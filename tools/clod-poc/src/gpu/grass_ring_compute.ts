@@ -4,6 +4,7 @@ import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
 import { grassHeightDensityVector, grassMaterialDensityVector } from "../grass/grass_material_bias.js";
+import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 16 * 17;
@@ -147,11 +148,7 @@ export interface GrassGpuRingTierRegion {
 
 export function grassGpuRingTierRegion(tier: number, maxInstancesPerTier: number): GrassGpuRingTierRegion {
   const start = Math.max(0, Math.floor(tier)) * Math.max(0, Math.floor(maxInstancesPerTier));
-  return {
-    start,
-    end: start + Math.max(0, Math.floor(maxInstancesPerTier)),
-    firstInstance: start,
-  };
+  return { start, end: start + Math.max(0, Math.floor(maxInstancesPerTier)), firstInstance: start };
 }
 
 export function grassGpuRingOutputIndex(tier: number, slot: number, maxInstancesPerTier: number): number {
@@ -240,9 +237,7 @@ export function packGrassGpuRingParams(
   f32[41] = height[5] ?? DEFAULT_HEIGHT_DENSITY[5];
 
   if (params.frustumPlanes) {
-    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
-      f32[44 + i] = params.frustumPlanes[i] ?? 0;
-    }
+    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[44 + i] = params.frustumPlanes[i] ?? 0;
   }
   return scratch;
 }
@@ -280,44 +275,20 @@ export class GrassGpuRingCompute {
   ) {
     this.pipelines = pipelines;
     this.outputBuffers = outputBuffers;
-    this.paramBuffer = device.createBuffer({
-      label: "grass ring params",
-      size: PARAM_BYTES,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.counterBuffer = device.createBuffer({
-      label: "grass ring counters",
-      size: COUNTER_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    this.indirectArgs = outputBuffers?.indirectArgs ?? device.createBuffer({
-      label: "grass ring indirect args",
-      size: INDIRECT_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC,
-    });
-    this.fieldParams = device.createBuffer({
-      label: "grass ring field params",
-      size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    this.paramBuffer = device.createBuffer({ label: "grass ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.counterBuffer = device.createBuffer({ label: "grass ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    this.indirectArgs = outputBuffers?.indirectArgs ?? device.createBuffer({ label: "grass ring indirect args", size: INDIRECT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC });
+    this.fieldParams = device.createBuffer({ label: "grass ring field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.digEdits = this.createDigEditsBuffer(edits);
     this.writeFieldParams(edits.length);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
-      buffer: device.createBuffer({
-        label: `grass ring counter readback ${index}`,
-        size: COUNTER_BYTES,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      }),
+      buffer: device.createBuffer({ label: `grass ring counter readback ${index}`, size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
       busy: false,
       destroyAfterMap: false,
       cpu: new Uint32Array(TIER_COUNT),
     }));
     this.hydroTexture = createGrassHydrologyTexture(device, hydroData);
-    this.hydroSampler = device.createSampler({
-      label: "grass ring hydro sampler",
-      magFilter: "nearest",
-      minFilter: "nearest",
-    });
+    this.hydroSampler = device.createSampler({ label: "grass ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
     this.bindGroup = this.createBindGroup();
   }
 
@@ -328,48 +299,22 @@ export class GrassGpuRingCompute {
     ring: GrassRingSettings = DEFAULT_GRASS_SETTINGS.ring,
     hydroData: GrassHydrologyData | null = null,
   ): Promise<GrassGpuRingCompute> {
-    const module = device.createShaderModule({
-      label: "grass ring compute shader",
-      code: composeGrassRingShader(),
-    });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
-      binding,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type },
-    });
+    const module = device.createShaderModule({ label: "grass ring compute shader", code: composeGrassRingShader() });
+    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
       label: "grass ring compute layout",
       entries: [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1),
-        storage(2),
-        storage(3),
-        storage(4),
-        storage(5),
-        storage(6),
-        storage(7, "read-only-storage"),
+        storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) =>
-      device.createComputePipelineAsync({
-        label: `grass ring ${entryPoint}`,
-        layout: pipelineLayout,
-        compute: { module, entryPoint },
-      });
-    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([
-      makePipeline("clear_counters"),
-      makePipeline("grass_cull"),
-      makePipeline("build_indirect_args"),
-    ]);
-    return new GrassGpuRingCompute(device, layout, {
-      clear_counters: clearCounters,
-      grass_cull: cull,
-      build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...ring }, hydroData);
+    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `grass ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("grass_cull"), makePipeline("build_indirect_args")]);
+    return new GrassGpuRingCompute(device, layout, { clear_counters: clearCounters, grass_cull: cull, build_indirect_args: buildIndirectArgs }, edits, outputBuffers, { ...ring }, hydroData);
   }
 
   updateDigEdits(edits: readonly ResolvedDigEdit[]): void {
@@ -384,10 +329,9 @@ export class GrassGpuRingCompute {
   dispatch(params: GrassGpuRingDispatchParams, indexCounts: GrassGpuRingIndexCounts): boolean {
     if (this.failedReason) return false;
 
-    const requestReadback = this.frame++ % READBACK_INTERVAL_FRAMES === 0;
-    const readbackSlot = requestReadback
-      ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null
-      : null;
+    const frame = this.frame++;
+    const requestReadback = shouldRequestGpuReadback({ kind: "grass_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES });
+    const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
 
     packGrassGpuRingParams(params, indexCounts, this.ring, this.paramScratch);
@@ -395,69 +339,16 @@ export class GrassGpuRingCompute {
 
     const encoder = this.device.createCommandEncoder({ label: "grass ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
-    const slotWorkgroups = Math.ceil(grassGpuRingSlotCount(this.ring) / WORKGROUP_SIZE);
-    this.dispatchPipeline(encoder, this.pipelines.grass_cull, slotWorkgroups);
+    this.dispatchPipeline(encoder, this.pipelines.grass_cull, Math.ceil(grassGpuRingSlotCount(this.ring) / WORKGROUP_SIZE));
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
-    if (readbackSlot) {
-      encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
-    }
+    if (readbackSlot) encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
 
     const submittedGeneration = this.generation;
     const submitStart = performance.now();
-    if (readbackSlot) {
-      readbackSlot.busy = true;
-      readbackSlot.destroyAfterMap = false;
-      this.runningReadbacks++;
-    }
+    if (readbackSlot) { readbackSlot.busy = true; readbackSlot.destroyAfterMap = false; this.runningReadbacks++; }
     this.device.queue.submit([encoder.finish()]);
     this.submitMs = performance.now() - submitStart;
-
-    if (readbackSlot) {
-      const slot = readbackSlot;
-      const readbackStart = performance.now();
-      void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
-        if (submittedGeneration !== this.generation) {
-          slot.busy = false;
-          slot.destroyAfterMap = false;
-          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-          slot.buffer.unmap();
-          slot.buffer.destroy();
-          return;
-        }
-        slot.cpu.set(new Uint32Array(slot.buffer.getMappedRange(0, COUNTER_BYTES)));
-        slot.buffer.unmap();
-        slot.busy = false;
-        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        this.readbackMs = performance.now() - readbackStart;
-        const cap = Math.max(0, Math.floor(params.maxInstancesPerTier));
-        this.counts = {
-          near: Math.min(slot.cpu[0] ?? 0, cap),
-          mid: Math.min(slot.cpu[1] ?? 0, cap),
-          far: Math.min(slot.cpu[2] ?? 0, cap),
-          super: Math.min(slot.cpu[3] ?? 0, cap),
-        };
-        if (slot.destroyAfterMap) {
-          slot.destroyAfterMap = false;
-          slot.buffer.destroy();
-        }
-      }).catch((error) => {
-        if (submittedGeneration !== this.generation) {
-          slot.busy = false;
-          slot.destroyAfterMap = false;
-          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-          slot.buffer.destroy();
-          return;
-        }
-        slot.busy = false;
-        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        if (slot.destroyAfterMap) {
-          slot.destroyAfterMap = false;
-          slot.buffer.destroy();
-          return;
-        }
-        this.failedReason = error instanceof Error ? error.message : String(error);
-      });
-    }
+    if (readbackSlot) this.readback(readbackSlot, submittedGeneration, params.maxInstancesPerTier);
     return true;
   }
 
@@ -465,11 +356,7 @@ export class GrassGpuRingCompute {
     const accepted = this.counts.near + this.counts.mid + this.counts.far + this.counts.super;
     const slotCount = grassGpuRingSlotCount(this.ring);
     return {
-      status: !enabled
-        ? "disabled"
-        : this.failedReason
-          ? "failed"
-          : this.runningReadbacks > 0 ? "running" : "ready",
+      status: !enabled ? "disabled" : this.failedReason ? "failed" : this.runningReadbacks > 0 ? "running" : "ready",
       reason: this.failedReason ?? undefined,
       candidateCount: slotCount,
       generatedCandidates: slotCount,
@@ -514,24 +401,14 @@ export class GrassGpuRingCompute {
   }
 
   private createDigEditsBuffer(edits: readonly ResolvedDigEdit[]): GPUBuffer {
-    const buffer = this.device.createBuffer({
-      label: "grass ring dig edits",
-      size: Math.max(1, edits.length) * DIG_EDIT_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+    const buffer = this.device.createBuffer({ label: "grass ring dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.device.queue.writeBuffer(buffer, 0, packDigEdits(edits));
     return buffer;
   }
 
   private writeFieldParams(editCount: number): void {
     const packedFieldParams = packFieldParams(editCount);
-    this.device.queue.writeBuffer(
-      this.fieldParams,
-      0,
-      packedFieldParams.buffer as ArrayBuffer,
-      packedFieldParams.byteOffset,
-      packedFieldParams.byteLength,
-    );
+    this.device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
   }
 
   private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
@@ -543,17 +420,52 @@ export class GrassGpuRingCompute {
   }
 
   private outputBindGroupEntries(): GPUBindGroupEntry[] {
-    const fallback = this.outputBuffers ?? createGrassGpuRingFallbackOutputBuffers(
-      this.device,
-      grassGpuRingSlotCount(this.ring),
-      this.indirectArgs,
-    );
+    const fallback = this.outputBuffers ?? createGrassGpuRingFallbackOutputBuffers(this.device, grassGpuRingSlotCount(this.ring), this.indirectArgs);
     return [
       { binding: 3, resource: { buffer: fallback.near.offset } },
       { binding: 4, resource: { buffer: fallback.near.packed0 } },
       { binding: 5, resource: { buffer: fallback.near.packed1 } },
       { binding: 6, resource: { buffer: fallback.near.terrainNormal } },
     ];
+  }
+
+  private readback(slot: ReadbackSlot, submittedGeneration: number, maxInstancesPerTier: number): void {
+    const readbackStart = performance.now();
+    void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
+      if (submittedGeneration !== this.generation) {
+        slot.busy = false;
+        slot.destroyAfterMap = false;
+        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+        slot.buffer.unmap();
+        slot.buffer.destroy();
+        return;
+      }
+      slot.cpu.set(new Uint32Array(slot.buffer.getMappedRange(0, COUNTER_BYTES)));
+      slot.buffer.unmap();
+      slot.busy = false;
+      this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+      this.readbackMs = performance.now() - readbackStart;
+      const cap = Math.max(0, Math.floor(maxInstancesPerTier));
+      this.counts = {
+        near: Math.min(slot.cpu[0] ?? 0, cap),
+        mid: Math.min(slot.cpu[1] ?? 0, cap),
+        far: Math.min(slot.cpu[2] ?? 0, cap),
+        super: Math.min(slot.cpu[3] ?? 0, cap),
+      };
+      if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); }
+    }).catch((error) => {
+      if (submittedGeneration !== this.generation) {
+        slot.busy = false;
+        slot.destroyAfterMap = false;
+        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+        slot.buffer.destroy();
+        return;
+      }
+      slot.busy = false;
+      this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+      if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); return; }
+      this.failedReason = error instanceof Error ? error.message : String(error);
+    });
   }
 }
 
