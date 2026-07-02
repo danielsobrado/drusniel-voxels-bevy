@@ -127,11 +127,11 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const treeGpuFallback = flagParam(searchParams, "treeGpuFallback", "treeGpuFallbackToCpu", "treeGpuCpuFallback");
   if (treeGpuFallback !== null) state.treeGpuFallbackToCpu = treeGpuFallback;
 
-  const treeGpuStrict = flagParam(searchParams, "treeGpuStrict", "treeGpuNoFallback", "treeGpuFailLoud");
-  if (treeGpuStrict === true) enableStrictTreeGpuMode(state);
-
   const treeGpuForceCpu = flagParam(searchParams, "treeGpuForceCpu", "treeForceCpu", "treeCpu");
   if (treeGpuForceCpu !== null) state.treeGpuForceCpu = treeGpuForceCpu;
+
+  const treeGpuStrict = flagParam(searchParams, "treeGpuStrict", "treeGpuNoFallback", "treeGpuFailLoud");
+  if (treeGpuStrict === true) enableStrictTreeGpuMode(state);
 
   const treeGpuCounts = flagParam(searchParams, "treeGpuCounts", "treeCounts");
   if (treeGpuCounts !== null) {
