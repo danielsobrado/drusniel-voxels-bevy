@@ -54,6 +54,8 @@ interface CacheEntry {
   unsubscribeMaterial: () => void;
 }
 
+type RenderNodeDisposeReason = "dispose" | "evict" | "invalidate";
+
 export class ClodRenderNodeCache {
   private readonly deps: ClodRenderNodeCacheDeps;
   private readonly viewMap = new Map<string, ClodRenderNodeView>();
@@ -133,48 +135,20 @@ export class ClodRenderNodeCache {
     while (inactive.length > config.maxInactiveNodes) {
       const view = inactive.shift();
       if (!view) return;
-      this.disposeNode(view.node.id, true);
+      this.disposeNodeInternal(view.node.id, "evict");
     }
   }
 
   invalidateNode(nodeId: string): void {
-    const hadEntry = this.entries.has(nodeId);
-    this.disposeNode(nodeId);
-    if (hadEntry && this.deps.config.evictGeometryWithRenderNode) {
-      this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
-    }
+    this.disposeNodeInternal(nodeId, "invalidate");
   }
 
   disposeNode(nodeId: string, evicted = false): void {
-    const entry = this.entries.get(nodeId);
-    if (!entry) return;
-    this.entries.delete(nodeId);
-    this.viewMap.delete(nodeId);
-    this.activeNodeIds.delete(nodeId);
-
-    const { view } = entry;
-    this.deps.scene.remove(view.mesh);
-    entry.unsubscribeMaterial();
-    const geometry = view.mesh.geometry as THREE.BufferGeometry;
-    if (this.deps.pageGeometryCache.owns(geometry)) {
-      this.deps.pageGeometryCache.setGeometryActive(geometry, false);
-      if (evicted && this.deps.config.evictGeometryWithRenderNode) {
-        this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
-      }
-    } else {
-      geometry.dispose();
-    }
-
-    if (view.mat !== this.deps.materialController.sharedMaterial) {
-      this.deps.materialController.materials.delete(view.mat);
-      view.mat.material.dispose();
-    }
-    this.statDisposals++;
-    if (evicted) this.statEvictions++;
+    this.disposeNodeInternal(nodeId, evicted ? "evict" : "dispose");
   }
 
   dispose(): void {
-    for (const nodeId of [...this.viewMap.keys()]) this.disposeNode(nodeId);
+    for (const nodeId of [...this.viewMap.keys()]) this.disposeNodeInternal(nodeId, "invalidate");
   }
 
   views(): Map<string, ClodRenderNodeView> {
@@ -197,6 +171,34 @@ export class ClodRenderNodeCache {
       evictions: this.statEvictions,
       prefetches: this.statPrefetches,
     };
+  }
+
+  private disposeNodeInternal(nodeId: string, reason: RenderNodeDisposeReason): void {
+    const entry = this.entries.get(nodeId);
+    if (!entry) return;
+    this.entries.delete(nodeId);
+    this.viewMap.delete(nodeId);
+    this.activeNodeIds.delete(nodeId);
+
+    const { view } = entry;
+    this.deps.scene.remove(view.mesh);
+    entry.unsubscribeMaterial();
+    const geometry = view.mesh.geometry as THREE.BufferGeometry;
+    if (this.deps.pageGeometryCache.owns(geometry)) {
+      this.deps.pageGeometryCache.setGeometryActive(geometry, false);
+      if (reason !== "dispose" && this.deps.config.evictGeometryWithRenderNode) {
+        this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
+      }
+    } else {
+      geometry.dispose();
+    }
+
+    if (view.mat !== this.deps.materialController.sharedMaterial) {
+      this.deps.materialController.materials.delete(view.mat);
+      view.mat.material.dispose();
+    }
+    this.statDisposals++;
+    if (reason === "evict") this.statEvictions++;
   }
 
   private createRenderNodeView(node: ClodPageNode, frameId: number): CacheEntry {
