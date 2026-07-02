@@ -11,6 +11,7 @@ function state(overrides: Partial<TreePerfSnapshotState> = {}): TreePerfSnapshot
     treeSpacing: 9,
     treeShadowMaxLod: "near",
     treeGpuEnabled: true,
+    treeGpuFallbackToCpu: true,
     treeGpuForceCpu: false,
     treeGpuShowCounts: false,
     treeGpuReadbackVisibleLists: false,
@@ -40,6 +41,7 @@ describe("tree perf snapshot", () => {
     expect(snapshot).toContain("## Capture Table Row");
     expect(snapshot).toContain("total=counts off");
     expect(snapshot).toContain("- treeShadowMaxLod: near");
+    expect(snapshot).toContain("- treeGpuFallbackToCpu: true");
   });
 
   it("formats GPU debug count details", () => {
