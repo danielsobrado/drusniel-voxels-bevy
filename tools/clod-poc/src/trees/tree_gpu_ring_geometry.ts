@@ -3,6 +3,7 @@ import { createTreeBakedImpostorGeometry, type TreeGeometryMap } from "./tree_ge
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { OctahedralFrame } from "./tree_impostor_octahedral.js";
 import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { treeUnbakedImpostorFallbackLod } from "./tree_system_impostor_resources.js";
 
 export interface TreeGpuRingGeometryInput {
   species: TreeSpeciesId;
@@ -25,7 +26,10 @@ export function selectTreeGpuRingGeometry(input: TreeGpuRingGeometryInput): Tree
 
   const atlas = input.impostorAtlases[input.species];
   if (!input.settings.impostors.enabled || !atlas?.ready) {
-    return { geometry: input.geometries[input.species].impostor, bakedImpostor: false };
+    return {
+      geometry: input.geometries[input.species][treeUnbakedImpostorFallbackLod(input.settings)],
+      bakedImpostor: false,
+    };
   }
 
   input.bakedImpostorGeometries[input.species] ??= createTreeGpuRingBakedImpostorGeometry(
