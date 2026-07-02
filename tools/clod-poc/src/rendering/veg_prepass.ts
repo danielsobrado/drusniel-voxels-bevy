@@ -49,10 +49,8 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: Depth
   material.depthWrite = true;
   material.depthTest = true;
 
-  const cloneColorMaterial = options.cloneColorMaterial ?? true;
-  const colorMaterial = cloneColorMaterial
-    ? (mesh.material as Material).clone()
-    : mesh.material as Material;
+  const sourceMaterial = singleMeshMaterial(mesh);
+  const colorMaterial = options.cloneColorMaterial === false ? sourceMaterial : sourceMaterial.clone();
   colorMaterial.depthFunc = EqualDepth;
   colorMaterial.depthWrite = false;
   colorMaterial.needsUpdate = true;
@@ -66,6 +64,13 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: Depth
   twin.renderOrder = -100;
 
   return twin;
+}
+
+function singleMeshMaterial(mesh: Mesh): Material {
+  if (Array.isArray(mesh.material)) {
+    throw new Error(`Depth prepass requires a single material mesh: ${mesh.name || "unnamed mesh"}`);
+  }
+  return mesh.material;
 }
 
 /**
