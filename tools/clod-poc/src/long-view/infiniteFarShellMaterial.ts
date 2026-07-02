@@ -57,12 +57,16 @@ export function createInfiniteFarShellMaterial(
     positionWorld.x.sub(uSunVisibilityOriginX).div(uSunVisibilityWorldSize),
     positionWorld.z.sub(uSunVisibilityOriginZ).div(uSunVisibilityWorldSize),
   );
+  const visibilityUv = vec2(
+    clamp(visibilityWorldUv.x, float(0.0), float(1.0)),
+    clamp(visibilityWorldUv.y, float(0.0), float(1.0)),
+  );
   const visibilityInside = step(float(0.0), visibilityWorldUv.x)
     .mul(step(visibilityWorldUv.x, float(1.0)))
     .mul(step(float(0.0), visibilityWorldUv.y))
     .mul(step(visibilityWorldUv.y, float(1.0)))
     .mul(uSunVisibilityValid);
-  const visibilitySample = texture(sunVisibilityAtlas.texture, clamp(visibilityWorldUv, float(0.0), float(1.0))).r;
+  const visibilitySample = texture(sunVisibilityAtlas.texture, visibilityUv).r;
   const sunVisibility = mix(float(1.0), mix(float(FAR_SUN_VISIBILITY_SHADE_MIN), float(1.0), visibilitySample), visibilityInside);
 
   const sun = max(dot(n, uLight), float(0));
