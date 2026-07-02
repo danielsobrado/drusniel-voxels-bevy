@@ -129,8 +129,14 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
       player.controls.update();
+    });
+    timed(collectFrameTiming, phaseTiming, "constructionMs", () => {
       construction?.update();
+    });
+    timed(collectFrameTiming, phaseTiming, "combatMs", () => {
       combat?.update(playerDelta);
+    });
+    timed(collectFrameTiming, phaseTiming, "spellsMs", () => {
       spells?.update(playerDelta);
     });
 
@@ -155,8 +161,14 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
       farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
+    });
+    timed(collectFrameTiming, phaseTiming, "shadowProxyMs", () => {
       shadowProxy?.rebuildIfNeeded();
+    });
+    timed(collectFrameTiming, phaseTiming, "clodShadowMs", () => {
       clodShadow?.update();
+    });
+    timed(collectFrameTiming, phaseTiming, "canopyMs", () => {
       canopy?.update(render.camera.position.x, render.camera.position.z);
     });
 
@@ -187,13 +199,15 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       collectTiming: collectFrameTiming,
     }));
 
-    borderOceanDebugPanel?.update({
-      worldCells: terrain.worldCells,
-      cameraPosition: render.camera.position,
-      deepOcean: waterWeather.deepOceanConfig,
-      deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
-      oceanSampler: waterWeather.oceanSampler,
-      playerConfig: player.player.config,
+    timed(collectFrameTiming, phaseTiming, "borderOceanDebugMs", () => {
+      borderOceanDebugPanel?.update({
+        worldCells: terrain.worldCells,
+        cameraPosition: render.camera.position,
+        deepOcean: waterWeather.deepOceanConfig,
+        deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+        oceanSampler: waterWeather.oceanSampler,
+        playerConfig: player.player.config,
+      });
     });
 
     const statsSyncResult = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
@@ -293,6 +307,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     }
 
+    timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
+
     runRenderPhase({
       renderer: render.renderer,
       scene: render.scene,
@@ -323,6 +339,5 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       perfProbe,
       phaseTiming,
     });
-    timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
   });
 }
