@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { FarSummaryGpuAtlas } from "./farSummaryAtlas.js";
 import { createTestNaadfConfig } from "../__tests__/testConfig.js";
+import { unpackUnorm8 } from "../farSummaryAtlasPacking.js";
 
 const atlases: FarSummaryGpuAtlas[] = [];
 
@@ -43,6 +44,10 @@ function testState(farTiles: Map<string, any>, revision = 42): any {
   return { config, farTiles, predictedX: 64, predictedZ: 64, revision };
 }
 
+function atlasPixel(atlas: FarSummaryGpuAtlas, x: number, z: number): number {
+  return z * atlas.view.widthCells + x;
+}
+
 describe("FarSummaryGpuAtlas", () => {
   it("uses a wider 5x5 moving tile window by default", () => {
     const atlas = createAtlas({ tileCells: 2, ringCount: 2 });
@@ -54,7 +59,19 @@ describe("FarSummaryGpuAtlas", () => {
     expect(atlas.view.rings[1]?.rowOffsetCells).toBe(10);
   });
 
-  it("packs ready far-summary heights into a float texture", () => {
+  it("uses balanced packed textures by default", () => {
+    const atlas = createAtlas({ tileCells: 2, ringCount: 2 });
+
+    expect(atlas.view.format).toBe("balanced");
+    expect(atlas.view.texture.format).toBe(THREE.RedFormat);
+    expect(atlas.view.texture.type).toBe(THREE.FloatType);
+    expect(atlas.view.materialTexture.type).toBe(THREE.UnsignedByteType);
+    expect(atlas.view.coverageTexture.type).toBe(THREE.UnsignedByteType);
+    expect(atlas.view.normalTexture.image.width).toBe(1);
+    expect(atlas.view.estimatedBytes).toBeLessThan(atlas.view.debugEstimatedBytes ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("packs ready far-summary heights into an R32F texture", () => {
     const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
@@ -72,56 +89,73 @@ describe("FarSummaryGpuAtlas", () => {
     expect(atlas.view.coverageTexture.magFilter).toBe(THREE.NearestFilter);
     expect(atlas.view.coverageTexture.minFilter).toBe(THREE.NearestFilter);
     const data = atlas.view.texture.image.data as Float32Array;
-    const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
+    const firstPackedPixel = atlasPixel(atlas, 2, 2);
     expect(data[firstPackedPixel]).toBe(20);
-    expect(data[firstPackedPixel + 1]).toBe(19);
-    expect(data[firstPackedPixel + 2]).toBe(21);
-    expect(data[firstPackedPixel + 3]).toBe(1);
   });
 
-  it("packs summary material color into a paired float texture", () => {
+  it("packs summary material color into an RGBA8 texture", () => {
     const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
     atlas.updateFromState(testState(farTiles));
 
-    const materialData = atlas.view.materialTexture.image.data as Float32Array;
-    const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
-    expect(materialData[firstPackedPixel]).toBeCloseTo(0.30);
-    expect(materialData[firstPackedPixel + 1]).toBeCloseTo(0.48);
-    expect(materialData[firstPackedPixel + 2]).toBeCloseTo(0.24);
-    expect(materialData[firstPackedPixel + 3]).toBe(1);
+    const materialData = atlas.view.materialTexture.image.data as Uint8Array;
+    const firstPackedPixel = atlasPixel(atlas, 2, 2) * 4;
+    expect(unpackUnorm8(materialData[firstPackedPixel] ?? 0)).toBeCloseTo(0.30, 2);
+    expect(unpackUnorm8(materialData[firstPackedPixel + 1] ?? 0)).toBeCloseTo(0.48, 2);
+    expect(unpackUnorm8(materialData[firstPackedPixel + 2] ?? 0)).toBeCloseTo(0.24, 2);
+    expect(materialData[firstPackedPixel + 3]).toBe(255);
   });
 
-  it("packs derived normals into a paired float texture", () => {
+  it("derives normals from height in balanced mode instead of storing a full normal atlas", () => {
     const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
     atlas.updateFromState(testState(farTiles));
+
+    expect(atlas.view.normalTexture.image.width).toBe(1);
+    expect(atlas.view.normalTexture.image.height).toBe(1);
+    expect(atlas.view.normalTexture.image.data).toBeInstanceOf(Uint8Array);
+  });
+
+  it("packs canopy, water, terrain, and validity coverage into RGBA8", () => {
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
+
+    atlas.updateFromState(testState(farTiles));
+
+    const coverageData = atlas.view.coverageTexture.image.data as Uint8Array;
+    const firstPackedPixel = atlasPixel(atlas, 2, 2) * 4;
+    expect(unpackUnorm8(coverageData[firstPackedPixel] ?? 0)).toBeCloseTo(0.25, 2);
+    expect(unpackUnorm8(coverageData[firstPackedPixel + 1] ?? 0)).toBeCloseTo(0.1, 2);
+    expect(coverageData[firstPackedPixel + 2]).toBe(255);
+    expect(coverageData[firstPackedPixel + 3]).toBe(255);
+  });
+
+  it("keeps debug RGBA32F mode for packed-vs-debug validation", () => {
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3, format: "debug_rgba32f" });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
+
+    atlas.updateFromState(testState(farTiles));
+
+    expect(atlas.view.texture.format).toBe(THREE.RGBAFormat);
+    expect(atlas.view.texture.type).toBe(THREE.FloatType);
+    const heightData = atlas.view.texture.image.data as Float32Array;
+    const firstPackedPixel = atlasPixel(atlas, 2, 2) * 4;
+    expect(heightData[firstPackedPixel]).toBe(20);
+    expect(heightData[firstPackedPixel + 1]).toBe(19);
+    expect(heightData[firstPackedPixel + 2]).toBe(21);
+    expect(heightData[firstPackedPixel + 3]).toBe(1);
 
     const normalData = atlas.view.normalTexture.image.data as Float32Array;
-    const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
     expect(normalData[firstPackedPixel]).toBeLessThan(0.5);
     expect(normalData[firstPackedPixel + 1]).toBeGreaterThan(0.5);
     expect(normalData[firstPackedPixel + 2]).toBeLessThan(0.5);
     expect(normalData[firstPackedPixel + 3]).toBe(1);
-  });
-
-  it("packs canopy and water coverage into a paired float texture", () => {
-    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
-    const farTiles = new Map<string, any>();
-    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
-
-    atlas.updateFromState(testState(farTiles));
-
-    const coverageData = atlas.view.coverageTexture.image.data as Float32Array;
-    const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
-    expect(coverageData[firstPackedPixel]).toBeCloseTo(0.25);
-    expect(coverageData[firstPackedPixel + 1]).toBeCloseTo(0.1);
-    expect(coverageData[firstPackedPixel + 2]).toBe(0);
-    expect(coverageData[firstPackedPixel + 3]).toBe(1);
   });
 
   it("packs each far-summary ring into a separate atlas band", () => {
@@ -138,9 +172,8 @@ describe("FarSummaryGpuAtlas", () => {
     expect(atlas.view.rings[1]?.rowOffsetCells).toBe(6);
 
     const data = atlas.view.texture.image.data as Float32Array;
-    const ring1PackedPixel = (((6 + 2) * atlas.view.widthCells) + 2) * 4;
+    const ring1PackedPixel = atlasPixel(atlas, 2, 8);
     expect(data[ring1PackedPixel]).toBe(80);
-    expect(data[ring1PackedPixel + 3]).toBe(1);
   });
 
   it("does not repack when only unrelated world revision changes", () => {
