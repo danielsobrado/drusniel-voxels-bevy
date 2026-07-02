@@ -16,6 +16,7 @@ import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
 import { composeShader } from "./wgsl_compose.js";
+import { replaceConstU32 } from "./wgsl_workgroup_size.js";
 import { withConservativeGrassFrustum } from "./grass_ring_wgsl_transforms.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
@@ -40,26 +41,22 @@ export function composeStoneScatterShader(): string {
 }
 
 export function composeTreeRingShader(workgroupSize = 64): string {
-  const size = workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
-    ? workgroupSize
-    : 64;
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
   const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)))));
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
-  const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(
-    /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
-    `const TREE_WORKGROUP_SIZE: u32 = ${size}u;`,
+  const treeEntry = replaceConstU32(
+    applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),
+    "TREE_WORKGROUP_SIZE",
+    workgroupSize,
   );
   return composeShader("tree ring shader", [treeBindings, terrainCommon, placementHeight, treeEntry]);
 }
 
 export function composeUnderstoryRingShader(workgroupSize = 64): string {
-  const size = workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
-    ? workgroupSize
-    : 64;
-  const entry = withRiverEcologyConstants(understoryRingEntry).replace(
-    /const UNDERSTORY_WORKGROUP_SIZE: u32 = \d+u;/,
-    `const UNDERSTORY_WORKGROUP_SIZE: u32 = ${size}u;`,
+  const entry = replaceConstU32(
+    withRiverEcologyConstants(understoryRingEntry),
+    "UNDERSTORY_WORKGROUP_SIZE",
+    workgroupSize,
   );
   return composeShader("understory ring shader", [understoryBindings, terrainCommon, placementHeight, entry]);
 }
