@@ -187,6 +187,15 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       collectTiming: collectFrameTiming,
     }));
 
+    borderOceanDebugPanel?.update({
+      worldCells: terrain.worldCells,
+      cameraPosition: render.camera.position,
+      deepOcean: waterWeather.deepOceanConfig,
+      deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+      oceanSampler: waterWeather.oceanSampler,
+      playerConfig: player.player.config,
+    });
+
     const statsSyncResult = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
       state: player.state,
       grassSystem: vegetation.grassSystem,
