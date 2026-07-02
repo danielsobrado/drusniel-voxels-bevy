@@ -22,6 +22,7 @@ export interface SunLightOptions {
   build: {
     maxTilesPerFrame: number;
     maxBuildMsPerFrame: number;
+    materialTileRadius: number;
   };
   cache: {
     maxEntries: number;
@@ -51,6 +52,7 @@ export const SUN_LIGHT_DEFAULTS: SunLightOptions = {
   build: {
     maxTilesPerFrame: 2,
     maxBuildMsPerFrame: 1,
+    materialTileRadius: 8,
   },
   cache: { maxEntries: 512, keepLastKnown: true },
   debugView: {
@@ -114,6 +116,7 @@ export function parseSunLightOptions(value: unknown): SunLightOptions {
     build: {
       maxTilesPerFrame: asPositiveInt(build.max_tiles_per_frame ?? build.maxTilesPerFrame, SUN_LIGHT_DEFAULTS.build.maxTilesPerFrame),
       maxBuildMsPerFrame: asPositive(build.max_build_ms_per_frame ?? build.maxBuildMsPerFrame, SUN_LIGHT_DEFAULTS.build.maxBuildMsPerFrame),
+      materialTileRadius: asNonNegativeInt(build.material_tile_radius ?? build.materialTileRadius, SUN_LIGHT_DEFAULTS.build.materialTileRadius),
     },
     cache: {
       maxEntries: asPositiveInt(cache.max_entries ?? cache.maxEntries, SUN_LIGHT_DEFAULTS.cache.maxEntries),
