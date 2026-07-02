@@ -28,6 +28,7 @@ export interface TerrainMaterialUiState {
   textureBlendWidth: number;
   proceduralDebugMode: ProceduralDebugMode;
   colorByLod: boolean;
+  wireframe: boolean;
   clodPerfMode: boolean;
   normalColor: boolean;
   normalDivergence: boolean;
@@ -239,6 +240,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
       normalDivergence: state.normalDivergence,
       divergenceGain: state.divergenceGain,
     });
+    mat.setWireframe(state.wireframe);
     mat.setTriplanar(state.triplanar);
     mat.setColorAdjust(deps.getColorAdjustments());
     mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
