@@ -4,6 +4,7 @@ import type { UiStartupContext } from "./ui_startup_context.js";
 export function bindBootstrapDisposal(ctx: UiStartupContext): void {
   const { input, session } = ctx;
   const {
+    renderer,
     clodWorker,
     getClodErrorCompute,
     runtime: {
@@ -32,6 +33,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
 
   window.addEventListener("beforeunload", () => {
     session.frameLoopAbortController?.abort();
+    renderer.setAnimationLoop(null);
     nearFieldBubbleController.dispose();
     renderNodeCache.dispose();
     pageGeometryCache.dispose();

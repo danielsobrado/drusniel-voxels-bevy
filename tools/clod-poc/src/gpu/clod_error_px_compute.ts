@@ -54,6 +54,7 @@ export class ClodErrorPxCompute {
   private readbackMode: WebGpuReadbackMode = "off";
   private dispatchOnlyFrames = 0;
   private readbackFrames = 0;
+  private disposed = false;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -85,6 +86,7 @@ export class ClodErrorPxCompute {
   }
 
   setNodes(nodes: readonly ClodPageNode[]): void {
+    if (this.disposed) return;
     const { data, nodeIndexById, nodeCount } = packNodes(nodes);
     this.nodeIndexById = nodeIndexById;
     this.nodeCount = nodeCount;
@@ -105,6 +107,7 @@ export class ClodErrorPxCompute {
   }
 
   patchNodes(nodes: readonly ClodPageNode[]): void {
+    if (this.disposed) return;
     const updates = buildNodePatches(nodes, this.nodeIndexById);
     if (updates.length === 0) return;
     this.version++;
@@ -113,7 +116,7 @@ export class ClodErrorPxCompute {
   }
 
   dispatch(selectionParams: SelectionParams, frameId: number, options?: DispatchOptions): boolean {
-    if (this.failedReason || this.nodeCount === 0) return false;
+    if (this.disposed || this.failedReason || this.nodeCount === 0) return false;
     const readback = options?.readback ?? false;
 
     const params = cloneParams({
@@ -144,12 +147,12 @@ export class ClodErrorPxCompute {
     const submitStart = performance.now();
     const valueBytes = this.nodeCount * Float32Array.BYTES_PER_ELEMENT;
     if (slot) slot.busy = true;
-    this.running++;
     this.device.queue.submit([encoder.finish()]);
     this.submitMs = performance.now() - submitStart;
 
     if (!readback || !slot) { this.dispatchOnlyFrames++; return true; }
 
+    this.running++;
     this.readbackFrames++;
     const readbackStart = performance.now();
     const localSlot = slot;
@@ -172,7 +175,7 @@ export class ClodErrorPxCompute {
   }
 
   latestFor(frameId: number, maxAgeFrames: number): ClodErrorMap | null {
-    if (this.failedReason || !this.latest || this.latest.version !== this.version) return null;
+    if (this.disposed || this.failedReason || !this.latest || this.latest.version !== this.version) return null;
     if (frameId - this.latest.frameId > maxAgeFrames) return null;
     return this.latest;
   }
@@ -210,7 +213,7 @@ export class ClodErrorPxCompute {
     const latestAgeFrames = this.latest ? frameId - this.latest.frameId : null;
     return {
       enabled, available: !this.failedReason,
-      status: !enabled ? "disabled" : this.failedReason ? "failed" : this.running > 0 ? "running" : this.latest ? "ready" : "idle",
+      status: !enabled ? "disabled" : this.disposed ? "disabled" : this.failedReason ? "failed" : this.running > 0 ? "running" : this.latest ? "ready" : "idle",
       reason: this.failedReason ?? undefined,
       nodeCount: this.nodeCount, version: this.version, latestAgeFrames,
       submitMs: this.submitMs, readbackMs: this.readbackMs,
@@ -222,6 +225,8 @@ export class ClodErrorPxCompute {
   }
 
   destroy(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.generation++;
     this.running = 0;
     this.nodeBuffer.destroy();

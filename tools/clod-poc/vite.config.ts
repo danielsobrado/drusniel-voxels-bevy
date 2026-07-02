@@ -13,6 +13,9 @@ export default defineConfig(({ command }) => ({
     // instead of quietly serving the wrong app.
     port: 5180,
     strictPort: true,
+    watch: {
+      ignored: ["**/perf-runs/**"],
+    },
   },
   build: {
     target: "es2022",

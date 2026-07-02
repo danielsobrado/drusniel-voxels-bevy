@@ -245,16 +245,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       statsPresenter: stats.statsPresenter,
     }));
 
-    render.gpuPassTiming?.update();
-    if (render.gpuPassTiming?.enabled) {
-      const hooks = render.getHooks();
-      if (hooks?.stats) {
-        const dst = hooks.stats.gpuPasses;
-        for (const key of Object.keys(dst)) delete dst[key];
-        Object.assign(dst, render.gpuPassTiming.passes);
-      }
-    }
-
     if (collectFrameTiming || frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS) {
       lastDebugCounterMirrorAt = frameStart;
       const hooks = render.getHooks();
@@ -342,6 +332,16 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       phaseTiming,
       afterRenderDiagnostics: () => timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics),
     });
+
+    render.gpuPassTiming?.update();
+    if (render.gpuPassTiming?.enabled) {
+      const hooks = render.getHooks();
+      if (hooks?.stats) {
+        const dst = hooks.stats.gpuPasses;
+        for (const key of Object.keys(dst)) delete dst[key];
+        Object.assign(dst, render.gpuPassTiming.passes);
+      }
+    }
 
     const hooks = render.getHooks();
     if (hooks?.stats) syncMaterialChurnCounters(hooks.stats.counters);

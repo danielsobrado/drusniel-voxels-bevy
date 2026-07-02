@@ -3,10 +3,8 @@ import type { WebGPURenderer } from "three/webgpu";
 import { GpuProfiler } from "./gpu_profiler.js";
 
 /**
- * TP-1 main-app collector: resolves the WebGPU timestamp queries every frame
- * and aggregates real per-pass GPU ms into `passes` (label → ms). Inert (a
- * no-op `update()`, empty `passes`) when the adapter has no `timestamp-query`,
- * so it costs nothing in normal play / on backends without the feature.
+ * Drains WebGPU timestamp queries whenever renderer timestamp tracking is on.
+ * Named pass collection is optional and only enabled for perf captures.
  */
 export class GpuPassTiming {
   readonly passes: Record<string, number> = {};
@@ -15,18 +13,19 @@ export class GpuPassTiming {
 
   constructor(
     private readonly renderer: WebGPURenderer,
-    supported: boolean,
+    private readonly canResolve: boolean,
+    collectPasses = canResolve,
   ) {
-    this.profiler = supported ? new GpuProfiler(renderer) : null;
+    this.profiler = collectPasses ? new GpuProfiler(renderer) : null;
   }
 
   get enabled(): boolean {
     return this.profiler !== null;
   }
 
-  /** Kick a resolve for the last submitted frame; collects when it lands. */
+  /** Kick a resolve for submitted timestamp queries; collects when enabled. */
   update(): void {
-    if (!this.profiler || this.pending) return;
+    if (!this.canResolve || this.pending) return;
     this.pending = true;
     Promise.all([
       this.renderer.resolveTimestampsAsync(TimestampQuery.RENDER),
@@ -36,7 +35,7 @@ export class GpuPassTiming {
         this.profiler?.collect(this.passes);
       })
       .catch(() => {
-        /* timestamps unsupported mid-run — keep last good values */
+        /* timestamps unsupported mid-run or resolve failed; keep last good values */
       })
       .finally(() => {
         this.pending = false;

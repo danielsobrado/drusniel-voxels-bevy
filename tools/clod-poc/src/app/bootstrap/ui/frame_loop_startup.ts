@@ -189,7 +189,7 @@ export function runFrameLoopStartup(
   const gpuTimestampReady = input.app.isWebGpu
     && (input.app.renderer.backend as unknown as { trackTimestamp?: boolean }).trackTimestamp === true;
   const gpuPassTiming = input.app.isWebGpu
-    ? new GpuPassTiming(input.app.renderer, wantGpuTiming && gpuTimestampReady)
+    ? new GpuPassTiming(input.app.renderer, gpuTimestampReady, wantGpuTiming && gpuTimestampReady)
     : null;
   const renderResolution = input.renderResolution ?? window.__drusnielRenderResolution;
   const initialRenderResolution = renderResolution?.current();

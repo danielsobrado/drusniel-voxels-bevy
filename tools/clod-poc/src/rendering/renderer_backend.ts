@@ -53,8 +53,8 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
     // can be profiled. three downgrades this to false internally if its own
     // device lacks the feature (it creates a compatibility-mode adapter that
     // differs from the probe above, so the probe's feature list is not a
-    // reliable gate). Allocating the pairs is cheap; the actual per-frame
-    // resolve is gated separately (only when a perf capture is requested).
+    // reliable gate). Allocating the pairs is cheap; the frame loop still
+    // resolves them every frame to keep three's timestamp query pools drained.
     trackTimestamp: true,
     requiredLimits: buildRequiredLimits(diagnostics),
   });
