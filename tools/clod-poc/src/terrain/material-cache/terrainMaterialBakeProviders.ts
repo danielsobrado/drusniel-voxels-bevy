@@ -92,17 +92,12 @@ export function buildFarColor(tile: FarSummaryTile): Uint8Array {
   return data;
 }
 
-export function buildFarNormal(tile: FarSummaryTile, useHeightDerivedMarker: boolean): Uint16Array {
+export function buildFarNormal(tile: FarSummaryTile): Uint16Array {
   const count = tile.resolution * tile.resolution;
   const data = new Uint16Array(count * 2);
   for (let z = 0; z < tile.resolution; z++) {
     for (let x = 0; x < tile.resolution; x++) {
       const idx = z * tile.resolution + x;
-      if (useHeightDerivedMarker) {
-        data[idx * 2] = 0;
-        data[idx * 2 + 1] = 0;
-        continue;
-      }
       const n = normalFromHeight(tile.avgHeight, tile.resolution, tile.cellM, x, z);
       data[idx * 2] = THREE.DataUtils.toHalfFloat(n.x);
       data[idx * 2 + 1] = THREE.DataUtils.toHalfFloat(n.z);
@@ -129,7 +124,11 @@ export function bakeFarSummaryTerrainMaterial(source: TerrainMaterialFarTileBake
   const slopeCurvature = createUint8Channel(buildSlopeCurvature(tile.avgHeight, tile.resolution, tile.cellM), tile.resolution, tile.resolution, config.formats.slopeCurvature);
   const wetnessShoreline = createUint8Channel(buildWetnessAndShoreline(tile.avgHeight, tile.waterCoverage, tile.resolution, 0), tile.resolution, tile.resolution, config.formats.wetnessShoreline);
   const coverage = createUint8Channel(buildCoverage(tile.canopyCoverage, tile.waterCoverage, tile.resolution), tile.resolution, tile.resolution, config.formats.coverage);
-  const farNormal = createUint16Channel(buildFarNormal(tile, useHeightDerivedNormal), tile.resolution, tile.resolution, config.formats.farNormal);
+  const farNormal = useHeightDerivedNormal
+    ? createUnavailableChannel<Uint16Array>(config.formats.farNormal, tile.resolution, tile.resolution)
+    : createUint16Channel(buildFarNormal(tile), tile.resolution, tile.resolution, config.formats.farNormal);
+  const unavailableChannels = ["macroTint", "materialWeights"];
+  if (useHeightDerivedNormal || !farNormal.available) unavailableChannels.push("farNormal");
   const payload: TerrainMaterialBakePayload = {
     slopeCurvature,
     wetnessShoreline,
@@ -137,7 +136,7 @@ export function bakeFarSummaryTerrainMaterial(source: TerrainMaterialFarTileBake
     farNormal,
     coverage,
     debug: {
-      unavailableChannels: ["macroTint", "materialWeights"],
+      unavailableChannels,
       sourceSampleCount: tile.resolution * tile.resolution,
       bakeMs: performance.now() - start,
       uploadMs: 0,
