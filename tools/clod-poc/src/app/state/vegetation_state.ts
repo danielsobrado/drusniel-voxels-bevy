@@ -13,6 +13,7 @@ export interface VegetationSliceState {
   grassEnabled: boolean;
   grassRingDebug: boolean;
   grassDepthPrepassEnabled: boolean;
+  grassDepthPrepassTier: number;
   grassShaderMode: GrassSettings["shaderMode"];
   grassAlphaToCoverage: boolean;
   grassNearCrossedQuads: boolean;
@@ -105,12 +106,14 @@ export function createVegetationSliceState(input: {
   forestLightingConfig: ForestLightingSettings;
   grassRingDebug: boolean;
   grassDepthPrepassEnabled: boolean;
+  grassDepthPrepassTier: number;
 }): VegetationSliceState {
   const { grassConfig, stoneConfig, treeConfig, understoryConfig, forestLightingConfig } = input;
   return {
     grassEnabled: grassConfig.enabled,
     grassRingDebug: input.grassRingDebug,
     grassDepthPrepassEnabled: input.grassDepthPrepassEnabled,
+    grassDepthPrepassTier: input.grassDepthPrepassTier,
     grassShaderMode: grassConfig.shaderMode,
     grassAlphaToCoverage: grassConfig.alphaToCoverage,
     grassNearCrossedQuads: grassConfig.nearCrossedQuads,
