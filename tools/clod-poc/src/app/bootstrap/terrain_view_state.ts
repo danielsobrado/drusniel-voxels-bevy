@@ -79,6 +79,7 @@ export function createTerrainViewStateReaders(state: ClodAppState): TerrainViewS
         state.postProcessAerialPerspectiveColorG,
         state.postProcessAerialPerspectiveColorB,
       ],
+      cloudsEnabled: state.postProcessCloudsEnabled,
       gtaoEnabled: state.postProcessGtaoEnabled,
       froxelsEnabled: state.postProcessFroxelsEnabled,
       bounceEnabled: state.postProcessBounceEnabled,
