@@ -53,18 +53,18 @@ trees:
       far_max_vertices: 40000
       impostor_max_vertices: 240
 
-  # WebGPU impostor bake target: 8x8 frames at 128px => 1024² atlas.
-  # Albedo RGBA8 + normal-depth RGBA8 cost ~8 MiB/species, ~48 MiB for
+  # WebGPU impostor bake target: 8x8 frames at 256px => 2048² atlas.
+  # Albedo RGBA8 + normal-depth RGBA8 cost ~32 MiB/species, ~192 MiB for
   # the six-species TREE-9 target. Keep URL/UI toggles available for disabling.
   impostors:
     enabled: true
     bake_on_start: true
     fallback_to_placeholder: false
-    source_lod: mid
-    resolution_px: 128
+    source_lod: near
+    resolution_px: 256
     octahedral_grid_size: 8
     atlas_padding_px: 2
-    alpha_test: 0.45
+    alpha_test: 0.35
     frame_update_distance_m: 2.0
     axial_billboard: true
     preserve_vertical: true
