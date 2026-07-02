@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import type { ClodRuntimeConfig } from "../../../app/runtime_config.js";
 import type { ClodPageNode, PageMesh } from "../../../types.js";
+import { LockedBorderOverlay } from "../../../ui/locked_border_overlay.js";
 import { DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG } from "../../geometry/page_geometry_cache.js";
 import { DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG } from "../../rendering/clod_render_node_cache_config.js";
 import { DEFAULT_SELECTION_CUT_CACHE_CONFIG } from "../selection_cut_cache.js";
@@ -86,6 +87,8 @@ describe("createClodSelectionController cache hits", () => {
     const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
     camera.position.set(32, 32, 32);
     camera.lookAt(0, 0, 0);
+    const overlayScene = new THREE.Scene();
+    const lockedBorderOverlay = new LockedBorderOverlay(overlayScene);
 
     const controller = createClodSelectionController({
       config: {
@@ -128,7 +131,7 @@ describe("createClodSelectionController cache hits", () => {
         seamGroup: new THREE.Group(),
         crossLodBorderGroup: new THREE.Group(),
       },
-      lockedBorderOverlay: { rebuild: vi.fn() },
+      lockedBorderOverlay,
       staleEditedAncestorIds: new Set<string>(),
       onCutChanged: vi.fn(),
     });
@@ -143,5 +146,7 @@ describe("createClodSelectionController cache hits", () => {
     expect(prefetchNodes).toHaveBeenCalledTimes(2);
     expect([...views.values()][0].selected).toBe(true);
     expect([...views.values()][0].target).toBe(1);
+
+    lockedBorderOverlay.dispose();
   });
 });
