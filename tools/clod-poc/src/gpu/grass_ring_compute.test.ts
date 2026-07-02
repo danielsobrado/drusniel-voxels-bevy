@@ -46,8 +46,8 @@ describe("grass ring compute capabilities", () => {
   it("dispatches the grass cull kernel over a compact active slot list", () => {
     const composed = composeGrassRingShader();
 
-    expect(composed).toContain("grass_active_slot_indices");
-    expect(composed).toContain("let slot = grass_active_slot_indices[id.x]");
+    expect(composed).toContain("active_slots");
+    expect(composed).toContain("let slot = active_slots[id.x]");
     expect(composed).toContain("process_slot(slot)");
     expect(composed).not.toContain("process_slot(id.x);");
   });
