@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import { getDigEditsSnapshot, getDigEditRevision } from "../terrain/terrain.js";
 import type { ClodPageNode, PageFootprint } from "../types.js";
 import {
@@ -7,11 +6,9 @@ import {
   grassGpuRingComputeUnsupportedReason,
   grassGpuRingDensityParams,
   grassGpuRingSlotCount,
-  grassGpuRingTierRegion,
   type GrassGpuRingStats,
 } from "../gpu/grass_ring_compute.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
-import { depthPrepassTwin } from "../rendering/veg_prepass.js";
 import {
   DEFAULT_GRASS_SHADER_MODE,
   GRASS_SHADER_MODES,
@@ -36,17 +33,14 @@ import {
   type GrassMaterialHandle,
 } from "./grass_geometry.js";
 import {
-  gpuBuffersForTier,
   grassGpuRingDrawUnsupportedReason,
   grassGpuRingKey,
   grassGpuRingTierCapacity,
   type GrassGpuRingDrawResources,
-  type GrassGpuSharedDrawAttributes,
-  type GrassGpuTierDrawResources,
   type GrassRingInstanceBuffers,
   type GrassWebGpuBackendAccess,
-  type IndirectInstancedBufferGeometry,
 } from "./grass_gpu_ring.js";
+import { createGrassGpuRingDrawResources } from "./grass_gpu_ring_draw_resources.js";
 import type { GrassGenerationStats, GrassStats } from "./grass_stats.js";
 import { grassFadeDistance, grassRingBands } from "./grass_math.js";
 import { GrassPatchFactory } from "./grass_patch_factory.js";
@@ -750,120 +744,27 @@ export class GrassSystem {
   }
 
   private createGpuRingDrawResources(candidateCount: number): GrassGpuRingDrawResources {
-    if (!this.gpuBackend) throw new Error("Cannot create WebGPU grass draw resources without a backend");
-    const count = Math.max(1, candidateCount);
-    const sharedInstanceCount = count * 4;
-    const indirect = new StorageBufferAttribute(new Uint32Array(4 * 5), 5);
-    indirect.name = "grass-ring-indirect";
-    this.gpuBackend.createIndirectStorageAttribute(indirect);
-    const sharedAttributes: GrassGpuSharedDrawAttributes = {
-      offset: this.createStorageInstancedAttribute("shared-offset", sharedInstanceCount),
-      packed0: this.createStorageInstancedAttribute("shared-packed0", sharedInstanceCount),
-      packed1: this.createStorageInstancedAttribute("shared-packed1", sharedInstanceCount),
-      terrainNormal: this.createStorageInstancedAttribute("shared-terrain-normal", sharedInstanceCount),
-    };
-    // Rebuild the node material to read these storage buffers (not attribute()) before the tier
-    // meshes pick it up via materialFor - the 4*maxBlades vec4 buffers exceed the 64KB uniform limit
-    // if bound as instanced attributes.
-    this.rebuildInjectedRingMaterial({ ...sharedAttributes, capacity: sharedInstanceCount });
-
-    const tiers = {
-      near: this.createGpuRingTierDraw("near", count, this.ringNearGeometry, indirect, 0, sharedAttributes),
-      mid: this.createGpuRingTierDraw("mid", count, this.ringMidGeometry, indirect, 5 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
-      far: this.createGpuRingTierDraw("far", count, this.ringFarGeometry, indirect, 10 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
-      super: this.createGpuRingTierDraw("super", count, this.ringSuperGeometry, indirect, 15 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
-    } satisfies Record<GrassTier, GrassGpuTierDrawResources>;
-    if (this.useGrassRingDebug) this.logGpuRingRegions(count);
-
-    return {
-      tiers,
-      indirect,
-      outputBuffers: {
-        near: gpuBuffersForTier(sharedAttributes, (attribute) => this.gpuBufferForAttribute(attribute)),
-        mid: gpuBuffersForTier(sharedAttributes, (attribute) => this.gpuBufferForAttribute(attribute)),
-        far: gpuBuffersForTier(sharedAttributes, (attribute) => this.gpuBufferForAttribute(attribute)),
-        super: gpuBuffersForTier(sharedAttributes, (attribute) => this.gpuBufferForAttribute(attribute)),
-        indirectArgs: this.gpuBufferForAttribute(indirect),
+    return createGrassGpuRingDrawResources({
+      candidateCount,
+      gpuBackend: this.gpuBackend,
+      geometries: {
+        near: this.ringNearGeometry,
+        mid: this.ringMidGeometry,
+        far: this.ringFarGeometry,
+        super: this.ringSuperGeometry,
       },
-    };
-  }
-
-  private logGpuRingRegions(maxInstancesPerTier: number): void {
-    const rows = (["near", "mid", "far", "super"] as const).map((tier, index) => ({
-      tier,
-      ...grassGpuRingTierRegion(index, maxInstancesPerTier),
-    }));
-    console.info("[grass-ring-debug] compact tier regions", rows);
-  }
-
-  private createGpuRingTierDraw(
-    tier: GrassTier,
-    count: number,
-    bladeGeometry: THREE.BufferGeometry,
-    indirect: StorageBufferAttribute,
-    indirectOffset: number,
-    sharedAttributes: GrassGpuSharedDrawAttributes,
-  ): GrassGpuTierDrawResources {
-    const geometry = new THREE.InstancedBufferGeometry();
-    geometry.setAttribute("position", bladeGeometry.getAttribute("position"));
-    geometry.setAttribute("uv", bladeGeometry.getAttribute("uv"));
-    geometry.setAttribute("normal", bladeGeometry.getAttribute("normal"));
-    geometry.setIndex(bladeGeometry.getIndex());
-    // Per-instance data is read by the material as STORAGE buffers (storage().element(instanceIndex)),
-    // not vertex attributes - binding these 4*maxBlades-vec4 buffers as instanced attributes overflows
-    // the 64KB uniform limit. The buffers still live in sharedAttributes (compute output / material input).
-    const { offset, packed0, packed1, terrainNormal } = sharedAttributes;
-    geometry.instanceCount = count;
-    this.setGpuRingIndirect(geometry, indirect, indirectOffset);
-    geometry.boundingBox = new THREE.Box3(
-      new THREE.Vector3(-1, -1, -1),
-      new THREE.Vector3(this.worldCells + 1, 256, this.worldCells + 1),
-    );
-    geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const baseMaterial = this.materialFor(this.settings.shaderMode);
-    const material = baseMaterial;
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `grass-ring-gpu-${tier}`;
-    mesh.frustumCulled = false;
-    this.addGpuRingPrepassTwin(tier, mesh);
-    return { mesh, offset, packed0, packed1, terrainNormal };
-  }
-
-  private usesGpuRingPrepass(tier: GrassTier): boolean {
-    return this.useGrassPrepass && (tier === "near" || tier === "mid");
-  }
-
-  private addGpuRingPrepassTwin(tier: GrassTier, mesh: THREE.Mesh): void {
-    if (!this.usesGpuRingPrepass(tier)) return;
-    const materialNodes = mesh.material as unknown as { positionNode?: unknown; maskNode?: unknown };
-    if (!materialNodes.positionNode) return;
-    const twin = depthPrepassTwin(mesh, {
-      positionNode: materialNodes.positionNode,
-      maskNode: materialNodes.maskNode,
-      side: THREE.DoubleSide,
+      worldCells: this.worldCells,
+      shaderMode: this.settings.shaderMode,
+      useGrassRingDebug: this.useGrassRingDebug,
+      useGrassPrepass: this.useGrassPrepass,
+      materialFor: (mode) => this.materialFor(mode),
+      rebuildInjectedRingMaterial: (buffers) => this.rebuildInjectedRingMaterial(buffers),
+      addPrepassTwin: (twin) => {
+        this.ringPrepassTwins.push(twin);
+        this.root.add(twin);
+      },
+      gpuBufferForAttribute: (attribute) => this.gpuBufferForAttribute(attribute),
     });
-    this.ringPrepassTwins.push(twin);
-    this.root.add(twin);
-  }
-
-  private createStorageInstancedAttribute(name: string, count: number): StorageInstancedBufferAttribute {
-    if (!this.gpuBackend) throw new Error("Cannot create WebGPU grass storage attribute without a backend");
-    const attribute = new StorageInstancedBufferAttribute(count, 4);
-    attribute.name = `grass-ring-${name}`;
-    this.gpuBackend.createStorageAttribute(attribute);
-    return attribute;
-  }
-
-  private setGpuRingIndirect(
-    geometry: THREE.InstancedBufferGeometry,
-    indirect: StorageBufferAttribute,
-    indirectOffset: number,
-  ): void {
-    const indirectGeometry = geometry as IndirectInstancedBufferGeometry;
-    if (!indirectGeometry.setIndirect) {
-      throw new Error(grassGpuRingDrawUnsupportedReason() ?? "Missing WebGPU indirect geometry support");
-    }
-    indirectGeometry.setIndirect(indirect, indirectOffset);
   }
 
   private setRingDrawsVisible(visible: boolean): void {

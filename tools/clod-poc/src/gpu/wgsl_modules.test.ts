@@ -11,7 +11,7 @@ import {
 } from "./wgsl_modules.js";
 
 function bindingDeclarationCount(source: string, name: string): number {
-  return [...source.matchAll(new RegExp(`\\bvar\\s+${name}\\s*:`, "g"))].length;
+  return [...source.matchAll(new RegExp(`\\bvar(?:<[^>]+>)?\\s+${name}\\s*:`, "g"))].length;
 }
 
 describe("WGSL module composition", () => {

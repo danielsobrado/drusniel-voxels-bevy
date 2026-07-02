@@ -5,6 +5,7 @@ import {
   createEmptyTreeSystemStats,
   type TreeGenerationStats,
   type TreeSystemStatsPatchInput,
+  type TreeVisibleClusterMaskStats,
 } from "./index.js";
 
 describe("tree system stats aggregation", () => {
@@ -99,7 +100,7 @@ describe("tree system stats aggregation", () => {
         counts: { near: 1, mid: 2, far: 3, impostor: 4 },
         shadowGroupCounts: [1, 2, 3],
         shadowOverflowed: true,
-        visibleClusterMaskStats: {
+        visibleClusterMaskStats: visibleClusterMaskStats({
           visibleClusterHidden: 5,
           visibleClusterVisible: 7,
           visibleClusterUnknownKept: 2,
@@ -112,7 +113,7 @@ describe("tree system stats aggregation", () => {
           gpuCandidateCountAfterPrefilter: 80,
           gpuPrefilterCacheHits: 0,
           gpuPrefilterCacheMisses: 12,
-        },
+        }),
       },
       gpuVisibleCount: 0,
       gpuStatus: "ring",
@@ -149,6 +150,26 @@ describe("tree system stats aggregation", () => {
 
 function patch(visible: boolean, instanceCount: number, generationStats: TreeGenerationStats): TreeSystemStatsPatchInput {
   return { visible, instances: new Array(instanceCount).fill(null), generationStats };
+}
+
+function visibleClusterMaskStats(
+  overrides: Partial<TreeVisibleClusterMaskStats> = {},
+): TreeVisibleClusterMaskStats {
+  return {
+    visibleClusterHidden: 0,
+    visibleClusterVisible: 0,
+    visibleClusterUnknownKept: 0,
+    gpuPrefilterTestedClusters: 0,
+    gpuPrefilterRejectedClusters: 0,
+    gpuPrefilterAcceptedClusters: 0,
+    gpuPrefilterUnknownKeptClusters: 0,
+    gpuPrefilterSkippedCandidateEstimate: 0,
+    gpuCandidateCountBeforePrefilter: 0,
+    gpuCandidateCountAfterPrefilter: 0,
+    gpuPrefilterCacheHits: 0,
+    gpuPrefilterCacheMisses: 0,
+    ...overrides,
+  };
 }
 
 function generation(

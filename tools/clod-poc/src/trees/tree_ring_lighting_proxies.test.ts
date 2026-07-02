@@ -52,7 +52,7 @@ describe("tree ring validation counts", () => {
     expect(result.shadowGroupCounts.reduce((sum, count) => sum + count, 0)).toBeGreaterThan(0);
   });
 
-  it("keeps terrain-hidden trees as shadow casters while removing them from visible counts", () => {
+  it("removes terrain-hidden trees from visible and shadow counts", () => {
     const settings = validationSettings();
     settings.gpu.terrainVisibility.minDistanceM = 0;
     settings.gpu.terrainVisibility.heightMarginM = 0;
@@ -76,7 +76,7 @@ describe("tree ring validation counts", () => {
     });
 
     expect(result.counts.near + result.counts.mid + result.counts.far + result.counts.impostor).toBe(0);
-    expect(result.shadowGroupCounts.reduce((sum, count) => sum + count, 0)).toBeGreaterThan(0);
+    expect(result.shadowGroupCounts.reduce((sum, count) => sum + count, 0)).toBe(0);
   });
 
   it("reports shadow caster overflow separately from visible overflow", () => {

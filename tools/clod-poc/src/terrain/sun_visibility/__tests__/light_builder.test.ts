@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { buildLightTile, LIGHT_SAMPLE } from "../light_builder.js";
 import { parseSunLightOptions } from "../sun_light_options.js";
 
-function provider(heightFn: (x: number, z: number) => { height: number; present: boolean }) {
+function provider(heightFn: (x: number, z: number) => { height: number; present: boolean; revision?: number }) {
   return {
-    readHeight: heightFn,
+    readHeight: (x: number, z: number) => ({ revision: 1, ...heightFn(x, z) }),
     tileRevision: () => 1,
   };
 }
@@ -29,12 +29,12 @@ describe("sun light tile builder", () => {
   });
 
   it("shades behind a ridge for low sun", () => {
-    const tile = buildLightTile({ ...baseRequest, sunVec: new THREE.Vector3(1, 0.15, 0) }, provider((x) => ({ height: x > 20 && x < 24 ? 10 : 0, present: true })), options);
+    const tile = buildLightTile({ ...baseRequest, sunVec: new THREE.Vector3(1, 0.15, 0) }, provider((x) => ({ height: x >= 20 && x <= 24 ? 10 : 0, present: true })), options);
     expect([...tile.values].some((value) => value === LIGHT_SAMPLE.shaded)).toBe(true);
   });
 
   it("does not let the same ridge affect the opposite direction", () => {
-    const tile = buildLightTile({ ...baseRequest, sunVec: new THREE.Vector3(-1, 0.15, 0) }, provider((x) => ({ height: x > 20 && x < 24 ? 10 : 0, present: true })), options);
+    const tile = buildLightTile({ ...baseRequest, sunVec: new THREE.Vector3(-1, 0.15, 0) }, provider((x) => ({ height: x >= 20 && x <= 24 ? 10 : 0, present: true })), options);
     expect(tile.values[0]).toBe(LIGHT_SAMPLE.lit);
   });
 

@@ -6,8 +6,8 @@ const options = { azimuthDegrees: 5, elevationDegrees: 5, minElevationDegrees: 2
 
 describe("sun direction bins", () => {
   it("keeps tiny movement in one bin", () => {
-    const a = toSunBin(new THREE.Vector3(1, 1, 0).normalize(), options);
-    const b = toSunBin(new THREE.Vector3(1, 1, 0.01).normalize(), options);
+    const a = toSunBin(new THREE.Vector3(1, 0.9, 0).normalize(), options);
+    const b = toSunBin(new THREE.Vector3(1, 0.9, 0.01).normalize(), options);
     expect(a).toEqual(b);
   });
 

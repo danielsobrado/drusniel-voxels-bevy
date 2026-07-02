@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import type { ClodHooks } from "../core/hooks.js";
 import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata, PropGpuStatus, PropPlacementScene } from "./prop_types.js";
 import { PropAssetRegistry, type LoadedPropAsset } from "./prop_asset_loader.js";
@@ -12,24 +11,23 @@ import {
   propNeedsCollider,
   selectPropLodIndex,
 } from "./prop_lod.js";
-import { PropSpatialGrid, type PropGridCell } from "./prop_spatial_grid.js";
+import { PropSpatialGrid } from "./prop_spatial_grid.js";
 import { EMPTY_PROP_STATS, syncPropStatsToHooks, type PropStats } from "./prop_stats.js";
 import { createBillboardMaterial } from "./prop_billboard.js";
 import type { PropColliderInstanceInput } from "./prop_collider.js";
 import {
   PropGpuRingCompute,
-  propGpuRingGroupCapacity,
   propGpuRingUnsupportedReason,
   type PropGpuRingSourceData,
   type PropGpuRingStats,
 } from "../gpu/prop_ring_compute.js";
-import { createPropGpuRingMaterial } from "./prop_gpu_ring_material.js";
+import { buildPropGpuRingSource, createPropGpuRingDrawResources } from "./prop_gpu_ring_draw.js";
+import { collectPropDebugCells, emptyPropDebugPayload } from "./prop_system_debug.js";
 import {
   addLodTotals,
   bucketKey,
   cellKey,
   disposeBucket,
-  emptyGpuRingSource,
   lodGeometry,
   lodTriangleCount,
   parseCellKey,
@@ -49,7 +47,6 @@ import {
   type CellJobKind,
   type CellRenderRecord,
   type InstanceLodState,
-  type IndirectInstancedBufferGeometry,
   type MatrixUploadJob,
   type PropGpuRingDrawResources,
   type PropWebGpuBackendAccess,
@@ -501,114 +498,21 @@ export class PropSystem {
   }
 
   private buildGpuRingSource(): PropGpuRingSourceData {
-    if (!this.grid) {
-      return emptyGpuRingSource();
-    }
-    const assetDefs = this.deps.settings.props.filter((def) => this.loadedAssets.has(def.id));
-    const assetIndexById = new Map<string, number>();
-    const groupMeta: number[] = [];
-    const assetMeta = new Float32Array(Math.max(1, assetDefs.length) * 4);
-    const assetLods = new Float32Array(Math.max(1, assetDefs.length) * 4);
-    let group = 0;
-    assetDefs.forEach((def, assetIndex) => {
-      const loaded = this.loadedAssets.get(def.id)!;
-      const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
-      assetIndexById.set(def.id, assetIndex);
-      assetMeta[assetIndex * 4] = def.culling.maxDistance;
-      assetMeta[assetIndex * 4 + 1] = loaded.metadata.boundingSphereRadius;
-      assetMeta[assetIndex * 4 + 2] = lodCount;
-      assetMeta[assetIndex * 4 + 3] = group;
-      for (let lod = 0; lod < 4; lod++) assetLods[assetIndex * 4 + lod] = def.lod.distances[lod] ?? Number.POSITIVE_INFINITY;
-      for (let lod = 0; lod < lodCount; lod++) {
-        const geometry = lodGeometry(loaded, lod);
-        const indexCount = geometry ? this.indexCountFor(geometry) : 0;
-        groupMeta.push(assetIndex, lod, indexCount, 0);
-        group++;
-      }
+    return buildPropGpuRingSource({
+      grid: this.grid,
+      settings: this.deps.settings,
+      loadedAssets: this.loadedAssets,
+      indexCountFor: (geometry) => this.indexCountFor(geometry),
     });
-    if (assetDefs.length === 0 || group === 0) return emptyGpuRingSource();
-
-    const sourceA: number[] = [];
-    const sourceB: number[] = [];
-    for (const inst of this.grid.instances) {
-      const assetIndex = assetIndexById.get(inst.assetId);
-      if (assetIndex === undefined) continue;
-      sourceA.push(inst.position[0], inst.position[1], inst.position[2], inst.scale);
-      sourceB.push(inst.rotationY, assetIndex, 0, 0);
-    }
-
-    return {
-      sourceA: new Float32Array(sourceA.length > 0 ? sourceA : [0, 0, 0, 1]),
-      sourceB: new Float32Array(sourceB.length > 0 ? sourceB : [0, 0, 0, 0]),
-      assetMeta,
-      assetLods,
-      groupMeta: new Uint32Array(groupMeta.length > 0 ? groupMeta : [0, 0, 0, 0]),
-      sourceCount: sourceA.length / 4,
-      groupCount: group,
-    };
   }
 
   private createGpuRingDrawResources(source: PropGpuRingSourceData): PropGpuRingDrawResources {
-    if (!this.deps.gpuBackend) throw new Error("Cannot create WebGPU prop ring resources without a backend");
-    const maxInstancesPerGroup = propGpuRingGroupCapacity(this.deps.settings, source.groupCount);
-    const capacity = Math.max(1, maxInstancesPerGroup * source.groupCount);
-    const instanceA = this.createStorageInstancedAttribute("instance-a", capacity);
-    const instanceB = this.createStorageInstancedAttribute("instance-b", capacity);
-    const indirect = new StorageBufferAttribute(new Uint32Array(source.groupCount * 5), 5);
-    indirect.name = "prop-ring-indirect";
-    this.deps.gpuBackend.createIndirectStorageAttribute(indirect);
-
-    const meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[] = [];
-    let group = 0;
-    for (const def of this.deps.settings.props) {
-      const loaded = this.loadedAssets.get(def.id);
-      if (!loaded) continue;
-      const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
-      for (let lod = 0; lod < lodCount; lod++) {
-        const geometry = lodGeometry(loaded, lod);
-        if (!geometry) continue;
-        const drawGeometry = this.createGpuRingGeometry(geometry, maxInstancesPerGroup, indirect, group * 5 * Uint32Array.BYTES_PER_ELEMENT);
-        const material = createPropGpuRingMaterial(loaded.sourceMaterial, { instanceA, instanceB, capacity });
-        const mesh = new THREE.Mesh(drawGeometry, material);
-        mesh.name = `props-ring-gpu-${def.id}-lod${lod}`;
-        mesh.frustumCulled = false;
-        mesh.castShadow = false;
-        mesh.receiveShadow = true;
-        meshes.push(mesh);
-        group++;
-      }
-    }
-
-    return { meshes, instanceA, instanceB, indirect, source, maxInstancesPerGroup };
-  }
-
-  private createGpuRingGeometry(
-    source: THREE.BufferGeometry,
-    instanceCount: number,
-    indirect: StorageBufferAttribute,
-    indirectOffset: number,
-  ): THREE.InstancedBufferGeometry {
-    const geometry = new THREE.InstancedBufferGeometry();
-    geometry.setIndex(source.getIndex());
-    for (const name of Object.keys(source.attributes)) geometry.setAttribute(name, source.getAttribute(name));
-    geometry.instanceCount = Math.max(1, instanceCount);
-    const indirectGeometry = geometry as IndirectInstancedBufferGeometry;
-    if (!indirectGeometry.setIndirect) throw new Error("custom prop GPU ring requires InstancedBufferGeometry.setIndirect support");
-    indirectGeometry.setIndirect(indirect, indirectOffset);
-    geometry.boundingBox = new THREE.Box3(
-      new THREE.Vector3(-1, -1024, -1),
-      new THREE.Vector3(1_000_000, 4096, 1_000_000),
-    );
-    geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
-    return geometry;
-  }
-
-  private createStorageInstancedAttribute(name: string, count: number): StorageInstancedBufferAttribute {
-    if (!this.deps.gpuBackend) throw new Error("Cannot create WebGPU prop storage attribute without a backend");
-    const attribute = new StorageInstancedBufferAttribute(Math.max(1, Math.floor(count)), 4);
-    attribute.name = `prop-ring-${name}`;
-    this.deps.gpuBackend.createStorageAttribute(attribute);
-    return attribute;
+    return createPropGpuRingDrawResources({
+      source,
+      settings: this.deps.settings,
+      loadedAssets: this.loadedAssets,
+      gpuBackend: this.deps.gpuBackend,
+    });
   }
 
   private gpuBufferForAttribute(attribute: THREE.BufferAttribute): GPUBuffer {
@@ -930,21 +834,15 @@ export class PropSystem {
     debugBounds: { min: THREE.Vector3; max: THREE.Vector3; lod: number }[],
   ): void {
     if (!debugEnabled || !this.grid) {
-      this.debug.update({ settings: this.deps.settings.debug, visibleCells: [], culledCells: [], instanceBounds: [] });
+      this.debug.update(emptyPropDebugPayload(this.deps.settings));
       return;
     }
-    const visibleCells: PropGridCell[] = [];
-    const culledCells: PropGridCell[] = [];
-    for (const cell of this.grid.allCells()) {
-      const key = cellKey(cell.cellCoord);
-      if (visibleCellSet.has(key)) visibleCells.push(cell);
-      else culledCells.push(cell);
-    }
-    this.debug.update({
-      settings: this.deps.settings.debug,
-      visibleCells,
-      culledCells,
+    this.debug.update(collectPropDebugCells({
+      settings: this.deps.settings,
+      cells: this.grid.allCells(),
+      visibleCellSet,
+      cellKey,
       instanceBounds: debugBounds,
-    });
+    }));
   }
 }

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { surfaceHeight } from "../terrain/terrain.js";
 import { defaultConstructionConfig } from "./config.js";
 import { asConstructionMaterial, CONSTRUCTION_MATERIAL_OPTIONS, constructionMaterialLabel, createConstructionMaterial } from "./materials.js";
+import { renderConstructionMenuHtml } from "./construction_menu_render.js";
 import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow } from "./material_preloader.js";
 import { createConstructionCandidate, createFreePlacementPosition, type TerrainHitPoint } from "./placement.js";
 import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
@@ -18,8 +19,6 @@ import {
   asFiniteVec3,
   createPieceGeometry,
   disposeMesh,
-  escapeHtml,
-  escapeStyleUrl,
   hasExplicitSupportMetadata,
   normalizeRotationQuarterTurns,
   readStringArray,
@@ -778,68 +777,14 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private renderMenuHtml(selected: ConstructionPieceDef | null, material: ConstructionMaterial): string {
-    const pieceButtons = this.config.pieces.map((piece, index) => {
-      const active = index === this.selectedIndex;
-      return `<button data-piece-index="${index}" style="${this.buttonStyle(active)}">${index + 1}. ${escapeHtml(piece.label)}</button>`;
-    }).join("");
-    const materialButtons = CONSTRUCTION_MATERIAL_OPTIONS.map((option, index) => {
-      const active = option.id === material;
-      const label = `${escapeHtml(option.label)}`;
-      const preview = escapeStyleUrl(option.previewUrl);
-      return `<button data-material-index="${index}" title="${label}" style="${this.swatchStyle(active, option.color, preview)}"><span>${label}</span></button>`;
-    }).join("");
-    const status = this.currentCandidate
-      ? this.currentCandidate.valid
-        ? this.currentCandidate.snapped ? "Snapped" : "Free placement"
-        : `Blocked: ${escapeHtml(this.currentCandidate.reason ?? "invalid")}`
-      : "Aim at terrain or snap point";
-    return `
-      <div data-drag-handle style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;cursor:grab;">
-        <strong>Build</strong>
-        <span>${selected ? escapeHtml(selected.label) : "No pieces"} · ${escapeHtml(constructionMaterialLabel(material))}</span>
-        <span>${this.snapEnabled ? "Snap ON" : "Snap OFF"}</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">${pieceButtons}</div>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-        <button data-material-step="-1" style="${this.buttonStyle(false)}">◀</button>
-        <div style="display:grid;grid-template-columns:repeat(${Math.min(6, CONSTRUCTION_MATERIAL_OPTIONS.length)}, minmax(0, 1fr));gap:5px;flex:1;">${materialButtons}</div>
-        <button data-material-step="1" style="${this.buttonStyle(false)}">▶</button>
-      </div>
-      <div style="display:flex;justify-content:space-between;gap:8px;">
-        <span>${status}</span>
-        <span>R rotate · X snap · arrows material</span>
-      </div>
-      ${this.lastPlacementMessage ? `<div style="margin-top:6px;color:#ffd27a;">${escapeHtml(this.lastPlacementMessage)}</div>` : ""}
-    `;
-  }
-
-  private buttonStyle(active: boolean): string {
-    return [
-      "border:1px solid rgba(160,190,230,0.35)",
-      `background:${active ? "rgba(80,150,255,0.42)" : "rgba(255,255,255,0.07)"}`,
-      "color:#eef3f8",
-      "border-radius:6px",
-      "padding:5px 7px",
-      "font:inherit",
-      "cursor:pointer",
-    ].join(";");
-  }
-
-  private swatchStyle(active: boolean, color: number, backgroundUrl: string): string {
-    return [
-      "height:38px",
-      "border-radius:7px",
-      `border:${active ? "2px solid #9bd3ff" : "1px solid rgba(160,190,230,0.35)"}`,
-      "color:#fff",
-      "font:10px/1.1 system-ui,sans-serif",
-      "text-shadow:0 1px 2px rgba(0,0,0,0.8)",
-      "cursor:pointer",
-      "overflow:hidden",
-      backgroundUrl
-        ? `background-image:linear-gradient(rgba(0,0,0,0.18),rgba(0,0,0,0.38)),url('${backgroundUrl}')`
-        : `background:#${color.toString(16).padStart(6, "0")}`,
-      "background-size:cover",
-      "background-position:center",
-    ].join(";");
+    return renderConstructionMenuHtml({
+      pieces: this.config.pieces,
+      selectedPiece: selected,
+      selectedIndex: this.selectedIndex,
+      selectedMaterial: material,
+      snapEnabled: this.snapEnabled,
+      currentCandidate: this.currentCandidate,
+      lastPlacementMessage: this.lastPlacementMessage,
+    });
   }
 }
