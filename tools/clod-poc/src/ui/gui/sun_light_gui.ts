@@ -1,5 +1,35 @@
 import type GUI from "lil-gui";
 
+interface SunLightGuiOptions {
+  active: boolean;
+  diagnostics: boolean;
+  build: {
+    maxTilesPerFrame: number;
+    maxBuildMsPerFrame: number;
+  };
+  tile: {
+    resolution: number;
+  };
+  debugView: {
+    cameraTileRadius: number;
+  };
+}
+
+interface SunLightGuiStats {
+  entries: number;
+  pendingTiles: number;
+  hits: number;
+  misses: number;
+  tilesBuiltThisFrame: number;
+  buildMsLastFrame: number;
+}
+
+interface SunLightWindowHooks {
+  __drusnielSunLightOptions?: SunLightGuiOptions;
+  __drusnielSunLightStats?: () => SunLightGuiStats;
+  __drusnielSunLightRefresh?: () => void;
+}
+
 function setQueryValue(key: string, value: string | null): void {
   const next = new URLSearchParams(location.search);
   if (value === null) next.delete(key);
@@ -7,26 +37,29 @@ function setQueryValue(key: string, value: string | null): void {
   history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
 }
 
-function readRuntimeOptions(): any | null {
-  return (window as unknown as Record<string, any>).__drusnielSunLightOptions ?? null;
+function hooks(): SunLightWindowHooks {
+  return window as unknown as SunLightWindowHooks;
 }
 
-function readRuntimeStats(): any | null {
-  const reader = (window as unknown as Record<string, any>).__drusnielSunLightStats;
+function readRuntimeOptions(): SunLightGuiOptions | null {
+  return hooks().__drusnielSunLightOptions ?? null;
+}
+
+function readRuntimeStats(): SunLightGuiStats | null {
+  const reader = hooks().__drusnielSunLightStats;
   return typeof reader === "function" ? reader() : null;
 }
 
 export function createSunLightGui(gui: GUI): void {
-  const options = readRuntimeOptions();
+  const initialOptions = readRuntimeOptions();
   const folder = gui.addFolder("sun light cache");
   const state = {
-    active: options?.active ?? new URLSearchParams(location.search).get("sunLightCache") !== "0",
+    active: initialOptions?.active ?? new URLSearchParams(location.search).get("sunLightCache") !== "0",
     stats: new URLSearchParams(location.search).get("sunLightStats") === "1",
-    debug: options?.debugView?.active ?? new URLSearchParams(location.search).get("sunLightDebug") === "1",
-    maxTilesPerFrame: options?.build?.maxTilesPerFrame ?? 2,
-    maxBuildMsPerFrame: options?.build?.maxBuildMsPerFrame ?? 1,
-    tileResolution: options?.tile?.resolution ?? 32,
-    cameraTileRadius: options?.debugView?.cameraTileRadius ?? 1,
+    maxTilesPerFrame: initialOptions?.build?.maxTilesPerFrame ?? 2,
+    maxBuildMsPerFrame: initialOptions?.build?.maxBuildMsPerFrame ?? 1,
+    tileResolution: initialOptions?.tile?.resolution ?? 32,
+    cameraTileRadius: initialOptions?.debugView?.cameraTileRadius ?? 1,
     entries: 0,
     pending: 0,
     hits: 0,
@@ -34,34 +67,35 @@ export function createSunLightGui(gui: GUI): void {
     builtThisFrame: 0,
     buildMs: 0,
     refresh: () => {
-      const refresh = (window as unknown as Record<string, any>).__drusnielSunLightRefresh;
-      if (typeof refresh === "function") refresh();
+      hooks().__drusnielSunLightRefresh?.();
     },
   };
 
   folder.add(state, "active").name("enabled").onChange((enabled: boolean) => {
+    const options = readRuntimeOptions();
     if (options) options.active = enabled;
     setQueryValue("sunLightCache", enabled ? null : "0");
   });
   folder.add(state, "stats").name("stats counters").onChange((enabled: boolean) => {
+    const options = readRuntimeOptions();
     if (options) options.diagnostics = enabled;
     setQueryValue("sunLightStats", enabled ? "1" : null);
   });
-  folder.add(state, "debug").name("debug overlay").onChange((enabled: boolean) => {
-    if (options?.debugView) options.debugView.active = enabled;
-    setQueryValue("sunLightDebug", enabled ? "1" : null);
-  });
   folder.add(state, "maxTilesPerFrame", 1, 16, 1).name("tiles / frame").onChange((value: number) => {
-    if (options?.build) options.build.maxTilesPerFrame = value;
+    const options = readRuntimeOptions();
+    if (options) options.build.maxTilesPerFrame = value;
   });
   folder.add(state, "maxBuildMsPerFrame", 0.1, 8, 0.1).name("build ms budget").onChange((value: number) => {
-    if (options?.build) options.build.maxBuildMsPerFrame = value;
+    const options = readRuntimeOptions();
+    if (options) options.build.maxBuildMsPerFrame = value;
   });
   folder.add(state, "tileResolution", 4, 64, 1).name("tile resolution").onChange((value: number) => {
-    if (options?.tile) options.tile.resolution = value;
+    const options = readRuntimeOptions();
+    if (options) options.tile.resolution = value;
   });
   folder.add(state, "cameraTileRadius", 0, 4, 1).name("camera tile radius").onChange((value: number) => {
-    if (options?.debugView) options.debugView.cameraTileRadius = value;
+    const options = readRuntimeOptions();
+    if (options) options.debugView.cameraTileRadius = value;
   });
   folder.add(state, "refresh").name("clear cache");
 
@@ -74,7 +108,7 @@ export function createSunLightGui(gui: GUI): void {
     statsFolder.add(state, "builtThisFrame").name("built/frame").listen(),
     statsFolder.add(state, "buildMs").name("build ms").listen(),
   ];
-  setInterval(() => {
+  window.setInterval(() => {
     const stats = readRuntimeStats();
     if (!stats) return;
     state.entries = stats.entries;
