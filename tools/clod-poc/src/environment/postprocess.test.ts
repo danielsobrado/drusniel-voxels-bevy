@@ -273,5 +273,9 @@ describe("postprocess shaders", () => {
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("bloomColor");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uAerialPerspectiveEnabled < 0.5");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("aerialPerspective");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tSunVisibilityAtlas");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("sunVisibilityAtWorld");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("godRaysColor");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain(`i < ${GOD_RAYS_SCREEN_SAMPLES.heavy}`);
   });
 });
