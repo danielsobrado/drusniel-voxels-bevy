@@ -147,7 +147,7 @@ export function withTreeShadowLodGate(source: string): string {
 }
 
 function withTreeActiveSlotList(source: string): string {
-  return source.replace(
+  const next = source.replace(
     /fn tree_cull\(@builtin\(global_invocation_id\) id: vec3<u32>\) \{\r?\n  process_tree_slot\(id\.x\);\r?\n\}/,
     `fn tree_cull(@builtin(global_invocation_id) id: vec3<u32>) {
   let slot = tree_active_slot_indices[id.x];
@@ -155,4 +155,8 @@ function withTreeActiveSlotList(source: string): string {
   process_tree_slot(slot);
 }`,
   );
+  if (!next.includes("tree_active_slot_indices[id.x]") || next.includes("process_tree_slot(id.x);")) {
+    throw new Error("tree ring WGSL active-slot transform failed");
+  }
+  return next;
 }
