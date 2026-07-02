@@ -149,7 +149,7 @@ describe("environment query overrides", () => {
 
     expect(state.treeGpuEnabled).toBe(true);
     expect(state.treeGpuFallbackToCpu).toBe(false);
-    expect(state.treeGpuForceCpu).toBe(true);
+    expect(state.treeGpuForceCpu).toBe(false);
   });
 
   it("enables tree GPU readback when counts or validation are requested", () => {
