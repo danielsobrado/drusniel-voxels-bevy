@@ -1,4 +1,42 @@
-export const SUN_LIGHT_DEFAULTS = {
+import { load } from "js-yaml";
+
+export interface SunLightOptions {
+  active: boolean;
+  diagnostics: boolean;
+  tile: {
+    sizeWorld: number;
+    resolution: number;
+  };
+  directionBins: {
+    azimuthDegrees: number;
+    elevationDegrees: number;
+    minElevationDegrees: number;
+  };
+  ray: {
+    maxDistanceWorld: number;
+    stepWorld: number;
+    receiverHeightBias: number;
+    terrainHeightBias: number;
+    missingOccludesFog: boolean;
+  };
+  build: {
+    maxTilesPerFrame: number;
+    maxBuildMsPerFrame: number;
+  };
+  cache: {
+    maxEntries: number;
+    keepLastKnown: boolean;
+  };
+  debugView: {
+    active: boolean;
+    showMissing: boolean;
+    opacity: number;
+    cameraTileRadius: number;
+    maxDebugTiles: number;
+  };
+}
+
+export const SUN_LIGHT_DEFAULTS: SunLightOptions = {
   active: true,
   diagnostics: false,
   tile: { sizeWorld: 128, resolution: 32 },
@@ -22,31 +60,31 @@ export const SUN_LIGHT_DEFAULTS = {
     cameraTileRadius: 1,
     maxDebugTiles: 12,
   },
-} as const;
+};
 
-function asRecord(value: any): Record<string, any> {
-  return value && typeof value === "object" ? value as Record<string, any> : {};
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-function asBool(value: any, fallback: boolean): boolean {
+function asBool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function asPositive(value: any, fallback: number): number {
+function asPositive(value: unknown, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function asPositiveInt(value: any, fallback: number): number {
+function asPositiveInt(value: unknown, fallback: number): number {
   return Math.floor(asPositive(value, fallback));
 }
 
-function asNonNegativeInt(value: any, fallback: number): number {
+function asNonNegativeInt(value: unknown, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }
 
-export function parseSunLightOptions(value: any) {
+export function parseSunLightOptions(value: unknown): SunLightOptions {
   const raw = asRecord(value);
   const tile = asRecord(raw.tile);
   const directionBins = asRecord(raw.direction_bins);
@@ -89,4 +127,12 @@ export function parseSunLightOptions(value: any) {
       maxDebugTiles: asPositiveInt(debugView.max_debug_tiles, SUN_LIGHT_DEFAULTS.debugView.maxDebugTiles),
     },
   };
+}
+
+export function parseSunLightOptionsYaml(yamlText: string): SunLightOptions {
+  try {
+    return parseSunLightOptions(load(yamlText));
+  } catch {
+    return SUN_LIGHT_DEFAULTS;
+  }
 }
