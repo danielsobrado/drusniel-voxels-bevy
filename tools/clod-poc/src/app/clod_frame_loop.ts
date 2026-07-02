@@ -153,7 +153,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     }));
 
     if (waterWeather.weatherController) {
-      timed(collectFrameTiming, phaseTiming, "weatherMs", () => waterWeather.weatherController.update(playerDelta));
+      elapsedSeconds += playerDelta;
+      timed(collectFrameTiming, phaseTiming, "weatherMs", () => waterWeather.weatherController.update(playerDelta, elapsedSeconds, render.camera.position, terrainPhaseResult.grassCenter));
     }
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
