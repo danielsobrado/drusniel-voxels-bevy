@@ -9,33 +9,34 @@ import {
   packUnderstoryRingClassParams,
   packUnderstoryRingParams,
   resolveUnderstoryRingReadbackCounts,
-  understoryRingCullWorkgroups,
+  understoryRingCell,
+  understoryRingGrid,
   understoryRingRequestsDebugReadback,
   understoryRingSlotCount,
+  understoryRingWorkgroupSize,
   type UnderstoryRingCounts,
 } from "../understory/understory_ring_math.js";
+import { getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
+import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
+import { buildVegetationSlotPrefilter, VegetationSlotPrefilterCache } from "../vegetation/vegetation_slot_prefilter.js";
 
 const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
+const ACTIVE_SLOT_SENTINEL = 0xffffffff;
+const PREFILTER_CLUSTER_DIM_SLOTS = 16;
+const CAMERA_HEIGHT_FALLBACK_M = 48;
 
-export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 5;
+export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 6;
 
-export interface UnderstoryGpuRingOutputBuffers {
-  cell: GPUBuffer;
-  indirectArgs: GPUBuffer;
-}
-
-export interface UnderstoryHydrologyData {
-  res: number;
-  worldCells: number;
-  data: Float32Array;
-}
-
+export interface UnderstoryGpuRingOutputBuffers { cell: GPUBuffer; indirectArgs: GPUBuffer }
+export interface UnderstoryHydrologyData { res: number; worldCells: number; data: Float32Array }
 export interface UnderstoryGpuRingStats {
   status: "initializing" | "idle" | "running" | "ready" | "failed" | "disabled";
   reason?: string;
   candidateCount: number;
+  candidateCountBeforePrefilter?: number;
+  candidateCountAfterPrefilter?: number;
   acceptedCandidates: number;
   counts: UnderstoryRingCounts;
   groupCounts: number[];
@@ -44,7 +45,6 @@ export interface UnderstoryGpuRingStats {
   readbackMs: number | null;
   skippedDispatches: number;
 }
-
 export interface UnderstoryGpuRingDispatchParams {
   centerX: number;
   centerZ: number;
@@ -53,15 +53,11 @@ export interface UnderstoryGpuRingDispatchParams {
   indexCounts: [number, number, number, number, number, number];
   frustumPlanes: ArrayLike<number>;
   hydroEnabled?: boolean;
+  activeSlotIndices?: Uint32Array;
+  candidateCountBeforePrefilter?: number;
+  candidateCountAfterPrefilter?: number;
 }
-
-interface ReadbackSlot {
-  buffer: GPUBuffer;
-  busy: boolean;
-  destroyAfterMap: boolean;
-  cpu: Uint32Array;
-}
-
+interface ReadbackSlot { buffer: GPUBuffer; busy: boolean; destroyAfterMap: boolean; cpu: Uint32Array }
 type PipelineName = "clear_counters" | "understory_cull" | "build_indirect_args";
 
 export function understoryGpuRingComputeUnsupportedReason(device: GPUDevice): string | null {
@@ -76,15 +72,21 @@ export class UnderstoryGpuRingCompute {
   private readonly counterBuffer: GPUBuffer;
   private readonly counterReadbacks: ReadbackSlot[];
   private readonly fieldParams: GPUBuffer;
+  private readonly activeSlotBuffer: GPUBuffer;
+  private readonly fullSlotIndices: Uint32Array;
+  private activeSlotScratch = new Uint32Array(0);
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(UNDERSTORY_RING_PARAM_BYTES);
   private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
+  private readonly slotPrefilterCache = new VegetationSlotPrefilterCache();
   private counts: UnderstoryRingCounts = { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 };
   private groupCounts = new Array<number>(UNDERSTORY_RING_GROUP_COUNT).fill(0);
   private overflowed = false;
+  private candidateCountBeforePrefilter = 0;
+  private candidateCountAfterPrefilter = 0;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
   private submitMs: number | null = null;
@@ -103,236 +105,102 @@ export class UnderstoryGpuRingCompute {
     hydroData: UnderstoryHydrologyData | null,
   ) {
     this.pipelines = pipelines;
-    this.paramBuffer = device.createBuffer({
-      label: "understory ring params",
-      size: UNDERSTORY_RING_PARAM_BYTES,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.classParamsBuffer = device.createBuffer({
-      label: "understory ring class params",
-      size: CLASS_PARAMS_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    this.counterBuffer = device.createBuffer({
-      label: "understory ring counters",
-      size: COUNTER_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    this.fieldParams = device.createBuffer({
-      label: "understory ring field params",
-      size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.digEdits = device.createBuffer({
-      label: "understory ring dig edits",
-      size: Math.max(1, edits.length) * DIG_EDIT_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+    const slotCount = understoryRingSlotCount(settings);
+    this.candidateCountBeforePrefilter = slotCount;
+    this.candidateCountAfterPrefilter = slotCount;
+    this.fullSlotIndices = fullSlotIndices(slotCount);
+    const activeSlotCapacity = Math.max(understoryRingWorkgroupSize(settings), roundUp(slotCount, understoryRingWorkgroupSize(settings)));
+    this.paramBuffer = device.createBuffer({ label: "understory ring params", size: UNDERSTORY_RING_PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.classParamsBuffer = device.createBuffer({ label: "understory ring class params", size: CLASS_PARAMS_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.counterBuffer = device.createBuffer({ label: "understory ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    this.fieldParams = device.createBuffer({ label: "understory ring field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.activeSlotBuffer = device.createBuffer({ label: "understory ring active slot indices", size: activeSlotCapacity * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.digEdits = device.createBuffer({ label: "understory ring dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
     const packedFieldParams = packFieldParams(edits.length);
-    device.queue.writeBuffer(
-      this.fieldParams,
-      0,
-      packedFieldParams.buffer as ArrayBuffer,
-      packedFieldParams.byteOffset,
-      packedFieldParams.byteLength,
-    );
+    device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
-      buffer: device.createBuffer({
-        label: `understory ring counter readback ${index}`,
-        size: COUNTER_BYTES,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      }),
+      buffer: device.createBuffer({ label: `understory ring counter readback ${index}`, size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
       busy: false,
       destroyAfterMap: false,
       cpu: new Uint32Array(UNDERSTORY_RING_GROUP_COUNT),
     }));
     if (hydroData && hydroData.data.length > 0) {
-      this.hydroTexture = device.createTexture({
-        label: "understory ring hydro texture",
-        size: { width: hydroData.res, height: hydroData.res },
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      });
-      device.queue.writeTexture(
-        { texture: this.hydroTexture },
-        hydroData.data.buffer as ArrayBuffer,
-        { bytesPerRow: hydroData.res * 16 },
-        { width: hydroData.res, height: hydroData.res },
-      );
+      this.hydroTexture = device.createTexture({ label: "understory ring hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      device.queue.writeTexture({ texture: this.hydroTexture }, hydroData.data.buffer as ArrayBuffer, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
     } else {
-      this.hydroTexture = device.createTexture({
-        label: "understory ring fallback hydro texture",
-        size: { width: 1, height: 1 },
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING,
-      });
+      this.hydroTexture = device.createTexture({ label: "understory ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
     }
-    const hydroSampler = device.createSampler({
-      label: "understory ring hydro sampler",
-      magFilter: "nearest",
-      minFilter: "nearest",
-    });
-    this.bindGroup = device.createBindGroup({
-      label: "understory ring bind group",
-      layout,
-      entries: [
-        { binding: 0, resource: { buffer: this.paramBuffer } },
-        { binding: 1, resource: { buffer: this.counterBuffer } },
-        { binding: 2, resource: { buffer: outputBuffers.indirectArgs } },
-        { binding: 3, resource: { buffer: outputBuffers.cell } },
-        { binding: 4, resource: { buffer: this.classParamsBuffer } },
-        { binding: 5, resource: this.hydroTexture.createView() },
-        { binding: 6, resource: hydroSampler },
-        { binding: 7, resource: { buffer: this.digEdits } },
-        { binding: 8, resource: { buffer: this.fieldParams } },
-      ],
-    });
+    const hydroSampler = device.createSampler({ label: "understory ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
+    this.bindGroup = device.createBindGroup({ label: "understory ring bind group", layout, entries: [
+      { binding: 0, resource: { buffer: this.paramBuffer } },
+      { binding: 1, resource: { buffer: this.counterBuffer } },
+      { binding: 2, resource: { buffer: outputBuffers.indirectArgs } },
+      { binding: 3, resource: { buffer: outputBuffers.cell } },
+      { binding: 4, resource: { buffer: this.classParamsBuffer } },
+      { binding: 5, resource: this.hydroTexture.createView() },
+      { binding: 6, resource: hydroSampler },
+      { binding: 7, resource: { buffer: this.digEdits } },
+      { binding: 8, resource: { buffer: this.fieldParams } },
+      { binding: 9, resource: { buffer: this.activeSlotBuffer } },
+    ] });
   }
 
-  static async create(
-    device: GPUDevice,
-    edits: readonly ResolvedDigEdit[],
-    outputBuffers: UnderstoryGpuRingOutputBuffers,
-    settings: UnderstorySettings,
-    hydroData: UnderstoryHydrologyData | null = null,
-  ): Promise<UnderstoryGpuRingCompute> {
-    const module = device.createShaderModule({
-      label: "understory ring compute shader",
-      code: composeUnderstoryRingShader(settings.gpu.workgroupSize),
-    });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
-      binding,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type },
-    });
-    const layout = device.createBindGroupLayout({
-      label: "understory ring compute layout",
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1),
-        storage(2),
-        storage(3),
-        storage(4, "read-only-storage"),
-        { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
-        { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: {} },
-        storage(7, "read-only-storage"),
-        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-      ],
-    });
+  static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], outputBuffers: UnderstoryGpuRingOutputBuffers, settings: UnderstorySettings, hydroData: UnderstoryHydrologyData | null = null): Promise<UnderstoryGpuRingCompute> {
+    const module = device.createShaderModule({ label: "understory ring compute shader", code: composeUnderstoryRingShader(settings.gpu.workgroupSize) });
+    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
+    const layout = device.createBindGroupLayout({ label: "understory ring compute layout", entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      storage(1), storage(2), storage(3), storage(4, "read-only-storage"),
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+      storage(7, "read-only-storage"),
+      { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      storage(9, "read-only-storage"),
+    ] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) =>
-      device.createComputePipelineAsync({
-        label: `understory ring ${entryPoint}`,
-        layout: pipelineLayout,
-        compute: { module, entryPoint },
-      });
-    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([
-      makePipeline("clear_counters"),
-      makePipeline("understory_cull"),
-      makePipeline("build_indirect_args"),
-    ]);
-    return new UnderstoryGpuRingCompute(device, layout, {
-      clear_counters: clearCounters,
-      understory_cull: cull,
-      build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...settings }, hydroData);
+    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `understory ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("understory_cull"), makePipeline("build_indirect_args")]);
+    return new UnderstoryGpuRingCompute(device, layout, { clear_counters: clearCounters, understory_cull: cull, build_indirect_args: buildIndirectArgs }, edits, outputBuffers, { ...settings }, hydroData);
   }
 
   dispatch(params: UnderstoryGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
-
     const frame = this.frame++;
     const requestReadback = understoryRingRequestsDebugReadback(this.settings, frame);
-    const readbackSlot = requestReadback
-      ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null
-      : null;
+    const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
-
+    const prefilter = params.activeSlotIndices ? null : this.buildSlotPrefilter(params);
+    const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
+    this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? understoryRingSlotCount(this.settings)));
+    this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
     packUnderstoryRingParams(this.settings, params, this.paramScratch);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
-
+    this.device.queue.writeBuffer(this.activeSlotBuffer, 0, activeSlots.data.buffer, activeSlots.data.byteOffset, activeSlots.data.byteLength);
     packUnderstoryRingClassParams(this.settings, this.classParamsScratch);
     this.device.queue.writeBuffer(this.classParamsBuffer, 0, this.classParamsScratch);
-
     const encoder = this.device.createCommandEncoder({ label: "understory ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
-    this.dispatchPipeline(
-      encoder,
-      this.pipelines.understory_cull,
-      understoryRingCullWorkgroups(this.settings),
-    );
+    this.dispatchPipeline(encoder, this.pipelines.understory_cull, activeCullWorkgroups(this.settings, activeSlots.paddedCount));
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
-    if (readbackSlot) {
-      encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
-    }
-
+    if (readbackSlot) encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
     const submittedGeneration = this.generation;
     const submitStart = performance.now();
-    if (readbackSlot) {
-      readbackSlot.busy = true;
-      readbackSlot.destroyAfterMap = false;
-      this.runningReadbacks++;
-    }
+    if (readbackSlot) { readbackSlot.busy = true; readbackSlot.destroyAfterMap = false; this.runningReadbacks++; }
     this.device.queue.submit([encoder.finish()]);
     this.submitMs = performance.now() - submitStart;
-
-    if (readbackSlot) {
-      const slot = readbackSlot;
-      const readbackStart = performance.now();
-      void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
-        if (submittedGeneration !== this.generation) {
-          slot.busy = false;
-          slot.destroyAfterMap = false;
-          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-          slot.buffer.unmap();
-          slot.buffer.destroy();
-          return;
-        }
-        slot.cpu.set(new Uint32Array(slot.buffer.getMappedRange(0, COUNTER_BYTES)));
-        slot.buffer.unmap();
-        slot.busy = false;
-        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        this.readbackMs = performance.now() - readbackStart;
-        const resolved = resolveUnderstoryRingReadbackCounts(slot.cpu, params.maxInstancesPerGroup);
-        this.groupCounts = resolved.groupCounts;
-        this.counts = resolved.counts;
-        this.overflowed = resolved.overflowed;
-        if (slot.destroyAfterMap) {
-          slot.destroyAfterMap = false;
-          slot.buffer.destroy();
-        }
-      }).catch((error) => {
-        if (submittedGeneration !== this.generation) {
-          slot.busy = false;
-          slot.destroyAfterMap = false;
-          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-          slot.buffer.destroy();
-          return;
-        }
-        slot.busy = false;
-        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        if (slot.destroyAfterMap) {
-          slot.destroyAfterMap = false;
-          slot.buffer.destroy();
-          return;
-        }
-        this.failedReason = error instanceof Error ? error.message : String(error);
-      });
-    }
+    if (readbackSlot) this.readback(readbackSlot, submittedGeneration, params.maxInstancesPerGroup);
     return true;
   }
 
   stats(enabled: boolean): UnderstoryGpuRingStats {
     const acceptedCandidates = Object.values(this.counts).reduce((a, b) => a + b, 0);
     return {
-      status: !enabled
-        ? "disabled"
-        : this.failedReason
-          ? "failed"
-          : this.runningReadbacks > 0 ? "running" : "ready",
+      status: !enabled ? "disabled" : this.failedReason ? "failed" : this.runningReadbacks > 0 ? "running" : "ready",
       reason: this.failedReason ?? undefined,
-      candidateCount: understoryRingSlotCount(this.settings),
+      candidateCount: this.candidateCountAfterPrefilter,
+      candidateCountBeforePrefilter: this.candidateCountBeforePrefilter,
+      candidateCountAfterPrefilter: this.candidateCountAfterPrefilter,
       acceptedCandidates,
       counts: { ...this.counts },
       groupCounts: [...this.groupCounts],
@@ -349,13 +217,11 @@ export class UnderstoryGpuRingCompute {
     this.paramBuffer.destroy();
     this.classParamsBuffer.destroy();
     this.counterBuffer.destroy();
+    this.activeSlotBuffer.destroy();
     this.digEdits.destroy();
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
-    for (const slot of this.counterReadbacks) {
-      if (slot.busy) slot.destroyAfterMap = true;
-      else slot.buffer.destroy();
-    }
+    for (const slot of this.counterReadbacks) if (slot.busy) slot.destroyAfterMap = true; else slot.buffer.destroy();
   }
 
   private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
@@ -365,6 +231,74 @@ export class UnderstoryGpuRingCompute {
     pass.dispatchWorkgroups(Math.max(1, workgroups));
     pass.end();
   }
+
+  private buildSlotPrefilter(params: UnderstoryGpuRingDispatchParams) {
+    const config = DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG;
+    if (!config.enabled || !config.viewRulesEnabled) return null;
+    const cameraGround = surfaceHeight(params.centerX, params.centerZ);
+    const cameraY = Number.isFinite(cameraGround) ? cameraGround + CAMERA_HEIGHT_FALLBACK_M : this.settings.placement.maxHeightM + CAMERA_HEIGHT_FALLBACK_M;
+    return buildVegetationSlotPrefilter({
+      kind: "understory",
+      centerX: params.centerX,
+      centerZ: params.centerZ,
+      cameraY,
+      worldCells: params.worldCells,
+      grid: understoryRingGrid(this.settings),
+      cell: understoryRingCell(this.settings),
+      clusterDimSlots: PREFILTER_CLUSTER_DIM_SLOTS,
+      visibility: { enabled: true, minDistanceM: config.viewMinDistanceM, sampleCount: config.viewSampleCount, heightMarginM: config.viewHeightMarginM, crownHeightM: config.understoryCrownHeightM },
+      sampler: { sampleHeight: (x, z) => { const height = surfaceHeight(x, z); return { height, unknown: !Number.isFinite(height) }; } },
+      terrainRevision: getDigEditRevision(),
+      cache: this.slotPrefilterCache,
+    });
+  }
+
+  private prepareActiveSlotIndices(source: Uint32Array | undefined): { data: Uint32Array; count: number; paddedCount: number } {
+    const slotCount = understoryRingSlotCount(this.settings);
+    const input = source ?? this.fullSlotIndices;
+    const count = Math.min(input.length, slotCount);
+    const paddedCount = Math.max(understoryRingWorkgroupSize(this.settings), roundUp(Math.max(1, count), understoryRingWorkgroupSize(this.settings)));
+    if (this.activeSlotScratch.length < paddedCount) this.activeSlotScratch = new Uint32Array(paddedCount);
+    this.activeSlotScratch.fill(ACTIVE_SLOT_SENTINEL, 0, paddedCount);
+    if (count > 0) this.activeSlotScratch.set(input.subarray(0, count), 0);
+    return { data: this.activeSlotScratch.subarray(0, paddedCount), count, paddedCount };
+  }
+
+  private readback(slot: ReadbackSlot, submittedGeneration: number, maxInstancesPerGroup: number): void {
+    const readbackStart = performance.now();
+    void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
+      if (submittedGeneration !== this.generation) { slot.busy = false; slot.destroyAfterMap = false; this.runningReadbacks = Math.max(0, this.runningReadbacks - 1); slot.buffer.unmap(); slot.buffer.destroy(); return; }
+      slot.cpu.set(new Uint32Array(slot.buffer.getMappedRange(0, COUNTER_BYTES)));
+      slot.buffer.unmap();
+      slot.busy = false;
+      this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+      this.readbackMs = performance.now() - readbackStart;
+      const resolved = resolveUnderstoryRingReadbackCounts(slot.cpu, maxInstancesPerGroup);
+      this.groupCounts = resolved.groupCounts;
+      this.counts = resolved.counts;
+      this.overflowed = resolved.overflowed;
+      if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); }
+    }).catch((error) => {
+      if (submittedGeneration !== this.generation) { slot.busy = false; slot.destroyAfterMap = false; this.runningReadbacks = Math.max(0, this.runningReadbacks - 1); slot.buffer.destroy(); return; }
+      slot.busy = false;
+      this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+      if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); return; }
+      this.failedReason = error instanceof Error ? error.message : String(error);
+    });
+  }
+}
+
+function activeCullWorkgroups(settings: UnderstorySettings, activeSlotCount: number): number {
+  return Math.max(1, Math.ceil(Math.max(1, Math.floor(activeSlotCount)) / understoryRingWorkgroupSize(settings)));
+}
+function roundUp(value: number, step: number): number {
+  const safeStep = Math.max(1, Math.floor(step));
+  return Math.ceil(Math.max(0, Math.floor(value)) / safeStep) * safeStep;
+}
+function fullSlotIndices(slotCount: number): Uint32Array {
+  const result = new Uint32Array(Math.max(0, Math.floor(slotCount)));
+  for (let i = 0; i < result.length; i++) result[i] = i;
+  return result;
 }
 
 export * from "./understory_ring_draw_resources.js";
