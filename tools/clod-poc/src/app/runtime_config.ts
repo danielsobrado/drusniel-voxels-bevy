@@ -83,6 +83,8 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   },
 };
 
+let cachedBundledRuntimeConfig: ClodRuntimeConfig | null = null;
+
 function positiveInt(value: unknown, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
@@ -122,6 +124,7 @@ function renderResolutionPresets(value: unknown, fallback: Record<string, Render
 }
 
 export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeConfig {
+  if (yamlText === clodRuntimeYaml && cachedBundledRuntimeConfig) return cachedBundledRuntimeConfig;
   const defaults = DEFAULT_CLOD_RUNTIME_CONFIG;
   try {
     const raw = load(yamlText) as Record<string, unknown> | null;
@@ -137,7 +140,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const renderResolution = (raw.render_resolution ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
-    return {
+    const parsed = {
       runtime: {
         worldOptions: worldOptions(runtime.world_options, defaults.runtime.worldOptions),
       },
@@ -172,57 +175,27 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
       },
       selectionCutCache: {
         enabled: bool(selectionCutCache.enabled, defaults.selectionCutCache.enabled),
-        cameraCellSizeM: positiveNumber(
-          selectionCutCache.camera_cell_size_m,
-          defaults.selectionCutCache.cameraCellSizeM,
-        ),
-        cameraHeightCellSizeM: positiveNumber(
-          selectionCutCache.camera_height_cell_size_m,
-          defaults.selectionCutCache.cameraHeightCellSizeM,
-        ),
-        targetCellSizeM: positiveNumber(
-          selectionCutCache.target_cell_size_m,
-          defaults.selectionCutCache.targetCellSizeM,
-        ),
-        angleBucketDeg: positiveNumber(
-          selectionCutCache.angle_bucket_deg,
-          defaults.selectionCutCache.angleBucketDeg,
-        ),
-        thresholdBucketPx: positiveNumber(
-          selectionCutCache.threshold_bucket_px,
-          defaults.selectionCutCache.thresholdBucketPx,
-        ),
-        bubbleCenterCellSizeM: positiveNumber(
-          selectionCutCache.bubble_center_cell_size_m,
-          defaults.selectionCutCache.bubbleCenterCellSizeM,
-        ),
-        maxReuseFrames: positiveInt(
-          selectionCutCache.max_reuse_frames,
-          defaults.selectionCutCache.maxReuseFrames,
-        ),
+        cameraCellSizeM: positiveNumber(selectionCutCache.camera_cell_size_m, defaults.selectionCutCache.cameraCellSizeM),
+        cameraHeightCellSizeM: positiveNumber(selectionCutCache.camera_height_cell_size_m, defaults.selectionCutCache.cameraHeightCellSizeM),
+        targetCellSizeM: positiveNumber(selectionCutCache.target_cell_size_m, defaults.selectionCutCache.targetCellSizeM),
+        angleBucketDeg: positiveNumber(selectionCutCache.angle_bucket_deg, defaults.selectionCutCache.angleBucketDeg),
+        thresholdBucketPx: positiveNumber(selectionCutCache.threshold_bucket_px, defaults.selectionCutCache.thresholdBucketPx),
+        bubbleCenterCellSizeM: positiveNumber(selectionCutCache.bubble_center_cell_size_m, defaults.selectionCutCache.bubbleCenterCellSizeM),
+        maxReuseFrames: positiveInt(selectionCutCache.max_reuse_frames, defaults.selectionCutCache.maxReuseFrames),
       },
       materialChurn: {
         enabled: bool(materialChurn.enabled, defaults.materialChurn.enabled),
         collectMaterialVersions: bool(materialChurn.collect_material_versions, defaults.materialChurn.collectMaterialVersions),
         collectRendererPrograms: bool(materialChurn.collect_renderer_programs, defaults.materialChurn.collectRendererPrograms),
         logSpikeWarnings: bool(materialChurn.log_spike_warnings, defaults.materialChurn.logSpikeWarnings),
-        spikeWarnThresholdPerFrame: positiveInt(
-          materialChurn.spike_warn_threshold_per_frame,
-          defaults.materialChurn.spikeWarnThresholdPerFrame,
-        ),
+        spikeWarnThresholdPerFrame: positiveInt(materialChurn.spike_warn_threshold_per_frame, defaults.materialChurn.spikeWarnThresholdPerFrame),
         maxTrackedMaterials: positiveInt(materialChurn.max_tracked_materials, defaults.materialChurn.maxTrackedMaterials),
       },
       renderResolution: {
         dprCap: positiveNumber(renderResolution.dpr_cap, defaults.renderResolution.dprCap),
         renderScale: positiveNumber(renderResolution.render_scale, defaults.renderResolution.renderScale),
-        minEffectivePixelRatio: positiveNumber(
-          renderResolution.min_effective_pixel_ratio,
-          defaults.renderResolution.minEffectivePixelRatio,
-        ),
-        maxEffectivePixelRatio: positiveNumber(
-          renderResolution.max_effective_pixel_ratio,
-          defaults.renderResolution.maxEffectivePixelRatio,
-        ),
+        minEffectivePixelRatio: positiveNumber(renderResolution.min_effective_pixel_ratio, defaults.renderResolution.minEffectivePixelRatio),
+        maxEffectivePixelRatio: positiveNumber(renderResolution.max_effective_pixel_ratio, defaults.renderResolution.maxEffectivePixelRatio),
         presets: renderResolutionPresets(renderResolution.presets, defaults.renderResolution.presets),
       },
       digging: {
@@ -232,6 +205,8 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         slowFrameMs: positiveNumber(profiling.slow_frame_ms, defaults.profiling.slowFrameMs),
       },
     };
+    if (yamlText === clodRuntimeYaml) cachedBundledRuntimeConfig = parsed;
+    return parsed;
   } catch {
     return defaults;
   }
