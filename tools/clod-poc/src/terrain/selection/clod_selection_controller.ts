@@ -261,10 +261,13 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     const initialCacheInput = buildCacheInput(settings, params, gpuMap, initialDebugKey);
     const cacheDecision = selectionCutCache.decide(initialCacheInput);
     if (cacheDecision.hit && lastRenderedNodes.length > 0) {
-      const tInfo = performance.now();
       lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
       selSub.cut = 0;
-      selSub.book = 0;
+      const tBook = performance.now();
+      applyRenderedCut(lastRenderedNodes, settings);
+      updateRenderedStats(lastRenderedNodes);
+      selSub.book = performance.now() - tBook;
+      const tInfo = performance.now();
       selSub.info = performance.now() - tInfo;
       const tOverlays = performance.now();
       maybeRebuildDebugOverlays(lastRenderedNodes, lastCutHash, settings);
@@ -320,26 +323,24 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       selState = { split: new Set() };
       selectionCutCache.invalidate("forced_invalidate");
     },
-    stats: () => ({
-      renderedCount: lastRenderedCount,
-      renderedNodes: lastRenderedNodes,
-      nodesByLod: lastNodesByLod,
-      levelSummary: lastLevelSummary,
-      triCount: lastTriCount,
-      forcedSplits: lastForced,
-      nearFieldForcedSplits: lastNearFieldForced,
-      crossLodAdjacencyCount: lastCrossLodAdjacencyCount,
-      selectionMs: lastSelectionMs,
-      selectionSource: lastSelectionSource,
-      frameId: selectionFrameId,
-      cache: {
-        hits: selectionCutCache.stats().hits,
-        misses: selectionCutCache.stats().misses,
-        lastHit: selectionCutCache.stats().lastReason === "hit",
-      },
-      subphases: { ...selSub },
-      selectionCache: selectionCutCache.stats(),
-    }),
+    stats: () => {
+      const selectionCache = selectionCutCache.stats();
+      return {
+        renderedCount: lastRenderedCount,
+        renderedNodes: lastRenderedNodes,
+        nodesByLod: lastNodesByLod,
+        levelSummary: lastLevelSummary,
+        triCount: lastTriCount,
+        forcedSplits: lastForced,
+        nearFieldForcedSplits: lastNearFieldForced,
+        crossLodAdjacencyCount: lastCrossLodAdjacencyCount,
+        selectionMs: lastSelectionMs,
+        selectionSource: lastSelectionSource,
+        frameId: selectionFrameId,
+        subphases: { ...selSub },
+        selectionCache,
+      };
+    },
     currentTerrainViews: () => currentTerrainViews,
     activeTerrainViews: () => activeTerrainViews,
     webGpuStats: (webgpuSelectionEnabled) =>
