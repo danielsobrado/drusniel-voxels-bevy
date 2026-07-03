@@ -15,6 +15,7 @@ const SPELL_LIGHT_ENVELOPE = {
 
 const SPELL_VISIBLE_PROGRESS_FLOOR = 0.035;
 const SPELL_SELF_TICK_PAD_MS = 120;
+const FALLBACK_BASE_OPACITY = 0.72;
 
 export interface SpellVfxMeshConfig {
   worldWidth: number;
@@ -119,17 +120,9 @@ export interface SpellVfxController {
   dispose: () => void;
 }
 
-interface FallbackSpellUniforms extends Record<string, THREE.IUniform> {
-  uColor: THREE.IUniform<THREE.Color>;
-  uTime: THREE.IUniform<number>;
-  uProgress: THREE.IUniform<number>;
-  uOpacity: THREE.IUniform<number>;
-}
-
 interface SpellState {
   mesh: THREE.Mesh;
-  fallbackMesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
-  fallbackUniforms: FallbackSpellUniforms;
+  fallbackMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   light: THREE.PointLight;
   baseLightIntensity: number;
   handle: SpellNodeMaterialHandle;
@@ -163,58 +156,18 @@ function spellLightColor(color: SpellColor): THREE.Color {
   return new THREE.Color(color[0], color[1], color[2]);
 }
 
-function createFallbackSpellMaterial(color: SpellColor): { material: THREE.ShaderMaterial; uniforms: FallbackSpellUniforms } {
-  const uniforms: FallbackSpellUniforms = {
-    uColor: { value: spellLightColor(color) },
-    uTime: { value: 0 },
-    uProgress: { value: 0 },
-    uOpacity: { value: 0.78 },
-  };
-  const material = new THREE.ShaderMaterial({
+function createFallbackSpellMaterial(color: SpellColor): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
     name: "spell-visible-fallback",
-    uniforms,
+    color: spellLightColor(color),
     transparent: true,
+    opacity: 0,
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
-    vertexShader: `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 uColor;
-      uniform float uTime;
-      uniform float uProgress;
-      uniform float uOpacity;
-      varying vec2 vUv;
-
-      float hash(vec2 p) {
-        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-      }
-
-      void main() {
-        float p = clamp(uProgress, 0.0, 1.0);
-        float life = smoothstep(0.0, 0.08, p) * (1.0 - smoothstep(0.78, 1.0, p));
-        float y = clamp(vUv.y, 0.0, 1.0);
-        float side = abs(vUv.x - 0.5);
-        float width = mix(0.16, 0.42, pow(y, 0.55)) * (1.0 - 0.55 * smoothstep(0.70, 1.0, y));
-        float body = 1.0 - smoothstep(width * 0.55, width, side);
-        float core = 1.0 - smoothstep(width * 0.16, width * 0.46, side);
-        float rise = 1.0 - smoothstep(max(0.08, p * 1.10), max(0.14, p * 1.28), y);
-        float sparks = step(0.985, hash(floor(vec2(vUv.x * 56.0, vUv.y * 92.0 - uTime * 24.0)))) * smoothstep(0.12, 0.88, y);
-        float alpha = clamp((body * 0.75 + core * 0.35 + sparks * 0.55) * life * rise * uOpacity, 0.0, 0.95);
-        vec3 hot = mix(uColor, vec3(1.0, 0.86, 0.42), core);
-        vec3 col = hot * (1.15 + 0.25 * sin(uTime * 13.0 + y * 18.0)) + uColor * sparks;
-        gl_FragColor = vec4(col, alpha);
-      }
-    `,
   });
-  return { material, uniforms };
 }
 
 export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfxController {
@@ -242,8 +195,8 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     mesh.renderOrder = 4000;
     mesh.visible = false;
 
-    const fallback = createFallbackSpellMaterial(config.glowColor);
-    const fallbackMesh = new THREE.Mesh(geometry, fallback.material);
+    const fallbackMaterial = createFallbackSpellMaterial(config.glowColor);
+    const fallbackMesh = new THREE.Mesh(geometry, fallbackMaterial);
     fallbackMesh.name = `${name}-fallback`;
     fallbackMesh.frustumCulled = false;
     fallbackMesh.renderOrder = 4001;
@@ -260,7 +213,6 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     return {
       mesh,
       fallbackMesh,
-      fallbackUniforms: fallback.uniforms,
       light,
       baseLightIntensity: config.glowIntensity,
       handle,
@@ -289,15 +241,16 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
       spell.light.visible = false;
       spell.mesh.visible = false;
       spell.fallbackMesh.visible = false;
+      spell.fallbackMesh.material.opacity = 0;
       return;
     }
 
     const visibleProgress = Math.max(frame.progress, SPELL_VISIBLE_PROGRESS_FLOOR);
     spell.handle.uTime.value = frame.timeSeconds;
     spell.handle.uProgress.value = visibleProgress;
-    spell.fallbackUniforms.uTime.value = frame.timeSeconds;
-    spell.fallbackUniforms.uProgress.value = visibleProgress;
     spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(visibleProgress);
+    spell.fallbackMesh.material.opacity = FALLBACK_BASE_OPACITY * computeSpellLightEnvelope(visibleProgress);
+    spell.fallbackMesh.scale.setScalar(1 + Math.sin(frame.timeSeconds * 12) * 0.04);
 
     const camera = getCamera();
     const pose = resolveSpellPose(camera, spell.config, spell.poseScratch);
@@ -329,12 +282,12 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     spell.active = true;
     spell.handle.uTime.value = 0;
     spell.handle.uProgress.value = SPELL_VISIBLE_PROGRESS_FLOOR;
-    spell.fallbackUniforms.uTime.value = 0;
-    spell.fallbackUniforms.uProgress.value = SPELL_VISIBLE_PROGRESS_FLOOR;
     spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(SPELL_VISIBLE_PROGRESS_FLOOR);
     spell.light.visible = true;
     spell.mesh.visible = true;
     spell.fallbackMesh.visible = true;
+    spell.fallbackMesh.material.opacity = FALLBACK_BASE_OPACITY;
+    spell.fallbackMesh.scale.setScalar(1);
     tick(spell, startMs + 16);
     selfTickUntilMs = Math.max(selfTickUntilMs, startMs + spell.durationMs + SPELL_SELF_TICK_PAD_MS);
     requestSelfTick();
