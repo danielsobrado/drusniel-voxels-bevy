@@ -142,6 +142,11 @@ function liveBubbleBuildBudget(defaultBudget: number): number {
   return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams(window.location.search));
 }
 
+function exposedTerrainColliders(): TerrainColliderSet | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as { __drusnielTerrainColliders?: TerrainColliderSet }).__drusnielTerrainColliders ?? null;
+}
+
 export function requiredStreamingPageCoords(
   center: THREE.Vector3,
   bubbleRadius: number,
@@ -178,6 +183,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
+  const terrainColliders = deps.terrainColliders ?? exposedTerrainColliders();
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
     (node.footprint.minX + node.footprint.maxX) / 2,
@@ -213,15 +219,15 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }));
     group.add(mesh);
     mats.push(mat);
-    if (cm.indices.length > 0 && deps.terrainColliders) {
-      deps.terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
+    if (cm.indices.length > 0 && terrainColliders) {
+      terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
       colliderIds.push(colliderId);
     }
   };
 
   const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
     deps.scene.remove(entry.group);
-    for (const colliderId of entry.colliderIds) deps.terrainColliders?.removePage(colliderId);
+    for (const colliderId of entry.colliderIds) terrainColliders?.removePage(colliderId);
     for (const child of entry.group.children) (child as THREE.Mesh).geometry.dispose();
     for (const unsub of entry.unsubs) unsub();
     for (const m of entry.mats) {
