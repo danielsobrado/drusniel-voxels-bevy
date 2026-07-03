@@ -8,6 +8,7 @@ import {
   VegetationSlotPrefilterCache,
   type VegetationSlotPrefilterDecision,
 } from "../vegetation/vegetation_slot_prefilter.js";
+import type { VegetationTerrainRejectSource } from "../vegetation/vegetation_terrain_reject_provider.js";
 import type { TerrainHeightSampler, VegetationVisibilityReason } from "../vegetation/vegetation_visibility_provider.js";
 import type { TreeSettings } from "./tree_config.js";
 import { type TreeTerrainSampler } from "./tree_instances.js";
@@ -43,6 +44,7 @@ export interface TreeRingClusterVisibilityMask {
   cacheHits: number;
   cacheMisses: number;
   reasonCounts: Record<VegetationVisibilityReason, number>;
+  sourceCounts: Record<VegetationTerrainRejectSource, number>;
 }
 
 export type TreeRingClusterVisibilityDecision = VegetationSlotPrefilterDecision;
@@ -89,6 +91,7 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     cacheHits: prefilter.cacheHits,
     cacheMisses: prefilter.cacheMisses,
     reasonCounts: prefilter.reasonCounts,
+    sourceCounts: prefilter.sourceCounts,
   };
 }
 
