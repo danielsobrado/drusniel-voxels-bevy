@@ -91,9 +91,9 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
     slowFrameMs: 24,
   },
   stats: {
-    normalHz: 4,
-    debugHz: 10,
-    profileEveryFrame: true,
+    normalHz: 2,
+    debugHz: 6,
+    profileEveryFrame: false,
   },
 };
 
