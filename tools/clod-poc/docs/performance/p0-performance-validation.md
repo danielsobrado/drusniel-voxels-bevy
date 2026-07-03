@@ -84,6 +84,19 @@ Fail the process when any case fails:
 CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --failOnCaseFailure
 ```
 
+## Atlas packing profiles
+
+`far_summary_atlas.format` supports:
+
+```text
+debug_rgba32f
+balanced
+packed
+packed_low_bandwidth
+```
+
+Use `balanced` for normal P0 validation. Use `debug_rgba32f` for oracle/debug precision checks. Use `packed` for the aggressive low-bandwidth profile. `packed_low_bandwidth` remains accepted as a legacy alias.
+
 ## Metrics captured
 
 The report includes p50/p95/p99 for:
@@ -105,20 +118,44 @@ vegetation early rejection
 page geometry cache
 render node cache
 material churn
+far-summary atlas memory estimate
+far-summary atlas dirty/full upload state
+```
+
+Atlas upload mode is numeric:
+
+```text
+0 = none
+1 = dirty
+2 = full
+```
+
+Atlas full-upload fallback reason is numeric:
+
+```text
+0 = none
+1 = initial
+2 = explicit
+3 = disabled
+4 = too_many_rects
+5 = threshold
+6 = invalid_atlas
+7 = partial_ranges_unsupported
+8 = full_invalidation
 ```
 
 A `-` value means the metric is not exposed by the current runtime path. Do not treat it as zero.
 
 ## Remaining P0 work after this runner
 
-The runner only records evidence. It does not complete the runtime P0 items by itself.
+The runner records evidence. It does not prove browser/GPU behavior by itself.
 
-Pending implementation work:
+Pending validation work:
 
 ```text
-1. Make vegetation rejection prefer NAADF/far-summary data before the old sampler.
-2. Add reason-separated grass and understory cluster telemetry.
-3. Implement or explicitly fallback dirty-rect far-summary atlas uploads.
-4. Add balanced/packed far-summary atlas format profiles.
-5. Run and commit a real perf report from a machine with browser/WebGPU access.
+1. Run typecheck and targeted P0 tests locally.
+2. Run the P0 perf suite on a browser/WebGPU machine.
+3. Commit the generated summary.json and summary.md, or archive them as release/perf artifacts.
+4. Confirm dirty upload mode appears after initial atlas population when the dirty area is below threshold.
+5. Compare balanced vs packed memory estimates and visual output in a NAADF scene.
 ```
