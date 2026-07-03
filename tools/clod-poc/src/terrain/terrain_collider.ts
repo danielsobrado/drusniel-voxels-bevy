@@ -41,6 +41,11 @@ export interface CapsuleCollisionResult {
   pagesTested: number;
 }
 
+export interface TerrainHeightFallback {
+  enabled: boolean;
+  surfaceHeight: (x: number, z: number) => number;
+}
+
 interface ColliderEntry {
   id: string;
   footprint: TerrainColliderFootprint;
@@ -88,7 +93,10 @@ function translatePageMesh(mesh: PageMesh, dx: number, dz: number): void {
 export class TerrainColliderSet {
   private readonly entries: ColliderEntry[];
 
-  constructor(pages: readonly TerrainColliderPage[]) {
+  constructor(
+    pages: readonly TerrainColliderPage[],
+    private readonly heightFallback: TerrainHeightFallback | null = null,
+  ) {
     this.entries = pages.map((page) => {
       if (!page.geometry && !page.mesh) throw new Error(`Collider page ${page.id} needs geometry or mesh source`);
       return {
@@ -134,6 +142,22 @@ export class TerrainColliderSet {
     entry.geometry = geometry;
     entry.boundsTree = new MeshBVH(geometry);
     return entry.boundsTree;
+  }
+
+  private applyHeightFallback(
+    position: THREE.Vector3,
+    velocity: THREE.Vector3,
+    config: CapsuleCollisionConfig,
+    grounded: boolean,
+  ): { position: THREE.Vector3; velocity: THREE.Vector3; grounded: boolean } {
+    if (!this.heightFallback?.enabled) return { position, velocity, grounded };
+    const terrainY = this.heightFallback.surfaceHeight(position.x, position.z);
+    if (!Number.isFinite(terrainY) || position.y > terrainY) return { position, velocity, grounded };
+    const resolvedPosition = position.clone();
+    resolvedPosition.y = terrainY;
+    const resolvedVelocity = velocity.clone();
+    if (resolvedVelocity.y < 0) resolvedVelocity.y = 0;
+    return { position: resolvedPosition, velocity: resolvedVelocity, grounded: true };
   }
 
   raycastSpawn(ray: THREE.Ray): TerrainSpawnHit | null {
@@ -254,7 +278,13 @@ export class TerrainColliderSet {
     }
     if (grounded && resolvedVelocity.y < 0) resolvedVelocity.y = 0;
 
-    return { position: resolvedPosition, velocity: resolvedVelocity, grounded, pagesTested };
+    const fallback = this.applyHeightFallback(resolvedPosition, resolvedVelocity, config, grounded);
+    return {
+      position: fallback.position,
+      velocity: fallback.velocity,
+      grounded: fallback.grounded,
+      pagesTested,
+    };
   }
 
   dispose(): void {
