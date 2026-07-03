@@ -16,9 +16,11 @@ trees:
     alpha_test: 0.35
   render:
     far_cheap_material: false
+    placement_debug: true
 `, null);
 
     expect(settings.impostors.swapOnBake).toBe(false);
     expect(settings.render.farCheapMaterial).toBe(false);
+    expect(settings.render.placementDebug).toBe(true);
   });
 });
