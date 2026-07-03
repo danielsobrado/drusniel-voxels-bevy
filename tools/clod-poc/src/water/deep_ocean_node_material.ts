@@ -22,7 +22,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { DEEP_OCEAN_GPU_WAVES } from "./deep_ocean_waves.js";
+import { DEEP_OCEAN_GPU_WAVES, type DeepOceanGpuWave } from "./deep_ocean_waves.js";
 import { applyWaterVisual, makeWaterUniforms, type WaterUniforms } from "./waterMaterial.js";
 import type { DeepOceanMaterialHandle, DeepOceanMaterialParams } from "./deep_ocean_material.js";
 import type { WaterVisualConfig } from "./waterConfig.js";
@@ -30,8 +30,24 @@ import type { WaterVisualConfig } from "./waterConfig.js";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
+const PERF_WAVE_COUNT = 8;
+
 function colorNode(color: readonly [number, number, number]): TslNode {
   return vec3(color[0], color[1], color[2]);
+}
+
+function queryFlag(keys: readonly string[]): boolean {
+  const maybeWindow = globalThis as typeof globalThis & { location?: { search?: string } };
+  const params = new URLSearchParams(maybeWindow.location?.search ?? "");
+  return keys.some((key) => {
+    const raw = params.get(key);
+    return raw === "1" || raw === "true" || raw === "high";
+  });
+}
+
+function selectedWaves(): readonly DeepOceanGpuWave[] {
+  if (queryFlag(["oceanHq", "deepOceanHq", "waterHq"])) return DEEP_OCEAN_GPU_WAVES;
+  return DEEP_OCEAN_GPU_WAVES.slice(0, PERF_WAVE_COUNT);
 }
 
 export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams): DeepOceanMaterialHandle {
@@ -48,7 +64,6 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   const uFoam = uniform(u.uFoamColor.value) as TslNode;
   const uHorizon = uniform((params.horizonColor ?? new THREE.Color(0.62, 0.74, 0.88)).clone()) as TslNode;
   const uAlpha = uniform(u.uAlpha.value) as TslNode;
-  const uFresnelPower = uniform(u.uFresnelPower.value) as TslNode;
   const uFresnelNormalFlatten = uniform(u.uFresnelNormalFlatten.value) as TslNode;
   const uCameraPos = uniform(u.uCameraPos.value) as TslNode;
   const uSunDir = uniform(u.uSunDir.value) as TslNode;
@@ -71,7 +86,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   let jxx: TslNode = float(0);
   let jzz: TslNode = float(0);
   let jxz: TslNode = float(0);
-  for (const wave of DEEP_OCEAN_GPU_WAVES) {
+  for (const wave of selectedWaves()) {
     const dirX = float(wave.dirX);
     const dirZ = float(wave.dirZ);
     const k = float(wave.k);
@@ -183,7 +198,6 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
       uDeep.value.copy(uniforms.uDeepColor.value);
       uFoam.value.copy(uniforms.uFoamColor.value);
       uAlpha.value = uniforms.uAlpha.value;
-      uFresnelPower.value = uniforms.uFresnelPower.value;
       uFresnelNormalFlatten.value = uniforms.uFresnelNormalFlatten.value;
       material.depthWrite = visual.depthWrite;
       material.needsUpdate = true;
