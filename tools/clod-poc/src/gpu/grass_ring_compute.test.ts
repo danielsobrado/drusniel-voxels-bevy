@@ -6,10 +6,12 @@ import { computeGrassDensityScale } from "../grass/grass_math.js";
 import {
   GRASS_GPU_RING_STORAGE_BINDINGS,
   grassGpuRingDensityParams,
+  grassGpuRingOutputBindGroupEntries,
   grassGpuRingOutputIndex,
   grassGpuRingTierRegion,
   grassGpuRingComputeUnsupportedReason,
   packGrassGpuRingParams,
+  type GrassGpuTierOutputBuffers,
 } from "./grass_ring_compute.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import shaderSource from "./shaders/grass_ring.compute.wgsl?raw";
@@ -41,6 +43,30 @@ describe("grass ring compute capabilities", () => {
     const storageBindings = composeGrassRingShader().match(/var<storage/g) ?? [];
 
     expect(storageBindings).toHaveLength(GRASS_GPU_RING_STORAGE_BINDINGS);
+  });
+
+  it("binds shared grass ring instance attributes without writable buffer aliasing", () => {
+    const offset = { label: "offset" } as unknown as GPUBuffer;
+    const packed0 = { label: "packed0" } as unknown as GPUBuffer;
+    const packed1 = { label: "packed1" } as unknown as GPUBuffer;
+    const terrainNormal = { label: "terrainNormal" } as unknown as GPUBuffer;
+    const shared: GrassGpuTierOutputBuffers = { offset, packed0, packed1, terrainNormal };
+
+    const entries = grassGpuRingOutputBindGroupEntries({
+      near: shared,
+      mid: shared,
+      far: shared,
+      super: shared,
+      indirectArgs: { label: "indirectArgs" } as unknown as GPUBuffer,
+    });
+
+    expect(entries.map((entry) => entry.binding)).toEqual([3, 4, 5, 6]);
+    expect(entries.map((entry) => (entry.resource as GPUBufferBinding).buffer)).toEqual([
+      offset,
+      packed0,
+      packed1,
+      terrainNormal,
+    ]);
   });
 
   it("dispatches the grass cull kernel over a compact active slot list", () => {

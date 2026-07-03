@@ -481,9 +481,7 @@ export class GrassGpuRingCompute {
   private outputBindGroupEntries(): GPUBindGroupEntry[] {
     const buffers = this.outputBuffers ?? this.fallbackOutputBuffers;
     if (!buffers) throw new Error("grass ring output buffers missing");
-    return [buffers.near, buffers.mid, buffers.far, buffers.super].flatMap((tier, i) => [
-      { binding: 3 + i, resource: { buffer: tier.offset } },
-    ]);
+    return grassGpuRingOutputBindGroupEntries(buffers);
   }
 
   private buildSlotPrefilter(params: GrassGpuRingDispatchParams) {
@@ -579,6 +577,16 @@ function makeFullSlotIndices(slotCount: number): Uint32Array {
   const result = new Uint32Array(Math.max(0, Math.floor(slotCount)));
   for (let i = 0; i < result.length; i++) result[i] = i;
   return result;
+}
+
+export function grassGpuRingOutputBindGroupEntries(buffers: GrassGpuRingOutputBuffers): GPUBindGroupEntry[] {
+  const shared = buffers.near;
+  return [
+    { binding: 3, resource: { buffer: shared.offset } },
+    { binding: 4, resource: { buffer: shared.packed0 } },
+    { binding: 5, resource: { buffer: shared.packed1 } },
+    { binding: 6, resource: { buffer: shared.terrainNormal } },
+  ];
 }
 
 export * from "./grass_ring_compute_resources.js";
