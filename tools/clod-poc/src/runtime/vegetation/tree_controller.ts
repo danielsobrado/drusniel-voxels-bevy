@@ -2,7 +2,8 @@ import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
-import type { TreeShadowMaxLod } from "../../app/state/tree_quality_presets.js";
+import type { PostProcessQualityPreset } from "../../app/state/postprocess_quality_presets.js";
+import { TreeShadowMaxLod, treeLodBudgetsForQualityPreset } from "../../app/state/tree_quality_presets.js";
 import { TreeSystem, type FallingTree, type TreeSettings, type TreeStats } from "../../trees/index.js";
 import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
@@ -10,6 +11,7 @@ import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../sto
 
 export interface TreeControllerUiState {
   treesEnabled: boolean;
+  treeQualityPreset: PostProcessQualityPreset;
   treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
   treeDistance: number;
   treeMaxInstances: number;
@@ -89,6 +91,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
     const state = deps.getUiState();
     const treeSpacing = clampAtLeast(state.treeSpacing, 0.5);
     const treeDensity = clampAtLeast(state.treeDensity, 0);
+    const lodBudgets = treeLodBudgetsForQualityPreset(state.treeQualityPreset, deps.treeConfig.lod.budgets);
     return {
       ...deps.treeConfig,
       enabled: state.treesEnabled,
@@ -101,6 +104,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       lod: {
         ...deps.treeConfig.lod,
         shadowsMaxLod: state.treeShadowMaxLod,
+        budgets: lodBudgets,
       },
       ecology: {
         ...deps.treeConfig.ecology,
