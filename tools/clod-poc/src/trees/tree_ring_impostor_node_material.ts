@@ -15,9 +15,7 @@ import {
   mix,
   normalize,
   positionGeometry,
-  screenCoordinate,
   sin,
-  smoothstep,
   storage,
   texture,
   uniform,
@@ -321,14 +319,7 @@ function treeRingLodMask(
   _nearDistance: TslNode,
   _midDistance: TslNode,
   farDistance: TslNode,
-  bandDistance: TslNode,
+  _bandDistance: TslNode,
 ): TslNode {
-  const ign: TslNode = fract(
-    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
-  );
-  const noBand = bandDistance.lessThan(0.0001);
-  const fadeIn = (distance: TslNode): TslNode => smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist);
-  const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade));
-  const impostorPass = lodIndex.greaterThanEqual(2.5).and(noBand.or(passIn(fadeIn(farDistance))));
-  return impostorPass;
+  return lodIndex.greaterThanEqual(2.5).and(dist.greaterThanEqual(farDistance));
 }
