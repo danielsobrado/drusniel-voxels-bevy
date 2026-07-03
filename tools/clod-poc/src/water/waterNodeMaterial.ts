@@ -147,10 +147,13 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const fragment = Fn(() => {
     const px: TslNode = worldPos.x;
     const pz: TslNode = worldPos.z;
-    const outsideWorld: TslNode = px.lessThan(float(0))
-      .or(px.greaterThan(uWorldBounds.x))
-      .or(pz.lessThan(float(0)))
-      .or(pz.greaterThan(uWorldBounds.y));
+    const finiteWorldBounds: TslNode = uWorldBounds.x.greaterThan(float(0)).and(uWorldBounds.y.greaterThan(float(0)));
+    const outsideWorld: TslNode = finiteWorldBounds.and(
+      px.lessThan(float(0))
+        .or(px.greaterThan(uWorldBounds.x))
+        .or(pz.lessThan(float(0)))
+        .or(pz.greaterThan(uWorldBounds.y)),
+    );
     const insideInner: TslNode = px.greaterThan(uInnerRect.x)
       .and(px.lessThan(uInnerRect.z))
       .and(pz.greaterThan(uInnerRect.y))
