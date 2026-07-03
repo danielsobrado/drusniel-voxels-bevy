@@ -14,6 +14,20 @@ import {
 
 type RawObject = Record<string, unknown>;
 
+const DEFAULT_GRASS_RUNTIME_BUDGET = {
+  maxInstances: 32000,
+  distanceM: 90,
+  maxNewPatchesPerFrame: 1,
+  refreshDistanceM: 8,
+  ringGrid: 512,
+  ringCell: 0.8,
+  ringDistance: 160,
+  ringMaxRadius: 160,
+  ringNearMeters: 28,
+  ringMidMeters: 80,
+  ringFarMeters: 125,
+} as const;
+
 function objectFrom(value: unknown): RawObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as RawObject : {};
 }
@@ -158,16 +172,44 @@ function buildSettings(raw: RawObject, fallback: GrassSettings, shaderMode: Gras
   };
 }
 
+function applyDefaultRuntimeBudget(settings: GrassSettings): GrassSettings {
+  const budget = DEFAULT_GRASS_RUNTIME_BUDGET;
+  return {
+    ...settings,
+    distanceM: Math.min(settings.distanceM, budget.distanceM),
+    distance: Math.min(settings.distance, budget.distanceM),
+    refreshDistanceM: Math.max(settings.refreshDistanceM, budget.refreshDistanceM),
+    maxNewPatchesPerFrame: Math.min(settings.maxNewPatchesPerFrame, budget.maxNewPatchesPerFrame),
+    maxInstances: Math.min(settings.maxInstances, budget.maxInstances),
+    maxBlades: Math.min(settings.maxBlades, budget.maxInstances),
+    ring: {
+      ...settings.ring,
+      grid: Math.min(settings.ring.grid, budget.ringGrid),
+      cell: Math.max(settings.ring.cell, budget.ringCell),
+      maxRadius: Math.min(settings.ring.maxRadius, budget.ringMaxRadius),
+      ringDistance: Math.min(settings.ring.ringDistance, budget.ringDistance),
+      nearMeters: Math.min(settings.ring.nearMeters, budget.ringNearMeters),
+      midMeters: Math.min(settings.ring.midMeters, budget.ringMidMeters),
+      farMeters: Math.min(settings.ring.farMeters, budget.ringFarMeters),
+    },
+    patchFallback: {
+      ...settings.patchFallback,
+      refreshDistance: Math.max(settings.patchFallback.refreshDistance, budget.refreshDistanceM),
+      maxNewPatchesPerRefresh: Math.min(settings.patchFallback.maxNewPatchesPerRefresh, budget.maxNewPatchesPerFrame),
+    },
+  };
+}
+
 export function parseGrassConfig(
   text: string | null | undefined,
   warn: ((message: string) => void) | null = console.warn,
 ): GrassSettings {
   const fallback = cloneGrassSettings();
-  if (!text || text.trim() === "") return fallback;
+  if (!text || text.trim() === "") return applyDefaultRuntimeBudget(fallback);
 
   const raw = readYamlGrass(text, warn);
-  if (!raw) return fallback;
+  if (!raw) return applyDefaultRuntimeBudget(fallback);
 
   const shaderMode = readShaderMode(raw, fallback, warn);
-  return resolveGrassSettings(buildSettings(raw, fallback, shaderMode));
+  return resolveGrassSettings(applyDefaultRuntimeBudget(buildSettings(raw, fallback, shaderMode)));
 }
