@@ -352,7 +352,6 @@ export class StoneSystem {
     for (const draw of this.draws) {
       this.root.remove(draw.mesh);
       draw.mesh.geometry.dispose();
-      draw.mesh.material.dispose();
     }
     this.draws = [];
     this.materialHandle?.material.dispose();
