@@ -7,6 +7,7 @@ import type { ForestLightingSettings } from "../../forest_lighting/forest_lighti
 import type { ForestLightingDebugMode } from "../../forest_lighting/index.js";
 import type { TreeTotalDisplay } from "../../trees/tree_info.js";
 import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
+import type { PostProcessQualityPreset } from "./postprocess_quality_presets.js";
 import { assignArchiveFields } from "./archive_fields.js";
 import type { TreeShadowMaxLod } from "./tree_quality_presets.js";
 
@@ -48,6 +49,7 @@ export interface VegetationSliceState {
   stoneClassSummary: string;
   stoneVisible: number;
   treesEnabled: boolean;
+  treeQualityPreset: PostProcessQualityPreset;
   treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
   treeDistance: number;
   treeMaxInstances: number;
@@ -154,6 +156,7 @@ export function createVegetationSliceState(input: {
     stoneClassSummary: "0/0/0",
     stoneVisible: 0,
     treesEnabled: treeConfig.enabled,
+    treeQualityPreset: "custom",
     treeDepthPrepassMaxLod: input.treeDepthPrepassMaxLod,
     treeDistance: treeConfig.distanceM,
     treeMaxInstances: treeConfig.maxInstances,
