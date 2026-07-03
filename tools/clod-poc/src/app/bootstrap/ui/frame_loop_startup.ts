@@ -8,6 +8,7 @@ import { GpuPassTiming } from "../../../core/gpu_pass_timing.js";
 import { TreeTimingPass } from "../../frame_loop/tree_timing_pass.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
 import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
+import { createDynamicResolutionController } from "../../../rendering/dynamic_resolution.js";
 import {
   RENDER_RESOLUTION_CHANGED_EVENT,
   type RenderResolutionChangedEventDetail,
@@ -199,6 +200,11 @@ export function runFrameLoopStartup(
         initialRenderResolution?.physicalHeight ?? window.innerHeight,
       )
     : null;
+  const dynamicResolutionController = createDynamicResolutionController(
+    clodRuntime.renderResolution.dynamic,
+    window.__drusnielRenderResolution ?? null,
+    searchParams,
+  );
 
   const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => {
     postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight);
@@ -238,6 +244,7 @@ export function runFrameLoopStartup(
       grassProfileEnabled,
       grassPrepassEnabled,
       makeGrassSettings,
+      dynamicResolution: dynamicResolutionController,
       gpuPassTiming,
       runGpuTreeTiming: treeTimingPass
         ? () => treeTimingPass.render(treeSystem, camera)
