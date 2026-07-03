@@ -1,4 +1,6 @@
+import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
 import type { ClodPagesConfig } from "../../config.js";
+import { parsePhase0Config } from "../../phase0/phase0_config.js";
 import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
 import { FAR_SHELL_DEFAULTS } from "../clod_constants.js";
 import { assignArchiveFields } from "./archive_fields.js";
@@ -47,11 +49,77 @@ export interface ClodSliceState {
   clodShadowStatsLine: string;
 }
 
+export interface LiveBubbleDefault {
+  enabled: boolean;
+  radiusM: number;
+}
+
 const CLOD_ARCHIVE_KEYS = [
   "thresholdPx", "enforce21", "freeze", "wireframe", "showBounds", "showSeamPoints",
   "showCrossLodBorders", "colorByLod", "normalColor", "normalDivergence", "divergenceGain",
   "frontSideOnly", "recomputedNormals", "forceMaxLevel", "bubble", "bubbleRadius", "tintBubble",
 ] as const satisfies readonly (keyof ProjectSessionState)[];
+
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const phase0Streaming = parsePhase0Config(phase0ConfigText).phase0.streaming;
+
+function currentSearchParams(): URLSearchParams {
+  if (typeof window === "undefined") return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
+
+function booleanParam(params: URLSearchParams, key: string): boolean | null {
+  const raw = params.get(key);
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  return null;
+}
+
+function positiveParam(params: URLSearchParams, key: string): number | null {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function finiteNonNegative(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
+function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undefined {
+  const params = currentSearchParams();
+  const sceneDefault = params.get("scene") === INFINITE_ISLANDS_SCENE;
+  const enabledOverride = booleanParam(params, "liveBubble");
+  const radiusOverride = positiveParam(params, "liveBubbleRadius");
+  if (!sceneDefault && enabledOverride === null && radiusOverride === null) return undefined;
+
+  const defaultRadius = sceneDefault
+    ? phase0Streaming.live_radius_m
+    : cfg.near_field.radius_chunks * cfg.page.chunk_size;
+  const maxRadius = Math.max(1, phase0Streaming.clod_radius_m / 2);
+  return {
+    enabled: enabledOverride ?? sceneDefault,
+    radiusM: Math.min(radiusOverride ?? defaultRadius, maxRadius),
+  };
+}
+
+export function applyLiveBubbleDefault(
+  target: ClodSliceState,
+  liveBubbleDefault?: LiveBubbleDefault,
+): void {
+  if (!liveBubbleDefault) return;
+  target.bubble = liveBubbleDefault.enabled;
+  if (finiteNonNegative(liveBubbleDefault.radiusM)) target.bubbleRadius = liveBubbleDefault.radiusM;
+}
+
+function preserveEnabledBubble(target: ClodSliceState, liveBubbleDefault?: LiveBubbleDefault): void {
+  if (!liveBubbleDefault?.enabled) return;
+  let value = true;
+  Object.defineProperty(target, "bubble", {
+    enumerable: true,
+    configurable: true,
+    get: () => value,
+    set: () => { value = true; },
+  });
+}
 
 export function createClodSliceState(input: {
   cfg: ClodPagesConfig;
@@ -61,8 +129,9 @@ export function createClodSliceState(input: {
   queryFarShell: boolean;
   isLongView: boolean;
   profileEnabled: boolean;
+  liveBubbleDefault?: LiveBubbleDefault;
 }): ClodSliceState {
-  return {
+  const state: ClodSliceState = {
     clodPerfMode: input.queryPerfMode,
     webgpuSelection: input.queryWebGpuSelection,
     materialTiers: input.queryMaterialTiers,
@@ -105,6 +174,10 @@ export function createClodSliceState(input: {
     clodShadowProxyWireframe: true,
     clodShadowStatsLine: "",
   };
+  const liveBubbleDefault = input.liveBubbleDefault ?? queryLiveBubbleDefault(input.cfg);
+  applyLiveBubbleDefault(state, liveBubbleDefault);
+  preserveEnabledBubble(state, liveBubbleDefault);
+  return state;
 }
 
 export function applyClodArchiveState(target: ClodSliceState, archive: ProjectSessionState): void {
