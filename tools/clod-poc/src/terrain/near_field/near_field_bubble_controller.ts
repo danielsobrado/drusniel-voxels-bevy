@@ -98,6 +98,26 @@ function pageIntersectsFiniteWorld(px: number, pz: number, pageSize: number, wor
   return maxX > 0 && minX < world.cellsX && maxZ > 0 && minZ < world.cellsZ;
 }
 
+function positiveIntegerParam(params: URLSearchParams, key: string): number | null {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+}
+
+export function resolveLiveBubbleBuildBudget(defaultBudget: number, params: URLSearchParams): number {
+  const fallback = Number.isFinite(defaultBudget) && defaultBudget > 0 ? Math.floor(defaultBudget) : 1;
+  return Math.max(
+    1,
+    positiveIntegerParam(params, "liveBubbleBudget")
+      ?? positiveIntegerParam(params, "live_bubble_budget")
+      ?? fallback,
+  );
+}
+
+function liveBubbleBuildBudget(defaultBudget: number): number {
+  if (typeof window === "undefined") return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams());
+  return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams(window.location.search));
+}
+
 export function requiredStreamingPageCoords(
   center: THREE.Vector3,
   bubbleRadius: number,
@@ -132,6 +152,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const S = deps.cfg.page.chunk_size;
   const pageSize = P * S;
   const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
+  const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
@@ -349,7 +370,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           if (owned) {
             let grp = chunkGroups.get(v.node.id);
             if (!grp) {
-              if (chunkGroupsBuiltThisFrame >= deps.chunkGroupBuildBudget) {
+              if (chunkGroupsBuiltThisFrame >= chunkGroupBuildBudget) {
                 v.mesh.visible = true;
                 continue;
               }
@@ -373,7 +394,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
             const key = pageGroupKey(coord.px, coord.pz);
             let grp = chunkGroups.get(key);
             if (!grp) {
-              if (chunkGroupsBuiltThisFrame >= deps.chunkGroupBuildBudget) continue;
+              if (chunkGroupsBuiltThisFrame >= chunkGroupBuildBudget) continue;
               grp = ensureChunkGroupForPage(key, coord.px, coord.pz, coord.centerX, coord.centerZ);
               chunkGroupsBuiltThisFrame++;
             }
