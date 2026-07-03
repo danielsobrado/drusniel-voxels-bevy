@@ -151,13 +151,13 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   if (!understory) return;
   const before = understory.gpuCandidateCountBeforePrefilter ?? understory.gpuCandidateCount ?? 0;
   const after = understory.gpuCandidateCountAfterPrefilter ?? understory.gpuCandidateCount ?? 0;
-  const total = estimateClusterCount(before, after);
-  const rejected = Math.max(0, total - estimateClusterCount(after, after));
-  const accepted = Math.max(0, total - rejected);
+  const total = understory.gpuPrefilterTestedClusters ?? estimateClusterCount(before, after);
+  const rejected = understory.gpuPrefilterRejectedClusters ?? Math.max(0, total - (understory.gpuPrefilterAcceptedClusters ?? total));
+  const accepted = understory.gpuPrefilterAcceptedClusters ?? Math.max(0, total - rejected);
+  const missing = understory.gpuPrefilterUnknownKeptClusters ?? 0;
   const reasonCounts = understory.earlyTerrainReasonCounts ?? {};
   const noCoverage = reasonCounts.wrong_biome ?? 0;
   const terrainHidden = reasonCounts.terrain_hidden ?? rejected;
-  const missing = reasonCounts.unknown_kept ?? 0;
 
   counters.understoryGpuClustersTotal += total;
   counters.understoryGpuClustersRejectedEarly += rejected;
