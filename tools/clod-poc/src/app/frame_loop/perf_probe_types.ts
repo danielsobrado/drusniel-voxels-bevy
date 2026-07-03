@@ -88,6 +88,9 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   customPropGpuVisibleCount: number;
   customPropGpuOverflowed: number;
   customPropGpuDispatchMs: number | null;
+  dynamicResolutionActive: number;
+  dynamicResolutionRenderScale: number;
+  dynamicResolutionAdjustments: number;
   gpuPasses?: Record<string, number>;
   statsSyncRan: number;
   statsSyncRuns: number;
@@ -187,6 +190,9 @@ export interface FramePerfSummary {
     customPropGpuVisibleCountAvg: number;
     customPropGpuOverflowedFrames: number;
     customPropGpuDispatchMsAvg: number;
+    dynamicResolutionActiveFrames: number;
+    dynamicResolutionRenderScaleAvg: number;
+    dynamicResolutionAdjustmentsMax: number;
     statsSyncRuns: number;
     statsSyncSkips: number;
     statsSyncRanFrames: number;
