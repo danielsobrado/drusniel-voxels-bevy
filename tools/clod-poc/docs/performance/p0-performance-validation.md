@@ -51,55 +51,67 @@ The selected renderer is written into both `summary.json` and `summary.md`.
 Start the app in one terminal:
 
 ```bash
-npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
+npm --prefix tools/clod-poc run dev
 ```
 
 Run the default P0 suite:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0
+npm --prefix tools/clod-poc run perf:p0
+```
+
+Run a WebGPU-only P0 suite and write to a stable output folder:
+
+```bash
+npm --prefix tools/clod-poc run perf:p0 -- --renderer webgpu --out perf-p0-webgpu --failOnGateFailure
 ```
 
 Short smoke run:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --warmup 10 --frames 30 --timeout 60000
+npm --prefix tools/clod-poc run perf:p0 -- --warmup 10 --frames 30 --timeout 60000
 ```
 
 Run one case:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --case terrain-material-cache-enabled
+npm --prefix tools/clod-poc run perf:p0 -- --case terrain-material-cache-enabled
 ```
 
 Force WebGL:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --renderer webgl
+npm --prefix tools/clod-poc run perf:p0 -- --renderer webgl
 ```
 
 Fail the process when any case fails:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --failOnCaseFailure
+npm --prefix tools/clod-poc run perf:p0 -- --failOnCaseFailure
 ```
 
 Fail the process when P0 evidence gates fail:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --failOnGateFailure
+npm --prefix tools/clod-poc run perf:p0 -- --failOnGateFailure
+```
+
+Use a custom dev-server URL only when Vite is intentionally running somewhere other than the package default:
+
+```bash
+npm --prefix tools/clod-poc run perf:p0 -- --baseUrl http://127.0.0.1:5180/
 ```
 
 Disable the built-in dirty-atlas exercise:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --params p0DirtyAtlasExercise=0
+npm --prefix tools/clod-poc run perf:p0 -- --params p0DirtyAtlasExercise=0
 ```
 
 Tune the dirty-atlas exercise movement and settle window:
 
 ```bash
-CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --params dirtyAtlasMoveM=1024,dirtyAtlasSettleFrames=24
+npm --prefix tools/clod-poc run perf:p0 -- --params dirtyAtlasMoveM=1024,dirtyAtlasSettleFrames=24
 ```
 
 ## Atlas packing profiles
@@ -261,18 +273,4 @@ Atlas full-upload fallback reason is numeric:
 8 = full_invalidation
 ```
 
-A `-` value means the metric is not exposed by the current runtime path. Do not treat it as zero.
-
-## Remaining P0 work after this runner
-
-The runner records evidence. It does not prove browser/GPU behavior by itself.
-
-Pending validation work:
-
-```text
-1. Run typecheck and targeted P0 tests locally.
-2. Run the P0 perf suite on a browser/WebGPU machine.
-3. Commit the generated summary.json and summary.md, or archive them as release/perf artifacts.
-4. Confirm dirty upload mode appears after the exercise and the gate passes.
-5. Compare balanced vs packed memory estimates and visual output in a NAADF scene.
-```
+A generated report with exit code `1` is expected when `--failOnCaseFailure` or `--failOnGateFailure` is enabled and at least one case/gate fails. The fix target is the failed row in the report, not the existence of the report files.
