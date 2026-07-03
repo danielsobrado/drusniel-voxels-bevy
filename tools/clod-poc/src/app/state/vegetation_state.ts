@@ -56,6 +56,7 @@ export interface VegetationSliceState {
   treeShadowMaxLod: TreeShadowMaxLod;
   treeDebugColorByLod: boolean;
   treeFarCheapMaterial: boolean;
+  treePlacementDebug: boolean;
   treeImpostorSwapOnBake: boolean;
   treeWindEnabled: boolean;
   treeWindStrength: number;
@@ -161,6 +162,7 @@ export function createVegetationSliceState(input: {
     treeShadowMaxLod: treeConfig.lod.shadowsMaxLod,
     treeDebugColorByLod: treeConfig.render.debugColorByLod,
     treeFarCheapMaterial: treeConfig.render.farCheapMaterial,
+    treePlacementDebug: treeConfig.render.placementDebug,
     treeImpostorSwapOnBake: treeConfig.impostors.swapOnBake,
     treeWindEnabled: treeConfig.wind.enabled,
     treeWindStrength: treeConfig.wind.strength,
