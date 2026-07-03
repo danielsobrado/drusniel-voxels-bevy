@@ -6,6 +6,7 @@ import {
   StorageBufferAttribute,
   StorageInstancedBufferAttribute,
 } from "three/webgpu";
+import { isRenderableIndirectDrawGeometry, renderableIndirectDrawCountForGeometry } from "../gpu/indirect_draw_geometry.js";
 import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import type { ClodPageNode } from "../types.js";
 import {
@@ -183,11 +184,13 @@ export class StoneSystem {
     this.indexCounts = [0, 0, 0];
     for (const classId of STONE_CLASSES) {
       const draw = this.createDraw(classId, maxInstances, indirect);
+      if (!draw) continue;
       this.indexCounts[draw.classIndex] = this.indexCountFor(draw.mesh.geometry);
       this.draws.push(draw);
       this.root.add(draw.mesh);
     }
     this.applyClassVisibility();
+    if (this.draws.length === 0) return;
 
     const buffers: StoneGpuScatterBuffers = {
       instanceA: this.gpuBufferForAttribute(instanceA),
@@ -264,11 +267,12 @@ export class StoneSystem {
     classId: StoneClass,
     maxInstances: number,
     indirect: StorageBufferAttribute,
-  ): StoneDraw {
+  ): StoneDraw | null {
     if (!this.materialHandle) throw new Error("Stone material must exist before creating draws");
     const classIndex = CLASS_INDEX[classId];
     const seed = hashCombine(this.settings.seedSalt >>> 0, hashString(`stone-gpu:${classId}`));
     const built = buildRock(DRAW_PRESET[classId], new Rng(seed), DRAW_DETAIL[classId]);
+    if (!isRenderableIndirectDrawGeometry(built.geometry)) return null;
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.setAttribute("position", built.geometry.getAttribute("position"));
     geometry.setAttribute("normal", built.geometry.getAttribute("normal"));
@@ -310,7 +314,7 @@ export class StoneSystem {
   }
 
   private indexCountFor(geometry: THREE.BufferGeometry): number {
-    return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
+    return renderableIndirectDrawCountForGeometry(geometry);
   }
 
   private applyClassVisibility(): void {
