@@ -1,0 +1,30 @@
+{
+  "renderer": "webgpu",
+  "url": "http://127.0.0.1:5180/?world=8&seed=1&webgpuSelection=1&farShell=1&freeze=1&perfProbe=1&perfWarmup=10&perfFrames=30&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-far&terrainMaterialCache=0",
+  "status": "failed",
+  "warnings": [
+    "The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "Calling [RenderPassEncoder (unlabeled)].Draw with a vertex count of 0 is unusual."
+  ],
+  "errors": [],
+  "launchRecipe": {
+    "headless": true,
+    "channel": "chromium",
+    "args": [
+      "--enable-unsafe-webgpu"
+    ]
+  },
+  "lastProgress": {
+    "fatal": null,
+    "ready": false,
+    "observedFrames": 35,
+    "sampleCount": 25,
+    "targetSampleFrames": 30,
+    "progressMsg": "ready",
+    "clodReady": true,
+    "lastFrameId": 63
+  },
+  "snapshot": null,
+  "finalCounters": {},
+  "error": "Perf probe timed out after 60000ms: 26/30 samples, 36 observed frames"
+}

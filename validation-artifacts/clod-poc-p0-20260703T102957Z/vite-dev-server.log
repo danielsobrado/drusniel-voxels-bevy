@@ -1,0 +1,10 @@
+
+> drusniel-voxels-web@0.1.0 dev
+> vite --port 5173 --strictPort --host 127.0.0.1 --port 5173 --strictPort
+
+
+  VITE v5.4.21  ready in 508 ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+2:57:24 PM [vite] page reload src/trees/tree_node_material.ts
+2:58:55 PM [vite] page reload src/trees/tree_node_material.ts

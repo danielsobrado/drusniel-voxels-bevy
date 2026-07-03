@@ -1,0 +1,30 @@
+﻿diff --git a/docs/reference/Project-Ascendant b/docs/reference/Project-Ascendant
+--- a/docs/reference/Project-Ascendant
++++ b/docs/reference/Project-Ascendant
+@@ -1 +1 @@
+-Subproject commit cc05b5bddb8c8c2f098683e52389ce7cb71d17aa
++Subproject commit cc05b5bddb8c8c2f098683e52389ce7cb71d17aa-dirty
+diff --git a/docs/reference/fable5-world-demo b/docs/reference/fable5-world-demo
+index b0631889..fd75fdb7 160000
+--- a/docs/reference/fable5-world-demo
++++ b/docs/reference/fable5-world-demo
+@@ -1 +1 @@
+-Subproject commit b0631889c77b5d92c9e686c52def3d7a3aff6fc9
++Subproject commit fd75fdb718996908aad3d22b59dfa297dc94298d-dirty
+diff --git a/docs/reference/glacial-valley b/docs/reference/glacial-valley
+index e59ab8a9..761a7763 160000
+--- a/docs/reference/glacial-valley
++++ b/docs/reference/glacial-valley
+@@ -1 +1 @@
+-Subproject commit e59ab8a95781fa64aa7f4cd4c4c31c0680f73ed6
++Subproject commit 761a7763e96fe78d54489fa70afee7a61fdf0361
+diff --git a/tools/clod-poc/config/water.yaml b/tools/clod-poc/config/water.yaml
+index 22f9d9f0..3c1c5359 100644
+--- a/tools/clod-poc/config/water.yaml
++++ b/tools/clod-poc/config/water.yaml
+@@ -1,4 +1,4 @@
+-# Fable5-style terrain-derived hydrology for the CLOD-POC viewer.
++# terrain-derived hydrology for the CLOD-POC viewer.
+ # Water is a visual layer only: no SSR, no caustics, no physics.
+ # Water is a separate render layer and is NEVER fed into the CLOD page source
+ # mesh, meshoptimizer, page borders, LOD selection, colliders, or validation.

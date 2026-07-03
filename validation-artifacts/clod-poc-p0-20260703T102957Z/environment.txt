@@ -1,0 +1,7 @@
+timestamp_utc=2026-07-03T10:30:07Z
+pwd=F:\Development\workspace\GitHub\drusniel-voxels-bevy
+git_head=08925321ea718ff7a7743b816c81dc08b543cbe4
+git_branch=main
+node=v22.21.1
+npm=11.1.0
+platform=Windows_NT Drusniel 10.0 22631 x86_64 MS/Windows (Windows 11)

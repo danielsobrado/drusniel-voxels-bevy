@@ -1,0 +1,30 @@
+{
+  "renderer": "webgl",
+  "url": "http://127.0.0.1:5180/?world=8&seed=1&webgpuSelection=0&farShell=1&freeze=1&perfProbe=1&perfWarmup=10&perfFrames=30&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-forest&gpuEarlyReject=1&treeGpu=1&grass=1&understory=1",
+  "status": "failed",
+  "warnings": [
+    "The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "Calling [RenderPassEncoder (unlabeled)].Draw with a vertex count of 0 is unusual."
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "launchRecipe": {
+    "headless": true,
+    "channel": "chromium",
+    "args": []
+  },
+  "lastProgress": {
+    "fatal": null,
+    "ready": false,
+    "observedFrames": 26,
+    "sampleCount": 16,
+    "targetSampleFrames": 30,
+    "progressMsg": "ready",
+    "clodReady": true,
+    "lastFrameId": 54
+  },
+  "snapshot": null,
+  "finalCounters": {},
+  "error": "Perf probe timed out after 60000ms: 17/30 samples, 27 observed frames"
+}

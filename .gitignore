@@ -2,6 +2,10 @@
 /temp
 /perf-dumps
 /bench-runs/
+/perf-runs/
+/perf-p0-webgpu/
+/perf-p0-*/
+/validation-artifacts/
 /references/
 .history/src/voxel/*
 log.txt
@@ -89,6 +93,8 @@ tools/clod-poc/shots/
 tools/clod-poc/shots/phase-1/*.png
 tools/clod-poc/shots/phase-1/*
 tools/clod-poc/perf-runs/
+tools/clod-poc/perf-p0-webgpu/
+tools/clod-poc/perf-p0-*/
 tools/clod-poc/acceptance-runs/*
 tools/clod-poc/public/tmp/*
 tools/clod-poc/textures/pbr/*.zip

@@ -1,0 +1,16 @@
+{
+  "renderer": "webgl",
+  "url": "http://127.0.0.1:5180/?world=8&seed=1&webgpuSelection=0&farShell=1&freeze=1&perfProbe=1&perfWarmup=10&perfFrames=30&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-forest&gpuEarlyReject=1&gpuEarlyRejectDebugOracle=1&treeGpu=1&grass=1&understory=1",
+  "status": "failed",
+  "warnings": [],
+  "errors": [],
+  "launchRecipe": {
+    "headless": true,
+    "channel": "chromium",
+    "args": []
+  },
+  "lastProgress": null,
+  "snapshot": null,
+  "finalCounters": {},
+  "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5180/?world=8&seed=1&webgpuSelection=0&farShell=1&freeze=1&perfProbe=1&perfWarmup=10&perfFrames=30&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-forest&gpuEarlyReject=1&gpuEarlyRejectDebugOracle=1&treeGpu=1&grass=1&understory=1\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:5180/?world=8&seed=1&webgpuSelection=0&farShell=1&freeze=1&perfProbe=1&perfWarmup=10&perfFrames=30&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-forest&gpuEarlyReject=1&gpuEarlyRejectDebugOracle=1&treeGpu=1&grass=1&understory=1\", waiting until \"domcontentloaded\"\u001b[22m\n"
+}
