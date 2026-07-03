@@ -92,7 +92,7 @@ export function createFarTerrainMaterial(
           .mul(step(float(0.0), atlasVCells))
           .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
         const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
-        const atlasWeight: TslNode = coverageSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+        const atlasWeight: TslNode = inside.mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
         const atlasUCellL = clamp(atlasUCell.sub(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
         const atlasUCellR = clamp(atlasUCell.add(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
         const atlasVCellD = clamp(atlasVCell.sub(float(1.0)), float(0.0), ringRefs.uHeightCells.sub(float(1.0)));
@@ -195,35 +195,4 @@ export function updateFarTerrainMaterialCenter(material: MeshBasicNodeMaterial, 
   updateFarTerrainMaterialSunVisibility(material);
 }
 
-export function updateFarTerrainMaterialSunVisibility(material: MeshBasicNodeMaterial): void {
-  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
-  if (!refs) return;
-  const atlas = getSunLightGpuAtlas();
-  refs.uSunVisibilityOriginX.value = atlas.originX;
-  refs.uSunVisibilityOriginZ.value = atlas.originZ;
-  refs.uSunVisibilityWorldSize.value = atlas.worldSize;
-  refs.uSunVisibilityValid.value = atlas.valid;
-}
-
 export function updateFarTerrainMaterialSummaryAtlas(material: MeshBasicNodeMaterial, view: FarSummaryGpuAtlasView): void {
-  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
-  if (!refs) return;
-  if (refs.uSummaryWidthCells) refs.uSummaryWidthCells.value = view.widthCells;
-  if (refs.uSummaryHeightCells) refs.uSummaryHeightCells.value = view.heightCells;
-  if (refs.uSummaryValid) refs.uSummaryValid.value = view.valid;
-  if (!refs.uSummaryRings) return;
-  for (let i = 0; i < refs.uSummaryRings.length; i++) {
-    const ring = view.rings[i];
-    const ringRefs = refs.uSummaryRings[i];
-    if (!ring || !ringRefs) continue;
-    ringRefs.uOriginX.value = ring.originX;
-    ringRefs.uOriginZ.value = ring.originZ;
-    ringRefs.uCellM.value = ring.cellM;
-    ringRefs.uStartM.value = ring.startM;
-    ringRefs.uEndM.value = ring.endM;
-    ringRefs.uRowOffsetCells.value = ring.rowOffsetCells;
-    ringRefs.uWidthCells.value = ring.widthCells;
-    ringRefs.uHeightCells.value = ring.heightCells;
-    ringRefs.uValid.value = ring.valid;
-  }
-}
