@@ -154,8 +154,8 @@ function movedPositionAcrossTileBoundary(
 }
 
 function movedPositionFallback(x: number, moveMeters: number, worldCells: number): number {
-  if (!Number.isFinite(worldCells) || worldCells <= 0) return x + moveMeters;
   const bounds = worldBounds(worldCells);
+  if (!bounds) return x + moveMeters;
   const forward = Math.min(bounds.maxX, x + moveMeters);
   if (Math.abs(forward - x) >= MIN_MOVE_METERS) return forward;
   return Math.max(bounds.minX, x - moveMeters);
