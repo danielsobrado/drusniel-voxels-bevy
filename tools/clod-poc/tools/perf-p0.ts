@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser } from "playwright";
 import { launchChromium, launchWebGPU } from "./launch.js";
+import { evaluateP0PerfGates, type P0PerfGateSummary } from "./perf-p0-gates.js";
 import type { FramePerfMetric, FramePerfSnapshot } from "../src/app/frame_loop/perf_probe.js";
 
 type Args = Record<string, string | boolean>;
@@ -404,7 +405,7 @@ async function runCase(
   };
 }
 
-function markdown(results: readonly PerfCaseResult[]): string {
+function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary): string {
   const lines = [
     "# CLOD-POC P0 Performance Validation",
     "",
@@ -423,6 +424,13 @@ function markdown(results: readonly PerfCaseResult[]): string {
         `${fmt(result.metrics["vegetationTotalMs.p95"])} | ${fmt(result.metrics["renderMs.p95"])} | ` +
         `${result.warnings.length} | ${result.errors.length} | ${result.error ?? "-"} |`,
     );
+  }
+
+  lines.push("", "## P0 gates", "");
+  lines.push(`Overall gate status: **${gates.status}** (${gates.failedCount} failed)`);
+  lines.push("", "| gate | status | detail |", "| --- | --- | --- |");
+  for (const gate of gates.results) {
+    lines.push(`| ${gate.name} | ${gate.status} | ${gate.detail} |`);
   }
 
   lines.push("", "## Required P0 counters", "");
@@ -472,6 +480,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
     "",
     "- `-` means the metric was not exposed by the current runtime path. Do not treat missing metrics as zero.",
     "- A WebGPU failure may be retried with WebGL only to keep the report complete; the selected renderer column shows which attempt produced the reported numbers.",
+    "- P0 gates are evidence gates, not FPS gates. Use `--failOnGateFailure` to make the runner exit non-zero when evidence is missing.",
     "- Vegetation source counts show which classifier source produced cluster prefilter decisions for trees, grass, and understory: far-summary, terrain sampler, or conservative fallback.",
     "- Atlas upload mode is numeric: 0=none, 1=dirty, 2=full. Fallback reason is numeric: 0=none, 1=initial, 2=explicit, 3=disabled, 4=too_many_rects, 5=threshold, 6=invalid_atlas, 7=partial_ranges_unsupported, 8=full_invalidation.",
     "- This runner records evidence. It does not prove visual parity by itself.",
@@ -512,6 +521,7 @@ async function main(): Promise<void> {
   for (const perfCase of cases) {
     results.push(await runCase(perfCase, renderer, baseParams, baseUrl, timeoutMs, outDir));
   }
+  const gates = evaluateP0PerfGates(results);
 
   const summary = {
     schemaVersion: 1,
@@ -520,14 +530,18 @@ async function main(): Promise<void> {
     baseUrl,
     renderer,
     baseParams,
+    gates,
     cases: results,
   };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
-  writeFileSync(join(outDir, "summary.md"), markdown(results));
+  writeFileSync(join(outDir, "summary.md"), markdown(results, gates));
   console.log(`[perf-p0] wrote ${join(outDir, "summary.json")}`);
   console.log(`[perf-p0] wrote ${join(outDir, "summary.md")}`);
 
   if (flag(args.failOnCaseFailure) && results.some((result) => result.status === "failed")) {
+    process.exitCode = 1;
+  }
+  if (flag(args.failOnGateFailure) && gates.status === "failed") {
     process.exitCode = 1;
   }
 }
