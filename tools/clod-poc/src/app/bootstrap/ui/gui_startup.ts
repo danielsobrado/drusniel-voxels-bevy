@@ -4,6 +4,8 @@ import { createSceneGui } from "../../../ui/gui/scene_gui.js";
 import { createSunLightGui } from "../../../ui/gui/sun_light_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
+import { applyTreeQualityPreset } from "../../state/tree_quality_presets.js";
+import type { PostProcessQualityPreset } from "../../state/postprocess_quality_presets.js";
 import type GUI from "lil-gui";
 import type { NodeView } from "../bootstrap_types.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
@@ -77,6 +79,12 @@ export function runGuiStartup(
 
   const farSummaryIntegration = (window as unknown as Record<string, unknown>).__drusnielFarSummary;
 
+  const applyGlobalTreeQualityPreset = (preset: Exclude<PostProcessQualityPreset, "custom">): void => {
+    applyTreeQualityPreset(state, preset);
+    treeController.rebuild();
+    updateInfo();
+  };
+
   const clodShadowOverlayController = createClodShadowOverlayController({
     roots: () => input.result.roots,
     camera: input.camera,
@@ -132,6 +140,7 @@ export function runGuiStartup(
       applyColorAdjustmentsToTerrain,
       currentPostProcessSettings,
       postProcess,
+      applyTreeQualityPreset: applyGlobalTreeQualityPreset,
     },
     weather: {
       weatherController,
