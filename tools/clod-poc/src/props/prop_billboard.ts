@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+const BILLBOARD_MATERIAL_KEY = "billboardMaterial";
+
 /** Axial billboard quad facing +Z in local space; instance rotation handles world alignment. */
 export function createPropBillboardGeometry(width: number, height: number): THREE.BufferGeometry {
   const hw = width * 0.5;
@@ -31,4 +33,18 @@ export function createBillboardMaterial(base: THREE.Material): THREE.Material {
     mat.transparent = false;
   }
   return mat;
+}
+
+export function assignBillboardMaterial(geometry: THREE.BufferGeometry, material: THREE.Material): void {
+  geometry.userData[BILLBOARD_MATERIAL_KEY] = material;
+}
+
+export function getBillboardMaterial(geometry: THREE.BufferGeometry): THREE.Material | undefined {
+  const value = geometry.userData[BILLBOARD_MATERIAL_KEY];
+  return value instanceof THREE.Material ? value : undefined;
+}
+
+export function disposeBillboardGeometryResources(geometry: THREE.BufferGeometry | null | undefined): void {
+  getBillboardMaterial(geometry!)?.dispose();
+  geometry?.dispose();
 }
