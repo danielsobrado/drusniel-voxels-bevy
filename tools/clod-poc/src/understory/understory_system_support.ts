@@ -32,6 +32,9 @@ export interface UnderstoryStats extends UnderstoryGenerationStats {
   gpuPrefilterRejectedClusters?: number;
   gpuPrefilterAcceptedClusters?: number;
   gpuPrefilterUnknownKeptClusters?: number;
+  gpuPrefilterSourceFarSummary?: number;
+  gpuPrefilterSourceTerrainSampler?: number;
+  gpuPrefilterSourceFallback?: number;
   gpuAcceptedCount: number;
   gpuVisibleCount: number;
   gpuOverflowed: boolean;
@@ -85,6 +88,9 @@ export function emptyUnderstoryStats(): UnderstoryStats {
     gpuPrefilterRejectedClusters: 0,
     gpuPrefilterAcceptedClusters: 0,
     gpuPrefilterUnknownKeptClusters: 0,
+    gpuPrefilterSourceFarSummary: 0,
+    gpuPrefilterSourceTerrainSampler: 0,
+    gpuPrefilterSourceFallback: 0,
     gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
     gpuOverflowed: false,
