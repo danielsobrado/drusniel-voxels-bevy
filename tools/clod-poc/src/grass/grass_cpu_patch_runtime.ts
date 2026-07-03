@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { ClodPageNode } from "../types.js";
+import type { ClodPageNode, PageFootprint } from "../types.js";
 import type { GrassSettings, GrassShaderMode, GrassTier } from "./grass_config.js";
 import { generateGrassInstances } from "./grass_cpu_patch.js";
 import type { GrassGeometryBuilder } from "./grass_geometry.js";
@@ -24,6 +24,14 @@ export interface GrassCpuPatchRuntimeOptions {
   materialFor: (mode: GrassShaderMode) => THREE.Material;
 }
 
+interface GrassPatchSource {
+  id: string;
+  footprint: PageFootprint;
+}
+
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const DEFAULT_UNBOUNDED_GRASS_PATCH_M = 64;
+
 export class GrassCpuPatchRuntime {
   readonly nodes: ClodPageNode[];
   private readonly worldCells: number;
@@ -31,6 +39,8 @@ export class GrassCpuPatchRuntime {
   private readonly geometries: GrassSharedGeometries;
   private readonly injectedGeometryBuilder: GrassGeometryBuilder | null;
   private readonly materialFor: (mode: GrassShaderMode) => THREE.Material;
+  private readonly unboundedWorld: boolean;
+  private readonly unboundedPatchSize: number;
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   patches: GrassPatch[] = [];
   patchesDirty = true;
@@ -48,6 +58,8 @@ export class GrassCpuPatchRuntime {
     this.geometries = options.geometries;
     this.injectedGeometryBuilder = options.injectedGeometryBuilder;
     this.materialFor = options.materialFor;
+    this.unboundedWorld = infiniteIslandsScene();
+    this.unboundedPatchSize = grassFallbackPatchSize(this.nodes);
   }
 
   markDirty(): void {
@@ -105,14 +117,13 @@ export class GrassCpuPatchRuntime {
   }
 
   private refreshPatches(center: THREE.Vector3, settings: GrassSettings): boolean {
-    const nearbyNodes = this.nodes.filter((node) => {
-      const footprint = node.footprint;
-      const centerX = grassFootprintCenterX(footprint);
-      const centerZ = grassFootprintCenterZ(footprint);
-      const radius = grassFootprintRadius(footprint);
-      return Math.hypot(center.x - centerX, center.z - centerZ) <= settings.distance + radius;
-    });
-    const nearbyIds = new Set(nearbyNodes.map((node) => node.id));
+    const nearbyNodes = this.nearbyFiniteNodes(center, settings);
+    const patchSources = nearbyNodes.length > 0
+      ? nearbyNodes.map((node) => ({ id: node.id, footprint: node.footprint }))
+      : this.unboundedWorld
+        ? unboundedGrassPatchSources(center, settings.distance, this.unboundedPatchSize)
+        : [];
+    const nearbyIds = new Set(patchSources.map((source) => source.id));
     const retainedPatches: GrassPatch[] = [];
     for (const patch of this.patches) {
       if (nearbyIds.has(patch.nodeId)) {
@@ -125,19 +136,19 @@ export class GrassCpuPatchRuntime {
     this.patches = retainedPatches;
 
     const retainedIds = new Set(this.patches.map((patch) => patch.nodeId));
-    const newNodes = nearbyNodes.filter((node) => !retainedIds.has(node.id));
+    const newSources = patchSources.filter((source) => !retainedIds.has(source.id));
     let remainingBudget = Math.max(0, Math.floor(settings.maxBlades) - this.bladeCount);
     let built = 0;
-    for (let index = 0; index < newNodes.length && remainingBudget > 0; index++) {
+    for (let index = 0; index < newSources.length && remainingBudget > 0; index++) {
       if (built >= settings.patchFallback.maxNewPatchesPerRefresh) return true;
-      const node = newNodes[index];
-      const footprint = clampGrassFootprint(node.footprint, this.worldCells);
-      const remainingNodes = newNodes.length - index;
+      const source = newSources[index];
+      const footprint = grassRuntimeFootprint(source.footprint, this.worldCells, this.unboundedWorld);
+      const remainingNodes = newSources.length - index;
       const patchBudget = Math.ceil(remainingBudget / remainingNodes);
       const buildStart = performance.now();
       const instances = generateGrassInstances(footprint, settings, patchBudget, this.generationStats);
       if (instances.length === 0) continue;
-      const patch = this.createPatchFactory(settings).createPatch(node.id, footprint, instances);
+      const patch = this.createPatchFactory(settings).createPatch(source.id, footprint, instances);
       this.buildMs += performance.now() - buildStart;
       this.patchRebuildCount++;
       this.patches.push(patch);
@@ -147,6 +158,16 @@ export class GrassCpuPatchRuntime {
       built++;
     }
     return false;
+  }
+
+  private nearbyFiniteNodes(center: THREE.Vector3, settings: GrassSettings): ClodPageNode[] {
+    return this.nodes.filter((node) => {
+      const footprint = node.footprint;
+      const centerX = grassFootprintCenterX(footprint);
+      const centerZ = grassFootprintCenterZ(footprint);
+      const radius = grassFootprintRadius(footprint);
+      return Math.hypot(center.x - centerX, center.z - centerZ) <= settings.distance + radius;
+    });
   }
 
   private createPatchFactory(settings: GrassSettings): GrassPatchFactory {
@@ -169,6 +190,45 @@ export class GrassCpuPatchRuntime {
       mesh.geometry.dispose();
     }
   }
+}
+
+export function grassRuntimeFootprint(footprint: PageFootprint, worldCells: number, unbounded: boolean): PageFootprint {
+  return unbounded ? { ...footprint } : clampGrassFootprint(footprint, worldCells);
+}
+
+export function unboundedGrassPatchSources(
+  center: THREE.Vector3,
+  distanceM: number,
+  patchSizeM: number,
+): GrassPatchSource[] {
+  const size = Number.isFinite(patchSizeM) && patchSizeM > 0 ? patchSizeM : DEFAULT_UNBOUNDED_GRASS_PATCH_M;
+  const radius = Math.max(0, Number.isFinite(distanceM) ? distanceM : 0);
+  const minX = Math.floor((center.x - radius) / size);
+  const maxX = Math.floor((center.x + radius) / size);
+  const minZ = Math.floor((center.z - radius) / size);
+  const maxZ = Math.floor((center.z + radius) / size);
+  const sources: GrassPatchSource[] = [];
+  for (let z = minZ; z <= maxZ; z++) {
+    for (let x = minX; x <= maxX; x++) {
+      const footprint = { minX: x * size, minZ: z * size, maxX: (x + 1) * size, maxZ: (z + 1) * size };
+      const centerX = grassFootprintCenterX(footprint);
+      const centerZ = grassFootprintCenterZ(footprint);
+      if (Math.hypot(center.x - centerX, center.z - centerZ) > radius + grassFootprintRadius(footprint)) continue;
+      sources.push({ id: `grass-unbounded:${x},${z}`, footprint });
+    }
+  }
+  return sources;
+}
+
+function grassFallbackPatchSize(nodes: readonly ClodPageNode[]): number {
+  const first = nodes[0]?.footprint;
+  const size = first ? Math.max(first.maxX - first.minX, first.maxZ - first.minZ) : DEFAULT_UNBOUNDED_GRASS_PATCH_M;
+  return Number.isFinite(size) && size > 0 ? size : DEFAULT_UNBOUNDED_GRASS_PATCH_M;
+}
+
+function infiniteIslandsScene(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
 }
 
 function emptyGrassGenerationStats(): GrassGenerationStats {
