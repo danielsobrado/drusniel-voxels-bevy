@@ -10,7 +10,6 @@ import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terra
 import {
   buildVegetationSlotPrefilter,
   VegetationSlotPrefilterCache,
-  type VegetationSlotPrefilterResult,
 } from "../vegetation/vegetation_slot_prefilter.js";
 
 const WORKGROUP_SIZE = 64;
@@ -142,6 +141,10 @@ export interface GrassGpuRingStats {
   candidateCount: number;
   candidateCountBeforePrefilter?: number;
   candidateCountAfterPrefilter?: number;
+  prefilterTestedClusters: number;
+  prefilterRejectedClusters: number;
+  prefilterAcceptedClusters: number;
+  prefilterUnknownKeptClusters: number;
   generatedCandidates: number;
   acceptedCandidates: number;
   counts: GrassGpuRingCounts;
@@ -282,6 +285,10 @@ export class GrassGpuRingCompute {
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
   private candidateCountBeforePrefilter = 0;
   private candidateCountAfterPrefilter = 0;
+  private prefilterTestedClusters = 0;
+  private prefilterRejectedClusters = 0;
+  private prefilterAcceptedClusters = 0;
+  private prefilterUnknownKeptClusters = 0;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
   private submitMs: number | null = null;
@@ -370,6 +377,10 @@ export class GrassGpuRingCompute {
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
 
     const prefilter = params.activeSlotIndices ? null : this.buildSlotPrefilter(params);
+    this.prefilterTestedClusters = prefilter ? prefilter.clusterGrid * prefilter.clusterGrid : 0;
+    this.prefilterRejectedClusters = prefilter?.rejectedClusters ?? 0;
+    this.prefilterAcceptedClusters = prefilter?.visibleClusters ?? 0;
+    this.prefilterUnknownKeptClusters = prefilter?.unknownKeptClusters ?? 0;
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? grassGpuRingSlotCount(this.ring)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
@@ -400,6 +411,10 @@ export class GrassGpuRingCompute {
       candidateCount: this.candidateCountAfterPrefilter,
       candidateCountBeforePrefilter: this.candidateCountBeforePrefilter,
       candidateCountAfterPrefilter: this.candidateCountAfterPrefilter,
+      prefilterTestedClusters: this.prefilterTestedClusters,
+      prefilterRejectedClusters: this.prefilterRejectedClusters,
+      prefilterAcceptedClusters: this.prefilterAcceptedClusters,
+      prefilterUnknownKeptClusters: this.prefilterUnknownKeptClusters,
       generatedCandidates: this.candidateCountAfterPrefilter,
       acceptedCandidates: accepted,
       counts: { ...this.counts },
@@ -464,23 +479,18 @@ export class GrassGpuRingCompute {
   }
 
   private outputBindGroupEntries(): GPUBindGroupEntry[] {
-    const fallback = this.outputBuffers ?? this.fallbackOutputBuffers;
-    if (!fallback) throw new Error("grass ring output buffers are unavailable");
-    return [
-      { binding: 3, resource: { buffer: fallback.near.offset } },
-      { binding: 4, resource: { buffer: fallback.near.packed0 } },
-      { binding: 5, resource: { buffer: fallback.near.packed1 } },
-      { binding: 6, resource: { buffer: fallback.near.terrainNormal } },
-    ];
+    const buffers = this.outputBuffers ?? this.fallbackOutputBuffers;
+    if (!buffers) throw new Error("grass ring output buffers missing");
+    return [buffers.near, buffers.mid, buffers.far, buffers.super].flatMap((tier, i) => [
+      { binding: 3 + i, resource: { buffer: tier.offset } },
+    ]);
   }
 
-  private buildSlotPrefilter(params: GrassGpuRingDispatchParams): VegetationSlotPrefilterResult | null {
+  private buildSlotPrefilter(params: GrassGpuRingDispatchParams) {
     const config = DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG;
     if (!config.enabled || !config.viewRulesEnabled) return null;
     const cameraGround = surfaceHeight(params.centerX, params.centerZ);
-    const cameraY = Number.isFinite(cameraGround)
-      ? cameraGround + GRASS_CAMERA_HEIGHT_FALLBACK_M
-      : params.maxHeight + GRASS_CAMERA_HEIGHT_FALLBACK_M;
+    const cameraY = Number.isFinite(cameraGround) ? cameraGround + GRASS_CAMERA_HEIGHT_FALLBACK_M : params.maxHeight + GRASS_CAMERA_HEIGHT_FALLBACK_M;
     return buildVegetationSlotPrefilter({
       kind: "grass",
       centerX: params.centerX,
@@ -490,19 +500,8 @@ export class GrassGpuRingCompute {
       grid: grassGpuRingGrid(this.ring),
       cell: grassGpuRingCell(this.ring),
       clusterDimSlots: GRASS_PREFILTER_CLUSTER_DIM_SLOTS,
-      visibility: {
-        enabled: true,
-        minDistanceM: config.viewMinDistanceM,
-        sampleCount: config.viewSampleCount,
-        heightMarginM: config.viewHeightMarginM,
-        crownHeightM: config.grassCrownHeightM,
-      },
-      sampler: {
-        sampleHeight: (x, z) => {
-          const height = surfaceHeight(x, z);
-          return { height, unknown: !Number.isFinite(height) };
-        },
-      },
+      visibility: { enabled: true, minDistanceM: config.viewMinDistanceM, sampleCount: config.viewSampleCount, heightMarginM: config.viewHeightMarginM, crownHeightM: config.grassCrownHeightM },
+      sampler: { sampleHeight: (x, z) => { const height = surfaceHeight(x, z); return { height, unknown: !Number.isFinite(height) }; } },
       terrainRevision: getDigEditRevision(),
       cache: this.slotPrefilterCache,
     });
