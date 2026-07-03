@@ -32,6 +32,15 @@ const HALF_FLOAT_MAX = 65504;
 type HeightAtlasData = Float32Array | Uint16Array;
 type AtlasData = Float32Array | Uint8Array;
 type UploadMode = "none" | "dirty" | "full";
+export type FarSummaryGpuAtlasFullUploadReason =
+  | "initial"
+  | "explicit"
+  | "disabled"
+  | "too_many_rects"
+  | "threshold"
+  | "invalid_atlas"
+  | "partial_ranges_unsupported"
+  | "full_invalidation";
 
 export type { FarSummaryGpuAtlasUploadOptions } from "../farSummaryAtlasUploadConfig.js";
 
@@ -72,6 +81,7 @@ export interface FarSummaryGpuAtlasUploadStats {
   dirtyPct: number;
   totalPixels: number;
   lastUploadMode: UploadMode;
+  fallbackReason: FarSummaryGpuAtlasFullUploadReason | null;
 }
 
 interface PlannedAtlasTile extends PlannedAtlasTileSnapshot {
@@ -201,6 +211,7 @@ export class FarSummaryGpuAtlas {
         dirtyPct: 0,
         totalPixels: width * height,
         lastUploadMode: "none",
+        fallbackReason: null,
       },
       originX: 0,
       originZ: 0,
@@ -257,6 +268,7 @@ export class FarSummaryGpuAtlas {
     const signature = signatureParts.join(";");
     if (signature === this.lastSignature) return;
 
+    const initialUpload = this.lastSignature === "" && this.previousTilePlacements.size === 0;
     const forceBlitAll = this.lastSignature === "" && this.previousTilePlacements.size > 0;
     const diff = diffAtlasTilePlacements(this.previousTilePlacements, nextPlacements, forceBlitAll);
     const plannedBlitRects = diff.blitKeys
@@ -270,7 +282,9 @@ export class FarSummaryGpuAtlas {
       fullUpload: false,
     };
     const atlasPixels = this.view.widthCells * this.view.heightCells;
-    const useFullUpload = shouldUseFullUpload(uploadPlan, atlasPixels, this.uploadOptions);
+    const fallbackReason = initialUpload
+      ? "initial" as const
+      : resolveFullUploadReason(uploadPlan, atlasPixels, this.uploadOptions, this.activeTexturesSupportDirtyRanges());
 
     let validRings = 0;
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
@@ -296,13 +310,13 @@ export class FarSummaryGpuAtlas {
       validRings++;
     }
 
-    if (useFullUpload) {
+    if (fallbackReason) {
       this.clearAllData();
       for (const tile of plannedTiles.values()) {
         this.blitTile(tile.tile, tile.atlasTileX, tile.atlasTileZ, tile.ringIndex, state.frame);
       }
       this.markFullTexturesDirty();
-      this.recordUploadStats("full", atlasPixels, atlasPixels, 1);
+      this.recordUploadStats("full", atlasPixels, atlasPixels, 1, fallbackReason);
     } else if (uploadRects.length > 0) {
       for (const rect of diff.clearRects) this.clearRect(rect);
       const actualBlitRects: AtlasDirtyRect[] = [];
@@ -314,13 +328,15 @@ export class FarSummaryGpuAtlas {
       }
       const actualUploadRects = mergeDirtyRects([...diff.clearRects, ...actualBlitRects]);
       const actualDirtyPixels = dirtyArea(actualUploadRects);
-      this.applyTextureDirtyRects(this.view.texture, actualUploadRects, this.view.widthCells, this.packing.heightComponents);
-      this.applyTextureDirtyRects(this.view.materialTexture, actualUploadRects, this.view.widthCells, RGBA_COMPONENTS);
-      if (this.packing.storesNormalAtlas) {
-        this.applyTextureDirtyRects(this.view.normalTexture, actualUploadRects, this.view.widthCells, RGBA_COMPONENTS);
+      const dirtyUploaded = this.applyActiveTextureDirtyRects(actualUploadRects);
+      if (dirtyUploaded) {
+        this.recordUploadStats("dirty", actualDirtyPixels, atlasPixels, actualUploadRects.length, null);
+      } else {
+        this.markFullTexturesDirty();
+        this.recordUploadStats("full", atlasPixels, atlasPixels, 1, "partial_ranges_unsupported");
       }
-      this.applyTextureDirtyRects(this.view.coverageTexture, actualUploadRects, this.view.widthCells, RGBA_COMPONENTS);
-      this.recordUploadStats("dirty", actualDirtyPixels, atlasPixels, actualUploadRects.length);
+    } else {
+      this.recordUploadStats("none", 0, atlasPixels, 0, null);
     }
 
     const firstValid = this.view.rings.find((ring) => ring.valid > 0) ?? this.view.rings[0]!;
@@ -353,7 +369,7 @@ export class FarSummaryGpuAtlas {
     this.previousTilePlacements.clear();
     this.lastSignature = "";
     const atlasPixels = this.view.widthCells * this.view.heightCells;
-    this.recordUploadStats("full", atlasPixels, atlasPixels, 1);
+    this.recordUploadStats("full", atlasPixels, atlasPixels, 1, "full_invalidation");
   }
 
   private planTile(tile: FarSummaryTile, minTileX: number, minTileZ: number, ringIndex: number): PlannedAtlasTile {
@@ -436,27 +452,35 @@ export class FarSummaryGpuAtlas {
       }
     }
 
-    return {
-      x: baseX,
-      y: baseZ,
-      width: copyCells,
-      height: copyCells,
-    };
+    return { x: baseX, y: baseZ, width: copyCells, height: copyCells };
   }
 
   private markFullTexturesDirty(): void {
-    markTextureFullyDirty(this.view.texture);
-    markTextureFullyDirty(this.view.materialTexture);
-    if (this.packing.storesNormalAtlas) markTextureFullyDirty(this.view.normalTexture);
-    markTextureFullyDirty(this.view.coverageTexture);
+    for (const texture of this.activeAtlasTextures()) markTextureFullyDirty(texture);
   }
 
-  private applyTextureDirtyRects(texture: THREE.DataTexture, rects: AtlasDirtyRect[], atlasWidth: number, componentStride: number): void {
-    if (rects.length === 0) return;
-    if (!textureUpdateRangesAvailable(texture)) {
-      markTextureFullyDirty(texture);
-      return;
-    }
+  private activeAtlasTextures(): THREE.DataTexture[] {
+    const textures = [this.view.texture, this.view.materialTexture, this.view.coverageTexture];
+    if (this.packing.storesNormalAtlas) textures.push(this.view.normalTexture);
+    return textures;
+  }
+
+  private activeTexturesSupportDirtyRanges(): boolean {
+    return this.activeAtlasTextures().every(textureUpdateRangesAvailable);
+  }
+
+  private applyActiveTextureDirtyRects(rects: AtlasDirtyRect[]): boolean {
+    if (rects.length === 0) return true;
+    if (!this.activeTexturesSupportDirtyRanges()) return false;
+    return this.applyTextureDirtyRects(this.view.texture, rects, this.view.widthCells, this.packing.heightComponents)
+      && this.applyTextureDirtyRects(this.view.materialTexture, rects, this.view.widthCells, RGBA_COMPONENTS)
+      && (!this.packing.storesNormalAtlas || this.applyTextureDirtyRects(this.view.normalTexture, rects, this.view.widthCells, RGBA_COMPONENTS))
+      && this.applyTextureDirtyRects(this.view.coverageTexture, rects, this.view.widthCells, RGBA_COMPONENTS);
+  }
+
+  private applyTextureDirtyRects(texture: THREE.DataTexture, rects: AtlasDirtyRect[], atlasWidth: number, componentStride: number): boolean {
+    if (rects.length === 0) return true;
+    if (!textureUpdateRangesAvailable(texture)) return false;
 
     texture.clearUpdateRanges();
     for (const rect of rects) {
@@ -464,18 +488,21 @@ export class FarSummaryGpuAtlas {
       if (!clipped) continue;
       for (let row = 0; row < clipped.height; row++) {
         const pixel = (clipped.y + row) * atlasWidth + clipped.x;
-        texture.addUpdateRange(
-          pixel * componentStride,
-          clipped.width * componentStride,
-        );
+        texture.addUpdateRange(pixel * componentStride, clipped.width * componentStride);
       }
     }
-    if (texture.updateRanges.length > 0) {
-      texture.needsUpdate = true;
-    }
+    if (texture.updateRanges.length === 0) return false;
+    texture.needsUpdate = true;
+    return true;
   }
 
-  private recordUploadStats(mode: UploadMode, dirtyPixels: number, atlasPixels: number, rectCount: number): void {
+  private recordUploadStats(
+    mode: UploadMode,
+    dirtyPixels: number,
+    atlasPixels: number,
+    rectCount: number,
+    fallbackReason: FarSummaryGpuAtlasFullUploadReason | null,
+  ): void {
     const stats = this.view.uploadStats;
     if (mode === "full") stats.fullUploads++;
     if (mode === "dirty") stats.dirtyUploads++;
@@ -484,6 +511,7 @@ export class FarSummaryGpuAtlas {
     stats.totalPixels = atlasPixels;
     stats.dirtyPct = atlasPixels > 0 ? dirtyPixels / atlasPixels : 0;
     stats.lastUploadMode = mode;
+    stats.fallbackReason = fallbackReason;
   }
 
   private lookupMaterialBake(tile: FarSummaryTile, frame: number): TerrainMaterialBakePayload | null {
@@ -617,8 +645,22 @@ export function mergeDirtyRects(rects: AtlasDirtyRect[]): AtlasDirtyRect[] {
 }
 
 export function dirtyArea(rects: AtlasDirtyRect[]): number {
-  return mergeDirtyRects(rects)
-    .reduce((total, rect) => total + rect.width * rect.height, 0);
+  return mergeDirtyRects(rects).reduce((total, rect) => total + rect.width * rect.height, 0);
+}
+
+export function resolveFullUploadReason(
+  plan: AtlasDirtyUploadPlan,
+  atlasPixels: number,
+  config: ResolvedFarSummaryGpuAtlasUploadOptions,
+  partialRangesSupported = true,
+): FarSummaryGpuAtlasFullUploadReason | null {
+  if (plan.fullUpload) return "explicit";
+  if (!config.dirtyRectUploads) return "disabled";
+  if (!partialRangesSupported) return "partial_ranges_unsupported";
+  if (plan.rects.length > config.maxDirtyRectsPerTexture) return "too_many_rects";
+  if (atlasPixels <= 0) return "invalid_atlas";
+  if (plan.dirtyPixels / atlasPixels > config.fullUploadThresholdPct) return "threshold";
+  return null;
 }
 
 export function shouldUseFullUpload(
@@ -626,11 +668,7 @@ export function shouldUseFullUpload(
   atlasPixels: number,
   config: ResolvedFarSummaryGpuAtlasUploadOptions,
 ): boolean {
-  if (plan.fullUpload) return true;
-  if (!config.dirtyRectUploads) return true;
-  if (plan.rects.length > config.maxDirtyRectsPerTexture) return true;
-  if (atlasPixels <= 0) return true;
-  return plan.dirtyPixels / atlasPixels > config.fullUploadThresholdPct;
+  return resolveFullUploadReason(plan, atlasPixels, config) !== null;
 }
 
 export function diffAtlasTilePlacements(
@@ -667,6 +705,48 @@ export function diffAtlasTilePlacements(
   return { clearRects, blitKeys };
 }
 
+function createHeightAtlasTexture(
+  data: HeightAtlasData,
+  width: number,
+  height: number,
+  packing: FarSummaryAtlasPackingSpec,
+  name: string,
+): THREE.DataTexture {
+  const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RedFormat;
+  const type = packing.heightFormat === "r16f" ? THREE.HalfFloatType : THREE.FloatType;
+  return createAtlasTexture(data, width, height, format, type, name);
+}
+
+function createPackedAtlasTexture(
+  data: AtlasData,
+  width: number,
+  height: number,
+  packing: FarSummaryAtlasPackingSpec,
+  name: string,
+): THREE.DataTexture {
+  const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
+  return createAtlasTexture(data, width, height, THREE.RGBAFormat, type, name);
+}
+
+function createAtlasTexture(
+  data: HeightAtlasData | AtlasData,
+  width: number,
+  height: number,
+  format: THREE.PixelFormat,
+  type: THREE.TextureDataType,
+  name: string,
+): THREE.DataTexture {
+  const texture = new THREE.DataTexture(data, width, height, format, type);
+  texture.name = name;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function farTilePlacementKey(tile: FarSummaryTile): string {
   return `${tile.key.ring}:${tile.key.x}:${tile.key.z}`;
 }
@@ -685,21 +765,11 @@ function snapshotPlannedTile(tile: PlannedAtlasTile): PlannedAtlasTileSnapshot {
 }
 
 function plannedTileRect(tile: PlannedAtlasTile): AtlasDirtyRect {
-  return {
-    x: tile.atlasX,
-    y: tile.atlasY,
-    width: tile.copyCells,
-    height: tile.copyCells,
-  };
+  return { x: tile.atlasX, y: tile.atlasY, width: tile.copyCells, height: tile.copyCells };
 }
 
 function snapshotRect(tile: PlannedAtlasTileSnapshot): AtlasDirtyRect {
-  return {
-    x: tile.atlasX,
-    y: tile.atlasY,
-    width: tile.copyCells,
-    height: tile.copyCells,
-  };
+  return { x: tile.atlasX, y: tile.atlasY, width: tile.copyCells, height: tile.copyCells };
 }
 
 function sameAtlasSlot(a: PlannedAtlasTileSnapshot, b: PlannedAtlasTileSnapshot): boolean {
@@ -759,6 +829,7 @@ function textureUpdateRangesAvailable(texture: THREE.DataTexture): boolean {
 }
 
 function markTextureFullyDirty(texture: THREE.DataTexture): void {
+  if (typeof texture.clearUpdateRanges === "function") texture.clearUpdateRanges();
   texture.needsUpdate = true;
 }
 
@@ -770,7 +841,11 @@ function selectTiles(tiles: FarSummaryTile[], minTileX: number, minTileZ: number
 }
 
 function buildRingSignature(ringIndex: number, tiles: FarSummaryTile[], minTileX: number, minTileZ: number): string {
-  return `${ringIndex}:${minTileX},${minTileZ}:${tiles.map((tile) => `${tile.key.x},${tile.key.z}@${tile.revision}`).join("|")}`;
+  const tileSig = tiles
+    .map((tile) => `${tile.key.x},${tile.key.z}@${tile.revision}`)
+    .sort()
+    .join("|");
+  return `${ringIndex}:${minTileX},${minTileZ}:${tileSig}`;
 }
 
 function finiteOrZero(value: number): number {
