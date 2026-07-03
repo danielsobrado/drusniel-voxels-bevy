@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
-import { createNearFieldBubbleController, requiredStreamingPageCoords } from "./near_field_bubble_controller.js";
+import { createNearFieldBubbleController, liveBubbleChunkFootprint, requiredStreamingPageCoords } from "./near_field_bubble_controller.js";
 import type { ClodPageNode } from "../../types.js";
 
 vi.mock("../../terrain/terrain.js", async (importOriginal) => {
@@ -45,6 +45,17 @@ describe("requiredStreamingPageCoords", () => {
 
     expect(coords.length).toBeGreaterThan(0);
     expect(keys.has("128,-64")).toBe(true);
+  });
+});
+
+describe("liveBubbleChunkFootprint", () => {
+  it("maps page/chunk coordinates to world-space collider footprints", () => {
+    expect(liveBubbleChunkFootprint(2, -1, 3, 1, 4, 16)).toEqual({
+      minX: 176,
+      minZ: -48,
+      maxX: 192,
+      maxZ: -32,
+    });
   });
 });
 
