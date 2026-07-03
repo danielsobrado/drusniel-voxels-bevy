@@ -100,6 +100,17 @@ const P0_COUNTERS = [
   "materialChurn.suspectedPipelineKeyChanges",
   "materialChurn.materialAssignments",
   "materialChurn.newMaterials",
+  "naadf.farSummaryAtlas.estimatedBytes",
+  "naadf.farSummaryAtlas.memorySavingsBytes",
+  "naadf.farSummaryAtlas.memorySavingsPct",
+  "naadf.farSummaryAtlas.upload.totalPixels",
+  "naadf.farSummaryAtlas.upload.dirtyPixels",
+  "naadf.farSummaryAtlas.upload.dirtyPct",
+  "naadf.farSummaryAtlas.upload.dirtyRects",
+  "naadf.farSummaryAtlas.upload.dirtyUploads",
+  "naadf.farSummaryAtlas.upload.fullUploads",
+  "naadf.farSummaryAtlas.upload.modeCode",
+  "naadf.farSummaryAtlas.upload.fallbackReasonCode",
 ] as const;
 
 function parseArgs(argv: string[]): Args {
@@ -421,12 +432,31 @@ function markdown(results: readonly PerfCaseResult[]): string {
     );
   }
 
+  lines.push("", "## Far-summary atlas upload and packing", "");
+  lines.push("| case | estimated bytes | savings bytes/pct | upload mode | fallback reason | dirty/full uploads | dirty pixels/total | dirty rects | dirty pct |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const result of results) {
+    const m = result.metrics;
+    lines.push(
+      `| ${result.name} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.estimatedBytes"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.memorySavingsBytes"])}/${fmt(m["naadf.farSummaryAtlas.memorySavingsPct"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.upload.modeCode"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.upload.fallbackReasonCode"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.upload.dirtyUploads"])}/${fmt(m["naadf.farSummaryAtlas.upload.fullUploads"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.upload.dirtyPixels"])}/${fmt(m["naadf.farSummaryAtlas.upload.totalPixels"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.upload.dirtyRects"])} | ` +
+        `${fmt(m["naadf.farSummaryAtlas.upload.dirtyPct"])} |`,
+    );
+  }
+
   lines.push(
     "",
     "## Interpretation notes",
     "",
     "- `-` means the metric was not exposed by the current runtime path. Do not treat missing metrics as zero.",
     "- A WebGPU failure may be retried with WebGL only to keep the report complete; the selected renderer column shows which attempt produced the reported numbers.",
+    "- Atlas upload mode is numeric: 0=none, 1=dirty, 2=full. Fallback reason is numeric: 0=none, 1=initial, 2=explicit, 3=disabled, 4=too_many_rects, 5=threshold, 6=invalid_atlas, 7=partial_ranges_unsupported, 8=full_invalidation.",
     "- This runner records evidence. It does not prove visual parity by itself.",
     "",
   );
