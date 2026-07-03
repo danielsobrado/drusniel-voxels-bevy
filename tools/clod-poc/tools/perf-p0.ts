@@ -124,6 +124,12 @@ const P0_COUNTERS = [
   "naadf.farSummaryAtlas.upload.fullUploads",
   "naadf.farSummaryAtlas.upload.modeCode",
   "naadf.farSummaryAtlas.upload.fallbackReasonCode",
+  "p0DirtyAtlasExercise.enabled",
+  "p0DirtyAtlasExercise.status",
+  "p0DirtyAtlasExercise.moveM",
+  "p0DirtyAtlasExercise.triggeredFrame",
+  "p0DirtyAtlasExercise.resetFrame",
+  "p0DirtyAtlasExercise.settleRemaining",
 ] as const;
 
 function parseArgs(argv: string[]): Args {
@@ -434,14 +440,15 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
   }
 
   lines.push("", "## Required P0 counters", "");
-  lines.push("| case | cache hit/miss | cache ready/stale | veg clusters rejected/accepted/missing | veg src far/sampler/fallback | tree src far/sampler/fallback | grass src far/sampler/fallback | under src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
-  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  lines.push("| case | cache hit/miss | cache ready/stale | dirty exercise status/move/reset | veg clusters rejected/accepted/missing | veg src far/sampler/fallback | tree src far/sampler/fallback | grass src far/sampler/fallback | under src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const result of results) {
     const m = result.metrics;
     lines.push(
       `| ${result.name} | ` +
         `${fmt(m.terrainMaterialCacheHits)}/${fmt(m.terrainMaterialCacheMisses)} | ` +
         `${fmt(m.terrainMaterialCacheReady)}/${fmt(m.terrainMaterialCacheStale)} | ` +
+        `${fmt(m["p0DirtyAtlasExercise.status"])}/${fmt(m["p0DirtyAtlasExercise.moveM"])}/${fmt(m["p0DirtyAtlasExercise.resetFrame"])} | ` +
         `${fmt(m.vegetationGpuClustersRejectedEarly)}/${fmt(m.vegetationGpuClustersAccepted)}/${fmt(m.vegetationGpuClustersSummaryMissing)} | ` +
         `${fmt(m.vegetationGpuSourceFarSummary)}/${fmt(m.vegetationGpuSourceTerrainSampler)}/${fmt(m.vegetationGpuSourceFallback)} | ` +
         `${fmt(m.treeGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.treeGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.treeGpuPrefilterSourceFallbackAvg)} | ` +
@@ -481,6 +488,7 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
     "- `-` means the metric was not exposed by the current runtime path. Do not treat missing metrics as zero.",
     "- A WebGPU failure may be retried with WebGL only to keep the report complete; the selected renderer column shows which attempt produced the reported numbers.",
     "- P0 gates are evidence gates, not FPS gates. Use `--failOnGateFailure` to make the runner exit non-zero when evidence is missing.",
+    "- Dirty exercise status codes are 0=disabled, 1=pending, 2=settling, 3=done, 4=skipped. The P0 runner enables it by default for NAADF scenes.",
     "- Vegetation source counts show which classifier source produced cluster prefilter decisions for trees, grass, and understory: far-summary, terrain sampler, or conservative fallback.",
     "- Atlas upload mode is numeric: 0=none, 1=dirty, 2=full. Fallback reason is numeric: 0=none, 1=initial, 2=explicit, 3=disabled, 4=too_many_rects, 5=threshold, 6=invalid_atlas, 7=partial_ranges_unsupported, 8=full_invalidation.",
     "- This runner records evidence. It does not prove visual parity by itself.",
@@ -508,6 +516,9 @@ async function main(): Promise<void> {
     perfProbe: "1",
     perfWarmup: str(args.warmup) ?? "120",
     perfFrames: str(args.frames) ?? "300",
+    p0DirtyAtlasExercise: str(args.dirtyAtlasExercise) ?? "1",
+    dirtyAtlasMoveM: str(args.dirtyAtlasMoveM) ?? "768",
+    dirtyAtlasSettleFrames: str(args.dirtyAtlasSettleFrames) ?? "18",
     profile: "0",
     ...parseParams(str(args.params)),
   };
