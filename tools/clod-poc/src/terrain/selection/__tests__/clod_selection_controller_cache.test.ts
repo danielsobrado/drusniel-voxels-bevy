@@ -34,6 +34,7 @@ function runtimeConfig(): ClodRuntimeConfig {
     renderResolution: DEFAULT_RENDER_RESOLUTION_CONFIG,
     digging: { holdIntervalMs: 400 },
     profiling: { slowFrameMs: 24 },
+    stats: { normalHz: 4, debugHz: 10, profileEveryFrame: true },
   };
 }
 

@@ -2,6 +2,11 @@ import { createLongViewFrameDiagnostics } from "../phase0/long_view_frame_diagno
 import { runTerrainFramePhase } from "./frame_loop/terrain_frame_phase.js";
 import { runVegetationFramePhase } from "./frame_loop/vegetation_frame_phase.js";
 import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
+import {
+  STATS_SYNC_THROTTLE_REASON_CODE,
+  StatsSyncThrottle,
+  type StatsSyncThrottleDecision,
+} from "./frame_loop/stats_sync_throttle.js";
 import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
 import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePerfPhaseTiming } from "./frame_loop/perf_probe.js";
@@ -52,6 +57,51 @@ function syncMaterialChurnCounters(counters: Record<string, number>): void {
   counters["materialChurn.suspectedPipelineKeyChanges"] = materialChurnStats.suspectedPipelineKeyChanges;
 }
 
+function statsRelevantModeKey(state: Record<string, unknown>, gpuTimingActive: boolean, perfProbeActive: boolean, benchmarkActive: boolean, acceptanceActive: boolean): string {
+  return [
+    state["profileEnabled"],
+    gpuTimingActive,
+    perfProbeActive,
+    benchmarkActive,
+    acceptanceActive,
+    state["clodPerfMode"],
+    state["grassEnabled"],
+    state["treesEnabled"],
+    state["understoryEnabled"],
+    state["forestLightingEnabled"],
+    state["forestLightingDebugMode"],
+    state["treeGpuEnabled"],
+    state["treeGpuForceCpu"],
+    state["treeGpuShowCounts"],
+    state["treeGpuReadbackVisibleLists"],
+    state["treeGpuValidateAgainstCpu"],
+    state["treeGpuMaxVisible"],
+    state["clodShadowOverlayMode"],
+    state["clodShadowProxyView"],
+  ].join("|");
+}
+
+function panelVisible(id: string): boolean {
+  const element = document.getElementById(id);
+  return element ? !element.hidden : false;
+}
+
+function queryFlag(searchParams: URLSearchParams, keys: readonly string[]): boolean {
+  return keys.some((key) => searchParams.get(key) === "1" || searchParams.get(key) === "true");
+}
+
+function recordStatsSyncThrottleCounters(
+  counters: Record<string, number>,
+  decision: StatsSyncThrottleDecision,
+  diagnostics: ReturnType<StatsSyncThrottle["diagnostics"]>,
+): void {
+  counters["statsSyncRuns"] = diagnostics.runs;
+  counters["statsSyncSkips"] = diagnostics.skips;
+  counters["statsSyncSkippedFrames"] = diagnostics.skippedFrames;
+  counters["statsSyncThrottleReason"] = STATS_SYNC_THROTTLE_REASON_CODE[decision.reason];
+  counters["statsSyncHzEffective"] = diagnostics.effectiveHz;
+}
+
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, floatingOrigin, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
   let elapsedSeconds = 0;
@@ -85,6 +135,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
   let frameStart = 0;
   const perfProbe = createFramePerfProbeFromQuery(debugQuery);
+  const statsSyncThrottle = new StatsSyncThrottle(stats.statsSyncThrottleConfig);
+  let statsRevision = 0;
+  let lastStatsModeKey = "";
+  let lastStatsDecision: StatsSyncThrottleDecision = { shouldRun: false, reason: "skipped" };
   const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
     getHooks: render.getHooks,
     getAverageFps: () => averageFpsRef.value,
@@ -226,27 +280,59 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       });
     });
 
-    const statsSyncResult = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
-      state: player.state,
-      grassSystem: vegetation.grassSystem,
-      treeSystem: vegetation.treeSystem,
-      stoneSystem: vegetation.stoneSystem,
-      understorySystem: vegetation.understorySystem,
-      forestLightingSystem: vegetation.forestLightingSystem,
-      getGrassStats: stats.getGrassStats,
-      setGrassStats: stats.setGrassStats,
-      getTreeStats: stats.getTreeStats,
-      setTreeStats: stats.setTreeStats,
-      getStoneStats: stats.getStoneStats,
-      setStoneStats: stats.setStoneStats,
-      getUnderstoryStats: stats.getUnderstoryStats,
-      setUnderstoryStats: stats.setUnderstoryStats,
-      getForestLightingStats: stats.getForestLightingStats,
-      setForestLightingStats: stats.setForestLightingStats,
-      formatTreeGpuSummary: stats.formatTreeGpuSummary,
-      formatUnderstoryGpuSummary: stats.formatUnderstoryGpuSummary,
-      statsPresenter: stats.statsPresenter,
-    }));
+    const stateRecord = player.state as unknown as Record<string, unknown>;
+    const gpuTimingActive = render.gpuPassTiming?.enabled === true;
+    const benchmarkActive = stateRecord["clodPerfMode"] === true || queryFlag(debugQuery, ["benchmark", "bench"]);
+    const acceptanceActive = queryFlag(debugQuery, ["acceptance", "acceptanceMode", "qa"]);
+    const statsModeKey = statsRelevantModeKey(stateRecord, gpuTimingActive, perfProbe !== null, benchmarkActive, acceptanceActive);
+    if (statsModeKey !== lastStatsModeKey) {
+      lastStatsModeKey = statsModeKey;
+      statsRevision += 1;
+    }
+    const statsPanelVisible = panelVisible("info-panel") || panelVisible("clod-overlay");
+    const debugVisible = queryFlag(debugQuery, ["hud", "debugHud", "debugOverlay"]);
+    const statsDecision = statsSyncThrottle.shouldRun({
+      nowMs: frameStart,
+      frameIndex: selectionStats.frameId,
+      debugVisible,
+      statsPanelVisible,
+      profilingActive: player.state.profileEnabled,
+      gpuTimingActive,
+      perfProbeActive: perfProbe !== null,
+      benchmarkActive,
+      acceptanceActive,
+      forceStatsSync: false,
+      statsRevision,
+    });
+    lastStatsDecision = statsDecision;
+
+    const statsSyncResult = statsDecision.shouldRun
+      ? timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
+          state: player.state,
+          grassSystem: vegetation.grassSystem,
+          treeSystem: vegetation.treeSystem,
+          stoneSystem: vegetation.stoneSystem,
+          understorySystem: vegetation.understorySystem,
+          forestLightingSystem: vegetation.forestLightingSystem,
+          getGrassStats: stats.getGrassStats,
+          setGrassStats: stats.setGrassStats,
+          getTreeStats: stats.getTreeStats,
+          setTreeStats: stats.setTreeStats,
+          getStoneStats: stats.getStoneStats,
+          setStoneStats: stats.setStoneStats,
+          getUnderstoryStats: stats.getUnderstoryStats,
+          setUnderstoryStats: stats.setUnderstoryStats,
+          getForestLightingStats: stats.getForestLightingStats,
+          setForestLightingStats: stats.setForestLightingStats,
+          formatTreeGpuSummary: stats.formatTreeGpuSummary,
+          formatUnderstoryGpuSummary: stats.formatUnderstoryGpuSummary,
+          statsPresenter: stats.statsPresenter,
+        }))
+      : {
+          currentGrassStats: stats.getGrassStats(),
+          currentTreeStats: stats.getTreeStats(),
+          currentUnderstoryStats: stats.getUnderstoryStats(),
+        };
 
     if (collectFrameTiming || frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS) {
       lastDebugCounterMirrorAt = frameStart;
@@ -314,6 +400,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["clodColliderStaleFramesMax"] = clodApplyStats.clodColliderStaleFramesMax;
           counters["clodGeometryReusedOnApply"] = clodApplyStats.clodGeometryReusedOnApply;
         }
+        recordStatsSyncThrottleCounters(counters, statsDecision, statsSyncThrottle.diagnostics());
         if (pageGeometryCacheStats) {
           counters["clodGeometryCacheHits"] = pageGeometryCacheStats.hits;
           counters["clodGeometryCacheMisses"] = pageGeometryCacheStats.misses;
@@ -358,6 +445,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       grassPrepassEnabled: render.grassPrepassEnabled,
       perfProbe,
       phaseTiming,
+      statsSyncThrottle: {
+        decision: lastStatsDecision,
+        diagnostics: statsSyncThrottle.diagnostics(),
+      },
       afterRenderDiagnostics: () => timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics),
     });
 

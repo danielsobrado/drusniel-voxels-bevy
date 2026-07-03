@@ -47,6 +47,9 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.renderResolution.presets.high).toEqual({ dprCap: 1.5, renderScale: 1.0 });
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
+    expect(config.stats.normalHz).toBe(4);
+    expect(config.stats.debugHz).toBe(10);
+    expect(config.stats.profileEveryFrame).toBe(true);
   });
 
   it("falls back to defaults on invalid yaml", () => {

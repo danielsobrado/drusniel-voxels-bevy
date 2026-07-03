@@ -13,6 +13,7 @@ import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
 import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
+import type { StatsSyncThrottleDecision, StatsSyncThrottleDiagnostics } from "./stats_sync_throttle.js";
 import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface RenderPhaseInput {
@@ -44,6 +45,10 @@ export interface RenderPhaseInput {
   grassPrepassEnabled: boolean;
   perfProbe: FramePerfProbe | null;
   phaseTiming: FramePerfPhaseTiming;
+  statsSyncThrottle: {
+    decision: StatsSyncThrottleDecision;
+    diagnostics: StatsSyncThrottleDiagnostics;
+  };
   gpuPasses: Record<string, number> | null;
   afterRenderDiagnostics?: () => void;
 }
@@ -203,6 +208,11 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       canopyMs: input.phaseTiming.canopyMs,
       borderOceanDebugMs: input.phaseTiming.borderOceanDebugMs,
       statsSyncMs: input.phaseTiming.statsSyncMs,
+      statsSyncRan: input.statsSyncThrottle.decision.shouldRun ? 1 : 0,
+      statsSyncRuns: input.statsSyncThrottle.diagnostics.runs,
+      statsSyncSkips: input.statsSyncThrottle.diagnostics.skips,
+      statsSyncThrottleReason: input.statsSyncThrottle.decision.reason,
+      statsSyncHzEffective: input.statsSyncThrottle.diagnostics.effectiveHz,
       unattributedMs: Math.max(0, frameMs - measuredTopLevelMs),
       selectionCutMs: selectionStats.subphases.cut,
       selectionBookMs: selectionStats.subphases.book,

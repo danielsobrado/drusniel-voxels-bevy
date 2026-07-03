@@ -2,6 +2,7 @@ import type { PlayerInteractionMode } from "../../player_controller.js";
 import type { TreeStats } from "../../trees/index.js";
 import type { PropGpuStatus } from "../../props/prop_types.js";
 import type { FramePerfMetric } from "./perf_probe_constants.js";
+import type { StatsSyncThrottleReason } from "./stats_sync_throttle.js";
 
 export type { FramePerfMetric };
 export type FramePerfBroadBucket = import("./perf_probe_constants.js").FramePerfBroadBucket;
@@ -79,6 +80,11 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   customPropGpuOverflowed: number;
   customPropGpuDispatchMs: number | null;
   gpuPasses?: Record<string, number>;
+  statsSyncRan: number;
+  statsSyncRuns: number;
+  statsSyncSkips: number;
+  statsSyncThrottleReason: StatsSyncThrottleReason;
+  statsSyncHzEffective: number;
 }
 
 export interface FramePerfMetricStats {
@@ -160,6 +166,11 @@ export interface FramePerfSummary {
     customPropGpuVisibleCountAvg: number;
     customPropGpuOverflowedFrames: number;
     customPropGpuDispatchMsAvg: number;
+    statsSyncRuns: number;
+    statsSyncSkips: number;
+    statsSyncRanFrames: number;
+    statsSyncThrottleReasonCounts: Record<string, number>;
+    statsSyncHzEffectiveAvg: number;
     gpuPassesAvg: Record<string, number>;
   };
 }

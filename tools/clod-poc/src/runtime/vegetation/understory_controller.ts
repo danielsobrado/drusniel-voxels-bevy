@@ -87,7 +87,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     hydrologyData: deps.hydrologyData,
     hydrologyWaterTexture: deps.hydrologyWaterTexture,
   });
-  assertPageMeshSignaturesUnchanged(signaturesBefore, deps.nodes, "understory init");
+  assertPageMeshSignaturesUnchanged(signaturesBefore, pageMeshSignatures(deps.nodes));
 
   const sync = () => deps.syncStatsToState(system.getStats());
   const rebuildWithCurrentSettings = () => {

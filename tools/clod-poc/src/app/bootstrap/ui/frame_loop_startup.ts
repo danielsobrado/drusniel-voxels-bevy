@@ -319,6 +319,7 @@ export function runFrameLoopStartup(
       statsPresenter,
       updateInfo,
       averageFpsRef: session.averageFpsRef,
+      statsSyncThrottleConfig: clodRuntime.stats,
     },
     diagnostics: {
       maxTerrainLevel,

@@ -97,6 +97,11 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         tilesX: config.farShell.gpuAtlasWindowTiles,
         tilesZ: config.farShell.gpuAtlasWindowTiles,
         format: config.farSummaryAtlas.format,
+        uploadOptions: {
+          dirtyRectUploads: config.farSummaryAtlas.dirtyRectUploads,
+          fullUploadThresholdPct: config.farSummaryAtlas.fullUploadThresholdPct,
+          maxDirtyRectsPerTexture: config.farSummaryAtlas.maxDirtyRectsPerTexture,
+        },
         materialCache: materialCache ?? undefined,
         materialCacheConfig,
       })
@@ -177,6 +182,12 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
           counters["naadf.farSummaryAtlas.estimatedBytes"] = gpuAtlas.view.estimatedBytes ?? 0;
           counters["naadf.farSummaryAtlas.memorySavingsBytes"] = gpuAtlas.view.memorySavingsBytes ?? 0;
           counters["naadf.farSummaryAtlas.memorySavingsPct"] = gpuAtlas.view.memorySavingsPct ?? 0;
+          counters["naadf.farSummaryAtlas.upload.totalPixels"] = gpuAtlas.view.uploadStats.totalPixels;
+          counters["naadf.farSummaryAtlas.upload.dirtyPixels"] = gpuAtlas.view.uploadStats.dirtyPixels;
+          counters["naadf.farSummaryAtlas.upload.dirtyPct"] = gpuAtlas.view.uploadStats.dirtyPct;
+          counters["naadf.farSummaryAtlas.upload.dirtyRects"] = gpuAtlas.view.uploadStats.dirtyRects;
+          counters["naadf.farSummaryAtlas.upload.dirtyUploads"] = gpuAtlas.view.uploadStats.dirtyUploads;
+          counters["naadf.farSummaryAtlas.upload.fullUploads"] = gpuAtlas.view.uploadStats.fullUploads;
         }
         if (materialCache) Object.assign(counters, terrainMaterialCacheCountersForHud(materialCache));
         if (clod.stats.counters) {

@@ -117,7 +117,7 @@ export function runGrassStartup(input: GrassStartupInput): GrassStartupResult {
       state.grassVisiblePatches = `${stats.visiblePatches}/${stats.patches}`;
       state.grassTierSummary = `${stats.nearPatches}/${stats.midPatches}/${stats.coveragePatches}/${stats.superPatches}`;
       state.grassEdgeSuppressed = stats.edgeSuppressedCandidates;
-      state.grassCandidateCount = stats.generatedCandidates;
+      state.grassCandidateCount = `${stats.generatedCandidates}`;
       state.grassPatchRebuildCount = stats.patchRebuildCount;
       state.grassBuildMs = Number(stats.buildMs.toFixed(2));
     },

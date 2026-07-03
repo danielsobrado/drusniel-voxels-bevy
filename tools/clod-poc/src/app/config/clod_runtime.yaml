@@ -88,3 +88,8 @@ digging:
 
 profiling:
   slow_frame_ms: 24
+
+stats:
+  normal_hz: 4
+  debug_hz: 10
+  profile_every_frame: true

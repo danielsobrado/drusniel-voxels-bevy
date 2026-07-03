@@ -62,6 +62,9 @@ naadf_poc:
 
   far_summary_atlas:
     format: balanced
+    dirty_rect_uploads: true
+    full_upload_threshold_pct: 0.35
+    max_dirty_rects_per_texture: 128
 
   query:
     max_steps_primary: 128

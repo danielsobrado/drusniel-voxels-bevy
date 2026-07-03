@@ -128,8 +128,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
     "",
-    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | visible clusters h/v/u | tree lod avg | prop GPU | prop visible avg | tris avg | warnings | errors |",
-    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |",
+    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | stats sync run/skip | tree GPU | tree visible avg | visible clusters h/v/u | tree lod avg | prop GPU | prop visible avg | tris avg | warnings | errors |",
+    "| --- | ---: | ---: | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |",
   ];
   for (const result of results) {
     const snapshot = result.snapshot;
@@ -156,7 +156,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
       `| ${result.name} | ${ms(frame.p50)} | ${ms(frame.p95)} | ` +
         `${topPhase ? `${topPhase.name} ${ms(topPhase.p95)}` : "-"} | ` +
         `${topProp ? `${topProp.name} ${ms(topProp.p95)}` : "-"} | ` +
-        `${ms(render.p95)} | ${statusCounts || "-"} | ` +
+        `${ms(render.p95)} | ${snapshot.counters.statsSyncRanFrames}/${snapshot.counters.statsSyncSkips} | ` +
+        `${statusCounts || "-"} | ` +
         `${Math.round(snapshot.counters.treeGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
         `${visibleClusters} | ` +
         `${treeLod} | ` +
@@ -170,6 +171,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
   lines.push("`visible clusters h/v/u` means hidden / visible / unknown-kept cluster-mask averages. It is a camera-visible tree mask; shadow casters are intentionally not gated by it.");
   lines.push("");
   lines.push("Broad phase buckets are measured around the frame-loop calls. `props unattributed` is time between terrain and render that was not assigned to shadow, canopy, vegetation, border debug, or stats sync.");
+  lines.push("`stats sync run/skip` reports sampled frames where the phase ran and the total skipped-frame counter at the end of the sample window.");
   lines.push("");
   lines.push("Tree GPU strict cases should report `ring` on supported hardware. Any warning/error count there needs inspection before trusting FPS numbers.");
   lines.push("");

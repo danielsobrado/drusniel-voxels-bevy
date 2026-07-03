@@ -35,6 +35,7 @@ import type { FloatingOriginController } from "../../precision/floating_origin.j
 import type { PageGeometryCacheStats } from "../../terrain/geometry/page_geometry_cache.js";
 import type { ClodRenderNodeCacheStats } from "../../terrain/rendering/clod_render_node_cache.js";
 import type { ClodApplyStatsSnapshot } from "../../terrain/rendering/clod_apply_stats.js";
+import type { StatsSyncThrottleConfig } from "./stats_sync_throttle.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -140,6 +141,7 @@ export interface FrameLoopStatsDeps {
   statsPresenter: StatsPresenter;
   updateInfo: () => void;
   averageFpsRef: { value: number };
+  statsSyncThrottleConfig: StatsSyncThrottleConfig;
 }
 
 export interface FrameLoopDiagnosticsDeps {

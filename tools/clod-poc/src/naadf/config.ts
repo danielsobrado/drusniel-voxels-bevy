@@ -5,6 +5,11 @@ import {
   isValidFarSummaryAtlasFormat,
   type FarSummaryAtlasFormat,
 } from "./farSummaryAtlasPacking.js";
+import {
+  DEFAULT_FAR_SUMMARY_ATLAS_DIRTY_RECT_UPLOADS,
+  DEFAULT_FAR_SUMMARY_ATLAS_FULL_UPLOAD_THRESHOLD_PCT,
+  DEFAULT_FAR_SUMMARY_ATLAS_MAX_DIRTY_RECTS_PER_TEXTURE,
+} from "./farSummaryAtlasUploadConfig.js";
 
 export { DEFAULT_FAR_SUMMARY_ATLAS_FORMAT, isValidFarSummaryAtlasFormat } from "./farSummaryAtlasPacking.js";
 
@@ -82,6 +87,9 @@ export interface NaadfFarShellConfig {
 
 export interface NaadfFarSummaryAtlasConfig {
   format: FarSummaryAtlasFormat;
+  dirtyRectUploads: boolean;
+  fullUploadThresholdPct: number;
+  maxDirtyRectsPerTexture: number;
 }
 
 export interface NaadfDebugConfig {
@@ -342,6 +350,23 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
     },
     farSummaryAtlas: {
       format: requireFarSummaryAtlasFormat(atlasRaw["format"] ?? DEFAULT_FAR_SUMMARY_ATLAS_FORMAT, "far_summary_atlas.format"),
+      dirtyRectUploads: optionalBool(
+        atlasRaw["dirty_rect_uploads"],
+        "far_summary_atlas.dirty_rect_uploads",
+        DEFAULT_FAR_SUMMARY_ATLAS_DIRTY_RECT_UPLOADS,
+      ),
+      fullUploadThresholdPct: optionalNumber(
+        atlasRaw["full_upload_threshold_pct"],
+        "far_summary_atlas.full_upload_threshold_pct",
+        DEFAULT_FAR_SUMMARY_ATLAS_FULL_UPLOAD_THRESHOLD_PCT,
+        0,
+      ),
+      maxDirtyRectsPerTexture: optionalNumber(
+        atlasRaw["max_dirty_rects_per_texture"],
+        "far_summary_atlas.max_dirty_rects_per_texture",
+        DEFAULT_FAR_SUMMARY_ATLAS_MAX_DIRTY_RECTS_PER_TEXTURE,
+        1,
+      ),
     },
     debug: {
       enabled: requireBool(debugRaw["enabled"], "debug.enabled"),

@@ -115,9 +115,22 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       customPropGpuVisibleCountAvg: avgCounter(samples, "customPropGpuVisibleCount"),
       customPropGpuOverflowedFrames: samples.reduce((s, sample) => s + sample.customPropGpuOverflowed, 0),
       customPropGpuDispatchMsAvg: avgCounter(samples, "customPropGpuDispatchMs"),
+      statsSyncRuns: samples.reduce((max, sample) => Math.max(max, sample.statsSyncRuns), 0),
+      statsSyncSkips: samples.reduce((max, sample) => Math.max(max, sample.statsSyncSkips), 0),
+      statsSyncRanFrames: samples.reduce((s, sample) => s + sample.statsSyncRan, 0),
+      statsSyncThrottleReasonCounts: countStatsSyncReasons(samples),
+      statsSyncHzEffectiveAvg: avgCounter(samples, "statsSyncHzEffective"),
       gpuPassesAvg: avgGpuPasses(samples),
     },
   };
+}
+
+function countStatsSyncReasons(samples: readonly FramePerfSample[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const sample of samples) {
+    counts[sample.statsSyncThrottleReason] = (counts[sample.statsSyncThrottleReason] ?? 0) + 1;
+  }
+  return counts;
 }
 
 export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): FramePerfProbe | null {

@@ -24,6 +24,7 @@ import type {
   RenderResolutionConfig,
   RenderResolutionPreset,
 } from "../rendering/render_resolution.js";
+import type { StatsSyncThrottleConfig } from "./frame_loop/stats_sync_throttle.js";
 
 export interface ClodRuntimeConfig {
   runtime: {
@@ -55,6 +56,7 @@ export interface ClodRuntimeConfig {
   profiling: {
     slowFrameMs: number;
   };
+  stats: StatsSyncThrottleConfig;
 }
 
 export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
@@ -86,6 +88,11 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   },
   profiling: {
     slowFrameMs: 24,
+  },
+  stats: {
+    normalHz: 4,
+    debugHz: 10,
+    profileEveryFrame: true,
   },
 };
 
@@ -147,6 +154,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const renderResolution = (raw.render_resolution ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
+    const stats = (raw.stats ?? {}) as Record<string, unknown>;
     const parsed = {
       runtime: {
         worldOptions: worldOptions(runtime.world_options, defaults.runtime.worldOptions),
@@ -222,6 +230,11 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
       },
       profiling: {
         slowFrameMs: positiveNumber(profiling.slow_frame_ms, defaults.profiling.slowFrameMs),
+      },
+      stats: {
+        normalHz: positiveNumber(stats.normal_hz, defaults.stats.normalHz),
+        debugHz: positiveNumber(stats.debug_hz, defaults.stats.debugHz),
+        profileEveryFrame: bool(stats.profile_every_frame, defaults.stats.profileEveryFrame),
       },
     };
     if (yamlText === clodRuntimeYaml) cachedBundledRuntimeConfig = parsed;

@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_FAR_SUMMARY_ATLAS_FORMAT, DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE, parseNaadfPocConfig } from "../config.js";
+import {
+  DEFAULT_FAR_SUMMARY_ATLAS_DIRTY_RECT_UPLOADS,
+  DEFAULT_FAR_SUMMARY_ATLAS_FULL_UPLOAD_THRESHOLD_PCT,
+  DEFAULT_FAR_SUMMARY_ATLAS_MAX_DIRTY_RECTS_PER_TEXTURE,
+} from "../farSummaryAtlasUploadConfig.js";
 import naadfYaml from "../../../config/naadf_poc.yaml?raw";
 
 function withoutFarSummaryAtlasSection(yaml: string): string {
-  return yaml.replace(/\n  far_summary_atlas:\n    format: [^\n]+\n/, "\n");
+  return yaml.replace(/\n  far_summary_atlas:\n(?:    .+\n)+(?=\n  query:)/, "\n");
 }
 
 function withFarSummaryAtlasFormat(yaml: string, format: string): string {
@@ -60,12 +65,18 @@ describe("naadf config", () => {
 
     expect(DEFAULT_FAR_SUMMARY_ATLAS_FORMAT).toBe("balanced");
     expect(config.farSummaryAtlas.format).toBe("balanced");
+    expect(config.farSummaryAtlas.dirtyRectUploads).toBe(true);
+    expect(config.farSummaryAtlas.fullUploadThresholdPct).toBe(0.35);
+    expect(config.farSummaryAtlas.maxDirtyRectsPerTexture).toBe(128);
   });
 
   it("defaults far-summary atlas packing to balanced when omitted", () => {
     const config = parseNaadfPocConfig(withoutFarSummaryAtlasSection(naadfYaml));
 
     expect(config.farSummaryAtlas.format).toBe("balanced");
+    expect(config.farSummaryAtlas.dirtyRectUploads).toBe(DEFAULT_FAR_SUMMARY_ATLAS_DIRTY_RECT_UPLOADS);
+    expect(config.farSummaryAtlas.fullUploadThresholdPct).toBe(DEFAULT_FAR_SUMMARY_ATLAS_FULL_UPLOAD_THRESHOLD_PCT);
+    expect(config.farSummaryAtlas.maxDirtyRectsPerTexture).toBe(DEFAULT_FAR_SUMMARY_ATLAS_MAX_DIRTY_RECTS_PER_TEXTURE);
   });
 
   it("allows debug RGBA32F far-summary atlas packing for validation", () => {

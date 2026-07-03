@@ -69,6 +69,18 @@ function dataTexture(widthCells: number, heightCells: number): THREE.DataTexture
   return new THREE.DataTexture(new Float32Array(widthCells * heightCells * 4), widthCells, heightCells, THREE.RGBAFormat, THREE.FloatType);
 }
 
+function uploadStats(totalPixels: number): FarSummaryGpuAtlasView["uploadStats"] {
+  return {
+    fullUploads: 0,
+    dirtyUploads: 0,
+    dirtyRects: 0,
+    dirtyPixels: 0,
+    dirtyPct: 0,
+    totalPixels,
+    lastUploadMode: "none",
+  };
+}
+
 function atlasView(ringCount: number): FarSummaryGpuAtlasView {
   const widthCells = 4;
   const ringHeightCells = 4;
@@ -89,6 +101,7 @@ function atlasView(ringCount: number): FarSummaryGpuAtlasView {
       heightCells: ringHeightCells,
       valid: 1,
     })),
+    uploadStats: uploadStats(widthCells * heightCells),
     originX: 0,
     originZ: 0,
     cellM: 32,
