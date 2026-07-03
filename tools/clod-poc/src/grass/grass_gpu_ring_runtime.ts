@@ -7,6 +7,7 @@ import {
   grassGpuRingSlotCount,
   type GrassGpuRingStats,
 } from "../gpu/grass_ring_compute.js";
+import { renderableIndirectDrawCountForGeometry } from "../gpu/indirect_draw_geometry.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import type { GrassSettings, GrassTier } from "./grass_config.js";
 import {
@@ -14,6 +15,7 @@ import {
   grassGpuRingKey,
   grassGpuRingTierCapacity,
   type GrassGpuRingDrawResources,
+  type GrassGpuTierDrawResources,
   type GrassRingInstanceBuffers,
   type GrassWebGpuBackendAccess,
 } from "./grass_gpu_ring.js";
@@ -265,7 +267,9 @@ export class GrassGpuRingRuntime {
     const slotCount = grassGpuRingSlotCount(settings.ring);
     const tierCapacity = grassGpuRingTierCapacity(settings);
     this.draw = this.createDrawResources(settings, tierCapacity);
-    this.meshes = Object.values(this.draw.tiers).map((tier) => tier.mesh);
+    this.meshes = Object.values(this.draw.tiers)
+      .filter((tier): tier is GrassGpuTierDrawResources => !!tier)
+      .map((tier) => tier.mesh);
     this.setDrawsVisible(false);
     for (const mesh of this.meshes) this.root.add(mesh);
     this.stats = {
@@ -357,7 +361,7 @@ export class GrassGpuRingRuntime {
   }
 
   private indexCountFor(geometry: THREE.BufferGeometry): number {
-    return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
+    return renderableIndirectDrawCountForGeometry(geometry);
   }
 
   private gpuBufferForAttribute(attribute: THREE.BufferAttribute): GPUBuffer {
