@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import { depthPrepassTwin } from "../rendering/veg_prepass.js";
+import { isRenderableIndirectDrawGeometry } from "../gpu/indirect_draw_geometry.js";
 import {
   gpuBuffersForTier,
   grassGpuRingDrawUnsupportedReason,
@@ -70,12 +71,15 @@ export function createGrassGpuRingDrawResources(input: {
     materialFor,
     addPrepassTwin,
   });
-  const tiers = {
-    near: createTier("near", 0),
-    mid: createTier("mid", 5 * Uint32Array.BYTES_PER_ELEMENT),
-    far: createTier("far", 10 * Uint32Array.BYTES_PER_ELEMENT),
-    super: createTier("super", 15 * Uint32Array.BYTES_PER_ELEMENT),
-  } satisfies Record<GrassTier, GrassGpuTierDrawResources>;
+  const tiers: Partial<Record<GrassTier, GrassGpuTierDrawResources>> = {};
+  const near = createTier("near", 0);
+  if (near) tiers.near = near;
+  const mid = createTier("mid", 5 * Uint32Array.BYTES_PER_ELEMENT);
+  if (mid) tiers.mid = mid;
+  const far = createTier("far", 10 * Uint32Array.BYTES_PER_ELEMENT);
+  if (far) tiers.far = far;
+  const superTier = createTier("super", 15 * Uint32Array.BYTES_PER_ELEMENT);
+  if (superTier) tiers.super = superTier;
   if (useGrassRingDebug) logGpuRingRegions(count);
 
   return {
@@ -103,8 +107,9 @@ function createGpuRingTierDraw(input: {
   useGrassPrepass: boolean;
   materialFor: (mode: GrassShaderMode) => THREE.Material;
   addPrepassTwin: (twin: THREE.Mesh) => void;
-}): GrassGpuTierDrawResources {
+}): GrassGpuTierDrawResources | null {
   const { tier, count, bladeGeometry, indirect, indirectOffset, sharedAttributes, worldCells, shaderMode, useGrassPrepass, materialFor, addPrepassTwin } = input;
+  if (!isRenderableIndirectDrawGeometry(bladeGeometry)) return null;
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setAttribute("position", bladeGeometry.getAttribute("position"));
   geometry.setAttribute("uv", bladeGeometry.getAttribute("uv"));
