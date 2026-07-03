@@ -175,9 +175,10 @@ terrain-material-cache-evidence
 vegetation-early-reject-evidence
 far-summary-source-evidence
 far-summary-atlas-packing-evidence
+far-summary-atlas-dirty-upload-evidence
 ```
 
-These gates fail if the report is missing required cases, any case failed, terrain cache evidence is missing, vegetation early rejection did not reduce candidate budget or reject clusters, far-summary source usage is missing in early-reject cases, or atlas packing savings are missing.
+These gates fail if the report is missing required cases, any case failed, terrain cache evidence is missing, vegetation early rejection did not reduce candidate budget or reject clusters, far-summary source usage is missing in early-reject cases, atlas packing savings are missing, or the atlas never shows a dirty upload with `dirtyPixels < totalPixels` and upload mode `dirty`.
 
 Use `--failOnGateFailure` to make failed evidence gates return a non-zero process exit code.
 
