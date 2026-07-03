@@ -73,13 +73,11 @@ export function materialChurnConfigForQuery(
   const enabled = explicitEnabled ?? profileEnabled;
   const collectMaterialVersions = enabled && (
     queryBool(searchParams, ["materialChurnVersions", "materialVersions"])
-      ?? config.collectMaterialVersions
-      ?? profileEnabled
+      ?? (profileEnabled ? true : config.collectMaterialVersions)
   );
   const collectRendererPrograms = enabled && (
     queryBool(searchParams, ["materialChurnPrograms", "rendererPrograms"])
-      ?? config.collectRendererPrograms
-      ?? profileEnabled
+      ?? (profileEnabled ? true : config.collectRendererPrograms)
   );
   return {
     ...config,
