@@ -24,6 +24,15 @@ function disposePropLodChain(chain: PropLodChain): void {
   chain.billboardGeometry?.dispose();
 }
 
+function disposeObjectGraph(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return;
+    obj.geometry?.dispose();
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const material of materials) material?.dispose();
+  });
+}
+
 export interface LoadedPropAsset {
   def: PropAssetDef;
   root: THREE.Group;
@@ -88,7 +97,10 @@ export class PropAssetRegistry {
     root.add(gltf.scene);
 
     const sourceMesh = firstRenderableMesh(root);
-    if (!sourceMesh) throw new Error(`Prop asset "${def.id}" has no renderable mesh`);
+    if (!sourceMesh) {
+      disposeObjectGraph(root);
+      throw new Error(`Prop asset "${def.id}" has no renderable mesh`);
+    }
 
     const sourceMaterial = Array.isArray(sourceMesh.material) ? sourceMesh.material[0]! : sourceMesh.material;
     let lodChain: PropLodChain | null = null;
@@ -99,6 +111,7 @@ export class PropAssetRegistry {
       const invalidLod = firstInvalidLodIndex(lodChain);
       if (invalidLod >= 0) {
         disposePropLodChain(lodChain);
+        disposeObjectGraph(root);
         throw new Error(`Prop asset "${def.id}" generated empty LOD ${invalidLod}`);
       }
       lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
@@ -119,6 +132,8 @@ export class PropAssetRegistry {
 
     const report = validatePropAssetMetadata(def, metadata, this.settings);
     if (!report.ok) {
+      lodChain && disposePropLodChain(lodChain);
+      disposeObjectGraph(root);
       const detail = report.errors.map((e) => e.message).join("; ");
       throw new Error(`Rejected prop asset "${def.id}": ${detail}`);
     }
@@ -142,12 +157,7 @@ export class PropAssetRegistry {
     for (const asset of this.assets.values()) {
       asset.lodChain?.levels.forEach((level) => level.geometry.dispose());
       asset.lodChain?.billboardGeometry?.dispose();
-      asset.root.traverse((obj) => {
-        if (!(obj instanceof THREE.Mesh)) return;
-        obj.geometry?.dispose();
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const mat of mats) mat?.dispose();
-      });
+      disposeObjectGraph(asset.root);
     }
     this.assets.clear();
     this.loading.clear();
