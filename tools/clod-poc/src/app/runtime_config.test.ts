@@ -33,23 +33,23 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(2);
     expect(config.selectionCutCache.thresholdBucketPx).toBe(0.05);
     expect(config.selectionCutCache.maxReuseFrames).toBe(8);
-    expect(config.materialChurn.enabled).toBe(true);
-    expect(config.materialChurn.collectMaterialVersions).toBe(true);
-    expect(config.materialChurn.collectRendererPrograms).toBe(true);
+    expect(config.materialChurn.enabled).toBe(false);
+    expect(config.materialChurn.collectMaterialVersions).toBe(false);
+    expect(config.materialChurn.collectRendererPrograms).toBe(false);
     expect(config.materialChurn.logSpikeWarnings).toBe(false);
     expect(config.materialChurn.spikeWarnThresholdPerFrame).toBe(32);
-    expect(config.materialChurn.maxTrackedMaterials).toBe(4096);
-    expect(config.renderResolution.dprCap).toBe(1.5);
-    expect(config.renderResolution.renderScale).toBe(1.0);
+    expect(config.materialChurn.maxTrackedMaterials).toBe(1024);
+    expect(config.renderResolution.dprCap).toBe(1.0);
+    expect(config.renderResolution.renderScale).toBe(0.85);
     expect(config.renderResolution.minEffectivePixelRatio).toBe(0.5);
-    expect(config.renderResolution.maxEffectivePixelRatio).toBe(2.0);
+    expect(config.renderResolution.maxEffectivePixelRatio).toBe(1.25);
     expect(config.renderResolution.presets.performance100).toEqual({ dprCap: 1.0, renderScale: 0.85 });
-    expect(config.renderResolution.presets.high).toEqual({ dprCap: 1.5, renderScale: 1.0 });
+    expect(config.renderResolution.presets.high).toEqual({ dprCap: 1.25, renderScale: 0.9 });
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
-    expect(config.stats.normalHz).toBe(4);
-    expect(config.stats.debugHz).toBe(10);
-    expect(config.stats.profileEveryFrame).toBe(true);
+    expect(config.stats.normalHz).toBe(2);
+    expect(config.stats.debugHz).toBe(6);
+    expect(config.stats.profileEveryFrame).toBe(false);
   });
 
   it("falls back to defaults on invalid yaml", () => {

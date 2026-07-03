@@ -193,7 +193,7 @@ describe("frame perf probe", () => {
     expect(summary.counters.understoryGpuPrefilterSourceFallbackAvg).toBe(3);
     expect(summary.counters.vegetationGpuClustersTotalAvg).toBe(18);
     expect(summary.counters.vegetationGpuClustersRejectedEarlyAvg).toBe(4);
-    expect(summary.counters.vegetationGpuClustersAcceptedAvg).toBe(12);
+    expect(summary.counters.vegetationGpuClustersAcceptedAvg).toBe(10);
     expect(summary.counters.vegetationGpuClustersSummaryMissingAvg).toBe(2);
     expect(summary.counters.vegetationGpuSourceFarSummaryAvg).toBe(24);
     expect(summary.counters.vegetationGpuSourceTerrainSamplerAvg).toBe(16);

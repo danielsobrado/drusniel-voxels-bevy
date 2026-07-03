@@ -134,7 +134,7 @@ function isCurrentSixSpeciesConfig(source) {
     `export const TREE_SPECIES = ["oak", "pine", "dead", "birch", "willow", "spruce"] as const;`,
     "export interface TreeSpeciesMorphologySettings",
     "export interface TreeSpeciesZoneSettings",
-    "spruce: species(0.09, 20, 64, 10.5, 0.32, 3.0",
+    "spruce: species(0.10, 16, 60, 10.0, 0.32, 3.4",
     "for (const id of TREE_SPECIES) species[id] = parseSpeciesSettings(root[id], fallback.species[id]);",
     "for (const id of TREE_SPECIES) speciesZones[id] = parseSpeciesZone(root[id], fallback.ecology.speciesZones[id]);",
   ].every((marker) => source.includes(marker));

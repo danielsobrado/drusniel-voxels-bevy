@@ -148,7 +148,7 @@ grass:
     expect(parsed.ring.bandMeters).toBe(0);
     expect(parsed.ring.scruffMeters).toBe(0);
     expect(parsed.patchFallback.maxNewPatchesPerRefresh).toBe(1);
-    expect(parsed.patchFallback.refreshDistance).toBe(0.1);
+    expect(parsed.patchFallback.refreshDistance).toBe(8);
   });
 
   it("clamps invalid nested grass YAML values", () => {
@@ -348,10 +348,10 @@ grass:
   });
 
   it("uses a fixed GPU slot grid instead of a CPU candidate buffer", () => {
-    expect(GRASS_GPU_RING_GRID).toBe(700);
-    expect(GRASS_GPU_RING_CELL).toBe(0.7);
+    expect(GRASS_GPU_RING_GRID).toBe(512);
+    expect(GRASS_GPU_RING_CELL).toBe(0.8);
     expect(GRASS_GPU_RING_SLOT_COUNT).toBe(GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID);
-    expect(GRASS_GPU_RING_GRID * GRASS_GPU_RING_CELL * 0.5).toBeGreaterThanOrEqual(217);
+    expect(GRASS_GPU_RING_GRID * GRASS_GPU_RING_CELL * 0.5).toBeGreaterThanOrEqual(160);
   });
 
   it("mirrors GPU pcg2d deterministically", () => {

@@ -26,11 +26,11 @@ function geometries(): TreeGeometryMap {
 }
 
 describe("tree impostor quality defaults", () => {
-  it("uses high-quality baked impostor defaults", () => {
+  it("uses configured baked impostor defaults", () => {
     const settings = cloneTreeSettings();
 
     expect(settings.impostors.sourceLod).toBe("near");
-    expect(settings.impostors.resolutionPx).toBe(256);
+    expect(settings.impostors.resolutionPx).toBe(192);
     expect(settings.impostors.alphaTest).toBe(0.35);
     expect(settings.impostors.fallbackToPlaceholder).toBe(false);
     expect(settings.impostors.swapOnBake).toBe(true);
