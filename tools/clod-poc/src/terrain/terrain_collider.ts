@@ -90,6 +90,23 @@ function translatePageMesh(mesh: PageMesh, dx: number, dz: number): void {
   }
 }
 
+function entryFromPage(page: TerrainColliderPage): ColliderEntry {
+  if (!page.geometry && !page.mesh) throw new Error(`Collider page ${page.id} needs geometry or mesh source`);
+  return {
+    id: page.id,
+    footprint: { ...page.footprint },
+    sourceGeometry: page.geometry?.clone() ?? null,
+    sourceMesh: page.mesh
+      ? {
+          ...page.mesh,
+          positions: new Float32Array(page.mesh.positions),
+        }
+      : null,
+    geometry: null,
+    boundsTree: null,
+  };
+}
+
 export class TerrainColliderSet {
   private readonly entries: ColliderEntry[];
 
@@ -97,26 +114,15 @@ export class TerrainColliderSet {
     pages: readonly TerrainColliderPage[],
     private readonly heightFallback: TerrainHeightFallback | null = null,
   ) {
-    this.entries = pages.map((page) => {
-      if (!page.geometry && !page.mesh) throw new Error(`Collider page ${page.id} needs geometry or mesh source`);
-      return {
-        id: page.id,
-        footprint: { ...page.footprint },
-        sourceGeometry: page.geometry?.clone() ?? null,
-        sourceMesh: page.mesh
-          ? {
-              ...page.mesh,
-              positions: new Float32Array(page.mesh.positions),
-            }
-          : null,
-        geometry: null,
-        boundsTree: null,
-      };
-    });
+    this.entries = pages.map(entryFromPage);
   }
 
   loadedPageCount(): number {
     return this.entries.filter((entry) => entry.boundsTree !== null).length;
+  }
+
+  pageCount(): number {
+    return this.entries.length;
   }
 
   translateHorizontal(dx: number, dz: number): void {
@@ -142,6 +148,14 @@ export class TerrainColliderSet {
     entry.geometry = geometry;
     entry.boundsTree = new MeshBVH(geometry);
     return entry.boundsTree;
+  }
+
+  private disposeEntry(entry: ColliderEntry): void {
+    entry.geometry?.dispose();
+    entry.sourceGeometry?.dispose();
+    entry.geometry = null;
+    entry.sourceGeometry = null;
+    entry.boundsTree = null;
   }
 
   private applyHeightFallback(
@@ -218,6 +232,24 @@ export class TerrainColliderSet {
     return true;
   }
 
+  upsertPage(page: TerrainColliderPage): void {
+    const index = this.entries.findIndex((entry) => entry.id === page.id);
+    if (index < 0) {
+      this.entries.push(entryFromPage(page));
+      return;
+    }
+    this.disposeEntry(this.entries[index]!);
+    this.entries[index] = entryFromPage(page);
+  }
+
+  removePage(id: string): boolean {
+    const index = this.entries.findIndex((entry) => entry.id === id);
+    if (index < 0) return false;
+    this.disposeEntry(this.entries[index]!);
+    this.entries.splice(index, 1);
+    return true;
+  }
+
   resolveCapsule(
     position: THREE.Vector3,
     velocity: THREE.Vector3,
@@ -288,12 +320,6 @@ export class TerrainColliderSet {
   }
 
   dispose(): void {
-    for (const entry of this.entries) {
-      entry.geometry?.dispose();
-      entry.sourceGeometry?.dispose();
-      entry.geometry = null;
-      entry.sourceGeometry = null;
-      entry.boundsTree = null;
-    }
+    for (const entry of this.entries) this.disposeEntry(entry);
   }
 }
