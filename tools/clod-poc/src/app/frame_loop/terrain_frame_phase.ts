@@ -40,6 +40,22 @@ export interface TerrainFramePhaseResult {
   grassCenter: THREE.Vector3;
 }
 
+function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
+  const hooks = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod;
+  const counters = hooks?.stats?.counters;
+  if (!counters) return;
+  counters["live_bubble_required_pages"] = stats.requiredPages;
+  counters["live_bubble_ready_pages"] = stats.readyPages;
+  counters["live_bubble_building_pages"] = stats.buildingPages;
+  counters["live_bubble_failed_pages"] = stats.failedPages;
+  counters["live_bubble_built_this_frame"] = stats.chunkGroupsBuiltThisFrame;
+  counters["live_bubble_ms"] = stats.bubbleMs;
+  counters["live_bubble_evictions"] = stats.evictions;
+  counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
+}
+
 export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFramePhaseResult {
   const activeTerrainViews = input.selectionController.activeTerrainViews() as Set<TerrainFadeView>;
   const currentTerrainViews = input.selectionController.currentTerrainViews();
@@ -70,6 +86,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     getView: (nodeId) => input.views.get(nodeId) as unknown as NearFieldBubbleView | undefined,
     frameId: selectionStats.frameId,
   });
+  mirrorLiveBubbleStats(bubbleStats);
   if (input.pruneRenderNodeCache) {
     const protectedNodeIds = new Set<string>();
     for (const view of currentTerrainViews) protectedNodeIds.add(view.node.id);
