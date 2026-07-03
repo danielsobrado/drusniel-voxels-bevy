@@ -205,7 +205,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     p0DirtyAtlasExercise.update(selectionStats.frameId);
 
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
-      player.controls.update();
+      player.playerInputController.updateFrame(playerDelta);
+      player.playerInputController.updateHoldToDig();
     });
     timed(collectFrameTiming, phaseTiming, "constructionMs", () => {
       construction?.update();
