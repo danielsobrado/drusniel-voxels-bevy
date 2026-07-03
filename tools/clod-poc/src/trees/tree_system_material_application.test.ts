@@ -90,6 +90,18 @@ describe("tree system material application helpers", () => {
     expect(geometry.getAttribute("treeImpostorBlendWeights").getX(0)).toBe(1);
   });
 
+  it("can omit impostor blend attributes for WebGPU-safe initial meshes", () => {
+    const source = new THREE.PlaneGeometry(1, 2);
+    const geometry = createTreeSystemImpostorGeometryForCapacity(source, 3, false);
+
+    expect(geometry.getAttribute("treeImpostorUvRect")).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorUvRect0")).toBeUndefined();
+    expect(geometry.getAttribute("treeImpostorUvRect1")).toBeUndefined();
+    expect(geometry.getAttribute("treeImpostorUvRect2")).toBeUndefined();
+    expect(geometry.getAttribute("treeImpostorUvRect3")).toBeUndefined();
+    expect(geometry.getAttribute("treeImpostorBlendWeights")).toBeUndefined();
+  });
+
   it("replaces one impostor mesh geometry and invalidates bounds state", () => {
     const source = new THREE.PlaneGeometry(1, 2);
     const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial(), 2);
@@ -98,7 +110,7 @@ describe("tree system material application helpers", () => {
     const bounds = new WeakMap<THREE.InstancedMesh, unknown>();
     bounds.set(mesh, { hasBounds: true });
 
-    replaceTreeSystemImpostorGeometry(mesh, source, bounds);
+    replaceTreeSystemImpostorGeometry(mesh, source, true, bounds);
 
     expect(mesh.geometry).not.toBe(oldGeometry);
     expect(mesh.geometry.getAttribute("treeWorldXZ").count).toBe(2);
