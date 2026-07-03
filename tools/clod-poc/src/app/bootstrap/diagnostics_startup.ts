@@ -1,9 +1,12 @@
+import * as THREE from "three";
 import { initHooks, type ClodHooks, type EngineStats } from "../../core/hooks.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { ClodErrorPxCompute } from "../../gpu/clod_error_px_compute.js";
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
 import type { ClodPageNode } from "../../types.js";
 import type { AppRenderer } from "./renderer_startup.js";
+
+const AUTOMATION_POSE_LOOK_DISTANCE_M = 100;
 
 export function publishTerrainSummaryForDiagnostics(summary: TerrainSummaryField): void {
   window.__drusnielTerrainSummary = summary;
@@ -22,7 +25,7 @@ export function initLongViewDiagnostics(input: {
   maxTerrainLevel: number;
   worldCells: number;
   phase0TargetVisibleM: number;
-  camera: import("three").PerspectiveCamera;
+  camera: THREE.PerspectiveCamera;
   controls: import("three/examples/jsm/controls/OrbitControls.js").OrbitControls;
 }): Pick<LongViewDiagnosticsContext, "longViewHooks" | "longViewSettleWaiters"> {
   const longViewSettleWaiters: { frames: number; resolve: () => void }[] = [];
@@ -36,12 +39,16 @@ export function initLongViewDiagnostics(input: {
   longViewHooks.settle = (frames = 8) => new Promise((resolve) => longViewSettleWaiters.push({ frames, resolve }));
   longViewHooks.flyCamEnabled = (_on) => { /* orbit-only in main app */ };
   longViewHooks.setPose = (pose) => {
-    input.controls.target.set(pose.p[0], pose.p[1], pose.p[2]);
+    input.camera.position.set(pose.p[0], pose.p[1], pose.p[2]);
     input.camera.rotation.set(pose.pitch, pose.yaw, 0, "YXZ");
     if (pose.fov) { input.camera.fov = pose.fov; input.camera.updateProjectionMatrix(); }
+    const forward = new THREE.Vector3();
+    input.camera.getWorldDirection(forward);
+    input.controls.target.copy(input.camera.position).addScaledVector(forward, AUTOMATION_POSE_LOOK_DISTANCE_M);
+    input.controls.update();
   };
   longViewHooks.getPose = () => ({
-    p: [input.controls.target.x, input.controls.target.y, input.controls.target.z],
+    p: [input.camera.position.x, input.camera.position.y, input.camera.position.z],
     yaw: input.camera.rotation.y,
     pitch: input.camera.rotation.x,
     fov: input.camera.fov,
