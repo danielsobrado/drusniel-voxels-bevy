@@ -53,6 +53,7 @@ import {
   isRiverParityTestScene,
   type WaterConfig,
 } from "../../water/index.js";
+import { applyWaterQueryOverrides } from "../../water/water_quality_overrides.js";
 import type { ClodPageNode } from "../../types.js";
 import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
@@ -181,7 +182,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     "5000": parsePropPlacements(customPropPlacements5000Text),
     "20000": parsePropPlacements(customPropPlacements20000Text),
   };
-  let waterConfig = parseWaterConfig(waterConfigText);
+  let waterConfig = applyWaterQueryOverrides(parseWaterConfig(waterConfigText), searchParams);
   const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
   const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
@@ -296,53 +297,55 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     waterConfig: {
       enabled: waterConfig.enabled,
       source: waterConfig.source,
-      fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
-      hydrology: { enabled: waterConfig.hydrology.enabled },
+      fakeBodies: waterConfig.fakeBodies,
+      hydrology: {
+        enabled: waterConfig.hydrology.enabled,
+        simRes: waterConfig.hydrology.simRes,
+        particles: waterConfig.hydrology.accumulation.particles,
+        fillIterations: waterConfig.hydrology.fill.iterations,
+        riverThresholdAdd: waterConfig.hydrology.rivers.riverThresholdAdd,
+        visibleWaterThresholdAdd: waterConfig.hydrology.rivers.visibleWaterThresholdAdd,
+        carveDepthM: waterConfig.hydrology.rivers.carveDepthM,
+        lakeSurfaceDropM: waterConfig.hydrology.rivers.lakeSurfaceDropM,
+      },
     },
-    proceduralTextureEnabled: proceduralTextureConfig.enabled,
-    proceduralTextureHash,
     stagedImportHash,
-    longViewScene: queryLongViewScene,
+    proceduralTextureHash,
   };
-
-  const cacheCtx: ClodCacheContext | null = await initClodCacheContext({
-    cfg,
+  const sourceHash = await buildProceduralTextureHash(true, JSON.stringify(terrainSource));
+  const cacheContext: ClodCacheContext = initClodCacheContext({
+    version: cfg.meshopt_package_version,
     worldPages: WORLD,
-    terrainSource,
-    forceDisabled: cacheDisabled,
-    role: "main",
+    sourceHash,
+    cacheDisabled: isCacheSessionDisabled(),
+  });
+  const cacheOverlay = createCacheDebugOverlay(document.body, cacheContext.stats);
+  if (searchParams.get("cacheDebug") === "1") cacheOverlay.setVisible(true);
+
+  const result = await loadTerrainSummaryWithCacheSimple({
+    client: clodWorker,
+    worldSize: WORLD,
+    config: cfg,
+    source: worldSource,
+    cacheContext,
+    onProgress: (progress) => {
+      buildProgress.hidden = false;
+      buildProgressPhase.textContent = progress.phase;
+      buildProgressPercent.textContent = `${Math.round(progress.progress * 100)}%`;
+      buildProgressBar.value = progress.progress;
+      buildStatus.value = progress.phase;
+      updateBuildOverlay();
+    },
   });
 
-  const buildNote = WORLD >= 16 ? " (worker build; large world may take a while)" : WORLD >= 8 ? " (worker build)" : "";
-  info.textContent = `building ${WORLD}x${WORLD} world…${buildNote}`;
-  buildProgress.hidden = false;
-  buildProgressPhase.textContent = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
-  buildProgressPercent.textContent = "0%";
-  buildProgressBar.value = 0;
-  buildStatus.value = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
-  updateBuildOverlay();
-  await new Promise((r) => setTimeout(r, 16));
-
-  const result = await clodWorker.buildWorld(WORLD, WORLD, cfg, getVoxelEditSnapshot(), ({ done, total, level, phase }) => {
-    const fraction = total > 0 ? Math.min(1, done / total) : 0;
-    buildProgressBar.value = fraction;
-    buildProgressPercent.textContent = `${Math.floor(fraction * 100)}%`;
-    buildProgressPhase.textContent = `${phase}  L${level}  ${done}/${total}`;
-    info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
-    buildStatus.value = `${phase} L${level} ${done}/${total}`;
-    updateBuildOverlay();
-  }, terrainFieldConfig, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), terrainSource);
-
+  publishTerrainSummaryForDiagnostics(result, worldCells);
+  const { lod0Nodes, allNodes, maxTerrainLevel } = splitWorldBuildNodes(result.nodes);
+  const polish = aggregateDiagonalPolishStats(result.nodes);
+  const polishLine = formatDiagonalPolishStats(polish);
+  info.textContent = "ready";
   buildProgress.hidden = true;
   buildStatus.value = "ready";
-  const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
-  const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
-  const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
-  const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const summaryResult = await loadTerrainSummaryWithCacheSimple(lod0Nodes, worldSizeCells, 8, cacheCtx);
-  const terrainSummary = summaryResult.summary;
-  publishTerrainSummaryForDiagnostics(terrainSummary);
-  if (cacheCtx) createCacheDebugOverlay();
+  updateBuildOverlay();
 
   return {
     cfg,
@@ -361,11 +364,11 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     clodWorker,
     WORLD,
     worldCells,
-    worldSizeCells,
+    worldSizeCells: worldCells,
     lod0Nodes,
     allNodes,
     maxTerrainLevel,
-    terrainSummary,
+    terrainSummary: result.terrainSummary,
     worldSource,
     result,
     hydrologySystem,
