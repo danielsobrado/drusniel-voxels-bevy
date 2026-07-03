@@ -5,7 +5,7 @@ import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata } from "./pro
 import { extractPropAssetMetadata } from "./prop_asset_metadata.js";
 import { validateCustomPropsManifest, validatePropAssetMetadata } from "./prop_asset_validate.js";
 import { buildPropLodChain, type PropLodChain } from "./prop_lod_build.js";
-import { createBillboardMaterial } from "./prop_billboard.js";
+import { assignBillboardMaterial, createBillboardMaterial, disposeBillboardGeometryResources } from "./prop_billboard.js";
 
 function firstRenderableMesh(root: THREE.Object3D): THREE.Mesh | null {
   let found: THREE.Mesh | null = null;
@@ -21,7 +21,7 @@ function firstInvalidLodIndex(chain: PropLodChain): number {
 
 function disposePropLodChain(chain: PropLodChain): void {
   for (const level of chain.levels) level.geometry.dispose();
-  chain.billboardGeometry?.dispose();
+  disposeBillboardGeometryResources(chain.billboardGeometry);
 }
 
 function disposeObjectGraph(root: THREE.Object3D): void {
@@ -116,9 +116,9 @@ export class PropAssetRegistry {
       }
       lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
       if (lodChain.billboardGeometry && isRenderableIndirectDrawGeometry(lodChain.billboardGeometry)) {
-        lodChain.billboardGeometry.userData.billboardMaterial = createBillboardMaterial(sourceMaterial);
+        assignBillboardMaterial(lodChain.billboardGeometry, createBillboardMaterial(sourceMaterial));
       } else if (lodChain.billboardGeometry) {
-        lodChain.billboardGeometry.dispose();
+        disposeBillboardGeometryResources(lodChain.billboardGeometry);
         lodChain.billboardGeometry = null;
       }
     }
@@ -155,8 +155,7 @@ export class PropAssetRegistry {
 
   dispose(): void {
     for (const asset of this.assets.values()) {
-      asset.lodChain?.levels.forEach((level) => level.geometry.dispose());
-      asset.lodChain?.billboardGeometry?.dispose();
+      if (asset.lodChain) disposePropLodChain(asset.lodChain);
       disposeObjectGraph(asset.root);
     }
     this.assets.clear();
