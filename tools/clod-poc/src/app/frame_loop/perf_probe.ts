@@ -50,6 +50,9 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
     avgCounter(samples, "grassGpuCandidateCount") +
     avgCounter(samples, "understoryGpuCandidateCount");
   const vegetationGpuClustersRejectedEarlyAvg = avgCounter(samples, "treeGpuPrefilterRejectedClusters");
+  const treeSourceFarSummaryAvg = avgCounter(samples, "treeGpuPrefilterSourceFarSummary");
+  const treeSourceTerrainSamplerAvg = avgCounter(samples, "treeGpuPrefilterSourceTerrainSampler");
+  const treeSourceFallbackAvg = avgCounter(samples, "treeGpuPrefilterSourceFallback");
   return {
     sampleCount: samples.length, warmupFrames, targetSampleFrames, metrics,
     broadBucketsByP95: rankBuckets(metrics, FRAME_PERF_BROAD_BUCKETS),
@@ -66,6 +69,9 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       treeGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "treeGpuCandidateCountAfterPrefilter"),
       treeGpuPrefilterRejectedClustersAvg: avgCounter(samples, "treeGpuPrefilterRejectedClusters"),
       treeGpuPrefilterSkippedCandidateEstimateAvg: avgCounter(samples, "treeGpuPrefilterSkippedCandidateEstimate"),
+      treeGpuPrefilterSourceFarSummaryAvg: treeSourceFarSummaryAvg,
+      treeGpuPrefilterSourceTerrainSamplerAvg: treeSourceTerrainSamplerAvg,
+      treeGpuPrefilterSourceFallbackAvg: treeSourceFallbackAvg,
       treeGpuAcceptedCountAvg: avgCounter(samples, "treeGpuAcceptedCount"),
       treeGpuVisibleCountAvg: avgCounter(samples, "treeGpuVisibleCount"),
       treeGpuShadowCasterCountAvg: avgCounter(samples, "treeGpuShadowCasterCount"),
@@ -97,6 +103,9 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       vegetationGpuClustersRejectedEarlyAvg,
       vegetationGpuClustersAcceptedAvg: avgCounter(samples, "treeVisibleClusterVisible"),
       vegetationGpuClustersSummaryMissingAvg: avgCounter(samples, "treeVisibleClusterUnknownKept"),
+      vegetationGpuSourceFarSummaryAvg: treeSourceFarSummaryAvg,
+      vegetationGpuSourceTerrainSamplerAvg: treeSourceTerrainSamplerAvg,
+      vegetationGpuSourceFallbackAvg: treeSourceFallbackAvg,
       vegetationGpuCandidatesBudgetBeforeRejectAvg,
       vegetationGpuCandidatesBudgetAfterRejectAvg,
       vegetationGpuCandidatesGeneratedAvg,
