@@ -28,8 +28,11 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     enabled: clipmapExclusionDistance > 0,
     distance: clipmapExclusionDistance,
   });
+  const useHighQualityWebGpuWater = deps.searchParams.get("waterHq") === "1" || deps.searchParams.get("waterQuality") === "high";
   const waterMaterialFactory = deps.isWebGpu
-    ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
+    ? useHighQualityWebGpuWater
+      ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
+      : (await import("../../water/waterFastNodeMaterial.js")).createWaterFastNodeMaterial
     : createWaterShaderMaterial;
   const clipmap = new WaterClipmap({
     scene: deps.scene,
