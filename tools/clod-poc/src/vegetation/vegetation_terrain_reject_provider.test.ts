@@ -238,7 +238,7 @@ describe("VegetationTerrainRejectProvider", () => {
     expect(result).toMatchObject({
       reject: true,
       reason: "terrainHidden",
-      source: "naadfFarSummary",
+      source: "terrainVisibilitySampler",
       farSummaryConsulted: true,
     });
   });

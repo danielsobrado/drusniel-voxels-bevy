@@ -145,6 +145,7 @@ export interface GrassGpuRingStats {
   prefilterRejectedClusters?: number;
   prefilterAcceptedClusters?: number;
   prefilterUnknownKeptClusters?: number;
+  prefilterFarSummaryConsulted?: number;
   prefilterSourceFarSummary?: number;
   prefilterSourceTerrainSampler?: number;
   prefilterSourceFallback?: number;
@@ -292,6 +293,7 @@ export class GrassGpuRingCompute {
   private prefilterRejectedClusters = 0;
   private prefilterAcceptedClusters = 0;
   private prefilterUnknownKeptClusters = 0;
+  private prefilterFarSummaryConsulted = 0;
   private prefilterSourceFarSummary = 0;
   private prefilterSourceTerrainSampler = 0;
   private prefilterSourceFallback = 0;
@@ -387,6 +389,7 @@ export class GrassGpuRingCompute {
     this.prefilterRejectedClusters = prefilter?.rejectedClusters ?? 0;
     this.prefilterAcceptedClusters = prefilter?.visibleClusters ?? 0;
     this.prefilterUnknownKeptClusters = prefilter?.unknownKeptClusters ?? 0;
+    this.prefilterFarSummaryConsulted = prefilter?.farSummaryConsultedClusters ?? 0;
     this.prefilterSourceFarSummary = prefilter?.sourceCounts.naadfFarSummary ?? 0;
     this.prefilterSourceTerrainSampler = prefilter?.sourceCounts.terrainVisibilitySampler ?? 0;
     this.prefilterSourceFallback = prefilter?.sourceCounts.conservativeFallback ?? 0;
@@ -424,6 +427,7 @@ export class GrassGpuRingCompute {
       prefilterRejectedClusters: this.prefilterRejectedClusters,
       prefilterAcceptedClusters: this.prefilterAcceptedClusters,
       prefilterUnknownKeptClusters: this.prefilterUnknownKeptClusters,
+      prefilterFarSummaryConsulted: this.prefilterFarSummaryConsulted,
       prefilterSourceFarSummary: this.prefilterSourceFarSummary,
       prefilterSourceTerrainSampler: this.prefilterSourceTerrainSampler,
       prefilterSourceFallback: this.prefilterSourceFallback,

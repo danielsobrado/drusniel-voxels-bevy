@@ -54,14 +54,18 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
   const treeUnknownKeptClustersAvg = avgCounter(samples, "treeVisibleClusterUnknownKept");
   const treeAcceptedClustersAvg = Math.max(0, treeVisibleClustersAvg - treeUnknownKeptClustersAvg);
   const treeSourceFarSummaryAvg = avgCounter(samples, "treeGpuPrefilterSourceFarSummary");
+  const treeFarSummaryConsultedAvg = avgCounter(samples, "treeGpuPrefilterFarSummaryConsulted");
   const treeSourceTerrainSamplerAvg = avgCounter(samples, "treeGpuPrefilterSourceTerrainSampler");
   const treeSourceFallbackAvg = avgCounter(samples, "treeGpuPrefilterSourceFallback");
   const grassSourceFarSummaryAvg = avgCounter(samples, "grassGpuPrefilterSourceFarSummary");
+  const grassFarSummaryConsultedAvg = avgCounter(samples, "grassGpuPrefilterFarSummaryConsulted");
   const grassSourceTerrainSamplerAvg = avgCounter(samples, "grassGpuPrefilterSourceTerrainSampler");
   const grassSourceFallbackAvg = avgCounter(samples, "grassGpuPrefilterSourceFallback");
   const understorySourceFarSummaryAvg = avgCounter(samples, "understoryGpuPrefilterSourceFarSummary");
+  const understoryFarSummaryConsultedAvg = avgCounter(samples, "understoryGpuPrefilterFarSummaryConsulted");
   const understorySourceTerrainSamplerAvg = avgCounter(samples, "understoryGpuPrefilterSourceTerrainSampler");
   const understorySourceFallbackAvg = avgCounter(samples, "understoryGpuPrefilterSourceFallback");
+  const vegetationFarSummaryConsultedAvg = treeFarSummaryConsultedAvg + grassFarSummaryConsultedAvg + understoryFarSummaryConsultedAvg;
   const vegetationSourceFarSummaryAvg = treeSourceFarSummaryAvg + grassSourceFarSummaryAvg + understorySourceFarSummaryAvg;
   const vegetationSourceTerrainSamplerAvg = treeSourceTerrainSamplerAvg + grassSourceTerrainSamplerAvg + understorySourceTerrainSamplerAvg;
   const vegetationSourceFallbackAvg = treeSourceFallbackAvg + grassSourceFallbackAvg + understorySourceFallbackAvg;
@@ -81,6 +85,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       treeGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "treeGpuCandidateCountAfterPrefilter"),
       treeGpuPrefilterRejectedClustersAvg: treeRejectedClustersAvg,
       treeGpuPrefilterSkippedCandidateEstimateAvg: avgCounter(samples, "treeGpuPrefilterSkippedCandidateEstimate"),
+      treeGpuPrefilterFarSummaryConsultedAvg: treeFarSummaryConsultedAvg,
       treeGpuPrefilterSourceFarSummaryAvg: treeSourceFarSummaryAvg,
       treeGpuPrefilterSourceTerrainSamplerAvg: treeSourceTerrainSamplerAvg,
       treeGpuPrefilterSourceFallbackAvg: treeSourceFallbackAvg,
@@ -104,6 +109,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       grassGpuCandidateCountAvg: avgCounter(samples, "grassGpuCandidateCount"),
       grassGpuCandidateCountBeforePrefilterAvg: avgCounter(samples, "grassGpuCandidateCountBeforePrefilter"),
       grassGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "grassGpuCandidateCountAfterPrefilter"),
+      grassGpuPrefilterFarSummaryConsultedAvg: grassFarSummaryConsultedAvg,
       grassGpuPrefilterSourceFarSummaryAvg: grassSourceFarSummaryAvg,
       grassGpuPrefilterSourceTerrainSamplerAvg: grassSourceTerrainSamplerAvg,
       grassGpuPrefilterSourceFallbackAvg: grassSourceFallbackAvg,
@@ -112,6 +118,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       understoryGpuCandidateCountAvg: avgCounter(samples, "understoryGpuCandidateCount"),
       understoryGpuCandidateCountBeforePrefilterAvg: avgCounter(samples, "understoryGpuCandidateCountBeforePrefilter"),
       understoryGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter"),
+      understoryGpuPrefilterFarSummaryConsultedAvg: understoryFarSummaryConsultedAvg,
       understoryGpuPrefilterSourceFarSummaryAvg: understorySourceFarSummaryAvg,
       understoryGpuPrefilterSourceTerrainSamplerAvg: understorySourceTerrainSamplerAvg,
       understoryGpuPrefilterSourceFallbackAvg: understorySourceFallbackAvg,
@@ -121,6 +128,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       vegetationGpuClustersRejectedEarlyAvg: treeRejectedClustersAvg,
       vegetationGpuClustersAcceptedAvg: treeAcceptedClustersAvg,
       vegetationGpuClustersSummaryMissingAvg: treeUnknownKeptClustersAvg,
+      vegetationGpuFarSummaryConsultedAvg: vegetationFarSummaryConsultedAvg,
       vegetationGpuSourceFarSummaryAvg: vegetationSourceFarSummaryAvg,
       vegetationGpuSourceTerrainSamplerAvg: vegetationSourceTerrainSamplerAvg,
       vegetationGpuSourceFallbackAvg: vegetationSourceFallbackAvg,

@@ -29,6 +29,7 @@ function grassStats(overrides: Partial<GrassStats> = {}): GrassStats {
     gpuRingPrefilterRejectedClusters: 3,
     gpuRingPrefilterAcceptedClusters: 5,
     gpuRingPrefilterUnknownKeptClusters: 1,
+    gpuRingPrefilterFarSummaryConsulted: 6,
     gpuRingPrefilterSourceFarSummary: 2,
     gpuRingPrefilterSourceTerrainSampler: 3,
     gpuRingPrefilterSourceFallback: 4,
@@ -76,6 +77,7 @@ function understoryStats(overrides: Partial<UnderstoryStats> = {}): UnderstorySt
     gpuPrefilterRejectedClusters: 2,
     gpuPrefilterAcceptedClusters: 4,
     gpuPrefilterUnknownKeptClusters: 1,
+    gpuPrefilterFarSummaryConsulted: 4,
     gpuPrefilterSourceFarSummary: 5,
     gpuPrefilterSourceTerrainSampler: 6,
     gpuPrefilterSourceFallback: 7,
@@ -112,6 +114,7 @@ describe("aggregateGpuVegetationEarlyRejectCounters", () => {
     });
 
     expect(counters.vegetationGpuSourceFarSummary).toBe(7);
+    expect(counters.vegetationGpuFarSummaryConsulted).toBe(10);
     expect(counters.vegetationGpuSourceTerrainSampler).toBe(9);
     expect(counters.vegetationGpuSourceFallback).toBe(11);
   });

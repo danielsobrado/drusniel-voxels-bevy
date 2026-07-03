@@ -212,6 +212,7 @@ describe("tree ring cluster visibility", () => {
       hiddenClusters: 1,
       visibleClusters: words.length - 1,
       unknownKeptClusters: 0,
+      farSummaryConsultedClusters: 0,
       candidateSlotsBeforePrefilter: 225,
       candidateSlotsAfterPrefilter: 1,
       skippedCandidateEstimate: 224,

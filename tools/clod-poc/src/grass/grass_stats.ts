@@ -29,6 +29,7 @@ export interface GrassStats {
   gpuRingPrefilterRejectedClusters?: number;
   gpuRingPrefilterAcceptedClusters?: number;
   gpuRingPrefilterUnknownKeptClusters?: number;
+  gpuRingPrefilterFarSummaryConsulted?: number;
   gpuRingPrefilterSourceFarSummary?: number;
   gpuRingPrefilterSourceTerrainSampler?: number;
   gpuRingPrefilterSourceFallback?: number;
