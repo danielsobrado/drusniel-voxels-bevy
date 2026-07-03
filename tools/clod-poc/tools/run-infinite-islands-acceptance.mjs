@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import path from "node:path";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:5173/";
 const SERVER_TIMEOUT_MS = 90_000;
@@ -7,7 +8,9 @@ const SERVER_POLL_MS = 500;
 process.env.CLOD_POC_BASE_URL ??= DEFAULT_BASE_URL;
 
 const isWindows = process.platform === "win32";
-const npxBin = isWindows ? "npx.cmd" : "npx";
+const viteBin = path.resolve(process.cwd(), "node_modules", "vite", "bin", "vite.js");
+const tsxCli = path.resolve(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+const nodeBin = process.execPath;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,7 +30,7 @@ function spawnChild(label, command, args) {
     cwd: process.cwd(),
     env: process.env,
     stdio: label === "vite" ? ["ignore", "pipe", "pipe"] : "inherit",
-    shell: isWindows,
+    shell: false,
   });
   child.on("error", (error) => {
     console.error(`[infinite-accept:${label}] failed to start:`, error.message);
@@ -50,11 +53,26 @@ function stopChildTree(child) {
   child.kill("SIGTERM");
 }
 
-async function ensureServer() {
-  if (await isServerReady(process.env.CLOD_POC_BASE_URL)) return null;
+function baseUrlPort(baseUrl) {
+  try {
+    const parsed = new URL(baseUrl);
+    return parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+  } catch {
+    return "5173";
+  }
+}
 
-  console.log(`[infinite-accept] starting Vite at ${process.env.CLOD_POC_BASE_URL}`);
-  const server = spawnChild("vite", npxBin, ["vite", "--config", "vite.acceptance.config.ts"]);
+function viteArgs(baseUrl) {
+  const port = baseUrlPort(baseUrl);
+  return ["--config", "vite.acceptance.config.ts", "--host", "127.0.0.1", "--port", String(port), "--strictPort"];
+}
+
+async function ensureServer() {
+  const baseUrl = process.env.CLOD_POC_BASE_URL ?? DEFAULT_BASE_URL;
+  if (await isServerReady(baseUrl)) return null;
+
+  console.log(`[infinite-accept] starting Vite at ${baseUrl}`);
+  const server = spawnChild("vite", nodeBin, [viteBin, ...viteArgs(baseUrl)]);
   const deadline = Date.now() + SERVER_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -71,7 +89,7 @@ async function ensureServer() {
 
 function runAcceptance() {
   return new Promise((resolve) => {
-    const child = spawnChild("playwright", npxBin, ["tsx", "tools/infinite-islands-acceptance.ts"]);
+    const child = spawnChild("playwright", nodeBin, [tsxCli, "tools/infinite-islands-acceptance.ts"]);
     child.on("exit", (code) => resolve(code ?? 1));
   });
 }

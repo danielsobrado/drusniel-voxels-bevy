@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { resolve } from "node:path";
 import {
   borderOceanCameraForWorld,
   parseBorderOceanSceneConfig,
@@ -44,7 +45,8 @@ const BATTERY_COMMAND_TIMEOUT_MS = 300_000;
 process.env["CLOD_POC_BASE_URL"] ??= DEFAULT_BASE_URL;
 
 const isWindows = process.platform === "win32";
-const npxBin = isWindows ? "npx.cmd" : "npx";
+const viteBin = resolve(process.cwd(), "node_modules", "vite", "bin", "vite.js");
+const nodeBin = process.execPath;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,12 +61,22 @@ async function isServerReady(url: string): Promise<boolean> {
   }
 }
 
+function baseUrlPort(baseUrl: string): string {
+  try {
+    const parsed = new URL(baseUrl);
+    return parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+  } catch {
+    return "5173";
+  }
+}
+
 function spawnVite(): ChildProcess {
-  const child = spawn(npxBin, ["vite", "--config", "vite.acceptance.config.ts"], {
+  const baseUrl = process.env["CLOD_POC_BASE_URL"] ?? DEFAULT_BASE_URL;
+  const child = spawn(nodeBin, [viteBin, "--config", "vite.acceptance.config.ts", "--host", "127.0.0.1", "--port", baseUrlPort(baseUrl), "--strictPort"], {
     cwd: process.cwd(),
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
-    shell: isWindows,
+    shell: false,
   });
   child.stdout?.on("data", (chunk) => process.stdout.write(`[vite] ${chunk}`));
   child.stderr?.on("data", (chunk) => process.stderr.write(`[vite] ${chunk}`));

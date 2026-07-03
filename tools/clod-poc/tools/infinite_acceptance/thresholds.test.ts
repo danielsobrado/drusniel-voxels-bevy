@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { evaluateThresholds, REQUIRED_COUNTERS } from "./thresholds.js";
 
 function validCounters(): Record<string, number> {
-  return Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
+  const counters = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
+  counters["live_bubble_required_pages"] = 1;
+  counters["live_bubble_ready_pages"] = 1;
+  return counters;
 }
 
 describe("infinite islands thresholds", () => {

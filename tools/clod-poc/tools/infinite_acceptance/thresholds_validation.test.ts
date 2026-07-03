@@ -20,6 +20,9 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["far_shell_inner_minus_clod_radius_m"] = 1;
   values["horizon_hole_ratio"] = 0;
   values["far_summary_tiles_missing"] = 0;
+  values["live_bubble_required_pages"] = 1;
+  values["live_bubble_ready_pages"] = 1;
+  values["live_bubble_failed_pages"] = 0;
   return { ...values, ...overrides };
 }
 
