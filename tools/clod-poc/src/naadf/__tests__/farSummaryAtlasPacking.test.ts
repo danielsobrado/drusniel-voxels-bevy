@@ -28,13 +28,25 @@ describe("far summary atlas packing", () => {
     expect(spec.storesNormalAtlas).toBe(true);
   });
 
-  it("makes packed_low_bandwidth more aggressive than balanced", () => {
+  it("makes packed more aggressive than balanced", () => {
     const balanced = resolveFarSummaryAtlasPackingSpec("balanced");
-    const low = resolveFarSummaryAtlasPackingSpec("packed_low_bandwidth");
+    const packed = resolveFarSummaryAtlasPackingSpec("packed");
 
-    expect(low.heightFormat).toBe("r16f");
-    expect(low.heightBytesPerPixel).toBeLessThan(balanced.heightBytesPerPixel);
-    expect(low.storesNormalAtlas).toBe(false);
+    expect(packed.heightFormat).toBe("r16f");
+    expect(packed.heightBytesPerPixel).toBeLessThan(balanced.heightBytesPerPixel);
+    expect(packed.storesNormalAtlas).toBe(false);
+  });
+
+  it("keeps packed_low_bandwidth as a backward-compatible alias", () => {
+    const packed = resolveFarSummaryAtlasPackingSpec("packed");
+    const legacy = resolveFarSummaryAtlasPackingSpec("packed_low_bandwidth");
+
+    expect(legacy.heightFormat).toBe(packed.heightFormat);
+    expect(legacy.heightComponents).toBe(packed.heightComponents);
+    expect(legacy.heightBytesPerPixel).toBe(packed.heightBytesPerPixel);
+    expect(legacy.materialBytesPerPixel).toBe(packed.materialBytesPerPixel);
+    expect(legacy.coverageBytesPerPixel).toBe(packed.coverageBytesPerPixel);
+    expect(legacy.storesNormalAtlas).toBe(packed.storesNormalAtlas);
   });
 
   it("estimates balanced atlas memory below debug RGBA32F", () => {
@@ -45,12 +57,12 @@ describe("far summary atlas packing", () => {
     expect(estimate.savingsPct).toBeGreaterThan(0.7);
   });
 
-  it("estimates low bandwidth atlas memory below balanced", () => {
+  it("estimates packed atlas memory below balanced", () => {
     const balanced = estimateFarSummaryAtlasBytes(160, 480, resolveFarSummaryAtlasPackingSpec("balanced"));
-    const low = estimateFarSummaryAtlasBytes(160, 480, resolveFarSummaryAtlasPackingSpec("packed_low_bandwidth"));
+    const packed = estimateFarSummaryAtlasBytes(160, 480, resolveFarSummaryAtlasPackingSpec("packed"));
 
-    expect(low.totalBytes).toBeLessThan(balanced.totalBytes);
-    expect(low.savingsPct).toBeGreaterThan(balanced.savingsPct);
+    expect(packed.totalBytes).toBeLessThan(balanced.totalBytes);
+    expect(packed.savingsPct).toBeGreaterThan(balanced.savingsPct);
   });
 
   it("round-trips UNORM8 coverage conservatively", () => {
