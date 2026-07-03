@@ -24,6 +24,7 @@ export interface TreeControllerUiState {
   treeLeafFlutterStrength: number;
   treeDebugColorByLod: boolean;
   treeFarCheapMaterial: boolean;
+  treePlacementDebug: boolean;
   treeImpostorSwapOnBake: boolean;
   treeGpuEnabled: boolean;
   treeGpuFallbackToCpu: boolean;
@@ -125,6 +126,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
         ...deps.treeConfig.render,
         debugColorByLod: state.treeDebugColorByLod,
         farCheapMaterial: state.treeFarCheapMaterial,
+        placementDebug: state.treePlacementDebug,
       },
       gpu: {
         ...deps.treeConfig.gpu,
