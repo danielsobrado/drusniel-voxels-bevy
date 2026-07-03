@@ -40,6 +40,8 @@ export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig):
   uniforms.uFresnelNormalFlatten.value = v.fresnel.normalFlatten;
   uniforms.uDepthScale.value = v.color.depthScale;
   uniforms.uTurbidity.value = v.color.turbidity;
+  Object.assign(uniforms.uRefraction, v.refraction);
+  Object.assign(uniforms.uReflection, v.reflection);
 }
 
 export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMaterialHandle {
