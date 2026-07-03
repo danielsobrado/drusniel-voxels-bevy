@@ -19,6 +19,11 @@ function firstInvalidLodIndex(chain: PropLodChain): number {
   return chain.levels.findIndex((level) => !isRenderableIndirectDrawGeometry(level.geometry));
 }
 
+function disposePropLodChain(chain: PropLodChain): void {
+  for (const level of chain.levels) level.geometry.dispose();
+  chain.billboardGeometry?.dispose();
+}
+
 export interface LoadedPropAsset {
   def: PropAssetDef;
   root: THREE.Group;
@@ -92,7 +97,10 @@ export class PropAssetRegistry {
     if (def.lod.mode === "generated") {
       lodChain = await buildPropLodChain(sourceMesh.geometry, def, extractPropAssetMetadata(root, def).boundingSphereRadius);
       const invalidLod = firstInvalidLodIndex(lodChain);
-      if (invalidLod >= 0) throw new Error(`Prop asset "${def.id}" generated empty LOD ${invalidLod}`);
+      if (invalidLod >= 0) {
+        disposePropLodChain(lodChain);
+        throw new Error(`Prop asset "${def.id}" generated empty LOD ${invalidLod}`);
+      }
       lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
       if (lodChain.billboardGeometry && isRenderableIndirectDrawGeometry(lodChain.billboardGeometry)) {
         lodChain.billboardGeometry.userData.billboardMaterial = createBillboardMaterial(sourceMaterial);
