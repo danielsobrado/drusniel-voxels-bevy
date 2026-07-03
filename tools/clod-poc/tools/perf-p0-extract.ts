@@ -110,6 +110,10 @@ const SELECTED_EVIDENCE_METRICS = [
   "naadf.farSummaryAtlas.upload.dirtyPct",
 ] as const;
 
+function emptyEvidence(): Record<string, number | null> {
+  return Object.fromEntries(SELECTED_EVIDENCE_METRICS.map((key) => [key, null]));
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
   let input = DEFAULT_INPUT;
   let out: string | null = null;
@@ -120,22 +124,10 @@ function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg) continue;
-    if (arg === "--stdout") {
-      stdout = true;
-      continue;
-    }
-    if (arg === "--json") {
-      jsonOnly = true;
-      continue;
-    }
-    if (arg === "--markdown") {
-      markdownOnly = true;
-      continue;
-    }
-    if (arg === "--failOnFailure") {
-      failOnFailure = true;
-      continue;
-    }
+    if (arg === "--stdout") { stdout = true; continue; }
+    if (arg === "--json") { jsonOnly = true; continue; }
+    if (arg === "--markdown") { markdownOnly = true; continue; }
+    if (arg === "--failOnFailure") { failOnFailure = true; continue; }
     if (arg === "--out") {
       const next = argv[++i];
       if (!next) throw new Error("Missing value for --out");
@@ -171,6 +163,14 @@ function resolveSummaryPath(input: string): string {
 function metric(metrics: Record<string, number | null | undefined>, name: string): number | null {
   const value = metrics[name];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseMarkdownNumber(value: string | undefined): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "-") return null;
+  const parsed = Number(trimmed.replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function compactCase(input: P0CaseResult): CompactCase {
@@ -215,17 +215,18 @@ function compactJsonSummary(path: string): CompactSummary {
 function compactMarkdownSummary(path: string): CompactSummary {
   const raw = readFileSync(path, "utf8");
   const gates = parseGateTable(raw);
+  const cases = parseCaseTable(raw);
   return {
     suite: null,
     startedAt: null,
     baseUrl: null,
     renderer: null,
-    gateStatus: gates.some((gate) => gate.status !== "passed") ? "failed" : "passed",
+    gateStatus: gates.length === 0 ? null : gates.some((gate) => gate.status !== "passed") ? "failed" : "passed",
     failedGateCount: gates.filter((gate) => gate.status !== "passed").length,
     failedGates: gates.filter((gate) => gate.status !== "passed"),
     gates,
-    failedCases: [],
-    cases: [],
+    failedCases: cases.filter((item) => item.status !== "passed"),
+    cases,
   };
 }
 
@@ -241,6 +242,36 @@ function parseGateTable(markdown: string): P0GateResult[] {
     const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
     if (cells.length < 3 || cells[0] === "gate") continue;
     rows.push({ name: cells[0] ?? "", status: cells[1] ?? "", detail: cells.slice(2).join(" | ") });
+  }
+  return rows;
+}
+
+function parseCaseTable(markdown: string): CompactCase[] {
+  const lines = markdown.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "## Status");
+  if (start < 0) return [];
+  const rows: CompactCase[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]?.trim() ?? "";
+    if (line.startsWith("## ")) break;
+    if (!line.startsWith("|") || line.includes("---")) continue;
+    const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+    if (cells.length < 12 || cells[0] === "case") continue;
+    rows.push({
+      name: cells[0] ?? "",
+      status: cells[1] ?? "",
+      renderer: cells[2] ?? "",
+      attempts: parseMarkdownNumber(cells[3]),
+      frameP50: parseMarkdownNumber(cells[4]),
+      frameP95: parseMarkdownNumber(cells[5]),
+      frameP99: parseMarkdownNumber(cells[6]),
+      vegP95: parseMarkdownNumber(cells[7]),
+      renderP95: parseMarkdownNumber(cells[8]),
+      warnings: parseMarkdownNumber(cells[9]),
+      errors: parseMarkdownNumber(cells[10]),
+      failure: cells[11] === "-" ? null : cells.slice(11).join(" | "),
+      evidence: emptyEvidence(),
+    });
   }
   return rows;
 }
