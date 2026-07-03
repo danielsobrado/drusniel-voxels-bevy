@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { evaluateThresholds, REQUIRED_COUNTERS } from "./thresholds.js";
+import { evaluateThresholds, extractAcceptanceCounters, REQUIRED_COUNTERS } from "./thresholds.js";
 
 function validCounters(): Record<string, number> {
   const counters = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
+  counters["frame_ms_p95"] = 7.9;
+  counters["frame_ms_p99"] = 9;
+  counters["streamer_far_shell_ownership_ok"] = 1;
   counters["live_bubble_required_pages"] = 1;
   counters["live_bubble_ready_pages"] = 1;
+  counters["live_bubble_streamed_collider_pages"] = 1;
+  counters["live_bubble_collider_registrations"] = 1;
   return counters;
 }
 
 describe("infinite islands thresholds", () => {
   it("passes a complete zero-hole sample under the p95 budget", () => {
     const counters = validCounters();
-    counters["frame_ms_p95"] = 7.9;
-    counters["frame_ms_p99"] = 9;
-    counters["streamer_far_shell_ownership_ok"] = 1;
+
     expect(evaluateThresholds(counters).passed).toBe(true);
   });
 
@@ -34,11 +37,25 @@ describe("infinite islands thresholds", () => {
   it("rejects non-finite p95 values passed directly to threshold evaluation", () => {
     const counters = validCounters();
     counters["frame_ms_p95"] = Infinity;
-    counters["streamer_far_shell_ownership_ok"] = 1;
 
     const result = evaluateThresholds(counters);
 
     expect(result.passed).toBe(false);
     expect(result.failures).toContain("frame_ms_p95=Infinity failed: must be finite, >= 0 and <= 8");
+  });
+
+  it("requires streamed live collider pages", () => {
+    const counters = validCounters();
+    counters["live_bubble_streamed_collider_pages"] = 0;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_bubble_streamed_collider_pages=0 failed: must be > 0",
+    );
+  });
+
+  it("extracts live collider counters from stats.counters", () => {
+    const counters = validCounters();
+
+    expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
   });
 });
