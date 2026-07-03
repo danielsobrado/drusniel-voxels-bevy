@@ -68,7 +68,7 @@ export function createTreeSystemGpuRingDrawResources(
       const materialKey = species + ":" + lod;
       materialHandles[materialKey] = createTreeGpuRingMaterialHandle(input, ringBuffers, species, lod);
       const group = treeGpuRingGroupIndex(species, lod);
-      meshes.push(createGpuRingTierDraw(
+      const mesh = createGpuRingTierDraw(
         input,
         species,
         lod,
@@ -76,13 +76,14 @@ export function createTreeSystemGpuRingDrawResources(
         buffers.indirect,
         group * 5 * Uint32Array.BYTES_PER_ELEMENT,
         materialHandles[materialKey],
-      ));
+      );
+      if (mesh) meshes.push(mesh);
       if (treeLodCastsShadow(input.settings, lod)) {
         for (let cascade = 0; cascade < TREE_RING_SHADOW_CASCADE_COUNT; cascade++) {
           const shadowMaterialKey = "shadow:" + cascade + ":" + materialKey;
           materialHandles[shadowMaterialKey] = createGpuRingShadowMaterialHandle(input, species, lod, shadowRingBuffers);
           const shadowGroup = treeRingShadowCasterGroupIndex(species, lod, cascade);
-          meshes.push(createGpuRingShadowTierDraw(
+          const shadowMesh = createGpuRingShadowTierDraw(
             input,
             species,
             lod,
@@ -91,7 +92,8 @@ export function createTreeSystemGpuRingDrawResources(
             buffers.shadowIndirect,
             shadowGroup * 5 * Uint32Array.BYTES_PER_ELEMENT,
             materialHandles[shadowMaterialKey],
-          ));
+          );
+          if (shadowMesh) meshes.push(shadowMesh);
         }
       }
     }
@@ -149,8 +151,9 @@ function createGpuRingTierDraw(
   indirect: StorageBufferAttribute,
   indirectOffset: number,
   materialHandle: TreeMaterialHandle,
-): TreeGpuRingMesh {
+): TreeGpuRingMesh | null {
   const source = input.geometryForGpuRing(species, lod);
+  if (!isRenderableGeometry(source)) return null;
   const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
   const mesh = createTreeGpuRingMesh(
     geometry,
@@ -199,10 +202,18 @@ function createGpuRingShadowTierDraw(
   indirect: StorageBufferAttribute,
   indirectOffset: number,
   materialHandle: TreeMaterialHandle,
-): TreeGpuRingMesh {
+): TreeGpuRingMesh | null {
   const source = lod === "far" || lod === "impostor"
     ? input.crownProxyGeometry
     : input.geometryForGpuRing(species, lod);
+  if (!isRenderableGeometry(source)) return null;
   const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
   return createTreeGpuRingShadowMesh(geometry, materialHandle, species, lod, cascade);
+}
+
+function isRenderableGeometry(geometry: THREE.BufferGeometry): boolean {
+  const vertexCount = geometry.getAttribute("position")?.count ?? 0;
+  if (vertexCount <= 0) return false;
+  const index = geometry.getIndex();
+  return !index || index.count > 0;
 }
