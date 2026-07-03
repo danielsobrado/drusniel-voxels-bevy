@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { renderableIndirectDrawCountForGeometry } from "../gpu/indirect_draw_geometry.js";
 import { getDigEditRevision, getDigEditsSnapshot } from "../terrain/terrain.js";
 import {
   TREE_GPU_RING_CELL,
@@ -355,7 +356,7 @@ function treeGpuRingIndexCounts(input: TreeGpuRingRuntimeInput): TreeGpuRingInde
 }
 
 function indexCountFor(geometry: THREE.BufferGeometry): number {
-  return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
+  return renderableIndirectDrawCountForGeometry(geometry);
 }
 
 function treeGpuRingShadowGroupCapacity(settings: TreeSettings, shadowCascadePlanes: ArrayLike<number> | undefined): number {
