@@ -74,10 +74,21 @@ const OPTIONAL_P0_CASES: PerfCase[] = [
 
 const ALL_P0_CASES = [...P0_CASES, ...OPTIONAL_P0_CASES];
 
+const FAR_SUMMARY_PHASE_METRICS = [
+  "farSumTilesMs",
+  "farSumNaadfMs",
+  "farSumShellMs",
+  "farSumShadowProxyMs",
+  "farSumBiomeStreamMs",
+  "farSumSunLightMs",
+  "farSumStatsDomMs",
+] as const satisfies readonly FramePerfMetric[];
+
 const PHASE_METRICS = [
   "frameMs",
   "selectionUpdateMs",
   "farSummaryMs",
+  ...FAR_SUMMARY_PHASE_METRICS,
   "vegetationTotalMs",
   "statsSyncMs",
   "renderMs",
@@ -453,8 +464,7 @@ function shouldRetryWebgl(attempt: PerfCaseAttempt): boolean {
     text.includes("webgpu") ||
     text.includes("device lost") ||
     text.includes("gpu device") ||
-    text.includes("adapter") ||
-    text.includes("destroyed")
+    text.includes("adapter")
   );
 }
 
@@ -505,6 +515,24 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
         `${fmt(result.metrics["frameMs.p50"])} | ${fmt(result.metrics["frameMs.p95"])} | ${fmt(result.metrics["frameMs.p99"])} | ` +
         `${fmt(result.metrics["vegetationTotalMs.p95"])} | ${fmt(result.metrics["renderMs.p95"])} | ` +
         `${result.warnings.length} | ${result.errors.length} | ${result.error ?? "-"} |`,
+    );
+  }
+
+  lines.push("", "## Far-summary subphase timings", "");
+  lines.push("| case | total p95 | tiles p95 | NAADF p95 | shell p95 | shadow proxy p95 | biome stream p95 | sun-light p95 | stats DOM p95 |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const result of results) {
+    const m = result.metrics;
+    lines.push(
+      `| ${result.name} | ` +
+        `${fmt(m["farSummaryMs.p95"])} | ` +
+        `${fmt(m["farSumTilesMs.p95"])} | ` +
+        `${fmt(m["farSumNaadfMs.p95"])} | ` +
+        `${fmt(m["farSumShellMs.p95"])} | ` +
+        `${fmt(m["farSumShadowProxyMs.p95"])} | ` +
+        `${fmt(m["farSumBiomeStreamMs.p95"])} | ` +
+        `${fmt(m["farSumSunLightMs.p95"])} | ` +
+        `${fmt(m["farSumStatsDomMs.p95"])} |`,
     );
   }
 
