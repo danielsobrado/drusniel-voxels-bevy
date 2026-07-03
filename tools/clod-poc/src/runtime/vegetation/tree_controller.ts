@@ -23,6 +23,8 @@ export interface TreeControllerUiState {
   treeTrunkSwayStrength: number;
   treeLeafFlutterStrength: number;
   treeDebugColorByLod: boolean;
+  treeFarCheapMaterial: boolean;
+  treeImpostorSwapOnBake: boolean;
   treeGpuEnabled: boolean;
   treeGpuFallbackToCpu: boolean;
   treeGpuForceCpu: boolean;
@@ -106,6 +108,10 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
           baseDensity: treeDensity,
         },
       },
+      impostors: {
+        ...deps.treeConfig.impostors,
+        swapOnBake: state.treeImpostorSwapOnBake,
+      },
       wind: {
         ...deps.treeConfig.wind,
         enabled: state.treeWindEnabled,
@@ -118,6 +124,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       render: {
         ...deps.treeConfig.render,
         debugColorByLod: state.treeDebugColorByLod,
+        farCheapMaterial: state.treeFarCheapMaterial,
       },
       gpu: {
         ...deps.treeConfig.gpu,
@@ -179,7 +186,6 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       const state = deps.getUiState();
       state.treeDepthPrepassMaxLod = maxLod;
       system.setDepthPrepassMaxLod(maxLod);
-      refreshStats();
     },
     markPatchesDirty() {
       system.markPatchesDirty();
