@@ -2,11 +2,29 @@
   "renderer": "webgpu",
   "url": "http://localhost:5173/?world=8&seed=1&webgpuSelection=1&farShell=1&freeze=1&perfProbe=1&perfWarmup=120&perfFrames=300&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-forest&gpuEarlyReject=1&gpuEarlyRejectDebugOracle=1&treeGpu=1&grass=1&understory=1",
   "status": "failed",
-  "warnings": [],
+  "warnings": [
+    "The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "Calling [RenderPassEncoder (unlabeled)].Draw with a vertex count of 0 is unusual."
+  ],
   "errors": [],
-  "launchRecipe": null,
-  "lastProgress": null,
+  "launchRecipe": {
+    "headless": true,
+    "channel": "chromium",
+    "args": [
+      "--enable-unsafe-webgpu"
+    ]
+  },
+  "lastProgress": {
+    "fatal": null,
+    "ready": false,
+    "observedFrames": 279,
+    "sampleCount": 159,
+    "targetSampleFrames": 300,
+    "progressMsg": "ready",
+    "clodReady": true,
+    "lastFrameId": 417
+  },
   "snapshot": null,
   "finalCounters": {},
-  "error": "CLOD-POC dev server is not reachable at http://localhost:5173/ (fetch failed). Start it with `npm run dev` from tools/clod-poc, or pass `--baseUrl` / CLOD_POC_BASE_URL."
+  "error": "Perf probe timed out after 240000ms: 162/300 samples, 282 observed frames"
 }
