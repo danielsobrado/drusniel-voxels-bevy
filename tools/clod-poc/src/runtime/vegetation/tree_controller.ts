@@ -186,7 +186,6 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       const state = deps.getUiState();
       state.treeDepthPrepassMaxLod = maxLod;
       system.setDepthPrepassMaxLod(maxLod);
-      refreshStats();
     },
     markPatchesDirty() {
       system.markPatchesDirty();
@@ -218,6 +217,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       fallingTreeMesh.instanceMatrix.needsUpdate = true;
     },
     dispose() {
+      system.dispose();
       deps.scene.remove(fallingTreeMesh);
       fallingTrunkGeo.dispose();
       fallingTreeMat.dispose();
