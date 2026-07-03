@@ -3,6 +3,10 @@ import { cloneHydrologyConfig } from "./hydrologyConfig.js";
 import type { WaterConfig, WaterVisualConfig } from "./water_config_types.js";
 import { WATER_DEBUG_MODES } from "./water_config_types.js";
 
+const DEFAULT_WATER_CELLS_PER_LEVEL = 96;
+const DEFAULT_WATER_CELL_SIZES = [2.0, 4.0, 8.0, 16.0, 32.0];
+const DEFAULT_WATER_REFRACTION_STRENGTH = 0.0;
+
 export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   shallowColor: [0.00, 0.32, 0.55],
   deepColor: [0.00, 0.025, 0.12],
@@ -40,8 +44,8 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     turbidity: 0.10,
   },
   refraction: {
-    enabled: true,
-    strength: 0.055,
+    enabled: false,
+    strength: DEFAULT_WATER_REFRACTION_STRENGTH,
     depthValidationBias: 0.02,
     absorptionR: 0.42,
     absorptionG: 0.135,
@@ -65,8 +69,8 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
 export const DEFAULT_WATER_CONFIG: WaterConfig = {
   enabled: true,
   source: "hydrology",
-  cellsPerLevel: 128,
-  cellSizes: [1.5, 3.0, 6.0, 12.0, 24.0, 48.0],
+  cellsPerLevel: DEFAULT_WATER_CELLS_PER_LEVEL,
+  cellSizes: DEFAULT_WATER_CELL_SIZES,
   snapCells: 2,
   drySentinelDepth: 2.0,
   fakeBodies: {
