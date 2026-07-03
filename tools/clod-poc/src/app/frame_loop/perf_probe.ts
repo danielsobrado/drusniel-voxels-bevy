@@ -161,9 +161,15 @@ function countStatsSyncReasons(samples: readonly FramePerfSample[]): Record<stri
   return counts;
 }
 
+function exposePerfHooks(hooks: FramePerfHooks | null): void {
+  if (typeof window === "undefined") return;
+  if (hooks) window.__drusnielPerf = hooks;
+  else delete window.__drusnielPerf;
+}
+
 export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): FramePerfProbe | null {
   if (searchParams.get("perfProbe") !== "1") {
-    delete window.__drusnielPerf;
+    exposePerfHooks(null);
     return null;
   }
   const warmupFrames = intParam(searchParams, ["perfWarmupFrames", "perfWarmup"], 120);
@@ -180,7 +186,7 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
     snapshot,
     reset: () => { observedFrames = 0; samples = []; hooks.ready = false; hooks.observedFrames = 0; hooks.sampleCount = 0; hooks.lastSample = null; hooks.samples = samples; },
   };
-  window.__drusnielPerf = hooks;
+  exposePerfHooks(hooks);
   return {
     enabled: true,
     record(sample: FramePerfSample): void {
