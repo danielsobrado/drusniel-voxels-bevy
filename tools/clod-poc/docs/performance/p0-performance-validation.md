@@ -84,6 +84,12 @@ Fail the process when any case fails:
 CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --failOnCaseFailure
 ```
 
+Fail the process when P0 evidence gates fail:
+
+```bash
+CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --failOnGateFailure
+```
+
 ## Atlas packing profiles
 
 `far_summary_atlas.format` supports:
@@ -155,6 +161,25 @@ understoryGpuPrefilterSourceFallbackAvg
 ```
 
 Use this to check whether the far-summary source is actually decisive, or whether the runtime silently falls back to terrain sampler / conservative fallback in one vegetation system only.
+
+## P0 gates
+
+The runner writes a `gates` object into `summary.json` and a `P0 gates` table into `summary.md`.
+
+Current gates are evidence gates, not FPS gates:
+
+```text
+required-cases-present
+cases-passed
+terrain-material-cache-evidence
+vegetation-early-reject-evidence
+far-summary-source-evidence
+far-summary-atlas-packing-evidence
+```
+
+These gates fail if the report is missing required cases, any case failed, terrain cache evidence is missing, vegetation early rejection did not reduce candidate budget or reject clusters, far-summary source usage is missing in early-reject cases, or atlas packing savings are missing.
+
+Use `--failOnGateFailure` to make failed evidence gates return a non-zero process exit code.
 
 Atlas upload mode is numeric:
 
