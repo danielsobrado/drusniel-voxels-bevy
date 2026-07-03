@@ -13,6 +13,9 @@ const SPELL_LIGHT_ENVELOPE = {
   pulseCycles: 8.0,
 } as const;
 
+const SPELL_VISIBLE_PROGRESS_FLOOR = 0.035;
+const SPELL_SELF_TICK_PAD_MS = 120;
+
 export interface SpellVfxMeshConfig {
   worldWidth: number;
   worldHeight: number;
@@ -116,8 +119,17 @@ export interface SpellVfxController {
   dispose: () => void;
 }
 
+interface FallbackSpellUniforms {
+  uColor: { value: THREE.Color };
+  uTime: { value: number };
+  uProgress: { value: number };
+  uOpacity: { value: number };
+}
+
 interface SpellState {
   mesh: THREE.Mesh;
+  fallbackMesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+  fallbackUniforms: FallbackSpellUniforms;
   light: THREE.PointLight;
   baseLightIntensity: number;
   handle: SpellNodeMaterialHandle;
@@ -151,9 +163,66 @@ function spellLightColor(color: SpellColor): THREE.Color {
   return new THREE.Color(color[0], color[1], color[2]);
 }
 
+function createFallbackSpellMaterial(color: SpellColor): { material: THREE.ShaderMaterial; uniforms: FallbackSpellUniforms } {
+  const uniforms: FallbackSpellUniforms = {
+    uColor: { value: spellLightColor(color) },
+    uTime: { value: 0 },
+    uProgress: { value: 0 },
+    uOpacity: { value: 0.78 },
+  };
+  const material = new THREE.ShaderMaterial({
+    name: "spell-visible-fallback",
+    uniforms,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uTime;
+      uniform float uProgress;
+      uniform float uOpacity;
+      varying vec2 vUv;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      void main() {
+        float p = clamp(uProgress, 0.0, 1.0);
+        float life = smoothstep(0.0, 0.08, p) * (1.0 - smoothstep(0.78, 1.0, p));
+        float y = clamp(vUv.y, 0.0, 1.0);
+        float side = abs(vUv.x - 0.5);
+        float width = mix(0.16, 0.42, pow(y, 0.55)) * (1.0 - 0.55 * smoothstep(0.70, 1.0, y));
+        float body = 1.0 - smoothstep(width * 0.55, width, side);
+        float core = 1.0 - smoothstep(width * 0.16, width * 0.46, side);
+        float rise = 1.0 - smoothstep(max(0.08, p * 1.10), max(0.14, p * 1.28), y);
+        float sparks = step(0.985, hash(floor(vec2(vUv.x * 56.0, vUv.y * 92.0 - uTime * 24.0)))) * smoothstep(0.12, 0.88, y);
+        float alpha = clamp((body * 0.75 + core * 0.35 + sparks * 0.55) * life * rise * uOpacity, 0.0, 0.95);
+        vec3 hot = mix(uColor, vec3(1.0, 0.86, 0.42), core);
+        vec3 col = hot * (1.15 + 0.25 * sin(uTime * 13.0 + y * 18.0)) + uColor * sparks;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+  });
+  return { material, uniforms };
+}
+
 export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfxController {
   const { scene, getCamera } = deps;
   const now = deps.now ?? (() => performance.now());
+  let rafId = 0;
+  let selfTickUntilMs = 0;
+  let disposed = false;
 
   const buildSpell = (
     name: string,
@@ -161,11 +230,24 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     config: SpellVfxMeshConfig,
   ): SpellState => {
     const geometry = createPropBillboardGeometry(config.worldWidth * config.flameScale, config.worldHeight * config.flameScale);
+    handle.material.transparent = true;
+    handle.material.depthWrite = false;
+    handle.material.depthTest = false;
+    handle.material.side = THREE.DoubleSide;
+    handle.material.toneMapped = false;
+
     const mesh = new THREE.Mesh(geometry, handle.material);
     mesh.name = name;
     mesh.frustumCulled = false;
     mesh.renderOrder = 4000;
     mesh.visible = false;
+
+    const fallback = createFallbackSpellMaterial(config.glowColor);
+    const fallbackMesh = new THREE.Mesh(geometry, fallback.material);
+    fallbackMesh.name = `${name}-fallback`;
+    fallbackMesh.frustumCulled = false;
+    fallbackMesh.renderOrder = 4001;
+    fallbackMesh.visible = false;
 
     const light = new THREE.PointLight(spellLightColor(config.glowColor), 0, config.glowDistance, config.glowDecay);
     light.name = `${name}-glow`;
@@ -174,8 +256,11 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     mesh.add(light);
 
     scene.add(mesh);
+    scene.add(fallbackMesh);
     return {
       mesh,
+      fallbackMesh,
+      fallbackUniforms: fallback.uniforms,
       light,
       baseLightIntensity: config.glowIntensity,
       handle,
@@ -193,16 +278,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
   const earth = createEarthSpellVfx({ scene, config: deps.earth, getTarget: deps.getEarthTarget, getCamera, now });
   const spells = [fire, water, air];
 
-  const start = (spell: SpellState, durationMs: number): void => {
-    spell.startMs = now();
-    spell.durationMs = Math.max(1, durationMs);
-    spell.active = true;
-    spell.handle.uTime.value = 0;
-    spell.handle.uProgress.value = 0;
-    spell.light.intensity = 0;
-    spell.light.visible = true;
-    spell.mesh.visible = true;
-  };
+  const hasActiveSpells = (): boolean => spells.some((spell) => spell.active) || now() < selfTickUntilMs;
 
   const tick = (spell: SpellState, nowMs: number): void => {
     if (!spell.active) return;
@@ -212,32 +288,79 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
       spell.light.intensity = 0;
       spell.light.visible = false;
       spell.mesh.visible = false;
+      spell.fallbackMesh.visible = false;
       return;
     }
+
+    const visibleProgress = Math.max(frame.progress, SPELL_VISIBLE_PROGRESS_FLOOR);
     spell.handle.uTime.value = frame.timeSeconds;
-    spell.handle.uProgress.value = frame.progress;
-    spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(frame.progress);
+    spell.handle.uProgress.value = visibleProgress;
+    spell.fallbackUniforms.uTime.value = frame.timeSeconds;
+    spell.fallbackUniforms.uProgress.value = visibleProgress;
+    spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(visibleProgress);
+
     const camera = getCamera();
     const pose = resolveSpellPose(camera, spell.config, spell.poseScratch);
     spell.mesh.position.copy(pose.base);
+    spell.fallbackMesh.position.copy(pose.base);
     orientFireJet(pose.base, pose.dir, camera.position, spell.mesh.quaternion);
+    spell.fallbackMesh.quaternion.copy(spell.mesh.quaternion);
+  };
+
+  const updateAll = (frameNow: number): void => {
+    if (disposed) return;
+    for (const spell of spells) tick(spell, frameNow);
+    earth.update(frameNow);
+  };
+
+  const requestSelfTick = (): void => {
+    if (disposed || rafId !== 0 || typeof requestAnimationFrame !== "function") return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      updateAll(now());
+      if (hasActiveSpells()) requestSelfTick();
+    });
+  };
+
+  const start = (spell: SpellState, durationMs: number): void => {
+    const startMs = now();
+    spell.startMs = startMs;
+    spell.durationMs = Math.max(1, durationMs);
+    spell.active = true;
+    spell.handle.uTime.value = 0;
+    spell.handle.uProgress.value = SPELL_VISIBLE_PROGRESS_FLOOR;
+    spell.fallbackUniforms.uTime.value = 0;
+    spell.fallbackUniforms.uProgress.value = SPELL_VISIBLE_PROGRESS_FLOOR;
+    spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(SPELL_VISIBLE_PROGRESS_FLOOR);
+    spell.light.visible = true;
+    spell.mesh.visible = true;
+    spell.fallbackMesh.visible = true;
+    tick(spell, startMs + 16);
+    selfTickUntilMs = Math.max(selfTickUntilMs, startMs + spell.durationMs + SPELL_SELF_TICK_PAD_MS);
+    requestSelfTick();
   };
 
   return {
     playFire: (durationMs) => start(fire, durationMs),
     playWater: (durationMs) => start(water, durationMs),
     playAir: (durationMs) => start(air, durationMs),
-    playEarth: (durationMs) => earth.play(durationMs),
-    update: () => {
-      const frameNow = now();
-      for (const spell of spells) tick(spell, frameNow);
-      earth.update(frameNow);
+    playEarth: (durationMs) => {
+      const startMs = now();
+      earth.play(durationMs);
+      selfTickUntilMs = Math.max(selfTickUntilMs, startMs + Math.max(1, durationMs) + SPELL_SELF_TICK_PAD_MS);
+      requestSelfTick();
     },
+    update: (nowMs) => updateAll(typeof nowMs === "number" && nowMs > 1000 ? nowMs : now()),
     dispose: () => {
+      disposed = true;
+      if (rafId !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
+      rafId = 0;
       for (const spell of spells) {
         scene.remove(spell.mesh);
+        scene.remove(spell.fallbackMesh);
         spell.mesh.geometry.dispose();
         spell.handle.material.dispose();
+        spell.fallbackMesh.material.dispose();
       }
       earth.dispose();
     },
