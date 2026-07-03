@@ -33,6 +33,7 @@ describe("tree impostor quality defaults", () => {
     expect(settings.impostors.resolutionPx).toBe(256);
     expect(settings.impostors.alphaTest).toBe(0.35);
     expect(settings.impostors.fallbackToPlaceholder).toBe(false);
+    expect(settings.impostors.swapOnBake).toBe(true);
   });
 
   it("configures atlas textures for stable distant sampling", () => {
