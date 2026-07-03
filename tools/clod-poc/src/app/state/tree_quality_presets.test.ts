@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { applyTreeQualityPreset, isTreeShadowMaxLod, type TreeQualityPresetState } from "./tree_quality_presets.js";
+import {
+  applyTreeQualityPreset,
+  isTreeShadowMaxLod,
+  treeLodBudgetsForQualityPreset,
+  type TreeQualityPresetState,
+} from "./tree_quality_presets.js";
 
 function createState(): TreeQualityPresetState {
   return {
+    treeQualityPreset: "custom",
     treeDistance: 620,
     treeMaxInstances: 9000,
     treeDensity: 1.2,
     treeSpacing: 5.5,
     treeShadowMaxLod: "mid",
+    treeWindEnabled: true,
+    treeWindStrength: 0.18,
+    treeGustStrength: 0.12,
+    treeTrunkSwayStrength: 0.45,
+    treeLeafFlutterStrength: 0.18,
     treeGpuEnabled: false,
     treeGpuFallbackToCpu: false,
     treeGpuForceCpu: true,
@@ -39,11 +50,17 @@ describe("tree quality presets", () => {
     const state = createState();
     applyTreeQualityPreset(state, "perf");
     expect(state).toEqual({
+      treeQualityPreset: "perf",
       treeDistance: 300,
       treeMaxInstances: 3500,
       treeDensity: 0.55,
       treeSpacing: 9,
       treeShadowMaxLod: "near",
+      treeWindEnabled: false,
+      treeWindStrength: 0,
+      treeGustStrength: 0,
+      treeTrunkSwayStrength: 0,
+      treeLeafFlutterStrength: 0,
       treeGpuEnabled: true,
       treeGpuFallbackToCpu: true,
       treeGpuForceCpu: false,
@@ -52,5 +69,19 @@ describe("tree quality presets", () => {
       treeGpuValidateAgainstCpu: false,
       treeGpuMaxVisible: 16_000,
     });
+  });
+
+  it("returns smaller geometry budgets for lower presets", () => {
+    const fallback = {
+      nearMaxVertices: 260_000,
+      midMaxVertices: 90_000,
+      farMaxVertices: 40_000,
+      impostorMaxVertices: 240,
+    };
+
+    expect(treeLodBudgetsForQualityPreset("custom", fallback)).toBe(fallback);
+    expect(treeLodBudgetsForQualityPreset("perf", fallback).nearMaxVertices).toBeLessThan(fallback.nearMaxVertices);
+    expect(treeLodBudgetsForQualityPreset("potato", fallback).nearMaxVertices)
+      .toBeLessThan(treeLodBudgetsForQualityPreset("perf", fallback).nearMaxVertices);
   });
 });
