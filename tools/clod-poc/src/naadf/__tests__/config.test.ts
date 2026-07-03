@@ -85,7 +85,13 @@ describe("naadf config", () => {
     expect(config.farSummaryAtlas.format).toBe("debug_rgba32f");
   });
 
-  it("allows packed low-bandwidth far-summary atlas packing", () => {
+  it("allows packed far-summary atlas packing", () => {
+    const config = parseNaadfPocConfig(withFarSummaryAtlasFormat(naadfYaml, "packed"));
+
+    expect(config.farSummaryAtlas.format).toBe("packed");
+  });
+
+  it("keeps packed_low_bandwidth far-summary atlas packing as a legacy alias", () => {
     const config = parseNaadfPocConfig(withFarSummaryAtlasFormat(naadfYaml, "packed_low_bandwidth"));
 
     expect(config.farSummaryAtlas.format).toBe("packed_low_bandwidth");
