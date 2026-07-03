@@ -40,8 +40,35 @@ export interface TreeStartupResult {
   formatTreeGpuSummary: (stats: TreeStats) => string;
 }
 
+function runtimeSearchParams(): URLSearchParams {
+  return typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+}
+
+function runtimeFlag(searchParams: URLSearchParams, keys: readonly string[]): boolean | null {
+  for (const key of keys) {
+    const raw = searchParams.get(key);
+    if (raw === null) continue;
+    const value = raw.trim().toLowerCase();
+    if (value === "1" || value === "true" || value === "on" || value === "yes") return true;
+    if (value === "0" || value === "false" || value === "off" || value === "no") return false;
+  }
+  return null;
+}
+
+function treeHardLodRequested(searchParams: URLSearchParams): boolean {
+  const crossfade = runtimeFlag(searchParams, ["treeCrossfade", "treeCrossfadeEnabled"]);
+  if (crossfade === false) return true;
+  if (crossfade === true) return false;
+  const hardLod = runtimeFlag(searchParams, ["treeHardLod", "treeHardLOD", "treeHardLods"]);
+  if (hardLod !== null) return hardLod;
+  const quality = searchParams.get("quality") ?? searchParams.get("qualityPreset") ?? searchParams.get("preset");
+  return searchParams.get("treeGpuStrict") === "1" || quality === "perf" || quality === "potato";
+}
+
 function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
-  const ditherEnabled = config.lod.ditherEnabled === true;
+  const searchParams = runtimeSearchParams();
+  const hardLod = treeHardLodRequested(searchParams);
+  const ditherEnabled = config.lod.ditherEnabled === true && !hardLod;
   return {
     ...config,
     lod: {
@@ -60,7 +87,7 @@ function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
     },
     impostors: {
       ...config.impostors,
-      fallbackToPlaceholder: true,
+      fallbackToPlaceholder: false,
     },
   };
 }
