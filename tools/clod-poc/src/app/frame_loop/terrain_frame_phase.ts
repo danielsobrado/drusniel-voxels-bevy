@@ -1,7 +1,11 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { NearFieldBubbleController, NearFieldBubbleView } from "../../terrain/near_field/near_field_bubble_controller.js";
+import type {
+  NearFieldBubbleController,
+  NearFieldBubbleStats,
+  NearFieldBubbleView,
+} from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
@@ -29,6 +33,7 @@ export interface TerrainFramePhaseInput {
 
 export interface TerrainFramePhaseResult {
   chunkGroupsBuiltThisFrame: number;
+  bubbleStats: NearFieldBubbleStats;
   tBubbleStart: number;
   tPropsStart: number;
   ringCenter: THREE.Vector3;
@@ -83,6 +88,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
+    bubbleStats,
     tBubbleStart: tPropsStart - bubbleStats.bubbleMs,
     tPropsStart,
     ringCenter,
