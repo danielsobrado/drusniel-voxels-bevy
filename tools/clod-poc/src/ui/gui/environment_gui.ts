@@ -20,6 +20,7 @@ export interface EnvironmentGuiDeps {
   applyColorAdjustmentsToTerrain: () => void;
   currentPostProcessSettings: () => PostProcessSettings;
   postProcess: { updateSettings: (settings: Partial<PostProcessSettings>) => void } | null;
+  applyTreeQualityPreset?: (preset: Exclude<PostProcessQualityPreset, "custom">) => void;
 }
 
 interface WebGpuPostProcessStageMirror {
@@ -187,9 +188,10 @@ export function createEnvironmentGui(
   const refreshPostControllers = () => {
     for (const controller of postControllers) controller.updateDisplay();
   };
-  const applyPreset = (preset: PostProcessQualityPreset) => {
+  const applyPreset = (preset: Exclude<PostProcessQualityPreset, "custom">) => {
     applyPostProcessQualityPreset(state, preset);
     applyPostProcessSettings();
+    deps.applyTreeQualityPreset?.(preset);
     refreshPostControllers();
   };
   const presetActions = {
@@ -257,14 +259,11 @@ export function createEnvironmentGui(
 
   const godRaysFolder = gui.addFolder("god rays");
   const godRaysControllers: GuiController[] = [
-    godRaysFolder
-      .add(state, "godRaysMode", ["off", "cheap", "heavy", "volumetric"])
-      .name("mode (WebGPU)")
-      .onChange(applyPostProcessSettings),
-    godRaysFolder.add(state, "godRaysDensity", 0.5, 1.5, 0.01).name("density").onChange(applyPostProcessSettings),
-    godRaysFolder.add(state, "godRaysDecay", 0.8, 0.99, 0.005).name("decay").onChange(applyPostProcessSettings),
-    godRaysFolder.add(state, "godRaysWeight", 0.0, 1.0, 0.01).name("weight").onChange(applyPostProcessSettings),
-    godRaysFolder.add(state, "godRaysExposure", 0.0, 2.0, 0.01).name("exposure").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysMode", ["off", "screen", "volumetric"]).name("mode").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDensity", 0, 2, 0.01).name("density").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDecay", 0, 1, 0.01).name("decay").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysWeight", 0, 1, 0.01).name("weight").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysExposure", 0, 1, 0.01).name("exposure").onChange(applyPostProcessSettings),
   ];
   const godRaysActions = {
     reset: () => {
@@ -278,6 +277,4 @@ export function createEnvironmentGui(
     },
   };
   godRaysFolder.add(godRaysActions, "reset").name("reset");
-
-  applyPostProcessSettings();
 }
