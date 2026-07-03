@@ -41,6 +41,13 @@ function runtimeParams(): URLSearchParams | null {
   return typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
 }
 
+function perfWaterEnabled(params: URLSearchParams | null): boolean {
+  const explicit = params?.get("waterPerf") ?? params?.get("waterPerformance") ?? params?.get("waterLow");
+  if (explicit !== null && explicit !== undefined) return explicit !== "0" && explicit !== "false";
+  const quality = params?.get("quality") ?? params?.get("qualityPreset") ?? params?.get("preset");
+  return quality === "perf" || quality === "potato";
+}
+
 function readNumber(params: URLSearchParams | null, key: string, fallback: number): number {
   const raw = params?.get(key);
   if (raw === null || raw === undefined) return fallback;
@@ -94,8 +101,9 @@ export function sanitizeRiverCascadeParticleSettings(
 export function readRiverCascadeParticleSettings(): RiverCascadeParticleSettings {
   const params = runtimeParams();
   const d = DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS;
+  const perfDefaultEnabled = perfWaterEnabled(params) ? false : d.enabled;
   return sanitizeRiverCascadeParticleSettings({
-    enabled: readBoolean(params, PARAM_KEYS.enabled, d.enabled),
+    enabled: readBoolean(params, PARAM_KEYS.enabled, perfDefaultEnabled),
     mistStrength: readNumber(params, PARAM_KEYS.mistStrength, d.mistStrength),
     splashStrength: readNumber(params, PARAM_KEYS.splashStrength, d.splashStrength),
     foamDriftStrength: readNumber(params, PARAM_KEYS.foamDriftStrength, d.foamDriftStrength),
