@@ -1,19 +1,19 @@
 postprocess:
   enabled: true
   opacity: 1.0
-  render_scale: 1.0
+  render_scale: 0.75
   exposure: 1.0
-  contrast: 1.04
-  saturation: 1.05
+  contrast: 1.02
+  saturation: 1.03
   vignette: 0.0
   debug_mode: output
   tone_mapping: agx
 
   bloom:
-    enabled: true
-    threshold: 0.28
-    strength: 0.45
-    radius: 1.5
+    enabled: false
+    threshold: 0.85
+    strength: 0.18
+    radius: 0.35
 
   fxaa:
     enabled: true
@@ -21,31 +21,31 @@ postprocess:
     subpixel_blend: 0.75
 
   taa:
-    enabled: true
+    enabled: false
     history_weight: 0.88
     depth_threshold: 0.0025
     sharpen: 0.06
-    jitter_enabled: true
+    jitter_enabled: false
     jitter_scale: 1.0
-    history_clamp_enabled: true
+    history_clamp_enabled: false
     history_clamp_strength: 1.0
 
   contact_shadows:
-    enabled: true
+    enabled: false
     strength: 0.25
     radius_px: 2.0
     depth_bias: 0.002
 
   clarity:
     enabled: true
-    sharpen: 0.08
-    dither: 0.003
+    sharpen: 0.06
+    dither: 0.002
 
   webgpu:
-    clouds_enabled: true
-    gtao_enabled: true
-    froxels_enabled: true
-    bounce_enabled: true
+    clouds_enabled: false
+    gtao_enabled: false
+    froxels_enabled: false
+    bounce_enabled: false
 
   god_rays:
     mode: off
