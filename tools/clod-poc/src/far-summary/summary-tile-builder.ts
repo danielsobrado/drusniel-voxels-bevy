@@ -70,13 +70,15 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
 
       const heightValid = Number.isFinite(height);
       const sampleH = heightValid ? height : 0;
+      const sampleForMin = heightValid ? height : Number.POSITIVE_INFINITY;
+      const sampleForMax = heightValid ? height : Number.NEGATIVE_INFINITY;
 
       const hRangeL = terrainSampler.sampleHeight(wx - cellM * 0.4, wz);
       const hRangeR = terrainSampler.sampleHeight(wx + cellM * 0.4, wz);
       const hRangeD = terrainSampler.sampleHeight(wx, wz - cellM * 0.4);
       const hRangeU = terrainSampler.sampleHeight(wx, wz + cellM * 0.4);
-      const hMin = Math.min(sampleH, hRangeL, hRangeR, hRangeD, hRangeU);
-      const hMax = Math.max(sampleH, hRangeL, hRangeR, hRangeD, hRangeU);
+      const hMin = Math.min(sampleForMin, hRangeL, hRangeR, hRangeD, hRangeU);
+      const hMax = Math.max(sampleForMax, hRangeL, hRangeR, hRangeD, hRangeU);
 
       const [nx, ny, nz] = computeNormalFiniteDifference(hFn, wx, wz, cellM);
 
@@ -97,9 +99,9 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
 
       const idx = sz * tileCells + sx;
       samples[idx] = {
-        heightMin: Number.isFinite(hMin) ? hMin : 0,
-        heightMax: Number.isFinite(hMax) ? hMax : 0,
-        heightAvg: sampleH,
+        heightMin: Number.isFinite(hMin) ? hMin : Number.POSITIVE_INFINITY,
+        heightMax: Number.isFinite(hMax) ? hMax : Number.NEGATIVE_INFINITY,
+        heightAvg: heightValid ? sampleH : Number.POSITIVE_INFINITY,
         normalX: nx,
         normalY: ny,
         normalZ: nz,
