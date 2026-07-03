@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import { isRenderableIndirectDrawGeometry } from "../gpu/indirect_draw_geometry.js";
-import type { CustomPropsSettings } from "./prop_types.js";
+import type { CustomPropsSettings, PropAssetDef } from "./prop_types.js";
 import type { LoadedPropAsset } from "./prop_asset_loader.js";
 import {
   emptyGpuRingSource,
@@ -17,6 +17,13 @@ import {
 } from "../gpu/prop_ring_compute.js";
 import type { PropSpatialGrid } from "./prop_spatial_grid.js";
 
+interface RenderablePropGpuAssetEntry {
+  def: PropAssetDef;
+  loaded: LoadedPropAsset;
+  lodCount: number;
+  renderableLods: boolean[];
+}
+
 export function buildPropGpuRingSource(input: {
   grid: PropSpatialGrid | null;
   settings: CustomPropsSettings;
@@ -25,16 +32,14 @@ export function buildPropGpuRingSource(input: {
 }): PropGpuRingSourceData {
   const { grid, settings, loadedAssets, indexCountFor } = input;
   if (!grid) return emptyGpuRingSource();
-  const assetDefs = settings.props.filter((def) => loadedAssets.has(def.id));
+  const entries = renderablePropGpuAssetEntries(settings, loadedAssets);
   const assetIndexById = new Map<string, number>();
   const groupMeta: number[] = [];
-  const assetMeta = new Float32Array(Math.max(1, assetDefs.length) * 4);
-  const assetLods = new Float32Array(Math.max(1, assetDefs.length) * 4);
+  const assetMeta = new Float32Array(Math.max(1, entries.length) * 4);
+  const assetLods = new Float32Array(Math.max(1, entries.length) * 4);
   let group = 0;
-  let renderableGroupCount = 0;
-  assetDefs.forEach((def, assetIndex) => {
-    const loaded = loadedAssets.get(def.id)!;
-    const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
+  entries.forEach((entry, assetIndex) => {
+    const { def, loaded, lodCount, renderableLods } = entry;
     assetIndexById.set(def.id, assetIndex);
     assetMeta[assetIndex * 4] = def.culling.maxDistance;
     assetMeta[assetIndex * 4 + 1] = loaded.metadata.boundingSphereRadius;
@@ -42,15 +47,13 @@ export function buildPropGpuRingSource(input: {
     assetMeta[assetIndex * 4 + 3] = group;
     for (let lod = 0; lod < 4; lod++) assetLods[assetIndex * 4 + lod] = def.lod.distances[lod] ?? Number.POSITIVE_INFINITY;
     for (let lod = 0; lod < lodCount; lod++) {
-      const geometry = lodGeometry(loaded, lod);
-      const renderable = !!geometry && isRenderableIndirectDrawGeometry(geometry);
-      const indexCount = renderable ? indexCountFor(geometry) : 0;
-      if (indexCount > 0) renderableGroupCount++;
+      const geometry = renderableLods[lod] ? lodGeometry(loaded, lod) : null;
+      const indexCount = geometry ? indexCountFor(geometry) : 0;
       groupMeta.push(assetIndex, lod, indexCount, 0);
       group++;
     }
   });
-  if (assetDefs.length === 0 || group === 0 || renderableGroupCount === 0) return emptyGpuRingSource();
+  if (entries.length === 0 || group === 0) return emptyGpuRingSource();
 
   const sourceA: number[] = [];
   const sourceB: number[] = [];
@@ -60,13 +63,14 @@ export function buildPropGpuRingSource(input: {
     sourceA.push(inst.position[0], inst.position[1], inst.position[2], inst.scale);
     sourceB.push(inst.rotationY, assetIndex, 0, 0);
   }
+  if (sourceA.length === 0) return emptyGpuRingSource();
 
   return {
-    sourceA: new Float32Array(sourceA.length > 0 ? sourceA : [0, 0, 0, 1]),
-    sourceB: new Float32Array(sourceB.length > 0 ? sourceB : [0, 0, 0, 0]),
+    sourceA: new Float32Array(sourceA),
+    sourceB: new Float32Array(sourceB),
     assetMeta,
     assetLods,
-    groupMeta: new Uint32Array(groupMeta.length > 0 ? groupMeta : [0, 0, 0, 0]),
+    groupMeta: new Uint32Array(groupMeta),
     sourceCount: sourceA.length / 4,
     groupCount: group,
   };
@@ -90,12 +94,10 @@ export function createPropGpuRingDrawResources(input: {
 
   const meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[] = [];
   let group = 0;
-  for (const def of settings.props) {
-    const loaded = loadedAssets.get(def.id);
-    if (!loaded) continue;
-    const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
+  for (const entry of renderablePropGpuAssetEntries(settings, loadedAssets)) {
+    const { def, loaded, lodCount, renderableLods } = entry;
     for (let lod = 0; lod < lodCount; lod++) {
-      const geometry = lodGeometry(loaded, lod);
+      const geometry = renderableLods[lod] ? lodGeometry(loaded, lod) : null;
       if (!geometry || !isRenderableIndirectDrawGeometry(geometry)) {
         group++;
         continue;
@@ -115,6 +117,22 @@ export function createPropGpuRingDrawResources(input: {
   return { meshes, instanceA, instanceB, indirect, source, maxInstancesPerGroup };
 }
 
+function renderablePropGpuAssetEntries(
+  settings: CustomPropsSettings,
+  loadedAssets: ReadonlyMap<string, LoadedPropAsset>,
+): RenderablePropGpuAssetEntry[] {
+  const entries: RenderablePropGpuAssetEntry[] = [];
+  for (const def of settings.props) {
+    const loaded = loadedAssets.get(def.id);
+    if (!loaded) continue;
+    const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
+    const renderableLods = Array.from({ length: lodCount }, (_, lod) => !!lodGeometry(loaded, lod));
+    if (!renderableLods.some(Boolean)) continue;
+    entries.push({ def, loaded, lodCount, renderableLods });
+  }
+  return entries;
+}
+
 function createPropGpuRingGeometry(
   source: THREE.BufferGeometry,
   instanceCount: number,
@@ -130,7 +148,7 @@ function createPropGpuRingGeometry(
   indirectGeometry.setIndirect(indirect, indirectOffset);
   geometry.boundingBox = new THREE.Box3(
     new THREE.Vector3(-1, -1024, -1),
-    new THREE.Vector3(1_000_000, 4096, 1_000_000),
+    new THREE.Vector3(1000000, 4096, 1000000),
   );
   geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
   return geometry;
