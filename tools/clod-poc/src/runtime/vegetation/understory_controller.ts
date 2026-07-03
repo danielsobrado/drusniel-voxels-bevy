@@ -46,6 +46,15 @@ export interface UnderstoryController {
   markPatchesDirty(): void;
 }
 
+interface UnderstoryGpuPrefilterStatsSource {
+  gpuRingStats?: {
+    prefilterTestedClusters?: number;
+    prefilterRejectedClusters?: number;
+    prefilterAcceptedClusters?: number;
+    prefilterUnknownKeptClusters?: number;
+  };
+}
+
 export function createUnderstoryController(deps: UnderstoryControllerDeps): UnderstoryController {
   setUnderstoryDepthPrepassEnabled(initialUnderstoryDepthPrepassEnabled());
 
@@ -89,7 +98,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
   });
   assertPageMeshSignaturesUnchanged(signaturesBefore, pageMeshSignatures(deps.nodes));
 
-  const sync = () => deps.syncStatsToState(system.getStats());
+  const sync = () => deps.syncStatsToState(withGpuPrefilterStats(system, system.getStats()));
   const rebuildWithCurrentSettings = () => {
     system.updateSettings(makeSettings());
     system.rebuild();
@@ -122,6 +131,19 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       system.rebuild();
       sync();
     },
+  };
+}
+
+function withGpuPrefilterStats(system: UnderstorySystem, stats: UnderstoryStats): UnderstoryStats {
+  const source = system as unknown as UnderstoryGpuPrefilterStatsSource;
+  const gpuRingStats = source.gpuRingStats;
+  if (!gpuRingStats) return stats;
+  return {
+    ...stats,
+    gpuPrefilterTestedClusters: gpuRingStats.prefilterTestedClusters ?? stats.gpuPrefilterTestedClusters ?? 0,
+    gpuPrefilterRejectedClusters: gpuRingStats.prefilterRejectedClusters ?? stats.gpuPrefilterRejectedClusters ?? 0,
+    gpuPrefilterAcceptedClusters: gpuRingStats.prefilterAcceptedClusters ?? stats.gpuPrefilterAcceptedClusters ?? 0,
+    gpuPrefilterUnknownKeptClusters: gpuRingStats.prefilterUnknownKeptClusters ?? stats.gpuPrefilterUnknownKeptClusters ?? 0,
   };
 }
 
