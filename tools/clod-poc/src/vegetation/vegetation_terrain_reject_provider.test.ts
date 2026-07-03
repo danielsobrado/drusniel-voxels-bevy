@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createVegetationTerrainRejectProvider } from "./vegetation_terrain_reject_provider.js";
+import {
+  createTerrainSummaryRejectProvider,
+  createVegetationTerrainRejectProvider,
+} from "./vegetation_terrain_reject_provider.js";
 import type { VegetationClusterDescriptor } from "./vegetation_cluster_descriptors.js";
+import type { TerrainSummaryField } from "../clod/terrain_summary_types.js";
 
 const visibility = {
   enabled: true,
@@ -26,6 +30,22 @@ function descriptor(overrides: Partial<VegetationClusterDescriptor> = {}): Veget
     densityBudget: 16,
     terrainRevision: 7,
     ...overrides,
+  };
+}
+
+function summaryField(coverageValue: number): TerrainSummaryField {
+  const res = 4;
+  const count = res * res;
+  return {
+    res,
+    worldSize: 128,
+    farReduceFactor: 1,
+    heightMin: new Float32Array(count).fill(0),
+    heightMax: new Float32Array(count).fill(8),
+    normalX: new Float32Array(count),
+    normalY: new Float32Array(count).fill(1),
+    normalZ: new Float32Array(count),
+    coverage: new Float32Array(count).fill(coverageValue),
   };
 }
 
@@ -146,5 +166,48 @@ describe("VegetationTerrainRejectProvider", () => {
 
     expect(first).toEqual(second);
     expect(query.descriptor.seed).toBe(999);
+  });
+
+  it("uses far-summary coverage as the first decisive rejection source", () => {
+    const farSummaryProvider = createTerrainSummaryRejectProvider(() => summaryField(0));
+    const result = createVegetationTerrainRejectProvider({ farSummaryProvider }).classifyCluster({
+      descriptor: descriptor(),
+      kind: "grass",
+      cameraX: 0,
+      cameraY: 2,
+      cameraZ: 0,
+      worldCells: 128,
+      visibility,
+      sampler: { sampleHeight: () => ({ height: 0 }) },
+    });
+
+    expect(result).toMatchObject({
+      reject: true,
+      reason: "noCoverage",
+      confidence: "summary",
+      source: "naadfFarSummary",
+    });
+  });
+
+  it("falls through to the terrain sampler when far-summary data is not decisive", () => {
+    const farSummaryProvider = createTerrainSummaryRejectProvider(() => summaryField(1));
+    const result = createVegetationTerrainRejectProvider({ farSummaryProvider }).classifyCluster({
+      descriptor: descriptor({ centerX: 64, centerZ: 0, halfSize: 4 }),
+      kind: "tree",
+      cameraX: 0,
+      cameraY: 0,
+      cameraZ: 0,
+      worldCells: 128,
+      visibility,
+      sampler: {
+        sampleHeight: (x) => ({ height: x > 8 && x < 56 ? 100 : 0 }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      reject: true,
+      reason: "terrainHidden",
+      source: "terrainVisibilitySampler",
+    });
   });
 });
