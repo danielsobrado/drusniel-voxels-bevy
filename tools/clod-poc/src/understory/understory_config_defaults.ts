@@ -74,10 +74,10 @@ function cloneUnderstoryTerrainWeights(weights: UnderstoryTerrainWeights): Under
 export const DEFAULT_UNDERSTORY_SETTINGS: UnderstorySettings = {
   enabled: true,
   seed: 9137,
-  distanceM: 150,
-  refreshDistanceM: 12,
-  maxNewPatchesPerFrame: 2,
-  maxInstances: 12000,
+  distanceM: 100,
+  refreshDistanceM: 16,
+  maxNewPatchesPerFrame: 1,
+  maxInstances: 7000,
   placement: {
     spacingM: 3.0,
     jitter: 0.55,

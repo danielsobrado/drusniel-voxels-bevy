@@ -60,13 +60,13 @@ export const DEFAULT_GRASS_DEBUG_SETTINGS: GrassDebugSettings = {
 };
 
 export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
-  grid: 700,
-  cell: 0.7,
-  maxRadius: 220,
-  ringDistance: 220,
-  nearMeters: 36,
-  midMeters: 110,
-  farMeters: 170,
+  grid: 512,
+  cell: 0.8,
+  maxRadius: 160,
+  ringDistance: 160,
+  nearMeters: 28,
+  midMeters: 80,
+  farMeters: 125,
   farDistanceFraction: 0.94,
   bandMeters: DEFAULT_GRASS_LOD_SETTINGS.ditherBandM,
   scruffMeters: 30,
@@ -74,17 +74,17 @@ export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
 };
 
 export const DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS: GrassPatchFallbackSettings = {
-  maxNewPatchesPerRefresh: 2,
-  refreshDistance: 4,
+  maxNewPatchesPerRefresh: 1,
+  refreshDistance: 8,
 };
 
 export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   enabled: true,
   shaderMode: DEFAULT_GRASS_SHADER_MODE,
-  distanceM: 120,
+  distanceM: 90,
   refreshDistanceM: DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS.refreshDistance,
   maxNewPatchesPerFrame: DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS.maxNewPatchesPerRefresh,
-  maxInstances: 64000,
+  maxInstances: 32000,
   placement: { ...DEFAULT_GRASS_PLACEMENT_SETTINGS },
   lod: { ...DEFAULT_GRASS_LOD_SETTINGS },
   blade: { ...DEFAULT_GRASS_BLADE_SETTINGS },
@@ -93,7 +93,7 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   debug: { ...DEFAULT_GRASS_DEBUG_SETTINGS },
   alphaToCoverage: DEFAULT_GRASS_RENDER_SETTINGS.alphaToCoverage,
   nearCrossedQuads: DEFAULT_GRASS_BLADE_SETTINGS.nearCrossedQuads,
-  distance: 120,
+  distance: 90,
   bladeSpacing: DEFAULT_GRASS_PLACEMENT_SETTINGS.spacingM,
   bladeHeight: DEFAULT_GRASS_BLADE_SETTINGS.heightM,
   bladeHeightVariation: DEFAULT_GRASS_BLADE_SETTINGS.heightVariation,
@@ -103,7 +103,7 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   slopeMinY: DEFAULT_GRASS_PLACEMENT_SETTINGS.slopeMinY,
   minHeight: DEFAULT_GRASS_PLACEMENT_SETTINGS.minHeightM,
   maxHeight: DEFAULT_GRASS_PLACEMENT_SETTINGS.maxHeightM,
-  maxBlades: 64000,
+  maxBlades: 32000,
   seed: 1337,
   ring: { ...DEFAULT_GRASS_RING_SETTINGS },
   patchFallback: { ...DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS },

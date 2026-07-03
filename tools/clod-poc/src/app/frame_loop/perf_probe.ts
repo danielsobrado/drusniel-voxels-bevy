@@ -117,7 +117,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       understoryGpuPrefilterSourceFallbackAvg: understorySourceFallbackAvg,
       understoryGpuAcceptedCountAvg: avgCounter(samples, "understoryGpuAcceptedCount"),
       understoryGpuVisibleCountAvg: avgCounter(samples, "understoryGpuVisibleCount"),
-      vegetationGpuClustersTotalAvg: treeRejectedClustersAvg + treeVisibleClustersAvg,
+      vegetationGpuClustersTotalAvg: treeRejectedClustersAvg + treeVisibleClustersAvg + treeUnknownKeptClustersAvg,
       vegetationGpuClustersRejectedEarlyAvg: treeRejectedClustersAvg,
       vegetationGpuClustersAcceptedAvg: treeAcceptedClustersAvg,
       vegetationGpuClustersSummaryMissingAvg: treeUnknownKeptClustersAvg,

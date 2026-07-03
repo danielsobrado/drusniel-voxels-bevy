@@ -1,10 +1,10 @@
 understory:
   enabled: true
   seed: 9137
-  distance_m: 150
-  refresh_distance_m: 12
-  max_new_patches_per_frame: 2
-  max_instances: 12000
+  distance_m: 100
+  refresh_distance_m: 16
+  max_new_patches_per_frame: 1
+  max_instances: 7000
 
   placement:
     spacing_m: 3.0

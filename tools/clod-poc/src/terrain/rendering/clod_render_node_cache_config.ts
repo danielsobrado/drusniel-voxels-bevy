@@ -15,7 +15,7 @@ export const DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG: ClodRenderNodeCacheConfig = 
   pruneIntervalFrames: 30,
   prefetchParent: true,
   prefetchChildren: false,
-  maxPrefetchCreatesPerFrame: 8,
+  maxPrefetchCreatesPerFrame: 4,
   warnAtInactiveNodes: 480,
   evictGeometryWithRenderNode: true,
 };
