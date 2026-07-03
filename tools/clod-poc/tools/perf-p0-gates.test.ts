@@ -13,6 +13,11 @@ function validCases(): P0PerfGateCaseLike[] {
       terrainMaterialCacheReady: 4,
       terrainMaterialCacheStale: 0,
       "naadf.farSummaryAtlas.memorySavingsPct": 0.72,
+      "naadf.farSummaryAtlas.upload.modeCode": 1,
+      "naadf.farSummaryAtlas.upload.dirtyUploads": 2,
+      "naadf.farSummaryAtlas.upload.dirtyPixels": 4096,
+      "naadf.farSummaryAtlas.upload.totalPixels": 65536,
+      "naadf.farSummaryAtlas.upload.dirtyPct": 0.0625,
     }),
     passedCase("gpu-early-reject-disabled"),
     passedCase("gpu-early-reject-enabled", {
@@ -47,6 +52,7 @@ describe("P0 perf gates", () => {
       "vegetation-early-reject-evidence",
       "far-summary-source-evidence",
       "far-summary-atlas-packing-evidence",
+      "far-summary-atlas-dirty-upload-evidence",
     ]);
   });
 
@@ -90,5 +96,21 @@ describe("P0 perf gates", () => {
 
     expect(summary.status).toBe("failed");
     expect(summary.results.find((result) => result.name === "far-summary-source-evidence")?.status).toBe("failed");
+  });
+
+  it("fails when dirty atlas uploads are missing", () => {
+    const cases = validCases().map((perfCase) => passedCase(perfCase.name, {
+      ...perfCase.metrics,
+      "naadf.farSummaryAtlas.upload.modeCode": 2,
+      "naadf.farSummaryAtlas.upload.dirtyUploads": 0,
+      "naadf.farSummaryAtlas.upload.dirtyPixels": 0,
+      "naadf.farSummaryAtlas.upload.totalPixels": 65536,
+      "naadf.farSummaryAtlas.upload.dirtyPct": 0,
+    }));
+
+    const summary = evaluateP0PerfGates(cases);
+
+    expect(summary.status).toBe("failed");
+    expect(summary.results.find((result) => result.name === "far-summary-atlas-dirty-upload-evidence")?.status).toBe("failed");
   });
 });
