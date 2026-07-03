@@ -145,6 +145,9 @@ export interface GrassGpuRingStats {
   prefilterRejectedClusters?: number;
   prefilterAcceptedClusters?: number;
   prefilterUnknownKeptClusters?: number;
+  prefilterSourceFarSummary?: number;
+  prefilterSourceTerrainSampler?: number;
+  prefilterSourceFallback?: number;
   generatedCandidates: number;
   acceptedCandidates: number;
   counts: GrassGpuRingCounts;
@@ -289,6 +292,9 @@ export class GrassGpuRingCompute {
   private prefilterRejectedClusters = 0;
   private prefilterAcceptedClusters = 0;
   private prefilterUnknownKeptClusters = 0;
+  private prefilterSourceFarSummary = 0;
+  private prefilterSourceTerrainSampler = 0;
+  private prefilterSourceFallback = 0;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
   private submitMs: number | null = null;
@@ -381,6 +387,9 @@ export class GrassGpuRingCompute {
     this.prefilterRejectedClusters = prefilter?.rejectedClusters ?? 0;
     this.prefilterAcceptedClusters = prefilter?.visibleClusters ?? 0;
     this.prefilterUnknownKeptClusters = prefilter?.unknownKeptClusters ?? 0;
+    this.prefilterSourceFarSummary = prefilter?.sourceCounts.naadfFarSummary ?? 0;
+    this.prefilterSourceTerrainSampler = prefilter?.sourceCounts.terrainVisibilitySampler ?? 0;
+    this.prefilterSourceFallback = prefilter?.sourceCounts.conservativeFallback ?? 0;
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? grassGpuRingSlotCount(this.ring)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
@@ -415,6 +424,9 @@ export class GrassGpuRingCompute {
       prefilterRejectedClusters: this.prefilterRejectedClusters,
       prefilterAcceptedClusters: this.prefilterAcceptedClusters,
       prefilterUnknownKeptClusters: this.prefilterUnknownKeptClusters,
+      prefilterSourceFarSummary: this.prefilterSourceFarSummary,
+      prefilterSourceTerrainSampler: this.prefilterSourceTerrainSampler,
+      prefilterSourceFallback: this.prefilterSourceFallback,
       generatedCandidates: this.candidateCountAfterPrefilter,
       acceptedCandidates: accepted,
       counts: { ...this.counts },
