@@ -65,18 +65,12 @@ export function treeRingUsesFarMaterial(lod: TreeLod): boolean {
 export function createTreeRingFarNodeMaterialHandle(
   settings: TreeSettings,
   buffers: TreeRingInstanceBuffers,
-  lod: TreeLod,
+  _lod: TreeLod,
   lighting: EnvironmentLighting = fallbackLighting(),
   hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
-  const uFadeCenter = uniform(new THREE.Vector2());
-  const uNearDistance = uniform(settings.distanceM * settings.lod.nearFraction);
-  const uMidDistance = uniform(settings.distanceM * settings.lod.midFraction);
-  const uFarDistance = uniform(settings.distanceM * settings.lod.farFraction);
-  const uBandDistance = uniform(settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0);
   const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
   const uSeed = uniform(settings.seed);
-  const uLodIndex = uniform(treeLodIndex(lod));
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
@@ -121,23 +115,14 @@ export function createTreeRingFarNodeMaterialHandle(
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
-    const lodMask: TslNode = treeRingLodMask(
-      uLodIndex,
-      worldXZ.sub(uFadeCenter).length(),
-      uNearDistance,
-      uMidDistance,
-      uFarDistance,
-      uBandDistance,
-    );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, worldXZ);
-    const maskNode: TslNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
-    (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
+    if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
-    prepassNodes.set(material, { positionNode, maskNode, side: material.side });
+    prepassNodes.set(material, { positionNode, maskNode: aboveWater ?? undefined, side: material.side });
     return material;
   };
 
@@ -156,8 +141,8 @@ export function createTreeRingFarNodeMaterialHandle(
     setTime() {
       // Far ring material is intentionally static to avoid per-vertex wind cost.
     },
-    setFadeCenter(x: number, z: number) {
-      uFadeCenter.value.set(x, z);
+    setFadeCenter() {
+      // GPU ring LOD selection is resolved by compute; render materials do not dither LODs.
     },
     prepassNodesFor(prepassLod: TreeLod) {
       const material = debugColorByLod ? debugMaterials[prepassLod] : regularMaterial;
@@ -165,10 +150,6 @@ export function createTreeRingFarNodeMaterialHandle(
     },
     updateSettings(next: TreeSettings) {
       debugColorByLod = next.render.debugColorByLod;
-      uNearDistance.value = next.distanceM * next.lod.nearFraction;
-      uMidDistance.value = next.distanceM * next.lod.midFraction;
-      uFarDistance.value = next.distanceM * next.lod.farFraction;
-      uBandDistance.value = next.lod.crossfadeEnabled ? next.lod.crossfadeBandM : 0;
       uSeed.value = next.seed;
       for (const material of materials) {
         material.alphaTest = 0;
@@ -190,13 +171,6 @@ export function createTreeRingFarNodeMaterialHandle(
       for (const material of materials) material.dispose();
     },
   };
-}
-
-function treeLodIndex(lod: TreeLod): number {
-  if (lod === "near") return 0;
-  if (lod === "mid") return 1;
-  if (lod === "far") return 2;
-  return 3;
 }
 
 function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: TslNode): TslNode | null {
@@ -231,18 +205,4 @@ function treeVariantKeep(aVariant: TslNode, worldXZ: TslNode, seed: TslNode): Ts
   const v3 = phase.greaterThanEqual(0.75)
     .and(aVariant.greaterThanEqual(2.5)).and(aVariant.lessThan(3.5));
   return v0.or(v1).or(v2).or(v3).select(float(1), float(0));
-}
-
-function treeRingLodMask(
-  lodIndex: TslNode,
-  dist: TslNode,
-  _nearDistance: TslNode,
-  midDistance: TslNode,
-  farDistance: TslNode,
-  _bandDistance: TslNode,
-): TslNode {
-  const farPass = lodIndex.greaterThanEqual(1.5).and(lodIndex.lessThan(2.5))
-    .and(dist.greaterThanEqual(midDistance)).and(dist.lessThan(farDistance));
-  const impostorPass = lodIndex.greaterThanEqual(2.5).and(dist.greaterThanEqual(farDistance));
-  return farPass.or(impostorPass);
 }
