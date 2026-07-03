@@ -279,6 +279,7 @@ function parseRender(root: Record<string, unknown>, fallback: TreeRenderSettings
     depthPrepass: boolFrom(root.depth_prepass, fallback.depthPrepass),
     debugColorByLod: boolFrom(root.debug_color_by_lod, fallback.debugColorByLod),
     farCheapMaterial: boolFrom(root.far_cheap_material, fallback.farCheapMaterial),
+    placementDebug: boolFrom(root.placement_debug, fallback.placementDebug),
   };
 }
 
