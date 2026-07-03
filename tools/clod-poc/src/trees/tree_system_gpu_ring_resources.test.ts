@@ -52,11 +52,19 @@ describe("tree system GPU ring resources", () => {
     expect(materialFactoryMocks.impostor).toHaveBeenCalledTimes(1);
     expect(materialFactoryMocks.impostor.mock.calls[0]?.[2]).toBe(readyAtlas);
   });
+
+  it("does not create renderable GPU ring meshes for empty source geometry", () => {
+    const resources = createResources({}, new THREE.BufferGeometry());
+
+    expect(resources.meshes).toHaveLength(0);
+  });
 });
 
-function createResources(impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>) {
+function createResources(
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+  sourceGeometry = new THREE.BoxGeometry(1, 1, 1),
+) {
   const settings = settingsForTest();
-  const sourceGeometry = new THREE.BoxGeometry(1, 1, 1);
   return createTreeSystemGpuRingDrawResources({
     backend: fakeBackend(),
     root: new THREE.Group(),
