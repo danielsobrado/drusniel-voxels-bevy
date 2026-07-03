@@ -95,7 +95,7 @@ export function createVegetationTerrainRejectProvider(
     classifyCluster(query): VegetationTerrainRejectDecision {
       if (!query.visibility.enabled) return accept("accepted", "fallback", "conservativeFallback", "disabled");
       if (outsideTerrain(query)) return reject("outsideTerrain", "exact", "conservativeFallback");
-      if (revisionMismatch(query)) return unknownSummaryDecision(query, "conservativeFallback");
+      if (revisionMismatch(query)) return unknownSummaryDecision("conservativeFallback");
 
       const sourcePriority = query.sourcePriority ?? defaultPriority;
       for (const source of sourcePriority) {
@@ -109,10 +109,10 @@ export function createVegetationTerrainRejectProvider(
           if (decision) return decision;
           continue;
         }
-        return unknownSummaryDecision(query, "conservativeFallback");
+        return unknownSummaryDecision("conservativeFallback");
       }
 
-      return unknownSummaryDecision(query, "conservativeFallback");
+      return unknownSummaryDecision("conservativeFallback");
     },
   };
 }
@@ -125,7 +125,7 @@ function classifyWithTerrainSampler(
 
   const sample = query.sampler.sampleHeight(query.descriptor.centerX, query.descriptor.centerZ);
   if (!sample || sample.unknown || !Number.isFinite(sample.height)) {
-    return unknownSummaryDecision(query, "terrainVisibilitySampler");
+    return unknownSummaryDecision("terrainVisibilitySampler");
   }
 
   const visibility = visibilityProvider.sampleTerrainVisibility({
@@ -142,7 +142,7 @@ function classifyWithTerrainSampler(
   if (!visibility.visible && visibility.reason === "terrain_hidden") {
     return reject("terrainHidden", "fallback", "terrainVisibilitySampler", visibility.reason);
   }
-  if (visibility.reason === "unknown_kept") return unknownSummaryDecision(query, "terrainVisibilitySampler");
+  if (visibility.reason === "unknown_kept") return unknownSummaryDecision("terrainVisibilitySampler");
   return accept("accepted", "fallback", "terrainVisibilitySampler", visibility.reason);
 }
 
@@ -165,14 +165,7 @@ export function createTerrainSummaryRejectProvider(
       const debug = { coverage, heightMin, heightMax };
 
       if (!Number.isFinite(heightMin) || !Number.isFinite(heightMax)) {
-        const rejectMissing = query.acceptWhenSummaryMissing === false;
-        return {
-          reject: rejectMissing,
-          reason: "summaryMissing",
-          confidence: "summary",
-          debug,
-          sourceReason: "unknown_kept",
-        };
+        return { reject: false, reason: "summaryMissing", confidence: "summary", debug, sourceReason: "unknown_kept" };
       }
       if (coverage < (query.minCoverageToAccept ?? 0.05)) {
         return { reject: true, reason: "noCoverage", confidence: "summary", debug };
@@ -183,13 +176,8 @@ export function createTerrainSummaryRejectProvider(
   };
 }
 
-function unknownSummaryDecision(
-  query: VegetationTerrainRejectQuery,
-  source: VegetationTerrainRejectSource,
-): VegetationTerrainRejectDecision {
-  return query.acceptWhenSummaryMissing === false || (revisionMismatch(query) && query.acceptWhenRevisionMismatch === false)
-    ? reject("summaryMissing", "fallback", source, "unknown_kept")
-    : accept("summaryMissing", "fallback", source, "unknown_kept");
+function unknownSummaryDecision(source: VegetationTerrainRejectSource): VegetationTerrainRejectDecision {
+  return accept("summaryMissing", "fallback", source, "unknown_kept");
 }
 
 function accept(
