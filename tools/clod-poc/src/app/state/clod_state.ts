@@ -40,7 +40,6 @@ export interface ClodSliceState {
   farShellRadiusFactor: number;
   farShellHeightBias: number;
   farShellHeightDrop: number;
-
   longViewInfiniteShellEnabled: boolean;
   longViewInfiniteShellWireframe: boolean;
   longViewShowShellRings: boolean;
@@ -49,7 +48,6 @@ export interface ClodSliceState {
   longViewFreezeStreamCenter: boolean;
   longViewForceMissingTiles: boolean;
   longViewRebuildBudget: number;
-
   clodShadowOverlayMode: "off" | "casters" | "all";
   clodShadowProxyView: "off" | "proxy-meshes";
   clodShadowProxyWireframe: boolean;
@@ -90,10 +88,7 @@ function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undef
   const enabledOverride = booleanParam(params, "liveBubble");
   const radiusOverride = positiveParam(params, "liveBubbleRadius");
   if (!sceneDefault && enabledOverride === null && radiusOverride === null) return undefined;
-
-  const defaultRadius = sceneDefault
-    ? INFINITE_ISLANDS_LIVE_RADIUS_M
-    : cfg.near_field.radius_chunks * cfg.page.chunk_size;
+  const defaultRadius = sceneDefault ? INFINITE_ISLANDS_LIVE_RADIUS_M : cfg.near_field.radius_chunks * cfg.page.chunk_size;
   return {
     enabled: enabledOverride ?? sceneDefault,
     radiusM: Math.min(radiusOverride ?? defaultRadius, INFINITE_ISLANDS_CLOD_RADIUS_M / 2),
@@ -107,6 +102,17 @@ export function applyLiveBubbleDefault(
   if (!liveBubbleDefault) return;
   target.bubble = liveBubbleDefault.enabled;
   if (finiteNonNegative(liveBubbleDefault.radiusM)) target.bubbleRadius = liveBubbleDefault.radiusM;
+}
+
+function preserveEnabledBubble(target: ClodSliceState, liveBubbleDefault?: LiveBubbleDefault): void {
+  if (!liveBubbleDefault?.enabled) return;
+  let value = true;
+  Object.defineProperty(target, "bubble", {
+    enumerable: true,
+    configurable: true,
+    get: () => value,
+    set: () => { value = true; },
+  });
 }
 
 export function createClodSliceState(input: {
@@ -147,7 +153,6 @@ export function createClodSliceState(input: {
     farShellRadiusFactor: FAR_SHELL_DEFAULTS.radiusFactor,
     farShellHeightBias: FAR_SHELL_DEFAULTS.heightBias,
     farShellHeightDrop: FAR_SHELL_DEFAULTS.heightDrop,
-
     longViewInfiniteShellEnabled: true,
     longViewInfiniteShellWireframe: false,
     longViewShowShellRings: false,
@@ -156,14 +161,14 @@ export function createClodSliceState(input: {
     longViewFreezeStreamCenter: false,
     longViewForceMissingTiles: false,
     longViewRebuildBudget: 4,
-
     clodShadowOverlayMode: "off",
     clodShadowProxyView: "off",
     clodShadowProxyWireframe: true,
     clodShadowStatsLine: "",
   };
-  applyLiveBubbleDefault(state, queryLiveBubbleDefault(input.cfg));
-  applyLiveBubbleDefault(state, input.liveBubbleDefault);
+  const liveBubbleDefault = input.liveBubbleDefault ?? queryLiveBubbleDefault(input.cfg);
+  applyLiveBubbleDefault(state, liveBubbleDefault);
+  preserveEnabledBubble(state, liveBubbleDefault);
   return state;
 }
 
