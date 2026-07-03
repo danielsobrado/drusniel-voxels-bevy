@@ -1,11 +1,11 @@
 enabled: true
 seed_salt: 931777
-cell_size_m: 2.1
-ring_radius_m: 220.0
-ring_refresh_distance_m: 8.0
-ring_edge_fade_m: 24.0
-max_instances: 120000
-density: 1.0
+cell_size_m: 2.4
+ring_radius_m: 160.0
+ring_refresh_distance_m: 12.0
+ring_edge_fade_m: 20.0
+max_instances: 60000
+density: 0.75
 
 slope_repose_start: 0.78
 slope_repose: 0.5
@@ -34,37 +34,37 @@ terrain:
   high_height_m: 78.0
   height_blend_m: 12.0
   grass:
-    density: 0.52
+    density: 0.40
     large: 0.38
     medium: 0.82
     small: 1.55
   rock:
-    density: 1.35
+    density: 1.05
     large: 1.48
     medium: 1.12
     small: 0.72
   sand:
-    density: 0.72
+    density: 0.54
     large: 0.58
     medium: 0.95
     small: 1.15
   snow:
-    density: 0.58
+    density: 0.42
     large: 2.05
     medium: 0.95
     small: 0.24
   low:
-    density: 0.78
+    density: 0.62
     large: 0.68
     medium: 0.98
     small: 1.22
   mid:
-    density: 1.00
+    density: 0.78
     large: 1.00
     medium: 1.00
     small: 1.00
   high:
-    density: 1.18
+    density: 0.90
     large: 1.50
     medium: 0.90
     small: 0.55
@@ -84,17 +84,17 @@ debug:
 large:
   radius_min: 0.6
   radius_max: 2.2
-  max_distance_m: 900.0
+  max_distance_m: 700.0
   sink: 0.30
   lod_details: [3, 2]
   variants: 4
   presets: [talus, boulder]
-  shadows: true
+  shadows: false
 
 medium:
   radius_min: 0.2
   radius_max: 0.6
-  max_distance_m: 280.0
+  max_distance_m: 220.0
   sink: 0.26
   lod_details: [2, 1]
   variants: 4
@@ -104,7 +104,7 @@ medium:
 small:
   radius_min: 0.06
   radius_max: 0.2
-  max_distance_m: 90.0
+  max_distance_m: 70.0
   sink: 0.22
   lod_details: [1]
   variants: 4
