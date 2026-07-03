@@ -56,6 +56,15 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
   const treeSourceFarSummaryAvg = avgCounter(samples, "treeGpuPrefilterSourceFarSummary");
   const treeSourceTerrainSamplerAvg = avgCounter(samples, "treeGpuPrefilterSourceTerrainSampler");
   const treeSourceFallbackAvg = avgCounter(samples, "treeGpuPrefilterSourceFallback");
+  const grassSourceFarSummaryAvg = avgCounter(samples, "grassGpuPrefilterSourceFarSummary");
+  const grassSourceTerrainSamplerAvg = avgCounter(samples, "grassGpuPrefilterSourceTerrainSampler");
+  const grassSourceFallbackAvg = avgCounter(samples, "grassGpuPrefilterSourceFallback");
+  const understorySourceFarSummaryAvg = avgCounter(samples, "understoryGpuPrefilterSourceFarSummary");
+  const understorySourceTerrainSamplerAvg = avgCounter(samples, "understoryGpuPrefilterSourceTerrainSampler");
+  const understorySourceFallbackAvg = avgCounter(samples, "understoryGpuPrefilterSourceFallback");
+  const vegetationSourceFarSummaryAvg = treeSourceFarSummaryAvg + grassSourceFarSummaryAvg + understorySourceFarSummaryAvg;
+  const vegetationSourceTerrainSamplerAvg = treeSourceTerrainSamplerAvg + grassSourceTerrainSamplerAvg + understorySourceTerrainSamplerAvg;
+  const vegetationSourceFallbackAvg = treeSourceFallbackAvg + grassSourceFallbackAvg + understorySourceFallbackAvg;
   return {
     sampleCount: samples.length, warmupFrames, targetSampleFrames, metrics,
     broadBucketsByP95: rankBuckets(metrics, FRAME_PERF_BROAD_BUCKETS),
@@ -95,20 +104,26 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       grassGpuCandidateCountAvg: avgCounter(samples, "grassGpuCandidateCount"),
       grassGpuCandidateCountBeforePrefilterAvg: avgCounter(samples, "grassGpuCandidateCountBeforePrefilter"),
       grassGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "grassGpuCandidateCountAfterPrefilter"),
+      grassGpuPrefilterSourceFarSummaryAvg: grassSourceFarSummaryAvg,
+      grassGpuPrefilterSourceTerrainSamplerAvg: grassSourceTerrainSamplerAvg,
+      grassGpuPrefilterSourceFallbackAvg: grassSourceFallbackAvg,
       grassGpuAcceptedCountAvg: avgCounter(samples, "grassGpuAcceptedCount"),
       grassGpuVisibleCountAvg: avgCounter(samples, "grassGpuVisibleCount"),
       understoryGpuCandidateCountAvg: avgCounter(samples, "understoryGpuCandidateCount"),
       understoryGpuCandidateCountBeforePrefilterAvg: avgCounter(samples, "understoryGpuCandidateCountBeforePrefilter"),
       understoryGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter"),
+      understoryGpuPrefilterSourceFarSummaryAvg: understorySourceFarSummaryAvg,
+      understoryGpuPrefilterSourceTerrainSamplerAvg: understorySourceTerrainSamplerAvg,
+      understoryGpuPrefilterSourceFallbackAvg: understorySourceFallbackAvg,
       understoryGpuAcceptedCountAvg: avgCounter(samples, "understoryGpuAcceptedCount"),
       understoryGpuVisibleCountAvg: avgCounter(samples, "understoryGpuVisibleCount"),
       vegetationGpuClustersTotalAvg: treeRejectedClustersAvg + treeVisibleClustersAvg,
       vegetationGpuClustersRejectedEarlyAvg: treeRejectedClustersAvg,
       vegetationGpuClustersAcceptedAvg: treeAcceptedClustersAvg,
       vegetationGpuClustersSummaryMissingAvg: treeUnknownKeptClustersAvg,
-      vegetationGpuSourceFarSummaryAvg: treeSourceFarSummaryAvg,
-      vegetationGpuSourceTerrainSamplerAvg: treeSourceTerrainSamplerAvg,
-      vegetationGpuSourceFallbackAvg: treeSourceFallbackAvg,
+      vegetationGpuSourceFarSummaryAvg: vegetationSourceFarSummaryAvg,
+      vegetationGpuSourceTerrainSamplerAvg: vegetationSourceTerrainSamplerAvg,
+      vegetationGpuSourceFallbackAvg: vegetationSourceFallbackAvg,
       vegetationGpuCandidatesBudgetBeforeRejectAvg,
       vegetationGpuCandidatesBudgetAfterRejectAvg,
       vegetationGpuCandidatesGeneratedAvg,
