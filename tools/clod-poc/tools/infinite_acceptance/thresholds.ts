@@ -36,6 +36,9 @@ export const REQUIRED_COUNTERS = [
   "live_bubble_ms",
   "live_bubble_evictions",
   "live_bubble_cached_pages",
+  "live_bubble_streamed_collider_pages",
+  "live_bubble_collider_registrations",
+  "live_bubble_collider_removals",
 ] as const;
 
 export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
@@ -68,6 +71,9 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_bubble_ready_pages", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_failed_pages", label: "must equal 0", pass: (value) => value === 0 },
   { key: "live_bubble_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
+  { key: "live_bubble_streamed_collider_pages", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_bubble_collider_removals", label: "must be >= 0", pass: (value) => value >= 0 },
 ];
 
 export interface ThresholdEvaluation {
