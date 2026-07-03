@@ -31,6 +31,8 @@ Normal gameplay does not require GPU readbacks for this optimization. Readback-b
 
 Probe-only static terrain rejection is disabled by default. It is an opt-in tuning/debug path because center/corner probes cannot prove that a whole page has no valid interior vegetation. This prevents false vegetation holes until summary/coverage data can prove full-footprint rejection.
 
+The shared GPU slot prefilter also disables itself for clusters smaller than `gpuEarlyReject.minClusterSize`; those slots are accepted unchanged. This keeps tiny noisy clusters out of the conservative terrain-visibility classifier.
+
 ## Shared provider
 
 The formal provider is `createVegetationTerrainRejectProvider()` in `src/vegetation/vegetation_terrain_reject_provider.ts`.
@@ -109,7 +111,7 @@ vegetationGpuRejectInvalidSurface
 vegetationGpuEarlyRejectMs
 ```
 
-Tree cluster counters are true cluster counts. Grass and understory currently expose candidate-budget deltas, not full reason-separated cluster counts, because their WebGPU ring path uses active slot lists without a separate cluster telemetry buffer.
+Tree cluster counters are true cluster counts. Grass and understory currently contribute to candidate-budget counters, not full reason-separated cluster counters, because their WebGPU ring path uses active slot lists without a separate cluster telemetry buffer.
 
 ## CPU trees
 
@@ -130,7 +132,6 @@ Suggested A/B URLs:
 ```text
 ?perfProbe=1&gpuEarlyReject=0&perfWarmupFrames=120&perfSampleFrames=300
 ?perfProbe=1&gpuEarlyReject=1&perfWarmupFrames=120&perfSampleFrames=300
-?perfProbe=1&gpuEarlyReject=1&gpuEarlyRejectDebugOracle=1&perfWarmupFrames=120&perfSampleFrames=300
 ```
 
 Report these values from `window.__drusnielPerf.snapshot()`:
@@ -149,6 +150,8 @@ visual differences:
 ## Known limitations
 
 This is still a browser validation prototype. The provider currently wraps the existing height/terrain visibility sampler. It does not yet use the production Bevy/Rust NAADF far-summary atlas as its first source of truth.
+
+`gpuEarlyRejectDebugOracle` and `gpuEarlyRejectDebugReadback` are parsed into config for later validation work, but the current implementation does not enable extra readbacks or CPU-oracle comparisons from those flags.
 
 For Rust/Bevy NAADF parity, port the same idea as:
 
