@@ -17,7 +17,13 @@ export interface DomShell {
   buildProgressPercent: HTMLElement;
 }
 
+function queryFlag(searchParams: URLSearchParams, keys: readonly string[]): boolean {
+  return keys.some((key) => searchParams.get(key) === "1" || searchParams.get(key) === "true");
+}
+
 export function initDomShell(): DomShell {
+  const searchParams = new URLSearchParams(window.location.search);
+  const openDebugPanels = queryFlag(searchParams, ["hud", "debugHud", "debugOverlay", "statsPanel", "debugStats"]);
   const info = document.getElementById("info")!;
   const infoPanel = document.getElementById("info-panel")!;
   const infoReopen = document.getElementById("info-reopen") as HTMLButtonElement;
@@ -46,6 +52,8 @@ export function initDomShell(): DomShell {
     title: "Debug stats",
     onClose: () => setInfoPanelVisible(false),
   });
+  setInfoPanelVisible(openDebugPanels);
+  setRuntimePanelVisible(openDebugPanels);
 
   const importButton = document.getElementById("project-import") as HTMLButtonElement;
   const exportButton = document.getElementById("project-export") as HTMLButtonElement;
