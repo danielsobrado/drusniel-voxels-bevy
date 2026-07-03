@@ -28,7 +28,6 @@ const RGBA_COMPONENTS = 4;
 const NORMAL_ENCODE_BIAS = 0.5;
 const NORMAL_ENCODE_SCALE = 0.5;
 const HALF_FLOAT_MAX = 65504;
-const TEXTURE_UPDATE_RANGE_COMPONENT_STRIDE = 4;
 
 type HeightAtlasData = Float32Array | Uint16Array;
 type AtlasData = Float32Array | Uint8Array;
@@ -315,12 +314,12 @@ export class FarSummaryGpuAtlas {
       }
       const actualUploadRects = mergeDirtyRects([...diff.clearRects, ...actualBlitRects]);
       const actualDirtyPixels = dirtyArea(actualUploadRects);
-      this.applyTextureDirtyRects(this.view.texture, actualUploadRects, this.view.widthCells);
-      this.applyTextureDirtyRects(this.view.materialTexture, actualUploadRects, this.view.widthCells);
+      this.applyTextureDirtyRects(this.view.texture, actualUploadRects, this.view.widthCells, this.packing.heightComponents);
+      this.applyTextureDirtyRects(this.view.materialTexture, actualUploadRects, this.view.widthCells, RGBA_COMPONENTS);
       if (this.packing.storesNormalAtlas) {
-        this.applyTextureDirtyRects(this.view.normalTexture, actualUploadRects, this.view.widthCells);
+        this.applyTextureDirtyRects(this.view.normalTexture, actualUploadRects, this.view.widthCells, RGBA_COMPONENTS);
       }
-      this.applyTextureDirtyRects(this.view.coverageTexture, actualUploadRects, this.view.widthCells);
+      this.applyTextureDirtyRects(this.view.coverageTexture, actualUploadRects, this.view.widthCells, RGBA_COMPONENTS);
       this.recordUploadStats("dirty", actualDirtyPixels, atlasPixels, actualUploadRects.length);
     }
 
@@ -452,7 +451,7 @@ export class FarSummaryGpuAtlas {
     markTextureFullyDirty(this.view.coverageTexture);
   }
 
-  private applyTextureDirtyRects(texture: THREE.DataTexture, rects: AtlasDirtyRect[], atlasWidth: number): void {
+  private applyTextureDirtyRects(texture: THREE.DataTexture, rects: AtlasDirtyRect[], atlasWidth: number, componentStride: number): void {
     if (rects.length === 0) return;
     if (!textureUpdateRangesAvailable(texture)) {
       markTextureFullyDirty(texture);
@@ -466,8 +465,8 @@ export class FarSummaryGpuAtlas {
       for (let row = 0; row < clipped.height; row++) {
         const pixel = (clipped.y + row) * atlasWidth + clipped.x;
         texture.addUpdateRange(
-          pixel * TEXTURE_UPDATE_RANGE_COMPONENT_STRIDE,
-          clipped.width * TEXTURE_UPDATE_RANGE_COMPONENT_STRIDE,
+          pixel * componentStride,
+          clipped.width * componentStride,
         );
       }
     }
@@ -760,107 +759,42 @@ function textureUpdateRangesAvailable(texture: THREE.DataTexture): boolean {
 }
 
 function markTextureFullyDirty(texture: THREE.DataTexture): void {
-  if (typeof texture.clearUpdateRanges === "function") texture.clearUpdateRanges();
   texture.needsUpdate = true;
 }
 
-function createHeightAtlasTexture(
-  data: HeightAtlasData,
-  width: number,
-  height: number,
-  packing: FarSummaryAtlasPackingSpec,
-  name: string,
-): THREE.DataTexture {
-  const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RedFormat;
-  const type = packing.heightFormat === "r16f" ? THREE.HalfFloatType : THREE.FloatType;
-  return createAtlasTexture(data, width, height, format, type, name);
+function selectTiles(tiles: FarSummaryTile[], minTileX: number, minTileZ: number, tilesX: number, tilesZ: number): FarSummaryTile[] {
+  return tiles.filter((tile) => tile.key.x >= minTileX
+    && tile.key.x < minTileX + tilesX
+    && tile.key.z >= minTileZ
+    && tile.key.z < minTileZ + tilesZ);
 }
 
-function createPackedAtlasTexture(
-  data: AtlasData,
-  width: number,
-  height: number,
-  packing: FarSummaryAtlasPackingSpec,
-  name: string,
-): THREE.DataTexture {
-  const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
-  return createAtlasTexture(data, width, height, THREE.RGBAFormat, type, name);
-}
-
-function createAtlasTexture(
-  data: HeightAtlasData | AtlasData,
-  width: number,
-  height: number,
-  format: THREE.PixelFormat,
-  type: THREE.TextureDataType,
-  name: string,
-): THREE.DataTexture {
-  const texture = new THREE.DataTexture(data, width, height, format, type);
-  texture.name = name;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-function deriveSummaryNormal(tile: FarSummaryTile, x: number, z: number): THREE.Vector3 {
-  const x0 = Math.max(0, x - 1);
-  const x1 = Math.min(tile.resolution - 1, x + 1);
-  const z0 = Math.max(0, z - 1);
-  const z1 = Math.min(tile.resolution - 1, z + 1);
-  const dx = Math.max(1, x1 - x0) * tile.cellM;
-  const dz = Math.max(1, z1 - z0) * tile.cellM;
-  const dhdx = (heightAt(tile, x1, z) - heightAt(tile, x0, z)) / dx;
-  const dhdz = (heightAt(tile, x, z1) - heightAt(tile, x, z0)) / dz;
-  return new THREE.Vector3(-dhdx, 1, -dhdz).normalize();
-}
-
-function heightAt(tile: FarSummaryTile, x: number, z: number): number {
-  const cx = Math.min(tile.resolution - 1, Math.max(0, x));
-  const cz = Math.min(tile.resolution - 1, Math.max(0, z));
-  return tile.avgHeight[cz * tile.resolution + cx] ?? 0;
-}
-
-function encodeNormalChannel(value: number): number {
-  return clamp01(value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS);
-}
-
-function clampHalfFloatHeight(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(HALF_FLOAT_MAX, Math.max(-HALF_FLOAT_MAX, value));
+function buildRingSignature(ringIndex: number, tiles: FarSummaryTile[], minTileX: number, minTileZ: number): string {
+  return `${ringIndex}:${minTileX},${minTileZ}:${tiles.map((tile) => `${tile.key.x},${tile.key.z}@${tile.revision}`).join("|")}`;
 }
 
 function finiteOrZero(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-function selectTiles(
-  tiles: FarSummaryTile[],
-  minTileX: number,
-  minTileZ: number,
-  tilesX: number,
-  tilesZ: number,
-): FarSummaryTile[] {
-  return tiles.filter((tile) =>
-    tile.key.x >= minTileX
-    && tile.key.x < minTileX + tilesX
-    && tile.key.z >= minTileZ
-    && tile.key.z < minTileZ + tilesZ,
-  );
+function clampHalfFloatHeight(value: number): number {
+  return Math.min(HALF_FLOAT_MAX, Math.max(-HALF_FLOAT_MAX, finiteOrZero(value)));
 }
 
-function buildRingSignature(
-  ringIndex: number,
-  tiles: FarSummaryTile[],
-  minTileX: number,
-  minTileZ: number,
-): string {
-  const tileSig = tiles
-    .map((tile) => `${tile.key.x},${tile.key.z},${tile.revision}`)
-    .sort()
-    .join("|");
-  return `${ringIndex}:${minTileX}:${minTileZ}:${tileSig}`;
+function encodeNormalChannel(value: number): number {
+  return clamp01(value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS);
+}
+
+function deriveSummaryNormal(tile: FarSummaryTile, x: number, z: number): THREE.Vector3 {
+  const left = sampleTileHeight(tile, x - 1, z);
+  const right = sampleTileHeight(tile, x + 1, z);
+  const down = sampleTileHeight(tile, x, z - 1);
+  const up = sampleTileHeight(tile, x, z + 1);
+  return new THREE.Vector3(left - right, 2, down - up).normalize();
+}
+
+function sampleTileHeight(tile: FarSummaryTile, x: number, z: number): number {
+  const cx = Math.max(0, Math.min(tile.resolution - 1, x));
+  const cz = Math.max(0, Math.min(tile.resolution - 1, z));
+  return tile.avgHeight[cz * tile.resolution + cx] ?? 0;
 }
