@@ -133,6 +133,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
           ` gpu-dispatch=${grassStats.current.gpuRingDispatchMs === null ? "-" : grassStats.current.gpuRingDispatchMs.toFixed(2)}ms`
         : grassStats.current ? ` gpu-grass=${grassStats.current.gpuRingStatus}` : ""}\n` +
       `${formatTreeInfoLine(state.treesEnabled, state.treeTotal, treeStats.current)}\n` +
+      `tree impostors: ${state.treeImpostorSummary}\n` +
       `${formatUnderstoryInfoLine(state.understoryEnabled, state.understoryTotal, understoryStats.current)}\n` +
       `${formatForestLightingInfoLine(state.forestLightingEnabled, forestLightingStats.current)}\n` +
       (state.clodShadowStatsLine ? `clod shadows: ${state.clodShadowStatsLine}\n` : "") +
