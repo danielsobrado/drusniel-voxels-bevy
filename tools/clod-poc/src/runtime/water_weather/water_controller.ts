@@ -32,7 +32,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const waterMaterialFactory = deps.isWebGpu
     ? useHighQualityWebGpuWater
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
-      : (await import("../../water/waterFastNodeMaterial.js")).createWaterFastNodeMaterial
+      : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
   const clipmap = new WaterClipmap({
     scene: deps.scene,
