@@ -156,7 +156,8 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   input.afterRenderDiagnostics?.();
 
   const hooks = input.getHooks();
-  const dynamicResolutionStats = input.dynamicResolution?.update({
+  const dynamicResolution = input.dynamicResolution ?? window.__drusnielDynamicResolution;
+  const dynamicResolutionStats = dynamicResolution?.update({
     frameMs,
     frameIndex: selectionStats.frameId,
     renderer: input.renderer,
