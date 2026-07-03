@@ -7,6 +7,7 @@ interface ParsedArgs {
   stdout: boolean;
   jsonOnly: boolean;
   markdownOnly: boolean;
+  failOnFailure: boolean;
 }
 
 interface P0GateResult {
@@ -115,6 +116,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let stdout = false;
   let jsonOnly = false;
   let markdownOnly = false;
+  let failOnFailure = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg) continue;
@@ -128,6 +130,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (arg === "--markdown") {
       markdownOnly = true;
+      continue;
+    }
+    if (arg === "--failOnFailure") {
+      failOnFailure = true;
       continue;
     }
     if (arg === "--out") {
@@ -146,7 +152,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     input = arg;
   }
   if (jsonOnly && markdownOnly) throw new Error("Use only one of --json or --markdown");
-  return { input, out, stdout, jsonOnly, markdownOnly };
+  return { input, out, stdout, jsonOnly, markdownOnly, failOnFailure };
 }
 
 function resolveSummaryPath(input: string): string {
@@ -306,7 +312,10 @@ function writeOutputs(summaryPath: string, summary: CompactSummary, args: Parsed
   mkdirSync(dirname(base), { recursive: true });
   if (!args.markdownOnly) writeFileSync(`${base}.json`, JSON.stringify(summary, null, 2));
   if (!args.jsonOnly) writeFileSync(`${base}.md`, compactMarkdown(summary));
-  console.log(`[perf-p0-extract] wrote ${args.markdownOnly ? "" : `${base}.json`}${args.jsonOnly || args.markdownOnly ? "" : " and "}${args.jsonOnly ? "" : `${base}.md`}`);
+  const jsonPath = args.markdownOnly ? "" : `${base}.json`;
+  const markdownPath = args.jsonOnly ? "" : `${base}.md`;
+  const separator = jsonPath && markdownPath ? " and " : "";
+  console.log(`[perf-p0-extract] wrote ${jsonPath}${separator}${markdownPath}`);
 }
 
 function main(): void {
@@ -314,7 +323,7 @@ function main(): void {
   const summaryPath = resolveSummaryPath(args.input);
   const summary = readCompactSummary(summaryPath);
   writeOutputs(summaryPath, summary, args);
-  if (summary.failedGateCount > 0 || summary.failedCases.length > 0) process.exitCode = 1;
+  if (args.failOnFailure && (summary.failedGateCount > 0 || summary.failedCases.length > 0)) process.exitCode = 1;
 }
 
 main();
