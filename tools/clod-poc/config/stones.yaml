@@ -89,7 +89,7 @@ large:
   lod_details: [3, 2]
   variants: 4
   presets: [talus, boulder]
-  shadows: false
+  shadows: true
 
 medium:
   radius_min: 0.2
