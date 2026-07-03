@@ -284,7 +284,7 @@ export class GrassSystem {
     });
   }
 
-  private createTerrainPatch(nodeId: string, footprint: PageFootprint, instances: GrassBladeInstance[]): GrassPatch {
+  createTerrainPatch(nodeId: string, footprint: PageFootprint, instances: GrassBladeInstance[]): GrassPatch {
     return new GrassPatchFactory({
       settings: this.settings,
       classicBladeGeometry: this.geometries.classicBladeGeometry,
@@ -298,15 +298,15 @@ export class GrassSystem {
     }).createPatch(nodeId, footprint, instances);
   }
 
-  private currentGpuRingKey(): string {
+  currentGpuRingKey(): string {
     return this.gpuRing.currentKey(this.settings);
   }
 
-  private get gpuRingFailedKey(): string {
+  get gpuRingFailedKey(): string {
     return this.gpuRing.failedGpuRingKey;
   }
 
-  private set gpuRingFailedKey(value: string) {
+  set gpuRingFailedKey(value: string) {
     this.gpuRing.failedGpuRingKey = value;
   }
 }
