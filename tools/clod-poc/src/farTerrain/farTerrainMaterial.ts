@@ -196,3 +196,35 @@ export function updateFarTerrainMaterialCenter(material: MeshBasicNodeMaterial, 
 }
 
 export function updateFarTerrainMaterialSummaryAtlas(material: MeshBasicNodeMaterial, view: FarSummaryGpuAtlasView): void {
+  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
+  if (!refs) return;
+  if (refs.uSummaryWidthCells) refs.uSummaryWidthCells.value = view.widthCells;
+  if (refs.uSummaryHeightCells) refs.uSummaryHeightCells.value = view.heightCells;
+  if (refs.uSummaryValid) refs.uSummaryValid.value = view.valid;
+  if (!refs.uSummaryRings) return;
+
+  for (let i = 0; i < refs.uSummaryRings.length; i++) {
+    const ring = view.rings[i];
+    const ringRefs = refs.uSummaryRings[i];
+    if (!ring || !ringRefs) continue;
+    ringRefs.uOriginX.value = ring.originX;
+    ringRefs.uOriginZ.value = ring.originZ;
+    ringRefs.uCellM.value = ring.cellM;
+    ringRefs.uStartM.value = ring.startM;
+    ringRefs.uEndM.value = ring.endM;
+    ringRefs.uRowOffsetCells.value = ring.rowOffsetCells;
+    ringRefs.uWidthCells.value = ring.widthCells;
+    ringRefs.uHeightCells.value = ring.heightCells;
+    ringRefs.uValid.value = ring.valid;
+  }
+}
+
+function updateFarTerrainMaterialSunVisibility(material: MeshBasicNodeMaterial): void {
+  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
+  if (!refs) return;
+  const atlas = getSunLightGpuAtlas();
+  refs.uSunVisibilityOriginX.value = atlas.originX;
+  refs.uSunVisibilityOriginZ.value = atlas.originZ;
+  refs.uSunVisibilityWorldSize.value = atlas.worldSize;
+  refs.uSunVisibilityValid.value = atlas.valid;
+}
