@@ -141,10 +141,10 @@ export interface GrassGpuRingStats {
   candidateCount: number;
   candidateCountBeforePrefilter?: number;
   candidateCountAfterPrefilter?: number;
-  prefilterTestedClusters: number;
-  prefilterRejectedClusters: number;
-  prefilterAcceptedClusters: number;
-  prefilterUnknownKeptClusters: number;
+  prefilterTestedClusters?: number;
+  prefilterRejectedClusters?: number;
+  prefilterAcceptedClusters?: number;
+  prefilterUnknownKeptClusters?: number;
   generatedCandidates: number;
   acceptedCandidates: number;
   counts: GrassGpuRingCounts;
