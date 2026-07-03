@@ -4,7 +4,7 @@ import {
   FAR_SUMMARY_ATLAS_UPLOAD_MODE_CODE,
   farSummaryAtlasUploadFallbackReasonCode,
   farSummaryAtlasUploadModeCode,
-} from "./integration.js";
+} from "./farSummaryAtlasUploadCounters.js";
 
 describe("far-summary atlas upload counter codes", () => {
   it("keeps upload mode codes stable for HUD and perf probes", () => {
