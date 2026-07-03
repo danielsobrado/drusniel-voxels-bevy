@@ -73,13 +73,13 @@ deep_ocean:
   visual_extent_m: 4096
   near_grid_size_m: 512
   far_grid_size_m: 2048
-  near_subdivisions: 256
-  far_subdivisions: 256
+  near_subdivisions: 96
+  far_subdivisions: 64
 
   wave:
     gravity: 9.81
     grid_k: 16
-    active_gpu_waves: 48
+    active_gpu_waves: 16
     wind_speed: 14
     wind_direction_deg: 45
     height_scale: 1.3
