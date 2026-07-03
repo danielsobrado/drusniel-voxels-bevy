@@ -237,12 +237,15 @@ export class GrassSystem {
 
   rebuildNodePatches(nodeIds: Iterable<string>): void {
     if (this.gpuRing.canUse(this.settings)) {
-      this.removePatchesForNodes(nodeIds);
-      if (this.gpuRing.hasDrawResources) return;
-    } else {
-      this.removePatchesForNodes(nodeIds);
+      this.gpuRing.clearCompute();
+      if (this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
+        this.updateStats();
+        return;
+      }
+      this.gpuRing.clearRing();
+      this.gpuRing.updateCpuFallbackStatus(this.settings);
     }
-    this.cpuPatches.refreshForCenter(this.lastCenter, this.settings);
+    this.cpuPatches.rebuildForNodes(nodeIds, this.lastCenter, this.settings);
     this.updateStats();
   }
 
