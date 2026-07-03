@@ -13,7 +13,11 @@ import { queryTerrainHeight, tracePrimaryDebugRay, traceSunVisibility } from "./
 import { NaadfDebugOverlay } from "./debugOverlay.js";
 import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
-import { FarSummaryGpuAtlas, type FarSummaryGpuAtlasView } from "./gpu/farSummaryAtlas.js";
+import {
+  FarSummaryGpuAtlas,
+  type FarSummaryGpuAtlasFullUploadReason,
+  type FarSummaryGpuAtlasView,
+} from "./gpu/farSummaryAtlas.js";
 import terrainMaterialCacheYaml from "../../config/terrain_material_cache.yaml?raw";
 import {
   parseTerrainMaterialCacheConfig,
@@ -26,6 +30,26 @@ const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda
 const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
 const HEIGHT_PROVIDER_KEY_SCALE = 1000;
 
+type FarSummaryAtlasUploadMode = FarSummaryGpuAtlasView["uploadStats"]["lastUploadMode"];
+
+export const FAR_SUMMARY_ATLAS_UPLOAD_MODE_CODE: Record<FarSummaryAtlasUploadMode, number> = {
+  none: 0,
+  dirty: 1,
+  full: 2,
+};
+
+export const FAR_SUMMARY_ATLAS_UPLOAD_FALLBACK_REASON_CODE: Record<FarSummaryGpuAtlasFullUploadReason | "none", number> = {
+  none: 0,
+  initial: 1,
+  explicit: 2,
+  disabled: 3,
+  too_many_rects: 4,
+  threshold: 5,
+  invalid_atlas: 6,
+  partial_ranges_unsupported: 7,
+  full_invalidation: 8,
+};
+
 export const NAADF_SCENES = new Set([
   "infinite-naadf-flat",
   "infinite-naadf-hills",
@@ -37,6 +61,14 @@ export const NAADF_SCENES = new Set([
   "infinite-naadf-stress-missing",
   "infinite-naadf-far",
 ]);
+
+export function farSummaryAtlasUploadModeCode(mode: FarSummaryAtlasUploadMode): number {
+  return FAR_SUMMARY_ATLAS_UPLOAD_MODE_CODE[mode];
+}
+
+export function farSummaryAtlasUploadFallbackReasonCode(reason: FarSummaryGpuAtlasFullUploadReason | null): number {
+  return FAR_SUMMARY_ATLAS_UPLOAD_FALLBACK_REASON_CODE[reason ?? "none"];
+}
 
 export function isNaadfScene(scene: string | null): boolean {
   return scene !== null && NAADF_SCENES.has(scene);
@@ -179,15 +211,18 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
       if (clod?.stats) {
         const counters = metrics.toCounters();
         if (gpuAtlas?.view) {
+          const uploadStats = gpuAtlas.view.uploadStats;
           counters["naadf.farSummaryAtlas.estimatedBytes"] = gpuAtlas.view.estimatedBytes ?? 0;
           counters["naadf.farSummaryAtlas.memorySavingsBytes"] = gpuAtlas.view.memorySavingsBytes ?? 0;
           counters["naadf.farSummaryAtlas.memorySavingsPct"] = gpuAtlas.view.memorySavingsPct ?? 0;
-          counters["naadf.farSummaryAtlas.upload.totalPixels"] = gpuAtlas.view.uploadStats.totalPixels;
-          counters["naadf.farSummaryAtlas.upload.dirtyPixels"] = gpuAtlas.view.uploadStats.dirtyPixels;
-          counters["naadf.farSummaryAtlas.upload.dirtyPct"] = gpuAtlas.view.uploadStats.dirtyPct;
-          counters["naadf.farSummaryAtlas.upload.dirtyRects"] = gpuAtlas.view.uploadStats.dirtyRects;
-          counters["naadf.farSummaryAtlas.upload.dirtyUploads"] = gpuAtlas.view.uploadStats.dirtyUploads;
-          counters["naadf.farSummaryAtlas.upload.fullUploads"] = gpuAtlas.view.uploadStats.fullUploads;
+          counters["naadf.farSummaryAtlas.upload.totalPixels"] = uploadStats.totalPixels;
+          counters["naadf.farSummaryAtlas.upload.dirtyPixels"] = uploadStats.dirtyPixels;
+          counters["naadf.farSummaryAtlas.upload.dirtyPct"] = uploadStats.dirtyPct;
+          counters["naadf.farSummaryAtlas.upload.dirtyRects"] = uploadStats.dirtyRects;
+          counters["naadf.farSummaryAtlas.upload.dirtyUploads"] = uploadStats.dirtyUploads;
+          counters["naadf.farSummaryAtlas.upload.fullUploads"] = uploadStats.fullUploads;
+          counters["naadf.farSummaryAtlas.upload.modeCode"] = farSummaryAtlasUploadModeCode(uploadStats.lastUploadMode);
+          counters["naadf.farSummaryAtlas.upload.fallbackReasonCode"] = farSummaryAtlasUploadFallbackReasonCode(uploadStats.fallbackReason);
         }
         if (materialCache) Object.assign(counters, terrainMaterialCacheCountersForHud(materialCache));
         if (clod.stats.counters) {
