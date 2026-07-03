@@ -107,6 +107,7 @@ export const DEFAULT_TREE_IMPOSTOR_SETTINGS: TreeImpostorSettings = {
   enabled: true,
   bakeOnStart: true,
   fallbackToPlaceholder: false,
+  swapOnBake: true,
   sourceLod: "near",
   resolutionPx: 256,
   octahedralGridSize: 8,
@@ -238,11 +239,12 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     receiveShadows: true,
     depthPrepass: true,
     debugColorByLod: false,
+    farCheapMaterial: true,
   },
   gpu: DEFAULT_TREE_GPU_SETTINGS,
   ecology: DEFAULT_TREE_ECOLOGY_SETTINGS,
 };
 
-export function cloneTreeSettings(source: TreeSettings = DEFAULT_TREE_SETTINGS): TreeSettings {
-  return structuredClone(source);
+export function cloneTreeSettings(): TreeSettings {
+  return structuredClone(DEFAULT_TREE_SETTINGS);
 }
