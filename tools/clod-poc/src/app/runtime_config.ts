@@ -21,6 +21,7 @@ import {
   type ClodApplyBudget,
 } from "../terrain/rendering/clod_apply_queue.js";
 import type {
+  DynamicResolutionConfig,
   RenderResolutionConfig,
   RenderResolutionPreset,
 } from "../rendering/render_resolution.js";
@@ -103,6 +104,11 @@ function positiveInt(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
+function nonNegativeInt(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
 function positiveNumber(value: unknown, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -134,6 +140,22 @@ function renderResolutionPresets(value: unknown, fallback: Record<string, Render
     presets[name] = renderResolutionPreset(raw[name], fallback[name] ?? DEFAULT_RENDER_RESOLUTION_CONFIG.presets.high);
   }
   return presets;
+}
+
+function dynamicResolutionConfig(value: unknown, fallback: DynamicResolutionConfig): DynamicResolutionConfig {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    enabled: bool(raw.enabled, fallback.enabled),
+    targetMs: positiveNumber(raw.target_ms ?? raw.targetMs, fallback.targetMs),
+    minScale: positiveNumber(raw.min_scale ?? raw.minScale, fallback.minScale),
+    maxScale: positiveNumber(raw.max_scale ?? raw.maxScale, fallback.maxScale),
+    stepUp: positiveNumber(raw.step_up ?? raw.stepUp, fallback.stepUp),
+    stepDown: positiveNumber(raw.step_down ?? raw.stepDown, fallback.stepDown),
+    sampleWindowFrames: positiveInt(raw.sample_window_frames ?? raw.sampleWindowFrames, fallback.sampleWindowFrames),
+    settleFrames: nonNegativeInt(raw.settle_frames ?? raw.settleFrames, fallback.settleFrames),
+    upscaleHeadroomMs: positiveNumber(raw.upscale_headroom_ms ?? raw.upscaleHeadroomMs, fallback.upscaleHeadroomMs),
+    downscaleOverMs: positiveNumber(raw.downscale_over_ms ?? raw.downscaleOverMs, fallback.downscaleOverMs),
+  };
 }
 
 export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeConfig {
@@ -223,6 +245,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         renderScale: positiveNumber(renderResolution.render_scale, defaults.renderResolution.renderScale),
         minEffectivePixelRatio: positiveNumber(renderResolution.min_effective_pixel_ratio, defaults.renderResolution.minEffectivePixelRatio),
         maxEffectivePixelRatio: positiveNumber(renderResolution.max_effective_pixel_ratio, defaults.renderResolution.maxEffectivePixelRatio),
+        dynamic: dynamicResolutionConfig(renderResolution.dynamic_resolution ?? renderResolution.dynamic, defaults.renderResolution.dynamic),
         presets: renderResolutionPresets(renderResolution.presets, defaults.renderResolution.presets),
       },
       digging: {
