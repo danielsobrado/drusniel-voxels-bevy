@@ -66,7 +66,7 @@ export function grassGpuRingDrawUnsupportedReason(): string | null {
 }
 
 export interface GrassGpuRingDrawResources {
-  tiers: Record<GrassTier, GrassGpuTierDrawResources>;
+  tiers: Partial<Record<GrassTier, GrassGpuTierDrawResources>>;
   indirect: StorageBufferAttribute;
   outputBuffers: GrassGpuRingOutputBuffers;
 }
