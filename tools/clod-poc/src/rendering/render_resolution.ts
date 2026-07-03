@@ -85,13 +85,22 @@ function firstParam(searchParams: URLSearchParams, keys: readonly string[]): str
   return null;
 }
 
+function renderPresetFromQuality(value: string | null): string | undefined {
+  if (value === "perf") return "performance100";
+  if (value === "potato") return "low";
+  if (value === "balanced") return "medium";
+  if (value === "ultra") return "high";
+  return undefined;
+}
+
 export function resolveRenderResolutionQueryOverrides(searchParams: URLSearchParams): RenderResolutionQueryOverrides {
-  const presetName = firstParam(searchParams, ["quality_preset", "qualityPreset", "render_preset", "renderPreset"]);
+  const explicitPresetName = firstParam(searchParams, ["quality_preset", "qualityPreset", "render_preset", "renderPreset"]);
+  const qualityPresetName = renderPresetFromQuality(firstParam(searchParams, ["quality", "preset"]));
   const dprCap = finitePositive(firstParam(searchParams, ["dpr_cap", "dprCap"]));
   const renderScale = finitePositive(firstParam(searchParams, ["render_scale", "renderScale"]));
 
   return {
-    presetName: presetName ?? undefined,
+    presetName: explicitPresetName ?? qualityPresetName ?? undefined,
     overrideDprCap: dprCap ?? undefined,
     overrideRenderScale: renderScale ?? undefined,
   };
