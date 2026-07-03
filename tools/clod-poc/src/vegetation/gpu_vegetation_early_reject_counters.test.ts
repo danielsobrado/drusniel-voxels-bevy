@@ -29,6 +29,9 @@ function grassStats(overrides: Partial<GrassStats> = {}): GrassStats {
     gpuRingPrefilterRejectedClusters: 3,
     gpuRingPrefilterAcceptedClusters: 5,
     gpuRingPrefilterUnknownKeptClusters: 1,
+    gpuRingPrefilterSourceFarSummary: 2,
+    gpuRingPrefilterSourceTerrainSampler: 3,
+    gpuRingPrefilterSourceFallback: 4,
     gpuRingVisibleNear: 0,
     gpuRingVisibleMid: 0,
     gpuRingVisibleFar: 0,
@@ -73,6 +76,9 @@ function understoryStats(overrides: Partial<UnderstoryStats> = {}): UnderstorySt
     gpuPrefilterRejectedClusters: 2,
     gpuPrefilterAcceptedClusters: 4,
     gpuPrefilterUnknownKeptClusters: 1,
+    gpuPrefilterSourceFarSummary: 5,
+    gpuPrefilterSourceTerrainSampler: 6,
+    gpuPrefilterSourceFallback: 7,
     gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
     gpuOverflowed: false,
@@ -97,6 +103,17 @@ describe("aggregateGpuVegetationEarlyRejectCounters", () => {
     expect(counters.vegetationGpuClustersTotal).toBe(14);
     expect(counters.vegetationGpuClustersRejectedEarly).toBe(5);
     expect(counters.vegetationGpuClustersAccepted).toBe(9);
+  });
+
+  it("aggregates prefilter source counters across vegetation systems", () => {
+    const counters = aggregateGpuVegetationEarlyRejectCounters({
+      grassStats: grassStats(),
+      understoryStats: understoryStats(),
+    });
+
+    expect(counters.vegetationGpuSourceFarSummary).toBe(7);
+    expect(counters.vegetationGpuSourceTerrainSampler).toBe(9);
+    expect(counters.vegetationGpuSourceFallback).toBe(11);
   });
 
   it("does not count near-forced visible clusters as too-far rejections", () => {
