@@ -170,6 +170,14 @@ describe("frame perf probe", () => {
     expect(summary.counters.understoryGpuCandidateCountAvg).toBe(128);
     expect(summary.counters.understoryGpuCandidateCountBeforePrefilterAvg).toBe(320);
     expect(summary.counters.understoryGpuCandidateCountAfterPrefilterAvg).toBe(160);
+    expect(summary.counters.vegetationGpuClustersTotalAvg).toBe(18);
+    expect(summary.counters.vegetationGpuClustersRejectedEarlyAvg).toBe(4);
+    expect(summary.counters.vegetationGpuClustersAcceptedAvg).toBe(12);
+    expect(summary.counters.vegetationGpuClustersSummaryMissingAvg).toBe(2);
+    expect(summary.counters.vegetationGpuCandidatesBudgetBeforeRejectAvg).toBe(1036);
+    expect(summary.counters.vegetationGpuCandidatesBudgetAfterRejectAvg).toBe(546);
+    expect(summary.counters.vegetationGpuCandidatesGeneratedAvg).toBe(480);
+    expect(summary.counters.vegetationGpuRejectTerrainHiddenAvg).toBe(4);
     expect(summary.counters.customPropGpuStatusCounts).toEqual({ ring: 2 });
     expect(summary.counters.customPropGpuVisibleCountAvg).toBe(30);
     expect(summary.counters.statsSyncRanFrames).toBe(1);
