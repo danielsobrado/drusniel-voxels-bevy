@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
-import type { ClodPageNode } from "../types.js";
+import type { ClodPageNode, PageFootprint } from "../types.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { selectTreeLod, treeLodDistances } from "./tree_lod.js";
 import { emptyTreeGenerationStats, generateTreeInstances, type TreeInstance, type TreeTerrainSampler } from "./tree_instances.js";
@@ -12,6 +12,7 @@ import {
   countTreePatchInstances,
   selectRetainedTreePatches,
   selectTreePatchCandidates,
+  type TreePatchCandidate,
 } from "./tree_system_patch_planner.js";
 import {
   treeDistance2d,
@@ -85,6 +86,8 @@ const TREE_CPU_SCALE = new THREE.Vector3();
 const TREE_CPU_ROTATION = new THREE.Quaternion();
 const TREE_CPU_TRANSLATION = new THREE.Vector3();
 const TREE_CPU_UP_AXIS = new THREE.Vector3(0, 1, 0);
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const DEFAULT_UNBOUNDED_TREE_PATCH_M = 64;
 
 export function createTreeLodCounts(): TreeLodCounts {
   return { near: 0, mid: 0, far: 0, impostor: 0 };
@@ -110,7 +113,13 @@ export function refreshTreePatchesForCenter(
   }
 
   const existing = new Set(retained.map((patch) => patch.nodeId));
-  const candidates = selectTreePatchCandidates(input.nodes, existing, center.x, center.z, input.settings.distanceM);
+  const finiteCandidates = selectTreePatchCandidates(input.nodes, existing, center.x, center.z, input.settings.distanceM);
+  const unboundedWorld = treeCpuUnboundedWorld();
+  const candidates = finiteCandidates.length > 0
+    ? finiteCandidates
+    : unboundedWorld
+      ? unboundedTreePatchCandidates(center, input.settings.distanceM, treeFallbackPatchSize(input.nodes), existing)
+      : [];
   let totalTrees = countTreePatchInstances(retained);
   let added = 0;
   let deferred = false;
@@ -123,12 +132,12 @@ export function refreshTreePatchesForCenter(
       settings: input.settings,
       sampler: input.sampler,
       cameraPosition,
-      worldCells: input.worldCells,
+      worldCells: unboundedWorld ? Number.POSITIVE_INFINITY : input.worldCells,
     });
     recordTreeEarlyTerrainRejection(input.earlyTerrainRejectionStats, rejection);
     if (rejection.reject) continue;
 
-    const patch = createTreePatch(input, node, input.settings.maxInstances - totalTrees);
+    const patch = createTreePatch(input, node, input.settings.maxInstances - totalTrees, unboundedWorld);
     totalTrees += patch.instances.length;
     patches.push(patch);
     input.root.add(patch.group);
@@ -193,7 +202,7 @@ export function updateTreePatchLods(
   }
 }
 
-function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, capacityLeft: number): TreePatch {
+function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, capacityLeft: number, unboundedWorld: boolean): TreePatch {
   const generationStats = emptyTreeGenerationStats();
   const instances = generateTreeInstances(
     node.footprint,
@@ -201,7 +210,7 @@ function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, ca
     capacityLeft,
     generationStats,
     input.sampler,
-    input.worldCells,
+    unboundedWorld ? Number.POSITIVE_INFINITY : input.worldCells,
   );
   const centerX = treeFootprintCenterX(node.footprint);
   const centerZ = treeFootprintCenterZ(node.footprint);
@@ -228,6 +237,63 @@ function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, ca
     terrainOccluded: false,
     generationStats,
   };
+}
+
+export function unboundedTreePatchCandidates(
+  center: THREE.Vector3,
+  distanceM: number,
+  patchSizeM: number,
+  existingNodeIds: ReadonlySet<string> = new Set(),
+): TreePatchCandidate[] {
+  const size = Number.isFinite(patchSizeM) && patchSizeM > 0 ? patchSizeM : DEFAULT_UNBOUNDED_TREE_PATCH_M;
+  const radius = Math.max(0, Number.isFinite(distanceM) ? distanceM : 0);
+  const minX = Math.floor((center.x - radius) / size);
+  const maxX = Math.floor((center.x + radius) / size);
+  const minZ = Math.floor((center.z - radius) / size);
+  const maxZ = Math.floor((center.z + radius) / size);
+  const candidates: TreePatchCandidate[] = [];
+  for (let z = minZ; z <= maxZ; z++) {
+    for (let x = minX; x <= maxX; x++) {
+      const id = `tree-unbounded:${x},${z}`;
+      if (existingNodeIds.has(id)) continue;
+      const footprint = { minX: x * size, minZ: z * size, maxX: (x + 1) * size, maxZ: (z + 1) * size };
+      const distance = treeDistance2d(center.x, center.z, treeFootprintCenterX(footprint), treeFootprintCenterZ(footprint));
+      if (distance > radius + treeFootprintRadius(footprint)) continue;
+      candidates.push({ node: syntheticTreeNode(id, footprint), distance });
+    }
+  }
+  return candidates.sort((a, b) => a.distance - b.distance);
+}
+
+function syntheticTreeNode(id: string, footprint: PageFootprint): ClodPageNode {
+  return {
+    id,
+    level: 0,
+    children: [],
+    mesh: {
+      positions: new Float32Array(),
+      normals: new Float32Array(),
+      paintSlots: new Float32Array(),
+      materialWeights: new Float32Array(),
+      materialWeightStride: 0,
+      indices: new Uint32Array(),
+    },
+    footprint,
+    bounds: { center: [treeFootprintCenterX(footprint), 0, treeFootprintCenterZ(footprint)], radius: treeFootprintRadius(footprint), minY: 0, maxY: 0 },
+    errorWorld: 0,
+    lowBenefit: false,
+  };
+}
+
+function treeFallbackPatchSize(nodes: readonly ClodPageNode[]): number {
+  const first = nodes[0]?.footprint;
+  const size = first ? Math.max(first.maxX - first.minX, first.maxZ - first.minZ) : DEFAULT_UNBOUNDED_TREE_PATCH_M;
+  return Number.isFinite(size) && size > 0 ? size : DEFAULT_UNBOUNDED_TREE_PATCH_M;
+}
+
+function treeCpuUnboundedWorld(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
 }
 
 function treeTerrainOcclusionSettings(settings: TreeSettings): TreeTerrainOcclusionSettings {
