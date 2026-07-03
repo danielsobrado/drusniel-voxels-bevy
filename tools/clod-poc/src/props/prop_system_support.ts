@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
+import { isRenderableIndirectDrawGeometry } from "../gpu/indirect_draw_geometry.js";
 import type { LoadedPropAsset } from "./prop_asset_loader.js";
 import type { CustomPropsSettings, PropGpuStatus } from "./prop_types.js";
 import type { PropGpuRingSourceData } from "../gpu/prop_ring_compute.js";
@@ -101,13 +102,16 @@ export function addLodTotals(target: number[], delta: readonly number[], sign: 1
 }
 
 export function lodGeometry(asset: LoadedPropAsset, lod: number): THREE.BufferGeometry | null {
-  if (asset.lodChain) return asset.lodChain.levels[lod]?.geometry ?? null;
-  let found: THREE.Mesh | null = null;
-  asset.root.traverse((obj) => {
-    if (!found && obj instanceof THREE.Mesh) found = obj;
-  });
-  const mesh = found as THREE.Mesh | null;
-  return mesh?.geometry ?? null;
+  let geometry: THREE.BufferGeometry | null = null;
+  if (asset.lodChain) geometry = asset.lodChain.levels[lod]?.geometry ?? null;
+  else {
+    let found: THREE.Mesh | null = null;
+    asset.root.traverse((obj) => {
+      if (!found && obj instanceof THREE.Mesh) found = obj;
+    });
+    geometry = found?.geometry ?? null;
+  }
+  return geometry && isRenderableIndirectDrawGeometry(geometry) ? geometry : null;
 }
 
 export function lodTriangleCount(asset: LoadedPropAsset, lod: number): number {
