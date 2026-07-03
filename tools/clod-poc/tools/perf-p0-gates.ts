@@ -43,6 +43,7 @@ export function evaluateP0PerfGates(cases: readonly P0PerfGateCaseLike[]): P0Per
     gateVegetationEarlyRejectEvidence(byName),
     gateFarSummarySourceEvidence(byName),
     gateAtlasPackingEvidence(byName),
+    gateAtlasDirtyUploadEvidence(byName),
   ];
   const failedCount = results.filter((result) => result.status === "failed").length;
   return {
@@ -133,6 +134,43 @@ function gateAtlasPackingEvidence(byName: ReadonlyMap<string, P0PerfGateCaseLike
       ? `atlas packing savings detected bestSavingsPct=${formatMetric(bestSavings)}`
       : "atlas packing memory savings metric missing or zero",
   );
+}
+
+function gateAtlasDirtyUploadEvidence(byName: ReadonlyMap<string, P0PerfGateCaseLike>): P0PerfGateResult {
+  const cases = [...byName.values()];
+  const best = cases.reduce<AtlasDirtyUploadEvidence | null>((current, perfCase) => {
+    const evidence = atlasDirtyUploadEvidence(perfCase);
+    if (!evidence) return current;
+    if (!current) return evidence;
+    return evidence.dirtyPixels > current.dirtyPixels ? evidence : current;
+  }, null);
+  return gate(
+    "far-summary-atlas-dirty-upload-evidence",
+    best !== null,
+    best
+      ? `dirty upload evidence case=${best.caseName} dirtyUploads=${formatMetric(best.dirtyUploads)} dirtyPixels=${formatMetric(best.dirtyPixels)} totalPixels=${formatMetric(best.totalPixels)} dirtyPct=${formatMetric(best.dirtyPct)}`
+      : "no dirty atlas upload evidence; expected dirty uploads with dirtyPixels < totalPixels and mode=dirty",
+  );
+}
+
+interface AtlasDirtyUploadEvidence {
+  caseName: string;
+  dirtyUploads: number;
+  dirtyPixels: number;
+  totalPixels: number;
+  dirtyPct: number;
+}
+
+function atlasDirtyUploadEvidence(perfCase: P0PerfGateCaseLike): AtlasDirtyUploadEvidence | null {
+  const dirtyUploads = metric(perfCase, "naadf.farSummaryAtlas.upload.dirtyUploads");
+  const dirtyPixels = metric(perfCase, "naadf.farSummaryAtlas.upload.dirtyPixels");
+  const totalPixels = metric(perfCase, "naadf.farSummaryAtlas.upload.totalPixels");
+  const dirtyPct = metric(perfCase, "naadf.farSummaryAtlas.upload.dirtyPct");
+  const modeCode = metric(perfCase, "naadf.farSummaryAtlas.upload.modeCode");
+  if (!positive(dirtyUploads) || !positive(dirtyPixels) || !positive(totalPixels)) return null;
+  if (dirtyPixels >= totalPixels) return null;
+  if (modeCode !== null && modeCode !== 1) return null;
+  return { caseName: perfCase.name, dirtyUploads, dirtyPixels, totalPixels, dirtyPct: dirtyPct ?? dirtyPixels / totalPixels };
 }
 
 function gate(name: string, passed: boolean, detail: string): P0PerfGateResult {
