@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FarSummaryGpuAtlas,
@@ -85,6 +86,28 @@ describe("far-summary atlas dirty upload edge cases", () => {
     expect(atlas.view.uploadStats.fallbackReason).toBe("partial_ranges_unsupported");
     expect(atlas.view.uploadStats.fullUploads).toBe(2);
     expect(atlas.view.uploadStats.dirtyPixels).toBe(atlas.view.uploadStats.totalPixels);
+  });
+
+  it("stores balanced coverage as an RG unsigned-byte atlas", () => {
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3, format: "balanced" });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20, 1));
+
+    atlas.updateFromState(testState(farTiles, 1));
+
+    expect(atlas.view.coverageTexture.format).toBe(THREE.RGFormat);
+    expect(atlas.view.coverageTexture.type).toBe(THREE.UnsignedByteType);
+    expect(atlas.view.coverageTexture.image.data).toBeInstanceOf(Uint8Array);
+    expect(atlas.view.coverageTexture.image.data.length).toBe(atlas.view.uploadStats.totalPixels * 2);
+  });
+
+  it("keeps debug coverage as RGBA32F for validation", () => {
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3, format: "debug_rgba32f" });
+
+    expect(atlas.view.coverageTexture.format).toBe(THREE.RGBAFormat);
+    expect(atlas.view.coverageTexture.type).toBe(THREE.FloatType);
+    expect(atlas.view.coverageTexture.image.data).toBeInstanceOf(Float32Array);
+    expect(atlas.view.coverageTexture.image.data.length).toBe(atlas.view.uploadStats.totalPixels * 4);
   });
 
   it("does not dirty the normal fallback texture when normal atlas storage is disabled", () => {
