@@ -19,6 +19,7 @@ export interface WaterGuiDeps {
 }
 
 type WaterVisual = ReturnType<WaterController["makeVisual"]>;
+type WaterDebugModeKey = keyof typeof WATER_DEBUG_MODES;
 
 type RiverStatsController = WaterController & {
   getRiverStats?: () => WaterRiverDebugStats;
@@ -128,6 +129,30 @@ function addDeepWaterLookFolder(
   folder.add(visual.foam, "riverStrength", 0.0, 2.0, 0.01).name("river foam").onChange(rebuild);
 }
 
+function addWaterRefractionFolder(
+  gui: GUI,
+  visual: WaterVisual,
+  rebuild: () => void,
+  setDebugMode: (mode: WaterDebugModeKey) => void,
+): void {
+  const folder = gui.addFolder("water / refraction");
+  const actions = {
+    showRefraction: () => setDebugMode("refraction"),
+    showFinal: () => setDebugMode("final"),
+  };
+
+  folder.add(visual.refraction, "enabled").name("enabled").onChange(rebuild);
+  folder.add(visual.refraction, "strength", 0.0, 0.16, 0.001).name("strength").onChange(rebuild);
+  folder.add(visual.refraction, "depthValidationBias", 0.0, 0.25, 0.005).name("depth bias").onChange(rebuild);
+  folder.add(visual.refraction, "maxThickness", 0.25, 32.0, 0.25).name("max thickness").onChange(rebuild);
+  folder.add(visual.refraction, "turbidityStrength", 0.0, 0.20, 0.002).name("turbidity").onChange(rebuild);
+  folder.add(visual.refraction, "absorptionR", 0.0, 1.0, 0.005).name("absorb R").onChange(rebuild);
+  folder.add(visual.refraction, "absorptionG", 0.0, 1.0, 0.005).name("absorb G").onChange(rebuild);
+  folder.add(visual.refraction, "absorptionB", 0.0, 1.0, 0.005).name("absorb B").onChange(rebuild);
+  folder.add(actions, "showRefraction").name("debug refraction");
+  folder.add(actions, "showFinal").name("debug final");
+}
+
 export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
   const visual = deps.makeWaterVisual();
 
@@ -135,15 +160,18 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     deps.waterController.updateVisual(visual);
   };
 
+  const setDebugMode = (mode: WaterDebugModeKey) => {
+    deps.waterDebugState.mode = mode;
+    deps.setWaterDebugMode(mode);
+    deps.waterController.setDebugMode(mode);
+  };
+
   addWaterDebugFolder(gui, deps.waterDebugState, {
     onEnabled: (enabled) => {
       deps.setWaterEnabled(enabled);
       deps.waterController.setVisible(enabled);
     },
-    onMode: (mode) => {
-      deps.setWaterDebugMode(mode);
-      deps.waterController.setDebugMode(mode);
-    },
+    onMode: setDebugMode,
     onClipmapTint: (enabled) => {
       deps.setWaterClipmapTint(enabled);
       deps.waterController.setClipmapTint(enabled);
@@ -167,4 +195,5 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
   });
 
   addDeepWaterLookFolder(gui, visual, rebuildVisual);
+  addWaterRefractionFolder(gui, visual, rebuildVisual, setDebugMode);
 }
