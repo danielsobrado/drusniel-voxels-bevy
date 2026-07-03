@@ -11,6 +11,14 @@ describe("unboundedTreePatchCandidates", () => {
     expect(candidates[0]?.distance).toBeLessThanOrEqual(candidates.at(-1)?.distance ?? Number.POSITIVE_INFINITY);
   });
 
+  it("creates deterministic negative-route patch IDs around out-of-world centers", () => {
+    const candidates = unboundedTreePatchCandidates(new THREE.Vector3(-150, 0, -300), 64, 64);
+    const ids = candidates.map((candidate) => candidate.node.id);
+
+    expect(ids).toContain("tree-unbounded:-3,-5");
+    expect(ids.some((id) => id.includes("-"))).toBe(true);
+  });
+
   it("does not return existing synthetic patches", () => {
     const candidates = unboundedTreePatchCandidates(
       new THREE.Vector3(1500, 0, 300),
