@@ -1,11 +1,13 @@
-export type FarSummaryAtlasFormat = "debug_rgba32f" | "balanced" | "packed_low_bandwidth";
+export type FarSummaryAtlasFormat = "debug_rgba32f" | "balanced" | "packed" | "packed_low_bandwidth";
 export type FarSummaryAtlasHeightFormat = "r32f" | "r16f";
 
 export const DEFAULT_FAR_SUMMARY_ATLAS_FORMAT: FarSummaryAtlasFormat = "balanced";
+export const FAR_SUMMARY_ATLAS_PACKED_ALIAS: FarSummaryAtlasFormat = "packed_low_bandwidth";
 
 const FORMAT_VALUES: ReadonlySet<string> = new Set([
   "debug_rgba32f",
   "balanced",
+  "packed",
   "packed_low_bandwidth",
 ]);
 
@@ -57,7 +59,7 @@ export function resolveFarSummaryAtlasPackingSpec(format: FarSummaryAtlasFormat 
     };
   }
 
-  if (format === "packed_low_bandwidth") {
+  if (format === "packed" || format === "packed_low_bandwidth") {
     return {
       format,
       heightFormat: "r16f",
