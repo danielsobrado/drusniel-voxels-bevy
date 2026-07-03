@@ -147,7 +147,6 @@ export class TerrainColliderSet {
   private applyHeightFallback(
     position: THREE.Vector3,
     velocity: THREE.Vector3,
-    config: CapsuleCollisionConfig,
     grounded: boolean,
   ): { position: THREE.Vector3; velocity: THREE.Vector3; grounded: boolean } {
     if (!this.heightFallback?.enabled) return { position, velocity, grounded };
@@ -278,7 +277,7 @@ export class TerrainColliderSet {
     }
     if (grounded && resolvedVelocity.y < 0) resolvedVelocity.y = 0;
 
-    const fallback = this.applyHeightFallback(resolvedPosition, resolvedVelocity, config, grounded);
+    const fallback = this.applyHeightFallback(resolvedPosition, resolvedVelocity, grounded);
     return {
       position: fallback.position,
       velocity: fallback.velocity,
