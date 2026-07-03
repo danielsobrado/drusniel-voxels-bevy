@@ -68,7 +68,8 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
         console.warn(`[far-summary] NaN height at (${wx}, ${wz})`);
       }
 
-      const sampleH = Number.isFinite(height) ? height : 0;
+      const heightValid = Number.isFinite(height);
+      const sampleH = heightValid ? height : 0;
 
       const hRangeL = terrainSampler.sampleHeight(wx - cellM * 0.4, wz);
       const hRangeR = terrainSampler.sampleHeight(wx + cellM * 0.4, wz);
@@ -87,10 +88,10 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
 
       const roughness = computeRoughness(hFn, wx, wz, cellM);
 
-      if (Number.isFinite(sampleH)) {
-        globalMin = Math.min(globalMin, sampleH);
-        globalMax = Math.max(globalMax, sampleH);
-        globalSum += sampleH;
+      if (heightValid) {
+        globalMin = Math.min(globalMin, height);
+        globalMax = Math.max(globalMax, height);
+        globalSum += height;
         validSamples++;
       }
 
