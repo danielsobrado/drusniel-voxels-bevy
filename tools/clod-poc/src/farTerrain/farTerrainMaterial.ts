@@ -92,7 +92,7 @@ export function createFarTerrainMaterial(
           .mul(step(float(0.0), atlasVCells))
           .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
         const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
-        const atlasWeight: TslNode = inside.mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+        const atlasWeight: TslNode = materialSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
         const atlasUCellL = clamp(atlasUCell.sub(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
         const atlasUCellR = clamp(atlasUCell.add(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
         const atlasVCellD = clamp(atlasVCell.sub(float(1.0)), float(0.0), ringRefs.uHeightCells.sub(float(1.0)));
