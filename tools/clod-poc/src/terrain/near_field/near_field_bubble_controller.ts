@@ -7,6 +7,7 @@ import { toGeometry } from "../geometry/page_geometry.js";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import type { TerrainMaterialController } from "../material/terrain_material_controller.js";
 import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
+import type { TerrainColliderFootprint, TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { WorldBounds } from "../../terrain/terrain_surface.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
@@ -16,6 +17,7 @@ export interface ChunkGroupEntry {
   group: THREE.Group;
   mats: TerrainMaterialHandle[];
   unsubs: Array<() => void>;
+  colliderIds: string[];
   ready: boolean;
   failed: boolean;
   centerX: number;
@@ -61,6 +63,7 @@ export interface NearFieldBubbleControllerDeps {
   maxCachedChunkGroups: number;
   evictDistanceMultiplier: number;
   streamingLiveTerrain?: boolean;
+  terrainColliders?: TerrainColliderSet;
 }
 
 export interface NearFieldBubbleController {
@@ -81,6 +84,23 @@ interface PageCoord {
 
 function pageGroupKey(px: number, pz: number): string {
   return `L0:${px},${pz}`;
+}
+
+function chunkColliderId(pageKey: string, dx: number, dz: number): string {
+  return `${pageKey}:chunk:${dx},${dz}`;
+}
+
+export function liveBubbleChunkFootprint(
+  px: number,
+  pz: number,
+  dx: number,
+  dz: number,
+  chunksPerPage: number,
+  chunkSize: number,
+): TerrainColliderFootprint {
+  const minX = (px * chunksPerPage + dx) * chunkSize;
+  const minZ = (pz * chunksPerPage + dz) * chunkSize;
+  return { minX, minZ, maxX: minX + chunkSize, maxZ: minZ + chunkSize };
 }
 
 function parsePageGroupKey(key: string): { px: number; pz: number } {
@@ -180,19 +200,28 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     group: THREE.Group,
     mats: TerrainMaterialHandle[],
     unsubs: Array<() => void>,
+    colliderIds: string[],
     cm: PageMesh | ChunkMesh,
+    colliderId: string,
+    footprint: TerrainColliderFootprint,
   ) => {
     const mat = buildChunkMaterial();
-    const mesh = new THREE.Mesh(toGeometry(cm), mat.material);
+    const geometry = toGeometry(cm);
+    const mesh = new THREE.Mesh(geometry, mat.material);
     unsubs.push(mat.onMaterialChanged((material) => {
       mesh.material = material;
     }));
     group.add(mesh);
     mats.push(mat);
+    if (cm.indices.length > 0 && deps.terrainColliders) {
+      deps.terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
+      colliderIds.push(colliderId);
+    }
   };
 
   const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
     deps.scene.remove(entry.group);
+    for (const colliderId of entry.colliderIds) deps.terrainColliders?.removePage(colliderId);
     for (const child of entry.group.children) (child as THREE.Mesh).geometry.dispose();
     for (const unsub of entry.unsubs) unsub();
     for (const m of entry.mats) {
@@ -211,12 +240,21 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     group: THREE.Group,
     mats: TerrainMaterialHandle[],
     unsubs: Array<() => void>,
+    colliderIds: string[],
     failedCoords: Array<[number, number]>,
   ): number => {
     let recovered = 0;
     for (const [dx, dz] of failedCoords) {
       try {
-        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds));
+        addChunkMesh(
+          group,
+          mats,
+          unsubs,
+          colliderIds,
+          meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds),
+          chunkColliderId(pageKey, dx, dz),
+          liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
+        );
         recovered++;
       } catch (error) {
         console.error(`[bubble] CPU fallback failed for page ${pageKey} chunk (${dx},${dz})`, error);
@@ -231,6 +269,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     const group = new THREE.Group();
     const mats: TerrainMaterialHandle[] = [];
     const unsubs: Array<() => void> = [];
+    const colliderIds: string[] = [];
     const worldBounds = buildWorldBoundsForPage(px, pz);
     const gpuMesher = deps.getGpuMesher();
 
@@ -239,6 +278,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         group,
         mats,
         unsubs,
+        colliderIds,
         ready: false,
         failed: false,
         centerX,
@@ -258,7 +298,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           console.error(
             `[bubble] GPU chunk meshing failed for page ${key}: ${failedCoords.length}/${P * P} chunks`,
           );
-          const recovered = cpuFallbackChunks(key, px, pz, worldBounds, group, mats, unsubs, failedCoords);
+          const recovered = cpuFallbackChunks(key, px, pz, worldBounds, group, mats, unsubs, colliderIds, failedCoords);
           unrecoveredFailures = failedCoords.length - recovered;
           if (recovered > 0 && unrecoveredFailures > 0) {
             console.warn(
@@ -274,7 +314,17 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           gpuMesher.meshChunk(px * P + dx, pz * P + dz, worldBounds, edits)
             .then((cm) => {
               if (chunkGroups.get(key) !== entry) return;
-              if (cm.indices.length > 0) addChunkMesh(group, mats, unsubs, cm);
+              if (cm.indices.length > 0) {
+                addChunkMesh(
+                  group,
+                  mats,
+                  unsubs,
+                  colliderIds,
+                  cm,
+                  chunkColliderId(key, dx, dz),
+                  liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
+                );
+              }
               settle();
             })
             .catch(() => {
@@ -289,7 +339,15 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
 
     for (let dz = 0; dz < P; dz++) {
       for (let dx = 0; dx < P; dx++) {
-        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds));
+        addChunkMesh(
+          group,
+          mats,
+          unsubs,
+          colliderIds,
+          meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds),
+          chunkColliderId(key, dx, dz),
+          liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
+        );
       }
     }
     deps.scene.add(group);
@@ -297,6 +355,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       group,
       mats,
       unsubs,
+      colliderIds,
       ready: true,
       failed: false,
       centerX,
