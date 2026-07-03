@@ -50,6 +50,9 @@ export interface NearFieldBubbleStats {
   buildingPages: number;
   failedPages: number;
   evictions: number;
+  streamedColliderPages: number;
+  colliderRegistrations: number;
+  colliderRemovals: number;
 }
 
 export interface NearFieldBubbleControllerDeps {
@@ -184,6 +187,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
   const terrainColliders = deps.terrainColliders ?? exposedTerrainColliders();
+  let colliderRegistrations = 0;
+  let colliderRemovals = 0;
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
     (node.footprint.minX + node.footprint.maxX) / 2,
@@ -200,6 +205,12 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     if (!liveStreamingEnabled) return deps.worldBounds;
     if (pageIntersectsFiniteWorld(px, pz, pageSize, deps.worldBounds)) return deps.worldBounds;
     return { ...deps.worldBounds, finite: false };
+  };
+
+  const activeColliderPages = (): number => {
+    let total = 0;
+    for (const entry of chunkGroups.values()) total += entry.colliderIds.length;
+    return total;
   };
 
   const addChunkMesh = (
@@ -222,12 +233,15 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     if (cm.indices.length > 0 && terrainColliders) {
       terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
       colliderIds.push(colliderId);
+      colliderRegistrations++;
     }
   };
 
   const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
     deps.scene.remove(entry.group);
-    for (const colliderId of entry.colliderIds) terrainColliders?.removePage(colliderId);
+    for (const colliderId of entry.colliderIds) {
+      if (terrainColliders?.removePage(colliderId)) colliderRemovals++;
+    }
     for (const child of entry.group.children) (child as THREE.Mesh).geometry.dispose();
     for (const unsub of entry.unsubs) unsub();
     for (const m of entry.mats) {
@@ -490,6 +504,9 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         buildingPages: required.buildingPages,
         failedPages: required.failedPages,
         evictions,
+        streamedColliderPages: activeColliderPages(),
+        colliderRegistrations,
+        colliderRemovals,
       };
     },
     invalidatePage(nodeId) {
