@@ -69,6 +69,11 @@ interface AtlasDirtyUploadDiagnostics {
   windowShiftTilesZ: number;
 }
 
+interface AtlasUploadTotals {
+  fullUploads: number;
+  dirtyUploads: number;
+}
+
 export function isNaadfScene(scene: string | null): boolean {
   return scene !== null && NAADF_SCENES.has(scene);
 }
@@ -145,6 +150,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   let prevZ: number | null = null;
   let lastMaterialCacheContentRevision = materialCache?.contentRevision() ?? 0;
   let lastAtlasDiagnostics = emptyAtlasDirtyUploadDiagnostics(config.farSummaryAtlas.fullUploadThresholdPct);
+  let lastAtlasUploadTotals = gpuAtlas ? atlasUploadTotals(gpuAtlas) : { fullUploads: 0, dirtyUploads: 0 };
   const onMaterialCacheDebug = (event: Event): void => {
     const detail = (event as CustomEvent).detail as Partial<{
       enabled: boolean;
@@ -205,14 +211,19 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         lastMaterialCacheContentRevision = materialCacheContentRevision;
       }
       const atlasBefore = gpuAtlas ? captureAtlasPlacements(gpuAtlas) : null;
+      const uploadTotalsBefore = gpuAtlas ? atlasUploadTotals(gpuAtlas) : null;
       gpuAtlas?.updateFromState(state);
-      if (gpuAtlas && atlasBefore) {
-        lastAtlasDiagnostics = computeAtlasDirtyUploadDiagnostics(
-          atlasBefore,
-          captureAtlasPlacements(gpuAtlas),
-          config.farClipmap.tileCells,
-          config.farSummaryAtlas.fullUploadThresholdPct,
-        );
+      if (gpuAtlas && atlasBefore && uploadTotalsBefore) {
+        const uploadTotalsAfter = atlasUploadTotals(gpuAtlas);
+        if (uploadTotalsChanged(uploadTotalsBefore, uploadTotalsAfter)) {
+          lastAtlasDiagnostics = computeAtlasDirtyUploadDiagnostics(
+            atlasBefore,
+            captureAtlasPlacements(gpuAtlas),
+            config.farClipmap.tileCells,
+            config.farSummaryAtlas.fullUploadThresholdPct,
+          );
+          lastAtlasUploadTotals = uploadTotalsAfter;
+        }
       }
       debugOverlay?.update(state);
 
@@ -242,6 +253,8 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
           counters["naadf.farSummaryAtlas.upload.blitRects"] = lastAtlasDiagnostics.blitRects;
           counters["naadf.farSummaryAtlas.upload.windowShiftTilesX"] = lastAtlasDiagnostics.windowShiftTilesX;
           counters["naadf.farSummaryAtlas.upload.windowShiftTilesZ"] = lastAtlasDiagnostics.windowShiftTilesZ;
+          counters["naadf.farSummaryAtlas.upload.latchedFullUploads"] = lastAtlasUploadTotals.fullUploads;
+          counters["naadf.farSummaryAtlas.upload.latchedDirtyUploads"] = lastAtlasUploadTotals.dirtyUploads;
         }
         if (materialCache) Object.assign(counters, terrainMaterialCacheCountersForHud(materialCache));
         if (clod.stats.counters) {
@@ -395,6 +408,17 @@ function emptyAtlasDirtyUploadDiagnostics(thresholdPct: number): AtlasDirtyUploa
     windowShiftTilesX: 0,
     windowShiftTilesZ: 0,
   };
+}
+
+function atlasUploadTotals(atlas: FarSummaryGpuAtlas): AtlasUploadTotals {
+  return {
+    fullUploads: atlas.view.uploadStats.fullUploads,
+    dirtyUploads: atlas.view.uploadStats.dirtyUploads,
+  };
+}
+
+function uploadTotalsChanged(before: AtlasUploadTotals, after: AtlasUploadTotals): boolean {
+  return before.fullUploads !== after.fullUploads || before.dirtyUploads !== after.dirtyUploads;
 }
 
 function snapshotToRect(tile: PlannedAtlasTileSnapshot): AtlasDirtyRect {
