@@ -86,6 +86,7 @@ const DRAW_PRESET: Record<StoneClass, RockPreset> = {
 };
 const DRAW_DETAIL: Record<StoneClass, number> = { large: 2, medium: 1, small: 1 };
 const STONE_RING_MIN_REFRESH_M = 0.5;
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
 export class StoneSystem {
   private readonly scene: THREE.Scene;
@@ -242,8 +243,9 @@ export class StoneSystem {
     const compute = this.scatterCompute;
     if (!compute || this.scatterRunning) return;
     const generation = this.generation;
-    const centerX = clampFinite(center.x, 0, this.worldCells);
-    const centerZ = clampFinite(center.z, 0, this.worldCells);
+    const unboundedCenter = infiniteIslandsScene();
+    const centerX = stoneScatterCenterCoord(center.x, 0, this.worldCells, unboundedCenter);
+    const centerZ = stoneScatterCenterCoord(center.z, 0, this.worldCells, unboundedCenter);
     this.scatterRunning = true;
     void compute.run({
       worldCells: this.worldCells,
@@ -369,9 +371,14 @@ function distance2d(a: THREE.Vector3, b: THREE.Vector3): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
-function clampFinite(value: number, min: number, max: number): number {
+function infiniteIslandsScene(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
+}
+
+export function stoneScatterCenterCoord(value: number, min: number, max: number, unbounded: boolean): number {
   if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
+  return unbounded ? value : Math.min(max, Math.max(min, value));
 }
 
 function cloneLighting(lighting: StoneLighting): StoneLighting {
