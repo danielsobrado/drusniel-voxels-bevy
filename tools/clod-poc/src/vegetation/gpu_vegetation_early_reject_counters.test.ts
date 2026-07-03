@@ -5,7 +5,7 @@ import { aggregateGpuVegetationEarlyRejectCounters } from "./gpu_vegetation_earl
 
 function grassStats(overrides: Partial<GrassStats> = {}): GrassStats {
   return {
-    mode: "cheap",
+    mode: "webgpu-ring-v1",
     blades: 0,
     patches: 0,
     visiblePatches: 0,
