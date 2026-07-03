@@ -240,6 +240,7 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     depthPrepass: true,
     debugColorByLod: false,
     farCheapMaterial: true,
+    placementDebug: false,
   },
   gpu: DEFAULT_TREE_GPU_SETTINGS,
   ecology: DEFAULT_TREE_ECOLOGY_SETTINGS,
