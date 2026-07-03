@@ -54,6 +54,9 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeGpuCandidateCountAfterPrefilter: number;
   treeGpuPrefilterRejectedClusters: number;
   treeGpuPrefilterSkippedCandidateEstimate: number;
+  treeGpuPrefilterSourceFarSummary: number;
+  treeGpuPrefilterSourceTerrainSampler: number;
+  treeGpuPrefilterSourceFallback: number;
   treeGpuAcceptedCount: number;
   treeGpuVisibleCount: number;
   treeGpuShadowCasterCount: number;
@@ -120,6 +123,9 @@ export interface FramePerfSummary {
     treeGpuCandidateCountAfterPrefilterAvg: number;
     treeGpuPrefilterRejectedClustersAvg: number;
     treeGpuPrefilterSkippedCandidateEstimateAvg: number;
+    treeGpuPrefilterSourceFarSummaryAvg: number;
+    treeGpuPrefilterSourceTerrainSamplerAvg: number;
+    treeGpuPrefilterSourceFallbackAvg: number;
     treeGpuAcceptedCountAvg: number;
     treeGpuVisibleCountAvg: number;
     treeGpuShadowCasterCountAvg: number;
@@ -151,6 +157,9 @@ export interface FramePerfSummary {
     vegetationGpuClustersRejectedEarlyAvg: number;
     vegetationGpuClustersAcceptedAvg: number;
     vegetationGpuClustersSummaryMissingAvg: number;
+    vegetationGpuSourceFarSummaryAvg: number;
+    vegetationGpuSourceTerrainSamplerAvg: number;
+    vegetationGpuSourceFallbackAvg: number;
     vegetationGpuCandidatesBudgetBeforeRejectAvg: number;
     vegetationGpuCandidatesBudgetAfterRejectAvg: number;
     vegetationGpuCandidatesGeneratedAvg: number;
