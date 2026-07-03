@@ -57,6 +57,9 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_ms"] = stats.bubbleMs;
   counters["live_bubble_evictions"] = stats.evictions;
   counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
+  counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
+  counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
+  counters["live_bubble_collider_removals"] = stats.colliderRemovals;
 }
 
 function infiniteIslandsScene(): boolean {
