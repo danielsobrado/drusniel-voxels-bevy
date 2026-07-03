@@ -60,6 +60,7 @@ trees:
     enabled: true
     bake_on_start: true
     fallback_to_placeholder: false
+    swap_on_bake: true
     source_lod: near
     resolution_px: 256
     octahedral_grid_size: 8
@@ -72,6 +73,9 @@ trees:
     debug_show_frames: false
     debug_freeze_frame: -1
     future_normal_depth: true
+
+  render:
+    far_cheap_material: true
 
   wind:
     enabled: true
