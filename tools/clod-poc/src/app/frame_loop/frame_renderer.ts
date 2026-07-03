@@ -7,6 +7,8 @@ export interface FrameRendererInfo {
 export interface FrameRenderer {
   readonly domElement: HTMLCanvasElement;
   setAnimationLoop(callback: ((time: number, frame?: XRFrame) => void) | null): void;
+  setPixelRatio(pixelRatio: number): void;
+  setSize(width: number, height: number, updateStyle?: boolean): void;
   render(scene: THREE.Scene, camera: THREE.Camera): void;
   readonly info?: FrameRendererInfo;
 }
