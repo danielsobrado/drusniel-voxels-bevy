@@ -174,8 +174,8 @@ export class FarSummaryGpuAtlas {
       ? new Float32Array(width * height * RGBA_COMPONENTS)
       : new Uint8Array(width * height * RGBA_COMPONENTS);
     this.coverageData = this.packing.format === "debug_rgba32f"
-      ? new Float32Array(width * height * RGBA_COMPONENTS)
-      : new Uint8Array(width * height * RGBA_COMPONENTS);
+      ? new Float32Array(width * height * this.packing.coverageComponents)
+      : new Uint8Array(width * height * this.packing.coverageComponents);
     const normalPixels = this.packing.storesNormalAtlas ? width * height : 1;
     this.normalData = this.packing.format === "debug_rgba32f"
       ? new Float32Array(normalPixels * RGBA_COMPONENTS)
@@ -190,7 +190,7 @@ export class FarSummaryGpuAtlas {
       this.packing,
       "naadf-far-summary-normal-atlas",
     );
-    const coverageTexture = createPackedAtlasTexture(this.coverageData, width, height, this.packing, "naadf-far-summary-coverage-atlas");
+    const coverageTexture = createCoverageAtlasTexture(this.coverageData, width, height, this.packing, "naadf-far-summary-coverage-atlas");
 
     this.view = {
       texture,
@@ -402,7 +402,7 @@ export class FarSummaryGpuAtlas {
     if (!clipped) return;
     clearRectData(this.heightData, clipped, this.view.widthCells, this.packing.heightComponents);
     clearRectData(this.materialData, clipped, this.view.widthCells, RGBA_COMPONENTS);
-    clearRectData(this.coverageData, clipped, this.view.widthCells, RGBA_COMPONENTS);
+    clearRectData(this.coverageData, clipped, this.view.widthCells, this.packing.coverageComponents);
     if (this.packing.storesNormalAtlas) {
       clearRectData(this.normalData, clipped, this.view.widthCells, RGBA_COMPONENTS);
     }
@@ -440,13 +440,10 @@ export class FarSummaryGpuAtlas {
         }
 
         if (!this.writeBakedCoverage(baked, src, pixel)) {
-          this.writeRgba(
-            this.coverageData,
-            pixel * RGBA_COMPONENTS,
+          this.writeCoverage(
+            pixel,
             clamp01(tile.canopyCoverage[src] ?? 0),
             clamp01(tile.waterCoverage[src] ?? 0),
-            1,
-            1,
           );
         }
       }
@@ -475,7 +472,7 @@ export class FarSummaryGpuAtlas {
     return this.applyTextureDirtyRects(this.view.texture, rects, this.view.widthCells, this.packing.heightComponents)
       && this.applyTextureDirtyRects(this.view.materialTexture, rects, this.view.widthCells, RGBA_COMPONENTS)
       && (!this.packing.storesNormalAtlas || this.applyTextureDirtyRects(this.view.normalTexture, rects, this.view.widthCells, RGBA_COMPONENTS))
-      && this.applyTextureDirtyRects(this.view.coverageTexture, rects, this.view.widthCells, RGBA_COMPONENTS);
+      && this.applyTextureDirtyRects(this.view.coverageTexture, rects, this.view.widthCells, this.packing.coverageComponents);
   }
 
   private applyTextureDirtyRects(texture: THREE.DataTexture, rects: AtlasDirtyRect[], atlasWidth: number, componentStride: number): boolean {
@@ -570,14 +567,10 @@ export class FarSummaryGpuAtlas {
     const channel = payload?.coverage;
     if (!channel?.available) return false;
     const src = srcPixel * 2;
-    const dst = atlasPixel * RGBA_COMPONENTS;
-    this.writeRgba(
-      this.coverageData,
-      dst,
+    this.writeCoverage(
+      atlasPixel,
       (channel.data[src] ?? 0) / 255,
       (channel.data[src + 1] ?? 0) / 255,
-      1,
-      1,
     );
     return true;
   }
@@ -607,6 +600,25 @@ export class FarSummaryGpuAtlas {
     data[dst + 1] = packUnorm8(g);
     data[dst + 2] = packUnorm8(b);
     data[dst + 3] = packUnorm8(a);
+  }
+
+  private writeCoverage(pixel: number, canopy: number, water: number): void {
+    const dst = pixel * this.packing.coverageComponents;
+    if (this.coverageData instanceof Float32Array) {
+      this.coverageData[dst] = clamp01(canopy);
+      this.coverageData[dst + 1] = clamp01(water);
+      if (this.packing.coverageComponents >= RGBA_COMPONENTS) {
+        this.coverageData[dst + 2] = 1;
+        this.coverageData[dst + 3] = 1;
+      }
+      return;
+    }
+    this.coverageData[dst] = packUnorm8(canopy);
+    this.coverageData[dst + 1] = packUnorm8(water);
+    if (this.packing.coverageComponents >= RGBA_COMPONENTS) {
+      this.coverageData[dst + 2] = 255;
+      this.coverageData[dst + 3] = 255;
+    }
   }
 
   private emptyRingView(ringIndex: number, ring?: { startM: number; endM: number; cellM: number }): FarSummaryGpuAtlasRingView {
@@ -726,6 +738,18 @@ function createPackedAtlasTexture(
 ): THREE.DataTexture {
   const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
   return createAtlasTexture(data, width, height, THREE.RGBAFormat, type, name);
+}
+
+function createCoverageAtlasTexture(
+  data: AtlasData,
+  width: number,
+  height: number,
+  packing: FarSummaryAtlasPackingSpec,
+  name: string,
+): THREE.DataTexture {
+  const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RGFormat;
+  const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
+  return createAtlasTexture(data, width, height, format, type, name);
 }
 
 function createAtlasTexture(
