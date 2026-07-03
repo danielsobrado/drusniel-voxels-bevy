@@ -15,12 +15,14 @@ const FLOAT32_BYTES = 4;
 const FLOAT16_BYTES = 2;
 const UINT8_BYTES = 1;
 const RGBA_COMPONENTS = 4;
+const RG_COMPONENTS = 2;
 const RED_COMPONENTS = 1;
 
 export interface FarSummaryAtlasPackingSpec {
   readonly format: FarSummaryAtlasFormat;
   readonly heightFormat: FarSummaryAtlasHeightFormat;
   readonly heightComponents: number;
+  readonly coverageComponents: number;
   readonly heightBytesPerPixel: number;
   readonly materialBytesPerPixel: number;
   readonly coverageBytesPerPixel: number;
@@ -50,6 +52,7 @@ export function resolveFarSummaryAtlasPackingSpec(format: FarSummaryAtlasFormat 
       format,
       heightFormat: "r32f",
       heightComponents: RGBA_COMPONENTS,
+      coverageComponents: RGBA_COMPONENTS,
       heightBytesPerPixel: RGBA_COMPONENTS * FLOAT32_BYTES,
       materialBytesPerPixel: RGBA_COMPONENTS * FLOAT32_BYTES,
       coverageBytesPerPixel: RGBA_COMPONENTS * FLOAT32_BYTES,
@@ -64,9 +67,10 @@ export function resolveFarSummaryAtlasPackingSpec(format: FarSummaryAtlasFormat 
       format,
       heightFormat: "r16f",
       heightComponents: RED_COMPONENTS,
+      coverageComponents: RG_COMPONENTS,
       heightBytesPerPixel: RED_COMPONENTS * FLOAT16_BYTES,
       materialBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
-      coverageBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
+      coverageBytesPerPixel: RG_COMPONENTS * UINT8_BYTES,
       normalBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
       storesHeightRange: false,
       storesNormalAtlas: false,
@@ -77,9 +81,10 @@ export function resolveFarSummaryAtlasPackingSpec(format: FarSummaryAtlasFormat 
     format,
     heightFormat: "r32f",
     heightComponents: RED_COMPONENTS,
+    coverageComponents: RG_COMPONENTS,
     heightBytesPerPixel: RED_COMPONENTS * FLOAT32_BYTES,
     materialBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
-    coverageBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
+    coverageBytesPerPixel: RG_COMPONENTS * UINT8_BYTES,
     normalBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
     storesHeightRange: false,
     storesNormalAtlas: false,
