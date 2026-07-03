@@ -132,7 +132,7 @@ far-summary atlas memory estimate
 far-summary atlas dirty/full upload state
 ```
 
-Vegetation source telemetry currently reports tree GPU-ring cluster prefilter decisions as:
+Vegetation source telemetry reports GPU-ring cluster prefilter decisions across trees, grass, and understory as:
 
 ```text
 vegetationGpuSourceFarSummary
