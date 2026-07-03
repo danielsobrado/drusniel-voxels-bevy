@@ -49,6 +49,13 @@ function summaryField(coverageValue: number): TerrainSummaryField {
   };
 }
 
+function missingHeightSummaryField(): TerrainSummaryField {
+  const field = summaryField(1);
+  field.heightMin.fill(Number.NaN);
+  field.heightMax.fill(Number.NaN);
+  return field;
+}
+
 describe("VegetationTerrainRejectProvider", () => {
   it("keeps clusters when summary data is missing", () => {
     const result = createVegetationTerrainRejectProvider().classifyCluster({
@@ -113,6 +120,28 @@ describe("VegetationTerrainRejectProvider", () => {
     });
 
     expect(result).toMatchObject({ reject: true, reason: "summaryMissing", confidence: "fallback" });
+  });
+
+  it("rejects missing far-summary heights when the caller requires known summary data", () => {
+    const farSummaryProvider = createTerrainSummaryRejectProvider(() => missingHeightSummaryField());
+    const result = createVegetationTerrainRejectProvider({ farSummaryProvider }).classifyCluster({
+      descriptor: descriptor(),
+      kind: "grass",
+      cameraX: 0,
+      cameraY: 2,
+      cameraZ: 0,
+      worldCells: 128,
+      visibility,
+      sampler: { sampleHeight: () => ({ height: 0 }) },
+      acceptWhenSummaryMissing: false,
+    });
+
+    expect(result).toMatchObject({
+      reject: true,
+      reason: "summaryMissing",
+      confidence: "summary",
+      source: "naadfFarSummary",
+    });
   });
 
   it("rejects clusters completely outside terrain", () => {
