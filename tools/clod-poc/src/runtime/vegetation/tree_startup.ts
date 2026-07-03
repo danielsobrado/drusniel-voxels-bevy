@@ -60,7 +60,7 @@ function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
     },
     impostors: {
       ...config.impostors,
-      fallbackToPlaceholder: false,
+      fallbackToPlaceholder: true,
     },
   };
 }
