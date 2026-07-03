@@ -66,6 +66,17 @@ render_resolution:
   render_scale: 0.85
   min_effective_pixel_ratio: 0.5
   max_effective_pixel_ratio: 1.25
+  dynamic_resolution:
+    enabled: true
+    target_ms: 16.6
+    min_scale: 0.7
+    max_scale: 1.0
+    step_up: 0.025
+    step_down: 0.05
+    sample_window_frames: 30
+    settle_frames: 20
+    upscale_headroom_ms: 2.0
+    downscale_over_ms: 1.0
   presets:
     performance100:
       dpr_cap: 1.0
