@@ -248,7 +248,7 @@ function withFarSummaryConsulted<T extends VegetationTerrainRejectDecision>(
   decision: T,
   farSummaryConsulted: boolean,
 ): T {
-  return farSummaryConsulted ? { ...decision, farSummaryConsulted: true } : decision;
+  return farSummaryConsulted ? { ...decision, source: "naadfFarSummary", farSummaryConsulted: true } : decision;
 }
 
 function outsideTerrain(query: VegetationTerrainRejectQuery): boolean {
