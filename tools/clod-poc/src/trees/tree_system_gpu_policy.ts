@@ -6,7 +6,7 @@ const TREE_GPU_FRUSTUM = new THREE.Frustum();
 
 export function treeSystemUsesGpuRingDraw(settings: TreeSettings): boolean {
   const gpu = settings.gpu;
-  return settings.enabled && gpu.enabled && gpu.scatterEnabled && gpu.cullEnabled && !gpu.debugForceCpu;
+  return settings.enabled && gpu.enabled && gpu.scatterEnabled && gpu.cullEnabled && !gpu.debugForceCpu && !settings.render.placementDebug;
 }
 
 export function treeCpuPatchCrossfadeEnabled(settings: TreeSettings): boolean {
@@ -17,7 +17,7 @@ export function treeCpuPatchCrossfadeEnabled(settings: TreeSettings): boolean {
 export function treeCpuPatchesAreGpuFallback(settings: TreeSettings): boolean {
   const gpu = settings.gpu;
   if (!gpu.enabled) return false;
-  return gpu.fallbackToCpu || gpu.debugForceCpu || !gpu.scatterEnabled || !gpu.cullEnabled;
+  return gpu.fallbackToCpu || gpu.debugForceCpu || !gpu.scatterEnabled || !gpu.cullEnabled || settings.render.placementDebug;
 }
 
 export function packTreeSystemGpuFrustumPlanes(camera?: THREE.Camera, out = new Float32Array(24)): Float32Array {
