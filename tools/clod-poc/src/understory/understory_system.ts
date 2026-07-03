@@ -728,7 +728,6 @@ export class UnderstorySystem {
     stats.gpuPrefilterRejectedClusters = gpuRing ? this.gpuRingStats.prefilterRejectedClusters ?? 0 : 0;
     stats.gpuPrefilterAcceptedClusters = gpuRing ? this.gpuRingStats.prefilterAcceptedClusters ?? 0 : 0;
     stats.gpuPrefilterUnknownKeptClusters = gpuRing ? this.gpuRingStats.prefilterUnknownKeptClusters ?? 0 : 0;
-    stats.gpuPrefilterFarSummaryConsulted = gpuRing ? this.gpuRingStats.prefilterFarSummaryConsulted ?? 0 : 0;
     stats.gpuPrefilterSourceFarSummary = gpuRing ? this.gpuRingStats.prefilterSourceFarSummary ?? 0 : 0;
     stats.gpuPrefilterSourceTerrainSampler = gpuRing ? this.gpuRingStats.prefilterSourceTerrainSampler ?? 0 : 0;
     stats.gpuPrefilterSourceFallback = gpuRing ? this.gpuRingStats.prefilterSourceFallback ?? 0 : 0;
@@ -750,7 +749,6 @@ function emptyGpuRingStats(status: UnderstoryGpuRingStats["status"], counts: Und
     prefilterRejectedClusters: 0,
     prefilterAcceptedClusters: 0,
     prefilterUnknownKeptClusters: 0,
-    prefilterFarSummaryConsulted: 0,
     prefilterSourceFarSummary: 0,
     prefilterSourceTerrainSampler: 0,
     prefilterSourceFallback: 0,

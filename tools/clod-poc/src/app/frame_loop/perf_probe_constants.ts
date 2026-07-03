@@ -1,8 +1,5 @@
-import { FAR_SUMMARY_SUBPHASE_METRICS } from "./far_summary_subphase_timing.js";
-
 export const FRAME_PERF_BROAD_BUCKETS = [
   "frameSetupMs", "inputMs", "selectionUpdateMs", "clodApplyMs", "longViewDiagnosticsMs", "farSummaryMs",
-  ...FAR_SUMMARY_SUBPHASE_METRICS,
   "constructionMs", "brushMs", "combatMs", "spellsMs", "terrainPhaseMs",
   "shadowProxyMs", "clodShadowMs", "canopyMs", "vegetationTotalMs",
   "borderOceanDebugMs", "statsSyncMs", "renderMs", "unattributedMs",

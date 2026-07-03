@@ -75,8 +75,13 @@ function measure(fn: () => void): number {
 
 function updateForestLighting(input: VegetationFramePhaseInput): void {
   const lighting = input.currentLighting();
-  const completed = input.forestLightingController.updateBudgeted(input.grassCenter, lighting.sunDirection);
-  if (completed) input.applyForestLightingToPropMaterials();
+  if (!input.forestLightingController.shouldUpdate(input.grassCenter, lighting.sunDirection)) return;
+  input.forestLightingController.update(input.elapsedSeconds, input.grassCenter, {
+    treeProxies: input.treeController.system.getLightingProxies(),
+    understoryProxies: input.understoryController.system.getLightingProxies(),
+    sunDirection: lighting.sunDirection,
+  });
+  input.applyForestLightingToPropMaterials();
 }
 
 function updateWater(input: VegetationFramePhaseInput): void {

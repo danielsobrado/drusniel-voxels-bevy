@@ -15,7 +15,6 @@ import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
 import type { StatsSyncThrottleDecision, StatsSyncThrottleDiagnostics } from "./stats_sync_throttle.js";
 import type { DynamicResolutionController, DynamicResolutionStats } from "../../rendering/dynamic_resolution.js";
-import { readFarSummarySubphaseCounters } from "./far_summary_subphase_timing.js";
 import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface RenderPhaseInput {
@@ -227,7 +226,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const treeStats = input.currentTreeStats;
     const understoryStats = input.currentUnderstoryStats;
     const propStats = input.currentPropStats;
-    const farSummarySubphases = readFarSummarySubphaseCounters();
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       frameMs,
@@ -238,7 +236,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       clodApplyMs: input.phaseTiming.clodApplyMs,
       longViewDiagnosticsMs: input.phaseTiming.longViewDiagnosticsMs,
       farSummaryMs: input.phaseTiming.farSummaryMs,
-      ...farSummarySubphases,
       constructionMs: input.phaseTiming.constructionMs,
       brushMs: input.phaseTiming.brushMs,
       combatMs: input.phaseTiming.combatMs,
@@ -299,7 +296,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       treeGpuCandidateCountAfterPrefilter: treeStats?.gpuCandidateCountAfterPrefilter ?? 0,
       treeGpuPrefilterRejectedClusters: treeStats?.gpuPrefilterRejectedClusters ?? 0,
       treeGpuPrefilterSkippedCandidateEstimate: treeStats?.gpuPrefilterSkippedCandidateEstimate ?? 0,
-      treeGpuPrefilterFarSummaryConsulted: treeStats?.gpuPrefilterFarSummaryConsulted ?? 0,
       treeGpuPrefilterSourceFarSummary: treeStats?.gpuPrefilterSourceFarSummary ?? 0,
       treeGpuPrefilterSourceTerrainSampler: treeStats?.gpuPrefilterSourceTerrainSampler ?? 0,
       treeGpuPrefilterSourceFallback: treeStats?.gpuPrefilterSourceFallback ?? 0,
@@ -314,7 +310,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       grassGpuCandidateCount: grassStats?.gpuRingCandidateCount ?? 0,
       grassGpuCandidateCountBeforePrefilter: grassStats?.gpuRingCandidateCountBeforePrefilter ?? 0,
       grassGpuCandidateCountAfterPrefilter: grassStats?.gpuRingCandidateCountAfterPrefilter ?? 0,
-      grassGpuPrefilterFarSummaryConsulted: grassStats?.gpuRingPrefilterFarSummaryConsulted ?? 0,
       grassGpuPrefilterSourceFarSummary: grassStats?.gpuRingPrefilterSourceFarSummary ?? 0,
       grassGpuPrefilterSourceTerrainSampler: grassStats?.gpuRingPrefilterSourceTerrainSampler ?? 0,
       grassGpuPrefilterSourceFallback: grassStats?.gpuRingPrefilterSourceFallback ?? 0,
@@ -323,7 +318,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       understoryGpuCandidateCount: understoryStats?.gpuCandidateCount ?? 0,
       understoryGpuCandidateCountBeforePrefilter: understoryStats?.gpuCandidateCountBeforePrefilter ?? 0,
       understoryGpuCandidateCountAfterPrefilter: understoryStats?.gpuCandidateCountAfterPrefilter ?? 0,
-      understoryGpuPrefilterFarSummaryConsulted: understoryStats?.gpuPrefilterFarSummaryConsulted ?? 0,
       understoryGpuPrefilterSourceFarSummary: understoryStats?.gpuPrefilterSourceFarSummary ?? 0,
       understoryGpuPrefilterSourceTerrainSampler: understoryStats?.gpuPrefilterSourceTerrainSampler ?? 0,
       understoryGpuPrefilterSourceFallback: understoryStats?.gpuPrefilterSourceFallback ?? 0,
@@ -370,7 +364,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
           ` programsΔ=${materialChurnStats.rendererProgramDelta ?? 0}` +
           ` other ${otherMs.toFixed(1)}` +
           ` dynScale=${dynamicResolutionStats?.renderScale ?? 0}` +
-          ` farSum naadf=${farSummarySubphases.farSumNaadfMs.toFixed(1)} shell=${farSummarySubphases.farSumShellMs.toFixed(1)} shadow=${farSummarySubphases.farSumShadowProxyMs.toFixed(1)}` +
           ` | cut=${selectionStats.renderedCount} chunkGroups=${input.nearFieldBubbleController.size()} mode=${input.interaction.mode}`,
       );
     }

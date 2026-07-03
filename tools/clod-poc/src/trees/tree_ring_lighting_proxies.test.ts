@@ -5,15 +5,10 @@ import {
   treeRingShadowCasterGroupIndex,
 } from "./tree_ring_shadow_casters.js";
 import {
-  createTreeRingLightingProxyBuild,
-  finishTreeRingLightingProxyBuild,
-  generateTreeRingLightingProxies,
   generateTreeRingValidationCounts,
-  stepTreeRingLightingProxyBuild,
   treeRingValidationHash,
   treeRingValidationJitter,
 } from "./tree_ring_lighting_proxies.js";
-import { TreeGpuLightingProxyCache } from "./tree_system_gpu_lighting_proxy_cache.js";
 import { treePcg2d } from "./tree_ring_math.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
 
@@ -124,71 +119,6 @@ describe("tree ring validation counts", () => {
     expect(shadowCountForLod(result.shadowGroupCounts, "mid")).toBe(0);
     expect(shadowCountForLod(result.shadowGroupCounts, "far")).toBe(0);
     expect(shadowCountForLod(result.shadowGroupCounts, "impostor")).toBe(0);
-  });
-});
-
-const EXPIRED_DEADLINE = () => performance.now() - 1;
-
-function proxyOptions(centerX: number, settings = validationSettings()) {
-  return { centerX, centerZ: 64, worldCells: 128, settings, sampler: flatSampler };
-}
-
-describe("resumable tree ring lighting proxy build", () => {
-  it("stepped build under an expired deadline matches the monolithic result", () => {
-    const options = proxyOptions(64);
-    const expected = generateTreeRingLightingProxies(options);
-    expect(expected.length).toBeGreaterThan(0);
-
-    const build = createTreeRingLightingProxyBuild(options);
-    let steps = 0;
-    while (!stepTreeRingLightingProxyBuild(build, EXPIRED_DEADLINE())) {
-      steps++;
-      expect(steps).toBeLessThan(1_000_000);
-    }
-    expect(steps).toBeGreaterThan(1);
-    expect(finishTreeRingLightingProxyBuild(build)).toEqual(expected);
-  });
-
-  it("disabled settings finish immediately with no proxies", () => {
-    const settings = validationSettings();
-    settings.enabled = false;
-    const build = createTreeRingLightingProxyBuild(proxyOptions(64, settings));
-    expect(stepTreeRingLightingProxyBuild(build, EXPIRED_DEADLINE())).toBe(true);
-    expect(finishTreeRingLightingProxyBuild(build)).toEqual([]);
-  });
-});
-
-describe("TreeGpuLightingProxyCache.getBudgeted", () => {
-  it("returns the previous proxy set (ready=false) until the new key completes", () => {
-    const cache = new TreeGpuLightingProxyCache();
-    const first = cache.getBudgeted(proxyOptions(64), Number.POSITIVE_INFINITY);
-    expect(first.ready).toBe(true);
-    expect(first.proxies.length).toBeGreaterThan(0);
-
-    const stale = cache.getBudgeted(proxyOptions(96), EXPIRED_DEADLINE());
-    expect(stale.ready).toBe(false);
-    expect(stale.proxies).toBe(first.proxies);
-
-    let result = stale;
-    let guard = 0;
-    while (!result.ready && ++guard < 1_000_000) {
-      result = cache.getBudgeted(proxyOptions(96), EXPIRED_DEADLINE());
-    }
-    expect(result.ready).toBe(true);
-    expect([...result.proxies]).toEqual(generateTreeRingLightingProxies(proxyOptions(96)));
-  });
-
-  it("converges to the latest key when the requested center drifts mid-build", () => {
-    const cache = new TreeGpuLightingProxyCache();
-    cache.getBudgeted(proxyOptions(64), Number.POSITIVE_INFINITY);
-    expect(cache.getBudgeted(proxyOptions(96), EXPIRED_DEADLINE()).ready).toBe(false);
-    let result = cache.getBudgeted(proxyOptions(112), EXPIRED_DEADLINE());
-    let guard = 0;
-    while (!result.ready && ++guard < 1_000_000) {
-      result = cache.getBudgeted(proxyOptions(112), EXPIRED_DEADLINE());
-    }
-    expect(result.ready).toBe(true);
-    expect([...result.proxies]).toEqual(generateTreeRingLightingProxies(proxyOptions(112)));
   });
 });
 

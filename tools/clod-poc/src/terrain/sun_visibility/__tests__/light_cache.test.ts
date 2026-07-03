@@ -6,41 +6,12 @@ import { parseSunLightOptions } from "../sun_light_options.js";
 function provider() {
   return {
     terrainRevision: () => 1,
-    heightAt: () => 0,
     readHeight: () => ({ height: 0, present: true, revision: 1 }),
     tileRevision: () => 1,
   };
 }
 
 describe("sun light cache", () => {
-  it("builds the pending tile nearest to the camera center first", () => {
-    const options = parseSunLightOptions({
-      tile: { size_world: 32, resolution: 4 },
-      ray: { max_distance_world: 16, step_world: 4 },
-      build: { max_tiles_per_frame: 1, max_build_ms_per_frame: 999 },
-    });
-    const cache = createSunLightCacheRuntime(options);
-    const p = provider();
-    cache.enqueueTile({ tileX: 5, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
-    cache.enqueueTile({ tileX: 0, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
-    cache.updateBudgeted(p, 1, performance.now(), { tileX: 0, tileZ: 0 });
-    expect(cache.tiles().map((tile) => tile.key)).toEqual([{ tileX: 0, tileZ: 0, lod: 0 }]);
-  });
-
-  it("prunes pending tiles far outside the material ring", () => {
-    const options = parseSunLightOptions({
-      tile: { size_world: 32, resolution: 4 },
-      ray: { max_distance_world: 16, step_world: 4 },
-      build: { max_tiles_per_frame: 1, max_build_ms_per_frame: 999, material_tile_radius: 2 },
-    });
-    const cache = createSunLightCacheRuntime(options);
-    const p = provider();
-    cache.enqueueTile({ tileX: 50, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
-    cache.updateBudgeted(p, 1, performance.now(), { tileX: 0, tileZ: 0 });
-    expect(cache.stats().pendingTiles).toBe(0);
-    expect(cache.stats().entries).toBe(0);
-  });
-
   it("queues before first budgeted build, then hits warm cache", () => {
     const options = parseSunLightOptions({
       tile: { size_world: 32, resolution: 4 },

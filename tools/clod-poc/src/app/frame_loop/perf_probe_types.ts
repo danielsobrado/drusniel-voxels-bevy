@@ -54,7 +54,6 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeGpuCandidateCountAfterPrefilter: number;
   treeGpuPrefilterRejectedClusters: number;
   treeGpuPrefilterSkippedCandidateEstimate: number;
-  treeGpuPrefilterFarSummaryConsulted: number;
   treeGpuPrefilterSourceFarSummary: number;
   treeGpuPrefilterSourceTerrainSampler: number;
   treeGpuPrefilterSourceFallback: number;
@@ -69,7 +68,6 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   grassGpuCandidateCount: number;
   grassGpuCandidateCountBeforePrefilter: number;
   grassGpuCandidateCountAfterPrefilter: number;
-  grassGpuPrefilterFarSummaryConsulted: number;
   grassGpuPrefilterSourceFarSummary: number;
   grassGpuPrefilterSourceTerrainSampler: number;
   grassGpuPrefilterSourceFallback: number;
@@ -78,7 +76,6 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   understoryGpuCandidateCount: number;
   understoryGpuCandidateCountBeforePrefilter: number;
   understoryGpuCandidateCountAfterPrefilter: number;
-  understoryGpuPrefilterFarSummaryConsulted: number;
   understoryGpuPrefilterSourceFarSummary: number;
   understoryGpuPrefilterSourceTerrainSampler: number;
   understoryGpuPrefilterSourceFallback: number;
@@ -135,7 +132,6 @@ export interface FramePerfSummary {
     treeGpuCandidateCountAfterPrefilterAvg: number;
     treeGpuPrefilterRejectedClustersAvg: number;
     treeGpuPrefilterSkippedCandidateEstimateAvg: number;
-    treeGpuPrefilterFarSummaryConsultedAvg: number;
     treeGpuPrefilterSourceFarSummaryAvg: number;
     treeGpuPrefilterSourceTerrainSamplerAvg: number;
     treeGpuPrefilterSourceFallbackAvg: number;
@@ -159,7 +155,6 @@ export interface FramePerfSummary {
     grassGpuCandidateCountAvg: number;
     grassGpuCandidateCountBeforePrefilterAvg: number;
     grassGpuCandidateCountAfterPrefilterAvg: number;
-    grassGpuPrefilterFarSummaryConsultedAvg: number;
     grassGpuPrefilterSourceFarSummaryAvg: number;
     grassGpuPrefilterSourceTerrainSamplerAvg: number;
     grassGpuPrefilterSourceFallbackAvg: number;
@@ -168,7 +163,6 @@ export interface FramePerfSummary {
     understoryGpuCandidateCountAvg: number;
     understoryGpuCandidateCountBeforePrefilterAvg: number;
     understoryGpuCandidateCountAfterPrefilterAvg: number;
-    understoryGpuPrefilterFarSummaryConsultedAvg: number;
     understoryGpuPrefilterSourceFarSummaryAvg: number;
     understoryGpuPrefilterSourceTerrainSamplerAvg: number;
     understoryGpuPrefilterSourceFallbackAvg: number;
@@ -178,7 +172,6 @@ export interface FramePerfSummary {
     vegetationGpuClustersRejectedEarlyAvg: number;
     vegetationGpuClustersAcceptedAvg: number;
     vegetationGpuClustersSummaryMissingAvg: number;
-    vegetationGpuFarSummaryConsultedAvg: number;
     vegetationGpuSourceFarSummaryAvg: number;
     vegetationGpuSourceTerrainSamplerAvg: number;
     vegetationGpuSourceFallbackAvg: number;

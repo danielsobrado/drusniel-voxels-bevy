@@ -9,8 +9,7 @@ function exerciseDone(): Record<string, number> {
   return {
     "p0DirtyAtlasExercise.enabled": 1,
     "p0DirtyAtlasExercise.status": 3,
-    "p0DirtyAtlasExercise.requestedTiles": 4,
-    "p0DirtyAtlasExercise.bumpedTiles": 4,
+    "p0DirtyAtlasExercise.moveM": 768,
     "p0DirtyAtlasExercise.triggeredFrame": 120,
     "p0DirtyAtlasExercise.resetFrame": 138,
     "p0DirtyAtlasExercise.settleRemaining": 0,
@@ -87,7 +86,7 @@ describe("P0 perf gates", () => {
       ...perfCase.metrics,
       "p0DirtyAtlasExercise.enabled": 1,
       "p0DirtyAtlasExercise.status": 4,
-      "p0DirtyAtlasExercise.bumpedTiles": 0,
+      "p0DirtyAtlasExercise.moveM": 0,
       "p0DirtyAtlasExercise.triggeredFrame": -1,
       "p0DirtyAtlasExercise.resetFrame": -1,
     }));

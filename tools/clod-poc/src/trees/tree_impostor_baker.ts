@@ -1,18 +1,12 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
-  attribute,
   clamp,
   float,
   normalize,
   normalView,
   positionView,
-  sqrt,
-  vec3,
 } from "three/tsl";
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type TslNode = any;
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
 import { octFrames, type OctahedralFrame } from "./tree_impostor_octahedral.js";
@@ -127,7 +121,7 @@ function bakeSpeciesAtlas(
   const near = 0.01;
   const far = radius * 6;
   const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, near, far);
-  const albedoMaterial = createBakeMaterial(options.material, settings, options.webgpu === true);
+  const albedoMaterial = createBakeMaterial(options.material, settings);
   const normalDepthMaterial = createNormalDepthBakeMaterial(near, far, options.webgpu === true);
   const mesh = new THREE.Mesh(geometry, albedoMaterial);
   mesh.position.copy(center).multiplyScalar(-1);
@@ -222,25 +216,7 @@ function bakeAtlasTarget(
   }
 }
 
-function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings, webgpu: boolean): THREE.Material {
-  if (webgpu) {
-    // WebGPURenderer silently drops onBeforeCompile, which turns the classic
-    // bake material below into solid black atlases. Encode sqrt(color) like
-    // the classic path so the impostor material's sample.xyz * sample.xyz
-    // decode stays linear.
-    const material = trackCreatedMaterial(
-      new MeshBasicNodeMaterial(),
-      "tree-impostor-bake-albedo-node",
-    );
-    material.name = "tree-impostor-albedo-bake";
-    const linearColor: TslNode = clamp(attribute("color", "vec3"), vec3(0), vec3(1));
-    material.colorNode = sqrt(linearColor);
-    material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
-    material.side = THREE.DoubleSide;
-    material.transparent = false;
-    material.depthWrite = true;
-    return material;
-  }
+function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings): THREE.Material {
   const map = sourceMaterial instanceof THREE.MeshStandardMaterial || sourceMaterial instanceof THREE.MeshBasicMaterial
     ? sourceMaterial.map
     : null;

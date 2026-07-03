@@ -13,15 +13,7 @@ import { queryTerrainHeight, tracePrimaryDebugRay, traceSunVisibility } from "./
 import { NaadfDebugOverlay } from "./debugOverlay.js";
 import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
-import {
-  FarSummaryGpuAtlas,
-  diffAtlasTilePlacements,
-  dirtyArea,
-  mergeDirtyRects,
-  type AtlasDirtyRect,
-  type FarSummaryGpuAtlasView,
-  type PlannedAtlasTileSnapshot,
-} from "./gpu/farSummaryAtlas.js";
+import { FarSummaryGpuAtlas, type FarSummaryGpuAtlasView } from "./gpu/farSummaryAtlas.js";
 import {
   farSummaryAtlasUploadFallbackReasonCode,
   farSummaryAtlasUploadModeCode,
@@ -49,30 +41,6 @@ export const NAADF_SCENES = new Set([
   "infinite-naadf-stress-missing",
   "infinite-naadf-far",
 ]);
-
-interface AtlasPlacementCapture {
-  placements: Map<string, PlannedAtlasTileSnapshot>;
-  signature: string;
-  rings: Array<{ valid: number; originX: number; originZ: number; cellM: number }>;
-}
-
-interface AtlasDirtyUploadDiagnostics {
-  thresholdPct: number;
-  rawDirtyRects: number;
-  mergedDirtyRects: number;
-  rawDirtyPixels: number;
-  mergedDirtyPixels: number;
-  changedTiles: number;
-  clearedRects: number;
-  blitRects: number;
-  windowShiftTilesX: number;
-  windowShiftTilesZ: number;
-}
-
-interface AtlasUploadTotals {
-  fullUploads: number;
-  dirtyUploads: number;
-}
 
 export function isNaadfScene(scene: string | null): boolean {
   return scene !== null && NAADF_SCENES.has(scene);
@@ -149,8 +117,6 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   let prevX: number | null = null;
   let prevZ: number | null = null;
   let lastMaterialCacheContentRevision = materialCache?.contentRevision() ?? 0;
-  let lastAtlasDiagnostics = emptyAtlasDirtyUploadDiagnostics(config.farSummaryAtlas.fullUploadThresholdPct);
-  let lastAtlasUploadTotals = gpuAtlas ? atlasUploadTotals(gpuAtlas) : { fullUploads: 0, dirtyUploads: 0 };
   const onMaterialCacheDebug = (event: Event): void => {
     const detail = (event as CustomEvent).detail as Partial<{
       enabled: boolean;
@@ -210,21 +176,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         invalidateFarSummaryAtlasSignature(gpuAtlas);
         lastMaterialCacheContentRevision = materialCacheContentRevision;
       }
-      const atlasBefore = gpuAtlas ? captureAtlasPlacements(gpuAtlas) : null;
-      const uploadTotalsBefore = gpuAtlas ? atlasUploadTotals(gpuAtlas) : null;
       gpuAtlas?.updateFromState(state);
-      if (gpuAtlas && atlasBefore && uploadTotalsBefore) {
-        const uploadTotalsAfter = atlasUploadTotals(gpuAtlas);
-        if (uploadTotalsChanged(uploadTotalsBefore, uploadTotalsAfter)) {
-          lastAtlasDiagnostics = computeAtlasDirtyUploadDiagnostics(
-            atlasBefore,
-            captureAtlasPlacements(gpuAtlas),
-            config.farClipmap.tileCells,
-            config.farSummaryAtlas.fullUploadThresholdPct,
-          );
-          lastAtlasUploadTotals = uploadTotalsAfter;
-        }
-      }
       debugOverlay?.update(state);
 
       const clod = (window as unknown as { __drusnielClod?: { stats?: { counters?: Record<string, number> } } }).__drusnielClod;
@@ -243,18 +195,6 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
           counters["naadf.farSummaryAtlas.upload.fullUploads"] = uploadStats.fullUploads;
           counters["naadf.farSummaryAtlas.upload.modeCode"] = farSummaryAtlasUploadModeCode(uploadStats.lastUploadMode);
           counters["naadf.farSummaryAtlas.upload.fallbackReasonCode"] = farSummaryAtlasUploadFallbackReasonCode(uploadStats.fallbackReason);
-          counters["naadf.farSummaryAtlas.upload.thresholdPct"] = lastAtlasDiagnostics.thresholdPct;
-          counters["naadf.farSummaryAtlas.upload.rawDirtyRects"] = lastAtlasDiagnostics.rawDirtyRects;
-          counters["naadf.farSummaryAtlas.upload.mergedDirtyRects"] = lastAtlasDiagnostics.mergedDirtyRects;
-          counters["naadf.farSummaryAtlas.upload.rawDirtyPixels"] = lastAtlasDiagnostics.rawDirtyPixels;
-          counters["naadf.farSummaryAtlas.upload.mergedDirtyPixels"] = lastAtlasDiagnostics.mergedDirtyPixels;
-          counters["naadf.farSummaryAtlas.upload.changedTiles"] = lastAtlasDiagnostics.changedTiles;
-          counters["naadf.farSummaryAtlas.upload.clearedRects"] = lastAtlasDiagnostics.clearedRects;
-          counters["naadf.farSummaryAtlas.upload.blitRects"] = lastAtlasDiagnostics.blitRects;
-          counters["naadf.farSummaryAtlas.upload.windowShiftTilesX"] = lastAtlasDiagnostics.windowShiftTilesX;
-          counters["naadf.farSummaryAtlas.upload.windowShiftTilesZ"] = lastAtlasDiagnostics.windowShiftTilesZ;
-          counters["naadf.farSummaryAtlas.upload.latchedFullUploads"] = lastAtlasUploadTotals.fullUploads;
-          counters["naadf.farSummaryAtlas.upload.latchedDirtyUploads"] = lastAtlasUploadTotals.dirtyUploads;
         }
         if (materialCache) Object.assign(counters, terrainMaterialCacheCountersForHud(materialCache));
         if (clod.stats.counters) {
@@ -349,103 +289,6 @@ function heightProviderKey(x: number, z: number): string {
   const qx = Math.round(x * HEIGHT_PROVIDER_KEY_SCALE);
   const qz = Math.round(z * HEIGHT_PROVIDER_KEY_SCALE);
   return `${qx}:${qz}`;
-}
-
-function captureAtlasPlacements(atlas: FarSummaryGpuAtlas): AtlasPlacementCapture {
-  const internals = atlas as unknown as {
-    previousTilePlacements: Map<string, PlannedAtlasTileSnapshot>;
-    lastSignature: string;
-  };
-  return {
-    placements: new Map(internals.previousTilePlacements),
-    signature: internals.lastSignature,
-    rings: atlas.view.rings.map((ring) => ({
-      valid: ring.valid,
-      originX: ring.originX,
-      originZ: ring.originZ,
-      cellM: ring.cellM,
-    })),
-  };
-}
-
-function computeAtlasDirtyUploadDiagnostics(
-  before: AtlasPlacementCapture,
-  after: AtlasPlacementCapture,
-  tileCells: number,
-  thresholdPct: number,
-): AtlasDirtyUploadDiagnostics {
-  const forceBlitAll = before.signature === "" && before.placements.size > 0;
-  const diff = diffAtlasTilePlacements(before.placements, after.placements, forceBlitAll);
-  const blitRects = diff.blitKeys
-    .map((key) => after.placements.get(key))
-    .filter((tile): tile is PlannedAtlasTileSnapshot => tile !== undefined)
-    .map(snapshotToRect);
-  const rawRects = [...diff.clearRects, ...blitRects];
-  const mergedRects = mergeDirtyRects(rawRects);
-  return {
-    thresholdPct,
-    rawDirtyRects: rawRects.length,
-    mergedDirtyRects: mergedRects.length,
-    rawDirtyPixels: rectArea(rawRects),
-    mergedDirtyPixels: dirtyArea(mergedRects),
-    changedTiles: diff.clearRects.length + diff.blitKeys.length,
-    clearedRects: diff.clearRects.length,
-    blitRects: blitRects.length,
-    ...windowShiftTiles(before, after, tileCells),
-  };
-}
-
-function emptyAtlasDirtyUploadDiagnostics(thresholdPct: number): AtlasDirtyUploadDiagnostics {
-  return {
-    thresholdPct,
-    rawDirtyRects: 0,
-    mergedDirtyRects: 0,
-    rawDirtyPixels: 0,
-    mergedDirtyPixels: 0,
-    changedTiles: 0,
-    clearedRects: 0,
-    blitRects: 0,
-    windowShiftTilesX: 0,
-    windowShiftTilesZ: 0,
-  };
-}
-
-function atlasUploadTotals(atlas: FarSummaryGpuAtlas): AtlasUploadTotals {
-  return {
-    fullUploads: atlas.view.uploadStats.fullUploads,
-    dirtyUploads: atlas.view.uploadStats.dirtyUploads,
-  };
-}
-
-function uploadTotalsChanged(before: AtlasUploadTotals, after: AtlasUploadTotals): boolean {
-  return before.fullUploads !== after.fullUploads || before.dirtyUploads !== after.dirtyUploads;
-}
-
-function snapshotToRect(tile: PlannedAtlasTileSnapshot): AtlasDirtyRect {
-  return { x: tile.atlasX, y: tile.atlasY, width: tile.copyCells, height: tile.copyCells };
-}
-
-function rectArea(rects: readonly AtlasDirtyRect[]): number {
-  return rects.reduce((sum, rect) => sum + rect.width * rect.height, 0);
-}
-
-function windowShiftTiles(
-  before: AtlasPlacementCapture,
-  after: AtlasPlacementCapture,
-  tileCells: number,
-): Pick<AtlasDirtyUploadDiagnostics, "windowShiftTilesX" | "windowShiftTilesZ"> {
-  let maxShiftX = 0;
-  let maxShiftZ = 0;
-  const count = Math.min(before.rings.length, after.rings.length);
-  for (let i = 0; i < count; i++) {
-    const a = before.rings[i];
-    const b = after.rings[i];
-    if (!a || !b || a.valid <= 0 || b.valid <= 0) continue;
-    const tileSpanM = Math.max(1, b.cellM * tileCells);
-    maxShiftX = Math.max(maxShiftX, Math.abs((b.originX - a.originX) / tileSpanM));
-    maxShiftZ = Math.max(maxShiftZ, Math.abs((b.originZ - a.originZ) / tileSpanM));
-  }
-  return { windowShiftTilesX: maxShiftX, windowShiftTilesZ: maxShiftZ };
 }
 
 function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig {

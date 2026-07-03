@@ -218,27 +218,8 @@ export class TreeSystem {
   }
 
   rebuildNodePatches(nodeIds: Iterable<string>): void {
-    const ids = new Set(nodeIds);
-    if (ids.size === 0) return;
-    if (treeSystemUsesGpuRingDraw(this.settings)) {
-      this.gpuLightingProxyCache.clear();
-      this.updateStats();
-      this.updatePlacementDebugOverlay();
-      return;
-    }
-
-    const stale: TreePatch[] = [];
-    const retained: TreePatch[] = [];
-    for (const patch of this.patches) {
-      if (ids.has(patch.nodeId)) stale.push(patch);
-      else retained.push(patch);
-    }
-
-    this.patches = retained;
-    this.refreshForCenter(this.lastCenter);
-    for (const patch of stale) removeTreePatchResources(this.root, patch);
-    this.updatePatchLods(this.lastCenter, this.lastCenter);
-    this.updatePlacementDebugOverlay();
+    this.removePatchesForNodes(nodeIds);
+    if (!treeSystemUsesGpuRingDraw(this.settings)) this.refreshForCenter(this.lastCenter);
   }
 
   dispose(): void {
@@ -258,21 +239,6 @@ export class TreeSystem {
       return this.gpuLightingProxyCache.get({ centerX: this.lastCenter.x, centerZ: this.lastCenter.z, worldCells: this.worldCells, settings: this.settings, sampler: this.sampler });
     }
     return buildVisibleTreeLightingProxies(this.settings, this.patches);
-  }
-
-  /** Deadline-bounded variant of {@link getLightingProxies} for the per-frame
-   *  forest-lighting budget: the GPU-ring proxy scan is spread across frames
-   *  and the previous proxy set is returned (ready=false) until it completes. */
-  getLightingProxiesBudgeted(deadlineMs: number): { proxies: readonly TreeLightingProxy[]; ready: boolean } {
-    if (!this.settings.enabled) return { proxies: [], ready: true };
-    const gpRingOn = treeSystemUsesGpuRingDraw(this.settings);
-    if (treeReportsGpuRingStats(gpRingOn, this.gpuRing.status, !!this.gpuRing.draw, !!this.gpuRing.compute, this.gpuRing.stats.status)) {
-      return this.gpuLightingProxyCache.getBudgeted(
-        { centerX: this.lastCenter.x, centerZ: this.lastCenter.z, worldCells: this.worldCells, settings: this.settings, sampler: this.sampler },
-        deadlineMs,
-      );
-    }
-    return { proxies: buildVisibleTreeLightingProxies(this.settings, this.patches), ready: true };
   }
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {

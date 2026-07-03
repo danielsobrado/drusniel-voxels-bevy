@@ -15,8 +15,6 @@ import type { ClodPageNode } from "../../types.js";
 import type { ClodSelectionController } from "../selection/clod_selection_controller.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
 
-const DIG_REBUILD_DEBOUNCE_MS = 40;
-const CONSTRUCTION_CONFORM_DEBOUNCE_MS = 20;
 const VEGETATION_REBUILD_DEBOUNCE_MS = 160;
 const VEGETATION_REBUILD_RETRY_MS = 1000;
 
@@ -47,8 +45,8 @@ export interface TerrainEditServiceDeps {
   selectionController: Pick<ClodSelectionController, "patchNodes" | "invalidate">;
   applyTerrainTextures: () => void;
   grassSystem: { rebuildNodePatches(ids: string[]): void } | null;
-  treeSystem: { rebuildNodePatches(ids: string[]): void } | null;
-  understorySystem: { rebuildNodePatches(ids: string[]): void; markPatchesDirty?(): void } | null;
+  treeSystem: { removePatchesForNodes(ids: string[]): Array<unknown>; rebuildNodePatches(ids: string[]): void } | null;
+  understorySystem: { rebuildNodePatches(ids: string[]): void } | null;
   fallingTrees: unknown[];
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
@@ -76,8 +74,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   let conformDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let vegetationFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastDigAt = -Infinity;
-  let digInFlight = false;
-  let queuedDigRay: THREE.Ray | null = null;
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
   const pendingUnderstoryNodeIds = new Set<string>();
@@ -109,6 +105,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (veg.treesEnabled && pendingTreeNodeIds.size > 0) {
       const ids = [...pendingTreeNodeIds];
       try {
+        const fallen = deps.treeSystem?.removePatchesForNodes(ids) ?? [];
+        deps.fallingTrees.push(...fallen);
         deps.treeSystem?.rebuildNodePatches(ids);
         deps.refreshTreeStats();
         clearIds(pendingTreeNodeIds, ids);
@@ -119,9 +117,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0) {
       const ids = [...pendingUnderstoryNodeIds];
       try {
-        const understory = deps.understorySystem;
-        if (understory?.markPatchesDirty) understory.markPatchesDirty();
-        else understory?.rebuildNodePatches(ids);
+        deps.understorySystem?.rebuildNodePatches(ids);
         deps.refreshUnderstoryStats();
         clearIds(pendingUnderstoryNodeIds, ids);
       } catch (error) {
@@ -251,22 +247,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (!hadPaintedTerrain && edit.op === "add") deps.applyTerrainTextures();
   };
 
-  const runDigExclusive = async (ray: THREE.Ray): Promise<void> => {
-    if (digInFlight) {
-      queuedDigRay = ray.clone();
-      return;
-    }
-    digInFlight = true;
-    try {
-      await performDig(ray);
-    } finally {
-      digInFlight = false;
-      const next = queuedDigRay;
-      queuedDigRay = null;
-      if (next) void runDigExclusive(next);
-    }
-  };
-
   const performConstructionTerrainConform = async (request: ConstructionTerrainConformRequest) => {
     const radius = Math.max(request.dimensionsM[0], request.dimensionsM[2]) * 0.5 + request.padMarginM;
     const topY = request.position[1] - request.dimensionsM[1] * 0.5;
@@ -324,8 +304,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (digDebounceTimer !== null) clearTimeout(digDebounceTimer);
     digDebounceTimer = setTimeout(() => {
       digDebounceTimer = null;
-      void runDigExclusive(cloned);
-    }, DIG_REBUILD_DEBOUNCE_MS);
+      void performDig(cloned);
+    }, 40);
   };
 
   const scheduleConstructionTerrainConform = (request: ConstructionTerrainConformRequest): void => {
@@ -333,7 +313,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     conformDebounceTimer = setTimeout(() => {
       conformDebounceTimer = null;
       void performConstructionTerrainConform(request);
-    }, CONSTRUCTION_CONFORM_DEBOUNCE_MS);
+    }, 20);
   };
 
   return {

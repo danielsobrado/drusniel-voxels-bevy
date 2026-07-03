@@ -10,10 +10,6 @@ import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
 import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
 import { createDynamicResolutionController } from "../../../rendering/dynamic_resolution.js";
 import {
-  resetFarSummarySubphaseCounters,
-  timeFarSummarySubphase,
-} from "../../frame_loop/far_summary_subphase_timing.js";
-import {
   RENDER_RESOLUTION_CHANGED_EVENT,
   type RenderResolutionChangedEventDetail,
 } from "../../../rendering/render_resolution_runtime.js";
@@ -351,21 +347,11 @@ export function runFrameLoopStartup(
     },
     farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
-          const counters = longView.hooks?.stats?.counters;
-          resetFarSummarySubphaseCounters(counters);
-          if (streamingScene) {
-            timeFarSummarySubphase(counters, "farSumShellMs", () => {
-              farShellController.moveTo(camera.position.x, camera.position.z);
-            });
-          }
-          timeFarSummarySubphase(counters, "farSumSunLightMs", () => {
-            sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
-            syncSunLightCounters();
-          });
+          if (streamingScene) farShellController.moveTo(camera.position.x, camera.position.z);
+          sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
+          syncSunLightCounters();
           input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
-          timeFarSummarySubphase(counters, "farSumStatsDomMs", () => {
-            session.naadfStatsController?.updateDisplay();
-          });
+          session.naadfStatsController?.updateDisplay();
         } }
       : undefined,
     floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,

@@ -55,7 +55,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
           cache.enqueueTile({ tileX: centerTile.tileX + dx, tileZ: centerTile.tileZ + dz, lod: 0 }, sunVec, frameIndex, provider);
         }
       }
-      cache.updateBudgeted(provider, frameIndex, nowMs, centerTile);
+      cache.updateBudgeted(provider, frameIndex, nowMs);
       updateSunLightGpuAtlas(centerTile, cache.tiles(), options);
       overlay.update(cache.tiles(), options);
     },

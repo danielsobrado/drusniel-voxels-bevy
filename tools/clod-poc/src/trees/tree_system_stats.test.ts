@@ -163,7 +163,6 @@ function visibleClusterMaskStats(
     gpuPrefilterRejectedClusters: 0,
     gpuPrefilterAcceptedClusters: 0,
     gpuPrefilterUnknownKeptClusters: 0,
-    gpuPrefilterFarSummaryConsulted: 0,
     gpuPrefilterSkippedCandidateEstimate: 0,
     gpuCandidateCountBeforePrefilter: 0,
     gpuCandidateCountAfterPrefilter: 0,

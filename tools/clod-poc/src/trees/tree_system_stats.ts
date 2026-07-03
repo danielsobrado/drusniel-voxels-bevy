@@ -16,7 +16,6 @@ export interface TreeVisibleClusterMaskStats {
   gpuPrefilterRejectedClusters: number;
   gpuPrefilterAcceptedClusters: number;
   gpuPrefilterUnknownKeptClusters: number;
-  gpuPrefilterFarSummaryConsulted: number;
   gpuPrefilterSkippedCandidateEstimate: number;
   gpuCandidateCountBeforePrefilter: number;
   gpuCandidateCountAfterPrefilter: number;
@@ -64,7 +63,6 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   gpuPrefilterRejectedClusters: number;
   gpuPrefilterAcceptedClusters: number;
   gpuPrefilterUnknownKeptClusters: number;
-  gpuPrefilterFarSummaryConsulted: number;
   gpuPrefilterSkippedCandidateEstimate: number;
   gpuPrefilterCacheHits: number;
   gpuPrefilterCacheMisses: number;
@@ -163,7 +161,6 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     gpuPrefilterRejectedClusters: 0,
     gpuPrefilterAcceptedClusters: 0,
     gpuPrefilterUnknownKeptClusters: 0,
-    gpuPrefilterFarSummaryConsulted: 0,
     gpuPrefilterSkippedCandidateEstimate: 0,
     gpuPrefilterCacheHits: 0,
     gpuPrefilterCacheMisses: 0,
@@ -276,7 +273,6 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
     stats.gpuPrefilterRejectedClusters = mask.gpuPrefilterRejectedClusters;
     stats.gpuPrefilterAcceptedClusters = mask.gpuPrefilterAcceptedClusters;
     stats.gpuPrefilterUnknownKeptClusters = mask.gpuPrefilterUnknownKeptClusters;
-    stats.gpuPrefilterFarSummaryConsulted = mask.gpuPrefilterFarSummaryConsulted;
     stats.gpuPrefilterSkippedCandidateEstimate = mask.gpuPrefilterSkippedCandidateEstimate;
     stats.gpuCandidateCountBeforePrefilter = mask.gpuCandidateCountBeforePrefilter;
     stats.gpuCandidateCountAfterPrefilter = mask.gpuCandidateCountAfterPrefilter;

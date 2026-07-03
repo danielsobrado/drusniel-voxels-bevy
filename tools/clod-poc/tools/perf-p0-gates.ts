@@ -3,7 +3,6 @@ export type P0PerfGateStatus = "passed" | "failed";
 export interface P0PerfGateCaseLike {
   name: string;
   status: string;
-  contaminated?: boolean;
   metrics: Record<string, number | null | undefined>;
 }
 
@@ -24,6 +23,7 @@ const REQUIRED_CASES = [
   "terrain-material-cache-enabled",
   "gpu-early-reject-disabled",
   "gpu-early-reject-enabled",
+  "gpu-early-reject-enabled-with-debug-oracle",
   "combined-cache-and-early-reject-enabled",
 ] as const;
 
@@ -32,14 +32,6 @@ const FAR_SUMMARY_SOURCE_COUNTERS = [
   "treeGpuPrefilterSourceFarSummaryAvg",
   "grassGpuPrefilterSourceFarSummaryAvg",
   "understoryGpuPrefilterSourceFarSummaryAvg",
-] as const;
-
-const FAR_SUMMARY_CONSULTED_COUNTERS = [
-  "vegetationGpuFarSummaryConsulted",
-  "vegetationGpuFarSummaryConsultedAvg",
-  "treeGpuPrefilterFarSummaryConsultedAvg",
-  "grassGpuPrefilterFarSummaryConsultedAvg",
-  "understoryGpuPrefilterFarSummaryConsultedAvg",
 ] as const;
 
 const P0_DIRTY_ATLAS_STATUS_DONE = 3;
@@ -74,11 +66,11 @@ function gateRequiredCases(byName: ReadonlyMap<string, P0PerfGateCaseLike>): P0P
 }
 
 function gateCasesPassed(cases: readonly P0PerfGateCaseLike[]): P0PerfGateResult {
-  const failed = cases.filter((perfCase) => perfCase.status !== "passed" || perfCase.contaminated).map((perfCase) => perfCase.name);
+  const failed = cases.filter((perfCase) => perfCase.status !== "passed").map((perfCase) => perfCase.name);
   return gate(
     "cases-passed",
     failed.length === 0,
-    failed.length === 0 ? "all collected cases passed without contamination" : `failed/contaminated cases: ${failed.join(", ")}`,
+    failed.length === 0 ? "all collected cases passed" : `failed cases: ${failed.join(", ")}`,
   );
 }
 
@@ -87,18 +79,18 @@ function gateP0DirtyAtlasExerciseCompleted(byName: ReadonlyMap<string, P0PerfGat
   const enabledCases = cases.filter((perfCase) => metric(perfCase, "p0DirtyAtlasExercise.enabled") === 1);
   const completed = enabledCases.filter((perfCase) => {
     const status = metric(perfCase, "p0DirtyAtlasExercise.status");
-    const bumpedTiles = metric(perfCase, "p0DirtyAtlasExercise.bumpedTiles");
+    const moveM = metric(perfCase, "p0DirtyAtlasExercise.moveM");
     const triggeredFrame = metric(perfCase, "p0DirtyAtlasExercise.triggeredFrame");
     const resetFrame = metric(perfCase, "p0DirtyAtlasExercise.resetFrame");
-    return status === P0_DIRTY_ATLAS_STATUS_DONE && positive(bumpedTiles) && finite(triggeredFrame) && finite(resetFrame) && resetFrame >= triggeredFrame;
+    return status === P0_DIRTY_ATLAS_STATUS_DONE && positive(moveM) && finite(triggeredFrame) && finite(resetFrame) && resetFrame >= triggeredFrame;
   });
   const skipped = enabledCases.filter((perfCase) => metric(perfCase, "p0DirtyAtlasExercise.status") === 4).map((perfCase) => perfCase.name);
-  const bestBumpedTiles = completed.reduce((max, perfCase) => Math.max(max, metric(perfCase, "p0DirtyAtlasExercise.bumpedTiles") ?? 0), 0);
+  const bestMove = completed.reduce((max, perfCase) => Math.max(max, metric(perfCase, "p0DirtyAtlasExercise.moveM") ?? 0), 0);
   return gate(
     "p0-dirty-atlas-exercise-completed",
     enabledCases.length > 0 && completed.length > 0 && skipped.length === 0,
     enabledCases.length > 0 && completed.length > 0 && skipped.length === 0
-      ? `dirty atlas exercise completed cases=${completed.length}/${enabledCases.length} bestBumpedTiles=${formatMetric(bestBumpedTiles)}`
+      ? `dirty atlas exercise completed cases=${completed.length}/${enabledCases.length} bestMoveM=${formatMetric(bestMove)}`
       : `dirty atlas exercise incomplete enabled=${enabledCases.length} completed=${completed.length} skipped=${skipped.join(", ") || "-"}`,
   );
 }
@@ -145,17 +137,13 @@ function gateFarSummarySourceEvidence(byName: ReadonlyMap<string, P0PerfGateCase
   const farSummaryUses = enabledCases.reduce((sum, perfCase) => (
     sum + FAR_SUMMARY_SOURCE_COUNTERS.reduce((inner, key) => inner + (metric(perfCase, key) ?? 0), 0)
   ), 0);
-  const farSummaryConsulted = enabledCases.reduce((sum, perfCase) => (
-    sum + FAR_SUMMARY_CONSULTED_COUNTERS.reduce((inner, key) => inner + (metric(perfCase, key) ?? 0), 0)
-  ), 0);
   const fallbackUses = enabledCases.reduce((sum, perfCase) => sum + (metric(perfCase, "vegetationGpuSourceFallback") ?? 0), 0);
-  const hasEvidence = farSummaryUses > 0 || farSummaryConsulted > 0;
   return gate(
     "far-summary-source-evidence",
-    hasEvidence,
-    hasEvidence
-      ? `far-summary source used=${formatMetric(farSummaryUses)} consulted=${formatMetric(farSummaryConsulted)} fallback=${formatMetric(fallbackUses)}`
-      : "early-reject enabled cases did not expose far-summary source usage or consultation",
+    farSummaryUses > 0,
+    farSummaryUses > 0
+      ? `far-summary source used=${formatMetric(farSummaryUses)} fallback=${formatMetric(fallbackUses)}`
+      : "early-reject enabled cases did not expose far-summary source usage",
   );
 }
 

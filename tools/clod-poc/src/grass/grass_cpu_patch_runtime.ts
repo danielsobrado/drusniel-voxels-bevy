@@ -78,49 +78,6 @@ export class GrassCpuPatchRuntime {
     this.patches = retained;
   }
 
-  rebuildForNodes(nodeIds: Iterable<string>, center: THREE.Vector3, settings: GrassSettings): void {
-    const ids = new Set(nodeIds);
-    if (ids.size === 0) return;
-    const wasDirty = this.patchesDirty;
-
-    const stale: GrassPatch[] = [];
-    const retained: GrassPatch[] = [];
-    for (const patch of this.patches) {
-      if (ids.has(patch.nodeId)) stale.push(patch);
-      else retained.push(patch);
-    }
-
-    let activeBladeCount = retained.reduce((sum, patch) => sum + patch.bladeCount, 0);
-    let remainingBudget = Math.max(0, Math.floor(settings.maxBlades) - activeBladeCount);
-    const replacements: GrassPatch[] = [];
-    for (const node of this.nodes) {
-      if (!ids.has(node.id) || remainingBudget <= 0) continue;
-      const footprint = clampGrassFootprint(node.footprint, this.worldCells);
-      const distance = Math.hypot(center.x - grassFootprintCenterX(footprint), center.z - grassFootprintCenterZ(footprint));
-      if (distance > settings.distance + grassFootprintRadius(footprint)) continue;
-      const buildStart = performance.now();
-      const instances = generateGrassInstances(footprint, settings, remainingBudget, this.generationStats);
-      if (instances.length === 0) continue;
-      const patch = this.createPatchFactory(settings).createPatch(node.id, footprint, instances);
-      this.buildMs += performance.now() - buildStart;
-      this.patchRebuildCount++;
-      replacements.push(patch);
-      for (const mesh of patch.meshes) this.root.add(mesh);
-      activeBladeCount += patch.bladeCount;
-      remainingBudget = Math.max(0, Math.floor(settings.maxBlades) - activeBladeCount);
-    }
-
-    this.patches = [...retained, ...replacements];
-    this.bladeCount = activeBladeCount;
-    for (const patch of stale) this.removePatch(patch);
-    for (const patch of this.patches) {
-      const distance = Math.hypot(center.x - patch.centerX, center.z - patch.centerZ);
-      updateGrassPatchVisibility({ patch, distance, settings });
-    }
-    this.lastRefreshCenter.copy(center);
-    this.patchesDirty = wasDirty;
-  }
-
   refreshIfNeeded(center: THREE.Vector3, settings: GrassSettings): boolean {
     if (!this.patchesDirty && this.lastRefreshCenter.distanceTo(center) < settings.patchFallback.refreshDistance) {
       return false;

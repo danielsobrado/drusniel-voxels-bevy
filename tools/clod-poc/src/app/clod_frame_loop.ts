@@ -140,6 +140,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const p0DirtyAtlasExercise = createP0DirtyAtlasExercise({
     searchParams: debugQuery,
     queryScene: diagnostics.queryScene,
+    camera: render.camera,
+    controls: player.controls,
     perfProbe,
     getHooks: render.getHooks,
   });
@@ -203,8 +205,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     p0DirtyAtlasExercise.update(selectionStats.frameId);
 
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
-      player.playerInputController.updateFrame(playerDelta);
-      player.playerInputController.updateHoldToDig();
+      player.controls.update();
     });
     timed(collectFrameTiming, phaseTiming, "constructionMs", () => {
       construction?.update();

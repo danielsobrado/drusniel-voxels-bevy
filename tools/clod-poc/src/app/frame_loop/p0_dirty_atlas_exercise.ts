@@ -1,10 +1,12 @@
+import type * as THREE from "three";
 import type { ClodHooks } from "../../core/hooks.js";
-import type { FarSummaryTile } from "../../naadf/types.js";
 import type { FramePerfProbe } from "./perf_probe.js";
 
 export interface P0DirtyAtlasExerciseInput {
   searchParams: URLSearchParams;
   queryScene: string | null;
+  camera: THREE.PerspectiveCamera;
+  controls: { target: THREE.Vector3; update(): void };
   perfProbe: FramePerfProbe | null;
   getHooks(): ClodHooks | null;
 }
@@ -15,9 +17,9 @@ export interface P0DirtyAtlasExerciseRuntime {
 
 type ExerciseStatus = "disabled" | "pending" | "settling" | "done" | "skipped";
 
-const DEFAULT_INVALIDATED_TILES = 4;
-const MAX_INVALIDATED_TILES = 8;
+const DEFAULT_MOVE_METERS = 768;
 const DEFAULT_SETTLE_FRAMES = 18;
+const MIN_MOVE_METERS = 64;
 const STATUS_CODE: Record<ExerciseStatus, number> = {
   disabled: 0,
   pending: 1,
@@ -26,31 +28,22 @@ const STATUS_CODE: Record<ExerciseStatus, number> = {
   skipped: 4,
 };
 
-/**
- * Proves the far-summary atlas dirty-upload path during P0 runs: bumps the
- * revision of a few far tiles that are currently placed in the atlas window
- * (same slot, new revision ⇒ blit-only dirty rects), so the next atlas update
- * performs a partial upload well below the full-upload threshold. Camera
- * movement is deliberately not used — window shifts dirty ~30+ tiles and fall
- * back to a threshold full upload.
- */
 export function createP0DirtyAtlasExercise(input: P0DirtyAtlasExerciseInput): P0DirtyAtlasExerciseRuntime {
   const enabled = shouldEnable(input);
-  const requestedTiles = clampTiles(positiveParam(input.searchParams, "dirtyAtlasTiles") ?? DEFAULT_INVALIDATED_TILES);
+  const moveMeters = positiveParam(input.searchParams, "dirtyAtlasMoveM") ?? DEFAULT_MOVE_METERS;
   const settleFrames = Math.max(1, Math.floor(positiveParam(input.searchParams, "dirtyAtlasSettleFrames") ?? DEFAULT_SETTLE_FRAMES));
   let status: ExerciseStatus = enabled ? "pending" : "disabled";
   let settleRemaining = 0;
   let triggeredFrame = -1;
   let resetFrame = -1;
-  let bumpedTiles = 0;
+  let moveApplied = 0;
 
   const mirror = (): void => {
     const counters = input.getHooks()?.stats?.counters;
     if (!counters) return;
     counters["p0DirtyAtlasExercise.enabled"] = enabled ? 1 : 0;
     counters["p0DirtyAtlasExercise.status"] = STATUS_CODE[status];
-    counters["p0DirtyAtlasExercise.requestedTiles"] = requestedTiles;
-    counters["p0DirtyAtlasExercise.bumpedTiles"] = bumpedTiles;
+    counters["p0DirtyAtlasExercise.moveM"] = moveApplied;
     counters["p0DirtyAtlasExercise.triggeredFrame"] = triggeredFrame;
     counters["p0DirtyAtlasExercise.resetFrame"] = resetFrame;
     counters["p0DirtyAtlasExercise.settleRemaining"] = settleRemaining;
@@ -75,12 +68,10 @@ export function createP0DirtyAtlasExercise(input: P0DirtyAtlasExerciseInput): P0
           return;
         }
         if (perf.observedFrames >= Math.max(1, perf.warmupFrames)) {
-          bumpedTiles = bumpPlacedFarSummaryTiles(requestedTiles);
-          if (bumpedTiles > 0) {
-            triggeredFrame = frameId;
-            settleRemaining = settleFrames;
-            status = "settling";
-          }
+          moveApplied = moveCameraAcrossAtlasTile(input, moveMeters);
+          triggeredFrame = frameId;
+          settleRemaining = settleFrames;
+          status = "settling";
         }
         mirror();
         return;
@@ -106,58 +97,26 @@ function shouldEnable(input: P0DirtyAtlasExerciseInput): boolean {
   return true;
 }
 
-/**
- * Re-stamps up to `requestedTiles` ready far tiles inside the ring-0 atlas
- * window with fresh revisions. Tiles are taken from a single tile row so the
- * merged dirty rects stay a thin strip (≤ requestedTiles · tileCells² pixels)
- * instead of a bounding box across rows.
- */
-function bumpPlacedFarSummaryTiles(requestedTiles: number): number {
-  const naadf = typeof window !== "undefined" ? window.__drusnielNaadf : undefined;
-  const view = naadf?.getFarSummaryGpuAtlasView();
-  if (!naadf || !view || view.valid !== 1) return 0;
-  const ring = view.rings[0];
-  const tileCells = naadf.config.farClipmap.tileCells;
-  if (!ring || ring.valid !== 1 || ring.cellM <= 0 || tileCells <= 0) return 0;
-
-  const spanM = ring.cellM * tileCells;
-  const tilesX = Math.max(1, Math.round(ring.widthCells / tileCells));
-  const tilesZ = Math.max(1, Math.round(ring.heightCells / tileCells));
-  const minTileX = Math.round(ring.originX / spanM);
-  const minTileZ = Math.round(ring.originZ / spanM);
-
-  const state = naadf.state;
-  const placedByRow = new Map<number, Array<[string, FarSummaryTile]>>();
-  for (const [mapKey, tile] of state.farTiles) {
-    if (tile.key.ring !== 0 || tile.state !== "ready") continue;
-    if (tile.key.x < minTileX || tile.key.x >= minTileX + tilesX) continue;
-    if (tile.key.z < minTileZ || tile.key.z >= minTileZ + tilesZ) continue;
-    let row = placedByRow.get(tile.key.z);
-    if (!row) {
-      row = [];
-      placedByRow.set(tile.key.z, row);
-    }
-    row.push([mapKey, tile]);
-  }
-
-  let bestRow: Array<[string, FarSummaryTile]> | null = null;
-  for (const row of placedByRow.values()) {
-    if (!bestRow || row.length > bestRow.length) bestRow = row;
-  }
-  if (!bestRow) return 0;
-
-  bestRow.sort(([, a], [, b]) => a.key.x - b.key.x);
-  let bumped = 0;
-  for (const [mapKey, tile] of bestRow) {
-    if (bumped >= requestedTiles) break;
-    state.farTiles.set(mapKey, { ...tile, revision: state.revision++ });
-    bumped++;
-  }
-  return bumped;
+function moveCameraAcrossAtlasTile(input: P0DirtyAtlasExerciseInput, requestedMoveMeters: number): number {
+  const move = Math.max(MIN_MOVE_METERS, requestedMoveMeters);
+  const counters = input.getHooks()?.stats?.counters;
+  const worldCells = counters?.world_cells ?? 0;
+  const x = input.camera.position.x;
+  const nextX = movedPosition(x, move, worldCells);
+  const dx = nextX - x;
+  input.camera.position.x += dx;
+  input.controls.target.x += dx;
+  input.controls.update();
+  return Math.abs(dx);
 }
 
-function clampTiles(value: number): number {
-  return Math.min(MAX_INVALIDATED_TILES, Math.max(1, Math.floor(value)));
+function movedPosition(x: number, moveMeters: number, worldCells: number): number {
+  if (!Number.isFinite(worldCells) || worldCells <= 0) return x + moveMeters;
+  const maxX = worldCells * 0.9;
+  const minX = worldCells * 0.1;
+  const forward = Math.min(maxX, x + moveMeters);
+  if (Math.abs(forward - x) >= MIN_MOVE_METERS) return forward;
+  return Math.max(minX, x - moveMeters);
 }
 
 function positiveParam(searchParams: URLSearchParams, key: string): number | null {

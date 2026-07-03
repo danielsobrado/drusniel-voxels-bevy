@@ -37,13 +37,8 @@ export interface VegetationFarSummaryRejectDecision {
   sourceReason?: VegetationVisibilityReason;
 }
 
-export interface VegetationFarSummaryRejectResult {
-  decision: VegetationFarSummaryRejectDecision | null;
-  consulted: boolean;
-}
-
 export interface VegetationFarSummaryRejectProvider {
-  classifyCluster(query: VegetationTerrainRejectQuery): VegetationFarSummaryRejectResult;
+  classifyCluster(query: VegetationTerrainRejectQuery): VegetationFarSummaryRejectDecision | null;
 }
 
 export interface VegetationTerrainRejectProviderOptions {
@@ -77,7 +72,6 @@ export interface VegetationTerrainRejectDecision {
   source: VegetationTerrainRejectSource;
   sourceReason?: VegetationVisibilityReason;
   debug?: VegetationTerrainRejectDebugValues;
-  farSummaryConsulted?: boolean;
 }
 
 export interface VegetationTerrainRejectProvider {
@@ -103,24 +97,22 @@ export function createVegetationTerrainRejectProvider(
       if (outsideTerrain(query)) return reject("outsideTerrain", "exact", "conservativeFallback");
       if (revisionMismatch(query)) return unknownSummaryDecision(query, "conservativeFallback", query.acceptWhenRevisionMismatch);
 
-      let farSummaryConsulted = false;
       const sourcePriority = query.sourcePriority ?? defaultPriority;
       for (const source of sourcePriority) {
         if (source === "naadfFarSummary") {
-          const result = farSummaryProvider?.classifyCluster(query) ?? { decision: null, consulted: false };
-          farSummaryConsulted ||= result.consulted;
-          if (result.decision) return farSummaryDecision(query, result.decision, source, farSummaryConsulted);
+          const decision = farSummaryProvider?.classifyCluster(query) ?? null;
+          if (decision) return farSummaryDecision(query, decision, source);
           continue;
         }
         if (source === "terrainVisibilitySampler") {
           const decision = classifyWithTerrainSampler(query, visibilityProvider);
-          if (decision) return withFarSummaryConsulted(decision, farSummaryConsulted);
+          if (decision) return decision;
           continue;
         }
-        return unknownSummaryDecision(query, "conservativeFallback", undefined, farSummaryConsulted);
+        return unknownSummaryDecision(query, "conservativeFallback");
       }
 
-      return unknownSummaryDecision(query, "conservativeFallback", undefined, farSummaryConsulted);
+      return unknownSummaryDecision(query, "conservativeFallback");
     },
   };
 }
@@ -163,9 +155,9 @@ export function createTerrainSummaryRejectProvider(
   getField: () => TerrainSummaryField | null | undefined,
 ): VegetationFarSummaryRejectProvider {
   return {
-    classifyCluster(query): VegetationFarSummaryRejectResult {
+    classifyCluster(query): VegetationFarSummaryRejectDecision | null {
       const field = getField();
-      if (!field) return { decision: null, consulted: false };
+      if (!field) return null;
       const { centerX, centerZ } = query.descriptor;
       const coverage = sampleCoverage(field, centerX, centerZ);
       const heightMin = sampleHeightBlend(field, centerX, centerZ, 0);
@@ -173,25 +165,13 @@ export function createTerrainSummaryRejectProvider(
       const debug = { coverage, heightMin, heightMax };
 
       if (!Number.isFinite(heightMin) || !Number.isFinite(heightMax)) {
-        return {
-          consulted: true,
-          decision: { reject: false, reason: "summaryMissing", confidence: "summary", debug, sourceReason: "unknown_kept" },
-        };
+        return { reject: false, reason: "summaryMissing", confidence: "summary", debug, sourceReason: "unknown_kept" };
       }
       if (coverage < (query.minCoverageToAccept ?? 0.05)) {
-        return {
-          consulted: true,
-          decision: { reject: true, reason: "noCoverage", confidence: "summary", debug },
-        };
-      }
-      if (!query.sampler) {
-        return {
-          consulted: true,
-          decision: { reject: false, reason: "accepted", confidence: "summary", debug, sourceReason: "visible" },
-        };
+        return { reject: true, reason: "noCoverage", confidence: "summary", debug };
       }
 
-      return { decision: null, consulted: true };
+      return null;
     },
   };
 }
@@ -200,10 +180,9 @@ function farSummaryDecision(
   query: VegetationTerrainRejectQuery,
   decision: VegetationFarSummaryRejectDecision,
   source: VegetationTerrainRejectSource,
-  farSummaryConsulted: boolean,
 ): VegetationTerrainRejectDecision {
-  if (decision.reason !== "summaryMissing") return withFarSummaryConsulted({ ...decision, source }, farSummaryConsulted);
-  const conservative = unknownSummaryDecision(query, source, undefined, farSummaryConsulted);
+  if (decision.reason !== "summaryMissing") return { ...decision, source };
+  const conservative = unknownSummaryDecision(query, source);
   return {
     ...conservative,
     confidence: decision.confidence,
@@ -216,10 +195,9 @@ function unknownSummaryDecision(
   query: VegetationTerrainRejectQuery,
   source: VegetationTerrainRejectSource,
   acceptWhenMissing = query.acceptWhenSummaryMissing,
-  farSummaryConsulted = false,
 ): VegetationTerrainRejectDecision {
-  if (acceptWhenMissing === false) return reject("summaryMissing", "fallback", source, "unknown_kept", undefined, farSummaryConsulted);
-  return accept("summaryMissing", "fallback", source, "unknown_kept", undefined, farSummaryConsulted);
+  if (acceptWhenMissing === false) return reject("summaryMissing", "fallback", source, "unknown_kept");
+  return accept("summaryMissing", "fallback", source, "unknown_kept");
 }
 
 function accept(
@@ -228,9 +206,8 @@ function accept(
   source: VegetationTerrainRejectSource,
   sourceReason?: VegetationVisibilityReason,
   debug?: VegetationTerrainRejectDebugValues,
-  farSummaryConsulted = false,
 ): VegetationTerrainRejectDecision {
-  return withFarSummaryConsulted({ reject: false, reason, confidence, source, sourceReason, debug }, farSummaryConsulted);
+  return { reject: false, reason, confidence, source, sourceReason, debug };
 }
 
 function reject(
@@ -239,16 +216,8 @@ function reject(
   source: VegetationTerrainRejectSource,
   sourceReason?: VegetationVisibilityReason,
   debug?: VegetationTerrainRejectDebugValues,
-  farSummaryConsulted = false,
 ): VegetationTerrainRejectDecision {
-  return withFarSummaryConsulted({ reject: true, reason, confidence, source, sourceReason, debug }, farSummaryConsulted);
-}
-
-function withFarSummaryConsulted(
-  decision: VegetationTerrainRejectDecision,
-  farSummaryConsulted: boolean,
-): VegetationTerrainRejectDecision {
-  return farSummaryConsulted ? { ...decision, farSummaryConsulted: true } : decision;
+  return { reject: true, reason, confidence, source, sourceReason, debug };
 }
 
 function outsideTerrain(query: VegetationTerrainRejectQuery): boolean {

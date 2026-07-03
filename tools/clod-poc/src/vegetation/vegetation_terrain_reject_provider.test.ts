@@ -141,7 +141,6 @@ describe("VegetationTerrainRejectProvider", () => {
       reason: "summaryMissing",
       confidence: "summary",
       source: "naadfFarSummary",
-      farSummaryConsulted: true,
     });
   });
 
@@ -216,11 +215,10 @@ describe("VegetationTerrainRejectProvider", () => {
       reason: "noCoverage",
       confidence: "summary",
       source: "naadfFarSummary",
-      farSummaryConsulted: true,
     });
   });
 
-  it("marks far-summary consultation when terrain sampler supplies the final decision", () => {
+  it("falls through to the terrain sampler when far-summary data is not decisive", () => {
     const farSummaryProvider = createTerrainSummaryRejectProvider(() => summaryField(1));
     const result = createVegetationTerrainRejectProvider({ farSummaryProvider }).classifyCluster({
       descriptor: descriptor({ centerX: 64, centerZ: 0, halfSize: 4 }),
@@ -239,7 +237,6 @@ describe("VegetationTerrainRejectProvider", () => {
       reject: true,
       reason: "terrainHidden",
       source: "terrainVisibilitySampler",
-      farSummaryConsulted: true,
     });
   });
 });

@@ -39,9 +39,9 @@ export const DEFAULT_CUSTOM_PROPS_SETTINGS: CustomPropsSettings = {
     maxInstancesPerCellWarning: 512,
     farCellUpdateIntervalFrames: 8,
     ringRadiusM: 0,
-    cellUpdateBudgetPerFrame: 6,
-    matrixUploadBudgetPerFrame: 4096,
-    lodRefreshDistanceM: 0,
+    cellUpdateBudgetPerFrame: 3,
+    matrixUploadBudgetPerFrame: 256,
+    lodRefreshDistanceM: 10,
   },
   culling: {
     cellFrustumCulling: true,

@@ -41,11 +41,6 @@ export interface ForestLightingController {
     center: import("three").Vector3,
     proxies: { treeProxies: ReturnType<TreeSystem["getLightingProxies"]>; understoryProxies: ReturnType<UnderstorySystem["getLightingProxies"]>; sunDirection: EnvironmentLighting["sunDirection"] },
   ): void;
-  /** Amortized per-frame update: collects proxies and rebuilds the lighting
-   *  field within the configured ms budget, keeping the previous lighting live
-   *  until the rebuild completes. Returns true when a rebuild finished this
-   *  frame (callers should then re-apply prop material state). */
-  updateBudgeted(center: import("three").Vector3, sunDirection: EnvironmentLighting["sunDirection"]): boolean;
   dispose(): void;
 }
 
@@ -134,20 +129,6 @@ export function createForestLightingController(deps: ForestLightingControllerDep
     refreshStats,
     update(elapsedSeconds, center, proxies) {
       system.update(elapsedSeconds, center, proxies);
-    },
-    updateBudgeted(center, sunDirection) {
-      const deadlineMs = performance.now() + deps.forestLightingConfig.field.maxBuildMsPerFrame;
-      if (!system.hasBuildInProgress()) {
-        if (!system.shouldUpdate(center, sunDirection)) return false;
-        const trees = deps.getTreeSystem().getLightingProxiesBudgeted(deadlineMs);
-        if (!trees.ready) return false;
-        system.beginBuild(center, {
-          treeProxies: trees.proxies,
-          understoryProxies: deps.getUnderstorySystem().getLightingProxies(),
-          sunDirection,
-        });
-      }
-      return system.stepBuild(deadlineMs);
     },
     dispose() {
       system.dispose();

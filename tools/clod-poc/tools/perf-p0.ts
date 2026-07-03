@@ -1,7 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Browser, Page } from "playwright";
+import type { Browser } from "playwright";
 import { clodBaseUrl, launchChromium, launchWebGPU } from "./launch.js";
 import { evaluateP0PerfGates, type P0PerfGateSummary } from "./perf-p0-gates.js";
 import type { FramePerfMetric, FramePerfSnapshot } from "../src/app/frame_loop/perf_probe.js";
@@ -32,11 +31,6 @@ interface BrowserState {
   finalCounters: Record<string, number>;
 }
 
-interface GitState {
-  head: string | null;
-  status: string | null;
-}
-
 interface PerfCaseAttempt {
   renderer: RendererKind;
   url: string;
@@ -47,10 +41,6 @@ interface PerfCaseAttempt {
   lastProgress: PerfCaseProgress | null;
   snapshot: FramePerfSnapshot | null;
   finalCounters: Record<string, number>;
-  gitStateStart: GitState;
-  gitStateEnd: GitState;
-  pageNavigationCount: number;
-  contaminated: boolean;
   error: string | null;
 }
 
@@ -65,30 +55,14 @@ const P0_CASES: PerfCase[] = [
   { name: "terrain-material-cache-enabled", params: { scene: "infinite-naadf-far", terrainMaterialCache: "1" } },
   { name: "gpu-early-reject-disabled", params: { scene: "infinite-naadf-forest", gpuEarlyReject: "0", treeGpu: "1", grass: "1", understory: "1" } },
   { name: "gpu-early-reject-enabled", params: { scene: "infinite-naadf-forest", gpuEarlyReject: "1", treeGpu: "1", grass: "1", understory: "1" } },
+  { name: "gpu-early-reject-enabled-with-debug-oracle", params: { scene: "infinite-naadf-forest", gpuEarlyReject: "1", gpuEarlyRejectDebugOracle: "1", treeGpu: "1", grass: "1", understory: "1" } },
   { name: "combined-cache-and-early-reject-enabled", params: { scene: "infinite-naadf-forest", terrainMaterialCache: "1", gpuEarlyReject: "1", treeGpu: "1", grass: "1", understory: "1" } },
 ];
-
-const OPTIONAL_P0_CASES: PerfCase[] = [
-  { name: "gpu-early-reject-enabled-with-debug-oracle", params: { scene: "infinite-naadf-forest", gpuEarlyReject: "1", gpuEarlyRejectDebugOracle: "1", treeGpu: "1", grass: "1", understory: "1" } },
-];
-
-const ALL_P0_CASES = [...P0_CASES, ...OPTIONAL_P0_CASES];
-
-const FAR_SUMMARY_PHASE_METRICS = [
-  "farSumTilesMs",
-  "farSumNaadfMs",
-  "farSumShellMs",
-  "farSumShadowProxyMs",
-  "farSumBiomeStreamMs",
-  "farSumSunLightMs",
-  "farSumStatsDomMs",
-] as const satisfies readonly FramePerfMetric[];
 
 const PHASE_METRICS = [
   "frameMs",
   "selectionUpdateMs",
   "farSummaryMs",
-  ...FAR_SUMMARY_PHASE_METRICS,
   "vegetationTotalMs",
   "statsSyncMs",
   "renderMs",
@@ -107,7 +81,6 @@ const P0_COUNTERS = [
   "vegetationGpuClustersRejectedEarly",
   "vegetationGpuClustersAccepted",
   "vegetationGpuClustersSummaryMissing",
-  "vegetationGpuFarSummaryConsulted",
   "vegetationGpuSourceFarSummary",
   "vegetationGpuSourceTerrainSampler",
   "vegetationGpuSourceFallback",
@@ -116,19 +89,16 @@ const P0_COUNTERS = [
   "vegetationGpuCandidatesGenerated",
   "treeGpuCandidateCountBeforePrefilterAvg",
   "treeGpuCandidateCountAfterPrefilterAvg",
-  "treeGpuPrefilterFarSummaryConsultedAvg",
   "treeGpuPrefilterSourceFarSummaryAvg",
   "treeGpuPrefilterSourceTerrainSamplerAvg",
   "treeGpuPrefilterSourceFallbackAvg",
   "grassGpuCandidateCountBeforePrefilterAvg",
   "grassGpuCandidateCountAfterPrefilterAvg",
-  "grassGpuPrefilterFarSummaryConsultedAvg",
   "grassGpuPrefilterSourceFarSummaryAvg",
   "grassGpuPrefilterSourceTerrainSamplerAvg",
   "grassGpuPrefilterSourceFallbackAvg",
   "understoryGpuCandidateCountBeforePrefilterAvg",
   "understoryGpuCandidateCountAfterPrefilterAvg",
-  "understoryGpuPrefilterFarSummaryConsultedAvg",
   "understoryGpuPrefilterSourceFarSummaryAvg",
   "understoryGpuPrefilterSourceTerrainSamplerAvg",
   "understoryGpuPrefilterSourceFallbackAvg",
@@ -156,8 +126,7 @@ const P0_COUNTERS = [
   "naadf.farSummaryAtlas.upload.fallbackReasonCode",
   "p0DirtyAtlasExercise.enabled",
   "p0DirtyAtlasExercise.status",
-  "p0DirtyAtlasExercise.requestedTiles",
-  "p0DirtyAtlasExercise.bumpedTiles",
+  "p0DirtyAtlasExercise.moveM",
   "p0DirtyAtlasExercise.triggeredFrame",
   "p0DirtyAtlasExercise.resetFrame",
   "p0DirtyAtlasExercise.settleRemaining",
@@ -204,8 +173,8 @@ function parseParams(raw: string | undefined): Record<string, string> {
 function selectCases(rawCase: string | undefined): PerfCase[] {
   if (!rawCase) return P0_CASES;
   const wanted = new Set(rawCase.split(",").map((name) => name.trim()).filter(Boolean));
-  const selected = ALL_P0_CASES.filter((perfCase) => wanted.has(perfCase.name));
-  const missing = [...wanted].filter((name) => !ALL_P0_CASES.some((perfCase) => perfCase.name === name));
+  const selected = P0_CASES.filter((perfCase) => wanted.has(perfCase.name));
+  const missing = [...wanted].filter((name) => !P0_CASES.some((perfCase) => perfCase.name === name));
   if (missing.length > 0) throw new Error(`Unknown P0 perf case(s): ${missing.join(", ")}`);
   if (selected.length === 0) throw new Error("No P0 perf cases selected");
   return selected;
@@ -223,29 +192,6 @@ function safeFileName(value: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function gitState(): GitState {
-  try {
-    return {
-      head: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-      status: execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim(),
-    };
-  } catch {
-    return { head: null, status: null };
-  }
-}
-
-function gitStateChanged(start: GitState, end: GitState): boolean {
-  return start.head !== end.head || start.status !== end.status;
-}
-
-async function captureBrowserState(page: Page | null): Promise<BrowserState> {
-  if (!page || page.isClosed()) return { snapshot: null, finalCounters: {} };
-  return page.evaluate<BrowserState>(() => ({
-    snapshot: window.__drusnielPerf?.snapshot() ?? null,
-    finalCounters: { ...(window.__drusnielClod?.stats?.counters ?? {}) },
-  })).catch(() => ({ snapshot: null, finalCounters: {} }));
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -324,19 +270,16 @@ async function runAttempt(
   const warnings: string[] = [];
   const errors: string[] = [];
   let browser: Browser | null = null;
-  let page: Page | null = null;
   let launchRecipe: unknown = null;
   let lastProgress: PerfCaseProgress | null = null;
-  let pageNavigationCount = 0;
   const params = { ...rendererParams(baseParams, renderer), ...perfCase.params };
   const url = buildUrl(baseUrl, params);
-  const gitStateStart = gitState();
 
   try {
     const launched = await launch(renderer);
     browser = launched.browser;
     launchRecipe = launched.recipe;
-    page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
     page.setDefaultTimeout(Math.min(timeoutMs, 60000));
     page.on("console", (msg) => {
       const text = msg.text();
@@ -344,9 +287,6 @@ async function runAttempt(
       if (msg.type() === "error") errors.push(text);
     });
     page.on("pageerror", (error) => errors.push(error.message));
-    page.on("framenavigated", (frame) => {
-      if (frame === page?.mainFrame()) pageNavigationCount++;
-    });
 
     try {
       console.log(`[perf-p0] ${perfCase.name} ${renderer}: ${url}`);
@@ -383,34 +323,17 @@ async function runAttempt(
         await delay(250);
       }
 
-      const state = await captureBrowserState(page);
+      const state = await page.evaluate<BrowserState>(() => ({
+        snapshot: window.__drusnielPerf?.snapshot() ?? null,
+        finalCounters: { ...(window.__drusnielClod?.stats?.counters ?? {}) },
+      }));
       if (!state.snapshot) throw new Error("Missing window.__drusnielPerf snapshot");
       if (!state.snapshot.ready) {
-        const gitStateEnd = gitState();
-        const contaminated = gitStateChanged(gitStateStart, gitStateEnd) || pageNavigationCount > 1;
-        const result: PerfCaseAttempt = {
-          renderer,
-          url,
-          status: "failed",
-          warnings,
-          errors,
-          launchRecipe,
-          lastProgress,
-          snapshot: state.snapshot,
-          finalCounters: state.finalCounters,
-          gitStateStart,
-          gitStateEnd,
-          pageNavigationCount,
-          contaminated,
-          error:
-            `Perf probe timed out after ${timeoutMs}ms: ` +
+        throw new Error(
+          `Perf probe timed out after ${timeoutMs}ms: ` +
             `${state.snapshot.sampleCount}/${state.snapshot.targetSampleFrames} samples, ${state.snapshot.observedFrames} observed frames`,
-        };
-        writeJson(outDir, `${perfCase.name}-${renderer}-FAILED`, result);
-        return result;
+        );
       }
-      const gitStateEnd = gitState();
-      const contaminated = gitStateChanged(gitStateStart, gitStateEnd) || pageNavigationCount > 1;
       const result: PerfCaseAttempt = {
         renderer,
         url,
@@ -421,10 +344,6 @@ async function runAttempt(
         lastProgress,
         snapshot: state.snapshot,
         finalCounters: state.finalCounters,
-        gitStateStart,
-        gitStateEnd,
-        pageNavigationCount,
-        contaminated,
         error: null,
       };
       writeJson(outDir, `${perfCase.name}-${renderer}`, result);
@@ -433,9 +352,6 @@ async function runAttempt(
       await page.close().catch(() => undefined);
     }
   } catch (error) {
-    const state = await captureBrowserState(page);
-    const gitStateEnd = gitState();
-    const contaminated = gitStateChanged(gitStateStart, gitStateEnd) || pageNavigationCount > 1;
     const result: PerfCaseAttempt = {
       renderer,
       url,
@@ -444,12 +360,8 @@ async function runAttempt(
       errors,
       launchRecipe,
       lastProgress,
-      snapshot: state.snapshot,
-      finalCounters: state.finalCounters,
-      gitStateStart,
-      gitStateEnd,
-      pageNavigationCount,
-      contaminated,
+      snapshot: null,
+      finalCounters: {},
       error: error instanceof Error ? error.message : String(error),
     };
     writeJson(outDir, `${perfCase.name}-${renderer}-FAILED`, result);
@@ -465,7 +377,8 @@ function shouldRetryWebgl(attempt: PerfCaseAttempt): boolean {
     text.includes("webgpu") ||
     text.includes("device lost") ||
     text.includes("gpu device") ||
-    text.includes("adapter")
+    text.includes("adapter") ||
+    text.includes("destroyed")
   );
 }
 
@@ -506,34 +419,16 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
     "",
     "## Status",
     "",
-    "| case | status | contaminated | navs | renderer | attempts | frame p50 | frame p95 | frame p99 | veg p95 | render p95 | warnings | errors | failure |",
-    "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    "| case | status | renderer | attempts | frame p50 | frame p95 | frame p99 | veg p95 | render p95 | warnings | errors | failure |",
+    "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
 
   for (const result of results) {
     lines.push(
-      `| ${result.name} | ${result.status} | ${result.contaminated ? "yes" : "no"} | ${result.pageNavigationCount} | ${result.renderer} | ${result.attempts.length} | ` +
+      `| ${result.name} | ${result.status} | ${result.renderer} | ${result.attempts.length} | ` +
         `${fmt(result.metrics["frameMs.p50"])} | ${fmt(result.metrics["frameMs.p95"])} | ${fmt(result.metrics["frameMs.p99"])} | ` +
         `${fmt(result.metrics["vegetationTotalMs.p95"])} | ${fmt(result.metrics["renderMs.p95"])} | ` +
         `${result.warnings.length} | ${result.errors.length} | ${result.error ?? "-"} |`,
-    );
-  }
-
-  lines.push("", "## Far-summary subphase timings", "");
-  lines.push("| case | total p95 | tiles p95 | NAADF p95 | shell p95 | shadow proxy p95 | biome stream p95 | sun-light p95 | stats DOM p95 |");
-  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
-  for (const result of results) {
-    const m = result.metrics;
-    lines.push(
-      `| ${result.name} | ` +
-        `${fmt(m["farSummaryMs.p95"])} | ` +
-        `${fmt(m["farSumTilesMs.p95"])} | ` +
-        `${fmt(m["farSumNaadfMs.p95"])} | ` +
-        `${fmt(m["farSumShellMs.p95"])} | ` +
-        `${fmt(m["farSumShadowProxyMs.p95"])} | ` +
-        `${fmt(m["farSumBiomeStreamMs.p95"])} | ` +
-        `${fmt(m["farSumSunLightMs.p95"])} | ` +
-        `${fmt(m["farSumStatsDomMs.p95"])} |`,
     );
   }
 
@@ -545,21 +440,20 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
   }
 
   lines.push("", "## Required P0 counters", "");
-  lines.push("| case | cache hit/miss | cache ready/stale | dirty exercise status/tiles/reset | veg clusters rejected/accepted/missing | veg consulted | veg src far/sampler/fallback | tree consulted/src far/sampler/fallback | grass consulted/src far/sampler/fallback | under consulted/src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
-  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  lines.push("| case | cache hit/miss | cache ready/stale | dirty exercise status/move/reset | veg clusters rejected/accepted/missing | veg src far/sampler/fallback | tree src far/sampler/fallback | grass src far/sampler/fallback | under src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const result of results) {
     const m = result.metrics;
     lines.push(
       `| ${result.name} | ` +
         `${fmt(m.terrainMaterialCacheHits)}/${fmt(m.terrainMaterialCacheMisses)} | ` +
         `${fmt(m.terrainMaterialCacheReady)}/${fmt(m.terrainMaterialCacheStale)} | ` +
-        `${fmt(m["p0DirtyAtlasExercise.status"])}/${fmt(m["p0DirtyAtlasExercise.bumpedTiles"])}/${fmt(m["p0DirtyAtlasExercise.resetFrame"])} | ` +
+        `${fmt(m["p0DirtyAtlasExercise.status"])}/${fmt(m["p0DirtyAtlasExercise.moveM"])}/${fmt(m["p0DirtyAtlasExercise.resetFrame"])} | ` +
         `${fmt(m.vegetationGpuClustersRejectedEarly)}/${fmt(m.vegetationGpuClustersAccepted)}/${fmt(m.vegetationGpuClustersSummaryMissing)} | ` +
-        `${fmt(m.vegetationGpuFarSummaryConsulted)} | ` +
         `${fmt(m.vegetationGpuSourceFarSummary)}/${fmt(m.vegetationGpuSourceTerrainSampler)}/${fmt(m.vegetationGpuSourceFallback)} | ` +
-        `${fmt(m.treeGpuPrefilterFarSummaryConsultedAvg)}/${fmt(m.treeGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.treeGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.treeGpuPrefilterSourceFallbackAvg)} | ` +
-        `${fmt(m.grassGpuPrefilterFarSummaryConsultedAvg)}/${fmt(m.grassGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.grassGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.grassGpuPrefilterSourceFallbackAvg)} | ` +
-        `${fmt(m.understoryGpuPrefilterFarSummaryConsultedAvg)}/${fmt(m.understoryGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.understoryGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.understoryGpuPrefilterSourceFallbackAvg)} | ` +
+        `${fmt(m.treeGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.treeGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.treeGpuPrefilterSourceFallbackAvg)} | ` +
+        `${fmt(m.grassGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.grassGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.grassGpuPrefilterSourceFallbackAvg)} | ` +
+        `${fmt(m.understoryGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.understoryGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.understoryGpuPrefilterSourceFallbackAvg)} | ` +
         `${fmt(m.vegetationGpuCandidatesBudgetBeforeReject)}/${fmt(m.vegetationGpuCandidatesBudgetAfterReject)}/${fmt(m.vegetationGpuCandidatesGenerated)} | ` +
         `${fmt(m.grassGpuCandidateCountBeforePrefilterAvg)}/${fmt(m.grassGpuCandidateCountAfterPrefilterAvg)} | ` +
         `${fmt(m.understoryGpuCandidateCountBeforePrefilterAvg)}/${fmt(m.understoryGpuCandidateCountAfterPrefilterAvg)} | ` +
@@ -623,7 +517,7 @@ async function main(): Promise<void> {
     perfWarmup: str(args.warmup) ?? "120",
     perfFrames: str(args.frames) ?? "300",
     p0DirtyAtlasExercise: str(args.dirtyAtlasExercise) ?? "1",
-    dirtyAtlasTiles: str(args.dirtyAtlasTiles) ?? "4",
+    dirtyAtlasMoveM: str(args.dirtyAtlasMoveM) ?? "768",
     dirtyAtlasSettleFrames: str(args.dirtyAtlasSettleFrames) ?? "18",
     profile: "0",
     ...parseParams(str(args.params)),

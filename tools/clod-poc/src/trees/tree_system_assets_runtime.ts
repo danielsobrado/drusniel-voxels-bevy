@@ -32,16 +32,6 @@ export interface TreeSystemAssetsOptions {
   impostorAtlases?: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
 }
 
-function createTreeSystemMaterialHandle(options: TreeSystemAssetsOptions): TreeMaterialHandle {
-  if (!options.webgpu) return createTreeMaterialHandle(options.settings);
-  try {
-    return createTreeNodeMaterialHandle(options.settings, options.lighting, options.hydrologyWater);
-  } catch (error) {
-    console.warn("[trees] WebGPU tree node material failed; falling back to classic tree material", error);
-    return createTreeMaterialHandle(options.settings);
-  }
-}
-
 export class TreeSystemAssets {
   readonly crownProxyGeometry = createTreeCrownProxyGeometry();
   readonly materialHandle: TreeMaterialHandle;
@@ -63,7 +53,9 @@ export class TreeSystemAssets {
     this.impostorStatus = this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
       ? "pending"
       : "disabled";
-    this.materialHandle = createTreeSystemMaterialHandle(options);
+    this.materialHandle = this.webgpu
+      ? createTreeNodeMaterialHandle(this.settings, options.lighting, options.hydrologyWater)
+      : createTreeMaterialHandle(this.settings);
     if (options.impostorAtlases) this.setImpostorAtlases(options.impostorAtlases);
   }
 
