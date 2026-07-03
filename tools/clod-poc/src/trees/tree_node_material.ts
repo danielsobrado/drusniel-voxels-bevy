@@ -23,6 +23,7 @@ import {
   normalWorld,
   normalize,
   positionGeometry,
+  screenCoordinate,
   sin,
   storage,
   texture,
