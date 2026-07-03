@@ -28,12 +28,22 @@ function createState() {
     postProcessContactShadowsEnabled: false,
     postProcessClarityEnabled: true,
     postProcessAerialPerspectiveEnabled: true,
+    postProcessCloudsEnabled: true,
+    postProcessGtaoEnabled: true,
+    postProcessFroxelsEnabled: true,
+    postProcessBounceEnabled: true,
     godRaysMode: "off",
+    treeQualityPreset: "custom",
     treeDistance: 620,
     treeMaxInstances: 9000,
     treeDensity: 1.2,
     treeSpacing: 5.5,
     treeShadowMaxLod: "mid",
+    treeWindEnabled: true,
+    treeWindStrength: 0.18,
+    treeGustStrength: 0.12,
+    treeTrunkSwayStrength: 0.45,
+    treeLeafFlutterStrength: 0.18,
     treeFarCheapMaterial: true,
     treeImpostorSwapOnBake: true,
     treeGpuEnabled: false,
@@ -103,11 +113,13 @@ describe("environment query overrides", () => {
 
     expect(state.postProcessQualityPreset).toBe("perf");
     expect(state.postProcessRenderScale).toBe(0.75);
+    expect(state.treeQualityPreset).toBe("perf");
     expect(state.treeDistance).toBe(360);
     expect(state.treeMaxInstances).toBe(4000);
     expect(state.treeDensity).toBe(0.7);
     expect(state.treeSpacing).toBe(8);
     expect(state.treeShadowMaxLod).toBe("none");
+    expect(state.treeWindEnabled).toBe(false);
     expect(state.treeGpuEnabled).toBe(true);
     expect(state.treeGpuFallbackToCpu).toBe(true);
     expect(state.treeGpuForceCpu).toBe(false);
