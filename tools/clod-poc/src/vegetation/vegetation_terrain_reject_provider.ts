@@ -50,19 +50,13 @@ export function createVegetationTerrainRejectProvider(): VegetationTerrainReject
   return {
     classifyCluster(query): VegetationTerrainRejectDecision {
       if (!query.visibility.enabled) return accept("accepted", "fallback", "disabled");
-      if (revisionMismatch(query)) {
-        return query.acceptWhenRevisionMismatch === false
-          ? reject("summaryMissing", "fallback", "unknown_kept")
-          : accept("summaryMissing", "fallback", "unknown_kept");
-      }
+      if (revisionMismatch(query)) return accept("summaryMissing", "fallback", "unknown_kept");
       if (outsideTerrain(query)) return reject("outsideTerrain", "exact");
       if (!query.sampler) return accept("summaryMissing", "fallback", "unknown_kept");
 
       const sample = query.sampler.sampleHeight(query.descriptor.centerX, query.descriptor.centerZ);
       if (!sample || sample.unknown || !Number.isFinite(sample.height)) {
-        return query.acceptWhenSummaryMissing === false
-          ? reject("belowWaterOrInvalid", "fallback", "unknown_kept")
-          : accept("summaryMissing", "fallback", "unknown_kept");
+        return accept("summaryMissing", "fallback", "unknown_kept");
       }
 
       const visibility = visibilityProvider.sampleTerrainVisibility({
