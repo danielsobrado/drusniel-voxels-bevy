@@ -14,6 +14,7 @@ import type { FrameRenderer } from "./frame_renderer.js";
 import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
 import type { StatsSyncThrottleDecision, StatsSyncThrottleDiagnostics } from "./stats_sync_throttle.js";
+import type { DynamicResolutionController, DynamicResolutionStats } from "../../rendering/dynamic_resolution.js";
 import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface RenderPhaseInput {
@@ -50,10 +51,21 @@ export interface RenderPhaseInput {
     diagnostics: StatsSyncThrottleDiagnostics;
   };
   gpuPasses: Record<string, number> | null;
+  dynamicResolution?: DynamicResolutionController | null;
   afterRenderDiagnostics?: () => void;
 }
 
 const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
+
+const DYNAMIC_RESOLUTION_REASON_CODE: Record<DynamicResolutionStats["reason"], number> = {
+  disabled: 0,
+  mode_disabled: 1,
+  warming: 2,
+  settling: 3,
+  stable: 4,
+  scale_down: 5,
+  scale_up: 6,
+};
 
 function logGrassProfile(
   stats: GrassStats,
@@ -101,6 +113,18 @@ function formatVegetationTiming(timing: VegetationFrameTiming, propsMs: number):
     ` weather ${timing.weatherMs.toFixed(1)}`;
 }
 
+function recordDynamicResolutionCounters(counters: Record<string, number>, stats: DynamicResolutionStats): void {
+  counters["dynamicResolution.enabled"] = stats.enabled ? 1 : 0;
+  counters["dynamicResolution.active"] = stats.active ? 1 : 0;
+  counters["dynamicResolution.frameMsAvg"] = stats.frameMsAvg;
+  counters["dynamicResolution.targetMs"] = stats.targetMs;
+  counters["dynamicResolution.renderScale"] = stats.renderScale;
+  counters["dynamicResolution.minScale"] = stats.minScale;
+  counters["dynamicResolution.maxScale"] = stats.maxScale;
+  counters["dynamicResolution.adjustments"] = stats.adjustments;
+  counters["dynamicResolution.reason"] = DYNAMIC_RESOLUTION_REASON_CODE[stats.reason];
+}
+
 export function runRenderPhase(input: RenderPhaseInput): void {
   const selectionStats = input.selectionController.stats();
   input.nodeLabelOverlay.update({
@@ -127,10 +151,21 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   else input.renderer.render(input.scene, input.camera);
   materialChurnDiagnostics.sampleRendererInfo(input.renderer);
   const tRenderEnd = performance.now();
+  const frameMs = tRenderEnd - input.frameStart;
 
   input.afterRenderDiagnostics?.();
 
   const hooks = input.getHooks();
+  const dynamicResolutionStats = input.dynamicResolution?.update({
+    frameMs,
+    frameIndex: selectionStats.frameId,
+    renderer: input.renderer,
+    camera: input.camera,
+  });
+  if (hooks?.stats && dynamicResolutionStats) {
+    recordDynamicResolutionCounters(hooks.stats.counters, dynamicResolutionStats);
+  }
+
   if (hooks && !hooks.ready) {
     hooks.ready = true;
     hooks.progress = 1;
@@ -146,8 +181,6 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   }
 
   if (input.profileEnabled || input.perfProbe) {
-    const end = performance.now();
-    const frameMs = end - input.frameStart;
     const bubbleMs = input.tPropsStart - input.tBubbleStart;
     const propsMs = tRenderStart - input.tPropsStart;
     const renderMs = tRenderEnd - tRenderStart;
@@ -167,10 +200,10 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     );
     const measuredTopLevelMs =
       input.phaseTiming.frameSetupMs +
-        input.phaseTiming.inputMs +
-        input.phaseTiming.selectionUpdateMs +
-        input.phaseTiming.clodApplyMs +
-        input.phaseTiming.longViewDiagnosticsMs +
+      input.phaseTiming.inputMs +
+      input.phaseTiming.selectionUpdateMs +
+      input.phaseTiming.clodApplyMs +
+      input.phaseTiming.longViewDiagnosticsMs +
       input.phaseTiming.farSummaryMs +
       input.phaseTiming.constructionMs +
       input.phaseTiming.brushMs +
@@ -300,6 +333,9 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       materialChurnRendererProgramCount: materialChurnStats.rendererProgramCount ?? -1,
       materialChurnRendererProgramDelta: materialChurnStats.rendererProgramDelta ?? 0,
       materialChurnSuspectedPipelineKeyChanges: materialChurnStats.suspectedPipelineKeyChanges,
+      dynamicResolutionActive: dynamicResolutionStats?.active ? 1 : 0,
+      dynamicResolutionRenderScale: dynamicResolutionStats?.renderScale ?? 0,
+      dynamicResolutionAdjustments: dynamicResolutionStats?.adjustments ?? 0,
       gpuPasses: input.gpuPasses ? { ...input.gpuPasses } : undefined,
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {
@@ -322,6 +358,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
           ` needsUpdate=${materialChurnStats.materialNeedsUpdate}` +
           ` programsΔ=${materialChurnStats.rendererProgramDelta ?? 0}` +
           ` other ${otherMs.toFixed(1)}` +
+          ` dynScale=${dynamicResolutionStats?.renderScale ?? 0}` +
           ` | cut=${selectionStats.renderedCount} chunkGroups=${input.nearFieldBubbleController.size()} mode=${input.interaction.mode}`,
       );
     }
