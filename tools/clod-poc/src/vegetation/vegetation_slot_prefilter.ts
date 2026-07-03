@@ -133,7 +133,13 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
   const clusterGrid = Math.max(1, Math.ceil(grid / clusterDimSlots));
   const candidateSlotsBeforePrefilter = grid * grid;
   const runtimeConfig = resolveVegetationTerrainRejectionConfig();
-  if (!runtimeConfig.enabled || !runtimeConfig.gpuEarlyReject.enabled || !runtimeConfig.viewRulesEnabled || !kindEnabled(options.kind, runtimeConfig)) {
+  if (
+    !runtimeConfig.enabled ||
+    !runtimeConfig.gpuEarlyReject.enabled ||
+    !runtimeConfig.viewRulesEnabled ||
+    !kindEnabled(options.kind, runtimeConfig) ||
+    clusterSizeM(options.cell, clusterDimSlots) < runtimeConfig.gpuEarlyReject.minClusterSize
+  ) {
     return fullVisibilityPrefilterResult(grid, clusterDimSlots, clusterGrid, candidateSlotsBeforePrefilter);
   }
 
@@ -438,8 +444,12 @@ function slotPrefilterCacheKey(input: {
   ].join("|");
 }
 
+function clusterSizeM(cell: number, clusterDimSlots: number): number {
+  return Math.max(0.001, cell) * Math.max(1, clusterDimSlots);
+}
+
 function clusterRadiusM(cell: number, clusterDimSlots: number): number {
-  return Math.SQRT2 * Math.max(0.001, cell) * Math.max(1, clusterDimSlots) * 0.5;
+  return Math.SQRT2 * clusterSizeM(cell, clusterDimSlots) * 0.5;
 }
 
 function createReasonCounts(): Record<VegetationVisibilityReason, number> {
