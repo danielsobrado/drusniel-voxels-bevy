@@ -10,6 +10,7 @@ import {
 import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
 import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePerfPhaseTiming } from "./frame_loop/perf_probe.js";
+import { createP0DirtyAtlasExercise } from "./frame_loop/p0_dirty_atlas_exercise.js";
 import { materialChurnDiagnostics } from "../rendering/material_churn/material_churn_diagnostics.js";
 import { aggregateGpuVegetationEarlyRejectCounters } from "../vegetation/gpu_vegetation_early_reject_counters.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
@@ -136,6 +137,14 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
   let frameStart = 0;
   const perfProbe = createFramePerfProbeFromQuery(debugQuery);
+  const p0DirtyAtlasExercise = createP0DirtyAtlasExercise({
+    searchParams: debugQuery,
+    queryScene: diagnostics.queryScene,
+    camera: render.camera,
+    controls: player.controls,
+    perfProbe,
+    getHooks: render.getHooks,
+  });
   const statsSyncThrottle = new StatsSyncThrottle(stats.statsSyncThrottleConfig);
   let statsRevision = 0;
   let lastStatsModeKey = "";
@@ -193,6 +202,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
     });
     updateAverageFps();
+    p0DirtyAtlasExercise.update(selectionStats.frameId);
 
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
       player.controls.update();
