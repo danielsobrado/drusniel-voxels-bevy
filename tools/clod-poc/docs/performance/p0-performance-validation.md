@@ -97,6 +97,15 @@ packed_low_bandwidth
 
 Use `balanced` for normal P0 validation. Use `debug_rgba32f` for oracle/debug precision checks. Use `packed` for the aggressive low-bandwidth profile. `packed_low_bandwidth` remains accepted as a legacy alias.
 
+Coverage atlas storage is now:
+
+```text
+debug_rgba32f: RGBA32F, canopy/water/debug/debug
+balanced: RG8, canopy/water
+packed: RG8, canopy/water
+packed_low_bandwidth: RG8, canopy/water
+```
+
 ## Metrics captured
 
 The report includes p50/p95/p99 for:
