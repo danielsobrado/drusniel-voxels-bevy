@@ -185,6 +185,6 @@ export function createDynamicResolutionController(
     stats: () => ({ ...stats }),
   };
 
-  window.__drusnielDynamicResolution = controller;
+  if (typeof window !== "undefined") window.__drusnielDynamicResolution = controller;
   return controller;
 }
