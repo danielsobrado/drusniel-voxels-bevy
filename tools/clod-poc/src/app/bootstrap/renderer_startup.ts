@@ -14,6 +14,7 @@ import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
+  type HorizontalWorldBounds,
   validatePlayerWorldBoundsFit,
 } from "../../player_controller.js";
 import {
@@ -37,6 +38,9 @@ import {
 } from "../../debug/border_ocean_scene.js";
 
 export type AppRenderer = Awaited<ReturnType<typeof createWebGpuAppRenderer>> | ReturnType<typeof createWebGlAppRenderer>;
+
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const INFINITE_PLAYER_WORLD_RADIUS_M = 1_000_000_000;
 
 export interface RendererStartupInput {
   searchParams: URLSearchParams;
@@ -70,6 +74,18 @@ export interface RendererStartupResult {
   terrainRaycast: ReturnType<typeof createTerrainRaycastService>;
 }
 
+export function playerWorldBoundsForScene(searchParams: URLSearchParams, worldCells: number): HorizontalWorldBounds {
+  if (searchParams.get("scene") !== INFINITE_ISLANDS_SCENE) {
+    return { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells };
+  }
+  return {
+    minX: -INFINITE_PLAYER_WORLD_RADIUS_M,
+    minZ: -INFINITE_PLAYER_WORLD_RADIUS_M,
+    maxX: INFINITE_PLAYER_WORLD_RADIUS_M,
+    maxZ: INFINITE_PLAYER_WORLD_RADIUS_M,
+  };
+}
+
 export async function runRendererStartup(input: RendererStartupInput): Promise<RendererStartupResult | null> {
   const {
     searchParams,
@@ -92,12 +108,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     DEFAULT_PLAYER_CONFIG,
     borderOceanGameplayConfig,
   );
-  const playerBounds = {
-    minX: 0,
-    minZ: 0,
-    maxX: worldCells,
-    maxZ: worldCells,
-  };
+  const playerBounds = playerWorldBoundsForScene(searchParams, worldCells);
   validatePlayerWorldBoundsFit(playerBounds, playerConfig);
 
   const rendererBackend = parseRendererBackend(searchParams);
@@ -245,7 +256,10 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       mesh: node.mesh,
       footprint: node.footprint,
     }));
-  const terrainColliders = new TerrainColliderSet(colliderPages);
+  const terrainColliders = new TerrainColliderSet(colliderPages, {
+    enabled: searchParams.get("scene") === INFINITE_ISLANDS_SCENE,
+    surfaceHeight,
+  });
   const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
   const interaction = new PlayerInteractionState();
   const terrainRaycast = createTerrainRaycastService({
