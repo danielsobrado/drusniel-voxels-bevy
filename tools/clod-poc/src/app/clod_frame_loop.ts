@@ -462,6 +462,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       grassPrepassEnabled: render.grassPrepassEnabled,
       perfProbe,
       phaseTiming,
+      dynamicResolution: render.dynamicResolution,
       statsSyncThrottle: {
         decision: lastStatsDecision,
         diagnostics: statsSyncThrottle.diagnostics(),
