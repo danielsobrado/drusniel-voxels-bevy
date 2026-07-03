@@ -230,6 +230,7 @@ function parseImpostors(root: Record<string, unknown>, fallback: TreeImpostorSet
     enabled: boolFrom(root.enabled, fallback.enabled),
     bakeOnStart: boolFrom(root.bake_on_start, fallback.bakeOnStart),
     fallbackToPlaceholder: boolFrom(root.fallback_to_placeholder, fallback.fallbackToPlaceholder),
+    swapOnBake: boolFrom(root.swap_on_bake, fallback.swapOnBake),
     sourceLod: impostorSourceLodFrom(root.source_lod, fallback.sourceLod),
     resolutionPx: clampedIntFrom(root.resolution_px, fallback.resolutionPx, 32, 2048),
     octahedralGridSize: clampedIntFrom(root.octahedral_grid_size, fallback.octahedralGridSize, 1, 8),
@@ -277,6 +278,7 @@ function parseRender(root: Record<string, unknown>, fallback: TreeRenderSettings
     receiveShadows: boolFrom(root.receive_shadows, fallback.receiveShadows),
     depthPrepass: boolFrom(root.depth_prepass, fallback.depthPrepass),
     debugColorByLod: boolFrom(root.debug_color_by_lod, fallback.debugColorByLod),
+    farCheapMaterial: boolFrom(root.far_cheap_material, fallback.farCheapMaterial),
   };
 }
 
