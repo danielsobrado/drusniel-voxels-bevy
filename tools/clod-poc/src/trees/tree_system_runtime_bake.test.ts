@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
+import { cloneTreeSettings } from "./tree_config.js";
 import { TreeSystem } from "./tree_system_runtime.js";
 
 // Guards the bake -> ring invalidation link: when a bake succeeds the runtime must
@@ -19,6 +20,7 @@ describe("tree system bake ring invalidation", () => {
       patches: [],
       meshBoundsState: new WeakMap(),
       lastCenter: new THREE.Vector3(1, 0, 2),
+      settings: cloneTreeSettings(),
     };
     return ctx;
   }

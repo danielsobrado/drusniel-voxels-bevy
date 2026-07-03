@@ -33,7 +33,7 @@ describe("parseBorderCoastOceanConfig", () => {
     expect(cfg.coast.oceanFullDepthCells).toBe(96);
     expect(cfg.coast.shoreBackshoreCells).toBe(128);
     expect(cfg.deepOcean.extendCells).toBe(4096);
-    expect(cfg.deepOcean.segments).toBe(256);
+    expect(cfg.deepOcean.segments).toBe(64);
   });
 
   it("keeps legacy nested yaml compatibility", () => {

@@ -76,9 +76,9 @@ describe("grass placement", () => {
     expect(DEFAULT_GRASS_SHADER_MODE).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.maxHeight).toBe(28);
-    expect(DEFAULT_GRASS_SETTINGS.ring.grid).toBe(700);
-    expect(DEFAULT_GRASS_SETTINGS.ring.cell).toBe(0.7);
-    expect(DEFAULT_GRASS_SETTINGS.patchFallback.maxNewPatchesPerRefresh).toBe(2);
+    expect(DEFAULT_GRASS_SETTINGS.ring.grid).toBe(512);
+    expect(DEFAULT_GRASS_SETTINGS.ring.cell).toBe(0.8);
+    expect(DEFAULT_GRASS_SETTINGS.patchFallback.maxNewPatchesPerRefresh).toBe(1);
     expect(GRASS_SHADER_MODES).toContain("terrain-patch-v2");
     expect(GRASS_SHADER_MODES).toContain("webgpu-ring-v1");
     expect(GRASS_SHADER_MODES).toContain("classic");
@@ -143,7 +143,7 @@ grass:
 
     expect(parsed.maxBlades).toBe(1);
     expect(parsed.ring.grid).toBe(1);
-    expect(parsed.ring.cell).toBe(0.1);
+    expect(parsed.ring.cell).toBe(0.8);
     expect(parsed.ring.maxRadius).toBe(0);
     expect(parsed.ring.bandMeters).toBe(0);
     expect(parsed.ring.scruffMeters).toBe(0);

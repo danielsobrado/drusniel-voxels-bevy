@@ -13,44 +13,44 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
     expect(DEFAULT_POST_PROCESS_SETTINGS).toEqual({
       enabled: true,
       opacity: 1,
-      renderScale: 1,
+      renderScale: 0.75,
       exposure: 1,
-      contrast: 1.04,
-      saturation: 1.05,
+      contrast: 1.02,
+      saturation: 1.03,
       vignette: 0,
       debugMode: "output",
       toneMapping: "agx",
-      bloomEnabled: true,
-      bloomThreshold: 0.28,
-      bloomStrength: 0.45,
-      bloomRadius: 1.5,
+      bloomEnabled: false,
+      bloomThreshold: 0.85,
+      bloomStrength: 0.18,
+      bloomRadius: 0.35,
       fxaaEnabled: true,
       fxaaEdgeThreshold: 0.125,
       fxaaSubpixelBlend: 0.75,
-      taaEnabled: true,
+      taaEnabled: false,
       taaHistoryWeight: 0.88,
       taaDepthThreshold: 0.0025,
       taaSharpen: 0.06,
-      taaJitterEnabled: true,
+      taaJitterEnabled: false,
       taaJitterScale: 1,
-      taaHistoryClampEnabled: true,
+      taaHistoryClampEnabled: false,
       taaHistoryClampStrength: 1,
-      contactShadowsEnabled: true,
+      contactShadowsEnabled: false,
       contactShadowsStrength: 0.25,
       contactShadowsRadiusPx: 2,
       contactShadowsDepthBias: 0.002,
       clarityEnabled: true,
-      claritySharpen: 0.08,
-      clarityDither: 0.003,
+      claritySharpen: 0.06,
+      clarityDither: 0.002,
       aerialPerspectiveEnabled: true,
       aerialPerspectiveStart: 120,
       aerialPerspectiveEnd: 1800,
       aerialPerspectiveStrength: 0.35,
       aerialPerspectiveColor: [0.62, 0.72, 0.86],
-      cloudsEnabled: true,
-      gtaoEnabled: true,
-      froxelsEnabled: true,
-      bounceEnabled: true,
+      cloudsEnabled: false,
+      gtaoEnabled: false,
+      froxelsEnabled: false,
+      bounceEnabled: false,
       godRaysMode: "off",
       godRaysDensity: 0.96,
       godRaysDecay: 0.92,
@@ -225,12 +225,12 @@ aerial_perspective:
 
   it("keeps god rays off while WebGPU post effects default on", () => {
     expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysMode).toBe("off");
-    expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(true);
-    expect(DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled).toBe(true);
-    expect(DEFAULT_POST_PROCESS_SETTINGS.cloudsEnabled).toBe(true);
-    expect(DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled).toBe(true);
-    expect(DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled).toBe(true);
-    expect(DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled).toBe(true);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.cloudsEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled).toBe(false);
   });
 });
 

@@ -20,7 +20,7 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.nearField.evictDistanceMultiplier).toBe(2.5);
     expect(config.renderNodeCache.maxInactiveNodes).toBe(512);
     expect(config.renderNodeCache.pruneIntervalFrames).toBe(30);
-    expect(config.renderNodeCache.maxPrefetchCreatesPerFrame).toBe(8);
+    expect(config.renderNodeCache.maxPrefetchCreatesPerFrame).toBe(4);
     expect(config.renderNodeCache.evictGeometryWithRenderNode).toBe(true);
     expect(config.clodApply.enabled).toBe(true);
     expect(config.clodApply.maxApplyMsPerFrame).toBe(1.0);

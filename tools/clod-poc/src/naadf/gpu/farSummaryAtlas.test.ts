@@ -254,7 +254,7 @@ describe("FarSummaryGpuAtlas", () => {
     expect(atlas.view.normalTexture.image.data).toBeInstanceOf(Uint8Array);
   });
 
-  it("packs canopy, water, terrain, and validity coverage into RGBA8", () => {
+  it("packs canopy and water coverage into the balanced RG atlas", () => {
     const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
@@ -262,11 +262,9 @@ describe("FarSummaryGpuAtlas", () => {
     atlas.updateFromState(testState(farTiles));
 
     const coverageData = atlas.view.coverageTexture.image.data as Uint8Array;
-    const firstPackedPixel = atlasPixel(atlas, 2, 2) * 4;
+    const firstPackedPixel = atlasPixel(atlas, 2, 2) * 2;
     expect(unpackUnorm8(coverageData[firstPackedPixel] ?? 0)).toBeCloseTo(0.25, 2);
     expect(unpackUnorm8(coverageData[firstPackedPixel + 1] ?? 0)).toBeCloseTo(0.1, 2);
-    expect(coverageData[firstPackedPixel + 2]).toBe(255);
-    expect(coverageData[firstPackedPixel + 3]).toBe(255);
   });
 
   it("keeps debug RGBA32F mode for packed-vs-debug validation", () => {

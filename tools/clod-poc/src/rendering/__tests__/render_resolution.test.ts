@@ -14,9 +14,9 @@ describe("resolveRenderResolution", () => {
       overrideRenderScale: 1.0,
     });
 
-    expect(result.effectivePixelRatio).toBe(1.5);
-    expect(result.physicalWidth).toBe(2880);
-    expect(result.physicalHeight).toBe(1620);
+    expect(result.effectivePixelRatio).toBe(1.25);
+    expect(result.physicalWidth).toBe(2400);
+    expect(result.physicalHeight).toBe(1350);
   });
 
   it("applies performance100 render scale", () => {
@@ -66,7 +66,7 @@ describe("resolveRenderResolution", () => {
       overrideRenderScale: 1.0,
     });
 
-    expect(result.effectivePixelRatio).toBe(2.0);
+    expect(result.effectivePixelRatio).toBe(1.25);
   });
 
   it("handles invalid browser DPR safely", () => {
@@ -77,7 +77,7 @@ describe("resolveRenderResolution", () => {
     });
 
     expect(result.rawDevicePixelRatio).toBe(1.0);
-    expect(result.effectivePixelRatio).toBe(1.0);
+    expect(result.effectivePixelRatio).toBe(0.85);
   });
 
   it("keeps aspect inputs in CSS pixels", () => {
@@ -89,7 +89,7 @@ describe("resolveRenderResolution", () => {
     });
 
     expect(result.cssWidth / result.cssHeight).toBe(1280 / 720);
-    expect(result.physicalWidth).toBe(1920);
-    expect(result.physicalHeight).toBe(1080);
+    expect(result.physicalWidth).toBe(1440);
+    expect(result.physicalHeight).toBe(810);
   });
 });

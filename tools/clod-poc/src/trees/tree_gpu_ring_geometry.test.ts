@@ -41,7 +41,7 @@ describe("GPU ring tree geometry selector", () => {
     });
 
     expect(result.bakedImpostor).toBe(false);
-    expect(result.geometry).toBe(geometries.pine.far);
+    expect(result.geometry).toBe(geometries.pine.impostor);
   });
 
   it("falls back to procedural impostor geometry when impostors are disabled", () => {

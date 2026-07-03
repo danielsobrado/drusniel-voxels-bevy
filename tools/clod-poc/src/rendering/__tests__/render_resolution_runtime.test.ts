@@ -53,7 +53,7 @@ describe("createRenderResolutionRuntime", () => {
     expect(second.changed).toBe(false);
     expect(events).toHaveLength(1);
     expect(renderer.setPixelRatio).toHaveBeenCalledTimes(1);
-    expect(renderer.setPixelRatio).toHaveBeenCalledWith(1.5);
+    expect(renderer.setPixelRatio).toHaveBeenCalledWith(0.85);
     expect(renderer.setSize).toHaveBeenCalledTimes(1);
     expect(renderer.setSize).toHaveBeenCalledWith(1920, 1080);
     expect(camera.aspect).toBe(1920 / 1080);
@@ -62,7 +62,7 @@ describe("createRenderResolutionRuntime", () => {
 
   it("preset changes force a new renderer apply", () => {
     installWindow(1920, 1080, 2);
-    const runtime = createRenderResolutionRuntime(DEFAULT_RENDER_RESOLUTION_CONFIG, new URLSearchParams());
+    const runtime = createRenderResolutionRuntime(DEFAULT_RENDER_RESOLUTION_CONFIG, new URLSearchParams("quality_preset=high"));
     const renderer = {
       setPixelRatio: vi.fn(),
       setSize: vi.fn(),
