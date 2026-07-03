@@ -132,7 +132,7 @@ far-summary atlas memory estimate
 far-summary atlas dirty/full upload state
 ```
 
-Vegetation source telemetry reports GPU-ring cluster prefilter decisions across trees, grass, and understory as:
+Vegetation source telemetry reports GPU-ring cluster prefilter decisions across trees, grass, and understory as aggregate counters:
 
 ```text
 vegetationGpuSourceFarSummary
@@ -140,7 +140,21 @@ vegetationGpuSourceTerrainSampler
 vegetationGpuSourceFallback
 ```
 
-Use this to check whether the far-summary source is actually decisive, or whether the runtime silently falls back to terrain sampler / conservative fallback.
+The markdown report also prints per-kind source columns from the perf snapshot:
+
+```text
+treeGpuPrefilterSourceFarSummaryAvg
+treeGpuPrefilterSourceTerrainSamplerAvg
+treeGpuPrefilterSourceFallbackAvg
+grassGpuPrefilterSourceFarSummaryAvg
+grassGpuPrefilterSourceTerrainSamplerAvg
+grassGpuPrefilterSourceFallbackAvg
+understoryGpuPrefilterSourceFarSummaryAvg
+understoryGpuPrefilterSourceTerrainSamplerAvg
+understoryGpuPrefilterSourceFallbackAvg
+```
+
+Use this to check whether the far-summary source is actually decisive, or whether the runtime silently falls back to terrain sampler / conservative fallback in one vegetation system only.
 
 Atlas upload mode is numeric:
 
