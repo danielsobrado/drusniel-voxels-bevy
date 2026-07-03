@@ -127,13 +127,15 @@ export function refreshTreePatchesForCenter(
   for (const { node } of candidates) {
     if (totalTrees >= input.settings.maxInstances) break;
     if (added >= input.settings.maxNewPatchesPerFrame) { deferred = true; break; }
-    const rejection = rejectTreePatchBeforeGeneration({
-      node,
-      settings: input.settings,
-      sampler: input.sampler,
-      cameraPosition,
-      worldCells: unboundedWorld ? Number.POSITIVE_INFINITY : input.worldCells,
-    });
+    const rejection = unboundedWorld
+      ? { reject: false, reason: "accepted" as const, skippedCandidateEstimate: 0 }
+      : rejectTreePatchBeforeGeneration({
+        node,
+        settings: input.settings,
+        sampler: input.sampler,
+        cameraPosition,
+        worldCells: input.worldCells,
+      });
     recordTreeEarlyTerrainRejection(input.earlyTerrainRejectionStats, rejection);
     if (rejection.reject) continue;
 
@@ -204,14 +206,7 @@ export function updateTreePatchLods(
 
 function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, capacityLeft: number, unboundedWorld: boolean): TreePatch {
   const generationStats = emptyTreeGenerationStats();
-  const instances = generateTreeInstances(
-    node.footprint,
-    input.settings,
-    capacityLeft,
-    generationStats,
-    input.sampler,
-    unboundedWorld ? Number.POSITIVE_INFINITY : input.worldCells,
-  );
+  const instances = generateTreeInstancesForRuntimePatch(input, node.footprint, capacityLeft, generationStats, unboundedWorld);
   const centerX = treeFootprintCenterX(node.footprint);
   const centerZ = treeFootprintCenterZ(node.footprint);
   const { group, meshes } = createTreePatchMeshGroup({
@@ -236,6 +231,41 @@ function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, ca
     visible: false,
     terrainOccluded: false,
     generationStats,
+  };
+}
+
+function generateTreeInstancesForRuntimePatch(
+  input: TreeCpuPatchRuntimeInput,
+  footprint: PageFootprint,
+  capacityLeft: number,
+  generationStats: ReturnType<typeof emptyTreeGenerationStats>,
+  unboundedWorld: boolean,
+): TreeInstance[] {
+  if (!unboundedWorld || (footprint.minX >= 0 && footprint.minZ >= 0)) {
+    return generateTreeInstances(footprint, input.settings, capacityLeft, generationStats, input.sampler, unboundedWorld ? Number.POSITIVE_INFINITY : input.worldCells);
+  }
+  const shiftX = Math.max(0, 1 - footprint.minX);
+  const shiftZ = Math.max(0, 1 - footprint.minZ);
+  const shiftedFootprint = {
+    minX: footprint.minX + shiftX,
+    minZ: footprint.minZ + shiftZ,
+    maxX: footprint.maxX + shiftX,
+    maxZ: footprint.maxZ + shiftZ,
+  };
+  const shiftedSampler = input.sampler ? shiftedTreeSampler(input.sampler, shiftX, shiftZ) : undefined;
+  return generateTreeInstances(shiftedFootprint, input.settings, capacityLeft, generationStats, shiftedSampler, Number.POSITIVE_INFINITY)
+    .map((instance) => ({
+      ...instance,
+      position: [instance.position[0] - shiftX, instance.position[1], instance.position[2] - shiftZ],
+    }));
+}
+
+function shiftedTreeSampler(sampler: TreeTerrainSampler, shiftX: number, shiftZ: number): TreeTerrainSampler {
+  return {
+    sourceRevision: sampler.sourceRevision,
+    surfaceHeight: (x, z) => sampler.surfaceHeight(x - shiftX, z - shiftZ),
+    surfaceNormal: (x, z) => sampler.surfaceNormal(x - shiftX, z - shiftZ),
+    materialWeights: sampler.materialWeights,
   };
 }
 
