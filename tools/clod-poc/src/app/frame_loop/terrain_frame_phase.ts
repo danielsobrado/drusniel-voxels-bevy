@@ -9,6 +9,9 @@ import type {
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const RING_CLAMP_MARGIN = 2;
+
 interface TerrainFadeView {
   node: { id: string };
   fade: number;
@@ -56,6 +59,21 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
 }
 
+function infiniteIslandsScene(): boolean {
+  const search = globalThis.location?.search;
+  if (!search) return false;
+  return new URLSearchParams(search).get("scene") === INFINITE_ISLANDS_SCENE;
+}
+
+export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: number, unbounded: boolean): THREE.Vector3 {
+  if (unbounded) return grassCenter.clone();
+  return new THREE.Vector3(
+    THREE.MathUtils.clamp(grassCenter.x, RING_CLAMP_MARGIN, worldCells - RING_CLAMP_MARGIN),
+    grassCenter.y,
+    THREE.MathUtils.clamp(grassCenter.z, RING_CLAMP_MARGIN, worldCells - RING_CLAMP_MARGIN),
+  );
+}
+
 export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFramePhaseResult {
   const activeTerrainViews = input.selectionController.activeTerrainViews() as Set<TerrainFadeView>;
   const currentTerrainViews = input.selectionController.currentTerrainViews();
@@ -96,12 +114,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
 
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;
-  const ringClampMargin = 2;
-  const ringCenter = new THREE.Vector3(
-    THREE.MathUtils.clamp(grassCenter.x, ringClampMargin, input.worldCells - ringClampMargin),
-    grassCenter.y,
-    THREE.MathUtils.clamp(grassCenter.z, ringClampMargin, input.worldCells - ringClampMargin),
-  );
+  const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, infiniteIslandsScene());
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
