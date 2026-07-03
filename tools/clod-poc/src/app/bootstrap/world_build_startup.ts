@@ -147,7 +147,7 @@ export interface WorldBuildResult {
 }
 
 function importedVoxelSnapshot(stagedImport: VoxelProjectArchiveContents | null): VoxelEditSnapshot {
-  if (!stagedImport) return { revision: 0, deltas: [] };
+  if (!stagedImport) return getVoxelEditSnapshot();
   return stagedImport.manifest.voxelTerrainEdits;
 }
 
