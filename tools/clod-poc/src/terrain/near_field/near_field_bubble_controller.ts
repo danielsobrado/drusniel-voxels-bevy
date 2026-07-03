@@ -9,6 +9,9 @@ import type { TerrainMaterialController } from "../material/terrain_material_con
 import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
 import type { WorldBounds } from "../../terrain/terrain_surface.js";
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
+
 export interface ChunkGroupEntry {
   group: THREE.Group;
   mats: TerrainMaterialHandle[];
@@ -104,13 +107,14 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | nu
 }
 
 export function resolveLiveBubbleBuildBudget(defaultBudget: number, params: URLSearchParams): number {
+  const queryBudget = positiveIntegerParam(params, "liveBubbleBudget")
+    ?? positiveIntegerParam(params, "live_bubble_budget");
+  if (queryBudget !== null) return Math.max(1, queryBudget);
+
+  if (params.get("scene") === INFINITE_ISLANDS_SCENE) return INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET;
+
   const fallback = Number.isFinite(defaultBudget) && defaultBudget > 0 ? Math.floor(defaultBudget) : 1;
-  return Math.max(
-    1,
-    positiveIntegerParam(params, "liveBubbleBudget")
-      ?? positiveIntegerParam(params, "live_bubble_budget")
-      ?? fallback,
-  );
+  return Math.max(1, fallback);
 }
 
 function liveBubbleBuildBudget(defaultBudget: number): number {
