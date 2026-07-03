@@ -144,7 +144,6 @@ function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: Gra
   counters.vegetationGpuRejectTerrainHidden += terrainHidden;
   counters.vegetationGpuRejectNoCoverage += noCoverage;
   counters.vegetationGpuRejectBelowWater += reasonCounts.below_water ?? 0;
-  counters.vegetationGpuRejectTooFar += reasonCounts.near_forced_visible ?? 0;
 }
 
 function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, understory: UnderstoryStats | null): void {
@@ -176,7 +175,6 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   counters.vegetationGpuRejectTerrainHidden += terrainHidden;
   counters.vegetationGpuRejectNoCoverage += noCoverage;
   counters.vegetationGpuRejectBelowWater += reasonCounts.below_water ?? 0;
-  counters.vegetationGpuRejectTooFar += reasonCounts.near_forced_visible ?? 0;
 }
 
 function estimateClusterCount(before: number, after: number): number {
