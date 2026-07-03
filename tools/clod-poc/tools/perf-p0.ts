@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser } from "playwright";
-import { launchChromium, launchWebGPU } from "./launch.js";
+import { clodBaseUrl, launchChromium, launchWebGPU } from "./launch.js";
 import { evaluateP0PerfGates, type P0PerfGateSummary } from "./perf-p0-gates.js";
 import type { FramePerfMetric, FramePerfSnapshot } from "../src/app/frame_loop/perf_probe.js";
 
@@ -501,7 +501,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const startedAt = new Date();
   const runId = startedAt.toISOString().replace(/[:.]/g, "-");
-  const baseUrl = str(args.baseUrl) ?? process.env.CLOD_POC_BASE_URL ?? "http://127.0.0.1:5180/";
+  const baseUrl = str(args.baseUrl) ?? process.env.CLOD_POC_BASE_URL ?? clodBaseUrl();
   process.env.CLOD_POC_BASE_URL = baseUrl;
 
   const renderer = (str(args.renderer) ?? "auto") as RendererMode;
