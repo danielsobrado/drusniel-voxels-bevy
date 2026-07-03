@@ -1,4 +1,4 @@
-# Fable5-style terrain-derived hydrology for the CLOD-POC viewer.
+# terrain-derived hydrology for the CLOD-POC viewer.
 # Water is a visual layer only: no SSR, no caustics, no physics.
 # Water is a separate render layer and is NEVER fed into the CLOD page source
 # mesh, meshoptimizer, page borders, LOD selection, colliders, or validation.
