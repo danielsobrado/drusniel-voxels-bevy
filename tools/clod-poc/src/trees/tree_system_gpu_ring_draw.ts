@@ -98,6 +98,16 @@ export function createTreeGpuRingInstancedGeometry(
   return geometry;
 }
 
+export function treeGpuRingDrawCountForGeometry(geometry: THREE.BufferGeometry): number {
+  const index = geometry.getIndex();
+  if (index) return Math.max(0, Math.floor(index.count));
+  return Math.max(0, Math.floor(geometry.getAttribute("position")?.count ?? 0));
+}
+
+export function isRenderableTreeGpuRingGeometry(geometry: THREE.BufferGeometry): boolean {
+  return treeGpuRingDrawCountForGeometry(geometry) > 0;
+}
+
 export function createTreeGpuRingMesh(
   geometry: THREE.InstancedBufferGeometry,
   materialHandle: TreeMaterialHandle,
