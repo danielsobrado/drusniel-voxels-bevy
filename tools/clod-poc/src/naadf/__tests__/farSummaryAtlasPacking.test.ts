@@ -15,15 +15,19 @@ describe("far summary atlas packing", () => {
     expect(spec.format).toBe("balanced");
     expect(spec.heightFormat).toBe("r32f");
     expect(spec.heightComponents).toBe(1);
+    expect(spec.coverageComponents).toBe(2);
+    expect(spec.coverageBytesPerPixel).toBe(2);
     expect(spec.storesHeightRange).toBe(false);
     expect(spec.storesNormalAtlas).toBe(false);
   });
 
-  it("keeps debug RGBA32F as an opt-in high precision format", () => {
+  it("keeps debug packing as an opt-in high precision format", () => {
     const spec = resolveFarSummaryAtlasPackingSpec("debug_rgba32f");
 
     expect(spec.heightFormat).toBe("r32f");
     expect(spec.heightComponents).toBe(4);
+    expect(spec.coverageComponents).toBe(4);
+    expect(spec.coverageBytesPerPixel).toBe(16);
     expect(spec.storesHeightRange).toBe(true);
     expect(spec.storesNormalAtlas).toBe(true);
   });
@@ -34,6 +38,8 @@ describe("far summary atlas packing", () => {
 
     expect(packed.heightFormat).toBe("r16f");
     expect(packed.heightBytesPerPixel).toBeLessThan(balanced.heightBytesPerPixel);
+    expect(packed.coverageComponents).toBe(2);
+    expect(packed.coverageBytesPerPixel).toBe(2);
     expect(packed.storesNormalAtlas).toBe(false);
   });
 
@@ -43,13 +49,14 @@ describe("far summary atlas packing", () => {
 
     expect(legacy.heightFormat).toBe(packed.heightFormat);
     expect(legacy.heightComponents).toBe(packed.heightComponents);
+    expect(legacy.coverageComponents).toBe(packed.coverageComponents);
     expect(legacy.heightBytesPerPixel).toBe(packed.heightBytesPerPixel);
     expect(legacy.materialBytesPerPixel).toBe(packed.materialBytesPerPixel);
     expect(legacy.coverageBytesPerPixel).toBe(packed.coverageBytesPerPixel);
     expect(legacy.storesNormalAtlas).toBe(packed.storesNormalAtlas);
   });
 
-  it("estimates balanced atlas memory below debug RGBA32F", () => {
+  it("estimates balanced atlas memory below debug", () => {
     const estimate = estimateFarSummaryAtlasBytes(160, 480, resolveFarSummaryAtlasPackingSpec("balanced"));
 
     expect(estimate.totalBytes).toBeLessThan(estimate.debugRgba32fBytes);
