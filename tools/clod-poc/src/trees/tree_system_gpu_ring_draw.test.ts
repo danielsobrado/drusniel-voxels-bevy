@@ -7,9 +7,11 @@ import {
   createTreeGpuRingInstancedGeometry,
   createTreeGpuRingMesh,
   createTreeGpuRingShadowMesh,
+  isRenderableTreeGpuRingGeometry,
   setTreeGpuRingIndirect,
   setTreeGpuRingMeshesVisible,
   treeGpuBufferForAttribute,
+  treeGpuRingDrawCountForGeometry,
   treeRingShadowCasterGroupCount,
   type TreeMaterialHandle,
   type TreeWebGpuBackendBufferAccess,
@@ -69,6 +71,25 @@ describe("tree system GPU ring draw helpers", () => {
       expect(geometry.boundingSphere?.radius).toBeGreaterThan(0);
       expect(setIndirect).toHaveBeenCalledWith(indirect, 16);
     });
+  });
+
+  it("uses safe draw counts for indexed and non-indexed geometry", () => {
+    const indexed = new THREE.BoxGeometry(1, 1, 1);
+    const nonIndexed = indexed.toNonIndexed();
+    const empty = new THREE.BufferGeometry();
+    empty.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
+    const emptyIndexed = new THREE.BufferGeometry();
+    emptyIndexed.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3));
+    emptyIndexed.setIndex([]);
+
+    expect(treeGpuRingDrawCountForGeometry(indexed)).toBe(indexed.getIndex()?.count);
+    expect(treeGpuRingDrawCountForGeometry(nonIndexed)).toBe(nonIndexed.getAttribute("position").count);
+    expect(treeGpuRingDrawCountForGeometry(empty)).toBe(0);
+    expect(treeGpuRingDrawCountForGeometry(emptyIndexed)).toBe(0);
+    expect(isRenderableTreeGpuRingGeometry(indexed)).toBe(true);
+    expect(isRenderableTreeGpuRingGeometry(nonIndexed)).toBe(true);
+    expect(isRenderableTreeGpuRingGeometry(empty)).toBe(false);
+    expect(isRenderableTreeGpuRingGeometry(emptyIndexed)).toBe(false);
   });
 
   it("throws when indirect geometry support is unavailable", () => {
