@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
+import { isRenderableIndirectDrawGeometry } from "./indirect_draw_geometry.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "../understory/understory_config.js";
 import { createUnderstoryGeometryMap, disposeUnderstoryGeometryMap, type UnderstoryGeometryMap } from "../understory/understory_geometry.js";
 import { getUnderstoryDepthPrepassEnabled } from "../understory/understory_depth_prepass_runtime.js";
@@ -84,6 +85,7 @@ export function createGpuRingDrawResources(
       geometries,
       worldCells,
     );
+    if (!mesh) continue;
     if (usePrepass) addPrepassChild(mesh, handle, cls);
     meshes.push(mesh);
   }
@@ -123,8 +125,9 @@ function createGpuRingTierDraw(
   materialHandle: UnderstoryMaterialHandle,
   geometries: UnderstoryGeometryMap,
   worldCells: number,
-): UnderstoryGpuRingMesh {
+): UnderstoryGpuRingMesh | null {
   const source = geometries[cls];
+  if (!isRenderableIndirectDrawGeometry(source)) return null;
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setIndex(source.getIndex());
   for (const name of Object.keys(source.attributes)) {
