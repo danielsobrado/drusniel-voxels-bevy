@@ -3,6 +3,11 @@ import type { ProjectSessionState } from "../../project/voxel_project_archive.js
 import { FAR_SHELL_DEFAULTS } from "../clod_constants.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
+export interface LiveBubbleDefault {
+  enabled: boolean;
+  radiusM: number;
+}
+
 export interface ClodSliceState {
   clodPerfMode: boolean;
   webgpuSelection: boolean;
@@ -53,6 +58,19 @@ const CLOD_ARCHIVE_KEYS = [
   "frontSideOnly", "recomputedNormals", "forceMaxLevel", "bubble", "bubbleRadius", "tintBubble",
 ] as const satisfies readonly (keyof ProjectSessionState)[];
 
+function finiteNonNegative(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
+export function applyLiveBubbleDefault(
+  target: Pick<ClodSliceState, "bubble" | "bubbleRadius">,
+  liveBubbleDefault?: LiveBubbleDefault,
+): void {
+  if (!liveBubbleDefault) return;
+  target.bubble = liveBubbleDefault.enabled;
+  if (finiteNonNegative(liveBubbleDefault.radiusM)) target.bubbleRadius = liveBubbleDefault.radiusM;
+}
+
 export function createClodSliceState(input: {
   cfg: ClodPagesConfig;
   queryPerfMode: boolean;
@@ -61,8 +79,9 @@ export function createClodSliceState(input: {
   queryFarShell: boolean;
   isLongView: boolean;
   profileEnabled: boolean;
+  liveBubbleDefault?: LiveBubbleDefault;
 }): ClodSliceState {
-  return {
+  const state: ClodSliceState = {
     clodPerfMode: input.queryPerfMode,
     webgpuSelection: input.queryWebGpuSelection,
     materialTiers: input.queryMaterialTiers,
@@ -105,6 +124,8 @@ export function createClodSliceState(input: {
     clodShadowProxyWireframe: true,
     clodShadowStatsLine: "",
   };
+  applyLiveBubbleDefault(state, input.liveBubbleDefault);
+  return state;
 }
 
 export function applyClodArchiveState(target: ClodSliceState, archive: ProjectSessionState): void {
