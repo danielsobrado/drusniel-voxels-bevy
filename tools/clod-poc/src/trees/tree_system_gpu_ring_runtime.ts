@@ -433,5 +433,6 @@ function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRing
     submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
+    terrainVisibilityCounts: null,
   };
 }
