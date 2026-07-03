@@ -45,6 +45,7 @@ export function getBillboardMaterial(geometry: THREE.BufferGeometry): THREE.Mate
 }
 
 export function disposeBillboardGeometryResources(geometry: THREE.BufferGeometry | null | undefined): void {
-  getBillboardMaterial(geometry!)?.dispose();
-  geometry?.dispose();
+  if (!geometry) return;
+  getBillboardMaterial(geometry)?.dispose();
+  geometry.dispose();
 }
