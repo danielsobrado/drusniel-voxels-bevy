@@ -74,21 +74,11 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   apply(searchParams, ["sunAzimuthDeg", "sunAzimuth"], (value) => {
     state.sunAzimuthDeg = ((value % 360) + 360) % 360;
   });
-  apply(searchParams, ["sunIntensity"], (value) => {
-    state.sunIntensity = Math.max(0, value);
-  });
-  apply(searchParams, ["skyIntensity"], (value) => {
-    state.skyIntensity = Math.max(0, value);
-  });
-  apply(searchParams, ["groundIntensity"], (value) => {
-    state.groundIntensity = Math.max(0, value);
-  });
-  apply(searchParams, ["exposure"], (value) => {
-    state.exposure = Math.max(0, value);
-  });
-  apply(searchParams, ["hazeIntensity"], (value) => {
-    state.hazeIntensity = Math.max(0, value);
-  });
+  apply(searchParams, ["sunIntensity"], (value) => { state.sunIntensity = Math.max(0, value); });
+  apply(searchParams, ["skyIntensity"], (value) => { state.skyIntensity = Math.max(0, value); });
+  apply(searchParams, ["groundIntensity"], (value) => { state.groundIntensity = Math.max(0, value); });
+  apply(searchParams, ["exposure"], (value) => { state.exposure = Math.max(0, value); });
+  apply(searchParams, ["hazeIntensity"], (value) => { state.hazeIntensity = Math.max(0, value); });
 
   const timings = flagParam(searchParams, "timings", "profile");
   if (timings !== null) state.profileEnabled = timings;
@@ -102,27 +92,20 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   apply(searchParams, ["renderScale", "renderscale", "postScale", "postprocessScale"], (value) => {
     state.postProcessRenderScale = clamp(value, 0.5, 1);
   });
-  apply(searchParams, ["treeDistance", "treeDistanceM", "treeRing", "treeRingM"], (value) => {
-    state.treeDistance = Math.max(0, value);
-  });
-  apply(searchParams, ["treeMaxInstances", "treeMax"], (value) => {
-    state.treeMaxInstances = Math.floor(Math.max(0, value));
-  });
-  apply(searchParams, ["treeDensity", "treeBaseDensity"], (value) => {
-    state.treeDensity = Math.max(0, value);
-  });
-  apply(searchParams, ["treeSpacing", "treeSpacingM"], (value) => {
-    state.treeSpacing = Math.max(0.5, value);
-  });
-  apply(searchParams, ["treeGpuMaxVisible", "treeGpuMax"], (value) => {
-    state.treeGpuMaxVisible = Math.floor(Math.max(0, value));
-  });
+  apply(searchParams, ["treeDistance", "treeDistanceM", "treeRing", "treeRingM"], (value) => { state.treeDistance = Math.max(0, value); });
+  apply(searchParams, ["treeMaxInstances", "treeMax"], (value) => { state.treeMaxInstances = Math.floor(Math.max(0, value)); });
+  apply(searchParams, ["treeDensity", "treeBaseDensity"], (value) => { state.treeDensity = Math.max(0, value); });
+  apply(searchParams, ["treeSpacing", "treeSpacingM"], (value) => { state.treeSpacing = Math.max(0.5, value); });
+  apply(searchParams, ["treeGpuMaxVisible", "treeGpuMax"], (value) => { state.treeGpuMaxVisible = Math.floor(Math.max(0, value)); });
 
   const treeShadowMaxLod = treeShadowMaxLodParam(searchParams);
   if (isTreeShadowMaxLod(treeShadowMaxLod)) state.treeShadowMaxLod = treeShadowMaxLod;
 
   const treeFarCheapMaterial = flagParam(searchParams, "treeFarCheapMaterial", "treeCheapFarMaterial", "treeFarCheap");
   if (treeFarCheapMaterial !== null) state.treeFarCheapMaterial = treeFarCheapMaterial;
+
+  const treePlacementDebug = flagParam(searchParams, "treePlacementDebug", "treeDebugPlacement", "treePlacementOverlay");
+  if (treePlacementDebug !== null) state.treePlacementDebug = treePlacementDebug;
 
   const treeImpostorSwapOnBake = flagParam(searchParams, "treeImpostorSwapOnBake", "treeImpostorHotSwap", "treeSwapImpostors");
   if (treeImpostorSwapOnBake !== null) state.treeImpostorSwapOnBake = treeImpostorSwapOnBake;
@@ -194,41 +177,30 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
 
   const grade = flagParam(searchParams, "grade");
   if (grade === false) neutralGrade(state);
-
   const bloom = flagParam(searchParams, "bloom");
   if (bloom !== null) state.postProcessBloomEnabled = bloom;
-
   const fxaa = flagParam(searchParams, "fxaa", "aa");
   if (fxaa !== null) state.postProcessFxaaEnabled = fxaa;
-
   const taa = flagParam(searchParams, "taa");
   if (taa !== null) state.postProcessTaaEnabled = taa;
-
   const taaJitter = flagParam(searchParams, "taaJitter", "taajitter", "jitter");
   if (taaJitter !== null) state.postProcessTaaJitterEnabled = taaJitter;
-
   const taaClamp = flagParam(searchParams, "taaClamp", "taaclamp", "historyClamp");
   if (taaClamp !== null) state.postProcessTaaHistoryClampEnabled = taaClamp;
-
   const contactShadows = flagParam(searchParams, "contactShadows", "contactshadows", "contact");
   if (contactShadows !== null) state.postProcessContactShadowsEnabled = contactShadows;
-
   const clarity = flagParam(searchParams, "clarity", "sharpen");
   if (clarity !== null) state.postProcessClarityEnabled = clarity;
-
   const aerial = flagParam(searchParams, "aerial", "aerialPerspective");
   if (aerial !== null) state.postProcessAerialPerspectiveEnabled = aerial;
-
   const fog = flagParam(searchParams, "fog", "haze");
   if (fog === false) {
     state.hazeIntensity = 0;
     state.postProcessAerialPerspectiveEnabled = false;
     state.godRaysMode = "off";
   }
-
   const godRays = flagParam(searchParams, "godRays", "godrays");
   if (godRays === false) state.godRaysMode = "off";
-
   const toneMap = toneMappingParam(searchParams);
   if (toneMap !== null) state.postProcessToneMapping = toneMap;
 }
