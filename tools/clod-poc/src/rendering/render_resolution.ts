@@ -10,12 +10,26 @@ export interface RenderResolutionPreset {
   renderScale: number;
 }
 
+export interface DynamicResolutionConfig {
+  enabled: boolean;
+  targetMs: number;
+  minScale: number;
+  maxScale: number;
+  stepUp: number;
+  stepDown: number;
+  sampleWindowFrames: number;
+  settleFrames: number;
+  upscaleHeadroomMs: number;
+  downscaleOverMs: number;
+}
+
 export interface RenderResolutionConfig {
   dprCap: number;
   renderScale: number;
   minEffectivePixelRatio: number;
   maxEffectivePixelRatio: number;
   presets: Record<string, RenderResolutionPreset>;
+  dynamic: DynamicResolutionConfig;
 }
 
 export interface RenderResolutionInput {
