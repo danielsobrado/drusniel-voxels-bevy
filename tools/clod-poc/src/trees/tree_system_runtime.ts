@@ -218,8 +218,27 @@ export class TreeSystem {
   }
 
   rebuildNodePatches(nodeIds: Iterable<string>): void {
-    this.removePatchesForNodes(nodeIds);
-    if (!treeSystemUsesGpuRingDraw(this.settings)) this.refreshForCenter(this.lastCenter);
+    const ids = new Set(nodeIds);
+    if (ids.size === 0) return;
+    if (treeSystemUsesGpuRingDraw(this.settings)) {
+      this.gpuLightingProxyCache.clear();
+      this.updateStats();
+      this.updatePlacementDebugOverlay();
+      return;
+    }
+
+    const stale: TreePatch[] = [];
+    const retained: TreePatch[] = [];
+    for (const patch of this.patches) {
+      if (ids.has(patch.nodeId)) stale.push(patch);
+      else retained.push(patch);
+    }
+
+    this.patches = retained;
+    this.refreshForCenter(this.lastCenter);
+    for (const patch of stale) removeTreePatchResources(this.root, patch);
+    this.updatePatchLods(this.lastCenter, this.lastCenter);
+    this.updatePlacementDebugOverlay();
   }
 
   dispose(): void {
