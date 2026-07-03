@@ -125,6 +125,79 @@ describe("tree ring cluster visibility", () => {
     expect(second.sourceCounts.terrainVisibilitySampler).toBe(first.sourceCounts.terrainVisibilitySampler);
   });
 
+  it("reuses the whole mask inside the same camera bucket", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+    settings.gpu.terrainVisibility.minDistanceM = 0;
+    settings.gpu.terrainVisibility.heightMarginM = 0;
+    settings.gpu.terrainVisibility.crownHeightM = 0;
+    const cache = new TreeRingClusterVisibilityCache();
+
+    const first = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+      terrainRevision: 11,
+      cache,
+    });
+    const second = buildTreeRingClusterVisibilityMask({
+      centerX: 64.5,
+      centerZ: 64.5,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+      terrainRevision: 11,
+      cache,
+    });
+
+    expect(second.cacheMisses).toBe(0);
+    expect(second.cacheHits).toBe(first.hiddenClusters + first.visibleClusters);
+    expect(second.words).toBe(first.words);
+    expect(second.activeSlotIndices).toBe(first.activeSlotIndices);
+  });
+
+  it("rebuilds the whole mask when the camera leaves the cached bucket", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+    settings.gpu.terrainVisibility.minDistanceM = 0;
+    settings.gpu.terrainVisibility.heightMarginM = 0;
+    settings.gpu.terrainVisibility.crownHeightM = 0;
+    const cache = new TreeRingClusterVisibilityCache();
+
+    const first = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+      terrainRevision: 11,
+      cache,
+    });
+    const second = buildTreeRingClusterVisibilityMask({
+      centerX: 73,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+      terrainRevision: 11,
+      cache,
+    });
+
+    expect(second.cacheMisses).toBeGreaterThan(0);
+    expect(second.words).not.toBe(first.words);
+    expect(second.activeSlotIndices).not.toBe(first.activeSlotIndices);
+  });
+
   it("maps slots to their cluster visibility", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.distanceM = 24;

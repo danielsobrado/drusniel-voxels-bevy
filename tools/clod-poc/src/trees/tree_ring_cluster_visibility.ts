@@ -3,6 +3,7 @@ import {
   DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG,
   type VegetationTerrainRejectionConfig,
 } from "../vegetation/terrain_rejection_config.js";
+import { quantizeTerrainRejectionBucket } from "../vegetation/terrain_rejection_cache.js";
 import {
   buildVegetationSlotPrefilter,
   VegetationSlotPrefilterCache,
@@ -49,11 +50,36 @@ export interface TreeRingClusterVisibilityMask {
 
 export type TreeRingClusterVisibilityDecision = VegetationSlotPrefilterDecision;
 
-export class TreeRingClusterVisibilityCache extends VegetationSlotPrefilterCache {}
+export class TreeRingClusterVisibilityCache extends VegetationSlotPrefilterCache {
+  private lastMaskKey = "";
+  private lastMask: TreeRingClusterVisibilityMask | null = null;
+
+  getMask(key: string): TreeRingClusterVisibilityMask | null {
+    return key === this.lastMaskKey ? this.lastMask : null;
+  }
+
+  setMask(key: string, mask: TreeRingClusterVisibilityMask): void {
+    this.lastMaskKey = key;
+    this.lastMask = mask;
+  }
+
+  override clear(): void {
+    super.clear();
+    this.lastMaskKey = "";
+    this.lastMask = null;
+  }
+}
 
 export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisibilityOptions): TreeRingClusterVisibilityMask {
   const grid = treeGpuRingGrid(options.settings);
   const clusterDimCells = effectiveTreeRingClusterDimCells(options.clusterDimCells);
+  const cacheKey = options.cache ? treeRingClusterVisibilityMaskCacheKey(options, grid, clusterDimCells) : "";
+  const cached = cacheKey ? options.cache?.getMask(cacheKey) ?? null : null;
+  if (cached) return {
+    ...cached,
+    cacheHits: cached.hiddenClusters + cached.visibleClusters,
+    cacheMisses: 0,
+  };
   const prefilter = buildVegetationSlotPrefilter({
     kind: "tree",
     centerX: options.centerX,
@@ -76,7 +102,7 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     cache: options.cache,
     cacheConfig: options.cacheConfig,
   });
-  return {
+  const mask = {
     grid: prefilter.grid,
     clusterDimCells: prefilter.clusterDimSlots,
     clusterGrid: prefilter.clusterGrid,
@@ -93,6 +119,8 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     reasonCounts: prefilter.reasonCounts,
     sourceCounts: prefilter.sourceCounts,
   };
+  if (cacheKey) options.cache?.setMask(cacheKey, mask);
+  return mask;
 }
 
 export function treeRingSlotClusterVisible(mask: TreeRingClusterVisibilityMask | null | undefined, slot: number): boolean {
@@ -127,4 +155,31 @@ function createTerrainHeightSampler(sampler: TreeTerrainSampler | undefined): Te
       return { height, unknown: !Number.isFinite(height) };
     },
   };
+}
+
+function treeRingClusterVisibilityMaskCacheKey(
+  options: TreeRingClusterVisibilityOptions,
+  grid: number,
+  clusterDimCells: number,
+): string {
+  const visibility = options.settings.gpu.terrainVisibility;
+  const bucketM = options.cacheConfig?.cameraBucketM ?? DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.cameraBucketM;
+  return [
+    "tree",
+    grid,
+    clusterDimCells,
+    TREE_GPU_RING_CELL,
+    quantizeTerrainRejectionBucket(options.centerX, bucketM),
+    quantizeTerrainRejectionBucket(options.centerZ, bucketM),
+    quantizeTerrainRejectionBucket(options.cameraY, bucketM),
+    Math.floor(options.worldCells),
+    options.settings.gpu.enabled ? 1 : 0,
+    visibility.enabled ? 1 : 0,
+    visibility.minDistanceM,
+    visibility.sampleCount,
+    visibility.heightMarginM,
+    visibility.crownHeightM,
+    options.terrainRevision ?? 0,
+    options.providerRevision ?? 0,
+  ].join("|");
 }
