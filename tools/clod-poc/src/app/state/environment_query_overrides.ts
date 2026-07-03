@@ -121,6 +121,12 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const treeShadowMaxLod = treeShadowMaxLodParam(searchParams);
   if (isTreeShadowMaxLod(treeShadowMaxLod)) state.treeShadowMaxLod = treeShadowMaxLod;
 
+  const treeFarCheapMaterial = flagParam(searchParams, "treeFarCheapMaterial", "treeCheapFarMaterial", "treeFarCheap");
+  if (treeFarCheapMaterial !== null) state.treeFarCheapMaterial = treeFarCheapMaterial;
+
+  const treeImpostorSwapOnBake = flagParam(searchParams, "treeImpostorSwapOnBake", "treeImpostorHotSwap", "treeSwapImpostors");
+  if (treeImpostorSwapOnBake !== null) state.treeImpostorSwapOnBake = treeImpostorSwapOnBake;
+
   const treeGpu = flagParam(searchParams, "treeGpu", "treeGPU", "gpuTrees");
   if (treeGpu !== null) state.treeGpuEnabled = treeGpu;
 
