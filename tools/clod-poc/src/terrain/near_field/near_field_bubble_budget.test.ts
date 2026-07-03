@@ -6,12 +6,20 @@ describe("resolveLiveBubbleBuildBudget", () => {
     expect(resolveLiveBubbleBuildBudget(4, new URLSearchParams())).toBe(4);
   });
 
+  it("uses a conservative default for infinite islands", () => {
+    expect(resolveLiveBubbleBuildBudget(4, new URLSearchParams("scene=infinite-islands"))).toBe(1);
+  });
+
   it("accepts the camelCase query override", () => {
     expect(resolveLiveBubbleBuildBudget(4, new URLSearchParams("liveBubbleBudget=7"))).toBe(7);
   });
 
   it("accepts the snake_case query override", () => {
     expect(resolveLiveBubbleBuildBudget(4, new URLSearchParams("live_bubble_budget=3"))).toBe(3);
+  });
+
+  it("lets query override beat the infinite islands conservative default", () => {
+    expect(resolveLiveBubbleBuildBudget(4, new URLSearchParams("scene=infinite-islands&liveBubbleBudget=3"))).toBe(3);
   });
 
   it("floors fractional values and clamps invalid budgets to one", () => {
