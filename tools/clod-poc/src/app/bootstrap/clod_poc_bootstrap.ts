@@ -28,6 +28,7 @@ import { createBiomeTextureStreamingManager } from "../../textures/biome_texture
 import * as THREE from "three";
 import { booleanQueryParam, positiveNumberQueryParam } from "./bootstrap_query_params.js";
 import { applyLongViewScenePreset, isLongViewCapableScene } from "./bootstrap_long_view.js";
+import { timeFarSummarySubphase } from "../frame_loop/far_summary_subphase_timing.js";
 import {
   materialChurnConfigForQuery,
   materialChurnDiagnostics,
@@ -407,25 +408,38 @@ export async function bootstrapClodPoc() {
     floatingOrigin,
     onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming || infiniteFarShell || floatingOrigin)
       ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          const counters = postRenderer.longViewHooks?.stats?.counters;
           const originStats = floatingOrigin.stats();
-          if (postRenderer.longViewHooks?.stats) {
-            postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
-            postRenderer.longViewHooks.stats.counters.floatingOriginRebaseCount = originStats.rebaseCount;
-            postRenderer.longViewHooks.stats.counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
-            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetX = originStats.originX;
-            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
+          if (counters) {
+            counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
+            counters.floatingOriginRebaseCount = originStats.rebaseCount;
+            counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
+            counters.floatingOriginOffsetX = originStats.originX;
+            counters.floatingOriginOffsetZ = originStats.originZ;
           }
-          infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
+          timeFarSummarySubphase(counters, "farSumShellMs", () => {
+            infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
+          });
           if (farSummaryIntegration) {
-            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+            timeFarSummarySubphase(counters, "farSumTilesMs", () => {
+              farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+            });
           }
-          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          timeFarSummarySubphase(counters, "farSumNaadfMs", () => {
+            naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          });
           if (infiniteFarShell) {
-            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+            timeFarSummarySubphase(counters, "farSumShellMs", () => {
+              infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+            });
           }
-          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+          timeFarSummarySubphase(counters, "farSumShadowProxyMs", () => {
+            terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+          });
           if (postRenderer.state.terrainMaterialSource === "procedural") {
-            biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
+            timeFarSummarySubphase(counters, "farSumBiomeStreamMs", () => {
+              biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
+            });
           }
         }
       : undefined,
