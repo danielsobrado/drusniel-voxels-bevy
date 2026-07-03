@@ -27,7 +27,7 @@ render_node_cache:
   prune_interval_frames: 30
   prefetch_parent: true
   prefetch_children: false
-  max_prefetch_creates_per_frame: 8
+  max_prefetch_creates_per_frame: 4
   warn_at_inactive_nodes: 480
   evict_geometry_with_render_node: true
 
@@ -54,18 +54,18 @@ selection_cut_cache:
   max_reuse_frames: 8
 
 material_churn:
-  enabled: true
-  collect_material_versions: true
-  collect_renderer_programs: true
+  enabled: false
+  collect_material_versions: false
+  collect_renderer_programs: false
   log_spike_warnings: false
   spike_warn_threshold_per_frame: 32
-  max_tracked_materials: 4096
+  max_tracked_materials: 1024
 
 render_resolution:
-  dpr_cap: 1.5
-  render_scale: 1.0
+  dpr_cap: 1.0
+  render_scale: 0.85
   min_effective_pixel_ratio: 0.5
-  max_effective_pixel_ratio: 2.0
+  max_effective_pixel_ratio: 1.25
   presets:
     performance100:
       dpr_cap: 1.0
@@ -74,13 +74,13 @@ render_resolution:
       dpr_cap: 1.0
       render_scale: 0.75
     medium:
+      dpr_cap: 1.0
+      render_scale: 0.85
+    high:
       dpr_cap: 1.25
       render_scale: 0.9
-    high:
-      dpr_cap: 1.5
-      render_scale: 1.0
     ultra:
-      dpr_cap: 2.0
+      dpr_cap: 1.5
       render_scale: 1.0
 
 digging:
@@ -90,6 +90,6 @@ profiling:
   slow_frame_ms: 24
 
 stats:
-  normal_hz: 4
-  debug_hz: 10
-  profile_every_frame: true
+  normal_hz: 2
+  debug_hz: 6
+  profile_every_frame: false
