@@ -190,7 +190,14 @@ export class StoneSystem {
       this.root.add(draw.mesh);
     }
     this.applyClassVisibility();
-    if (this.draws.length === 0) return;
+    if (this.draws.length === 0) {
+      this.materialHandle?.material.dispose();
+      this.materialHandle = null;
+      this.indexCounts = [0, 0, 0];
+      this.stats = emptyStats();
+      this.onStats?.(this.getStats());
+      return;
+    }
 
     const buffers: StoneGpuScatterBuffers = {
       instanceA: this.gpuBufferForAttribute(instanceA),
