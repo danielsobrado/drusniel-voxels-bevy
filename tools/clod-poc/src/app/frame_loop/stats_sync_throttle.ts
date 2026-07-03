@@ -37,6 +37,7 @@ export interface StatsSyncThrottleDiagnostics {
   skippedFrames: number;
   effectiveHz: number;
   lastReason: StatsSyncThrottleReason;
+  lastRunFrameIndex: number;
 }
 
 export const STATS_SYNC_THROTTLE_REASON_CODE: Record<StatsSyncThrottleReason, number> = {
@@ -58,6 +59,7 @@ export class StatsSyncThrottle {
   private skippedFrames = 0;
   private lastRunIntervalMs = 0;
   private lastReason: StatsSyncThrottleReason = "skipped";
+  private lastRunFrameIndex = -1;
 
   constructor(private readonly config: StatsSyncThrottleConfig) {}
 
@@ -93,6 +95,7 @@ export class StatsSyncThrottle {
       skippedFrames: this.skippedFrames,
       effectiveHz: this.lastRunIntervalMs > 0 ? 1000 / this.lastRunIntervalMs : 0,
       lastReason: this.lastReason,
+      lastRunFrameIndex: this.lastRunFrameIndex,
     };
   }
 
@@ -113,6 +116,7 @@ export class StatsSyncThrottle {
     this.lastStatsRevision = input.statsRevision;
     this.lastDebugVisible = input.debugVisible;
     this.lastStatsPanelVisible = input.statsPanelVisible;
+    this.lastRunFrameIndex = input.frameIndex;
     this.skippedFrames = 0;
     this.runs += 1;
     this.lastReason = reason;
