@@ -93,6 +93,7 @@ export interface TreeImpostorSettings {
   enabled: boolean;
   bakeOnStart: boolean;
   fallbackToPlaceholder: boolean;
+  swapOnBake: boolean;
   sourceLod: Exclude<TreeLod, "impostor">;
   resolutionPx: number;
   octahedralGridSize: number;
@@ -152,6 +153,7 @@ export interface TreeRenderSettings {
   receiveShadows: boolean;
   depthPrepass: boolean;
   debugColorByLod: boolean;
+  farCheapMaterial: boolean;
 }
 
 export interface TreeGpuSettings {
