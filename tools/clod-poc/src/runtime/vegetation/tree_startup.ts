@@ -14,6 +14,7 @@ import { setTreeGpuRingHydrologyData } from "../../gpu/tree_ring_compute.js";
 import type { TreeSettings } from "../../trees/tree_config.js";
 import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import { createEmptyTreeSystemStats } from "../../trees/tree_system_stats.js";
+import { estimateTreeImpostorAtlasMemoryMiB } from "../../trees/tree_impostor_memory.js";
 
 export interface TreeStartupInput {
   scene: THREE.Scene;
@@ -59,11 +60,18 @@ function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
     },
     impostors: {
       ...config.impostors,
-      enabled: false,
-      bakeOnStart: false,
       fallbackToPlaceholder: false,
     },
   };
+}
+
+function formatTreeImpostorSummary(stats: TreeStats, settings: TreeSettings): string {
+  if (!settings.impostors.enabled) return "disabled";
+  const atlasSize = settings.impostors.resolutionPx * settings.impostors.octahedralGridSize;
+  const memoryMiB = estimateTreeImpostorAtlasMemoryMiB(settings);
+  const ready = stats.impostorStatus === "baked" ? "6/6" : `0/6`;
+  const reason = stats.impostorStatus === "fallback" && stats.impostorReason ? ` ${stats.impostorReason}` : "";
+  return `${stats.impostorStatus} atlas=${ready} ${atlasSize}px ~${Math.round(memoryMiB)}MiB${reason}`;
 }
 
 export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
@@ -98,10 +106,12 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
       state.treeVisiblePatches = `${stats.visiblePatches}/${stats.patches}`;
       state.treeLodSummary = `${stats.nearTrees}/${stats.midTrees}/${stats.farTrees}/${stats.impostorTrees}`;
       state.treeGpuSummary = formatTreeGpuSummary(stats);
+      state.treeImpostorSummary = formatTreeImpostorSummary(stats, treeController.makeSettings());
       statControllers.treeTotal?.updateDisplay();
       statControllers.treeVisiblePatches?.updateDisplay();
       statControllers.treeLodSummary?.updateDisplay();
       statControllers.treeGpuSummary?.updateDisplay();
+      statControllers.treeImpostorSummary?.updateDisplay();
     },
   });
   const treeSystem = treeController.system;
@@ -130,10 +140,12 @@ function runPerfModeTreeStartup(input: TreeStartupInput): TreeStartupResult {
   input.state.treeVisiblePatches = "0/0";
   input.state.treeLodSummary = "0/0/0/0";
   input.state.treeGpuSummary = formatTreeGpuSummary(stats);
+  input.state.treeImpostorSummary = "disabled";
   input.statControllers.treeTotal?.updateDisplay();
   input.statControllers.treeVisiblePatches?.updateDisplay();
   input.statControllers.treeLodSummary?.updateDisplay();
   input.statControllers.treeGpuSummary?.updateDisplay();
+  input.statControllers.treeImpostorSummary?.updateDisplay();
 
   const disabledSettings: TreeSettings = { ...input.treeConfig, enabled: false };
   const system = {
