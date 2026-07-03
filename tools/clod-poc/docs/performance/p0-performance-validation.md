@@ -124,12 +124,23 @@ It also records the exposed P0 counters for:
 ```text
 terrain material cache
 vegetation early rejection
+vegetation rejection source telemetry
 page geometry cache
 render node cache
 material churn
 far-summary atlas memory estimate
 far-summary atlas dirty/full upload state
 ```
+
+Vegetation source telemetry currently reports tree GPU-ring cluster prefilter decisions as:
+
+```text
+vegetationGpuSourceFarSummary
+vegetationGpuSourceTerrainSampler
+vegetationGpuSourceFallback
+```
+
+Use this to check whether the far-summary source is actually decisive, or whether the runtime silently falls back to terrain sampler / conservative fallback.
 
 Atlas upload mode is numeric:
 
