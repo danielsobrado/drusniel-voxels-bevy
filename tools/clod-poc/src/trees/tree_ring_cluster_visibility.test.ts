@@ -8,6 +8,12 @@ import {
 } from "./tree_ring_cluster_visibility.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
 
+const EMPTY_SOURCE_COUNTS = {
+  naadfFarSummary: 0,
+  terrainVisibilitySampler: 0,
+  conservativeFallback: 0,
+};
+
 describe("tree ring cluster visibility", () => {
   it("keeps every cluster visible when terrain visibility is disabled", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
@@ -27,6 +33,7 @@ describe("tree ring cluster visibility", () => {
     expect(mask.hiddenClusters).toBe(0);
     expect(mask.visibleClusters).toBe(mask.words.length);
     expect(mask.reasonCounts.disabled).toBe(mask.words.length);
+    expect(mask.sourceCounts.conservativeFallback).toBe(mask.words.length);
     expect(mask.candidateSlotsAfterPrefilter).toBe(mask.candidateSlotsBeforePrefilter);
     expect(mask.activeSlotIndices).toHaveLength(mask.candidateSlotsBeforePrefilter);
     expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
@@ -72,6 +79,7 @@ describe("tree ring cluster visibility", () => {
 
     expect(mask.hiddenClusters).toBeGreaterThan(0);
     expect(mask.reasonCounts.terrain_hidden).toBe(mask.hiddenClusters);
+    expect(mask.sourceCounts.terrainVisibilitySampler).toBeGreaterThan(0);
     expect(mask.candidateSlotsAfterPrefilter).toBeLessThan(mask.candidateSlotsBeforePrefilter);
     expect(mask.activeSlotIndices.length).toBe(mask.candidateSlotsAfterPrefilter);
     expect(mask.skippedCandidateEstimate).toBe(mask.candidateSlotsBeforePrefilter - mask.candidateSlotsAfterPrefilter);
@@ -114,6 +122,7 @@ describe("tree ring cluster visibility", () => {
     expect(second.cacheHits).toBe(first.cacheMisses);
     expect(second.cacheMisses).toBe(0);
     expect(second.activeSlotIndices).toEqual(first.activeSlotIndices);
+    expect(second.sourceCounts.terrainVisibilitySampler).toBe(first.sourceCounts.terrainVisibilitySampler);
   });
 
   it("maps slots to their cluster visibility", () => {
@@ -142,6 +151,7 @@ describe("tree ring cluster visibility", () => {
         near_forced_visible: 0,
         disabled: 0,
       },
+      sourceCounts: { ...EMPTY_SOURCE_COUNTS, terrainVisibilitySampler: words.length },
     };
     mask.words[0] = 0;
 
