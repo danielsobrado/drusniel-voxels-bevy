@@ -11,6 +11,7 @@ import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
 import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePerfPhaseTiming } from "./frame_loop/perf_probe.js";
 import { materialChurnDiagnostics } from "../rendering/material_churn/material_churn_diagnostics.js";
+import { aggregateGpuVegetationEarlyRejectCounters } from "../vegetation/gpu_vegetation_early_reject_counters.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
@@ -353,6 +354,12 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["trees.candidates"] = currentTreeStats.gpuCandidateCount;
           counters["trees.overflow"] = currentTreeStats.gpuOverflowed ? 1 : 0;
         }
+        const aggregateVegetationCounters = aggregateGpuVegetationEarlyRejectCounters({
+          treeStats: statsSyncResult.currentTreeStats,
+          grassStats: statsSyncResult.currentGrassStats,
+          understoryStats: statsSyncResult.currentUnderstoryStats,
+        });
+        for (const [key, value] of Object.entries(aggregateVegetationCounters)) counters[key] = value;
         const propStats = vegetation.propStats?.current ?? null;
         if (propStats) {
           counters["props.visible"] = propStats.gpuVisibleCount;
