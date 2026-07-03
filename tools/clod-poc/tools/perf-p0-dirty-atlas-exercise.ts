@@ -50,7 +50,24 @@ export function shouldRunP0DirtyAtlasExercise(input: {
 
 export async function runP0DirtyAtlasExercise(page: Page, config: P0DirtyAtlasExerciseConfig): Promise<P0DirtyAtlasExerciseResult> {
   if (!config.enabled) return { status: "disabled", detail: "disabled by runner config" };
-  return page.evaluate(async ({ moveMeters, settleFrames }) => {
+  return page.evaluate(async ({ moveMeters, settleFrames, minMoveMeters }) => {
+    const atlasCounters = (counters: Record<string, number>): Record<string, number> => ({
+      dirtyUploads: counters["naadf.farSummaryAtlas.upload.dirtyUploads"] ?? 0,
+      fullUploads: counters["naadf.farSummaryAtlas.upload.fullUploads"] ?? 0,
+      dirtyPixels: counters["naadf.farSummaryAtlas.upload.dirtyPixels"] ?? 0,
+      totalPixels: counters["naadf.farSummaryAtlas.upload.totalPixels"] ?? 0,
+      dirtyPct: counters["naadf.farSummaryAtlas.upload.dirtyPct"] ?? 0,
+      modeCode: counters["naadf.farSummaryAtlas.upload.modeCode"] ?? 0,
+    });
+    const movedPosition = (x: number, move: number, worldCells: number): number => {
+      if (!Number.isFinite(worldCells) || worldCells <= 0) return x + move;
+      const maxX = worldCells * 0.9;
+      const minX = worldCells * 0.1;
+      const forward = Math.min(maxX, x + move);
+      if (Math.abs(forward - x) >= minMoveMeters) return forward;
+      return Math.max(minX, x - move);
+    };
+
     const hooks = window.__drusnielClod;
     const perf = window.__drusnielPerf;
     if (!hooks) return { status: "skipped", detail: "missing __drusnielClod hooks" } as P0DirtyAtlasExerciseResult;
@@ -60,7 +77,7 @@ export async function runP0DirtyAtlasExercise(page: Page, config: P0DirtyAtlasEx
     const before = atlasCounters(hooks.stats?.counters ?? {});
     const pose = hooks.getPose();
     const worldCells = hooks.stats?.counters?.world_cells ?? 0;
-    const move = Math.max(MIN_MOVE_METERS, moveMeters);
+    const move = Math.max(minMoveMeters, moveMeters);
     const movedX = movedPosition(pose.p[0], move, worldCells);
     const nextPose = { ...pose, p: [movedX, pose.p[1], pose.p[2]] as [number, number, number] };
     hooks.setPose(nextPose);
@@ -73,27 +90,7 @@ export async function runP0DirtyAtlasExercise(page: Page, config: P0DirtyAtlasEx
       before,
       after,
     } as P0DirtyAtlasExerciseResult;
-  }, config);
-}
-
-function movedPosition(x: number, moveMeters: number, worldCells: number): number {
-  if (!Number.isFinite(worldCells) || worldCells <= 0) return x + moveMeters;
-  const maxX = worldCells * 0.9;
-  const minX = worldCells * 0.1;
-  const forward = Math.min(maxX, x + moveMeters);
-  if (Math.abs(forward - x) >= MIN_MOVE_METERS) return forward;
-  return Math.max(minX, x - moveMeters);
-}
-
-function atlasCounters(counters: Record<string, number>): Record<string, number> {
-  return {
-    dirtyUploads: counters["naadf.farSummaryAtlas.upload.dirtyUploads"] ?? 0,
-    fullUploads: counters["naadf.farSummaryAtlas.upload.fullUploads"] ?? 0,
-    dirtyPixels: counters["naadf.farSummaryAtlas.upload.dirtyPixels"] ?? 0,
-    totalPixels: counters["naadf.farSummaryAtlas.upload.totalPixels"] ?? 0,
-    dirtyPct: counters["naadf.farSummaryAtlas.upload.dirtyPct"] ?? 0,
-    modeCode: counters["naadf.farSummaryAtlas.upload.modeCode"] ?? 0,
-  };
+  }, { ...config, minMoveMeters: MIN_MOVE_METERS });
 }
 
 function finitePositive(value: unknown): value is number {
