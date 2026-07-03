@@ -31,6 +31,7 @@ export function buildPropGpuRingSource(input: {
   const assetMeta = new Float32Array(Math.max(1, assetDefs.length) * 4);
   const assetLods = new Float32Array(Math.max(1, assetDefs.length) * 4);
   let group = 0;
+  let renderableGroupCount = 0;
   assetDefs.forEach((def, assetIndex) => {
     const loaded = loadedAssets.get(def.id)!;
     const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
@@ -42,12 +43,14 @@ export function buildPropGpuRingSource(input: {
     for (let lod = 0; lod < 4; lod++) assetLods[assetIndex * 4 + lod] = def.lod.distances[lod] ?? Number.POSITIVE_INFINITY;
     for (let lod = 0; lod < lodCount; lod++) {
       const geometry = lodGeometry(loaded, lod);
-      const indexCount = geometry && isRenderableIndirectDrawGeometry(geometry) ? indexCountFor(geometry) : 0;
+      const renderable = !!geometry && isRenderableIndirectDrawGeometry(geometry);
+      const indexCount = renderable ? indexCountFor(geometry) : 0;
+      if (indexCount > 0) renderableGroupCount++;
       groupMeta.push(assetIndex, lod, indexCount, 0);
       group++;
     }
   });
-  if (assetDefs.length === 0 || group === 0) return emptyGpuRingSource();
+  if (assetDefs.length === 0 || group === 0 || renderableGroupCount === 0) return emptyGpuRingSource();
 
   const sourceA: number[] = [];
   const sourceB: number[] = [];
