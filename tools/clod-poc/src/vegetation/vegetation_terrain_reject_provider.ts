@@ -15,7 +15,6 @@ export type VegetationTerrainRejectReason =
   | "tooFarForKind"
   | "noCoverage"
   | "summaryMissing"
-  | "revisionMismatch"
   | "accepted";
 
 export type VegetationTerrainRejectConfidence = "exact" | "summary" | "fallback";
@@ -97,7 +96,7 @@ export function createVegetationTerrainRejectProvider(
       if (!query.visibility.enabled) return accept("accepted", "fallback", "conservativeFallback", "disabled");
       if (outsideTerrain(query)) return reject("outsideTerrain", "exact", "conservativeFallback");
       if (revisionMismatch(query)) {
-        return accept("revisionMismatch", "fallback", "conservativeFallback", "unknown_kept");
+        return accept("summaryMissing", "fallback", "conservativeFallback", "unknown_kept");
       }
 
       const sourcePriority = query.sourcePriority ?? defaultPriority;
