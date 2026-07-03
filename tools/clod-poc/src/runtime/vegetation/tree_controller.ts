@@ -186,6 +186,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       const state = deps.getUiState();
       state.treeDepthPrepassMaxLod = maxLod;
       system.setDepthPrepassMaxLod(maxLod);
+      refreshStats();
     },
     markPatchesDirty() {
       system.markPatchesDirty();
