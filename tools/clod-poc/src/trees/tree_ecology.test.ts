@@ -107,6 +107,7 @@ describe("tree ecology sampling", () => {
       rejectedSlope: 0,
       rejectedHeight: 0,
       rejectedMaterial: 0,
+      debugSamples: [],
     };
     generateTreeInstances(footprint, settings, 10000, stats, sampler(24), 128);
     expect(stats.generatedCandidates).toBe(16 * 16);

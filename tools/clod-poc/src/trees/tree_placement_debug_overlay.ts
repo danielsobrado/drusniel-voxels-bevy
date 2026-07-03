@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { TreePlacementDebugReason, TreePlacementDebugSample } from "./tree_instances.js";
+import type { TreePlacementDebugReason } from "./tree_instances.js";
 import type { TreePatch } from "./tree_system_types.js";
 
 const TREE_PLACEMENT_DEBUG_POINT_SIZE = 2.0;

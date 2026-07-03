@@ -98,7 +98,8 @@ describe("far-summary atlas dirty upload edge cases", () => {
     expect(atlas.view.coverageTexture.format).toBe(THREE.RGFormat);
     expect(atlas.view.coverageTexture.type).toBe(THREE.UnsignedByteType);
     expect(atlas.view.coverageTexture.image.data).toBeInstanceOf(Uint8Array);
-    expect(atlas.view.coverageTexture.image.data.length).toBe(atlas.view.uploadStats.totalPixels * 2);
+    const data = atlas.view.coverageTexture.image.data;
+    expect(data?.length).toBe(atlas.view.uploadStats.totalPixels * 2);
   });
 
   it("keeps debug coverage as RGBA32F for validation", () => {
@@ -107,7 +108,8 @@ describe("far-summary atlas dirty upload edge cases", () => {
     expect(atlas.view.coverageTexture.format).toBe(THREE.RGBAFormat);
     expect(atlas.view.coverageTexture.type).toBe(THREE.FloatType);
     expect(atlas.view.coverageTexture.image.data).toBeInstanceOf(Float32Array);
-    expect(atlas.view.coverageTexture.image.data.length).toBe(atlas.view.uploadStats.totalPixels * 4);
+    const data = atlas.view.coverageTexture.image.data;
+    expect(data?.length).toBe(atlas.view.uploadStats.totalPixels * 4);
   });
 
   it("does not dirty the normal fallback texture when normal atlas storage is disabled", () => {

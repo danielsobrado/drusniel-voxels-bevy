@@ -192,6 +192,7 @@ function atlasDirtyUploadEvidence(perfCase: P0PerfGateCaseLike): AtlasDirtyUploa
   const dirtyPct = metric(perfCase, "naadf.farSummaryAtlas.upload.dirtyPct");
   const modeCode = metric(perfCase, "naadf.farSummaryAtlas.upload.modeCode");
   if (!positive(dirtyUploads) || !positive(dirtyPixels) || !positive(totalPixels)) return null;
+  if (dirtyUploads === null || dirtyPixels === null || totalPixels === null) return null;
   if (dirtyPixels >= totalPixels) return null;
   if (modeCode !== null && modeCode !== 1) return null;
   return { caseName: perfCase.name, dirtyUploads, dirtyPixels, totalPixels, dirtyPct: dirtyPct ?? dirtyPixels / totalPixels };

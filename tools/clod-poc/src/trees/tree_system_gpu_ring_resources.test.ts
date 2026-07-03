@@ -62,7 +62,7 @@ describe("tree system GPU ring resources", () => {
 
 function createResources(
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
-  sourceGeometry = new THREE.BoxGeometry(1, 1, 1),
+  sourceGeometry: THREE.BufferGeometry = new THREE.BoxGeometry(1, 1, 1),
 ) {
   const settings = settingsForTest();
   return createTreeSystemGpuRingDrawResources({

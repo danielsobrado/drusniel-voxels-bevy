@@ -23,7 +23,6 @@ import {
   createCacheDebugOverlay,
   isCacheSessionDisabled,
   setCacheSessionDisabled,
-  type ClodCacheContext,
 } from "../../cache/index.js";
 import {
   buildProceduralTextureHash,
@@ -297,50 +296,58 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     waterConfig: {
       enabled: waterConfig.enabled,
       source: waterConfig.source,
-      fakeBodies: waterConfig.fakeBodies,
-      hydrology: {
-        enabled: waterConfig.hydrology.enabled,
-        simRes: waterConfig.hydrology.simRes,
-        particles: waterConfig.hydrology.accumulation.particles,
-        fillIterations: waterConfig.hydrology.fill.iterations,
-        riverThresholdAdd: waterConfig.hydrology.rivers.riverThresholdAdd,
-        visibleWaterThresholdAdd: waterConfig.hydrology.rivers.visibleWaterThresholdAdd,
-        carveDepthM: waterConfig.hydrology.rivers.carveDepthM,
-        lakeSurfaceDropM: waterConfig.hydrology.rivers.lakeSurfaceDropM,
-      },
+      fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
+      hydrology: { enabled: waterConfig.hydrology.enabled },
     },
+    proceduralTextureEnabled: proceduralTextureConfig.enabled,
     stagedImportHash,
     proceduralTextureHash,
+    longViewScene: queryLongViewScene,
   };
-  const sourceHash = await buildProceduralTextureHash(true, JSON.stringify(terrainSource));
-  const cacheContext: ClodCacheContext = initClodCacheContext({
-    version: cfg.meshopt_package_version,
+  const cacheContext = await initClodCacheContext({
+    cfg,
     worldPages: WORLD,
-    sourceHash,
-    cacheDisabled: isCacheSessionDisabled(),
+    terrainSource,
+    forceDisabled: isCacheSessionDisabled(),
   });
-  const cacheOverlay = createCacheDebugOverlay(document.body, cacheContext.stats);
-  if (searchParams.get("cacheDebug") === "1") cacheOverlay.setVisible(true);
+  const cacheOverlay = searchParams.get("cacheDebug") === "1"
+    ? createCacheDebugOverlay({ clearWorkerCache: () => clodWorker.clearCache() })
+    : null;
 
-  const result = await loadTerrainSummaryWithCacheSimple({
-    client: clodWorker,
-    worldSize: WORLD,
-    config: cfg,
-    source: worldSource,
-    cacheContext,
-    onProgress: (progress) => {
+  const result = await clodWorker.buildWorld(
+    WORLD,
+    WORLD,
+    cfg,
+    getVoxelEditSnapshot(),
+    (progress) => {
+      const fraction = progress.total > 0 ? progress.done / progress.total : 0;
       buildProgress.hidden = false;
       buildProgressPhase.textContent = progress.phase;
-      buildProgressPercent.textContent = `${Math.round(progress.progress * 100)}%`;
-      buildProgressBar.value = progress.progress;
+      buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
+      buildProgressBar.value = fraction;
       buildStatus.value = progress.phase;
       updateBuildOverlay();
     },
-  });
+    terrainFieldConfig,
+    hydrologyTerrain,
+    borderCoastOceanConfig,
+    isCacheSessionDisabled(),
+    terrainSource,
+  );
+  cacheOverlay?.update();
 
-  publishTerrainSummaryForDiagnostics(result, worldCells);
-  const { lod0Nodes, allNodes, maxTerrainLevel } = splitWorldBuildNodes(result.nodes);
-  const polish = aggregateDiagonalPolishStats(result.nodes);
+  const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
+  const summaryResult = await loadTerrainSummaryWithCacheSimple(
+    lod0Nodes,
+    worldCells,
+    cacheContext?.farReduceFactor ?? 8,
+    cacheContext,
+    worldSource,
+  );
+  const terrainSummary = summaryResult.summary;
+  publishTerrainSummaryForDiagnostics(terrainSummary);
+  const maxTerrainLevel = result.nodesByLevel.size > 0 ? Math.max(...result.nodesByLevel.keys()) : 0;
+  const polish = aggregateDiagonalPolishStats(result.stats.map((s) => s.polish));
   const polishLine = formatDiagonalPolishStats(polish);
   info.textContent = "ready";
   buildProgress.hidden = true;
@@ -368,7 +375,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     lod0Nodes,
     allNodes,
     maxTerrainLevel,
-    terrainSummary: result.terrainSummary,
+    terrainSummary,
     worldSource,
     result,
     hydrologySystem,

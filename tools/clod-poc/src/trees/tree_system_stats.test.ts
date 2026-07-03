@@ -168,6 +168,9 @@ function visibleClusterMaskStats(
     gpuCandidateCountAfterPrefilter: 0,
     gpuPrefilterCacheHits: 0,
     gpuPrefilterCacheMisses: 0,
+    gpuPrefilterSourceFarSummary: 0,
+    gpuPrefilterSourceTerrainSampler: 0,
+    gpuPrefilterSourceFallback: 0,
     ...overrides,
   };
 }
@@ -185,5 +188,6 @@ function generation(
     rejectedSlope,
     rejectedHeight,
     rejectedMaterial,
+    debugSamples: [],
   };
 }

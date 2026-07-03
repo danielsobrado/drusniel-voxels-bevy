@@ -98,7 +98,8 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const riverWeight: TslNode = smoothstep(0.001, 0.02, flowSpeed);
     const riverDir: TslNode = normalize(vec2(aFlow.x, aFlow.y).add(vec2(0.00001, 0.0)));
     const breezeDir: TslNode = normalize(uLakeBreeze.add(vec2(0.00001, 0.0)));
-    const mainDir: TslNode = normalize(mix(breezeDir, riverDir, riverWeight));
+    const mixedDir: TslNode = mix(breezeDir, riverDir, riverWeight) as TslNode;
+    const mainDir: TslNode = normalize(mixedDir);
     const sideDir: TslNode = vec2(mainDir.y.negate(), mainDir.x);
     const phase: TslNode = uTime.mul(uRippleSpeed);
     const waveA: TslNode = sin(dot(worldPos.xz, mainDir).mul(uRippleScaleA).add(phase)).mul(uRippleStrengthA);
