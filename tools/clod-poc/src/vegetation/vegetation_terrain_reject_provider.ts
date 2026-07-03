@@ -101,7 +101,7 @@ export function createVegetationTerrainRejectProvider(
       for (const source of sourcePriority) {
         if (source === "naadfFarSummary") {
           const decision = farSummaryProvider?.classifyCluster(query) ?? null;
-          if (decision) return { ...decision, source };
+          if (decision) return farSummaryDecision(query, decision, source);
           continue;
         }
         if (source === "terrainVisibilitySampler") {
@@ -173,6 +173,21 @@ export function createTerrainSummaryRejectProvider(
 
       return null;
     },
+  };
+}
+
+function farSummaryDecision(
+  query: VegetationTerrainRejectQuery,
+  decision: VegetationFarSummaryRejectDecision,
+  source: VegetationTerrainRejectSource,
+): VegetationTerrainRejectDecision {
+  if (decision.reason !== "summaryMissing") return { ...decision, source };
+  const conservative = unknownSummaryDecision(query, source);
+  return {
+    ...conservative,
+    confidence: decision.confidence,
+    debug: decision.debug,
+    sourceReason: decision.sourceReason,
   };
 }
 
