@@ -5,11 +5,6 @@ import {
   createTreePatchLodMesh,
   createTreePatchMeshGroup,
 } from "./tree_system_patch_mesh_factory.js";
-import {
-  TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
-  TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
-} from "./tree_impostor_blend_geometry.js";
-import { TREE_IMPOSTOR_BLEND_SAMPLE_COUNT } from "./tree_impostor_runtime.js";
 import { TREE_LODS, TREE_SPECIES, type TreeInstance, type TreeLod, type TreeSpeciesId } from "./index.js";
 
 describe("tree patch mesh factory", () => {
@@ -63,10 +58,9 @@ describe("tree patch mesh factory", () => {
     expect(mesh.geometry.getAttribute("treeLodFade").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeLodDitherRole").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeImpostorUvRect").count).toBe(3);
-    expect(mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME).count).toBe(3);
   });
 
-  it("attaches impostor UV rects only for impostor LOD", () => {
+  it("attaches impostor UV rect only for impostor LOD", () => {
     const near = new THREE.BufferGeometry();
     const impostor = new THREE.BufferGeometry();
     attachTreePatchInstanceAttributes(near, "near", 2);
@@ -78,11 +72,6 @@ describe("tree patch mesh factory", () => {
     expect(near.getAttribute("treeLodDitherRole").getX(0)).toBe(0);
     expect(near.getAttribute("treeImpostorUvRect")).toBeUndefined();
     expect(impostor.getAttribute("treeImpostorUvRect").itemSize).toBe(4);
-    for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
-      expect(impostor.getAttribute(name).itemSize).toBe(4);
-    }
-    expect(impostor.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME).itemSize).toBe(TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
-    expect(impostor.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME).getX(0)).toBe(1);
     expect(impostor.getAttribute("treeLodFade").getX(0)).toBe(1);
   });
 });
