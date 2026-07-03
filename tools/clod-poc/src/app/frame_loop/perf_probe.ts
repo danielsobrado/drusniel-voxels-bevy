@@ -49,7 +49,10 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
     avgCounter(samples, "treeGpuCandidateCount") +
     avgCounter(samples, "grassGpuCandidateCount") +
     avgCounter(samples, "understoryGpuCandidateCount");
-  const vegetationGpuClustersRejectedEarlyAvg = avgCounter(samples, "treeGpuPrefilterRejectedClusters");
+  const treeRejectedClustersAvg = avgCounter(samples, "treeGpuPrefilterRejectedClusters");
+  const treeVisibleClustersAvg = avgCounter(samples, "treeVisibleClusterVisible");
+  const treeUnknownKeptClustersAvg = avgCounter(samples, "treeVisibleClusterUnknownKept");
+  const treeAcceptedClustersAvg = Math.max(0, treeVisibleClustersAvg - treeUnknownKeptClustersAvg);
   const treeSourceFarSummaryAvg = avgCounter(samples, "treeGpuPrefilterSourceFarSummary");
   const treeSourceTerrainSamplerAvg = avgCounter(samples, "treeGpuPrefilterSourceTerrainSampler");
   const treeSourceFallbackAvg = avgCounter(samples, "treeGpuPrefilterSourceFallback");
@@ -67,7 +70,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       treeGpuCandidateCountAvg: avgCounter(samples, "treeGpuCandidateCount"),
       treeGpuCandidateCountBeforePrefilterAvg: avgCounter(samples, "treeGpuCandidateCountBeforePrefilter"),
       treeGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "treeGpuCandidateCountAfterPrefilter"),
-      treeGpuPrefilterRejectedClustersAvg: avgCounter(samples, "treeGpuPrefilterRejectedClusters"),
+      treeGpuPrefilterRejectedClustersAvg: treeRejectedClustersAvg,
       treeGpuPrefilterSkippedCandidateEstimateAvg: avgCounter(samples, "treeGpuPrefilterSkippedCandidateEstimate"),
       treeGpuPrefilterSourceFarSummaryAvg: treeSourceFarSummaryAvg,
       treeGpuPrefilterSourceTerrainSamplerAvg: treeSourceTerrainSamplerAvg,
@@ -77,8 +80,8 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       treeGpuShadowCasterCountAvg: avgCounter(samples, "treeGpuShadowCasterCount"),
       treeGpuShadowOverflowedFrames: samples.reduce((s, sample) => s + sample.treeGpuShadowOverflowed, 0),
       treeVisibleClusterHiddenAvg: avgCounter(samples, "treeVisibleClusterHidden"),
-      treeVisibleClusterVisibleAvg: avgCounter(samples, "treeVisibleClusterVisible"),
-      treeVisibleClusterUnknownKeptAvg: avgCounter(samples, "treeVisibleClusterUnknownKept"),
+      treeVisibleClusterVisibleAvg: treeVisibleClustersAvg,
+      treeVisibleClusterUnknownKeptAvg: treeUnknownKeptClustersAvg,
       treeNearTreesAvg: avgCounter(samples, "treeNearTrees"),
       treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
       treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
@@ -99,10 +102,10 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       understoryGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter"),
       understoryGpuAcceptedCountAvg: avgCounter(samples, "understoryGpuAcceptedCount"),
       understoryGpuVisibleCountAvg: avgCounter(samples, "understoryGpuVisibleCount"),
-      vegetationGpuClustersTotalAvg: avgCounter(samples, "treeGpuPrefilterRejectedClusters") + avgCounter(samples, "treeVisibleClusterVisible") + avgCounter(samples, "treeVisibleClusterUnknownKept"),
-      vegetationGpuClustersRejectedEarlyAvg,
-      vegetationGpuClustersAcceptedAvg: avgCounter(samples, "treeVisibleClusterVisible"),
-      vegetationGpuClustersSummaryMissingAvg: avgCounter(samples, "treeVisibleClusterUnknownKept"),
+      vegetationGpuClustersTotalAvg: treeRejectedClustersAvg + treeVisibleClustersAvg,
+      vegetationGpuClustersRejectedEarlyAvg: treeRejectedClustersAvg,
+      vegetationGpuClustersAcceptedAvg: treeAcceptedClustersAvg,
+      vegetationGpuClustersSummaryMissingAvg: treeUnknownKeptClustersAvg,
       vegetationGpuSourceFarSummaryAvg: treeSourceFarSummaryAvg,
       vegetationGpuSourceTerrainSamplerAvg: treeSourceTerrainSamplerAvg,
       vegetationGpuSourceFallbackAvg: treeSourceFallbackAvg,
@@ -110,7 +113,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       vegetationGpuCandidatesBudgetAfterRejectAvg,
       vegetationGpuCandidatesGeneratedAvg,
       vegetationGpuRejectOutsideTerrainAvg: 0,
-      vegetationGpuRejectTerrainHiddenAvg: vegetationGpuClustersRejectedEarlyAvg,
+      vegetationGpuRejectTerrainHiddenAvg: treeRejectedClustersAvg,
       vegetationGpuRejectNoCoverageAvg: 0,
       vegetationGpuRejectInvalidSurfaceAvg: 0,
       vegetationGpuEarlyRejectMsAvg: 0,
