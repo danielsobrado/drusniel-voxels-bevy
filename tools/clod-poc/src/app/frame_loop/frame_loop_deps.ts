@@ -35,6 +35,7 @@ import type { FloatingOriginController } from "../../precision/floating_origin.j
 import type { PageGeometryCacheStats } from "../../terrain/geometry/page_geometry_cache.js";
 import type { ClodRenderNodeCacheStats } from "../../terrain/rendering/clod_render_node_cache.js";
 import type { ClodApplyStatsSnapshot } from "../../terrain/rendering/clod_apply_stats.js";
+import type { DynamicResolutionController } from "../../rendering/dynamic_resolution.js";
 import type { StatsSyncThrottleConfig } from "./stats_sync_throttle.js";
 
 interface TerrainFadeView {
@@ -62,6 +63,7 @@ export interface FrameLoopRenderDeps {
   grassProfileEnabled: boolean;
   grassPrepassEnabled: boolean;
   makeGrassSettings: () => GrassSettings;
+  dynamicResolution?: DynamicResolutionController | null;
   /** TP-1 per-pass GPU timing collector (null on WebGL / unsupported). */
   gpuPassTiming?: GpuPassTiming | null;
   /** TP-1 gated offscreen tree-timing pass; runs after the visible frame. */
