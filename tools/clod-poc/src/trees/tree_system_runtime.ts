@@ -124,7 +124,10 @@ export class TreeSystem {
     this.settings.enabled = enabled;
     this.root.visible = enabled;
     if (enabled && !wasEnabled && !treeSystemUsesGpuRingDraw(this.settings)) this.refreshForCenter(this.lastCenter);
-    if (!enabled) { this.updateStats(); resetTreeLodCounts(this.lodCounts); }
+    if (!enabled) {
+      resetTreeLodCounts(this.lodCounts);
+      this.updateStats();
+    }
     this.updatePlacementDebugOverlay();
   }
 
@@ -209,6 +212,7 @@ export class TreeSystem {
     const plan = planTreePatchRemoval(this.patches, ids);
     for (const patch of plan.removed) removeTreePatchResources(this.root, patch);
     this.patches = plan.retained;
+    this.updatePatchLods(this.lastCenter, this.lastCenter);
     this.updatePlacementDebugOverlay();
     return plan.falling;
   }
@@ -273,9 +277,9 @@ export class TreeSystem {
   clearPatches(): void {
     for (const patch of this.patches) removeTreePatchResources(this.root, patch);
     this.patches = [];
+    resetTreeLodCounts(this.lodCounts);
     this.placementDebugOverlay.clear();
     this.updateStats();
-    resetTreeLodCounts(this.lodCounts);
   }
 
   clearGpuRing(): void { treeClearGpuRing(this); this.gpuLightingProxyCache.clear(); }
