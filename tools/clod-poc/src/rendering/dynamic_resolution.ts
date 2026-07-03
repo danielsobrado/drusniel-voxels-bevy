@@ -35,6 +35,12 @@ export interface DynamicResolutionController {
   stats(): DynamicResolutionStats;
 }
 
+declare global {
+  interface Window {
+    __drusnielDynamicResolution?: DynamicResolutionController;
+  }
+}
+
 const QUERY_FORCE_ON = new Set(["1", "true", "on"]);
 const QUERY_FORCE_OFF = new Set(["0", "false", "off"]);
 const DETERMINISTIC_MODE_FLAGS = [
@@ -134,7 +140,7 @@ export function createDynamicResolutionController(
     return avg;
   };
 
-  const applyScale = (nextScale: number, input: RenderResolutionUpdateInput, reason: DynamicResolutionReason) => {
+  const applyScale = (nextScale: number, input: DynamicResolutionUpdateInput, reason: DynamicResolutionReason) => {
     if (!runtime) return setReason("disabled");
     const currentScale = runtime.settings.renderScale;
     if (Math.abs(nextScale - currentScale) < 0.001) return setReason("stable");
