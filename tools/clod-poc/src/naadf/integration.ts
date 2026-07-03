@@ -13,11 +13,11 @@ import { queryTerrainHeight, tracePrimaryDebugRay, traceSunVisibility } from "./
 import { NaadfDebugOverlay } from "./debugOverlay.js";
 import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
+import { FarSummaryGpuAtlas, type FarSummaryGpuAtlasView } from "./gpu/farSummaryAtlas.js";
 import {
-  FarSummaryGpuAtlas,
-  type FarSummaryGpuAtlasFullUploadReason,
-  type FarSummaryGpuAtlasView,
-} from "./gpu/farSummaryAtlas.js";
+  farSummaryAtlasUploadFallbackReasonCode,
+  farSummaryAtlasUploadModeCode,
+} from "./farSummaryAtlasUploadCounters.js";
 import terrainMaterialCacheYaml from "../../config/terrain_material_cache.yaml?raw";
 import {
   parseTerrainMaterialCacheConfig,
@@ -30,26 +30,6 @@ const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda
 const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
 const HEIGHT_PROVIDER_KEY_SCALE = 1000;
 
-type FarSummaryAtlasUploadMode = FarSummaryGpuAtlasView["uploadStats"]["lastUploadMode"];
-
-export const FAR_SUMMARY_ATLAS_UPLOAD_MODE_CODE: Record<FarSummaryAtlasUploadMode, number> = {
-  none: 0,
-  dirty: 1,
-  full: 2,
-};
-
-export const FAR_SUMMARY_ATLAS_UPLOAD_FALLBACK_REASON_CODE: Record<FarSummaryGpuAtlasFullUploadReason | "none", number> = {
-  none: 0,
-  initial: 1,
-  explicit: 2,
-  disabled: 3,
-  too_many_rects: 4,
-  threshold: 5,
-  invalid_atlas: 6,
-  partial_ranges_unsupported: 7,
-  full_invalidation: 8,
-};
-
 export const NAADF_SCENES = new Set([
   "infinite-naadf-flat",
   "infinite-naadf-hills",
@@ -61,14 +41,6 @@ export const NAADF_SCENES = new Set([
   "infinite-naadf-stress-missing",
   "infinite-naadf-far",
 ]);
-
-export function farSummaryAtlasUploadModeCode(mode: FarSummaryAtlasUploadMode): number {
-  return FAR_SUMMARY_ATLAS_UPLOAD_MODE_CODE[mode];
-}
-
-export function farSummaryAtlasUploadFallbackReasonCode(reason: FarSummaryGpuAtlasFullUploadReason | null): number {
-  return FAR_SUMMARY_ATLAS_UPLOAD_FALLBACK_REASON_CODE[reason ?? "none"];
-}
 
 export function isNaadfScene(scene: string | null): boolean {
   return scene !== null && NAADF_SCENES.has(scene);
