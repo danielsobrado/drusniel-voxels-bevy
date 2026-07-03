@@ -66,6 +66,8 @@ describe("tree GPU ring compute helpers", () => {
         midFraction: 0.5,
         farFraction: 0.75,
         impostorFraction: 1,
+        crossfadeEnabled: true,
+        crossfadeBandM: 24,
       },
     };
     const layout = treeRingSpeciesLayout(TREE_SPECIES.length, 4);
@@ -93,6 +95,7 @@ describe("tree GPU ring compute helpers", () => {
     expect(f32[27]).toBe(56);
     expect(f32[4]).toBe(25);
     expect(f32[5]).toBe(50);
+    expect(f32[7]).toBe(0);
     expect(f32[8]).toBeCloseTo(TREE_GPU_RING_CELL, 6);
     expect(u32[layout.indexCountsOffset]).toBe(111);
     expect(u32[layout.indexCountsOffset + 1]).toBe(222);
@@ -236,22 +239,19 @@ describe("tree GPU ring shader source", () => {
     expect(treeRingShader).toContain("shadow_group_index(cascade, species, lod)");
   });
 
-  it("overlaps all adjacent LOD rings before the material dithers the transition", () => {
+  it("can append each LOD group, while runtime params select one hard LOD", () => {
     expect(treeRingShader).toContain("tree_lod_ring(dist");
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x");
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y");
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z");
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w");
-    expect(treeRingShader).toContain("dist > params.center_radius.z + params.lod.w");
   });
 });
 
 describe("tree GPU ring material source", () => {
-  it("uses complementary dither comparisons for ring LODs", () => {
-    expect(treeNodeMaterialSource).toContain("function treeRingLodMask");
-    expect(treeNodeMaterialSource).toContain("const passOut = (fade: TslNode): TslNode => ign.lessThan(fade)");
-    expect(treeNodeMaterialSource).toContain("const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade))");
-    expect(treeNodeMaterialSource).toContain("uFadeCenter");
+  it("keeps render-side ring LOD dithering out of the WebGPU material", () => {
+    expect(treeNodeMaterialSource).not.toContain("function treeRingLodMask");
+    expect(treeNodeMaterialSource).toContain("GPU ring LOD selection is resolved by compute");
     expect(treeNodeMaterialSource).toContain("treeRingHash(worldCell");
   });
 });
