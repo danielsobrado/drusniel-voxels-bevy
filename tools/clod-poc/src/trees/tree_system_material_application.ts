@@ -34,6 +34,7 @@ export interface ReplaceTreeSystemImpostorGeometriesInput {
   geometries: TreeGeometryMap;
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
   bakedImpostorGeometries: Partial<Record<TreeSpeciesId, THREE.BufferGeometry>>;
+  includeBlendAttributes?: boolean;
   meshBoundsState?: WeakMap<THREE.InstancedMesh, unknown>;
 }
 
@@ -68,7 +69,7 @@ export function replaceTreeSystemImpostorGeometries(input: ReplaceTreeSystemImpo
         impostorAtlases: input.impostorAtlases,
         bakedImpostorGeometries: input.bakedImpostorGeometries,
       });
-      replaceTreeSystemImpostorGeometry(mesh, source, input.meshBoundsState);
+      replaceTreeSystemImpostorGeometry(mesh, source, input.includeBlendAttributes ?? true, input.meshBoundsState);
     }
   }
 }
@@ -76,10 +77,11 @@ export function replaceTreeSystemImpostorGeometries(input: ReplaceTreeSystemImpo
 export function replaceTreeSystemImpostorGeometry(
   mesh: THREE.InstancedMesh,
   source: THREE.BufferGeometry,
+  includeBlendAttributes = true,
   meshBoundsState?: WeakMap<THREE.InstancedMesh, unknown>,
 ): void {
   const oldGeometry = mesh.geometry;
-  mesh.geometry = createTreeSystemImpostorGeometryForCapacity(source, mesh.instanceMatrix.count);
+  mesh.geometry = createTreeSystemImpostorGeometryForCapacity(source, mesh.instanceMatrix.count, includeBlendAttributes);
   oldGeometry.dispose();
   meshBoundsState?.delete(mesh);
 }
@@ -87,6 +89,7 @@ export function replaceTreeSystemImpostorGeometry(
 export function createTreeSystemImpostorGeometryForCapacity(
   source: THREE.BufferGeometry,
   capacity: number,
+  includeBlendAttributes = true,
 ): THREE.BufferGeometry {
   const safeCapacity = Math.max(0, Math.floor(capacity));
   const geometry = source.clone();
@@ -94,14 +97,18 @@ export function createTreeSystemImpostorGeometryForCapacity(
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity).fill(1), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+  if (includeBlendAttributes) attachTreeSystemImpostorBlendAttributes(geometry, safeCapacity);
+  return geometry;
+}
+
+function attachTreeSystemImpostorBlendAttributes(geometry: THREE.BufferGeometry, capacity: number): void {
   for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
-    geometry.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+    geometry.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));
   }
-  const weights = new Float32Array(safeCapacity * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
-  for (let index = 0; index < safeCapacity; index++) weights[index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT] = 1;
+  const weights = new Float32Array(capacity * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
+  for (let index = 0; index < capacity; index++) weights[index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT] = 1;
   geometry.setAttribute(
     TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
     new THREE.InstancedBufferAttribute(weights, TREE_IMPOSTOR_BLEND_SAMPLE_COUNT),
   );
-  return geometry;
 }
