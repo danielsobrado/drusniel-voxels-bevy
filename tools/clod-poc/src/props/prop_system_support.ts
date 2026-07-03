@@ -102,16 +102,20 @@ export function addLodTotals(target: number[], delta: readonly number[], sign: 1
 }
 
 export function lodGeometry(asset: LoadedPropAsset, lod: number): THREE.BufferGeometry | null {
-  let geometry: THREE.BufferGeometry | null = null;
-  if (asset.lodChain) geometry = asset.lodChain.levels[lod]?.geometry ?? null;
-  else {
-    let found: THREE.Mesh | null = null;
-    asset.root.traverse((obj) => {
-      if (!found && obj instanceof THREE.Mesh) found = obj;
-    });
-    geometry = found?.geometry ?? null;
-  }
+  const geometry = asset.lodChain
+    ? asset.lodChain.levels[lod]?.geometry ?? null
+    : firstRenderableGeometry(asset.root);
   return geometry && isRenderableIndirectDrawGeometry(geometry) ? geometry : null;
+}
+
+export function firstRenderableGeometry(root: THREE.Object3D): THREE.BufferGeometry | null {
+  let found: THREE.BufferGeometry | null = null;
+  root.traverse((obj) => {
+    if (found || !(obj instanceof THREE.Mesh)) return;
+    const geometry = obj.geometry;
+    if (geometry && isRenderableIndirectDrawGeometry(geometry)) found = geometry;
+  });
+  return found;
 }
 
 export function lodTriangleCount(asset: LoadedPropAsset, lod: number): number {
