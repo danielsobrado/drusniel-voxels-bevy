@@ -81,6 +81,7 @@ export class GrassCpuPatchRuntime {
   rebuildForNodes(nodeIds: Iterable<string>, center: THREE.Vector3, settings: GrassSettings): void {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
+    const wasDirty = this.patchesDirty;
 
     const stale: GrassPatch[] = [];
     const retained: GrassPatch[] = [];
@@ -117,7 +118,7 @@ export class GrassCpuPatchRuntime {
       updateGrassPatchVisibility({ patch, distance, settings });
     }
     this.lastRefreshCenter.copy(center);
-    this.patchesDirty = false;
+    this.patchesDirty = wasDirty;
   }
 
   refreshIfNeeded(center: THREE.Vector3, settings: GrassSettings): boolean {
