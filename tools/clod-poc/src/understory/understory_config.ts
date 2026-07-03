@@ -18,23 +18,31 @@ import {
 } from "./understory_config_types.js";
 import { cloneUnderstorySettings } from "./understory_config_defaults.js";
 
+const DEFAULT_UNDERSTORY_RUNTIME_BUDGET = {
+  distanceM: 100,
+  refreshDistanceM: 16,
+  maxNewPatchesPerFrame: 1,
+  maxInstances: 7000,
+  gpuMaxVisible: 24000,
+} as const;
+
 export function parseUnderstoryConfig(
   text: string | null | undefined,
   warn: ((message: string) => void) | null = console.warn,
 ): UnderstorySettings {
   const fallback = cloneUnderstorySettings();
-  if (!text || text.trim() === "") return fallback;
+  if (!text || text.trim() === "") return applyDefaultRuntimeBudget(fallback);
 
   let rawConfig: UnderstoryYamlConfig;
   try {
     rawConfig = (load(text) ?? {}) as UnderstoryYamlConfig;
   } catch (error) {
     warn?.(`[understory-config] failed to parse config/understory.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`);
-    return fallback;
+    return applyDefaultRuntimeBudget(fallback);
   }
 
   const raw = rawConfig.understory ?? {};
-  return {
+  return applyDefaultRuntimeBudget({
     enabled: readBoolean(raw.enabled, fallback.enabled),
     seed: Math.floor(readNumber(raw.seed, fallback.seed)),
     distanceM: readNumberInRange(raw.distance_m, fallback.distanceM, 0, 2000),
@@ -78,6 +86,21 @@ export function parseUnderstoryConfig(
       maxShadowClass: readUnderstoryClass(raw.render?.max_shadow_class, fallback.render.maxShadowClass),
     },
     gpu: readUnderstoryGpuSettings(raw.gpu, fallback.gpu),
+  });
+}
+
+function applyDefaultRuntimeBudget(settings: UnderstorySettings): UnderstorySettings {
+  const budget = DEFAULT_UNDERSTORY_RUNTIME_BUDGET;
+  return {
+    ...settings,
+    distanceM: Math.min(settings.distanceM, budget.distanceM),
+    refreshDistanceM: Math.max(settings.refreshDistanceM, budget.refreshDistanceM),
+    maxNewPatchesPerFrame: Math.min(settings.maxNewPatchesPerFrame, budget.maxNewPatchesPerFrame),
+    maxInstances: Math.min(settings.maxInstances, budget.maxInstances),
+    gpu: {
+      ...settings.gpu,
+      maxVisible: Math.min(settings.gpu.maxVisible, budget.gpuMaxVisible),
+    },
   };
 }
 
