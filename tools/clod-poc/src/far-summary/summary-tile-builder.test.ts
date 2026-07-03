@@ -38,6 +38,26 @@ describe("summary tile builder", () => {
     }
   });
 
+  it("backfills invalid center heights from valid samples instead of zero", () => {
+    let calls = 0;
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 2 },
+      terrainSampler: {
+        sampleHeight: () => {
+          calls++;
+          return calls === 1 ? Number.NaN : 64;
+        },
+      },
+      frameIndex: 0,
+      nowMs: 0,
+    });
+
+    expect(tile.samples[0].heightAvg).toBe(64);
+    expect(tile.samples[0].heightMin).toBe(64);
+    expect(tile.samples[0].heightMax).toBe(64);
+  });
+
   it("normals are unit vectors", () => {
     const tile = buildFarSummaryTile({
       key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
