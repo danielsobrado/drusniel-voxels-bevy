@@ -37,6 +37,10 @@ export interface UnderstoryGpuRingStats {
   candidateCount: number;
   candidateCountBeforePrefilter?: number;
   candidateCountAfterPrefilter?: number;
+  prefilterTestedClusters?: number;
+  prefilterRejectedClusters?: number;
+  prefilterAcceptedClusters?: number;
+  prefilterUnknownKeptClusters?: number;
   acceptedCandidates: number;
   counts: UnderstoryRingCounts;
   groupCounts: number[];
@@ -87,6 +91,10 @@ export class UnderstoryGpuRingCompute {
   private overflowed = false;
   private candidateCountBeforePrefilter = 0;
   private candidateCountAfterPrefilter = 0;
+  private prefilterTestedClusters = 0;
+  private prefilterRejectedClusters = 0;
+  private prefilterAcceptedClusters = 0;
+  private prefilterUnknownKeptClusters = 0;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
   private submitMs: number | null = null;
@@ -173,6 +181,10 @@ export class UnderstoryGpuRingCompute {
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
     const prefilter = params.activeSlotIndices ? null : this.buildSlotPrefilter(params);
+    this.prefilterTestedClusters = prefilter ? prefilter.clusterGrid * prefilter.clusterGrid : 0;
+    this.prefilterRejectedClusters = prefilter?.rejectedClusters ?? 0;
+    this.prefilterAcceptedClusters = prefilter?.visibleClusters ?? 0;
+    this.prefilterUnknownKeptClusters = prefilter?.unknownKeptClusters ?? 0;
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? understoryRingSlotCount(this.settings)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
@@ -203,6 +215,10 @@ export class UnderstoryGpuRingCompute {
       candidateCount: this.candidateCountAfterPrefilter,
       candidateCountBeforePrefilter: this.candidateCountBeforePrefilter,
       candidateCountAfterPrefilter: this.candidateCountAfterPrefilter,
+      prefilterTestedClusters: this.prefilterTestedClusters,
+      prefilterRejectedClusters: this.prefilterRejectedClusters,
+      prefilterAcceptedClusters: this.prefilterAcceptedClusters,
+      prefilterUnknownKeptClusters: this.prefilterUnknownKeptClusters,
       acceptedCandidates,
       counts: { ...this.counts },
       groupCounts: [...this.groupCounts],
