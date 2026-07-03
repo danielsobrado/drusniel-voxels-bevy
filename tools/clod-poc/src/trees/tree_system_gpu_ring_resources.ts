@@ -123,7 +123,7 @@ function createTreeGpuRingMaterialHandle(
       input.hydrologyWater,
     );
   }
-  if (treeRingUsesFarMaterial(lod)) {
+  if (input.settings.render.farCheapMaterial && treeRingUsesFarMaterial(lod)) {
     return createTreeRingFarNodeMaterialHandle(
       input.settings,
       buffers,
