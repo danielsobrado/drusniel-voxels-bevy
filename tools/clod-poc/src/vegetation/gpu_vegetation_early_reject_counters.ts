@@ -58,8 +58,6 @@ export function aggregateGpuVegetationEarlyRejectCounters(input: {
     counters.vegetationGpuCandidatesBudgetBeforeReject += grass.gpuRingCandidateCountBeforePrefilter ?? grass.gpuRingCandidateCount ?? 0;
     counters.vegetationGpuCandidatesBudgetAfterReject += grass.gpuRingCandidateCountAfterPrefilter ?? grass.gpuRingCandidateCount ?? 0;
     counters.vegetationGpuCandidatesGenerated += grass.generatedCandidates ?? 0;
-    counters.vegetationGpuClustersRejectedEarly += Math.max(0, (grass.gpuRingCandidateCountBeforePrefilter ?? 0) - (grass.gpuRingCandidateCountAfterPrefilter ?? 0));
-    counters.vegetationGpuRejectTerrainHidden += Math.max(0, (grass.gpuRingCandidateCountBeforePrefilter ?? 0) - (grass.gpuRingCandidateCountAfterPrefilter ?? 0));
   }
 
   const understory = input.understoryStats;
@@ -67,8 +65,6 @@ export function aggregateGpuVegetationEarlyRejectCounters(input: {
     counters.vegetationGpuCandidatesBudgetBeforeReject += understory.gpuCandidateCountBeforePrefilter ?? understory.gpuCandidateCount ?? 0;
     counters.vegetationGpuCandidatesBudgetAfterReject += understory.gpuCandidateCountAfterPrefilter ?? understory.gpuCandidateCount ?? 0;
     counters.vegetationGpuCandidatesGenerated += understory.gpuCandidateCount ?? 0;
-    counters.vegetationGpuClustersRejectedEarly += Math.max(0, (understory.gpuCandidateCountBeforePrefilter ?? 0) - (understory.gpuCandidateCountAfterPrefilter ?? 0));
-    counters.vegetationGpuRejectTerrainHidden += Math.max(0, (understory.gpuCandidateCountBeforePrefilter ?? 0) - (understory.gpuCandidateCountAfterPrefilter ?? 0));
   }
 
   return counters;
