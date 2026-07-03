@@ -49,10 +49,7 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
     avgCounter(samples, "treeGpuCandidateCount") +
     avgCounter(samples, "grassGpuCandidateCount") +
     avgCounter(samples, "understoryGpuCandidateCount");
-  const vegetationGpuClustersRejectedEarlyAvg =
-    avgCounter(samples, "treeGpuPrefilterRejectedClusters") +
-    Math.max(0, avgCounter(samples, "grassGpuCandidateCountBeforePrefilter") - avgCounter(samples, "grassGpuCandidateCountAfterPrefilter")) +
-    Math.max(0, avgCounter(samples, "understoryGpuCandidateCountBeforePrefilter") - avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter"));
+  const vegetationGpuClustersRejectedEarlyAvg = avgCounter(samples, "treeGpuPrefilterRejectedClusters");
   return {
     sampleCount: samples.length, warmupFrames, targetSampleFrames, metrics,
     broadBucketsByP95: rankBuckets(metrics, FRAME_PERF_BROAD_BUCKETS),
@@ -128,7 +125,8 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
 function countStatsSyncReasons(samples: readonly FramePerfSample[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const sample of samples) {
-    counts[sample.statsSyncThrottleReason] = (counts[sample.statsSyncThrottleReason] ?? 0) + 1;
+    const key = String(sample.statsSyncThrottleReason);
+    counts[key] = (counts[key] ?? 0) + 1;
   }
   return counts;
 }
