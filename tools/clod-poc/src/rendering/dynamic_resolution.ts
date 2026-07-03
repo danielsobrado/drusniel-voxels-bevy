@@ -152,7 +152,7 @@ export function createDynamicResolutionController(
     return setReason(reason);
   };
 
-  return {
+  const controller: DynamicResolutionController = {
     update(input: DynamicResolutionUpdateInput): DynamicResolutionStats {
       stats.renderScale = runtime?.settings.renderScale ?? stats.renderScale;
       if (!active || !runtime) return setReason(stats.reason === "mode_disabled" ? "mode_disabled" : "disabled");
@@ -184,4 +184,7 @@ export function createDynamicResolutionController(
     },
     stats: () => ({ ...stats }),
   };
+
+  window.__drusnielDynamicResolution = controller;
+  return controller;
 }
