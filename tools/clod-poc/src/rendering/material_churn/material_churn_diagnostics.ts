@@ -32,12 +32,12 @@ export interface MaterialChurnTotals {
 }
 
 export const DEFAULT_MATERIAL_CHURN_CONFIG: MaterialChurnConfig = {
-  enabled: true,
-  collectMaterialVersions: true,
-  collectRendererPrograms: true,
+  enabled: false,
+  collectMaterialVersions: false,
+  collectRendererPrograms: false,
   logSpikeWarnings: false,
   spikeWarnThresholdPerFrame: 32,
-  maxTrackedMaterials: 4096,
+  maxTrackedMaterials: 1024,
 };
 
 type TrackedMaterial = {
@@ -53,6 +53,41 @@ const ZERO_TOTALS: MaterialChurnTotals = {
   pipelineSensitiveChanges: 0,
   suspectedPipelineKeyChanges: 0,
 };
+
+function queryBool(searchParams: URLSearchParams, keys: readonly string[]): boolean | null {
+  for (const key of keys) {
+    const raw = searchParams.get(key)?.trim().toLowerCase();
+    if (raw === undefined) continue;
+    if (raw === "1" || raw === "true" || raw === "on" || raw === "yes") return true;
+    if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
+  }
+  return null;
+}
+
+export function materialChurnConfigForQuery(
+  config: MaterialChurnConfig,
+  searchParams: URLSearchParams,
+): MaterialChurnConfig {
+  const profileEnabled = queryBool(searchParams, ["profile", "profiling"]) === true;
+  const explicitEnabled = queryBool(searchParams, ["materialChurn", "material_churn"]);
+  const enabled = explicitEnabled ?? profileEnabled;
+  const collectMaterialVersions = enabled && (
+    queryBool(searchParams, ["materialChurnVersions", "materialVersions"])
+      ?? config.collectMaterialVersions
+      ?? profileEnabled
+  );
+  const collectRendererPrograms = enabled && (
+    queryBool(searchParams, ["materialChurnPrograms", "rendererPrograms"])
+      ?? config.collectRendererPrograms
+      ?? profileEnabled
+  );
+  return {
+    ...config,
+    enabled,
+    collectMaterialVersions,
+    collectRendererPrograms,
+  };
+}
 
 export class MaterialChurnDiagnostics {
   private config: MaterialChurnConfig;
