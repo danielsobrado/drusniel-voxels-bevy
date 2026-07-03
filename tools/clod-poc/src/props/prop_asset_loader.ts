@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { isRenderableIndirectDrawGeometry } from "../gpu/indirect_draw_geometry.js";
 import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata } from "./prop_types.js";
 import { extractPropAssetMetadata } from "./prop_asset_metadata.js";
 import { validateCustomPropsManifest, validatePropAssetMetadata } from "./prop_asset_validate.js";
@@ -9,7 +10,7 @@ import { createBillboardMaterial } from "./prop_billboard.js";
 function firstRenderableMesh(root: THREE.Object3D): THREE.Mesh | null {
   let found: THREE.Mesh | null = null;
   root.traverse((obj) => {
-    if (!found && obj instanceof THREE.Mesh) found = obj;
+    if (!found && obj instanceof THREE.Mesh && isRenderableIndirectDrawGeometry(obj.geometry)) found = obj;
   });
   return found;
 }
@@ -87,8 +88,11 @@ export class PropAssetRegistry {
     if (def.lod.mode === "generated") {
       lodChain = await buildPropLodChain(sourceMesh.geometry, def, extractPropAssetMetadata(root, def).boundingSphereRadius);
       lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
-      if (lodChain.billboardGeometry) {
+      if (lodChain.billboardGeometry && isRenderableIndirectDrawGeometry(lodChain.billboardGeometry)) {
         lodChain.billboardGeometry.userData.billboardMaterial = createBillboardMaterial(sourceMaterial);
+      } else if (lodChain.billboardGeometry) {
+        lodChain.billboardGeometry.dispose();
+        lodChain.billboardGeometry = null;
       }
     }
 
