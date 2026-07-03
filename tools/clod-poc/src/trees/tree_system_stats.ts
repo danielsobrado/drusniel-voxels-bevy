@@ -177,6 +177,7 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     rejectedSlope: 0,
     rejectedHeight: 0,
     rejectedMaterial: 0,
+    debugSamples: [],
   };
 }
 
