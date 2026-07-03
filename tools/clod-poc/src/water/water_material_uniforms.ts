@@ -148,8 +148,9 @@ export const WATER_FRAG = /* glsl */ `
 
   void main() {
     vec3 worldPos = vWorldPos;
-    if (worldPos.x < 0.0 || worldPos.x > uWorldBounds.x ||
-        worldPos.z < 0.0 || worldPos.z > uWorldBounds.y) {
+    bool finiteWorldBounds = uWorldBounds.x > 0.0 && uWorldBounds.y > 0.0;
+    if (finiteWorldBounds && (worldPos.x < 0.0 || worldPos.x > uWorldBounds.x ||
+        worldPos.z < 0.0 || worldPos.z > uWorldBounds.y)) {
       discard;
     }
     if (worldPos.x > uInnerRect.x && worldPos.x < uInnerRect.z &&
