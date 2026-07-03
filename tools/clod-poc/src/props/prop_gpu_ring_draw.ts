@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
+import { isRenderableIndirectDrawGeometry } from "../gpu/indirect_draw_geometry.js";
 import type { CustomPropsSettings } from "./prop_types.js";
 import type { LoadedPropAsset } from "./prop_asset_loader.js";
 import {
@@ -41,7 +42,7 @@ export function buildPropGpuRingSource(input: {
     for (let lod = 0; lod < 4; lod++) assetLods[assetIndex * 4 + lod] = def.lod.distances[lod] ?? Number.POSITIVE_INFINITY;
     for (let lod = 0; lod < lodCount; lod++) {
       const geometry = lodGeometry(loaded, lod);
-      const indexCount = geometry ? indexCountFor(geometry) : 0;
+      const indexCount = geometry && isRenderableIndirectDrawGeometry(geometry) ? indexCountFor(geometry) : 0;
       groupMeta.push(assetIndex, lod, indexCount, 0);
       group++;
     }
@@ -92,7 +93,10 @@ export function createPropGpuRingDrawResources(input: {
     const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
     for (let lod = 0; lod < lodCount; lod++) {
       const geometry = lodGeometry(loaded, lod);
-      if (!geometry) continue;
+      if (!geometry || !isRenderableIndirectDrawGeometry(geometry)) {
+        group++;
+        continue;
+      }
       const drawGeometry = createPropGpuRingGeometry(geometry, maxInstancesPerGroup, indirect, group * 5 * Uint32Array.BYTES_PER_ELEMENT);
       const material = createPropGpuRingMaterial(loaded.sourceMaterial, { instanceA, instanceB, capacity });
       const mesh = new THREE.Mesh(drawGeometry, material);
