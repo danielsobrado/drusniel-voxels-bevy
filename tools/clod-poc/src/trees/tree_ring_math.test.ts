@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TREE_SETTINGS } from "./tree_config.js";
+import { cloneTreeSettings } from "./tree_config_defaults.js";
 import {
   treeAcceptMask,
   treeLodRing,
@@ -55,14 +56,28 @@ describe("tree GPU ring math", () => {
     expect(lowGround).toBeLessThan(first);
   });
 
-  it("derives LOD ring thresholds from tree settings", () => {
-    const params = treeRingLodParams(DEFAULT_TREE_SETTINGS);
+  it("derives CPU LOD ring thresholds from tree settings", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.gpu.enabled = false;
+    const params = treeRingLodParams(settings);
 
-    expect(params.near).toBe(DEFAULT_TREE_SETTINGS.distanceM * DEFAULT_TREE_SETTINGS.lod.nearFraction);
-    expect(params.mid).toBe(DEFAULT_TREE_SETTINGS.distanceM * DEFAULT_TREE_SETTINGS.lod.midFraction);
-    expect(params.far).toBe(DEFAULT_TREE_SETTINGS.distanceM * DEFAULT_TREE_SETTINGS.lod.farFraction);
-    expect(params.radius).toBe(DEFAULT_TREE_SETTINGS.distanceM * DEFAULT_TREE_SETTINGS.lod.impostorFraction);
-    expect(params.band).toBe(DEFAULT_TREE_SETTINGS.lod.crossfadeBandM);
+    expect(params.near).toBe(settings.distanceM * settings.lod.nearFraction);
+    expect(params.mid).toBe(settings.distanceM * settings.lod.midFraction);
+    expect(params.far).toBe(settings.distanceM * settings.lod.farFraction);
+    expect(params.radius).toBe(settings.distanceM * settings.lod.impostorFraction);
+    expect(params.band).toBe(settings.lod.crossfadeBandM);
+  });
+
+  it("forces hard LOD selection for the GPU ring path", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.gpu.enabled = true;
+    settings.gpu.scatterEnabled = true;
+    settings.gpu.cullEnabled = true;
+    settings.gpu.debugForceCpu = false;
+    settings.lod.crossfadeEnabled = true;
+    settings.lod.crossfadeBandM = 24;
+
+    expect(treeRingLodParams(settings).band).toBe(0);
   });
 
   it("overlaps adjacent LOD rings with complementary fades", () => {
