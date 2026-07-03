@@ -3,6 +3,10 @@ import type { ProjectSessionState } from "../../project/voxel_project_archive.js
 import { FAR_SHELL_DEFAULTS } from "../clod_constants.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const INFINITE_ISLANDS_LIVE_RADIUS_M = 200;
+const INFINITE_ISLANDS_CLOD_RADIUS_M = 2048;
+
 export interface LiveBubbleDefault {
   enabled: boolean;
   radiusM: number;
@@ -60,6 +64,40 @@ const CLOD_ARCHIVE_KEYS = [
 
 function finiteNonNegative(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
+}
+
+function queryParams(): URLSearchParams | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search);
+}
+
+function booleanParam(params: URLSearchParams, key: string): boolean | null {
+  const value = params.get(key);
+  if (value === "1" || value === "true") return true;
+  if (value === "0" || value === "false") return false;
+  return null;
+}
+
+function positiveParam(params: URLSearchParams, key: string): number | null {
+  const value = Number(params.get(key));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undefined {
+  const params = queryParams();
+  if (!params) return undefined;
+  const sceneDefault = params.get("scene") === INFINITE_ISLANDS_SCENE;
+  const enabledOverride = booleanParam(params, "liveBubble");
+  const radiusOverride = positiveParam(params, "liveBubbleRadius");
+  if (!sceneDefault && enabledOverride === null && radiusOverride === null) return undefined;
+
+  const defaultRadius = sceneDefault
+    ? INFINITE_ISLANDS_LIVE_RADIUS_M
+    : cfg.near_field.radius_chunks * cfg.page.chunk_size;
+  return {
+    enabled: enabledOverride ?? sceneDefault,
+    radiusM: Math.min(radiusOverride ?? defaultRadius, INFINITE_ISLANDS_CLOD_RADIUS_M / 2),
+  };
 }
 
 export function applyLiveBubbleDefault(
@@ -124,6 +162,7 @@ export function createClodSliceState(input: {
     clodShadowProxyWireframe: true,
     clodShadowStatsLine: "",
   };
+  applyLiveBubbleDefault(state, queryLiveBubbleDefault(input.cfg));
   applyLiveBubbleDefault(state, input.liveBubbleDefault);
   return state;
 }
