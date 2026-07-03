@@ -48,7 +48,7 @@ export interface TerrainEditServiceDeps {
   applyTerrainTextures: () => void;
   grassSystem: { rebuildNodePatches(ids: string[]): void } | null;
   treeSystem: { rebuildNodePatches(ids: string[]): void } | null;
-  understorySystem: { rebuildNodePatches(ids: string[]): void } | null;
+  understorySystem: { rebuildNodePatches(ids: string[]): void; markPatchesDirty?(): void } | null;
   fallingTrees: unknown[];
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
@@ -119,7 +119,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0) {
       const ids = [...pendingUnderstoryNodeIds];
       try {
-        deps.understorySystem?.rebuildNodePatches(ids);
+        const understory = deps.understorySystem;
+        if (understory?.markPatchesDirty) understory.markPatchesDirty();
+        else understory?.rebuildNodePatches(ids);
         deps.refreshUnderstoryStats();
         clearIds(pendingUnderstoryNodeIds, ids);
       } catch (error) {
