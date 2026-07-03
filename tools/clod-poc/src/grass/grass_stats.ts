@@ -25,6 +25,10 @@ export interface GrassStats {
   gpuRingCandidateCount: number;
   gpuRingCandidateCountBeforePrefilter?: number;
   gpuRingCandidateCountAfterPrefilter?: number;
+  gpuRingPrefilterTestedClusters: number;
+  gpuRingPrefilterRejectedClusters: number;
+  gpuRingPrefilterAcceptedClusters: number;
+  gpuRingPrefilterUnknownKeptClusters: number;
   gpuRingVisibleNear: number;
   gpuRingVisibleMid: number;
   gpuRingVisibleFar: number;
