@@ -112,7 +112,7 @@ export interface SpellVfxController {
   playWater: (durationMs: number) => void;
   playAir: (durationMs: number) => void;
   playEarth: (durationMs: number) => void;
-  update: (nowMs: number) => void;
+  update: (nowMs?: number) => void;
   dispose: () => void;
 }
 
@@ -228,9 +228,10 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     playWater: (durationMs) => start(water, durationMs),
     playAir: (durationMs) => start(air, durationMs),
     playEarth: (durationMs) => earth.play(durationMs),
-    update: (nowMs) => {
-      for (const spell of spells) tick(spell, nowMs);
-      earth.update(nowMs);
+    update: () => {
+      const frameNow = now();
+      for (const spell of spells) tick(spell, frameNow);
+      earth.update(frameNow);
     },
     dispose: () => {
       for (const spell of spells) {
