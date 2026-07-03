@@ -49,7 +49,7 @@ describe("tree impostor quality defaults", () => {
     expect(texture.anisotropy).toBeGreaterThanOrEqual(4);
   });
 
-  it("uses far mesh geometry while baked impostor atlases are not ready", () => {
+  it("uses placeholder impostor geometry while baked impostor atlases are not ready", () => {
     const settings = cloneTreeSettings();
     const map = geometries();
 
@@ -63,7 +63,7 @@ describe("tree impostor quality defaults", () => {
         bakedImpostorGeometries: {},
       });
 
-      expect(geometry).toBe(map[TEST_SPECIES][lod === "impostor" ? "far" : lod]);
+      expect(geometry).toBe(map[TEST_SPECIES][lod]);
     }
   });
 
