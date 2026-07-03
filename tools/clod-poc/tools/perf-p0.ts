@@ -93,8 +93,14 @@ const P0_COUNTERS = [
   "treeGpuPrefilterSourceFallbackAvg",
   "grassGpuCandidateCountBeforePrefilterAvg",
   "grassGpuCandidateCountAfterPrefilterAvg",
+  "grassGpuPrefilterSourceFarSummaryAvg",
+  "grassGpuPrefilterSourceTerrainSamplerAvg",
+  "grassGpuPrefilterSourceFallbackAvg",
   "understoryGpuCandidateCountBeforePrefilterAvg",
   "understoryGpuCandidateCountAfterPrefilterAvg",
+  "understoryGpuPrefilterSourceFarSummaryAvg",
+  "understoryGpuPrefilterSourceTerrainSamplerAvg",
+  "understoryGpuPrefilterSourceFallbackAvg",
   "pageGeometryCache.hits",
   "pageGeometryCache.misses",
   "pageGeometryCache.entries",
@@ -420,8 +426,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
   }
 
   lines.push("", "## Required P0 counters", "");
-  lines.push("| case | cache hit/miss | cache ready/stale | veg clusters rejected/accepted/missing | source far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
-  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  lines.push("| case | cache hit/miss | cache ready/stale | veg clusters rejected/accepted/missing | veg src far/sampler/fallback | tree src far/sampler/fallback | grass src far/sampler/fallback | under src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const result of results) {
     const m = result.metrics;
     lines.push(
@@ -430,6 +436,9 @@ function markdown(results: readonly PerfCaseResult[]): string {
         `${fmt(m.terrainMaterialCacheReady)}/${fmt(m.terrainMaterialCacheStale)} | ` +
         `${fmt(m.vegetationGpuClustersRejectedEarly)}/${fmt(m.vegetationGpuClustersAccepted)}/${fmt(m.vegetationGpuClustersSummaryMissing)} | ` +
         `${fmt(m.vegetationGpuSourceFarSummary)}/${fmt(m.vegetationGpuSourceTerrainSampler)}/${fmt(m.vegetationGpuSourceFallback)} | ` +
+        `${fmt(m.treeGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.treeGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.treeGpuPrefilterSourceFallbackAvg)} | ` +
+        `${fmt(m.grassGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.grassGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.grassGpuPrefilterSourceFallbackAvg)} | ` +
+        `${fmt(m.understoryGpuPrefilterSourceFarSummaryAvg)}/${fmt(m.understoryGpuPrefilterSourceTerrainSamplerAvg)}/${fmt(m.understoryGpuPrefilterSourceFallbackAvg)} | ` +
         `${fmt(m.vegetationGpuCandidatesBudgetBeforeReject)}/${fmt(m.vegetationGpuCandidatesBudgetAfterReject)}/${fmt(m.vegetationGpuCandidatesGenerated)} | ` +
         `${fmt(m.grassGpuCandidateCountBeforePrefilterAvg)}/${fmt(m.grassGpuCandidateCountAfterPrefilterAvg)} | ` +
         `${fmt(m.understoryGpuCandidateCountBeforePrefilterAvg)}/${fmt(m.understoryGpuCandidateCountAfterPrefilterAvg)} | ` +
@@ -463,7 +472,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
     "",
     "- `-` means the metric was not exposed by the current runtime path. Do not treat missing metrics as zero.",
     "- A WebGPU failure may be retried with WebGL only to keep the report complete; the selected renderer column shows which attempt produced the reported numbers.",
-    "- Vegetation source counts show which classifier source produced the tree cluster prefilter decisions: far-summary, terrain sampler, or conservative fallback.",
+    "- Vegetation source counts show which classifier source produced cluster prefilter decisions for trees, grass, and understory: far-summary, terrain sampler, or conservative fallback.",
     "- Atlas upload mode is numeric: 0=none, 1=dirty, 2=full. Fallback reason is numeric: 0=none, 1=initial, 2=explicit, 3=disabled, 4=too_many_rects, 5=threshold, 6=invalid_atlas, 7=partial_ranges_unsupported, 8=full_invalidation.",
     "- This runner records evidence. It does not prove visual parity by itself.",
     "",
