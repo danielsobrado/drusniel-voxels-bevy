@@ -14,7 +14,7 @@ describe("tree system LOD resolution helper", () => {
     })).toBe("near");
   });
 
-  it("falls back from impostor to far when atlas is missing and placeholders are disabled", () => {
+  it("keeps the impostor LOD when atlas is missing", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
     settings.impostors.fallbackToPlaceholder = false;
@@ -23,7 +23,7 @@ describe("tree system LOD resolution helper", () => {
       lod: "impostor",
       settings,
       impostorAtlases: {},
-    })).toBe("far");
+    })).toBe("impostor");
   });
 
   it("keeps impostor LOD when placeholder fallback is enabled", () => {
@@ -50,20 +50,20 @@ describe("tree system LOD resolution helper", () => {
     })).toBe("impostor");
   });
 
-  it("falls back to far when the atlas exists but is not ready", () => {
+  it("keeps impostor LOD when the atlas exists but is not ready", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
     settings.impostors.fallbackToPlaceholder = false;
     expect(resolveTreeSystemLod({
-      species: "dead",
+      species: "oak",
       lod: "impostor",
       settings,
-      impostorAtlases: { dead: atlas("dead", false) },
-    })).toBe("far");
+      impostorAtlases: { oak: atlas("oak", false) },
+    })).toBe("impostor");
   });
 });
 
-function atlas(species: "oak" | "pine" | "dead", ready: boolean): TreeImpostorAtlas {
+function atlas(species: "oak" | "pine", ready: boolean): TreeImpostorAtlas {
   const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
   return {
     species,
