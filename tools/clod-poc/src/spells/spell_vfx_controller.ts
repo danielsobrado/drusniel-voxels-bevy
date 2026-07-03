@@ -119,11 +119,11 @@ export interface SpellVfxController {
   dispose: () => void;
 }
 
-interface FallbackSpellUniforms {
-  uColor: { value: THREE.Color };
-  uTime: { value: number };
-  uProgress: { value: number };
-  uOpacity: { value: number };
+interface FallbackSpellUniforms extends Record<string, THREE.IUniform> {
+  uColor: THREE.IUniform<THREE.Color>;
+  uTime: THREE.IUniform<number>;
+  uProgress: THREE.IUniform<number>;
+  uOpacity: THREE.IUniform<number>;
 }
 
 interface SpellState {
