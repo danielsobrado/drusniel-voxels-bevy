@@ -2,11 +2,33 @@
   "renderer": "webgpu",
   "url": "http://localhost:5173/?world=8&seed=1&webgpuSelection=1&farShell=1&freeze=1&perfProbe=1&perfWarmup=120&perfFrames=300&p0DirtyAtlasExercise=1&dirtyAtlasMoveM=768&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-forest&terrainMaterialCache=1&gpuEarlyReject=1&treeGpu=1&grass=1&understory=1",
   "status": "failed",
-  "warnings": [],
-  "errors": [],
-  "launchRecipe": null,
-  "lastProgress": null,
+  "warnings": [
+    "The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "Calling [RenderPassEncoder (unlabeled)].Draw with a vertex count of 0 is unusual.",
+    "The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127"
+  ],
+  "errors": [
+    "page.evaluate: Execution context was destroyed, most likely because of a navigation",
+    "ReferenceError: screenCoordinate is not defined\n    at buildMaterial (http://localhost:5173/src/trees/tree_node_material.ts?t=1783076244573:125:13)\n    at createTreeNodeMaterialHandle (http://localhost:5173/src/trees/tree_node_material.ts?t=1783076244573:143:27)\n    at new TreeSystemAssets (http://localhost:5173/src/trees/tree_system_assets_runtime.ts?t=1783076244573:37:41)\n    at new TreeSystem (http://localhost:5173/src/trees/tree_system_runtime.ts?t=1783076244573:69:19)\n    at createTreeController (http://localhost:5173/src/runtime/vegetation/tree_controller.ts?t=1783076244573:78:18)\n    at runTreeStartup (http://localhost:5173/src/runtime/vegetation/tree_startup.ts?t=1783076244573:88:26)\n    at runVegetationStartup (http://localhost:5173/src/runtime/vegetation/vegetation_startup.ts?t=1783076244573:57:16)\n    at runRuntimeSystemsStartup (http://localhost:5173/src/app/bootstrap/runtime/runtime_systems_startup.ts?t=1783076244573:56:22)\n    at bootstrapClodPoc (http://localhost:5173/src/app/bootstrap/clod_poc_bootstrap.ts?t=1783076244573:273:25)"
+  ],
+  "launchRecipe": {
+    "headless": true,
+    "channel": "chromium",
+    "args": [
+      "--enable-unsafe-webgpu"
+    ]
+  },
+  "lastProgress": {
+    "fatal": null,
+    "ready": false,
+    "observedFrames": 0,
+    "sampleCount": 0,
+    "targetSampleFrames": 0,
+    "progressMsg": "building world",
+    "clodReady": false,
+    "lastFrameId": null
+  },
   "snapshot": null,
   "finalCounters": {},
-  "error": "CLOD-POC dev server is not reachable at http://localhost:5173/ (fetch failed). Start it with `npm run dev` from tools/clod-poc, or pass `--baseUrl` / CLOD_POC_BASE_URL."
+  "error": "Missing window.__drusnielPerf snapshot"
 }
