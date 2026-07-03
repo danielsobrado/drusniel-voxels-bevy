@@ -1,6 +1,6 @@
 import type { DynamicResolutionConfig, RenderResolutionConfig } from "./render_resolution.js";
 
-export const DEFAULT_RENDER_RESOLUTION_PRESET = "high";
+export const DEFAULT_RENDER_RESOLUTION_PRESET = "performance100";
 
 export const DEFAULT_DYNAMIC_RESOLUTION_CONFIG: DynamicResolutionConfig = {
   enabled: true,
@@ -16,10 +16,10 @@ export const DEFAULT_DYNAMIC_RESOLUTION_CONFIG: DynamicResolutionConfig = {
 };
 
 export const DEFAULT_RENDER_RESOLUTION_CONFIG: RenderResolutionConfig = {
-  dprCap: 1.5,
-  renderScale: 1.0,
+  dprCap: 1.0,
+  renderScale: 0.85,
   minEffectivePixelRatio: 0.5,
-  maxEffectivePixelRatio: 2.0,
+  maxEffectivePixelRatio: 1.25,
   dynamic: DEFAULT_DYNAMIC_RESOLUTION_CONFIG,
   presets: {
     performance100: {
@@ -31,15 +31,15 @@ export const DEFAULT_RENDER_RESOLUTION_CONFIG: RenderResolutionConfig = {
       renderScale: 0.75,
     },
     medium: {
+      dprCap: 1.0,
+      renderScale: 0.85,
+    },
+    high: {
       dprCap: 1.25,
       renderScale: 0.9,
     },
-    high: {
-      dprCap: 1.5,
-      renderScale: 1.0,
-    },
     ultra: {
-      dprCap: 2.0,
+      dprCap: 1.5,
       renderScale: 1.0,
     },
   },
