@@ -244,10 +244,10 @@ function reject(
   return withFarSummaryConsulted({ reject: true, reason, confidence, source, sourceReason, debug }, farSummaryConsulted);
 }
 
-function withFarSummaryConsulted<T extends VegetationTerrainRejectDecision>(
-  decision: T,
+function withFarSummaryConsulted(
+  decision: VegetationTerrainRejectDecision,
   farSummaryConsulted: boolean,
-): T {
+): VegetationTerrainRejectDecision {
   return farSummaryConsulted ? { ...decision, source: "naadfFarSummary", farSummaryConsulted: true } : decision;
 }
 
