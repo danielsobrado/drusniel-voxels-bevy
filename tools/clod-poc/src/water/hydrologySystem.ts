@@ -44,15 +44,19 @@ export interface HydrologyStats {
   waterYFarMax: number;
 }
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+
 export class HydrologySystem {
   readonly grid: HydrologyGrid;
   readonly stats: HydrologyStats;
+  private readonly wrapWorldSamples: boolean;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
-  private constructor(grid: HydrologyGrid, stats: HydrologyStats) {
+  private constructor(grid: HydrologyGrid, stats: HydrologyStats, wrapWorldSamples: boolean) {
     this.grid = grid;
     this.stats = stats;
+    this.wrapWorldSamples = wrapWorldSamples;
   }
 
   /**
@@ -132,16 +136,37 @@ export class HydrologySystem {
     const stats = collectStats(grid, config.accumulation.particles, nowMs() - t0);
     logHydrologySummary(stats);
     maybeDumpHydrologyFields(grid, config);
-    return new HydrologySystem(grid, stats);
+    return new HydrologySystem(grid, stats, infiniteIslandsScene());
   }
 
   sample(x: number, z: number): HydrologySample {
-    return sampleHydrologyGrid(this.grid, x, z);
+    const mapped = this.mapSampleCoord(x, z);
+    return sampleHydrologyGrid(this.grid, mapped.x, mapped.z);
   }
 
   terrainHeight(x: number, z: number): number {
-    return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
+    const mapped = this.mapSampleCoord(x, z);
+    return sampleGridBilinear(this.grid, this.grid.carvedBed, mapped.x, mapped.z);
   }
+
+  private mapSampleCoord(x: number, z: number): { x: number; z: number } {
+    return {
+      x: hydrologySampleCoord(x, this.grid.worldCells, this.wrapWorldSamples),
+      z: hydrologySampleCoord(z, this.grid.worldCells, this.wrapWorldSamples),
+    };
+  }
+}
+
+export function hydrologySampleCoord(value: number, worldCells: number, wrapWorld: boolean): number {
+  if (!Number.isFinite(value)) return 0;
+  if (!wrapWorld) return value;
+  const size = Number.isFinite(worldCells) && worldCells > 0 ? worldCells : 1;
+  return ((value % size) + size) % size;
+}
+
+function infiniteIslandsScene(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
 }
 
 function applyRiverFlowSpeedMultiplier(grid: HydrologyGrid, multiplier: number): void {
