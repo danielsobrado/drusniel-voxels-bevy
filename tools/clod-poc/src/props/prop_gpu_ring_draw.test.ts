@@ -30,13 +30,13 @@ function invalidGeometry(): THREE.BufferGeometry {
   return geometry;
 }
 
-function propDef(id: string): PropAssetDef {
+function propDef(id: string, distances = [0]): PropAssetDef {
   return {
     id,
     source: `${id}.glb`,
     category: "medium_static",
     placement: { alignToTerrain: true, terrainConform: false, snapToGrid: false },
-    lod: { mode: "generated", distances: [0], triangleRatios: [1], hysteresis: 2 },
+    lod: { mode: "generated", distances, triangleRatios: distances.map(() => 1), hysteresis: 2 },
     culling: { maxDistance: 200, shadowDistance: 60, reflectionDistance: 80, minScreenPx: 4 },
     collision: { mode: "none", distance: 0 },
   };
@@ -62,13 +62,16 @@ function metadata(id: string): PropAssetMetadata {
   };
 }
 
-function loadedAsset(def: PropAssetDef, geometry: THREE.BufferGeometry): LoadedPropAsset {
+function loadedAsset(def: PropAssetDef, ...geometries: THREE.BufferGeometry[]): LoadedPropAsset {
   return {
     def,
     root: new THREE.Group(),
     metadata: metadata(def.id),
-    lodChain: { levels: [{ lod: 0, geometry, triangleCount: 1, errorWorld: 0 }], billboardGeometry: null },
-    lodErrorWorld: [0],
+    lodChain: {
+      levels: geometries.map((geometry, lod) => ({ lod, geometry, triangleCount: 1, errorWorld: 0 })),
+      billboardGeometry: null,
+    },
+    lodErrorWorld: geometries.map(() => 0),
     sourceMaterial: new THREE.MeshBasicMaterial(),
   };
 }
@@ -148,6 +151,27 @@ describe("prop GPU ring draw source", () => {
     expect(source.sourceCount).toBe(1);
     expect(source.groupCount).toBe(1);
     expect(source.groupMeta[2]).toBe(3);
+  });
+
+  it("skips assets with partially invalid LOD chains", () => {
+    const valid = propDef("valid", [0, 50]);
+    const partial = propDef("partial", [0, 50]);
+    const loaded = new Map<string, LoadedPropAsset>([
+      [valid.id, loadedAsset(valid, validGeometry(), validGeometry())],
+      [partial.id, loadedAsset(partial, validGeometry(), invalidGeometry())],
+    ]);
+    const grid = PropSpatialGrid.fromInstances([instance(valid.id, 1), instance(partial.id, 2)], 16);
+
+    const source = buildPropGpuRingSource({
+      grid,
+      settings: settings([valid, partial]),
+      loadedAssets: loaded,
+      indexCountFor: renderableIndirectDrawCountForGeometry,
+    });
+
+    expect(source.sourceCount).toBe(1);
+    expect(source.groupCount).toBe(2);
+    expect(Array.from(source.groupMeta)).toEqual([0, 0, 3, 0, 0, 1, 3, 0]);
   });
 
   it("returns an empty source when no loaded asset has renderable LOD geometry", () => {
