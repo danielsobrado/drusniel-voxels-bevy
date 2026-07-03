@@ -23,6 +23,7 @@ import {
   createTreeGpuRingInstancedGeometry,
   createTreeGpuRingMesh,
   createTreeGpuRingShadowMesh,
+  isRenderableTreeGpuRingGeometry,
   type TreeGpuRingMesh,
 } from "./tree_system_gpu_ring_draw.js";
 import { addTreeGpuRingPrepassTwin } from "./tree_system_gpu_ring_prepass.js";
@@ -153,7 +154,7 @@ function createGpuRingTierDraw(
   materialHandle: TreeMaterialHandle,
 ): TreeGpuRingMesh | null {
   const source = input.geometryForGpuRing(species, lod);
-  if (!isRenderableGeometry(source)) return null;
+  if (!isRenderableTreeGpuRingGeometry(source)) return null;
   const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
   const mesh = createTreeGpuRingMesh(
     geometry,
@@ -206,14 +207,7 @@ function createGpuRingShadowTierDraw(
   const source = lod === "far" || lod === "impostor"
     ? input.crownProxyGeometry
     : input.geometryForGpuRing(species, lod);
-  if (!isRenderableGeometry(source)) return null;
+  if (!isRenderableTreeGpuRingGeometry(source)) return null;
   const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
   return createTreeGpuRingShadowMesh(geometry, materialHandle, species, lod, cascade);
-}
-
-function isRenderableGeometry(geometry: THREE.BufferGeometry): boolean {
-  const vertexCount = geometry.getAttribute("position")?.count ?? 0;
-  if (vertexCount <= 0) return false;
-  const index = geometry.getIndex();
-  return !index || index.count > 0;
 }
