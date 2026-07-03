@@ -95,7 +95,7 @@ export function createVegetationTerrainRejectProvider(
     classifyCluster(query): VegetationTerrainRejectDecision {
       if (!query.visibility.enabled) return accept("accepted", "fallback", "conservativeFallback", "disabled");
       if (outsideTerrain(query)) return reject("outsideTerrain", "exact", "conservativeFallback");
-      if (revisionMismatch(query)) return unknownSummaryDecision("conservativeFallback");
+      if (revisionMismatch(query)) return unknownSummaryDecision(query, "conservativeFallback", query.acceptWhenRevisionMismatch);
 
       const sourcePriority = query.sourcePriority ?? defaultPriority;
       for (const source of sourcePriority) {
@@ -109,10 +109,10 @@ export function createVegetationTerrainRejectProvider(
           if (decision) return decision;
           continue;
         }
-        return unknownSummaryDecision("conservativeFallback");
+        return unknownSummaryDecision(query, "conservativeFallback");
       }
 
-      return unknownSummaryDecision("conservativeFallback");
+      return unknownSummaryDecision(query, "conservativeFallback");
     },
   };
 }
@@ -125,7 +125,7 @@ function classifyWithTerrainSampler(
 
   const sample = query.sampler.sampleHeight(query.descriptor.centerX, query.descriptor.centerZ);
   if (!sample || sample.unknown || !Number.isFinite(sample.height)) {
-    return unknownSummaryDecision("terrainVisibilitySampler");
+    return unknownSummaryDecision(query, "terrainVisibilitySampler");
   }
 
   const visibility = visibilityProvider.sampleTerrainVisibility({
@@ -142,7 +142,7 @@ function classifyWithTerrainSampler(
   if (!visibility.visible && visibility.reason === "terrain_hidden") {
     return reject("terrainHidden", "fallback", "terrainVisibilitySampler", visibility.reason);
   }
-  if (visibility.reason === "unknown_kept") return unknownSummaryDecision("terrainVisibilitySampler");
+  if (visibility.reason === "unknown_kept") return unknownSummaryDecision(query, "terrainVisibilitySampler");
   return accept("accepted", "fallback", "terrainVisibilitySampler", visibility.reason);
 }
 
@@ -176,7 +176,12 @@ export function createTerrainSummaryRejectProvider(
   };
 }
 
-function unknownSummaryDecision(source: VegetationTerrainRejectSource): VegetationTerrainRejectDecision {
+function unknownSummaryDecision(
+  query: VegetationTerrainRejectQuery,
+  source: VegetationTerrainRejectSource,
+  acceptWhenMissing = query.acceptWhenSummaryMissing,
+): VegetationTerrainRejectDecision {
+  if (acceptWhenMissing === false) return reject("summaryMissing", "fallback", source, "unknown_kept");
   return accept("summaryMissing", "fallback", source, "unknown_kept");
 }
 

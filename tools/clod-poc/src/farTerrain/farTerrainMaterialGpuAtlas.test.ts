@@ -68,6 +68,7 @@ function uploadStats(totalPixels: number): FarSummaryGpuAtlasView["uploadStats"]
     dirtyPct: 0,
     totalPixels,
     lastUploadMode: "none",
+    fallbackReason: null,
   };
 }
 
