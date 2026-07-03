@@ -55,7 +55,7 @@ export function createP0DirtyAtlasExercise(input: P0DirtyAtlasExerciseInput): P0
         mirror();
         return;
       }
-      const perf = window.__drusnielPerf;
+      const perf = typeof window !== "undefined" ? window.__drusnielPerf : undefined;
       if (!perf) {
         status = "skipped";
         mirror();
