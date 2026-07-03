@@ -154,6 +154,7 @@ export interface TreeRenderSettings {
   depthPrepass: boolean;
   debugColorByLod: boolean;
   farCheapMaterial: boolean;
+  placementDebug: boolean;
 }
 
 export interface TreeGpuSettings {
