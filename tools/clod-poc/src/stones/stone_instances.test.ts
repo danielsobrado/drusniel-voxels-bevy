@@ -13,7 +13,7 @@ import shaderSource from "../gpu/shaders/stone_scatter.compute.wgsl?raw";
 import { buildWorld } from "../clod/quadtree.js";
 import type { ClodPageNode } from "../types.js";
 import { DEFAULT_STONE_SETTINGS, type StoneSettings } from "./stone_config.js";
-import { StoneSystem } from "./stone_instances.js";
+import { StoneSystem, stoneScatterCenterCoord } from "./stone_instances.js";
 import {
   sampleStoneSite,
   selectStoneClass,
@@ -115,6 +115,18 @@ describe("GPU stone instance layout", () => {
     const collisions = functionNames(shaderSource).filter((name) => terrainFunctions.has(name));
 
     expect(collisions).toEqual([]);
+  });
+});
+
+describe("stoneScatterCenterCoord", () => {
+  it("clamps finite-world scatter centers", () => {
+    expect(stoneScatterCenterCoord(1500, 0, 1024, false)).toBe(1024);
+    expect(stoneScatterCenterCoord(-30, 0, 1024, false)).toBe(0);
+  });
+
+  it("preserves unbounded scatter centers", () => {
+    expect(stoneScatterCenterCoord(1500, 0, 1024, true)).toBe(1500);
+    expect(stoneScatterCenterCoord(-30, 0, 1024, true)).toBe(-30);
   });
 });
 
