@@ -1,10 +1,10 @@
 trees:
   enabled: true
   seed: 7331
-  distance_m: 620
-  refresh_distance_m: 16
-  max_new_patches_per_frame: 2
-  max_instances: 9000
+  distance_m: 420
+  refresh_distance_m: 20
+  max_new_patches_per_frame: 1
+  max_instances: 6000
 
   gpu:
     enabled: true
@@ -12,7 +12,7 @@ trees:
     fallback_to_cpu: true
     scatter_enabled: true
     cull_enabled: true
-    max_visible: 50000
+    max_visible: 24000
     workgroup_size: 64
     readback_visible_lists: false
     debug_force_cpu: false
@@ -20,53 +20,47 @@ trees:
     debug_validate_against_cpu: false
     terrain_visibility:
       enabled: true
-      min_distance_m: 96
-      sample_count: 6
-      height_margin_m: 1.75
+      min_distance_m: 120
+      sample_count: 3
+      height_margin_m: 2.0
       crown_height_m: 5.5
 
   placement:
-    spacing_m: 5.5
-    jitter: 0.72
+    spacing_m: 6.8
+    jitter: 0.70
     slope_min_y: 0.64
     min_height_m: 10
     max_height_m: 58
     min_ground_weight: 0.14
-    min_spacing_m: 3.4
+    min_spacing_m: 4.0
 
   lod:
-    near_fraction: 0.042
-    mid_fraction: 0.18
-    far_fraction: 0.35
+    near_fraction: 0.040
+    mid_fraction: 0.15
+    far_fraction: 0.30
     impostor_fraction: 1.0
     hysteresis_m: 8
     crossfade_enabled: true
     crossfade_band_m: 24
     dither_enabled: true
-    shadows_max_lod: near
+    shadows_max_lod: none
     budgets:
-      # Budgets are high because procedural grammar trees generate real
-      # branch/leaf geometry instead of alpha cards.  Typical range:
-      #   near: 30k-260k  mid: 13k-90k  far: 6.5k-40k
-      near_max_vertices: 260000
-      mid_max_vertices: 90000
-      far_max_vertices: 40000
+      near_max_vertices: 180000
+      mid_max_vertices: 60000
+      far_max_vertices: 24000
       impostor_max_vertices: 240
 
-  # WebGPU impostor bake target: 8x8 frames at 256px => 2048² atlas.
-  # Albedo RGBA8 + normal-depth RGBA8 cost ~32 MiB/species, ~192 MiB for
-  # the six-species TREE-9 target. Keep URL/UI toggles available for disabling.
   impostors:
     enabled: true
     bake_on_start: true
     fallback_to_placeholder: false
     swap_on_bake: true
     source_lod: near
-    resolution_px: 256
+    resolution_px: 192
     octahedral_grid_size: 8
     atlas_padding_px: 2
     alpha_test: 0.35
-    frame_update_distance_m: 2.0
+    frame_update_distance_m: 3.0
     axial_billboard: true
     preserve_vertical: true
     max_bakes_per_frame: 1
@@ -80,16 +74,16 @@ trees:
   wind:
     enabled: true
     direction: [0.8, 0.6]
-    strength: 0.18
-    speed: 0.9
-    gust_strength: 0.12
-    trunk_sway_strength: 0.45
-    leaf_flutter_strength: 0.18
+    strength: 0.14
+    speed: 0.8
+    gust_strength: 0.10
+    trunk_sway_strength: 0.36
+    leaf_flutter_strength: 0.14
 
   ecology:
     enabled: true
     density:
-      base_density: 1.2
+      base_density: 0.82
       forest_noise_scale_m: 96
       forest_noise_strength: 0.9
       clearing_noise_scale_m: 180
@@ -105,7 +99,7 @@ trees:
       material_weight_power: 1.35
     material_bias:
       grass:
-        density: 1.08
+        density: 0.90
         oak: 1.22
         pine: 0.86
         dead: 0.52
@@ -113,7 +107,7 @@ trees:
         willow: 1.04
         spruce: 0.72
       rock:
-        density: 0.46
+        density: 0.36
         oak: 0.35
         pine: 0.96
         dead: 1.55
@@ -121,7 +115,7 @@ trees:
         willow: 0.22
         spruce: 1.12
       sand:
-        density: 0.55
+        density: 0.42
         oak: 0.72
         pine: 0.45
         dead: 0.68
@@ -129,7 +123,7 @@ trees:
         willow: 1.16
         spruce: 0.28
       snow:
-        density: 0.22
+        density: 0.14
         oak: 0.04
         pine: 0.30
         dead: 1.45
@@ -260,56 +254,56 @@ trees:
       crown_radius_m: 3.2
       morphology:
         trunk_bend: 0.12
-        trunk_taper: 0.55
+        trunk_taper: 0.58
         branch_levels: 3
         primary_branch_count: 7
         secondary_branch_count: 2
         branch_spread: 0.72
-        branch_up_sweep: 0.36
+        branch_up_sweep: 0.32
         branch_length: 2.0
-        crown_flattening: 0.88
-        crown_irregularity: 0.20
+        crown_flattening: 0.8
+        crown_irregularity: 0.22
         leaf_cluster_count: 14
         leaf_card_count: 34
     willow:
       enabled: true
-      weight: 0.12
-      min_height_m: 8
-      max_height_m: 34
-      trunk_height_m: 6.4
+      weight: 0.11
+      min_height_m: 9
+      max_height_m: 36
+      trunk_height_m: 5.5
       trunk_radius_m: 0.34
       crown_radius_m: 4.6
       morphology:
-        trunk_bend: 0.32
-        trunk_taper: 0.68
+        trunk_bend: 0.24
+        trunk_taper: 0.64
         branch_levels: 3
         primary_branch_count: 8
         secondary_branch_count: 3
-        branch_spread: 1.05
-        branch_up_sweep: 0.18
-        branch_length: 2.5
+        branch_spread: 1.1
+        branch_up_sweep: -0.08
+        branch_length: 2.8
         crown_flattening: 0.62
         crown_irregularity: 0.34
-        leaf_cluster_count: 20
-        leaf_card_count: 48
+        leaf_cluster_count: 22
+        leaf_card_count: 50
     spruce:
       enabled: true
-      weight: 0.09
-      min_height_m: 20
-      max_height_m: 64
-      trunk_height_m: 10.5
+      weight: 0.10
+      min_height_m: 16
+      max_height_m: 60
+      trunk_height_m: 10.0
       trunk_radius_m: 0.32
-      crown_radius_m: 3.0
+      crown_radius_m: 3.4
       morphology:
-        trunk_bend: 0.06
+        trunk_bend: 0.05
         trunk_taper: 0.38
-        branch_levels: 4
+        branch_levels: 5
         primary_branch_count: 10
         secondary_branch_count: 1
-        branch_spread: 0.50
-        branch_up_sweep: -0.16
-        branch_length: 2.1
-        crown_flattening: 1.65
-        crown_irregularity: 0.12
-        leaf_cluster_count: 16
-        leaf_card_count: 40
+        branch_spread: 0.62
+        branch_up_sweep: -0.12
+        branch_length: 2.2
+        crown_flattening: 1.55
+        crown_irregularity: 0.14
+        leaf_cluster_count: 14
+        leaf_card_count: 38
