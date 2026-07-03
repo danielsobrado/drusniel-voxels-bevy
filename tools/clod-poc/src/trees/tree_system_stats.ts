@@ -240,7 +240,7 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   stats.heroNearTreeTriangles = heroFidelity.nearTriangleCount;
   stats.heroNearFoliageTriangles = heroFidelity.nearFoliageTriangleCount;
   stats.heroNearMinTreeTriangles = heroFidelity.minNearTreeTriangles;
-  stats.heroNearAvgTreeTriangles = heroFidelity.avgTreeTriangles;
+  stats.heroNearAvgTreeTriangles = heroFidelity.avgNearTreeTriangles;
   stats.heroNearPassesTriangleFloor = heroFidelity.passesTriangleFloor;
   stats.heroNearPassesRealFoliage = heroFidelity.passesRealFoliage;
   stats.gpuStatus = input.gpuStatus;
