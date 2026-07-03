@@ -40,6 +40,11 @@ export interface NearFieldBubbleStats {
   chunkGroupsBuiltThisFrame: number;
   bubbleMs: number;
   chunkGroupCount: number;
+  requiredPages: number;
+  readyPages: number;
+  buildingPages: number;
+  failedPages: number;
+  evictions: number;
 }
 
 export interface NearFieldBubbleControllerDeps {
@@ -283,19 +288,23 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return ensureChunkGroupForPage(node.id, px, pz, centerX, centerZ);
   };
 
-  const evictCache = (bubbleCenter: THREE.Vector3, bubbleRadius: number) => {
+  const evictCache = (bubbleCenter: THREE.Vector3, bubbleRadius: number): number => {
+    let evictions = 0;
     for (const [nodeId, entry] of [...chunkGroups.entries()]) {
       const dist = Math.hypot(bubbleCenter.x - entry.centerX, bubbleCenter.z - entry.centerZ);
       if (dist > bubbleRadius * deps.evictDistanceMultiplier) {
         disposeEntry(nodeId, entry);
+        evictions++;
       }
     }
-    if (chunkGroups.size <= deps.maxCachedChunkGroups) return;
+    if (chunkGroups.size <= deps.maxCachedChunkGroups) return evictions;
     const lru = [...chunkGroups.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame);
     while (chunkGroups.size > deps.maxCachedChunkGroups && lru.length > 0) {
       const [nodeId, entry] = lru.shift()!;
       disposeEntry(nodeId, entry);
+      evictions++;
     }
+    return evictions;
   };
 
   const showReadyGroup = (entry: ChunkGroupEntry, fallbackMesh?: THREE.Mesh): boolean => {
@@ -308,10 +317,26 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return false;
   };
 
+  const countRequiredPages = (requiredCoords: PageCoord[]) => {
+    let readyPages = 0;
+    let buildingPages = 0;
+    let failedPages = 0;
+    for (const coord of requiredCoords) {
+      const entry = chunkGroups.get(pageGroupKey(coord.px, coord.pz));
+      if (!entry) continue;
+      if (entry.failed) failedPages++;
+      else if (!entry.ready) buildingPages++;
+      else if (entry.group.children.length > 0) readyPages++;
+    }
+    return { readyPages, buildingPages, failedPages };
+  };
+
   return {
     update(input) {
       const tBubbleStart = performance.now();
       let chunkGroupsBuiltThisFrame = 0;
+      let evictions = 0;
+      let requiredCoords: PageCoord[] = [];
       if (input.enabled) {
         for (const v of input.bubbleViews) {
           const owned =
@@ -343,7 +368,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         }
 
         if (liveStreamingEnabled) {
-          for (const coord of requiredStreamingPageCoords(input.bubbleCenter, input.bubbleRadius, pageSize)) {
+          requiredCoords = requiredStreamingPageCoords(input.bubbleCenter, input.bubbleRadius, pageSize);
+          for (const coord of requiredCoords) {
             const key = pageGroupKey(coord.px, coord.pz);
             let grp = chunkGroups.get(key);
             if (!grp) {
@@ -356,7 +382,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           }
         }
 
-        evictCache(input.bubbleCenter, input.bubbleRadius);
+        evictions = evictCache(input.bubbleCenter, input.bubbleRadius);
       } else if (chunkGroups.size > 0) {
         for (const [nodeId, { group }] of chunkGroups) {
           group.visible = false;
@@ -364,10 +390,16 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           if (view) view.mesh.visible = view.fade > 0.001;
         }
       }
+      const required = countRequiredPages(requiredCoords);
       return {
         chunkGroupsBuiltThisFrame,
         bubbleMs: performance.now() - tBubbleStart,
         chunkGroupCount: chunkGroups.size,
+        requiredPages: requiredCoords.length,
+        readyPages: required.readyPages,
+        buildingPages: required.buildingPages,
+        failedPages: required.failedPages,
+        evictions,
       };
     },
     invalidatePage(nodeId) {

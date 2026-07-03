@@ -1,9 +1,16 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { NearFieldBubbleController, NearFieldBubbleView } from "../../terrain/near_field/near_field_bubble_controller.js";
+import type {
+  NearFieldBubbleController,
+  NearFieldBubbleStats,
+  NearFieldBubbleView,
+} from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
+
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const RING_CLAMP_MARGIN = 2;
 
 interface TerrainFadeView {
   node: { id: string };
@@ -29,10 +36,42 @@ export interface TerrainFramePhaseInput {
 
 export interface TerrainFramePhaseResult {
   chunkGroupsBuiltThisFrame: number;
+  bubbleStats: NearFieldBubbleStats;
   tBubbleStart: number;
   tPropsStart: number;
   ringCenter: THREE.Vector3;
   grassCenter: THREE.Vector3;
+}
+
+function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
+  const hooks = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod;
+  const counters = hooks?.stats?.counters;
+  if (!counters) return;
+  counters["live_bubble_required_pages"] = stats.requiredPages;
+  counters["live_bubble_ready_pages"] = stats.readyPages;
+  counters["live_bubble_building_pages"] = stats.buildingPages;
+  counters["live_bubble_failed_pages"] = stats.failedPages;
+  counters["live_bubble_built_this_frame"] = stats.chunkGroupsBuiltThisFrame;
+  counters["live_bubble_ms"] = stats.bubbleMs;
+  counters["live_bubble_evictions"] = stats.evictions;
+  counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
+}
+
+function infiniteIslandsScene(): boolean {
+  const search = globalThis.location?.search;
+  if (!search) return false;
+  return new URLSearchParams(search).get("scene") === INFINITE_ISLANDS_SCENE;
+}
+
+export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: number, unbounded: boolean): THREE.Vector3 {
+  if (unbounded) return grassCenter.clone();
+  return new THREE.Vector3(
+    THREE.MathUtils.clamp(grassCenter.x, RING_CLAMP_MARGIN, worldCells - RING_CLAMP_MARGIN),
+    grassCenter.y,
+    THREE.MathUtils.clamp(grassCenter.z, RING_CLAMP_MARGIN, worldCells - RING_CLAMP_MARGIN),
+  );
 }
 
 export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFramePhaseResult {
@@ -65,6 +104,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     getView: (nodeId) => input.views.get(nodeId) as unknown as NearFieldBubbleView | undefined,
     frameId: selectionStats.frameId,
   });
+  mirrorLiveBubbleStats(bubbleStats);
   if (input.pruneRenderNodeCache) {
     const protectedNodeIds = new Set<string>();
     for (const view of currentTerrainViews) protectedNodeIds.add(view.node.id);
@@ -74,15 +114,11 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
 
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;
-  const ringClampMargin = 2;
-  const ringCenter = new THREE.Vector3(
-    THREE.MathUtils.clamp(grassCenter.x, ringClampMargin, input.worldCells - ringClampMargin),
-    grassCenter.y,
-    THREE.MathUtils.clamp(grassCenter.z, ringClampMargin, input.worldCells - ringClampMargin),
-  );
+  const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, infiniteIslandsScene());
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
+    bubbleStats,
     tBubbleStart: tPropsStart - bubbleStats.bubbleMs,
     tPropsStart,
     ringCenter,

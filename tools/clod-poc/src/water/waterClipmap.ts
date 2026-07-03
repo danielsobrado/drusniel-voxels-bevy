@@ -24,6 +24,11 @@ export interface WaterRect {
   maxZ: number;
 }
 
+export interface WaterWorldBounds {
+  cellsX: number;
+  cellsZ: number;
+}
+
 export interface WaterClipmapOptions {
   scene: THREE.Scene;
   config: WaterConfig;
@@ -31,10 +36,19 @@ export interface WaterClipmapOptions {
   createMaterial: (params: WaterMaterialParams) => WaterMaterialHandle;
   sunDirection: THREE.Vector3;
   cameraPosition: THREE.Vector3;
-  worldBounds: { cellsX: number; cellsZ: number };
+  worldBounds: WaterWorldBounds;
 }
 
 const DEGENERATE_INNER: WaterRect = { minX: 1e30, minZ: 1e30, maxX: -1e30, maxZ: -1e30 };
+
+export function finiteWaterWorldBounds(worldBounds: WaterWorldBounds): boolean {
+  return worldBounds.cellsX > 0 && worldBounds.cellsZ > 0;
+}
+
+function waterPointInBounds(x: number, z: number, worldBounds: WaterWorldBounds): boolean {
+  if (!finiteWaterWorldBounds(worldBounds)) return true;
+  return x >= 0 && x <= worldBounds.cellsX && z >= 0 && z <= worldBounds.cellsZ;
+}
 
 class WaterLevel {
   readonly index: number;
@@ -44,7 +58,7 @@ class WaterLevel {
   private readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
   private readonly handle: WaterMaterialHandle;
   private readonly field: WaterField;
-  private readonly worldBounds: { cellsX: number; cellsZ: number };
+  private readonly worldBounds: WaterWorldBounds;
   private readonly positions: Float32Array;
   private readonly terrainY: Float32Array;
   private readonly bodyMask: Float32Array;
@@ -63,7 +77,7 @@ class WaterLevel {
     cellsPerLevel: number,
     field: WaterField,
     handle: WaterMaterialHandle,
-    worldBounds: { cellsX: number; cellsZ: number },
+    worldBounds: WaterWorldBounds,
   ) {
     this.index = index;
     this.cellSize = cellSize;
@@ -131,8 +145,7 @@ class WaterLevel {
       const worldZ = originZ + iz * cellSize - half;
       for (let ix = 0; ix < vertsPerEdge; ix++) {
         const worldX = originX + ix * cellSize - half;
-        const inBounds = worldX >= 0 && worldX <= worldBounds.cellsX && worldZ >= 0 && worldZ <= worldBounds.cellsZ;
-        if (inBounds) {
+        if (waterPointInBounds(worldX, worldZ, worldBounds)) {
           const sample = field.sampleForCellSize(worldX, worldZ, cellSize);
           positions[vi] = worldX;
           positions[vi + 1] = sample.waterY;
@@ -195,7 +208,7 @@ export function waterQuadRenderable(
   terrainY: Float32Array,
   bodyMask: Float32Array,
   flow: Float32Array,
-  worldBounds: { cellsX: number; cellsZ: number },
+  worldBounds: WaterWorldBounds,
   maskEpsilon = 1e-4,
 ): boolean {
   let minY = Number.POSITIVE_INFINITY;
@@ -205,7 +218,7 @@ export function waterQuadRenderable(
     const px = positions[vi * 3];
     const py = positions[vi * 3 + 1];
     const pz = positions[vi * 3 + 2];
-    if (px < 0 || px > worldBounds.cellsX || pz < 0 || pz > worldBounds.cellsZ) return false;
+    if (!waterPointInBounds(px, pz, worldBounds)) return false;
     if (bodyMask[vi] <= maskEpsilon) return false;
     if (py - terrainY[vi] <= 0) return false;
     minY = Math.min(minY, py);
@@ -273,7 +286,6 @@ export class WaterClipmap {
     this.root.visible = this.visible;
   }
 
-  /** Advance animation and snap every level to the camera. Call after camera move. */
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void {
     if (!this.visible) return;
     if (

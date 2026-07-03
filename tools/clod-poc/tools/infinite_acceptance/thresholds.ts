@@ -28,6 +28,14 @@ export const REQUIRED_COUNTERS = [
   "far_summary_tiles_ready",
   "far_summary_tiles_missing",
   "far_summary_tiles_stale",
+  "live_bubble_required_pages",
+  "live_bubble_ready_pages",
+  "live_bubble_building_pages",
+  "live_bubble_failed_pages",
+  "live_bubble_built_this_frame",
+  "live_bubble_ms",
+  "live_bubble_evictions",
+  "live_bubble_cached_pages",
 ] as const;
 
 export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
@@ -56,6 +64,10 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "far_shell_inner_minus_clod_radius_m", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "horizon_hole_ratio", label: "must equal 0", pass: (value) => value === 0 },
   { key: "far_summary_tiles_missing", label: "must equal 0 after warmup", pass: (value) => value === 0 },
+  { key: "live_bubble_required_pages", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_bubble_ready_pages", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_bubble_failed_pages", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "live_bubble_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
 ];
 
 export interface ThresholdEvaluation {
