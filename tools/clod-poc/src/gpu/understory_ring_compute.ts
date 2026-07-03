@@ -41,6 +41,9 @@ export interface UnderstoryGpuRingStats {
   prefilterRejectedClusters?: number;
   prefilterAcceptedClusters?: number;
   prefilterUnknownKeptClusters?: number;
+  prefilterSourceFarSummary?: number;
+  prefilterSourceTerrainSampler?: number;
+  prefilterSourceFallback?: number;
   acceptedCandidates: number;
   counts: UnderstoryRingCounts;
   groupCounts: number[];
@@ -95,6 +98,9 @@ export class UnderstoryGpuRingCompute {
   private prefilterRejectedClusters = 0;
   private prefilterAcceptedClusters = 0;
   private prefilterUnknownKeptClusters = 0;
+  private prefilterSourceFarSummary = 0;
+  private prefilterSourceTerrainSampler = 0;
+  private prefilterSourceFallback = 0;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
   private submitMs: number | null = null;
@@ -185,6 +191,9 @@ export class UnderstoryGpuRingCompute {
     this.prefilterRejectedClusters = prefilter?.rejectedClusters ?? 0;
     this.prefilterAcceptedClusters = prefilter?.visibleClusters ?? 0;
     this.prefilterUnknownKeptClusters = prefilter?.unknownKeptClusters ?? 0;
+    this.prefilterSourceFarSummary = prefilter?.sourceCounts.naadfFarSummary ?? 0;
+    this.prefilterSourceTerrainSampler = prefilter?.sourceCounts.terrainVisibilitySampler ?? 0;
+    this.prefilterSourceFallback = prefilter?.sourceCounts.conservativeFallback ?? 0;
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? understoryRingSlotCount(this.settings)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
@@ -219,6 +228,9 @@ export class UnderstoryGpuRingCompute {
       prefilterRejectedClusters: this.prefilterRejectedClusters,
       prefilterAcceptedClusters: this.prefilterAcceptedClusters,
       prefilterUnknownKeptClusters: this.prefilterUnknownKeptClusters,
+      prefilterSourceFarSummary: this.prefilterSourceFarSummary,
+      prefilterSourceTerrainSampler: this.prefilterSourceTerrainSampler,
+      prefilterSourceFallback: this.prefilterSourceFallback,
       acceptedCandidates,
       counts: { ...this.counts },
       groupCounts: [...this.groupCounts],
