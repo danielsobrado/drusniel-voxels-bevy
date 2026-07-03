@@ -96,61 +96,58 @@ export class PropAssetRegistry {
     root.name = `prop:${def.id}`;
     root.add(gltf.scene);
 
-    const sourceMesh = firstRenderableMesh(root);
-    if (!sourceMesh) {
-      disposeObjectGraph(root);
-      throw new Error(`Prop asset "${def.id}" has no renderable mesh`);
-    }
-
-    const sourceMaterial = Array.isArray(sourceMesh.material) ? sourceMesh.material[0]! : sourceMesh.material;
     let lodChain: PropLodChain | null = null;
-    let lodErrorWorld: number[] = [];
+    try {
+      const sourceMesh = firstRenderableMesh(root);
+      if (!sourceMesh) throw new Error(`Prop asset "${def.id}" has no renderable mesh`);
 
-    if (def.lod.mode === "generated") {
-      lodChain = await buildPropLodChain(sourceMesh.geometry, def, extractPropAssetMetadata(root, def).boundingSphereRadius);
-      const invalidLod = firstInvalidLodIndex(lodChain);
-      if (invalidLod >= 0) {
-        disposePropLodChain(lodChain);
-        disposeObjectGraph(root);
-        throw new Error(`Prop asset "${def.id}" generated empty LOD ${invalidLod}`);
+      const sourceMaterial = Array.isArray(sourceMesh.material) ? sourceMesh.material[0]! : sourceMesh.material;
+      let lodErrorWorld: number[] = [];
+
+      if (def.lod.mode === "generated") {
+        lodChain = await buildPropLodChain(sourceMesh.geometry, def, extractPropAssetMetadata(root, def).boundingSphereRadius);
+        const invalidLod = firstInvalidLodIndex(lodChain);
+        if (invalidLod >= 0) throw new Error(`Prop asset "${def.id}" generated empty LOD ${invalidLod}`);
+        lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
+        if (lodChain.billboardGeometry && isRenderableIndirectDrawGeometry(lodChain.billboardGeometry)) {
+          assignBillboardMaterial(lodChain.billboardGeometry, createBillboardMaterial(sourceMaterial));
+        } else if (lodChain.billboardGeometry) {
+          disposeBillboardGeometryResources(lodChain.billboardGeometry);
+          lodChain.billboardGeometry = null;
+        }
       }
-      lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
-      if (lodChain.billboardGeometry && isRenderableIndirectDrawGeometry(lodChain.billboardGeometry)) {
-        assignBillboardMaterial(lodChain.billboardGeometry, createBillboardMaterial(sourceMaterial));
-      } else if (lodChain.billboardGeometry) {
-        disposeBillboardGeometryResources(lodChain.billboardGeometry);
-        lodChain.billboardGeometry = null;
+
+      const metadata = extractPropAssetMetadata(root, def, {
+        lodAvailability: def.lod.mode === "generated" ? "generated" : "provided",
+      });
+      if (lodChain) {
+        metadata.triangleCount = lodChain.levels[0]?.triangleCount ?? metadata.triangleCount;
       }
-    }
 
-    const metadata = extractPropAssetMetadata(root, def, {
-      lodAvailability: def.lod.mode === "generated" ? "generated" : "provided",
-    });
-    if (lodChain) {
-      metadata.triangleCount = lodChain.levels[0]?.triangleCount ?? metadata.triangleCount;
-    }
+      const report = validatePropAssetMetadata(def, metadata, this.settings);
+      if (!report.ok) {
+        const detail = report.errors.map((e) => e.message).join("; ");
+        throw new Error(`Rejected prop asset "${def.id}": ${detail}`);
+      }
+      for (const warning of report.warnings) {
+        console.warn(`[props] ${warning.message}`);
+      }
 
-    const report = validatePropAssetMetadata(def, metadata, this.settings);
-    if (!report.ok) {
-      lodChain && disposePropLodChain(lodChain);
+      const loaded: LoadedPropAsset = {
+        def,
+        root,
+        metadata,
+        lodChain,
+        lodErrorWorld,
+        sourceMaterial,
+      };
+      this.assets.set(def.id, loaded);
+      return loaded;
+    } catch (error) {
+      if (lodChain) disposePropLodChain(lodChain);
       disposeObjectGraph(root);
-      const detail = report.errors.map((e) => e.message).join("; ");
-      throw new Error(`Rejected prop asset "${def.id}": ${detail}`);
+      throw error;
     }
-    for (const warning of report.warnings) {
-      console.warn(`[props] ${warning.message}`);
-    }
-
-    const loaded: LoadedPropAsset = {
-      def,
-      root,
-      metadata,
-      lodChain,
-      lodErrorWorld,
-      sourceMaterial,
-    };
-    this.assets.set(def.id, loaded);
-    return loaded;
   }
 
   dispose(): void {
