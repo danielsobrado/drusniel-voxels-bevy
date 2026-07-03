@@ -14,9 +14,7 @@ import {
   normalGeometry,
   normalize,
   positionGeometry,
-  screenCoordinate,
   sin,
-  smoothstep,
   storage,
   texture,
   uniform,
@@ -238,24 +236,13 @@ function treeVariantKeep(aVariant: TslNode, worldXZ: TslNode, seed: TslNode): Ts
 function treeRingLodMask(
   lodIndex: TslNode,
   dist: TslNode,
-  nearDistance: TslNode,
+  _nearDistance: TslNode,
   midDistance: TslNode,
   farDistance: TslNode,
-  bandDistance: TslNode,
+  _bandDistance: TslNode,
 ): TslNode {
-  const ign: TslNode = fract(
-    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
-  );
-  const noBand = bandDistance.lessThan(0.0001);
-  const fadeIn = (distance: TslNode): TslNode => smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist);
-  const fadeOut = (distance: TslNode): TslNode => float(1).sub(fadeIn(distance));
-  const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade));
-  const passOut = (fade: TslNode): TslNode => ign.lessThan(fade);
-  const nearPass = lodIndex.lessThan(0.5).and(noBand.or(passOut(fadeOut(nearDistance))));
-  const midPass = lodIndex.greaterThanEqual(0.5).and(lodIndex.lessThan(1.5))
-    .and(noBand.or(passIn(fadeIn(nearDistance)).and(passOut(fadeOut(midDistance)))));
   const farPass = lodIndex.greaterThanEqual(1.5).and(lodIndex.lessThan(2.5))
-    .and(noBand.or(passIn(fadeIn(midDistance)).and(passOut(fadeOut(farDistance)))));
-  const impostorPass = lodIndex.greaterThanEqual(2.5).and(noBand.or(passIn(fadeIn(farDistance))));
-  return nearPass.or(midPass).or(farPass).or(impostorPass);
+    .and(dist.greaterThanEqual(midDistance)).and(dist.lessThan(farDistance));
+  const impostorPass = lodIndex.greaterThanEqual(2.5).and(dist.greaterThanEqual(farDistance));
+  return farPass.or(impostorPass);
 }
