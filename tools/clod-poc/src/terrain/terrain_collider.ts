@@ -148,8 +148,9 @@ export class TerrainColliderSet {
     position: THREE.Vector3,
     velocity: THREE.Vector3,
     grounded: boolean,
+    pagesTested: number,
   ): { position: THREE.Vector3; velocity: THREE.Vector3; grounded: boolean } {
-    if (!this.heightFallback?.enabled) return { position, velocity, grounded };
+    if (pagesTested > 0 || !this.heightFallback?.enabled) return { position, velocity, grounded };
     const terrainY = this.heightFallback.surfaceHeight(position.x, position.z);
     if (!Number.isFinite(terrainY) || position.y > terrainY) return { position, velocity, grounded };
     const resolvedPosition = position.clone();
@@ -277,7 +278,7 @@ export class TerrainColliderSet {
     }
     if (grounded && resolvedVelocity.y < 0) resolvedVelocity.y = 0;
 
-    const fallback = this.applyHeightFallback(resolvedPosition, resolvedVelocity, grounded);
+    const fallback = this.applyHeightFallback(resolvedPosition, resolvedVelocity, grounded, pagesTested);
     return {
       position: fallback.position,
       velocity: fallback.velocity,
