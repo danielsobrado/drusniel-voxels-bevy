@@ -13,7 +13,7 @@ export interface TreeImpostorAtlasMemoryStats {
   approximateMiB: number;
 }
 
-export function estimateTreeImpostorAtlasMemoryMiB(settings: TreeSettings, atlasCount = TREE_SPECIES.length): number {
+export function estimateTreeImpostorAtlasMemoryMiB(settings: TreeSettings, atlasCount: number = TREE_SPECIES.length): number {
   if (!settings.impostors.enabled) return 0;
   const atlasSizePx = settings.impostors.resolutionPx * settings.impostors.octahedralGridSize;
   const bytes = atlasSizePx * atlasSizePx * BYTES_PER_RGBA8_PIXEL * TREE_IMPOSTOR_ATLAS_TEXTURES * MIPMAP_OVERHEAD * atlasCount;

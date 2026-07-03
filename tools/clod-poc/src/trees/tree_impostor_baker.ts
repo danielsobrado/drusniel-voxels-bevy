@@ -1,4 +1,12 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  clamp,
+  float,
+  normalize,
+  normalView,
+  positionView,
+} from "three/tsl";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
 import { octFrames, type OctahedralFrame } from "./tree_impostor_octahedral.js";
@@ -10,6 +18,7 @@ import {
   materialChurnDiagnostics,
 } from "../rendering/material_churn/material_churn_diagnostics.js";
 import {
+  trackCreatedMaterial,
   trackedMeshBasicMaterial,
   trackedShaderMaterial,
 } from "../rendering/material_churn/tracked_material_factory.js";
@@ -45,6 +54,7 @@ export interface TreeImpostorBakerOptions {
   settings: TreeSettings;
   geometries: TreeGeometryMap;
   material: THREE.Material;
+  webgpu?: boolean;
 }
 
 interface RenderTargetRenderer {
@@ -112,7 +122,7 @@ function bakeSpeciesAtlas(
   const far = radius * 6;
   const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, near, far);
   const albedoMaterial = createBakeMaterial(options.material, settings);
-  const normalDepthMaterial = createNormalDepthBakeMaterial(near, far);
+  const normalDepthMaterial = createNormalDepthBakeMaterial(near, far, options.webgpu === true);
   const mesh = new THREE.Mesh(geometry, albedoMaterial);
   mesh.position.copy(center).multiplyScalar(-1);
   scene.add(mesh);
@@ -230,7 +240,26 @@ function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettin
   return material;
 }
 
-function createNormalDepthBakeMaterial(near: number, far: number): THREE.ShaderMaterial {
+function createNormalDepthBakeMaterial(near: number, far: number, webgpu: boolean): THREE.Material {
+  if (webgpu) {
+    const material = trackCreatedMaterial(
+      new MeshBasicNodeMaterial(),
+      "tree-impostor-bake-normal-depth-node",
+    );
+    const linearDepth = clamp(
+      positionView.z.negate().sub(float(near)).div(float(Math.max(far - near, 0.0001))),
+      0.0,
+      1.0,
+    );
+    material.name = "tree-impostor-normal-depth-bake";
+    material.colorNode = normalize(normalView).mul(0.5).add(0.5);
+    material.opacityNode = linearDepth;
+    material.side = THREE.DoubleSide;
+    material.transparent = false;
+    material.depthWrite = true;
+    return material;
+  }
+
   return trackedShaderMaterial({
     name: "tree-impostor-normal-depth-bake",
     uniforms: {

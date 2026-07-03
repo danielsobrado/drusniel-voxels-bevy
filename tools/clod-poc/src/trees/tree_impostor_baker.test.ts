@@ -44,6 +44,22 @@ describe("tree impostor baker", () => {
     expect(renderer.renderCalls).toBe(TREE_SPECIES.length * settings.impostors.octahedralGridSize ** 2 * 2);
   });
 
+  it("uses a WebGPU-compatible normal-depth material when requested", async () => {
+    const settings = impostorSettings();
+    const renderer = fakeRenderTargetRenderer({ rejectShaderMaterial: true });
+    const result = await bakeTreeImpostorAtlases({
+      renderer,
+      settings,
+      geometries: geometryMap(),
+      material: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      webgpu: true,
+    });
+
+    expect(result.supported).toBe(true);
+    expect(result.reason).toBeNull();
+    for (const species of TREE_SPECIES) result.atlases[species]?.dispose();
+  });
+
   it("round-trips impostor albedo, normal, and depth encode/decode helpers", () => {
     for (const value of [0, 0.1, 0.25, 0.5, 0.9, 1]) {
       expect(decodeTreeImpostorAlbedo(encodeTreeImpostorAlbedo(value))).toBeCloseTo(value, 6);
@@ -98,7 +114,7 @@ function geometryMap(): TreeGeometryMap {
   return out;
 }
 
-function fakeRenderTargetRenderer(): {
+function fakeRenderTargetRenderer(options: { rejectShaderMaterial?: boolean } = {}): {
   renderCalls: number;
   render(scene: THREE.Object3D, camera: THREE.Camera): void;
   setRenderTarget(target: THREE.WebGLRenderTarget | null): void;
@@ -117,7 +133,8 @@ function fakeRenderTargetRenderer(): {
   let viewport = new THREE.Vector4(0, 0, 1, 1);
   return {
     renderCalls: 0,
-    render() {
+    render(scene) {
+      if (options.rejectShaderMaterial) assertNoShaderMaterial(scene);
       this.renderCalls++;
     },
     setRenderTarget(target) {
@@ -145,4 +162,14 @@ function fakeRenderTargetRenderer(): {
       else viewport = new THREE.Vector4(args[0], args[1], args[2], args[3]);
     },
   };
+}
+
+function assertNoShaderMaterial(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    const material = (object as THREE.Mesh).material;
+    const materials = Array.isArray(material) ? material : material ? [material] : [];
+    for (const item of materials) {
+      if (item instanceof THREE.ShaderMaterial) throw new Error(`ShaderMaterial rejected: ${item.name}`);
+    }
+  });
 }

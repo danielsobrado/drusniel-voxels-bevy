@@ -1,5 +1,8 @@
 import { TREE_GPU_RING_CELL, treeGpuRingGrid } from "../gpu/tree_ring_compute.js";
-import type { VegetationTerrainRejectionConfig } from "../vegetation/terrain_rejection_config.js";
+import {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG,
+  type VegetationTerrainRejectionConfig,
+} from "../vegetation/terrain_rejection_config.js";
 import {
   buildVegetationSlotPrefilter,
   VegetationSlotPrefilterCache,
@@ -48,7 +51,7 @@ export class TreeRingClusterVisibilityCache extends VegetationSlotPrefilterCache
 
 export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisibilityOptions): TreeRingClusterVisibilityMask {
   const grid = treeGpuRingGrid(options.settings);
-  const clusterDimCells = Math.max(1, Math.floor(options.clusterDimCells ?? TREE_RING_CLUSTER_DIM_CELLS));
+  const clusterDimCells = effectiveTreeRingClusterDimCells(options.clusterDimCells);
   const prefilter = buildVegetationSlotPrefilter({
     kind: "tree",
     centerX: options.centerX,
@@ -101,8 +104,16 @@ export function treeRingSlotClusterVisible(mask: TreeRingClusterVisibilityMask |
 
 export function treeRingClusterMaskByteLength(settings: TreeSettings, clusterDimCells = TREE_RING_CLUSTER_DIM_CELLS): number {
   const grid = treeGpuRingGrid(settings);
-  const clusterGrid = Math.max(1, Math.ceil(grid / Math.max(1, Math.floor(clusterDimCells))));
+  const clusterGrid = Math.max(1, Math.ceil(grid / effectiveTreeRingClusterDimCells(clusterDimCells)));
   return clusterGrid * clusterGrid * Uint32Array.BYTES_PER_ELEMENT;
+}
+
+function effectiveTreeRingClusterDimCells(clusterDimCells = TREE_RING_CLUSTER_DIM_CELLS): number {
+  const requested = Math.max(1, Math.floor(clusterDimCells));
+  const minByPhysicalSize = Math.ceil(
+    DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.gpuEarlyReject.minClusterSize / TREE_GPU_RING_CELL,
+  );
+  return Math.max(requested, minByPhysicalSize);
 }
 
 function createTerrainHeightSampler(sampler: TreeTerrainSampler | undefined): TerrainHeightSampler | undefined {
