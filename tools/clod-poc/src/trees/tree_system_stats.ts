@@ -21,6 +21,9 @@ export interface TreeVisibleClusterMaskStats {
   gpuCandidateCountAfterPrefilter: number;
   gpuPrefilterCacheHits: number;
   gpuPrefilterCacheMisses: number;
+  gpuPrefilterSourceFarSummary: number;
+  gpuPrefilterSourceTerrainSampler: number;
+  gpuPrefilterSourceFallback: number;
 }
 
 export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
@@ -63,6 +66,9 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   gpuPrefilterSkippedCandidateEstimate: number;
   gpuPrefilterCacheHits: number;
   gpuPrefilterCacheMisses: number;
+  gpuPrefilterSourceFarSummary: number;
+  gpuPrefilterSourceTerrainSampler: number;
+  gpuPrefilterSourceFallback: number;
   gpuAcceptedCount: number;
   gpuVisibleCount: number;
   gpuShadowCasterCount: number;
@@ -158,6 +164,9 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     gpuPrefilterSkippedCandidateEstimate: 0,
     gpuPrefilterCacheHits: 0,
     gpuPrefilterCacheMisses: 0,
+    gpuPrefilterSourceFarSummary: 0,
+    gpuPrefilterSourceTerrainSampler: 0,
+    gpuPrefilterSourceFallback: 0,
     gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
     gpuShadowCasterCount: 0,
@@ -231,7 +240,7 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   stats.heroNearTreeTriangles = heroFidelity.nearTriangleCount;
   stats.heroNearFoliageTriangles = heroFidelity.nearFoliageTriangleCount;
   stats.heroNearMinTreeTriangles = heroFidelity.minNearTreeTriangles;
-  stats.heroNearAvgTreeTriangles = heroFidelity.avgNearTreeTriangles;
+  stats.heroNearAvgTreeTriangles = heroFidelity.avgTreeTriangles;
   stats.heroNearPassesTriangleFloor = heroFidelity.passesTriangleFloor;
   stats.heroNearPassesRealFoliage = heroFidelity.passesRealFoliage;
   stats.gpuStatus = input.gpuStatus;
@@ -269,6 +278,9 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
     stats.gpuCandidateCountAfterPrefilter = mask.gpuCandidateCountAfterPrefilter;
     stats.gpuPrefilterCacheHits = mask.gpuPrefilterCacheHits;
     stats.gpuPrefilterCacheMisses = mask.gpuPrefilterCacheMisses;
+    stats.gpuPrefilterSourceFarSummary = mask.gpuPrefilterSourceFarSummary;
+    stats.gpuPrefilterSourceTerrainSampler = mask.gpuPrefilterSourceTerrainSampler;
+    stats.gpuPrefilterSourceFallback = mask.gpuPrefilterSourceFallback;
   }
   stats.impostorStatus = input.impostorStatus;
   stats.impostorReason = input.impostorReason;
