@@ -172,8 +172,11 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
     exposePerfHooks(null);
     return null;
   }
-  const warmupFrames = intParam(searchParams, ["perfWarmupFrames", "perfWarmup"], 120);
-  const targetSampleFrames = Math.max(1, intParam(searchParams, ["perfSampleFrames", "perfFrames"], 300));
+  const debugOracle = searchParams.get("gpuEarlyRejectDebugOracle") === "1";
+  const requestedWarmupFrames = intParam(searchParams, ["perfWarmupFrames", "perfWarmup"], 120);
+  const requestedSampleFrames = Math.max(1, intParam(searchParams, ["perfSampleFrames", "perfFrames"], 300));
+  const warmupFrames = debugOracle ? Math.min(requestedWarmupFrames, 60) : requestedWarmupFrames;
+  const targetSampleFrames = debugOracle ? Math.min(requestedSampleFrames, 120) : requestedSampleFrames;
   let observedFrames = 0;
   let samples: FramePerfSample[] = [];
   const snapshot = (): FramePerfSnapshot => ({
