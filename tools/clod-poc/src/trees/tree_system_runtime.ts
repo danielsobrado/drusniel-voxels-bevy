@@ -30,6 +30,7 @@ import { createTreeLodCounts, refreshTreePatchesForCenter, resetTreeLodCounts, u
 import { createTreeGpuRingRuntimeState, treeGpuRingMaterialHandles, updateTreeGpuRingTrees } from "./tree_system_gpu_ring_runtime.js";
 import { TreeSystemAssets } from "./tree_system_assets_runtime.js";
 import { TreeGpuLightingProxyCache } from "./tree_system_gpu_lighting_proxy_cache.js";
+import { TreePlacementDebugOverlay } from "./tree_placement_debug_overlay.js";
 import type { FallingTree, TreeLightingProxy, TreePatch, TreeStats, TreeSystemOptions, TreeWebGpuBackendAccess } from "./tree_system_types.js";
 import type { TreeIsolatedRenderer } from "./tree_system_runtime_types.js";
 import { treeCpuPatchInput, treeGpuRingInput, treeCreateGpuRingResources, treeClearGpuRing, treeUpdateStats } from "./tree_system_runtime_privates.js";
@@ -63,6 +64,7 @@ export class TreeSystem {
   stats: TreeStats = createEmptyTreeSystemStats();
   readonly earlyTerrainRejectionStats = createEmptyTreeEarlyTerrainRejectionStats();
   readonly gpuLightingProxyCache = new TreeGpuLightingProxyCache();
+  readonly placementDebugOverlay = new TreePlacementDebugOverlay(this.root);
   measureScene: THREE.Scene | null = null;
 
   constructor(options: TreeSystemOptions) {
@@ -123,6 +125,7 @@ export class TreeSystem {
     this.root.visible = enabled;
     if (enabled && !wasEnabled && !treeSystemUsesGpuRingDraw(this.settings)) this.refreshForCenter(this.lastCenter);
     if (!enabled) { this.updateStats(); resetTreeLodCounts(this.lodCounts); }
+    this.updatePlacementDebugOverlay();
   }
 
   renderIsolatedForTiming(renderer: TreeIsolatedRenderer, target: THREE.RenderTarget, camera: THREE.Camera): void {
@@ -152,6 +155,7 @@ export class TreeSystem {
     this.assets.refreshMaterials(this.patches);
     if (plan.needsPatchRefresh) this.patchesDirty = true;
     this.setEnabled(this.settings.enabled);
+    this.updatePlacementDebugOverlay();
   }
 
   update(timeSeconds: number, center: THREE.Vector3, camera?: THREE.Camera): void {
@@ -182,6 +186,7 @@ export class TreeSystem {
     if (treeSystemUsesGpuRingDraw(this.settings)) { this.updateStats(); return; }
     if (this.settings.enabled) this.refreshForCenter(this.lastCenter);
     this.root.visible = this.settings.enabled;
+    this.updatePlacementDebugOverlay();
   }
 
   markPatchesDirty(): void { this.patchesDirty = true; }
@@ -198,11 +203,13 @@ export class TreeSystem {
       this.gpuRing.status = treeGpuRuntimeStatus(this.settings, { supportsGpuTrees: this.supportsGpuTrees, hasDevice: !!this.gpuDevice, hasBackend: !!this.gpuBackend, unsupportedReason: this.gpuRingUnsupportedReason });
       this.root.visible = this.settings.enabled;
       this.updateStats();
+      this.updatePlacementDebugOverlay();
       return [];
     }
     const plan = planTreePatchRemoval(this.patches, ids);
     for (const patch of plan.removed) removeTreePatchResources(this.root, patch);
     this.patches = plan.retained;
+    this.updatePlacementDebugOverlay();
     return plan.falling;
   }
 
@@ -211,7 +218,13 @@ export class TreeSystem {
     if (!treeSystemUsesGpuRingDraw(this.settings)) this.refreshForCenter(this.lastCenter);
   }
 
-  dispose(): void { this.clearGpuRing(); this.clearPatches(); this.scene.remove(this.root); this.assets.dispose(); }
+  dispose(): void {
+    this.clearGpuRing();
+    this.clearPatches();
+    this.placementDebugOverlay.dispose();
+    this.scene.remove(this.root);
+    this.assets.dispose();
+  }
 
   getStats(): TreeStats { this.updateStats(); return { ...this.stats }; }
 
@@ -226,11 +239,14 @@ export class TreeSystem {
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
     const result = await this.assets.bakeImpostors(renderer);
-    if (result.supported) {
+    if (result.supported && this.settings.impostors.swapOnBake) {
       this.clearGpuRing();
       this.assets.applyMaterials(this.patches);
       this.assets.replaceImpostorMeshGeometries(this.patches, this.meshBoundsState);
       this.updatePatchLods(this.lastCenter, this.lastCenter);
+    } else if (result.supported) {
+      this.patchesDirty = true;
+      this.updateStats();
     }
     return { supported: result.supported, reason: result.reason };
   }
@@ -241,6 +257,7 @@ export class TreeSystem {
     this.patches = result.patches;
     this.patchesDirty = result.patchesDirty;
     this.updatePatchLods(center, cameraPosition);
+    this.updatePlacementDebugOverlay();
   }
 
   updatePatchLods(center: THREE.Vector3, cameraPosition: THREE.Vector3 = center): void {
@@ -255,12 +272,19 @@ export class TreeSystem {
 
   clearPatches(): void {
     for (const patch of this.patches) removeTreePatchResources(this.root, patch);
-    this.patches = []; this.updateStats(); resetTreeLodCounts(this.lodCounts);
+    this.patches = [];
+    this.placementDebugOverlay.clear();
+    this.updateStats();
+    resetTreeLodCounts(this.lodCounts);
   }
 
   clearGpuRing(): void { treeClearGpuRing(this); this.gpuLightingProxyCache.clear(); }
 
   updateStats(): void {
     treeUpdateStats(this);
+  }
+
+  private updatePlacementDebugOverlay(): void {
+    this.placementDebugOverlay.update(this.patches, this.settings.enabled && this.settings.render.placementDebug);
   }
 }
