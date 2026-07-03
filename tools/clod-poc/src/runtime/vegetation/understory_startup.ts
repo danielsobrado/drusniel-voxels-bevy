@@ -69,7 +69,6 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
     },
   });
   const understorySystem = understoryController.system;
-  understoryStats.current = understorySystem.getStats();
 
   return {
     understoryController, understorySystem, understoryStats, formatUnderstoryGpuSummary,
