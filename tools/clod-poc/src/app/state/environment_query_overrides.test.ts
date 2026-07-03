@@ -34,6 +34,8 @@ function createState() {
     treeDensity: 1.2,
     treeSpacing: 5.5,
     treeShadowMaxLod: "mid",
+    treeFarCheapMaterial: true,
+    treeImpostorSwapOnBake: true,
     treeGpuEnabled: false,
     treeGpuFallbackToCpu: true,
     treeGpuForceCpu: true,
@@ -150,6 +152,18 @@ describe("environment query overrides", () => {
     expect(state.treeGpuEnabled).toBe(true);
     expect(state.treeGpuFallbackToCpu).toBe(false);
     expect(state.treeGpuForceCpu).toBe(false);
+  });
+
+  it("applies far-material and impostor hot-swap URL toggles", () => {
+    const state = createState();
+
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({
+      treeFarCheapMaterial: "0",
+      treeImpostorSwapOnBake: "0",
+    }));
+
+    expect(state.treeFarCheapMaterial).toBe(false);
+    expect(state.treeImpostorSwapOnBake).toBe(false);
   });
 
   it("enables tree GPU readback when counts or validation are requested", () => {
