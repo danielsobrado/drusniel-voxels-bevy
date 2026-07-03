@@ -163,6 +163,13 @@ export function treeRingLodParams(settings: TreeSettings = DEFAULT_TREE_SETTINGS
   };
 }
 
+export function treeGpuRingLodParams(settings: TreeSettings = DEFAULT_TREE_SETTINGS): TreeRingLodParams {
+  return {
+    ...treeRingLodParams(settings),
+    band: 0,
+  };
+}
+
 export function treeLodRing(distance: number, params: TreeRingLodParams): TreeRingLodState {
   const dist = Math.max(0, Number.isFinite(distance) ? distance : 0);
   const near = Math.max(0, params.near);
