@@ -35,6 +35,26 @@ describe("shared vegetation slot prefilter", () => {
     expect(new Set(Array.from(result.activeSlotIndices)).size).toBe(25);
   });
 
+  it("keeps every slot when clusters are below the minimum early-reject size", () => {
+    const result = buildVegetationSlotPrefilter({
+      kind: "grass",
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      grid: 8,
+      cell: 1,
+      clusterDimSlots: 4,
+      visibility: VISIBILITY,
+      sampler: sampler(100),
+    });
+
+    expect(result.rejectedClusters).toBe(0);
+    expect(result.candidateSlotsBeforePrefilter).toBe(64);
+    expect(result.candidateSlotsAfterPrefilter).toBe(64);
+    expect(Array.from(result.activeSlotIndices)).toEqual([...Array(64).keys()]);
+  });
+
   it("rejects hidden clusters before slot dispatch", () => {
     const result = buildVegetationSlotPrefilter({
       kind: "test",
