@@ -13,6 +13,9 @@ import { createWaterController } from "./water_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { waterUiState } from "../../app/clod_app_state.js";
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const INFINITE_WATER_RUNTIME_WORLD_CELLS = 1_000_000_000;
+
 export interface WaterStartupInput {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -38,17 +41,24 @@ export interface WaterStartupResult {
   oceanSampler: OceanSampler | null;
 }
 
+export function waterRuntimeWorldCells(searchParams: URLSearchParams, worldCells: number): number {
+  return searchParams.get("scene") === INFINITE_ISLANDS_SCENE
+    ? INFINITE_WATER_RUNTIME_WORLD_CELLS
+    : worldCells;
+}
+
 export async function runWaterStartup(input: WaterStartupInput): Promise<WaterStartupResult> {
   const {
     scene, camera, state, waterConfig, borderCoastOceanConfig, worldCells,
     hydrologySystem, searchParams, currentLighting, lod0Nodes, isWebGpu,
   } = input;
+  const runtimeWorldCells = waterRuntimeWorldCells(searchParams, worldCells);
 
   const waterController = await createWaterController({
     scene,
     nodes: lod0Nodes,
     waterConfig,
-    worldCells,
+    worldCells: runtimeWorldCells,
     isWebGpu,
     surfaceHeight,
     hydrologySystem,
