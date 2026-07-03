@@ -132,13 +132,8 @@ export function createTreeNodeMaterialHandle(
 
   const forestMapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
-  // TP-3: depth-prepass nodes for the CPU/patch tree path (mirrors the GPU-ring
-  // handle). Lets the patch meshes get a depth-only twin so the near canopy
-  // gets early-z and stops paying full shading for occluded fragments.
   const prepassNodes = new Map<MeshBasicNodeMaterial, PrepassNodes>();
 
-  // Shared per-vertex / per-instance attribute nodes (rebuilt per material to avoid
-  // sharing a node instance across compiled materials).
   const barkTexture = sharedBarkTexture(settings.seed);
   const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
@@ -154,17 +149,11 @@ export function createTreeNodeMaterialHandle(
     const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
     forestMapNodes.push(forestPacked);
     const foliageAlbedo: TslNode = albedoFactory(aColor);
-    // Trunk/branch verts (treeFoliageMask 0) get triplanar bark; foliage verts
-    // (mask 1) are real leaf/needle meshes lit by their vertex colour. The old
-    // alpha-card atlas cutout is retired — foliage is opaque geometry now.
     const albedo: TslNode = withBark
       ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
       : foliageAlbedo;
     const opacity: TslNode = float(1);
 
-    // Wind sway/flutter, matching injectTreeWindShader() so the WebGL and WebGPU paths
-    // animate identically. Applied in object space before the instance matrix, exactly
-    // like the classic <begin_vertex> injection.
     const phase: TslNode = fract(sin(dot(aWorldXZ, vec2(127.1, 311.7))).mul(43758.5453123));
     const t: TslNode = wind.uTime.mul(wind.uWindSpeed);
     const waveArg: TslNode = t.add(phase.mul(6.2831853)).add(dot(aWorldXZ, wind.uWindDir).mul(0.035));
@@ -178,14 +167,12 @@ export function createTreeNodeMaterialHandle(
       vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)).mul(variantKeep),
     );
 
-    // Double-sided hemispheric + sun lighting (same model as grass/stones).
     const n0: TslNode = normalize(normalWorld);
     const n: TslNode = frontFacing.select(n0, n0.negate());
     const sun: TslNode = max(dot(n, uLight), 0.0);
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
-    // Leaf translucency: sun coming from behind a leaf card glows through it.
     const back: TslNode = max(dot(n.negate(), uLight), 0.0);
     const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(0.5);
     const litBase: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
@@ -198,9 +185,6 @@ export function createTreeNodeMaterialHandle(
     const lit: TslNode = mix(litBase.mul(float(1).sub(forestDarken)), uForestFogColor, forestFog)
       .add(vec3(forestPacked.w.mul(0.05).mul(uForestEnabled)));
 
-    // Screen-door LOD crossfade: keep a fragment only when an interleaved-gradient
-    // noise sample falls under the instance's fade weight. treeLodFade defaults to 1
-    // (all instances drawn solid) unless TreeSystem is crossfading two LODs.
     const aLodFade: TslNode = attribute("treeLodFade", "float");
     const ign: TslNode = fract(
       fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
@@ -235,8 +219,6 @@ export function createTreeNodeMaterialHandle(
     regularMaterial,
     debugMaterials,
     prepassNodesFor() {
-      // Depth-only prepass is colour-agnostic; the regular and debug materials
-      // share the same position/mask node graph, so one set works for any LOD.
       return prepassNodes.get(regularMaterial);
     },
     setTime(timeSeconds: number) {
@@ -281,7 +263,7 @@ export function createTreeNodeMaterialHandle(
 export function createTreeRingNodeMaterialHandle(
   settings: TreeSettings,
   buffers: TreeRingInstanceBuffers,
-  lod: TreeLod,
+  _lod: TreeLod,
   lighting: EnvironmentLighting = fallbackLighting(),
   hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
@@ -295,14 +277,8 @@ export function createTreeRingNodeMaterialHandle(
     uLeafFlutter: uniform(0),
   };
   applyWindUniforms(wind, settings);
-  const uFadeCenter = uniform(new THREE.Vector2());
-  const uNearDistance = uniform(settings.distanceM * settings.lod.nearFraction);
-  const uMidDistance = uniform(settings.distanceM * settings.lod.midFraction);
-  const uFarDistance = uniform(settings.distanceM * settings.lod.farFraction);
-  const uBandDistance = uniform(settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0);
   const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
   const uSeed = uniform(settings.seed);
-  const uLodIndex = uniform(TREE_LODS.indexOf(lod));
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
@@ -328,8 +304,6 @@ export function createTreeRingNodeMaterialHandle(
     );
     const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
     const aHeight: TslNode = aCell.z;
-    // GPU scatter writes scale into aCell.w so tree age/clump variation is shared
-    // by culling and rendering instead of being a material-only hash.
     const aScale: TslNode = max(aCell.w, float(0.001));
     const aYaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
@@ -369,7 +343,6 @@ export function createTreeRingNodeMaterialHandle(
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
-    // Leaf translucency: sun coming from behind a leaf card glows through it.
     const back: TslNode = max(dot(n.negate(), uLight), 0.0);
     const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(0.5);
     const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
@@ -378,16 +351,8 @@ export function createTreeRingNodeMaterialHandle(
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
-    const lodMask: TslNode = treeRingLodMask(
-      uLodIndex,
-      aWorldXZ.sub(uFadeCenter).length(),
-      uNearDistance,
-      uMidDistance,
-      uFarDistance,
-      uBandDistance,
-    );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
-    (material as unknown as { maskNode: TslNode }).maskNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
+    if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -395,7 +360,7 @@ export function createTreeRingNodeMaterialHandle(
     materials.push(material);
     prepassNodes.set(material, {
       positionNode,
-      maskNode: (material as unknown as { maskNode: TslNode }).maskNode,
+      maskNode: aboveWater ?? undefined,
       side: material.side,
     });
     return material;
@@ -417,8 +382,8 @@ export function createTreeRingNodeMaterialHandle(
     setTime(timeSeconds: number) {
       wind.uTime.value = timeSeconds;
     },
-    setFadeCenter(x: number, z: number) {
-      uFadeCenter.value.set(x, z);
+    setFadeCenter() {
+      // GPU ring LOD selection is resolved by compute; render materials do not dither LODs.
     },
     prepassNodesFor(prepassLod: TreeLod) {
       const material = debugColorByLod ? debugMaterials[prepassLod] : regularMaterial;
@@ -427,10 +392,6 @@ export function createTreeRingNodeMaterialHandle(
     updateSettings(next: TreeSettings) {
       debugColorByLod = next.render.debugColorByLod;
       applyWindUniforms(wind, next);
-      uNearDistance.value = next.distanceM * next.lod.nearFraction;
-      uMidDistance.value = next.distanceM * next.lod.midFraction;
-      uFarDistance.value = next.distanceM * next.lod.farFraction;
-      uBandDistance.value = next.lod.crossfadeEnabled ? next.lod.crossfadeBandM : 0;
       uSeed.value = next.seed;
       for (const material of materials) {
         material.alphaTest = 0;
@@ -481,31 +442,6 @@ function treeVariantKeep(aVariant: TslNode, worldXZ: TslNode, seed: TslNode): Ts
   const v3 = phase.greaterThanEqual(0.75)
     .and(aVariant.greaterThanEqual(2.5)).and(aVariant.lessThan(3.5));
   return v0.or(v1).or(v2).or(v3).select(float(1), float(0));
-}
-
-function treeRingLodMask(
-  lodIndex: TslNode,
-  dist: TslNode,
-  nearDistance: TslNode,
-  midDistance: TslNode,
-  farDistance: TslNode,
-  bandDistance: TslNode,
-): TslNode {
-  const ign: TslNode = fract(
-    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
-  );
-  const noBand = bandDistance.lessThan(0.0001);
-  const fadeIn = (distance: TslNode): TslNode => smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist);
-  const fadeOut = (distance: TslNode): TslNode => float(1).sub(fadeIn(distance));
-  const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade));
-  const passOut = (fade: TslNode): TslNode => ign.lessThan(fade);
-  const nearPass = lodIndex.lessThan(0.5).and(noBand.or(passOut(fadeOut(nearDistance))));
-  const midPass = lodIndex.greaterThanEqual(0.5).and(lodIndex.lessThan(1.5))
-    .and(noBand.or(passIn(fadeIn(nearDistance)).and(passOut(fadeOut(midDistance)))));
-  const farPass = lodIndex.greaterThanEqual(1.5).and(lodIndex.lessThan(2.5))
-    .and(noBand.or(passIn(fadeIn(midDistance)).and(passOut(fadeOut(farDistance)))));
-  const impostorPass = lodIndex.greaterThanEqual(2.5).and(noBand.or(passIn(fadeIn(farDistance))));
-  return nearPass.or(midPass).or(farPass).or(impostorPass);
 }
 
 function applyWindUniforms(wind: TreeWindNodeUniforms, settings: TreeSettings): void {
