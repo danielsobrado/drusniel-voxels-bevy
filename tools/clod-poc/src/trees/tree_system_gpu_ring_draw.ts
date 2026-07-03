@@ -2,6 +2,10 @@ import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import type { TreeGpuRingOutputBuffers } from "../gpu/tree_ring_compute.js";
 import { TREE_GPU_RING_GROUP_COUNT } from "../gpu/tree_ring_compute.js";
+import {
+  isRenderableIndirectDrawGeometry,
+  renderableIndirectDrawCountForGeometry,
+} from "../gpu/indirect_draw_geometry.js";
 import { markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";
 import type { TreeLod, TreeSpeciesId } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
@@ -99,13 +103,11 @@ export function createTreeGpuRingInstancedGeometry(
 }
 
 export function treeGpuRingDrawCountForGeometry(geometry: THREE.BufferGeometry): number {
-  const index = geometry.getIndex();
-  if (index) return Math.max(0, Math.floor(index.count));
-  return Math.max(0, Math.floor(geometry.getAttribute("position")?.count ?? 0));
+  return renderableIndirectDrawCountForGeometry(geometry);
 }
 
 export function isRenderableTreeGpuRingGeometry(geometry: THREE.BufferGeometry): boolean {
-  return treeGpuRingDrawCountForGeometry(geometry) > 0;
+  return isRenderableIndirectDrawGeometry(geometry);
 }
 
 export function createTreeGpuRingMesh(
