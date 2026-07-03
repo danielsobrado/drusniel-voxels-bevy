@@ -70,20 +70,12 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
 
       const sampleH = Number.isFinite(height) ? height : 0;
 
-      const hMin = Math.min(
-        sampleH,
-        terrainSampler.sampleHeight(wx - cellM * 0.4, wz),
-        terrainSampler.sampleHeight(wx + cellM * 0.4, wz),
-        terrainSampler.sampleHeight(wx, wz - cellM * 0.4),
-        terrainSampler.sampleHeight(wx, wz + cellM * 0.4),
-      );
-      const hMax = Math.max(
-        sampleH,
-        terrainSampler.sampleHeight(wx - cellM * 0.4, wz),
-        terrainSampler.sampleHeight(wx + cellM * 0.4, wz),
-        terrainSampler.sampleHeight(wx, wz - cellM * 0.4),
-        terrainSampler.sampleHeight(wx, wz + cellM * 0.4),
-      );
+      const hRangeL = terrainSampler.sampleHeight(wx - cellM * 0.4, wz);
+      const hRangeR = terrainSampler.sampleHeight(wx + cellM * 0.4, wz);
+      const hRangeD = terrainSampler.sampleHeight(wx, wz - cellM * 0.4);
+      const hRangeU = terrainSampler.sampleHeight(wx, wz + cellM * 0.4);
+      const hMin = Math.min(sampleH, hRangeL, hRangeR, hRangeD, hRangeU);
+      const hMax = Math.max(sampleH, hRangeL, hRangeR, hRangeD, hRangeU);
 
       const [nx, ny, nz] = computeNormalFiniteDifference(hFn, wx, wz, cellM);
 

@@ -258,38 +258,55 @@ function validateTreeGpuRingAgainstCpu(
   shadowCascadePlanes: ArrayLike<number> | undefined,
   visibleClusterMask: TreeRingClusterVisibilityMask | null,
 ): void {
-  if (!input.settings.gpu.validation.enabled || !input.state.draw) return;
-  const frame = Math.round(performance.now() / 16.6667);
-  if (frame % input.settings.gpu.validation.intervalFrames !== 0) return;
+  if (!input.settings.gpu.debugValidateAgainstCpu || input.state.stats.readbackMs === null) return;
   const signature = [
-    Math.round(center.x / input.settings.gpu.validation.centerEpsilonM),
-    Math.round(center.z / input.settings.gpu.validation.centerEpsilonM),
-    treeGpuRingKey(input.settings, input.worldCells),
+    Math.round(center.x / TREE_GPU_RING_CELL),
+    Math.round(center.z / TREE_GPU_RING_CELL),
+    input.state.stats.groupCounts.join(","),
+    input.state.stats.shadowGroupCounts.join(","),
+    input.state.stats.overflowed ? 1 : 0,
+    input.state.stats.shadowOverflowed ? 1 : 0,
+    input.state.stats.candidateCountAfterPrefilter,
     visibleClusterMask?.candidateSlotsAfterPrefilter ?? treeGpuRingSlotCount(input.settings),
-    input.settings.gpu.validation.compareShadowCasters ? 1 : 0,
   ].join("|");
   if (signature === input.state.lastValidationSignature) return;
   input.state.lastValidationSignature = signature;
 
+  const capacity = treeGpuRingGroupCapacity(input.settings);
+  const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
   const cpuCounts = generateTreeRingValidationCounts({
     centerX: center.x,
     centerZ: center.z,
-    camera,
+    cameraY: camera?.position.y ?? center.y,
     worldCells: input.worldCells,
     settings: input.settings,
+    sampler: input.sampler,
+    maxInstancesPerGroup: capacity,
+    maxShadowCastersPerGroup: shadowCapacity,
     frustumPlanes,
-    shadowCascadePlanes,
-    visibleClusterMask,
+    shadowCascadePlanes: shadowCapacity > 0 ? shadowCascadePlanes : undefined,
+    activeSlotIndices: visibleClusterMask?.activeSlotIndices,
   });
   const gpuCounts = input.state.compute?.stats(true);
   if (!gpuCounts) return;
-  const visibleDelta = maxGroupDelta(cpuCounts.countsByGroup, gpuCounts.groupCounts);
-  const shadowDelta = maxGroupDelta(cpuCounts.shadowCountsByGroup, gpuCounts.shadowGroupCounts ?? []);
-  if (visibleDelta > input.settings.gpu.validation.maxVisibleDelta || shadowDelta > input.settings.gpu.validation.maxShadowDelta) {
+  const deltas = TREE_LODS.map((lod) => Math.abs((gpuCounts.counts[lod] ?? 0) - (cpuCounts.counts[lod] ?? 0)));
+  const maxDelta = Math.max(...deltas);
+  const tolerance = Math.max(4, Math.ceil(Math.max(visibleTreeLodCount(cpuCounts.counts), visibleTreeLodCount(gpuCounts.counts)) * 0.02));
+  const shadowMaxDelta = maxGroupDelta(gpuCounts.shadowGroupCounts, cpuCounts.shadowGroupCounts);
+  const shadowTolerance = Math.max(4, Math.ceil(Math.max(sumCounts(cpuCounts.shadowGroupCounts), sumCounts(gpuCounts.shadowGroupCounts)) * 0.02));
+  if (
+    maxDelta > tolerance ||
+    cpuCounts.overflowed !== gpuCounts.overflowed ||
+    shadowMaxDelta > shadowTolerance ||
+    cpuCounts.shadowOverflowed !== gpuCounts.shadowOverflowed
+  ) {
     console.warn(
-      `[trees-gpu-validate] mismatch visibleDelta=${visibleDelta} shadowDelta=${shadowDelta}` +
-        ` cpu=${formatTreeLodCounts(cpuCounts.counts)}` +
-        ` gpu=${formatTreeLodCounts(gpuCounts.counts)}`,
+      "[trees-gpu-ring] CPU/GPU count parity failed " +
+        `gpu=${formatTreeLodCounts(gpuCounts.counts)} cpu=${formatTreeLodCounts(cpuCounts.counts)} ` +
+        `maxDelta=${maxDelta} tolerance=${tolerance} ` +
+        `overflow gpu=${gpuCounts.overflowed} cpu=${cpuCounts.overflowed} ` +
+        `shadowMaxDelta=${shadowMaxDelta} shadowTolerance=${shadowTolerance} ` +
+        `shadowOverflow gpu=${gpuCounts.shadowOverflowed} cpu=${cpuCounts.shadowOverflowed}`,
     );
   }
 }

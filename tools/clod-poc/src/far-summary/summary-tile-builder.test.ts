@@ -106,6 +106,24 @@ describe("summary tile builder", () => {
     expect(roughRoughness).toBeGreaterThan(flatRoughness);
   });
 
+  it("reuses range samples for min and max height", () => {
+    let heightSamples = 0;
+    buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 2 },
+      terrainSampler: {
+        sampleHeight: () => {
+          heightSamples++;
+          return 50;
+        },
+      },
+      frameIndex: 0,
+      nowMs: 0,
+    });
+
+    expect(heightSamples).toBe(2 * 2 * 18);
+  });
+
   it("finite difference normal computation works", () => {
     const h = () => 50;
     const [nx, ny, nz] = computeNormalFiniteDifference(h, 0, 0, 1);
