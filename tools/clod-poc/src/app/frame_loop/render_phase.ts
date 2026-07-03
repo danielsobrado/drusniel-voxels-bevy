@@ -227,7 +227,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const treeStats = input.currentTreeStats;
     const understoryStats = input.currentUnderstoryStats;
     const propStats = input.currentPropStats;
-    const farSummarySubphases = readFarSummarySubphaseCounters(hooks?.stats?.counters);
+    const farSummarySubphases = readFarSummarySubphaseCounters();
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       frameMs,

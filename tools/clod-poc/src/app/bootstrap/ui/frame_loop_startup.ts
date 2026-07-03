@@ -352,7 +352,7 @@ export function runFrameLoopStartup(
     farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
           const counters = longView.hooks?.stats?.counters;
-          if (counters) resetFarSummarySubphaseCounters(counters);
+          resetFarSummarySubphaseCounters(counters);
           if (streamingScene) {
             timeFarSummarySubphase(counters, "farSumShellMs", () => {
               farShellController.moveTo(camera.position.x, camera.position.z);

@@ -19,7 +19,7 @@ ray:
 
 build:
   max_tiles_per_frame: 2
-  max_build_ms_per_frame: 1.0
+  max_build_ms_per_frame: 2.0
   material_tile_radius: 8
 
 cache:

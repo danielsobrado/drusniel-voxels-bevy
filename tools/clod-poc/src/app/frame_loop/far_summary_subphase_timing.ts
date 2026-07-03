@@ -16,18 +16,20 @@ export function emptyFarSummarySubphaseSnapshot(): FarSummarySubphaseSnapshot {
   return Object.fromEntries(FAR_SUMMARY_SUBPHASE_METRICS.map((key) => [key, 0])) as FarSummarySubphaseSnapshot;
 }
 
-export function resetFarSummarySubphaseCounters(counters: Record<string, number>): void {
-  for (const key of FAR_SUMMARY_SUBPHASE_METRICS) counters[key] = 0;
+// Authoritative per-frame store. Long-view stats counters only exist in
+// long-view scenes, so timings must not depend on them or every other scene
+// records zeros.
+const subphaseStore: FarSummarySubphaseSnapshot = emptyFarSummarySubphaseSnapshot();
+
+export function resetFarSummarySubphaseCounters(counters?: Record<string, number>): void {
+  for (const key of FAR_SUMMARY_SUBPHASE_METRICS) {
+    subphaseStore[key] = 0;
+    if (counters) counters[key] = 0;
+  }
 }
 
-export function readFarSummarySubphaseCounters(counters: Record<string, number> | undefined): FarSummarySubphaseSnapshot {
-  const snapshot = emptyFarSummarySubphaseSnapshot();
-  if (!counters) return snapshot;
-  for (const key of FAR_SUMMARY_SUBPHASE_METRICS) {
-    const value = counters[key];
-    snapshot[key] = Number.isFinite(value) ? value : 0;
-  }
-  return snapshot;
+export function readFarSummarySubphaseCounters(): FarSummarySubphaseSnapshot {
+  return { ...subphaseStore };
 }
 
 export function timeFarSummarySubphase<T>(
@@ -35,11 +37,12 @@ export function timeFarSummarySubphase<T>(
   key: FarSummarySubphaseMetric,
   fn: () => T,
 ): T {
-  if (!counters) return fn();
   const startedAt = performance.now();
   try {
     return fn();
   } finally {
-    counters[key] = (counters[key] ?? 0) + performance.now() - startedAt;
+    const elapsed = performance.now() - startedAt;
+    subphaseStore[key] += elapsed;
+    if (counters) counters[key] = (counters[key] ?? 0) + elapsed;
   }
 }
