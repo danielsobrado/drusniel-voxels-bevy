@@ -19,7 +19,7 @@ export interface InfoPanelController {
 export function createInfoPanelController(ctx: UiStartupContext): InfoPanelController {
   const { input, session } = ctx;
   const {
-    dom: { info },
+    dom: { info, infoPanel },
     WORLD,
     polishLine,
     buildStatusRef,
@@ -51,6 +51,8 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     grassSystem,
   } = input.runtime;
   const { colorByLodUserOverride } = input;
+  const runtimePanel = document.getElementById("clod-overlay");
+  const debugPanelsVisible = () => !infoPanel.hidden || runtimePanel?.hidden === false;
   const streamDiagnostics = createStreamDiagnosticTracker({
     cfg: input.cfg,
     maxTerrainLevel: input.maxTerrainLevel,
@@ -93,6 +95,8 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
   };
 
   const updateInfo = () => {
+    if (!debugPanelsVisible()) return;
+
     const selection = selectionController.stats();
     const streamLine = input.longView.isLongView
       ? `${streamDiagnostics.format(streamDiagnostics.update({ x: input.camera.position.x, z: input.camera.position.z }))}\n`
