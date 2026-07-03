@@ -126,7 +126,13 @@ packed_low_bandwidth: RG8, canopy/water
 
 ## Dirty-atlas exercise
 
-For NAADF scenes with `perfProbe=1`, the frame loop now runs a P0 dirty-atlas exercise by default.
+For NAADF scenes with `perfProbe=1`, the frame loop runs a P0 dirty-atlas exercise by default. The P0 runner also passes explicit defaults:
+
+```text
+p0DirtyAtlasExercise=1
+dirtyAtlasMoveM=768
+dirtyAtlasSettleFrames=18
+```
 
 The exercise:
 
@@ -185,6 +191,7 @@ render node cache
 material churn
 far-summary atlas memory estimate
 far-summary atlas dirty/full upload state
+p0 dirty-atlas exercise state
 ```
 
 Vegetation source telemetry reports GPU-ring cluster prefilter decisions across trees, grass, and understory as aggregate counters:
@@ -220,6 +227,7 @@ Current gates are evidence gates, not FPS gates:
 ```text
 required-cases-present
 cases-passed
+p0-dirty-atlas-exercise-completed
 terrain-material-cache-evidence
 vegetation-early-reject-evidence
 far-summary-source-evidence
@@ -227,7 +235,7 @@ far-summary-atlas-packing-evidence
 far-summary-atlas-dirty-upload-evidence
 ```
 
-These gates fail if the report is missing required cases, any case failed, terrain cache evidence is missing, vegetation early rejection did not reduce candidate budget or reject clusters, far-summary source usage is missing in early-reject cases, atlas packing savings are missing, or the atlas never shows a dirty upload with `dirtyPixels < totalPixels` and upload mode `dirty`.
+These gates fail if the report is missing required cases, any case failed, the P0 dirty-atlas exercise did not complete after warmup, terrain cache evidence is missing, vegetation early rejection did not reduce candidate budget or reject clusters, far-summary source usage is missing in early-reject cases, atlas packing savings are missing, or the atlas never shows a dirty upload with `dirtyPixels < totalPixels` and upload mode `dirty`.
 
 Use `--failOnGateFailure` to make failed evidence gates return a non-zero process exit code.
 
