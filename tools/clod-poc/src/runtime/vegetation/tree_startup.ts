@@ -69,9 +69,15 @@ function formatTreeImpostorSummary(stats: TreeStats, settings: TreeSettings): st
   if (!settings.impostors.enabled) return "disabled";
   const atlasSize = settings.impostors.resolutionPx * settings.impostors.octahedralGridSize;
   const memoryMiB = estimateTreeImpostorAtlasMemoryMiB(settings);
-  const ready = stats.impostorStatus === "baked" ? "6/6" : `0/6`;
+  const ready = stats.impostorStatus === "baked" ? "6/6" : "0/6";
   const reason = stats.impostorStatus === "fallback" && stats.impostorReason ? ` ${stats.impostorReason}` : "";
   return `${stats.impostorStatus} atlas=${ready} ${atlasSize}px ~${Math.round(memoryMiB)}MiB${reason}`;
+}
+
+function formatDeferredTreeImpostorSummary(settings: TreeSettings): string {
+  const atlasSize = settings.impostors.resolutionPx * settings.impostors.octahedralGridSize;
+  const memoryMiB = estimateTreeImpostorAtlasMemoryMiB(settings);
+  return `deferred atlas=0/6 ${atlasSize}px ~${Math.round(memoryMiB)}MiB`;
 }
 
 export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
@@ -106,7 +112,7 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
       state.treeVisiblePatches = `${stats.visiblePatches}/${stats.patches}`;
       state.treeLodSummary = `${stats.nearTrees}/${stats.midTrees}/${stats.farTrees}/${stats.impostorTrees}`;
       state.treeGpuSummary = formatTreeGpuSummary(stats);
-      state.treeImpostorSummary = formatTreeImpostorSummary(stats, treeController.makeSettings());
+      state.treeImpostorSummary = formatTreeImpostorSummary(stats, treeConfig);
       statControllers.treeTotal?.updateDisplay();
       statControllers.treeVisiblePatches?.updateDisplay();
       statControllers.treeLodSummary?.updateDisplay();
@@ -118,7 +124,10 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   const fallingTrees = treeController.fallingTrees;
   treeController.refreshStats();
 
-  if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
+  const shouldBakeImpostorsOnStart = treeConfig.impostors.enabled &&
+    treeConfig.impostors.bakeOnStart &&
+    state.treeImpostorSwapOnBake;
+  if (shouldBakeImpostorsOnStart) {
     void treeController.bakeImpostors(renderer).then((result) => {
       if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
       treeController.refreshStats();
@@ -126,6 +135,9 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
       console.warn("[trees] impostor baking failed", error);
       treeController.refreshStats();
     });
+  } else if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
+    state.treeImpostorSummary = formatDeferredTreeImpostorSummary(treeConfig);
+    statControllers.treeImpostorSummary?.updateDisplay();
   }
 
   return {
