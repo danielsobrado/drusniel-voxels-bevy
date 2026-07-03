@@ -125,6 +125,10 @@ function recordDynamicResolutionCounters(counters: Record<string, number>, stats
   counters["dynamicResolution.reason"] = DYNAMIC_RESOLUTION_REASON_CODE[stats.reason];
 }
 
+function globalDynamicResolution(): DynamicResolutionController | undefined {
+  return typeof window !== "undefined" ? window.__drusnielDynamicResolution : undefined;
+}
+
 export function runRenderPhase(input: RenderPhaseInput): void {
   const selectionStats = input.selectionController.stats();
   input.nodeLabelOverlay.update({
@@ -156,7 +160,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   input.afterRenderDiagnostics?.();
 
   const hooks = input.getHooks();
-  const dynamicResolution = input.dynamicResolution ?? window.__drusnielDynamicResolution;
+  const dynamicResolution = input.dynamicResolution ?? globalDynamicResolution();
   const dynamicResolutionStats = dynamicResolution?.update({
     frameMs,
     frameIndex: selectionStats.frameId,
