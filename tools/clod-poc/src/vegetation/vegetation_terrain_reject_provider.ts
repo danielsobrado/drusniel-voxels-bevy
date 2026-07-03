@@ -170,6 +170,9 @@ export function createTerrainSummaryRejectProvider(
       if (coverage < (query.minCoverageToAccept ?? 0.05)) {
         return { reject: true, reason: "noCoverage", confidence: "summary", debug };
       }
+      if (!query.sampler) {
+        return { reject: false, reason: "accepted", confidence: "summary", debug, sourceReason: "visible" };
+      }
 
       return null;
     },
