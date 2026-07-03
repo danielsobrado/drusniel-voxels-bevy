@@ -15,6 +15,15 @@ import {
 export const TREE_STRUCTURAL_VARIANTS = 4;
 
 const TREE_CONTACT_OFFSET_PER_SCALE_M = -0.12;
+const TREE_PLACEMENT_DEBUG_SAMPLE_LIMIT = 4096;
+
+export type TreePlacementDebugReason = "accepted" | "outside" | "slope" | "height" | "material" | "ecology" | "species";
+
+export interface TreePlacementDebugSample {
+  readonly reason: TreePlacementDebugReason;
+  readonly position: [number, number, number];
+}
+
 export interface TreeTerrainSampler {
   readonly sourceRevision?: number | (() => number);
   surfaceHeight(x: number, z: number): number;
@@ -37,6 +46,7 @@ export interface TreeGenerationStats {
   rejectedSlope: number;
   rejectedHeight: number;
   rejectedMaterial: number;
+  debugSamples: TreePlacementDebugSample[];
 }
 
 export const defaultTreeTerrainSampler: TreeTerrainSampler = {
@@ -52,6 +62,7 @@ export function emptyTreeGenerationStats(): TreeGenerationStats {
     rejectedSlope: 0,
     rejectedHeight: 0,
     rejectedMaterial: 0,
+    debugSamples: [],
   };
 }
 
@@ -89,6 +100,7 @@ export function generateTreeInstances(
       );
       if (x < 0 || z < 0 || x > worldCells || z > worldCells) {
         stats.rejectedMaterial++;
+        recordPlacementDebugSample(settings, stats, "outside", x, 0, z);
         continue;
       }
 
@@ -96,10 +108,12 @@ export function generateTreeInstances(
       const normalY = sampler.surfaceNormal(x, z)[1];
       if (normalY < settings.placement.slopeMinY) {
         stats.rejectedSlope++;
+        recordPlacementDebugSample(settings, stats, "slope", x, height, z);
         continue;
       }
       if (height < settings.placement.minHeightM || height > settings.placement.maxHeightM) {
         stats.rejectedHeight++;
+        recordPlacementDebugSample(settings, stats, "height", x, height, z);
         continue;
       }
 
@@ -109,16 +123,22 @@ export function generateTreeInstances(
       const threshold = treeHash2(gridX, gridZ, settings.seed + 307);
       if (groundWeight < settings.placement.minGroundWeight || (!settings.ecology.enabled && threshold > groundWeight)) {
         stats.rejectedMaterial++;
+        recordPlacementDebugSample(settings, stats, "material", x, height, z);
         continue;
       }
 
       const ecology = settings.ecology.enabled ? sampleTreeEcology(x, z, height, normalY, groundWeight, settings) : null;
       if (ecology && treeHash2(gridX, gridZ, settings.seed + 701) > ecologyAcceptanceProbability(ecology, settings)) {
         stats.rejectedMaterial++;
+        recordPlacementDebugSample(settings, stats, "ecology", x, height, z);
         continue;
       }
       const species = selectTreeSpeciesForInstance(settings, treeHash2(gridX, gridZ, settings.seed + 409), height, normalY, weights, ecology);
-      if (!species) { stats.rejectedMaterial++; continue; }
+      if (!species) {
+        stats.rejectedMaterial++;
+        recordPlacementDebugSample(settings, stats, "species", x, height, z);
+        continue;
+      }
       const speciesSettings = settings.species[species];
       const variant = Math.floor(treeHash2(gridX, gridZ, settings.seed + 509) * TREE_STRUCTURAL_VARIANTS) % TREE_STRUCTURAL_VARIANTS;
       const scale = (0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42) * (ecology?.scaleMultiplier ?? 1);
@@ -149,9 +169,29 @@ export function generateTreeInstances(
       return dx * dx + dz * dz < Math.max(minSpacingSq, minDistance * minDistance);
     })) continue;
     stats.acceptedCandidates++;
+    recordPlacementDebugSample(
+      settings,
+      stats,
+      "accepted",
+      candidate.instance.position[0],
+      candidate.instance.position[1],
+      candidate.instance.position[2],
+    );
     accepted.push(candidate.instance);
   }
   return accepted;
+}
+
+function recordPlacementDebugSample(
+  settings: TreeSettings,
+  stats: TreeGenerationStats,
+  reason: TreePlacementDebugReason,
+  x: number,
+  y: number,
+  z: number,
+): void {
+  if (!settings.render.placementDebug || stats.debugSamples.length >= TREE_PLACEMENT_DEBUG_SAMPLE_LIMIT) return;
+  stats.debugSamples.push({ reason, position: [x, y + 0.25, z] });
 }
 
 function selectTreeSpeciesForInstance(
