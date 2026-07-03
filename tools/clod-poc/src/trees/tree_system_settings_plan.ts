@@ -26,7 +26,10 @@ export function planTreeSystemSettingsUpdate(
     patch.maxInstances !== undefined ||
     patch.placement !== undefined ||
     patch.lod !== undefined;
-  const clearGpuRing = patch.gpu !== undefined;
+  const renderChanged = patch.render !== undefined;
+  const farMaterialChanged = patch.render?.farCheapMaterial !== undefined &&
+    patch.render.farCheapMaterial !== current.render.farCheapMaterial;
+  const clearGpuRing = patch.gpu !== undefined || farMaterialChanged || renderChanged;
   const nextGpuStatus = !patch.gpu
     ? null
     : !patch.gpu.enabled
