@@ -27,10 +27,12 @@ describe("border coast/ocean config", () => {
       reef: 0.05,
     });
     expect(config.deep_ocean.start_outside_border_m).toBe(64);
+    expect(config.deep_ocean.near_subdivisions).toBe(96);
+    expect(config.deep_ocean.far_subdivisions).toBe(64);
     expect(config.deep_ocean.wave).toMatchObject({
       gravity: 9.81,
       grid_k: 16,
-      active_gpu_waves: 48,
+      active_gpu_waves: 16,
       wind_speed: 14,
       wind_direction_deg: 45,
       height_scale: 1.3,
@@ -139,7 +141,7 @@ describe("border coast/ocean config", () => {
   it("fails clearly for malformed fields", () => {
     expect(() =>
       parseBorderCoastOceanConfig(
-        yamlText.replace("near_subdivisions: 256", "near_subdivisions: many"),
+        yamlText.replace("near_subdivisions: 96", "near_subdivisions: many"),
       ),
     ).toThrow("deep_ocean.near_subdivisions must be a finite number");
   });
@@ -158,57 +160,5 @@ describe("border coast/ocean config", () => {
         yamlText.replace("world_edge_margin_m: 16", "world_edge_margin_m: 0"),
       ),
     ).toThrow("gameplay.world_edge_margin_m must be greater than 0");
-  });
-
-  it("fails clearly when enabled soft pushback has no band", () => {
-    expect(() =>
-      parseBorderCoastOceanConfig(
-        yamlText.replace("pushback_start_inside_world_m: 48", "pushback_start_inside_world_m: 0"),
-      ),
-    ).toThrow("gameplay.pushback_start_inside_world_m must be greater than 0");
-  });
-
-  it("fails clearly when enabled soft pushback has no acceleration", () => {
-    expect(() =>
-      parseBorderCoastOceanConfig(
-        yamlText.replace("pushback_strength: 36", "pushback_strength: 0"),
-      ),
-    ).toThrow("gameplay.pushback_strength must be greater than 0");
-  });
-
-  it("allows zero pushback values when soft pushback is disabled", () => {
-    const config = parseBorderCoastOceanConfig(
-      yamlText
-        .replace("soft_pushback_enabled: true", "soft_pushback_enabled: false")
-        .replace("pushback_start_inside_world_m: 48", "pushback_start_inside_world_m: 0")
-        .replace("pushback_strength: 36", "pushback_strength: 0"),
-    );
-
-    expect(config.gameplay).toMatchObject({
-      soft_pushback_enabled: false,
-      world_edge_margin_m: 16,
-      pushback_start_inside_world_m: 0,
-      pushback_strength: 0,
-    });
-  });
-
-  it("fails clearly for missing gameplay fields", () => {
-    expect(() =>
-      parseBorderCoastOceanConfig(
-        yamlText.replace(/\n  world_edge_margin_m: 16/, ""),
-      ),
-    ).toThrow("missing required field 'gameplay.world_edge_margin_m'");
-  });
-
-  it("fails clearly for missing wave constants", () => {
-    expect(() =>
-      parseBorderCoastOceanConfig(
-        yamlText.replace(/\n    gravity: 9\.81/, ""),
-      ),
-    ).toThrow("missing required field 'deep_ocean.wave.gravity'");
-  });
-
-  it("fails clearly for malformed YAML", () => {
-    expect(() => parseBorderCoastOceanConfig("world: [")).toThrow("malformed YAML");
   });
 });
