@@ -49,6 +49,7 @@ export interface VegetationGuiStatControllers {
   treeVisiblePatches: GuiController | null;
   treeLodSummary: GuiController | null;
   treeGpuSummary: GuiController | null;
+  treeImpostorSummary: GuiController | null;
   understoryTotal: GuiController | null;
   understoryVisiblePatches: GuiController | null;
   understoryClassSummary: GuiController | null;
@@ -227,7 +228,7 @@ export function createVegetationGui(
   };
   const updateTreeWindSettings = () => deps.treeSystem.updateSettings({
     wind: {
-      ...deps.treeConfig.wind,
+      ...deps.treeController.makeSettings().wind,
       enabled: state.treeWindEnabled as boolean,
       strength: state.treeWindStrength as number,
       speed: state.treeWindSpeed as number,
@@ -236,16 +237,32 @@ export function createVegetationGui(
       leafFlutterStrength: state.treeLeafFlutterStrength as number,
     },
   });
-  const updateTreeRenderSettings = () => deps.treeSystem.updateSettings({
-    render: {
-      ...deps.treeConfig.render,
-      debugColorByLod: state.treeDebugColorByLod as boolean,
-    },
-  });
+  const updateTreeRenderSettings = () => {
+    deps.treeSystem.updateSettings({
+      render: {
+        ...deps.treeController.makeSettings().render,
+        debugColorByLod: state.treeDebugColorByLod as boolean,
+        farCheapMaterial: state.treeFarCheapMaterial as boolean,
+        placementDebug: state.treePlacementDebug as boolean,
+      },
+    });
+    refreshTreeStats();
+    deps.updateInfo();
+  };
+  const updateTreeImpostorSettings = () => {
+    deps.treeSystem.updateSettings({
+      impostors: {
+        ...deps.treeController.makeSettings().impostors,
+        swapOnBake: state.treeImpostorSwapOnBake as boolean,
+      },
+    });
+    refreshTreeStats();
+    deps.updateInfo();
+  };
   const updateTreeGpuSettings = () => {
     deps.treeSystem.updateSettings({
       gpu: {
-        ...deps.treeConfig.gpu,
+        ...deps.treeController.makeSettings().gpu,
         enabled: state.treeGpuEnabled as boolean,
         fallbackToCpu: state.treeGpuFallbackToCpu as boolean,
         debugForceCpu: state.treeGpuForceCpu as boolean,
@@ -266,7 +283,9 @@ export function createVegetationGui(
   const treeActions = {
     rebuild: () => {
       deps.treeController.rebuild();
-      if (deps.impostorsEnabled && deps.bakeImpostorsOnStart) void deps.treeController.bakeImpostors(deps.renderer);
+      if (deps.impostorsEnabled && deps.bakeImpostorsOnStart && state.treeImpostorSwapOnBake) {
+        void deps.treeController.bakeImpostors(deps.renderer);
+      }
       deps.updateInfo();
     },
     snapshot: () => {
@@ -309,6 +328,9 @@ export function createVegetationGui(
     treeFolder.add(state, "treeShadowMaxLod", [...TREE_SHADOW_MAX_LOD_VALUES]).name("shadow max LOD").onFinishChange(treeActions.rebuild),
   );
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
+  treeFolder.add(state, "treeFarCheapMaterial").name("cheap far material").onChange(updateTreeRenderSettings);
+  treeFolder.add(state, "treePlacementDebug").name("placement debug").onChange(updateTreeRenderSettings);
+  treeFolder.add(state, "treeImpostorSwapOnBake").name("swap impostors on bake").onChange(updateTreeImpostorSettings);
   treeSettingControllers.push(
     treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuFallbackToCpu").name("fallback to CPU").onChange(updateTreeGpuSettings),
@@ -328,6 +350,7 @@ export function createVegetationGui(
   const treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
   const treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far/impostor").disable();
   const treeGpuSummaryController = treeFolder.add(state, "treeGpuSummary").name("GPU").disable();
+  const treeImpostorSummaryController = treeFolder.add(state, "treeImpostorSummary").name("impostors").disable();
   treeFolder.add(treeActions, "snapshot").name("log perf snapshot");
   treeFolder.add(treeActions, "rebuild").name("rebuild");
 
@@ -410,6 +433,7 @@ export function createVegetationGui(
       treeVisiblePatches: treeVisiblePatchesController,
       treeLodSummary: treeLodSummaryController,
       treeGpuSummary: treeGpuSummaryController,
+      treeImpostorSummary: treeImpostorSummaryController,
       understoryTotal: understoryTotalController,
       understoryVisiblePatches: understoryVisiblePatchesController,
       understoryClassSummary: understoryClassSummaryController,
