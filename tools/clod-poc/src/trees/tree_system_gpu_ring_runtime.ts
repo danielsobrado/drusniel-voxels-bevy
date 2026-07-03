@@ -100,7 +100,7 @@ export function treeGpuRingMaterialHandles(state: TreeGpuRingRuntimeState): Iter
 export interface TreeMaterialHandleLike {
   setTime(timeSeconds: number): void;
   setFadeCenter?(x: number, z: number): void;
-  updateLighting?(lighting: unknown): void;
+  updateLighting?(state: unknown): void;
   updateForestLighting?(state: unknown): void;
   dispose(): void;
 }
@@ -258,74 +258,59 @@ function validateTreeGpuRingAgainstCpu(
   shadowCascadePlanes: ArrayLike<number> | undefined,
   visibleClusterMask: TreeRingClusterVisibilityMask | null,
 ): void {
-  if (!input.settings.gpu.debugValidateAgainstCpu || input.state.stats.readbackMs === null) return;
-
+  if (!input.settings.gpu.validation.enabled || !input.state.draw) return;
+  const frame = Math.round(performance.now() / 16.6667);
+  if (frame % input.settings.gpu.validation.intervalFrames !== 0) return;
   const signature = [
-    Math.round(center.x / TREE_GPU_RING_CELL),
-    Math.round(center.z / TREE_GPU_RING_CELL),
-    input.state.stats.groupCounts.join(","),
-    input.state.stats.shadowGroupCounts.join(","),
-    input.state.stats.overflowed ? 1 : 0,
-    input.state.stats.shadowOverflowed ? 1 : 0,
-    input.state.stats.candidateCountAfterPrefilter,
-    visibleClusterMask?.activeSlotIndices.length ?? -1,
+    Math.round(center.x / input.settings.gpu.validation.centerEpsilonM),
+    Math.round(center.z / input.settings.gpu.validation.centerEpsilonM),
+    treeGpuRingKey(input.settings, input.worldCells),
+    visibleClusterMask?.candidateSlotsAfterPrefilter ?? treeGpuRingSlotCount(input.settings),
+    input.settings.gpu.validation.compareShadowCasters ? 1 : 0,
   ].join("|");
   if (signature === input.state.lastValidationSignature) return;
   input.state.lastValidationSignature = signature;
 
-  const capacity = treeGpuRingGroupCapacity(input.settings);
-  const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
-  const expected = generateTreeRingValidationCounts({
+  const cpuCounts = generateTreeRingValidationCounts({
     centerX: center.x,
     centerZ: center.z,
-    cameraY: camera?.position.y ?? center.y,
+    camera,
     worldCells: input.worldCells,
     settings: input.settings,
-    sampler: input.sampler,
-    maxInstancesPerGroup: capacity,
-    maxShadowCastersPerGroup: shadowCapacity,
     frustumPlanes,
-    shadowCascadePlanes: shadowCapacity > 0 ? shadowCascadePlanes : undefined,
-    activeSlotIndices: visibleClusterMask?.activeSlotIndices,
+    shadowCascadePlanes,
+    visibleClusterMask,
   });
-  const deltas = TREE_LODS.map((lod) => Math.abs((input.state.stats.counts[lod] ?? 0) - (expected.counts[lod] ?? 0)));
-  const maxDelta = Math.max(...deltas);
-  const tolerance = Math.max(4, Math.ceil(Math.max(visibleTreeLodCount(expected.counts), visibleTreeLodCount(input.state.stats.counts)) * 0.02));
-  const shadowMaxDelta = maxGroupDelta(input.state.stats.shadowGroupCounts, expected.shadowGroupCounts);
-  const shadowTolerance = Math.max(4, Math.ceil(Math.max(sumCounts(expected.shadowGroupCounts), sumCounts(input.state.stats.shadowGroupCounts)) * 0.02));
-  if (
-    maxDelta > tolerance ||
-    expected.overflowed !== input.state.stats.overflowed ||
-    shadowMaxDelta > shadowTolerance ||
-    expected.shadowOverflowed !== input.state.stats.shadowOverflowed
-  ) {
+  const gpuCounts = input.state.compute?.stats(true);
+  if (!gpuCounts) return;
+  const visibleDelta = maxGroupDelta(cpuCounts.countsByGroup, gpuCounts.groupCounts);
+  const shadowDelta = maxGroupDelta(cpuCounts.shadowCountsByGroup, gpuCounts.shadowGroupCounts ?? []);
+  if (visibleDelta > input.settings.gpu.validation.maxVisibleDelta || shadowDelta > input.settings.gpu.validation.maxShadowDelta) {
     console.warn(
-      "[trees-gpu-ring] CPU/GPU count parity failed " +
-      `gpu=${formatTreeLodCounts(input.state.stats.counts)} cpu=${formatTreeLodCounts(expected.counts)} ` +
-      `maxDelta=${maxDelta} tolerance=${tolerance} ` +
-      `overflow gpu=${input.state.stats.overflowed} cpu=${expected.overflowed} ` +
-      `shadowMaxDelta=${shadowMaxDelta} shadowTolerance=${shadowTolerance} ` +
-      `shadowOverflow gpu=${input.state.stats.shadowOverflowed} cpu=${expected.shadowOverflowed}`,
+      `[trees-gpu-validate] mismatch visibleDelta=${visibleDelta} shadowDelta=${shadowDelta}` +
+        ` cpu=${formatTreeLodCounts(cpuCounts.counts)}` +
+        ` gpu=${formatTreeLodCounts(gpuCounts.counts)}`,
     );
   }
 }
 
 function updateTreeClusterVisibilityProviderRevision(input: TreeGpuRingRuntimeInput): number {
+  if (!input.sampler) return 0;
   const key = treeClusterVisibilityProviderKey(input);
-  if (input.state.clusterVisibilityProviderKey !== key || input.state.clusterVisibilitySampler !== input.sampler) {
+  if (key !== input.state.clusterVisibilityProviderKey) {
     input.state.clusterVisibilityProviderKey = key;
-    input.state.clusterVisibilitySampler = input.sampler;
     input.state.clusterVisibilityProviderRevision++;
     input.state.clusterVisibilityCache.clear();
   }
+  input.state.clusterVisibilitySampler = input.sampler;
   return input.state.clusterVisibilityProviderRevision;
 }
 
 function treeClusterVisibilityProviderKey(input: TreeGpuRingRuntimeInput): string {
   const visibility = input.settings.gpu.terrainVisibility;
   return [
+    input.sampler ? "sampler" : "none",
     input.worldCells,
-    input.settings.gpu.enabled ? 1 : 0,
     visibility.enabled ? 1 : 0,
     visibility.minDistanceM,
     visibility.sampleCount,
@@ -376,6 +361,9 @@ function treeVisibleClusterMaskStats(mask: TreeRingClusterVisibilityMask | null)
     gpuCandidateCountAfterPrefilter: mask.candidateSlotsAfterPrefilter,
     gpuPrefilterCacheHits: mask.cacheHits,
     gpuPrefilterCacheMisses: mask.cacheMisses,
+    gpuPrefilterSourceFarSummary: mask.sourceCounts.naadfFarSummary,
+    gpuPrefilterSourceTerrainSampler: mask.sourceCounts.terrainVisibilitySampler,
+    gpuPrefilterSourceFallback: mask.sourceCounts.conservativeFallback,
   };
 }
 
@@ -428,6 +416,5 @@ function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRing
     submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
-    terrainVisibilityCounts: null,
   };
 }
