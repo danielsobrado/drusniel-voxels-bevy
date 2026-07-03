@@ -66,14 +66,8 @@ export function createTreeRingImpostorNodeMaterialHandle(
   lighting: EnvironmentLighting = fallbackLighting(),
   hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
-  const uFadeCenter = uniform(new THREE.Vector2());
-  const uNearDistance = uniform(settings.distanceM * settings.lod.nearFraction);
-  const uMidDistance = uniform(settings.distanceM * settings.lod.midFraction);
-  const uFarDistance = uniform(settings.distanceM * settings.lod.farFraction);
-  const uBandDistance = uniform(settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0);
   const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
   const uSeed = uniform(settings.seed);
-  const uLodIndex = uniform(TREE_LODS.indexOf("impostor"));
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
@@ -118,17 +112,9 @@ export function createTreeRingImpostorNodeMaterialHandle(
       ? relightTreeRingImpostor(albedo, impostor.normal, c, s, uLight, uSun, uSky, uGround)
       : albedo;
 
-    const lodMask: TslNode = treeRingLodMask(
-      uLodIndex,
-      aWorldXZ.sub(uFadeCenter).length(),
-      uNearDistance,
-      uMidDistance,
-      uFarDistance,
-      uBandDistance,
-    );
     const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest));
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
-    const mask: TslNode = aboveWater ? lodMask.and(alphaMask).and(aboveWater) : lodMask.and(alphaMask);
+    const mask: TslNode = aboveWater ? alphaMask.and(aboveWater) : alphaMask;
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
@@ -151,14 +137,10 @@ export function createTreeRingImpostorNodeMaterialHandle(
     regularMaterial,
     debugMaterials,
     setTime() {},
-    setFadeCenter(x: number, z: number) {
-      uFadeCenter.value.set(x, z);
+    setFadeCenter() {
+      // GPU ring LOD selection is resolved by compute; render materials do not dither LODs.
     },
     updateSettings(next: TreeSettings) {
-      uNearDistance.value = next.distanceM * next.lod.nearFraction;
-      uMidDistance.value = next.distanceM * next.lod.midFraction;
-      uFarDistance.value = next.distanceM * next.lod.farFraction;
-      uBandDistance.value = next.lod.crossfadeEnabled ? next.lod.crossfadeBandM : 0;
       uSeed.value = next.seed;
       for (const material of materials) {
         material.alphaTest = 0;
@@ -311,15 +293,4 @@ function treeRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode 
   return fract(
     sin(dot(cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))), vec2(41.3, 289.1))).mul(43758.5453),
   );
-}
-
-function treeRingLodMask(
-  lodIndex: TslNode,
-  dist: TslNode,
-  _nearDistance: TslNode,
-  _midDistance: TslNode,
-  farDistance: TslNode,
-  _bandDistance: TslNode,
-): TslNode {
-  return lodIndex.greaterThanEqual(2.5).and(dist.greaterThanEqual(farDistance));
 }
