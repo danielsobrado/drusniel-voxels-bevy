@@ -95,6 +95,38 @@ npm --prefix tools/clod-poc test                # vitest — NO rtk
 - `tsc --noEmit`: clean. (Fixed two fallouts: `perf_probe.test.ts` sample helper was missing the new required `farSum*` fields — pre-existing break from the instrumentation commits; `light_cache.test.ts` provider mock needed the new `heightAt`.)
 - Full vitest suite: **380 files / 2101 tests, all passed** (156 s). Includes 2 new tests in `light_builder.test.ts`: deterministic incremental build under an expired deadline matches the full build; `heightAt` fast path is used when present.
 
+## 6b. Player-mode forest stutter (props → vegTotal → forest ≈ 112–116 ms) [DONE]
+
+[EVIDENCE] User profile in player mode: frame 118–122 ms, `props` 115–119, `vegTotal` 113–117, `forest` 112–116, render only 2.4–2.8 ms, zero shader churn — pure CPU in the `forest` bracket (`updateForestLighting`).
+
+Root cause (micro-bench, vitest, world=1024, trees.yaml settings): `generateTreeRingLightingProxies` walks all **61,504 ring slots** (`distance_m: 420`, cell 3.4 m ⇒ grid 248²) doing `surfaceHeight` + `surfaceNormal` + a 3-sample terrain-occlusion march per slot — **778.7 ms** in Node (~100 ms browser). The field rebuild is minor (splat 2.3 + finalize 11.3 + upload ≈ 25 ms total). The proxy cache key quantizes the center to one 3.4 m ring cell, so walking regenerates constantly; `ForestLightingSystem.shouldUpdate` re-triggers every 8 m or 0.025 sun drift, and the whole rebuild was monolithic inside one frame.
+
+Fix (same resumable pattern as the sun-light cache, budget `forest_lighting.yaml: field.max_build_ms_per_frame: 2.0`):
+
+- `tree_ring_lighting_proxies.ts`: `createTreeRingLightingProxyBuild` / `stepTreeRingLightingProxyBuild(deadline)` / `finishTreeRingLightingProxyBuild` (slot cursor, ≥16 slots progress per step); species weight table hoisted out of the slot loop (also in `generateTreeRingValidationCounts`); `generateTreeRingLightingProxies` kept as run-to-completion wrapper.
+- `tree_system_gpu_lighting_proxy_cache.ts`: `getBudgeted(input, deadline)` steps the build across frames, returns the previous proxy set (`ready:false`) meanwhile, never restarts on key drift (converges after completion). `TreeSystem.getLightingProxiesBudgeted(deadline)` wraps it.
+- `forest_lighting_fields.ts`: finalize split into row-sliceable phases (`createForestLightingFinalizeContext`, `blurForestLightingCanopyRows`, `finalizeForestLightingRows`, `finalizeForestLightingClampPass`); `finalizeForestLightingField` unchanged wrapper.
+- `forest_lighting_system.ts`: double-buffered field + `beginBuild`/`stepBuild(deadline)`/`hasBuildInProgress`; live field/texture untouched until completion (no lighting pop), swap + one texture upload at the end; `update()` = begin+step(∞); `updateSettings` cancels in-flight builds.
+- `forest_lighting_controller.ts`: `updateBudgeted(center, sun)` orchestrates proxy acquisition → field build within the ms budget; `vegetation_frame_phase.ts` drives it and re-applies prop material state only on completion.
+
+[EVIDENCE] Same bench, budgeted at 2 ms: proxy build spread over 362 steps, **max step 3.27 ms**; field build 6 steps, max 2.42 ms (slot-check granularity causes the small overshoot; browser per-slot cost is ~8× lower). Total work unchanged — a lighting refresh now completes over ~50 frames in-browser instead of one 112–116 ms hitch.
+
+Tests: +2 resumable-proxy tests, +2 cache budgeted tests (`tree_ring_lighting_proxies.test.ts`), +2 system build tests (`forest_lighting_system.test.ts`), new `forest_lighting_controller.test.ts` (orchestration), frame-phase mock updated. trees/forest/runtime/frame_loop suites: 72 files / 354 tests green; typecheck clean.
+
+**Browser re-verify pending**: in player mode, walk continuously and confirm `forest` stays ≤ ~3 ms in the vegTotal profile line and lighting still refreshes (canopy shadows follow within ~a second after stopping).
+
+## 6c. P0 dirty-atlas exercise → targeted tile revision invalidation [DONE, P0 re-run pending]
+
+[EVIDENCE] smoke-4: camera-boundary move dirtied 27,648–30,720 of 76,800 px (36–40%) > 0.35 threshold ⇒ `fallback=threshold`, full upload — the camera-move exercise can never prove the dirty path.
+
+Rework (`p0_dirty_atlas_exercise.ts`): instead of moving the camera, the exercise re-stamps up to `dirtyAtlasTiles` (1–8, default 4) **ready far tiles already placed in the ring-0 atlas window** with fresh revisions (`state.farTiles.set(key, { ...tile, revision: state.revision++ })` via `window.__drusnielNaadf`). Same slot + new revision ⇒ `diffAtlasTilePlacements` yields blit-only dirty rects; tiles are picked from a single tile row so merged rects stay a strip ≤ 4·32² = 4,096 px (5.3%) ⇒ `mode=dirty`, `fallbackReason=none`. Retries every frame after warmup until tiles are ready; camera/controls removed from the exercise input.
+
+Counters renamed: `moveM`/`requestedMoveM`/`tileSpanM`/`boundaryEpsilonM` → `requestedTiles`/`bumpedTiles`. Updated consumers: `perf-p0.ts` (URL param `dirtyAtlasTiles=4`, counter list, summary row), `perf-p0-gates.ts` (completion gate now checks `bumpedTiles`), `perf-p0-extract.ts`, `perf-p0-atlas-diagnostics.ts`, `perf-p0-gates.test.ts`, `p0-performance-validation.md`.
+
+smoke-5 attempt failed **environmentally**: the dev server on 127.0.0.1:5180 died between the pre-check and the run (`dev server is not reachable`, all cases failed with empty counters, 0 navigations). The rework itself is typecheck-clean and gate unit tests pass — re-run needed with a live server.
+
+Full suite after both fixes: **381 files / 2111 tests green** (141 s).
+
 ## 7. Files changed in this session
 
 - `src/terrain/sun_visibility/far_light_height.ts` — allocation-free `heightAt` fast path.

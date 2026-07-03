@@ -87,18 +87,18 @@ function gateP0DirtyAtlasExerciseCompleted(byName: ReadonlyMap<string, P0PerfGat
   const enabledCases = cases.filter((perfCase) => metric(perfCase, "p0DirtyAtlasExercise.enabled") === 1);
   const completed = enabledCases.filter((perfCase) => {
     const status = metric(perfCase, "p0DirtyAtlasExercise.status");
-    const moveM = metric(perfCase, "p0DirtyAtlasExercise.moveM");
+    const bumpedTiles = metric(perfCase, "p0DirtyAtlasExercise.bumpedTiles");
     const triggeredFrame = metric(perfCase, "p0DirtyAtlasExercise.triggeredFrame");
     const resetFrame = metric(perfCase, "p0DirtyAtlasExercise.resetFrame");
-    return status === P0_DIRTY_ATLAS_STATUS_DONE && positive(moveM) && finite(triggeredFrame) && finite(resetFrame) && resetFrame >= triggeredFrame;
+    return status === P0_DIRTY_ATLAS_STATUS_DONE && positive(bumpedTiles) && finite(triggeredFrame) && finite(resetFrame) && resetFrame >= triggeredFrame;
   });
   const skipped = enabledCases.filter((perfCase) => metric(perfCase, "p0DirtyAtlasExercise.status") === 4).map((perfCase) => perfCase.name);
-  const bestMove = completed.reduce((max, perfCase) => Math.max(max, metric(perfCase, "p0DirtyAtlasExercise.moveM") ?? 0), 0);
+  const bestBumpedTiles = completed.reduce((max, perfCase) => Math.max(max, metric(perfCase, "p0DirtyAtlasExercise.bumpedTiles") ?? 0), 0);
   return gate(
     "p0-dirty-atlas-exercise-completed",
     enabledCases.length > 0 && completed.length > 0 && skipped.length === 0,
     enabledCases.length > 0 && completed.length > 0 && skipped.length === 0
-      ? `dirty atlas exercise completed cases=${completed.length}/${enabledCases.length} bestMoveM=${formatMetric(bestMove)}`
+      ? `dirty atlas exercise completed cases=${completed.length}/${enabledCases.length} bestBumpedTiles=${formatMetric(bestBumpedTiles)}`
       : `dirty atlas exercise incomplete enabled=${enabledCases.length} completed=${completed.length} skipped=${skipped.join(", ") || "-"}`,
   );
 }

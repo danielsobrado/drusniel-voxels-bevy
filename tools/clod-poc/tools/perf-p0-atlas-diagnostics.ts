@@ -33,10 +33,8 @@ const COUNTERS = {
   dirtyUploads: "naadf.farSummaryAtlas.upload.dirtyUploads",
   fullUploads: "naadf.farSummaryAtlas.upload.fullUploads",
   exerciseStatus: "p0DirtyAtlasExercise.status",
-  exerciseMove: "p0DirtyAtlasExercise.moveM",
-  requestedMove: "p0DirtyAtlasExercise.requestedMoveM",
-  tileSpan: "p0DirtyAtlasExercise.tileSpanM",
-  boundaryEpsilon: "p0DirtyAtlasExercise.boundaryEpsilonM",
+  requestedTiles: "p0DirtyAtlasExercise.requestedTiles",
+  bumpedTiles: "p0DirtyAtlasExercise.bumpedTiles",
 } as const;
 
 function argValue(name: string): string | null {
@@ -88,7 +86,7 @@ function markdown(summaryPath: string, summary: P0Summary): string {
     "",
     `Source: \`${summaryPath}\``,
     "",
-    "| case | status | contaminated | renderer | mode | fallback | dirty/full | dirty pixels/total | dirty pct | threshold | raw rects | merged rects | raw pixels | merged pixels | changed tiles | clear/blit | window shift X/Z | exercise move/request/tile/eps | diagnosis |",
+    "| case | status | contaminated | renderer | mode | fallback | dirty/full | dirty pixels/total | dirty pct | threshold | raw rects | merged rects | raw pixels | merged pixels | changed tiles | clear/blit | window shift X/Z | exercise status/bumped/requested | diagnosis |",
     "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
 
@@ -111,7 +109,7 @@ function markdown(summaryPath: string, summary: P0Summary): string {
         `${fmt(numberFromCase(testCase, COUNTERS.changedTiles))} | ` +
         `${fmt(numberFromCase(testCase, COUNTERS.clearedRects))}/${fmt(numberFromCase(testCase, COUNTERS.blitRects))} | ` +
         `${fmt(numberFromCase(testCase, COUNTERS.windowShiftTilesX))}/${fmt(numberFromCase(testCase, COUNTERS.windowShiftTilesZ))} | ` +
-        `${fmt(numberFromCase(testCase, COUNTERS.exerciseMove))}/${fmt(numberFromCase(testCase, COUNTERS.requestedMove))}/${fmt(numberFromCase(testCase, COUNTERS.tileSpan))}/${fmt(numberFromCase(testCase, COUNTERS.boundaryEpsilon))} | ` +
+        `${fmt(numberFromCase(testCase, COUNTERS.exerciseStatus))}/${fmt(numberFromCase(testCase, COUNTERS.bumpedTiles))}/${fmt(numberFromCase(testCase, COUNTERS.requestedTiles))} | ` +
         `${diagnosis(testCase)} |`,
     );
   }

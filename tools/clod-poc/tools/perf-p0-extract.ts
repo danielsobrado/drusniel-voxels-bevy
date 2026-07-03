@@ -97,7 +97,8 @@ const SELECTED_EVIDENCE_METRICS = [
   "understoryGpuPrefilterSourceFallbackAvg",
   "p0DirtyAtlasExercise.enabled",
   "p0DirtyAtlasExercise.status",
-  "p0DirtyAtlasExercise.moveM",
+  "p0DirtyAtlasExercise.requestedTiles",
+  "p0DirtyAtlasExercise.bumpedTiles",
   "p0DirtyAtlasExercise.triggeredFrame",
   "p0DirtyAtlasExercise.resetFrame",
   "naadf.farSummaryAtlas.memorySavingsBytes",
@@ -315,13 +316,13 @@ function compactMarkdown(summary: CompactSummary): string {
   }
 
   lines.push("", "## Evidence counters", "");
-  lines.push("| case | dirty status/move/reset | early before/after/rejected | source far/sampler/fallback | atlas dirty/full pixels | cache hit/miss ready/stale |");
+  lines.push("| case | dirty status/tiles/reset | early before/after/rejected | source far/sampler/fallback | atlas dirty/full pixels | cache hit/miss ready/stale |");
   lines.push("| --- | ---: | ---: | ---: | ---: | ---: |");
   for (const item of summary.cases) {
     const e = item.evidence;
     lines.push(
       `| ${item.name} | ` +
-        `${formatMetric(e["p0DirtyAtlasExercise.status"])}/${formatMetric(e["p0DirtyAtlasExercise.moveM"])}/${formatMetric(e["p0DirtyAtlasExercise.resetFrame"])} | ` +
+        `${formatMetric(e["p0DirtyAtlasExercise.status"])}/${formatMetric(e["p0DirtyAtlasExercise.bumpedTiles"])}/${formatMetric(e["p0DirtyAtlasExercise.resetFrame"])} | ` +
         `${formatMetric(e.vegetationGpuCandidatesBudgetBeforeReject)}/${formatMetric(e.vegetationGpuCandidatesBudgetAfterReject)}/${formatMetric(e.vegetationGpuClustersRejectedEarly)} | ` +
         `${formatMetric(e.vegetationGpuSourceFarSummary)}/${formatMetric(e.vegetationGpuSourceTerrainSampler)}/${formatMetric(e.vegetationGpuSourceFallback)} | ` +
         `${formatMetric(e["naadf.farSummaryAtlas.upload.dirtyPixels"])}/${formatMetric(e["naadf.farSummaryAtlas.upload.totalPixels"])} ` +

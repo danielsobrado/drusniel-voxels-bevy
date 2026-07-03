@@ -200,6 +200,63 @@ describe("forest lighting system lifecycle", () => {
     system.dispose();
   });
 
+  it("amortized build matches the monolithic update and keeps the old texture until completion", () => {
+    const settings = cloneForestLightingSettings();
+    settings.field.resolution = 16;
+    const proxies = [tree(), tree({ x: 12, z: 40 }), tree({ x: 50, z: 20 })];
+    const sun = new THREE.Vector3(1, 1, 0).normalize();
+    const center = new THREE.Vector3(32, 0, 32);
+    const expiredDeadline = () => performance.now() - 1;
+
+    const monolithic = new ForestLightingSystem({ worldCells: 64, settings });
+    monolithic.update(0, center, { treeProxies: proxies, sunDirection: sun, force: true });
+
+    const stepped = new ForestLightingSystem({ worldCells: 64, settings });
+    const bytesBefore = [...(stepped.getTextureHandle().texture.image.data as Uint8Array)];
+    expect(stepped.hasBuildInProgress()).toBe(false);
+    stepped.beginBuild(center, { treeProxies: proxies, sunDirection: sun });
+    expect(stepped.hasBuildInProgress()).toBe(true);
+
+    let done = stepped.stepBuild(expiredDeadline());
+    expect(done).toBe(false);
+    expect([...(stepped.getTextureHandle().texture.image.data as Uint8Array)]).toEqual(bytesBefore);
+    expect(stepped.getStats().textureUpdates).toBe(0);
+
+    let guard = 0;
+    while (!done && ++guard < 1_000_000) done = stepped.stepBuild(expiredDeadline());
+    expect(done).toBe(true);
+    expect(stepped.hasBuildInProgress()).toBe(false);
+    expect([...(stepped.getTextureHandle().texture.image.data as Uint8Array)])
+      .toEqual([...(monolithic.getTextureHandle().texture.image.data as Uint8Array)]);
+
+    const expected = monolithic.getStats();
+    const actual = stepped.getStats();
+    expect(actual.maxCanopy).toBe(expected.maxCanopy);
+    expect(actual.maxAo).toBe(expected.maxAo);
+    expect(actual.maxShadow).toBe(expected.maxShadow);
+    expect(actual.maxFog).toBe(expected.maxFog);
+    expect(actual.treeProxies).toBe(3);
+    expect(actual.textureUpdates).toBe(1);
+
+    monolithic.dispose();
+    stepped.dispose();
+  });
+
+  it("settings updates cancel an in-progress build", () => {
+    const settings = cloneForestLightingSettings();
+    settings.field.resolution = 16;
+    const system = new ForestLightingSystem({ worldCells: 64, settings });
+    system.beginBuild(new THREE.Vector3(32, 0, 32), {
+      treeProxies: [tree()],
+      sunDirection: new THREE.Vector3(1, 1, 0).normalize(),
+    });
+    expect(system.hasBuildInProgress()).toBe(true);
+    system.updateSettings(settings);
+    expect(system.hasBuildInProgress()).toBe(false);
+    expect(system.stepBuild(Number.POSITIVE_INFINITY)).toBe(false);
+    system.dispose();
+  });
+
   it("disabled system produces neutral texture stats", () => {
     const settings = cloneForestLightingSettings();
     settings.enabled = false;

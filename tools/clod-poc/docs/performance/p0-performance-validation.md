@@ -108,10 +108,10 @@ Disable the built-in dirty-atlas exercise:
 npm --prefix tools/clod-poc run perf:p0 -- --params p0DirtyAtlasExercise=0
 ```
 
-Tune the dirty-atlas exercise movement and settle window:
+Tune the dirty-atlas exercise tile count and settle window:
 
 ```bash
-npm --prefix tools/clod-poc run perf:p0 -- --params dirtyAtlasMoveM=1024,dirtyAtlasSettleFrames=24
+npm --prefix tools/clod-poc run perf:p0 -- --params dirtyAtlasTiles=8,dirtyAtlasSettleFrames=24
 ```
 
 ## Atlas packing profiles
@@ -142,7 +142,7 @@ For NAADF scenes with `perfProbe=1`, the frame loop runs a P0 dirty-atlas exerci
 
 ```text
 p0DirtyAtlasExercise=1
-dirtyAtlasMoveM=768
+dirtyAtlasTiles=4
 dirtyAtlasSettleFrames=18
 ```
 
@@ -150,13 +150,18 @@ The exercise:
 
 ```text
 1. Waits until perf warmup frames are observed.
-2. Moves the real automation camera along X.
-3. Lets far-summary streaming settle for a few frames.
+2. Bumps the revision of up to dirtyAtlasTiles (1-8) ready far tiles placed in the
+   ring-0 atlas window, picked from a single tile row so merged dirty rects stay a
+   thin strip (<= tiles * tileCells^2 pixels, well below the full-upload threshold).
+3. Lets the atlas apply the partial upload and settle for a few frames.
 4. Resets the perf probe.
-5. Collects the final perf sample window from the moved position.
+5. Collects the final perf sample window.
 ```
 
-This makes dirty-rect atlas uploads deterministic for P0 instead of depending on incidental camera motion.
+Camera movement is deliberately not used: shifting the atlas window dirties ~30+
+tiles (36-40% of the atlas) and falls back to a `threshold` full upload, which can
+never prove the dirty path. Revision bumps keep tile slots stable, so the diff is
+blit-only dirty rects and the upload records `mode=dirty`, `fallbackReason=none`.
 
 The exercise mirrors these counters into `window.__drusnielClod.stats.counters`:
 

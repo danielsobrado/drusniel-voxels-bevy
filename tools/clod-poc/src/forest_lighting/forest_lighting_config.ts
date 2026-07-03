@@ -6,6 +6,8 @@ export interface ForestLightingFieldSettings {
   resolution: number;
   updateDistanceM: number;
   maxUpdatePagesPerFrame: number;
+  /** Per-frame CPU budget for the amortized lighting rebuild (proxy scan + field build). */
+  maxBuildMsPerFrame: number;
   blurRadiusCells: number;
   canopyInfluenceRadiusM: number;
   understoryInfluenceRadiusM: number;
@@ -78,6 +80,7 @@ interface ForestLightingYamlConfig {
       resolution?: number;
       update_distance_m?: number;
       max_update_pages_per_frame?: number;
+      max_build_ms_per_frame?: number;
       blur_radius_cells?: number;
       canopy_influence_radius_m?: number;
       understory_influence_radius_m?: number;
@@ -132,6 +135,7 @@ export const DEFAULT_FOREST_LIGHTING_SETTINGS: ForestLightingSettings = {
     resolution: 128,
     updateDistanceM: 8,
     maxUpdatePagesPerFrame: 2,
+    maxBuildMsPerFrame: 2.0,
     blurRadiusCells: 2,
     canopyInfluenceRadiusM: 7.5,
     understoryInfluenceRadiusM: 2.5,
@@ -236,6 +240,12 @@ export function parseForestLightingConfig(
         fallback.field.maxUpdatePagesPerFrame,
         1,
         128,
+      ),
+      maxBuildMsPerFrame: readNumberInRange(
+        raw.field?.max_build_ms_per_frame,
+        fallback.field.maxBuildMsPerFrame,
+        0.25,
+        32,
       ),
       blurRadiusCells: readIntegerInRange(raw.field?.blur_radius_cells, fallback.field.blurRadiusCells, 0, 16),
       canopyInfluenceRadiusM: readNumberInRange(

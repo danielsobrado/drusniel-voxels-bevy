@@ -1,0 +1,22 @@
+{
+  "renderer": "webgpu",
+  "url": "http://127.0.0.1:5180/?world=8&seed=1&webgpuSelection=1&farShell=1&freeze=1&perfProbe=1&perfWarmup=30&perfFrames=60&p0DirtyAtlasExercise=1&dirtyAtlasTiles=4&dirtyAtlasSettleFrames=18&profile=0&scene=infinite-naadf-far&terrainMaterialCache=0",
+  "status": "failed",
+  "warnings": [],
+  "errors": [],
+  "launchRecipe": null,
+  "lastProgress": null,
+  "snapshot": null,
+  "finalCounters": {},
+  "gitStateStart": {
+    "head": "dc6b9a97f101e42d8161baee93e027d794897f0d",
+    "status": "M docs/reference/Project-Ascendant\n M docs/reference/fable5-world-demo\n M tools/clod-poc/config/forest_lighting.yaml\n M tools/clod-poc/docs/performance/live-frame-cost-fix-report.md\n M tools/clod-poc/docs/performance/p0-performance-validation.md\n M tools/clod-poc/src/app/clod_frame_loop.ts\n M tools/clod-poc/src/app/frame_loop/p0_dirty_atlas_exercise.ts\n M tools/clod-poc/src/app/frame_loop/vegetation_frame_phase.test.ts\n M tools/clod-poc/src/app/frame_loop/vegetation_frame_phase.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_config.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_fields.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_system.test.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_system.ts\n M tools/clod-poc/src/runtime/forest_lighting/forest_lighting_controller.ts\n M tools/clod-poc/src/trees/tree_ring_lighting_proxies.test.ts\n M tools/clod-poc/src/trees/tree_ring_lighting_proxies.ts\n M tools/clod-poc/src/trees/tree_system_gpu_lighting_proxy_cache.ts\n M tools/clod-poc/src/trees/tree_system_runtime.ts\n M tools/clod-poc/tools/perf-p0-atlas-diagnostics.ts\n M tools/clod-poc/tools/perf-p0-extract.ts\n M tools/clod-poc/tools/perf-p0-gates.test.ts\n M tools/clod-poc/tools/perf-p0-gates.ts\n M tools/clod-poc/tools/perf-p0.ts\n?? tools/clod-poc/docs/plans/infinite-islands-live-streaming-critical-path-plan.md\n?? tools/clod-poc/src/runtime/forest_lighting/forest_lighting_controller.test.ts"
+  },
+  "gitStateEnd": {
+    "head": "dc6b9a97f101e42d8161baee93e027d794897f0d",
+    "status": "M docs/reference/Project-Ascendant\n M docs/reference/fable5-world-demo\n M tools/clod-poc/config/forest_lighting.yaml\n M tools/clod-poc/docs/performance/live-frame-cost-fix-report.md\n M tools/clod-poc/docs/performance/p0-performance-validation.md\n M tools/clod-poc/src/app/clod_frame_loop.ts\n M tools/clod-poc/src/app/frame_loop/p0_dirty_atlas_exercise.ts\n M tools/clod-poc/src/app/frame_loop/vegetation_frame_phase.test.ts\n M tools/clod-poc/src/app/frame_loop/vegetation_frame_phase.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_config.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_fields.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_system.test.ts\n M tools/clod-poc/src/forest_lighting/forest_lighting_system.ts\n M tools/clod-poc/src/runtime/forest_lighting/forest_lighting_controller.ts\n M tools/clod-poc/src/trees/tree_ring_lighting_proxies.test.ts\n M tools/clod-poc/src/trees/tree_ring_lighting_proxies.ts\n M tools/clod-poc/src/trees/tree_system_gpu_lighting_proxy_cache.ts\n M tools/clod-poc/src/trees/tree_system_runtime.ts\n M tools/clod-poc/tools/perf-p0-atlas-diagnostics.ts\n M tools/clod-poc/tools/perf-p0-extract.ts\n M tools/clod-poc/tools/perf-p0-gates.test.ts\n M tools/clod-poc/tools/perf-p0-gates.ts\n M tools/clod-poc/tools/perf-p0.ts\n?? tools/clod-poc/docs/plans/infinite-islands-live-streaming-critical-path-plan.md\n?? tools/clod-poc/src/runtime/forest_lighting/forest_lighting_controller.test.ts"
+  },
+  "pageNavigationCount": 0,
+  "contaminated": false,
+  "error": "CLOD-POC dev server is not reachable at http://127.0.0.1:5180/ (fetch failed). Start it with `npm run dev` from tools/clod-poc, or pass `--baseUrl` / CLOD_POC_BASE_URL."
+}

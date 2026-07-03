@@ -156,7 +156,8 @@ const P0_COUNTERS = [
   "naadf.farSummaryAtlas.upload.fallbackReasonCode",
   "p0DirtyAtlasExercise.enabled",
   "p0DirtyAtlasExercise.status",
-  "p0DirtyAtlasExercise.moveM",
+  "p0DirtyAtlasExercise.requestedTiles",
+  "p0DirtyAtlasExercise.bumpedTiles",
   "p0DirtyAtlasExercise.triggeredFrame",
   "p0DirtyAtlasExercise.resetFrame",
   "p0DirtyAtlasExercise.settleRemaining",
@@ -544,7 +545,7 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
   }
 
   lines.push("", "## Required P0 counters", "");
-  lines.push("| case | cache hit/miss | cache ready/stale | dirty exercise status/move/reset | veg clusters rejected/accepted/missing | veg consulted | veg src far/sampler/fallback | tree consulted/src far/sampler/fallback | grass consulted/src far/sampler/fallback | under consulted/src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
+  lines.push("| case | cache hit/miss | cache ready/stale | dirty exercise status/tiles/reset | veg clusters rejected/accepted/missing | veg consulted | veg src far/sampler/fallback | tree consulted/src far/sampler/fallback | grass consulted/src far/sampler/fallback | under consulted/src far/sampler/fallback | candidate budget before/after/generated | grass before/after | understory before/after | page geom hit/miss | render node create/reuse | churn key/assign/new |");
   lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const result of results) {
     const m = result.metrics;
@@ -552,7 +553,7 @@ function markdown(results: readonly PerfCaseResult[], gates: P0PerfGateSummary):
       `| ${result.name} | ` +
         `${fmt(m.terrainMaterialCacheHits)}/${fmt(m.terrainMaterialCacheMisses)} | ` +
         `${fmt(m.terrainMaterialCacheReady)}/${fmt(m.terrainMaterialCacheStale)} | ` +
-        `${fmt(m["p0DirtyAtlasExercise.status"])}/${fmt(m["p0DirtyAtlasExercise.moveM"])}/${fmt(m["p0DirtyAtlasExercise.resetFrame"])} | ` +
+        `${fmt(m["p0DirtyAtlasExercise.status"])}/${fmt(m["p0DirtyAtlasExercise.bumpedTiles"])}/${fmt(m["p0DirtyAtlasExercise.resetFrame"])} | ` +
         `${fmt(m.vegetationGpuClustersRejectedEarly)}/${fmt(m.vegetationGpuClustersAccepted)}/${fmt(m.vegetationGpuClustersSummaryMissing)} | ` +
         `${fmt(m.vegetationGpuFarSummaryConsulted)} | ` +
         `${fmt(m.vegetationGpuSourceFarSummary)}/${fmt(m.vegetationGpuSourceTerrainSampler)}/${fmt(m.vegetationGpuSourceFallback)} | ` +
@@ -622,7 +623,7 @@ async function main(): Promise<void> {
     perfWarmup: str(args.warmup) ?? "120",
     perfFrames: str(args.frames) ?? "300",
     p0DirtyAtlasExercise: str(args.dirtyAtlasExercise) ?? "1",
-    dirtyAtlasMoveM: str(args.dirtyAtlasMoveM) ?? "768",
+    dirtyAtlasTiles: str(args.dirtyAtlasTiles) ?? "4",
     dirtyAtlasSettleFrames: str(args.dirtyAtlasSettleFrames) ?? "18",
     profile: "0",
     ...parseParams(str(args.params)),
