@@ -123,8 +123,14 @@ export class GrassSystem {
     const wasEnabled = this.settings.enabled;
     this.settings.enabled = enabled;
     this.root.visible = enabled;
-    if (!enabled || wasEnabled) return;
-    if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) return;
+    if (!enabled || wasEnabled) {
+      this.updateStats();
+      return;
+    }
+    if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
+      this.updateStats();
+      return;
+    }
     if (this.cpuPatches.patches.length === 0) this.cpuPatches.refreshForCenter(this.lastCenter, this.settings);
     this.updateStats();
   }
@@ -151,7 +157,10 @@ export class GrassSystem {
     this.cpuPatches.markDirty();
     if (this.settings.enabled && !wasEnabled) {
       this.gpuRing.updateCpuFallbackStatus(this.settings);
-      if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) return;
+      if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
+        this.updateStats();
+        return;
+      }
       if (this.cpuPatches.patches.length === 0) this.cpuPatches.refreshForCenter(this.lastCenter, this.settings);
     } else {
       this.root.visible = this.settings.enabled;
@@ -173,6 +182,7 @@ export class GrassSystem {
     if (this.gpuRing.canUse(this.settings)) {
       if (this.gpuRing.updateCounters(this.settings, center, camera)) {
         if (this.cpuPatches.patches.length > 0) this.cpuPatches.clear();
+        this.updateStats();
         return;
       }
       this.gpuRing.clearRing();
