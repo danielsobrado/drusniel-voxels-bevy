@@ -99,19 +99,7 @@ export class UnderstorySystem {
   private gpuRingGeneration = 0;
   private gpuRingDraw: UnderstoryGpuRingDrawResources | null = null;
   private ringMeshes: THREE.Mesh[] = [];
-  private gpuRingStats: UnderstoryGpuRingStats = {
-    status: "disabled",
-    candidateCount: 0,
-    candidateCountBeforePrefilter: 0,
-    candidateCountAfterPrefilter: 0,
-    acceptedCandidates: 0,
-    counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
-    groupCounts: [],
-    overflowed: false,
-    submitMs: null,
-    readbackMs: null,
-    skippedDispatches: 0,
-  };
+  private gpuRingStats: UnderstoryGpuRingStats = emptyGpuRingStats("disabled", null);
   private lastGpuValidationSignature = "";
   private readonly frustumPlaneScratch = new Float32Array(24);
   private readonly hydrologyData: UnderstoryHydrologyData | null;
@@ -344,19 +332,7 @@ export class UnderstorySystem {
       this.root.add(mesh);
       this.ringMeshes.push(mesh);
     }
-    this.gpuRingStats = {
-      status: "initializing",
-      candidateCount: 0,
-      candidateCountBeforePrefilter: 0,
-      candidateCountAfterPrefilter: 0,
-      acceptedCandidates: 0,
-      counts: this.gpuRingStats.counts,
-      groupCounts: [],
-      overflowed: false,
-      submitMs: null,
-      readbackMs: null,
-      skippedDispatches: 0,
-    };
+    this.gpuRingStats = emptyGpuRingStats("initializing", this.gpuRingStats.counts);
 
     const initKey = key;
     const initGeneration = this.gpuRingGeneration;
@@ -519,19 +495,7 @@ export class UnderstorySystem {
     this.gpuOverflowed = false;
     this.gpuDispatchMs = null;
     this.lastGpuValidationSignature = "";
-    this.gpuRingStats = {
-      status: this.gpuDevice ? "idle" : "disabled",
-      candidateCount: 0,
-      candidateCountBeforePrefilter: 0,
-      candidateCountAfterPrefilter: 0,
-      acceptedCandidates: 0,
-      counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
-      groupCounts: [],
-      overflowed: false,
-      submitMs: null,
-      readbackMs: null,
-      skippedDispatches: 0,
-    };
+    this.gpuRingStats = emptyGpuRingStats(this.gpuDevice ? "idle" : "disabled", null);
   }
 
   private clearGpuRingDraw(): void {
@@ -760,12 +724,42 @@ export class UnderstorySystem {
     stats.gpuCandidateCount = gpuRing ? this.gpuRingStats.candidateCount : 0;
     stats.gpuCandidateCountBeforePrefilter = gpuRing ? this.gpuRingStats.candidateCountBeforePrefilter ?? this.gpuRingStats.candidateCount : 0;
     stats.gpuCandidateCountAfterPrefilter = gpuRing ? this.gpuRingStats.candidateCountAfterPrefilter ?? this.gpuRingStats.candidateCount : 0;
+    stats.gpuPrefilterTestedClusters = gpuRing ? this.gpuRingStats.prefilterTestedClusters ?? 0 : 0;
+    stats.gpuPrefilterRejectedClusters = gpuRing ? this.gpuRingStats.prefilterRejectedClusters ?? 0 : 0;
+    stats.gpuPrefilterAcceptedClusters = gpuRing ? this.gpuRingStats.prefilterAcceptedClusters ?? 0 : 0;
+    stats.gpuPrefilterUnknownKeptClusters = gpuRing ? this.gpuRingStats.prefilterUnknownKeptClusters ?? 0 : 0;
+    stats.gpuPrefilterSourceFarSummary = gpuRing ? this.gpuRingStats.prefilterSourceFarSummary ?? 0 : 0;
+    stats.gpuPrefilterSourceTerrainSampler = gpuRing ? this.gpuRingStats.prefilterSourceTerrainSampler ?? 0 : 0;
+    stats.gpuPrefilterSourceFallback = gpuRing ? this.gpuRingStats.prefilterSourceFallback ?? 0 : 0;
     stats.gpuAcceptedCount = gpuRing ? (this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount) : 0;
     stats.gpuVisibleCount = gpuRing ? this.gpuVisibleCount : 0;
     stats.gpuOverflowed = this.gpuOverflowed;
     stats.gpuDispatchMs = this.gpuDispatchMs;
     this.stats = stats;
   }
+}
+
+function emptyGpuRingStats(status: UnderstoryGpuRingStats["status"], counts: UnderstoryGpuRingStats["counts"] | null): UnderstoryGpuRingStats {
+  return {
+    status,
+    candidateCount: 0,
+    candidateCountBeforePrefilter: 0,
+    candidateCountAfterPrefilter: 0,
+    prefilterTestedClusters: 0,
+    prefilterRejectedClusters: 0,
+    prefilterAcceptedClusters: 0,
+    prefilterUnknownKeptClusters: 0,
+    prefilterSourceFarSummary: 0,
+    prefilterSourceTerrainSampler: 0,
+    prefilterSourceFallback: 0,
+    acceptedCandidates: 0,
+    counts: counts ?? { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
+    groupCounts: [],
+    overflowed: false,
+    submitMs: null,
+    readbackMs: null,
+    skippedDispatches: 0,
+  };
 }
 
 export {
