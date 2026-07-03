@@ -161,71 +161,279 @@ export async function bootstrapClodPoc() {
           world.proceduralTextureConfig = nextConfig;
           world.proceduralTerrain = nextTerrain;
           world.bakedMacroTint = nextMacroTint;
-          terrainView.updateProceduralTerrain(nextTerrain, nextConfig, nextMacroTint, activeBiomeMaterials);
-          terrainTextureWindowSwaps += 1;
+          terrainTextureWindowSwaps++;
+          terrainView.materialController.setProceduralTerrain(nextTerrain, nextConfig, nextMacroTint);
+          terrainView.applyTerrainTextures();
+          if (postRenderer.longViewHooks?.stats) {
+            postRenderer.longViewHooks.stats.counters.terrainTextureWindowSwaps = terrainTextureWindowSwaps;
+            postRenderer.longViewHooks.stats.counters.terrainTextureActiveBiomes = activeBiomeMaterials.length;
+          }
         },
       })
     : null;
 
-  const farSummary = initFarSummaryIntegration({
-    enabled: queries.queryLongViewScene,
-    farSummaryConfig: longViewConfigToFarSummaryConfig(createDefaultLongViewConfig({ worldCells: world.worldCells })),
-    source: world.worldSource,
+  if (postRenderer.state.terrainMaterialSource === "procedural") {
+    const initialWorldCamera = floatingOrigin.getWorldCamera(renderer.camera);
+    biomeTextureStreaming?.update({ x: initialWorldCamera.position.x, z: initialWorldCamera.position.z, frameIndex: 0 });
+  }
+
+  let farSummaryIntegration: FarSummaryIntegration | undefined;
+  let naadfIntegration: NaadfIntegration | undefined;
+
+  const queryScene = queries.queryScene;
+  const isNaadfCapable = queries.queryNaadfScene;
+  const streamingOwnership = resolveStreamingOwnership({
+    streaming: queries.phase0Streaming,
+    targetVisibleM: queries.phase0TargetVisibleM,
+    targetFutureVisibleM: queries.phase0Config.phase0.target_future_visible_m,
+    pageSizeM: world.cfg.page.chunks_per_page * world.cfg.page.chunk_size,
+    streamingScene: queryScene?.startsWith("infinite-") ?? false,
   });
 
-  const naadf = initNaadfIntegration({
-    configText: naadfConfigText,
-    source: world.worldSource,
-  });
+  if (isNaadfCapable) {
+    naadfIntegration = initNaadfIntegration({
+      yamlText: naadfConfigText,
+      sceneName: queryScene,
+      threeScene: renderer.scene,
+      forceEnable: queries.queryNaadfScene,
+    }) ?? undefined;
+  }
 
-  let farShell: InfiniteFarShell | null = null;
-  let farShellMetrics: FarShellMetrics = createFarShellMetrics();
-  const longViewMaterialConfig = loadLongViewMaterialsConfig();
-  const longViewQueryOverrides = parseQueryOverrides(searchParams);
-  const streamingOwnership = resolveStreamingOwnership(searchParams, queries.queryLongViewScene);
-  if (queries.queryLongViewScene && isLongViewCapableScene(queries.activePhase0Scene)) {
-    const longViewConfig = createDefaultLongViewConfig({ worldCells: world.worldCells });
-    applyLongViewScenePreset(longViewConfig, queries.activePhase0Scene, queries.queryCanopy);
-    if (longViewQueryOverrides) longViewConfig.materials = { ...longViewConfig.materials, ...longViewQueryOverrides };
-    farShell = new InfiniteFarShell({
-      scene: renderer.scene,
-      config: longViewConfig,
-      summary: farSummary.summary,
-      ownership: streamingOwnership,
-    });
-    farShellMetrics = farShell.getMetrics();
-    if (farSummary.summary) {
-      applyOwnershipToFarShellRange({
-        summary: farSummary.summary,
-        ownership: streamingOwnership,
-        ranges: farShell.rangesForOwnership(),
+  const useNaadfFarSummary = Boolean(
+    naadfIntegration?.config.farShell.useNaadfSummary
+    && (queryScene?.startsWith("infinite-naadf-") ?? false),
+  );
+  const naadfHeightSamplingMode = useNaadfFarSummary
+    ? naadfIntegration?.config.farShell.heightSamplingMode
+    : undefined;
+
+  let infiniteFarShell: InfiniteFarShell | undefined;
+  let farShellMetrics: FarShellMetrics | undefined;
+
+  if (isLongViewCapableScene(queryScene)) {
+    const lvConfig = createDefaultLongViewConfig();
+    applyLongViewScenePreset(lvConfig, queryScene, naadfIntegration);
+
+    applyOwnershipToFarShellRange(lvConfig.farShell, streamingOwnership);
+
+    farShellMetrics = createFarShellMetrics();
+    farShellMetrics.farShellEnabled = true;
+    farShellMetrics.farShellInnerM = lvConfig.farShell.startMeters;
+    farShellMetrics.farShellOuterM = lvConfig.farShell.endMeters;
+    farShellMetrics.farShellGridRes = lvConfig.farShell.radialSegments;
+
+    if (!useNaadfFarSummary) {
+      farSummaryIntegration = initFarSummaryIntegration({
+        terrainSampler: {
+          sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
+          sampleMaterial: (x, z) => world.worldSource.sampleBiome(x, z),
+          sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
+          sampleWaterCoverage: (x, z) => world.worldSource.oceanMask(x, z),
+        },
+        scene: renderer.scene,
+        camera: renderer.camera,
+        farShellController: terrainView.farShellController,
+        farShellMetrics,
+        config: longViewConfigToFarSummaryConfig(lvConfig),
       });
+    }
+
+    const heightProvider = useNaadfFarSummary && naadfIntegration
+      ? naadfIntegration.getHeightProvider()
+      : farSummaryIntegration?.getHeightProvider();
+    const lighting = terrainView.currentLighting();
+
+    const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
+    const parityConfig = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
+    const useParity = materialConfig.enabled && parityConfig !== undefined;
+    const farSummaryGpuAtlas = naadfHeightSamplingMode === "gpu"
+      ? naadfIntegration?.getFarSummaryGpuAtlasView()
+      : undefined;
+
+    if (naadfHeightSamplingMode === "gpu" && !useParity) {
+      throw new Error("NAADF GPU height mode requires the WebGPU parity far terrain material");
+    }
+    if (naadfHeightSamplingMode === "gpu" && !farSummaryGpuAtlas) {
+      throw new Error("NAADF GPU height mode requires a far-summary GPU atlas");
+    }
+
+    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu"
+      ? "gpu"
+      : naadfHeightSamplingMode;
+    if (!heightProvider && effectiveHeightSamplingMode !== "gpu") {
+      throw new Error("long-view scene requires NAADF or far-summary height provider");
+    }
+
+    infiniteFarShell = new InfiniteFarShell({
+      innerMeters: lvConfig.farShell.startMeters,
+      outerMeters: lvConfig.farShell.endMeters,
+      radialSegments: lvConfig.farShell.radialSegments,
+      angularSegments: lvConfig.farShell.angularSegments,
+      heightBiasMeters: lvConfig.farShell.heightBiasMeters,
+      nearBlendMeters: lvConfig.farShell.nearBlendMeters,
+      farFadeMeters: lvConfig.farShell.farFadeMeters,
+      macroBlendStartMeters: lvConfig.farShell.macroBlendStartMeters,
+      macroBlendEndMeters: lvConfig.farShell.macroBlendEndMeters,
+      rebaseSnapMeters: lvConfig.farShell.rebaseSnapMeters,
+      lighting: {
+        sunDirection: lighting.sunDirection,
+        sunColor: lighting.sunColor,
+        skyLight: lighting.skyLight,
+        groundLight: lighting.groundLight,
+      },
+      useParityMaterial: useParity,
+      parityConfig,
+      heightSamplingMode: effectiveHeightSamplingMode,
+      farSummaryGpuAtlas: effectiveHeightSamplingMode === "gpu" ? farSummaryGpuAtlas : undefined,
+      debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
+      metrics: farShellMetrics,
+    });
+
+    infiniteFarShell.setHeightProvider(heightProvider);
+    renderer.scene.add(infiniteFarShell.mesh);
+
+    terrainView.farShellController.setEnabled(false);
+
+    terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {
+      infiniteFarShell?.setReceiveSunShadows(enabled);
+    });
+    if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) {
+      infiniteFarShell.setReceiveSunShadows(true);
+    }
+
+    if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {
+      farSummaryIntegration.setForceSlowBuilds(true);
+      farSummaryIntegration.setBuildDelayMs(100);
     }
   }
 
-  runRuntimeSystemsStartup({
-    renderer,
-    world,
-    postRenderer,
-    terrainView,
-    farSummary,
-    naadf,
-    farShell,
-    farShellMetrics,
-    floatingOrigin,
-    biomeTextureStreaming,
-    terrainTextureWindowSwaps: () => terrainTextureWindowSwaps,
+  const treeTerrainOcclusionSampler = naadfIntegration
+    ? {
+        sampleHeight: (x: number, z: number) => {
+          const sample = naadfIntegration!.queryHeight(x, z, "render");
+          return { height: sample.height, unknown: sample.unknown || sample.missingSample };
+        },
+      }
+    : undefined;
+
+  const runtime = await runRuntimeSystemsStartup({
+    app: renderer.app,
+    scene: renderer.scene,
+    camera: renderer.camera,
+    controls: renderer.controls,
+    state: postRenderer.state,
+    bindings: postRenderer.uiRefs.bindings,
+    lod0Nodes: world.lod0Nodes,
+    worldCells: world.worldCells,
+    grassConfig: world.grassConfig,
+    stoneConfig: world.stoneConfig,
+    treeConfig: world.treeConfig,
+    understoryConfig: world.understoryConfig,
+    forestLightingConfig: world.forestLightingConfig,
+    waterConfig: world.waterConfig,
+    borderCoastOceanConfig: world.borderCoastOceanConfig,
+    customPropsConfig: world.customPropsConfig,
+    propPlacementScenes: world.propPlacementScenes,
+    stagedImport,
+    queryGrassRingGrid: queries.queryGrassRingGrid,
+    queryGrassRingCell: queries.queryGrassRingCell,
+    isWebGpu: renderer.isWebGpu,
+    rendererWebGpuDevice: renderer.rendererWebGpuDevice,
+    hydrologySystem: world.hydrologySystem,
+    terrainOcclusionSampler: treeTerrainOcclusionSampler,
+    searchParams,
+    materialController: terrainView.materialController,
+    skyEnvironment: terrainView.skyEnvironment,
+    currentLighting: terrainView.currentLighting,
+    vegetationDirtyQueue: postRenderer.terrainEdit.vegetationDirtyQueue,
+    statControllers: postRenderer.uiRefs.statControllers,
+    getHooks: () => postRenderer.longViewHooks,
+    shadowProxyController: terrainView.shadowProxyController,
   });
 
-  runUiStartup({
+  await runUiStartup({
     dom,
-    world,
-    renderer,
-    postRenderer,
+    searchParams,
+    clodRuntime,
+    cfg: world.cfg,
+    WORLD: world.WORLD,
+    polishLine: world.polishLine,
+    buildStatusRef: world.buildStatus,
+    stagedImport,
+    state: postRenderer.state,
+    bindings: postRenderer.uiRefs.bindings,
+    colorByLodUserOverride: postRenderer.uiRefs.colorByLodUserOverride,
+    colorByLodController: postRenderer.uiRefs.colorByLodController,
     terrainView,
-    farSummary,
-    naadf,
-    farShell,
-    biomeTextureStreaming,
+    runtime,
+    statControllers: postRenderer.uiRefs.statControllers,
+    app: renderer.app,
+    renderer: renderer.renderer,
+    renderResolution: renderer.renderResolution,
+    scene: renderer.scene,
+    camera: renderer.camera,
+    controls: renderer.controls,
+    player: renderer.player,
+    interaction: renderer.interaction,
+    terrainColliders: renderer.terrainColliders,
+    terrainRaycast: renderer.terrainRaycast,
+    isWebGpu: renderer.isWebGpu,
+    worldCells: world.worldCells,
+    clodWorker: world.clodWorker,
+    result: world.result,
+    allNodes: world.allNodes,
+    maxTerrainLevel: world.maxTerrainLevel,
+    markEditedAncestorsStale: postRenderer.terrainEdit.markEditedAncestorsStale,
+    vegetationDirtyQueue: postRenderer.terrainEdit.vegetationDirtyQueue,
+    staleEditedAncestorIds: postRenderer.terrainEdit.staleEditedAncestorIds,
+    selectionQueryFlags: {
+      queryGrassPerfScene: queries.queryGrassPerfScene,
+      queryTreePerfScene: queries.queryTreePerfScene,
+      queryForestFloorScene: queries.queryForestFloorScene,
+    },
+    longView: {
+      hooks: postRenderer.longViewHooks,
+      settleWaiters: postRenderer.longViewSettleWaiters,
+      isLongView: postRenderer.isLongView,
+      phase0TargetVisibleM: queries.phase0TargetVisibleM,
+      phase0Config: queries.phase0Config,
+      queryScene: queries.queryScene,
+      phase0VelocityX: queries.phase0VelocityX,
+      phase0VelocityZ: queries.phase0VelocityZ,
+      phase0Streaming: queries.phase0Streaming,
+      infiniteFarShell,
+      farShellMetrics,
+    },
+    floatingOrigin,
+    onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming || infiniteFarShell || floatingOrigin)
+      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          const originStats = floatingOrigin.stats();
+          if (postRenderer.longViewHooks?.stats) {
+            postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
+            postRenderer.longViewHooks.stats.counters.floatingOriginRebaseCount = originStats.rebaseCount;
+            postRenderer.longViewHooks.stats.counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
+            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetX = originStats.originX;
+            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
+          }
+          infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
+          if (farSummaryIntegration) {
+            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+          }
+          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          if (infiniteFarShell) {
+            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+          }
+          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+          if (postRenderer.state.terrainMaterialSource === "procedural") {
+            biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
+          }
+        }
+      : undefined,
+    naadfIntegration,
+    getClodErrorCompute: postRenderer.getClodErrorCompute,
+    ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
+    textureLoadOptions: postRenderer.textureLoadOptions,
+    treeConfig: world.treeConfig,
+    understoryConfig: world.understoryConfig,
   });
 }
