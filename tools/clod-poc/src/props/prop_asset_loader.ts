@@ -46,6 +46,7 @@ export class PropAssetRegistry {
   private readonly loader = new GLTFLoader();
   private readonly assets = new Map<string, LoadedPropAsset>();
   private readonly loading = new Map<string, Promise<LoadedPropAsset>>();
+  private disposed = false;
 
   constructor(private readonly settings: CustomPropsSettings) {}
 
@@ -68,16 +69,23 @@ export class PropAssetRegistry {
   }
 
   async loadManifest(): Promise<{ loaded: LoadedPropAsset[]; manifestReport: ReturnType<typeof validateCustomPropsManifest> }> {
+    this.assertActive();
     const manifestReport = validateCustomPropsManifest(this.settings);
     const loaded: LoadedPropAsset[] = [];
-    for (const def of this.settings.props) {
-      const asset = await this.loadAsset(def);
-      loaded.push(asset);
+    try {
+      for (const def of this.settings.props) {
+        const asset = await this.loadAsset(def);
+        loaded.push(asset);
+      }
+      return { loaded, manifestReport };
+    } catch (error) {
+      this.dispose();
+      throw error;
     }
-    return { loaded, manifestReport };
   }
 
   async loadAsset(def: PropAssetDef): Promise<LoadedPropAsset> {
+    this.assertActive();
     const cached = this.assets.get(def.id);
     if (cached) return cached;
     const inflight = this.loading.get(def.id);
@@ -98,6 +106,7 @@ export class PropAssetRegistry {
 
     let lodChain: PropLodChain | null = null;
     try {
+      this.assertActive();
       const sourceMesh = firstRenderableMesh(root);
       if (!sourceMesh) throw new Error(`Prop asset "${def.id}" has no renderable mesh`);
 
@@ -106,6 +115,7 @@ export class PropAssetRegistry {
 
       if (def.lod.mode === "generated") {
         lodChain = await buildPropLodChain(sourceMesh.geometry, def, extractPropAssetMetadata(root, def).boundingSphereRadius);
+        this.assertActive();
         const invalidLod = firstInvalidLodIndex(lodChain);
         if (invalidLod >= 0) throw new Error(`Prop asset "${def.id}" generated empty LOD ${invalidLod}`);
         lodErrorWorld = lodChain.levels.map((level) => level.errorWorld);
@@ -133,6 +143,7 @@ export class PropAssetRegistry {
         console.warn(`[props] ${warning.message}`);
       }
 
+      this.assertActive();
       const loaded: LoadedPropAsset = {
         def,
         root,
@@ -151,11 +162,16 @@ export class PropAssetRegistry {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const asset of this.assets.values()) {
       if (asset.lodChain) disposePropLodChain(asset.lodChain);
       disposeObjectGraph(asset.root);
     }
     this.assets.clear();
     this.loading.clear();
+  }
+
+  private assertActive(): void {
+    if (this.disposed) throw new Error("Prop asset registry is disposed");
   }
 }
