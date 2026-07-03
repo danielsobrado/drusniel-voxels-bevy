@@ -55,6 +55,8 @@ export interface VegetationSliceState {
   treeSpacing: number;
   treeShadowMaxLod: TreeShadowMaxLod;
   treeDebugColorByLod: boolean;
+  treeFarCheapMaterial: boolean;
+  treeImpostorSwapOnBake: boolean;
   treeWindEnabled: boolean;
   treeWindStrength: number;
   treeWindSpeed: number;
@@ -72,6 +74,7 @@ export interface VegetationSliceState {
   treeVisiblePatches: string;
   treeLodSummary: string;
   treeGpuSummary: string;
+  treeImpostorSummary: string;
   understoryEnabled: boolean;
   understoryDistance: number;
   understoryMaxInstances: number;
@@ -157,6 +160,8 @@ export function createVegetationSliceState(input: {
     treeSpacing: treeConfig.placement.spacingM,
     treeShadowMaxLod: treeConfig.lod.shadowsMaxLod,
     treeDebugColorByLod: treeConfig.render.debugColorByLod,
+    treeFarCheapMaterial: treeConfig.render.farCheapMaterial,
+    treeImpostorSwapOnBake: treeConfig.impostors.swapOnBake,
     treeWindEnabled: treeConfig.wind.enabled,
     treeWindStrength: treeConfig.wind.strength,
     treeWindSpeed: treeConfig.wind.speed,
@@ -174,6 +179,7 @@ export function createVegetationSliceState(input: {
     treeVisiblePatches: "0/0",
     treeLodSummary: "0/0/0/0",
     treeGpuSummary: "disabled",
+    treeImpostorSummary: "pending",
     understoryEnabled: understoryConfig.enabled,
     understoryDistance: understoryConfig.distanceM,
     understoryMaxInstances: understoryConfig.maxInstances,
