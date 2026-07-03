@@ -27,6 +27,7 @@ export interface VegetationStatControllerRefs {
   treeVisiblePatches: GuiDisplayController | null;
   treeLodSummary: GuiDisplayController | null;
   treeGpuSummary: GuiDisplayController | null;
+  treeImpostorSummary: GuiDisplayController | null;
   understoryTotal: GuiDisplayController | null;
   understoryVisiblePatches: GuiDisplayController | null;
   understoryClassSummary: GuiDisplayController | null;
