@@ -80,6 +80,12 @@ describe("StatsSyncThrottle", () => {
     expect(throttle.shouldRun(input({ nowMs: 10, debugVisible: true })).reason).toBe("debug");
   });
 
+  it("stats panel visibility change runs immediately", () => {
+    const throttle = new StatsSyncThrottle(config);
+    expect(throttle.shouldRun(input({ nowMs: 0 })).shouldRun).toBe(true);
+    expect(throttle.shouldRun(input({ nowMs: 10, statsPanelVisible: true })).reason).toBe("debug");
+  });
+
   it("stats revision change runs immediately", () => {
     const throttle = new StatsSyncThrottle(config);
     expect(throttle.shouldRun(input({ nowMs: 0, statsRevision: 1 })).shouldRun).toBe(true);
