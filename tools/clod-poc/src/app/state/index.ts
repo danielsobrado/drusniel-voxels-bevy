@@ -71,6 +71,13 @@ export interface CreateClodAppStateParams {
   digHoldIntervalMs: number;
 }
 
+const TREE_RUNTIME_BUDGET = {
+  distance: 420,
+  maxInstances: 6000,
+  gpuMaxVisible: 24000,
+  minSpacing: 6.8,
+} as const;
+
 function mergeSlices(slices: AppStateSlices): ClodAppState {
   return {
     ...slices.clod,
@@ -118,6 +125,14 @@ function grassDepthPrepassTierFromQuery(searchParams: URLSearchParams): number {
 function treeDepthPrepassMaxLodFromQuery(searchParams: URLSearchParams): TreeDepthPrepassMaxLod {
   const enabled = queryFlagEnabled(searchParams, ["treePrepass", "prepass"], true);
   return enabled ? parseTreeDepthPrepassMaxLod(searchParams.get("treePrepassMaxLod")) : "none";
+}
+
+function clampTreeRuntimeState(state: ClodAppState): void {
+  state.treeDistance = Math.min(Math.max(0, state.treeDistance), TREE_RUNTIME_BUDGET.distance);
+  state.treeMaxInstances = Math.floor(Math.min(Math.max(0, state.treeMaxInstances), TREE_RUNTIME_BUDGET.maxInstances));
+  state.treeGpuMaxVisible = Math.floor(Math.min(Math.max(0, state.treeGpuMaxVisible), TREE_RUNTIME_BUDGET.gpuMaxVisible));
+  state.treeSpacing = Math.max(state.treeSpacing, TREE_RUNTIME_BUDGET.minSpacing);
+  if (state.treeShadowMaxLod === "none") state.treeShadowMaxLod = "near";
 }
 
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
@@ -291,6 +306,7 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
   if (params.isWebGpu && !params.queryPerfMode) {
     state.grassShaderMode = "webgpu-ring-v1";
   }
+  clampTreeRuntimeState(state);
   return state;
 }
 
@@ -315,6 +331,7 @@ export function stoneUiState(state: ClodAppState): import("../../runtime/vegetat
 }
 
 export function treeUiState(state: ClodAppState): import("../../runtime/vegetation/tree_controller.js").TreeControllerUiState {
+  clampTreeRuntimeState(state);
   return state;
 }
 
