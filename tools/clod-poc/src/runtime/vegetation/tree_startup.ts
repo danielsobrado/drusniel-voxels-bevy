@@ -116,7 +116,7 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   });
   const treeSystem = treeController.system;
   const fallingTrees = treeController.fallingTrees;
-  treeStats.current = treeSystem.getStats();
+  treeController.refreshStats();
 
   if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
     void treeController.bakeImpostors(renderer).then((result) => {
