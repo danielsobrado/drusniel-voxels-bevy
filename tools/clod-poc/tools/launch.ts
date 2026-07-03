@@ -8,12 +8,37 @@ interface LaunchRecipe {
   cdpUrl?: string;
 }
 
+interface ProbeResult {
+  browser: Browser | null;
+  failure: string | null;
+}
+
+const WEBGPU_ARGS = [
+  "--enable-unsafe-webgpu",
+  "--ignore-gpu-blocklist",
+] as const;
+
+const WEBGPU_VULKAN_ARGS = [
+  ...WEBGPU_ARGS,
+  "--enable-features=Vulkan,WebGPU",
+  "--disable-gpu-sandbox",
+] as const;
+
+const WEBGPU_SWIFTSHADER_ARGS = [
+  ...WEBGPU_VULKAN_ARGS,
+  "--use-vulkan=swiftshader",
+  "--disable-vulkan-surface",
+] as const;
+
 const CANDIDATES: LaunchRecipe[] = [
   { headless: true, channel: "chromium", args: [] },
-  { headless: true, channel: "chromium", args: ["--enable-unsafe-webgpu"] },
-  { headless: true, channel: "chrome", args: ["--enable-unsafe-webgpu"] },
-  { headless: false, channel: "chrome", args: ["--enable-unsafe-webgpu"] },
-  { headless: false, args: ["--enable-unsafe-webgpu"] },
+  { headless: true, channel: "chromium", args: [...WEBGPU_ARGS] },
+  { headless: true, channel: "chromium", args: [...WEBGPU_VULKAN_ARGS] },
+  { headless: true, channel: "chromium", args: [...WEBGPU_SWIFTSHADER_ARGS] },
+  { headless: true, channel: "chrome", args: [...WEBGPU_ARGS] },
+  { headless: true, channel: "chrome", args: [...WEBGPU_VULKAN_ARGS] },
+  { headless: false, channel: "chrome", args: [...WEBGPU_ARGS] },
+  { headless: false, args: [...WEBGPU_ARGS] },
   { headless: false, args: [] },
 ];
 
@@ -24,9 +49,33 @@ const GENERIC_CANDIDATES: LaunchRecipe[] = [
 ];
 
 const CACHE_PATH = ".cache/webgpu-flags.json";
+const SERVER_PROBE_TIMEOUT_MS = 2500;
 
 export function clodBaseUrl(): string {
   return process.env["CLOD_POC_BASE_URL"] ?? "http://localhost:5173/";
+}
+
+function recipeLabel(recipe: LaunchRecipe): string {
+  const channel = recipe.channel ?? "default";
+  const args = recipe.args.length > 0 ? recipe.args.join(" ") : "none";
+  return `headless=${recipe.headless} channel=${channel} args=[${args}]`;
+}
+
+async function assertBaseUrlReachable(baseUrl: string): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SERVER_PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetch(baseUrl, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `CLOD-POC dev server is not reachable at ${baseUrl} (${reason}). ` +
+        "Start it with `npm run dev` from tools/clod-poc, or pass `--baseUrl` / CLOD_POC_BASE_URL.",
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function tryLaunch(recipe: LaunchRecipe): Promise<Browser | null> {
@@ -42,27 +91,31 @@ async function tryLaunch(recipe: LaunchRecipe): Promise<Browser | null> {
   }
 }
 
-async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Browser | null> {
+async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<ProbeResult> {
   let browser: Browser | null = null;
   try {
     browser = await tryLaunch(recipe);
-    if (!browser) return null;
+    if (!browser) return { browser: null, failure: `${recipeLabel(recipe)}: browser launch failed` };
     const page = await browser.newPage();
     const probeUrl = new URL(baseUrl);
     probeUrl.searchParams.set("webgpuProbe", "1");
     await page.goto(probeUrl.toString(), { waitUntil: "domcontentloaded" });
-    const ok = await page.evaluate(async () => {
+    const probe = await page.evaluate(async () => {
       const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-      if (!gpu) return false;
-      return (await gpu.requestAdapter()) !== null;
+      if (!gpu) return { ok: false, reason: "navigator.gpu is missing" };
+      const adapter = await gpu.requestAdapter();
+      return adapter ? { ok: true, reason: "adapter available" } : { ok: false, reason: "requestAdapter() returned null" };
     });
     await page.close();
-    if (ok) return browser;
+    if (probe.ok) return { browser, failure: null };
     await browser.close();
-    return null;
-  } catch {
+    return { browser: null, failure: `${recipeLabel(recipe)}: ${probe.reason}` };
+  } catch (error) {
     if (browser) await browser.close().catch(() => undefined);
-    return null;
+    return {
+      browser: null,
+      failure: `${recipeLabel(recipe)}: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -70,7 +123,7 @@ export async function launchChromium(): Promise<{ browser: Browser; recipe: Laun
   for (const recipe of GENERIC_CANDIDATES) {
     const browser = await tryLaunch(recipe);
     if (!browser) continue;
-    console.log(`[launch] Chromium OK headless=${recipe.headless} channel=${recipe.channel ?? "default"} args=[${recipe.args.join(" ")}]`);
+    console.log(`[launch] Chromium OK ${recipeLabel(recipe)}`);
     return { browser, recipe };
   }
   throw new Error("No Chromium launch recipe succeeded. Run `npx playwright install chromium` if this is a fresh machine.");
@@ -78,6 +131,8 @@ export async function launchChromium(): Promise<{ browser: Browser; recipe: Laun
 
 export async function launchWebGPU(): Promise<{ browser: Browser; recipe: LaunchRecipe }> {
   const baseUrl = clodBaseUrl();
+  await assertBaseUrlReachable(baseUrl);
+
   const forcedChannel = process.env["CLOD_POC_BROWSER_CHANNEL"];
   const cdpUrl = process.env["CLOD_POC_CDP_URL"];
   if (cdpUrl) {
@@ -106,8 +161,8 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
   if (!forcedChannel && existsSync(CACHE_PATH)) {
     try {
       const recipe = JSON.parse(readFileSync(CACHE_PATH, "utf8")) as LaunchRecipe;
-      const browser = await probeRecipe(recipe, baseUrl);
-      if (browser) return { browser, recipe };
+      const result = await probeRecipe(recipe, baseUrl);
+      if (result.browser) return { browser: result.browser, recipe };
     } catch {
       /* stale cache is harmless; probe candidates below */
     }
@@ -115,25 +170,35 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
 
   const candidates = forcedChannel
     ? [
-      { headless: true, channel: forcedChannel, args: ["--enable-unsafe-webgpu"] },
-      { headless: false, channel: forcedChannel, args: ["--enable-unsafe-webgpu"] },
+      { headless: true, channel: forcedChannel, args: [...WEBGPU_ARGS] },
+      { headless: true, channel: forcedChannel, args: [...WEBGPU_VULKAN_ARGS] },
+      { headless: true, channel: forcedChannel, args: [...WEBGPU_SWIFTSHADER_ARGS] },
+      { headless: false, channel: forcedChannel, args: [...WEBGPU_ARGS] },
       { headless: true, channel: forcedChannel, args: [] },
       { headless: false, channel: forcedChannel, args: [] },
     ]
     : CANDIDATES;
 
+  const failures: string[] = [];
   for (const recipe of candidates) {
-    const browser = await probeRecipe(recipe, baseUrl);
-    if (!browser) continue;
+    const result = await probeRecipe(recipe, baseUrl);
+    if (!result.browser) {
+      if (result.failure) failures.push(result.failure);
+      continue;
+    }
     if (!forcedChannel) {
       mkdirSync(".cache", { recursive: true });
       writeFileSync(CACHE_PATH, JSON.stringify(recipe, null, 2));
     }
-    console.log(`[launch] WebGPU OK headless=${recipe.headless} channel=${recipe.channel ?? "default"} args=[${recipe.args.join(" ")}]`);
-    return { browser, recipe };
+    console.log(`[launch] WebGPU OK ${recipeLabel(recipe)}`);
+    return { browser: result.browser, recipe };
   }
 
-  throw new Error(`No Chromium launch recipe produced a WebGPU adapter. Is Vite running at ${baseUrl}?`);
+  throw new Error(
+    `No Chromium launch recipe produced a WebGPU adapter at ${baseUrl}. ` +
+      "Try a desktop Chrome session with `CLOD_POC_CDP_URL`, or set `--renderer webgl` for non-WebGPU smoke data. " +
+      `Probe failures: ${failures.slice(0, 8).join(" | ")}`,
+  );
 }
 
 export interface ClodUrlOptions {
