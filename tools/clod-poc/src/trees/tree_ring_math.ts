@@ -154,12 +154,13 @@ export function treeParentClumpMask(worldX: number, worldZ: number, params: Tree
 }
 
 export function treeRingLodParams(settings: TreeSettings = DEFAULT_TREE_SETTINGS): TreeRingLodParams {
+  const gpuRingEnabled = settings.gpu.enabled && settings.gpu.scatterEnabled && settings.gpu.cullEnabled && !settings.gpu.debugForceCpu;
   return {
     near: settings.distanceM * settings.lod.nearFraction,
     mid: settings.distanceM * settings.lod.midFraction,
     far: settings.distanceM * settings.lod.farFraction,
     radius: settings.distanceM * settings.lod.impostorFraction,
-    band: settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0,
+    band: gpuRingEnabled ? 0 : settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0,
   };
 }
 
