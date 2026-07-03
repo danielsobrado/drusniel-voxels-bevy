@@ -90,6 +90,18 @@ Fail the process when P0 evidence gates fail:
 CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --failOnGateFailure
 ```
 
+Disable the built-in dirty-atlas exercise:
+
+```bash
+CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --params p0DirtyAtlasExercise=0
+```
+
+Tune the dirty-atlas exercise movement and settle window:
+
+```bash
+CLOD_POC_BASE_URL=http://127.0.0.1:5180/ npm --prefix tools/clod-poc run perf:p0 -- --params dirtyAtlasMoveM=1024,dirtyAtlasSettleFrames=24
+```
+
 ## Atlas packing profiles
 
 `far_summary_atlas.format` supports:
@@ -110,6 +122,43 @@ debug_rgba32f: RGBA32F, canopy/water/debug/debug
 balanced: RG8, canopy/water
 packed: RG8, canopy/water
 packed_low_bandwidth: RG8, canopy/water
+```
+
+## Dirty-atlas exercise
+
+For NAADF scenes with `perfProbe=1`, the frame loop now runs a P0 dirty-atlas exercise by default.
+
+The exercise:
+
+```text
+1. Waits until perf warmup frames are observed.
+2. Moves the real automation camera along X.
+3. Lets far-summary streaming settle for a few frames.
+4. Resets the perf probe.
+5. Collects the final perf sample window from the moved position.
+```
+
+This makes dirty-rect atlas uploads deterministic for P0 instead of depending on incidental camera motion.
+
+The exercise mirrors these counters into `window.__drusnielClod.stats.counters`:
+
+```text
+p0DirtyAtlasExercise.enabled
+p0DirtyAtlasExercise.status
+p0DirtyAtlasExercise.moveM
+p0DirtyAtlasExercise.triggeredFrame
+p0DirtyAtlasExercise.resetFrame
+p0DirtyAtlasExercise.settleRemaining
+```
+
+Status codes are:
+
+```text
+0 = disabled
+1 = pending
+2 = settling
+3 = done
+4 = skipped
 ```
 
 ## Metrics captured
@@ -216,6 +265,6 @@ Pending validation work:
 1. Run typecheck and targeted P0 tests locally.
 2. Run the P0 perf suite on a browser/WebGPU machine.
 3. Commit the generated summary.json and summary.md, or archive them as release/perf artifacts.
-4. Confirm dirty upload mode appears after initial atlas population when the dirty area is below threshold.
+4. Confirm dirty upload mode appears after the exercise and the gate passes.
 5. Compare balanced vs packed memory estimates and visual output in a NAADF scene.
 ```
