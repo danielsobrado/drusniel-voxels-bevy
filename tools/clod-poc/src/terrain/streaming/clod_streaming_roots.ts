@@ -112,7 +112,7 @@ function clodCounters(): Record<string, number> | null {
   return maybeWindow?.__drusnielClod?.stats?.counters ?? null;
 }
 
-function mirrorStreamingProbeCounters(stats: StreamingClodRootStats): void {
+function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   const counters = clodCounters();
   if (!counters) return;
   counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
@@ -122,6 +122,31 @@ function mirrorStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_probe_evictions_total"] = stats.probeEvictionsTotal;
   counters["live_clod_stream_probe_stale_discards_total"] = stats.probeStaleDiscardsTotal;
   counters["live_clod_stream_out_of_world_edits_supported"] = stats.outOfWorldEditsSupported;
+  if (stats.probeActive === 1) {
+    counters["live_clod_stream_built_total"] = stats.probeApplyPagesTotal;
+    counters["live_clod_stream_apply_pages_total"] = stats.probeApplyPagesTotal;
+    counters["live_clod_stream_evictions_total"] = stats.probeEvictionsTotal;
+    counters["live_clod_stream_stale_discards_total"] = stats.probeStaleDiscardsTotal;
+  }
+}
+
+function mirrorStreamingProbeCounters(stats: StreamingClodRootStats): void {
+  writeStreamingProbeCounters(stats);
+  globalThis.queueMicrotask?.(() => writeStreamingProbeCounters(stats));
+}
+
+function resetStreamingCounterMirrors(): void {
+  const counters = clodCounters();
+  if (!counters) return;
+  counters["live_clod_stream_built_total"] = 0;
+  counters["live_clod_stream_apply_pages_total"] = 0;
+  counters["live_clod_stream_evictions_total"] = 0;
+  counters["live_clod_stream_stale_discards_total"] = 0;
+  counters["live_clod_stream_probe_active"] = 1;
+  counters["live_clod_stream_probe_requested_pages_total"] = 0;
+  counters["live_clod_stream_probe_apply_pages_total"] = 0;
+  counters["live_clod_stream_probe_evictions_total"] = 0;
+  counters["live_clod_stream_probe_stale_discards_total"] = 0;
 }
 
 function registerGlobalStreamProbe(beginMovementProbe: () => void): void {
@@ -160,9 +185,7 @@ export function streamingClodRequiredPageCoords(center: THREE.Vector3, radiusM: 
     for (let px = minPx; px <= maxPx; px++) {
       const centerX = (px + 0.5) * pageSize;
       const centerZ = (pz + 0.5) * pageSize;
-      if (Math.hypot(center.x - centerX, center.z - centerZ) <= radius + halfDiag) {
-        coords.push({ px, pz, centerX, centerZ });
-      }
+      if (Math.hypot(center.x - centerX, center.z - centerZ) <= radius + halfDiag) coords.push({ px, pz, centerX, centerZ });
     }
   }
 
@@ -188,14 +211,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const cached = new Map<string, CachedPage>();
   const failed = new Map<string, FailedBuildState>();
   const ready: ClodPageNode[] = [];
-  const probe: MovementProbeState = {
-    active: false,
-    requestedIds: new Set<string>(),
-    requestedPagesTotal: 0,
-    applyPagesTotal: 0,
-    evictionsTotal: 0,
-    staleDiscardsTotal: 0,
-  };
+  const probe: MovementProbeState = { active: false, requestedIds: new Set<string>(), requestedPagesTotal: 0, applyPagesTotal: 0, evictionsTotal: 0, staleDiscardsTotal: 0 };
   let frame = 0;
   let active = deps.enabled;
   let requiredNow = new Set<string>();
@@ -212,16 +228,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     probe.applyPagesTotal = 0;
     probe.evictionsTotal = 0;
     probe.staleDiscardsTotal = 0;
+    resetStreamingCounterMirrors();
   };
   registerGlobalStreamProbe(beginMovementProbe);
 
   const removeRoot = (id: string): void => {
-    for (let i = deps.roots.length - 1; i >= 0; i--) {
-      if (deps.roots[i]?.id === id) deps.roots.splice(i, 1);
-    }
-    for (let i = deps.allNodes.length - 1; i >= 0; i--) {
-      if (deps.allNodes[i]?.id === id) deps.allNodes.splice(i, 1);
-    }
+    for (let i = deps.roots.length - 1; i >= 0; i--) if (deps.roots[i]?.id === id) deps.roots.splice(i, 1);
+    for (let i = deps.allNodes.length - 1; i >= 0; i--) if (deps.allNodes[i]?.id === id) deps.allNodes.splice(i, 1);
   };
 
   const evict = (center: THREE.Vector3, radiusM: number): number => {
@@ -245,7 +258,6 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
-
   const failedBuildCoolingDown = (id: string): boolean => {
     const failure = failed.get(id);
     return failure !== undefined && frame < failure.retryAfterFrame;
@@ -284,11 +296,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       deps.onNodesBuilt?.(appliedNodes);
       deps.onRootsChanged?.();
     }
-    return {
-      applied: appliedNodes.length,
-      applyMs: performance.now() - startedAt,
-      staleDiscards,
-    };
+    return { applied: appliedNodes.length, applyMs: performance.now() - startedAt, staleDiscards };
   };
 
   const dispatchBuild = (coords: readonly PageCoord[]): number => {
@@ -335,7 +343,6 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const buildStillQueued = (id: string): boolean => ready.some((node) => node.id === id);
-
   const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
     if (inFlight === batch) inFlight = null;
     for (const id of batch.ids) {
@@ -357,17 +364,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         mirrorStreamingProbeCounters(latest);
         return latest;
       }
-
-      const required = streamingClodRequiredPageCoords(center, radiusM, pageSize)
-        .filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
+      const required = streamingClodRequiredPageCoords(center, radiusM, pageSize).filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
       const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz)));
       requiredNow = requiredIds;
-
       for (const coord of required) {
         const existing = cached.get(streamingClodPageKey(coord.px, coord.pz));
         if (existing) existing.lastTouchFrame = frame;
       }
-
       const evictions = evict(center, radiusM);
       if (probe.active) probe.evictionsTotal += evictions;
       const workerBuildMs = completedWorkerBuildMs;
@@ -380,7 +383,6 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       staleDiscards += applied.staleDiscards;
       const scheduledPagesThisFrame = scheduleBuilds(required);
       if (evictions > 0) deps.onRootsChanged?.();
-
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
@@ -408,9 +410,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       mirrorStreamingProbeCounters(latest);
       return latest;
     },
-    stats() {
-      return latest;
-    },
+    stats() { return latest; },
     beginMovementProbe,
   };
 }
