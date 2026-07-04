@@ -119,6 +119,9 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_building_pages"] = stats.buildingPages;
   counters["live_bubble_failed_pages"] = stats.failedPages;
   counters["live_bubble_valid_empty_pages"] = stats.validEmptyPages;
+  counters["live_bubble_gpu_retry_pages"] = stats.gpuRetryPages;
+  counters["live_bubble_gpu_retries_total"] = stats.gpuRetriesTotal;
+  counters["live_bubble_gpu_failures_total"] = stats.gpuTerminalFailuresTotal;
   counters["live_bubble_built_this_frame"] = stats.chunkGroupsBuiltThisFrame;
   counters["live_bubble_built_total"] = liveBubbleProbeActive ? liveBubbleProbeBuiltTotal : liveBubbleBuiltTotal;
   counters["live_bubble_ms"] = stats.bubbleMs;
