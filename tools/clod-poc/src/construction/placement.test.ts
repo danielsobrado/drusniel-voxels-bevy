@@ -14,6 +14,11 @@ const placementConfig: ConstructionPlacementConfig = {
   storageKey: "test-construction",
 };
 
+const unboundedPlacementConfig: ConstructionPlacementConfig = {
+  ...placementConfig,
+  unboundedWorld: true,
+};
+
 const floor: ConstructionPieceDef = {
   id: "floor",
   label: "Floor",
@@ -62,6 +67,7 @@ function validateLive(
     rotationQuarterTurns?: number;
     snapped?: boolean;
     snap?: ConstructionSnapResult | null;
+    config?: ConstructionPlacementConfig;
   } = {},
 ): { valid: boolean; reason: string | null } {
   const snapped = options.snapped ?? false;
@@ -75,7 +81,7 @@ function validateLive(
     placedPieces: options.placedPieces ?? [],
     piecesById,
     worldCells: 16,
-    config: placementConfig,
+    config: options.config ?? placementConfig,
   });
 }
 
@@ -83,6 +89,7 @@ function validateSaved(
   placed: PlacedConstructionPiece,
   placedPieces: readonly PlacedConstructionPiece[] = [],
   allowLegacySupportMetadata = false,
+  config: ConstructionPlacementConfig = placementConfig,
 ) {
   const piece = piecesById.get(placed.typeId)!;
   return validateStrictPersistedConstructionPlacement({
@@ -91,7 +98,7 @@ function validateSaved(
     placedPieces,
     piecesById,
     worldCells: 16,
-    config: placementConfig,
+    config,
     allowLegacySupportMetadata,
   });
 }
@@ -103,6 +110,10 @@ describe("construction placement", () => {
 
   it("rejects pieces that extend outside the world even when their center is inside", () => {
     expect(validateLive(floor, [0.5, 1, 8])).toEqual({ valid: false, reason: "outside world" });
+  });
+
+  it("accepts live pieces outside finite bounds when placement is unbounded", () => {
+    expect(validateLive(floor, [-512, 1, 2048], { config: unboundedPlacementConfig })).toEqual({ valid: true, reason: null });
   });
 
   it("rejects invalid world dimensions", () => {
@@ -189,6 +200,19 @@ describe("construction placement", () => {
     }, [parent]);
 
     expect(result.valid).toBe(true);
+  });
+
+  it("accepts saved ground pieces outside finite bounds when placement is unbounded", () => {
+    const result = validateSaved({
+      id: "far-floor",
+      typeId: "floor",
+      position: [-512, 1, 2048],
+      rotationQuarterTurns: 0,
+      grounded: true,
+      parentIds: [],
+    }, [], false, unboundedPlacementConfig);
+
+    expect(result).toEqual({ valid: true, reason: null });
   });
 
   it("allows child-before-parent loading when the loader retries pending pieces", () => {
