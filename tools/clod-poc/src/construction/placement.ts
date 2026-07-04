@@ -110,11 +110,11 @@ function hasLegacySupportMetadata(placed: PlacedConstructionPiece): boolean {
 }
 
 function validatePersistedSupport(placed: PlacedConstructionPiece, placedPieces: readonly PlacedConstructionPiece[]): { valid: boolean; reason: string | null } {
-  if (hasLegacySupportMetadata(placed)) return { valid: true };
-  if (placed.grounded === true) return { valid: true };
+  if (hasLegacySupportMetadata(placed)) return { valid: true, reason: null };
+  if (placed.grounded === true) return { valid: true, reason: null };
   const parentIds = placed.parentIds ?? [];
   if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) {
-    return { valid: true };
+    return { valid: true, reason: null };
   }
   return { valid: false, reason: "unsupported" };
 }
