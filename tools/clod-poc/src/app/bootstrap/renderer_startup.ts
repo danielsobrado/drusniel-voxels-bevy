@@ -86,10 +86,6 @@ export function playerWorldBoundsForScene(searchParams: URLSearchParams, worldCe
   };
 }
 
-function exposeTerrainColliders(terrainColliders: TerrainColliderSet): void {
-  (window as unknown as { __drusnielTerrainColliders?: TerrainColliderSet }).__drusnielTerrainColliders = terrainColliders;
-}
-
 export async function runRendererStartup(input: RendererStartupInput): Promise<RendererStartupResult | null> {
   const {
     searchParams,
@@ -264,7 +260,6 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     enabled: searchParams.get("scene") === INFINITE_ISLANDS_SCENE,
     surfaceHeight,
   });
-  exposeTerrainColliders(terrainColliders);
   const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
   const interaction = new PlayerInteractionState();
   const terrainRaycast = createTerrainRaycastService({
