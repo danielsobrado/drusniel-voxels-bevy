@@ -44,7 +44,7 @@ function rawDefaultConfig(): LongViewConfig {
       startMeters: 1536,
       endMeters: 8192,
       tileSizeMeters: 256,
-      maxTilesBuiltPerFrame: 4,
+      maxTilesBuiltPerFrame: 1,
       staleTileGraceSeconds: 10,
       rings: [
         { name: "near_far", startM: 1536, endM: 4096, cellM: 32, tileCells: 32 },
