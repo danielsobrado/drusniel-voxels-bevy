@@ -219,9 +219,9 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     farFraction: 0.30,
     impostorFraction: 1.0,
     hysteresisM: 8,
-    crossfadeEnabled: true,
-    crossfadeBandM: 24,
-    ditherEnabled: true,
+    crossfadeEnabled: false,
+    crossfadeBandM: 0,
+    ditherEnabled: false,
     shadowsMaxLod: "none",
     budgets: {
       nearMaxVertices: 180_000,
