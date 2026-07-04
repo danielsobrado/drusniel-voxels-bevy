@@ -3,6 +3,8 @@ import type { GrassShaderMode, GrassTier } from "./grass_config.js";
 import type { GrassGenerationStats, GrassStats } from "./grass_stats.js";
 import type { GrassPatch } from "./grass_system_support.js";
 
+type GrassGpuRingStatsWithConsulted = GrassGpuRingStats & { prefilterFarSummaryConsulted?: number };
+
 export interface BuildGrassStatsInput {
   mode: GrassShaderMode;
   ringMode: boolean;
@@ -28,7 +30,7 @@ export function buildGrassStats(input: BuildGrassStatsInput): GrassStats {
 function buildRingStats(input: BuildGrassStatsInput): GrassStats {
   const visiblePatches = input.activeGpu ? input.ringMeshes.filter((mesh) => mesh.visible).length : 0;
   const patchCount = input.activeGpu ? input.ringMeshes.length : input.patches.length;
-  const gpu = input.gpuRingStats;
+  const gpu = input.gpuRingStats as GrassGpuRingStatsWithConsulted;
   return {
     mode: input.mode,
     blades: input.activeGpu ? input.ringBladeCount : input.bladeCount,
@@ -58,6 +60,7 @@ function buildRingStats(input: BuildGrassStatsInput): GrassStats {
     gpuRingPrefilterRejectedClusters: gpu.prefilterRejectedClusters,
     gpuRingPrefilterAcceptedClusters: gpu.prefilterAcceptedClusters,
     gpuRingPrefilterUnknownKeptClusters: gpu.prefilterUnknownKeptClusters,
+    gpuRingPrefilterFarSummaryConsulted: gpu.prefilterFarSummaryConsulted,
     gpuRingPrefilterSourceFarSummary: gpu.prefilterSourceFarSummary,
     gpuRingPrefilterSourceTerrainSampler: gpu.prefilterSourceTerrainSampler,
     gpuRingPrefilterSourceFallback: gpu.prefilterSourceFallback,
@@ -85,7 +88,7 @@ function buildPatchStats(input: BuildGrassStatsInput): GrassStats {
     else if (patch.visibleTier === "super") superPatches++;
     midBladeCount += patch.midBladeCount;
   }
-  const gpu = input.gpuRingStats;
+  const gpu = input.gpuRingStats as GrassGpuRingStatsWithConsulted;
   return {
     mode: input.mode,
     blades: input.bladeCount,
@@ -113,6 +116,7 @@ function buildPatchStats(input: BuildGrassStatsInput): GrassStats {
     gpuRingPrefilterRejectedClusters: gpu.prefilterRejectedClusters,
     gpuRingPrefilterAcceptedClusters: gpu.prefilterAcceptedClusters,
     gpuRingPrefilterUnknownKeptClusters: gpu.prefilterUnknownKeptClusters,
+    gpuRingPrefilterFarSummaryConsulted: gpu.prefilterFarSummaryConsulted,
     gpuRingPrefilterSourceFarSummary: gpu.prefilterSourceFarSummary,
     gpuRingPrefilterSourceTerrainSampler: gpu.prefilterSourceTerrainSampler,
     gpuRingPrefilterSourceFallback: gpu.prefilterSourceFallback,
