@@ -15,6 +15,7 @@ const RING_CLAMP_MARGIN = 2;
 let cachedInfiniteIslandsScene: boolean | null = null;
 let liveBubbleBuiltTotal = 0;
 let liveBubbleEvictionsTotal = 0;
+let liveBubbleLastColliderRemovals: number | null = null;
 let liveBubbleProbeActive = false;
 let liveBubbleProbeBuiltTotal = 0;
 let liveBubbleProbeEvictionsTotal = 0;
@@ -81,7 +82,6 @@ function resetLiveBubbleCounterMirrors(): void {
   const counters = hooksCounters();
   if (!counters) return;
   counters["live_bubble_built_total"] = 0;
-  counters["live_bubble_evictions_total"] = 0;
   counters["live_bubble_probe_active"] = 1;
   counters["live_bubble_probe_built_total"] = 0;
   counters["live_bubble_probe_evictions_total"] = 0;
@@ -90,11 +90,11 @@ function resetLiveBubbleCounterMirrors(): void {
 
 export function beginLiveBubbleMovementProbe(): void {
   liveBubbleBuiltTotal = 0;
-  liveBubbleEvictionsTotal = 0;
   liveBubbleProbeActive = true;
   liveBubbleProbeBuiltTotal = 0;
   liveBubbleProbeEvictionsTotal = 0;
   liveBubbleProbeColliderRemovalsTotal = 0;
+  liveBubbleLastColliderRemovals = null;
   resetLiveBubbleCounterMirrors();
 }
 
@@ -102,12 +102,16 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   const counters = hooksCounters();
   registerGlobalLiveBubbleProbe();
   if (!counters) return;
+  const colliderRemovalDelta = liveBubbleLastColliderRemovals === null
+    ? 0
+    : Math.max(0, stats.colliderRemovals - liveBubbleLastColliderRemovals);
+  liveBubbleLastColliderRemovals = stats.colliderRemovals;
   liveBubbleBuiltTotal += stats.chunkGroupsBuiltThisFrame;
   liveBubbleEvictionsTotal += stats.evictions;
   if (liveBubbleProbeActive) {
     liveBubbleProbeBuiltTotal += stats.chunkGroupsBuiltThisFrame;
     liveBubbleProbeEvictionsTotal += stats.colliderEvictions;
-    liveBubbleProbeColliderRemovalsTotal += stats.colliderRemovals;
+    liveBubbleProbeColliderRemovalsTotal += colliderRemovalDelta;
   }
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
@@ -117,7 +121,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_built_total"] = liveBubbleProbeActive ? liveBubbleProbeBuiltTotal : liveBubbleBuiltTotal;
   counters["live_bubble_ms"] = stats.bubbleMs;
   counters["live_bubble_evictions"] = stats.evictions;
-  counters["live_bubble_evictions_total"] = liveBubbleProbeActive ? liveBubbleProbeEvictionsTotal : liveBubbleEvictionsTotal;
+  counters["live_bubble_evictions_total"] = liveBubbleEvictionsTotal;
   counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
