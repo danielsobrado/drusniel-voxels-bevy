@@ -345,13 +345,18 @@ export async function runRuntimeSystemsStartup(
         getCounters: () => getHooks()?.stats?.counters ?? null,
         onRejected: (reason) => console.info(`[construction] placement rejected: ${reason}`),
       });
-      constructionController = withConstructionGuardDispose(createConstructionController({
-        scene,
-        camera,
-        rendererDomElement: app.renderer.domElement,
-        worldCells: constructionWorldCells,
-        config: constructionConfig,
-      }), disposeGuard);
+      try {
+        constructionController = withConstructionGuardDispose(createConstructionController({
+          scene,
+          camera,
+          rendererDomElement: app.renderer.domElement,
+          worldCells: constructionWorldCells,
+          config: constructionConfig,
+        }), disposeGuard);
+      } catch (error) {
+        disposeGuard();
+        throw error;
+      }
     } catch (error) {
       console.error("[construction] failed to initialize", error);
     }
