@@ -455,7 +455,13 @@ export async function bootstrapClodPoc() {
     },
     floatingOrigin,
     onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming || infiniteFarShell || floatingOrigin)
-      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+      ? (() => {
+          // The shell first builds from procedural fallbacks (no tiles are
+          // ready that early); refresh its heights as tile commits land.
+          let shellRefreshCommitRev = 0;
+          let framesSinceShellRefresh = 0;
+          const SHELL_REFRESH_INTERVAL_FRAMES = 120;
+          return (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
           const originStats = floatingOrigin.stats();
           if (postRenderer.longViewHooks?.stats) {
             postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
@@ -471,6 +477,17 @@ export async function bootstrapClodPoc() {
           if (naadfIntegration) {
             timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
           }
+          if (farSummaryIntegration && infiniteFarShell) {
+            framesSinceShellRefresh++;
+            if (
+              framesSinceShellRefresh >= SHELL_REFRESH_INTERVAL_FRAMES
+              && farSummaryIntegration.cache.hasNewCommitsSince(shellRefreshCommitRev)
+            ) {
+              shellRefreshCommitRev = farSummaryIntegration.cache.commitRevisionAt();
+              framesSinceShellRefresh = 0;
+              infiniteFarShell.requestHeightRefresh();
+            }
+          }
           if (infiniteFarShell) {
             timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex));
           }
@@ -480,7 +497,8 @@ export async function bootstrapClodPoc() {
           if (postRenderer.state.terrainMaterialSource === "procedural" && biomeTextureStreaming) {
             timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: camera.position.x, z: camera.position.z, frameIndex }));
           }
-        }
+        };
+        })()
       : undefined,
     naadfIntegration,
     getClodErrorCompute: postRenderer.getClodErrorCompute,

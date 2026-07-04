@@ -141,6 +141,17 @@ export class InfiniteFarShell {
     if (this.heightSamplingMode === "cpu") this.rebuildHeights();
   }
 
+  /**
+   * Resample heights from the current provider without moving the shell —
+   * used when far-summary tiles commit after the shell was built from
+   * fallbacks. Always sliced; a no-op before the first build or in gpu mode.
+   */
+  requestHeightRefresh(): void {
+    if (this.heightSamplingMode !== "cpu" || this.rebuildCount === 0) return;
+    if (this.pendingHeightRebuild) return;
+    this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
+  }
+
   setRenderOriginOffset(originX: number, originZ: number): void {
     if (this.renderOriginX === originX && this.renderOriginZ === originZ) return;
     this.renderOriginX = originX;

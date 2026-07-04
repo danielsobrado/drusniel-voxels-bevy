@@ -14,7 +14,6 @@ import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
-const INFINITE_ISLANDS_BUILD_INTERVAL_FRAMES = 30;
 const INFINITE_ISLANDS_SHELL_REBUILD_INTERVAL_FRAMES = 120;
 const DEFAULT_SHELL_REBUILD_INTERVAL_FRAMES = 10;
 
@@ -73,10 +72,13 @@ export function initFarSummaryIntegration(
 
   const queryParams = currentQueryParams();
   const isInfiniteIslands = queryParams.get("scene") === INFINITE_ISLANDS_SCENE;
+  // Tile builds are deadline-sliced inside buildSomeTiles (maxBuildMsPerFrame),
+  // so per-frame building is frame-safe; the old 30-frame infinite-islands
+  // throttle starved the clipmap (~9 ready of ~120 required per scene).
   const buildIntervalFrames = resolveFarSummaryFrameInterval(
     queryParams,
     "farSummaryBuildInterval",
-    isInfiniteIslands ? INFINITE_ISLANDS_BUILD_INTERVAL_FRAMES : 1,
+    1,
   );
   const shellRebuildIntervalFrames = resolveFarSummaryFrameInterval(
     queryParams,

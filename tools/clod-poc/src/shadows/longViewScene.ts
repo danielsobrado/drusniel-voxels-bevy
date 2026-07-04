@@ -6,6 +6,7 @@ const STREAMING_LONG_VIEW_SCENES = new Set([
   "infinite-far-shell-straight",
   "infinite-far-shell-fast-turn",
   "infinite-far-shell-mountain-approach",
+  "infinite-islands",
 ]);
 
 /** Long-view scenes that use InfiniteFarShell instead of the finite far-shell skirt. */
