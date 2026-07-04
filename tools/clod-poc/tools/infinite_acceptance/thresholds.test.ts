@@ -11,6 +11,9 @@ function validCounters(): Record<string, number> {
   counters["live_bubble_streamed_collider_pages"] = 1;
   counters["live_bubble_collider_registrations"] = 1;
   counters["live_clod_stream_required_pages"] = 1;
+  counters["live_clod_stream_cached_pages"] = 1;
+  counters["live_clod_stream_build_budget"] = 1;
+  counters["live_clod_stream_apply_ms"] = 1;
   counters["infinite_hydrology_outside_sample_valid"] = 1;
   counters["infinite_hydrology_nonrepeat_delta"] = 1;
   counters["infinite_hydrology_nonrepeat_ok"] = 1;
@@ -45,16 +48,30 @@ describe("infinite islands thresholds", () => {
     );
   });
 
-  it("checks outside-startup CLOD root page requests without requiring cached root builds", () => {
+  it("requires cached CLOD root pages when builds are enabled and pages are required", () => {
     const counters = validCounters();
+    counters["live_clod_stream_cached_pages"] = 0;
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_cached_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
+    );
+
+    counters["live_clod_stream_build_budget"] = 0;
+    expect(evaluateThresholds(counters).passed).toBe(true);
+
+    counters["live_clod_stream_build_budget"] = 1;
     counters["live_clod_stream_required_pages"] = 0;
     expect(evaluateThresholds(counters).failures).toContain(
       "live_clod_stream_required_pages=0 failed: must be > 0",
     );
+  });
 
-    counters["live_clod_stream_required_pages"] = 1;
-    counters["live_clod_stream_cached_pages"] = 0;
-    expect(evaluateThresholds(counters).passed).toBe(true);
+  it("checks streamed root apply cost", () => {
+    const counters = validCounters();
+    counters["live_clod_stream_apply_ms"] = 2.1;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_apply_ms=2.1 failed: must be finite, >= 0 and <= 2",
+    );
   });
 
   it("checks non-repeating infinite hydrology samples", () => {
@@ -70,7 +87,8 @@ describe("infinite islands thresholds", () => {
     const counters = validCounters();
 
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
-    expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(0);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_transfer_bytes"]).toBe(0);
     expect(extractAcceptanceCounters({ counters })["infinite_hydrology_nonrepeat_ok"]).toBe(1);
   });
 });
