@@ -109,8 +109,6 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
   const originZ = tileOrigin(key.z, cellM, tileCells);
   const sampleCount = tileCells * tileCells;
   const samples: FarSummarySample[] = new Array(sampleCount);
-  let globalMin = Number.POSITIVE_INFINITY;
-  let globalMax = Number.NEGATIVE_INFINITY;
   let globalSum = 0;
   let validSamples = 0;
 
@@ -146,8 +144,6 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
       const roughness = computeRoughnessFromGrid(heightGrid, sx, sz);
 
       if (heightValid) {
-        globalMin = Math.min(globalMin, height);
-        globalMax = Math.max(globalMax, height);
         globalSum += height;
         validSamples++;
       }
