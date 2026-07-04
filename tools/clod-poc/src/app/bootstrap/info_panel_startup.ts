@@ -153,7 +153,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
       state.triplanar = false;
       state.postProcessEnabled = false;
       state.postProcessDebugMode = "off";
-      state.bubble = false;
+      if (!state.liveBubblePinned) state.bubble = false;
       state.showBounds = false;
       state.showSeamPoints = false;
       state.showCrossLodBorders = false;
