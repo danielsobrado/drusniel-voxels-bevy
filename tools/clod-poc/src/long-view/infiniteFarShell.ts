@@ -234,8 +234,8 @@ export class InfiniteFarShell {
 
   dispose(): void {
     this.mesh.geometry.dispose();
-    disposeMaterial(this.mesh.material as THREE.Material | THREE.Material[]>);
-    if (this.waterMesh) disposeMaterial(this.waterMesh.material as THREE.Material | THREE.Material[]>);
+    disposeMaterial(this.mesh.material as THREE.Material | THREE.Material[]);
+    if (this.waterMesh) disposeMaterial(this.waterMesh.material as THREE.Material | THREE.Material[]);
   }
 
   private applyRenderPosition(): void {
