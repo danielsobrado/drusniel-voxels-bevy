@@ -76,11 +76,25 @@ function registerGlobalLiveBubbleProbe(): void {
   }
 }
 
+function resetLiveBubbleCounterMirrors(): void {
+  const counters = hooksCounters();
+  if (!counters) return;
+  counters["live_bubble_built_total"] = 0;
+  counters["live_bubble_evictions_total"] = 0;
+  counters["live_bubble_probe_active"] = 1;
+  counters["live_bubble_probe_built_total"] = 0;
+  counters["live_bubble_probe_evictions_total"] = 0;
+  counters["live_bubble_probe_collider_removals_total"] = 0;
+}
+
 export function beginLiveBubbleMovementProbe(): void {
+  liveBubbleBuiltTotal = 0;
+  liveBubbleEvictionsTotal = 0;
   liveBubbleProbeActive = true;
   liveBubbleProbeBuiltTotal = 0;
   liveBubbleProbeEvictionsTotal = 0;
   liveBubbleProbeColliderRemovalsTotal = 0;
+  resetLiveBubbleCounterMirrors();
 }
 
 function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
@@ -99,10 +113,10 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_building_pages"] = stats.buildingPages;
   counters["live_bubble_failed_pages"] = stats.failedPages;
   counters["live_bubble_built_this_frame"] = stats.chunkGroupsBuiltThisFrame;
-  counters["live_bubble_built_total"] = liveBubbleBuiltTotal;
+  counters["live_bubble_built_total"] = liveBubbleProbeActive ? liveBubbleProbeBuiltTotal : liveBubbleBuiltTotal;
   counters["live_bubble_ms"] = stats.bubbleMs;
   counters["live_bubble_evictions"] = stats.evictions;
-  counters["live_bubble_evictions_total"] = liveBubbleEvictionsTotal;
+  counters["live_bubble_evictions_total"] = liveBubbleProbeActive ? liveBubbleProbeEvictionsTotal : liveBubbleEvictionsTotal;
   counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
