@@ -10,6 +10,14 @@ Every document in `docs/` declares a lifecycle status near the top. Treat `curre
 
 The current Rust runtime baseline is Bevy 0.18.1, as declared in `Cargo.toml` and `Cargo.lock`. Bevy 0.17 documents are historical references unless their status block explicitly says otherwise.
 
+## Current CLOD docs
+
+- [Bevy / clod-poc parity status](./plans/bevy-clod-poc-parity-status.md)
+- [clod-poc tree parity status](./plans/clod-poc-trees-parity-status.md)
+- [clod-poc GPU vegetation early rejection](./plans/clod-poc-gpu-vegetation-early-rejection.md)
+- [clod-poc README](../tools/clod-poc/README.md)
+- [clod-poc performance docs](../tools/clod-poc/docs/performance/)
+
 ## Drusniel Voxels editor roadmap
 
 - [Editor build plan home](./editor/README.md)

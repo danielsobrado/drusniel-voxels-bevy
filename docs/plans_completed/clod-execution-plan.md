@@ -1,5 +1,9 @@
 # Drusniel CLOD Pages — Execution Plan
 
+Status: completed historical execution plan. Active CLOD/clod-poc source-of-truth docs are
+listed in `docs/README.md` under "Current CLOD docs"; keep this file as design background
+for CLOD page invariants and historical phase ordering.
+
 Maps the 5 borrowed techniques (meshoptimizer, zeux nanite.cpp parameters, jglrxavpok loop lessons, Bevy error propagation, restricted-quadtree discipline) into phased, executable tasks.
 
 ---

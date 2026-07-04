@@ -1,6 +1,8 @@
 # CLOD Pages — Phase 5 Implementation Plan (Bevy integration)
 
-Status: **implementation present behind a default-off runtime flag for A/B benching.**
+Status: completed historical implementation plan. The current Bevy/clod-poc parity state
+is tracked in `docs/plans/bevy-clod-poc-parity-status.md`; keep this file as background
+for the Bevy CLOD page integration design.
 Prereq gate: Phase 3 A3 (visual density-scar judgement) must be confirmed by a human.
 Inputs validated: Phases 0–4 complete (PoC `tools/clod-poc`, Rust builder `tools/clod-rs`,
 all measured gate criteria PASS, builder matches PoC within epsilon).

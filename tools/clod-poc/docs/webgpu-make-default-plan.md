@@ -1,5 +1,11 @@
 # clod-poc — make WebGPU the default app path
 
+Document status: historical implementation plan. WebGPU is now the normal clod-poc app
+path through `src/rendering/renderer_backend.ts`; keep this file only as background for
+why the renderer abstraction, terrain material adapter, and WebGL fallback were staged.
+Use `tools/clod-poc/README.md`, `docs/plans/bevy-clod-poc-parity-status.md`, and
+`tools/clod-poc/docs/postfx-webgl-decommission-decision.md` for current operating state.
+
 Companion to [webgpu-migration.md](webgpu-migration.md). That doc proved every surface
 ports to WebGPU/TSL in the **isolated `?webgpu=1` preview**. This doc is the plan to land
 those ports in the **real app** (`src/main.ts`) and retire the WebGL path.

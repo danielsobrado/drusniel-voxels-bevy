@@ -1,5 +1,9 @@
 # CLOD PoC — Shading Band & Diagonal Lines: Troubleshooting Plan (Tickets + Prompts)
 
+Status: historical troubleshooting record. Current CLOD/clod-poc orientation is in
+`docs/README.md`, `tools/clod-poc/README.md`, and the active parity/status docs under
+`docs/plans/`.
+
 Scope: the Three.js PoC (`tools/clod-poc`) shows (1) a shading/normal-colour band along
 what is suspected to be the L0|L1 page border, and (2) faint diagonal shading lines on
 L0 terrain. Goal: classify the root cause with instrumentation FIRST, fix only the
@@ -365,8 +369,8 @@ Done when: D1 resolved or D2 documented as not-a-bug.
 ## DBG-8 — Port findings to the engine plans
 
 **Requirements**
-- `docs/plans/clod-phase5-plan.md`: add the selector rule **"any page node adjacent to the near-field bubble must be LOD0"** (a page↔chunk constraint, distinct from the page↔page 2:1 rule) into the selection step, marked as originating from this investigation.
-- `docs/plans/clod-execution-plan.md` §4.3 debug overlays: add the normal-divergence view and cross-LOD border markers as required engine debug overlays.
+- `docs/plans_completed/clod-phase5-plan.md`: add the selector rule **"any page node adjacent to the near-field bubble must be LOD0"** (a page↔chunk constraint, distinct from the page↔page 2:1 rule) into the selection step, marked as originating from this investigation.
+- `docs/plans_completed/clod-execution-plan.md` §4.3 debug overlays: add the normal-divergence view and cross-LOD border markers as required engine debug overlays.
 - If DBG-5 chose a new normal attribute weight: note it for `crates/clod-core/clod_pages.yaml` (or apply, if the CORE-3 move already landed). If DBG-6 found a Rust twin bug: confirm the follow-up exists.
 - One-paragraph summary of the classification appended to the findings doc header.
 

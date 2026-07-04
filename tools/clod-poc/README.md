@@ -18,7 +18,14 @@ npm install
 npm run dev
 ```
 
-The local dev server is pinned to port 5180:
+The package script uses Vite's configured strict port. For deterministic QA/perf harness
+runs, start the server explicitly on port 5180:
+
+```bash
+npm run dev -- --host 127.0.0.1 --port 5180 --strictPort
+```
+
+Harness examples expect:
 
 ```text
 http://127.0.0.1:5180/
@@ -72,6 +79,14 @@ To write reports to a named folder:
 ```bash
 npm run qa -- --summary tests/qa-sample-summary.json --output qa-runs/local-smoke
 ```
+
+## Current CLOD Docs
+
+- Runtime and viewer orientation: this README.
+- Bevy/clod-poc parity status: `../../docs/plans/bevy-clod-poc-parity-status.md`.
+- Tree parity status: `../../docs/plans/clod-poc-trees-parity-status.md`.
+- GPU vegetation early rejection status: `../../docs/plans/clod-poc-gpu-vegetation-early-rejection.md`.
+- Performance process and current perf notes: `docs/performance/`.
 
 ## GitHub Pages
 

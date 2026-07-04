@@ -1,5 +1,12 @@
 # clod-poc → WebGPURenderer migration
 
+Document status: historical migration record. The current app path uses the renderer
+backend abstraction and WebGPU post-process pipeline; this file remains useful for
+module provenance and old code comments that cite the migration phases. For current
+commands and status, use `tools/clod-poc/README.md`,
+`docs/plans/bevy-clod-poc-parity-status.md`, and
+`tools/clod-poc/docs/performance/`.
+
 Goal: run clod-poc on a single renderer-owned device (Three.js `WebGPURenderer` +
 TSL/NodeMaterial), matching the `docs/reference/fable5-world-demo` pattern, so GPU
 compute (CLOD error_px today, more later) shares one device/queue with rendering instead

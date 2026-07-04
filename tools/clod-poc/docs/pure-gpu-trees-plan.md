@@ -1,5 +1,11 @@
 # Pure-GPU trees — implementation plan
 
+Document status: historical implementation record. The pure-GPU tree ring path is now the
+TreeSystem GPU route; current incomplete verification and quality gates live in
+`docs/plans/clod-poc-trees-parity-status.md`,
+`docs/plans/clod-poc-tree-performance-plan.md`, and
+`docs/plans/clod-poc-tree-billboard-quality-plan.md`.
+
 Goal: make clod-poc trees **fully GPU-driven** — GPU scatter + per-frame GPU cull into
 compacted indirect draws, instances and counts never touching the CPU — matching the
 quality and performance of the LAAS reference in `docs/reference/fable5-world-demo`.
@@ -7,9 +13,9 @@ This removes the current tree GPU path's two CPU bottlenecks (CPU patch scatter 
 `generateTreeInstances`, and the per-frame GPU→CPU→GPU readback in `tree_gpu_cull.ts`),
 and makes **LOD crossfade GPU-native** instead of CPU-path-only.
 
-This is a plan only. No code changes yet. It is the trees sibling of
-[`grass-props-gpu-driven-plan.md`](grass-props-gpu-driven-plan.md) and reuses the proven
-grass-ring infrastructure.
+This started as a plan and now serves as the implementation history for the tree GPU ring.
+The sibling grass/vegetation rejection state is tracked by
+`docs/plans/clod-poc-gpu-vegetation-early-rejection.md`.
 
 ---
 

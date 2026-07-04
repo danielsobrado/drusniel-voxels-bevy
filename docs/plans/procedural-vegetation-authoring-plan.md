@@ -6,7 +6,7 @@
 > `assets/config/props.yaml`, `assets/textures/billboards/generated/`
 > Related: [`bevy-gpu-vegetation-port-plan.md`](bevy-gpu-vegetation-port-plan.md) (runtime cull/draw — consumes these assets),
 > [`props-virtual-geometry-execution-plan.md`](props-virtual-geometry-execution-plan.md) (meshlet pilot — can consume hero meshes),
-> [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md) (completed ground-cover grass planning record — sibling).
+> [`clod-poc-gpu-vegetation-early-rejection.md`](clod-poc-gpu-vegetation-early-rejection.md) (current clod-poc GPU vegetation rejection status — sibling).
 
 Port LAAS/fable5's procedural vegetation **generators** into Drusniel as
 **authoring-time tooling**, not runtime generation. Generators run in the
@@ -222,7 +222,7 @@ dependent placement caches cleanly.
 - **Feeds** [`props-virtual-geometry-execution-plan.md`](props-virtual-geometry-execution-plan.md):
   generated hero (LOD0) meshes are natural meshlet sources for the static-opaque
   pilot.
-- **Sibling of** [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md):
+- **Sibling of** [`clod-poc-gpu-vegetation-early-rejection.md`](clod-poc-gpu-vegetation-early-rejection.md):
   ground-cover grass is runtime-instanced (clipmap), while shrubs/ferns/flowers here
   are baked prop bundles — keep the boundary clear (carpet vs placed prop).
 

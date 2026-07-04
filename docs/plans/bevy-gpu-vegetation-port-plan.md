@@ -6,7 +6,7 @@
 > `bench/scenes/forest/`
 > Related: [`props-virtual-geometry-execution-plan.md`](props-virtual-geometry-execution-plan.md)
 > (meshlet pilot — complementary, see "Relationship to the meshlet pilot"),
-> [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md) (completed clod-poc grass planning record).
+> [`clod-poc-gpu-vegetation-early-rejection.md`](clod-poc-gpu-vegetation-early-rejection.md) (current clod-poc GPU vegetation rejection status).
 
 This is the **main-engine** counterpart to the clod-poc grass port. It adapts the
 GPU vegetation scatter/cull/indirect-draw idea from LAAS/fable5 to Drusniel's
@@ -169,7 +169,7 @@ prop slice proves out):
 - (a) migrate grass onto the same instanced pipeline and inherit the GPU path, or
 - (b) leave grass on its `Material` path and instead port the *rendering-quality*
   techniques (clumps, continuous-thin LOD, dither crossfade, `lean²` wind) from the
-  [clod-poc planning record](../plans_completed/clod-poc-grass-port-plan.md) — quality without the GPU-cull rework.
+  [clod-poc GPU vegetation status](clod-poc-gpu-vegetation-early-rejection.md) — quality without the GPU-cull rework.
 
 ## CPU/GPU contract (kept from the external plan — this part is good)
 

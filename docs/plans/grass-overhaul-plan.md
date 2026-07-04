@@ -1,12 +1,12 @@
 # Drusniel Grass Overhaul Plan
 
-Document status: older execution plan for replacing dense object-style grass with terrain-derived patch grass in the CLOD PoC first, then the Rust/Bevy runtime. The CLOD-POC WebGPU ring direction is preserved as the completed planning record [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md); keep this plan as background for terrain qualification, edit behavior, and Rust follow-up.
+Document status: older execution plan for replacing dense object-style grass with terrain-derived patch grass in the CLOD PoC first, then the Rust/Bevy runtime. The current CLOD-POC GPU vegetation rejection path is tracked in [`clod-poc-gpu-vegetation-early-rejection.md`](clod-poc-gpu-vegetation-early-rejection.md); keep this plan as background for terrain qualification, edit behavior, and Rust follow-up.
 
 ## 1. Summary
 
 The target is a staged grass overhaul inspired by Eclipse Shader's shader grass pipeline, but implemented with Drusniel-native TypeScript, WGSL, and Rust patterns. Do not port Eclipse's GLSL tessellation or geometry shaders directly.
 
-For CLOD-POC specifically, prefer the `GroundRing` model described in [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md): camera-following WebGPU ring, deterministic world cells, GPU cull/compact, indirect draws, and grass LOD bands. The Eclipse material remains useful for terrain eligibility and distance-simplification ideas, not as the primary ownership model.
+For CLOD-POC specifically, prefer the current WebGPU ring model described in [`clod-poc-gpu-vegetation-early-rejection.md`](clod-poc-gpu-vegetation-early-rejection.md): camera-following WebGPU ring, deterministic world cells, GPU cull/compact, indirect draws, and grass LOD bands. The Eclipse material remains useful for terrain eligibility and distance-simplification ideas, not as the primary ownership model.
 
 Core idea:
 
@@ -253,7 +253,7 @@ Follow the repo profiling rule for any rendering-affecting implementation: take 
 
 ## 8. Defaults And Assumptions
 
-- The CLOD-POC grass ring planning record is `docs/plans_completed/clod-poc-grass-port-plan.md`.
+- The current CLOD-POC GPU vegetation status is `docs/plans/clod-poc-gpu-vegetation-early-rejection.md`.
 - This file remains the background plan for terrain-derived grass concepts and eventual Rust follow-up.
 - Reference files live under `docs/reference/eclipse-shader-grass/`.
 - PoC implementation comes first, Rust second, prop demotion third.

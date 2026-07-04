@@ -1,8 +1,12 @@
 # Per-Cascade Shadow Caster Culling (clod-poc) — Plan
 
+Status: historical planning note. clod-poc tree GPU ring shadow/crown-proxy work is now
+tracked in `docs/plans/clod-poc-trees-parity-status.md` under TREE-7 and TREE-8. Keep this
+file only as background for the earlier "not applicable yet" decision point.
+
 > Created: 2026-06-17 · Status: Planning (mostly **N/A today** — see below)
 > Scope: `tools/clod-poc/src/` (only if/when a shadow system is added)
-> Related: [`bevy-per-cascade-shadow-caster-culling-plan.md`](bevy-per-cascade-shadow-caster-culling-plan.md)
+> Related: [`bevy-per-cascade-shadow-caster-culling-plan.md`](../plans/bevy-per-cascade-shadow-caster-culling-plan.md)
 > (the substantive engine-side plan).
 
 ## Honest status: not applicable yet
