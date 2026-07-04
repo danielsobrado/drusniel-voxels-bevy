@@ -29,6 +29,11 @@ export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
+let streamBuiltTotal = 0;
+let streamApplyPagesTotal = 0;
+let streamEvictionsTotal = 0;
+let streamStaleDiscardsTotal = 0;
+
 function positiveIntegerParam(params: URLSearchParams, key: string): number | undefined {
   const parsed = Number(params.get(key));
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
@@ -53,19 +58,27 @@ function globalClodCounters(): Record<string, number> | undefined {
 function mirrorStreamingClodRootCounters(counters: Record<string, number> | undefined, stats: StreamingClodRootStats): void {
   const target = counters ?? globalClodCounters();
   if (!target) return;
+  streamBuiltTotal += stats.builtThisFrame;
+  streamApplyPagesTotal += stats.applyPagesThisFrame;
+  streamEvictionsTotal += stats.evictions;
+  streamStaleDiscardsTotal += stats.staleDiscards;
   target["live_clod_stream_required_pages"] = stats.requiredPages;
   target["live_clod_stream_cached_pages"] = stats.cachedPages;
   target["live_clod_stream_built_this_frame"] = stats.builtThisFrame;
+  target["live_clod_stream_built_total"] = streamBuiltTotal;
   target["live_clod_stream_failed_pages"] = stats.failedPages;
   target["live_clod_stream_evictions"] = stats.evictions;
+  target["live_clod_stream_evictions_total"] = streamEvictionsTotal;
   target["live_clod_stream_build_ms"] = stats.buildMs;
   target["live_clod_stream_pending_pages"] = stats.pendingPages;
   target["live_clod_stream_build_budget"] = stats.buildBudget;
   target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
   target["live_clod_stream_ready_pages"] = stats.readyPages;
   target["live_clod_stream_apply_pages_this_frame"] = stats.applyPagesThisFrame;
+  target["live_clod_stream_apply_pages_total"] = streamApplyPagesTotal;
   target["live_clod_stream_apply_ms"] = stats.applyMs;
   target["live_clod_stream_stale_discards"] = stats.staleDiscards;
+  target["live_clod_stream_stale_discards_total"] = streamStaleDiscardsTotal;
   target["live_clod_stream_worker_build_ms"] = stats.workerBuildMs;
   target["live_clod_stream_worker_transfer_bytes"] = stats.workerTransferBytes;
 }
