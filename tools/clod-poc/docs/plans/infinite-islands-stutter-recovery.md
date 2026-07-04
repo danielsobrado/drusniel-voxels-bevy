@@ -459,6 +459,22 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   (3 files / 25 tests).
 - 2026-07-04: Started fresh post-hardening acceptance run
   `2026-07-04T13-52-52`; walk URL includes explicit `acceptance=1`.
+- 2026-07-04: In run `2026-07-04T13-52-52`, walk initial convergence
+  settled after 34.7 s and post-route convergence settled after 13.4 s.
+  Incremental GPU dispatch did not regress the route refill wait.
+- 2026-07-04: Run `2026-07-04T13-52-52` completed with 3 failures, all
+  `frame_ms_p95` only: walk 10.0, biome-near 8.8, biome-horizon 8.8.
+  Final-near passed at 5.1 and final-horizon passed at 7.9. All live-bubble
+  and far-summary counters are healthy. Raw stats confirm acceptance
+  stats-sync is now every frame (`statsSkips=0`, reason `profile`), so the
+  remaining p95 issue is not convergence or missing counters; next check is
+  whether forcing the heavier stats-sync phase every frame is itself adding
+  measurement overhead.
+- 2026-07-04: Corrected the stats-sync diagnosis: `frame_ms_p95` is updated
+  by long-view diagnostics after render, not by the throttled stats-sync
+  phase. Forcing full stats-sync every frame added acceptance overhead, so
+  that change and its test were reverted. Keep `acceptance=1`; do not force
+  UI/stat presenter sync every frame.
 
 ## Remaining known risks / next steps if gates still fail
 
