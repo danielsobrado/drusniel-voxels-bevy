@@ -15,12 +15,33 @@ import {
 } from "../../../rendering/render_resolution_runtime.js";
 import { parseSunLightOptions } from "../../../terrain/sun_visibility/sun_light_options.js";
 import { createLightUpdate } from "../../../terrain/sun_visibility/light_update.js";
+import {
+  createStreamingClodRootController,
+  type StreamingClodRootStats,
+} from "../../../terrain/streaming/clod_streaming_roots.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
+
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+
+function positiveIntegerParam(params: URLSearchParams, key: string): number | undefined {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function mirrorStreamingClodRootCounters(counters: Record<string, number> | undefined, stats: StreamingClodRootStats): void {
+  if (!counters) return;
+  counters["live_clod_stream_required_pages"] = stats.requiredPages;
+  counters["live_clod_stream_cached_pages"] = stats.cachedPages;
+  counters["live_clod_stream_built_this_frame"] = stats.builtThisFrame;
+  counters["live_clod_stream_failed_pages"] = stats.failedPages;
+  counters["live_clod_stream_evictions"] = stats.evictions;
+  counters["live_clod_stream_build_ms"] = stats.buildMs;
+}
 
 function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
   const { session, input } = ctx;
@@ -205,6 +226,22 @@ export function runFrameLoopStartup(
     window.__drusnielRenderResolution ?? null,
     searchParams,
   );
+  const streamingClodRootController = createStreamingClodRootController({
+    roots: input.result.roots,
+    allNodes: input.allNodes,
+    cfg,
+    worldCells,
+    enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
+    buildBudgetPagesPerFrame: positiveIntegerParam(searchParams, "liveClodRootBudget"),
+    maxCachedPages: positiveIntegerParam(searchParams, "liveClodRootMaxCached"),
+    onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
+  });
+  const updateSelectionWithStreaming = () => {
+    const center = interaction.mode === "playing" ? player.position : controls.target;
+    const streamStats = streamingClodRootController.update(center, state.bubbleRadius);
+    mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats);
+    updateSelection();
+  };
 
   const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => {
     postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight);
@@ -262,10 +299,11 @@ export function runFrameLoopStartup(
     },
     terrain: {
       selectionController,
-      updateSelection,
+      updateSelection: updateSelectionWithStreaming,
       pageTransitionMode,
       crossfadeStep,
       nearFieldBubbleController,
+      streamingClodRootController,
       views,
       worldCells,
       pruneRenderNodeCache: input.terrainView.renderNodeCache.prune.bind(input.terrainView.renderNodeCache),
