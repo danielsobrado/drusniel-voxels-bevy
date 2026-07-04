@@ -461,10 +461,6 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     gpuPendingBuilds.delete(key);
     if (cpuPendingBuilds.has(key)) return;
 
-    if (job.failures === 0 && liveStreamingEnabled && terrainColliders && job.meshChunks === 0 && job.emptyChunks > 0) {
-      job.failures++;
-    }
-
     if (job.failures > 0 && retryGpuPageBuild(key, entry, job)) return;
     if (job.failures > 0) gpuTerminalFailuresTotal++;
     entry.failed = job.failures > 0;
