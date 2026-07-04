@@ -69,9 +69,11 @@ function validateBoundsAndOverlap(
     return { valid: false, reason: "invalid position" };
   }
 
-  const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
-  if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
-    return { valid: false, reason: "outside world" };
+  if (!config.unboundedWorld) {
+    const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
+    if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
+      return { valid: false, reason: "outside world" };
+    }
   }
 
   const bounds = boundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
