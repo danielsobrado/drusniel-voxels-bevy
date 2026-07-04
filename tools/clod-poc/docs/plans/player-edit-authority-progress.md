@@ -15,10 +15,13 @@ Scope: tools/clod-poc only. This document tracks the player edit authority, cons
 - Added construction capture-phase commit guard.
 - Made the construction commit guard support unbounded `infinite-*` scenes.
 - Disposed the construction commit guard with the construction controller wrapper.
+- Cleaned up the construction commit guard if controller startup fails after the guard listener is installed.
+- Added an explicit `unboundedWorld` flag to construction placement validation so persisted/preview validation does not reject infinite-world coordinates only because they are outside the finite startup grid.
 - Avoided finite construction-controller bounds for positive-coordinate infinite scenes by using an expanded construction world bound when `scene=infinite-*`.
 - Mirrored live-bubble GPU retry counters.
 - Added acceptance threshold gates for live-bubble retry/failure counters.
 - Added `TerrainEditDirtyQueue` and dirty edit event records with revision + world AABB + effect flags.
+- Bounded `TerrainEditDirtyQueue` so it cannot grow forever before downstream consumers are added.
 - Wired terrain edits and construction terrain conform into the dirty edit queue.
 - Added tests for the dirty edit queue.
 - Cached terrain page paint/biome typed arrays in `page_geometry.ts` to reduce repeated derived-data allocation while avoiding shared `THREE.BufferAttribute` ownership across geometries.
@@ -26,6 +29,7 @@ Scope: tools/clod-poc only. This document tracks the player edit authority, cons
 ## Still pending
 
 - Add direct construction-controller commit authority so the ghost turns invalid/red beyond commit range before click. Current protection is safe through the pre-controller capture guard and conform gate, but the controller itself does not yet own the commit-distance reason.
+- Make construction controller terrain raycast itself use `unboundedWorld` for negative infinite-world coordinates. Current runtime bound fix covers positive infinite coordinates such as the acceptance/manual start at 2048,2048; negative-world construction still needs the controller raycast patch.
 - Add explicit `live_bubble_gpu_retry_pages === 0` to `waitForConvergence()` in `tools/infinite-islands-acceptance.ts`. Current acceptance still fails via thresholds if retry pages remain, but the wait predicate itself is not yet retry-aware.
 - Run local typecheck/tests/acceptance and fix any compile/runtime drift.
 - Consider a deeper collider/BVH cache after profiling. The current safe cache reduces derived terrain paint/biome allocation only.
