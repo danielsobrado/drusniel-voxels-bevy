@@ -31,6 +31,7 @@ export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_
 export interface WorkerStreamRootsResult {
   nodes: ClodPageNode[];
   buildMs: number;
+  transferBytes: number;
 }
 
 export class ClodWorkerClient {
@@ -217,7 +218,11 @@ export class ClodWorkerClient {
         const pending = this.streamRootsRequests.get(message.requestId);
         if (!pending) break;
         this.streamRootsRequests.delete(message.requestId);
-        pending.resolve({ nodes: rehydrateStandaloneNodes(message.nodes), buildMs: message.buildMs });
+        pending.resolve({
+          nodes: rehydrateStandaloneNodes(message.nodes),
+          buildMs: message.buildMs,
+          transferBytes: message.transferBytes,
+        });
         break;
       }
       case "cacheCleared": {
@@ -259,30 +264,32 @@ export class ClodWorkerClient {
     this.onError?.(err);
   }
 
-  private rejectPendingDig(error: Error): void {
-    const pending = this.digPending;
-    this.digPending = null;
-    if (!pending) return;
-    for (const resolver of pending.resolvers) resolver.reject(error);
-  }
-
   private markParentsFailed(error: Error): void {
     this.parentsHealthy = false;
     this.lastParentError = error;
-    this.resolveParentsWaiters();
+    this.rejectParentsWaiters(error);
   }
 
   private resolveParentsWaiters(): void {
-    for (const resolve of this.parentsWaiters) resolve();
-    this.parentsWaiters = [];
+    const waiters = this.parentsWaiters.splice(0);
+    for (const resolve of waiters) resolve();
+  }
+
+  private rejectParentsWaiters(_error: Error): void {
+    this.parentsWaiters.splice(0);
+  }
+
+  private rejectPendingDig(error: Error): void {
+    const batch = this.digPending;
+    this.digPending = null;
+    if (!batch) return;
+    for (const pending of batch.resolvers) pending.reject(error);
   }
 
   private doRejectAll(error: Error): void {
+    rejectAllMaps(error, this.buildRequests, this.digRequests, this.flushRequests, this.clearCacheRequests, this.streamRootsRequests);
     this.rejectPendingDig(error);
-    rejectAllMaps(
-      [this.buildRequests, this.digRequests, this.flushRequests, this.clearCacheRequests, this.streamRootsRequests],
-      this.progressHandlers, error,
-    );
-    this.resolveParentsWaiters();
+    this.progressHandlers.clear();
+    this.parentsWaiters.splice(0);
   }
 }
