@@ -101,6 +101,8 @@ export class FarSummaryCache implements FallbackStatsWriter {
       if (!this.activeBuild && !this.startNextBuild(terrainSampler, nowMs)) return;
       const active = this.activeBuild;
       if (!active) return;
+      active.state.input.frameIndex = frameIndex;
+      active.state.input.nowMs = nowMs;
 
       const t0 = performance.now();
       const complete = stepFarSummaryTileBuild(active.state, deadlineMs);
