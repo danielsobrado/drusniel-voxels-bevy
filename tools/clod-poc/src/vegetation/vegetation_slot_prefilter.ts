@@ -45,6 +45,7 @@ export interface VegetationSlotPrefilterResult {
   rejectedClusters: number;
   visibleClusters: number;
   unknownKeptClusters: number;
+  farSummaryConsultedClusters: number;
   skippedCandidateEstimate: number;
   cacheHits: number;
   cacheMisses: number;
@@ -58,6 +59,7 @@ export interface VegetationSlotPrefilterDecision {
   reason: VegetationVisibilityReason;
   providerReason: VegetationTerrainRejectReason;
   source: VegetationTerrainRejectSource;
+  farSummaryConsulted: boolean;
 }
 
 interface CacheEntry {
@@ -158,6 +160,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
   let rejectedClusters = 0;
   let visibleClusters = 0;
   let unknownKeptClusters = 0;
+  let farSummaryConsultedClusters = 0;
   let skippedCandidateEstimate = 0;
 
   for (let clusterZ = 0; clusterZ < clusterGrid; clusterZ++) {
@@ -170,6 +173,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
       reasonCounts[decision.reason]++;
       providerReasonCounts[decision.providerReason]++;
       sourceCounts[decision.source]++;
+      if (decision.farSummaryConsulted) farSummaryConsultedClusters++;
       if (decision.reason === "unknown_kept" || decision.providerReason === "summaryMissing") unknownKeptClusters++;
       clusterWords[clusterIndex] = decision.visible ? 1 : 0;
       if (decision.visible) {
@@ -194,6 +198,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
     rejectedClusters,
     visibleClusters,
     unknownKeptClusters,
+    farSummaryConsultedClusters,
     skippedCandidateEstimate,
     cacheHits: cacheStatsBefore && cacheStatsAfter ? cacheStatsAfter.hits - cacheStatsBefore.hits : 0,
     cacheMisses: cacheStatsBefore && cacheStatsAfter ? cacheStatsAfter.misses - cacheStatsBefore.misses : 0,
@@ -229,13 +234,14 @@ function evaluateCluster(input: {
   runtimeConfig: VegetationTerrainRejectionConfig;
 }): VegetationSlotPrefilterDecision {
   if (!input.options.visibility.enabled) {
-    return { visible: true, reason: "disabled", providerReason: "accepted", source: "conservativeFallback" };
+    return { visible: true, reason: "disabled", providerReason: "accepted", source: "conservativeFallback", farSummaryConsulted: false };
   }
 
   const probes = clusterProbes(input.clusterX, input.clusterZ, input.grid, input.clusterDimSlots, input.options);
   let hiddenProbeCount = 0;
   let lastProviderReason: VegetationTerrainRejectReason = "accepted";
   let lastSource: VegetationTerrainRejectSource = "conservativeFallback";
+  let farSummaryConsulted = false;
   for (const probe of probes) {
     const decision = input.provider.classifyCluster({
       descriptor: clusterDescriptorForProbe(input, probe),
@@ -251,16 +257,17 @@ function evaluateCluster(input: {
       acceptWhenSummaryMissing: input.runtimeConfig.gpuEarlyReject.conservative.acceptWhenSummaryMissing,
       acceptWhenRevisionMismatch: input.runtimeConfig.gpuEarlyReject.conservative.acceptWhenRevisionMismatch,
     });
+    farSummaryConsulted ||= decision.farSummaryConsulted === true;
     lastProviderReason = decision.reason;
     lastSource = decision.source;
     if (!decision.reject) {
-      return { visible: true, reason: sourceReason(decision), providerReason: decision.reason, source: decision.source };
+      return { visible: true, reason: sourceReason(decision), providerReason: decision.reason, source: decision.source, farSummaryConsulted };
     }
     hiddenProbeCount++;
   }
   return hiddenProbeCount === probes.length
-    ? { visible: false, reason: sourceReasonFromProvider(lastProviderReason), providerReason: lastProviderReason, source: lastSource }
-    : { visible: true, reason: "visible", providerReason: "accepted", source: lastSource };
+    ? { visible: false, reason: sourceReasonFromProvider(lastProviderReason), providerReason: lastProviderReason, source: lastSource, farSummaryConsulted }
+    : { visible: true, reason: "visible", providerReason: "accepted", source: lastSource, farSummaryConsulted };
 }
 
 function fullVisibilityPrefilterResult(
@@ -290,6 +297,7 @@ function fullVisibilityPrefilterResult(
     rejectedClusters: 0,
     visibleClusters: clusterWords.length,
     unknownKeptClusters: 0,
+    farSummaryConsultedClusters: 0,
     skippedCandidateEstimate: 0,
     cacheHits: 0,
     cacheMisses: 0,
