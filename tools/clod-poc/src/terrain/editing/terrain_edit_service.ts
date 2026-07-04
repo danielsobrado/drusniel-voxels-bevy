@@ -5,6 +5,7 @@ import type { ConstructionTerrainConformRequest } from "../../construction/types
 import {
   addDigEdit,
   DIG_INFLUENCE_MARGIN,
+  getDigEditRevision,
   getDigEditsSnapshot,
   replaceDigEdits,
   type BrushOp,
@@ -20,6 +21,11 @@ import {
   publishPlayerEditAuthorityDecision,
   type PlayerEditAuthorityConfig,
 } from "../../player/player_edit_authority.js";
+import {
+  dirtyAabbForBrush,
+  type TerrainEditDirtyQueue,
+  type TerrainEditDirtyReason,
+} from "./terrain_edit_dirty_queue.js";
 
 const DIG_REBUILD_DEBOUNCE_MS = 40;
 const CONSTRUCTION_CONFORM_DEBOUNCE_MS = 20;
@@ -59,6 +65,7 @@ export interface TerrainEditServiceDeps {
   editAuthority?: PlayerEditAuthorityConfig;
   getAuthorityOrigin?: () => THREE.Vector3 | null;
   getAuthorityCounters?: () => Record<string, number> | null;
+  dirtyQueue?: TerrainEditDirtyQueue;
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
   refreshUnderstoryStats: () => void;
@@ -191,6 +198,31 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     console.error(`${label} apply failed after worker rebuild:`, error);
   };
 
+  const dirtyReasonFor = (edit: DigEdit, label: string): TerrainEditDirtyReason => {
+    if (label.startsWith("construction")) return "build";
+    if (edit.op === "add") return edit.material === undefined ? "raise" : "paint";
+    return "dig";
+  };
+
+  const publishDirtyEdit = (edit: DigEdit, label: string): void => {
+    if (!deps.dirtyQueue) return;
+    const height = edit.height ?? edit.r;
+    deps.dirtyQueue.enqueue({
+      editRevision: getDigEditRevision(),
+      worldAabb: dirtyAabbForBrush(edit.x, edit.y, edit.z, edit.r, height, DIG_INFLUENCE_MARGIN),
+      reason: dirtyReasonFor(edit, label),
+      affectsHeight: true,
+      affectsCollision: true,
+      affectsVegetation: true,
+    });
+    const snapshot = deps.dirtyQueue.snapshot();
+    const counters = authorityCounters();
+    if (counters) {
+      counters["terrain_edit_dirty_queue_size"] = snapshot.queued;
+      counters["terrain_edit_dirty_revision"] = snapshot.latestRevision;
+    }
+  };
+
   const performEditRebuild = async (
     edit: DigEdit,
     hit: TerrainRebuildHit,
@@ -217,6 +249,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
     try {
       applyLod0Result(lod0.changed, lod0.pendingParents);
+      publishDirtyEdit(edit, label);
       deps.setPendingParentNodes(0);
       deps.setPendingParentMs(0);
     } catch (error) {
