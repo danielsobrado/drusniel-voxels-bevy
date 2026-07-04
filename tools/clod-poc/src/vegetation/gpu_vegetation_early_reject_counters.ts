@@ -55,6 +55,9 @@ export interface GpuVegetationEarlyRejectCounters {
   understoryGpuSourceFallback: number;
 }
 
+type GrassStatsWithConsulted = GrassStats & { gpuRingPrefilterFarSummaryConsulted?: number };
+type UnderstoryStatsWithConsulted = UnderstoryStats & { gpuPrefilterFarSummaryConsulted?: number };
+
 export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejectCounters {
   return {
     vegetationGpuClustersTotal: 0,
@@ -161,6 +164,7 @@ function addTreeCounters(counters: GpuVegetationEarlyRejectCounters, tree: TreeS
 
 function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: GrassStats | null): void {
   if (!grass) return;
+  const grassWithConsulted = grass as GrassStatsWithConsulted;
   const before = grass.gpuRingCandidateCountBeforePrefilter ?? grass.gpuRingCandidateCount ?? 0;
   const after = grass.gpuRingCandidateCountAfterPrefilter ?? grass.gpuRingCandidateCount ?? 0;
   const total = grass.gpuRingPrefilterTestedClusters ?? estimateClusterCount(before, after);
@@ -171,7 +175,7 @@ function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: Gra
   const noCoverage = reasonCounts.wrong_biome ?? 0;
   const terrainHidden = reasonCounts.terrain_hidden ?? rejected;
   const farSummary = grass.gpuRingPrefilterSourceFarSummary ?? 0;
-  const consulted = grass.gpuRingPrefilterFarSummaryConsulted ?? farSummary;
+  const consulted = grassWithConsulted.gpuRingPrefilterFarSummaryConsulted ?? farSummary;
   const sampler = grass.gpuRingPrefilterSourceTerrainSampler ?? 0;
   const fallback = grass.gpuRingPrefilterSourceFallback ?? 0;
 
@@ -204,6 +208,7 @@ function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: Gra
 
 function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, understory: UnderstoryStats | null): void {
   if (!understory) return;
+  const understoryWithConsulted = understory as UnderstoryStatsWithConsulted;
   const before = understory.gpuCandidateCountBeforePrefilter ?? understory.gpuCandidateCount ?? 0;
   const after = understory.gpuCandidateCountAfterPrefilter ?? understory.gpuCandidateCount ?? 0;
   const total = understory.gpuPrefilterTestedClusters ?? estimateClusterCount(before, after);
@@ -214,7 +219,7 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   const noCoverage = reasonCounts.wrong_biome ?? 0;
   const terrainHidden = reasonCounts.terrain_hidden ?? rejected;
   const farSummary = understory.gpuPrefilterSourceFarSummary ?? 0;
-  const consulted = understory.gpuPrefilterFarSummaryConsulted ?? farSummary;
+  const consulted = understoryWithConsulted.gpuPrefilterFarSummaryConsulted ?? farSummary;
   const sampler = understory.gpuPrefilterSourceTerrainSampler ?? 0;
   const fallback = understory.gpuPrefilterSourceFallback ?? 0;
 
