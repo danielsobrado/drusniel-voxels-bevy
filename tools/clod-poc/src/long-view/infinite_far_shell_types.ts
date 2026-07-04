@@ -25,6 +25,8 @@ export interface InfiniteFarShellOptions {
   useParityMaterial?: boolean;
   parityConfig?: FarTerrainUniformData;
   heightSamplingMode?: FarShellHeightSamplingMode;
+  /** Per-frame CPU budget for sliced height rebuilds after the first reposition (default 2 ms). */
+  cpuRebuildBudgetMs?: number;
   farSummaryGpuAtlas?: FarSummaryGpuAtlasView;
   debugShowMissingFallback?: boolean;
   debugShowWireframe?: boolean;

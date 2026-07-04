@@ -36,6 +36,8 @@ export class InfiniteFarShell {
   private renderOriginZ = 0;
   private rebuildCount = 0;
   private lastRebuildMs = 0;
+  /** Sliced height rebuild in progress (cpu mode, after the first reposition). */
+  private pendingHeightRebuild: { cursor: number; buildMs: number } | null = null;
   private materialOptions: InfiniteFarShellMaterialOptions;
   private readonly useParityMaterial: boolean;
   private readonly parityConfig: FarTerrainUniformData | undefined;
@@ -176,7 +178,18 @@ export class InfiniteFarShell {
     this.metrics.farShellCenterZ = cameraWorldZ;
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
-    if (snappedChanged && this.heightSamplingMode === "cpu") this.rebuildHeights();
+    if (snappedChanged && this.heightSamplingMode === "cpu") {
+      // First reposition builds synchronously so spawn/boot renders correct
+      // heights before settle; later crossings resample under a per-frame
+      // budget while the previous heights keep rendering until the flush.
+      if (this.rebuildCount <= 1) {
+        this.pendingHeightRebuild = null;
+        this.rebuildHeights();
+      } else {
+        this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
+      }
+    }
+    if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();
     this.applyRenderPosition();
     if (this.useParityMaterial && this.parityConfig) {
       const material = this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
@@ -206,33 +219,47 @@ export class InfiniteFarShell {
 
   private rebuildHeights(): void {
     const t0 = performance.now();
-    const { angularSegments, radialSegments, heightBiasMeters } = this.options;
-    const farShellHeightBiasMeters = heightBiasMeters + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M;
     const vertexCount = this.computeVertexCount();
+    this.prepareHeightBuffers(vertexCount);
+    this.sampleHeightVertexRange(0, vertexCount);
+    this.finalizeHeightRebuild(performance.now() - t0);
+  }
+
+  private prepareHeightBuffers(vertexCount: number): void {
     const writeBiomeColors = !(this.useParityMaterial && this.parityConfig);
     if (writeBiomeColors && (!this.biomeColorBuffer || this.biomeColorBuffer.length !== vertexCount * 3)) {
       this.biomeColorBuffer = new Float32Array(vertexCount * 3);
     }
-    for (let ri = 0; ri <= radialSegments; ri++) {
+  }
+
+  private sampleHeightVertexRange(startVi: number, endVi: number): void {
+    const { angularSegments, radialSegments, heightBiasMeters } = this.options;
+    const farShellHeightBiasMeters = heightBiasMeters + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M;
+    const writeBiomeColors = !(this.useParityMaterial && this.parityConfig);
+    const columns = angularSegments + 1;
+    for (let vi = startVi; vi < endVi; vi++) {
+      const ri = Math.floor(vi / columns);
+      const ai = vi % columns;
       const rNorm = ri / radialSegments;
       const r = this.options.innerMeters + (this.options.outerMeters - this.options.innerMeters) * rNorm;
-      for (let ai = 0; ai <= angularSegments; ai++) {
-        const theta = (ai / angularSegments) * Math.PI * 2;
-        const localX = r * Math.cos(theta);
-        const localZ = r * Math.sin(theta);
-        const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(this.snappedX + localX, this.snappedZ + localZ, r, this.heightProvider, this.samplerOptions);
-        const vi = ri * (angularSegments + 1) + ai;
-        this.positions[vi * 3] = localX;
-        this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
-        this.positions[vi * 3 + 2] = localZ;
-        this.normals[vi * 3] = sample.normal.x;
-        this.normals[vi * 3 + 1] = sample.normal.y;
-        this.normals[vi * 3 + 2] = sample.normal.z;
-        this.uvs[vi * 2] = rNorm;
-        this.uvs[vi * 2 + 1] = ai / angularSegments;
-        if (writeBiomeColors && this.biomeColorBuffer) writeBiomeRgb(this.biomeColorBuffer, vi, sample.material);
-      }
+      const theta = (ai / angularSegments) * Math.PI * 2;
+      const localX = r * Math.cos(theta);
+      const localZ = r * Math.sin(theta);
+      const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(this.snappedX + localX, this.snappedZ + localZ, r, this.heightProvider, this.samplerOptions);
+      this.positions[vi * 3] = localX;
+      this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
+      this.positions[vi * 3 + 2] = localZ;
+      this.normals[vi * 3] = sample.normal.x;
+      this.normals[vi * 3 + 1] = sample.normal.y;
+      this.normals[vi * 3 + 2] = sample.normal.z;
+      this.uvs[vi * 2] = rNorm;
+      this.uvs[vi * 2 + 1] = ai / angularSegments;
+      if (writeBiomeColors && this.biomeColorBuffer) writeBiomeRgb(this.biomeColorBuffer, vi, sample.material);
     }
+  }
+
+  private finalizeHeightRebuild(buildMs: number): void {
+    const vertexCount = this.computeVertexCount();
     if (this.useParityMaterial && this.parityConfig) {
       const vertexColors = computeFarTerrainVertexColors(this.positions, this.normals, vertexCount, this.parityConfig, this.snappedX, this.snappedZ);
       this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
@@ -241,10 +268,37 @@ export class InfiniteFarShell {
       this.attachBiomeVertexColors();
     }
     this.rebuildCount++;
-    this.lastRebuildMs = performance.now() - t0;
+    this.lastRebuildMs = buildMs;
     this.metrics.farShellRebuilds = this.rebuildCount;
     this.metrics.farShellLastRebuildMs = this.lastRebuildMs;
     this.flushAttributes();
+  }
+
+  /**
+   * Advance a sliced rebuild. Buffers are written in place but only uploaded
+   * by the completing flush, so partial samples never render. A minimum step
+   * of vertices guarantees small (test-sized) shells finish in one call.
+   */
+  private stepPendingHeightRebuild(): void {
+    const pending = this.pendingHeightRebuild;
+    if (!pending) return;
+    const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
+    const minStepVerts = 256;
+    const vertexCount = this.computeVertexCount();
+    if (pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
+    const started = performance.now();
+    while (pending.cursor < vertexCount) {
+      const end = Math.min(vertexCount, pending.cursor + minStepVerts);
+      this.sampleHeightVertexRange(pending.cursor, end);
+      pending.cursor = end;
+      if (pending.cursor < vertexCount && performance.now() - started >= budgetMs) {
+        pending.buildMs += performance.now() - started;
+        return;
+      }
+    }
+    pending.buildMs += performance.now() - started;
+    this.pendingHeightRebuild = null;
+    this.finalizeHeightRebuild(pending.buildMs);
   }
 
   private flushAttributes(): void {
