@@ -444,6 +444,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     chunkGroupBuildBudget: clodRuntime.nearField.chunkGroupBuildBudget,
     maxCachedChunkGroups: clodRuntime.nearField.maxCachedChunkGroups,
     evictDistanceMultiplier: clodRuntime.nearField.evictDistanceMultiplier,
+    terrainColliders,
   });
 
   const pageTransitionMode = cfg.selection.transition_mode;
