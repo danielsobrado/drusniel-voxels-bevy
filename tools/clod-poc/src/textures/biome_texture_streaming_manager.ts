@@ -49,6 +49,7 @@ export interface BiomeTextureStreamingManagerDeps {
   ) => void;
   probeDistanceM?: number;
   minMoveDistanceM?: number;
+  deferWindowSwaps?: boolean;
   logger?: Pick<Console, "info" | "warn" | "error">;
 }
 
@@ -177,28 +178,25 @@ export function createBiomeTextureStreamingManager(
     statsState.lastUpdateFrame = frameIndex;
 
     if (!changed) {
-      setPendingSignature(null);
+      publishTextureStats(statsState);
       return { changed: false, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
     }
 
-    if (pendingSignature === signature) {
-      publishTextureStats(statsState);
-      return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: nextActive };
-    }
-
     const nextConfig = withActiveBiomeProceduralMaterials(config, nextActive);
-    setPendingSignature(signature);
-    scheduleIdleTask(() => {
+    const commitConfigState = () => {
+      config = nextConfig;
+      activeSignature = nextConfig.terrain.active_biome_materials.join("|");
+      statsState.textureWindowSwaps++;
+      statsState.activeBiomeMaterials = [...nextConfig.terrain.active_biome_materials];
+      statsState.fallbackBiomeTextureCount = Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - statsState.activeBiomeMaterials.length);
+    };
+    const applyWindow = () => {
       if (desiredSignature !== signature || pendingSignature !== signature) return;
       const start = performance.now();
       try {
         deps.onActiveWindowChanged(nextConfig, nextConfig.terrain.active_biome_materials);
-        config = nextConfig;
-        activeSignature = nextConfig.terrain.active_biome_materials.join("|");
-        statsState.textureWindowSwaps++;
+        if (!deps.deferWindowSwaps) commitConfigState();
         statsState.rebuildsTotal++;
-        statsState.activeBiomeMaterials = [...nextConfig.terrain.active_biome_materials];
-        statsState.fallbackBiomeTextureCount = Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - statsState.activeBiomeMaterials.length);
         statsState.lastRebuildMs = performance.now() - start;
         statsState.lastAppliedFrame = frameIndex;
         statsState.lastError = null;
@@ -210,7 +208,15 @@ export function createBiomeTextureStreamingManager(
         if (pendingSignature === signature) setPendingSignature(null);
         else publishTextureStats(statsState);
       }
-    });
+    };
+
+    setPendingSignature(signature);
+    if (deps.deferWindowSwaps) {
+      commitConfigState();
+      scheduleIdleTask(applyWindow);
+    } else {
+      applyWindow();
+    }
 
     return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: nextActive };
   };

@@ -151,6 +151,7 @@ export async function bootstrapClodPoc() {
     ? createBiomeTextureStreamingManager({
         baseConfig: world.proceduralTextureConfig,
         sampleBiome: (x, z) => world.worldSource.sampleBiome(x, z),
+        deferWindowSwaps: true,
         onActiveWindowChanged: (nextConfig, activeBiomeMaterials) => {
           const nextTerrain = createProceduralTerrainTextures(nextConfig);
           const bakeRes = Math.min(512, nextTerrain.noise.resolution);

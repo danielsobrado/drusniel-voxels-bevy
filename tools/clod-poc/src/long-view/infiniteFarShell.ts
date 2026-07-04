@@ -137,14 +137,16 @@ export class InfiniteFarShell {
     return (angularSegments + 1) * (radialSegments + 1);
   }
 
-  private requestSlicedHeightRebuild(): void {
-    if (this.heightSamplingMode !== "cpu" || this.pendingHeightRebuild) return;
+  private requestSlicedHeightRebuild(restart = false): void {
+    if (this.heightSamplingMode !== "cpu") return;
+    if (this.pendingHeightRebuild && !restart) return;
     this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
   }
 
   setHeightProvider(provider: FarHeightProvider | undefined): void {
     this.heightProvider = provider;
-    if (provider) this.requestSlicedHeightRebuild();
+    this.requestSlicedHeightRebuild(true);
+    this.stepPendingHeightRebuild();
   }
 
   /**
@@ -194,8 +196,8 @@ export class InfiniteFarShell {
     this.metrics.farShellCenterZ = cameraWorldZ;
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
-    if (snappedChanged && this.heightSamplingMode === "cpu" && this.heightProvider) {
-      this.requestSlicedHeightRebuild();
+    if (snappedChanged && this.heightSamplingMode === "cpu") {
+      this.requestSlicedHeightRebuild(true);
     }
     if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();
     this.applyRenderPosition();
@@ -282,7 +284,7 @@ export class InfiniteFarShell {
     const pending = this.pendingHeightRebuild;
     if (!pending) return;
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
-    const minStepVerts = 64;
+    const minStepVerts = 256;
     const vertexCount = this.computeVertexCount();
     if (pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
     const started = performance.now();
