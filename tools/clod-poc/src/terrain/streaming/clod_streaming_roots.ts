@@ -42,8 +42,7 @@ interface PageCoord {
   centerZ: number;
 }
 
-// TODO: replace this opt-in synchronous builder with a worker/off-frame queue before enabling it by default.
-const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 0;
+const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
 
