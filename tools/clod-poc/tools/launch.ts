@@ -13,6 +13,11 @@ interface ProbeResult {
   failure: string | null;
 }
 
+interface WebGpuProbeResult {
+  ok: boolean;
+  reason: string;
+}
+
 const WEBGPU_ARGS = [
   "--enable-unsafe-webgpu",
   "--ignore-gpu-blocklist",
@@ -50,6 +55,7 @@ const GENERIC_CANDIDATES: LaunchRecipe[] = [
 
 const CACHE_PATH = ".cache/webgpu-flags.json";
 const SERVER_PROBE_TIMEOUT_MS = 2500;
+const GPU_DEVICE_LOST_PROBE_MS = 500;
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_ISLANDS_DEFAULT_CAM_Y = 96;
 const INFINITE_ISLANDS_DEFAULT_PITCH = -0.43;
@@ -95,6 +101,47 @@ async function tryLaunch(recipe: LaunchRecipe): Promise<Browser | null> {
   }
 }
 
+async function runWebGpuDeviceProbe(page: Awaited<ReturnType<Browser["newPage"]>>): Promise<WebGpuProbeResult> {
+  return await page.evaluate(async ({ lostTimeoutMs }) => {
+    const gpu = (navigator as Navigator & {
+      gpu?: {
+        requestAdapter(): Promise<GPUAdapter | null>;
+      };
+    }).gpu;
+    if (!gpu) return { ok: false, reason: "navigator.gpu is missing" };
+    const adapter = await gpu.requestAdapter();
+    if (!adapter) return { ok: false, reason: "requestAdapter() returned null" };
+
+    let device: GPUDevice | null = null;
+    try {
+      device = await adapter.requestDevice();
+      const lost = device.lost.then((info) => ({ lost: true, reason: info.message || info.reason || "device lost" }));
+      const stable = new Promise<{ lost: false }>((resolve) => setTimeout(() => resolve({ lost: false }), lostTimeoutMs));
+
+      device.pushErrorScope("validation");
+      const mapped = device.createBuffer({ size: 120, usage: GPUBufferUsage.MAP_WRITE, mappedAtCreation: true });
+      new Uint32Array(mapped.getMappedRange()).fill(0);
+      mapped.unmap();
+      mapped.destroy();
+
+      const storage = device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      device.queue.writeBuffer(storage, 0, new Uint32Array([1, 2, 3, 4]));
+      storage.destroy();
+      device.queue.submit([]);
+
+      const validationError = await device.popErrorScope();
+      if (validationError) return { ok: false, reason: validationError.message };
+      const lostResult = await Promise.race([lost, stable]);
+      if (lostResult.lost) return { ok: false, reason: lostResult.reason };
+      return { ok: true, reason: "device stable" };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    } finally {
+      device?.destroy();
+    }
+  }, { lostTimeoutMs: GPU_DEVICE_LOST_PROBE_MS });
+}
+
 async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<ProbeResult> {
   let browser: Browser | null = null;
   try {
@@ -104,12 +151,7 @@ async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Probe
     const probeUrl = new URL(baseUrl);
     probeUrl.searchParams.set("webgpuProbe", "1");
     await page.goto(probeUrl.toString(), { waitUntil: "domcontentloaded" });
-    const probe = await page.evaluate(async () => {
-      const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-      if (!gpu) return { ok: false, reason: "navigator.gpu is missing" };
-      const adapter = await gpu.requestAdapter();
-      return adapter ? { ok: true, reason: "adapter available" } : { ok: false, reason: "requestAdapter() returned null" };
-    });
+    const probe = await runWebGpuDeviceProbe(page);
     await page.close();
     if (probe.ok) return { browser, failure: null };
     await browser.close();
@@ -146,12 +188,8 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
       const probeUrl = new URL(baseUrl);
       probeUrl.searchParams.set("webgpuProbe", "1");
       await page.goto(probeUrl.toString(), { waitUntil: "domcontentloaded" });
-      const ok = await page.evaluate(async () => {
-        const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-        if (!gpu) return false;
-        return (await gpu.requestAdapter()) !== null;
-      });
-      if (!ok) throw new Error(`Chrome at ${cdpUrl} did not expose a WebGPU adapter`);
+      const probe = await runWebGpuDeviceProbe(page);
+      if (!probe.ok) throw new Error(`Chrome at ${cdpUrl} did not expose a stable WebGPU device: ${probe.reason}`);
       console.log(`[launch] WebGPU OK cdp=${cdpUrl}`);
       return { browser, recipe: { headless: false, args: [], cdpUrl } };
     } catch (error) {
@@ -199,8 +237,8 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
   }
 
   throw new Error(
-    `No Chromium launch recipe produced a WebGPU adapter at ${baseUrl}. ` +
-      "Try a desktop Chrome session with `CLOD_POC_CDP_URL`, or set `--renderer webgl` for non-WebGPU smoke data. " +
+    `No Chromium launch recipe produced a stable WebGPU device at ${baseUrl}. ` +
+      "For WSL/headless failures, run a native desktop Chrome session and pass CLOD_POC_CDP_URL. " +
       `Probe failures: ${failures.slice(0, 8).join(" | ")}`,
   );
 }
