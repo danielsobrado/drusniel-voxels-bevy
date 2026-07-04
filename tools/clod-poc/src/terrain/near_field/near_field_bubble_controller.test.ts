@@ -12,7 +12,7 @@ import type { TerrainMaterialController } from "../material/terrain_material_con
 import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 
 const terrainMocks = vi.hoisted(() => ({
-  meshChunk: vi.fn(() => {
+  meshChunk: vi.fn((): ChunkMesh => {
     throw new Error("cpu fallback fail");
   }),
 }));
@@ -173,7 +173,7 @@ describe("liveBubbleOwnsPageView", () => {
 describe("createNearFieldBubbleController", () => {
   beforeEach(() => {
     terrainMocks.meshChunk.mockReset();
-    terrainMocks.meshChunk.mockImplementation(() => {
+    terrainMocks.meshChunk.mockImplementation((): ChunkMesh => {
       throw new Error("cpu fallback fail");
     });
   });
