@@ -5,7 +5,8 @@ import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, updateF
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import { createFarTerrainMaterial, updateFarTerrainMaterialCenter, updateFarTerrainMaterialSummaryAtlas } from "../farTerrain/farTerrainMaterial.js";
-import { computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/far_terrain_vertex_colors.js";
+import type { FarTerrainVertexColors } from "../farTerrain/far_terrain_material_types.js";
+import { createFarTerrainVertexColorScratch, computeFarTerrainVertexColorsRange, createVertexColorBufferRange } from "../farTerrain/far_terrain_vertex_colors.js";
 import { createFarWaterMaterial, updateFarWaterMaterialCenter, updateFarWaterMaterialSummaryAtlas } from "../farTerrain/farWaterMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
@@ -20,7 +21,15 @@ import {
   attachColorAttribute, createDefaultParityColors, createDefaultBiomeColors,
 } from "./infinite_far_shell_helpers.js";
 
-type PendingFarShellHeightRebuild = { cursor: number; buildMs: number; snapX: number; snapZ: number };
+type PendingFarShellHeightRebuild = {
+  cursor: number;
+  buildMs: number;
+  snapX: number;
+  snapZ: number;
+  phase: "sample" | "finalize";
+  colorCursor: number;
+  vertexColors: FarTerrainVertexColors | null;
+};
 
 export class InfiniteFarShell {
   readonly mesh: THREE.Mesh;
@@ -143,7 +152,7 @@ export class InfiniteFarShell {
   private publishRebuildProgress(): void {
     const pending = this.pendingHeightRebuild;
     this.metrics.farShellRebuildPending = pending ? 1 : 0;
-    this.metrics.farShellRebuildCursor = pending?.cursor ?? 0;
+    this.metrics.farShellRebuildCursor = pending?.phase === "finalize" ? pending.colorCursor : pending?.cursor ?? 0;
     this.metrics.farShellRebuildVertices = this.computeVertexCount();
   }
 
@@ -158,7 +167,15 @@ export class InfiniteFarShell {
       this.publishRebuildProgress();
       return;
     }
-    this.pendingHeightRebuild = { cursor: 0, buildMs: 0, snapX: this.snappedX, snapZ: this.snappedZ };
+    this.pendingHeightRebuild = {
+      cursor: 0,
+      buildMs: 0,
+      snapX: this.snappedX,
+      snapZ: this.snappedZ,
+      phase: "sample",
+      colorCursor: 0,
+      vertexColors: null,
+    };
     this.publishRebuildProgress();
   }
 
@@ -275,21 +292,23 @@ export class InfiniteFarShell {
     }
   }
 
-  private finalizeHeightRebuild(buildMs: number, snapX: number, snapZ: number): void {
-    const vertexCount = this.computeVertexCount();
-    if (this.useParityMaterial && this.parityConfig) {
-      const vertexColors = computeFarTerrainVertexColors(this.positions, this.normals, vertexCount, this.parityConfig, snapX, snapZ);
-      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
-      this.attachVertexColors();
-    } else {
-      this.attachBiomeVertexColors();
-    }
+  private finishHeightRebuild(buildMs: number): void {
     this.rebuildCount++;
     this.lastRebuildMs = buildMs;
     this.metrics.farShellRebuilds = this.rebuildCount;
     this.metrics.farShellLastRebuildMs = this.lastRebuildMs;
     this.flushAttributes();
     this.publishRebuildProgress();
+  }
+
+  private beginParityFinalize(pending: PendingFarShellHeightRebuild, vertexCount: number): void {
+    if (!this.parityConfig) return;
+    pending.phase = "finalize";
+    pending.colorCursor = 0;
+    pending.vertexColors = createFarTerrainVertexColorScratch(vertexCount, this.normals);
+    if (!this.parityColorBuffer || this.parityColorBuffer.length !== vertexCount * 3) {
+      this.parityColorBuffer = new Float32Array(vertexCount * 3);
+    }
   }
 
   private stepPendingHeightRebuild(): void {
@@ -301,21 +320,68 @@ export class InfiniteFarShell {
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
     const minStepVerts = 64;
     const vertexCount = this.computeVertexCount();
-    if (pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
+    if (pending.phase === "sample" && pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
     const started = performance.now();
-    while (pending.cursor < vertexCount) {
+    const elapsedMs = () => performance.now() - started;
+
+    while (pending.phase === "sample" && pending.cursor < vertexCount) {
       const end = Math.min(vertexCount, pending.cursor + minStepVerts);
       this.sampleHeightVertexRange(pending.cursor, end, pending.snapX, pending.snapZ);
       pending.cursor = end;
       this.publishRebuildProgress();
-      if (pending.cursor < vertexCount && performance.now() - started >= budgetMs) {
-        pending.buildMs += performance.now() - started;
+      if (pending.cursor < vertexCount && elapsedMs() >= budgetMs) {
+        pending.buildMs += elapsedMs();
         return;
       }
     }
-    pending.buildMs += performance.now() - started;
+
+    if (pending.phase === "sample") {
+      if (this.useParityMaterial && this.parityConfig) {
+        this.beginParityFinalize(pending, vertexCount);
+      } else {
+        pending.buildMs += elapsedMs();
+        this.pendingHeightRebuild = null;
+        this.attachBiomeVertexColors();
+        this.finishHeightRebuild(pending.buildMs);
+        return;
+      }
+    }
+
+    while (pending.phase === "finalize" && pending.colorCursor < vertexCount && pending.vertexColors && this.parityConfig && this.parityColorBuffer) {
+      const end = Math.min(vertexCount, pending.colorCursor + minStepVerts);
+      computeFarTerrainVertexColorsRange(
+        pending.vertexColors,
+        this.positions,
+        this.normals,
+        pending.colorCursor,
+        end,
+        this.parityConfig,
+        pending.snapX,
+        pending.snapZ,
+      );
+      createVertexColorBufferRange(
+        this.parityColorBuffer,
+        pending.vertexColors,
+        this.parityConfig,
+        pending.colorCursor,
+        end,
+        this.normals,
+        0,
+        0,
+        this.positions,
+      );
+      pending.colorCursor = end;
+      this.publishRebuildProgress();
+      if (pending.colorCursor < vertexCount && elapsedMs() >= budgetMs) {
+        pending.buildMs += elapsedMs();
+        return;
+      }
+    }
+
+    pending.buildMs += elapsedMs();
     this.pendingHeightRebuild = null;
-    this.finalizeHeightRebuild(pending.buildMs, pending.snapX, pending.snapZ);
+    if (this.useParityMaterial) this.attachVertexColors();
+    this.finishHeightRebuild(pending.buildMs);
   }
 
   private flushAttributes(): void {
