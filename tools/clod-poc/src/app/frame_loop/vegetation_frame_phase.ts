@@ -8,6 +8,7 @@ import type { PropController } from "../../systems/prop_controller.js";
 import type { DeepOceanSurface } from "../../water/deep_ocean_surface.js";
 import type { DeepOceanMaterialHandle } from "../../water/deep_ocean_material.js";
 import type { WaterController } from "../../runtime/water_weather/water_controller.js";
+import type { WaterFieldResult } from "../../water/index.js";
 import type { WeatherController } from "../../runtime/water_weather/weather_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
@@ -67,10 +68,54 @@ const EMPTY_TIMING: VegetationFrameTiming = {
   totalMs: 0,
 };
 
+const HYDROLOGY_DIAGNOSTIC_OFFSET_M = 173;
+const HYDROLOGY_NONREPEAT_EPSILON_M = 0.001;
+
 function measure(fn: () => void): number {
   const start = performance.now();
   fn();
   return performance.now() - start;
+}
+
+function finiteWaterSample(sample: WaterFieldResult): boolean {
+  return Number.isFinite(sample.waterY)
+    && Number.isFinite(sample.terrainY)
+    && Number.isFinite(sample.depth)
+    && Number.isFinite(sample.bodyMask)
+    && Number.isFinite(sample.flow.x)
+    && Number.isFinite(sample.flow.z)
+    && Number.isFinite(sample.flow.speed)
+    && Number.isFinite(sample.flow.progress)
+    && Number.isFinite(sample.flow.drop);
+}
+
+function mirrorInfiniteHydrologyDiagnostics(input: VegetationFramePhaseInput): void {
+  const hooks = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod;
+  const counters = hooks?.stats?.counters;
+  if (!counters || input.worldCells <= 0) return;
+
+  const outsideX = input.worldCells + HYDROLOGY_DIAGNOSTIC_OFFSET_M;
+  const outsideZ = -HYDROLOGY_DIAGNOSTIC_OFFSET_M;
+  const wrappedX = HYDROLOGY_DIAGNOSTIC_OFFSET_M;
+  const wrappedZ = input.worldCells - HYDROLOGY_DIAGNOSTIC_OFFSET_M;
+  const outside = input.waterController.field.sample(outsideX, outsideZ);
+  const wrapped = input.waterController.field.sample(wrappedX, wrappedZ);
+  const cameraOutside = input.camera.position.x < 0
+    || input.camera.position.z < 0
+    || input.camera.position.x > input.worldCells
+    || input.camera.position.z > input.worldCells;
+  const nonrepeatDelta = Math.abs(outside.terrainY - wrapped.terrainY)
+    + Math.abs(outside.waterY - wrapped.waterY)
+    + Math.abs(outside.bodyMask - wrapped.bodyMask);
+
+  counters["infinite_hydrology_outside_sample_valid"] = finiteWaterSample(outside) ? 1 : 0;
+  counters["infinite_hydrology_outside_body_mask"] = outside.bodyMask;
+  counters["infinite_hydrology_outside_depth_m"] = outside.depth;
+  counters["infinite_hydrology_nonrepeat_delta"] = nonrepeatDelta;
+  counters["infinite_hydrology_nonrepeat_ok"] = nonrepeatDelta > HYDROLOGY_NONREPEAT_EPSILON_M ? 1 : 0;
+  counters["infinite_hydrology_camera_outside_startup"] = cameraOutside ? 1 : 0;
 }
 
 function updateForestLighting(input: VegetationFramePhaseInput): void {
@@ -87,6 +132,7 @@ function updateForestLighting(input: VegetationFramePhaseInput): void {
 function updateWater(input: VegetationFramePhaseInput): void {
   if (!input.state.waterEnabled) return;
   input.waterController.update(Math.min(input.playerDelta, 0.1), input.camera.position);
+  mirrorInfiniteHydrologyDiagnostics(input);
   input.waterController.logDevInitOnce(input.worldCells);
 }
 
