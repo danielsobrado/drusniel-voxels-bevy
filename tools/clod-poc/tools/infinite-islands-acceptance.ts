@@ -180,13 +180,6 @@ function outsideStartupWorld(pose: PoseTuple, worldCells: number): boolean {
   return pose[0] < 0 || pose[2] < 0 || pose[0] > worldCells || pose[2] > worldCells;
 }
 
-function keyForCode(code: string): string {
-  if (code.startsWith("Key")) return code.slice(3).toLowerCase();
-  if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
-  if (code === "Space") return " ";
-  return code;
-}
-
 async function dispatchKeyCodes(page: Page, type: "keydown" | "keyup", codes: readonly string[]): Promise<void> {
   await page.evaluate(({ type: eventType, codes: eventCodes }) => {
     const keyForCodeInPage = (code: string): string => {
