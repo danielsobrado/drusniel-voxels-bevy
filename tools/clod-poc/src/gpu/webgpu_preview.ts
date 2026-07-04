@@ -1,4 +1,4 @@
-// Phase 2c WebGPU app path (docs/webgpu-migration.md). Reached via `?webgpu=1`.
+// Isolated WebGPU app path reached via `?webgpu=1`.
 //
 // Parallel-path migration strategy: this grows the isolated WebGPU viewer toward the real
 // app, reusing the pure logic (buildWorld + selectCut) but with its own slim render path, so

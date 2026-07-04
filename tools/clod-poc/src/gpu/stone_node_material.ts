@@ -1,4 +1,4 @@
-// Phase 3 WebGPU stones (docs/webgpu-migration.md). TSL port of the small procedural
+// WebGPU stones material: TSL port of the small procedural
 // rock shader in src/stones/stone_instances.ts: vdata-driven strata/moss/AO, procedural
 // grain, dust/dirt, and the same hemispheric + sun lighting. Geometry/LOD/scatter stays in
 // StoneSystem; this only replaces the material under ?webgpu=1&stones=1.

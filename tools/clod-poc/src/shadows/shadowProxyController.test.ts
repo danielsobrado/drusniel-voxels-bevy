@@ -6,6 +6,12 @@ import { createShadowProxyController } from "./shadowProxyController.js";
 import * as shadowProxyBuilder from "./shadowProxyBuilder.js";
 
 const summary = buildTerrainSummary([], 512, 8);
+const TEST_SHADOW_PROXY_CONFIG = {
+  ...DEFAULT_SHADOW_PROXY_CONFIG,
+  gridRes: 8,
+  startM: 0,
+  endM: 512,
+};
 
 function makeDeps(overrides: Partial<Parameters<typeof createShadowProxyController>[1]> = {}) {
   const scene = new THREE.Scene();
@@ -18,7 +24,7 @@ function makeDeps(overrides: Partial<Parameters<typeof createShadowProxyControll
     streamingCentered: true,
     rebuildSnapMeters: 1024,
     getSunShadowsEnabled: () => false,
-    getConfig: () => ({ ...DEFAULT_SHADOW_PROXY_CONFIG, debugFreezeProxy: false }),
+    getConfig: () => ({ ...TEST_SHADOW_PROXY_CONFIG, debugFreezeProxy: false }),
     getLighting: () => ({
       sunDirection: new THREE.Vector3(0.3, 0.8, 0.5).normalize(),
       sunColor: new THREE.Color(1, 0.95, 0.85),
@@ -40,7 +46,7 @@ describe("shadow proxy controller", () => {
     const controller = createShadowProxyController(
       DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG,
       makeDeps({
-        getConfig: () => ({ ...DEFAULT_SHADOW_PROXY_CONFIG, debugFreezeProxy: true }),
+        getConfig: () => ({ ...TEST_SHADOW_PROXY_CONFIG, debugFreezeProxy: true }),
         getCoverageCenter: () => ({ x: 0, z: 0 }),
       }),
     );

@@ -1,7 +1,5 @@
-// Phase A of the WebGPU make-default plan (docs/webgpu-make-default-plan.md).
-//
 // A backend-agnostic handle over the terrain material: the app drives terrain state through
-// one setter interface instead of poking `ShaderMaterial.uniforms.*` directly, so Phase B can
+// one setter interface instead of poking `ShaderMaterial.uniforms.*` directly, so the app can
 // swap WebGLRenderer(ShaderMaterial) <-> WebGPURenderer(NodeMaterial) per surface.
 //
 // This file is the WebGL implementation. It is a thin pass-through: every setter performs the

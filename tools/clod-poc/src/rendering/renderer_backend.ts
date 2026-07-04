@@ -1,9 +1,7 @@
-// Phase B of the WebGPU make-default plan (docs/webgpu-make-default-plan.md).
-//
-// Renderer-backend seam for the real app. The app selects a backend with
+// Renderer-backend selection for the real app. The app selects a backend with
 // `?renderer=webgpu|webgl` (default webgpu) and creates the matching renderer here, so the
 // rest of main.ts depends on a small surface (renderer + maxAnisotropy) instead of
-// `new THREE.WebGLRenderer` directly. The WebGPU app boot itself lands in Phase B-2.
+// `new THREE.WebGLRenderer` directly.
 
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";

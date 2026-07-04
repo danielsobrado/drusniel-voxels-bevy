@@ -1,5 +1,4 @@
-// Phase 1 de-risk spike for the WebGPURenderer migration (docs/webgpu-migration.md).
-// Standalone bring-up reached via `?webgpuSpike=1`: it does NOT touch the real app path.
+// Standalone WebGPURenderer bring-up reached via `?webgpuSpike=1`: it does NOT touch the real app path.
 // It answers one question — does the three r0.184 WebGPURenderer + TSL toolchain run in
 // our exact Vite setup, render a NodeMaterial, and hold a sane frame rate?
 //

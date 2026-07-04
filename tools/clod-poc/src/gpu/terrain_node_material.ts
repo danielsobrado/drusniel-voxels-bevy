@@ -1,4 +1,4 @@
-// Phase 2 WebGPU terrain material (docs/webgpu-migration.md). TSL port of src/terrain_shader.ts.
+// WebGPU terrain material: TSL port of src/terrain_shader.ts.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";

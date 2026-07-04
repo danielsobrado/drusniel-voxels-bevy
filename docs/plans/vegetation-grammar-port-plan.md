@@ -6,7 +6,7 @@ the full **growth grammar** (parametric branching skeleton) and the
 sprays instead of flat alpha cards).
 
 Reference root: [`docs/reference/fable5-world-demo/src/vegetation/`](../reference/fable5-world-demo/src/vegetation/)
-Related plan: [`pure-gpu-trees-plan.md`](../../tools/clod-poc/docs/pure-gpu-trees-plan.md)
+Related status: [`clod-poc-trees-parity-status.md`](clod-poc-trees-parity-status.md)
 
 ---
 

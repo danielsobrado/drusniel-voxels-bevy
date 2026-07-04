@@ -1,4 +1,4 @@
-// Phase 3 WebGPU sky dome (docs/webgpu-migration.md). TSL port of the SKY_FRAG gradient in
+// WebGPU sky dome material: TSL port of the SKY_FRAG gradient in
 // src/environment.ts: horizon/zenith/ground gradient + haze + sun disk/glow. Rendered on a
 // BackSide dome that follows the camera (depth off, drawn first). Also returns the derived
 // EnvironmentLighting so the terrain material can be lit by the same sun.

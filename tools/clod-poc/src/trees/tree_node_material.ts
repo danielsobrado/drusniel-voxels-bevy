@@ -1,4 +1,4 @@
-// WebGPU tree material (docs/webgpu-migration.md). TSL port of the classic
+// WebGPU tree material: TSL port of the classic
 // MeshStandardMaterial + onBeforeCompile path in tree_material.ts. The classic path
 // relies on GLSL `onBeforeCompile` (#include <begin_vertex>, <map_fragment>) which
 // WebGPURenderer silently drops, leaving the trees as solid black silhouettes. This

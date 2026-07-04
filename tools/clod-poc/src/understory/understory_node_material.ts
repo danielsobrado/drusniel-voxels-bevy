@@ -1,4 +1,4 @@
-// WebGPU understory material (docs/webgpu-migration.md). TSL port of the classic
+// WebGPU understory material: TSL port of the classic
 // MeshStandardMaterial + onBeforeCompile path in understory_material.ts. As with trees,
 // WebGPURenderer silently drops `onBeforeCompile`, so the classic path renders the
 // understory as solid black. This reauthors the same look as a node graph: lit vertex

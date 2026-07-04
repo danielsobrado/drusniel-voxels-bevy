@@ -3,6 +3,7 @@ import {
   cloneTreeSettings,
   DEFAULT_TREE_ECOLOGY_SETTINGS,
   DEFAULT_TREE_FOLIAGE_SETTINGS,
+  DEFAULT_TREE_GPU_SETTINGS,
   DEFAULT_TREE_SETTINGS,
   DEFAULT_TREE_WIND_SETTINGS,
   parseTreeConfig,
@@ -63,7 +64,7 @@ describe("tree placement", () => {
     cloned.gpu.maxVisible = 1;
     cloned.gpu.terrainVisibility.enabled = false;
     expect(DEFAULT_TREE_SETTINGS.gpu.enabled).toBe(true);
-    expect(DEFAULT_TREE_SETTINGS.gpu.maxVisible).toBe(24_000);
+    expect(DEFAULT_TREE_SETTINGS.gpu.maxVisible).toBe(DEFAULT_TREE_GPU_SETTINGS.maxVisible);
     expect(DEFAULT_TREE_SETTINGS.gpu.terrainVisibility.enabled).toBe(true);
   });
 
