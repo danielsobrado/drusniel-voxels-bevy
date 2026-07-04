@@ -206,6 +206,7 @@ export interface FramePerfSnapshot extends FramePerfSummary {
   ready: boolean;
   observedFrames: number;
   samples: FramePerfSample[];
+  recentSamples: FramePerfSample[];
 }
 
 export interface FramePerfHooks {
@@ -216,6 +217,7 @@ export interface FramePerfHooks {
   targetSampleFrames: number;
   lastSample: FramePerfSample | null;
   samples: FramePerfSample[];
+  recentSamples: FramePerfSample[];
   snapshot: () => FramePerfSnapshot;
   reset: () => void;
 }
