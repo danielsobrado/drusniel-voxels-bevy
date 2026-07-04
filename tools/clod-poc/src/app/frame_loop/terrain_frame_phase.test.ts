@@ -19,6 +19,7 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
   evictions: 0,
   colliderEvictions: 0,
   streamedColliderPages: 0,
+  validEmptyPages: 0,
   colliderRegistrations: 0,
   colliderRemovals: 0,
 };
@@ -122,5 +123,16 @@ describe("terrain frame live-bubble probe counters", () => {
     expect(counters["live_bubble_probe_evictions_total"]).toBe(1);
     expect(counters["live_bubble_probe_collider_removals_total"]).toBe(2);
     expect(counters["live_bubble_evictions_total"]).toBe((totalBeforeProbe ?? 0) + 2);
+  });
+
+  it("mirrors explicit valid-empty live-bubble pages", () => {
+    const counters = installCounters();
+
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      validEmptyPages: 2,
+    }, 1));
+
+    expect(counters["live_bubble_valid_empty_pages"]).toBe(2);
   });
 });
