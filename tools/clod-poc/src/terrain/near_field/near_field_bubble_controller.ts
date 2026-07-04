@@ -179,6 +179,20 @@ export function requiredStreamingPageCoords(
   });
 }
 
+export function liveBubbleOwnsPageView(
+  node: ClodPageNode,
+  bubbleCenter: THREE.Vector3,
+  bubbleRadius: number,
+  pageSize: number,
+  target: number,
+): boolean {
+  if (node.level !== 0 || target <= 0.5) return false;
+  const centerX = (node.footprint.minX + node.footprint.maxX) / 2;
+  const centerZ = (node.footprint.minZ + node.footprint.maxZ) / 2;
+  const halfDiag = pageSize * Math.SQRT2 * 0.5;
+  return Math.hypot(bubbleCenter.x - centerX, bubbleCenter.z - centerZ) <= bubbleRadius + halfDiag;
+}
+
 export function createNearFieldBubbleController(deps: NearFieldBubbleControllerDeps): NearFieldBubbleController {
   const P = deps.cfg.page.chunks_per_page;
   const S = deps.cfg.page.chunk_size;
@@ -443,13 +457,13 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       let requiredCoords: PageCoord[] = [];
       if (input.enabled) {
         for (const v of input.bubbleViews) {
-          const owned =
-            v.node.level === 0 &&
-            v.target > 0.5 &&
-            Math.hypot(
-              input.bubbleCenter.x - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
-              input.bubbleCenter.z - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
-            ) < input.bubbleRadius;
+          const owned = liveBubbleOwnsPageView(
+            v.node,
+            input.bubbleCenter,
+            input.bubbleRadius,
+            pageSize,
+            v.target,
+          );
           if (owned) {
             let grp = chunkGroups.get(v.node.id);
             if (!grp) {
