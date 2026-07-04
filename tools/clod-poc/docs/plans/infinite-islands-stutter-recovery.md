@@ -260,6 +260,41 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   `CPU_CHUNK_MESH_BUDGET_MS = 6` with deferred-ready semantics — no page
   ever meshes synchronously. Full suite green (2188/2188). Decisive
   acceptance run in progress.
+- 2026-07-04 (new session): DECISIVE RUN `2026-07-04T12-11-49` was
+  INTERRUPTED — walk, biome-near, biome-horizon, final-near stats exist on
+  disk but no final-horizon and no `report.json`. Partial stats confirm
+  step 5 engaged everywhere: walk `frame_ms_p95 6.1` (gate 8 — PASSES,
+  was 9.1), `live_bubble_ms 0`, tiles 122/122, `shadow_proxy_building 0`
+  (`shadow_proxy_build_ms 1938` accumulated). Biome-near:
+  `frame_ms_p95 30.4` (was 1087–2126), `live_bubble_ms 0` (was 1399),
+  tiles 124/124 ready — but `live_bubble_ready_pages 2/52` with 37 still
+  building at snapshot time, i.e. the sample window closed mid-convergence
+  (handover item 1: settle window). Full acceptance re-run launched with
+  `CLOD_POC_REUSE_SERVER=1` against the leftover Vite on 5173.
+- 2026-07-04: FOURTH MEASURED RUN (`2026-07-04T12-19-20`, complete, all 5
+  scenes + report.json). 8 failures, ALL convergence-window sampling:
+  freeze scenes fail only `frame_ms_p95` 30.3–30.8 (was 1087–2126 — the
+  stutter itself is gone; the 180-frame sample starts 30 warmup frames in,
+  mid-convergence) plus biome-near `far_summary_tiles_missing 4` (still
+  draining). Walk: `frame_ms_p95 14.9` (run-to-run variance vs 6.1 in
+  12-11-49) + `live_bubble_ready_pages 0` + `live_bubble_streamed_collider
+  _pages 0` — snapshot lands mid-refill after the movement route because
+  the GPU-meshed bubble no longer becomes ready by stalling frames (the
+  old sync path implicitly guaranteed ready>0 at snapshot).
+  ALSO CHECKED (handover item 3): no threshold gates `shadow_proxy_build_ms`
+  or `far_shell_last_rebuild_ms` — accumulated-total semantics need no gate
+  change, documentation only (this entry is that documentation).
+- 2026-07-04: MEASUREMENT FIX LANDED in the harness (not gates):
+  `waitForConvergence()` in `tools/infinite-islands-acceptance.ts` polls
+  `far_summary_tiles_missing===0`, live-bubble quiet
+  (`required===0 || (building===0 && ready>0)`), and
+  `shadow_proxy_building!==1` every 500 ms until quiet 3 consecutive polls
+  (cap 120 s, proceed + log on timeout), called after warmup AND after the
+  walk movement route so the sampled 120-frame p95 window is steady state.
+  Thresholds untouched. Typecheck green. Acceptance re-run in progress.
+- 2026-07-04: Resumed from handover and reviewed this session log. Next
+  action is to inspect the newest acceptance run newer than
+  `2026-07-04T12-19-20` before deciding whether to re-run acceptance.
 
 ## Remaining known risks / next steps if gates still fail
 

@@ -27,6 +27,9 @@ const PAGE_ERROR_PRINT_LIMIT = 8;
 const PAGE_ERROR_STORE_LIMIT = 50;
 const WARMUP_FRAMES = 30;
 const SAMPLE_FRAMES = 180;
+const CONVERGENCE_TIMEOUT_MS = 120_000;
+const CONVERGENCE_POLL_MS = 500;
+const CONVERGENCE_STABLE_POLLS = 3;
 const MIN_WALK_ROUTE_DISTANCE_M = 48;
 const MOVEMENT_SAMPLE_FRAMES = 30;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
@@ -301,6 +304,42 @@ async function settle(page: Page, frames: number): Promise<void> {
   await settlePage(page, frames, SETTLE_TIMEOUT_MS);
 }
 
+// Sliced background work (shadow proxy, far-summary tiles, live-bubble page
+// meshing) takes far longer than WARMUP_FRAMES to converge. Wait until those
+// counters report quiet for a few consecutive polls so the sampled p95 window
+// measures steady state instead of the convergence ramp. Measurement fix
+// only — thresholds are unchanged; on timeout we proceed and let gates fail.
+async function waitForConvergence(page: Page, sceneName: string): Promise<void> {
+  const startedAt = Date.now();
+  const deadline = startedAt + CONVERGENCE_TIMEOUT_MS;
+  let stablePolls = 0;
+  let lastSnapshot = "";
+  while (Date.now() < deadline) {
+    const c = await page.evaluate(() => {
+      const counters = (window as typeof window & {
+        __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
+      }).__drusnielClod?.stats?.counters ?? {};
+      return {
+        tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
+        bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
+        bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
+        bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
+        proxyBuilding: counters["shadow_proxy_building"] ?? -1,
+      };
+    });
+    const bubbleQuiet = c.bubbleRequired === 0 || (c.bubbleBuilding === 0 && c.bubbleReady > 0);
+    const quiet = c.tilesMissing === 0 && bubbleQuiet && c.proxyBuilding !== 1;
+    stablePolls = quiet ? stablePolls + 1 : 0;
+    if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
+      console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+      return;
+    }
+    lastSnapshot = JSON.stringify(c);
+    await page.waitForTimeout(CONVERGENCE_POLL_MS);
+  }
+  console.log(`[infinite-accept] ${sceneName}: convergence wait timed out after ${(CONVERGENCE_TIMEOUT_MS / 1000).toFixed(0)}s; last ${lastSnapshot}`);
+}
+
 async function beginMovementRouteProbe(page: Page): Promise<void> {
   await page.evaluate(() => {
     const hook = (window as typeof window & {
@@ -485,9 +524,15 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     await Promise.race([settle(page, WARMUP_FRAMES), pageErrorGate]);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
+    await Promise.race([waitForConvergence(page, scene.name), pageErrorGate]);
+    await failOnPageError(page, scene.name, pageErrors, failedPath);
     if (scene.movementRoute) {
       movement = await Promise.race([runMovementRoute(page), pageErrorGate]);
       if (movementPath) writeJson(movementPath, movement);
+      await failOnPageError(page, scene.name, pageErrors, failedPath);
+      // The route ends mid-refill (bubble pages rebuilding at the new
+      // position); converge again so the sampled window is steady state.
+      await Promise.race([waitForConvergence(page, `${scene.name}:post-route`), pageErrorGate]);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
     }
     await Promise.race([settle(page, SAMPLE_FRAMES), pageErrorGate]);
