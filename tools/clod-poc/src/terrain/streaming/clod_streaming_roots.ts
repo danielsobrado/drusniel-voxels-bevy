@@ -13,16 +13,24 @@ export interface StreamingClodRootStats {
   buildBudget: number;
   inflightBatches: number;
   readyPages: number;
+  scheduledPagesThisFrame: number;
   applyPagesThisFrame: number;
   applyMs: number;
   staleDiscards: number;
   workerBuildMs: number;
   workerTransferBytes: number;
+  probeActive: number;
+  probeRequestedPagesTotal: number;
+  probeApplyPagesTotal: number;
+  probeEvictionsTotal: number;
+  probeStaleDiscardsTotal: number;
+  outOfWorldEditsSupported: number;
 }
 
 export interface StreamingClodRootController {
   update(center: THREE.Vector3, radiusM: number): StreamingClodRootStats;
   stats(): StreamingClodRootStats;
+  beginMovementProbe(): void;
 }
 
 export interface PageCoord {
@@ -65,14 +73,54 @@ interface InflightBatch {
   coordsById: Map<string, PageCoord>;
 }
 
+interface FailedBuildState {
+  attempts: number;
+  retryAfterFrame: number;
+}
+
+interface MovementProbeState {
+  active: boolean;
+  requestedIds: Set<string>;
+  requestedPagesTotal: number;
+  applyPagesTotal: number;
+  evictionsTotal: number;
+  staleDiscardsTotal: number;
+}
+
 const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
+const BUILD_RETRY_BASE_COOLDOWN_FRAMES = 60;
+const BUILD_RETRY_MAX_COOLDOWN_FRAMES = 600;
+const OUT_OF_WORLD_EDITS_SUPPORTED = 0;
 
 function resolveBudget(value: number | undefined, fallback: number): number {
   const raw = value ?? fallback;
   return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : fallback;
+}
+
+function retryCooldownFrames(attempts: number): number {
+  const multiplier = Math.min(8, 2 ** Math.max(0, attempts - 1));
+  return Math.min(BUILD_RETRY_MAX_COOLDOWN_FRAMES, BUILD_RETRY_BASE_COOLDOWN_FRAMES * multiplier);
+}
+
+function registerGlobalStreamProbe(beginMovementProbe: () => void): void {
+  const maybeWindow = (globalThis as typeof globalThis & {
+    window?: {
+      __drusnielClod?: { beginMovementRouteProbe?: (() => void) | null };
+      __drusnielBeginLiveBubbleMovementProbe?: () => void;
+      __drusnielBeginStreamingMovementProbe?: () => void;
+    };
+  }).window;
+  if (!maybeWindow) return;
+  maybeWindow.__drusnielBeginStreamingMovementProbe = beginMovementProbe;
+  if (maybeWindow.__drusnielClod) {
+    maybeWindow.__drusnielClod.beginMovementRouteProbe = () => {
+      beginMovementProbe();
+      maybeWindow.__drusnielBeginLiveBubbleMovementProbe?.();
+    };
+  }
 }
 
 export function streamingClodPageKey(px: number, pz: number): string {
@@ -119,8 +167,16 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const cached = new Map<string, CachedPage>();
-  const failed = new Set<string>();
+  const failed = new Map<string, FailedBuildState>();
   const ready: ClodPageNode[] = [];
+  const probe: MovementProbeState = {
+    active: false,
+    requestedIds: new Set<string>(),
+    requestedPagesTotal: 0,
+    applyPagesTotal: 0,
+    evictionsTotal: 0,
+    staleDiscardsTotal: 0,
+  };
   let frame = 0;
   let active = deps.enabled;
   let requiredNow = new Set<string>();
@@ -129,6 +185,16 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let completedWorkerTransferBytes = 0;
   let completedStaleDiscards = 0;
   let latest: StreamingClodRootStats = emptyStats();
+
+  const beginMovementProbe = (): void => {
+    probe.active = true;
+    probe.requestedIds.clear();
+    probe.requestedPagesTotal = 0;
+    probe.applyPagesTotal = 0;
+    probe.evictionsTotal = 0;
+    probe.staleDiscardsTotal = 0;
+  };
+  registerGlobalStreamProbe(beginMovementProbe);
 
   const removeRoot = (id: string): void => {
     for (let i = deps.roots.length - 1; i >= 0; i--) {
@@ -161,12 +227,19 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
 
   const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
 
+  const failedBuildCoolingDown = (id: string): boolean => {
+    const failure = failed.get(id);
+    return failure !== undefined && frame < failure.retryAfterFrame;
+  };
+
   const discardStaleReadyPages = (): number => {
     let stale = 0;
     for (let i = ready.length - 1; i >= 0; i--) {
-      if (buildStillWanted(ready[i]!.id)) continue;
+      const node = ready[i]!;
+      if (buildStillWanted(node.id)) continue;
       ready.splice(i, 1);
       stale++;
+      if (probe.active && probe.requestedIds.has(node.id)) probe.staleDiscardsTotal++;
     }
     return stale;
   };
@@ -184,7 +257,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       deps.roots.push(node);
       deps.allNodes.push(node);
       cached.set(node.id, { node, centerX, centerZ, lastTouchFrame: frame });
+      failed.delete(node.id);
       appliedNodes.push(node);
+      if (probe.active && probe.requestedIds.has(node.id)) probe.applyPagesTotal++;
     }
     if (appliedNodes.length > 0) {
       deps.onNodesBuilt?.(appliedNodes);
@@ -197,17 +272,21 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     };
   };
 
-  const dispatchBuild = (coords: readonly PageCoord[]): void => {
-    if (!deps.buildPages || coords.length === 0 || inFlight) return;
+  const dispatchBuild = (coords: readonly PageCoord[]): number => {
+    if (!deps.buildPages || coords.length === 0 || inFlight) return 0;
     const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz), coord]));
     const batch: InflightBatch = { ids: new Set(coordsById.keys()), coordsById };
     inFlight = batch;
+    if (probe.active) {
+      for (const id of batch.ids) probe.requestedIds.add(id);
+      probe.requestedPagesTotal += batch.ids.size;
+    }
     let result: Promise<StreamingClodRootBuildResult>;
     try {
       result = deps.buildPages(coords);
     } catch (error) {
       handleBuildRejection(batch, error);
-      return;
+      return batch.ids.size;
     }
     void result.then((built) => {
       if (inFlight === batch) inFlight = null;
@@ -215,28 +294,36 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       completedWorkerTransferBytes += Number.isFinite(built.transferBytes) ? Math.max(0, built.transferBytes ?? 0) : 0;
       for (const node of built.nodes) {
         if (buildStillWanted(node.id)) ready.push(node);
-        else completedStaleDiscards++;
+        else {
+          completedStaleDiscards++;
+          if (probe.active && probe.requestedIds.has(node.id)) probe.staleDiscardsTotal++;
+        }
       }
     }).catch((error) => handleBuildRejection(batch, error));
+    return batch.ids.size;
   };
 
-  const scheduleBuilds = (required: readonly PageCoord[]): void => {
-    if (!deps.buildPages || inFlight || buildBudget <= 0) return;
+  const scheduleBuilds = (required: readonly PageCoord[]): number => {
+    if (!deps.buildPages || inFlight || buildBudget <= 0) return 0;
     const batch: PageCoord[] = [];
     for (const coord of required) {
       const id = streamingClodPageKey(coord.px, coord.pz);
-      if (cached.has(id) || failed.has(id) || buildStillQueued(id)) continue;
+      if (cached.has(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
       batch.push(coord);
       if (batch.length >= buildBudget) break;
     }
-    dispatchBuild(batch);
+    return dispatchBuild(batch);
   };
 
   const buildStillQueued = (id: string): boolean => ready.some((node) => node.id === id);
 
   const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
     if (inFlight === batch) inFlight = null;
-    for (const id of batch.ids) failed.add(id);
+    for (const id of batch.ids) {
+      const previous = failed.get(id);
+      const attempts = (previous?.attempts ?? 0) + 1;
+      failed.set(id, { attempts, retryAfterFrame: frame + retryCooldownFrames(attempts) });
+    }
     console.warn(`[clod-stream] worker failed to build ${batch.ids.size} streamed root page(s)`, error);
   };
 
@@ -262,6 +349,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       }
 
       const evictions = evict(center, radiusM);
+      if (probe.active) probe.evictionsTotal += evictions;
       const workerBuildMs = completedWorkerBuildMs;
       const workerTransferBytes = completedWorkerTransferBytes;
       let staleDiscards = completedStaleDiscards;
@@ -270,7 +358,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       completedStaleDiscards = 0;
       const applied = applyReadyPages();
       staleDiscards += applied.staleDiscards;
-      scheduleBuilds(required);
+      const scheduledPagesThisFrame = scheduleBuilds(required);
       if (evictions > 0) deps.onRootsChanged?.();
 
       latest = {
@@ -284,17 +372,25 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         buildBudget,
         inflightBatches: inFlight ? 1 : 0,
         readyPages: ready.length,
+        scheduledPagesThisFrame,
         applyPagesThisFrame: applied.applied,
         applyMs: applied.applyMs,
         staleDiscards,
         workerBuildMs,
         workerTransferBytes,
+        probeActive: probe.active ? 1 : 0,
+        probeRequestedPagesTotal: probe.requestedPagesTotal,
+        probeApplyPagesTotal: probe.applyPagesTotal,
+        probeEvictionsTotal: probe.evictionsTotal,
+        probeStaleDiscardsTotal: probe.staleDiscardsTotal,
+        outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
       };
       return latest;
     },
     stats() {
       return latest;
     },
+    beginMovementProbe,
   };
 }
 
@@ -310,10 +406,17 @@ function emptyStats(): StreamingClodRootStats {
     buildBudget: DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME,
     inflightBatches: 0,
     readyPages: 0,
+    scheduledPagesThisFrame: 0,
     applyPagesThisFrame: 0,
     applyMs: 0,
     staleDiscards: 0,
     workerBuildMs: 0,
     workerTransferBytes: 0,
+    probeActive: 0,
+    probeRequestedPagesTotal: 0,
+    probeApplyPagesTotal: 0,
+    probeEvictionsTotal: 0,
+    probeStaleDiscardsTotal: 0,
+    outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
   };
 }
