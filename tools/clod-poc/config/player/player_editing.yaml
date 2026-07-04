@@ -1,0 +1,6 @@
+player_editing:
+  terrain_edit_radius_m: 96
+  build_commit_radius_m: 80
+  build_preview_radius_m: 160
+  allow_far_preview: true
+  allow_far_commit: false
