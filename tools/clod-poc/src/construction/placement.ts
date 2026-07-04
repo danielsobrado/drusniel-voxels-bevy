@@ -86,9 +86,11 @@ function validateBoundsAndOverlap(
     return { valid: false, reason: "invalid position" };
   }
 
-  const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
-  if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
-    return { valid: false, reason: "outside world" };
+  if (!config.unboundedWorld) {
+    const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
+    if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
+      return { valid: false, reason: "outside world" };
+    }
   }
 
   const bounds = boundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
@@ -108,11 +110,11 @@ function hasLegacySupportMetadata(placed: PlacedConstructionPiece): boolean {
 }
 
 function validatePersistedSupport(placed: PlacedConstructionPiece, placedPieces: readonly PlacedConstructionPiece[]): { valid: boolean; reason: string | null } {
-  if (hasLegacySupportMetadata(placed)) return { valid: true, reason: null };
-  if (placed.grounded === true) return { valid: true, reason: null };
+  if (hasLegacySupportMetadata(placed)) return { valid: true };
+  if (placed.grounded === true) return { valid: true };
   const parentIds = placed.parentIds ?? [];
   if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) {
-    return { valid: true, reason: null };
+    return { valid: true };
   }
   return { valid: false, reason: "unsupported" };
 }
