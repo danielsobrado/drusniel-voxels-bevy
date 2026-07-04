@@ -12,6 +12,8 @@ import type { ClodFrameLoopUiState } from "./ui_state.js";
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const RING_CLAMP_MARGIN = 2;
 
+let cachedInfiniteIslandsScene: boolean | null = null;
+
 interface TerrainFadeView {
   node: { id: string };
   fade: number;
@@ -63,9 +65,10 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
 }
 
 function infiniteIslandsScene(): boolean {
+  if (cachedInfiniteIslandsScene !== null) return cachedInfiniteIslandsScene;
   const search = globalThis.location?.search;
-  if (!search) return false;
-  return new URLSearchParams(search).get("scene") === INFINITE_ISLANDS_SCENE;
+  cachedInfiniteIslandsScene = search ? new URLSearchParams(search).get("scene") === INFINITE_ISLANDS_SCENE : false;
+  return cachedInfiniteIslandsScene;
 }
 
 export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: number, unbounded: boolean): THREE.Vector3 {
