@@ -90,63 +90,119 @@ export function treeRingLightingProxyKey(options: TreeRingLightingProxyOptions):
   ].join("|");
 }
 
-export function generateTreeRingLightingProxies(options: TreeRingLightingProxyOptions): TreeRingLightingProxy[] {
-  if (!options.settings.enabled) return [];
-  const maxProxies = Math.max(0, Math.floor(options.maxProxies ?? TREE_GPU_RING_LIGHTING_PROXY_CAP));
-  if (maxProxies <= 0) return [];
-  const sampler = options.sampler ?? defaultTreeTerrainSampler;
+/** Resumable proxy generation: walking every ring slot samples the terrain
+ *  (height + normal + occlusion march) tens of thousands of times, which is far
+ *  too slow for one frame. Callers step the build against a deadline and read
+ *  the result once every slot has been visited. */
+export interface TreeRingLightingProxyBuild {
+  readonly options: TreeRingLightingProxyOptions;
+  slot: number;
+  done: boolean;
+}
+
+interface TreeRingLightingProxyBuildInternal extends TreeRingLightingProxyBuild {
+  sampler: TreeTerrainSampler;
+  grid: number;
+  slots: number;
+  acceptParams: ReturnType<typeof treeRingAcceptParams>;
+  speciesTable: RingSpeciesTable;
+  maxProxies: number;
+  ranked: { priority: number; proxy: TreeRingLightingProxy }[];
+}
+
+/** Slots processed between deadline checks; also the minimum progress per step. */
+const PROXY_BUILD_SLOT_CHECK_INTERVAL = 16;
+
+export function createTreeRingLightingProxyBuild(options: TreeRingLightingProxyOptions): TreeRingLightingProxyBuild {
   const settings = options.settings;
-  const grid = treeGpuRingGrid(settings);
-  const slots = treeGpuRingSlotCount(settings);
-  const acceptParams = treeRingAcceptParams(settings);
-  const ranked: { priority: number; proxy: TreeRingLightingProxy }[] = [];
+  const maxProxies = Math.max(0, Math.floor(options.maxProxies ?? TREE_GPU_RING_LIGHTING_PROXY_CAP));
+  const build: TreeRingLightingProxyBuildInternal = {
+    options,
+    slot: 0,
+    done: !settings.enabled || maxProxies <= 0,
+    sampler: options.sampler ?? defaultTreeTerrainSampler,
+    grid: treeGpuRingGrid(settings),
+    slots: treeGpuRingSlotCount(settings),
+    acceptParams: treeRingAcceptParams(settings),
+    speciesTable: buildRingSpeciesTable(settings),
+    maxProxies,
+    ranked: [],
+  };
+  return build;
+}
 
-  for (let slot = 0; slot < slots; slot++) {
-    const [cellX, cellZ] = treeWorldCellFromSlot(slot, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
-    const [jitterX, jitterZ] = treeRingValidationJitter(cellX, cellZ, settings.seed, 1103);
-    const x = (cellX + jitterX) * TREE_GPU_RING_CELL;
-    const z = (cellZ + jitterZ) * TREE_GPU_RING_CELL;
-    if (x <= 0 || z <= 0 || x >= options.worldCells || z >= options.worldCells) continue;
-    const distance = Math.hypot(x - options.centerX, z - options.centerZ);
-    if (distance > settings.distanceM + settings.lod.crossfadeBandM) continue;
+export function stepTreeRingLightingProxyBuild(build: TreeRingLightingProxyBuild, deadlineMs: number): boolean {
+  const state = build as TreeRingLightingProxyBuildInternal;
+  if (state.done) return true;
+  let sinceCheck = 0;
+  while (state.slot < state.slots) {
+    processProxySlot(state, state.slot);
+    state.slot++;
+    if (++sinceCheck >= PROXY_BUILD_SLOT_CHECK_INTERVAL) {
+      sinceCheck = 0;
+      if (performance.now() >= deadlineMs) break;
+    }
+  }
+  if (state.slot >= state.slots) state.done = true;
+  return state.done;
+}
 
-    const terrainHeight = sampler.surfaceHeight(x, z);
-    if (treeRingTerrainHiddenForValidation({
-      settings,
-      sampler,
-      centerX: options.centerX,
-      centerZ: options.centerZ,
-      cameraY: undefined,
+export function finishTreeRingLightingProxyBuild(build: TreeRingLightingProxyBuild): TreeRingLightingProxy[] {
+  const state = build as TreeRingLightingProxyBuildInternal;
+  state.ranked.sort((a, b) => a.priority - b.priority);
+  return state.ranked.slice(0, state.maxProxies).map(({ proxy }) => proxy);
+}
+
+function processProxySlot(state: TreeRingLightingProxyBuildInternal, slot: number): void {
+  const options = state.options;
+  const settings = options.settings;
+  const [cellX, cellZ] = treeWorldCellFromSlot(slot, state.grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
+  const [jitterX, jitterZ] = treeRingValidationJitter(cellX, cellZ, settings.seed, 1103);
+  const x = (cellX + jitterX) * TREE_GPU_RING_CELL;
+  const z = (cellZ + jitterZ) * TREE_GPU_RING_CELL;
+  if (x <= 0 || z <= 0 || x >= options.worldCells || z >= options.worldCells) return;
+  const distance = Math.hypot(x - options.centerX, z - options.centerZ);
+  if (distance > settings.distanceM + settings.lod.crossfadeBandM) return;
+
+  const terrainHeight = state.sampler.surfaceHeight(x, z);
+  if (treeRingTerrainHiddenForValidation({
+    settings,
+    sampler: state.sampler,
+    centerX: options.centerX,
+    centerZ: options.centerZ,
+    cameraY: undefined,
+    x,
+    z,
+    terrainHeight,
+    distance,
+  })) return;
+
+  const normalY = state.sampler.surfaceNormal(x, z)[1];
+  const accept = treeAcceptMask(terrainHeight, normalY, x, z, state.acceptParams);
+  if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) return;
+
+  const species = selectRingSpeciesFromTable(state.speciesTable, treeRingValidationHash(cellX, cellZ, settings.seed, 409));
+  if (!species) return;
+  const speciesSettings = settings.species[species];
+  if (terrainHeight < speciesSettings.minHeightM || terrainHeight > speciesSettings.maxHeightM) return;
+  const scale = 0.82 + treeRingValidationHash(cellX, cellZ, settings.seed, 601) * 0.42;
+  state.ranked.push({
+    priority: treeRingValidationHash(cellX, cellZ, settings.seed, 503),
+    proxy: {
       x,
       z,
-      terrainHeight,
-      distance,
-    })) continue;
+      height: (speciesSettings.trunkHeightM + speciesSettings.crownRadiusM * 2) * scale,
+      scale,
+      crownRadius: speciesSettings.crownRadiusM * scale,
+      species,
+    },
+  });
+}
 
-    const normalY = sampler.surfaceNormal(x, z)[1];
-    const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
-    if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
-
-    const species = selectRingSpecies(settings, treeRingValidationHash(cellX, cellZ, settings.seed, 409));
-    if (!species) continue;
-    const speciesSettings = settings.species[species];
-    if (terrainHeight < speciesSettings.minHeightM || terrainHeight > speciesSettings.maxHeightM) continue;
-    const scale = 0.82 + treeRingValidationHash(cellX, cellZ, settings.seed, 601) * 0.42;
-    ranked.push({
-      priority: treeRingValidationHash(cellX, cellZ, settings.seed, 503),
-      proxy: {
-        x,
-        z,
-        height: (speciesSettings.trunkHeightM + speciesSettings.crownRadiusM * 2) * scale,
-        scale,
-        crownRadius: speciesSettings.crownRadiusM * scale,
-        species,
-      },
-    });
-  }
-
-  ranked.sort((a, b) => a.priority - b.priority);
-  return ranked.slice(0, maxProxies).map(({ proxy }) => proxy);
+export function generateTreeRingLightingProxies(options: TreeRingLightingProxyOptions): TreeRingLightingProxy[] {
+  const build = createTreeRingLightingProxyBuild(options);
+  stepTreeRingLightingProxyBuild(build, Number.POSITIVE_INFINITY);
+  return finishTreeRingLightingProxyBuild(build);
 }
 
 export function generateTreeRingValidationCounts(options: TreeRingValidationCountOptions): TreeRingValidationCounts {
@@ -168,6 +224,7 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
   const grid = treeGpuRingGrid(settings);
   const slots = treeGpuRingSlotCount(settings);
   const acceptParams = treeRingAcceptParams(settings);
+  const speciesTable = buildRingSpeciesTable(settings);
   const lodParams = treeRingLodParams(settings);
   const ringLodParams = { ...lodParams, radius: Math.min(settings.distanceM, lodParams.radius) };
   const maxInstancesPerGroup = Math.max(0, Math.floor(options.maxInstancesPerGroup));
@@ -200,7 +257,7 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
     const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
     if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
 
-    const species = selectRingSpecies(settings, treeRingValidationHash(cellX, cellZ, settings.seed, 409));
+    const species = selectRingSpeciesFromTable(speciesTable, treeRingValidationHash(cellX, cellZ, settings.seed, 409));
     if (!species) continue;
 
     const ring = treeLodRing(distance, ringLodParams);
@@ -301,16 +358,25 @@ function treeRingTerrainHiddenForValidation(input: {
   });
 }
 
-function selectRingSpecies(settings: TreeSettings, roll: number): TreeSpeciesId | null {
-  const weights = TREE_SPECIES.map((species) => ({ species, weight: speciesWeight(settings, species) }));
-  const total = weights.reduce((sum, entry) => entry.weight + sum, 0);
-  if (total <= 0) return null;
-  let cursor = roll * total;
-  for (const entry of weights) {
+interface RingSpeciesTable {
+  entries: { species: TreeSpeciesId; weight: number }[];
+  total: number;
+}
+
+function buildRingSpeciesTable(settings: TreeSettings): RingSpeciesTable {
+  const entries = TREE_SPECIES.map((species) => ({ species, weight: speciesWeight(settings, species) }));
+  const total = entries.reduce((sum, entry) => entry.weight + sum, 0);
+  return { entries, total };
+}
+
+function selectRingSpeciesFromTable(table: RingSpeciesTable, roll: number): TreeSpeciesId | null {
+  if (table.total <= 0) return null;
+  let cursor = roll * table.total;
+  for (const entry of table.entries) {
     cursor -= entry.weight;
     if (cursor <= 0) return entry.species;
   }
-  return weights[weights.length - 1]?.species ?? null;
+  return table.entries[table.entries.length - 1]?.species ?? null;
 }
 
 function treeRingPointInFrustum(
