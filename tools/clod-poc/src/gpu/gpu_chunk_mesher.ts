@@ -103,8 +103,6 @@ export class GpuChunkMesher {
     this.bindGroup = this.makeBindGroup();
   }
 
-  // The TypedArray generic (ArrayBufferLike) is not directly a GPU BufferSource; pass the backing
-  // ArrayBuffer + range, as clod_error_px_compute.ts does.
   private writeView(buffer: GPUBuffer, data: Int32Array | Uint32Array): void {
     this.device.queue.writeBuffer(buffer, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
   }
@@ -134,9 +132,13 @@ export class GpuChunkMesher {
   ): Promise<GpuChunkMesherCreateResult> {
     let device = opts.sharedDevice ?? null;
     if (!device) {
-      const result = await requestWebGpuDevice();
-      if (!result.ok) return { mesher: null, unavailable: result };
-      device = result.device;
+      try {
+        const result = await requestWebGpuDevice();
+        if (!result.ok) return { mesher: null, unavailable: result };
+        device = result.device;
+      } catch (error) {
+        return { mesher: null, unavailable: gpuMesherUnavailable(error) };
+      }
     }
 
     try {
@@ -180,11 +182,8 @@ export class GpuChunkMesher {
     }
   }
 
-  /** Mesh one chunk on the GPU and read back the compact result. Serialized via an internal queue
-   *  because the work buffers are shared. */
   meshChunk(cx: number, cz: number, world: { cellsX: number; cellsZ: number }, edits: readonly ResolvedDigEdit[]): Promise<ChunkMesh> {
     const run = this.queue.then(() => this.meshChunkInner(cx, cz, world, edits));
-    // Keep the chain alive regardless of individual failures.
     this.queue = run.catch(() => undefined);
     return run;
   }
@@ -214,8 +213,6 @@ export class GpuChunkMesher {
     this.writeView(this.indexCount, zero);
     this.writeView(this.vertexCount, zero);
 
-    // Pass 1: vertices. Pass 2: quads (ordered after pass 1 on the same queue). Then copy the two
-    // counts to a small readback so we only transfer the live verts/indices in phase 2.
     const enc = this.device.createCommandEncoder({ label: "gpu mesher encode" });
     const vpass = enc.beginComputePass();
     vpass.setPipeline(this.vertexPipeline);
@@ -240,7 +237,6 @@ export class GpuChunkMesher {
       return { positions: new Float32Array(0), normals: new Float32Array(0), materials: new Float32Array(0), indices: new Uint32Array(0) };
     }
 
-    // Phase 2: copy exactly the live ranges to sized readback buffers.
     const posRB = this.device.createBuffer({ label: "rb pos", size: vc * 3 * F32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     const nrmRB = this.device.createBuffer({ label: "rb nrm", size: vc * 3 * F32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     const matRB = this.device.createBuffer({ label: "rb mat", size: vc * F32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
