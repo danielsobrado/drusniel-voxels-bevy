@@ -36,7 +36,7 @@ export interface PlayerModeController {
   applyQuerySpawn(): void;
 }
 
-interface QuerySpawnPoint {
+export interface QuerySpawnPoint {
   x: number;
   y: number;
   z: number;
@@ -52,14 +52,15 @@ function querySpawnDryEnough(height: number): boolean {
   return Number.isFinite(height) && height >= WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M;
 }
 
-function resolveQuerySpawnPoint(
+export function resolveQuerySpawnPoint(
   x: number,
   z: number,
   surfaceHeight: (x: number, z: number) => number,
 ): QuerySpawnPoint {
+  const centerY = surfaceHeight(x, z);
   let best: QuerySpawnPoint = {
     x,
-    y: surfaceHeight(x, z),
+    y: Number.isFinite(centerY) ? centerY : Number.NEGATIVE_INFINITY,
     z,
     adjusted: false,
   };
@@ -80,9 +81,8 @@ function resolveQuerySpawnPoint(
     }
   }
 
-  return best.adjusted || best.x !== x || best.z !== z
-    ? best
-    : { ...best, y: Math.max(best.y, WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M), adjusted: false };
+  if (Number.isFinite(best.y)) return best;
+  return { x, y: WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M, z, adjusted: false };
 }
 
 export function createPlayerModeController(deps: PlayerModeControllerDeps): PlayerModeController {
