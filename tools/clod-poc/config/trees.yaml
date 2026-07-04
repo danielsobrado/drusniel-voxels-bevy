@@ -258,3 +258,52 @@ trees:
         branch_levels: 3
         primary_branch_count: 7
         secondary_branch_count: 2
+        branch_spread: 0.72
+        branch_up_sweep: 0.32
+        branch_length: 2.0
+        crown_flattening: 0.8
+        crown_irregularity: 0.22
+        leaf_cluster_count: 14
+        leaf_card_count: 34
+    willow:
+      enabled: true
+      weight: 0.11
+      min_height_m: 9
+      max_height_m: 36
+      trunk_height_m: 5.5
+      trunk_radius_m: 0.34
+      crown_radius_m: 4.6
+      morphology:
+        trunk_bend: 0.24
+        trunk_taper: 0.64
+        branch_levels: 3
+        primary_branch_count: 8
+        secondary_branch_count: 3
+        branch_spread: 1.1
+        branch_up_sweep: -0.08
+        branch_length: 2.8
+        crown_flattening: 0.62
+        crown_irregularity: 0.34
+        leaf_cluster_count: 22
+        leaf_card_count: 50
+    spruce:
+      enabled: true
+      weight: 0.10
+      min_height_m: 16
+      max_height_m: 60
+      trunk_height_m: 10.0
+      trunk_radius_m: 0.32
+      crown_radius_m: 3.4
+      morphology:
+        trunk_bend: 0.05
+        trunk_taper: 0.38
+        branch_levels: 5
+        primary_branch_count: 10
+        secondary_branch_count: 1
+        branch_spread: 0.62
+        branch_up_sweep: -0.12
+        branch_length: 2.2
+        crown_flattening: 1.55
+        crown_irregularity: 0.14
+        leaf_cluster_count: 14
+        leaf_card_count: 38
