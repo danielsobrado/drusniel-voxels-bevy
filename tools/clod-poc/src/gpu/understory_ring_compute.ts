@@ -83,8 +83,9 @@ export class UnderstoryGpuRingCompute {
   private readonly fullSlotIndices: Uint32Array;
   private activeSlotScratch = new Uint32Array(0);
   private digEdits: GPUBuffer;
-  private readonly bindGroup: GPUBindGroup;
+  private bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
+  private readonly hydroSampler: GPUSampler;
   private readonly paramScratch = new ArrayBuffer(UNDERSTORY_RING_PARAM_BYTES);
   private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
@@ -111,10 +112,10 @@ export class UnderstoryGpuRingCompute {
 
   private constructor(
     private readonly device: GPUDevice,
-    layout: GPUBindGroupLayout,
+    private readonly layout: GPUBindGroupLayout,
     pipelines: Record<PipelineName, GPUComputePipeline>,
     edits: readonly ResolvedDigEdit[],
-    outputBuffers: UnderstoryGpuRingOutputBuffers,
+    private readonly outputBuffers: UnderstoryGpuRingOutputBuffers,
     private readonly settings: UnderstorySettings,
     hydroData: UnderstoryHydrologyData | null,
   ) {
@@ -129,10 +130,8 @@ export class UnderstoryGpuRingCompute {
     this.counterBuffer = device.createBuffer({ label: "understory ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.fieldParams = device.createBuffer({ label: "understory ring field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.activeSlotBuffer = device.createBuffer({ label: "understory ring active slot indices", size: activeSlotCapacity * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    this.digEdits = device.createBuffer({ label: "understory ring dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
-    const packedFieldParams = packFieldParams(edits.length);
-    device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
+    this.digEdits = this.createDigEditsBuffer(edits);
+    this.writeFieldParams(edits.length);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
       buffer: device.createBuffer({ label: `understory ring counter readback ${index}`, size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
       busy: false,
@@ -147,19 +146,8 @@ export class UnderstoryGpuRingCompute {
     } else {
       this.hydroTexture = device.createTexture({ label: "understory ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
     }
-    const hydroSampler = device.createSampler({ label: "understory ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
-    this.bindGroup = device.createBindGroup({ label: "understory ring bind group", layout, entries: [
-      { binding: 0, resource: { buffer: this.paramBuffer } },
-      { binding: 1, resource: { buffer: this.counterBuffer } },
-      { binding: 2, resource: { buffer: outputBuffers.indirectArgs } },
-      { binding: 3, resource: { buffer: outputBuffers.cell } },
-      { binding: 4, resource: { buffer: this.classParamsBuffer } },
-      { binding: 5, resource: this.hydroTexture.createView() },
-      { binding: 6, resource: hydroSampler },
-      { binding: 7, resource: { buffer: this.digEdits } },
-      { binding: 8, resource: { buffer: this.fieldParams } },
-      { binding: 9, resource: { buffer: this.activeSlotBuffer } },
-    ] });
+    this.hydroSampler = device.createSampler({ label: "understory ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
+    this.bindGroup = this.createBindGroup();
   }
 
   static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], outputBuffers: UnderstoryGpuRingOutputBuffers, settings: UnderstorySettings, hydroData: UnderstoryHydrologyData | null = null): Promise<UnderstoryGpuRingCompute> {
@@ -178,6 +166,16 @@ export class UnderstoryGpuRingCompute {
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `understory ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
     const [clearCounters, cull, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("understory_cull"), makePipeline("build_indirect_args")]);
     return new UnderstoryGpuRingCompute(device, layout, { clear_counters: clearCounters, understory_cull: cull, build_indirect_args: buildIndirectArgs }, edits, outputBuffers, { ...settings }, hydroData);
+  }
+
+  updateDigEdits(edits: readonly ResolvedDigEdit[]): void {
+    const previous = this.digEdits;
+    this.digEdits = this.createDigEditsBuffer(edits);
+    this.writeFieldParams(edits.length);
+    this.bindGroup = this.createBindGroup();
+    this.slotPrefilterCache.clear();
+    previous.destroy();
+    this.failedReason = null;
   }
 
   dispatch(params: UnderstoryGpuRingDispatchParams): boolean {
@@ -252,6 +250,32 @@ export class UnderstoryGpuRingCompute {
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
     for (const slot of this.counterReadbacks) if (slot.busy) slot.destroyAfterMap = true; else slot.buffer.destroy();
+  }
+
+  private createBindGroup(): GPUBindGroup {
+    return this.device.createBindGroup({ label: "understory ring bind group", layout: this.layout, entries: [
+      { binding: 0, resource: { buffer: this.paramBuffer } },
+      { binding: 1, resource: { buffer: this.counterBuffer } },
+      { binding: 2, resource: { buffer: this.outputBuffers.indirectArgs } },
+      { binding: 3, resource: { buffer: this.outputBuffers.cell } },
+      { binding: 4, resource: { buffer: this.classParamsBuffer } },
+      { binding: 5, resource: this.hydroTexture.createView() },
+      { binding: 6, resource: this.hydroSampler },
+      { binding: 7, resource: { buffer: this.digEdits } },
+      { binding: 8, resource: { buffer: this.fieldParams } },
+      { binding: 9, resource: { buffer: this.activeSlotBuffer } },
+    ] });
+  }
+
+  private createDigEditsBuffer(edits: readonly ResolvedDigEdit[]): GPUBuffer {
+    const buffer = this.device.createBuffer({ label: "understory ring dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.device.queue.writeBuffer(buffer, 0, packDigEdits(edits));
+    return buffer;
+  }
+
+  private writeFieldParams(editCount: number): void {
+    const packedFieldParams = packFieldParams(editCount);
+    this.device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
   }
 
   private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
