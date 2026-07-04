@@ -138,4 +138,19 @@ describe("terrain frame live-bubble probe counters", () => {
 
     expect(counters["live_bubble_valid_empty_pages"]).toBe(2);
   });
+
+  it("mirrors GPU retry counters", () => {
+    const counters = installCounters();
+
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      gpuRetryPages: 3,
+      gpuRetriesTotal: 5,
+      gpuTerminalFailuresTotal: 1,
+    }, 1));
+
+    expect(counters["live_bubble_gpu_retry_pages"]).toBe(3);
+    expect(counters["live_bubble_gpu_retries_total"]).toBe(5);
+    expect(counters["live_bubble_gpu_failures_total"]).toBe(1);
+  });
 });
