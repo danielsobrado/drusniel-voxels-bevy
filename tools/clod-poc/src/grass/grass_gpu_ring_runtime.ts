@@ -12,7 +12,7 @@ import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import type { GrassSettings, GrassTier } from "./grass_config.js";
 import {
   grassGpuRingDrawUnsupportedReason,
-  grassGpuRingKey,
+  grassGpuRingStableKey,
   grassGpuRingTierCapacity,
   type GrassGpuRingDrawResources,
   type GrassGpuTierDrawResources,
@@ -57,6 +57,7 @@ export class GrassGpuRingRuntime {
   private init: Promise<void> | null = null;
   private key = "";
   private failedKey = "";
+  private lastDigEditRevision = -1;
   private draw: GrassGpuRingDrawResources | null = null;
   private readonly frustum = new THREE.Frustum();
   private readonly frustumMatrix = new THREE.Matrix4();
@@ -148,6 +149,7 @@ export class GrassGpuRingRuntime {
     this.compute = null;
     this.init = null;
     this.key = "";
+    this.lastDigEditRevision = -1;
     this.hasFrustum = false;
     this.stats = emptyGrassGpuRingStats(this.gpuDevice ? "idle" : "disabled");
   }
@@ -205,6 +207,7 @@ export class GrassGpuRingRuntime {
       this.logDebug(settings, "no-compute");
       return true;
     }
+    this.syncDigEdits();
     const frustumPlanes = this.frustumPlanes(camera);
     if (!frustumPlanes) {
       this.stats = this.compute.stats(settings.enabled);
@@ -278,6 +281,7 @@ export class GrassGpuRingRuntime {
       generatedCandidates: slotCount,
     };
     const initKey = key;
+    const initDigRevision = getDigEditRevision();
     const edits = resolveDigEdits(getDigEditsSnapshot());
     const createCompute = this.injectedGpuRingComputeFactory ?? GrassGpuRingCompute.create;
     this.init = createCompute(this.gpuDevice, edits, this.draw.outputBuffers, settings.ring)
@@ -287,6 +291,7 @@ export class GrassGpuRingRuntime {
           return;
         }
         this.compute = compute;
+        this.lastDigEditRevision = initDigRevision;
         this.stats = compute.stats(settings.enabled);
       })
       .catch((error) => {
@@ -300,6 +305,14 @@ export class GrassGpuRingRuntime {
       .finally(() => {
         if (this.key === initKey) this.init = null;
       });
+  }
+
+  private syncDigEdits(): void {
+    if (!this.compute) return;
+    const revision = getDigEditRevision();
+    if (revision === this.lastDigEditRevision) return;
+    this.compute.updateDigEdits(resolveDigEdits(getDigEditsSnapshot()));
+    this.lastDigEditRevision = revision;
   }
 
   private createDrawResources(settings: GrassSettings, candidateCount: number): GrassGpuRingDrawResources {
@@ -327,7 +340,7 @@ export class GrassGpuRingRuntime {
   }
 
   currentKey(settings: GrassSettings): string {
-    return grassGpuRingKey(settings, this.worldCells, getDigEditRevision());
+    return grassGpuRingStableKey(settings, this.worldCells);
   }
 
   private handleFailure(reason: string): void {
