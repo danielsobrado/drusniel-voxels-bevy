@@ -51,6 +51,14 @@ export function buildInfiniteQaSummary(scene: string, stats: JsonRecord): JsonRe
           evictions: counters["live_clod_stream_evictions"] ?? 0,
           build_ms: counters["live_clod_stream_build_ms"] ?? 0,
         },
+        vegetation_ring: {
+          unbounded: counters["vegetation_ring_unbounded"] ?? 0,
+          center_x: counters["vegetation_ring_center_x"] ?? 0,
+          center_z: counters["vegetation_ring_center_z"] ?? 0,
+          grass_center_x: counters["vegetation_grass_center_x"] ?? 0,
+          grass_center_z: counters["vegetation_grass_center_z"] ?? 0,
+          distance_to_grass_m: counters["vegetation_ring_distance_to_grass_m"] ?? 0,
+        },
         hydrology: {
           outside_sample_valid: counters["infinite_hydrology_outside_sample_valid"] ?? 0,
           outside_body_mask: counters["infinite_hydrology_outside_body_mask"] ?? 0,
