@@ -33,14 +33,21 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | un
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
+function globalClodCounters(): Record<string, number> | undefined {
+  return (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+}
+
 function mirrorStreamingClodRootCounters(counters: Record<string, number> | undefined, stats: StreamingClodRootStats): void {
-  if (!counters) return;
-  counters["live_clod_stream_required_pages"] = stats.requiredPages;
-  counters["live_clod_stream_cached_pages"] = stats.cachedPages;
-  counters["live_clod_stream_built_this_frame"] = stats.builtThisFrame;
-  counters["live_clod_stream_failed_pages"] = stats.failedPages;
-  counters["live_clod_stream_evictions"] = stats.evictions;
-  counters["live_clod_stream_build_ms"] = stats.buildMs;
+  const target = counters ?? globalClodCounters();
+  if (!target) return;
+  target["live_clod_stream_required_pages"] = stats.requiredPages;
+  target["live_clod_stream_cached_pages"] = stats.cachedPages;
+  target["live_clod_stream_built_this_frame"] = stats.builtThisFrame;
+  target["live_clod_stream_failed_pages"] = stats.failedPages;
+  target["live_clod_stream_evictions"] = stats.evictions;
+  target["live_clod_stream_build_ms"] = stats.buildMs;
 }
 
 function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
