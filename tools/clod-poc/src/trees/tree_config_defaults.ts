@@ -138,7 +138,7 @@ export const DEFAULT_TREE_GPU_SETTINGS: TreeGpuSettings = {
   fallbackToCpu: true,
   scatterEnabled: true,
   cullEnabled: true,
-  maxVisible: 24_000,
+  maxVisible: 128_000,
   workgroupSize: 64,
   readbackVisibleLists: false,
   debugForceCpu: false,
