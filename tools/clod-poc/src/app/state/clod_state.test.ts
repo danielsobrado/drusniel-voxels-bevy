@@ -62,7 +62,7 @@ const cfg: ClodPagesConfig = {
   },
 };
 
-function createState(liveBubbleDefault?: { enabled: boolean; radiusM: number }) {
+function createState(liveBubbleDefault?: { enabled: boolean; radiusM: number; pinned?: boolean }) {
   return createClodSliceState({
     cfg,
     queryPerfMode: true,
@@ -76,20 +76,35 @@ function createState(liveBubbleDefault?: { enabled: boolean; radiusM: number }) 
 }
 
 describe("createClodSliceState", () => {
-  it("uses the live bubble default and preserves it against perf presets", () => {
-    const state = createState({ enabled: true, radiusM: 200 });
+  it("records the live bubble default and pin flag", () => {
+    const state = createState({ enabled: true, radiusM: 200, pinned: true });
 
     expect(state.bubble).toBe(true);
+    expect(state.liveBubblePinned).toBe(true);
     expect(state.bubbleRadius).toBe(200);
+  });
+
+  it("allows user code to turn the bubble off", () => {
+    const state = createState({ enabled: true, radiusM: 200, pinned: true });
 
     state.bubble = false;
-    expect(state.bubble).toBe(true);
+    expect(state.bubble).toBe(false);
+    expect(state.liveBubblePinned).toBe(true);
   });
 
   it("keeps the legacy finite bubble default when no live default is present", () => {
     const state = createState();
 
     expect(state.bubble).toBe(false);
+    expect(state.liveBubblePinned).toBe(false);
     expect(state.bubbleRadius).toBe(96);
+  });
+
+  it("does not pin a false live bubble default", () => {
+    const state = createState({ enabled: false, radiusM: 128, pinned: false });
+
+    expect(state.bubble).toBe(false);
+    expect(state.liveBubblePinned).toBe(false);
+    expect(state.bubbleRadius).toBe(128);
   });
 });
