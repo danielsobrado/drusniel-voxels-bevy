@@ -69,7 +69,8 @@ export function understoryUsesGpuRingDraw(settings: UnderstorySettings): boolean
 }
 
 export function emptyUnderstoryStats(): UnderstoryStats {
-  return {
+  let farSummaryConsulted: number | undefined;
+  const stats = {
     totalInstances: 0,
     patches: 0,
     visiblePatches: 0,
@@ -80,7 +81,7 @@ export function emptyUnderstoryStats(): UnderstoryStats {
     flower: 0,
     deadLog: 0,
     stump: 0,
-    gpuStatus: "disabled",
+    gpuStatus: "disabled" as UnderstoryStats["gpuStatus"],
     gpuCandidateCount: 0,
     gpuCandidateCountBeforePrefilter: 0,
     gpuCandidateCountAfterPrefilter: 0,
@@ -88,7 +89,12 @@ export function emptyUnderstoryStats(): UnderstoryStats {
     gpuPrefilterRejectedClusters: 0,
     gpuPrefilterAcceptedClusters: 0,
     gpuPrefilterUnknownKeptClusters: 0,
-    gpuPrefilterFarSummaryConsulted: 0,
+    get gpuPrefilterFarSummaryConsulted(): number {
+      return farSummaryConsulted ?? this.gpuPrefilterSourceFarSummary ?? 0;
+    },
+    set gpuPrefilterFarSummaryConsulted(value: number | undefined) {
+      farSummaryConsulted = value;
+    },
     gpuPrefilterSourceFarSummary: 0,
     gpuPrefilterSourceTerrainSampler: 0,
     gpuPrefilterSourceFallback: 0,
@@ -98,6 +104,7 @@ export function emptyUnderstoryStats(): UnderstoryStats {
     gpuDispatchMs: null,
     ...emptyUnderstoryGenerationStats(),
   };
+  return stats;
 }
 
 export function mergeGenerationStats(target: UnderstoryGenerationStats, source: UnderstoryGenerationStats): void {
