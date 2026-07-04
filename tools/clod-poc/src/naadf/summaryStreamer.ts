@@ -16,9 +16,12 @@ import {
 } from "./nearPageTable.js";
 import { createHashFallback, type HashFallback } from "./hashFallback.js";
 import {
-  buildFarSummaryTile,
+  createFarSummaryTileBuild,
   farTileKeyString,
+  finishFarSummaryTileBuild,
+  stepFarSummaryTileBuild,
   type FarClipmapStore,
+  type FarSummaryTileBuildState,
 } from "./farClipmap.js";
 import { worldToChunkKey, worldToSummaryTileKey, chunkKeyToString } from "./keys.js";
 import type { NaadfMetricsCollector } from "./metrics.js";
@@ -35,6 +38,11 @@ type StreamJob = {
   ringIndex?: number;
 };
 
+type ActiveFarTileBuild = {
+  tileKey: string;
+  build: FarSummaryTileBuildState;
+};
+
 export type NaadfWorldState = {
   config: NaadfPocConfig;
   source: TerrainSource;
@@ -45,6 +53,7 @@ export type NaadfWorldState = {
   farTiles: FarClipmapStore;
   farTileLastTouched: Map<string, number>;
   pendingJobs: Map<string, StreamJob>;
+  activeFarTileBuild: ActiveFarTileBuild | null;
   cameraX: number;
   cameraZ: number;
   velocityX: number;
@@ -73,6 +82,7 @@ export function createNaadfWorldState(
     farTiles: new Map(),
     farTileLastTouched: new Map(),
     pendingJobs: new Map(),
+    activeFarTileBuild: null,
     cameraX: 0,
     cameraZ: 0,
     velocityX: 0,
@@ -164,6 +174,7 @@ export function updateSummaryStreaming(params: {
 }): SummaryStreamingUpdate {
   const { state, cameraX, cameraZ, velocityX, velocityZ } = params;
   const nowMs = params.nowMs ?? performance.now();
+  const buildDeadlineMs = nowMs + resolveBuildBudgetMs(state);
   state.frame++;
   state.cameraX = cameraX;
   state.cameraZ = cameraZ;
@@ -228,6 +239,7 @@ export function updateSummaryStreaming(params: {
   let commitsDone = 0;
   const maxJobs = state.forceMissingStress ? 0 : state.config.streaming.maxJobsPerFrame;
   const maxCommits = state.forceMissingStress ? 0 : state.config.streaming.maxCommitsPerFrame;
+  let buildBudgetExhausted = state.forceMissingStress;
 
   for (const job of sortedJobs) {
     if (jobsDone >= maxJobs) break;
@@ -244,12 +256,18 @@ export function updateSummaryStreaming(params: {
       const tileKey = farTileKeyString(key);
       const existing = state.farTiles.get(tileKey);
       if (existing && (existing.state === "ready" || existing.state === "building")) continue;
+      if (state.activeFarTileBuild?.tileKey === tileKey) continue;
       jobsDone++;
     }
   }
 
+  if (!buildBudgetExhausted && state.activeFarTileBuild && commitsDone < maxCommits) {
+    buildBudgetExhausted = !stepActiveFarTileBuild(state, buildDeadlineMs);
+    if (!buildBudgetExhausted) commitsDone++;
+  }
+
   for (const entry of state.residents) {
-    if (entry.state !== "building" || commitsDone >= maxCommits) continue;
+    if (buildBudgetExhausted || entry.state !== "building" || commitsDone >= maxCommits) continue;
     if (state.forceMissingStress) continue;
 
     const replacing = entry.brick !== null;
@@ -264,6 +282,7 @@ export function updateSummaryStreaming(params: {
       entry.state = "stale";
       entry.builtFrame = state.frame;
       commitsDone++;
+      buildBudgetExhausted = performance.now() >= buildDeadlineMs;
       continue;
     }
 
@@ -275,6 +294,7 @@ export function updateSummaryStreaming(params: {
     entry.state = "ready";
     entry.builtFrame = state.frame;
     commitsDone++;
+    buildBudgetExhausted = performance.now() >= buildDeadlineMs;
   }
 
   if (commitsDone > 0) {
@@ -282,17 +302,20 @@ export function updateSummaryStreaming(params: {
   }
 
   for (const job of sortedJobs) {
-    if (commitsDone >= maxCommits) break;
+    if (buildBudgetExhausted || commitsDone >= maxCommits) break;
     if (job.kind !== "far_tile" || job.ringIndex === undefined) continue;
     const key = job.key as SummaryTileKey;
     const tileKey = farTileKeyString(key);
     if (state.farTiles.has(tileKey)) continue;
+    if (state.activeFarTileBuild?.tileKey === tileKey) continue;
     if (state.forceMissingStress) continue;
 
-    const tile = buildFarSummaryTile(key, job.ringIndex, state.config, state.source, state.revision++);
-    state.farTiles.set(tileKey, tile);
-    touchFarTile(state, tileKey);
-    commitsDone++;
+    state.activeFarTileBuild = {
+      tileKey,
+      build: createFarSummaryTileBuild(key, job.ringIndex, state.config, state.source, state.revision++),
+    };
+    buildBudgetExhausted = !stepActiveFarTileBuild(state, buildDeadlineMs);
+    if (!buildBudgetExhausted) commitsDone++;
   }
 
   const graceMs = state.config.streaming.evictionGraceSeconds * 1000;
@@ -323,10 +346,11 @@ export function updateSummaryStreaming(params: {
   const graceFrames = params.deltaSeconds > 1e-6
     ? Math.max(1, Math.ceil(state.config.streaming.evictionGraceSeconds / params.deltaSeconds))
     : Math.max(1, Math.ceil(state.config.streaming.evictionGraceSeconds * 60));
+  const activeFarTileKey = state.activeFarTileBuild?.tileKey;
   for (const [tileKey, lastFrame] of [...state.farTileLastTouched.entries()]) {
     if (state.frame - lastFrame < graceFrames) continue;
     if (!state.farTiles.has(tileKey)) {
-      state.farTileLastTouched.delete(tileKey);
+      if (tileKey !== activeFarTileKey) state.farTileLastTouched.delete(tileKey);
       continue;
     }
     state.farTiles.delete(tileKey);
@@ -334,7 +358,8 @@ export function updateSummaryStreaming(params: {
     evicted++;
   }
 
-  const buildingJobs = state.residents.filter((r) => r.state === "building").length;
+  const residentBuildingJobs = state.residents.filter((r) => r.state === "building").length;
+  const buildingJobs = residentBuildingJobs + (state.activeFarTileBuild ? 1 : 0);
   state.metrics.residentChunks = state.residents.filter((r) => r.state === "ready" || r.state === "stale").length;
   state.metrics.residentFarTiles = [...state.farTiles.values()].filter((t) => t.state === "ready" || t.state === "stale").length;
   state.metrics.queuedJobs = state.pendingJobs.size;
@@ -350,6 +375,23 @@ export function updateSummaryStreaming(params: {
     residentChunks: state.metrics.residentChunks,
     residentFarTiles: state.metrics.residentFarTiles,
   };
+}
+
+function stepActiveFarTileBuild(state: NaadfWorldState, deadlineMs: number): boolean {
+  const active = state.activeFarTileBuild;
+  if (!active) return true;
+  if (!stepFarSummaryTileBuild(active.build, deadlineMs)) return false;
+  const tile = finishFarSummaryTileBuild(active.build);
+  state.farTiles.set(active.tileKey, tile);
+  touchFarTile(state, active.tileKey);
+  state.activeFarTileBuild = null;
+  return true;
+}
+
+function resolveBuildBudgetMs(state: NaadfWorldState): number {
+  const config = state.config.streaming as { maxBuildMsPerFrame?: number };
+  const budgetMs = config.maxBuildMsPerFrame;
+  return Number.isFinite(budgetMs) && budgetMs !== undefined && budgetMs > 0 ? budgetMs : 2.0;
 }
 
 function chunkKeyInNearRadius(table: NearPageTable, key: ChunkKey): boolean {
