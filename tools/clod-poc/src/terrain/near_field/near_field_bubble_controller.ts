@@ -230,7 +230,9 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
 
   const activeColliderPages = (): number => {
     let total = 0;
-    for (const entry of chunkGroups.values()) total += entry.colliderIds.length;
+    for (const entry of chunkGroups.values()) {
+      if (entry.colliderIds.length > 0) total++;
+    }
     return total;
   };
 
@@ -482,7 +484,10 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     let failedPages = 0;
     for (const coord of requiredCoords) {
       const entry = chunkGroups.get(pageGroupKey(coord.px, coord.pz));
-      if (!entry) continue;
+      if (!entry) {
+        buildingPages++;
+        continue;
+      }
       if (entry.failed) failedPages++;
       else if (!entry.ready) buildingPages++;
       else if (entry.group.children.length > 0) readyPages++;
