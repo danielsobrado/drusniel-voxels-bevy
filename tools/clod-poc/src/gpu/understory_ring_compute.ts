@@ -1,5 +1,5 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
-import type { ResolvedDigEdit } from "./terrain_field_core.js";
+import { resolveDigEdits, type ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeUnderstoryRingShader } from "./wgsl_modules.js";
 import type { UnderstorySettings } from "../understory/understory_config.js";
 import {
@@ -16,7 +16,7 @@ import {
   understoryRingWorkgroupSize,
   type UnderstoryRingCounts,
 } from "../understory/understory_ring_math.js";
-import { getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
+import { getDigEditsSnapshot, getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { buildVegetationSlotPrefilter, VegetationSlotPrefilterCache } from "../vegetation/vegetation_slot_prefilter.js";
 
@@ -109,6 +109,7 @@ export class UnderstoryGpuRingCompute {
   private skippedDispatches = 0;
   private generation = 0;
   private frame = 0;
+  private lastDigEditRevision = -1;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -180,6 +181,7 @@ export class UnderstoryGpuRingCompute {
 
   dispatch(params: UnderstoryGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
+    this.syncDigEdits();
     const frame = this.frame++;
     const requestReadback = understoryRingRequestsDebugReadback(this.settings, frame);
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
@@ -250,6 +252,13 @@ export class UnderstoryGpuRingCompute {
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
     for (const slot of this.counterReadbacks) if (slot.busy) slot.destroyAfterMap = true; else slot.buffer.destroy();
+  }
+
+  private syncDigEdits(): void {
+    const revision = getDigEditRevision();
+    if (revision === this.lastDigEditRevision) return;
+    this.updateDigEdits(resolveDigEdits(getDigEditsSnapshot()));
+    this.lastDigEditRevision = revision;
   }
 
   private createBindGroup(): GPUBindGroup {
