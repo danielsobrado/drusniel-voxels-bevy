@@ -298,7 +298,8 @@ async function readPhase0Report(page: Page): Promise<JsonRecord> {
       ? { available: true, report: JSON.parse(JSON.stringify(report)) }
       : { available: false };
   });
-}\n
+}
+
 async function settle(page: Page, frames: number): Promise<void> {
   await settlePage(page, frames, SETTLE_TIMEOUT_MS);
 }
