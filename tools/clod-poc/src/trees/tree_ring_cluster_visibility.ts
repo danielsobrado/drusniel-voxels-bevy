@@ -39,6 +39,7 @@ export interface TreeRingClusterVisibilityMask {
   hiddenClusters: number;
   visibleClusters: number;
   unknownKeptClusters: number;
+  farSummaryConsultedClusters: number;
   candidateSlotsBeforePrefilter: number;
   candidateSlotsAfterPrefilter: number;
   skippedCandidateEstimate: number;
@@ -111,6 +112,7 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     hiddenClusters: prefilter.rejectedClusters,
     visibleClusters: prefilter.visibleClusters,
     unknownKeptClusters: prefilter.unknownKeptClusters,
+    farSummaryConsultedClusters: prefilter.farSummaryConsultedClusters,
     candidateSlotsBeforePrefilter: prefilter.candidateSlotsBeforePrefilter,
     candidateSlotsAfterPrefilter: prefilter.candidateSlotsAfterPrefilter,
     skippedCandidateEstimate: prefilter.skippedCandidateEstimate,
