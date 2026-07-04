@@ -14,6 +14,12 @@ import {
 import type { ClodPageNode } from "../../types.js";
 import type { ClodSelectionController } from "../selection/clod_selection_controller.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
+import {
+  canCommitBuild,
+  canCommitTerrainEdit,
+  publishPlayerEditAuthorityDecision,
+  type PlayerEditAuthorityConfig,
+} from "../../player/player_edit_authority.js";
 
 const DIG_REBUILD_DEBOUNCE_MS = 40;
 const CONSTRUCTION_CONFORM_DEBOUNCE_MS = 20;
@@ -50,6 +56,9 @@ export interface TerrainEditServiceDeps {
   treeSystem: { rebuildNodePatches(ids: string[]): void; markPatchesDirty?(): void } | null;
   understorySystem: { rebuildNodePatches(ids: string[]): void; markPatchesDirty?(): void } | null;
   fallingTrees: unknown[];
+  editAuthority?: PlayerEditAuthorityConfig;
+  getAuthorityOrigin?: () => THREE.Vector3 | null;
+  getAuthorityCounters?: () => Record<string, number> | null;
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
   refreshUnderstoryStats: () => void;
@@ -81,6 +90,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
   const pendingUnderstoryNodeIds = new Set<string>();
+
+  const authorityOrigin = (): THREE.Vector3 | null => deps.getAuthorityOrigin?.() ?? null;
+  const authorityCounters = (): Record<string, number> | null => deps.getAuthorityCounters?.() ?? null;
 
   const clearIds = (pending: Set<string>, ids: readonly string[]): void => {
     for (const id of ids) pending.delete(id);
@@ -224,6 +236,26 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     return true;
   };
 
+  const terrainCommitAllowed = (point: THREE.Vector3): boolean => {
+    if (!deps.editAuthority) return true;
+    const decision = canCommitTerrainEdit(deps.editAuthority, authorityOrigin(), point);
+    publishPlayerEditAuthorityDecision(authorityCounters(), decision);
+    if (decision.allowed) return true;
+    deps.setLastDigSummary(`terrain edit rejected: ${decision.reason}`);
+    deps.updateInfo();
+    return false;
+  };
+
+  const buildTerrainConformAllowed = (position: readonly [number, number, number]): boolean => {
+    if (!deps.editAuthority) return true;
+    const decision = canCommitBuild(deps.editAuthority, authorityOrigin(), position);
+    publishPlayerEditAuthorityDecision(authorityCounters(), decision);
+    if (decision.allowed) return true;
+    deps.setLastDigSummary(`construction terrain conform rejected: ${decision.reason}`);
+    deps.updateInfo();
+    return false;
+  };
+
   const performDig = async (ray: THREE.Ray) => {
     const hit = deps.terrainRaycast.raycastEditableTerrain(ray);
     if (!hit) {
@@ -231,6 +263,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       deps.updateInfo();
       return;
     }
+    if (!terrainCommitAllowed(hit.point)) return;
     const brushParams = deps.getBrushParams();
     const radius = brushParams.digRadius;
     const edit = {
@@ -272,6 +305,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   };
 
   const performConstructionTerrainConform = async (request: ConstructionTerrainConformRequest) => {
+    if (!buildTerrainConformAllowed(request.position)) return;
     const radius = Math.max(request.dimensionsM[0], request.dimensionsM[2]) * 0.5 + request.padMarginM;
     const topY = request.position[1] - request.dimensionsM[1] * 0.5;
     const hit = { point: new THREE.Vector3(request.position[0], topY, request.position[2]) };
