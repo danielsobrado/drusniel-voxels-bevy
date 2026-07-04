@@ -42,6 +42,7 @@ import {
 import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
 import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
+import { installConstructionCommitGuard } from "../../../construction/construction_commit_guard.js";
 import { resolvePlayerEditAuthorityConfig } from "../../../player/player_edit_authority.js";
 import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
 import { propPlacementSceneToProjectProps } from "../../../project/project_props.js";
@@ -296,21 +297,41 @@ export async function runRuntimeSystemsStartup(
       const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, searchParams);
       const maxRayDistanceM = editAuthority.allowFarCommit
         ? defaultConstructionConfig.placement.maxRayDistanceM
-        : Math.min(defaultConstructionConfig.placement.maxRayDistanceM, editAuthority.buildCommitRadiusM);
+        : Math.min(
+            defaultConstructionConfig.placement.maxRayDistanceM,
+            editAuthority.allowFarPreview ? editAuthority.buildPreviewRadiusM : editAuthority.buildCommitRadiusM,
+          );
+      const constructionConfig = {
+        ...defaultConstructionConfig,
+        placement: {
+          ...defaultConstructionConfig.placement,
+          maxRayDistanceM,
+        },
+      };
+      const counters = getHooks()?.stats?.counters ?? null;
+      if (counters) {
+        counters["player_build_preview_limit_m"] = maxRayDistanceM;
+        counters["player_build_commit_limit_m"] = editAuthority.allowFarCommit
+          ? maxRayDistanceM
+          : editAuthority.buildCommitRadiusM;
+      }
+      installConstructionCommitGuard({
+        domElement: app.renderer.domElement,
+        camera,
+        worldCells,
+        placement: constructionConfig.placement,
+        editAuthority,
+        getAuthorityOrigin: () => ({ x: camera.position.x, z: camera.position.z }),
+        getCounters: () => getHooks()?.stats?.counters ?? null,
+        onRejected: (reason) => console.info(`[construction] placement rejected: ${reason}`),
+      });
       constructionController = createConstructionController({
         scene,
         camera,
         rendererDomElement: app.renderer.domElement,
         worldCells,
-        config: {
-          ...defaultConstructionConfig,
-          placement: {
-            ...defaultConstructionConfig.placement,
-            maxRayDistanceM,
-          },
-        },
+        config: constructionConfig,
       });
-      getHooks()?.stats?.counters && (getHooks()!.stats!.counters["player_build_commit_limit_m"] = maxRayDistanceM);
     } catch (error) {
       console.error("[construction] failed to initialize", error);
     }
