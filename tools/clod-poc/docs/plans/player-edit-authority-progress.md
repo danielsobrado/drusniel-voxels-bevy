@@ -15,19 +15,20 @@ Scope: tools/clod-poc only. This document tracks the player edit authority, cons
 - Added construction capture-phase commit guard.
 - Made the construction commit guard support unbounded `infinite-*` scenes.
 - Disposed the construction commit guard with the construction controller wrapper.
+- Avoided finite construction-controller bounds for positive-coordinate infinite scenes by using an expanded construction world bound when `scene=infinite-*`.
 - Mirrored live-bubble GPU retry counters.
 - Added acceptance threshold gates for live-bubble retry/failure counters.
 - Added `TerrainEditDirtyQueue` and dirty edit event records with revision + world AABB + effect flags.
 - Wired terrain edits and construction terrain conform into the dirty edit queue.
 - Added tests for the dirty edit queue.
-- Cached terrain page geometry `BufferAttribute` objects in `page_geometry.ts` to reduce repeated attribute allocation when page/chunk meshes are converted to `THREE.BufferGeometry`.
+- Cached terrain page paint/biome typed arrays in `page_geometry.ts` to reduce repeated derived-data allocation while avoiding shared `THREE.BufferAttribute` ownership across geometries.
 
 ## Still pending
 
 - Add direct construction-controller commit authority so the ghost turns invalid/red beyond commit range before click. Current protection is safe through the pre-controller capture guard and conform gate, but the controller itself does not yet own the commit-distance reason.
 - Add explicit `live_bubble_gpu_retry_pages === 0` to `waitForConvergence()` in `tools/infinite-islands-acceptance.ts`. Current acceptance still fails via thresholds if retry pages remain, but the wait predicate itself is not yet retry-aware.
 - Run local typecheck/tests/acceptance and fix any compile/runtime drift.
-- Consider a deeper collider/BVH cache after profiling. The current safe cache reduces page geometry attribute allocations only.
+- Consider a deeper collider/BVH cache after profiling. The current safe cache reduces derived terrain paint/biome allocation only.
 - Construction LOD/impostor rendering is still a larger follow-up feature.
 
 ## Validation required locally
