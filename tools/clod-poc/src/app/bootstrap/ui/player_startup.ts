@@ -73,6 +73,9 @@ export function runPlayerStartup(
     triggerSwordAttack: () => combatController.trigger(),
   });
 
+  const updateOrbitControls = controls.update.bind(controls);
+  controls.update = () => (interaction.mode === "orbit" ? updateOrbitControls() : false);
+
   let lastPlayerFrameAt = performance.now();
   const updatePlayingInput = (now: number): void => {
     const deltaSeconds = Math.min(Math.max((now - lastPlayerFrameAt) / 1000, 0), MAX_PLAYER_FRAME_DELTA_SECONDS);
