@@ -1,3 +1,7 @@
+import { FRAME_PERF_FAR_SUMMARY_BUCKETS } from "./far_summary_subphase_timing.js";
+
+export { FRAME_PERF_FAR_SUMMARY_BUCKETS } from "./far_summary_subphase_timing.js";
+
 export const FRAME_PERF_BROAD_BUCKETS = [
   "frameSetupMs", "inputMs", "selectionUpdateMs", "clodApplyMs", "longViewDiagnosticsMs", "farSummaryMs",
   "constructionMs", "brushMs", "combatMs", "spellsMs", "terrainPhaseMs",
@@ -25,6 +29,7 @@ export const FRAME_PERF_MATERIAL_CHURN_BUCKETS = [
 export const FRAME_PERF_ALL_METRICS = [
   "frameMs", "selectionMs", "bubbleMs", "propsMs", "otherMs",
   ...FRAME_PERF_BROAD_BUCKETS,
+  ...FRAME_PERF_FAR_SUMMARY_BUCKETS,
   "selectionCutMs", "selectionBookMs", "selectionInfoMs", "selectionOverlaysMs",
   ...FRAME_PERF_PROP_BUCKETS,
   ...FRAME_PERF_MATERIAL_CHURN_BUCKETS,

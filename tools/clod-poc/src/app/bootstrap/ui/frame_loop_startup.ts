@@ -4,6 +4,7 @@ import type { TreeStats } from "../../../trees/index.js";
 import type { UnderstoryStats } from "../../../understory/index.js";
 import type { ForestLightingStats } from "../../../forest_lighting/index.js";
 import { bindClodFrameLoop } from "../../clod_frame_loop.js";
+import { timeFarSummarySubphase } from "../../frame_loop/far_summary_subphase_timing.js";
 import { GpuPassTiming } from "../../../core/gpu_pass_timing.js";
 import { TreeTimingPass } from "../../frame_loop/tree_timing_pass.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
@@ -393,11 +394,15 @@ export function runFrameLoopStartup(
     },
     farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
-          if (streamingScene) farShellController.moveTo(camera.position.x, camera.position.z);
-          sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
-          syncSunLightCounters();
+          if (streamingScene) {
+            timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z));
+          }
+          timeFarSummarySubphase("farSumSunLightMs", () => {
+            sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
+            syncSunLightCounters();
+          });
           input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
-          session.naadfStatsController?.updateDisplay();
+          timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay());
         } }
       : undefined,
     floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,

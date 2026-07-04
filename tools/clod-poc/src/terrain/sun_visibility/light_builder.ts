@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { sunVisibilityTileCellCenter, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
+import { sunVisibilityTileBounds, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
 import type { SunDirectionBin } from "./sun_bins.js";
 import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import type { SunLightOptions } from "./sun_light_options.js";
@@ -27,66 +27,119 @@ export interface LightTile {
   builtAtFrame: number;
 }
 
-export function buildLightTile(
-  request: LightTileBuildRequest,
-  provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
-  options: SunLightOptions,
-): LightTile {
+/** Resumable tile build: one tile is up to resolution² texels × ray steps of
+ *  height samples (hundreds of ms), far too much for a single frame. Callers
+ *  step the build against a deadline; at least one texel of progress is made
+ *  per call so the build always terminates. */
+export interface LightTileBuild {
+  readonly request: LightTileBuildRequest;
+  readonly resolution: number;
+  readonly values: Uint8Array;
+  cursor: number;
+  /** Per-tile constants hoisted out of the texel loop. */
+  readonly minX: number;
+  readonly minZ: number;
+  readonly cellSize: number;
+  readonly zeroHorizontal: boolean;
+  readonly stepX: number;
+  readonly stepZ: number;
+  readonly slope: number;
+}
+
+export function createLightTileBuild(request: LightTileBuildRequest, options: SunLightOptions): LightTileBuild {
   const resolution = options.tile.resolution;
-  const values = new Uint8Array(resolution * resolution);
+  const bounds = sunVisibilityTileBounds(request.tile, options.tile);
   const sun = request.sunVec.clone().normalize();
   const horizontalLength = Math.hypot(sun.x, sun.z);
+  const zeroHorizontal = horizontalLength < 0.001;
+  return {
+    request,
+    resolution,
+    values: new Uint8Array(resolution * resolution),
+    cursor: 0,
+    minX: bounds.minX,
+    minZ: bounds.minZ,
+    cellSize: options.tile.sizeWorld / resolution,
+    zeroHorizontal,
+    stepX: zeroHorizontal ? 0 : sun.x / horizontalLength,
+    stepZ: zeroHorizontal ? 0 : sun.z / horizontalLength,
+    slope: sun.y / Math.max(horizontalLength, 0.001),
+  };
+}
 
-  for (let cellZ = 0; cellZ < resolution; cellZ++) {
-    for (let cellX = 0; cellX < resolution; cellX++) {
-      const index = cellZ * resolution + cellX;
-      const receiver = sunVisibilityTileCellCenter(request.tile, cellX, cellZ, options.tile);
-      const receiverHeight = provider.readHeight(receiver.x, receiver.z);
-      if (!receiverHeight.present) {
-        values[index] = LIGHT_SAMPLE.missing;
-        continue;
-      }
-      if (horizontalLength < 0.001) {
-        values[index] = LIGHT_SAMPLE.lit;
-        continue;
-      }
+export function stepLightTileBuild(
+  build: LightTileBuild,
+  provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
+  options: SunLightOptions,
+  deadlineMs: number,
+): boolean {
+  const resolution = build.resolution;
+  const total = resolution * resolution;
+  const heightAt = provider.heightAt;
+  const values = build.values;
+  const stepWorld = options.ray.stepWorld;
+  const maxDistanceWorld = options.ray.maxDistanceWorld;
+  const receiverHeightBias = options.ray.receiverHeightBias;
+  const terrainHeightBias = options.ray.terrainHeightBias;
+  const missingOccludesFog = options.ray.missingOccludesFog;
 
-      const stepX = sun.x / horizontalLength;
-      const stepZ = sun.z / horizontalLength;
-      const slope = sun.y / Math.max(horizontalLength, 0.001);
-      const originY = receiverHeight.height + options.ray.receiverHeightBias;
+  while (build.cursor < total) {
+    const index = build.cursor;
+    const cellX = index % resolution;
+    const cellZ = (index / resolution) | 0;
+    const receiverX = build.minX + (cellX + 0.5) * build.cellSize;
+    const receiverZ = build.minZ + (cellZ + 0.5) * build.cellSize;
+    const receiverHeight = heightAt(receiverX, receiverZ);
+
+    if (Number.isNaN(receiverHeight)) {
+      values[index] = LIGHT_SAMPLE.missing;
+    } else if (build.zeroHorizontal) {
+      values[index] = LIGHT_SAMPLE.lit;
+    } else {
+      const originY = receiverHeight + receiverHeightBias;
       let shaded = false;
       let missing = false;
-
-      for (let distance = options.ray.stepWorld; distance <= options.ray.maxDistanceWorld; distance += options.ray.stepWorld) {
-        const sx = receiver.x + stepX * distance;
-        const sz = receiver.z + stepZ * distance;
-        const rayY = originY + slope * distance;
-        const terrain = provider.readHeight(sx, sz);
-        if (!terrain.present) {
+      for (let distance = stepWorld; distance <= maxDistanceWorld; distance += stepWorld) {
+        const terrain = heightAt(receiverX + build.stepX * distance, receiverZ + build.stepZ * distance);
+        if (Number.isNaN(terrain)) {
           missing = true;
-          if (options.ray.missingOccludesFog) {
+          if (missingOccludesFog) {
             shaded = true;
             break;
           }
           continue;
         }
-        if (terrain.height > rayY + options.ray.terrainHeightBias) {
+        if (terrain > originY + build.slope * distance + terrainHeightBias) {
           shaded = true;
           break;
         }
       }
-
       values[index] = shaded ? LIGHT_SAMPLE.shaded : missing ? LIGHT_SAMPLE.missing : LIGHT_SAMPLE.lit;
     }
-  }
 
+    build.cursor++;
+    if (performance.now() >= deadlineMs) break;
+  }
+  return build.cursor >= total;
+}
+
+export function finalizeLightTile(build: LightTileBuild): LightTile {
   return {
-    key: request.tile,
-    sunBin: request.sunBin,
-    terrainRevision: request.terrainRevision,
-    resolution,
-    values,
-    builtAtFrame: request.frameIndex,
+    key: build.request.tile,
+    sunBin: build.request.sunBin,
+    terrainRevision: build.request.terrainRevision,
+    resolution: build.resolution,
+    values: build.values,
+    builtAtFrame: build.request.frameIndex,
   };
+}
+
+export function buildLightTile(
+  request: LightTileBuildRequest,
+  provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
+  options: SunLightOptions,
+): LightTile {
+  const build = createLightTileBuild(request, options);
+  stepLightTileBuild(build, provider, options, Number.POSITIVE_INFINITY);
+  return finalizeLightTile(build);
 }

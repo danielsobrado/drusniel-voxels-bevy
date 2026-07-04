@@ -1,11 +1,21 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { buildLightTile, LIGHT_SAMPLE } from "../light_builder.js";
+import {
+  buildLightTile,
+  createLightTileBuild,
+  finalizeLightTile,
+  stepLightTileBuild,
+  LIGHT_SAMPLE,
+} from "../light_builder.js";
 import { parseSunLightOptions } from "../sun_light_options.js";
 
 function provider(heightFn: (x: number, z: number) => { height: number; present: boolean; revision?: number }) {
   return {
     terrainRevision: () => 1,
+    heightAt: (x: number, z: number) => {
+      const sample = heightFn(x, z);
+      return sample.present ? sample.height : Number.NaN;
+    },
     readHeight: (x: number, z: number) => ({ revision: 1, ...heightFn(x, z) }),
     tileRevision: () => 1,
   };
@@ -42,5 +52,31 @@ describe("sun light tile builder", () => {
   it("marks missing receiver data", () => {
     const tile = buildLightTile({ ...baseRequest, sunVec: new THREE.Vector3(1, 1, 0) }, provider(() => ({ height: 0, present: false })), options);
     expect([...tile.values].every((value) => value === LIGHT_SAMPLE.missing)).toBe(true);
+  });
+
+  it("stepped build under an expired deadline matches the monolithic build", () => {
+    const ridge = provider((x) => ({ height: x >= 20 && x <= 24 ? 10 : 0, present: true }));
+    const request = { ...baseRequest, sunVec: new THREE.Vector3(1, 0.15, 0) };
+    const expected = buildLightTile(request, ridge, options);
+
+    const build = createLightTileBuild(request, options);
+    let steps = 0;
+    while (!stepLightTileBuild(build, ridge, options, performance.now() - 1)) {
+      steps++;
+      expect(steps).toBeLessThan(100000);
+    }
+    expect(steps).toBeGreaterThan(1);
+    const tile = finalizeLightTile(build);
+    expect([...tile.values]).toEqual([...expected.values]);
+    expect(tile.key).toEqual(expected.key);
+    expect(tile.sunBin).toEqual(expected.sunBin);
+  });
+
+  it("guarantees at least one texel of progress per step", () => {
+    const flat = provider(() => ({ height: 0, present: true }));
+    const build = createLightTileBuild({ ...baseRequest, sunVec: new THREE.Vector3(1, 1, 0) }, options);
+    const before = build.cursor;
+    stepLightTileBuild(build, flat, options, performance.now() - 1);
+    expect(build.cursor).toBeGreaterThan(before);
   });
 });

@@ -13,6 +13,7 @@ import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
 import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
+import { takeFarSummarySubphaseTimings } from "./far_summary_subphase_timing.js";
 import type { StatsSyncThrottleDecision, StatsSyncThrottleDiagnostics } from "./stats_sync_throttle.js";
 import type { DynamicResolutionController, DynamicResolutionStats } from "../../rendering/dynamic_resolution.js";
 import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
@@ -226,6 +227,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const treeStats = input.currentTreeStats;
     const understoryStats = input.currentUnderstoryStats;
     const propStats = input.currentPropStats;
+    const farSummarySubphases = takeFarSummarySubphaseTimings();
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       frameMs,
@@ -236,6 +238,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       clodApplyMs: input.phaseTiming.clodApplyMs,
       longViewDiagnosticsMs: input.phaseTiming.longViewDiagnosticsMs,
       farSummaryMs: input.phaseTiming.farSummaryMs,
+      ...farSummarySubphases,
       constructionMs: input.phaseTiming.constructionMs,
       brushMs: input.phaseTiming.brushMs,
       combatMs: input.phaseTiming.combatMs,

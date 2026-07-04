@@ -14,6 +14,7 @@ import { runTerrainViewStartup } from "./terrain_view_startup.js";
 import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
+import { timeFarSummarySubphase } from "../frame_loop/far_summary_subphase_timing.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
 import { initNaadfIntegration, type NaadfIntegration } from "../../naadf/integration.js";
 import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
@@ -417,15 +418,19 @@ export async function bootstrapClodPoc() {
           }
           infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
           if (farSummaryIntegration) {
-            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+            timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera));
           }
-          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          if (naadfIntegration) {
+            timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
+          }
           if (infiniteFarShell) {
-            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+            timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex));
           }
-          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
-          if (postRenderer.state.terrainMaterialSource === "procedural") {
-            biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
+          if (terrainView.shadowProxyController) {
+            timeFarSummarySubphase("farSumShadowProxyMs", () => terrainView.shadowProxyController!.updateFrame(camera.position.x, camera.position.z));
+          }
+          if (postRenderer.state.terrainMaterialSource === "procedural" && biomeTextureStreaming) {
+            timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: camera.position.x, z: camera.position.z, frameIndex }));
           }
         }
       : undefined,
