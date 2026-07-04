@@ -5,6 +5,8 @@ import { intParam, statsFor, rankBuckets, avgCounter, minPositiveCounter, avgGpu
 export type { FramePerfMetric, FramePerfBroadBucket, FramePerfPropBucket, FramePerfPhaseTiming, FramePerfSample, FramePerfMetricStats, FramePerfBucketRank, FramePerfSummary, FramePerfSnapshot, FramePerfHooks, FramePerfProbe } from "./perf_probe_types.js";
 export { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS, FRAME_PERF_ALL_METRICS } from "./perf_probe_constants.js";
 
+const RECENT_SAMPLE_LIMIT = 120;
+
 declare global {
   interface Window {
     __drusnielPerf?: FramePerfHooks;
@@ -37,15 +39,15 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
   const metrics = Object.fromEntries(FRAME_PERF_ALL_METRICS.map((m) => [m, statsFor(samples, m)])) as Record<FramePerfMetric, import("./perf_probe_types.js").FramePerfMetricStats>;
   const renderedTotal = samples.reduce((s, sample) => s + sample.renderedCount, 0);
   const trianglesTotal = samples.reduce((s, sample) => s + sample.terrainTriangles, 0);
-  const vegetationGpuCandidatesBudgetBeforeRejectAvg =
+  const vegetationGpuCandidatesBudgetBeforeReject =
     avgCounter(samples, "treeGpuCandidateCountBeforePrefilter") +
     avgCounter(samples, "grassGpuCandidateCountBeforePrefilter") +
     avgCounter(samples, "understoryGpuCandidateCountBeforePrefilter");
-  const vegetationGpuCandidatesBudgetAfterRejectAvg =
+  const vegetationGpuCandidatesBudgetAfterReject =
     avgCounter(samples, "treeGpuCandidateCountAfterPrefilter") +
     avgCounter(samples, "grassGpuCandidateCountAfterPrefilter") +
     avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter");
-  const vegetationGpuCandidatesGeneratedAvg =
+  const vegetationGpuCandidatesGenerated =
     avgCounter(samples, "treeGpuCandidateCount") +
     avgCounter(samples, "grassGpuCandidateCount") +
     avgCounter(samples, "understoryGpuCandidateCount");
@@ -124,9 +126,9 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       vegetationGpuSourceFarSummaryAvg: vegetationSourceFarSummaryAvg,
       vegetationGpuSourceTerrainSamplerAvg: vegetationSourceTerrainSamplerAvg,
       vegetationGpuSourceFallbackAvg: vegetationSourceFallbackAvg,
-      vegetationGpuCandidatesBudgetBeforeRejectAvg,
-      vegetationGpuCandidatesBudgetAfterRejectAvg,
-      vegetationGpuCandidatesGeneratedAvg,
+      vegetationGpuCandidatesBudgetBeforeRejectAvg: vegetationGpuCandidatesBudgetBeforeReject,
+      vegetationGpuCandidatesBudgetAfterRejectAvg: vegetationGpuCandidatesBudgetAfterReject,
+      vegetationGpuCandidatesGeneratedAvg: vegetationGpuCandidatesGenerated,
       vegetationGpuRejectOutsideTerrainAvg: 0,
       vegetationGpuRejectTerrainHiddenAvg: treeRejectedClustersAvg,
       vegetationGpuRejectNoCoverageAvg: 0,
@@ -167,6 +169,11 @@ function exposePerfHooks(hooks: FramePerfHooks | null): void {
   else delete window.__drusnielPerf;
 }
 
+function appendRecentSample(recentSamples: FramePerfSample[], sample: FramePerfSample): void {
+  recentSamples.push(sample);
+  if (recentSamples.length > RECENT_SAMPLE_LIMIT) recentSamples.shift();
+}
+
 export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): FramePerfProbe | null {
   if (searchParams.get("perfProbe") !== "1") {
     exposePerfHooks(null);
@@ -176,15 +183,35 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
   const targetSampleFrames = Math.max(1, intParam(searchParams, ["perfSampleFrames", "perfFrames"], 300));
   let observedFrames = 0;
   let samples: FramePerfSample[] = [];
+  let recentSamples: FramePerfSample[] = [];
   const snapshot = (): FramePerfSnapshot => ({
-    ready: samples.length >= targetSampleFrames, observedFrames, samples: samples.slice(),
+    ready: samples.length >= targetSampleFrames,
+    observedFrames,
+    samples: samples.slice(),
+    recentSamples: recentSamples.slice(),
     ...summarizeFramePerfSamples(samples, warmupFrames, targetSampleFrames),
   });
   const hooks: FramePerfHooks = {
-    ready: false, observedFrames: 0, sampleCount: 0, warmupFrames, targetSampleFrames,
-    lastSample: null, samples,
+    ready: false,
+    observedFrames: 0,
+    sampleCount: 0,
+    warmupFrames,
+    targetSampleFrames,
+    lastSample: null,
+    samples,
+    recentSamples,
     snapshot,
-    reset: () => { observedFrames = 0; samples = []; hooks.ready = false; hooks.observedFrames = 0; hooks.sampleCount = 0; hooks.lastSample = null; hooks.samples = samples; },
+    reset: () => {
+      observedFrames = 0;
+      samples = [];
+      recentSamples = [];
+      hooks.ready = false;
+      hooks.observedFrames = 0;
+      hooks.sampleCount = 0;
+      hooks.lastSample = null;
+      hooks.samples = samples;
+      hooks.recentSamples = recentSamples;
+    },
   };
   exposePerfHooks(hooks);
   return {
@@ -192,9 +219,11 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
     record(sample: FramePerfSample): void {
       observedFrames += 1;
       hooks.observedFrames = observedFrames;
+      appendRecentSample(recentSamples, sample);
+      hooks.recentSamples = recentSamples;
+      hooks.lastSample = sample;
       if (observedFrames <= warmupFrames || samples.length >= targetSampleFrames) return;
       samples.push(sample);
-      hooks.lastSample = sample;
       hooks.sampleCount = samples.length;
       hooks.ready = samples.length >= targetSampleFrames;
     },
