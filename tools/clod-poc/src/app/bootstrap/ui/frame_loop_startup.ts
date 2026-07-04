@@ -242,6 +242,7 @@ export function runFrameLoopStartup(
     buildBudgetPagesPerFrame: positiveIntegerParam(searchParams, "liveClodRootBudget"),
     maxCachedPages: positiveIntegerParam(searchParams, "liveClodRootMaxCached"),
     onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
+    onRootsChanged: () => selectionController.invalidate(),
   });
   const updateSelectionWithStreaming = () => {
     const center = interaction.mode === "playing" ? player.position : controls.target;
