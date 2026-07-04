@@ -149,7 +149,7 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
     state.proceduralMicroNormals = false;
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
-    state.bubble = false;
+    if (!state.liveBubblePinned) state.bubble = false;
     state.showBounds = false;
     state.showSeamPoints = false;
     state.showCrossLodBorders = false;
@@ -336,13 +336,5 @@ export function treeUiState(state: ClodAppState): import("../../runtime/vegetati
 }
 
 export function understoryUiState(state: ClodAppState): import("../../runtime/vegetation/understory_controller.js").UnderstoryControllerUiState {
-  return state;
-}
-
-export function forestLightingUiState(state: ClodAppState): import("../../runtime/forest_lighting/forest_lighting_controller.js").ForestLightingControllerUiState {
-  return state;
-}
-
-export function waterUiState(state: ClodAppState): import("../../runtime/water_weather/water_controller.js").WaterControllerUiState {
   return state;
 }
