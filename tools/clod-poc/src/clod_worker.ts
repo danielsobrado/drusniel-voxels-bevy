@@ -473,12 +473,21 @@ function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type: "bui
   }
   const serialized = serializeNodes(nodes);
   const transferables: Transferable[] = [];
-  for (const node of serialized) collectNodeTransferables(node, transferables);
+  let transferBytes = 0;
+  for (const node of serialized) {
+    transferBytes += node.mesh.positions.byteLength
+      + node.mesh.normals.byteLength
+      + node.mesh.paintSlots.byteLength
+      + node.mesh.materialWeights.byteLength
+      + node.mesh.indices.byteLength;
+    collectNodeTransferables(node, transferables);
+  }
   post({
     type: "streamRootsBuilt",
     requestId: request.requestId,
     nodes: serialized,
     buildMs: performance.now() - t0,
+    transferBytes,
   }, transferables);
 }
 
