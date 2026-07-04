@@ -7,6 +7,9 @@ import {
   requiredStreamingPageCoords,
 } from "./near_field_bubble_controller.js";
 import type { ClodPageNode, PageFootprint } from "../../types.js";
+import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
+import type { TerrainMaterialController } from "../material/terrain_material_controller.js";
+import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 
 vi.mock("../../terrain/terrain.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../terrain/terrain.js")>();
@@ -21,6 +24,13 @@ vi.mock("../../terrain/terrain.js", async (importOriginal) => {
 const TEST_CFG = {
   page: { chunks_per_page: 2, chunk_size: 16 },
 } as import("../../config.js").ClodPagesConfig;
+
+const NON_EMPTY_CHUNK: ChunkMesh = {
+  positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+  normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+  materials: new Float32Array([0, 0, 0]),
+  indices: new Uint32Array([0, 1, 2]),
+};
 
 function makeNode(
   id = "L0:1,1",
@@ -45,6 +55,50 @@ function makeNode(
 function makeView(node: ClodPageNode, target = 1) {
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
   return { node, mesh, fade: 1, target };
+}
+
+function makeMaterialController(): TerrainMaterialController {
+  const sharedMaterial = {
+    material: new THREE.MeshStandardMaterial(),
+    setBaseColor: vi.fn(),
+    onMaterialChanged: () => () => {},
+  };
+  return {
+    sharedMaterial,
+    materials: new Map(),
+    makeTerrainMaterial: () => sharedMaterial,
+    configureChunkMaterial: vi.fn(),
+  } as unknown as TerrainMaterialController;
+}
+
+function makeController(options: {
+  scene?: THREE.Scene;
+  materialController?: TerrainMaterialController;
+  getGpuMesher?: () => GpuChunkMesher | null;
+  chunkGroupBuildBudget?: number;
+  maxCachedChunkGroups?: number;
+  evictDistanceMultiplier?: number;
+  streamingLiveTerrain?: boolean;
+  terrainColliders?: TerrainColliderSet | null;
+} = {}) {
+  return createNearFieldBubbleController({
+    scene: options.scene ?? new THREE.Scene(),
+    materialController: options.materialController ?? makeMaterialController(),
+    cfg: TEST_CFG,
+    worldBounds: { cellsX: 64, cellsZ: 64 },
+    getTintBubble: () => false,
+    getGpuMesher: options.getGpuMesher ?? (() => null),
+    chunkGroupBuildBudget: options.chunkGroupBuildBudget ?? 4,
+    maxCachedChunkGroups: options.maxCachedChunkGroups ?? 64,
+    evictDistanceMultiplier: options.evictDistanceMultiplier ?? 2.5,
+    streamingLiveTerrain: options.streamingLiveTerrain ?? false,
+    terrainColliders: options.terrainColliders,
+  });
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("requiredStreamingPageCoords", () => {
@@ -98,33 +152,12 @@ describe("liveBubbleOwnsPageView", () => {
 
 describe("createNearFieldBubbleController", () => {
   it("keeps welded page visible when GPU chunk meshing fails", async () => {
-    const scene = new THREE.Scene();
-    const sharedMaterial = {
-      material: new THREE.MeshStandardMaterial(),
-      setBaseColor: vi.fn(),
-      onMaterialChanged: () => () => {},
-    };
-    const materialController = {
-      sharedMaterial,
-      materials: new Map(),
-      makeTerrainMaterial: () => sharedMaterial,
-      configureChunkMaterial: vi.fn(),
-    } as unknown as import("../material/terrain_material_controller.js").TerrainMaterialController;
-
     const rejectMesher = {
       meshChunk: vi.fn(() => Promise.reject(new Error("gpu fail"))),
     };
 
-    const controller = createNearFieldBubbleController({
-      scene,
-      materialController,
-      cfg: TEST_CFG,
-      worldBounds: { cellsX: 64, cellsZ: 64 },
-      getTintBubble: () => false,
-      getGpuMesher: () => rejectMesher as unknown as import("../../gpu/gpu_chunk_mesher.js").GpuChunkMesher,
-      chunkGroupBuildBudget: 4,
-      maxCachedChunkGroups: 64,
-      evictDistanceMultiplier: 2.5,
+    const controller = makeController({
+      getGpuMesher: () => rejectMesher as unknown as GpuChunkMesher,
       streamingLiveTerrain: false,
     });
 
@@ -157,19 +190,6 @@ describe("createNearFieldBubbleController", () => {
   });
 
   it("does not mark page failed when GPU returns empty but successful chunks", async () => {
-    const scene = new THREE.Scene();
-    const sharedMaterial = {
-      material: new THREE.MeshStandardMaterial(),
-      setBaseColor: vi.fn(),
-      onMaterialChanged: () => () => {},
-    };
-    const materialController = {
-      sharedMaterial,
-      materials: new Map(),
-      makeTerrainMaterial: () => sharedMaterial,
-      configureChunkMaterial: vi.fn(),
-    } as unknown as import("../material/terrain_material_controller.js").TerrainMaterialController;
-
     const emptyMesher = {
       meshChunk: vi.fn(() => Promise.resolve({
         positions: new Float32Array(),
@@ -179,16 +199,8 @@ describe("createNearFieldBubbleController", () => {
       })),
     };
 
-    const controller = createNearFieldBubbleController({
-      scene,
-      materialController,
-      cfg: TEST_CFG,
-      worldBounds: { cellsX: 64, cellsZ: 64 },
-      getTintBubble: () => false,
-      getGpuMesher: () => emptyMesher as unknown as import("../../gpu/gpu_chunk_mesher.js").GpuChunkMesher,
-      chunkGroupBuildBudget: 4,
-      maxCachedChunkGroups: 64,
-      evictDistanceMultiplier: 2.5,
+    const controller = makeController({
+      getGpuMesher: () => emptyMesher as unknown as GpuChunkMesher,
       streamingLiveTerrain: false,
     });
 
@@ -217,5 +229,97 @@ describe("createNearFieldBubbleController", () => {
     });
 
     expect(view.mesh.visible).toBe(true);
+  });
+
+  it("prioritizes required streaming pages before render-view bubble pages", () => {
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      chunkGroupBuildBudget: 1,
+      streamingLiveTerrain: true,
+    });
+    const farViewNode = makeNode("L0:3,3", { minX: 96, maxX: 128, minZ: 96, maxZ: 128 });
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 96,
+      bubbleCenter: new THREE.Vector3(64, 0, 64),
+      bubbleViews: [makeView(farViewNode)],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(stats.chunkGroupsBuiltThisFrame).toBe(1);
+    expect(mesher.meshChunk).toHaveBeenCalled();
+    expect(mesher.meshChunk.mock.calls[0]?.[0]).toBe(2);
+    expect(mesher.meshChunk.mock.calls[0]?.[1]).toBe(2);
+  });
+
+  it("counts missing required streaming pages as building", () => {
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      chunkGroupBuildBudget: 1,
+      streamingLiveTerrain: true,
+    });
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 96,
+      bubbleCenter: new THREE.Vector3(4096, 0, -2048),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(stats.requiredPages).toBeGreaterThan(1);
+    expect(stats.readyPages).toBe(0);
+    expect(stats.buildingPages).toBe(stats.requiredPages);
+  });
+
+  it("counts streamed collider pages by page, not by chunk collider", async () => {
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const colliders = new Map<string, unknown>();
+    const terrainColliders = {
+      upsertPage: vi.fn((page: { id: string }) => {
+        colliders.set(page.id, page);
+      }),
+      removePage: vi.fn((id: string) => colliders.delete(id)),
+    } as unknown as TerrainColliderSet;
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+      terrainColliders,
+    });
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+    await vi.waitFor(() => expect(mesher.meshChunk).toHaveBeenCalledTimes(4));
+    await flushPromises();
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 2,
+    });
+
+    expect(stats.readyPages).toBe(1);
+    expect(stats.streamedColliderPages).toBe(1);
+    expect(stats.colliderRegistrations).toBe(4);
   });
 });
