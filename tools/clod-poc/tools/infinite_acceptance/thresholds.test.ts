@@ -10,6 +10,8 @@ function validCounters(): Record<string, number> {
   counters["live_bubble_ready_pages"] = 1;
   counters["live_bubble_streamed_collider_pages"] = 1;
   counters["live_bubble_collider_registrations"] = 1;
+  counters["live_clod_stream_required_pages"] = 1;
+  counters["live_clod_stream_cached_pages"] = 1;
   return counters;
 }
 
@@ -53,9 +55,19 @@ describe("infinite islands thresholds", () => {
     );
   });
 
-  it("extracts live collider counters from stats.counters", () => {
+  it("requires streamed CLOD root pages", () => {
+    const counters = validCounters();
+    counters["live_clod_stream_cached_pages"] = 0;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_cached_pages=0 failed: must be > 0",
+    );
+  });
+
+  it("extracts live collider and CLOD stream counters from stats.counters", () => {
     const counters = validCounters();
 
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
   });
 });
