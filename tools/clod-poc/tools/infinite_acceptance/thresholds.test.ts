@@ -12,6 +12,10 @@ function validCounters(): Record<string, number> {
   counters["live_bubble_collider_registrations"] = 1;
   counters["live_clod_stream_required_pages"] = 1;
   counters["live_clod_stream_cached_pages"] = 1;
+  counters["infinite_hydrology_outside_sample_valid"] = 1;
+  counters["infinite_hydrology_nonrepeat_delta"] = 1;
+  counters["infinite_hydrology_nonrepeat_ok"] = 1;
+  counters["infinite_hydrology_camera_outside_startup"] = 1;
   return counters;
 }
 
@@ -64,10 +68,20 @@ describe("infinite islands thresholds", () => {
     );
   });
 
-  it("extracts live collider and CLOD stream counters from stats.counters", () => {
+  it("requires non-repeating infinite hydrology samples", () => {
+    const counters = validCounters();
+    counters["infinite_hydrology_nonrepeat_ok"] = 0;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "infinite_hydrology_nonrepeat_ok=0 failed: must equal 1",
+    );
+  });
+
+  it("extracts live collider, CLOD stream, and hydrology counters from stats.counters", () => {
     const counters = validCounters();
 
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
+    expect(extractAcceptanceCounters({ counters })["infinite_hydrology_nonrepeat_ok"]).toBe(1);
   });
 });
