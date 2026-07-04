@@ -14,6 +14,7 @@ export interface FarShellMetrics {
 
   farSummaryTilesRequired: number;
   farSummaryTilesReady: number;
+  farSummaryTilesBuilding: number;
   farSummaryTilesMissing: number;
   farSummaryTilesStale: number;
   farSummaryTilesBuiltThisFrame: number;
@@ -37,6 +38,7 @@ export function createFarShellMetrics(): FarShellMetrics {
     farShellSnappedZ: 0,
     farSummaryTilesRequired: 0,
     farSummaryTilesReady: 0,
+    farSummaryTilesBuilding: 0,
     farSummaryTilesMissing: 0,
     farSummaryTilesStale: 0,
     farSummaryTilesBuiltThisFrame: 0,
@@ -62,6 +64,7 @@ export function publishFarShellMetricsToCounters(
   counters["far_shell_last_rebuild_ms"] = metrics.farShellLastRebuildMs;
   counters["far_summary_tiles_required"] = metrics.farSummaryTilesRequired;
   counters["far_summary_tiles_ready"] = metrics.farSummaryTilesReady;
+  counters["far_summary_tiles_building"] = metrics.farSummaryTilesBuilding;
   counters["far_summary_tiles_missing"] = metrics.farSummaryTilesMissing;
   counters["far_summary_tiles_stale"] = metrics.farSummaryTilesStale;
   counters["far_summary_tiles_built_this_frame"] = metrics.farSummaryTilesBuiltThisFrame;
