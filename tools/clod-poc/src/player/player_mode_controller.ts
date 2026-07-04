@@ -6,6 +6,7 @@ import {
   PlayerInteractionState,
 } from "../player_controller.js";
 import type { TerrainColliderSet } from "../terrain/terrain_collider.js";
+import { WATER_LEVEL } from "../terrain/terrain.js";
 
 export interface PlayerModeControllerDeps {
   renderer: { domElement: HTMLElement };
@@ -35,7 +36,54 @@ export interface PlayerModeController {
   applyQuerySpawn(): void;
 }
 
+interface QuerySpawnPoint {
+  x: number;
+  y: number;
+  z: number;
+  adjusted: boolean;
+}
+
 const ORBIT_RETURN_OFFSET = new THREE.Vector3(8, 7, 8);
+const QUERY_SPAWN_DRY_CLEARANCE_M = 2;
+const QUERY_SPAWN_SEARCH_RADII_M = [0, 16, 32, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] as const;
+const QUERY_SPAWN_SEARCH_DIRECTIONS = 24;
+
+function querySpawnDryEnough(height: number): boolean {
+  return Number.isFinite(height) && height >= WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M;
+}
+
+function resolveQuerySpawnPoint(
+  x: number,
+  z: number,
+  surfaceHeight: (x: number, z: number) => number,
+): QuerySpawnPoint {
+  let best: QuerySpawnPoint = {
+    x,
+    y: surfaceHeight(x, z),
+    z,
+    adjusted: false,
+  };
+  if (querySpawnDryEnough(best.y)) return best;
+
+  for (const radius of QUERY_SPAWN_SEARCH_RADII_M) {
+    if (radius <= 0) continue;
+    for (let i = 0; i < QUERY_SPAWN_SEARCH_DIRECTIONS; i++) {
+      const angle = (i / QUERY_SPAWN_SEARCH_DIRECTIONS) * Math.PI * 2;
+      const candidateX = x + Math.cos(angle) * radius;
+      const candidateZ = z + Math.sin(angle) * radius;
+      const candidateY = surfaceHeight(candidateX, candidateZ);
+      if (!Number.isFinite(candidateY)) continue;
+      if (candidateY > best.y) best = { x: candidateX, y: candidateY, z: candidateZ, adjusted: true };
+      if (querySpawnDryEnough(candidateY)) {
+        return { x: candidateX, y: candidateY, z: candidateZ, adjusted: true };
+      }
+    }
+  }
+
+  return best.adjusted || best.x !== x || best.z !== z
+    ? best
+    : { ...best, y: Math.max(best.y, WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M), adjusted: false };
+}
 
 export function createPlayerModeController(deps: PlayerModeControllerDeps): PlayerModeController {
   const playerRaycaster = new THREE.Raycaster();
@@ -145,14 +193,22 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     const xVal = Number(qx);
     const zVal = Number(qz);
     const yawVal = qyaw !== null ? Number(qyaw) : 0;
-    const terrainY = deps.surfaceHeight(xVal, zVal);
+    if (!Number.isFinite(xVal) || !Number.isFinite(zVal)) return;
 
-    deps.controls.target.set(xVal, terrainY, zVal);
-    deps.camera.position.set(xVal, terrainY + 15, zVal + 20);
+    const spawn = resolveQuerySpawnPoint(xVal, zVal, deps.surfaceHeight);
+    if (spawn.adjusted) {
+      console.info(
+        `[player] query spawn adjusted to dry land: requested=(${xVal.toFixed(1)}, ${zVal.toFixed(1)}) ` +
+          `resolved=(${spawn.x.toFixed(1)}, ${spawn.z.toFixed(1)}) y=${spawn.y.toFixed(1)}`,
+      );
+    }
+
+    deps.controls.target.set(spawn.x, spawn.y, spawn.z);
+    deps.camera.position.set(spawn.x, spawn.y + 15, spawn.z + 20);
     deps.camera.lookAt(deps.controls.target);
     deps.controls.update();
 
-    deps.player.spawn(new THREE.Vector3(xVal, terrainY, zVal));
+    deps.player.spawn(new THREE.Vector3(spawn.x, spawn.y, spawn.z));
     deps.onStartPlayingFacing(yawVal, 0);
     deps.interaction.startPlaying();
     deps.controls.enabled = false;
