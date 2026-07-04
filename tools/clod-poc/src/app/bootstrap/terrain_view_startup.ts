@@ -403,7 +403,10 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   nodeLabelOverlay.setVisible(state.showNodeLabels);
 
   const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
-  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1";
+  // infinite-islands streams live-bubble pages continuously; CPU chunk meshing
+  // cannot keep up, so the async GPU mesher defaults on (gpuMesh=0 disables).
+  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1"
+    || (queryScene === "infinite-islands" && searchParams.get("gpuMesh") !== "0");
   const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
   let gpuMesher: GpuChunkMesher | null = null;
   if (gpuMeshEnabled) {

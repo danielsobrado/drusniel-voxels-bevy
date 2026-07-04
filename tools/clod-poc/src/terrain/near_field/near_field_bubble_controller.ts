@@ -12,6 +12,8 @@ import type { WorldBounds } from "../../terrain/terrain_surface.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
+/** Per-frame budget for CPU-fallback chunk meshing; one chunk can cost 10–90 ms, so at most one runs once the budget is spent. */
+const CPU_CHUNK_MESH_BUDGET_MS = 6;
 
 export interface ChunkGroupEntry {
   group: THREE.Group;
@@ -83,6 +85,14 @@ interface PageCoord {
   pz: number;
   centerX: number;
   centerZ: number;
+}
+
+interface PendingCpuPageBuild {
+  px: number;
+  pz: number;
+  worldBounds: WorldBounds;
+  chunks: Array<[number, number]>;
+  failures: number;
 }
 
 function pageGroupKey(px: number, pz: number): string {
@@ -195,6 +205,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
+  const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
   const terrainColliders = deps.terrainColliders ?? null;
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
@@ -259,6 +270,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       m.material.dispose();
     }
     chunkGroups.delete(nodeId);
+    cpuPendingBuilds.delete(nodeId);
   };
 
   const cpuFallbackChunks = (
@@ -366,33 +378,62 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       return entry;
     }
 
+    // CPU fallback: never mesh a whole page synchronously — queue the chunks
+    // and drain them in update() under a per-frame budget. The entry follows
+    // the same deferred-ready contract as the GPU path.
+    const chunks: Array<[number, number]> = [];
     for (let dz = 0; dz < P; dz++) {
-      for (let dx = 0; dx < P; dx++) {
-        addChunkMesh(
-          group,
-          mats,
-          unsubs,
-          colliderIds,
-          meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds),
-          chunkColliderId(key, dx, dz),
-          liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
-        );
-      }
+      for (let dx = 0; dx < P; dx++) chunks.push([dx, dz]);
     }
+    group.visible = false;
     deps.scene.add(group);
     const entry: ChunkGroupEntry = {
       group,
       mats,
       unsubs,
       colliderIds,
-      ready: true,
+      ready: false,
       failed: false,
       centerX,
       centerZ,
       lastTouchFrame: 0,
     };
     chunkGroups.set(key, entry);
+    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks, failures: 0 });
     return entry;
+  };
+
+  const drainCpuPendingBuilds = (tBubbleStart: number) => {
+    while (cpuPendingBuilds.size > 0) {
+      const next = cpuPendingBuilds.entries().next().value as [string, PendingCpuPageBuild];
+      const [key, job] = next;
+      const entry = chunkGroups.get(key);
+      if (!entry || job.chunks.length === 0) {
+        cpuPendingBuilds.delete(key);
+        continue;
+      }
+      const [dx, dz] = job.chunks.shift()!;
+      try {
+        addChunkMesh(
+          entry.group,
+          entry.mats,
+          entry.unsubs,
+          entry.colliderIds,
+          meshChunk(job.px * P + dx, job.pz * P + dz, deps.cfg, job.worldBounds),
+          chunkColliderId(key, dx, dz),
+          liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
+        );
+      } catch (error) {
+        job.failures++;
+        console.error(`[bubble] CPU chunk meshing failed for page ${key} chunk (${dx},${dz})`, error);
+      }
+      if (job.chunks.length === 0) {
+        cpuPendingBuilds.delete(key);
+        entry.failed = job.failures > 0;
+        entry.ready = true;
+      }
+      if (performance.now() - tBubbleStart >= CPU_CHUNK_MESH_BUDGET_MS) return;
+    }
   };
 
   const ensureChunkGroup = (node: ClodPageNode): ChunkGroupEntry => {
@@ -495,6 +536,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           }
         }
 
+        drainCpuPendingBuilds(tBubbleStart);
         evictions = evictCache(input.bubbleCenter, input.bubbleRadius);
       } else if (chunkGroups.size > 0) {
         for (const [nodeId, { group }] of chunkGroups) {
