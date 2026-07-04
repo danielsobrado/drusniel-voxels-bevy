@@ -128,22 +128,82 @@ export function splatUnderstoryInfluence(
   }
 }
 
-export function finalizeForestLightingField(
+/** Scratch state shared by the row-sliced finalize phases so a rebuild can be
+ *  spread across frames. Create once per rebuild, then run blur rows, finalize
+ *  rows, and the clamp pass in that order. */
+export interface ForestLightingFinalizeContext {
+  blurredCanopy: Float32Array;
+  shadow: Float32Array;
+  sunX: number;
+  sunZ: number;
+  projectionCells: number;
+  shadowSoftnessCells: number;
+}
+
+export function createForestLightingFinalizeContext(
   field: ForestLightingField,
   sunDirection: THREE.Vector3,
   settings: ForestLightingSettings,
-): void {
-  const resolution = field.resolution;
-  const length = resolution * resolution;
-  const blurredCanopy = blurArray(field.canopyDensity, resolution, settings.field.blurRadiusCells);
-  const shadow = new Float32Array(length);
+): ForestLightingFinalizeContext {
+  const length = field.resolution * field.resolution;
   const sunXz = new THREE.Vector2(sunDirection.x, sunDirection.z);
   if (sunXz.lengthSq() <= 1e-8) sunXz.set(1, 0);
   else sunXz.normalize();
-  const projectionCells = settings.shadowProxy.projectionDistanceM / cellSizeM(field);
-  const shadowSoftnessCells = Math.max(0.5, settings.shadowProxy.softnessM / cellSizeM(field));
+  return {
+    blurredCanopy: new Float32Array(length),
+    shadow: new Float32Array(length),
+    sunX: sunXz.x,
+    sunZ: sunXz.y,
+    projectionCells: settings.shadowProxy.projectionDistanceM / cellSizeM(field),
+    shadowSoftnessCells: Math.max(0.5, settings.shadowProxy.softnessM / cellSizeM(field)),
+  };
+}
 
-  for (let z = 0; z < resolution; z++) {
+export function blurForestLightingCanopyRows(
+  field: ForestLightingField,
+  context: ForestLightingFinalizeContext,
+  settings: ForestLightingSettings,
+  rowStart: number,
+  rowEnd: number,
+): void {
+  const resolution = field.resolution;
+  const radius = settings.field.blurRadiusCells;
+  const source = field.canopyDensity;
+  const target = context.blurredCanopy;
+  if (radius <= 0) {
+    target.set(source.subarray(rowStart * resolution, rowEnd * resolution), rowStart * resolution);
+    return;
+  }
+  for (let z = rowStart; z < rowEnd; z++) {
+    for (let x = 0; x < resolution; x++) {
+      let sum = 0;
+      let weightSum = 0;
+      for (let dz = -radius; dz <= radius; dz++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const d = Math.hypot(dx, dz);
+          if (d > radius + 0.001) continue;
+          const weight = 1 / (1 + d);
+          sum += sampleArray(source, resolution, x + dx, z + dz) * weight;
+          weightSum += weight;
+        }
+      }
+      target[z * resolution + x] = weightSum > 0 ? sum / weightSum : source[z * resolution + x];
+    }
+  }
+}
+
+export function finalizeForestLightingRows(
+  field: ForestLightingField,
+  context: ForestLightingFinalizeContext,
+  settings: ForestLightingSettings,
+  rowStart: number,
+  rowEnd: number,
+): void {
+  const resolution = field.resolution;
+  const blurredCanopy = context.blurredCanopy;
+  const shadow = context.shadow;
+
+  for (let z = rowStart; z < rowEnd; z++) {
     for (let x = 0; x < resolution; x++) {
       const index = cellIndex(field, x, z);
       const canopy = clamp01(field.canopyDensity[index]);
@@ -169,7 +229,7 @@ export function finalizeForestLightingField(
         : 0;
       field.fogDensity[index] = clamp01(fog);
 
-      const sunFacingEdge = clamp01((gradientX * sunXz.x + gradientZ * sunXz.y) * 3 + 0.5);
+      const sunFacingEdge = clamp01((gradientX * context.sunX + gradientZ * context.sunZ) * 3 + 0.5);
       const gap = clamp01(1 - blurred);
       field.sunShaftMask[index] = settings.atmosphere.enabled && edge > settings.atmosphere.sunShaftsThreshold
         ? clamp01(edge * sunFacingEdge * gap * settings.atmosphere.sunShaftsStrength)
@@ -179,22 +239,40 @@ export function finalizeForestLightingField(
         splatProjectedShadow(
           shadow,
           resolution,
-          x - sunXz.x * projectionCells * settings.shadowProxy.sunDirectionWeight,
-          z - sunXz.y * projectionCells * settings.shadowProxy.sunDirectionWeight,
-          shadowSoftnessCells,
+          x - context.sunX * context.projectionCells * settings.shadowProxy.sunDirectionWeight,
+          z - context.sunZ * context.projectionCells * settings.shadowProxy.sunDirectionWeight,
+          context.shadowSoftnessCells,
           canopy * settings.shadowProxy.strength,
         );
       }
     }
   }
+}
 
+export function finalizeForestLightingClampPass(
+  field: ForestLightingField,
+  context: ForestLightingFinalizeContext,
+  settings: ForestLightingSettings,
+): void {
+  const length = field.resolution * field.resolution;
   for (let i = 0; i < length; i++) {
     field.canopyDensity[i] = clamp01(field.canopyDensity[i]);
-    field.shadowProxy[i] = settings.shadowProxy.enabled ? clamp(shadow[i], 0, settings.shadowProxy.maxShadow) : 0;
+    field.shadowProxy[i] = settings.shadowProxy.enabled ? clamp(context.shadow[i], 0, settings.shadowProxy.maxShadow) : 0;
     field.fogDensity[i] = clamp01(field.fogDensity[i]);
     field.sunShaftMask[i] = clamp01(field.sunShaftMask[i]);
     field.forestEdge[i] = clamp01(field.forestEdge[i]);
   }
+}
+
+export function finalizeForestLightingField(
+  field: ForestLightingField,
+  sunDirection: THREE.Vector3,
+  settings: ForestLightingSettings,
+): void {
+  const context = createForestLightingFinalizeContext(field, sunDirection, settings);
+  blurForestLightingCanopyRows(field, context, settings, 0, field.resolution);
+  finalizeForestLightingRows(field, context, settings, 0, field.resolution);
+  finalizeForestLightingClampPass(field, context, settings);
 }
 
 function splatProjectedShadow(
@@ -217,28 +295,6 @@ function splatProjectedShadow(
       target[index] = clamp01(target[index] + strength * Math.pow(1 - d, 2));
     }
   }
-}
-
-function blurArray(source: Float32Array, resolution: number, radius: number): Float32Array {
-  if (radius <= 0) return new Float32Array(source);
-  const target = new Float32Array(source.length);
-  for (let z = 0; z < resolution; z++) {
-    for (let x = 0; x < resolution; x++) {
-      let sum = 0;
-      let weightSum = 0;
-      for (let dz = -radius; dz <= radius; dz++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          const d = Math.hypot(dx, dz);
-          if (d > radius + 0.001) continue;
-          const weight = 1 / (1 + d);
-          sum += sampleArray(source, resolution, x + dx, z + dz) * weight;
-          weightSum += weight;
-        }
-      }
-      target[z * resolution + x] = weightSum > 0 ? sum / weightSum : source[z * resolution + x];
-    }
-  }
-  return target;
 }
 
 function sampleArray(source: Float32Array, resolution: number, x: number, z: number): number {
