@@ -61,14 +61,14 @@ interface MovementReport {
   endedOutsideStartupWorld: boolean;
   maxLiveBubbleReadyPages: number;
   maxLiveBubbleBuiltThisFrame: number;
-  liveBubbleBuiltTotal: number;
+  liveBubbleBuiltDelta: number;
   maxStreamCachedPages: number;
   maxStreamApplyPagesThisFrame: number;
-  streamApplyPagesTotal: number;
+  streamApplyPagesDelta: number;
   maxStreamEvictions: number;
   maxStreamStaleDiscards: number;
-  streamEvictionsTotal: number;
-  streamStaleDiscardsTotal: number;
+  streamEvictionsDelta: number;
+  streamStaleDiscardsDelta: number;
   samples: MovementSnapshot[];
 }
 
@@ -178,6 +178,11 @@ function numCounter(counters: Readonly<Record<string, number>>, key: string): nu
 
 function maxCounter(samples: readonly MovementSnapshot[], key: string): number {
   return samples.reduce((max, sample) => Math.max(max, numCounter(sample.counters, key)), 0);
+}
+
+function counterDelta(samples: readonly MovementSnapshot[], key: string): number {
+  if (samples.length === 0) return 0;
+  return Math.max(0, maxCounter(samples, key) - numCounter(samples[0]!.counters, key));
 }
 
 function outsideStartupWorld(pose: PoseTuple, worldCells: number): boolean {
@@ -353,14 +358,14 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     endedOutsideStartupWorld: outsideStartupWorld(end, worldCells),
     maxLiveBubbleReadyPages: maxCounter(samples, "live_bubble_ready_pages"),
     maxLiveBubbleBuiltThisFrame: maxCounter(samples, "live_bubble_built_this_frame"),
-    liveBubbleBuiltTotal: maxCounter(samples, "live_bubble_built_total"),
+    liveBubbleBuiltDelta: counterDelta(samples, "live_bubble_built_total"),
     maxStreamCachedPages: maxCounter(samples, "live_clod_stream_cached_pages"),
     maxStreamApplyPagesThisFrame: maxCounter(samples, "live_clod_stream_apply_pages_this_frame"),
-    streamApplyPagesTotal: maxCounter(samples, "live_clod_stream_apply_pages_total"),
+    streamApplyPagesDelta: counterDelta(samples, "live_clod_stream_apply_pages_total"),
     maxStreamEvictions: maxCounter(samples, "live_clod_stream_evictions"),
     maxStreamStaleDiscards: maxCounter(samples, "live_clod_stream_stale_discards"),
-    streamEvictionsTotal: maxCounter(samples, "live_clod_stream_evictions_total"),
-    streamStaleDiscardsTotal: maxCounter(samples, "live_clod_stream_stale_discards_total"),
+    streamEvictionsDelta: counterDelta(samples, "live_clod_stream_evictions_total"),
+    streamStaleDiscardsDelta: counterDelta(samples, "live_clod_stream_stale_discards_total"),
     samples,
   };
 }
@@ -374,10 +379,10 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   if (!movement.startedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not start outside startup world`);
   if (!movement.endedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not end outside startup world`);
   if (movement.maxLiveBubbleReadyPages <= 0) failures.push(`${sceneName}: movement route never observed ready live-bubble pages`);
-  if (movement.liveBubbleBuiltTotal <= 0) failures.push(`${sceneName}: movement route never built a live-bubble page during motion`);
+  if (movement.liveBubbleBuiltDelta <= 0) failures.push(`${sceneName}: movement route never built a live-bubble page during motion`);
   if (movement.maxStreamCachedPages <= 0) failures.push(`${sceneName}: movement route never observed cached streamed CLOD roots`);
-  if (movement.streamApplyPagesTotal <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
-  if (movement.streamEvictionsTotal + movement.streamStaleDiscardsTotal <= 0) {
+  if (movement.streamApplyPagesDelta <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
+  if (movement.streamEvictionsDelta + movement.streamStaleDiscardsDelta <= 0) {
     failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
   }
   return failures;
