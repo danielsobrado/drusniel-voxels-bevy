@@ -157,6 +157,7 @@ export function initFarSummaryIntegration(
       resetFrameShellMetrics(metrics);
       metrics.farSummaryTilesRequired = requests.length;
       metrics.farSummaryTilesReady = stats.readyTiles;
+      metrics.farSummaryTilesBuilding = stats.buildingTiles;
       metrics.farSummaryTilesMissing = Math.max(
         0,
         requests.length - stats.readyTiles - stats.buildingTiles,
