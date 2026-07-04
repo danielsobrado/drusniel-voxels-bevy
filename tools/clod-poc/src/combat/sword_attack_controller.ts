@@ -4,6 +4,7 @@ import { AttackPhase, type CombatConfig, type AttackState, DEFAULT_COMBAT_CONFIG
 
 const MIN_PHASE_MS = 1;
 const ATTACK_LOG_THROTTLE_MS = 250;
+const ABSOLUTE_TIME_MIN_MS = 1000;
 
 export interface SwordAttackControllerDeps {
   camera: THREE.PerspectiveCamera;
@@ -15,7 +16,7 @@ export interface SwordAttackController {
   readonly state: AttackState;
   readonly config: CombatConfig;
   trigger(timeMs?: number): boolean;
-  update(timeMs: number): void;
+  update(timeMs?: number): void;
   getConfig(): CombatConfig;
   setConfig(config: Partial<CombatConfig>): void;
 }
@@ -34,6 +35,10 @@ export function createSwordAttackController(deps: SwordAttackControllerDeps): Sw
     return deps.isEnabled?.() ?? true;
   }
 
+  function resolveTimeMs(timeMs?: number): number {
+    return typeof timeMs === "number" && timeMs >= ABSOLUTE_TIME_MIN_MS ? timeMs : performance.now();
+  }
+
   function phaseDurationMs(value: number): number {
     return Math.max(MIN_PHASE_MS, value);
   }
@@ -46,27 +51,29 @@ export function createSwordAttackController(deps: SwordAttackControllerDeps): Sw
   }
 
   function trigger(timeMs = performance.now()): boolean {
+    const nowMs = resolveTimeMs(timeMs);
     if (!isEnabled()) return false;
     if (state.phase !== AttackPhase.Idle) return false;
-    if (timeMs < state.cooldownUntilMs) return false;
+    if (nowMs < state.cooldownUntilMs) return false;
     state.phase = AttackPhase.Windup;
-    state.phaseStartMs = timeMs;
-    state.cooldownUntilMs = timeMs + Math.max(config.cooldown_ms, 0);
+    state.phaseStartMs = nowMs;
+    state.cooldownUntilMs = nowMs + Math.max(config.cooldown_ms, 0);
     state.hitDelivered = false;
     return true;
   }
 
-  function update(timeMs: number): void {
+  function update(timeMs?: number): void {
+    const nowMs = resolveTimeMs(timeMs);
     const enabled = isEnabled();
     deps.weapon.setVisible(enabled);
     deps.weapon.update();
     if (!enabled) {
-      if (state.phase !== AttackPhase.Idle) resetToIdle(timeMs);
+      if (state.phase !== AttackPhase.Idle) resetToIdle(nowMs);
       return;
     }
     if (state.phase === AttackPhase.Idle) return;
 
-    const elapsed = Math.max(0, timeMs - state.phaseStartMs);
+    const elapsed = Math.max(0, nowMs - state.phaseStartMs);
 
     switch (state.phase) {
       case AttackPhase.Windup: {
@@ -75,7 +82,7 @@ export function createSwordAttackController(deps: SwordAttackControllerDeps): Sw
         deps.weapon.swingProgress(-t * 0.3);
         if (elapsed >= duration) {
           state.phase = AttackPhase.Active;
-          state.phaseStartMs = timeMs;
+          state.phaseStartMs = nowMs;
         }
         break;
       }
@@ -84,12 +91,12 @@ export function createSwordAttackController(deps: SwordAttackControllerDeps): Sw
         const t = Math.min(elapsed / duration, 1);
         deps.weapon.swingProgress(-0.3 + t * 0.8);
         if (!state.hitDelivered) {
-          doHitCheck(timeMs);
+          doHitCheck(nowMs);
           state.hitDelivered = true;
         }
         if (elapsed >= duration) {
           state.phase = AttackPhase.Recovery;
-          state.phaseStartMs = timeMs;
+          state.phaseStartMs = nowMs;
         }
         break;
       }
@@ -97,7 +104,7 @@ export function createSwordAttackController(deps: SwordAttackControllerDeps): Sw
         const duration = phaseDurationMs(config.recovery_ms);
         const t = Math.min(elapsed / duration, 1);
         deps.weapon.swingProgress(0.5 - t * 0.5);
-        if (elapsed >= duration) resetToIdle(timeMs);
+        if (elapsed >= duration) resetToIdle(nowMs);
         break;
       }
     }
