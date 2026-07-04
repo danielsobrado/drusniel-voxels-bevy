@@ -1,13 +1,17 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG } from "../../config.js";
-import type { ClodPageNode } from "../../types.js";
+import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   createStreamingClodRootController,
   pageInsideFiniteStartupWorld,
   streamingClodPageKey,
   streamingClodRequiredPageCoords,
+  type PageCoord,
+  type StreamingClodRootBuildResult,
+  type StreamingClodRootControllerDeps,
 } from "./clod_streaming_roots.js";
 
 const TEST_CFG: ClodPagesConfig = {
@@ -43,6 +47,95 @@ const TEST_CFG: ClodPagesConfig = {
   validation: { position_epsilon: 0.000001, normal_dot_min: 0.997, material_weight_epsilon: 0.0001, zero_area_epsilon: 0.00000001 },
 };
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushAsync(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function mesh(): PageMesh {
+  return {
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+    paintSlots: new Float32Array([0, 0, 0]),
+    materialWeights: new Float32Array(12),
+    materialWeightStride: 4,
+    indices: new Uint32Array([0, 1, 2]),
+  };
+}
+
+function makeNode(px: number, pz: number): ClodPageNode {
+  const pageSize = TEST_CFG.page.chunks_per_page * TEST_CFG.page.chunk_size;
+  const minX = px * pageSize;
+  const minZ = pz * pageSize;
+  return {
+    id: streamingClodPageKey(px, pz),
+    revision: 1,
+    level: 0,
+    children: [],
+    mesh: mesh(),
+    footprint: { minX, minZ, maxX: minX + pageSize, maxZ: minZ + pageSize },
+    bounds: { center: [minX + pageSize / 2, 0, minZ + pageSize / 2], radius: pageSize, minY: 0, maxY: 1 },
+    errorWorld: 0,
+    lowBenefit: false,
+  };
+}
+
+function makeController(overrides: Partial<StreamingClodRootControllerDeps> = {}) {
+  const roots: ClodPageNode[] = overrides.roots ?? [];
+  const allNodes: ClodPageNode[] = overrides.allNodes ?? [];
+  const requests: Deferred<StreamingClodRootBuildResult>[] = [];
+  const buildPages = overrides.buildPages !== undefined
+    ? overrides.buildPages
+    : vi.fn(() => {
+      const next = deferred<StreamingClodRootBuildResult>();
+      requests.push(next);
+      return next.promise;
+    });
+  const controller = createStreamingClodRootController({
+    roots,
+    allNodes,
+    cfg: TEST_CFG,
+    worldCells: 64,
+    enabled: true,
+    buildBudgetPagesPerFrame: 1,
+    applyBudgetPagesPerFrame: 1,
+    maxCachedPages: 8,
+    evictDistanceMultiplier: 1,
+    buildPages,
+    ...overrides,
+  });
+  return { controller, roots, allNodes, buildPages, requests };
+}
+
+function resolveRequest(
+  request: Deferred<StreamingClodRootBuildResult>,
+  coords: readonly PageCoord[],
+  extra: Partial<StreamingClodRootBuildResult> = {},
+): void {
+  request.resolve({
+    nodes: coords.map((coord) => makeNode(coord.px, coord.pz)),
+    buildMs: 1,
+    transferBytes: 10,
+    ...extra,
+  });
+}
+
 describe("streamingClodRequiredPageCoords", () => {
   it("returns deterministic page coords around positive and negative centers", () => {
     const positive = streamingClodRequiredPageCoords(new THREE.Vector3(1500, 0, 300), 96, 64)
@@ -72,100 +165,144 @@ describe("pageInsideFiniteStartupWorld", () => {
 });
 
 describe("createStreamingClodRootController", () => {
-  it("does not build root pages unless a positive build budget is provided", () => {
-    const roots: ClodPageNode[] = [];
-    const allNodes: ClodPageNode[] = [];
-    const pendingTasks: Array<() => void> = [];
-    const controller = createStreamingClodRootController({
-      roots,
-      allNodes,
-      cfg: TEST_CFG,
-      worldCells: 64,
-      enabled: true,
-      scheduleBuild: (task) => pendingTasks.push(task),
-    });
+  it("runs planner-only when buildPages is null", () => {
+    const { controller, roots } = makeController({ buildPages: null });
 
     const stats = controller.update(new THREE.Vector3(192, 0, 0), 40);
 
     expect(stats.requiredPages).toBeGreaterThan(0);
     expect(stats.cachedPages).toBe(0);
-    expect(pendingTasks.length).toBe(0);
-    expect(roots.length).toBe(0);
+    expect(stats.pendingPages).toBe(0);
+    expect(stats.inflightBatches).toBe(0);
+    expect(roots).toHaveLength(0);
   });
 
-  it("signals root changes after streamed builds and evictions", () => {
-    const roots: ClodPageNode[] = [];
-    const allNodes: ClodPageNode[] = [];
-    const onRootsChanged = vi.fn();
-    const controller = createStreamingClodRootController({
-      roots,
-      allNodes,
-      cfg: TEST_CFG,
-      worldCells: 64,
-      enabled: true,
-      buildBudgetPagesPerFrame: 1,
-      maxCachedPages: 4,
-      evictDistanceMultiplier: 1,
-      scheduleBuild: (task) => task(),
-      onRootsChanged,
-    });
+  it("dispatches a nearest-first worker batch that respects build budget", () => {
+    const { controller, buildPages } = makeController({ buildBudgetPagesPerFrame: 2 });
 
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 80);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as readonly PageCoord[];
+
+    expect(coords).toHaveLength(2);
+    expect(stats.pendingPages).toBe(2);
+    expect(stats.buildBudget).toBe(2);
+    expect(Math.hypot(192 - coords[0]!.centerX, coords[0]!.centerZ)).toBeLessThanOrEqual(
+      Math.hypot(192 - coords[1]!.centerX, coords[1]!.centerZ),
+    );
+  });
+
+  it("keeps only one worker batch in flight", () => {
+    const { controller, buildPages } = makeController({ buildBudgetPagesPerFrame: 2 });
+
+    controller.update(new THREE.Vector3(192, 0, 0), 80);
+    const stats = controller.update(new THREE.Vector3(256, 0, 0), 80);
+
+    expect(buildPages).toHaveBeenCalledTimes(1);
+    expect(stats.inflightBatches).toBe(1);
+  });
+
+  it("queues async worker results and applies them on the next frame", async () => {
+    const { controller, roots, buildPages, requests } = makeController();
     controller.update(new THREE.Vector3(192, 0, 0), 40);
-    controller.update(new THREE.Vector3(512, 0, 0), 40);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
 
-    expect(onRootsChanged).toHaveBeenCalled();
-    expect(roots.length).toBeGreaterThan(0);
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+    expect(roots).toHaveLength(0);
+
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    expect(roots).toHaveLength(1);
+    expect(stats.cachedPages).toBe(1);
+    expect(stats.applyPagesThisFrame).toBe(1);
+    expect(stats.builtThisFrame).toBe(1);
   });
 
-  it("can defer root builds through a scheduler", () => {
-    const roots: ClodPageNode[] = [];
-    const allNodes: ClodPageNode[] = [];
-    const pendingTasks: Array<() => void> = [];
-    const controller = createStreamingClodRootController({
-      roots,
-      allNodes,
-      cfg: TEST_CFG,
-      worldCells: 64,
-      enabled: true,
-      buildBudgetPagesPerFrame: 1,
-      maxCachedPages: 4,
-      scheduleBuild: (task) => pendingTasks.push(task),
+  it("throttles ready page application with an apply budget", async () => {
+    const { controller, roots, buildPages, requests } = makeController({
+      buildBudgetPagesPerFrame: 3,
+      applyBudgetPagesPerFrame: 1,
     });
+    controller.update(new THREE.Vector3(192, 0, 0), 80);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
 
-    const beforeBuild = controller.update(new THREE.Vector3(192, 0, 0), 40);
-    expect(beforeBuild.cachedPages).toBe(0);
-    expect(pendingTasks.length).toBe(1);
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
 
-    pendingTasks.shift()?.();
-    const afterBuild = controller.update(new THREE.Vector3(192, 0, 0), 40);
-    expect(afterBuild.cachedPages).toBeGreaterThan(0);
-    expect(afterBuild.builtThisFrame).toBe(1);
+    const firstApply = controller.update(new THREE.Vector3(192, 0, 0), 80);
+    expect(roots).toHaveLength(1);
+    expect(firstApply.readyPages).toBe(2);
+    expect(firstApply.applyPagesThisFrame).toBe(1);
+
+    const secondApply = controller.update(new THREE.Vector3(192, 0, 0), 80);
+    expect(roots).toHaveLength(2);
+    expect(secondApply.applyPagesThisFrame).toBe(1);
   });
 
-  it("drops a queued root build after the center changes", () => {
-    const roots: ClodPageNode[] = [];
-    const allNodes: ClodPageNode[] = [];
-    const pendingTasks: Array<() => void> = [];
-    const controller = createStreamingClodRootController({
-      roots,
-      allNodes,
-      cfg: TEST_CFG,
-      worldCells: 64,
-      enabled: true,
-      buildBudgetPagesPerFrame: 1,
-      maxCachedPages: 8,
-      scheduleBuild: (task) => pendingTasks.push(task),
-    });
-
+  it("discards stale ready pages after the stream center moves", async () => {
+    const { controller, roots, buildPages, requests } = makeController();
     controller.update(new THREE.Vector3(192, 0, 0), 40);
-    controller.update(new THREE.Vector3(512, 0, 0), 40);
-    expect(pendingTasks.length).toBe(2);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
 
-    pendingTasks[0]?.();
-    expect(roots.length).toBe(0);
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+    const stats = controller.update(new THREE.Vector3(512, 0, 0), 40);
 
-    pendingTasks[1]?.();
-    const afterBuild = controller.update(new THREE.Vector3(512, 0, 0), 40);
-    expect(afterBuild.cachedPages).toBeGreaterThan(0);
+    expect(roots).toHaveLength(0);
+    expect(stats.staleDiscards).toBe(1);
+    expect(stats.cachedPages).toBe(0);
+  });
+
+  it("evicts cached pages from roots and allNodes deterministically", async () => {
+    const { controller, roots, allNodes, buildPages, requests } = makeController({ maxCachedPages: 4 });
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    const stats = controller.update(new THREE.Vector3(1024, 0, 0), 1);
+
+    expect(stats.evictions).toBe(1);
+    expect(roots).toHaveLength(0);
+    expect(allNodes).toHaveLength(0);
+    expect(stats.cachedPages).toBe(0);
+  });
+
+  it("marks worker rejections as failed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { controller, requests } = makeController();
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    requests[0]!.reject(new Error("worker failed"));
+    await flushAsync();
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    expect(stats.failedPages).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("accumulates worker build time and transfer bytes separately from apply time", async () => {
+    const { controller, buildPages, requests } = makeController();
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+
+    resolveRequest(requests[0]!, coords, { buildMs: 12, transferBytes: 345 });
+    await flushAsync();
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    expect(stats.workerBuildMs).toBe(12);
+    expect(stats.buildMs).toBe(12);
+    expect(stats.workerTransferBytes).toBe(345);
+    expect(stats.applyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("does not retain the old synchronous builder path", () => {
+    const source = readFileSync(new URL("./clod_streaming_roots.ts", import.meta.url), "utf8");
+
+    expect(source).not.toContain("buildLod0PageSource");
+    expect(source).not.toContain("defaultBuildScheduler");
+    expect(source).not.toContain("buildNode");
+    expect(source).not.toContain("scheduleBuild?:");
   });
 });
