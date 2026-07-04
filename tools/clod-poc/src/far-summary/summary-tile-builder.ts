@@ -20,11 +20,31 @@ export interface FarSummaryBuildInput {
 
 interface HeightGrid {
   values: Float64Array;
+  initialized: Uint8Array;
   stride: number;
   tileCells: number;
+  originX: number;
+  originZ: number;
+  cellM: number;
+  sampleHeight: (x: number, z: number) => number;
+}
+
+export interface FarSummaryTileBuildState {
+  readonly input: FarSummaryBuildInput;
+  readonly originX: number;
+  readonly originZ: number;
+  readonly sampleCount: number;
+  readonly samples: FarSummarySample[];
+  readonly heightGrid: HeightGrid;
+  cursor: number;
+  globalMin: number;
+  globalMax: number;
+  globalSum: number;
+  validSamples: number;
 }
 
 const GRID_BORDER_CELLS = 1;
+const BUILD_DEADLINE_CHECK_INTERVAL_CELLS = 8;
 
 export function computeNormalFiniteDifference(
   h: (x: number, z: number) => number,
@@ -51,7 +71,9 @@ function normalFromHeights(
   hU: number,
   step: number,
 ): [number, number, number] {
-  if (!Number.isFinite(hL) || !Number.isFinite(hR) || !Number.isFinite(hD) || !Number.isFinite(hU)) return [0, 1, 0];
+  if (!Number.isFinite(hL) || !Number.isFinite(hR) || !Number.isFinite(hD) || !Number.isFinite(hU)) {
+    return [0, 1, 0];
+  }
   const nx = hL - hR;
   const ny = 2 * step;
   const nz = hD - hU;
@@ -76,7 +98,7 @@ function finiteMax(values: readonly number[], fallback: number): number {
   return Number.isFinite(out) ? out : fallback;
 }
 
-function buildHeightGrid(
+function createHeightGrid(
   originX: number,
   originZ: number,
   cellM: number,
@@ -84,113 +106,159 @@ function buildHeightGrid(
   sampleHeight: (x: number, z: number) => number,
 ): HeightGrid {
   const stride = tileCells + GRID_BORDER_CELLS * 2;
-  const values = new Float64Array(stride * stride);
-
-  for (let gz = -GRID_BORDER_CELLS; gz < tileCells + GRID_BORDER_CELLS; gz++) {
-    for (let gx = -GRID_BORDER_CELLS; gx < tileCells + GRID_BORDER_CELLS; gx++) {
-      const wx = originX + (gx + 0.5) * cellM;
-      const wz = originZ + (gz + 0.5) * cellM;
-      values[(gz + GRID_BORDER_CELLS) * stride + gx + GRID_BORDER_CELLS] = sampleHeight(wx, wz);
-    }
-  }
-
-  return { values, stride, tileCells };
+  return {
+    values: new Float64Array(stride * stride),
+    initialized: new Uint8Array(stride * stride),
+    stride,
+    tileCells,
+    originX,
+    originZ,
+    cellM,
+    sampleHeight,
+  };
 }
 
 function heightAt(grid: HeightGrid, sx: number, sz: number): number {
   const gx = Math.max(-GRID_BORDER_CELLS, Math.min(grid.tileCells, sx));
   const gz = Math.max(-GRID_BORDER_CELLS, Math.min(grid.tileCells, sz));
-  return grid.values[(gz + GRID_BORDER_CELLS) * grid.stride + gx + GRID_BORDER_CELLS];
+  const index = (gz + GRID_BORDER_CELLS) * grid.stride + gx + GRID_BORDER_CELLS;
+  if (grid.initialized[index]) return grid.values[index];
+
+  const wx = grid.originX + (gx + 0.5) * grid.cellM;
+  const wz = grid.originZ + (gz + 0.5) * grid.cellM;
+  const height = grid.sampleHeight(wx, wz);
+  grid.values[index] = height;
+  grid.initialized[index] = 1;
+  return height;
 }
 
-export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile {
-  const { key, ringConfig, terrainSampler, frameIndex, nowMs } = input;
-  const { cellM, tileCells } = ringConfig;
-  const originX = tileOrigin(key.x, cellM, tileCells);
-  const originZ = tileOrigin(key.z, cellM, tileCells);
-  const sampleCount = tileCells * tileCells;
-  const samples: FarSummarySample[] = new Array(sampleCount);
-  let globalSum = 0;
-  let validSamples = 0;
+export function createFarSummaryTileBuild(input: FarSummaryBuildInput): FarSummaryTileBuildState {
+  const { key, ringConfig, terrainSampler } = input;
+  const originX = tileOrigin(key.x, ringConfig.cellM, ringConfig.tileCells);
+  const originZ = tileOrigin(key.z, ringConfig.cellM, ringConfig.tileCells);
+  const sampleCount = ringConfig.tileCells * ringConfig.tileCells;
+  return {
+    input,
+    originX,
+    originZ,
+    sampleCount,
+    samples: new Array(sampleCount),
+    heightGrid: createHeightGrid(originX, originZ, ringConfig.cellM, ringConfig.tileCells, terrainSampler.sampleHeight),
+    cursor: 0,
+    globalMin: Number.POSITIVE_INFINITY,
+    globalMax: Number.NEGATIVE_INFINITY,
+    globalSum: 0,
+    validSamples: 0,
+  };
+}
 
-  const heightGrid = buildHeightGrid(originX, originZ, cellM, tileCells, terrainSampler.sampleHeight);
+export function stepFarSummaryTileBuild(
+  build: FarSummaryTileBuildState,
+  deadlineMs: number,
+): boolean {
+  let cellsSinceDeadlineCheck = 0;
 
-  for (let sz = 0; sz < tileCells; sz++) {
-    for (let sx = 0; sx < tileCells; sx++) {
-      const wx = originX + (sx + 0.5) * cellM;
-      const wz = originZ + (sz + 0.5) * cellM;
+  while (build.cursor < build.sampleCount) {
+    build.samples[build.cursor] = sampleCell(build, build.cursor);
+    build.cursor++;
+    cellsSinceDeadlineCheck++;
 
-      const height = heightAt(heightGrid, sx, sz);
-      if (Number.isNaN(height)) {
-        console.warn(`[far-summary] NaN height at (${wx}, ${wz})`);
-      }
-
-      const heightValid = Number.isFinite(height);
-      const sampleH = heightValid ? height : 0;
-      const hLeft = heightAt(heightGrid, sx - 1, sz);
-      const hRight = heightAt(heightGrid, sx + 1, sz);
-      const hDown = heightAt(heightGrid, sx, sz - 1);
-      const hUp = heightAt(heightGrid, sx, sz + 1);
-      const hMin = finiteMin([height, hLeft, hRight, hDown, hUp], sampleH);
-      const hMax = finiteMax([height, hLeft, hRight, hDown, hUp], sampleH);
-
-      const [nx, ny, nz] = normalFromHeights(hLeft, hRight, hDown, hUp, cellM);
-      const slope = Math.acos(clamp01(ny));
-      const material = terrainSampler.sampleMaterial?.(wx, wz) ?? 0;
-      const canopy = terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
-      const water = heightValid
-        ? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, sampleH) ?? terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0
-        : 0;
-      const roughness = computeRoughnessFromGrid(heightGrid, sx, sz);
-
-      if (heightValid) {
-        globalSum += height;
-        validSamples++;
-      }
-
-      const idx = sz * tileCells + sx;
-      samples[idx] = {
-        heightMin: hMin,
-        heightMax: hMax,
-        heightAvg: heightValid ? sampleH : Number.POSITIVE_INFINITY,
-        normalX: nx,
-        normalY: ny,
-        normalZ: nz,
-        dominantMaterial: Math.max(0, Math.round(material)),
-        materialVariance: 0,
-        canopyCoverage: clamp01(canopy),
-        waterCoverage: clamp01(water),
-        slope: Number.isFinite(slope) ? slope : 0,
-        roughness,
-      };
+    if (cellsSinceDeadlineCheck >= BUILD_DEADLINE_CHECK_INTERVAL_CELLS) {
+      cellsSinceDeadlineCheck = 0;
+      if (performance.now() >= deadlineMs) return false;
     }
   }
 
-  const avg = validSamples > 0 ? globalSum / validSamples : 0;
+  return true;
+}
 
-  for (let i = 0; i < samples.length; i++) {
-    if (!Number.isFinite(samples[i].heightAvg)) {
-      samples[i].heightAvg = avg;
+export function finishFarSummaryTileBuild(build: FarSummaryTileBuildState): FarSummaryTile {
+  const { key, ringConfig, frameIndex, nowMs } = build.input;
+  const avg = build.validSamples > 0 ? build.globalSum / build.validSamples : 0;
+
+  for (let i = 0; i < build.samples.length; i++) {
+    const sample = build.samples[i];
+    if (!sample) {
+      build.samples[i] = fallbackSample(avg);
+      continue;
     }
-    if (!Number.isFinite(samples[i].heightMin)) {
-      samples[i].heightMin = avg;
-    }
-    if (!Number.isFinite(samples[i].heightMax)) {
-      samples[i].heightMax = avg;
-    }
+    if (!Number.isFinite(sample.heightAvg)) sample.heightAvg = avg;
+    if (!Number.isFinite(sample.heightMin)) sample.heightMin = avg;
+    if (!Number.isFinite(sample.heightMax)) sample.heightMax = avg;
   }
 
   return {
     key,
-    state: 'ready',
+    state: "ready",
     revision: 0,
     lastTouchedFrame: frameIndex,
     lastTouchedTimeMs: nowMs,
-    cellSizeM: cellM,
-    tileCells,
-    originX,
-    originZ,
-    samples,
+    cellSizeM: ringConfig.cellM,
+    tileCells: ringConfig.tileCells,
+    originX: build.originX,
+    originZ: build.originZ,
+    samples: build.samples,
+  };
+}
+
+export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile {
+  const build = createFarSummaryTileBuild(input);
+  stepFarSummaryTileBuild(build, Number.POSITIVE_INFINITY);
+  return finishFarSummaryTileBuild(build);
+}
+
+function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySample {
+  const { ringConfig, terrainSampler } = build.input;
+  const { cellM, tileCells } = ringConfig;
+  const sx = idx % tileCells;
+  const sz = Math.floor(idx / tileCells);
+  const wx = build.originX + (sx + 0.5) * cellM;
+  const wz = build.originZ + (sz + 0.5) * cellM;
+
+  const height = heightAt(build.heightGrid, sx, sz);
+  if (Number.isNaN(height)) {
+    console.warn(`[far-summary] NaN height at (${wx}, ${wz})`);
+  }
+
+  const heightValid = Number.isFinite(height);
+  const sampleH = heightValid ? height : 0;
+  const hLeft = heightAt(build.heightGrid, sx - 1, sz);
+  const hRight = heightAt(build.heightGrid, sx + 1, sz);
+  const hDown = heightAt(build.heightGrid, sx, sz - 1);
+  const hUp = heightAt(build.heightGrid, sx, sz + 1);
+  const hMin = finiteMin([height, hLeft, hRight, hDown, hUp], sampleH);
+  const hMax = finiteMax([height, hLeft, hRight, hDown, hUp], sampleH);
+
+  const [nx, ny, nz] = normalFromHeights(hLeft, hRight, hDown, hUp, cellM);
+  const slope = Math.acos(clamp01(ny));
+  const material = terrainSampler.sampleMaterial?.(wx, wz) ?? 0;
+  const canopy = terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
+  const waterHeight = Number.isFinite(hMax) ? hMax : sampleH;
+  const water = heightValid
+    ? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, waterHeight) ?? terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0
+    : 0;
+  const roughness = computeRoughnessFromGrid(build.heightGrid, sx, sz);
+
+  if (heightValid) {
+    build.globalMin = Math.min(build.globalMin, height);
+    build.globalMax = Math.max(build.globalMax, height);
+    build.globalSum += height;
+    build.validSamples++;
+  }
+
+  return {
+    heightMin: hMin,
+    heightMax: hMax,
+    heightAvg: heightValid ? sampleH : Number.POSITIVE_INFINITY,
+    normalX: nx,
+    normalY: ny,
+    normalZ: nz,
+    dominantMaterial: Math.max(0, Math.round(material)),
+    materialVariance: 0,
+    canopyCoverage: clamp01(canopy),
+    waterCoverage: clamp01(water),
+    slope: Number.isFinite(slope) ? slope : 0,
+    roughness,
   };
 }
 
@@ -212,4 +280,21 @@ function computeRoughnessFromGrid(grid: HeightGrid, cx: number, cz: number): num
     }
   }
   return count > 0 ? Math.sqrt(sumSq / count) : 0;
+}
+
+function fallbackSample(height: number): FarSummarySample {
+  return {
+    heightMin: height,
+    heightMax: height,
+    heightAvg: height,
+    normalX: 0,
+    normalY: 1,
+    normalZ: 0,
+    dominantMaterial: 0,
+    materialVariance: 0,
+    canopyCoverage: 0,
+    waterCoverage: 0,
+    slope: 0,
+    roughness: 0,
+  };
 }

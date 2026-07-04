@@ -13,6 +13,7 @@ export interface FarSummaryStreamConfig {
   preloadSeconds: number;
   maxTileBuildsPerFrame: number;
   maxTileCommitsPerFrame: number;
+  maxBuildMsPerFrame: number;
   evictionGraceSeconds: number;
   keepStaleUntilReplacement: boolean;
 }
@@ -52,6 +53,7 @@ export const DEFAULT_FAR_SUMMARY_CONFIG: FarSummaryConfig = {
     preloadSeconds: 4.0,
     maxTileBuildsPerFrame: 1,
     maxTileCommitsPerFrame: 8,
+    maxBuildMsPerFrame: 2.0,
     evictionGraceSeconds: 12.0,
     keepStaleUntilReplacement: true,
   },

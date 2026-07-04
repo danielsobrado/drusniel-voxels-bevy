@@ -122,7 +122,11 @@ export function initFarSummaryIntegration(
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
     if (buildAllowedByInterval && buildAllowedByDelay) {
       const budget = forceSlowBuilds ? 1 : undefined;
-      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget);
+      const buildBudgetMs = Math.max(0, config.stream.maxBuildMsPerFrame);
+      const deadlineMs = Number.isFinite(buildBudgetMs) && buildBudgetMs > 0
+        ? nowMs + buildBudgetMs
+        : Number.POSITIVE_INFINITY;
+      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
 
     cache.markStale(null);
