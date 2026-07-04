@@ -61,10 +61,14 @@ interface MovementReport {
   endedOutsideStartupWorld: boolean;
   maxLiveBubbleReadyPages: number;
   maxLiveBubbleBuiltThisFrame: number;
+  liveBubbleBuiltTotal: number;
   maxStreamCachedPages: number;
   maxStreamApplyPagesThisFrame: number;
+  streamApplyPagesTotal: number;
   maxStreamEvictions: number;
   maxStreamStaleDiscards: number;
+  streamEvictionsTotal: number;
+  streamStaleDiscardsTotal: number;
   samples: MovementSnapshot[];
 }
 
@@ -349,10 +353,14 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     endedOutsideStartupWorld: outsideStartupWorld(end, worldCells),
     maxLiveBubbleReadyPages: maxCounter(samples, "live_bubble_ready_pages"),
     maxLiveBubbleBuiltThisFrame: maxCounter(samples, "live_bubble_built_this_frame"),
+    liveBubbleBuiltTotal: maxCounter(samples, "live_bubble_built_total"),
     maxStreamCachedPages: maxCounter(samples, "live_clod_stream_cached_pages"),
     maxStreamApplyPagesThisFrame: maxCounter(samples, "live_clod_stream_apply_pages_this_frame"),
+    streamApplyPagesTotal: maxCounter(samples, "live_clod_stream_apply_pages_total"),
     maxStreamEvictions: maxCounter(samples, "live_clod_stream_evictions"),
     maxStreamStaleDiscards: maxCounter(samples, "live_clod_stream_stale_discards"),
+    streamEvictionsTotal: maxCounter(samples, "live_clod_stream_evictions_total"),
+    streamStaleDiscardsTotal: maxCounter(samples, "live_clod_stream_stale_discards_total"),
     samples,
   };
 }
@@ -366,10 +374,10 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   if (!movement.startedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not start outside startup world`);
   if (!movement.endedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not end outside startup world`);
   if (movement.maxLiveBubbleReadyPages <= 0) failures.push(`${sceneName}: movement route never observed ready live-bubble pages`);
-  if (movement.maxLiveBubbleBuiltThisFrame <= 0) failures.push(`${sceneName}: movement route never built a live-bubble page during motion`);
+  if (movement.liveBubbleBuiltTotal <= 0) failures.push(`${sceneName}: movement route never built a live-bubble page during motion`);
   if (movement.maxStreamCachedPages <= 0) failures.push(`${sceneName}: movement route never observed cached streamed CLOD roots`);
-  if (movement.maxStreamApplyPagesThisFrame <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
-  if (movement.maxStreamEvictions + movement.maxStreamStaleDiscards <= 0) {
+  if (movement.streamApplyPagesTotal <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
+  if (movement.streamEvictionsTotal + movement.streamStaleDiscardsTotal <= 0) {
     failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
   }
   return failures;
