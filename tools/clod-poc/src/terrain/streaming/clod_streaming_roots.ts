@@ -97,6 +97,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const pending = new Set<string>();
   const failed = new Set<string>();
   let frame = 0;
+  let active = deps.enabled;
+  let requiredNow = new Set<string>();
   let completedBuilds = 0;
   let completedBuildMs = 0;
   let latest: StreamingClodRootStats = emptyStats();
@@ -145,14 +147,17 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     };
   };
 
+  const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
+
   const scheduleNodeBuild = (coord: PageCoord, frameId: number): void => {
     const id = streamingClodPageKey(coord.px, coord.pz);
     pending.add(id);
     scheduleBuild(() => {
       const startedAt = performance.now();
       try {
-        if (cached.has(id)) return;
+        if (!buildStillWanted(id)) return;
         const node = buildNode(coord);
+        if (!buildStillWanted(id)) return;
         deps.roots.push(node);
         deps.allNodes.push(node);
         cached.set(id, { node, centerX: coord.centerX, centerZ: coord.centerZ, lastTouchFrame: frameId });
@@ -160,8 +165,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         deps.onNodesBuilt?.([node]);
         deps.onRootsChanged?.();
       } catch (error) {
-        console.warn(`[clod-stream] failed to build ${id}`, error);
-        failed.add(id);
+        if (active && requiredNow.has(id)) {
+          console.warn(`[clod-stream] failed to build ${id}`, error);
+          failed.add(id);
+        }
       } finally {
         pending.delete(id);
         completedBuildMs += performance.now() - startedAt;
@@ -176,7 +183,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       const finishedBuildMs = completedBuildMs;
       completedBuilds = 0;
       completedBuildMs = 0;
-      if (!deps.enabled) {
+      active = deps.enabled;
+      if (!active) {
+        requiredNow = new Set();
         latest = emptyStats();
         return latest;
       }
@@ -184,6 +193,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         .filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
       let scheduledThisFrame = 0;
       const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz)));
+      requiredNow = requiredIds;
 
       for (const coord of required) {
         const id = streamingClodPageKey(coord.px, coord.pz);
