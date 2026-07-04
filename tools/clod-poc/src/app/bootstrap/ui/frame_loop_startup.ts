@@ -34,6 +34,16 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | un
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
+function nonNegativeIntegerParam(params: URLSearchParams, key: string): number | undefined {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
+}
+
+function positiveNumberParam(params: URLSearchParams, key: string): number | undefined {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function globalClodCounters(): Record<string, number> | undefined {
   return (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
@@ -49,6 +59,15 @@ function mirrorStreamingClodRootCounters(counters: Record<string, number> | unde
   target["live_clod_stream_failed_pages"] = stats.failedPages;
   target["live_clod_stream_evictions"] = stats.evictions;
   target["live_clod_stream_build_ms"] = stats.buildMs;
+  target["live_clod_stream_pending_pages"] = stats.pendingPages;
+  target["live_clod_stream_build_budget"] = stats.buildBudget;
+  target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
+  target["live_clod_stream_ready_pages"] = stats.readyPages;
+  target["live_clod_stream_apply_pages_this_frame"] = stats.applyPagesThisFrame;
+  target["live_clod_stream_apply_ms"] = stats.applyMs;
+  target["live_clod_stream_stale_discards"] = stats.staleDiscards;
+  target["live_clod_stream_worker_build_ms"] = stats.workerBuildMs;
+  target["live_clod_stream_worker_transfer_bytes"] = stats.workerTransferBytes;
 }
 
 function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
@@ -234,20 +253,22 @@ export function runFrameLoopStartup(
     window.__drusnielRenderResolution ?? null,
     searchParams,
   );
+  const liveClodRootRadius = positiveNumberParam(searchParams, "liveClodRootRadius") ?? state.bubbleRadius;
   const streamingClodRootController = createStreamingClodRootController({
     roots: input.result.roots,
     allNodes: input.allNodes,
     cfg,
     worldCells,
     enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
-    buildBudgetPagesPerFrame: positiveIntegerParam(searchParams, "liveClodRootBudget"),
+    buildBudgetPagesPerFrame: nonNegativeIntegerParam(searchParams, "liveClodRootBudget"),
     maxCachedPages: positiveIntegerParam(searchParams, "liveClodRootMaxCached"),
+    buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
     onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
     onRootsChanged: () => selectionController.invalidate(),
   });
   const updateSelectionWithStreaming = () => {
     const center = interaction.mode === "playing" ? player.position : controls.target;
-    const streamStats = streamingClodRootController.update(center, state.bubbleRadius);
+    const streamStats = streamingClodRootController.update(center, liveClodRootRadius);
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats);
     updateSelection();
   };
