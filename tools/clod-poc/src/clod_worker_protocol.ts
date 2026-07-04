@@ -66,19 +66,9 @@ export type ClodWorkerRequest =
       edits: DigEdit[];
       dirtyRegions: DirtyCellBounds[];
     }
-  | {
-      type: "flush";
-      requestId: number;
-    }
-  | {
-      type: "clearCache";
-      requestId: number;
-    }
-  | {
-      type: "buildStreamRoots";
-      requestId: number;
-      coords: Array<{ px: number; pz: number }>;
-    };
+  | { type: "flush"; requestId: number }
+  | { type: "clearCache"; requestId: number }
+  | { type: "buildStreamRoots"; requestId: number; coords: Array<{ px: number; pz: number }> };
 
 export interface SerializedLod0RebuildResult {
   requestIds: number[];
@@ -130,9 +120,7 @@ function cloneMesh(mesh: PageMesh): PageMesh {
   };
 }
 
-function cloneSourceRevisions(
-  revisions: readonly SerializedSourceRevision[] | undefined,
-): SerializedSourceRevision[] | undefined {
+function cloneSourceRevisions(revisions: readonly SerializedSourceRevision[] | undefined): SerializedSourceRevision[] | undefined {
   return revisions?.map((entry) => ({ ...entry }));
 }
 
@@ -147,23 +135,33 @@ function serializedMetadata(node: ClodPageNode): Pick<SerializedClodNode, "revis
 function applySerializedMetadata(target: ClodPageNode, serialized: SerializedClodNode): void {
   if (serialized.revision === undefined) delete target.revision;
   else target.revision = serialized.revision;
-
   const sourceRevisions = cloneSourceRevisions(serialized.sourceRevisions);
   if (sourceRevisions === undefined) delete target.sourceRevisions;
   else target.sourceRevisions = sourceRevisions;
 }
 
-function resolveChildIds(
-  ownerId: string,
-  childIds: readonly (string | null)[],
-  nodesById: ReadonlyMap<string, ClodPageNode>,
-): (ClodPageNode | null)[] {
+function resolveChildIds(ownerId: string, childIds: readonly (string | null)[], nodesById: ReadonlyMap<string, ClodPageNode>): (ClodPageNode | null)[] {
   return childIds.map((id) => {
     if (id === null) return null;
     const child = nodesById.get(id);
     if (!child) throw new Error(`CLOD serialized node ${ownerId} references missing child ${id}`);
     return child;
   });
+}
+
+function materializeSerializedNode(node: SerializedClodNode): ClodPageNode {
+  const rehydrated: ClodPageNode = {
+    id: node.id,
+    level: node.level,
+    children: [],
+    mesh: node.mesh,
+    footprint: node.footprint,
+    bounds: node.bounds,
+    errorWorld: node.errorWorld,
+    lowBenefit: node.lowBenefit,
+  };
+  applySerializedMetadata(rehydrated, node);
+  return rehydrated;
 }
 
 export function serializeNode(node: ClodPageNode): SerializedClodNode {
@@ -185,20 +183,12 @@ export function serializeNodes(nodes: readonly ClodPageNode[]): SerializedClodNo
 }
 
 export function collectNodeTransferables(node: SerializedClodNode, out: Transferable[]): void {
-  out.push(
-    node.mesh.positions.buffer,
-    node.mesh.normals.buffer,
-    node.mesh.paintSlots.buffer,
-    node.mesh.materialWeights.buffer,
-    node.mesh.indices.buffer,
-  );
+  out.push(node.mesh.positions.buffer, node.mesh.normals.buffer, node.mesh.paintSlots.buffer, node.mesh.materialWeights.buffer, node.mesh.indices.buffer);
 }
 
 export function collectBuildResultTransferables(result: SerializedBuildResult): Transferable[] {
   const out: Transferable[] = [];
-  for (const [, nodes] of result.nodesByLevel) {
-    for (const node of nodes) collectNodeTransferables(node, out);
-  }
+  for (const [, nodes] of result.nodesByLevel) for (const node of nodes) collectNodeTransferables(node, out);
   return out;
 }
 
@@ -212,19 +202,43 @@ export function serializeBuildResult(result: BuildResult): SerializedBuildResult
   };
 }
 
+export function rehydrateBuildResult(result: SerializedBuildResult): BuildResult {
+  const nodesById = new Map<string, ClodPageNode>();
+  const nodesByLevel = new Map<number, ClodPageNode[]>();
+  for (const [level, serializedNodes] of result.nodesByLevel) {
+    const levelNodes: ClodPageNode[] = [];
+    for (const serialized of serializedNodes) {
+      if (nodesById.has(serialized.id)) throw new Error(`CLOD serialized build result contains duplicate node ${serialized.id}`);
+      const node = materializeSerializedNode(serialized);
+      nodesById.set(serialized.id, node);
+      levelNodes.push(node);
+    }
+    nodesByLevel.set(level, levelNodes);
+  }
+  for (const [, serializedNodes] of result.nodesByLevel) {
+    for (const serialized of serializedNodes) nodesById.get(serialized.id)!.children = resolveChildIds(serialized.id, serialized.childIds, nodesById);
+  }
+  const roots = result.roots.map((id) => {
+    const root = nodesById.get(id);
+    if (!root) throw new Error(`CLOD serialized build result references missing root ${id}`);
+    return root;
+  });
+  return {
+    roots,
+    nodesByLevel,
+    stats: result.stats.map((stat) => ({ ...stat, polish: { ...stat.polish } })),
+    worldPagesX: result.worldPagesX,
+    worldPagesZ: result.worldPagesZ,
+  };
+}
+
 export function indexNodes(result: BuildResult): Map<string, ClodPageNode> {
   const nodes = new Map<string, ClodPageNode>();
-  for (const levelNodes of result.nodesByLevel.values()) {
-    for (const node of levelNodes) nodes.set(node.id, node);
-  }
+  for (const levelNodes of result.nodesByLevel.values()) for (const node of levelNodes) nodes.set(node.id, node);
   return nodes;
 }
 
-export function applySerializedNode(
-  target: ClodPageNode,
-  serialized: SerializedClodNode,
-  nodesById: Map<string, ClodPageNode>,
-): ClodPageNode {
+export function applySerializedNode(target: ClodPageNode, serialized: SerializedClodNode, nodesById: Map<string, ClodPageNode>): ClodPageNode {
   const children = resolveChildIds(serialized.id, serialized.childIds, nodesById);
   applySerializedMetadata(target, serialized);
   target.level = serialized.level;
@@ -240,20 +254,7 @@ export function applySerializedNode(
 /** Rehydrate leaf nodes that reference no children (streamed LOD0 root pages). */
 export function rehydrateStandaloneNodes(nodes: readonly SerializedClodNode[]): ClodPageNode[] {
   return nodes.map((node) => {
-    if (node.childIds.some((id) => id !== null)) {
-      throw new Error(`CLOD standalone node ${node.id} must not reference children`);
-    }
-    const rehydrated: ClodPageNode = {
-      id: node.id,
-      level: node.level,
-      children: [],
-      mesh: node.mesh,
-      footprint: node.footprint,
-      bounds: node.bounds,
-      errorWorld: node.errorWorld,
-      lowBenefit: node.lowBenefit,
-    };
-    applySerializedMetadata(rehydrated, node);
-    return rehydrated;
+    if (node.childIds.some((id) => id !== null)) throw new Error(`CLOD standalone node ${node.id} must not reference children`);
+    return materializeSerializedNode(node);
   });
 }
