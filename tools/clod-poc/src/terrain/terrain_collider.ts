@@ -155,6 +155,7 @@ export class TerrainColliderSet {
     entry.sourceGeometry?.dispose();
     entry.geometry = null;
     entry.sourceGeometry = null;
+    entry.sourceMesh = null;
     entry.boundsTree = null;
   }
 
