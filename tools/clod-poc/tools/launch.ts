@@ -50,6 +50,10 @@ const GENERIC_CANDIDATES: LaunchRecipe[] = [
 
 const CACHE_PATH = ".cache/webgpu-flags.json";
 const SERVER_PROBE_TIMEOUT_MS = 2500;
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const INFINITE_ISLANDS_DEFAULT_CAM_Y = 96;
+const INFINITE_ISLANDS_DEFAULT_PITCH = -0.43;
+const INFINITE_ISLANDS_DEFAULT_FOV = 55;
 
 export function clodBaseUrl(): string {
   return process.env["CLOD_POC_BASE_URL"] ?? "http://localhost:5173/";
@@ -210,11 +214,23 @@ export interface ClodUrlOptions {
   extra?: Record<string, string>;
 }
 
+function inferredInfiniteIslandsCamera(options: ClodUrlOptions): string | null {
+  if (options.cam || options.scene !== INFINITE_ISLANDS_SCENE) return null;
+  const extra = options.extra ?? {};
+  const x = Number(extra["x"]);
+  const z = Number(extra["z"]);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const yaw = Number(extra["yaw"]);
+  const safeYaw = Number.isFinite(yaw) ? yaw : 2.65;
+  return `${x},${INFINITE_ISLANDS_DEFAULT_CAM_Y},${z},${safeYaw.toFixed(4)},${INFINITE_ISLANDS_DEFAULT_PITCH.toFixed(4)},${INFINITE_ISLANDS_DEFAULT_FOV}`;
+}
+
 export function clodUrl(options: ClodUrlOptions, baseUrl = clodBaseUrl()): string {
   const params = new URLSearchParams();
   if (options.scene !== null) params.set("scene", options.scene ?? "sanity");
   if (options.seed !== undefined) params.set("seed", String(options.seed));
-  if (options.cam) params.set("cam", options.cam);
+  const cam = options.cam ?? inferredInfiniteIslandsCamera(options);
+  if (cam) params.set("cam", cam);
   if (options.hud) params.set("hud", "1");
   if (options.freeze) params.set("freeze", "1");
   for (const [key, value] of Object.entries(options.extra ?? {})) params.set(key, value);
