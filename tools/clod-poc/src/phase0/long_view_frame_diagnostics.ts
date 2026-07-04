@@ -85,6 +85,19 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   let lastFarShellSnapX = Number.NaN;
   let lastFarShellSnapZ = Number.NaN;
 
+  const resetFrameMetrics = (): void => {
+    phase0FrameMsBuffer.length = 0;
+    const hooks = deps.getHooks();
+    if (!hooks?.stats) return;
+    hooks.stats.counters["frame_ms_avg"] = 0;
+    hooks.stats.counters["frame_ms_p95"] = -1;
+    hooks.stats.counters["frame_ms_p99"] = -1;
+  };
+
+  if (typeof window !== "undefined") {
+    (window as typeof window & { __drusnielResetPhase0FrameStats?: () => void }).__drusnielResetPhase0FrameStats = resetFrameMetrics;
+  }
+
   return () => {
     const hooks = deps.getHooks();
     if (!hooks?.stats) return;
@@ -165,10 +178,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.counters["rendered_terrain_tris"] = selectionStats.triCount;
     s.counters["total_scene_tris"] = s.triangles;
     s.counters["draw_calls"] = s.drawCalls;
-    s.counters["frame_ms_avg"] = s.fps > 0 ? 1000 / s.fps : 0;
 
     phase0FrameMsBuffer.push(s.frameMs);
     if (phase0FrameMsBuffer.length > PHASE0_P95_WINDOW) phase0FrameMsBuffer.shift();
+    if (phase0FrameMsBuffer.length > 0) {
+      const totalFrameMs = phase0FrameMsBuffer.reduce((sum, value) => sum + value, 0);
+      s.counters["frame_ms_avg"] = totalFrameMs / phase0FrameMsBuffer.length;
+    }
     if (phase0FrameMsBuffer.length >= 10) {
       const sorted = [...phase0FrameMsBuffer].sort((a, b) => a - b);
       s.counters["frame_ms_p95"] = sorted[Math.floor(sorted.length * 0.95)] ?? -1;
