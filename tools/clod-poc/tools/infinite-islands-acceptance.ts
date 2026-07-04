@@ -298,8 +298,7 @@ async function readPhase0Report(page: Page): Promise<JsonRecord> {
       ? { available: true, report: JSON.parse(JSON.stringify(report)) }
       : { available: false };
   });
-}
-
+}\n
 async function settle(page: Page, frames: number): Promise<void> {
   await settlePage(page, frames, SETTLE_TIMEOUT_MS);
 }
@@ -321,6 +320,7 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
       }).__drusnielClod?.stats?.counters ?? {};
       return {
         tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
+        tilesBuilding: counters["far_summary_tiles_building"] ?? -1,
         bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
         bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
         bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
@@ -334,6 +334,7 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         proxyBuilding: counters["shadow_proxy_building"] ?? -1,
       };
     });
+    const farSummaryQuiet = c.tilesMissing === 0 && c.tilesBuilding === 0;
     const bubbleQuiet = c.bubbleRequired === 0 || (c.bubbleFailed === 0 && c.bubbleBuilding === 0 && c.bubbleReady > 0);
     const streamQuiet = c.streamRequired === 0 || (
       c.streamFailed === 0
@@ -342,7 +343,7 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
       && c.streamReady === 0
       && c.streamCached > 0
     );
-    const quiet = c.tilesMissing === 0 && bubbleQuiet && streamQuiet && c.proxyBuilding !== 1;
+    const quiet = farSummaryQuiet && bubbleQuiet && streamQuiet && c.proxyBuilding !== 1;
     stablePolls = quiet ? stablePolls + 1 : 0;
     if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
       console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
