@@ -93,6 +93,21 @@ export interface RuntimeSystemsStartupResult extends VegetationStartupResult, Wa
   constructionController: ConstructionController | null;
 }
 
+function withConstructionGuardDispose(
+  controller: ConstructionController,
+  disposeGuard: () => void,
+): ConstructionController {
+  return {
+    update: () => controller.update(),
+    stats: () => controller.stats(),
+    setTerrainConformHandler: (handler) => controller.setTerrainConformHandler(handler),
+    dispose: () => {
+      disposeGuard();
+      controller.dispose();
+    },
+  };
+}
+
 export async function runRuntimeSystemsStartup(
   input: RuntimeSystemsStartupInput,
 ): Promise<RuntimeSystemsStartupResult> {
@@ -315,23 +330,24 @@ export async function runRuntimeSystemsStartup(
           ? maxRayDistanceM
           : editAuthority.buildCommitRadiusM;
       }
-      installConstructionCommitGuard({
+      const disposeGuard = installConstructionCommitGuard({
         domElement: app.renderer.domElement,
         camera,
         worldCells,
+        unboundedWorld: searchParams.get("scene")?.startsWith("infinite-") ?? false,
         placement: constructionConfig.placement,
         editAuthority,
         getAuthorityOrigin: () => ({ x: camera.position.x, z: camera.position.z }),
         getCounters: () => getHooks()?.stats?.counters ?? null,
         onRejected: (reason) => console.info(`[construction] placement rejected: ${reason}`),
       });
-      constructionController = createConstructionController({
+      constructionController = withConstructionGuardDispose(createConstructionController({
         scene,
         camera,
         rendererDomElement: app.renderer.domElement,
         worldCells,
         config: constructionConfig,
-      });
+      }), disposeGuard);
     } catch (error) {
       console.error("[construction] failed to initialize", error);
     }
