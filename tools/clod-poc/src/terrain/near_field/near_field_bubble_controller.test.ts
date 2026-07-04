@@ -508,4 +508,44 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.streamedColliderPages).toBe(1);
     expect(stats.colliderRegistrations).toBe(4);
   });
+
+  it("confirms GPU-empty collider chunks through the sliced CPU fallback before ready", async () => {
+    terrainMocks.meshChunk.mockImplementation(() => NON_EMPTY_CHUNK);
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(EMPTY_CHUNK)),
+    };
+    const colliders = new Map<string, unknown>();
+    const terrainColliders = {
+      upsertPage: vi.fn((page: { id: string }) => {
+        colliders.set(page.id, page);
+      }),
+      removePage: vi.fn((id: string) => colliders.delete(id)),
+    } as unknown as TerrainColliderSet;
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+      terrainColliders,
+    });
+    const input = {
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    };
+
+    controller.update(input);
+    await flushPromises();
+    await runUpdateAndFlush(controller, { ...input, frameId: 2 });
+    await runUpdateAndFlush(controller, { ...input, frameId: 3 });
+    const stats = await runUpdateAndFlush(controller, { ...input, frameId: 4 });
+
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(4);
+    expect(terrainMocks.meshChunk).toHaveBeenCalledTimes(4);
+    expect(stats.readyPages).toBe(1);
+    expect(stats.buildingPages).toBe(0);
+    expect(stats.streamedColliderPages).toBe(1);
+    expect(stats.colliderRegistrations).toBe(4);
+  });
 });

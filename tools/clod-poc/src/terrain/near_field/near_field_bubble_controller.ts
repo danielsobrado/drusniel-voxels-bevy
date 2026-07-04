@@ -335,6 +335,15 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     gpuPendingBuilds.set(key, { px, pz, worldBounds, edits, chunks: pageChunks(), inflight: 0, failures: 0 });
   };
 
+  const enqueueCpuChunkBuild = (key: string, px: number, pz: number, worldBounds: WorldBounds, dx: number, dz: number): void => {
+    const existing = cpuPendingBuilds.get(key);
+    if (existing) {
+      existing.chunks.push([dx, dz]);
+      return;
+    }
+    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: [[dx, dz]], failures: 0 });
+  };
+
   const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
     const existing = chunkGroups.get(key);
     if (existing) return existing;
@@ -382,6 +391,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     if (chunkGroups.get(key) !== entry || gpuPendingBuilds.get(key) !== job) return;
     if (job.chunks.length > 0 || job.inflight > 0) return;
     gpuPendingBuilds.delete(key);
+    if (cpuPendingBuilds.has(key)) return;
     entry.failed = job.failures > 0;
     entry.ready = true;
   };
@@ -403,16 +413,20 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         dispatched++;
         gpuMesher.meshChunk(job.px * P + dx, job.pz * P + dz, job.worldBounds, job.edits)
           .then((cm) => {
-            if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job && cm.indices.length > 0) {
-              addChunkMesh(
-                entry.group,
-                entry.mats,
-                entry.unsubs,
-                entry.colliderIds,
-                cm,
-                chunkColliderId(key, dx, dz),
-                liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
-              );
+            if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) {
+              if (cm.indices.length > 0) {
+                addChunkMesh(
+                  entry.group,
+                  entry.mats,
+                  entry.unsubs,
+                  entry.colliderIds,
+                  cm,
+                  chunkColliderId(key, dx, dz),
+                  liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
+                );
+              } else if (terrainColliders) {
+                enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
+              }
             }
             completeGpuChunk(key, entry, job);
           })
@@ -451,8 +465,10 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       }
       if (job.chunks.length === 0) {
         cpuPendingBuilds.delete(key);
-        entry.failed = job.failures > 0;
-        entry.ready = true;
+        if (!gpuPendingBuilds.has(key)) {
+          entry.failed = job.failures > 0;
+          entry.ready = true;
+        }
       }
       if (performance.now() - tBubbleStart >= CPU_CHUNK_MESH_BUDGET_MS) return;
     }

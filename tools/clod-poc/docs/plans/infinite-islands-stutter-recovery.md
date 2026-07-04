@@ -502,6 +502,49 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   10 s before timing out.
 - 2026-07-04: Typecheck passed after the `page_settle.ts` rendered-frame
   timeout adjustment (`rtk npm --prefix tools/clod-poc run typecheck`).
+- 2026-07-04: Started acceptance rerun
+  `acceptance-runs/infinite-islands/2026-07-04T14-56-49` with the corrected
+  convergence predicate and longer short-settle timeout.
+- 2026-07-04: Stopped run `2026-07-04T14-56-49` after the walk convergence
+  timeout revealed it was using the reverted stream-quiet predicate. The
+  source on disk had reverted to the stream fields, while `page_settle.ts`
+  already retained the 10 s short-settle timeout in `HEAD`. Reapply the
+  convergence predicate before rerunning acceptance.
+- 2026-07-04: Reapplied the convergence predicate in
+  `tools/infinite-islands-acceptance.ts`: remove live-CLOD stream quiet
+  gating and require live-bubble collider pages/registrations when
+  live-bubble required pages are present. Verified the diff only touches that
+  predicate.
+- 2026-07-04: Typecheck passed after reapplying the convergence predicate
+  (`rtk npm --prefix tools/clod-poc run typecheck`).
+- 2026-07-04: Started acceptance rerun
+  `acceptance-runs/infinite-islands/2026-07-04T15-02-29` after verifying the
+  corrected convergence predicate in source.
+- 2026-07-04: Stopped run `2026-07-04T15-02-29` after the walk convergence
+  timeout produced the intended collider-focused snapshot:
+  `tilesMissing=0`, `tilesBuilding=0`, `bubbleBuilding=0`,
+  `bubbleReady=52`, `bubbleRequired=52`, `bubbleFailed=0`,
+  `bubbleColliderPages=0`, `bubbleColliderRegistrations=0`,
+  `proxyBuilding=0`. This confirms the remaining failure is live-bubble
+  pages becoming ready without any collider-producing chunks.
+- 2026-07-04: Next controller fix: when the GPU mesher returns an empty
+  chunk for a live-bubble page, enqueue that chunk for the existing sliced CPU
+  build path and do not mark the page ready until CPU confirmation drains.
+  This keeps true empty pages valid, but prevents a GPU all-empty result from
+  satisfying convergence as ready-without-colliders.
+- 2026-07-04: Implemented the targeted GPU-empty confirmation path for
+  live-bubble pages when `terrainColliders` is present. GPU-empty chunks are
+  queued onto the existing CPU pending chunk path, GPU completion waits for
+  pending CPU fallback chunks, and CPU fallback completion waits for any
+  remaining GPU job before marking the page ready. Added a focused test that
+  GPU-empty chunks become collider registrations via sliced CPU fallback.
+- 2026-07-04: Verification after GPU-empty confirmation path: typecheck
+  passed, and focused Vitest passed directly for
+  `near_field_bubble_controller.test.ts`, `terrain_frame_phase.test.ts`, and
+  `stats_sync_throttle.test.ts` (3 files / 28 tests).
+- 2026-07-04: Started acceptance rerun
+  `acceptance-runs/infinite-islands/2026-07-04T15-09-40` after the
+  GPU-empty CPU confirmation fix.
 
 ## Remaining known risks / next steps if gates still fail
 
