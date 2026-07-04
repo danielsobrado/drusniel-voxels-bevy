@@ -322,16 +322,26 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
       return {
         tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
         tilesBuilding: counters["far_summary_tiles_building"] ?? -1,
+        farShellRebuildPending: counters["far_shell_rebuild_pending"] ?? 0,
+        textureWindowPending: counters["terrain_texture_window_pending"] ?? 0,
         bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
         bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
         bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
         bubbleFailed: counters["live_bubble_failed_pages"] ?? -1,
         bubbleColliderPages: counters["live_bubble_streamed_collider_pages"] ?? -1,
         bubbleColliderRegistrations: counters["live_bubble_collider_registrations"] ?? -1,
+        streamRequired: counters["live_clod_stream_required_pages"] ?? 0,
+        streamPending: counters["live_clod_stream_pending_pages"] ?? 0,
+        streamInflight: counters["live_clod_stream_inflight_batches"] ?? 0,
+        streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
+        streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
+        streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
         proxyBuilding: counters["shadow_proxy_building"] ?? -1,
       };
     });
     const farSummaryQuiet = c.tilesMissing === 0 && c.tilesBuilding === 0;
+    const shellQuiet = c.farShellRebuildPending === 0;
+    const textureQuiet = c.textureWindowPending === 0;
     const bubbleQuiet = c.bubbleRequired === 0 || (
       c.bubbleFailed === 0
       && c.bubbleBuilding === 0
@@ -339,7 +349,14 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
       && c.bubbleColliderPages > 0
       && c.bubbleColliderRegistrations > 0
     );
-    const quiet = farSummaryQuiet && bubbleQuiet && c.proxyBuilding !== 1;
+    const streamQuiet = c.streamRequired === 0 || (
+      c.streamFailed === 0
+      && c.streamPending === 0
+      && c.streamInflight === 0
+      && c.streamReady === 0
+      && c.streamCached > 0
+    );
+    const quiet = farSummaryQuiet && shellQuiet && textureQuiet && bubbleQuiet && streamQuiet && c.proxyBuilding !== 1;
     stablePolls = quiet ? stablePolls + 1 : 0;
     if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
       console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
