@@ -374,6 +374,7 @@ function treeVisibleClusterMaskStats(mask: TreeRingClusterVisibilityMask | null)
     gpuPrefilterRejectedClusters: mask.hiddenClusters,
     gpuPrefilterAcceptedClusters: mask.visibleClusters - mask.unknownKeptClusters,
     gpuPrefilterUnknownKeptClusters: mask.unknownKeptClusters,
+    gpuPrefilterFarSummaryConsulted: mask.farSummaryConsultedClusters,
     gpuPrefilterSkippedCandidateEstimate: mask.skippedCandidateEstimate,
     gpuCandidateCountBeforePrefilter: mask.candidateSlotsBeforePrefilter,
     gpuCandidateCountAfterPrefilter: mask.candidateSlotsAfterPrefilter,
