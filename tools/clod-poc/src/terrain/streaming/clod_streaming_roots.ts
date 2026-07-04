@@ -19,6 +19,8 @@ export interface StreamingClodRootController {
   stats(): StreamingClodRootStats;
 }
 
+export type StreamingClodRootBuildScheduler = (task: () => void) => void;
+
 export interface StreamingClodRootControllerDeps {
   roots: ClodPageNode[];
   allNodes: ClodPageNode[];
@@ -28,6 +30,7 @@ export interface StreamingClodRootControllerDeps {
   buildBudgetPagesPerFrame?: number;
   maxCachedPages?: number;
   evictDistanceMultiplier?: number;
+  scheduleBuild?: StreamingClodRootBuildScheduler;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
   onRootsChanged?: () => void;
 }
@@ -42,6 +45,10 @@ interface PageCoord {
 const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
+
+function defaultBuildScheduler(task: () => void): void {
+  globalThis.setTimeout(task, 0);
+}
 
 export function streamingClodPageKey(px: number, pz: number): string {
   return `L0:${px},${pz}`;
@@ -85,9 +92,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const buildBudget = Math.max(1, Math.floor(deps.buildBudgetPagesPerFrame ?? DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME));
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
+  const scheduleBuild = deps.scheduleBuild ?? defaultBuildScheduler;
   const cached = new Map<string, { node: ClodPageNode; centerX: number; centerZ: number; lastTouchFrame: number }>();
+  const pending = new Set<string>();
   const failed = new Set<string>();
   let frame = 0;
+  let completedBuilds = 0;
+  let completedBuildMs = 0;
   let latest: StreamingClodRootStats = emptyStats();
 
   const removeRoot = (id: string): void => {
@@ -134,18 +145,44 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     };
   };
 
+  const scheduleNodeBuild = (coord: PageCoord, frameId: number): void => {
+    const id = streamingClodPageKey(coord.px, coord.pz);
+    pending.add(id);
+    scheduleBuild(() => {
+      const startedAt = performance.now();
+      try {
+        if (cached.has(id)) return;
+        const node = buildNode(coord);
+        deps.roots.push(node);
+        deps.allNodes.push(node);
+        cached.set(id, { node, centerX: coord.centerX, centerZ: coord.centerZ, lastTouchFrame: frameId });
+        completedBuilds++;
+        deps.onNodesBuilt?.([node]);
+        deps.onRootsChanged?.();
+      } catch (error) {
+        console.warn(`[clod-stream] failed to build ${id}`, error);
+        failed.add(id);
+      } finally {
+        pending.delete(id);
+        completedBuildMs += performance.now() - startedAt;
+      }
+    });
+  };
+
   return {
     update(center, radiusM) {
       frame++;
+      const finishedBuilds = completedBuilds;
+      const finishedBuildMs = completedBuildMs;
+      completedBuilds = 0;
+      completedBuildMs = 0;
       if (!deps.enabled) {
         latest = emptyStats();
         return latest;
       }
       const required = streamingClodRequiredPageCoords(center, radiusM, pageSize)
         .filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
-      let builtThisFrame = 0;
-      let buildMs = 0;
-      const builtNodes: ClodPageNode[] = [];
+      let scheduledThisFrame = 0;
       const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz)));
 
       for (const coord of required) {
@@ -155,33 +192,20 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
           existing.lastTouchFrame = frame;
           continue;
         }
-        if (failed.has(id) || builtThisFrame >= buildBudget) continue;
-        const startedAt = performance.now();
-        try {
-          const node = buildNode(coord);
-          deps.roots.push(node);
-          deps.allNodes.push(node);
-          cached.set(id, { node, centerX: coord.centerX, centerZ: coord.centerZ, lastTouchFrame: frame });
-          builtNodes.push(node);
-          builtThisFrame++;
-        } catch (error) {
-          console.warn(`[clod-stream] failed to build ${id}`, error);
-          failed.add(id);
-        } finally {
-          buildMs += performance.now() - startedAt;
-        }
+        if (pending.has(id) || failed.has(id) || scheduledThisFrame >= buildBudget) continue;
+        scheduleNodeBuild(coord, frame);
+        scheduledThisFrame++;
       }
 
       const evictions = evict(center, radiusM);
-      if (builtNodes.length > 0) deps.onNodesBuilt?.(builtNodes);
-      if (builtNodes.length > 0 || evictions > 0) deps.onRootsChanged?.();
+      if (evictions > 0) deps.onRootsChanged?.();
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
-        builtThisFrame,
+        builtThisFrame: finishedBuilds,
         failedPages: [...requiredIds].filter((id) => failed.has(id)).length,
         evictions,
-        buildMs,
+        buildMs: finishedBuildMs,
       };
       return latest;
     },
