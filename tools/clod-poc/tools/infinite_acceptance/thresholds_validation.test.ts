@@ -13,6 +13,8 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_bubble_collider_registrations"] = 1;
   values["live_clod_stream_required_pages"] = 1;
   values["live_clod_stream_cached_pages"] = 1;
+  values["live_clod_stream_build_budget"] = 1;
+  values["live_clod_stream_apply_ms"] = 1;
   values["infinite_hydrology_outside_sample_valid"] = 1;
   values["infinite_hydrology_nonrepeat_delta"] = 1;
   values["infinite_hydrology_nonrepeat_ok"] = 1;
@@ -50,5 +52,28 @@ describe("infinite islands threshold validation", () => {
     ]) {
       expect(evaluateThresholds(validCounters({ [key]: 1 })).passed).toBe(false);
     }
+  });
+
+  it("fails when required streamed roots never become cached", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_cached_pages: 0 })).passed).toBe(false);
+  });
+
+  it("allows zero cached roots only when builds are disabled or no pages are required", () => {
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_cached_pages: 0,
+      live_clod_stream_build_budget: 0,
+    })).failures).not.toContain(
+      "live_clod_stream_cached_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
+    );
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_cached_pages: 0,
+      live_clod_stream_required_pages: 0,
+    })).failures).not.toContain(
+      "live_clod_stream_cached_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
+    );
+  });
+
+  it("fails when streamed root apply work exceeds the main-thread budget", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_apply_ms: 2.01 })).passed).toBe(false);
   });
 });
