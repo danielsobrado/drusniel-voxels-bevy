@@ -72,6 +72,27 @@ describe("pageInsideFiniteStartupWorld", () => {
 });
 
 describe("createStreamingClodRootController", () => {
+  it("does not build root pages unless a positive build budget is provided", () => {
+    const roots: ClodPageNode[] = [];
+    const allNodes: ClodPageNode[] = [];
+    const pendingTasks: Array<() => void> = [];
+    const controller = createStreamingClodRootController({
+      roots,
+      allNodes,
+      cfg: TEST_CFG,
+      worldCells: 64,
+      enabled: true,
+      scheduleBuild: (task) => pendingTasks.push(task),
+    });
+
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    expect(stats.requiredPages).toBeGreaterThan(0);
+    expect(stats.cachedPages).toBe(0);
+    expect(pendingTasks.length).toBe(0);
+    expect(roots.length).toBe(0);
+  });
+
   it("signals root changes after streamed builds and evictions", () => {
     const roots: ClodPageNode[] = [];
     const allNodes: ClodPageNode[] = [];
