@@ -334,6 +334,8 @@ export async function runRuntimeSystemsStartup(
           : editAuthority.buildCommitRadiusM;
         counters["player_build_unbounded_world"] = constructionUnboundedWorld ? 1 : 0;
       }
+      const getBuildAuthorityOrigin = () => ({ x: camera.position.x, z: camera.position.z });
+      const getBuildAuthorityCounters = () => getHooks()?.stats?.counters ?? null;
       const disposeGuard = installConstructionCommitGuard({
         domElement: app.renderer.domElement,
         camera,
@@ -341,8 +343,8 @@ export async function runRuntimeSystemsStartup(
         unboundedWorld: constructionUnboundedWorld,
         placement: constructionConfig.placement,
         editAuthority,
-        getAuthorityOrigin: () => ({ x: camera.position.x, z: camera.position.z }),
-        getCounters: () => getHooks()?.stats?.counters ?? null,
+        getAuthorityOrigin: getBuildAuthorityOrigin,
+        getCounters: getBuildAuthorityCounters,
         onRejected: (reason) => console.info(`[construction] placement rejected: ${reason}`),
       });
       try {
@@ -352,6 +354,9 @@ export async function runRuntimeSystemsStartup(
           rendererDomElement: app.renderer.domElement,
           worldCells: constructionWorldCells,
           config: constructionConfig,
+          editAuthority,
+          getAuthorityOrigin: getBuildAuthorityOrigin,
+          getAuthorityCounters: getBuildAuthorityCounters,
         }), disposeGuard);
       } catch (error) {
         disposeGuard();
