@@ -1,12 +1,17 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadQaConfig, runQa, testOnly, validateConfig } from "./qa.js";
 
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const defaultQaConfigPath = join(packageRoot, "config/qa_visual.yaml");
+const sampleSummaryPath = join(packageRoot, "tests/qa-sample-summary.json");
+
 describe("clod-poc QA", () => {
   it("loads the default QA config", () => {
-    const config = loadQaConfig("config/qa_visual.yaml");
+    const config = loadQaConfig(defaultQaConfigPath);
     expect(config.scenes[0].id).toBe("clod_poc_main_view");
   });
 
@@ -45,10 +50,10 @@ describe("clod-poc QA", () => {
   });
 
   it("writes a baseline-missing report for the sample summary", () => {
-    const config = loadQaConfig("config/qa_visual.yaml");
-    const summary = JSON.parse(readFileSync("tests/qa-sample-summary.json", "utf8"));
+    const config = loadQaConfig(defaultQaConfigPath);
+    const summary = JSON.parse(readFileSync(sampleSummaryPath, "utf8"));
     const output = mkdtempSync(join(tmpdir(), "clod-qa-"));
-    const report = runQa(config, summary, "tests/qa-sample-summary.json", output);
+    const report = runQa(config, summary, sampleSummaryPath, output);
     expect(report.overall_status).toBe("baseline_missing");
     expect(readFileSync(join(output, "qa-report.md"), "utf8")).toContain("clod_poc_main_view");
   });
