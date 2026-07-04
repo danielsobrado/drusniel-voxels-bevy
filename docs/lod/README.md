@@ -8,8 +8,8 @@ multi-LOD / seam-stitch documents have moved to [`../legacy/`](../legacy/).
 LOD is now CLOD pages — far terrain decimated from merged LOD0 child meshes with
 locked/welded borders — plus a live near-field LOD0 bubble. Design + execution:
 
-- [CLOD execution plan](../plans/clod-execution-plan.md)
-- [CLOD phase 5 plan](../plans/clod-phase5-plan.md)
+- [CLOD execution plan](../plans_completed/clod-execution-plan.md)
+- [CLOD phase 5 plan](../plans_completed/clod-phase5-plan.md)
 
 Retained live systems documented here:
 

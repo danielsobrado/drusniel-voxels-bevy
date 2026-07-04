@@ -338,3 +338,11 @@ export function treeUiState(state: ClodAppState): import("../../runtime/vegetati
 export function understoryUiState(state: ClodAppState): import("../../runtime/vegetation/understory_controller.js").UnderstoryControllerUiState {
   return state;
 }
+
+export function forestLightingUiState(state: ClodAppState): import("../../runtime/forest_lighting/forest_lighting_controller.js").ForestLightingControllerUiState {
+  return state;
+}
+
+export function waterUiState(state: ClodAppState): import("../../runtime/water_weather/water_controller.js").WaterControllerUiState {
+  return state;
+}

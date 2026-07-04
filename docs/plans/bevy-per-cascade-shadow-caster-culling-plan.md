@@ -5,7 +5,7 @@
 > `queue_instanced_prop_shadows`), `src/rendering/lighting/`, `assets/config/props.yaml`,
 > `bench/scenes/forest/`
 > Related: [`bevy-gpu-vegetation-port-plan.md`](bevy-gpu-vegetation-port-plan.md) Phase 4
-> (the GPU version of this), [`clod-poc-per-cascade-shadow-caster-culling-plan.md`](clod-poc-per-cascade-shadow-caster-culling-plan.md)
+> (the GPU version of this), [`clod-poc-per-cascade-shadow-caster-culling-plan.md`](../plans_completed/clod-poc-per-cascade-shadow-caster-culling-plan.md)
 > (sibling — mostly N/A there).
 
 Separate **visible-instance culling** from **shadow-caster culling, per cascade**, for

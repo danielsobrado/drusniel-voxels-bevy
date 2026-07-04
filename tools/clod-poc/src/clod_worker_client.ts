@@ -287,9 +287,14 @@ export class ClodWorkerClient {
   }
 
   private doRejectAll(error: Error): void {
-    rejectAllMaps(error, this.buildRequests, this.digRequests, this.flushRequests, this.clearCacheRequests, this.streamRootsRequests);
+    rejectAllMaps([
+      this.buildRequests,
+      this.digRequests,
+      this.flushRequests,
+      this.clearCacheRequests,
+      this.streamRootsRequests,
+    ], this.progressHandlers, error);
     this.rejectPendingDig(error);
-    this.progressHandlers.clear();
     this.parentsWaiters.splice(0);
   }
 }

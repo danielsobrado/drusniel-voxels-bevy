@@ -252,8 +252,8 @@ double-sided node material.**
   AO/shadow + fog + a screen-door **`maskNode` discard** ([L230-266](../../tools/clod-poc/src/trees/tree_node_material.ts#L230)).
   `DoubleSide` doubles fragment work and the dither discard weakens early-z.
 
-This matches gap #1 of the parity plan
-([clod-poc-trees-parity-plan.md](../plans/clod-poc-trees-parity-plan.md)):
+This matches the earlier tree parity gap now tracked by the status note
+([clod-poc-trees-parity-status.md](../plans/clod-poc-trees-parity-status.md)):
 "Impostors / billboards are not real on the WebGPU path," and the recent Fable5
 foliage-grammar commits (`36d019c3` foliage card placement, `843593f0` budget
 grammar foliage by anchor targets, `5ab91f4e` structural variants).

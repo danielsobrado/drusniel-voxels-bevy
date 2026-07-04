@@ -63,7 +63,7 @@ for correctness, not legal, reasons.
 
 ## Two-target discipline (every plan)
 
-Per [`clod-execution-plan.md` §10](clod-execution-plan.md), behaviour that does not
+Per [`clod-execution-plan.md` §10](../plans_completed/clod-execution-plan.md), behaviour that does not
 yet exist is prototyped in the cheap **clod-poc** Three.js sandbox first, then ported
 to **Bevy**. glacial-valley *is itself* a Three.js sandbox, so for the looks (water,
 detail, art direction) the clod-poc port is nearly a like-for-like translation and is

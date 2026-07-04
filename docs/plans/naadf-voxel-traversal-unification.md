@@ -353,7 +353,7 @@ Do not merge PR5 before PR2 equivalence tests are green.
 - [`docs/rendering/naadf-completion-jira-plan.md`](../rendering/naadf-completion-jira-plan.md) — broader NAADF roadmap
 - [`docs/rendering/naadf-implementation-status.md`](../rendering/naadf-implementation-status.md) — landed milestones
 - [`docs/legacy/seam-lip-fix-plan.md`](../legacy/seam-lip-fix-plan.md) — mesh seam work (orthogonal)
-- [`docs/plans/clod-execution-plan.md`](clod-execution-plan.md) — CLOD pages (orthogonal)
+- [`docs/plans_completed/clod-execution-plan.md`](../plans_completed/clod-execution-plan.md) — CLOD pages (orthogonal)
 
 ---
 

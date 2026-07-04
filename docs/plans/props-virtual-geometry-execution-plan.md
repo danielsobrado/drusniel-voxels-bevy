@@ -7,7 +7,7 @@
 > `bench/scenes/visual/visual-regression-performance100.toml`  
 > Owner: rendering / props  
 > Related: [`docs/legacy/lod-implementation-and-review.md`](../legacy/lod-implementation-and-review.md),  
-> [`docs/plans/clod-execution-plan.md`](clod-execution-plan.md) §9 (terrain meshlets deferred separately)
+> [`docs/plans_completed/clod-execution-plan.md`](../plans_completed/clod-execution-plan.md) §9 (terrain meshlets deferred separately)
 
 ## Summary
 
@@ -25,7 +25,7 @@ high-triangle** assets where triangle count and overdraw dominate — **not** ma
 where count, alpha, wind, and instancing already win.
 
 **Explicit non-goal:** replace terrain rendering. CLOD terrain pages keep their own meshlet
-decision in [`clod-execution-plan.md`](clod-execution-plan.md).
+decision in [`clod-execution-plan.md`](../plans_completed/clod-execution-plan.md).
 
 **Review verdict (2026-06-10):** **Approve only as a tightly-scoped meshlet pilot** on Vulkan +
 Metal with automatic fallback to today's prop stack. **Reject as a global prop strategy** without

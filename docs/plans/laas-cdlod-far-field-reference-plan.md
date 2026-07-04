@@ -26,7 +26,7 @@ Every vertex height is a single-valued function of world `(x, z)`. That represen
 
 - overhangs, arches, sea-stacks, mushroom rocks
 - caves, tunnels, cave mouths crossing a page border (a Phase-2 stress case in
-  [`clod-execution-plan.md` §4.4](clod-execution-plan.md))
+  [`clod-execution-plan.md` §4.4](../plans_completed/clod-execution-plan.md))
 - floating geometry, vertical cliffs with undercuts
 - any post-edit voxel change that opens a void below a surface
 
@@ -70,7 +70,7 @@ LAAS hides LOD pops by sliding odd vertices toward the even grid across the oute
 each LOD ring ([`TerrainTiles.ts:117-136`](../reference/fable5-world-demo/src/world/TerrainTiles.ts#L117-L136)),
 giving **crack-free, pop-free** transitions with no second draw.
 - Our page runtime currently plans a **dithered screen-door crossfade**
-  ([`clod-execution-plan.md` §4.2 / §7](clod-execution-plan.md), the deferred geomorph note).
+  ([`clod-execution-plan.md` §4.2 / §7](../plans_completed/clod-execution-plan.md), the deferred geomorph note).
 - A geomorph between a page LOD and its parent is the same idea as CDLOD vertex morph,
   but on decimated meshes the collapse correspondence is non-trivial (deferred item §9 of
   the execution plan). **Borrow the *concept* and the morph-band math**; do not assume
@@ -84,7 +84,7 @@ LAAS splits steep/rough tiles earlier *and* deeper using a CPU height-range pyra
 ([`TerrainTiles.ts:388-485`](../reference/fable5-world-demo/src/world/TerrainTiles.ts#L388-L485)).
 - Our page selection ([`src/voxel/pages/selection.rs`](../../src/voxel/pages/selection.rs))
   uses **accumulated world-space simplification error → screen-space px** with hysteresis +
-  a 2:1 constraint ([`clod-execution-plan.md` §4.1](clod-execution-plan.md)). That is already
+  a 2:1 constraint ([`clod-execution-plan.md` §4.1](../plans_completed/clod-execution-plan.md)). That is already
   *more* principled than LAAS's relief heuristic (our error is measured, not estimated).
 - **Borrow only the framing**, not the mechanism: LAAS confirms that 3D camera distance
   (de-prioritising the ground straight below from altitude,
@@ -98,7 +98,7 @@ LAAS adds a one-quad skirt ring that clamps to the patch edge then drops down to
 residual crack from non-uniform splits
 ([`TerrainTiles.ts:103-139`](../reference/fable5-world-demo/src/world/TerrainTiles.ts#L103-L139)).
 - Our pages are watertight **by construction** (locked outer borders, gate A1/A2 in
-  [`clod-execution-plan.md` §5](clod-execution-plan.md)) — so skirts are *not* needed for
+  [`clod-execution-plan.md` §5](../plans_completed/clod-execution-plan.md)) — so skirts are *not* needed for
   page↔page seams.
 - Skirts **are** the right insurance for the **mid-field-page ↔ outer-far-shell seam**
   (B4), where a voxel decimation meets an analytic heightfield and exact welding is
@@ -131,7 +131,7 @@ page path (I4: page builds never on the frame path). Cite it as confirmation, no
 | Rejected | Why |
 |---|---|
 | **Heightfield patch grid as the near/mid terrain mesh** | G0. Destroys volumetric topology, edits, caves, overhangs. The entire point of this document. |
-| **Replacing voxel CLOD pages with a CDLOD heightfield** | Pages are derived from the real mesher (I2/I3) so the bubble edge matches by construction ([`clod-phase5-plan.md` §7](clod-phase5-plan.md)). A heightfield page would reintroduce a seam and lose undercuts. |
+| **Replacing voxel CLOD pages with a CDLOD heightfield** | Pages are derived from the real mesher (I2/I3) so the bubble edge matches by construction ([`clod-phase5-plan.md` §7](../plans_completed/clod-phase5-plan.md)). A heightfield page would reintroduce a seam and lose undercuts. |
 | **Baking displacement/relief into terrain *height* near the camera** | LAAS's micro-displacement ([`TerrainTiles.ts:142-182`](../reference/fable5-world-demo/src/world/TerrainTiles.ts#L142-L182)) is heightfield relief; our near-field relief is real voxel geometry. Keep it that way. |
 | **CDLOD morph applied to live LOD0 chunks** | The bubble already has GPU geomorph (`ATTRIBUTE_MORPH_TARGET`); don't fork a second morph scheme into the editable path. |
 | **Using the far shell to *hide draw distance with fog*** | Banned by the reference's own §9 and by our distance-fidelity goals. The far shell must render serrated geometry, not a fog cutout. |
@@ -148,7 +148,7 @@ page path (I4: page builds never on the frame path). Cite it as confirmation, no
 - **G2** — The far shell owns **only** footprints with **no voxel chunk residency**. A
   runtime assertion (debug builds) must fail if the far shell and any live chunk / CLOD page
   claim the same footprint — same "exactly one owner per footprint" rule as the bubble edge
-  (§11.8 of [`clod-execution-plan.md`](clod-execution-plan.md)). **Measure it, don't just
+  (§11.8 of [`clod-execution-plan.md`](../plans_completed/clod-execution-plan.md)). **Measure it, don't just
   assert it:** emit two `summary.json` counters that must read **zero** every bench frame —
   **`Clod Page Ownership Conflicts`** (any footprint where a live chunk and a page/shell both
   render) and **`Clod Page Near Field Violations`** (any page/shell rendered inside the
@@ -194,7 +194,7 @@ P4  B1 (optional, deferred): evaluate geomorph-on-pages vs the shipped dither
   judge. **P0 does NOT create a new module tree.** Everything lands in the existing
   `src/voxel/pages/` and `config/clod_pages.yaml`; do **not** introduce `src/terrain/clod_pages/`
   or a second `assets/config/clod_pages.yaml` — both would fork the shipped system and split
-  the single source of truth (decision D2, [`clod-phase5-plan.md`](clod-phase5-plan.md)).
+  the single source of truth (decision D2, [`clod-phase5-plan.md`](../plans_completed/clod-phase5-plan.md)).
 - **P1** is the real new feature and is editable-safe by construction (Zone 3 has no voxels).
 - **P3/P4** are conditional optimizations — do them only if a bench shows the need.
 
@@ -204,7 +204,7 @@ require editing `meshing/` or `lod/`, stop — it has violated G0/G1.
 ### 5.1 Two-target port (clod-poc + Bevy) — parity matrix
 
 P0 lands on **both** targets, but each feature starts from a different place. Per the
-validation order in [`clod-execution-plan.md` §10](clod-execution-plan.md), behaviour that
+validation order in [`clod-execution-plan.md` §10](../plans_completed/clod-execution-plan.md), behaviour that
 does **not** yet exist is prototyped in the cheap Three.js sandbox **first**, then ported to
 Bevy; behaviour already proven in the PoC ports straight across.
 

@@ -205,6 +205,7 @@ export function serializeBuildResult(result: BuildResult): SerializedBuildResult
 export function rehydrateBuildResult(result: SerializedBuildResult): BuildResult {
   const nodesById = new Map<string, ClodPageNode>();
   const nodesByLevel = new Map<number, ClodPageNode[]>();
+
   for (const [level, serializedNodes] of result.nodesByLevel) {
     const levelNodes: ClodPageNode[] = [];
     for (const serialized of serializedNodes) {
@@ -215,14 +216,17 @@ export function rehydrateBuildResult(result: SerializedBuildResult): BuildResult
     }
     nodesByLevel.set(level, levelNodes);
   }
+
   for (const [, serializedNodes] of result.nodesByLevel) {
     for (const serialized of serializedNodes) nodesById.get(serialized.id)!.children = resolveChildIds(serialized.id, serialized.childIds, nodesById);
   }
+
   const roots = result.roots.map((id) => {
     const root = nodesById.get(id);
     if (!root) throw new Error(`CLOD serialized build result references missing root ${id}`);
     return root;
   });
+
   return {
     roots,
     nodesByLevel,

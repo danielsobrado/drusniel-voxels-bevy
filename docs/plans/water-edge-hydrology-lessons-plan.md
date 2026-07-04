@@ -6,7 +6,7 @@
 > `src/rendering/diagnostics/water_visual_probe.rs`, `assets/config/water.yaml`
 > Scope (clod-poc): `tools/clod-poc/src/{terrain,grass,terrain_textures}.ts`
 > Related: [`bevy-gpu-vegetation-port-plan.md`](bevy-gpu-vegetation-port-plan.md) &
-> [`clod-poc-grass-port-plan.md`](clod-poc-grass-port-plan.md) (consume the gating rule),
+> [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md) (consume the gating rule),
 > [`procedural-vegetation-authoring-plan.md`](procedural-vegetation-authoring-plan.md).
 
 Steal LAAS/fable5's hard-won **water-edge / hydrology discipline** — the rules,
@@ -144,7 +144,7 @@ and far-rim diagnosis entries):
 ## Relationship to the other plans
 
 - **L1 is a dependency of** the vegetation plans: both
-  [`clod-poc-grass-port-plan.md`](clod-poc-grass-port-plan.md) and
+  [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md) and
   [`bevy-gpu-vegetation-port-plan.md`](bevy-gpu-vegetation-port-plan.md) cull/place near
   water — they must gate on the true surface, not a proxy. Land L1 first or alongside.
 - **L5/L6 inform** the authoring plan's understory/shrub placement near shorelines.

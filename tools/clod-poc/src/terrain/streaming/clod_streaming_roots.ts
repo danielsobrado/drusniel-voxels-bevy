@@ -225,7 +225,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     const batch: PageCoord[] = [];
     for (const coord of required) {
       const id = streamingClodPageKey(coord.px, coord.pz);
-      if (cached.has(id) || failed.has(id) || buildStillQueued(id) || inFlight?.ids.has(id)) continue;
+      if (cached.has(id) || failed.has(id) || buildStillQueued(id)) continue;
       batch.push(coord);
       if (batch.length >= buildBudget) break;
     }

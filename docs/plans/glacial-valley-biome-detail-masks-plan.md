@@ -7,7 +7,7 @@
 > Parent: [`glacial-valley-port-overview.md`](glacial-valley-port-overview.md)
 > Siblings: [`bevy-gpu-vegetation-port-plan.md`](bevy-gpu-vegetation-port-plan.md),
 > [`procedural-vegetation-authoring-plan.md`](procedural-vegetation-authoring-plan.md),
-> [`clod-poc-grass-port-plan.md`](clod-poc-grass-port-plan.md)
+> [`clod-poc-grass-port-plan.md`](../plans_completed/clod-poc-grass-port-plan.md)
 
 ## What this is / is not
 

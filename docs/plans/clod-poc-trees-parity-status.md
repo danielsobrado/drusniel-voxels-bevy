@@ -2,7 +2,7 @@
 
 Status: In progress.
 
-This status note tracks the implementation state for `docs/plans/clod-poc-trees-parity-plan.md`.
+This status note supersedes the removed tree parity execution draft.
 
 ## Latest automated QA
 
