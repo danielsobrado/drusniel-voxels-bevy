@@ -223,7 +223,7 @@ function collectStats(grid: HydrologyGrid, particles: number, buildMs: number): 
       maxFlowSpeed = Math.max(maxFlowSpeed, Math.hypot(grid.flowDirX[i], grid.flowDirZ[i]) * grid.flowStrength[i]);
       countBodyKind(bodyKindCounts, grid.bodyKind[i]);
       if (x + 1 < grid.res) maxWaterYJump = Math.max(maxWaterYJump, Math.abs(grid.waterY[i] - grid.waterY[i + 1]));
-      if (z + 1 < grid.res) maxWaterYJump = Math.max(maxWaterYJump, Math.abs(grid.waterY[i] - grid.res]));
+      if (z + 1 < grid.res) maxWaterYJump = Math.max(maxWaterYJump, Math.abs(grid.waterY[i] - grid.waterY[i + grid.res]));
     }
   }
   return {
