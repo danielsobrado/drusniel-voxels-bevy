@@ -15,6 +15,10 @@ const RING_CLAMP_MARGIN = 2;
 let cachedInfiniteIslandsScene: boolean | null = null;
 let liveBubbleBuiltTotal = 0;
 let liveBubbleEvictionsTotal = 0;
+let liveBubbleProbeActive = false;
+let liveBubbleProbeBuiltTotal = 0;
+let liveBubbleProbeEvictionsTotal = 0;
+let liveBubbleProbeColliderRemovalsTotal = 0;
 
 interface TerrainFadeView {
   node: { id: string };
@@ -54,11 +58,42 @@ function hooksCounters(): Record<string, number> | null {
   return hooks?.stats?.counters ?? null;
 }
 
+function registerGlobalLiveBubbleProbe(): void {
+  const maybeWindow = (globalThis as typeof globalThis & {
+    window?: {
+      __drusnielClod?: { beginMovementRouteProbe?: (() => void) | null };
+      __drusnielBeginLiveBubbleMovementProbe?: () => void;
+      __drusnielBeginStreamingMovementProbe?: () => void;
+    };
+  }).window;
+  if (!maybeWindow) return;
+  maybeWindow.__drusnielBeginLiveBubbleMovementProbe = beginLiveBubbleMovementProbe;
+  if (maybeWindow.__drusnielClod) {
+    maybeWindow.__drusnielClod.beginMovementRouteProbe = () => {
+      beginLiveBubbleMovementProbe();
+      maybeWindow.__drusnielBeginStreamingMovementProbe?.();
+    };
+  }
+}
+
+export function beginLiveBubbleMovementProbe(): void {
+  liveBubbleProbeActive = true;
+  liveBubbleProbeBuiltTotal = 0;
+  liveBubbleProbeEvictionsTotal = 0;
+  liveBubbleProbeColliderRemovalsTotal = 0;
+}
+
 function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   const counters = hooksCounters();
+  registerGlobalLiveBubbleProbe();
   if (!counters) return;
   liveBubbleBuiltTotal += stats.chunkGroupsBuiltThisFrame;
   liveBubbleEvictionsTotal += stats.evictions;
+  if (liveBubbleProbeActive) {
+    liveBubbleProbeBuiltTotal += stats.chunkGroupsBuiltThisFrame;
+    liveBubbleProbeEvictionsTotal += stats.evictions;
+    liveBubbleProbeColliderRemovalsTotal += stats.colliderRemovals;
+  }
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
   counters["live_bubble_building_pages"] = stats.buildingPages;
@@ -72,6 +107,10 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
   counters["live_bubble_collider_removals"] = stats.colliderRemovals;
+  counters["live_bubble_probe_active"] = liveBubbleProbeActive ? 1 : 0;
+  counters["live_bubble_probe_built_total"] = liveBubbleProbeBuiltTotal;
+  counters["live_bubble_probe_evictions_total"] = liveBubbleProbeEvictionsTotal;
+  counters["live_bubble_probe_collider_removals_total"] = liveBubbleProbeColliderRemovalsTotal;
 }
 
 function mirrorVegetationRingStats(grassCenter: THREE.Vector3, ringCenter: THREE.Vector3, unbounded: boolean): void {
