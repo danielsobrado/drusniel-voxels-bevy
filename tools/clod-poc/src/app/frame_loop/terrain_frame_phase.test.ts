@@ -20,6 +20,9 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
   colliderEvictions: 0,
   streamedColliderPages: 0,
   validEmptyPages: 0,
+  gpuRetryPages: 0,
+  gpuRetriesTotal: 0,
+  gpuTerminalFailuresTotal: 0,
   colliderRegistrations: 0,
   colliderRemovals: 0,
 };
