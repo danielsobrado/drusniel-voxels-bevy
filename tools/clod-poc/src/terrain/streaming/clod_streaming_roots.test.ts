@@ -85,6 +85,7 @@ describe("createStreamingClodRootController", () => {
       buildBudgetPagesPerFrame: 1,
       maxCachedPages: 4,
       evictDistanceMultiplier: 1,
+      scheduleBuild: (task) => task(),
       onRootsChanged,
     });
 
@@ -93,5 +94,30 @@ describe("createStreamingClodRootController", () => {
 
     expect(onRootsChanged).toHaveBeenCalled();
     expect(roots.length).toBeGreaterThan(0);
+  });
+
+  it("can defer root builds through a scheduler", () => {
+    const roots: ClodPageNode[] = [];
+    const allNodes: ClodPageNode[] = [];
+    const pendingTasks: Array<() => void> = [];
+    const controller = createStreamingClodRootController({
+      roots,
+      allNodes,
+      cfg: TEST_CFG,
+      worldCells: 64,
+      enabled: true,
+      buildBudgetPagesPerFrame: 1,
+      maxCachedPages: 4,
+      scheduleBuild: (task) => pendingTasks.push(task),
+    });
+
+    const beforeBuild = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    expect(beforeBuild.cachedPages).toBe(0);
+    expect(pendingTasks.length).toBe(1);
+
+    pendingTasks.shift()?.();
+    const afterBuild = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    expect(afterBuild.cachedPages).toBeGreaterThan(0);
+    expect(afterBuild.builtThisFrame).toBe(1);
   });
 });
