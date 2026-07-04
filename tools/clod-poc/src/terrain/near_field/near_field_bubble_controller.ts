@@ -14,6 +14,7 @@ const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
 /** Per-frame budget for CPU-fallback chunk meshing; one chunk can cost 10–90 ms, so at most one runs once the budget is spent. */
 const CPU_CHUNK_MESH_BUDGET_MS = 6;
+const GPU_CHUNK_DISPATCH_BUDGET = 2;
 
 export interface ChunkGroupEntry {
   group: THREE.Group;
@@ -93,6 +94,16 @@ interface PendingCpuPageBuild {
   pz: number;
   worldBounds: WorldBounds;
   chunks: Array<[number, number]>;
+  failures: number;
+}
+
+interface PendingGpuPageBuild {
+  px: number;
+  pz: number;
+  worldBounds: WorldBounds;
+  edits: ReturnType<typeof resolveDigEdits>;
+  chunks: Array<[number, number]>;
+  inflight: number;
   failures: number;
 }
 
@@ -207,6 +218,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
+  const gpuPendingBuilds = new Map<string, PendingGpuPageBuild>();
   const terrainColliders = deps.terrainColliders ?? null;
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
@@ -274,37 +286,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }
     chunkGroups.delete(nodeId);
     cpuPendingBuilds.delete(nodeId);
-  };
-
-  const cpuFallbackChunks = (
-    pageKey: string,
-    px: number,
-    pz: number,
-    worldBounds: WorldBounds,
-    group: THREE.Group,
-    mats: TerrainMaterialHandle[],
-    unsubs: Array<() => void>,
-    colliderIds: string[],
-    failedCoords: Array<[number, number]>,
-  ): number => {
-    let recovered = 0;
-    for (const [dx, dz] of failedCoords) {
-      try {
-        addChunkMesh(
-          group,
-          mats,
-          unsubs,
-          colliderIds,
-          meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds),
-          chunkColliderId(pageKey, dx, dz),
-          liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
-        );
-        recovered++;
-      } catch (error) {
-        console.error(`[bubble] CPU fallback failed for page ${pageKey} chunk (${dx},${dz})`, error);
-      }
-    }
-    return recovered;
+    gpuPendingBuilds.delete(nodeId);
   };
 
   const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
@@ -333,51 +315,11 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       deps.scene.add(group);
       chunkGroups.set(key, entry);
       const edits = resolveDigEdits(getDigEditsSnapshot());
-      let pending = P * P;
-      const failedCoords: Array<[number, number]> = [];
-      let unrecoveredFailures = 0;
-      const settle = () => {
-        if (--pending !== 0) return;
-        if (failedCoords.length > 0) {
-          console.error(
-            `[bubble] GPU chunk meshing failed for page ${key}: ${failedCoords.length}/${P * P} chunks`,
-          );
-          const recovered = cpuFallbackChunks(key, px, pz, worldBounds, group, mats, unsubs, colliderIds, failedCoords);
-          unrecoveredFailures = failedCoords.length - recovered;
-          if (recovered > 0 && unrecoveredFailures > 0) {
-            console.warn(
-              `[bubble] partial CPU fallback for page ${key}: ${recovered}/${failedCoords.length} chunks recovered`,
-            );
-          }
-        }
-        entry.failed = unrecoveredFailures > 0;
-        entry.ready = true;
-      };
+      const chunks: Array<[number, number]> = [];
       for (let dz = 0; dz < P; dz++) {
-        for (let dx = 0; dx < P; dx++) {
-          gpuMesher.meshChunk(px * P + dx, pz * P + dz, worldBounds, edits)
-            .then((cm) => {
-              if (chunkGroups.get(key) !== entry) return;
-              if (cm.indices.length > 0) {
-                addChunkMesh(
-                  group,
-                  mats,
-                  unsubs,
-                  colliderIds,
-                  cm,
-                  chunkColliderId(key, dx, dz),
-                  liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
-                );
-              }
-              settle();
-            })
-            .catch(() => {
-              if (chunkGroups.get(key) !== entry) return;
-              failedCoords.push([dx, dz]);
-              settle();
-            });
-        }
+        for (let dx = 0; dx < P; dx++) chunks.push([dx, dz]);
       }
+      gpuPendingBuilds.set(key, { px, pz, worldBounds, edits, chunks, inflight: 0, failures: 0 });
       return entry;
     }
 
@@ -404,6 +346,54 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     chunkGroups.set(key, entry);
     cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks, failures: 0 });
     return entry;
+  };
+
+  const completeGpuChunk = (key: string, entry: ChunkGroupEntry, job: PendingGpuPageBuild) => {
+    job.inflight--;
+    if (chunkGroups.get(key) !== entry || gpuPendingBuilds.get(key) !== job) return;
+    if (job.chunks.length > 0 || job.inflight > 0) return;
+    gpuPendingBuilds.delete(key);
+    entry.failed = job.failures > 0;
+    entry.ready = true;
+  };
+
+  const drainGpuPendingBuilds = () => {
+    let dispatched = 0;
+    const jobs = [...gpuPendingBuilds.entries()]
+      .sort((a, b) => (chunkGroups.get(b[0])?.lastTouchFrame ?? -1) - (chunkGroups.get(a[0])?.lastTouchFrame ?? -1));
+    for (const [key, job] of jobs) {
+      const entry = chunkGroups.get(key);
+      const gpuMesher = deps.getGpuMesher();
+      if (!entry || !gpuMesher) {
+        gpuPendingBuilds.delete(key);
+        continue;
+      }
+      while (job.chunks.length > 0 && dispatched < GPU_CHUNK_DISPATCH_BUDGET) {
+        const [dx, dz] = job.chunks.shift()!;
+        job.inflight++;
+        dispatched++;
+        gpuMesher.meshChunk(job.px * P + dx, job.pz * P + dz, job.worldBounds, job.edits)
+          .then((cm) => {
+            if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job && cm.indices.length > 0) {
+              addChunkMesh(
+                entry.group,
+                entry.mats,
+                entry.unsubs,
+                entry.colliderIds,
+                cm,
+                chunkColliderId(key, dx, dz),
+                liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
+              );
+            }
+            completeGpuChunk(key, entry, job);
+          })
+          .catch(() => {
+            if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) job.failures++;
+            completeGpuChunk(key, entry, job);
+          });
+      }
+      if (dispatched >= GPU_CHUNK_DISPATCH_BUDGET) return;
+    }
   };
 
   const drainCpuPendingBuilds = (tBubbleStart: number) => {
@@ -547,6 +537,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           }
         }
 
+        drainGpuPendingBuilds();
         drainCpuPendingBuilds(tBubbleStart);
         const evictStats = evictColliderBearingCache(input.bubbleCenter, input.bubbleRadius);
         evictions = evictStats.evictions;

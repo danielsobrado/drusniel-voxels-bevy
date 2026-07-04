@@ -393,6 +393,72 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 - 2026-07-04: Focused Vitest passed directly after the review follow-ups:
   `near_field_bubble_controller.test.ts` and
   `terrain_frame_phase.test.ts`, 2 files / 12 tests.
+- 2026-07-04: Started fresh acceptance run `2026-07-04T13-21-11` after
+  stopping a leftover Playwright Chromium from the aborted run.
+- 2026-07-04: In run `2026-07-04T13-21-11`, walk initial convergence
+  settled after 41.8 s and post-route convergence now settled after 12.8 s
+  instead of timing out. The empty-ready-page fix addressed the bad
+  `required>0/building=0/ready=0` wait shape.
+- 2026-07-04: Run `2026-07-04T13-21-11` completed with 5 failures, all
+  `frame_ms_p95` only. Counter health is now good: every scene has
+  `far_summary_tiles_missing=0`, `live_bubble_ready_pages=required`,
+  `live_bubble_building_pages=0`, `live_bubble_failed_pages=0`, and positive
+  streamed collider pages. p95 values: walk 8.3, biome-near 10.1,
+  biome-horizon 9.3, final-near 10.5, final-horizon 9.6. Next step per
+  handover: profile with `perfProbe=1` before touching budgets.
+- 2026-07-04: First perf probe
+  `perf-runs/infinite-islands-13-21-p95-profile` completed, but it sampled
+  convergence rather than steady state: frame p95 56.8, top phase
+  `longViewDiagnosticsMs` p95 60.2 / `farSummaryMs` p95 51.3, render p95
+  only 3.2. Rerunning with longer warmup before interpreting p95.
+- 2026-07-04: Steady perf probe
+  `perf-runs/infinite-islands-13-21-steady-profile` completed with
+  `perfWarmup=1800`: frame p50 4.0 / p95 6.0, render p95 1.5,
+  selection p95 0.1, bubble p95 0.1, props p95 4.6. Broad buckets show
+  `longViewDiagnosticsMs` p95 31.1 and `farSummaryMs` p95 2.8, but broad
+  buckets are overlapping/instrumentation buckets and should not be added to
+  frame time. This suggests steady headless can meet the 8 ms walk budget;
+  next check is why acceptance `frame_ms_p95` remains 8.3-10.5.
+- 2026-07-04: Found acceptance p95 measurement issue: URLs now pass
+  `acceptance=1`, but `profile_every_frame:false` meant stats sync still
+  ran sparsely (`statsSyncRuns=501`, `statsSyncSkips=1301` in walk), so
+  `frame_ms_p95` was a sparse diagnostic sample instead of a full rolling
+  frame window. Changed `StatsSyncThrottle` so `acceptanceActive` forces
+  `profile` sampling every frame; normal/manual behavior remains gated by
+  config.
+- 2026-07-04: Typecheck passed after the acceptance stats-sync fix, and
+  focused Vitest passed directly for `near_field_bubble_controller.test.ts`,
+  `terrain_frame_phase.test.ts`, and `stats_sync_throttle.test.ts`
+  (3 files / 24 tests).
+- 2026-07-04: User relayed another review. Current status: `acceptance=1`
+  is already explicit on acceptance URLs. Remaining live-bubble GPU
+  scheduler/cancellation and GPU-failure CPU fallback risks are real
+  hardening items, but the next decision point is the post-stats-sync
+  acceptance run: if it passes, log them as follow-ups; if post-route
+  building/ready regresses or p95 spikes, address the relevant path next.
+- 2026-07-04: Started post-stats-sync acceptance run
+  `2026-07-04T13-47-53`; walk URL includes explicit `acceptance=1`.
+- 2026-07-04: User asked to act on the latest review before acceptance.
+  Stopped the active `2026-07-04T13-47-53` run during walk; this run is
+  intentionally incomplete. Next changes target live-bubble GPU queue
+  starvation/cancellation and GPU-failure fallback hardening.
+- 2026-07-04: Implemented live-bubble GPU hardening. GPU-backed page
+  creation now registers a pending chunk job instead of immediately
+  enqueueing all page chunks into the serialized `GpuChunkMesher`; `update()`
+  dispatches a small number of current chunks per frame, sorted by most
+  recently touched page, and stale completions are ignored if the page/job
+  was evicted. GPU chunk failures no longer run synchronous CPU fallback in
+  the promise completion; the page finishes failed once its dispatched GPU
+  chunks settle. Also wrapped `GpuChunkMesher` phase-2 readback buffers in
+  `try/finally` cleanup so temporary buffers are destroyed on map/readback
+  errors. Updated focused live-bubble tests for incremental dispatch.
+- 2026-07-04: Verification after GPU hardening: typecheck passed
+  (`rtk npm --prefix tools/clod-poc run typecheck`), and focused Vitest
+  passed directly for `near_field_bubble_controller.test.ts`,
+  `terrain_frame_phase.test.ts`, and `stats_sync_throttle.test.ts`
+  (3 files / 25 tests).
+- 2026-07-04: Started fresh post-hardening acceptance run
+  `2026-07-04T13-52-52`; walk URL includes explicit `acceptance=1`.
 
 ## Remaining known risks / next steps if gates still fail
 

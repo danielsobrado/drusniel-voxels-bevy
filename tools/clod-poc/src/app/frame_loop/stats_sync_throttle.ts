@@ -64,6 +64,9 @@ export class StatsSyncThrottle {
   constructor(private readonly config: StatsSyncThrottleConfig) {}
 
   shouldRun(input: StatsSyncThrottleInput): StatsSyncThrottleDecision {
+    if (input.acceptanceActive) {
+      return this.recordRun(input, "profile");
+    }
     if (this.config.profileEveryFrame && this.profileMode(input)) {
       return this.recordRun(input, "profile");
     }

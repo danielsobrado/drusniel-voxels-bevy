@@ -68,6 +68,13 @@ describe("StatsSyncThrottle", () => {
     expect(acceptanceThrottle.shouldRun(input({ nowMs: 1, acceptanceActive: true })).reason).toBe("profile");
   });
 
+  it("acceptance mode runs every frame even when profileEveryFrame is disabled", () => {
+    const throttle = new StatsSyncThrottle({ ...config, profileEveryFrame: false });
+
+    expect(throttle.shouldRun(input({ nowMs: 0, acceptanceActive: true })).reason).toBe("profile");
+    expect(throttle.shouldRun(input({ nowMs: 1, acceptanceActive: true })).reason).toBe("profile");
+  });
+
   it("force flag runs immediately", () => {
     const throttle = new StatsSyncThrottle(config);
     expect(throttle.shouldRun(input({ nowMs: 0 })).shouldRun).toBe(true);

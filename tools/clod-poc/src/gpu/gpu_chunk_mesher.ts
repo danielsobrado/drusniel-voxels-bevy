@@ -239,23 +239,32 @@ export class GpuChunkMesher {
     enc2.copyBufferToBuffer(this.outIndices, 0, idxRB, 0, ic * U32);
     this.device.queue.submit([enc2.finish()]);
 
-    await Promise.all([
-      posRB.mapAsync(GPUMapMode.READ),
-      nrmRB.mapAsync(GPUMapMode.READ),
-      matRB.mapAsync(GPUMapMode.READ),
-      idxRB.mapAsync(GPUMapMode.READ),
-    ]);
-    const mesh = assembleChunkMesh(
-      new Float32Array(posRB.getMappedRange().slice(0)),
-      new Float32Array(nrmRB.getMappedRange().slice(0)),
-      new Float32Array(matRB.getMappedRange().slice(0)),
-      new Uint32Array(idxRB.getMappedRange().slice(0)),
-      vc,
-      ic,
-    );
-    posRB.unmap(); nrmRB.unmap(); matRB.unmap(); idxRB.unmap();
-    posRB.destroy(); nrmRB.destroy(); matRB.destroy(); idxRB.destroy();
-    return mesh;
+    let posMapped = false;
+    let nrmMapped = false;
+    let matMapped = false;
+    let idxMapped = false;
+    try {
+      await Promise.all([
+        posRB.mapAsync(GPUMapMode.READ).then(() => { posMapped = true; }),
+        nrmRB.mapAsync(GPUMapMode.READ).then(() => { nrmMapped = true; }),
+        matRB.mapAsync(GPUMapMode.READ).then(() => { matMapped = true; }),
+        idxRB.mapAsync(GPUMapMode.READ).then(() => { idxMapped = true; }),
+      ]);
+      return assembleChunkMesh(
+        new Float32Array(posRB.getMappedRange().slice(0)),
+        new Float32Array(nrmRB.getMappedRange().slice(0)),
+        new Float32Array(matRB.getMappedRange().slice(0)),
+        new Uint32Array(idxRB.getMappedRange().slice(0)),
+        vc,
+        ic,
+      );
+    } finally {
+      if (posMapped) posRB.unmap();
+      if (nrmMapped) nrmRB.unmap();
+      if (matMapped) matRB.unmap();
+      if (idxMapped) idxRB.unmap();
+      posRB.destroy(); nrmRB.destroy(); matRB.destroy(); idxRB.destroy();
+    }
   }
 
   destroy(): void {

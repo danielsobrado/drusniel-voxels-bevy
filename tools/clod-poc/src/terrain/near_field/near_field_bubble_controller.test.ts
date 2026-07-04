@@ -108,6 +108,15 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
 }
 
+async function runUpdateAndFlush(
+  controller: ReturnType<typeof makeController>,
+  input: Parameters<ReturnType<typeof makeController>["update"]>[0],
+): Promise<ReturnType<ReturnType<typeof makeController>["update"]>> {
+  const stats = controller.update(input);
+  await flushPromises();
+  return stats;
+}
+
 describe("requiredStreamingPageCoords", () => {
   it("keeps requesting live pages around a moving center outside the finite world", () => {
     const coords = requiredStreamingPageCoords(new THREE.Vector3(4096, 0, -2048), 96, 32);
@@ -178,11 +187,8 @@ describe("createNearFieldBubbleController", () => {
       getView: (id) => (id === node.id ? view : undefined),
       frameId: 1,
     });
-    await vi.waitFor(() => {
-      expect(rejectMesher.meshChunk).toHaveBeenCalled();
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
+    expect(rejectMesher.meshChunk).toHaveBeenCalledTimes(2);
+    await flushPromises();
     controller.update({
       enabled: true,
       bubbleRadius: 1000,
@@ -190,6 +196,17 @@ describe("createNearFieldBubbleController", () => {
       bubbleViews: [view],
       getView: (id) => (id === node.id ? view : undefined),
       frameId: 2,
+    });
+    expect(rejectMesher.meshChunk).toHaveBeenCalledTimes(4);
+    await flushPromises();
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(24, 0, 24),
+      bubbleViews: [view],
+      getView: (id) => (id === node.id ? view : undefined),
+      frameId: 3,
     });
 
     expect(view.mesh.visible).toBe(true);
@@ -216,10 +233,16 @@ describe("createNearFieldBubbleController", () => {
       getView: (id) => (id === node.id ? view : undefined),
       frameId: 1,
     });
-    await vi.waitFor(() => {
-      expect(emptyMesher.meshChunk).toHaveBeenCalled();
+    expect(emptyMesher.meshChunk).toHaveBeenCalledTimes(2);
+    await flushPromises();
+    await runUpdateAndFlush(controller, {
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(24, 0, 24),
+      bubbleViews: [view],
+      getView: (id) => (id === node.id ? view : undefined),
+      frameId: 2,
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
     controller.update({
       enabled: true,
@@ -227,7 +250,7 @@ describe("createNearFieldBubbleController", () => {
       bubbleCenter: new THREE.Vector3(24, 0, 24),
       bubbleViews: [view],
       getView: (id) => (id === node.id ? view : undefined),
-      frameId: 2,
+      frameId: 3,
     });
 
     expect(view.mesh.visible).toBe(true);
@@ -250,7 +273,16 @@ describe("createNearFieldBubbleController", () => {
       getView: () => undefined,
       frameId: 1,
     });
-    await vi.waitFor(() => expect(emptyMesher.meshChunk).toHaveBeenCalledTimes(4));
+    expect(emptyMesher.meshChunk).toHaveBeenCalledTimes(2);
+    await flushPromises();
+    await runUpdateAndFlush(controller, {
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 2,
+    });
     await flushPromises();
 
     const stats = controller.update({
@@ -259,7 +291,7 @@ describe("createNearFieldBubbleController", () => {
       bubbleCenter: new THREE.Vector3(48, 0, 48),
       bubbleViews: [],
       getView: () => undefined,
-      frameId: 2,
+      frameId: 3,
     });
 
     expect(stats.requiredPages).toBe(1);
@@ -289,10 +321,31 @@ describe("createNearFieldBubbleController", () => {
     });
 
     expect(stats.chunkGroupsBuiltThisFrame).toBe(1);
-    expect(mesher.meshChunk).toHaveBeenCalled();
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
     const firstCall = mesher.meshChunk.mock.calls[0] as unknown as [number, number];
     expect(firstCall[0]).toBe(2);
     expect(firstCall[1]).toBe(2);
+  });
+
+  it("does not enqueue all GPU chunks when a page is created", () => {
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+    });
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
   });
 
   it("counts missing required streaming pages as building", () => {
@@ -344,7 +397,16 @@ describe("createNearFieldBubbleController", () => {
       getView: () => undefined,
       frameId: 1,
     });
-    await vi.waitFor(() => expect(mesher.meshChunk).toHaveBeenCalledTimes(4));
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
+    await flushPromises();
+    await runUpdateAndFlush(controller, {
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 2,
+    });
     await flushPromises();
 
     const stats = controller.update({
@@ -353,7 +415,7 @@ describe("createNearFieldBubbleController", () => {
       bubbleCenter: new THREE.Vector3(48, 0, 48),
       bubbleViews: [],
       getView: () => undefined,
-      frameId: 2,
+      frameId: 3,
     });
 
     expect(stats.readyPages).toBe(1);
