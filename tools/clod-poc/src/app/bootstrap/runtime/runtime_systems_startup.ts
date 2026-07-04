@@ -323,18 +323,21 @@ export async function runRuntimeSystemsStartup(
           maxRayDistanceM,
         },
       };
+      const constructionUnboundedWorld = searchParams.get("scene")?.startsWith("infinite-") ?? false;
+      const constructionWorldCells = constructionUnboundedWorld ? Number.MAX_SAFE_INTEGER / 4 : worldCells;
       const counters = getHooks()?.stats?.counters ?? null;
       if (counters) {
         counters["player_build_preview_limit_m"] = maxRayDistanceM;
         counters["player_build_commit_limit_m"] = editAuthority.allowFarCommit
           ? maxRayDistanceM
           : editAuthority.buildCommitRadiusM;
+        counters["player_build_unbounded_world"] = constructionUnboundedWorld ? 1 : 0;
       }
       const disposeGuard = installConstructionCommitGuard({
         domElement: app.renderer.domElement,
         camera,
-        worldCells,
-        unboundedWorld: searchParams.get("scene")?.startsWith("infinite-") ?? false,
+        worldCells: constructionWorldCells,
+        unboundedWorld: constructionUnboundedWorld,
         placement: constructionConfig.placement,
         editAuthority,
         getAuthorityOrigin: () => ({ x: camera.position.x, z: camera.position.z }),
@@ -345,7 +348,7 @@ export async function runRuntimeSystemsStartup(
         scene,
         camera,
         rendererDomElement: app.renderer.domElement,
-        worldCells,
+        worldCells: constructionWorldCells,
         config: constructionConfig,
       }), disposeGuard);
     } catch (error) {
