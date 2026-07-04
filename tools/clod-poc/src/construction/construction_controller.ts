@@ -33,6 +33,12 @@ import type {
   PlacedConstructionPiece,
 } from "./types.js";
 import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
+import {
+  canCommitBuild,
+  publishPlayerEditAuthorityDecision,
+  type PlayerEditAuthorityConfig,
+  type PlayerEditAuthorityPoint,
+} from "../player/player_edit_authority.js";
 
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
@@ -40,6 +46,9 @@ export interface ConstructionControllerDeps {
   rendererDomElement: HTMLElement;
   worldCells: number;
   config?: ConstructionConfig;
+  editAuthority?: PlayerEditAuthorityConfig;
+  getAuthorityOrigin?: () => PlayerEditAuthorityPoint | null;
+  getAuthorityCounters?: () => Record<string, number> | null;
 }
 
 export interface ConstructionControllerStats {
@@ -143,7 +152,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const snap = this.snapEnabled ? this.findBestSnapForPreview(ray, terrainHit, piece) : null;
     const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit);
-    const candidate = createConstructionCandidate({
+    const candidate = this.applyCommitAuthority(createConstructionCandidate({
       piece,
       position,
       rotationQuarterTurns,
@@ -154,7 +163,7 @@ class ConstructionControllerImpl implements ConstructionController {
       piecesById: this.piecesById,
       worldCells: this.deps.worldCells,
       config: this.config.placement,
-    });
+    }));
 
     this.currentCandidate = candidate;
     this.updateGhost(candidate);
@@ -383,6 +392,18 @@ class ConstructionControllerImpl implements ConstructionController {
       previousSigned = signed;
     }
     return null;
+  }
+
+  private applyCommitAuthority(candidate: ConstructionCandidate): ConstructionCandidate {
+    const editAuthority = this.deps.editAuthority;
+    if (!editAuthority) return candidate;
+    const decision = canCommitBuild(editAuthority, this.deps.getAuthorityOrigin?.() ?? null, candidate.position);
+    publishPlayerEditAuthorityDecision(this.deps.getAuthorityCounters?.() ?? null, decision);
+    return decision.allowed ? candidate : {
+      ...candidate,
+      valid: false,
+      reason: decision.reason,
+    };
   }
 
   private findBestSnapForPreview(ray: THREE.Ray, terrainHit: TerrainHitPoint, piece: ConstructionPieceDef): ConstructionSnapResult | null {
