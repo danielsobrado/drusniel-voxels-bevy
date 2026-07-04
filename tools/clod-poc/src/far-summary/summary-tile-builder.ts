@@ -7,6 +7,7 @@ export interface FarTerrainSampler {
   sampleMaterial?(x: number, z: number): number;
   sampleCanopyCoverage?(x: number, z: number): number;
   sampleWaterCoverage?(x: number, z: number): number;
+  sampleWaterCoverageForHeight?(x: number, z: number, height: number): number;
 }
 
 export interface FarSummaryBuildInput {
@@ -134,13 +135,12 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
       const hMax = finiteMax([height, hLeft, hRight, hDown, hUp], sampleH);
 
       const [nx, ny, nz] = normalFromHeights(hLeft, hRight, hDown, hUp, cellM);
-
       const slope = Math.acos(clamp01(ny));
-
       const material = terrainSampler.sampleMaterial?.(wx, wz) ?? 0;
       const canopy = terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
-      const water = terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0;
-
+      const water = heightValid
+        ? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, sampleH) ?? terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0
+        : 0;
       const roughness = computeRoughnessFromGrid(heightGrid, sx, sz);
 
       if (heightValid) {
