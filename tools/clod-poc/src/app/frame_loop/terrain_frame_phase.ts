@@ -19,6 +19,7 @@ let liveBubbleProbeActive = false;
 let liveBubbleProbeBuiltTotal = 0;
 let liveBubbleProbeEvictionsTotal = 0;
 let liveBubbleProbeColliderRemovalsTotal = 0;
+let movementProbePoseWrapped = false;
 
 interface TerrainFadeView {
   node: { id: string };
@@ -26,6 +27,16 @@ interface TerrainFadeView {
   target: number;
   mesh: THREE.Mesh;
   mat: { setFade: (fade: number, fadeIn: boolean, dither: boolean) => void };
+}
+
+interface MovementProbeWindow {
+  __drusnielClod?: {
+    beginMovementRouteProbe?: (() => void) | null;
+    getPose?: (() => unknown) | null;
+    stats?: { counters?: Record<string, number> };
+  };
+  __drusnielBeginLiveBubbleMovementProbe?: () => void;
+  __drusnielBeginStreamingMovementProbe?: () => void;
 }
 
 export interface TerrainFramePhaseInput {
@@ -52,20 +63,25 @@ export interface TerrainFramePhaseResult {
 }
 
 function hooksCounters(): Record<string, number> | null {
-  const hooks = (globalThis as typeof globalThis & {
-    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
-  }).window?.__drusnielClod;
+  const hooks = (globalThis as typeof globalThis & { window?: MovementProbeWindow }).window?.__drusnielClod;
   return hooks?.stats?.counters ?? null;
 }
 
+function maybeWrapPoseProbeHook(maybeWindow: MovementProbeWindow): void {
+  const hooks = maybeWindow.__drusnielClod;
+  if (movementProbePoseWrapped || !hooks?.getPose) return;
+  const originalGetPose = hooks.getPose;
+  hooks.getPose = () => {
+    if (!liveBubbleProbeActive && infiniteIslandsScene()) {
+      hooks.beginMovementRouteProbe?.();
+    }
+    return originalGetPose();
+  };
+  movementProbePoseWrapped = true;
+}
+
 function registerGlobalLiveBubbleProbe(): void {
-  const maybeWindow = (globalThis as typeof globalThis & {
-    window?: {
-      __drusnielClod?: { beginMovementRouteProbe?: (() => void) | null };
-      __drusnielBeginLiveBubbleMovementProbe?: () => void;
-      __drusnielBeginStreamingMovementProbe?: () => void;
-    };
-  }).window;
+  const maybeWindow = (globalThis as typeof globalThis & { window?: MovementProbeWindow }).window;
   if (!maybeWindow) return;
   maybeWindow.__drusnielBeginLiveBubbleMovementProbe = beginLiveBubbleMovementProbe;
   if (maybeWindow.__drusnielClod) {
@@ -73,6 +89,7 @@ function registerGlobalLiveBubbleProbe(): void {
       beginLiveBubbleMovementProbe();
       maybeWindow.__drusnielBeginStreamingMovementProbe?.();
     };
+    maybeWrapPoseProbeHook(maybeWindow);
   }
 }
 
