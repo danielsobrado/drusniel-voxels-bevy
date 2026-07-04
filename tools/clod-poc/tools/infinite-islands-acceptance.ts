@@ -51,12 +51,16 @@ interface SceneResult extends SceneReportInput {
   pageErrors: string[];
 }
 
+const OUTSIDE_STARTUP_CAM = "2048,96,2048,2.6500,-0.4300,55";
+const OUTSIDE_HORIZON_CAM = "2048,260,4096,2.6500,-0.3000,55";
+
 const SCENES: SceneSpec[] = [
   {
     name: "walk",
     screenshot: "walk.png",
     freeze: false,
     proceduralDebug: "biome",
+    cam: OUTSIDE_STARTUP_CAM,
     summary: true,
   },
   {
@@ -64,26 +68,26 @@ const SCENES: SceneSpec[] = [
     screenshot: "biome-near.png",
     freeze: true,
     proceduralDebug: "biome",
-    cam: "2048,96,2048,2.6500,-0.4300,55",
+    cam: OUTSIDE_STARTUP_CAM,
   },
   {
     name: "biome-horizon",
     screenshot: "biome-horizon.png",
     freeze: true,
     proceduralDebug: "biome",
-    cam: "2048,260,4096,2.6500,-0.3000,55",
+    cam: OUTSIDE_HORIZON_CAM,
   },
   {
     name: "final-near",
     screenshot: "final-near.png",
     freeze: true,
-    cam: "2048,96,2048,2.6500,-0.4300,55",
+    cam: OUTSIDE_STARTUP_CAM,
   },
   {
     name: "final-horizon",
     screenshot: "final-horizon.png",
     freeze: true,
-    cam: "2048,260,4096,2.6500,-0.3000,55",
+    cam: OUTSIDE_HORIZON_CAM,
   },
 ];
 
