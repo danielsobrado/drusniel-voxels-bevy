@@ -241,6 +241,21 @@ export class TreeSystem {
     return buildVisibleTreeLightingProxies(this.settings, this.patches);
   }
 
+  /** Deadline-bounded variant of {@link getLightingProxies} for the per-frame
+   *  forest-lighting budget: the GPU-ring proxy scan is spread across frames
+   *  and the previous proxy set is returned (ready=false) until it completes. */
+  getLightingProxiesBudgeted(deadlineMs: number): { proxies: readonly TreeLightingProxy[]; ready: boolean } {
+    if (!this.settings.enabled) return { proxies: [], ready: true };
+    const gpRingOn = treeSystemUsesGpuRingDraw(this.settings);
+    if (treeReportsGpuRingStats(gpRingOn, this.gpuRing.status, !!this.gpuRing.draw, !!this.gpuRing.compute, this.gpuRing.stats.status)) {
+      return this.gpuLightingProxyCache.getBudgeted(
+        { centerX: this.lastCenter.x, centerZ: this.lastCenter.z, worldCells: this.worldCells, settings: this.settings, sampler: this.sampler },
+        deadlineMs,
+      );
+    }
+    return { proxies: buildVisibleTreeLightingProxies(this.settings, this.patches), ready: true };
+  }
+
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
     const result = await this.assets.bakeImpostors(renderer);
     if (result.supported && this.settings.impostors.swapOnBake) {
