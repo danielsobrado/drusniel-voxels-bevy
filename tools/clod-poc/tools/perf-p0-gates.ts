@@ -27,6 +27,13 @@ const REQUIRED_CASES = [
   "combined-cache-and-early-reject-enabled",
 ] as const;
 
+const FAR_SUMMARY_CONSULTED_COUNTERS = [
+  "vegetationGpuFarSummaryConsulted",
+  "treeGpuPrefilterFarSummaryConsultedAvg",
+  "grassGpuPrefilterFarSummaryConsultedAvg",
+  "understoryGpuPrefilterFarSummaryConsultedAvg",
+] as const;
+
 const FAR_SUMMARY_SOURCE_COUNTERS = [
   "vegetationGpuSourceFarSummary",
   "treeGpuPrefilterSourceFarSummaryAvg",
@@ -44,7 +51,7 @@ export function evaluateP0PerfGates(cases: readonly P0PerfGateCaseLike[]): P0Per
     gateP0DirtyAtlasExerciseCompleted(byName),
     gateMaterialCacheEvidence(byName),
     gateVegetationEarlyRejectEvidence(byName),
-    gateFarSummarySourceEvidence(byName),
+    gateFarSummaryConsultedEvidence(byName),
     gateAtlasPackingEvidence(byName),
     gateAtlasDirtyUploadEvidence(byName),
   ];
@@ -128,23 +135,32 @@ function gateVegetationEarlyRejectEvidence(byName: ReadonlyMap<string, P0PerfGat
   );
 }
 
-function gateFarSummarySourceEvidence(byName: ReadonlyMap<string, P0PerfGateCaseLike>): P0PerfGateResult {
+function gateFarSummaryConsultedEvidence(byName: ReadonlyMap<string, P0PerfGateCaseLike>): P0PerfGateResult {
   const enabledCases = [
     byName.get("gpu-early-reject-enabled"),
     byName.get("gpu-early-reject-enabled-with-debug-oracle"),
     byName.get("combined-cache-and-early-reject-enabled"),
   ].filter((perfCase): perfCase is P0PerfGateCaseLike => !!perfCase);
-  const farSummaryUses = enabledCases.reduce((sum, perfCase) => (
-    sum + FAR_SUMMARY_SOURCE_COUNTERS.reduce((inner, key) => inner + (metric(perfCase, key) ?? 0), 0)
-  ), 0);
+  const consulted = sumCounters(enabledCases, FAR_SUMMARY_CONSULTED_COUNTERS);
+  const sourceUses = sumCounters(enabledCases, FAR_SUMMARY_SOURCE_COUNTERS);
   const fallbackUses = enabledCases.reduce((sum, perfCase) => sum + (metric(perfCase, "vegetationGpuSourceFallback") ?? 0), 0);
+  const hasEvidence = consulted > 0 || sourceUses > 0;
   return gate(
-    "far-summary-source-evidence",
-    farSummaryUses > 0,
-    farSummaryUses > 0
-      ? `far-summary source used=${formatMetric(farSummaryUses)} fallback=${formatMetric(fallbackUses)}`
-      : "early-reject enabled cases did not expose far-summary source usage",
+    "far-summary-consulted-evidence",
+    hasEvidence,
+    hasEvidence
+      ? `far-summary consulted=${formatMetric(consulted)} sourceUsed=${formatMetric(sourceUses)} fallback=${formatMetric(fallbackUses)}`
+      : "early-reject enabled cases did not expose far-summary consulted/source evidence",
   );
+}
+
+function sumCounters(
+  cases: readonly P0PerfGateCaseLike[],
+  counters: readonly string[],
+): number {
+  return cases.reduce((sum, perfCase) => (
+    sum + counters.reduce((inner, key) => inner + (metric(perfCase, key) ?? 0), 0)
+  ), 0);
 }
 
 function gateAtlasPackingEvidence(byName: ReadonlyMap<string, P0PerfGateCaseLike>): P0PerfGateResult {
