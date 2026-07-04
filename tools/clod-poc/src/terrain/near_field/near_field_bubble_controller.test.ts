@@ -510,7 +510,7 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.colliderRegistrations).toBe(4);
   });
 
-  it("does not CPU fallback GPU-empty live collider pages on the frame path", async () => {
+  it("treats GPU-empty live pages as valid empty without CPU fallback", async () => {
     terrainMocks.meshChunk.mockImplementation(() => NON_EMPTY_CHUNK);
     const mesher = {
       meshChunk: vi.fn(() => Promise.resolve(EMPTY_CHUNK)),
@@ -543,8 +543,10 @@ describe("createNearFieldBubbleController", () => {
     const stats = controller.update({ ...input, frameId: 3 });
 
     expect(terrainMocks.meshChunk).not.toHaveBeenCalled();
-    expect(stats.readyPages).toBe(0);
-    expect(stats.buildingPages).toBe(1);
+    expect(stats.readyPages).toBe(1);
+    expect(stats.validEmptyPages).toBe(1);
+    expect(stats.failedPages).toBe(0);
+    expect(stats.buildingPages).toBe(0);
     expect(stats.streamedColliderPages).toBe(0);
     expect(stats.colliderRegistrations).toBe(0);
   });
