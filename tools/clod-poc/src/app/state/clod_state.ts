@@ -26,6 +26,7 @@ export interface ClodSliceState {
   recomputedNormals: boolean;
   forceMaxLevel: string;
   bubble: boolean;
+  liveBubblePinned: boolean;
   bubbleRadius: number;
   tintBubble: boolean;
   profileEnabled: boolean;
@@ -52,6 +53,7 @@ export interface ClodSliceState {
 export interface LiveBubbleDefault {
   enabled: boolean;
   radiusM: number;
+  pinned?: boolean;
 }
 
 const CLOD_ARCHIVE_KEYS = [
@@ -95,9 +97,11 @@ function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undef
     ? phase0Streaming.live_radius_m
     : cfg.near_field.radius_chunks * cfg.page.chunk_size;
   const maxRadius = Math.max(1, phase0Streaming.clod_radius_m / 2);
+  const enabled = enabledOverride ?? sceneDefault;
   return {
-    enabled: enabledOverride ?? sceneDefault,
+    enabled,
     radiusM: Math.min(radiusOverride ?? defaultRadius, maxRadius),
+    pinned: sceneDefault && enabled,
   };
 }
 
@@ -107,18 +111,8 @@ export function applyLiveBubbleDefault(
 ): void {
   if (!liveBubbleDefault) return;
   target.bubble = liveBubbleDefault.enabled;
+  target.liveBubblePinned = liveBubbleDefault.pinned ?? liveBubbleDefault.enabled;
   if (finiteNonNegative(liveBubbleDefault.radiusM)) target.bubbleRadius = liveBubbleDefault.radiusM;
-}
-
-function preserveEnabledBubble(target: ClodSliceState, liveBubbleDefault?: LiveBubbleDefault): void {
-  if (!liveBubbleDefault?.enabled) return;
-  let value = true;
-  Object.defineProperty(target, "bubble", {
-    enumerable: true,
-    configurable: true,
-    get: () => value,
-    set: () => { value = true; },
-  });
 }
 
 export function createClodSliceState(input: {
@@ -152,6 +146,7 @@ export function createClodSliceState(input: {
     recomputedNormals: false,
     forceMaxLevel: "auto",
     bubble: false,
+    liveBubblePinned: false,
     bubbleRadius: input.cfg.near_field.radius_chunks * input.cfg.page.chunk_size,
     tintBubble: true,
     profileEnabled: input.profileEnabled,
@@ -176,7 +171,6 @@ export function createClodSliceState(input: {
   };
   const liveBubbleDefault = input.liveBubbleDefault ?? queryLiveBubbleDefault(input.cfg);
   applyLiveBubbleDefault(state, liveBubbleDefault);
-  preserveEnabledBubble(state, liveBubbleDefault);
   return state;
 }
 
