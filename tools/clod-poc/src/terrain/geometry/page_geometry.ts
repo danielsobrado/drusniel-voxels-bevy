@@ -11,18 +11,8 @@ export interface PaintAttributeCache {
   weights: Float32Array;
 }
 
-interface GeometryAttributeCache {
-  position: THREE.BufferAttribute;
-  normal: THREE.BufferAttribute;
-  paintSlots: THREE.BufferAttribute;
-  paintWeights: THREE.BufferAttribute;
-  biomeId: THREE.BufferAttribute;
-  index: THREE.BufferAttribute;
-}
-
 const paintAttributeCache = new WeakMap<MeshLike, PaintAttributeCache>();
 const biomeAttributeCache = new WeakMap<MeshLike, Float32Array>();
-const geometryAttributeCache = new WeakMap<MeshLike, GeometryAttributeCache>();
 
 export function paintAttributesFor(mesh: MeshLike): PaintAttributeCache {
   const cached = paintAttributeCache.get(mesh);
@@ -63,31 +53,15 @@ export function biomeIdsFor(mesh: MeshLike): Float32Array {
   return biomeIds;
 }
 
-function geometryAttributesFor(mesh: MeshLike): GeometryAttributeCache {
-  const cached = geometryAttributeCache.get(mesh);
-  if (cached) return cached;
-  const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(mesh);
-  const built: GeometryAttributeCache = {
-    position: new THREE.BufferAttribute(mesh.positions, 3),
-    normal: new THREE.BufferAttribute(mesh.normals, 3),
-    paintSlots: new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS),
-    paintWeights: new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS),
-    biomeId: new THREE.BufferAttribute(biomeIdsFor(mesh), 1),
-    index: new THREE.BufferAttribute(mesh.indices, 1),
-  };
-  geometryAttributeCache.set(mesh, built);
-  return built;
-}
-
 export function toGeometry(mesh: MeshLike): THREE.BufferGeometry {
-  const attributes = geometryAttributesFor(mesh);
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", attributes.position);
-  g.setAttribute("normal", attributes.normal);
-  g.setAttribute("paintSlots", attributes.paintSlots);
-  g.setAttribute("paintWeights", attributes.paintWeights);
-  g.setAttribute("biomeId", attributes.biomeId);
-  g.setIndex(attributes.index);
+  g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+  g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+  const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(mesh);
+  g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
+  g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
+  g.setAttribute("biomeId", new THREE.BufferAttribute(biomeIdsFor(mesh), 1));
+  g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return g;
 }
 
