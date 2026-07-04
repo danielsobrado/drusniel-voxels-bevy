@@ -37,6 +37,10 @@ Per-area findings:
      Its legitimate purposes: (a) fallback mesh while bubble chunk groups
      build outside the startup world, (b) persistent terrain behind/around the
      player. Both are served by async worker builds.
+   - Worker build time is not the whole cost. Even after builds move off-thread,
+     main-thread apply can still spike from buffer transfer, geometry upload,
+     `patchNodes`, and selection cache invalidation. Treat worker build budget
+     and apply budget as separate systems.
 
 2. **Sticky bubble guard (`src/app/state/clod_state.ts` `preserveEnabledBubble`) — wrong mechanism.**
    `Object.defineProperty` makes `state.bubble` silently un-settable to false
@@ -49,7 +53,7 @@ Per-area findings:
    Update `src/app/state/clod_state.test.ts` (lines ~79–87 assert the sticky
    trap — rewrite to assert preset-respect + manual-disable-works).
 
-3. **Acceptance gates — mostly real now, three problems.**
+3. **Acceptance gates — mostly real now, four problems.**
    (`tools/infinite_acceptance/thresholds.ts`)
    - Real and good: `live_bubble_required_pages > 0`, `live_bubble_ready_pages > 0`,
      `live_bubble_streamed_collider_pages > 0`, collider registrations > 0,
@@ -60,8 +64,15 @@ Per-area findings:
      `_evictions`, `live_bubble_collider_removals`) can never fail — theater.
    - Gap: the walk scene is a **stationary** spawn; nothing moves the player,
      so sustained movement (build churn, eviction, fast turn) is untested.
+     Fix this before trusting acceptance: the route must cross startup-world
+     bounds, trigger live-bubble page changes, trigger worker build/apply,
+     observe water/hydrology variation, and exercise at least one eviction or
+     stale-discard path when the route is long enough.
    - Gap: `live_clod_stream_cached_pages` stays 0 forever with default budget 0
      and nothing fails — "streamed CLOD roots" pass without a single page.
+   - Gap: worker build counters alone are insufficient. Acceptance must also
+     observe main-thread apply cost/counters, because a worker path can still
+     stutter when pages are uploaded and patched into selection.
 
 4. **Live bubble + colliders — sound.** Counters derive from actual
    `chunkGroups`; collider registration happens per chunk mesh on ready with
@@ -126,32 +137,38 @@ by the new path — removing it is the next step.
 1. **Rewrite `src/terrain/streaming/clod_streaming_roots.ts` (async provider).**
    - Delete `scheduleBuild`/`defaultBuildScheduler`/`buildNode` (the sync path)
      and the `buildLod0PageSource` import.
-   - New dep: `buildPages: ((coords) => Promise<{ nodes: readonly ClodPageNode[]; buildMs: number }>) | null`.
+   - New dep: `buildPages: ((coords) => Promise<{ nodes: readonly ClodPageNode[]; buildMs: number; transferBytes?: number }>) | null`.
      `null` → planner-only (counters, no builds).
    - Dispatch at most one in-flight batch: when `pending.size === 0`, take up
      to `buildBudgetPagesPerFrame` uncached/unfailed required coords (nearest
      first — planner already sorts) and call `buildPages`. On resolve, for each
      node still wanted (`active && requiredNow.has(id) && !cached.has(id)`):
-     push to `roots` + `allNodes`, cache, then ONE `onNodesBuilt(nodes)` +
-     `onRootsChanged()` per batch. On reject: mark batch coords failed,
-     `console.warn` once. Accumulate applied count + worker `buildMs` and
-     report them on the next `update()` (existing counter pattern).
+     queue the node for apply. Apply should be separately budgeted; default is
+     one page per frame. Push to `roots` + `allNodes`, cache, then ONE
+     `onNodesBuilt(nodes)` + `onRootsChanged()` per apply batch. On reject:
+     mark batch coords failed, `console.warn` once. Accumulate worker `buildMs`,
+     apply count, apply ms, stale discards, and transfer bytes; report them on
+     the next `update()` (existing counter pattern).
    - Change `DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME` 0 → 1 (safe now: builds are
-     off-thread; main-thread cost is one geometry upload + `patchNodes` per
-     page).
-   - Add to stats: `pendingPages`, `buildBudget` (needed for the acceptance
-     gate below).
+     off-thread, but still keep apply separately budgeted because geometry
+     upload + `patchNodes` can stutter).
+   - Add to stats: `pendingPages`, `buildBudget`, `inflightBatches`,
+     `readyPages`, `applyPagesThisFrame`, `applyMs`, `staleDiscards`,
+     `workerBuildMs`, `workerTransferBytes`.
    - Rewrite `clod_streaming_roots.test.ts` with a fake async `buildPages`
-     (deferred promises): budget batch size, apply-on-resolve, stale discard
-     after center moves, eviction removes from roots/allNodes, planner-only
-     when `buildPages: null`, failure marks failed.
+     (deferred promises): budget batch size, apply-on-resolve, apply-budget
+     throttling, stale discard after center moves, eviction removes from
+     roots/allNodes, planner-only when `buildPages: null`, failure marks failed.
 
 2. **Wire it (`src/app/bootstrap/ui/frame_loop_startup.ts:236`).**
    - `buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords)`
      (clodWorker is on `ctx.input`; terrain_edit_startup already uses it).
    - Optional `liveClodRootRadius` query param (default `state.bubbleRadius`).
-   - Mirror the two new counters: `live_clod_stream_pending_pages`,
-     `live_clod_stream_build_budget`.
+   - Mirror the new counters: `live_clod_stream_pending_pages`,
+     `live_clod_stream_build_budget`, `live_clod_stream_inflight_batches`,
+     `live_clod_stream_ready_pages`, `live_clod_stream_apply_pages_this_frame`,
+     `live_clod_stream_apply_ms`, `live_clod_stream_stale_discards`,
+     `live_clod_stream_worker_build_ms`, `live_clod_stream_worker_transfer_bytes`.
 
 3. **Bubble rim ownership fix (`near_field_bubble_controller.ts`).**
    In the view loop, change the "owned" distance check from
@@ -169,8 +186,11 @@ by the new path — removing it is the next step.
    sides.
 
 6. **Thresholds (`tools/infinite_acceptance/thresholds.ts` + its two tests).**
-   - Add `live_clod_stream_pending_pages`, `live_clod_stream_build_budget` to
-     `REQUIRED_COUNTERS`.
+   - Add `live_clod_stream_pending_pages`, `live_clod_stream_build_budget`,
+     `live_clod_stream_inflight_batches`, `live_clod_stream_ready_pages`,
+     `live_clod_stream_apply_pages_this_frame`, `live_clod_stream_apply_ms`,
+     `live_clod_stream_stale_discards`, `live_clod_stream_worker_build_ms`,
+     `live_clod_stream_worker_transfer_bytes` to `REQUIRED_COUNTERS`.
    - Delete the vacuous `>= 0` rules (`_cached_pages`, `_built_this_frame`,
      `_evictions`, `live_bubble_collider_removals`). Keep the keys in
      `REQUIRED_COUNTERS` (presence still enforced).
@@ -179,13 +199,30 @@ by the new path — removing it is the next step.
      `value > 0 || values["live_clod_stream_build_budget"] === 0 || values["live_clod_stream_required_pages"] === 0`.
      With the new default budget 1 and all five acceptance scenes positioned
      outside the startup world, this genuinely requires worker-built pages.
+   - Add an apply-cost gate: `live_clod_stream_apply_ms` must be finite and
+     inside a strict budget. Start with `<= 2.0 ms` unless measurement proves a
+     different number is needed; do not loosen it to hide stutter.
+   - Add a stale-discard sanity gate: stale discards may be non-zero on long
+     movement routes, but failures must stay zero and cached pages must still
+     become positive when build budget and required pages are positive.
    - Update `thresholds.test.ts` (it currently asserts cached=0 passes) and
      `thresholds_validation.test.ts` fixture values.
    - Do NOT relax any existing gate.
 
-7. **Frame-phase scene-check caching** (finding 7): one-line lazy module cache.
+7. **Acceptance movement fix.** The infinite-islands acceptance route must not
+   only spawn at `(2048, 2048)`. It must move far enough to prove sustained
+   streaming. Required route coverage:
+   - cross the startup world boundary or start outside it and continue moving;
+   - cross at least one live-bubble page boundary;
+   - trigger at least one worker build, apply, and cached streamed page;
+   - if the route is long enough, trigger an eviction or stale discard;
+   - observe hydrology/water variation outside the startup grid;
+   - fail when `&liveBubble=0` is passed.
+   Add counters/route assertions instead of relying on a static outside spawn.
 
-8. **Follow-up (separate pass, plan only):** coarse-LOD (2/3) worker-built
+8. **Frame-phase scene-check caching** (finding 7): one-line lazy module cache.
+
+9. **Follow-up (separate pass, plan only):** coarse-LOD (2/3) worker-built
    pages for the 200–2048 m annulus; vegetation `lod0Nodes` are startup-frozen
    (streamed pages grow no grass/trees — GPU rings cover near field, far
    vegetation is out of scope); verify finding 6's grass/stone clamps in the
@@ -216,13 +253,18 @@ Manual QA (dev server on 5180 with `--port 5180 --strictPort`):
   filling the bubble ring as you fly outward, no rim flicker (fix 3), no
   fall-through, and `live_clod_stream_cached_pages > 0` in
   `window.__drusnielClod.stats.counters`.
+- Movement check: do not accept a static spawn-only pass. Move long enough to
+  cross at least one live-bubble page boundary and observe
+  `live_clod_stream_apply_pages_this_frame > 0` at least once,
+  `live_clod_stream_apply_ms` within budget, and worker/cached page counters
+  remaining healthy after movement.
 - Kill switches: `&liveBubble=0` (acceptance must FAIL on live bubble gates),
   `&liveClodRootBudget=1` (now = default), GUI "enable (raw chunks)" toggle
   must actually disable the bubble after fix 4.
 - Frame budget: acceptance gate stays `frame_ms_p95 <= 8`. Watch
-  `live_clod_stream_build_ms` — it is worker time, informational; the
-  main-thread symptom to watch is `selectionUpdateMs` / `clodApplyMs` spikes
-  when pages apply.
+  `live_clod_stream_build_ms` — it is worker time, informational. The main
+  thread symptom to gate separately is `live_clod_stream_apply_ms`, plus any
+  `selectionUpdateMs` / `clodApplyMs` spikes when pages apply.
 
 ## Hard constraints (unchanged)
 
