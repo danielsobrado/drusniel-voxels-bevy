@@ -27,6 +27,9 @@ export interface BiomeTextureStreamingStats {
   fallbackBiomeTextureCount: number;
   lastRebuildMs: number;
   lastUpdateFrame: number;
+  lastAppliedFrame: number;
+  pendingWindowSwap: boolean;
+  rebuildsTotal: number;
   lastError: string | null;
 }
 
@@ -77,6 +80,21 @@ function scheduleIdleTask(callback: () => void): void {
   setTimeout(callback, 0);
 }
 
+function publishTextureStats(stats: BiomeTextureStreamingStats): void {
+  if (typeof window === "undefined") return;
+  const hooks = (window as typeof window & {
+    __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
+  }).__drusnielClod;
+  const counters = hooks?.stats?.counters;
+  if (!counters) return;
+  counters["terrain_texture_window_pending"] = stats.pendingWindowSwap ? 1 : 0;
+  counters["terrain_texture_window_rebuild_ms"] = stats.lastRebuildMs;
+  counters["terrain_texture_window_rebuilds_total"] = stats.rebuildsTotal;
+  counters["terrain_texture_window_last_applied_frame"] = stats.lastAppliedFrame;
+  counters["terrainTextureWindowSwaps"] = stats.textureWindowSwaps;
+  counters["terrainTextureActiveBiomes"] = stats.activeBiomeMaterials.length;
+}
+
 export function createBiomeTextureStreamingManager(
   deps: BiomeTextureStreamingManagerDeps,
 ): BiomeTextureStreamingManager {
@@ -87,6 +105,7 @@ export function createBiomeTextureStreamingManager(
   let lastX: number | null = null;
   let lastZ: number | null = null;
   let activeSignature = config.terrain.active_biome_materials.join("|");
+  let desiredSignature = activeSignature;
   let pendingSignature: string | null = null;
   const statsState: BiomeTextureStreamingStats = {
     currentBiomeId: null,
@@ -96,7 +115,16 @@ export function createBiomeTextureStreamingManager(
     fallbackBiomeTextureCount: Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - config.terrain.active_biome_materials.length),
     lastRebuildMs: 0,
     lastUpdateFrame: -1,
+    lastAppliedFrame: -1,
+    pendingWindowSwap: false,
+    rebuildsTotal: 0,
     lastError: null,
+  };
+
+  const setPendingSignature = (signature: string | null): void => {
+    pendingSignature = signature;
+    statsState.pendingWindowSwap = pendingSignature !== null;
+    publishTextureStats(statsState);
   };
 
   const sampleBiomeId = (x: number, z: number): BiomeId => normalizeBiomeId(deps.sampleBiome(x, z));
@@ -142,39 +170,45 @@ export function createBiomeTextureStreamingManager(
       : [biomeTextureMaterialForBiomeId(currentBiomeId)];
     const signature = nextActive.join("|");
     const changed = signature !== activeSignature;
+    desiredSignature = signature;
 
     statsState.currentBiomeId = currentBiomeId;
     statsState.adjacentBiomeId = adjacentBiomeId;
     statsState.lastUpdateFrame = frameIndex;
 
     if (!changed) {
+      setPendingSignature(null);
       return { changed: false, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
     }
 
     if (pendingSignature === signature) {
+      publishTextureStats(statsState);
       return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: nextActive };
     }
 
     const nextConfig = withActiveBiomeProceduralMaterials(config, nextActive);
-    pendingSignature = signature;
+    setPendingSignature(signature);
     scheduleIdleTask(() => {
-      if (pendingSignature !== signature) return;
+      if (desiredSignature !== signature || pendingSignature !== signature) return;
       const start = performance.now();
       try {
         deps.onActiveWindowChanged(nextConfig, nextConfig.terrain.active_biome_materials);
         config = nextConfig;
         activeSignature = nextConfig.terrain.active_biome_materials.join("|");
         statsState.textureWindowSwaps++;
+        statsState.rebuildsTotal++;
         statsState.activeBiomeMaterials = [...nextConfig.terrain.active_biome_materials];
         statsState.fallbackBiomeTextureCount = Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - statsState.activeBiomeMaterials.length);
         statsState.lastRebuildMs = performance.now() - start;
+        statsState.lastAppliedFrame = frameIndex;
         statsState.lastError = null;
         logger.info?.(`[texture-streaming] terrain biome window ${statsState.activeBiomeMaterials.join(", ")}`);
       } catch (error) {
         statsState.lastError = error instanceof Error ? error.message : String(error);
         logger.error?.("[texture-streaming] failed to rebuild terrain biome texture window", error);
       } finally {
-        if (pendingSignature === signature) pendingSignature = null;
+        if (pendingSignature === signature) setPendingSignature(null);
+        else publishTextureStats(statsState);
       }
     });
 
@@ -193,15 +227,19 @@ export function createBiomeTextureStreamingManager(
       const result = applyActiveMaterials(currentBiomeId, adjacentBiomeId, activeBiomeMaterials, frameIndex);
       lastX = input.x;
       lastZ = input.z;
+      publishTextureStats(statsState);
       return result;
     },
     forceActiveBiomes(biomeIds) {
-      return applyBiomeIds(biomeIds, statsState.lastUpdateFrame + 1);
+      const result = applyBiomeIds(biomeIds, statsState.lastUpdateFrame + 1);
+      publishTextureStats(statsState);
+      return result;
     },
     currentConfig() {
       return config;
     },
     stats() {
+      publishTextureStats(statsState);
       return { ...statsState, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
     },
   };
