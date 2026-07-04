@@ -39,6 +39,12 @@ export const REQUIRED_COUNTERS = [
   "live_bubble_streamed_collider_pages",
   "live_bubble_collider_registrations",
   "live_bubble_collider_removals",
+  "live_clod_stream_required_pages",
+  "live_clod_stream_cached_pages",
+  "live_clod_stream_built_this_frame",
+  "live_clod_stream_failed_pages",
+  "live_clod_stream_evictions",
+  "live_clod_stream_build_ms",
 ] as const;
 
 export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
@@ -74,6 +80,12 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_bubble_streamed_collider_pages", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_collider_removals", label: "must be >= 0", pass: (value) => value >= 0 },
+  { key: "live_clod_stream_required_pages", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_clod_stream_cached_pages", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_clod_stream_built_this_frame", label: "must be >= 0", pass: (value) => value >= 0 },
+  { key: "live_clod_stream_failed_pages", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "live_clod_stream_evictions", label: "must be >= 0", pass: (value) => value >= 0 },
+  { key: "live_clod_stream_build_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
 ];
 
 export interface ThresholdEvaluation {
