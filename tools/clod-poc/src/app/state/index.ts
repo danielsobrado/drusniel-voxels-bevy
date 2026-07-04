@@ -74,7 +74,7 @@ export interface CreateClodAppStateParams {
 const TREE_RUNTIME_BUDGET = {
   distance: 420,
   maxInstances: 6000,
-  gpuMaxVisible: 24000,
+  gpuMaxVisible: 128000,
   minSpacing: 6.8,
 } as const;
 
