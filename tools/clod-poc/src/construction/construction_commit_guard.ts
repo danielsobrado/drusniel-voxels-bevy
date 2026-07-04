@@ -14,6 +14,7 @@ export interface ConstructionCommitGuardDeps {
   domElement: HTMLElement;
   camera: THREE.PerspectiveCamera;
   worldCells: number;
+  unboundedWorld?: boolean;
   placement: ConstructionPlacementConfig;
   editAuthority: PlayerEditAuthorityConfig;
   getAuthorityOrigin: () => PlayerEditAuthorityPoint | null;
@@ -33,14 +34,22 @@ function pointerRay(event: PointerEvent, domElement: HTMLElement, camera: THREE.
   return raycaster.ray.clone();
 }
 
-function raycastTerrain(ray: THREE.Ray, worldCells: number, placement: ConstructionPlacementConfig): THREE.Vector3 | null {
+function inPlacementWorld(x: number, z: number, worldCells: number, unboundedWorld: boolean): boolean {
+  return unboundedWorld || (x >= 0 && x <= worldCells && z >= 0 && z <= worldCells);
+}
+
+function raycastTerrain(
+  ray: THREE.Ray,
+  worldCells: number,
+  placement: ConstructionPlacementConfig,
+  unboundedWorld: boolean,
+): THREE.Vector3 | null {
   const scratch = new THREE.Vector3();
   let previousT: number | null = null;
   let previousSigned = 0;
   for (let t = 0; t <= placement.maxRayDistanceM; t += placement.terrainStepM) {
     ray.at(t, scratch);
-    const inWorld = scratch.x >= 0 && scratch.x <= worldCells && scratch.z >= 0 && scratch.z <= worldCells;
-    if (!inWorld) {
+    if (!inPlacementWorld(scratch.x, scratch.z, worldCells, unboundedWorld)) {
       previousT = null;
       continue;
     }
@@ -51,8 +60,7 @@ function raycastTerrain(ray: THREE.Ray, worldCells: number, placement: Construct
       for (let i = 0; i < RAYCAST_REFINE_STEPS; i += 1) {
         const mid = (lo + hi) * 0.5;
         ray.at(mid, scratch);
-        const midInWorld = scratch.x >= 0 && scratch.x <= worldCells && scratch.z >= 0 && scratch.z <= worldCells;
-        if (!midInWorld) {
+        if (!inPlacementWorld(scratch.x, scratch.z, worldCells, unboundedWorld)) {
           lo = mid;
           continue;
         }
@@ -76,7 +84,7 @@ export function installConstructionCommitGuard(deps: ConstructionCommitGuardDeps
     if (!origin || deps.editAuthority.allowFarCommit) return;
     const ray = pointerRay(event, deps.domElement, deps.camera);
     if (!ray) return;
-    const hit = raycastTerrain(ray, deps.worldCells, deps.placement);
+    const hit = raycastTerrain(ray, deps.worldCells, deps.placement, deps.unboundedWorld ?? false);
     if (!hit) return;
     const decision = canCommitBuild(deps.editAuthority, origin, hit);
     publishPlayerEditAuthorityDecision(deps.getCounters(), decision);
