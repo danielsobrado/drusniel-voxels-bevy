@@ -94,6 +94,8 @@ export interface ThresholdRule {
 }
 
 const finiteNonNegative = (value: number): boolean => Number.isFinite(value) && value >= 0;
+const inactiveOrPositive = (activeKey: RequiredCounter) => (value: number, values: Readonly<Record<string, number>>): boolean =>
+  finiteNonNegative(value) && (values[activeKey] !== 1 || value > 0);
 
 export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "frame_ms_p95", label: "must be finite, >= 0 and <= 8", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 8 },
@@ -119,9 +121,13 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_bubble_ms", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_bubble_built_total", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_bubble_evictions_total", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_bubble_probe_built_total", label: "must be finite and >= 0", pass: finiteNonNegative },
+  { key: "live_bubble_probe_built_total", label: "must be > 0 when the movement probe is active", pass: inactiveOrPositive("live_bubble_probe_active") },
   { key: "live_bubble_probe_evictions_total", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_bubble_probe_collider_removals_total", label: "must be finite and >= 0", pass: finiteNonNegative },
+  {
+    key: "live_bubble_probe_collider_removals_total",
+    label: "must be finite and remove colliders if route-owned live-bubble pages evicted",
+    pass: (value, values) => finiteNonNegative(value) && ((values["live_bubble_probe_evictions_total"] ?? 0) <= 0 || value > 0),
+  },
   { key: "live_bubble_streamed_collider_pages", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_clod_stream_required_pages", label: "must be > 0", pass: (value) => value > 0 },
@@ -142,9 +148,14 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_clod_stream_apply_ms", label: "must be finite, >= 0 and <= 2", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 2 },
   { key: "live_clod_stream_worker_build_ms", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_clod_stream_worker_transfer_bytes", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_clod_stream_probe_requested_pages_total", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_clod_stream_probe_apply_pages_total", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_clod_stream_probe_evictions_total", label: "must be finite and >= 0", pass: finiteNonNegative },
+  { key: "live_clod_stream_probe_requested_pages_total", label: "must be > 0 when the movement probe is active", pass: inactiveOrPositive("live_clod_stream_probe_active") },
+  { key: "live_clod_stream_probe_apply_pages_total", label: "must be > 0 when the movement probe is active", pass: inactiveOrPositive("live_clod_stream_probe_active") },
+  {
+    key: "live_clod_stream_probe_evictions_total",
+    label: "must exercise eviction or stale-discard when the movement probe is active",
+    pass: (value, values) => finiteNonNegative(value)
+      && (values["live_clod_stream_probe_active"] !== 1 || value + (values["live_clod_stream_probe_stale_discards_total"] ?? 0) > 0),
+  },
   { key: "live_clod_stream_probe_stale_discards_total", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_clod_stream_out_of_world_edits_supported", label: "must be explicit 0 or 1", pass: (value) => value === 0 || value === 1 },
   { key: "vegetation_ring_unbounded", label: "must equal 1 for infinite-islands", pass: (value) => value === 1 },
@@ -181,10 +192,5 @@ export function evaluateThresholds(values: Record<string, number>): ThresholdEva
     if (value === undefined) continue;
     if (!rule.pass(value, values)) failures.push(`${rule.key}=${value} failed: ${rule.label}`);
   }
-  return {
-    values,
-    missing,
-    failures,
-    passed: failures.length === 0,
-  };
+  return { values, missing, failures, passed: failures.length === 0 };
 }
