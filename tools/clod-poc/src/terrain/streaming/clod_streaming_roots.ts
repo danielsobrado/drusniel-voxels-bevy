@@ -1,9 +1,6 @@
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
-import { buildLod0PageSource } from "../../clod/source_mesh.js";
-import { boundsOf, INITIAL_NODE_REVISION } from "../../clod/quadtree_support.js";
 import type { ClodPageNode } from "../../types.js";
-import type { WorldBounds } from "../terrain_surface.js";
 
 export interface StreamingClodRootStats {
   requiredPages: number;
@@ -12,6 +9,15 @@ export interface StreamingClodRootStats {
   failedPages: number;
   evictions: number;
   buildMs: number;
+  pendingPages: number;
+  buildBudget: number;
+  inflightBatches: number;
+  readyPages: number;
+  applyPagesThisFrame: number;
+  applyMs: number;
+  staleDiscards: number;
+  workerBuildMs: number;
+  workerTransferBytes: number;
 }
 
 export interface StreamingClodRootController {
@@ -19,7 +25,18 @@ export interface StreamingClodRootController {
   stats(): StreamingClodRootStats;
 }
 
-export type StreamingClodRootBuildScheduler = (task: () => void) => void;
+export interface PageCoord {
+  px: number;
+  pz: number;
+  centerX: number;
+  centerZ: number;
+}
+
+export interface StreamingClodRootBuildResult {
+  nodes: readonly ClodPageNode[];
+  buildMs: number;
+  transferBytes?: number;
+}
 
 export interface StreamingClodRootControllerDeps {
   roots: ClodPageNode[];
@@ -28,31 +45,34 @@ export interface StreamingClodRootControllerDeps {
   worldCells: number;
   enabled: boolean;
   buildBudgetPagesPerFrame?: number;
+  applyBudgetPagesPerFrame?: number;
   maxCachedPages?: number;
   evictDistanceMultiplier?: number;
-  scheduleBuild?: StreamingClodRootBuildScheduler;
+  buildPages: ((coords: readonly PageCoord[]) => Promise<StreamingClodRootBuildResult>) | null;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
   onRootsChanged?: () => void;
 }
 
-interface PageCoord {
-  px: number;
-  pz: number;
+interface CachedPage {
+  node: ClodPageNode;
   centerX: number;
   centerZ: number;
+  lastTouchFrame: number;
 }
 
-const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 0;
+interface InflightBatch {
+  ids: Set<string>;
+  coordsById: Map<string, PageCoord>;
+}
+
+const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
+const DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
 
-function defaultBuildScheduler(task: () => void): void {
-  globalThis.setTimeout(task, 0);
-}
-
-function resolveBuildBudget(value: number | undefined): number {
-  const raw = value ?? DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME;
-  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME;
+function resolveBudget(value: number | undefined, fallback: number): number {
+  const raw = value ?? fallback;
+  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : fallback;
 }
 
 export function streamingClodPageKey(px: number, pz: number): string {
@@ -94,30 +114,34 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const pageSize = deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size;
   const worldPagesX = Math.max(1, Math.ceil(deps.worldCells / pageSize));
   const worldPagesZ = Math.max(1, Math.ceil(deps.worldCells / pageSize));
-  const buildBudget = resolveBuildBudget(deps.buildBudgetPagesPerFrame);
+  const buildBudget = resolveBudget(deps.buildBudgetPagesPerFrame, DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME);
+  const applyBudget = resolveBudget(deps.applyBudgetPagesPerFrame, DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME);
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
-  const scheduleBuild = deps.scheduleBuild ?? defaultBuildScheduler;
-  const cached = new Map<string, { node: ClodPageNode; centerX: number; centerZ: number; lastTouchFrame: number }>();
-  const pending = new Set<string>();
+  const cached = new Map<string, CachedPage>();
   const failed = new Set<string>();
+  const ready: ClodPageNode[] = [];
   let frame = 0;
   let active = deps.enabled;
   let requiredNow = new Set<string>();
-  let completedBuilds = 0;
-  let completedBuildMs = 0;
+  let inFlight: InflightBatch | null = null;
+  let completedWorkerBuildMs = 0;
+  let completedWorkerTransferBytes = 0;
+  let completedStaleDiscards = 0;
   let latest: StreamingClodRootStats = emptyStats();
 
   const removeRoot = (id: string): void => {
-    const rootIndex = deps.roots.findIndex((node) => node.id === id);
-    if (rootIndex >= 0) deps.roots.splice(rootIndex, 1);
-    const allIndex = deps.allNodes.findIndex((node) => node.id === id);
-    if (allIndex >= 0) deps.allNodes.splice(allIndex, 1);
+    for (let i = deps.roots.length - 1; i >= 0; i--) {
+      if (deps.roots[i]?.id === id) deps.roots.splice(i, 1);
+    }
+    for (let i = deps.allNodes.length - 1; i >= 0; i--) {
+      if (deps.allNodes[i]?.id === id) deps.allNodes.splice(i, 1);
+    }
   };
 
   const evict = (center: THREE.Vector3, radiusM: number): number => {
     let evictions = 0;
-    for (const [id, entry] of [...cached.entries()]) {
+    for (const [id, entry] of [...cached.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const distance = Math.hypot(center.x - entry.centerX, center.z - entry.centerZ);
       if (distance <= radiusM * evictDistanceMultiplier) continue;
       cached.delete(id);
@@ -125,7 +149,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       evictions++;
     }
     if (cached.size <= maxCachedPages) return evictions;
-    const lru = [...cached.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame);
+    const lru = [...cached.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame || a[0].localeCompare(b[0]));
     while (cached.size > maxCachedPages && lru.length > 0) {
       const [id] = lru.shift()!;
       cached.delete(id);
@@ -135,92 +159,136 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return evictions;
   };
 
-  const buildNode = (coord: PageCoord): ClodPageNode => {
-    const world: WorldBounds = { cellsX: deps.worldCells, cellsZ: deps.worldCells, finite: false };
-    const src = buildLod0PageSource(coord.px, coord.pz, deps.cfg, world);
+  const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
+
+  const discardStaleReadyPages = (): number => {
+    let stale = 0;
+    for (let i = ready.length - 1; i >= 0; i--) {
+      if (buildStillWanted(ready[i]!.id)) continue;
+      ready.splice(i, 1);
+      stale++;
+    }
+    return stale;
+  };
+
+  const applyReadyPages = (): { applied: number; applyMs: number; staleDiscards: number } => {
+    const staleDiscards = discardStaleReadyPages();
+    if (applyBudget <= 0 || ready.length === 0) return { applied: 0, applyMs: 0, staleDiscards };
+    const appliedNodes: ClodPageNode[] = [];
+    const startedAt = performance.now();
+    while (ready.length > 0 && appliedNodes.length < applyBudget) {
+      const node = ready.shift()!;
+      if (!buildStillWanted(node.id)) continue;
+      const centerX = (node.footprint.minX + node.footprint.maxX) / 2;
+      const centerZ = (node.footprint.minZ + node.footprint.maxZ) / 2;
+      deps.roots.push(node);
+      deps.allNodes.push(node);
+      cached.set(node.id, { node, centerX, centerZ, lastTouchFrame: frame });
+      appliedNodes.push(node);
+    }
+    if (appliedNodes.length > 0) {
+      deps.onNodesBuilt?.(appliedNodes);
+      deps.onRootsChanged?.();
+    }
     return {
-      id: streamingClodPageKey(coord.px, coord.pz),
-      revision: INITIAL_NODE_REVISION,
-      level: 0,
-      children: [],
-      mesh: src.mesh,
-      footprint: src.footprint,
-      bounds: boundsOf(src.mesh),
-      errorWorld: 0,
-      lowBenefit: false,
-      chunkMeshes: src.chunks,
+      applied: appliedNodes.length,
+      applyMs: performance.now() - startedAt,
+      staleDiscards,
     };
   };
 
-  const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
-
-  const scheduleNodeBuild = (coord: PageCoord, frameId: number): void => {
-    const id = streamingClodPageKey(coord.px, coord.pz);
-    pending.add(id);
-    scheduleBuild(() => {
-      const startedAt = performance.now();
-      try {
-        if (!buildStillWanted(id)) return;
-        const node = buildNode(coord);
-        if (!buildStillWanted(id)) return;
-        deps.roots.push(node);
-        deps.allNodes.push(node);
-        cached.set(id, { node, centerX: coord.centerX, centerZ: coord.centerZ, lastTouchFrame: frameId });
-        completedBuilds++;
-        deps.onNodesBuilt?.([node]);
-        deps.onRootsChanged?.();
-      } catch (error) {
-        if (active && requiredNow.has(id)) {
-          console.warn(`[clod-stream] failed to build ${id}`, error);
-          failed.add(id);
-        }
-      } finally {
-        pending.delete(id);
-        completedBuildMs += performance.now() - startedAt;
+  const dispatchBuild = (coords: readonly PageCoord[]): void => {
+    if (!deps.buildPages || coords.length === 0 || inFlight) return;
+    const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz), coord]));
+    const batch: InflightBatch = { ids: new Set(coordsById.keys()), coordsById };
+    inFlight = batch;
+    let result: Promise<StreamingClodRootBuildResult>;
+    try {
+      result = deps.buildPages(coords);
+    } catch (error) {
+      handleBuildRejection(batch, error);
+      return;
+    }
+    void result.then((built) => {
+      if (inFlight === batch) inFlight = null;
+      completedWorkerBuildMs += Number.isFinite(built.buildMs) ? Math.max(0, built.buildMs) : 0;
+      completedWorkerTransferBytes += Number.isFinite(built.transferBytes) ? Math.max(0, built.transferBytes ?? 0) : 0;
+      for (const node of built.nodes) {
+        if (buildStillWanted(node.id)) ready.push(node);
+        else completedStaleDiscards++;
       }
-    });
+    }).catch((error) => handleBuildRejection(batch, error));
+  };
+
+  const scheduleBuilds = (required: readonly PageCoord[]): void => {
+    if (!deps.buildPages || inFlight || buildBudget <= 0) return;
+    const batch: PageCoord[] = [];
+    for (const coord of required) {
+      const id = streamingClodPageKey(coord.px, coord.pz);
+      if (cached.has(id) || failed.has(id) || buildStillQueued(id) || inFlight?.ids.has(id)) continue;
+      batch.push(coord);
+      if (batch.length >= buildBudget) break;
+    }
+    dispatchBuild(batch);
+  };
+
+  const buildStillQueued = (id: string): boolean => ready.some((node) => node.id === id);
+
+  const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
+    if (inFlight === batch) inFlight = null;
+    for (const id of batch.ids) failed.add(id);
+    console.warn(`[clod-stream] worker failed to build ${batch.ids.size} streamed root page(s)`, error);
   };
 
   return {
     update(center, radiusM) {
       frame++;
-      const finishedBuilds = completedBuilds;
-      const finishedBuildMs = completedBuildMs;
-      completedBuilds = 0;
-      completedBuildMs = 0;
       active = deps.enabled;
       if (!active) {
         requiredNow = new Set();
+        ready.length = 0;
         latest = emptyStats();
         return latest;
       }
+
       const required = streamingClodRequiredPageCoords(center, radiusM, pageSize)
         .filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
-      let scheduledThisFrame = 0;
       const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz)));
       requiredNow = requiredIds;
 
       for (const coord of required) {
-        const id = streamingClodPageKey(coord.px, coord.pz);
-        const existing = cached.get(id);
-        if (existing) {
-          existing.lastTouchFrame = frame;
-          continue;
-        }
-        if (buildBudget <= 0 || pending.has(id) || failed.has(id) || scheduledThisFrame >= buildBudget) continue;
-        scheduleNodeBuild(coord, frame);
-        scheduledThisFrame++;
+        const existing = cached.get(streamingClodPageKey(coord.px, coord.pz));
+        if (existing) existing.lastTouchFrame = frame;
       }
 
       const evictions = evict(center, radiusM);
+      const workerBuildMs = completedWorkerBuildMs;
+      const workerTransferBytes = completedWorkerTransferBytes;
+      let staleDiscards = completedStaleDiscards;
+      completedWorkerBuildMs = 0;
+      completedWorkerTransferBytes = 0;
+      completedStaleDiscards = 0;
+      const applied = applyReadyPages();
+      staleDiscards += applied.staleDiscards;
+      scheduleBuilds(required);
       if (evictions > 0) deps.onRootsChanged?.();
+
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
-        builtThisFrame: finishedBuilds,
+        builtThisFrame: applied.applied,
         failedPages: [...requiredIds].filter((id) => failed.has(id)).length,
         evictions,
-        buildMs: finishedBuildMs,
+        buildMs: workerBuildMs,
+        pendingPages: inFlight?.ids.size ?? 0,
+        buildBudget,
+        inflightBatches: inFlight ? 1 : 0,
+        readyPages: ready.length,
+        applyPagesThisFrame: applied.applied,
+        applyMs: applied.applyMs,
+        staleDiscards,
+        workerBuildMs,
+        workerTransferBytes,
       };
       return latest;
     },
@@ -238,5 +306,14 @@ function emptyStats(): StreamingClodRootStats {
     failedPages: 0,
     evictions: 0,
     buildMs: 0,
+    pendingPages: 0,
+    buildBudget: DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME,
+    inflightBatches: 0,
+    readyPages: 0,
+    applyPagesThisFrame: 0,
+    applyMs: 0,
+    staleDiscards: 0,
+    workerBuildMs: 0,
+    workerTransferBytes: 0,
   };
 }
