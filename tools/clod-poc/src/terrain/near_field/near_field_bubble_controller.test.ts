@@ -75,23 +75,24 @@ describe("liveBubbleOwnsPageView", () => {
     const halfDiag = pageSize * Math.SQRT2 * 0.5;
     const center = new THREE.Vector3(0, 0, 0);
     const limit = bubbleRadius + halfDiag;
-    const rimNode = makeNode("L0:rim,0", {
-      minX: limit - pageSize / 2,
-      maxX: limit + pageSize / 2,
+    const epsilon = 0.001;
+    const insideRimNode = makeNode("L0:rim,0", {
+      minX: limit - epsilon - pageSize / 2,
+      maxX: limit - epsilon + pageSize / 2,
       minZ: -pageSize / 2,
       maxZ: pageSize / 2,
     });
     const outsideNode = makeNode("L0:outside,0", {
-      minX: limit + 0.001 - pageSize / 2,
-      maxX: limit + 0.001 + pageSize / 2,
+      minX: limit + epsilon - pageSize / 2,
+      maxX: limit + epsilon + pageSize / 2,
       minZ: -pageSize / 2,
       maxZ: pageSize / 2,
     });
 
-    expect(liveBubbleOwnsPageView(rimNode, center, bubbleRadius, pageSize, 1)).toBe(true);
+    expect(liveBubbleOwnsPageView(insideRimNode, center, bubbleRadius, pageSize, 1)).toBe(true);
     expect(liveBubbleOwnsPageView(outsideNode, center, bubbleRadius, pageSize, 1)).toBe(false);
-    expect(liveBubbleOwnsPageView(makeNode("L1:rim,0", rimNode.footprint, 1), center, bubbleRadius, pageSize, 1)).toBe(false);
-    expect(liveBubbleOwnsPageView(rimNode, center, bubbleRadius, pageSize, 0.5)).toBe(false);
+    expect(liveBubbleOwnsPageView(makeNode("L1:rim,0", insideRimNode.footprint, 1), center, bubbleRadius, pageSize, 1)).toBe(false);
+    expect(liveBubbleOwnsPageView(insideRimNode, center, bubbleRadius, pageSize, 0.5)).toBe(false);
   });
 });
 
