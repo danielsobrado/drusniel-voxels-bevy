@@ -7,6 +7,8 @@ import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
+const MAX_PLAYER_FRAME_DELTA_SECONDS = 0.1;
+
 export function runPlayerStartup(
   ctx: UiStartupContext,
   infoPanel: InfoPanelController,
@@ -70,6 +72,18 @@ export function runPlayerStartup(
     },
     triggerSwordAttack: () => combatController.trigger(),
   });
+
+  let lastPlayerFrameAt = performance.now();
+  const updatePlayingInput = (now: number): void => {
+    const deltaSeconds = Math.min(Math.max((now - lastPlayerFrameAt) / 1000, 0), MAX_PLAYER_FRAME_DELTA_SECONDS);
+    lastPlayerFrameAt = now;
+    if (interaction.mode === "playing") {
+      playerInputController.updateFrame(deltaSeconds);
+      playerInputController.updateHoldToDig();
+    }
+    requestAnimationFrame(updatePlayingInput);
+  };
+  requestAnimationFrame(updatePlayingInput);
 
   const playerModeController = createPlayerModeController({
     renderer,
