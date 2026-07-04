@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import type { PageFootprint } from "../types.js";
-import { getDigEditRevision } from "../terrain/terrain.js";
 import type { VegetationTerrainRejectionReason } from "../vegetation/terrain_rejection_config.js";
 import type {
   UnderstoryClass,
@@ -191,6 +190,6 @@ export function understoryGpuRingStableKey(settings: UnderstorySettings, worldCe
   ].join(":");
 }
 
-export function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number, digRevision = getDigEditRevision()): string {
-  return `${understoryGpuRingStableKey(settings, worldCells)}:${digRevision}`;
+export function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number): string {
+  return understoryGpuRingStableKey(settings, worldCells);
 }
