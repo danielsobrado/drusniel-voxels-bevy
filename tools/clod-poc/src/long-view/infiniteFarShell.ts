@@ -52,6 +52,7 @@ export class InfiniteFarShell {
   private readonly useParityMaterial: boolean;
   private readonly parityConfig: FarTerrainUniformData | undefined;
   private parityColorBuffer: Float32Array | null = null;
+  private parityVertexScratch: FarTerrainVertexColors | null = null;
   private biomeColorBuffer: Float32Array | null = null;
   private positions: Float32Array;
   private normals: Float32Array;
@@ -130,6 +131,7 @@ export class InfiniteFarShell {
 
     if (useParity) {
       this.parityColorBuffer = createDefaultParityColors(vertexCount);
+      this.parityVertexScratch = createFarTerrainVertexColorScratch(vertexCount, this.normals);
       this.attachVertexColors();
     } else {
       this.biomeColorBuffer = createDefaultBiomeColors(vertexCount);
@@ -301,14 +303,21 @@ export class InfiniteFarShell {
     this.publishRebuildProgress();
   }
 
-  private beginParityFinalize(pending: PendingFarShellHeightRebuild, vertexCount: number): void {
-    if (!this.parityConfig) return;
-    pending.phase = "finalize";
-    pending.colorCursor = 0;
-    pending.vertexColors = createFarTerrainVertexColorScratch(vertexCount, this.normals);
+  private ensureParityScratch(vertexCount: number): FarTerrainVertexColors | null {
+    if (!this.parityConfig) return null;
+    if (!this.parityVertexScratch || this.parityVertexScratch.baseColor.length !== vertexCount * 3) {
+      this.parityVertexScratch = createFarTerrainVertexColorScratch(vertexCount, this.normals);
+    }
     if (!this.parityColorBuffer || this.parityColorBuffer.length !== vertexCount * 3) {
       this.parityColorBuffer = new Float32Array(vertexCount * 3);
     }
+    return this.parityVertexScratch;
+  }
+
+  private beginParityFinalize(pending: PendingFarShellHeightRebuild, vertexCount: number): void {
+    pending.phase = "finalize";
+    pending.colorCursor = 0;
+    pending.vertexColors = this.ensureParityScratch(vertexCount);
   }
 
   private stepPendingHeightRebuild(): void {
