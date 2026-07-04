@@ -307,6 +307,7 @@ describe("createNearFieldBubbleController", () => {
 
     expect(stats.requiredPages).toBe(1);
     expect(stats.readyPages).toBe(1);
+    expect(stats.validEmptyPages).toBe(1);
     expect(stats.buildingPages).toBe(0);
     expect(stats.failedPages).toBe(0);
   });
@@ -509,7 +510,7 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.colliderRegistrations).toBe(4);
   });
 
-  it("confirms GPU-empty collider chunks through the sliced CPU fallback before ready", async () => {
+  it("does not CPU fallback GPU-empty live collider pages on the frame path", async () => {
     terrainMocks.meshChunk.mockImplementation(() => NON_EMPTY_CHUNK);
     const mesher = {
       meshChunk: vi.fn(() => Promise.resolve(EMPTY_CHUNK)),
@@ -538,14 +539,42 @@ describe("createNearFieldBubbleController", () => {
     controller.update(input);
     await flushPromises();
     await runUpdateAndFlush(controller, { ...input, frameId: 2 });
-    await runUpdateAndFlush(controller, { ...input, frameId: 3 });
-    const stats = await runUpdateAndFlush(controller, { ...input, frameId: 4 });
+    await flushPromises();
+    const stats = controller.update({ ...input, frameId: 3 });
 
-    expect(mesher.meshChunk).toHaveBeenCalledTimes(4);
-    expect(terrainMocks.meshChunk).toHaveBeenCalledTimes(4);
-    expect(stats.readyPages).toBe(1);
-    expect(stats.buildingPages).toBe(0);
-    expect(stats.streamedColliderPages).toBe(1);
-    expect(stats.colliderRegistrations).toBe(4);
+    expect(terrainMocks.meshChunk).not.toHaveBeenCalled();
+    expect(stats.readyPages).toBe(0);
+    expect(stats.buildingPages).toBe(1);
+    expect(stats.streamedColliderPages).toBe(0);
+    expect(stats.colliderRegistrations).toBe(0);
+  });
+
+  it("returns stalled GPU pages to the wait queue when the mesher disappears", async () => {
+    let mesher: { meshChunk: ReturnType<typeof vi.fn> } | null = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher | null,
+      streamingLiveTerrain: true,
+    });
+    const input = {
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    };
+
+    controller.update(input);
+    mesher = null;
+    const waiting = controller.update({ ...input, frameId: 2 });
+    expect(waiting.buildingPages).toBe(1);
+
+    mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    controller.update({ ...input, frameId: 3 });
+    expect(mesher.meshChunk).toHaveBeenCalled();
   });
 });
