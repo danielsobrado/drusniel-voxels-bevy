@@ -13,6 +13,11 @@ import type { FarShellController } from "../systems/far_shell_controller.js";
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const INFINITE_ISLANDS_BUILD_INTERVAL_FRAMES = 30;
+const INFINITE_ISLANDS_SHELL_REBUILD_INTERVAL_FRAMES = 120;
+const DEFAULT_SHELL_REBUILD_INTERVAL_FRAMES = 10;
+
 export interface FarSummaryIntegrationOptions {
   terrainSampler: FarTerrainSampler;
   scene?: THREE.Scene;
@@ -36,6 +41,24 @@ export interface FarSummaryIntegration {
   dispose: () => void;
 }
 
+function positiveIntegerParam(params: URLSearchParams, key: string): number | null {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+}
+
+function currentQueryParams(): URLSearchParams {
+  if (typeof window === "undefined") return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
+
+export function resolveFarSummaryFrameInterval(
+  params: URLSearchParams,
+  key: string,
+  defaultInterval: number,
+): number {
+  return Math.max(1, positiveIntegerParam(params, key) ?? defaultInterval);
+}
+
 export function initFarSummaryIntegration(
   options: FarSummaryIntegrationOptions,
 ): FarSummaryIntegration {
@@ -47,6 +70,19 @@ export function initFarSummaryIntegration(
     debug: { ...DEFAULT_FAR_SUMMARY_CONFIG.debug, ...(options.config?.debug ?? {}) },
     rings: options.config?.rings ?? DEFAULT_FAR_SUMMARY_CONFIG.rings,
   };
+
+  const queryParams = currentQueryParams();
+  const isInfiniteIslands = queryParams.get("scene") === INFINITE_ISLANDS_SCENE;
+  const buildIntervalFrames = resolveFarSummaryFrameInterval(
+    queryParams,
+    "farSummaryBuildInterval",
+    isInfiniteIslands ? INFINITE_ISLANDS_BUILD_INTERVAL_FRAMES : 1,
+  );
+  const shellRebuildIntervalFrames = resolveFarSummaryFrameInterval(
+    queryParams,
+    "farSummaryShellRebuildInterval",
+    isInfiniteIslands ? INFINITE_ISLANDS_SHELL_REBUILD_INTERVAL_FRAMES : DEFAULT_SHELL_REBUILD_INTERVAL_FRAMES,
+  );
 
   const cache = new FarSummaryCache(config);
   const sampler = new FarSummaryClipmapSampler(cache, config, options.terrainSampler);
@@ -82,8 +118,9 @@ export function initFarSummaryIntegration(
 
     cache.requestTiles(requests, frameIndex, nowMs);
 
-    if (buildDelayMs > 0 && frameIndex % Math.ceil(buildDelayMs / 16) !== 0) {
-    } else {
+    const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
+    const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
+    if (buildAllowedByInterval && buildAllowedByDelay) {
       const budget = forceSlowBuilds ? 1 : undefined;
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget);
     }
@@ -128,16 +165,13 @@ export function initFarSummaryIntegration(
     }
 
     if (options.farShellController) {
-      // Move shell to camera position (not predicted, which would drift ahead).
       options.farShellController.moveTo(
         currentCenter.worldX,
         currentCenter.worldZ,
       );
 
-      // Rebuild shell when summary data changes, throttled to skip ~10 frames
-      // so a burst of tile commits doesn't trigger back-to-back rebuilds.
       framesSinceShellRebuild++;
-      if (cache.hasNewCommitsSince(lastKnownCommitRev) && framesSinceShellRebuild >= 10) {
+      if (cache.hasNewCommitsSince(lastKnownCommitRev) && framesSinceShellRebuild >= shellRebuildIntervalFrames) {
         lastKnownCommitRev = cache.commitRevisionAt();
         framesSinceShellRebuild = 0;
         options.farShellController.setHeightProvider(sampler);
