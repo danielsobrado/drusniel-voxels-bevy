@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG } from "../../config.js";
+import type { ClodPageNode } from "../../types.js";
 import {
   createStreamingClodRootController,
   pageInsideFiniteStartupWorld,
@@ -72,8 +73,8 @@ describe("pageInsideFiniteStartupWorld", () => {
 
 describe("createStreamingClodRootController", () => {
   it("signals root changes after streamed builds and evictions", () => {
-    const roots = [];
-    const allNodes = [];
+    const roots: ClodPageNode[] = [];
+    const allNodes: ClodPageNode[] = [];
     const onRootsChanged = vi.fn();
     const controller = createStreamingClodRootController({
       roots,
