@@ -36,7 +36,7 @@ export class InfiniteFarShell {
   private renderOriginZ = 0;
   private rebuildCount = 0;
   private lastRebuildMs = 0;
-  /** Sliced height rebuild in progress (cpu mode, after the first reposition). */
+  /** Sliced height rebuild in progress. Previous/flat heights render until the final flush. */
   private pendingHeightRebuild: { cursor: number; buildMs: number } | null = null;
   private materialOptions: InfiniteFarShellMaterialOptions;
   private readonly useParityMaterial: boolean;
@@ -57,8 +57,9 @@ export class InfiniteFarShell {
       farShellVertices: 0, farShellTriangles: 0, farShellGridRes: 0, farShellRebuilds: 0,
       farShellLastRebuildMs: 0, farShellCenterX: 0, farShellCenterZ: 0,
       farShellSnappedX: 0, farShellSnappedZ: 0, farSummaryTilesRequired: 0,
-      farSummaryTilesReady: 0, farSummaryTilesMissing: 0, farSummaryTilesStale: 0,
-      farSummaryTilesBuiltThisFrame: 0, farSummaryCacheSize: 0, farSummaryFallbackSamples: 0,
+      farSummaryTilesReady: 0, farSummaryTilesBuilding: 0, farSummaryTilesMissing: 0,
+      farSummaryTilesStale: 0, farSummaryTilesBuiltThisFrame: 0, farSummaryCacheSize: 0,
+      farSummaryFallbackSamples: 0,
     };
     this.useParityMaterial = options.useParityMaterial ?? false;
     this.parityConfig = options.parityConfig;
@@ -136,20 +137,24 @@ export class InfiniteFarShell {
     return (angularSegments + 1) * (radialSegments + 1);
   }
 
+  private requestSlicedHeightRebuild(): void {
+    if (this.heightSamplingMode !== "cpu" || this.pendingHeightRebuild) return;
+    this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
+  }
+
   setHeightProvider(provider: FarHeightProvider | undefined): void {
     this.heightProvider = provider;
-    if (this.heightSamplingMode === "cpu") this.rebuildHeights();
+    if (provider) this.requestSlicedHeightRebuild();
   }
 
   /**
    * Resample heights from the current provider without moving the shell —
    * used when far-summary tiles commit after the shell was built from
-   * fallbacks. Always sliced; a no-op before the first build or in gpu mode.
+   * fallbacks. Always sliced so refresh work never blocks a frame.
    */
   requestHeightRefresh(): void {
-    if (this.heightSamplingMode !== "cpu" || this.rebuildCount === 0) return;
-    if (this.pendingHeightRebuild) return;
-    this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
+    if (!this.heightProvider) return;
+    this.requestSlicedHeightRebuild();
   }
 
   setRenderOriginOffset(originX: number, originZ: number): void {
@@ -189,16 +194,8 @@ export class InfiniteFarShell {
     this.metrics.farShellCenterZ = cameraWorldZ;
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
-    if (snappedChanged && this.heightSamplingMode === "cpu") {
-      // First reposition builds synchronously so spawn/boot renders correct
-      // heights before settle; later crossings resample under a per-frame
-      // budget while the previous heights keep rendering until the flush.
-      if (this.rebuildCount <= 1) {
-        this.pendingHeightRebuild = null;
-        this.rebuildHeights();
-      } else {
-        this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
-      }
+    if (snappedChanged && this.heightSamplingMode === "cpu" && this.heightProvider) {
+      this.requestSlicedHeightRebuild();
     }
     if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();
     this.applyRenderPosition();
@@ -226,14 +223,6 @@ export class InfiniteFarShell {
 
   private applyRenderPosition(): void {
     this.mesh.position.set(this.snappedX - this.renderOriginX, 0, this.snappedZ - this.renderOriginZ);
-  }
-
-  private rebuildHeights(): void {
-    const t0 = performance.now();
-    const vertexCount = this.computeVertexCount();
-    this.prepareHeightBuffers(vertexCount);
-    this.sampleHeightVertexRange(0, vertexCount);
-    this.finalizeHeightRebuild(performance.now() - t0);
   }
 
   private prepareHeightBuffers(vertexCount: number): void {
@@ -287,14 +276,13 @@ export class InfiniteFarShell {
 
   /**
    * Advance a sliced rebuild. Buffers are written in place but only uploaded
-   * by the completing flush, so partial samples never render. A minimum step
-   * of vertices guarantees small (test-sized) shells finish in one call.
+   * by the completing flush, so partial samples never render.
    */
   private stepPendingHeightRebuild(): void {
     const pending = this.pendingHeightRebuild;
     if (!pending) return;
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
-    const minStepVerts = 256;
+    const minStepVerts = 64;
     const vertexCount = this.computeVertexCount();
     if (pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
     const started = performance.now();
