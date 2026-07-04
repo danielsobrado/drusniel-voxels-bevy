@@ -10,6 +10,7 @@ export interface LongViewConfig {
     tileSizeMeters: number;
     rings: FarSummaryRingConfig[];
     maxTilesBuiltPerFrame: number;
+    maxBuildMsPerFrame: number;
     staleTileGraceSeconds: number;
   };
 
@@ -45,6 +46,7 @@ function rawDefaultConfig(): LongViewConfig {
       endMeters: 8192,
       tileSizeMeters: 256,
       maxTilesBuiltPerFrame: 4,
+      maxBuildMsPerFrame: 2.0,
       staleTileGraceSeconds: 10,
       rings: [
         { name: "near_far", startM: 1536, endM: 4096, cellM: 32, tileCells: 32 },
@@ -94,6 +96,7 @@ export function longViewConfigToFarSummaryConfig(lvConfig: LongViewConfig): FarS
     stream: {
       ...DEFAULT_FAR_SUMMARY_CONFIG.stream,
       maxTileBuildsPerFrame: fs.maxTilesBuiltPerFrame,
+      maxBuildMsPerFrame: fs.maxBuildMsPerFrame,
       evictionGraceSeconds: fs.staleTileGraceSeconds,
     } satisfies FarSummaryStreamConfig,
     rings: fs.rings,
