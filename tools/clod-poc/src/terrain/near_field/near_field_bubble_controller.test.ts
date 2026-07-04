@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
-import { createNearFieldBubbleController, liveBubbleChunkFootprint, requiredStreamingPageCoords } from "./near_field_bubble_controller.js";
-import type { ClodPageNode } from "../../types.js";
+import {
+  createNearFieldBubbleController,
+  liveBubbleChunkFootprint,
+  liveBubbleOwnsPageView,
+  requiredStreamingPageCoords,
+} from "./near_field_bubble_controller.js";
+import type { ClodPageNode, PageFootprint } from "../../types.js";
 
 vi.mock("../../terrain/terrain.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../terrain/terrain.js")>();
@@ -17,11 +22,15 @@ const TEST_CFG = {
   page: { chunks_per_page: 2, chunk_size: 16 },
 } as import("../../config.js").ClodPagesConfig;
 
-function makeNode(id = "L0:1,1"): ClodPageNode {
+function makeNode(
+  id = "L0:1,1",
+  footprint: PageFootprint = { minX: 16, maxX: 32, minZ: 16, maxZ: 32 },
+  level = 0,
+): ClodPageNode {
   return {
     id,
-    level: 0,
-    footprint: { minX: 16, maxX: 32, minZ: 16, maxZ: 32 },
+    level,
+    footprint,
     mesh: {
       positions: new Float32Array([0, 0, 0]),
       normals: new Float32Array([0, 1, 0]),
@@ -56,6 +65,33 @@ describe("liveBubbleChunkFootprint", () => {
       maxX: 192,
       maxZ: -32,
     });
+  });
+});
+
+describe("liveBubbleOwnsPageView", () => {
+  it("owns page views through the same half-diagonal rim used for chunk requests", () => {
+    const pageSize = 32;
+    const bubbleRadius = 100;
+    const halfDiag = pageSize * Math.SQRT2 * 0.5;
+    const center = new THREE.Vector3(0, 0, 0);
+    const limit = bubbleRadius + halfDiag;
+    const rimNode = makeNode("L0:rim,0", {
+      minX: limit - pageSize / 2,
+      maxX: limit + pageSize / 2,
+      minZ: -pageSize / 2,
+      maxZ: pageSize / 2,
+    });
+    const outsideNode = makeNode("L0:outside,0", {
+      minX: limit + 0.001 - pageSize / 2,
+      maxX: limit + 0.001 + pageSize / 2,
+      minZ: -pageSize / 2,
+      maxZ: pageSize / 2,
+    });
+
+    expect(liveBubbleOwnsPageView(rimNode, center, bubbleRadius, pageSize, 1)).toBe(true);
+    expect(liveBubbleOwnsPageView(outsideNode, center, bubbleRadius, pageSize, 1)).toBe(false);
+    expect(liveBubbleOwnsPageView(makeNode("L1:rim,0", rimNode.footprint, 1), center, bubbleRadius, pageSize, 1)).toBe(false);
+    expect(liveBubbleOwnsPageView(rimNode, center, bubbleRadius, pageSize, 0.5)).toBe(false);
   });
 });
 
