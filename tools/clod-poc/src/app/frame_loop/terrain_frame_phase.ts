@@ -45,11 +45,15 @@ export interface TerrainFramePhaseResult {
   grassCenter: THREE.Vector3;
 }
 
-function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
+function hooksCounters(): Record<string, number> | null {
   const hooks = (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
   }).window?.__drusnielClod;
-  const counters = hooks?.stats?.counters;
+  return hooks?.stats?.counters ?? null;
+}
+
+function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
+  const counters = hooksCounters();
   if (!counters) return;
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
@@ -62,6 +66,17 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
   counters["live_bubble_collider_removals"] = stats.colliderRemovals;
+}
+
+function mirrorVegetationRingStats(grassCenter: THREE.Vector3, ringCenter: THREE.Vector3, unbounded: boolean): void {
+  const counters = hooksCounters();
+  if (!counters) return;
+  counters["vegetation_ring_unbounded"] = unbounded ? 1 : 0;
+  counters["vegetation_ring_center_x"] = ringCenter.x;
+  counters["vegetation_ring_center_z"] = ringCenter.z;
+  counters["vegetation_grass_center_x"] = grassCenter.x;
+  counters["vegetation_grass_center_z"] = grassCenter.z;
+  counters["vegetation_ring_distance_to_grass_m"] = Math.hypot(ringCenter.x - grassCenter.x, ringCenter.z - grassCenter.z);
 }
 
 function infiniteIslandsScene(): boolean {
@@ -120,7 +135,9 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
 
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;
-  const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, infiniteIslandsScene());
+  const ringUnbounded = infiniteIslandsScene();
+  const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, ringUnbounded);
+  mirrorVegetationRingStats(grassCenter, ringCenter, ringUnbounded);
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
