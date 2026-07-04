@@ -11,9 +11,9 @@ export interface FarShellMetrics {
   farShellCenterZ: number;
   farShellSnappedX: number;
   farShellSnappedZ: number;
-  farShellRebuildPending: number;
-  farShellRebuildCursor: number;
-  farShellRebuildVertices: number;
+  farShellRebuildPending?: number;
+  farShellRebuildCursor?: number;
+  farShellRebuildVertices?: number;
 
   farSummaryTilesRequired: number;
   farSummaryTilesReady: number;
@@ -68,9 +68,9 @@ export function publishFarShellMetricsToCounters(
   counters["far_shell_vertices"] = metrics.farShellVertices;
   counters["far_shell_rebuilds"] = metrics.farShellRebuilds;
   counters["far_shell_last_rebuild_ms"] = metrics.farShellLastRebuildMs;
-  counters["far_shell_rebuild_pending"] = metrics.farShellRebuildPending;
-  counters["far_shell_rebuild_cursor"] = metrics.farShellRebuildCursor;
-  counters["far_shell_rebuild_vertices"] = metrics.farShellRebuildVertices;
+  counters["far_shell_rebuild_pending"] = metrics.farShellRebuildPending ?? 0;
+  counters["far_shell_rebuild_cursor"] = metrics.farShellRebuildCursor ?? 0;
+  counters["far_shell_rebuild_vertices"] = metrics.farShellRebuildVertices ?? metrics.farShellVertices;
   counters["far_summary_tiles_required"] = metrics.farSummaryTilesRequired;
   counters["far_summary_tiles_ready"] = metrics.farSummaryTilesReady;
   counters["far_summary_tiles_building"] = metrics.farSummaryTilesBuilding;
