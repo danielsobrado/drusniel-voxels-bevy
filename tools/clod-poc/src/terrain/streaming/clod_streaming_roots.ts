@@ -42,12 +42,18 @@ interface PageCoord {
   centerZ: number;
 }
 
-const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
+// TODO: replace this opt-in synchronous builder with a worker/off-frame queue before enabling it by default.
+const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 0;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
 
 function defaultBuildScheduler(task: () => void): void {
   globalThis.setTimeout(task, 0);
+}
+
+function resolveBuildBudget(value: number | undefined): number {
+  const raw = value ?? DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME;
+  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME;
 }
 
 export function streamingClodPageKey(px: number, pz: number): string {
@@ -89,7 +95,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const pageSize = deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size;
   const worldPagesX = Math.max(1, Math.ceil(deps.worldCells / pageSize));
   const worldPagesZ = Math.max(1, Math.ceil(deps.worldCells / pageSize));
-  const buildBudget = Math.max(1, Math.floor(deps.buildBudgetPagesPerFrame ?? DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME));
+  const buildBudget = resolveBuildBudget(deps.buildBudgetPagesPerFrame);
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const scheduleBuild = deps.scheduleBuild ?? defaultBuildScheduler;
@@ -202,7 +208,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
           existing.lastTouchFrame = frame;
           continue;
         }
-        if (pending.has(id) || failed.has(id) || scheduledThisFrame >= buildBudget) continue;
+        if (buildBudget <= 0 || pending.has(id) || failed.has(id) || scheduledThisFrame >= buildBudget) continue;
         scheduleNodeBuild(coord, frame);
         scheduledThisFrame++;
       }
