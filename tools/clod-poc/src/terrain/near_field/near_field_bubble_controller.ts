@@ -59,6 +59,9 @@ export interface NearFieldBubbleStats {
   colliderEvictions: number;
   streamedColliderPages: number;
   validEmptyPages: number;
+  gpuRetryPages: number;
+  gpuRetriesTotal: number;
+  gpuTerminalFailuresTotal: number;
   colliderRegistrations: number;
   colliderRemovals: number;
 }
@@ -236,6 +239,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const terrainColliders = deps.terrainColliders ?? null;
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
+  let gpuRetriesTotal = 0;
+  let gpuTerminalFailuresTotal = 0;
   let currentFrame = 0;
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
@@ -267,6 +272,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     let total = 0;
     for (const entry of chunkGroups.values()) {
       if (entry.ready && !entry.failed && entry.validEmpty) total++;
+    }
+    return total;
+  };
+
+  const gpuRetryPages = (): number => {
+    let total = 0;
+    for (const job of gpuPendingBuilds.values()) {
+      if (job.attempts > 0 || currentFrame < job.nextRetryFrame) total++;
     }
     return total;
   };
@@ -436,6 +449,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     entry.ready = false;
     entry.failed = false;
     entry.validEmpty = false;
+    gpuRetriesTotal++;
     enqueueGpuPageBuild(key, job.px, job.pz, job.worldBounds, job.attempts + 1, currentFrame + GPU_PAGE_RETRY_DELAY_FRAMES);
     return true;
   };
@@ -452,6 +466,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }
 
     if (job.failures > 0 && retryGpuPageBuild(key, entry, job)) return;
+    if (job.failures > 0) gpuTerminalFailuresTotal++;
     entry.failed = job.failures > 0;
     entry.validEmpty = job.failures === 0 && job.meshChunks === 0;
     entry.ready = true;
@@ -687,6 +702,9 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         colliderEvictions,
         streamedColliderPages: activeColliderPages(),
         validEmptyPages: validEmptyPages(),
+        gpuRetryPages: gpuRetryPages(),
+        gpuRetriesTotal,
+        gpuTerminalFailuresTotal,
         colliderRegistrations,
         colliderRemovals,
       };
