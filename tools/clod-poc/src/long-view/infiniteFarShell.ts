@@ -20,6 +20,8 @@ import {
   attachColorAttribute, createDefaultParityColors, createDefaultBiomeColors,
 } from "./infinite_far_shell_helpers.js";
 
+type PendingFarShellHeightRebuild = { cursor: number; buildMs: number; snapX: number; snapZ: number };
+
 export class InfiniteFarShell {
   readonly mesh: THREE.Mesh;
   private readonly waterMesh: THREE.Mesh | undefined;
@@ -36,8 +38,7 @@ export class InfiniteFarShell {
   private renderOriginZ = 0;
   private rebuildCount = 0;
   private lastRebuildMs = 0;
-  /** Sliced height rebuild in progress. Previous/flat heights render until the final flush. */
-  private pendingHeightRebuild: { cursor: number; buildMs: number } | null = null;
+  private pendingHeightRebuild: PendingFarShellHeightRebuild | null = null;
   private materialOptions: InfiniteFarShellMaterialOptions;
   private readonly useParityMaterial: boolean;
   private readonly parityConfig: FarTerrainUniformData | undefined;
@@ -56,7 +57,8 @@ export class InfiniteFarShell {
       farShellEnabled: true, farShellInnerM: options.innerMeters, farShellOuterM: options.outerMeters,
       farShellVertices: 0, farShellTriangles: 0, farShellGridRes: 0, farShellRebuilds: 0,
       farShellLastRebuildMs: 0, farShellCenterX: 0, farShellCenterZ: 0,
-      farShellSnappedX: 0, farShellSnappedZ: 0, farSummaryTilesRequired: 0,
+      farShellSnappedX: 0, farShellSnappedZ: 0, farShellRebuildPending: 0,
+      farShellRebuildCursor: 0, farShellRebuildVertices: 0, farSummaryTilesRequired: 0,
       farSummaryTilesReady: 0, farSummaryTilesBuilding: 0, farSummaryTilesMissing: 0,
       farSummaryTilesStale: 0, farSummaryTilesBuiltThisFrame: 0, farSummaryCacheSize: 0,
       farSummaryFallbackSamples: 0,
@@ -130,6 +132,7 @@ export class InfiniteFarShell {
     this.metrics.farShellEnabled = true;
     this.metrics.farShellInnerM = options.innerMeters;
     this.metrics.farShellOuterM = options.outerMeters;
+    this.metrics.farShellRebuildVertices = vertexCount;
   }
 
   private computeVertexCount(): number {
@@ -137,10 +140,26 @@ export class InfiniteFarShell {
     return (angularSegments + 1) * (radialSegments + 1);
   }
 
+  private publishRebuildProgress(): void {
+    const pending = this.pendingHeightRebuild;
+    this.metrics.farShellRebuildPending = pending ? 1 : 0;
+    this.metrics.farShellRebuildCursor = pending?.cursor ?? 0;
+    this.metrics.farShellRebuildVertices = this.computeVertexCount();
+  }
+
   private requestSlicedHeightRebuild(restart = false): void {
     if (this.heightSamplingMode !== "cpu") return;
-    if (this.pendingHeightRebuild && !restart) return;
-    this.pendingHeightRebuild = { cursor: 0, buildMs: 0 };
+    if (
+      this.pendingHeightRebuild
+      && !restart
+      && this.pendingHeightRebuild.snapX === this.snappedX
+      && this.pendingHeightRebuild.snapZ === this.snappedZ
+    ) {
+      this.publishRebuildProgress();
+      return;
+    }
+    this.pendingHeightRebuild = { cursor: 0, buildMs: 0, snapX: this.snappedX, snapZ: this.snappedZ };
+    this.publishRebuildProgress();
   }
 
   setHeightProvider(provider: FarHeightProvider | undefined): void {
@@ -149,11 +168,6 @@ export class InfiniteFarShell {
     this.stepPendingHeightRebuild();
   }
 
-  /**
-   * Resample heights from the current provider without moving the shell —
-   * used when far-summary tiles commit after the shell was built from
-   * fallbacks. Always sliced so refresh work never blocks a frame.
-   */
   requestHeightRefresh(): void {
     if (!this.heightProvider) return;
     this.requestSlicedHeightRebuild();
@@ -200,6 +214,7 @@ export class InfiniteFarShell {
       this.requestSlicedHeightRebuild(true);
     }
     if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();
+    else this.publishRebuildProgress();
     this.applyRenderPosition();
     if (this.useParityMaterial && this.parityConfig) {
       const material = this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
@@ -219,8 +234,8 @@ export class InfiniteFarShell {
 
   dispose(): void {
     this.mesh.geometry.dispose();
-    disposeMaterial(this.mesh.material as THREE.Material | THREE.Material[]);
-    if (this.waterMesh) disposeMaterial(this.waterMesh.material as THREE.Material | THREE.Material[]);
+    disposeMaterial(this.mesh.material as THREE.Material | THREE.Material[]>);
+    if (this.waterMesh) disposeMaterial(this.waterMesh.material as THREE.Material | THREE.Material[]>);
   }
 
   private applyRenderPosition(): void {
@@ -234,7 +249,7 @@ export class InfiniteFarShell {
     }
   }
 
-  private sampleHeightVertexRange(startVi: number, endVi: number): void {
+  private sampleHeightVertexRange(startVi: number, endVi: number, snapX: number, snapZ: number): void {
     const { angularSegments, radialSegments, heightBiasMeters } = this.options;
     const farShellHeightBiasMeters = heightBiasMeters + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M;
     const writeBiomeColors = !(this.useParityMaterial && this.parityConfig);
@@ -247,7 +262,7 @@ export class InfiniteFarShell {
       const theta = (ai / angularSegments) * Math.PI * 2;
       const localX = r * Math.cos(theta);
       const localZ = r * Math.sin(theta);
-      const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(this.snappedX + localX, this.snappedZ + localZ, r, this.heightProvider, this.samplerOptions);
+      const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(snapX + localX, snapZ + localZ, r, this.heightProvider, this.samplerOptions);
       this.positions[vi * 3] = localX;
       this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
       this.positions[vi * 3 + 2] = localZ;
@@ -260,10 +275,10 @@ export class InfiniteFarShell {
     }
   }
 
-  private finalizeHeightRebuild(buildMs: number): void {
+  private finalizeHeightRebuild(buildMs: number, snapX: number, snapZ: number): void {
     const vertexCount = this.computeVertexCount();
     if (this.useParityMaterial && this.parityConfig) {
-      const vertexColors = computeFarTerrainVertexColors(this.positions, this.normals, vertexCount, this.parityConfig, this.snappedX, this.snappedZ);
+      const vertexColors = computeFarTerrainVertexColors(this.positions, this.normals, vertexCount, this.parityConfig, snapX, snapZ);
       this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
       this.attachVertexColors();
     } else {
@@ -274,24 +289,25 @@ export class InfiniteFarShell {
     this.metrics.farShellRebuilds = this.rebuildCount;
     this.metrics.farShellLastRebuildMs = this.lastRebuildMs;
     this.flushAttributes();
+    this.publishRebuildProgress();
   }
 
-  /**
-   * Advance a sliced rebuild. Buffers are written in place but only uploaded
-   * by the completing flush, so partial samples never render.
-   */
   private stepPendingHeightRebuild(): void {
     const pending = this.pendingHeightRebuild;
-    if (!pending) return;
+    if (!pending) {
+      this.publishRebuildProgress();
+      return;
+    }
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
-    const minStepVerts = 256;
+    const minStepVerts = 64;
     const vertexCount = this.computeVertexCount();
     if (pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
     const started = performance.now();
     while (pending.cursor < vertexCount) {
       const end = Math.min(vertexCount, pending.cursor + minStepVerts);
-      this.sampleHeightVertexRange(pending.cursor, end);
+      this.sampleHeightVertexRange(pending.cursor, end, pending.snapX, pending.snapZ);
       pending.cursor = end;
+      this.publishRebuildProgress();
       if (pending.cursor < vertexCount && performance.now() - started >= budgetMs) {
         pending.buildMs += performance.now() - started;
         return;
@@ -299,7 +315,7 @@ export class InfiniteFarShell {
     }
     pending.buildMs += performance.now() - started;
     this.pendingHeightRebuild = null;
-    this.finalizeHeightRebuild(pending.buildMs);
+    this.finalizeHeightRebuild(pending.buildMs, pending.snapX, pending.snapZ);
   }
 
   private flushAttributes(): void {
