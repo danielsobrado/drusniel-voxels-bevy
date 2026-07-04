@@ -178,8 +178,13 @@ export function createBiomeTextureStreamingManager(
     statsState.lastUpdateFrame = frameIndex;
 
     if (!changed) {
-      publishTextureStats(statsState);
+      setPendingSignature(null);
       return { changed: false, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
+    }
+
+    if (pendingSignature === signature) {
+      publishTextureStats(statsState);
+      return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: nextActive };
     }
 
     const nextConfig = withActiveBiomeProceduralMaterials(config, nextActive);
@@ -195,7 +200,7 @@ export function createBiomeTextureStreamingManager(
       const start = performance.now();
       try {
         deps.onActiveWindowChanged(nextConfig, nextConfig.terrain.active_biome_materials);
-        if (!deps.deferWindowSwaps) commitConfigState();
+        commitConfigState();
         statsState.rebuildsTotal++;
         statsState.lastRebuildMs = performance.now() - start;
         statsState.lastAppliedFrame = frameIndex;
@@ -212,7 +217,6 @@ export function createBiomeTextureStreamingManager(
 
     setPendingSignature(signature);
     if (deps.deferWindowSwaps) {
-      commitConfigState();
       scheduleIdleTask(applyWindow);
     } else {
       applyWindow();
