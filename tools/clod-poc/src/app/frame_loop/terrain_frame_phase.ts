@@ -13,6 +13,8 @@ const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const RING_CLAMP_MARGIN = 2;
 
 let cachedInfiniteIslandsScene: boolean | null = null;
+let liveBubbleBuiltTotal = 0;
+let liveBubbleEvictionsTotal = 0;
 
 interface TerrainFadeView {
   node: { id: string };
@@ -55,13 +57,17 @@ function hooksCounters(): Record<string, number> | null {
 function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   const counters = hooksCounters();
   if (!counters) return;
+  liveBubbleBuiltTotal += stats.chunkGroupsBuiltThisFrame;
+  liveBubbleEvictionsTotal += stats.evictions;
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
   counters["live_bubble_building_pages"] = stats.buildingPages;
   counters["live_bubble_failed_pages"] = stats.failedPages;
   counters["live_bubble_built_this_frame"] = stats.chunkGroupsBuiltThisFrame;
+  counters["live_bubble_built_total"] = liveBubbleBuiltTotal;
   counters["live_bubble_ms"] = stats.bubbleMs;
   counters["live_bubble_evictions"] = stats.evictions;
+  counters["live_bubble_evictions_total"] = liveBubbleEvictionsTotal;
   counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
