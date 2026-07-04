@@ -116,7 +116,7 @@ export type ClodWorkerResponse =
   | { type: "parentsComplete"; requestId: number | null; parentNodes: number; parentMs: number }
   | { type: "flushed"; requestId: number }
   | { type: "cacheCleared"; requestId: number }
-  | { type: "streamRootsBuilt"; requestId: number; nodes: SerializedClodNode[]; buildMs: number }
+  | { type: "streamRootsBuilt"; requestId: number; nodes: SerializedClodNode[]; buildMs: number; transferBytes: number }
   | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
 function cloneMesh(mesh: PageMesh): PageMesh {
@@ -256,53 +256,4 @@ export function rehydrateStandaloneNodes(nodes: readonly SerializedClodNode[]): 
     applySerializedMetadata(rehydrated, node);
     return rehydrated;
   });
-}
-
-export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildResult {
-  const nodesById = new Map<string, ClodPageNode>();
-  const serializedById = new Map<string, SerializedClodNode>();
-  const nodesByLevel = new Map<number, ClodPageNode[]>();
-
-  for (const [level, serializedNodes] of serialized.nodesByLevel) {
-    const nodes: ClodPageNode[] = serializedNodes.map((node) => {
-      if (nodesById.has(node.id)) throw new Error(`CLOD build result contains duplicate node ${node.id}`);
-      const rehydrated: ClodPageNode = {
-        id: node.id,
-        level: node.level,
-        children: [],
-        mesh: node.mesh,
-        footprint: node.footprint,
-        bounds: node.bounds,
-        errorWorld: node.errorWorld,
-        lowBenefit: node.lowBenefit,
-      };
-      applySerializedMetadata(rehydrated, node);
-      nodesById.set(rehydrated.id, rehydrated);
-      serializedById.set(node.id, node);
-      return rehydrated;
-    });
-    nodesByLevel.set(level, nodes);
-  }
-
-  for (const [, nodes] of nodesByLevel) {
-    for (const node of nodes) {
-      const serializedNode = serializedById.get(node.id);
-      if (!serializedNode) throw new Error(`CLOD build result missing serialized node ${node.id}`);
-      node.children = resolveChildIds(serializedNode.id, serializedNode.childIds, nodesById);
-    }
-  }
-
-  const roots = serialized.roots.map((id) => {
-    const root = nodesById.get(id);
-    if (!root) throw new Error(`CLOD build result references missing root ${id}`);
-    return root;
-  });
-
-  return {
-    roots,
-    nodesByLevel,
-    stats: serialized.stats.map((stat) => ({ ...stat, polish: { ...stat.polish } })),
-    worldPagesX: serialized.worldPagesX,
-    worldPagesZ: serialized.worldPagesZ,
-  };
 }
