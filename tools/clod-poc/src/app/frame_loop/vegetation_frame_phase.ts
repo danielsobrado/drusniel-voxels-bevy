@@ -120,13 +120,8 @@ function mirrorInfiniteHydrologyDiagnostics(input: VegetationFramePhaseInput): v
 
 function updateForestLighting(input: VegetationFramePhaseInput): void {
   const lighting = input.currentLighting();
-  if (!input.forestLightingController.shouldUpdate(input.grassCenter, lighting.sunDirection)) return;
-  input.forestLightingController.update(input.elapsedSeconds, input.grassCenter, {
-    treeProxies: input.treeController.system.getLightingProxies(),
-    understoryProxies: input.understoryController.system.getLightingProxies(),
-    sunDirection: lighting.sunDirection,
-  });
-  input.applyForestLightingToPropMaterials();
+  const completed = input.forestLightingController.updateBudgeted(input.grassCenter, lighting.sunDirection);
+  if (completed) input.applyForestLightingToPropMaterials();
 }
 
 function updateWater(input: VegetationFramePhaseInput): void {
