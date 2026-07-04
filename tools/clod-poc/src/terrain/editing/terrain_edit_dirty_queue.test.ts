@@ -13,10 +13,33 @@ describe("TerrainEditDirtyQueue", () => {
       affectsVegetation: true,
     });
 
-    expect(queue.snapshot()).toEqual({ queued: 1, latestRevision: 7 });
+    expect(queue.snapshot()).toEqual({ queued: 1, latestRevision: 7, dropped: 0 });
     expect(queue.peek()).toHaveLength(1);
     expect(queue.drain()).toHaveLength(1);
-    expect(queue.snapshot()).toEqual({ queued: 0, latestRevision: 7 });
+    expect(queue.snapshot()).toEqual({ queued: 0, latestRevision: 7, dropped: 0 });
+  });
+
+  it("drops oldest events after the configured bound", () => {
+    const queue = new TerrainEditDirtyQueue(1);
+    queue.enqueue({
+      editRevision: 1,
+      worldAabb: dirtyAabbForBrush(0, 0, 0, 1, 1, 0),
+      reason: "dig",
+      affectsHeight: true,
+      affectsCollision: true,
+      affectsVegetation: true,
+    });
+    queue.enqueue({
+      editRevision: 2,
+      worldAabb: dirtyAabbForBrush(2, 0, 0, 1, 1, 0),
+      reason: "raise",
+      affectsHeight: true,
+      affectsCollision: true,
+      affectsVegetation: true,
+    });
+
+    expect(queue.snapshot()).toEqual({ queued: 1, latestRevision: 2, dropped: 1 });
+    expect(queue.peek()[0]?.editRevision).toBe(2);
   });
 
   it("computes conservative brush bounds", () => {
