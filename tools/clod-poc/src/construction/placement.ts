@@ -82,11 +82,10 @@ function validateBoundsAndOverlap(
   worldCells: number,
   config: ConstructionPlacementConfig,
 ): { valid: boolean; reason: string | null } {
-  if (!isFiniteVec3(position) || !Number.isFinite(worldCells) || worldCells <= 0) {
-    return { valid: false, reason: "invalid position" };
-  }
+  if (!isFiniteVec3(position)) return { valid: false, reason: "invalid position" };
 
   if (!config.unboundedWorld) {
+    if (!Number.isFinite(worldCells) || worldCells <= 0) return { valid: false, reason: "invalid position" };
     const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
     if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
       return { valid: false, reason: "outside world" };
