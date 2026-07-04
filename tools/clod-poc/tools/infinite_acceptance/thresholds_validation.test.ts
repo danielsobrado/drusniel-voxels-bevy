@@ -2,27 +2,21 @@ import { describe, expect, it } from "vitest";
 import { evaluateThresholds, REQUIRED_COUNTERS } from "./thresholds.js";
 
 function validCounters(overrides: Record<string, number> = {}): Record<string, number> {
-  const values: Record<string, number> = {};
-  for (const key of REQUIRED_COUNTERS) values[key] = 1;
+  const values = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
   values["frame_ms_p95"] = 8;
   values["frame_ms_p99"] = 9;
-  values["ring_boundary_holes"] = 0;
-  values["live_clod_gap_holes"] = 0;
-  values["clod_far_gap_holes"] = 0;
-  values["live_clod_overlap_cells"] = 0;
-  values["clod_far_overlap_cells"] = 0;
-  values["priority_owner_overlap_cells"] = 0;
-  values["priority_unowned_cells"] = 0;
-  values["missing_live_chunks_in_required_radius"] = 0;
-  values["missing_clod_pages_in_required_radius"] = 0;
-  values["camera_to_clod_center_m"] = 0;
-  values["camera_to_far_shell_center_m"] = 0;
   values["far_shell_inner_minus_clod_radius_m"] = 1;
-  values["horizon_hole_ratio"] = 0;
-  values["far_summary_tiles_missing"] = 0;
+  values["streamer_far_shell_ownership_ok"] = 1;
   values["live_bubble_required_pages"] = 1;
   values["live_bubble_ready_pages"] = 1;
-  values["live_bubble_failed_pages"] = 0;
+  values["live_bubble_streamed_collider_pages"] = 1;
+  values["live_bubble_collider_registrations"] = 1;
+  values["live_clod_stream_required_pages"] = 1;
+  values["live_clod_stream_cached_pages"] = 1;
+  values["infinite_hydrology_outside_sample_valid"] = 1;
+  values["infinite_hydrology_nonrepeat_delta"] = 1;
+  values["infinite_hydrology_nonrepeat_ok"] = 1;
+  values["infinite_hydrology_camera_outside_startup"] = 1;
   return { ...values, ...overrides };
 }
 
