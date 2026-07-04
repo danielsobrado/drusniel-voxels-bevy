@@ -6,6 +6,7 @@ import type { Browser, Page } from "playwright";
 import { clodUrl, launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
+import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import {
   evaluateThresholds,
   extractAcceptanceCounters,
@@ -127,48 +128,7 @@ async function writeBootstrapDiff(aPath: string, outPath: string): Promise<void>
 }
 
 function qaSummary(scene: string, stats: JsonRecord): JsonRecord {
-  const counters = (stats["counters"] as Record<string, number> | undefined) ?? {};
-  return {
-    schema_version: 1,
-    scene,
-    platform: "web",
-    checkpoints: [{
-      name: "main",
-      median_frame_ms: counters["frame_ms_avg"] ?? stats["frameMs"] ?? 0,
-      p95_frame_ms: counters["frame_ms_p95"] ?? stats["frameMsP95"] ?? 0,
-      p99_frame_ms: counters["frame_ms_p99"] ?? 0,
-      areas: {
-        renderer: {
-          draw_calls: counters["draw_calls"] ?? stats["drawCalls"] ?? 0,
-          triangles: counters["total_scene_tris"] ?? stats["triangles"] ?? 0,
-        },
-        clod: {
-          terrain_draw_calls: counters["terrain_draw_calls"] ?? 0,
-          terrain_triangles: counters["rendered_terrain_tris"] ?? 0,
-          ring_boundary_holes: counters["ring_boundary_holes"] ?? 0,
-          live_clod_gap_holes: counters["live_clod_gap_holes"] ?? 0,
-          clod_far_gap_holes: counters["clod_far_gap_holes"] ?? 0,
-          priority_owner_overlap_cells: counters["priority_owner_overlap_cells"] ?? 0,
-          priority_unowned_cells: counters["priority_unowned_cells"] ?? 0,
-          missing_live_chunks_in_required_radius: counters["missing_live_chunks_in_required_radius"] ?? 0,
-          missing_clod_pages_in_required_radius: counters["missing_clod_pages_in_required_radius"] ?? 0,
-        },
-        far_shell: {
-          enabled: counters["far_shell_enabled"] ?? 0,
-          triangles: counters["far_shell_tris"] ?? 0,
-          radius_m: counters["far_shell_radius_m"] ?? 0,
-          grid_res: counters["far_shell_grid_res"] ?? 0,
-          ownership_ok: counters["streamer_far_shell_ownership_ok"] ?? 0,
-        },
-        far_summary: {
-          required: counters["far_summary_tiles_required"] ?? 0,
-          ready: counters["far_summary_tiles_ready"] ?? 0,
-          missing: counters["far_summary_tiles_missing"] ?? 0,
-          stale: counters["far_summary_tiles_stale"] ?? 0,
-        },
-      },
-    }],
-  };
+  return buildInfiniteQaSummary(scene, stats);
 }
 
 async function waitReady(page: Page, sceneName: string, failedPath: string): Promise<void> {
