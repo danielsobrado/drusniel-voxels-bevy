@@ -228,9 +228,15 @@ export class GpuChunkMesher {
     enc.copyBufferToBuffer(this.indexCount, 0, this.countReadback, U32, U32);
     this.device.queue.submit([enc.finish()]);
 
-    await this.countReadback.mapAsync(GPUMapMode.READ);
-    const counts = new Uint32Array(this.countReadback.getMappedRange().slice(0));
-    this.countReadback.unmap();
+    let countMapped = false;
+    let counts: Uint32Array;
+    try {
+      await this.countReadback.mapAsync(GPUMapMode.READ);
+      countMapped = true;
+      counts = new Uint32Array(this.countReadback.getMappedRange().slice(0));
+    } finally {
+      if (countMapped) this.countReadback.unmap();
+    }
     const vc = Math.min(counts[0], this.maxVertices);
     const ic = Math.min(counts[1], this.maxIndices);
     if (vc === 0 || ic === 0) {
