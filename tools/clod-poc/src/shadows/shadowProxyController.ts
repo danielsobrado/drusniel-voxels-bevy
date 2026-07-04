@@ -75,8 +75,6 @@ export function createShadowProxyController(
   let builtSummaryRef: ShadowProxySource | null = null;
   let builtCenterX = Number.NaN;
   let builtCenterZ = Number.NaN;
-  // In streaming mode geometry is rebuilt incrementally: the job samples a
-  // few ms per frame while the previous mesh keeps rendering, then swaps.
   let pendingJob: {
     job: ShadowProxyGeometryJob;
     centerX: number;
@@ -211,24 +209,15 @@ export function createShadowProxyController(
       ...computeShadowProxyCoverage(deps.worldSize, config, center.x, center.z),
       buildRelative: deps.streamingCentered,
     };
-    if (!deps.streamingCentered) {
-      applyCompletedBuild(
-        { centerX: center.x, centerZ: center.z, summaryRef: terrainSummary, config },
-        buildShadowProxyMesh(terrainSummary, config, coverage),
-      );
-      return;
-    }
-    // Streaming: never sample the full grid in one frame. Use the (cheaper)
-    // stream grid and slice the sampling; the old mesh stays until the swap.
-    const streamConfig = config.streamGridRes > 1 && config.streamGridRes < config.gridRes
+    const buildConfig = deps.streamingCentered && config.streamGridRes > 1 && config.streamGridRes < config.gridRes
       ? { ...config, gridRes: Math.floor(config.streamGridRes) }
       : config;
     pendingJob = {
-      job: createShadowProxyGeometryJob(terrainSummary, streamConfig, coverage),
+      job: createShadowProxyGeometryJob(terrainSummary, buildConfig, coverage),
       centerX: center.x,
       centerZ: center.z,
       summaryRef: terrainSummary,
-      config: streamConfig,
+      config: buildConfig,
       coverage,
     };
     publishCounters();
@@ -305,8 +294,9 @@ export function createShadowProxyController(
       publishCounters();
     },
     updateFrame(cameraWorldX: number, cameraWorldZ: number) {
-      if (!deps.isLongView || !deps.streamingCentered) return;
+      if (!deps.isLongView) return;
       stepPendingJob();
+      if (!deps.streamingCentered) return;
       const snapped = snapCenter(cameraWorldX, cameraWorldZ, deps.rebuildSnapMeters);
       sunTarget = new THREE.Vector3(snapped.x, 0, snapped.z);
       if (sunLight) {
