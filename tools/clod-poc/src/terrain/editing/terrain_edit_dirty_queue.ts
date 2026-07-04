@@ -1,5 +1,7 @@
 export type TerrainEditDirtyReason = "dig" | "raise" | "build" | "paint";
 
+const DEFAULT_MAX_DIRTY_EVENTS = 4096;
+
 export interface TerrainEditDirtyAabb {
   minX: number;
   maxX: number;
@@ -21,15 +23,23 @@ export interface TerrainEditDirtyEvent {
 export interface TerrainEditDirtyQueueSnapshot {
   queued: number;
   latestRevision: number;
+  dropped: number;
 }
 
 export class TerrainEditDirtyQueue {
   private readonly events: TerrainEditDirtyEvent[] = [];
   private latestRevisionValue = 0;
+  private droppedValue = 0;
+
+  constructor(private readonly maxEvents = DEFAULT_MAX_DIRTY_EVENTS) {}
 
   enqueue(event: TerrainEditDirtyEvent): void {
     this.events.push(event);
     this.latestRevisionValue = Math.max(this.latestRevisionValue, event.editRevision);
+    while (this.events.length > this.maxEvents) {
+      this.events.shift();
+      this.droppedValue++;
+    }
   }
 
   drain(): TerrainEditDirtyEvent[] {
@@ -44,6 +54,7 @@ export class TerrainEditDirtyQueue {
     return {
       queued: this.events.length,
       latestRevision: this.latestRevisionValue,
+      dropped: this.droppedValue,
     };
   }
 }
