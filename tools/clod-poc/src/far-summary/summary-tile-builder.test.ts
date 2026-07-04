@@ -126,11 +126,12 @@ describe("summary tile builder", () => {
     expect(roughRoughness).toBeGreaterThan(flatRoughness);
   });
 
-  it("reuses range samples for min and max height", () => {
+  it("reuses cached height samples for derived fields", () => {
+    const tileCells = 2;
     let heightSamples = 0;
     buildFarSummaryTile({
       key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
-      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 2 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells },
       terrainSampler: {
         sampleHeight: () => {
           heightSamples++;
@@ -141,7 +142,7 @@ describe("summary tile builder", () => {
       nowMs: 0,
     });
 
-    expect(heightSamples).toBe(2 * 2 * 18);
+    expect(heightSamples).toBe((tileCells + 2) * (tileCells + 2));
   });
 
   it("finite difference normal computation works", () => {
