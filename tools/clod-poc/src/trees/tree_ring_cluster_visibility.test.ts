@@ -211,6 +211,7 @@ describe("tree ring cluster visibility", () => {
       activeSlotIndices: new Uint32Array([4]),
       hiddenClusters: 1,
       visibleClusters: words.length - 1,
+      farSummaryConsultedClusters: 0,
       unknownKeptClusters: 0,
       candidateSlotsBeforePrefilter: 225,
       candidateSlotsAfterPrefilter: 1,

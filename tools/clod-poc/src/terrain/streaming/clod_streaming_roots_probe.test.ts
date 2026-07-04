@@ -104,7 +104,7 @@ function makeController() {
   const roots: ClodPageNode[] = [];
   const allNodes: ClodPageNode[] = [];
   const requests: Deferred<StreamingClodRootBuildResult>[] = [];
-  const buildPages = vi.fn((coords: readonly PageCoord[]) => {
+  const buildPages = vi.fn((_coords: readonly PageCoord[]) => {
     const next = deferred<StreamingClodRootBuildResult>();
     requests.push(next);
     return next.promise;
@@ -151,18 +151,20 @@ describe("streamed CLOD root movement probes", () => {
   it("retries route pages after worker rejection cooldown instead of permanently poisoning them", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { controller, buildPages, requests } = makeController();
+    const routeCenter = new THREE.Vector3(272, 0, 16);
+    const routeRadius = 1;
 
     controller.beginMovementProbe();
-    controller.update(new THREE.Vector3(256, 0, 0), 40);
+    controller.update(routeCenter, routeRadius);
     requests[0]!.reject(new Error("temporary worker failure"));
     await flushAsync();
 
-    controller.update(new THREE.Vector3(256, 0, 0), 40);
+    controller.update(routeCenter, routeRadius);
     expect(controller.stats().failedPages).toBe(1);
     expect(buildPages).toHaveBeenCalledTimes(1);
 
     for (let frame = 0; frame < 60; frame++) {
-      controller.update(new THREE.Vector3(256, 0, 0), 40);
+      controller.update(routeCenter, routeRadius);
     }
 
     expect(buildPages).toHaveBeenCalledTimes(2);

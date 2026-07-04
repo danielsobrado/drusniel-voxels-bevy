@@ -40,8 +40,7 @@ function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
       system: { getLightingProxies: () => [] },
     } as unknown as VegetationFramePhaseInput["understoryController"],
     forestLightingController: {
-      shouldUpdate: () => false,
-      update: vi.fn(),
+      updateBudgeted: vi.fn(() => false),
     } as unknown as VegetationFramePhaseInput["forestLightingController"],
     applyForestLightingToPropMaterials: vi.fn(),
     stoneController: { update: vi.fn() } as unknown as VegetationFramePhaseInput["stoneController"],
