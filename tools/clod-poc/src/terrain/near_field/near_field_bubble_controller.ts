@@ -66,7 +66,7 @@ export interface NearFieldBubbleControllerDeps {
   maxCachedChunkGroups: number;
   evictDistanceMultiplier: number;
   streamingLiveTerrain?: boolean;
-  terrainColliders?: TerrainColliderSet;
+  terrainColliders?: TerrainColliderSet | null;
 }
 
 export interface NearFieldBubbleController {
@@ -145,11 +145,6 @@ function liveBubbleBuildBudget(defaultBudget: number): number {
   return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams(window.location.search));
 }
 
-function exposedTerrainColliders(): TerrainColliderSet | null {
-  if (typeof window === "undefined") return null;
-  return (window as unknown as { __drusnielTerrainColliders?: TerrainColliderSet }).__drusnielTerrainColliders ?? null;
-}
-
 export function requiredStreamingPageCoords(
   center: THREE.Vector3,
   bubbleRadius: number,
@@ -200,7 +195,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
-  const terrainColliders = deps.terrainColliders ?? exposedTerrainColliders();
+  const terrainColliders = deps.terrainColliders ?? null;
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
 
