@@ -11,6 +11,7 @@ import {
   applySerializedNode,
   indexNodes,
   rehydrateBuildResult,
+  rehydrateStandaloneNodes,
   type ClodWorkerRequest,
   type ClodWorkerResponse,
 } from "./clod_worker_protocol.js";
@@ -27,6 +28,11 @@ import {
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
 
+export interface WorkerStreamRootsResult {
+  nodes: ClodPageNode[];
+  buildMs: number;
+}
+
 export class ClodWorkerClient {
   onParentRebuilt: ((batch: WorkerParentBatch) => void) | null = null;
   onParentsComplete: ((requestId: number | null, parentNodes: number, parentMs: number) => void) | null = null;
@@ -40,6 +46,7 @@ export class ClodWorkerClient {
   private digRequests = new Map<number, PendingRequest<WorkerLod0Rebuild>>();
   private flushRequests = new Map<number, PendingRequest<void>>();
   private clearCacheRequests = new Map<number, PendingRequest<void>>();
+  private streamRootsRequests = new Map<number, PendingRequest<WorkerStreamRootsResult>>();
   private progressHandlers = new Map<number, (progress: BuildProgress) => void>();
   private digPending: DigBatchSlot | null = null;
   private digPumpActive = false;
@@ -106,6 +113,16 @@ export class ClodWorkerClient {
   clearCache(): Promise<void> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     return postTrackedRequest(this.clearCacheRequests, this.worker, { type: "clearCache", requestId: this.nextRequestId++ });
+  }
+
+  /** Build LOD0 root pages off-thread for streaming outside the startup world. */
+  buildStreamRoots(coords: readonly { px: number; pz: number }[]): Promise<WorkerStreamRootsResult> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
+    return postTrackedRequest(this.streamRootsRequests, this.worker, {
+      type: "buildStreamRoots",
+      requestId: this.nextRequestId++,
+      coords: coords.map(({ px, pz }) => ({ px, pz })),
+    });
   }
 
   isParentsHealthy(): boolean { return this.parentsHealthy; }
@@ -196,6 +213,13 @@ export class ClodWorkerClient {
         pending.resolve();
         break;
       }
+      case "streamRootsBuilt": {
+        const pending = this.streamRootsRequests.get(message.requestId);
+        if (!pending) break;
+        this.streamRootsRequests.delete(message.requestId);
+        pending.resolve({ nodes: rehydrateStandaloneNodes(message.nodes), buildMs: message.buildMs });
+        break;
+      }
       case "cacheCleared": {
         const pending = this.clearCacheRequests.get(message.requestId);
         if (!pending) break;
@@ -210,12 +234,13 @@ export class ClodWorkerClient {
 
   private handleError(requestId: number | null, error: Error): void {
     if (requestId !== null) {
-      const pending = this.buildRequests.get(requestId) ?? this.digRequests.get(requestId) ?? this.flushRequests.get(requestId) ?? this.clearCacheRequests.get(requestId);
+      const pending = this.buildRequests.get(requestId) ?? this.digRequests.get(requestId) ?? this.flushRequests.get(requestId) ?? this.clearCacheRequests.get(requestId) ?? this.streamRootsRequests.get(requestId);
       if (pending) {
         this.buildRequests.delete(requestId);
         this.digRequests.delete(requestId);
         this.flushRequests.delete(requestId);
         this.clearCacheRequests.delete(requestId);
+        this.streamRootsRequests.delete(requestId);
         pending.reject(error);
         return;
       }
@@ -255,7 +280,7 @@ export class ClodWorkerClient {
   private doRejectAll(error: Error): void {
     this.rejectPendingDig(error);
     rejectAllMaps(
-      [this.buildRequests, this.digRequests, this.flushRequests, this.clearCacheRequests],
+      [this.buildRequests, this.digRequests, this.flushRequests, this.clearCacheRequests, this.streamRootsRequests],
       this.progressHandlers, error,
     );
     this.resolveParentsWaiters();

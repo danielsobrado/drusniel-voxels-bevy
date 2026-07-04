@@ -10,6 +10,8 @@ import {
   type NodeIndex,
 } from "./clod/quadtree.js";
 import { nextPendingParentLevelOrdered } from "./clod/parent_queue.js";
+import { buildLod0PageSource } from "./clod/source_mesh.js";
+import { boundsOf, INITIAL_NODE_REVISION } from "./clod/quadtree_support.js";
 import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext } from "./cache/clodCacheContext.js";
 import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
 import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
@@ -29,6 +31,7 @@ import {
   serializeNodes,
   type ClodWorkerRequest,
   type ClodWorkerResponse,
+  type SerializedHydrologyTerrain,
 } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
 import type { ClodPageNode } from "./types.js";
@@ -60,6 +63,7 @@ const ctx = self as unknown as {
 };
 
 let cfg: ClodPagesConfig | null = null;
+let hydrologyTerrain: SerializedHydrologyTerrain | null = null;
 let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
 let index: NodeIndex | null = null;
@@ -268,7 +272,8 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   setTerrainFieldConfig(request.terrainFieldConfig ?? null);
   setTerrainFieldCoreConfig(request.terrainFieldConfig ?? null);
   replaceVoxelEdits(request.voxelEdits);
-  installHydrologyTerrain(request.hydrologyTerrain);
+  hydrologyTerrain = request.hydrologyTerrain ?? null;
+  installHydrologyTerrain(hydrologyTerrain);
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
   pendingChildCoordsByLevel.clear();
@@ -437,6 +442,46 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   }
 }
 
+function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type: "buildStreamRoots" }>): void {
+  if (!result || !cfg) throw new Error("CLOD worker received buildStreamRoots before build completion");
+  const pageSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const worldCells = result.worldPagesX * pageSpan;
+  const world = { cellsX: worldCells, cellsZ: worldCells, finite: false as const };
+  const t0 = performance.now();
+  // Streamed roots are not registered in the dig index: terrain edits outside
+  // the startup world only affect live bubble chunks, not these visual pages.
+  // TODO: route out-of-world dig edits to streamed root rebuilds.
+  installHydrologyTerrain(hydrologyTerrain, { boundedToStartupWorld: true });
+  let nodes;
+  try {
+    nodes = request.coords.map(({ px, pz }) => {
+      const src = buildLod0PageSource(px, pz, cfg!, world);
+      return {
+        id: `L0:${px},${pz}`,
+        revision: INITIAL_NODE_REVISION,
+        level: 0,
+        children: [],
+        mesh: src.mesh,
+        footprint: src.footprint,
+        bounds: boundsOf(src.mesh),
+        errorWorld: 0,
+        lowBenefit: false,
+      };
+    });
+  } finally {
+    installHydrologyTerrain(hydrologyTerrain);
+  }
+  const serialized = serializeNodes(nodes);
+  const transferables: Transferable[] = [];
+  for (const node of serialized) collectNodeTransferables(node, transferables);
+  post({
+    type: "streamRootsBuilt",
+    requestId: request.requestId,
+    nodes: serialized,
+    buildMs: performance.now() - t0,
+  }, transferables);
+}
+
 function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
   drainParents(Number.POSITIVE_INFINITY);
   post({ type: "flushed", requestId: request.requestId });
@@ -465,6 +510,8 @@ ctx.onmessage = (event: MessageEvent<ClodWorkerRequest>) => {
       handleDig(request);
     } else if (request.type === "clearCache") {
       void handleClearCache(request).catch((error) => post(errorResponse(request.requestId, error)));
+    } else if (request.type === "buildStreamRoots") {
+      handleBuildStreamRoots(request);
     } else {
       handleFlush(request);
     }

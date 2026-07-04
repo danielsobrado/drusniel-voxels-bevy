@@ -1,4 +1,4 @@
-import { setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import { baseSurfaceHeight, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import type { ClodWorkerRequest, ClodWorkerResponse, SerializedHydrologyTerrain } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
 
@@ -6,14 +6,32 @@ export interface WorkerPostContext {
   postMessage(message: ClodWorkerResponse, transfer?: Transferable[]): void;
 }
 
-export function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
+export interface InstallHydrologyTerrainOptions {
+  /**
+   * When set, coordinates outside [0..worldCells] fall back to the base terrain
+   * field instead of the edge-clamped carved grid. Used for streamed root pages
+   * outside the startup world so worker meshes match main-thread live chunks
+   * (HydrologySystem.terrainHeight applies the same bound). The startup world
+   * build keeps the legacy clamp so cached page geometry stays byte-stable.
+   */
+  boundedToStartupWorld?: boolean;
+}
+
+export function installHydrologyTerrain(
+  terrain: SerializedHydrologyTerrain | null | undefined,
+  options: InstallHydrologyTerrainOptions = {},
+): void {
   if (!terrain) {
     setTerrainSurfaceOverride(null);
     return;
   }
   const { res, worldCells, carvedBed } = terrain;
+  const bounded = options.boundedToStartupWorld === true;
   const scale = (res - 1) / Math.max(1e-6, worldCells);
   setTerrainSurfaceOverride((x, z) => {
+    if (bounded && (x < 0 || z < 0 || x > worldCells || z > worldCells)) {
+      return baseSurfaceHeight(x, z);
+    }
     const gx = Math.max(0, Math.min(res - 1, x * scale));
     const gz = Math.max(0, Math.min(res - 1, z * scale));
     const x0 = Math.floor(gx);

@@ -73,6 +73,11 @@ export type ClodWorkerRequest =
   | {
       type: "clearCache";
       requestId: number;
+    }
+  | {
+      type: "buildStreamRoots";
+      requestId: number;
+      coords: Array<{ px: number; pz: number }>;
     };
 
 export interface SerializedLod0RebuildResult {
@@ -111,6 +116,7 @@ export type ClodWorkerResponse =
   | { type: "parentsComplete"; requestId: number | null; parentNodes: number; parentMs: number }
   | { type: "flushed"; requestId: number }
   | { type: "cacheCleared"; requestId: number }
+  | { type: "streamRootsBuilt"; requestId: number; nodes: SerializedClodNode[]; buildMs: number }
   | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
 function cloneMesh(mesh: PageMesh): PageMesh {
@@ -229,6 +235,27 @@ export function applySerializedNode(
   target.errorWorld = serialized.errorWorld;
   target.lowBenefit = serialized.lowBenefit;
   return target;
+}
+
+/** Rehydrate leaf nodes that reference no children (streamed LOD0 root pages). */
+export function rehydrateStandaloneNodes(nodes: readonly SerializedClodNode[]): ClodPageNode[] {
+  return nodes.map((node) => {
+    if (node.childIds.some((id) => id !== null)) {
+      throw new Error(`CLOD standalone node ${node.id} must not reference children`);
+    }
+    const rehydrated: ClodPageNode = {
+      id: node.id,
+      level: node.level,
+      children: [],
+      mesh: node.mesh,
+      footprint: node.footprint,
+      bounds: node.bounds,
+      errorWorld: node.errorWorld,
+      lowBenefit: node.lowBenefit,
+    };
+    applySerializedMetadata(rehydrated, node);
+    return rehydrated;
+  });
 }
 
 export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildResult {
