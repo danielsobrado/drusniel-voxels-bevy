@@ -7,6 +7,7 @@ import { clodUrl, launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
+import { settlePage } from "./infinite_acceptance/page_settle.js";
 import {
   evaluateThresholds,
   extractAcceptanceCounters,
@@ -205,25 +206,7 @@ async function readPhase0Report(page: Page): Promise<JsonRecord> {
 }
 
 async function settle(page: Page, frames: number): Promise<void> {
-  await Promise.race([
-    page.evaluate(async (settleFrames) => {
-      const hooks = (window as typeof window & {
-        __drusnielClod?: { settle?: ((frames?: number) => Promise<void>) | null };
-      }).__drusnielClod;
-      await hooks?.settle?.(settleFrames);
-    }, frames),
-    new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`settle(${frames}) timed out after ${SETTLE_TIMEOUT_MS}ms`)), SETTLE_TIMEOUT_MS);
-    }),
-  ]);
-
-  const appError = await page.evaluate(() => {
-    const hooks = (window as typeof window & {
-      __drusnielClod?: { error?: string | null };
-    }).__drusnielClod;
-    return hooks?.error ?? null;
-  });
-  if (appError) throw new Error(`app reported fatal error after settle(${frames}): ${appError}`);
+  await settlePage(page, frames, SETTLE_TIMEOUT_MS);
 }
 
 async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Promise<SceneResult> {
