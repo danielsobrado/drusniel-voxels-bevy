@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runVegetationFramePhase, type VegetationFramePhaseInput } from "./vegetation_frame_phase.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
@@ -12,6 +12,12 @@ function sampleWater(x: number, z: number) {
     bodyMask: x > 1024 || z < 0 ? 0.5 : 0,
     flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
   };
+}
+
+function installCounters(): Record<string, number> {
+  const counters: Record<string, number> = {};
+  vi.stubGlobal("window", { __drusnielClod: { stats: { counters } } });
+  return counters;
 }
 
 function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
@@ -58,6 +64,10 @@ function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
 }
 
 describe("vegetation frame phase", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("skips water updates when water is disabled", () => {
     const input = makeInput(false);
 
@@ -66,6 +76,19 @@ describe("vegetation frame phase", () => {
     expect(input.waterController.update).not.toHaveBeenCalled();
     expect(input.waterController.logDevInitOnce).not.toHaveBeenCalled();
     expect(timing.waterMs).toBeLessThan(0.5);
+  });
+
+  it("mirrors infinite hydrology diagnostics even when water rendering is disabled", () => {
+    const counters = installCounters();
+    const input = makeInput(false);
+    input.camera.position.set(1500, 40, -300);
+
+    runVegetationFramePhase(input);
+
+    expect(input.waterController.update).not.toHaveBeenCalled();
+    expect(counters["infinite_hydrology_outside_sample_valid"]).toBe(1);
+    expect(counters["infinite_hydrology_nonrepeat_ok"]).toBe(1);
+    expect(counters["infinite_hydrology_camera_outside_startup"]).toBe(1);
   });
 
   it("updates water when water is enabled", () => {
@@ -78,8 +101,7 @@ describe("vegetation frame phase", () => {
   });
 
   it("mirrors infinite hydrology diagnostics when stats counters are installed", () => {
-    const counters: Record<string, number> = {};
-    vi.stubGlobal("window", { __drusnielClod: { stats: { counters } } });
+    const counters = installCounters();
     const input = makeInput(true);
     input.camera.position.set(1500, 40, -300);
 
@@ -88,7 +110,6 @@ describe("vegetation frame phase", () => {
     expect(counters["infinite_hydrology_outside_sample_valid"]).toBe(1);
     expect(counters["infinite_hydrology_nonrepeat_ok"]).toBe(1);
     expect(counters["infinite_hydrology_camera_outside_startup"]).toBe(1);
-    vi.unstubAllGlobals();
   });
 
   it("updates custom props with the vegetation ring center", () => {
