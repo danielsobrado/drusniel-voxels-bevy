@@ -38,6 +38,7 @@ export interface ClodHooks {
   getPose: (() => CamPose) | null;
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
+  beginMovementRouteProbe: (() => void) | null;
 }
 
 export interface Phase0SceneReport {
@@ -69,6 +70,7 @@ export function initHooks(): ClodHooks {
     getPose: null,
     settle: null,
     flyCamEnabled: null,
+    beginMovementRouteProbe: null,
   };
   window.__drusnielClod = hooks;
   return hooks;
