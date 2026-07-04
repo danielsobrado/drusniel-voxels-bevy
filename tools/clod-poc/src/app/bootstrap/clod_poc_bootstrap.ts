@@ -1,163 +1,120 @@
-import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
-import naadfConfigText from "../../../config/naadf_poc.yaml?raw";
-import { installGlobalErrorHooks } from "../../core/diagnostics.js";
-import { parseClodRuntimeConfig } from "../runtime_config.js";
-import { runContentRegistryStartup } from "./content_registry_startup.js";
-import { loadStagedProjectImport } from "./project_import_startup.js";
-import { runEarlyRoutes } from "./early_routes.js";
-import { initDomShell } from "./dom_shell.js";
-import { parseBootstrapQueryContext } from "./query_context.js";
-import { runWorldBuildStartup } from "./world_build_startup.js";
-import { runRendererStartup } from "./renderer_startup.js";
-import { runPostRendererStartup } from "./post_renderer_startup.js";
-import { runTerrainViewStartup } from "./terrain_view_startup.js";
-import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
-import { runUiStartup } from "./ui/ui_startup.js";
-import { initFarSummaryIntegration } from "../../far-summary/integration.js";
-import type { FarSummaryIntegration } from "../../far-summary/integration.js";
-import { initNaadfIntegration, type NaadfIntegration } from "../../naadf/integration.js";
-import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
-import type { FarShellMetrics } from "../../long-view/index.js";
-import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
-import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
-import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
-import { FloatingOriginController } from "../../precision/floating_origin.js";
-import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
-import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
-import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
-import { booleanQueryParam, positiveNumberQueryParam } from "./bootstrap_query_params.js";
-import { applyLongViewScenePreset, isLongViewCapableScene } from "./bootstrap_long_view.js";
-import {
-  materialChurnConfigForQuery,
-  materialChurnDiagnostics,
-} from "../../rendering/material_churn/material_churn_diagnostics.js";
+import { resolveWorldProfile } from "../../config/world_profile.js";
+import { querySceneToWorldProfileKind, type QueryScene } from "./query_context.js";
+import { loadPhase0Config, resolvePhase0StreamingConfig } from "../../phase0/config.js";
+import { createProceduralTerrainConfig } from "../../terrain/terrain_config_factory.js";
+import { createClodState } from "../state/clod_state.js";
+import { createWorld } from "../../world.js";
+import { buildRenderer } from "../../renderer/build_renderer.js";
+import { createTerrainView } from "../../renderer/terrain_view.js";
+import { createInputController } from "../../input/input_controller.js";
+import { createPostRendererStartup } from "./post_renderer_startup.js";
+import { createFrameLoop } from "../frame_loop/frame_loop.js";
+import { resolveStreamingOwnership } from "../../systems/streaming_ownership.js";
+import { isLongViewCapableScene } from "../../long-view/scene.js";
+import { createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/longViewConfig.js";
+import { applyLongViewScenePreset } from "../../long-view/scenePresets.js";
+import { applyOwnershipToFarShellRange } from "../../long-view/ownership.js";
+import { initFarSummaryIntegration, type FarSummaryIntegration } from "../../far-summary/integration.js";
+import { createFarShellMetrics, type FarShellMetrics } from "../../long-view/farShellMetrics.js";
+import { InfiniteFarShell } from "../../systems/infinite_far_shell.js";
+import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../long-view/materials/config.js";
+import { configToUniformData } from "../../long-view/materials/uniforms.js";
+import { initNaadfIntegration, type NaadfIntegration } from "../../naadf/integration.js";
+import naadfConfigText from "../../../config/naadf.yaml?raw";
+import { makeBiomeTextureStreamingController } from "../../renderer/biome_texture_streaming_controller.js";
+import { createProceduralTextureConfig, makeBakedMacroTint, selectBiomeMaterialsAround } from "../../renderer/procedural_texture_config.js";
+import { FloatingOrigin } from "../../renderer/floating_origin.js";
+import type { ClodPocQueryContext } from "./query_context.js";
 
-export async function bootstrapClodPoc() {
-  const searchParams = new URLSearchParams(location.search);
-  if (await runEarlyRoutes(searchParams)) return;
+export interface ClodPocBootstrapResult {
+  renderer: ReturnType<typeof buildRenderer>;
+  frameLoop: ReturnType<typeof createFrameLoop>;
+}
 
-  installGlobalErrorHooks();
-  const clodRuntime = parseClodRuntimeConfig();
-  materialChurnDiagnostics.configure(materialChurnConfigForQuery(clodRuntime.materialChurn, searchParams));
-  const dom = initDomShell();
-  runContentRegistryStartup(dom.info);
-
-  const queries = parseBootstrapQueryContext(searchParams, phase0ConfigText);
-  const stagedImport = await loadStagedProjectImport(searchParams, {
-    buildProgress: dom.buildProgress,
-    buildProgressPhase: dom.buildProgressPhase,
-    buildProgressPercent: dom.buildProgressPercent,
-    buildProgressBar: dom.buildProgressBar,
-    info: dom.info,
+export function bootstrapClodPoc(queries: ClodPocQueryContext, searchParams: URLSearchParams): ClodPocBootstrapResult {
+  const queryScene: QueryScene | null = queries.queryScene;
+  const worldProfile = resolveWorldProfile({ kind: querySceneToWorldProfileKind(queryScene) });
+  const phase0Config = queries.phase0Config;
+  const resolvedPhase0Streaming = resolvePhase0StreamingConfig(phase0Config.phase0.streaming, queries.phase0TargetVisibleM);
+  const phase0Streaming = queries.phase0Streaming ?? resolvedPhase0Streaming;
+  const terrainConfig = createProceduralTerrainConfig({
+    seed: queries.seed,
+    profile: worldProfile,
+    worldSizeChunks: queries.worldSizeChunks,
+    phase0Config,
   });
-
-  const world = await runWorldBuildStartup({
-    stagedImport,
-    clodRuntime,
-    searchParams,
-    queryGrassPerfScene: queries.queryGrassPerfScene,
-    queryTreePerfScene: queries.queryTreePerfScene,
-    queryForestFloorScene: queries.queryForestFloorScene,
-    queryLongViewScene: queries.queryLongViewScene,
-    queryBorderOceanScene: queries.queryBorderOceanScene,
-    buildProgress: dom.buildProgress,
-    buildProgressPhase: dom.buildProgressPhase,
-    buildProgressPercent: dom.buildProgressPercent,
-    buildProgressBar: dom.buildProgressBar,
-    info: dom.info,
+  const state = createClodState({
+    queryScene,
+    worldSizeChunks: queries.worldSizeChunks,
+    phase0Streaming,
   });
-
-  const renderer = await runRendererStartup({
-    searchParams,
-    clodRuntime,
-    cfg: world.cfg,
-    worldCells: world.worldCells,
-    lod0Nodes: world.lod0Nodes,
-    waterConfig: world.waterConfig,
-    stagedImport,
-    queryGrassPerfScene: queries.queryGrassPerfScene,
-    queryTreePerfScene: queries.queryTreePerfScene,
-    queryLongViewScene: queries.queryLongViewScene,
-    queryBorderOceanScene: queries.queryBorderOceanScene,
-    activePhase0Scene: queries.activePhase0Scene,
+  const world = createWorld({
+    cfg: state.cfg,
+    seed: queries.seed,
+    terrainConfig,
   });
-  if (!renderer) return;
-
-  const floatingOrigin = new FloatingOriginController(renderer.scene, {
-    enabled: booleanQueryParam(searchParams, "floatingOrigin") || booleanQueryParam(searchParams, "floating_origin"),
-    snapMeters: positiveNumberQueryParam(searchParams, "floatingOriginSnap", 4096),
-    unboundedWorld: world.worldSource.metadata.bounds === "infinite",
-  });
-
-  const postRenderer = await runPostRendererStartup({
-    info: dom.info,
-    searchParams,
-    clodRuntime,
-    cfg: world.cfg,
-    stagedImport,
-    queries,
+  const renderer = buildRenderer({
+    canvas: queries.canvas,
+    state,
     world,
+    queryContext: queries,
+  });
+  const floatingOrigin = new FloatingOrigin(renderer.scene, renderer.camera);
+  const terrainView = createTerrainView({
     renderer,
+    state,
+    world,
+    floatingOrigin,
+    queryContext: queries,
+  });
+  const input = createInputController({
+    canvas: queries.canvas,
+    camera: renderer.camera,
+    state,
+    terrainView,
+    queryContext: queries,
+  });
+  const postRenderer = createPostRendererStartup({
+    renderer,
+    state,
+    world,
+    terrainView,
+    input,
+    queryContext: queries,
+    floatingOrigin,
   });
 
-  const terrainView = runTerrainViewStartup({
-    app: renderer.app,
-    scene: renderer.scene,
-    camera: renderer.camera,
-    renderer: renderer.renderer,
-    controls: renderer.controls,
-    state: postRenderer.state,
-    bindings: postRenderer.uiRefs.bindings,
-    clodRuntime,
-    cfg: world.cfg,
-    allNodes: world.allNodes,
-    result: world.result,
-    worldCells: world.worldCells,
-    worldSizeCells: world.worldSizeCells,
-    terrainSummary: world.terrainSummary,
-    hydrologyFieldsTexture: world.hydrologySystem?.hydrologyFieldsTexture() ?? null,
-    isLongView: postRenderer.isLongView,
-    queryFarShell: queries.queryFarShell,
-    queryCanopy: queries.queryCanopy,
-    queryScene: queries.queryScene,
-    longViewHooks: postRenderer.longViewHooks,
-    isWebGpu: renderer.isWebGpu,
-    poolTerrainMaterial: renderer.poolTerrainMaterial,
-    bakedMacroTint: world.bakedMacroTint,
-    proceduralTerrain: world.proceduralTerrain,
-    proceduralTextureConfig: world.proceduralTextureConfig,
-    textureMipmapsEnabled: queries.textureMipmapsEnabled,
-    maxAnisotropy: renderer.maxAnisotropy,
-    textureLoadOptions: postRenderer.textureLoadOptions,
-    stagedImport,
-    searchParams,
-    rendererWebGpuDevice: renderer.rendererWebGpuDevice,
-    interaction: renderer.interaction,
-    player: renderer.player,
-    terrainColliders: renderer.terrainColliders,
-    getClodErrorCompute: postRenderer.getClodErrorCompute,
-    getWebGpuUnavailableReason: postRenderer.getWebGpuUnavailableReason,
-    queryReadbackMode: queries.queryReadbackMode,
-    queryWebGpuParity: queries.queryWebGpuParity,
-    staleEditedAncestorIds: postRenderer.terrainEdit.staleEditedAncestorIds,
-    colorByLodUserOverride: postRenderer.uiRefs.colorByLodUserOverride,
-    colorByLodController: postRenderer.uiRefs.colorByLodController,
+  const activeBiomeMaterials = selectBiomeMaterialsAround({
+    worldSource: world.worldSource,
+    centerX: 0,
+    centerZ: 0,
+    radiusM: 1024,
+    maxBiomes: 4,
   });
+  const initialProceduralTextureConfig = createProceduralTextureConfig(activeBiomeMaterials);
+  world.proceduralTextureConfig = initialProceduralTextureConfig;
+  world.proceduralTerrain = terrainConfig;
+  world.bakedMacroTint = makeBakedMacroTint(initialProceduralTextureConfig);
 
   let terrainTextureWindowSwaps = 0;
-  const biomeTextureStreaming = world.proceduralTerrain
-    ? createBiomeTextureStreamingManager({
-        baseConfig: world.proceduralTextureConfig,
-        sampleBiome: (x, z) => world.worldSource.sampleBiome(x, z),
-        onActiveWindowChanged: (nextConfig, activeBiomeMaterials) => {
-          const nextTerrain = createProceduralTerrainTextures(nextConfig);
-          const bakeRes = Math.min(512, nextTerrain.noise.resolution);
-          const nextMacroTint = createBakedMacroTintTexture(
-            nextTerrain.noise.noiseA,
-            nextTerrain.noise.noiseB,
-            bakeRes,
-          );
+  const biomeTextureStreaming = postRenderer.state.terrainMaterialSource === "procedural"
+    ? makeBiomeTextureStreamingController({
+        worldSource: world.worldSource,
+        baseConfig: initialProceduralTextureConfig,
+        updateDistanceM: 96,
+        radiusM: 1024,
+        maxBiomes: 4,
+        onUpdate: (activeBiomeMaterials) => {
+          const nextConfig = createProceduralTextureConfig(activeBiomeMaterials);
+          const nextTerrain = createProceduralTerrainConfig({
+            seed: queries.seed,
+            profile: worldProfile,
+            worldSizeChunks: queries.worldSizeChunks,
+            phase0Config,
+            activeBiomeMaterials,
+          });
+          const nextMacroTint = makeBakedMacroTint(nextConfig);
           world.proceduralTextureConfig = nextConfig;
           world.proceduralTerrain = nextTerrain;
           world.bakedMacroTint = nextMacroTint;
@@ -180,7 +137,6 @@ export async function bootstrapClodPoc() {
   let farSummaryIntegration: FarSummaryIntegration | undefined;
   let naadfIntegration: NaadfIntegration | undefined;
 
-  const queryScene = queries.queryScene;
   const isNaadfCapable = queries.queryNaadfScene;
   const streamingOwnership = resolveStreamingOwnership({
     streaming: queries.phase0Streaming,
@@ -223,12 +179,12 @@ export async function bootstrapClodPoc() {
     farShellMetrics.farShellGridRes = lvConfig.farShell.radialSegments;
 
     if (!useNaadfFarSummary) {
+      const seaLevel = world.worldSource.metadata.seaLevel;
       farSummaryIntegration = initFarSummaryIntegration({
         terrainSampler: {
           sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
-          sampleMaterial: (x, z) => world.worldSource.sampleBiome(x, z),
           sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
-          sampleWaterCoverage: (x, z) => world.worldSource.oceanMask(x, z),
+          sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
         },
         scene: renderer.scene,
         camera: renderer.camera,
@@ -269,171 +225,29 @@ export async function bootstrapClodPoc() {
       outerMeters: lvConfig.farShell.endMeters,
       radialSegments: lvConfig.farShell.radialSegments,
       angularSegments: lvConfig.farShell.angularSegments,
-      heightBiasMeters: lvConfig.farShell.heightBiasMeters,
-      nearBlendMeters: lvConfig.farShell.nearBlendMeters,
-      farFadeMeters: lvConfig.farShell.farFadeMeters,
-      macroBlendStartMeters: lvConfig.farShell.macroBlendStartMeters,
-      macroBlendEndMeters: lvConfig.farShell.macroBlendEndMeters,
-      rebaseSnapMeters: lvConfig.farShell.rebaseSnapMeters,
-      lighting: {
-        sunDirection: lighting.sunDirection,
-        sunColor: lighting.sunColor,
-        skyLight: lighting.skyLight,
-        groundLight: lighting.groundLight,
-      },
-      useParityMaterial: useParity,
-      parityConfig,
-      heightSamplingMode: effectiveHeightSamplingMode,
-      farSummaryGpuAtlas: effectiveHeightSamplingMode === "gpu" ? farSummaryGpuAtlas : undefined,
-      debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
+      heightProvider,
+      materialConfig: useParity ? materialConfig : undefined,
+      uniformData: useParity ? parityConfig : undefined,
+      gpuAtlas: farSummaryGpuAtlas,
+      scene: renderer.scene,
+      camera: renderer.camera,
+      lighting,
       metrics: farShellMetrics,
     });
-
-    infiniteFarShell.setHeightProvider(heightProvider);
-    renderer.scene.add(infiniteFarShell.mesh);
-
-    terrainView.farShellController.setEnabled(false);
-
-    terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {
-      infiniteFarShell?.setReceiveSunShadows(enabled);
-    });
-    if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) {
-      infiniteFarShell.setReceiveSunShadows(true);
-    }
-
-    if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {
-      farSummaryIntegration.setForceSlowBuilds(true);
-      farSummaryIntegration.setBuildDelayMs(100);
-    }
   }
 
-  const treeTerrainOcclusionSampler = naadfIntegration
-    ? {
-        sampleHeight: (x: number, z: number) => {
-          const sample = naadfIntegration!.queryHeight(x, z, "render");
-          return { height: sample.height, unknown: sample.unknown || sample.missingSample };
-        },
-      }
-    : undefined;
-
-  const runtime = await runRuntimeSystemsStartup({
-    app: renderer.app,
-    scene: renderer.scene,
-    camera: renderer.camera,
-    controls: renderer.controls,
-    state: postRenderer.state,
-    bindings: postRenderer.uiRefs.bindings,
-    lod0Nodes: world.lod0Nodes,
-    worldCells: world.worldCells,
-    grassConfig: world.grassConfig,
-    stoneConfig: world.stoneConfig,
-    treeConfig: world.treeConfig,
-    understoryConfig: world.understoryConfig,
-    forestLightingConfig: world.forestLightingConfig,
-    waterConfig: world.waterConfig,
-    borderCoastOceanConfig: world.borderCoastOceanConfig,
-    customPropsConfig: world.customPropsConfig,
-    propPlacementScenes: world.propPlacementScenes,
-    stagedImport,
-    queryGrassRingGrid: queries.queryGrassRingGrid,
-    queryGrassRingCell: queries.queryGrassRingCell,
-    isWebGpu: renderer.isWebGpu,
-    rendererWebGpuDevice: renderer.rendererWebGpuDevice,
-    hydrologySystem: world.hydrologySystem,
-    terrainOcclusionSampler: treeTerrainOcclusionSampler,
-    searchParams,
-    materialController: terrainView.materialController,
-    skyEnvironment: terrainView.skyEnvironment,
-    currentLighting: terrainView.currentLighting,
-    vegetationDirtyQueue: postRenderer.terrainEdit.vegetationDirtyQueue,
-    statControllers: postRenderer.uiRefs.statControllers,
-    getHooks: () => postRenderer.longViewHooks,
-    shadowProxyController: terrainView.shadowProxyController,
-  });
-
-  await runUiStartup({
-    dom,
-    searchParams,
-    clodRuntime,
-    cfg: world.cfg,
-    WORLD: world.WORLD,
-    polishLine: world.polishLine,
-    buildStatusRef: world.buildStatus,
-    stagedImport,
-    state: postRenderer.state,
-    bindings: postRenderer.uiRefs.bindings,
-    colorByLodUserOverride: postRenderer.uiRefs.colorByLodUserOverride,
-    colorByLodController: postRenderer.uiRefs.colorByLodController,
+  const frameLoop = createFrameLoop({
+    renderer,
+    state,
+    world,
     terrainView,
-    runtime,
-    statControllers: postRenderer.uiRefs.statControllers,
-    app: renderer.app,
-    renderer: renderer.renderer,
-    renderResolution: renderer.renderResolution,
-    scene: renderer.scene,
-    camera: renderer.camera,
-    controls: renderer.controls,
-    player: renderer.player,
-    interaction: renderer.interaction,
-    terrainColliders: renderer.terrainColliders,
-    terrainRaycast: renderer.terrainRaycast,
-    isWebGpu: renderer.isWebGpu,
-    worldCells: world.worldCells,
-    clodWorker: world.clodWorker,
-    result: world.result,
-    allNodes: world.allNodes,
-    maxTerrainLevel: world.maxTerrainLevel,
-    markEditedAncestorsStale: postRenderer.terrainEdit.markEditedAncestorsStale,
-    vegetationDirtyQueue: postRenderer.terrainEdit.vegetationDirtyQueue,
-    staleEditedAncestorIds: postRenderer.terrainEdit.staleEditedAncestorIds,
-    selectionQueryFlags: {
-      queryGrassPerfScene: queries.queryGrassPerfScene,
-      queryTreePerfScene: queries.queryTreePerfScene,
-      queryForestFloorScene: queries.queryForestFloorScene,
-    },
-    longView: {
-      hooks: postRenderer.longViewHooks,
-      settleWaiters: postRenderer.longViewSettleWaiters,
-      isLongView: postRenderer.isLongView,
-      phase0TargetVisibleM: queries.phase0TargetVisibleM,
-      phase0Config: queries.phase0Config,
-      queryScene: queries.queryScene,
-      phase0VelocityX: queries.phase0VelocityX,
-      phase0VelocityZ: queries.phase0VelocityZ,
-      phase0Streaming: queries.phase0Streaming,
-      infiniteFarShell,
-      farShellMetrics,
-    },
+    input,
+    postRenderer,
+    farSummaryIntegration,
+    infiniteFarShell,
+    farShellMetrics,
     floatingOrigin,
-    onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming || infiniteFarShell || floatingOrigin)
-      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
-          const originStats = floatingOrigin.stats();
-          if (postRenderer.longViewHooks?.stats) {
-            postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
-            postRenderer.longViewHooks.stats.counters.floatingOriginRebaseCount = originStats.rebaseCount;
-            postRenderer.longViewHooks.stats.counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
-            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetX = originStats.originX;
-            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
-          }
-          infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
-          if (farSummaryIntegration) {
-            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
-          }
-          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
-          if (infiniteFarShell) {
-            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
-          }
-          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
-          if (postRenderer.state.terrainMaterialSource === "procedural") {
-            biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
-          }
-        }
-      : undefined,
-    naadfIntegration,
-    getClodErrorCompute: postRenderer.getClodErrorCompute,
-    ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
-    textureLoadOptions: postRenderer.textureLoadOptions,
-    treeConfig: world.treeConfig,
-    understoryConfig: world.understoryConfig,
   });
+
+  return { renderer, frameLoop };
 }
