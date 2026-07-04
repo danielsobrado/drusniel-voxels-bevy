@@ -156,6 +156,10 @@ export class HydrologySystem {
     );
   }
 
+  supportsInfiniteWorldSamples(): boolean {
+    return this.infiniteWorldSamples;
+  }
+
   sample(x: number, z: number): HydrologySample {
     if (this.shouldUseInfiniteSample(x, z)) {
       return sampleInfiniteHydrology(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
