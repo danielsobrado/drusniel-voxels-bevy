@@ -109,7 +109,9 @@ export class WaterField {
   }
 
   sampleForCellSize(x: number, z: number, cellSize: number): WaterFieldResult {
-    if (this.worldCells > 0 && !this.isInsidePlayableWorld(x, z)) return this.sampleDry(x, z);
+    if (this.worldCells > 0 && !this.isInsidePlayableWorld(x, z) && !this.canSampleHydrologyOutsideWorld()) {
+      return this.sampleDry(x, z);
+    }
     const shoreSurf = this.sampleShoreSurfBand(x, z);
     if (shoreSurf) return shoreSurf;
     if (this.isInClipmapExclusionBand(x, z)) return this.sampleDry(x, z);
@@ -238,6 +240,10 @@ export class WaterField {
 
   private isInsidePlayableWorld(x: number, z: number): boolean {
     return this.worldCells > 0 && x >= 0 && x <= this.worldCells && z >= 0 && z <= this.worldCells;
+  }
+
+  private canSampleHydrologyOutsideWorld(): boolean {
+    return this.source === "hydrology" && this.hydrology?.supportsInfiniteWorldSamples() === true;
   }
 
   private isInClipmapExclusionBand(x: number, z: number): boolean {
