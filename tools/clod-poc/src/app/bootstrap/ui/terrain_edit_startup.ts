@@ -1,6 +1,13 @@
 import type * as THREE from "three";
+import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
+import {
+  canCommitBuild,
+  canCommitTerrainEdit,
+  publishPlayerEditAuthorityDecision,
+  resolvePlayerEditAuthorityConfig,
+} from "../../../player/player_edit_authority.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
@@ -37,6 +44,9 @@ export function runTerrainEditStartup(
     fallingTrees,
   } = input.runtime;
   const { updateInfo } = infoPanel;
+  const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, input.searchParams);
+  const authorityOrigin = () => input.interaction.mode === "playing" ? input.player.position : null;
+  const authorityCounters = () => input.longView.hooks?.stats?.counters ?? null;
 
   clodWorker.onParentRebuilt = (batch) => {
     clodApplyQueue.recordWorkerRebuild(batch.parentMs);
@@ -100,11 +110,36 @@ export function runTerrainEditStartup(
     setPendingParentMs: (ms) => { session.pendingParentMs = ms; },
   });
 
+  const scheduleDig = (ray: THREE.Ray): void => {
+    const hit = terrainRaycast.raycastEditableTerrain(ray);
+    if (hit) {
+      const decision = canCommitTerrainEdit(editAuthority, authorityOrigin(), hit.point);
+      publishPlayerEditAuthorityDecision(authorityCounters(), decision);
+      if (!decision.allowed) {
+        session.lastDigSummary = `terrain edit rejected: ${decision.reason}`;
+        updateInfo();
+        return;
+      }
+    }
+    terrainEditService.scheduleDig(ray);
+  };
+
+  const scheduleConstructionTerrainConform = (request: ConstructionTerrainConformRequest): void => {
+    const decision = canCommitBuild(editAuthority, authorityOrigin(), request.position);
+    publishPlayerEditAuthorityDecision(authorityCounters(), decision);
+    if (!decision.allowed) {
+      session.lastDigSummary = `construction terrain conform rejected: ${decision.reason}`;
+      updateInfo();
+      return;
+    }
+    terrainEditService.scheduleConstructionTerrainConform(request);
+  };
+
   return {
     terrainEditService,
     flushAncestors: () => terrainEditService.flushAncestors(),
-    scheduleDig: (ray) => terrainEditService.scheduleDig(ray),
-    scheduleConstructionTerrainConform: (request) => terrainEditService.scheduleConstructionTerrainConform(request),
+    scheduleDig,
+    scheduleConstructionTerrainConform,
     playerTerraformEditActive,
   };
 }
