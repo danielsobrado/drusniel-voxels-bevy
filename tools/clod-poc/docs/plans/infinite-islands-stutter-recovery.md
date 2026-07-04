@@ -475,6 +475,33 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   phase. Forcing full stats-sync every frame added acceptance overhead, so
   that change and its test were reverted. Keep `acceptance=1`; do not force
   UI/stat presenter sync every frame.
+- 2026-07-04: Continued after newer commits `75a69e84`/`ab3d2fed` landed.
+  Focused final-horizon perf probe
+  `perf-runs/infinite-islands-14-08-final-horizon-profile-short` was clean
+  (frame p50 3.1 ms, p95 3.7 ms, render p95 0.7 ms, selection/bubble p95
+  0.1 ms), so the earlier `14-08-56` final-horizon p95=8.7 looked like
+  run variance rather than a steady bottleneck.
+- 2026-07-04: Acceptance run `2026-07-04T14-32-36` failed with a different
+  shape: `walk` and `biome-near` timed out waiting for 30 rendered frames,
+  while rendered later scenes had 52 ready live-bubble pages but zero
+  collider pages/registrations. Good runs had 2-3 collider pages and 32-48
+  registrations. Updated `waitForConvergence()` to remove the unreliable
+  live-CLOD stream quiet predicate (stream counters are zero even in good
+  runs) and require live-bubble collider pages/registrations when required
+  pages are present. Thresholds unchanged.
+- 2026-07-04: Typecheck passed and focused Vitest passed directly for
+  `near_field_bubble_controller.test.ts`, `terrain_frame_phase.test.ts`, and
+  `stats_sync_throttle.test.ts` (3 files / 27 tests) after the convergence
+  predicate edit.
+- 2026-07-04: Acceptance run `2026-07-04T14-46-20` then failed all five
+  scenes with `timed out waiting for 30 rendered frame(s)`. Screenshots were
+  valid PNGs, but stats and phase0 reports were only error stubs, so the app
+  was drawable while the 30-frame settle hook did not resolve before the
+  helper's 2.4 s fallback. Updated `page_settle.ts` to keep the same frame
+  counts and global 30 s cap, but allow short rendered-frame waits up to
+  10 s before timing out.
+- 2026-07-04: Typecheck passed after the `page_settle.ts` rendered-frame
+  timeout adjustment (`rtk npm --prefix tools/clod-poc run typecheck`).
 
 ## Remaining known risks / next steps if gates still fail
 

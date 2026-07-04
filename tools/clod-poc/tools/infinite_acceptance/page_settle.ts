@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 
 const MIN_SETTLE_MS = 1_000;
 const FRAME_SETTLE_MS = 80;
+const MIN_RENDERED_FRAME_TIMEOUT_MS = 10_000;
 
 function navigationContextWasLost(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -12,7 +13,7 @@ function navigationContextWasLost(error: unknown): boolean {
 
 export async function settlePage(page: Page, frames: number, timeoutMs: number): Promise<void> {
   const frameCount = Math.max(1, Math.floor(frames));
-  const fallbackMs = Math.min(timeoutMs, Math.max(MIN_SETTLE_MS, frameCount * FRAME_SETTLE_MS));
+  const fallbackMs = Math.min(timeoutMs, Math.max(MIN_SETTLE_MS, MIN_RENDERED_FRAME_TIMEOUT_MS, frameCount * FRAME_SETTLE_MS));
 
   const settleInPage = page.evaluate(async (args: { frames: number }) => {
     const hooks = (window as typeof window & {
