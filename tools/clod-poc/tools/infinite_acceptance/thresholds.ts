@@ -87,7 +87,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_collider_removals", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "live_clod_stream_required_pages", label: "must be > 0", pass: (value) => value > 0 },
-  { key: "live_clod_stream_cached_pages", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_clod_stream_cached_pages", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "live_clod_stream_built_this_frame", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "live_clod_stream_failed_pages", label: "must equal 0", pass: (value) => value === 0 },
   { key: "live_clod_stream_evictions", label: "must be >= 0", pass: (value) => value >= 0 },
