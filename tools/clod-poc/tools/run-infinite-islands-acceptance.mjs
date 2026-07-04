@@ -67,9 +67,16 @@ function viteArgs(baseUrl) {
   return ["--config", "vite.acceptance.config.ts", "--host", "127.0.0.1", "--port", String(port), "--strictPort"];
 }
 
+function reuseExistingServer() {
+  return process.env.CLOD_POC_REUSE_SERVER === "1" || process.env.CLOD_POC_REUSE_SERVER === "true";
+}
+
 async function ensureServer() {
   const baseUrl = process.env.CLOD_POC_BASE_URL ?? DEFAULT_BASE_URL;
-  if (await isServerReady(baseUrl)) return null;
+  if (reuseExistingServer() && await isServerReady(baseUrl)) {
+    console.log(`[infinite-accept] reusing existing Vite at ${baseUrl}`);
+    return null;
+  }
 
   console.log(`[infinite-accept] starting Vite at ${baseUrl}`);
   const server = spawnChild("vite", nodeBin, [viteBin, ...viteArgs(baseUrl)]);
@@ -83,7 +90,7 @@ async function ensureServer() {
     await delay(SERVER_POLL_MS);
   }
 
-  server.kill();
+  stopChildTree(server);
   throw new Error(`Timed out waiting for Vite at ${process.env.CLOD_POC_BASE_URL}`);
 }
 
