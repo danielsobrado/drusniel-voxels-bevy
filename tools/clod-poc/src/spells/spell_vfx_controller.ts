@@ -16,6 +16,7 @@ const SPELL_LIGHT_ENVELOPE = {
 const SPELL_VISIBLE_PROGRESS_FLOOR = 0.035;
 const SPELL_SELF_TICK_PAD_MS = 120;
 const FALLBACK_BASE_OPACITY = 0.72;
+const ENABLE_VISIBLE_FALLBACK = false;
 
 export interface SpellVfxMeshConfig {
   worldWidth: number;
@@ -249,15 +250,22 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     spell.handle.uTime.value = frame.timeSeconds;
     spell.handle.uProgress.value = visibleProgress;
     spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(visibleProgress);
-    spell.fallbackMesh.material.opacity = FALLBACK_BASE_OPACITY * computeSpellLightEnvelope(visibleProgress);
-    spell.fallbackMesh.scale.setScalar(1 + Math.sin(frame.timeSeconds * 12) * 0.04);
 
     const camera = getCamera();
     const pose = resolveSpellPose(camera, spell.config, spell.poseScratch);
     spell.mesh.position.copy(pose.base);
-    spell.fallbackMesh.position.copy(pose.base);
     orientFireJet(pose.base, pose.dir, camera.position, spell.mesh.quaternion);
-    spell.fallbackMesh.quaternion.copy(spell.mesh.quaternion);
+
+    if (ENABLE_VISIBLE_FALLBACK) {
+      spell.fallbackMesh.visible = true;
+      spell.fallbackMesh.material.opacity = FALLBACK_BASE_OPACITY * computeSpellLightEnvelope(visibleProgress);
+      spell.fallbackMesh.scale.setScalar(1 + Math.sin(frame.timeSeconds * 12) * 0.04);
+      spell.fallbackMesh.position.copy(pose.base);
+      spell.fallbackMesh.quaternion.copy(spell.mesh.quaternion);
+    } else {
+      spell.fallbackMesh.visible = false;
+      spell.fallbackMesh.material.opacity = 0;
+    }
   };
 
   const updateAll = (frameNow: number): void => {
@@ -285,9 +293,14 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(SPELL_VISIBLE_PROGRESS_FLOOR);
     spell.light.visible = true;
     spell.mesh.visible = true;
-    spell.fallbackMesh.visible = true;
-    spell.fallbackMesh.material.opacity = FALLBACK_BASE_OPACITY;
-    spell.fallbackMesh.scale.setScalar(1);
+    if (ENABLE_VISIBLE_FALLBACK) {
+      spell.fallbackMesh.visible = true;
+      spell.fallbackMesh.material.opacity = FALLBACK_BASE_OPACITY;
+      spell.fallbackMesh.scale.setScalar(1);
+    } else {
+      spell.fallbackMesh.visible = false;
+      spell.fallbackMesh.material.opacity = 0;
+    }
     tick(spell, startMs + 16);
     selfTickUntilMs = Math.max(selfTickUntilMs, startMs + spell.durationMs + SPELL_SELF_TICK_PAD_MS);
     requestSelfTick();
