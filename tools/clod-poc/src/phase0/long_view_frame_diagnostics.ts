@@ -103,6 +103,8 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   const backgroundQueuesQuiet = (counters: Readonly<Record<string, number>>): boolean => {
     const tilesMissing = numericCounter(counters, "far_summary_tiles_missing", -1);
     const tilesBuilding = numericCounter(counters, "far_summary_tiles_building", -1);
+    const farShellRebuildPending = numericCounter(counters, "far_shell_rebuild_pending", 0);
+    const textureWindowPending = numericCounter(counters, "terrain_texture_window_pending", 0);
     const bubbleRequired = numericCounter(counters, "live_bubble_required_pages", -1);
     const bubbleBuilding = numericCounter(counters, "live_bubble_building_pages", -1);
     const bubbleReady = numericCounter(counters, "live_bubble_ready_pages", -1);
@@ -116,7 +118,8 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const farSummaryQuiet = tilesMissing === 0 && tilesBuilding === 0;
     const bubbleQuiet = bubbleRequired === 0 || (bubbleFailed === 0 && bubbleBuilding === 0 && bubbleReady > 0);
     const streamQuiet = streamRequired === 0 || (streamPending === 0 && streamInflight === 0 && streamReady === 0 && streamCached > 0);
-    return farSummaryQuiet && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
+    return farSummaryQuiet && farShellRebuildPending === 0 && textureWindowPending === 0
+      && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
   };
 
   if (typeof window !== "undefined") {
