@@ -42,6 +42,7 @@ function isManualInfiniteIslandsPlayer(searchParams: URLSearchParams): boolean {
     && searchParams.has("x")
     && searchParams.has("z")
     && searchParams.get("acceptance") !== "1"
+    && searchParams.get("proceduralDebug") !== "biome"
     && searchParams.get("fullLongView") !== "1";
 }
 
