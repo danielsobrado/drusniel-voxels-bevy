@@ -34,6 +34,8 @@ import {
   materialChurnDiagnostics,
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
+const MAX_TERRAIN_TEXTURE_WINDOW_CACHE = 8;
+
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
   if (await runEarlyRoutes(searchParams)) return;
@@ -147,28 +149,45 @@ export async function bootstrapClodPoc() {
   });
 
   let terrainTextureWindowSwaps = 0;
+  const terrainTextureWindowCache = new Map<string, {
+    config: typeof world.proceduralTextureConfig;
+    terrain: NonNullable<typeof world.proceduralTerrain>;
+    macroTint: typeof world.bakedMacroTint;
+  }>();
   const biomeTextureStreaming = world.proceduralTerrain
     ? createBiomeTextureStreamingManager({
         baseConfig: world.proceduralTextureConfig,
         sampleBiome: (x, z) => world.worldSource.sampleBiome(x, z),
         deferWindowSwaps: true,
         onActiveWindowChanged: (nextConfig, activeBiomeMaterials) => {
-          const nextTerrain = createProceduralTerrainTextures(nextConfig);
-          const bakeRes = Math.min(512, nextTerrain.noise.resolution);
-          const nextMacroTint = createBakedMacroTintTexture(
-            nextTerrain.noise.noiseA,
-            nextTerrain.noise.noiseB,
-            bakeRes,
-          );
-          world.proceduralTextureConfig = nextConfig;
-          world.proceduralTerrain = nextTerrain;
-          world.bakedMacroTint = nextMacroTint;
+          const signature = activeBiomeMaterials.join("|");
+          let cached = terrainTextureWindowCache.get(signature);
+          if (!cached) {
+            const nextTerrain = createProceduralTerrainTextures(nextConfig);
+            const bakeRes = Math.min(512, nextTerrain.noise.resolution);
+            const nextMacroTint = createBakedMacroTintTexture(
+              nextTerrain.noise.noiseA,
+              nextTerrain.noise.noiseB,
+              bakeRes,
+            );
+            cached = { config: nextConfig, terrain: nextTerrain, macroTint: nextMacroTint };
+            terrainTextureWindowCache.set(signature, cached);
+            while (terrainTextureWindowCache.size > MAX_TERRAIN_TEXTURE_WINDOW_CACHE) {
+              const firstKey = terrainTextureWindowCache.keys().next().value as string | undefined;
+              if (!firstKey) break;
+              terrainTextureWindowCache.delete(firstKey);
+            }
+          }
+          world.proceduralTextureConfig = cached.config;
+          world.proceduralTerrain = cached.terrain;
+          world.bakedMacroTint = cached.macroTint;
           terrainTextureWindowSwaps++;
-          terrainView.materialController.setProceduralTerrain(nextTerrain, nextConfig, nextMacroTint);
+          terrainView.materialController.setProceduralTerrain(cached.terrain, cached.config, cached.macroTint);
           terrainView.applyTerrainTextures();
           if (postRenderer.longViewHooks?.stats) {
             postRenderer.longViewHooks.stats.counters.terrainTextureWindowSwaps = terrainTextureWindowSwaps;
             postRenderer.longViewHooks.stats.counters.terrainTextureActiveBiomes = activeBiomeMaterials.length;
+            postRenderer.longViewHooks.stats.counters.terrainTextureWindowCacheSize = terrainTextureWindowCache.size;
           }
         },
       })
