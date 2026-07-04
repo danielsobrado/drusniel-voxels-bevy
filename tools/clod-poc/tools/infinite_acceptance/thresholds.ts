@@ -45,6 +45,12 @@ export const REQUIRED_COUNTERS = [
   "live_clod_stream_failed_pages",
   "live_clod_stream_evictions",
   "live_clod_stream_build_ms",
+  "infinite_hydrology_outside_sample_valid",
+  "infinite_hydrology_outside_body_mask",
+  "infinite_hydrology_outside_depth_m",
+  "infinite_hydrology_nonrepeat_delta",
+  "infinite_hydrology_nonrepeat_ok",
+  "infinite_hydrology_camera_outside_startup",
 ] as const;
 
 export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
@@ -86,6 +92,10 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_clod_stream_failed_pages", label: "must equal 0", pass: (value) => value === 0 },
   { key: "live_clod_stream_evictions", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "live_clod_stream_build_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
+  { key: "infinite_hydrology_outside_sample_valid", label: "must equal 1", pass: (value) => value === 1 },
+  { key: "infinite_hydrology_nonrepeat_delta", label: "must be finite and > 0", pass: (value) => Number.isFinite(value) && value > 0 },
+  { key: "infinite_hydrology_nonrepeat_ok", label: "must equal 1", pass: (value) => value === 1 },
+  { key: "infinite_hydrology_camera_outside_startup", label: "must equal 1", pass: (value) => value === 1 },
 ];
 
 export interface ThresholdEvaluation {
