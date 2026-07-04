@@ -15,6 +15,8 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_cached_pages"] = 1;
   values["live_clod_stream_build_budget"] = 1;
   values["live_clod_stream_apply_ms"] = 1;
+  values["vegetation_ring_unbounded"] = 1;
+  values["vegetation_ring_distance_to_grass_m"] = 0;
   values["infinite_hydrology_outside_sample_valid"] = 1;
   values["infinite_hydrology_nonrepeat_delta"] = 1;
   values["infinite_hydrology_nonrepeat_ok"] = 1;
@@ -75,5 +77,10 @@ describe("infinite islands threshold validation", () => {
 
   it("fails when streamed root apply work exceeds the main-thread budget", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_apply_ms: 2.01 })).passed).toBe(false);
+  });
+
+  it("fails when vegetation is still clamped to the startup grid", () => {
+    expect(evaluateThresholds(validCounters({ vegetation_ring_unbounded: 0 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ vegetation_ring_distance_to_grass_m: 8 })).passed).toBe(false);
   });
 });
