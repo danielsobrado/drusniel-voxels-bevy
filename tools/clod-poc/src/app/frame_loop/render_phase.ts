@@ -58,6 +58,8 @@ export interface RenderPhaseInput {
 
 const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
 
+type UnderstoryStatsWithConsulted = UnderstoryStats & { gpuPrefilterFarSummaryConsulted?: number };
+
 const DYNAMIC_RESOLUTION_REASON_CODE: Record<DynamicResolutionStats["reason"], number> = {
   disabled: 0,
   mode_disabled: 1,
@@ -226,6 +228,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const grassStats = input.currentGrassStats;
     const treeStats = input.currentTreeStats;
     const understoryStats = input.currentUnderstoryStats;
+    const understoryStatsWithConsulted = understoryStats as UnderstoryStatsWithConsulted | null;
     const propStats = input.currentPropStats;
     const farSummarySubphases = takeFarSummarySubphaseTimings();
     input.perfProbe?.record({
@@ -299,6 +302,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       treeGpuCandidateCountAfterPrefilter: treeStats?.gpuCandidateCountAfterPrefilter ?? 0,
       treeGpuPrefilterRejectedClusters: treeStats?.gpuPrefilterRejectedClusters ?? 0,
       treeGpuPrefilterSkippedCandidateEstimate: treeStats?.gpuPrefilterSkippedCandidateEstimate ?? 0,
+      treeGpuPrefilterFarSummaryConsulted: treeStats?.gpuPrefilterFarSummaryConsulted ?? 0,
       treeGpuPrefilterSourceFarSummary: treeStats?.gpuPrefilterSourceFarSummary ?? 0,
       treeGpuPrefilterSourceTerrainSampler: treeStats?.gpuPrefilterSourceTerrainSampler ?? 0,
       treeGpuPrefilterSourceFallback: treeStats?.gpuPrefilterSourceFallback ?? 0,
@@ -313,6 +317,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       grassGpuCandidateCount: grassStats?.gpuRingCandidateCount ?? 0,
       grassGpuCandidateCountBeforePrefilter: grassStats?.gpuRingCandidateCountBeforePrefilter ?? 0,
       grassGpuCandidateCountAfterPrefilter: grassStats?.gpuRingCandidateCountAfterPrefilter ?? 0,
+      grassGpuPrefilterFarSummaryConsulted: grassStats?.gpuRingPrefilterFarSummaryConsulted ?? 0,
       grassGpuPrefilterSourceFarSummary: grassStats?.gpuRingPrefilterSourceFarSummary ?? 0,
       grassGpuPrefilterSourceTerrainSampler: grassStats?.gpuRingPrefilterSourceTerrainSampler ?? 0,
       grassGpuPrefilterSourceFallback: grassStats?.gpuRingPrefilterSourceFallback ?? 0,
@@ -321,6 +326,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       understoryGpuCandidateCount: understoryStats?.gpuCandidateCount ?? 0,
       understoryGpuCandidateCountBeforePrefilter: understoryStats?.gpuCandidateCountBeforePrefilter ?? 0,
       understoryGpuCandidateCountAfterPrefilter: understoryStats?.gpuCandidateCountAfterPrefilter ?? 0,
+      understoryGpuPrefilterFarSummaryConsulted: understoryStatsWithConsulted?.gpuPrefilterFarSummaryConsulted ?? 0,
       understoryGpuPrefilterSourceFarSummary: understoryStats?.gpuPrefilterSourceFarSummary ?? 0,
       understoryGpuPrefilterSourceTerrainSampler: understoryStats?.gpuPrefilterSourceTerrainSampler ?? 0,
       understoryGpuPrefilterSourceFallback: understoryStats?.gpuPrefilterSourceFallback ?? 0,
