@@ -14,6 +14,8 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_cached_pages"] = 1;
   counters["live_clod_stream_build_budget"] = 1;
   counters["live_clod_stream_apply_ms"] = 1;
+  counters["vegetation_ring_unbounded"] = 1;
+  counters["vegetation_ring_distance_to_grass_m"] = 0;
   counters["infinite_hydrology_outside_sample_valid"] = 1;
   counters["infinite_hydrology_nonrepeat_delta"] = 1;
   counters["infinite_hydrology_nonrepeat_ok"] = 1;
@@ -74,6 +76,19 @@ describe("infinite islands thresholds", () => {
     );
   });
 
+  it("checks unbounded vegetation ring behavior", () => {
+    const counters = validCounters();
+    counters["vegetation_ring_unbounded"] = 0;
+    counters["vegetation_ring_distance_to_grass_m"] = 32;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "vegetation_ring_unbounded=0 failed: must equal 1 for infinite-islands",
+    );
+    expect(evaluateThresholds(counters).failures).toContain(
+      "vegetation_ring_distance_to_grass_m=32 failed: must equal 0 for unbounded vegetation rings",
+    );
+  });
+
   it("checks non-repeating infinite hydrology samples", () => {
     const counters = validCounters();
     counters["infinite_hydrology_nonrepeat_ok"] = 0;
@@ -89,6 +104,7 @@ describe("infinite islands thresholds", () => {
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_transfer_bytes"]).toBe(0);
+    expect(extractAcceptanceCounters({ counters })["vegetation_ring_unbounded"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["infinite_hydrology_nonrepeat_ok"]).toBe(1);
   });
 });
