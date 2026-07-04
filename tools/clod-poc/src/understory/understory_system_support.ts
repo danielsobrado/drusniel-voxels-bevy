@@ -156,7 +156,7 @@ function classKeyRow(cls: UnderstoryClassSettings): string {
   return `${cls.enabled ? 1 : 0}:${cls.weight}:${cls.density}:${cls.minScale}:${cls.maxScale}:${cls.heightPreference}:${cls.shadePreference}:${cls.moisturePreference}:${cls.forestEdgeBias}:${cls.windWeight}`;
 }
 
-export function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number): string {
+export function understoryGpuRingStableKey(settings: UnderstorySettings, worldCells: number): string {
   const gpu = settings.gpu;
   const eco = settings.ecology;
   const cls = settings.classes;
@@ -188,6 +188,9 @@ export function understoryGpuRingKey(settings: UnderstorySettings, worldCells: n
     classKeyRow(cls.flower),
     classKeyRow(cls.dead_log),
     classKeyRow(cls.stump),
-    getDigEditRevision(),
   ].join(":");
+}
+
+export function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number, digRevision = getDigEditRevision()): string {
+  return `${understoryGpuRingStableKey(settings, worldCells)}:${digRevision}`;
 }
