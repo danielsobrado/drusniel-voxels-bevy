@@ -15,6 +15,8 @@ const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
 /** Per-frame budget for CPU-fallback chunk meshing; one chunk can cost 10–90 ms, so at most one runs once the budget is spent. */
 const CPU_CHUNK_MESH_BUDGET_MS = 6;
 const GPU_CHUNK_DISPATCH_BUDGET = 2;
+const GPU_PAGE_RETRY_LIMIT = 3;
+const GPU_PAGE_RETRY_DELAY_FRAMES = 12;
 
 export interface ChunkGroupEntry {
   group: THREE.Group;
@@ -105,6 +107,8 @@ interface PendingGpuPageBuild {
   chunks: Array<[number, number]>;
   inflight: number;
   failures: number;
+  attempts: number;
+  nextRetryFrame: number;
 }
 
 interface PendingGpuWaitPageBuild {
@@ -228,6 +232,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const terrainColliders = deps.terrainColliders ?? null;
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
+  let currentFrame = 0;
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
     (node.footprint.minX + node.footprint.maxX) / 2,
@@ -278,18 +283,25 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }
   };
 
-  const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
-    deps.scene.remove(entry.group);
-    for (const colliderId of entry.colliderIds) {
+  const clearEntryContent = (entry: ChunkGroupEntry): void => {
+    for (const colliderId of entry.colliderIds.splice(0)) {
       if (terrainColliders?.removePage(colliderId)) colliderRemovals++;
     }
-    for (const child of entry.group.children) (child as THREE.Mesh).geometry.dispose();
-    for (const unsub of entry.unsubs) unsub();
-    for (const m of entry.mats) {
+    for (const child of [...entry.group.children]) {
+      entry.group.remove(child);
+      (child as THREE.Mesh).geometry.dispose();
+    }
+    for (const unsub of entry.unsubs.splice(0)) unsub();
+    for (const m of entry.mats.splice(0)) {
       if (m === deps.materialController.sharedMaterial) continue;
       deps.materialController.materials.delete(m);
       m.material.dispose();
     }
+  };
+
+  const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
+    deps.scene.remove(entry.group);
+    clearEntryContent(entry);
     chunkGroups.delete(nodeId);
     cpuPendingBuilds.delete(nodeId);
     gpuWaitBuilds.delete(nodeId);
@@ -330,9 +342,26 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return chunks;
   };
 
-  const enqueueGpuPageBuild = (key: string, px: number, pz: number, worldBounds: WorldBounds): void => {
+  const enqueueGpuPageBuild = (
+    key: string,
+    px: number,
+    pz: number,
+    worldBounds: WorldBounds,
+    attempts = 0,
+    nextRetryFrame = 0,
+  ): void => {
     const edits = resolveDigEdits(getDigEditsSnapshot());
-    gpuPendingBuilds.set(key, { px, pz, worldBounds, edits, chunks: pageChunks(), inflight: 0, failures: 0 });
+    gpuPendingBuilds.set(key, {
+      px,
+      pz,
+      worldBounds,
+      edits,
+      chunks: pageChunks(),
+      inflight: 0,
+      failures: 0,
+      attempts,
+      nextRetryFrame,
+    });
   };
 
   const enqueueCpuChunkBuild = (key: string, px: number, pz: number, worldBounds: WorldBounds, dx: number, dz: number): void => {
@@ -386,12 +415,22 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }
   };
 
+  const retryGpuPageBuild = (key: string, entry: ChunkGroupEntry, job: PendingGpuPageBuild): boolean => {
+    if (!liveStreamingEnabled || job.attempts >= GPU_PAGE_RETRY_LIMIT) return false;
+    clearEntryContent(entry);
+    entry.ready = false;
+    entry.failed = false;
+    enqueueGpuPageBuild(key, job.px, job.pz, job.worldBounds, job.attempts + 1, currentFrame + GPU_PAGE_RETRY_DELAY_FRAMES);
+    return true;
+  };
+
   const completeGpuChunk = (key: string, entry: ChunkGroupEntry, job: PendingGpuPageBuild) => {
     job.inflight--;
     if (chunkGroups.get(key) !== entry || gpuPendingBuilds.get(key) !== job) return;
     if (job.chunks.length > 0 || job.inflight > 0) return;
     gpuPendingBuilds.delete(key);
     if (cpuPendingBuilds.has(key)) return;
+    if (job.failures > 0 && retryGpuPageBuild(key, entry, job)) return;
     entry.failed = job.failures > 0;
     entry.ready = true;
   };
@@ -401,6 +440,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     const jobs = [...gpuPendingBuilds.entries()]
       .sort((a, b) => (chunkGroups.get(b[0])?.lastTouchFrame ?? -1) - (chunkGroups.get(a[0])?.lastTouchFrame ?? -1));
     for (const [key, job] of jobs) {
+      if (currentFrame < job.nextRetryFrame) continue;
       const entry = chunkGroups.get(key);
       const gpuMesher = deps.getGpuMesher();
       if (!entry || !gpuMesher) {
@@ -424,7 +464,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
                   chunkColliderId(key, dx, dz),
                   liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
                 );
-              } else if (terrainColliders) {
+              } else if (terrainColliders && !liveStreamingEnabled) {
                 enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
               }
             }
@@ -533,6 +573,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   return {
     update(input) {
       const tBubbleStart = performance.now();
+      currentFrame = input.frameId;
       let chunkGroupsBuiltThisFrame = 0;
       let evictions = 0;
       let colliderEvictions = 0;
