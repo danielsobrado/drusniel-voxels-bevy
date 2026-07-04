@@ -27,11 +27,12 @@ const PAGE_ERROR_PRINT_LIMIT = 8;
 const PAGE_ERROR_STORE_LIMIT = 50;
 const WARMUP_FRAMES = 30;
 const SAMPLE_FRAMES = 180;
+const MIN_WALK_ROUTE_DISTANCE_M = 48;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
 
 type JsonRecord = Record<string, unknown>;
-
 type SceneExtra = Record<string, string>;
+type PoseTuple = [number, number, number];
 
 interface SceneSpec {
   name: string;
@@ -41,6 +42,29 @@ interface SceneSpec {
   cam?: string;
   extra?: SceneExtra;
   summary?: boolean;
+  movementRoute?: boolean;
+}
+
+interface MovementSnapshot {
+  label: string;
+  pose: PoseTuple;
+  counters: Record<string, number>;
+}
+
+interface MovementReport {
+  start: PoseTuple;
+  end: PoseTuple;
+  horizontalDistanceM: number;
+  worldCells: number;
+  startedOutsideStartupWorld: boolean;
+  endedOutsideStartupWorld: boolean;
+  maxLiveBubbleReadyPages: number;
+  maxLiveBubbleBuiltThisFrame: number;
+  maxStreamCachedPages: number;
+  maxStreamApplyPagesThisFrame: number;
+  maxStreamEvictions: number;
+  maxStreamStaleDiscards: number;
+  samples: MovementSnapshot[];
 }
 
 interface SceneResult extends SceneReportInput {
@@ -50,14 +74,34 @@ interface SceneResult extends SceneReportInput {
   summaryPath: string | null;
   comparisonPath: string;
   imageSanity: ImageSanityResult;
+  movement: MovementReport | null;
   consoleWarnings: string[];
   consoleErrors: string[];
   pageErrors: string[];
 }
 
+interface MovementSegment {
+  label: string;
+  frames: number;
+  codes: string[];
+}
+
 const OUTSIDE_STARTUP_CAM = "2048,96,2048,2.6500,-0.4300,55";
 const OUTSIDE_HORIZON_CAM = "2048,260,4096,2.6500,-0.3000,55";
-const OUTSIDE_STARTUP_SPAWN: SceneExtra = { x: "2048", z: "2048", yaw: "2.65" };
+const OUTSIDE_STARTUP_SPAWN: SceneExtra = {
+  x: "2048",
+  z: "2048",
+  yaw: "2.65",
+  liveClodRootBudget: "2",
+  liveClodRootMaxCached: "4",
+};
+
+const WALK_ROUTE: MovementSegment[] = [
+  { label: "forward-a", frames: 180, codes: ["ShiftLeft", "KeyW"] },
+  { label: "forward-right", frames: 160, codes: ["ShiftLeft", "KeyW", "KeyD"] },
+  { label: "right", frames: 120, codes: ["ShiftLeft", "KeyD"] },
+  { label: "forward-b", frames: 180, codes: ["ShiftLeft", "KeyW"] },
+];
 
 const SCENES: SceneSpec[] = [
   {
@@ -67,6 +111,7 @@ const SCENES: SceneSpec[] = [
     proceduralDebug: "biome",
     extra: OUTSIDE_STARTUP_SPAWN,
     summary: true,
+    movementRoute: true,
   },
   {
     name: "biome-near",
@@ -115,6 +160,59 @@ function gitSha(): string | null {
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function horizontalDistance(a: PoseTuple, b: PoseTuple): number {
+  return Math.hypot(a[0] - b[0], a[2] - b[2]);
+}
+
+function numCounter(counters: Readonly<Record<string, number>>, key: string): number {
+  const value = counters[key];
+  return Number.isFinite(value) ? value : 0;
+}
+
+function maxCounter(samples: readonly MovementSnapshot[], key: string): number {
+  return samples.reduce((max, sample) => Math.max(max, numCounter(sample.counters, key)), 0);
+}
+
+function outsideStartupWorld(pose: PoseTuple, worldCells: number): boolean {
+  if (!Number.isFinite(worldCells) || worldCells <= 0) return false;
+  return pose[0] < 0 || pose[2] < 0 || pose[0] > worldCells || pose[2] > worldCells;
+}
+
+function keyForCode(code: string): string {
+  if (code.startsWith("Key")) return code.slice(3).toLowerCase();
+  if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
+  if (code === "Space") return " ";
+  return code;
+}
+
+async function dispatchKeyCodes(page: Page, type: "keydown" | "keyup", codes: readonly string[]): Promise<void> {
+  await page.evaluate(({ type: eventType, codes: eventCodes }) => {
+    const keyForCodeInPage = (code: string): string => {
+      if (code.startsWith("Key")) return code.slice(3).toLowerCase();
+      if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
+      if (code === "Space") return " ";
+      return code;
+    };
+    for (const code of eventCodes) {
+      window.dispatchEvent(new KeyboardEvent(eventType, {
+        bubbles: true,
+        cancelable: true,
+        code,
+        key: keyForCodeInPage(code),
+      }));
+    }
+  }, { type, codes });
+}
+
+async function holdMovementKeys(page: Page, codes: readonly string[], frames: number): Promise<void> {
+  await dispatchKeyCodes(page, "keydown", codes);
+  try {
+    await settle(page, frames);
+  } finally {
+    await dispatchKeyCodes(page, "keyup", [...codes].reverse());
+  }
 }
 
 async function writeBootstrapDiff(aPath: string, outPath: string): Promise<void> {
@@ -213,6 +311,69 @@ async function settle(page: Page, frames: number): Promise<void> {
   await settlePage(page, frames, SETTLE_TIMEOUT_MS);
 }
 
+async function readMovementSnapshot(page: Page, label: string): Promise<MovementSnapshot> {
+  return await page.evaluate((sampleLabel) => {
+    const hooks = (window as typeof window & {
+      __drusnielClod?: {
+        getPose?: (() => { p: [number, number, number] }) | null;
+        stats?: { counters?: Record<string, number> } | null;
+      };
+    }).__drusnielClod;
+    const pose = hooks?.getPose?.();
+    if (!pose) throw new Error("movement route requires __drusnielClod.getPose");
+    return JSON.parse(JSON.stringify({
+      label: sampleLabel,
+      pose: pose.p,
+      counters: hooks?.stats?.counters ?? {},
+    })) as MovementSnapshot;
+  }, label);
+}
+
+async function runMovementRoute(page: Page): Promise<MovementReport> {
+  const samples: MovementSnapshot[] = [];
+  samples.push(await readMovementSnapshot(page, "start"));
+  for (const segment of WALK_ROUTE) {
+    await holdMovementKeys(page, segment.codes, segment.frames);
+    samples.push(await readMovementSnapshot(page, segment.label));
+  }
+  const start = samples[0]!.pose;
+  const end = samples.at(-1)!.pose;
+  const worldCells = maxCounter(samples, "world_cells");
+  return {
+    start,
+    end,
+    horizontalDistanceM: horizontalDistance(start, end),
+    worldCells,
+    startedOutsideStartupWorld: outsideStartupWorld(start, worldCells),
+    endedOutsideStartupWorld: outsideStartupWorld(end, worldCells),
+    maxLiveBubbleReadyPages: maxCounter(samples, "live_bubble_ready_pages"),
+    maxLiveBubbleBuiltThisFrame: maxCounter(samples, "live_bubble_built_this_frame"),
+    maxStreamCachedPages: maxCounter(samples, "live_clod_stream_cached_pages"),
+    maxStreamApplyPagesThisFrame: maxCounter(samples, "live_clod_stream_apply_pages_this_frame"),
+    maxStreamEvictions: maxCounter(samples, "live_clod_stream_evictions"),
+    maxStreamStaleDiscards: maxCounter(samples, "live_clod_stream_stale_discards"),
+    samples,
+  };
+}
+
+function evaluateMovementRoute(sceneName: string, movement: MovementReport | null): string[] {
+  if (!movement) return [];
+  const failures: string[] = [];
+  if (movement.horizontalDistanceM < MIN_WALK_ROUTE_DISTANCE_M) {
+    failures.push(`${sceneName}: movement route distance ${movement.horizontalDistanceM.toFixed(2)}m < ${MIN_WALK_ROUTE_DISTANCE_M}m`);
+  }
+  if (!movement.startedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not start outside startup world`);
+  if (!movement.endedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not end outside startup world`);
+  if (movement.maxLiveBubbleReadyPages <= 0) failures.push(`${sceneName}: movement route never observed ready live-bubble pages`);
+  if (movement.maxLiveBubbleBuiltThisFrame <= 0) failures.push(`${sceneName}: movement route never built a live-bubble page during motion`);
+  if (movement.maxStreamCachedPages <= 0) failures.push(`${sceneName}: movement route never observed cached streamed CLOD roots`);
+  if (movement.maxStreamApplyPagesThisFrame <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
+  if (movement.maxStreamEvictions + movement.maxStreamStaleDiscards <= 0) {
+    failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
+  }
+  return failures;
+}
+
 async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Promise<SceneResult> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 });
   const consoleWarnings: string[] = [];
@@ -232,7 +393,9 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
   const statsPath = resolve(outDir, `${scene.name}-stats.json`);
   const phase0Path = resolve(outDir, `${scene.name}-phase0-report.json`);
   const summaryPath = scene.summary ? resolve(outDir, `${scene.name}-summary.json`) : null;
+  const movementPath = scene.movementRoute ? resolve(outDir, `${scene.name}-movement.json`) : null;
   const comparisonPath = resolve(outDir, `compare/${scene.name}-self-diff.png`);
+  let movement: MovementReport | null = null;
 
   page.on("console", (msg) => {
     const type = msg.type();
@@ -290,6 +453,11 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     await Promise.race([settle(page, WARMUP_FRAMES), pageErrorGate]);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
+    if (scene.movementRoute) {
+      movement = await Promise.race([runMovementRoute(page), pageErrorGate]);
+      if (movementPath) writeJson(movementPath, movement);
+      await failOnPageError(page, scene.name, pageErrors, failedPath);
+    }
     await Promise.race([settle(page, SAMPLE_FRAMES), pageErrorGate]);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
 
@@ -305,9 +473,11 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     await writeBootstrapDiff(screenshotPath, comparisonPath);
     const imageSanity = await inspectPngSanity(screenshotPath, { width: WIDTH, height: HEIGHT });
     const thresholds: ThresholdEvaluation = evaluateThresholds(extractAcceptanceCounters(stats));
+    const movementFailures = evaluateMovementRoute(scene.name, movement);
     const failures = [
       ...pageErrors.map((error) => `page error: ${error}`),
       ...thresholds.failures,
+      ...movementFailures,
       ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),
     ];
     return {
@@ -321,6 +491,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
       comparisonPath: rel(comparisonPath),
       thresholds,
       imageSanity,
+      movement,
       consoleWarnings,
       consoleErrors,
       pageErrors,
@@ -333,7 +504,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     const stats = { ready: false, error: message };
     writeJson(statsPath, stats);
     writeJson(phase0Path, { available: false, error: message });
-    if (summaryPath) writeJson(summaryPath, qaSummary("infinite-islands", stats));
+    if (movementPath && movement) writeJson(movementPath, movement);
     let imageSanity: ImageSanityResult = {
       passed: false,
       failures: ["screenshot was not captured"],
@@ -358,6 +529,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     const thresholds = evaluateThresholds({});
     const failures = [
       message,
+      ...evaluateMovementRoute(scene.name, movement),
       ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),
     ];
     return {
@@ -371,6 +543,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
       comparisonPath: rel(comparisonPath),
       thresholds,
       imageSanity,
+      movement,
       consoleWarnings,
       consoleErrors,
       pageErrors,
@@ -425,6 +598,7 @@ async function main(): Promise<void> {
       page_errors: scene.pageErrors,
       thresholds: scene.thresholds,
       image_sanity: scene.imageSanity,
+      movement: scene.movement,
       artifacts: {
         screenshot: scene.screenshot,
         stats_json: scene.statsPath,
