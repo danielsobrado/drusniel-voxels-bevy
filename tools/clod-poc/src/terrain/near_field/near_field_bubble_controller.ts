@@ -25,6 +25,7 @@ export interface ChunkGroupEntry {
   colliderIds: string[];
   ready: boolean;
   failed: boolean;
+  validEmpty: boolean;
   centerX: number;
   centerZ: number;
   lastTouchFrame: number;
@@ -57,6 +58,7 @@ export interface NearFieldBubbleStats {
   evictions: number;
   colliderEvictions: number;
   streamedColliderPages: number;
+  validEmptyPages: number;
   colliderRegistrations: number;
   colliderRemovals: number;
 }
@@ -109,6 +111,8 @@ interface PendingGpuPageBuild {
   failures: number;
   attempts: number;
   nextRetryFrame: number;
+  meshChunks: number;
+  emptyChunks: number;
 }
 
 interface PendingGpuWaitPageBuild {
@@ -259,6 +263,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return total;
   };
 
+  const validEmptyPages = (): number => {
+    let total = 0;
+    for (const entry of chunkGroups.values()) {
+      if (entry.ready && !entry.failed && entry.validEmpty) total++;
+    }
+    return total;
+  };
+
   const addChunkMesh = (
     group: THREE.Group,
     mats: TerrainMaterialHandle[],
@@ -326,6 +338,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       colliderIds,
       ready: false,
       failed: false,
+      validEmpty: false,
       centerX,
       centerZ,
       lastTouchFrame: 0,
@@ -361,6 +374,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       failures: 0,
       attempts,
       nextRetryFrame,
+      meshChunks: 0,
+      emptyChunks: 0,
     });
   };
 
@@ -420,6 +435,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     clearEntryContent(entry);
     entry.ready = false;
     entry.failed = false;
+    entry.validEmpty = false;
     enqueueGpuPageBuild(key, job.px, job.pz, job.worldBounds, job.attempts + 1, currentFrame + GPU_PAGE_RETRY_DELAY_FRAMES);
     return true;
   };
@@ -430,8 +446,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     if (job.chunks.length > 0 || job.inflight > 0) return;
     gpuPendingBuilds.delete(key);
     if (cpuPendingBuilds.has(key)) return;
+
+    if (job.failures === 0 && liveStreamingEnabled && terrainColliders && job.meshChunks === 0 && job.emptyChunks > 0) {
+      job.failures++;
+    }
+
     if (job.failures > 0 && retryGpuPageBuild(key, entry, job)) return;
     entry.failed = job.failures > 0;
+    entry.validEmpty = job.failures === 0 && job.meshChunks === 0;
     entry.ready = true;
   };
 
@@ -443,8 +465,18 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       if (currentFrame < job.nextRetryFrame) continue;
       const entry = chunkGroups.get(key);
       const gpuMesher = deps.getGpuMesher();
-      if (!entry || !gpuMesher) {
+      if (!entry) {
         gpuPendingBuilds.delete(key);
+        continue;
+      }
+      if (!gpuMesher) {
+        if (job.inflight === 0) {
+          gpuPendingBuilds.delete(key);
+          entry.ready = false;
+          entry.failed = false;
+          entry.validEmpty = false;
+          gpuWaitBuilds.set(key, { px: job.px, pz: job.pz });
+        }
         continue;
       }
       while (job.chunks.length > 0 && dispatched < GPU_CHUNK_DISPATCH_BUDGET) {
@@ -455,6 +487,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           .then((cm) => {
             if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) {
               if (cm.indices.length > 0) {
+                job.meshChunks++;
                 addChunkMesh(
                   entry.group,
                   entry.mats,
@@ -464,8 +497,11 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
                   chunkColliderId(key, dx, dz),
                   liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
                 );
-              } else if (terrainColliders && !liveStreamingEnabled) {
-                enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
+              } else {
+                job.emptyChunks++;
+                if (terrainColliders && !liveStreamingEnabled) {
+                  enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
+                }
               }
             }
             completeGpuChunk(key, entry, job);
@@ -507,6 +543,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         cpuPendingBuilds.delete(key);
         if (!gpuPendingBuilds.has(key)) {
           entry.failed = job.failures > 0;
+          entry.validEmpty = job.failures === 0 && entry.group.children.length === 0;
           entry.ready = true;
         }
       }
@@ -565,7 +602,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       }
       if (entry.failed) failedPages++;
       else if (!entry.ready) buildingPages++;
-      else readyPages++;
+      else if (entry.group.children.length > 0 || entry.colliderIds.length > 0 || entry.validEmpty) readyPages++;
+      else buildingPages++;
     }
     return { readyPages, buildingPages, failedPages };
   };
@@ -648,6 +686,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         evictions,
         colliderEvictions,
         streamedColliderPages: activeColliderPages(),
+        validEmptyPages: validEmptyPages(),
         colliderRegistrations,
         colliderRemovals,
       };
