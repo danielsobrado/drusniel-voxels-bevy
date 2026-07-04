@@ -145,6 +145,29 @@ describe("summary tile builder", () => {
     expect(heightSamples).toBe((tileCells + 2) * (tileCells + 2));
   });
 
+  it("uses cached height for water coverage without fallback resampling", () => {
+    const tileCells = 2;
+    let fallbackWaterSamples = 0;
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells },
+      terrainSampler: {
+        sampleHeight: (_x, z) => z < 64 ? 10 : 80,
+        sampleWaterCoverageForHeight: (_x, _z, height) => height < 50 ? 1 : 0,
+        sampleWaterCoverage: () => {
+          fallbackWaterSamples++;
+          return 0;
+        },
+      },
+      frameIndex: 0,
+      nowMs: 0,
+    });
+
+    expect(fallbackWaterSamples).toBe(0);
+    expect(tile.samples.some((sample) => sample.waterCoverage === 1)).toBe(true);
+    expect(tile.samples.some((sample) => sample.waterCoverage === 0)).toBe(true);
+  });
+
   it("finite difference normal computation works", () => {
     const h = () => 50;
     const [nx, ny, nz] = computeNormalFiniteDifference(h, 0, 0, 1);
