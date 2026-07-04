@@ -198,6 +198,7 @@ function runPerfModeTreeStartup(input: TreeStartupInput): TreeStartupResult {
     setDepthPrepassMaxLod: () => undefined,
     markPatchesDirty: () => undefined,
     getLightingProxies: () => [],
+    getLightingProxiesBudgeted: () => ({ proxies: [], ready: true }),
     bakeImpostors: async () => ({ supported: false, reason: "disabled in CLOD perf mode" }),
     dispose: () => undefined,
   } as unknown as ReturnType<typeof createTreeController>["system"];
