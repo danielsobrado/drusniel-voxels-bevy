@@ -229,7 +229,7 @@ export class GpuChunkMesher {
     this.device.queue.submit([enc.finish()]);
 
     let countMapped = false;
-    let counts: Uint32Array;
+    let counts = new Uint32Array(2);
     try {
       await this.countReadback.mapAsync(GPUMapMode.READ);
       countMapped = true;
