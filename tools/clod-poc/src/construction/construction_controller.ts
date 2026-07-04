@@ -342,6 +342,11 @@ class ConstructionControllerImpl implements ConstructionController {
     return this.raycaster.ray.clone();
   }
 
+  private inPlacementWorld(x: number, z: number): boolean {
+    return this.config.placement.unboundedWorld === true
+      || (x >= 0 && x <= this.deps.worldCells && z >= 0 && z <= this.deps.worldCells);
+  }
+
   private raycastTerrain(ray: THREE.Ray): TerrainHitPoint | null {
     const maxDistance = this.config.placement.maxRayDistanceM;
     const step = this.config.placement.terrainStepM;
@@ -351,8 +356,7 @@ class ConstructionControllerImpl implements ConstructionController {
 
     for (let t = 0; t <= maxDistance; t += step) {
       ray.at(t, scratch);
-      const inWorld = scratch.x >= 0 && scratch.x <= this.deps.worldCells && scratch.z >= 0 && scratch.z <= this.deps.worldCells;
-      if (!inWorld) {
+      if (!this.inPlacementWorld(scratch.x, scratch.z)) {
         previousT = null;
         continue;
       }
@@ -364,8 +368,7 @@ class ConstructionControllerImpl implements ConstructionController {
         for (let i = 0; i < RAYCAST_REFINE_STEPS; i += 1) {
           const mid = (lo + hi) * 0.5;
           ray.at(mid, scratch);
-          const midInWorld = scratch.x >= 0 && scratch.x <= this.deps.worldCells && scratch.z >= 0 && scratch.z <= this.deps.worldCells;
-          if (!midInWorld) {
+          if (!this.inPlacementWorld(scratch.x, scratch.z)) {
             lo = mid;
             continue;
           }
@@ -758,33 +761,36 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private syncUi(force = false): void {
-    const selected = this.config.pieces[this.selectedIndex] ?? null;
-    const material = this.selectedMaterial();
-    const key = [
-      this.active,
-      this.snapEnabled,
-      this.selectedIndex,
-      this.selectedMaterialIndex,
-      this.placedPieces.length,
-      this.currentCandidate?.valid ?? false,
-      this.currentCandidate?.reason ?? "",
-      this.lastPlacementMessage,
-    ].join("|");
-    if (!force && key === this.lastUiStateKey) return;
-    this.lastUiStateKey = key;
-    this.menu.style.display = this.active ? "block" : "none";
-    this.menu.innerHTML = this.renderMenuHtml(selected, material);
-  }
-
-  private renderMenuHtml(selected: ConstructionPieceDef | null, material: ConstructionMaterial): string {
-    return renderConstructionMenuHtml({
-      pieces: this.config.pieces,
-      selectedPiece: selected,
-      selectedIndex: this.selectedIndex,
-      selectedMaterial: material,
+    const selected = this.selectedPiece();
+    const selectedMaterial = this.selectedMaterial();
+    const stateKey = JSON.stringify({
+      active: this.active,
       snapEnabled: this.snapEnabled,
-      currentCandidate: this.currentCandidate,
+      selectedIndex: this.selectedIndex,
+      selectedMaterial,
+      rotationQuarterTurns: this.rotationQuarterTurns,
+      currentValid: this.currentCandidate?.valid ?? false,
+      currentReason: this.currentCandidate?.reason ?? null,
+      placedPieces: this.placedPieces.length,
+      snapPoints: this.snapIndex.size(),
       lastPlacementMessage: this.lastPlacementMessage,
     });
+    if (!force && stateKey === this.lastUiStateKey) return;
+    this.lastUiStateKey = stateKey;
+    this.menu.innerHTML = renderConstructionMenuHtml({
+      active: this.active,
+      snapEnabled: this.snapEnabled,
+      pieces: this.config.pieces,
+      selectedPieceId: selected.id,
+      rotationQuarterTurns: this.rotationQuarterTurns,
+      placedPieces: this.placedPieces.length,
+      indexedSnapPoints: this.snapIndex.size(),
+      currentValid: this.currentCandidate?.valid ?? false,
+      currentReason: this.currentCandidate?.reason ?? null,
+      materialOptions: CONSTRUCTION_MATERIAL_OPTIONS,
+      selectedMaterial,
+      lastMessage: this.lastPlacementMessage,
+    });
+    this.menu.style.display = this.active ? "block" : "none";
   }
 }
