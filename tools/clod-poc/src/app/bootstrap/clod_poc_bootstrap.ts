@@ -34,52 +34,10 @@ import {
   materialChurnDiagnostics,
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
-const MANUAL_INFINITE_ISLANDS_LIVE_RADIUS_M = "96";
-
-function isManualInfiniteIslandsPlayer(searchParams: URLSearchParams): boolean {
-  return searchParams.get("scene") === INFINITE_ISLANDS_SCENE
-    && searchParams.has("x")
-    && searchParams.has("z")
-    && searchParams.get("acceptance") !== "1"
-    && searchParams.get("proceduralDebug") !== "biome"
-    && searchParams.get("fullLongView") !== "1";
-}
-
-function syncSearchParamsToUrl(searchParams: URLSearchParams): void {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.search = searchParams.toString();
-  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
-function applyManualInfiniteIslandsDefaults(searchParams: URLSearchParams): boolean {
-  if (!isManualInfiniteIslandsPlayer(searchParams)) return false;
-  const applied: string[] = [];
-  const setDefault = (key: string, value: string): void => {
-    if (searchParams.has(key)) return;
-    searchParams.set(key, value);
-    applied.push(`${key}=${value}`);
-  };
-
-  setDefault("liveBubble", "0");
-  setDefault("liveBubbleRadius", MANUAL_INFINITE_ISLANDS_LIVE_RADIUS_M);
-  setDefault("shadowProxy", "0");
-  setDefault("canopy", "0");
-  setDefault("farShellCpuHeights", "0");
-
-  if (applied.length > 0) {
-    syncSearchParamsToUrl(searchParams);
-    console.info(`[infinite-islands] manual playable defaults applied: ${applied.join(", ")}`);
-  }
-  return true;
-}
-
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
   if (await runEarlyRoutes(searchParams)) return;
 
-  const manualInfiniteIslandsPlayer = applyManualInfiniteIslandsDefaults(searchParams);
   installGlobalErrorHooks();
   const clodRuntime = parseClodRuntimeConfig();
   materialChurnDiagnostics.configure(materialChurnConfigForQuery(clodRuntime.materialChurn, searchParams));
@@ -343,11 +301,6 @@ export async function bootstrapClodPoc() {
     });
     if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) {
       infiniteFarShell.setReceiveSunShadows(true);
-    }
-
-    if (manualInfiniteIslandsPlayer && postRenderer.longViewHooks?.stats) {
-      postRenderer.longViewHooks.stats.counters.manual_infinite_islands_playable_defaults = 1;
-      postRenderer.longViewHooks.stats.counters.far_shell_cpu_heights_enabled = farShellCpuHeightsEnabled ? 1 : 0;
     }
 
     if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {

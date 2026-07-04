@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import {
   createNearFieldBubbleController,
@@ -11,13 +11,17 @@ import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import type { TerrainMaterialController } from "../material/terrain_material_controller.js";
 import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 
+const terrainMocks = vi.hoisted(() => ({
+  meshChunk: vi.fn(() => {
+    throw new Error("cpu fallback fail");
+  }),
+}));
+
 vi.mock("../../terrain/terrain.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../terrain/terrain.js")>();
   return {
     ...actual,
-    meshChunk: () => {
-      throw new Error("cpu fallback fail");
-    },
+    meshChunk: terrainMocks.meshChunk,
   };
 });
 
@@ -167,6 +171,13 @@ describe("liveBubbleOwnsPageView", () => {
 });
 
 describe("createNearFieldBubbleController", () => {
+  beforeEach(() => {
+    terrainMocks.meshChunk.mockReset();
+    terrainMocks.meshChunk.mockImplementation(() => {
+      throw new Error("cpu fallback fail");
+    });
+  });
+
   it("keeps welded page visible when GPU chunk meshing fails", async () => {
     const rejectMesher = {
       meshChunk: vi.fn(() => Promise.reject(new Error("gpu fail"))),
@@ -370,6 +381,81 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.requiredPages).toBeGreaterThan(1);
     expect(stats.readyPages).toBe(0);
     expect(stats.buildingPages).toBe(stats.requiredPages);
+  });
+
+  it("waits for GPU instead of CPU meshing required streaming pages", () => {
+    const controller = makeController({
+      getGpuMesher: () => null,
+      streamingLiveTerrain: true,
+    });
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(terrainMocks.meshChunk).not.toHaveBeenCalled();
+    expect(stats.requiredPages).toBe(1);
+    expect(stats.buildingPages).toBe(1);
+    expect(stats.readyPages).toBe(0);
+    expect(stats.failedPages).toBe(0);
+  });
+
+  it("promotes waiting streaming pages when the GPU mesher becomes available", () => {
+    let mesher: { meshChunk: ReturnType<typeof vi.fn> } | null = null;
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher | null,
+      streamingLiveTerrain: true,
+    });
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 2,
+    });
+
+    expect(terrainMocks.meshChunk).not.toHaveBeenCalled();
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps CPU fallback for non-streaming pages without a GPU mesher", () => {
+    terrainMocks.meshChunk.mockImplementation(() => NON_EMPTY_CHUNK);
+    const controller = makeController({
+      getGpuMesher: () => null,
+      streamingLiveTerrain: false,
+    });
+    const node = makeNode();
+    const view = makeView(node);
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(24, 0, 24),
+      bubbleViews: [view],
+      getView: (id) => (id === node.id ? view : undefined),
+      frameId: 1,
+    });
+
+    expect(terrainMocks.meshChunk).toHaveBeenCalled();
   });
 
   it("counts streamed collider pages by page, not by chunk collider", async () => {

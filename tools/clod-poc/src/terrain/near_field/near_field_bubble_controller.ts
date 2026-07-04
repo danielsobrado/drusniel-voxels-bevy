@@ -107,6 +107,11 @@ interface PendingGpuPageBuild {
   failures: number;
 }
 
+interface PendingGpuWaitPageBuild {
+  px: number;
+  pz: number;
+}
+
 function pageGroupKey(px: number, pz: number): string {
   return `L0:${px},${pz}`;
 }
@@ -218,6 +223,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const chunkGroups = new Map<string, ChunkGroupEntry>();
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
+  const gpuWaitBuilds = new Map<string, PendingGpuWaitPageBuild>();
   const gpuPendingBuilds = new Map<string, PendingGpuPageBuild>();
   const terrainColliders = deps.terrainColliders ?? null;
   let colliderRegistrations = 0;
@@ -286,50 +292,19 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }
     chunkGroups.delete(nodeId);
     cpuPendingBuilds.delete(nodeId);
+    gpuWaitBuilds.delete(nodeId);
     gpuPendingBuilds.delete(nodeId);
   };
 
-  const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
-    const existing = chunkGroups.get(key);
-    if (existing) return existing;
-    const group = new THREE.Group();
-    const mats: TerrainMaterialHandle[] = [];
-    const unsubs: Array<() => void> = [];
-    const colliderIds: string[] = [];
-    const worldBounds = buildWorldBoundsForPage(px, pz);
-    const gpuMesher = deps.getGpuMesher();
-
-    if (gpuMesher) {
-      const entry: ChunkGroupEntry = {
-        group,
-        mats,
-        unsubs,
-        colliderIds,
-        ready: false,
-        failed: false,
-        centerX,
-        centerZ,
-        lastTouchFrame: 0,
-      };
-      group.visible = false;
-      deps.scene.add(group);
-      chunkGroups.set(key, entry);
-      const edits = resolveDigEdits(getDigEditsSnapshot());
-      const chunks: Array<[number, number]> = [];
-      for (let dz = 0; dz < P; dz++) {
-        for (let dx = 0; dx < P; dx++) chunks.push([dx, dz]);
-      }
-      gpuPendingBuilds.set(key, { px, pz, worldBounds, edits, chunks, inflight: 0, failures: 0 });
-      return entry;
-    }
-
-    // CPU fallback: never mesh a whole page synchronously — queue the chunks
-    // and drain them in update() under a per-frame budget. The entry follows
-    // the same deferred-ready contract as the GPU path.
-    const chunks: Array<[number, number]> = [];
-    for (let dz = 0; dz < P; dz++) {
-      for (let dx = 0; dx < P; dx++) chunks.push([dx, dz]);
-    }
+  const createDeferredEntry = (
+    key: string,
+    group: THREE.Group,
+    mats: TerrainMaterialHandle[],
+    unsubs: Array<() => void>,
+    colliderIds: string[],
+    centerX: number,
+    centerZ: number,
+  ): ChunkGroupEntry => {
     group.visible = false;
     deps.scene.add(group);
     const entry: ChunkGroupEntry = {
@@ -344,8 +319,62 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       lastTouchFrame: 0,
     };
     chunkGroups.set(key, entry);
-    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks, failures: 0 });
     return entry;
+  };
+
+  const pageChunks = (): Array<[number, number]> => {
+    const chunks: Array<[number, number]> = [];
+    for (let dz = 0; dz < P; dz++) {
+      for (let dx = 0; dx < P; dx++) chunks.push([dx, dz]);
+    }
+    return chunks;
+  };
+
+  const enqueueGpuPageBuild = (key: string, px: number, pz: number, worldBounds: WorldBounds): void => {
+    const edits = resolveDigEdits(getDigEditsSnapshot());
+    gpuPendingBuilds.set(key, { px, pz, worldBounds, edits, chunks: pageChunks(), inflight: 0, failures: 0 });
+  };
+
+  const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
+    const existing = chunkGroups.get(key);
+    if (existing) return existing;
+    const group = new THREE.Group();
+    const mats: TerrainMaterialHandle[] = [];
+    const unsubs: Array<() => void> = [];
+    const colliderIds: string[] = [];
+    const worldBounds = buildWorldBoundsForPage(px, pz);
+    const gpuMesher = deps.getGpuMesher();
+
+    if (gpuMesher) {
+      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
+      enqueueGpuPageBuild(key, px, pz, worldBounds);
+      return entry;
+    }
+
+    if (liveStreamingEnabled) {
+      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
+      gpuWaitBuilds.set(key, { px, pz });
+      return entry;
+    }
+
+    // CPU fallback: never mesh a whole page synchronously — queue the chunks
+    // and drain them in update() under a per-frame budget. The entry follows
+    // the same deferred-ready contract as the GPU path.
+    const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
+    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: pageChunks(), failures: 0 });
+    return entry;
+  };
+
+  const promoteGpuWaitBuilds = () => {
+    if (gpuWaitBuilds.size === 0 || !deps.getGpuMesher()) return;
+    const jobs = [...gpuWaitBuilds.entries()]
+      .sort((a, b) => (chunkGroups.get(b[0])?.lastTouchFrame ?? -1) - (chunkGroups.get(a[0])?.lastTouchFrame ?? -1));
+    for (const [key, job] of jobs) {
+      const entry = chunkGroups.get(key);
+      gpuWaitBuilds.delete(key);
+      if (!entry || entry.ready || entry.failed || gpuPendingBuilds.has(key)) continue;
+      enqueueGpuPageBuild(key, job.px, job.pz, buildWorldBoundsForPage(job.px, job.pz));
+    }
   };
 
   const completeGpuChunk = (key: string, entry: ChunkGroupEntry, job: PendingGpuPageBuild) => {
@@ -537,6 +566,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           }
         }
 
+        promoteGpuWaitBuilds();
         drainGpuPendingBuilds();
         drainCpuPendingBuilds(tBubbleStart);
         const evictStats = evictColliderBearingCache(input.bubbleCenter, input.bubbleRadius);

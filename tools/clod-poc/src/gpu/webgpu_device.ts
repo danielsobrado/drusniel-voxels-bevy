@@ -28,7 +28,16 @@ export async function requestWebGpuDevice(
     };
   }
 
-  const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+  let adapter: GPUAdapter | null;
+  try {
+    adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "adapter-unavailable",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   if (!adapter) {
     return {
       ok: false,
