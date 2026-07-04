@@ -54,6 +54,7 @@ export interface ConstructionPlacementConfig {
   terrainStepM: number;
   overlapPaddingM: number;
   storageKey: string;
+  unboundedWorld?: boolean;
 }
 
 export interface ConstructionGhostConfig {
