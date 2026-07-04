@@ -7,6 +7,25 @@ import type { ClodPageNode } from "../../types.js";
 import type { AppRenderer } from "./renderer_startup.js";
 
 const AUTOMATION_POSE_LOOK_DISTANCE_M = 100;
+const SEEDED_COUNTERS = [
+  "live_bubble_built_total",
+  "live_bubble_evictions_total",
+  "live_bubble_probe_active",
+  "live_bubble_probe_built_total",
+  "live_bubble_probe_evictions_total",
+  "live_bubble_probe_collider_removals_total",
+  "live_clod_stream_built_total",
+  "live_clod_stream_evictions_total",
+  "live_clod_stream_scheduled_pages_this_frame",
+  "live_clod_stream_apply_pages_total",
+  "live_clod_stream_stale_discards_total",
+  "live_clod_stream_probe_active",
+  "live_clod_stream_probe_requested_pages_total",
+  "live_clod_stream_probe_apply_pages_total",
+  "live_clod_stream_probe_evictions_total",
+  "live_clod_stream_probe_stale_discards_total",
+  "live_clod_stream_out_of_world_edits_supported",
+] as const;
 
 export function publishTerrainSummaryForDiagnostics(summary: TerrainSummaryField): void {
   window.__drusnielTerrainSummary = summary;
@@ -123,6 +142,7 @@ export function seedLongViewStats(
   lvStats.counters["far_summary_tiles_built_this_frame"] = 0;
   lvStats.counters["far_summary_cache_size"] = 0;
   lvStats.counters["far_summary_fallback_samples"] = 0;
+  for (const counter of SEEDED_COUNTERS) lvStats.counters[counter] = 0;
 }
 
 export function createClodErrorComputeAccess(input: {
