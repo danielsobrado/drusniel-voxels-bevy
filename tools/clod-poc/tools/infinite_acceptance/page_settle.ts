@@ -13,14 +13,16 @@ function navigationContextWasLost(error: unknown): boolean {
 
 export async function settlePage(page: Page, frames: number, timeoutMs: number): Promise<void> {
   const fallbackMs = Math.min(timeoutMs, Math.max(MIN_SETTLE_MS, frames * FRAME_SETTLE_MS));
-  const settleInPage = page.evaluate(async (settleFrames) => {
+  // The evaluated closure must be self-contained: it runs in the page, where
+  // module-scope constants do not exist, so every input is passed as the arg.
+  const settleInPage = page.evaluate(async (args: { frames: number; safetyMs: number }) => {
     const hooks = (window as typeof window & {
       __drusnielClod?: { settle?: ((frames?: number) => Promise<void>) | null };
     }).__drusnielClod;
 
     const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
     const waitFrames = new Promise<void>((resolve) => {
-      let remaining = Math.max(1, Math.floor(settleFrames));
+      let remaining = Math.max(1, Math.floor(args.frames));
       const tick = () => {
         remaining -= 1;
         if (remaining <= 0) resolve();
@@ -28,11 +30,11 @@ export async function settlePage(page: Page, frames: number, timeoutMs: number):
       };
       window.requestAnimationFrame(tick);
     });
-    const hookWait = hooks?.settle?.(settleFrames) ?? waitFrames;
-    const safetyWait = sleep(Math.min(IN_PAGE_TIMEOUT_MS, Math.max(MIN_SETTLE_MS, settleFrames * FRAME_SETTLE_MS)));
+    const hookWait = hooks?.settle?.(args.frames) ?? waitFrames;
+    const safetyWait = sleep(args.safetyMs);
 
     await Promise.race([hookWait, waitFrames, safetyWait]);
-  }, frames);
+  }, { frames, safetyMs: Math.min(IN_PAGE_TIMEOUT_MS, Math.max(MIN_SETTLE_MS, frames * FRAME_SETTLE_MS)) });
 
   try {
     await Promise.race([settleInPage, page.waitForTimeout(fallbackMs)]);

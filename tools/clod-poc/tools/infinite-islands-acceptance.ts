@@ -411,6 +411,10 @@ function failedImageSanity(message = "screenshot was not captured"): ImageSanity
 
 async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Promise<SceneResult> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 });
+  // This script runs under tsx, whose esbuild keepNames transform injects
+  // __name(...) helper calls into functions inside page.evaluate closures.
+  // Define __name in the page (string form so this line itself is immune).
+  await page.addInitScript({ content: "globalThis.__name = globalThis.__name || ((fn) => fn);" });
   const consoleWarnings: string[] = [];
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
