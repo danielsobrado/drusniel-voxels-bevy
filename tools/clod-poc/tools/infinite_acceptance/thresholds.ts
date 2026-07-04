@@ -45,6 +45,15 @@ export const REQUIRED_COUNTERS = [
   "live_clod_stream_failed_pages",
   "live_clod_stream_evictions",
   "live_clod_stream_build_ms",
+  "live_clod_stream_pending_pages",
+  "live_clod_stream_build_budget",
+  "live_clod_stream_inflight_batches",
+  "live_clod_stream_ready_pages",
+  "live_clod_stream_apply_pages_this_frame",
+  "live_clod_stream_apply_ms",
+  "live_clod_stream_stale_discards",
+  "live_clod_stream_worker_build_ms",
+  "live_clod_stream_worker_transfer_bytes",
   "infinite_hydrology_outside_sample_valid",
   "infinite_hydrology_outside_body_mask",
   "infinite_hydrology_outside_depth_m",
@@ -58,7 +67,7 @@ export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
 export interface ThresholdRule {
   key: RequiredCounter;
   label: string;
-  pass: (value: number) => boolean;
+  pass: (value: number, values: Readonly<Record<string, number>>) => boolean;
 }
 
 export const THRESHOLD_RULES: ThresholdRule[] = [
@@ -85,13 +94,19 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_bubble_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
   { key: "live_bubble_streamed_collider_pages", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
-  { key: "live_bubble_collider_removals", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "live_clod_stream_required_pages", label: "must be > 0", pass: (value) => value > 0 },
-  { key: "live_clod_stream_cached_pages", label: "must be >= 0", pass: (value) => value >= 0 },
-  { key: "live_clod_stream_built_this_frame", label: "must be >= 0", pass: (value) => value >= 0 },
+  {
+    key: "live_clod_stream_cached_pages",
+    label: "must be > 0 when worker stream roots are required and enabled",
+    pass: (value, values) => value > 0
+      || values["live_clod_stream_build_budget"] === 0
+      || values["live_clod_stream_required_pages"] === 0,
+  },
   { key: "live_clod_stream_failed_pages", label: "must equal 0", pass: (value) => value === 0 },
-  { key: "live_clod_stream_evictions", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "live_clod_stream_build_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
+  { key: "live_clod_stream_apply_ms", label: "must be finite, >= 0 and <= 2", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 2 },
+  { key: "live_clod_stream_worker_build_ms", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
+  { key: "live_clod_stream_worker_transfer_bytes", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
   { key: "infinite_hydrology_outside_sample_valid", label: "must equal 1", pass: (value) => value === 1 },
   { key: "infinite_hydrology_nonrepeat_delta", label: "must be finite and > 0", pass: (value) => Number.isFinite(value) && value > 0 },
   { key: "infinite_hydrology_nonrepeat_ok", label: "must equal 1", pass: (value) => value === 1 },
@@ -122,7 +137,7 @@ export function evaluateThresholds(values: Record<string, number>): ThresholdEva
   for (const rule of THRESHOLD_RULES) {
     const value = values[rule.key];
     if (value === undefined) continue;
-    if (!rule.pass(value)) failures.push(`${rule.key}=${value} failed: ${rule.label}`);
+    if (!rule.pass(value, values)) failures.push(`${rule.key}=${value} failed: ${rule.label}`);
   }
   return {
     values,
