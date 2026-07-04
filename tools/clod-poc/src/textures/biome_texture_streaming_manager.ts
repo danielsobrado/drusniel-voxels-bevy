@@ -62,8 +62,19 @@ const BIOME_TEXTURE_MATERIAL_BY_ID: Record<BiomeId, BiomeProceduralMaterialId> =
 const DEFAULT_PROBE_DISTANCE_M = 96;
 const DEFAULT_MIN_MOVE_DISTANCE_M = 8;
 
+type IdleScheduler = (callback: () => void) => unknown;
+
 export function biomeTextureMaterialForBiomeId(biomeId: number): BiomeProceduralMaterialId {
   return BIOME_TEXTURE_MATERIAL_BY_ID[normalizeBiomeId(biomeId)];
+}
+
+function scheduleIdleTask(callback: () => void): void {
+  const host = globalThis as typeof globalThis & { requestIdleCallback?: IdleScheduler };
+  if (host.requestIdleCallback) {
+    host.requestIdleCallback(callback);
+    return;
+  }
+  setTimeout(callback, 0);
 }
 
 export function createBiomeTextureStreamingManager(
@@ -76,6 +87,7 @@ export function createBiomeTextureStreamingManager(
   let lastX: number | null = null;
   let lastZ: number | null = null;
   let activeSignature = config.terrain.active_biome_materials.join("|");
+  let pendingSignature: string | null = null;
   const statsState: BiomeTextureStreamingStats = {
     currentBiomeId: null,
     adjacentBiomeId: null,
@@ -139,24 +151,34 @@ export function createBiomeTextureStreamingManager(
       return { changed: false, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
     }
 
-    const nextConfig = withActiveBiomeProceduralMaterials(config, nextActive);
-    const start = performance.now();
-    try {
-      deps.onActiveWindowChanged(nextConfig, nextConfig.terrain.active_biome_materials);
-      config = nextConfig;
-      activeSignature = nextConfig.terrain.active_biome_materials.join("|");
-      statsState.textureWindowSwaps++;
-      statsState.activeBiomeMaterials = [...nextConfig.terrain.active_biome_materials];
-      statsState.fallbackBiomeTextureCount = Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - statsState.activeBiomeMaterials.length);
-      statsState.lastRebuildMs = performance.now() - start;
-      statsState.lastError = null;
-      logger.info?.(`[texture-streaming] terrain biome window ${statsState.activeBiomeMaterials.join(", ")}`);
-    } catch (error) {
-      statsState.lastError = error instanceof Error ? error.message : String(error);
-      logger.error?.("[texture-streaming] failed to rebuild terrain biome texture window", error);
+    if (pendingSignature === signature) {
+      return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: nextActive };
     }
 
-    return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
+    const nextConfig = withActiveBiomeProceduralMaterials(config, nextActive);
+    pendingSignature = signature;
+    scheduleIdleTask(() => {
+      if (pendingSignature !== signature) return;
+      const start = performance.now();
+      try {
+        deps.onActiveWindowChanged(nextConfig, nextConfig.terrain.active_biome_materials);
+        config = nextConfig;
+        activeSignature = nextConfig.terrain.active_biome_materials.join("|");
+        statsState.textureWindowSwaps++;
+        statsState.activeBiomeMaterials = [...nextConfig.terrain.active_biome_materials];
+        statsState.fallbackBiomeTextureCount = Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - statsState.activeBiomeMaterials.length);
+        statsState.lastRebuildMs = performance.now() - start;
+        statsState.lastError = null;
+        logger.info?.(`[texture-streaming] terrain biome window ${statsState.activeBiomeMaterials.join(", ")}`);
+      } catch (error) {
+        statsState.lastError = error instanceof Error ? error.message : String(error);
+        logger.error?.("[texture-streaming] failed to rebuild terrain biome texture window", error);
+      } finally {
+        if (pendingSignature === signature) pendingSignature = null;
+      }
+    });
+
+    return { changed: true, currentBiomeId, adjacentBiomeId, activeBiomeMaterials: nextActive };
   };
 
   return {
