@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 
 const MIN_SETTLE_MS = 1_000;
-const FRAME_SETTLE_MS = 50;
+const FRAME_SETTLE_MS = 80;
 const IN_PAGE_TIMEOUT_MS = 15_000;
 
 function navigationContextWasLost(error: unknown): boolean {
@@ -29,7 +29,7 @@ export async function settlePage(page: Page, frames: number, timeoutMs: number):
       window.requestAnimationFrame(tick);
     });
     const hookWait = hooks?.settle?.(settleFrames) ?? waitFrames;
-    const safetyWait = sleep(Math.min(IN_PAGE_TIMEOUT_MS, Math.max(MIN_SETTLE_MS, settleFrames * 80)));
+    const safetyWait = sleep(Math.min(IN_PAGE_TIMEOUT_MS, Math.max(MIN_SETTLE_MS, settleFrames * FRAME_SETTLE_MS)));
 
     await Promise.race([hookWait, waitFrames, safetyWait]);
   }, frames);
