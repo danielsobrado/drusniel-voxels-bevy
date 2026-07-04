@@ -31,12 +31,15 @@ const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
 
 type JsonRecord = Record<string, unknown>;
 
+type SceneExtra = Record<string, string>;
+
 interface SceneSpec {
   name: string;
   screenshot: string;
   freeze: boolean;
   proceduralDebug?: string;
   cam?: string;
+  extra?: SceneExtra;
   summary?: boolean;
 }
 
@@ -54,6 +57,7 @@ interface SceneResult extends SceneReportInput {
 
 const OUTSIDE_STARTUP_CAM = "2048,96,2048,2.6500,-0.4300,55";
 const OUTSIDE_HORIZON_CAM = "2048,260,4096,2.6500,-0.3000,55";
+const OUTSIDE_STARTUP_SPAWN: SceneExtra = { x: "2048", z: "2048", yaw: "2.65" };
 
 const SCENES: SceneSpec[] = [
   {
@@ -61,7 +65,7 @@ const SCENES: SceneSpec[] = [
     screenshot: "walk.png",
     freeze: false,
     proceduralDebug: "biome",
-    cam: OUTSIDE_STARTUP_CAM,
+    extra: OUTSIDE_STARTUP_SPAWN,
     summary: true,
   },
   {
@@ -267,6 +271,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     world: "16",
     clodPerf: "1",
     webgpuSelection: "1",
+    ...(scene.extra ?? {}),
   };
   if (scene.proceduralDebug) extra["proceduralDebug"] = scene.proceduralDebug;
   const url = clodUrl({
