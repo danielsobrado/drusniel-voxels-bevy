@@ -5,8 +5,94 @@ import type { TerrainSource } from "./terrainSource.js";
 import { sampleMacroFallback } from "./terrainSource.js";
 import { floorDiv, summaryTileKeyToString, summaryTileOrigin, worldToSummaryTileKey } from "./keys.js";
 
+const DEADLINE_CHECK_INTERVAL_CELLS = 8;
+
+export type FarSummaryTileBuildState = {
+  key: SummaryTileKey;
+  ringIndex: number;
+  config: NaadfPocConfig;
+  source: TerrainSource;
+  revision: number;
+  originX: number;
+  originZ: number;
+  cellM: number;
+  resolution: number;
+  count: number;
+  cursor: number;
+  minHeight: Float32Array;
+  maxHeight: Float32Array;
+  avgHeight: Float32Array;
+  dominantMaterial: Uint16Array;
+  canopyCoverage: Float32Array;
+  waterCoverage: Float32Array;
+};
+
 export function farTileKeyString(key: SummaryTileKey): string {
   return summaryTileKeyToString(key);
+}
+
+export function createFarSummaryTileBuild(
+  key: SummaryTileKey,
+  ringIndex: number,
+  config: NaadfPocConfig,
+  source: TerrainSource,
+  revision: number,
+): FarSummaryTileBuildState {
+  const ring = config.farClipmap.rings[ringIndex]!;
+  const tileCells = config.farClipmap.tileCells;
+  const origin = summaryTileOrigin(key, ring.cellM, tileCells);
+  const count = tileCells * tileCells;
+  return {
+    key,
+    ringIndex,
+    config,
+    source,
+    revision,
+    originX: origin.x,
+    originZ: origin.z,
+    cellM: ring.cellM,
+    resolution: tileCells,
+    count,
+    cursor: 0,
+    minHeight: new Float32Array(count),
+    maxHeight: new Float32Array(count),
+    avgHeight: new Float32Array(count),
+    dominantMaterial: new Uint16Array(count),
+    canopyCoverage: new Float32Array(count),
+    waterCoverage: new Float32Array(count),
+  };
+}
+
+export function stepFarSummaryTileBuild(build: FarSummaryTileBuildState, deadlineMs: number): boolean {
+  let checkedCells = 0;
+  while (build.cursor < build.count) {
+    sampleFarSummaryCell(build, build.cursor);
+    build.cursor++;
+    checkedCells++;
+    if (checkedCells >= DEADLINE_CHECK_INTERVAL_CELLS) {
+      checkedCells = 0;
+      if (performance.now() >= deadlineMs) return false;
+    }
+  }
+  return true;
+}
+
+export function finishFarSummaryTileBuild(build: FarSummaryTileBuildState): FarSummaryTile {
+  return {
+    key: build.key,
+    originX: build.originX,
+    originZ: build.originZ,
+    cellM: build.cellM,
+    resolution: build.resolution,
+    minHeight: build.minHeight,
+    maxHeight: build.maxHeight,
+    avgHeight: build.avgHeight,
+    dominantMaterial: build.dominantMaterial,
+    canopyCoverage: build.canopyCoverage,
+    waterCoverage: build.waterCoverage,
+    revision: build.revision,
+    state: "ready",
+  };
 }
 
 export function buildFarSummaryTile(
@@ -16,63 +102,9 @@ export function buildFarSummaryTile(
   source: TerrainSource,
   revision: number,
 ): FarSummaryTile {
-  const ring = config.farClipmap.rings[ringIndex]!;
-  const tileCells = config.farClipmap.tileCells;
-  const origin = summaryTileOrigin(key, ring.cellM, tileCells);
-  const resolution = tileCells;
-  const count = resolution * resolution;
-  const minHeight = new Float32Array(count);
-  const maxHeight = new Float32Array(count);
-  const avgHeight = new Float32Array(count);
-  const dominantMaterial = new Uint16Array(count);
-  const canopyCoverage = new Float32Array(count);
-  const waterCoverage = new Float32Array(count);
-
-  for (let sz = 0; sz < resolution; sz++) {
-    for (let sx = 0; sx < resolution; sx++) {
-      const wx = origin.x + (sx + 0.5) * ring.cellM;
-      const wz = origin.z + (sz + 0.5) * ring.cellM;
-      const idx = sz * resolution + sx;
-      const s = source.sample(wx, wz);
-      const h = Number.isFinite(s.height) ? s.height : 0;
-      const hMin = Math.min(
-        h,
-        source.sampleHeight(wx - ring.cellM * 0.25, wz),
-        source.sampleHeight(wx + ring.cellM * 0.25, wz),
-        source.sampleHeight(wx, wz - ring.cellM * 0.25),
-        source.sampleHeight(wx, wz + ring.cellM * 0.25),
-      );
-      const hMax = Math.max(
-        h,
-        source.sampleHeight(wx - ring.cellM * 0.25, wz),
-        source.sampleHeight(wx + ring.cellM * 0.25, wz),
-        source.sampleHeight(wx, wz - ring.cellM * 0.25),
-        source.sampleHeight(wx, wz + ring.cellM * 0.25),
-      );
-      minHeight[idx] = hMin;
-      maxHeight[idx] = hMax;
-      avgHeight[idx] = h;
-      dominantMaterial[idx] = s.material;
-      canopyCoverage[idx] = s.canopyCoverage;
-      waterCoverage[idx] = s.waterCoverage;
-    }
-  }
-
-  return {
-    key,
-    originX: origin.x,
-    originZ: origin.z,
-    cellM: ring.cellM,
-    resolution,
-    minHeight,
-    maxHeight,
-    avgHeight,
-    dominantMaterial,
-    canopyCoverage,
-    waterCoverage,
-    revision,
-    state: "ready",
-  };
+  const build = createFarSummaryTileBuild(key, ringIndex, config, source, revision);
+  stepFarSummaryTileBuild(build, Number.POSITIVE_INFINITY);
+  return finishFarSummaryTileBuild(build);
 }
 
 export type FarClipmapStore = Map<string, FarSummaryTile>;
@@ -114,6 +146,27 @@ export function sampleFarSummary(params: {
   }
 
   return macroOrUnknown(worldX, worldZ, source, ringIndex, false);
+}
+
+function sampleFarSummaryCell(build: FarSummaryTileBuildState, idx: number): void {
+  const sx = idx % build.resolution;
+  const sz = Math.floor(idx / build.resolution);
+  const wx = build.originX + (sx + 0.5) * build.cellM;
+  const wz = build.originZ + (sz + 0.5) * build.cellM;
+  const s = build.source.sample(wx, wz);
+  const h = Number.isFinite(s.height) ? s.height : 0;
+  const offset = build.cellM * 0.25;
+  const hL = build.source.sampleHeight(wx - offset, wz);
+  const hR = build.source.sampleHeight(wx + offset, wz);
+  const hD = build.source.sampleHeight(wx, wz - offset);
+  const hU = build.source.sampleHeight(wx, wz + offset);
+
+  build.minHeight[idx] = Math.min(h, hL, hR, hD, hU);
+  build.maxHeight[idx] = Math.max(h, hL, hR, hD, hU);
+  build.avgHeight[idx] = h;
+  build.dominantMaterial[idx] = s.material;
+  build.canopyCoverage[idx] = s.canopyCoverage;
+  build.waterCoverage[idx] = s.waterCoverage;
 }
 
 function sampleTileAtKey(
