@@ -2,6 +2,7 @@ import type * as THREE from "three";
 import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
+import { TerrainEditDirtyQueue } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
 import {
   canCommitBuild,
   canCommitTerrainEdit,
@@ -45,6 +46,7 @@ export function runTerrainEditStartup(
   } = input.runtime;
   const { updateInfo } = infoPanel;
   const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, input.searchParams);
+  const dirtyQueue = new TerrainEditDirtyQueue();
   const authorityOrigin = () => input.interaction.mode === "playing" ? input.player.position : null;
   const authorityCounters = () => input.longView.hooks?.stats?.counters ?? null;
 
@@ -103,6 +105,7 @@ export function runTerrainEditStartup(
     editAuthority,
     getAuthorityOrigin: authorityOrigin,
     getAuthorityCounters: authorityCounters,
+    dirtyQueue,
     refreshGrassStats: () => bindings.refreshGrassStats(),
     refreshTreeStats: () => bindings.refreshTreeStats(),
     refreshUnderstoryStats: () => bindings.refreshUnderstoryStats(),
