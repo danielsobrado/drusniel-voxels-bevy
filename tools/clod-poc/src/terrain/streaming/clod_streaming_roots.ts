@@ -105,6 +105,25 @@ function retryCooldownFrames(attempts: number): number {
   return Math.min(BUILD_RETRY_MAX_COOLDOWN_FRAMES, BUILD_RETRY_BASE_COOLDOWN_FRAMES * multiplier);
 }
 
+function clodCounters(): Record<string, number> | null {
+  const maybeWindow = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window;
+  return maybeWindow?.__drusnielClod?.stats?.counters ?? null;
+}
+
+function mirrorStreamingProbeCounters(stats: StreamingClodRootStats): void {
+  const counters = clodCounters();
+  if (!counters) return;
+  counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
+  counters["live_clod_stream_probe_active"] = stats.probeActive;
+  counters["live_clod_stream_probe_requested_pages_total"] = stats.probeRequestedPagesTotal;
+  counters["live_clod_stream_probe_apply_pages_total"] = stats.probeApplyPagesTotal;
+  counters["live_clod_stream_probe_evictions_total"] = stats.probeEvictionsTotal;
+  counters["live_clod_stream_probe_stale_discards_total"] = stats.probeStaleDiscardsTotal;
+  counters["live_clod_stream_out_of_world_edits_supported"] = stats.outOfWorldEditsSupported;
+}
+
 function registerGlobalStreamProbe(beginMovementProbe: () => void): void {
   const maybeWindow = (globalThis as typeof globalThis & {
     window?: {
@@ -335,6 +354,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         requiredNow = new Set();
         ready.length = 0;
         latest = emptyStats();
+        mirrorStreamingProbeCounters(latest);
         return latest;
       }
 
@@ -385,6 +405,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         probeStaleDiscardsTotal: probe.staleDiscardsTotal,
         outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
       };
+      mirrorStreamingProbeCounters(latest);
       return latest;
     },
     stats() {
