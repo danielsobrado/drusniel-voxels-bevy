@@ -8,6 +8,7 @@ import { carveRiversAndClassifyWater } from "./riverCarve.js";
 import { buildWaterSurface } from "./waterSurfaceBuild.js";
 import { buildFarWaterSurface } from "./farWaterSurface.js";
 import { buildMoistureField } from "./moistureField.js";
+import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import {
   HYDROLOGY_BODY_DRY,
   HYDROLOGY_BODY_LAKE,
@@ -49,14 +50,24 @@ const INFINITE_ISLANDS_SCENE = "infinite-islands";
 export class HydrologySystem {
   readonly grid: HydrologyGrid;
   readonly stats: HydrologyStats;
-  private readonly wrapWorldSamples: boolean;
+  private readonly infiniteWorldSamples: boolean;
+  private readonly sampler: TerrainHeightSampler;
+  private readonly drySentinelDepthM: number;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
-  private constructor(grid: HydrologyGrid, stats: HydrologyStats, wrapWorldSamples: boolean) {
+  private constructor(
+    grid: HydrologyGrid,
+    stats: HydrologyStats,
+    infiniteWorldSamples: boolean,
+    sampler: TerrainHeightSampler,
+    drySentinelDepthM: number,
+  ) {
     this.grid = grid;
     this.stats = stats;
-    this.wrapWorldSamples = wrapWorldSamples;
+    this.infiniteWorldSamples = infiniteWorldSamples;
+    this.sampler = sampler;
+    this.drySentinelDepthM = drySentinelDepthM;
   }
 
   /**
@@ -136,25 +147,39 @@ export class HydrologySystem {
     const stats = collectStats(grid, config.accumulation.particles, nowMs() - t0);
     logHydrologySummary(stats);
     maybeDumpHydrologyFields(grid, config);
-    return new HydrologySystem(grid, stats, infiniteIslandsScene());
+    return new HydrologySystem(
+      grid,
+      stats,
+      infiniteIslandsScene(),
+      sampler,
+      config.waterSurface.drySentinelDepth,
+    );
   }
 
   sample(x: number, z: number): HydrologySample {
-    const mapped = this.mapSampleCoord(x, z);
-    return sampleHydrologyGrid(this.grid, mapped.x, mapped.z);
+    if (this.shouldUseInfiniteSample(x, z)) {
+      return sampleInfiniteHydrology(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
+    }
+    return sampleHydrologyGrid(this.grid, x, z);
   }
 
   terrainHeight(x: number, z: number): number {
-    const mapped = this.mapSampleCoord(x, z);
-    return sampleGridBilinear(this.grid, this.grid.carvedBed, mapped.x, mapped.z);
+    if (this.shouldUseInfiniteSample(x, z)) return this.sampler.surfaceHeight(x, z);
+    return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
   }
 
-  private mapSampleCoord(x: number, z: number): { x: number; z: number } {
-    return {
-      x: hydrologySampleCoord(x, this.grid.worldCells, this.wrapWorldSamples),
-      z: hydrologySampleCoord(z, this.grid.worldCells, this.wrapWorldSamples),
-    };
+  private shouldUseInfiniteSample(x: number, z: number): boolean {
+    return this.infiniteWorldSamples && !hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells);
   }
+}
+
+export function hydrologyCoordInsideStartupWorld(x: number, z: number, worldCells: number): boolean {
+  return Number.isFinite(x)
+    && Number.isFinite(z)
+    && x >= 0
+    && z >= 0
+    && x <= worldCells
+    && z <= worldCells;
 }
 
 export function hydrologySampleCoord(value: number, worldCells: number, wrapWorld: boolean): number {
@@ -198,7 +223,7 @@ function collectStats(grid: HydrologyGrid, particles: number, buildMs: number): 
       maxFlowSpeed = Math.max(maxFlowSpeed, Math.hypot(grid.flowDirX[i], grid.flowDirZ[i]) * grid.flowStrength[i]);
       countBodyKind(bodyKindCounts, grid.bodyKind[i]);
       if (x + 1 < grid.res) maxWaterYJump = Math.max(maxWaterYJump, Math.abs(grid.waterY[i] - grid.waterY[i + 1]));
-      if (z + 1 < grid.res) maxWaterYJump = Math.max(maxWaterYJump, Math.abs(grid.waterY[i] - grid.waterY[i + grid.res]));
+      if (z + 1 < grid.res) maxWaterYJump = Math.max(maxWaterYJump, Math.abs(grid.waterY[i] - grid.res]));
     }
   }
   return {
