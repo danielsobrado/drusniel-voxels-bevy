@@ -490,7 +490,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       }
       if (entry.failed) failedPages++;
       else if (!entry.ready) buildingPages++;
-      else if (entry.group.children.length > 0) readyPages++;
+      else readyPages++;
     }
     return { readyPages, buildingPages, failedPages };
   };

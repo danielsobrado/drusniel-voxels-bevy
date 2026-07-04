@@ -343,6 +343,56 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   pages that actually registered colliders. Thresholds unchanged.
 - 2026-07-04: Typecheck passed after the live-bubble prioritization/probe
   counter fix (`rtk npm --prefix tools/clod-poc run typecheck`).
+- 2026-07-04: Started clean post-fix acceptance run
+  `2026-07-04T13-03-18` with the harness-owned Vite server on
+  `http://127.0.0.1:5173/`.
+- 2026-07-04: In run `2026-07-04T13-03-18`, initial walk convergence
+  settled after 37.0 s, but post-route convergence still timed out after
+  120 s with `{tilesMissing:0,bubbleBuilding:0,bubbleReady:0,
+  bubbleRequired:46,proxyBuilding:0}`. The priority change did not fix the
+  final ready-page counter; inspect artifacts after completion.
+- 2026-07-04: User supplied review of the live-bubble follow-up and asked
+  to fix issues before acceptance. Stopped the in-progress
+  `2026-07-04T13-03-18` acceptance/Vite processes; that run is intentionally
+  incomplete and should not be used as a signal.
+- 2026-07-04: Checked current `main` after external commits. The review
+  fixes are already present: collider removals are mirrored by delta,
+  public `live_bubble_evictions_total` stays cumulative, probe evictions
+  count only collider-bearing page evictions, missing required pages count
+  as building, and `live_bubble_streamed_collider_pages` now counts pages
+  rather than chunk colliders. Targeted tests exist in
+  `near_field_bubble_controller.test.ts` and `terrain_frame_phase.test.ts`.
+- 2026-07-04: Typecheck failed in the new tests only:
+  `terrain_frame_phase.test.ts` used partial `EngineStats`/`Location`
+  shapes, and `near_field_bubble_controller.test.ts` indexed an inferred
+  empty tuple. Patching test types narrowly before rerunning.
+- 2026-07-04: Patched the new tests only: the fake hook stats now satisfy
+  `EngineStats`, the fake location is explicitly cast, and the mesher mock
+  call is cast before indexing.
+- 2026-07-04: Typecheck is now clean after completing the hook test stub and
+  installing it via `Object.defineProperty(globalThis, "window", ...)`.
+- 2026-07-04: Focused Vitest run passed directly (no `rtk`):
+  `near_field_bubble_controller.test.ts` and
+  `terrain_frame_phase.test.ts`, 2 files / 11 tests.
+- 2026-07-04: Started fresh acceptance run `2026-07-04T13-16-00` with a
+  harness-owned Vite server on `http://127.0.0.1:5173/`.
+- 2026-07-04: User supplied another review before `13-16-00` completed.
+  Stopped the run after its initial walk convergence (`56.3s`); this run is
+  intentionally incomplete. Next fix: ready-but-empty required pages should
+  count as ready, and convergence diagnostics should include failed pages.
+- 2026-07-04: Applied review follow-ups without changing thresholds:
+  finished required pages now count as ready even when they have no geometry
+  children; the convergence wait snapshot includes `live_bubble_failed_pages`
+  and requires zero failed pages before quiet; acceptance URLs now pass
+  `acceptance=1`; and the live-bubble probe baselines collider removals from
+  the current mirrored counter so first-frame removal deltas are counted.
+  Added focused tests for empty finished pages and first-frame probe removal
+  deltas.
+- 2026-07-04: Typecheck passed after the review follow-ups
+  (`rtk npm --prefix tools/clod-poc run typecheck`).
+- 2026-07-04: Focused Vitest passed directly after the review follow-ups:
+  `near_field_bubble_controller.test.ts` and
+  `terrain_frame_phase.test.ts`, 2 files / 12 tests.
 
 ## Remaining known risks / next steps if gates still fail
 

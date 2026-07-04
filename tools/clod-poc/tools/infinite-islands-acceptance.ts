@@ -324,10 +324,11 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
         bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
         bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
+        bubbleFailed: counters["live_bubble_failed_pages"] ?? -1,
         proxyBuilding: counters["shadow_proxy_building"] ?? -1,
       };
     });
-    const bubbleQuiet = c.bubbleRequired === 0 || (c.bubbleBuilding === 0 && c.bubbleReady > 0);
+    const bubbleQuiet = c.bubbleRequired === 0 || (c.bubbleFailed === 0 && c.bubbleBuilding === 0 && c.bubbleReady > 0);
     const quiet = c.tilesMissing === 0 && bubbleQuiet && c.proxyBuilding !== 1;
     stablePolls = quiet ? stablePolls + 1 : 0;
     if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
@@ -502,6 +503,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
   });
 
   const extra: Record<string, string> = {
+    acceptance: "1",
     world: "16",
     clodPerf: "1",
     webgpuSelection: "1",

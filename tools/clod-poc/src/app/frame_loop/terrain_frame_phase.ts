@@ -89,12 +89,13 @@ function resetLiveBubbleCounterMirrors(): void {
 }
 
 export function beginLiveBubbleMovementProbe(): void {
+  const currentColliderRemovals = hooksCounters()?.["live_bubble_collider_removals"];
   liveBubbleBuiltTotal = 0;
   liveBubbleProbeActive = true;
   liveBubbleProbeBuiltTotal = 0;
   liveBubbleProbeEvictionsTotal = 0;
   liveBubbleProbeColliderRemovalsTotal = 0;
-  liveBubbleLastColliderRemovals = null;
+  liveBubbleLastColliderRemovals = Number.isFinite(currentColliderRemovals) ? currentColliderRemovals! : null;
   resetLiveBubbleCounterMirrors();
 }
 

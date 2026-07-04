@@ -32,6 +32,13 @@ const NON_EMPTY_CHUNK: ChunkMesh = {
   indices: new Uint32Array([0, 1, 2]),
 };
 
+const EMPTY_CHUNK: ChunkMesh = {
+  positions: new Float32Array(),
+  normals: new Float32Array(),
+  materials: new Float32Array(),
+  indices: new Uint32Array(),
+};
+
 function makeNode(
   id = "L0:1,1",
   footprint: PageFootprint = { minX: 16, maxX: 32, minZ: 16, maxZ: 32 },
@@ -191,12 +198,7 @@ describe("createNearFieldBubbleController", () => {
 
   it("does not mark page failed when GPU returns empty but successful chunks", async () => {
     const emptyMesher = {
-      meshChunk: vi.fn(() => Promise.resolve({
-        positions: new Float32Array(),
-        normals: new Float32Array(),
-        materials: new Float32Array(),
-        indices: new Uint32Array(),
-      })),
+      meshChunk: vi.fn(() => Promise.resolve(EMPTY_CHUNK)),
     };
 
     const controller = makeController({
@@ -231,6 +233,41 @@ describe("createNearFieldBubbleController", () => {
     expect(view.mesh.visible).toBe(true);
   });
 
+  it("counts empty but finished required streaming pages as ready", async () => {
+    const emptyMesher = {
+      meshChunk: vi.fn(() => Promise.resolve(EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => emptyMesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+    });
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+    await vi.waitFor(() => expect(emptyMesher.meshChunk).toHaveBeenCalledTimes(4));
+    await flushPromises();
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 2,
+    });
+
+    expect(stats.requiredPages).toBe(1);
+    expect(stats.readyPages).toBe(1);
+    expect(stats.buildingPages).toBe(0);
+    expect(stats.failedPages).toBe(0);
+  });
+
   it("prioritizes required streaming pages before render-view bubble pages", () => {
     const mesher = {
       meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
@@ -253,8 +290,9 @@ describe("createNearFieldBubbleController", () => {
 
     expect(stats.chunkGroupsBuiltThisFrame).toBe(1);
     expect(mesher.meshChunk).toHaveBeenCalled();
-    expect(mesher.meshChunk.mock.calls[0]?.[0]).toBe(2);
-    expect(mesher.meshChunk.mock.calls[0]?.[1]).toBe(2);
+    const firstCall = mesher.meshChunk.mock.calls[0] as unknown as [number, number];
+    expect(firstCall[0]).toBe(2);
+    expect(firstCall[1]).toBe(2);
   });
 
   it("counts missing required streaming pages as building", () => {

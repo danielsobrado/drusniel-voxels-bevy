@@ -46,15 +46,34 @@ function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePh
 
 function installCounters(): Record<string, number> {
   const counters: Record<string, number> = {};
-  (globalThis as typeof globalThis & {
-    window?: unknown;
-    location?: unknown;
-  }).window = {
-    __drusnielClod: {
-      stats: { counters },
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      __drusnielClod: {
+        ready: true,
+        error: null,
+        stats: {
+          fps: 0,
+          frameMs: 0,
+          frameMsP95: 0,
+          drawCalls: 0,
+          triangles: 0,
+          frame: 0,
+          counters,
+          gpuPasses: {},
+        },
+        diag: null,
+        progress: 1,
+        progressMsg: "ready",
+        setPose: null,
+        getPose: null,
+        settle: null,
+        flyCamEnabled: null,
+        beginMovementRouteProbe: null,
+      },
     },
-  };
-  (globalThis as typeof globalThis & { location?: unknown }).location = { search: "?scene=infinite-islands" };
+  });
+  (globalThis as typeof globalThis & { location?: unknown }).location = { search: "?scene=infinite-islands" } as Location;
   return counters;
 }
 
@@ -90,22 +109,15 @@ describe("terrain frame live-bubble probe counters", () => {
     beginLiveBubbleMovementProbe();
     runTerrainFramePhase(makeInput({
       ...BASE_BUBBLE_STATS,
-      colliderRemovals: 5,
-    }, 2));
-
-    expect(counters["live_bubble_probe_collider_removals_total"]).toBe(0);
-    expect(counters["live_bubble_evictions_total"]).toBe(totalBeforeProbe);
-
-    runTerrainFramePhase(makeInput({
-      ...BASE_BUBBLE_STATS,
       evictions: 2,
       colliderEvictions: 1,
       colliderRemovals: 7,
-    }, 3));
+    }, 2));
+
     runTerrainFramePhase(makeInput({
       ...BASE_BUBBLE_STATS,
       colliderRemovals: 7,
-    }, 4));
+    }, 3));
 
     expect(counters["live_bubble_probe_evictions_total"]).toBe(1);
     expect(counters["live_bubble_probe_collider_removals_total"]).toBe(2);
