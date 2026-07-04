@@ -28,6 +28,7 @@ const PAGE_ERROR_STORE_LIMIT = 50;
 const WARMUP_FRAMES = 30;
 const SAMPLE_FRAMES = 180;
 const MIN_WALK_ROUTE_DISTANCE_M = 48;
+const MOVEMENT_SAMPLE_FRAMES = 30;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
 
 type JsonRecord = Record<string, unknown>;
@@ -199,15 +200,6 @@ async function dispatchKeyCodes(page: Page, type: "keydown" | "keyup", codes: re
   }, { type, codes });
 }
 
-async function holdMovementKeys(page: Page, codes: readonly string[], frames: number): Promise<void> {
-  await dispatchKeyCodes(page, "keydown", codes);
-  try {
-    await settle(page, frames);
-  } finally {
-    await dispatchKeyCodes(page, "keyup", [...codes].reverse());
-  }
-}
-
 async function writeBootstrapDiff(aPath: string, outPath: string): Promise<void> {
   const metadata = await sharp(aPath).metadata();
   const width = Math.max(1, metadata.width ?? WIDTH);
@@ -322,12 +314,28 @@ async function readMovementSnapshot(page: Page, label: string): Promise<Movement
   }, label);
 }
 
+async function runMovementSegment(page: Page, segment: MovementSegment, samples: MovementSnapshot[]): Promise<void> {
+  await dispatchKeyCodes(page, "keydown", segment.codes);
+  try {
+    let remainingFrames = segment.frames;
+    let sampleIndex = 0;
+    while (remainingFrames > 0) {
+      const frames = Math.min(MOVEMENT_SAMPLE_FRAMES, remainingFrames);
+      await settle(page, frames);
+      remainingFrames -= frames;
+      samples.push(await readMovementSnapshot(page, `${segment.label}:${sampleIndex}`));
+      sampleIndex++;
+    }
+  } finally {
+    await dispatchKeyCodes(page, "keyup", [...segment.codes].reverse());
+  }
+}
+
 async function runMovementRoute(page: Page): Promise<MovementReport> {
   const samples: MovementSnapshot[] = [];
   samples.push(await readMovementSnapshot(page, "start"));
   for (const segment of WALK_ROUTE) {
-    await holdMovementKeys(page, segment.codes, segment.frames);
-    samples.push(await readMovementSnapshot(page, segment.label));
+    await runMovementSegment(page, segment, samples);
   }
   const start = samples[0]!.pose;
   const end = samples.at(-1)!.pose;
