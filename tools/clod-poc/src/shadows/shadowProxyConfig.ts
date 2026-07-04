@@ -41,6 +41,8 @@ function parseShadowProxyConfig(
   return {
     enabled: readBoolean(raw.enabled, fallback.enabled),
     gridRes: Math.floor(readNumber(raw.grid_res, fallback.gridRes, 2)),
+    streamGridRes: Math.floor(readNumber(raw.stream_grid_res, fallback.streamGridRes, 2)),
+    buildBudgetMs: readNumber(raw.build_budget_ms, fallback.buildBudgetMs, 0.25),
     startM: readNumber(raw.start_m, fallback.startM, 0),
     endM: readNumber(raw.end_m, fallback.endM, 1),
     heightBiasM: readNumber(raw.height_bias_m, fallback.heightBiasM),

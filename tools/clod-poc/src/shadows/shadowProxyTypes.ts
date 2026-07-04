@@ -5,6 +5,10 @@ export type ShadowProxyShadowSide = "front" | "back" | "double";
 export interface ShadowProxyConfig {
   enabled: boolean;
   gridRes: number;
+  /** Grid resolution used for streaming-centered rebuilds (must stay cheap enough to converge between snap crossings). */
+  streamGridRes: number;
+  /** Per-frame sampling budget for incremental streaming rebuilds. */
+  buildBudgetMs: number;
   startM: number;
   endM: number;
   heightBiasM: number;

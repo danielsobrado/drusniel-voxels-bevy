@@ -50,6 +50,7 @@ describe("shadow proxy controller", () => {
         getCoverageCenter: () => ({ x: 0, z: 0 }),
       }),
     );
+    controller.rebuildIfNeeded(); // drain the sliced boot build so it cannot complete inside updateFrame below
     const initialBuilds = buildSpy.mock.calls.length;
     controller.updateFrame(1500, 0);
     expect(buildSpy.mock.calls.length).toBe(initialBuilds);
@@ -79,12 +80,14 @@ describe("shadow proxy controller", () => {
         getCoverageCenter: () => ({ x: cameraX, z: 0 }),
       }),
     );
+    controller.rebuildIfNeeded(); // drain the sliced boot build
     const buildsAfterInit = buildSpy.mock.calls.length;
     cameraX = 200;
     controller.updateFrame(cameraX, 0);
     expect(buildSpy.mock.calls.length).toBe(buildsAfterInit);
     cameraX = 1100;
     controller.updateFrame(cameraX, 0);
+    controller.updateFrame(cameraX, 0); // second frame lets the sliced rebuild complete
     expect(buildSpy.mock.calls.length).toBeGreaterThan(buildsAfterInit);
     controller.dispose();
   });
@@ -98,10 +101,12 @@ describe("shadow proxy controller", () => {
         getCoverageCenter: () => ({ x: cameraX, z: 0 }),
       }),
     );
+    controller.rebuildIfNeeded(); // drain the sliced boot build
     expect(controller.runtime.mesh?.position.x).toBe(0);
 
     cameraX = 1100;
     controller.updateFrame(cameraX, 0);
+    controller.updateFrame(cameraX, 0); // second frame lets the sliced rebuild complete
     expect(controller.runtime.mesh?.position.x).toBe(1024);
     expect(controller.runtime.mesh?.position.x).not.toBe(1024 - cameraX);
     controller.dispose();

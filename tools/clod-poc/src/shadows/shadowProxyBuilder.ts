@@ -14,6 +14,7 @@ export function buildShadowProxyMesh(
   terrainSummary: ShadowProxySource | null | undefined,
   config: ShadowProxyConfig,
   coverage?: ShadowProxyCoverage,
+  prebuilt?: import("./shadowProxyGeometry.js").ShadowProxyGeometryResult,
 ): ShadowProxyRuntime {
   let mesh: THREE.Mesh | null = null;
   let geometry: THREE.BufferGeometry | null = null;
@@ -27,7 +28,7 @@ export function buildShadowProxyMesh(
     return makeRuntime(null, stats, () => {});
   }
 
-  const built = buildShadowProxyGeometry(terrainSummary, config, coverage);
+  const built = prebuilt ?? buildShadowProxyGeometry(terrainSummary, config, coverage);
   stats = built.stats;
   if (!built.geometry) {
     console.warn("[shadow-proxy] disabled:", built.error ?? "build failed");

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { LongViewSunShadowsConfig, ShadowProxyConfig, ShadowProxyCoverage, ShadowProxyRuntime, ShadowProxySource } from "./shadowProxyTypes.js";
 import { buildShadowProxyMesh, updateShadowProxyDebugMaterial } from "./shadowProxyBuilder.js";
+import { createShadowProxyGeometryJob, type ShadowProxyGeometryJob } from "./shadowProxyGeometry.js";
 import {
   configureLongViewSunShadows,
   createLongViewSunLight,
@@ -55,6 +56,7 @@ function snapCenter(x: number, z: number, snapM: number): { x: number; z: number
 
 function geometryConfigChanged(a: ShadowProxyConfig, b: ShadowProxyConfig): boolean {
   return a.gridRes !== b.gridRes
+    || a.streamGridRes !== b.streamGridRes
     || a.startM !== b.startM
     || a.endM !== b.endM
     || a.heightBiasM !== b.heightBiasM
@@ -73,6 +75,16 @@ export function createShadowProxyController(
   let builtSummaryRef: ShadowProxySource | null = null;
   let builtCenterX = Number.NaN;
   let builtCenterZ = Number.NaN;
+  // In streaming mode geometry is rebuilt incrementally: the job samples a
+  // few ms per frame while the previous mesh keeps rendering, then swaps.
+  let pendingJob: {
+    job: ShadowProxyGeometryJob;
+    centerX: number;
+    centerZ: number;
+    summaryRef: ShadowProxySource;
+    config: ShadowProxyConfig;
+    coverage: ShadowProxyCoverage;
+  } | null = null;
   let runtime = buildDisabledRuntime();
   let sunLight: THREE.DirectionalLight | null = null;
   let sunHelper: THREE.CameraHelper | null = null;
@@ -125,7 +137,7 @@ export function createShadowProxyController(
       lightShadowMapSize: config.lightShadowMapSize,
       lightShadowCameraExtentM: config.lightShadowCameraExtentM,
     });
-    deps.onCounters?.(counters);
+    deps.onCounters?.({ ...counters, shadow_proxy_building: pendingJob ? 1 : 0 });
   };
 
   const removeProxyMesh = () => {
@@ -141,8 +153,43 @@ export function createShadowProxyController(
     runtime.mesh.position.set(builtCenterX, 0, builtCenterZ);
   };
 
+  const applyCompletedBuild = (
+    built: { centerX: number; centerZ: number; summaryRef: ShadowProxySource; config: ShadowProxyConfig },
+    nextRuntime: ShadowProxyRuntime,
+  ) => {
+    removeProxyMesh();
+    runtime.dispose();
+    runtime = nextRuntime;
+    builtSummaryRef = built.summaryRef;
+    builtCenterX = built.centerX;
+    builtCenterZ = built.centerZ;
+    frozenGeometry = runtime.stats.built;
+    if (runtime.mesh && deps.streamingCentered) {
+      runtime.mesh.position.set(builtCenterX, 0, builtCenterZ);
+    } else if (runtime.mesh) {
+      runtime.mesh.position.set(0, 0, 0);
+    }
+    attachProxyMesh();
+    publishCounters();
+  };
+
+  const buildBudgetMs = () => {
+    const budget = config.buildBudgetMs;
+    return Number.isFinite(budget) && budget > 0 ? budget : 2;
+  };
+
+  const stepPendingJob = () => {
+    if (!pendingJob) return;
+    const result = pendingJob.job.step(buildBudgetMs());
+    if (!result) return;
+    const done = pendingJob;
+    pendingJob = null;
+    applyCompletedBuild(done, buildShadowProxyMesh(done.summaryRef, done.config, done.coverage, result));
+  };
+
   const rebuildProxy = (force = false) => {
     if (!deps.isLongView || !proxyEnabled) {
+      pendingJob = null;
       removeProxyMesh();
       runtime.dispose();
       runtime = buildDisabledRuntime();
@@ -164,20 +211,28 @@ export function createShadowProxyController(
       ...computeShadowProxyCoverage(deps.worldSize, config, center.x, center.z),
       buildRelative: deps.streamingCentered,
     };
-    removeProxyMesh();
-    runtime.dispose();
-    runtime = buildShadowProxyMesh(terrainSummary, config, coverage);
-    builtSummaryRef = terrainSummary;
-    builtCenterX = center.x;
-    builtCenterZ = center.z;
-    frozenGeometry = runtime.stats.built;
-    if (runtime.mesh && deps.streamingCentered) {
-      runtime.mesh.position.set(builtCenterX, 0, builtCenterZ);
-    } else if (runtime.mesh) {
-      runtime.mesh.position.set(0, 0, 0);
+    if (!deps.streamingCentered) {
+      applyCompletedBuild(
+        { centerX: center.x, centerZ: center.z, summaryRef: terrainSummary, config },
+        buildShadowProxyMesh(terrainSummary, config, coverage),
+      );
+      return;
     }
-    attachProxyMesh();
+    // Streaming: never sample the full grid in one frame. Use the (cheaper)
+    // stream grid and slice the sampling; the old mesh stays until the swap.
+    const streamConfig = config.streamGridRes > 1 && config.streamGridRes < config.gridRes
+      ? { ...config, gridRes: Math.floor(config.streamGridRes) }
+      : config;
+    pendingJob = {
+      job: createShadowProxyGeometryJob(terrainSummary, streamConfig, coverage),
+      centerX: center.x,
+      centerZ: center.z,
+      summaryRef: terrainSummary,
+      config: streamConfig,
+      coverage,
+    };
     publishCounters();
+    stepPendingJob();
   };
 
   rebuildProxy(true);
@@ -251,6 +306,7 @@ export function createShadowProxyController(
     },
     updateFrame(cameraWorldX: number, cameraWorldZ: number) {
       if (!deps.isLongView || !deps.streamingCentered) return;
+      stepPendingJob();
       const snapped = snapCenter(cameraWorldX, cameraWorldZ, deps.rebuildSnapMeters);
       sunTarget = new THREE.Vector3(snapped.x, 0, snapped.z);
       if (sunLight) {
@@ -258,20 +314,26 @@ export function createShadowProxyController(
         sunLight.target.updateMatrixWorld();
       }
       const frozen = deps.getConfig().debugFreezeProxy && frozenGeometry;
-      if ((snapped.x !== builtCenterX || snapped.z !== builtCenterZ) && !frozen) {
+      const targetCenterX = pendingJob ? pendingJob.centerX : builtCenterX;
+      const targetCenterZ = pendingJob ? pendingJob.centerZ : builtCenterZ;
+      if ((snapped.x !== targetCenterX || snapped.z !== targetCenterZ) && !frozen) {
         rebuildProxy(true);
       }
       updateStreamingFollow();
     },
     rebuildIfNeeded(force = false) {
+      stepPendingJob();
       if (deps.getConfig().debugFreezeProxy && frozenGeometry && !force) return;
       const summary = deps.getTerrainSummary();
       const center = resolveCoverageCenter(deps);
+      const targetSummary = pendingJob ? pendingJob.summaryRef : builtSummaryRef;
+      const targetCenterX = pendingJob ? pendingJob.centerX : builtCenterX;
+      const targetCenterZ = pendingJob ? pendingJob.centerZ : builtCenterZ;
       if (
         force
-        || builtSummaryRef !== summary
-        || builtCenterX !== center.x
-        || builtCenterZ !== center.z
+        || targetSummary !== summary
+        || targetCenterX !== center.x
+        || targetCenterZ !== center.z
       ) {
         rebuildProxy(force);
       }
@@ -282,6 +344,7 @@ export function createShadowProxyController(
     dispose() {
       if (disposed) return;
       disposed = true;
+      pendingJob = null;
       removeProxyMesh();
       runtime.dispose();
       disposeSunLight();

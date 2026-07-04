@@ -3,6 +3,8 @@ import type { LongViewSunShadowsConfig, ShadowProxyConfig } from "../shadows/sha
 export const DEFAULT_SHADOW_PROXY_CONFIG: ShadowProxyConfig = {
   enabled: true,
   gridRes: 512,
+  streamGridRes: 160,
+  buildBudgetMs: 2,
   startM: 192,
   endM: 4096,
   heightBiasM: 0.75,
