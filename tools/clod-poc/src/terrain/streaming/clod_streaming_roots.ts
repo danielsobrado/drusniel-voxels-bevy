@@ -29,6 +29,7 @@ export interface StreamingClodRootControllerDeps {
   maxCachedPages?: number;
   evictDistanceMultiplier?: number;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
+  onRootsChanged?: () => void;
 }
 
 interface PageCoord {
@@ -173,6 +174,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
 
       const evictions = evict(center, radiusM);
       if (builtNodes.length > 0) deps.onNodesBuilt?.(builtNodes);
+      if (builtNodes.length > 0 || evictions > 0) deps.onRootsChanged?.();
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
