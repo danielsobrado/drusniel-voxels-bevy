@@ -42,6 +42,14 @@ export interface GpuChunkMesherCreateResult {
 
 const STORAGE = (extra = 0) => GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | extra;
 
+function gpuMesherUnavailable(error: unknown): WebGpuUnavailable {
+  return {
+    ok: false,
+    reason: "device-request-failed",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
 export class GpuChunkMesher {
   private readonly slotCount: number;
   private readonly maxVertices: number;
@@ -130,41 +138,46 @@ export class GpuChunkMesher {
       if (!result.ok) return { mesher: null, unavailable: result };
       device = result.device;
     }
-    const module = device.createShaderModule({
-      label: "gpu mesher shader",
-      code: composeTerrainFieldShader(),
-    });
-    const storage = (i: number): GPUBindGroupLayoutEntry => ({
-      binding: i,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type: "storage" },
-    });
-    const layout = device.createBindGroupLayout({
-      label: "gpu mesher layout",
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(3), storage(4), storage(5), storage(6), storage(7), storage(8), storage(9),
-      ],
-    });
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const [vertexPipeline, quadPipeline] = await Promise.all([
-      device.createComputePipelineAsync({
-        label: "gpu mesher vertexPass",
-        layout: pipelineLayout,
-        compute: { module, entryPoint: "vertexPass" },
-      }),
-      device.createComputePipelineAsync({
-        label: "gpu mesher quadPass",
-        layout: pipelineLayout,
-        compute: { module, entryPoint: "quadPass" },
-      }),
-    ]);
-    const mesher = new GpuChunkMesher(
-      device, layout, vertexPipeline, quadPipeline, chunkSize, opts.initialEditCapacity ?? 32,
-    );
-    return { mesher, unavailable: null };
+
+    try {
+      const module = device.createShaderModule({
+        label: "gpu mesher shader",
+        code: composeTerrainFieldShader(),
+      });
+      const storage = (i: number): GPUBindGroupLayoutEntry => ({
+        binding: i,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "storage" },
+      });
+      const layout = device.createBindGroupLayout({
+        label: "gpu mesher layout",
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+          { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+          storage(3), storage(4), storage(5), storage(6), storage(7), storage(8), storage(9),
+        ],
+      });
+      const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
+      const [vertexPipeline, quadPipeline] = await Promise.all([
+        device.createComputePipelineAsync({
+          label: "gpu mesher vertexPass",
+          layout: pipelineLayout,
+          compute: { module, entryPoint: "vertexPass" },
+        }),
+        device.createComputePipelineAsync({
+          label: "gpu mesher quadPass",
+          layout: pipelineLayout,
+          compute: { module, entryPoint: "quadPass" },
+        }),
+      ]);
+      const mesher = new GpuChunkMesher(
+        device, layout, vertexPipeline, quadPipeline, chunkSize, opts.initialEditCapacity ?? 32,
+      );
+      return { mesher, unavailable: null };
+    } catch (error) {
+      return { mesher: null, unavailable: gpuMesherUnavailable(error) };
+    }
   }
 
   /** Mesh one chunk on the GPU and read back the compact result. Serialized via an internal queue
