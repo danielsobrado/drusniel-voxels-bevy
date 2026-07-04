@@ -84,6 +84,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   let farShellLastRecenterFrame = -1;
   let lastFarShellSnapX = Number.NaN;
   let lastFarShellSnapZ = Number.NaN;
+  let backgroundQuiet = false;
 
   const resetFrameMetrics = (): void => {
     phase0FrameMsBuffer.length = 0;
@@ -92,6 +93,28 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     hooks.stats.counters["frame_ms_avg"] = 0;
     hooks.stats.counters["frame_ms_p95"] = -1;
     hooks.stats.counters["frame_ms_p99"] = -1;
+  };
+
+  const numericCounter = (counters: Readonly<Record<string, number>>, key: string, fallback: number): number => {
+    const value = counters[key];
+    return Number.isFinite(value) ? value : fallback;
+  };
+
+  const backgroundQueuesQuiet = (counters: Readonly<Record<string, number>>): boolean => {
+    const tilesMissing = numericCounter(counters, "far_summary_tiles_missing", -1);
+    const bubbleRequired = numericCounter(counters, "live_bubble_required_pages", -1);
+    const bubbleBuilding = numericCounter(counters, "live_bubble_building_pages", -1);
+    const bubbleReady = numericCounter(counters, "live_bubble_ready_pages", -1);
+    const bubbleFailed = numericCounter(counters, "live_bubble_failed_pages", -1);
+    const proxyBuilding = numericCounter(counters, "shadow_proxy_building", 0);
+    const streamRequired = numericCounter(counters, "live_clod_stream_required_pages", 0);
+    const streamPending = numericCounter(counters, "live_clod_stream_pending_pages", 0);
+    const streamInflight = numericCounter(counters, "live_clod_stream_inflight_batches", 0);
+    const streamReady = numericCounter(counters, "live_clod_stream_ready_pages", 0);
+    const streamCached = numericCounter(counters, "live_clod_stream_cached_pages", 0);
+    const bubbleQuiet = bubbleRequired === 0 || (bubbleFailed === 0 && bubbleBuilding === 0 && bubbleReady > 0);
+    const streamQuiet = streamRequired === 0 || (streamPending === 0 && streamInflight === 0 && streamReady === 0 && streamCached > 0);
+    return tilesMissing === 0 && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
   };
 
   if (typeof window !== "undefined") {
@@ -245,6 +268,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         farShellLastRecenterFrame,
       }),
     );
+
+    const nowQuiet = backgroundQueuesQuiet(s.counters);
+    if (nowQuiet && !backgroundQuiet) {
+      resetFrameMetrics();
+      s.counters["phase0_frame_metrics_resets"] = (s.counters["phase0_frame_metrics_resets"] ?? 0) + 1;
+    }
+    backgroundQuiet = nowQuiet;
 
     const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
     window.__drusnielPhase0Report = {
