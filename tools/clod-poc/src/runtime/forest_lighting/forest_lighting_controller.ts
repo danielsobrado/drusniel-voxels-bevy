@@ -113,6 +113,21 @@ export function createForestLightingController(deps: ForestLightingControllerDep
     );
   };
 
+  const updateBudgeted = (center: import("three").Vector3, sunDirection: EnvironmentLighting["sunDirection"]): boolean => {
+    const deadlineMs = performance.now() + deps.forestLightingConfig.field.maxBuildMsPerFrame;
+    if (!system.hasBuildInProgress()) {
+      if (!system.shouldUpdate(center, sunDirection)) return false;
+      const trees = deps.getTreeSystem().getLightingProxiesBudgeted(deadlineMs);
+      if (!trees.ready) return false;
+      system.beginBuild(center, {
+        treeProxies: trees.proxies,
+        understoryProxies: deps.getUnderstorySystem().getLightingProxies(),
+        sunDirection,
+      });
+    }
+    return system.stepBuild(deadlineMs);
+  };
+
   applyToPropMaterials();
 
   return {
@@ -129,26 +144,19 @@ export function createForestLightingController(deps: ForestLightingControllerDep
     },
     applyToPropMaterials,
     shouldUpdate(center, sunDirection, force = false) {
-      return system.shouldUpdate(center, sunDirection, force);
+      if (force) return system.shouldUpdate(center, sunDirection, force);
+      const completed = updateBudgeted(center, sunDirection);
+      if (completed) {
+        applyToPropMaterials();
+        refreshStats();
+      }
+      return false;
     },
     refreshStats,
     update(elapsedSeconds, center, proxies) {
       system.update(elapsedSeconds, center, proxies);
     },
-    updateBudgeted(center, sunDirection) {
-      const deadlineMs = performance.now() + deps.forestLightingConfig.field.maxBuildMsPerFrame;
-      if (!system.hasBuildInProgress()) {
-        if (!system.shouldUpdate(center, sunDirection)) return false;
-        const trees = deps.getTreeSystem().getLightingProxiesBudgeted(deadlineMs);
-        if (!trees.ready) return false;
-        system.beginBuild(center, {
-          treeProxies: trees.proxies,
-          understoryProxies: deps.getUnderstorySystem().getLightingProxies(),
-          sunDirection,
-        });
-      }
-      return system.stepBuild(deadlineMs);
-    },
+    updateBudgeted,
     dispose() {
       system.dispose();
     },
