@@ -106,7 +106,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   liveBubbleEvictionsTotal += stats.evictions;
   if (liveBubbleProbeActive) {
     liveBubbleProbeBuiltTotal += stats.chunkGroupsBuiltThisFrame;
-    liveBubbleProbeEvictionsTotal += stats.evictions;
+    liveBubbleProbeEvictionsTotal += stats.colliderEvictions;
     liveBubbleProbeColliderRemovalsTotal += stats.colliderRemovals;
   }
   counters["live_bubble_required_pages"] = stats.requiredPages;

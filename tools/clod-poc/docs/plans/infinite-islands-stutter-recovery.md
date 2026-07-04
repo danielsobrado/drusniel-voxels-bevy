@@ -295,6 +295,54 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 - 2026-07-04: Resumed from handover and reviewed this session log. Next
   action is to inspect the newest acceptance run newer than
   `2026-07-04T12-19-20` before deciding whether to re-run acceptance.
+- 2026-07-04: Found newer acceptance directory
+  `2026-07-04T12-28-04`, but it has no `report.json`, so the background
+  acceptance run is incomplete and cannot be used as the decisive result.
+- 2026-07-04: Inspected incomplete run contents: walk, biome-near,
+  biome-horizon, and final-near artifacts exist; final-horizon and the
+  top-level report are missing. Port `5173` is occupied by an existing Vite
+  server, so the next acceptance run should use `CLOD_POC_REUSE_SERVER=1`.
+- 2026-07-04: Started fresh acceptance run with
+  `CLOD_POC_REUSE_SERVER=1`; run directory is
+  `2026-07-04T12-40-58`, reusing Vite at `http://127.0.0.1:5173/`.
+- 2026-07-04: Run `2026-07-04T12-40-58` is invalid as a performance
+  signal: all five scenes failed with zero threshold values. Walk timed out
+  while still `building world (0.5)` after repeated module fetch failures;
+  the other scenes hit `page.goto net::ERR_CONNECTION_REFUSED`. This points
+  to the stale reused Vite server, not to acceptance gates.
+- 2026-07-04: Rechecked port `5173` after the invalid run; no listener
+  remained, so the next acceptance run can start and own a clean Vite
+  server without `CLOD_POC_REUSE_SERVER`.
+- 2026-07-04: Started clean acceptance run without server reuse; Vite
+  started on `http://127.0.0.1:5173/` and the run directory is
+  `2026-07-04T12-44-35`.
+- 2026-07-04: During run `2026-07-04T12-44-35`, the first walk convergence
+  wait logged `converged after 33.7s`. Later silence is not a dead run:
+  `walk-movement.json` was written and Vite remains listening, so the run is
+  past movement and still waiting/sampling.
+- 2026-07-04: Same run: walk post-route convergence timed out after 120 s
+  with snapshot `{tilesMissing:0,bubbleBuilding:0,bubbleReady:0,
+  bubbleRequired:43,proxyBuilding:0}`. This will need walk counter
+  inspection after the run completes; it is not a freeze-scene stutter
+  signature.
+- 2026-07-04: Clean run `2026-07-04T12-44-35` completed with 4 failures.
+  Convergence engaged for freeze scenes (`biome-near` 42.6 s,
+  `biome-horizon` 31.7 s, `final-near` 59.7 s, `final-horizon` 58.6 s).
+  Stutter gates are largely fixed: walk `frame_ms_p95=5.9`,
+  `far_summary_tiles_missing=0`, `live_bubble_ms=0`. Remaining failures:
+  walk `live_bubble_ready_pages=0` and
+  `live_bubble_probe_collider_removals_total=0`; biome-near
+  `frame_ms_p95=9.0`; final-near `frame_ms_p95=8.1`. Horizon scenes passed.
+- 2026-07-04: Investigated walk failures. Movement samples did observe
+  ready live-bubble pages (`maxReady=2`) and builds (`liveBuiltDelta=47`),
+  but the final post-route snapshot had required pages with no ready page
+  entries. Implemented a targeted live-bubble source fix: build
+  streaming-required page coords before render-view bubble pages so the
+  acceptance-required set cannot starve, and mirror probe evictions using
+  only collider-bearing evictions so the collider-removal gate is tied to
+  pages that actually registered colliders. Thresholds unchanged.
+- 2026-07-04: Typecheck passed after the live-bubble prioritization/probe
+  counter fix (`rtk npm --prefix tools/clod-poc run typecheck`).
 
 ## Remaining known risks / next steps if gates still fail
 
