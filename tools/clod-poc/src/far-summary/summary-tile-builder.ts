@@ -17,6 +17,14 @@ export interface FarSummaryBuildInput {
   nowMs: number;
 }
 
+interface HeightGrid {
+  values: Float64Array;
+  stride: number;
+  tileCells: number;
+}
+
+const GRID_BORDER_CELLS = 1;
+
 export function computeNormalFiniteDifference(
   h: (x: number, z: number) => number,
   x: number,
@@ -32,6 +40,17 @@ export function computeNormalFiniteDifference(
     return [0, 1, 0];
   }
 
+  return normalFromHeights(hL, hR, hD, hU, step);
+}
+
+function normalFromHeights(
+  hL: number,
+  hR: number,
+  hD: number,
+  hU: number,
+  step: number,
+): [number, number, number] {
+  if (!Number.isFinite(hL) || !Number.isFinite(hR) || !Number.isFinite(hD) || !Number.isFinite(hU)) return [0, 1, 0];
   const nx = hL - hR;
   const ny = 2 * step;
   const nz = hD - hU;
@@ -42,6 +61,45 @@ export function computeNormalFiniteDifference(
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+function finiteMin(values: readonly number[], fallback: number): number {
+  let out = Number.POSITIVE_INFINITY;
+  for (const value of values) if (Number.isFinite(value) && value < out) out = value;
+  return Number.isFinite(out) ? out : fallback;
+}
+
+function finiteMax(values: readonly number[], fallback: number): number {
+  let out = Number.NEGATIVE_INFINITY;
+  for (const value of values) if (Number.isFinite(value) && value > out) out = value;
+  return Number.isFinite(out) ? out : fallback;
+}
+
+function buildHeightGrid(
+  originX: number,
+  originZ: number,
+  cellM: number,
+  tileCells: number,
+  sampleHeight: (x: number, z: number) => number,
+): HeightGrid {
+  const stride = tileCells + GRID_BORDER_CELLS * 2;
+  const values = new Float64Array(stride * stride);
+
+  for (let gz = -GRID_BORDER_CELLS; gz < tileCells + GRID_BORDER_CELLS; gz++) {
+    for (let gx = -GRID_BORDER_CELLS; gx < tileCells + GRID_BORDER_CELLS; gx++) {
+      const wx = originX + (gx + 0.5) * cellM;
+      const wz = originZ + (gz + 0.5) * cellM;
+      values[(gz + GRID_BORDER_CELLS) * stride + gx + GRID_BORDER_CELLS] = sampleHeight(wx, wz);
+    }
+  }
+
+  return { values, stride, tileCells };
+}
+
+function heightAt(grid: HeightGrid, sx: number, sz: number): number {
+  const gx = Math.max(-GRID_BORDER_CELLS, Math.min(grid.tileCells, sx));
+  const gz = Math.max(-GRID_BORDER_CELLS, Math.min(grid.tileCells, sz));
+  return grid.values[(gz + GRID_BORDER_CELLS) * grid.stride + gx + GRID_BORDER_CELLS];
 }
 
 export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile {
@@ -56,31 +114,28 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
   let globalSum = 0;
   let validSamples = 0;
 
-  const hFn = (x: number, z: number): number => terrainSampler.sampleHeight(x, z);
+  const heightGrid = buildHeightGrid(originX, originZ, cellM, tileCells, terrainSampler.sampleHeight);
 
   for (let sz = 0; sz < tileCells; sz++) {
     for (let sx = 0; sx < tileCells; sx++) {
       const wx = originX + (sx + 0.5) * cellM;
       const wz = originZ + (sz + 0.5) * cellM;
 
-      const height = terrainSampler.sampleHeight(wx, wz);
+      const height = heightAt(heightGrid, sx, sz);
       if (Number.isNaN(height)) {
         console.warn(`[far-summary] NaN height at (${wx}, ${wz})`);
       }
 
       const heightValid = Number.isFinite(height);
       const sampleH = heightValid ? height : 0;
-      const sampleForMin = heightValid ? height : Number.POSITIVE_INFINITY;
-      const sampleForMax = heightValid ? height : Number.NEGATIVE_INFINITY;
+      const hLeft = heightAt(heightGrid, sx - 1, sz);
+      const hRight = heightAt(heightGrid, sx + 1, sz);
+      const hDown = heightAt(heightGrid, sx, sz - 1);
+      const hUp = heightAt(heightGrid, sx, sz + 1);
+      const hMin = finiteMin([height, hLeft, hRight, hDown, hUp], sampleH);
+      const hMax = finiteMax([height, hLeft, hRight, hDown, hUp], sampleH);
 
-      const hRangeL = terrainSampler.sampleHeight(wx - cellM * 0.4, wz);
-      const hRangeR = terrainSampler.sampleHeight(wx + cellM * 0.4, wz);
-      const hRangeD = terrainSampler.sampleHeight(wx, wz - cellM * 0.4);
-      const hRangeU = terrainSampler.sampleHeight(wx, wz + cellM * 0.4);
-      const hMin = Math.min(sampleForMin, hRangeL, hRangeR, hRangeD, hRangeU);
-      const hMax = Math.max(sampleForMax, hRangeL, hRangeR, hRangeD, hRangeU);
-
-      const [nx, ny, nz] = computeNormalFiniteDifference(hFn, wx, wz, cellM);
+      const [nx, ny, nz] = normalFromHeights(hLeft, hRight, hDown, hUp, cellM);
 
       const slope = Math.acos(clamp01(ny));
 
@@ -88,7 +143,7 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
       const canopy = terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
       const water = terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0;
 
-      const roughness = computeRoughness(hFn, wx, wz, cellM);
+      const roughness = computeRoughnessFromGrid(heightGrid, sx, sz);
 
       if (heightValid) {
         globalMin = Math.min(globalMin, height);
@@ -99,8 +154,8 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
 
       const idx = sz * tileCells + sx;
       samples[idx] = {
-        heightMin: Number.isFinite(hMin) ? hMin : Number.POSITIVE_INFINITY,
-        heightMax: Number.isFinite(hMax) ? hMax : Number.NEGATIVE_INFINITY,
+        heightMin: hMin,
+        heightMax: hMax,
         heightAvg: heightValid ? sampleH : Number.POSITIVE_INFINITY,
         normalX: nx,
         normalY: ny,
@@ -110,7 +165,7 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
         canopyCoverage: clamp01(canopy),
         waterCoverage: clamp01(water),
         slope: Number.isFinite(slope) ? slope : 0,
-        roughness: Number.isFinite(roughness) ? roughness : 0,
+        roughness,
       };
     }
   }
@@ -143,28 +198,21 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
   };
 }
 
-function computeRoughness(
-  h: (x: number, z: number) => number,
-  cx: number,
-  cz: number,
-  radius: number,
-): number {
-  const offsets = [
-    [-1, -1], [0, -1], [1, -1],
-    [-1, 0], [1, 0],
-    [-1, 1], [0, 1], [1, 1],
-  ];
-  const center = h(cx, cz);
+function computeRoughnessFromGrid(grid: HeightGrid, cx: number, cz: number): number {
+  const center = heightAt(grid, cx, cz);
   if (!Number.isFinite(center)) return 0;
 
   let sumSq = 0;
   let count = 0;
-  for (const [dx, dz] of offsets) {
-    const v = h(cx + dx * radius * 0.5, cz + dz * radius * 0.5);
-    if (Number.isFinite(v)) {
-      const diff = v - center;
-      sumSq += diff * diff;
-      count++;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dz === 0) continue;
+      const value = heightAt(grid, cx + dx, cz + dz);
+      if (Number.isFinite(value)) {
+        const diff = value - center;
+        sumSq += diff * diff;
+        count++;
+      }
     }
   }
   return count > 0 ? Math.sqrt(sumSq / count) : 0;
