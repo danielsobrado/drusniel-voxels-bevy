@@ -9,6 +9,7 @@ export interface GpuVegetationEarlyRejectCounters {
   vegetationGpuClustersSummaryMissing: number;
   vegetationGpuClustersRevisionMismatch: number;
   vegetationGpuClustersFallbackAccepted: number;
+  vegetationGpuFarSummaryConsulted: number;
   vegetationGpuSourceFarSummary: number;
   vegetationGpuSourceTerrainSampler: number;
   vegetationGpuSourceFallback: number;
@@ -28,6 +29,7 @@ export interface GpuVegetationEarlyRejectCounters {
   treeGpuRejectTerrainHidden: number;
   treeGpuRejectNoCoverage: number;
   treeGpuRejectSummaryMissing: number;
+  treeGpuPrefilterFarSummaryConsulted: number;
   treeGpuSourceFarSummary: number;
   treeGpuSourceTerrainSampler: number;
   treeGpuSourceFallback: number;
@@ -37,6 +39,7 @@ export interface GpuVegetationEarlyRejectCounters {
   grassGpuRejectTerrainHidden: number;
   grassGpuRejectNoCoverage: number;
   grassGpuRejectSummaryMissing: number;
+  grassGpuPrefilterFarSummaryConsulted: number;
   grassGpuSourceFarSummary: number;
   grassGpuSourceTerrainSampler: number;
   grassGpuSourceFallback: number;
@@ -46,6 +49,7 @@ export interface GpuVegetationEarlyRejectCounters {
   understoryGpuRejectTerrainHidden: number;
   understoryGpuRejectNoCoverage: number;
   understoryGpuRejectSummaryMissing: number;
+  understoryGpuPrefilterFarSummaryConsulted: number;
   understoryGpuSourceFarSummary: number;
   understoryGpuSourceTerrainSampler: number;
   understoryGpuSourceFallback: number;
@@ -59,6 +63,7 @@ export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejec
     vegetationGpuClustersSummaryMissing: 0,
     vegetationGpuClustersRevisionMismatch: 0,
     vegetationGpuClustersFallbackAccepted: 0,
+    vegetationGpuFarSummaryConsulted: 0,
     vegetationGpuSourceFarSummary: 0,
     vegetationGpuSourceTerrainSampler: 0,
     vegetationGpuSourceFallback: 0,
@@ -78,6 +83,7 @@ export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejec
     treeGpuRejectTerrainHidden: 0,
     treeGpuRejectNoCoverage: 0,
     treeGpuRejectSummaryMissing: 0,
+    treeGpuPrefilterFarSummaryConsulted: 0,
     treeGpuSourceFarSummary: 0,
     treeGpuSourceTerrainSampler: 0,
     treeGpuSourceFallback: 0,
@@ -87,6 +93,7 @@ export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejec
     grassGpuRejectTerrainHidden: 0,
     grassGpuRejectNoCoverage: 0,
     grassGpuRejectSummaryMissing: 0,
+    grassGpuPrefilterFarSummaryConsulted: 0,
     grassGpuSourceFarSummary: 0,
     grassGpuSourceTerrainSampler: 0,
     grassGpuSourceFallback: 0,
@@ -96,6 +103,7 @@ export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejec
     understoryGpuRejectTerrainHidden: 0,
     understoryGpuRejectNoCoverage: 0,
     understoryGpuRejectSummaryMissing: 0,
+    understoryGpuPrefilterFarSummaryConsulted: 0,
     understoryGpuSourceFarSummary: 0,
     understoryGpuSourceTerrainSampler: 0,
     understoryGpuSourceFallback: 0,
@@ -123,6 +131,7 @@ function addTreeCounters(counters: GpuVegetationEarlyRejectCounters, tree: TreeS
   const accepted = tree.gpuPrefilterAcceptedClusters ?? 0;
   const missing = tree.gpuPrefilterUnknownKeptClusters ?? 0;
   const farSummary = tree.gpuPrefilterSourceFarSummary ?? 0;
+  const consulted = tree.gpuPrefilterFarSummaryConsulted ?? farSummary;
   const sampler = tree.gpuPrefilterSourceTerrainSampler ?? 0;
   const fallback = tree.gpuPrefilterSourceFallback ?? 0;
 
@@ -131,6 +140,7 @@ function addTreeCounters(counters: GpuVegetationEarlyRejectCounters, tree: TreeS
   counters.treeGpuClustersAccepted += accepted;
   counters.treeGpuRejectTerrainHidden += rejected;
   counters.treeGpuRejectSummaryMissing += missing;
+  counters.treeGpuPrefilterFarSummaryConsulted += consulted;
   counters.treeGpuSourceFarSummary += farSummary;
   counters.treeGpuSourceTerrainSampler += sampler;
   counters.treeGpuSourceFallback += fallback;
@@ -139,6 +149,7 @@ function addTreeCounters(counters: GpuVegetationEarlyRejectCounters, tree: TreeS
   counters.vegetationGpuClustersRejectedEarly += rejected;
   counters.vegetationGpuClustersAccepted += accepted;
   counters.vegetationGpuClustersSummaryMissing += missing;
+  counters.vegetationGpuFarSummaryConsulted += consulted;
   counters.vegetationGpuSourceFarSummary += farSummary;
   counters.vegetationGpuSourceTerrainSampler += sampler;
   counters.vegetationGpuSourceFallback += fallback;
@@ -160,6 +171,7 @@ function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: Gra
   const noCoverage = reasonCounts.wrong_biome ?? 0;
   const terrainHidden = reasonCounts.terrain_hidden ?? rejected;
   const farSummary = grass.gpuRingPrefilterSourceFarSummary ?? 0;
+  const consulted = grass.gpuRingPrefilterFarSummaryConsulted ?? farSummary;
   const sampler = grass.gpuRingPrefilterSourceTerrainSampler ?? 0;
   const fallback = grass.gpuRingPrefilterSourceFallback ?? 0;
 
@@ -169,6 +181,7 @@ function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: Gra
   counters.grassGpuRejectTerrainHidden += terrainHidden;
   counters.grassGpuRejectNoCoverage += noCoverage;
   counters.grassGpuRejectSummaryMissing += missing;
+  counters.grassGpuPrefilterFarSummaryConsulted += consulted;
   counters.grassGpuSourceFarSummary += farSummary;
   counters.grassGpuSourceTerrainSampler += sampler;
   counters.grassGpuSourceFallback += fallback;
@@ -177,6 +190,7 @@ function addGrassCounters(counters: GpuVegetationEarlyRejectCounters, grass: Gra
   counters.vegetationGpuClustersRejectedEarly += rejected;
   counters.vegetationGpuClustersAccepted += accepted;
   counters.vegetationGpuClustersSummaryMissing += missing;
+  counters.vegetationGpuFarSummaryConsulted += consulted;
   counters.vegetationGpuSourceFarSummary += farSummary;
   counters.vegetationGpuSourceTerrainSampler += sampler;
   counters.vegetationGpuSourceFallback += fallback;
@@ -200,6 +214,7 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   const noCoverage = reasonCounts.wrong_biome ?? 0;
   const terrainHidden = reasonCounts.terrain_hidden ?? rejected;
   const farSummary = understory.gpuPrefilterSourceFarSummary ?? 0;
+  const consulted = understory.gpuPrefilterFarSummaryConsulted ?? farSummary;
   const sampler = understory.gpuPrefilterSourceTerrainSampler ?? 0;
   const fallback = understory.gpuPrefilterSourceFallback ?? 0;
 
@@ -209,6 +224,7 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   counters.understoryGpuRejectTerrainHidden += terrainHidden;
   counters.understoryGpuRejectNoCoverage += noCoverage;
   counters.understoryGpuRejectSummaryMissing += missing;
+  counters.understoryGpuPrefilterFarSummaryConsulted += consulted;
   counters.understoryGpuSourceFarSummary += farSummary;
   counters.understoryGpuSourceTerrainSampler += sampler;
   counters.understoryGpuSourceFallback += fallback;
@@ -217,6 +233,7 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   counters.vegetationGpuClustersRejectedEarly += rejected;
   counters.vegetationGpuClustersAccepted += accepted;
   counters.vegetationGpuClustersSummaryMissing += missing;
+  counters.vegetationGpuFarSummaryConsulted += consulted;
   counters.vegetationGpuSourceFarSummary += farSummary;
   counters.vegetationGpuSourceTerrainSampler += sampler;
   counters.vegetationGpuSourceFallback += fallback;
