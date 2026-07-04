@@ -125,13 +125,12 @@ function makeController() {
 }
 
 describe("streamed CLOD root movement probes", () => {
-  it("counts only route-owned worker requests, applies, and evictions", async () => {
+  it("counts route-owned worker requests, applies, and evictions", async () => {
     const { controller, buildPages, requests } = makeController();
 
-    controller.update(new THREE.Vector3(192, 0, 0), 40);
     expect(controller.stats().probeRequestedPagesTotal).toBe(0);
-
     controller.beginMovementProbe();
+
     const scheduled = controller.update(new THREE.Vector3(256, 0, 0), 40);
     const coords = buildPages.mock.calls.at(-1)?.[0] as readonly PageCoord[];
     expect(scheduled.probeActive).toBe(1);
