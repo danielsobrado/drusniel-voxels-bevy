@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
 import type { ClodPageNode } from "../../../types.js";
 import { parseGrassConfig } from "../../../grass.js";
 import { parseStoneConfig } from "../../../stones/stone_config.js";
@@ -41,6 +42,7 @@ import {
 import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
 import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
+import { resolvePlayerEditAuthorityConfig } from "../../../player/player_edit_authority.js";
 import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
 import { propPlacementSceneToProjectProps } from "../../../project/project_props.js";
 import { projectPropEditStore } from "../../../project/prop_edit_store.js";
@@ -291,12 +293,24 @@ export async function runRuntimeSystemsStartup(
       : defaultConstructionConfig.enabled;
   if (constructionEnabled) {
     try {
+      const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, searchParams);
+      const maxRayDistanceM = editAuthority.allowFarCommit
+        ? defaultConstructionConfig.placement.maxRayDistanceM
+        : Math.min(defaultConstructionConfig.placement.maxRayDistanceM, editAuthority.buildCommitRadiusM);
       constructionController = createConstructionController({
         scene,
         camera,
         rendererDomElement: app.renderer.domElement,
         worldCells,
+        config: {
+          ...defaultConstructionConfig,
+          placement: {
+            ...defaultConstructionConfig.placement,
+            maxRayDistanceM,
+          },
+        },
       });
+      getHooks()?.stats?.counters && (getHooks()!.stats!.counters["player_build_commit_limit_m"] = maxRayDistanceM);
     } catch (error) {
       console.error("[construction] failed to initialize", error);
     }
