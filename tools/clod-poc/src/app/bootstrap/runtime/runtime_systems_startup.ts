@@ -316,14 +316,15 @@ export async function runRuntimeSystemsStartup(
             defaultConstructionConfig.placement.maxRayDistanceM,
             editAuthority.allowFarPreview ? editAuthority.buildPreviewRadiusM : editAuthority.buildCommitRadiusM,
           );
+      const constructionUnboundedWorld = searchParams.get("scene")?.startsWith("infinite-") ?? false;
       const constructionConfig = {
         ...defaultConstructionConfig,
         placement: {
           ...defaultConstructionConfig.placement,
           maxRayDistanceM,
+          unboundedWorld: constructionUnboundedWorld,
         },
       };
-      const constructionUnboundedWorld = searchParams.get("scene")?.startsWith("infinite-") ?? false;
       const constructionWorldCells = constructionUnboundedWorld ? Number.MAX_SAFE_INTEGER / 4 : worldCells;
       const counters = getHooks()?.stats?.counters ?? null;
       if (counters) {
