@@ -40,7 +40,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
 
   const fireButton = createSpellButton(`1 🔥 ${config.fire.label}`, `${config.fire.label} spell (1)`, () => castFire());
   const waterButton = createSpellButton(`2 💧 ${config.water.label}`, `${config.water.label} spell (2)`, () => castWater());
-  const airButton = createSpellButton(`3 ${config.air.label}`, `${config.air.label} spell (3)`, () => castAir());
+  const airButton = createSpellButton(`3 💨 ${config.air.label}`, `${config.air.label} spell (3)`, () => castAir());
   const earthButton = createSpellButton(`4 🪨 ${config.earth.label}`, `${config.earth.label} spell (4)`, () => castEarth());
 
   root.addEventListener("pointerdown", stopUiPropagation);
