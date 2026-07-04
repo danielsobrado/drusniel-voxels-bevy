@@ -14,6 +14,8 @@ import {
 import { shadowProxyStatsToCounters } from "./shadowProxyStats.js";
 import { computeShadowProxyCoverage } from "./shadowProxyValidation.js";
 
+const SHADOW_PROXY_PENDING_MAX_MS = 1000;
+
 export interface ShadowProxyControllerDeps {
   scene: THREE.Scene;
   renderer: ShadowMapRenderer;
@@ -82,6 +84,7 @@ export function createShadowProxyController(
     summaryRef: ShadowProxySource;
     config: ShadowProxyConfig;
     coverage: ShadowProxyCoverage;
+    startedMs: number;
   } | null = null;
   let runtime = buildDisabledRuntime();
   let sunLight: THREE.DirectionalLight | null = null;
@@ -135,7 +138,8 @@ export function createShadowProxyController(
       lightShadowMapSize: config.lightShadowMapSize,
       lightShadowCameraExtentM: config.lightShadowCameraExtentM,
     });
-    deps.onCounters?.({ ...counters, shadow_proxy_building: pendingJob ? 1 : 0 });
+    const pendingAgeMs = pendingJob ? Math.max(0, performance.now() - pendingJob.startedMs) : 0;
+    deps.onCounters?.({ ...counters, shadow_proxy_building: pendingJob ? 1 : 0, shadow_proxy_pending_age_ms: pendingAgeMs });
   };
 
   const removeProxyMesh = () => {
@@ -185,6 +189,14 @@ export function createShadowProxyController(
     applyCompletedBuild(done, buildShadowProxyMesh(done.summaryRef, done.config, done.coverage, result));
   };
 
+  const shouldRestartPendingForCenter = (centerX: number, centerZ: number): boolean => {
+    if (!pendingJob) return true;
+    const distance = Math.hypot(centerX - pendingJob.centerX, centerZ - pendingJob.centerZ);
+    const maxDistance = Math.max(1, deps.rebuildSnapMeters);
+    const stale = performance.now() - pendingJob.startedMs > SHADOW_PROXY_PENDING_MAX_MS;
+    return distance > maxDistance || stale;
+  };
+
   const rebuildProxy = (force = false) => {
     if (!deps.isLongView || !proxyEnabled) {
       pendingJob = null;
@@ -205,6 +217,10 @@ export function createShadowProxyController(
     config = { ...config, ...liveConfig };
     const terrainSummary = deps.getTerrainSummary();
     const center = resolveCoverageCenter(deps);
+    if (!force && pendingJob && terrainSummary === pendingJob.summaryRef && !shouldRestartPendingForCenter(center.x, center.z)) {
+      publishCounters();
+      return;
+    }
     const coverage: ShadowProxyCoverage = {
       ...computeShadowProxyCoverage(deps.worldSize, config, center.x, center.z),
       buildRelative: deps.streamingCentered,
@@ -219,6 +235,7 @@ export function createShadowProxyController(
       summaryRef: terrainSummary,
       config: buildConfig,
       coverage,
+      startedMs: performance.now(),
     };
     publishCounters();
     stepPendingJob();
@@ -307,9 +324,10 @@ export function createShadowProxyController(
       const targetCenterX = pendingJob ? pendingJob.centerX : builtCenterX;
       const targetCenterZ = pendingJob ? pendingJob.centerZ : builtCenterZ;
       if ((snapped.x !== targetCenterX || snapped.z !== targetCenterZ) && !frozen) {
-        rebuildProxy(true);
+        if (!pendingJob || shouldRestartPendingForCenter(snapped.x, snapped.z)) rebuildProxy(true);
       }
       updateStreamingFollow();
+      publishCounters();
     },
     rebuildIfNeeded(force = false) {
       stepPendingJob();
@@ -325,7 +343,7 @@ export function createShadowProxyController(
         || targetCenterX !== center.x
         || targetCenterZ !== center.z
       ) {
-        rebuildProxy(force);
+        rebuildProxy(force || !pendingJob || shouldRestartPendingForCenter(center.x, center.z));
       }
     },
     setOnSunShadowsChanged(handler: ((enabled: boolean) => void) | undefined) {
