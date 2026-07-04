@@ -1,6 +1,62 @@
 import * as THREE from "three";
-import { describe, expect, it } from "vitest";
-import { vegetationRingCenter } from "./terrain_frame_phase.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  beginLiveBubbleMovementProbe,
+  runTerrainFramePhase,
+  vegetationRingCenter,
+} from "./terrain_frame_phase.js";
+import type { NearFieldBubbleStats } from "../../terrain/near_field/near_field_bubble_controller.js";
+import type { TerrainFramePhaseInput } from "./terrain_frame_phase.js";
+
+const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
+  chunkGroupsBuiltThisFrame: 0,
+  bubbleMs: 0,
+  chunkGroupCount: 0,
+  requiredPages: 0,
+  readyPages: 0,
+  buildingPages: 0,
+  failedPages: 0,
+  evictions: 0,
+  colliderEvictions: 0,
+  streamedColliderPages: 0,
+  colliderRegistrations: 0,
+  colliderRemovals: 0,
+};
+
+function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePhaseInput {
+  return {
+    state: { bubble: true, bubbleRadius: 96 } as TerrainFramePhaseInput["state"],
+    pageTransitionMode: "instant",
+    crossfadeStep: 1,
+    interaction: { mode: "orbit" } as TerrainFramePhaseInput["interaction"],
+    player: { position: new THREE.Vector3(0, 0, 0) } as TerrainFramePhaseInput["player"],
+    controls: { target: new THREE.Vector3(0, 0, 0) } as TerrainFramePhaseInput["controls"],
+    selectionController: {
+      activeTerrainViews: () => new Set(),
+      currentTerrainViews: () => new Set(),
+      stats: () => ({ frameId }),
+    } as unknown as TerrainFramePhaseInput["selectionController"],
+    nearFieldBubbleController: {
+      update: vi.fn(() => stats),
+    } as unknown as TerrainFramePhaseInput["nearFieldBubbleController"],
+    views: new Map(),
+    worldCells: 16,
+  };
+}
+
+function installCounters(): Record<string, number> {
+  const counters: Record<string, number> = {};
+  (globalThis as typeof globalThis & {
+    window?: unknown;
+    location?: unknown;
+  }).window = {
+    __drusnielClod: {
+      stats: { counters },
+    },
+  };
+  (globalThis as typeof globalThis & { location?: unknown }).location = { search: "?scene=infinite-islands" };
+  return counters;
+}
 
 describe("vegetationRingCenter", () => {
   it("keeps legacy vegetation inside finite world bounds", () => {
@@ -17,5 +73,42 @@ describe("vegetationRingCenter", () => {
     expect(center.x).toBe(1600);
     expect(center.y).toBe(3);
     expect(center.z).toBe(-300);
+  });
+});
+
+describe("terrain frame live-bubble probe counters", () => {
+  it("adds collider removals by delta and keeps total evictions cumulative", () => {
+    const counters = installCounters();
+
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      evictions: 3,
+      colliderRemovals: 5,
+    }, 1));
+    const totalBeforeProbe = counters["live_bubble_evictions_total"];
+
+    beginLiveBubbleMovementProbe();
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      colliderRemovals: 5,
+    }, 2));
+
+    expect(counters["live_bubble_probe_collider_removals_total"]).toBe(0);
+    expect(counters["live_bubble_evictions_total"]).toBe(totalBeforeProbe);
+
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      evictions: 2,
+      colliderEvictions: 1,
+      colliderRemovals: 7,
+    }, 3));
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      colliderRemovals: 7,
+    }, 4));
+
+    expect(counters["live_bubble_probe_evictions_total"]).toBe(1);
+    expect(counters["live_bubble_probe_collider_removals_total"]).toBe(2);
+    expect(counters["live_bubble_evictions_total"]).toBe((totalBeforeProbe ?? 0) + 2);
   });
 });
