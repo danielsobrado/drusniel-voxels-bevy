@@ -26,12 +26,19 @@ export interface TerrainEditDirtyQueueSnapshot {
   dropped: number;
 }
 
+function resolveMaxEvents(maxEvents: number): number {
+  return Number.isFinite(maxEvents) && maxEvents > 0 ? Math.floor(maxEvents) : DEFAULT_MAX_DIRTY_EVENTS;
+}
+
 export class TerrainEditDirtyQueue {
   private readonly events: TerrainEditDirtyEvent[] = [];
+  private readonly maxEvents: number;
   private latestRevisionValue = 0;
   private droppedValue = 0;
 
-  constructor(private readonly maxEvents = DEFAULT_MAX_DIRTY_EVENTS) {}
+  constructor(maxEvents = DEFAULT_MAX_DIRTY_EVENTS) {
+    this.maxEvents = resolveMaxEvents(maxEvents);
+  }
 
   enqueue(event: TerrainEditDirtyEvent): void {
     this.events.push(event);
