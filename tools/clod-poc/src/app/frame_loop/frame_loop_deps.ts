@@ -10,6 +10,7 @@ import type { PropStats } from "../../props/prop_stats.js";
 import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { NearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
+import type { StreamingClodRootController } from "../../terrain/streaming/clod_streaming_roots.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
 import type { PlayerInputController } from "../../player/player_input_controller.js";
 import type { BrushPreviewController } from "../../player/brush_preview_controller.js";
@@ -87,6 +88,7 @@ export interface FrameLoopTerrainDeps {
   pageTransitionMode: string;
   crossfadeStep: number;
   nearFieldBubbleController: NearFieldBubbleController;
+  streamingClodRootController?: StreamingClodRootController | null;
   views: Map<string, NodeViewLookup & TerrainFadeView>;
   worldCells: number;
   pruneRenderNodeCache?: (protectedNodeIds: ReadonlySet<string>, frameId: number) => void;
