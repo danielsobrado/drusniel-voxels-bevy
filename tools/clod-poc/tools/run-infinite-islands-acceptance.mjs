@@ -73,9 +73,16 @@ function reuseExistingServer() {
 
 async function ensureServer() {
   const baseUrl = process.env.CLOD_POC_BASE_URL ?? DEFAULT_BASE_URL;
-  if (reuseExistingServer() && await isServerReady(baseUrl)) {
+  const alreadyReady = await isServerReady(baseUrl);
+  if (alreadyReady && reuseExistingServer()) {
     console.log(`[infinite-accept] reusing existing Vite at ${baseUrl}`);
     return null;
+  }
+  if (alreadyReady) {
+    throw new Error(
+      `A server is already running at ${baseUrl}. Stop it, set CLOD_POC_BASE_URL to a free port, ` +
+        `or set CLOD_POC_REUSE_SERVER=1 to intentionally reuse it.`,
+    );
   }
 
   console.log(`[infinite-accept] starting Vite at ${baseUrl}`);
