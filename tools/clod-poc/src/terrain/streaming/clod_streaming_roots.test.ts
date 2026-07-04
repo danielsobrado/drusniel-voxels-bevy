@@ -120,4 +120,31 @@ describe("createStreamingClodRootController", () => {
     expect(afterBuild.cachedPages).toBeGreaterThan(0);
     expect(afterBuild.builtThisFrame).toBe(1);
   });
+
+  it("drops a queued root build after the center changes", () => {
+    const roots: ClodPageNode[] = [];
+    const allNodes: ClodPageNode[] = [];
+    const pendingTasks: Array<() => void> = [];
+    const controller = createStreamingClodRootController({
+      roots,
+      allNodes,
+      cfg: TEST_CFG,
+      worldCells: 64,
+      enabled: true,
+      buildBudgetPagesPerFrame: 1,
+      maxCachedPages: 8,
+      scheduleBuild: (task) => pendingTasks.push(task),
+    });
+
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+    controller.update(new THREE.Vector3(512, 0, 0), 40);
+    expect(pendingTasks.length).toBe(2);
+
+    pendingTasks[0]?.();
+    expect(roots.length).toBe(0);
+
+    pendingTasks[1]?.();
+    const afterBuild = controller.update(new THREE.Vector3(512, 0, 0), 40);
+    expect(afterBuild.cachedPages).toBeGreaterThan(0);
+  });
 });
