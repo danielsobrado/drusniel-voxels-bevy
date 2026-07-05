@@ -3,6 +3,7 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   abs,
   clamp,
+  cos,
   dot,
   float,
   Fn,
@@ -101,7 +102,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const choppiness = float(wave.choppiness);
     const theta: TslNode = k.mul(dirX.mul(pos.x).add(dirZ.mul(pos.z))).sub(float(wave.omega).mul(uTime)).add(float(wave.phase));
     const s: TslNode = sin(theta);
-    const c: TslNode = (theta as TslNode).cos ? (theta as TslNode).cos() : sin(theta.add(float(Math.PI / 2)));
+    const c: TslNode = cos(theta);
     waveX = waveX.sub(amp.mul(dirX).mul(s).mul(choppiness));
     waveZ = waveZ.sub(amp.mul(dirZ).mul(s).mul(choppiness));
     waveY = waveY.add(amp.mul(c));
