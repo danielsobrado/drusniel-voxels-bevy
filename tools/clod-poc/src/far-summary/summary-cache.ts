@@ -1,6 +1,6 @@
 import type { FarSummaryConfig } from "./config.js";
 import type { FarSummaryStats, FarSummaryTile, FarSummaryTileKey, FarSummarySample } from "./types.js";
-import type { FarSummaryRingRequest } from "./clipmap-rings.js";
+import type { FarSummaryRingRequest, TileBounds } from "./clipmap-rings.js";
 import { findCachedTileForSample } from "./clipmap-rings.js";
 import { tileKeyToString, worldToTileCoord } from "./tile-key.js";
 import { createFarSummaryStats, resetFrameStats } from "./stats.js";
@@ -24,6 +24,19 @@ interface ActiveBuild {
   startedAtMs: number;
 }
 
+interface PendingCommit {
+  keyStr: string;
+  tile: FarSummaryTile;
+  startedAtMs: number;
+}
+
+export interface FarSummaryRequestStateCounts {
+  ready: number;
+  building: number;
+  staleWithSamples: number;
+  missing: number;
+}
+
 export class FarSummaryCache implements FallbackStatsWriter {
   private readonly config: FarSummaryConfig;
   private readonly tiles = new Map<string, FarSummaryTile>();
@@ -33,6 +46,8 @@ export class FarSummaryCache implements FallbackStatsWriter {
   private frameIndex = 0;
   private commitRevision = 0;
   private stateRevision = 0;
+  private invalidationEpoch = 0;
+  private readonly pendingCommits: PendingCommit[] = [];
 
   constructor(config: FarSummaryConfig) {
     this.config = config;
@@ -55,6 +70,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
           key: req.key,
           state: "requested",
           revision: 0,
+          builtEpoch: -1,
           lastTouchedFrame: frameIndex,
           lastTouchedTimeMs: nowMs,
           cellSizeM: req.key.cellSizeM,
@@ -67,8 +83,19 @@ export class FarSummaryCache implements FallbackStatsWriter {
         this.pendingBuildKeys.set(keyStr, req);
         this.stats.requestedTiles++;
       } else {
-        existing.lastTouchedFrame = frameIndex;
-        existing.lastTouchedTimeMs = nowMs;
+          existing.lastTouchedFrame = frameIndex;
+          existing.lastTouchedTimeMs = nowMs;
+
+        if (
+          (existing.state === "stale" || existing.state === "cooling") &&
+          existing.samples.length > 0 &&
+          existing.builtEpoch === this.invalidationEpoch
+        ) {
+          existing.state = "ready";
+          this.stateRevision++;
+          this.stats.staleRestores++;
+          continue;
+        }
 
         if (
           existing.state === "missing" ||
@@ -95,6 +122,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
     this.frameIndex = frameIndex;
     const maxBuilds = Math.max(0, overrideMaxBuilds ?? this.config.stream.maxTileBuildsPerFrame);
     const commitBudget = Math.max(0, this.config.stream.maxTileCommitsPerFrame);
+    this.drainPendingCommits(commitBudget);
     let completedBuilds = 0;
 
     while (completedBuilds < maxBuilds) {
@@ -137,6 +165,10 @@ export class FarSummaryCache implements FallbackStatsWriter {
       this.stats.cacheMisses++;
       return null;
     }
+    if ((tile.state === "stale" || tile.state === "cooling") && !this.config.stream.keepStaleUntilReplacement) {
+      this.stats.cacheMisses++;
+      return null;
+    }
     const sample = sampleFromTile(tile, x, z);
     if (sample) {
       this.stats.cacheHits++;
@@ -157,15 +189,48 @@ export class FarSummaryCache implements FallbackStatsWriter {
     return this.sampleExactRing(x, z, preferredRing);
   }
 
+  countRequestStates(requests: readonly FarSummaryRingRequest[]): FarSummaryRequestStateCounts {
+    const seen = new Set<string>();
+    const counts: FarSummaryRequestStateCounts = {
+      ready: 0,
+      building: 0,
+      staleWithSamples: 0,
+      missing: 0,
+    };
+
+    for (const req of requests) {
+      const keyStr = tileKeyToString(req.key);
+      if (seen.has(keyStr)) continue;
+      seen.add(keyStr);
+      const tile = this.tiles.get(keyStr);
+      if (!tile || tile.state === "missing" || tile.state === "evicted") {
+        counts.missing++;
+      } else if (tile.state === "ready") {
+        counts.ready++;
+      } else if (tile.state === "building" || tile.state === "requested") {
+        counts.building++;
+      } else if ((tile.state === "stale" || tile.state === "cooling") && tile.samples.length > 0) {
+        counts.staleWithSamples++;
+      } else {
+        counts.missing++;
+      }
+    }
+
+    return counts;
+  }
+
   countProceduralFallback(): void { this.stats.proceduralFallbacks++; }
   countLowerRingFallback(): void { this.stats.lowerRingFallbacks++; }
   countConservativeFallback(): void { this.stats.conservativeFallbacks++; }
 
-  markStale(_boundsOrPredicate: unknown): void {
-    const now = this.frameIndex;
+  markStale(bounds: TileBounds | null): void {
+    if (bounds === null) this.invalidationEpoch++;
     for (const [, tile] of this.tiles) {
-      if (tile.state === "ready" && tile.lastTouchedFrame < now - 1) {
+      if (tile.state === "building" || tile.state === "evicted") continue;
+      if (bounds !== null && !tileIntersectsBounds(tile, bounds)) continue;
+      if (tile.state === "ready" || tile.state === "cooling" || tile.state === "stale") {
         tile.state = "stale";
+        if (bounds !== null) tile.builtEpoch = -1;
         this.stateRevision++;
       }
     }
@@ -280,17 +345,12 @@ export class FarSummaryCache implements FallbackStatsWriter {
 
     try {
       const builtTile = finishFarSummaryTileBuild(active.state);
+      builtTile.builtEpoch = this.invalidationEpoch;
       this.stats.tilesBuiltThisFrame++;
       if (this.stats.tilesCommittedThisFrame >= commitBudget) {
-        const hasSamples = existing.samples.length > 0;
-        existing.state = hasSamples ? "stale" : "requested";
-        this.stateRevision++;
-        this.pendingBuildKeys.set(active.keyStr, active.req);
+        this.pendingCommits.push({ keyStr: active.keyStr, tile: builtTile, startedAtMs: active.startedAtMs });
       } else {
-        this.tiles.set(active.keyStr, builtTile);
-        this.stateRevision++;
-        this.stats.tilesCommittedThisFrame++;
-        this.commitRevision++;
+        this.commitBuiltTile(active.keyStr, builtTile);
       }
       const elapsed = performance.now() - active.startedAtMs;
       if (elapsed > this.stats.maxBuildTimeMs) {
@@ -310,6 +370,24 @@ export class FarSummaryCache implements FallbackStatsWriter {
     }
     return best;
   }
+
+  private drainPendingCommits(commitBudget: number): void {
+    while (this.pendingCommits.length > 0 && this.stats.tilesCommittedThisFrame < commitBudget) {
+      const pending = this.pendingCommits.shift()!;
+      this.commitBuiltTile(pending.keyStr, pending.tile);
+      const elapsed = performance.now() - pending.startedAtMs;
+      if (elapsed > this.stats.maxBuildTimeMs) {
+        this.stats.maxBuildTimeMs = elapsed;
+      }
+    }
+  }
+
+  private commitBuiltTile(keyStr: string, tile: FarSummaryTile): void {
+    this.tiles.set(keyStr, tile);
+    this.stateRevision++;
+    this.stats.tilesCommittedThisFrame++;
+    this.commitRevision++;
+  }
 }
 
 function compareRequests(a: FarSummaryRingRequest, b: FarSummaryRingRequest): number {
@@ -327,5 +405,56 @@ function sampleFromTile(tile: FarSummaryTile, x: number, z: number): FarSummaryS
   const sx = Math.floor(localX);
   const sz = Math.floor(localZ);
   if (sx < 0 || sx >= tileCells || sz < 0 || sz >= tileCells) return null;
-  return samples[sz * tileCells + sx] ?? null;
+  const out = emptySample();
+  return readTileSample(tile, sx, sz, out) ? out : null;
+}
+
+export function readTileSample(
+  tile: FarSummaryTile,
+  cellX: number,
+  cellZ: number,
+  out: FarSummarySample,
+): boolean {
+  if (tile.samples.length === 0) return false;
+  if (cellX < 0 || cellX >= tile.tileCells || cellZ < 0 || cellZ >= tile.tileCells) return false;
+  const sample = tile.samples[cellZ * tile.tileCells + cellX];
+  if (!sample) return false;
+  out.heightMin = sample.heightMin;
+  out.heightMax = sample.heightMax;
+  out.heightAvg = sample.heightAvg;
+  out.normalX = sample.normalX;
+  out.normalY = sample.normalY;
+  out.normalZ = sample.normalZ;
+  out.dominantMaterial = sample.dominantMaterial;
+  out.materialVariance = sample.materialVariance;
+  out.canopyCoverage = sample.canopyCoverage;
+  out.waterCoverage = sample.waterCoverage;
+  out.slope = sample.slope;
+  out.roughness = sample.roughness;
+  return true;
+}
+
+function emptySample(): FarSummarySample {
+  return {
+    heightMin: 0,
+    heightMax: 0,
+    heightAvg: 0,
+    normalX: 0,
+    normalY: 1,
+    normalZ: 0,
+    dominantMaterial: 0,
+    materialVariance: 0,
+    canopyCoverage: 0,
+    waterCoverage: 0,
+    slope: 0,
+    roughness: 0,
+  };
+}
+
+function tileIntersectsBounds(tile: FarSummaryTile, bounds: TileBounds): boolean {
+  const minX = tile.originX;
+  const minZ = tile.originZ;
+  const maxX = tile.originX + tile.cellSizeM * tile.tileCells;
+  const maxZ = tile.originZ + tile.cellSizeM * tile.tileCells;
+  return minX < bounds.maxX && maxX > bounds.minX && minZ < bounds.maxZ && maxZ > bounds.minZ;
 }

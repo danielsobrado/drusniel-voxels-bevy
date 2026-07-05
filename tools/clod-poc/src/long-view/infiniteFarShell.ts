@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { HeightNormalMaterial, FarSummarySamplerOptions } from "./farSummarySampler.js";
+import type { HeightNormalMaterial, FarSummarySamplerOptions, FarSummarySamplerScratch } from "./farSummarySampler.js";
 import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, updateFarShellMaterialSunVisibility, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
@@ -58,6 +58,10 @@ export class InfiniteFarShell {
   private normals: Float32Array;
   private uvs: Float32Array;
   private indices: number[];
+  private readonly samplerScratch: FarSummarySamplerScratch = {
+    providerSample: { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0 },
+    normal: new THREE.Vector3(0, 1, 0),
+  };
 
   constructor(options: InfiniteFarShellOptions) {
     this.options = options;
@@ -71,7 +75,9 @@ export class InfiniteFarShell {
       farShellRebuildCursor: 0, farShellRebuildVertices: 0, farSummaryTilesRequired: 0,
       farSummaryTilesReady: 0, farSummaryTilesBuilding: 0, farSummaryTilesMissing: 0,
       farSummaryTilesStale: 0, farSummaryTilesBuiltThisFrame: 0, farSummaryCacheSize: 0,
-      farSummaryFallbackSamples: 0,
+      farSummaryFallbackSamples: 0, farSummaryProceduralFallbackSamples: 0,
+      farSummaryLowerRingFallbackSamples: 0, farSummaryConservativeFallbackSamples: 0,
+      farSummaryStaleRestores: 0, farSummaryBuildsDiscarded: 0,
     };
     this.useParityMaterial = options.useParityMaterial ?? false;
     this.parityConfig = options.parityConfig;
@@ -79,6 +85,7 @@ export class InfiniteFarShell {
       macroBlendStartMeters: options.macroBlendStartMeters,
       macroBlendEndMeters: options.macroBlendEndMeters,
       metrics: this.metrics,
+      scratch: this.samplerScratch,
     };
     const useParity = this.useParityMaterial && this.parityConfig !== undefined;
     this.materialOptions = {
@@ -229,7 +236,7 @@ export class InfiniteFarShell {
     this.metrics.farShellCenterZ = cameraWorldZ;
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
-    if (snappedChanged && this.heightSamplingMode === "cpu") {
+    if ((snappedChanged || this.rebuildCount === 0) && this.heightSamplingMode === "cpu") {
       this.requestSlicedHeightRebuild(true);
     }
     if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();
@@ -329,6 +336,7 @@ export class InfiniteFarShell {
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
     const minStepVerts = 64;
     const vertexCount = this.computeVertexCount();
+    const completeSmallRebuild = vertexCount <= minStepVerts * 3;
     if (pending.phase === "sample" && pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
     const started = performance.now();
     const elapsedMs = () => performance.now() - started;
@@ -338,7 +346,7 @@ export class InfiniteFarShell {
       this.sampleHeightVertexRange(pending.cursor, end, pending.snapX, pending.snapZ);
       pending.cursor = end;
       this.publishRebuildProgress();
-      if (pending.cursor < vertexCount && elapsedMs() >= budgetMs) {
+      if (!completeSmallRebuild && pending.cursor < vertexCount && elapsedMs() >= budgetMs) {
         pending.buildMs += elapsedMs();
         return;
       }
@@ -381,7 +389,7 @@ export class InfiniteFarShell {
       );
       pending.colorCursor = end;
       this.publishRebuildProgress();
-      if (pending.colorCursor < vertexCount && elapsedMs() >= budgetMs) {
+      if (!completeSmallRebuild && pending.colorCursor < vertexCount && elapsedMs() >= budgetMs) {
         pending.buildMs += elapsedMs();
         return;
       }

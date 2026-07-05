@@ -9,19 +9,13 @@ import { FarSummaryDebugOverlay } from "./debug-overlay.js";
 import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
 import type { FarHeightProvider } from "./clipmap-sampler.js";
-import type { FarShellController } from "../systems/far_shell_controller.js";
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
-
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
-const INFINITE_ISLANDS_SHELL_REBUILD_INTERVAL_FRAMES = 120;
-const DEFAULT_SHELL_REBUILD_INTERVAL_FRAMES = 10;
 
 export interface FarSummaryIntegrationOptions {
   terrainSampler: FarTerrainSampler;
   scene?: THREE.Scene;
   camera?: THREE.PerspectiveCamera;
-  farShellController?: FarShellController;
   farShellMetrics?: FarShellMetrics;
   config?: Partial<FarSummaryConfig>;
 }
@@ -71,7 +65,6 @@ export function initFarSummaryIntegration(
   };
 
   const queryParams = currentQueryParams();
-  const isInfiniteIslands = queryParams.get("scene") === INFINITE_ISLANDS_SCENE;
   // Tile builds are deadline-sliced inside buildSomeTiles (maxBuildMsPerFrame),
   // so per-frame building is frame-safe; the old 30-frame infinite-islands
   // throttle starved the clipmap (~9 ready of ~120 required per scene).
@@ -79,11 +72,6 @@ export function initFarSummaryIntegration(
     queryParams,
     "farSummaryBuildInterval",
     1,
-  );
-  const shellRebuildIntervalFrames = resolveFarSummaryFrameInterval(
-    queryParams,
-    "farSummaryShellRebuildInterval",
-    isInfiniteIslands ? INFINITE_ISLANDS_SHELL_REBUILD_INTERVAL_FRAMES : DEFAULT_SHELL_REBUILD_INTERVAL_FRAMES,
   );
 
   const cache = new FarSummaryCache(config);
@@ -100,8 +88,6 @@ export function initFarSummaryIntegration(
   };
   let forceSlowBuilds = false;
   let buildDelayMs = 0;
-  let lastKnownCommitRev = 0;
-  let framesSinceShellRebuild = 99;
 
   const update = (_frameIndexArg: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
     frameIndex++;
@@ -113,6 +99,7 @@ export function initFarSummaryIntegration(
       config.stream.preloadSeconds,
     );
     previousCenter = currentCenter;
+    sampler.setSampleCenter(currentCenter.worldX, currentCenter.worldZ);
 
     const requests = computeRequiredFarSummaryTiles(currentCenter, config);
 
@@ -131,10 +118,10 @@ export function initFarSummaryIntegration(
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
 
-    cache.markStale(null);
     cache.evictColdTiles(frameIndex, nowMs);
 
     const currentStats = cache.getStats();
+    const requestStates = cache.countRequestStates(requests);
     stats.requestedTiles = currentStats.requestedTiles;
     stats.buildingTiles = currentStats.buildingTiles;
     stats.readyTiles = currentStats.readyTiles;
@@ -149,6 +136,8 @@ export function initFarSummaryIntegration(
     stats.tilesCommittedThisFrame = currentStats.tilesCommittedThisFrame;
     stats.buildTimeMs = currentStats.buildTimeMs;
     stats.maxBuildTimeMs = currentStats.maxBuildTimeMs;
+    stats.staleRestores = currentStats.staleRestores;
+    stats.buildsDiscarded = currentStats.buildsDiscarded;
 
     debugOverlay.update(frameIndex, stats);
 
@@ -156,33 +145,21 @@ export function initFarSummaryIntegration(
       const metrics = options.farShellMetrics;
       resetFrameShellMetrics(metrics);
       metrics.farSummaryTilesRequired = requests.length;
-      metrics.farSummaryTilesReady = stats.readyTiles;
-      metrics.farSummaryTilesBuilding = stats.buildingTiles;
-      metrics.farSummaryTilesMissing = Math.max(
-        0,
-        requests.length - stats.readyTiles - stats.buildingTiles,
-      );
-      metrics.farSummaryTilesStale = stats.staleTiles;
+      metrics.farSummaryTilesReady = requestStates.ready;
+      metrics.farSummaryTilesBuilding = requestStates.building;
+      metrics.farSummaryTilesMissing = requestStates.missing;
+      metrics.farSummaryTilesStale = requestStates.staleWithSamples;
       metrics.farSummaryTilesBuiltThisFrame = stats.tilesBuiltThisFrame;
       metrics.farSummaryCacheSize = cache.getTileCount();
+      metrics.farSummaryProceduralFallbackSamples = stats.proceduralFallbacks;
+      metrics.farSummaryLowerRingFallbackSamples = stats.lowerRingFallbacks;
+      metrics.farSummaryConservativeFallbackSamples = stats.conservativeFallbacks;
+      metrics.farSummaryStaleRestores = stats.staleRestores;
+      metrics.farSummaryBuildsDiscarded = stats.buildsDiscarded;
       metrics.farSummaryFallbackSamples =
         stats.proceduralFallbacks +
         stats.lowerRingFallbacks +
         stats.conservativeFallbacks;
-    }
-
-    if (options.farShellController) {
-      options.farShellController.moveTo(
-        currentCenter.worldX,
-        currentCenter.worldZ,
-      );
-
-      framesSinceShellRebuild++;
-      if (cache.hasNewCommitsSince(lastKnownCommitRev) && framesSinceShellRebuild >= shellRebuildIntervalFrames) {
-        lastKnownCommitRev = cache.commitRevisionAt();
-        framesSinceShellRebuild = 0;
-        options.farShellController.setHeightProvider(sampler);
-      }
     }
   };
 

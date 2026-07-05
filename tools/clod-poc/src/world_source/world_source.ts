@@ -21,6 +21,7 @@ export interface WorldSource {
   readonly metadata: WorldSourceMetadata;
   sampleHeight(x: number, z: number): number;
   sampleBiome(x: number, z: number): BiomeId;
+  sampleMaterial(x: number, z: number): number;
   oceanMask(x: number, z: number): number;
 }
 
@@ -83,6 +84,10 @@ export class ProceduralWorldSource implements WorldSource {
     return this.biomes.sample(x, z, this.sampleHeight(x, z)).biome;
   }
 
+  sampleMaterial(x: number, z: number): number {
+    return this.sampleBiome(x, z);
+  }
+
   oceanMask(x: number, z: number): number {
     const h = this.sampleHeight(x, z);
     const island = sampleIslandMask(x, z, this.metadata.terrain.islandShape);
@@ -125,6 +130,10 @@ export class StreamedVoxelWorldSource implements WorldSource {
 
   sampleBiome(_x: number, _z: number): BiomeId {
     return notImplemented("sampleBiome");
+  }
+
+  sampleMaterial(_x: number, _z: number): number {
+    return notImplemented("sampleMaterial");
   }
 
   oceanMask(_x: number, _z: number): number {

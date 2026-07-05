@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
+import type { FarHeightProvider, FarHeightProviderSample } from "../far-summary/clipmap-sampler.js";
 import { sampleMacroTerrainHeight, sampleMacroTerrainNormal, sampleMacroTerrainMaterial } from "./macroTerrain.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 
@@ -21,6 +21,7 @@ export interface FarSummarySamplerOptions {
   macroBlendStartMeters: number;
   macroBlendEndMeters: number;
   metrics?: FarShellMetrics;
+  scratch?: FarSummarySamplerScratch;
 }
 
 export interface HeightNormalMaterial {
@@ -35,6 +36,11 @@ type MacroSample = Readonly<{
   material: number;
 }>;
 
+export interface FarSummarySamplerScratch {
+  providerSample: FarHeightProviderSample;
+  normal: THREE.Vector3;
+}
+
 function sampleMacro(x: number, z: number): MacroSample {
   return {
     height: sampleMacroTerrainHeight(x, z),
@@ -46,9 +52,22 @@ function sampleMacro(x: number, z: number): MacroSample {
 function sampleProvider(
   x: number,
   z: number,
+  distanceFromCenter: number,
   heightProvider: FarHeightProvider,
+  scratch: FarSummarySamplerScratch | undefined,
 ): HeightNormalMaterial | null {
   try {
+    if (scratch && heightProvider.sampleSummaryInto?.(x, z, distanceFromCenter, scratch.providerSample)) {
+      const sample = scratch.providerSample;
+      scratch.normal.set(sample.normalX, sample.normalY, sample.normalZ);
+      if (!Number.isFinite(sample.height) || !isFiniteNormal(scratch.normal)) return null;
+      return {
+        height: sample.height,
+        normal: scratch.normal,
+        material: sample.material,
+      };
+    }
+
     const height = heightProvider.sampleHeight(x, z);
     const normal = heightProvider.sampleNormal(x, z);
     if (!Number.isFinite(height) || !isFiniteNormal(normal)) return null;
@@ -71,7 +90,7 @@ export function sampleBlendedHeightNormalMaterial(
 ): HeightNormalMaterial {
   if (!heightProvider) return sampleMacro(x, z);
 
-  const summary = sampleProvider(x, z, heightProvider);
+  const summary = sampleProvider(x, z, distanceFromCenter, heightProvider, options.scratch);
   if (!summary) {
     if (options.metrics) {
       options.metrics.farSummaryFallbackSamples = options.metrics.farSummaryFallbackSamples + 1;

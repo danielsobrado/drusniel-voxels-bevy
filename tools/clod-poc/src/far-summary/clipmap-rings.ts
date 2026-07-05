@@ -43,6 +43,7 @@ export function computeRequiredFarSummaryTiles(
   for (let ri = 0; ri < config.rings.length; ri++) {
     const ring = config.rings[ri];
     const radiusM = ring.endM;
+    const coverageMarginM = Math.max(0, config.stream.ringCoverageMarginM);
 
     const minTileX = worldToTileCoord(predictedX - radiusM, ring.cellM, ring.tileCells);
     const maxTileX = worldToTileCoord(predictedX + radiusM, ring.cellM, ring.tileCells);
@@ -62,8 +63,17 @@ export function computeRequiredFarSummaryTiles(
         const tileCenterZ = (bounds.minZ + bounds.maxZ) / 2;
         const distCamera = Math.hypot(tileCenterX - center.worldX, tileCenterZ - center.worldZ);
         const distPredicted = Math.hypot(tileCenterX - predictedX, tileCenterZ - predictedZ);
+        const nearestX = clamp(predictedX, bounds.minX, bounds.maxX);
+        const nearestZ = clamp(predictedZ, bounds.minZ, bounds.maxZ);
+        const nearest = Math.hypot(nearestX - predictedX, nearestZ - predictedZ);
+        const farthest = Math.max(
+          Math.hypot(bounds.minX - predictedX, bounds.minZ - predictedZ),
+          Math.hypot(bounds.minX - predictedX, bounds.maxZ - predictedZ),
+          Math.hypot(bounds.maxX - predictedX, bounds.minZ - predictedZ),
+          Math.hypot(bounds.maxX - predictedX, bounds.maxZ - predictedZ),
+        );
 
-        if (distCamera < ring.startM || distCamera > ring.endM) {
+        if (nearest > ring.endM + coverageMarginM || farthest < ring.startM - coverageMarginM) {
           continue;
         }
 
@@ -95,6 +105,10 @@ export function computeRequiredFarSummaryTiles(
 
   requests.sort((a, b) => a.priority - b.priority);
   return requests;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 /**

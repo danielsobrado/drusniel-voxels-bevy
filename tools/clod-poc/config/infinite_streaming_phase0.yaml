@@ -224,6 +224,11 @@ metrics:
     - far_summary_tiles_stale
     - far_summary_tiles_built_this_frame
     - far_summary_cache_size
+    - far_summary_procedural_fallback_samples
+    - far_summary_lower_ring_fallback_samples
+    - far_summary_conservative_fallback_samples
+    - far_summary_stale_restores
+    - far_summary_builds_discarded
 
 acceptance:
   allow_current_4km_failure: true

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FarSummaryClipmapSampler } from "./clipmap-sampler.js";
+import { FarSummaryClipmapSampler, ringIndexForDistance } from "./clipmap-sampler.js";
 import { FarSummaryCache } from "./summary-cache.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
@@ -34,6 +34,14 @@ function buildPopulatedSampler(): FarSummaryClipmapSampler {
 }
 
 describe("clipmap sampler", () => {
+  it("derives preferred ring from sample distance", () => {
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+    expect(ringIndexForDistance(config.rings[0]!.startM - 1, config)).toBe(0);
+    expect(ringIndexForDistance(config.rings[0]!.endM - 1, config)).toBe(0);
+    expect(ringIndexForDistance(config.rings[0]!.endM + 1, config)).toBe(1);
+    expect(ringIndexForDistance(config.rings[2]!.endM + 1000, config)).toBe(2);
+  });
+
   it("exact tile hit returns correct height", () => {
     const sampler = buildPopulatedSampler();
     const h = sampler.sampleHeight(500, 500, 0);
@@ -64,6 +72,31 @@ describe("clipmap sampler", () => {
     expect(Number.isFinite(h)).toBe(true);
     // Lower-ring fallback tracking is on the clipmap sampler, not the cache
     // The sample succeeded via the lower ring path
+  });
+
+  it("samples both sides of a ring edge without fallback once requested tiles are built", () => {
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+    config.stream.maxTileBuildsPerFrame = 1000;
+    config.stream.maxTileCommitsPerFrame = 1000;
+    const cache = new FarSummaryCache(config);
+    const center: StreamCenter = {
+      worldX: 0, worldZ: 0,
+      predictedX: 0, predictedZ: 0,
+      velocityX: 0, velocityZ: 0,
+    };
+
+    const requests = computeRequiredFarSummaryTiles(center, config);
+    cache.requestTiles(requests, 0, 0);
+    cache.buildSomeTiles(flatSampler, 0, 0);
+    const sampler = new FarSummaryClipmapSampler(cache, config, flatSampler);
+    sampler.setSampleCenter(0, 0);
+
+    expect(sampler.sampleHeight(config.rings[0]!.endM - 1, 0)).toBe(50);
+    expect(sampler.sampleHeight(config.rings[0]!.endM + 1, 0)).toBe(50);
+    const stats = cache.getStats();
+    expect(stats.proceduralFallbacks).toBe(0);
+    expect(stats.lowerRingFallbacks).toBe(0);
+    expect(stats.conservativeFallbacks).toBe(0);
   });
 
   it("procedural fallback when no tiles exist", () => {

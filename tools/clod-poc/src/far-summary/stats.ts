@@ -16,6 +16,8 @@ export function createFarSummaryStats(): FarSummaryStats {
     tilesCommittedThisFrame: 0,
     buildTimeMs: 0,
     maxBuildTimeMs: 0,
+    staleRestores: 0,
+    buildsDiscarded: 0,
   };
 }
 
@@ -23,6 +25,8 @@ export function resetFrameStats(stats: FarSummaryStats): void {
   stats.tilesBuiltThisFrame = 0;
   stats.tilesCommittedThisFrame = 0;
   stats.buildTimeMs = 0;
+  stats.staleRestores = 0;
+  stats.buildsDiscarded = 0;
 }
 
 export function accumulateStats(dst: FarSummaryStats, src: FarSummaryStats): void {
@@ -39,6 +43,8 @@ export function accumulateStats(dst: FarSummaryStats, src: FarSummaryStats): voi
   dst.tilesBuiltThisFrame = src.tilesBuiltThisFrame;
   dst.tilesCommittedThisFrame = src.tilesCommittedThisFrame;
   dst.buildTimeMs = src.buildTimeMs;
+  dst.staleRestores = src.staleRestores;
+  dst.buildsDiscarded = src.buildsDiscarded;
   if (src.maxBuildTimeMs > dst.maxBuildTimeMs) {
     dst.maxBuildTimeMs = src.maxBuildTimeMs;
   }

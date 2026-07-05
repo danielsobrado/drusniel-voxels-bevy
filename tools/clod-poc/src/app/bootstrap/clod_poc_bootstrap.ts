@@ -248,12 +248,12 @@ export async function bootstrapClodPoc() {
       farSummaryIntegration = initFarSummaryIntegration({
         terrainSampler: {
           sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
+          sampleMaterial: (x: number, z: number) => world.worldSource.sampleMaterial(x, z),
           sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
           sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
         },
         scene: renderer.scene,
         camera: renderer.camera,
-        farShellController: terrainView.farShellController,
         farShellMetrics,
         config: longViewConfigToFarSummaryConfig(lvConfig),
       });
@@ -314,6 +314,7 @@ export async function bootstrapClodPoc() {
     if (farShellCpuHeightsEnabled) infiniteFarShell.setHeightProvider(heightProvider);
     renderer.scene.add(infiniteFarShell.mesh);
 
+    // InfiniteFarShell is the active long-view far renderer; keep the legacy controller disabled.
     terrainView.farShellController.setEnabled(false);
 
     terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {

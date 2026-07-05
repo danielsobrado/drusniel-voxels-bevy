@@ -23,6 +23,11 @@ export interface FarShellMetrics {
   farSummaryTilesBuiltThisFrame: number;
   farSummaryCacheSize: number;
   farSummaryFallbackSamples: number;
+  farSummaryProceduralFallbackSamples: number;
+  farSummaryLowerRingFallbackSamples: number;
+  farSummaryConservativeFallbackSamples: number;
+  farSummaryStaleRestores: number;
+  farSummaryBuildsDiscarded: number;
 }
 
 export function createFarShellMetrics(): FarShellMetrics {
@@ -50,12 +55,21 @@ export function createFarShellMetrics(): FarShellMetrics {
     farSummaryTilesBuiltThisFrame: 0,
     farSummaryCacheSize: 0,
     farSummaryFallbackSamples: 0,
+    farSummaryProceduralFallbackSamples: 0,
+    farSummaryLowerRingFallbackSamples: 0,
+    farSummaryConservativeFallbackSamples: 0,
+    farSummaryStaleRestores: 0,
+    farSummaryBuildsDiscarded: 0,
   };
 }
 
 export function resetFrameShellMetrics(m: FarShellMetrics): void {
   m.farSummaryTilesBuiltThisFrame = 0;
   m.farSummaryFallbackSamples = 0;
+  m.farSummaryProceduralFallbackSamples = 0;
+  m.farSummaryLowerRingFallbackSamples = 0;
+  m.farSummaryConservativeFallbackSamples = 0;
+  m.farSummaryBuildsDiscarded = 0;
 }
 
 /** Publishes infinite-far-shell metrics into phase-0 / hook counter maps. */
@@ -79,6 +93,11 @@ export function publishFarShellMetricsToCounters(
   counters["far_summary_tiles_built_this_frame"] = metrics.farSummaryTilesBuiltThisFrame;
   counters["far_summary_cache_size"] = metrics.farSummaryCacheSize;
   counters["far_summary_fallback_samples"] = metrics.farSummaryFallbackSamples;
+  counters["far_summary_procedural_fallback_samples"] = metrics.farSummaryProceduralFallbackSamples;
+  counters["far_summary_lower_ring_fallback_samples"] = metrics.farSummaryLowerRingFallbackSamples;
+  counters["far_summary_conservative_fallback_samples"] = metrics.farSummaryConservativeFallbackSamples;
+  counters["far_summary_stale_restores"] = metrics.farSummaryStaleRestores;
+  counters["far_summary_builds_discarded"] = metrics.farSummaryBuildsDiscarded;
 }
 
 export function exposeMetricsOnWindow(metrics: FarShellMetrics): void {

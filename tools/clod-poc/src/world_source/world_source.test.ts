@@ -57,6 +57,23 @@ describe("ProceduralWorldSource", () => {
     expect(source.metadata.bounds).toEqual({ radiusM: 4096 });
     expect(source.metadata.oceanRim).toBe(true);
   });
+
+  it("uses biome ids as procedural material ids across the far terrain sample range", () => {
+    const source = new ProceduralWorldSource(resolveTerrainFieldConfig({ seed: 7, islandShape: { enabled: true } }));
+    const seen = new Set<number>();
+
+    for (let z = -8192; z <= 8192; z += 512) {
+      for (let x = -8192; x <= 8192; x += 512) {
+        const material = source.sampleMaterial(x, z);
+        expect(material).toBe(source.sampleBiome(x, z));
+        expect(material).toBeGreaterThanOrEqual(BIOME_IDS.meadows);
+        expect(material).toBeLessThanOrEqual(BIOME_IDS.ocean);
+        seen.add(material);
+      }
+    }
+
+    expect(seen.size).toBeGreaterThan(1);
+  });
 });
 
 describe("BiomeRegionField", () => {
@@ -126,6 +143,7 @@ describe("StreamedVoxelWorldSource", () => {
     const source = new StreamedVoxelWorldSource({ seed: 9, seaLevel: 21 });
     expect(() => source.sampleHeight(0, 0)).toThrow(/sampleHeight is not implemented/);
     expect(() => source.sampleBiome(0, 0)).toThrow(/sampleBiome is not implemented/);
+    expect(() => source.sampleMaterial(0, 0)).toThrow(/sampleMaterial is not implemented/);
     expect(() => source.oceanMask(0, 0)).toThrow(/oceanMask is not implemented/);
   });
 });

@@ -11,6 +11,7 @@ export interface FarSummaryRingConfig {
 
 export interface FarSummaryStreamConfig {
   preloadSeconds: number;
+  ringCoverageMarginM: number;
   maxTileBuildsPerFrame: number;
   maxTileCommitsPerFrame: number;
   maxBuildMsPerFrame: number;
@@ -51,6 +52,7 @@ export const DEFAULT_FAR_SUMMARY_CONFIG: FarSummaryConfig = {
 
   stream: {
     preloadSeconds: 4.0,
+    ringCoverageMarginM: 256,
     maxTileBuildsPerFrame: 1,
     maxTileCommitsPerFrame: 8,
     maxBuildMsPerFrame: 2.0,

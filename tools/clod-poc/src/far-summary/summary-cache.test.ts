@@ -4,6 +4,8 @@ import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { StreamCenter } from "./stream-center.js";
 import { computeRequiredFarSummaryTiles } from "./clipmap-rings.js";
+import { ProceduralWorldSource } from "../world_source/world_source.js";
+import { resolveTerrainFieldConfig } from "../terrain/terrain.js";
 
 
 const flatSampler: FarTerrainSampler = {
@@ -134,6 +136,64 @@ describe("far summary cache", () => {
     expect(stats.tilesCommittedThisFrame).toBeLessThanOrEqual(2);
   });
 
+  it("counts request states from the current request set", () => {
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+    config.stream.maxTileBuildsPerFrame = 500;
+    config.stream.maxTileCommitsPerFrame = 500;
+    const cache = new FarSummaryCache(config);
+    const centerA: StreamCenter = {
+      worldX: 0, worldZ: 0,
+      predictedX: 0, predictedZ: 0,
+      velocityX: 0, velocityZ: 0,
+    };
+    const centerB: StreamCenter = {
+      worldX: 30000, worldZ: 30000,
+      predictedX: 30000, predictedZ: 30000,
+      velocityX: 0, velocityZ: 0,
+    };
+
+    const requestsA = computeRequiredFarSummaryTiles(centerA, config);
+    cache.requestTiles(requestsA, 0, 0);
+    cache.buildSomeTiles(flatSampler, 0, 0);
+    expect(cache.countRequestStates(requestsA).ready).toBeGreaterThan(0);
+
+    const requestsB = computeRequiredFarSummaryTiles(centerB, config);
+    const statesB = cache.countRequestStates(requestsB);
+    expect(statesB.missing).toBeGreaterThan(0);
+    expect(statesB.ready).toBeLessThan(requestsB.length);
+  });
+
+  it("builds far-summary material ids from ProceduralWorldSource", () => {
+    const terrain = resolveTerrainFieldConfig({ seed: 7, islandShape: { enabled: true } });
+    const source = new ProceduralWorldSource(terrain);
+    const sampler: FarTerrainSampler = {
+      sampleHeight: (x, z) => source.sampleHeight(x, z),
+      sampleMaterial: (x, z) => source.sampleMaterial(x, z),
+      sampleWaterCoverageForHeight: (_x, _z, height) => height < source.metadata.seaLevel ? 1 : 0,
+    };
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+    config.stream.maxTileBuildsPerFrame = 1000;
+    config.stream.maxTileCommitsPerFrame = 1000;
+    const cache = new FarSummaryCache(config);
+    const center: StreamCenter = {
+      worldX: 0, worldZ: 0,
+      predictedX: 0, predictedZ: 0,
+      velocityX: 0, velocityZ: 0,
+    };
+
+    const requests = computeRequiredFarSummaryTiles(center, config);
+    cache.requestTiles(requests, 0, 0);
+    cache.buildSomeTiles(sampler, 0, 0);
+
+    const materials = new Set<number>();
+    cache.forEachTile((tile) => {
+      if (tile.state !== "ready") return;
+      for (const sample of tile.samples) materials.add(sample.dominantMaterial);
+    });
+
+    expect(materials.size).toBeGreaterThanOrEqual(2);
+  });
+
   describe("cache hit/miss stats", () => {
     it("hit increments only cacheHits", () => {
       const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
@@ -225,6 +285,48 @@ describe("far summary cache", () => {
       expect(sample).not.toBeNull();
     });
 
+    it("stale tile is a miss when stale replacement sampling is disabled", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      config.stream.keepStaleUntilReplacement = false;
+      const cache = new FarSummaryCache(config);
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(flatSampler, 0, 0);
+
+      cache.markStale(null);
+
+      expect(cache.sample(2500, 2500, 0)).toBeNull();
+    });
+
+    it("markStale(bounds) only invalidates intersecting tiles", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      const cache = new FarSummaryCache(config);
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(flatSampler, 0, 0);
+
+      cache.markStale({ minX: 2048, maxX: 3072, minZ: 2048, maxZ: 3072 });
+
+      const intersecting = cache.getTile({ ring: 0, x: 2, z: 2, cellSizeM: 32 });
+      const outside = cache.getTile({ ring: 0, x: -3, z: -3, cellSizeM: 32 });
+      expect(intersecting?.state).toBe("stale");
+      expect(outside?.state).toBe("ready");
+    });
+
     it("commit budget exhaustion preserves stale state and retries next frame", () => {
       const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
       config.stream.maxTileBuildsPerFrame = 500;
@@ -240,21 +342,19 @@ describe("far summary cache", () => {
       cache.requestTiles(requests, 0, 0);
       cache.buildSomeTiles(flatSampler, 0, 0);
 
-      // Frame 0: budget exhausted — no tiles committed.
-      // Brand-new tiles (no samples) stay 'requested', not 'stale'.
+      // Frame 0: budget exhausted, so completed builds wait in the pending commit queue.
       let stats = cache.getStats();
       expect(stats.tilesCommittedThisFrame).toBe(0);
       expect(stats.staleTiles).toBe(0);
-      expect(stats.requestedTiles).toBeGreaterThan(0);
+      expect(stats.buildingTiles).toBeGreaterThan(0);
       expect(stats.readyTiles).toBe(0);
 
-      // Frame 1: still no commit budget — tiles built again, still 'requested'.
+      // Frame 1: still no commit budget — pending commits are retained, not rebuilt away.
       cache.requestTiles(requests, 1, 16);
       cache.buildSomeTiles(flatSampler, 1, 16);
       stats = cache.getStats();
-      expect(stats.tilesBuiltThisFrame).toBeGreaterThan(0);
       expect(stats.tilesCommittedThisFrame).toBe(0);
-      expect(stats.requestedTiles).toBeGreaterThan(0);
+      expect(stats.buildingTiles).toBeGreaterThan(0);
 
       // Frame 2: now allow commits
       config.stream.maxTileCommitsPerFrame = 500;

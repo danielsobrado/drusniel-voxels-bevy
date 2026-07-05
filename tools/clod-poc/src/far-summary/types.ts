@@ -33,6 +33,7 @@ export interface FarSummaryTile {
   key: FarSummaryTileKey;
   state: FarSummaryTileState;
   revision: number;
+  builtEpoch?: number;
   lastTouchedFrame: number;
   lastTouchedTimeMs: number;
   cellSizeM: number;
@@ -57,4 +58,6 @@ export interface FarSummaryStats {
   tilesCommittedThisFrame: number;
   buildTimeMs: number;
   maxBuildTimeMs: number;
+  staleRestores: number;
+  buildsDiscarded: number;
 }

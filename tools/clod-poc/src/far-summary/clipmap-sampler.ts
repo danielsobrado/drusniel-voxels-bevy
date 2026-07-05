@@ -9,6 +9,25 @@ export interface FarHeightProvider {
   sampleHeight(x: number, z: number): number;
   sampleNormal(x: number, z: number): THREE.Vector3;
   sampleMaterial?(x: number, z: number): number;
+  sampleSummaryInto?(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean;
+}
+
+export interface FarHeightProviderSample {
+  height: number;
+  normalX: number;
+  normalY: number;
+  normalZ: number;
+  material: number;
+}
+
+export function ringIndexForDistance(distanceM: number, config: FarSummaryConfig): number {
+  if (config.rings.length === 0) return 0;
+  for (let i = 0; i < config.rings.length; i++) {
+    const ring = config.rings[i]!;
+    if (distanceM >= ring.startM && distanceM < ring.endM) return i;
+  }
+  if (distanceM < config.rings[0]!.startM) return 0;
+  return config.rings.length - 1;
 }
 
 export class FarSummaryClipmapSampler implements FarHeightProvider {
@@ -16,6 +35,8 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
   private readonly config: FarSummaryConfig;
   private readonly terrainSampler: FarTerrainSampler;
   private readonly _fallbacks: FallbackStatsWriter;
+  private sampleCenterX = 0;
+  private sampleCenterZ = 0;
 
   constructor(
     cache: FarSummaryCache,
@@ -30,33 +51,32 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
   }
 
   sampleHeight(x: number, z: number, preferredRing?: number): number {
-    const sample = this.sampleFull(x, z, preferredRing);
+    const sample = this.sampleFull(x, z, this.resolvePreferredRing(x, z, preferredRing));
     return sample.heightAvg;
   }
 
   sampleNormal(x: number, z: number, preferredRing?: number): THREE.Vector3 {
-    const sample = this.sampleFull(x, z, preferredRing);
+    const sample = this.sampleFull(x, z, this.resolvePreferredRing(x, z, preferredRing));
     return new THREE.Vector3(sample.normalX, sample.normalY, sample.normalZ);
   }
 
   sampleMaterial(x: number, z: number, preferredRing?: number): number {
-    const sample = this.sampleFull(x, z, preferredRing);
+    const sample = this.sampleFull(x, z, this.resolvePreferredRing(x, z, preferredRing));
     return sample.dominantMaterial;
   }
 
   sampleCanopyCoverage(x: number, z: number, preferredRing?: number): number {
-    const sample = this.sampleFull(x, z, preferredRing);
+    const sample = this.sampleFull(x, z, this.resolvePreferredRing(x, z, preferredRing));
     return sample.canopyCoverage;
   }
 
   sampleWaterCoverage(x: number, z: number, preferredRing?: number): number {
-    const sample = this.sampleFull(x, z, preferredRing);
+    const sample = this.sampleFull(x, z, this.resolvePreferredRing(x, z, preferredRing));
     return sample.waterCoverage;
   }
 
-  sampleFull(x: number, z: number, preferredRing?: number): FarSummarySample {
-    const ring = preferredRing ?? 0;
-
+  sampleFull(x: number, z: number, preferredRing: number): FarSummarySample {
+    const ring = preferredRing;
     const tileSample = this.cache.sampleExactRing(x, z, ring);
     if (tileSample) {
       return tileSample;
@@ -86,6 +106,29 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
     }
 
     return this.sampleConservativeDefault();
+  }
+
+  sampleSummaryInto(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean {
+    const sample = this.sampleFull(x, z, ringIndexForDistance(distanceM, this.config));
+    out.height = sample.heightAvg;
+    out.normalX = sample.normalX;
+    out.normalY = sample.normalY;
+    out.normalZ = sample.normalZ;
+    out.material = sample.dominantMaterial;
+    return Number.isFinite(out.height)
+      && Number.isFinite(out.normalX)
+      && Number.isFinite(out.normalY)
+      && Number.isFinite(out.normalZ);
+  }
+
+  setSampleCenter(x: number, z: number): void {
+    this.sampleCenterX = x;
+    this.sampleCenterZ = z;
+  }
+
+  private resolvePreferredRing(x: number, z: number, preferredRing: number | undefined): number {
+    if (preferredRing !== undefined) return preferredRing;
+    return ringIndexForDistance(Math.hypot(x - this.sampleCenterX, z - this.sampleCenterZ), this.config);
   }
 
   private sampleProceduralFallback(x: number, z: number): FarSummarySample {
