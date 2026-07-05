@@ -24,6 +24,8 @@ export interface FarShellRangeLike {
   endMeters: number;
 }
 
+const LIVE_CLOD_ROOT_RADIUS_PARAMS = ["liveClodRootRadius", "live_clod_root_radius"] as const;
+
 function finitePositive(value: number, name: string): number {
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`Streaming ownership: ${name} must be a positive finite number`);
@@ -36,6 +38,21 @@ function finitePositiveOptional(value: number | undefined, name: string): number
   return finitePositive(value, name);
 }
 
+function queryLiveClodRootRadiusOverrideM(): number | undefined {
+  const search = (globalThis as typeof globalThis & {
+    window?: { location?: { search?: string } };
+  }).window?.location?.search;
+  if (!search) return undefined;
+  const params = new URLSearchParams(search);
+  for (const key of LIVE_CLOD_ROOT_RADIUS_PARAMS) {
+    const raw = params.get(key);
+    if (raw === null || raw.trim() === "") continue;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return undefined;
+}
+
 export function pageGridAlignedRadius(radiusM: number, pageSizeM?: number): number {
   if (pageSizeM === undefined) return radiusM;
   const pageSize = finitePositive(pageSizeM, "pageSizeM");
@@ -44,9 +61,15 @@ export function pageGridAlignedRadius(radiusM: number, pageSizeM?: number): numb
 
 export function resolveStreamingOwnership(input: StreamingOwnershipInput): StreamingOwnershipRadii {
   const liveRadiusM = finitePositive(input.streaming.live_radius_m, "live_radius_m");
-  const baseClodRadiusM = finitePositive(input.streaming.clod_radius_m, "clod_radius_m");
-  const clodRadiusM = finitePositiveOptional(input.streaming.clod_refinement_radius_m, "clod_refinement_radius_m") ?? baseClodRadiusM;
-  const farClipmapRadiusM = finitePositiveOptional(input.streaming.far_clipmap_radius_m, "far_clipmap_radius_m") ?? clodRadiusM;
+  const streamRadiusOverrideM = finitePositiveOptional(queryLiveClodRootRadiusOverrideM(), "liveClodRootRadius");
+  const configuredBaseClodRadiusM = finitePositive(input.streaming.clod_radius_m, "clod_radius_m");
+  const baseClodRadiusM = streamRadiusOverrideM ?? configuredBaseClodRadiusM;
+  const clodRadiusM = streamRadiusOverrideM
+    ?? finitePositiveOptional(input.streaming.clod_refinement_radius_m, "clod_refinement_radius_m")
+    ?? baseClodRadiusM;
+  const farClipmapRadiusM = streamRadiusOverrideM
+    ?? finitePositiveOptional(input.streaming.far_clipmap_radius_m, "far_clipmap_radius_m")
+    ?? clodRadiusM;
   const targetVisibleM = finitePositive(input.targetVisibleM, "targetVisibleM");
   const targetFutureVisibleM = finitePositive(input.targetFutureVisibleM ?? targetVisibleM, "targetFutureVisibleM");
   const farShellOuterM = finitePositive(input.farShellOuterOverrideM ?? targetFutureVisibleM, "farShellOuterM");
