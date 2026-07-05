@@ -75,14 +75,14 @@ function mesh(): PageMesh {
   };
 }
 
-function makeNode(px: number, pz: number): ClodPageNode {
-  const pageSize = TEST_CFG.page.chunks_per_page * TEST_CFG.page.chunk_size;
+function makeNode(px: number, pz: number, level = 0): ClodPageNode {
+  const pageSize = TEST_CFG.page.chunks_per_page * TEST_CFG.page.chunk_size * 2 ** level;
   const minX = px * pageSize;
   const minZ = pz * pageSize;
   return {
-    id: streamingClodPageKey(px, pz),
+    id: streamingClodPageKey(px, pz, level),
     revision: 1,
-    level: 0,
+    level,
     children: [],
     mesh: mesh(),
     footprint: { minX, minZ, maxX: minX + pageSize, maxZ: minZ + pageSize },
@@ -94,7 +94,7 @@ function makeNode(px: number, pz: number): ClodPageNode {
 
 function resolveRequest(request: Deferred<StreamingClodRootBuildResult>, coords: readonly PageCoord[]): void {
   request.resolve({
-    nodes: coords.map((coord) => makeNode(coord.px, coord.pz)),
+    nodes: coords.map((coord) => makeNode(coord.px, coord.pz, coord.level ?? 0)),
     buildMs: 1,
     transferBytes: 10,
   });

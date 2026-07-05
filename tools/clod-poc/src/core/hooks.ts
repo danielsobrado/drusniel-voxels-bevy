@@ -32,6 +32,7 @@ export interface ClodHooks {
   error: string | null;
   stats: EngineStats | null;
   diag: GpuDiagnostics | null;
+  startupTimings: Record<string, number> | null;
   progress: number;
   progressMsg: string;
   setPose: ((pose: CamPose) => void) | null;
@@ -53,6 +54,8 @@ export interface Phase0SceneReport {
 declare global {
   interface Window {
     __drusnielClod?: ClodHooks;
+    __drusnielStartupTimings?: Record<string, number>;
+    __drusnielAcceptanceWorldCacheKey?: import("../cache/acceptanceWorldCacheKey.js").AcceptanceWorldCacheKey;
     __drusnielTerrainSummary?: import("../clod/terrain_summary.js").TerrainSummaryField;
     __drusnielPhase0Report?: Phase0SceneReport;
   }
@@ -64,6 +67,7 @@ export function initHooks(): ClodHooks {
     error: null,
     stats: null,
     diag: null,
+    startupTimings: window.__drusnielStartupTimings ?? null,
     progress: 0,
     progressMsg: "boot",
     setPose: null,

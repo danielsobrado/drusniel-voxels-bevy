@@ -103,7 +103,7 @@ async function ensureServer() {
 
 function runAcceptance() {
   return new Promise((resolve) => {
-    const child = spawnChild("playwright", nodeBin, [tsxCli, "tools/infinite-islands-acceptance.ts"]);
+    const child = spawnChild("playwright", nodeBin, [tsxCli, "tools/infinite-islands-acceptance.ts", ...process.argv.slice(2)]);
     child.on("exit", (code) => resolve(code ?? 1));
   });
 }

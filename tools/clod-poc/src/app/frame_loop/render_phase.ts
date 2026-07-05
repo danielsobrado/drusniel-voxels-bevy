@@ -175,6 +175,20 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   }
 
   if (hooks && !hooks.ready) {
+    const startupTimings = hooks.startupTimings ?? window.__drusnielStartupTimings ?? null;
+    if (startupTimings) {
+      const startedAt = startupTimings["startup.started_at_ms"];
+      if (Number.isFinite(startedAt)) {
+        startupTimings["startup.first_render_ready_ms"] = performance.now() - startedAt;
+        startupTimings["startup_first_render_ready_ms"] = startupTimings["startup.first_render_ready_ms"];
+      }
+      hooks.startupTimings = startupTimings;
+      if (hooks.stats) {
+        for (const [key, value] of Object.entries(startupTimings)) {
+          if (Number.isFinite(value)) hooks.stats.counters[key] = value;
+        }
+      }
+    }
     hooks.ready = true;
     hooks.progress = 1;
     hooks.progressMsg = "ready";

@@ -18,10 +18,17 @@ export {
 } from "./cacheConfig.js";
 
 export { buildClodCacheKey, encodeNodeIdForKey, parsePageCoordsFromNodeId } from "./cacheKey.js";
+export {
+  buildAcceptanceWorldCacheKey,
+  diffAcceptanceWorldCacheKeyFields,
+  type AcceptanceWorldCacheKey,
+  type AcceptanceWorldCacheKeyInput,
+} from "./acceptanceWorldCacheKey.js";
 export { computeCacheConfigHash } from "./cacheHash.js";
 export {
   computeTerrainSourceHash,
   buildStagedImportHash,
+  buildVoxelSnapshotHash,
   buildProceduralTextureHash,
   canonicalizeDigEdits,
   normalizeTerrainSourceInputs,

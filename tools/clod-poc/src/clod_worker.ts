@@ -1,6 +1,7 @@
 import { initSimplifier } from "./clod/simplify.js";
 import {
   buildNodeIndex,
+  buildStandaloneClodRootNode,
   buildWorldAsync,
   expandQuadSiblingPages,
   rebuildDirtyLod0Pages,
@@ -10,8 +11,6 @@ import {
   type NodeIndex,
 } from "./clod/quadtree.js";
 import { nextPendingParentLevelOrdered } from "./clod/parent_queue.js";
-import { buildLod0PageSource } from "./clod/source_mesh.js";
-import { boundsOf, INITIAL_NODE_REVISION } from "./clod/quadtree_support.js";
 import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext } from "./cache/clodCacheContext.js";
 import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
 import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
@@ -454,20 +453,9 @@ function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type: "bui
   installHydrologyTerrain(hydrologyTerrain, { boundedToStartupWorld: true });
   let nodes;
   try {
-    nodes = request.coords.map(({ px, pz }) => {
-      const src = buildLod0PageSource(px, pz, cfg!, world);
-      return {
-        id: `L0:${px},${pz}`,
-        revision: INITIAL_NODE_REVISION,
-        level: 0,
-        children: [],
-        mesh: src.mesh,
-        footprint: src.footprint,
-        bounds: boundsOf(src.mesh),
-        errorWorld: 0,
-        lowBenefit: false,
-      };
-    });
+    nodes = request.coords.map(({ px, pz, level }) =>
+      buildStandaloneClodRootNode(level ?? 0, px, pz, cfg!, world)
+    );
   } finally {
     installHydrologyTerrain(hydrologyTerrain);
   }

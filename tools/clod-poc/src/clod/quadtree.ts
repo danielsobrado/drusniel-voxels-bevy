@@ -8,9 +8,10 @@
 // decimation of its merged children. Locked outer borders are bit-identical across
 // siblings (inherited verbatim from LOD0), so internal borders weld exactly.
 
-import { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
+import { ClodBuildError, ClodPageNode, PageFootprint, PageMesh } from "../types.js";
 import { ClodPagesConfig } from "../config.js";
 import { buildLod0PageSource, dirtyPageChunkIndices, rebuildPageChunks } from "./source_mesh.js";
+import type { WorldBounds } from "../terrain/terrain.js";
 import { concatPageSourceMeshes as concat } from "./pageSource.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "../lock.js";
@@ -461,6 +462,69 @@ export function buildNodeIndex(result: BuildResult): NodeIndex {
     index[level] = byCoord;
   }
   return index;
+}
+
+export function buildStandaloneClodRootNode(
+  level: number,
+  nx: number,
+  nz: number,
+  cfg: ClodPagesConfig,
+  world: WorldBounds,
+): ClodPageNode {
+  const rootLevel = Math.max(0, Math.min(cfg.page.quadtree_levels - 1, Math.floor(level)));
+  const index: NodeIndex = [];
+
+  const lod0Index = new Map<string, ClodPageNode>();
+  const lod0Scale = 2 ** rootLevel;
+  const lod0BaseX = nx * lod0Scale;
+  const lod0BaseZ = nz * lod0Scale;
+  for (let pz = lod0BaseZ; pz < lod0BaseZ + lod0Scale; pz++) {
+    for (let px = lod0BaseX; px < lod0BaseX + lod0Scale; px++) {
+      const nodeId = `L0:${px},${pz}`;
+      const src = buildLod0PageSource(px, pz, cfg, world);
+      validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, nodeId);
+      const node: ClodPageNode = {
+        id: nodeId,
+        revision: INITIAL_NODE_REVISION,
+        level: 0,
+        children: [],
+        mesh: src.mesh,
+        footprint: src.footprint,
+        bounds: boundsOf(src.mesh),
+        errorWorld: 0,
+        lowBenefit: false,
+        chunkMeshes: src.chunks,
+      };
+      lod0Index.set(`${px},${pz}`, node);
+    }
+  }
+  index[0] = lod0Index;
+
+  for (let currentLevel = 1; currentLevel <= rootLevel; currentLevel++) {
+    const scale = 2 ** (rootLevel - currentLevel);
+    const baseX = nx * scale;
+    const baseZ = nz * scale;
+    const levelIndex = new Map<string, ClodPageNode>();
+    for (let pz = baseZ; pz < baseZ + scale; pz++) {
+      for (let px = baseX; px < baseX + scale; px++) {
+        const { node } = createParentNode(
+          currentLevel,
+          px,
+          pz,
+          childNodes(index, currentLevel, px, pz),
+          cfg,
+          currentLevel === rootLevel,
+        );
+        levelIndex.set(`${px},${pz}`, node);
+      }
+    }
+    index[currentLevel] = levelIndex;
+  }
+
+  const root = index[rootLevel]?.get(`${nx},${nz}`);
+  if (!root) throw new ClodBuildError("PageIncomplete", `stream root L${rootLevel}:${nx},${nz} was not built`);
+  root.children = [];
+  return root;
 }
 
 export function expandQuadSiblingPages(

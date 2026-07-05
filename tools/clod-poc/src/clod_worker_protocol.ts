@@ -68,7 +68,7 @@ export type ClodWorkerRequest =
     }
   | { type: "flush"; requestId: number }
   | { type: "clearCache"; requestId: number }
-  | { type: "buildStreamRoots"; requestId: number; coords: Array<{ px: number; pz: number }> };
+  | { type: "buildStreamRoots"; requestId: number; coords: Array<{ px: number; pz: number; level?: number }> };
 
 export interface SerializedLod0RebuildResult {
   requestIds: number[];

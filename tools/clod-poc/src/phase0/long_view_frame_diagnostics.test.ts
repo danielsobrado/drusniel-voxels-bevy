@@ -43,6 +43,28 @@ describe("stream readiness diagnostics", () => {
   it("reports stream readiness after live roots and far-summary requests are ready", () => {
     const snap = snapshot();
     const readyFeeds = feeds(new Set([packLiveKey(0, 0)]), new Set([packPageKey(2, 0, 0)]));
+    const readyCounters = {
+      farSummaryTilesRequired: 4,
+      farSummaryTilesReady: 4,
+      farSummaryTilesMissing: 0,
+      farSummaryTilesBuilding: 0,
+    };
+
+    expect(streamReadinessSatisfied({
+      snapshot: snap,
+      feeds: readyFeeds,
+      maxLevel: 2,
+      liveMissing: 1,
+      counters: readyCounters,
+    })).toBe(false);
+
+    expect(streamReadinessSatisfied({
+      snapshot: snap,
+      feeds: feeds(new Set([packLiveKey(0, 0)]), new Set()),
+      maxLevel: 2,
+      liveMissing: 0,
+      counters: readyCounters,
+    })).toBe(false);
 
     expect(streamReadinessSatisfied({
       snapshot: snap,
@@ -62,12 +84,7 @@ describe("stream readiness diagnostics", () => {
       feeds: readyFeeds,
       maxLevel: 2,
       liveMissing: 0,
-      counters: {
-        farSummaryTilesRequired: 4,
-        farSummaryTilesReady: 4,
-        farSummaryTilesMissing: 0,
-        farSummaryTilesBuilding: 0,
-      },
+      counters: readyCounters,
     })).toBe(true);
   });
 });

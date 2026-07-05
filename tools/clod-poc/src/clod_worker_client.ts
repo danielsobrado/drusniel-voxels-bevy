@@ -116,13 +116,12 @@ export class ClodWorkerClient {
     return postTrackedRequest(this.clearCacheRequests, this.worker, { type: "clearCache", requestId: this.nextRequestId++ });
   }
 
-  /** Build LOD0 root pages off-thread for streaming outside the startup world. */
-  buildStreamRoots(coords: readonly { px: number; pz: number }[]): Promise<WorkerStreamRootsResult> {
+  buildStreamRoots(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     return postTrackedRequest(this.streamRootsRequests, this.worker, {
       type: "buildStreamRoots",
       requestId: this.nextRequestId++,
-      coords: coords.map(({ px, pz }) => ({ px, pz })),
+      coords: coords.map(({ px, pz, level }) => ({ px, pz, level })),
     });
   }
 

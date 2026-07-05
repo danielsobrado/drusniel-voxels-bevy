@@ -87,6 +87,7 @@ export interface TerrainSourceInputs {
   proceduralTextureEnabled: boolean;
   proceduralTextureHash: string | null;
   stagedImportHash: string | null;
+  voxelSnapshotHash?: string | null;
   longViewScene: boolean;
 }
 
@@ -116,6 +117,7 @@ export function normalizeTerrainSourceInputs(
     proceduralTextureEnabled: input.proceduralTextureEnabled ?? false,
     proceduralTextureHash: input.proceduralTextureHash ?? null,
     stagedImportHash: input.stagedImportHash ?? null,
+    voxelSnapshotHash: input.voxelSnapshotHash ?? null,
     longViewScene: input.longViewScene ?? false,
   };
 }
@@ -166,7 +168,18 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     proceduralTextureEnabled: source.proceduralTextureEnabled,
     proceduralTextureHash: source.proceduralTextureHash,
     stagedImportHash: source.stagedImportHash,
+    voxelSnapshotHash: source.voxelSnapshotHash,
     longViewScene: source.longViewScene,
+  });
+}
+
+export async function buildVoxelSnapshotHash(snapshot: VoxelEditSnapshot): Promise<string> {
+  const editsCanonical = canonicalizeVoxelEdits(snapshot);
+  const editsDigest = await sha256Hex(textEncoder.encode(JSON.stringify(editsCanonical)).buffer);
+  return hashJson({
+    editCount: snapshot.deltas.length,
+    editsRevision: snapshot.revision,
+    editsDigest,
   });
 }
 
@@ -176,13 +189,12 @@ export async function buildStagedImportHash(manifest: {
   config: ClodPagesConfig;
 } | null): Promise<string | null> {
   if (!manifest) return null;
-  const editsCanonical = canonicalizeVoxelEdits(manifest.voxelTerrainEdits);
-  const editsDigest = await sha256Hex(textEncoder.encode(JSON.stringify(editsCanonical)).buffer);
+  const voxelSnapshotHash = await buildVoxelSnapshotHash(manifest.voxelTerrainEdits);
   return hashJson({
     worldSize: manifest.worldSize,
     editCount: manifest.voxelTerrainEdits.deltas.length,
     editsRevision: manifest.voxelTerrainEdits.revision,
-    editsDigest,
+    voxelSnapshotHash,
     page: manifest.config.page,
     meshopt: manifest.config.meshopt_package_version,
   });

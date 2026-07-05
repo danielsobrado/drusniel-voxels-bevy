@@ -144,6 +144,13 @@ export function seedLongViewStats(
   lvStats.counters["far_summary_cache_size"] = 0;
   lvStats.counters["far_summary_fallback_samples"] = 0;
   for (const counter of SEEDED_COUNTERS) lvStats.counters[counter] = 0;
+  const startupTimings = window.__drusnielStartupTimings;
+  if (startupTimings) {
+    longViewHooks.startupTimings = startupTimings;
+    for (const [key, value] of Object.entries(startupTimings)) {
+      if (Number.isFinite(value)) lvStats.counters[key] = value;
+    }
+  }
 }
 
 export function createClodErrorComputeAccess(input: {

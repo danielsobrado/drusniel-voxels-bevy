@@ -216,29 +216,53 @@ export function sortStreamingClodPageCoordsForLoad(coords: readonly PageCoord[],
   });
 }
 
-export function streamingClodRequiredPageCoords(center: THREE.Vector3, radiusM: number, pageSizeM: number): PageCoord[] {
+export function streamingClodRequiredPageCoords(
+  center: THREE.Vector3,
+  radiusM: number,
+  pageSizeM: number,
+  maxLevel = 0,
+): PageCoord[] {
   const radius = Math.max(0, Number.isFinite(radiusM) ? radiusM : 0);
   const pageSize = Math.max(1, Number.isFinite(pageSizeM) ? pageSizeM : 1);
+  const highestLevel = Math.max(0, Math.floor(maxLevel));
   const minPx = Math.floor((center.x - radius) / pageSize);
   const maxPx = Math.floor((center.x + radius) / pageSize);
   const minPz = Math.floor((center.z - radius) / pageSize);
   const maxPz = Math.floor((center.z + radius) / pageSize);
   const halfDiag = pageSize * Math.SQRT2 * 0.5;
-  const coords: PageCoord[] = [];
+  const coordsById = new Map<string, PageCoord>();
 
   for (let pz = minPz; pz <= maxPz; pz++) {
     for (let px = minPx; px <= maxPx; px++) {
       const centerX = (px + 0.5) * pageSize;
       const centerZ = (pz + 0.5) * pageSize;
-      if (Math.hypot(center.x - centerX, center.z - centerZ) <= radius + halfDiag) coords.push({ px, pz, centerX, centerZ });
+      if (Math.hypot(center.x - centerX, center.z - centerZ) > radius + halfDiag) continue;
+      for (let level = 0; level <= highestLevel; level++) {
+        const scale = 2 ** level;
+        const levelPx = Math.floor(px / scale);
+        const levelPz = Math.floor(pz / scale);
+        const levelPageSize = pageSize * scale;
+        const key = streamingClodPageKey(levelPx, levelPz, level);
+        if (coordsById.has(key)) continue;
+        coordsById.set(key, {
+          px: levelPx,
+          pz: levelPz,
+          level,
+          centerX: (levelPx + 0.5) * levelPageSize,
+          centerZ: (levelPz + 0.5) * levelPageSize,
+        });
+      }
     }
   }
 
-  return sortStreamingClodPageCoordsForLoad(coords, center);
+  return sortStreamingClodPageCoordsForLoad([...coordsById.values()], center);
 }
 
-export function pageInsideFiniteStartupWorld(px: number, pz: number, worldPagesX: number, worldPagesZ: number): boolean {
-  return px >= 0 && pz >= 0 && px < worldPagesX && pz < worldPagesZ;
+export function pageInsideFiniteStartupWorld(px: number, pz: number, worldPagesX: number, worldPagesZ: number, level = 0): boolean {
+  const scale = 2 ** Math.max(0, Math.floor(level));
+  const minX = px * scale;
+  const minZ = pz * scale;
+  return minX >= 0 && minZ >= 0 && minX + scale <= worldPagesX && minZ + scale <= worldPagesZ;
 }
 
 export function createStreamingClodRootController(deps: StreamingClodRootControllerDeps): StreamingClodRootController {
@@ -410,7 +434,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         mirrorStreamingProbeCounters(latest);
         return latest;
       }
-      const required = streamingClodRequiredPageCoords(center, radiusM, pageSize).filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
+      const required = streamingClodRequiredPageCoords(center, radiusM, pageSize, deps.cfg.page.quadtree_levels - 1)
+        .filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ, coordLevel(coord)));
       const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz, coordLevel(coord))));
       requiredNow = requiredIds;
       for (const coord of required) {

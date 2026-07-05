@@ -23,13 +23,18 @@ import {
   createCacheDebugOverlay,
   isCacheSessionDisabled,
   setCacheSessionDisabled,
+  buildAcceptanceWorldCacheKey,
 } from "../../cache/index.js";
 import {
   buildProceduralTextureHash,
   buildStagedImportHash,
+  buildVoxelSnapshotHash,
   type TerrainSourceInputs,
 } from "../../cache/terrainSource.js";
-import { clearWorkerCacheSnapshot } from "../../cache/cacheMetricsBridge.js";
+import {
+  clearWorkerCacheSnapshot,
+  getWorkerCacheBuildStats,
+} from "../../cache/cacheMetricsBridge.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
@@ -100,6 +105,105 @@ function booleanParam(searchParams: URLSearchParams, keys: readonly string[], fa
   return fallback;
 }
 
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const DEFAULT_INFINITE_BOOTSTRAP_WORLD_PAGES = 2;
+
+type StartupTimings = Record<string, number>;
+
+function measure<T>(timings: StartupTimings, key: string, fn: () => T): T {
+  const startedAt = performance.now();
+  try {
+    return fn();
+  } finally {
+    timings[key] = performance.now() - startedAt;
+  }
+}
+
+async function measureAsync<T>(timings: StartupTimings, key: string, fn: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now();
+  try {
+    return await fn();
+  } finally {
+    timings[key] = performance.now() - startedAt;
+  }
+}
+
+function addTiming(timings: StartupTimings, key: string, ms: number): void {
+  timings[key] = (timings[key] ?? 0) + ms;
+}
+
+function createLazyPropPlacementScenes(timings: StartupTimings): Record<string, PropPlacementScene> {
+  const texts: Record<string, string> = {
+    smoke: customPropPlacementsText,
+    "500": customPropPlacements500Text,
+    "5000": customPropPlacements5000Text,
+    "20000": customPropPlacements20000Text,
+  };
+  const cache = new Map<string, PropPlacementScene>();
+  const scenes = {} as Record<string, PropPlacementScene>;
+  for (const [sceneId, text] of Object.entries(texts)) {
+    Object.defineProperty(scenes, sceneId, {
+      enumerable: true,
+      configurable: false,
+      get: () => {
+        const cached = cache.get(sceneId);
+        if (cached) return cached;
+        const startedAt = performance.now();
+        const parsed = parsePropPlacements(text);
+        const elapsed = performance.now() - startedAt;
+        cache.set(sceneId, parsed);
+        addTiming(timings, "startup.prop_placements_ms", elapsed);
+        timings[`startup.prop_placement_${sceneId}_ms`] = elapsed;
+        return parsed;
+      },
+    });
+  }
+  return scenes;
+}
+
+function configuredWorldPages(
+  stagedImport: VoxelProjectArchiveContents | null,
+  clodRuntime: ClodRuntimeConfig,
+  searchParams: URLSearchParams,
+  queries: {
+    queryGrassPerfScene: boolean;
+    queryTreePerfScene: boolean;
+    queryForestFloorScene: boolean;
+    queryLongViewScene: boolean;
+    queryBorderOceanScene: boolean;
+  },
+  borderOceanDefaultWorldPages: number,
+): number {
+  const requested = Number(searchParams.get("world"));
+  return stagedImport?.manifest.worldSize ?? (
+    clodRuntime.runtime.worldOptions.includes(requested)
+      ? requested
+      : queries.queryGrassPerfScene || queries.queryTreePerfScene || queries.queryForestFloorScene || queries.queryLongViewScene || queries.queryBorderOceanScene
+        ? queries.queryBorderOceanScene
+          ? borderOceanDefaultWorldPages
+          : 16
+        : 8
+  );
+}
+
+function startupWorldPages(
+  configuredWorld: number,
+  stagedImport: VoxelProjectArchiveContents | null,
+  clodRuntime: ClodRuntimeConfig,
+  searchParams: URLSearchParams,
+  sceneName: string,
+): number {
+  if (stagedImport) return configuredWorld;
+  const requestedStartupWorld = Number(searchParams.get("infiniteStartupWorld") ?? searchParams.get("startupWorld"));
+  if (clodRuntime.runtime.worldOptions.includes(requestedStartupWorld)) {
+    return Math.min(requestedStartupWorld, configuredWorld);
+  }
+  if (sceneName === INFINITE_ISLANDS_SCENE && searchParams.get("acceptance") === "1") {
+    return Math.min(DEFAULT_INFINITE_BOOTSTRAP_WORLD_PAGES, configuredWorld);
+  }
+  return configuredWorld;
+}
+
 export interface WorldBuildStartupInput {
   stagedImport: VoxelProjectArchiveContents | null;
   clodRuntime: ClodRuntimeConfig;
@@ -167,28 +271,57 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     info,
   } = input;
 
-  const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
-  const stoneConfig = parseStoneConfig(stoneConfigText);
-  const treeConfig = applyTreeMaterialBiasFromYaml(parseTreeConfig(treeConfigText), treeConfigText);
-  const understoryConfig = parseUnderstoryConfig(understoryConfigText);
-  const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
-  createForestLightingIntegrationWarner()(forestLightingConfig);
-  const grassConfig = applyGrassMaterialBiasFromYaml(parseGrassConfig(grassConfigText), grassConfigText);
-  const customPropsConfig = parseCustomPropsConfig(customPropsConfigText);
-  const propPlacementScenes: Record<string, PropPlacementScene> = {
-    smoke: parsePropPlacements(customPropPlacementsText),
-    "500": parsePropPlacements(customPropPlacements500Text),
-    "5000": parsePropPlacements(customPropPlacements5000Text),
-    "20000": parsePropPlacements(customPropPlacements20000Text),
-  };
-  let waterConfig = applyWaterQueryOverrides(parseWaterConfig(waterConfigText), searchParams);
-  const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
-  const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
-  const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const sceneName = searchParams.get("scene") ?? "default";
+  const startupStartedAt = performance.now();
+  const startupTimings: StartupTimings = { "startup.started_at_ms": startupStartedAt };
+  window.__drusnielStartupTimings = startupTimings;
+
+  const parsedConfigs = measure(startupTimings, "startup.parse_configs_ms", () => {
+    const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
+    const stoneConfig = parseStoneConfig(stoneConfigText);
+    const treeConfig = applyTreeMaterialBiasFromYaml(parseTreeConfig(treeConfigText), treeConfigText);
+    const understoryConfig = parseUnderstoryConfig(understoryConfigText);
+    const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
+    createForestLightingIntegrationWarner()(forestLightingConfig);
+    const grassConfig = applyGrassMaterialBiasFromYaml(parseGrassConfig(grassConfigText), grassConfigText);
+    const customPropsConfig = parseCustomPropsConfig(customPropsConfigText);
+    const propPlacementScenes = createLazyPropPlacementScenes(startupTimings);
+    const waterConfig = applyWaterQueryOverrides(parseWaterConfig(waterConfigText), searchParams);
+    const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
+    const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
+    const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
+    return {
+      cfg,
+      stoneConfig,
+      treeConfig,
+      understoryConfig,
+      forestLightingConfig,
+      grassConfig,
+      customPropsConfig,
+      propPlacementScenes,
+      waterConfig,
+      borderCoastOceanConfig,
+      borderOceanSceneConfig,
+      proceduralTextureConfig,
+    };
+  });
+  const {
+    cfg,
+    stoneConfig,
+    treeConfig,
+    understoryConfig,
+    forestLightingConfig,
+    grassConfig,
+    customPropsConfig,
+    propPlacementScenes,
+    borderCoastOceanConfig,
+    borderOceanSceneConfig,
+    proceduralTextureConfig,
+  } = parsedConfigs;
+  let { waterConfig } = parsedConfigs;
   const seed = numberParam(searchParams, ["seed"]) ?? 0;
   const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
-  const isInfiniteIslands = sceneName === "infinite-islands";
+  const isInfiniteIslands = sceneName === INFINITE_ISLANDS_SCENE;
   const terrainFieldConfig = resolveTerrainFieldConfig({
     seed,
     seaLevel,
@@ -204,36 +337,42 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   setTerrainFieldConfig(terrainFieldConfig);
   setTerrainFieldCoreConfig(terrainFieldConfig);
   const worldSource = new ProceduralWorldSource(terrainFieldConfig);
-  const proceduralTerrain = proceduralTextureConfig.enabled
-    ? createProceduralTerrainTextures(proceduralTextureConfig)
-    : null;
   const clodWorker = new ClodWorkerClient();
   clodWorker.onError = (error) => {
     emitAudio("clod.rebuild.error");
     console.error("[clod worker]", error);
   };
 
-  const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (
-    clodRuntime.runtime.worldOptions.includes(requested)
-      ? requested
-      : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene || queryBorderOceanScene
-        ? queryBorderOceanScene
-          ? borderOceanSceneConfig.defaultWorldPages
-          : 16
-        : 8
-  );
+  const configuredWorld = configuredWorldPages(stagedImport, clodRuntime, searchParams, {
+    queryGrassPerfScene,
+    queryTreePerfScene,
+    queryForestFloorScene,
+    queryLongViewScene,
+    queryBorderOceanScene,
+  }, borderOceanSceneConfig.defaultWorldPages);
+  const WORLD = startupWorldPages(configuredWorld, stagedImport, clodRuntime, searchParams, sceneName);
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  startupTimings["startup.configured_world_pages"] = configuredWorld;
+  startupTimings["startup.world_pages"] = WORLD;
+  startupTimings["startup.world_cells"] = worldCells;
+  startupTimings["acceptance_world_reuse_enabled"] = searchParams.get("acceptance") === "1" ? 1 : 0;
+  startupTimings["acceptance_world_reuse_mode"] = numberParam(searchParams, ["acceptanceReuseMode"]) ?? 0;
 
+  let proceduralTerrain: ReturnType<typeof createProceduralTerrainTextures> | null = null;
   let bakedMacroTint: THREE.DataTexture | null = null;
-  if (proceduralTerrain) {
-    const bakeRes = Math.min(512, proceduralTerrain.noise.resolution);
-    bakedMacroTint = createBakedMacroTintTexture(
-      proceduralTerrain.noise.noiseA,
-      proceduralTerrain.noise.noiseB,
-      bakeRes,
-    );
-  }
+  measure(startupTimings, "startup.procedural_textures_ms", () => {
+    proceduralTerrain = proceduralTextureConfig.enabled
+      ? createProceduralTerrainTextures(proceduralTextureConfig)
+      : null;
+    if (proceduralTerrain) {
+      const bakeRes = Math.min(512, proceduralTerrain.noise.resolution);
+      bakedMacroTint = createBakedMacroTintTexture(
+        proceduralTerrain.noise.noiseA,
+        proceduralTerrain.noise.noiseB,
+        bakeRes,
+      );
+    }
+  });
   if (isRiverParityTestScene(searchParams.get("scene"))) waterConfig = applyRiverParityTestWaterConfig(waterConfig);
   waterConfig = resolveWaterConfig(waterConfig, worldCells);
   setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
@@ -257,20 +396,24 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   if (cacheDisabled) setCacheSessionDisabled(true);
   clearWorkerCacheSnapshot();
 
-  replaceVoxelEdits(importedVoxelSnapshot(stagedImport));
+  const voxelSnapshot = importedVoxelSnapshot(stagedImport);
+  replaceVoxelEdits(voxelSnapshot);
 
-  const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
-  const hydrologySystem = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
-    ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
-    : null;
-  if (hydrologySystem) {
-    setTerrainSurfaceOverride((x, z) => hydrologySystem.terrainHeight(x, z));
-    console.log("[water] hydrology built", hydrologySystem.stats);
-  } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
-    setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
-  } else {
-    setTerrainSurfaceOverride(null);
-  }
+  const hydrologySystem = measure(startupTimings, "startup.hydrology_ms", () => {
+    const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
+    const system = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
+      ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
+      : null;
+    if (system) {
+      setTerrainSurfaceOverride((x, z) => system.terrainHeight(x, z));
+      console.log("[water] hydrology built", system.stats);
+    } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
+      setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
+    } else {
+      setTerrainSurfaceOverride(null);
+    }
+    return system;
+  });
   const hydrologyTerrain = hydrologySystem
     ? {
         res: hydrologySystem.grid.res,
@@ -284,6 +427,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     proceduralTextureConfig.enabled ? `${proceduralTextureConfig.seed}:${proceduralTextureConfig.noise.resolution}` : null,
   );
   const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
+  const voxelSnapshotHash = await buildVoxelSnapshotHash(voxelSnapshot);
   const terrainSource: TerrainSourceInputs = {
     scene: sceneName,
     worldSeed: String(seed),
@@ -301,9 +445,12 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     },
     proceduralTextureEnabled: proceduralTextureConfig.enabled,
     stagedImportHash,
+    voxelSnapshotHash,
     proceduralTextureHash,
     longViewScene: queryLongViewScene,
   };
+  const acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
+  window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
   const cacheContext = await initClodCacheContext({
     cfg,
     worldPages: WORLD,
@@ -314,36 +461,52 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     ? createCacheDebugOverlay({ clearWorkerCache: () => clodWorker.clearCache() })
     : null;
 
-  const result = await clodWorker.buildWorld(
-    WORLD,
-    WORLD,
-    cfg,
-    getVoxelEditSnapshot(),
-    (progress) => {
-      const fraction = progress.total > 0 ? progress.done / progress.total : 0;
-      buildProgress.hidden = false;
-      buildProgressPhase.textContent = progress.phase;
-      buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
-      buildProgressBar.value = fraction;
-      buildStatus.value = progress.phase;
-      updateBuildOverlay();
-    },
-    terrainFieldConfig,
-    hydrologyTerrain,
-    borderCoastOceanConfig,
-    isCacheSessionDisabled(),
-    terrainSource,
-  );
+  const result = await measureAsync(startupTimings, "startup.build_world_ms", () =>
+    clodWorker.buildWorld(
+      WORLD,
+      WORLD,
+      cfg,
+      voxelSnapshot,
+      (progress) => {
+        const fraction = progress.total > 0 ? progress.done / progress.total : 0;
+        buildProgress.hidden = false;
+        buildProgressPhase.textContent = progress.phase;
+        buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
+        buildProgressBar.value = fraction;
+        buildStatus.value = progress.phase;
+        updateBuildOverlay();
+      },
+      terrainFieldConfig,
+      hydrologyTerrain,
+      borderCoastOceanConfig,
+      isCacheSessionDisabled(),
+      terrainSource,
+    ));
+  const workerCacheStats = getWorkerCacheBuildStats();
+  startupTimings["startup_build_world_ms"] = startupTimings["startup.build_world_ms"];
+  startupTimings["clod_cache_hit"] = workerCacheStats && workerCacheStats.cacheHits > 0 && workerCacheStats.cacheMisses === 0 ? 1 : 0;
+  startupTimings["clod_cache_miss"] = workerCacheStats && workerCacheStats.cacheMisses > 0 ? 1 : 0;
+  startupTimings["clod_cache_rehydrate_ms"] = workerCacheStats?.cacheDecodeMs ?? 0;
+  startupTimings["clod_cache_key_match"] = cacheContext?.effective ? 1 : 0;
+  startupTimings["clod_cache_nodes_from_cache"] = workerCacheStats?.nodesFromCache ?? 0;
+  startupTimings["clod_cache_nodes_built"] = workerCacheStats?.nodesBuilt ?? 0;
+  startupTimings["clod_cache_hits"] = workerCacheStats?.cacheHits ?? 0;
+  startupTimings["clod_cache_misses"] = workerCacheStats?.cacheMisses ?? 0;
+  startupTimings["clod_cache_cold_build_ms_avoided"] = workerCacheStats?.coldBuildMsAvoided ?? 0;
   cacheOverlay?.update();
 
   const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
-  const summaryResult = await loadTerrainSummaryWithCacheSimple(
-    lod0Nodes,
-    worldCells,
-    cacheContext?.farReduceFactor ?? 8,
-    cacheContext,
-    worldSource,
-  );
+  const summaryResult = await measureAsync(startupTimings, "startup.terrain_summary_ms", () =>
+    loadTerrainSummaryWithCacheSimple(
+      lod0Nodes,
+      worldCells,
+      cacheContext?.farReduceFactor ?? 8,
+      cacheContext,
+      worldSource,
+    ));
+  startupTimings["startup_terrain_summary_ms"] = startupTimings["startup.terrain_summary_ms"];
+  startupTimings["terrain_summary_cache_hit"] = summaryResult.fromCache ? 1 : 0;
+  startupTimings["terrain_summary_cache_miss"] = summaryResult.fromCache ? 0 : 1;
   const terrainSummary = summaryResult.summary;
   publishTerrainSummaryForDiagnostics(terrainSummary);
   const maxTerrainLevel = result.nodesByLevel.size > 0 ? Math.max(...result.nodesByLevel.keys()) : 0;
@@ -353,6 +516,18 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   buildProgress.hidden = true;
   buildStatus.value = "ready";
   updateBuildOverlay();
+  startupTimings["startup.world_build_startup_ms"] = performance.now() - startupStartedAt;
+  startupTimings["startup_total_ms"] = startupTimings["startup.world_build_startup_ms"];
+  console.info(
+    "[startup]",
+    `parse=${startupTimings["startup.parse_configs_ms"].toFixed(1)}ms`,
+    `textures=${startupTimings["startup.procedural_textures_ms"].toFixed(1)}ms`,
+    `hydrology=${startupTimings["startup.hydrology_ms"].toFixed(1)}ms`,
+    `buildWorld=${startupTimings["startup.build_world_ms"].toFixed(1)}ms`,
+    `terrainSummary=${startupTimings["startup.terrain_summary_ms"].toFixed(1)}ms`,
+    `world=${WORLD}x${WORLD}`,
+    configuredWorld !== WORLD ? `configured=${configuredWorld}x${configuredWorld}` : "",
+  );
 
   return {
     cfg,

@@ -17,6 +17,16 @@ describe("infinite islands report helpers", () => {
         name: "walk",
         screenshot: "walk.png",
         stats: {},
+        cache: {
+          clodCacheHit: 1,
+          clodCacheMiss: 0,
+          clodCacheRehydrateMs: 4,
+          terrainSummaryCacheHit: 1,
+          terrainSummaryCacheMiss: 0,
+          startupBuildWorldMs: 12.4,
+          startupTerrainSummaryMs: 1.2,
+          startupTotalMs: 24.8,
+        },
         thresholds: {
           passed: false,
           missing: [],
@@ -37,7 +47,7 @@ describe("infinite islands report helpers", () => {
         passed: false,
       }],
     });
-    expect(markdown).toContain("| walk | 9.00 | 10.00 | 12.00 | 1234 | 5678 | 0 | 0.00 | FAIL | walk.png |");
+    expect(markdown).toContain("| walk | 9.00 | 10.00 | 12.00 | 1234 | 5678 | hit | 12.4 | 1.2 | 24.8 | 0 | 0.00 | FAIL | walk.png |");
     expect(markdown).toContain("Result: FAIL");
   });
 });

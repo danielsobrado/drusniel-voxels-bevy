@@ -131,7 +131,7 @@ function resolveRequest(
   extra: Partial<StreamingClodRootBuildResult> = {},
 ): void {
   request.resolve({
-    nodes: coords.map((coord) => makeNode(coord.px, coord.pz)),
+    nodes: coords.map((coord) => makeNode(coord.px, coord.pz, coord.level ?? 0)),
     buildMs: 1,
     transferBytes: 10,
     ...extra,
@@ -154,6 +154,16 @@ describe("streamingClodRequiredPageCoords", () => {
     const distances = coords.map((coord) => Math.hypot(128 - coord.centerX, 128 - coord.centerZ));
 
     expect(distances[0]).toBeLessThanOrEqual(distances.at(-1) ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("includes requested L0 pages and their ancestors with real levels", () => {
+    const coords = streamingClodRequiredPageCoords(new THREE.Vector3(272, 0, 16), 1, 32, 2);
+
+    expect(coords.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toEqual([
+      "L2:2,0",
+      "L1:4,0",
+      "L0:8,0",
+    ]);
   });
 
   it("sorts budget candidates coarse-to-fine before distance within the same level", () => {
@@ -190,6 +200,8 @@ describe("pageInsideFiniteStartupWorld", () => {
     expect(pageInsideFiniteStartupWorld(15, 15, 16, 16)).toBe(true);
     expect(pageInsideFiniteStartupWorld(16, 15, 16, 16)).toBe(false);
     expect(pageInsideFiniteStartupWorld(-1, 0, 16, 16)).toBe(false);
+    expect(pageInsideFiniteStartupWorld(3, 3, 16, 16, 2)).toBe(true);
+    expect(pageInsideFiniteStartupWorld(4, 3, 16, 16, 2)).toBe(false);
   });
 });
 
@@ -206,7 +218,7 @@ describe("createStreamingClodRootController", () => {
     expect(roots).toHaveLength(0);
   });
 
-  it("dispatches a nearest-first worker batch that respects build budget", () => {
+  it("dispatches a coarse-to-fine worker batch that respects build budget", () => {
     const { controller, buildPages } = makeController({ buildBudgetPagesPerFrame: 2 });
 
     const stats = controller.update(new THREE.Vector3(192, 0, 0), 80);
@@ -215,9 +227,7 @@ describe("createStreamingClodRootController", () => {
     expect(coords).toHaveLength(2);
     expect(stats.pendingPages).toBe(2);
     expect(stats.buildBudget).toBe(2);
-    expect(Math.hypot(192 - coords[0]!.centerX, coords[0]!.centerZ)).toBeLessThanOrEqual(
-      Math.hypot(192 - coords[1]!.centerX, coords[1]!.centerZ),
-    );
+    expect((coords[0]!.level ?? 0)).toBeGreaterThanOrEqual(coords[1]!.level ?? 0);
   });
 
   it("keeps only one worker batch in flight", () => {
@@ -244,6 +254,48 @@ describe("createStreamingClodRootController", () => {
     expect(stats.cachedPages).toBe(1);
     expect(stats.applyPagesThisFrame).toBe(1);
     expect(stats.builtThisFrame).toBe(1);
+    expect(controller.readyPageKeys()).toEqual([roots[0]!.id]);
+  });
+
+  it("preserves requested levels through worker results and ready page keys", async () => {
+    const { controller, roots, buildPages, requests } = makeController({ buildBudgetPagesPerFrame: 2 });
+    controller.update(new THREE.Vector3(272, 0, 16), 1);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+
+    expect(coords.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toEqual([
+      "L1:4,0",
+      "L0:8,0",
+    ]);
+
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+    controller.update(new THREE.Vector3(272, 0, 16), 1);
+    controller.update(new THREE.Vector3(272, 0, 16), 1);
+
+    expect(roots.map((node) => node.id)).toEqual(["L1:4,0", "L0:8,0"]);
+    expect(controller.readyPageKeys()).toEqual(["L0:8,0", "L1:4,0"]);
+  });
+
+  it("retains resident parents while required descendants are still missing", async () => {
+    const { controller, roots, buildPages, requests } = makeController({
+      buildBudgetPagesPerFrame: 1,
+      maxCachedPages: 1,
+      evictDistanceMultiplier: 1,
+    });
+    const center = new THREE.Vector3(272, 0, 16);
+    controller.update(center, 1);
+    const parentCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    expect(parentCoords.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toEqual(["L1:4,0"]);
+    resolveRequest(requests[0]!, parentCoords);
+    await flushAsync();
+
+    controller.update(center, 1);
+    expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
+
+    const stats = controller.update(center, 1);
+    expect(stats.evictions).toBe(0);
+    expect(controller.readyPageKeys()).toEqual(["L1:4,0"]);
+    expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
   });
 
   it("reports real applied streamed pages as ready keys", async () => {

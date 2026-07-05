@@ -32,13 +32,15 @@ const CONSOLE_PRINT_LIMIT = 24;
 const PAGE_ERROR_PRINT_LIMIT = 8;
 const PAGE_ERROR_STORE_LIMIT = 50;
 const WARMUP_FRAMES = 30;
-const SAMPLE_FRAMES = 180;
+const DEFAULT_SAMPLE_FRAMES = 180;
+const FAST_SAMPLE_FRAMES = 60;
 const CONVERGENCE_TIMEOUT_MS = 120_000;
 const CONVERGENCE_POLL_MS = 500;
 const CONVERGENCE_STABLE_POLLS = 3;
 const MIN_WALK_ROUTE_DISTANCE_M = 48;
 const MOVEMENT_SAMPLE_FRAMES = 30;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
+const FAST_STARTUP_WORLD = "4";
 
 const OUTSIDE_STARTUP_CAM = "2048,96,2048,2.6500,-0.4300,55";
 const OUTSIDE_HORIZON_CAM = "2048,260,4096,2.6500,-0.3000,55";
@@ -108,6 +110,13 @@ type JsonRecord = Record<string, unknown>;
 type SceneExtra = Record<string, string>;
 type PoseTuple = [number, number, number];
 type CamPose = { p: PoseTuple; yaw: number; pitch: number; fov?: number };
+type AcceptanceProfile = "full" | "fast" | "reuse";
+
+const REUSE_MODE_CODES: Record<AcceptanceProfile, number> = {
+  full: 1,
+  fast: 2,
+  reuse: 3,
+};
 
 interface SceneSpec {
   name: string;
@@ -160,9 +169,26 @@ interface SceneResult extends SceneReportInput {
   comparisonPath: string;
   imageSanity: ImageSanityResult;
   movement: MovementReport | null;
+  startupTimings: Record<string, number>;
+  cache: AcceptanceSceneCacheEvidence;
+  acceptanceCacheKey: JsonRecord | null;
   consoleWarnings: string[];
   consoleErrors: string[];
   pageErrors: string[];
+}
+
+interface AcceptanceSceneCacheEvidence {
+  clodCacheHit: number;
+  clodCacheMiss: number;
+  clodCacheRehydrateMs: number;
+  clodCacheKeyMatch: number;
+  terrainSummaryCacheHit: number;
+  terrainSummaryCacheMiss: number;
+  startupBuildWorldMs: number;
+  startupTerrainSummaryMs: number;
+  startupTotalMs: number;
+  reuseEnabled: number;
+  reuseMode: number;
 }
 
 interface MovementSegment {
@@ -174,6 +200,22 @@ interface MovementSegment {
 
 function rel(path: string): string {
   return relative(process.cwd(), path).replace(/\\/g, "/");
+}
+
+function parseProfile(argv: readonly string[]): AcceptanceProfile {
+  if (argv.includes("--fast")) return "fast";
+  if (argv.includes("--reuse")) return "reuse";
+  return "full";
+}
+
+const PROFILE = parseProfile(process.argv.slice(2));
+const ACTIVE_SCENES = PROFILE === "fast"
+  ? SCENES.filter((scene) => scene.name === "walk" || scene.name === "final-near")
+  : SCENES;
+const SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;
+
+function elapsedSeconds(startedAt: number): string {
+  return `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 }
 
 function timestampForFolder(): string {
@@ -200,6 +242,27 @@ function horizontalDistance(a: PoseTuple, b: PoseTuple): number {
 function numCounter(counters: Readonly<Record<string, number>>, key: string): number {
   const value = counters[key];
   return Number.isFinite(value) ? value : 0;
+}
+
+function numTiming(timings: Readonly<Record<string, number>>, key: string): number {
+  const value = timings[key];
+  return Number.isFinite(value) ? value : 0;
+}
+
+function cacheEvidenceFromTimings(timings: Readonly<Record<string, number>>): AcceptanceSceneCacheEvidence {
+  return {
+    clodCacheHit: numTiming(timings, "clod_cache_hit"),
+    clodCacheMiss: numTiming(timings, "clod_cache_miss"),
+    clodCacheRehydrateMs: numTiming(timings, "clod_cache_rehydrate_ms"),
+    clodCacheKeyMatch: numTiming(timings, "clod_cache_key_match"),
+    terrainSummaryCacheHit: numTiming(timings, "terrain_summary_cache_hit"),
+    terrainSummaryCacheMiss: numTiming(timings, "terrain_summary_cache_miss"),
+    startupBuildWorldMs: numTiming(timings, "startup_build_world_ms"),
+    startupTerrainSummaryMs: numTiming(timings, "startup_terrain_summary_ms"),
+    startupTotalMs: numTiming(timings, "startup_total_ms"),
+    reuseEnabled: numTiming(timings, "acceptance_world_reuse_enabled"),
+    reuseMode: numTiming(timings, "acceptance_world_reuse_mode"),
+  };
 }
 
 function maxCounter(samples: readonly MovementSnapshot[], key: string): number {
@@ -282,20 +345,46 @@ async function failOnPageError(page: Page, sceneName: string, pageErrors: string
 
 async function readStats(page: Page): Promise<JsonRecord> {
   return await page.evaluate(() => {
-    const hooks = (window as typeof window & {
+    const w = window as typeof window & {
       __drusnielClod?: {
         ready?: boolean;
         error?: string | null;
         diag?: unknown;
+        startupTimings?: Record<string, number> | null;
         stats?: Record<string, unknown> | null;
       };
-    }).__drusnielClod;
+      __drusnielStartupTimings?: Record<string, number>;
+      __drusnielAcceptanceWorldCacheKey?: unknown;
+    };
+    const hooks = w.__drusnielClod;
     return JSON.parse(JSON.stringify({
       ready: hooks?.ready ?? false,
       error: hooks ? hooks.error ?? null : "missing hooks",
       diag: hooks?.diag ?? null,
+      startupTimings: hooks?.startupTimings ?? w.__drusnielStartupTimings ?? null,
+      acceptanceCacheKey: w.__drusnielAcceptanceWorldCacheKey ?? null,
       ...(hooks?.stats ?? {}),
     })) as Record<string, unknown>;
+  });
+}
+
+async function readAcceptanceCacheKey(page: Page): Promise<JsonRecord | null> {
+  return await page.evaluate(() => {
+    const w = window as typeof window & { __drusnielAcceptanceWorldCacheKey?: unknown };
+    return w.__drusnielAcceptanceWorldCacheKey
+      ? JSON.parse(JSON.stringify(w.__drusnielAcceptanceWorldCacheKey)) as Record<string, unknown>
+      : null;
+  });
+}
+
+async function readStartupTimings(page: Page): Promise<Record<string, number>> {
+  return await page.evaluate(() => {
+    const w = window as typeof window & {
+      __drusnielClod?: { startupTimings?: Record<string, number> | null };
+      __drusnielStartupTimings?: Record<string, number>;
+    };
+    const hooks = w.__drusnielClod;
+    return JSON.parse(JSON.stringify(hooks?.startupTimings ?? w.__drusnielStartupTimings ?? {})) as Record<string, number>;
   });
 }
 
@@ -571,12 +660,18 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
 
   const extra: Record<string, string> = {
     acceptance: "1",
+    acceptanceReuse: PROFILE,
+    acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]),
     ownershipOracle: gate.ownershipOracle,
     world: "16",
     clodPerf: "1",
     webgpuSelection: "1",
     ...(scene.extra ?? {}),
   };
+  if (PROFILE === "fast") {
+    extra["startupWorld"] = FAST_STARTUP_WORLD;
+    extra["infiniteStartupWorld"] = FAST_STARTUP_WORLD;
+  }
   if (scene.proceduralDebug) extra["proceduralDebug"] = scene.proceduralDebug;
   const url = clodUrl({
     scene: "infinite-islands",
@@ -589,12 +684,44 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
 
   console.log(`[infinite-accept] ${gate.name}/${scene.name}: ${url}`);
   try {
+    const sceneStartedAt = Date.now();
+    const loadStartedAt = Date.now();
     await page.goto(url, { waitUntil: "domcontentloaded" });
-    await Promise.race([waitReady(page, scene.name, failedPath), pageErrorGate]);
+    console.log(
+      `[infinite-accept] ${sceneRunName}: loaded after ${elapsedSeconds(loadStartedAt)} ` +
+      `(total ${elapsedSeconds(sceneStartedAt)})`,
+    );
+    const readyStartedAt = Date.now();
+    await Promise.race([waitReady(page, sceneRunName, failedPath), pageErrorGate]);
+    console.log(
+      `[infinite-accept] ${sceneRunName}: ready after ${elapsedSeconds(readyStartedAt)} ` +
+      `(total ${elapsedSeconds(sceneStartedAt)})`,
+    );
+    const startupTimings = await readStartupTimings(page).catch((): Record<string, number> => ({}));
+    if (Object.keys(startupTimings).length > 0) {
+      console.log(
+        `[infinite-accept] ${sceneRunName}: startup timings ` +
+        `parse=${(startupTimings["startup.parse_configs_ms"] ?? 0).toFixed(1)}ms ` +
+        `textures=${(startupTimings["startup.procedural_textures_ms"] ?? 0).toFixed(1)}ms ` +
+        `hydrology=${(startupTimings["startup.hydrology_ms"] ?? 0).toFixed(1)}ms ` +
+        `build=${(startupTimings["startup.build_world_ms"] ?? 0).toFixed(1)}ms ` +
+        `summary=${(startupTimings["startup.terrain_summary_ms"] ?? 0).toFixed(1)}ms ` +
+        `firstRender=${(startupTimings["startup.first_render_ready_ms"] ?? 0).toFixed(1)}ms ` +
+        `world=${startupTimings["startup.world_pages"] ?? "?"}`,
+      );
+    }
+    const cacheEvidence = cacheEvidenceFromTimings(startupTimings);
+    console.log(
+      `[infinite-accept] ${sceneRunName}: scene boot: ` +
+      `cache ${cacheEvidence.clodCacheHit === 1 ? "hit" : "miss"} ` +
+      `buildWorld=${cacheEvidence.startupBuildWorldMs.toFixed(1)}ms ` +
+      `terrainSummary=${cacheEvidence.startupTerrainSummaryMs.toFixed(1)}ms ` +
+      `ready=${elapsedSeconds(readyStartedAt)}`,
+    );
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     await Promise.race([settle(page, WARMUP_FRAMES), pageErrorGate]);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
-    await Promise.race([waitForConvergence(page, scene.name), pageErrorGate]);
+    await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     if (scene.movementRoute) {
       movement = await Promise.race([runMovementRoute(page), pageErrorGate]);
@@ -602,16 +729,24 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       await failOnPageError(page, scene.name, pageErrors, failedPath);
       // The route ends mid-refill (bubble pages rebuilding at the new
       // position); converge again so the sampled window is steady state.
-      await Promise.race([waitForConvergence(page, `${scene.name}:post-route`), pageErrorGate]);
+      await Promise.race([waitForConvergence(page, `${sceneRunName}:post-route`), pageErrorGate]);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
     }
+    const sampleStartedAt = Date.now();
     await Promise.race([settle(page, SAMPLE_FRAMES), pageErrorGate]);
+    console.log(
+      `[infinite-accept] ${sceneRunName}: sampled after ${elapsedSeconds(sampleStartedAt)} ` +
+      `(total ${elapsedSeconds(sceneStartedAt)})`,
+    );
     await failOnPageError(page, scene.name, pageErrors, failedPath);
 
     mkdirSync(outDir, { recursive: true });
     await page.screenshot({ path: screenshotPath });
 
     const stats = await readStats(page);
+    const finalStartupTimings = await readStartupTimings(page).catch((): Record<string, number> => startupTimings);
+    const finalCacheEvidence = cacheEvidenceFromTimings(finalStartupTimings);
+    const acceptanceCacheKey = await readAcceptanceCacheKey(page).catch(() => null);
     const phase0 = await readPhase0Report(page);
     writeJson(statsPath, stats);
     writeJson(phase0Path, phase0);
@@ -643,6 +778,9 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       thresholds,
       imageSanity,
       movement,
+      startupTimings: finalStartupTimings,
+      cache: finalCacheEvidence,
+      acceptanceCacheKey,
       consoleWarnings,
       consoleErrors,
       pageErrors,
@@ -664,6 +802,8 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       await writeBootstrapDiff(failedPath, comparisonPath).catch(() => undefined);
     }
     const thresholds = evaluateThresholds({}, gate.requiredCounters, gate.rules);
+    const startupTimings: Record<string, number> = {};
+    const cache = cacheEvidenceFromTimings(startupTimings);
     const failures = [
       message,
       ...evaluateMovementRoute(scene.name, movement),
@@ -681,6 +821,9 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       thresholds,
       imageSanity,
       movement,
+      startupTimings,
+      cache,
+      acceptanceCacheKey: null,
       consoleWarnings,
       consoleErrors,
       pageErrors,
@@ -699,12 +842,13 @@ async function main(): Promise<void> {
 
   console.log(`[infinite-accept] run ${rel(outDir)}`);
   console.log(`[infinite-accept] base ${process.env["CLOD_POC_BASE_URL"]}`);
+  console.log(`[infinite-accept] profile ${PROFILE} scenes=${ACTIVE_SCENES.length} sampleFrames=${SAMPLE_FRAMES}`);
 
   const { browser, recipe } = await launchWebGPU();
   const sceneResults: SceneResult[] = [];
   try {
     for (const gate of GATE_MODES) {
-      for (const scene of SCENES) {
+      for (const scene of ACTIVE_SCENES) {
         sceneResults.push(await runScene(browser, scene, gate, outDir));
       }
     }
@@ -721,6 +865,8 @@ async function main(): Promise<void> {
     timestamp,
     commit_sha: gitSha(),
     browser_launch_recipe: recipe,
+    profile: PROFILE,
+    sample_frames: SAMPLE_FRAMES,
     thresholds: {
       required_counters: REQUIRED_COUNTERS,
       rules: THRESHOLD_RULES.map((rule) => ({ key: rule.key, label: rule.label })),
@@ -742,6 +888,9 @@ async function main(): Promise<void> {
       thresholds: scene.thresholds,
       image_sanity: scene.imageSanity,
       movement: scene.movement,
+      startup_timings: scene.startupTimings,
+      cache: scene.cache,
+      acceptance_cache_key: scene.acceptanceCacheKey,
       artifacts: {
         screenshot: scene.screenshot,
         stats_json: scene.statsPath,
