@@ -21,6 +21,11 @@ import {
   type StreamingClodRootStats,
 } from "../../../terrain/streaming/clod_streaming_roots.js";
 import {
+  createFarClipmapController,
+  farClipmapConfigFromSearchParams,
+  publishFarClipmapStatsToCounters,
+} from "../../../terrain/far_clipmap/index.js";
+import {
   PROCEDURAL_DEBUG_MODES,
   type ProceduralDebugMode,
 } from "../../../terrain/material/terrain_material_constants.js";
@@ -301,6 +306,13 @@ export function runFrameLoopStartup(
     searchParams,
   );
   const liveClodRootRadius = resolveLiveClodRootRadius(searchParams, longView.phase0Config, state.bubbleRadius);
+  const farClipmapConfig = farClipmapConfigFromSearchParams(searchParams, {
+    liveCollisionRadiusM: state.bubbleRadius,
+    clodCoverageRadiusM: liveClodRootRadius,
+  });
+  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1"
+    ? createFarClipmapController(scene, farClipmapConfig)
+    : null;
   const streamingClodRootController = createStreamingClodRootController({
     roots: input.result.roots,
     allNodes: input.allNodes,
@@ -468,6 +480,10 @@ export function runFrameLoopStartup(
     },
     farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
+          if (farClipmapController) {
+            const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position));
+            if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats);
+          }
           if (streamingScene) {
             timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z));
           }
