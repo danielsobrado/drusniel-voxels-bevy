@@ -160,6 +160,12 @@ describe("streamed CLOD convergence controls", () => {
     expect(resolveStreamingClodMaxRootLevel(cfg)).toBeLessThan(cfg.page.quadtree_levels - 1);
   });
 
+  it("streamed_clod_missing_query_param_does_not_override_config_to_zero", () => {
+    testGlobal().window = { location: { search: "?scene=infinite-islands&acceptance=1" } };
+
+    expect(resolveStreamingClodMaxRootLevel(BASE_CFG)).toBe(1);
+  });
+
   it("streamed_clod_query_param_overrides_configured_max_root_level", () => {
     testGlobal().window = { location: { search: "?liveClodRootMaxLevel=2" } };
 
