@@ -10,6 +10,7 @@ describe("parseConfig", () => {
     expect(cfg.page.quadtree_levels).toBe(4);
     expect(cfg.simplify.target_ratio_per_level).toBe(0.5);
     expect(cfg.simplify.abandon_ratio).toBe(0.85);
+    expect(cfg.streaming?.clod.max_root_level).toBe(1);
     expect(cfg.meshopt_package_version).toBe("0.22.0");
     expect(cfg.poc.lod0_pages_x).toBe(8);
     expect(cfg.validation.position_epsilon).toBe(0.000001);
@@ -19,6 +20,7 @@ describe("parseConfig", () => {
     const cfg: ClodPagesConfig = parseConfig(configText);
     expect(typeof cfg.page.chunks_per_page).toBe("number");
     expect(typeof cfg.simplify.attribute_weights.normal).toBe("number");
+    expect(typeof cfg.streaming?.clod.max_root_level).toBe("number");
     expect(typeof cfg.poc.emit_debug_json).toBe("boolean");
   });
 
