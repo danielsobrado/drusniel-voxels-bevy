@@ -1,7 +1,7 @@
 import { indexedDB } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SaveRegionRecords } from "../region_store.js";
-import { openSaveDb, readSaveManifest, writeRegionRecords, writeSaveManifestAndMetadata } from "../save_db.js";
+import { openSaveDb, readRegionRecords, readSaveManifest, writeRegionRecords, writeSaveManifestAndMetadata } from "../save_db.js";
 import {
   finalizeSaveManifestAndMetadata,
   flushDirtyRegionBatch,
@@ -9,6 +9,9 @@ import {
 } from "../save_service.js";
 import { regionVoxelDeltasToDeltas, type SavedPropInstance, type SaveWorldManifest, type WorldMetadataRecord } from "../save_schema.js";
 import { clearSaveInvalidationTargets, registerSaveInvalidationTarget } from "../save_far_summary_bridge.js";
+import { partitionSavedPropsByRegion } from "../prop_partition.js";
+import { savedPropStore } from "../prop_store.js";
+import { clearSaveRuntime, initSaveRuntime, upsertSaveRuntimeProp } from "../save_runtime.js";
 
 function dbName(): string {
   return `drusniel-two-session-test-${Date.now()}-${Math.random()}`;
@@ -100,6 +103,7 @@ function regionRecords(): SaveRegionRecords {
 describe("two-session saved world workflow", () => {
   afterEach(() => {
     clearSaveInvalidationTargets();
+    clearSaveRuntime();
     vi.restoreAllMocks();
   });
 
@@ -183,5 +187,51 @@ describe("two-session saved world workflow", () => {
 
     await expect(loadSavedWorldFromDb(db, "qa-save", { expectedSeed: 42 })).rejects.toThrow(/save region not found: r_0_0/);
     db.close();
+  });
+
+  it("moving a saved prop across regions clears the old region record before reload", async () => {
+    const db = await openSaveDb(indexedDB, dbName());
+    await writeRegionRecords(db, "qa-save", regionRecords());
+    await writeSaveManifestAndMetadata(db, manifest(), { ...metadata(), roads: [], criticalPaths: [] });
+    const loaded = await loadSavedWorldFromDb(db, "qa-save", { expectedSeed: 42, replaceVoxelSnapshot: vi.fn() });
+    initSaveRuntime(loaded);
+
+    const movedProp = { ...prop(), position: [512, 2, 3] as [number, number, number], regionKey: "r_1_0" };
+    const dirtyKeys = upsertSaveRuntimeProp(movedProp);
+    expect(dirtyKeys).toEqual(["r_0_0", "r_1_0"]);
+
+    const propsByRegion = partitionSavedPropsByRegion(savedPropStore.snapshot());
+    const snapshot = { revision: 0, deltas: [] };
+    const first = await flushDirtyRegionBatch({
+      db,
+      saveId: "qa-save",
+      manifest: manifest(),
+      metadata: { ...metadata(), roads: [], criticalPaths: [] },
+      dirtyRegionKeys: dirtyKeys,
+      propsByRegion,
+      snapshot,
+      maxRegionWrites: 1,
+    });
+    const second = await flushDirtyRegionBatch({
+      db,
+      saveId: "qa-save",
+      manifest: manifest(),
+      metadata: { ...metadata(), roads: [], criticalPaths: [] },
+      dirtyRegionKeys: first.pending,
+      propsByRegion,
+      snapshot,
+      maxRegionWrites: 1,
+    });
+    await finalizeSaveManifestAndMetadata(db, manifest(), { ...metadata(), roads: [], criticalPaths: [] }, [...manifest().regionKeys, ...first.written, ...second.written]);
+
+    const oldRegion = await readRegionRecords(db, "qa-save", "r_0_0");
+    const newRegion = await readRegionRecords(db, "qa-save", "r_1_0");
+    const reloaded = await loadSavedWorldFromDb(db, "qa-save", { expectedSeed: 42, replaceVoxelSnapshot: vi.fn() });
+    db.close();
+
+    expect(oldRegion?.props).toEqual([]);
+    expect(newRegion?.props).toEqual([movedProp]);
+    expect(reloaded.regions.flatMap((region) => region.props).map((savedProp) => savedProp.id)).toEqual(["p_000001_ab12"]);
+    expect(reloaded.regions.flatMap((region) => region.props)[0]).toEqual(movedProp);
   });
 });

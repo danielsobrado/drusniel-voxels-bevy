@@ -47,6 +47,8 @@ import { resolvePlayerEditAuthorityConfig } from "../../../player/player_edit_au
 import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
 import { propPlacementSceneToProjectProps } from "../../../project/project_props.js";
 import { projectPropEditStore } from "../../../project/prop_edit_store.js";
+import { hasLoadedSavePropAuthority } from "../../../save/save_runtime.js";
+import { shouldRestoreDefaultCustomProps } from "./custom_props_authority.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
 
@@ -277,7 +279,11 @@ export async function runRuntimeSystemsStartup(
     try {
       if (hasImportedProps) {
         projectPropEditStore.restore(importedProps);
-      } else if (!projectPropEditStore.hasProps()) {
+      } else if (shouldRestoreDefaultCustomProps({
+        hasImportedProps,
+        hasProjectProps: projectPropEditStore.hasProps(),
+        hasLoadedSavePropAuthority: hasLoadedSavePropAuthority(),
+      })) {
         const scenePreset = resolvePropPlacementScene(searchParams, propPlacementScenes, propPlacementScenes.smoke!);
         projectPropEditStore.restore(propPlacementSceneToProjectProps(scenePreset));
       }

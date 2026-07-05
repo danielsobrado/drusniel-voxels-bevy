@@ -115,6 +115,20 @@ describe("save schemas", () => {
     expect(() => assertWorldMetadataRecord(brokenShape)).toThrow(/points/i);
   });
 
+  it("rejects negative metadata radii and widths", () => {
+    const negativeCity = metadata();
+    negativeCity.cities[0] = { ...negativeCity.cities[0]!, radiusM: -1 };
+    expect(() => assertWorldMetadataRecord(negativeCity)).toThrow(/radiusM/i);
+
+    const negativeRoad = metadata();
+    negativeRoad.roads[0] = { ...negativeRoad.roads[0]!, widthM: -1 };
+    expect(() => assertWorldMetadataRecord(negativeRoad)).toThrow(/widthM/i);
+
+    const negativeEntrance = metadata();
+    negativeEntrance.caveEntrances[0] = { ...negativeEntrance.caveEntrances[0]!, farMaskRadiusM: -1 };
+    expect(() => assertWorldMetadataRecord(negativeEntrance)).toThrow(/farMaskRadiusM/i);
+  });
+
   it("validates metadata prop links against loaded saved props", () => {
     const withPropLink = metadata();
     withPropLink.criticalPaths[0] = { ...withPropLink.criticalPaths[0]!, linkedPropIds: ["p_000001_ab12"] };

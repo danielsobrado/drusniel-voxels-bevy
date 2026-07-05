@@ -40,13 +40,17 @@ export class SavedPropStore {
     return this.props.size > 0;
   }
 
-  upsert(prop: SavedPropInstance): void {
+  upsert(prop: SavedPropInstance): SavedPropInstance | null {
     assertSavedPropInstance(prop);
+    const previous = this.props.get(prop.id);
     this.props.set(prop.id, cloneSavedProp(prop));
+    return previous ? cloneSavedProp(previous) : null;
   }
 
-  remove(id: string): boolean {
-    return this.props.delete(id);
+  remove(id: string): SavedPropInstance | null {
+    const previous = this.props.get(id);
+    this.props.delete(id);
+    return previous ? cloneSavedProp(previous) : null;
   }
 
   snapshot(): SavedPropInstance[] {

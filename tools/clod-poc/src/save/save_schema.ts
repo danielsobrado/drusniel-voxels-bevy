@@ -110,6 +110,11 @@ function assertFinite(value: unknown, label: string): asserts value is number {
   if (!isFiniteNumber(value)) throw new Error(`${label} must be finite`);
 }
 
+function assertNonNegativeFinite(value: unknown, label: string): asserts value is number {
+  assertFinite(value, label);
+  if (value < 0) throw new Error(`${label} must be non-negative`);
+}
+
 function assertStringList(value: unknown, label: string): asserts value is string[] {
   if (!isStringArray(value)) throw new Error(`${label} must be a string array`);
 }
@@ -238,7 +243,7 @@ function assertCity(value: unknown): asserts value is SavedCity {
   assertString(value.id, "city id");
   assertString(value.name, "city name");
   assertVec3(value.center, "city center");
-  assertFinite(value.radiusM, "city radiusM");
+  assertNonNegativeFinite(value.radiusM, "city radiusM");
   assertStringList(value.districtIds, "city districtIds");
   assertStringList(value.roadIds, "city roadIds");
   assertStringList(value.criticalPathIds, "city criticalPathIds");
@@ -258,7 +263,7 @@ function assertRoad(value: unknown): asserts value is SavedRoad {
   if (!isRecord(value)) throw new Error("road must be an object");
   assertString(value.id, "road id");
   assertNonEmptyVec3List(value.points, "road points");
-  assertFinite(value.widthM, "road widthM");
+  assertNonNegativeFinite(value.widthM, "road widthM");
   if (!isSafeInteger(value.materialId)) throw new Error("road materialId must be a safe integer");
   if (!["dirt", "stone", "bridge", "city", "trail"].includes(String(value.roadType))) throw new Error("road roadType is invalid");
   assertStringList(value.connectedCityIds, "road connectedCityIds");
@@ -271,7 +276,7 @@ function assertCaveEntrance(value: unknown): asserts value is SavedCaveEntrance 
   assertVec3(value.position, "cave entrance position");
   assertVec3(value.facing, "cave entrance facing");
   assertString(value.caveSystemId, "cave entrance caveSystemId");
-  assertFinite(value.farMaskRadiusM, "cave entrance farMaskRadiusM");
+  assertNonNegativeFinite(value.farMaskRadiusM, "cave entrance farMaskRadiusM");
   if (!isSafeInteger(value.revision)) throw new Error("cave entrance revision must be a safe integer");
 }
 
