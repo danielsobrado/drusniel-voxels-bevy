@@ -661,6 +661,12 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   `src/gpu/gpu_mesh_buffers.test.ts`, `src/gpu/surface_nets_core.test.ts`,
   and `src/terrain/near_field/near_field_bubble_controller.test.ts`
   (3 files / 28 tests).
+- 2026-07-05: Manual acceptance run `2026-07-05T04-44-08` failed only two
+  `frame_ms_p95` checks: walk 10.3 ms and final-near 8.5 ms. Movement route
+  gates now pass (`horizontalDistanceM=395.8`, `liveBubbleBuiltDelta=45`,
+  `streamApplyPagesDelta=28`), freeze/horizon scenes pass except final-near
+  p95 variance, and readiness/collider/failure counters are healthy. Next
+  step: profile p95 misses before touching runtime budgets or thresholds.
 
 ## Remaining known risks / next steps if gates still fail
 
