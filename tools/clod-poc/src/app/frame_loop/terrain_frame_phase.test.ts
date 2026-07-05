@@ -153,4 +153,16 @@ describe("terrain frame live-bubble probe counters", () => {
     expect(counters["live_bubble_gpu_retries_total"]).toBe(5);
     expect(counters["live_bubble_gpu_failures_total"]).toBe(1);
   });
+
+  it("keeps the mirrored building counter nonzero while GPU retries remain", () => {
+    const counters = installCounters();
+
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      buildingPages: 0,
+      gpuRetryPages: 2,
+    }, 1));
+
+    expect(counters["live_bubble_building_pages"]).toBe(2);
+  });
 });
