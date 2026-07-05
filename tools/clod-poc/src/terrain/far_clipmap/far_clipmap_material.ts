@@ -11,10 +11,6 @@ const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object
 const FAR_CLIPMAP_SHADER_RENDER_ORDER = 20;
 
 export interface FarClipmapMaterialUniforms {
-  uRingOrigin: THREE.IUniform<THREE.Vector2>;
-  uCellSize: THREE.IUniform<number>;
-  uHeightScale: THREE.IUniform<number>;
-  uYOffset: THREE.IUniform<number>;
   uSeaLevel: THREE.IUniform<number>;
   uDebugMode: THREE.IUniform<number>;
   uClipInnerRadius: THREE.IUniform<number>;
@@ -30,7 +26,7 @@ attribute vec3 color;
 uniform vec2 uCameraXZ;
 
 varying vec2 vWorldXZ;
-varying vec3 vWorldNormal;
+varying vec3 vViewNormal;
 varying vec3 vVertexColor;
 varying float vHeight;
 varying float vDistance;
@@ -40,7 +36,7 @@ void main() {
   vWorldXZ = worldPosition.xz;
   vHeight = worldPosition.y;
   vDistance = length(vWorldXZ - uCameraXZ);
-  vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  vViewNormal = normalize(normalMatrix * normal);
   vVertexColor = color;
   gl_Position = projectionMatrix * viewMatrix * worldPosition;
 }
@@ -53,10 +49,9 @@ uniform float uSeaLevel;
 uniform int uDebugMode;
 uniform float uClipInnerRadius;
 uniform float uClipOuterRadius;
-uniform vec2 uCameraXZ;
 
 varying vec2 vWorldXZ;
-varying vec3 vWorldNormal;
+varying vec3 vViewNormal;
 varying vec3 vVertexColor;
 varying float vHeight;
 varying float vDistance;
@@ -72,7 +67,7 @@ vec3 tonemapFarTerrain(vec3 color) {
 void main() {
   if (vDistance < uClipInnerRadius || vDistance > uClipOuterRadius) discard;
 
-  vec3 normal = normalize(vWorldNormal);
+  vec3 normal = normalize(vViewNormal);
   vec3 sunDir = normalize(vec3(0.38, 0.82, 0.34));
   float directLight = saturate(dot(normal, sunDir));
   float ambientLight = 0.34 + 0.24 * saturate(normal.y);
@@ -119,9 +114,6 @@ export function farClipmapShaderRenderOrder(): number {
 
 export function createFarClipmapMaterial(input: {
   debugMode: FarClipmapDebugMode;
-  cellSizeM: number;
-  heightScale: number;
-  yOffset: number;
   seaLevel?: number;
   clipInnerRadiusM: number;
   clipOuterRadiusM: number;
@@ -133,10 +125,6 @@ export function createFarClipmapMaterial(input: {
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {
-      uRingOrigin: { value: new THREE.Vector2(0, 0) },
-      uCellSize: { value: input.cellSizeM },
-      uHeightScale: { value: input.heightScale },
-      uYOffset: { value: input.yOffset },
       uSeaLevel: { value: input.seaLevel ?? 0 },
       uDebugMode: { value: farClipmapDebugModeCode(input.debugMode) },
       uClipInnerRadius: { value: input.clipInnerRadiusM },
@@ -158,17 +146,12 @@ export function setFarClipmapMaterialDebugMode(material: FarClipmapMaterial, mod
 }
 
 export function updateFarClipmapMaterialFrameUniforms(material: FarClipmapMaterial, input: {
-  ringOriginX: number;
-  ringOriginZ: number;
   cameraX: number;
   cameraZ: number;
-  cellSizeM: number;
   clipInnerRadiusM: number;
   clipOuterRadiusM: number;
 }): void {
-  material.uniforms.uRingOrigin.value.set(input.ringOriginX, input.ringOriginZ);
   material.uniforms.uCameraXZ.value.set(input.cameraX, input.cameraZ);
-  material.uniforms.uCellSize.value = input.cellSizeM;
   material.uniforms.uClipInnerRadius.value = input.clipInnerRadiusM;
   material.uniforms.uClipOuterRadius.value = input.clipOuterRadiusM;
 }
