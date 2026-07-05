@@ -27,8 +27,6 @@ export interface WorldMetadataEntityRegionKeys {
   regionKeys: string[];
 }
 
-const HALF_OPEN_BOUNDS_MAX_EPSILON_M = 1e-7;
-
 function cloneMetadata(metadata: WorldMetadataRecord): WorldMetadataRecord {
   return structuredClone(metadata) as WorldMetadataRecord;
 }
@@ -62,16 +60,26 @@ function mergeBounds(a: SavedBounds2D, b: SavedBounds2D): SavedBounds2D {
   };
 }
 
-function boundsOverlap(a: SavedBounds2D, b: SavedBounds2D): boolean {
-  return a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
+function axisOverlapsHalfOpenRegion(min: number, max: number, regionMin: number, regionMax: number): boolean {
+  return min === max ? min >= regionMin && min < regionMax : min < regionMax && max > regionMin;
+}
+
+function boundsOverlapHalfOpenRegion(bounds: SavedBounds2D, regionBounds: SavedBounds2D): boolean {
+  return axisOverlapsHalfOpenRegion(bounds.minX, bounds.maxX, regionBounds.minX, regionBounds.maxX)
+    && axisOverlapsHalfOpenRegion(bounds.minZ, bounds.maxZ, regionBounds.minZ, regionBounds.maxZ);
 }
 
 function assertFiniteBoundsCoordinate(value: number, label: string): void {
   if (!Number.isFinite(value)) throw new Error(`metadata bounds ${label} must be finite`);
 }
 
-function maxCoordForHalfOpenBounds(min: number, max: number): number {
-  return min === max ? max : Math.max(min, max - HALF_OPEN_BOUNDS_MAX_EPSILON_M);
+function isExactRegionBoundary(value: number): boolean {
+  return Number.isInteger(value / SAVE_REGION_SIZE_M);
+}
+
+function maxRegionCoordForHalfOpenBounds(min: number, max: number): number {
+  if (min === max) return regionCoord(max);
+  return isExactRegionBoundary(max) ? regionCoord(max) - 1 : regionCoord(max);
 }
 
 export function boundsForRegion(regionKey: string): SavedBounds2D {
@@ -88,9 +96,9 @@ export function regionKeysForBounds(bounds: SavedBounds2D): string[] {
   for (const key of ["minX", "minZ", "maxX", "maxZ"] as const) assertFiniteBoundsCoordinate(bounds[key], key);
   if (bounds.minX > bounds.maxX || bounds.minZ > bounds.maxZ) throw new Error("metadata bounds min must be <= max");
   const minRx = regionCoord(bounds.minX);
-  const maxRx = regionCoord(maxCoordForHalfOpenBounds(bounds.minX, bounds.maxX));
+  const maxRx = maxRegionCoordForHalfOpenBounds(bounds.minX, bounds.maxX);
   const minRz = regionCoord(bounds.minZ);
-  const maxRz = regionCoord(maxCoordForHalfOpenBounds(bounds.minZ, bounds.maxZ));
+  const maxRz = maxRegionCoordForHalfOpenBounds(bounds.minZ, bounds.maxZ);
   const keys: string[] = [];
   for (let rx = minRx; rx <= maxRx; rx++) {
     for (let rz = minRz; rz <= maxRz; rz++) keys.push(regionKeyOf(rx, rz));
@@ -193,12 +201,12 @@ export class WorldMetadataStore {
     const regionBounds = boundsForRegion(regionKey);
     const result = emptyQueryResult();
     const matchingCaveSystemIds = new Set<string>();
-    const entranceIds = ids(this.metadataValue.caveEntrances.filter((entrance) => boundsOverlap(caveEntranceBounds(entrance), regionBounds)));
-    const criticalPathIds = ids(this.metadataValue.criticalPaths.filter((path) => boundsOverlap(criticalPathBounds(path), regionBounds)));
+    const entranceIds = ids(this.metadataValue.caveEntrances.filter((entrance) => boundsOverlapHalfOpenRegion(caveEntranceBounds(entrance), regionBounds)));
+    const criticalPathIds = ids(this.metadataValue.criticalPaths.filter((path) => boundsOverlapHalfOpenRegion(criticalPathBounds(path), regionBounds)));
 
-    result.cities = this.metadataValue.cities.filter((city) => boundsOverlap(cityBounds(city), regionBounds));
-    result.districts = this.metadataValue.districts.filter((district) => boundsOverlap(districtBounds(district), regionBounds));
-    result.roads = this.metadataValue.roads.filter((road) => boundsOverlap(roadBounds(road), regionBounds));
+    result.cities = this.metadataValue.cities.filter((city) => boundsOverlapHalfOpenRegion(cityBounds(city), regionBounds));
+    result.districts = this.metadataValue.districts.filter((district) => boundsOverlapHalfOpenRegion(districtBounds(district), regionBounds));
+    result.roads = this.metadataValue.roads.filter((road) => boundsOverlapHalfOpenRegion(roadBounds(road), regionBounds));
     result.caveEntrances = this.metadataValue.caveEntrances.filter((entrance) => entranceIds.has(entrance.id));
     result.criticalPaths = this.metadataValue.criticalPaths.filter((path) => criticalPathIds.has(path.id));
 
