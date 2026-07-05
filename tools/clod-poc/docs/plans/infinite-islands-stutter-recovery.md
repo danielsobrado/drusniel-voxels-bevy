@@ -667,6 +667,17 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   `streamApplyPagesDelta=28`), freeze/horizon scenes pass except final-near
   p95 variance, and readiness/collider/failure counters are healthy. Next
   step: profile p95 misses before touching runtime budgets or thresholds.
+- 2026-07-05: Manual acceptance run `2026-07-05T05-02-15` failed only one
+  threshold: walk `frame_ms_p95=9.7` ms (gate 8 ms). All freeze scenes pass
+  (`final-near` recovered to 7.0 ms p95), missing pages/holes are zero, and
+  convergence completed. Next step remains profiling the walk steady-state
+  frame-time miss; do not weaken thresholds.
+- 2026-07-05: Attempted a focused `perfProbe=1` profile for the walk endpoint
+  pose from `2026-07-05T05-02-15` (`cam=2431.964,19.332,608.042,2.65,
+  -0.43,55`) on a temporary 5182 dev server. First run double-encoded `cam`;
+  second run used the base URL but never observed `__drusnielClod` hooks.
+  Both stuck perf processes and the 5182 Vite server were terminated. No
+  runtime change made from this inconclusive profile attempt.
 
 ## Remaining known risks / next steps if gates still fail
 
