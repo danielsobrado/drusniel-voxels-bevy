@@ -30,6 +30,7 @@ export type {
 
 export {
   createConservativeFarClipmapSource,
+  createDefaultFarClipmapSource,
   createFarClipmapSourceFromFarHeightProvider,
   createFarClipmapSourceFromProviderGetter,
   createFarClipmapSourceFromTerrainSampler,
