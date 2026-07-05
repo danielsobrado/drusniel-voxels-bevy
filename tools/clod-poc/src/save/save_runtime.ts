@@ -1,3 +1,4 @@
+import { projectPropEditStore } from "../project/prop_edit_store.js";
 import { SAVE_AUTOSAVE_INTERVAL_S, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
 import type { LoadedSavedWorld } from "./save_service.js";
 import { finalizeSaveManifestAndMetadata, flushDirtyRegionBatch } from "./save_service.js";
@@ -62,6 +63,7 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     counters,
   };
   savedPropStore.restore(loadedWorld.regions.flatMap((region) => region.props));
+  projectPropEditStore.restore(savedPropStore.activeProjectProps());
   publishCounters();
 }
 
@@ -69,6 +71,7 @@ export function clearSaveRuntime(): void {
   if (state?.flushTimer) clearTimeout(state.flushTimer);
   state = null;
   savedPropStore.clear();
+  projectPropEditStore.clear();
 }
 
 export function hasActiveSaveRuntime(): boolean {
