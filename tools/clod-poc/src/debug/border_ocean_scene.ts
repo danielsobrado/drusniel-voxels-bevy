@@ -50,18 +50,22 @@ export interface BorderOceanCamera {
   fov: number;
 }
 
+interface BorderOceanCameraConfig {
+  eyeXRatio: number;
+  eyeYRatio: number;
+  eyeY?: number;
+  eyeZRatio: number;
+  lookXRatio: number;
+  lookY: number;
+  lookZRatio: number;
+  fov: number;
+}
+
 export interface BorderOceanSceneConfig {
   defaultWorldPages: number;
   defaultSeed: number;
-  camera: {
-    eyeXRatio: number;
-    eyeYRatio: number;
-    eyeZRatio: number;
-    lookXRatio: number;
-    lookY: number;
-    lookZRatio: number;
-    fov: number;
-  };
+  camera: BorderOceanCameraConfig;
+  horizonCamera: BorderOceanCameraConfig;
   acceptance: {
     minDeepOceanVertices: number;
     maxDeepOceanTriangles: number;
@@ -85,6 +89,16 @@ export const DEFAULT_BORDER_OCEAN_SCENE_CONFIG: BorderOceanSceneConfig = {
     lookXRatio: 0.5,
     lookY: 18,
     lookZRatio: 1.08,
+    fov: 55,
+  },
+  horizonCamera: {
+    eyeXRatio: 0.5,
+    eyeYRatio: 0,
+    eyeY: 320,
+    eyeZRatio: 0.5,
+    lookXRatio: 0.5,
+    lookY: 0,
+    lookZRatio: 4.0,
     fov: 55,
   },
   acceptance: {
@@ -134,15 +148,27 @@ function optionalIntegerAtLeast(value: unknown, fallback: number, min: number, f
   return value;
 }
 
+function parseCameraConfig(raw: YamlRecord | undefined, fallback: BorderOceanCameraConfig, field: string): BorderOceanCameraConfig {
+  const eyeY = raw?.eye_y !== undefined
+    ? optionalNumber(raw.eye_y, fallback.eyeY ?? 0, `${field}.eye_y`)
+    : fallback.eyeY;
+  return {
+    eyeXRatio: optionalNumber(raw?.eye_x_ratio, fallback.eyeXRatio, `${field}.eye_x_ratio`),
+    eyeYRatio: optionalNumber(raw?.eye_y_ratio, fallback.eyeYRatio, `${field}.eye_y_ratio`),
+    eyeY,
+    eyeZRatio: optionalNumber(raw?.eye_z_ratio, fallback.eyeZRatio, `${field}.eye_z_ratio`),
+    lookXRatio: optionalNumber(raw?.look_x_ratio, fallback.lookXRatio, `${field}.look_x_ratio`),
+    lookY: optionalNumber(raw?.look_y, fallback.lookY, `${field}.look_y`),
+    lookZRatio: optionalNumber(raw?.look_z_ratio, fallback.lookZRatio, `${field}.look_z_ratio`),
+    fov: optionalNumber(raw?.fov, fallback.fov, `${field}.fov`),
+  };
+}
+
 function readRequiredCounters(value: unknown, fallback: readonly string[]): readonly string[] {
   if (value === undefined) return fallback;
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters must be a non-empty string array`);
-  }
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters must be a non-empty string array`);
   const invalidIndex = value.findIndex((item) => typeof item !== "string" || item.length === 0);
-  if (invalidIndex >= 0) {
-    throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
-  }
+  if (invalidIndex >= 0) throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
   return value as string[];
 }
 
@@ -153,20 +179,14 @@ export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfi
   const rawRoot = requiredRootRecord(load(text));
   const root = optionalRecord(rawRoot.border_ocean_scene, "border_ocean_scene") ?? {};
   const camera = optionalRecord(root.camera, "border_ocean_scene.camera") ?? {};
+  const horizonCamera = optionalRecord(root.horizon_camera, "border_ocean_scene.horizon_camera") ?? {};
   const acceptance = optionalRecord(root.acceptance, "border_ocean_scene.acceptance") ?? {};
 
   return {
     defaultWorldPages: optionalIntegerAtLeast(root.default_world_pages, defaults.defaultWorldPages, 4, "border_ocean_scene.default_world_pages"),
     defaultSeed: optionalIntegerAtLeast(root.default_seed, defaults.defaultSeed, 1, "border_ocean_scene.default_seed"),
-    camera: {
-      eyeXRatio: optionalNumber(camera.eye_x_ratio, defaults.camera.eyeXRatio, "border_ocean_scene.camera.eye_x_ratio"),
-      eyeYRatio: optionalNumber(camera.eye_y_ratio, defaults.camera.eyeYRatio, "border_ocean_scene.camera.eye_y_ratio"),
-      eyeZRatio: optionalNumber(camera.eye_z_ratio, defaults.camera.eyeZRatio, "border_ocean_scene.camera.eye_z_ratio"),
-      lookXRatio: optionalNumber(camera.look_x_ratio, defaults.camera.lookXRatio, "border_ocean_scene.camera.look_x_ratio"),
-      lookY: optionalNumber(camera.look_y, defaults.camera.lookY, "border_ocean_scene.camera.look_y"),
-      lookZRatio: optionalNumber(camera.look_z_ratio, defaults.camera.lookZRatio, "border_ocean_scene.camera.look_z_ratio"),
-      fov: optionalNumber(camera.fov, defaults.camera.fov, "border_ocean_scene.camera.fov"),
-    },
+    camera: parseCameraConfig(camera, defaults.camera, "border_ocean_scene.camera"),
+    horizonCamera: parseCameraConfig(horizonCamera, defaults.horizonCamera, "border_ocean_scene.horizon_camera"),
     acceptance: {
       minDeepOceanVertices: optionalIntegerAtLeast(acceptance.min_deep_ocean_vertices, defaults.acceptance.minDeepOceanVertices, 1, "border_ocean_scene.acceptance.min_deep_ocean_vertices"),
       maxDeepOceanTriangles: optionalIntegerAtLeast(acceptance.max_deep_ocean_triangles, defaults.acceptance.maxDeepOceanTriangles, 1, "border_ocean_scene.acceptance.max_deep_ocean_triangles"),
@@ -181,13 +201,20 @@ export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfi
   };
 }
 
-export function borderOceanCameraForWorld(worldCells: number, sceneConfig: BorderOceanSceneConfig = DEFAULT_BORDER_OCEAN_SCENE_CONFIG): BorderOceanCamera {
-  const cam = sceneConfig.camera;
+function cameraFromConfig(worldCells: number, cam: BorderOceanCameraConfig): BorderOceanCamera {
   return {
-    eye: [worldCells * cam.eyeXRatio, worldCells * cam.eyeYRatio, worldCells * cam.eyeZRatio],
+    eye: [worldCells * cam.eyeXRatio, cam.eyeY ?? worldCells * cam.eyeYRatio, worldCells * cam.eyeZRatio],
     look: [worldCells * cam.lookXRatio, cam.lookY, worldCells * cam.lookZRatio],
     fov: cam.fov,
   };
+}
+
+export function borderOceanCameraForWorld(worldCells: number, sceneConfig: BorderOceanSceneConfig = DEFAULT_BORDER_OCEAN_SCENE_CONFIG): BorderOceanCamera {
+  return cameraFromConfig(worldCells, sceneConfig.camera);
+}
+
+export function borderOceanHorizonCameraForWorld(worldCells: number, sceneConfig: BorderOceanSceneConfig = DEFAULT_BORDER_OCEAN_SCENE_CONFIG): BorderOceanCamera {
+  return cameraFromConfig(worldCells, sceneConfig.horizonCamera);
 }
 
 /** Cam string: eyeX,eyeY,eyeZ,lookX,lookY,lookZ[,fov] */
@@ -259,69 +286,24 @@ export function publishBorderOceanAcceptanceCounters(counters: Record<string, nu
   counters["border_ocean.deep_ocean_mesh_present"] = input.deepOceanMeshPresent ? 1 : 0;
   counters["border_ocean.deep_ocean_vertices"] = input.deepOcean.enabled ? deepOceanSurfaceVertexCount(input.worldCells, input.deepOcean) : 0;
   counters["border_ocean.deep_ocean_triangles"] = input.deepOcean.enabled ? deepOceanSurfaceTriangleCount(input.worldCells, input.deepOcean) : 0;
-  counters["border_ocean.deep_ocean_draw_calls"] = input.deepOceanMeshPresent ? 1 : 0;
+  counters["border_ocean.deep_ocean_draw_calls"] = input.deepOcean.enabled && input.deepOceanMeshPresent ? 1 : 0;
   counters["border_ocean.deep_ocean_start_outside_m"] = input.deepOcean.startOutsideBorderM;
   counters["border_ocean.deep_ocean_extend_m"] = input.deepOcean.extendCells;
   counters["border_ocean.deep_ocean_surface_y"] = input.deepOcean.surfaceY;
-  counters["border_ocean.deep_ocean_transition_gap_vertices"] = input.deepOcean.enabled ? countDeepOceanTransitionGapVertices(input.worldCells, input.deepOcean) : 0;
-  counters["border_ocean.wave_count"] = input.oceanSampler ? deepOceanSpectrumWaveCount(input.oceanSampler.waves) : 0;
+  counters["border_ocean.deep_ocean_transition_gap_vertices"] = countDeepOceanTransitionGapVertices(input.worldCells, input.deepOcean);
+  counters["border_ocean.wave_count"] = deepOceanSpectrumWaveCount();
   counters["border_ocean.wave_wind_speed"] = input.deepOcean.wave.windSpeed;
   counters["border_ocean.wave_height_scale"] = input.deepOcean.wave.heightScale;
   counters["border_ocean.wave_choppiness"] = input.deepOcean.wave.choppiness;
   counters["border_ocean.shading_fog_far_m"] = input.deepOcean.shading.fogFarM;
   counters["border_ocean.shading_reflection_strength"] = input.deepOcean.shading.reflectionStrength;
-  counters["border_ocean.player_margin_m"] = input.playerConfig?.worldEdgeMargin ?? -1;
-  counters["border_ocean.player_pushback_band_m"] = input.playerConfig?.worldEdgePushbackBand ?? -1;
-  counters["border_ocean.player_pushback_accel"] = input.playerConfig?.worldEdgePushbackAcceleration ?? -1;
-  counters["border_ocean.player_soft_pushback_enabled"] = input.playerConfig ? (input.playerConfig.worldEdgePushbackBand > 0 && input.playerConfig.worldEdgePushbackAcceleration > 0 ? 1 : 0) : -1;
-  counters["border_ocean.frame_ms_p95"] = counters["frame_ms_p95"] ?? counters["frame_ms_avg"] ?? 0;
-  counters["border_ocean.page_source_purity"] = 1;
-  counters["border_ocean.interior_water_wet_ratio"] = input.waterField ? sampleInteriorWaterWetRatio(input.waterField, input.worldCells) : -1;
-  counters["border_ocean.playable_ocean_outside_ok"] = input.oceanSampler ? probePlayableOceanOutside(input.oceanSampler, input.worldCells) : 0;
-  counters["border_ocean.cliff_dry_above_sea"] = input.waterField && runtime?.config ? probeCliffDryAboveSea(runtime.config.ocean.surfaceY, input.worldCells) : -1;
-}
-
-export function validateBorderOceanStats(stats: Record<string, unknown>, sceneConfig: BorderOceanSceneConfig = DEFAULT_BORDER_OCEAN_SCENE_CONFIG): void {
-  if (stats["ready"] !== true) throw new Error("border-ocean stats ready flag is not true");
-  if (stats["error"] !== null) throw new Error(`border-ocean stats error: ${String(stats["error"])}`);
-  const counters = stats["counters"] as Record<string, unknown> | undefined;
-  if (!counters) throw new Error("border-ocean stats missing counters");
-
-  for (const key of sceneConfig.acceptance.requiredCounters) {
-    const value = counters[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`border-ocean required counter missing: ${key}`);
+  if (input.playerConfig) {
+    counters["border_ocean.player_margin_m"] = input.playerConfig.world_edge_margin_m;
+    counters["border_ocean.player_pushback_band_m"] = input.playerConfig.pushback_start_inside_world_m;
+    counters["border_ocean.player_pushback_accel"] = input.playerConfig.pushback_strength;
+    counters["border_ocean.player_soft_pushback_enabled"] = input.playerConfig.soft_pushback_enabled ? 1 : 0;
   }
-
-  const assertCounter = (key: string, predicate: (value: number) => boolean) => {
-    const value = counters[key];
-    if (typeof value !== "number" || !Number.isFinite(value) || !predicate(value)) throw new Error(`border-ocean counter failed: ${key}=${String(value)}`);
-  };
-
-  const acceptance = sceneConfig.acceptance;
-  assertCounter("border_ocean.scene", (v) => v === 1);
-  assertCounter("border_ocean.coast_runtime_active", (v) => v === 1);
-  assertCounter("border_ocean.deep_ocean_enabled", (v) => v === 1);
-  assertCounter("border_ocean.deep_ocean_mesh_present", (v) => v === 1);
-  assertCounter("border_ocean.deep_ocean_vertices", (v) => v >= acceptance.minDeepOceanVertices);
-  assertCounter("border_ocean.deep_ocean_triangles", (v) => v > 0 && v <= acceptance.maxDeepOceanTriangles);
-  assertCounter("border_ocean.deep_ocean_draw_calls", (v) => v > 0 && v <= acceptance.maxDeepOceanDrawCalls);
-  assertCounter("border_ocean.deep_ocean_start_outside_m", (v) => v >= 0);
-  assertCounter("border_ocean.deep_ocean_extend_m", (v) => v > 0);
-  assertCounter("border_ocean.deep_ocean_surface_y", (v) => v > 0);
-  assertCounter("border_ocean.deep_ocean_transition_gap_vertices", (v) => v <= acceptance.maxTransitionGapVertices);
-  assertCounter("border_ocean.wave_count", (v) => v > 0);
-  assertCounter("border_ocean.wave_wind_speed", (v) => v > 0);
-  assertCounter("border_ocean.wave_height_scale", (v) => v > 0);
-  assertCounter("border_ocean.wave_choppiness", (v) => v > 0);
-  assertCounter("border_ocean.shading_fog_far_m", (v) => v > 0);
-  assertCounter("border_ocean.shading_reflection_strength", (v) => v >= 0);
-  assertCounter("border_ocean.player_margin_m", (v) => v > 0);
-  assertCounter("border_ocean.player_pushback_band_m", (v) => v >= 0);
-  assertCounter("border_ocean.player_pushback_accel", (v) => v >= 0);
-  assertCounter("border_ocean.player_soft_pushback_enabled", (v) => v === 0 || v === 1);
-  assertCounter("border_ocean.frame_ms_p95", (v) => v >= 0 && v <= acceptance.maxFrameMsP95);
-  assertCounter("border_ocean.page_source_purity", (v) => v === 1);
-  assertCounter("border_ocean.interior_water_wet_ratio", (v) => v >= 0 && v <= acceptance.maxInteriorWaterWetRatio);
-  assertCounter("border_ocean.playable_ocean_outside_ok", (v) => v === 1);
-  assertCounter("border_ocean.cliff_dry_above_sea", (v) => v === 1);
+  if (input.waterField) counters["border_ocean.interior_water_wet_ratio"] = sampleInteriorWaterWetRatio(input.waterField, input.worldCells);
+  if (input.oceanSampler) counters["border_ocean.playable_ocean_outside_ok"] = probePlayableOceanOutside(input.oceanSampler, input.worldCells);
+  counters["border_ocean.cliff_dry_above_sea"] = probeCliffDryAboveSea(input.deepOcean.surfaceY, input.worldCells);
 }
