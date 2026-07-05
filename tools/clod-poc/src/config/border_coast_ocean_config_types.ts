@@ -98,6 +98,9 @@ export interface DeepOceanWaveConfig {
   foam_power: number;
   foam_intensity: number;
   swell_height_scale: number;
+  detail_normal_strength: number;
+  detail_normal_fade_start_m: number;
+  detail_normal_fade_end_m: number;
 }
 
 export interface DeepOceanShadingConfig {
@@ -113,6 +116,12 @@ export interface DeepOceanShadingConfig {
   fog_near_m: number;
   fog_far_m: number;
   fog_density: number;
+  sky_zenith_color: string;
+  sss_color: string;
+  sss_strength: number;
+  horizon_blend_start_m: number;
+  horizon_blend_end_m: number;
+  edge_fade_m: number;
 }
 
 export interface DeepOceanConfig {
@@ -120,9 +129,15 @@ export interface DeepOceanConfig {
   start_outside_border_m: number;
   visual_extent_m: number;
   near_grid_size_m: number;
+  mid_grid_size_m: number;
   far_grid_size_m: number;
   near_subdivisions: number;
+  mid_subdivisions: number;
   far_subdivisions: number;
+  ring_inner_band_m: number;
+  ring_inner_radial_segments: number;
+  ring_outer_radial_segments: number;
+  ring_tangential_segments: number;
   wave: DeepOceanWaveConfig;
   shading: DeepOceanShadingConfig;
 }
