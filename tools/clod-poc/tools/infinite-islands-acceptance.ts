@@ -45,10 +45,9 @@ const OUTSIDE_STARTUP_SPAWN: SceneExtra = {
 };
 
 const WALK_ROUTE: MovementSegment[] = [
-  { label: "forward-a", frames: 180, codes: ["ShiftLeft", "KeyW"] },
-  { label: "forward-right", frames: 160, codes: ["ShiftLeft", "KeyW", "KeyD"] },
-  { label: "right", frames: 120, codes: ["ShiftLeft", "KeyD"] },
-  { label: "forward-b", frames: 180, codes: ["ShiftLeft", "KeyW"] },
+  { label: "east-a", frames: 180, dx: 160, dz: 0 },
+  { label: "south-east", frames: 160, dx: 96, dz: 96 },
+  { label: "east-b", frames: 120, dx: 128, dz: 0 },
 ];
 
 const SCENES: SceneSpec[] = [
@@ -92,6 +91,7 @@ const SCENES: SceneSpec[] = [
 type JsonRecord = Record<string, unknown>;
 type SceneExtra = Record<string, string>;
 type PoseTuple = [number, number, number];
+type CamPose = { p: PoseTuple; yaw: number; pitch: number; fov?: number };
 
 interface SceneSpec {
   name: string;
@@ -146,7 +146,8 @@ interface SceneResult extends SceneReportInput {
 interface MovementSegment {
   label: string;
   frames: number;
-  codes: string[];
+  dx: number;
+  dz: number;
 }
 
 function rel(path: string): string {
@@ -191,21 +192,6 @@ function counterDelta(samples: readonly MovementSnapshot[], key: string): number
 function outsideStartupWorld(pose: PoseTuple, worldCells: number): boolean {
   if (!Number.isFinite(worldCells) || worldCells <= 0) return false;
   return pose[0] < 0 || pose[2] < 0 || pose[0] >= worldCells || pose[2] >= worldCells;
-}
-
-function keyForCode(code: string): string {
-  if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
-  if (code === "Space") return " ";
-  if (code.startsWith("Key") && code.length === 4) return code.slice(3).toLowerCase();
-  return code;
-}
-
-async function holdKeys(page: Page, codes: readonly string[]): Promise<void> {
-  for (const code of codes) await page.keyboard.down(keyForCode(code));
-}
-
-async function releaseKeys(page: Page, codes: readonly string[]): Promise<void> {
-  for (const code of [...codes].reverse()) await page.keyboard.up(keyForCode(code));
 }
 
 async function writeBootstrapDiff(aPath: string, outPath: string): Promise<void> {
@@ -396,20 +382,53 @@ async function readMovementSnapshot(page: Page, label: string): Promise<Movement
   }, label);
 }
 
+async function readAutomationPose(page: Page): Promise<CamPose> {
+  return await page.evaluate(() => {
+    const pose = (window as typeof window & {
+      __drusnielClod?: {
+        getPose?: (() => { p: [number, number, number]; yaw: number; pitch: number; fov?: number }) | null;
+      };
+    }).__drusnielClod?.getPose?.();
+    if (!pose) throw new Error("movement route requires __drusnielClod.getPose");
+    return JSON.parse(JSON.stringify(pose)) as CamPose;
+  });
+}
+
+async function setAutomationPose(page: Page, pose: CamPose): Promise<void> {
+  await page.evaluate((nextPose) => {
+    const setPose = (window as typeof window & {
+      __drusnielClod?: {
+        setPose?: ((pose: CamPose) => void) | null;
+      };
+    }).__drusnielClod?.setPose;
+    if (typeof setPose !== "function") throw new Error("movement route requires __drusnielClod.setPose");
+    setPose(nextPose);
+  }, pose);
+}
+
 async function runMovementSegment(page: Page, segment: MovementSegment, samples: MovementSnapshot[]): Promise<void> {
-  await holdKeys(page, segment.codes);
-  try {
-    let remainingFrames = segment.frames;
-    let sampleIndex = 0;
-    while (remainingFrames > 0) {
-      const frames = Math.min(MOVEMENT_SAMPLE_FRAMES, remainingFrames);
-      await settle(page, frames);
-      remainingFrames -= frames;
-      samples.push(await readMovementSnapshot(page, `${segment.label}:${sampleIndex}`));
-      sampleIndex++;
-    }
-  } finally {
-    await releaseKeys(page, segment.codes);
+  const start = await readAutomationPose(page);
+  const target: CamPose = {
+    ...start,
+    p: [start.p[0] + segment.dx, start.p[1], start.p[2] + segment.dz],
+  };
+  let elapsedFrames = 0;
+  let sampleIndex = 0;
+  while (elapsedFrames < segment.frames) {
+    const frames = Math.min(MOVEMENT_SAMPLE_FRAMES, segment.frames - elapsedFrames);
+    elapsedFrames += frames;
+    const t = elapsedFrames / segment.frames;
+    await setAutomationPose(page, {
+      ...start,
+      p: [
+        start.p[0] + (target.p[0] - start.p[0]) * t,
+        start.p[1],
+        start.p[2] + (target.p[2] - start.p[2]) * t,
+      ],
+    });
+    await settle(page, frames);
+    samples.push(await readMovementSnapshot(page, `${segment.label}:${sampleIndex}`));
+    sampleIndex++;
   }
 }
 

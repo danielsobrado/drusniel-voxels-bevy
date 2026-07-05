@@ -638,6 +638,29 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   `src/gpu/gpu_mesh_buffers.test.ts`, `src/gpu/surface_nets_core.test.ts`,
   and `src/terrain/near_field/near_field_bubble_controller.test.ts`
   (3 files / 28 tests).
+- 2026-07-05: Acceptance run `2026-07-05T03-22-45` after the GPU finite flag
+  fix failed only the `walk` scene. All freeze scenes pass with p95 6.6-7.1
+  ms, far summary missing 0, and live-bubble collider counters restored.
+  Remaining failures: walk p95 8.5 ms, movement route distance only 0.16 m
+  (gate 48 m), `live_bubble_probe_built_total=0`, and route never built a
+  live-bubble page during motion. Next review target is the acceptance
+  movement route/probe, not terrain convergence.
+- 2026-07-05: Reviewed the walk movement artifacts. The long-view app uses
+  OrbitControls diagnostics hooks (`setPose`/`getPose`) while the harness
+  still pressed fly-camera keys; the recorded route wandered but ended almost
+  exactly at the start and did not force live-bubble page construction. Next
+  patch: drive the existing automation pose hook deterministically during the
+  movement route.
+- 2026-07-05: Patched the walk movement route to use the app automation
+  `setPose` hook instead of keyboard input. The route now steps through a
+  monotonic 384 m out-of-world path while preserving yaw/pitch/fov, so the
+  existing probe gates measure streaming work caused by deterministic camera
+  movement instead of headless keyboard focus behavior.
+- 2026-07-05: Validation after the deterministic movement-route patch passed:
+  `rtk npm --prefix tools/clod-poc run typecheck` and direct Vitest for
+  `src/gpu/gpu_mesh_buffers.test.ts`, `src/gpu/surface_nets_core.test.ts`,
+  and `src/terrain/near_field/near_field_bubble_controller.test.ts`
+  (3 files / 28 tests).
 
 ## Remaining known risks / next steps if gates still fail
 
