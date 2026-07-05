@@ -13,8 +13,11 @@ function validCounters(): Record<string, number> {
   const counters = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
   counters["frame_ms_p95"] = 7.9;
   counters["frame_ms_p99"] = 9;
+  counters["target_visible_m"] = 4096;
   counters["streamer_far_shell_ownership_ok"] = 1;
-  counters["streamer_clod_radius_m"] = 2048;
+  counters["streamer_live_radius_m"] = 200;
+  counters["streamer_clod_radius_m"] = 768;
+  counters["far_shell_inner_minus_clod_radius_m"] = -384;
   counters["live_bubble_required_pages"] = 1;
   counters["live_bubble_ready_pages"] = 1;
   counters["live_bubble_streamed_collider_pages"] = 1;
@@ -30,7 +33,7 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_cached_pages"] = 1;
   counters["live_clod_stream_build_budget"] = 1;
   counters["live_clod_stream_max_inflight_batches"] = 4;
-  counters["live_clod_stream_radius_m"] = 2048;
+  counters["live_clod_stream_radius_m"] = 768;
   counters["live_clod_stream_ready_pages"] = 1;
   counters["live_clod_stream_active_root_pages"] = 1;
   counters["live_clod_stream_max_cached_pages"] = 512;
@@ -38,6 +41,23 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_safety_required_pages"] = 1;
   counters["live_clod_stream_safety_ready_pages"] = 1;
   counters["live_clod_stream_apply_ms"] = 1;
+  counters["far_clipmap_enabled"] = 1;
+  counters["far_clipmap_visible"] = 1;
+  counters["far_clipmap_active_rings"] = 5;
+  counters["far_clipmap_ready_tiles"] = 5;
+  counters["far_clipmap_pending_tiles"] = 0;
+  counters["far_clipmap_rebuilt_this_frame"] = 0;
+  counters["far_clipmap_inner_radius_m"] = 384;
+  counters["far_clipmap_outer_radius_m"] = 4096;
+  counters["far_clipmap_gpu_owned_cells"] = 5;
+  counters["far_clipmap_gpu_ownership_holes"] = 0;
+  counters["far_clipmap_owned_cells"] = 64;
+  counters["far_clipmap_unowned_cells"] = 0;
+  counters["far_clipmap_ownership_holes"] = 0;
+  counters["far_clipmap_priority_overlap_cells"] = 8;
+  counters["owner_far_clipmap_cells"] = 48;
+  counters["owner_clod_refinement_cells"] = 16;
+  counters["owner_live_cells"] = 4;
   counters["vegetation_ring_unbounded"] = 1;
   counters["vegetation_ring_distance_to_grass_m"] = 0;
   counters["infinite_hydrology_outside_sample_valid"] = 1;
@@ -164,6 +184,31 @@ describe("infinite islands thresholds", () => {
     );
   });
 
+  it("requires ready far clipmap ownership before passing", () => {
+    const counters = validCounters();
+    counters["far_clipmap_ready_tiles"] = 4;
+    counters["far_clipmap_pending_tiles"] = 1;
+    counters["far_clipmap_ownership_holes"] = 2;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "far_clipmap_ready_tiles=4 failed: must cover active rings",
+    );
+    expect(evaluateThresholds(counters).failures).toContain(
+      "far_clipmap_pending_tiles=1 failed: must equal 0",
+    );
+    expect(evaluateThresholds(counters).failures).toContain(
+      "far_clipmap_ownership_holes=2 failed: must equal 0",
+    );
+  });
+
+  it("allows far clipmap to overlap CLOD when ownership priority is resolved", () => {
+    const counters = validCounters();
+    counters["far_shell_inner_minus_clod_radius_m"] = -384;
+    counters["far_clipmap_priority_overlap_cells"] = 12;
+
+    expect(evaluateThresholds(counters).passed).toBe(true);
+  });
+
   it("checks streamed root apply cost", () => {
     const counters = validCounters();
     counters["live_clod_stream_apply_ms"] = 2.1;
@@ -201,6 +246,7 @@ describe("infinite islands thresholds", () => {
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_transfer_bytes"]).toBe(0);
+    expect(extractAcceptanceCounters({ counters })["far_clipmap_owned_cells"]).toBe(64);
     expect(extractAcceptanceCounters({ counters })["vegetation_ring_unbounded"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["infinite_hydrology_nonrepeat_ok"]).toBe(1);
   });
