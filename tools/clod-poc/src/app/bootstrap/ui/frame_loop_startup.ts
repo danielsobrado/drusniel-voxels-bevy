@@ -20,6 +20,10 @@ import {
   createStreamingClodRootController,
   type StreamingClodRootStats,
 } from "../../../terrain/streaming/clod_streaming_roots.js";
+import {
+  PROCEDURAL_DEBUG_MODES,
+  type ProceduralDebugMode,
+} from "../../../terrain/material/terrain_material_constants.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -204,6 +208,19 @@ export function runFrameLoopStartup(
   const combatController = session.combatController;
   const spellVfxController = session.spellVfxController;
   const clodShadowOverlayController = session.clodShadowOverlayController;
+
+  if (longView.hooks) {
+    longView.hooks.setAcceptanceSceneOptions = (options) => {
+      if (options.freeze !== undefined) state.freeze = options.freeze;
+      if (options.proceduralDebug !== undefined) {
+        const nextMode = options.proceduralDebug ?? "final";
+        if (nextMode in PROCEDURAL_DEBUG_MODES && state.proceduralDebugMode !== nextMode) {
+          state.proceduralDebugMode = nextMode as ProceduralDebugMode;
+          input.terrainView.applyTerrainTextures();
+        }
+      }
+    };
+  }
 
   if (!session.playerInputController) {
     throw new Error("Frame loop startup requires playerInputController");

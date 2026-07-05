@@ -27,6 +27,8 @@ describe("infinite islands report helpers", () => {
           startupTerrainSummaryMs: 1.2,
           startupTotalMs: 24.8,
         },
+        configuredWorldPages: 16,
+        startupWorldPages: 2,
         thresholds: {
           passed: false,
           missing: [],
@@ -47,7 +49,7 @@ describe("infinite islands report helpers", () => {
         passed: false,
       }],
     });
-    expect(markdown).toContain("| walk | 9.00 | 10.00 | 12.00 | 1234 | 5678 | hit | 12.4 | 1.2 | 24.8 | 0 | 0.00 | FAIL | walk.png |");
+    expect(markdown).toContain("| walk | 9.00 | 10.00 | 12.00 | 1234 | 5678 | 16->2 | hit | 12.4 | 1.2 | 24.8 | 0 | 0.00 | FAIL | walk.png |");
     expect(markdown).toContain("Result: FAIL");
   });
 });

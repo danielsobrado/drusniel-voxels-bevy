@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import sharp from "sharp";
-import type { Browser, Page } from "playwright";
+import type { Browser, ConsoleMessage, Page } from "playwright";
 import { clodUrl, launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
@@ -170,11 +170,18 @@ interface SceneResult extends SceneReportInput {
   imageSanity: ImageSanityResult;
   movement: MovementReport | null;
   startupTimings: Record<string, number>;
+  configuredWorldPages: number;
+  startupWorldPages: number;
   cache: AcceptanceSceneCacheEvidence;
   acceptanceCacheKey: JsonRecord | null;
   consoleWarnings: string[];
   consoleErrors: string[];
   pageErrors: string[];
+}
+
+interface RunSceneOptions {
+  reusePage: boolean;
+  firstSceneOnPage: boolean;
 }
 
 interface AcceptanceSceneCacheEvidence {
@@ -263,6 +270,64 @@ function cacheEvidenceFromTimings(timings: Readonly<Record<string, number>>): Ac
     reuseEnabled: numTiming(timings, "acceptance_world_reuse_enabled"),
     reuseMode: numTiming(timings, "acceptance_world_reuse_mode"),
   };
+}
+
+async function createAcceptancePage(browser: Browser): Promise<Page> {
+  const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 });
+  // This script runs under tsx, whose esbuild keepNames transform injects
+  // __name(...) helper calls into functions inside page.evaluate closures.
+  // Define __name in the page (string form so this line itself is immune).
+  await page.addInitScript({ content: "globalThis.__name = globalThis.__name || ((fn) => fn);" });
+  return page;
+}
+
+function parseCamPose(cam: string | undefined): CamPose | null {
+  if (!cam) return null;
+  const parts = cam.split(",").map((part) => Number(part));
+  if (parts.length < 5 || parts.some((value) => !Number.isFinite(value))) return null;
+  return {
+    p: [parts[0]!, parts[1]!, parts[2]!],
+    yaw: parts[3]!,
+    pitch: parts[4]!,
+    fov: Number.isFinite(parts[5]) ? parts[5] : undefined,
+  };
+}
+
+function initialPoseForScene(scene: SceneSpec): CamPose | null {
+  const camPose = parseCamPose(scene.cam);
+  if (camPose) return camPose;
+  const x = Number(scene.extra?.["x"]);
+  const z = Number(scene.extra?.["z"]);
+  const yaw = Number(scene.extra?.["yaw"]);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return parseCamPose(OUTSIDE_STARTUP_CAM);
+  return {
+    p: [x, 96, z],
+    yaw: Number.isFinite(yaw) ? yaw : 2.65,
+    pitch: -0.43,
+    fov: 55,
+  };
+}
+
+async function configureReusedScenePage(page: Page, url: string, scene: SceneSpec): Promise<void> {
+  const pose = initialPoseForScene(scene);
+  await page.evaluate((input) => {
+    window.history.replaceState(null, "", input.url);
+    const hooks = window.__drusnielClod;
+    hooks?.setAcceptanceSceneOptions?.({
+      freeze: input.freeze,
+      proceduralDebug: input.proceduralDebug,
+    });
+    hooks?.resetAcceptanceScene?.();
+    if (input.pose) {
+      if (typeof hooks?.setPose !== "function") throw new Error("reused acceptance page requires __drusnielClod.setPose");
+      hooks.setPose(input.pose);
+    }
+  }, {
+    url,
+    freeze: scene.freeze,
+    proceduralDebug: scene.proceduralDebug ?? null,
+    pose,
+  });
 }
 
 function maxCounter(samples: readonly MovementSnapshot[], key: string): number {
@@ -604,12 +669,7 @@ function failedImageSanity(message = "screenshot was not captured"): ImageSanity
   };
 }
 
-async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outDir: string): Promise<SceneResult> {
-  const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 });
-  // This script runs under tsx, whose esbuild keepNames transform injects
-  // __name(...) helper calls into functions inside page.evaluate closures.
-  // Define __name in the page (string form so this line itself is immune).
-  await page.addInitScript({ content: "globalThis.__name = globalThis.__name || ((fn) => fn);" });
+async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: string, options: RunSceneOptions): Promise<SceneResult> {
   const consoleWarnings: string[] = [];
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -631,7 +691,7 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
   const comparisonPath = resolve(outDir, `compare/${sceneRunName}-self-diff.png`);
   let movement: MovementReport | null = null;
 
-  page.on("console", (msg) => {
+  const onConsole = (msg: ConsoleMessage) => {
     const type = msg.type();
     const text = msg.text();
     if (type === "warning") consoleWarnings.push(text);
@@ -644,9 +704,9 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
         console.log(`[page:${type}] ${text}`);
       }
     }
-  });
+  };
 
-  page.on("pageerror", (error) => {
+  const onPageError = (error: Error) => {
     if (pageErrors.length < PAGE_ERROR_STORE_LIMIT) pageErrors.push(error.message);
     rejectPageError?.(new Error(`${scene.name}: page error: ${error.message}`));
     if (printedPageErrors < PAGE_ERROR_PRINT_LIMIT) {
@@ -656,7 +716,10 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       suppressedPageErrorNotice = true;
       console.log("[page:error] further page errors suppressed");
     }
-  });
+  };
+
+  page.on("console", onConsole);
+  page.on("pageerror", onPageError);
 
   const extra: Record<string, string> = {
     acceptance: "1",
@@ -685,14 +748,24 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
   console.log(`[infinite-accept] ${gate.name}/${scene.name}: ${url}`);
   try {
     const sceneStartedAt = Date.now();
-    const loadStartedAt = Date.now();
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-    console.log(
-      `[infinite-accept] ${sceneRunName}: loaded after ${elapsedSeconds(loadStartedAt)} ` +
-      `(total ${elapsedSeconds(sceneStartedAt)})`,
-    );
+    if (!options.reusePage || options.firstSceneOnPage) {
+      const loadStartedAt = Date.now();
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+      console.log(
+        `[infinite-accept] ${sceneRunName}: loaded after ${elapsedSeconds(loadStartedAt)} ` +
+        `(total ${elapsedSeconds(sceneStartedAt)})`,
+      );
+    } else {
+      const reuseStartedAt = Date.now();
+      await configureReusedScenePage(page, url, scene);
+      console.log(
+        `[infinite-accept] ${sceneRunName}: reused page after ${elapsedSeconds(reuseStartedAt)} ` +
+        `(total ${elapsedSeconds(sceneStartedAt)})`,
+      );
+    }
     const readyStartedAt = Date.now();
     await Promise.race([waitReady(page, sceneRunName, failedPath), pageErrorGate]);
+    if (options.reusePage && options.firstSceneOnPage) await configureReusedScenePage(page, url, scene);
     console.log(
       `[infinite-accept] ${sceneRunName}: ready after ${elapsedSeconds(readyStartedAt)} ` +
       `(total ${elapsedSeconds(sceneStartedAt)})`,
@@ -707,7 +780,8 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
         `build=${(startupTimings["startup.build_world_ms"] ?? 0).toFixed(1)}ms ` +
         `summary=${(startupTimings["startup.terrain_summary_ms"] ?? 0).toFixed(1)}ms ` +
         `firstRender=${(startupTimings["startup.first_render_ready_ms"] ?? 0).toFixed(1)}ms ` +
-        `world=${startupTimings["startup.world_pages"] ?? "?"}`,
+        `configuredWorld=${startupTimings["startup.configured_world_pages"] ?? "?"} ` +
+        `startupWorld=${startupTimings["startup.world_pages"] ?? "?"}`,
       );
     }
     const cacheEvidence = cacheEvidenceFromTimings(startupTimings);
@@ -779,6 +853,8 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       imageSanity,
       movement,
       startupTimings: finalStartupTimings,
+      configuredWorldPages: numTiming(finalStartupTimings, "startup.configured_world_pages"),
+      startupWorldPages: numTiming(finalStartupTimings, "startup.world_pages"),
       cache: finalCacheEvidence,
       acceptanceCacheKey,
       consoleWarnings,
@@ -822,6 +898,8 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       imageSanity,
       movement,
       startupTimings,
+      configuredWorldPages: 0,
+      startupWorldPages: 0,
       cache,
       acceptanceCacheKey: null,
       consoleWarnings,
@@ -831,7 +909,8 @@ async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outD
       passed: false,
     };
   } finally {
-    await page.close().catch(() => undefined);
+    page.off("console", onConsole);
+    page.off("pageerror", onPageError);
   }
 }
 
@@ -847,9 +926,35 @@ async function main(): Promise<void> {
   const { browser, recipe } = await launchWebGPU();
   const sceneResults: SceneResult[] = [];
   try {
-    for (const gate of GATE_MODES) {
-      for (const scene of ACTIVE_SCENES) {
-        sceneResults.push(await runScene(browser, scene, gate, outDir));
+    if (PROFILE === "reuse") {
+      const page = await createAcceptancePage(browser);
+      let firstSceneOnPage = true;
+      try {
+        for (const gate of GATE_MODES) {
+          for (const scene of ACTIVE_SCENES) {
+            sceneResults.push(await runScene(page, scene, gate, outDir, {
+              reusePage: true,
+              firstSceneOnPage,
+            }));
+            firstSceneOnPage = false;
+          }
+        }
+      } finally {
+        await page.close().catch(() => undefined);
+      }
+    } else {
+      for (const gate of GATE_MODES) {
+        for (const scene of ACTIVE_SCENES) {
+          const page = await createAcceptancePage(browser);
+          try {
+            sceneResults.push(await runScene(page, scene, gate, outDir, {
+              reusePage: false,
+              firstSceneOnPage: true,
+            }));
+          } finally {
+            await page.close().catch(() => undefined);
+          }
+        }
       }
     }
   } finally {
@@ -860,6 +965,7 @@ async function main(): Promise<void> {
   const passed = aggregatePassed(sceneResults, failures);
   const reportJsonPath = resolve(outDir, "report.json");
   const reportMdPath = resolve(outDir, "report.md");
+  const firstStartupTimings = sceneResults[0]?.startupTimings ?? {};
   const report = {
     passed,
     timestamp,
@@ -867,6 +973,10 @@ async function main(): Promise<void> {
     browser_launch_recipe: recipe,
     profile: PROFILE,
     sample_frames: SAMPLE_FRAMES,
+    world_pages: {
+      configured: numTiming(firstStartupTimings, "startup.configured_world_pages"),
+      startup: numTiming(firstStartupTimings, "startup.world_pages"),
+    },
     thresholds: {
       required_counters: REQUIRED_COUNTERS,
       rules: THRESHOLD_RULES.map((rule) => ({ key: rule.key, label: rule.label })),
@@ -889,6 +999,8 @@ async function main(): Promise<void> {
       image_sanity: scene.imageSanity,
       movement: scene.movement,
       startup_timings: scene.startupTimings,
+      configured_world_pages: scene.configuredWorldPages,
+      startup_world_pages: scene.startupWorldPages,
       cache: scene.cache,
       acceptance_cache_key: scene.acceptanceCacheKey,
       artifacts: {

@@ -157,7 +157,16 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   };
 
   if (typeof window !== "undefined") {
+    const resetAcceptanceScene = (): void => {
+      streamReadyFrame = -1;
+      backgroundQuiet = false;
+      resetFrameMetrics();
+      const hooks = deps.getHooks();
+      if (hooks?.stats) hooks.stats.counters["stream_ready_frame"] = -1;
+    };
     (window as typeof window & { __drusnielResetPhase0FrameStats?: () => void }).__drusnielResetPhase0FrameStats = resetFrameMetrics;
+    const hooks = window.__drusnielClod;
+    if (hooks) hooks.resetAcceptanceScene = resetAcceptanceScene;
   }
 
   return () => {

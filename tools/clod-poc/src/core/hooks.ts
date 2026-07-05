@@ -5,6 +5,11 @@ export interface CamPose {
   fov?: number;
 }
 
+export interface AcceptanceSceneOptions {
+  freeze?: boolean;
+  proceduralDebug?: string | null;
+}
+
 export interface EngineStats {
   fps: number;
   frameMs: number;
@@ -40,6 +45,8 @@ export interface ClodHooks {
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
   beginMovementRouteProbe: (() => void) | null;
+  setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => void) | null;
+  resetAcceptanceScene: (() => void) | null;
 }
 
 export interface Phase0SceneReport {
@@ -75,6 +82,8 @@ export function initHooks(): ClodHooks {
     settle: null,
     flyCamEnabled: null,
     beginMovementRouteProbe: null,
+    setAcceptanceSceneOptions: null,
+    resetAcceptanceScene: null,
   };
   window.__drusnielClod = hooks;
   return hooks;
