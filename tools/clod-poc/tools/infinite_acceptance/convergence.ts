@@ -60,7 +60,10 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
       liveClodRootMaxInflightBatches: "4",
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "2",
-      liveClodRootRadius: "2048",
+      liveClodRootRadius: "768",
+      farClipmap: "1",
+      farClipmapInnerRadius: "384",
+      farClipmapOuterRadius: "4096",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     };
@@ -75,7 +78,10 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     liveClodRootMaxInflightBatches: "4",
     liveClodRootMaxCached: "512",
     liveClodRootMaxLevel: "2",
-    liveClodRootRadius: "2048",
+    liveClodRootRadius: "768",
+    farClipmap: "1",
+    farClipmapInnerRadius: "384",
+    farClipmapOuterRadius: "4096",
     farSummaryMaxTileBuildsPerFrame: "4",
     farSummaryMaxBuildMsPerFrame: "6",
   };
