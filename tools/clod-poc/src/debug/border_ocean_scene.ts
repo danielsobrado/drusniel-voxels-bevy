@@ -149,9 +149,7 @@ function optionalIntegerAtLeast(value: unknown, fallback: number, min: number, f
 }
 
 function parseCameraConfig(raw: YamlRecord | undefined, fallback: BorderOceanCameraConfig, field: string): BorderOceanCameraConfig {
-  const eyeY = raw?.eye_y !== undefined
-    ? optionalNumber(raw.eye_y, fallback.eyeY ?? 0, `${field}.eye_y`)
-    : fallback.eyeY;
+  const eyeY = raw?.eye_y !== undefined ? optionalNumber(raw.eye_y, fallback.eyeY ?? 0, `${field}.eye_y`) : fallback.eyeY;
   return {
     eyeXRatio: optionalNumber(raw?.eye_x_ratio, fallback.eyeXRatio, `${field}.eye_x_ratio`),
     eyeYRatio: optionalNumber(raw?.eye_y_ratio, fallback.eyeYRatio, `${field}.eye_y_ratio`),
@@ -175,13 +173,11 @@ function readRequiredCounters(value: unknown, fallback: readonly string[]): read
 export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfig {
   const defaults = DEFAULT_BORDER_OCEAN_SCENE_CONFIG;
   if (!text.trim()) return { ...defaults };
-
   const rawRoot = requiredRootRecord(load(text));
   const root = optionalRecord(rawRoot.border_ocean_scene, "border_ocean_scene") ?? {};
   const camera = optionalRecord(root.camera, "border_ocean_scene.camera") ?? {};
   const horizonCamera = optionalRecord(root.horizon_camera, "border_ocean_scene.horizon_camera") ?? {};
   const acceptance = optionalRecord(root.acceptance, "border_ocean_scene.acceptance") ?? {};
-
   return {
     defaultWorldPages: optionalIntegerAtLeast(root.default_world_pages, defaults.defaultWorldPages, 4, "border_ocean_scene.default_world_pages"),
     defaultSeed: optionalIntegerAtLeast(root.default_seed, defaults.defaultSeed, 1, "border_ocean_scene.default_seed"),
@@ -217,7 +213,6 @@ export function borderOceanHorizonCameraForWorld(worldCells: number, sceneConfig
   return cameraFromConfig(worldCells, sceneConfig.horizonCamera);
 }
 
-/** Cam string: eyeX,eyeY,eyeZ,lookX,lookY,lookZ[,fov] */
 export function formatBorderOceanCamString(camera: BorderOceanCamera): string {
   const [ex, ey, ez] = camera.eye;
   const [lx, ly, lz] = camera.look;
@@ -228,11 +223,7 @@ export function parseBorderOceanCamString(cam: string | null, worldCells: number
   if (!cam) return borderOceanCameraForWorld(worldCells, sceneConfig);
   const parts = cam.split(",").map(Number);
   if (parts.length >= 6 && parts.every(Number.isFinite)) {
-    return {
-      eye: [parts[0], parts[1], parts[2]],
-      look: [parts[3], parts[4], parts[5]],
-      fov: parts[6] !== undefined && Number.isFinite(parts[6]) ? parts[6] : sceneConfig.camera.fov,
-    };
+    return { eye: [parts[0], parts[1], parts[2]], look: [parts[3], parts[4], parts[5]], fov: parts[6] !== undefined && Number.isFinite(parts[6]) ? parts[6] : sceneConfig.camera.fov };
   }
   return borderOceanCameraForWorld(worldCells, sceneConfig);
 }
@@ -276,6 +267,23 @@ export function probeCliffDryAboveSea(seaLevel: number, worldCells: number): num
   field.setShoreSurfBand({ enabled: true, startDistance: 48, fullSurfDistance: 16, level: seaLevel, maxShallowDepth: 2.5 });
   const sample = field.sample(4, worldCells * 0.5);
   return sample.depth > 0 ? 0 : 1;
+}
+
+function numericStat(stats: Record<string, unknown>, key: string): number {
+  const value = stats[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`border ocean stats missing numeric counter ${key}`);
+  return value;
+}
+
+export function validateBorderOceanStats(stats: Record<string, unknown>, sceneConfig: BorderOceanSceneConfig = DEFAULT_BORDER_OCEAN_SCENE_CONFIG): void {
+  for (const key of sceneConfig.acceptance.requiredCounters) numericStat(stats, key);
+  const a = sceneConfig.acceptance;
+  if (numericStat(stats, "border_ocean.deep_ocean_vertices") < a.minDeepOceanVertices) throw new Error("border ocean deep-ocean vertices below acceptance minimum");
+  if (numericStat(stats, "border_ocean.deep_ocean_triangles") > a.maxDeepOceanTriangles) throw new Error("border ocean deep-ocean triangles exceeded acceptance maximum");
+  if (numericStat(stats, "border_ocean.deep_ocean_draw_calls") > a.maxDeepOceanDrawCalls) throw new Error("border ocean deep-ocean draw calls exceeded acceptance maximum");
+  if (numericStat(stats, "border_ocean.deep_ocean_transition_gap_vertices") > a.maxTransitionGapVertices) throw new Error("border ocean transition gap vertices exceeded acceptance maximum");
+  if (numericStat(stats, "border_ocean.frame_ms_p95") > a.maxFrameMsP95) throw new Error("border ocean frame_ms_p95 exceeded acceptance maximum");
+  if (numericStat(stats, "border_ocean.interior_water_wet_ratio") > a.maxInteriorWaterWetRatio) throw new Error("border ocean interior water wet ratio exceeded acceptance maximum");
 }
 
 export function publishBorderOceanAcceptanceCounters(counters: Record<string, number>, input: BorderOceanAcceptanceInput): void {
