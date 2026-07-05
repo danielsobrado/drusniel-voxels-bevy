@@ -402,11 +402,8 @@ function sampleFromTile(tile: FarSummaryTile, x: number, z: number): FarSummaryS
   if (samples.length === 0) return null;
   const localX = (x - originX) / cellSizeM;
   const localZ = (z - originZ) / cellSizeM;
-  const sx = Math.floor(localX);
-  const sz = Math.floor(localZ);
-  if (sx < 0 || sx >= tileCells || sz < 0 || sz >= tileCells) return null;
-  const out = emptySample();
-  return readTileSample(tile, sx, sz, out) ? out : null;
+  if (localX < 0 || localX >= tileCells || localZ < 0 || localZ >= tileCells) return null;
+  return bilinearTileSample(tile, localX, localZ);
 }
 
 export function readTileSample(
@@ -449,6 +446,74 @@ function emptySample(): FarSummarySample {
     slope: 0,
     roughness: 0,
   };
+}
+
+function bilinearTileSample(tile: FarSummaryTile, localX: number, localZ: number): FarSummarySample | null {
+  const sampleX = localX - 0.5;
+  const sampleZ = localZ - 0.5;
+  const baseX = Math.floor(sampleX);
+  const baseZ = Math.floor(sampleZ);
+  const x0 = clampInt(baseX, 0, tile.tileCells - 1);
+  const z0 = clampInt(baseZ, 0, tile.tileCells - 1);
+  const x1 = clampInt(baseX + 1, 0, tile.tileCells - 1);
+  const z1 = clampInt(baseZ + 1, 0, tile.tileCells - 1);
+  const tx = x0 === x1 ? 0 : Math.max(0, Math.min(1, sampleX - baseX));
+  const tz = z0 === z1 ? 0 : Math.max(0, Math.min(1, sampleZ - baseZ));
+  const s00 = emptySample();
+  const s10 = emptySample();
+  const s01 = emptySample();
+  const s11 = emptySample();
+  if (
+    !readTileSample(tile, x0, z0, s00) ||
+    !readTileSample(tile, x1, z0, s10) ||
+    !readTileSample(tile, x0, z1, s01) ||
+    !readTileSample(tile, x1, z1, s11)
+  ) {
+    return null;
+  }
+
+  const out = emptySample();
+  out.heightAvg = bilerp(s00.heightAvg, s10.heightAvg, s01.heightAvg, s11.heightAvg, tx, tz);
+  out.heightMin = bilerp(s00.heightMin, s10.heightMin, s01.heightMin, s11.heightMin, tx, tz);
+  out.heightMax = bilerp(s00.heightMax, s10.heightMax, s01.heightMax, s11.heightMax, tx, tz);
+  const nx = bilerp(s00.normalX, s10.normalX, s01.normalX, s11.normalX, tx, tz);
+  const ny = bilerp(s00.normalY, s10.normalY, s01.normalY, s11.normalY, tx, tz);
+  const nz = bilerp(s00.normalZ, s10.normalZ, s01.normalZ, s11.normalZ, tx, tz);
+  const normalLen = Math.hypot(nx, ny, nz);
+  if (normalLen > 1e-8) {
+    out.normalX = nx / normalLen;
+    out.normalY = ny / normalLen;
+    out.normalZ = nz / normalLen;
+  }
+  out.dominantMaterial = nearestMaterial(s00, s10, s01, s11, tx, tz);
+  out.materialVariance = bilerp(s00.materialVariance, s10.materialVariance, s01.materialVariance, s11.materialVariance, tx, tz);
+  out.canopyCoverage = bilerp(s00.canopyCoverage, s10.canopyCoverage, s01.canopyCoverage, s11.canopyCoverage, tx, tz);
+  out.waterCoverage = bilerp(s00.waterCoverage, s10.waterCoverage, s01.waterCoverage, s11.waterCoverage, tx, tz);
+  out.slope = bilerp(s00.slope, s10.slope, s01.slope, s11.slope, tx, tz);
+  out.roughness = bilerp(s00.roughness, s10.roughness, s01.roughness, s11.roughness, tx, tz);
+  return out;
+}
+
+function bilerp(v00: number, v10: number, v01: number, v11: number, tx: number, tz: number): number {
+  const a = v00 + (v10 - v00) * tx;
+  const b = v01 + (v11 - v01) * tx;
+  return a + (b - a) * tz;
+}
+
+function nearestMaterial(
+  s00: FarSummarySample,
+  s10: FarSummarySample,
+  s01: FarSummarySample,
+  s11: FarSummarySample,
+  tx: number,
+  tz: number,
+): number {
+  if (tx < 0.5) return tz < 0.5 ? s00.dominantMaterial : s01.dominantMaterial;
+  return tz < 0.5 ? s10.dominantMaterial : s11.dominantMaterial;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function tileIntersectsBounds(tile: FarSummaryTile, bounds: TileBounds): boolean {

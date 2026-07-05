@@ -52,6 +52,11 @@ export function resolveFarSummaryFrameInterval(
   return Math.max(1, positiveIntegerParam(params, key) ?? defaultInterval);
 }
 
+function shouldRunFarSummaryProbes(params: URLSearchParams): boolean {
+  return (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0")
+    || params.get("ownershipOracle") === "1";
+}
+
 export function initFarSummaryIntegration(
   options: FarSummaryIntegrationOptions,
 ): FarSummaryIntegration {
@@ -65,6 +70,7 @@ export function initFarSummaryIntegration(
   };
 
   const queryParams = currentQueryParams();
+  const runProbeDiagnostics = shouldRunFarSummaryProbes(queryParams);
   // Tile builds are deadline-sliced inside buildSomeTiles (maxBuildMsPerFrame),
   // so per-frame building is frame-safe; the old 30-frame infinite-islands
   // throttle starved the clipmap (~9 ready of ~120 required per scene).
@@ -120,8 +126,23 @@ export function initFarSummaryIntegration(
 
     cache.evictColdTiles(frameIndex, nowMs);
 
-    const currentStats = cache.getStats();
+    let currentStats = cache.getStats();
     const requestStates = cache.countRequestStates(requests);
+    let probeFallbacks = 0;
+    let probeHeightErrorMaxM = 0;
+    if (options.farShellMetrics && runProbeDiagnostics) {
+      const beforeProbe = currentStats;
+      const probe = runFarSummaryProbes(sampler, config, options.terrainSampler, currentCenter);
+      currentStats = cache.getStats();
+      probeFallbacks =
+        currentStats.proceduralFallbacks +
+        currentStats.lowerRingFallbacks +
+        currentStats.conservativeFallbacks -
+        beforeProbe.proceduralFallbacks -
+        beforeProbe.lowerRingFallbacks -
+        beforeProbe.conservativeFallbacks;
+      probeHeightErrorMaxM = probe.heightErrorMaxM;
+    }
     stats.requestedTiles = currentStats.requestedTiles;
     stats.buildingTiles = currentStats.buildingTiles;
     stats.readyTiles = currentStats.readyTiles;
@@ -156,6 +177,8 @@ export function initFarSummaryIntegration(
       metrics.farSummaryConservativeFallbackSamples = stats.conservativeFallbacks;
       metrics.farSummaryStaleRestores = stats.staleRestores;
       metrics.farSummaryBuildsDiscarded = stats.buildsDiscarded;
+      metrics.farSummaryProbeFallbacks = probeFallbacks;
+      metrics.farSummaryProbeHeightErrorMaxM = probeHeightErrorMaxM;
       metrics.farSummaryFallbackSamples =
         stats.proceduralFallbacks +
         stats.lowerRingFallbacks +
@@ -183,6 +206,29 @@ export function initFarSummaryIntegration(
   (window as unknown as Record<string, unknown>).__drusnielFarSummary = integration;
 
   return integration;
+}
+
+function runFarSummaryProbes(
+  sampler: FarSummaryClipmapSampler,
+  config: FarSummaryConfig,
+  terrainSampler: FarTerrainSampler,
+  center: StreamCenter,
+): { heightErrorMaxM: number } {
+  let heightErrorMaxM = 0;
+  for (let ri = 0; ri < config.rings.length; ri++) {
+    const ring = config.rings[ri]!;
+    const radius = (ring.startM + ring.endM) * 0.5;
+    for (let i = 0; i < 16; i++) {
+      const theta = (i / 16) * Math.PI * 2;
+      const x = center.worldX + Math.cos(theta) * radius;
+      const z = center.worldZ + Math.sin(theta) * radius;
+      const summary = sampler.sampleFull(x, z, ri);
+      const sourceHeight = terrainSampler.sampleHeight(x, z);
+      const error = Math.abs(summary.heightAvg - sourceHeight);
+      if (Number.isFinite(error)) heightErrorMaxM = Math.max(heightErrorMaxM, error);
+    }
+  }
+  return { heightErrorMaxM };
 }
 
 declare global {

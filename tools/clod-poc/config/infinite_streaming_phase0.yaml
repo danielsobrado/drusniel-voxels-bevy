@@ -208,8 +208,12 @@ metrics:
     - clod_far_overlap_cells
     - priority_owner_overlap_cells
     - priority_unowned_cells
+    - clod_parent_coverage_violations
     - missing_live_chunks_in_required_radius
     - missing_clod_pages_in_required_radius
+    - ownership_oracle_ms
+    - residency_missing_live
+    - residency_missing_clod
     - far_shell_recenter_count
     - far_shell_last_recenter_frame
     - stale_fallback_count
@@ -217,6 +221,7 @@ metrics:
     - far_shell_outer_m
     - far_shell_vertices
     - far_shell_rebuilds
+    - far_shell_rebuild_restarts
     - far_shell_last_rebuild_ms
     - far_summary_tiles_required
     - far_summary_tiles_ready
@@ -229,6 +234,8 @@ metrics:
     - far_summary_conservative_fallback_samples
     - far_summary_stale_restores
     - far_summary_builds_discarded
+    - far_summary_probe_fallbacks
+    - far_summary_probe_height_error_max_m
 
 acceptance:
   allow_current_4km_failure: true

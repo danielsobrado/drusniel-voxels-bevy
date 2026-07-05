@@ -46,6 +46,7 @@ export class InfiniteFarShell {
   private renderOriginX = 0;
   private renderOriginZ = 0;
   private rebuildCount = 0;
+  private rebuildRestartCount = 0;
   private lastRebuildMs = 0;
   private pendingHeightRebuild: PendingFarShellHeightRebuild | null = null;
   private materialOptions: InfiniteFarShellMaterialOptions;
@@ -70,7 +71,7 @@ export class InfiniteFarShell {
     this.metrics = options.metrics ?? {
       farShellEnabled: true, farShellInnerM: options.innerMeters, farShellOuterM: options.outerMeters,
       farShellVertices: 0, farShellTriangles: 0, farShellGridRes: 0, farShellRebuilds: 0,
-      farShellLastRebuildMs: 0, farShellCenterX: 0, farShellCenterZ: 0,
+      farShellRebuildRestarts: 0, farShellLastRebuildMs: 0, farShellCenterX: 0, farShellCenterZ: 0,
       farShellSnappedX: 0, farShellSnappedZ: 0, farShellRebuildPending: 0,
       farShellRebuildCursor: 0, farShellRebuildVertices: 0, farSummaryTilesRequired: 0,
       farSummaryTilesReady: 0, farSummaryTilesBuilding: 0, farSummaryTilesMissing: 0,
@@ -78,6 +79,7 @@ export class InfiniteFarShell {
       farSummaryFallbackSamples: 0, farSummaryProceduralFallbackSamples: 0,
       farSummaryLowerRingFallbackSamples: 0, farSummaryConservativeFallbackSamples: 0,
       farSummaryStaleRestores: 0, farSummaryBuildsDiscarded: 0,
+      farSummaryProbeFallbacks: 0, farSummaryProbeHeightErrorMaxM: 0,
     };
     this.useParityMaterial = options.useParityMaterial ?? false;
     this.parityConfig = options.parityConfig;
@@ -167,6 +169,10 @@ export class InfiniteFarShell {
 
   private requestSlicedHeightRebuild(restart = false): void {
     if (this.heightSamplingMode !== "cpu") return;
+    if (restart && this.pendingHeightRebuild && this.pendingHeightRebuild.cursor > 0) {
+      this.rebuildRestartCount++;
+      this.metrics.farShellRebuildRestarts = this.rebuildRestartCount;
+    }
     if (
       this.pendingHeightRebuild
       && !restart

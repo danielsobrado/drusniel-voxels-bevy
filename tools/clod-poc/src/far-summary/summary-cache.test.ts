@@ -255,6 +255,33 @@ describe("far summary cache", () => {
     });
   });
 
+  describe("tile sampling", () => {
+    it("bilinearly samples height at center-aligned positions", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      const gradientSampler: FarTerrainSampler = {
+        sampleHeight: (x, z) => x + z,
+        sampleMaterial: (x) => x < 2080 ? 1 : 2,
+      };
+      const cache = new FarSummaryCache(config);
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(gradientSampler, 0, 0);
+
+      expect(cache.sample(2064, 2064, 0)?.heightAvg).toBe(4128);
+      const midpoint = cache.sample(2080, 2080, 0);
+      expect(midpoint?.heightAvg).toBe(4160);
+      expect(midpoint?.dominantMaterial).toBe(2);
+    });
+  });
+
   describe("stale tile lifecycle", () => {
     it("stale tile remains sampleable while rebuild is pending", () => {
       const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };

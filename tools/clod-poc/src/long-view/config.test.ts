@@ -31,7 +31,7 @@ describe("createDefaultLongViewConfig", () => {
     const cfg = createDefaultLongViewConfig();
     expect(cfg.farShell.startMeters).toBe(4096);
     expect(cfg.farShell.endMeters).toBe(16384);
-    expect(cfg.farShell.rebaseSnapMeters).toBe(64);
+    expect(cfg.farShell.rebaseSnapMeters).toBe(128);
     expect(cfg.farSummary.enabled).toBe(true);
     expect(cfg.debug.showMissingSummaryFallback).toBe(false);
   });

@@ -1,6 +1,6 @@
 import type { TerrainOwnershipRuntimeSnapshot } from "./terrain_ownership_runtime.js";
-import { liveChunkKey } from "./live_chunk_keys.js";
-import { pageKey } from "./page_plan.js";
+import { packLiveKey, parseLiveChunkKey } from "./live_chunk_keys.js";
+import { packPageKey, parsePageKey } from "./page_plan.js";
 
 export interface OwnershipCoverageOracleInput {
   snapshot: TerrainOwnershipRuntimeSnapshot;
@@ -37,27 +37,62 @@ export interface OwnershipCoverageCounters {
   // raw_* counters preserve the geometric spill-band diagnostics.
   priority_owner_overlap_cells: number;
   priority_unowned_cells: number;
+  clod_parent_coverage_violations: number;
 }
 
-function setDifferenceCount(required: readonly string[], loaded: ReadonlySet<string>): number {
+function packedLiveKeySet(keys: readonly string[]): Set<number> {
+  const out = new Set<number>();
+  for (const key of keys) {
+    const coord = parseLiveChunkKey(key);
+    out.add(packLiveKey(coord.x, coord.z));
+  }
+  return out;
+}
+
+function packedPageKeySet(keys: readonly string[]): Set<number> {
+  const out = new Set<number>();
+  for (const key of keys) {
+    const coord = parsePageKey(key);
+    out.add(packPageKey(coord.level, coord.x, coord.z));
+  }
+  return out;
+}
+
+function setDifferenceCount(required: ReadonlySet<number>, loaded: ReadonlySet<number>): number {
   let missing = 0;
   for (const key of required) if (!loaded.has(key)) missing++;
   return missing;
 }
 
-function liveOwns(loaded: ReadonlySet<string>, x: number, z: number, chunkSizeM: number): boolean {
-  return loaded.has(liveChunkKey({
-    x: Math.floor(x / chunkSizeM),
-    z: Math.floor(z / chunkSizeM),
-  }));
+function liveOwns(loaded: ReadonlySet<number>, x: number, z: number, chunkSizeM: number): boolean {
+  return loaded.has(packLiveKey(Math.floor(x / chunkSizeM), Math.floor(z / chunkSizeM)));
 }
 
-function clodOwns(loaded: ReadonlySet<string>, x: number, z: number, pageSizeM: number, maxLevel: number): boolean {
+function clodOwns(loaded: ReadonlySet<number>, x: number, z: number, pageSizeM: number, maxLevel: number): boolean {
   for (let level = 0; level <= maxLevel; level++) {
     const size = pageSizeM * 2 ** level;
-    if (loaded.has(pageKey(level, Math.floor(x / size), Math.floor(z / size)))) return true;
+    if (loaded.has(packPageKey(level, Math.floor(x / size), Math.floor(z / size)))) return true;
   }
   return false;
+}
+
+function hasResidentAncestor(pageKeyText: string, loaded: ReadonlySet<number>, maxLevel: number): boolean {
+  const page = parsePageKey(pageKeyText);
+  for (let level = page.level + 1; level <= maxLevel; level++) {
+    const scale = 2 ** (level - page.level);
+    if (loaded.has(packPageKey(level, Math.floor(page.x / scale), Math.floor(page.z / scale)))) return true;
+  }
+  return false;
+}
+
+function clodParentCoverageViolations(required: readonly string[], loadedPacked: ReadonlySet<number>, maxLevel: number): number {
+  let violations = 0;
+  for (const key of required) {
+    const page = parsePageKey(key);
+    if (loadedPacked.has(packPageKey(page.level, page.x, page.z))) continue;
+    if (!hasResidentAncestor(key, loadedPacked, maxLevel)) violations++;
+  }
+  return violations;
 }
 
 export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleInput): OwnershipCoverageCounters {
@@ -65,10 +100,13 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   const chunkSizeM = Math.max(1, input.chunkSizeM);
   const pageSizeM = Math.max(chunkSizeM, input.pageSizeM);
   const coverageCellM = Math.max(chunkSizeM, input.coverageCellM ?? pageSizeM);
-  const loadedLive = new Set(snapshot.live.loaded);
-  const loadedClod = new Set(snapshot.visualPages.loaded);
-  const missingLive = setDifferenceCount(snapshot.live.required, loadedLive);
-  const missingClod = setDifferenceCount(snapshot.visualPages.required, loadedClod);
+  const requiredLive = packedLiveKeySet(snapshot.live.required);
+  const loadedLive = packedLiveKeySet(snapshot.live.loaded);
+  const requiredClod = packedPageKeySet(snapshot.visualPages.required);
+  const loadedClod = packedPageKeySet(snapshot.visualPages.loaded);
+  const missingLive = setDifferenceCount(requiredLive, loadedLive);
+  const missingClod = setDifferenceCount(requiredClod, loadedClod);
+  const parentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, input.maxLevel);
 
   let liveClodGap = 0;
   let clodFarGap = 0;
@@ -155,6 +193,7 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
     raw_horizon_hole_ratio: horizonSamples > 0 ? rawHorizonHoles / horizonSamples : 0,
     priority_owner_overlap_cells: priorityOwnerOverlap,
     priority_unowned_cells: priorityUnowned,
+    clod_parent_coverage_violations: parentCoverageViolations,
   };
 }
 

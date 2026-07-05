@@ -1,4 +1,6 @@
 import { createLongViewFrameDiagnostics } from "../phase0/long_view_frame_diagnostics.js";
+import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
+import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 import { runTerrainFramePhase } from "./frame_loop/terrain_frame_phase.js";
 import { runVegetationFramePhase } from "./frame_loop/vegetation_frame_phase.js";
 import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
@@ -149,6 +151,27 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   let statsRevision = 0;
   let lastStatsModeKey = "";
   let lastStatsDecision: StatsSyncThrottleDecision = { shouldRun: false, reason: "skipped" };
+  const diagnosticsPageSizeM = diagnostics.longViewDiagnosticsCfg.page.chunks_per_page * diagnostics.longViewDiagnosticsCfg.page.chunk_size;
+  const ownershipRuntime = new TerrainOwnershipRuntime(
+    resolveStreamingOwnership({
+      streaming: diagnostics.phase0Streaming,
+      targetVisibleM: diagnostics.phase0TargetVisibleM,
+      targetFutureVisibleM: diagnostics.phase0Config.phase0.target_future_visible_m,
+      pageSizeM: diagnosticsPageSizeM,
+      streamingScene: diagnostics.queryScene?.startsWith("infinite-") ?? false,
+    }),
+    {
+      live: {
+        chunkSizeM: diagnostics.longViewDiagnosticsCfg.page.chunk_size,
+        hysteresisM: diagnostics.longViewDiagnosticsCfg.page.chunk_size * 2,
+      },
+      visualPages: {
+        pageSizeM: diagnosticsPageSizeM,
+        maxLevel: diagnostics.maxTerrainLevel,
+        hysteresisM: diagnosticsPageSizeM,
+      },
+    },
+  );
   const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
     getHooks: render.getHooks,
     getAverageFps: () => averageFpsRef.value,
@@ -176,6 +199,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     phase0VelocityX: diagnostics.phase0VelocityX,
     phase0VelocityZ: diagnostics.phase0VelocityZ,
     phase0Streaming: diagnostics.phase0Streaming,
+    ownershipRuntime,
     borderOceanScene: diagnostics.queryScene === "border-ocean"
       ? {
           waterField: waterWeather.waterField,

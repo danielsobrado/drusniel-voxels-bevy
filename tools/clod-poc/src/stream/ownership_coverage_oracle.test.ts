@@ -77,7 +77,32 @@ describe("ownership coverage oracle", () => {
     expect(counters.clod_far_gap_holes).toBeGreaterThan(0);
     expect(counters.missing_live_chunks_in_required_radius).toBe(1);
     expect(counters.missing_clod_pages_in_required_radius).toBe(1);
+    expect(counters.clod_parent_coverage_violations).toBe(1);
     expect(counters.ring_boundary_holes).toBeGreaterThan(0);
+  });
+
+  it("does not report a parent coverage violation when a resident ancestor covers a missing page", () => {
+    const counters = computeOwnershipCoverageCounters({
+      snapshot: snapshot({
+        visualPages: {
+          center: { x: 0, z: 0 },
+          required: [pageKey(0, 1, 1)],
+          loaded: [pageKey(1, 0, 0)],
+          evictable: [],
+        },
+      }),
+      chunkSizeM: 16,
+      pageSizeM: 16,
+      maxLevel: 1,
+      camera: { x: 0, z: 0 },
+      farShellCenter: { x: 0, z: 0 },
+      farShellRecenterCount: 0,
+      farShellLastRecenterFrame: -1,
+      coverageCellM: 8,
+    });
+
+    expect(counters.missing_clod_pages_in_required_radius).toBe(1);
+    expect(counters.clod_parent_coverage_violations).toBe(0);
   });
 
   it("uses the actual far-shell center for coverage and center-distance counters", () => {
@@ -151,6 +176,7 @@ describe("ownership coverage oracle", () => {
     // cell (no double-owner) and leaves no covered cell un-owned (no real holes).
     expect(counters.priority_owner_overlap_cells).toBe(0);
     expect(counters.priority_unowned_cells).toBe(0);
+    expect(counters.clod_parent_coverage_violations).toBe(0);
     // And there are no genuine ring gaps under the real quantized footprints.
     expect(counters.live_clod_gap_holes).toBe(0);
     expect(counters.clod_far_gap_holes).toBe(0);

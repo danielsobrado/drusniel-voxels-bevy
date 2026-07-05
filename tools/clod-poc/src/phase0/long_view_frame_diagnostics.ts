@@ -14,8 +14,7 @@ import { publishBorderOceanAcceptanceCounters } from "../debug/border_ocean_scen
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { publishFarShellMetricsToCounters } from "../long-view/farShellMetrics.js";
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
-import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
-import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
+import type { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
 
@@ -50,6 +49,7 @@ export interface LongViewFrameDiagnosticsDeps {
   phase0VelocityX: number;
   phase0VelocityZ: number;
   phase0Streaming: Phase0Config["phase0"]["streaming"];
+  ownershipRuntime: TerrainOwnershipRuntime;
   borderOceanScene?: {
     waterField: WaterField;
     deepOcean: DeepOceanRenderConfig;
@@ -62,24 +62,6 @@ export interface LongViewFrameDiagnosticsDeps {
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
   const phase0FrameMsBuffer: number[] = [];
   const streamingScene = deps.queryScene?.startsWith("infinite-") ?? false;
-  const ownership = resolveStreamingOwnership({
-    streaming: deps.phase0Streaming,
-    targetVisibleM: deps.phase0TargetVisibleM,
-    targetFutureVisibleM: deps.phase0Config.phase0.target_future_visible_m,
-    pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
-    streamingScene,
-  });
-  const ownershipRuntime = new TerrainOwnershipRuntime(ownership, {
-    live: {
-      chunkSizeM: deps.cfg.page.chunk_size,
-      hysteresisM: deps.cfg.page.chunk_size * 2,
-    },
-    visualPages: {
-      pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
-      maxLevel: deps.maxTerrainLevel,
-      hysteresisM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
-    },
-  });
   let farShellRecenterCount = 0;
   let farShellLastRecenterFrame = -1;
   let lastFarShellSnapX = Number.NaN;
@@ -98,6 +80,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   const numericCounter = (counters: Readonly<Record<string, number>>, key: string, fallback: number): number => {
     const value = counters[key];
     return Number.isFinite(value) ? value : fallback;
+  };
+
+  const ownershipOracleEnabled = (): boolean => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0")
+      || params.get("ownershipOracle") === "1";
   };
 
   const backgroundQueuesQuiet = (counters: Readonly<Record<string, number>>): boolean => {
@@ -247,8 +236,10 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
     s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
 
-    const ownershipSnapshot = ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
+    const ownershipSnapshot = deps.ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
     publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
+    s.counters["residency_missing_live"] = Math.max(0, ownershipSnapshot.live.required.length - ownershipSnapshot.live.loaded.length);
+    s.counters["residency_missing_clod"] = Math.max(0, ownershipSnapshot.visualPages.required.length - ownershipSnapshot.visualPages.loaded.length);
     const farShellCenter = shellMetrics
       ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ }
       : { x: deps.camera.position.x, z: deps.camera.position.z };
@@ -260,9 +251,9 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       lastFarShellSnapX = farShellSnapX;
       lastFarShellSnapZ = farShellSnapZ;
     }
-    publishOwnershipCoverageCounters(
-      s.counters,
-      computeOwnershipCoverageCounters({
+    if (ownershipOracleEnabled()) {
+      const ownershipOracleStartMs = performance.now();
+      const ownershipCoverageCounters = computeOwnershipCoverageCounters({
         snapshot: ownershipSnapshot,
         chunkSizeM: deps.cfg.page.chunk_size,
         pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
@@ -271,8 +262,33 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         farShellCenter,
         farShellRecenterCount,
         farShellLastRecenterFrame,
-      }),
-    );
+      });
+      publishOwnershipCoverageCounters(s.counters, ownershipCoverageCounters);
+      s.counters["ownership_oracle_ms"] = performance.now() - ownershipOracleStartMs;
+    } else {
+      s.counters["ownership_oracle_ms"] = 0;
+      publishOwnershipCoverageCounters(s.counters, {
+        camera_to_clod_center_m: Math.hypot(deps.camera.position.x - ownershipSnapshot.center.x, deps.camera.position.z - ownershipSnapshot.center.z),
+        camera_to_far_shell_center_m: Math.hypot(deps.camera.position.x - farShellCenter.x, deps.camera.position.z - farShellCenter.z),
+        far_shell_inner_minus_clod_radius_m: ownershipSnapshot.farShell.innerRadiusM - ownershipSnapshot.ownership.clodRadiusM,
+        live_clod_gap_holes: 0,
+        clod_far_gap_holes: 0,
+        live_clod_overlap_cells: 0,
+        clod_far_overlap_cells: 0,
+        raw_live_clod_overlap_cells: 0,
+        raw_clod_far_overlap_cells: 0,
+        missing_live_chunks_in_required_radius: s.counters["residency_missing_live"],
+        missing_clod_pages_in_required_radius: s.counters["residency_missing_clod"],
+        far_shell_recenter_count: farShellRecenterCount,
+        far_shell_last_recenter_frame: farShellLastRecenterFrame,
+        ring_boundary_holes: s.counters["residency_missing_live"] + s.counters["residency_missing_clod"],
+        horizon_hole_ratio: 0,
+        raw_horizon_hole_ratio: 0,
+        priority_owner_overlap_cells: 0,
+        priority_unowned_cells: 0,
+        clod_parent_coverage_violations: 0,
+      });
+    }
 
     const nowQuiet = backgroundQueuesQuiet(s.counters);
     if (nowQuiet && !backgroundQuiet) {

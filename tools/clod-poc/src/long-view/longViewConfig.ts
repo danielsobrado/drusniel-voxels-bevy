@@ -60,7 +60,7 @@ function rawDefaultConfig(): LongViewConfig {
       gridResolution: 192, radialSegments: 96, angularSegments: 192,
       heightBiasMeters: 0.6, nearBlendMeters: 512, farFadeMeters: 2048,
       macroBlendStartMeters: 8192, macroBlendEndMeters: 16384,
-      rebaseSnapMeters: 64,
+      rebaseSnapMeters: 128,
     },
     debug: {
       showFarSummaryTiles: false, showFarShellWireframe: false,

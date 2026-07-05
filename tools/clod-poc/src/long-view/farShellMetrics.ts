@@ -6,6 +6,7 @@ export interface FarShellMetrics {
   farShellTriangles: number;
   farShellGridRes: number;
   farShellRebuilds: number;
+  farShellRebuildRestarts: number;
   farShellLastRebuildMs: number;
   farShellCenterX: number;
   farShellCenterZ: number;
@@ -28,6 +29,8 @@ export interface FarShellMetrics {
   farSummaryConservativeFallbackSamples: number;
   farSummaryStaleRestores: number;
   farSummaryBuildsDiscarded: number;
+  farSummaryProbeFallbacks: number;
+  farSummaryProbeHeightErrorMaxM: number;
 }
 
 export function createFarShellMetrics(): FarShellMetrics {
@@ -39,6 +42,7 @@ export function createFarShellMetrics(): FarShellMetrics {
     farShellTriangles: 0,
     farShellGridRes: 0,
     farShellRebuilds: 0,
+    farShellRebuildRestarts: 0,
     farShellLastRebuildMs: 0,
     farShellCenterX: 0,
     farShellCenterZ: 0,
@@ -60,6 +64,8 @@ export function createFarShellMetrics(): FarShellMetrics {
     farSummaryConservativeFallbackSamples: 0,
     farSummaryStaleRestores: 0,
     farSummaryBuildsDiscarded: 0,
+    farSummaryProbeFallbacks: 0,
+    farSummaryProbeHeightErrorMaxM: 0,
   };
 }
 
@@ -70,6 +76,8 @@ export function resetFrameShellMetrics(m: FarShellMetrics): void {
   m.farSummaryLowerRingFallbackSamples = 0;
   m.farSummaryConservativeFallbackSamples = 0;
   m.farSummaryBuildsDiscarded = 0;
+  m.farSummaryProbeFallbacks = 0;
+  m.farSummaryProbeHeightErrorMaxM = 0;
 }
 
 /** Publishes infinite-far-shell metrics into phase-0 / hook counter maps. */
@@ -81,6 +89,7 @@ export function publishFarShellMetricsToCounters(
   counters["far_shell_outer_m"] = metrics.farShellOuterM;
   counters["far_shell_vertices"] = metrics.farShellVertices;
   counters["far_shell_rebuilds"] = metrics.farShellRebuilds;
+  counters["far_shell_rebuild_restarts"] = metrics.farShellRebuildRestarts;
   counters["far_shell_last_rebuild_ms"] = metrics.farShellLastRebuildMs;
   counters["far_shell_rebuild_pending"] = metrics.farShellRebuildPending ?? 0;
   counters["far_shell_rebuild_cursor"] = metrics.farShellRebuildCursor ?? 0;
@@ -98,6 +107,8 @@ export function publishFarShellMetricsToCounters(
   counters["far_summary_conservative_fallback_samples"] = metrics.farSummaryConservativeFallbackSamples;
   counters["far_summary_stale_restores"] = metrics.farSummaryStaleRestores;
   counters["far_summary_builds_discarded"] = metrics.farSummaryBuildsDiscarded;
+  counters["far_summary_probe_fallbacks"] = metrics.farSummaryProbeFallbacks;
+  counters["far_summary_probe_height_error_max_m"] = metrics.farSummaryProbeHeightErrorMaxM;
 }
 
 export function exposeMetricsOnWindow(metrics: FarShellMetrics): void {
