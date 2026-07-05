@@ -65,6 +65,54 @@ live voxel > CLOD page > far shell
 
 There must be no gaps and no double owners. Double owners create z-fighting and overdraw. Gaps create holes and pop.
 
+## Difference from current infinite-islands work
+
+The current `infinite-islands` work in `tools/clod-poc` is a useful prototype of the
+visual ring idea, but it is not this full Bevy runtime architecture yet.
+
+Current `tools/clod-poc` infinite-islands focuses on:
+
+```text
+live visual radius < CLOD visual pages < camera-following far shell
+```
+
+It already proves several important ideas:
+
+- terrain rings follow the active view instead of being fixed at world origin;
+- far shell ownership starts outside CLOD ownership;
+- page-grid-aligned far-shell inner radius avoids the worst spill band;
+- one terrain summary can feed far shell, canopy shell, and shadow proxy;
+- deterministic acceptance can catch center drift, ownership gaps, and missing required pages/chunks.
+
+This document is broader and stricter. It describes the shipping Bevy runtime target:
+
+```text
+resident voxel chunks + colliders + edit persistence
+derived CLOD page-source residency
+authoritative WorldSource unification
+terrain ownership resolver shared by all rings
+far shell as visual-only derived data
+voxel edit deltas and replay before eviction
+native Bevy benches and runtime counters
+```
+
+Key differences:
+
+| Area | Current infinite-islands prototype | Target architecture in this document |
+|---|---|---|
+| Runtime target | `tools/clod-poc` browser/TypeScript prototype | Bevy runtime terrain stack |
+| Gameplay authority | visual/diagnostic rings | `VoxelWorld` chunks, colliders, edits, save deltas |
+| Streaming unit | ownership/page/far-shell logic | disk load, procedural chunk generation, meshing, collider, eviction queues |
+| World source | moving toward active `WorldSource` summaries | one Rust `WorldSource` authority for live, CLOD, far, biome, cave, water |
+| CLOD source | page coverage acceptance | resident page-source/export tier independent of collider/live visibility |
+| Far shell | camera-following visual annulus | visual annulus clipped by shared ownership resolver and fed by `FarSummarySample` |
+| Edits | not the main scope | voxel deltas are authoritative; far summaries are projections only |
+| Acceptance | deterministic Node/browser gates | Rust tests, Bevy bench scenes, summary counters, native Windows visual/perf runs |
+
+So the prototype should be treated as a validation sandbox and technique donor, not as a
+drop-in runtime implementation. Port behavior only after naming the corresponding Bevy
+owner: resident chunks, CLOD pages, far shell, edit persistence, or ownership validation.
+
 ## Hard invariants
 
 ```text
@@ -76,7 +124,9 @@ I5. Live voxel chunks own colliders and real cave interiors.
 I6. CLOD pages and live chunks must never draw the same terrain footprint at the same time.
 I7. Far shell and CLOD pages must never draw the same terrain footprint at the same time.
 I8. One WorldSource authority feeds all terrain rings.
-I9. Missing derived data falls back inward: far -> CLOD -> live chunks.
+I9. Missing derived data never creates a visible hole: keep the last valid derived layer
+    visible when possible, otherwise resolve to the next available lower-priority visual
+    owner. Outside the live radius, do not assume live chunks are resident.
 I10. No page or far-shell build runs on the frame hot path.
 ```
 
@@ -85,11 +135,21 @@ I10. No page or far-shell build runs on the frame hot path.
 | Ring | Distance target | Data | Collision | Editable | Purpose |
 |---|---:|---|---|---|---|
 | Live voxel | 0-96m first target, maybe 128-160m later | Voxel chunks + Surface Nets | Yes | Yes | player gameplay, caves, digging, building, physics |
-| CLOD pages | ~96m to 1km/1.5km | Decimated meshes derived from live LOD0 chunk exports | No | No | mid-distance terrain continuity |
+| CLOD pages | ~96m to 1km/1.5km | Decimated meshes derived from page-source LOD0 exports | No | No | mid-distance terrain continuity |
 | Far shell | ~1km/1.5km to 8km | WorldSource analytic samples + cached summaries | No | No | islands, mountains, coast, ocean, biome silhouettes |
 | Very far | 8km+ | impostor/proxy/atmosphere | No | No | horizon, sky, large landmass feeling |
 
 These distances are targets, not hard constants. They must live in YAML config and be tuned with benches.
+
+Important distinction:
+
+```text
+live chunk radius != CLOD page source radius
+```
+
+Live chunks are the editable/collider/gameplay bubble. CLOD page sources may be generated
+or retained farther out as non-collider source data so pages can cover 1km/1.5km without
+making every source chunk a visible live chunk.
 
 ## Proposed config files
 
@@ -107,6 +167,8 @@ streaming:
   max_chunk_generations_per_frame: 4
   max_chunk_mesh_commits_per_frame: 6
   max_chunk_evictions_per_frame: 16
+  page_source_radius_chunks: 64
+  max_page_source_generations_per_frame: 2
   co_op:
     max_players: 2
     union_resident_windows: true
@@ -393,6 +455,11 @@ No frame-path generation of a full configured world in streaming mode.
 
 CLOD pages should stay derived from live LOD0 chunk exports.
 
+In the streaming architecture, "LOD0 chunk export" does not mean "currently visible live
+chunk." It means an export produced by the same authoritative mesher and WorldSource at
+full source resolution. Those exports can come from a dedicated page-source residency tier
+outside the live/collider bubble.
+
 Target module layout can remain near the existing `src/voxel/pages` path, but ownership and streaming integration should be made explicit:
 
 ```text
@@ -413,12 +480,14 @@ src/voxel/pages/
 Required changes:
 
 1. Keep `CLOD_PAGES=1` default-off until ownership and benches pass.
-2. Feed CLOD page source exports from streaming resident chunks, not from an assumed complete world.
+2. Feed CLOD page source exports from streaming page-source chunks, not from an assumed complete world.
 3. Build LOD0 page source only when all required chunk exports exist.
 4. When chunks unload, retain built page meshes if still valid and useful.
 5. Dirty voxel edits invalidate owning LOD0 page and all ancestors.
 6. Rebuild pages in background only.
-7. Missing or stale page falls back inward to live chunks if available.
+7. Missing pages keep the last valid page visible when possible; otherwise ownership falls
+   back to live chunks only when those chunks are actually resident, or to the far shell
+   outside the live radius.
 8. Pages get no colliders.
 9. No page may draw inside the live voxel ownership region.
 
@@ -767,8 +836,8 @@ far summary acceleration later
 Do not block streaming terrain on full NAADF rendering. The order should be:
 
 ```text
-1. resident chunk streaming
-2. world source unification
+1. world source unification
+2. resident chunk streaming
 3. CLOD mid-field ownership
 4. far shell
 5. NAADF query backend integration for lighting/fog/visibility
@@ -806,15 +875,15 @@ world_source_far_live_height_delta_p95
 Manual commands:
 
 ```powershell
-cargo test world_source
-cargo test streaming
-cargo test clod_page
-cargo test far_shell
-cargo test terrain_ownership
-cargo run --release -- --bench bench/scenes/streaming-single-player.toml
-cargo run --release -- --bench bench/scenes/clod-midfield-streaming.toml
-cargo run --release -- --bench bench/scenes/far-shell-8km.toml
-cargo run --bin bench_guard -- bench-runs/<run>/summary.json
+rtk cargo test world_source
+rtk cargo test streaming
+rtk cargo test clod_page
+rtk cargo test far_shell
+rtk cargo test terrain_ownership
+rtk cargo run --release -- --bench bench/scenes/streaming-single-player.toml
+rtk cargo run --release -- --bench bench/scenes/clod-midfield-streaming.toml
+rtk cargo run --release -- --bench bench/scenes/far-shell-8km.toml
+rtk cargo run --bin bench_guard -- bench-runs/<run>/summary.json
 ```
 
 Do not run visual benches from WSL. Use native Windows for visual/perf validation.
