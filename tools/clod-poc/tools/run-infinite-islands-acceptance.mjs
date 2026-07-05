@@ -25,21 +25,57 @@ async function isServerReady(url) {
   }
 }
 
-function spawnChild(label, command, args) {
+function createReuseLogFilter() {
+  let buffer = "";
+  const reusedScenes = new Set();
+
+  function rewriteLine(line) {
+    const reused = /^\[infinite-accept\] ([^:]+): reused page after /.exec(line);
+    if (reused) reusedScenes.add(reused[1]);
+
+    const sceneBoot = /^\[infinite-accept\] ([^:]+): scene boot: cache /.exec(line);
+    if (sceneBoot && reusedScenes.has(sceneBoot[1])) {
+      return `[infinite-accept] ${sceneBoot[1]}: scene boot: reused existing page; no buildWorld executed`;
+    }
+    return line;
+  }
+
+  return {
+    write(chunk) {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) process.stdout.write(`${rewriteLine(line)}\n`);
+    },
+    flush() {
+      if (!buffer) return;
+      process.stdout.write(rewriteLine(buffer));
+      buffer = "";
+    },
+  };
+}
+
+function spawnChild(label, command, args, options = {}) {
+  const pipe = label === "vite" || options.filterStdout;
   const child = spawn(command, args, {
     cwd: process.cwd(),
     env: process.env,
-    stdio: label === "vite" ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: pipe ? ["ignore", "pipe", "pipe"] : "inherit",
     shell: false,
   });
   child.on("error", (error) => {
     console.error(`[infinite-accept:${label}] failed to start:`, error.message);
   });
   if (child.stdout) {
-    child.stdout.on("data", (chunk) => process.stdout.write(`[vite] ${chunk}`));
+    const stdoutFilter = options.filterStdout ? createReuseLogFilter() : null;
+    child.stdout.on("data", (chunk) => {
+      if (stdoutFilter) stdoutFilter.write(chunk);
+      else process.stdout.write(`[vite] ${chunk}`);
+    });
+    if (stdoutFilter) child.stdout.on("end", () => stdoutFilter.flush());
   }
   if (child.stderr) {
-    child.stderr.on("data", (chunk) => process.stderr.write(`[vite] ${chunk}`));
+    child.stderr.on("data", (chunk) => process.stderr.write(label === "vite" ? `[vite] ${chunk}` : chunk));
   }
   return child;
 }
@@ -103,7 +139,9 @@ async function ensureServer() {
 
 function runAcceptance() {
   return new Promise((resolve) => {
-    const child = spawnChild("playwright", nodeBin, [tsxCli, "tools/infinite-islands-acceptance.ts", ...process.argv.slice(2)]);
+    const child = spawnChild("playwright", nodeBin, [tsxCli, "tools/infinite-islands-acceptance.ts", ...process.argv.slice(2)], {
+      filterStdout: true,
+    });
     child.on("exit", (code) => resolve(code ?? 1));
   });
 }
