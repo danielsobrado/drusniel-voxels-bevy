@@ -21,9 +21,7 @@ export async function loadSavedWorldStartup(
   dom.buildProgressBar.value = 0;
 
   try {
-    const savedWorld = await loadSavedWorldFromQuery(searchParams, {
-      replaceVoxelSnapshot: () => undefined,
-    });
+    const savedWorld = await loadSavedWorldFromQuery(searchParams);
     if (!savedWorld) return null;
     dom.buildProgressPercent.textContent = "100%";
     dom.buildProgressBar.value = 1;
