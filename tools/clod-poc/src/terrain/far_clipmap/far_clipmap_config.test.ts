@@ -77,8 +77,10 @@ describe("far clipmap geometry", () => {
 
     const position = geometry.getAttribute("position");
     const color = geometry.getAttribute("color");
+    const normal = geometry.getAttribute("normal");
     expect(position.count).toBe(25);
     expect(color.count).toBe(25);
+    expect(normal.count).toBe(25);
     expect((geometry.getIndex()?.count ?? 0)).toBeGreaterThan(0);
     expect(position.getY(0)).toBeCloseTo(-0.44);
     geometry.dispose();
@@ -86,7 +88,7 @@ describe("far clipmap geometry", () => {
 });
 
 describe("far clipmap controller", () => {
-  it("rebuilds sampled rings and becomes ready across budgeted frames", () => {
+  it("rebuilds sampled rings with the custom shader and becomes ready across budgeted frames", () => {
     const scene = new THREE.Scene();
     const config = resolveFarClipmapConfig({
       ringCount: 3,
@@ -101,13 +103,17 @@ describe("far clipmap controller", () => {
     const first = controller.update(new THREE.Vector3(1, 0, 1));
     const second = controller.update(new THREE.Vector3(1, 0, 1));
     const firstMesh = scene.children[0] as THREE.Mesh;
+    const material = firstMesh.material as THREE.ShaderMaterial;
 
     expect(first.readyTiles).toBe(2);
     expect(first.pendingTiles).toBe(1);
     expect(second.readyTiles).toBe(3);
     expect(firstMesh.geometry.getAttribute("position").count).toBe(25);
+    expect(material).toBeInstanceOf(THREE.ShaderMaterial);
+    expect(material.name).toBe("FarClipmapTerrainShader");
     expect(controller.ownershipSnapshot().ready).toBe(true);
     controller.setDebugMode("ownership");
+    expect(material.uniforms["uDebugMode"].value).toBe(3);
     controller.setVisible(false);
     controller.dispose();
     expect(scene.children).toHaveLength(0);
