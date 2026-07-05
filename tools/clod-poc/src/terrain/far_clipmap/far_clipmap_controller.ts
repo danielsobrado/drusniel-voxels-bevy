@@ -2,6 +2,13 @@ import * as THREE from "three";
 import type { FarClipmapConfig, FarClipmapDebugMode } from "./far_clipmap_config.js";
 import { farClipmapRingRange, farClipmapSnap } from "./far_clipmap_keys.js";
 import { createFarClipmapTerrainGeometry } from "./far_clipmap_geometry.js";
+import {
+  createFarClipmapMaterial,
+  farClipmapShaderRenderOrder,
+  setFarClipmapMaterialDebugMode,
+  updateFarClipmapMaterialFrameUniforms,
+  type FarClipmapMaterial,
+} from "./far_clipmap_material.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 import { createDefaultFarClipmapSource } from "./far_clipmap_source.js";
 
@@ -41,21 +48,13 @@ export interface FarClipmapController {
 
 interface RingMesh {
   mesh: THREE.Mesh;
-  material: THREE.MeshBasicMaterial;
+  material: FarClipmapMaterial;
   innerRadiusM: number;
   outerRadiusM: number;
+  cellSizeM: number;
   readySnapX: number;
   readySnapZ: number;
 }
-
-const FAR_CLIPMAP_RENDER_ORDER = 20;
-
-const DEBUG_COLORS: Record<FarClipmapDebugMode, number> = Object.freeze({
-  final: 0xffffff,
-  biome: 0x9be5a1,
-  height: 0xb5b5b5,
-  ownership: 0x66aee8,
-});
 
 function makeStats(config: FarClipmapConfig, visible: boolean, readyTiles: number, rebuilt: number): FarClipmapStats {
   const pendingTiles = Math.max(0, config.ringCount - readyTiles);
@@ -100,20 +99,18 @@ class FarClipmapControllerImpl implements FarClipmapController {
     this.lastStats = makeStats(config, false, 0, 0);
     for (let ring = 0; ring < config.ringCount; ring++) {
       const range = farClipmapRingRange(config, ring);
-      const material = new THREE.MeshBasicMaterial({
-        color: DEBUG_COLORS[config.materialDebugMode],
-        depthTest: true,
-        depthWrite: true,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-        transparent: false,
-        vertexColors: true,
+      const material = createFarClipmapMaterial({
+        debugMode: config.materialDebugMode,
+        cellSizeM: range.cellSizeM,
+        heightScale: config.heightScale,
+        yOffset: config.yOffset,
+        clipInnerRadiusM: range.innerRadiusM,
+        clipOuterRadiusM: range.outerRadiusM,
       });
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
       mesh.name = "far-clipmap-ring-" + String(ring);
       mesh.frustumCulled = false;
-      mesh.renderOrder = FAR_CLIPMAP_RENDER_ORDER;
+      mesh.renderOrder = farClipmapShaderRenderOrder();
       mesh.visible = config.enabled;
       scene.add(mesh);
       this.rings.push({
@@ -121,6 +118,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         material,
         innerRadiusM: range.innerRadiusM,
         outerRadiusM: range.outerRadiusM,
+        cellSizeM: range.cellSizeM,
         readySnapX: Number.NaN,
         readySnapZ: Number.NaN,
       });
@@ -159,6 +157,15 @@ class FarClipmapControllerImpl implements FarClipmapController {
         ring.readySnapZ = snap.snapZ;
         rebuilt++;
       }
+      updateFarClipmapMaterialFrameUniforms(ring.material, {
+        ringOriginX: snap.snapX,
+        ringOriginZ: snap.snapZ,
+        cameraX: cameraPosition.x,
+        cameraZ: cameraPosition.z,
+        cellSizeM: ring.cellSizeM,
+        clipInnerRadiusM: ring.innerRadiusM,
+        clipOuterRadiusM: ring.outerRadiusM,
+      });
       ring.mesh.visible = this.visible && this.config.enabled;
       if (ring.readySnapX === snap.snapX && ring.readySnapZ === snap.snapZ) ready++;
     }
@@ -167,7 +174,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
   }
 
   setDebugMode(mode: FarClipmapDebugMode): void {
-    for (const ring of this.rings) ring.material.color.setHex(DEBUG_COLORS[mode]);
+    for (const ring of this.rings) setFarClipmapMaterialDebugMode(ring.material, mode);
   }
 
   setVisible(visible: boolean): void {
