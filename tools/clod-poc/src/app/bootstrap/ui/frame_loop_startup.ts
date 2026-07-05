@@ -38,6 +38,11 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const ACCEPTANCE_MIN_STREAM_BUILD_BUDGET = 32;
+const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 8;
+const ACCEPTANCE_MIN_STREAM_MAX_CACHED = 512;
+const ACCEPTANCE_MIN_STREAM_MAX_LEVEL = 2;
+const ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES = 1;
 
 let streamBuiltTotal = 0;
 let streamApplyPagesTotal = 0;
@@ -52,6 +57,16 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | un
 function nonNegativeIntegerParam(params: URLSearchParams, key: string): number | undefined {
   const parsed = Number(params.get(key));
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
+}
+
+function acceptanceMin(value: number | undefined, minimum: number, acceptance: boolean): number | undefined {
+  if (!acceptance) return value;
+  return Math.max(value ?? minimum, minimum);
+}
+
+function acceptanceMax(value: number | undefined, maximum: number, acceptance: boolean): number | undefined {
+  if (!acceptance) return value;
+  return Math.min(value ?? maximum, maximum);
 }
 
 function globalClodCounters(): Record<string, number> | undefined {
@@ -227,6 +242,7 @@ export function runFrameLoopStartup(
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
   const streamingScene = longView.queryScene?.startsWith("infinite-") ?? false;
+  const acceptanceStreamProfile = searchParams.get("acceptance") === "1" && longView.queryScene === INFINITE_ISLANDS_SCENE;
   const combatController = session.combatController;
   const spellVfxController = session.spellVfxController;
   const clodShadowOverlayController = session.clodShadowOverlayController;
@@ -319,11 +335,11 @@ export function runFrameLoopStartup(
     cfg,
     worldCells,
     enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
-    buildBudgetPagesPerFrame: nonNegativeIntegerParam(searchParams, "liveClodRootBudget"),
-    applyBudgetPagesPerFrame: nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"),
-    maxInflightBatches: positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"),
-    maxCachedPages: positiveIntegerParam(searchParams, "liveClodRootMaxCached"),
-    maxRootLevel: nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"),
+    buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile),
+    applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile),
+    maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES, acceptanceStreamProfile),
+    maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile),
+    maxRootLevel: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), ACCEPTANCE_MIN_STREAM_MAX_LEVEL, acceptanceStreamProfile),
     buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
     onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
     onRootsChanged: () => selectionController.invalidate(),
@@ -518,5 +534,6 @@ export function runFrameLoopStartup(
           isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off",
         }
       : undefined,
+    canopy: input.terrainView.canopyShellSystem ? { system: input.terrainView.canopyShellSystem } : undefined,
   });
 }
