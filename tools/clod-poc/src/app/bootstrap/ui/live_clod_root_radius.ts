@@ -16,8 +16,8 @@ export function resolveLiveClodRootRadius(
   phase0Config: Phase0Config,
   fallbackRadius: number,
 ): number {
+  void fallbackRadius;
   return positiveNumberParam(params, "liveClodRootRadius")
     ?? positiveFinite(phase0Config.phase0.streaming.clod_refinement_radius_m)
-    ?? positiveFinite(fallbackRadius)
     ?? DEFAULT_CLOD_REFINEMENT_RADIUS_M;
 }
