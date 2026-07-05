@@ -29,6 +29,12 @@ export function resetFrameStats(stats: FarSummaryStats): void {
   stats.buildsDiscarded = 0;
 }
 
+export function resetFrameFallbackStats(stats: FarSummaryStats): void {
+  stats.proceduralFallbacks = 0;
+  stats.lowerRingFallbacks = 0;
+  stats.conservativeFallbacks = 0;
+}
+
 export function accumulateStats(dst: FarSummaryStats, src: FarSummaryStats): void {
   dst.requestedTiles = src.requestedTiles;
   dst.buildingTiles = src.buildingTiles;

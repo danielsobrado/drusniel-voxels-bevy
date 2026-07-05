@@ -5,6 +5,7 @@ import type { StreamingOwnershipRadii } from "../streaming/streaming_ownership.j
 import { liveChunkKey } from "./live_chunk_keys.js";
 import { pageKey } from "./page_plan.js";
 import { computeOwnershipCoverageCounters } from "./ownership_coverage_oracle.js";
+import { createSnapshotOwnershipResidencyFeeds } from "./ownership_residency.js";
 
 function snapshot(overrides: Partial<TerrainOwnershipRuntimeSnapshot> = {}): TerrainOwnershipRuntimeSnapshot {
   return {
@@ -103,6 +104,39 @@ describe("ownership coverage oracle", () => {
 
     expect(counters.missing_clod_pages_in_required_radius).toBe(1);
     expect(counters.clod_parent_coverage_violations).toBe(0);
+  });
+
+  it("uses residency feeds instead of snapshot loaded lists for oracle ownership", () => {
+    const snap = snapshot({
+      visualPages: {
+        center: { x: 0, z: 0 },
+        required: [pageKey(0, 1, 0)],
+        loaded: [pageKey(0, 1, 0)],
+        evictable: [],
+      },
+      farShell: { innerRadiusM: 48, outerRadiusM: 96 },
+    });
+    const emptyClodFeed = {
+      liveReady: createSnapshotOwnershipResidencyFeeds(snap).liveReady,
+      clodReady: () => new Set<number>(),
+    };
+
+    const counters = computeOwnershipCoverageCounters({
+      snapshot: snap,
+      chunkSizeM: 16,
+      pageSizeM: 16,
+      maxLevel: 0,
+      camera: { x: 0, z: 0 },
+      farShellCenter: { x: 0, z: 0 },
+      farShellRecenterCount: 0,
+      farShellLastRecenterFrame: -1,
+      residencyFeeds: emptyClodFeed,
+      coverageCellM: 8,
+    });
+
+    expect(counters.missing_clod_pages_in_required_radius).toBe(1);
+    expect(counters.clod_parent_coverage_violations).toBe(1);
+    expect(counters.priority_unowned_cells).toBeGreaterThan(0);
   });
 
   it("uses the actual far-shell center for coverage and center-distance counters", () => {

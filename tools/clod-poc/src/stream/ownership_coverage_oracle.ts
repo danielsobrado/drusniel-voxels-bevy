@@ -1,6 +1,13 @@
 import type { TerrainOwnershipRuntimeSnapshot } from "./terrain_ownership_runtime.js";
-import { packLiveKey, parseLiveChunkKey } from "./live_chunk_keys.js";
+import { packLiveKey } from "./live_chunk_keys.js";
 import { packPageKey, parsePageKey } from "./page_plan.js";
+import type { OwnershipResidencyFeeds } from "./ownership_residency.js";
+import {
+  countMissingPacked,
+  createSnapshotOwnershipResidencyFeeds,
+  packedLiveKeySet,
+  packedPageKeySet,
+} from "./ownership_residency.js";
 
 export interface OwnershipCoverageOracleInput {
   snapshot: TerrainOwnershipRuntimeSnapshot;
@@ -11,6 +18,7 @@ export interface OwnershipCoverageOracleInput {
   farShellCenter: { x: number; z: number };
   farShellRecenterCount: number;
   farShellLastRecenterFrame: number;
+  residencyFeeds?: OwnershipResidencyFeeds;
   coverageCellM?: number;
 }
 
@@ -38,30 +46,6 @@ export interface OwnershipCoverageCounters {
   priority_owner_overlap_cells: number;
   priority_unowned_cells: number;
   clod_parent_coverage_violations: number;
-}
-
-function packedLiveKeySet(keys: readonly string[]): Set<number> {
-  const out = new Set<number>();
-  for (const key of keys) {
-    const coord = parseLiveChunkKey(key);
-    out.add(packLiveKey(coord.x, coord.z));
-  }
-  return out;
-}
-
-function packedPageKeySet(keys: readonly string[]): Set<number> {
-  const out = new Set<number>();
-  for (const key of keys) {
-    const coord = parsePageKey(key);
-    out.add(packPageKey(coord.level, coord.x, coord.z));
-  }
-  return out;
-}
-
-function setDifferenceCount(required: ReadonlySet<number>, loaded: ReadonlySet<number>): number {
-  let missing = 0;
-  for (const key of required) if (!loaded.has(key)) missing++;
-  return missing;
 }
 
 function liveOwns(loaded: ReadonlySet<number>, x: number, z: number, chunkSizeM: number): boolean {
@@ -101,11 +85,12 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   const pageSizeM = Math.max(chunkSizeM, input.pageSizeM);
   const coverageCellM = Math.max(chunkSizeM, input.coverageCellM ?? pageSizeM);
   const requiredLive = packedLiveKeySet(snapshot.live.required);
-  const loadedLive = packedLiveKeySet(snapshot.live.loaded);
   const requiredClod = packedPageKeySet(snapshot.visualPages.required);
-  const loadedClod = packedPageKeySet(snapshot.visualPages.loaded);
-  const missingLive = setDifferenceCount(requiredLive, loadedLive);
-  const missingClod = setDifferenceCount(requiredClod, loadedClod);
+  const residencyFeeds = input.residencyFeeds ?? createSnapshotOwnershipResidencyFeeds(snapshot);
+  const loadedLive = residencyFeeds.liveReady();
+  const loadedClod = residencyFeeds.clodReady();
+  const missingLive = countMissingPacked(requiredLive, loadedLive);
+  const missingClod = countMissingPacked(requiredClod, loadedClod);
   const parentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, input.maxLevel);
 
   let liveClodGap = 0;

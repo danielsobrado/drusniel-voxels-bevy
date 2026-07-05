@@ -242,7 +242,7 @@ export class InfiniteFarShell {
     this.metrics.farShellCenterZ = cameraWorldZ;
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
-    if ((snappedChanged || this.rebuildCount === 0) && this.heightSamplingMode === "cpu") {
+    if ((snappedChanged || (this.rebuildCount === 0 && !this.pendingHeightRebuild)) && this.heightSamplingMode === "cpu") {
       this.requestSlicedHeightRebuild(true);
     }
     if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();

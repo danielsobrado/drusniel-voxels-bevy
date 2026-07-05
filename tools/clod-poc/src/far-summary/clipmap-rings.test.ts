@@ -88,6 +88,19 @@ describe("clipmap rings", () => {
     expect(req.some((r) => r.ring === 0 && r.key.x === edgeTileX && r.key.z === 0)).toBe(true);
   });
 
+  it("scans margin tiles behind a predicted center at the outer ring edge", () => {
+    const center: StreamCenter = {
+      worldX: 0, worldZ: 0,
+      predictedX: 96, predictedZ: 0,
+      velocityX: 24, velocityZ: 0,
+    };
+    const req = computeRequiredFarSummaryTiles(center, config);
+    const ring0TileSize = config.rings[0]!.cellM * config.rings[0]!.tileCells;
+    const behindEdgeTileX = worldToTileCoordQuick(-(config.rings[0]!.endM + 1), ring0TileSize);
+
+    expect(req.some((r) => r.ring === 0 && r.key.x === behindEdgeTileX && r.key.z === 0)).toBe(true);
+  });
+
   describe("priority ordering", () => {
     it("streams ahead tiles before behind tiles when moving +X", () => {
       const center: StreamCenter = {

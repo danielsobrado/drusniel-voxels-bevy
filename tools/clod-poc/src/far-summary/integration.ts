@@ -184,6 +184,8 @@ export function initFarSummaryIntegration(
         stats.lowerRingFallbacks +
         stats.conservativeFallbacks;
     }
+
+    cache.resetFallbackCounters();
   };
 
   const getHeightProvider = (): FarHeightProvider => sampler;
@@ -203,7 +205,9 @@ export function initFarSummaryIntegration(
     },
   };
 
-  (window as unknown as Record<string, unknown>).__drusnielFarSummary = integration;
+  if (typeof window !== "undefined") {
+    (window as unknown as Record<string, unknown>).__drusnielFarSummary = integration;
+  }
 
   return integration;
 }

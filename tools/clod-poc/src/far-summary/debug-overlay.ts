@@ -28,8 +28,8 @@ const RING_COLORS: number[] = [
 export class FarSummaryDebugOverlay {
   private readonly config: FarSummaryConfig;
   private readonly cache: FarSummaryCache;
-  private readonly statsHost: HTMLElement;
-  private readonly statsElement: HTMLPreElement;
+  private readonly statsHost: HTMLElement | null = null;
+  private readonly statsElement: HTMLPreElement | null = null;
 
   private readonly gridGroup: THREE.Group;
   private readonly gridMeshes: THREE.Object3D[] = [];
@@ -50,30 +50,32 @@ export class FarSummaryDebugOverlay {
     this.gridGroup.frustumCulled = false;
     scene?.add(this.gridGroup);
 
-    this.statsHost = document.createElement("div");
-    document.body.appendChild(this.statsHost);
+    if (typeof document !== "undefined" && typeof window !== "undefined") {
+      this.statsHost = document.createElement("div");
+      document.body.appendChild(this.statsHost);
 
-    this.statsElement = document.createElement("pre");
-    this.statsElement.style.cssText = `
-      color: #9fef9f;
-      font: 11px/1.4 monospace;
-      margin: 0;
-      max-width: 350px;
-      white-space: pre-wrap;
-    `;
-    this.statsHost.appendChild(this.statsElement);
+      this.statsElement = document.createElement("pre");
+      this.statsElement.style.cssText = `
+        color: #9fef9f;
+        font: 11px/1.4 monospace;
+        margin: 0;
+        max-width: 350px;
+        white-space: pre-wrap;
+      `;
+      this.statsHost.appendChild(this.statsElement);
 
-    const chrome = attachDebugPanelChrome(this.statsHost, {
-      panelId: "far-summary",
-      title: "Far Summary",
-      floating: true,
-      defaultPosition: {
-        left: Math.max(12, window.innerWidth - 370),
-        top: Math.max(12, window.innerHeight - 220),
-      },
-      onClose: () => this.statsHost.remove(),
-    });
-    chrome.body.style.padding = "6px 10px";
+      const chrome = attachDebugPanelChrome(this.statsHost, {
+        panelId: "far-summary",
+        title: "Far Summary",
+        floating: true,
+        defaultPosition: {
+          left: Math.max(12, window.innerWidth - 370),
+          top: Math.max(12, window.innerHeight - 220),
+        },
+        onClose: () => this.statsHost?.remove(),
+      });
+      chrome.body.style.padding = "6px 10px";
+    }
   }
 
   update(
@@ -179,6 +181,7 @@ export class FarSummaryDebugOverlay {
   }
 
   private updateStatsText(stats: FarSummaryStats): void {
+    if (!this.statsElement) return;
     const lines = [
       "Far Summary:",
       `  req: ${stats.requestedTiles}`,
@@ -206,7 +209,7 @@ export class FarSummaryDebugOverlay {
   dispose(): void {
     this.clearAllMeshes();
     this.gridGroup.removeFromParent?.();
-    this.statsHost.remove();
+    this.statsHost?.remove();
     for (const material of this.lineMaterials.values()) material.dispose();
     for (const material of this.tileMaterials.values()) material.dispose();
     this.lineMaterials.clear();

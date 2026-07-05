@@ -3,7 +3,7 @@ import type { FarSummaryStats, FarSummaryTile, FarSummaryTileKey, FarSummarySamp
 import type { FarSummaryRingRequest, TileBounds } from "./clipmap-rings.js";
 import { findCachedTileForSample } from "./clipmap-rings.js";
 import { tileKeyToString, worldToTileCoord } from "./tile-key.js";
-import { createFarSummaryStats, resetFrameStats } from "./stats.js";
+import { createFarSummaryStats, resetFrameFallbackStats, resetFrameStats } from "./stats.js";
 import type { FarTerrainSampler, FarSummaryTileBuildState } from "./summary-tile-builder.js";
 import {
   createFarSummaryTileBuild,
@@ -222,6 +222,10 @@ export class FarSummaryCache implements FallbackStatsWriter {
   countProceduralFallback(): void { this.stats.proceduralFallbacks++; }
   countLowerRingFallback(): void { this.stats.lowerRingFallbacks++; }
   countConservativeFallback(): void { this.stats.conservativeFallbacks++; }
+
+  resetFallbackCounters(): void {
+    resetFrameFallbackStats(this.stats);
+  }
 
   markStale(bounds: TileBounds | null): void {
     if (bounds === null) this.invalidationEpoch++;

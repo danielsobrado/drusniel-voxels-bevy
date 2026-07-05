@@ -44,11 +44,12 @@ export function computeRequiredFarSummaryTiles(
     const ring = config.rings[ri];
     const radiusM = ring.endM;
     const coverageMarginM = Math.max(0, config.stream.ringCoverageMarginM);
+    const scanRadiusM = radiusM + coverageMarginM;
 
-    const minTileX = worldToTileCoord(predictedX - radiusM, ring.cellM, ring.tileCells);
-    const maxTileX = worldToTileCoord(predictedX + radiusM, ring.cellM, ring.tileCells);
-    const minTileZ = worldToTileCoord(predictedZ - radiusM, ring.cellM, ring.tileCells);
-    const maxTileZ = worldToTileCoord(predictedZ + radiusM, ring.cellM, ring.tileCells);
+    const minTileX = worldToTileCoord(predictedX - scanRadiusM, ring.cellM, ring.tileCells);
+    const maxTileX = worldToTileCoord(predictedX + scanRadiusM, ring.cellM, ring.tileCells);
+    const minTileZ = worldToTileCoord(predictedZ - scanRadiusM, ring.cellM, ring.tileCells);
+    const maxTileZ = worldToTileCoord(predictedZ + scanRadiusM, ring.cellM, ring.tileCells);
 
     const tileCount = (maxTileX - minTileX + 1) * (maxTileZ - minTileZ + 1);
     if (tileCount > 10000) {

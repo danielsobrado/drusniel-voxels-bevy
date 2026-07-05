@@ -17,6 +17,7 @@ import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 import type { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
+import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds } from "../stream/ownership_residency.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -238,8 +239,10 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
 
     const ownershipSnapshot = deps.ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
     publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
-    s.counters["residency_missing_live"] = Math.max(0, ownershipSnapshot.live.required.length - ownershipSnapshot.live.loaded.length);
-    s.counters["residency_missing_clod"] = Math.max(0, ownershipSnapshot.visualPages.required.length - ownershipSnapshot.visualPages.loaded.length);
+    const ownershipResidencyFeeds = createSnapshotOwnershipResidencyFeeds(ownershipSnapshot);
+    const residencyMissing = countSnapshotResidencyMissing(ownershipSnapshot, ownershipResidencyFeeds);
+    s.counters["residency_missing_live"] = residencyMissing.liveMissing;
+    s.counters["residency_missing_clod"] = residencyMissing.clodMissing;
     const farShellCenter = shellMetrics
       ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ }
       : { x: deps.camera.position.x, z: deps.camera.position.z };
@@ -262,6 +265,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         farShellCenter,
         farShellRecenterCount,
         farShellLastRecenterFrame,
+        residencyFeeds: ownershipResidencyFeeds,
       });
       publishOwnershipCoverageCounters(s.counters, ownershipCoverageCounters);
       s.counters["ownership_oracle_ms"] = performance.now() - ownershipOracleStartMs;

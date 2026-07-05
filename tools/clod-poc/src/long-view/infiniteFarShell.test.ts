@@ -208,6 +208,28 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     shell.dispose();
   });
 
+  it("continues an initial pending rebuild instead of restarting it every frame", () => {
+    const metrics = createFarShellMetrics();
+    const shell = new InfiniteFarShell({
+      ...makeDefaultOptions(),
+      metrics,
+      radialSegments: 96,
+      angularSegments: 192,
+      rebaseSnapMeters: 100,
+      cpuRebuildBudgetMs: 0,
+    });
+
+    shell.update(0, 0, 0);
+    const firstCursor = metrics.farShellRebuildCursor ?? 0;
+    for (let frame = 1; frame <= 5; frame++) {
+      shell.update(0, 0, frame);
+    }
+
+    expect(metrics.farShellRebuildRestarts).toBe(0);
+    expect(metrics.farShellRebuildCursor ?? 0).toBeGreaterThan(firstCursor);
+    shell.dispose();
+  });
+
   it("no finite-world border assumption — small CLOD world, shell still config radius", () => {
     const shell = new InfiniteFarShell({ ...makeDefaultOptions(), outerMeters: 8000 });
     const pos = shell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
