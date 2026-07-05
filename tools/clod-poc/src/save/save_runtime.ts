@@ -23,6 +23,7 @@ interface SaveRuntimeState {
   manifest: SaveWorldManifest;
   metadata: WorldMetadataRecord;
   dirtyRegionKeys: Set<string>;
+  completedRegionKeys: Set<string>;
   revision: number;
   flushTimer: ReturnType<typeof setTimeout> | null;
   flushing: boolean;
@@ -50,6 +51,12 @@ function scheduleFlush(): void {
   }, SAVE_AUTOSAVE_INTERVAL_S * 1000);
 }
 
+export function attachSaveRuntimeCounters(counters: Partial<SaveRuntimeCounters> | null): void {
+  if (!state || !counters) return;
+  state.counters = counters;
+  publishCounters();
+}
+
 export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial<SaveRuntimeCounters> = {}): void {
   state?.flushTimer && clearTimeout(state.flushTimer);
   state = {
@@ -57,6 +64,7 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     manifest: { ...loadedWorld.manifest, regionKeys: [...loadedWorld.manifest.regionKeys] },
     metadata: structuredClone(loadedWorld.metadata) as WorldMetadataRecord,
     dirtyRegionKeys: new Set<string>(),
+    completedRegionKeys: new Set<string>(),
     revision: loadedWorld.manifest.regionKeys.length,
     flushTimer: null,
     flushing: false,
@@ -106,14 +114,18 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
       propsByRegion,
       maxRegionWrites,
     });
-    for (const key of result.written) activeState.dirtyRegionKeys.delete(key);
+    for (const key of result.written) {
+      activeState.dirtyRegionKeys.delete(key);
+      activeState.completedRegionKeys.add(key);
+    }
     if (activeState.dirtyRegionKeys.size === 0) {
       activeState.manifest = await finalizeSaveManifestAndMetadata(
         db,
         activeState.manifest,
         activeState.metadata,
-        [...activeState.manifest.regionKeys, ...result.written],
+        [...activeState.manifest.regionKeys, ...activeState.completedRegionKeys],
       );
+      activeState.completedRegionKeys.clear();
     }
     activeState.counters.save_last_flush_written_regions = result.written.length;
     activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegionKeys.size;
