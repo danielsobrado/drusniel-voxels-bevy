@@ -5,6 +5,13 @@ export interface FarClipmapGridGeometryOptions {
   gridResolution: number;
 }
 
+export interface FarClipmapBuildStats {
+  vertices: number;
+  triangles: number;
+  fallbackSamples: number;
+  exceptionSamples: number;
+}
+
 export interface FarClipmapTerrainGeometryOptions {
   gridResolution: number;
   centerX: number;
@@ -14,6 +21,7 @@ export interface FarClipmapTerrainGeometryOptions {
   heightScale: number;
   yOffset: number;
   source: FarClipmapSource;
+  stats?: FarClipmapBuildStats;
 }
 
 const COLOR_GRASS = new THREE.Color(0x33442d);
@@ -26,36 +34,61 @@ function safeGridResolution(value: number): number {
   return Math.max(2, Math.floor(value));
 }
 
-function sampleHeight(source: FarClipmapSource, x: number, z: number): number {
+function recordFallback(stats: FarClipmapBuildStats | undefined): void {
+  if (stats) stats.fallbackSamples++;
+}
+
+function recordException(stats: FarClipmapBuildStats | undefined): void {
+  if (stats) {
+    stats.fallbackSamples++;
+    stats.exceptionSamples++;
+  }
+}
+
+function sampleHeight(source: FarClipmapSource, x: number, z: number, stats: FarClipmapBuildStats | undefined): number {
   try {
     const height = source.sampleHeight(x, z);
-    return Number.isFinite(height) ? height : 0;
+    if (Number.isFinite(height)) return height;
+    recordFallback(stats);
+    return 0;
   } catch {
+    recordException(stats);
     return 0;
   }
 }
 
-function sampleMaterial(source: FarClipmapSource, x: number, z: number): number {
+function sampleMaterial(source: FarClipmapSource, x: number, z: number, stats: FarClipmapBuildStats | undefined): number {
   try {
     const material = source.sampleMaterial(x, z);
-    return Number.isFinite(material) ? material : 0;
+    if (Number.isFinite(material)) return material;
+    recordFallback(stats);
+    return 0;
   } catch {
+    recordException(stats);
     return 0;
   }
 }
 
-function sampleWater(source: FarClipmapSource, x: number, z: number): number {
+function sampleWater(source: FarClipmapSource, x: number, z: number, stats: FarClipmapBuildStats | undefined): number {
   try {
     const water = source.sampleWater(x, z);
-    return Number.isFinite(water) ? water : 0;
+    if (Number.isFinite(water)) return water;
+    recordFallback(stats);
+    return 0;
   } catch {
+    recordException(stats);
     return 0;
   }
 }
 
-function colorForSample(source: FarClipmapSource, x: number, z: number): THREE.Color {
-  if (sampleWater(source, x, z) > 0.5) return COLOR_WATER;
-  const material = Math.floor(sampleMaterial(source, x, z));
+function colorForSample(
+  source: FarClipmapSource,
+  x: number,
+  z: number,
+  stats: FarClipmapBuildStats | undefined,
+): THREE.Color {
+  if (sampleWater(source, x, z, stats) > 0.5) return COLOR_WATER;
+  const material = Math.floor(sampleMaterial(source, x, z, stats));
   if (material === 1) return COLOR_SAND;
   if (material === 2 || material === 3) return COLOR_ROCK;
   return COLOR_GRASS;
@@ -123,8 +156,8 @@ export function createFarClipmapTerrainGeometry(options: FarClipmapTerrainGeomet
       const v = z / segments;
       const worldX = originX + x * step;
       const worldZ = originZ + z * step;
-      const height = sampleHeight(options.source, worldX, worldZ) * options.heightScale + options.yOffset;
-      const color = colorForSample(options.source, worldX, worldZ);
+      const height = sampleHeight(options.source, worldX, worldZ, options.stats) * options.heightScale + options.yOffset;
+      const color = colorForSample(options.source, worldX, worldZ, options.stats);
       positions[cursor++] = worldX;
       positions[cursor++] = height;
       positions[cursor++] = worldZ;
@@ -158,5 +191,10 @@ export function createFarClipmapTerrainGeometry(options: FarClipmapTerrainGeomet
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
+
+  if (options.stats) {
+    options.stats.vertices += vertexCount;
+    options.stats.triangles += indices.length / 3;
+  }
   return geometry;
 }
