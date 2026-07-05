@@ -4,6 +4,7 @@ import { computeEffectiveVisibleMeters, computeVisibleTargetMet } from "../phase
 import type { Phase0Config } from "../phase0/phase0_config.js";
 import { simulateStreamingCoverage } from "../phase0/streaming_coverage_sim.js";
 import type { ClodSelectionStats } from "../terrain/selection/clod_selection_controller.js";
+import type { FarClipmapOwnershipSnapshot } from "../terrain/far_clipmap/index.js";
 import type { GrassStats } from "../grass.js";
 import type { TreeStats } from "../trees/index.js";
 import type { StoneStats } from "../stones/stone_instances.js";
@@ -55,6 +56,7 @@ export interface LongViewFrameDiagnosticsDeps {
   phase0Streaming: Phase0Config["phase0"]["streaming"];
   ownershipRuntime: TerrainOwnershipRuntime;
   getOwnershipResidencyFeeds?: () => OwnershipResidencyFeeds;
+  getFarClipmapOwnershipSnapshot?: () => FarClipmapOwnershipSnapshot | undefined;
   borderOceanScene?: {
     waterField: WaterField;
     deepOcean: DeepOceanRenderConfig;
@@ -101,6 +103,27 @@ export function streamReadinessSatisfied(input: {
   return input.liveMissing === 0
     && requiredRootClodPagesReady(input.snapshot, input.feeds, input.maxLevel)
     && farSummaryReady;
+}
+
+function farClipmapFromCounters(
+  counters: Readonly<Record<string, number>>,
+  camera: THREE.PerspectiveCamera,
+): FarClipmapOwnershipSnapshot | undefined {
+  if (counters["far_clipmap_enabled"] !== 1) return undefined;
+  const innerRadiusM = counters["far_clipmap_inner_radius_m"];
+  const outerRadiusM = counters["far_clipmap_outer_radius_m"];
+  if (!Number.isFinite(innerRadiusM) || !Number.isFinite(outerRadiusM)) return undefined;
+  return {
+    enabled: true,
+    innerRadiusM,
+    outerRadiusM,
+    centerX: camera.position.x,
+    centerZ: camera.position.z,
+    snapX: camera.position.x,
+    snapZ: camera.position.z,
+    ready: (counters["far_clipmap_pending_tiles"] ?? 1) === 0
+      && (counters["far_clipmap_ready_tiles"] ?? 0) > 0,
+  };
 }
 
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
@@ -152,7 +175,8 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const streamSafetyInflight = numericCounter(counters, "live_clod_stream_safety_inflight_pages", streamInflight);
     const streamParentCoverageViolations = numericCounter(counters, "live_clod_stream_parent_coverage_violations", streamReady > 0 ? 0 : 1);
     const streamActiveRootPages = numericCounter(counters, "live_clod_stream_active_root_pages", streamReady);
-    const farSummaryQuiet = tilesMissing === 0 && tilesBuilding === 0;
+    const farClipmapPending = numericCounter(counters, "far_clipmap_pending_tiles", 0);
+    const farSummaryQuiet = tilesMissing === 0 && tilesBuilding === 0 && farClipmapPending === 0;
     const bubbleQuiet = bubbleRequired === 0 || (bubbleFailed === 0 && bubbleBuilding === 0 && bubbleReady > 0);
     const streamQuiet = streamRequired === 0 || (
       streamSafetyPending === 0
@@ -296,7 +320,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       velocityZ: deps.phase0VelocityZ,
       preloadSeconds: deps.phase0Streaming.preload_seconds,
       liveRadiusM: deps.phase0Streaming.live_radius_m,
-      clodRadiusM: deps.phase0Streaming.clod_radius_m,
+      clodRadiusM: deps.phase0Streaming.clod_refinement_radius_m ?? deps.phase0Streaming.clod_radius_m,
       infiniteStreaming: streamingScene,
     });
     s.counters["streamer_simulated_required_chunks"] = streamingReport.requiredChunkCount;
@@ -325,6 +349,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       streamReadyFrame = s.frame;
     }
     s.counters["stream_ready_frame"] = streamReadyFrame;
+    const farClipmap = deps.getFarClipmapOwnershipSnapshot?.() ?? farClipmapFromCounters(s.counters, deps.camera);
     const farShellCenter = shellMetrics
       ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ }
       : { x: deps.camera.position.x, z: deps.camera.position.z };
@@ -347,6 +372,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         farShellCenter,
         farShellRecenterCount,
         farShellLastRecenterFrame,
+        farClipmap,
         residencyFeeds: ownershipResidencyFeeds,
       });
       publishOwnershipCoverageCounters(s.counters, ownershipCoverageCounters);
@@ -355,8 +381,8 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       s.counters["ownership_oracle_ms"] = 0;
       publishOwnershipCoverageCounters(s.counters, {
         camera_to_clod_center_m: Math.hypot(deps.camera.position.x - ownershipSnapshot.center.x, deps.camera.position.z - ownershipSnapshot.center.z),
-        camera_to_far_shell_center_m: Math.hypot(deps.camera.position.x - farShellCenter.x, deps.camera.position.z - farShellCenter.z),
-        far_shell_inner_minus_clod_radius_m: ownershipSnapshot.farShell.innerRadiusM - ownershipSnapshot.ownership.clodRadiusM,
+        camera_to_far_shell_center_m: Math.hypot(deps.camera.position.x - (farClipmap?.centerX ?? farShellCenter.x), deps.camera.position.z - (farClipmap?.centerZ ?? farShellCenter.z)),
+        far_shell_inner_minus_clod_radius_m: (farClipmap?.innerRadiusM ?? ownershipSnapshot.farShell.innerRadiusM) - ownershipSnapshot.ownership.clodRadiusM,
         live_clod_gap_holes: 0,
         clod_far_gap_holes: 0,
         live_clod_overlap_cells: 0,
@@ -373,6 +399,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         priority_owner_overlap_cells: 0,
         priority_unowned_cells: 0,
         clod_parent_coverage_violations: 0,
+        far_clipmap_owned_cells: farClipmap?.ready ? numericCounter(s.counters, "far_clipmap_gpu_owned_cells", 0) : 0,
+        far_clipmap_unowned_cells: farClipmap?.enabled && !farClipmap.ready ? 1 : 0,
+        far_clipmap_ownership_holes: 0,
+        far_clipmap_priority_overlap_cells: 0,
+        owner_far_clipmap_cells: farClipmap?.ready ? numericCounter(s.counters, "far_clipmap_gpu_owned_cells", 0) : 0,
+        owner_clod_refinement_cells: 0,
+        owner_live_cells: 0,
       });
     }
 
