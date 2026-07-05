@@ -245,7 +245,7 @@ describe("createStreamingClodRootController", () => {
     expect((coords[0]!.level ?? 0)).toBeGreaterThanOrEqual(coords[1]!.level ?? 0);
   });
 
-  it("keeps only one worker batch in flight", () => {
+  it("keeps only one worker batch in flight by default", () => {
     const { controller, buildPages } = makeController({ buildBudgetPagesPerFrame: 2 });
 
     controller.update(new THREE.Vector3(192, 0, 0), 80);
@@ -253,6 +253,40 @@ describe("createStreamingClodRootController", () => {
 
     expect(buildPages).toHaveBeenCalledTimes(1);
     expect(stats.inflightBatches).toBe(1);
+  });
+
+  it("can keep multiple streamed CLOD worker batches in flight", () => {
+    const { controller, buildPages } = makeController({
+      buildBudgetPagesPerFrame: 4,
+      maxInflightBatches: 3,
+    });
+
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 80);
+
+    expect(buildPages).toHaveBeenCalledTimes(3);
+    expect(stats.inflightBatches).toBe(3);
+    expect(stats.maxInflightBatches).toBe(3);
+    expect(stats.pendingPages).toBe(3);
+    for (const call of (buildPages as ReturnType<typeof vi.fn>).mock.calls) {
+      const coords = call[0] as readonly PageCoord[];
+      expect(coords).toHaveLength(1);
+      expect(coords.every((coord) => coord.level === 1)).toBe(true);
+    }
+  });
+
+  it("schedules only safety roots until parent coverage is complete", () => {
+    const { controller, buildPages } = makeController({
+      buildBudgetPagesPerFrame: 5,
+      maxInflightBatches: 4,
+    });
+
+    const stats = controller.update(new THREE.Vector3(288, 0, 32), 30);
+
+    expect(stats.safetyPendingPages + stats.safetyInflightPages).toBeGreaterThan(0);
+    for (const call of (buildPages as ReturnType<typeof vi.fn>).mock.calls) {
+      const coords = call[0] as readonly PageCoord[];
+      expect(coords.every((coord) => coord.level === 1)).toBe(true);
+    }
   });
 
   it("queues async worker results and applies them on the next frame", async () => {

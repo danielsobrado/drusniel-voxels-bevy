@@ -53,8 +53,11 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     return {
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
+      liveBubbleMaxInflightChunks: "128",
       liveBubbleColliderRadius: "128",
-      liveClodRootBudget: "16",
+      liveClodRootBudget: "32",
+      liveClodRootApplyBudget: "8",
+      liveClodRootMaxInflightBatches: "4",
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "2",
       liveClodRootRadius: "2048",
@@ -64,9 +67,12 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
   }
   return {
     liveBubbleBudget: "4",
-    liveBubbleGpuChunkBudget: "12",
+    liveBubbleGpuChunkBudget: "16",
+    liveBubbleMaxInflightChunks: "128",
     liveBubbleColliderRadius: "128",
-    liveClodRootBudget: "16",
+    liveClodRootBudget: "32",
+    liveClodRootApplyBudget: "8",
+    liveClodRootMaxInflightBatches: "4",
     liveClodRootMaxCached: "512",
     liveClodRootMaxLevel: "2",
     liveClodRootRadius: "2048",

@@ -26,6 +26,7 @@ const SEEDED_COUNTERS = [
   "live_clod_stream_safety_inflight_pages",
   "live_clod_stream_refinement_pending_pages",
   "live_clod_stream_refinement_inflight_pages",
+  "live_clod_stream_max_inflight_batches",
   "live_clod_stream_max_cached_pages",
   "live_clod_stream_safety_cache_capacity_ok",
   "live_clod_stream_parent_coverage_violations",

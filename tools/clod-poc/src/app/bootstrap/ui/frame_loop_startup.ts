@@ -78,6 +78,7 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_pending_pages"] = stats.pendingPages;
   target["live_clod_stream_build_budget"] = stats.buildBudget;
   target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
+  target["live_clod_stream_max_inflight_batches"] = stats.maxInflightBatches;
   target["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   target["live_clod_stream_active_root_pages"] = stats.activeRootPages;
   target["live_clod_stream_max_cached_pages"] = stats.maxCachedPages;
@@ -307,6 +308,8 @@ export function runFrameLoopStartup(
     worldCells,
     enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
     buildBudgetPagesPerFrame: nonNegativeIntegerParam(searchParams, "liveClodRootBudget"),
+    applyBudgetPagesPerFrame: nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"),
+    maxInflightBatches: positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"),
     maxCachedPages: positiveIntegerParam(searchParams, "liveClodRootMaxCached"),
     maxRootLevel: nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"),
     buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),

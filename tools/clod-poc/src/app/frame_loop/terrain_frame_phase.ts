@@ -132,6 +132,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
   counters["live_bubble_collider_removals"] = stats.colliderRemovals;
   counters["live_bubble_gpu_dispatch_budget"] = stats.gpuDispatchBudget;
+  counters["live_bubble_max_inflight_chunks"] = stats.gpuMaxInflightChunks;
   counters["live_bubble_pending_chunks"] = stats.pendingChunks;
   counters["live_bubble_inflight_chunks"] = stats.inflightChunks;
   counters["live_bubble_ready_visual_pages"] = stats.readyVisualPages;

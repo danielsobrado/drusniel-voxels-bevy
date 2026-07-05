@@ -12,6 +12,7 @@ export interface StreamingClodRootStats {
   pendingPages: number;
   buildBudget: number;
   inflightBatches: number;
+  maxInflightBatches: number;
   applyQueuePages: number;
   activeRootPages: number;
   maxCachedPages: number;
@@ -84,6 +85,7 @@ export interface StreamingClodRootControllerDeps {
   maxCachedPages?: number;
   evictDistanceMultiplier?: number;
   maxRootLevel?: number;
+  maxInflightBatches?: number;
   buildPages: ((coords: readonly PageCoord[]) => Promise<StreamingClodRootBuildResult>) | null;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
   onRootsChanged?: () => void;
@@ -103,6 +105,7 @@ interface ReadyPage {
 }
 
 interface InflightBatch {
+  id: number;
   ids: Set<string>;
   coordsById: Map<string, PageCoord>;
   startMs: number;
@@ -129,6 +132,7 @@ interface StreamingClodConfigCarrier {
 
 const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME = 1;
+const DEFAULT_MAX_INFLIGHT_BATCHES = 1;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
 const DEFAULT_STREAM_MAX_ROOT_LEVEL = 1;
@@ -268,6 +272,7 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
   counters["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   counters["live_clod_stream_active_root_pages"] = stats.activeRootPages;
+  counters["live_clod_stream_max_inflight_batches"] = stats.maxInflightBatches;
   counters["live_clod_stream_max_cached_pages"] = stats.maxCachedPages;
   counters["live_clod_stream_safety_cache_capacity_ok"] = stats.safetyCacheCapacityOk;
   counters["live_clod_stream_safety_required_pages"] = stats.safetyRequiredPages;
@@ -438,6 +443,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const worldPagesZ = Math.max(1, Math.ceil(deps.worldCells / pageSize));
   const buildBudget = resolveBudget(deps.buildBudgetPagesPerFrame, DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME);
   const applyBudget = resolveBudget(deps.applyBudgetPagesPerFrame, DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME);
+  const maxInflightBatches = Math.max(1, resolveBudget(deps.maxInflightBatches, DEFAULT_MAX_INFLIGHT_BATCHES));
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const maxRootLevel = resolveStreamingClodMaxRootLevel(deps.cfg, deps.maxRootLevel);
@@ -452,14 +458,15 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let frame = 0;
   let active = deps.enabled;
   let requiredNow = new Set<string>();
-  let inFlight: InflightBatch | null = null;
+  const inFlight = new Map<number, InflightBatch>();
+  let nextBatchId = 1;
   let completedWorkerBuildMs = 0;
   let completedWorkerTransferBytes = 0;
   let completedStaleDiscards = 0;
   let workerBuildFailures = 0;
   let workerBuildTimeouts = 0;
   let activeRootIds = new Set<string>();
-  let latest: StreamingClodRootStats = emptyStats(maxRootLevel, maxCachedPages);
+  let latest: StreamingClodRootStats = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches);
 
   const beginMovementProbe = (): void => {
     probe.active = true;
@@ -610,6 +617,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
+  const buildInFlight = (id: string): boolean => {
+    for (const batch of inFlight.values()) if (batch.ids.has(id)) return true;
+    return false;
+  };
+  const currentInflightIds = (): Set<string> => new Set([...inFlight.values()].flatMap((batch) => [...batch.ids]));
   const failedBuildCoolingDown = (id: string): boolean => {
     const failure = failed.get(id);
     return failure !== undefined && frame < failure.retryAfterFrame;
@@ -698,7 +710,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     let refinementInflightPages = 0;
     let parentCoverageViolations = 0;
 
-    const inflightIds = inFlight?.ids ?? new Set<string>();
+    const inflightIds = currentInflightIds();
     for (const id of safetyIds) {
       const covered = pageCoveredByActiveRoots(id, activeRootIds);
       if (covered) {
@@ -729,7 +741,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
-    if (inFlight === batch) inFlight = null;
+    inFlight.delete(batch.id);
     workerBuildFailures++;
     for (const id of batch.ids) {
       const previous = failed.get(id);
@@ -740,10 +752,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const dispatchBuild = (coords: readonly PageCoord[]): number => {
-    if (!deps.buildPages || coords.length === 0 || inFlight) return 0;
+    if (!deps.buildPages || coords.length === 0 || inFlight.size >= maxInflightBatches) return 0;
     const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)), coord]));
-    const batch: InflightBatch = { ids: new Set(coordsById.keys()), coordsById, startMs: performance.now() };
-    inFlight = batch;
+    const batch: InflightBatch = { id: nextBatchId++, ids: new Set(coordsById.keys()), coordsById, startMs: performance.now() };
+    inFlight.set(batch.id, batch);
     for (const coord of coords) {
       const level = coordLevel(coord);
       console.log(`[clod-stream] Dispatching build for page: L${level}:${coord.px},${coord.pz} (estimated LOD0 subtree size: ${pageBudgetCost(level)})`);
@@ -761,7 +773,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       return batch.ids.size;
     }
     void result.then((built) => {
-      if (inFlight === batch) inFlight = null;
+      inFlight.delete(batch.id);
       const buildMs = Number.isFinite(built.buildMs) ? Math.max(0, built.buildMs) : 0;
       completedWorkerBuildMs += buildMs;
       completedWorkerTransferBytes += Number.isFinite(built.transferBytes) ? Math.max(0, built.transferBytes ?? 0) : 0;
@@ -777,20 +789,37 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return batch.ids.size;
   };
 
-  const scheduleBuilds = (required: readonly PageCoord[]): { scheduled: number; cost: number } => {
-    if (!deps.buildPages || inFlight || buildBudget <= 0) return { scheduled: 0, cost: 0 };
-    const batch: PageCoord[] = [];
-    let currentCost = 0;
-    for (const coord of required) {
-      const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
-      if (cached.has(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
-      const pageCost = pageBudgetCost(coordLevel(coord));
-      if (batch.length > 0 && currentCost + pageCost > buildBudget) break;
-      batch.push(coord);
-      currentCost += pageCost;
+  const safetyFirstCandidates = (required: readonly PageCoord[], coverage: ReturnType<typeof countStreamCoverage>): readonly PageCoord[] => {
+    if (coverage.safetyPendingPages > 0) return required.filter((coord) => coordLevel(coord) === maxRootLevel);
+    if (coverage.safetyInflightPages > 0) return [];
+    return required;
+  };
+
+  const scheduleBuilds = (required: readonly PageCoord[], coverage: ReturnType<typeof countStreamCoverage>): { scheduled: number; cost: number } => {
+    if (!deps.buildPages || buildBudget <= 0) return { scheduled: 0, cost: 0 };
+    let scheduled = 0;
+    let scheduledCost = 0;
+    const scheduledIds = new Set<string>();
+    const candidates = safetyFirstCandidates(required, coverage);
+    while (inFlight.size < maxInflightBatches) {
+      const batch: PageCoord[] = [];
+      let currentCost = 0;
+      for (const coord of candidates) {
+        const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
+        if (scheduledIds.has(id) || cached.has(id) || buildInFlight(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
+        const pageCost = pageBudgetCost(coordLevel(coord));
+        if (batch.length > 0 && currentCost + pageCost > buildBudget) break;
+        batch.push(coord);
+        scheduledIds.add(id);
+        currentCost += pageCost;
+      }
+      if (batch.length === 0) break;
+      const batchScheduled = dispatchBuild(batch);
+      if (batchScheduled === 0) break;
+      scheduled += batchScheduled;
+      scheduledCost += currentCost;
     }
-    const scheduled = dispatchBuild(batch);
-    return { scheduled, cost: scheduled > 0 ? currentCost : 0 };
+    return { scheduled, cost: scheduledCost };
   };
 
   return {
@@ -800,7 +829,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       if (!active) {
         requiredNow = new Set();
         ready.length = 0;
-        latest = emptyStats(maxRootLevel, maxCachedPages);
+        inFlight.clear();
+        latest = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches);
         mirrorStreamingProbeCounters(latest);
         return latest;
       }
@@ -825,18 +855,20 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       completedStaleDiscards = 0;
       const applied = applyReadyPages(center, radiusM);
       staleDiscards += applied.staleDiscards;
-      const { scheduled: scheduledPagesThisFrame, cost: scheduledBudgetCost } = scheduleBuilds(required);
       const activeRootsChanged = syncActiveRoots();
+      const coverageBeforeSchedule = countStreamCoverage(requiredIds);
+      const { scheduled: scheduledPagesThisFrame, cost: scheduledBudgetCost } = scheduleBuilds(required, coverageBeforeSchedule);
       if (evictions > 0 || activeRootsChanged || applied.applied > 0) deps.onRootsChanged?.();
       let inflightMs = 0;
-      if (inFlight) {
-        inflightMs = performance.now() - inFlight.startMs;
-        if (inflightMs > 60000 && !inFlight.timedOut) {
-          inFlight.timedOut = true;
+      for (const batch of inFlight.values()) {
+        const batchInflightMs = performance.now() - batch.startMs;
+        inflightMs = Math.max(inflightMs, batchInflightMs);
+        if (batchInflightMs > 60000 && !batch.timedOut) {
+          batch.timedOut = true;
           workerBuildTimeouts++;
         }
       }
-      const inflightPageLevels = inFlight ? [...inFlight.coordsById.values()].map((coord) => coordLevel(coord)) : [];
+      const inflightPageLevels = [...inFlight.values()].flatMap((batch) => [...batch.coordsById.values()].map((coord) => coordLevel(coord)));
       const coverage = countStreamCoverage(requiredIds);
       latest = {
         requiredPages: requiredIds.size,
@@ -845,9 +877,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         failedPages: [...requiredIds].filter((id) => failed.has(id)).length,
         evictions,
         buildMs: workerBuildMs,
-        pendingPages: inFlight?.ids.size ?? 0,
+        pendingPages: [...inFlight.values()].reduce((sum, batch) => sum + batch.ids.size, 0),
         buildBudget,
-        inflightBatches: inFlight ? 1 : 0,
+        inflightBatches: inFlight.size,
+        maxInflightBatches,
         applyQueuePages: ready.length,
         activeRootPages: activeRootIds.size,
         maxCachedPages,
@@ -892,7 +925,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 }
 
-function emptyStats(maxRootLevel = 0, maxCachedPages = DEFAULT_MAX_CACHED_PAGES): StreamingClodRootStats {
+function emptyStats(
+  maxRootLevel = 0,
+  maxCachedPages = DEFAULT_MAX_CACHED_PAGES,
+  maxInflightBatches = DEFAULT_MAX_INFLIGHT_BATCHES,
+): StreamingClodRootStats {
   return {
     requiredPages: 0,
     cachedPages: 0,
@@ -903,6 +940,7 @@ function emptyStats(maxRootLevel = 0, maxCachedPages = DEFAULT_MAX_CACHED_PAGES)
     pendingPages: 0,
     buildBudget: DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME,
     inflightBatches: 0,
+    maxInflightBatches,
     applyQueuePages: 0,
     activeRootPages: 0,
     maxCachedPages,

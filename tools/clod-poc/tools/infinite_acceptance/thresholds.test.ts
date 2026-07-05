@@ -20,6 +20,7 @@ function validCounters(): Record<string, number> {
   counters["live_bubble_streamed_collider_pages"] = 1;
   counters["live_bubble_collider_registrations"] = 1;
   counters["live_bubble_gpu_dispatch_budget"] = 12;
+  counters["live_bubble_max_inflight_chunks"] = 128;
   counters["live_bubble_ready_visual_pages"] = 1;
   counters["live_bubble_visual_required_pages"] = 1;
   counters["live_bubble_visual_ready_pages"] = 1;
@@ -28,6 +29,7 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_required_pages"] = 1;
   counters["live_clod_stream_cached_pages"] = 1;
   counters["live_clod_stream_build_budget"] = 1;
+  counters["live_clod_stream_max_inflight_batches"] = 4;
   counters["live_clod_stream_radius_m"] = 2048;
   counters["live_clod_stream_ready_pages"] = 1;
   counters["live_clod_stream_active_root_pages"] = 1;

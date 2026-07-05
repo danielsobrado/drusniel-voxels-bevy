@@ -387,6 +387,31 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.gpuDispatchBudget).toBe(4);
   });
 
+  it("caps live-bubble GPU chunk inflight work", () => {
+    vi.stubGlobal("window", { location: { search: "?liveBubbleGpuChunkBudget=4&liveBubbleMaxInflightChunks=2" } });
+    const mesher = {
+      meshChunk: vi.fn(() => new Promise<ChunkMesh>(() => undefined)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+    });
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
+    expect(stats.gpuDispatchBudget).toBe(4);
+    expect(stats.gpuMaxInflightChunks).toBe(2);
+    expect(stats.inflightChunks).toBe(2);
+  });
+
   it("reports pending and inflight chunk counters while GPU work is building", () => {
     const mesher = {
       meshChunk: vi.fn(() => new Promise<ChunkMesh>(() => undefined)),

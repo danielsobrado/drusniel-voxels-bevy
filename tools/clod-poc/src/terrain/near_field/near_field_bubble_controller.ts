@@ -15,6 +15,7 @@ const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
 /** Per-frame budget for CPU-fallback chunk meshing; one chunk can cost 10–90 ms, so at most one runs once the budget is spent. */
 const CPU_CHUNK_MESH_BUDGET_MS = 6;
 const DEFAULT_GPU_CHUNK_DISPATCH_BUDGET = 2;
+const DEFAULT_GPU_MAX_INFLIGHT_CHUNKS = Number.MAX_SAFE_INTEGER;
 const GPU_PAGE_RETRY_LIMIT = 3;
 const GPU_PAGE_RETRY_DELAY_FRAMES = 12;
 
@@ -65,6 +66,7 @@ export interface NearFieldBubbleStats {
   colliderRegistrations: number;
   colliderRemovals: number;
   gpuDispatchBudget: number;
+  gpuMaxInflightChunks: number;
   pendingChunks: number;
   inflightChunks: number;
   readyVisualPages: number;
@@ -204,6 +206,14 @@ export function resolveLiveBubbleGpuChunkBudget(defaultBudget: number, params: U
   return Math.max(1, fallback);
 }
 
+export function resolveLiveBubbleMaxInflightChunks(defaultMax: number, params: URLSearchParams): number {
+  const queryMax = positiveIntegerParam(params, "liveBubbleMaxInflightChunks")
+    ?? positiveIntegerParam(params, "live_bubble_max_inflight_chunks");
+  if (queryMax !== null) return Math.max(1, queryMax);
+  const fallback = Number.isFinite(defaultMax) && defaultMax > 0 ? Math.floor(defaultMax) : DEFAULT_GPU_MAX_INFLIGHT_CHUNKS;
+  return Math.max(1, fallback);
+}
+
 export function resolveLiveBubbleColliderRadius(params: URLSearchParams): number | null {
   return positiveNumberParam(params, "liveBubbleColliderRadius")
     ?? positiveNumberParam(params, "live_bubble_collider_radius");
@@ -217,6 +227,11 @@ function liveBubbleBuildBudget(defaultBudget: number): number {
 function liveBubbleGpuChunkBudget(): number {
   if (typeof window === "undefined") return resolveLiveBubbleGpuChunkBudget(DEFAULT_GPU_CHUNK_DISPATCH_BUDGET, new URLSearchParams());
   return resolveLiveBubbleGpuChunkBudget(DEFAULT_GPU_CHUNK_DISPATCH_BUDGET, new URLSearchParams(window.location.search));
+}
+
+function liveBubbleMaxInflightChunks(): number {
+  if (typeof window === "undefined") return resolveLiveBubbleMaxInflightChunks(DEFAULT_GPU_MAX_INFLIGHT_CHUNKS, new URLSearchParams());
+  return resolveLiveBubbleMaxInflightChunks(DEFAULT_GPU_MAX_INFLIGHT_CHUNKS, new URLSearchParams(window.location.search));
 }
 
 function liveBubbleColliderRadiusOverride(): number | null {
@@ -284,6 +299,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
   const gpuChunkDispatchBudget = liveBubbleGpuChunkBudget();
+  const gpuMaxInflightChunks = liveBubbleMaxInflightChunks();
   const colliderRadiusOverride = liveBubbleColliderRadiusOverride();
   const chunkGroups = new Map<string, ChunkGroupEntry>();
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
@@ -530,11 +546,19 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     slowestPageMs = Math.max(slowestPageMs, performance.now() - job.startedAtMs);
   };
 
+  const countGpuInflightChunks = (): number => {
+    let inflightChunks = 0;
+    for (const job of gpuPendingBuilds.values()) inflightChunks += job.inflight;
+    return inflightChunks;
+  };
+
   const drainGpuPendingBuilds = () => {
     let dispatched = 0;
+    let inflightChunks = countGpuInflightChunks();
     const jobs = [...gpuPendingBuilds.entries()]
       .sort((a, b) => (chunkGroups.get(b[0])?.lastTouchFrame ?? -1) - (chunkGroups.get(a[0])?.lastTouchFrame ?? -1));
     for (const [key, job] of jobs) {
+      if (inflightChunks >= gpuMaxInflightChunks) return;
       if (currentFrame < job.nextRetryFrame) continue;
       const entry = chunkGroups.get(key);
       const gpuMesher = deps.getGpuMesher();
@@ -552,10 +576,11 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         }
         continue;
       }
-      while (job.chunks.length > 0 && dispatched < gpuChunkDispatchBudget) {
+      while (job.chunks.length > 0 && dispatched < gpuChunkDispatchBudget && inflightChunks < gpuMaxInflightChunks) {
         const [dx, dz] = job.chunks.shift()!;
         job.inflight++;
         dispatched++;
+        inflightChunks++;
         const chunkStartedAt = performance.now();
         gpuMesher.meshChunk(job.px * P + dx, job.pz * P + dz, job.worldBounds, job.edits)
           .then((cm) => {
@@ -589,7 +614,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
             completeGpuChunk(key, entry, job);
           });
       }
-      if (dispatched >= gpuChunkDispatchBudget) return;
+      if (dispatched >= gpuChunkDispatchBudget || inflightChunks >= gpuMaxInflightChunks) return;
     }
   };
 
@@ -804,6 +829,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         colliderRegistrations,
         colliderRemovals,
         gpuDispatchBudget: gpuChunkDispatchBudget,
+        gpuMaxInflightChunks,
         pendingChunks: chunkCounts.pendingChunks,
         inflightChunks: chunkCounts.inflightChunks,
         readyVisualPages: required.readyPages,

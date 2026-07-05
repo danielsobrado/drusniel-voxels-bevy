@@ -165,8 +165,11 @@ describe("infinite acceptance convergence helpers", () => {
   it("passes higher acceptance warmup budgets by profile", () => {
     expect(profileAcceptanceParams("reuse")).toMatchObject({
       liveBubbleBudget: "4",
-      liveBubbleGpuChunkBudget: "12",
-      liveClodRootBudget: "16",
+      liveBubbleGpuChunkBudget: "16",
+      liveBubbleMaxInflightChunks: "128",
+      liveClodRootBudget: "32",
+      liveClodRootApplyBudget: "8",
+      liveClodRootMaxInflightBatches: "4",
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "2",
       liveClodRootRadius: "2048",
@@ -176,7 +179,10 @@ describe("infinite acceptance convergence helpers", () => {
     expect(profileAcceptanceParams("fast")).toMatchObject({
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
-      liveClodRootBudget: "16",
+      liveBubbleMaxInflightChunks: "128",
+      liveClodRootBudget: "32",
+      liveClodRootApplyBudget: "8",
+      liveClodRootMaxInflightBatches: "4",
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "2",
       liveClodRootRadius: "2048",
@@ -189,6 +195,8 @@ describe("infinite acceptance convergence helpers", () => {
     const params = profileAcceptanceParams("reuse");
 
     expect(Number(params["liveClodRootBudget"])).toBeGreaterThan(0);
+    expect(Number(params["liveClodRootApplyBudget"])).toBeGreaterThan(0);
+    expect(Number(params["liveClodRootMaxInflightBatches"])).toBeGreaterThan(0);
     expect(Number(params["liveClodRootMaxCached"])).toBeGreaterThan(0);
     expect(Number(params["liveClodRootMaxLevel"])).toBeGreaterThan(0);
     expect(Number(params["liveClodRootRadius"])).toBeGreaterThan(0);

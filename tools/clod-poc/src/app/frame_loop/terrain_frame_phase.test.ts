@@ -26,6 +26,7 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
   colliderRegistrations: 0,
   colliderRemovals: 0,
   gpuDispatchBudget: 2,
+  gpuMaxInflightChunks: Number.MAX_SAFE_INTEGER,
   pendingChunks: 0,
   inflightChunks: 0,
   readyVisualPages: 0,

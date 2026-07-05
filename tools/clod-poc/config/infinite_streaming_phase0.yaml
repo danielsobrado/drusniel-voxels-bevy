@@ -216,6 +216,7 @@ metrics:
     - residency_missing_live
     - residency_missing_clod
     - stream_ready_frame
+    - live_clod_stream_max_inflight_batches
     - live_clod_stream_max_cached_pages
     - live_clod_stream_safety_cache_capacity_ok
     - far_shell_recenter_count

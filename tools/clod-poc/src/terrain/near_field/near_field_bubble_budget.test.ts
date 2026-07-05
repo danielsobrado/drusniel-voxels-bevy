@@ -3,6 +3,7 @@ import {
   resolveLiveBubbleBuildBudget,
   resolveLiveBubbleColliderRadius,
   resolveLiveBubbleGpuChunkBudget,
+  resolveLiveBubbleMaxInflightChunks,
 } from "./near_field_bubble_controller.js";
 
 describe("resolveLiveBubbleBuildBudget", () => {
@@ -40,6 +41,17 @@ describe("resolveLiveBubbleGpuChunkBudget", () => {
   it("accepts camelCase and snake_case query overrides", () => {
     expect(resolveLiveBubbleGpuChunkBudget(2, new URLSearchParams("liveBubbleGpuChunkBudget=12"))).toBe(12);
     expect(resolveLiveBubbleGpuChunkBudget(2, new URLSearchParams("live_bubble_gpu_chunk_budget=16"))).toBe(16);
+  });
+});
+
+describe("resolveLiveBubbleMaxInflightChunks", () => {
+  it("keeps the default without an override", () => {
+    expect(resolveLiveBubbleMaxInflightChunks(256, new URLSearchParams())).toBe(256);
+  });
+
+  it("accepts camelCase and snake_case query overrides", () => {
+    expect(resolveLiveBubbleMaxInflightChunks(256, new URLSearchParams("liveBubbleMaxInflightChunks=128"))).toBe(128);
+    expect(resolveLiveBubbleMaxInflightChunks(256, new URLSearchParams("live_bubble_max_inflight_chunks=64"))).toBe(64);
   });
 });
 
