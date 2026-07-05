@@ -3,15 +3,24 @@ import * as THREE from "three";
 import {
   DEFAULT_FAR_CLIPMAP_CONFIG,
   createFarClipmapController,
+  createFarClipmapTerrainGeometry,
   farClipmapConfigFromSearchParams,
   farClipmapSnap,
   farClipmapTileKeysForSnap,
   resolveFarClipmapConfig,
+  type FarClipmapSource,
 } from "./index.js";
 
 function query(text: string): URLSearchParams {
   return new URLSearchParams(text);
 }
+
+const sampledSource: FarClipmapSource = {
+  sampleHeight: (x, z) => x * 0.1 + z * 0.01,
+  sampleMaterial: (x) => Math.abs(Math.floor(x)) % 3,
+  sampleBiome: () => 0,
+  sampleWater: () => 0,
+};
 
 describe("far clipmap config", () => {
   it("uses deterministic defaults", () => {
@@ -53,18 +62,50 @@ describe("far clipmap snapping", () => {
   });
 });
 
+describe("far clipmap geometry", () => {
+  it("builds sampled annular terrain geometry", () => {
+    const geometry = createFarClipmapTerrainGeometry({
+      gridResolution: 5,
+      centerX: 0,
+      centerZ: 0,
+      innerRadiusM: 2,
+      outerRadiusM: 4,
+      heightScale: 1,
+      yOffset: 0,
+      source: sampledSource,
+    });
+
+    const position = geometry.getAttribute("position");
+    const color = geometry.getAttribute("color");
+    expect(position.count).toBe(25);
+    expect(color.count).toBe(25);
+    expect((geometry.getIndex()?.count ?? 0)).toBeGreaterThan(0);
+    expect(position.getY(0)).toBeCloseTo(-0.44);
+    geometry.dispose();
+  });
+});
+
 describe("far clipmap controller", () => {
-  it("updates uniforms and becomes ready across budgeted frames", () => {
+  it("rebuilds sampled rings and becomes ready across budgeted frames", () => {
     const scene = new THREE.Scene();
-    const config = resolveFarClipmapConfig({ ringCount: 3, maxRebuildsPerFrame: 2 });
-    const controller = createFarClipmapController(scene, config);
+    const config = resolveFarClipmapConfig({
+      ringCount: 3,
+      maxRebuildsPerFrame: 2,
+      gridResolution: 5,
+      innerRadiusM: 8,
+      outerRadiusM: 64,
+      snapSizeM: 16,
+    });
+    const controller = createFarClipmapController(scene, config, sampledSource);
 
     const first = controller.update(new THREE.Vector3(1, 0, 1));
     const second = controller.update(new THREE.Vector3(1, 0, 1));
+    const firstMesh = scene.children[0] as THREE.Mesh;
 
     expect(first.readyTiles).toBe(2);
     expect(first.pendingTiles).toBe(1);
     expect(second.readyTiles).toBe(3);
+    expect(firstMesh.geometry.getAttribute("position").count).toBe(25);
     expect(controller.ownershipSnapshot().ready).toBe(true);
     controller.setDebugMode("ownership");
     controller.setVisible(false);
