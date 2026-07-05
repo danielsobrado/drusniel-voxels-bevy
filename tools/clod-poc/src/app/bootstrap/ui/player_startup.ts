@@ -8,6 +8,7 @@ import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
 const MAX_PLAYER_FRAME_DELTA_SECONDS = 0.1;
+const PLAYER_AUTOMATION_SURFACE_OFFSET_M = 0.02;
 
 export function runPlayerStartup(
   ctx: UiStartupContext,
@@ -106,6 +107,46 @@ export function runPlayerStartup(
     resetPlayerInput: () => playerInputController.resetPlayerInput(),
     onStartPlayingFacing: (yaw, pitch) => playerInputController.setPlayerYawPitch(yaw, pitch),
   });
+
+  const automationHooks = input.longView.hooks;
+  if (automationHooks) {
+    const baseSetPose = automationHooks.setPose;
+    const baseGetPose = automationHooks.getPose;
+    automationHooks.setPose = (pose) => {
+      if (interaction.mode !== "playing") {
+        baseSetPose?.(pose);
+        return;
+      }
+      const terrainY = surfaceHeight(pose.p[0], pose.p[2]);
+      const playerY = Number.isFinite(terrainY)
+        ? terrainY + PLAYER_AUTOMATION_SURFACE_OFFSET_M
+        : pose.p[1] - player.config.eyeHeight;
+      player.position.set(pose.p[0], playerY, pose.p[2]);
+      player.lastSafePosition.copy(player.position);
+      player.velocity.set(0, 0, 0);
+      player.grounded = true;
+      playerInputController.resetPlayerInput();
+      playerInputController.setPlayerYawPitch(pose.yaw, pose.pitch);
+      camera.position.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, player.config.eyeHeight);
+      camera.rotation.set(pose.pitch, pose.yaw, 0, "YXZ");
+    };
+    automationHooks.getPose = () => {
+      if (interaction.mode === "playing") {
+        return {
+          p: [camera.position.x, camera.position.y, camera.position.z],
+          yaw: playerInputController.playerYaw,
+          pitch: playerInputController.playerPitch,
+          fov: camera.fov,
+        };
+      }
+      return baseGetPose?.() ?? {
+        p: [camera.position.x, camera.position.y, camera.position.z],
+        yaw: camera.rotation.y,
+        pitch: camera.rotation.x,
+        fov: camera.fov,
+      };
+    };
+  }
 
   bindings.resetPlayerInput = () => playerInputController.resetPlayerInput();
   bindings.updatePlayerModeUi = () => playerModeController.updatePlayerModeUi();
