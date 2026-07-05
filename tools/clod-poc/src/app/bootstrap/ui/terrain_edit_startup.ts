@@ -1,8 +1,9 @@
 import type * as THREE from "three";
 import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
+import { markSaveRegionsDirtyForBounds } from "../../../save/save_runtime.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
-import { TerrainEditDirtyQueue } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
+import { TerrainEditDirtyQueue, type TerrainEditDirtyEvent } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
 import {
   canCommitBuild,
   canCommitTerrainEdit,
@@ -18,6 +19,18 @@ export interface TerrainEditStartupResult {
   scheduleDig: (ray: THREE.Ray) => void;
   scheduleConstructionTerrainConform: (request: ConstructionTerrainConformRequest) => void;
   playerTerraformEditActive: () => boolean;
+}
+
+class SaveTrackingDirtyQueue extends TerrainEditDirtyQueue {
+  enqueue(event: TerrainEditDirtyEvent): void {
+    super.enqueue(event);
+    markSaveRegionsDirtyForBounds({
+      minX: event.worldAabb.minX,
+      minZ: event.worldAabb.minZ,
+      maxX: event.worldAabb.maxX,
+      maxZ: event.worldAabb.maxZ,
+    });
+  }
 }
 
 export function runTerrainEditStartup(
@@ -46,7 +59,7 @@ export function runTerrainEditStartup(
   } = input.runtime;
   const { updateInfo } = infoPanel;
   const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, input.searchParams);
-  const dirtyQueue = new TerrainEditDirtyQueue();
+  const dirtyQueue = new SaveTrackingDirtyQueue();
   const authorityOrigin = () => input.interaction.mode === "playing" ? input.player.position : null;
   const authorityCounters = () => input.longView.hooks?.stats?.counters ?? null;
 
