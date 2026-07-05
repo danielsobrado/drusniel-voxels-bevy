@@ -31,6 +31,8 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_radius_m"] = 2048;
   counters["live_clod_stream_ready_pages"] = 1;
   counters["live_clod_stream_active_root_pages"] = 1;
+  counters["live_clod_stream_max_cached_pages"] = 512;
+  counters["live_clod_stream_safety_cache_capacity_ok"] = 1;
   counters["live_clod_stream_safety_required_pages"] = 1;
   counters["live_clod_stream_safety_ready_pages"] = 1;
   counters["live_clod_stream_apply_ms"] = 1;
@@ -135,6 +137,19 @@ describe("infinite islands thresholds", () => {
 
     expect(evaluateThresholds(counters).failures).toContain(
       "live_clod_stream_parent_coverage_violations=1 failed: must equal 0",
+    );
+  });
+
+  it("fails when the streamed CLOD safety set cannot fit cache", () => {
+    const counters = validCounters();
+    counters["live_clod_stream_safety_cache_capacity_ok"] = 0;
+    counters["live_clod_stream_safety_required_pages"] = 513;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_safety_cache_capacity_ok=0 failed: must equal 1 when streamed roots are required",
+    );
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_safety_required_pages=513 failed: must be <= live_clod_stream_max_cached_pages",
     );
   });
 

@@ -38,6 +38,8 @@ interface AcceptanceConvergenceSnapshot {
   streamReady: number;
   streamCached: number;
   streamFailed: number;
+  streamMaxCached: number;
+  streamSafetyCacheCapacityOk: number;
   streamSafetyRequired: number;
   streamSafetyReady: number;
   streamSafetyPending: number;
@@ -189,6 +191,7 @@ function convergenceBlockers(snapshot: AcceptanceConvergenceSnapshot): string[] 
   );
   const streamQuiet = snapshot.streamRequired === 0 || (
     snapshot.streamFailed === 0
+    && snapshot.streamSafetyCacheCapacityOk !== 0
     && snapshot.streamSafetyPending === 0
     && snapshot.streamSafetyInflight === 0
     && snapshot.streamParentCoverageViolations === 0
@@ -210,6 +213,8 @@ function convergenceBlockers(snapshot: AcceptanceConvergenceSnapshot): string[] 
     blockers.push(
       `liveClodStream required=${snapshot.streamRequired} budget=${snapshot.streamBudget} ` +
       `pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
+      `safetyCacheCapacityOk=${snapshot.streamSafetyCacheCapacityOk} safetyRequired=${snapshot.streamSafetyRequired} ` +
+      `maxCached=${snapshot.streamMaxCached} ` +
       `safetyPending=${snapshot.streamSafetyPending} safetyInflight=${snapshot.streamSafetyInflight} ` +
       `refinementPending=${snapshot.streamRefinementPending} refinementInflight=${snapshot.streamRefinementInflight} ` +
       `parentCoverageViolations=${snapshot.streamParentCoverageViolations} activeRoots=${snapshot.streamActiveRootPages} ` +
@@ -251,6 +256,8 @@ async function readAcceptanceConvergenceSnapshot(page: Page): Promise<Acceptance
       streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
       streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
       streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
+      streamMaxCached: counters["live_clod_stream_max_cached_pages"] ?? 0,
+      streamSafetyCacheCapacityOk: counters["live_clod_stream_safety_cache_capacity_ok"] ?? 1,
       streamSafetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
       streamSafetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
       streamSafetyPending: counters["live_clod_stream_safety_pending_pages"] ?? 0,

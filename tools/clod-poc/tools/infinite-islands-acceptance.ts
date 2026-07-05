@@ -488,6 +488,8 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
         streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
         streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
+        streamMaxCached: counters["live_clod_stream_max_cached_pages"] ?? 0,
+        streamSafetyCacheCapacityOk: counters["live_clod_stream_safety_cache_capacity_ok"] ?? 1,
         streamSafetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
         streamSafetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
         streamSafetyPending: counters["live_clod_stream_safety_pending_pages"] ?? 0,
@@ -503,6 +505,12 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
     if (c.streamRequired > 0 && c.streamBudget === 0) {
       const blockers = convergenceTimeoutBlockers(c);
       const message = `${sceneName}: streamed CLOD required but build budget is zero`;
+      if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
+      throw new Error(message);
+    }
+    if (c.streamRequired > 0 && c.streamSafetyCacheCapacityOk === 0) {
+      const blockers = convergenceTimeoutBlockers(c);
+      const message = `${sceneName}: CLOD safety set cannot fit cache`;
       if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
       throw new Error(message);
     }

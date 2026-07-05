@@ -2,6 +2,9 @@
   "headless": true,
   "channel": "chromium",
   "args": [
-    "--enable-unsafe-webgpu"
+    "--enable-unsafe-webgpu",
+    "--ignore-gpu-blocklist",
+    "--enable-features=Vulkan,WebGPU",
+    "--disable-gpu-sandbox"
   ]
 }

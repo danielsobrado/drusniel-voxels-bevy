@@ -167,6 +167,17 @@ describe("streamingClodRequiredPageCoords", () => {
     ]);
   });
 
+  it("uses fewer safety pages when the streamed root level is coarser", () => {
+    const center = new THREE.Vector3(0, 0, 0);
+    const level1Safety = streamingClodRequiredPageCoords(center, 512, 32, 1)
+      .filter((coord) => coord.level === 1);
+    const level2Safety = streamingClodRequiredPageCoords(center, 512, 32, 2)
+      .filter((coord) => coord.level === 2);
+
+    expect(level2Safety.length).toBeGreaterThan(0);
+    expect(level2Safety.length).toBeLessThan(level1Safety.length);
+  });
+
   it("sorts budget candidates coarse-to-fine before distance within the same level", () => {
     const sorted = sortStreamingClodPageCoordsForLoad([
       { level: 0, px: 0, pz: 0, centerX: 0, centerZ: 0 },
@@ -344,6 +355,37 @@ describe("createStreamingClodRootController", () => {
     expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
   });
 
+  it("evicts refinement before active safety coverage when cache is over capacity", async () => {
+    const { controller, roots, allNodes, buildPages, requests } = makeController({
+      buildBudgetPagesPerFrame: 1,
+      applyBudgetPagesPerFrame: 8,
+      maxCachedPages: 1,
+      evictDistanceMultiplier: 1000,
+    });
+    const center = new THREE.Vector3(272, 0, 16);
+    controller.update(center, 1);
+    const parentCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    resolveRequest(requests[0]!, parentCoords);
+    await flushAsync();
+
+    controller.update(center, 1);
+    expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
+    const childCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[1]![0] as readonly PageCoord[];
+    expect(childCoords.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toEqual(["L0:8,0"]);
+    resolveRequest(requests[1]!, childCoords);
+    await flushAsync();
+
+    const applied = controller.update(center, 1);
+    expect(applied.cachedPages).toBe(2);
+
+    const trimmed = controller.update(center, 1);
+    expect(trimmed.evictions).toBe(1);
+    expect(trimmed.cachedPages).toBe(1);
+    expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
+    expect(allNodes.map((node) => node.id)).toEqual(["L1:4,0"]);
+    expect(controller.readyPageKeys()).toEqual(["L1:4,0"]);
+  });
+
   it("counts active parents as safety-ready while child refinement is still inflight", async () => {
     const { controller, buildPages, requests } = makeController({ buildBudgetPagesPerFrame: 2 });
     const center = new THREE.Vector3(272, 0, 16);
@@ -373,6 +415,19 @@ describe("createStreamingClodRootController", () => {
     expect(stats.safetyPendingPages).toBe(1);
     expect(stats.parentCoverageViolations).toBe(1);
     expect(stats.activeRootPages).toBe(0);
+  });
+
+  it("reports when required safety coverage cannot fit the configured cache", () => {
+    const { controller } = makeController({
+      buildPages: null,
+      maxCachedPages: 1,
+    });
+
+    const stats = controller.update(new THREE.Vector3(192, 0, 0), 80);
+
+    expect(stats.safetyRequiredPages).toBeGreaterThan(1);
+    expect(stats.maxCachedPages).toBe(1);
+    expect(stats.safetyCacheCapacityOk).toBe(0);
   });
 
   it("reports real applied streamed pages as ready keys", async () => {

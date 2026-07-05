@@ -27,6 +27,8 @@ function snapshot(overrides: Partial<ConvergenceSnapshot> = {}): ConvergenceSnap
     streamReady: 1,
     streamCached: 1,
     streamFailed: 0,
+    streamMaxCached: 512,
+    streamSafetyCacheCapacityOk: 1,
     streamSafetyRequired: 1,
     streamSafetyReady: 1,
     streamSafetyPending: 0,
@@ -75,6 +77,32 @@ describe("infinite acceptance convergence helpers", () => {
 
     expect(result.streamQuiet).toBe(false);
     expect(blockers[0]).toContain("clodStream: budget=0");
+  });
+
+  it("does not wait when the CLOD safety set cannot fit cache", () => {
+    const result = evaluateConvergence(snapshot({
+      streamRequired: 4230,
+      streamMaxCached: 256,
+      streamSafetyCacheCapacityOk: 0,
+      streamSafetyRequired: 874,
+      streamSafetyReady: 256,
+      streamSafetyPending: 616,
+      streamParentCoverageViolations: 618,
+      streamActiveRootPages: 256,
+    }));
+    const blockers = convergenceTimeoutBlockers(snapshot({
+      streamRequired: 4230,
+      streamMaxCached: 256,
+      streamSafetyCacheCapacityOk: 0,
+      streamSafetyRequired: 874,
+      streamSafetyReady: 256,
+      streamSafetyPending: 616,
+      streamParentCoverageViolations: 618,
+      streamActiveRootPages: 256,
+    }));
+
+    expect(result.streamQuiet).toBe(false);
+    expect(blockers[0]).toContain("safetyCacheCapacityOk=0 safetyRequired=874 maxCached=256");
   });
 
   it("treats parent-covered refinement work as quiet", () => {
@@ -138,8 +166,9 @@ describe("infinite acceptance convergence helpers", () => {
     expect(profileAcceptanceParams("reuse")).toMatchObject({
       liveBubbleBudget: "4",
       liveBubbleGpuChunkBudget: "12",
-      liveClodRootBudget: "8",
-      liveClodRootMaxCached: "128",
+      liveClodRootBudget: "16",
+      liveClodRootMaxCached: "512",
+      liveClodRootMaxLevel: "2",
       liveClodRootRadius: "2048",
       farSummaryMaxTileBuildsPerFrame: "4",
       farSummaryMaxBuildMsPerFrame: "6",
@@ -147,8 +176,9 @@ describe("infinite acceptance convergence helpers", () => {
     expect(profileAcceptanceParams("fast")).toMatchObject({
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
-      liveClodRootBudget: "12",
-      liveClodRootMaxCached: "128",
+      liveClodRootBudget: "16",
+      liveClodRootMaxCached: "512",
+      liveClodRootMaxLevel: "2",
       liveClodRootRadius: "2048",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
@@ -160,6 +190,7 @@ describe("infinite acceptance convergence helpers", () => {
 
     expect(Number(params["liveClodRootBudget"])).toBeGreaterThan(0);
     expect(Number(params["liveClodRootMaxCached"])).toBeGreaterThan(0);
+    expect(Number(params["liveClodRootMaxLevel"])).toBeGreaterThan(0);
     expect(Number(params["liveClodRootRadius"])).toBeGreaterThan(0);
   });
 });

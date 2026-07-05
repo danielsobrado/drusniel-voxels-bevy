@@ -14,6 +14,8 @@ export interface StreamingClodRootStats {
   inflightBatches: number;
   applyQueuePages: number;
   activeRootPages: number;
+  maxCachedPages: number;
+  safetyCacheCapacityOk: number;
   safetyRequiredPages: number;
   safetyReadyPages: number;
   safetyPendingPages: number;
@@ -266,6 +268,8 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
   counters["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   counters["live_clod_stream_active_root_pages"] = stats.activeRootPages;
+  counters["live_clod_stream_max_cached_pages"] = stats.maxCachedPages;
+  counters["live_clod_stream_safety_cache_capacity_ok"] = stats.safetyCacheCapacityOk;
   counters["live_clod_stream_safety_required_pages"] = stats.safetyRequiredPages;
   counters["live_clod_stream_safety_ready_pages"] = stats.safetyReadyPages;
   counters["live_clod_stream_safety_pending_pages"] = stats.safetyPendingPages;
@@ -303,6 +307,7 @@ function resetStreamingCounterMirrors(): void {
   counters["live_clod_stream_stale_discards_total"] = 0;
   counters["live_clod_stream_apply_queue_pages"] = 0;
   counters["live_clod_stream_active_root_pages"] = 0;
+  counters["live_clod_stream_safety_cache_capacity_ok"] = 1;
   counters["live_clod_stream_safety_required_pages"] = 0;
   counters["live_clod_stream_safety_ready_pages"] = 0;
   counters["live_clod_stream_safety_pending_pages"] = 0;
@@ -454,7 +459,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let workerBuildFailures = 0;
   let workerBuildTimeouts = 0;
   let activeRootIds = new Set<string>();
-  let latest: StreamingClodRootStats = emptyStats(maxRootLevel);
+  let latest: StreamingClodRootStats = emptyStats(maxRootLevel, maxCachedPages);
 
   const beginMovementProbe = (): void => {
     probe.active = true;
@@ -532,27 +537,73 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return true;
   };
 
+  const requiredSafetyIds = (requiredIds: Iterable<string>): Set<string> =>
+    new Set([...requiredIds].filter((id) => parseStreamingClodPageKey(id).level === maxRootLevel));
+
+  const safetyCoverageRootIds = (safetyIds: ReadonlySet<string>): Set<string> => {
+    const protectedIds = new Set<string>();
+    for (const activeId of activeRootIds) {
+      for (const safetyId of safetyIds) {
+        if (activeId === safetyId || pageContainsPage(activeId, safetyId)) {
+          protectedIds.add(activeId);
+          break;
+        }
+      }
+    }
+    return protectedIds;
+  };
+
+  const evictCachedPage = (id: string, cachedIds: Set<string>): void => {
+    cached.delete(id);
+    cachedIds.delete(id);
+    removeRoot(id);
+    activeRootIds.delete(id);
+  };
+
+  const evictionPriority = (
+    id: string,
+    entry: CachedPage,
+    protectedSafetyIds: ReadonlySet<string>,
+    center: THREE.Vector3,
+    radiusM: number,
+  ): number => {
+    if (protectedSafetyIds.has(id)) return 99;
+    const page = parseStreamingClodPageKey(id);
+    if (page.level < maxRootLevel) return 0;
+    return cacheHorizonContains(entry.centerX, entry.centerZ, center, radiusM) ? 2 : 1;
+  };
+
   const evict = (center: THREE.Vector3, radiusM: number): number => {
     let evictions = 0;
     const cachedIds = new Set(cached.keys());
-    for (const [id, entry] of [...cached.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const protectedSafetyIds = safetyCoverageRootIds(requiredSafetyIds(requiredNow));
+    const outsideHorizon = [...cached.entries()]
+      .filter(([, entry]) => !cacheHorizonContains(entry.centerX, entry.centerZ, center, radiusM))
+      .sort((a, b) =>
+        evictionPriority(a[0], a[1], protectedSafetyIds, center, radiusM)
+        - evictionPriority(b[0], b[1], protectedSafetyIds, center, radiusM)
+        || a[1].lastTouchFrame - b[1].lastTouchFrame
+        || a[0].localeCompare(b[0]));
+    for (const [id, entry] of outsideHorizon) {
+      if (!cached.has(id)) continue;
       if (cacheHorizonContains(entry.centerX, entry.centerZ, center, radiusM)) continue;
+      if (protectedSafetyIds.has(id)) continue;
       if (streamingClodPageHasRequiredNotReadyDescendant(id, requiredNow, cachedIds)) continue;
-      cached.delete(id);
-      cachedIds.delete(id);
-      removeRoot(id);
-      activeRootIds.delete(id);
+      evictCachedPage(id, cachedIds);
       evictions++;
     }
     if (cached.size <= maxCachedPages) return evictions;
-    const lru = [...cached.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame || a[0].localeCompare(b[0]));
+    const lru = [...cached.entries()].sort((a, b) =>
+      evictionPriority(a[0], a[1], protectedSafetyIds, center, radiusM)
+      - evictionPriority(b[0], b[1], protectedSafetyIds, center, radiusM)
+      || a[1].lastTouchFrame - b[1].lastTouchFrame
+      || a[0].localeCompare(b[0]));
     while (cached.size > maxCachedPages && lru.length > 0) {
       const [id] = lru.shift()!;
+      if (!cached.has(id)) continue;
+      if (protectedSafetyIds.has(id)) continue;
       if (streamingClodPageHasRequiredNotReadyDescendant(id, requiredNow, cachedIds)) continue;
-      cached.delete(id);
-      cachedIds.delete(id);
-      removeRoot(id);
-      activeRootIds.delete(id);
+      evictCachedPage(id, cachedIds);
       evictions++;
     }
     return evictions;
@@ -639,7 +690,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const buildStillQueued = (id: string): boolean => ready.some((entry) => entry.node.id === id);
 
   const countStreamCoverage = (requiredIds: ReadonlySet<string>) => {
-    const safetyIds = [...requiredIds].filter((id) => parseStreamingClodPageKey(id).level === maxRootLevel);
+    const safetyIds = [...requiredSafetyIds(requiredIds)];
     let safetyReadyPages = 0;
     let safetyPendingPages = 0;
     let safetyInflightPages = 0;
@@ -667,6 +718,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
 
     return {
       safetyRequiredPages: safetyIds.length,
+      safetyCacheCapacityOk: safetyIds.length <= maxCachedPages ? 1 : 0,
       safetyReadyPages,
       safetyPendingPages,
       safetyInflightPages,
@@ -748,7 +800,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       if (!active) {
         requiredNow = new Set();
         ready.length = 0;
-        latest = emptyStats(maxRootLevel);
+        latest = emptyStats(maxRootLevel, maxCachedPages);
         mirrorStreamingProbeCounters(latest);
         return latest;
       }
@@ -798,6 +850,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         inflightBatches: inFlight ? 1 : 0,
         applyQueuePages: ready.length,
         activeRootPages: activeRootIds.size,
+        maxCachedPages,
+        safetyCacheCapacityOk: coverage.safetyCacheCapacityOk,
         safetyRequiredPages: coverage.safetyRequiredPages,
         safetyReadyPages: coverage.safetyReadyPages,
         safetyPendingPages: coverage.safetyPendingPages,
@@ -838,7 +892,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 }
 
-function emptyStats(maxRootLevel = 0): StreamingClodRootStats {
+function emptyStats(maxRootLevel = 0, maxCachedPages = DEFAULT_MAX_CACHED_PAGES): StreamingClodRootStats {
   return {
     requiredPages: 0,
     cachedPages: 0,
@@ -851,6 +905,8 @@ function emptyStats(maxRootLevel = 0): StreamingClodRootStats {
     inflightBatches: 0,
     applyQueuePages: 0,
     activeRootPages: 0,
+    maxCachedPages,
+    safetyCacheCapacityOk: 1,
     safetyRequiredPages: 0,
     safetyReadyPages: 0,
     safetyPendingPages: 0,

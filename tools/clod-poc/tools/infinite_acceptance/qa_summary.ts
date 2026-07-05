@@ -48,6 +48,8 @@ export function buildInfiniteQaSummary(scene: string, stats: JsonRecord): JsonRe
           radius_m: counters["live_clod_stream_radius_m"] ?? 0,
           required_pages: counters["live_clod_stream_required_pages"] ?? 0,
           cached_pages: counters["live_clod_stream_cached_pages"] ?? 0,
+          max_cached_pages: counters["live_clod_stream_max_cached_pages"] ?? 0,
+          safety_cache_capacity_ok: counters["live_clod_stream_safety_cache_capacity_ok"] ?? 0,
           active_root_pages: counters["live_clod_stream_active_root_pages"] ?? 0,
           safety_required_pages: counters["live_clod_stream_safety_required_pages"] ?? 0,
           safety_ready_pages: counters["live_clod_stream_safety_ready_pages"] ?? 0,

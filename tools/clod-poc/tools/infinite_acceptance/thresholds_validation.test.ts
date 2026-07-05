@@ -24,6 +24,8 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_radius_m"] = 2048;
   values["live_clod_stream_ready_pages"] = 1;
   values["live_clod_stream_active_root_pages"] = 1;
+  values["live_clod_stream_max_cached_pages"] = 512;
+  values["live_clod_stream_safety_cache_capacity_ok"] = 1;
   values["live_clod_stream_safety_required_pages"] = 1;
   values["live_clod_stream_safety_ready_pages"] = 1;
   values["live_clod_stream_apply_ms"] = 1;
@@ -98,6 +100,10 @@ describe("infinite islands threshold validation", () => {
 
   it("fails when the streamed CLOD radius is smaller than the ownership CLOD radius", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_radius_m: 96 })).passed).toBe(false);
+  });
+
+  it("fails when the streamed CLOD safety set cannot fit cache", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_safety_cache_capacity_ok: 0 })).passed).toBe(false);
   });
 
   it("fails when vegetation is still clamped to the startup grid", () => {

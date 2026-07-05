@@ -103,3 +103,4 @@ tools/clod-poc/pr/*
 *-PR-NOTES.md
 tools/clod-poc/shots/phase-1/*.png
 tools/clod-poc/shots/phase-0/*.png
+tools/clod-poc/.cache/webgpu-flags.json

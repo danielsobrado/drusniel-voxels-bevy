@@ -19,6 +19,8 @@ export interface ConvergenceSnapshot {
   streamReady: number;
   streamCached: number;
   streamFailed: number;
+  streamMaxCached: number;
+  streamSafetyCacheCapacityOk: number;
   streamSafetyRequired: number;
   streamSafetyReady: number;
   streamSafetyPending: number;
@@ -52,8 +54,9 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
       liveBubbleColliderRadius: "128",
-      liveClodRootBudget: "12",
-      liveClodRootMaxCached: "128",
+      liveClodRootBudget: "16",
+      liveClodRootMaxCached: "512",
+      liveClodRootMaxLevel: "2",
       liveClodRootRadius: "2048",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
@@ -63,8 +66,9 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     liveBubbleBudget: "4",
     liveBubbleGpuChunkBudget: "12",
     liveBubbleColliderRadius: "128",
-    liveClodRootBudget: "8",
-    liveClodRootMaxCached: "128",
+    liveClodRootBudget: "16",
+    liveClodRootMaxCached: "512",
+    liveClodRootMaxLevel: "2",
     liveClodRootRadius: "2048",
     farSummaryMaxTileBuildsPerFrame: "4",
     farSummaryMaxBuildMsPerFrame: "6",
@@ -88,6 +92,7 @@ export function evaluateConvergence(snapshot: ConvergenceSnapshot): {
   );
   const streamQuiet = snapshot.streamRequired === 0 || (
     snapshot.streamFailed === 0
+    && snapshot.streamSafetyCacheCapacityOk !== 0
     && snapshot.streamSafetyPending === 0
     && snapshot.streamSafetyInflight === 0
     && snapshot.streamParentCoverageViolations === 0
@@ -121,10 +126,12 @@ export function convergenceTimeoutBlockers(snapshot: ConvergenceSnapshot): strin
   }
   if (!evaluated.streamQuiet) {
     const streamBudgetBlocked = snapshot.streamRequired > 0 && snapshot.streamBudget === 0;
+    const streamCapacityBlocked = snapshot.streamRequired > 0 && snapshot.streamSafetyCacheCapacityOk === 0;
     blockers.push({
-      rank: streamBudgetBlocked ? Number.POSITIVE_INFINITY : snapshot.streamPending + snapshot.streamInflight,
+      rank: streamBudgetBlocked || streamCapacityBlocked ? Number.POSITIVE_INFINITY : snapshot.streamPending + snapshot.streamInflight,
       text:
         `clodStream: budget=${snapshot.streamBudget} pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
+        `safetyCacheCapacityOk=${snapshot.streamSafetyCacheCapacityOk} safetyRequired=${snapshot.streamSafetyRequired} maxCached=${snapshot.streamMaxCached} ` +
         `safetyPending=${snapshot.streamSafetyPending} safetyInflight=${snapshot.streamSafetyInflight} ` +
         `refinementPending=${snapshot.streamRefinementPending} refinementInflight=${snapshot.streamRefinementInflight} ` +
         `parentCoverageViolations=${snapshot.streamParentCoverageViolations} activeRoots=${snapshot.streamActiveRootPages} ` +
