@@ -38,6 +38,14 @@ interface AcceptanceConvergenceSnapshot {
   streamReady: number;
   streamCached: number;
   streamFailed: number;
+  streamSafetyRequired: number;
+  streamSafetyReady: number;
+  streamSafetyPending: number;
+  streamSafetyInflight: number;
+  streamRefinementPending: number;
+  streamRefinementInflight: number;
+  streamParentCoverageViolations: number;
+  streamActiveRootPages: number;
   proxyBuilding: number;
 }
 
@@ -181,9 +189,10 @@ function convergenceBlockers(snapshot: AcceptanceConvergenceSnapshot): string[] 
   );
   const streamQuiet = snapshot.streamRequired === 0 || (
     snapshot.streamFailed === 0
-    && snapshot.streamPending === 0
-    && snapshot.streamInflight === 0
-    && snapshot.streamReady > 0
+    && snapshot.streamSafetyPending === 0
+    && snapshot.streamSafetyInflight === 0
+    && snapshot.streamParentCoverageViolations === 0
+    && snapshot.streamActiveRootPages > 0
   );
   const proxyQuiet = snapshot.proxyBuilding !== 1;
 
@@ -201,6 +210,9 @@ function convergenceBlockers(snapshot: AcceptanceConvergenceSnapshot): string[] 
     blockers.push(
       `liveClodStream required=${snapshot.streamRequired} budget=${snapshot.streamBudget} ` +
       `pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
+      `safetyPending=${snapshot.streamSafetyPending} safetyInflight=${snapshot.streamSafetyInflight} ` +
+      `refinementPending=${snapshot.streamRefinementPending} refinementInflight=${snapshot.streamRefinementInflight} ` +
+      `parentCoverageViolations=${snapshot.streamParentCoverageViolations} activeRoots=${snapshot.streamActiveRootPages} ` +
       `ready=${snapshot.streamReady} cached=${snapshot.streamCached} failed=${snapshot.streamFailed}`,
     );
   }
@@ -239,6 +251,14 @@ async function readAcceptanceConvergenceSnapshot(page: Page): Promise<Acceptance
       streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
       streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
       streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
+      streamSafetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
+      streamSafetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
+      streamSafetyPending: counters["live_clod_stream_safety_pending_pages"] ?? 0,
+      streamSafetyInflight: counters["live_clod_stream_safety_inflight_pages"] ?? 0,
+      streamRefinementPending: counters["live_clod_stream_refinement_pending_pages"] ?? 0,
+      streamRefinementInflight: counters["live_clod_stream_refinement_inflight_pages"] ?? 0,
+      streamParentCoverageViolations: counters["live_clod_stream_parent_coverage_violations"] ?? 0,
+      streamActiveRootPages: counters["live_clod_stream_active_root_pages"] ?? 0,
       proxyBuilding: counters["shadow_proxy_building"] ?? -1,
     } satisfies AcceptanceConvergenceSnapshot;
   });

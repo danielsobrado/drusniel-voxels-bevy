@@ -27,6 +27,14 @@ function snapshot(overrides: Partial<ConvergenceSnapshot> = {}): ConvergenceSnap
     streamReady: 1,
     streamCached: 1,
     streamFailed: 0,
+    streamSafetyRequired: 1,
+    streamSafetyReady: 1,
+    streamSafetyPending: 0,
+    streamSafetyInflight: 0,
+    streamRefinementPending: 0,
+    streamRefinementInflight: 0,
+    streamParentCoverageViolations: 0,
+    streamActiveRootPages: 1,
     proxyBuilding: 0,
     ...overrides,
   };
@@ -38,6 +46,10 @@ describe("infinite acceptance convergence helpers", () => {
       streamCached: 17,
       streamReady: 0,
       streamPending: 1,
+      streamSafetyReady: 0,
+      streamSafetyPending: 1,
+      streamParentCoverageViolations: 1,
+      streamActiveRootPages: 0,
     })).streamQuiet).toBe(false);
   });
 
@@ -47,25 +59,54 @@ describe("infinite acceptance convergence helpers", () => {
       streamBudget: 0,
       streamReady: 0,
       streamCached: 0,
+      streamSafetyReady: 0,
+      streamParentCoverageViolations: 1,
+      streamActiveRootPages: 0,
     }));
     const blockers = convergenceTimeoutBlockers(snapshot({
       streamRequired: 58,
       streamBudget: 0,
       streamReady: 0,
       streamCached: 0,
+      streamSafetyReady: 0,
+      streamParentCoverageViolations: 1,
+      streamActiveRootPages: 0,
     }));
 
     expect(result.streamQuiet).toBe(false);
     expect(blockers[0]).toContain("clodStream: budget=0");
   });
 
-  it("treats active resident roots as quiet when stream queues are empty", () => {
+  it("treats parent-covered refinement work as quiet", () => {
     expect(evaluateConvergence(snapshot({
       streamCached: 17,
       streamReady: 17,
-      streamPending: 0,
-      streamInflight: 0,
+      streamPending: 8,
+      streamInflight: 1,
+      streamSafetyRequired: 4,
+      streamSafetyReady: 4,
+      streamSafetyPending: 0,
+      streamSafetyInflight: 0,
+      streamRefinementPending: 8,
+      streamRefinementInflight: 8,
+      streamParentCoverageViolations: 0,
+      streamActiveRootPages: 17,
     })).streamQuiet).toBe(true);
+  });
+
+  it("does not treat missing parent coverage as quiet", () => {
+    const result = evaluateConvergence(snapshot({
+      streamSafetyRequired: 4,
+      streamSafetyReady: 3,
+      streamSafetyPending: 1,
+      streamSafetyInflight: 0,
+      streamRefinementPending: 0,
+      streamRefinementInflight: 0,
+      streamParentCoverageViolations: 1,
+      streamActiveRootPages: 3,
+    }));
+
+    expect(result.streamQuiet).toBe(false);
   });
 
   it("prints live-bubble pending/building data in timeout blockers", () => {

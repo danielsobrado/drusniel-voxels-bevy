@@ -79,6 +79,13 @@ function mirrorStreamingClodRootCounters(counters: Record<string, number> | unde
   target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
   target["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   target["live_clod_stream_active_root_pages"] = stats.activeRootPages;
+  target["live_clod_stream_safety_required_pages"] = stats.safetyRequiredPages;
+  target["live_clod_stream_safety_ready_pages"] = stats.safetyReadyPages;
+  target["live_clod_stream_safety_pending_pages"] = stats.safetyPendingPages;
+  target["live_clod_stream_safety_inflight_pages"] = stats.safetyInflightPages;
+  target["live_clod_stream_refinement_pending_pages"] = stats.refinementPendingPages;
+  target["live_clod_stream_refinement_inflight_pages"] = stats.refinementInflightPages;
+  target["live_clod_stream_parent_coverage_violations"] = stats.parentCoverageViolations;
   target["live_clod_stream_ready_pages"] = stats.readyPages;
   target["live_clod_stream_apply_pages_this_frame"] = stats.applyPagesThisFrame;
   target["live_clod_stream_apply_pages_total"] = streamApplyPagesTotal;

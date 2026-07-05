@@ -14,6 +14,13 @@ export interface StreamingClodRootStats {
   inflightBatches: number;
   applyQueuePages: number;
   activeRootPages: number;
+  safetyRequiredPages: number;
+  safetyReadyPages: number;
+  safetyPendingPages: number;
+  safetyInflightPages: number;
+  refinementPendingPages: number;
+  refinementInflightPages: number;
+  parentCoverageViolations: number;
   readyPages: number;
   scheduledPagesThisFrame: number;
   applyPagesThisFrame: number;
@@ -210,6 +217,13 @@ function pageFullyCoveredByFinerCachedPages(pageKey: string, cachedKeys: Iterabl
   return covered.size === span * span;
 }
 
+function pageCoveredByActiveRoots(pageKey: string, activeKeys: Iterable<string>): boolean {
+  for (const activeKey of activeKeys) {
+    if (activeKey === pageKey || pageContainsPage(activeKey, pageKey)) return true;
+  }
+  return pageFullyCoveredByFinerCachedPages(pageKey, activeKeys);
+}
+
 function zeroLevelArray(): number[] {
   return Array.from({ length: STREAM_COUNTER_LEVELS }, () => 0);
 }
@@ -252,6 +266,13 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
   counters["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   counters["live_clod_stream_active_root_pages"] = stats.activeRootPages;
+  counters["live_clod_stream_safety_required_pages"] = stats.safetyRequiredPages;
+  counters["live_clod_stream_safety_ready_pages"] = stats.safetyReadyPages;
+  counters["live_clod_stream_safety_pending_pages"] = stats.safetyPendingPages;
+  counters["live_clod_stream_safety_inflight_pages"] = stats.safetyInflightPages;
+  counters["live_clod_stream_refinement_pending_pages"] = stats.refinementPendingPages;
+  counters["live_clod_stream_refinement_inflight_pages"] = stats.refinementInflightPages;
+  counters["live_clod_stream_parent_coverage_violations"] = stats.parentCoverageViolations;
   counters["live_clod_stream_ready_pages"] = stats.readyPages;
   counters["live_clod_stream_probe_active"] = stats.probeActive;
   counters["live_clod_stream_probe_requested_pages_total"] = stats.probeRequestedPagesTotal;
@@ -279,9 +300,16 @@ function resetStreamingCounterMirrors(): void {
   counters["live_clod_stream_built_total"] = 0;
   counters["live_clod_stream_apply_pages_total"] = 0;
   counters["live_clod_stream_evictions_total"] = 0;
-    counters["live_clod_stream_stale_discards_total"] = 0;
+  counters["live_clod_stream_stale_discards_total"] = 0;
   counters["live_clod_stream_apply_queue_pages"] = 0;
   counters["live_clod_stream_active_root_pages"] = 0;
+  counters["live_clod_stream_safety_required_pages"] = 0;
+  counters["live_clod_stream_safety_ready_pages"] = 0;
+  counters["live_clod_stream_safety_pending_pages"] = 0;
+  counters["live_clod_stream_safety_inflight_pages"] = 0;
+  counters["live_clod_stream_refinement_pending_pages"] = 0;
+  counters["live_clod_stream_refinement_inflight_pages"] = 0;
+  counters["live_clod_stream_parent_coverage_violations"] = 0;
   counters["live_clod_stream_ready_pages"] = 0;
   counters["live_clod_stream_probe_active"] = 1;
   counters["live_clod_stream_probe_requested_pages_total"] = 0;
@@ -610,6 +638,44 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
 
   const buildStillQueued = (id: string): boolean => ready.some((entry) => entry.node.id === id);
 
+  const countStreamCoverage = (requiredIds: ReadonlySet<string>) => {
+    const safetyIds = [...requiredIds].filter((id) => parseStreamingClodPageKey(id).level === maxRootLevel);
+    let safetyReadyPages = 0;
+    let safetyPendingPages = 0;
+    let safetyInflightPages = 0;
+    let refinementPendingPages = 0;
+    let refinementInflightPages = 0;
+    let parentCoverageViolations = 0;
+
+    const inflightIds = inFlight?.ids ?? new Set<string>();
+    for (const id of safetyIds) {
+      const covered = pageCoveredByActiveRoots(id, activeRootIds);
+      if (covered) {
+        safetyReadyPages++;
+        continue;
+      }
+      parentCoverageViolations++;
+      if (inflightIds.has(id)) safetyInflightPages++;
+      else safetyPendingPages++;
+    }
+
+    for (const id of requiredIds) {
+      if (parseStreamingClodPageKey(id).level === maxRootLevel || cached.has(id)) continue;
+      if (inflightIds.has(id)) refinementInflightPages++;
+      else refinementPendingPages++;
+    }
+
+    return {
+      safetyRequiredPages: safetyIds.length,
+      safetyReadyPages,
+      safetyPendingPages,
+      safetyInflightPages,
+      refinementPendingPages,
+      refinementInflightPages,
+      parentCoverageViolations,
+    };
+  };
+
   const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
     if (inFlight === batch) inFlight = null;
     workerBuildFailures++;
@@ -719,6 +785,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         }
       }
       const inflightPageLevels = inFlight ? [...inFlight.coordsById.values()].map((coord) => coordLevel(coord)) : [];
+      const coverage = countStreamCoverage(requiredIds);
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
@@ -731,6 +798,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         inflightBatches: inFlight ? 1 : 0,
         applyQueuePages: ready.length,
         activeRootPages: activeRootIds.size,
+        safetyRequiredPages: coverage.safetyRequiredPages,
+        safetyReadyPages: coverage.safetyReadyPages,
+        safetyPendingPages: coverage.safetyPendingPages,
+        safetyInflightPages: coverage.safetyInflightPages,
+        refinementPendingPages: coverage.refinementPendingPages,
+        refinementInflightPages: coverage.refinementInflightPages,
+        parentCoverageViolations: coverage.parentCoverageViolations,
         readyPages: activeRootIds.size,
         scheduledPagesThisFrame,
         applyPagesThisFrame: applied.applied,
@@ -777,6 +851,13 @@ function emptyStats(maxRootLevel = 0): StreamingClodRootStats {
     inflightBatches: 0,
     applyQueuePages: 0,
     activeRootPages: 0,
+    safetyRequiredPages: 0,
+    safetyReadyPages: 0,
+    safetyPendingPages: 0,
+    safetyInflightPages: 0,
+    refinementPendingPages: 0,
+    refinementInflightPages: 0,
+    parentCoverageViolations: 0,
     readyPages: 0,
     scheduledPagesThisFrame: 0,
     applyPagesThisFrame: 0,

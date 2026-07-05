@@ -488,6 +488,14 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
         streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
         streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
+        streamSafetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
+        streamSafetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
+        streamSafetyPending: counters["live_clod_stream_safety_pending_pages"] ?? 0,
+        streamSafetyInflight: counters["live_clod_stream_safety_inflight_pages"] ?? 0,
+        streamRefinementPending: counters["live_clod_stream_refinement_pending_pages"] ?? 0,
+        streamRefinementInflight: counters["live_clod_stream_refinement_inflight_pages"] ?? 0,
+        streamParentCoverageViolations: counters["live_clod_stream_parent_coverage_violations"] ?? 0,
+        streamActiveRootPages: counters["live_clod_stream_active_root_pages"] ?? 0,
         proxyBuilding: counters["shadow_proxy_building"] ?? -1,
       };
     }) as ConvergenceSnapshot;

@@ -19,6 +19,14 @@ export interface ConvergenceSnapshot {
   streamReady: number;
   streamCached: number;
   streamFailed: number;
+  streamSafetyRequired: number;
+  streamSafetyReady: number;
+  streamSafetyPending: number;
+  streamSafetyInflight: number;
+  streamRefinementPending: number;
+  streamRefinementInflight: number;
+  streamParentCoverageViolations: number;
+  streamActiveRootPages: number;
   proxyBuilding: number;
 }
 
@@ -78,9 +86,10 @@ export function evaluateConvergence(snapshot: ConvergenceSnapshot): {
   );
   const streamQuiet = snapshot.streamRequired === 0 || (
     snapshot.streamFailed === 0
-    && snapshot.streamPending === 0
-    && snapshot.streamInflight === 0
-    && snapshot.streamReady > 0
+    && snapshot.streamSafetyPending === 0
+    && snapshot.streamSafetyInflight === 0
+    && snapshot.streamParentCoverageViolations === 0
+    && snapshot.streamActiveRootPages > 0
   );
   return {
     quiet: farSummaryQuiet && shellQuiet && textureQuiet && bubbleQuiet && streamQuiet && snapshot.proxyBuilding !== 1,
@@ -114,7 +123,10 @@ export function convergenceTimeoutBlockers(snapshot: ConvergenceSnapshot): strin
       rank: streamBudgetBlocked ? Number.POSITIVE_INFINITY : snapshot.streamPending + snapshot.streamInflight,
       text:
         `clodStream: budget=${snapshot.streamBudget} pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
-        `activeRoots=${snapshot.streamReady} cached=${snapshot.streamCached} failed=${snapshot.streamFailed}`,
+        `safetyPending=${snapshot.streamSafetyPending} safetyInflight=${snapshot.streamSafetyInflight} ` +
+        `refinementPending=${snapshot.streamRefinementPending} refinementInflight=${snapshot.streamRefinementInflight} ` +
+        `parentCoverageViolations=${snapshot.streamParentCoverageViolations} activeRoots=${snapshot.streamActiveRootPages} ` +
+        `cached=${snapshot.streamCached} failed=${snapshot.streamFailed}`,
     });
   }
   if (snapshot.farShellRebuildPending !== 0) blockers.push({ rank: 1, text: `farShell: rebuildPending=${snapshot.farShellRebuildPending}` });

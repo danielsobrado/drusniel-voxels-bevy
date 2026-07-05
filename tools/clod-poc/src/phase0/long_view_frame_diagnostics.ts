@@ -148,9 +148,18 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const streamPending = numericCounter(counters, "live_clod_stream_pending_pages", 0);
     const streamInflight = numericCounter(counters, "live_clod_stream_inflight_batches", 0);
     const streamReady = numericCounter(counters, "live_clod_stream_ready_pages", 0);
+    const streamSafetyPending = numericCounter(counters, "live_clod_stream_safety_pending_pages", streamPending);
+    const streamSafetyInflight = numericCounter(counters, "live_clod_stream_safety_inflight_pages", streamInflight);
+    const streamParentCoverageViolations = numericCounter(counters, "live_clod_stream_parent_coverage_violations", streamReady > 0 ? 0 : 1);
+    const streamActiveRootPages = numericCounter(counters, "live_clod_stream_active_root_pages", streamReady);
     const farSummaryQuiet = tilesMissing === 0 && tilesBuilding === 0;
     const bubbleQuiet = bubbleRequired === 0 || (bubbleFailed === 0 && bubbleBuilding === 0 && bubbleReady > 0);
-    const streamQuiet = streamRequired === 0 || (streamPending === 0 && streamInflight === 0 && streamReady > 0);
+    const streamQuiet = streamRequired === 0 || (
+      streamSafetyPending === 0
+      && streamSafetyInflight === 0
+      && streamParentCoverageViolations === 0
+      && streamActiveRootPages > 0
+    );
     return farSummaryQuiet && farShellRebuildPending === 0 && textureWindowPending === 0
       && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
   };

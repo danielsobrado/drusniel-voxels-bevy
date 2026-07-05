@@ -344,6 +344,37 @@ describe("createStreamingClodRootController", () => {
     expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
   });
 
+  it("counts active parents as safety-ready while child refinement is still inflight", async () => {
+    const { controller, buildPages, requests } = makeController({ buildBudgetPagesPerFrame: 2 });
+    const center = new THREE.Vector3(272, 0, 16);
+    controller.update(center, 1);
+    const parentCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    resolveRequest(requests[0]!, parentCoords);
+    await flushAsync();
+
+    const stats = controller.update(center, 1);
+
+    expect(stats.safetyRequiredPages).toBe(1);
+    expect(stats.safetyReadyPages).toBe(1);
+    expect(stats.safetyPendingPages).toBe(0);
+    expect(stats.safetyInflightPages).toBe(0);
+    expect(stats.parentCoverageViolations).toBe(0);
+    expect(stats.refinementInflightPages).toBe(1);
+    expect(stats.activeRootPages).toBe(1);
+  });
+
+  it("reports parent coverage violations when safety parents are missing", () => {
+    const { controller } = makeController({ buildPages: null });
+
+    const stats = controller.update(new THREE.Vector3(272, 0, 16), 1);
+
+    expect(stats.safetyRequiredPages).toBe(1);
+    expect(stats.safetyReadyPages).toBe(0);
+    expect(stats.safetyPendingPages).toBe(1);
+    expect(stats.parentCoverageViolations).toBe(1);
+    expect(stats.activeRootPages).toBe(0);
+  });
+
   it("reports real applied streamed pages as ready keys", async () => {
     const { controller, buildPages, requests } = makeController();
     controller.update(new THREE.Vector3(192, 0, 0), 40);

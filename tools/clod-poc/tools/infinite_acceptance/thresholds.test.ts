@@ -29,6 +29,8 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_build_budget"] = 1;
   counters["live_clod_stream_ready_pages"] = 1;
   counters["live_clod_stream_active_root_pages"] = 1;
+  counters["live_clod_stream_safety_required_pages"] = 1;
+  counters["live_clod_stream_safety_ready_pages"] = 1;
   counters["live_clod_stream_apply_ms"] = 1;
   counters["vegetation_ring_unbounded"] = 1;
   counters["vegetation_ring_distance_to_grass_m"] = 0;
@@ -111,6 +113,26 @@ describe("infinite islands thresholds", () => {
     counters["live_clod_stream_required_pages"] = 0;
     expect(evaluateThresholds(counters).failures).toContain(
       "live_clod_stream_required_pages=0 failed: must be > 0",
+    );
+  });
+
+  it("allows refinement work to remain pending after safety coverage is ready", () => {
+    const counters = validCounters();
+    counters["live_clod_stream_apply_queue_pages"] = 3;
+    counters["live_clod_stream_refinement_pending_pages"] = 8;
+    counters["live_clod_stream_refinement_inflight_pages"] = 4;
+
+    expect(evaluateThresholds(counters).passed).toBe(true);
+  });
+
+  it("requires safety parent coverage before passing", () => {
+    const counters = validCounters();
+    counters["live_clod_stream_safety_ready_pages"] = 0;
+    counters["live_clod_stream_safety_pending_pages"] = 1;
+    counters["live_clod_stream_parent_coverage_violations"] = 1;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_parent_coverage_violations=1 failed: must equal 0",
     );
   });
 
