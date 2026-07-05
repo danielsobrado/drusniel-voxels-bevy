@@ -97,6 +97,7 @@ export function createFarClipmapGridGeometry(options: FarClipmapGridGeometryOpti
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
 }
@@ -155,6 +156,7 @@ export function createFarClipmapTerrainGeometry(options: FarClipmapTerrainGeomet
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
 }
