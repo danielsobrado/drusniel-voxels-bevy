@@ -27,12 +27,13 @@ describe("border coast/ocean config", () => {
       reef: 0.05,
     });
     expect(config.deep_ocean.start_outside_border_m).toBe(64);
-    expect(config.deep_ocean.near_subdivisions).toBe(96);
-    expect(config.deep_ocean.far_subdivisions).toBe(64);
+    expect(config.deep_ocean.near_subdivisions).toBe(128);
+    expect(config.deep_ocean.mid_subdivisions).toBe(128);
+    expect(config.deep_ocean.far_subdivisions).toBe(128);
     expect(config.deep_ocean.wave).toMatchObject({
       gravity: 9.81,
       grid_k: 16,
-      active_gpu_waves: 16,
+      active_gpu_waves: 24,
       wind_speed: 14,
       wind_direction_deg: 45,
       height_scale: 1.3,
@@ -43,8 +44,13 @@ describe("border coast/ocean config", () => {
       foam_power: 1.36,
       foam_intensity: 1.25,
       swell_height_scale: 0.34,
+      detail_normal_strength: 0.35,
+      detail_normal_fade_start_m: 200,
+      detail_normal_fade_end_m: 900,
     });
-    expect(config.deep_ocean.shading.deep_color).toBe("#042c4e");
+    expect(config.deep_ocean.shading.deep_color).toBe("#04294a");
+    expect(config.deep_ocean.shading.fog_far_m).toBe(2200);
+    expect(config.deep_ocean.shading.horizon_blend_end_m).toBe(4400);
     expect(config.gameplay).toEqual({
       soft_pushback_enabled: true,
       world_edge_margin_m: 16,
@@ -76,10 +82,15 @@ describe("border coast/ocean config", () => {
       foamPower: strict.deep_ocean.wave.foam_power,
       foamIntensity: strict.deep_ocean.wave.foam_intensity,
       swellHeightScale: strict.deep_ocean.wave.swell_height_scale,
+      detailNormalStrength: strict.deep_ocean.wave.detail_normal_strength,
+      detailNormalFadeStartM: strict.deep_ocean.wave.detail_normal_fade_start_m,
+      detailNormalFadeEndM: strict.deep_ocean.wave.detail_normal_fade_end_m,
     });
     expect(runtime.deepOcean.shading.deepColor).toEqual(hexToRgb(strict.deep_ocean.shading.deep_color));
     expect(runtime.deepOcean.shading.shallowColor).toEqual(hexToRgb(strict.deep_ocean.shading.shallow_color));
     expect(runtime.deepOcean.shading.foamColor).toEqual(hexToRgb(strict.deep_ocean.shading.foam_color));
+    expect(runtime.deepOcean.shading.skyZenithColor).toEqual(hexToRgb(strict.deep_ocean.shading.sky_zenith_color));
+    expect(runtime.deepOcean.shading.sssColor).toEqual(hexToRgb(strict.deep_ocean.shading.sss_color));
   });
 
   it("keeps strict gameplay config aligned with player config resolver", () => {
@@ -141,7 +152,7 @@ describe("border coast/ocean config", () => {
   it("fails clearly for malformed fields", () => {
     expect(() =>
       parseBorderCoastOceanConfig(
-        yamlText.replace("near_subdivisions: 96", "near_subdivisions: many"),
+        yamlText.replace("near_subdivisions: 128", "near_subdivisions: many"),
       ),
     ).toThrow("deep_ocean.near_subdivisions must be a finite number");
   });
