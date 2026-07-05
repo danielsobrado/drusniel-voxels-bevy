@@ -27,6 +27,8 @@ export interface Phase0StreamingConfig {
   preload_seconds: number;
   live_radius_m: number;
   clod_radius_m: number;
+  clod_refinement_radius_m?: number;
+  far_clipmap_radius_m?: number;
 }
 
 export interface Phase0Settings {
@@ -129,6 +131,12 @@ export function parsePhase0Config(rawYaml: string): Phase0Config {
     live_radius_m: requireNumber(st["live_radius_m"], "phase0.streaming.live_radius_m", 1),
     clod_radius_m: requireNumber(st["clod_radius_m"], "phase0.streaming.clod_radius_m", 1),
   };
+  if (st["clod_refinement_radius_m"] !== undefined) {
+    streaming.clod_refinement_radius_m = requireNumber(st["clod_refinement_radius_m"], "phase0.streaming.clod_refinement_radius_m", 1);
+  }
+  if (st["far_clipmap_radius_m"] !== undefined) {
+    streaming.far_clipmap_radius_m = requireNumber(st["far_clipmap_radius_m"], "phase0.streaming.far_clipmap_radius_m", 1);
+  }
 
   const rawScenes = p0["scenes"];
   if (!rawScenes || typeof rawScenes !== "object") {
