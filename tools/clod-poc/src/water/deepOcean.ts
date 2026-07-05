@@ -9,7 +9,7 @@ import {
   wgslFn,
 } from "three/tsl";
 import type { BorderCoastOceanConfig } from "../config/borderCoastOceanConfig.js";
-import deepOceanWgsl from "../shaders/deepOcean.wgsl?raw";
+import deepOceanWgsl from "../shaders/deepOceanV2.wgsl?raw";
 import { extractWgslFunction } from "../shaders/wgslFunction.js";
 import { buildDeepOceanMeshes, type DeepOceanGridMesh, type DeepOceanMeshSet } from "./deepOceanMesh.js";
 import { createCoastOceanTransitionGpu } from "./coastOceanTransition.js";
