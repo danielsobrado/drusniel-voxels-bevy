@@ -9,12 +9,17 @@ import { buildDeepOceanMeshes } from "./deepOceanMesh.js";
 const config = defaultBorderCoastOceanConfig;
 
 describe("deep ocean mesh", () => {
-  it("uses configured near/far resolutions and covers every corner quadrant", () => {
+  it("uses configured near/mid/far resolutions and complementary fades", () => {
     const meshes = buildDeepOceanMeshes(config.deep_ocean);
     expect(meshes.near.subdivisions).toBe(config.deep_ocean.near_subdivisions);
+    expect(meshes.mid.subdivisions).toBe(config.deep_ocean.mid_subdivisions);
     expect(meshes.far.subdivisions).toBe(config.deep_ocean.far_subdivisions);
     expect(meshes.near.extentM).toBe(config.deep_ocean.near_grid_size_m);
+    expect(meshes.mid.extentM).toBe(config.deep_ocean.mid_grid_size_m);
     expect(meshes.far.extentM).toBeGreaterThanOrEqual(config.deep_ocean.visual_extent_m * 2);
+    expect(meshes.mid.fadeIn).toEqual(meshes.near.fadeOut);
+    expect(meshes.far.fadeIn).toEqual(meshes.mid.fadeOut);
+    expect(meshes.far.fadeOut[0]).toBeGreaterThanOrEqual(1e9);
 
     const positions = meshes.far.geometry.getAttribute("position");
     const quadrants = new Set<string>();
@@ -37,16 +42,14 @@ describe("DeepOcean", () => {
     expect(ocean.collisionEnabled).toBe(false);
     expect(ocean.pageSourceKind).toBe("deepOcean");
     expect(ocean.object.userData["waveEvaluation"]).toBe("gpu-wgsl");
-    expect(ocean.object.children).toHaveLength(2);
+    expect(ocean.object.children).toHaveLength(3);
     for (const child of ocean.object.children as THREE.Mesh[]) {
       expect(child.userData["cornerCoverage"]).toBe(true);
       expect(child.userData["collisionEnabled"]).toBe(false);
-      expect((child.material as MeshBasicNodeMaterialLike).depthWrite).toBe(false);
-      expect(child.position.x).toBeCloseTo(
-        Math.floor(2077.3 / snapFor(child)) * snapFor(child),
-      );
+      expect((child.material as MeshBasicNodeMaterialLike).depthWrite).toBe(true);
+      expect(child.position.x).toBeCloseTo(Math.floor(2077.3 / snapFor(child)) * snapFor(child));
     }
-    expect(ocean.stats().snapUpdates).toBe(2);
+    expect(ocean.stats().snapUpdates).toBe(3);
     ocean.dispose();
   });
 
@@ -102,7 +105,11 @@ interface MeshBasicNodeMaterialLike extends THREE.Material {
 }
 
 function snapFor(mesh: THREE.Mesh): number {
-  return mesh.userData["level"] === "near"
-    ? config.deep_ocean.near_grid_size_m / config.deep_ocean.near_subdivisions
-    : config.deep_ocean.far_grid_size_m / config.deep_ocean.far_subdivisions;
+  if (mesh.userData["level"] === "near") {
+    return config.deep_ocean.near_grid_size_m / config.deep_ocean.near_subdivisions;
+  }
+  if (mesh.userData["level"] === "mid") {
+    return config.deep_ocean.mid_grid_size_m / config.deep_ocean.mid_subdivisions;
+  }
+  return config.deep_ocean.far_grid_size_m / config.deep_ocean.far_subdivisions;
 }
