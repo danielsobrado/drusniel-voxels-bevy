@@ -85,6 +85,10 @@ function mirrorStreamingClodRootCounters(counters: Record<string, number> | unde
   target["live_clod_stream_stale_discards_total"] = streamStaleDiscardsTotal;
   target["live_clod_stream_worker_build_ms"] = stats.workerBuildMs;
   target["live_clod_stream_worker_transfer_bytes"] = stats.workerTransferBytes;
+  target["live_clod_stream_inflight_ms"] = stats.inflightMs;
+  target["live_clod_stream_scheduled_budget_cost"] = stats.scheduledBudgetCost;
+  target["live_clod_stream_worker_build_failures"] = stats.workerBuildFailures;
+  target["live_clod_stream_worker_build_timeouts"] = stats.workerBuildTimeouts;
 }
 
 function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {

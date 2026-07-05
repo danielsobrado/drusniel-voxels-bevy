@@ -7,6 +7,7 @@ import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   createStreamingClodRootController,
   pageInsideFiniteStartupWorld,
+  pageBudgetCost,
   sortStreamingClodPageCoordsForLoad,
   streamingClodPageHasRequiredNotReadyDescendant,
   streamingClodPageKey,
@@ -219,7 +220,10 @@ describe("createStreamingClodRootController", () => {
   });
 
   it("dispatches a coarse-to-fine worker batch that respects build budget", () => {
-    const { controller, buildPages } = makeController({ buildBudgetPagesPerFrame: 2 });
+    const { controller, buildPages } = makeController({
+      buildBudgetPagesPerFrame: 2,
+      cfg: { ...TEST_CFG, page: { ...TEST_CFG.page, quadtree_levels: 1 } },
+    });
 
     const stats = controller.update(new THREE.Vector3(192, 0, 0), 80);
     const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as readonly PageCoord[];
@@ -358,6 +362,7 @@ describe("createStreamingClodRootController", () => {
     const { controller, roots, buildPages, requests } = makeController({
       buildBudgetPagesPerFrame: 3,
       applyBudgetPagesPerFrame: 1,
+      cfg: { ...TEST_CFG, page: { ...TEST_CFG.page, quadtree_levels: 1 } },
     });
     controller.update(new THREE.Vector3(192, 0, 0), 80);
     const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
@@ -441,5 +446,49 @@ describe("createStreamingClodRootController", () => {
     expect(source).not.toContain("defaultBuildScheduler");
     expect(source).not.toContain("buildNode");
     expect(source).not.toContain("scheduleBuild?:");
+  });
+
+  it("pageBudgetCost returns 4^level", () => {
+    expect(pageBudgetCost(0)).toBe(1);
+    expect(pageBudgetCost(1)).toBe(4);
+    expect(pageBudgetCost(2)).toBe(16);
+    expect(pageBudgetCost(3)).toBe(64);
+  });
+
+  it("weighted budget caps batch by LOD0-equivalent cost, not page count", () => {
+    const { controller, buildPages } = makeController({ buildBudgetPagesPerFrame: 2 });
+    const center = new THREE.Vector3(272, 0, 16);
+    const stats = controller.update(center, 1);
+    const mock = buildPages as ReturnType<typeof vi.fn>;
+    expect(mock).toHaveBeenCalledTimes(1);
+    const coords = mock.mock.calls[0]![0] as readonly PageCoord[];
+    expect(coords).toHaveLength(1);
+    expect(coords[0]!.level).toBe(1);
+    expect(stats.scheduledBudgetCost).toBe(4);
+  });
+
+  it("weighted budget dispatches multiple L0 pages up to budget", () => {
+    const { controller, buildPages } = makeController({
+      buildBudgetPagesPerFrame: 4,
+      cfg: { ...TEST_CFG, page: { ...TEST_CFG.page, quadtree_levels: 1 } },
+    });
+    const center = new THREE.Vector3(128, 0, 128);
+    const stats = controller.update(center, 40);
+    const mock = buildPages as ReturnType<typeof vi.fn>;
+    expect(mock).toHaveBeenCalledTimes(1);
+    const coords = mock.mock.calls[0]![0] as readonly PageCoord[];
+    expect(coords.length).toBeGreaterThan(1);
+    expect(coords.every(c => c.level === 0 || c.level === undefined)).toBe(true);
+    expect(stats.scheduledBudgetCost).toBeLessThanOrEqual(4);
+  });
+
+  it("reports inflightMs and inflightPageLevels in stats", async () => {
+    const { controller } = makeController({
+      cfg: { ...TEST_CFG, page: { ...TEST_CFG.page, quadtree_levels: 1 } },
+    });
+    const statsBefore = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    expect(statsBefore.inflightBatches).toBe(1);
+    expect(statsBefore.inflightMs).toBeGreaterThanOrEqual(0);
+    expect(statsBefore.inflightPageLevels).toEqual([0]);
   });
 });

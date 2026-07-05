@@ -31,6 +31,7 @@ interface PerfCaseProgress {
 }
 
 const CASES: PerfCase[] = [
+  { name: "infinite-islands", params: {} },
   { name: "current-textured", params: {} },
   { name: "debug-flat", params: { terrainMaterial: "debug_flat", terrainTriplanar: "0" } },
   { name: "triplanar-off", params: { terrainTriplanar: "0" } },

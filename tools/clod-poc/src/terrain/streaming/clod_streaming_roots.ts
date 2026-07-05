@@ -25,6 +25,11 @@ export interface StreamingClodRootStats {
   probeEvictionsTotal: number;
   probeStaleDiscardsTotal: number;
   outOfWorldEditsSupported: number;
+  inflightMs: number;
+  inflightPageLevels: number[];
+  scheduledBudgetCost: number;
+  workerBuildFailures: number;
+  workerBuildTimeouts: number;
 }
 
 export interface StreamingClodRootController {
@@ -40,6 +45,10 @@ export interface PageCoord {
   level?: number;
   centerX: number;
   centerZ: number;
+}
+
+export function pageBudgetCost(level = 0): number {
+  return 4 ** Math.max(0, Math.floor(level));
 }
 
 export interface StreamingClodRootBuildResult {
@@ -73,6 +82,8 @@ interface CachedPage {
 interface InflightBatch {
   ids: Set<string>;
   coordsById: Map<string, PageCoord>;
+  startMs: number;
+  timedOut?: boolean;
 }
 
 interface FailedBuildState {
@@ -335,6 +346,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let completedWorkerBuildMs = 0;
   let completedWorkerTransferBytes = 0;
   let completedStaleDiscards = 0;
+  let workerBuildFailures = 0;
+  let workerBuildTimeouts = 0;
   let activeRootIds = new Set<string>();
   let latest: StreamingClodRootStats = emptyStats();
 
@@ -471,8 +484,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const dispatchBuild = (coords: readonly PageCoord[]): number => {
     if (!deps.buildPages || coords.length === 0 || inFlight) return 0;
     const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)), coord]));
-    const batch: InflightBatch = { ids: new Set(coordsById.keys()), coordsById };
+    const batch: InflightBatch = { ids: new Set(coordsById.keys()), coordsById, startMs: performance.now() };
     inFlight = batch;
+    for (const coord of coords) {
+      const lvl = coordLevel(coord);
+      const subtreeSize = pageBudgetCost(lvl);
+      console.log(`[clod-stream] Dispatching build for page: L${lvl}:${coord.px},${coord.pz} (estimated LOD0 subtree size: ${subtreeSize})`);
+    }
     if (probe.active) {
       for (const id of batch.ids) probe.requestedIds.add(id);
       probe.requestedPagesTotal += batch.ids.size;
@@ -499,21 +517,29 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return batch.ids.size;
   };
 
-  const scheduleBuilds = (required: readonly PageCoord[]): number => {
-    if (!deps.buildPages || inFlight || buildBudget <= 0) return 0;
+  const scheduleBuilds = (required: readonly PageCoord[]): { scheduled: number; cost: number } => {
+    if (!deps.buildPages || inFlight || buildBudget <= 0) return { scheduled: 0, cost: 0 };
     const batch: PageCoord[] = [];
+    let currentCost = 0;
     for (const coord of required) {
       const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
       if (cached.has(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
+      
+      const pageCost = pageBudgetCost(coordLevel(coord));
+      if (batch.length > 0 && currentCost + pageCost > buildBudget) {
+        break;
+      }
       batch.push(coord);
-      if (batch.length >= buildBudget) break;
+      currentCost += pageCost;
     }
-    return dispatchBuild(batch);
+    const scheduled = dispatchBuild(batch);
+    return { scheduled, cost: scheduled > 0 ? currentCost : 0 };
   };
 
   const buildStillQueued = (id: string): boolean => ready.some((node) => node.id === id);
   const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
     if (inFlight === batch) inFlight = null;
+    workerBuildFailures++;
     for (const id of batch.ids) {
       const previous = failed.get(id);
       const attempts = (previous?.attempts ?? 0) + 1;
@@ -551,9 +577,22 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       completedStaleDiscards = 0;
       const applied = applyReadyPages();
       staleDiscards += applied.staleDiscards;
-      const scheduledPagesThisFrame = scheduleBuilds(required);
+      const { scheduled: scheduledPagesThisFrame, cost: scheduledBudgetCost } = scheduleBuilds(required);
       const activeRootsChanged = evictions > 0 || applied.applied > 0 ? syncActiveRoots() : false;
       if (evictions > 0 || activeRootsChanged) deps.onRootsChanged?.();
+      
+      let inflightMs = 0;
+      if (inFlight) {
+        inflightMs = performance.now() - inFlight.startMs;
+        if (inflightMs > 60000 && !inFlight.timedOut) {
+          inFlight.timedOut = true;
+          workerBuildTimeouts++;
+        }
+      }
+      const inflightPageLevels = inFlight 
+        ? [...inFlight.coordsById.values()].map((c) => coordLevel(c))
+        : [];
+
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
@@ -577,6 +616,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         probeEvictionsTotal: probe.evictionsTotal,
         probeStaleDiscardsTotal: probe.staleDiscardsTotal,
         outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
+        inflightMs,
+        inflightPageLevels,
+        scheduledBudgetCost,
+        workerBuildFailures,
+        workerBuildTimeouts,
       };
       mirrorStreamingProbeCounters(latest);
       return latest;
@@ -611,5 +655,10 @@ function emptyStats(): StreamingClodRootStats {
     probeEvictionsTotal: 0,
     probeStaleDiscardsTotal: 0,
     outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
+    inflightMs: 0,
+    inflightPageLevels: [],
+    scheduledBudgetCost: 0,
+    workerBuildFailures: 0,
+    workerBuildTimeouts: 0,
   };
 }
