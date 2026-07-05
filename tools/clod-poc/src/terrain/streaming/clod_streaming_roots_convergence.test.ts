@@ -17,6 +17,10 @@ interface Deferred<T> {
   reject: (error: unknown) => void;
 }
 
+interface TestGlobal {
+  window?: unknown;
+}
+
 const BASE_CFG: ClodPagesConfig = {
   page: { chunks_per_page: 2, chunk_size: 16, halo_chunks: 1, quadtree_levels: 4 },
   simplify: {
@@ -50,6 +54,10 @@ const BASE_CFG: ClodPagesConfig = {
   poc: { lod0_pages_x: 8, lod0_pages_z: 8, smoke_lod0_pages_x: 4, smoke_lod0_pages_z: 4, emit_debug_json: true, emit_debug_obj: false },
   validation: { position_epsilon: 0.000001, normal_dot_min: 0.997, material_weight_epsilon: 0.0001, zero_area_epsilon: 0.00000001 },
 };
+
+function testGlobal(): TestGlobal {
+  return globalThis as unknown as TestGlobal;
+}
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
@@ -131,7 +139,7 @@ function resolveRequest(request: Deferred<StreamingClodRootBuildResult>, coords:
 }
 
 afterEach(() => {
-  delete (globalThis as typeof globalThis & { window?: unknown }).window;
+  delete testGlobal().window;
 });
 
 describe("streamed CLOD convergence controls", () => {
@@ -153,7 +161,7 @@ describe("streamed CLOD convergence controls", () => {
   });
 
   it("streamed_clod_query_param_overrides_configured_max_root_level", () => {
-    (globalThis as typeof globalThis & { window?: unknown }).window = { location: { search: "?liveClodRootMaxLevel=2" } };
+    testGlobal().window = { location: { search: "?liveClodRootMaxLevel=2" } };
 
     expect(resolveStreamingClodMaxRootLevel(BASE_CFG)).toBe(2);
   });
@@ -191,7 +199,7 @@ describe("streamed CLOD convergence controls", () => {
 
   it("streamed_clod_per_level_request_counters_are_reported", () => {
     const counters: Record<string, number> = {};
-    (globalThis as typeof globalThis & { window?: unknown }).window = { __drusnielClod: { stats: { counters } } };
+    testGlobal().window = { __drusnielClod: { stats: { counters } } };
     const { controller } = makeController({ maxRootLevel: 1 });
 
     const stats = controller.update(new THREE.Vector3(272, 0, 16), 1);
