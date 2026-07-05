@@ -34,6 +34,14 @@ WP-6 local verification:
 - Passed: `npm --prefix tools/clod-poc run build`.
 - Not run here: browser acceptance/perf runs. Long browser/perf validation is deferred to a native manual run.
 
+WP-6 follow-up verification:
+
+- Passed: `npm --prefix tools/clod-poc test -- src/terrain/streaming/clod_streaming_roots.test.ts src/stream/ownership_residency.test.ts src/stream/ownership_coverage_oracle.test.ts src/phase0/long_view_frame_diagnostics.test.ts tools/infinite_acceptance/thresholds.test.ts tools/infinite_acceptance/thresholds_validation.test.ts` - 6 files, 45 tests.
+- Passed: `rtk npm --prefix tools/clod-poc run typecheck`.
+- Passed: `npm --prefix tools/clod-poc run build`.
+- Passed: `rtk git diff --check`.
+- Existing partial browser acceptance run `tools/clod-poc/acceptance-runs/infinite-islands/2026-07-05T09-05-38` did not produce a final report because it stopped before `perf-final-horizon`; available stats show `stream_ready_frame=-1`, so WP-6 is not browser-accepted.
+
 ## Work Package Status
 
 | Item | Status | What was done |
@@ -60,8 +68,8 @@ WP-6 local verification:
 | WP-3.4 Wire `keepStaleUntilReplacement` | Done | Stale/cooling tiles are sample misses when `keepStaleUntilReplacement` is false. |
 | WP-3.5 Publish stale restore diagnostic | Done | `far_summary_stale_restores` is published as a required diagnostic counter. |
 | WP-4 Shell sampling and rebuild integrity | Mostly done | Bilinear sampling is routed through `readTileSample`, `rebaseSnapMeters` is 128, rebuild restarts are counted, initial sliced rebuilds no longer restart every frame, fixed probes are published, and the infinite-islands shot reports zero settled fallback samples. Remaining acceptance work is a dedicated recenter/popping screenshot pair if this becomes visually suspect. |
-| WP-5 Ownership promotion and oracle scoping | Done pending browser acceptance | The duplicate diagnostics-local ownership runtime is gone; packed keys and oracle gating are in place. Added `ownership_residency.ts` and threaded `OwnershipResidencyFeeds` through diagnostics and the oracle, with tests proving feed holes trip oracle ownership. Production diagnostics now build feeds from renderer-owned ready state: live-bubble ready page keys expand to packed live chunks, and CLOD residency reads loaded renderer CLOD node ids instead of snapshot-loaded lists. Infinite acceptance rules are split into coverage gates (`ownershipOracle=1`, no frame-time gates) and perf gates (`ownershipOracle=0`, frame timing included). |
-| WP-6 CLOD parent coverage | Done pending browser acceptance | Added explicit CLOD stream hierarchy helpers for coarse-to-fine budget ordering and parent retention. The oracle now treats parent-covered missing descendants as covered CLOD footprints, so `missing_clod_pages_in_required_radius` reports uncovered missing pages. Added `stream_ready_frame`, seeded/published it from live readiness, coarsest CLOD residency, and far-summary readiness. Acceptance thresholds now allow direct CLOD residency misses before `stream_ready_frame` when `clod_parent_coverage_violations = 0`, but require them to clear after stream readiness. |
+| WP-5 Ownership promotion and oracle scoping | Done pending browser acceptance | The duplicate diagnostics-local ownership runtime is gone; packed keys and oracle gating are in place. Added `ownership_residency.ts` and threaded `OwnershipResidencyFeeds` through diagnostics and the oracle, with tests proving feed holes trip oracle ownership. Production diagnostics now build feeds from renderer-owned ready state: live-bubble ready page keys expand to packed live chunks, and CLOD residency reads the streaming controller's applied ready page keys for infinite-streaming scenes instead of snapshot-loaded lists or all renderer nodes. Infinite acceptance rules are split into coverage gates (`ownershipOracle=1`, no frame-time gates) and perf gates (`ownershipOracle=0`, frame timing included). |
+| WP-6 CLOD parent coverage | Partially done | Added CLOD stream hierarchy helpers for coarse-to-fine budget ordering and parent retention. The oracle now treats parent-covered missing descendants as covered CLOD footprints, so `missing_clod_pages_in_required_radius` reports uncovered missing pages. Added `stream_ready_frame`, seeded/published it from live readiness, coarsest CLOD residency, and far-summary readiness. Coverage acceptance now requires `stream_ready_frame >= 0`. Remaining blocker: the worker stream path still builds L0 stream roots only, so true multi-level coarse-to-fine streamed roots are not complete. |
 | WP-7 SoA tiles and worker builds | Not started | Typed-array tile storage and worker builds remain blocked until WP-1 through WP-6 are accepted. |
 | WP-8 GPU summary atlas general flag | Not started | General `farSummaryAtlas=1` un-gating remains open. |
 
@@ -76,6 +84,6 @@ WP-6 local verification:
 ## Remaining Acceptance Work
 
 - Run browser acceptance after the WP-5 feed/gate split and record the generated coverage/perf artifacts.
-- Run browser acceptance after WP-6 and record `stream_ready_frame`, `clod_parent_coverage_violations`, `priority_unowned_cells`, and coverage/perf split results.
+- Implement real multi-level streamed CLOD roots, then run browser acceptance and record `stream_ready_frame`, `clod_parent_coverage_violations`, `priority_unowned_cells`, and coverage/perf split results.
 - Capture a dedicated recenter/popping screenshot pair if WP-4 visual popping is suspected.
 - Capture clod-poc perf harness data with a real before/after baseline for any later performance claims.

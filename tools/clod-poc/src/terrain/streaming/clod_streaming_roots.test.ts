@@ -246,6 +246,20 @@ describe("createStreamingClodRootController", () => {
     expect(stats.builtThisFrame).toBe(1);
   });
 
+  it("reports real applied streamed pages as ready keys", async () => {
+    const { controller, buildPages, requests } = makeController();
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    expect(controller.readyPageKeys()).toEqual([
+      streamingClodPageKey(coords[0]!.px, coords[0]!.pz, coords[0]!.level),
+    ]);
+  });
+
   it("throttles ready page application with an apply budget", async () => {
     const { controller, roots, buildPages, requests } = makeController({
       buildBudgetPagesPerFrame: 3,

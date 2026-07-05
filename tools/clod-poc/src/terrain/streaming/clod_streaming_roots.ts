@@ -30,6 +30,7 @@ export interface StreamingClodRootStats {
 export interface StreamingClodRootController {
   update(center: THREE.Vector3, radiusM: number): StreamingClodRootStats;
   stats(): StreamingClodRootStats;
+  readyPageKeys(): readonly string[];
   beginMovementProbe(): void;
 }
 
@@ -456,6 +457,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       return latest;
     },
     stats() { return latest; },
+    readyPageKeys() { return [...cached.keys()].sort(); },
     beginMovementProbe,
   };
 }

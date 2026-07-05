@@ -350,7 +350,9 @@ export function runFrameLoopStartup(
       views,
       worldCells,
       pruneRenderNodeCache: input.terrainView.renderNodeCache.prune.bind(input.terrainView.renderNodeCache),
-      getClodReadyPageKeys: () => input.allNodes.map((node) => node.id),
+      getClodReadyPageKeys: () => streamingScene
+        ? streamingClodRootController.readyPageKeys()
+        : input.allNodes.map((node) => node.id),
       drainClodApplyQueue: input.terrainView.drainClodApplyQueue,
       getClodApplyStats: input.terrainView.getClodApplyStats,
     },

@@ -70,7 +70,9 @@ describe("infinite islands thresholds", () => {
     counters["residency_missing_clod"] = 8;
     counters["missing_clod_pages_in_required_radius"] = 0;
     counters["clod_parent_coverage_violations"] = 0;
-    expect(evaluateThresholds(counters, COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).passed).toBe(true);
+    expect(evaluateThresholds(counters, COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).failures).toContain(
+      "stream_ready_frame=-1 failed: must be finite and >= 0",
+    );
 
     counters["stream_ready_frame"] = 42;
     expect(evaluateThresholds(counters, COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).failures).toContain(
