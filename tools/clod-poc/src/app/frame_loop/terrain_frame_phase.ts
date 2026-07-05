@@ -116,7 +116,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   }
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
-  counters["live_bubble_building_pages"] = stats.buildingPages;
+  counters["live_bubble_building_pages"] = Math.max(stats.buildingPages, stats.gpuRetryPages);
   counters["live_bubble_failed_pages"] = stats.failedPages;
   counters["live_bubble_valid_empty_pages"] = stats.validEmptyPages;
   counters["live_bubble_gpu_retry_pages"] = stats.gpuRetryPages;
@@ -206,7 +206,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   const grassCenter = bubbleCenter;
   const ringUnbounded = infiniteIslandsScene();
   const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, ringUnbounded);
-  mirrorVegetationRingStats(grassCenter, ringCenter, ringUnbounded);
+  mirrorVegetationRingStats(grassCenter, ringCenter, unbounded);
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
