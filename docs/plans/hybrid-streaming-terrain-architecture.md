@@ -115,13 +115,18 @@ current runtime/acceptance config, measure it, then tune in a separate change.
 | Live visual radius | `200m` from `tools/clod-poc/config/infinite_streaming_phase0.yaml` |
 | CLOD outer radius | `2048m` from `tools/clod-poc/config/infinite_streaming_phase0.yaml` |
 | Far shell inner radius | page-grid aligned CLOD radius via `resolveStreamingOwnership` |
-| Far shell outer radius | `8192m` target future visible distance for infinite-islands scenes |
+| Far ownership/visibility target | `8192m` target future visible distance for infinite-islands scenes |
 | Far summary near ring | `1536m-4096m`, `32m` cells, `32` cells/tile |
 | Far summary mid ring | `4096m-8192m`, `64m` cells, `32` cells/tile |
 | Far summary horizon ring | `8192m-16384m`, `128m` cells, `32` cells/tile |
 | InfiniteFarShell default shell | `4096m-16384m`, `96` radial segments, `192` angular segments |
 | InfiniteFarShell snap | `64m` rebase snap by default |
 | Far summary build budget | `2ms/frame` by default |
+
+Current bootstrap wiring applies ownership to the far shell with `applyOwnershipToFarShellRange`.
+That raises the shell start to the page-grid-aligned CLOD radius for streaming scenes, but it does
+not shrink the default shell end. The acceptance target is 8km visible coverage; the mesh can still
+extend to 16km for horizon fade and macro terrain.
 
 If a test or perf run proves these are wrong, record the failure first. Tune later.
 
@@ -167,6 +172,7 @@ Add or enforce these counters before calling the path ready:
 far_summary_tiles_required
 far_summary_tiles_ready
 far_summary_tiles_missing
+far_summary_tiles_building
 far_summary_tiles_stale
 far_summary_tiles_built_this_frame
 far_summary_cache_size
@@ -329,7 +335,7 @@ Acceptance counters:
 
 ```text
 far_shell_inner_minus_clod_radius_m >= 0
-camera_to_far_shell_center_m <= far_shell_recenter_threshold_m
+camera_to_far_shell_center_m <= 1 in the current acceptance gate
 far_shell_recenter_count increases only after snapped-center changes
 far_shell_rebuild_pending eventually returns to 0 after stream-ready
 far_shell_tris stays stable during camera movement
@@ -425,7 +431,7 @@ missing_live_chunks_in_required_radius = 0 after stream-ready
 missing_clod_pages_in_required_radius = 0 after stream-ready unless far fallback is explicitly accepted
 horizon_hole_ratio = 0 after stream-ready
 camera_to_clod_center_m <= chunk_size_m
-camera_to_far_shell_center_m <= far_shell_recenter_threshold_m
+camera_to_far_shell_center_m <= 1 in the current acceptance gate
 ```
 
 ## Phase 6: Visual Integration
