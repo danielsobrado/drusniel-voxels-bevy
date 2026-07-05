@@ -76,6 +76,9 @@ function normalizeWaveConfig(config: DeepOceanWaveConfig = DEFAULT_WAVE_CONFIG):
     foamPower: Math.max(0, config.foamPower),
     foamIntensity: Math.max(0, config.foamIntensity),
     swellHeightScale: Math.max(0, config.swellHeightScale),
+    detailNormalStrength: Math.max(0, config.detailNormalStrength),
+    detailNormalFadeStartM: Math.max(0, config.detailNormalFadeStartM),
+    detailNormalFadeEndM: Math.max(0, config.detailNormalFadeEndM),
   };
 }
 
@@ -110,7 +113,7 @@ function buildCascade(config: DeepOceanWaveConfig, cascade: 0 | 1, patchSize: nu
       const directional = Math.pow(Math.max(Math.cos(waveAngle - windDirectionRad), 0), 2);
       const suppress = Math.exp(k * k * -0.0001);
       const spectrum = phillips * jonswap * directional * suppress;
-      const amp = Math.sqrt(Math.max(0, spectrum)) * dk * config.heightScale;
+      const amp = Math.sqrt(Math.max(0, spectrum)) * dk;
       if (amp <= 1e-6) continue;
 
       const waveIndex = cascade * gridK * gridK + iz * gridK + ix;
@@ -127,6 +130,21 @@ function buildCascade(config: DeepOceanWaveConfig, cascade: 0 | 1, patchSize: nu
   }
 
   return waves;
+}
+
+function selectSpectrumWaves(waves: SpectrumWave[], count: number): SpectrumWave[] {
+  const byAmp = (a: SpectrumWave, b: SpectrumWave) => b.amp - a.amp;
+  const coarse = waves.filter((wave) => wave.cascade === 0).sort(byAmp);
+  const fine = waves.filter((wave) => wave.cascade === 1).sort(byAmp);
+  const fineCount = Math.floor(count / 2);
+  return [...coarse.slice(0, count - fineCount), ...fine.slice(0, fineCount)];
+}
+
+function normalizeSelectedAmplitudes(waves: SpectrumWave[], heightScale: number): void {
+  const sum = waves.reduce((total, wave) => total + Math.abs(wave.amp), 0);
+  if (sum <= 1e-9) return;
+  const scale = heightScale / sum;
+  for (const wave of waves) wave.amp *= scale;
 }
 
 function resolveSwellWaves(config: DeepOceanWaveConfig): DeepOceanGpuWave[] {
@@ -157,20 +175,21 @@ function buildGpuWaves(configInput: DeepOceanWaveConfig = DEFAULT_WAVE_CONFIG): 
   const spectrum = [
     ...buildCascade(config, 0, config.coarsePatchM),
     ...buildCascade(config, 1, config.finePatchM),
-  ]
-    .sort((a, b) => b.amp - a.amp)
-    .slice(0, config.activeGpuWaves)
-    .map((wave): DeepOceanGpuWave => ({
-      dirX: wave.dx,
-      dirZ: wave.dz,
-      k: wave.k,
-      omega: wave.omega,
-      amp: wave.amp,
-      phase: wave.phase,
-      choppiness: config.choppiness,
-    }));
+  ];
+  const selected = selectSpectrumWaves(spectrum, config.activeGpuWaves);
+  normalizeSelectedAmplitudes(selected, config.heightScale);
 
-  return [...spectrum, ...resolveSwellWaves(config)];
+  const gpuWaves = selected.map((wave): DeepOceanGpuWave => ({
+    dirX: wave.dx,
+    dirZ: wave.dz,
+    k: wave.k,
+    omega: wave.omega,
+    amp: wave.amp,
+    phase: wave.phase,
+    choppiness: config.choppiness,
+  }));
+
+  return [...gpuWaves, ...resolveSwellWaves(config)];
 }
 
 const DEFAULT_GPU_WAVES = Object.freeze(buildGpuWaves(DEFAULT_WAVE_CONFIG));
