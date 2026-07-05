@@ -205,6 +205,23 @@ metrics:
     - camera_to_clod_center_m
     - camera_to_far_shell_center_m
     - far_shell_inner_minus_clod_radius_m
+    - far_clipmap_enabled
+    - far_clipmap_visible
+    - far_clipmap_active_rings
+    - far_clipmap_ready_tiles
+    - far_clipmap_pending_tiles
+    - far_clipmap_rebuilt_this_frame
+    - far_clipmap_inner_radius_m
+    - far_clipmap_outer_radius_m
+    - far_clipmap_gpu_owned_cells
+    - far_clipmap_gpu_ownership_holes
+    - far_clipmap_owned_cells
+    - far_clipmap_unowned_cells
+    - far_clipmap_ownership_holes
+    - far_clipmap_priority_overlap_cells
+    - owner_far_clipmap_cells
+    - owner_clod_refinement_cells
+    - owner_live_cells
     - live_clod_gap_holes
     - clod_far_gap_holes
     - live_clod_overlap_cells
