@@ -33,6 +33,10 @@ selection:
   crossfade_frames: 12
   freeze_selection: false
 
+streaming:
+  clod:
+    max_root_level: 1         # Acceptance default: avoid expensive L3 standalone stream roots.
+
 near_field:
   enabled: true
   radius_chunks: 6            # live editable Surface Nets bubble, no pages inside
