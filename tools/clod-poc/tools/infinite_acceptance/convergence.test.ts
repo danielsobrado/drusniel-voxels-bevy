@@ -97,16 +97,16 @@ describe("infinite acceptance convergence helpers", () => {
     expect(profileAcceptanceParams("reuse")).toMatchObject({
       liveBubbleBudget: "4",
       liveBubbleGpuChunkBudget: "12",
-      liveClodRootBudget: "2",
-      liveClodRootMaxCached: "16",
+      liveClodRootBudget: "8",
+      liveClodRootMaxCached: "128",
       farSummaryMaxTileBuildsPerFrame: "4",
       farSummaryMaxBuildMsPerFrame: "6",
     });
     expect(profileAcceptanceParams("fast")).toMatchObject({
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
-      liveClodRootBudget: "4",
-      liveClodRootMaxCached: "24",
+      liveClodRootBudget: "12",
+      liveClodRootMaxCached: "128",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     });

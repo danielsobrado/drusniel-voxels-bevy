@@ -44,8 +44,8 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
       liveBubbleColliderRadius: "128",
-      liveClodRootBudget: "4",
-      liveClodRootMaxCached: "24",
+      liveClodRootBudget: "12",
+      liveClodRootMaxCached: "128",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     };
@@ -54,8 +54,8 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     liveBubbleBudget: "4",
     liveBubbleGpuChunkBudget: "12",
     liveBubbleColliderRadius: "128",
-    liveClodRootBudget: "2",
-    liveClodRootMaxCached: "16",
+    liveClodRootBudget: "8",
+    liveClodRootMaxCached: "128",
     farSummaryMaxTileBuildsPerFrame: "4",
     farSummaryMaxBuildMsPerFrame: "6",
   };
