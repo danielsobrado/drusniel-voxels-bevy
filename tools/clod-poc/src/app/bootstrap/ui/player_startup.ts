@@ -129,6 +129,10 @@ export function runPlayerStartup(
       playerInputController.setPlayerYawPitch(pose.yaw, pose.pitch);
       camera.position.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, player.config.eyeHeight);
       camera.rotation.set(pose.pitch, pose.yaw, 0, "YXZ");
+      if (Number.isFinite(pose.fov)) {
+        camera.fov = pose.fov!;
+        camera.updateProjectionMatrix();
+      }
     };
     automationHooks.getPose = () => {
       if (interaction.mode === "playing") {
