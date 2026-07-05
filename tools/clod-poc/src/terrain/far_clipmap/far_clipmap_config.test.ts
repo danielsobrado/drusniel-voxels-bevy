@@ -107,6 +107,7 @@ describe("far clipmap controller", () => {
 
     expect(first.readyTiles).toBe(2);
     expect(first.pendingTiles).toBe(1);
+    expect(first.sourceReady).toBe(1);
     expect(second.readyTiles).toBe(3);
     expect(firstMesh.geometry.getAttribute("position").count).toBe(25);
     expect(material).toBeInstanceOf(THREE.ShaderMaterial);
@@ -117,5 +118,33 @@ describe("far clipmap controller", () => {
     controller.setVisible(false);
     controller.dispose();
     expect(scene.children).toHaveLength(0);
+  });
+
+  it("keeps rings pending until the source is ready", () => {
+    let ready = false;
+    const scene = new THREE.Scene();
+    const source: FarClipmapSource = { ...sampledSource, isReady: () => ready };
+    const config = resolveFarClipmapConfig({
+      ringCount: 3,
+      maxRebuildsPerFrame: 2,
+      gridResolution: 5,
+      innerRadiusM: 8,
+      outerRadiusM: 64,
+      snapSizeM: 16,
+    });
+    const controller = createFarClipmapController(scene, config, source);
+
+    const blocked = controller.update(new THREE.Vector3(1, 0, 1));
+    ready = true;
+    const firstReady = controller.update(new THREE.Vector3(1, 0, 1));
+
+    expect(blocked.sourceReady).toBe(0);
+    expect(blocked.readyTiles).toBe(0);
+    expect(blocked.pendingTiles).toBe(3);
+    expect(blocked.rebuiltTilesThisFrame).toBe(0);
+    expect(firstReady.sourceReady).toBe(1);
+    expect(firstReady.readyTiles).toBe(2);
+    expect(firstReady.pendingTiles).toBe(1);
+    controller.dispose();
   });
 });
