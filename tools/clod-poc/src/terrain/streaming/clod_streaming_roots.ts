@@ -141,7 +141,9 @@ function queryStreamingClodMaxRootLevel(): number | undefined {
   const maybeWindow = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window;
   const search = maybeWindow?.location?.search;
   if (!search) return undefined;
-  const parsed = Number(new URLSearchParams(search).get("liveClodRootMaxLevel"));
+  const raw = new URLSearchParams(search).get("liveClodRootMaxLevel");
+  if (raw === null || raw.trim() === "") return undefined;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
 }
 
