@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 
 interface LaunchRecipe {
   headless: boolean;
@@ -16,6 +16,29 @@ interface ProbeResult {
 interface WebGpuProbeResult {
   ok: boolean;
   reason: string;
+}
+
+interface AcceptanceConvergenceSnapshot {
+  acceptance: boolean;
+  label: string;
+  tilesMissing: number;
+  tilesBuilding: number;
+  farShellRebuildPending: number;
+  textureWindowPending: number;
+  bubbleBuilding: number;
+  bubbleReady: number;
+  bubbleRequired: number;
+  bubbleFailed: number;
+  bubbleRetryPages: number;
+  bubbleColliderPages: number;
+  streamRequired: number;
+  streamBudget: number;
+  streamPending: number;
+  streamInflight: number;
+  streamReady: number;
+  streamCached: number;
+  streamFailed: number;
+  proxyBuilding: number;
 }
 
 const WEBGPU_ARGS = [
@@ -60,6 +83,9 @@ const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_ISLANDS_DEFAULT_CAM_Y = 96;
 const INFINITE_ISLANDS_DEFAULT_PITCH = -0.43;
 const INFINITE_ISLANDS_DEFAULT_FOV = 55;
+const ACCEPTANCE_CONVERGENCE_LOG_INTERVAL_MS = 5000;
+
+const convergenceLoggerBrowsers = new WeakSet<Browser>();
 
 export function clodBaseUrl(): string {
   return process.env["CLOD_POC_BASE_URL"] ?? "http://localhost:5173/";
@@ -142,6 +168,115 @@ async function runWebGpuDeviceProbe(page: Awaited<ReturnType<Browser["newPage"]>
   }, { lostTimeoutMs: GPU_DEVICE_LOST_PROBE_MS });
 }
 
+function convergenceBlockers(snapshot: AcceptanceConvergenceSnapshot): string[] {
+  const blockers: string[] = [];
+  const farSummaryQuiet = snapshot.tilesMissing === 0 && snapshot.tilesBuilding === 0;
+  const shellQuiet = snapshot.farShellRebuildPending === 0;
+  const textureQuiet = snapshot.textureWindowPending === 0;
+  const bubbleQuiet = snapshot.bubbleRequired === 0 || (
+    snapshot.bubbleFailed === 0
+    && snapshot.bubbleRetryPages === 0
+    && snapshot.bubbleBuilding === 0
+    && snapshot.bubbleReady > 0
+  );
+  const streamQuiet = snapshot.streamRequired === 0 || snapshot.streamBudget === 0 || (
+    snapshot.streamFailed === 0
+    && snapshot.streamCached > 0
+  );
+  const proxyQuiet = snapshot.proxyBuilding !== 1;
+
+  if (!farSummaryQuiet) blockers.push(`farSummary missing=${snapshot.tilesMissing} building=${snapshot.tilesBuilding}`);
+  if (!shellQuiet) blockers.push(`farShell pending=${snapshot.farShellRebuildPending}`);
+  if (!textureQuiet) blockers.push(`textureWindow pending=${snapshot.textureWindowPending}`);
+  if (!bubbleQuiet) {
+    blockers.push(
+      `liveBubble required=${snapshot.bubbleRequired} ready=${snapshot.bubbleReady} ` +
+      `building=${snapshot.bubbleBuilding} failed=${snapshot.bubbleFailed} ` +
+      `retry=${snapshot.bubbleRetryPages} colliders=${snapshot.bubbleColliderPages}`,
+    );
+  }
+  if (!streamQuiet) {
+    blockers.push(
+      `liveClodStream required=${snapshot.streamRequired} budget=${snapshot.streamBudget} ` +
+      `pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
+      `ready=${snapshot.streamReady} cached=${snapshot.streamCached} failed=${snapshot.streamFailed}`,
+    );
+  }
+  if (!proxyQuiet) blockers.push(`shadowProxy building=${snapshot.proxyBuilding}`);
+  return blockers;
+}
+
+async function readAcceptanceConvergenceSnapshot(page: Page): Promise<AcceptanceConvergenceSnapshot | null> {
+  return await page.evaluate(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("acceptance") !== "1") return null;
+    const counters = (window as typeof window & {
+      __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
+    }).__drusnielClod?.stats?.counters ?? {};
+    const gate = params.get("ownershipOracle") === "1" ? "coverage" : "perf";
+    const scene = params.get("scene") ?? "unknown";
+    const debug = params.get("proceduralDebug");
+    const freeze = params.get("freeze") === "1" ? "freeze" : "live";
+    return {
+      acceptance: true,
+      label: `${gate}/${scene}/${debug ?? "final"}/${freeze}`,
+      tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
+      tilesBuilding: counters["far_summary_tiles_building"] ?? -1,
+      farShellRebuildPending: counters["far_shell_rebuild_pending"] ?? 0,
+      textureWindowPending: counters["terrain_texture_window_pending"] ?? 0,
+      bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
+      bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
+      bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
+      bubbleFailed: counters["live_bubble_failed_pages"] ?? -1,
+      bubbleRetryPages: counters["live_bubble_gpu_retry_pages"] ?? 0,
+      bubbleColliderPages: counters["live_bubble_streamed_collider_pages"] ?? -1,
+      streamRequired: counters["live_clod_stream_required_pages"] ?? 0,
+      streamBudget: counters["live_clod_stream_build_budget"] ?? 0,
+      streamPending: counters["live_clod_stream_pending_pages"] ?? 0,
+      streamInflight: counters["live_clod_stream_inflight_batches"] ?? 0,
+      streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
+      streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
+      streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
+      proxyBuilding: counters["shadow_proxy_building"] ?? -1,
+    } satisfies AcceptanceConvergenceSnapshot;
+  });
+}
+
+function attachAcceptanceConvergenceLogger(page: Page): void {
+  const startedAt = Date.now();
+  let lastMessage = "";
+  const timer = setInterval(() => {
+    if (page.isClosed()) {
+      clearInterval(timer);
+      return;
+    }
+    void readAcceptanceConvergenceSnapshot(page).then((snapshot) => {
+      if (!snapshot?.acceptance) return;
+      const blockers = convergenceBlockers(snapshot);
+      if (blockers.length === 0) return;
+      const message = `${snapshot.label}: ${blockers.join("; ")}`;
+      if (message === lastMessage) return;
+      lastMessage = message;
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+      console.log(`[infinite-accept:convergence] ${elapsed}s ${message}`);
+    }).catch(() => undefined);
+  }, ACCEPTANCE_CONVERGENCE_LOG_INTERVAL_MS);
+  (timer as unknown as { unref?: () => void }).unref?.();
+  page.once("close", () => clearInterval(timer));
+}
+
+function installAcceptanceConvergenceLogger(browser: Browser): Browser {
+  if (convergenceLoggerBrowsers.has(browser)) return browser;
+  convergenceLoggerBrowsers.add(browser);
+  const originalNewPage = browser.newPage.bind(browser);
+  browser.newPage = (async (...args: Parameters<Browser["newPage"]>) => {
+    const page = await originalNewPage(...args);
+    attachAcceptanceConvergenceLogger(page);
+    return page;
+  }) as Browser["newPage"];
+  return browser;
+}
+
 async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<ProbeResult> {
   let browser: Browser | null = null;
   try {
@@ -153,7 +288,7 @@ async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Probe
     await page.goto(probeUrl.toString(), { waitUntil: "domcontentloaded" });
     const probe = await runWebGpuDeviceProbe(page);
     await page.close();
-    if (probe.ok) return { browser, failure: null };
+    if (probe.ok) return { browser: installAcceptanceConvergenceLogger(browser), failure: null };
     await browser.close();
     return { browser: null, failure: `${recipeLabel(recipe)}: ${probe.reason}` };
   } catch (error) {
@@ -191,7 +326,7 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
       const probe = await runWebGpuDeviceProbe(page);
       if (!probe.ok) throw new Error(`Chrome at ${cdpUrl} did not expose a stable WebGPU device: ${probe.reason}`);
       console.log(`[launch] WebGPU OK cdp=${cdpUrl}`);
-      return { browser, recipe: { headless: false, args: [], cdpUrl } };
+      return { browser: installAcceptanceConvergenceLogger(browser), recipe: { headless: false, args: [], cdpUrl } };
     } catch (error) {
       await browser.close().catch(() => undefined);
       throw error;
