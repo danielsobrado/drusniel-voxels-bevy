@@ -1,8 +1,8 @@
 import { getVoxelEditSnapshot, replaceVoxelEdits } from "../terrain/terrain.js";
 import type { VoxelChunkKey, VoxelEditSnapshot } from "../terrain/voxel_edits/voxel_edit_types.js";
 import { mergePartitionedVoxelSnapshots, partitionVoxelSnapshot } from "./voxel_partition.js";
-import { regionKeyForWorld } from "./region_key.js";
-import { SAVE_CHUNK_SIZE_M } from "./save_config.js";
+import { parseRegionKey, regionKeyForWorld } from "./region_key.js";
+import { SAVE_CHUNK_SIZE_M, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
 import type { SaveRegionRecords } from "./region_store.js";
 import type { SaveWorldManifest, WorldMetadataRecord } from "./save_schema.js";
 import { openSaveDb, readRegionRecords, readSaveManifest, readWorldMetadata, writeRegionRecords, writeSaveManifestAndMetadata } from "./save_db.js";
@@ -32,6 +32,7 @@ export interface SaveDirtyRegionsInput {
   dirtyRegionKeys: readonly string[];
   propsByRegion?: ReadonlyMap<string, SaveRegionRecords["props"]>;
   snapshot?: VoxelEditSnapshot;
+  maxRegionWrites?: number;
 }
 
 function defaultNowMs(): number {
@@ -115,18 +116,26 @@ export function markRegionDirtyFromDirtyChunks(dirtyChunks: readonly VoxelChunkK
   return [...regionKeys].sort();
 }
 
+export function selectDirtyRegionWriteBatch(
+  dirtyRegionKeys: readonly string[],
+  maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME,
+): string[] {
+  const maxWrites = Math.max(0, Math.floor(maxRegionWrites));
+  return [...dirtyRegionKeys].sort().slice(0, maxWrites);
+}
+
 export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<string[]> {
   const snapshot = input.snapshot ?? getVoxelEditSnapshot();
   const partsByRegion = new Map(partitionVoxelSnapshot(snapshot).map((part) => [part.regionKey, part]));
   const written: string[] = [];
+  const batch = selectDirtyRegionWriteBatch(input.dirtyRegionKeys, input.maxRegionWrites ?? SAVE_MAX_REGION_WRITES_PER_FRAME);
 
-  for (const regionKey of input.dirtyRegionKeys) {
+  for (const regionKey of batch) {
     const voxelDeltas = partsByRegion.get(regionKey) ?? { schemaVersion: 1 as const, regionKey, format: "json" as const, deltas: [] };
     const props = input.propsByRegion?.get(regionKey) ?? [];
     const existing = await readRegionRecords(input.db, input.saveId, regionKey);
     const revision = (existing?.manifest.revision ?? 0) + 1;
-    const [rx, rz] = regionKey.slice(2).split("_").map(Number);
-    if (!Number.isSafeInteger(rx) || !Number.isSafeInteger(rz)) throw new Error(`invalid dirty region key: ${regionKey}`);
+    const { rx, rz } = parseRegionKey(regionKey);
     await writeRegionRecords(input.db, input.saveId, {
       manifest: {
         schemaVersion: 1,
