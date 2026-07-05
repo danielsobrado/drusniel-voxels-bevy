@@ -6,6 +6,7 @@ import {
   loadSavedWorldFromDb,
   markRegionDirtyFromDirtyChunks,
   saveDirtyRegions,
+  seedOverrideFromQuery,
   selectDirtyRegionWriteBatch,
 } from "../save_service.js";
 import type { SaveWorldManifest, WorldMetadataRecord } from "../save_schema.js";
@@ -91,6 +92,12 @@ describe("save service", () => {
     db.close();
 
     expect(replaceVoxelSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit query seed only for save-load validation", () => {
+    expect(seedOverrideFromQuery(new URLSearchParams("save=qa-save"))).toBeUndefined();
+    expect(seedOverrideFromQuery(new URLSearchParams("save=qa-save&seed=7"))).toBe(7);
+    expect(seedOverrideFromQuery(new URLSearchParams("save=qa-save&seed=bad"))).toBeUndefined();
   });
 
   it("tracks dirty regions from dirty chunk keys", () => {
