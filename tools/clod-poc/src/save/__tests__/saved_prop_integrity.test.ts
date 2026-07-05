@@ -48,6 +48,7 @@ describe("saved prop integrity validation", () => {
     expect(() => assertSavedPropInstance(prop({ flags: 1.5 }))).toThrow(/flags/i);
     expect(() => assertSavedPropInstance(prop({ revision: unbounded }))).toThrow(/revision/i);
     expect(() => assertSavedPropInstance(prop({ cityId: "" }))).toThrow(/cityId/i);
+    expect(() => assertSavedPropInstance(prop({ roadId: "   " }))).toThrow(/roadId/i);
     expect(() => assertSavedPropInstance(prop({ seed: 1, variationId: 2, flags: 0, revision: 3, cityId: "city-1", roadId: "road-1", criticalPathId: "path-1", ownerFactionId: "faction-1" }))).not.toThrow();
   });
 });
