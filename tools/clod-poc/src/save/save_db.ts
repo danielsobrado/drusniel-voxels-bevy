@@ -1,5 +1,5 @@
 import type { SaveRegionRecords } from "./region_store.js";
-import type { SaveWorldManifest, WorldMetadataRecord } from "./save_schema.js";
+import type { RegionVoxelDeltas, SaveWorldManifest, WorldMetadataRecord } from "./save_schema.js";
 import { assertRegionManifest, assertRegionRecordSet, assertRegionVoxelDeltas, assertSaveWorldManifest, assertWorldMetadataRecord } from "./save_schema.js";
 
 export const SAVE_DB_NAME = "drusniel-clod-saves";
@@ -47,6 +47,16 @@ function ensureStore(db: IDBDatabase, name: string): void {
   if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
 }
 
+function cloneVoxelDeltasRecord(voxelDeltas: RegionVoxelDeltas): RegionVoxelDeltas {
+  if (voxelDeltas.format === "json") {
+    return { ...voxelDeltas, deltas: voxelDeltas.deltas.map((delta) => ({ ...delta })) };
+  }
+  const payload = voxelDeltas.payload instanceof ArrayBuffer
+    ? voxelDeltas.payload.slice(0)
+    : voxelDeltas.payload.slice();
+  return { ...voxelDeltas, payload };
+}
+
 export async function openSaveDb(factory: Pick<IDBFactory, "open"> = indexedDB, name = SAVE_DB_NAME): Promise<IDBDatabase> {
   const request = factory.open(name, SAVE_DB_VERSION);
   request.onupgradeneeded = () => {
@@ -73,7 +83,7 @@ export async function writeRegionRecords(
   const regionKey = records.manifest.regionKey;
 
   manifests.put({ ...records.manifest }, regionManifestKey(saveId, regionKey));
-  regions.put({ ...records.voxelDeltas, deltas: records.voxelDeltas.deltas.map((delta) => ({ ...delta })) }, voxelDeltasKey(saveId, regionKey));
+  regions.put(cloneVoxelDeltasRecord(records.voxelDeltas), voxelDeltasKey(saveId, regionKey));
   regions.put(records.props.map((prop) => ({ ...prop, position: [...prop.position], rotation: [...prop.rotation], scale: [...prop.scale], tags: [...prop.tags] })), propsKey(saveId, regionKey));
 
   if (options.abortBeforeCommit) transaction.abort();

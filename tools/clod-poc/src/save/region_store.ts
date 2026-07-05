@@ -19,12 +19,19 @@ export interface SaveWorldStoreSnapshot {
 function cloneRegionRecords(records: SaveRegionRecords): SaveRegionRecords {
   return {
     manifest: { ...records.manifest },
-    voxelDeltas: {
-      ...records.voxelDeltas,
-      deltas: records.voxelDeltas.deltas.map((delta) => ({ ...delta })),
-    },
+    voxelDeltas: cloneVoxelDeltasRecord(records.voxelDeltas),
     props: records.props.map((prop) => ({ ...prop, position: [...prop.position], rotation: [...prop.rotation], scale: [...prop.scale], tags: [...prop.tags] })),
   };
+}
+
+function cloneVoxelDeltasRecord(voxelDeltas: RegionVoxelDeltas): RegionVoxelDeltas {
+  if (voxelDeltas.format === "json") {
+    return { ...voxelDeltas, deltas: voxelDeltas.deltas.map((delta) => ({ ...delta })) };
+  }
+  const payload = voxelDeltas.payload instanceof ArrayBuffer
+    ? voxelDeltas.payload.slice(0)
+    : voxelDeltas.payload.slice();
+  return { ...voxelDeltas, payload };
 }
 
 export class SaveWorldStore {

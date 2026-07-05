@@ -40,6 +40,15 @@ export class SavedPropStore {
     return this.props.size > 0;
   }
 
+  upsert(prop: SavedPropInstance): void {
+    assertSavedPropInstance(prop);
+    this.props.set(prop.id, cloneSavedProp(prop));
+  }
+
+  remove(id: string): boolean {
+    return this.props.delete(id);
+  }
+
   snapshot(): SavedPropInstance[] {
     return [...this.props.values()].map(cloneSavedProp).sort((a, b) => a.id.localeCompare(b.id));
   }

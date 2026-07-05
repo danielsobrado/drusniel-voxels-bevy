@@ -3,6 +3,7 @@ import { initHooks, type ClodHooks, type EngineStats } from "../../core/hooks.js
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { ClodErrorPxCompute } from "../../gpu/clod_error_px_compute.js";
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
+import { seedSaveRuntimeCounters } from "../../save/save_runtime.js";
 import type { ClodPageNode } from "../../types.js";
 import type { AppRenderer } from "./renderer_startup.js";
 
@@ -156,6 +157,7 @@ export function seedLongViewStats(
   lvStats.counters["far_summary_cache_size"] = 0;
   lvStats.counters["far_summary_fallback_samples"] = 0;
   for (const counter of SEEDED_COUNTERS) lvStats.counters[counter] = 0;
+  seedSaveRuntimeCounters(lvStats.counters);
   const startupTimings = window.__drusnielStartupTimings;
   if (startupTimings) {
     longViewHooks.startupTimings = startupTimings;

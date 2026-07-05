@@ -1,12 +1,15 @@
 import { getVoxelEditSnapshot, replaceVoxelEdits } from "../terrain/terrain.js";
 import type { VoxelChunkKey, VoxelEditSnapshot } from "../terrain/voxel_edits/voxel_edit_types.js";
+import { assertCriticalPathValidation, validateCriticalPaths, type CriticalPathValidationResult } from "./critical_path_validation.js";
 import { mergePartitionedVoxelSnapshots, partitionVoxelSnapshot } from "./voxel_partition.js";
 import { parseRegionKey, regionKeyForWorld } from "./region_key.js";
 import { SAVE_CHUNK_SIZE_M, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
 import type { SaveRegionRecords } from "./region_store.js";
 import type { SaveWorldManifest, WorldMetadataRecord } from "./save_schema.js";
-import { assertWorldMetadataPropLinks } from "./save_schema.js";
+import { assertWorldMetadataPropLinks, regionVoxelDeltasToDeltas } from "./save_schema.js";
 import { openSaveDb, readRegionRecords, readSaveManifest, readWorldMetadata, writeRegionRecords, writeSaveManifestAndMetadata } from "./save_db.js";
+import { markSaveInvalidationBounds } from "./save_far_summary_bridge.js";
+import { boundsForRegion } from "./world_metadata/metadata_store.js";
 
 export interface LoadedSavedWorld {
   saveId: string;
@@ -16,6 +19,7 @@ export interface LoadedSavedWorld {
   voxelSnapshot: VoxelEditSnapshot;
   voxelDeltaCount: number;
   propInstanceCount: number;
+  criticalPathValidation: CriticalPathValidationResult;
   loadMs: number;
 }
 
@@ -23,6 +27,8 @@ export interface LoadSavedWorldOptions {
   expectedSeed?: number;
   replaceVoxelSnapshot?: (snapshot: VoxelEditSnapshot) => void;
   nowMs?: () => number;
+  blockCriticalPathWarnings?: boolean;
+  publishLoadedRegionInvalidations?: boolean;
 }
 
 export interface SaveDirtyRegionsInput {
@@ -92,10 +98,16 @@ export async function loadSavedWorldFromDb(
 
   const metadata = await readWorldMetadata(db, saveId);
   if (!metadata) throw new Error(`save metadata not found: ${saveId}`);
-  assertWorldMetadataPropLinks(metadata, savedPropIds(regions));
+  const propIds = savedPropIds(regions);
+  assertWorldMetadataPropLinks(metadata, propIds);
+  const criticalPathValidation = validateCriticalPaths(metadata, { propIds, nowMs: options.nowMs });
+  assertCriticalPathValidation(criticalPathValidation, { blockWarnings: options.blockCriticalPathWarnings });
 
   const voxelSnapshot = mergePartitionedVoxelSnapshots(regions.map((region) => region.voxelDeltas));
   (options.replaceVoxelSnapshot ?? replaceVoxelEdits)(voxelSnapshot);
+  if (options.publishLoadedRegionInvalidations) {
+    for (const regionKey of [...manifest.regionKeys].sort()) markSaveInvalidationBounds(boundsForRegion(regionKey));
+  }
 
   const finishedAt = (options.nowMs ?? defaultNowMs)();
   return {
@@ -106,6 +118,7 @@ export async function loadSavedWorldFromDb(
     voxelSnapshot,
     voxelDeltaCount: voxelSnapshot.deltas.length,
     propInstanceCount: regions.reduce((total, region) => total + region.props.length, 0),
+    criticalPathValidation,
     loadMs: Math.max(0, finishedAt - startedAt),
   };
 }
@@ -122,6 +135,8 @@ export async function loadSavedWorldFromQuery(
       expectedSeed: options.expectedSeed ?? seedOverrideFromQuery(searchParams),
       replaceVoxelSnapshot: options.replaceVoxelSnapshot,
       nowMs: options.nowMs,
+      blockCriticalPathWarnings: options.blockCriticalPathWarnings,
+      publishLoadedRegionInvalidations: options.publishLoadedRegionInvalidations,
     });
   } finally {
     db.close();
@@ -150,6 +165,7 @@ export async function flushDirtyRegionBatch(input: SaveDirtyRegionsInput): Promi
 
   for (const regionKey of batch) {
     const voxelDeltas = partsByRegion.get(regionKey) ?? { schemaVersion: 1 as const, regionKey, format: "json" as const, deltas: [] };
+    const deltas = regionVoxelDeltasToDeltas(voxelDeltas);
     const props = input.propsByRegion?.get(regionKey) ?? [];
     const existing = await readRegionRecords(input.db, input.saveId, regionKey);
     const revision = (existing?.manifest.revision ?? 0) + 1;
@@ -161,8 +177,8 @@ export async function flushDirtyRegionBatch(input: SaveDirtyRegionsInput): Promi
         rx,
         rz,
         revision,
-        authorityRevision: voxelDeltas.deltas.reduce((max, delta) => Math.max(max, delta.revision), 0),
-        voxelDeltaCount: voxelDeltas.deltas.length,
+        authorityRevision: deltas.reduce((max, delta) => Math.max(max, delta.revision), 0),
+        voxelDeltaCount: deltas.length,
         propCount: props.length,
         updatedAt: new Date().toISOString(),
       },

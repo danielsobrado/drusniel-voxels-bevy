@@ -16,6 +16,8 @@ import { runUiStartup } from "./ui/ui_startup.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import { timeFarSummarySubphase } from "../frame_loop/far_summary_subphase_timing.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
+import { clearSaveInvalidationTargets, registerSaveInvalidationTarget } from "../../save/save_far_summary_bridge.js";
+import { attachSaveRuntimeCounters, hasActiveSaveRuntime, markSaveRuntimeLoadedRegionsInvalidated } from "../../save/save_runtime.js";
 import { initNaadfIntegration, type NaadfIntegration } from "../../naadf/integration.js";
 import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
@@ -103,6 +105,7 @@ export async function bootstrapClodPoc() {
     world,
     renderer,
   });
+  attachSaveRuntimeCounters(postRenderer.longViewHooks?.stats?.counters ?? null);
 
   const terrainView = runTerrainViewStartup({
     app: renderer.app,
@@ -329,6 +332,17 @@ export async function bootstrapClodPoc() {
       farSummaryIntegration.setBuildDelayMs(100);
     }
   }
+
+  clearSaveInvalidationTargets();
+  if (farSummaryIntegration) {
+    registerSaveInvalidationTarget({
+      markSaveInvalidationBounds: (bounds) => {
+        farSummaryIntegration!.cache.markStale(bounds);
+        infiniteFarShell?.requestHeightRefresh();
+      },
+    });
+  }
+  if (hasActiveSaveRuntime()) markSaveRuntimeLoadedRegionsInvalidated();
 
   const treeTerrainOcclusionSampler = naadfIntegration
     ? {

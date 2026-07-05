@@ -2,6 +2,7 @@ import type { VoxelDelta, VoxelEditSnapshot } from "../terrain/voxel_edits/voxel
 import { regionKeyForWorld } from "./region_key.js";
 import { SAVE_SCHEMA_VERSION } from "./save_config.js";
 import type { RegionVoxelDeltas } from "./save_schema.js";
+import { regionVoxelDeltasToDeltas } from "./save_schema.js";
 
 function voxelSortKey(delta: VoxelDelta): string {
   return `${delta.x},${delta.y},${delta.z}`;
@@ -60,7 +61,7 @@ export function mergePartitionedVoxelSnapshots(parts: readonly RegionVoxelDeltas
   let revision = 0;
 
   for (const part of parts) {
-    for (const delta of part.deltas) {
+    for (const delta of regionVoxelDeltasToDeltas(part)) {
       const actualRegion = regionKeyForWorld(delta.x, delta.z);
       if (actualRegion !== part.regionKey) {
         throw new Error(`voxel delta belongs to ${actualRegion}, not ${part.regionKey}`);
@@ -79,5 +80,5 @@ export function mergePartitionedVoxelSnapshots(parts: readonly RegionVoxelDeltas
 }
 
 export function voxelDeltaCount(parts: readonly RegionVoxelDeltas[]): number {
-  return parts.reduce((total, part) => total + part.deltas.length, 0);
+  return parts.reduce((total, part) => total + regionVoxelDeltasToDeltas(part).length, 0);
 }

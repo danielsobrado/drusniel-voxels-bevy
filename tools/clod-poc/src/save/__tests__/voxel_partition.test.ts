@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { VoxelEditSnapshot } from "../../terrain/voxel_edits/voxel_edit_types.js";
+import { regionVoxelDeltasToDeltas } from "../save_schema.js";
 import { canonicalVoxelSnapshot, mergePartitionedVoxelSnapshots, partitionVoxelSnapshot, voxelDeltaCount } from "../voxel_partition.js";
 
 function snapshot(): VoxelEditSnapshot {
@@ -22,7 +23,7 @@ describe("voxel save partition", () => {
     expect(keys).toEqual(["r_-1_-2", "r_0_0", "r_1_0"]);
     expect(voxelDeltaCount(parts)).toBe(3);
     for (const part of parts) {
-      for (const delta of part.deltas) expect(part.regionKey).toBe(delta.x === 512 ? "r_1_0" : delta.x === -1 ? "r_-1_-2" : "r_0_0");
+      for (const delta of regionVoxelDeltasToDeltas(part)) expect(part.regionKey).toBe(delta.x === 512 ? "r_1_0" : delta.x === -1 ? "r_-1_-2" : "r_0_0");
     }
   });
 
@@ -36,7 +37,7 @@ describe("voxel save partition", () => {
 
   it("merge revision is max of parts", () => {
     const parts = partitionVoxelSnapshot(snapshot());
-    parts[0] = { ...parts[0], deltas: parts[0].deltas.map((delta) => ({ ...delta, revision: 12 })) };
+    parts[0] = { ...parts[0], format: "json", deltas: regionVoxelDeltasToDeltas(parts[0]!).map((delta) => ({ ...delta, revision: 12 })) };
 
     expect(mergePartitionedVoxelSnapshots(parts).revision).toBe(12);
   });

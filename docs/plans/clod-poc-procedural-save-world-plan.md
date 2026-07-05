@@ -32,6 +32,33 @@ only acceptable for tiny debug fixtures or explicitly baked authored areas.
 Companion plan: `docs/plans/hybrid-streaming-terrain-architecture.md`. Its WP-3 (real
 `FarSummaryCache.markStale(bounds)`) is a hard dependency of SV-7 in this plan.
 
+## Implementation Status As Of 2026-07-05
+
+Implemented in `tools/clod-poc`:
+
+```text
+- Region keys, save ids, v1 schemas, IndexedDB stores, and region-partitioned voxel deltas.
+- Bootstrap save load with seed mismatch rejection before voxel replacement.
+- Save runtime with autosave batching and final manifest/metadata write after dirty regions flush.
+- Saved props as save-side authority, projected into runtime custom props.
+- One world-level metadata record with derived region membership and schema/link validation.
+- Save dirty bounds fan-out through `src/save/save_far_summary_bridge.ts` to
+  `FarSummaryCache.markStale(bounds)` and far-shell height refresh.
+- Critical-path validation for data/link/status integrity with structured errors/warnings.
+- `bin1` voxel-delta payload decoding/encoding support. JSON remains the default write format.
+- Save diagnostics counters in the existing `window.__drusnielClod.stats.counters` map.
+```
+
+Not implemented:
+
+```text
+- Runtime streaming save/load. v1 still loads the save at bootstrap and writes back by dirty region.
+- Operation-log replay or DigEdit-history persistence.
+- A second voxel authority. `VoxelDelta` / `voxelEditStore` remain the only saved voxel authority.
+- Far-shell or far-summary persistence. They are derived data refreshed by invalidation.
+- Full gameplay passability proof. Critical-path validation does not run navmesh/pathfinding.
+```
+
 ## Target Result
 
 The player should be able to:
@@ -216,8 +243,15 @@ export interface RegionManifest {
 export interface RegionVoxelDeltas {
   schemaVersion: 1;
   regionKey: string;
-  format: "json" | "bin1";   // "json" until SV-10; both accepted on read
+  format: "json";            // default v1 write format
   deltas: VoxelDelta[];      // EXISTING type from terrain/voxel_edits/voxel_edit_types.ts, verbatim
+}
+
+export interface BinaryRegionVoxelDeltas {
+  schemaVersion: 1;
+  regionKey: string;
+  format: "bin1";            // optional accepted read format
+  payload: ArrayBuffer | Uint8Array;
 }
 
 export interface SavedPropInstance extends ProjectPropInstance { // EXISTING base, verbatim
@@ -319,21 +353,24 @@ success callback. There are no temp/rename steps.
    construction, so merge is concat with `revision = max`.
 6. `replaceVoxelEdits(merged)` — the only voxel-store mutation during load. `replaceDigEdits`
    is never called on load.
-7. Read `WorldMetadataRecord` into the metadata store; run linkage validation (every
-   `cityId`/`roadId`/`caveSystemId`/prop link resolves). Dangling link -> fail-loud.
+7. Read `WorldMetadataRecord`; run schema/link validation and critical-path data validation
+   (non-empty points, linked roads, required linked props, cave links). Hard corruption ->
+   fail-loud. Warning statuses do not block load unless explicitly configured.
 8. Proceed with `runWorldBuildStartup` unchanged — the terrain field reads `voxelEditStore`
-   globally, so all meshes, pages, and summaries build already-patched. No invalidation is
-   needed at load time.
+   globally, so near meshes and pages build already-patched.
 9. After renderer startup, convert `SavedPropInstance[]` via the existing
    `projectPropsToPropPlacementScene` and register the placement scene.
-10. Publish `save_regions_loaded`, `save_voxel_delta_count_total`,
-    `save_prop_instances_loaded`, `save_load_ms`.
+10. After far-summary integration is registered, replay loaded region bounds through
+    `save_far_summary_bridge.ts` so derived far-summary/far-shell data refreshes.
+11. Publish save counters including loaded flag, save id hash, dirty region count, metadata
+    revision, prop count, voxel delta count, flush timing, far invalidation count/bounds, and
+    far invalidation errors.
 
 ## Save Order (Runtime, Exact)
 
-1. Edits mark regions dirty at commit time: map each `VoxelEditResult.dirtyChunks` entry to a
-   region key; add to the dirty-region set. Prop add/remove/state-change marks the prop's
-   region dirty. Metadata change marks the metadata record dirty.
+1. Edits mark regions dirty at commit time from dirty world bounds. Voxel and construction
+   conform edits publish through `SaveTrackingDirtyQueue`; saved prop add/remove/state-change
+   and metadata changes call save-runtime APIs with the affected bounds.
 2. Autosave tick (every `SAVE_AUTOSAVE_INTERVAL_S = 30`, and on explicit save request):
    snapshot `getVoxelEditSnapshot()` once; `partitionVoxelSnapshot` once; enqueue dirty
    regions.
@@ -341,8 +378,7 @@ success callback. There are no temp/rename steps.
    region as defined in Storage Layout.
 4. After all dirty regions flush, write `SaveWorldManifest` (updated `regionKeys`,
    `updatedAt`) and the metadata record in one final transaction.
-5. Clear dirty flags only on transaction success; publish `save_regions_pending_write`,
-   `save_region_write_ms`.
+5. Clear dirty flags only on transaction success; publish save dirty/flush counters.
 
 ## Derived Invalidation Flow (Exact)
 
@@ -351,33 +387,33 @@ success callback. There are no temp/rename steps.
    synchronously. The save layer never re-triggers any of this.
 2. Dirty publication (existing, unchanged): `publishDirtyEdit` enqueues an AABB event on
    `TerrainEditDirtyQueue`.
-3. Bridge (new, `src/save/derived_invalidation_bridge.ts`), once per frame in the far-summary
-   update hook: `events = dirtyQueue.drain()`. For each event, build
-   `bounds2D = {minX, minZ, maxX, maxZ}` from `worldAabb` and call
-   `farSummaryCache.markStale(bounds2D)`. This requires hybrid-plan WP-3; until it lands, the
-   bridge asserts and counts, and the gate stays red.
-4. Far shell: if any event marked at least one tile, call
-   `infiniteFarShell.requestHeightRefresh()` once per frame (the shell's pending/snap logic
-   dedupes). Never bypass tile rebuilds — refreshing the shell against stale tiles just
-   resamples stale data.
-5. Load-time: no invalidation occurs — load happens before anything derived is built.
-6. Canopy/shadow/water proxies: out of v1; the bridge publishes
-   `save_derived_invalidations_proxies_skipped` so the gap is visible, not silent.
+3. Bridge (`src/save/save_far_summary_bridge.ts`): save runtime publishes
+   `bounds2D = {minX, minZ, maxX, maxZ}` and the bridge fans out to registered targets. The
+   bridge does not know about IndexedDB and does not own terrain edits.
+4. Far-summary target: bootstrap registers `farSummaryCache.markStale(bounds2D)`. WP-3 keeps
+   old samples live until replacement commits when configured and prevents invalidated active
+   builds/pending commits from overwriting edited data.
+5. Far shell: bootstrap requests `infiniteFarShell.requestHeightRefresh()` after stale marking.
+6. Load-time: loaded region bounds are replayed through the same bridge after far-summary
+   integration is registered. Far-shell/far-summary data is never persisted.
 
 ## Critical Path Validation (v1 Semantics)
 
-After the bridge drains, budgeted at 1 path per frame:
+`src/save/critical_path_validation.ts` validates data integrity and reports structured
+results:
 
 ```text
-1. Find critical paths whose point-list bounds overlap drained dirty bounds.
-2. Sample terrain density (src/terrain/terrain_density.ts) at 2m steps along `points`, 2m
-   above the surface. A solid sample -> status "blocked".
-3. A linked prop with state !== "active" -> status "warning".
-4. Otherwise -> status "valid". Persist status in the metadata record.
+- errors
+- warnings
+- touchedCriticalPathIds
+- durationMs
 ```
 
-What this proves: terrain is not solid at sampled points. What it does NOT prove:
-traversability (cliffs, water, and gaps all pass). Full navigation is explicitly out of v1.
+It checks non-empty path points, linked roads, required linked props, cave entrance/system
+links, and persisted path status. Missing roads/props/cave links are hard errors. Existing
+`status: "warning" | "blocked" | "dirty"` values are warnings by default and do not block
+load unless configured. This layer does not prove navmesh reachability, water safety, slope
+traversal, or full gameplay passability.
 
 ## Configuration
 
@@ -386,6 +422,8 @@ traversability (cliffs, water, and gaps all pass). Full navigation is explicitly
 export const SAVE_AUTOSAVE_INTERVAL_S = 30;
 export const SAVE_MAX_REGION_WRITES_PER_FRAME = 1;
 export const SAVE_VOXEL_DELTA_WARN_TOTAL = 250_000;  // warn counter threshold, not a hard cap
+export const SAVE_VOXEL_DELTA_BINARY_MAGIC = "DVXB";
+export const SAVE_VOXEL_DELTA_BINARY_VERSION = 1;
 ```
 
 ## Module Map
@@ -401,12 +439,11 @@ src/save/voxel_partition.ts                # partitionVoxelSnapshot / merge help
 src/save/region_store.ts                   # in-memory SaveWorldStore
 src/save/save_db.ts                        # IndexedDB "drusniel-clod-saves" v1
 src/save/save_service.ts                   # loadSavedWorld, saveDirtyRegions, markRegionDirtyFromDirtyChunks
-src/save/derived_invalidation_bridge.ts    # invalidation flow step 3-4
-src/save/save_stats.ts                     # counters below
+src/save/save_far_summary_bridge.ts        # save dirty bounds -> far-summary/far-shell targets
+src/save/critical_path_validation.ts       # critical-path data/link/status validation
+src/save/voxel_delta_binary.ts             # optional bin1 payload encode/decode
 src/save/world_metadata/metadata_schema.ts
 src/save/world_metadata/metadata_store.ts  # world-level store + bounds/id queries + linkage validation
-src/save/world_metadata/critical_path_validation.ts
-tools/save-roundtrip-acceptance.ts         # acceptance gates below (Playwright, mirrors infinite-islands-acceptance.ts)
 ```
 
 Changes to existing files:
@@ -414,8 +451,8 @@ Changes to existing files:
 ```text
 src/terrain/terrain_edits.ts               # export mergeVoxelSnapshots(parts): VoxelEditSnapshot
 src/app/bootstrap/clod_poc_bootstrap.ts    # save=<saveId> load before runWorldBuildStartup; bridge + autosave registration
-src/terrain/editing/terrain_edit_service.ts # after publishDirtyEdit: saveService.markRegionDirtyFromDirtyChunks(...)
-src/phase0/long_view_frame_diagnostics.ts  # publish save_* counters when a save is active
+src/app/bootstrap/ui/terrain_edit_startup.ts # SaveTrackingDirtyQueue publishes dirty bounds
+src/app/bootstrap/diagnostics_startup.ts    # seeds save_* counters
 ```
 
 Explicitly NOT created (earlier draft, now superseded): `save/voxel/voxel_edit_operation.ts`,
@@ -425,29 +462,23 @@ module, `atomic_region_write.ts`.
 ## Counters
 
 ```text
-save_regions_loaded
-save_regions_dirty
-save_regions_pending_write
-save_region_write_ms
-save_region_read_ms
-save_load_ms
-save_last_autosave_frame
-save_voxel_delta_count_total
-save_prop_instances_loaded
-save_city_count
-save_road_count
-save_cave_entrance_count
-save_critical_path_count
-save_schema_validation_failures
-save_roundtrip_voxel_mismatch
-save_roundtrip_prop_mismatch
-save_derived_invalidations_far_tiles
-save_derived_invalidations_proxies_skipped
-critical_paths_total
-critical_paths_dirty
-critical_paths_valid
-critical_paths_blocked
-critical_path_validation_ms
+save_loaded
+save_id_hash
+save_dirty_region_count
+save_dirty_revision
+save_last_flush_written_regions
+save_last_flush_pending_regions
+save_last_flush_ms
+save_last_error
+save_metadata_revision
+save_prop_count
+save_voxel_delta_count
+save_far_invalidation_count
+save_far_invalidation_last_min_x
+save_far_invalidation_last_min_z
+save_far_invalidation_last_max_x
+save_far_invalidation_last_max_z
+save_far_invalidation_errors
 ```
 
 Dropped from the earlier draft: `save_voxel_edit_operations`, `save_voxel_compacted_chunks`
@@ -477,14 +508,18 @@ src/save/__tests__/save_service.test.ts
   load_calls_replaceVoxelEdits_exactly_once_and_never_replaceDigEdits
   dirty_region_tracking_from_dirty_chunks_marks_expected_regions
   edit_after_save_marks_only_touched_region_dirty
-src/save/__tests__/derived_invalidation_bridge.test.ts
-  edit_aabb_marks_expected_far_summary_tiles_stale          (depends on hybrid-plan WP-3)
-  bridge_requests_shell_refresh_once_per_frame_max
-  bridge_never_retriggers_live_or_clod_rebuilds
-src/save/world_metadata/__tests__/critical_path_validation.test.ts
-  blocking_edit_over_path_sets_status_blocked
-  reverting_edit_restores_status_valid
-  validation_samples_density_along_points_at_2m_steps
+src/save/__tests__/save_far_summary_bridge.test.ts
+  dirty_bounds_fan_out_to_targets
+  target_throw_does_not_stop_fanout_and_increments_error_counter
+  dirty_save_bounds_mark_intersecting_far_summary_tiles_stale
+src/save/__tests__/critical_path_validation.test.ts
+  valid_path_passes
+  missing_road_or_required_prop_fails_hard
+  warning_status_does_not_block_load_by_default
+src/save/__tests__/voxel_delta_binary.test.ts
+  json_still_passes
+  bin1_roundtrip_exactly
+  corrupt_or_unsupported_header_fails
 src/save/__tests__/save_ids.test.ts
   id_factory_is_deterministic_per_seed_and_collision_free_for_1e5
 ```
@@ -498,8 +533,8 @@ src/save/__tests__/save_ids.test.ts
 1. Session A: boot fresh, run 8 scripted edits (reuse the long_view_edit_stress scripted-edit
    mechanism) + place 4 props, trigger save, wait save_regions_pending_write == 0.
 2. Session B: reload the same URL. Gates:
-   - save_schema_validation_failures == 0
-   - save_regions_loaded and save_voxel_delta_count_total equal across sessions
+   - load fails loudly on schema/link corruption
+   - save_loaded == 1 and save_voxel_delta_count equals the expected fixture count
    - height probe at each edit center: |sessionB - sessionA| == 0 (existing pose/stats hooks)
    - save_roundtrip_prop_mismatch == 0 (ids, positions, states equal)
    - far tiles over edited bounds reach ready after convergence with
@@ -567,34 +602,36 @@ Exit: dangling links fail loud.
 
 ### SV-7: Derived invalidation bridge
 
-BLOCKED until hybrid-plan WP-3 (`markStale(bounds)`) is merged; do not start before. Create
-`save/derived_invalidation_bridge.ts` per the invalidation flow; register in bootstrap.
-Tests: `derived_invalidation_bridge.test.ts`.
+WP-3 (`markStale(bounds)`) is available. Create `save/save_far_summary_bridge.ts` per the
+invalidation flow; register in bootstrap. Tests: `save_far_summary_bridge.test.ts`.
 
 Exit: one edit stales exactly the expected far tiles, triggers at most one shell refresh per
 frame, and never re-marks live/CLOD.
 
 ### SV-8: Critical-path validation
 
-Create `world_metadata/critical_path_validation.ts` per the v1 semantics above; runs after
-bridge drain, budgeted 1 path/frame; publish counters. Tests per the test list.
+Create `save/critical_path_validation.ts` per the v1 semantics above. It is an honest
+data/link/status validator, not a pathfinder. Tests per the test list.
 
-Exit: block/revert test transitions blocked -> valid.
+Exit: hard data corruption fails clearly; warning statuses remain non-blocking by default.
 
-### SV-9: Browser round-trip acceptance
+### SV-9: Two-session service acceptance
 
-Create `tools/save-roundtrip-acceptance.ts` and npm script `save:accept` per Acceptance Gates.
+Use fake-indexeddb/service-level tests for the v1 acceptance workflow: write Session A data,
+reload Session B by save id, reject explicit seed mismatch before voxel replacement, restore
+props/metadata/voxel deltas, and prove dirty-region batches finalize the manifest only after
+all dirty regions flush. Browser smoke instructions may be documented separately.
 
-Exit: two-session round trip passes all gates on the dev server.
+Exit: tests prove the workflow without manual browser dependence.
 
 ### SV-10: Binary delta records (storage only)
 
-Replace the JSON delta payload with `Int32Array` (x,y,z) + `Float32Array` (density) +
-`Uint8Array` (materialSlot) inside the same record shape the cache store uses for
-`Uint8Array` payloads. `schemaVersion` stays 1; `format` field written as `"bin1"`; both
-`"json"` and `"bin1"` accepted on read.
+Add optional `bin1` payload support with a clear header/version. JSON remains the default
+write format unless explicitly changed later; both `"json"` and `"bin1"` are accepted on
+read.
 
-Exit: byte-level round trip + size assertion <= 25% of JSON for a 10k-delta fixture.
+Exit: exact round trip, negative coordinates/material slots survive, and corrupt or
+unsupported headers fail.
 
 ## Done Criteria
 
@@ -608,12 +645,13 @@ This plan is done when:
    factory ids; scatter vegetation is never saved.
 4. Cities, roads, caves, and critical paths persist as one world-level metadata record with
    derived region membership.
-5. Loading at bootstrap replays deltas via replaceVoxelEdits before world build; nothing
-   derived needs invalidation at load.
+5. Loading at bootstrap replays deltas via replaceVoxelEdits before world build; loaded
+   region bounds are later pushed through far-summary invalidation after the target exists.
 6. Runtime edits invalidate far-summary tiles by bounds and request far-shell refresh through
    the bridge; live/CLOD invalidation stays with the edit service.
-7. Critical-path metadata detects blocking edits via density sampling, with its limits stated.
-8. The two-session browser round trip passes all acceptance gates.
+7. Critical-path metadata validation detects hard data/link corruption and reports warnings
+   honestly without claiming full passability.
+8. The two-session service round trip passes all acceptance gates.
 9. Derived render caches remain rebuildable and are never the gameplay authority.
 ```
 
@@ -628,6 +666,9 @@ Reintroducing any of these is a regression against this plan:
 - Multi-record region writes outside a single IndexedDB transaction.
 - Save-layer code that re-marks live chunks or CLOD pages dirty.
 - Stored region-membership arrays on metadata.
-- Critical-path "passability" claims beyond sampled-density semantics.
+- Critical-path full-passability claims without a real pathfinder/navmesh.
 - Op-log persistence as authority (order-dependence) instead of per-voxel deltas.
+- Runtime world-streaming save/load claims.
+- DigEdit history persistence claims.
+- Far-shell or far-summary persistence claims; those remain derived/invalidation-driven.
 ```

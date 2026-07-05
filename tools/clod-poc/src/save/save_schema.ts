@@ -2,6 +2,7 @@ import type { ProjectPropInstance } from "../project/project_props.js";
 import type { VoxelDelta } from "../terrain/voxel_edits/voxel_edit_types.js";
 import { SAVE_CHUNK_SIZE_M, SAVE_PROCEDURAL_PROFILE, SAVE_REGION_SIZE_M, SAVE_SCHEMA_VERSION } from "./save_config.js";
 import { parseRegionKey } from "./region_key.js";
+import { decodeVoxelDeltasBin1, type VoxelDeltaBinaryPayload } from "./voxel_delta_binary.js";
 
 export type SaveSchemaVersion = 1;
 export type SaveProceduralProfile = "infinite-islands-v1";
@@ -35,12 +36,21 @@ export interface RegionManifest {
   updatedAt: string;
 }
 
-export interface RegionVoxelDeltas {
+export interface JsonRegionVoxelDeltas {
   schemaVersion: SaveSchemaVersion;
   regionKey: string;
   format: "json";
   deltas: VoxelDelta[];
 }
+
+export interface BinaryRegionVoxelDeltas {
+  schemaVersion: SaveSchemaVersion;
+  regionKey: string;
+  format: "bin1";
+  payload: VoxelDeltaBinaryPayload;
+}
+
+export type RegionVoxelDeltas = JsonRegionVoxelDeltas | BinaryRegionVoxelDeltas;
 
 export interface SavedPropInstance extends ProjectPropInstance {
   regionKey: string;
@@ -177,8 +187,15 @@ export function assertRegionVoxelDeltas(value: unknown): asserts value is Region
   assertSchemaVersion(value.schemaVersion, "region voxel deltas");
   assertString(value.regionKey, "region voxel deltas regionKey");
   parseRegionKey(value.regionKey);
-  if (value.format !== "json") throw new Error("region voxel deltas format is unsupported before SV-10");
-  requireArray(value.deltas, "region voxel deltas deltas").forEach((delta, index) => assertVoxelDelta(delta, `region voxel deltas[${index}]`));
+  if (value.format === "json") {
+    requireArray(value.deltas, "region voxel deltas deltas").forEach((delta, index) => assertVoxelDelta(delta, `region voxel deltas[${index}]`));
+    return;
+  }
+  if (value.format === "bin1") {
+    decodeVoxelDeltasBin1(value.payload as VoxelDeltaBinaryPayload).forEach((delta, index) => assertVoxelDelta(delta, `region voxel deltas bin1[${index}]`));
+    return;
+  }
+  throw new Error("region voxel deltas format is unsupported");
 }
 
 export function assertSavedPropInstance(value: unknown): asserts value is SavedPropInstance {
@@ -198,13 +215,18 @@ export function assertSavedPropInstance(value: unknown): asserts value is SavedP
 
 export function assertRegionRecordSet(manifest: RegionManifest, voxelDeltas: RegionVoxelDeltas, props: readonly SavedPropInstance[]): void {
   if (voxelDeltas.regionKey !== manifest.regionKey) throw new Error("region voxel record key mismatch");
-  if (voxelDeltas.deltas.length !== manifest.voxelDeltaCount) throw new Error("region voxel delta count mismatch");
+  if (regionVoxelDeltasToDeltas(voxelDeltas).length !== manifest.voxelDeltaCount) throw new Error("region voxel delta count mismatch");
   if (props.length !== manifest.propCount) throw new Error("region prop count mismatch");
   props.forEach((prop) => {
     assertSavedPropInstance(prop);
     if (prop.regionKey !== manifest.regionKey) throw new Error("saved prop regionKey mismatch");
   });
   assertUniqueIds(props, `region ${manifest.regionKey} prop`);
+}
+
+export function regionVoxelDeltasToDeltas(voxelDeltas: RegionVoxelDeltas): VoxelDelta[] {
+  if (voxelDeltas.format === "json") return voxelDeltas.deltas.map((delta) => ({ ...delta }));
+  return decodeVoxelDeltasBin1(voxelDeltas.payload).map((delta) => ({ ...delta }));
 }
 
 function requireLinked(id: string, ids: ReadonlySet<string>, label: string): void {

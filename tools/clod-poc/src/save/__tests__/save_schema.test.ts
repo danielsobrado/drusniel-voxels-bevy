@@ -13,6 +13,7 @@ import {
   type SaveWorldManifest,
   type WorldMetadataRecord,
 } from "../save_schema.js";
+import { encodeVoxelDeltasBin1 } from "../voxel_delta_binary.js";
 
 function manifest(): SaveWorldManifest {
   return {
@@ -92,8 +93,9 @@ describe("save schemas", () => {
     expect(() => assertRegionRecordSet({ ...region, voxelDeltaCount: 2 }, deltas, props)).toThrow(/count/i);
   });
 
-  it("rejects binary voxel payloads until SV-10", () => {
-    expect(() => assertRegionVoxelDeltas({ schemaVersion: 1, regionKey: "r_0_0", format: "bin1", deltas: [] })).toThrow(/SV-10/i);
+  it("accepts binary voxel payloads after SV-10", () => {
+    const payload = encodeVoxelDeltasBin1([{ x: -1, y: 2, z: -3, density: 0.5, materialSlot: 2, revision: 9 }]);
+    expect(() => assertRegionVoxelDeltas({ schemaVersion: 1, regionKey: "r_0_0", format: "bin1", payload })).not.toThrow();
   });
 
   it("round-trips a prop with a factory id shape", () => {

@@ -9,7 +9,7 @@ import {
   writeRegionRecords,
   writeSaveManifestAndMetadata,
 } from "../save_db.js";
-import type { SaveWorldManifest, WorldMetadataRecord } from "../save_schema.js";
+import { regionVoxelDeltasToDeltas, type SaveWorldManifest, type WorldMetadataRecord } from "../save_schema.js";
 
 function dbName(): string {
   return `drusniel-save-test-${Date.now()}-${Math.random()}`;
@@ -87,7 +87,7 @@ describe("save IndexedDB", () => {
     db.close();
 
     expect(loaded?.manifest.revision).toBe(1);
-    expect(loaded?.voxelDeltas.deltas[0]?.density).toBe(0.25);
+    expect(loaded ? regionVoxelDeltasToDeltas(loaded.voxelDeltas)[0]?.density : undefined).toBe(0.25);
     expect(loaded?.props[0]?.id).toBe("p_000001_ab12");
   });
 
@@ -101,7 +101,7 @@ describe("save IndexedDB", () => {
     db.close();
 
     expect(loaded?.manifest.revision).toBe(1);
-    expect(loaded?.voxelDeltas.deltas[0]?.density).toBe(0.25);
+    expect(loaded ? regionVoxelDeltasToDeltas(loaded.voxelDeltas)[0]?.density : undefined).toBe(0.25);
   });
 
   it("writes manifest and metadata together", async () => {
