@@ -211,6 +211,15 @@ metrics:
     - far_clipmap_ready_tiles
     - far_clipmap_pending_tiles
     - far_clipmap_rebuilt_this_frame
+    - far_clipmap_source_ready
+    - far_clipmap_build_ms
+    - far_clipmap_build_ms_total
+    - far_clipmap_vertices_built_this_frame
+    - far_clipmap_triangles_built_this_frame
+    - far_clipmap_fallback_samples_this_frame
+    - far_clipmap_fallback_samples_total
+    - far_clipmap_exception_samples_this_frame
+    - far_clipmap_exception_samples_total
     - far_clipmap_inner_radius_m
     - far_clipmap_outer_radius_m
     - far_clipmap_gpu_owned_cells
