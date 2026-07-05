@@ -46,6 +46,11 @@ acceptance:
   max_streamer_simulated_missing_pages: 0
 `;
 
+const REFINEMENT_YAML = VALID_YAML.replace(
+  "    clod_radius_m: 2048",
+  "    clod_radius_m: 2048\n    clod_refinement_radius_m: 768\n    far_clipmap_radius_m: 768",
+);
+
 describe("parsePhase0Config", () => {
   it("parses valid config", () => {
     const cfg = parsePhase0Config(VALID_YAML);
@@ -71,6 +76,21 @@ describe("parsePhase0Config", () => {
     expect(ownership.liveRadiusM).toBe(200);
     expect(ownership.clodRadiusM).toBe(2048);
     expect(ownership.farShellInnerM).toBe(2048);
+    expect(ownership.farShellOuterM).toBe(8192);
+  });
+
+  it("resolves CLOD refinement radius separately from the safety radius", () => {
+    const cfg = parsePhase0Config(REFINEMENT_YAML);
+    const ownership = resolveStreamingOwnership({
+      streaming: cfg.phase0.streaming,
+      targetVisibleM: cfg.phase0.target_visible_m,
+      targetFutureVisibleM: cfg.phase0.target_future_visible_m,
+      pageSizeM: 64,
+      streamingScene: true,
+    });
+    expect(ownership.liveRadiusM).toBe(200);
+    expect(ownership.clodRadiusM).toBe(768);
+    expect(ownership.farShellInnerM).toBe(768);
     expect(ownership.farShellOuterM).toBe(8192);
   });
 
@@ -131,6 +151,8 @@ describe("parsePhase0Config", () => {
     const cfg = parsePhase0Config(raw);
     expect(cfg.phase0.target_visible_m).toBe(4096);
     expect(cfg.phase0.target_future_visible_m).toBe(8192);
+    expect(cfg.phase0.streaming.clod_refinement_radius_m).toBe(768);
+    expect(cfg.phase0.streaming.far_clipmap_radius_m).toBe(768);
     expect(Object.keys(cfg.phase0.scenes)).toContain("long_view_4km");
     expect(Object.keys(cfg.phase0.scenes)).toContain("infinite_islands");
     expect(cfg.phase0.scenes["infinite_islands"].camera.mode).toBe("scripted");
