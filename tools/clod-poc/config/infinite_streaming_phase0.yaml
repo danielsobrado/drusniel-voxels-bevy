@@ -5,6 +5,8 @@ phase0:
     preload_seconds: 4.0
     live_radius_m: 200
     clod_radius_m: 2048
+    clod_refinement_radius_m: 768
+    far_clipmap_radius_m: 768
 
   scenes:
     long_view_4km:
