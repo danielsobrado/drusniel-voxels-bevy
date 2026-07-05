@@ -108,7 +108,7 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
         nodeId: node.id,
         sourceHash: sourceHash(),
       });
-      void ctx.service.put(
+      await ctx.service.put(
         keyParts,
         nodeToArtifact(node),
         encodeClodPageNodeArtifact,
@@ -134,7 +134,7 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
       const keyParts = buildBaseKeyParts(ctx, "clod-page-tree", {
         sourceHash: sourceHash(),
       });
-      void ctx.service.put(
+      await ctx.service.put(
         keyParts,
         {
           worldPagesX: result.worldPagesX,
