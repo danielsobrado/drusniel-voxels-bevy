@@ -10,6 +10,14 @@ border_ocean_scene:
     look_y: 18
     look_z_ratio: 1.08
     fov: 55
+  horizon_camera:
+    eye_x_ratio: 0.50
+    eye_y: 320
+    eye_z_ratio: 0.50
+    look_x_ratio: 0.50
+    look_y: 0
+    look_z_ratio: 4.0
+    fov: 55
   acceptance:
     min_deep_ocean_vertices: 1000
     max_deep_ocean_triangles: 600000
