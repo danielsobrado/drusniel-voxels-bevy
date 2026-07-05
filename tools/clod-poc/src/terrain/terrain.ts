@@ -32,6 +32,7 @@ export {
   getVoxelEditSnapshot,
   replaceVoxelEdits,
 } from "./terrain_edits.js";
+export { mergeVoxelSnapshots } from "./voxel_edits/voxel_snapshot_merge.js";
 export { type VoxelEditSnapshot, type VoxelDelta } from "./voxel_edits/voxel_edit_types.js";
 export { type SdfBrush, type SdfBrushOp, type SdfBrushShape, applyBrushSdfToDensity, sampleBrushSdf } from "./sdf/sdf_brush.js";
 export { rasterizeSdfBrushToVoxelTransaction, type SdfBrushRasterizeInput, type SdfRasterBounds } from "./sdf/sdf_rasterizer.js";
