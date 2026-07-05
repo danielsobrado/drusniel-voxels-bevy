@@ -27,6 +27,8 @@ export interface WorldMetadataEntityRegionKeys {
   regionKeys: string[];
 }
 
+const HALF_OPEN_BOUNDS_MAX_EPSILON_M = 1e-7;
+
 function cloneMetadata(metadata: WorldMetadataRecord): WorldMetadataRecord {
   return structuredClone(metadata) as WorldMetadataRecord;
 }
@@ -64,6 +66,14 @@ function boundsOverlap(a: SavedBounds2D, b: SavedBounds2D): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 }
 
+function assertFiniteBoundsCoordinate(value: number, label: string): void {
+  if (!Number.isFinite(value)) throw new Error(`metadata bounds ${label} must be finite`);
+}
+
+function maxCoordForHalfOpenBounds(min: number, max: number): number {
+  return min === max ? max : Math.max(min, max - HALF_OPEN_BOUNDS_MAX_EPSILON_M);
+}
+
 export function boundsForRegion(regionKey: string): SavedBounds2D {
   const { rx, rz } = parseRegionKey(regionKey);
   return {
@@ -75,11 +85,12 @@ export function boundsForRegion(regionKey: string): SavedBounds2D {
 }
 
 export function regionKeysForBounds(bounds: SavedBounds2D): string[] {
+  for (const key of ["minX", "minZ", "maxX", "maxZ"] as const) assertFiniteBoundsCoordinate(bounds[key], key);
   if (bounds.minX > bounds.maxX || bounds.minZ > bounds.maxZ) throw new Error("metadata bounds min must be <= max");
   const minRx = regionCoord(bounds.minX);
-  const maxRx = regionCoord(bounds.maxX);
+  const maxRx = regionCoord(maxCoordForHalfOpenBounds(bounds.minX, bounds.maxX));
   const minRz = regionCoord(bounds.minZ);
-  const maxRz = regionCoord(bounds.maxZ);
+  const maxRz = regionCoord(maxCoordForHalfOpenBounds(bounds.minZ, bounds.maxZ));
   const keys: string[] = [];
   for (let rx = minRx; rx <= maxRx; rx++) {
     for (let rz = minRz; rz <= maxRz; rz++) keys.push(regionKeyOf(rx, rz));
