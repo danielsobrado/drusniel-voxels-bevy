@@ -545,6 +545,79 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 - 2026-07-04: Started acceptance rerun
   `acceptance-runs/infinite-islands/2026-07-04T15-09-40` after the
   GPU-empty CPU confirmation fix.
+- 2026-07-04: Run `2026-07-04T15-09-40` reported
+  `walk: converged after 79.9s`, confirming the collider-readiness predicate
+  can now be satisfied after GPU-empty CPU confirmation.
+- 2026-07-04: Run `2026-07-04T15-09-40` reported
+  `walk:post-route: converged after 80.7s` and advanced to `biome-near`.
+  Route refill is slower with CPU confirmation, but no longer stuck at zero
+  live-bubble colliders.
+- 2026-07-04: Run `2026-07-04T15-09-40` reported
+  `biome-near: converged after 74.8s` and advanced to `biome-horizon`.
+- 2026-07-04: Run `2026-07-04T15-09-40` reported
+  `biome-horizon: converged after 77.7s`.
+- 2026-07-04: Run `2026-07-04T15-09-40` advanced to `final-near`.
+- 2026-07-04: Run `2026-07-04T15-09-40` reported
+  `final-near: converged after 74.7s`.
+- 2026-07-04: Run `2026-07-04T15-09-40` advanced to `final-horizon`.
+- 2026-07-04: Run `2026-07-04T15-09-40` reported
+  `final-horizon: converged after 73.8s`; awaiting final report.
+- 2026-07-04: Run `2026-07-04T15-09-40` failed with 2 remaining
+  `frame_ms_p95` misses only: walk 8.3 ms and final-horizon 8.8 ms
+  (gate 8 ms). All readiness counters are healthy: far-summary
+  missing/building 0, live-bubble required pages ready, building/failed 0,
+  and collider pages/registrations present (walk 64/2304, freeze scenes
+  52/832). Next step is perf profiling before touching budgets.
+- 2026-07-04: Verified the current `HEAD` contains the relevant harness and
+  controller changes (`bubbleColliderPages` convergence, 10 s short-settle
+  timeout, and `enqueueCpuChunkBuild` GPU-empty confirmation). Worktree is
+  only the session log.
+- 2026-07-04: Port 5180 was already in use, so started a separate clod-poc
+  dev server on `http://127.0.0.1:5181/` for focused perf probes.
+- 2026-07-04: First final-horizon `perfProbe=1` attempt used a 5000-frame
+  warmup, but the page restarted during warmup and the probe was stopped
+  before producing a summary. Avoid editing files while the next probe runs
+  to reduce Vite reload interference.
+- 2026-07-04: Focused `perfProbe=1` profiles did not reproduce the remaining
+  acceptance p95 failures. Final-horizon
+  `perf-runs/infinite-islands-15-09-final-horizon-profile-short` reported
+  frame p50 3.2 ms, p95 4.3 ms, render p95 0.9 ms, selection/bubble p95
+  0.1 ms. Walk post-route
+  `perf-runs/infinite-islands-15-09-walk-post-route-profile-short` reported
+  frame p50 5.5 ms, p95 6.1 ms, render p95 3.1 ms, selection p95 0.2 ms,
+  bubble p95 0.1 ms. Top broad bucket in both was long-view diagnostics,
+  which is diagnostic overhead and not additive to frame p95. Rerun
+  acceptance once for variance before changing code or budgets.
+- 2026-07-04: Pulled latest `main` after commits `8ec5945f`, `4a74b4d6`,
+  and `b6205231`; `rtk git pull --rebase --autostash` reported up-to-date.
+  Worktree is still only this session log.
+- 2026-07-04: Typecheck failed after latest pull in
+  `src/player/player_edit_authority.ts` on tuple-vs-object narrowing for
+  edit authority point parsing (`TS2345` at lines 136-146). Next step: fix
+  the narrow type guard without changing behavior.
+- 2026-07-04: Added an explicit `PlayerEditAuthorityTuple` type guard in
+  `src/player/player_edit_authority.ts` so build commit/preview targets
+  narrow correctly before tuple-to-point conversion. Runtime behavior
+  unchanged.
+- 2026-07-04: Typecheck passed after the player edit authority type guard
+  fix (`rtk npm --prefix tools/clod-poc run typecheck`).
+- 2026-07-04: Requested focused Vitest selection passed directly (no `rtk`):
+  `src/player`, `src/construction`, `src/app/frame_loop`,
+  `src/app/bootstrap/ui`, `src/app/bootstrap/runtime`,
+  `src/terrain/editing`, and `src/terrain/near_field` (17 files /
+  113 tests).
+- 2026-07-04: Started acceptance run
+  `acceptance-runs/infinite-islands/2026-07-04T17-03-46`; stopped it after
+  multiple convergence timeouts showed the same live-bubble failure shape:
+  far-summary/build queues quiet, but required live-bubble pages terminally
+  failed with `bubbleReady=0`, `bubbleFailed=36-49`, and
+  `bubbleColliderPages=0` / `bubbleColliderRegistrations=0`. User identified
+  the likely cause: all-empty GPU pages in live streaming are being retried
+  and terminal-failed instead of becoming valid-empty/ready.
+- 2026-07-04: Latest `main` now includes `cbae14aa Treat empty live bubble
+  pages as valid`, plus the retry counter mirror. Before rerunning local
+  validation, add the small pending convergence improvement so
+  `waitForConvergence()` also waits for `live_bubble_gpu_retry_pages===0`.
 
 ## Remaining known risks / next steps if gates still fail
 

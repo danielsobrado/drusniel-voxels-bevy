@@ -23,6 +23,8 @@ export interface PlayerEditAuthorityPoint {
   z: number;
 }
 
+type PlayerEditAuthorityTuple = readonly [number, number, number];
+
 export const DEFAULT_PLAYER_EDIT_AUTHORITY: PlayerEditAuthorityConfig = {
   terrainEditRadiusM: 96,
   buildCommitRadiusM: 80,
@@ -91,7 +93,11 @@ export function resolvePlayerEditAuthorityConfig(
   };
 }
 
-function pointFromTuple(value: readonly [number, number, number]): PlayerEditAuthorityPoint {
+function isPointTuple(value: PlayerEditAuthorityPoint | PlayerEditAuthorityTuple): value is PlayerEditAuthorityTuple {
+  return Array.isArray(value);
+}
+
+function pointFromTuple(value: PlayerEditAuthorityTuple): PlayerEditAuthorityPoint {
   return { x: value[0], z: value[2] };
 }
 
@@ -131,18 +137,18 @@ export function canCommitTerrainEdit(
 export function canCommitBuild(
   config: PlayerEditAuthorityConfig,
   origin: PlayerEditAuthorityPoint | null | undefined,
-  target: PlayerEditAuthorityPoint | readonly [number, number, number],
+  target: PlayerEditAuthorityPoint | PlayerEditAuthorityTuple,
 ): PlayerEditAuthorityDecision {
-  const p = Array.isArray(target) ? pointFromTuple(target) : target;
+  const p = isPointTuple(target) ? pointFromTuple(target) : target;
   return decide("build_commit", origin, p, config.buildCommitRadiusM, config.allowFarCommit);
 }
 
 export function canPreviewBuild(
   config: PlayerEditAuthorityConfig,
   origin: PlayerEditAuthorityPoint | null | undefined,
-  target: PlayerEditAuthorityPoint | readonly [number, number, number],
+  target: PlayerEditAuthorityPoint | PlayerEditAuthorityTuple,
 ): PlayerEditAuthorityDecision {
-  const p = Array.isArray(target) ? pointFromTuple(target) : target;
+  const p = isPointTuple(target) ? pointFromTuple(target) : target;
   return decide("build_preview", origin, p, config.buildPreviewRadiusM, config.allowFarPreview);
 }
 
