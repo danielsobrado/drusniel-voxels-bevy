@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { l0PageRangeForRegion, regionCoord, regionKeyForWorld, regionKeyOf } from "../region_key.js";
+import { l0PageRangeForRegion, parseRegionKey, regionCoord, regionKeyForWorld, regionKeyOf } from "../region_key.js";
 
 interface RegionCase {
   value: number;
@@ -25,5 +25,10 @@ describe("save region keys", () => {
   it("aligns one save region to one L3 page footprint", () => {
     expect(regionKeyOf(2, -3)).toBe("r_2_-3");
     expect(l0PageRangeForRegion(2, -3)).toEqual({ minPx: 16, maxPx: 23, minPz: -24, maxPz: -17 });
+  });
+
+  it("rejects non-canonical region keys", () => {
+    expect(parseRegionKey("r_1_-2")).toEqual({ rx: 1, rz: -2 });
+    expect(() => parseRegionKey("r_01_-2")).toThrow(/canonical/i);
   });
 });
