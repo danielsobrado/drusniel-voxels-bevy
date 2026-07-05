@@ -18,6 +18,7 @@ import {
   farSummaryAtlasUploadFallbackReasonCode,
   farSummaryAtlasUploadModeCode,
 } from "./farSummaryAtlasUploadCounters.js";
+import { registerNaadfSaveInvalidationTarget } from "./invalidation.js";
 import terrainMaterialCacheYaml from "../../config/terrain_material_cache.yaml?raw";
 import {
   parseTerrainMaterialCacheConfig,
@@ -29,6 +30,8 @@ import { terrainMaterialCacheCountersForHud } from "../terrain/material-cache/te
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
 const HEIGHT_PROVIDER_KEY_SCALE = 1000;
+
+let activeSaveInvalidationCleanup: (() => void) | null = null;
 
 export const NAADF_SCENES = new Set([
   "infinite-naadf-flat",
@@ -83,6 +86,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const config = applyRuntimeTraversalOverrides(parseNaadfPocConfig(options.yamlText));
   const active = config.enabled && (options.forceEnable || isNaadfScene(options.sceneName));
   if (!active) {
+    disposeActiveSaveInvalidationTarget();
     setNaadfIntegration(undefined);
     return null;
   }
@@ -113,6 +117,8 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const debugOverlay = options.threeScene
     ? new NaadfDebugOverlay(options.threeScene, config)
     : null;
+  const saveInvalidationCleanup = registerNaadfSaveInvalidationTarget(state);
+  replaceActiveSaveInvalidationTarget(saveInvalidationCleanup);
 
   let prevX: number | null = null;
   let prevZ: number | null = null;
@@ -270,6 +276,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
 
     dispose() {
+      disposeSaveInvalidationTarget(saveInvalidationCleanup);
       debugOverlay?.dispose();
       gpuAtlas?.dispose();
       window.removeEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
@@ -283,6 +290,21 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
   setNaadfIntegration(integration);
   return integration;
+}
+
+function replaceActiveSaveInvalidationTarget(cleanup: () => void): void {
+  activeSaveInvalidationCleanup?.();
+  activeSaveInvalidationCleanup = cleanup;
+}
+
+function disposeActiveSaveInvalidationTarget(): void {
+  activeSaveInvalidationCleanup?.();
+  activeSaveInvalidationCleanup = null;
+}
+
+function disposeSaveInvalidationTarget(cleanup: () => void): void {
+  cleanup();
+  if (activeSaveInvalidationCleanup === cleanup) activeSaveInvalidationCleanup = null;
 }
 
 function heightProviderKey(x: number, z: number): string {
