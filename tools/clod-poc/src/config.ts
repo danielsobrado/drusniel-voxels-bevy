@@ -38,6 +38,12 @@ export interface ValidationConfig {
   zero_area_epsilon: number;
 }
 
+export interface StreamingConfig {
+  clod: {
+    max_root_level: number;
+  };
+}
+
 export interface ClodPagesConfig {
   page: {
     chunks_per_page: number;
@@ -63,6 +69,7 @@ export interface ClodPagesConfig {
     crossfade_frames: number;
     freeze_selection: boolean;
   };
+  streaming?: StreamingConfig;
   near_field: { enabled: boolean; radius_chunks: number; show_mask: boolean };
   debug: {
     show_wireframe: boolean;
@@ -130,6 +137,18 @@ function diagConfig(raw: Record<string, unknown>, prefix: string): DiagonalFlipC
   };
 }
 
+function streamingConfig(raw: Record<string, unknown>, maxRootLevel: number): StreamingConfig | undefined {
+  const streaming = raw["streaming"];
+  if (streaming === undefined) return undefined;
+  const section = asRecord(streaming, "streaming");
+  const clod = asRecord(section["clod"], "streaming.clod");
+  return {
+    clod: {
+      max_root_level: intAt(clod, "max_root_level", "streaming.clod", 0, maxRootLevel),
+    },
+  };
+}
+
 /** Strict parse. Every missing or invalid key fails loudly. */
 export function parseConfig(text: string): ClodPagesConfig {
   const doc = asRecord(load(text), "root");
@@ -149,13 +168,15 @@ export function parseConfig(text: string): ClodPagesConfig {
     throw new Error("selection.transition_mode must be 'instant' or 'dither'");
   }
 
+  const pageConfig = {
+    chunks_per_page: positiveIntAt(page, "chunks_per_page", "page"),
+    chunk_size: positiveIntAt(page, "chunk_size", "page"),
+    halo_chunks: intAt(page, "halo_chunks", "page", 0),
+    quadtree_levels: positiveIntAt(page, "quadtree_levels", "page"),
+  };
+
   return {
-    page: {
-      chunks_per_page: positiveIntAt(page, "chunks_per_page", "page"),
-      chunk_size: positiveIntAt(page, "chunk_size", "page"),
-      halo_chunks: intAt(page, "halo_chunks", "page", 0),
-      quadtree_levels: positiveIntAt(page, "quadtree_levels", "page"),
-    },
+    page: pageConfig,
     simplify: {
       target_ratio_per_level: numberAt(simplify, "target_ratio_per_level", "simplify", 0, 1),
       abandon_ratio: numberAt(simplify, "abandon_ratio", "simplify", 0, 1),
@@ -177,6 +198,7 @@ export function parseConfig(text: string): ClodPagesConfig {
       crossfade_frames: intAt(selection, "crossfade_frames", "selection", 0),
       freeze_selection: boolAt(selection, "freeze_selection", "selection"),
     },
+    streaming: streamingConfig(doc, Math.max(0, pageConfig.quadtree_levels - 1)),
     near_field: {
       enabled: boolAt(near_field, "enabled", "near_field"),
       radius_chunks: intAt(near_field, "radius_chunks", "near_field", 0),
