@@ -1,40 +1,54 @@
-# Hybrid Streaming Terrain Concept Probe
+# CLOD-POC Hybrid Streaming Terrain Core Engine Plan
 
 ## Scope
 
-This document is only for proving the hybrid long-distance terrain concept in
-`tools/clod-poc`.
+`tools/clod-poc` is the active core engine target for the time being.
 
-Do not implement the Bevy/Rust streaming architecture from this document. The probe must
-answer one question:
+This document is no longer a disposable concept probe for a later Bevy/Rust port. It is the
+implementation plan for proving and hardening the hybrid terrain stack inside `tools/clod-poc`
+itself.
+
+The plan answers this question:
 
 ```text
-Can we render and validate a camera-following terrain stack with live visual chunks,
-CLOD pages, and a far shell out to 8km without gaps, double owners, or unacceptable
-frame-time cost?
+Can clod-poc become the core long-distance terrain engine with camera-following live visual
+chunks, CLOD pages, and a far shell out to 8km, while keeping ownership deterministic,
+frame-time measurable, and future gameplay systems possible?
 ```
 
-The production Bevy runtime remains voxel-authoritative later, but this plan does not
-modify `src/voxel`, `src/world/source`, `src/terrain`, `assets/config`, or Bevy benches.
+For this plan, do not modify production Bevy/Rust terrain modules. Do not add new Bevy module
+layouts, Cargo acceptance gates, or Rust streaming architecture tasks here. If native Rust/Bevy
+work resumes later, it must be planned separately from measured clod-poc behavior.
 
-## Verdict To Probe
+## Current Engine Direction
 
-Keep the conceptual architecture:
+The core clod-poc terrain stack is:
 
 ```text
-near field:      live visual chunks, highest-priority owner
+near field:      live visual chunks, highest-priority terrain owner
 mid field:       CLOD visual pages, clipped by live ownership
 far field:       analytic/summary far shell, clipped by live and CLOD ownership
 very far field:  cheap canopy, ocean, mountain, shadow, and atmosphere proxies
 ```
 
-The clod-poc must prove the visual and performance side only. Gameplay authority,
-colliders, voxel edit persistence, caves as true volumes, and chunk disk I/O are future
-Bevy work and are intentionally out of scope here.
+The first responsibility is visual terrain scale and correctness. The next responsibility is making
+this stack a solid core engine foundation for gameplay systems: streamed biomes, caves, edits,
+placement, collision experiments, persistence experiments, and performance diagnostics.
+
+## Non-Goals For This Plan
+
+```text
+- No Bevy/Rust implementation work.
+- No Cargo acceptance gates.
+- No direct changes to src/voxel, src/world/source, src/terrain, or Bevy benches.
+- No global heightfield rewrite.
+- No pretending clod-poc perf proves Bevy perf.
+- No future-port language in task acceptance. This plan is for clod-poc.
+```
 
 ## Existing clod-poc Surfaces
 
-Use the current TypeScript modules as the probe foundation:
+Use the current TypeScript modules as the engine foundation:
 
 | Concern | Existing files |
 |---|---|
@@ -53,22 +67,22 @@ Use the current TypeScript modules as the probe foundation:
 ## Hard Invariants
 
 ```text
-I1. The probe is TypeScript/WebGPU/Three-only under tools/clod-poc.
-I2. The probe has one terrain source: ProceduralWorldSource.
+I1. The active engine target is TypeScript/WebGPU/Three under tools/clod-poc.
+I2. clod-poc has one terrain source: ProceduralWorldSource.
 I3. Every sampled visible footprint has exactly one resolved owner: live, CLOD, or far.
 I4. Raw overlap is allowed only when the priority resolver clips it before rendering.
 I5. Missing CLOD does not create a hole; ownership falls back to far shell outside live range.
-I6. Far shell is visual-only: no gameplay, colliders, or edit authority.
+I6. Far shell is visual-only for now: no interaction, collision, or edit authority in terrain rendering passes.
 I7. Far shell follows the camera and uses snapped/grid-stable centers.
 I8. Per-frame work is budgeted and measured by the clod-poc perf harness.
 I9. Acceptance is deterministic: same URL, seed, pose, warmup, and frame count.
-I10. No Bevy/Rust module layouts or Cargo acceptance gates belong in this probe plan.
+I10. Gameplay systems must be staged on top of the terrain ownership model, not bypass it.
+I11. No Bevy/Rust module layouts or Cargo acceptance gates belong in this clod-poc plan.
 ```
 
 ## Initial Constants
 
-Use these constants for the probe. Do not tune them in the same change as the architecture
-work.
+Use these constants first. Do not tune them in the same change as the architecture work.
 
 | Layer | First value |
 |---|---:|
@@ -81,9 +95,7 @@ work.
 | Coverage oracle cell size | CLOD page size unless a test overrides it |
 | Far shell recenter threshold | one far-shell cell, snapped to the active ring spacing |
 
-## Probe Phases
-
-### Phase 1: Source Parity
+## Phase 1: Source Parity
 
 Goal:
 
@@ -94,7 +106,7 @@ sample the same ProceduralWorldSource
 
 Tasks:
 
-- [ ] Keep `ProceduralWorldSource` as the only source for the probe.
+- [ ] Keep `ProceduralWorldSource` as the only source for clod-poc terrain.
 - [ ] Add a `sampleFarSummary(x, z, footprintM)` helper in `tools/clod-poc/src/world_source/world_source.ts`.
 - [ ] The far summary returns height, normal, biome, ocean mask, coast distance, roughness, and canopy density.
 - [ ] Route far terrain height provider through `ProceduralWorldSource.createFarHeightProvider()` or the new far-summary helper.
@@ -114,12 +126,12 @@ Acceptance:
 source parity tests pass and no far-shell path samples a separate terrain function
 ```
 
-### Phase 2: Deterministic Ownership Runtime
+## Phase 2: Deterministic Ownership Runtime
 
 Goal:
 
 ```text
-the probe can explain which layer owns every visible terrain footprint
+clod-poc can explain which layer owns every visible terrain footprint
 ```
 
 Tasks:
@@ -154,12 +166,12 @@ camera_to_clod_center_m <= chunk_size_m
 camera_to_far_shell_center_m <= far_shell_recenter_threshold_m
 ```
 
-### Phase 3: Live And CLOD Stream Probe
+## Phase 3: Live And CLOD Stream Core
 
 Goal:
 
 ```text
-simulate camera-centered live chunk and CLOD page residency without implementing disk I/O
+simulate camera-centered live chunk and CLOD page residency as the core terrain engine path
 ```
 
 Tasks:
@@ -170,7 +182,7 @@ Tasks:
 - [ ] Add deterministic pending, loaded, and evictable lists to both snapshots.
 - [ ] Add hysteresis tests for slow movement, fast movement, and returning to a previous area.
 - [ ] Add a no-hole rule after stream-ready: once required live and required visual pages have had enough budgeted frames to load, ownership counters must be green.
-- [ ] Do not model chunk mesh generation, colliders, disk load, or voxel persistence in this phase.
+- [ ] Do not model disk I/O or permanent persistence in this phase.
 
 Required files:
 
@@ -199,7 +211,7 @@ stream_ready_frame
 missing_required_after_ready = 0
 ```
 
-### Phase 4: Camera-Following Far Shell
+## Phase 4: Camera-Following Far Shell
 
 Goal:
 
@@ -215,7 +227,7 @@ Tasks:
 - [ ] Keep build-relative geometry for long-distance precision.
 - [ ] Add `farShellCenter`, `farShellRecenterCount`, and `farShellLastRecenterFrame` to runtime diagnostics.
 - [ ] Make the far shell inner exclusion radius equal to the resolved CLOD outer radius, rounded up to the page grid.
-- [ ] Keep the far shell visual-only; do not add interaction, edit, or collision concepts.
+- [ ] Keep the far shell visual-only; do not add interaction, edit, or collision concepts in this phase.
 
 Required files:
 
@@ -235,7 +247,7 @@ far_shell_recenter_count increases only after threshold crossing
 far_shell_tris stays stable during camera movement
 ```
 
-### Phase 5: Visual Integration
+## Phase 5: Visual Integration
 
 Goal:
 
@@ -245,7 +257,7 @@ the browser scene proves live, CLOD, far shell, ocean, canopy, and shadows can c
 
 Tasks:
 
-- [ ] Add or keep a deterministic URL for the probe, for example:
+- [ ] Add or keep a deterministic URL for the core terrain scene, for example:
   `?scene=infinite-islands&seed=1&world=16&clodPerf=1&webgpuSelection=1`.
 - [ ] Expose all ownership and stream counters through `window.__drusnielClod.stats`.
 - [ ] Show debug HUD counters only when HUD/debug flags are enabled.
@@ -267,16 +279,16 @@ tools/clod-poc/src/naadf/
 Acceptance:
 
 ```text
-the deterministic probe URL reaches ready state, reports green ownership counters,
+the deterministic core scene reaches ready state, reports green ownership counters,
 and renders nonblank terrain/far-shell output
 ```
 
-### Phase 6: Performance Probe
+## Phase 6: Performance Core Gate
 
 Goal:
 
 ```text
-prove the concept by timing the browser path, not by estimating from FPS
+prove the core clod-poc terrain path by timing it, not by estimating from FPS
 ```
 
 Tasks:
@@ -300,6 +312,40 @@ Acceptance:
 frameMs p95 and renderMs p95 are reported with ownership counters from the same run
 ```
 
+## Phase 7: Gameplay-Ready Terrain Contracts Inside clod-poc
+
+Goal:
+
+```text
+prepare clod-poc terrain for gameplay experiments without breaking render ownership
+```
+
+This phase does not need full RPG gameplay. It defines safe contracts so future clod-poc gameplay
+work has a clean place to attach.
+
+Tasks:
+
+- [ ] Add terrain query helpers for gameplay-style systems: height at point, owner at footprint, biome at point, water at point, cave entrance mask at point.
+- [ ] Add a read-only terrain collision query experiment for the live visual radius only.
+- [ ] Add a future edit-invalidation contract: live edits invalidate live visual chunks, CLOD pages, and far summaries in that order.
+- [ ] Add tests proving gameplay queries use `ProceduralWorldSource` and the ownership runtime, not separate ad hoc terrain math.
+- [ ] Keep cave interiors and persistent edits out of this phase unless a separate clod-poc gameplay plan is written.
+
+Required files:
+
+```text
+tools/clod-poc/src/gameplay/terrain_queries.ts
+tools/clod-poc/src/gameplay/terrain_queries.test.ts
+tools/clod-poc/src/stream/terrain_ownership_runtime.ts
+tools/clod-poc/src/world_source/world_source.ts
+```
+
+Acceptance:
+
+```text
+gameplay terrain queries are deterministic and agree with the visual terrain owner/source at fixed sample points
+```
+
 ## Deterministic Task Backlog
 
 Implement in this order:
@@ -314,13 +360,14 @@ Implement in this order:
 8. Snap far-shell inner radius to the CLOD page grid.
 9. Add far-shell recenter threshold counters.
 10. Wire ownership counters into `window.__drusnielClod.stats`.
-11. Add deterministic shot/perf URL for the infinite-islands probe.
-12. Run typecheck, tests, build, shot, and perf harness.
+11. Add deterministic shot/perf URL for the infinite-islands core scene.
+12. Add read-only gameplay terrain query helpers.
+13. Run typecheck, tests, build, shot, and perf harness.
 
-No task in this backlog requires a design decision. If a test reveals a bad constant, keep
-the constant and record the failure first; tuning is a follow-up change.
+No task in this backlog requires a design decision. If a test reveals a bad constant, keep the
+constant and record the failure first; tuning is a follow-up change.
 
-## Performance Risks And Probe Mitigations
+## Performance Risks And Mitigations
 
 | Risk | Why it matters in clod-poc | Required mitigation |
 |---|---|---|
@@ -330,8 +377,9 @@ the constant and record the failure first; tuning is a follow-up change.
 | Raw overlap mistaken for failure | Square pages and circular rings naturally overlap at boundaries. | Gate on priority-resolved counters, keep raw counters diagnostic. |
 | Missing CLOD creates holes | Stream budgets can delay pages. | Far owns outside live range when CLOD is missing. |
 | Far shell rebuild every frame | Full geometry rebuilds can dominate frame time. | Move/recenter snapped shell; rebuild only after threshold crossing. |
-| Multiple terrain sources | Coast, biome, and height seams appear between layers. | Route all probe terrain summaries through `ProceduralWorldSource`. |
+| Multiple terrain sources | Coast, biome, and height seams appear between layers. | Route all terrain summaries through `ProceduralWorldSource`. |
 | FPS-only conclusions | Browser FPS hides render and update costs. | Use perf harness summaries and report p50/p95 timing plus counters. |
+| Gameplay bypasses terrain ownership | Future systems can disagree with the rendered world. | Gameplay queries must go through source and ownership helpers. |
 
 ## Verification Commands
 
@@ -343,37 +391,37 @@ rtk npm --prefix tools/clod-poc run typecheck
 npm --prefix tools/clod-poc test
 npm --prefix tools/clod-poc run build
 npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
-rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene infinite-islands --seed 1 --world 16 --freeze 1 --hud 1 --framealign 0 --out shots/infinite-islands/probe.png --stats shots/infinite-islands/probe-stats.json"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene infinite-islands --seed 1 --world 16 --freeze 1 --hud 1 --framealign 0 --out shots/infinite-islands/core.png --stats shots/infinite-islands/core-stats.json"
 rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 16 --warmup 600 --frames 300 --case infinite-islands --params scene=infinite-islands,clodPerf=1,webgpuSelection=1 --out perf-runs/infinite-islands"
 ```
 
 ## Done Criteria
 
-The concept probe is done when:
+The clod-poc core terrain path is ready when:
 
 ```text
-1. One ProceduralWorldSource feeds live, CLOD summary, far shell, ocean, canopy, and shadow proxy queries.
+1. One ProceduralWorldSource feeds live, CLOD summary, far shell, ocean, canopy, shadow proxy, and gameplay terrain queries.
 2. Deterministic ownership tests pass for origin, negative, far positive, edge, and diagonal movement.
 3. Priority-resolved overlap and unowned counters are zero after stream-ready.
 4. Missing CLOD outside live range falls back to far shell instead of producing holes.
 5. Far shell center drift stays under the configured recenter threshold.
-6. The deterministic browser URL reaches ready state and renders nonblank terrain.
+6. The deterministic browser core scene reaches ready state and renders nonblank terrain.
 7. Perf output reports frameMs p50/p95, renderMs p95, triangles, draw calls, and ownership counters.
-8. No Bevy/Rust implementation work is required by this document.
+8. Read-only gameplay terrain queries agree with the rendered terrain source and resolved owner.
+9. No Bevy/Rust implementation work is required by this document.
 ```
 
-## Future Bevy Translation
+## Future Work Inside clod-poc
 
-After the clod-poc probe is green, write a separate Bevy implementation plan. That future
-plan must translate only the proven behaviors and measured constraints from this probe:
+After the core terrain path is green, write separate clod-poc plans for:
 
 ```text
-ownership rules
-radius constants
-far-shell recenter policy
-source-summary fields
-stream-ready counters
-performance budgets
+- cave interiors and cave streaming
+- real collision/physics over live terrain
+- terrain edits and derived-layer invalidation
+- persistence/save-load experiments
+- RPG traversal and interaction systems
+- multiplayer/co-op ownership windows
 ```
 
-Do not copy TypeScript visual shortcuts into Bevy as gameplay authority.
+These are clod-poc plans first. Do not turn them into Bevy/Rust plans unless the project direction changes again.
