@@ -8,12 +8,32 @@ export interface FarClipmapSource {
   sampleWater(x: number, z: number): number;
 }
 
+type FarHeightProviderWithWater = FarHeightProvider & {
+  sampleWaterCoverage?: (x: number, z: number) => number;
+};
+
+function providerWater(provider: FarHeightProvider | undefined, x: number, z: number): number {
+  return (provider as FarHeightProviderWithWater | undefined)?.sampleWaterCoverage?.(x, z) ?? 0;
+}
+
 export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightProvider): FarClipmapSource {
   return {
     sampleHeight: (x, z) => provider.sampleHeight(x, z),
     sampleMaterial: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
     sampleBiome: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
-    sampleWater: () => 0,
+    sampleWater: (x, z) => providerWater(provider, x, z),
+  };
+}
+
+export function createFarClipmapSourceFromProviderGetter(
+  getProvider: () => FarHeightProvider | undefined,
+  fallbackHeightM = 0,
+): FarClipmapSource {
+  return {
+    sampleHeight: (x, z) => getProvider()?.sampleHeight(x, z) ?? fallbackHeightM,
+    sampleMaterial: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
+    sampleBiome: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
+    sampleWater: (x, z) => providerWater(getProvider(), x, z),
   };
 }
 
