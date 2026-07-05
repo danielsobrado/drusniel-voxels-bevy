@@ -41,7 +41,7 @@ const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const ACCEPTANCE_MIN_STREAM_BUILD_BUDGET = 32;
 const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 8;
 const ACCEPTANCE_MIN_STREAM_MAX_CACHED = 512;
-const ACCEPTANCE_MIN_STREAM_MAX_LEVEL = 2;
+const ACCEPTANCE_STREAM_MAX_LEVEL = 1;
 const ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES = 1;
 
 let streamBuiltTotal = 0;
@@ -243,6 +243,7 @@ export function runFrameLoopStartup(
   const statsPresenter = statsPresenterFromSession(ctx);
   const streamingScene = longView.queryScene?.startsWith("infinite-") ?? false;
   const acceptanceStreamProfile = searchParams.get("acceptance") === "1" && longView.queryScene === INFINITE_ISLANDS_SCENE;
+  const diagnosticsTerrainMaxLevel = acceptanceStreamProfile ? Math.min(maxTerrainLevel, ACCEPTANCE_STREAM_MAX_LEVEL) : maxTerrainLevel;
   const combatController = session.combatController;
   const spellVfxController = session.spellVfxController;
   const clodShadowOverlayController = session.clodShadowOverlayController;
@@ -339,7 +340,7 @@ export function runFrameLoopStartup(
     applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile),
     maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES, acceptanceStreamProfile),
     maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile),
-    maxRootLevel: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), ACCEPTANCE_MIN_STREAM_MAX_LEVEL, acceptanceStreamProfile),
+    maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"),
     buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
     onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
     onRootsChanged: () => selectionController.invalidate(),
@@ -471,7 +472,7 @@ export function runFrameLoopStartup(
       statsSyncThrottleConfig: clodRuntime.stats,
     },
     diagnostics: {
-      maxTerrainLevel,
+      maxTerrainLevel: diagnosticsTerrainMaxLevel,
       farShellBuilt: () => farShellController.isBuilt(),
       farShellCanopyEnabled: () =>
         farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null,
