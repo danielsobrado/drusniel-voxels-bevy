@@ -1,7 +1,7 @@
 import type { ProjectPropInstance } from "../project/project_props.js";
 import type { VoxelDelta } from "../terrain/voxel_edits/voxel_edit_types.js";
 import { SAVE_CHUNK_SIZE_M, SAVE_PROCEDURAL_PROFILE, SAVE_REGION_SIZE_M, SAVE_SCHEMA_VERSION } from "./save_config.js";
-import { parseRegionKey } from "./region_key.js";
+import { parseRegionKey, regionKeyForWorld } from "./region_key.js";
 import { decodeVoxelDeltasBin1, type VoxelDeltaBinaryPayload } from "./voxel_delta_binary.js";
 
 export type SaveSchemaVersion = 1;
@@ -74,6 +74,9 @@ export interface WorldMetadataRecord { schemaVersion: SaveSchemaVersion; cities:
 
 type RecordValue = Record<string, unknown>;
 
+const OPTIONAL_SAVED_PROP_SAFE_INTEGER_FIELDS = ["seed", "variationId", "flags", "revision"] as const;
+const OPTIONAL_SAVED_PROP_STRING_FIELDS = ["cityId", "roadId", "criticalPathId", "ownerFactionId"] as const;
+
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -117,6 +120,18 @@ function assertNonNegativeFinite(value: unknown, label: string): asserts value i
 
 function assertStringList(value: unknown, label: string): asserts value is string[] {
   if (!isStringArray(value)) throw new Error(`${label} must be a string array`);
+}
+
+function assertOptionalSafeIntegerFields(value: RecordValue, fields: readonly string[], label: string): void {
+  for (const field of fields) {
+    if (value[field] !== undefined && !isSafeInteger(value[field])) throw new Error(`${label} ${field} must be a safe integer`);
+  }
+}
+
+function assertOptionalNonEmptyStringFields(value: RecordValue, fields: readonly string[], label: string): void {
+  for (const field of fields) {
+    if (value[field] !== undefined) assertString(value[field], `${label} ${field}`);
+  }
 }
 
 function assertIso(value: unknown, label: string): void {
@@ -212,6 +227,8 @@ export function assertSavedPropInstance(value: unknown): asserts value is SavedP
   assertVec3(value.scale, "saved prop scale");
   if (value.scale.some((scale) => scale <= 0)) throw new Error("saved prop scale must be positive");
   if (value.anchor !== undefined && value.anchor !== "world" && value.anchor !== "terrain" && value.anchor !== "voxel") throw new Error("saved prop anchor is invalid");
+  assertOptionalSafeIntegerFields(value, OPTIONAL_SAVED_PROP_SAFE_INTEGER_FIELDS, "saved prop");
+  assertOptionalNonEmptyStringFields(value, OPTIONAL_SAVED_PROP_STRING_FIELDS, "saved prop");
   assertString(value.regionKey, "saved prop regionKey");
   parseRegionKey(value.regionKey);
   if (value.state !== "active" && value.state !== "hidden" && value.state !== "destroyed") throw new Error("saved prop state is invalid");
@@ -225,6 +242,10 @@ export function assertRegionRecordSet(manifest: RegionManifest, voxelDeltas: Reg
   props.forEach((prop) => {
     assertSavedPropInstance(prop);
     if (prop.regionKey !== manifest.regionKey) throw new Error("saved prop regionKey mismatch");
+    const positionRegionKey = regionKeyForWorld(prop.position[0], prop.position[2]);
+    if (positionRegionKey !== manifest.regionKey) {
+      throw new Error(`saved prop position region mismatch: ${prop.id} belongs to ${positionRegionKey}, not ${manifest.regionKey}`);
+    }
   });
   assertUniqueIds(props, `region ${manifest.regionKey} prop`);
 }
