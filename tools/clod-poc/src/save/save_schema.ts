@@ -38,7 +38,7 @@ export interface RegionManifest {
 export interface RegionVoxelDeltas {
   schemaVersion: SaveSchemaVersion;
   regionKey: string;
-  format: "json" | "bin1";
+  format: "json";
   deltas: VoxelDelta[];
 }
 
@@ -117,6 +117,26 @@ function requireArray(value: unknown, label: string): unknown[] {
   return value;
 }
 
+function assertNonEmptyVec3List(value: unknown, label: string): void {
+  const items = requireArray(value, label);
+  if (items.length === 0) throw new Error(`${label} must not be empty`);
+  items.forEach((item, index) => assertVec3(item, `${label}[${index}]`));
+}
+
+function assertBounds2D(value: unknown, label: string): void {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  for (const key of ["minX", "minZ", "maxX", "maxZ"] as const) assertFinite(value[key], `${label}.${key}`);
+  if (value.minX > value.maxX || value.minZ > value.maxZ) throw new Error(`${label} min must be <= max`);
+}
+
+function assertUniqueIds(items: readonly { id: string }[], label: string): void {
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.id)) throw new Error(`duplicate ${label} id: ${item.id}`);
+    seen.add(item.id);
+  }
+}
+
 export function assertSaveWorldManifest(value: unknown): asserts value is SaveWorldManifest {
   if (!isRecord(value)) throw new Error("save manifest must be an object");
   assertSchemaVersion(value.schemaVersion, "save manifest");
@@ -156,7 +176,7 @@ export function assertRegionVoxelDeltas(value: unknown): asserts value is Region
   assertSchemaVersion(value.schemaVersion, "region voxel deltas");
   assertString(value.regionKey, "region voxel deltas regionKey");
   parseRegionKey(value.regionKey);
-  if (value.format !== "json" && value.format !== "bin1") throw new Error("region voxel deltas format is unsupported");
+  if (value.format !== "json") throw new Error("region voxel deltas format is unsupported before SV-10");
   requireArray(value.deltas, "region voxel deltas deltas").forEach((delta, index) => assertVoxelDelta(delta, `region voxel deltas[${index}]`));
 }
 
@@ -167,6 +187,7 @@ export function assertSavedPropInstance(value: unknown): asserts value is SavedP
   assertVec3(value.position, "saved prop position");
   if (!isVec4(value.rotation)) throw new Error("saved prop rotation must be a vec4");
   assertVec3(value.scale, "saved prop scale");
+  if (value.scale.some((scale) => scale <= 0)) throw new Error("saved prop scale must be positive");
   if (value.anchor !== undefined && value.anchor !== "world" && value.anchor !== "terrain" && value.anchor !== "voxel") throw new Error("saved prop anchor is invalid");
   assertString(value.regionKey, "saved prop regionKey");
   parseRegionKey(value.regionKey);
@@ -182,10 +203,76 @@ export function assertRegionRecordSet(manifest: RegionManifest, voxelDeltas: Reg
     assertSavedPropInstance(prop);
     if (prop.regionKey !== manifest.regionKey) throw new Error("saved prop regionKey mismatch");
   });
+  assertUniqueIds(props, `region ${manifest.regionKey} prop`);
 }
 
 function requireLinked(id: string, ids: ReadonlySet<string>, label: string): void {
   if (!ids.has(id)) throw new Error(`dangling ${label} link: ${id}`);
+}
+
+function assertCity(value: unknown): asserts value is SavedCity {
+  if (!isRecord(value)) throw new Error("city must be an object");
+  assertString(value.id, "city id");
+  assertString(value.name, "city name");
+  assertVec3(value.center, "city center");
+  assertFinite(value.radiusM, "city radiusM");
+  assertStringList(value.districtIds, "city districtIds");
+  assertStringList(value.roadIds, "city roadIds");
+  assertStringList(value.criticalPathIds, "city criticalPathIds");
+  if (!isSafeInteger(value.revision)) throw new Error("city revision must be a safe integer");
+}
+
+function assertDistrict(value: unknown): asserts value is SavedCityDistrict {
+  if (!isRecord(value)) throw new Error("district must be an object");
+  assertString(value.id, "district id");
+  assertString(value.cityId, "district cityId");
+  assertString(value.name, "district name");
+  assertBounds2D(value.bounds, "district bounds");
+  assertStringList(value.tags, "district tags");
+}
+
+function assertRoad(value: unknown): asserts value is SavedRoad {
+  if (!isRecord(value)) throw new Error("road must be an object");
+  assertString(value.id, "road id");
+  assertNonEmptyVec3List(value.points, "road points");
+  assertFinite(value.widthM, "road widthM");
+  if (!isSafeInteger(value.materialId)) throw new Error("road materialId must be a safe integer");
+  if (!["dirt", "stone", "bridge", "city", "trail"].includes(String(value.roadType))) throw new Error("road roadType is invalid");
+  assertStringList(value.connectedCityIds, "road connectedCityIds");
+  if (!isSafeInteger(value.revision)) throw new Error("road revision must be a safe integer");
+}
+
+function assertCaveEntrance(value: unknown): asserts value is SavedCaveEntrance {
+  if (!isRecord(value)) throw new Error("cave entrance must be an object");
+  assertString(value.id, "cave entrance id");
+  assertVec3(value.position, "cave entrance position");
+  assertVec3(value.facing, "cave entrance facing");
+  assertString(value.caveSystemId, "cave entrance caveSystemId");
+  assertFinite(value.farMaskRadiusM, "cave entrance farMaskRadiusM");
+  if (!isSafeInteger(value.revision)) throw new Error("cave entrance revision must be a safe integer");
+}
+
+function assertCaveSystem(value: unknown): asserts value is SavedCaveSystem {
+  if (!isRecord(value)) throw new Error("cave system must be an object");
+  assertString(value.id, "cave system id");
+  assertStringList(value.entranceIds, "cave system entranceIds");
+  if (!isSafeInteger(value.proceduralSeed)) throw new Error("cave system proceduralSeed must be a safe integer");
+  if (typeof value.authored !== "boolean") throw new Error("cave system authored must be boolean");
+  assertStringList(value.criticalPathIds, "cave system criticalPathIds");
+  if (!isSafeInteger(value.revision)) throw new Error("cave system revision must be a safe integer");
+}
+
+function assertCriticalPath(value: unknown): asserts value is SavedCriticalPath {
+  if (!isRecord(value)) throw new Error("critical path must be an object");
+  assertString(value.id, "critical path id");
+  assertString(value.name, "critical path name");
+  if (!["mainQuest", "cityAccess", "dungeonAccess", "bossRoute", "tutorial"].includes(String(value.purpose))) throw new Error("critical path purpose is invalid");
+  assertNonEmptyVec3List(value.points, "critical path points");
+  assertStringList(value.linkedRoadIds, "critical path linkedRoadIds");
+  assertStringList(value.linkedPropIds, "critical path linkedPropIds");
+  if (typeof value.mustRemainPassable !== "boolean") throw new Error("critical path mustRemainPassable must be boolean");
+  if (!["valid", "warning", "blocked", "dirty"].includes(String(value.status))) throw new Error("critical path status is invalid");
+  if (!isSafeInteger(value.revision)) throw new Error("critical path revision must be a safe integer");
 }
 
 export function assertWorldMetadataLinks(metadata: WorldMetadataRecord): void {
@@ -214,12 +301,34 @@ export function assertWorldMetadataLinks(metadata: WorldMetadataRecord): void {
     requireLinked(entrance.caveSystemId, caveSystemIds, "cave system");
     if (entrance.linkedCriticalPathId) requireLinked(entrance.linkedCriticalPathId, criticalPathIds, "critical path");
   });
+  metadata.criticalPaths.forEach((path) => path.linkedRoadIds.forEach((id) => requireLinked(id, roadIds, "road")));
+}
+
+export function assertWorldMetadataPropLinks(metadata: WorldMetadataRecord, propIds: ReadonlySet<string>): void {
+  metadata.criticalPaths.forEach((path) => path.linkedPropIds.forEach((id) => requireLinked(id, propIds, "prop")));
 }
 
 export function assertWorldMetadataRecord(value: unknown): asserts value is WorldMetadataRecord {
   if (!isRecord(value)) throw new Error("world metadata must be an object");
   assertSchemaVersion(value.schemaVersion, "world metadata");
-  for (const key of ["cities", "districts", "roads", "caveEntrances", "caveSystems", "criticalPaths"] as const) requireArray(value[key], `world metadata ${key}`);
+  const cities = requireArray(value.cities, "world metadata cities");
+  const districts = requireArray(value.districts, "world metadata districts");
+  const roads = requireArray(value.roads, "world metadata roads");
+  const caveEntrances = requireArray(value.caveEntrances, "world metadata caveEntrances");
+  const caveSystems = requireArray(value.caveSystems, "world metadata caveSystems");
+  const criticalPaths = requireArray(value.criticalPaths, "world metadata criticalPaths");
+  cities.forEach(assertCity);
+  districts.forEach(assertDistrict);
+  roads.forEach(assertRoad);
+  caveEntrances.forEach(assertCaveEntrance);
+  caveSystems.forEach(assertCaveSystem);
+  criticalPaths.forEach(assertCriticalPath);
   if (!isSafeInteger(value.revision)) throw new Error("world metadata revision must be a safe integer");
+  assertUniqueIds(cities as SavedCity[], "city");
+  assertUniqueIds(districts as SavedCityDistrict[], "district");
+  assertUniqueIds(roads as SavedRoad[], "road");
+  assertUniqueIds(caveEntrances as SavedCaveEntrance[], "cave entrance");
+  assertUniqueIds(caveSystems as SavedCaveSystem[], "cave system");
+  assertUniqueIds(criticalPaths as SavedCriticalPath[], "critical path");
   assertWorldMetadataLinks(value as unknown as WorldMetadataRecord);
 }
