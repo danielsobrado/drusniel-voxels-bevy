@@ -91,10 +91,9 @@ describe("DeepOcean", () => {
   it("ships GPU wave, shading, foam, and fog functions", () => {
     expect(DEEP_OCEAN_WGSL).toContain("fn deep_ocean_wave_sample");
     expect(DEEP_OCEAN_WGSL).toContain("fn deep_ocean_shade");
-    expect(DEEP_OCEAN_WGSL).toContain("sun_specular");
-    expect(DEEP_OCEAN_WGSL).toContain("fog_exponential");
-    expect(DEEP_OCEAN_WGSL).toContain("sandy_calm");
-    expect(DEEP_OCEAN_WGSL).toContain("cove_calm");
+    expect(DEEP_OCEAN_WGSL).toContain("dow_fbm3");
+    expect(DEEP_OCEAN_WGSL).toContain("foam_breakup");
+    expect(DEEP_OCEAN_WGSL).toContain("fog_amount");
     expect(DEEP_OCEAN_WGSL).toContain("reef_line");
     expect(DEEP_OCEAN_WGSL).toContain("cliff_spray");
   });
