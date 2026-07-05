@@ -23,6 +23,13 @@ describe("deep ocean GPU wave cache", () => {
     expect(DEEP_OCEAN_GPU_WAVES).toHaveLength(base.length);
   });
 
+  it("normalizes selected spectrum waves to the configured height scale", () => {
+    const cfg = DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.wave;
+    const waves = deepOceanGpuWaves(cfg).slice(0, cfg.activeGpuWaves);
+    const sum = waves.reduce((total, wave) => total + Math.abs(wave.amp), 0);
+    expect(sum).toBeCloseTo(cfg.heightScale, 3);
+  });
+
   it("precomputes finite immutable wave constants", () => {
     expect(Object.isFrozen(DEEP_OCEAN_GPU_WAVES)).toBe(true);
     for (const wave of DEEP_OCEAN_GPU_WAVES) {
