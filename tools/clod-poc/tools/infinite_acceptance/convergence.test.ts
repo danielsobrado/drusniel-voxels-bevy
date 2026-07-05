@@ -162,14 +162,14 @@ describe("infinite acceptance convergence helpers", () => {
     expect(cache.startupTerrainSummaryMs).toBe(0);
   });
 
-  it("passes higher acceptance warmup budgets by profile", () => {
+  it("passes bounded acceptance warmup budgets by profile", () => {
     expect(profileAcceptanceParams("reuse")).toMatchObject({
       liveBubbleBudget: "4",
       liveBubbleGpuChunkBudget: "16",
       liveBubbleMaxInflightChunks: "128",
       liveClodRootBudget: "32",
       liveClodRootApplyBudget: "8",
-      liveClodRootMaxInflightBatches: "4",
+      liveClodRootMaxInflightBatches: "1",
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "2",
       liveClodRootRadius: "768",
@@ -185,7 +185,7 @@ describe("infinite acceptance convergence helpers", () => {
       liveBubbleMaxInflightChunks: "128",
       liveClodRootBudget: "32",
       liveClodRootApplyBudget: "8",
-      liveClodRootMaxInflightBatches: "4",
+      liveClodRootMaxInflightBatches: "1",
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "2",
       liveClodRootRadius: "768",
