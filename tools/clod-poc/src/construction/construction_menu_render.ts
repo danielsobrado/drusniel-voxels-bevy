@@ -7,47 +7,85 @@ import { escapeHtml, escapeStyleUrl } from "./construction_controller_support.js
 
 export interface ConstructionMenuRenderInput {
   pieces: readonly ConstructionPieceDef[];
-  selectedPiece: ConstructionPieceDef | null;
-  selectedIndex: number;
+  selectedPiece?: ConstructionPieceDef | null;
+  selectedPieceId?: string | null;
+  selectedIndex?: number;
   selectedMaterial: ConstructionMaterial;
   snapEnabled: boolean;
-  currentCandidate: ConstructionCandidate | null;
-  lastPlacementMessage: string;
+  currentCandidate?: ConstructionCandidate | null;
+  currentValid?: boolean;
+  currentReason?: string | null;
+  lastPlacementMessage?: string;
+  lastMessage?: string;
+  active?: boolean;
+  rotationQuarterTurns?: number;
+  placedPieces?: number;
+  indexedSnapPoints?: number;
+  materialOptions?: typeof CONSTRUCTION_MATERIAL_OPTIONS;
+}
+
+function resolveSelectedIndex(input: ConstructionMenuRenderInput): number {
+  if (Number.isInteger(input.selectedIndex) && input.selectedIndex! >= 0 && input.selectedIndex! < input.pieces.length) {
+    return input.selectedIndex!;
+  }
+  if (input.selectedPieceId) {
+    const index = input.pieces.findIndex((piece) => piece.id === input.selectedPieceId);
+    if (index >= 0) return index;
+  }
+  return 0;
+}
+
+function resolveSelectedPiece(input: ConstructionMenuRenderInput, selectedIndex: number): ConstructionPieceDef | null {
+  return input.selectedPiece ?? input.pieces[selectedIndex] ?? null;
+}
+
+function resolveStatus(input: ConstructionMenuRenderInput): string {
+  if (input.currentCandidate) {
+    return input.currentCandidate.valid
+      ? input.currentCandidate.snapped ? "Snapped" : "Free placement"
+      : `Blocked: ${escapeHtml(input.currentCandidate.reason ?? "invalid")}`;
+  }
+  if (typeof input.currentValid === "boolean") {
+    return input.currentValid
+      ? "Free placement"
+      : input.currentReason ? `Blocked: ${escapeHtml(input.currentReason)}` : "Aim at terrain or snap point";
+  }
+  return "Aim at terrain or snap point";
 }
 
 export function renderConstructionMenuHtml(input: ConstructionMenuRenderInput): string {
+  const selectedIndex = resolveSelectedIndex(input);
+  const selectedPiece = resolveSelectedPiece(input, selectedIndex);
+  const materialOptions = input.materialOptions ?? CONSTRUCTION_MATERIAL_OPTIONS;
   const pieceButtons = input.pieces.map((piece, index) => {
-    const active = index === input.selectedIndex;
+    const active = index === selectedIndex;
     return `<button data-piece-index="${index}" style="${buttonStyle(active)}">${index + 1}. ${escapeHtml(piece.label)}</button>`;
   }).join("");
-  const materialButtons = CONSTRUCTION_MATERIAL_OPTIONS.map((option, index) => {
+  const materialButtons = materialOptions.map((option, index) => {
     const active = option.id === input.selectedMaterial;
     const label = `${escapeHtml(option.label)}`;
     const preview = escapeStyleUrl(option.previewUrl);
     return `<button data-material-index="${index}" title="${label}" style="${swatchStyle(active, option.color, preview)}"><span>${label}</span></button>`;
   }).join("");
-  const status = input.currentCandidate
-    ? input.currentCandidate.valid
-      ? input.currentCandidate.snapped ? "Snapped" : "Free placement"
-      : `Blocked: ${escapeHtml(input.currentCandidate.reason ?? "invalid")}`
-    : "Aim at terrain or snap point";
+  const status = resolveStatus(input);
+  const lastMessage = input.lastPlacementMessage ?? input.lastMessage ?? "";
   return `
       <div data-drag-handle style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;cursor:grab;">
         <strong>Build</strong>
-        <span>${input.selectedPiece ? escapeHtml(input.selectedPiece.label) : "No pieces"} · ${escapeHtml(constructionMaterialLabel(input.selectedMaterial))}</span>
+        <span>${selectedPiece ? escapeHtml(selectedPiece.label) : "No pieces"} · ${escapeHtml(constructionMaterialLabel(input.selectedMaterial))}</span>
         <span>${input.snapEnabled ? "Snap ON" : "Snap OFF"}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">${pieceButtons}</div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
         <button data-material-step="-1" style="${buttonStyle(false)}">◀</button>
-        <div style="display:grid;grid-template-columns:repeat(${Math.min(6, CONSTRUCTION_MATERIAL_OPTIONS.length)}, minmax(0, 1fr));gap:5px;flex:1;">${materialButtons}</div>
+        <div style="display:grid;grid-template-columns:repeat(${Math.min(6, materialOptions.length)}, minmax(0, 1fr));gap:5px;flex:1;">${materialButtons}</div>
         <button data-material-step="1" style="${buttonStyle(false)}">▶</button>
       </div>
       <div style="display:flex;justify-content:space-between;gap:8px;">
         <span>${status}</span>
         <span>R rotate · X snap · arrows material</span>
       </div>
-      ${input.lastPlacementMessage ? `<div style="margin-top:6px;color:#ffd27a;">${escapeHtml(input.lastPlacementMessage)}</div>` : ""}
+      ${lastMessage ? `<div style="margin-top:6px;color:#ffd27a;">${escapeHtml(lastMessage)}</div>` : ""}
     `;
 }
 
