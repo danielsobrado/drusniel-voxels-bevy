@@ -6,6 +6,7 @@ export interface FarClipmapSource {
   sampleMaterial(x: number, z: number): number;
   sampleBiome(x: number, z: number): number;
   sampleWater(x: number, z: number): number;
+  isReady?: () => boolean;
 }
 
 type FarHeightProviderWithWater = FarHeightProvider & {
@@ -13,7 +14,7 @@ type FarHeightProviderWithWater = FarHeightProvider & {
 };
 
 type GlobalFarSummaryProvider = {
-  getHeightProvider: () => FarHeightProvider;
+  getHeightProvider: () => FarHeightProvider | undefined;
 };
 
 function providerWater(provider: FarHeightProvider | undefined, x: number, z: number): number {
@@ -33,6 +34,7 @@ export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightP
     sampleMaterial: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
     sampleBiome: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
     sampleWater: (x, z) => providerWater(provider, x, z),
+    isReady: () => true,
   };
 }
 
@@ -45,6 +47,7 @@ export function createFarClipmapSourceFromProviderGetter(
     sampleMaterial: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
     sampleBiome: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
     sampleWater: (x, z) => providerWater(getProvider(), x, z),
+    isReady: () => getProvider() !== undefined,
   };
 }
 
@@ -58,6 +61,7 @@ export function createFarClipmapSourceFromTerrainSampler(sampler: FarTerrainSamp
     sampleMaterial: (x, z) => sampler.sampleMaterial?.(x, z) ?? 0,
     sampleBiome: (x, z) => sampler.sampleMaterial?.(x, z) ?? 0,
     sampleWater: (x, z) => sampler.sampleWaterCoverage?.(x, z) ?? 0,
+    isReady: () => true,
   };
 }
 
@@ -67,5 +71,6 @@ export function createConservativeFarClipmapSource(heightM = 0): FarClipmapSourc
     sampleMaterial: () => 0,
     sampleBiome: () => 0,
     sampleWater: () => 1,
+    isReady: () => true,
   };
 }
