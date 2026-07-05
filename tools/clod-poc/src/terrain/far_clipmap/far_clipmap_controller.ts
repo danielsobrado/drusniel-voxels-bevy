@@ -3,7 +3,7 @@ import type { FarClipmapConfig, FarClipmapDebugMode } from "./far_clipmap_config
 import { farClipmapRingRange, farClipmapSnap } from "./far_clipmap_keys.js";
 import { createFarClipmapTerrainGeometry } from "./far_clipmap_geometry.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
-import { createConservativeFarClipmapSource } from "./far_clipmap_source.js";
+import { createDefaultFarClipmapSource } from "./far_clipmap_source.js";
 
 export interface FarClipmapStats {
   enabled: number;
@@ -76,7 +76,7 @@ function makeStats(config: FarClipmapConfig, visible: boolean, readyTiles: numbe
 export function createFarClipmapController(
   scene: THREE.Scene,
   config: FarClipmapConfig,
-  source: FarClipmapSource = createConservativeFarClipmapSource(),
+  source: FarClipmapSource = createDefaultFarClipmapSource(),
 ): FarClipmapController {
   return new FarClipmapControllerImpl(scene, config, source);
 }
