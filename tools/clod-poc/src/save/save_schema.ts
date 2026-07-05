@@ -106,7 +106,7 @@ function assertSchemaVersion(value: unknown, label: string): void {
 }
 
 function assertString(value: unknown, label: string): asserts value is string {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string`);
+  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);
 }
 
 function assertFinite(value: unknown, label: string): asserts value is number {
