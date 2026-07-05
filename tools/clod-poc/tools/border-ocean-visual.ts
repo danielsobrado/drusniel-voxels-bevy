@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import sharp from "sharp";
 import {
   borderOceanCameraForWorld,
+  borderOceanHorizonCameraForWorld,
+  formatBorderOceanCamString,
   parseBorderOceanSceneConfig,
   validateBorderOceanStats,
 } from "../src/debug/border_ocean_scene.js";
@@ -12,6 +14,7 @@ interface VisualPreset {
   renderer: "webgl" | "webgpu";
   weather: string;
   extra: readonly string[];
+  cameraArg?: string;
 }
 
 interface DiffStats {
@@ -24,11 +27,12 @@ const WORLD_PAGES = 16;
 const WORLD_CELLS = WORLD_PAGES * 4 * 16;
 const CONFIG_TEXT = readFileSync("config/border_ocean_scene.yaml", "utf8");
 const SCENE_CONFIG = parseBorderOceanSceneConfig(CONFIG_TEXT);
-const CAMERA = borderOceanCameraForWorld(WORLD_CELLS, SCENE_CONFIG);
-const CAMERA_ARG = `${CAMERA.eye[0].toFixed(0)},${CAMERA.eye[1].toFixed(0)},${CAMERA.eye[2].toFixed(0)},${CAMERA.look[0].toFixed(0)},${CAMERA.look[1].toFixed(0)},${CAMERA.look[2].toFixed(0)},${CAMERA.fov}`;
+const CAMERA_ARG = formatBorderOceanCamString(borderOceanCameraForWorld(WORLD_CELLS, SCENE_CONFIG));
+const HORIZON_CAMERA_ARG = formatBorderOceanCamString(borderOceanHorizonCameraForWorld(WORLD_CELLS, SCENE_CONFIG));
 
 const PRESETS: readonly VisualPreset[] = [
   { name: "noon", renderer: "webgl", weather: "off", extra: [] },
+  { name: "horizon", renderer: "webgl", weather: "off", extra: [], cameraArg: HORIZON_CAMERA_ARG },
   { name: "sunset", renderer: "webgl", weather: "off", extra: ["--sunElevationDeg", "8", "--sunAzimuthDeg", "238", "--hazeIntensity", "0.8"] },
   { name: "storm", renderer: "webgl", weather: "storm", extra: ["--weatherIntensity", "0.85", "--hazeIntensity", "1.0"] },
   { name: "cheap", renderer: "webgl", weather: "off", extra: ["--textureMipmaps", "0", "--grass", "0", "--trees", "0", "--stones", "0"] },
@@ -51,7 +55,7 @@ function shotArgs(preset: VisualPreset, out: string, stats: string): string[] {
     "--hud", "1",
     "--framealign", "0",
     "--weather", preset.weather,
-    "--cam", CAMERA_ARG,
+    "--cam", preset.cameraArg ?? CAMERA_ARG,
     "--out", out,
     "--stats", stats,
     ...preset.extra,
