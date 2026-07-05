@@ -12,4 +12,13 @@ export function publishFarClipmapStatsToCounters(counters: Record<string, number
   counters["far_clipmap_snap_size_m"] = stats.snapSizeM;
   counters["far_clipmap_gpu_owned_cells"] = stats.gpuOwnedCells;
   counters["far_clipmap_gpu_ownership_holes"] = stats.gpuOwnershipHoles;
+  counters["far_clipmap_source_ready"] = stats.sourceReady;
+  counters["far_clipmap_build_ms"] = stats.buildMsThisFrame;
+  counters["far_clipmap_build_ms_total"] = stats.buildMsTotal;
+  counters["far_clipmap_vertices_built_this_frame"] = stats.verticesBuiltThisFrame;
+  counters["far_clipmap_triangles_built_this_frame"] = stats.trianglesBuiltThisFrame;
+  counters["far_clipmap_fallback_samples_this_frame"] = stats.fallbackSamplesThisFrame;
+  counters["far_clipmap_fallback_samples_total"] = stats.fallbackSamplesTotal;
+  counters["far_clipmap_exception_samples_this_frame"] = stats.exceptionSamplesThisFrame;
+  counters["far_clipmap_exception_samples_total"] = stats.exceptionSamplesTotal;
 }
