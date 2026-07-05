@@ -18,7 +18,9 @@ export class CacheScheduler {
   private readonly config: ClodCacheStreamingConfig;
   private readonly readQueue: ReadTask<unknown>[] = [];
   private readonly writeQueue: WriteTask<unknown>[] = [];
+  private readonly idleWaiters: Array<() => void> = [];
   private draining = false;
+  private activeTasks = 0;
 
   constructor(config: ClodCacheStreamingConfig) {
     this.config = config;
@@ -47,9 +49,22 @@ export class CacheScheduler {
   }
 
   async flush(): Promise<void> {
-    while (this.readQueue.length > 0 || this.writeQueue.length > 0) {
-      await this.drainOnce();
+    while (this.hasPendingWork()) {
+      if (this.readQueue.length > 0 || this.writeQueue.length > 0) {
+        await this.drainOnce();
+      } else {
+        await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+      }
     }
+  }
+
+  private hasPendingWork(): boolean {
+    return this.readQueue.length > 0 || this.writeQueue.length > 0 || this.activeTasks > 0;
+  }
+
+  private notifyIdleIfNeeded(): void {
+    if (this.hasPendingWork()) return;
+    while (this.idleWaiters.length > 0) this.idleWaiters.shift()?.();
   }
 
   private scheduleDrain(): void {
@@ -62,11 +77,25 @@ export class CacheScheduler {
           else setTimeout(tick, 0);
         } else {
           this.draining = false;
+          this.notifyIdleIfNeeded();
         }
       });
     };
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(tick);
     else setTimeout(tick, 0);
+  }
+
+  private async runTask<T>(task: ReadTask<T> | WriteTask<T>): Promise<void> {
+    this.activeTasks++;
+    try {
+      const result = await task.run();
+      task.resolve(result);
+    } catch (error) {
+      task.reject(error);
+    } finally {
+      this.activeTasks--;
+      this.notifyIdleIfNeeded();
+    }
   }
 
   private async drainOnce(): Promise<void> {
@@ -80,12 +109,7 @@ export class CacheScheduler {
       if (elapsed >= this.config.max_decode_ms_per_frame) break;
       const task = this.readQueue.shift();
       if (!task) break;
-      try {
-        const result = await task.run();
-        task.resolve(result);
-      } catch (error) {
-        task.reject(error);
-      }
+      await this.runTask(task);
       reads++;
     }
 
@@ -94,12 +118,7 @@ export class CacheScheduler {
       if (elapsed >= this.config.max_encode_ms_per_frame) break;
       const task = this.writeQueue.shift();
       if (!task) break;
-      try {
-        const result = await task.run();
-        task.resolve(result);
-      } catch (error) {
-        task.reject(error);
-      }
+      await this.runTask(task);
       writes++;
     }
   }
