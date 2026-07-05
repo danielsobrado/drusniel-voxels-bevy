@@ -3,6 +3,7 @@ import {
   consumeStagedVoxelProjectImport,
   type VoxelProjectArchiveContents,
 } from "../../project/voxel_project_archive.js";
+import { loadSavedWorldStartup } from "./save_world_startup.js";
 
 export interface ProjectImportDom {
   buildProgress: HTMLElement;
@@ -17,7 +18,10 @@ export async function loadStagedProjectImport(
   dom: ProjectImportDom,
 ): Promise<VoxelProjectArchiveContents | null> {
   const importToken = searchParams.get("import");
-  if (!importToken) return null;
+  if (!importToken) {
+    await loadSavedWorldStartup(searchParams, dom);
+    return null;
+  }
 
   dom.buildProgress.hidden = false;
   dom.buildProgressPhase.textContent = "loading imported project";
