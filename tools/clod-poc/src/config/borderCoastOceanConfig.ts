@@ -74,15 +74,24 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
   }
 
   const nearGridSize = numberAt(deepOcean, "near_grid_size_m", "deep_ocean", Number.MIN_VALUE);
+  const midGridSize = numberAt(deepOcean, "mid_grid_size_m", "deep_ocean", Number.MIN_VALUE);
   const farGridSize = numberAt(deepOcean, "far_grid_size_m", "deep_ocean", Number.MIN_VALUE);
-  if (nearGridSize > farGridSize) {
-    throw new Error(`${CONFIG_NAME}: deep_ocean.near_grid_size_m must not exceed deep_ocean.far_grid_size_m`);
+  if (nearGridSize > midGridSize) {
+    throw new Error(`${CONFIG_NAME}: deep_ocean.near_grid_size_m must not exceed mid_grid_size_m`);
+  }
+  if (midGridSize > farGridSize) {
+    throw new Error(`${CONFIG_NAME}: deep_ocean.mid_grid_size_m must not exceed far_grid_size_m`);
   }
 
   const fogNear = numberAt(shading, "fog_near_m", "deep_ocean.shading", 0);
   const fogFar = numberAt(shading, "fog_far_m", "deep_ocean.shading", 0);
   if (fogNear >= fogFar) {
     throw new Error(`${CONFIG_NAME}: deep_ocean.shading.fog_near_m must be less than fog_far_m`);
+  }
+  const horizonStart = numberAt(shading, "horizon_blend_start_m", "deep_ocean.shading", 0);
+  const horizonEnd = numberAt(shading, "horizon_blend_end_m", "deep_ocean.shading", 0);
+  if (horizonStart >= horizonEnd) {
+    throw new Error(`${CONFIG_NAME}: deep_ocean.shading.horizon_blend_start_m must be less than horizon_blend_end_m`);
   }
 
   const gameplayConfig: BorderOceanGameplayConfig = {
@@ -158,9 +167,15 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
       start_outside_border_m: numberAt(deepOcean, "start_outside_border_m", "deep_ocean", 0),
       visual_extent_m: numberAt(deepOcean, "visual_extent_m", "deep_ocean", Number.MIN_VALUE),
       near_grid_size_m: nearGridSize,
+      mid_grid_size_m: midGridSize,
       far_grid_size_m: farGridSize,
       near_subdivisions: integerAt(deepOcean, "near_subdivisions", "deep_ocean", 1),
+      mid_subdivisions: integerAt(deepOcean, "mid_subdivisions", "deep_ocean", 1),
       far_subdivisions: integerAt(deepOcean, "far_subdivisions", "deep_ocean", 1),
+      ring_inner_band_m: numberAt(deepOcean, "ring_inner_band_m", "deep_ocean", 0),
+      ring_inner_radial_segments: integerAt(deepOcean, "ring_inner_radial_segments", "deep_ocean", 1),
+      ring_outer_radial_segments: integerAt(deepOcean, "ring_outer_radial_segments", "deep_ocean", 1),
+      ring_tangential_segments: integerAt(deepOcean, "ring_tangential_segments", "deep_ocean", 1),
       wave: {
         gravity: numberAt(wave, "gravity", "deep_ocean.wave", Number.MIN_VALUE),
         grid_k: integerAt(wave, "grid_k", "deep_ocean.wave", 2),
@@ -175,6 +190,9 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
         foam_power: numberAt(wave, "foam_power", "deep_ocean.wave", 0),
         foam_intensity: numberAt(wave, "foam_intensity", "deep_ocean.wave", 0),
         swell_height_scale: numberAt(wave, "swell_height_scale", "deep_ocean.wave", 0),
+        detail_normal_strength: numberAt(wave, "detail_normal_strength", "deep_ocean.wave", 0),
+        detail_normal_fade_start_m: numberAt(wave, "detail_normal_fade_start_m", "deep_ocean.wave", 0),
+        detail_normal_fade_end_m: numberAt(wave, "detail_normal_fade_end_m", "deep_ocean.wave", 0),
       },
       shading: {
         deep_color: colorAt(shading, "deep_color", "deep_ocean.shading"),
@@ -189,6 +207,12 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
         fog_near_m: fogNear,
         fog_far_m: fogFar,
         fog_density: numberAt(shading, "fog_density", "deep_ocean.shading", 0),
+        sky_zenith_color: colorAt(shading, "sky_zenith_color", "deep_ocean.shading"),
+        sss_color: colorAt(shading, "sss_color", "deep_ocean.shading"),
+        sss_strength: numberAt(shading, "sss_strength", "deep_ocean.shading", 0),
+        horizon_blend_start_m: horizonStart,
+        horizon_blend_end_m: horizonEnd,
+        edge_fade_m: numberAt(shading, "edge_fade_m", "deep_ocean.shading", 0),
       },
     },
     gameplay: gameplayConfig,
