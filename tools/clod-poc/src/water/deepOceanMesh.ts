@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { DeepOceanConfig } from "../config/borderCoastOceanConfig.js";
 
-export type DeepOceanLevel = "near" | "far";
+export type DeepOceanLevel = "near" | "mid" | "far";
 
 export interface DeepOceanGridMesh {
   level: DeepOceanLevel;
@@ -9,36 +9,44 @@ export interface DeepOceanGridMesh {
   extentM: number;
   subdivisions: number;
   snapM: number;
-  innerFadeM: number;
-  outerFadeM: number;
+  fadeIn: readonly [number, number];
+  fadeOut: readonly [number, number];
   triangleCount: number;
 }
 
 export interface DeepOceanMeshSet {
   near: DeepOceanGridMesh;
+  mid: DeepOceanGridMesh;
   far: DeepOceanGridMesh;
 }
 
 export function buildDeepOceanMeshes(config: DeepOceanConfig): DeepOceanMeshSet {
-  const nearExtent = config.near_grid_size_m;
-  const farExtent = Math.max(config.visual_extent_m * 2, config.far_grid_size_m);
   const near = buildGrid(
     "near",
-    nearExtent,
+    config.near_grid_size_m,
     config.near_subdivisions,
     config.near_grid_size_m / config.near_subdivisions,
-    0,
-    nearExtent * 0.5,
+    [0, 1],
+    [224, 256],
   );
+  const mid = buildGrid(
+    "mid",
+    config.mid_grid_size_m,
+    config.mid_subdivisions,
+    config.mid_grid_size_m / config.mid_subdivisions,
+    [224, 256],
+    [928, 1024],
+  );
+  const farExtent = Math.max(config.visual_extent_m * 2, config.far_grid_size_m);
   const far = buildGrid(
     "far",
     farExtent,
     config.far_subdivisions,
     config.far_grid_size_m / config.far_subdivisions,
-    nearExtent * 0.42,
-    farExtent * 0.5,
+    [928, 1024],
+    [1e9, 1e9 + 1],
   );
-  return { near, far };
+  return { near, mid, far };
 }
 
 function buildGrid(
@@ -46,14 +54,17 @@ function buildGrid(
   extentM: number,
   subdivisions: number,
   snapM: number,
-  innerFadeM: number,
-  outerFadeM: number,
+  fadeIn: readonly [number, number],
+  fadeOut: readonly [number, number],
 ): DeepOceanGridMesh {
   if (!Number.isFinite(extentM) || extentM <= 0) {
     throw new Error(`Deep ocean mesh: ${level} extent must be positive`);
   }
   if (!Number.isInteger(subdivisions) || subdivisions < 1) {
     throw new Error(`Deep ocean mesh: ${level} subdivisions must be a positive integer`);
+  }
+  if (fadeIn[0] > fadeIn[1] || fadeOut[0] > fadeOut[1]) {
+    throw new Error(`Deep ocean mesh: ${level} fade ranges must be ordered`);
   }
 
   const side = subdivisions + 1;
@@ -95,8 +106,8 @@ function buildGrid(
     extentM,
     subdivisions,
     snapM,
-    innerFadeM,
-    outerFadeM,
+    fadeIn,
+    fadeOut,
     triangleCount: indices.length / 3,
   };
 }
