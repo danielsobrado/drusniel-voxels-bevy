@@ -1,4 +1,5 @@
 import { parseRegionKey, regionCoord, regionKeyOf } from "../region_key.js";
+import { SAVE_REGION_SIZE_M } from "../save_config.js";
 import type {
   SavedBounds2D,
   SavedCaveEntrance,
@@ -65,12 +66,11 @@ function boundsOverlap(a: SavedBounds2D, b: SavedBounds2D): boolean {
 
 export function boundsForRegion(regionKey: string): SavedBounds2D {
   const { rx, rz } = parseRegionKey(regionKey);
-  const size = 512;
   return {
-    minX: rx * size,
-    minZ: rz * size,
-    maxX: (rx + 1) * size,
-    maxZ: (rz + 1) * size,
+    minX: rx * SAVE_REGION_SIZE_M,
+    minZ: rz * SAVE_REGION_SIZE_M,
+    maxX: (rx + 1) * SAVE_REGION_SIZE_M,
+    maxZ: (rz + 1) * SAVE_REGION_SIZE_M,
   };
 }
 
@@ -195,7 +195,7 @@ export class WorldMetadataStore {
       if (system.entranceIds.some((id) => entranceIds.has(id)) || system.criticalPathIds.some((id) => criticalPathIds.has(id))) matchingCaveSystemIds.add(system.id);
     }
     result.caveSystems = this.metadataValue.caveSystems.filter((system) => matchingCaveSystemIds.has(system.id));
-    return cloneMetadata({ schemaVersion: 1, revision: this.metadataValue.revision, ...result });
+    return structuredClone(result) as WorldMetadataRegionQueryResult;
   }
 
   caveSystemRegionKeys(caveSystemId: string): string[] {
