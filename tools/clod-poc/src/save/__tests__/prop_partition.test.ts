@@ -49,6 +49,16 @@ describe("saved prop partition", () => {
     });
   });
 
+  it("uses one default id factory per conversion batch", () => {
+    const result = savedPropsFromProjectProps([
+      legacyProp({ id: "scene:0:stone_ruin_wall" }),
+      legacyProp({ id: "scene:1:stone_ruin_wall", position: [20, 20, 30] }),
+    ], { assetDefs });
+
+    expect(new Set(result.savedProps.map((prop) => prop.id)).size).toBe(2);
+    expect(result.migratedIds).toBe(2);
+  });
+
   it("preserves factory ids and excludes scatter vegetation", () => {
     const result = savedPropsFromProjectProps([
       legacyProp({ id: "p_000001_ab12" }),
@@ -99,7 +109,7 @@ describe("saved prop partition", () => {
     expect(merged.map((prop) => prop.id)).toEqual(["p_000001_ab12", "p_000002_cd34"]);
   });
 
-  it("reloads active saved props into a placement scene and skips hidden/destroyed props", () => {
+  it("reloads active saved props into a placement scene and skips hidden or destroyed props", () => {
     const result = savedPropsFromProjectProps([
       legacyProp({ id: "p_000001_ab12", position: [10, 20, 30] }),
       legacyProp({ id: "p_000002_cd34", position: [20, 20, 30] }),
