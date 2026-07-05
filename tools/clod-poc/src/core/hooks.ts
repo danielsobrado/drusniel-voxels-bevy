@@ -47,6 +47,7 @@ export interface ClodHooks {
   beginMovementRouteProbe: (() => void) | null;
   setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => void) | null;
   resetAcceptanceScene: (() => void) | null;
+  resetAcceptanceSceneForPose: ((pose: CamPose) => void) | null;
 }
 
 export interface Phase0SceneReport {
@@ -84,6 +85,7 @@ export function initHooks(): ClodHooks {
     beginMovementRouteProbe: null,
     setAcceptanceSceneOptions: null,
     resetAcceptanceScene: null,
+    resetAcceptanceSceneForPose: null,
   };
   window.__drusnielClod = hooks;
   return hooks;

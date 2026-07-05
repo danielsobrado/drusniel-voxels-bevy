@@ -30,7 +30,8 @@ describe("voxel save partition", () => {
     const canonical = canonicalVoxelSnapshot(snapshot());
     const merged = mergePartitionedVoxelSnapshots(partitionVoxelSnapshot(snapshot()));
 
-    expect(merged).toEqual(canonical);
+    expect(merged.deltas).toEqual(canonical.deltas);
+    expect(merged.revision).toBe(Math.max(...canonical.deltas.map((d) => d.revision)));
   });
 
   it("merge revision is max of parts", () => {

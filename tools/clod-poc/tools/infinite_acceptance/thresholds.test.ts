@@ -18,9 +18,17 @@ function validCounters(): Record<string, number> {
   counters["live_bubble_ready_pages"] = 1;
   counters["live_bubble_streamed_collider_pages"] = 1;
   counters["live_bubble_collider_registrations"] = 1;
+  counters["live_bubble_gpu_dispatch_budget"] = 12;
+  counters["live_bubble_ready_visual_pages"] = 1;
+  counters["live_bubble_visual_required_pages"] = 1;
+  counters["live_bubble_visual_ready_pages"] = 1;
+  counters["live_bubble_collider_required_pages"] = 1;
+  counters["live_bubble_collider_ready_pages"] = 1;
   counters["live_clod_stream_required_pages"] = 1;
   counters["live_clod_stream_cached_pages"] = 1;
   counters["live_clod_stream_build_budget"] = 1;
+  counters["live_clod_stream_ready_pages"] = 1;
+  counters["live_clod_stream_active_root_pages"] = 1;
   counters["live_clod_stream_apply_ms"] = 1;
   counters["vegetation_ring_unbounded"] = 1;
   counters["vegetation_ring_distance_to_grass_m"] = 0;
@@ -89,17 +97,17 @@ describe("infinite islands thresholds", () => {
     );
   });
 
-  it("requires cached CLOD root pages when builds are enabled and pages are required", () => {
+  it("requires ready resident CLOD root pages when pages are required", () => {
     const counters = validCounters();
-    counters["live_clod_stream_cached_pages"] = 0;
+    counters["live_clod_stream_ready_pages"] = 0;
+    counters["live_clod_stream_active_root_pages"] = 0;
     expect(evaluateThresholds(counters).failures).toContain(
-      "live_clod_stream_cached_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
+      "live_clod_stream_ready_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
     );
 
-    counters["live_clod_stream_build_budget"] = 0;
-    expect(evaluateThresholds(counters).passed).toBe(true);
+    counters["live_clod_stream_cached_pages"] = 1;
+    expect(evaluateThresholds(counters).passed).toBe(false);
 
-    counters["live_clod_stream_build_budget"] = 1;
     counters["live_clod_stream_required_pages"] = 0;
     expect(evaluateThresholds(counters).failures).toContain(
       "live_clod_stream_required_pages=0 failed: must be > 0",

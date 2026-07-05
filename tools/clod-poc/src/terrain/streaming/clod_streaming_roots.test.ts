@@ -372,12 +372,32 @@ describe("createStreamingClodRootController", () => {
 
     const firstApply = controller.update(new THREE.Vector3(192, 0, 0), 80);
     expect(roots).toHaveLength(1);
-    expect(firstApply.readyPages).toBe(2);
+    expect(firstApply.readyPages).toBe(1);
+    expect(firstApply.activeRootPages).toBe(1);
+    expect(firstApply.applyQueuePages).toBe(2);
     expect(firstApply.applyPagesThisFrame).toBe(1);
 
     const secondApply = controller.update(new THREE.Vector3(192, 0, 0), 80);
     expect(roots).toHaveLength(2);
     expect(secondApply.applyPagesThisFrame).toBe(1);
+  });
+
+  it("keeps resident ready roots nonzero after the apply queue drains", async () => {
+    const { controller, roots, buildPages, requests } = makeController();
+    controller.update(new THREE.Vector3(192, 0, 0), 40);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+    const applied = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    const settled = controller.update(new THREE.Vector3(192, 0, 0), 40);
+
+    expect(roots).toHaveLength(1);
+    expect(applied.applyQueuePages).toBe(0);
+    expect(settled.applyQueuePages).toBe(0);
+    expect(settled.readyPages).toBeGreaterThan(0);
+    expect(settled.activeRootPages).toBe(settled.readyPages);
+    expect(controller.readyPageKeys()).toHaveLength(settled.readyPages);
   });
 
   it("discards stale ready pages after the stream center moves", async () => {

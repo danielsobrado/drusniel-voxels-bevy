@@ -11,9 +11,17 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_bubble_ready_pages"] = 1;
   values["live_bubble_streamed_collider_pages"] = 1;
   values["live_bubble_collider_registrations"] = 1;
+  values["live_bubble_gpu_dispatch_budget"] = 12;
+  values["live_bubble_ready_visual_pages"] = 1;
+  values["live_bubble_visual_required_pages"] = 1;
+  values["live_bubble_visual_ready_pages"] = 1;
+  values["live_bubble_collider_required_pages"] = 1;
+  values["live_bubble_collider_ready_pages"] = 1;
   values["live_clod_stream_required_pages"] = 1;
   values["live_clod_stream_cached_pages"] = 1;
   values["live_clod_stream_build_budget"] = 1;
+  values["live_clod_stream_ready_pages"] = 1;
+  values["live_clod_stream_active_root_pages"] = 1;
   values["live_clod_stream_apply_ms"] = 1;
   values["vegetation_ring_unbounded"] = 1;
   values["vegetation_ring_distance_to_grass_m"] = 0;
@@ -56,22 +64,27 @@ describe("infinite islands threshold validation", () => {
     }
   });
 
-  it("fails when required streamed roots never become cached", () => {
-    expect(evaluateThresholds(validCounters({ live_clod_stream_cached_pages: 0 })).passed).toBe(false);
+  it("fails when required streamed roots never become ready residents", () => {
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_ready_pages: 0,
+      live_clod_stream_active_root_pages: 0,
+    })).passed).toBe(false);
   });
 
-  it("allows zero cached roots only when builds are disabled or no pages are required", () => {
+  it("does not let cached roots alone satisfy readiness", () => {
     expect(evaluateThresholds(validCounters({
-      live_clod_stream_cached_pages: 0,
-      live_clod_stream_build_budget: 0,
+      live_clod_stream_cached_pages: 1,
+      live_clod_stream_ready_pages: 0,
+      live_clod_stream_active_root_pages: 0,
     })).failures).not.toContain(
-      "live_clod_stream_cached_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
+      "live_clod_stream_cached_pages=1 failed: must be finite and >= ready roots",
     );
     expect(evaluateThresholds(validCounters({
-      live_clod_stream_cached_pages: 0,
+      live_clod_stream_ready_pages: 0,
+      live_clod_stream_active_root_pages: 0,
       live_clod_stream_required_pages: 0,
     })).failures).not.toContain(
-      "live_clod_stream_cached_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
+      "live_clod_stream_ready_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
     );
   });
 

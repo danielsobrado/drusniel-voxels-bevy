@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { createFarShellMetrics } from "../long-view/farShellMetrics.js";
-import { initFarSummaryIntegration, resolveFarSummaryFrameInterval } from "./integration.js";
+import {
+  applyFarSummaryQueryOverrides,
+  initFarSummaryIntegration,
+  resolveFarSummaryFrameInterval,
+} from "./integration.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 
@@ -21,6 +25,18 @@ describe("resolveFarSummaryFrameInterval", () => {
   it("rejects invalid values and clamps the default to at least one", () => {
     expect(resolveFarSummaryFrameInterval(new URLSearchParams("farSummaryBuildInterval=0"), "farSummaryBuildInterval", 0)).toBe(1);
     expect(resolveFarSummaryFrameInterval(new URLSearchParams("farSummaryBuildInterval=nope"), "farSummaryBuildInterval", 0)).toBe(1);
+  });
+});
+
+describe("applyFarSummaryQueryOverrides", () => {
+  it("overrides tile build count and build ms budget", () => {
+    const config = applyFarSummaryQueryOverrides(
+      DEFAULT_FAR_SUMMARY_CONFIG,
+      new URLSearchParams("farSummaryMaxTileBuildsPerFrame=4&farSummaryMaxBuildMsPerFrame=6"),
+    );
+
+    expect(config.stream.maxTileBuildsPerFrame).toBe(4);
+    expect(config.stream.maxBuildMsPerFrame).toBe(6);
   });
 });
 

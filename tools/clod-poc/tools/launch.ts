@@ -179,9 +179,11 @@ function convergenceBlockers(snapshot: AcceptanceConvergenceSnapshot): string[] 
     && snapshot.bubbleBuilding === 0
     && snapshot.bubbleReady > 0
   );
-  const streamQuiet = snapshot.streamRequired === 0 || snapshot.streamBudget === 0 || (
+  const streamQuiet = snapshot.streamRequired === 0 || (
     snapshot.streamFailed === 0
-    && snapshot.streamCached > 0
+    && snapshot.streamPending === 0
+    && snapshot.streamInflight === 0
+    && snapshot.streamReady > 0
   );
   const proxyQuiet = snapshot.proxyBuilding !== 1;
 

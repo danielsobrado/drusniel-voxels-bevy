@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import {
   createNearFieldBubbleController,
@@ -176,6 +176,10 @@ describe("createNearFieldBubbleController", () => {
     terrainMocks.meshChunk.mockImplementation((): ChunkMesh => {
       throw new Error("cpu fallback fail");
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("keeps welded page visible when GPU chunk meshing fails", async () => {
@@ -360,6 +364,51 @@ describe("createNearFieldBubbleController", () => {
     expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts a query override for GPU chunk dispatch budget", () => {
+    vi.stubGlobal("window", { location: { search: "?liveBubbleGpuChunkBudget=4" } });
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+    });
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(mesher.meshChunk).toHaveBeenCalledTimes(4);
+    expect(stats.gpuDispatchBudget).toBe(4);
+  });
+
+  it("reports pending and inflight chunk counters while GPU work is building", () => {
+    const mesher = {
+      meshChunk: vi.fn(() => new Promise<ChunkMesh>(() => undefined)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+    });
+
+    const stats = controller.update({
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    });
+
+    expect(stats.pendingChunks).toBe(2);
+    expect(stats.inflightChunks).toBe(2);
+  });
+
   it("counts missing required streaming pages as building", () => {
     const mesher = {
       meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
@@ -508,6 +557,40 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.readyPages).toBe(1);
     expect(stats.streamedColliderPages).toBe(1);
     expect(stats.colliderRegistrations).toBe(4);
+  });
+
+  it("lets visual pages outside the collider radius become ready without registering colliders", async () => {
+    vi.stubGlobal("window", { location: { search: "?liveBubbleGpuChunkBudget=4&liveBubbleColliderRadius=1" } });
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const terrainColliders = {
+      upsertPage: vi.fn(),
+      removePage: vi.fn(() => true),
+    } as unknown as TerrainColliderSet;
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: false,
+      terrainColliders,
+    });
+    const node = makeNode("L0:10,10", { minX: 320, maxX: 352, minZ: 320, maxZ: 352 });
+    const view = makeView(node);
+    const input = {
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(0, 0, 0),
+      bubbleViews: [view],
+      getView: (id: string) => (id === node.id ? view : undefined),
+      frameId: 1,
+    };
+
+    controller.update(input);
+    await flushPromises();
+    const stats = controller.update({ ...input, frameId: 2 });
+
+    expect(controller.readyPageKeys()).toEqual([node.id]);
+    expect(stats.colliderRegistrations).toBe(0);
+    expect(terrainColliders.upsertPage).not.toHaveBeenCalled();
   });
 
   it("treats GPU-empty live pages as valid empty without CPU fallback", async () => {

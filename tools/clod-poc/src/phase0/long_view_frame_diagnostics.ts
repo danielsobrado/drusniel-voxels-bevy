@@ -1,5 +1,5 @@
 import type * as THREE from "three";
-import type { ClodHooks } from "../core/hooks.js";
+import type { CamPose, ClodHooks } from "../core/hooks.js";
 import { computeEffectiveVisibleMeters, computeVisibleTargetMet } from "../phase0/phase0_metrics.js";
 import type { Phase0Config } from "../phase0/phase0_config.js";
 import { simulateStreamingCoverage } from "../phase0/streaming_coverage_sim.js";
@@ -148,10 +148,9 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const streamPending = numericCounter(counters, "live_clod_stream_pending_pages", 0);
     const streamInflight = numericCounter(counters, "live_clod_stream_inflight_batches", 0);
     const streamReady = numericCounter(counters, "live_clod_stream_ready_pages", 0);
-    const streamCached = numericCounter(counters, "live_clod_stream_cached_pages", 0);
     const farSummaryQuiet = tilesMissing === 0 && tilesBuilding === 0;
     const bubbleQuiet = bubbleRequired === 0 || (bubbleFailed === 0 && bubbleBuilding === 0 && bubbleReady > 0);
-    const streamQuiet = streamRequired === 0 || (streamPending === 0 && streamInflight === 0 && streamReady === 0 && streamCached > 0);
+    const streamQuiet = streamRequired === 0 || (streamPending === 0 && streamInflight === 0 && streamReady > 0);
     return farSummaryQuiet && farShellRebuildPending === 0 && textureWindowPending === 0
       && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
   };
@@ -164,9 +163,15 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       const hooks = deps.getHooks();
       if (hooks?.stats) hooks.stats.counters["stream_ready_frame"] = -1;
     };
+    const resetAcceptanceSceneForPose = (pose: CamPose): void => {
+      const hooks = deps.getHooks();
+      if (typeof hooks?.setPose === "function") hooks.setPose(pose);
+      resetAcceptanceScene();
+    };
     (window as typeof window & { __drusnielResetPhase0FrameStats?: () => void }).__drusnielResetPhase0FrameStats = resetFrameMetrics;
     const hooks = window.__drusnielClod;
     if (hooks) hooks.resetAcceptanceScene = resetAcceptanceScene;
+    if (hooks) hooks.resetAcceptanceSceneForPose = resetAcceptanceSceneForPose;
   }
 
   return () => {

@@ -12,6 +12,8 @@ export interface StreamingClodRootStats {
   pendingPages: number;
   buildBudget: number;
   inflightBatches: number;
+  applyQueuePages: number;
+  activeRootPages: number;
   readyPages: number;
   scheduledPagesThisFrame: number;
   applyPagesThisFrame: number;
@@ -248,6 +250,9 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   const counters = clodCounters();
   if (!counters) return;
   counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
+  counters["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
+  counters["live_clod_stream_active_root_pages"] = stats.activeRootPages;
+  counters["live_clod_stream_ready_pages"] = stats.readyPages;
   counters["live_clod_stream_probe_active"] = stats.probeActive;
   counters["live_clod_stream_probe_requested_pages_total"] = stats.probeRequestedPagesTotal;
   counters["live_clod_stream_probe_apply_pages_total"] = stats.probeApplyPagesTotal;
@@ -274,7 +279,10 @@ function resetStreamingCounterMirrors(): void {
   counters["live_clod_stream_built_total"] = 0;
   counters["live_clod_stream_apply_pages_total"] = 0;
   counters["live_clod_stream_evictions_total"] = 0;
-  counters["live_clod_stream_stale_discards_total"] = 0;
+    counters["live_clod_stream_stale_discards_total"] = 0;
+  counters["live_clod_stream_apply_queue_pages"] = 0;
+  counters["live_clod_stream_active_root_pages"] = 0;
+  counters["live_clod_stream_ready_pages"] = 0;
   counters["live_clod_stream_probe_active"] = 1;
   counters["live_clod_stream_probe_requested_pages_total"] = 0;
   counters["live_clod_stream_probe_apply_pages_total"] = 0;
@@ -721,7 +729,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         pendingPages: inFlight?.ids.size ?? 0,
         buildBudget,
         inflightBatches: inFlight ? 1 : 0,
-        readyPages: ready.length,
+        applyQueuePages: ready.length,
+        activeRootPages: activeRootIds.size,
+        readyPages: activeRootIds.size,
         scheduledPagesThisFrame,
         applyPagesThisFrame: applied.applied,
         applyMs: applied.applyMs,
@@ -765,6 +775,8 @@ function emptyStats(maxRootLevel = 0): StreamingClodRootStats {
     pendingPages: 0,
     buildBudget: DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME,
     inflightBatches: 0,
+    applyQueuePages: 0,
+    activeRootPages: 0,
     readyPages: 0,
     scheduledPagesThisFrame: 0,
     applyPagesThisFrame: 0,

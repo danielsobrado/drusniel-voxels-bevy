@@ -25,6 +25,17 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
   gpuTerminalFailuresTotal: 0,
   colliderRegistrations: 0,
   colliderRemovals: 0,
+  gpuDispatchBudget: 2,
+  pendingChunks: 0,
+  inflightChunks: 0,
+  readyVisualPages: 0,
+  avgChunkMs: 0,
+  slowestPageMs: 0,
+  visualRequiredPages: 0,
+  visualReadyPages: 0,
+  colliderRequiredPages: 0,
+  colliderReadyPages: 0,
+  colliderSkippedPages: 0,
 };
 
 function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePhaseInput {

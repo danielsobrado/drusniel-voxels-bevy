@@ -39,9 +39,27 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | nu
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
+function positiveNumberParam(params: URLSearchParams, key: string): number | null {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function currentQueryParams(): URLSearchParams {
   if (typeof window === "undefined") return new URLSearchParams();
   return new URLSearchParams(window.location.search);
+}
+
+export function applyFarSummaryQueryOverrides(config: FarSummaryConfig, params: URLSearchParams): FarSummaryConfig {
+  const maxTileBuilds = positiveIntegerParam(params, "farSummaryMaxTileBuildsPerFrame");
+  const maxBuildMs = positiveNumberParam(params, "farSummaryMaxBuildMsPerFrame");
+  return {
+    ...config,
+    stream: {
+      ...config.stream,
+      maxTileBuildsPerFrame: maxTileBuilds ?? config.stream.maxTileBuildsPerFrame,
+      maxBuildMsPerFrame: maxBuildMs ?? config.stream.maxBuildMsPerFrame,
+    },
+  };
 }
 
 export function resolveFarSummaryFrameInterval(
@@ -60,16 +78,16 @@ function shouldRunFarSummaryProbes(params: URLSearchParams): boolean {
 export function initFarSummaryIntegration(
   options: FarSummaryIntegrationOptions,
 ): FarSummaryIntegration {
-  const config: FarSummaryConfig = {
+  const queryParams = currentQueryParams();
+  const config: FarSummaryConfig = applyFarSummaryQueryOverrides({
     ...DEFAULT_FAR_SUMMARY_CONFIG,
     ...options.config,
     stream: { ...DEFAULT_FAR_SUMMARY_CONFIG.stream, ...(options.config?.stream ?? {}) },
     sampling: { ...DEFAULT_FAR_SUMMARY_CONFIG.sampling, ...(options.config?.sampling ?? {}) },
     debug: { ...DEFAULT_FAR_SUMMARY_CONFIG.debug, ...(options.config?.debug ?? {}) },
     rings: options.config?.rings ?? DEFAULT_FAR_SUMMARY_CONFIG.rings,
-  };
+  }, queryParams);
 
-  const queryParams = currentQueryParams();
   const runProbeDiagnostics = shouldRunFarSummaryProbes(queryParams);
   // Tile builds are deadline-sliced inside buildSomeTiles (maxBuildMsPerFrame),
   // so per-frame building is frame-safe; the old 30-frame infinite-islands

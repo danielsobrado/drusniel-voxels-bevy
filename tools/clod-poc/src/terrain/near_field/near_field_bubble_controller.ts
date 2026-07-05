@@ -14,7 +14,7 @@ const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
 /** Per-frame budget for CPU-fallback chunk meshing; one chunk can cost 10–90 ms, so at most one runs once the budget is spent. */
 const CPU_CHUNK_MESH_BUDGET_MS = 6;
-const GPU_CHUNK_DISPATCH_BUDGET = 2;
+const DEFAULT_GPU_CHUNK_DISPATCH_BUDGET = 2;
 const GPU_PAGE_RETRY_LIMIT = 3;
 const GPU_PAGE_RETRY_DELAY_FRAMES = 12;
 
@@ -64,6 +64,17 @@ export interface NearFieldBubbleStats {
   gpuTerminalFailuresTotal: number;
   colliderRegistrations: number;
   colliderRemovals: number;
+  gpuDispatchBudget: number;
+  pendingChunks: number;
+  inflightChunks: number;
+  readyVisualPages: number;
+  avgChunkMs: number;
+  slowestPageMs: number;
+  visualRequiredPages: number;
+  visualReadyPages: number;
+  colliderRequiredPages: number;
+  colliderReadyPages: number;
+  colliderSkippedPages: number;
 }
 
 export interface NearFieldBubbleControllerDeps {
@@ -117,6 +128,7 @@ interface PendingGpuPageBuild {
   nextRetryFrame: number;
   meshChunks: number;
   emptyChunks: number;
+  startedAtMs: number;
 }
 
 interface PendingGpuWaitPageBuild {
@@ -168,6 +180,11 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | nu
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
+function positiveNumberParam(params: URLSearchParams, key: string): number | null {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function resolveLiveBubbleBuildBudget(defaultBudget: number, params: URLSearchParams): number {
   const queryBudget = positiveIntegerParam(params, "liveBubbleBudget")
     ?? positiveIntegerParam(params, "live_bubble_budget");
@@ -179,9 +196,32 @@ export function resolveLiveBubbleBuildBudget(defaultBudget: number, params: URLS
   return Math.max(1, fallback);
 }
 
+export function resolveLiveBubbleGpuChunkBudget(defaultBudget: number, params: URLSearchParams): number {
+  const queryBudget = positiveIntegerParam(params, "liveBubbleGpuChunkBudget")
+    ?? positiveIntegerParam(params, "live_bubble_gpu_chunk_budget");
+  if (queryBudget !== null) return Math.max(1, queryBudget);
+  const fallback = Number.isFinite(defaultBudget) && defaultBudget > 0 ? Math.floor(defaultBudget) : DEFAULT_GPU_CHUNK_DISPATCH_BUDGET;
+  return Math.max(1, fallback);
+}
+
+export function resolveLiveBubbleColliderRadius(params: URLSearchParams): number | null {
+  return positiveNumberParam(params, "liveBubbleColliderRadius")
+    ?? positiveNumberParam(params, "live_bubble_collider_radius");
+}
+
 function liveBubbleBuildBudget(defaultBudget: number): number {
   if (typeof window === "undefined") return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams());
   return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams(window.location.search));
+}
+
+function liveBubbleGpuChunkBudget(): number {
+  if (typeof window === "undefined") return resolveLiveBubbleGpuChunkBudget(DEFAULT_GPU_CHUNK_DISPATCH_BUDGET, new URLSearchParams());
+  return resolveLiveBubbleGpuChunkBudget(DEFAULT_GPU_CHUNK_DISPATCH_BUDGET, new URLSearchParams(window.location.search));
+}
+
+function liveBubbleColliderRadiusOverride(): number | null {
+  if (typeof window === "undefined") return null;
+  return resolveLiveBubbleColliderRadius(new URLSearchParams(window.location.search));
 }
 
 export function requiredStreamingPageCoords(
@@ -227,12 +267,24 @@ export function liveBubbleOwnsPageView(
   return Math.hypot(bubbleCenter.x - centerX, bubbleCenter.z - centerZ) <= bubbleRadius + halfDiag;
 }
 
+function footprintIntersectsCircle(
+  footprint: TerrainColliderFootprint,
+  center: THREE.Vector3,
+  radius: number,
+): boolean {
+  const closestX = THREE.MathUtils.clamp(center.x, footprint.minX, footprint.maxX);
+  const closestZ = THREE.MathUtils.clamp(center.z, footprint.minZ, footprint.maxZ);
+  return Math.hypot(center.x - closestX, center.z - closestZ) <= radius;
+}
+
 export function createNearFieldBubbleController(deps: NearFieldBubbleControllerDeps): NearFieldBubbleController {
   const P = deps.cfg.page.chunks_per_page;
   const S = deps.cfg.page.chunk_size;
   const pageSize = P * S;
   const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
   const chunkGroupBuildBudget = liveBubbleBuildBudget(deps.chunkGroupBuildBudget);
+  const gpuChunkDispatchBudget = liveBubbleGpuChunkBudget();
+  const colliderRadiusOverride = liveBubbleColliderRadiusOverride();
   const chunkGroups = new Map<string, ChunkGroupEntry>();
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
   const gpuWaitBuilds = new Map<string, PendingGpuWaitPageBuild>();
@@ -242,7 +294,12 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   let colliderRemovals = 0;
   let gpuRetriesTotal = 0;
   let gpuTerminalFailuresTotal = 0;
+  let totalChunkMs = 0;
+  let completedChunks = 0;
+  let slowestPageMs = 0;
   let currentFrame = 0;
+  let currentBubbleCenter = new THREE.Vector3();
+  let currentColliderRadius: number | null = null;
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
     (node.footprint.minX + node.footprint.maxX) / 2,
@@ -302,7 +359,9 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     }));
     group.add(mesh);
     mats.push(mat);
-    if (cm.indices.length > 0 && terrainColliders) {
+    const colliderAllowed = currentColliderRadius === null
+      || footprintIntersectsCircle(footprint, currentBubbleCenter, currentColliderRadius);
+    if (cm.indices.length > 0 && terrainColliders && colliderAllowed) {
       terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
       colliderIds.push(colliderId);
       colliderRegistrations++;
@@ -390,6 +449,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       nextRetryFrame,
       meshChunks: 0,
       emptyChunks: 0,
+      startedAtMs: performance.now(),
     });
   };
 
@@ -467,6 +527,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     entry.failed = job.failures > 0;
     entry.validEmpty = job.failures === 0 && job.meshChunks === 0;
     entry.ready = true;
+    slowestPageMs = Math.max(slowestPageMs, performance.now() - job.startedAtMs);
   };
 
   const drainGpuPendingBuilds = () => {
@@ -491,12 +552,15 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         }
         continue;
       }
-      while (job.chunks.length > 0 && dispatched < GPU_CHUNK_DISPATCH_BUDGET) {
+      while (job.chunks.length > 0 && dispatched < gpuChunkDispatchBudget) {
         const [dx, dz] = job.chunks.shift()!;
         job.inflight++;
         dispatched++;
+        const chunkStartedAt = performance.now();
         gpuMesher.meshChunk(job.px * P + dx, job.pz * P + dz, job.worldBounds, job.edits)
           .then((cm) => {
+            totalChunkMs += performance.now() - chunkStartedAt;
+            completedChunks++;
             if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) {
               if (cm.indices.length > 0) {
                 job.meshChunks++;
@@ -519,11 +583,13 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
             completeGpuChunk(key, entry, job);
           })
           .catch(() => {
+            totalChunkMs += performance.now() - chunkStartedAt;
+            completedChunks++;
             if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) job.failures++;
             completeGpuChunk(key, entry, job);
           });
       }
-      if (dispatched >= GPU_CHUNK_DISPATCH_BUDGET) return;
+      if (dispatched >= gpuChunkDispatchBudget) return;
     }
   };
 
@@ -605,28 +671,57 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const pageEntryReady = (entry: ChunkGroupEntry): boolean =>
     entry.ready && !entry.failed && (entry.group.children.length > 0 || entry.colliderIds.length > 0 || entry.validEmpty);
 
-  const countRequiredPages = (requiredCoords: PageCoord[]) => {
+  const countGpuChunks = (): { pendingChunks: number; inflightChunks: number } => {
+    let pendingChunks = 0;
+    let inflightChunks = 0;
+    for (const job of gpuPendingBuilds.values()) {
+      pendingChunks += job.chunks.length;
+      inflightChunks += job.inflight;
+    }
+    for (const job of cpuPendingBuilds.values()) pendingChunks += job.chunks.length;
+    return { pendingChunks, inflightChunks };
+  };
+
+  const countRequiredPages = (requiredCoords: PageCoord[], colliderRadius: number | null) => {
     let readyPages = 0;
     let buildingPages = 0;
     let failedPages = 0;
+    let colliderRequiredPages = 0;
+    let colliderReadyPages = 0;
+    let colliderSkippedPages = 0;
     for (const coord of requiredCoords) {
-      const entry = chunkGroups.get(pageGroupKey(coord.px, coord.pz));
+      const key = pageGroupKey(coord.px, coord.pz);
+      const entry = chunkGroups.get(key);
+      const pageFootprint: TerrainColliderFootprint = {
+        minX: coord.px * pageSize,
+        minZ: coord.pz * pageSize,
+        maxX: coord.px * pageSize + pageSize,
+        maxZ: coord.pz * pageSize + pageSize,
+      };
+      const needsCollider = colliderRadius === null || footprintIntersectsCircle(pageFootprint, currentBubbleCenter, colliderRadius);
+      if (needsCollider) colliderRequiredPages++;
       if (!entry) {
         buildingPages++;
         continue;
       }
       if (entry.failed) failedPages++;
       else if (!entry.ready) buildingPages++;
-      else if (pageEntryReady(entry)) readyPages++;
+      else if (pageEntryReady(entry)) {
+        readyPages++;
+        if (needsCollider && (entry.colliderIds.length > 0 || entry.validEmpty || !terrainColliders)) colliderReadyPages++;
+        if (!needsCollider && entry.colliderIds.length === 0) colliderSkippedPages++;
+      }
       else buildingPages++;
     }
-    return { readyPages, buildingPages, failedPages };
+    return { readyPages, buildingPages, failedPages, colliderRequiredPages, colliderReadyPages, colliderSkippedPages };
   };
 
   return {
     update(input) {
       const tBubbleStart = performance.now();
       currentFrame = input.frameId;
+      currentBubbleCenter = input.bubbleCenter;
+      currentColliderRadius = colliderRadiusOverride;
       let chunkGroupsBuiltThisFrame = 0;
       let evictions = 0;
       let colliderEvictions = 0;
@@ -689,7 +784,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           if (view) view.mesh.visible = view.fade > 0.001;
         }
       }
-      const required = countRequiredPages(requiredCoords);
+      const required = countRequiredPages(requiredCoords, currentColliderRadius);
+      const chunkCounts = countGpuChunks();
       return {
         chunkGroupsBuiltThisFrame,
         bubbleMs: performance.now() - tBubbleStart,
@@ -707,6 +803,17 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         gpuTerminalFailuresTotal,
         colliderRegistrations,
         colliderRemovals,
+        gpuDispatchBudget: gpuChunkDispatchBudget,
+        pendingChunks: chunkCounts.pendingChunks,
+        inflightChunks: chunkCounts.inflightChunks,
+        readyVisualPages: required.readyPages,
+        avgChunkMs: completedChunks > 0 ? totalChunkMs / completedChunks : 0,
+        slowestPageMs,
+        visualRequiredPages: requiredCoords.length,
+        visualReadyPages: required.readyPages,
+        colliderRequiredPages: required.colliderRequiredPages,
+        colliderReadyPages: required.colliderReadyPages,
+        colliderSkippedPages: required.colliderSkippedPages,
       };
     },
     invalidatePage(nodeId) {

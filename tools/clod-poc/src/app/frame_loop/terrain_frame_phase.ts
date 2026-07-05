@@ -131,6 +131,17 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
   counters["live_bubble_collider_registrations"] = stats.colliderRegistrations;
   counters["live_bubble_collider_removals"] = stats.colliderRemovals;
+  counters["live_bubble_gpu_dispatch_budget"] = stats.gpuDispatchBudget;
+  counters["live_bubble_pending_chunks"] = stats.pendingChunks;
+  counters["live_bubble_inflight_chunks"] = stats.inflightChunks;
+  counters["live_bubble_ready_visual_pages"] = stats.readyVisualPages;
+  counters["live_bubble_avg_chunk_ms"] = stats.avgChunkMs;
+  counters["live_bubble_slowest_page_ms"] = stats.slowestPageMs;
+  counters["live_bubble_visual_required_pages"] = stats.visualRequiredPages;
+  counters["live_bubble_visual_ready_pages"] = stats.visualReadyPages;
+  counters["live_bubble_collider_required_pages"] = stats.colliderRequiredPages;
+  counters["live_bubble_collider_ready_pages"] = stats.colliderReadyPages;
+  counters["live_bubble_collider_skipped_pages"] = stats.colliderSkippedPages;
   counters["live_bubble_probe_active"] = liveBubbleProbeActive ? 1 : 0;
   counters["live_bubble_probe_built_total"] = liveBubbleProbeBuiltTotal;
   counters["live_bubble_probe_evictions_total"] = liveBubbleProbeEvictionsTotal;

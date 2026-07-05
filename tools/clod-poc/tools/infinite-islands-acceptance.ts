@@ -9,6 +9,15 @@ import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import {
+  cacheEvidenceFromTimings,
+  convergenceTimeoutBlockers,
+  evaluateConvergence,
+  profileAcceptanceParams,
+  type AcceptanceProfile,
+  type AcceptanceSceneCacheEvidence,
+  type ConvergenceSnapshot,
+} from "./infinite_acceptance/convergence.js";
+import {
   COVERAGE_REQUIRED_COUNTERS,
   COVERAGE_RULES,
   evaluateThresholds,
@@ -110,7 +119,6 @@ type JsonRecord = Record<string, unknown>;
 type SceneExtra = Record<string, string>;
 type PoseTuple = [number, number, number];
 type CamPose = { p: PoseTuple; yaw: number; pitch: number; fov?: number };
-type AcceptanceProfile = "full" | "fast" | "reuse";
 
 const REUSE_MODE_CODES: Record<AcceptanceProfile, number> = {
   full: 1,
@@ -184,20 +192,6 @@ interface RunSceneOptions {
   firstSceneOnPage: boolean;
 }
 
-interface AcceptanceSceneCacheEvidence {
-  clodCacheHit: number;
-  clodCacheMiss: number;
-  clodCacheRehydrateMs: number;
-  clodCacheKeyMatch: number;
-  terrainSummaryCacheHit: number;
-  terrainSummaryCacheMiss: number;
-  startupBuildWorldMs: number;
-  startupTerrainSummaryMs: number;
-  startupTotalMs: number;
-  reuseEnabled: number;
-  reuseMode: number;
-}
-
 interface MovementSegment {
   label: string;
   frames: number;
@@ -218,6 +212,8 @@ function parseProfile(argv: readonly string[]): AcceptanceProfile {
 const PROFILE = parseProfile(process.argv.slice(2));
 const ACTIVE_SCENES = PROFILE === "fast"
   ? SCENES.filter((scene) => scene.name === "walk" || scene.name === "final-near")
+  : PROFILE === "reuse"
+    ? [...SCENES.filter((scene) => !scene.movementRoute), ...SCENES.filter((scene) => scene.movementRoute)]
   : SCENES;
 const SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;
 
@@ -254,22 +250,6 @@ function numCounter(counters: Readonly<Record<string, number>>, key: string): nu
 function numTiming(timings: Readonly<Record<string, number>>, key: string): number {
   const value = timings[key];
   return Number.isFinite(value) ? value : 0;
-}
-
-function cacheEvidenceFromTimings(timings: Readonly<Record<string, number>>): AcceptanceSceneCacheEvidence {
-  return {
-    clodCacheHit: numTiming(timings, "clod_cache_hit"),
-    clodCacheMiss: numTiming(timings, "clod_cache_miss"),
-    clodCacheRehydrateMs: numTiming(timings, "clod_cache_rehydrate_ms"),
-    clodCacheKeyMatch: numTiming(timings, "clod_cache_key_match"),
-    terrainSummaryCacheHit: numTiming(timings, "terrain_summary_cache_hit"),
-    terrainSummaryCacheMiss: numTiming(timings, "terrain_summary_cache_miss"),
-    startupBuildWorldMs: numTiming(timings, "startup_build_world_ms"),
-    startupTerrainSummaryMs: numTiming(timings, "startup_terrain_summary_ms"),
-    startupTotalMs: numTiming(timings, "startup_total_ms"),
-    reuseEnabled: numTiming(timings, "acceptance_world_reuse_enabled"),
-    reuseMode: numTiming(timings, "acceptance_world_reuse_mode"),
-  };
 }
 
 async function createAcceptancePage(browser: Browser): Promise<Page> {
@@ -317,10 +297,16 @@ async function configureReusedScenePage(page: Page, url: string, scene: SceneSpe
       freeze: input.freeze,
       proceduralDebug: input.proceduralDebug,
     });
-    hooks?.resetAcceptanceScene?.();
     if (input.pose) {
-      if (typeof hooks?.setPose !== "function") throw new Error("reused acceptance page requires __drusnielClod.setPose");
-      hooks.setPose(input.pose);
+      if (typeof hooks?.resetAcceptanceSceneForPose === "function") {
+        hooks.resetAcceptanceSceneForPose(input.pose);
+      } else {
+        if (typeof hooks?.setPose !== "function") throw new Error("reused acceptance page requires __drusnielClod.setPose");
+        hooks.setPose(input.pose);
+        hooks?.resetAcceptanceScene?.();
+      }
+    } else {
+      hooks?.resetAcceptanceScene?.();
     }
   }, {
     url,
@@ -491,6 +477,8 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
         bubbleFailed: counters["live_bubble_failed_pages"] ?? -1,
         bubbleRetryPages: counters["live_bubble_gpu_retry_pages"] ?? 0,
+        bubblePendingChunks: counters["live_bubble_pending_chunks"] ?? 0,
+        bubbleInflightChunks: counters["live_bubble_inflight_chunks"] ?? 0,
         bubbleColliderPages: counters["live_bubble_streamed_collider_pages"] ?? -1,
         bubbleColliderRegistrations: counters["live_bubble_collider_registrations"] ?? -1,
         streamRequired: counters["live_clod_stream_required_pages"] ?? 0,
@@ -502,21 +490,8 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
         proxyBuilding: counters["shadow_proxy_building"] ?? -1,
       };
-    });
-    const farSummaryQuiet = c.tilesMissing === 0 && c.tilesBuilding === 0;
-    const shellQuiet = c.farShellRebuildPending === 0;
-    const textureQuiet = c.textureWindowPending === 0;
-    const bubbleQuiet = c.bubbleRequired === 0 || (
-      c.bubbleFailed === 0
-      && c.bubbleRetryPages === 0
-      && c.bubbleBuilding === 0
-      && c.bubbleReady > 0
-    );
-    const streamQuiet = c.streamRequired === 0 || c.streamBudget === 0 || (
-      c.streamFailed === 0
-      && c.streamCached > 0
-    );
-    const quiet = farSummaryQuiet && shellQuiet && textureQuiet && bubbleQuiet && streamQuiet && c.proxyBuilding !== 1;
+    }) as ConvergenceSnapshot;
+    const { quiet } = evaluateConvergence(c);
     stablePolls = quiet ? stablePolls + 1 : 0;
     if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
       console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
@@ -525,7 +500,10 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
     lastSnapshot = JSON.stringify(c);
     await page.waitForTimeout(CONVERGENCE_POLL_MS);
   }
+  const last = JSON.parse(lastSnapshot || "{}") as ConvergenceSnapshot;
   console.log(`[infinite-accept] ${sceneName}: convergence wait timed out after ${(CONVERGENCE_TIMEOUT_MS / 1000).toFixed(0)}s; last ${lastSnapshot}`);
+  const blockers = convergenceTimeoutBlockers(last);
+  if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
 }
 
 async function beginMovementRouteProbe(page: Page): Promise<void> {
@@ -729,6 +707,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     world: "16",
     clodPerf: "1",
     webgpuSelection: "1",
+    ...profileAcceptanceParams(PROFILE),
     ...(scene.extra ?? {}),
   };
   if (PROFILE === "fast") {
@@ -784,7 +763,8 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
         `startupWorld=${startupTimings["startup.world_pages"] ?? "?"}`,
       );
     }
-    const cacheEvidence = cacheEvidenceFromTimings(startupTimings);
+    const reusedScene = options.reusePage && !options.firstSceneOnPage;
+    const cacheEvidence = cacheEvidenceFromTimings(startupTimings, reusedScene);
     console.log(
       `[infinite-accept] ${sceneRunName}: scene boot: ` +
       `cache ${cacheEvidence.clodCacheHit === 1 ? "hit" : "miss"} ` +
@@ -819,7 +799,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
 
     const stats = await readStats(page);
     const finalStartupTimings = await readStartupTimings(page).catch((): Record<string, number> => startupTimings);
-    const finalCacheEvidence = cacheEvidenceFromTimings(finalStartupTimings);
+    const finalCacheEvidence = cacheEvidenceFromTimings(finalStartupTimings, reusedScene);
     const acceptanceCacheKey = await readAcceptanceCacheKey(page).catch(() => null);
     const phase0 = await readPhase0Report(page);
     writeJson(statsPath, stats);
@@ -879,7 +859,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     }
     const thresholds = evaluateThresholds({}, gate.requiredCounters, gate.rules);
     const startupTimings: Record<string, number> = {};
-    const cache = cacheEvidenceFromTimings(startupTimings);
+    const cache = cacheEvidenceFromTimings(startupTimings, options.reusePage && !options.firstSceneOnPage);
     const failures = [
       message,
       ...evaluateMovementRoute(scene.name, movement),
