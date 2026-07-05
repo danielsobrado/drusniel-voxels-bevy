@@ -66,6 +66,20 @@ describe("surface_nets_core surface parity (no edits)", () => {
       expectSameSurface(canonical, gpu);
     });
   }
+
+  it("matches canonical meshChunk outside finite bounds when world is infinite", () => {
+    const infiniteWorld = { cellsX: 16, cellsZ: 16, finite: false };
+    const canonical = meshChunk(64, 64, cfg, infiniteWorld);
+    const gpu = meshChunkGpuShaped(64, 64, S, infiniteWorld, []);
+    expect(gpu.indices.length).toBeGreaterThan(0);
+    expectSameSurface(canonical, gpu);
+  });
+
+  it("keeps clipping chunks outside finite bounds", () => {
+    const finiteWorld = { cellsX: 16, cellsZ: 16 };
+    const gpu = meshChunkGpuShaped(64, 64, S, finiteWorld, []);
+    expect(gpu.indices.length).toBe(0);
+  });
 });
 
 describe("surface_nets_core surface parity (with edits)", () => {

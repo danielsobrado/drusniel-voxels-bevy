@@ -21,6 +21,7 @@ import {
   FIELD_PARAM_WORDS,
 } from "./gpu_mesh_buffers.js";
 import { composeTerrainFieldShader } from "./wgsl_modules.js";
+import type { WorldBounds } from "../terrain/terrain_surface.js";
 
 const WORKGROUP_SIZE = 64;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
@@ -182,7 +183,7 @@ export class GpuChunkMesher {
     }
   }
 
-  meshChunk(cx: number, cz: number, world: { cellsX: number; cellsZ: number }, edits: readonly ResolvedDigEdit[]): Promise<ChunkMesh> {
+  meshChunk(cx: number, cz: number, world: WorldBounds, edits: readonly ResolvedDigEdit[]): Promise<ChunkMesh> {
     const run = this.queue.then(() => this.meshChunkInner(cx, cz, world, edits));
     this.queue = run.catch(() => undefined);
     return run;
@@ -191,7 +192,7 @@ export class GpuChunkMesher {
   private async meshChunkInner(
     cx: number,
     cz: number,
-    world: { cellsX: number; cellsZ: number },
+    world: WorldBounds,
     edits: readonly ResolvedDigEdit[],
   ): Promise<ChunkMesh> {
     if (edits.length > this.editCapacity) {

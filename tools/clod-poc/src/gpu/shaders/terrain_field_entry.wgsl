@@ -23,7 +23,7 @@ struct MeshParams {
   vxCount : i32, vyCount : i32, vzCount : i32,
   maxIndices : u32,
   maxVertices : u32,
-  _pad0 : u32,
+  finiteWorld : u32,
 };
 
 @group(0) @binding(2) var<uniform> mesh : MeshParams;
@@ -191,7 +191,7 @@ fn quadPass(@builtin(global_invocation_id) gid : vec3<u32>) {
     let o = quadCell(axis, c);
     let ci = i + o.x;
     let ck = k + o.z;
-    if (ci < 0 || ci >= mesh.worldCellsX || ck < 0 || ck >= mesh.worldCellsZ) { return; } // clipped
+    if (mesh.finiteWorld != 0u && (ci < 0 || ci >= mesh.worldCellsX || ck < 0 || ck >= mesh.worldCellsZ)) { return; } // clipped
     let gi = ci - mesh.vxBase;
     let gj = (j + o.y) - mesh.vyBase;
     let gk = ck - mesh.vzBase;

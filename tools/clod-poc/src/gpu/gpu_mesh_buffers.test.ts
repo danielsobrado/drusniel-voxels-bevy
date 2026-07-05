@@ -50,6 +50,13 @@ describe("packMeshParams", () => {
     expect([p[10], p[11], p[12]]).toEqual([dims.vxCount, dims.vyCount, dims.vzCount]);
     expect(p[13]).toBe(dims.maxIndices);
     expect(p[14]).toBe(dims.maxVertices);
+    expect(p[15]).toBe(1);
+  });
+
+  it("packs finite:false so the GPU mesher can skip finite-world clipping", () => {
+    const dims = computeMeshDims(64, 64, 8);
+    const p = packMeshParams(dims, { cellsX: 64, cellsZ: 64, finite: false });
+    expect(p[15]).toBe(0);
   });
 });
 

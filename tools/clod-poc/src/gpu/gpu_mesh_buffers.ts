@@ -5,12 +5,13 @@
 
 import { getTerrainFieldCoreConfig, type ResolvedDigEdit } from "./terrain_field_core.js";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
+import type { WorldBounds } from "../terrain/terrain_surface.js";
 
 // Mirror of terrain.ts Y_CELLS / the wgsl yCells.
 export const Y_CELLS = 128;
 
 // WGSL struct sizes (4-byte words).
-export const MESH_PARAM_WORDS = 16; // MeshParams: 13 dims + maxIndices + maxVertices + pad
+export const MESH_PARAM_WORDS = 16; // MeshParams: 13 dims + maxIndices + maxVertices + finiteWorld
 export const FIELD_PARAM_WORDS = 16; // FieldParams: editCount + terrain field config + pad
 export const DIG_EDIT_WORDS = 10; // DigEdit: x,y,z,r,h,shape,opAdd,strength,falloff,material
 export const DIG_EDIT_BYTES = DIG_EDIT_WORDS * 4; // stride 40
@@ -46,7 +47,7 @@ export function computeMeshDims(cx: number, cz: number, S: number): MeshDims {
 /** Pack MeshParams (binding 2). Int32Array view is bit-compatible with the u32 fields. */
 export function packMeshParams(
   dims: MeshDims,
-  world: { cellsX: number; cellsZ: number },
+  world: WorldBounds,
 ): Int32Array {
   const p = new Int32Array(MESH_PARAM_WORDS);
   p[0] = dims.x0; p[1] = dims.x1;
@@ -57,7 +58,7 @@ export function packMeshParams(
   p[10] = dims.vxCount; p[11] = dims.vyCount; p[12] = dims.vzCount;
   p[13] = dims.maxIndices;
   p[14] = dims.maxVertices;
-  p[15] = 0; // pad
+  p[15] = world.finite === false ? 0 : 1;
   return p;
 }
 

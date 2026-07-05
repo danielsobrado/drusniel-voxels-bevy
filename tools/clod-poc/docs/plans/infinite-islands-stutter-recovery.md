@@ -618,6 +618,26 @@ with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   pages as valid`, plus the retry counter mirror. Before rerunning local
   validation, add the small pending convergence improvement so
   `waitForConvergence()` also waits for `live_bubble_gpu_retry_pages===0`.
+- 2026-07-05: Pulled latest `main` with `59ce9261`/`5d42c175`; run
+  `2026-07-05T03-06-18` now converges all scenes but fails 10 threshold
+  checks because live-bubble reports every required page ready as
+  `valid_empty` with `live_bubble_streamed_collider_pages=0` and
+  `live_bubble_collider_registrations=0`. Code review found the likely
+  cause: live-bubble correctly marks out-of-finite-world page bounds as
+  `finite:false`, but `GpuChunkMesher` drops that flag and the WGSL still
+  clips quads against finite `cellsX/cellsZ`, producing empty GPU chunks at
+  `x=2048,z=2048`.
+- 2026-07-05: Patched the GPU live-bubble mesher contract to carry a
+  `finiteWorld` bit through `packMeshParams()` into
+  `terrain_field_entry.wgsl`; the WGSL perimeter clip now only applies when
+  the world is finite. Added host-side coverage for `finite:false` packing
+  and surface-nets parity outside finite bounds while preserving finite-world
+  clipping.
+- 2026-07-05: Local validation passed for the finite-world GPU mesher fix:
+  `rtk npm --prefix tools/clod-poc run typecheck` and direct Vitest for
+  `src/gpu/gpu_mesh_buffers.test.ts`, `src/gpu/surface_nets_core.test.ts`,
+  and `src/terrain/near_field/near_field_bubble_controller.test.ts`
+  (3 files / 28 tests).
 
 ## Remaining known risks / next steps if gates still fail
 

@@ -15,6 +15,7 @@ import {
   densityGradientCore,
   paintMaterialAtCore,
 } from "./terrain_field_core.js";
+import type { WorldBounds } from "../terrain/terrain_surface.js";
 
 // Mirror of terrain.ts Y_CELLS. Full-Y scan range is [0, Y_CELLS).
 const Y_CELLS = 128;
@@ -86,7 +87,7 @@ export function meshChunkGpuShaped(
   cx: number,
   cz: number,
   S: number,
-  world: { cellsX: number; cellsZ: number },
+  world: WorldBounds,
   edits: readonly ResolvedDigEdit[] = [],
 ): ChunkMeshArrays {
   const x0 = cx * S, x1 = (cx + 1) * S;
@@ -141,7 +142,10 @@ export function meshChunkGpuShaped(
           let clipped = false;
           for (const [oi, , ok] of loop) {
             const ci = i + oi, ck = k + ok;
-            if (ci < 0 || ci >= world.cellsX || ck < 0 || ck >= world.cellsZ) { clipped = true; break; }
+            if (world.finite !== false && (ci < 0 || ci >= world.cellsX || ck < 0 || ck >= world.cellsZ)) {
+              clipped = true;
+              break;
+            }
           }
           if (clipped) continue;
 
