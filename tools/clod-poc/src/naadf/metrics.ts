@@ -67,6 +67,10 @@ export type NaadfPocMetricsSnapshot = Readonly<{
   farShellMissingSamples: number;
   canopySamples: number;
   shadowProxySamples: number;
+  invalidationBoundsCount: number;
+  invalidationFarTilesRemoved: number;
+  invalidationResidentsMarked: number;
+  invalidationActiveBuildsCancelled: number;
 }>;
 
 export class NaadfMetricsCollector {
@@ -98,6 +102,10 @@ export class NaadfMetricsCollector {
   canopySamples = 0;
   shadowProxySamples = 0;
   hashInsertFailures = 0;
+  invalidationBoundsCount = 0;
+  invalidationFarTilesRemoved = 0;
+  invalidationResidentsMarked = 0;
+  invalidationActiveBuildsCancelled = 0;
 
   beginFrame(): void {
     this.frame++;
@@ -154,6 +162,10 @@ export class NaadfMetricsCollector {
       canopySamples: this.canopySamples,
       shadowProxySamples: this.shadowProxySamples,
       hashInsertFailures: this.hashInsertFailures,
+      invalidationBoundsCount: this.invalidationBoundsCount,
+      invalidationFarTilesRemoved: this.invalidationFarTilesRemoved,
+      invalidationResidentsMarked: this.invalidationResidentsMarked,
+      invalidationActiveBuildsCancelled: this.invalidationActiveBuildsCancelled,
     };
   }
 
@@ -187,6 +199,10 @@ export class NaadfMetricsCollector {
       naadf_canopy_samples: s.canopySamples,
       naadf_shadow_proxy_samples: s.shadowProxySamples,
       naadf_hash_insert_failures: s.hashInsertFailures,
+      naadf_invalidation_bounds_count: s.invalidationBoundsCount,
+      naadf_invalidation_far_tiles_removed: s.invalidationFarTilesRemoved,
+      naadf_invalidation_residents_marked: s.invalidationResidentsMarked,
+      naadf_invalidation_active_builds_cancelled: s.invalidationActiveBuildsCancelled,
     };
   }
 }
