@@ -5,9 +5,11 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   const values = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
   values["frame_ms_p95"] = 8;
   values["frame_ms_p99"] = 9;
-  values["far_shell_inner_minus_clod_radius_m"] = 1;
+  values["target_visible_m"] = 4096;
+  values["far_shell_inner_minus_clod_radius_m"] = -384;
   values["streamer_far_shell_ownership_ok"] = 1;
-  values["streamer_clod_radius_m"] = 2048;
+  values["streamer_live_radius_m"] = 200;
+  values["streamer_clod_radius_m"] = 768;
   values["live_bubble_required_pages"] = 1;
   values["live_bubble_ready_pages"] = 1;
   values["live_bubble_streamed_collider_pages"] = 1;
@@ -23,7 +25,7 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_cached_pages"] = 1;
   values["live_clod_stream_build_budget"] = 1;
   values["live_clod_stream_max_inflight_batches"] = 4;
-  values["live_clod_stream_radius_m"] = 2048;
+  values["live_clod_stream_radius_m"] = 768;
   values["live_clod_stream_ready_pages"] = 1;
   values["live_clod_stream_active_root_pages"] = 1;
   values["live_clod_stream_max_cached_pages"] = 512;
@@ -31,6 +33,23 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_safety_required_pages"] = 1;
   values["live_clod_stream_safety_ready_pages"] = 1;
   values["live_clod_stream_apply_ms"] = 1;
+  values["far_clipmap_enabled"] = 1;
+  values["far_clipmap_visible"] = 1;
+  values["far_clipmap_active_rings"] = 5;
+  values["far_clipmap_ready_tiles"] = 5;
+  values["far_clipmap_pending_tiles"] = 0;
+  values["far_clipmap_rebuilt_this_frame"] = 0;
+  values["far_clipmap_inner_radius_m"] = 384;
+  values["far_clipmap_outer_radius_m"] = 4096;
+  values["far_clipmap_gpu_owned_cells"] = 5;
+  values["far_clipmap_gpu_ownership_holes"] = 0;
+  values["far_clipmap_owned_cells"] = 64;
+  values["far_clipmap_unowned_cells"] = 0;
+  values["far_clipmap_ownership_holes"] = 0;
+  values["far_clipmap_priority_overlap_cells"] = 8;
+  values["owner_far_clipmap_cells"] = 48;
+  values["owner_clod_refinement_cells"] = 16;
+  values["owner_live_cells"] = 4;
   values["vegetation_ring_unbounded"] = 1;
   values["vegetation_ring_distance_to_grass_m"] = 0;
   values["infinite_hydrology_outside_sample_valid"] = 1;
@@ -70,6 +89,14 @@ describe("infinite islands threshold validation", () => {
     ]) {
       expect(evaluateThresholds(validCounters({ [key]: 1 })).passed).toBe(false);
     }
+  });
+
+  it("fails when far clipmap ownership is not ready", () => {
+    expect(evaluateThresholds(validCounters({
+      far_clipmap_ready_tiles: 4,
+      far_clipmap_pending_tiles: 1,
+      far_clipmap_ownership_holes: 1,
+    })).passed).toBe(false);
   });
 
   it("fails when required streamed roots never become ready residents", () => {
