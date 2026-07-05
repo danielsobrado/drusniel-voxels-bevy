@@ -165,12 +165,69 @@ describe("ownership coverage oracle", () => {
     expect(counters.clod_far_gap_holes).toBeGreaterThan(0);
   });
 
+  it("uses far clipmap as the far owner when it is ready", () => {
+    const counters = computeOwnershipCoverageCounters({
+      snapshot: snapshot({
+        ownership: { liveRadiusM: 16, clodRadiusM: 48 },
+        farShell: { innerRadiusM: 48, outerRadiusM: 128 },
+      }),
+      chunkSizeM: 16,
+      pageSizeM: 16,
+      maxLevel: 0,
+      camera: { x: 0, z: 0 },
+      farShellCenter: { x: 0, z: 0 },
+      farShellRecenterCount: 0,
+      farShellLastRecenterFrame: -1,
+      farClipmap: {
+        enabled: true,
+        innerRadiusM: 48,
+        outerRadiusM: 128,
+        centerX: 0,
+        centerZ: 0,
+        snapX: 0,
+        snapZ: 0,
+        ready: true,
+      },
+      coverageCellM: 16,
+    });
+
+    expect(counters.far_clipmap_owned_cells).toBeGreaterThan(0);
+    expect(counters.owner_far_clipmap_cells).toBeGreaterThan(0);
+    expect(counters.far_clipmap_ownership_holes).toBe(0);
+  });
+
+  it("reports far clipmap ownership holes while a far clipmap band is not ready", () => {
+    const counters = computeOwnershipCoverageCounters({
+      snapshot: snapshot({
+        ownership: { liveRadiusM: 16, clodRadiusM: 48 },
+        farShell: { innerRadiusM: 48, outerRadiusM: 128 },
+      }),
+      chunkSizeM: 16,
+      pageSizeM: 16,
+      maxLevel: 0,
+      camera: { x: 0, z: 0 },
+      farShellCenter: { x: 0, z: 0 },
+      farShellRecenterCount: 0,
+      farShellLastRecenterFrame: -1,
+      farClipmap: {
+        enabled: true,
+        innerRadiusM: 48,
+        outerRadiusM: 128,
+        centerX: 0,
+        centerZ: 0,
+        snapX: 0,
+        snapZ: 0,
+        ready: false,
+      },
+      coverageCellM: 16,
+    });
+
+    expect(counters.far_clipmap_unowned_cells).toBeGreaterThan(0);
+    expect(counters.far_clipmap_ownership_holes).toBeGreaterThan(0);
+    expect(counters.ring_boundary_holes).toBeGreaterThanOrEqual(counters.far_clipmap_ownership_holes);
+  });
+
   it("priority ownership is gap-free even though square tiles raw-overlap the circular rings", () => {
-    // Drive the REAL streamers so loaded footprints are page/chunk quantized like
-    // production. The far shell is a circular annulus while CLOD/live are square
-    // grids, so raw coverage overlap at the boundaries is unavoidable (the spill
-    // band). Priority ownership (live > CLOD > far) resolves it: every cell in the
-    // coverage envelope still has exactly one owner.
     const chunkSizeM = 32;
     const pageSizeM = 128;
     const maxLevel = 2;
@@ -201,17 +258,11 @@ describe("ownership coverage oracle", () => {
       coverageCellM: 64,
     });
 
-    // The spill band is real: raw coverage overlap is non-zero. The acceptance
-    // overlap counter is priority-resolved, so it stays gateable at 0.
     expect(counters.raw_clod_far_overlap_cells).toBeGreaterThan(0);
     expect(counters.clod_far_overlap_cells).toBe(0);
-
-    // The invariant that actually matters: priority assigns exactly one owner per
-    // cell (no double-owner) and leaves no covered cell un-owned (no real holes).
     expect(counters.priority_owner_overlap_cells).toBe(0);
     expect(counters.priority_unowned_cells).toBe(0);
     expect(counters.clod_parent_coverage_violations).toBe(0);
-    // And there are no genuine ring gaps under the real quantized footprints.
     expect(counters.live_clod_gap_holes).toBe(0);
     expect(counters.clod_far_gap_holes).toBe(0);
   });
