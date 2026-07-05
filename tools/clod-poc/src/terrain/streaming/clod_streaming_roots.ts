@@ -107,6 +107,57 @@ function retryCooldownFrames(attempts: number): number {
   return Math.min(BUILD_RETRY_MAX_COOLDOWN_FRAMES, BUILD_RETRY_BASE_COOLDOWN_FRAMES * multiplier);
 }
 
+function pageLevel0Bounds(page: { level: number; px: number; pz: number }): { minX: number; minZ: number; maxX: number; maxZ: number } {
+  const scale = 2 ** page.level;
+  return {
+    minX: page.px * scale,
+    minZ: page.pz * scale,
+    maxX: (page.px + 1) * scale,
+    maxZ: (page.pz + 1) * scale,
+  };
+}
+
+function pageContainsPage(ancestorKey: string, descendantKey: string): boolean {
+  const ancestor = parseStreamingClodPageKey(ancestorKey);
+  const descendant = parseStreamingClodPageKey(descendantKey);
+  if (ancestor.level <= descendant.level) return false;
+  const ancestorBounds = pageLevel0Bounds(ancestor);
+  const descendantBounds = pageLevel0Bounds(descendant);
+  return (
+    descendantBounds.minX >= ancestorBounds.minX &&
+    descendantBounds.minZ >= ancestorBounds.minZ &&
+    descendantBounds.maxX <= ancestorBounds.maxX &&
+    descendantBounds.maxZ <= ancestorBounds.maxZ
+  );
+}
+
+function pageFullyCoveredByFinerCachedPages(pageKey: string, cachedKeys: Iterable<string>): boolean {
+  const page = parseStreamingClodPageKey(pageKey);
+  if (page.level <= 0) return false;
+  const bounds = pageLevel0Bounds(page);
+  const span = bounds.maxX - bounds.minX;
+  const covered = new Set<number>();
+
+  for (const key of cachedKeys) {
+    if (key === pageKey) continue;
+    const child = parseStreamingClodPageKey(key);
+    if (child.level >= page.level) continue;
+    const childBounds = pageLevel0Bounds(child);
+    const minX = Math.max(bounds.minX, childBounds.minX);
+    const minZ = Math.max(bounds.minZ, childBounds.minZ);
+    const maxX = Math.min(bounds.maxX, childBounds.maxX);
+    const maxZ = Math.min(bounds.maxZ, childBounds.maxZ);
+    if (minX >= maxX || minZ >= maxZ) continue;
+    for (let z = minZ; z < maxZ; z++) {
+      for (let x = minX; x < maxX; x++) {
+        covered.add((z - bounds.minZ) * span + (x - bounds.minX));
+      }
+    }
+  }
+
+  return covered.size === span * span;
+}
+
 function clodCounters(): Record<string, number> | null {
   const maybeWindow = (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
@@ -284,6 +335,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let completedWorkerBuildMs = 0;
   let completedWorkerTransferBytes = 0;
   let completedStaleDiscards = 0;
+  let activeRootIds = new Set<string>();
   let latest: StreamingClodRootStats = emptyStats();
 
   const beginMovementProbe = (): void => {
@@ -302,6 +354,42 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     for (let i = deps.allNodes.length - 1; i >= 0; i--) if (deps.allNodes[i]?.id === id) deps.allNodes.splice(i, 1);
   };
 
+  const resolveActiveRootIds = (): Set<string> => {
+    const cachedKeys = [...cached.keys()];
+    const activeIds: string[] = [];
+    const sortedKeys = cachedKeys.sort((a, b) => {
+      const pageA = parseStreamingClodPageKey(a);
+      const pageB = parseStreamingClodPageKey(b);
+      if (pageA.level !== pageB.level) return pageB.level - pageA.level;
+      return a.localeCompare(b);
+    });
+    for (const key of sortedKeys) {
+      if (activeIds.some((activeId) => pageContainsPage(activeId, key))) continue;
+      if (pageFullyCoveredByFinerCachedPages(key, cachedKeys)) continue;
+      activeIds.push(key);
+    }
+    return new Set(activeIds);
+  };
+
+  const syncActiveRoots = (): boolean => {
+    const nextActiveRootIds = resolveActiveRootIds();
+    const changed =
+      nextActiveRootIds.size !== activeRootIds.size ||
+      [...nextActiveRootIds].some((id) => !activeRootIds.has(id));
+    if (!changed) return false;
+
+    for (let i = deps.roots.length - 1; i >= 0; i--) {
+      const id = deps.roots[i]?.id;
+      if (id !== undefined && cached.has(id)) deps.roots.splice(i, 1);
+    }
+    for (const id of [...nextActiveRootIds].sort()) {
+      const node = cached.get(id)?.node;
+      if (node) deps.roots.push(node);
+    }
+    activeRootIds = nextActiveRootIds;
+    return true;
+  };
+
   const evict = (center: THREE.Vector3, radiusM: number): number => {
     let evictions = 0;
     const cachedIds = new Set(cached.keys());
@@ -312,6 +400,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       cached.delete(id);
       cachedIds.delete(id);
       removeRoot(id);
+      activeRootIds.delete(id);
       evictions++;
     }
     if (cached.size <= maxCachedPages) return evictions;
@@ -322,6 +411,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       cached.delete(id);
       cachedIds.delete(id);
       removeRoot(id);
+      activeRootIds.delete(id);
       evictions++;
     }
     return evictions;
@@ -331,6 +421,16 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const failedBuildCoolingDown = (id: string): boolean => {
     const failure = failed.get(id);
     return failure !== undefined && frame < failure.retryAfterFrame;
+  };
+
+  const missingRequiredAncestor = (id: string): boolean => {
+    const page = parseStreamingClodPageKey(id);
+    for (let level = page.level + 1; level < deps.cfg.page.quadtree_levels; level++) {
+      const scale = 2 ** (level - page.level);
+      const ancestorKey = streamingClodPageKey(Math.floor(page.px / scale), Math.floor(page.pz / scale), level);
+      if (requiredNow.has(ancestorKey) && !cached.has(ancestorKey)) return true;
+    }
+    return false;
   };
 
   const discardStaleReadyPages = (): number => {
@@ -355,7 +455,6 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       if (!buildStillWanted(node.id)) continue;
       const centerX = (node.footprint.minX + node.footprint.maxX) / 2;
       const centerZ = (node.footprint.minZ + node.footprint.maxZ) / 2;
-      deps.roots.push(node);
       deps.allNodes.push(node);
       cached.set(node.id, { node, centerX, centerZ, lastTouchFrame: frame });
       failed.delete(node.id);
@@ -405,7 +504,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     const batch: PageCoord[] = [];
     for (const coord of required) {
       const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
-      if (cached.has(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
+      if (cached.has(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
       batch.push(coord);
       if (batch.length >= buildBudget) break;
     }
@@ -453,7 +552,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       const applied = applyReadyPages();
       staleDiscards += applied.staleDiscards;
       const scheduledPagesThisFrame = scheduleBuilds(required);
-      if (evictions > 0) deps.onRootsChanged?.();
+      const activeRootsChanged = evictions > 0 || applied.applied > 0 ? syncActiveRoots() : false;
+      if (evictions > 0 || activeRootsChanged) deps.onRootsChanged?.();
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
@@ -482,7 +582,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       return latest;
     },
     stats() { return latest; },
-    readyPageKeys() { return [...cached.keys()].sort(); },
+    readyPageKeys() { return [...activeRootIds].sort(); },
     beginMovementProbe,
   };
 }

@@ -30,6 +30,14 @@ npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json   #
 
 The QA runner reads a web summary JSON, validates configured screenshots, probes, and timing thresholds, then writes `qa-report.json` and `qa-report.md` under `tools/clod-poc/qa-runs` unless `--output` is provided. The sample summary is only a harness smoke test; use a captured summary for real browser visual/perf conclusions.
 
+For infinite-islands browser acceptance, prefer the single-page reuse profile so the runner does not reboot the scene for every gate/pose:
+
+```powershell
+npm --prefix tools/clod-poc run accept:infinite-islands -- --reuse
+```
+
+The generated report records both `configured_world_pages` and `startup_world_pages`; full acceptance currently means the full scene/gate set, not necessarily a full-size startup world.
+
 The opt-in CLOD WebGPU selection scenario is:
 
 ```text
