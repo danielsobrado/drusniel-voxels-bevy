@@ -1,0 +1,36 @@
+import type { FarHeightProvider } from "../../far-summary/clipmap-sampler.js";
+import type { FarTerrainSampler } from "../../far-summary/summary-tile-builder.js";
+
+export interface FarClipmapSource {
+  sampleHeight(x: number, z: number): number;
+  sampleMaterial(x: number, z: number): number;
+  sampleBiome(x: number, z: number): number;
+  sampleWater(x: number, z: number): number;
+}
+
+export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightProvider): FarClipmapSource {
+  return {
+    sampleHeight: (x, z) => provider.sampleHeight(x, z),
+    sampleMaterial: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
+    sampleBiome: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
+    sampleWater: () => 0,
+  };
+}
+
+export function createFarClipmapSourceFromTerrainSampler(sampler: FarTerrainSampler): FarClipmapSource {
+  return {
+    sampleHeight: (x, z) => sampler.sampleHeight(x, z),
+    sampleMaterial: (x, z) => sampler.sampleMaterial?.(x, z) ?? 0,
+    sampleBiome: (x, z) => sampler.sampleMaterial?.(x, z) ?? 0,
+    sampleWater: (x, z) => sampler.sampleWaterCoverage?.(x, z) ?? 0,
+  };
+}
+
+export function createConservativeFarClipmapSource(heightM = 0): FarClipmapSource {
+  return {
+    sampleHeight: () => heightM,
+    sampleMaterial: () => 0,
+    sampleBiome: () => 0,
+    sampleWater: () => 1,
+  };
+}
