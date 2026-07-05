@@ -27,6 +27,9 @@ export async function loadSavedWorldStartup(
     if (seedOverrideFromQuery(searchParams) === undefined) {
       searchParams.set("seed", String(savedWorld.manifest.seed));
     }
+    if (savedWorld.propInstanceCount > 0 && searchParams.get("customProps") !== "0") {
+      searchParams.set("customProps", "1");
+    }
     initSaveRuntime(savedWorld);
     dom.buildProgressPercent.textContent = "100%";
     dom.buildProgressBar.value = 1;
