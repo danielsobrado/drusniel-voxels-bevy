@@ -36,6 +36,7 @@ export interface StreamingClodRootController {
 export interface PageCoord {
   px: number;
   pz: number;
+  level?: number;
   centerX: number;
   centerZ: number;
 }
@@ -167,8 +168,51 @@ function registerGlobalStreamProbe(beginMovementProbe: () => void): void {
   }
 }
 
-export function streamingClodPageKey(px: number, pz: number): string {
-  return `L0:${px},${pz}`;
+function coordLevel(coord: PageCoord): number {
+  return Math.max(0, Math.floor(coord.level ?? 0));
+}
+
+export function streamingClodPageKey(px: number, pz: number, level = 0): string {
+  return `L${Math.max(0, Math.floor(level))}:${px},${pz}`;
+}
+
+export function parseStreamingClodPageKey(key: string): { level: number; px: number; pz: number } {
+  const [levelText, coordText] = key.split(":");
+  const [pxText, pzText] = (coordText ?? "").split(",");
+  const level = Number(levelText?.startsWith("L") ? levelText.slice(1) : levelText);
+  const px = Number(pxText);
+  const pz = Number(pzText);
+  if (!Number.isInteger(level) || !Number.isInteger(px) || !Number.isInteger(pz)) {
+    throw new Error(`Invalid streaming CLOD page key ${key}`);
+  }
+  return { level, px, pz };
+}
+
+export function streamingClodPageHasRequiredNotReadyDescendant(
+  pageKey: string,
+  required: Iterable<string>,
+  cached: ReadonlySet<string>,
+): boolean {
+  const parent = parseStreamingClodPageKey(pageKey);
+  for (const key of required) {
+    if (cached.has(key)) continue;
+    const child = parseStreamingClodPageKey(key);
+    if (parent.level <= child.level) continue;
+    const scale = 2 ** (parent.level - child.level);
+    if (Math.floor(child.px / scale) === parent.px && Math.floor(child.pz / scale) === parent.pz) return true;
+  }
+  return false;
+}
+
+export function sortStreamingClodPageCoordsForLoad(coords: readonly PageCoord[], center: THREE.Vector3): PageCoord[] {
+  return [...coords].sort((a, b) => {
+    const levelA = coordLevel(a);
+    const levelB = coordLevel(b);
+    if (levelA !== levelB) return levelB - levelA;
+    const da = Math.hypot(center.x - a.centerX, center.z - a.centerZ);
+    const db = Math.hypot(center.x - b.centerX, center.z - b.centerZ);
+    return da - db || a.px - b.px || a.pz - b.pz;
+  });
 }
 
 export function streamingClodRequiredPageCoords(center: THREE.Vector3, radiusM: number, pageSizeM: number): PageCoord[] {
@@ -189,11 +233,7 @@ export function streamingClodRequiredPageCoords(center: THREE.Vector3, radiusM: 
     }
   }
 
-  return coords.sort((a, b) => {
-    const da = Math.hypot(center.x - a.centerX, center.z - a.centerZ);
-    const db = Math.hypot(center.x - b.centerX, center.z - b.centerZ);
-    return da - db || a.px - b.px || a.pz - b.pz;
-  });
+  return sortStreamingClodPageCoordsForLoad(coords, center);
 }
 
 export function pageInsideFiniteStartupWorld(px: number, pz: number, worldPagesX: number, worldPagesZ: number): boolean {
@@ -239,10 +279,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
 
   const evict = (center: THREE.Vector3, radiusM: number): number => {
     let evictions = 0;
+    const cachedIds = new Set(cached.keys());
     for (const [id, entry] of [...cached.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const distance = Math.hypot(center.x - entry.centerX, center.z - entry.centerZ);
       if (distance <= radiusM * evictDistanceMultiplier) continue;
+      if (streamingClodPageHasRequiredNotReadyDescendant(id, requiredNow, cachedIds)) continue;
       cached.delete(id);
+      cachedIds.delete(id);
       removeRoot(id);
       evictions++;
     }
@@ -250,7 +293,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     const lru = [...cached.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame || a[0].localeCompare(b[0]));
     while (cached.size > maxCachedPages && lru.length > 0) {
       const [id] = lru.shift()!;
+      if (streamingClodPageHasRequiredNotReadyDescendant(id, requiredNow, cachedIds)) continue;
       cached.delete(id);
+      cachedIds.delete(id);
       removeRoot(id);
       evictions++;
     }
@@ -301,7 +346,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
 
   const dispatchBuild = (coords: readonly PageCoord[]): number => {
     if (!deps.buildPages || coords.length === 0 || inFlight) return 0;
-    const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz), coord]));
+    const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)), coord]));
     const batch: InflightBatch = { ids: new Set(coordsById.keys()), coordsById };
     inFlight = batch;
     if (probe.active) {
@@ -334,7 +379,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     if (!deps.buildPages || inFlight || buildBudget <= 0) return 0;
     const batch: PageCoord[] = [];
     for (const coord of required) {
-      const id = streamingClodPageKey(coord.px, coord.pz);
+      const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
       if (cached.has(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
       batch.push(coord);
       if (batch.length >= buildBudget) break;
@@ -365,10 +410,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         return latest;
       }
       const required = streamingClodRequiredPageCoords(center, radiusM, pageSize).filter((coord) => !pageInsideFiniteStartupWorld(coord.px, coord.pz, worldPagesX, worldPagesZ));
-      const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz)));
+      const requiredIds = new Set(required.map((coord) => streamingClodPageKey(coord.px, coord.pz, coordLevel(coord))));
       requiredNow = requiredIds;
       for (const coord of required) {
-        const existing = cached.get(streamingClodPageKey(coord.px, coord.pz));
+        const existing = cached.get(streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)));
         if (existing) existing.lastTouchFrame = frame;
       }
       const evictions = evict(center, radiusM);

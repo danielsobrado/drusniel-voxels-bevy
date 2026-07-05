@@ -64,6 +64,20 @@ describe("infinite islands thresholds", () => {
     );
   });
 
+  it("allows parent-covered CLOD descendants to be missing before stream readiness", () => {
+    const counters = validCounters();
+    counters["stream_ready_frame"] = -1;
+    counters["residency_missing_clod"] = 8;
+    counters["missing_clod_pages_in_required_radius"] = 0;
+    counters["clod_parent_coverage_violations"] = 0;
+    expect(evaluateThresholds(counters, COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).passed).toBe(true);
+
+    counters["stream_ready_frame"] = 42;
+    expect(evaluateThresholds(counters, COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).failures).toContain(
+      "residency_missing_clod=8 failed: must equal 0, or be parent-covered before stream_ready_frame",
+    );
+  });
+
   it("checks streamed live collider pages", () => {
     const counters = validCounters();
     counters["live_bubble_streamed_collider_pages"] = 0;

@@ -7,6 +7,8 @@ import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   createStreamingClodRootController,
   pageInsideFiniteStartupWorld,
+  sortStreamingClodPageCoordsForLoad,
+  streamingClodPageHasRequiredNotReadyDescendant,
   streamingClodPageKey,
   streamingClodRequiredPageCoords,
   type PageCoord,
@@ -79,14 +81,14 @@ function mesh(): PageMesh {
   };
 }
 
-function makeNode(px: number, pz: number): ClodPageNode {
-  const pageSize = TEST_CFG.page.chunks_per_page * TEST_CFG.page.chunk_size;
+function makeNode(px: number, pz: number, level = 0): ClodPageNode {
+  const pageSize = TEST_CFG.page.chunks_per_page * TEST_CFG.page.chunk_size * 2 ** level;
   const minX = px * pageSize;
   const minZ = pz * pageSize;
   return {
-    id: streamingClodPageKey(px, pz),
+    id: streamingClodPageKey(px, pz, level),
     revision: 1,
-    level: 0,
+    level,
     children: [],
     mesh: mesh(),
     footprint: { minX, minZ, maxX: minX + pageSize, maxZ: minZ + pageSize },
@@ -152,6 +154,33 @@ describe("streamingClodRequiredPageCoords", () => {
     const distances = coords.map((coord) => Math.hypot(128 - coord.centerX, 128 - coord.centerZ));
 
     expect(distances[0]).toBeLessThanOrEqual(distances.at(-1) ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("sorts budget candidates coarse-to-fine before distance within the same level", () => {
+    const sorted = sortStreamingClodPageCoordsForLoad([
+      { level: 0, px: 0, pz: 0, centerX: 0, centerZ: 0 },
+      { level: 2, px: 8, pz: 0, centerX: 512, centerZ: 0 },
+      { level: 1, px: 1, pz: 0, centerX: 32, centerZ: 0 },
+      { level: 1, px: 0, pz: 0, centerX: 0, centerZ: 0 },
+    ], new THREE.Vector3(0, 0, 0));
+
+    expect(sorted.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toEqual([
+      "L2:8,0",
+      "L1:0,0",
+      "L1:1,0",
+      "L0:0,0",
+    ]);
+  });
+
+  it("retains resident parents while required descendants are not ready", () => {
+    const parent = streamingClodPageKey(0, 0, 2);
+    const child = streamingClodPageKey(3, 2, 0);
+    const sibling = streamingClodPageKey(5, 0, 0);
+    const cached = new Set([parent]);
+
+    expect(streamingClodPageHasRequiredNotReadyDescendant(parent, [child, sibling], cached)).toBe(true);
+    cached.add(child);
+    expect(streamingClodPageHasRequiredNotReadyDescendant(parent, [child, sibling], cached)).toBe(false);
   });
 });
 

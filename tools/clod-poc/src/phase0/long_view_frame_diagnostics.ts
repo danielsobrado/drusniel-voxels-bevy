@@ -15,10 +15,12 @@ import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { publishFarShellMetricsToCounters } from "../long-view/farShellMetrics.js";
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 import type { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
+import type { TerrainOwnershipRuntimeSnapshot } from "../stream/terrain_ownership_runtime.js";
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
 import type { OwnershipResidencyFeeds } from "../stream/ownership_residency.js";
 import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds } from "../stream/ownership_residency.js";
+import { packPageKey, parsePageKey } from "../stream/page_plan.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -62,6 +64,45 @@ export interface LongViewFrameDiagnosticsDeps {
   };
 }
 
+export interface StreamReadinessCounters {
+  farSummaryTilesRequired: number;
+  farSummaryTilesReady: number;
+  farSummaryTilesMissing: number;
+  farSummaryTilesBuilding: number;
+}
+
+export function requiredRootClodPagesReady(
+  snapshot: TerrainOwnershipRuntimeSnapshot,
+  feeds: OwnershipResidencyFeeds,
+  maxLevel: number,
+): boolean {
+  const ready = feeds.clodReady();
+  for (const key of snapshot.visualPages.required) {
+    const page = parsePageKey(key);
+    if (page.level !== maxLevel) continue;
+    if (!ready.has(packPageKey(page.level, page.x, page.z))) return false;
+  }
+  return true;
+}
+
+export function streamReadinessSatisfied(input: {
+  snapshot: TerrainOwnershipRuntimeSnapshot;
+  feeds: OwnershipResidencyFeeds;
+  maxLevel: number;
+  liveMissing: number;
+  counters: StreamReadinessCounters;
+}): boolean {
+  const farSummaryReady = input.counters.farSummaryTilesRequired <= 0
+    || (
+      input.counters.farSummaryTilesMissing === 0
+      && input.counters.farSummaryTilesBuilding === 0
+      && input.counters.farSummaryTilesReady >= input.counters.farSummaryTilesRequired
+    );
+  return input.liveMissing === 0
+    && requiredRootClodPagesReady(input.snapshot, input.feeds, input.maxLevel)
+    && farSummaryReady;
+}
+
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
   const phase0FrameMsBuffer: number[] = [];
   const streamingScene = deps.queryScene?.startsWith("infinite-") ?? false;
@@ -70,6 +111,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   let lastFarShellSnapX = Number.NaN;
   let lastFarShellSnapZ = Number.NaN;
   let backgroundQuiet = false;
+  let streamReadyFrame = -1;
 
   const resetFrameMetrics = (): void => {
     phase0FrameMsBuffer.length = 0;
@@ -245,6 +287,21 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const residencyMissing = countSnapshotResidencyMissing(ownershipSnapshot, ownershipResidencyFeeds);
     s.counters["residency_missing_live"] = residencyMissing.liveMissing;
     s.counters["residency_missing_clod"] = residencyMissing.clodMissing;
+    if (streamReadyFrame < 0 && streamReadinessSatisfied({
+      snapshot: ownershipSnapshot,
+      feeds: ownershipResidencyFeeds,
+      maxLevel: deps.maxTerrainLevel,
+      liveMissing: residencyMissing.liveMissing,
+      counters: {
+        farSummaryTilesRequired: numericCounter(s.counters, "far_summary_tiles_required", 0),
+        farSummaryTilesReady: numericCounter(s.counters, "far_summary_tiles_ready", 0),
+        farSummaryTilesMissing: numericCounter(s.counters, "far_summary_tiles_missing", 0),
+        farSummaryTilesBuilding: numericCounter(s.counters, "far_summary_tiles_building", 0),
+      },
+    })) {
+      streamReadyFrame = s.frame;
+    }
+    s.counters["stream_ready_frame"] = streamReadyFrame;
     const farShellCenter = shellMetrics
       ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ }
       : { x: deps.camera.position.x, z: deps.camera.position.z };

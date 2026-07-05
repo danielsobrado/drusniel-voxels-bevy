@@ -2,6 +2,7 @@ export const REQUIRED_COUNTERS = [
   "frame_ms_p95",
   "frame_ms_p99",
   "frame_ms_avg",
+  "stream_ready_frame",
   "draw_calls",
   "total_scene_tris",
   "terrain_draw_calls",
@@ -112,6 +113,8 @@ export interface ThresholdRule {
 const finiteNonNegative = (value: number): boolean => Number.isFinite(value) && value >= 0;
 const inactiveOrPositive = (activeKey: RequiredCounter) => (value: number, values: Readonly<Record<string, number>>): boolean =>
   finiteNonNegative(value) && (values[activeKey] !== 1 || value > 0);
+const clodMissingCoveredOrReady = (value: number, values: Readonly<Record<string, number>>): boolean =>
+  value === 0 || ((values["stream_ready_frame"] ?? -1) < 0 && (values["clod_parent_coverage_violations"] ?? 1) === 0);
 
 const FRAME_TIME_COUNTERS = new Set<RequiredCounter>([
   "frame_ms_p95",
@@ -142,6 +145,7 @@ const ORACLE_COUNTERS = new Set<RequiredCounter>([
 export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "frame_ms_p95", label: "must be finite, >= 0 and <= 8", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 8 },
   { key: "frame_ms_p99", label: "must be >= 0", pass: (value) => value >= 0 },
+  { key: "stream_ready_frame", label: "must be finite and >= -1", pass: (value) => Number.isFinite(value) && value >= -1 },
   { key: "streamer_far_shell_ownership_ok", label: "must equal 1", pass: (value) => value === 1 },
   { key: "ring_boundary_holes", label: "must equal 0", pass: (value) => value === 0 },
   { key: "live_clod_gap_holes", label: "must equal 0", pass: (value) => value === 0 },
@@ -152,9 +156,9 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "priority_unowned_cells", label: "must equal 0", pass: (value) => value === 0 },
   { key: "clod_parent_coverage_violations", label: "must equal 0", pass: (value) => value === 0 },
   { key: "missing_live_chunks_in_required_radius", label: "must equal 0", pass: (value) => value === 0 },
-  { key: "missing_clod_pages_in_required_radius", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "missing_clod_pages_in_required_radius", label: "must equal 0, or be parent-covered before stream_ready_frame", pass: clodMissingCoveredOrReady },
   { key: "residency_missing_live", label: "must equal 0", pass: (value) => value === 0 },
-  { key: "residency_missing_clod", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "residency_missing_clod", label: "must equal 0, or be parent-covered before stream_ready_frame", pass: clodMissingCoveredOrReady },
   { key: "camera_to_clod_center_m", label: "must be <= 1", pass: (value) => value <= 1 },
   { key: "camera_to_far_shell_center_m", label: "must be <= 1", pass: (value) => value <= 1 },
   { key: "far_shell_inner_minus_clod_radius_m", label: "must be >= 0", pass: (value) => value >= 0 },

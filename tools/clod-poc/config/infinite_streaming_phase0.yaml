@@ -214,6 +214,7 @@ metrics:
     - ownership_oracle_ms
     - residency_missing_live
     - residency_missing_clod
+    - stream_ready_frame
     - far_shell_recenter_count
     - far_shell_last_recenter_frame
     - stale_fallback_count

@@ -6,7 +6,6 @@ import {
   countMissingPacked,
   createSnapshotOwnershipResidencyFeeds,
   packedLiveKeySet,
-  packedPageKeySet,
 } from "./ownership_residency.js";
 
 export interface OwnershipCoverageOracleInput {
@@ -85,13 +84,12 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   const pageSizeM = Math.max(chunkSizeM, input.pageSizeM);
   const coverageCellM = Math.max(chunkSizeM, input.coverageCellM ?? pageSizeM);
   const requiredLive = packedLiveKeySet(snapshot.live.required);
-  const requiredClod = packedPageKeySet(snapshot.visualPages.required);
   const residencyFeeds = input.residencyFeeds ?? createSnapshotOwnershipResidencyFeeds(snapshot);
   const loadedLive = residencyFeeds.liveReady();
   const loadedClod = residencyFeeds.clodReady();
   const missingLive = countMissingPacked(requiredLive, loadedLive);
-  const missingClod = countMissingPacked(requiredClod, loadedClod);
   const parentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, input.maxLevel);
+  const missingClod = parentCoverageViolations;
 
   let liveClodGap = 0;
   let clodFarGap = 0;

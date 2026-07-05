@@ -125,6 +125,7 @@ export function seedLongViewStats(
   lvStats.counters["frame_ms_avg"] = 0;
   lvStats.counters["frame_ms_p95"] = -1;
   lvStats.counters["frame_ms_p99"] = -1;
+  lvStats.counters["stream_ready_frame"] = -1;
   lvStats.counters["streamer_simulated_required_chunks"] = 0;
   lvStats.counters["streamer_simulated_required_pages"] = 0;
   lvStats.counters["streamer_simulated_missing_chunks"] = 0;

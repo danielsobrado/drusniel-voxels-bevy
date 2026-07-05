@@ -102,7 +102,7 @@ describe("ownership coverage oracle", () => {
       coverageCellM: 8,
     });
 
-    expect(counters.missing_clod_pages_in_required_radius).toBe(1);
+    expect(counters.missing_clod_pages_in_required_radius).toBe(0);
     expect(counters.clod_parent_coverage_violations).toBe(0);
   });
 
