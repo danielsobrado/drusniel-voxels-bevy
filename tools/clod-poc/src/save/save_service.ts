@@ -1,6 +1,7 @@
 import { getVoxelEditSnapshot, replaceVoxelEdits } from "../terrain/terrain.js";
 import type { VoxelChunkKey, VoxelEditSnapshot } from "../terrain/voxel_edits/voxel_edit_types.js";
 import { assertCriticalPathValidation, validateCriticalPaths, type CriticalPathValidationResult } from "./critical_path_validation.js";
+import { mergeSavedPropsFromRegions } from "./prop_partition.js";
 import { mergePartitionedVoxelSnapshots, partitionVoxelSnapshot } from "./voxel_partition.js";
 import { parseRegionKey, regionKeyForWorld } from "./region_key.js";
 import { SAVE_CHUNK_SIZE_M, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
@@ -61,12 +62,6 @@ function validateExpectedSeed(manifest: SaveWorldManifest, expectedSeed: number 
   }
 }
 
-function savedPropIds(regions: readonly SaveRegionRecords[]): Set<string> {
-  const ids = new Set<string>();
-  for (const region of regions) for (const prop of region.props) ids.add(prop.id);
-  return ids;
-}
-
 export function saveIdFromQuery(searchParams: URLSearchParams): string | null {
   const saveId = searchParams.get("save");
   return saveId && saveId.trim().length > 0 ? saveId.trim() : null;
@@ -102,7 +97,8 @@ export async function loadSavedWorldFromDb(
 
   const metadata = await readWorldMetadata(db, saveId);
   if (!metadata) throw new Error(`save metadata not found: ${saveId}`);
-  const propIds = savedPropIds(regions);
+  const savedProps = mergeSavedPropsFromRegions(regions.map((region) => region.props));
+  const propIds = new Set(savedProps.map((prop) => prop.id));
   assertWorldMetadataPropLinks(metadata, propIds);
   const criticalPathValidation = validateCriticalPaths(metadata, { propIds, nowMs: options.nowMs });
   assertCriticalPathValidation(criticalPathValidation, { blockWarnings: options.blockCriticalPathWarnings });
