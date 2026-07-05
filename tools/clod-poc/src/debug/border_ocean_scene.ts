@@ -277,25 +277,41 @@ export function probeCliffDryAboveSea(seaLevel: number, worldCells: number): num
   return sample.depth > 0 ? 0 : 1;
 }
 
+function counterBag(stats: Record<string, unknown>): Record<string, unknown> {
+  const counters = stats["counters"];
+  if (counters !== null && typeof counters === "object" && !Array.isArray(counters)) {
+    return counters as Record<string, unknown>;
+  }
+  return stats;
+}
+
 function numericStat(stats: Record<string, unknown>, key: string): number {
-  const value = stats[key] ?? (stats.counters as Record<string, unknown> | undefined)?.[key];
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`border-ocean required counter missing: ${key}`);
+  const value = counterBag(stats)[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`border-ocean required counter missing: ${key}`);
+  }
   return value;
+}
+
+function assertCounterAtMost(stats: Record<string, unknown>, key: string, max: number): void {
+  const value = numericStat(stats, key);
+  if (value > max) throw new Error(`border-ocean counter failed: ${key}=${value}`);
+}
+
+function assertCounterAtLeast(stats: Record<string, unknown>, key: string, min: number): void {
+  const value = numericStat(stats, key);
+  if (value < min) throw new Error(`border-ocean counter failed: ${key}=${value}`);
 }
 
 export function validateBorderOceanStats(stats: Record<string, unknown>, sceneConfig: BorderOceanSceneConfig = DEFAULT_BORDER_OCEAN_SCENE_CONFIG): void {
   for (const key of sceneConfig.acceptance.requiredCounters) numericStat(stats, key);
   const a = sceneConfig.acceptance;
-  const check = (key: string, max: number): void => {
-    const value = numericStat(stats, key);
-    if (value > max) throw new Error(`border-ocean counter failed: ${key}=${value}`);
-  };
-  if (numericStat(stats, "border_ocean.deep_ocean_vertices") < a.minDeepOceanVertices) throw new Error(`border ocean deep-ocean vertices below acceptance minimum`);
-  check("border_ocean.deep_ocean_triangles", a.maxDeepOceanTriangles);
-  check("border_ocean.deep_ocean_draw_calls", a.maxDeepOceanDrawCalls);
-  check("border_ocean.deep_ocean_transition_gap_vertices", a.maxTransitionGapVertices);
-  check("border_ocean.frame_ms_p95", a.maxFrameMsP95);
-  check("border_ocean.interior_water_wet_ratio", a.maxInteriorWaterWetRatio);
+  assertCounterAtLeast(stats, "border_ocean.deep_ocean_vertices", a.minDeepOceanVertices);
+  assertCounterAtMost(stats, "border_ocean.deep_ocean_triangles", a.maxDeepOceanTriangles);
+  assertCounterAtMost(stats, "border_ocean.deep_ocean_draw_calls", a.maxDeepOceanDrawCalls);
+  assertCounterAtMost(stats, "border_ocean.deep_ocean_transition_gap_vertices", a.maxTransitionGapVertices);
+  assertCounterAtMost(stats, "border_ocean.frame_ms_p95", a.maxFrameMsP95);
+  assertCounterAtMost(stats, "border_ocean.interior_water_wet_ratio", a.maxInteriorWaterWetRatio);
 }
 
 export function publishBorderOceanAcceptanceCounters(counters: Record<string, number>, input: BorderOceanAcceptanceInput): void {
