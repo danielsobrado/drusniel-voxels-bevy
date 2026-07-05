@@ -1,0 +1,10 @@
+export const SAVE_SCHEMA_VERSION = 1;
+export const SAVE_PROCEDURAL_PROFILE = "infinite-islands-v1";
+export const SAVE_REGION_SIZE_M = 512;
+export const SAVE_CHUNK_SIZE_M = 16;
+export const SAVE_AUTOSAVE_INTERVAL_S = 30;
+export const SAVE_MAX_REGION_WRITES_PER_FRAME = 1;
+export const SAVE_VOXEL_DELTA_WARN_TOTAL = 250_000;
+
+export const SAVE_ID_PREFIX = "p";
+export const SAVE_ID_HASH_MASK = 0xffff;
