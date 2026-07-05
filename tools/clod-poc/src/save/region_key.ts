@@ -20,6 +20,7 @@ export function parseRegionKey(regionKey: string): { rx: number; rz: number } {
   const rx = Number(parts[1]);
   const rz = Number(parts[2]);
   if (!Number.isSafeInteger(rx) || !Number.isSafeInteger(rz)) throw new Error(`invalid region key: ${regionKey}`);
+  if (regionKeyOf(rx, rz) !== regionKey) throw new Error(`non-canonical region key: ${regionKey}`);
   return { rx, rz };
 }
 
