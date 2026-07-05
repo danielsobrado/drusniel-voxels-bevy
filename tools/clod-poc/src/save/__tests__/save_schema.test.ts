@@ -5,6 +5,7 @@ import {
   assertRegionVoxelDeltas,
   assertSavedPropInstance,
   assertSaveWorldManifest,
+  assertWorldMetadataPropLinks,
   assertWorldMetadataRecord,
   type RegionManifest,
   type RegionVoxelDeltas,
@@ -91,15 +92,32 @@ describe("save schemas", () => {
     expect(() => assertRegionRecordSet({ ...region, voxelDeltaCount: 2 }, deltas, props)).toThrow(/count/i);
   });
 
+  it("rejects binary voxel payloads until SV-10", () => {
+    expect(() => assertRegionVoxelDeltas({ schemaVersion: 1, regionKey: "r_0_0", format: "bin1", deltas: [] })).toThrow(/SV-10/i);
+  });
+
   it("round-trips a prop with a factory id shape", () => {
     expect(() => assertSavedPropInstance(prop())).not.toThrow();
     expect(() => assertSavedPropInstance({ ...prop(), tags: undefined })).toThrow(/tags/i);
+    expect(() => assertSavedPropInstance({ ...prop(), scale: [1, 0, 1] })).toThrow(/scale/i);
   });
 
-  it("rejects dangling world metadata links", () => {
+  it("rejects dangling and malformed world metadata", () => {
     expect(() => assertWorldMetadataRecord(metadata())).not.toThrow();
-    const broken = metadata();
-    broken.cities[0] = { ...broken.cities[0], roadIds: ["missing-road"] };
-    expect(() => assertWorldMetadataRecord(broken)).toThrow(/dangling road/i);
+    const brokenLink = metadata();
+    brokenLink.cities[0] = { ...brokenLink.cities[0]!, roadIds: ["missing-road"] };
+    expect(() => assertWorldMetadataRecord(brokenLink)).toThrow(/dangling road/i);
+
+    const brokenShape = metadata();
+    brokenShape.roads[0] = { ...brokenShape.roads[0]!, points: [] };
+    expect(() => assertWorldMetadataRecord(brokenShape)).toThrow(/points/i);
+  });
+
+  it("validates metadata prop links against loaded saved props", () => {
+    const withPropLink = metadata();
+    withPropLink.criticalPaths[0] = { ...withPropLink.criticalPaths[0]!, linkedPropIds: ["p_000001_ab12"] };
+
+    expect(() => assertWorldMetadataPropLinks(withPropLink, new Set(["p_000001_ab12"]))).not.toThrow();
+    expect(() => assertWorldMetadataPropLinks(withPropLink, new Set())).toThrow(/prop/i);
   });
 });
