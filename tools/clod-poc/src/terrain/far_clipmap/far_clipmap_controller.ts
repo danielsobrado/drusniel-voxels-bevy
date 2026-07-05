@@ -48,6 +48,8 @@ interface RingMesh {
   readySnapZ: number;
 }
 
+const FAR_CLIPMAP_RENDER_ORDER = 20;
+
 const DEBUG_COLORS: Record<FarClipmapDebugMode, number> = Object.freeze({
   final: 0xffffff,
   biome: 0x9be5a1,
@@ -102,12 +104,16 @@ class FarClipmapControllerImpl implements FarClipmapController {
         color: DEBUG_COLORS[config.materialDebugMode],
         depthTest: true,
         depthWrite: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
         transparent: false,
         vertexColors: true,
       });
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
       mesh.name = "far-clipmap-ring-" + String(ring);
       mesh.frustumCulled = false;
+      mesh.renderOrder = FAR_CLIPMAP_RENDER_ORDER;
       mesh.visible = config.enabled;
       scene.add(mesh);
       this.rings.push({
