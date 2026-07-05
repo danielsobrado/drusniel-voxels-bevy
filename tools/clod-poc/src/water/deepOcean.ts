@@ -44,10 +44,19 @@ interface OceanLevelHandle {
   updateLook(heightScale: number, choppiness: number, foamIntensity: number, fogDensity: number): void;
 }
 
+const dowHash21 = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "dow_hash21"));
+const dowNoise2 = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "dow_noise2"), [dowHash21] as any);
+const dowFbm3 = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "dow_fbm3"), [dowNoise2] as any);
 const oceanWave = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "ocean_wave"));
-const oceanWaveSample = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_wave_sample"), [oceanWave] as any);
+const oceanWaveSample = wgslFn(
+  extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_wave_sample"),
+  [oceanWave, dowFbm3] as any,
+);
 const oceanOutsideDistance = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_outside_distance"));
-const oceanShade = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_shade"), [oceanOutsideDistance] as any);
+const oceanShade = wgslFn(
+  extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_shade"),
+  [oceanOutsideDistance, dowFbm3] as any,
+);
 
 export class DeepOcean {
   readonly object = new THREE.Group();
@@ -151,8 +160,12 @@ function createOceanLevel(grid: DeepOceanGridMesh, options: DeepOceanOptions, le
   const uShallowColor = uniform(new THREE.Color(shading.shallow_color));
   const uFoamColor = uniform(new THREE.Color(shading.foam_color));
   const uFogColor = uniform(new THREE.Color(shading.fog_color));
+  const uSkyZenith = uniform(new THREE.Color(shading.sky_zenith_color));
+  const uSssColor = uniform(new THREE.Color(shading.sss_color));
   const uShading = uniform(new THREE.Vector4(shading.fresnel_power, shading.fresnel_strength, shading.reflection_strength, shading.reflection_distortion));
   const uFog = uniform(new THREE.Vector4(shading.fog_near_m, shading.fog_far_m, shading.fog_density, shading.roughness));
+  const uDetail = uniform(new THREE.Vector4(wave.detail_normal_strength, wave.detail_normal_fade_start_m, wave.detail_normal_fade_end_m, shading.sss_strength));
+  const uHorizonBlend = uniform(new THREE.Vector2(shading.horizon_blend_start_m, shading.horizon_blend_end_m));
   const uSun = uniform(options.sunDirection.clone().normalize());
 
   const worldXZ: TslNode = positionGeometry.xz.add(uSnapOrigin);
@@ -191,6 +204,10 @@ function createOceanLevel(grid: DeepOceanGridMesh, options: DeepOceanOptions, le
     shading_params: uShading,
     fog_params: uFog,
     foam_value: waveSample.w.mul(uFoamIntensity),
+    sky_zenith: uSkyZenith,
+    sss_color: uSssColor,
+    detail_params: uDetail,
+    horizon_blend: uHorizonBlend,
     transition_primary: transition.primary,
     transition_secondary: transition.secondary,
   });
