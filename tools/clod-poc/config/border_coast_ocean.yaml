@@ -72,14 +72,20 @@ deep_ocean:
   start_outside_border_m: 64
   visual_extent_m: 4096
   near_grid_size_m: 512
+  mid_grid_size_m: 2048
   far_grid_size_m: 2048
-  near_subdivisions: 96
-  far_subdivisions: 64
+  near_subdivisions: 128
+  mid_subdivisions: 128
+  far_subdivisions: 128
+  ring_inner_band_m: 512
+  ring_inner_radial_segments: 64
+  ring_outer_radial_segments: 24
+  ring_tangential_segments: 288
 
   wave:
     gravity: 9.81
     grid_k: 16
-    active_gpu_waves: 16
+    active_gpu_waves: 24
     wind_speed: 14
     wind_direction_deg: 45
     height_scale: 1.3
@@ -90,20 +96,29 @@ deep_ocean:
     foam_power: 1.36
     foam_intensity: 1.25
     swell_height_scale: 0.34
+    detail_normal_strength: 0.35
+    detail_normal_fade_start_m: 200
+    detail_normal_fade_end_m: 900
 
   shading:
-    deep_color: "#042c4e"
-    shallow_color: "#0a5c5a"
+    deep_color: "#04294a"
+    shallow_color: "#0d6b66"
     foam_color: "#ffffff"
     fresnel_power: 4.5
     fresnel_strength: 0.75
     reflection_strength: 0.46
     reflection_distortion: 0.04
     roughness: 0.08
-    fog_color: "#47616d"
+    fog_color: "#7f98ac"
     fog_near_m: 100
-    fog_far_m: 1800
-    fog_density: 0.5
+    fog_far_m: 2200
+    fog_density: 1.0
+    sky_zenith_color: "#2a5f9e"
+    sss_color: "#0e5a4e"
+    sss_strength: 0.9
+    horizon_blend_start_m: 3520
+    horizon_blend_end_m: 4400
+    edge_fade_m: 48
 
 gameplay:
   soft_pushback_enabled: true
