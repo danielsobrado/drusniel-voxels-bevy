@@ -17,6 +17,7 @@ import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 import type { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
+import type { OwnershipResidencyFeeds } from "../stream/ownership_residency.js";
 import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds } from "../stream/ownership_residency.js";
 
 const PHASE0_P95_WINDOW = 120;
@@ -51,6 +52,7 @@ export interface LongViewFrameDiagnosticsDeps {
   phase0VelocityZ: number;
   phase0Streaming: Phase0Config["phase0"]["streaming"];
   ownershipRuntime: TerrainOwnershipRuntime;
+  getOwnershipResidencyFeeds?: () => OwnershipResidencyFeeds;
   borderOceanScene?: {
     waterField: WaterField;
     deepOcean: DeepOceanRenderConfig;
@@ -239,7 +241,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
 
     const ownershipSnapshot = deps.ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
     publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
-    const ownershipResidencyFeeds = createSnapshotOwnershipResidencyFeeds(ownershipSnapshot);
+    const ownershipResidencyFeeds = deps.getOwnershipResidencyFeeds?.() ?? createSnapshotOwnershipResidencyFeeds(ownershipSnapshot);
     const residencyMissing = countSnapshotResidencyMissing(ownershipSnapshot, ownershipResidencyFeeds);
     s.counters["residency_missing_live"] = residencyMissing.liveMissing;
     s.counters["residency_missing_clod"] = residencyMissing.clodMissing;

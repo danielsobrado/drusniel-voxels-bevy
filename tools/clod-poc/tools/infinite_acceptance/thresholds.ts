@@ -113,6 +113,32 @@ const finiteNonNegative = (value: number): boolean => Number.isFinite(value) && 
 const inactiveOrPositive = (activeKey: RequiredCounter) => (value: number, values: Readonly<Record<string, number>>): boolean =>
   finiteNonNegative(value) && (values[activeKey] !== 1 || value > 0);
 
+const FRAME_TIME_COUNTERS = new Set<RequiredCounter>([
+  "frame_ms_p95",
+  "frame_ms_p99",
+  "frame_ms_avg",
+]);
+
+const ORACLE_COUNTERS = new Set<RequiredCounter>([
+  "ring_boundary_holes",
+  "live_clod_gap_holes",
+  "clod_far_gap_holes",
+  "live_clod_overlap_cells",
+  "clod_far_overlap_cells",
+  "priority_owner_overlap_cells",
+  "priority_unowned_cells",
+  "clod_parent_coverage_violations",
+  "missing_live_chunks_in_required_radius",
+  "missing_clod_pages_in_required_radius",
+  "camera_to_clod_center_m",
+  "camera_to_far_shell_center_m",
+  "far_shell_inner_minus_clod_radius_m",
+  "ownership_oracle_ms",
+  "residency_missing_live",
+  "residency_missing_clod",
+  "horizon_hole_ratio",
+]);
+
 export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "frame_ms_p95", label: "must be finite, >= 0 and <= 8", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 8 },
   { key: "frame_ms_p99", label: "must be >= 0", pass: (value) => value >= 0 },
@@ -195,6 +221,11 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "infinite_hydrology_camera_outside_startup", label: "must equal 1", pass: (value) => value === 1 },
 ];
 
+export const COVERAGE_REQUIRED_COUNTERS = REQUIRED_COUNTERS.filter((key) => !FRAME_TIME_COUNTERS.has(key));
+export const PERF_REQUIRED_COUNTERS = REQUIRED_COUNTERS.filter((key) => !ORACLE_COUNTERS.has(key));
+export const COVERAGE_RULES = THRESHOLD_RULES.filter((rule) => !FRAME_TIME_COUNTERS.has(rule.key));
+export const PERF_RULES = THRESHOLD_RULES.filter((rule) => !ORACLE_COUNTERS.has(rule.key));
+
 export interface ThresholdEvaluation {
   values: Record<string, number>;
   missing: string[];
@@ -212,11 +243,15 @@ export function extractAcceptanceCounters(stats: Record<string, unknown>): Recor
   return out;
 }
 
-export function evaluateThresholds(values: Record<string, number>): ThresholdEvaluation {
-  const missing = REQUIRED_COUNTERS.filter((key) => !(key in values));
+export function evaluateThresholds(
+  values: Record<string, number>,
+  requiredCounters: readonly RequiredCounter[] = REQUIRED_COUNTERS,
+  rules: readonly ThresholdRule[] = THRESHOLD_RULES,
+): ThresholdEvaluation {
+  const missing = requiredCounters.filter((key) => !(key in values));
   const failures: string[] = [];
   for (const key of missing) failures.push(`${key} missing or not numeric`);
-  for (const rule of THRESHOLD_RULES) {
+  for (const rule of rules) {
     const value = values[rule.key];
     if (value === undefined) continue;
     if (!rule.pass(value, values)) failures.push(`${rule.key}=${value} failed: ${rule.label}`);

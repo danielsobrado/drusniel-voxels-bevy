@@ -18,7 +18,14 @@ Continuation verification:
 - Passed: `npm --prefix tools/clod-poc test -- src/stream/ownership_residency.test.ts src/stream/ownership_coverage_oracle.test.ts src/stream/page_plan.test.ts src/stream/live_voxel_chunk_streamer.test.ts src/far-summary/clipmap-rings.test.ts src/long-view/infiniteFarShell.test.ts src/far-summary/integration.test.ts` - 7 files, 54 tests.
 - Passed browser shot: `tools/clod-poc/shots/infinite-islands/core-after-residency-feeds.png` and `tools/clod-poc/shots/infinite-islands/core-after-residency-feeds-stats.json`.
 - Browser shot counters: `far_summary_tiles_missing=0`, `far_summary_fallback_samples=0`, split fallback counters all `0`, `residency_missing_live=0`, `residency_missing_clod=0`, `priority_unowned_cells=0`, `far_shell_rebuild_pending=0`.
-- Blocked: `rtk npm --prefix tools/clod-poc run typecheck` currently fails in unrelated `src/debug/border_ocean_scene.ts` player config property accesses (`world_edge_margin_m`, `pushback_start_inside_world_m`, `pushback_strength`, `soft_pushback_enabled`).
+- Note: from the WSL UNC path, `rtk npm --prefix tools/clod-poc run typecheck` can start in `C:\Windows` and fail before typechecking. Use the explicit `rtk bash -lc "cd /home/drusniel/drusniel-voxels-bevy && ..."` form below.
+
+Latest local verification:
+
+- Passed: `npm --prefix tools/clod-poc test -- src/stream/ownership_residency.test.ts src/stream/ownership_coverage_oracle.test.ts src/terrain/near_field/near_field_bubble_controller.test.ts tools/infinite_acceptance/thresholds.test.ts tools/infinite_acceptance/thresholds_validation.test.ts` - 5 files, 41 tests.
+- Passed: `rtk bash -lc "cd /home/drusniel/drusniel-voxels-bevy && npm --prefix tools/clod-poc run typecheck"`.
+- Passed: `npm --prefix tools/clod-poc run build`.
+- Not run here: browser acceptance/perf runs. Long browser/perf validation is deferred to a native manual run.
 
 ## Work Package Status
 
@@ -46,7 +53,7 @@ Continuation verification:
 | WP-3.4 Wire `keepStaleUntilReplacement` | Done | Stale/cooling tiles are sample misses when `keepStaleUntilReplacement` is false. |
 | WP-3.5 Publish stale restore diagnostic | Done | `far_summary_stale_restores` is published as a required diagnostic counter. |
 | WP-4 Shell sampling and rebuild integrity | Mostly done | Bilinear sampling is routed through `readTileSample`, `rebaseSnapMeters` is 128, rebuild restarts are counted, initial sliced rebuilds no longer restart every frame, fixed probes are published, and the infinite-islands shot reports zero settled fallback samples. Remaining acceptance work is a dedicated recenter/popping screenshot pair if this becomes visually suspect. |
-| WP-5 Ownership promotion and oracle scoping | In progress | The duplicate diagnostics-local ownership runtime is gone; packed keys and oracle gating are in place. Added `ownership_residency.ts` and threaded `OwnershipResidencyFeeds` through diagnostics and the oracle, with a test proving feed holes trip oracle ownership. The feed currently adapts the ownership snapshot; wiring it to renderer-owned live-bubble/CLOD ready sets remains open. |
+| WP-5 Ownership promotion and oracle scoping | Done pending browser acceptance | The duplicate diagnostics-local ownership runtime is gone; packed keys and oracle gating are in place. Added `ownership_residency.ts` and threaded `OwnershipResidencyFeeds` through diagnostics and the oracle, with tests proving feed holes trip oracle ownership. Production diagnostics now build feeds from renderer-owned ready state: live-bubble ready page keys expand to packed live chunks, and CLOD residency reads loaded renderer CLOD node ids instead of snapshot-loaded lists. Infinite acceptance rules are split into coverage gates (`ownershipOracle=1`, no frame-time gates) and perf gates (`ownershipOracle=0`, frame timing included). |
 | WP-6 CLOD parent coverage | Not started | Coarse-to-fine loading, parent retention, swap-not-pop CLOD assertions, and `clod_parent_coverage_violations` remain open. |
 | WP-7 SoA tiles and worker builds | Not started | Typed-array tile storage and worker builds remain blocked until WP-1 through WP-6 are accepted. |
 | WP-8 GPU summary atlas general flag | Not started | General `farSummaryAtlas=1` un-gating remains open. |
@@ -61,7 +68,6 @@ Continuation verification:
 
 ## Remaining Acceptance Work
 
-- Wire `OwnershipResidencyFeeds` to renderer-owned live-bubble and CLOD-stream ready sets instead of the current ownership snapshot adapter.
-- Split infinite acceptance rules into coverage and perf rule sets so frame-time gates never include oracle cost.
+- Run browser acceptance after the WP-5 feed/gate split and record the generated coverage/perf artifacts.
 - Capture a dedicated recenter/popping screenshot pair if WP-4 visual popping is suspected.
 - Capture clod-poc perf harness data with a real before/after baseline for any later performance claims.

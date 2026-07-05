@@ -92,6 +92,7 @@ export interface FrameLoopTerrainDeps {
   views: Map<string, NodeViewLookup & TerrainFadeView>;
   worldCells: number;
   pruneRenderNodeCache?: (protectedNodeIds: ReadonlySet<string>, frameId: number) => void;
+  getClodReadyPageKeys?: () => Iterable<string>;
   drainClodApplyQueue?: () => ClodApplyStatsSnapshot;
   getClodApplyStats?: () => ClodApplyStatsSnapshot;
 }

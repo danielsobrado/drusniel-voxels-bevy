@@ -9,11 +9,17 @@ import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import {
+  COVERAGE_REQUIRED_COUNTERS,
+  COVERAGE_RULES,
   evaluateThresholds,
   extractAcceptanceCounters,
+  PERF_REQUIRED_COUNTERS,
+  PERF_RULES,
   REQUIRED_COUNTERS,
   THRESHOLD_RULES,
+  type RequiredCounter,
   type ThresholdEvaluation,
+  type ThresholdRule,
 } from "./infinite_acceptance/thresholds.js";
 
 process.env["CLOD_POC_BASE_URL"] ??= "http://127.0.0.1:5173/";
@@ -53,7 +59,6 @@ const WALK_ROUTE: MovementSegment[] = [
 const SCENES: SceneSpec[] = [
   {
     name: "walk",
-    screenshot: "walk.png",
     freeze: false,
     proceduralDebug: "biome",
     extra: OUTSIDE_STARTUP_SPAWN,
@@ -62,29 +67,40 @@ const SCENES: SceneSpec[] = [
   },
   {
     name: "biome-near",
-    screenshot: "biome-near.png",
     freeze: true,
     proceduralDebug: "biome",
     cam: OUTSIDE_STARTUP_CAM,
   },
   {
     name: "biome-horizon",
-    screenshot: "biome-horizon.png",
     freeze: true,
     proceduralDebug: "biome",
     cam: OUTSIDE_HORIZON_CAM,
   },
   {
     name: "final-near",
-    screenshot: "final-near.png",
     freeze: true,
     cam: OUTSIDE_STARTUP_CAM,
   },
   {
     name: "final-horizon",
-    screenshot: "final-horizon.png",
     freeze: true,
     cam: OUTSIDE_HORIZON_CAM,
+  },
+];
+
+const GATE_MODES: GateMode[] = [
+  {
+    name: "coverage",
+    ownershipOracle: "1",
+    requiredCounters: COVERAGE_REQUIRED_COUNTERS,
+    rules: COVERAGE_RULES,
+  },
+  {
+    name: "perf",
+    ownershipOracle: "0",
+    requiredCounters: PERF_REQUIRED_COUNTERS,
+    rules: PERF_RULES,
   },
 ];
 
@@ -95,13 +111,19 @@ type CamPose = { p: PoseTuple; yaw: number; pitch: number; fov?: number };
 
 interface SceneSpec {
   name: string;
-  screenshot: string;
   freeze: boolean;
   proceduralDebug?: string;
   cam?: string;
   extra?: SceneExtra;
   summary?: boolean;
   movementRoute?: boolean;
+}
+
+interface GateMode {
+  name: "coverage" | "perf";
+  ownershipOracle: "0" | "1";
+  requiredCounters: readonly RequiredCounter[];
+  rules: readonly ThresholdRule[];
 }
 
 interface MovementSnapshot {
@@ -493,7 +515,7 @@ function failedImageSanity(message = "screenshot was not captured"): ImageSanity
   };
 }
 
-async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Promise<SceneResult> {
+async function runScene(browser: Browser, scene: SceneSpec, gate: GateMode, outDir: string): Promise<SceneResult> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 });
   // This script runs under tsx, whose esbuild keepNames transform injects
   // __name(...) helper calls into functions inside page.evaluate closures.
@@ -510,13 +532,14 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
   let printedConsoleMessages = 0;
   let printedPageErrors = 0;
   let suppressedPageErrorNotice = false;
-  const screenshotPath = resolve(outDir, scene.screenshot);
+  const sceneRunName = `${gate.name}-${scene.name}`;
+  const screenshotPath = resolve(outDir, `${sceneRunName}.png`);
   const failedPath = screenshotPath.replace(/\.png$/i, "-FAILED.png");
-  const statsPath = resolve(outDir, `${scene.name}-stats.json`);
-  const phase0Path = resolve(outDir, `${scene.name}-phase0-report.json`);
-  const summaryPath = scene.summary ? resolve(outDir, `${scene.name}-summary.json`) : null;
-  const movementPath = scene.movementRoute ? resolve(outDir, `${scene.name}-movement.json`) : null;
-  const comparisonPath = resolve(outDir, `compare/${scene.name}-self-diff.png`);
+  const statsPath = resolve(outDir, `${sceneRunName}-stats.json`);
+  const phase0Path = resolve(outDir, `${sceneRunName}-phase0-report.json`);
+  const summaryPath = scene.summary ? resolve(outDir, `${sceneRunName}-summary.json`) : null;
+  const movementPath = scene.movementRoute ? resolve(outDir, `${sceneRunName}-movement.json`) : null;
+  const comparisonPath = resolve(outDir, `compare/${sceneRunName}-self-diff.png`);
   let movement: MovementReport | null = null;
 
   page.on("console", (msg) => {
@@ -548,6 +571,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
 
   const extra: Record<string, string> = {
     acceptance: "1",
+    ownershipOracle: gate.ownershipOracle,
     world: "16",
     clodPerf: "1",
     webgpuSelection: "1",
@@ -563,7 +587,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
     extra,
   });
 
-  console.log(`[infinite-accept] ${scene.name}: ${url}`);
+  console.log(`[infinite-accept] ${gate.name}/${scene.name}: ${url}`);
   try {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await Promise.race([waitReady(page, scene.name, failedPath), pageErrorGate]);
@@ -595,7 +619,11 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
 
     await writeBootstrapDiff(screenshotPath, comparisonPath);
     const imageSanity = await inspectPngSanity(screenshotPath, { width: WIDTH, height: HEIGHT });
-    const thresholds: ThresholdEvaluation = evaluateThresholds(extractAcceptanceCounters(stats));
+    const thresholds: ThresholdEvaluation = evaluateThresholds(
+      extractAcceptanceCounters(stats),
+      gate.requiredCounters,
+      gate.rules,
+    );
     const movementFailures = evaluateMovementRoute(scene.name, movement);
     const failures = [
       ...pageErrors.map((error) => `page error: ${error}`),
@@ -604,7 +632,7 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
       ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),
     ];
     return {
-      name: scene.name,
+      name: `${gate.name}/${scene.name}`,
       url,
       screenshot: rel(screenshotPath),
       stats,
@@ -635,14 +663,14 @@ async function runScene(browser: Browser, scene: SceneSpec, outDir: string): Pro
       ));
       await writeBootstrapDiff(failedPath, comparisonPath).catch(() => undefined);
     }
-    const thresholds = evaluateThresholds({});
+    const thresholds = evaluateThresholds({}, gate.requiredCounters, gate.rules);
     const failures = [
       message,
       ...evaluateMovementRoute(scene.name, movement),
       ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),
     ];
     return {
-      name: scene.name,
+      name: `${gate.name}/${scene.name}`,
       url,
       screenshot: existsSync(failedPath) ? rel(failedPath) : rel(screenshotPath),
       stats,
@@ -675,8 +703,10 @@ async function main(): Promise<void> {
   const { browser, recipe } = await launchWebGPU();
   const sceneResults: SceneResult[] = [];
   try {
-    for (const scene of SCENES) {
-      sceneResults.push(await runScene(browser, scene, outDir));
+    for (const gate of GATE_MODES) {
+      for (const scene of SCENES) {
+        sceneResults.push(await runScene(browser, scene, gate, outDir));
+      }
     }
   } finally {
     await browser.close().catch(() => undefined);
@@ -694,6 +724,10 @@ async function main(): Promise<void> {
     thresholds: {
       required_counters: REQUIRED_COUNTERS,
       rules: THRESHOLD_RULES.map((rule) => ({ key: rule.key, label: rule.label })),
+      coverage_required_counters: COVERAGE_REQUIRED_COUNTERS,
+      coverage_rules: COVERAGE_RULES.map((rule) => ({ key: rule.key, label: rule.label })),
+      perf_required_counters: PERF_REQUIRED_COUNTERS,
+      perf_rules: PERF_RULES.map((rule) => ({ key: rule.key, label: rule.label })),
     },
     reference_status: "bootstrap",
     failures,

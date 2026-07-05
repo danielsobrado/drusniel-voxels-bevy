@@ -4,6 +4,7 @@ import { packPageKey, pageKey } from "./page_plan.js";
 import type { TerrainOwnershipRuntimeSnapshot } from "./terrain_ownership_runtime.js";
 import {
   countSnapshotResidencyMissing,
+  createRendererOwnershipResidencyFeeds,
   createSnapshotOwnershipResidencyFeeds,
   packedLiveKeySet,
   packedPageKeySet,
@@ -42,5 +43,24 @@ describe("ownership residency feeds", () => {
     expect(feeds.liveReady()).toEqual(new Set([packLiveKey(0, 0)]));
     expect(feeds.clodReady()).toEqual(new Set([packPageKey(1, -1, 0)]));
     expect(countSnapshotResidencyMissing(snap, feeds)).toEqual({ liveMissing: 1, clodMissing: 1 });
+  });
+
+  it("adapts renderer live pages and CLOD page ids into oracle-ready sets", () => {
+    const feeds = createRendererOwnershipResidencyFeeds({
+      liveReadyPageKeys: () => ["L0:-1,2"],
+      clodReadyPageKeys: () => ["L0:3,-4", "L2:-1,1"],
+      liveChunksPerPage: 2,
+    });
+
+    expect(feeds.liveReady()).toEqual(new Set([
+      packLiveKey(-2, 4),
+      packLiveKey(-2, 5),
+      packLiveKey(-1, 4),
+      packLiveKey(-1, 5),
+    ]));
+    expect(feeds.clodReady()).toEqual(new Set([
+      packPageKey(0, 3, -4),
+      packPageKey(2, -1, 1),
+    ]));
   });
 });

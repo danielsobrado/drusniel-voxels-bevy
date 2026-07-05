@@ -86,6 +86,7 @@ export interface NearFieldBubbleController {
   applyTint(enabled: boolean): void;
   size(): number;
   chunkGroupValues(): Iterable<ChunkGroupEntry>;
+  readyPageKeys(): readonly string[];
   dispose(): void;
 }
 
@@ -601,6 +602,9 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return false;
   };
 
+  const pageEntryReady = (entry: ChunkGroupEntry): boolean =>
+    entry.ready && !entry.failed && (entry.group.children.length > 0 || entry.colliderIds.length > 0 || entry.validEmpty);
+
   const countRequiredPages = (requiredCoords: PageCoord[]) => {
     let readyPages = 0;
     let buildingPages = 0;
@@ -613,7 +617,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       }
       if (entry.failed) failedPages++;
       else if (!entry.ready) buildingPages++;
-      else if (entry.group.children.length > 0 || entry.colliderIds.length > 0 || entry.validEmpty) readyPages++;
+      else if (pageEntryReady(entry)) readyPages++;
       else buildingPages++;
     }
     return { readyPages, buildingPages, failedPages };
@@ -721,6 +725,13 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     },
     chunkGroupValues() {
       return chunkGroups.values();
+    },
+    readyPageKeys() {
+      const ready: string[] = [];
+      for (const [key, entry] of chunkGroups) {
+        if (pageEntryReady(entry)) ready.push(key);
+      }
+      return ready.sort();
     },
     dispose() {
       for (const [nodeId, entry] of [...chunkGroups.entries()]) {

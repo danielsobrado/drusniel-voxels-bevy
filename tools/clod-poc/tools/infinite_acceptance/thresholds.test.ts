@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { evaluateThresholds, extractAcceptanceCounters, REQUIRED_COUNTERS } from "./thresholds.js";
+import {
+  COVERAGE_REQUIRED_COUNTERS,
+  COVERAGE_RULES,
+  evaluateThresholds,
+  extractAcceptanceCounters,
+  PERF_REQUIRED_COUNTERS,
+  PERF_RULES,
+  REQUIRED_COUNTERS,
+} from "./thresholds.js";
 
 function validCounters(): Record<string, number> {
   const counters = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
@@ -39,6 +47,21 @@ describe("infinite islands thresholds", () => {
     expect(result.missing).toContain("frame_ms_p99");
     expect(result.failures).toContain("frame_ms_p95=8.1 failed: must be finite, >= 0 and <= 8");
     expect(result.failures).toContain("ring_boundary_holes=1 failed: must equal 0");
+  });
+
+  it("splits coverage and perf gates so oracle cost does not affect frame timing", () => {
+    const coverage = validCounters();
+    coverage["frame_ms_p95"] = 30;
+    expect(evaluateThresholds(coverage, COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).passed).toBe(true);
+
+    const perf = validCounters();
+    perf["ring_boundary_holes"] = 7;
+    expect(evaluateThresholds(perf, PERF_REQUIRED_COUNTERS, PERF_RULES).passed).toBe(true);
+
+    perf["frame_ms_p95"] = 8.1;
+    expect(evaluateThresholds(perf, PERF_REQUIRED_COUNTERS, PERF_RULES).failures).toContain(
+      "frame_ms_p95=8.1 failed: must be finite, >= 0 and <= 8",
+    );
   });
 
   it("checks streamed live collider pages", () => {
