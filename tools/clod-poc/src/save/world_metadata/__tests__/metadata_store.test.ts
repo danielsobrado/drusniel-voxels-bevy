@@ -101,7 +101,7 @@ describe("world metadata store", () => {
     const cave = rows.find((row) => row.kind === "caveSystems" && row.id === "cave-1");
 
     expect(road?.regionKeys).toEqual(["r_0_0", "r_1_0"]);
-    expect(cave?.regionKeys).toEqual(["r_-1_-1", "r_0_0", "r_1_0"]);
+    expect(cave?.regionKeys).toEqual(["r_-1_-1", "r_-1_0", "r_0_-1", "r_0_0", "r_1_-1", "r_1_0"]);
     expect(Object.prototype.hasOwnProperty.call(store.get().cities[0] ?? {}, "regionKeys")).toBe(false);
   });
 
