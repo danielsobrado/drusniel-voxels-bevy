@@ -140,6 +140,7 @@ describe("infinite acceptance convergence helpers", () => {
       liveBubbleGpuChunkBudget: "12",
       liveClodRootBudget: "8",
       liveClodRootMaxCached: "128",
+      liveClodRootRadius: "2048",
       farSummaryMaxTileBuildsPerFrame: "4",
       farSummaryMaxBuildMsPerFrame: "6",
     });
@@ -148,6 +149,7 @@ describe("infinite acceptance convergence helpers", () => {
       liveBubbleGpuChunkBudget: "16",
       liveClodRootBudget: "12",
       liveClodRootMaxCached: "128",
+      liveClodRootRadius: "2048",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     });
@@ -158,5 +160,6 @@ describe("infinite acceptance convergence helpers", () => {
 
     expect(Number(params["liveClodRootBudget"])).toBeGreaterThan(0);
     expect(Number(params["liveClodRootMaxCached"])).toBeGreaterThan(0);
+    expect(Number(params["liveClodRootRadius"])).toBeGreaterThan(0);
   });
 });

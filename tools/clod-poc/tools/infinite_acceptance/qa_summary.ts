@@ -23,6 +23,7 @@ export function buildInfiniteQaSummary(scene: string, stats: JsonRecord): JsonRe
           triangles: counters["total_scene_tris"] ?? stats["triangles"] ?? 0,
         },
         clod: {
+          radius_m: counters["streamer_clod_radius_m"] ?? 0,
           terrain_draw_calls: counters["terrain_draw_calls"] ?? 0,
           terrain_triangles: counters["rendered_terrain_tris"] ?? 0,
           ring_boundary_holes: counters["ring_boundary_holes"] ?? 0,
@@ -44,6 +45,7 @@ export function buildInfiniteQaSummary(scene: string, stats: JsonRecord): JsonRe
           collider_removals: counters["live_bubble_collider_removals"] ?? 0,
         },
         live_clod_stream: {
+          radius_m: counters["live_clod_stream_radius_m"] ?? 0,
           required_pages: counters["live_clod_stream_required_pages"] ?? 0,
           cached_pages: counters["live_clod_stream_cached_pages"] ?? 0,
           active_root_pages: counters["live_clod_stream_active_root_pages"] ?? 0,

@@ -195,6 +195,7 @@ metrics:
     - streamer_far_shell_inner_m
     - streamer_far_shell_outer_m
     - streamer_clod_radius_m
+    - live_clod_stream_radius_m
     - streamer_live_radius_m
     - streamer_far_shell_ownership_ok
     - ring_boundary_holes

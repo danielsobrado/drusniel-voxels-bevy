@@ -14,6 +14,7 @@ function validCounters(): Record<string, number> {
   counters["frame_ms_p95"] = 7.9;
   counters["frame_ms_p99"] = 9;
   counters["streamer_far_shell_ownership_ok"] = 1;
+  counters["streamer_clod_radius_m"] = 2048;
   counters["live_bubble_required_pages"] = 1;
   counters["live_bubble_ready_pages"] = 1;
   counters["live_bubble_streamed_collider_pages"] = 1;
@@ -27,6 +28,7 @@ function validCounters(): Record<string, number> {
   counters["live_clod_stream_required_pages"] = 1;
   counters["live_clod_stream_cached_pages"] = 1;
   counters["live_clod_stream_build_budget"] = 1;
+  counters["live_clod_stream_radius_m"] = 2048;
   counters["live_clod_stream_ready_pages"] = 1;
   counters["live_clod_stream_active_root_pages"] = 1;
   counters["live_clod_stream_safety_required_pages"] = 1;
@@ -133,6 +135,15 @@ describe("infinite islands thresholds", () => {
 
     expect(evaluateThresholds(counters).failures).toContain(
       "live_clod_stream_parent_coverage_violations=1 failed: must equal 0",
+    );
+  });
+
+  it("requires the live CLOD stream radius to cover the ownership CLOD radius", () => {
+    const counters = validCounters();
+    counters["live_clod_stream_radius_m"] = 96;
+
+    expect(evaluateThresholds(counters).failures).toContain(
+      "live_clod_stream_radius_m=96 failed: must be >= streamer_clod_radius_m",
     );
   });
 

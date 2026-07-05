@@ -27,6 +27,7 @@ import {
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
+import { resolveLiveClodRootRadius } from "./live_clod_root_radius.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
@@ -48,24 +49,24 @@ function nonNegativeIntegerParam(params: URLSearchParams, key: string): number |
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
 }
 
-function positiveNumberParam(params: URLSearchParams, key: string): number | undefined {
-  const parsed = Number(params.get(key));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 function globalClodCounters(): Record<string, number> | undefined {
   return (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
   }).window?.__drusnielClod?.stats?.counters;
 }
 
-function mirrorStreamingClodRootCounters(counters: Record<string, number> | undefined, stats: StreamingClodRootStats): void {
+function mirrorStreamingClodRootCounters(
+  counters: Record<string, number> | undefined,
+  stats: StreamingClodRootStats,
+  radiusM: number,
+): void {
   const target = counters ?? globalClodCounters();
   if (!target) return;
   streamBuiltTotal += stats.builtThisFrame;
   streamApplyPagesTotal += stats.applyPagesThisFrame;
   streamEvictionsTotal += stats.evictions;
   streamStaleDiscardsTotal += stats.staleDiscards;
+  target["live_clod_stream_radius_m"] = radiusM;
   target["live_clod_stream_required_pages"] = stats.requiredPages;
   target["live_clod_stream_cached_pages"] = stats.cachedPages;
   target["live_clod_stream_built_this_frame"] = stats.builtThisFrame;
@@ -296,7 +297,7 @@ export function runFrameLoopStartup(
     window.__drusnielRenderResolution ?? null,
     searchParams,
   );
-  const liveClodRootRadius = positiveNumberParam(searchParams, "liveClodRootRadius") ?? state.bubbleRadius;
+  const liveClodRootRadius = resolveLiveClodRootRadius(searchParams, longView.phase0Config, state.bubbleRadius);
   const streamingClodRootController = createStreamingClodRootController({
     roots: input.result.roots,
     allNodes: input.allNodes,
@@ -312,7 +313,7 @@ export function runFrameLoopStartup(
   const updateSelectionWithStreaming = () => {
     const center = interaction.mode === "playing" ? player.position : controls.target;
     const streamStats = streamingClodRootController.update(center, liveClodRootRadius);
-    mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats);
+    mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
     updateSelection();
   };
 

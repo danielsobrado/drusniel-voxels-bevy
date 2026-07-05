@@ -7,6 +7,7 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["frame_ms_p99"] = 9;
   values["far_shell_inner_minus_clod_radius_m"] = 1;
   values["streamer_far_shell_ownership_ok"] = 1;
+  values["streamer_clod_radius_m"] = 2048;
   values["live_bubble_required_pages"] = 1;
   values["live_bubble_ready_pages"] = 1;
   values["live_bubble_streamed_collider_pages"] = 1;
@@ -20,6 +21,7 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_required_pages"] = 1;
   values["live_clod_stream_cached_pages"] = 1;
   values["live_clod_stream_build_budget"] = 1;
+  values["live_clod_stream_radius_m"] = 2048;
   values["live_clod_stream_ready_pages"] = 1;
   values["live_clod_stream_active_root_pages"] = 1;
   values["live_clod_stream_safety_required_pages"] = 1;
@@ -92,6 +94,10 @@ describe("infinite islands threshold validation", () => {
 
   it("fails when streamed root apply work exceeds the main-thread budget", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_apply_ms: 2.01 })).passed).toBe(false);
+  });
+
+  it("fails when the streamed CLOD radius is smaller than the ownership CLOD radius", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_radius_m: 96 })).passed).toBe(false);
   });
 
   it("fails when vegetation is still clamped to the startup grid", () => {

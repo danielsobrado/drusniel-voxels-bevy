@@ -23,6 +23,8 @@ export default defineConfig(({ command }) => ({
   test: {
     setupFiles: ["./src/test-setup.ts"],
     testTimeout: 120000,
+    // Keep Windows runs below the process/memory pressure that makes Vitest forks exit.
+    maxWorkers: 4,
     exclude: [
       "**/node_modules/**",
       "**/dist/**",

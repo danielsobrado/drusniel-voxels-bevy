@@ -54,6 +54,7 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
       liveBubbleColliderRadius: "128",
       liveClodRootBudget: "12",
       liveClodRootMaxCached: "128",
+      liveClodRootRadius: "2048",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     };
@@ -64,6 +65,7 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     liveBubbleColliderRadius: "128",
     liveClodRootBudget: "8",
     liveClodRootMaxCached: "128",
+    liveClodRootRadius: "2048",
     farSummaryMaxTileBuildsPerFrame: "4",
     farSummaryMaxBuildMsPerFrame: "6",
   };

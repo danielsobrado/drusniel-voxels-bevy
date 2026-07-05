@@ -16,6 +16,7 @@ const SEEDED_COUNTERS = [
   "live_bubble_probe_collider_removals_total",
   "live_clod_stream_built_total",
   "live_clod_stream_evictions_total",
+  "live_clod_stream_radius_m",
   "live_clod_stream_scheduled_pages_this_frame",
   "live_clod_stream_apply_pages_total",
   "live_clod_stream_stale_discards_total",
