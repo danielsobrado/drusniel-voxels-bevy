@@ -47,6 +47,10 @@ export interface DirtyRegionBatchResult {
   pending: string[];
 }
 
+export interface SaveDirtyRegionsResult extends DirtyRegionBatchResult {
+  finalized: boolean;
+}
+
 function defaultNowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
@@ -210,8 +214,9 @@ export async function finalizeSaveManifestAndMetadata(
   return nextManifest;
 }
 
-export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<string[]> {
+export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<SaveDirtyRegionsResult> {
   const result = await flushDirtyRegionBatch(input);
+  let finalized = false;
   if (result.pending.length === 0) {
     await finalizeSaveManifestAndMetadata(
       input.db,
@@ -219,6 +224,7 @@ export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<st
       input.metadata,
       [...input.manifest.regionKeys, ...result.written],
     );
+    finalized = true;
   }
-  return result.written;
+  return { ...result, finalized };
 }

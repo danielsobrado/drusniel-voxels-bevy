@@ -82,6 +82,15 @@ function publishCounters(): void {
   state.counters.save_voxel_delta_count = state.voxelDeltaCount;
 }
 
+function pointBoundsForProp(prop: SavedPropInstance): SavedBounds2D {
+  return {
+    minX: prop.position[0],
+    minZ: prop.position[2],
+    maxX: prop.position[0],
+    maxZ: prop.position[2],
+  };
+}
+
 function scheduleFlush(): void {
   if (!state || state.flushTimer !== null) return;
   state.flushTimer = setTimeout(() => {
@@ -139,6 +148,10 @@ export function hasActiveSaveRuntime(): boolean {
   return state !== null;
 }
 
+export function hasLoadedSavePropAuthority(): boolean {
+  return state !== null && savedPropStore.hasProps();
+}
+
 export function markSaveRegionsDirtyForBounds(bounds: SavedBounds2D): string[] {
   if (!state) return [];
   const keys = regionKeysForBounds(bounds);
@@ -148,6 +161,22 @@ export function markSaveRegionsDirtyForBounds(bounds: SavedBounds2D): string[] {
   publishCounters();
   scheduleFlush();
   return keys;
+}
+
+function markSaveRegionsDirtyForBoundList(boundsList: readonly SavedBounds2D[]): string[] {
+  if (!state) return [];
+  const keys = new Set<string>();
+  for (const bounds of boundsList) {
+    for (const key of regionKeysForBounds(bounds)) {
+      keys.add(key);
+      state.dirtyRegionKeys.add(key);
+    }
+    markSaveInvalidationBounds(bounds);
+  }
+  state.revision++;
+  publishCounters();
+  scheduleFlush();
+  return [...keys].sort();
 }
 
 export function markSaveRuntimeLoadedRegionsInvalidated(): number {
@@ -165,21 +194,17 @@ export function updateSaveRuntimeMetadata(metadata: WorldMetadataRecord, dirtyBo
 
 export function upsertSaveRuntimeProp(prop: SavedPropInstance): string[] {
   if (!state) return [];
-  savedPropStore.upsert(prop);
+  const previous = savedPropStore.upsert(prop);
   projectPropEditStore.restore(savedPropStore.activeProjectProps());
-  return markSaveRegionsDirtyForBounds({
-    minX: prop.position[0],
-    minZ: prop.position[2],
-    maxX: prop.position[0],
-    maxZ: prop.position[2],
-  });
+  const boundsList = previous ? [pointBoundsForProp(previous), pointBoundsForProp(prop)] : [pointBoundsForProp(prop)];
+  return markSaveRegionsDirtyForBoundList(boundsList);
 }
 
 export function removeSaveRuntimeProp(id: string, dirtyBounds: SavedBounds2D): string[] {
   if (!state) return [];
-  savedPropStore.remove(id);
+  const previous = savedPropStore.remove(id);
   projectPropEditStore.restore(savedPropStore.activeProjectProps());
-  return markSaveRegionsDirtyForBounds(dirtyBounds);
+  return markSaveRegionsDirtyForBoundList(previous ? [pointBoundsForProp(previous), dirtyBounds] : [dirtyBounds]);
 }
 
 export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME): Promise<void> {

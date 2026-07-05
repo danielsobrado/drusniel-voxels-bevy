@@ -115,7 +115,7 @@ describe("save service", () => {
 
   it("saveDirtyRegions writes only the selected dirty batch", async () => {
     const db = await openSaveDb(indexedDB, dbName());
-    const written = await saveDirtyRegions({
+    const result = await saveDirtyRegions({
       db,
       saveId: "qa-save",
       manifest: manifest([]),
@@ -131,6 +131,6 @@ describe("save service", () => {
     });
     db.close();
 
-    expect(written).toEqual(["r_0_0"]);
+    expect(result).toEqual({ written: ["r_0_0"], pending: ["r_1_0"], finalized: false });
   });
 });

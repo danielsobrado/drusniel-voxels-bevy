@@ -19,12 +19,20 @@ export {
 } from "./far_clipmap_keys.js";
 export type { FarClipmapRingRange, FarClipmapSnap } from "./far_clipmap_keys.js";
 
-export { createFarClipmapGridGeometry } from "./far_clipmap_geometry.js";
-export type { FarClipmapGridGeometryOptions } from "./far_clipmap_geometry.js";
+export {
+  createFarClipmapGridGeometry,
+  createFarClipmapTerrainGeometry,
+} from "./far_clipmap_geometry.js";
+export type {
+  FarClipmapGridGeometryOptions,
+  FarClipmapTerrainGeometryOptions,
+} from "./far_clipmap_geometry.js";
 
 export {
   createConservativeFarClipmapSource,
+  createDefaultFarClipmapSource,
   createFarClipmapSourceFromFarHeightProvider,
+  createFarClipmapSourceFromProviderGetter,
   createFarClipmapSourceFromTerrainSampler,
 } from "./far_clipmap_source.js";
 export type { FarClipmapSource } from "./far_clipmap_source.js";

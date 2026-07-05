@@ -56,6 +56,8 @@ Not implemented:
 - Operation-log replay or DigEdit-history persistence.
 - A second voxel authority. `VoxelDelta` / `voxelEditStore` remain the only saved voxel authority.
 - Far-shell or far-summary persistence. They are derived data refreshed by invalidation.
+- NAADF far-summary/atlas invalidation. SV-7 currently targets the classic
+  `FarSummaryCache` path only.
 - Full gameplay passability proof. Critical-path validation does not run navmesh/pathfinding.
 ```
 
@@ -390,9 +392,10 @@ success callback. There are no temp/rename steps.
 3. Bridge (`src/save/save_far_summary_bridge.ts`): save runtime publishes
    `bounds2D = {minX, minZ, maxX, maxZ}` and the bridge fans out to registered targets. The
    bridge does not know about IndexedDB and does not own terrain edits.
-4. Far-summary target: bootstrap registers `farSummaryCache.markStale(bounds2D)`. WP-3 keeps
-   old samples live until replacement commits when configured and prevents invalidated active
-   builds/pending commits from overwriting edited data.
+4. Far-summary target: bootstrap registers `farSummaryCache.markStale(bounds2D)` for the
+   classic `FarSummaryCache` path. WP-3 keeps old samples live until replacement commits when
+   configured and prevents invalidated active builds/pending commits from overwriting edited
+   data. NAADF far-summary/atlas invalidation is not wired in v1.
 5. Far shell: bootstrap requests `infiniteFarShell.requestHeightRefresh()` after stale marking.
 6. Load-time: loaded region bounds are replayed through the same bridge after far-summary
    integration is registered. Far-shell/far-summary data is never persisted.
@@ -438,7 +441,7 @@ src/save/region_key.ts                     # key rules above, no deps
 src/save/voxel_partition.ts                # partitionVoxelSnapshot / merge helpers
 src/save/region_store.ts                   # in-memory SaveWorldStore
 src/save/save_db.ts                        # IndexedDB "drusniel-clod-saves" v1
-src/save/save_service.ts                   # loadSavedWorld, saveDirtyRegions, markRegionDirtyFromDirtyChunks
+src/save/save_service.ts                   # loadSavedWorld, saveDirtyRegions result, markRegionDirtyFromDirtyChunks
 src/save/save_far_summary_bridge.ts        # save dirty bounds -> far-summary/far-shell targets
 src/save/critical_path_validation.ts       # critical-path data/link/status validation
 src/save/voxel_delta_binary.ts             # optional bin1 payload encode/decode
@@ -605,8 +608,8 @@ Exit: dangling links fail loud.
 WP-3 (`markStale(bounds)`) is available. Create `save/save_far_summary_bridge.ts` per the
 invalidation flow; register in bootstrap. Tests: `save_far_summary_bridge.test.ts`.
 
-Exit: one edit stales exactly the expected far tiles, triggers at most one shell refresh per
-frame, and never re-marks live/CLOD.
+Exit: one edit stales expected classic far-summary tiles, triggers shell refresh, and never
+re-marks live/CLOD. NAADF far-summary invalidation remains documented as out of v1.
 
 ### SV-8: Critical-path validation
 
@@ -671,4 +674,5 @@ Reintroducing any of these is a regression against this plan:
 - Runtime world-streaming save/load claims.
 - DigEdit history persistence claims.
 - Far-shell or far-summary persistence claims; those remain derived/invalidation-driven.
+- NAADF far-summary invalidation claims until a NAADF target is wired and tested.
 ```
