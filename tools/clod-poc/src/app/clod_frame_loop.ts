@@ -208,6 +208,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     phase0Streaming: diagnostics.phase0Streaming,
     ownershipRuntime,
     getOwnershipResidencyFeeds: rendererOwnershipResidencyFeeds,
+    getFarClipmapOwnershipSnapshot: diagnostics.getFarClipmapOwnershipSnapshot,
     borderOceanScene: diagnostics.queryScene === "border-ocean"
       ? {
           waterField: waterWeather.waterField,
