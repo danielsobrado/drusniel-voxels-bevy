@@ -5,6 +5,7 @@ import { parseRegionKey, regionKeyForWorld } from "./region_key.js";
 import { SAVE_CHUNK_SIZE_M, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
 import type { SaveRegionRecords } from "./region_store.js";
 import type { SaveWorldManifest, WorldMetadataRecord } from "./save_schema.js";
+import { assertWorldMetadataPropLinks } from "./save_schema.js";
 import { openSaveDb, readRegionRecords, readSaveManifest, readWorldMetadata, writeRegionRecords, writeSaveManifestAndMetadata } from "./save_db.js";
 
 export interface LoadedSavedWorld {
@@ -35,6 +36,11 @@ export interface SaveDirtyRegionsInput {
   maxRegionWrites?: number;
 }
 
+export interface DirtyRegionBatchResult {
+  written: string[];
+  pending: string[];
+}
+
 function defaultNowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
@@ -43,6 +49,12 @@ function validateExpectedSeed(manifest: SaveWorldManifest, expectedSeed: number 
   if (expectedSeed !== undefined && manifest.seed !== expectedSeed) {
     throw new Error(`saved seed ${manifest.seed} does not match resolved world seed ${expectedSeed}`);
   }
+}
+
+function savedPropIds(regions: readonly SaveRegionRecords[]): Set<string> {
+  const ids = new Set<string>();
+  for (const region of regions) for (const prop of region.props) ids.add(prop.id);
+  return ids;
 }
 
 export function saveIdFromQuery(searchParams: URLSearchParams): string | null {
@@ -80,6 +92,7 @@ export async function loadSavedWorldFromDb(
 
   const metadata = await readWorldMetadata(db, saveId);
   if (!metadata) throw new Error(`save metadata not found: ${saveId}`);
+  assertWorldMetadataPropLinks(metadata, savedPropIds(regions));
 
   const voxelSnapshot = mergePartitionedVoxelSnapshots(regions.map((region) => region.voxelDeltas));
   (options.replaceVoxelSnapshot ?? replaceVoxelEdits)(voxelSnapshot);
@@ -129,11 +142,11 @@ export function selectDirtyRegionWriteBatch(
   return [...dirtyRegionKeys].sort().slice(0, maxWrites);
 }
 
-export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<string[]> {
+export async function flushDirtyRegionBatch(input: SaveDirtyRegionsInput): Promise<DirtyRegionBatchResult> {
   const snapshot = input.snapshot ?? getVoxelEditSnapshot();
   const partsByRegion = new Map(partitionVoxelSnapshot(snapshot).map((part) => [part.regionKey, part]));
-  const written: string[] = [];
   const batch = selectDirtyRegionWriteBatch(input.dirtyRegionKeys, input.maxRegionWrites ?? SAVE_MAX_REGION_WRITES_PER_FRAME);
+  const written: string[] = [];
 
   for (const regionKey of batch) {
     const voxelDeltas = partsByRegion.get(regionKey) ?? { schemaVersion: 1 as const, regionKey, format: "json" as const, deltas: [] };
@@ -159,7 +172,37 @@ export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<st
     written.push(regionKey);
   }
 
-  const regionKeys = [...new Set([...input.manifest.regionKeys, ...written])].sort();
-  await writeSaveManifestAndMetadata(input.db, { ...input.manifest, regionKeys, updatedAt: new Date().toISOString() }, input.metadata);
-  return written;
+  const writtenSet = new Set(written);
+  return {
+    written,
+    pending: input.dirtyRegionKeys.filter((regionKey) => !writtenSet.has(regionKey)).sort(),
+  };
+}
+
+export async function finalizeSaveManifestAndMetadata(
+  db: IDBDatabase,
+  manifest: SaveWorldManifest,
+  metadata: WorldMetadataRecord,
+  regionKeys: readonly string[],
+): Promise<SaveWorldManifest> {
+  const nextManifest = {
+    ...manifest,
+    regionKeys: [...new Set(regionKeys)].sort(),
+    updatedAt: new Date().toISOString(),
+  };
+  await writeSaveManifestAndMetadata(db, nextManifest, metadata);
+  return nextManifest;
+}
+
+export async function saveDirtyRegions(input: SaveDirtyRegionsInput): Promise<string[]> {
+  const result = await flushDirtyRegionBatch(input);
+  if (result.pending.length === 0) {
+    await finalizeSaveManifestAndMetadata(
+      input.db,
+      input.manifest,
+      input.metadata,
+      [...input.manifest.regionKeys, ...result.written],
+    );
+  }
+  return result.written;
 }
