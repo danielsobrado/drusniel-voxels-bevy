@@ -206,7 +206,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   const grassCenter = bubbleCenter;
   const ringUnbounded = infiniteIslandsScene();
   const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, ringUnbounded);
-  mirrorVegetationRingStats(grassCenter, ringCenter, unbounded);
+  mirrorVegetationRingStats(grassCenter, ringCenter, ringUnbounded);
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
