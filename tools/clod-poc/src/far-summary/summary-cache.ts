@@ -26,6 +26,7 @@ interface ActiveBuild {
 
 interface PendingCommit {
   keyStr: string;
+  req: FarSummaryRingRequest;
   tile: FarSummaryTile;
   startedAtMs: number;
 }
@@ -83,8 +84,8 @@ export class FarSummaryCache implements FallbackStatsWriter {
         this.pendingBuildKeys.set(keyStr, req);
         this.stats.requestedTiles++;
       } else {
-          existing.lastTouchedFrame = frameIndex;
-          existing.lastTouchedTimeMs = nowMs;
+        existing.lastTouchedFrame = frameIndex;
+        existing.lastTouchedTimeMs = nowMs;
 
         if (
           (existing.state === "stale" || existing.state === "cooling") &&
@@ -229,14 +230,13 @@ export class FarSummaryCache implements FallbackStatsWriter {
 
   markStale(bounds: TileBounds | null): void {
     if (bounds === null) this.invalidationEpoch++;
+    this.cancelInvalidatedActiveBuild(bounds);
+    this.dropInvalidatedPendingCommits(bounds);
+
     for (const [, tile] of this.tiles) {
-      if (tile.state === "building" || tile.state === "evicted") continue;
+      if (tile.state === "evicted") continue;
       if (bounds !== null && !tileIntersectsBounds(tile, bounds)) continue;
-      if (tile.state === "ready" || tile.state === "cooling" || tile.state === "stale") {
-        tile.state = "stale";
-        if (bounds !== null) tile.builtEpoch = -1;
-        this.stateRevision++;
-      }
+      this.markTileStaleOrRequested(tile);
     }
   }
 
@@ -267,6 +267,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
         this.tiles.delete(ekey);
         this.pendingBuildKeys.delete(ekey);
         if (this.activeBuild?.keyStr === ekey) this.activeBuild = null;
+        this.dropPendingCommit(ekey);
         this.stateRevision++;
         evicted++;
       }
@@ -352,7 +353,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
       builtTile.builtEpoch = this.invalidationEpoch;
       this.stats.tilesBuiltThisFrame++;
       if (this.stats.tilesCommittedThisFrame >= commitBudget) {
-        this.pendingCommits.push({ keyStr: active.keyStr, tile: builtTile, startedAtMs: active.startedAtMs });
+        this.pendingCommits.push({ keyStr: active.keyStr, req: active.req, tile: builtTile, startedAtMs: active.startedAtMs });
       } else {
         this.commitBuiltTile(active.keyStr, builtTile);
       }
@@ -391,6 +392,51 @@ export class FarSummaryCache implements FallbackStatsWriter {
     this.stateRevision++;
     this.stats.tilesCommittedThisFrame++;
     this.commitRevision++;
+  }
+
+  private cancelInvalidatedActiveBuild(bounds: TileBounds | null): void {
+    const active = this.activeBuild;
+    if (!active) return;
+    if (bounds !== null && !requestIntersectsBounds(active.req, this.config, bounds)) return;
+    this.activeBuild = null;
+    this.pendingBuildKeys.set(active.keyStr, active.req);
+    this.stats.buildsDiscarded++;
+    const tile = this.tiles.get(active.keyStr);
+    if (tile && tile.state !== "evicted") this.markTileStaleOrRequested(tile);
+  }
+
+  private dropInvalidatedPendingCommits(bounds: TileBounds | null): void {
+    for (let index = this.pendingCommits.length - 1; index >= 0; index--) {
+      const pending = this.pendingCommits[index]!;
+      if (bounds !== null && !tileIntersectsBounds(pending.tile, bounds)) continue;
+      this.pendingCommits.splice(index, 1);
+      this.pendingBuildKeys.set(pending.keyStr, pending.req);
+      this.stats.buildsDiscarded++;
+      const tile = this.tiles.get(pending.keyStr);
+      if (tile && tile.state !== "evicted") this.markTileStaleOrRequested(tile);
+    }
+  }
+
+  private dropPendingCommit(keyStr: string): void {
+    for (let index = this.pendingCommits.length - 1; index >= 0; index--) {
+      if (this.pendingCommits[index]?.keyStr === keyStr) this.pendingCommits.splice(index, 1);
+    }
+  }
+
+  private markTileStaleOrRequested(tile: FarSummaryTile): void {
+    if (tile.samples.length > 0) {
+      if (tile.state !== "stale" || tile.builtEpoch !== -1) {
+        tile.state = "stale";
+        tile.builtEpoch = -1;
+        this.stateRevision++;
+      }
+      return;
+    }
+    if (tile.state !== "requested") {
+      tile.state = "requested";
+      tile.builtEpoch = -1;
+      this.stateRevision++;
+    }
   }
 }
 
@@ -525,5 +571,14 @@ function tileIntersectsBounds(tile: FarSummaryTile, bounds: TileBounds): boolean
   const minZ = tile.originZ;
   const maxX = tile.originX + tile.cellSizeM * tile.tileCells;
   const maxZ = tile.originZ + tile.cellSizeM * tile.tileCells;
+  return minX < bounds.maxX && maxX > bounds.minX && minZ < bounds.maxZ && maxZ > bounds.minZ;
+}
+
+function requestIntersectsBounds(req: FarSummaryRingRequest, config: FarSummaryConfig, bounds: TileBounds): boolean {
+  const tileCells = config.rings[req.ring]?.tileCells ?? 32;
+  const minX = req.key.x * req.key.cellSizeM * tileCells;
+  const minZ = req.key.z * req.key.cellSizeM * tileCells;
+  const maxX = minX + req.key.cellSizeM * tileCells;
+  const maxZ = minZ + req.key.cellSizeM * tileCells;
   return minX < bounds.maxX && maxX > bounds.minX && minZ < bounds.maxZ && maxZ > bounds.minZ;
 }
