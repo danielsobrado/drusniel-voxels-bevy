@@ -72,10 +72,12 @@ export function savedPropsFromProjectProps(
   options: SavedPropConversionOptions = {},
 ): SavedPropSceneResult {
   const savedProps: SavedPropInstance[] = [];
+  const nextId = options.nextId ?? createSaveIdFactory(0);
+  const conversionOptions = { ...options, nextId };
   let migratedIds = 0;
   let skippedVegetation = 0;
   for (const prop of props) {
-    const result = savedPropFromProjectProp(prop, options);
+    const result = savedPropFromProjectProp(prop, conversionOptions);
     if (result.skippedVegetation) skippedVegetation++;
     if (result.migrated) migratedIds++;
     if (result.prop) savedProps.push(result.prop);
