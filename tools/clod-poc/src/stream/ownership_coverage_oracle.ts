@@ -38,10 +38,6 @@ export interface OwnershipCoverageCounters {
   ring_boundary_holes: number;
   horizon_hole_ratio: number;
   raw_horizon_hole_ratio: number;
-  // Priority ownership (live > CLOD > far): the renderer resolves the square-tile
-  // vs circular-annulus spill band by draw order. The acceptance-facing overlap
-  // and horizon counters above report unresolved priority-ownership failures;
-  // raw_* counters preserve the geometric spill-band diagnostics.
   priority_owner_overlap_cells: number;
   priority_unowned_cells: number;
   clod_parent_coverage_violations: number;
@@ -196,7 +192,9 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
 
 export function publishOwnershipCoverageCounters(
   counters: Record<string, number>,
-  values: OwnershipCoverageCounters,
+  values: Partial<OwnershipCoverageCounters>,
 ): void {
-  for (const [key, value] of Object.entries(values)) counters[key] = value;
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === "number") counters[key] = value;
+  }
 }
