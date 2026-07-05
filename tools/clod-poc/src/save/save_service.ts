@@ -50,10 +50,15 @@ export function saveIdFromQuery(searchParams: URLSearchParams): string | null {
   return saveId && saveId.trim().length > 0 ? saveId.trim() : null;
 }
 
-export function resolvedSeedFromQuery(searchParams: URLSearchParams): number {
+export function seedOverrideFromQuery(searchParams: URLSearchParams): number | undefined {
   const raw = searchParams.get("seed");
-  const parsed = raw === null ? 0 : Number(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (raw === null) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function resolvedSeedFromQuery(searchParams: URLSearchParams): number {
+  return seedOverrideFromQuery(searchParams) ?? 0;
 }
 
 export async function loadSavedWorldFromDb(
@@ -101,7 +106,7 @@ export async function loadSavedWorldFromQuery(
   const db = await openSaveDb();
   try {
     return await loadSavedWorldFromDb(db, saveId, {
-      expectedSeed: options.expectedSeed ?? resolvedSeedFromQuery(searchParams),
+      expectedSeed: options.expectedSeed ?? seedOverrideFromQuery(searchParams),
       replaceVoxelSnapshot: options.replaceVoxelSnapshot,
       nowMs: options.nowMs,
     });
