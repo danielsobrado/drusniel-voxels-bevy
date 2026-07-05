@@ -126,7 +126,8 @@ function assertNonEmptyVec3List(value: unknown, label: string): void {
 function assertBounds2D(value: unknown, label: string): void {
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
   for (const key of ["minX", "minZ", "maxX", "maxZ"] as const) assertFinite(value[key], `${label}.${key}`);
-  if (value.minX > value.maxX || value.minZ > value.maxZ) throw new Error(`${label} min must be <= max`);
+  const { minX, minZ, maxX, maxZ } = value as Record<string, number>;
+  if (minX > maxX || minZ > maxZ) throw new Error(`${label} min must be <= max`);
 }
 
 function assertUniqueIds(items: readonly { id: string }[], label: string): void {

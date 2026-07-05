@@ -492,6 +492,12 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
       };
     }) as ConvergenceSnapshot;
     const { quiet } = evaluateConvergence(c);
+    if (c.streamRequired > 0 && c.streamBudget === 0) {
+      const blockers = convergenceTimeoutBlockers(c);
+      const message = `${sceneName}: streamed CLOD required but build budget is zero`;
+      if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
+      throw new Error(message);
+    }
     stablePolls = quiet ? stablePolls + 1 : 0;
     if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
       console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);

@@ -44,6 +44,8 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
       liveBubbleColliderRadius: "128",
+      liveClodRootBudget: "4",
+      liveClodRootMaxCached: "24",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     };
@@ -52,6 +54,8 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     liveBubbleBudget: "4",
     liveBubbleGpuChunkBudget: "12",
     liveBubbleColliderRadius: "128",
+    liveClodRootBudget: "2",
+    liveClodRootMaxCached: "16",
     farSummaryMaxTileBuildsPerFrame: "4",
     farSummaryMaxBuildMsPerFrame: "6",
   };
@@ -105,10 +109,11 @@ export function convergenceTimeoutBlockers(snapshot: ConvergenceSnapshot): strin
     });
   }
   if (!evaluated.streamQuiet) {
+    const streamBudgetBlocked = snapshot.streamRequired > 0 && snapshot.streamBudget === 0;
     blockers.push({
-      rank: snapshot.streamPending + snapshot.streamInflight,
+      rank: streamBudgetBlocked ? Number.POSITIVE_INFINITY : snapshot.streamPending + snapshot.streamInflight,
       text:
-        `clodStream: pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
+        `clodStream: budget=${snapshot.streamBudget} pending=${snapshot.streamPending} inflight=${snapshot.streamInflight} ` +
         `activeRoots=${snapshot.streamReady} cached=${snapshot.streamCached} failed=${snapshot.streamFailed}`,
     });
   }

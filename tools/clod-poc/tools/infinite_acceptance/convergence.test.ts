@@ -41,6 +41,24 @@ describe("infinite acceptance convergence helpers", () => {
     })).streamQuiet).toBe(false);
   });
 
+  it("does not treat a required stream with zero build budget as quiet", () => {
+    const result = evaluateConvergence(snapshot({
+      streamRequired: 58,
+      streamBudget: 0,
+      streamReady: 0,
+      streamCached: 0,
+    }));
+    const blockers = convergenceTimeoutBlockers(snapshot({
+      streamRequired: 58,
+      streamBudget: 0,
+      streamReady: 0,
+      streamCached: 0,
+    }));
+
+    expect(result.streamQuiet).toBe(false);
+    expect(blockers[0]).toContain("clodStream: budget=0");
+  });
+
   it("treats active resident roots as quiet when stream queues are empty", () => {
     expect(evaluateConvergence(snapshot({
       streamCached: 17,
@@ -79,14 +97,25 @@ describe("infinite acceptance convergence helpers", () => {
     expect(profileAcceptanceParams("reuse")).toMatchObject({
       liveBubbleBudget: "4",
       liveBubbleGpuChunkBudget: "12",
+      liveClodRootBudget: "2",
+      liveClodRootMaxCached: "16",
       farSummaryMaxTileBuildsPerFrame: "4",
       farSummaryMaxBuildMsPerFrame: "6",
     });
     expect(profileAcceptanceParams("fast")).toMatchObject({
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
+      liveClodRootBudget: "4",
+      liveClodRootMaxCached: "24",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     });
+  });
+
+  it("gives reuse a positive streamed CLOD budget and cache cap", () => {
+    const params = profileAcceptanceParams("reuse");
+
+    expect(Number(params["liveClodRootBudget"])).toBeGreaterThan(0);
+    expect(Number(params["liveClodRootMaxCached"])).toBeGreaterThan(0);
   });
 });
