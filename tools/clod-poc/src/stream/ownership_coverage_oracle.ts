@@ -45,6 +45,13 @@ export interface OwnershipCoverageCounters {
   priority_owner_overlap_cells: number;
   priority_unowned_cells: number;
   clod_parent_coverage_violations: number;
+  far_clipmap_owned_cells: number;
+  far_clipmap_unowned_cells: number;
+  far_clipmap_ownership_holes: number;
+  far_clipmap_priority_overlap_cells: number;
+  owner_far_clipmap_cells: number;
+  owner_clod_refinement_cells: number;
+  owner_live_cells: number;
 }
 
 function liveOwns(loaded: ReadonlySet<number>, x: number, z: number, chunkSizeM: number): boolean {
@@ -102,6 +109,8 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   let unresolvedHorizonHoles = 0;
   let priorityOwnerOverlap = 0;
   let priorityUnowned = 0;
+  let ownerClodRefinementCells = 0;
+  let ownerLiveCells = 0;
 
   const clodCenter = snapshot.center;
   const farCenter = input.farShellCenter;
@@ -130,17 +139,15 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
       if (clodDistance <= snapshot.ownership.clodRadiusM && !live && !clod) liveClodGap++;
       if (clodDistance > snapshot.ownership.clodRadiusM && farDistance < snapshot.farShell.innerRadiusM && !clod && !far) clodFarGap++;
 
-      // Priority ownership: live wins over clod, clod wins over far. Each cell gets
-      // at most one owner, so the spill band where two rings raw-overlap is not a
-      // double-render — the higher-priority ring owns it. The invariant we gate on
-      // is: a cell inside the coverage envelope must have exactly one owner.
       const liveOwner = live;
       const clodOwner = clod && !live;
       const farOwner = far && !clod && !live;
       const ownerCount = (liveOwner ? 1 : 0) + (clodOwner ? 1 : 0) + (farOwner ? 1 : 0);
-      if (ownerCount > 1) priorityOwnerOverlap++; // 0 by construction; guards the model
+      if (ownerCount > 1) priorityOwnerOverlap++;
       if (liveOwner && clodOwner) unresolvedLiveClodOverlap++;
       if (clodOwner && farOwner) unresolvedClodFarOverlap++;
+      if (liveOwner) ownerLiveCells++;
+      if (clodOwner) ownerClodRefinementCells++;
       const inCoverageEnvelope =
         clodDistance <= snapshot.ownership.clodRadiusM ||
         (farDistance >= snapshot.farShell.innerRadiusM && farDistance <= snapshot.farShell.outerRadiusM);
@@ -177,6 +184,13 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
     priority_owner_overlap_cells: priorityOwnerOverlap,
     priority_unowned_cells: priorityUnowned,
     clod_parent_coverage_violations: parentCoverageViolations,
+    far_clipmap_owned_cells: 0,
+    far_clipmap_unowned_cells: 0,
+    far_clipmap_ownership_holes: 0,
+    far_clipmap_priority_overlap_cells: 0,
+    owner_far_clipmap_cells: 0,
+    owner_clod_refinement_cells: ownerClodRefinementCells,
+    owner_live_cells: ownerLiveCells,
   };
 }
 
