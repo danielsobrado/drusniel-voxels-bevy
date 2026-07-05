@@ -332,6 +332,7 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         bubbleColliderPages: counters["live_bubble_streamed_collider_pages"] ?? -1,
         bubbleColliderRegistrations: counters["live_bubble_collider_registrations"] ?? -1,
         streamRequired: counters["live_clod_stream_required_pages"] ?? 0,
+        streamBudget: counters["live_clod_stream_build_budget"] ?? 0,
         streamPending: counters["live_clod_stream_pending_pages"] ?? 0,
         streamInflight: counters["live_clod_stream_inflight_batches"] ?? 0,
         streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
@@ -349,7 +350,7 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
       && c.bubbleBuilding === 0
       && c.bubbleReady > 0
     );
-    const streamQuiet = c.streamRequired === 0 || (
+    const streamQuiet = c.streamRequired === 0 || c.streamBudget === 0 || (
       c.streamFailed === 0
       && c.streamCached > 0
     );
