@@ -164,9 +164,13 @@ function parseCameraConfig(raw: YamlRecord | undefined, fallback: BorderOceanCam
 
 function readRequiredCounters(value: unknown, fallback: readonly string[]): readonly string[] {
   if (value === undefined) return fallback;
-  if (!Array.isArray(value) || value.length === 0) throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters must be a non-empty string array`);
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters must be a non-empty string array`);
+  }
   const invalidIndex = value.findIndex((item) => typeof item !== "string" || item.length === 0);
-  if (invalidIndex >= 0) throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
+  if (invalidIndex >= 0) {
+    throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
+  }
   return value as string[];
 }
 
@@ -223,7 +227,11 @@ export function parseBorderOceanCamString(cam: string | null, worldCells: number
   if (!cam) return borderOceanCameraForWorld(worldCells, sceneConfig);
   const parts = cam.split(",").map(Number);
   if (parts.length >= 6 && parts.every(Number.isFinite)) {
-    return { eye: [parts[0], parts[1], parts[2]], look: [parts[3], parts[4], parts[5]], fov: parts[6] !== undefined && Number.isFinite(parts[6]) ? parts[6] : sceneConfig.camera.fov };
+    return {
+      eye: [parts[0], parts[1], parts[2]],
+      look: [parts[3], parts[4], parts[5]],
+      fov: parts[6] !== undefined && Number.isFinite(parts[6]) ? parts[6] : sceneConfig.camera.fov,
+    };
   }
   return borderOceanCameraForWorld(worldCells, sceneConfig);
 }
@@ -306,10 +314,10 @@ export function publishBorderOceanAcceptanceCounters(counters: Record<string, nu
   counters["border_ocean.shading_fog_far_m"] = input.deepOcean.shading.fogFarM;
   counters["border_ocean.shading_reflection_strength"] = input.deepOcean.shading.reflectionStrength;
   if (input.playerConfig) {
-    counters["border_ocean.player_margin_m"] = input.playerConfig.world_edge_margin_m;
-    counters["border_ocean.player_pushback_band_m"] = input.playerConfig.pushback_start_inside_world_m;
-    counters["border_ocean.player_pushback_accel"] = input.playerConfig.pushback_strength;
-    counters["border_ocean.player_soft_pushback_enabled"] = input.playerConfig.soft_pushback_enabled ? 1 : 0;
+    counters["border_ocean.player_margin_m"] = input.playerConfig.worldEdgeMargin;
+    counters["border_ocean.player_pushback_band_m"] = input.playerConfig.worldEdgePushbackBand;
+    counters["border_ocean.player_pushback_accel"] = input.playerConfig.worldEdgePushbackAcceleration;
+    counters["border_ocean.player_soft_pushback_enabled"] = input.playerConfig.worldEdgePushbackBand > 0 ? 1 : 0;
   }
   if (input.waterField) counters["border_ocean.interior_water_wet_ratio"] = sampleInteriorWaterWetRatio(input.waterField, input.worldCells);
   if (input.oceanSampler) counters["border_ocean.playable_ocean_outside_ok"] = probePlayableOceanOutside(input.oceanSampler, input.worldCells);
