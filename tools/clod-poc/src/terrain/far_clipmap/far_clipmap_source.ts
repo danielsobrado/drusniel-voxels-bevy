@@ -12,8 +12,19 @@ type FarHeightProviderWithWater = FarHeightProvider & {
   sampleWaterCoverage?: (x: number, z: number) => number;
 };
 
+type GlobalFarSummaryProvider = {
+  getHeightProvider: () => FarHeightProvider;
+};
+
 function providerWater(provider: FarHeightProvider | undefined, x: number, z: number): number {
   return (provider as FarHeightProviderWithWater | undefined)?.sampleWaterCoverage?.(x, z) ?? 0;
+}
+
+function globalFarSummaryProvider(): FarHeightProvider | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as typeof window & { __drusnielFarSummary?: GlobalFarSummaryProvider })
+    .__drusnielFarSummary
+    ?.getHeightProvider();
 }
 
 export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightProvider): FarClipmapSource {
@@ -35,6 +46,10 @@ export function createFarClipmapSourceFromProviderGetter(
     sampleBiome: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
     sampleWater: (x, z) => providerWater(getProvider(), x, z),
   };
+}
+
+export function createDefaultFarClipmapSource(fallbackHeightM = 0): FarClipmapSource {
+  return createFarClipmapSourceFromProviderGetter(globalFarSummaryProvider, fallbackHeightM);
 }
 
 export function createFarClipmapSourceFromTerrainSampler(sampler: FarTerrainSampler): FarClipmapSource {
