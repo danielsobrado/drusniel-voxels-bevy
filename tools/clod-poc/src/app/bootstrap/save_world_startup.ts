@@ -1,4 +1,5 @@
 import { emitAudio } from "../../audio/index.js";
+import { initSaveRuntime } from "../../save/save_runtime.js";
 import { loadSavedWorldFromQuery, seedOverrideFromQuery, type LoadedSavedWorld } from "../../save/save_service.js";
 
 export interface SaveWorldStartupDom {
@@ -26,6 +27,7 @@ export async function loadSavedWorldStartup(
     if (seedOverrideFromQuery(searchParams) === undefined) {
       searchParams.set("seed", String(savedWorld.manifest.seed));
     }
+    initSaveRuntime(savedWorld);
     dom.buildProgressPercent.textContent = "100%";
     dom.buildProgressBar.value = 1;
     emitAudio("project.import.success");
