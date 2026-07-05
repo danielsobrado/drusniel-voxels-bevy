@@ -1,17 +1,22 @@
 # CLOD-POC Procedural World Save And Modification Plan
 
+Rebased 2026-07-05 after code review. This revision replaces the earlier draft. The earlier
+draft invented new edit/prop/persistence systems; the codebase already contains most of them.
+This plan reuses them. If an implementation step contradicts the Locked Decisions table below,
+the table wins.
+
 ## Scope
 
 This plan is only for `tools/clod-poc`.
 
-The goal is to support a huge playable world that starts from deterministic procedural generation
-and then becomes personalized through saved changes:
+The goal is to support a huge playable world that starts from deterministic procedural
+generation and then becomes personalized through saved changes:
 
 ```text
 procedural base world
 + saved voxel deltas
 + saved prop / prefab instances
-+ saved city, road, cave, quest, and critical-path metadata
++ saved city, road, cave, and critical-path metadata
 + rebuildable derived caches
 ```
 
@@ -21,8 +26,11 @@ The core rule is:
 Do not save the whole huge world as raw voxels.
 ```
 
-A huge world should be regenerated from seed and then patched with saved deltas. Full raw voxel
-storage is only acceptable for tiny debug fixtures or explicitly baked authored areas.
+A huge world is regenerated from seed and patched with saved deltas. Full raw voxel storage is
+only acceptable for tiny debug fixtures or explicitly baked authored areas.
+
+Companion plan: `docs/plans/hybrid-streaming-terrain-architecture.md`. Its WP-3 (real
+`FarSummaryCache.markStale(bounds)`) is a hard dependency of SV-7 in this plan.
 
 ## Target Result
 
@@ -54,282 +62,79 @@ far shell geometry
 render-only caches
 ```
 
-Derived data can be cached for faster reloads, but it must always be rebuildable from the saved
-authority.
+Derived data can be cached for faster reloads, but it must always be rebuildable from the
+saved authority.
+
+## Existing Code This Plan Builds On
+
+The save layer reuses these systems. It never duplicates them.
+
+| Concern | Existing implementation |
+|---|---|
+| Brush edit ops (transient input) | `DigEdit` + `addDigEdit`/`getDigEditsSnapshot`/`replaceDigEdits` in `src/terrain/terrain_edits.ts` |
+| Per-voxel deltas (canonical) | `VoxelDelta`/`VoxelEditSnapshot` + `voxelEditStore` in `src/terrain/voxel_edits/` |
+| Density sampling with edits | `voxelEditStore.sampleDensity` via `src/terrain/terrain_density.ts` |
+| Edit dirty AABB events | `TerrainEditDirtyQueue` in `src/terrain/editing/terrain_edit_dirty_queue.ts` |
+| Live/CLOD invalidation on edit | `rebuildAfterDig` + `markEditedAncestorsStale` in `src/terrain/editing/terrain_edit_service.ts` |
+| Prop instance schema + conversion | `ProjectPropInstance` in `src/project/project_props.ts` |
+| Schema-versioned archive + validation style | `src/project/voxel_project_archive.ts` |
+| IndexedDB patterns (transactions, records) | `src/project/voxel_project_archive.ts` helpers, `src/cache/indexedDbStore.ts` |
+| Bootstrap restore-before-world-build | staged project import path in `src/app/bootstrap/clod_poc_bootstrap.ts` |
+
+## Locked Decisions (2026-07-05 Review Rebase)
+
+| # | Problem in earlier draft | Locked resolution |
+|---|---|---|
+| L1 | New `VoxelEditOperation` type created a second voxel authority parallel to `DigEdit`/`VoxelDelta`. | The saved voxel authority is `VoxelEditSnapshot` (per-voxel deltas), reused verbatim. No new op type exists. |
+| L2 | Operation-log replay is not order-independent (overlapping add/remove with strength/falloff do not commute). | Per-voxel deltas are last-write-wins by `revision`; each voxel lives in exactly one region. The `DigEdit` log is transient UX input and is not saved in v1. |
+| L3 | Loading both an op log and a delta snapshot double-applies (`replaceDigEdits` re-runs voxel transactions). | Load calls only `replaceVoxelEdits(snapshot)`. Nothing else mutates the voxel store during load. |
+| L4 | Runtime per-region streaming load was assumed; no runtime authority streaming exists. | v1 = region-keyed STORAGE, whole-save LOAD at bootstrap (same lifecycle as staged project import). Runtime streaming is out of v1. |
+| L5 | Save pipeline re-marked live chunks and CLOD pages dirty, duplicating what the edit service already does synchronously. | The invalidation bridge handles only far-summary tiles and the far shell. It never re-marks live/CLOD. |
+| L6 | Stored `regionKeys` arrays on metadata desync from geometry. | Region membership is always derived from geometry at load; never stored. |
+| L7 | Per-region metadata files added cross-region membership complexity for hundreds of small objects. | All city/road/cave/critical-path metadata is ONE world-level record per save. Only voxel deltas and props are region-partitioned. |
+| L8 | "Temp file -> rename" atomicity language does not apply to IndexedDB. | One region write = one IndexedDB transaction covering all its records + its manifest. The transaction is the atomicity mechanism. |
+| L9 | Prop id `${sceneId}:${index}:${assetId}` is unstable under insertion/deletion. | All saved ids come from `createSaveIdFactory(seed)`; legacy ids migrate to factory ids on first save. |
+| L10 | Plan listed `world_source` as owner of terrain density. | Density lives in `src/terrain/terrain_density.ts` + `src/gpu/terrain_field_core.ts`. The save layer queries those, never a parallel path. |
+| L11 | Prop examples included scatter vegetation. | GPU-scattered vegetation (grass/tree/pebble rings) is never saved as instances. Only authored placements are. |
+| L12 | `derivedCacheRevision` in region manifest duplicated the cache service's own manifests. | Removed. The region manifest carries `authorityRevision` only. |
+| L13 | `entities.json` and an entity system were referenced; none exists. | Removed from v1 entirely. |
+| L14 | YAML config "later" left constants floating. | v1 constants live in `src/save/save_config.ts` as exported consts. YAML migration is out of v1. |
+
+## Non-Goals For v1
+
+```text
+- No runtime region streaming of authority data (load is bootstrap-only).
+- No save-driven eviction of loaded voxel deltas during a session.
+- No cross-session undo history (DigEdit history is not persisted).
+- No entity system.
+- No city/road/cave GENERATION (schemas ship; producers are test fixtures or editor JSON).
+- No export/import save bundles.
+- No native filesystem storage.
+- No YAML save config.
+- No new voxel edit op types, no new replay engine, no compaction module
+  (the voxel store already applies and compacts at edit time).
+```
 
 ## Data Ownership Model
 
 ### Procedural base
 
-The procedural base defines the unmodified world.
+Owned by `src/world_source/world_source.ts`, `island_shape.ts`, `biome_region_field.ts` for
+height/biome/ocean, and by `src/terrain/terrain_density.ts` + `src/gpu/terrain_field_core.ts`
+for density. Cave entrance hints do not exist yet and are not promised by this plan.
 
-Owned by:
+### Voxel deltas (canonical terrain-change authority)
 
-```text
-tools/clod-poc/src/world_source/world_source.ts
-tools/clod-poc/src/world_source/island_shape.ts
-tools/clod-poc/src/world_source/biome_region_field.ts
-```
-
-It should provide:
-
-```text
-height
-biome/material
-water/ocean state
-canopy/forest hints
-cave entrance hints
-base terrain density
-```
-
-### Voxel deltas
-
-Voxel deltas define terrain changes on top of the procedural base.
-
-Examples:
-
-```text
-digging
-raising/lowering terrain
-flattening city foundations
-road cuts
-cave entrance edits
-terrain paint
-blocked/unblocked critical-path terrain
-```
-
-Voxel deltas are authoritative for terrain edits. They are loaded per region/chunk and replayed over
-the procedural base before live mesh generation.
+`VoxelEditSnapshot` from `getVoxelEditSnapshot()`. Deltas are integer voxel coordinates with
+density and optional material slot, last-write-wins by `revision`. Brush operations
+(`DigEdit`) convert to voxel transactions at edit time and are not part of the saved
+authority.
 
 ### Prop and prefab instances
 
-Props define authored objects that should not be stored as raw terrain voxels unless they are truly
-voxel terrain.
-
-Examples:
-
-```text
-houses
-walls
-bridges
-city props
-doors
-market stalls
-signs
-rocks/trees placed by design
-quest objects
-landmark ruins
-```
-
-Props are saved as stable instances:
-
-```text
-prefab id
-instance id
-position
-rotation
-scale
-variant/material
-state
-owner/faction tags
-critical-path flags
-```
-
-### Metadata
-
-Metadata gives meaning to terrain and props.
-
-Examples:
-
-```text
-city id
-road id
-district id
-quest area id
-safe zone id
-spawn zone id
-dungeon entrance id
-critical path id
-nav hint id
-faction ownership
-```
-
-Metadata is required. Without it, the engine can render objects but cannot understand cities, roads,
-critical paths, progression, or RPG rules.
-
-## Save File Shape
-
-Use region-based saves. Do not store one massive world file.
-
-Suggested layout:
-
-```text
-saves/<save_id>/
-  world.json
-  regions/
-    r_<rx>_<rz>/
-      region_manifest.json
-      voxel_deltas.bin
-      props.json
-      entities.json
-      roads.json
-      cities.json
-      caves.json
-      critical_paths.json
-      metadata.json
-      cache_manifest.json
-```
-
-### `world.json`
-
-Purpose:
-
-```text
-world-level seed and global save metadata
-```
-
-Fields:
-
-```json
-{
-  "schemaVersion": 1,
-  "worldId": "world_001",
-  "saveId": "save_001",
-  "seed": 1,
-  "createdAt": "2026-07-05T00:00:00.000Z",
-  "updatedAt": "2026-07-05T00:00:00.000Z",
-  "proceduralProfile": "infinite-islands-v1",
-  "regionSizeM": 512,
-  "chunkSizeM": 16,
-  "notes": "debug save"
-}
-```
-
-### `region_manifest.json`
-
-Purpose:
-
-```text
-describes which authority files exist for this region and their revisions
-```
-
-Fields:
-
-```json
-{
-  "schemaVersion": 1,
-  "regionX": 0,
-  "regionZ": 0,
-  "revision": 12,
-  "hasVoxelDeltas": true,
-  "hasProps": true,
-  "hasRoads": true,
-  "hasCities": true,
-  "hasCaves": true,
-  "hasCriticalPaths": true,
-  "derivedCacheRevision": 8
-}
-```
-
-## Voxel Delta Model
-
-Do not store full voxel chunks unless necessary. Store compact operations or sparse modified cells.
-
-### Recommended first format: operation log
-
-Start with an operation log because it is simple, testable, and good for editor/gameplay iteration.
-
-```ts
-export type VoxelEditOperationKind =
-  | "add"
-  | "remove"
-  | "paint"
-  | "flatten"
-  | "raise"
-  | "lower";
-
-export interface VoxelEditOperation {
-  id: string;
-  revision: number;
-  kind: VoxelEditOperationKind;
-  center: [number, number, number];
-  radiusM: number;
-  heightM?: number;
-  materialId?: number;
-  shape: "sphere" | "box" | "cylinder" | "splineBrush";
-  createdBy: "player" | "editor" | "system";
-  criticalPathId?: string;
-}
-```
-
-Pros:
-
-```text
-simple to inspect
-small files
-easy undo/redo
-easy editor integration
-good for critical-path edits
-```
-
-Cons:
-
-```text
-replay cost grows over time
-requires compaction later
-```
-
-### Later format: compacted chunk deltas
-
-When operation logs get too large, compact them into chunk-local sparse voxel deltas.
-
-```ts
-export interface ChunkVoxelDelta {
-  chunkKey: string;
-  baseRevision: number;
-  changedVoxels: Array<{
-    localX: number;
-    localY: number;
-    localZ: number;
-    densityDelta?: number;
-    materialId?: number;
-    flags?: number;
-  }>;
-}
-```
-
-Compaction rule:
-
-```text
-procedural base + operation log -> compacted chunk delta
-```
-
-The compacted delta becomes faster to load, but the original operation log can still be kept for
-editor history if needed.
-
-## Prop Instance Model
-
-Props and buildings should be saved as instances, not baked into terrain.
-
-```ts
-export interface SavedPropInstance {
-  id: string;
-  prefabId: string;
-  regionKey: string;
-  position: [number, number, number];
-  rotation: [number, number, number, number];
-  scale: [number, number, number];
-  variantId?: string;
-  materialOverrideId?: string;
-  state: "active" | "hidden" | "destroyed" | "disabled";
-  tags: string[];
-  ownerFactionId?: string;
-  cityId?: string;
-  roadId?: string;
-  criticalPathId?: string;
-  revision: number;
-}
-```
+`SavedPropInstance` (extension of the existing `ProjectPropInstance`, schema below). Sourced
+from the same placement-scene path the project archive uses
+(`propPlacementSceneToProjectProps` / `projectPropsToPropPlacementScene`).
 
 Rules:
 
@@ -337,391 +142,287 @@ Rules:
 - buildings are prefab instances unless destructible terrain is required
 - bridges are props unless they need voxel destruction
 - walls are props unless they must be mined/damaged as terrain
-- doors/gates are entities, not terrain
+- doors/gates are out of v1 (no entity system)
 - decorations are props
-- quest objects have stable IDs
+- quest objects have stable factory ids
+- procedural scatter vegetation is never saved as instances
 ```
 
-## City Model
+### World metadata
 
-A city is metadata plus prop instances plus terrain deltas.
+One `WorldMetadataRecord` per save (cities, districts, roads, cave entrances, cave systems,
+critical paths). Metadata gives meaning to terrain and props; without it the engine renders
+objects but cannot understand cities, roads, critical paths, or RPG rules. City terrain
+changes (foundation flattening, road cuts, harbor cuts, entrances) are voxel deltas; city
+objects are prop instances; city meaning is metadata.
 
-Do not save a city as one giant voxel object.
+## Region And Key Rules
 
 ```ts
-export interface SavedCity {
-  id: string;
-  name: string;
-  regionKeys: string[];
-  center: [number, number, number];
-  radiusM: number;
-  districtIds: string[];
-  roadIds: string[];
-  factionId?: string;
-  criticalPathIds: string[];
-  revision: number;
-}
-
-export interface SavedCityDistrict {
-  id: string;
-  cityId: string;
-  name: string;
-  bounds: SavedBounds2D;
-  tags: string[];
+// src/save/region_key.ts
+export const REGION_SIZE_M = 512;   // = 32 live chunks (16m) = 8 L0 pages (64m) = 1 L3 page (512m)
+export function regionCoord(v: number): number { return Math.floor(v / REGION_SIZE_M); }
+export function regionKeyOf(rx: number, rz: number): string { return `r_${rx}_${rz}`; }
+export function regionKeyForWorld(x: number, z: number): string {
+  return regionKeyOf(regionCoord(x), regionCoord(z));
 }
 ```
 
-City terrain uses voxel deltas for:
+Mandatory rules:
 
 ```text
-foundation flattening
-road cuts
-stairs/ramps carved into terrain
-harbor cuts
-cave/dungeon entrances
-blocked/unblocked critical terrain
+- Math.floor only. Never >>, |0, Math.trunc, or Math.round: world coordinates are floats and
+  truncation breaks negatives (-0.5 must map to region -1, not 0).
+- Half-open boundaries: x = 512 -> rx 1; x = 511.999 -> rx 0; x = -512 -> rx -1; x = -512.001 -> rx -2.
+- A VoxelDelta belongs to exactly one region: regionKeyForWorld(delta.x, delta.z); y is ignored.
+- A prop belongs to exactly one region: regionKeyForWorld(position[0], position[2]).
+- Live chunk and CLOD page keys are the existing liveChunkKey/pageKey. The save layer never
+  invents parallel chunk keys.
+- Region -> L0 page mapping for the invalidation bridge: px in [rx*8, rx*8+7], pz in [rz*8, rz*8+7].
 ```
 
-City objects use prop instances for:
+## Final v1 Schemas
 
-```text
-houses
-walls
-bridges
-towers
-markets
-docks
-lamps
-signs
-furniture
-NPC spawn markers
-```
-
-## Road And Critical Path Model
-
-Roads should be saved as splines plus optional terrain deltas.
+`schemaVersion` is `1` everywhere; bump only with a migration function. Validators follow the
+`assert*` style of `voxel_project_archive.ts` and fail loud.
 
 ```ts
-export interface SavedRoad {
-  id: string;
-  name?: string;
-  regionKeys: string[];
-  points: Array<[number, number, number]>;
-  widthM: number;
-  materialId: number;
-  roadType: "dirt" | "stone" | "bridge" | "city" | "trail";
-  connectedCityIds: string[];
-  criticalPathId?: string;
-  revision: number;
+// src/save/save_schema.ts
+export interface SaveWorldManifest {
+  schemaVersion: 1;
+  saveId: string;
+  worldId: string;
+  seed: number;
+  proceduralProfile: "infinite-islands-v1";
+  regionSizeM: 512;          // literal; validated against REGION_SIZE_M
+  chunkSizeM: 16;            // literal; validated against cfg.page.chunk_size
+  regionKeys: string[];      // index of regions with any authority data
+  createdAt: string;         // ISO-8601 UTC
+  updatedAt: string;
 }
-```
 
-Critical paths are gameplay metadata. They should be separate from the visual road or terrain edit.
-
-```ts
-export interface SavedCriticalPath {
-  id: string;
-  name: string;
-  purpose: "mainQuest" | "cityAccess" | "dungeonAccess" | "bossRoute" | "tutorial";
-  requiredRegionKeys: string[];
-  linkedRoadIds: string[];
-  linkedPropIds: string[];
-  linkedVoxelEditIds: string[];
-  mustRemainPassable: boolean;
-  revision: number;
+export interface RegionManifest {
+  schemaVersion: 1;
+  regionKey: string;         // "r_<rx>_<rz>"
+  rx: number;
+  rz: number;
+  revision: number;          // increments on every region write
+  authorityRevision: number; // max VoxelDelta.revision in this region at write time
+  voxelDeltaCount: number;
+  propCount: number;
+  updatedAt: string;
 }
-```
 
-Rules:
-
-```text
-- save road shape as spline metadata
-- save actual terrain cut/paint as voxel deltas
-- save bridge meshes as props
-- save passability rules as critical-path metadata
-- validate critical paths after edits
-```
-
-## Cave Model
-
-Caves should be voxel terrain near the player, with metadata and far-visible entrance summaries.
-
-```ts
-export interface SavedCaveEntrance {
-  id: string;
+export interface RegionVoxelDeltas {
+  schemaVersion: 1;
   regionKey: string;
-  position: [number, number, number];
-  facing: [number, number, number];
-  caveSystemId: string;
-  linkedCriticalPathId?: string;
-  farMaskRadiusM: number;
+  format: "json" | "bin1";   // "json" until SV-10; both accepted on read
+  deltas: VoxelDelta[];      // EXISTING type from terrain/voxel_edits/voxel_edit_types.ts, verbatim
+}
+
+export interface SavedPropInstance extends ProjectPropInstance { // EXISTING base, verbatim
+  regionKey: string;
+  state: "active" | "hidden" | "destroyed";
+  tags: string[];            // empty array, never undefined
+  cityId?: string;
+  roadId?: string;
+  criticalPathId?: string;
+  ownerFactionId?: string;
+}
+// id rule: ids come ONLY from createSaveIdFactory; legacy "<sceneId>:<index>:<assetId>" ids
+// migrate to factory ids on first save.
+
+export interface SavedBounds2D { minX: number; minZ: number; maxX: number; maxZ: number; }
+export interface SavedBounds3D extends SavedBounds2D { minY: number; maxY: number; }
+
+export interface WorldMetadataRecord {   // ONE record per save — not per region
+  schemaVersion: 1;
+  cities: SavedCity[];
+  districts: SavedCityDistrict[];
+  roads: SavedRoad[];
+  caveEntrances: SavedCaveEntrance[];
+  caveSystems: SavedCaveSystem[];
+  criticalPaths: SavedCriticalPath[];
   revision: number;
 }
 
+export interface SavedCity {
+  id: string; name: string;
+  center: [number, number, number]; radiusM: number;
+  districtIds: string[]; roadIds: string[]; criticalPathIds: string[];
+  factionId?: string; revision: number;
+}                                        // NO regionKeys — always derived
+export interface SavedCityDistrict { id: string; cityId: string; name: string; bounds: SavedBounds2D; tags: string[]; }
+export interface SavedRoad {
+  id: string; name?: string;
+  points: Array<[number, number, number]>; widthM: number; materialId: number;
+  roadType: "dirt" | "stone" | "bridge" | "city" | "trail";
+  connectedCityIds: string[]; criticalPathId?: string; revision: number;
+}
+export interface SavedCaveEntrance {
+  id: string; position: [number, number, number]; facing: [number, number, number];
+  caveSystemId: string; linkedCriticalPathId?: string; farMaskRadiusM: number; revision: number;
+}
 export interface SavedCaveSystem {
-  id: string;
-  regionKeys: string[];
-  entranceIds: string[];
-  proceduralSeed?: number;
-  authored: boolean;
-  criticalPathIds: string[];
+  id: string; entranceIds: string[]; proceduralSeed: number; authored: boolean;
+  criticalPathIds: string[]; revision: number;
+}
+export interface SavedCriticalPath {
+  id: string; name: string;
+  purpose: "mainQuest" | "cityAccess" | "dungeonAccess" | "bossRoute" | "tutorial";
+  points: Array<[number, number, number]>;            // validation needs geometry, not just links
+  linkedRoadIds: string[]; linkedPropIds: string[];
+  mustRemainPassable: boolean;
+  status: "valid" | "warning" | "blocked" | "dirty";  // persisted validation state
   revision: number;
 }
 ```
 
-Rules:
+Removed relative to the earlier draft: `VoxelEditOperation`, `ChunkVoxelDelta`,
+`variantId`/`materialOverrideId` on props (existing `variationId`/`flags` cover), all
+`regionKeys` fields, `requiredRegionKeys`, `linkedVoxelEditIds` (voxel deltas have no stable
+per-edit ids in v1 — critical paths link to geometry instead), `derivedCacheRevision`,
+`notes`, everything entity-related. Cave schemas ship, but no producer exists yet: they are
+populated only by test fixtures or editor JSON in v1.
+
+## Storage Layout
+
+IndexedDB database `drusniel-clod-saves`, version 1. Reuse the `requestResult` /
+`transactionDone` helper pattern from `voxel_project_archive.ts`.
 
 ```text
-- cave interiors are voxel/generated/edited near the player
-- far shell only sees cave entrance masks or dark silhouettes
-- do not project full cave interiors into heightfield/far-summary terrain
-- save cave edits as voxel deltas
-- save cave meaning as metadata
+object store "manifests":
+  key `${saveId}`                          -> SaveWorldManifest
+  key `${saveId}/${regionKey}`             -> RegionManifest
+object store "regions":
+  key `${saveId}/${regionKey}/voxel_deltas` -> RegionVoxelDeltas
+  key `${saveId}/${regionKey}/props`        -> SavedPropInstance[]
+object store "metadata":
+  key `${saveId}`                          -> WorldMetadataRecord
 ```
 
-## Load Pipeline
+Atomicity rule: one region write = one transaction covering the region's delta record, prop
+record, and its RegionManifest with `revision + 1`. Dirty flags clear only in the transaction
+success callback. There are no temp/rename steps.
 
-When a region or chunk becomes needed:
+## Load Order (Bootstrap Only, Exact)
+
+1. Parse `save=<saveId>` from the URL. Absent -> skip all remaining steps.
+2. Open `drusniel-clod-saves`; read `SaveWorldManifest`. Missing manifest -> fail-loud boot
+   error (`window.__drusnielClod.error`), never silently start fresh.
+3. Validate: `schemaVersion === 1`, `seed` equals the resolved world seed,
+   `chunkSizeM === cfg.page.chunk_size`, `regionSizeM === REGION_SIZE_M`. Any mismatch ->
+   fail-loud.
+4. For every key in `manifest.regionKeys` (sorted lexicographically): read `RegionManifest`,
+   `RegionVoxelDeltas`, and props. Validate counts against the manifest; mismatch -> fail-loud.
+5. `merged = mergeVoxelSnapshots(all region delta records)`. Regions are voxel-disjoint by
+   construction, so merge is concat with `revision = max`.
+6. `replaceVoxelEdits(merged)` — the only voxel-store mutation during load. `replaceDigEdits`
+   is never called on load.
+7. Read `WorldMetadataRecord` into the metadata store; run linkage validation (every
+   `cityId`/`roadId`/`caveSystemId`/prop link resolves). Dangling link -> fail-loud.
+8. Proceed with `runWorldBuildStartup` unchanged — the terrain field reads `voxelEditStore`
+   globally, so all meshes, pages, and summaries build already-patched. No invalidation is
+   needed at load time.
+9. After renderer startup, convert `SavedPropInstance[]` via the existing
+   `projectPropsToPropPlacementScene` and register the placement scene.
+10. Publish `save_regions_loaded`, `save_voxel_delta_count_total`,
+    `save_prop_instances_loaded`, `save_load_ms`.
+
+## Save Order (Runtime, Exact)
+
+1. Edits mark regions dirty at commit time: map each `VoxelEditResult.dirtyChunks` entry to a
+   region key; add to the dirty-region set. Prop add/remove/state-change marks the prop's
+   region dirty. Metadata change marks the metadata record dirty.
+2. Autosave tick (every `SAVE_AUTOSAVE_INTERVAL_S = 30`, and on explicit save request):
+   snapshot `getVoxelEditSnapshot()` once; `partitionVoxelSnapshot` once; enqueue dirty
+   regions.
+3. Per frame, write at most `SAVE_MAX_REGION_WRITES_PER_FRAME = 1` region, one transaction per
+   region as defined in Storage Layout.
+4. After all dirty regions flush, write `SaveWorldManifest` (updated `regionKeys`,
+   `updatedAt`) and the metadata record in one final transaction.
+5. Clear dirty flags only on transaction success; publish `save_regions_pending_write`,
+   `save_region_write_ms`.
+
+## Derived Invalidation Flow (Exact)
+
+1. Edit commit (existing, unchanged): `addDigEdit` -> `voxelEditStore.apply` ->
+   `clodWorker.rebuildAfterDig` -> `applyLod0Result` patches live meshes and CLOD ancestors
+   synchronously. The save layer never re-triggers any of this.
+2. Dirty publication (existing, unchanged): `publishDirtyEdit` enqueues an AABB event on
+   `TerrainEditDirtyQueue`.
+3. Bridge (new, `src/save/derived_invalidation_bridge.ts`), once per frame in the far-summary
+   update hook: `events = dirtyQueue.drain()`. For each event, build
+   `bounds2D = {minX, minZ, maxX, maxZ}` from `worldAabb` and call
+   `farSummaryCache.markStale(bounds2D)`. This requires hybrid-plan WP-3; until it lands, the
+   bridge asserts and counts, and the gate stays red.
+4. Far shell: if any event marked at least one tile, call
+   `infiniteFarShell.requestHeightRefresh()` once per frame (the shell's pending/snap logic
+   dedupes). Never bypass tile rebuilds — refreshing the shell against stale tiles just
+   resamples stale data.
+5. Load-time: no invalidation occurs — load happens before anything derived is built.
+6. Canopy/shadow/water proxies: out of v1; the bridge publishes
+   `save_derived_invalidations_proxies_skipped` so the gap is visible, not silent.
+
+## Critical Path Validation (v1 Semantics)
+
+After the bridge drains, budgeted at 1 path per frame:
 
 ```text
-1. Resolve region key from world position.
-2. Load world seed and procedural profile.
-3. Generate procedural base terrain for the needed chunk/page/sample.
-4. Load region manifest.
-5. Load voxel operation log and/or compacted voxel deltas.
-6. Apply voxel deltas over procedural base.
-7. Load prop instances for the region.
-8. Load metadata: cities, roads, caves, critical paths.
-9. Build live visual chunk mesh when inside live radius.
-10. Invalidate or rebuild CLOD page when needed.
-11. Invalidate or rebuild far-summary tile when needed.
-12. Render using terrain ownership: live > CLOD > far.
+1. Find critical paths whose point-list bounds overlap drained dirty bounds.
+2. Sample terrain density (src/terrain/terrain_density.ts) at 2m steps along `points`, 2m
+   above the surface. A solid sample -> status "blocked".
+3. A linked prop with state !== "active" -> status "warning".
+4. Otherwise -> status "valid". Persist status in the metadata record.
 ```
 
-## Save Pipeline
-
-When the player or editor changes the world:
-
-```text
-1. Create a stable edit ID or prop instance ID.
-2. Resolve affected region keys.
-3. Write operation to in-memory region authority.
-4. Mark affected live chunks dirty.
-5. Mark affected CLOD pages stale.
-6. Mark affected far-summary tiles stale by bounds.
-7. Mark affected critical paths dirty if the edit overlaps them.
-8. Queue save for affected region files.
-9. Flush region files under a save budget.
-10. After successful save, clear dirty-save flags.
-```
-
-Save must be atomic at region level:
-
-```text
-write temp file -> validate -> rename/swap manifest revision
-```
-
-If browser storage is used first, emulate atomicity with a manifest revision and complete/incomplete
-write markers.
-
-## Derived Cache Invalidation
-
-Derived caches are not authority. They are rebuildable.
-
-Affected derived layers:
-
-```text
-live chunk mesh
-live collision experiment
-CLOD page mesh
-FarSummaryCache tile
-InfiniteFarShell height/color rebuild
-canopy proxy
-shadow proxy
-water/coast summary
-```
-
-Invalidation order:
-
-```text
-voxel/prop authority changes
--> live chunks dirty
--> CLOD pages stale
--> far-summary tiles stale
--> far shell requests refresh
--> proxies request refresh
-```
-
-Required bounds helpers:
-
-```ts
-export interface SavedBounds2D {
-  minX: number;
-  minZ: number;
-  maxX: number;
-  maxZ: number;
-}
-
-export interface SavedBounds3D extends SavedBounds2D {
-  minY: number;
-  maxY: number;
-}
-```
-
-`FarSummaryCache.markStale(bounds)` must become real before terrain edits are considered reliable.
-A no-op bounds parameter is not enough.
-
-## Proposed clod-poc Modules
-
-```text
-tools/clod-poc/src/save/
-  save_schema.ts
-  save_paths.ts
-  save_manifest.ts
-  region_key.ts
-  region_store.ts
-  region_io.ts
-  atomic_region_write.ts
-  save_errors.ts
-  save_stats.ts
-  tests/
-
- tools/clod-poc/src/save/voxel/
-  voxel_edit_operation.ts
-  voxel_delta_apply.ts
-  voxel_delta_compaction.ts
-  voxel_delta_bounds.ts
-  voxel_delta_serialization.ts
-  tests/
-
- tools/clod-poc/src/save/props/
-  prop_instance_schema.ts
-  prop_instance_store.ts
-  prop_instance_query.ts
-  prop_instance_serialization.ts
-  tests/
-
- tools/clod-poc/src/save/world_metadata/
-  city_schema.ts
-  road_schema.ts
-  cave_schema.ts
-  critical_path_schema.ts
-  metadata_store.ts
-  metadata_query.ts
-  tests/
-
- tools/clod-poc/src/gameplay/terrain_queries.ts
- tools/clod-poc/src/gameplay/world_authority_queries.ts
-```
-
-Keep files small. Split serialization, validation, storage, and queries.
+What this proves: terrain is not solid at sampled points. What it does NOT prove:
+traversability (cliffs, water, and gaps all pass). Full navigation is explicitly out of v1.
 
 ## Configuration
 
-Add YAML config later, not hardcoded values in runtime logic.
+```ts
+// src/save/save_config.ts — v1 constants; YAML migration is out of v1 (L14)
+export const SAVE_AUTOSAVE_INTERVAL_S = 30;
+export const SAVE_MAX_REGION_WRITES_PER_FRAME = 1;
+export const SAVE_VOXEL_DELTA_WARN_TOTAL = 250_000;  // warn counter threshold, not a hard cap
+```
 
-Suggested file:
+## Module Map
+
+New files:
 
 ```text
-tools/clod-poc/config/save_world.yaml
+src/save/save_schema.ts                    # schemas above + assert* validators
+src/save/save_ids.ts                       # createSaveIdFactory(seed): () => string ("p_000001_ab12")
+src/save/save_config.ts                    # constants above
+src/save/region_key.ts                     # key rules above, no deps
+src/save/voxel_partition.ts                # partitionVoxelSnapshot / merge helpers
+src/save/region_store.ts                   # in-memory SaveWorldStore
+src/save/save_db.ts                        # IndexedDB "drusniel-clod-saves" v1
+src/save/save_service.ts                   # loadSavedWorld, saveDirtyRegions, markRegionDirtyFromDirtyChunks
+src/save/derived_invalidation_bridge.ts    # invalidation flow step 3-4
+src/save/save_stats.ts                     # counters below
+src/save/world_metadata/metadata_schema.ts
+src/save/world_metadata/metadata_store.ts  # world-level store + bounds/id queries + linkage validation
+src/save/world_metadata/critical_path_validation.ts
+tools/save-roundtrip-acceptance.ts         # acceptance gates below (Playwright, mirrors infinite-islands-acceptance.ts)
 ```
 
-Suggested content:
-
-```yaml
-save_world:
-  enabled: true
-  region_size_m: 512
-  chunk_size_m: 16
-  autosave:
-    enabled: true
-    interval_seconds: 30
-    max_region_writes_per_frame: 1
-  voxel_deltas:
-    format: operation_log
-    compact_after_operations_per_region: 5000
-    max_replay_operations_per_chunk: 256
-  props:
-    max_instances_per_region_warning: 5000
-  critical_paths:
-    validate_after_terrain_edits: true
-  caches:
-    save_derived_caches: false
-    rebuild_derived_caches_on_load: true
-```
-
-## Browser Storage First Step
-
-For clod-poc, start simple:
+Changes to existing files:
 
 ```text
-first: in-memory save/load for tests
-second: IndexedDB-backed region store
-third: downloadable/importable save bundle
-later: filesystem/native storage if needed
+src/terrain/terrain_edits.ts               # export mergeVoxelSnapshots(parts): VoxelEditSnapshot
+src/app/bootstrap/clod_poc_bootstrap.ts    # save=<saveId> load before runWorldBuildStartup; bridge + autosave registration
+src/terrain/editing/terrain_edit_service.ts # after publishDirtyEdit: saveService.markRegionDirtyFromDirtyChunks(...)
+src/phase0/long_view_frame_diagnostics.ts  # publish save_* counters when a save is active
 ```
 
-Do not start with complex binary persistence before the authority model is proven.
+Explicitly NOT created (earlier draft, now superseded): `save/voxel/voxel_edit_operation.ts`,
+`voxel_delta_apply.ts`, `voxel_delta_compaction.ts`, a new prop schema module, an entities
+module, `atomic_region_write.ts`.
 
-Recommended first implementation:
-
-```text
-RegionStore in memory
-JSON serialization for metadata and props
-JSON operation log for voxel edits
-binary compacted voxel deltas later
-```
-
-## Critical Path Validation
-
-Critical paths must not silently break.
-
-After terrain or prop edits:
-
-```text
-1. Find overlapping critical paths by bounds.
-2. Recompute simple passability samples along the path.
-3. Check required linked props still exist and are active.
-4. Check required cave/city/road entrances still have terrain access.
-5. Mark path valid/warning/blocked.
-6. Expose debug counters.
-```
-
-Counters:
-
-```text
-critical_paths_total
-critical_paths_dirty
-critical_paths_valid
-critical_paths_blocked
-critical_path_validation_ms
-```
-
-Start with simple sampled validation. Do not build full navigation yet.
-
-## Tests
-
-Required tests:
-
-```text
-save_region_key_is_stable_for_negative_coordinates
-save_world_manifest_roundtrips
-voxel_edit_operation_roundtrips
-voxel_delta_replay_is_deterministic
-voxel_delta_bounds_cover_edit_shape
-prop_instance_roundtrips_with_stable_id
-city_metadata_roundtrips
-road_spline_roundtrips
-critical_path_links_roundtrip
-region_store_loads_procedural_base_then_applies_deltas
-edited_region_marks_live_clod_far_dirty
-far_summary_mark_stale_by_bounds_marks_expected_tiles
-critical_path_overlap_detects_blocking_edit
-```
-
-## Metrics
-
-Expose these counters during save/world-authority test scenes:
+## Counters
 
 ```text
 save_regions_loaded
@@ -729,147 +430,171 @@ save_regions_dirty
 save_regions_pending_write
 save_region_write_ms
 save_region_read_ms
-save_voxel_edit_operations
-save_voxel_compacted_chunks
+save_load_ms
+save_last_autosave_frame
+save_voxel_delta_count_total
 save_prop_instances_loaded
 save_city_count
 save_road_count
 save_cave_entrance_count
 save_critical_path_count
-save_derived_invalidations_live_chunks
-save_derived_invalidations_clod_pages
+save_schema_validation_failures
+save_roundtrip_voxel_mismatch
+save_roundtrip_prop_mismatch
 save_derived_invalidations_far_tiles
+save_derived_invalidations_proxies_skipped
+critical_paths_total
+critical_paths_dirty
+critical_paths_valid
+critical_paths_blocked
+critical_path_validation_ms
 ```
 
-## Implementation Order
+Dropped from the earlier draft: `save_voxel_edit_operations`, `save_voxel_compacted_chunks`
+(no op authority), `save_derived_invalidations_live_chunks/clod_pages` (live/CLOD
+invalidation is not the save layer's job; counting it there invites re-triggering it).
 
-### Phase 1: Schema and in-memory authority
-
-Goal:
+## Tests
 
 ```text
-save data can be represented, validated, and queried without file I/O
+src/save/__tests__/region_key.test.ts
+  region_key_floor_semantics_for_negative_coordinates      (-0.5, -512, -512.001, 511.999, 512)
+  region_key_matches_l3_page_grid_alignment
+src/save/__tests__/voxel_partition.test.ts
+  partition_assigns_each_delta_to_exactly_one_region
+  partition_then_merge_roundtrips_snapshot_bytes_equal
+  merge_revision_is_max_of_parts
+src/save/__tests__/save_schema.test.ts
+  world_manifest_roundtrips_and_rejects_wrong_chunk_size
+  region_manifest_rejects_count_mismatch
+  prop_instance_roundtrips_with_factory_id
+  metadata_record_rejects_dangling_city_road_links
+src/save/__tests__/save_db.test.ts                          (fake-indexeddb, same harness as cache tests)
+  region_write_is_single_transaction_and_survives_reopen
+  interrupted_write_leaves_previous_revision_intact
+  autosave_budget_writes_at_most_one_region_per_tick
+src/save/__tests__/save_service.test.ts
+  load_calls_replaceVoxelEdits_exactly_once_and_never_replaceDigEdits
+  dirty_region_tracking_from_dirty_chunks_marks_expected_regions
+  edit_after_save_marks_only_touched_region_dirty
+src/save/__tests__/derived_invalidation_bridge.test.ts
+  edit_aabb_marks_expected_far_summary_tiles_stale          (depends on hybrid-plan WP-3)
+  bridge_requests_shell_refresh_once_per_frame_max
+  bridge_never_retriggers_live_or_clod_rebuilds
+src/save/world_metadata/__tests__/critical_path_validation.test.ts
+  blocking_edit_over_path_sets_status_blocked
+  reverting_edit_restores_status_valid
+  validation_samples_density_along_points_at_2m_steps
+src/save/__tests__/save_ids.test.ts
+  id_factory_is_deterministic_per_seed_and_collision_free_for_1e5
 ```
 
-Tasks:
+## Acceptance Gates
 
-- [ ] Add schema types for world manifest, region manifest, voxel edit operations, prop instances, cities, roads, caves, and critical paths.
-- [ ] Add stable region key calculation for positive and negative coordinates.
-- [ ] Add in-memory `RegionStore`.
-- [ ] Add roundtrip tests for all schemas.
-
-Exit gate:
+`tools/save-roundtrip-acceptance.ts`, npm script `save:accept`, deterministic URL
+`?scene=infinite-islands&seed=1&save=qa-roundtrip&acceptance=1`:
 
 ```text
-all authority data roundtrips in tests with stable IDs and revisions
+1. Session A: boot fresh, run 8 scripted edits (reuse the long_view_edit_stress scripted-edit
+   mechanism) + place 4 props, trigger save, wait save_regions_pending_write == 0.
+2. Session B: reload the same URL. Gates:
+   - save_schema_validation_failures == 0
+   - save_regions_loaded and save_voxel_delta_count_total equal across sessions
+   - height probe at each edit center: |sessionB - sessionA| == 0 (existing pose/stats hooks)
+   - save_roundtrip_prop_mismatch == 0 (ids, positions, states equal)
+   - far tiles over edited bounds reach ready after convergence with
+     far_summary_tiles_stale == 0 and the hybrid plan's split fallback counters == 0
+   - screenshot at a fixed pose over an edited area passes image sanity; stored as artifact
+3. Critical-path scene: author one path + one blocking edit via fixture ->
+   critical_paths_blocked == 1; revert -> == 0.
+4. frame_ms gates do NOT apply to these runs (coverage runs, per the hybrid plan's rule-set
+   split).
 ```
 
-### Phase 2: Voxel delta replay
+## Deterministic Backlog (Execute Strictly In Order)
 
-Goal:
+Each step ends with `rtk npm --prefix tools/clod-poc run typecheck`,
+`npm --prefix tools/clod-poc test`, and `npm --prefix tools/clod-poc run build` green
+(vitest/vite never under rtk). No step leaves a design decision open.
 
-```text
-procedural base terrain can be patched by saved terrain edits
-```
+### SV-1: Keys, ids, schemas
 
-Tasks:
+Create `save/region_key.ts` (rules above, verbatim), `save/save_ids.ts`, `save/save_config.ts`,
+`save/save_schema.ts` (schemas above, verbatim, with `assert*` validators in the
+`voxel_project_archive.ts` style). Tests: `region_key.test.ts`, `save_schema.test.ts`,
+`save_ids.test.ts`.
 
-- [ ] Add voxel edit operation replay over a generated chunk/sample field.
-- [ ] Add edit bounds calculation.
-- [ ] Add deterministic replay tests.
-- [ ] Add operation-log compaction design but do not implement compaction yet.
+Exit: all listed tests for these files green.
 
-Exit gate:
+### SV-2: Partition/merge over the existing store
 
-```text
-procedural chunk + saved operation log produces deterministic modified terrain
-```
+Create `save/voxel_partition.ts`; add `mergeVoxelSnapshots` to `terrain_edits.ts`. No new
+apply/replay code anywhere. Tests: `voxel_partition.test.ts`.
 
-### Phase 3: Prop and metadata loading
+Exit: partition -> merge byte-equal round trip.
 
-Goal:
+### SV-3: In-memory store + IndexedDB
 
-```text
-saved cities, roads, props, caves, and critical paths can be loaded by region
-```
+Create `save/region_store.ts`, `save/save_db.ts` (layout above; one transaction per region
+write). Tests: `save_db.test.ts` with fake-indexeddb.
 
-Tasks:
+Exit: interrupted-write test proves the previous revision stays intact.
 
-- [ ] Add prop instance query by region and bounds.
-- [ ] Add city/road/cave/critical-path metadata query by region and bounds.
-- [ ] Add stable linkage validation between metadata and prop/edit IDs.
-- [ ] Add debug counters.
+### SV-4: Bootstrap load + autosave
 
-Exit gate:
+Create `save/save_service.ts`; wire `clod_poc_bootstrap.ts` per Load Order (load before
+`runWorldBuildStartup`, only `replaceVoxelEdits`); wire dirty-region tracking into
+`terrain_edit_service.ts` after `publishDirtyEdit`; autosave per Save Order. Publish counters.
+Tests: `save_service.test.ts`.
 
-```text
-region query returns terrain edits, props, and metadata needed for a city/road/cave area
-```
+Exit: unit tests green; manual dev-server check that `?save=x` with no stored save fails loud.
 
-### Phase 4: Derived invalidation
+### SV-5: Props
 
-Goal:
+Extend `SavedPropInstance` per schema; source instances from the same placement-scene path the
+project archive uses; migrate legacy ids to factory ids on first save; exclude scatter
+vegetation. Tests: prop round-trip + id migration.
 
-```text
-saved changes correctly invalidate live chunks, CLOD pages, and far-summary tiles
-```
+Exit: props reload into the placement scene with equal ids/positions/states.
 
-Tasks:
+### SV-6: World metadata
 
-- [ ] Add dirty bounds events from voxel edit operations.
-- [ ] Map dirty bounds to live chunk keys.
-- [ ] Map dirty bounds to CLOD page keys.
-- [ ] Implement real `FarSummaryCache.markStale(bounds)`.
-- [ ] Request `InfiniteFarShell` refresh when far-summary tiles change.
+Create `world_metadata/metadata_schema.ts`, `metadata_store.ts` (single world-level record,
+bounds/id queries, linkage validation, region membership derived). Tests: linkage + query
+tests.
 
-Exit gate:
+Exit: dangling links fail loud.
 
-```text
-one saved terrain edit marks exactly the expected live/CLOD/far derived data stale
-```
+### SV-7: Derived invalidation bridge
 
-### Phase 5: Region persistence
+BLOCKED until hybrid-plan WP-3 (`markStale(bounds)`) is merged; do not start before. Create
+`save/derived_invalidation_bridge.ts` per the invalidation flow; register in bootstrap.
+Tests: `derived_invalidation_bridge.test.ts`.
 
-Goal:
+Exit: one edit stales exactly the expected far tiles, triggers at most one shell refresh per
+frame, and never re-marks live/CLOD.
 
-```text
-modified regions can be saved and loaded again
-```
+### SV-8: Critical-path validation
 
-Tasks:
+Create `world_metadata/critical_path_validation.ts` per the v1 semantics above; runs after
+bridge drain, budgeted 1 path/frame; publish counters. Tests per the test list.
 
-- [ ] Add JSON region serialization for manifests, props, cities, roads, caves, critical paths, and voxel operation logs.
-- [ ] Add in-memory persistence tests.
-- [ ] Add IndexedDB region store.
-- [ ] Add save bundle export/import later.
-- [ ] Add atomic write/revision semantics.
+Exit: block/revert test transitions blocked -> valid.
 
-Exit gate:
+### SV-9: Browser round-trip acceptance
 
-```text
-edit terrain + place props + save + reload reproduces the same region authority
-```
+Create `tools/save-roundtrip-acceptance.ts` and npm script `save:accept` per Acceptance Gates.
 
-### Phase 6: Critical path validation
+Exit: two-session round trip passes all gates on the dev server.
 
-Goal:
+### SV-10: Binary delta records (storage only)
 
-```text
-critical routes can be protected from accidental breakage
-```
+Replace the JSON delta payload with `Int32Array` (x,y,z) + `Float32Array` (density) +
+`Uint8Array` (materialSlot) inside the same record shape the cache store uses for
+`Uint8Array` payloads. `schemaVersion` stays 1; `format` field written as `"bin1"`; both
+`"json"` and `"bin1"` accepted on read.
 
-Tasks:
-
-- [ ] Add critical path bounds and linked object lookup.
-- [ ] Add sampled passability validation along road/path splines.
-- [ ] Add warnings for blocked paths.
-- [ ] Add counters and tests.
-
-Exit gate:
-
-```text
-blocking a critical path produces a deterministic validation warning
-```
+Exit: byte-level round trip + size assertion <= 25% of JSON for a 10k-delta fixture.
 
 ## Done Criteria
 
@@ -877,27 +602,32 @@ This plan is done when:
 
 ```text
 1. A world seed creates the procedural base.
-2. Voxel edits save as deltas or operations, not full-world raw voxels.
-3. Props and buildings save as stable prefab instances.
-4. Cities, roads, caves, and critical paths save as metadata.
-5. Loading a region regenerates procedural terrain, applies voxel deltas, then loads props and metadata.
-6. Edited regions invalidate live meshes, CLOD pages, far-summary tiles, and far-shell refreshes.
-7. Critical path metadata can detect blocking edits.
-8. Save/load roundtrip tests prove deterministic behavior.
-9. Derived render caches remain rebuildable and are not the gameplay authority.
+2. Voxel edits persist as the existing VoxelEditSnapshot deltas, region-partitioned;
+   no new edit representation exists anywhere.
+3. Props and buildings persist as SavedPropInstance extensions of ProjectPropInstance with
+   factory ids; scatter vegetation is never saved.
+4. Cities, roads, caves, and critical paths persist as one world-level metadata record with
+   derived region membership.
+5. Loading at bootstrap replays deltas via replaceVoxelEdits before world build; nothing
+   derived needs invalidation at load.
+6. Runtime edits invalidate far-summary tiles by bounds and request far-shell refresh through
+   the bridge; live/CLOD invalidation stays with the edit service.
+7. Critical-path metadata detects blocking edits via density sampling, with its limits stated.
+8. The two-session browser round trip passes all acceptance gates.
+9. Derived render caches remain rebuildable and are never the gameplay authority.
 ```
 
-## Blunt Risk Assessment
+## False-Confidence Guards
 
-The main risk is saving too much raw data.
-
-The second risk is saving only visuals and forgetting gameplay metadata.
-
-The third risk is allowing terrain edits to update live chunks but not invalidate CLOD/far-summary
-layers, causing distant views to lie.
-
-The scalable solution is:
+Reintroducing any of these is a regression against this plan:
 
 ```text
-procedural base + saved deltas + saved props + saved metadata + rebuildable caches
+- A second voxel edit representation or replay engine ("deterministic replay" tests that the
+  renderer never uses).
+- Round-trip tests for metadata no system produces or consumes, presented as feature proof.
+- Multi-record region writes outside a single IndexedDB transaction.
+- Save-layer code that re-marks live chunks or CLOD pages dirty.
+- Stored region-membership arrays on metadata.
+- Critical-path "passability" claims beyond sampled-density semantics.
+- Op-log persistence as authority (order-dependence) instead of per-voxel deltas.
 ```
