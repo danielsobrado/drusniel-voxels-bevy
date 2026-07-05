@@ -123,6 +123,10 @@ fn deep_ocean_shade(
   shading_params: vec4<f32>,
   fog_params: vec4<f32>,
   foam_value: f32,
+  sky_zenith: vec3<f32>,
+  sss_color: vec3<f32>,
+  detail_params: vec4<f32>,
+  horizon_blend: vec2<f32>,
   transition_primary: vec4<f32>,
   transition_secondary: vec4<f32>,
 ) -> vec4<f32> {
@@ -138,11 +142,11 @@ fn deep_ocean_shade(
   let coast_noise = transition_secondary.z;
   let near_shore = transition_secondary.w;
 
-  let detail_fade = 1.0 - smoothstep(200.0, 900.0, camera_distance);
+  let detail_fade = 1.0 - smoothstep(detail_params.y, detail_params.z, camera_distance);
   let uv = world_position.xz * 0.14;
   let h = dow_fbm3(uv);
-  let detail = vec2<f32>(dow_fbm3(uv + vec2<f32>(0.35, 0.0)) - h, dow_fbm3(uv + vec2<f32>(0.0, 0.35)) - h) * detail_fade;
-  let normal = normalize(vec3<f32>(normal_value.x - detail.x * 0.25, normal_value.y, normal_value.z - detail.y * 0.25));
+  let detail = vec2<f32>(dow_fbm3(uv + vec2<f32>(0.35, 0.0)) - h, dow_fbm3(uv + vec2<f32>(0.0, 0.35)) - h) * detail_fade * detail_params.x;
+  let normal = normalize(vec3<f32>(normal_value.x - detail.x, normal_value.y, normal_value.z - detail.y));
   let view_direction = normalize(camera_position - world_position);
   let sun = normalize(sun_direction);
   let fresnel = pow(1.0 - max(dot(view_direction, normal), 0.0), max(shading_params.x, 0.001)) * shading_params.y;
@@ -151,19 +155,20 @@ fn deep_ocean_shade(
   color *= 1.0 - cliff * near_shore * 0.22;
   color *= 1.0 - rocky * near_shore * (0.08 + coast_noise * 0.08);
   color *= 1.0 - cove * near_shore * 0.04;
-  let reflected_sky = mix(fog_color, vec3<f32>(0.16, 0.37, 0.62), smoothstep(0.0, 0.65, max(reflect(-view_direction, normal).y, 0.0)));
+  let reflected_sky = mix(fog_color, sky_zenith, smoothstep(0.0, 0.65, max(reflect(-view_direction, normal).y, 0.0)));
   color = mix(color, reflected_sky, clamp(fresnel * shading_params.z, 0.0, 1.0));
 
   let half_direction = normalize(sun + view_direction);
   let roughness = max(fog_params.w, 0.01);
   let sun_specular = pow(max(dot(normal, half_direction), 0.0), mix(180.0, 18.0, roughness));
   color += vec3<f32>(sun_specular * (0.35 + shading_params.z * 0.65));
+  color += sss_color * detail_params.w * pow(max(dot(view_direction, -sun), 0.0), 4.0) * (0.25 + foam_value * 0.5);
   let cliff_spray_glow = cliff * near_shore * smoothstep(0.62, 0.88, coast_noise) * 0.35;
   color = mix(color, foam_color, clamp(foam_value + cliff_spray_glow, 0.0, 1.0));
 
   let fog_t = clamp((camera_distance - fog_params.x) / max(fog_params.y - fog_params.x, 1.0), 0.0, 1.0);
   var fog_amount = 1.0 - exp(-max(fog_params.z, 0.0) * fog_t * fog_t * 3.0);
-  fog_amount = max(fog_amount, smoothstep(fog_params.y * 1.55, fog_params.y * 2.0, camera_distance));
+  fog_amount = max(fog_amount, smoothstep(horizon_blend.x, horizon_blend.y, camera_distance));
   color = mix(color, fog_color, clamp(fog_amount, 0.0, 1.0));
   return vec4<f32>(color, border_alpha * level_alpha);
 }
