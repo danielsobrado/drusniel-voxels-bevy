@@ -39,6 +39,15 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["far_clipmap_ready_tiles"] = 5;
   values["far_clipmap_pending_tiles"] = 0;
   values["far_clipmap_rebuilt_this_frame"] = 0;
+  values["far_clipmap_source_ready"] = 1;
+  values["far_clipmap_build_ms"] = 0;
+  values["far_clipmap_build_ms_total"] = 1;
+  values["far_clipmap_vertices_built_this_frame"] = 0;
+  values["far_clipmap_triangles_built_this_frame"] = 0;
+  values["far_clipmap_fallback_samples_this_frame"] = 0;
+  values["far_clipmap_fallback_samples_total"] = 0;
+  values["far_clipmap_exception_samples_this_frame"] = 0;
+  values["far_clipmap_exception_samples_total"] = 0;
   values["far_clipmap_inner_radius_m"] = 384;
   values["far_clipmap_outer_radius_m"] = 4096;
   values["far_clipmap_gpu_owned_cells"] = 5;
@@ -97,6 +106,13 @@ describe("infinite islands threshold validation", () => {
       far_clipmap_pending_tiles: 1,
       far_clipmap_ownership_holes: 1,
     })).passed).toBe(false);
+  });
+
+  it("fails when far clipmap source or build diagnostics are bad", () => {
+    expect(evaluateThresholds(validCounters({ far_clipmap_source_ready: 0 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ far_clipmap_build_ms: 6.1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ far_clipmap_fallback_samples_total: 1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ far_clipmap_exception_samples_total: 1 })).passed).toBe(false);
   });
 
   it("fails when required streamed roots never become ready residents", () => {
