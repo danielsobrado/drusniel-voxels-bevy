@@ -494,13 +494,10 @@ export function runFrameLoopStartup(
       getFarShellRadiusFactor: () => state.farShellRadiusFactor,
       getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
       getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
+      getFarClipmapOwnershipSnapshot: () => farClipmapController?.ownershipSnapshot(),
     },
     farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
-          if (farClipmapController) {
-            const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position));
-            if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats);
-          }
           if (streamingScene) {
             timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z));
           }
@@ -509,6 +506,10 @@ export function runFrameLoopStartup(
             syncSunLightCounters();
           });
           input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
+          if (farClipmapController) {
+            const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position));
+            if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats);
+          }
           timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay());
         } }
       : undefined,
