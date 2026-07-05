@@ -26,7 +26,9 @@ describe("deep ocean mesh", () => {
     for (let vertex = 0; vertex < positions.count; vertex += 1) {
       quadrants.add(`${Math.sign(positions.getX(vertex))},${Math.sign(positions.getZ(vertex))}`);
     }
-    expect(quadrants).toEqual(expect.objectContaining(new Set(["-1,-1", "1,-1", "-1,1", "1,1"])));
+    for (const quadrant of ["-1,-1", "1,-1", "-1,1", "1,1"]) {
+      expect(quadrants.has(quadrant)).toBe(true);
+    }
   });
 });
 
@@ -96,6 +98,9 @@ describe("DeepOcean", () => {
     expect(DEEP_OCEAN_WGSL).toContain("fog_amount");
     expect(DEEP_OCEAN_WGSL).toContain("reef_line");
     expect(DEEP_OCEAN_WGSL).toContain("cliff_spray");
+    expect(DEEP_OCEAN_WGSL).toContain("sky_zenith");
+    expect(DEEP_OCEAN_WGSL).toContain("detail_params");
+    expect(DEEP_OCEAN_WGSL).toContain("horizon_blend");
   });
 });
 
