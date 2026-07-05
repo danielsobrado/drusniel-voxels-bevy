@@ -48,6 +48,10 @@ export function registerSaveInvalidationTarget(target: SaveInvalidationTarget): 
   targets.add(target);
 }
 
+export function unregisterSaveInvalidationTarget(target: SaveInvalidationTarget): void {
+  targets.delete(target);
+}
+
 export function clearSaveInvalidationTargets(): void {
   targets.clear();
 }
