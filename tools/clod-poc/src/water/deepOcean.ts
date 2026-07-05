@@ -11,11 +11,7 @@ import {
 import type { BorderCoastOceanConfig } from "../config/borderCoastOceanConfig.js";
 import deepOceanWgsl from "../shaders/deepOcean.wgsl?raw";
 import { extractWgslFunction } from "../shaders/wgslFunction.js";
-import {
-  buildDeepOceanMeshes,
-  type DeepOceanGridMesh,
-  type DeepOceanMeshSet,
-} from "./deepOceanMesh.js";
+import { buildDeepOceanMeshes, type DeepOceanGridMesh, type DeepOceanMeshSet } from "./deepOceanMesh.js";
 import { createCoastOceanTransitionGpu } from "./coastOceanTransition.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,6 +27,7 @@ export interface DeepOceanOptions {
 
 export interface DeepOceanStats {
   nearTriangles: number;
+  midTriangles: number;
   farTriangles: number;
   totalTriangles: number;
   snapUpdates: number;
@@ -43,20 +40,19 @@ interface OceanLevelHandle {
   mesh: THREE.Mesh<THREE.BufferGeometry, MeshBasicNodeMaterial>;
   setTime(timeSeconds: number): void;
   setSnapOrigin(x: number, z: number): void;
+  setHorizonColor(color: THREE.Color): void;
   updateLook(heightScale: number, choppiness: number, foamIntensity: number, fogDensity: number): void;
 }
 
+const dowHash21 = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "dow_hash21"));
+const dowNoise2 = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "dow_noise2"), [dowHash21] as any);
+const dowFbm3 = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "dow_fbm3"), [dowNoise2] as any);
 const oceanWave = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "ocean_wave"));
-const oceanWaveSample = wgslFn(
-  extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_wave_sample"),
-  [oceanWave] as any,
-);
-const oceanOutsideDistance = wgslFn(
-  extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_outside_distance"),
-);
+const oceanWaveSample = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_wave_sample"), [oceanWave] as any);
+const oceanOutsideDistance = wgslFn(extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_outside_distance"));
 const oceanShade = wgslFn(
   extractWgslFunction(DEEP_OCEAN_WGSL, "deep_ocean_shade"),
-  [oceanOutsideDistance] as any,
+  [oceanOutsideDistance, dowFbm3] as any,
 );
 
 export class DeepOcean {
@@ -79,8 +75,9 @@ export class DeepOcean {
     this.object.userData["collisionEnabled"] = false;
     this.object.userData["waveEvaluation"] = "gpu-wgsl";
     this.levels = [
-      createOceanLevel(grids.near, options, 0),
-      createOceanLevel(grids.far, options, 1),
+      createOceanLevel(grids.near, options, 0, 9),
+      createOceanLevel(grids.mid, options, 1, 8),
+      createOceanLevel(grids.far, options, 2, 7),
     ];
     for (const level of this.levels) this.object.add(level.mesh);
   }
@@ -102,11 +99,13 @@ export class DeepOcean {
 
   stats(): DeepOceanStats {
     const nearTriangles = this.levels[0].grid.triangleCount;
-    const farTriangles = this.levels[1].grid.triangleCount;
+    const midTriangles = this.levels[1].grid.triangleCount;
+    const farTriangles = this.levels[2].grid.triangleCount;
     return {
       nearTriangles,
+      midTriangles,
       farTriangles,
-      totalTriangles: nearTriangles + farTriangles,
+      totalTriangles: nearTriangles + midTriangles + farTriangles,
       snapUpdates: this.snapUpdates,
       drawCalls: this.object.visible ? this.levels.length : 0,
       shaderTimeMs: this.shaderTimeMs,
@@ -117,16 +116,16 @@ export class DeepOcean {
     this.object.visible = enabled;
   }
 
+  setHorizonColor(color: THREE.Color): void {
+    for (const level of this.levels) level.setHorizonColor(color);
+  }
+
   updateLook(heightScale: number, choppiness: number, foamIntensity: number, fogDensity: number): void {
-    for (const level of this.levels) {
-      level.updateLook(heightScale, choppiness, foamIntensity, fogDensity);
-    }
+    for (const level of this.levels) level.updateLook(heightScale, choppiness, foamIntensity, fogDensity);
   }
 
   setShaderTimeMs(shaderTimeMs: number | null): void {
-    this.shaderTimeMs = shaderTimeMs !== null && Number.isFinite(shaderTimeMs)
-      ? Math.max(0, shaderTimeMs)
-      : null;
+    this.shaderTimeMs = shaderTimeMs !== null && Number.isFinite(shaderTimeMs) ? Math.max(0, shaderTimeMs) : null;
   }
 
   dispose(): void {
@@ -138,11 +137,7 @@ export class DeepOcean {
   }
 }
 
-function createOceanLevel(
-  grid: DeepOceanGridMesh,
-  options: DeepOceanOptions,
-  levelId: number,
-): OceanLevelHandle {
+function createOceanLevel(grid: DeepOceanGridMesh, options: DeepOceanOptions, levelId: number, renderOrder: number): OceanLevelHandle {
   const ocean = options.config.deep_ocean;
   const wave = ocean.wave;
   const shading = ocean.shading;
@@ -150,64 +145,28 @@ function createOceanLevel(
   const uTime = uniform(0);
   const uSnapOrigin = uniform(new THREE.Vector2());
   const uWaterLevel = uniform(options.config.world.water_level);
-  const uBounds = uniform(new THREE.Vector4(
-    bounds.min_x,
-    bounds.max_x,
-    bounds.min_z,
-    bounds.max_z,
-  ));
+  const uBounds = uniform(new THREE.Vector4(bounds.min_x, bounds.max_x, bounds.min_z, bounds.max_z));
   const windRadians = wave.wind_direction_deg * Math.PI / 180;
   const uWind = uniform(new THREE.Vector2(Math.cos(windRadians), Math.sin(windRadians)));
-  const uWave = uniform(new THREE.Vector4(
-    wave.wind_speed,
-    wave.height_scale,
-    wave.choppiness,
-    levelId,
-  ));
-  const uPatch = uniform(new THREE.Vector4(
-    wave.coarse_patch_m,
-    wave.fine_patch_m,
-    wave.foam_threshold,
-    wave.foam_power,
-  ));
+  const uWave = uniform(new THREE.Vector4(wave.wind_speed, wave.height_scale, wave.choppiness, levelId));
+  const uPatch = uniform(new THREE.Vector4(wave.coarse_patch_m, wave.fine_patch_m, wave.foam_threshold, wave.foam_power));
   const uFoamIntensity = uniform(wave.foam_intensity);
-  const uLevelFade = uniform(new THREE.Vector4(
-    grid.innerFadeM,
-    grid.innerFadeM + grid.snapM * 4,
-    grid.outerFadeM * 0.82,
-    grid.outerFadeM,
-  ));
+  const uLevelFade = uniform(new THREE.Vector4(grid.fadeIn[0], grid.fadeIn[1], grid.fadeOut[0], grid.fadeOut[1]));
   const uStartOutside = uniform(ocean.start_outside_border_m);
   const uDeepColor = uniform(new THREE.Color(shading.deep_color));
   const uShallowColor = uniform(new THREE.Color(shading.shallow_color));
   const uFoamColor = uniform(new THREE.Color(shading.foam_color));
   const uFogColor = uniform(new THREE.Color(shading.fog_color));
-  const uShading = uniform(new THREE.Vector4(
-    shading.fresnel_power,
-    shading.fresnel_strength,
-    shading.reflection_strength,
-    shading.reflection_distortion,
-  ));
-  const uFog = uniform(new THREE.Vector4(
-    shading.fog_near_m,
-    shading.fog_far_m,
-    shading.fog_density,
-    shading.roughness,
-  ));
+  const uSkyZenith = uniform(new THREE.Color(shading.sky_zenith_color));
+  const uSssColor = uniform(new THREE.Color(shading.sss_color));
+  const uShading = uniform(new THREE.Vector4(shading.fresnel_power, shading.fresnel_strength, shading.reflection_strength, shading.reflection_distortion));
+  const uFog = uniform(new THREE.Vector4(shading.fog_near_m, shading.fog_far_m, shading.fog_density, shading.roughness));
+  const uDetail = uniform(new THREE.Vector4(wave.detail_normal_strength, wave.detail_normal_fade_start_m, wave.detail_normal_fade_end_m, shading.sss_strength));
+  const uHorizonBlend = uniform(new THREE.Vector2(shading.horizon_blend_start_m, shading.horizon_blend_end_m));
   const uSun = uniform(options.sunDirection.clone().normalize());
-
   const worldXZ: TslNode = positionGeometry.xz.add(uSnapOrigin);
-  const transition = createCoastOceanTransitionGpu(
-    worldXZ,
-    options.config,
-    options.seed ?? 1,
-  );
-  const uCoastBehavior = uniform(new THREE.Vector4(
-    options.config.surf.beach_foam_width_m,
-    options.config.surf.cliff_foam_width_m,
-    options.config.surf.reef_foam_width_m,
-    options.config.surf.shore_wave_height,
-  ));
+  const transition = createCoastOceanTransitionGpu(worldXZ, options.config, options.seed ?? 1);
+  const uCoastBehavior = uniform(new THREE.Vector4(options.config.surf.beach_foam_width_m, options.config.surf.cliff_foam_width_m, options.config.surf.reef_foam_width_m, options.config.surf.shore_wave_height));
   const waveSample: TslNode = oceanWaveSample({
     world_xz: worldXZ,
     time_seconds: uTime,
@@ -218,11 +177,7 @@ function createOceanLevel(
     transition_secondary: transition.secondary,
     coast_behavior: uCoastBehavior,
   });
-  const displaced = vec3(
-    positionGeometry.x,
-    uWaterLevel.add(waveSample.x),
-    positionGeometry.z,
-  );
+  const displaced = vec3(positionGeometry.x, uWaterLevel.add(waveSample.x), positionGeometry.z);
   const normalNode = normalize(vec3(waveSample.y.negate(), 1, waveSample.z.negate()));
   const worldPosition = displaced.add(vec3(uSnapOrigin.x, 0, uSnapOrigin.y));
   const colorNode: TslNode = oceanShade({
@@ -240,6 +195,11 @@ function createOceanLevel(
     shading_params: uShading,
     fog_params: uFog,
     foam_value: waveSample.w.mul(uFoamIntensity),
+    time_seconds: uTime,
+    sky_zenith: uSkyZenith,
+    sss_color: uSssColor,
+    detail_params: uDetail,
+    horizon_blend: uHorizonBlend,
     transition_primary: transition.primary,
     transition_secondary: transition.secondary,
   });
@@ -252,12 +212,12 @@ function createOceanLevel(
   material.maskNode = colorNode.w.greaterThan(0.001);
   material.transparent = true;
   material.depthTest = true;
-  material.depthWrite = false;
-  material.side = THREE.DoubleSide;
+  material.depthWrite = true;
+  material.side = THREE.FrontSide;
 
   const mesh = new THREE.Mesh(grid.geometry, material);
   mesh.name = `deep-ocean-${grid.level}`;
-  mesh.renderOrder = grid.level === "near" ? 9 : 8;
+  mesh.renderOrder = renderOrder;
   mesh.frustumCulled = false;
   mesh.userData["pageSourceKind"] = "deepOcean";
   mesh.userData["collisionEnabled"] = false;
@@ -272,6 +232,9 @@ function createOceanLevel(
     },
     setSnapOrigin(x, z) {
       uSnapOrigin.value.set(x, z);
+    },
+    setHorizonColor(color) {
+      uFogColor.value.copy(color);
     },
     updateLook(heightScale, choppiness, foamIntensity, fogDensity) {
       uWave.value.y = Math.max(0, heightScale);
