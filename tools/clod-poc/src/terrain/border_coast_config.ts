@@ -44,6 +44,9 @@ export interface DeepOceanWaveConfig {
   foamPower: number;
   foamIntensity: number;
   swellHeightScale: number;
+  detailNormalStrength: number;
+  detailNormalFadeStartM: number;
+  detailNormalFadeEndM: number;
 }
 
 export interface DeepOceanShadingConfig {
@@ -59,6 +62,12 @@ export interface DeepOceanShadingConfig {
   fogNearM: number;
   fogFarM: number;
   fogDensity: number;
+  skyZenithColor: RgbColor;
+  sssColor: RgbColor;
+  sssStrength: number;
+  horizonBlendStartM: number;
+  horizonBlendEndM: number;
+  edgeFadeM: number;
 }
 
 export interface DeepOceanRenderConfig {
@@ -67,6 +76,16 @@ export interface DeepOceanRenderConfig {
   extendCells: number;
   surfaceY: number;
   segments: number;
+  nearGridSizeM: number;
+  midGridSizeM: number;
+  farGridSizeM: number;
+  nearSubdivisions: number;
+  midSubdivisions: number;
+  farSubdivisions: number;
+  ringInnerBandM: number;
+  ringInnerRadialSegments: number;
+  ringOuterRadialSegments: number;
+  ringTangentialSegments: number;
   wave: DeepOceanWaveConfig;
   shading: DeepOceanShadingConfig;
 }
@@ -81,7 +100,7 @@ export interface BorderCoastOceanConfig {
 export const DEFAULT_DEEP_OCEAN_WAVE_CONFIG: DeepOceanWaveConfig = {
   gravity: 9.81,
   gridK: 16,
-  activeGpuWaves: 48,
+  activeGpuWaves: 24,
   windSpeed: 14.0,
   windDirectionDeg: 45,
   heightScale: 1.3,
@@ -92,21 +111,30 @@ export const DEFAULT_DEEP_OCEAN_WAVE_CONFIG: DeepOceanWaveConfig = {
   foamPower: 1.36,
   foamIntensity: 1.25,
   swellHeightScale: 0.34,
+  detailNormalStrength: 0.35,
+  detailNormalFadeStartM: 200,
+  detailNormalFadeEndM: 900,
 };
 
 export const DEFAULT_DEEP_OCEAN_SHADING_CONFIG: DeepOceanShadingConfig = {
-  deepColor: [0.016, 0.173, 0.306],
-  shallowColor: [0.039, 0.361, 0.353],
+  deepColor: [0.016, 0.161, 0.290],
+  shallowColor: [0.051, 0.420, 0.400],
   foamColor: [1.0, 1.0, 1.0],
   fresnelPower: 4.5,
   fresnelStrength: 0.75,
   reflectionStrength: 0.46,
   reflectionDistortion: 0.04,
   roughness: 0.08,
-  fogColor: [0.278, 0.380, 0.427],
+  fogColor: [0.498, 0.596, 0.675],
   fogNearM: 100,
-  fogFarM: 1800,
-  fogDensity: 0.5,
+  fogFarM: 2200,
+  fogDensity: 1.0,
+  skyZenithColor: [0.165, 0.373, 0.620],
+  sssColor: [0.055, 0.353, 0.306],
+  sssStrength: 0.9,
+  horizonBlendStartM: 3520,
+  horizonBlendEndM: 4400,
+  edgeFadeM: 48,
 };
 
 export const DEFAULT_BORDER_COAST_OCEAN_CONFIG: BorderCoastOceanConfig = {
@@ -136,9 +164,19 @@ export const DEFAULT_BORDER_COAST_OCEAN_CONFIG: BorderCoastOceanConfig = {
   deepOcean: {
     enabled: true,
     startOutsideBorderM: 64,
-    extendCells: 384,
+    extendCells: 4096,
     surfaceY: 18,
-    segments: 256,
+    segments: 128,
+    nearGridSizeM: 512,
+    midGridSizeM: 2048,
+    farGridSizeM: 2048,
+    nearSubdivisions: 128,
+    midSubdivisions: 128,
+    farSubdivisions: 128,
+    ringInnerBandM: 512,
+    ringInnerRadialSegments: 64,
+    ringOuterRadialSegments: 24,
+    ringTangentialSegments: 288,
     wave: { ...DEFAULT_DEEP_OCEAN_WAVE_CONFIG },
     shading: {
       ...DEFAULT_DEEP_OCEAN_SHADING_CONFIG,
@@ -146,6 +184,8 @@ export const DEFAULT_BORDER_COAST_OCEAN_CONFIG: BorderCoastOceanConfig = {
       shallowColor: [...DEFAULT_DEEP_OCEAN_SHADING_CONFIG.shallowColor] as RgbColor,
       foamColor: [...DEFAULT_DEEP_OCEAN_SHADING_CONFIG.foamColor] as RgbColor,
       fogColor: [...DEFAULT_DEEP_OCEAN_SHADING_CONFIG.fogColor] as RgbColor,
+      skyZenithColor: [...DEFAULT_DEEP_OCEAN_SHADING_CONFIG.skyZenithColor] as RgbColor,
+      sssColor: [...DEFAULT_DEEP_OCEAN_SHADING_CONFIG.sssColor] as RgbColor,
     },
   },
 };
@@ -195,6 +235,18 @@ function readColor(value: unknown, fallback: RgbColor): RgbColor {
   return [...fallback] as RgbColor;
 }
 
+function cloneShading(shading: DeepOceanShadingConfig): DeepOceanShadingConfig {
+  return {
+    ...shading,
+    deepColor: [...shading.deepColor] as RgbColor,
+    shallowColor: [...shading.shallowColor] as RgbColor,
+    foamColor: [...shading.foamColor] as RgbColor,
+    fogColor: [...shading.fogColor] as RgbColor,
+    skyZenithColor: [...shading.skyZenithColor] as RgbColor,
+    sssColor: [...shading.sssColor] as RgbColor,
+  };
+}
+
 function cloneDefaults(): BorderCoastOceanConfig {
   const defaults = DEFAULT_BORDER_COAST_OCEAN_CONFIG;
   return {
@@ -208,13 +260,7 @@ function cloneDefaults(): BorderCoastOceanConfig {
     deepOcean: {
       ...defaults.deepOcean,
       wave: { ...defaults.deepOcean.wave },
-      shading: {
-        ...defaults.deepOcean.shading,
-        deepColor: [...defaults.deepOcean.shading.deepColor] as RgbColor,
-        shallowColor: [...defaults.deepOcean.shading.shallowColor] as RgbColor,
-        foamColor: [...defaults.deepOcean.shading.foamColor] as RgbColor,
-        fogColor: [...defaults.deepOcean.shading.fogColor] as RgbColor,
-      },
+      shading: cloneShading(defaults.deepOcean.shading),
     },
   };
 }
@@ -234,15 +280,17 @@ function parseDeepOceanWaveConfig(root: YamlRecord | undefined, fallback: DeepOc
     foamPower: readNumberAtLeast(root?.foam_power ?? root?.foamPower, fallback.foamPower, 0),
     foamIntensity: readNumberAtLeast(root?.foam_intensity ?? root?.foamIntensity, fallback.foamIntensity, 0),
     swellHeightScale: readNumberAtLeast(root?.swell_height_scale ?? root?.swellHeightScale, fallback.swellHeightScale, 0),
+    detailNormalStrength: readNumberAtLeast(root?.detail_normal_strength ?? root?.detailNormalStrength, fallback.detailNormalStrength, 0),
+    detailNormalFadeStartM: readNumberAtLeast(root?.detail_normal_fade_start_m ?? root?.detailNormalFadeStartM, fallback.detailNormalFadeStartM, 0),
+    detailNormalFadeEndM: readNumberAtLeast(root?.detail_normal_fade_end_m ?? root?.detailNormalFadeEndM, fallback.detailNormalFadeEndM, 0),
   };
 }
 
 function parseDeepOceanShadingConfig(root: YamlRecord | undefined, fallback: DeepOceanShadingConfig): DeepOceanShadingConfig {
   const fogNear = readNumberAtLeast(root?.fog_near_m ?? root?.fogNearM, fallback.fogNearM, 0);
-  const fogFar = Math.max(
-    fogNear + 1,
-    readNumberAtLeast(root?.fog_far_m ?? root?.fogFarM, fallback.fogFarM, 0),
-  );
+  const fogFar = Math.max(fogNear + 1, readNumberAtLeast(root?.fog_far_m ?? root?.fogFarM, fallback.fogFarM, 0));
+  const horizonStart = readNumberAtLeast(root?.horizon_blend_start_m ?? root?.horizonBlendStartM, fallback.horizonBlendStartM, 0);
+  const horizonEnd = Math.max(horizonStart + 1, readNumberAtLeast(root?.horizon_blend_end_m ?? root?.horizonBlendEndM, fallback.horizonBlendEndM, 0));
   return {
     deepColor: readColor(root?.deep_color ?? root?.deepColor, fallback.deepColor),
     shallowColor: readColor(root?.shallow_color ?? root?.shallowColor, fallback.shallowColor),
@@ -256,18 +304,35 @@ function parseDeepOceanShadingConfig(root: YamlRecord | undefined, fallback: Dee
     fogNearM: fogNear,
     fogFarM: fogFar,
     fogDensity: readNumberAtLeast(root?.fog_density ?? root?.fogDensity, fallback.fogDensity, 0),
+    skyZenithColor: readColor(root?.sky_zenith_color ?? root?.skyZenithColor, fallback.skyZenithColor),
+    sssColor: readColor(root?.sss_color ?? root?.sssColor, fallback.sssColor),
+    sssStrength: readNumberAtLeast(root?.sss_strength ?? root?.sssStrength, fallback.sssStrength, 0),
+    horizonBlendStartM: horizonStart,
+    horizonBlendEndM: horizonEnd,
+    edgeFadeM: readNumberAtLeast(root?.edge_fade_m ?? root?.edgeFadeM, fallback.edgeFadeM, 0),
   };
 }
 
 function parseDeepOceanConfig(root: YamlRecord | undefined, waterLevel: number, fallback: DeepOceanRenderConfig): DeepOceanRenderConfig {
   const wave = parseDeepOceanWaveConfig(readRecord(root?.wave), fallback.wave);
   const shading = parseDeepOceanShadingConfig(readRecord(root?.shading), fallback.shading);
+  const visualExtent = readIntegerAtLeast(root?.extend_cells ?? root?.visual_extent_m ?? root?.visualExtentM ?? root?.extendCells, fallback.extendCells, 1);
   return {
     enabled: readBoolean(root?.enabled, fallback.enabled),
     startOutsideBorderM: readNumberAtLeast(root?.start_outside_border_m ?? root?.startOutsideBorderM, fallback.startOutsideBorderM, 0),
-    extendCells: readIntegerAtLeast(root?.extend_cells ?? root?.visual_extent_m ?? root?.extendCells, fallback.extendCells, 1),
+    extendCells: visualExtent,
     surfaceY: readNumber(root?.surface_y ?? root?.surfaceY, waterLevel),
     segments: readIntegerAtLeast(root?.segments ?? root?.far_subdivisions ?? root?.farSubdivisions, fallback.segments, 4),
+    nearGridSizeM: readNumberAtLeast(root?.near_grid_size_m ?? root?.nearGridSizeM, fallback.nearGridSizeM, 1),
+    midGridSizeM: readNumberAtLeast(root?.mid_grid_size_m ?? root?.midGridSizeM, fallback.midGridSizeM, 1),
+    farGridSizeM: readNumberAtLeast(root?.far_grid_size_m ?? root?.farGridSizeM, fallback.farGridSizeM, 1),
+    nearSubdivisions: readIntegerAtLeast(root?.near_subdivisions ?? root?.nearSubdivisions, fallback.nearSubdivisions, 1),
+    midSubdivisions: readIntegerAtLeast(root?.mid_subdivisions ?? root?.midSubdivisions, fallback.midSubdivisions, 1),
+    farSubdivisions: readIntegerAtLeast(root?.far_subdivisions ?? root?.farSubdivisions, fallback.farSubdivisions, 1),
+    ringInnerBandM: readNumberAtLeast(root?.ring_inner_band_m ?? root?.ringInnerBandM, fallback.ringInnerBandM, 0),
+    ringInnerRadialSegments: readIntegerAtLeast(root?.ring_inner_radial_segments ?? root?.ringInnerRadialSegments, fallback.ringInnerRadialSegments, 1),
+    ringOuterRadialSegments: readIntegerAtLeast(root?.ring_outer_radial_segments ?? root?.ringOuterRadialSegments, fallback.ringOuterRadialSegments, 1),
+    ringTangentialSegments: readIntegerAtLeast(root?.ring_tangential_segments ?? root?.ringTangentialSegments, fallback.ringTangentialSegments, 1),
     wave,
     shading,
   };
