@@ -3,7 +3,7 @@ import { FRAME_PERF_FAR_SUMMARY_BUCKETS } from "./far_summary_subphase_timing.js
 export { FRAME_PERF_FAR_SUMMARY_BUCKETS } from "./far_summary_subphase_timing.js";
 
 export const FRAME_PERF_BROAD_BUCKETS = [
-  "frameSetupMs", "inputMs", "selectionUpdateMs", "clodApplyMs", "longViewDiagnosticsMs", "farSummaryMs",
+  "frameSetupMs", "inputMs", "selectionUpdateMs", "streamingRootUpdateMs", "selectionCoreMs", "clodApplyMs", "longViewDiagnosticsMs", "farSummaryMs",
   "constructionMs", "brushMs", "combatMs", "spellsMs", "terrainPhaseMs",
   "shadowProxyMs", "clodShadowMs", "canopyMs", "vegetationTotalMs",
   "borderOceanDebugMs", "statsSyncMs", "renderMs", "unattributedMs",
