@@ -10,8 +10,6 @@ import { syncResidentLookupTables } from "./residentLookup.js";
 import type { NaadfWorldState } from "./summaryStreamer.js";
 import type { ResidentChunkEntry, SummaryTileKey } from "./types.js";
 
-const HALF_OPEN_EPSILON_SCALE = 4;
-
 export interface NaadfInvalidationResult {
   farTilesRemoved: number;
   residentsMarked: number;
@@ -132,13 +130,14 @@ function axisOverlaps(min: number, max: number, footprintMin: number, footprintM
 function touchedIndexRange(min: number, max: number, tileSizeM: number): { min: number; max: number } {
   const first = floorDiv(min, tileSizeM);
   if (min === max) return { min: first, max: first };
-  const last = Math.max(first, floorDiv(previousHalfOpenValue(max), tileSizeM));
-  return { min: first, max: last };
+  const last = isExactBoundary(max, tileSizeM)
+    ? floorDiv(max, tileSizeM) - 1
+    : floorDiv(max, tileSizeM);
+  return { min: first, max: Math.max(first, last) };
 }
 
-function previousHalfOpenValue(value: number): number {
-  const epsilon = Math.max(1, Math.abs(value)) * Number.EPSILON * HALF_OPEN_EPSILON_SCALE;
-  return value - epsilon;
+function isExactBoundary(value: number, tileSizeM: number): boolean {
+  return Number.isInteger(value / tileSizeM);
 }
 
 function normalizeBounds(bounds: SavedBounds2D): NormalizedBounds2D | null {
