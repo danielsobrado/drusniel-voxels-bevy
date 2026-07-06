@@ -11,7 +11,7 @@ import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
 import { buildOuterBorderLocks } from "../../lock.js";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import type { WorldBounds } from "../terrain_surface.js";
-import { RootGpuBatchLimitError, estimateChunkSlotBytes, estimateRootRequestSlotBytes, planGeometryReadbackLayout, planRootBatchChunkSlots, splitRootGpuBatches, type GpuRootChunkPlan, type RootGpuBatchLimits, type RootBatchPageConfig } from "./gpu_clod_root_batch_buffers.js";
+import { RootGpuBatchLimitError, chunkSlotsPerRootPage, estimateChunkSlotBytes, estimateRootRequestSlotBytes, planGeometryReadbackLayout, planRootBatchChunkSlots, rootLevelForRequest, splitRootGpuBatches, type GpuRootChunkPlan, type RootGpuBatchLimits, type RootBatchPageConfig } from "./gpu_clod_root_batch_buffers.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
 
 const STREAM_COUNTER_SAMPLE_LIMIT = 128;
@@ -140,19 +140,10 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
     if (this.disabledError) throw this.disabledError;
     const startedAt = performance.now();
     const nodes: ClodPageNode[] = [];
-    const batchCfg = this.rootBatchPageConfig();
-    const subBatches = splitRootGpuBatches(batch, batchCfg, this.batchLimits);
-    this.batchesDispatched += subBatches.length;
-    this.pagesDispatched += batch.length;
-    for (const subBatch of subBatches) pushSample(this.batchPageSamples, subBatch.length);
     try {
       await this.simplifierReady;
-      const inflightBatches = this.resolveInflightBatches(subBatches, batchCfg);
-      for (let offset = 0; offset < subBatches.length; offset += inflightBatches) {
-        const active = subBatches.slice(offset, offset + inflightBatches);
-        const built = await Promise.all(active.map((subBatch) => this.buildRootSubBatch(subBatch)));
-        for (const group of built) nodes.push(...group);
-      }
+      this.pagesDispatched += batch.length;
+      for (const request of batch) nodes.push(await this.buildRootRequest(request));
       const buildMs = performance.now() - startedAt;
       pushSample(this.buildSamples, buildMs);
       return { nodes, buildMs, transferBytes: nodes.reduce((sum, node) => sum + transferBytesForNode(node), 0) };
@@ -169,16 +160,53 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   dispose(): void { this.pool.destroy(); }
 
   private rootBatchPageConfig(): RootBatchPageConfig { return { chunks_per_page: this.cfg.page.chunks_per_page, chunk_size: this.cfg.page.chunk_size, quadtree_levels: this.cfg.page.quadtree_levels }; }
-  private resolveInflightBatches(subBatches: readonly (readonly GpuClodRootBuildRequest[])[], cfg: RootBatchPageConfig): number { const requested = Math.max(1, Math.floor(this.config.maxInflightBatches)); if (requested === 1 || subBatches.length <= 1) return 1; const heavy = subBatches.some((batch) => batch.reduce((sum, request) => sum + estimateRootRequestSlotBytes(request, cfg), 0) > this.batchLimits.maxTotalSlotBytes * 0.45); return heavy || this.failedBatches > 0 ? 1 : Math.min(requested, 2); }
+
+  private async buildRootRequest(request: GpuClodRootBuildRequest): Promise<ClodPageNode> {
+    const cfg = this.rootBatchPageConfig();
+    const rootLevel = rootLevelForRequest(request, cfg);
+    const slots = chunkSlotsPerRootPage(cfg.chunks_per_page, rootLevel);
+    const bytes = estimateRootRequestSlotBytes(request, cfg);
+    if (slots <= this.batchLimits.maxChunkSlots && bytes <= this.batchLimits.maxTotalSlotBytes) {
+      const nodes = await this.buildRootSubBatch([request]);
+      const node = nodes[0];
+      if (!node) throw new Error(`GPU streamed-root request L${rootLevel}:${request.px},${request.pz} produced no node`);
+      return node;
+    }
+    return this.buildOversizedRootFromLod0(request, rootLevel);
+  }
+
+  private async buildOversizedRootFromLod0(request: GpuClodRootBuildRequest, rootLevel: number): Promise<ClodPageNode> {
+    if (rootLevel <= 0) throw new RootGpuBatchLimitError(`GPU streamed-root L0:${request.px},${request.pz} exceeds packed pool limits`, request, 0, 0, this.batchLimits);
+    const lod0Scale = 2 ** rootLevel;
+    const lod0Requests: GpuClodRootBuildRequest[] = [];
+    for (let dz = 0; dz < lod0Scale; dz++) {
+      for (let dx = 0; dx < lod0Scale; dx++) lod0Requests.push({ px: request.px * lod0Scale + dx, pz: request.pz * lod0Scale + dz, level: 0 });
+    }
+    const lod0Nodes = new Map<string, ClodPageNode>();
+    for (const subBatch of splitRootGpuBatches(lod0Requests, this.rootBatchPageConfig(), this.batchLimits)) {
+      for (const node of await this.buildRootSubBatch(subBatch)) {
+        if (node.level !== 0) throw new Error(`GPU streamed-root oversized split expected L0 node, got ${node.id}`);
+        lod0Nodes.set(node.id.slice(3), node);
+      }
+    }
+    return this.buildRootPageFromLod0(request, lod0Nodes);
+  }
 
   private async buildRootSubBatch(batch: readonly GpuClodRootBuildRequest[]): Promise<ClodPageNode[]> {
-    const plans = planRootBatchChunkSlots(batch, this.rootBatchPageConfig());
-    this.chunkSlotsDispatched += plans.length;
-    if (plans.length === 0) return [];
-    const slots = this.pool.prepare(plans);
-    const countReadback = this.device.createBuffer({ label: "gpu clod root count readback", size: slots.length * 2 * U32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    try { const meshes = await this.dispatchAndReadSlots(slots, countReadback); return this.buildRootNodesFromMeshes(batch, slots, meshes); }
-    finally { countReadback.destroy(); }
+    const subBatches = splitRootGpuBatches(batch, this.rootBatchPageConfig(), this.batchLimits);
+    const nodes: ClodPageNode[] = [];
+    for (const subBatch of subBatches) {
+      this.batchesDispatched++;
+      pushSample(this.batchPageSamples, subBatch.length);
+      const plans = planRootBatchChunkSlots(subBatch, this.rootBatchPageConfig());
+      this.chunkSlotsDispatched += plans.length;
+      if (plans.length === 0) continue;
+      const slots = this.pool.prepare(plans);
+      const countReadback = this.device.createBuffer({ label: "gpu clod root count readback", size: slots.length * 2 * U32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+      try { const meshes = await this.dispatchAndReadSlots(slots, countReadback); nodes.push(...this.buildRootNodesFromMeshes(subBatch, slots, meshes)); }
+      finally { countReadback.destroy(); }
+    }
+    return nodes;
   }
 
   private async dispatchAndReadSlots(slots: readonly GpuRootChunkSlot[], countReadback: GPUBuffer): Promise<Map<number, PageMesh>> {
