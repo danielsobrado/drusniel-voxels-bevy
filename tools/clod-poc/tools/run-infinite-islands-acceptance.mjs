@@ -1,9 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:5173/";
 const SERVER_TIMEOUT_MS = 90_000;
 const SERVER_POLL_MS = 500;
+const ACCEPTANCE_SOURCE = path.resolve(process.cwd(), "tools", "infinite-islands-acceptance.ts");
+const FILTERED_ACCEPTANCE_SOURCE = path.resolve(process.cwd(), "tools", "infinite-islands-acceptance.filtered.tmp.ts");
 
 process.env.CLOD_POC_BASE_URL ??= DEFAULT_BASE_URL;
 
@@ -137,22 +140,63 @@ async function ensureServer() {
   throw new Error(`Timed out waiting for Vite at ${process.env.CLOD_POC_BASE_URL}`);
 }
 
+function hasFilterArgs(args) {
+  return args.some((arg) => arg === "--scene" || arg.startsWith("--scene=") || arg === "--gate" || arg.startsWith("--gate="));
+}
+
+function injectFilteredRunner(source) {
+  const activeScenesBlock = /const PROFILE = parseProfile\(process\.argv\.slice\(2\)\);\nconst ACTIVE_SCENES = PROFILE === "fast"[\s\S]*?const SAMPLE_FRAMES = PROFILE === "fast" \? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;/;
+  const replacement = `const CLI_ARGS = process.argv.slice(2);\n\nfunction cliValues(args: readonly string[], key: string): string[] {\n  const values: string[] = [];\n  for (let i = 0; i < args.length; i++) {\n    const arg = args[i]!;\n    if (arg === key) {\n      const next = args[i + 1];\n      if (next && !next.startsWith("--")) {\n        values.push(next);\n        i += 1;\n      }\n    } else if (arg.startsWith(\`${key}=\`)) {\n      const value = arg.slice(key.length + 1);\n      if (value.length > 0) values.push(value);\n    }\n  }\n  return values;\n}\n\nfunction filterActiveScenes(scenes: readonly SceneSpec[]): SceneSpec[] {\n  const requested = cliValues(CLI_ARGS, "--scene").flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean);\n  if (requested.length === 0) return [...scenes];\n  const known = new Set(SCENES.map((scene) => scene.name));\n  const unknown = requested.filter((name) => !known.has(name));\n  if (unknown.length > 0) throw new Error(\`Unknown --scene value(s): \${unknown.join(", ")}. Valid scenes: \${[...known].join(", ")}\`);\n  const requestedSet = new Set(requested);\n  return scenes.filter((scene) => requestedSet.has(scene.name));\n}\n\nfunction filterActiveGates(gates: readonly GateMode[]): GateMode[] {\n  const requested = cliValues(CLI_ARGS, "--gate").at(-1)?.trim() ?? "all";\n  if (requested === "all") return [...gates];\n  if (requested !== "coverage" && requested !== "perf") {\n    throw new Error(\`Unknown --gate value: \${requested}. Valid gates: coverage, perf, all\`);\n  }\n  return gates.filter((gate) => gate.name === requested);\n}\n\nconst PROFILE = parseProfile(CLI_ARGS);\nconst BASE_ACTIVE_SCENES = PROFILE === "fast"\n  ? SCENES.filter((scene) => scene.name === "walk" || scene.name === "final-near")\n  : PROFILE === "reuse"\n    ? [...SCENES.filter((scene) => !scene.movementRoute), ...SCENES.filter((scene) => scene.movementRoute)]\n    : SCENES;\nconst ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES);\nconst ACTIVE_GATES = filterActiveGates(GATE_MODES);\nconst SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;`;
+  const withSceneFilter = source.replace(activeScenesBlock, replacement);
+  if (withSceneFilter === source) throw new Error("Failed to inject infinite acceptance scene/gate filters");
+  return withSceneFilter
+    .replaceAll("for (const gate of GATE_MODES)", "for (const gate of ACTIVE_GATES)")
+    .replace(
+      "console.log(`[infinite-accept] profile ${PROFILE} scenes=${ACTIVE_SCENES.length} sampleFrames=${SAMPLE_FRAMES}`);",
+      "console.log(`[infinite-accept] profile ${PROFILE} gates=${ACTIVE_GATES.map((gate) => gate.name).join(\",\")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(\",\")} sampleFrames=${SAMPLE_FRAMES}`);",
+    );
+}
+
+function prepareAcceptanceScript(args) {
+  if (!hasFilterArgs(args)) return ACCEPTANCE_SOURCE;
+  const source = readFileSync(ACCEPTANCE_SOURCE, "utf8");
+  const filtered = injectFilteredRunner(source);
+  writeFileSync(FILTERED_ACCEPTANCE_SOURCE, filtered);
+  return FILTERED_ACCEPTANCE_SOURCE;
+}
+
+function cleanupFilteredScript() {
+  if (!existsSync(FILTERED_ACCEPTANCE_SOURCE)) return;
+  try {
+    unlinkSync(FILTERED_ACCEPTANCE_SOURCE);
+  } catch {
+    // Best effort cleanup only.
+  }
+}
+
 function runAcceptance() {
+  const args = process.argv.slice(2);
+  const acceptanceScript = prepareAcceptanceScript(args);
   return new Promise((resolve) => {
-    const child = spawnChild("playwright", nodeBin, [tsxCli, "tools/infinite-islands-acceptance.ts", ...process.argv.slice(2)], {
+    const child = spawnChild("playwright", nodeBin, [tsxCli, acceptanceScript, ...args], {
       filterStdout: true,
     });
-    child.on("exit", (code) => resolve(code ?? 1));
+    child.on("exit", (code) => {
+      cleanupFilteredScript();
+      resolve(code ?? 1);
+    });
   });
 }
 
 let server = null;
 try {
+  mkdirSync(path.dirname(FILTERED_ACCEPTANCE_SOURCE), { recursive: true });
   server = await ensureServer();
   const code = await runAcceptance();
   stopChildTree(server);
   process.exit(code);
 } catch (error) {
+  cleanupFilteredScript();
   stopChildTree(server);
   console.error("[infinite-accept] FAILED:", error instanceof Error ? error.message : error);
   process.exit(1);
