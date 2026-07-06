@@ -87,10 +87,11 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const config = applyRuntimeTraversalOverrides(parseNaadfPocConfig(options.yamlText));
   const active = config.enabled && (options.forceEnable || isNaadfScene(options.sceneName));
   if (!active) {
-    disposeActiveSaveInvalidationTarget();
-    clearActiveIntegration();
+    disposeActiveIntegrationInstance();
     return null;
   }
+
+  disposeActiveIntegrationInstance();
 
   const profile = terrainProfileForScene(options.sceneName);
   const source = createTerrainSource(profile, config.world.seed);
@@ -308,6 +309,16 @@ function disposeActiveSaveInvalidationTarget(): void {
 function disposeSaveInvalidationTarget(cleanup: () => void): void {
   cleanup();
   if (activeSaveInvalidationCleanup === cleanup) activeSaveInvalidationCleanup = null;
+}
+
+function disposeActiveIntegrationInstance(): void {
+  const current = activeIntegration;
+  if (!current) {
+    disposeActiveSaveInvalidationTarget();
+    clearActiveIntegration();
+    return;
+  }
+  current.dispose();
 }
 
 function replaceActiveIntegration(integration: NaadfIntegration): void {
