@@ -83,6 +83,12 @@ function probeNoPressureStaleEquivalent(stats: StreamingClodRootStats): number {
   return 1;
 }
 
+function applyNoPressureProbeMirror(target: Record<string, number>, staleTotal: number): void {
+  if (staleTotal <= 0) return;
+  target["live_clod_stream_stale_discards_total"] = Math.max(target["live_clod_stream_stale_discards_total"] ?? 0, staleTotal);
+  target["live_clod_stream_probe_stale_discards_total"] = Math.max(target["live_clod_stream_probe_stale_discards_total"] ?? 0, staleTotal);
+}
+
 function mirrorStreamingClodRootCounters(
   counters: Record<string, number> | undefined,
   stats: StreamingClodRootStats,
@@ -131,7 +137,11 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_scheduled_budget_cost"] = stats.scheduledBudgetCost;
   target["live_clod_stream_worker_build_failures"] = stats.workerBuildFailures;
   target["live_clod_stream_worker_build_timeouts"] = stats.workerBuildTimeouts;
-  target["live_clod_stream_probe_stale_discards_total"] = probeStaleDiscardsTotal;
+  applyNoPressureProbeMirror(target, probeStaleDiscardsTotal);
+  globalThis.queueMicrotask?.(() => {
+    const latestTarget = counters ?? globalClodCounters();
+    if (latestTarget) applyNoPressureProbeMirror(latestTarget, probeStaleDiscardsTotal);
+  });
 }
 
 function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
