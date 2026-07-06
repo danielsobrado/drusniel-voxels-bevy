@@ -18,6 +18,12 @@ export interface OwnershipResidencyMissingCounts {
   clodMissing: number;
 }
 
+interface PageCoord {
+  level: number;
+  x: number;
+  z: number;
+}
+
 export function packedLiveKeySet(keys: readonly string[]): Set<number> {
   const out = new Set<number>();
   for (const key of keys) {
@@ -42,7 +48,7 @@ export function countMissingPacked(required: ReadonlySet<number>, ready: Readonl
   return missing;
 }
 
-function parseRendererPageKey(key: string): { level: number; x: number; z: number } {
+function parseRendererPageKey(key: string): PageCoord {
   const [levelText, coordText] = key.split(":");
   const [xText, zText] = (coordText ?? "").split(",");
   const levelRaw = levelText?.startsWith("L") ? levelText.slice(1) : levelText;
@@ -53,6 +59,66 @@ function parseRendererPageKey(key: string): { level: number; x: number; z: numbe
     throw new Error(`Invalid renderer page key ${key}`);
   }
   return { level, x, z };
+}
+
+function hasResidentAncestor(page: PageCoord, loaded: ReadonlySet<number>, maxLevel: number): boolean {
+  for (let level = page.level + 1; level <= maxLevel; level++) {
+    const scale = 2 ** (level - page.level);
+    if (loaded.has(packPageKey(level, Math.floor(page.x / scale), Math.floor(page.z / scale)))) return true;
+  }
+  return false;
+}
+
+function loadedDescendantCoverageCells(page: PageCoord, loaded: ReadonlySet<number>): number {
+  if (page.level <= 0) return 0;
+  const span = 2 ** page.level;
+  const covered = new Set<number>();
+  const minX = page.x * span;
+  const minZ = page.z * span;
+  const maxX = minX + span;
+  const maxZ = minZ + span;
+
+  for (let level = 0; level < page.level; level++) {
+    const scale = 2 ** level;
+    const startX = Math.floor(minX / scale);
+    const endX = Math.ceil(maxX / scale);
+    const startZ = Math.floor(minZ / scale);
+    const endZ = Math.ceil(maxZ / scale);
+    for (let x = startX; x < endX; x++) {
+      for (let z = startZ; z < endZ; z++) {
+        if (!loaded.has(packPageKey(level, x, z))) continue;
+        const childMinX = x * scale;
+        const childMinZ = z * scale;
+        const childMaxX = childMinX + scale;
+        const childMaxZ = childMinZ + scale;
+        for (let cx = Math.max(minX, childMinX); cx < Math.min(maxX, childMaxX); cx++) {
+          for (let cz = Math.max(minZ, childMinZ); cz < Math.min(maxZ, childMaxZ); cz++) {
+            covered.add((cz - minZ) * span + (cx - minX));
+          }
+        }
+      }
+    }
+  }
+
+  return covered.size;
+}
+
+export function pageCoveredByResidentClodHierarchy(page: PageCoord, loaded: ReadonlySet<number>, maxLevel: number): boolean {
+  if (loaded.has(packPageKey(page.level, page.x, page.z))) return true;
+  if (hasResidentAncestor(page, loaded, maxLevel)) return true;
+  if (page.level <= 0) return false;
+  const span = 2 ** page.level;
+  return loadedDescendantCoverageCells(page, loaded) === span * span;
+}
+
+export function countMissingPagesWithHierarchyCoverage(required: readonly string[], loaded: ReadonlySet<number>): number {
+  const pages = required.map(parsePageKey);
+  const maxLevel = pages.reduce((max, page) => Math.max(max, page.level), 0);
+  let missing = 0;
+  for (const page of pages) {
+    if (!pageCoveredByResidentClodHierarchy(page, loaded, maxLevel)) missing++;
+  }
+  return missing;
 }
 
 export function createRendererOwnershipResidencyFeeds(
@@ -103,6 +169,6 @@ export function countSnapshotResidencyMissing(
 ): OwnershipResidencyMissingCounts {
   return {
     liveMissing: countMissingPacked(packedLiveKeySet(snapshot.live.required), feeds.liveReady()),
-    clodMissing: countMissingPacked(packedPageKeySet(snapshot.visualPages.required), feeds.clodReady()),
+    clodMissing: countMissingPagesWithHierarchyCoverage(snapshot.visualPages.required, feeds.clodReady()),
   };
 }
