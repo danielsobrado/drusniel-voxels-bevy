@@ -6,6 +6,35 @@ export type { FramePerfMetric, FramePerfBroadBucket, FramePerfPropBucket, FrameP
 export { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS, FRAME_PERF_ALL_METRICS } from "./perf_probe_constants.js";
 
 const RECENT_SAMPLE_LIMIT = 120;
+const MIRRORED_TOP_BUCKET_COUNT = 8;
+const MIRRORED_METRICS: readonly FramePerfMetric[] = [
+  "frameMs",
+  "renderMs",
+  "selectionUpdateMs",
+  "selectionMs",
+  "selectionCutMs",
+  "selectionBookMs",
+  "clodApplyMs",
+  "terrainPhaseMs",
+  "bubbleMs",
+  "farSummaryMs",
+  "longViewDiagnosticsMs",
+  "vegetationTotalMs",
+  "grassMs",
+  "treesMs",
+  "understoryMs",
+  "forestLightingMs",
+  "stonesMs",
+  "customPropsMs",
+  "waterMs",
+  "deepOceanMs",
+  "weatherMs",
+  "statsSyncMs",
+  "propsRestMs",
+  "propsUnattributedMs",
+  "unattributedMs",
+  "otherMs",
+];
 
 declare global {
   interface Window {
@@ -182,6 +211,50 @@ function appendRecentSample(recentSamples: FramePerfSample[], sample: FramePerfS
   if (recentSamples.length > RECENT_SAMPLE_LIMIT) recentSamples.shift();
 }
 
+function mirrorFramePerfCounters(snapshot: FramePerfSnapshot): void {
+  if (typeof window === "undefined") return;
+  const hooks = (window as typeof window & {
+    __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
+  }).__drusnielClod;
+  const counters = hooks?.stats?.counters;
+  if (!counters) return;
+  counters["framePerf.enabled"] = 1;
+  counters["framePerf.ready"] = snapshot.ready ? 1 : 0;
+  counters["framePerf.observedFrames"] = snapshot.observedFrames;
+  counters["framePerf.sampleCount"] = snapshot.sampleCount;
+  counters["framePerf.warmupFrames"] = snapshot.warmupFrames;
+  counters["framePerf.targetSampleFrames"] = snapshot.targetSampleFrames;
+  for (const metric of MIRRORED_METRICS) {
+    const stats = snapshot.metrics[metric];
+    if (!stats) continue;
+    counters[`framePerf.avg.${metric}`] = stats.avg;
+    counters[`framePerf.p50.${metric}`] = stats.p50;
+    counters[`framePerf.p95.${metric}`] = stats.p95;
+    counters[`framePerf.max.${metric}`] = stats.max;
+  }
+  snapshot.broadBucketsByP95.slice(0, MIRRORED_TOP_BUCKET_COUNT).forEach((bucket, index) => {
+    counters[`framePerf.topBroad.${index}.p95`] = bucket.p95;
+    counters[`framePerf.topBroad.${index}.avg`] = bucket.avg;
+    counters[`framePerf.p95.${bucket.name}`] = bucket.p95;
+    counters[`framePerf.avg.${bucket.name}`] = bucket.avg;
+  });
+  snapshot.propBucketsByP95.slice(0, MIRRORED_TOP_BUCKET_COUNT).forEach((bucket, index) => {
+    counters[`framePerf.topProp.${index}.p95`] = bucket.p95;
+    counters[`framePerf.topProp.${index}.avg`] = bucket.avg;
+    counters[`framePerf.p95.${bucket.name}`] = bucket.p95;
+    counters[`framePerf.avg.${bucket.name}`] = bucket.avg;
+  });
+  counters["framePerf.renderedCountAvg"] = snapshot.counters.renderedCountAvg;
+  counters["framePerf.terrainTrianglesAvg"] = snapshot.counters.terrainTrianglesAvg;
+  counters["framePerf.dynamicResolutionRenderScaleAvg"] = snapshot.counters.dynamicResolutionRenderScaleAvg;
+  counters["framePerf.dynamicResolutionActiveFrames"] = snapshot.counters.dynamicResolutionActiveFrames;
+  counters["framePerf.statsSyncRanFrames"] = snapshot.counters.statsSyncRanFrames;
+  counters["framePerf.treeGpuCandidateCountAvg"] = snapshot.counters.treeGpuCandidateCountAvg;
+  counters["framePerf.grassGpuCandidateCountAvg"] = snapshot.counters.grassGpuCandidateCountAvg;
+  counters["framePerf.understoryGpuCandidateCountAvg"] = snapshot.counters.understoryGpuCandidateCountAvg;
+  counters["framePerf.vegetationGpuCandidatesGeneratedAvg"] = snapshot.counters.vegetationGpuCandidatesGeneratedAvg;
+}
+
 export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): FramePerfProbe | null {
   if (searchParams.get("perfProbe") !== "1") {
     exposePerfHooks(null);
@@ -219,9 +292,11 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
       hooks.lastSample = null;
       hooks.samples = samples;
       hooks.recentSamples = recentSamples;
+      mirrorFramePerfCounters(snapshot());
     },
   };
   exposePerfHooks(hooks);
+  mirrorFramePerfCounters(snapshot());
   return {
     enabled: true,
     record(sample: FramePerfSample): void {
@@ -230,10 +305,12 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
       appendRecentSample(recentSamples, sample);
       hooks.recentSamples = recentSamples;
       hooks.lastSample = sample;
-      if (observedFrames <= warmupFrames || samples.length >= targetSampleFrames) return;
-      samples.push(sample);
-      hooks.sampleCount = samples.length;
-      hooks.ready = samples.length >= targetSampleFrames;
+      if (observedFrames > warmupFrames && samples.length < targetSampleFrames) {
+        samples.push(sample);
+        hooks.sampleCount = samples.length;
+        hooks.ready = samples.length >= targetSampleFrames;
+      }
+      mirrorFramePerfCounters(snapshot());
     },
     reset: hooks.reset,
     snapshot,
