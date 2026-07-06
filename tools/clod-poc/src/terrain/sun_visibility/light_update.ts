@@ -6,6 +6,7 @@ import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
 import { invalidateSunLightGpuAtlas, updateSunLightGpuAtlas } from "./sun_light_gpu_atlas.js";
+import { sunBinKey, toSunBin } from "./sun_bins.js";
 
 interface LightUpdateArgs {
   terrainSummary: TerrainSummaryField;
@@ -19,6 +20,15 @@ function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptio
   if (searchParams.has("sunLightDebug")) options.debugView.active = searchParams.get("sunLightDebug") === "1";
 }
 
+function stableFrameKey(input: {
+  terrainRevision: number;
+  tileX: number;
+  tileZ: number;
+  sunBin: string;
+}): string {
+  return `${input.terrainRevision}|${input.tileX},${input.tileZ}|${input.sunBin}`;
+}
+
 export function createLightUpdate(args: LightUpdateArgs) {
   const options = loadBundledSunLightOptions();
   applyQueryOverrides(options);
@@ -26,12 +36,14 @@ export function createLightUpdate(args: LightUpdateArgs) {
   const cache = createSunLightCacheRuntime(options);
   const overlay = createSunLightDebugOverlay();
   let lastTerrainRevision = provider.terrainRevision();
+  let lastStableFrameKey = "";
   const globals = window as unknown as Record<string, unknown>;
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
   globals.__drusnielSunLightRefresh = () => {
     cache.markAllStale();
     invalidateSunLightGpuAtlas();
+    lastStableFrameKey = "";
   };
   globals.__drusnielSunLightPeekWorld = (x: number, z: number, sunVec: THREE.Vector3) => cache.peekWorld(x, z, sunVec, provider);
   return {
@@ -42,13 +54,25 @@ export function createLightUpdate(args: LightUpdateArgs) {
         cache.markAllStale();
         invalidateSunLightGpuAtlas();
         lastTerrainRevision = terrainRevision;
+        lastStableFrameKey = "";
       }
       if (!options.active) {
         invalidateSunLightGpuAtlas();
         overlay.update([], options);
+        lastStableFrameKey = "";
         return;
       }
       const centerTile = worldToSunVisibilityTile(camera.position.x, camera.position.z, options.tile);
+      const sunBin = sunBinKey(toSunBin(sunVec, options.directionBins));
+      const frameKey = stableFrameKey({
+        terrainRevision,
+        tileX: centerTile.tileX,
+        tileZ: centerTile.tileZ,
+        sunBin,
+      });
+      if (!options.debugView.active && frameKey === lastStableFrameKey && cache.stats().pendingTiles === 0) {
+        return;
+      }
       const materialRadius = options.build.materialTileRadius;
       for (let dz = -materialRadius; dz <= materialRadius; dz++) {
         for (let dx = -materialRadius; dx <= materialRadius; dx++) {
@@ -58,6 +82,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       cache.updateBudgeted(provider, frameIndex, nowMs, centerTile);
       updateSunLightGpuAtlas(centerTile, cache.tiles(), options);
       overlay.update(cache.tiles(), options);
+      lastStableFrameKey = cache.stats().pendingTiles === 0 ? frameKey : "";
     },
     stats() {
       return cache.stats();
@@ -65,6 +90,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
     dispose() {
       overlay.dispose();
       invalidateSunLightGpuAtlas();
+      lastStableFrameKey = "";
     },
   };
 }
