@@ -261,14 +261,8 @@ export function runFrameLoopStartup(
     };
   }
 
-  if (!session.playerInputController) {
-    throw new Error("Frame loop startup requires playerInputController");
-  }
-
-  if (customProps?.propController) {
-    player.attachPropColliders(customProps.propController.colliderSet);
-  }
-
+  if (!session.playerInputController) throw new Error("Frame loop startup requires playerInputController");
+  if (customProps?.propController) player.attachPropColliders(customProps.propController.colliderSet);
   constructionController?.setTerrainConformHandler((request) => {
     terrainEdit.scheduleConstructionTerrainConform(request);
   });
@@ -279,9 +273,7 @@ export function runFrameLoopStartup(
   const sunLightOptions = parseSunLightOptions({
     active: searchParams.get("sunLightCache") !== "0",
     diagnostics: searchParams.get("sunLightStats") === "1",
-    debug_view: {
-      active: searchParams.get("sunLightDebug") === "1",
-    },
+    debug_view: { active: searchParams.get("sunLightDebug") === "1" },
   });
   const sunLightRuntime = window.__drusnielTerrainSummary
     ? createLightUpdate({ terrainSummary: window.__drusnielTerrainSummary, options: sunLightOptions })
@@ -323,6 +315,14 @@ export function runFrameLoopStartup(
     searchParams,
   );
   const liveClodRootRadius = resolveLiveClodRootRadius(searchParams, longView.phase0Config, state.bubbleRadius);
+  const diagnosticsPhase0Streaming = acceptanceStreamProfile
+    ? {
+        ...longView.phase0Streaming,
+        clod_radius_m: liveClodRootRadius,
+        clod_refinement_radius_m: liveClodRootRadius,
+        far_clipmap_radius_m: liveClodRootRadius,
+      }
+    : longView.phase0Streaming;
   const farClipmapConfig = farClipmapConfigFromSearchParams(searchParams, {
     liveCollisionRadiusM: state.bubbleRadius,
     clodCoverageRadiusM: liveClodRootRadius,
@@ -367,7 +367,6 @@ export function runFrameLoopStartup(
       renderResolution.applyCurrentViewport({ renderer, camera });
       return;
     }
-
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -392,13 +391,11 @@ export function runFrameLoopStartup(
       makeGrassSettings,
       dynamicResolution: dynamicResolutionController,
       gpuPassTiming,
-      runGpuTreeTiming: treeTimingPass
-        ? () => treeTimingPass.render(treeSystem, camera)
-        : null,
+      runGpuTreeTiming: treeTimingPass ? () => treeTimingPass.render(treeSystem, camera) : null,
     },
     player: {
       controls,
-      player: player,
+      player,
       interaction,
       state,
       playerInputController: session.playerInputController,
@@ -484,7 +481,7 @@ export function runFrameLoopStartup(
       queryScene: longView.queryScene,
       phase0VelocityX: longView.phase0VelocityX,
       phase0VelocityZ: longView.phase0VelocityZ,
-      phase0Streaming: longView.phase0Streaming,
+      phase0Streaming: diagnosticsPhase0Streaming,
       longViewDiagnosticsCfg: {
         page: {
           chunk_size: cfg.page.chunk_size,
@@ -494,41 +491,31 @@ export function runFrameLoopStartup(
       getFarShellRadiusFactor: () => state.farShellRadiusFactor,
       getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
       getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
-      getFarClipmapOwnershipSnapshot: () => farClipmapController?.ownershipSnapshot(),
     },
     farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
-          if (streamingScene) {
-            timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z));
+          if (farClipmapController) {
+            const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position));
+            if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats);
           }
+          if (streamingScene) timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z));
           timeFarSummarySubphase("farSumSunLightMs", () => {
             sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
             syncSunLightCounters();
           });
           input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
-          if (farClipmapController) {
-            const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position));
-            if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats);
-          }
           timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay());
         } }
       : undefined,
     floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,
     construction: constructionController
-      ? {
-          update: () => {
-            constructionController.update();
-            session.constructionBuildActive = constructionController.stats().active;
-          },
-          isActive: () => constructionController.stats().active,
-        }
+      ? { update: () => {
+          constructionController.update();
+          session.constructionBuildActive = constructionController.stats().active;
+        }, isActive: () => constructionController.stats().active }
       : undefined,
-    combat: combatController
-      ? { update: (timeMs) => combatController.update(timeMs) }
-      : undefined,
-    spells: spellVfxController
-      ? { update: (timeMs) => spellVfxController.update(timeMs) }
-      : undefined,
+    combat: combatController ? { update: (timeMs) => combatController.update(timeMs) } : undefined,
+    spells: spellVfxController ? { update: (timeMs) => spellVfxController.update(timeMs) } : undefined,
     clodShadow: clodShadowOverlayController
       ? {
           update: () => clodShadowOverlayController.update(),

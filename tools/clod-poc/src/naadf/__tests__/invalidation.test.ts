@@ -40,6 +40,46 @@ describe("naadf invalidation", () => {
     expect(state.farTiles.has(farTileKeyString(unrelated))).toBe(true);
   });
 
+  it("treats non-point far dirty bounds as half-open at exact tile boundaries", () => {
+    const state = createTestState();
+    const tileSizeM = farTileSizeM(state, 0);
+    const left = { ring: 0, x: 0, z: 0 };
+    const right = { ring: 0, x: 1, z: 0 };
+    insertFarTile(state, left);
+    insertFarTile(state, right);
+
+    const result = invalidateNaadfBounds(state, {
+      minX: 0,
+      minZ: 0,
+      maxX: tileSizeM,
+      maxZ: 1,
+    });
+
+    expect(result.farTilesRemoved).toBe(1);
+    expect(state.farTiles.has(farTileKeyString(left))).toBe(false);
+    expect(state.farTiles.has(farTileKeyString(right))).toBe(true);
+  });
+
+  it("maps exact point far dirty bounds to the actual tile", () => {
+    const state = createTestState();
+    const tileSizeM = farTileSizeM(state, 0);
+    const left = { ring: 0, x: 0, z: 0 };
+    const right = { ring: 0, x: 1, z: 0 };
+    insertFarTile(state, left);
+    insertFarTile(state, right);
+
+    const result = invalidateNaadfBounds(state, {
+      minX: tileSizeM,
+      minZ: 0,
+      maxX: tileSizeM,
+      maxZ: 0,
+    });
+
+    expect(result.farTilesRemoved).toBe(1);
+    expect(state.farTiles.has(farTileKeyString(left))).toBe(true);
+    expect(state.farTiles.has(farTileKeyString(right))).toBe(false);
+  });
+
   it("cancels active far tile builds touched by dirty bounds", () => {
     const state = createTestState();
     const touched = { ring: 0, x: 0, z: 0 };
@@ -71,6 +111,42 @@ describe("naadf invalidation", () => {
     const lookup = lookupValidatedChunkIndex(state.nearTable, state.hashFallback, state.residents, overlapping.key);
     expect(lookup.index).toBeGreaterThanOrEqual(0);
     expect(state.residents[lookup.index]).toBe(overlapping);
+  });
+
+  it("treats non-point resident dirty bounds as half-open at chunk boundaries", () => {
+    const state = createTestState();
+    const chunkSize = state.config.world.chunkSizeCells;
+    const left = addResident(state, readyResident(state, { x: 0, z: 0 }));
+    const right = addResident(state, readyResident(state, { x: 1, z: 0 }));
+
+    const result = invalidateNaadfBounds(state, {
+      minX: 0,
+      minZ: 0,
+      maxX: chunkSize,
+      maxZ: 1,
+    });
+
+    expect(result.residentsMarked).toBe(1);
+    expect(left.state).toBe("building");
+    expect(right.state).toBe("ready");
+  });
+
+  it("maps exact point resident dirty bounds to the actual chunk", () => {
+    const state = createTestState();
+    const chunkSize = state.config.world.chunkSizeCells;
+    const left = addResident(state, readyResident(state, { x: 0, z: 0 }));
+    const right = addResident(state, readyResident(state, { x: 1, z: 0 }));
+
+    const result = invalidateNaadfBounds(state, {
+      minX: chunkSize,
+      minZ: 0,
+      maxX: chunkSize,
+      maxZ: 0,
+    });
+
+    expect(result.residentsMarked).toBe(1);
+    expect(left.state).toBe("ready");
+    expect(right.state).toBe("building");
   });
 
   it("receives save invalidation bridge publications through the NAADF target", () => {
@@ -116,6 +192,10 @@ function createTestState(): NaadfWorldState {
   const config = createTestNaadfConfig();
   const source = createTerrainSource("default", config.world.seed);
   return createNaadfWorldState(config, source, new NaadfMetricsCollector());
+}
+
+function farTileSizeM(state: NaadfWorldState, ringIndex: number): number {
+  return state.config.farClipmap.rings[ringIndex]!.cellM * state.config.farClipmap.tileCells;
 }
 
 function insertFarTile(state: NaadfWorldState, key: SummaryTileKey): void {
