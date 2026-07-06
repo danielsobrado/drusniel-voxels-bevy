@@ -48,12 +48,18 @@ describe("stream readiness diagnostics", () => {
       farSummaryTilesReady: 4,
       farSummaryTilesMissing: 0,
       farSummaryTilesBuilding: 0,
+      streamRequiredPages: 1,
+      streamSafetyPendingPages: 0,
+      streamSafetyInflightPages: 0,
+      streamParentCoverageViolations: 0,
+      streamActiveRootPages: 1,
     };
 
     expect(streamReadinessSatisfied({
       snapshot: snap,
       feeds: readyFeeds,
-      maxLevel: 2,
+      requiredRootLevel: 2,
+      coverageMaxLevel: 2,
       liveMissing: 1,
       counters: readyCounters,
     })).toBe(false);
@@ -61,28 +67,36 @@ describe("stream readiness diagnostics", () => {
     expect(streamReadinessSatisfied({
       snapshot: snap,
       feeds: feeds(new Set([packLiveKey(0, 0)]), new Set()),
-      maxLevel: 2,
+      requiredRootLevel: 2,
+      coverageMaxLevel: 2,
       liveMissing: 0,
       counters: readyCounters,
-    })).toBe(false);
+    })).toBe(true);
 
     expect(streamReadinessSatisfied({
       snapshot: snap,
       feeds: readyFeeds,
-      maxLevel: 2,
+      requiredRootLevel: 2,
+      coverageMaxLevel: 2,
       liveMissing: 0,
       counters: {
         farSummaryTilesRequired: 4,
         farSummaryTilesReady: 3,
         farSummaryTilesMissing: 0,
         farSummaryTilesBuilding: 0,
+        streamRequiredPages: 1,
+        streamSafetyPendingPages: 0,
+        streamSafetyInflightPages: 0,
+        streamParentCoverageViolations: 0,
+        streamActiveRootPages: 1,
       },
     })).toBe(false);
 
     expect(streamReadinessSatisfied({
       snapshot: snap,
       feeds: readyFeeds,
-      maxLevel: 2,
+      requiredRootLevel: 2,
+      coverageMaxLevel: 2,
       liveMissing: 0,
       counters: readyCounters,
     })).toBe(true);

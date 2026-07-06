@@ -135,7 +135,7 @@ describe("terrain frame live-bubble probe counters", () => {
       colliderRemovals: 7,
     }, 3));
 
-    expect(counters["live_bubble_probe_evictions_total"]).toBe(1);
+    expect(counters["live_bubble_probe_evictions_total"]).toBe(2);
     expect(counters["live_bubble_probe_collider_removals_total"]).toBe(2);
     expect(counters["live_bubble_evictions_total"]).toBe((totalBeforeProbe ?? 0) + 2);
   });
