@@ -217,6 +217,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       vegetationPhaseMs +
       input.phaseTiming.borderOceanDebugMs +
       input.phaseTiming.statsSyncMs;
+    const propsRestMs = Math.max(0, propsMs - vegetationPhaseMs);
     const propsUnattributedMs = Math.max(0, propsMs - propsBookedMs);
     const measuredTopLevelMs =
       input.phaseTiming.frameSetupMs +
@@ -277,7 +278,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       bubbleMs,
       propsMs,
       vegetationTotalMs: vegetationPhaseMs,
-      propsRestMs: propsUnattributedMs,
+      propsRestMs,
       grassMs: input.vegetationTiming.grassMs,
       treesMs: input.vegetationTiming.treesMs,
       understoryMs: input.vegetationTiming.understoryMs,
