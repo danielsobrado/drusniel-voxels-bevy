@@ -1,6 +1,7 @@
 export type ClodCacheArtifactKind =
   | "clod-page-node"
   | "clod-page-tree"
+  | "clod-stream-root-node"
   | "terrain-summary"
   | "far-shell-summary"
   | "shadow-proxy-summary"
