@@ -100,8 +100,6 @@ function streamWorkPending(stats: StreamingClodRootStats): boolean {
     || stats.applyQueuePages > 0
     || stats.safetyPendingPages > 0
     || stats.safetyInflightPages > 0
-    || stats.refinementPendingPages > 0
-    || stats.refinementInflightPages > 0
     || stats.parentCoverageViolations > 0;
 }
 
@@ -177,7 +175,7 @@ function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
     stoneClassSummaryController: statControllers.stoneClassSummary,
     stoneVisibleController: statControllers.stoneVisible,
     understoryTotalController: statControllers.understoryTotal,
-    understoryVisiblePatchesController: session.understoryVisiblePatchesController,
+    understoryVisiblePatchesController: statControllers.understoryVisiblePatchesController,
     understoryClassSummaryController: statControllers.understoryClassSummary,
     understoryGpuSummaryController: statControllers.understoryGpuSummary,
     forestLightingStatsController: statControllers.forestLightingStats,
