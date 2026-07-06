@@ -15,8 +15,7 @@ import { publishBorderOceanAcceptanceCounters } from "../debug/border_ocean_scen
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { publishFarShellMetricsToCounters } from "../long-view/farShellMetrics.js";
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
-import type { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
-import type { TerrainOwnershipRuntimeSnapshot } from "../stream/terrain_ownership_runtime.js";
+import type { TerrainOwnershipRuntime, TerrainOwnershipRuntimeSnapshot } from "../stream/terrain_ownership_runtime.js";
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
 import type { OwnershipResidencyFeeds } from "../stream/ownership_residency.js";
@@ -47,9 +46,7 @@ export interface LongViewFrameDiagnosticsDeps {
   phase0TargetVisibleM: number;
   phase0Config: Phase0Config;
   queryScene: string | null;
-  cfg: {
-    page: { chunk_size: number; chunks_per_page: number };
-  };
+  cfg: { page: { chunk_size: number; chunks_per_page: number } };
   camera: THREE.PerspectiveCamera;
   phase0VelocityX: number;
   phase0VelocityZ: number;
@@ -76,13 +73,14 @@ export interface StreamReadinessCounters {
 export function requiredRootClodPagesReady(
   snapshot: TerrainOwnershipRuntimeSnapshot,
   feeds: OwnershipResidencyFeeds,
-  maxLevel: number,
+  requiredRootLevel: number,
+  coverageMaxLevel: number,
 ): boolean {
   const ready = feeds.clodReady();
   for (const key of snapshot.visualPages.required) {
     const page = parsePageKey(key);
-    if (page.level !== maxLevel) continue;
-    if (!pageCoveredByResidentClodHierarchy(page, ready, maxLevel)) return false;
+    if (page.level !== requiredRootLevel) continue;
+    if (!pageCoveredByResidentClodHierarchy(page, ready, coverageMaxLevel)) return false;
   }
   return true;
 }
@@ -90,7 +88,8 @@ export function requiredRootClodPagesReady(
 export function streamReadinessSatisfied(input: {
   snapshot: TerrainOwnershipRuntimeSnapshot;
   feeds: OwnershipResidencyFeeds;
-  maxLevel: number;
+  requiredRootLevel: number;
+  coverageMaxLevel: number;
   liveMissing: number;
   counters: StreamReadinessCounters;
 }): boolean {
@@ -101,14 +100,11 @@ export function streamReadinessSatisfied(input: {
       && input.counters.farSummaryTilesReady >= input.counters.farSummaryTilesRequired
     );
   return input.liveMissing === 0
-    && requiredRootClodPagesReady(input.snapshot, input.feeds, input.maxLevel)
+    && requiredRootClodPagesReady(input.snapshot, input.feeds, input.requiredRootLevel, input.coverageMaxLevel)
     && farSummaryReady;
 }
 
-function farClipmapFromCounters(
-  counters: Readonly<Record<string, number>>,
-  camera: THREE.PerspectiveCamera,
-): FarClipmapOwnershipSnapshot | undefined {
+function farClipmapFromCounters(counters: Readonly<Record<string, number>>, camera: THREE.PerspectiveCamera): FarClipmapOwnershipSnapshot | undefined {
   if (counters["far_clipmap_enabled"] !== 1) return undefined;
   const innerRadiusM = counters["far_clipmap_inner_radius_m"];
   const outerRadiusM = counters["far_clipmap_outer_radius_m"];
@@ -121,8 +117,7 @@ function farClipmapFromCounters(
     centerZ: camera.position.z,
     snapX: camera.position.x,
     snapZ: camera.position.z,
-    ready: (counters["far_clipmap_pending_tiles"] ?? 1) === 0
-      && (counters["far_clipmap_ready_tiles"] ?? 0) > 0,
+    ready: (counters["far_clipmap_pending_tiles"] ?? 1) === 0 && (counters["far_clipmap_ready_tiles"] ?? 0) > 0,
   };
 }
 
@@ -150,11 +145,20 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     return Number.isFinite(value) ? value : fallback;
   };
 
+  const liveSafetyRadiusM = (): number => Math.max(
+    0,
+    deps.phase0Streaming.live_radius_m - deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
+  );
+
+  const requiredStreamingRootLevel = (counters: Readonly<Record<string, number>>): number => Math.max(
+    0,
+    Math.min(deps.maxTerrainLevel, Math.floor(numericCounter(counters, "live_clod_stream_max_root_level", deps.maxTerrainLevel))),
+  );
+
   const ownershipOracleEnabled = (): boolean => {
     if (typeof window === "undefined") return false;
     const params = new URLSearchParams(window.location.search);
-    return (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0")
-      || params.get("ownershipOracle") === "1";
+    return (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0") || params.get("ownershipOracle") === "1";
   };
 
   const backgroundQueuesQuiet = (counters: Readonly<Record<string, number>>): boolean => {
@@ -184,8 +188,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       && streamParentCoverageViolations === 0
       && streamActiveRootPages > 0
     );
-    return farSummaryQuiet && farShellRebuildPending === 0 && textureWindowPending === 0
-      && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
+    return farSummaryQuiet && farShellRebuildPending === 0 && textureWindowPending === 0 && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
   };
 
   if (typeof window !== "undefined") {
@@ -219,16 +222,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const info = deps.renderer.info;
     s.drawCalls = info?.render.drawCalls ?? 0;
     s.triangles = info?.render.triangles ?? 0;
-    for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) {
-      s.counters[`built_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
-    }
+    for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) s.counters[`built_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
     s.counters["terrain_draw_calls"] = selectionStats.renderedCount;
     s.counters["terrain_triangles"] = selectionStats.triCount;
 
     const grassStats = deps.getGrassStats();
     if (grassStats) {
-      s.counters["gpu_grass_visible"] = grassStats.gpuRingVisibleNear + grassStats.gpuRingVisibleMid
-        + grassStats.gpuRingVisibleFar + grassStats.gpuRingVisibleSuper;
+      s.counters["gpu_grass_visible"] = grassStats.gpuRingVisibleNear + grassStats.gpuRingVisibleMid + grassStats.gpuRingVisibleFar + grassStats.gpuRingVisibleSuper;
       s.counters["gpu_grass_dispatch_ms"] = grassStats.gpuRingDispatchMs ?? 0;
     }
     const treeStats = deps.getTreeStats();
@@ -246,54 +246,30 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const shellMetrics = deps.getFarShellMetrics?.();
     const infiniteShellActive = deps.infiniteFarShellActive?.() ?? false;
     const legacyShellBuilt = deps.farShellBuilt();
-    const farShellEnabled = infiniteShellActive
-      ? Boolean(shellMetrics?.farShellEnabled)
-      : legacyShellBuilt;
-    const farShellRadiusM = infiniteShellActive && shellMetrics
-      ? shellMetrics.farShellOuterM
-      : deps.worldCells * deps.getFarShellRadiusFactor();
-    const farShellGridRes = infiniteShellActive && shellMetrics
-      ? shellMetrics.farShellGridRes
-      : 128;
+    const farShellEnabled = infiniteShellActive ? Boolean(shellMetrics?.farShellEnabled) : legacyShellBuilt;
+    const farShellRadiusM = infiniteShellActive && shellMetrics ? shellMetrics.farShellOuterM : deps.worldCells * deps.getFarShellRadiusFactor();
+    const farShellGridRes = infiniteShellActive && shellMetrics ? shellMetrics.farShellGridRes : 128;
 
-    const effectiveVisible = computeEffectiveVisibleMeters({
-      worldCells: deps.worldCells,
-      farShellEnabled,
-      farShellRadiusM,
-    });
+    const effectiveVisible = computeEffectiveVisibleMeters({ worldCells: deps.worldCells, farShellEnabled, farShellRadiusM });
     s.counters["effective_far_radius_m"] = farShellRadiusM;
     s.counters["effective_visible_m"] = effectiveVisible;
-    s.counters["visible_target_met"] = computeVisibleTargetMet({
-      effectiveVisibleM: effectiveVisible,
-      targetVisibleM: deps.phase0TargetVisibleM,
-    }) ? 1 : 0;
+    s.counters["visible_target_met"] = computeVisibleTargetMet({ effectiveVisibleM: effectiveVisible, targetVisibleM: deps.phase0TargetVisibleM }) ? 1 : 0;
     s.counters["far_shell_enabled"] = farShellEnabled ? 1 : 0;
     s.counters["far_shell_radius_m"] = farShellRadiusM;
     s.counters["far_shell_grid_res"] = farShellGridRes;
-    s.counters["far_shell_tris"] = infiniteShellActive && shellMetrics
-      ? shellMetrics.farShellTriangles
-      : (s.counters["far_shell_tris"] ?? 0);
-    if (shellMetrics) {
-      publishFarShellMetricsToCounters(s.counters, shellMetrics);
-    }
-    if (s.counters["shadow_proxy_enabled"] === undefined) {
-      s.counters["shadow_proxy_enabled"] = deps.isLongView ? 1 : 0;
-    }
+    s.counters["far_shell_tris"] = infiniteShellActive && shellMetrics ? shellMetrics.farShellTriangles : (s.counters["far_shell_tris"] ?? 0);
+    if (shellMetrics) publishFarShellMetricsToCounters(s.counters, shellMetrics);
+    if (s.counters["shadow_proxy_enabled"] === undefined) s.counters["shadow_proxy_enabled"] = deps.isLongView ? 1 : 0;
     s.counters["shadow_proxy_inert"] = deps.getShadowProxyInert();
     s.counters["canopy_enabled"] = deps.farShellCanopyEnabled() ? 1 : 0;
-    for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) {
-      s.counters[`rendered_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
-    }
+    for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) s.counters[`rendered_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
     s.counters["rendered_terrain_tris"] = selectionStats.triCount;
     s.counters["total_scene_tris"] = s.triangles;
     s.counters["draw_calls"] = s.drawCalls;
 
     phase0FrameMsBuffer.push(s.frameMs);
     if (phase0FrameMsBuffer.length > PHASE0_P95_WINDOW) phase0FrameMsBuffer.shift();
-    if (phase0FrameMsBuffer.length > 0) {
-      const totalFrameMs = phase0FrameMsBuffer.reduce((sum, value) => sum + value, 0);
-      s.counters["frame_ms_avg"] = totalFrameMs / phase0FrameMsBuffer.length;
-    }
+    if (phase0FrameMsBuffer.length > 0) s.counters["frame_ms_avg"] = phase0FrameMsBuffer.reduce((sum, value) => sum + value, 0) / phase0FrameMsBuffer.length;
     if (phase0FrameMsBuffer.length >= 10) {
       const sorted = [...phase0FrameMsBuffer].sort((a, b) => a - b);
       s.counters["frame_ms_p95"] = sorted[Math.floor(sorted.length * 0.95)] ?? -1;
@@ -331,13 +307,20 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const ownershipSnapshot = deps.ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
     publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
     const ownershipResidencyFeeds = deps.getOwnershipResidencyFeeds?.() ?? createSnapshotOwnershipResidencyFeeds(ownershipSnapshot);
-    const residencyMissing = countSnapshotResidencyMissing(ownershipSnapshot, ownershipResidencyFeeds);
+    const rootLevel = requiredStreamingRootLevel(s.counters);
+    const residencyMissing = countSnapshotResidencyMissing(ownershipSnapshot, ownershipResidencyFeeds, {
+      liveChunkSizeM: deps.cfg.page.chunk_size,
+      liveRequiredRadiusM: liveSafetyRadiusM(),
+      clodRequiredRootLevel: rootLevel,
+      clodCoverageMaxLevel: deps.maxTerrainLevel,
+    });
     s.counters["residency_missing_live"] = residencyMissing.liveMissing;
     s.counters["residency_missing_clod"] = residencyMissing.clodMissing;
     if (streamReadyFrame < 0 && streamReadinessSatisfied({
       snapshot: ownershipSnapshot,
       feeds: ownershipResidencyFeeds,
-      maxLevel: deps.maxTerrainLevel,
+      requiredRootLevel: rootLevel,
+      coverageMaxLevel: deps.maxTerrainLevel,
       liveMissing: residencyMissing.liveMissing,
       counters: {
         farSummaryTilesRequired: numericCounter(s.counters, "far_summary_tiles_required", 0),
@@ -345,14 +328,11 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         farSummaryTilesMissing: numericCounter(s.counters, "far_summary_tiles_missing", 0),
         farSummaryTilesBuilding: numericCounter(s.counters, "far_summary_tiles_building", 0),
       },
-    })) {
-      streamReadyFrame = s.frame;
-    }
+    })) streamReadyFrame = s.frame;
     s.counters["stream_ready_frame"] = streamReadyFrame;
+
     const farClipmap = deps.getFarClipmapOwnershipSnapshot?.() ?? farClipmapFromCounters(s.counters, deps.camera);
-    const farShellCenter = shellMetrics
-      ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ }
-      : { x: deps.camera.position.x, z: deps.camera.position.z };
+    const farShellCenter = shellMetrics ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ } : { x: deps.camera.position.x, z: deps.camera.position.z };
     const farShellSnapX = shellMetrics?.farShellSnappedX ?? farShellCenter.x;
     const farShellSnapZ = shellMetrics?.farShellSnappedZ ?? farShellCenter.z;
     if (farShellSnapX !== lastFarShellSnapX || farShellSnapZ !== lastFarShellSnapZ) {
@@ -368,6 +348,8 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         chunkSizeM: deps.cfg.page.chunk_size,
         pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
         maxLevel: deps.maxTerrainLevel,
+        requiredRootLevel: rootLevel,
+        liveRequiredRadiusM: liveSafetyRadiusM(),
         camera: { x: deps.camera.position.x, z: deps.camera.position.z },
         farShellCenter,
         farShellRecenterCount,
@@ -398,7 +380,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         raw_horizon_hole_ratio: 0,
         priority_owner_overlap_cells: 0,
         priority_unowned_cells: 0,
-        clod_parent_coverage_violations: 0,
+        clod_parent_coverage_violations: s.counters["residency_missing_clod"],
         far_clipmap_owned_cells: farClipmap?.ready ? numericCounter(s.counters, "far_clipmap_gpu_owned_cells", 0) : 0,
         far_clipmap_unowned_cells: farClipmap?.enabled && !farClipmap.ready ? 1 : 0,
         far_clipmap_ownership_holes: 0,
@@ -419,9 +401,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const inflightMs = s.counters["live_clod_stream_inflight_ms"] ?? 0;
     if (inflightMs > 60000) {
       const hooks = (window as typeof window & { __drusnielClod?: { error?: string | null } }).__drusnielClod;
-      if (hooks) {
-        hooks.error = `Streamed CLOD worker build timed out after ${inflightMs.toFixed(0)}ms (inflight batch exceeded 60s threshold)`;
-      }
+      if (hooks) hooks.error = `Streamed CLOD worker build timed out after ${inflightMs.toFixed(0)}ms (inflight batch exceeded 60s threshold)`;
     }
 
     const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
