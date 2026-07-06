@@ -148,7 +148,12 @@ export class ClodWorkerClient {
       }
       return await mesher.buildPages(coords);
     } catch (error) {
+      const mesherDisabled = this.streamRootGpuMesher?.stats().enabled === 0;
       this.streamRootGpuMesher?.recordFallbackPages(coords.length);
+      if (mesherDisabled) {
+        this.streamRootGpuUnavailable = true;
+        this.disposeStreamRootGpuMesher();
+      }
       if (!this.streamRootGpuConfig.fallback) throw error;
       console.warn(`[clod-stream-gpu] GPU streamed-root batch failed; falling back to CPU worker for ${coords.length} page(s)`, error);
       return this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
