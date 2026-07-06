@@ -11,8 +11,9 @@ import {
 } from "./artifactSerializer.js";
 import type { WorkerCacheBuildStats } from "./cacheMetrics.js";
 
-const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v1-world-infinite-hydrology-bounded";
+const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v2-world-infinite-hydrology-bounded";
 
+export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
 
 export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
@@ -30,6 +31,7 @@ export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
 
 export async function tryLoadStreamRootNode(
   ctx: ClodCacheContext | null,
+  backend: StreamRootCacheBackend,
   level: number,
   px: number,
   pz: number,
@@ -38,7 +40,7 @@ export async function tryLoadStreamRootNode(
   if (!ctx?.effective) return null;
   const nodeId = streamRootNodeId(level, px, pz);
   const result = await ctx.service.get(
-    streamRootKeyParts(ctx, level, px, pz, nodeId),
+    streamRootKeyParts(ctx, backend, level, px, pz, nodeId),
     decodeClodPageNodeArtifact,
   );
 
@@ -58,6 +60,7 @@ export async function tryLoadStreamRootNode(
 
 export async function storeStreamRootNode(
   ctx: ClodCacheContext | null,
+  backend: StreamRootCacheBackend,
   node: ClodPageNode,
   buildMs: number,
   stats: StreamRootCacheStats,
@@ -67,7 +70,7 @@ export async function storeStreamRootNode(
   stats.nodesBuilt++;
   stats.coldBuildMs += buildMs;
   await ctx.service.put(
-    streamRootKeyParts(ctx, parsed.level, parsed.pageX, parsed.pageZ, node.id),
+    streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id),
     nodeToArtifact(node),
     encodeClodPageNodeArtifact,
     {
@@ -75,18 +78,46 @@ export async function storeStreamRootNode(
       triangleCount: node.mesh.indices.length / 3,
       worldMode: "infinite",
       hydrologyMode: "bounded-to-startup-world",
+      backend,
     },
   );
 }
 
+export function publishStreamRootCacheCounters(
+  stats: StreamRootCacheStats,
+  backend: StreamRootCacheBackend,
+): void {
+  const counters = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+  if (!counters) return;
+
+  addCounter(counters, "live_clod_stream_cache_hits", stats.cacheHits);
+  addCounter(counters, "live_clod_stream_cache_misses", stats.cacheMisses);
+  addCounter(counters, "live_clod_stream_cache_nodes_from_cache", stats.nodesFromCache);
+  addCounter(counters, "live_clod_stream_cache_nodes_built", stats.nodesBuilt);
+  addCounter(counters, "live_clod_stream_cache_cold_build_ms", stats.coldBuildMs);
+  addCounter(counters, "live_clod_stream_cache_cold_build_ms_avoided", stats.coldBuildMsAvoided);
+  addCounter(counters, "live_clod_stream_cache_decode_ms", stats.cacheDecodeMs);
+  addCounter(counters, "live_clod_stream_cache_net_saved_ms", stats.netSavedMs);
+  counters["live_clod_stream_cache_backend_gpu"] = backend === "gpu" ? 1 : 0;
+  counters["live_clod_stream_cache_backend_cpu"] = backend === "cpu" ? 1 : 0;
+}
+
+function addCounter(counters: Record<string, number>, key: string, value: number): void {
+  if (!Number.isFinite(value) || value <= 0) return;
+  counters[key] = (counters[key] ?? 0) + value;
+}
+
 function streamRootKeyParts(
   ctx: ClodCacheContext,
+  backend: StreamRootCacheBackend,
   level: number,
   px: number,
   pz: number,
   nodeId: string,
 ) {
-  const sourceHash = streamRootSourceHash(ctx);
+  const sourceHash = streamRootSourceHash(ctx, backend);
   return buildBaseKeyParts(ctx, "clod-stream-root-node", {
     pageX: px,
     pageZ: pz,
@@ -96,8 +127,8 @@ function streamRootKeyParts(
   });
 }
 
-function streamRootSourceHash(ctx: ClodCacheContext): string {
-  return `${pageNodeSourceHash(ctx)}-${STREAM_ROOT_SOURCE_SUFFIX}`;
+function streamRootSourceHash(ctx: ClodCacheContext, backend: StreamRootCacheBackend): string {
+  return `${pageNodeSourceHash(ctx)}-${STREAM_ROOT_SOURCE_SUFFIX}-backend-${backend}`;
 }
 
 function streamRootNodeId(level: number, px: number, pz: number): string {
