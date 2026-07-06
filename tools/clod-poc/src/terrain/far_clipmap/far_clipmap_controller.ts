@@ -1,7 +1,11 @@
 import * as THREE from "three";
 import type { FarClipmapConfig, FarClipmapDebugMode } from "./far_clipmap_config.js";
 import { farClipmapRingRange, farClipmapSnap } from "./far_clipmap_keys.js";
-import { createFarClipmapTerrainGeometry, type FarClipmapBuildStats } from "./far_clipmap_geometry.js";
+import {
+  createFarClipmapGridGeometry,
+  validateFarClipmapSummaryCoverage,
+  type FarClipmapBuildStats,
+} from "./far_clipmap_geometry.js";
 import {
   createFarClipmapMaterial,
   farClipmapShaderRenderOrder,
@@ -119,6 +123,10 @@ function makeStats(
   };
 }
 
+function ringCellSize(config: FarClipmapConfig, outerRadiusM: number): number {
+  return (outerRadiusM * 2) / Math.max(1, config.gridResolution - 1);
+}
+
 export function createFarClipmapController(
   scene: THREE.Scene,
   config: FarClipmapConfig,
@@ -151,24 +159,28 @@ class FarClipmapControllerImpl implements FarClipmapController {
     });
     for (let ring = 0; ring < config.ringCount; ring++) {
       const range = farClipmapRingRange(config, ring);
+      const cellSizeM = ringCellSize(config, range.outerRadiusM);
       const material = createFarClipmapMaterial({
         debugMode: config.materialDebugMode,
         seaLevel: 0,
         clipInnerRadiusM: range.innerRadiusM,
         clipOuterRadiusM: range.outerRadiusM,
+        cellSizeM,
+        heightScale: config.heightScale,
+        yOffset: config.yOffset,
       });
-      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
+      const mesh = new THREE.Mesh(createFarClipmapGridGeometry({ gridResolution: config.gridResolution }), material);
       mesh.name = "far-clipmap-ring-" + String(ring);
       mesh.frustumCulled = false;
       mesh.renderOrder = farClipmapShaderRenderOrder();
-      mesh.visible = config.enabled;
+      mesh.visible = false;
       scene.add(mesh);
       this.rings.push({
         mesh,
         material,
         innerRadiusM: range.innerRadiusM,
         outerRadiusM: range.outerRadiusM,
-        cellSizeM: range.cellSizeM,
+        cellSizeM,
         readySnapX: Number.NaN,
         readySnapZ: Number.NaN,
       });
@@ -198,7 +210,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
           exceptionSamples: 0,
         };
         const startedAt = performance.now();
-        const nextGeometry = createFarClipmapTerrainGeometry({
+        const coverageReady = validateFarClipmapSummaryCoverage({
           gridResolution: this.config.gridResolution,
           centerX: snap.snapX,
           centerZ: snap.snapZ,
@@ -210,12 +222,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
           stats: buildStats,
         });
         const buildMs = performance.now() - startedAt;
-        if (buildStats.fallbackSamples > 0) {
-          nextGeometry.dispose();
-        } else {
-          const previousGeometry = ring.mesh.geometry;
-          ring.mesh.geometry = nextGeometry;
-          previousGeometry.dispose();
+        if (coverageReady && buildStats.fallbackSamples === 0) {
           ring.readySnapX = snap.snapX;
           ring.readySnapZ = snap.snapZ;
           frameStats.rebuilt++;
@@ -229,14 +236,22 @@ class FarClipmapControllerImpl implements FarClipmapController {
         this.totalFallbackSamples += buildStats.fallbackSamples;
         this.totalExceptionSamples += buildStats.exceptionSamples;
       }
+      const displaySnapX = Number.isFinite(ring.readySnapX) ? ring.readySnapX : snap.snapX;
+      const displaySnapZ = Number.isFinite(ring.readySnapZ) ? ring.readySnapZ : snap.snapZ;
       updateFarClipmapMaterialFrameUniforms(ring.material, {
         cameraX: cameraPosition.x,
         cameraZ: cameraPosition.z,
         clipInnerRadiusM: ring.innerRadiusM,
         clipOuterRadiusM: ring.outerRadiusM,
+        ringOriginX: displaySnapX - ring.outerRadiusM,
+        ringOriginZ: displaySnapZ - ring.outerRadiusM,
+        cellSizeM: ring.cellSizeM,
+        heightScale: this.config.heightScale,
+        yOffset: this.config.yOffset,
       });
-      ring.mesh.visible = this.visible && this.config.enabled;
-      if (ring.readySnapX === snap.snapX && ring.readySnapZ === snap.snapZ) ready++;
+      const ringReady = ring.readySnapX === snap.snapX && ring.readySnapZ === snap.snapZ;
+      ring.mesh.visible = this.visible && this.config.enabled && ringReady;
+      if (ringReady) ready++;
     }
     this.lastStats = makeStats(this.config, this.visible, ready, frameStats, sourceReady, this.totals());
     return this.lastStats;
@@ -248,7 +263,10 @@ class FarClipmapControllerImpl implements FarClipmapController {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
-    for (const ring of this.rings) ring.mesh.visible = visible && this.config.enabled;
+    for (const ring of this.rings) {
+      const ringReady = Number.isFinite(ring.readySnapX) && Number.isFinite(ring.readySnapZ);
+      ring.mesh.visible = visible && this.config.enabled && ringReady;
+    }
   }
 
   ownershipSnapshot(): FarClipmapOwnershipSnapshot {
