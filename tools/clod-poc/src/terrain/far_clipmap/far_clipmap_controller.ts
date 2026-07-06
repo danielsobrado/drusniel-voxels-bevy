@@ -3,8 +3,6 @@ import type { FarClipmapConfig, FarClipmapDebugMode } from "./far_clipmap_config
 import { farClipmapRingRange, farClipmapSnap } from "./far_clipmap_keys.js";
 import {
   createFarClipmapGridGeometry,
-  validateFarClipmapSummaryCoverage,
-  type FarClipmapBuildStats,
 } from "./far_clipmap_geometry.js";
 import {
   createFarClipmapMaterial,
@@ -127,6 +125,14 @@ function ringCellSize(config: FarClipmapConfig, outerRadiusM: number): number {
   return (outerRadiusM * 2) / Math.max(1, config.gridResolution - 1);
 }
 
+function ringVertexCount(config: FarClipmapConfig): number {
+  return config.gridResolution * config.gridResolution;
+}
+
+function ringTriangleCount(config: FarClipmapConfig): number {
+  return Math.max(0, config.gridResolution - 1) * Math.max(0, config.gridResolution - 1) * 2;
+}
+
 export function createFarClipmapController(
   scene: THREE.Scene,
   config: FarClipmapConfig,
@@ -200,41 +206,20 @@ class FarClipmapControllerImpl implements FarClipmapController {
     this.snapX = snap.snapX;
     this.snapZ = snap.snapZ;
     let ready = 0;
+    const vertexCount = ringVertexCount(this.config);
+    const triangleCount = ringTriangleCount(this.config);
     for (const ring of this.rings) {
       const stale = ring.readySnapX !== snap.snapX || ring.readySnapZ !== snap.snapZ;
       if (stale && sourceReady && frameStats.rebuilt < this.config.maxRebuildsPerFrame) {
-        const buildStats: FarClipmapBuildStats = {
-          vertices: 0,
-          triangles: 0,
-          fallbackSamples: 0,
-          exceptionSamples: 0,
-        };
         const startedAt = performance.now();
-        const coverageReady = validateFarClipmapSummaryCoverage({
-          gridResolution: this.config.gridResolution,
-          centerX: snap.snapX,
-          centerZ: snap.snapZ,
-          innerRadiusM: ring.innerRadiusM,
-          outerRadiusM: ring.outerRadiusM,
-          heightScale: this.config.heightScale,
-          yOffset: this.config.yOffset,
-          source: this.source,
-          stats: buildStats,
-        });
+        ring.readySnapX = snap.snapX;
+        ring.readySnapZ = snap.snapZ;
+        frameStats.rebuilt++;
+        frameStats.vertices += vertexCount;
+        frameStats.triangles += triangleCount;
         const buildMs = performance.now() - startedAt;
-        if (coverageReady && buildStats.fallbackSamples === 0) {
-          ring.readySnapX = snap.snapX;
-          ring.readySnapZ = snap.snapZ;
-          frameStats.rebuilt++;
-        }
         frameStats.buildMs += buildMs;
-        frameStats.vertices += buildStats.vertices;
-        frameStats.triangles += buildStats.triangles;
-        frameStats.fallbackSamples += buildStats.fallbackSamples;
-        frameStats.exceptionSamples += buildStats.exceptionSamples;
         this.totalBuildMs += buildMs;
-        this.totalFallbackSamples += buildStats.fallbackSamples;
-        this.totalExceptionSamples += buildStats.exceptionSamples;
       }
       const displaySnapX = Number.isFinite(ring.readySnapX) ? ring.readySnapX : snap.snapX;
       const displaySnapZ = Number.isFinite(ring.readySnapZ) ? ring.readySnapZ : snap.snapZ;
