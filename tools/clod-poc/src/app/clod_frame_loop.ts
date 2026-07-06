@@ -378,7 +378,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           currentUnderstoryStats: stats.getUnderstoryStats(),
         };
 
-    if (collectFrameTiming || frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS) {
+    const mirrorDue = frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS;
+    if (mirrorDue) {
       lastDebugCounterMirrorAt = frameStart;
       const hooks = render.getHooks();
       if (hooks?.stats) {
