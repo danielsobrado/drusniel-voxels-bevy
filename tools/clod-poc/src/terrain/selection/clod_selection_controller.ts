@@ -179,6 +179,11 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   };
 
   const refreshCachedCut = (rendered: ClodPageNode[], settings: ClodSelectionSettings): boolean => {
+    if (currentTerrainViews.size === lastRenderedNodeIds.size) {
+      deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId);
+      return true;
+    }
+
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
     for (const node of rendered) {
       const view = deps.views.get(node.id);
