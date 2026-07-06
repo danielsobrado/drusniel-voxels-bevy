@@ -12,6 +12,8 @@ export interface FramePerfPhaseTiming {
   frameSetupMs: number;
   inputMs: number;
   selectionUpdateMs: number;
+  streamingRootUpdateMs: number;
+  selectionCoreMs: number;
   clodApplyMs: number;
   longViewDiagnosticsMs: number;
   farSummaryMs: number;
