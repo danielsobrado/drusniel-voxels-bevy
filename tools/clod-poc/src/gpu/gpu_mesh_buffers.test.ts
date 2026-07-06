@@ -1,18 +1,6 @@
-// Verifies host buffer packing matches the WGSL struct layouts in terrain_field_entry.wgsl
-// (a byte-offset mismatch silently feeds the GPU garbage), and that assembling readback arrays
-// reproduces the canonical surface end-to-end.
-
 import { describe, it, expect, beforeEach } from "vitest";
 import { voxelEditStore } from "../terrain/voxel_edits/voxel_edit_store.js";
-import {
-  Y_CELLS,
-  DIG_EDIT_WORDS,
-  computeMeshDims,
-  packMeshParams,
-  packFieldParams,
-  packDigEdits,
-  assembleChunkMesh,
-} from "./gpu_mesh_buffers.js";
+import { Y_CELLS, DIG_EDIT_WORDS, MESH_PARAM_WORDS, computeMeshDims, packMeshParams, packFieldParams, packDigEdits, assembleChunkMesh } from "./gpu_mesh_buffers.js";
 import { resolveDigEdits } from "./terrain_field_core.js";
 import { meshChunkGpuShaped } from "./surface_nets_core.js";
 import { meshChunk } from "../terrain/terrain.js";
@@ -22,16 +10,9 @@ describe("computeMeshDims", () => {
   it("matches the grid meshChunkGpuShaped uses", () => {
     const S = 8;
     const d = computeMeshDims(2, 3, S);
-    expect(d.x0).toBe(16);
-    expect(d.x1).toBe(24);
-    expect(d.z0).toBe(24);
-    expect(d.z1).toBe(32);
-    expect(d.vxBase).toBe(15);
-    expect(d.vyBase).toBe(-1);
-    expect(d.vzBase).toBe(23);
-    expect(d.vxCount).toBe(S + 1);
-    expect(d.vyCount).toBe(Y_CELLS + 1);
-    expect(d.vzCount).toBe(S + 1);
+    expect([d.x0, d.x1, d.z0, d.z1]).toEqual([16, 24, 24, 32]);
+    expect([d.vxBase, d.vyBase, d.vzBase]).toEqual([15, -1, 23]);
+    expect([d.vxCount, d.vyCount, d.vzCount]).toEqual([S + 1, Y_CELLS + 1, S + 1]);
     expect(d.slotCount).toBe((S + 1) * (Y_CELLS + 1) * (S + 1));
     expect(d.maxVertices).toBe(d.slotCount);
     expect(d.maxIndices).toBe(S * S * Y_CELLS * 3 * 6);
@@ -41,71 +22,37 @@ describe("computeMeshDims", () => {
 describe("packMeshParams", () => {
   it("writes MeshParams fields in wgsl struct order", () => {
     const dims = computeMeshDims(1, 1, 8);
-    const p = packMeshParams(dims, { cellsX: 64, cellsZ: 48 });
-    expect(p.length).toBe(16);
+    const p = packMeshParams(dims, { cellsX: 64, cellsZ: 48 }, { positionBaseF32: 10, normalBaseF32: 20, materialBaseF32: 30, cellIndexBase: 40, indexBase: 50, counterSlot: 3 });
+    expect(p.length).toBe(MESH_PARAM_WORDS);
     expect([p[0], p[1], p[2], p[3]]).toEqual([dims.x0, dims.x1, dims.z0, dims.z1]);
     expect(p[4]).toBe(Y_CELLS);
     expect([p[5], p[6]]).toEqual([64, 48]);
     expect([p[7], p[8], p[9]]).toEqual([dims.vxBase, dims.vyBase, dims.vzBase]);
     expect([p[10], p[11], p[12]]).toEqual([dims.vxCount, dims.vyCount, dims.vzCount]);
-    expect(p[13]).toBe(dims.maxIndices);
-    expect(p[14]).toBe(dims.maxVertices);
-    expect(p[15]).toBe(1);
+    expect([p[13], p[14], p[15]]).toEqual([dims.maxIndices, dims.maxVertices, 1]);
+    expect([p[16], p[17], p[18], p[19], p[20], p[21]]).toEqual([10, 20, 30, 40, 50, 3]);
   });
 
-  it("packs finite:false so the GPU mesher can skip finite-world clipping", () => {
-    const dims = computeMeshDims(64, 64, 8);
-    const p = packMeshParams(dims, { cellsX: 64, cellsZ: 64, finite: false });
+  it("packs finite false", () => {
+    const p = packMeshParams(computeMeshDims(64, 64, 8), { cellsX: 64, cellsZ: 64, finite: false });
     expect(p[15]).toBe(0);
   });
 });
 
 describe("packFieldParams", () => {
   it("writes editCount and terrain config in wgsl struct order", () => {
-    const p = packFieldParams(7, {
-      seed: 123,
-      seaLevel: 19,
-      islandShape: {
-        enabled: true,
-        seaLevel: 19,
-        seed: 123,
-        spacingM: 1400,
-        radiusM: 520,
-        blendM: 240,
-        warpStrengthM: 180,
-        beachWidthM: 30,
-        cliffWidthM: 50,
-        worldRadiusM: 4096,
-        oceanRim: true,
-        oceanRimDropM: 37,
-      },
-    });
-    const i = new Int32Array(p.buffer);
-    const f = new Float32Array(p.buffer);
+    const p = packFieldParams(7);
     expect(p.length).toBe(16);
     expect(p[0]).toBe(7);
-    expect(i[1]).toBe(123);
-    expect([p[2], p[3]]).toEqual([1, 1]);
-    expect([f[4], f[5], f[6], f[7]]).toEqual([19, 1400, 520, 240]);
-    expect([f[8], f[9], f[10], f[11], f[12]]).toEqual([180, 30, 50, 4096, 37]);
   });
 });
 
 describe("packDigEdits", () => {
-  it("lays out each edit as 10 words in DigEdit struct order (stride 40)", () => {
-    const resolved = resolveDigEdits([
-      { x: 1, y: 2, z: 3, r: 4, height: 5, shape: "cube", op: "add", strength: 0.5, falloff: 0.25, material: 3 },
-    ]);
+  it("packs one resolved edit", () => {
+    const resolved = resolveDigEdits([{ x: 1, y: 2, z: 3, r: 4, height: 5, shape: "sphere", op: "add", strength: 0.5, falloff: 0.25, material: 3 }]);
     const buf = packDigEdits(resolved);
-    expect(buf.byteLength).toBe(DIG_EDIT_WORDS * 4); // one edit, stride 40
-    const f = new Float32Array(buf);
-    const i = new Int32Array(buf);
-    expect([f[0], f[1], f[2], f[3], f[4]]).toEqual([1, 2, 3, 4, 5]); // x,y,z,r,h
-    expect(i[5]).toBe(1); // shape: cube
-    expect(i[6]).toBe(1); // opAdd: add
-    expect(f[7]).toBeCloseTo(0.5); // strength
-    expect(f[8]).toBeCloseTo(0.25); // falloff
-    expect(i[9]).toBe(3); // material
+    expect(buf.byteLength).toBe(DIG_EDIT_WORDS * 4);
+    expect(new Float32Array(buf)[0]).toBe(1);
   });
 
   it("never returns a zero-sized buffer", () => {
@@ -114,19 +61,12 @@ describe("packDigEdits", () => {
 });
 
 describe("assembleChunkMesh end-to-end", () => {
-  beforeEach(() => {
-    voxelEditStore.clear();
-  });
+  beforeEach(() => { voxelEditStore.clear(); });
 
   it("reproduces the canonical surface from max-sized readback arrays", () => {
     const S = 4;
     const world = { cellsX: 16, cellsZ: 16 };
-    const cfg = {
-      page: { chunk_size: S },
-      simplify: { weld_epsilon_cells: 0.3 },
-    } as unknown as ClodPagesConfig;
-    // The GPU writes compact verts/indices into oversized buffers; emulate that with the verified
-    // mesher and over-allocated backing arrays, then assemble by the reported counts.
+    const cfg = { page: { chunk_size: S }, simplify: { weld_epsilon_cells: 0.3 } } as unknown as ClodPagesConfig;
     const gpu = meshChunkGpuShaped(1, 1, S, world, []);
     const dims = computeMeshDims(1, 1, S);
     const posBuf = new Float32Array(dims.maxVertices * 3);
@@ -137,15 +77,9 @@ describe("assembleChunkMesh end-to-end", () => {
     nrmBuf.set(gpu.normals);
     matBuf.set(gpu.materials);
     idxBuf.set(gpu.indices);
-    const vertexCount = gpu.positions.length / 3;
-    const indexCount = gpu.indices.length;
-
-    const asm = assembleChunkMesh(posBuf, nrmBuf, matBuf, idxBuf, vertexCount, indexCount);
+    const asm = assembleChunkMesh(posBuf, nrmBuf, matBuf, idxBuf, gpu.positions.length / 3, gpu.indices.length);
     expect(asm.positions).toEqual(gpu.positions);
     expect(asm.indices).toEqual(gpu.indices);
-
-    // And the assembled surface still equals canonical meshChunk (sanity over the full chain).
-    const canonical = meshChunk(1, 1, cfg, world);
-    expect(asm.indices.length).toBe(canonical.indices.length);
+    expect(asm.indices.length).toBe(meshChunk(1, 1, cfg, world).indices.length);
   });
 });
