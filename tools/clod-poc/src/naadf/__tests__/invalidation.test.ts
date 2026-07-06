@@ -60,6 +60,26 @@ describe("naadf invalidation", () => {
     expect(state.farTiles.has(farTileKeyString(right))).toBe(true);
   });
 
+  it("treats negative non-point far dirty bounds as half-open at exact tile boundaries", () => {
+    const state = createTestState();
+    const tileSizeM = farTileSizeM(state, 0);
+    const negative = { ring: 0, x: -1, z: -1 };
+    const zeroX = { ring: 0, x: 0, z: -1 };
+    insertFarTile(state, negative);
+    insertFarTile(state, zeroX);
+
+    const result = invalidateNaadfBounds(state, {
+      minX: -tileSizeM,
+      minZ: -tileSizeM,
+      maxX: 0,
+      maxZ: -tileSizeM + 1,
+    });
+
+    expect(result.farTilesRemoved).toBe(1);
+    expect(state.farTiles.has(farTileKeyString(negative))).toBe(false);
+    expect(state.farTiles.has(farTileKeyString(zeroX))).toBe(true);
+  });
+
   it("maps exact point far dirty bounds to the actual tile", () => {
     const state = createTestState();
     const tileSizeM = farTileSizeM(state, 0);
@@ -129,6 +149,24 @@ describe("naadf invalidation", () => {
     expect(result.residentsMarked).toBe(1);
     expect(left.state).toBe("building");
     expect(right.state).toBe("ready");
+  });
+
+  it("treats negative non-point resident dirty bounds as half-open at chunk boundaries", () => {
+    const state = createTestState();
+    const chunkSize = state.config.world.chunkSizeCells;
+    const negative = addResident(state, readyResident(state, { x: -1, z: -1 }));
+    const zeroX = addResident(state, readyResident(state, { x: 0, z: -1 }));
+
+    const result = invalidateNaadfBounds(state, {
+      minX: -chunkSize,
+      minZ: -chunkSize,
+      maxX: 0,
+      maxZ: -chunkSize + 1,
+    });
+
+    expect(result.residentsMarked).toBe(1);
+    expect(negative.state).toBe("building");
+    expect(zeroX.state).toBe("ready");
   });
 
   it("maps exact point resident dirty bounds to the actual chunk", () => {
