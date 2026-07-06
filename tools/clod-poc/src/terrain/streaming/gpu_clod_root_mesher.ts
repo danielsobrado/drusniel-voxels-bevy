@@ -34,10 +34,15 @@ import { buildOuterBorderLocks } from "../../lock.js";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import type { WorldBounds } from "../terrain_surface.js";
 import {
+  RootGpuBatchLimitError,
+  estimateChunkSlotBytes,
+  estimateRootRequestSlotBytes,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   splitRootGpuBatches,
   type GpuRootChunkPlan,
+  type RootGpuBatchLimits,
+  type RootBatchPageConfig,
 } from "./gpu_clod_root_batch_buffers.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
 
@@ -48,6 +53,9 @@ const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
 const DEFAULT_MAX_BATCH_CHUNK_SLOTS = 64;
 const DEFAULT_MAX_TOTAL_SLOT_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_READBACK_BUFFER_BYTES = 256 * 1024 * 1024;
+const READBACK_BUFFER_HEADROOM = 0.75;
+const TOTAL_SLOT_BUFFER_HEADROOM = 2;
 
 interface ChunkMesh {
   positions: Float32Array;
@@ -76,8 +84,8 @@ export interface GpuClodRootMesherStats {
   pagesDispatched: number;
   batchPagesP95: number;
   chunkSlotsDispatched: number;
-  computeSubmitMsP50: number;
-  computeSubmitMsP95: number;
+  encodeSubmitMsP50: number;
+  encodeSubmitMsP95: number;
   countReadbackMsP95: number;
   geometryReadbackMsP95: number;
   buildMsP50: number;
@@ -117,11 +125,15 @@ interface GpuRootChunkSlot extends GpuRootChunkPlan {
   bindGroup: GPUBindGroup;
 }
 
+interface RuntimeBatchLimits extends RootGpuBatchLimits {
+  maxReadbackBufferBytes: number;
+}
+
 class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   private readonly buildSamples: number[] = [];
   private readonly countReadbackSamples: number[] = [];
   private readonly geometryReadbackSamples: number[] = [];
-  private readonly computeSubmitSamples: number[] = [];
+  private readonly encodeSubmitSamples: number[] = [];
   private readonly batchPageSamples: number[] = [];
   private batchesDispatched = 0;
   private pagesDispatched = 0;
@@ -129,7 +141,9 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   private fallbackPages = 0;
   private failedBatches = 0;
   private workerFallbackPages = 0;
+  private disabledError: Error | null = null;
   private readonly simplifierReady = initSimplifier();
+  private readonly batchLimits: RuntimeBatchLimits;
 
   constructor(
     private readonly device: GPUDevice,
@@ -139,29 +153,26 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
     private readonly cfg: ClodPagesConfig,
     private readonly world: WorldBounds,
     private readonly config: StreamingRootGpuMesherConfig,
-  ) {}
+  ) {
+    this.batchLimits = resolveRuntimeBatchLimits(device, config, cfg.page.chunk_size);
+  }
 
   async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
     if (batch.length === 0) return { nodes: [], buildMs: 0, transferBytes: 0 };
+    if (this.disabledError) throw this.disabledError;
     const startedAt = performance.now();
     const nodes: ClodPageNode[] = [];
-    const subBatches = splitRootGpuBatches(batch, {
-      chunks_per_page: this.cfg.page.chunks_per_page,
-      chunk_size: this.cfg.page.chunk_size,
-      quadtree_levels: this.cfg.page.quadtree_levels,
-    }, {
-      batchSize: this.config.batchSize,
-      maxChunkSlots: DEFAULT_MAX_BATCH_CHUNK_SLOTS,
-      maxTotalSlotBytes: DEFAULT_MAX_TOTAL_SLOT_BYTES,
-    });
+    const batchCfg = this.rootBatchPageConfig();
+    const subBatches = splitRootGpuBatches(batch, batchCfg, this.batchLimits);
     this.batchesDispatched += subBatches.length;
     this.pagesDispatched += batch.length;
     for (const subBatch of subBatches) pushSample(this.batchPageSamples, subBatch.length);
 
     try {
       await this.simplifierReady;
-      for (let offset = 0; offset < subBatches.length; offset += this.config.maxInflightBatches) {
-        const active = subBatches.slice(offset, offset + this.config.maxInflightBatches);
+      const inflightBatches = this.resolveInflightBatches(subBatches, batchCfg);
+      for (let offset = 0; offset < subBatches.length; offset += inflightBatches) {
+        const active = subBatches.slice(offset, offset + inflightBatches);
         const built = await Promise.all(active.map((subBatch) => this.buildRootSubBatch(subBatch)));
         for (const group of built) nodes.push(...group);
       }
@@ -171,6 +182,9 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       return { nodes, buildMs, transferBytes };
     } catch (error) {
       this.failedBatches++;
+      if (isHardGpuFailure(error)) {
+        this.disabledError = error instanceof Error ? error : new Error(String(error));
+      }
       throw error;
     } finally {
       publishGpuClodRootMesherCounters(this.stats());
@@ -179,13 +193,13 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
 
   stats(): GpuClodRootMesherStats {
     return {
-      enabled: 1,
+      enabled: this.disabledError ? 0 : 1,
       batchesDispatched: this.batchesDispatched,
       pagesDispatched: this.pagesDispatched,
       batchPagesP95: percentile(this.batchPageSamples, 0.95),
       chunkSlotsDispatched: this.chunkSlotsDispatched,
-      computeSubmitMsP50: percentile(this.computeSubmitSamples, 0.5),
-      computeSubmitMsP95: percentile(this.computeSubmitSamples, 0.95),
+      encodeSubmitMsP50: percentile(this.encodeSubmitSamples, 0.5),
+      encodeSubmitMsP95: percentile(this.encodeSubmitSamples, 0.95),
       countReadbackMsP95: percentile(this.countReadbackSamples, 0.95),
       geometryReadbackMsP95: percentile(this.geometryReadbackSamples, 0.95),
       buildMsP50: percentile(this.buildSamples, 0.5),
@@ -213,16 +227,34 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
     // the browser WebGPU implementation and do not need explicit disposal here.
   }
 
+  private rootBatchPageConfig(): RootBatchPageConfig {
+    return {
+      chunks_per_page: this.cfg.page.chunks_per_page,
+      chunk_size: this.cfg.page.chunk_size,
+      quadtree_levels: this.cfg.page.quadtree_levels,
+    };
+  }
+
+  private resolveInflightBatches(
+    subBatches: readonly (readonly GpuClodRootBuildRequest[])[],
+    cfg: RootBatchPageConfig,
+  ): number {
+    const requested = Math.max(1, Math.floor(this.config.maxInflightBatches));
+    if (requested === 1 || subBatches.length <= 1) return 1;
+    const heavyBatch = subBatches.some((batch) => batch.reduce(
+      (sum, request) => sum + estimateRootRequestSlotBytes(request, cfg),
+      0,
+    ) > this.batchLimits.maxTotalSlotBytes * 0.45);
+    if (heavyBatch || this.failedBatches > 0) return 1;
+    return Math.min(requested, 2);
+  }
+
   private writeView(buffer: GPUBuffer, data: Int32Array | Uint32Array): void {
     this.device.queue.writeBuffer(buffer, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
   }
 
   private async buildRootSubBatch(batch: readonly GpuClodRootBuildRequest[]): Promise<ClodPageNode[]> {
-    const plans = planRootBatchChunkSlots(batch, {
-      chunks_per_page: this.cfg.page.chunks_per_page,
-      chunk_size: this.cfg.page.chunk_size,
-      quadtree_levels: this.cfg.page.quadtree_levels,
-    });
+    const plans = planRootBatchChunkSlots(batch, this.rootBatchPageConfig());
     this.chunkSlotsDispatched += plans.length;
     if (plans.length === 0) return [];
 
@@ -259,8 +291,10 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   private createSlot(plan: GpuRootChunkPlan, digEdits: GPUBuffer, fieldParams: GPUBuffer): GpuRootChunkSlot {
     const dims = computeMeshDims(plan.cx, plan.cz, this.cfg.page.chunk_size);
     const storage = (extra = 0) => GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | extra;
-    const mk = (label: string, size: number, usage: number) =>
-      this.device.createBuffer({ label: `gpu clod root ${label} ${plan.slotIndex}`, size, usage });
+    const mk = (label: string, size: number, usage: number) => {
+      assertBufferWithinLimit(size, this.batchLimits.maxReadbackBufferBytes, `gpu clod root ${label} ${plan.slotIndex}`);
+      return this.device.createBuffer({ label: `gpu clod root ${label} ${plan.slotIndex}`, size, usage });
+    };
     const slot: Omit<GpuRootChunkSlot, "bindGroup"> = {
       ...plan,
       dims,
@@ -320,7 +354,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       encoder.copyBufferToBuffer(slot.indexCount, 0, countReadback, offset + U32, U32);
     }
     this.device.queue.submit([encoder.finish()]);
-    pushSample(this.computeSubmitSamples, performance.now() - encodeStart);
+    pushSample(this.encodeSubmitSamples, performance.now() - encodeStart);
 
     const countStart = performance.now();
     let countMapped = false;
@@ -350,6 +384,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
     counts: readonly { slotIndex: number; vertexCount: number; indexCount: number }[],
   ): Promise<Map<number, PageMesh>> {
     const layout = planGeometryReadbackLayout(counts);
+    this.assertReadbackLayout(layout);
     const mkReadback = (label: string, size: number) => this.device.createBuffer({
       label,
       size: Math.max(4, size),
@@ -420,6 +455,13 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       matRB.destroy();
       idxRB.destroy();
     }
+  }
+
+  private assertReadbackLayout(layout: { positionsBytes: number; normalsBytes: number; materialsBytes: number; indicesBytes: number }): void {
+    assertBufferWithinLimit(layout.positionsBytes, this.batchLimits.maxReadbackBufferBytes, "gpu clod root rb positions");
+    assertBufferWithinLimit(layout.normalsBytes, this.batchLimits.maxReadbackBufferBytes, "gpu clod root rb normals");
+    assertBufferWithinLimit(layout.materialsBytes, this.batchLimits.maxReadbackBufferBytes, "gpu clod root rb materials");
+    assertBufferWithinLimit(layout.indicesBytes, this.batchLimits.maxReadbackBufferBytes, "gpu clod root rb indices");
   }
 
   private buildRootNodesFromMeshes(
@@ -549,8 +591,10 @@ export function publishGpuClodRootMesherCounters(stats: GpuClodRootMesherStats):
   counters["live_clod_stream_gpu_pages_dispatched"] = stats.pagesDispatched;
   counters["live_clod_stream_gpu_batch_pages_p95"] = stats.batchPagesP95;
   counters["live_clod_stream_gpu_chunk_slots_dispatched"] = stats.chunkSlotsDispatched;
-  counters["live_clod_stream_gpu_compute_submit_ms_p50"] = stats.computeSubmitMsP50;
-  counters["live_clod_stream_gpu_compute_submit_ms_p95"] = stats.computeSubmitMsP95;
+  counters["live_clod_stream_gpu_encode_submit_ms_p50"] = stats.encodeSubmitMsP50;
+  counters["live_clod_stream_gpu_encode_submit_ms_p95"] = stats.encodeSubmitMsP95;
+  counters["live_clod_stream_gpu_compute_submit_ms_p50"] = stats.encodeSubmitMsP50;
+  counters["live_clod_stream_gpu_compute_submit_ms_p95"] = stats.encodeSubmitMsP95;
   counters["live_clod_stream_gpu_count_readback_ms_p95"] = stats.countReadbackMsP95;
   counters["live_clod_stream_gpu_geometry_readback_ms_p95"] = stats.geometryReadbackMsP95;
   counters["live_clod_stream_gpu_build_ms_p50"] = stats.buildMsP50;
@@ -569,8 +613,8 @@ export function disabledGpuStats(workerFallbackPages = 0): GpuClodRootMesherStat
     pagesDispatched: 0,
     batchPagesP95: 0,
     chunkSlotsDispatched: 0,
-    computeSubmitMsP50: 0,
-    computeSubmitMsP95: 0,
+    encodeSubmitMsP50: 0,
+    encodeSubmitMsP95: 0,
     countReadbackMsP95: 0,
     geometryReadbackMsP95: 0,
     buildMsP50: 0,
@@ -581,6 +625,67 @@ export function disabledGpuStats(workerFallbackPages = 0): GpuClodRootMesherStat
     failedBatches: 0,
     workerFallbackPages,
   };
+}
+
+function resolveRuntimeBatchLimits(
+  device: GPUDevice,
+  config: StreamingRootGpuMesherConfig,
+  chunkSize: number,
+): RuntimeBatchLimits {
+  const maxBufferSize = positiveLimit((device.limits as { maxBufferSize?: number }).maxBufferSize, DEFAULT_MAX_READBACK_BUFFER_BYTES);
+  const maxStorageBufferBindingSize = positiveLimit(
+    (device.limits as { maxStorageBufferBindingSize?: number }).maxStorageBufferBindingSize,
+    maxBufferSize,
+  );
+  const dims = computeMeshDims(0, 0, Math.max(1, Math.floor(chunkSize)));
+  const maxSingleStorageBufferBytes = Math.max(
+    dims.maxVertices * 3 * F32,
+    dims.maxVertices * F32,
+    dims.slotCount * U32,
+    dims.maxIndices * U32,
+    U32,
+  );
+  const maxSingleGroupedReadbackBytes = Math.max(
+    dims.maxVertices * 3 * F32,
+    dims.maxVertices * F32,
+    dims.maxIndices * U32,
+  );
+  const maxReadbackBufferBytes = Math.max(4, Math.floor(maxBufferSize * READBACK_BUFFER_HEADROOM));
+  const readbackSlotLimit = Math.max(1, Math.floor(maxReadbackBufferBytes / Math.max(1, maxSingleGroupedReadbackBytes)));
+  const storageAllowed = maxSingleStorageBufferBytes <= maxStorageBufferBindingSize;
+  const maxChunkSlots = storageAllowed ? Math.max(1, Math.min(DEFAULT_MAX_BATCH_CHUNK_SLOTS, readbackSlotLimit)) : 1;
+  const chunkEstimate = estimateChunkSlotBytes(chunkSize).totalBytes;
+  const totalBudget = Math.max(
+    chunkEstimate,
+    Math.min(DEFAULT_MAX_TOTAL_SLOT_BYTES, Math.floor(maxBufferSize * TOTAL_SLOT_BUFFER_HEADROOM)),
+  );
+  return {
+    batchSize: Math.max(1, Math.floor(config.batchSize)),
+    maxChunkSlots,
+    maxTotalSlotBytes: totalBudget,
+    maxReadbackBufferBytes,
+  };
+}
+
+function positiveLimit(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function assertBufferWithinLimit(size: number, limit: number, label: string): void {
+  if (size <= limit) return;
+  throw new RootGpuBatchLimitError(
+    `${label} requires ${size} bytes, above WebGPU-safe limit ${limit}`,
+    { px: 0, pz: 0 },
+    0,
+    size,
+    { batchSize: 1, maxChunkSlots: 1, maxTotalSlotBytes: limit },
+  );
+}
+
+function isHardGpuFailure(error: unknown): boolean {
+  if (error instanceof RootGpuBatchLimitError) return true;
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /out.?of.?memory|device.?lost|validation|maxBufferSize|GPUValidationError|OperationError/i.test(message);
 }
 
 function destroySlot(slot: GpuRootChunkSlot): void {
