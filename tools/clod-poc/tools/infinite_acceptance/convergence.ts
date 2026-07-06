@@ -109,6 +109,8 @@ export function evaluateConvergence(snapshot: ConvergenceSnapshot): {
     snapshot.bubbleFailed === 0
     && snapshot.bubbleRetryPages === 0
     && snapshot.bubbleBuilding === 0
+    && snapshot.bubblePendingChunks === 0
+    && snapshot.bubbleInflightChunks === 0
     && snapshot.bubbleReady > 0
   );
   const streamQuiet = snapshot.streamRequired === 0 || (
