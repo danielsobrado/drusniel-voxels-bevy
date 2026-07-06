@@ -6,7 +6,7 @@ export interface StreamingRootGpuMesherConfig {
 }
 
 export const DEFAULT_STREAMING_ROOT_GPU_BATCH_SIZE = 4;
-export const DEFAULT_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES = 2;
+export const DEFAULT_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES = 1;
 
 export const DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG: StreamingRootGpuMesherConfig = {
   enabled: false,
@@ -35,7 +35,7 @@ export function parseStreamingRootGpuMesherConfig(
   return {
     enabled: booleanFlag(params, "liveClodRootGpuMesher", defaults.enabled),
     batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? defaults.batchSize,
-    maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaults.maxInflightBatches,
+    maxInflightBatches: 1,
     fallback: booleanFlag(params, "liveClodRootGpuFallback", defaults.fallback),
   };
 }
