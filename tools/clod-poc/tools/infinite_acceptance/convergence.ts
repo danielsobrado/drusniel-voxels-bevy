@@ -48,6 +48,13 @@ export interface AcceptanceSceneCacheEvidence {
   startup_reexecuted: number;
 }
 
+const STREAMED_ROOT_GPU_PARAMS = {
+  liveClodRootGpuMesher: "1",
+  liveClodRootGpuBatchSize: "4",
+  liveClodRootGpuMaxInflightBatches: "2",
+  liveClodRootGpuFallback: "1",
+} as const;
+
 export function profileAcceptanceParams(profile: AcceptanceProfile): Record<string, string> {
   if (profile === "fast") {
     return {
@@ -61,10 +68,7 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "1",
       liveClodRootRadius: "384",
-      liveClodRootGpuMesher: "1",
-      liveClodRootGpuBatchSize: "4",
-      liveClodRootGpuMaxInflightBatches: "2",
-      liveClodRootGpuFallback: "1",
+      ...STREAMED_ROOT_GPU_PARAMS,
       farClipmap: "1",
       farClipmapInnerRadius: "384",
       farClipmapOuterRadius: "4096",
@@ -83,6 +87,7 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     liveClodRootMaxCached: "512",
     liveClodRootMaxLevel: "1",
     liveClodRootRadius: "384",
+    ...STREAMED_ROOT_GPU_PARAMS,
     farClipmap: "1",
     farClipmapInnerRadius: "384",
     farClipmapOuterRadius: "4096",
