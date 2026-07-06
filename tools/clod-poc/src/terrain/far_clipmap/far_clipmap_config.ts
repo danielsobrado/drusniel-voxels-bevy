@@ -17,6 +17,7 @@ export interface FarClipmapConfig {
 export interface FarClipmapConfigConstraints {
   liveCollisionRadiusM?: number;
   clodCoverageRadiusM?: number;
+  targetVisibleRadiusM?: number;
 }
 
 export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
@@ -104,7 +105,11 @@ export function resolveFarClipmapConfig(
     config.innerRadiusM = Math.ceil(minInner / config.baseCellSizeM) * config.baseCellSizeM;
   }
 
-  const minOuter = Math.max(config.innerRadiusM + config.baseCellSizeM, constraints.clodCoverageRadiusM ?? 0);
+  const minOuter = Math.max(
+    config.innerRadiusM + config.baseCellSizeM,
+    constraints.clodCoverageRadiusM ?? 0,
+    constraints.targetVisibleRadiusM ?? 0,
+  );
   if (config.outerRadiusM < minOuter) {
     config.outerRadiusM = Math.ceil(minOuter / config.snapSizeM) * config.snapSizeM;
   }
