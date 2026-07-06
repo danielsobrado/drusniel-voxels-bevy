@@ -6,7 +6,8 @@ import { paintMaterialAt, terrainWeights } from "./terrain_paint.js";
 import { editIndex, editIds, editHeight, editCellKey, DIG_INFLUENCE_MARGIN, CELL_SIZE } from "./terrain_edits.js";
 import type { DigEdit } from "./terrain_edits.js";
 
-const Y_CELLS = 128;
+const MIN_Y_CELL = -2;
+const MAX_Y_CELL = 128;
 
 const QUAD_CELLS: Record<"x" | "y" | "z", [number, number, number][]> = {
   x: [[0, -1, -1], [0, 0, -1], [0, 0, 0], [0, -1, 0]],
@@ -186,13 +187,13 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
         surfaceHeight(i, k), surfaceHeight(i + 1, k), surfaceHeight(i - 1, k),
         surfaceHeight(i, k + 1), surfaceHeight(i, k - 1),
       ];
-      let j0 = Math.max(0, Math.floor(Math.min(...nearbyHeights)) - 2);
-      let j1 = Math.min(Y_CELLS - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
+      let j0 = Math.max(MIN_Y_CELL, Math.floor(Math.min(...nearbyHeights)) - 2);
+      let j1 = Math.min(MAX_Y_CELL - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
       for (const e of chunkEdits) {
         if (Math.abs(i - e.x) > e.r + DIG_INFLUENCE_MARGIN || Math.abs(k - e.z) > e.r + DIG_INFLUENCE_MARGIN) continue;
         const eh = editHeight(e);
-        j0 = Math.max(0, Math.min(j0, Math.floor(e.y - eh - DIG_INFLUENCE_MARGIN)));
-        j1 = Math.min(Y_CELLS - 1, Math.max(j1, Math.ceil(e.y + eh + DIG_INFLUENCE_MARGIN)));
+        j0 = Math.max(MIN_Y_CELL, Math.min(j0, Math.floor(e.y - eh - DIG_INFLUENCE_MARGIN)));
+        j1 = Math.min(MAX_Y_CELL - 1, Math.max(j1, Math.ceil(e.y + eh + DIG_INFLUENCE_MARGIN)));
       }
       for (let j = j0; j <= j1; j++) {
         emitAxis("x", i, j, k, buf, indices, world, posInv);
