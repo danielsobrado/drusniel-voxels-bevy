@@ -109,8 +109,8 @@ export function publishStreamRootCacheCounters(
 }
 
 function addCounter(counters: Record<string, number>, key: string, value: number): void {
-  if (!Number.isFinite(value) || value <= 0) return;
-  counters[key] = (counters[key] ?? 0) + value;
+  const safeValue = Number.isFinite(value) && value > 0 ? value : 0;
+  counters[key] = (counters[key] ?? 0) + safeValue;
 }
 
 function streamRootKeyParts(
