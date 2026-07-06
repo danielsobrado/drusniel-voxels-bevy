@@ -3,6 +3,9 @@ export interface StreamingRootGpuMesherConfig {
   batchSize: number;
   maxInflightBatches: number;
   fallback: boolean;
+  maxChunkSlots?: number;
+  maxTotalSlotBytes?: number;
+  maxReadbackBufferBytes?: number;
 }
 
 export const DEFAULT_STREAMING_ROOT_GPU_BATCH_SIZE = 4;
@@ -37,6 +40,9 @@ export function parseStreamingRootGpuMesherConfig(
     batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? defaults.batchSize,
     maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaults.maxInflightBatches,
     fallback: booleanFlag(params, "liveClodRootGpuFallback", defaults.fallback),
+    maxChunkSlots: positiveIntegerParam(params, "liveClodRootGpuMaxChunkSlots") ?? defaults.maxChunkSlots,
+    maxTotalSlotBytes: positiveIntegerParam(params, "liveClodRootGpuMaxSlotBytes") ?? defaults.maxTotalSlotBytes,
+    maxReadbackBufferBytes: positiveIntegerParam(params, "liveClodRootGpuMaxReadbackBytes") ?? defaults.maxReadbackBufferBytes,
   };
 }
 
