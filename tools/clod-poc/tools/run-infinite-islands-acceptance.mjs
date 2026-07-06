@@ -144,10 +144,62 @@ function hasFilterArgs(args) {
   return args.some((arg) => arg === "--scene" || arg.startsWith("--scene=") || arg === "--gate" || arg.startsWith("--gate="));
 }
 
+function injectedFilterBlock() {
+  return [
+    "const CLI_ARGS = process.argv.slice(2);",
+    "",
+    "function cliValues(args: readonly string[], key: string): string[] {",
+    "  const values: string[] = [];",
+    "  for (let i = 0; i < args.length; i++) {",
+    "    const arg = args[i]!;",
+    "    if (arg === key) {",
+    "      const next = args[i + 1];",
+    "      if (next && !next.startsWith(\"--\")) {",
+    "        values.push(next);",
+    "        i += 1;",
+    "      }",
+    "    } else if (arg.startsWith(`${key}=`)) {",
+    "      const value = arg.slice(key.length + 1);",
+    "      if (value.length > 0) values.push(value);",
+    "    }",
+    "  }",
+    "  return values;",
+    "}",
+    "",
+    "function filterActiveScenes(scenes: readonly SceneSpec[]): SceneSpec[] {",
+    "  const requested = cliValues(CLI_ARGS, \"--scene\").flatMap((value) => value.split(\",\")).map((value) => value.trim()).filter(Boolean);",
+    "  if (requested.length === 0) return [...scenes];",
+    "  const known = new Set(SCENES.map((scene) => scene.name));",
+    "  const unknown = requested.filter((name) => !known.has(name));",
+    "  if (unknown.length > 0) throw new Error(`Unknown --scene value(s): ${unknown.join(\", \")}. Valid scenes: ${[...known].join(\", \")}`);",
+    "  const requestedSet = new Set(requested);",
+    "  return scenes.filter((scene) => requestedSet.has(scene.name));",
+    "}",
+    "",
+    "function filterActiveGates(gates: readonly GateMode[]): GateMode[] {",
+    "  const requested = cliValues(CLI_ARGS, \"--gate\").at(-1)?.trim() ?? \"all\";",
+    "  if (requested === \"all\") return [...gates];",
+    "  if (requested !== \"coverage\" && requested !== \"perf\") {",
+    "    throw new Error(`Unknown --gate value: ${requested}. Valid gates: coverage, perf, all`);",
+    "  }",
+    "  return gates.filter((gate) => gate.name === requested);",
+    "}",
+    "",
+    "const PROFILE = parseProfile(CLI_ARGS);",
+    "const BASE_ACTIVE_SCENES = PROFILE === \"fast\"",
+    "  ? SCENES.filter((scene) => scene.name === \"walk\" || scene.name === \"final-near\")",
+    "  : PROFILE === \"reuse\"",
+    "    ? [...SCENES.filter((scene) => !scene.movementRoute), ...SCENES.filter((scene) => scene.movementRoute)]",
+    "    : SCENES;",
+    "const ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES);",
+    "const ACTIVE_GATES = filterActiveGates(GATE_MODES);",
+    "const SAMPLE_FRAMES = PROFILE === \"fast\" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;",
+  ].join("\n");
+}
+
 function injectFilteredRunner(source) {
   const activeScenesBlock = /const PROFILE = parseProfile\(process\.argv\.slice\(2\)\);\nconst ACTIVE_SCENES = PROFILE === "fast"[\s\S]*?const SAMPLE_FRAMES = PROFILE === "fast" \? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;/;
-  const replacement = `const CLI_ARGS = process.argv.slice(2);\n\nfunction cliValues(args: readonly string[], key: string): string[] {\n  const values: string[] = [];\n  for (let i = 0; i < args.length; i++) {\n    const arg = args[i]!;\n    if (arg === key) {\n      const next = args[i + 1];\n      if (next && !next.startsWith("--")) {\n        values.push(next);\n        i += 1;\n      }\n    } else if (arg.startsWith(\`${key}=\`)) {\n      const value = arg.slice(key.length + 1);\n      if (value.length > 0) values.push(value);\n    }\n  }\n  return values;\n}\n\nfunction filterActiveScenes(scenes: readonly SceneSpec[]): SceneSpec[] {\n  const requested = cliValues(CLI_ARGS, "--scene").flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean);\n  if (requested.length === 0) return [...scenes];\n  const known = new Set(SCENES.map((scene) => scene.name));\n  const unknown = requested.filter((name) => !known.has(name));\n  if (unknown.length > 0) throw new Error(\`Unknown --scene value(s): \${unknown.join(", ")}. Valid scenes: \${[...known].join(", ")}\`);\n  const requestedSet = new Set(requested);\n  return scenes.filter((scene) => requestedSet.has(scene.name));\n}\n\nfunction filterActiveGates(gates: readonly GateMode[]): GateMode[] {\n  const requested = cliValues(CLI_ARGS, "--gate").at(-1)?.trim() ?? "all";\n  if (requested === "all") return [...gates];\n  if (requested !== "coverage" && requested !== "perf") {\n    throw new Error(\`Unknown --gate value: \${requested}. Valid gates: coverage, perf, all\`);\n  }\n  return gates.filter((gate) => gate.name === requested);\n}\n\nconst PROFILE = parseProfile(CLI_ARGS);\nconst BASE_ACTIVE_SCENES = PROFILE === "fast"\n  ? SCENES.filter((scene) => scene.name === "walk" || scene.name === "final-near")\n  : PROFILE === "reuse"\n    ? [...SCENES.filter((scene) => !scene.movementRoute), ...SCENES.filter((scene) => scene.movementRoute)]\n    : SCENES;\nconst ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES);\nconst ACTIVE_GATES = filterActiveGates(GATE_MODES);\nconst SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;`;
-  const withSceneFilter = source.replace(activeScenesBlock, replacement);
+  const withSceneFilter = source.replace(activeScenesBlock, injectedFilterBlock());
   if (withSceneFilter === source) throw new Error("Failed to inject infinite acceptance scene/gate filters");
   return withSceneFilter
     .replaceAll("for (const gate of GATE_MODES)", "for (const gate of ACTIVE_GATES)")
