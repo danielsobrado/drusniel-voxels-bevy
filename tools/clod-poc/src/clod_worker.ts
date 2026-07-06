@@ -468,7 +468,7 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
   try {
     for (const { px, pz, level } of request.coords) {
       const rootLevel = streamRootLevel(level);
-      const cached = await tryLoadStreamRootNode(workerCacheCtx, rootLevel, px, pz, cacheStats);
+      const cached = await tryLoadStreamRootNode(workerCacheCtx, "cpu", rootLevel, px, pz, cacheStats);
       if (cached) {
         nodes.push(cached);
         continue;
@@ -478,7 +478,7 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
       const node = buildStandaloneClodRootNode(rootLevel, px, pz, cfg, world);
       const buildMs = performance.now() - buildStart;
       nodes.push(node);
-      await storeStreamRootNode(workerCacheCtx, node, buildMs, cacheStats);
+      await storeStreamRootNode(workerCacheCtx, "cpu", node, buildMs, cacheStats);
     }
   } finally {
     installHydrologyTerrain(hydrologyTerrain);
@@ -502,6 +502,7 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
     nodes: serialized,
     buildMs: performance.now() - t0,
     transferBytes,
+    cacheStats,
   }, transferables);
 }
 

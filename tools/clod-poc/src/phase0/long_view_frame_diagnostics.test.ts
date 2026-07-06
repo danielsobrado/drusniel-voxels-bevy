@@ -36,8 +36,8 @@ describe("stream readiness diagnostics", () => {
   it("requires coarsest CLOD pages to be resident, not every descendant", () => {
     const snap = snapshot();
 
-    expect(requiredRootClodPagesReady(snap, feeds(new Set(), new Set()), 2)).toBe(false);
-    expect(requiredRootClodPagesReady(snap, feeds(new Set(), new Set([packPageKey(2, 0, 0)])), 2)).toBe(true);
+    expect(requiredRootClodPagesReady(snap, feeds(new Set(), new Set()), 2, 2)).toBe(false);
+    expect(requiredRootClodPagesReady(snap, feeds(new Set(), new Set([packPageKey(2, 0, 0)])), 2, 2)).toBe(true);
   });
 
   it("reports stream readiness after live roots and far-summary requests are ready", () => {

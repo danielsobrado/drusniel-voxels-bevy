@@ -106,7 +106,7 @@ export type ClodWorkerResponse =
   | { type: "parentsComplete"; requestId: number | null; parentNodes: number; parentMs: number }
   | { type: "flushed"; requestId: number }
   | { type: "cacheCleared"; requestId: number }
-  | { type: "streamRootsBuilt"; requestId: number; nodes: SerializedClodNode[]; buildMs: number; transferBytes: number }
+  | { type: "streamRootsBuilt"; requestId: number; nodes: SerializedClodNode[]; buildMs: number; transferBytes: number; cacheStats?: WorkerCacheBuildStats }
   | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
 function cloneMesh(mesh: PageMesh): PageMesh {

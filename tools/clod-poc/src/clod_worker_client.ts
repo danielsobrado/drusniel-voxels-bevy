@@ -7,6 +7,7 @@ import type { TerrainSourceInputs } from "./cache/terrainSource.js";
 import { initClodCacheContext, type ClodCacheContext } from "./cache/clodCacheContext.js";
 import {
   createEmptyStreamRootCacheStats,
+  publishStreamRootCacheCounters,
   storeStreamRootNode,
   tryLoadStreamRootNode,
 } from "./cache/clodStreamRootCache.js";
@@ -194,7 +195,7 @@ export class ClodWorkerClient {
 
     for (const coord of coords) {
       const rootLevel = this.streamRootLevel(coord.level);
-      const cached = await tryLoadStreamRootNode(cacheCtx, rootLevel, coord.px, coord.pz, cacheStats);
+      const cached = await tryLoadStreamRootNode(cacheCtx, "gpu", rootLevel, coord.px, coord.pz, cacheStats);
       if (cached) nodesById.set(cached.id, cached);
       else misses.push(coord);
     }
@@ -204,10 +205,12 @@ export class ClodWorkerClient {
       const avgBuildMs = built.nodes.length > 0 ? built.buildMs / built.nodes.length : 0;
       for (const node of built.nodes) {
         nodesById.set(node.id, node);
-        await storeStreamRootNode(cacheCtx, node, avgBuildMs, cacheStats);
+        await storeStreamRootNode(cacheCtx, "gpu", node, avgBuildMs, cacheStats);
       }
       if (cacheCtx) await cacheCtx.service.flush();
     }
+
+    publishStreamRootCacheCounters(cacheStats, "gpu");
 
     const nodes = coords.map((coord) => {
       const id = this.streamRootNodeId(coord);
@@ -283,7 +286,7 @@ export class ClodWorkerClient {
       worldPagesZ,
       terrainSource,
       forceDisabled: cacheDisabled,
-      role: "main",
+      role: "main-pages",
     }).catch((error) => {
       console.warn("[clod-stream-cache] failed to initialize main streamed-root cache", error);
       return null;
@@ -395,6 +398,9 @@ export class ClodWorkerClient {
         const pending = this.streamRootsRequests.get(message.requestId);
         if (!pending) break;
         this.streamRootsRequests.delete(message.requestId);
+        if (message.cacheStats) {
+          publishStreamRootCacheCounters(message.cacheStats, "cpu");
+        }
         pending.resolve({
           nodes: rehydrateStandaloneNodes(message.nodes),
           buildMs: message.buildMs,
