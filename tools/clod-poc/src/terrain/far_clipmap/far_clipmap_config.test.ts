@@ -63,7 +63,7 @@ describe("far clipmap snapping", () => {
 });
 
 describe("far clipmap geometry", () => {
-  it("builds sampled annular terrain geometry", () => {
+  it("builds reusable flat GPU grid geometry", () => {
     const geometry = createFarClipmapTerrainGeometry({
       gridResolution: 5,
       centerX: 0,
@@ -76,19 +76,20 @@ describe("far clipmap geometry", () => {
     });
 
     const position = geometry.getAttribute("position");
-    const color = geometry.getAttribute("color");
     const normal = geometry.getAttribute("normal");
     expect(position.count).toBe(25);
-    expect(color.count).toBe(25);
+    expect(geometry.getAttribute("color")).toBeUndefined();
     expect(normal.count).toBe(25);
     expect((geometry.getIndex()?.count ?? 0)).toBeGreaterThan(0);
-    expect(position.getY(0)).toBeCloseTo(-0.44);
+    expect(position.getX(0)).toBe(0);
+    expect(position.getY(0)).toBe(0);
+    expect(position.getZ(0)).toBe(0);
     geometry.dispose();
   });
 });
 
 describe("far clipmap controller", () => {
-  it("rebuilds sampled rings with the custom shader and becomes ready across budgeted frames", () => {
+  it("validates sampled rings with the custom shader and becomes ready across budgeted frames", () => {
     const scene = new THREE.Scene();
     const config = resolveFarClipmapConfig({
       ringCount: 3,
@@ -100,18 +101,22 @@ describe("far clipmap controller", () => {
     });
     const controller = createFarClipmapController(scene, config, sampledSource);
 
+    const firstMesh = scene.children[0] as THREE.Mesh;
+    const initialGeometry = firstMesh.geometry;
     const first = controller.update(new THREE.Vector3(1, 0, 1));
     const second = controller.update(new THREE.Vector3(1, 0, 1));
-    const firstMesh = scene.children[0] as THREE.Mesh;
     const material = firstMesh.material as THREE.ShaderMaterial;
 
     expect(first.readyTiles).toBe(2);
     expect(first.pendingTiles).toBe(1);
     expect(first.sourceReady).toBe(1);
     expect(second.readyTiles).toBe(3);
-    expect(firstMesh.geometry.getAttribute("position").count).toBe(25);
+    expect(firstMesh.geometry).toBe(initialGeometry);
+    expect(firstMesh.geometry.getAttribute("position").getY(0)).toBe(0);
     expect(material).toBeInstanceOf(THREE.ShaderMaterial);
     expect(material.name).toBe("FarClipmapTerrainShader");
+    expect(material.uniforms["uRingOrigin"].value.x).toBeCloseTo(-64);
+    expect(material.uniforms["uCellSize"].value).toBeGreaterThan(0);
     expect(controller.ownershipSnapshot().ready).toBe(true);
     controller.setDebugMode("ownership");
     expect(material.uniforms["uDebugMode"].value).toBe(3);
