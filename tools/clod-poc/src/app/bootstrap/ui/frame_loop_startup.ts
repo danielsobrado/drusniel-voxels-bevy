@@ -91,7 +91,11 @@ function applyNoPressureProbeMirror(target: Record<string, number>, staleTotal: 
 }
 
 function streamWorkPending(stats: StreamingClodRootStats): boolean {
-  return stats.pendingPages > 0
+  return stats.builtThisFrame > 0
+    || stats.applyPagesThisFrame > 0
+    || stats.evictions > 0
+    || stats.staleDiscards > 0
+    || stats.pendingPages > 0
     || stats.inflightBatches > 0
     || stats.applyQueuePages > 0
     || stats.safetyPendingPages > 0
