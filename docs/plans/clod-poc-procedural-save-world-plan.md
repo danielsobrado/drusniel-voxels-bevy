@@ -41,7 +41,10 @@ Implemented in `tools/clod-poc`:
 - Bootstrap save load with seed mismatch rejection before voxel replacement.
 - Save runtime with autosave batching and final manifest/metadata write after dirty regions flush.
 - Saved props as save-side authority, projected into runtime custom props.
+- Duplicate saved prop ids across loaded regions are rejected before voxel replacement.
+- Saved prop position/region mismatches are rejected during region-record validation.
 - One world-level metadata record with derived region membership and schema/link validation.
+- Metadata area bounds use half-open region membership; exact point bounds keep point ownership.
 - Save dirty bounds fan-out through `src/save/save_far_summary_bridge.ts` to
   `FarSummaryCache.markStale(bounds)` and far-shell height refresh.
 - Critical-path validation for data/link/status integrity with structured errors/warnings.
@@ -202,9 +205,14 @@ Mandatory rules:
 ```text
 - Math.floor only. Never >>, |0, Math.trunc, or Math.round: world coordinates are floats and
   truncation breaks negatives (-0.5 must map to region -1, not 0).
-- Half-open boundaries: x = 512 -> rx 1; x = 511.999 -> rx 0; x = -512 -> rx -1; x = -512.001 -> rx -2.
+- Half-open point boundaries: x = 512 -> rx 1; x = 511.999 -> rx 0; x = -512 -> rx -1; x = -512.001 -> rx -2.
+- Non-point metadata/save bounds are half-open areas: [minX, maxX) x [minZ, maxZ).
+- Exact point bounds keep point ownership, so {minX=maxX=512, minZ=maxZ=0} maps to r_1_0.
 - A VoxelDelta belongs to exactly one region: regionKeyForWorld(delta.x, delta.z); y is ignored.
 - A prop belongs to exactly one region: regionKeyForWorld(position[0], position[2]).
+- Loaded props are rejected if prop.regionKey disagrees with the region manifest or the
+  position-derived region key.
+- Duplicate saved prop ids across loaded regions are rejected before voxel replacement.
 - Live chunk and CLOD page keys are the existing liveChunkKey/pageKey. The save layer never
   invents parallel chunk keys.
 - Region -> L0 page mapping for the invalidation bridge: px in [rx*8, rx*8+7], pz in [rz*8, rz*8+7].
@@ -351,20 +359,27 @@ success callback. There are no temp/rename steps.
    fail-loud.
 4. For every key in `manifest.regionKeys` (sorted lexicographically): read `RegionManifest`,
    `RegionVoxelDeltas`, and props. Validate counts against the manifest; mismatch -> fail-loud.
-5. `merged = mergeVoxelSnapshots(all region delta records)`. Regions are voxel-disjoint by
-   construction, so merge is concat with `revision = max`.
-6. `replaceVoxelEdits(merged)` — the only voxel-store mutation during load. `replaceDigEdits`
-   is never called on load.
+5. Validate each prop in each region. Reject if `prop.regionKey` does not match the region
+   manifest, or if `regionKeyForWorld(prop.position[0], prop.position[2])` does not match the
+   region manifest.
+6. Merge saved props across all loaded regions with `mergeSavedPropsFromRegions`. Duplicate
+   saved prop ids across regions are hard corruption and fail before voxel replacement.
 7. Read `WorldMetadataRecord`; run schema/link validation and critical-path data validation
    (non-empty points, linked roads, required linked props, cave links). Hard corruption ->
    fail-loud. Warning statuses do not block load unless explicitly configured.
-8. Proceed with `runWorldBuildStartup` unchanged — the terrain field reads `voxelEditStore`
-   globally, so near meshes and pages build already-patched.
-9. After renderer startup, convert `SavedPropInstance[]` via the existing
-   `projectPropsToPropPlacementScene` and register the placement scene.
-10. After far-summary integration is registered, replay loaded region bounds through
+8. Validate metadata prop links against the merged saved-prop id set before mutating runtime
+   voxel state.
+9. `merged = mergeVoxelSnapshots(all region delta records)`. Regions are voxel-disjoint by
+   construction, so merge is concat with `revision = max`.
+10. `replaceVoxelEdits(merged)` — the only voxel-store mutation during load. `replaceDigEdits`
+    is never called on load.
+11. Proceed with `runWorldBuildStartup` unchanged — the terrain field reads `voxelEditStore`
+    globally, so near meshes and pages build already-patched.
+12. After renderer startup, convert `SavedPropInstance[]` via the existing
+    `projectPropsToPropPlacementScene` and register the placement scene.
+13. After far-summary integration is registered, replay loaded region bounds through
     `save_far_summary_bridge.ts` so derived far-summary/far-shell data refreshes.
-11. Publish save counters including loaded flag, save id hash, dirty region count, metadata
+14. Publish save counters including loaded flag, save id hash, dirty region count, metadata
     revision, prop count, voxel delta count, flush timing, far invalidation count/bounds, and
     far invalidation errors.
 
@@ -494,6 +509,11 @@ invalidation is not the save layer's job; counting it there invites re-triggerin
 src/save/__tests__/region_key.test.ts
   region_key_floor_semantics_for_negative_coordinates      (-0.5, -512, -512.001, 511.999, 512)
   region_key_matches_l3_page_grid_alignment
+src/save/__tests__/metadata_bounds.test.ts
+  regionKeysForBounds treats area bounds as half-open, including positive and negative boundaries
+  regionKeysForBounds preserves exact point-bound ownership
+  regionKeysForBounds keeps tiny cross-boundary bounds on both sides
+  WorldMetadataStore.queryRegion uses the same half-open ownership rules as derived membership
 src/save/__tests__/voxel_partition.test.ts
   partition_assigns_each_delta_to_exactly_one_region
   partition_then_merge_roundtrips_snapshot_bytes_equal
@@ -503,6 +523,11 @@ src/save/__tests__/save_schema.test.ts
   region_manifest_rejects_count_mismatch
   prop_instance_roundtrips_with_factory_id
   metadata_record_rejects_dangling_city_road_links
+src/save/__tests__/saved_prop_integrity.test.ts
+  prop_position_region_mismatch_rejects
+  optional_saved_prop_fields_reject_bad_numbers_or_blank_links
+src/save/__tests__/load_duplicate_props.test.ts
+  duplicate_saved_prop_ids_across_regions_fail_before_voxel_replacement
 src/save/__tests__/save_db.test.ts                          (fake-indexeddb, same harness as cache tests)
   region_write_is_single_transaction_and_survives_reopen
   interrupted_write_leaves_previous_revision_intact
@@ -647,15 +672,17 @@ This plan is done when:
 3. Props and buildings persist as SavedPropInstance extensions of ProjectPropInstance with
    factory ids; scatter vegetation is never saved.
 4. Cities, roads, caves, and critical paths persist as one world-level metadata record with
-   derived region membership.
-5. Loading at bootstrap replays deltas via replaceVoxelEdits before world build; loaded
-   region bounds are later pushed through far-summary invalidation after the target exists.
-6. Runtime edits invalidate far-summary tiles by bounds and request far-shell refresh through
+   derived half-open region membership.
+5. Loading at bootstrap validates regions, prop ownership, duplicate prop ids, metadata links,
+   and critical paths before replaceVoxelEdits; replaceVoxelEdits remains the only voxel-store
+   mutation during load.
+6. Loaded region bounds are later pushed through far-summary invalidation after the target exists.
+7. Runtime edits invalidate far-summary tiles by bounds and request far-shell refresh through
    the bridge; live/CLOD invalidation stays with the edit service.
-7. Critical-path metadata validation detects hard data/link corruption and reports warnings
+8. Critical-path metadata validation detects hard data/link corruption and reports warnings
    honestly without claiming full passability.
-8. The two-session service round trip passes all acceptance gates.
-9. Derived render caches remain rebuildable and are never the gameplay authority.
+9. The two-session service round trip passes all acceptance gates.
+10. Derived render caches remain rebuildable and are never the gameplay authority.
 ```
 
 ## False-Confidence Guards
