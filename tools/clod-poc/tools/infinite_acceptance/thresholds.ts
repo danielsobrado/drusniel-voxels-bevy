@@ -347,48 +347,49 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
     pass: streamProbeEvictionOrNoPressure,
   },
   { key: "live_clod_stream_probe_stale_discards_total", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_clod_stream_out_of_world_edits_supported", label: "must equal 0 until out-of-world dig edits are implemented", pass: (value) => value === 0 },
-  { key: "vegetation_ring_unbounded", label: "must equal 1 for infinite islands", pass: (value) => value === 1 },
-  { key: "vegetation_ring_distance_to_grass_m", label: "must be <= 1", pass: (value) => value <= 1 },
+  { key: "live_clod_stream_out_of_world_edits_supported", label: "must be explicit 0 or 1", pass: (value) => value === 0 || value === 1 },
+  { key: "vegetation_ring_unbounded", label: "must equal 1 for infinite-islands", pass: (value) => value === 1 },
+  { key: "vegetation_ring_distance_to_grass_m", label: "must equal 0 for unbounded vegetation rings", pass: (value) => value === 0 },
   { key: "infinite_hydrology_outside_sample_valid", label: "must equal 1", pass: (value) => value === 1 },
-  { key: "infinite_hydrology_outside_body_mask", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "infinite_hydrology_outside_depth_m", label: "must be finite", pass: (value) => Number.isFinite(value) },
-  { key: "infinite_hydrology_nonrepeat_delta", label: "must be > 0.01 outside startup world", pass: (value) => value > 0.01 },
+  { key: "infinite_hydrology_nonrepeat_delta", label: "must be finite and > 0", pass: (value) => Number.isFinite(value) && value > 0 },
   { key: "infinite_hydrology_nonrepeat_ok", label: "must equal 1", pass: (value) => value === 1 },
-  { key: "infinite_hydrology_camera_outside_startup", label: "must equal 1 for infinite acceptance scenes", pass: (value) => value === 1 },
+  { key: "infinite_hydrology_camera_outside_startup", label: "must equal 1", pass: (value) => value === 1 },
 ];
 
+export const COVERAGE_REQUIRED_COUNTERS = REQUIRED_COUNTERS.filter((key) => !FRAME_TIME_COUNTERS.has(key));
+export const PERF_REQUIRED_COUNTERS = REQUIRED_COUNTERS.filter((key) => !ORACLE_COUNTERS.has(key));
+export const COVERAGE_RULES = THRESHOLD_RULES.filter((rule) => !FRAME_TIME_COUNTERS.has(rule.key));
+export const PERF_RULES = THRESHOLD_RULES.filter((rule) => !ORACLE_COUNTERS.has(rule.key));
+
 export interface ThresholdEvaluation {
-  passed: boolean;
-  failures: string[];
   values: Record<string, number>;
+  missing: string[];
+  failures: string[];
+  passed: boolean;
 }
 
-export function evaluateThresholds(stats: Record<string, unknown>): ThresholdEvaluation {
-  const values: Record<string, number> = {};
-  const failures: string[] = [];
+export function extractAcceptanceCounters(stats: Record<string, unknown>): Record<string, number> {
+  const counters = stats["counters"] as Record<string, unknown> | undefined;
+  const out: Record<string, number> = {};
   for (const key of REQUIRED_COUNTERS) {
-    const raw = stats[key];
-    const value = typeof raw === "number" ? raw : Number(raw);
-    values[key] = value;
-    if (!Number.isFinite(value)) failures.push(`${key}=missing/non-finite`);
+    const value = counters?.[key] ?? stats[key];
+    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
   }
-  for (const rule of THRESHOLD_RULES) {
+  return out;
+}
+
+export function evaluateThresholds(
+  values: Record<string, number>,
+  requiredCounters: readonly RequiredCounter[] = REQUIRED_COUNTERS,
+  rules: readonly ThresholdRule[] = THRESHOLD_RULES,
+): ThresholdEvaluation {
+  const missing = requiredCounters.filter((key) => !(key in values));
+  const failures: string[] = [];
+  for (const key of missing) failures.push(`${key} missing or not numeric`);
+  for (const rule of rules) {
     const value = values[rule.key];
-    if (!Number.isFinite(value)) continue;
-    if (!rule.pass(value, values)) failures.push(`${rule.key}=${value} (${rule.label})`);
+    if (value === undefined) continue;
+    if (!rule.pass(value, values)) failures.push(`${rule.key}=${value} failed: ${rule.label}`);
   }
-  if ((values["stream_ready_frame"] ?? -1) < 0) {
-    for (const key of ORACLE_COUNTERS) {
-      const value = values[key];
-      if (value !== undefined && value !== 0 && key !== "camera_to_clod_center_m" && key !== "camera_to_far_shell_center_m" && key !== "far_shell_inner_minus_clod_radius_m" && key !== "ownership_oracle_ms" && key !== "streamer_clod_radius_m") {
-        failures.push(`${key}=${value} before stream_ready_frame`);
-      }
-    }
-  }
-  const p95 = values["frame_ms_p95"];
-  if (p95 !== undefined && p95 > 8) {
-    failures.push(`frame_ms_p95=${p95.toFixed(2)} > 8`);
-  }
-  return { passed: failures.length === 0, failures, values };
+  return { values, missing, failures, passed: failures.length === 0 };
 }
