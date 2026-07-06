@@ -167,4 +167,28 @@ describe("save service", () => {
     expect(result.pending).toEqual(["r_1_0"]);
     expect(published).toEqual([boundsForRegion("r_0_0")]);
   });
+
+  it("publishes invalidation for committed dirty regions before a later batch failure", async () => {
+    const db = await openSaveDb(indexedDB, dbName());
+    const published: ReturnType<typeof boundsForRegion>[] = [];
+    registerSaveInvalidationTarget({
+      markSaveInvalidationBounds: (bounds) => published.push(bounds),
+    });
+
+    await expect(saveDirtyRegions({
+      db,
+      saveId: "qa-save",
+      manifest: manifest([]),
+      metadata: metadata(),
+      dirtyRegionKeys: ["r_0_0", "x_bad"],
+      maxRegionWrites: 2,
+      snapshot: {
+        revision: 4,
+        deltas: [{ x: 1, y: 2, z: 3, density: 0.5, revision: 4 }],
+      },
+    })).rejects.toThrow(/invalid region key/i);
+    db.close();
+
+    expect(published).toEqual([boundsForRegion("r_0_0")]);
+  });
 });
