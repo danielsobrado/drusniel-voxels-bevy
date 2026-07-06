@@ -18,6 +18,13 @@ export interface OwnershipResidencyMissingCounts {
   clodMissing: number;
 }
 
+export interface OwnershipResidencyMissingOptions {
+  liveChunkSizeM?: number;
+  liveRequiredRadiusM?: number;
+  clodRequiredRootLevel?: number;
+  clodCoverageMaxLevel?: number;
+}
+
 interface PageCoord {
   level: number;
   x: number;
@@ -29,6 +36,25 @@ export function packedLiveKeySet(keys: readonly string[]): Set<number> {
   for (const key of keys) {
     const coord = parseLiveChunkKey(key);
     out.add(packLiveKey(coord.x, coord.z));
+  }
+  return out;
+}
+
+export function packedLiveKeySetWithinRadius(
+  keys: readonly string[],
+  center: { x: number; z: number },
+  chunkSizeM: number,
+  radiusM?: number,
+): Set<number> {
+  if (!Number.isFinite(radiusM)) return packedLiveKeySet(keys);
+  const chunkSize = Math.max(1, Number.isFinite(chunkSizeM) ? chunkSizeM : 1);
+  const radius = Math.max(0, radiusM ?? 0);
+  const out = new Set<number>();
+  for (const key of keys) {
+    const coord = parseLiveChunkKey(key);
+    const cx = (coord.x + 0.5) * chunkSize;
+    const cz = (coord.z + 0.5) * chunkSize;
+    if (Math.hypot(cx - center.x, cz - center.z) <= radius) out.add(packLiveKey(coord.x, coord.z));
   }
   return out;
 }
@@ -111,9 +137,15 @@ export function pageCoveredByResidentClodHierarchy(page: PageCoord, loaded: Read
   return loadedDescendantCoverageCells(page, loaded) === span * span;
 }
 
-export function countMissingPagesWithHierarchyCoverage(required: readonly string[], loaded: ReadonlySet<number>): number {
-  const pages = required.map(parsePageKey);
-  const maxLevel = pages.reduce((max, page) => Math.max(max, page.level), 0);
+export function countMissingPagesWithHierarchyCoverage(
+  required: readonly string[],
+  loaded: ReadonlySet<number>,
+  options: { requiredRootLevel?: number; coverageMaxLevel?: number } = {},
+): number {
+  const pages = required
+    .map(parsePageKey)
+    .filter((page) => options.requiredRootLevel === undefined || page.level === options.requiredRootLevel);
+  const maxLevel = options.coverageMaxLevel ?? pages.reduce((max, page) => Math.max(max, page.level), 0);
   let missing = 0;
   for (const page of pages) {
     if (!pageCoveredByResidentClodHierarchy(page, loaded, maxLevel)) missing++;
@@ -166,9 +198,19 @@ export function createSnapshotOwnershipResidencyFeeds(
 export function countSnapshotResidencyMissing(
   snapshot: TerrainOwnershipRuntimeSnapshot,
   feeds: OwnershipResidencyFeeds = createSnapshotOwnershipResidencyFeeds(snapshot),
+  options: OwnershipResidencyMissingOptions = {},
 ): OwnershipResidencyMissingCounts {
+  const liveRequired = packedLiveKeySetWithinRadius(
+    snapshot.live.required,
+    snapshot.center,
+    options.liveChunkSizeM ?? 1,
+    options.liveRequiredRadiusM,
+  );
   return {
-    liveMissing: countMissingPacked(packedLiveKeySet(snapshot.live.required), feeds.liveReady()),
-    clodMissing: countMissingPagesWithHierarchyCoverage(snapshot.visualPages.required, feeds.clodReady()),
+    liveMissing: countMissingPacked(liveRequired, feeds.liveReady()),
+    clodMissing: countMissingPagesWithHierarchyCoverage(snapshot.visualPages.required, feeds.clodReady(), {
+      requiredRootLevel: options.clodRequiredRootLevel,
+      coverageMaxLevel: options.clodCoverageMaxLevel,
+    }),
   };
 }
