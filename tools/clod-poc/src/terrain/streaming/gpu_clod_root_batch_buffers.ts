@@ -66,8 +66,22 @@ export interface GeometryReadbackLayout {
   indicesBytes: number;
 }
 
+export class RootGpuBatchLimitError extends Error {
+  constructor(
+    message: string,
+    readonly request: RootBatchRequest,
+    readonly slots: number,
+    readonly bytes: number,
+    readonly limits: RootGpuBatchLimits,
+  ) {
+    super(message);
+    this.name = "RootGpuBatchLimitError";
+  }
+}
+
 const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
+const READBACK_HEADROOM_MULTIPLIER = 2;
 
 export function rootLevelForRequest(request: RootBatchRequest, cfg: { quadtree_levels: number }): number {
   return Math.max(0, Math.min(Math.max(0, Math.floor(cfg.quadtree_levels) - 1), Math.floor(request.level ?? 0)));
@@ -80,7 +94,7 @@ export function chunkSlotsPerRootPage(chunksPerPage: number, rootLevel: number):
 
 export function estimateChunkSlotBytes(chunkSize: number): ChunkSlotByteEstimate {
   const dims = computeMeshDims(0, 0, Math.max(1, Math.floor(chunkSize)));
-  const totalBytes =
+  const slotBufferBytes =
     dims.maxVertices * 3 * F32 +
     dims.maxVertices * 3 * F32 +
     dims.maxVertices * F32 +
@@ -92,7 +106,7 @@ export function estimateChunkSlotBytes(chunkSize: number): ChunkSlotByteEstimate
     slotCount: dims.slotCount,
     maxVertices: dims.maxVertices,
     maxIndices: dims.maxIndices,
-    totalBytes,
+    totalBytes: slotBufferBytes * READBACK_HEADROOM_MULTIPLIER,
   };
 }
 
@@ -147,6 +161,7 @@ export function splitRootGpuBatches<T extends RootBatchRequest>(
   const maxPages = Math.max(1, Math.floor(limits.batchSize));
   const maxChunkSlots = Math.max(1, Math.floor(limits.maxChunkSlots));
   const maxTotalSlotBytes = Math.max(1, Math.floor(limits.maxTotalSlotBytes));
+  const normalizedLimits = { batchSize: maxPages, maxChunkSlots, maxTotalSlotBytes };
   let current: T[] = [];
   let currentSlots = 0;
   let currentBytes = 0;
@@ -162,6 +177,15 @@ export function splitRootGpuBatches<T extends RootBatchRequest>(
   for (const request of requests) {
     const slots = chunkSlotsPerRootPage(cfg.chunks_per_page, rootLevelForRequest(request, cfg));
     const bytes = estimateRootRequestSlotBytes(request, cfg);
+    if (slots > maxChunkSlots || bytes > maxTotalSlotBytes) {
+      throw new RootGpuBatchLimitError(
+        `GPU streamed-root request L${rootLevelForRequest(request, cfg)}:${request.px},${request.pz} requires ${slots} chunk slots and ${bytes} bytes, above limits ${maxChunkSlots}/${maxTotalSlotBytes}`,
+        request,
+        slots,
+        bytes,
+        normalizedLimits,
+      );
+    }
     const wouldExceed =
       current.length >= maxPages ||
       currentSlots + slots > maxChunkSlots ||
