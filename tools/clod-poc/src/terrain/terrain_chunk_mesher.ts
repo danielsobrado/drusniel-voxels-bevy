@@ -25,8 +25,17 @@ interface VertBuf {
   mergeCount: number[];
 }
 
+interface TerrainSampler {
+  density(x: number, y: number, z: number): number;
+  surfaceHeight(x: number, z: number): number;
+}
+
 function cellKeySN(ci: number, cj: number, ck: number): string {
   return `${ci},${cj},${ck}`;
+}
+
+function sampleKey(...coords: readonly number[]): string {
+  return coords.join(",");
 }
 
 function finiteBounds(world: WorldBounds): boolean {
@@ -41,14 +50,14 @@ function positionKey(px: number, py: number, pz: number, inv: number): string {
   return `${Math.round(px * inv)},${Math.round(py * inv)},${Math.round(pz * inv)}`;
 }
 
-function cellVertex(ci: number, cj: number, ck: number): [number, number, number] | null {
+function cellVertex(ci: number, cj: number, ck: number, sampler: TerrainSampler): [number, number, number] | null {
   const d: number[] = [];
   let neg = 0;
   for (let c = 0; c < 8; c++) {
     const x = ci + (c & 1);
     const y = cj + ((c >> 1) & 1);
     const z = ck + ((c >> 2) & 1);
-    const v = density(x, y, z);
+    const v = sampler.density(x, y, z);
     d.push(v);
     if (v < 0) neg++;
   }
@@ -74,14 +83,14 @@ function cellVertex(ci: number, cj: number, ck: number): [number, number, number
   return n > 0 ? [sx / n, sy / n, sz / n] : null;
 }
 
-function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number, posInv: number): number | null {
+function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number, posInv: number, sampler: TerrainSampler): number | null {
   const key = cellKeySN(ci, cj, ck);
   const existing = buf.index.get(key);
   if (existing !== undefined) return existing;
-  const p = cellVertex(ci, cj, ck);
+  const p = cellVertex(ci, cj, ck, sampler);
   if (p === null) return null;
   const [px, py, pz] = p;
-  const [nx, ny, nz] = gradient(px, py, pz);
+  const [nx, ny, nz] = gradient(px, py, pz, sampler);
   const pk = positionKey(px, py, pz, posInv);
   const posExisting = buf.posIndex.get(pk);
   if (posExisting !== undefined) {
@@ -109,11 +118,11 @@ function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number, posInv
   return idx;
 }
 
-function gradient(x: number, y: number, z: number): [number, number, number] {
+function gradient(x: number, y: number, z: number, sampler: TerrainSampler): [number, number, number] {
   const e = 0.5;
-  const gx = density(x + e, y, z) - density(x - e, y, z);
-  const gy = density(x, y + e, z) - density(x, y - e, z);
-  const gz = density(x, y, z + e) - density(x, y, z - e);
+  const gx = sampler.density(x + e, y, z) - sampler.density(x - e, y, z);
+  const gy = sampler.density(x, y + e, z) - sampler.density(x, y - e, z);
+  const gz = sampler.density(x, y, z + e) - sampler.density(x, y, z - e);
   const nx = -gx, ny = -gy, nz = -gz;
   const len = Math.hypot(nx, ny, nz) || 1;
   return [nx / len, ny / len, nz / len];
@@ -121,13 +130,13 @@ function gradient(x: number, y: number, z: number): [number, number, number] {
 
 function emitAxis(
   axis: "x" | "y" | "z", i: number, j: number, k: number,
-  buf: VertBuf, indices: number[], world: WorldBounds, posInv: number,
+  buf: VertBuf, indices: number[], world: WorldBounds, posInv: number, sampler: TerrainSampler,
 ): void {
-  const dBase = density(i, j, k);
+  const dBase = sampler.density(i, j, k);
   const tx = axis === "x" ? i + 1 : i;
   const ty = axis === "y" ? j + 1 : j;
   const tz = axis === "z" ? k + 1 : k;
-  const dTip = density(tx, ty, tz);
+  const dTip = sampler.density(tx, ty, tz);
   if (dBase < 0 === dTip < 0) return;
 
   const loop = QUAD_CELLS[axis];
@@ -137,7 +146,7 @@ function emitAxis(
   }
   const v: number[] = [];
   for (const [oi, oj, ok] of loop) {
-    const idx = getOrAddVertex(buf, i + oi, j + oj, k + ok, posInv);
+    const idx = getOrAddVertex(buf, i + oi, j + oj, k + ok, posInv, sampler);
     if (idx === null) return;
     v.push(idx);
   }
@@ -149,11 +158,35 @@ function emitAxis(
   }
 }
 
+function createTerrainSampler(): TerrainSampler {
+  const heightCache = new Map<string, number>();
+  const densityCache = new Map<string, number>();
+  return {
+    surfaceHeight(x, z) {
+      const key = sampleKey(x, z);
+      const cached = heightCache.get(key);
+      if (cached !== undefined) return cached;
+      const value = surfaceHeight(x, z);
+      heightCache.set(key, value);
+      return value;
+    },
+    density(x, y, z) {
+      const key = sampleKey(x, y, z);
+      const cached = densityCache.get(key);
+      if (cached !== undefined) return cached;
+      const value = density(x, y, z);
+      densityCache.set(key, value);
+      return value;
+    },
+  };
+}
+
 export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: WorldBounds): PageMesh {
   const S = cfg.page.chunk_size;
   const posInv = 1 / cfg.simplify.weld_epsilon_cells;
   const buf: VertBuf = { pos: [], nrm: [], mat: [], index: new Map(), posIndex: new Map(), mergeCount: [] };
   const indices: number[] = [];
+  const sampler = createTerrainSampler();
 
   const x0 = cx * S, x1 = (cx + 1) * S;
   const z0 = cz * S, z1 = (cz + 1) * S;
@@ -184,8 +217,8 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
   for (let i = x0; i < x1; i++) {
     for (let k = z0; k < z1; k++) {
       const nearbyHeights = [
-        surfaceHeight(i, k), surfaceHeight(i + 1, k), surfaceHeight(i - 1, k),
-        surfaceHeight(i, k + 1), surfaceHeight(i, k - 1),
+        sampler.surfaceHeight(i, k), sampler.surfaceHeight(i + 1, k), sampler.surfaceHeight(i - 1, k),
+        sampler.surfaceHeight(i, k + 1), sampler.surfaceHeight(i, k - 1),
       ];
       let j0 = Math.max(MIN_Y_CELL, Math.floor(Math.min(...nearbyHeights)) - 2);
       let j1 = Math.min(MAX_Y_CELL - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
@@ -196,9 +229,9 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
         j1 = Math.min(MAX_Y_CELL - 1, Math.max(j1, Math.ceil(e.y + eh + DIG_INFLUENCE_MARGIN)));
       }
       for (let j = j0; j <= j1; j++) {
-        emitAxis("x", i, j, k, buf, indices, world, posInv);
-        emitAxis("y", i, j, k, buf, indices, world, posInv);
-        emitAxis("z", i, j, k, buf, indices, world, posInv);
+        emitAxis("x", i, j, k, buf, indices, world, posInv, sampler);
+        emitAxis("y", i, j, k, buf, indices, world, posInv, sampler);
+        emitAxis("z", i, j, k, buf, indices, world, posInv, sampler);
       }
     }
   }
