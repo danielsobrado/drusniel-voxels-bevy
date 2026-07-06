@@ -49,6 +49,10 @@ export interface FarClipmapOwnershipSnapshot {
   ready: boolean;
 }
 
+export interface FarClipmapControllerOptions {
+  webGpuCompatibleMaterial?: boolean;
+}
+
 export interface FarClipmapController {
   update(cameraPosition: THREE.Vector3): FarClipmapStats;
   setDebugMode(mode: FarClipmapDebugMode): void;
@@ -137,8 +141,9 @@ export function createFarClipmapController(
   scene: THREE.Scene,
   config: FarClipmapConfig,
   source: FarClipmapSource = createDefaultFarClipmapSource(),
+  options: FarClipmapControllerOptions = {},
 ): FarClipmapController {
-  return new FarClipmapControllerImpl(scene, config, source);
+  return new FarClipmapControllerImpl(scene, config, source, options);
 }
 
 class FarClipmapControllerImpl implements FarClipmapController {
@@ -157,6 +162,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
     private readonly scene: THREE.Scene,
     private readonly config: FarClipmapConfig,
     private readonly source: FarClipmapSource,
+    private readonly options: FarClipmapControllerOptions,
   ) {
     this.lastStats = makeStats(config, false, 0, emptyFrameStats(), false, {
       buildMs: 0,
@@ -174,6 +180,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         cellSizeM,
         heightScale: config.heightScale,
         yOffset: config.yOffset,
+        webGpuCompatible: options.webGpuCompatibleMaterial === true,
       });
       const mesh = new THREE.Mesh(createFarClipmapGridGeometry({ gridResolution: config.gridResolution }), material);
       mesh.name = "far-clipmap-ring-" + String(ring);
@@ -261,9 +268,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
       outerRadiusM: this.config.outerRadiusM,
       centerX: this.centerX,
       centerZ: this.centerZ,
-      snapX: Number.isFinite(this.snapX) ? this.snapX : this.centerX,
-      snapZ: Number.isFinite(this.snapZ) ? this.snapZ : this.centerZ,
-      ready: this.lastStats.readyTiles === this.config.ringCount && this.lastStats.pendingTiles === 0,
+      snapX: Number.isFinite(this.snapX) ? this.snapX : 0,
+      snapZ: Number.isFinite(this.snapZ) ? this.snapZ : 0,
+      ready: this.lastStats.pendingTiles === 0,
     };
   }
 
