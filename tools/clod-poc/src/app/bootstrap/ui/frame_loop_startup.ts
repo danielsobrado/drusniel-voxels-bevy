@@ -536,6 +536,8 @@ export function runFrameLoopStartup(
           isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off",
         }
       : undefined,
-    canopy: input.terrainView.canopyShellSystem ? { system: input.terrainView.canopyShellSystem } : undefined,
+    canopy: input.terrainView.canopyShellSystem
+      ? { update: (cameraX, cameraZ) => input.terrainView.canopyShellSystem!.update(cameraX, cameraZ) }
+      : undefined,
   });
 }
