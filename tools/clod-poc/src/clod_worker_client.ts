@@ -188,10 +188,11 @@ export class ClodWorkerClient {
     if (!this.streamRootGpuCreatePromise) {
       const cfg = this.streamRootCfg;
       const pageSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
-      const worldCells = this.streamRootWorldPagesX * pageSpan;
+      const worldCellsX = this.streamRootWorldPagesX * pageSpan;
+      const worldCellsZ = this.streamRootWorldPagesZ * pageSpan;
       this.streamRootGpuCreatePromise = createGpuClodRootMesher({
         cfg,
-        world: { cellsX: worldCells, cellsZ: worldCells, finite: false },
+        world: { cellsX: worldCellsX, cellsZ: worldCellsZ, finite: false },
         config: this.streamRootGpuConfig,
       }).then((mesher) => {
         this.streamRootGpuMesher = mesher;
