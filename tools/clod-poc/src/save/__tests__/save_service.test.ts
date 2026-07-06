@@ -1,5 +1,5 @@
 import { indexedDB } from "fake-indexeddb";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SaveRegionRecords } from "../region_store.js";
 import { openSaveDb, writeRegionRecords, writeSaveManifestAndMetadata } from "../save_db.js";
 import {
@@ -9,7 +9,9 @@ import {
   seedOverrideFromQuery,
   selectDirtyRegionWriteBatch,
 } from "../save_service.js";
+import { clearSaveInvalidationTargets, registerSaveInvalidationTarget } from "../save_far_summary_bridge.js";
 import type { SaveWorldManifest, WorldMetadataRecord } from "../save_schema.js";
+import { boundsForRegion } from "../world_metadata/metadata_store.js";
 
 function dbName(): string {
   return `drusniel-save-service-test-${Date.now()}-${Math.random()}`;
@@ -66,6 +68,10 @@ function records(regionKey = "r_0_0", x = 1): SaveRegionRecords {
     props: [],
   };
 }
+
+afterEach(() => {
+  clearSaveInvalidationTargets();
+});
 
 describe("save service", () => {
   it("loads by replacing voxel edits exactly once", async () => {
@@ -132,5 +138,33 @@ describe("save service", () => {
     db.close();
 
     expect(result).toEqual({ written: ["r_0_0"], pending: ["r_1_0"], finalized: false });
+  });
+
+  it("publishes invalidation bounds for written dirty regions only", async () => {
+    const db = await openSaveDb(indexedDB, dbName());
+    const published: ReturnType<typeof boundsForRegion>[] = [];
+    registerSaveInvalidationTarget({
+      markSaveInvalidationBounds: (bounds) => published.push(bounds),
+    });
+
+    const result = await saveDirtyRegions({
+      db,
+      saveId: "qa-save",
+      manifest: manifest([]),
+      metadata: metadata(),
+      dirtyRegionKeys: ["r_0_0", "r_1_0"],
+      snapshot: {
+        revision: 3,
+        deltas: [
+          { x: 1, y: 2, z: 3, density: 0.5, revision: 3 },
+          { x: 512, y: 2, z: 3, density: 0.75, revision: 3 },
+        ],
+      },
+    });
+    db.close();
+
+    expect(result.written).toEqual(["r_0_0"]);
+    expect(result.pending).toEqual(["r_1_0"]);
+    expect(published).toEqual([boundsForRegion("r_0_0")]);
   });
 });
