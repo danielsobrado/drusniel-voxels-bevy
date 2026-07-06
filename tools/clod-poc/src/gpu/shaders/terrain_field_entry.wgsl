@@ -1,17 +1,5 @@
 // GPU Surface Nets compute pass. Concatenated after terrain field bindings and common logic,
 // which provide densityField / densityGradient and own group(0) bindings 0-1.
-// Transliteration of src/gpu/surface_nets_core.ts, which is proven (surface_nets_core.test.ts)
-// to emit the same surface as terrain.ts meshChunk. Two passes over the chunk cell grid:
-//   vertexPass: one invocation per grid cell. If the cell has a sign change, atomically claim a
-//               compact vertex index, write its position/normal/material, and record that index
-//               in cellIndex[slot]; otherwise cellIndex[slot] = -1.
-//   quadPass:   one invocation per (i,j,k,axis). On a sign-crossing edge, read the 4 dual cells'
-//               compact indices from cellIndex and atomic-append the two triangles into indices.
-// Compaction (atomic vertexCount) keeps readback to just the live verts + indices, and matches
-// surface_nets_core (which assigns sequential indices; GPU order differs but the surface is equal).
-// vertexPass must fully complete before quadPass (separate same-queue dispatches → ordered).
-//
-// (*) paintMaterialAt is ported inline below to keep this file self-contained for the paint slot.
 
 struct MeshParams {
   x0 : i32, x1 : i32,
@@ -24,16 +12,24 @@ struct MeshParams {
   maxIndices : u32,
   maxVertices : u32,
   finiteWorld : u32,
+  positionBase : u32,
+  normalBase : u32,
+  materialBase : u32,
+  cellIndexBase : u32,
+  indexBase : u32,
+  counterSlot : u32,
+  _pad0 : u32,
+  _pad1 : u32,
 };
 
 @group(0) @binding(2) var<uniform> mesh : MeshParams;
-@group(0) @binding(3) var<storage, read_write> outPositions : array<f32>;  // 3 per compact vertex
-@group(0) @binding(4) var<storage, read_write> outNormals : array<f32>;    // 3 per compact vertex
-@group(0) @binding(5) var<storage, read_write> outMaterials : array<f32>;  // 1 per compact vertex
-@group(0) @binding(6) var<storage, read_write> cellIndex : array<i32>;     // compact vert index per slot, or -1
+@group(0) @binding(3) var<storage, read_write> outPositions : array<f32>;
+@group(0) @binding(4) var<storage, read_write> outNormals : array<f32>;
+@group(0) @binding(5) var<storage, read_write> outMaterials : array<f32>;
+@group(0) @binding(6) var<storage, read_write> cellIndex : array<i32>;
 @group(0) @binding(7) var<storage, read_write> outIndices : array<u32>;
-@group(0) @binding(8) var<storage, read_write> indexCount : atomic<u32>;
-@group(0) @binding(9) var<storage, read_write> vertexCount : atomic<u32>;
+@group(0) @binding(8) var<storage, read_write> indexCount : array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read_write> vertexCount : array<atomic<u32>>;
 
 const MATERIAL_PAINT_BAND : f32 = 0.75;
 
@@ -41,8 +37,10 @@ fn slotIndex(gx : i32, gy : i32, gz : i32) -> i32 {
   return (gx * mesh.vyCount + gy) * mesh.vzCount + gz;
 }
 
-// Inline paintMaterialAt (mirror of terrain_field_core.paintMaterialAtCore). digEdits/fieldParams
-// come from the terrain field binding wrapper.
+fn cellIndexOffset(gx : i32, gy : i32, gz : i32) -> u32 {
+  return mesh.cellIndexBase + u32(slotIndex(gx, gy, gz));
+}
+
 fn paintMaterialAt(x : f32, y : f32, z : f32) -> f32 {
   let count = i32(fieldParams.editCount);
   for (var i : i32 = count - 1; i >= 0; i = i - 1) {
@@ -61,7 +59,6 @@ fn paintMaterialAt(x : f32, y : f32, z : f32) -> f32 {
   return 0.0;
 }
 
-// Surface-nets vertex for a cell (mirror of cellVertexCore). Returns false if no sign change.
 fn cellVertex(ci : i32, cj : i32, ck : i32, outPos : ptr<function, vec3<f32>>) -> bool {
   var d : array<f32, 8>;
   var neg : i32 = 0;
@@ -75,7 +72,6 @@ fn cellVertex(ci : i32, cj : i32, ck : i32, outPos : ptr<function, vec3<f32>>) -
   }
   if (neg == 0 || neg == 8) { return false; }
 
-  // 12 edges as (cornerA, cornerB): x(0-1,2-3,4-5,6-7) y(0-2,1-3,4-6,5-7) z(0-4,1-5,2-6,3-7)
   var ea = array<i32, 12>(0, 2, 4, 6, 0, 1, 4, 5, 0, 1, 2, 3);
   var eb = array<i32, 12>(1, 3, 5, 7, 2, 3, 6, 7, 4, 5, 6, 7);
   var sx : f32 = 0.0;
@@ -117,44 +113,40 @@ fn vertexPass(@builtin(global_invocation_id) gid : vec3<u32>) {
   let cj = mesh.vyBase + gy;
   let ck = mesh.vzBase + gz;
 
-  let slot = i32(lin);
+  let slot = cellIndexOffset(gx, gy, gz);
   var p : vec3<f32>;
   if (!cellVertex(ci, cj, ck, &p)) {
     cellIndex[slot] = -1;
     return;
   }
-  let vi = atomicAdd(&vertexCount, 1u);
-  if (vi >= mesh.maxVertices) { cellIndex[slot] = -1; return; } // overflow guard; host sizes buffer
+  let vi = atomicAdd(&vertexCount[mesh.counterSlot], 1u);
+  if (vi >= mesh.maxVertices) { cellIndex[slot] = -1; return; }
   let nrm = densityGradient(p.x, p.y, p.z);
   let paint = paintMaterialAt(p.x, p.y, p.z);
-  let vo = i32(vi);
-  outPositions[vo * 3 + 0] = p.x;
-  outPositions[vo * 3 + 1] = p.y;
-  outPositions[vo * 3 + 2] = p.z;
-  outNormals[vo * 3 + 0] = nrm.x;
-  outNormals[vo * 3 + 1] = nrm.y;
-  outNormals[vo * 3 + 2] = nrm.z;
-  outMaterials[vo] = paint;
-  cellIndex[slot] = vo;
+  let vo3 = vi * 3u;
+  outPositions[mesh.positionBase + vo3 + 0u] = p.x;
+  outPositions[mesh.positionBase + vo3 + 1u] = p.y;
+  outPositions[mesh.positionBase + vo3 + 2u] = p.z;
+  outNormals[mesh.normalBase + vo3 + 0u] = nrm.x;
+  outNormals[mesh.normalBase + vo3 + 1u] = nrm.y;
+  outNormals[mesh.normalBase + vo3 + 2u] = nrm.z;
+  outMaterials[mesh.materialBase + vi] = paint;
+  cellIndex[slot] = i32(vi);
 }
 
-// QUAD_CELLS[axis] (offsets to the cell min-corner), flattened [axis][corner][oi,oj,ok].
 fn quadCell(axis : i32, corner : i32) -> vec3<i32> {
-  // x
   if (axis == 0) {
     if (corner == 0) { return vec3<i32>(0, -1, -1); }
     if (corner == 1) { return vec3<i32>(0, 0, -1); }
     if (corner == 2) { return vec3<i32>(0, 0, 0); }
     return vec3<i32>(0, -1, 0);
   }
-  // y
   if (axis == 1) {
     if (corner == 0) { return vec3<i32>(-1, 0, -1); }
     if (corner == 1) { return vec3<i32>(-1, 0, 0); }
     if (corner == 2) { return vec3<i32>(0, 0, 0); }
     return vec3<i32>(0, 0, -1);
   }
-  // z
   if (corner == 0) { return vec3<i32>(-1, -1, 0); }
   if (corner == 1) { return vec3<i32>(0, -1, 0); }
   if (corner == 2) { return vec3<i32>(0, 0, 0); }
@@ -183,39 +175,39 @@ fn quadPass(@builtin(global_invocation_id) gid : vec3<u32>) {
   else if (axis == 1) { step = vec3<i32>(0, 1, 0); }
   else { step = vec3<i32>(0, 0, 1); }
   let dTip = densityField(f32(i + step.x), f32(j + step.y), f32(k + step.z));
-  if ((dBase < 0.0) == (dTip < 0.0)) { return; } // no crossing
+  if ((dBase < 0.0) == (dTip < 0.0)) { return; }
 
-  // Perimeter clip + gather the 4 dual-cell vertex slots.
   var slots : array<i32, 4>;
   for (var c : i32 = 0; c < 4; c = c + 1) {
     let o = quadCell(axis, c);
     let ci = i + o.x;
     let ck = k + o.z;
-    if (mesh.finiteWorld != 0u && (ci < 0 || ci >= mesh.worldCellsX || ck < 0 || ck >= mesh.worldCellsZ)) { return; } // clipped
+    if (mesh.finiteWorld != 0u && (ci < 0 || ci >= mesh.worldCellsX || ck < 0 || ck >= mesh.worldCellsZ)) { return; }
     let gi = ci - mesh.vxBase;
     let gj = (j + o.y) - mesh.vyBase;
     let gk = ck - mesh.vzBase;
-    let vi = cellIndex[slotIndex(gi, gj, gk)];
-    if (vi < 0) { return; } // degenerate: a dual cell has no vertex
+    let vi = cellIndex[cellIndexOffset(gi, gj, gk)];
+    if (vi < 0) { return; }
     slots[c] = vi;
   }
 
-  let base = atomicAdd(&indexCount, 6u);
-  if (base + 6u > mesh.maxIndices) { return; } // overflow guard; host sizes the buffer
+  let base = atomicAdd(&indexCount[mesh.counterSlot], 6u);
+  if (base + 6u > mesh.maxIndices) { return; }
+  let outBase = mesh.indexBase + base;
   let flip = dBase < dTip;
   if (!flip) {
-    outIndices[base + 0u] = u32(slots[0]);
-    outIndices[base + 1u] = u32(slots[1]);
-    outIndices[base + 2u] = u32(slots[2]);
-    outIndices[base + 3u] = u32(slots[0]);
-    outIndices[base + 4u] = u32(slots[2]);
-    outIndices[base + 5u] = u32(slots[3]);
+    outIndices[outBase + 0u] = u32(slots[0]);
+    outIndices[outBase + 1u] = u32(slots[1]);
+    outIndices[outBase + 2u] = u32(slots[2]);
+    outIndices[outBase + 3u] = u32(slots[0]);
+    outIndices[outBase + 4u] = u32(slots[2]);
+    outIndices[outBase + 5u] = u32(slots[3]);
   } else {
-    outIndices[base + 0u] = u32(slots[0]);
-    outIndices[base + 1u] = u32(slots[2]);
-    outIndices[base + 2u] = u32(slots[1]);
-    outIndices[base + 3u] = u32(slots[0]);
-    outIndices[base + 4u] = u32(slots[3]);
-    outIndices[base + 5u] = u32(slots[2]);
+    outIndices[outBase + 0u] = u32(slots[0]);
+    outIndices[outBase + 1u] = u32(slots[2]);
+    outIndices[outBase + 2u] = u32(slots[1]);
+    outIndices[outBase + 3u] = u32(slots[0]);
+    outIndices[outBase + 4u] = u32(slots[3]);
+    outIndices[outBase + 5u] = u32(slots[2]);
   }
 }
