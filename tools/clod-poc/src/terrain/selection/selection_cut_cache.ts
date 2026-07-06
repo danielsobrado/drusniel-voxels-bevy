@@ -17,7 +17,7 @@ export const DEFAULT_SELECTION_CUT_CACHE_CONFIG: SelectionCutCacheConfig = {
   angleBucketDeg: 1.0,
   thresholdBucketPx: 0.05,
   bubbleCenterCellSizeM: 1.0,
-  maxReuseFrames: 8,
+  maxReuseFrames: 120,
 };
 
 export type SelectionCutCacheMissReason =
