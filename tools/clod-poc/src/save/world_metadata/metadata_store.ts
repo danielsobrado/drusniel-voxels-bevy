@@ -60,17 +60,19 @@ function mergeBounds(a: SavedBounds2D, b: SavedBounds2D): SavedBounds2D {
   };
 }
 
-function axisOverlapsRegion(min: number, max: number, regionMin: number, regionMax: number): boolean {
-  return min <= regionMax && max >= regionMin;
-}
-
-function boundsOverlapRegion(bounds: SavedBounds2D, regionBounds: SavedBounds2D): boolean {
-  return axisOverlapsRegion(bounds.minX, bounds.maxX, regionBounds.minX, regionBounds.maxX)
-    && axisOverlapsRegion(bounds.minZ, bounds.maxZ, regionBounds.minZ, regionBounds.maxZ);
-}
-
 function assertFiniteBoundsCoordinate(value: number, label: string): void {
   if (!Number.isFinite(value)) throw new Error(`metadata bounds ${label} must be finite`);
+}
+
+function regionCoordRangeHalfOpen(min: number, max: number): { min: number; max: number } {
+  if (min === max) {
+    const coord = regionCoord(min);
+    return { min: coord, max: coord };
+  }
+  return {
+    min: regionCoord(min),
+    max: Math.ceil(max / SAVE_REGION_SIZE_M) - 1,
+  };
 }
 
 export function boundsForRegion(regionKey: string): SavedBounds2D {
@@ -86,15 +88,17 @@ export function boundsForRegion(regionKey: string): SavedBounds2D {
 export function regionKeysForBounds(bounds: SavedBounds2D): string[] {
   for (const key of ["minX", "minZ", "maxX", "maxZ"] as const) assertFiniteBoundsCoordinate(bounds[key], key);
   if (bounds.minX > bounds.maxX || bounds.minZ > bounds.maxZ) throw new Error("metadata bounds min must be <= max");
-  const minRx = regionCoord(bounds.minX);
-  const maxRx = regionCoord(bounds.maxX);
-  const minRz = regionCoord(bounds.minZ);
-  const maxRz = regionCoord(bounds.maxZ);
+  const rx = regionCoordRangeHalfOpen(bounds.minX, bounds.maxX);
+  const rz = regionCoordRangeHalfOpen(bounds.minZ, bounds.maxZ);
   const keys: string[] = [];
-  for (let rx = minRx; rx <= maxRx; rx++) {
-    for (let rz = minRz; rz <= maxRz; rz++) keys.push(regionKeyOf(rx, rz));
+  for (let x = rx.min; x <= rx.max; x++) {
+    for (let z = rz.min; z <= rz.max; z++) keys.push(regionKeyOf(x, z));
   }
   return keys.sort();
+}
+
+function boundsIncludeRegion(bounds: SavedBounds2D, regionKey: string): boolean {
+  return regionKeysForBounds(bounds).includes(regionKey);
 }
 
 export function cityBounds(city: SavedCity): SavedBounds2D {
@@ -189,15 +193,14 @@ export class WorldMetadataStore {
   }
 
   queryRegion(regionKey: string): WorldMetadataRegionQueryResult {
-    const regionBounds = boundsForRegion(regionKey);
     const result = emptyQueryResult();
     const matchingCaveSystemIds = new Set<string>();
-    const entranceIds = ids(this.metadataValue.caveEntrances.filter((entrance) => boundsOverlapRegion(caveEntranceBounds(entrance), regionBounds)));
-    const criticalPathIds = ids(this.metadataValue.criticalPaths.filter((path) => boundsOverlapRegion(criticalPathBounds(path), regionBounds)));
+    const entranceIds = ids(this.metadataValue.caveEntrances.filter((entrance) => boundsIncludeRegion(caveEntranceBounds(entrance), regionKey)));
+    const criticalPathIds = ids(this.metadataValue.criticalPaths.filter((path) => boundsIncludeRegion(criticalPathBounds(path), regionKey)));
 
-    result.cities = this.metadataValue.cities.filter((city) => boundsOverlapRegion(cityBounds(city), regionBounds));
-    result.districts = this.metadataValue.districts.filter((district) => boundsOverlapRegion(districtBounds(district), regionBounds));
-    result.roads = this.metadataValue.roads.filter((road) => boundsOverlapRegion(roadBounds(road), regionBounds));
+    result.cities = this.metadataValue.cities.filter((city) => boundsIncludeRegion(cityBounds(city), regionKey));
+    result.districts = this.metadataValue.districts.filter((district) => boundsIncludeRegion(districtBounds(district), regionKey));
+    result.roads = this.metadataValue.roads.filter((road) => boundsIncludeRegion(roadBounds(road), regionKey));
     result.caveEntrances = this.metadataValue.caveEntrances.filter((entrance) => entranceIds.has(entrance.id));
     result.criticalPaths = this.metadataValue.criticalPaths.filter((path) => criticalPathIds.has(path.id));
 
