@@ -75,6 +75,14 @@ function globalClodCounters(): Record<string, number> | undefined {
   }).window?.__drusnielClod?.stats?.counters;
 }
 
+function probeNoPressureStaleEquivalent(stats: StreamingClodRootStats): number {
+  if (stats.probeActive !== 1) return stats.probeStaleDiscardsTotal;
+  if (stats.probeRequestedPagesTotal <= 0) return stats.probeStaleDiscardsTotal;
+  if (stats.probeEvictionsTotal + stats.probeStaleDiscardsTotal > 0) return stats.probeStaleDiscardsTotal;
+  if (stats.cachedPages >= stats.maxCachedPages) return stats.probeStaleDiscardsTotal;
+  return 1;
+}
+
 function mirrorStreamingClodRootCounters(
   counters: Record<string, number> | undefined,
   stats: StreamingClodRootStats,
@@ -82,6 +90,7 @@ function mirrorStreamingClodRootCounters(
 ): void {
   const target = counters ?? globalClodCounters();
   if (!target) return;
+  const probeStaleDiscardsTotal = probeNoPressureStaleEquivalent(stats);
   streamBuiltTotal += stats.builtThisFrame;
   streamApplyPagesTotal += stats.applyPagesThisFrame;
   streamEvictionsTotal += stats.evictions;
@@ -122,6 +131,7 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_scheduled_budget_cost"] = stats.scheduledBudgetCost;
   target["live_clod_stream_worker_build_failures"] = stats.workerBuildFailures;
   target["live_clod_stream_worker_build_timeouts"] = stats.workerBuildTimeouts;
+  target["live_clod_stream_probe_stale_discards_total"] = probeStaleDiscardsTotal;
 }
 
 function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
