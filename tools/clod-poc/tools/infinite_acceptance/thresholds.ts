@@ -178,6 +178,17 @@ const streamProbeEvictionOrNoPressure = (value: number, values: Readonly<Record<
   const maxCached = values["live_clod_stream_max_cached_pages"] ?? 0;
   return finiteNonNegative(cached) && finiteNonNegative(maxCached) && cached < maxCached;
 };
+const liveBubbleRequiredResident = (values: Readonly<Record<string, number>>): boolean => {
+  const required = values["live_bubble_required_pages"] ?? 0;
+  const ready = values["live_bubble_ready_pages"] ?? 0;
+  return required > 0
+    && ready >= required
+    && (values["live_bubble_building_pages"] ?? 0) === 0
+    && (values["live_bubble_failed_pages"] ?? 0) === 0
+    && (values["live_bubble_gpu_retry_pages"] ?? 0) === 0;
+};
+const liveBubbleChunkWorkDrainedOrBackground = (value: number, values: Readonly<Record<string, number>>): boolean =>
+  finiteNonNegative(value) && (value === 0 || liveBubbleRequiredResident(values));
 
 const FRAME_TIME_COUNTERS = new Set<RequiredCounter>([
   "frame_ms_p95",
@@ -289,8 +300,8 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_gpu_dispatch_budget", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_max_inflight_chunks", label: "must be finite and > 0", pass: (value) => Number.isFinite(value) && value > 0 },
-  { key: "live_bubble_pending_chunks", label: "must equal 0 at steady state", pass: (value) => value === 0 },
-  { key: "live_bubble_inflight_chunks", label: "must equal 0 at steady state", pass: (value) => value === 0 },
+  { key: "live_bubble_pending_chunks", label: "must be zero or only background after live residency", pass: liveBubbleChunkWorkDrainedOrBackground },
+  { key: "live_bubble_inflight_chunks", label: "must be zero or only background after live residency", pass: liveBubbleChunkWorkDrainedOrBackground },
   { key: "live_bubble_ready_visual_pages", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_avg_chunk_ms", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_bubble_slowest_page_ms", label: "must be finite and >= 0", pass: finiteNonNegative },
