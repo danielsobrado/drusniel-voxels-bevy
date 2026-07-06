@@ -55,9 +55,15 @@ const STREAMED_ROOT_GPU_PARAMS = {
   liveClodRootGpuFallback: "1",
 } as const;
 
+const ACCEPTANCE_RENDER_PARAMS = {
+  renderScale: "0.75",
+  dprCap: "1",
+} as const;
+
 export function profileAcceptanceParams(profile: AcceptanceProfile): Record<string, string> {
   if (profile === "fast") {
     return {
+      ...ACCEPTANCE_RENDER_PARAMS,
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
       liveBubbleMaxInflightChunks: "128",
@@ -77,6 +83,7 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
     };
   }
   return {
+    ...ACCEPTANCE_RENDER_PARAMS,
     liveBubbleBudget: "4",
     liveBubbleGpuChunkBudget: "16",
     liveBubbleMaxInflightChunks: "128",
