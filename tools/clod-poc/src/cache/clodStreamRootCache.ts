@@ -7,7 +7,6 @@ import {
 import {
   decodeClodPageNodeArtifact,
   encodeClodPageNodeArtifact,
-  type ClodPageNodeArtifact,
 } from "./artifactSerializer.js";
 import type { WorkerCacheBuildStats } from "./cacheMetrics.js";
 import {

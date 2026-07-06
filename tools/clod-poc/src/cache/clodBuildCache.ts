@@ -1,7 +1,6 @@
 import type { BuildProgress, BuildResult, NodeBuildStat } from "../clod/quadtree.js";
 import { buildWorldAsync, type BuildCacheHooks } from "../clod/quadtree.js";
 import type { ClodPagesConfig } from "../config.js";
-import type { ClodPageNode } from "../types.js";
 import {
   buildBaseKeyParts,
   pageNodeSourceHash,
@@ -11,7 +10,6 @@ import {
   decodeClodPageNodeArtifact,
   encodeClodPageNodeArtifact,
   encodeClodPageTreeArtifact,
-  type ClodPageNodeArtifact,
 } from "./artifactSerializer.js";
 import { decodeBuildStatFromMetadata, encodeBuildStatMetadata } from "./cacheBuildStatMetadata.js";
 import type { WorkerCacheBuildStats } from "./cacheMetrics.js";
