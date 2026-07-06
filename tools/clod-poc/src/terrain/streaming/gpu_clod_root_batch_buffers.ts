@@ -84,7 +84,7 @@ export class RootGpuBatchLimitError extends Error {
 
 const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
-const READBACK_HEADROOM_MULTIPLIER = 2;
+const READBACK_HEADROOM_MULTIPLIER = 3;
 
 export function rootLevelForRequest(request: RootBatchRequest, cfg: { quadtree_levels: number }): number {
   return Math.max(0, Math.min(Math.max(0, Math.floor(cfg.quadtree_levels) - 1), Math.floor(request.level ?? 0)));
