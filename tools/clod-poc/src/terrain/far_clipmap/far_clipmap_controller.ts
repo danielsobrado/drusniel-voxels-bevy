@@ -3,6 +3,7 @@ import type { FarClipmapConfig, FarClipmapDebugMode } from "./far_clipmap_config
 import { farClipmapRingRange, farClipmapSnap } from "./far_clipmap_keys.js";
 import {
   createFarClipmapGridGeometry,
+  createFarClipmapTerrainGeometry,
 } from "./far_clipmap_geometry.js";
 import {
   createFarClipmapMaterial,
@@ -222,6 +223,23 @@ class FarClipmapControllerImpl implements FarClipmapController {
         ring.readySnapX = snap.snapX;
         ring.readySnapZ = snap.snapZ;
         frameStats.rebuilt++;
+
+        if (this.options.webGpuCompatibleMaterial === true) {
+          const oldGeo = ring.mesh.geometry;
+          const newGeo = createFarClipmapTerrainGeometry({
+            gridResolution: this.config.gridResolution,
+            centerX: snap.snapX,
+            centerZ: snap.snapZ,
+            innerRadiusM: ring.innerRadiusM,
+            outerRadiusM: ring.outerRadiusM,
+            heightScale: this.config.heightScale,
+            yOffset: this.config.yOffset,
+            source: this.source,
+          });
+          ring.mesh.geometry = newGeo;
+          oldGeo.dispose();
+        }
+
         frameStats.vertices += vertexCount;
         frameStats.triangles += triangleCount;
         const buildMs = performance.now() - startedAt;

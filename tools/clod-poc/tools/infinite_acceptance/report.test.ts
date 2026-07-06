@@ -49,7 +49,7 @@ describe("infinite islands report helpers", () => {
         passed: false,
       }],
     });
-    expect(markdown).toContain("| walk | 9.00 | 10.00 | 12.00 | 1234 | 5678 | 16->2 | hit | 12.4 | 1.2 | 24.8 | 0 | 0.00 | FAIL | walk.png |");
+    expect(markdown).toContain("| walk | 9.00 | 10.00 | n/a | n/a | n/a | 12.00 | 1234 | 5678 | 16->2 | hit | 12.4 | 1.2 | 24.8 | 0 | 0.00 | FAIL | walk.png |");
     expect(markdown).toContain("Result: FAIL");
   });
 });

@@ -184,17 +184,17 @@ class PackedRootGpuBufferPool {
     if (plans.length > this.capacity) {
       throw new RootGpuBatchLimitError(
         `GPU streamed-root packed pool needs ${plans.length} slots, capacity ${this.capacity}`,
-        plans[0] ?? { px: 0, pz: 0 },
+        plans[0] ? { px: plans[0].rootPx, pz: plans[0].rootPz, level: plans[0].rootLevel } : { px: 0, pz: 0 },
         plans.length,
         0,
         { batchSize: 1, maxChunkSlots: this.capacity, maxTotalSlotBytes: 0 },
       );
     }
     this.device.queue.writeBuffer(this.digEdits, 0, packDigEdits([]));
-    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0));
+    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0) as any);
     const zeros = new Uint32Array(Math.max(1, plans.length));
-    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer, 0, plans.length * U32);
-    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer, 0, plans.length * U32);
+    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer as any, 0, plans.length * U32);
+    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer as any, 0, plans.length * U32);
     return plans.map((plan) => this.prepareSlot(plan));
   }
 
@@ -247,7 +247,7 @@ class PackedRootGpuBufferPool {
     this.device.queue.writeBuffer(
       this.meshParams[counterSlot]!,
       0,
-      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }),
+      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }) as any,
     );
     return {
       ...plan,
@@ -282,12 +282,12 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
 
   constructor(
     private readonly device: GPUDevice,
-    private readonly layout: GPUBindGroupLayout,
+    layout: GPUBindGroupLayout,
     private readonly vertexPipeline: GPUComputePipeline,
     private readonly quadPipeline: GPUComputePipeline,
     private readonly cfg: ClodPagesConfig,
-    private readonly world: WorldBounds,
-    private readonly config: StreamingRootGpuMesherConfig,
+    world: WorldBounds,
+    config: StreamingRootGpuMesherConfig,
   ) {
     this.batchLimits = resolveRuntimeBatchLimits(device, config, cfg.page.chunk_size);
     this.pool = new PackedRootGpuBufferPool(device, layout, cfg, world, this.batchLimits.maxChunkSlots);
@@ -795,7 +795,7 @@ function resolveRuntimeBatchLimits(device: GPUDevice, config: StreamingRootGpuMe
 }
 
 function positiveLimit(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+  return value !== undefined && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
 function assertBufferWithinLimit(size: number, limit: number, label: string): void {

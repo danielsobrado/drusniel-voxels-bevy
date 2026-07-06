@@ -3,6 +3,7 @@ import * as THREE from "three";
 import {
   DEFAULT_FAR_CLIPMAP_CONFIG,
   createFarClipmapController,
+  createFarClipmapGridGeometry,
   createFarClipmapTerrainGeometry,
   farClipmapConfigFromSearchParams,
   farClipmapSnap,
@@ -64,6 +65,23 @@ describe("far clipmap snapping", () => {
 
 describe("far clipmap geometry", () => {
   it("builds reusable flat GPU grid geometry", () => {
+    const geometry = createFarClipmapGridGeometry({
+      gridResolution: 5,
+    });
+
+    const position = geometry.getAttribute("position");
+    const normal = geometry.getAttribute("normal");
+    expect(position.count).toBe(25);
+    expect(geometry.getAttribute("color")).toBeUndefined();
+    expect(normal.count).toBe(25);
+    expect((geometry.getIndex()?.count ?? 0)).toBeGreaterThan(0);
+    expect(position.getX(0)).toBe(0);
+    expect(position.getY(0)).toBe(0);
+    expect(position.getZ(0)).toBe(0);
+    geometry.dispose();
+  });
+
+  it("builds deformed CPU terrain geometry", () => {
     const geometry = createFarClipmapTerrainGeometry({
       gridResolution: 5,
       centerX: 0,
@@ -77,13 +95,10 @@ describe("far clipmap geometry", () => {
 
     const position = geometry.getAttribute("position");
     const normal = geometry.getAttribute("normal");
-    expect(position.count).toBe(25);
-    expect(geometry.getAttribute("color")).toBeUndefined();
-    expect(normal.count).toBe(25);
-    expect((geometry.getIndex()?.count ?? 0)).toBeGreaterThan(0);
-    expect(position.getX(0)).toBe(0);
-    expect(position.getY(0)).toBe(0);
-    expect(position.getZ(0)).toBe(0);
+    const color = geometry.getAttribute("color");
+    expect(position.count).toBeGreaterThan(0);
+    expect(normal.count).toBeGreaterThan(0);
+    expect(color).toBeDefined();
     geometry.dispose();
   });
 });

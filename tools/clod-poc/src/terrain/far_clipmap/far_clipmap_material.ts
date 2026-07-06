@@ -11,6 +11,7 @@ const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object
 const FAR_CLIPMAP_SHADER_RENDER_ORDER = 20;
 
 export interface FarClipmapMaterialUniforms {
+  [key: string]: THREE.IUniform<any>;
   uRingOrigin: THREE.IUniform<THREE.Vector2>;
   uCellSize: THREE.IUniform<number>;
   uHeightScale: THREE.IUniform<number>;
@@ -233,6 +234,7 @@ function createWebGpuFarClipmapMaterial(input: {
   const material = new THREE.MeshBasicMaterial({
     name: "FarClipmapTerrainWebGpuFallback",
     color: farClipmapFallbackColor(input.debugMode),
+    vertexColors: true,
     depthWrite: true,
     depthTest: true,
     polygonOffset: true,

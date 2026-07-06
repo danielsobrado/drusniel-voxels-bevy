@@ -159,9 +159,107 @@ export function createFarClipmapGridGeometry(options: FarClipmapGridGeometryOpti
   return localGridGeometry(safeGridResolution(options.gridResolution));
 }
 
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, val));
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
+function mix(v0: number, v1: number, t: number): number {
+  return v0 * (1.0 - t) + v1 * t;
+}
+
+function farTerrainBaseColor(height: number, normalY: number): THREE.Color {
+  const slope = 1.0 - clamp(normalY, 0.0, 1.0);
+  if (height <= 0.25) return new THREE.Color(0.07, 0.18, 0.25);
+  if (height < 4.0) return new THREE.Color(0.42, 0.36, 0.20);
+  const grass = [0.20, 0.27, 0.18];
+  const rock = [0.35, 0.34, 0.30];
+  const highland = [0.32, 0.36, 0.24];
+  const tSlope = smoothstep(0.32, 0.72, slope);
+  const r = mix(grass[0], rock[0], tSlope);
+  const g = mix(grass[1], rock[1], tSlope);
+  const b = mix(grass[2], rock[2], tSlope);
+  const tHigh = smoothstep(56.0, 180.0, height) * 0.35;
+  return new THREE.Color(
+    mix(r, highland[0], tHigh),
+    mix(g, highland[1], tHigh),
+    mix(b, highland[2], tHigh),
+  );
+}
+
 export function createFarClipmapTerrainGeometry(options: FarClipmapTerrainGeometryOptions): THREE.BufferGeometry {
   validateFarClipmapSummaryCoverage(options);
-  void options.heightScale;
-  void options.yOffset;
-  return createFarClipmapGridGeometry({ gridResolution: options.gridResolution });
+  const resolution = safeGridResolution(options.gridResolution);
+  const segments = resolution - 1;
+  const diameter = options.outerRadiusM * 2;
+  const step = diameter / segments;
+  const originX = options.centerX - options.outerRadiusM;
+  const originZ = options.centerZ - options.outerRadiusM;
+
+  const vertices: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const gridIndexMap = new Map<string, number>();
+
+  for (let gz = 0; gz < resolution; gz++) {
+    for (let gx = 0; gx < resolution; gx++) {
+      const worldX = originX + gx * step;
+      const worldZ = originZ + gz * step;
+      const distance = Math.hypot(worldX - options.centerX, worldZ - options.centerZ);
+      
+      const isVertexNeeded = distance >= (options.innerRadiusM - step) && distance <= (options.outerRadiusM + step);
+      if (!isVertexNeeded) continue;
+
+      const height = options.source.sampleHeight(worldX, worldZ) * options.heightScale + options.yOffset;
+      
+      const stepM = 2.0;
+      const hL = options.source.sampleHeight(worldX - stepM, worldZ) * options.heightScale + options.yOffset;
+      const hR = options.source.sampleHeight(worldX + stepM, worldZ) * options.heightScale + options.yOffset;
+      const hD = options.source.sampleHeight(worldX, worldZ - stepM) * options.heightScale + options.yOffset;
+      const hU = options.source.sampleHeight(worldX, worldZ + stepM) * options.heightScale + options.yOffset;
+      const dx = (hR - hL) / (2.0 * stepM);
+      const dz = (hU - hD) / (2.0 * stepM);
+      const normal = new THREE.Vector3(-dx, 1.0, -dz).normalize();
+
+      const color = farTerrainBaseColor(height, normal.y);
+
+      const vertexIdx = vertices.length / 3;
+      vertices.push(worldX, height, worldZ);
+      normals.push(normal.x, normal.y, normal.z);
+      colors.push(color.r, color.g, color.b);
+      gridIndexMap.set(`${gx},${gz}`, vertexIdx);
+    }
+  }
+
+  for (let gz = 0; gz < segments; gz++) {
+    for (let gx = 0; gx < segments; gx++) {
+      const cx = originX + (gx + 0.5) * step;
+      const cz = originZ + (gz + 0.5) * step;
+      const distance = Math.hypot(cx - options.centerX, cz - options.centerZ);
+      if (distance < options.innerRadiusM || distance > options.outerRadiusM) continue;
+
+      const idxA = gridIndexMap.get(`${gx},${gz}`);
+      const idxB = gridIndexMap.get(`${gx + 1},${gz}`);
+      const idxC = gridIndexMap.get(`${gx},${gz + 1}`);
+      const idxD = gridIndexMap.get(`${gx + 1},${gz + 1}`);
+
+      if (idxA !== undefined && idxB !== undefined && idxC !== undefined && idxD !== undefined) {
+        indices.push(idxA, idxC, idxB);
+        indices.push(idxB, idxC, idxD);
+      }
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(vertices), 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
 }

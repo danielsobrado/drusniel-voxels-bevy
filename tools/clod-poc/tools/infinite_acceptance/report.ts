@@ -40,9 +40,6 @@ function counterValue(counters: Readonly<Record<string, number>>, key: string): 
   return Number.isFinite(value) ? value : undefined;
 }
 
-function fixed(value: number | undefined): string {
-  return value === undefined ? "n/a" : value.toFixed(1);
-}
 
 function derivedSelectionSplit(scene: SceneReportInput): string {
   const counters = sceneCounters(scene);

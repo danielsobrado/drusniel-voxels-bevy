@@ -189,7 +189,12 @@ describe("SelectionCutCache", () => {
   });
 
   it("misses after maxReuseFrames exceeded", () => {
-    const cache = committedCache(baseInput({ frameId: 1 }));
+    const config = { ...DEFAULT_SELECTION_CUT_CACHE_CONFIG, maxReuseFrames: 8 };
+    const cache = new SelectionCutCache(config);
+    const input = baseInput({ frameId: 1 });
+    const first = cache.decide(input);
+    expect(first.hit).toBe(false);
+    cache.commitMiss(first.key, input.frameId);
 
     const decision = cache.decide(baseInput({ frameId: 10 }));
 

@@ -17,50 +17,12 @@ import { decodeBuildStatFromMetadata, encodeBuildStatMetadata } from "./cacheBui
 import type { WorkerCacheBuildStats } from "./cacheMetrics.js";
 import { cacheLogger } from "./cacheLogger.js";
 
+import {
+  clodPageNodeFromArtifact,
+  clodPageNodeToArtifact,
+} from "./clodPageNodeArtifact.js";
+
 export type CachedBuildStats = WorkerCacheBuildStats;
-
-function artifactToNode(artifact: ClodPageNodeArtifact, children: ClodPageNode[] = []): ClodPageNode {
-  return {
-    id: artifact.nodeId,
-    level: artifact.level,
-    children,
-    mesh: {
-      positions: artifact.positions,
-      normals: artifact.normals,
-      paintSlots: artifact.paintSlots,
-      materialWeights: artifact.materialWeights,
-      materialWeightStride: artifact.materialWeightStride,
-      indices: artifact.indices,
-    },
-    footprint: artifact.footprint,
-    bounds: artifact.bounds,
-    errorWorld: artifact.errorWorld,
-    lowBenefit: artifact.lowBenefit,
-  };
-}
-
-function nodeToArtifact(node: ClodPageNode): ClodPageNodeArtifact {
-  return {
-    nodeId: node.id,
-    level: node.level,
-    positions: node.mesh.positions,
-    normals: node.mesh.normals,
-    paintSlots: node.mesh.paintSlots,
-    materialWeights: node.mesh.materialWeights,
-    materialWeightStride: node.mesh.materialWeightStride,
-    indices: node.mesh.indices,
-    errorWorld: node.errorWorld,
-    boundingSphere: [
-      node.bounds.center[0],
-      node.bounds.center[1],
-      node.bounds.center[2],
-      node.bounds.radius,
-    ],
-    lowBenefit: node.lowBenefit,
-    footprint: node.footprint,
-    bounds: node.bounds,
-  };
-}
 
 export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildStats): BuildCacheHooks {
   const sourceHash = () => pageNodeSourceHash(ctx);
@@ -90,7 +52,7 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
         stats.cacheDecodeMs += result.decodeMs;
         stats.coldBuildMsAvoided += cachedBuildMs;
         stats.netSavedMs += Math.max(0, cachedBuildMs - result.decodeMs);
-        return artifactToNode(result.artifact);
+        return clodPageNodeFromArtifact(result.artifact);
       }
       stats.cacheMisses++;
       return null;
@@ -110,7 +72,7 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
       });
       await ctx.service.put(
         keyParts,
-        nodeToArtifact(node),
+        clodPageNodeToArtifact(node),
         encodeClodPageNodeArtifact,
         {
           ...encodeBuildStatMetadata(stat),

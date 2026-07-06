@@ -32,7 +32,7 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.selectionCutCache.cameraCellSizeM).toBe(1);
     expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(2);
     expect(config.selectionCutCache.thresholdBucketPx).toBe(0.05);
-    expect(config.selectionCutCache.maxReuseFrames).toBe(8);
+    expect(config.selectionCutCache.maxReuseFrames).toBe(120);
     expect(config.materialChurn.enabled).toBe(false);
     expect(config.materialChurn.collectMaterialVersions).toBe(false);
     expect(config.materialChurn.collectRendererPrograms).toBe(false);

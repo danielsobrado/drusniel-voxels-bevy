@@ -42,7 +42,8 @@ const ACCEPTANCE_MIN_STREAM_BUILD_BUDGET = 16;
 const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 4;
 const ACCEPTANCE_MIN_STREAM_MAX_CACHED = 512;
 const ACCEPTANCE_STREAM_MAX_LEVEL = 1;
-const ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES = 1;
+const ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES = 1;
+const ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES = 2;
 const STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR = 0.25;
 
 let streamBuiltTotal = 0;
@@ -262,7 +263,11 @@ export function runFrameLoopStartup(
     targetVisibleRadiusM: longView.phase0TargetVisibleM,
   });
   const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu }) : null;
-  const streamingClodRootController = createStreamingClodRootController({ roots: input.result.roots, allNodes: input.allNodes, cfg, worldCells, enabled: longView.queryScene === INFINITE_ISLANDS_SCENE, buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile), applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile), maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES, acceptanceStreamProfile), maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile), maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords), onNodesBuilt: (nodes) => selectionController.patchNodes(nodes), onRootsChanged: () => selectionController.invalidate() });
+  const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
+  const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled
+    ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES
+    : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;
+  const streamingClodRootController = createStreamingClodRootController({ roots: input.result.roots, allNodes: input.allNodes, cfg, worldCells, enabled: longView.queryScene === INFINITE_ISLANDS_SCENE, buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile), applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile), maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), acceptanceMaxStreamInflightBatches, acceptanceStreamProfile), maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile), maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords), onNodesBuilt: (nodes) => selectionController.patchNodes(nodes), onRootsChanged: () => selectionController.invalidate() });
   const streamingClodReadyPageKeys = (): string[] => {
     if (!streamingScene) return input.allNodes.map((node) => node.id);
     return [...new Set([...input.allNodes.map((node) => node.id), ...streamingClodRootController.readyPageKeys()])];
