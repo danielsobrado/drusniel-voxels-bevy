@@ -20,8 +20,8 @@ import type { TerrainOwnershipRuntimeSnapshot } from "../stream/terrain_ownershi
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
 import type { OwnershipResidencyFeeds } from "../stream/ownership_residency.js";
-import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds } from "../stream/ownership_residency.js";
-import { packPageKey, parsePageKey } from "../stream/page_plan.js";
+import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds, pageCoveredByResidentClodHierarchy } from "../stream/ownership_residency.js";
+import { parsePageKey } from "../stream/page_plan.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -82,7 +82,7 @@ export function requiredRootClodPagesReady(
   for (const key of snapshot.visualPages.required) {
     const page = parsePageKey(key);
     if (page.level !== maxLevel) continue;
-    if (!ready.has(packPageKey(page.level, page.x, page.z))) return false;
+    if (!pageCoveredByResidentClodHierarchy(page, ready, maxLevel)) return false;
   }
   return true;
 }
