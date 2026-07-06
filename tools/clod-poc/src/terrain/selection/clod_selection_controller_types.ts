@@ -91,6 +91,7 @@ export interface ClodSelectionStats {
   frameId: number;
   subphases: ClodSelectionSubphases;
   selectionCache: SelectionCutCacheStats;
+  cachedFastHits: number;
 }
 
 export interface ClodSelectionController {
