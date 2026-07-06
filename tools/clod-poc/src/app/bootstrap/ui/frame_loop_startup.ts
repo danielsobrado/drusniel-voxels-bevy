@@ -1,1 +1,1 @@
-x
+import * as THREE from "three";
