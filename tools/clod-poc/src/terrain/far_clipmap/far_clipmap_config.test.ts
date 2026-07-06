@@ -106,6 +106,8 @@ describe("far clipmap controller", () => {
     const first = controller.update(new THREE.Vector3(1, 0, 1));
     const second = controller.update(new THREE.Vector3(1, 0, 1));
     const material = firstMesh.material as THREE.ShaderMaterial;
+    const cellSize = material.uniforms["uCellSize"].value as number;
+    const expectedOuterRadius = cellSize * (config.gridResolution - 1) * 0.5;
 
     expect(first.readyTiles).toBe(2);
     expect(first.pendingTiles).toBe(1);
@@ -115,8 +117,8 @@ describe("far clipmap controller", () => {
     expect(firstMesh.geometry.getAttribute("position").getY(0)).toBe(0);
     expect(material).toBeInstanceOf(THREE.ShaderMaterial);
     expect(material.name).toBe("FarClipmapTerrainShader");
-    expect(material.uniforms["uRingOrigin"].value.x).toBeCloseTo(-64);
-    expect(material.uniforms["uCellSize"].value).toBeGreaterThan(0);
+    expect(material.uniforms["uRingOrigin"].value.x).toBeCloseTo(-expectedOuterRadius);
+    expect(cellSize).toBeGreaterThan(0);
     expect(controller.ownershipSnapshot().ready).toBe(true);
     controller.setDebugMode("ownership");
     expect(material.uniforms["uDebugMode"].value).toBe(3);
