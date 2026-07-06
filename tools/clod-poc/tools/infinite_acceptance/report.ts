@@ -30,6 +30,35 @@ function num(values: Record<string, number>, key: string): string {
   return value === undefined ? "n/a" : value.toFixed(key.includes("tris") ? 0 : 2);
 }
 
+function sceneCounters(scene: SceneReportInput): Record<string, number> {
+  const counters = scene.stats["counters"];
+  return counters && typeof counters === "object" ? counters as Record<string, number> : {};
+}
+
+function counterValue(counters: Readonly<Record<string, number>>, key: string): number | undefined {
+  const value = counters[key];
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function topPerfBuckets(scene: SceneReportInput, limit = 5): string {
+  const counters = sceneCounters(scene);
+  const entries = Object.entries(counters)
+    .filter(([key, value]) => key.startsWith("framePerf.p95.") && Number.isFinite(value) && value > 0)
+    .map(([key, value]) => ({ name: key.slice("framePerf.p95.".length), value }))
+    .filter((entry) => !entry.name.startsWith("topBroad.") && !entry.name.startsWith("topProp."))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+  return entries.length === 0 ? "n/a" : entries.map((entry) => `${entry.name}:${entry.value.toFixed(1)}`).join("<br>");
+}
+
+function perfScale(scene: SceneReportInput): string {
+  const counters = sceneCounters(scene);
+  const avg = counterValue(counters, "framePerf.dynamicResolutionRenderScaleAvg") ?? counterValue(counters, "dynamicResolution.renderScale");
+  const active = counterValue(counters, "dynamicResolution.active");
+  if (avg === undefined) return "n/a";
+  return active === undefined ? avg.toFixed(2) : `${avg.toFixed(2)} / ${active}`;
+}
+
 export function renderMarkdownReport(input: {
   passed: boolean;
   scenes: SceneReportInput[];
@@ -41,8 +70,8 @@ export function renderMarkdownReport(input: {
     ``,
     `Result: ${input.passed ? "PASS" : "FAIL"}`,
     ``,
-    `| scene | p95 | p99 | draw calls | terrain tris | far shell tris | world | cache | build ms | summary ms | startup ms | holes | missing pages | pass | screenshot |`,
-    `| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |`,
+    `| scene | p95 | p99 | perf scale/active | top perf p95 buckets | draw calls | terrain tris | far shell tris | world | cache | build ms | summary ms | startup ms | holes | missing pages | pass | screenshot |`,
+    `| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |`,
   ];
   for (const scene of input.scenes) {
     const v = scene.thresholds.values;
@@ -58,7 +87,7 @@ export function renderMarkdownReport(input: {
     const worldLabel = scene.configuredWorldPages !== undefined && scene.startupWorldPages !== undefined
       ? `${scene.configuredWorldPages}->${scene.startupWorldPages}`
       : "n/a";
-    lines.push(`| ${scene.name} | ${num(v, "frame_ms_p95")} | ${num(v, "frame_ms_p99")} | ${num(v, "draw_calls")} | ${num(v, "rendered_terrain_tris")} | ${num(v, "far_shell_tris")} | ${worldLabel} | ${cacheLabel} | ${cache?.startupBuildWorldMs.toFixed(1) ?? "n/a"} | ${cache?.startupTerrainSummaryMs.toFixed(1) ?? "n/a"} | ${cache?.startupTotalMs.toFixed(1) ?? "n/a"} | ${holes} | ${num(v, "missing_clod_pages_in_required_radius")} | ${scene.passed ? "PASS" : "FAIL"} | ${scene.screenshot} |`);
+    lines.push(`| ${scene.name} | ${num(v, "frame_ms_p95")} | ${num(v, "frame_ms_p99")} | ${perfScale(scene)} | ${topPerfBuckets(scene)} | ${num(v, "draw_calls")} | ${num(v, "rendered_terrain_tris")} | ${num(v, "far_shell_tris")} | ${worldLabel} | ${cacheLabel} | ${cache?.startupBuildWorldMs.toFixed(1) ?? "n/a"} | ${cache?.startupTerrainSummaryMs.toFixed(1) ?? "n/a"} | ${cache?.startupTotalMs.toFixed(1) ?? "n/a"} | ${holes} | ${num(v, "missing_clod_pages_in_required_radius")} | ${scene.passed ? "PASS" : "FAIL"} | ${scene.screenshot} |`);
   }
   if (input.failures.length > 0) {
     lines.push(``, `## Failures`);
