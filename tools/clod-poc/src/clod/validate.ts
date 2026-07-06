@@ -64,6 +64,10 @@ function isCoastOpenBoundary(x: number, z: number): boolean {
   return coastMask(x, z, coast.config.coast, coast.worldCellsX) > COAST_BOUNDARY_BAND;
 }
 
+function isLod0SourceLabel(label: string): boolean {
+  return /^L0:-?\d+,-?\d+/.test(label);
+}
+
 /**
  * Assert every open-boundary vertex hugs the page footprint perimeter (within one cell),
  * i.e. no INTERNAL topological border survived welding. Coastline shaping can create a
@@ -194,6 +198,10 @@ export function validateFinalPageMesh(mesh: PageMesh, footprint: PageFootprint, 
 
 /** @deprecated Use {@link validateFinalPageMesh} or {@link validateWeldedIntermediate}. */
 export function validatePageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
+  if (isLod0SourceLabel(label)) {
+    validateWeldedIntermediate(mesh, label, zeroAreaEpsilon);
+    return;
+  }
   validateFinalPageMesh(mesh, footprint, zeroAreaEpsilon, label);
 }
 
@@ -275,7 +283,7 @@ export function assertBorderMatch(a: BorderChain, b: BorderChain, tolerances?: B
       throw new ClodBuildError("BorderNormalMismatch", `normal dot ${ndot.toFixed(5)} < ${tol.normalDot} at border index ${i}`);
     }
     if (Math.abs(a.materials[i] - b.materials[i]) > tol.material) {
-      throw new ClodBuildError("BorderMaterialMismatch", `material delta > ${tol.material} at border index ${i}`);
+      throw new ClodBuildError("BorderMaterialMismatch", `material delta > ${tol.material}`);
     }
     const aw = a.materialWeights[i], bw = b.materialWeights[i];
     if (aw.length !== bw.length) {
