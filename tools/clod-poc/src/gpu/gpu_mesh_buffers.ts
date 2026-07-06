@@ -1,29 +1,29 @@
-// Pure host-side buffer math + packing for the GPU Surface Nets mesher. Split out from the GPU
-// driver (gpu_chunk_mesher.ts) so the byte layouts — which must match the WGSL structs in
-// shaders/terrain_field_entry.wgsl exactly or the GPU reads garbage — are unit-testable headless
-// (gpu_mesh_buffers.test.ts). No WebGPU here.
-
 import { getTerrainFieldCoreConfig, type ResolvedDigEdit } from "./terrain_field_core.js";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import type { WorldBounds } from "../terrain/terrain_surface.js";
 
-// Mirror of terrain.ts Y_CELLS / the wgsl yCells.
 export const Y_CELLS = 128;
+export const MESH_PARAM_WORDS = 24;
+export const FIELD_PARAM_WORDS = 16;
+export const DIG_EDIT_WORDS = 10;
+export const DIG_EDIT_BYTES = DIG_EDIT_WORDS * 4;
 
-// WGSL struct sizes (4-byte words).
-export const MESH_PARAM_WORDS = 16; // MeshParams: 13 dims + maxIndices + maxVertices + finiteWorld
-export const FIELD_PARAM_WORDS = 16; // FieldParams: editCount + terrain field config + pad
-export const DIG_EDIT_WORDS = 10; // DigEdit: x,y,z,r,h,shape,opAdd,strength,falloff,material
-export const DIG_EDIT_BYTES = DIG_EDIT_WORDS * 4; // stride 40
-
-/** Geometry/buffer dimensions for meshing one chunk. Mirrors meshChunkGpuShaped's grid. */
 export interface MeshDims {
   x0: number; x1: number; z0: number; z1: number;
   vxBase: number; vyBase: number; vzBase: number;
   vxCount: number; vyCount: number; vzCount: number;
-  slotCount: number; // grid cells = max possible vertices
+  slotCount: number;
   maxVertices: number;
   maxIndices: number;
+}
+
+export interface MeshBufferOffsets {
+  positionBaseF32?: number;
+  normalBaseF32?: number;
+  materialBaseF32?: number;
+  cellIndexBase?: number;
+  indexBase?: number;
+  counterSlot?: number;
 }
 
 export function computeMeshDims(cx: number, cz: number, S: number): MeshDims {
@@ -32,7 +32,6 @@ export function computeMeshDims(cx: number, cz: number, S: number): MeshDims {
   const vxBase = x0 - 1, vyBase = -1, vzBase = z0 - 1;
   const vxCount = S + 1, vyCount = Y_CELLS + 1, vzCount = S + 1;
   const slotCount = vxCount * vyCount * vzCount;
-  // Worst case: every cell holds a vertex; every axis-edge in the chunk crosses (6 indices each).
   const edgeCount = S * S * Y_CELLS * 3;
   return {
     x0, x1, z0, z1,
@@ -44,10 +43,10 @@ export function computeMeshDims(cx: number, cz: number, S: number): MeshDims {
   };
 }
 
-/** Pack MeshParams (binding 2). Int32Array view is bit-compatible with the u32 fields. */
 export function packMeshParams(
   dims: MeshDims,
   world: WorldBounds,
+  offsets: MeshBufferOffsets = {},
 ): Int32Array {
   const p = new Int32Array(MESH_PARAM_WORDS);
   p[0] = dims.x0; p[1] = dims.x1;
@@ -59,10 +58,15 @@ export function packMeshParams(
   p[13] = dims.maxIndices;
   p[14] = dims.maxVertices;
   p[15] = world.finite === false ? 0 : 1;
+  p[16] = Math.max(0, Math.floor(offsets.positionBaseF32 ?? 0));
+  p[17] = Math.max(0, Math.floor(offsets.normalBaseF32 ?? 0));
+  p[18] = Math.max(0, Math.floor(offsets.materialBaseF32 ?? 0));
+  p[19] = Math.max(0, Math.floor(offsets.cellIndexBase ?? 0));
+  p[20] = Math.max(0, Math.floor(offsets.indexBase ?? 0));
+  p[21] = Math.max(0, Math.floor(offsets.counterSlot ?? 0));
   return p;
 }
 
-/** Pack FieldParams (binding 1). The word order mirrors terrain_field_common.wgsl. */
 export function packFieldParams(
   editCount: number,
   config: TerrainFieldConfig = getTerrainFieldCoreConfig(),
@@ -86,8 +90,6 @@ export function packFieldParams(
   return p;
 }
 
-/** Pack resolved dig edits into the binding-0 storage layout (stride 40, fields in struct order).
- *  Returns at least one element's worth so the buffer is never zero-sized. */
 export function packDigEdits(edits: readonly ResolvedDigEdit[]): ArrayBuffer {
   const count = Math.max(1, edits.length);
   const buf = new ArrayBuffer(count * DIG_EDIT_BYTES);
@@ -104,7 +106,6 @@ export function packDigEdits(edits: readonly ResolvedDigEdit[]): ArrayBuffer {
   return buf;
 }
 
-/** Slice the (max-sized, reused) readback arrays to the live counts the GPU reported. */
 export function assembleChunkMesh(
   positions: Float32Array,
   normals: Float32Array,
