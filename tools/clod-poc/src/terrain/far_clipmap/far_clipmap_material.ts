@@ -22,7 +22,9 @@ export interface FarClipmapMaterialUniforms {
   uCameraXZ: THREE.IUniform<THREE.Vector2>;
 }
 
-export type FarClipmapMaterial = THREE.ShaderMaterial & { uniforms: FarClipmapMaterialUniforms };
+export type FarClipmapMaterial = (THREE.ShaderMaterial | THREE.MeshBasicMaterial) & {
+  uniforms: FarClipmapMaterialUniforms;
+};
 
 const TERRAIN_SHADER_FUNCTIONS = `
 float saturate(float value) {
@@ -182,7 +184,40 @@ export function farClipmapShaderRenderOrder(): number {
   return FAR_CLIPMAP_SHADER_RENDER_ORDER;
 }
 
-export function createFarClipmapMaterial(input: {
+function createFarClipmapUniforms(input: {
+  debugMode: FarClipmapDebugMode;
+  seaLevel?: number;
+  clipInnerRadiusM: number;
+  clipOuterRadiusM: number;
+  ringOriginX?: number;
+  ringOriginZ?: number;
+  cellSizeM?: number;
+  heightScale?: number;
+  yOffset?: number;
+  cameraX?: number;
+  cameraZ?: number;
+}): FarClipmapMaterialUniforms {
+  return {
+    uRingOrigin: { value: new THREE.Vector2(input.ringOriginX ?? 0, input.ringOriginZ ?? 0) },
+    uCellSize: { value: input.cellSizeM ?? 1 },
+    uHeightScale: { value: input.heightScale ?? 1 },
+    uYOffset: { value: input.yOffset ?? 0 },
+    uSeaLevel: { value: input.seaLevel ?? 0 },
+    uDebugMode: { value: farClipmapDebugModeCode(input.debugMode) },
+    uClipInnerRadius: { value: input.clipInnerRadiusM },
+    uClipOuterRadius: { value: input.clipOuterRadiusM },
+    uCameraXZ: { value: new THREE.Vector2(input.cameraX ?? 0, input.cameraZ ?? 0) },
+  };
+}
+
+function farClipmapFallbackColor(mode: FarClipmapDebugMode): THREE.Color {
+  if (mode === "biome") return new THREE.Color(0x3e5a30);
+  if (mode === "height") return new THREE.Color(0x6f7568);
+  if (mode === "ownership") return new THREE.Color(0x2d69c7);
+  return new THREE.Color(0x33432f);
+}
+
+function createWebGpuFarClipmapMaterial(input: {
   debugMode: FarClipmapDebugMode;
   seaLevel?: number;
   clipInnerRadiusM: number;
@@ -195,21 +230,43 @@ export function createFarClipmapMaterial(input: {
   cameraX?: number;
   cameraZ?: number;
 }): FarClipmapMaterial {
+  const material = new THREE.MeshBasicMaterial({
+    name: "FarClipmapTerrainWebGpuFallback",
+    color: farClipmapFallbackColor(input.debugMode),
+    depthWrite: true,
+    depthTest: true,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+    transparent: false,
+    side: THREE.FrontSide,
+    toneMapped: true,
+  }) as FarClipmapMaterial;
+  material.uniforms = createFarClipmapUniforms(input);
+  material.userData.webGpuSafeFarClipmapFallback = true;
+  return material;
+}
+
+export function createFarClipmapMaterial(input: {
+  debugMode: FarClipmapDebugMode;
+  seaLevel?: number;
+  clipInnerRadiusM: number;
+  clipOuterRadiusM: number;
+  ringOriginX?: number;
+  ringOriginZ?: number;
+  cellSizeM?: number;
+  heightScale?: number;
+  yOffset?: number;
+  cameraX?: number;
+  cameraZ?: number;
+  webGpuCompatible?: boolean;
+}): FarClipmapMaterial {
+  if (input.webGpuCompatible === true) return createWebGpuFarClipmapMaterial(input);
   return new THREE.ShaderMaterial({
     name: "FarClipmapTerrainShader",
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
-    uniforms: {
-      uRingOrigin: { value: new THREE.Vector2(input.ringOriginX ?? 0, input.ringOriginZ ?? 0) },
-      uCellSize: { value: input.cellSizeM ?? 1 },
-      uHeightScale: { value: input.heightScale ?? 1 },
-      uYOffset: { value: input.yOffset ?? 0 },
-      uSeaLevel: { value: input.seaLevel ?? 0 },
-      uDebugMode: { value: farClipmapDebugModeCode(input.debugMode) },
-      uClipInnerRadius: { value: input.clipInnerRadiusM },
-      uClipOuterRadius: { value: input.clipOuterRadiusM },
-      uCameraXZ: { value: new THREE.Vector2(input.cameraX ?? 0, input.cameraZ ?? 0) },
-    },
+    uniforms: createFarClipmapUniforms(input),
     depthWrite: true,
     depthTest: true,
     polygonOffset: true,
@@ -222,6 +279,7 @@ export function createFarClipmapMaterial(input: {
 
 export function setFarClipmapMaterialDebugMode(material: FarClipmapMaterial, mode: FarClipmapDebugMode): void {
   material.uniforms.uDebugMode.value = farClipmapDebugModeCode(mode);
+  if (material instanceof THREE.MeshBasicMaterial) material.color.copy(farClipmapFallbackColor(mode));
 }
 
 export function updateFarClipmapMaterialFrameUniforms(material: FarClipmapMaterial, input: {
