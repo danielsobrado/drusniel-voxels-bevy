@@ -25,6 +25,16 @@ import {
   sendDigBatchFn,
   splitDigBatch,
 } from "./clod_worker_client_helpers.js";
+import {
+  createGpuClodRootMesher,
+  disabledGpuStats,
+  publishGpuClodRootMesherCounters,
+  type GpuClodRootMesher,
+} from "./terrain/streaming/gpu_clod_root_mesher.js";
+import {
+  streamingRootGpuMesherConfigFromWindow,
+  type StreamingRootGpuMesherConfig,
+} from "./terrain/streaming/streamed_root_gpu_config.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
 
@@ -55,6 +65,14 @@ export class ClodWorkerClient {
   private lastParentError: Error | null = null;
   private parentsWaiters: Array<() => void> = [];
   private stopped = false;
+  private streamRootCfg: ClodPagesConfig | null = null;
+  private streamRootWorldPagesX = 0;
+  private streamRootWorldPagesZ = 0;
+  private streamRootGpuConfig: StreamingRootGpuMesherConfig = streamingRootGpuMesherConfigFromWindow();
+  private streamRootGpuMesher: GpuClodRootMesher | null = null;
+  private streamRootGpuCreatePromise: Promise<GpuClodRootMesher | null> | null = null;
+  private streamRootGpuUnavailable = false;
+  private streamRootWorkerFallbackPages = 0;
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -80,6 +98,7 @@ export class ClodWorkerClient {
     terrainSource: TerrainSourceInputs,
   ): Promise<BuildResult> => {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
+    this.resetStreamRootGpuMesherForWorld(worldPagesX, worldPagesZ, cfg);
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
       type: "build", requestId, worldPagesX, worldPagesZ, cfg, voxelEdits,
@@ -116,13 +135,24 @@ export class ClodWorkerClient {
     return postTrackedRequest(this.clearCacheRequests, this.worker, { type: "clearCache", requestId: this.nextRequestId++ });
   }
 
-  buildStreamRoots(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
+  async buildStreamRoots(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
-    return postTrackedRequest(this.streamRootsRequests, this.worker, {
-      type: "buildStreamRoots",
-      requestId: this.nextRequestId++,
-      coords: coords.map(({ px, pz, level }) => ({ px, pz, level })),
-    });
+    this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
+    if (!this.streamRootGpuConfig.enabled) return this.buildStreamRootsOnWorker(coords);
+
+    try {
+      const mesher = await this.getStreamRootGpuMesher();
+      if (!mesher) {
+        if (!this.streamRootGpuConfig.fallback) throw new Error("WebGPU streamed-root mesher unavailable");
+        return this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
+      }
+      return await mesher.buildPages(coords);
+    } catch (error) {
+      this.streamRootGpuMesher?.recordFallbackPages(coords.length);
+      if (!this.streamRootGpuConfig.fallback) throw error;
+      console.warn(`[clod-stream-gpu] GPU streamed-root batch failed; falling back to CPU worker for ${coords.length} page(s)`, error);
+      return this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
+    }
   }
 
   isParentsHealthy(): boolean { return this.parentsHealthy; }
@@ -132,8 +162,65 @@ export class ClodWorkerClient {
   dispose(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.disposeStreamRootGpuMesher();
     this.worker.terminate();
     this.doRejectAll(new Error("CLOD worker disposed"));
+  }
+
+  private buildStreamRootsOnWorker(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
+    return postTrackedRequest(this.streamRootsRequests, this.worker, {
+      type: "buildStreamRoots",
+      requestId: this.nextRequestId++,
+      coords: coords.map(({ px, pz, level }) => ({ px, pz, level })),
+    });
+  }
+
+  private buildStreamRootsOnWorkerWithFallbackCounter(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
+    this.streamRootWorkerFallbackPages += coords.length;
+    if (this.streamRootGpuMesher) this.streamRootGpuMesher.recordWorkerFallbackPages(coords.length);
+    else publishGpuClodRootMesherCounters(disabledGpuStats(this.streamRootWorkerFallbackPages));
+    return this.buildStreamRootsOnWorker(coords);
+  }
+
+  private async getStreamRootGpuMesher(): Promise<GpuClodRootMesher | null> {
+    if (this.streamRootGpuMesher) return this.streamRootGpuMesher;
+    if (this.streamRootGpuUnavailable || !this.streamRootCfg) return null;
+    if (!this.streamRootGpuCreatePromise) {
+      const cfg = this.streamRootCfg;
+      const pageSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
+      const worldCells = this.streamRootWorldPagesX * pageSpan;
+      this.streamRootGpuCreatePromise = createGpuClodRootMesher({
+        cfg,
+        world: { cellsX: worldCells, cellsZ: worldCells, finite: false },
+        config: this.streamRootGpuConfig,
+      }).then((mesher) => {
+        this.streamRootGpuMesher = mesher;
+        this.streamRootGpuUnavailable = mesher === null;
+        return mesher;
+      }).catch((error) => {
+        this.streamRootGpuUnavailable = true;
+        console.warn("[clod-stream-gpu] failed to create GPU streamed-root mesher", error);
+        return null;
+      });
+    }
+    return this.streamRootGpuCreatePromise;
+  }
+
+  private resetStreamRootGpuMesherForWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): void {
+    this.disposeStreamRootGpuMesher();
+    this.streamRootCfg = cfg;
+    this.streamRootWorldPagesX = worldPagesX;
+    this.streamRootWorldPagesZ = worldPagesZ;
+    this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
+    this.streamRootGpuUnavailable = false;
+    this.streamRootWorkerFallbackPages = 0;
+    publishGpuClodRootMesherCounters(disabledGpuStats());
+  }
+
+  private disposeStreamRootGpuMesher(): void {
+    this.streamRootGpuMesher?.dispose();
+    this.streamRootGpuMesher = null;
+    this.streamRootGpuCreatePromise = null;
   }
 
   private async pumpDigQueue(): Promise<void> {
@@ -257,6 +344,7 @@ export class ClodWorkerClient {
     if (this.stopped) return;
     const err = error instanceof Error ? error : new Error(String(error));
     this.stopped = true;
+    this.disposeStreamRootGpuMesher();
     this.worker.terminate();
     this.markParentsFailed(err);
     this.doRejectAll(err);
