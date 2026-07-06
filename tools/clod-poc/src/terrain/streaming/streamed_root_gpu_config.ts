@@ -35,7 +35,7 @@ export function parseStreamingRootGpuMesherConfig(
   return {
     enabled: booleanFlag(params, "liveClodRootGpuMesher", defaults.enabled),
     batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? defaults.batchSize,
-    maxInflightBatches: 1,
+    maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaults.maxInflightBatches,
     fallback: booleanFlag(params, "liveClodRootGpuFallback", defaults.fallback),
   };
 }
