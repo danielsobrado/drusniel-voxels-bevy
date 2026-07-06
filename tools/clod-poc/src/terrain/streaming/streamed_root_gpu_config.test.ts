@@ -15,6 +15,9 @@ describe("streamed root GPU mesher config", () => {
       liveClodRootGpuBatchSize: "8",
       liveClodRootGpuMaxInflightBatches: "3",
       liveClodRootGpuFallback: "0",
+      liveClodRootGpuMaxChunkSlots: "32",
+      liveClodRootGpuMaxSlotBytes: "123456",
+      liveClodRootGpuMaxReadbackBytes: "654321",
     }));
 
     expect(parsed).toEqual({
@@ -22,6 +25,9 @@ describe("streamed root GPU mesher config", () => {
       batchSize: 8,
       maxInflightBatches: 3,
       fallback: false,
+      maxChunkSlots: 32,
+      maxTotalSlotBytes: 123456,
+      maxReadbackBufferBytes: 654321,
     });
   });
 
@@ -29,8 +35,11 @@ describe("streamed root GPU mesher config", () => {
     const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({
       liveClodRootGpuMesher: "true",
       liveClodRootGpuBatchSize: "0",
-      liveClodRootGpuMaxInflightBatches: "bad",
+      liveClodRootGpuMaxInflightBatches: "not-a-number",
       liveClodRootGpuFallback: "maybe",
+      liveClodRootGpuMaxChunkSlots: "0",
+      liveClodRootGpuMaxSlotBytes: "not-a-number",
+      liveClodRootGpuMaxReadbackBytes: "0",
     }));
 
     expect(parsed).toEqual({
@@ -38,6 +47,9 @@ describe("streamed root GPU mesher config", () => {
       batchSize: DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG.batchSize,
       maxInflightBatches: DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG.maxInflightBatches,
       fallback: true,
+      maxChunkSlots: undefined,
+      maxTotalSlotBytes: undefined,
+      maxReadbackBufferBytes: undefined,
     });
   });
 });
