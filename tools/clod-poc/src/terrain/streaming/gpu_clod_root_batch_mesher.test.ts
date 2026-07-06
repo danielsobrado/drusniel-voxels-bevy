@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  RootGpuBatchLimitError,
   chunkSlotsPerRootPage,
   estimateChunkSlotBytes,
+  estimateRootRequestReadbackBytes,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   splitRootGpuBatches,
@@ -68,6 +70,33 @@ describe("GPU streamed-root batch planning", () => {
     });
 
     expect(batches.map((batch) => batch.length)).toEqual([1, 1]);
+  });
+
+  it("splits on grouped readback byte caps", () => {
+    const readbackBytes = estimateRootRequestReadbackBytes({ px: 0, pz: 0, level: 0 }, CFG);
+    const requests = [
+      { px: 0, pz: 0, level: 0 },
+      { px: 1, pz: 0, level: 0 },
+    ];
+    const batches = splitRootGpuBatches(requests, CFG, {
+      batchSize: 8,
+      maxChunkSlots: 64,
+      maxTotalSlotBytes: Number.MAX_SAFE_INTEGER,
+      maxReadbackBufferBytes: readbackBytes,
+    });
+
+    expect(batches.map((batch) => batch.length)).toEqual([1, 1]);
+  });
+
+  it("throws instead of accepting a single readback-oversized request", () => {
+    const readbackBytes = estimateRootRequestReadbackBytes({ px: 0, pz: 0, level: 0 }, CFG);
+
+    expect(() => splitRootGpuBatches([{ px: 0, pz: 0, level: 0 }], CFG, {
+      batchSize: 4,
+      maxChunkSlots: 64,
+      maxTotalSlotBytes: Number.MAX_SAFE_INTEGER,
+      maxReadbackBufferBytes: readbackBytes - 1,
+    })).toThrow(RootGpuBatchLimitError);
   });
 });
 
