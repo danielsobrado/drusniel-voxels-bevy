@@ -56,8 +56,10 @@ const STREAMED_ROOT_GPU_PARAMS = {
 } as const;
 
 const ACCEPTANCE_RENDER_PARAMS = {
-  renderScale: "0.75",
+  renderScale: "0.5",
+  render_scale: "0.5",
   dprCap: "1",
+  dpr_cap: "1",
 } as const;
 
 export function profileAcceptanceParams(profile: AcceptanceProfile): Record<string, string> {
