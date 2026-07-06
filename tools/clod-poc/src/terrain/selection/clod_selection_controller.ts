@@ -141,7 +141,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       bubbleRadius: params.nearField?.radius ?? 0,
       forcedMaxLevel: params.forcedMaxLevel ?? null,
       webgpuSelectionEnabled: settings.webgpuSelection,
-      webgpuErrorMapGeneration: gpuMap ? `${gpuMap.version}:${gpuMap.frameId}` : null,
+      webgpuErrorMapGeneration: gpuMap ? String(gpuMap.version) : null,
       staleRevision: currentStaleRevision(),
       debugKey,
     };
