@@ -6,7 +6,7 @@ export const FRAME_PERF_BROAD_BUCKETS = [
   "frameSetupMs", "inputMs", "selectionUpdateMs", "clodApplyMs", "longViewDiagnosticsMs", "farSummaryMs",
   "constructionMs", "brushMs", "combatMs", "spellsMs", "terrainPhaseMs",
   "shadowProxyMs", "clodShadowMs", "canopyMs", "vegetationTotalMs",
-  "borderOceanDebugMs", "statsSyncMs", "renderMs", "unattributedMs",
+  "borderOceanDebugMs", "statsSyncMs", "propsUnattributedMs", "renderMs", "unattributedMs",
 ] as const;
 
 export const FRAME_PERF_PROP_BUCKETS = [
