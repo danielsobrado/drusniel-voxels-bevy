@@ -191,10 +191,10 @@ class PackedRootGpuBufferPool {
       );
     }
     this.device.queue.writeBuffer(this.digEdits, 0, packDigEdits([]));
-    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0));
+    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0) as Uint32Array<ArrayBuffer>);
     const zeros = new Uint32Array(Math.max(1, plans.length));
-    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer, zeros.byteOffset, plans.length * U32);
-    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer, zeros.byteOffset, plans.length * U32);
+    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer as ArrayBuffer, zeros.byteOffset, plans.length * U32);
+    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer as ArrayBuffer, zeros.byteOffset, plans.length * U32);
     return plans.map((plan) => this.prepareSlot(plan));
   }
 
@@ -247,7 +247,7 @@ class PackedRootGpuBufferPool {
     this.device.queue.writeBuffer(
       this.meshParams[counterSlot]!,
       0,
-      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }),
+      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }) as Int32Array<ArrayBuffer>,
     );
     return {
       ...plan,
