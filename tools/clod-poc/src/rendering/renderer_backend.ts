@@ -11,6 +11,9 @@ import { installPositionInvariance } from "./veg_prepass.js";
 
 export type RendererBackend = "webgl" | "webgpu";
 
+const WEBGPU_SHADER_MATERIAL_GUARD_KEY = "__drusnielWebGpuShaderMaterialGuard";
+const WEBGPU_SHADER_MATERIAL_FALLBACK_KEY = "__drusnielWebGpuShaderMaterialFallback";
+
 export function parseRendererBackend(params: URLSearchParams): RendererBackend {
   return params.get("renderer") === "webgl" ? "webgl" : "webgpu";
 }
@@ -68,6 +71,7 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
       ...describeDiagnostics(diagnostics),
     ].join("\n"));
   }
+  installWebGpuShaderMaterialGuard();
   installPositionInvariance(renderer);
   installMaterialKeyMemo(renderer);
   renderer.shadowMap.enabled = true;
@@ -87,4 +91,64 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   }
   // WebGPU exposes a high anisotropy limit; 16 matches typical hardware and the WebGL default.
   return { isWebGpu: true, renderer, maxAnisotropy: 16 };
+}
+
+function installWebGpuShaderMaterialGuard(): void {
+  const proto = THREE.Object3D.prototype as THREE.Object3D & {
+    [WEBGPU_SHADER_MATERIAL_GUARD_KEY]?: boolean;
+    add: THREE.Object3D["add"];
+  };
+  if (proto[WEBGPU_SHADER_MATERIAL_GUARD_KEY] === true) return;
+  proto[WEBGPU_SHADER_MATERIAL_GUARD_KEY] = true;
+  const originalAdd = proto.add;
+  proto.add = function guardedAdd(this: THREE.Object3D, ...objects: THREE.Object3D[]): THREE.Object3D {
+    for (const object of objects) replaceLegacyShaderMaterials(object);
+    const result = originalAdd.apply(this, objects) as THREE.Object3D;
+    for (const object of objects) replaceLegacyShaderMaterials(object);
+    return result;
+  } as THREE.Object3D["add"];
+}
+
+function replaceLegacyShaderMaterials(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    const mesh = object as THREE.Object3D & { material?: THREE.Material | THREE.Material[] };
+    if (!mesh.material) return;
+    if (Array.isArray(mesh.material)) {
+      mesh.material = mesh.material.map((material) => webGpuCompatibleMaterial(material));
+    } else {
+      mesh.material = webGpuCompatibleMaterial(mesh.material);
+    }
+  });
+}
+
+function webGpuCompatibleMaterial(material: THREE.Material): THREE.Material {
+  const maybeShader = material as THREE.Material & {
+    isShaderMaterial?: boolean;
+    isRawShaderMaterial?: boolean;
+    uniforms?: Record<string, { value: unknown }>;
+  };
+  if (!maybeShader.isShaderMaterial && !maybeShader.isRawShaderMaterial) return material;
+  const cached = material.userData[WEBGPU_SHADER_MATERIAL_FALLBACK_KEY] as THREE.Material | undefined;
+  if (cached) return cached;
+  const fallback = new THREE.MeshBasicMaterial({
+    color: colorFromShaderUniform(maybeShader.uniforms?.uColor?.value) ?? 0xffffff,
+    transparent: material.transparent,
+    opacity: material.opacity,
+    depthTest: material.depthTest,
+    depthWrite: material.depthWrite,
+    side: material.side,
+    wireframe: (material as THREE.Material & { wireframe?: boolean }).wireframe === true,
+    toneMapped: material.toneMapped,
+  });
+  fallback.name = `${material.name || material.type || "shader"}-webgpu-fallback`;
+  fallback.userData.sourceMaterialType = material.type;
+  material.userData[WEBGPU_SHADER_MATERIAL_FALLBACK_KEY] = fallback;
+  console.warn(`[webgpu] replaced incompatible ${material.type || "ShaderMaterial"} with MeshBasicMaterial fallback: ${material.name || "unnamed"}`);
+  return fallback;
+}
+
+function colorFromShaderUniform(value: unknown): THREE.Color | undefined {
+  if (value instanceof THREE.Color) return value.clone();
+  if (typeof value === "number") return new THREE.Color(value);
+  return undefined;
 }
