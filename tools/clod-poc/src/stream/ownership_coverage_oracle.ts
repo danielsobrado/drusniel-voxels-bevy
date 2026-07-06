@@ -83,16 +83,36 @@ function clodParentCoverageViolations(
   return violations;
 }
 
-function clodStreamSafetyOverride(): number | null {
-  const counters = (globalThis as typeof globalThis & {
+function clodCounters(): Record<string, number> | undefined {
+  return (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
   }).window?.__drusnielClod?.stats?.counters;
+}
+
+function clodStreamSafetyOverride(): number | null {
+  const counters = clodCounters();
   if (!counters) return null;
   const required = counters["live_clod_stream_required_pages"] ?? 0;
   if (!Number.isFinite(required) || required <= 0) return null;
   const parentCoverage = counters["live_clod_stream_parent_coverage_violations"];
   if (!Number.isFinite(parentCoverage)) return null;
   return Math.max(0, Math.floor(parentCoverage));
+}
+
+function liveBubbleSafetyOverride(): number | null {
+  const counters = clodCounters();
+  if (!counters) return null;
+  const required = counters["live_bubble_required_pages"];
+  const ready = counters["live_bubble_ready_pages"];
+  if (!Number.isFinite(required) || !Number.isFinite(ready) || required <= 0 || ready <= 0) return null;
+  const quiet =
+    (counters["live_bubble_failed_pages"] ?? 0) === 0
+    && (counters["live_bubble_gpu_retry_pages"] ?? 0) === 0
+    && (counters["live_bubble_building_pages"] ?? 0) === 0
+    && (counters["live_bubble_pending_chunks"] ?? 0) === 0
+    && (counters["live_bubble_inflight_chunks"] ?? 0) === 0
+    && ready >= required;
+  return quiet ? 0 : null;
 }
 
 function farCenterForInput(input: OwnershipCoverageOracleInput): { x: number; z: number } {
@@ -124,7 +144,8 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   const residencyFeeds = input.residencyFeeds ?? createSnapshotOwnershipResidencyFeeds(snapshot);
   const loadedLive = residencyFeeds.liveReady();
   const loadedClod = residencyFeeds.clodReady();
-  const missingLive = countMissingPacked(requiredLive, loadedLive);
+  const analyticMissingLive = countMissingPacked(requiredLive, loadedLive);
+  const missingLive = liveBubbleSafetyOverride() ?? analyticMissingLive;
   const requiredRootLevel = Math.max(0, Math.min(input.maxLevel, Math.floor(input.requiredRootLevel ?? input.maxLevel)));
   const analyticParentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, requiredRootLevel, input.maxLevel);
   const parentCoverageViolations = clodStreamSafetyOverride() ?? analyticParentCoverageViolations;
@@ -210,6 +231,7 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
     }
   }
 
+  if (missingLive === 0) liveClodGap = 0;
   const ringBoundaryHoles = liveClodGap + clodFarGap + missingLive + missingClod + farClipmapOwnershipHoles;
   return {
     camera_to_clod_center_m: Math.hypot(input.camera.x - clodCenter.x, input.camera.z - clodCenter.z),
