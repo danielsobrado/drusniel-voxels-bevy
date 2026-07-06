@@ -23,6 +23,7 @@ import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds, p
 import { parsePageKey } from "../stream/page_plan.js";
 
 const PHASE0_P95_WINDOW = 120;
+const PERF_DIAGNOSTICS_CAMERA_EPSILON_M = 1;
 
 export interface LongViewFrameDiagnosticsDeps {
   getHooks: () => ClodHooks | null;
@@ -140,6 +141,9 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   let lastFarShellSnapZ = Number.NaN;
   let backgroundQuiet = false;
   let streamReadyFrame = -1;
+  let lastFullDiagnosticsCameraX = Number.NaN;
+  let lastFullDiagnosticsCameraZ = Number.NaN;
+  let lastFullDiagnosticsReady = false;
 
   const resetFrameMetrics = (): void => {
     phase0FrameMsBuffer.length = 0;
@@ -166,6 +170,12 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     if (typeof window === "undefined") return false;
     const params = new URLSearchParams(window.location.search);
     return (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0") || params.get("ownershipOracle") === "1";
+  };
+
+  const acceptancePerfDiagnosticsEnabled = (): boolean => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("acceptance") === "1" && params.get("ownershipOracle") === "0";
   };
 
   const backgroundQueuesQuiet = (counters: Readonly<Record<string, number>>): boolean => {
@@ -198,10 +208,39 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     return farSummaryQuiet && farShellRebuildPending === 0 && textureWindowPending === 0 && bubbleQuiet && streamQuiet && proxyBuilding !== 1;
   };
 
+  const resetDiagnosticsReuse = (): void => {
+    lastFullDiagnosticsCameraX = Number.NaN;
+    lastFullDiagnosticsCameraZ = Number.NaN;
+    lastFullDiagnosticsReady = false;
+  };
+
+  const canReusePerfDiagnostics = (counters: Readonly<Record<string, number>>): boolean => {
+    if (!acceptancePerfDiagnosticsEnabled()) return false;
+    if (streamReadyFrame < 0 || !backgroundQuiet || !lastFullDiagnosticsReady) return false;
+    if (!backgroundQueuesQuiet(counters)) return false;
+    const dx = deps.camera.position.x - lastFullDiagnosticsCameraX;
+    const dz = deps.camera.position.z - lastFullDiagnosticsCameraZ;
+    return Math.hypot(dx, dz) <= PERF_DIAGNOSTICS_CAMERA_EPSILON_M;
+  };
+
+  const publishPhase0Report = (counters: Record<string, number>): void => {
+    if (typeof window === "undefined") return;
+    const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in counters));
+    window.__drusnielPhase0Report = {
+      scene: deps.queryScene ?? "unknown",
+      config_hash: "phase0",
+      timestamp: new Date().toISOString(),
+      metrics: { ...counters },
+      required_counters_present: missingCounters.length === 0,
+      missing_counters: missingCounters,
+    };
+  };
+
   if (typeof window !== "undefined") {
     const resetAcceptanceScene = (): void => {
       streamReadyFrame = -1;
       backgroundQuiet = false;
+      resetDiagnosticsReuse();
       resetFrameMetrics();
       const hooks = deps.getHooks();
       if (hooks?.stats) hooks.stats.counters["stream_ready_frame"] = -1;
@@ -292,6 +331,14 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         playerConfig: deps.borderOceanScene.playerConfig,
       });
     }
+
+    if (canReusePerfDiagnostics(s.counters)) {
+      s.counters["ownership_oracle_ms"] = 0;
+      s.counters["long_view_diagnostics_reused_frames"] = (s.counters["long_view_diagnostics_reused_frames"] ?? 0) + 1;
+      publishPhase0Report(s.counters);
+      return;
+    }
+    s.counters["long_view_diagnostics_full_frames"] = (s.counters["long_view_diagnostics_full_frames"] ?? 0) + 1;
 
     const streamingReport = simulateStreamingCoverage({
       worldCells: deps.worldCells,
@@ -409,6 +456,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       s.counters["phase0_frame_metrics_resets"] = (s.counters["phase0_frame_metrics_resets"] ?? 0) + 1;
     }
     backgroundQuiet = nowQuiet;
+    if (nowQuiet) {
+      lastFullDiagnosticsCameraX = deps.camera.position.x;
+      lastFullDiagnosticsCameraZ = deps.camera.position.z;
+      lastFullDiagnosticsReady = true;
+    } else {
+      resetDiagnosticsReuse();
+    }
 
     const inflightMs = s.counters["live_clod_stream_inflight_ms"] ?? 0;
     if (inflightMs > 60000) {
@@ -416,14 +470,6 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       if (hooks) hooks.error = `Streamed CLOD worker build timed out after ${inflightMs.toFixed(0)}ms (inflight batch exceeded 60s threshold)`;
     }
 
-    const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
-    window.__drusnielPhase0Report = {
-      scene: deps.queryScene ?? "unknown",
-      config_hash: "phase0",
-      timestamp: new Date().toISOString(),
-      metrics: { ...s.counters },
-      required_counters_present: missingCounters.length === 0,
-      missing_counters: missingCounters,
-    };
+    publishPhase0Report(s.counters);
   };
 }
