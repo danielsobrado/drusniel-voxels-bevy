@@ -38,14 +38,15 @@ import {
   RootGpuBatchLimitError,
   chunkSlotsPerRootPage,
   estimateChunkSlotBytes,
+  estimateRootRequestReadbackBytes,
   estimateRootRequestSlotBytes,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   rootLevelForRequest,
   splitRootGpuBatches,
   type GpuRootChunkPlan,
-  type RootGpuBatchLimits,
   type RootBatchPageConfig,
+  type RootGpuBatchLimits,
 } from "./gpu_clod_root_batch_buffers.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
 
@@ -122,7 +123,6 @@ interface GpuRootChunkSlot extends GpuRootChunkPlan {
   positionOffsetBytes: number;
   normalOffsetBytes: number;
   materialOffsetBytes: number;
-  cellIndexOffsetBytes: number;
   indexOffsetBytes: number;
   bindGroup: GPUBindGroup;
 }
@@ -191,10 +191,10 @@ class PackedRootGpuBufferPool {
       );
     }
     this.device.queue.writeBuffer(this.digEdits, 0, packDigEdits([]));
-    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0) as any);
+    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0));
     const zeros = new Uint32Array(Math.max(1, plans.length));
-    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer as any, 0, plans.length * U32);
-    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer as any, 0, plans.length * U32);
+    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer, zeros.byteOffset, plans.length * U32);
+    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer, zeros.byteOffset, plans.length * U32);
     return plans.map((plan) => this.prepareSlot(plan));
   }
 
@@ -247,7 +247,7 @@ class PackedRootGpuBufferPool {
     this.device.queue.writeBuffer(
       this.meshParams[counterSlot]!,
       0,
-      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }) as any,
+      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }),
     );
     return {
       ...plan,
@@ -256,7 +256,6 @@ class PackedRootGpuBufferPool {
       positionOffsetBytes: positionBaseF32 * F32,
       normalOffsetBytes: normalBaseF32 * F32,
       materialOffsetBytes: materialBaseF32 * F32,
-      cellIndexOffsetBytes: cellIndexBase * U32,
       indexOffsetBytes: indexBase * U32,
       bindGroup: this.bindGroups[counterSlot]!,
     };
@@ -388,7 +387,10 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   ): boolean {
     const slots = chunkSlotsPerRootPage(cfg.chunks_per_page, rootLevel);
     const bytes = estimateRootRequestSlotBytes(request, cfg);
-    return slots <= this.batchLimits.maxChunkSlots && bytes <= this.batchLimits.maxTotalSlotBytes;
+    const readbackBytes = estimateRootRequestReadbackBytes(request, cfg);
+    return slots <= this.batchLimits.maxChunkSlots
+      && bytes <= this.batchLimits.maxTotalSlotBytes
+      && readbackBytes <= this.batchLimits.maxReadbackBufferBytes;
   }
 
   private rootNodeId(request: GpuClodRootBuildRequest, cfg: RootBatchPageConfig): string {
@@ -525,39 +527,15 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       for (const range of layout.ranges) {
         const slot = slotsByIndex.get(range.slotIndex);
         if (!slot || range.vertexCount === 0 || range.indexCount === 0) continue;
-        encoder.copyBufferToBuffer(
-          this.pool.positions,
-          slot.positionOffsetBytes,
-          readback,
-          offsets.positions + range.positionsOffset,
-          range.positionsBytes,
-        );
-        encoder.copyBufferToBuffer(
-          this.pool.normals,
-          slot.normalOffsetBytes,
-          readback,
-          offsets.normals + range.normalsOffset,
-          range.normalsBytes,
-        );
-        encoder.copyBufferToBuffer(
-          this.pool.materials,
-          slot.materialOffsetBytes,
-          readback,
-          offsets.materials + range.materialsOffset,
-          range.materialsBytes,
-        );
-        encoder.copyBufferToBuffer(
-          this.pool.indices,
-          slot.indexOffsetBytes,
-          readback,
-          offsets.indices + range.indicesOffset,
-          range.indicesBytes,
-        );
+        encoder.copyBufferToBuffer(this.pool.positions, slot.positionOffsetBytes, readback, offsets.positions + range.positionsOffset, range.positionsBytes);
+        encoder.copyBufferToBuffer(this.pool.normals, slot.normalOffsetBytes, readback, offsets.normals + range.normalsOffset, range.normalsBytes);
+        encoder.copyBufferToBuffer(this.pool.materials, slot.materialOffsetBytes, readback, offsets.materials + range.materialsOffset, range.materialsBytes);
+        encoder.copyBufferToBuffer(this.pool.indices, slot.indexOffsetBytes, readback, offsets.indices + range.indicesOffset, range.indicesBytes);
       }
       this.device.queue.submit([encoder.finish()]);
       await readback.mapAsync(GPUMapMode.READ);
       mapped = true;
-      const geometryBytes = new Uint8Array(readback.getMappedRange().slice(0));
+      const mappedRange = readback.getMappedRange();
       const meshes = new Map<number, PageMesh>();
       for (const range of layout.ranges) {
         if (range.vertexCount === 0 || range.indexCount === 0) {
@@ -570,10 +548,10 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
           continue;
         }
         const chunk = assembleChunkMesh(
-          new Float32Array(geometryBytes.buffer.slice(offsets.positions + range.positionsOffset, offsets.positions + range.positionsOffset + range.positionsBytes)),
-          new Float32Array(geometryBytes.buffer.slice(offsets.normals + range.normalsOffset, offsets.normals + range.normalsOffset + range.normalsBytes)),
-          new Float32Array(geometryBytes.buffer.slice(offsets.materials + range.materialsOffset, offsets.materials + range.materialsOffset + range.materialsBytes)),
-          new Uint32Array(geometryBytes.buffer.slice(offsets.indices + range.indicesOffset, offsets.indices + range.indicesOffset + range.indicesBytes)),
+          f32Slice(mappedRange, offsets.positions + range.positionsOffset, range.positionsBytes),
+          f32Slice(mappedRange, offsets.normals + range.normalsOffset, range.normalsBytes),
+          f32Slice(mappedRange, offsets.materials + range.materialsOffset, range.materialsBytes),
+          u32Slice(mappedRange, offsets.indices + range.indicesOffset, range.indicesBytes),
           range.vertexCount,
           range.indexCount,
         );
@@ -780,12 +758,15 @@ function resolveRuntimeBatchLimits(device: GPUDevice, config: StreamingRootGpuMe
     U32,
   );
   const maxSingleGroupedReadbackBytes = Math.max(dims.maxVertices * 3 * F32, dims.maxVertices * F32, dims.maxIndices * U32);
-  const maxReadbackBufferBytes = Math.max(4, Math.floor(maxBufferSize * READBACK_BUFFER_HEADROOM));
+  const deviceReadbackBudget = Math.max(4, Math.floor(maxBufferSize * READBACK_BUFFER_HEADROOM));
+  const maxReadbackBufferBytes = Math.max(4, Math.min(deviceReadbackBudget, positiveLimit(config.maxReadbackBufferBytes, deviceReadbackBudget)));
   const readbackSlotLimit = Math.max(1, Math.floor(maxReadbackBufferBytes / Math.max(1, maxSingleGroupedReadbackBytes)));
   const storageSlotLimit = Math.max(1, Math.floor(maxStorageBufferBindingSize / Math.max(1, maxSingleStorageBufferBytes)));
-  const maxChunkSlots = Math.max(1, Math.min(DEFAULT_MAX_BATCH_CHUNK_SLOTS, readbackSlotLimit, storageSlotLimit));
+  const configuredChunkSlots = positiveLimit(config.maxChunkSlots, DEFAULT_MAX_BATCH_CHUNK_SLOTS);
+  const maxChunkSlots = Math.max(1, Math.min(DEFAULT_MAX_BATCH_CHUNK_SLOTS, configuredChunkSlots, readbackSlotLimit, storageSlotLimit));
   const chunkEstimate = estimateChunkSlotBytes(chunkSize).totalBytes;
-  const totalBudget = Math.max(chunkEstimate, Math.min(DEFAULT_MAX_TOTAL_SLOT_BYTES, Math.floor(maxBufferSize * TOTAL_SLOT_BUFFER_HEADROOM)));
+  const deviceTotalBudget = Math.max(chunkEstimate, Math.min(DEFAULT_MAX_TOTAL_SLOT_BYTES, Math.floor(maxBufferSize * TOTAL_SLOT_BUFFER_HEADROOM)));
+  const totalBudget = Math.max(chunkEstimate, Math.min(deviceTotalBudget, positiveLimit(config.maxTotalSlotBytes, deviceTotalBudget)));
   return {
     batchSize: Math.max(1, Math.floor(config.batchSize)),
     maxChunkSlots,
@@ -805,14 +786,22 @@ function assertBufferWithinLimit(size: number, limit: number, label: string): vo
     { px: 0, pz: 0 },
     0,
     size,
-    { batchSize: 1, maxChunkSlots: 1, maxTotalSlotBytes: limit },
+    { batchSize: 1, maxChunkSlots: 1, maxTotalSlotBytes: limit, maxReadbackBufferBytes: limit },
   );
 }
 
 function isHardGpuFailure(error: unknown): boolean {
-  if (error instanceof RootGpuBatchLimitError) return true;
+  if (error instanceof RootGpuBatchLimitError) return false;
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return /out.?of.?memory|device.?lost|validation|maxBufferSize|GPUValidationError|OperationError/i.test(message);
+}
+
+function f32Slice(buffer: ArrayBuffer, byteOffset: number, byteLength: number): Float32Array {
+  return new Float32Array(buffer.slice(byteOffset, byteOffset + byteLength));
+}
+
+function u32Slice(buffer: ArrayBuffer, byteOffset: number, byteLength: number): Uint32Array {
+  return new Uint32Array(buffer.slice(byteOffset, byteOffset + byteLength));
 }
 
 function buildLod0Page(px: number, pz: number, chunkMeshes: readonly PageMesh[], cfg: ClodPagesConfig): ClodPageNode {
