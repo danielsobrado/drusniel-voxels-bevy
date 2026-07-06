@@ -42,6 +42,12 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
     live_clod_stream_safety_required_pages: 1,
     live_clod_stream_safety_ready_pages: 1,
     live_clod_stream_apply_ms: 1,
+    live_clod_stream_gpu_mesher_enabled: 1,
+    live_clod_stream_gpu_batches_dispatched: 1,
+    live_clod_stream_gpu_pages_dispatched: 4,
+    live_clod_stream_gpu_chunk_slots_dispatched: 64,
+    live_clod_stream_gpu_failed_batches: 0,
+    live_clod_stream_worker_fallback_pages: 0,
     far_clipmap_enabled: 1,
     far_clipmap_visible: 1,
     far_clipmap_active_rings: 5,
@@ -135,6 +141,24 @@ describe("infinite islands thresholds", () => {
     );
   });
 
+  it("fails unless streamed-root GPU work actually dispatched without fallback", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_mesher_enabled: 0 })).failures).toContain(
+      "live_clod_stream_gpu_mesher_enabled=0 failed: must equal 1",
+    );
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_batches_dispatched: 0 })).failures).toContain(
+      "live_clod_stream_gpu_batches_dispatched=0 failed: must be > 0",
+    );
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_chunk_slots_dispatched: 4 })).failures).toContain(
+      "live_clod_stream_gpu_chunk_slots_dispatched=4 failed: must be greater than live_clod_stream_gpu_pages_dispatched",
+    );
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_failed_batches: 1 })).failures).toContain(
+      "live_clod_stream_gpu_failed_batches=1 failed: must equal 0",
+    );
+    expect(evaluateThresholds(validCounters({ live_clod_stream_worker_fallback_pages: 1 })).failures).toContain(
+      "live_clod_stream_worker_fallback_pages=1 failed: must equal 0",
+    );
+  });
+
   it("allows refinement work to remain pending after safety coverage is ready", () => {
     expect(evaluateThresholds(validCounters({
       live_clod_stream_apply_queue_pages: 3,
@@ -195,6 +219,8 @@ describe("infinite islands thresholds", () => {
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_transfer_bytes"]).toBe(0);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_gpu_batches_dispatched"]).toBe(1);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_fallback_pages"]).toBe(0);
     expect(extractAcceptanceCounters({ counters })["far_clipmap_owned_cells"]).toBe(64);
     expect(extractAcceptanceCounters({ counters })["far_clipmap_source_ready"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["vegetation_ring_unbounded"]).toBe(1);
