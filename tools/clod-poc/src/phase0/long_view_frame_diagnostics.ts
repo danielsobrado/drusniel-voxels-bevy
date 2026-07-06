@@ -68,6 +68,11 @@ export interface StreamReadinessCounters {
   farSummaryTilesReady: number;
   farSummaryTilesMissing: number;
   farSummaryTilesBuilding: number;
+  streamRequiredPages: number;
+  streamSafetyPendingPages: number;
+  streamSafetyInflightPages: number;
+  streamParentCoverageViolations: number;
+  streamActiveRootPages: number;
 }
 
 export function requiredRootClodPagesReady(
@@ -99,9 +104,14 @@ export function streamReadinessSatisfied(input: {
       && input.counters.farSummaryTilesBuilding === 0
       && input.counters.farSummaryTilesReady >= input.counters.farSummaryTilesRequired
     );
-  return input.liveMissing === 0
-    && requiredRootClodPagesReady(input.snapshot, input.feeds, input.requiredRootLevel, input.coverageMaxLevel)
-    && farSummaryReady;
+  const streamSafetyReady = input.counters.streamRequiredPages <= 0
+    || (
+      input.counters.streamSafetyPendingPages === 0
+      && input.counters.streamSafetyInflightPages === 0
+      && input.counters.streamParentCoverageViolations === 0
+      && input.counters.streamActiveRootPages > 0
+    );
+  return input.liveMissing === 0 && streamSafetyReady && farSummaryReady;
 }
 
 function farClipmapFromCounters(counters: Readonly<Record<string, number>>, camera: THREE.PerspectiveCamera): FarClipmapOwnershipSnapshot | undefined {
@@ -145,10 +155,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     return Number.isFinite(value) ? value : fallback;
   };
 
-  const liveSafetyRadiusM = (): number => Math.max(
-    0,
-    deps.phase0Streaming.live_radius_m - deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
-  );
+  const liveSafetyRadiusM = (): number => Math.max(0, deps.phase0Streaming.live_radius_m - deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size);
 
   const requiredStreamingRootLevel = (counters: Readonly<Record<string, number>>): number => Math.max(
     0,
@@ -327,6 +334,11 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         farSummaryTilesReady: numericCounter(s.counters, "far_summary_tiles_ready", 0),
         farSummaryTilesMissing: numericCounter(s.counters, "far_summary_tiles_missing", 0),
         farSummaryTilesBuilding: numericCounter(s.counters, "far_summary_tiles_building", 0),
+        streamRequiredPages: numericCounter(s.counters, "live_clod_stream_required_pages", 0),
+        streamSafetyPendingPages: numericCounter(s.counters, "live_clod_stream_safety_pending_pages", 0),
+        streamSafetyInflightPages: numericCounter(s.counters, "live_clod_stream_safety_inflight_pages", 0),
+        streamParentCoverageViolations: numericCounter(s.counters, "live_clod_stream_parent_coverage_violations", 0),
+        streamActiveRootPages: numericCounter(s.counters, "live_clod_stream_active_root_pages", 0),
       },
     })) streamReadyFrame = s.frame;
     s.counters["stream_ready_frame"] = streamReadyFrame;
