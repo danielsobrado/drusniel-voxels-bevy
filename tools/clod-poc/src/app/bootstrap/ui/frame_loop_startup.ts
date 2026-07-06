@@ -43,6 +43,7 @@ const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 4;
 const ACCEPTANCE_MIN_STREAM_MAX_CACHED = 512;
 const ACCEPTANCE_STREAM_MAX_LEVEL = 1;
 const ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES = 1;
+const STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR = 0.25;
 
 let streamBuiltTotal = 0;
 let streamApplyPagesTotal = 0;
@@ -87,6 +88,17 @@ function applyNoPressureProbeMirror(target: Record<string, number>, staleTotal: 
   if (staleTotal <= 0) return;
   target["live_clod_stream_stale_discards_total"] = Math.max(target["live_clod_stream_stale_discards_total"] ?? 0, staleTotal);
   target["live_clod_stream_probe_stale_discards_total"] = Math.max(target["live_clod_stream_probe_stale_discards_total"] ?? 0, staleTotal);
+}
+
+function streamWorkPending(stats: StreamingClodRootStats): boolean {
+  return stats.pendingPages > 0
+    || stats.inflightBatches > 0
+    || stats.applyQueuePages > 0
+    || stats.safetyPendingPages > 0
+    || stats.safetyInflightPages > 0
+    || stats.refinementPendingPages > 0
+    || stats.refinementInflightPages > 0
+    || stats.parentCoverageViolations > 0;
 }
 
 function mirrorStreamingClodRootCounters(
@@ -161,7 +173,7 @@ function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
     stoneClassSummaryController: statControllers.stoneClassSummary,
     stoneVisibleController: statControllers.stoneVisible,
     understoryTotalController: statControllers.understoryTotal,
-    understoryVisiblePatchesController: statControllers.understoryVisiblePatches,
+    understoryVisiblePatchesController: session.understoryVisiblePatchesController,
     understoryClassSummaryController: statControllers.understoryClassSummary,
     understoryGpuSummaryController: statControllers.understoryGpuSummary,
     forestLightingStatsController: statControllers.forestLightingStats,
@@ -253,9 +265,21 @@ export function runFrameLoopStartup(
     if (!streamingScene) return input.allNodes.map((node) => node.id);
     return [...new Set([...input.allNodes.map((node) => node.id), ...streamingClodRootController.readyPageKeys()])];
   };
+  let lastStreamCenterX = Number.NaN;
+  let lastStreamCenterZ = Number.NaN;
+  const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
   const updateSelectionWithStreaming = () => {
     const center = interaction.mode === "playing" ? player.position : controls.target;
-    const streamStats = streamingClodRootController.update(center, liveClodRootRadius);
+    const previousStats = streamingClodRootController.stats();
+    const dx = center.x - lastStreamCenterX;
+    const dz = center.z - lastStreamCenterZ;
+    const movedEnough = !Number.isFinite(dx) || !Number.isFinite(dz) || dx * dx + dz * dz >= streamingIdleUpdateDistanceM * streamingIdleUpdateDistanceM;
+    const shouldUpdateStream = !streamingScene || movedEnough || streamWorkPending(previousStats);
+    const streamStats = shouldUpdateStream ? streamingClodRootController.update(center, liveClodRootRadius) : previousStats;
+    if (shouldUpdateStream) {
+      lastStreamCenterX = center.x;
+      lastStreamCenterZ = center.z;
+    }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
     updateSelection();
   };
