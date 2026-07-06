@@ -33,6 +33,12 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_safety_required_pages"] = 1;
   values["live_clod_stream_safety_ready_pages"] = 1;
   values["live_clod_stream_apply_ms"] = 1;
+  values["live_clod_stream_gpu_mesher_enabled"] = 1;
+  values["live_clod_stream_gpu_batches_dispatched"] = 1;
+  values["live_clod_stream_gpu_pages_dispatched"] = 4;
+  values["live_clod_stream_gpu_chunk_slots_dispatched"] = 64;
+  values["live_clod_stream_gpu_failed_batches"] = 0;
+  values["live_clod_stream_worker_fallback_pages"] = 0;
   values["far_clipmap_enabled"] = 1;
   values["far_clipmap_visible"] = 1;
   values["far_clipmap_active_rings"] = 5;
@@ -137,6 +143,14 @@ describe("infinite islands threshold validation", () => {
     })).failures).not.toContain(
       "live_clod_stream_ready_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
     );
+  });
+
+  it("fails when streamed-root GPU counters show disabled, failed, or fallback work", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_mesher_enabled: 0 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_batches_dispatched: 0 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_chunk_slots_dispatched: 4 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_failed_batches: 1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_worker_fallback_pages: 1 })).passed).toBe(false);
   });
 
   it("fails when streamed root apply work exceeds the main-thread budget", () => {
