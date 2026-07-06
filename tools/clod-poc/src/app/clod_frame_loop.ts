@@ -378,10 +378,12 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           currentUnderstoryStats: stats.getUnderstoryStats(),
         };
 
+    const hooks = render.getHooks();
+    if (hooks?.stats) recordStatsSyncThrottleCounters(hooks.stats.counters, statsDecision, statsSyncThrottle.diagnostics());
+
     const mirrorDue = frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS;
     if (mirrorDue) {
       lastDebugCounterMirrorAt = frameStart;
-      const hooks = render.getHooks();
       if (hooks?.stats) {
         const counters = hooks.stats.counters;
         const currentTreeStats = statsSyncResult.currentTreeStats;
@@ -451,7 +453,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["clodColliderStaleFramesMax"] = clodApplyStats.clodColliderStaleFramesMax;
           counters["clodGeometryReusedOnApply"] = clodApplyStats.clodGeometryReusedOnApply;
         }
-        recordStatsSyncThrottleCounters(counters, statsDecision, statsSyncThrottle.diagnostics());
         if (pageGeometryCacheStats) {
           counters["clodGeometryCacheHits"] = pageGeometryCacheStats.hits;
           counters["clodGeometryCacheMisses"] = pageGeometryCacheStats.misses;
@@ -506,7 +507,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     render.gpuPassTiming?.update();
     if (render.gpuPassTiming?.enabled) {
-      const hooks = render.getHooks();
       if (hooks?.stats) {
         const dst = hooks.stats.gpuPasses;
         for (const key of Object.keys(dst)) delete dst[key];
@@ -514,7 +514,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     }
 
-    const hooks = render.getHooks();
     if (hooks?.stats) syncMaterialChurnCounters(hooks.stats.counters);
   });
 }
