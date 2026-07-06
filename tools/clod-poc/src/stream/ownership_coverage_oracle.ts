@@ -6,7 +6,7 @@ import type { OwnershipResidencyFeeds } from "./ownership_residency.js";
 import {
   countMissingPacked,
   createSnapshotOwnershipResidencyFeeds,
-  packedLiveKeySet,
+  packedLiveKeySetWithinRadius,
   pageCoveredByResidentClodHierarchy,
 } from "./ownership_residency.js";
 import { farClipmapBandContainsCell, farClipmapCoversCell } from "./far_clipmap_ownership.js";
@@ -16,6 +16,8 @@ export interface OwnershipCoverageOracleInput {
   chunkSizeM: number;
   pageSizeM: number;
   maxLevel: number;
+  requiredRootLevel?: number;
+  liveRequiredRadiusM?: number;
   camera: { x: number; z: number };
   farShellCenter: { x: number; z: number };
   farShellRecenterCount: number;
@@ -66,11 +68,17 @@ function clodOwns(loaded: ReadonlySet<number>, x: number, z: number, pageSizeM: 
   return false;
 }
 
-function clodParentCoverageViolations(required: readonly string[], loadedPacked: ReadonlySet<number>, maxLevel: number): number {
+function clodParentCoverageViolations(
+  required: readonly string[],
+  loadedPacked: ReadonlySet<number>,
+  requiredRootLevel: number,
+  maxCoverageLevel: number,
+): number {
   let violations = 0;
   for (const key of required) {
     const page = parsePageKey(key);
-    if (!pageCoveredByResidentClodHierarchy(page, loadedPacked, maxLevel)) violations++;
+    if (page.level !== requiredRootLevel) continue;
+    if (!pageCoveredByResidentClodHierarchy(page, loadedPacked, maxCoverageLevel)) violations++;
   }
   return violations;
 }
@@ -95,12 +103,18 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   const chunkSizeM = Math.max(1, input.chunkSizeM);
   const pageSizeM = Math.max(chunkSizeM, input.pageSizeM);
   const coverageCellM = Math.max(chunkSizeM, input.coverageCellM ?? pageSizeM);
-  const requiredLive = packedLiveKeySet(snapshot.live.required);
+  const requiredLive = packedLiveKeySetWithinRadius(
+    snapshot.live.required,
+    snapshot.center,
+    chunkSizeM,
+    input.liveRequiredRadiusM,
+  );
   const residencyFeeds = input.residencyFeeds ?? createSnapshotOwnershipResidencyFeeds(snapshot);
   const loadedLive = residencyFeeds.liveReady();
   const loadedClod = residencyFeeds.clodReady();
   const missingLive = countMissingPacked(requiredLive, loadedLive);
-  const parentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, input.maxLevel);
+  const requiredRootLevel = Math.max(0, Math.min(input.maxLevel, Math.floor(input.requiredRootLevel ?? input.maxLevel)));
+  const parentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, requiredRootLevel, input.maxLevel);
   const missingClod = parentCoverageViolations;
 
   let liveClodGap = 0;
