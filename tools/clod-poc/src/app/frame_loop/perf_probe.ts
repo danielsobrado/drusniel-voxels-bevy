@@ -211,15 +211,62 @@ function appendRecentSample(recentSamples: FramePerfSample[], sample: FramePerfS
   if (recentSamples.length > RECENT_SAMPLE_LIMIT) recentSamples.shift();
 }
 
-function mirrorFramePerfCounters(snapshot: FramePerfSnapshot): void {
-  if (typeof window === "undefined") return;
+function clodCounters(): Record<string, number> | null {
+  if (typeof window === "undefined") return null;
   const hooks = (window as typeof window & {
     __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
   }).__drusnielClod;
-  const counters = hooks?.stats?.counters;
+  return hooks?.stats?.counters ?? null;
+}
+
+function counter(counters: Readonly<Record<string, number>>, key: string, fallback: number): number {
+  const value = counters[key];
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function acceptancePerfGateReady(enabled: boolean): boolean {
+  if (!enabled) return true;
+  const counters = clodCounters();
+  if (!counters) return false;
+  const farSummaryQuiet = counter(counters, "far_summary_tiles_missing", -1) === 0
+    && counter(counters, "far_summary_tiles_building", -1) === 0
+    && counter(counters, "far_clipmap_pending_tiles", 0) === 0;
+  const bubbleRequired = counter(counters, "live_bubble_required_pages", -1);
+  const bubbleQuiet = bubbleRequired === 0 || (
+    counter(counters, "live_bubble_failed_pages", -1) === 0
+    && counter(counters, "live_bubble_gpu_retry_pages", 0) === 0
+    && counter(counters, "live_bubble_building_pages", -1) === 0
+    && counter(counters, "live_bubble_pending_chunks", 0) === 0
+    && counter(counters, "live_bubble_inflight_chunks", 0) === 0
+    && counter(counters, "live_bubble_ready_pages", 0) > 0
+  );
+  const streamRequired = counter(counters, "live_clod_stream_required_pages", 0);
+  const streamQuiet = streamRequired === 0 || (
+    counter(counters, "live_clod_stream_failed_pages", 0) === 0
+    && counter(counters, "live_clod_stream_safety_cache_capacity_ok", 1) !== 0
+    && counter(counters, "live_clod_stream_safety_pending_pages", 0) === 0
+    && counter(counters, "live_clod_stream_safety_inflight_pages", 0) === 0
+    && counter(counters, "live_clod_stream_parent_coverage_violations", 0) === 0
+    && counter(counters, "live_clod_stream_active_root_pages", 0) > 0
+  );
+  return farSummaryQuiet
+    && counter(counters, "far_shell_rebuild_pending", 0) === 0
+    && counter(counters, "terrain_texture_window_pending", 0) === 0
+    && bubbleQuiet
+    && streamQuiet
+    && counter(counters, "shadow_proxy_building", 0) !== 1;
+}
+
+function mirrorFramePerfCounters(
+  snapshot: FramePerfSnapshot,
+  diagnostics: { ignoredConvergenceFrames: number; acceptanceGateReady: boolean },
+): void {
+  const counters = clodCounters();
   if (!counters) return;
   counters["framePerf.enabled"] = 1;
   counters["framePerf.ready"] = snapshot.ready ? 1 : 0;
+  counters["framePerf.acceptanceGateReady"] = diagnostics.acceptanceGateReady ? 1 : 0;
+  counters["framePerf.ignoredConvergenceFrames"] = diagnostics.ignoredConvergenceFrames;
   counters["framePerf.observedFrames"] = snapshot.observedFrames;
   counters["framePerf.sampleCount"] = snapshot.sampleCount;
   counters["framePerf.warmupFrames"] = snapshot.warmupFrames;
@@ -262,7 +309,9 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
   }
   const warmupFrames = intParam(searchParams, ["perfWarmupFrames", "perfWarmup"], 120);
   const targetSampleFrames = Math.max(1, intParam(searchParams, ["perfSampleFrames", "perfFrames"], 300));
+  const gateAcceptanceConvergence = searchParams.get("acceptance") === "1" && searchParams.get("perfProbeConvergenceGate") !== "0";
   let observedFrames = 0;
+  let ignoredConvergenceFrames = 0;
   let samples: FramePerfSample[] = [];
   let recentSamples: FramePerfSample[] = [];
   const snapshot = (): FramePerfSnapshot => ({
@@ -271,6 +320,10 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
     samples: samples.slice(),
     recentSamples: recentSamples.slice(),
     ...summarizeFramePerfSamples(samples, warmupFrames, targetSampleFrames),
+  });
+  const diagnostics = (): { ignoredConvergenceFrames: number; acceptanceGateReady: boolean } => ({
+    ignoredConvergenceFrames,
+    acceptanceGateReady: acceptancePerfGateReady(gateAcceptanceConvergence),
   });
   const hooks: FramePerfHooks = {
     ready: false,
@@ -284,6 +337,7 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
     snapshot,
     reset: () => {
       observedFrames = 0;
+      ignoredConvergenceFrames = 0;
       samples = [];
       recentSamples = [];
       hooks.ready = false;
@@ -292,25 +346,31 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
       hooks.lastSample = null;
       hooks.samples = samples;
       hooks.recentSamples = recentSamples;
-      mirrorFramePerfCounters(snapshot());
+      mirrorFramePerfCounters(snapshot(), diagnostics());
     },
   };
   exposePerfHooks(hooks);
-  mirrorFramePerfCounters(snapshot());
+  mirrorFramePerfCounters(snapshot(), diagnostics());
   return {
     enabled: true,
     record(sample: FramePerfSample): void {
-      observedFrames += 1;
-      hooks.observedFrames = observedFrames;
+      const gateReady = acceptancePerfGateReady(gateAcceptanceConvergence);
       appendRecentSample(recentSamples, sample);
       hooks.recentSamples = recentSamples;
       hooks.lastSample = sample;
+      if (!gateReady) {
+        ignoredConvergenceFrames += 1;
+        mirrorFramePerfCounters(snapshot(), { ignoredConvergenceFrames, acceptanceGateReady: false });
+        return;
+      }
+      observedFrames += 1;
+      hooks.observedFrames = observedFrames;
       if (observedFrames > warmupFrames && samples.length < targetSampleFrames) {
         samples.push(sample);
         hooks.sampleCount = samples.length;
         hooks.ready = samples.length >= targetSampleFrames;
       }
-      mirrorFramePerfCounters(snapshot());
+      mirrorFramePerfCounters(snapshot(), { ignoredConvergenceFrames, acceptanceGateReady: true });
     },
     reset: hooks.reset,
     snapshot,
