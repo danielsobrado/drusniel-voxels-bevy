@@ -7,6 +7,7 @@ import {
   countMissingPacked,
   createSnapshotOwnershipResidencyFeeds,
   packedLiveKeySet,
+  pageCoveredByResidentClodHierarchy,
 } from "./ownership_residency.js";
 import { farClipmapBandContainsCell, farClipmapCoversCell } from "./far_clipmap_ownership.js";
 
@@ -65,21 +66,11 @@ function clodOwns(loaded: ReadonlySet<number>, x: number, z: number, pageSizeM: 
   return false;
 }
 
-function hasResidentAncestor(pageKeyText: string, loaded: ReadonlySet<number>, maxLevel: number): boolean {
-  const page = parsePageKey(pageKeyText);
-  for (let level = page.level + 1; level <= maxLevel; level++) {
-    const scale = 2 ** (level - page.level);
-    if (loaded.has(packPageKey(level, Math.floor(page.x / scale), Math.floor(page.z / scale)))) return true;
-  }
-  return false;
-}
-
 function clodParentCoverageViolations(required: readonly string[], loadedPacked: ReadonlySet<number>, maxLevel: number): number {
   let violations = 0;
   for (const key of required) {
     const page = parsePageKey(key);
-    if (loadedPacked.has(packPageKey(page.level, page.x, page.z))) continue;
-    if (!hasResidentAncestor(key, loadedPacked, maxLevel)) violations++;
+    if (!pageCoveredByResidentClodHierarchy(page, loadedPacked, maxLevel)) violations++;
   }
   return violations;
 }
