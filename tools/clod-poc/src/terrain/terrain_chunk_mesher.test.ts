@@ -41,7 +41,7 @@ describe("meshChunk vertical scan bounds", () => {
   afterEach(() => setTerrainSurfaceOverride(null));
 
   it("keeps below-sea-level interior terrain connected instead of clipping an open basin", () => {
-    setTerrainSurfaceOverride((x, z) => (x >= 6 && x <= 10 && z >= 6 && z <= 10 ? -1 : 2));
+    setTerrainSurfaceOverride((x, z) => (x >= 6 && x <= 10 && z >= 6 && z <= 10 ? -4 : 2));
 
     const source = buildLod0PageSource(0, 0, TEST_CFG, { cellsX: 16, cellsZ: 16, finite: false });
 

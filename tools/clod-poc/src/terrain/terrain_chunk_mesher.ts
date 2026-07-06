@@ -6,7 +6,7 @@ import { paintMaterialAt, terrainWeights } from "./terrain_paint.js";
 import { editIndex, editIds, editHeight, editCellKey, DIG_INFLUENCE_MARGIN, CELL_SIZE } from "./terrain_edits.js";
 import type { DigEdit } from "./terrain_edits.js";
 
-const MIN_Y_CELL = -2;
+const MIN_Y_CELL = -64;
 const MAX_Y_CELL = 128;
 
 const QUAD_CELLS: Record<"x" | "y" | "z", [number, number, number][]> = {
