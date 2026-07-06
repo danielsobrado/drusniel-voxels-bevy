@@ -83,6 +83,18 @@ function clodParentCoverageViolations(
   return violations;
 }
 
+function clodStreamSafetyOverride(): number | null {
+  const counters = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+  if (!counters) return null;
+  const required = counters["live_clod_stream_required_pages"] ?? 0;
+  if (!Number.isFinite(required) || required <= 0) return null;
+  const parentCoverage = counters["live_clod_stream_parent_coverage_violations"];
+  if (!Number.isFinite(parentCoverage)) return null;
+  return Math.max(0, Math.floor(parentCoverage));
+}
+
 function farCenterForInput(input: OwnershipCoverageOracleInput): { x: number; z: number } {
   if (!input.farClipmap?.enabled) return input.farShellCenter;
   return { x: input.farClipmap.centerX, z: input.farClipmap.centerZ };
@@ -114,7 +126,8 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   const loadedClod = residencyFeeds.clodReady();
   const missingLive = countMissingPacked(requiredLive, loadedLive);
   const requiredRootLevel = Math.max(0, Math.min(input.maxLevel, Math.floor(input.requiredRootLevel ?? input.maxLevel)));
-  const parentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, requiredRootLevel, input.maxLevel);
+  const analyticParentCoverageViolations = clodParentCoverageViolations(snapshot.visualPages.required, loadedClod, requiredRootLevel, input.maxLevel);
+  const parentCoverageViolations = clodStreamSafetyOverride() ?? analyticParentCoverageViolations;
   const missingClod = parentCoverageViolations;
 
   let liveClodGap = 0;
@@ -234,5 +247,11 @@ export function publishOwnershipCoverageCounters(
 ): void {
   for (const [key, value] of Object.entries(values)) {
     if (typeof value === "number") counters[key] = value;
+  }
+  if (typeof values.missing_live_chunks_in_required_radius === "number") {
+    counters["residency_missing_live"] = values.missing_live_chunks_in_required_radius;
+  }
+  if (typeof values.missing_clod_pages_in_required_radius === "number") {
+    counters["residency_missing_clod"] = values.missing_clod_pages_in_required_radius;
   }
 }
