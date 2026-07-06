@@ -117,6 +117,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const debugOverlay = options.threeScene
     ? new NaadfDebugOverlay(options.threeScene, config)
     : null;
+  const browserWindow = currentWindow();
   const saveInvalidationCleanup = registerNaadfSaveInvalidationTarget(state);
   replaceActiveSaveInvalidationTarget(saveInvalidationCleanup);
 
@@ -138,7 +139,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     if (detail.showTiles !== undefined) materialCacheConfig.debug.showCacheTiles = detail.showTiles;
     if (detail.showInvalidations !== undefined) materialCacheConfig.debug.showInvalidations = detail.showInvalidations;
   };
-  window.addEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
+  browserWindow?.addEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
 
   const integration: NaadfIntegration = {
     config,
@@ -185,7 +186,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
       gpuAtlas?.updateFromState(state);
       debugOverlay?.update(state);
 
-      const clod = (window as unknown as { __drusnielClod?: { stats?: { counters?: Record<string, number> } } }).__drusnielClod;
+      const clod = (browserWindow as unknown as { __drusnielClod?: { stats?: { counters?: Record<string, number> } } } | null)?.__drusnielClod;
       if (clod?.stats) {
         const counters = metrics.toCounters();
         if (gpuAtlas?.view) {
@@ -279,7 +280,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
       disposeSaveInvalidationTarget(saveInvalidationCleanup);
       debugOverlay?.dispose();
       gpuAtlas?.dispose();
-      window.removeEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
+      browserWindow?.removeEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
       state.residents.length = 0;
       state.residentIndexByKey.clear();
       state.farTiles.clear();
@@ -372,8 +373,12 @@ function positiveIntParam(value: string | null): number | null {
 }
 
 function currentSearchParams(): URLSearchParams | null {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search);
+  const browserWindow = currentWindow();
+  return browserWindow ? new URLSearchParams(browserWindow.location.search) : null;
+}
+
+function currentWindow(): Window | null {
+  return typeof window === "undefined" ? null : window;
 }
 
 declare global {
