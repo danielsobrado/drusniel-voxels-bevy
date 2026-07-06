@@ -2,7 +2,7 @@ import type { ClodPagesConfig } from "../config.js";
 import type { ClodCacheConfig } from "./cacheConfig.js";
 import { parseClodCacheConfig, isCacheEffective } from "./cacheConfig.js";
 import type { ClodCacheService } from "./cacheService.js";
-import { createClodCacheS\u0065rvice as makeCacheService } from "./cacheService.js";
+import { createClodCacheService as makeCacheService } from "./cacheService.js";
 import { computeCacheConfigHash } from "./cacheHash.js";
 import {
   computeTerrainSourceHash,
@@ -12,7 +12,7 @@ import {
 import type { ClodCacheKeyParts } from "./cacheTypes.js";
 import cacheConfigText from "../../config/clod_cache.yaml?raw";
 
-type CacheRole = "main" | "worker";
+type CacheRole = "main" | "main-pages" | "worker";
 
 export interface ClodCacheContext {
   config: ClodCacheConfig;
@@ -98,10 +98,10 @@ export function pageNodeSourceHash(ctx: ClodCacheContext): string {
   return ctx.terrainSourceHash;
 }
 
-export async function cl\u0065arWorkerPersist\u0065ntCache(): Promise<void> {
+export async function clearWorkerPersistentCache(): Promise<void> {
   const cacheConfig = parseClodCacheConfig(cacheConfigText);
   if (!cacheConfig.persistent.enabled) return;
   const service = makeCacheService(cacheConfig, undefined, "worker");
-  const removeAll = service.cl\u0065ar.bind(service);
+  const removeAll = service.clear.bind(service);
   await removeAll();
 }
