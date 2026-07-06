@@ -62,6 +62,10 @@ function validateExpectedSeed(manifest: SaveWorldManifest, expectedSeed: number 
   }
 }
 
+function publishDirtyRegionInvalidations(regionKeys: readonly string[]): void {
+  for (const regionKey of regionKeys) markSaveInvalidationBounds(boundsForRegion(regionKey));
+}
+
 export function saveIdFromQuery(searchParams: URLSearchParams): string | null {
   const saveId = searchParams.get("save");
   return saveId && saveId.trim().length > 0 ? saveId.trim() : null;
@@ -187,6 +191,8 @@ export async function flushDirtyRegionBatch(input: SaveDirtyRegionsInput): Promi
     });
     written.push(regionKey);
   }
+
+  publishDirtyRegionInvalidations(written);
 
   const writtenSet = new Set(written);
   return {
