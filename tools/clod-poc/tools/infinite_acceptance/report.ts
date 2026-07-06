@@ -40,6 +40,19 @@ function counterValue(counters: Readonly<Record<string, number>>, key: string): 
   return Number.isFinite(value) ? value : undefined;
 }
 
+function fixed(value: number | undefined): string {
+  return value === undefined ? "n/a" : value.toFixed(1);
+}
+
+function derivedSelectionSplit(scene: SceneReportInput): string {
+  const counters = sceneCounters(scene);
+  const update = counterValue(counters, "framePerf.p95.selectionUpdateMs");
+  const core = counterValue(counters, "framePerf.p95.selectionMs");
+  if (update === undefined || core === undefined) return "n/a";
+  const stream = Math.max(0, update - core);
+  return `stream:${stream.toFixed(1)}<br>core:${core.toFixed(1)}<br>total:${update.toFixed(1)}`;
+}
+
 function topPerfBuckets(scene: SceneReportInput, limit = 5): string {
   const counters = sceneCounters(scene);
   const entries = Object.entries(counters)
@@ -70,8 +83,8 @@ export function renderMarkdownReport(input: {
     ``,
     `Result: ${input.passed ? "PASS" : "FAIL"}`,
     ``,
-    `| scene | p95 | p99 | perf scale/active | top perf p95 buckets | draw calls | terrain tris | far shell tris | world | cache | build ms | summary ms | startup ms | holes | missing pages | pass | screenshot |`,
-    `| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |`,
+    `| scene | p95 | p99 | perf scale/active | selection split p95 | top perf p95 buckets | draw calls | terrain tris | far shell tris | world | cache | build ms | summary ms | startup ms | holes | missing pages | pass | screenshot |`,
+    `| --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |`,
   ];
   for (const scene of input.scenes) {
     const v = scene.thresholds.values;
@@ -87,7 +100,7 @@ export function renderMarkdownReport(input: {
     const worldLabel = scene.configuredWorldPages !== undefined && scene.startupWorldPages !== undefined
       ? `${scene.configuredWorldPages}->${scene.startupWorldPages}`
       : "n/a";
-    lines.push(`| ${scene.name} | ${num(v, "frame_ms_p95")} | ${num(v, "frame_ms_p99")} | ${perfScale(scene)} | ${topPerfBuckets(scene)} | ${num(v, "draw_calls")} | ${num(v, "rendered_terrain_tris")} | ${num(v, "far_shell_tris")} | ${worldLabel} | ${cacheLabel} | ${cache?.startupBuildWorldMs.toFixed(1) ?? "n/a"} | ${cache?.startupTerrainSummaryMs.toFixed(1) ?? "n/a"} | ${cache?.startupTotalMs.toFixed(1) ?? "n/a"} | ${holes} | ${num(v, "missing_clod_pages_in_required_radius")} | ${scene.passed ? "PASS" : "FAIL"} | ${scene.screenshot} |`);
+    lines.push(`| ${scene.name} | ${num(v, "frame_ms_p95")} | ${num(v, "frame_ms_p99")} | ${perfScale(scene)} | ${derivedSelectionSplit(scene)} | ${topPerfBuckets(scene)} | ${num(v, "draw_calls")} | ${num(v, "rendered_terrain_tris")} | ${num(v, "far_shell_tris")} | ${worldLabel} | ${cacheLabel} | ${cache?.startupBuildWorldMs.toFixed(1) ?? "n/a"} | ${cache?.startupTerrainSummaryMs.toFixed(1) ?? "n/a"} | ${cache?.startupTotalMs.toFixed(1) ?? "n/a"} | ${holes} | ${num(v, "missing_clod_pages_in_required_radius")} | ${scene.passed ? "PASS" : "FAIL"} | ${scene.screenshot} |`);
   }
   if (input.failures.length > 0) {
     lines.push(``, `## Failures`);
