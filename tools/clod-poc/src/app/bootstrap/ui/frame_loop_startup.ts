@@ -38,8 +38,8 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
-const ACCEPTANCE_MIN_STREAM_BUILD_BUDGET = 32;
-const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 8;
+const ACCEPTANCE_MIN_STREAM_BUILD_BUDGET = 16;
+const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 4;
 const ACCEPTANCE_MIN_STREAM_MAX_CACHED = 512;
 const ACCEPTANCE_STREAM_MAX_LEVEL = 1;
 const ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES = 1;
@@ -154,89 +154,16 @@ export function runFrameLoopStartup(
   terrainEdit: TerrainEditStartupResult,
 ): void {
   const { input, session } = ctx;
-  const {
-    searchParams,
-    clodRuntime,
-    cfg,
-    state,
-    renderer,
-    scene,
-    camera,
-    controls,
-    player,
-    interaction,
-    terrainColliders,
-    terrainRaycast,
-    worldCells,
-    maxTerrainLevel,
-    longView,
-    floatingOrigin,
-  } = input;
-  const {
-    postProcess,
-    skyEnvironment,
-    currentPostProcessSettings,
-    currentLighting,
-    selectionController,
-    updateSelection,
-    pageTransitionMode,
-    crossfadeStep,
-    nearFieldBubbleController,
-    nodeLabelOverlay,
-    views,
-    farShellController,
-  } = input.terrainView;
-  const {
-    shadowProxyController,
-    shadowProxyDebugState,
-    getShadowProxyConfig,
-  } = input.terrainView;
+  const { searchParams, clodRuntime, cfg, state, renderer, scene, camera, controls, player, interaction, terrainColliders, terrainRaycast, worldCells, maxTerrainLevel, longView, floatingOrigin } = input;
+  const { postProcess, skyEnvironment, currentPostProcessSettings, currentLighting, selectionController, updateSelection, pageTransitionMode, crossfadeStep, nearFieldBubbleController, nodeLabelOverlay, views, farShellController } = input.terrainView;
+  const { shadowProxyController, shadowProxyDebugState, getShadowProxyConfig } = input.terrainView;
 
   const readShadowProxyCounters = () => {
-    if (!shadowProxyController || !shadowProxyDebugState) {
-      return { shadow_proxy_enabled: 0, shadow_proxy_inert: 1 };
-    }
+    if (!shadowProxyController || !shadowProxyDebugState) return { shadow_proxy_enabled: 0, shadow_proxy_inert: 1 };
     const proxyConfig = getShadowProxyConfig();
-    return shadowProxyStatsToCounters({
-      proxyEnabled: shadowProxyDebugState.shadowProxyEnabled,
-      sunShadowsEnabled: shadowProxyDebugState.sunShadowsEnabled,
-      stats: shadowProxyController.runtime.stats,
-      lightShadowMapSize: shadowProxyDebugState.lightShadowMapSize,
-      lightShadowCameraExtentM: proxyConfig.lightShadowCameraExtentM,
-    });
+    return shadowProxyStatsToCounters({ proxyEnabled: shadowProxyDebugState.shadowProxyEnabled, sunShadowsEnabled: shadowProxyDebugState.sunShadowsEnabled, stats: shadowProxyController.runtime.stats, lightShadowMapSize: shadowProxyDebugState.lightShadowMapSize, lightShadowCameraExtentM: proxyConfig.lightShadowCameraExtentM });
   };
-  const {
-    drainVegetationDirtyQueue,
-    treeController,
-    grassController,
-    understoryController,
-    forestLightingController,
-    applyForestLightingToPropMaterials,
-    stoneController,
-    waterController,
-    deepOceanMaterial,
-    deepOceanSurface,
-    waterField,
-    deepOceanConfig,
-    oceanSampler,
-    weatherController,
-    updateWeatherStats,
-    grassSystem,
-    treeSystem,
-    understorySystem,
-    forestLightingSystem,
-    stoneSystem,
-    makeGrassSettings,
-    formatTreeGpuSummary,
-    formatUnderstoryGpuSummary,
-    grassStats,
-    treeStats,
-    stoneStats,
-    understoryStats,
-    forestLightingStats,
-    customProps,
-    constructionController,
-  } = input.runtime;
+  const { drainVegetationDirtyQueue, treeController, grassController, understoryController, forestLightingController, applyForestLightingToPropMaterials, stoneController, waterController, deepOceanMaterial, deepOceanSurface, waterField, deepOceanConfig, oceanSampler, weatherController, updateWeatherStats, grassSystem, treeSystem, understorySystem, forestLightingSystem, stoneSystem, makeGrassSettings, formatTreeGpuSummary, formatUnderstoryGpuSummary, grassStats, treeStats, stoneStats, understoryStats, forestLightingStats, customProps, constructionController } = input.runtime;
   const deepOceanMeshPresent = deepOceanSurface !== null;
   const { updateInfo } = infoPanel;
   const { playerTerraformEditActive } = terrainEdit;
@@ -263,21 +190,13 @@ export function runFrameLoopStartup(
 
   if (!session.playerInputController) throw new Error("Frame loop startup requires playerInputController");
   if (customProps?.propController) player.attachPropColliders(customProps.propController.colliderSet);
-  constructionController?.setTerrainConformHandler((request) => {
-    terrainEdit.scheduleConstructionTerrainConform(request);
-  });
+  constructionController?.setTerrainConformHandler((request) => terrainEdit.scheduleConstructionTerrainConform(request));
 
   const grassProfileEnabled = searchParams.get("grassProfile") === "1";
   const grassPrepassEnabled = searchParams.get("prepass") !== "0";
   const profileFrameMs = resolveSlowFrameMsThreshold(searchParams, clodRuntime.profiling.slowFrameMs);
-  const sunLightOptions = parseSunLightOptions({
-    active: searchParams.get("sunLightCache") !== "0",
-    diagnostics: searchParams.get("sunLightStats") === "1",
-    debug_view: { active: searchParams.get("sunLightDebug") === "1" },
-  });
-  const sunLightRuntime = window.__drusnielTerrainSummary
-    ? createLightUpdate({ terrainSummary: window.__drusnielTerrainSummary, options: sunLightOptions })
-    : null;
+  const sunLightOptions = parseSunLightOptions({ active: searchParams.get("sunLightCache") !== "0", diagnostics: searchParams.get("sunLightStats") === "1", debug_view: { active: searchParams.get("sunLightDebug") === "1" } });
+  const sunLightRuntime = window.__drusnielTerrainSummary ? createLightUpdate({ terrainSummary: window.__drusnielTerrainSummary, options: sunLightOptions }) : null;
   const syncSunLightCounters = () => {
     const sunStats = sunLightRuntime?.stats();
     if (!sunStats || !longView.hooks?.stats) return;
@@ -296,55 +215,16 @@ export function runFrameLoopStartup(
   };
 
   const wantGpuTiming = searchParams.get("perfProbe") === "1" || searchParams.get("gpuTiming") === "1";
-  const gpuTimestampReady = input.app.isWebGpu
-    && (input.app.renderer.backend as unknown as { trackTimestamp?: boolean }).trackTimestamp === true;
-  const gpuPassTiming = input.app.isWebGpu
-    ? new GpuPassTiming(input.app.renderer, gpuTimestampReady, wantGpuTiming && gpuTimestampReady)
-    : null;
+  const gpuTimestampReady = input.app.isWebGpu && (input.app.renderer.backend as unknown as { trackTimestamp?: boolean }).trackTimestamp === true;
+  const gpuPassTiming = input.app.isWebGpu ? new GpuPassTiming(input.app.renderer, gpuTimestampReady, wantGpuTiming && gpuTimestampReady) : null;
   const initialRenderResolution = window.__drusnielRenderResolution?.current();
-  const treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
-    ? new TreeTimingPass(
-        input.app.renderer,
-        initialRenderResolution?.physicalWidth ?? window.innerWidth,
-        initialRenderResolution?.physicalHeight ?? window.innerHeight,
-      )
-    : null;
-  const dynamicResolutionController = createDynamicResolutionController(
-    clodRuntime.renderResolution.dynamic,
-    window.__drusnielRenderResolution ?? null,
-    searchParams,
-  );
+  const treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady ? new TreeTimingPass(input.app.renderer, initialRenderResolution?.physicalWidth ?? window.innerWidth, initialRenderResolution?.physicalHeight ?? window.innerHeight) : null;
+  const dynamicResolutionController = createDynamicResolutionController(clodRuntime.renderResolution.dynamic, window.__drusnielRenderResolution ?? null, searchParams);
   const liveClodRootRadius = resolveLiveClodRootRadius(searchParams, longView.phase0Config, state.bubbleRadius);
-  const diagnosticsPhase0Streaming = acceptanceStreamProfile
-    ? {
-        ...longView.phase0Streaming,
-        clod_radius_m: liveClodRootRadius,
-        clod_refinement_radius_m: liveClodRootRadius,
-        far_clipmap_radius_m: liveClodRootRadius,
-      }
-    : longView.phase0Streaming;
-  const farClipmapConfig = farClipmapConfigFromSearchParams(searchParams, {
-    liveCollisionRadiusM: state.bubbleRadius,
-    clodCoverageRadiusM: liveClodRootRadius,
-  });
-  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1"
-    ? createFarClipmapController(scene, farClipmapConfig)
-    : null;
-  const streamingClodRootController = createStreamingClodRootController({
-    roots: input.result.roots,
-    allNodes: input.allNodes,
-    cfg,
-    worldCells,
-    enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
-    buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile),
-    applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile),
-    maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES, acceptanceStreamProfile),
-    maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile),
-    maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"),
-    buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
-    onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
-    onRootsChanged: () => selectionController.invalidate(),
-  });
+  const diagnosticsPhase0Streaming = acceptanceStreamProfile ? { ...longView.phase0Streaming, clod_radius_m: liveClodRootRadius, clod_refinement_radius_m: liveClodRootRadius, far_clipmap_radius_m: liveClodRootRadius } : longView.phase0Streaming;
+  const farClipmapConfig = farClipmapConfigFromSearchParams(searchParams, { liveCollisionRadiusM: state.bubbleRadius, clodCoverageRadiusM: liveClodRootRadius });
+  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig) : null;
+  const streamingClodRootController = createStreamingClodRootController({ roots: input.result.roots, allNodes: input.allNodes, cfg, worldCells, enabled: longView.queryScene === INFINITE_ISLANDS_SCENE, buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile), applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile), maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES, acceptanceStreamProfile), maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile), maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords), onNodesBuilt: (nodes) => selectionController.patchNodes(nodes), onRootsChanged: () => selectionController.invalidate() });
   const updateSelectionWithStreaming = () => {
     const center = interaction.mode === "playing" ? player.position : controls.target;
     const streamStats = streamingClodRootController.update(center, liveClodRootRadius);
@@ -352,21 +232,11 @@ export function runFrameLoopStartup(
     updateSelection();
   };
 
-  const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => {
-    postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight);
-    treeTimingPass?.setSize(detail.resolution.physicalWidth, detail.resolution.physicalHeight);
-  };
-
-  window.addEventListener(RENDER_RESOLUTION_CHANGED_EVENT, (event) => {
-    resizeDependentTargets((event as CustomEvent<RenderResolutionChangedEventDetail>).detail);
-  });
-
+  const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => { postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight); treeTimingPass?.setSize(detail.resolution.physicalWidth, detail.resolution.physicalHeight); };
+  window.addEventListener(RENDER_RESOLUTION_CHANGED_EVENT, (event) => resizeDependentTargets((event as CustomEvent<RenderResolutionChangedEventDetail>).detail));
   window.addEventListener("resize", () => {
     const renderResolution = window.__drusnielRenderResolution;
-    if (renderResolution) {
-      renderResolution.applyCurrentViewport({ renderer, camera });
-      return;
-    }
+    if (renderResolution) { renderResolution.applyCurrentViewport({ renderer, camera }); return; }
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -375,156 +245,19 @@ export function runFrameLoopStartup(
   });
 
   bindClodFrameLoop({
-    render: {
-      renderer,
-      scene,
-      camera,
-      postProcess,
-      currentPostProcessSettings,
-      nodeLabelOverlay,
-      skyEnvironment,
-      getHooks: () => longView.hooks,
-      longViewSettleWaiters: longView.settleWaiters,
-      profileFrameMs,
-      grassProfileEnabled,
-      grassPrepassEnabled,
-      makeGrassSettings,
-      dynamicResolution: dynamicResolutionController,
-      gpuPassTiming,
-      runGpuTreeTiming: treeTimingPass ? () => treeTimingPass.render(treeSystem, camera) : null,
-    },
-    player: {
-      controls,
-      player,
-      interaction,
-      state,
-      playerInputController: session.playerInputController,
-      playerTerraformEditActive,
-      brushPreview: input.terrainView.brushPreview,
-      terrainRaycast,
-    },
-    terrain: {
-      selectionController,
-      updateSelection: updateSelectionWithStreaming,
-      pageTransitionMode,
-      crossfadeStep,
-      nearFieldBubbleController,
-      streamingClodRootController,
-      views,
-      worldCells,
-      pruneRenderNodeCache: input.terrainView.renderNodeCache.prune.bind(input.terrainView.renderNodeCache),
-      getClodReadyPageKeys: () => streamingScene
-        ? streamingClodRootController.readyPageKeys()
-        : input.allNodes.map((node) => node.id),
-      drainClodApplyQueue: input.terrainView.drainClodApplyQueue,
-      getClodApplyStats: input.terrainView.getClodApplyStats,
-    },
-    vegetation: {
-      drainVegetationDirtyQueue,
-      treeController,
-      grassController,
-      understoryController,
-      forestLightingController,
-      applyForestLightingToPropMaterials,
-      stoneController,
-      propController: customProps?.propController ?? null,
-      grassSystem,
-      treeSystem,
-      understorySystem,
-      forestLightingSystem,
-      stoneSystem,
-      propStats: customProps?.propStats ?? null,
-      currentLighting,
-    },
-    waterWeather: {
-      waterController,
-      deepOceanSurface,
-      deepOceanMaterial,
-      waterField,
-      deepOceanConfig,
-      deepOceanMeshPresent,
-      oceanSampler,
-      weatherController,
-      updateWeatherStats,
-      weatherStatsController: session.weatherStatsController,
-    },
-    stats: {
-      getGrassStats: () => grassStats.current,
-      setGrassStats: (stats: GrassStats | null) => { grassStats.current = stats; },
-      getTreeStats: () => treeStats.current,
-      setTreeStats: (stats: TreeStats | null) => { treeStats.current = stats; },
-      getStoneStats: () => stoneStats.current,
-      setStoneStats: (stats: StoneStats | null) => { stoneStats.current = stats; },
-      getUnderstoryStats: () => understoryStats.current,
-      setUnderstoryStats: (stats: UnderstoryStats | null) => { understoryStats.current = stats; },
-      getForestLightingStats: () => forestLightingStats.current,
-      setForestLightingStats: (stats: ForestLightingStats | null) => { forestLightingStats.current = stats; },
-      formatTreeGpuSummary,
-      formatUnderstoryGpuSummary,
-      getPageGeometryCacheStats: () => input.terrainView.pageGeometryCache.stats(),
-      getRenderNodeCacheStats: () => input.terrainView.renderNodeCache.stats(),
-      statsPresenter,
-      updateInfo,
-      averageFpsRef: session.averageFpsRef,
-      statsSyncThrottleConfig: clodRuntime.stats,
-    },
-    diagnostics: {
-      maxTerrainLevel: diagnosticsTerrainMaxLevel,
-      farShellBuilt: () => farShellController.isBuilt(),
-      farShellCanopyEnabled: () =>
-        farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null,
-      getFarShellMetrics: () => longView.farShellMetrics,
-      infiniteFarShellActive: () => longView.infiniteFarShell !== undefined,
-      isLongView: longView.isLongView,
-      phase0TargetVisibleM: longView.phase0TargetVisibleM,
-      phase0Config: longView.phase0Config,
-      queryScene: longView.queryScene,
-      phase0VelocityX: longView.phase0VelocityX,
-      phase0VelocityZ: longView.phase0VelocityZ,
-      phase0Streaming: diagnosticsPhase0Streaming,
-      longViewDiagnosticsCfg: {
-        page: {
-          chunk_size: cfg.page.chunk_size,
-          chunks_per_page: cfg.page.chunks_per_page,
-        },
-      },
-      getFarShellRadiusFactor: () => state.farShellRadiusFactor,
-      getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
-      getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
-    },
-    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
-      ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
-          if (farClipmapController) {
-            const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position));
-            if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats);
-          }
-          if (streamingScene) timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z));
-          timeFarSummarySubphase("farSumSunLightMs", () => {
-            sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
-            syncSunLightCounters();
-          });
-          input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
-          timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay());
-        } }
-      : undefined,
+    render: { renderer, scene, camera, postProcess, currentPostProcessSettings, nodeLabelOverlay, skyEnvironment, getHooks: () => longView.hooks, longViewSettleWaiters: longView.settleWaiters, profileFrameMs, grassProfileEnabled, grassPrepassEnabled, makeGrassSettings, dynamicResolution: dynamicResolutionController, gpuPassTiming, runGpuTreeTiming: treeTimingPass ? () => treeTimingPass.render(treeSystem, camera) : null },
+    player: { controls, player, interaction, state, playerInputController: session.playerInputController, playerTerraformEditActive, brushPreview: input.terrainView.brushPreview, terrainRaycast },
+    terrain: { selectionController, updateSelection: updateSelectionWithStreaming, pageTransitionMode, crossfadeStep, nearFieldBubbleController, streamingClodRootController, views, worldCells, pruneRenderNodeCache: input.terrainView.renderNodeCache.prune.bind(input.terrainView.renderNodeCache), getClodReadyPageKeys: () => streamingScene ? streamingClodRootController.readyPageKeys() : input.allNodes.map((node) => node.id), drainClodApplyQueue: input.terrainView.drainClodApplyQueue, getClodApplyStats: input.terrainView.getClodApplyStats },
+    vegetation: { drainVegetationDirtyQueue, treeController, grassController, understoryController, forestLightingController, applyForestLightingToPropMaterials, stoneController, propController: customProps?.propController ?? null, grassSystem, treeSystem, understorySystem, forestLightingSystem, stoneSystem, propStats: customProps?.propStats ?? null, currentLighting },
+    waterWeather: { waterController, deepOceanSurface, deepOceanMaterial, waterField, deepOceanConfig, deepOceanMeshPresent, oceanSampler, weatherController, updateWeatherStats, weatherStatsController: session.weatherStatsController },
+    stats: { getGrassStats: () => grassStats.current, setGrassStats: (stats: GrassStats | null) => { grassStats.current = stats; }, getTreeStats: () => treeStats.current, setTreeStats: (stats: TreeStats | null) => { treeStats.current = stats; }, getStoneStats: () => stoneStats.current, setStoneStats: (stats: StoneStats | null) => { stoneStats.current = stats; }, getUnderstoryStats: () => understoryStats.current, setUnderstoryStats: (stats: UnderstoryStats | null) => { understoryStats.current = stats; }, getForestLightingStats: () => forestLightingStats.current, setForestLightingStats: (stats: ForestLightingStats | null) => { forestLightingStats.current = stats; }, formatTreeGpuSummary, formatUnderstoryGpuSummary, getPageGeometryCacheStats: () => input.terrainView.pageGeometryCache.stats(), getRenderNodeCacheStats: () => input.terrainView.renderNodeCache.stats(), statsPresenter, updateInfo, averageFpsRef: session.averageFpsRef, statsSyncThrottleConfig: clodRuntime.stats },
+    diagnostics: { maxTerrainLevel: diagnosticsTerrainMaxLevel, farShellBuilt: () => farShellController.isBuilt(), farShellCanopyEnabled: () => farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null, getFarShellMetrics: () => longView.farShellMetrics, infiniteFarShellActive: () => longView.infiniteFarShell !== undefined, isLongView: longView.isLongView, phase0TargetVisibleM: longView.phase0TargetVisibleM, phase0Config: longView.phase0Config, queryScene: longView.queryScene, phase0VelocityX: longView.phase0VelocityX, phase0VelocityZ: longView.phase0VelocityZ, phase0Streaming: diagnosticsPhase0Streaming, longViewDiagnosticsCfg: { page: { chunk_size: cfg.page.chunk_size, chunks_per_page: cfg.page.chunks_per_page } }, getFarShellRadiusFactor: () => state.farShellRadiusFactor, getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert, getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled },
+    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => { if (farClipmapController) { const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(camera.position)); if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats); } if (streamingScene) timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(camera.position.x, camera.position.z)); timeFarSummarySubphase("farSumSunLightMs", () => { sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now()); syncSunLightCounters(); }); input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera); timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay()); } } : undefined,
     floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,
-    construction: constructionController
-      ? { update: () => {
-          constructionController.update();
-          session.constructionBuildActive = constructionController.stats().active;
-        }, isActive: () => constructionController.stats().active }
-      : undefined,
+    construction: constructionController ? { update: () => { constructionController.update(); session.constructionBuildActive = constructionController.stats().active; }, isActive: () => constructionController.stats().active } : undefined,
     combat: combatController ? { update: (timeMs) => combatController.update(timeMs) } : undefined,
     spells: spellVfxController ? { update: (timeMs) => spellVfxController.update(timeMs) } : undefined,
-    clodShadow: clodShadowOverlayController
-      ? {
-          update: () => clodShadowOverlayController.update(),
-          statsController: session.clodShadowStatsController,
-          isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off",
-        }
-      : undefined,
-    canopy: input.terrainView.canopyShellSystem
-      ? { update: (cameraX, cameraZ) => input.terrainView.canopyShellSystem!.update(cameraX, cameraZ) }
-      : undefined,
+    clodShadow: clodShadowOverlayController ? { update: () => clodShadowOverlayController.update(), statsController: session.clodShadowStatsController, isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off" } : undefined,
+    canopy: input.terrainView.canopyShellSystem ? { system: input.terrainView.canopyShellSystem } : undefined,
   });
 }
