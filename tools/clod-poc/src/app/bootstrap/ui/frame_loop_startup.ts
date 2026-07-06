@@ -175,7 +175,7 @@ function statsPresenterFromSession(ctx: UiStartupContext): StatsPresenter {
     stoneClassSummaryController: statControllers.stoneClassSummary,
     stoneVisibleController: statControllers.stoneVisible,
     understoryTotalController: statControllers.understoryTotal,
-    understoryVisiblePatchesController: statControllers.understoryVisiblePatchesController,
+    understoryVisiblePatchesController: session.understoryVisiblePatchesController,
     understoryClassSummaryController: statControllers.understoryClassSummary,
     understoryGpuSummaryController: statControllers.understoryGpuSummary,
     forestLightingStatsController: statControllers.forestLightingStats,
@@ -261,7 +261,7 @@ export function runFrameLoopStartup(
     clodCoverageRadiusM: liveClodRootRadius,
     targetVisibleRadiusM: longView.phase0TargetVisibleM,
   });
-  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig) : null;
+  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu }) : null;
   const streamingClodRootController = createStreamingClodRootController({ roots: input.result.roots, allNodes: input.allNodes, cfg, worldCells, enabled: longView.queryScene === INFINITE_ISLANDS_SCENE, buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile), applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile), maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), ACCEPTANCE_MAX_STREAM_INFLIGHT_BATCHES, acceptanceStreamProfile), maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile), maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords), onNodesBuilt: (nodes) => selectionController.patchNodes(nodes), onRootsChanged: () => selectionController.invalidate() });
   const streamingClodReadyPageKeys = (): string[] => {
     if (!streamingScene) return input.allNodes.map((node) => node.id);
