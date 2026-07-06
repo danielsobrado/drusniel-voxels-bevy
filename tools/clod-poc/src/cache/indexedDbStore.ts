@@ -299,7 +299,7 @@ export class IndexedDbStore implements PersistentCacheStore {
   }
 }
 
-export type CachePersistenceRole = "worker" | "main";
+export type CachePersistenceRole = "worker" | "main" | "main-pages";
 
 export function resolveBrokerPersistentConfig(
   config: ClodCachePersistentConfig | undefined,
@@ -323,6 +323,13 @@ export function resolvePersistentConfig(
       ...config,
       enabled: config.enabled,
       database_name: `${config.database_name}-${SUMMARY_CACHE_DB_SUFFIX}`,
+    };
+  }
+  if (role === "main-pages") {
+    return {
+      ...config,
+      enabled: config.enabled,
+      database_name: `${config.database_name}-${PAGE_CACHE_DB_SUFFIX}`,
     };
   }
   // Worker never opens IndexedDB locally; persistence is brokered on the main thread.
