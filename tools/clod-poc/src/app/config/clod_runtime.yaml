@@ -51,7 +51,7 @@ selection_cut_cache:
   angle_bucket_deg: 1.0
   threshold_bucket_px: 0.05
   bubble_center_cell_size_m: 1.0
-  max_reuse_frames: 8
+  max_reuse_frames: 120
 
 material_churn:
   enabled: false
