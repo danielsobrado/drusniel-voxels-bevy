@@ -142,6 +142,8 @@ export const REQUIRED_COUNTERS = [
   "live_clod_stream_probe_evictions_total",
   "live_clod_stream_probe_stale_discards_total",
   "live_clod_stream_out_of_world_edits_supported",
+  "live_clod_stream_cache_backend_gpu",
+  "live_clod_stream_cache_nodes_from_cache",
   "live_clod_stream_gpu_mesher_enabled",
   "live_clod_stream_gpu_batches_dispatched",
   "live_clod_stream_gpu_pages_dispatched",
@@ -195,6 +197,14 @@ const liveBubbleRequiredResident = (values: Readonly<Record<string, number>>): b
 };
 const liveBubbleChunkWorkDrainedOrBackground = (value: number, values: Readonly<Record<string, number>>): boolean =>
   finiteNonNegative(value) && (value === 0 || liveBubbleRequiredResident(values));
+const gpuStreamRootsProven = (values: Readonly<Record<string, number>>): boolean => {
+  const gpuDispatch = (values["live_clod_stream_gpu_batches_dispatched"] ?? 0) > 0
+    && (values["live_clod_stream_gpu_pages_dispatched"] ?? 0) > 0
+    && (values["live_clod_stream_gpu_chunk_slots_dispatched"] ?? 0) > (values["live_clod_stream_gpu_pages_dispatched"] ?? Number.POSITIVE_INFINITY);
+  const gpuCacheReuse = values["live_clod_stream_cache_backend_gpu"] === 1
+    && (values["live_clod_stream_cache_nodes_from_cache"] ?? 0) > 0;
+  return gpuDispatch || gpuCacheReuse;
+};
 
 const FRAME_TIME_COUNTERS = new Set<RequiredCounter>([
   "frame_ms_p95",
@@ -356,13 +366,15 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_clod_stream_apply_ms", label: "must be finite, >= 0 and <= 2", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 2 },
   { key: "live_clod_stream_worker_build_ms", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_clod_stream_worker_transfer_bytes", label: "must be finite and >= 0", pass: finiteNonNegative },
+  { key: "live_clod_stream_cache_backend_gpu", label: "must be explicit 0 or 1", pass: (value) => value === 0 || value === 1 },
+  { key: "live_clod_stream_cache_nodes_from_cache", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_clod_stream_gpu_mesher_enabled", label: "must equal 1", pass: (value) => value === 1 },
-  { key: "live_clod_stream_gpu_batches_dispatched", label: "must be > 0", pass: (value) => value > 0 },
-  { key: "live_clod_stream_gpu_pages_dispatched", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_clod_stream_gpu_batches_dispatched", label: "must dispatch GPU batches or reuse GPU stream-root cache", pass: (_value, values) => gpuStreamRootsProven(values) },
+  { key: "live_clod_stream_gpu_pages_dispatched", label: "must dispatch GPU pages or reuse GPU stream-root cache", pass: (_value, values) => gpuStreamRootsProven(values) },
   {
     key: "live_clod_stream_gpu_chunk_slots_dispatched",
-    label: "must be greater than live_clod_stream_gpu_pages_dispatched",
-    pass: (value, values) => value > (values["live_clod_stream_gpu_pages_dispatched"] ?? Number.POSITIVE_INFINITY),
+    label: "must exceed pages dispatched or reuse GPU stream-root cache",
+    pass: (_value, values) => gpuStreamRootsProven(values),
   },
   { key: "live_clod_stream_gpu_failed_batches", label: "must equal 0", pass: (value) => value === 0 },
   { key: "live_clod_stream_worker_fallback_pages", label: "must equal 0", pass: (value) => value === 0 },

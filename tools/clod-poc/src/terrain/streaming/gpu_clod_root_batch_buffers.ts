@@ -109,13 +109,14 @@ export function estimateChunkSlotBytes(chunkSize: number): ChunkSlotByteEstimate
     + cellIndexBytes
     + indicesBytes
     + counterBytes;
+  const readbackBytes = positionsBytes + normalsBytes + materialsBytes + indicesBytes;
   return {
     slotCount: dims.slotCount,
     maxVertices: dims.maxVertices,
     maxIndices: dims.maxIndices,
     slotBufferBytes,
-    readbackBytes: positionsBytes + normalsBytes + materialsBytes + indicesBytes,
-    totalBytes: slotBufferBytes * READBACK_HEADROOM_MULTIPLIER,
+    readbackBytes,
+    totalBytes: slotBufferBytes + readbackBytes * READBACK_HEADROOM_MULTIPLIER,
   };
 }
 
