@@ -111,7 +111,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   liveBubbleEvictionsTotal += stats.evictions;
   if (liveBubbleProbeActive) {
     liveBubbleProbeBuiltTotal += stats.chunkGroupsBuiltThisFrame;
-    liveBubbleProbeEvictionsTotal += stats.colliderEvictions;
+    liveBubbleProbeEvictionsTotal += stats.evictions;
     liveBubbleProbeColliderRemovalsTotal += colliderRemovalDelta;
   }
   counters["live_bubble_required_pages"] = stats.requiredPages;
@@ -189,7 +189,6 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
       activeTerrainViews.delete(v);
       continue;
     }
-
     if (v.fade < v.target) v.fade = Math.min(v.target, v.fade + input.crossfadeStep);
     else if (v.fade > v.target) v.fade = Math.max(v.target, v.fade - input.crossfadeStep);
     v.mesh.visible = v.fade > 0.001;
