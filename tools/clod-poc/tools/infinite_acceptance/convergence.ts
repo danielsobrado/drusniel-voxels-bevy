@@ -62,10 +62,17 @@ const ACCEPTANCE_RENDER_PARAMS = {
   dpr_cap: "1",
 } as const;
 
+const ACCEPTANCE_PERF_PROBE_PARAMS = {
+  perfProbe: "1",
+  perfWarmupFrames: "0",
+} as const;
+
 export function profileAcceptanceParams(profile: AcceptanceProfile): Record<string, string> {
   if (profile === "fast") {
     return {
       ...ACCEPTANCE_RENDER_PARAMS,
+      ...ACCEPTANCE_PERF_PROBE_PARAMS,
+      perfSampleFrames: "60",
       liveBubbleBudget: "8",
       liveBubbleGpuChunkBudget: "16",
       liveBubbleMaxInflightChunks: "128",
@@ -86,6 +93,8 @@ export function profileAcceptanceParams(profile: AcceptanceProfile): Record<stri
   }
   return {
     ...ACCEPTANCE_RENDER_PARAMS,
+    ...ACCEPTANCE_PERF_PROBE_PARAMS,
+    perfSampleFrames: "180",
     liveBubbleBudget: "4",
     liveBubbleGpuChunkBudget: "16",
     liveBubbleMaxInflightChunks: "128",
