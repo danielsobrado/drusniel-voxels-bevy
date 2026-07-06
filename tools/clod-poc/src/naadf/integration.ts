@@ -32,6 +32,7 @@ const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu
 const HEIGHT_PROVIDER_KEY_SCALE = 1000;
 
 let activeSaveInvalidationCleanup: (() => void) | null = null;
+let activeIntegration: NaadfIntegration | null = null;
 
 export const NAADF_SCENES = new Set([
   "infinite-naadf-flat",
@@ -87,7 +88,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const active = config.enabled && (options.forceEnable || isNaadfScene(options.sceneName));
   if (!active) {
     disposeActiveSaveInvalidationTarget();
-    setNaadfIntegration(undefined);
+    clearActiveIntegration();
     return null;
   }
 
@@ -278,6 +279,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
     dispose() {
       disposeSaveInvalidationTarget(saveInvalidationCleanup);
+      disposeActiveIntegration(integration);
       debugOverlay?.dispose();
       gpuAtlas?.dispose();
       browserWindow?.removeEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
@@ -289,7 +291,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
   };
 
-  setNaadfIntegration(integration);
+  replaceActiveIntegration(integration);
   return integration;
 }
 
@@ -306,6 +308,21 @@ function disposeActiveSaveInvalidationTarget(): void {
 function disposeSaveInvalidationTarget(cleanup: () => void): void {
   cleanup();
   if (activeSaveInvalidationCleanup === cleanup) activeSaveInvalidationCleanup = null;
+}
+
+function replaceActiveIntegration(integration: NaadfIntegration): void {
+  activeIntegration = integration;
+  setNaadfIntegration(integration);
+}
+
+function disposeActiveIntegration(integration: NaadfIntegration): void {
+  if (activeIntegration !== integration) return;
+  clearActiveIntegration();
+}
+
+function clearActiveIntegration(): void {
+  activeIntegration = null;
+  setNaadfIntegration(undefined);
 }
 
 function heightProviderKey(x: number, z: number): string {
