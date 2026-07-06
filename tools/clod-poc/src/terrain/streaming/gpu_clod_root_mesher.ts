@@ -1,8 +1,7 @@
 import type { ClodPagesConfig } from "../../config.js";
 import { initSimplifier, simplifyPage } from "../../clod/simplify.js";
-import { concatPageSourceMeshes } from "../../clod/pageSource.js";
+import { concatPageSourceMeshes, filterPageSourceSections } from "../../clod/pageSource.js";
 import type { PageSourceSection } from "../../clod/pageSourceSections.js";
-import { filterPageSourceSections } from "../../clod/pageSource.js";
 import { weldVertices } from "../../clod/weld.js";
 import {
   assertNoInternalBorders,
@@ -17,11 +16,10 @@ import {
   footprintFor,
   INITIAL_NODE_REVISION,
   requireFourChildren,
-  tris,
 } from "../../clod/quadtree_support.js";
 import { GpuChunkMesher, type ChunkMesh } from "../../gpu/gpu_chunk_mesher.js";
-import { buildOuterBorderLocks, countLocks } from "../../lock.js";
-import type { ClodPageNode, PageFootprint, PageMesh } from "../../types.js";
+import { buildOuterBorderLocks } from "../../lock.js";
+import type { ClodPageNode, PageMesh } from "../../types.js";
 import type { WorldBounds } from "../terrain_surface.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
 
@@ -90,15 +88,20 @@ class PooledGpuClodRootMesher implements GpuClodRootMesher {
 
   async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
     if (batch.length === 0) return { nodes: [], buildMs: 0, transferBytes: 0 };
-    const requested = batch.slice(0, this.config.batchSize);
     const startedAt = performance.now();
-    this.batchesDispatched++;
-    this.pagesDispatched += requested.length;
-    pushSample(this.batchPageSamples, requested.length);
+    const nodes: ClodPageNode[] = [];
+    const subBatches = chunkRequests(batch, this.config.batchSize);
+    this.batchesDispatched += subBatches.length;
+    this.pagesDispatched += batch.length;
+    for (const subBatch of subBatches) pushSample(this.batchPageSamples, subBatch.length);
 
     try {
       await this.simplifierReady;
-      const nodes = await Promise.all(requested.map((request) => this.buildRootPage(request)));
+      for (let offset = 0; offset < subBatches.length; offset += this.config.maxInflightBatches) {
+        const active = subBatches.slice(offset, offset + this.config.maxInflightBatches);
+        const built = await Promise.all(active.map(async (subBatch) => Promise.all(subBatch.map((request) => this.buildRootPage(request)))));
+        for (const group of built) nodes.push(...group);
+      }
       const buildMs = performance.now() - startedAt;
       pushSample(this.buildSamples, buildMs);
       const transferBytes = nodes.reduce((sum, node) => sum + transferBytesForNode(node), 0);
@@ -157,7 +160,7 @@ class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private async buildLod0Page(px: number, pz: number): Promise<ClodPageNode> {
     const P = this.cfg.page.chunks_per_page;
     const chunkMeshes = new Array<PageMesh>(P * P);
-    await Promise.all(chunkMeshes.map(async (_, index) => {
+    await Promise.all(Array.from({ length: P * P }, async (_, index) => {
       const dx = index % P;
       const dz = Math.floor(index / P);
       chunkMeshes[index] = await this.meshChunk(px * P + dx, pz * P + dz);
@@ -273,6 +276,15 @@ export function disabledGpuStats(workerFallbackPages = 0): GpuClodRootMesherStat
     failedBatches: 0,
     workerFallbackPages,
   };
+}
+
+function chunkRequests<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  const safeSize = Math.max(1, Math.floor(size));
+  for (let offset = 0; offset < items.length; offset += safeSize) {
+    out.push(items.slice(offset, offset + safeSize));
+  }
+  return out;
 }
 
 function chunkMeshToPageMesh(mesh: ChunkMesh): PageMesh {
