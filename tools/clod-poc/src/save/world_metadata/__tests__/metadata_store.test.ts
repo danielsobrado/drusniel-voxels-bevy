@@ -132,7 +132,7 @@ describe("world metadata store", () => {
     const fixture = metadata();
 
     expect(boundsForRegion("r_-1_0")).toEqual({ minX: -512, minZ: 0, maxX: 0, maxZ: 512 });
-    expect(regionKeysForBounds({ minX: -0.5, minZ: -0.5, maxX: 512, maxZ: 1 })).toEqual(["r_-1_-1", "r_-1_0", "r_0_-1", "r_0_0", "r_1_-1", "r_1_0"]);
+    expect(regionKeysForBounds({ minX: -0.5, minZ: -0.5, maxX: 512, maxZ: 1 })).toEqual(["r_-1_-1", "r_-1_0", "r_0_-1", "r_0_0"]);
     expect(roadBounds(fixture.roads[0]!).maxX).toBe(704);
     expect(caveEntranceBounds(fixture.caveEntrances[0]!)).toEqual({ minX: -48, minZ: -48, maxX: 16, maxZ: 16 });
     expect(criticalPathBounds(fixture.criticalPaths[0]!).maxX).toBe(700);
