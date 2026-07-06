@@ -45,12 +45,12 @@ clod_apply:
 
 selection_cut_cache:
   enabled: true
-  camera_cell_size_m: 1.0
-  camera_height_cell_size_m: 2.0
-  target_cell_size_m: 1.0
+  camera_cell_size_m: 32.0
+  camera_height_cell_size_m: 8.0
+  target_cell_size_m: 32.0
   angle_bucket_deg: 1.0
   threshold_bucket_px: 0.05
-  bubble_center_cell_size_m: 1.0
+  bubble_center_cell_size_m: 32.0
   max_reuse_frames: 120
 
 material_churn:
