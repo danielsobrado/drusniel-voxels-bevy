@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { FarHeightProviderSample } from "../../far-summary/clipmap-sampler.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 
 export interface FarClipmapGridGeometryOptions {
@@ -28,6 +29,7 @@ const COLOR_GRASS = new THREE.Color(0x33442d);
 const COLOR_ROCK = new THREE.Color(0x56564d);
 const COLOR_SAND = new THREE.Color(0x6b6040);
 const COLOR_WATER = new THREE.Color(0x203b50);
+const SUMMARY_SAMPLE: FarHeightProviderSample = { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0, waterCoverage: 0 };
 
 function safeGridResolution(value: number): number {
   if (!Number.isFinite(value)) return 2;
@@ -81,6 +83,30 @@ function sampleWater(source: FarClipmapSource, x: number, z: number, stats: FarC
   }
 }
 
+function sampleSummary(
+  source: FarClipmapSource,
+  x: number,
+  z: number,
+  distanceM: number,
+  stats: FarClipmapBuildStats | undefined,
+): FarHeightProviderSample | null {
+  if (!source.sampleSummaryInto) return null;
+  try {
+    if (!source.sampleSummaryInto(x, z, distanceM, SUMMARY_SAMPLE)) {
+      recordFallback(stats);
+      return null;
+    }
+    if (!Number.isFinite(SUMMARY_SAMPLE.height) || !Number.isFinite(SUMMARY_SAMPLE.material)) {
+      recordFallback(stats);
+      return null;
+    }
+    return SUMMARY_SAMPLE;
+  } catch {
+    recordException(stats);
+    return null;
+  }
+}
+
 function colorForSample(
   source: FarClipmapSource,
   x: number,
@@ -89,6 +115,14 @@ function colorForSample(
 ): THREE.Color {
   if (sampleWater(source, x, z, stats) > 0.5) return COLOR_WATER;
   const material = Math.floor(sampleMaterial(source, x, z, stats));
+  if (material === 1) return COLOR_SAND;
+  if (material === 2 || material === 3) return COLOR_ROCK;
+  return COLOR_GRASS;
+}
+
+function colorForSummarySample(sample: FarHeightProviderSample): THREE.Color {
+  if ((sample.waterCoverage ?? 0) > 0.5) return COLOR_WATER;
+  const material = Math.floor(sample.material);
   if (material === 1) return COLOR_SAND;
   if (material === 2 || material === 3) return COLOR_ROCK;
   return COLOR_GRASS;
@@ -156,8 +190,11 @@ export function createFarClipmapTerrainGeometry(options: FarClipmapTerrainGeomet
       const v = z / segments;
       const worldX = originX + x * step;
       const worldZ = originZ + z * step;
-      const height = sampleHeight(options.source, worldX, worldZ, options.stats) * options.heightScale + options.yOffset;
-      const color = colorForSample(options.source, worldX, worldZ, options.stats);
+      const distance = Math.hypot(worldX - options.centerX, worldZ - options.centerZ);
+      const summary = sampleSummary(options.source, worldX, worldZ, distance, options.stats);
+      const heightSource = summary?.height ?? sampleHeight(options.source, worldX, worldZ, options.stats);
+      const height = heightSource * options.heightScale + options.yOffset;
+      const color = summary ? colorForSummarySample(summary) : colorForSample(options.source, worldX, worldZ, options.stats);
       positions[cursor++] = worldX;
       positions[cursor++] = height;
       positions[cursor++] = worldZ;

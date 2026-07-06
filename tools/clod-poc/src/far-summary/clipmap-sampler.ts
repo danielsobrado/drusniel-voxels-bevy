@@ -18,6 +18,7 @@ export interface FarHeightProviderSample {
   normalY: number;
   normalZ: number;
   material: number;
+  waterCoverage?: number;
 }
 
 export function ringIndexForDistance(distanceM: number, config: FarSummaryConfig): number {
@@ -109,12 +110,14 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
   }
 
   sampleSummaryInto(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean {
-    const sample = this.sampleFull(x, z, ringIndexForDistance(distanceM, this.config));
+    const sample = this.cache.sampleExactRing(x, z, ringIndexForDistance(distanceM, this.config));
+    if (!sample) return false;
     out.height = sample.heightAvg;
     out.normalX = sample.normalX;
     out.normalY = sample.normalY;
     out.normalZ = sample.normalZ;
     out.material = sample.dominantMaterial;
+    out.waterCoverage = sample.waterCoverage;
     return Number.isFinite(out.height)
       && Number.isFinite(out.normalX)
       && Number.isFinite(out.normalY)

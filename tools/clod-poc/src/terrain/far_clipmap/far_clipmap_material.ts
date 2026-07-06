@@ -26,7 +26,7 @@ attribute vec3 color;
 uniform vec2 uCameraXZ;
 
 varying vec2 vWorldXZ;
-varying vec3 vViewNormal;
+varying vec3 vWorldNormal;
 varying vec3 vVertexColor;
 varying float vHeight;
 varying float vDistance;
@@ -36,7 +36,7 @@ void main() {
   vWorldXZ = worldPosition.xz;
   vHeight = worldPosition.y;
   vDistance = length(vWorldXZ - uCameraXZ);
-  vViewNormal = normalize(normalMatrix * normal);
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
   vVertexColor = color;
   gl_Position = projectionMatrix * viewMatrix * worldPosition;
 }
@@ -51,7 +51,7 @@ uniform float uClipInnerRadius;
 uniform float uClipOuterRadius;
 
 varying vec2 vWorldXZ;
-varying vec3 vViewNormal;
+varying vec3 vWorldNormal;
 varying vec3 vVertexColor;
 varying float vHeight;
 varying float vDistance;
@@ -67,7 +67,7 @@ vec3 tonemapFarTerrain(vec3 color) {
 void main() {
   if (vDistance < uClipInnerRadius || vDistance > uClipOuterRadius) discard;
 
-  vec3 normal = normalize(vViewNormal);
+  vec3 normal = normalize(vWorldNormal);
   vec3 sunDir = normalize(vec3(0.38, 0.82, 0.34));
   float directLight = saturate(dot(normal, sunDir));
   float ambientLight = 0.34 + 0.24 * saturate(normal.y);

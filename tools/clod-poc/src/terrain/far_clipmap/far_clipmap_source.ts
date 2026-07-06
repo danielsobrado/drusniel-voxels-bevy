@@ -1,4 +1,5 @@
 import type { FarHeightProvider } from "../../far-summary/clipmap-sampler.js";
+import type { FarHeightProviderSample } from "../../far-summary/clipmap-sampler.js";
 import type { FarTerrainSampler } from "../../far-summary/summary-tile-builder.js";
 
 export interface FarClipmapSource {
@@ -6,6 +7,7 @@ export interface FarClipmapSource {
   sampleMaterial(x: number, z: number): number;
   sampleBiome(x: number, z: number): number;
   sampleWater(x: number, z: number): number;
+  sampleSummaryInto?(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean;
   isReady?: () => boolean;
 }
 
@@ -34,6 +36,7 @@ export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightP
     sampleMaterial: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
     sampleBiome: (x, z) => provider.sampleMaterial?.(x, z) ?? 0,
     sampleWater: (x, z) => providerWater(provider, x, z),
+    sampleSummaryInto: provider.sampleSummaryInto?.bind(provider),
     isReady: () => true,
   };
 }
@@ -47,6 +50,7 @@ export function createFarClipmapSourceFromProviderGetter(
     sampleMaterial: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
     sampleBiome: (x, z) => getProvider()?.sampleMaterial?.(x, z) ?? 0,
     sampleWater: (x, z) => providerWater(getProvider(), x, z),
+    sampleSummaryInto: (x, z, distanceM, out) => getProvider()?.sampleSummaryInto?.(x, z, distanceM, out) ?? false,
     isReady: () => getProvider() !== undefined,
   };
 }

@@ -147,4 +147,31 @@ describe("far clipmap controller", () => {
     expect(firstReady.pendingTiles).toBe(1);
     controller.dispose();
   });
+
+  it("keeps rings pending when summary samples fall back instead of exact tile data", () => {
+    const scene = new THREE.Scene();
+    const source: FarClipmapSource = {
+      ...sampledSource,
+      sampleSummaryInto: () => false,
+      isReady: () => true,
+    };
+    const config = resolveFarClipmapConfig({
+      ringCount: 1,
+      maxRebuildsPerFrame: 1,
+      gridResolution: 5,
+      innerRadiusM: 8,
+      outerRadiusM: 64,
+      snapSizeM: 16,
+    });
+    const controller = createFarClipmapController(scene, config, source);
+
+    const stats = controller.update(new THREE.Vector3(1, 0, 1));
+
+    expect(stats.sourceReady).toBe(1);
+    expect(stats.readyTiles).toBe(0);
+    expect(stats.pendingTiles).toBe(1);
+    expect(stats.rebuiltTilesThisFrame).toBe(0);
+    expect(stats.fallbackSamplesThisFrame).toBeGreaterThan(0);
+    controller.dispose();
+  });
 });

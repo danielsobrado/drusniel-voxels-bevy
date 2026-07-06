@@ -210,12 +210,16 @@ class FarClipmapControllerImpl implements FarClipmapController {
           stats: buildStats,
         });
         const buildMs = performance.now() - startedAt;
-        const previousGeometry = ring.mesh.geometry;
-        ring.mesh.geometry = nextGeometry;
-        previousGeometry.dispose();
-        ring.readySnapX = snap.snapX;
-        ring.readySnapZ = snap.snapZ;
-        frameStats.rebuilt++;
+        if (buildStats.fallbackSamples > 0) {
+          nextGeometry.dispose();
+        } else {
+          const previousGeometry = ring.mesh.geometry;
+          ring.mesh.geometry = nextGeometry;
+          previousGeometry.dispose();
+          ring.readySnapX = snap.snapX;
+          ring.readySnapZ = snap.snapZ;
+          frameStats.rebuilt++;
+        }
         frameStats.buildMs += buildMs;
         frameStats.vertices += buildStats.vertices;
         frameStats.triangles += buildStats.triangles;
