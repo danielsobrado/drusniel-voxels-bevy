@@ -42,6 +42,8 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
     live_clod_stream_safety_required_pages: 1,
     live_clod_stream_safety_ready_pages: 1,
     live_clod_stream_apply_ms: 1,
+    live_clod_stream_cache_backend_gpu: 1,
+    live_clod_stream_cache_nodes_from_cache: 0,
     live_clod_stream_gpu_mesher_enabled: 1,
     live_clod_stream_gpu_batches_dispatched: 1,
     live_clod_stream_gpu_pages_dispatched: 4,
@@ -141,15 +143,15 @@ describe("infinite islands thresholds", () => {
     );
   });
 
-  it("fails unless streamed-root GPU work actually dispatched without fallback", () => {
+  it("fails unless streamed-root GPU work dispatched or came from GPU cache without fallback", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_mesher_enabled: 0 })).failures).toContain(
       "live_clod_stream_gpu_mesher_enabled=0 failed: must equal 1",
     );
     expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_batches_dispatched: 0 })).failures).toContain(
-      "live_clod_stream_gpu_batches_dispatched=0 failed: must be > 0",
+      "live_clod_stream_gpu_batches_dispatched=0 failed: must dispatch GPU batches or reuse GPU stream-root cache",
     );
     expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_chunk_slots_dispatched: 4 })).failures).toContain(
-      "live_clod_stream_gpu_chunk_slots_dispatched=4 failed: must be greater than live_clod_stream_gpu_pages_dispatched",
+      "live_clod_stream_gpu_chunk_slots_dispatched=4 failed: must exceed pages dispatched or reuse GPU stream-root cache",
     );
     expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_failed_batches: 1 })).failures).toContain(
       "live_clod_stream_gpu_failed_batches=1 failed: must equal 0",
@@ -157,6 +159,16 @@ describe("infinite islands thresholds", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_worker_fallback_pages: 1 })).failures).toContain(
       "live_clod_stream_worker_fallback_pages=1 failed: must equal 0",
     );
+  });
+
+  it("allows GPU-backed stream-root cache reuse without fresh dispatch", () => {
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_cache_backend_gpu: 1,
+      live_clod_stream_cache_nodes_from_cache: 4,
+      live_clod_stream_gpu_batches_dispatched: 0,
+      live_clod_stream_gpu_pages_dispatched: 0,
+      live_clod_stream_gpu_chunk_slots_dispatched: 0,
+    })).passed).toBe(true);
   });
 
   it("allows refinement work to remain pending after safety coverage is ready", () => {
@@ -219,6 +231,8 @@ describe("infinite islands thresholds", () => {
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_transfer_bytes"]).toBe(0);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_cache_backend_gpu"]).toBe(1);
+    expect(extractAcceptanceCounters({ counters })["live_clod_stream_cache_nodes_from_cache"]).toBe(0);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_gpu_batches_dispatched"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_fallback_pages"]).toBe(0);
     expect(extractAcceptanceCounters({ counters })["far_clipmap_owned_cells"]).toBe(64);
