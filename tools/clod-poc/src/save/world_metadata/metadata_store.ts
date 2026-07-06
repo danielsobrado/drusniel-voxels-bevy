@@ -64,15 +64,8 @@ function assertFiniteBoundsCoordinate(value: number, label: string): void {
   if (!Number.isFinite(value)) throw new Error(`metadata bounds ${label} must be finite`);
 }
 
-function regionCoordRangeHalfOpen(min: number, max: number): { min: number; max: number } {
-  if (min === max) {
-    const coord = regionCoord(min);
-    return { min: coord, max: coord };
-  }
-  return {
-    min: regionCoord(min),
-    max: Math.ceil(max / SAVE_REGION_SIZE_M) - 1,
-  };
+function regionCoordRangeInclusive(min: number, max: number): { min: number; max: number } {
+  return { min: regionCoord(min), max: regionCoord(max) };
 }
 
 export function boundsForRegion(regionKey: string): SavedBounds2D {
@@ -88,8 +81,8 @@ export function boundsForRegion(regionKey: string): SavedBounds2D {
 export function regionKeysForBounds(bounds: SavedBounds2D): string[] {
   for (const key of ["minX", "minZ", "maxX", "maxZ"] as const) assertFiniteBoundsCoordinate(bounds[key], key);
   if (bounds.minX > bounds.maxX || bounds.minZ > bounds.maxZ) throw new Error("metadata bounds min must be <= max");
-  const rx = regionCoordRangeHalfOpen(bounds.minX, bounds.maxX);
-  const rz = regionCoordRangeHalfOpen(bounds.minZ, bounds.maxZ);
+  const rx = regionCoordRangeInclusive(bounds.minX, bounds.maxX);
+  const rz = regionCoordRangeInclusive(bounds.minZ, bounds.maxZ);
   const keys: string[] = [];
   for (let x = rx.min; x <= rx.max; x++) {
     for (let z = rz.min; z <= rz.max; z++) keys.push(regionKeyOf(x, z));
