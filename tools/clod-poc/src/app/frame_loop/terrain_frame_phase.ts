@@ -45,7 +45,7 @@ export interface TerrainFramePhaseInput {
   interaction: PlayerInteractionState;
   player: PlayerController;
   controls: OrbitControls;
-  camera: THREE.Camera;
+  camera?: THREE.Camera;
   selectionController: ClodSelectionController;
   nearFieldBubbleController: NearFieldBubbleController;
   views: Map<string, { node: { id: string } } & TerrainFadeView>;
@@ -170,7 +170,7 @@ function infiniteIslandsScene(): boolean {
 
 function canonicalWorldCenter(input: TerrainFramePhaseInput, infiniteScene: boolean): THREE.Vector3 {
   if (input.interaction.mode === "playing") return input.player.position;
-  if (infiniteScene) return input.camera.position;
+  if (infiniteScene) return input.camera?.position ?? input.controls.object.position;
   return input.controls.target;
 }
 
