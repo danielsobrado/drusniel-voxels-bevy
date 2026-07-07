@@ -42,6 +42,40 @@ export type {
   ClodSelectionController,
 } from "./clod_selection_controller_types.js";
 
+const emptySelectionSubphases = (): ClodSelectionSubphases => ({
+  settings: 0,
+  params: 0,
+  compute: 0,
+  readback: 0,
+  parity: 0,
+  lookup: 0,
+  cache: 0,
+  cut: 0,
+  book: 0,
+  markActive: 0,
+  apply: 0,
+  stats: 0,
+  hash: 0,
+  commit: 0,
+  info: 0,
+  overlays: 0,
+  dispatch: 0,
+  total: 0,
+});
+
+function resetSelectionSubphases(target: ClodSelectionSubphases): void {
+  for (const key of Object.keys(target) as (keyof ClodSelectionSubphases)[]) target[key] = 0;
+}
+
+function timeSelectionSubphase<T>(target: ClodSelectionSubphases, key: keyof ClodSelectionSubphases, fn: () => T): T {
+  const start = performance.now();
+  try {
+    return fn();
+  } finally {
+    target[key] += performance.now() - start;
+  }
+}
+
 export function createClodSelectionController(deps: ClodSelectionControllerDeps): ClodSelectionController {
   const { config, roots, allNodes, overlays, lockedBorderOverlay, staleEditedAncestorIds, onCutChanged } = deps;
   const { clodRuntime } = config;
@@ -63,7 +97,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let selectionFrameId = 0;
   let lastSelectionMs = 0;
   let cachedFastHits = 0;
-  const selSub: ClodSelectionSubphases = { cut: 0, book: 0, info: 0, overlays: 0 };
+  const selSub = emptySelectionSubphases();
   let lastSelectionSource: "cpu" | "webgpu" = "cpu";
   const parityTracker = createWebGpuParityTracker(
     clodRuntime.webgpuSelection.parityIntervalFrames,
@@ -166,7 +200,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       applyMaterialTier(view, settings);
       nextTerrainViews.add(view);
     }
-    deps.markActiveNodes?.(cutIds, selectionFrameId);
+    timeSelectionSubphase(selSub, "markActive", () => deps.markActiveNodes?.(cutIds, selectionFrameId));
     deps.prefetchNodes?.(rendered, selectionFrameId);
     for (const view of currentTerrainViews) {
       if (cutIds.has(view.node.id)) continue;
@@ -232,20 +266,21 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   };
 
   const update = () => {
-    const settings = deps.getSettings();
     const selectionStart = performance.now();
-    const params = buildSelectionParams(settings);
-    const compute = deps.getClodErrorCompute();
-    const gpuMap = resolveClodErrorGpuMap({
+    resetSelectionSubphases(selSub);
+    const settings = timeSelectionSubphase(selSub, "settings", () => deps.getSettings());
+    const params = timeSelectionSubphase(selSub, "params", () => buildSelectionParams(settings));
+    const compute = timeSelectionSubphase(selSub, "compute", () => deps.getClodErrorCompute());
+    const gpuMap = timeSelectionSubphase(selSub, "readback", () => resolveClodErrorGpuMap({
       enabled: settings.webgpuSelection,
       compute,
       selectionFrameId,
       errorMaxAgeFrames: clodRuntime.webgpuSelection.errorMaxAgeFrames,
       readbackMode: config.readbackMode,
       readbackState,
-    });
+    }));
     if (gpuMap && compute) {
-      verifyWebGpuClodParity({
+      timeSelectionSubphase(selSub, "parity", () => verifyWebGpuClodParity({
         map: gpuMap,
         params,
         allNodes,
@@ -255,60 +290,60 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
         parityIntervalFrames: clodRuntime.webgpuSelection.parityIntervalFrames,
         errorTolerancePx: clodRuntime.webgpuSelection.errorTolerancePx,
         forceContinuous: config.forceContinuousParity,
-      });
+      }));
     }
-    const errorPxLookup = gpuMap && compute ? compute.errorLookup(gpuMap) : undefined;
-    const staleViewsMissing = lastRenderedNodes.length > 0 && lastRenderedNodes.some((node) => !deps.views.has(node.id));
-    if (staleViewsMissing) selectionCutCache.invalidate("forced_invalidate");
-    const initialDebugKey = buildDebugKey(lastCutHash, settings);
-    const initialCacheInput = buildCacheInput(settings, params, gpuMap, initialDebugKey);
-    const cacheDecision = selectionCutCache.decide(initialCacheInput);
+    const errorPxLookup = timeSelectionSubphase(selSub, "lookup", () => gpuMap && compute ? compute.errorLookup(gpuMap) : undefined);
+    const { initialCacheInput, cacheDecision } = timeSelectionSubphase(selSub, "cache", () => {
+      const staleViewsMissing = lastRenderedNodes.length > 0 && lastRenderedNodes.some((node) => !deps.views.has(node.id));
+      if (staleViewsMissing) selectionCutCache.invalidate("forced_invalidate");
+      const initialDebugKey = buildDebugKey(lastCutHash, settings);
+      const cacheInput = buildCacheInput(settings, params, gpuMap, initialDebugKey);
+      return { initialCacheInput: cacheInput, cacheDecision: selectionCutCache.decide(cacheInput) };
+    });
     if (cacheDecision.hit && lastRenderedNodes.length > 0) {
       const tBook = performance.now();
-      deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId);
+      timeSelectionSubphase(selSub, "markActive", () => deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId));
       cachedFastHits++;
       selSub.book = performance.now() - tBook;
       lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
-      selSub.cut = 0;
-      selSub.info = 0;
       const tOverlays = performance.now();
       maybeRebuildDebugOverlays(lastRenderedNodes, lastCutHash, settings);
       selSub.overlays = performance.now() - tOverlays;
-      maybeDispatchWebGpuSelection(settings, params, compute, gpuMap);
+      timeSelectionSubphase(selSub, "dispatch", () => maybeDispatchWebGpuSelection(settings, params, compute, gpuMap));
       lastSelectionMs = performance.now() - selectionStart;
+      selSub.total = lastSelectionMs;
       return;
     }
 
-    const tSelectCut = performance.now();
-    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(
+    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = timeSelectionSubphase(selSub, "cut", () => selectCut(
       roots,
       params,
       selState,
       { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
-    );
-    selSub.cut = performance.now() - tSelectCut;
+    ));
     selState = ns;
     lastForced = forcedSplits;
     lastNearFieldForced = nearFieldForcedSplits;
     lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
 
-    applyRenderedCut(rendered, settings);
-    updateRenderedStats(rendered);
+    timeSelectionSubphase(selSub, "apply", () => applyRenderedCut(rendered, settings));
+    timeSelectionSubphase(selSub, "stats", () => updateRenderedStats(rendered));
+    selSub.book = selSub.apply + selSub.stats;
 
     const tInfo = performance.now();
-    selSub.book = tInfo - tSelectCut - selSub.cut;
-    const cutHash = hashRenderedCut(rendered);
+    const cutHash = timeSelectionSubphase(selSub, "hash", () => hashRenderedCut(rendered));
     if (cutHash !== lastCutHash) {
       lastCutHash = cutHash;
       onCutChanged();
     }
-    selectionCutCache.commit({ ...initialCacheInput, debugKey: buildDebugKey(cutHash, settings) }, selectionFrameId);
+    timeSelectionSubphase(selSub, "commit", () => selectionCutCache.commit({ ...initialCacheInput, debugKey: buildDebugKey(cutHash, settings) }, selectionFrameId));
     selSub.info = performance.now() - tInfo;
     const tOverlays = performance.now();
     maybeRebuildDebugOverlays(rendered, cutHash, settings);
     selSub.overlays = performance.now() - tOverlays;
-    maybeDispatchWebGpuSelection(settings, params, compute, gpuMap);
+    timeSelectionSubphase(selSub, "dispatch", () => maybeDispatchWebGpuSelection(settings, params, compute, gpuMap));
     lastSelectionMs = performance.now() - selectionStart;
+    selSub.total = lastSelectionMs;
   };
 
   return {
