@@ -38,6 +38,8 @@ export type TerrainArraySamplingMode = "off" | "planar" | "triplanar";
 type TslNode = any;
 export type BiomeLayerSet = readonly [number, number, number];
 
+const ROOT_HEIGHT_MORPH_ATTRIBUTE = "rootMorphDeltaY";
+
 export interface TerrainNodeTextureProcedural {
   noiseA: THREE.Texture;
   noiseB: THREE.Texture;
@@ -93,6 +95,7 @@ export interface TerrainNodeMaterialHandle {
   setColorAdjust(next: Partial<TerrainColorAdjust>): void;
   setNormalColor(on: boolean): void;
   setFade(fade: number, fadeIn: boolean, dither: boolean): void;
+  setRootMorph(influence: number): void;
   setTier(tier: number): void;
   setDebug(state: TerrainDebugState): void;
   setRoughness(roughness: number): void;
@@ -463,9 +466,11 @@ export function createTerrainNodeMaterial(
   const uShininess = uniform(roughnessToShininess(rough));
   const uSpecGain = uniform(1 - rough);
   const uTier = uniform(0);
+  const uRootMorphInfluence = uniform(0.0);
 
   const geomN = normalize(normalGeometry);
-  const worldPos = positionGeometry;
+  const rootMorphDeltaY: TslNode = attribute(ROOT_HEIGHT_MORPH_ATTRIBUTE, "float");
+  const worldPos = positionGeometry.add(vec3(0.0, rootMorphDeltaY.mul(uRootMorphInfluence), 0.0));
   const paintSlots: TslNode = attribute("paintSlots", "vec4");
   const paintWeights: TslNode = attribute("paintWeights", "vec4");
   const biomeId: TslNode = attribute("biomeId", "float");
@@ -562,6 +567,7 @@ export function createTerrainNodeMaterial(
   const fadeInDiscard = ditherNoise.greaterThan(fade);
   const fadeOutDiscard = ditherNoise.lessThanEqual(fade.oneMinus());
   colorNode = colorNode.bypass(or(fadeInOn.and(fadeInDiscard), not(fadeInOn).and(fadeOutDiscard)).and(ditherOn).discard());
+  material.positionNode = worldPos;
   material.colorNode = colorNode;
   material.side = THREE.DoubleSide;
 
@@ -587,6 +593,9 @@ export function createTerrainNodeMaterial(
       uFade.value = fadeValue;
       uFadeIn.value = fadeIn ? 1 : 0;
       uDither.value = dither ? 1 : 0;
+    },
+    setRootMorph(influence) {
+      uRootMorphInfluence.value = THREE.MathUtils.clamp(influence, 0, 1);
     },
     setTier(tier) { uTier.value = tier; },
     setRoughness(roughness) {
