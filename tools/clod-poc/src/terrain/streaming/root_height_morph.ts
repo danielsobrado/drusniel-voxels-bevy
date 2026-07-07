@@ -4,7 +4,7 @@ import type { ClodPageNode } from "../../types.js";
 export const ROOT_HEIGHT_MORPH_ATTRIBUTE = "rootMorphDeltaY";
 
 export interface RootHeightMorphView {
-  node: Pick<ClodPageNode, "id" | "mesh" | "rootTransition">;
+  node: Pick<ClodPageNode, "id" | "revision" | "mesh" | "rootTransition">;
   mesh: THREE.Mesh;
 }
 
@@ -45,6 +45,9 @@ const HEIGHT_MORPH_MAX_SEARCH_BINS = 2;
 const HEIGHT_MORPH_MAX_DELTA_M = 128;
 const HEIGHT_MORPH_EPSILON = 1e-4;
 const HEIGHT_MORPH_SIGNATURE_KEY = "rootHeightMorphSignature";
+const HEIGHT_SAMPLER_CACHE_LIMIT = 64;
+
+const heightSamplerCache = new Map<string, HeightSampler>();
 
 function binKey(ix: number, iz: number): string {
   return `${ix},${iz}`;
@@ -165,13 +168,42 @@ function buildHeightSampler(sourceViews: readonly RootHeightMorphView[]): Height
   };
 }
 
+function meshSignature(view: RootHeightMorphView): string {
+  const mesh = view.node.mesh;
+  return [
+    view.node.id,
+    view.node.revision ?? 0,
+    mesh.positions.length,
+    mesh.indices.length,
+    mesh.boundsVersion ?? "",
+  ].join(":");
+}
+
 function sourceSignature(sourceViews: readonly RootHeightMorphView[]): string {
-  return sourceViews.map((view) => view.node.id).sort().join("|");
+  return sourceViews.map(meshSignature).sort().join("|");
 }
 
 function morphSignature(view: RootHeightMorphView, sourceViews: readonly RootHeightMorphView[]): string {
   const transition = view.node.rootTransition;
-  return `${transition?.groupId ?? 0}:${transition?.mode ?? "stable"}:${view.node.id}:${sourceSignature(sourceViews)}`;
+  return [
+    transition?.groupId ?? 0,
+    transition?.mode ?? "stable",
+    meshSignature(view),
+    sourceSignature(sourceViews),
+  ].join("|");
+}
+
+function cachedHeightSampler(sourceViews: readonly RootHeightMorphView[]): HeightSampler {
+  const signature = sourceSignature(sourceViews);
+  const cached = heightSamplerCache.get(signature);
+  if (cached) return cached;
+  const sampler = buildHeightSampler(sourceViews);
+  heightSamplerCache.set(signature, sampler);
+  if (heightSamplerCache.size > HEIGHT_SAMPLER_CACHE_LIMIT) {
+    const oldestKey = heightSamplerCache.keys().next().value;
+    if (oldestKey !== undefined) heightSamplerCache.delete(oldestKey);
+  }
+  return sampler;
 }
 
 function ensureRootMorphAttribute(geometry: THREE.BufferGeometry, vertexCount: number): THREE.BufferAttribute {
@@ -190,7 +222,7 @@ function writeMorphDeltaAttribute(view: RootHeightMorphView, deltaY: Float32Arra
 }
 
 function buildDeltaY(view: RootHeightMorphView, sourceViews: readonly RootHeightMorphView[]): Float32Array {
-  const sampler = buildHeightSampler(sourceViews);
+  const sampler = cachedHeightSampler(sourceViews);
   const positions = view.node.mesh.positions;
   const deltas = new Float32Array(positions.length / 3);
   for (let i = 0; i < deltas.length; i++) {
@@ -219,16 +251,17 @@ export function applyRootHeightMorph(
     const deltas = buildDeltaY(view, sourceViews);
     writeMorphDeltaAttribute(view, deltas);
     geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY] = signature;
-    view.node.rootTransition!.parentHeightMorphReady = true;
     builtRoots = 1;
     builtVertices = deltas.length;
   }
+  if (view.node.rootTransition) view.node.rootTransition.parentHeightMorphReady = true;
 
   return { builtRoots, builtVertices, buildMs: performance.now() - startedAt };
 }
 
 export function resetRootHeightMorph(view: RootHeightMorphView): void {
   const geometry = view.mesh.geometry as THREE.BufferGeometry;
+  if (view.node.rootTransition) view.node.rootTransition.parentHeightMorphReady = false;
   if (geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY] === undefined) return;
   const attribute = geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
   if (!attribute) return;
