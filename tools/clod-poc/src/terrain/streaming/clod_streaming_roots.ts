@@ -43,6 +43,10 @@ export interface StreamingClodRootStats {
   workerBuildFailures: number;
   workerBuildTimeouts: number;
   maxRootLevel: number;
+  rootSwitchStableFrames: number;
+  rootSwitchPendingPages: number;
+  rootSwitchSuppressedFrames: number;
+  rootSwitchesTotal: number;
   requestedPagesByLevel: number[];
   appliedPagesByLevel: number[];
   staleCompletedPagesByLevel: number[];
@@ -86,6 +90,7 @@ export interface StreamingClodRootControllerDeps {
   evictDistanceMultiplier?: number;
   maxRootLevel?: number;
   maxInflightBatches?: number;
+  rootSwitchStableFrames?: number;
   buildPages: ((coords: readonly PageCoord[]) => Promise<StreamingClodRootBuildResult>) | null;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
   onRootsChanged?: () => void;
@@ -136,6 +141,7 @@ const DEFAULT_MAX_INFLIGHT_BATCHES = 1;
 const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
 const DEFAULT_STREAM_MAX_ROOT_LEVEL = 1;
+const DEFAULT_ROOT_SWITCH_STABLE_FRAMES = 8;
 const STREAM_COUNTER_LEVELS = 4;
 const WORKER_BUILD_MS_SAMPLE_LIMIT = 128;
 const BUILD_RETRY_BASE_COOLDOWN_FRAMES = 60;
@@ -152,14 +158,26 @@ function retryCooldownFrames(attempts: number): number {
   return Math.min(BUILD_RETRY_MAX_COOLDOWN_FRAMES, BUILD_RETRY_BASE_COOLDOWN_FRAMES * multiplier);
 }
 
-function queryStreamingClodMaxRootLevel(): number | undefined {
+function querySearchParams(): URLSearchParams | null {
   const maybeWindow = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window;
   const search = maybeWindow?.location?.search;
-  if (!search) return undefined;
-  const raw = new URLSearchParams(search).get("liveClodRootMaxLevel");
-  if (raw === null || raw.trim() === "") return undefined;
+  return search ? new URLSearchParams(search) : null;
+}
+
+function queryStreamingClodMaxRootLevel(): number | undefined {
+  const raw = querySearchParams()?.get("liveClodRootMaxLevel");
+  if (raw === null || raw === undefined || raw.trim() === "") return undefined;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
+}
+
+function queryStreamingRootSwitchStableFrames(): number | undefined {
+  const params = querySearchParams();
+  if (!params) return undefined;
+  const raw = params.get("liveClodRootSwitchStableFrames");
+  if (raw === null || raw.trim() === "") return DEFAULT_ROOT_SWITCH_STABLE_FRAMES;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_ROOT_SWITCH_STABLE_FRAMES;
 }
 
 export function resolveStreamingClodMaxRootLevel(cfg: ClodPagesConfig, override?: number): number {
@@ -230,6 +248,16 @@ function pageCoveredByActiveRoots(pageKey: string, activeKeys: Iterable<string>)
   return pageFullyCoveredByFinerCachedPages(pageKey, activeKeys);
 }
 
+function stableSetKey(ids: Iterable<string>): string {
+  return [...ids].sort().join("|");
+}
+
+function setEquals(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
+
 function zeroLevelArray(): number[] {
   return Array.from({ length: STREAM_COUNTER_LEVELS }, () => 0);
 }
@@ -272,6 +300,10 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_scheduled_pages_this_frame"] = stats.scheduledPagesThisFrame;
   counters["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   counters["live_clod_stream_active_root_pages"] = stats.activeRootPages;
+  counters["live_clod_stream_root_switch_stable_frames"] = stats.rootSwitchStableFrames;
+  counters["live_clod_stream_root_switch_pending_pages"] = stats.rootSwitchPendingPages;
+  counters["live_clod_stream_root_switch_suppressed_frames"] = stats.rootSwitchSuppressedFrames;
+  counters["live_clod_stream_root_switches_total"] = stats.rootSwitchesTotal;
   counters["live_clod_stream_max_inflight_batches"] = stats.maxInflightBatches;
   counters["live_clod_stream_max_cached_pages"] = stats.maxCachedPages;
   counters["live_clod_stream_safety_cache_capacity_ok"] = stats.safetyCacheCapacityOk;
@@ -312,6 +344,10 @@ function resetStreamingCounterMirrors(): void {
   counters["live_clod_stream_stale_discards_total"] = 0;
   counters["live_clod_stream_apply_queue_pages"] = 0;
   counters["live_clod_stream_active_root_pages"] = 0;
+  counters["live_clod_stream_root_switch_stable_frames"] = 0;
+  counters["live_clod_stream_root_switch_pending_pages"] = 0;
+  counters["live_clod_stream_root_switch_suppressed_frames"] = 0;
+  counters["live_clod_stream_root_switches_total"] = 0;
   counters["live_clod_stream_safety_cache_capacity_ok"] = 1;
   counters["live_clod_stream_safety_required_pages"] = 0;
   counters["live_clod_stream_safety_ready_pages"] = 0;
@@ -447,6 +483,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const maxRootLevel = resolveStreamingClodMaxRootLevel(deps.cfg, deps.maxRootLevel);
+  const rootSwitchStableFrames = Math.max(0, Math.floor(deps.rootSwitchStableFrames ?? queryStreamingRootSwitchStableFrames() ?? 0));
   const cached = new Map<string, CachedPage>();
   const failed = new Map<string, FailedBuildState>();
   const ready: ReadyPage[] = [];
@@ -466,6 +503,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let workerBuildFailures = 0;
   let workerBuildTimeouts = 0;
   let activeRootIds = new Set<string>();
+  let pendingRootSwitchIds = new Set<string>();
+  let pendingRootSwitchKey = "";
+  let pendingRootSwitchStableFrames = 0;
+  let rootSwitchSuppressedFrames = 0;
+  let rootSwitchesTotal = 0;
   let latest: StreamingClodRootStats = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches);
 
   const beginMovementProbe = (): void => {
@@ -528,10 +570,17 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return new Set(activeIds);
   };
 
-  const syncActiveRoots = (): boolean => {
-    const nextActiveRootIds = resolveActiveRootIds();
-    const changed = nextActiveRootIds.size !== activeRootIds.size || [...nextActiveRootIds].some((id) => !activeRootIds.has(id));
-    if (!changed) return false;
+  const requiredSafetyIds = (requiredIds: Iterable<string>): Set<string> =>
+    new Set([...requiredIds].filter((id) => parseStreamingClodPageKey(id).level === maxRootLevel));
+
+  const rootSetCoversSafety = (rootIds: ReadonlySet<string>): boolean => {
+    const safetyIds = requiredSafetyIds(requiredNow);
+    if (safetyIds.size === 0) return true;
+    for (const safetyId of safetyIds) if (!pageCoveredByActiveRoots(safetyId, rootIds)) return false;
+    return true;
+  };
+
+  const commitActiveRootIds = (nextActiveRootIds: Set<string>): void => {
     for (let i = deps.roots.length - 1; i >= 0; i--) {
       const id = deps.roots[i]?.id;
       if (id !== undefined && cached.has(id)) deps.roots.splice(i, 1);
@@ -541,11 +590,44 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       if (node) deps.roots.push(node);
     }
     activeRootIds = nextActiveRootIds;
-    return true;
+    pendingRootSwitchIds = new Set<string>();
+    pendingRootSwitchKey = "";
+    pendingRootSwitchStableFrames = 0;
+    rootSwitchesTotal++;
   };
 
-  const requiredSafetyIds = (requiredIds: Iterable<string>): Set<string> =>
-    new Set([...requiredIds].filter((id) => parseStreamingClodPageKey(id).level === maxRootLevel));
+  const syncActiveRoots = (): boolean => {
+    const nextActiveRootIds = resolveActiveRootIds();
+    if (setEquals(nextActiveRootIds, activeRootIds)) {
+      pendingRootSwitchIds = new Set<string>();
+      pendingRootSwitchKey = "";
+      pendingRootSwitchStableFrames = 0;
+      return false;
+    }
+
+    const currentCoversSafety = activeRootIds.size > 0 && rootSetCoversSafety(activeRootIds);
+    const nextCoversSafety = rootSetCoversSafety(nextActiveRootIds);
+    const canHoldCurrent = rootSwitchStableFrames > 0 && currentCoversSafety && nextCoversSafety;
+    if (canHoldCurrent) {
+      const nextKey = stableSetKey(nextActiveRootIds);
+      if (nextKey === pendingRootSwitchKey) {
+        pendingRootSwitchStableFrames++;
+      } else {
+        pendingRootSwitchKey = nextKey;
+        pendingRootSwitchIds = new Set(nextActiveRootIds);
+        pendingRootSwitchStableFrames = 1;
+      }
+      if (pendingRootSwitchStableFrames < rootSwitchStableFrames) {
+        rootSwitchSuppressedFrames++;
+        return false;
+      }
+      commitActiveRootIds(new Set(pendingRootSwitchIds));
+      return true;
+    }
+
+    commitActiveRootIds(nextActiveRootIds);
+    return true;
+  };
 
   const safetyCoverageRootIds = (safetyIds: ReadonlySet<string>): Set<string> => {
     const protectedIds = new Set<string>();
@@ -565,6 +647,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     cachedIds.delete(id);
     removeRoot(id);
     activeRootIds.delete(id);
+    pendingRootSwitchIds.delete(id);
   };
 
   const evictionPriority = (
@@ -830,6 +913,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         requiredNow = new Set();
         ready.length = 0;
         inFlight.clear();
+        activeRootIds = new Set();
+        pendingRootSwitchIds = new Set();
+        pendingRootSwitchKey = "";
+        pendingRootSwitchStableFrames = 0;
         latest = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches);
         mirrorStreamingProbeCounters(latest);
         return latest;
@@ -911,6 +998,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         workerBuildFailures,
         workerBuildTimeouts,
         maxRootLevel,
+        rootSwitchStableFrames: pendingRootSwitchStableFrames,
+        rootSwitchPendingPages: pendingRootSwitchIds.size,
+        rootSwitchSuppressedFrames,
+        rootSwitchesTotal,
         requestedPagesByLevel: [...requestedPagesByLevel],
         appliedPagesByLevel: [...appliedPagesByLevel],
         staleCompletedPagesByLevel: [...staleCompletedPagesByLevel],
@@ -971,6 +1062,10 @@ function emptyStats(
     workerBuildFailures: 0,
     workerBuildTimeouts: 0,
     maxRootLevel,
+    rootSwitchStableFrames: 0,
+    rootSwitchPendingPages: 0,
+    rootSwitchSuppressedFrames: 0,
+    rootSwitchesTotal: 0,
     requestedPagesByLevel: zeroLevelArray(),
     appliedPagesByLevel: zeroLevelArray(),
     staleCompletedPagesByLevel: zeroLevelArray(),
