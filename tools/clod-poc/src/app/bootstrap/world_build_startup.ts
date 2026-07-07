@@ -67,6 +67,8 @@ import {
   resolveWorldMode,
   type WorldModeConfig,
 } from "../world_mode.js";
+import { isLongViewCapableScene } from "./bootstrap_long_view.js";
+import { farClipmapRendererAllowed } from "../../terrain/far_clipmap/far_clipmap_config.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import configText from "../../../config/clod_pages.yaml?raw";
 import stoneConfigText from "../../../config/stones.yaml?raw";
@@ -369,6 +371,8 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     borderCoastConfigEnabled: borderCoastOceanConfig.enabled,
     oceanRim: terrainFieldConfig.islandShape.oceanRim,
     worldRadiusM: terrainFieldConfig.islandShape.worldRadiusM,
+    longViewCapable: isLongViewCapableScene(sceneName),
+    farClipmapRendererAllowed: farClipmapRendererAllowed(searchParams),
   });
   window.__drusnielWorldMode = worldMode;
   startupTimings["startup.configured_world_pages"] = configuredWorld;

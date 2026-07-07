@@ -334,11 +334,14 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   });
 
   // The legacy far shell is built from the finite startup terrainSummary and is centered on the
-  // startup world (worldSizeCells/2), so for an infinite-island world it paints a small finite
-  // ring near the origin that disagrees with, and z-fights, the player-centered far terrain.
-  // WorldModeConfig names the single far owner; drop the redundant finite shell when the far
-  // clipmap owns far terrain to avoid two far owners.
-  const disableLegacyFarShell = input.worldMode.farOwner === "far_clipmap";
+  // startup world (worldSizeCells/2), so for an infinite-island world it paints a small finite ring
+  // near the origin that disagrees with, and z-fights, the player-centered far terrain. It renders
+  // only when it is the resolved far owner (finite worlds); for every other owner it stays off so
+  // there is never a legacy finite shell competing with an infinite far renderer. `debugLegacyFarShell=1`
+  // forces it on for diagnosis.
+  const debugForceLegacyFarShell = searchParams.get("debugLegacyFarShell") === "1";
+  const disableLegacyFarShell = !debugForceLegacyFarShell
+    && input.worldMode.farOwner !== "legacy_far_shell";
 
   if (disableLegacyFarShell) {
     farShellController.setEnabled(false);

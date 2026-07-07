@@ -79,7 +79,7 @@ function debugMode(value: unknown, fallback: FarClipmapDebugMode): FarClipmapDeb
   return typeof value === "string" && DEBUG_MODES.has(value) ? value as FarClipmapDebugMode : fallback;
 }
 
-function farClipmapRendererAllowed(params: URLSearchParams): boolean {
+export function farClipmapRendererAllowed(params: URLSearchParams): boolean {
   const sceneName = params.get("scene") ?? "";
   return params.get("farClipmapMode") === "replace" || !sceneName.startsWith("infinite-");
 }

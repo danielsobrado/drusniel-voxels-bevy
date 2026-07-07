@@ -8,7 +8,7 @@ function params(query: string): URLSearchParams {
 }
 
 describe("resolveWorldMode", () => {
-  it("treats the infinite-islands scene as infinite and disables border coast", () => {
+  it("treats the infinite-islands scene as infinite, disables border coast, and hands the far band to the infinite shell", () => {
     const world = resolveWorldMode({
       scene: "infinite-islands",
       searchParams: params("farClipmap=1"),
@@ -19,10 +19,14 @@ describe("resolveWorldMode", () => {
       borderCoastConfigEnabled: true,
       oceanRim: false,
       worldRadiusM: 8192,
+      // infinite-islands is long-view-capable, and the clipmap renderer is disabled for `infinite-`
+      // scenes, so the InfiniteFarShell — not the clipmap — owns the far band.
+      longViewCapable: true,
+      farClipmapRendererAllowed: false,
     });
     expect(world.mode).toBe("infinite_islands");
     expect(world.borderCoastEnabled).toBe(false);
-    expect(world.farOwner).toBe("far_clipmap");
+    expect(world.farOwner).toBe("infinite_far_shell");
     // Bootstrap window and configured domain are kept distinct.
     expect(world.startupWorldCells).toBe(4 * PAGE_CELLS);
     expect(world.configuredWorldCells).toBe(16 * PAGE_CELLS);
@@ -30,10 +34,10 @@ describe("resolveWorldMode", () => {
     expect(world.proceduralWorldRadiusM).toBeNull();
   });
 
-  it("infers infinite mode from islandShape even without the scene string", () => {
+  it("uses the far clipmap only when it is actually allowed to render (replace mode)", () => {
     const world = resolveWorldMode({
-      scene: "default",
-      searchParams: params(""),
+      scene: "custom-infinite",
+      searchParams: params("farClipmap=1&farClipmapMode=replace"),
       configuredWorldPages: 8,
       startupWorldPages: 8,
       pageCells: PAGE_CELLS,
@@ -41,11 +45,29 @@ describe("resolveWorldMode", () => {
       borderCoastConfigEnabled: true,
       oceanRim: true,
       worldRadiusM: 4096,
+      longViewCapable: false,
+      farClipmapRendererAllowed: true,
     });
     expect(world.mode).toBe("infinite_islands");
-    expect(world.borderCoastEnabled).toBe(false);
-    expect(world.farOwner).toBe("infinite_far_shell");
+    expect(world.farOwner).toBe("far_clipmap");
     expect(world.proceduralWorldRadiusM).toBe(4096);
+  });
+
+  it("leaves the far band unowned for an infinite world with no far renderer", () => {
+    const world = resolveWorldMode({
+      scene: "custom-infinite",
+      searchParams: params(""),
+      configuredWorldPages: 8,
+      startupWorldPages: 8,
+      pageCells: PAGE_CELLS,
+      islandShapeEnabled: true,
+      borderCoastConfigEnabled: true,
+      oceanRim: false,
+      worldRadiusM: 8192,
+      longViewCapable: false,
+      farClipmapRendererAllowed: false,
+    });
+    expect(world.farOwner).toBe("none");
   });
 
   it("keeps finite worlds on the legacy far shell with border coast active", () => {
@@ -59,6 +81,8 @@ describe("resolveWorldMode", () => {
       borderCoastConfigEnabled: true,
       oceanRim: false,
       worldRadiusM: 8192,
+      longViewCapable: false,
+      farClipmapRendererAllowed: true,
     });
     expect(world.mode).toBe("finite");
     expect(world.borderCoastEnabled).toBe(true);
@@ -76,6 +100,8 @@ describe("resolveWorldMode", () => {
       borderCoastConfigEnabled: false,
       oceanRim: false,
       worldRadiusM: 8192,
+      longViewCapable: false,
+      farClipmapRendererAllowed: true,
     });
     expect(world.borderCoastEnabled).toBe(false);
   });

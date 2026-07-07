@@ -9,12 +9,13 @@
 // means (configured domain vs bootstrap window vs procedural radius) instead of guessing from a
 // scene string or reusing bootstrap `worldCells`.
 
+import { resolveFarOwner, type FarOwner } from "./far_ownership.js";
+
 export const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
 export type WorldMode = "finite" | "infinite_islands";
 
-/** Who renders the far band. Exactly one owner should be active per world-mode slice. */
-export type FarOwner = "legacy_far_shell" | "far_clipmap" | "infinite_far_shell" | "none";
+export type { FarOwner } from "./far_ownership.js";
 
 export interface WorldModeConfig {
   mode: WorldMode;
@@ -49,14 +50,10 @@ export interface ResolveWorldModeInput {
   oceanRim: boolean;
   /** terrainFieldConfig.islandShape.worldRadiusM */
   worldRadiusM: number;
-}
-
-function resolveFarOwner(mode: WorldMode, searchParams: URLSearchParams): FarOwner {
-  if (mode === "finite") return "legacy_far_shell";
-  if (searchParams.get("farClipmap") === "1") return "far_clipmap";
-  // Long-view / NAADF paths install the player-centred infinite far shell; otherwise the near
-  // streamed roots + sky cover the horizon and no legacy finite shell should be built.
-  return "infinite_far_shell";
+  /** isLongViewCapableScene(scene): these scenes own the far band with the InfiniteFarShell. */
+  longViewCapable: boolean;
+  /** farClipmapRendererAllowed(searchParams): false for `infinite-` scenes unless replace mode. */
+  farClipmapRendererAllowed: boolean;
 }
 
 export function resolveWorldMode(input: ResolveWorldModeInput): WorldModeConfig {
@@ -71,7 +68,12 @@ export function resolveWorldMode(input: ResolveWorldModeInput): WorldModeConfig 
     startupWorldCells: input.startupWorldPages * input.pageCells,
     proceduralWorldRadiusM: mode === "infinite_islands" && input.oceanRim ? input.worldRadiusM : null,
     borderCoastEnabled,
-    farOwner: resolveFarOwner(mode, input.searchParams),
+    farOwner: resolveFarOwner({
+      isInfinite: mode === "infinite_islands",
+      longViewCapable: input.longViewCapable,
+      farClipmapRequested: input.searchParams.get("farClipmap") === "1",
+      farClipmapRendererAllowed: input.farClipmapRendererAllowed,
+    }),
   };
 }
 

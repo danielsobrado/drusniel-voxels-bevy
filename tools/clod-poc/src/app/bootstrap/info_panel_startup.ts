@@ -9,7 +9,18 @@ import { formatForestLightingInfoLine } from "../../forest_lighting/index.js";
 import { updateClodOverlay, type ClodOverlaySnapshot } from "../../ui/overlay_panel.js";
 import { createStreamDiagnosticTracker } from "../../stream/stream_diagnostics.js";
 import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
+import { formatFarOwnershipOverlay } from "../far_ownership.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
+
+/** Ownership contract line: near/mid owner, the near↔far handoff (transition) band, far owner, and
+ *  the count of forbidden overlapping far owners (legacy finite shell + infinite shell). */
+function formatOwnershipLine(): string {
+  const ownership = window.__drusnielFarOwnership;
+  const counters = window.__drusnielClod?.stats?.counters;
+  if (!ownership) return "owner: (pending)";
+  if (counters) counters["far_ownership_overlap_violations"] = ownership.overlapViolations;
+  return `owner: ${formatFarOwnershipOverlay(ownership)}`;
+}
 
 /**
  * Compact world-identity diagnostics line. Surfaces the WorldMode struct, the finite/infinite
@@ -136,6 +147,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     info.textContent =
       `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${sceneLabel}\n` +
       `${formatWorldModeLine(input.camera.position.x, input.camera.position.z)}\n` +
+      `${formatOwnershipLine()}\n` +
       `cut: ${selection.renderedCount} nodes  (${selection.levelSummary})\n` +
       `tris rendered: ${selection.triCount.toLocaleString()}   2:1 forced splits: ${selection.forcedSplits}   ` +
       `bubble forced splits: ${selection.nearFieldForcedSplits}   xLOD borders: ${selection.crossLodAdjacencyCount}\n` +

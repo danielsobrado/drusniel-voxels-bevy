@@ -24,6 +24,8 @@ import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
+import { assertLegacyFarShellExclusive, buildFarOwnershipSummary } from "../far_ownership.js";
+import { farClipmapRendererAllowed } from "../../terrain/far_clipmap/far_clipmap_config.js";
 import { FloatingOriginController } from "../../precision/floating_origin.js";
 import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
@@ -213,6 +215,26 @@ export async function bootstrapClodPoc() {
     targetFutureVisibleM: queries.phase0Config.phase0.target_future_visible_m,
     pageSizeM: world.cfg.page.chunks_per_page * world.cfg.page.chunk_size,
     streamingScene: queryScene?.startsWith("infinite-") ?? false,
+  });
+
+  // Terrain-ownership contract: streamed CLOD owns near/mid, exactly one far renderer owns the far
+  // band (resolveStreamingOwnership already enforces the radial seam farShellInnerM >= clodRadiusM),
+  // and the legacy finite far shell must never render alongside the player-centred infinite shell.
+  // Predict the far renderer activity from the same conditions the systems use, assert the invariant,
+  // and publish the resolved ownership (with the real seam radii) for the HUD overlay.
+  const farRendererActivity = {
+    legacyFarShell: world.worldMode.farOwner === "legacy_far_shell",
+    infiniteFarShell: isLongViewCapableScene(queryScene),
+    farClipmap: searchParams.get("farClipmap") === "1" && farClipmapRendererAllowed(searchParams),
+  };
+  assertLegacyFarShellExclusive(farRendererActivity);
+  window.__drusnielFarOwnership = buildFarOwnershipSummary({
+    farOwner: world.worldMode.farOwner,
+    streamingScene: streamingOwnership.streamingScene,
+    activity: farRendererActivity,
+    clodRadiusM: streamingOwnership.clodRadiusM,
+    farInnerM: streamingOwnership.farShellInnerM,
+    farOuterM: streamingOwnership.farShellOuterM,
   });
 
   if (isNaadfCapable) {
