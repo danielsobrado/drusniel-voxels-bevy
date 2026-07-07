@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import type { GrassStats } from "../../../grass.js";
 import type { StoneStats } from "../../../stones/stone_instances.js";
 import type { TreeStats } from "../../../trees/index.js";
@@ -118,10 +119,11 @@ function streamingWorldCenter(
   player: { spawned: boolean; position: { x: number; z: number } },
   camera: { position: { x: number; z: number } },
   controls: { target: { x: number; z: number } },
-): { x: number; z: number } {
-  if (interactionMode === "playing") return player.position;
-  if (streamingScene && player.spawned) return player.position;
-  return streamingScene ? camera.position : controls.target;
+): THREE.Vector3 {
+  if (interactionMode === "playing") return new THREE.Vector3(player.position.x, 0, player.position.z);
+  if (streamingScene && player.spawned) return new THREE.Vector3(player.position.x, 0, player.position.z);
+  const src = streamingScene ? camera.position : controls.target;
+  return new THREE.Vector3(src.x, 0, src.z);
 }
 
 function mirrorStreamingClodRootCounters(

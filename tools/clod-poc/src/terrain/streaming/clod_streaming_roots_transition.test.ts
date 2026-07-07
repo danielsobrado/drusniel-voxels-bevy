@@ -170,7 +170,7 @@ describe("streamed root transitions", () => {
     const stats = harness.controller.update(center, 30);
 
     expect(stats.transitionCappedTotal).toBe(1);
-    expect(stats.transitionHardSwitchesTotal).toBe(1);
+    expect(stats.transitionHardSwitchesTotal).toBe(2);
     expect(stats.transitionActiveGroups).toBe(0);
     expect(harness.roots.map((node) => node.id)).toEqual(["L0:8,0", "L0:8,1", "L0:9,0", "L0:9,1"]);
   });

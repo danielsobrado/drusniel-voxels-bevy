@@ -47,6 +47,7 @@ function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePh
     interaction: { mode: "orbit" } as TerrainFramePhaseInput["interaction"],
     player: { position: new THREE.Vector3(0, 0, 0) } as TerrainFramePhaseInput["player"],
     controls: { target: new THREE.Vector3(0, 0, 0) } as TerrainFramePhaseInput["controls"],
+    camera: { position: new THREE.Vector3(0, 0, 0) } as unknown as TerrainFramePhaseInput["camera"],
     selectionController: {
       activeTerrainViews: () => new Set(),
       currentTerrainViews: () => new Set(),

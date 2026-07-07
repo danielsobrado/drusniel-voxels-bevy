@@ -76,7 +76,7 @@ export interface TerrainFramePhaseInput {
   camera?: THREE.Camera;
   selectionController: ClodSelectionController;
   nearFieldBubbleController: NearFieldBubbleController;
-  views: Map<string, { node: { id: string } } & TerrainFadeView>;
+  views: Map<string, { node: { id: string }; fade: number; target: number; mesh: THREE.Mesh; mat: { setFade: (fade: number, fadeIn: boolean, dither: boolean) => void } }>;
   worldCells: number;
   pruneRenderNodeCache?: (protectedNodeIds: ReadonlySet<string>, frameId: number) => void;
 }
