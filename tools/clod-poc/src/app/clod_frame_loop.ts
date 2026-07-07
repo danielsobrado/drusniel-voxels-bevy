@@ -34,6 +34,8 @@ import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 const DEBUG_COUNTER_MIRROR_INTERVAL_MS = 250;
 
+type ExtraPhaseTiming = FramePerfPhaseTiming & Record<string, number>;
+
 function timed<T>(
   enabled: boolean,
   phaseTiming: FramePerfPhaseTiming,
@@ -47,6 +49,12 @@ function timed<T>(
   } finally {
     phaseTiming[key] += performance.now() - start;
   }
+}
+
+function addExtraTiming(phaseTiming: FramePerfPhaseTiming, key: string, value: number): void {
+  if (!Number.isFinite(value)) return;
+  const timings = phaseTiming as ExtraPhaseTiming;
+  timings[key] = (timings[key] ?? 0) + value;
 }
 
 function syncMaterialChurnCounters(counters: Record<string, number>): void {
@@ -253,10 +261,23 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       terrain.drainClodApplyQueue?.();
     });
 
-    timed(collectFrameTiming, phaseTiming, "selectionUpdateMs", () => {
+    if (collectFrameTiming) {
+      const selectionOuterStart = performance.now();
+      const updateStart = selectionOuterStart;
+      terrain.updateSelection();
+      const updateMs = performance.now() - updateStart;
+      const statsStart = performance.now();
+      selectionStats = terrain.selectionController.stats();
+      const statsMs = performance.now() - statsStart;
+      const outerMs = performance.now() - selectionOuterStart;
+      phaseTiming.selectionUpdateMs += outerMs;
+      addExtraTiming(phaseTiming, "selectionOuter.updateCallMs", updateMs);
+      addExtraTiming(phaseTiming, "selectionOuter.statsCallMs", statsMs);
+      addExtraTiming(phaseTiming, "selectionOuter.wrapperGapMs", Math.max(0, outerMs - updateMs - statsMs));
+    } else {
       terrain.updateSelection();
       selectionStats = terrain.selectionController.stats();
-    });
+    }
 
     const terrainPhaseResult = timed(collectFrameTiming, phaseTiming, "terrainPhaseMs", () => runTerrainFramePhase({
       state: player.state,
