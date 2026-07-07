@@ -31,7 +31,10 @@ interface TerrainFadeView {
   fade: number;
   target: number;
   mesh: THREE.Mesh;
-  mat: { setFade: (fade: number, fadeIn: boolean, dither: boolean) => void };
+  mat: {
+    setFade: (fade: number, fadeIn: boolean, dither: boolean) => void;
+    setRootMorph: (influence: number) => void;
+  };
 }
 
 interface MovementProbeWindow {
@@ -233,13 +236,14 @@ function applyRootTransitionFade(
   const progress = THREE.MathUtils.clamp(transition.progress, 0, 1);
   const fade = transition.mode === "fadeOut" ? 1 - progress : progress;
   const morphInfluence = transition.mode === "fadeIn" ? 1 - progress : progress;
-  const built = applyRootHeightMorph(view, sourceViewsForMorph(view, transitionGroups), morphInfluence);
+  const built = applyRootHeightMorph(view, sourceViewsForMorph(view, transitionGroups));
   morphStats.builtRoots += built.builtRoots;
   morphStats.builtVertices += built.builtVertices;
   morphStats.buildMs += built.buildMs;
   view.fade = fade;
   view.target = transition.mode === "fadeOut" ? 0 : 1;
   view.mesh.visible = fade > 0.001;
+  view.mat.setRootMorph(morphInfluence);
   view.mat.setFade(fade, transition.mode !== "fadeOut", fade > 0.001 && fade < 0.999);
   return true;
 }
@@ -259,6 +263,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
       continue;
     }
     resetRootHeightMorph(v);
+    v.mat.setRootMorph(0);
     if (input.pageTransitionMode === "instant") {
       v.fade = v.target;
       v.mesh.visible = v.target > 0.5;
