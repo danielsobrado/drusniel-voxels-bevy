@@ -28,6 +28,16 @@ export interface PageFootprint {
   maxZ: number; // exclusive
 }
 
+export type StreamedRootTransitionMode = "stable" | "fadeIn" | "fadeOut" | "morphIn";
+
+export interface StreamedRootRenderState {
+  mode: StreamedRootTransitionMode;
+  progress: number;
+  groupId: number;
+  /** Reserved for the later shader-height morph path; phase 1 only crossfades. */
+  parentHeightMorphReady?: boolean;
+}
+
 export interface ClodPageNode {
   id: string; // e.g. "L0:0,0"
   /**
@@ -43,6 +53,8 @@ export interface ClodPageNode {
   /** error_world = simplification_error_world + max(child.error_world). Monotone up the tree. */
   errorWorld: number;
   lowBenefit: boolean;
+  /** Lightweight streamed-root transition state consumed by terrain material uniforms. */
+  rootTransition?: StreamedRootRenderState;
   /**
    * LOD0 only: the unwelded per-chunk source meshes, row-major (dz*P + dx). Cached so an
    * edit re-meshes just the chunks it touches and re-welds the page, instead of
