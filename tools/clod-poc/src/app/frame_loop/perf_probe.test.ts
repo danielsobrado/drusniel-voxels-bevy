@@ -43,10 +43,24 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     selectionBookMs: 0.3,
     selectionInfoMs: 0.4,
     selectionOverlaysMs: 0.1,
+    "selectionSub.settings": 0.01,
+    "selectionSub.params": 0.02,
+    "selectionSub.compute": 0.03,
+    "selectionSub.readback": 0.04,
+    "selectionSub.parity": 0.05,
+    "selectionSub.lookup": 0.06,
+    "selectionSub.cache": 0.07,
     "selectionSub.cut": 0.2,
     "selectionSub.book": 0.3,
+    "selectionSub.markActive": 0.08,
+    "selectionSub.apply": 0.09,
+    "selectionSub.stats": 0.1,
+    "selectionSub.hash": 0.11,
+    "selectionSub.commit": 0.12,
     "selectionSub.info": 0.4,
     "selectionSub.overlays": 0.1,
+    "selectionSub.dispatch": 0.13,
+    "selectionSub.total": 1,
     selectionCutCacheEnabled: 1,
     selectionCutCacheHits: 1,
     selectionCutCacheMisses: 0,
@@ -172,12 +186,14 @@ describe("frame perf probe", () => {
   it("ranks detailed phase and prop buckets by p95", () => {
     const summary = summarizeFramePerfSamples([
       sample({ renderMs: 9, frameMs: 16, propsUnattributedMs: 1, treeHeroNearMinTreeTriangles: 9_000, treeGpuShadowCasterCount: 60, treeVisibleClusterHidden: 2, treeVisibleClusterVisible: 14, treeVisibleClusterUnknownKept: 1 }),
-      sample({ renderMs: 24, frameMs: 32, statsSyncMs: 4, propsUnattributedMs: 7, selectionCutCacheMisses: 1, selectionCutCacheLastReason: "camera_bucket_changed", selectionCutCacheLastReasonCode: 3, cachedFastHits: 1, treeHeroNearTriangles: 150_000, treeHeroNearMinTreeTriangles: 7_000, treeGpuCandidateCountBeforePrefilter: 160, treeGpuCandidateCountAfterPrefilter: 100, treeGpuPrefilterRejectedClusters: 6, treeGpuPrefilterSkippedCandidateEstimate: 60, treeGpuPrefilterFarSummaryConsulted: 13, treeGpuPrefilterSourceFarSummary: 10, treeGpuPrefilterSourceTerrainSampler: 6, treeGpuPrefilterSourceFallback: 4, treeGpuShadowCasterCount: 68, treeGpuShadowOverflowed: 1, treeVisibleClusterHidden: 6, treeVisibleClusterVisible: 10, treeVisibleClusterUnknownKept: 3, grassGpuCandidateCountBeforePrefilter: 640, grassGpuCandidateCountAfterPrefilter: 320, grassGpuPrefilterFarSummaryConsulted: 12, grassGpuPrefilterSourceFarSummary: 9, grassGpuPrefilterSourceTerrainSampler: 7, grassGpuPrefilterSourceFallback: 5, understoryGpuCandidateCountBeforePrefilter: 384, understoryGpuCandidateCountAfterPrefilter: 192, understoryGpuPrefilterFarSummaryConsulted: 11, understoryGpuPrefilterSourceFarSummary: 8, understoryGpuPrefilterSourceTerrainSampler: 6, understoryGpuPrefilterSourceFallback: 4, statsSyncRan: 1, statsSyncRuns: 1, statsSyncSkips: 1, statsSyncThrottleReason: "normal", statsSyncHzEffective: 4 }),
+      sample({ renderMs: 24, frameMs: 32, statsSyncMs: 4, propsUnattributedMs: 7, selectionCutCacheMisses: 1, selectionCutCacheLastReason: "camera_bucket_changed", selectionCutCacheLastReasonCode: 3, cachedFastHits: 1, "selectionSub.readback": 0.8, "selectionSub.total": 1.5, treeHeroNearTriangles: 150_000, treeHeroNearMinTreeTriangles: 7_000, treeGpuCandidateCountBeforePrefilter: 160, treeGpuCandidateCountAfterPrefilter: 100, treeGpuPrefilterRejectedClusters: 6, treeGpuPrefilterSkippedCandidateEstimate: 60, treeGpuPrefilterFarSummaryConsulted: 13, treeGpuPrefilterSourceFarSummary: 10, treeGpuPrefilterSourceTerrainSampler: 6, treeGpuPrefilterSourceFallback: 4, treeGpuShadowCasterCount: 68, treeGpuShadowOverflowed: 1, treeVisibleClusterHidden: 6, treeVisibleClusterVisible: 10, treeVisibleClusterUnknownKept: 3, grassGpuCandidateCountBeforePrefilter: 640, grassGpuCandidateCountAfterPrefilter: 320, grassGpuPrefilterFarSummaryConsulted: 12, grassGpuPrefilterSourceFarSummary: 9, grassGpuPrefilterSourceTerrainSampler: 7, grassGpuPrefilterSourceFallback: 5, understoryGpuCandidateCountBeforePrefilter: 384, understoryGpuCandidateCountAfterPrefilter: 192, understoryGpuPrefilterFarSummaryConsulted: 11, understoryGpuPrefilterSourceFarSummary: 8, understoryGpuPrefilterSourceTerrainSampler: 6, understoryGpuPrefilterSourceFallback: 4, statsSyncRan: 1, statsSyncRuns: 1, statsSyncSkips: 1, statsSyncThrottleReason: "normal", statsSyncHzEffective: 4 }),
     ], 10, 2);
 
     expect(summary.sampleCount).toBe(2);
     expect(summary.metrics.frameMs.p95).toBe(32);
     expect(summary.metrics["selectionSub.cut"].p95).toBe(0.2);
+    expect(summary.metrics["selectionSub.readback"].p95).toBe(0.8);
+    expect(summary.metrics["selectionSub.total"].p95).toBe(1.5);
     expect(summary.broadBucketsByP95[0]).toMatchObject({ name: "renderMs", p95: 24 });
     expect(summary.propBucketsByP95[0]).toMatchObject({ name: "propsUnattributedMs", p95: 7 });
     expect(summary.counters.terrainTrianglesAvg).toBe(12000);
