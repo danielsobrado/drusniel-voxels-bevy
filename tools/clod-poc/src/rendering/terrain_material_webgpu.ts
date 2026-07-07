@@ -82,6 +82,7 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
   let fade = 1;
   let fadeIn = true;
   let dither = false;
+  let rootMorphInfluence = 0;
   let textureSignature = "";
   let warnedNormalDivergence = false;
   const callbacks: MaterialChangedCallback[] = [];
@@ -100,6 +101,7 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
     next.material.side = side;
     next.material.wireframe = wireframe;
     next.setFade(fade, fadeIn, dither);
+    next.setRootMorph(rootMorphInfluence);
     next.setDebug(debug);
     materialChurnDiagnostics.trackNewMaterial(next.material, `webgpu-terrain-node:${reason}`);
     return next;
@@ -195,6 +197,10 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
       fadeIn = nextFadeIn;
       dither = nextDither;
       node.setFade(fade, fadeIn, dither);
+    },
+    setRootMorph(influence) {
+      rootMorphInfluence = influence;
+      node.setRootMorph(rootMorphInfluence);
     },
     setTier(tier) {
       node.setTier(tier);
