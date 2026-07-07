@@ -192,6 +192,19 @@ describe("terrain collider set", () => {
     expect(result.pagesTested).toBe(2);
   });
 
+  it("uses height fallback when overlapping collider pages miss the capsule", () => {
+    const farBelow = planeGeometry(20, -100);
+    const colliders = new TerrainColliderSet([page("stale", farBelow, -10, -10, 10, 10)], {
+      enabled: true,
+      surfaceHeight: () => 12,
+    });
+    const result = colliders.resolveCapsule(new THREE.Vector3(0, 11.5, 0), new THREE.Vector3(0, -4, 0), DEFAULT_PLAYER_CONFIG);
+    expect(result.pagesTested).toBe(1);
+    expect(result.position.y).toBeCloseTo(12);
+    expect(result.velocity.y).toBe(0);
+    expect(result.grounded).toBe(true);
+  });
+
   it("treats a walkable ramp as ground and a steep ramp as a slide", () => {
     const walkable = new TerrainColliderSet([page("ramp", rampGeometry(30))]);
     const steep = new TerrainColliderSet([page("steep", rampGeometry(70))]);
