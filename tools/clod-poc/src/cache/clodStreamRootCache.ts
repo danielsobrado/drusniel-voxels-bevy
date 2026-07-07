@@ -14,7 +14,7 @@ import {
   clodPageNodeToArtifact,
 } from "./clodPageNodeArtifact.js";
 
-const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v2-world-infinite-hydrology-bounded";
+const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v3-island-border-skip";
 
 export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
