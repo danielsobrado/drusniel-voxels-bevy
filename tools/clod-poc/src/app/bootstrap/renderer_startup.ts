@@ -121,7 +121,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       "",
       "Recovery:",
       "- Hard-reload after closing other tabs that used this WebGPU app.",
-      "- If Chrome keeps reporting DXGI_ERROR_DEVICE_HUNG, restart the browser.",
+      "- Restart the browser if the WebGPU device keeps failing.",
       "- Use ?renderer=webgl to open the app without WebGPU.",
     ];
     failLoud("Renderer startup failed", details);
@@ -159,8 +159,8 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   }
   if (!anyBodyInWorld) {
     for (const river of waterConfig.fakeBodies.rivers) {
-      for (const p of river.points) {
-        if (p[0] >= 0 && p[0] <= worldCells && p[1] >= 0 && p[1] <= worldCells) {
+      for (const pt of river.points) {
+        if (pt[0] >= 0 && pt[0] <= worldCells && pt[1] >= 0 && pt[1] <= worldCells) {
           anyBodyInWorld = true;
           break;
         }
@@ -168,60 +168,106 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       if (anyBodyInWorld) break;
     }
   }
-  if (queryBorderOceanScene) {
-    const parsedCam = parseBorderOceanCamString(searchParams.get("cam"));
-    const cam = parsedCam ?? borderOceanSceneConfig.camera;
-    camera.position.set(cam.position[0], cam.position[1], cam.position[2]);
-    controls.target.set(cam.target[0], cam.target[1], cam.target[2]);
+  if (waterConfig.enabled && !anyBodyInWorld && (waterConfig.fakeBodies.lakes.length > 0 || waterConfig.fakeBodies.rivers.length > 0)) {
+    console.warn("[water] no fake water bodies inside world bounds; water will be invisible");
   }
-  if (queryLongViewScene && activePhase0Scene?.camera) {
-    camera.position.set(...activePhase0Scene.camera.position);
-    controls.target.set(...activePhase0Scene.camera.target);
-  }
-  if (searchParams.get("scene") === INFINITE_ISLANDS_SCENE && searchParams.has("x") && searchParams.has("z")) {
-    const x = Number(searchParams.get("x"));
-    const z = Number(searchParams.get("z"));
-    if (Number.isFinite(x) && Number.isFinite(z)) {
-      const y = Number(searchParams.get("y"));
-      const yaw = Number(searchParams.get("yaw") ?? 0);
-      const height = Number.isFinite(y) ? y : Math.max(40, surfaceHeight(x, z) + 18);
-      camera.position.set(x, height, z);
-      controls.target.set(x + Math.sin(yaw) * 80, height - 12, z + Math.cos(yaw) * 80);
+
+  const mid = worldCells / 2;
+  const camera = new THREE.PerspectiveCamera(
+    55,
+    initialRenderResolution.cssWidth / initialRenderResolution.cssHeight,
+    0.5,
+    8000,
+  );
+  camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(mid, 24, mid);
+
+  if (stagedImport) {
+    camera.position.fromArray(stagedImport.manifest.camera.position);
+    controls.target.fromArray(stagedImport.manifest.camera.target);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryGrassPerfScene) {
+    controls.target.set(mid, 20, mid);
+    camera.position.set(mid - worldCells * 0.24, 46, mid + worldCells * 0.34);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryTreePerfScene) {
+    controls.target.set(mid, 24, mid);
+    camera.position.set(mid - worldCells * 0.28, 58, mid + worldCells * 0.38);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryBorderOceanScene) {
+    const cam = parseBorderOceanCamString(searchParams.get("cam"), worldCells, borderOceanSceneConfig);
+    camera.position.set(cam.eye[0], cam.eye[1], cam.eye[2]);
+    controls.target.set(cam.look[0], cam.look[1], cam.look[2]);
+    camera.fov = cam.fov;
+    camera.updateProjectionMatrix();
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (searchParams.get("scene") === RIVER_PARITY_TEST_SCENE) {
+    controls.target.set(worldCells * 0.50, 38, worldCells * 0.50);
+    camera.position.set(worldCells * 0.30, 155, worldCells * 0.86);
+    camera.fov = 48;
+    camera.updateProjectionMatrix();
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryLongViewScene) {
+    const camParam = searchParams.get("cam");
+    const parts = camParam ? camParam.split(",").map(Number) : [];
+    if (camParam && parts.length >= 4 && parts.every(Number.isFinite)) {
+      controls.target.set(parts[0], parts[1], parts[2]);
+      camera.position.set(parts[0], parts[1] + 20, parts[2] + 40);
+      camera.rotation.set(parts[4] ?? 0, parts[3] ?? 0, 0, "YXZ");
+      if (parts[5]) { camera.fov = parts[5]; camera.updateProjectionMatrix(); }
+      controls.update();
+    } else if (activePhase0Scene) {
+      const cam = activePhase0Scene.camera;
+      const xRatio = cam.x_ratio ?? cam.start_x_ratio ?? 0.5;
+      const zRatio = cam.z_ratio ?? cam.start_z_ratio ?? 0.5;
+      const yOffset = cam.y_offset_m ?? worldCells * 0.45;
+      const lookDist = cam.look_distance_m ?? worldCells;
+      const cx = worldCells * xRatio;
+      const cz = worldCells * zRatio;
+      controls.target.set(cx, 64, cz + lookDist * 0.1);
+      camera.position.set(cx - worldCells * 0.15, yOffset, cz + lookDist * 0.15);
+      camera.lookAt(controls.target);
+      controls.update();
+    } else {
+      controls.target.set(mid, 64, mid + worldCells * 0.4);
+      camera.position.set(mid - worldCells * 0.15, worldCells * 0.45, mid + worldCells * 0.55);
+      camera.lookAt(controls.target);
+      controls.update();
     }
   }
 
-  if (queryGrassPerfScene || queryTreePerfScene || queryLongViewScene) {
-    const center = lod0Nodes[0]?.bounds.center;
-    if (center && searchParams.get("scene") !== INFINITE_ISLANDS_SCENE && !activePhase0Scene?.camera) {
-      const y = center[1] + (queryLongViewScene ? 110 : 38);
-      const z = center[2] + (queryLongViewScene ? 220 : 54);
-      camera.position.set(center[0] + 12, y, z);
-      controls.target.set(center[0], center[1], center[2]);
-    }
-  }
-  if (searchParams.get("scene") === RIVER_PARITY_TEST_SCENE) {
-    camera.position.set(worldCells * 0.48, 54, worldCells * 0.56);
-    controls.target.set(worldCells * 0.50, 19, worldCells * 0.50);
-  }
-  controls.update();
+  installRealtimeSunShadows({
+    scene,
+    camera,
+    renderer,
+    worldCells,
+    searchParams,
+    enabled: !queryLongViewScene,
+  });
 
-  installRealtimeSunShadows({ renderer, scene, searchParams });
-
-  const terrainColliders = new TerrainColliderSet();
-  const terrainRaycast = createTerrainRaycastService(terrainColliders);
-  if (!anyBodyInWorld && !queryBorderOceanScene) {
-    console.warn("[water] no configured water bodies intersect this world; water overlay may be empty", {
-      worldCells,
-      lakes: waterConfig.fakeBodies.lakes.length,
-      rivers: waterConfig.fakeBodies.rivers.length,
-    });
-  }
-  if (!queryBorderOceanScene) {
-    lod0Nodes.forEach((n) => terrainColliders.addPage({ id: n.id, mesh: n.mesh } as TerrainColliderPage));
-  }
-
-  const player = new PlayerController(playerConfig, playerBounds);
-  const interaction: PlayerInteractionState = { mode: "orbit" };
+  const colliderPages: TerrainColliderPage[] = lod0Nodes
+    .map((node) => ({
+      id: node.id,
+      mesh: node.mesh,
+      footprint: node.footprint,
+    }));
+  const terrainColliders = new TerrainColliderSet(colliderPages, {
+    enabled: searchParams.get("scene") === INFINITE_ISLANDS_SCENE,
+    surfaceHeight,
+  });
+  const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
+  const interaction = new PlayerInteractionState();
+  const terrainRaycast = createTerrainRaycastService({
+    terrainColliders,
+    surfaceHeight,
+    worldCells,
+  });
 
   return {
     app,
