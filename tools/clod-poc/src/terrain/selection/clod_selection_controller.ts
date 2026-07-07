@@ -76,6 +76,10 @@ function timeSelectionSubphase<T>(target: ClodSelectionSubphases, key: keyof Clo
   }
 }
 
+function streamedRootTarget(node: ClodPageNode): number {
+  return node.rootTransition?.mode === "fadeOut" ? 0 : 1;
+}
+
 export function createClodSelectionController(deps: ClodSelectionControllerDeps): ClodSelectionController {
   const { config, roots, allNodes, overlays, lockedBorderOverlay, staleEditedAncestorIds, onCutChanged } = deps;
   const { clodRuntime } = config;
@@ -99,9 +103,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let cachedFastHits = 0;
   const selSub = emptySelectionSubphases();
   let lastSelectionSource: "cpu" | "webgpu" = "cpu";
-  const parityTracker = createWebGpuParityTracker(
-    clodRuntime.webgpuSelection.parityIntervalFrames,
-  );
+  const parityTracker = createWebGpuParityTracker(clodRuntime.webgpuSelection.parityIntervalFrames);
   let lastWebGpuDispatchFrame = -clodRuntime.webgpuSelection.dispatchIntervalFrames;
   let lastWebGpuDispatchKey = "";
   const readbackState = createWebGpuReadbackState();
@@ -156,11 +158,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       frameId: selectionFrameId,
       cameraPosition: params.camPos,
       cameraForward: [cameraForward.x, cameraForward.y, cameraForward.z],
-      selectionCenter: [
-        params.nearField?.centerX ?? params.camPos[0],
-        0,
-        params.nearField?.centerZ ?? params.camPos[2],
-      ],
+      selectionCenter: [params.nearField?.centerX ?? params.camPos[0], 0, params.nearField?.centerZ ?? params.camPos[2]],
       viewportHeight: params.viewportH,
       fovY: params.fovY,
       thresholdPx: params.thresholdPx,
@@ -192,13 +190,16 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
     for (const node of rendered) {
       const view = deps.getOrCreateView(node, selectionFrameId);
-      view.selected = true;
-      if (view.target !== 1) {
-        view.target = 1;
+      const target = streamedRootTarget(node);
+      view.selected = target > 0.5;
+      if (view.target !== target) {
+        view.target = target;
+        activeTerrainViews.add(view);
+      } else if (node.rootTransition?.mode === "fadeIn" || node.rootTransition?.mode === "fadeOut") {
         activeTerrainViews.add(view);
       }
       applyMaterialTier(view, settings);
-      nextTerrainViews.add(view);
+      if (target > 0.5) nextTerrainViews.add(view);
     }
     timeSelectionSubphase(selSub, "markActive", () => deps.markActiveNodes?.(cutIds, selectionFrameId));
     deps.prefetchNodes?.(rendered, selectionFrameId);
@@ -228,11 +229,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     lastTriCount = tris;
   };
 
-  const maybeRebuildDebugOverlays = (
-    rendered: ClodPageNode[],
-    cutHash: number,
-    settings: ClodSelectionSettings,
-  ): void => {
+  const maybeRebuildDebugOverlays = (rendered: ClodPageNode[], cutHash: number, settings: ClodSelectionSettings): void => {
     const debugKey = buildDebugKey(cutHash, settings);
     if (debugKey === lastDebugKey) return;
     lastDebugKey = debugKey;
@@ -250,14 +247,9 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   ): void => {
     if (!settings.webgpuSelection || !compute) return;
     const dispatchKey = webGpuDispatchKey(params);
-    const dispatchDue =
-      selectionFrameId - lastWebGpuDispatchFrame >= clodRuntime.webgpuSelection.dispatchIntervalFrames;
+    const dispatchDue = selectionFrameId - lastWebGpuDispatchFrame >= clodRuntime.webgpuSelection.dispatchIntervalFrames;
     if (dispatchDue && (!gpuMap || dispatchKey !== lastWebGpuDispatchKey)) {
-      const dispatchOptions: DispatchOptions = buildClodErrorDispatchOptions({
-        readbackMode: config.readbackMode,
-        compute,
-        readbackState,
-      });
+      const dispatchOptions: DispatchOptions = buildClodErrorDispatchOptions({ readbackMode: config.readbackMode, compute, readbackState });
       if (compute.dispatch(params, selectionFrameId, dispatchOptions)) {
         lastWebGpuDispatchFrame = selectionFrameId;
         lastWebGpuDispatchKey = dispatchKey;
@@ -381,8 +373,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     },
     currentTerrainViews: () => currentTerrainViews,
     activeTerrainViews: () => activeTerrainViews,
-    webGpuStats: (webgpuSelectionEnabled) =>
-      deps.getClodErrorCompute()?.stats(selectionFrameId, webgpuSelectionEnabled)
+    webGpuStats: (webgpuSelectionEnabled) => deps.getClodErrorCompute()?.stats(selectionFrameId, webgpuSelectionEnabled)
       ?? emptyWebGpuStats(webgpuSelectionEnabled, allNodes.length, config.webGpuUnavailableReason, config.readbackMode),
     formatWebGpuStats: (webgpuSelectionEnabled) => {
       const stats = deps.getClodErrorCompute()?.stats(selectionFrameId, webgpuSelectionEnabled)
