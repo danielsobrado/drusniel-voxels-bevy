@@ -78,6 +78,8 @@ const TREE_RUNTIME_BUDGET = {
   minSpacing: 6.8,
 } as const;
 
+const POPULATED_PERF_FLAGS = ["populatedPerf", "biomePerf"] as const;
+
 function mergeSlices(slices: AppStateSlices): ClodAppState {
   return {
     ...slices.clod,
@@ -135,31 +137,63 @@ function clampTreeRuntimeState(state: ClodAppState): void {
   if (state.treeShadowMaxLod === "none") state.treeShadowMaxLod = "near";
 }
 
+function populatedPerfEnabled(searchParams: URLSearchParams): boolean {
+  return queryFlagEnabled(searchParams, POPULATED_PERF_FLAGS, false);
+}
+
+function applyPerfUiAndDebugPreset(state: ClodAppState): void {
+  state.clodPerfMode = true;
+  state.proceduralMicroNormals = false;
+  state.postProcessEnabled = false;
+  state.postProcessDebugMode = "off";
+  if (!state.liveBubblePinned) state.bubble = false;
+  state.showBounds = false;
+  state.showSeamPoints = false;
+  state.showCrossLodBorders = false;
+  state.showNodeLabels = false;
+  state.showLockedBorderVertices = false;
+}
+
+function applyClodPerfTerrainPreset(state: ClodAppState): void {
+  state.colorByLod = true;
+  state.albedo = false;
+  state.normalMap = false;
+  state.triplanar = false;
+  state.terrainMaterialSource = "debug_flat";
+  state.proceduralDebugMode = "page LOD";
+}
+
+function applyPopulatedPerfPreset(state: ClodAppState, params: CreateClodAppStateParams): void {
+  applyPerfUiAndDebugPreset(state);
+  state.grassEnabled = true;
+  state.stonesEnabled = true;
+  state.treesEnabled = true;
+  state.understoryEnabled = true;
+  state.waterEnabled = true;
+  state.weatherMode = "off";
+  if (params.isWebGpu) {
+    state.grassShaderMode = "webgpu-ring-v1";
+    state.treeGpuEnabled = true;
+  }
+}
+
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
   const scene = sceneFromSearchParams(params.searchParams);
+  const populatedPerf = populatedPerfEnabled(params.searchParams);
   if (params.isWebGpu) state.normalDivergence = false;
-  if (params.queryPerfMode) {
-    state.clodPerfMode = true;
-    state.colorByLod = true;
-    state.albedo = false;
-    state.normalMap = false;
-    state.triplanar = false;
-    state.terrainMaterialSource = "debug_flat";
-    state.proceduralDebugMode = "page LOD";
-    state.proceduralMicroNormals = false;
-    state.postProcessEnabled = false;
-    state.postProcessDebugMode = "off";
-    if (!state.liveBubblePinned) state.bubble = false;
-    state.showBounds = false;
-    state.showSeamPoints = false;
-    state.showCrossLodBorders = false;
-    state.showNodeLabels = false;
-    state.showLockedBorderVertices = false;
+  if (params.queryPerfMode || populatedPerf) {
+    applyPerfUiAndDebugPreset(state);
+  }
+  if (params.queryPerfMode && !populatedPerf) {
+    applyClodPerfTerrainPreset(state);
     state.grassEnabled = false;
     state.stonesEnabled = false;
     state.treesEnabled = false;
     state.waterEnabled = false;
     state.weatherMode = "off";
+  }
+  if (populatedPerf) {
+    applyPopulatedPerfPreset(state, params);
   }
   if (params.queryGrassPerfScene) {
     state.grassEnabled = true;
