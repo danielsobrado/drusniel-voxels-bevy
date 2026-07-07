@@ -276,7 +276,7 @@ export function runFrameLoopStartup(
   let lastStreamCenterZ = Number.NaN;
   const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
   const updateSelectionWithStreaming = () => {
-    const center = interaction.mode === "playing" ? player.position : controls.target;
+    const center = interaction.mode === "playing" ? player.position : (streamingScene ? camera.position : controls.target);
     const previousStats = streamingClodRootController.stats();
     const dx = center.x - lastStreamCenterX;
     const dz = center.z - lastStreamCenterZ;
