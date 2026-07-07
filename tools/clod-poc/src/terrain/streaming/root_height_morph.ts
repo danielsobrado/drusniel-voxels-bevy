@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 
+export const ROOT_HEIGHT_MORPH_ATTRIBUTE = "rootMorphDeltaY";
+
 export interface RootHeightMorphView {
   node: Pick<ClodPageNode, "id" | "mesh" | "rootTransition">;
   mesh: THREE.Mesh;
@@ -38,7 +40,6 @@ interface HeightSampler {
   sample(x: number, z: number): number | null;
 }
 
-const MORPH_TARGET_INDEX = 0;
 const HEIGHT_MORPH_BIN_SIZE_M = 32;
 const HEIGHT_MORPH_MAX_SEARCH_BINS = 2;
 const HEIGHT_MORPH_MAX_DELTA_M = 128;
@@ -173,27 +174,29 @@ function morphSignature(view: RootHeightMorphView, sourceViews: readonly RootHei
   return `${transition?.groupId ?? 0}:${transition?.mode ?? "stable"}:${view.node.id}:${sourceSignature(sourceViews)}`;
 }
 
-function ensureMorphTarget(view: RootHeightMorphView, deltaPositions: Float32Array): void {
-  const geometry = view.mesh.geometry as THREE.BufferGeometry;
-  geometry.morphTargetsRelative = true;
-  const existing = geometry.morphAttributes.position?.[MORPH_TARGET_INDEX] as THREE.BufferAttribute | undefined;
-  if (existing && existing.array.length === deltaPositions.length) {
-    (existing.array as Float32Array).set(deltaPositions);
-    existing.needsUpdate = true;
-  } else {
-    geometry.morphAttributes.position = [new THREE.BufferAttribute(deltaPositions, 3)];
-    view.mesh.updateMorphTargets();
-  }
-  view.mesh.morphTargetInfluences ??= [];
+function ensureRootMorphAttribute(geometry: THREE.BufferGeometry, vertexCount: number): THREE.BufferAttribute {
+  const existing = geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
+  if (existing && existing.array.length === vertexCount) return existing;
+  const attribute = new THREE.BufferAttribute(new Float32Array(vertexCount), 1);
+  geometry.setAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE, attribute);
+  return attribute;
 }
 
-function buildDeltaPositions(view: RootHeightMorphView, sourceViews: readonly RootHeightMorphView[]): Float32Array {
+function writeMorphDeltaAttribute(view: RootHeightMorphView, deltaY: Float32Array): void {
+  const geometry = view.mesh.geometry as THREE.BufferGeometry;
+  const attribute = ensureRootMorphAttribute(geometry, deltaY.length);
+  (attribute.array as Float32Array).set(deltaY);
+  attribute.needsUpdate = true;
+}
+
+function buildDeltaY(view: RootHeightMorphView, sourceViews: readonly RootHeightMorphView[]): Float32Array {
   const sampler = buildHeightSampler(sourceViews);
   const positions = view.node.mesh.positions;
-  const deltas = new Float32Array(positions.length);
-  for (let i = 0; i < positions.length; i += 3) {
-    const sourceY = sampler.sample(positions[i], positions[i + 2]);
-    deltas[i + 1] = sourceY === null ? 0 : clampDelta(sourceY - positions[i + 1]);
+  const deltas = new Float32Array(positions.length / 3);
+  for (let i = 0; i < deltas.length; i++) {
+    const p = i * 3;
+    const sourceY = sampler.sample(positions[p], positions[p + 2]);
+    deltas[i] = sourceY === null ? 0 : clampDelta(sourceY - positions[p + 1]);
   }
   return deltas;
 }
@@ -201,7 +204,6 @@ function buildDeltaPositions(view: RootHeightMorphView, sourceViews: readonly Ro
 export function applyRootHeightMorph(
   view: RootHeightMorphView,
   sourceViews: readonly RootHeightMorphView[],
-  influence: number,
 ): RootHeightMorphStats {
   if (sourceViews.length === 0) {
     resetRootHeightMorph(view);
@@ -214,19 +216,22 @@ export function applyRootHeightMorph(
   let builtRoots = 0;
   let builtVertices = 0;
   if (geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY] !== signature) {
-    const deltas = buildDeltaPositions(view, sourceViews);
-    ensureMorphTarget(view, deltas);
+    const deltas = buildDeltaY(view, sourceViews);
+    writeMorphDeltaAttribute(view, deltas);
     geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY] = signature;
     view.node.rootTransition!.parentHeightMorphReady = true;
     builtRoots = 1;
-    builtVertices = deltas.length / 3;
+    builtVertices = deltas.length;
   }
 
-  view.mesh.morphTargetInfluences ??= [];
-  view.mesh.morphTargetInfluences[MORPH_TARGET_INDEX] = THREE.MathUtils.clamp(influence, 0, 1);
   return { builtRoots, builtVertices, buildMs: performance.now() - startedAt };
 }
 
 export function resetRootHeightMorph(view: RootHeightMorphView): void {
-  if (view.mesh.morphTargetInfluences) view.mesh.morphTargetInfluences[MORPH_TARGET_INDEX] = 0;
+  const geometry = view.mesh.geometry as THREE.BufferGeometry;
+  const attribute = geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
+  if (!attribute) return;
+  (attribute.array as Float32Array).fill(0);
+  attribute.needsUpdate = true;
+  delete geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY];
 }
