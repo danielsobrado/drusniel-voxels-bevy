@@ -17,6 +17,15 @@ import type { ClodPageNode } from "../../types.js";
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const RING_CLAMP_MARGIN = 2;
 
+const CANONICAL_CENTER_SOURCE_CODE = {
+  playing_player: 1,
+  orbit_spawned_player: 2,
+  orbit_camera: 3,
+  orbit_target: 4,
+} as const;
+
+type CanonicalCenterSource = keyof typeof CANONICAL_CENTER_SOURCE_CODE;
+
 let cachedInfiniteIslandsScene: boolean | null = null;
 let liveBubbleBuiltTotal = 0;
 let liveBubbleEvictionsTotal = 0;
@@ -50,6 +59,11 @@ interface RootMorphFrameStats {
   builtRoots: number;
   builtVertices: number;
   buildMs: number;
+}
+
+interface CanonicalCenter {
+  center: THREE.Vector3;
+  source: CanonicalCenterSource;
 }
 
 export interface TerrainFramePhaseInput {
@@ -164,6 +178,21 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_probe_collider_removals_total"] = liveBubbleProbeColliderRemovalsTotal;
 }
 
+function mirrorCanonicalWorldCenter(input: TerrainFramePhaseInput, canonical: CanonicalCenter): void {
+  const counters = hooksCounters();
+  if (!counters) return;
+  counters["canonical_world_center_x"] = canonical.center.x;
+  counters["canonical_world_center_z"] = canonical.center.z;
+  counters["canonical_world_center_source"] = CANONICAL_CENTER_SOURCE_CODE[canonical.source];
+  counters["canonical_world_player_spawned"] = input.player.spawned ? 1 : 0;
+  counters["canonical_world_player_x"] = input.player.position.x;
+  counters["canonical_world_player_z"] = input.player.position.z;
+  counters["canonical_world_camera_x"] = input.camera?.position.x ?? input.controls.object.position.x;
+  counters["canonical_world_camera_z"] = input.camera?.position.z ?? input.controls.object.position.z;
+  counters["canonical_world_target_x"] = input.controls.target.x;
+  counters["canonical_world_target_z"] = input.controls.target.z;
+}
+
 function mirrorVegetationRingStats(grassCenter: THREE.Vector3, ringCenter: THREE.Vector3, unbounded: boolean): void {
   const counters = hooksCounters();
   if (!counters) return;
@@ -190,10 +219,17 @@ function infiniteIslandsScene(): boolean {
   return cachedInfiniteIslandsScene;
 }
 
-function canonicalWorldCenter(input: TerrainFramePhaseInput, infiniteScene: boolean): THREE.Vector3 {
-  if (input.interaction.mode === "playing") return input.player.position;
-  if (infiniteScene) return input.camera?.position ?? input.controls.object.position;
-  return input.controls.target;
+function canonicalWorldCenter(input: TerrainFramePhaseInput, infiniteScene: boolean): CanonicalCenter {
+  if (input.interaction.mode === "playing") {
+    return { center: input.player.position, source: "playing_player" };
+  }
+  if (infiniteScene && input.player.spawned) {
+    return { center: input.player.position, source: "orbit_spawned_player" };
+  }
+  if (infiniteScene) {
+    return { center: input.camera?.position ?? input.controls.object.position, source: "orbit_camera" };
+  }
+  return { center: input.controls.target, source: "orbit_target" };
 }
 
 export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: number, unbounded: boolean): THREE.Vector3 {
@@ -280,7 +316,9 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   mirrorRootMorphStats(morphStats);
 
   const ringUnbounded = infiniteIslandsScene();
-  const bubbleCenter = canonicalWorldCenter(input, ringUnbounded);
+  const canonicalCenter = canonicalWorldCenter(input, ringUnbounded);
+  mirrorCanonicalWorldCenter(input, canonicalCenter);
+  const bubbleCenter = canonicalCenter.center;
   const bubbleStats = input.nearFieldBubbleController.update({
     enabled: input.state.bubble,
     bubbleRadius: input.state.bubbleRadius,
