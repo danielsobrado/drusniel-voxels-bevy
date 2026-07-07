@@ -61,6 +61,12 @@ import { applyWaterQueryOverrides } from "../../water/water_quality_overrides.js
 import type { ClodPageNode } from "../../types.js";
 import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
+import {
+  INFINITE_ISLANDS_SCENE,
+  describeWorldMode,
+  resolveWorldMode,
+  type WorldModeConfig,
+} from "../world_mode.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import configText from "../../../config/clod_pages.yaml?raw";
 import stoneConfigText from "../../../config/stones.yaml?raw";
@@ -105,7 +111,6 @@ function booleanParam(searchParams: URLSearchParams, keys: readonly string[], fa
   return fallback;
 }
 
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const DEFAULT_INFINITE_BOOTSTRAP_WORLD_PAGES = 2;
 
 type StartupTimings = Record<string, number>;
@@ -238,6 +243,7 @@ export interface WorldBuildResult {
   WORLD: number;
   worldCells: number;
   worldSizeCells: number;
+  worldMode: WorldModeConfig;
   lod0Nodes: ClodPageNode[];
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
@@ -351,10 +357,26 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     queryBorderOceanScene,
   }, borderOceanSceneConfig.defaultWorldPages);
   const WORLD = startupWorldPages(configuredWorld, stagedImport, clodRuntime, searchParams, sceneName);
-  const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const pageCells = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const worldCells = WORLD * pageCells;
+  const worldMode: WorldModeConfig = resolveWorldMode({
+    scene: sceneName,
+    searchParams,
+    configuredWorldPages: configuredWorld,
+    startupWorldPages: WORLD,
+    pageCells,
+    islandShapeEnabled: terrainFieldConfig.islandShape.enabled,
+    borderCoastConfigEnabled: borderCoastOceanConfig.enabled,
+    oceanRim: terrainFieldConfig.islandShape.oceanRim,
+    worldRadiusM: terrainFieldConfig.islandShape.worldRadiusM,
+  });
+  window.__drusnielWorldMode = worldMode;
   startupTimings["startup.configured_world_pages"] = configuredWorld;
   startupTimings["startup.world_pages"] = WORLD;
   startupTimings["startup.world_cells"] = worldCells;
+  for (const [key, value] of Object.entries(describeWorldMode(worldMode))) {
+    if (typeof value === "number") startupTimings[`startup.${key}`] = value;
+  }
   startupTimings["acceptance_world_reuse_enabled"] = searchParams.get("acceptance") === "1" ? 1 : 0;
   startupTimings["acceptance_world_reuse_mode"] = numberParam(searchParams, ["acceptanceReuseMode"]) ?? 0;
 
@@ -376,15 +398,12 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   if (isRiverParityTestScene(searchParams.get("scene"))) waterConfig = applyRiverParityTestWaterConfig(waterConfig);
   waterConfig = resolveWaterConfig(waterConfig, worldCells);
 
-  // Border coast is a finite-world feature. Infinite islands own their coast via
-  // the procedural island field, so the finite rectangular border coast must be
-  // disabled — otherwise everything outside the small startup world (worldCells,
-  // derived from startupWorld) collapses to a flat sea-level sheet. We pass the
-  // disabled config to the runtime, the worker, and the cache key so all three agree.
-  const borderCoastActive =
-    borderCoastOceanConfig.enabled &&
-    !isInfiniteIslands &&
-    !terrainFieldConfig.islandShape.enabled;
+  // Border coast is a finite-world feature (worldMode.borderCoastEnabled). Infinite islands own
+  // their coast via the procedural island field, so the finite rectangular border coast must be
+  // disabled — otherwise everything outside the small startup world (worldCells, derived from
+  // startupWorld) collapses to a flat sea-level sheet. We pass the disabled config to the runtime,
+  // the worker, and the cache key so all three agree.
+  const borderCoastActive = worldMode.borderCoastEnabled;
   const effectiveBorderCoast: BorderCoastOceanConfig = borderCoastActive
     ? borderCoastOceanConfig
     : { ...borderCoastOceanConfig, enabled: false };
@@ -454,6 +473,8 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     worldSeed: String(seed),
     terrainFieldConfig,
     worldPages: WORLD,
+    worldMode: worldMode.mode,
+    borderCoastMode: worldMode.borderCoastEnabled ? "finite_rect" : "none",
     generatorVersion: cfg.meshopt_package_version,
     digRevision: getDigEditRevision(),
     hydrologyTerrain,
@@ -568,6 +589,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     WORLD,
     worldCells,
     worldSizeCells: worldCells,
+    worldMode,
     lod0Nodes,
     allNodes,
     maxTerrainLevel,

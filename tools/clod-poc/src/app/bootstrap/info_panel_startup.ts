@@ -8,7 +8,31 @@ import { formatUnderstoryInfoLine } from "../../understory/index.js";
 import { formatForestLightingInfoLine } from "../../forest_lighting/index.js";
 import { updateClodOverlay, type ClodOverlaySnapshot } from "../../ui/overlay_panel.js";
 import { createStreamDiagnosticTracker } from "../../stream/stream_diagnostics.js";
+import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
+
+/**
+ * Compact world-identity diagnostics line. Surfaces the WorldMode struct, the finite/infinite
+ * decision, the active far owner, live streamed-root safety coverage, and the cache-source
+ * version so the exact class of bug that flattened terrain far from the startup world is visible
+ * at a glance instead of hidden in global state.
+ */
+function formatWorldModeLine(cameraX: number, cameraZ: number): string {
+  const world = window.__drusnielWorldMode;
+  const counters = window.__drusnielClod?.stats?.counters ?? {};
+  const safetyReady = counters["live_clod_stream_safety_ready_pages"] ?? 0;
+  const safetyRequired = counters["live_clod_stream_safety_required_pages"] ?? 0;
+  const activeRoots = counters["live_clod_stream_active_root_pages"] ?? 0;
+  const center = `player=(${cameraX.toFixed(0)}, ${cameraZ.toFixed(0)})`;
+  if (!world) return `world: (mode pending)   ${center}   cache=${TERRAIN_SOURCE_VERSION}`;
+  const radius = world.proceduralWorldRadiusM ? `${world.proceduralWorldRadiusM}m` : "inf";
+  return (
+    `world: ${world.mode}   cfg=${world.configuredWorldPages}p boot=${world.startupWorldPages}p ` +
+    `(cells cfg=${world.configuredWorldCells}/boot=${world.startupWorldCells})   radius=${radius}   ` +
+    `coast=${world.borderCoastEnabled ? "on" : "off"}   far=${world.farOwner}   ` +
+    `${center}   safety=${safetyReady}/${safetyRequired} roots=${activeRoots}   cache=${TERRAIN_SOURCE_VERSION}`
+  );
+}
 
 export interface InfoPanelController {
   updateInfo: () => void;
@@ -111,6 +135,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     logTreeGpuWarningIfNeeded(formatTreeGpuFallbackWarning(state.treesEnabled, state.treeGpuEnabled, treeStats.current));
     info.textContent =
       `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${sceneLabel}\n` +
+      `${formatWorldModeLine(input.camera.position.x, input.camera.position.z)}\n` +
       `cut: ${selection.renderedCount} nodes  (${selection.levelSummary})\n` +
       `tris rendered: ${selection.triCount.toLocaleString()}   2:1 forced splits: ${selection.forcedSplits}   ` +
       `bubble forced splits: ${selection.nearFieldForcedSplits}   xLOD borders: ${selection.crossLodAdjacencyCount}\n` +

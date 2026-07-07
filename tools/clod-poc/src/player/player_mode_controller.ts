@@ -25,6 +25,8 @@ export interface PlayerModeControllerDeps {
   onBeforeExitMode: () => void;
   resetPlayerInput: () => void;
   onStartPlayingFacing: (yaw: number, pitch: number) => void;
+  /** Defer the query spawn until streamed-root safety pages + colliders are ready (streaming worlds). */
+  spawnGateEnabled?: boolean;
 }
 
 export interface PlayerModeController {
@@ -85,6 +87,32 @@ export function resolveQuerySpawnPoint(
 
   if (Number.isFinite(best.y)) return best;
   return { x, y: WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M, z, adjusted: false };
+}
+
+// ~5s at 60fps: if streaming stalls, spawn anyway rather than hang forever.
+const SPAWN_GATE_MAX_FRAMES = 300;
+
+export interface QuerySpawnGateState {
+  /** Only streaming/infinite worlds gate; finite worlds spawn immediately. */
+  enabled: boolean;
+  safetyReady: number;
+  safetyRequired: number;
+  collidersLoaded: number;
+  framesWaited: number;
+  maxFrames: number;
+}
+
+/**
+ * Decide whether the query spawn may be applied this frame. Pure so it is unit-testable.
+ * For streaming worlds the player must not drop onto un-meshed ground: wait until the streamed
+ * root safety pages report full coverage and at least one collider page has loaded, but never
+ * past the frame cap.
+ */
+export function shouldApplyQuerySpawnNow(gate: QuerySpawnGateState): boolean {
+  if (!gate.enabled) return true;
+  if (gate.framesWaited >= gate.maxFrames) return true;
+  const safetyReady = gate.safetyRequired > 0 && gate.safetyReady >= gate.safetyRequired;
+  return safetyReady && gate.collidersLoaded > 0;
 }
 
 function resolveColliderSpawnPoint(
@@ -199,16 +227,7 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     if (deps.interaction.mode === "playing") deps.playerModeStatus.textContent = "Click viewport to capture mouse";
   });
 
-  const applyQuerySpawn = () => {
-    const qx = deps.searchParams.get("x");
-    const qz = deps.searchParams.get("z");
-    const qyaw = deps.searchParams.get("yaw");
-    if (qx === null || qz === null) return;
-    const xVal = Number(qx);
-    const zVal = Number(qz);
-    const yawVal = qyaw !== null ? Number(qyaw) : 0;
-    if (!Number.isFinite(xVal) || !Number.isFinite(zVal)) return;
-
+  const performQuerySpawn = (xVal: number, zVal: number, yawVal: number) => {
     const spawn = resolveQuerySpawnPoint(xVal, zVal, deps.surfaceHeight);
     const spawnPoint = resolveColliderSpawnPoint(deps.terrainColliders, spawn);
     if (spawn.adjusted) {
@@ -230,6 +249,47 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
 
     deps.camera.position.copy(deps.player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, deps.player.config.eyeHeight);
     deps.camera.rotation.set(0, yawVal, 0, "YXZ");
+  };
+
+  const applyQuerySpawn = () => {
+    const qx = deps.searchParams.get("x");
+    const qz = deps.searchParams.get("z");
+    const qyaw = deps.searchParams.get("yaw");
+    if (qx === null || qz === null) return;
+    const xVal = Number(qx);
+    const zVal = Number(qz);
+    const yawVal = qyaw !== null ? Number(qyaw) : 0;
+    if (!Number.isFinite(xVal) || !Number.isFinite(zVal)) return;
+
+    if (deps.spawnGateEnabled !== true) {
+      performQuerySpawn(xVal, zVal, yawVal);
+      return;
+    }
+
+    // Streaming/infinite worlds: hold in the pre-play (orbit) view until the streamed-root safety
+    // pages report full coverage and at least one collider page has loaded around the spawn, so the
+    // player lands on real ground instead of dropping through un-meshed terrain. Frame-capped so a
+    // stalled stream never hangs the spawn.
+    let framesWaited = 0;
+    const poll = () => {
+      if (deps.interaction.mode === "playing") return;
+      const counters = (typeof window !== "undefined" ? window.__drusnielClod?.stats?.counters : undefined) ?? {};
+      const ready = shouldApplyQuerySpawnNow({
+        enabled: true,
+        safetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
+        safetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
+        collidersLoaded: deps.terrainColliders.loadedPageCount(),
+        framesWaited,
+        maxFrames: SPAWN_GATE_MAX_FRAMES,
+      });
+      if (ready) {
+        performQuerySpawn(xVal, zVal, yawVal);
+        return;
+      }
+      framesWaited++;
+      requestAnimationFrame(poll);
+    };
+    requestAnimationFrame(poll);
   };
 
   return {

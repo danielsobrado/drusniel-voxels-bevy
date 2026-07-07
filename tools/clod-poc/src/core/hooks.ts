@@ -63,6 +63,7 @@ declare global {
   interface Window {
     __drusnielClod?: ClodHooks;
     __drusnielStartupTimings?: Record<string, number>;
+    __drusnielWorldMode?: import("../app/world_mode.js").WorldModeConfig;
     __drusnielAcceptanceWorldCacheKey?: import("../cache/acceptanceWorldCacheKey.js").AcceptanceWorldCacheKey;
     __drusnielTerrainSummary?: import("../clod/terrain_summary.js").TerrainSummaryField;
     __drusnielPhase0Report?: Phase0SceneReport;

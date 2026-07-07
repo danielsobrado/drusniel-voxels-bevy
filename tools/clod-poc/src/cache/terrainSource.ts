@@ -10,7 +10,7 @@ const textEncoder = new TextEncoder();
 // v2: border coast is now disabled for infinite-island fields (islandShape.enabled),
 // so page geometry outside the startup world is the true procedural field instead of a
 // collapsed sea-level sheet. Bump invalidates any pages cached under the old finite coast.
-const TERRAIN_SOURCE_VERSION = "world-modes-v2";
+export const TERRAIN_SOURCE_VERSION = "world-modes-v2";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -79,6 +79,10 @@ export interface TerrainSourceInputs {
   worldPages: number;
   worldPagesX?: number;
   worldPagesZ?: number;
+  /** finite | infinite_islands — the explicit world identity (see app/world_mode.ts). */
+  worldMode?: string;
+  /** finite_rect | none — whether the finite border coast shapes the world edge. */
+  borderCoastMode?: string;
   generatorVersion: string;
   digRevision: number;
   hydrologyTerrain: SerializedHydrologyTerrain | null;
@@ -107,6 +111,8 @@ export function normalizeTerrainSourceInputs(
     worldPages: input.worldPages ?? 0,
     worldPagesX: input.worldPagesX ?? input.worldPages ?? 0,
     worldPagesZ: input.worldPagesZ ?? input.worldPagesX ?? input.worldPages ?? 0,
+    worldMode: input.worldMode ?? "finite",
+    borderCoastMode: input.borderCoastMode ?? (input.borderCoastOceanConfig?.enabled ? "finite_rect" : "none"),
     generatorVersion: input.generatorVersion ?? "unknown",
     digRevision: input.digRevision ?? 0,
     hydrologyTerrain: input.hydrologyTerrain ?? null,
@@ -158,6 +164,8 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     worldPages: source.worldPages,
     worldPagesX: source.worldPagesX,
     worldPagesZ: source.worldPagesZ,
+    worldMode: source.worldMode,
+    borderCoastMode: source.borderCoastMode,
     generatorVersion: source.generatorVersion,
     digRevision: source.digRevision,
     hydrologyHash,
