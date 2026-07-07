@@ -8,6 +8,14 @@ export interface DeepOceanSurface {
   dispose(): void;
 }
 
+export interface DeepOceanSurfaceOptions {
+  mode?: "finite-border" | "camera-relative";
+  getCenter?: () => THREE.Vector3;
+  rebaseSnapM?: number;
+  innerRadiusM?: number;
+  outerRadiusM?: number;
+}
+
 interface BandSpec {
   x0: number;
   x1: number;
@@ -28,6 +36,7 @@ interface Layout {
 }
 
 const MIN_SEGMENTS = 1;
+const DEFAULT_CAMERA_RELATIVE_SNAP_M = 128;
 
 function clampSegments(value: number): number {
   return Math.max(MIN_SEGMENTS, Math.floor(value));
@@ -146,7 +155,77 @@ export function countDeepOceanTransitionGapVertices(worldCells: number, config: 
   return count;
 }
 
-export function createDeepOceanSurface(worldCells: number, config: DeepOceanRenderConfig, material: THREE.Material): DeepOceanSurface | null {
+function snap(value: number, snapM: number): number {
+  return Math.round(value / snapM) * snapM;
+}
+
+function buildCameraRelativeGeometry(config: DeepOceanRenderConfig, options: DeepOceanSurfaceOptions): THREE.BufferGeometry {
+  const innerRadius = Math.max(0, options.innerRadiusM ?? config.ringInnerBandM);
+  const outerRadius = Math.max(innerRadius + 1, options.outerRadiusM ?? config.extendCells);
+  const radialSegments = clampSegments(config.ringInnerRadialSegments + config.ringOuterRadialSegments);
+  const angularSegments = clampSegments(config.ringTangentialSegments);
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let ri = 0; ri <= radialSegments; ri++) {
+    const r = innerRadius + (outerRadius - innerRadius) * (ri / radialSegments);
+    for (let ai = 0; ai <= angularSegments; ai++) {
+      const theta = (ai / angularSegments) * Math.PI * 2;
+      positions.push(r * Math.cos(theta), config.surfaceY, r * Math.sin(theta));
+    }
+  }
+
+  const stride = angularSegments + 1;
+  for (let ri = 0; ri < radialSegments; ri++) {
+    for (let ai = 0; ai < angularSegments; ai++) {
+      const a = ri * stride + ai;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  const bounds = deepOceanWaveVerticalBounds(deepOceanGpuWaves(config.wave));
+  geometry.boundingBox = new THREE.Box3(
+    new THREE.Vector3(-outerRadius - bounds, config.surfaceY - bounds, -outerRadius - bounds),
+    new THREE.Vector3(outerRadius + bounds, config.surfaceY + bounds, outerRadius + bounds),
+  );
+  return geometry;
+}
+
+function createCameraRelativeDeepOceanSurface(config: DeepOceanRenderConfig, material: THREE.Material, options: DeepOceanSurfaceOptions): DeepOceanSurface | null {
+  if (!config.enabled) return null;
+  const geometry = buildCameraRelativeGeometry(config, options);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = "deep-ocean-surface-camera-relative";
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 9;
+  const snapM = Math.max(1, options.rebaseSnapM ?? DEFAULT_CAMERA_RELATIVE_SNAP_M);
+
+  const syncToCenter = () => {
+    const center = options.getCenter?.();
+    if (!center) return;
+    mesh.position.set(snap(center.x, snapM), 0, snap(center.z, snapM));
+  };
+  syncToCenter();
+
+  return {
+    mesh,
+    update(_timeSeconds: number) { syncToCenter(); },
+    dispose() {
+      geometry.dispose();
+      mesh.removeFromParent();
+    },
+  };
+}
+
+function createFiniteBorderDeepOceanSurface(worldCells: number, config: DeepOceanRenderConfig, material: THREE.Material): DeepOceanSurface | null {
   if (!config.enabled || worldCells <= 0) return null;
   const positions: number[] = [];
   const indices: number[] = [];
@@ -175,6 +254,16 @@ export function createDeepOceanSurface(worldCells: number, config: DeepOceanRend
       mesh.removeFromParent();
     },
   };
+}
+
+export function createDeepOceanSurface(
+  worldCells: number,
+  config: DeepOceanRenderConfig,
+  material: THREE.Material,
+  options: DeepOceanSurfaceOptions = {},
+): DeepOceanSurface | null {
+  if (options.mode === "camera-relative") return createCameraRelativeDeepOceanSurface(config, material, options);
+  return createFiniteBorderDeepOceanSurface(worldCells, config, material);
 }
 
 export function deepOceanSurfaceVertexCount(worldCells: number, config: DeepOceanRenderConfig): number {
