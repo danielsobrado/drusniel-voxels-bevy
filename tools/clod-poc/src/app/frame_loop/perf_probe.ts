@@ -14,6 +14,12 @@ const MIRRORED_METRICS: readonly FramePerfMetric[] = [
   "selectionMs",
   "selectionCutMs",
   "selectionBookMs",
+  "selectionInfoMs",
+  "selectionOverlaysMs",
+  "selectionSub.cut",
+  "selectionSub.book",
+  "selectionSub.info",
+  "selectionSub.overlays",
   "clodApplyMs",
   "terrainPhaseMs",
   "bubbleMs",
@@ -64,6 +70,10 @@ export function createFramePerfPhaseTiming(): FramePerfPhaseTiming {
   };
 }
 
+function maxCounter(samples: readonly FramePerfSample[], key: string): number {
+  return samples.reduce((max, sample) => Math.max(max, Number(sample[key] ?? 0)), 0);
+}
+
 export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], warmupFrames: number, targetSampleFrames: number): FramePerfSummary {
   const metrics = Object.fromEntries(FRAME_PERF_ALL_METRICS.map((m) => [m, statsFor(samples, m)])) as Record<FramePerfMetric, import("./perf_probe_types.js").FramePerfMetricStats>;
   const renderedTotal = samples.reduce((s, sample) => s + sample.renderedCount, 0);
@@ -109,6 +119,12 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       terrainTrianglesAvg: samples.length > 0 ? trianglesTotal / samples.length : 0,
       chunkGroupsBuiltTotal: samples.reduce((s, sample) => s + sample.chunkGroupsBuilt, 0),
       nearFieldChunkGroupsMax: samples.reduce((m, sample) => Math.max(m, sample.nearFieldChunkGroups), 0),
+      selectionCutCacheHitsMax: maxCounter(samples, "selectionCutCacheHits"),
+      selectionCutCacheMissesMax: maxCounter(samples, "selectionCutCacheMisses"),
+      selectionCutCacheInvalidationsMax: maxCounter(samples, "selectionCutCacheInvalidations"),
+      selectionCutCacheLastReasonCode: samples.length > 0 ? Number(samples[samples.length - 1]?.selectionCutCacheLastReasonCode ?? -1) : -1,
+      selectionCutCacheReasonCounts: countSelectionCacheReasons(samples),
+      cachedFastHitsMax: maxCounter(samples, "cachedFastHits"),
       treeGpuStatusCounts: countTreeGpuStatuses(samples),
       treeTotalTreesAvg: avgCounter(samples, "treeTotalTrees"),
       treeGpuCandidateCountAvg: avgCounter(samples, "treeGpuCandidateCount"),
@@ -196,6 +212,16 @@ function countStatsSyncReasons(samples: readonly FramePerfSample[]): Record<stri
   for (const sample of samples) {
     const key = String(sample.statsSyncThrottleReason);
     counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function countSelectionCacheReasons(samples: readonly FramePerfSample[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const sample of samples) {
+    const reason = sample.selectionCutCacheLastReason;
+    if (typeof reason !== "string" || reason.length === 0) continue;
+    counts[reason] = (counts[reason] ?? 0) + 1;
   }
   return counts;
 }
@@ -293,6 +319,14 @@ function mirrorFramePerfCounters(
   });
   counters["framePerf.renderedCountAvg"] = snapshot.counters.renderedCountAvg;
   counters["framePerf.terrainTrianglesAvg"] = snapshot.counters.terrainTrianglesAvg;
+  counters["framePerf.selectionCutCache.hitsMax"] = snapshot.counters.selectionCutCacheHitsMax;
+  counters["framePerf.selectionCutCache.missesMax"] = snapshot.counters.selectionCutCacheMissesMax;
+  counters["framePerf.selectionCutCache.invalidationsMax"] = snapshot.counters.selectionCutCacheInvalidationsMax;
+  counters["framePerf.selectionCutCache.lastReasonCode"] = snapshot.counters.selectionCutCacheLastReasonCode;
+  counters["framePerf.cachedFastHitsMax"] = snapshot.counters.cachedFastHitsMax;
+  for (const [reason, count] of Object.entries(snapshot.counters.selectionCutCacheReasonCounts ?? {})) {
+    counters[`framePerf.selectionCutCache.reason.${reason}`] = Number(count) || 0;
+  }
   counters["framePerf.dynamicResolutionRenderScaleAvg"] = snapshot.counters.dynamicResolutionRenderScaleAvg;
   counters["framePerf.dynamicResolutionActiveFrames"] = snapshot.counters.dynamicResolutionActiveFrames;
   counters["framePerf.statsSyncRanFrames"] = snapshot.counters.statsSyncRanFrames;
