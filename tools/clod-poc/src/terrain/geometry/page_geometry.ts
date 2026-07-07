@@ -3,6 +3,7 @@ import { getTerrainFieldConfig, PAINT_BLEND_CHANNELS, paintWeightsAt } from "../
 import type { PageMesh } from "../../types.js";
 import type { ChunkMesh } from "../../gpu/gpu_chunk_mesher.js";
 import { BiomeRegionField } from "../../world_source/biome_region_field.js";
+import { ROOT_HEIGHT_MORPH_ATTRIBUTE } from "../streaming/root_height_morph.js";
 
 type MeshLike = PageMesh | ChunkMesh;
 
@@ -55,8 +56,10 @@ export function biomeIdsFor(mesh: MeshLike): Float32Array {
 
 export function toGeometry(mesh: MeshLike): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
+  const vertexCount = mesh.positions.length / 3;
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+  g.setAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE, new THREE.BufferAttribute(new Float32Array(vertexCount), 1));
   const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(mesh);
   g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
   g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
