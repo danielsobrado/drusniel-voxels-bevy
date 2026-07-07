@@ -64,6 +64,7 @@ const ACCEPTANCE_RENDER_PARAMS = {
 
 const ACCEPTANCE_PERF_PROBE_PARAMS = {
   perfProbe: "1",
+  perfProbeConvergenceGate: "0",
   perfWarmupFrames: "0",
 } as const;
 
@@ -220,9 +221,9 @@ export function cacheEvidenceFromTimings(
     clodCacheKeyMatch: numTiming(timings, "clod_cache_key_match"),
     terrainSummaryCacheHit: numTiming(timings, "terrain_summary_cache_hit"),
     terrainSummaryCacheMiss: numTiming(timings, "terrain_summary_cache_miss"),
-    startupBuildWorldMs: numTiming(timings, "startup_build_world_ms"),
-    startupTerrainSummaryMs: numTiming(timings, "startup_terrain_summary_ms"),
-    startupTotalMs: numTiming(timings, "startup_total_ms"),
+    startupBuildWorldMs: numTiming(timings, "startup.build_world_ms"),
+    startupTerrainSummaryMs: numTiming(timings, "startup.terrain_summary_ms"),
+    startupTotalMs: numTiming(timings, "startup.total_ms"),
     reuseEnabled: numTiming(timings, "acceptance_world_reuse_enabled"),
     reuseMode: numTiming(timings, "acceptance_world_reuse_mode"),
     page_reused: 0,
