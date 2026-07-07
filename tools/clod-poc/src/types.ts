@@ -34,7 +34,7 @@ export interface StreamedRootRenderState {
   mode: StreamedRootTransitionMode;
   progress: number;
   groupId: number;
-  /** Reserved for the later shader-height morph path; phase 1 only crossfades. */
+  /** True once the view geometry owns a root-transition height morph target. */
   parentHeightMorphReady?: boolean;
 }
 
