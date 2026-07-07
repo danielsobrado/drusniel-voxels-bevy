@@ -229,6 +229,7 @@ export function applyRootHeightMorph(
 
 export function resetRootHeightMorph(view: RootHeightMorphView): void {
   const geometry = view.mesh.geometry as THREE.BufferGeometry;
+  if (geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY] === undefined) return;
   const attribute = geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
   if (!attribute) return;
   (attribute.array as Float32Array).fill(0);
