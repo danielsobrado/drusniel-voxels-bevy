@@ -29,8 +29,8 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.clodApply.keepStaleVisible).toBe(true);
     expect(config.clodApply.colliderMaxDelayFrames).toBe(8);
     expect(config.selectionCutCache.enabled).toBe(true);
-    expect(config.selectionCutCache.cameraCellSizeM).toBe(1);
-    expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(2);
+    expect(config.selectionCutCache.cameraCellSizeM).toBe(32);
+    expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(8);
     expect(config.selectionCutCache.thresholdBucketPx).toBe(0.05);
     expect(config.selectionCutCache.maxReuseFrames).toBe(120);
     expect(config.materialChurn.enabled).toBe(false);
