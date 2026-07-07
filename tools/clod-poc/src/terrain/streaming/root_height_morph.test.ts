@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import type { ClodPageNode, PageMesh } from "../../types.js";
-import { applyRootHeightMorph, resetRootHeightMorph } from "./root_height_morph.js";
+import {
+  applyRootHeightMorph,
+  resetRootHeightMorph,
+  ROOT_HEIGHT_MORPH_ATTRIBUTE,
+} from "./root_height_morph.js";
 
 function meshAtHeight(height: number): PageMesh {
   return {
@@ -45,42 +49,37 @@ function view(n: ClodPageNode) {
 }
 
 describe("root height morph", () => {
-  it("builds a Y-only relative morph target from the opposite root set", () => {
+  it("builds a Y-only rootMorphDeltaY attribute from the opposite root set", () => {
     const incoming = view(node("incoming", 20, "fadeIn"));
     const outgoing = view(node("outgoing", 10, "fadeOut"));
 
-    const stats = applyRootHeightMorph(incoming, [outgoing], 0.75);
-    const morph = incoming.mesh.geometry.morphAttributes.position?.[0] as THREE.BufferAttribute;
+    const stats = applyRootHeightMorph(incoming, [outgoing]);
+    const morph = incoming.mesh.geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute;
 
     expect(stats.builtRoots).toBe(1);
     expect(stats.builtVertices).toBe(3);
-    expect(Array.from(morph.array as Float32Array)).toEqual([
-      0, -10, 0,
-      0, -10, 0,
-      0, -10, 0,
-    ]);
-    expect(incoming.mesh.morphTargetInfluences?.[0]).toBe(0.75);
+    expect(Array.from(morph.array as Float32Array)).toEqual([-10, -10, -10]);
     expect(incoming.node.rootTransition?.parentHeightMorphReady).toBe(true);
   });
 
-  it("reuses an existing morph target when the signature is unchanged", () => {
+  it("reuses an existing root morph attribute when the signature is unchanged", () => {
     const incoming = view(node("incoming", 20, "fadeIn"));
     const outgoing = view(node("outgoing", 10, "fadeOut"));
 
-    applyRootHeightMorph(incoming, [outgoing], 1);
-    const stats = applyRootHeightMorph(incoming, [outgoing], 0.25);
+    applyRootHeightMorph(incoming, [outgoing]);
+    const stats = applyRootHeightMorph(incoming, [outgoing]);
 
     expect(stats.builtRoots).toBe(0);
-    expect(incoming.mesh.morphTargetInfluences?.[0]).toBe(0.25);
   });
 
-  it("resets morph influence without touching geometry", () => {
+  it("resets morph deltas without touching material state", () => {
     const incoming = view(node("incoming", 20, "fadeIn"));
     const outgoing = view(node("outgoing", 10, "fadeOut"));
-    applyRootHeightMorph(incoming, [outgoing], 1);
+    applyRootHeightMorph(incoming, [outgoing]);
 
     resetRootHeightMorph(incoming);
+    const morph = incoming.mesh.geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute;
 
-    expect(incoming.mesh.morphTargetInfluences?.[0]).toBe(0);
+    expect(Array.from(morph.array as Float32Array)).toEqual([0, 0, 0]);
   });
 });
