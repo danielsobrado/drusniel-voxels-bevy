@@ -45,6 +45,8 @@ const ACCEPTANCE_STREAM_MAX_LEVEL = 1;
 const ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES = 1;
 const ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES = 2;
 const STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR = 0.25;
+const DEFAULT_ROOT_TRANSITION_FRAMES = 12;
+const DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS = 64;
 
 let streamBuiltTotal = 0;
 let streamApplyPagesTotal = 0;
@@ -69,6 +71,11 @@ function acceptanceMin(value: number | undefined, minimum: number, acceptance: b
 function acceptanceMax(value: number | undefined, maximum: number, acceptance: boolean): number | undefined {
   if (!acceptance) return value;
   return Math.min(value ?? maximum, maximum);
+}
+
+function enabledParam(params: URLSearchParams, key: string): boolean {
+  const raw = params.get(key);
+  return raw === "1" || raw?.toLowerCase() === "true";
 }
 
 function globalClodCounters(): Record<string, number> | undefined {
@@ -101,7 +108,8 @@ function streamWorkPending(stats: StreamingClodRootStats): boolean {
     || stats.applyQueuePages > 0
     || stats.safetyPendingPages > 0
     || stats.safetyInflightPages > 0
-    || stats.parentCoverageViolations > 0;
+    || stats.parentCoverageViolations > 0
+    || stats.transitionActiveGroups > 0;
 }
 
 function mirrorStreamingClodRootCounters(
@@ -152,6 +160,20 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_scheduled_budget_cost"] = stats.scheduledBudgetCost;
   target["live_clod_stream_worker_build_failures"] = stats.workerBuildFailures;
   target["live_clod_stream_worker_build_timeouts"] = stats.workerBuildTimeouts;
+  target["live_clod_stream_transition_enabled"] = stats.transitionEnabled;
+  target["live_clod_stream_transition_active_groups"] = stats.transitionActiveGroups;
+  target["live_clod_stream_transition_active_roots"] = stats.transitionActiveRoots;
+  target["live_clod_stream_transition_fade_in_roots"] = stats.transitionFadeInRoots;
+  target["live_clod_stream_transition_fade_out_roots"] = stats.transitionFadeOutRoots;
+  target["live_clod_stream_transition_hard_switches_total"] = stats.transitionHardSwitchesTotal;
+  target["live_clod_stream_transition_cancelled_total"] = stats.transitionCancelledTotal;
+  target["live_clod_stream_transition_capped_total"] = stats.transitionCappedTotal;
+  target["live_clod_stream_transition_completed_total"] = stats.transitionCompletedTotal;
+  target["live_clod_stream_transition_draw_overhead_roots"] = stats.transitionDrawOverheadRoots;
+  target["live_clod_stream_transition_duration_frames"] = stats.transitionDurationFrames;
+  target["live_clod_stream_transition_progress_min"] = stats.transitionProgressMin;
+  target["live_clod_stream_transition_progress_max"] = stats.transitionProgressMax;
+  target["live_clod_stream_transition_ms_p95"] = stats.transitionMsP95;
   applyNoPressureProbeMirror(target, probeStaleDiscardsTotal);
   globalThis.queueMicrotask?.(() => {
     const latestTarget = counters ?? globalClodCounters();
@@ -264,10 +286,29 @@ export function runFrameLoopStartup(
   });
   const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu }) : null;
   const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
-  const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled
-    ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES
-    : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;
-  const streamingClodRootController = createStreamingClodRootController({ roots: input.result.roots, allNodes: input.allNodes, cfg, worldCells, enabled: longView.queryScene === INFINITE_ISLANDS_SCENE, buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile), applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile), maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), acceptanceMaxStreamInflightBatches, acceptanceStreamProfile), maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile), maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"), buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords), onNodesBuilt: (nodes) => selectionController.patchNodes(nodes), onRootsChanged: () => selectionController.invalidate() });
+  const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;
+  const rootTransitionEnabled = enabledParam(searchParams, "liveClodRootTransition") && input.app.isWebGpu;
+  const streamingClodRootController = createStreamingClodRootController({
+    roots: input.result.roots,
+    allNodes: input.allNodes,
+    cfg,
+    worldCells,
+    enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
+    buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile),
+    applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile),
+    maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), acceptanceMaxStreamInflightBatches, acceptanceStreamProfile),
+    maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile),
+    maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"),
+    rootTransition: {
+      enabled: rootTransitionEnabled,
+      mode: "crossfade",
+      durationFrames: positiveIntegerParam(searchParams, "liveClodRootTransitionFrames") ?? DEFAULT_ROOT_TRANSITION_FRAMES,
+      maxExtraRoots: nonNegativeIntegerParam(searchParams, "liveClodRootTransitionMaxExtraRoots") ?? DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS,
+    },
+    buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
+    onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
+    onRootsChanged: () => selectionController.invalidate(),
+  });
   const streamingClodReadyPageKeys = (): string[] => {
     if (!streamingScene) return input.allNodes.map((node) => node.id);
     return [...new Set([...input.allNodes.map((node) => node.id), ...streamingClodRootController.readyPageKeys()])];
