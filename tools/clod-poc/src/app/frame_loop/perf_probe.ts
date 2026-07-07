@@ -88,6 +88,33 @@ function maxCounter(samples: readonly FramePerfSample[], key: string): number {
   return samples.reduce((max, sample) => Math.max(max, Number(sample[key] ?? 0)), 0);
 }
 
+function statsForNumbers(values: readonly number[]): import("./perf_probe_types.js").FramePerfMetricStats {
+  const safeValues = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (safeValues.length === 0) return { avg: 0, min: 0, max: 0, p50: 0, p95: 0 };
+  const percentile = (ratio: number): number => safeValues[Math.min(safeValues.length - 1, Math.max(0, Math.ceil(safeValues.length * ratio) - 1))] ?? 0;
+  const total = safeValues.reduce((sum, value) => sum + value, 0);
+  return {
+    avg: total / safeValues.length,
+    min: safeValues[0] ?? 0,
+    max: safeValues[safeValues.length - 1] ?? 0,
+    p50: percentile(0.5),
+    p95: percentile(0.95),
+  };
+}
+
+function numericSample(sample: FramePerfSample, key: string): number {
+  const value = sample[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function selectionOuterStats(samples: readonly FramePerfSample[]): Record<string, import("./perf_probe_types.js").FramePerfMetricStats> {
+  return {
+    totalMs: statsForNumbers(samples.map((sample) => numericSample(sample, "selectionUpdateMs"))),
+    updateMs: statsForNumbers(samples.map((sample) => numericSample(sample, "selectionSub.total"))),
+    statsOrWrapperMs: statsForNumbers(samples.map((sample) => Math.max(0, numericSample(sample, "selectionUpdateMs") - numericSample(sample, "selectionSub.total")))),
+  };
+}
+
 export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], warmupFrames: number, targetSampleFrames: number): FramePerfSummary {
   const metrics = Object.fromEntries(FRAME_PERF_ALL_METRICS.map((m) => [m, statsFor(samples, m)])) as Record<FramePerfMetric, import("./perf_probe_types.js").FramePerfMetricStats>;
   const renderedTotal = samples.reduce((s, sample) => s + sample.renderedCount, 0);
@@ -297,6 +324,13 @@ function acceptancePerfGateReady(enabled: boolean): boolean {
     && counter(counters, "shadow_proxy_building", 0) !== 1;
 }
 
+function mirrorStats(counters: Record<string, number>, prefix: string, stats: import("./perf_probe_types.js").FramePerfMetricStats): void {
+  counters[`framePerf.avg.${prefix}`] = stats.avg;
+  counters[`framePerf.p50.${prefix}`] = stats.p50;
+  counters[`framePerf.p95.${prefix}`] = stats.p95;
+  counters[`framePerf.max.${prefix}`] = stats.max;
+}
+
 function mirrorFramePerfCounters(
   snapshot: FramePerfSnapshot,
   diagnostics: { ignoredConvergenceFrames: number; acceptanceGateReady: boolean },
@@ -319,6 +353,10 @@ function mirrorFramePerfCounters(
     counters[`framePerf.p95.${metric}`] = stats.p95;
     counters[`framePerf.max.${metric}`] = stats.max;
   }
+  const outerStats = selectionOuterStats(snapshot.samples);
+  mirrorStats(counters, "selectionOuter.totalMs", outerStats.totalMs);
+  mirrorStats(counters, "selectionOuter.updateMs", outerStats.updateMs);
+  mirrorStats(counters, "selectionOuter.statsOrWrapperMs", outerStats.statsOrWrapperMs);
   snapshot.broadBucketsByP95.slice(0, MIRRORED_TOP_BUCKET_COUNT).forEach((bucket, index) => {
     counters[`framePerf.topBroad.${index}.p95`] = bucket.p95;
     counters[`framePerf.topBroad.${index}.avg`] = bucket.avg;
