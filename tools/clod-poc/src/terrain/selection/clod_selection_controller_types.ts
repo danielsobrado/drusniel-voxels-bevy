@@ -31,6 +31,7 @@ export interface ClodSelectionTerrainView {
   mat: {
     setTier(tier: number): void;
     setFade(fade: number, selected: boolean, dither: boolean): void;
+    setRootMorph(influence: number): void;
   };
 }
 
