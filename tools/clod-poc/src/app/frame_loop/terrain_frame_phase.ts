@@ -45,6 +45,7 @@ export interface TerrainFramePhaseInput {
   interaction: PlayerInteractionState;
   player: PlayerController;
   controls: OrbitControls;
+  camera: THREE.Camera;
   selectionController: ClodSelectionController;
   nearFieldBubbleController: NearFieldBubbleController;
   views: Map<string, { node: { id: string } } & TerrainFadeView>;
@@ -167,6 +168,12 @@ function infiniteIslandsScene(): boolean {
   return cachedInfiniteIslandsScene;
 }
 
+function canonicalWorldCenter(input: TerrainFramePhaseInput, infiniteScene: boolean): THREE.Vector3 {
+  if (input.interaction.mode === "playing") return input.player.position;
+  if (infiniteScene) return input.camera.position;
+  return input.controls.target;
+}
+
 export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: number, unbounded: boolean): THREE.Vector3 {
   if (unbounded) return grassCenter.clone();
   return new THREE.Vector3(
@@ -196,7 +203,8 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     if (v.fade === v.target) activeTerrainViews.delete(v);
   }
 
-  const bubbleCenter = input.interaction.mode === "playing" ? input.player.position : input.controls.target;
+  const ringUnbounded = infiniteIslandsScene();
+  const bubbleCenter = canonicalWorldCenter(input, ringUnbounded);
   const bubbleStats = input.nearFieldBubbleController.update({
     enabled: input.state.bubble,
     bubbleRadius: input.state.bubbleRadius,
@@ -215,7 +223,6 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
 
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;
-  const ringUnbounded = infiniteIslandsScene();
   const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, ringUnbounded);
   mirrorVegetationRingStats(grassCenter, ringCenter, ringUnbounded);
 
