@@ -142,7 +142,6 @@ function populatedPerfEnabled(searchParams: URLSearchParams): boolean {
 }
 
 function applyPerfUiAndDebugPreset(state: ClodAppState): void {
-  state.clodPerfMode = true;
   state.proceduralMicroNormals = false;
   state.postProcessEnabled = false;
   state.postProcessDebugMode = "off";
@@ -155,6 +154,7 @@ function applyPerfUiAndDebugPreset(state: ClodAppState): void {
 }
 
 function applyClodPerfTerrainPreset(state: ClodAppState): void {
+  state.clodPerfMode = true;
   state.colorByLod = true;
   state.albedo = false;
   state.normalMap = false;
@@ -165,6 +165,7 @@ function applyClodPerfTerrainPreset(state: ClodAppState): void {
 
 function applyPopulatedPerfPreset(state: ClodAppState, params: CreateClodAppStateParams): void {
   applyPerfUiAndDebugPreset(state);
+  state.clodPerfMode = false;
   state.grassEnabled = true;
   state.stonesEnabled = true;
   state.treesEnabled = true;
