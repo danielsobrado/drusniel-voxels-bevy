@@ -70,6 +70,24 @@ const DYNAMIC_RESOLUTION_REASON_CODE: Record<DynamicResolutionStats["reason"], n
   scale_up: 6,
 };
 
+const SELECTION_CACHE_REASON_CODE: Record<string, number> = {
+  hit: 0,
+  first_frame: 1,
+  disabled: 2,
+  camera_bucket_changed: 3,
+  settings_changed: 4,
+  near_field_changed: 5,
+  stale_revision_changed: 6,
+  webgpu_error_source_changed: 7,
+  debug_state_changed: 8,
+  max_reuse_frames_exceeded: 9,
+  forced_invalidate: 10,
+};
+
+function selectionCacheReasonCode(reason: string): number {
+  return SELECTION_CACHE_REASON_CODE[reason] ?? -1;
+}
+
 function logGrassProfile(
   stats: GrassStats,
   grassAndPropsMs: number,
@@ -245,6 +263,9 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const understoryStatsWithConsulted = understoryStats as UnderstoryStatsWithConsulted | null;
     const propStats = input.currentPropStats;
     const farSummarySubphases = takeFarSummarySubphaseTimings();
+    const selectionCacheStats = selectionStats.selectionCache;
+    const selectionCacheReason = selectionCacheStats.lastReason;
+    const selectionCacheReasonNumeric = selectionCacheReasonCode(selectionCacheReason);
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       frameMs,
@@ -276,6 +297,17 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       selectionBookMs: selectionStats.subphases.book,
       selectionInfoMs: selectionStats.subphases.info,
       selectionOverlaysMs: selectionStats.subphases.overlays,
+      "selectionSub.cut": selectionStats.subphases.cut,
+      "selectionSub.book": selectionStats.subphases.book,
+      "selectionSub.info": selectionStats.subphases.info,
+      "selectionSub.overlays": selectionStats.subphases.overlays,
+      selectionCutCacheEnabled: selectionCacheStats.enabled ? 1 : 0,
+      selectionCutCacheHits: selectionCacheStats.hits,
+      selectionCutCacheMisses: selectionCacheStats.misses,
+      selectionCutCacheInvalidations: selectionCacheStats.invalidations,
+      selectionCutCacheLastReason: selectionCacheReason,
+      selectionCutCacheLastReasonCode: selectionCacheReasonNumeric,
+      cachedFastHits: selectionStats.cachedFastHits,
       bubbleMs,
       propsMs,
       vegetationTotalMs: vegetationPhaseMs,
