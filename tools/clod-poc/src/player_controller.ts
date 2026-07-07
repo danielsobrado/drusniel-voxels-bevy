@@ -184,6 +184,7 @@ export class PlayerController {
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
   readonly lastSafePosition = new THREE.Vector3();
+  spawned = false;
   grounded = false;
   lastPhysicsMs = 0;
   lastPagesTested = 0;
@@ -208,6 +209,7 @@ export class PlayerController {
   }
 
   spawn(point: THREE.Vector3): void {
+    this.spawned = true;
     this.position.copy(point).addScaledVector(THREE.Object3D.DEFAULT_UP, 0.02);
     clampPlayerToWorld(this.position, this.bounds, this.config.worldEdgeMargin);
     this.velocity.set(0, 0, 0);
