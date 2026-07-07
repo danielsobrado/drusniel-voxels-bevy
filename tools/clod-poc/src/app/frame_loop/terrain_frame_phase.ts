@@ -7,7 +7,12 @@ import type {
   NearFieldBubbleView,
 } from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
+import {
+  applyRootHeightMorph,
+  resetRootHeightMorph,
+} from "../../terrain/streaming/root_height_morph.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
+import type { ClodPageNode } from "../../types.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const RING_CLAMP_MARGIN = 2;
@@ -22,10 +27,7 @@ let liveBubbleProbeEvictionsTotal = 0;
 let liveBubbleProbeColliderRemovalsTotal = 0;
 
 interface TerrainFadeView {
-  node: {
-    id: string;
-    rootTransition?: { mode: string; progress: number; groupId: number };
-  };
+  node: Pick<ClodPageNode, "id" | "mesh" | "rootTransition">;
   fade: number;
   target: number;
   mesh: THREE.Mesh;
@@ -39,6 +41,12 @@ interface MovementProbeWindow {
   };
   __drusnielBeginLiveBubbleMovementProbe?: () => void;
   __drusnielBeginStreamingMovementProbe?: () => void;
+}
+
+interface RootMorphFrameStats {
+  builtRoots: number;
+  builtVertices: number;
+  buildMs: number;
 }
 
 export interface TerrainFramePhaseInput {
@@ -164,6 +172,14 @@ function mirrorVegetationRingStats(grassCenter: THREE.Vector3, ringCenter: THREE
   counters["vegetation_ring_distance_to_grass_m"] = Math.hypot(ringCenter.x - grassCenter.x, ringCenter.z - grassCenter.z);
 }
 
+function mirrorRootMorphStats(stats: RootMorphFrameStats): void {
+  const counters = hooksCounters();
+  if (!counters) return;
+  counters["live_clod_stream_transition_height_morph_roots"] = stats.builtRoots;
+  counters["live_clod_stream_transition_height_morph_vertices"] = stats.builtVertices;
+  counters["live_clod_stream_transition_height_morph_build_ms"] = stats.buildMs;
+}
+
 function infiniteIslandsScene(): boolean {
   if (cachedInfiniteIslandsScene !== null) return cachedInfiniteIslandsScene;
   const search = globalThis.location?.search;
@@ -186,12 +202,41 @@ export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: num
   );
 }
 
-function applyRootTransitionFade(view: TerrainFadeView): boolean {
+function buildTransitionGroups(views: Iterable<TerrainFadeView>): Map<number, TerrainFadeView[]> {
+  const groups = new Map<number, TerrainFadeView[]>();
+  for (const view of views) {
+    const transition = view.node.rootTransition;
+    if (transition?.mode !== "fadeIn" && transition?.mode !== "fadeOut") continue;
+    const group = groups.get(transition.groupId);
+    if (group) group.push(view);
+    else groups.set(transition.groupId, [view]);
+  }
+  return groups;
+}
+
+function sourceViewsForMorph(view: TerrainFadeView, groups: ReadonlyMap<number, TerrainFadeView[]>): TerrainFadeView[] {
+  const transition = view.node.rootTransition;
+  if (!transition) return [];
+  const oppositeMode = transition.mode === "fadeIn" ? "fadeOut" : transition.mode === "fadeOut" ? "fadeIn" : "";
+  if (!oppositeMode) return [];
+  return (groups.get(transition.groupId) ?? []).filter((candidate) => candidate.node.rootTransition?.mode === oppositeMode);
+}
+
+function applyRootTransitionFade(
+  view: TerrainFadeView,
+  transitionGroups: ReadonlyMap<number, TerrainFadeView[]>,
+  morphStats: RootMorphFrameStats,
+): boolean {
   const transition = view.node.rootTransition;
   if (transition?.mode !== "fadeIn" && transition?.mode !== "fadeOut") return false;
 
   const progress = THREE.MathUtils.clamp(transition.progress, 0, 1);
   const fade = transition.mode === "fadeOut" ? 1 - progress : progress;
+  const morphInfluence = transition.mode === "fadeIn" ? 1 - progress : progress;
+  const built = applyRootHeightMorph(view, sourceViewsForMorph(view, transitionGroups), morphInfluence);
+  morphStats.builtRoots += built.builtRoots;
+  morphStats.builtVertices += built.builtVertices;
+  morphStats.buildMs += built.buildMs;
   view.fade = fade;
   view.target = transition.mode === "fadeOut" ? 0 : 1;
   view.mesh.visible = fade > 0.001;
@@ -201,15 +246,19 @@ function applyRootTransitionFade(view: TerrainFadeView): boolean {
 
 export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFramePhaseResult {
   const activeTerrainViews = input.selectionController.activeTerrainViews() as Set<TerrainFadeView>;
-  const currentTerrainViews = input.selectionController.currentTerrainViews();
+  const currentTerrainViews = input.selectionController.currentTerrainViews() as Set<TerrainFadeView>;
   const selectionStats = input.selectionController.stats();
+  const transitionViews = new Set<TerrainFadeView>([...currentTerrainViews, ...activeTerrainViews]);
+  const transitionGroups = buildTransitionGroups(transitionViews);
+  const morphStats: RootMorphFrameStats = { builtRoots: 0, builtVertices: 0, buildMs: 0 };
 
   for (const v of activeTerrainViews) {
-    if (applyRootTransitionFade(v)) {
+    if (applyRootTransitionFade(v, transitionGroups, morphStats)) {
       const progress = v.node.rootTransition?.progress ?? 1;
       if (progress >= 1) activeTerrainViews.delete(v);
       continue;
     }
+    resetRootHeightMorph(v);
     if (input.pageTransitionMode === "instant") {
       v.fade = v.target;
       v.mesh.visible = v.target > 0.5;
@@ -223,6 +272,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     v.mat.setFade(v.fade, v.target > 0.5, v.fade > 0.001 && v.fade < 0.999);
     if (v.fade === v.target) activeTerrainViews.delete(v);
   }
+  mirrorRootMorphStats(morphStats);
 
   const ringUnbounded = infiniteIslandsScene();
   const bubbleCenter = canonicalWorldCenter(input, ringUnbounded);
