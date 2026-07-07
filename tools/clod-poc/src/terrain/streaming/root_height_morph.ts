@@ -170,13 +170,7 @@ function buildHeightSampler(sourceViews: readonly RootHeightMorphView[]): Height
 
 function meshSignature(view: RootHeightMorphView): string {
   const mesh = view.node.mesh;
-  return [
-    view.node.id,
-    view.node.revision ?? 0,
-    mesh.positions.length,
-    mesh.indices.length,
-    mesh.boundsVersion ?? "",
-  ].join(":");
+  return [view.node.id, view.node.revision ?? 0, mesh.positions.length, mesh.indices.length].join(":");
 }
 
 function sourceSignature(sourceViews: readonly RootHeightMorphView[]): string {
