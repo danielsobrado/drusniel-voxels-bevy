@@ -159,7 +159,7 @@ function snap(value: number, snapM: number): number {
   return Math.round(value / snapM) * snapM;
 }
 
-function buildCameraRelativeGeometry(config: DeepOceanRenderConfig, options: DeepOceanSurfaceOptions): THREE.BufferGeometry {
+function buildCameraRelativeGeometry(config: DeepOceanRenderConfig, options: DeepOceanSurfaceOptions, centerX: number, centerZ: number): THREE.BufferGeometry {
   const innerRadius = Math.max(0, options.innerRadiusM ?? config.ringInnerBandM);
   const outerRadius = Math.max(innerRadius + 1, options.outerRadiusM ?? config.extendCells);
   const radialSegments = clampSegments(config.ringInnerRadialSegments + config.ringOuterRadialSegments);
@@ -171,7 +171,7 @@ function buildCameraRelativeGeometry(config: DeepOceanRenderConfig, options: Dee
     const r = innerRadius + (outerRadius - innerRadius) * (ri / radialSegments);
     for (let ai = 0; ai <= angularSegments; ai++) {
       const theta = (ai / angularSegments) * Math.PI * 2;
-      positions.push(r * Math.cos(theta), config.surfaceY, r * Math.sin(theta));
+      positions.push(centerX + r * Math.cos(theta), config.surfaceY, centerZ + r * Math.sin(theta));
     }
   }
 
@@ -193,31 +193,40 @@ function buildCameraRelativeGeometry(config: DeepOceanRenderConfig, options: Dee
   geometry.computeBoundingSphere();
   const bounds = deepOceanWaveVerticalBounds(deepOceanGpuWaves(config.wave));
   geometry.boundingBox = new THREE.Box3(
-    new THREE.Vector3(-outerRadius - bounds, config.surfaceY - bounds, -outerRadius - bounds),
-    new THREE.Vector3(outerRadius + bounds, config.surfaceY + bounds, outerRadius + bounds),
+    new THREE.Vector3(centerX - outerRadius - bounds, config.surfaceY - bounds, centerZ - outerRadius - bounds),
+    new THREE.Vector3(centerX + outerRadius + bounds, config.surfaceY + bounds, centerZ + outerRadius + bounds),
   );
   return geometry;
 }
 
 function createCameraRelativeDeepOceanSurface(config: DeepOceanRenderConfig, material: THREE.Material, options: DeepOceanSurfaceOptions): DeepOceanSurface | null {
   if (!config.enabled) return null;
-  const geometry = buildCameraRelativeGeometry(config, options);
+  const snapM = Math.max(1, options.rebaseSnapM ?? DEFAULT_CAMERA_RELATIVE_SNAP_M);
+  const snappedCenter = () => {
+    const center = options.getCenter?.();
+    return {
+      x: center ? snap(center.x, snapM) : 0,
+      z: center ? snap(center.z, snapM) : 0,
+    };
+  };
+  let current = snappedCenter();
+  let geometry = buildCameraRelativeGeometry(config, options, current.x, current.z);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "deep-ocean-surface-camera-relative";
   mesh.frustumCulled = false;
   mesh.renderOrder = 9;
-  const snapM = Math.max(1, options.rebaseSnapM ?? DEFAULT_CAMERA_RELATIVE_SNAP_M);
-
-  const syncToCenter = () => {
-    const center = options.getCenter?.();
-    if (!center) return;
-    mesh.position.set(snap(center.x, snapM), 0, snap(center.z, snapM));
-  };
-  syncToCenter();
 
   return {
     mesh,
-    update(_timeSeconds: number) { syncToCenter(); },
+    update(_timeSeconds: number) {
+      const next = snappedCenter();
+      if (next.x === current.x && next.z === current.z) return;
+      current = next;
+      const oldGeometry = geometry;
+      geometry = buildCameraRelativeGeometry(config, options, current.x, current.z);
+      mesh.geometry = geometry;
+      oldGeometry.dispose();
+    },
     dispose() {
       geometry.dispose();
       mesh.removeFromParent();
