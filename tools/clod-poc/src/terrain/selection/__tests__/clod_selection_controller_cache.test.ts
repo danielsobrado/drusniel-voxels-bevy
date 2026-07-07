@@ -73,6 +73,7 @@ function terrainView(n: ClodPageNode): ClodSelectionTerrainView {
     mat: {
       setTier: vi.fn(),
       setFade: vi.fn(),
+      setRootMorph: vi.fn(),
     },
   };
 }
