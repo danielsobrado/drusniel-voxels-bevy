@@ -53,6 +53,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     hydrologySystem, searchParams, currentLighting, lod0Nodes, isWebGpu,
   } = input;
   const runtimeWorldCells = waterRuntimeWorldCells(searchParams, worldCells);
+  const infiniteIslandsScene = searchParams.get("scene") === INFINITE_ISLANDS_SCENE;
 
   const waterController = await createWaterController({
     scene,
@@ -94,6 +95,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
         worldCells,
         deepOceanConfig,
         deepOceanMaterial.material,
+        infiniteIslandsScene ? { mode: "camera-relative", getCenter: () => camera.position } : undefined,
       )
     : null;
   if (deepOceanSurface) scene.add(deepOceanSurface.mesh);
