@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
-import type { ClodPageNode } from "../../types.js";
+import type { ClodPageNode, StreamedRootRenderState } from "../../types.js";
 
 export interface StreamingClodRootStats {
   requiredPages: number;
@@ -51,6 +51,20 @@ export interface StreamingClodRootStats {
   appliedPagesByLevel: number[];
   staleCompletedPagesByLevel: number[];
   workerBuildMsP95ByLevel: number[];
+  transitionEnabled: number;
+  transitionActiveGroups: number;
+  transitionActiveRoots: number;
+  transitionFadeInRoots: number;
+  transitionFadeOutRoots: number;
+  transitionHardSwitchesTotal: number;
+  transitionCancelledTotal: number;
+  transitionCappedTotal: number;
+  transitionCompletedTotal: number;
+  transitionDrawOverheadRoots: number;
+  transitionDurationFrames: number;
+  transitionProgressMin: number;
+  transitionProgressMax: number;
+  transitionMsP95: number;
 }
 
 export interface StreamingClodRootController {
@@ -78,6 +92,13 @@ export interface StreamingClodRootBuildResult {
   transferBytes?: number;
 }
 
+export interface StreamingClodRootTransitionOptions {
+  enabled: boolean;
+  mode: "crossfade";
+  durationFrames: number;
+  maxExtraRoots: number;
+}
+
 export interface StreamingClodRootControllerDeps {
   roots: ClodPageNode[];
   allNodes: ClodPageNode[];
@@ -91,6 +112,7 @@ export interface StreamingClodRootControllerDeps {
   maxRootLevel?: number;
   maxInflightBatches?: number;
   rootSwitchStableFrames?: number;
+  rootTransition?: Partial<StreamingClodRootTransitionOptions>;
   buildPages: ((coords: readonly PageCoord[]) => Promise<StreamingClodRootBuildResult>) | null;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
   onRootsChanged?: () => void;
@@ -135,6 +157,14 @@ interface StreamingClodConfigCarrier {
   streaming?: { clod?: { max_root_level?: number } };
 }
 
+interface ActiveRootTransition {
+  id: number;
+  fromRootIds: Set<string>;
+  toRootIds: Set<string>;
+  startedFrame: number;
+  durationFrames: number;
+}
+
 const DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME = 1;
 const DEFAULT_MAX_INFLIGHT_BATCHES = 1;
@@ -142,8 +172,11 @@ const DEFAULT_MAX_CACHED_PAGES = 128;
 const DEFAULT_EVICT_DISTANCE_MULTIPLIER = 2.5;
 const DEFAULT_STREAM_MAX_ROOT_LEVEL = 1;
 const DEFAULT_ROOT_SWITCH_STABLE_FRAMES = 8;
+const DEFAULT_ROOT_TRANSITION_FRAMES = 12;
+const DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS = 64;
 const STREAM_COUNTER_LEVELS = 4;
 const WORKER_BUILD_MS_SAMPLE_LIMIT = 128;
+const TRANSITION_MS_SAMPLE_LIMIT = 128;
 const BUILD_RETRY_BASE_COOLDOWN_FRAMES = 60;
 const BUILD_RETRY_MAX_COOLDOWN_FRAMES = 600;
 const OUT_OF_WORLD_EDITS_SUPPORTED = 0;
@@ -180,6 +213,33 @@ function queryStreamingRootSwitchStableFrames(): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_ROOT_SWITCH_STABLE_FRAMES;
 }
 
+function queryEnabledFlag(params: URLSearchParams | null, key: string): boolean | undefined {
+  const raw = params?.get(key);
+  if (raw === null || raw === undefined || raw.trim() === "") return undefined;
+  return raw === "1" || raw.toLowerCase() === "true";
+}
+
+function queryPositiveInteger(params: URLSearchParams | null, key: string, fallback: number): number {
+  const parsed = Number(params?.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function queryNonNegativeInteger(params: URLSearchParams | null, key: string, fallback: number): number {
+  const parsed = Number(params?.get(key));
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+}
+
+function resolveRootTransitionOptions(override?: Partial<StreamingClodRootTransitionOptions>): StreamingClodRootTransitionOptions {
+  const params = querySearchParams();
+  const mode = params?.get("liveClodRootTransitionMode") === "crossfade" ? "crossfade" : "crossfade";
+  return {
+    enabled: override?.enabled ?? queryEnabledFlag(params, "liveClodRootTransition") ?? false,
+    mode: override?.mode ?? mode,
+    durationFrames: Math.max(1, Math.floor(override?.durationFrames ?? queryPositiveInteger(params, "liveClodRootTransitionFrames", DEFAULT_ROOT_TRANSITION_FRAMES))),
+    maxExtraRoots: Math.max(0, Math.floor(override?.maxExtraRoots ?? queryNonNegativeInteger(params, "liveClodRootTransitionMaxExtraRoots", DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS))),
+  };
+}
+
 export function resolveStreamingClodMaxRootLevel(cfg: ClodPagesConfig, override?: number): number {
   const fullMax = Math.max(0, Math.floor(cfg.page.quadtree_levels) - 1);
   const configured = (cfg as ClodPagesConfig & StreamingClodConfigCarrier).streaming?.clod?.max_root_level;
@@ -194,12 +254,7 @@ function coordLevel(coord: PageCoord): number {
 
 function pageLevel0Bounds(page: { level: number; px: number; pz: number }): { minX: number; minZ: number; maxX: number; maxZ: number } {
   const scale = 2 ** page.level;
-  return {
-    minX: page.px * scale,
-    minZ: page.pz * scale,
-    maxX: (page.px + 1) * scale,
-    maxZ: (page.pz + 1) * scale,
-  };
+  return { minX: page.px * scale, minZ: page.pz * scale, maxX: (page.px + 1) * scale, maxZ: (page.pz + 1) * scale };
 }
 
 function pageContainsPage(ancestorKey: string, descendantKey: string): boolean {
@@ -208,12 +263,10 @@ function pageContainsPage(ancestorKey: string, descendantKey: string): boolean {
   if (ancestor.level <= descendant.level) return false;
   const ancestorBounds = pageLevel0Bounds(ancestor);
   const descendantBounds = pageLevel0Bounds(descendant);
-  return (
-    descendantBounds.minX >= ancestorBounds.minX &&
-    descendantBounds.minZ >= ancestorBounds.minZ &&
-    descendantBounds.maxX <= ancestorBounds.maxX &&
-    descendantBounds.maxZ <= ancestorBounds.maxZ
-  );
+  return descendantBounds.minX >= ancestorBounds.minX
+    && descendantBounds.minZ >= ancestorBounds.minZ
+    && descendantBounds.maxX <= ancestorBounds.maxX
+    && descendantBounds.maxZ <= ancestorBounds.maxZ;
 }
 
 function pageFullyCoveredByFinerCachedPages(pageKey: string, cachedKeys: Iterable<string>): boolean {
@@ -278,9 +331,7 @@ function workerP95(samples: readonly number[][]): number[] {
 }
 
 function clodCounters(): Record<string, number> | null {
-  const maybeWindow = (globalThis as typeof globalThis & {
-    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
-  }).window;
+  const maybeWindow = (globalThis as typeof globalThis & { window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } } }).window;
   return maybeWindow?.__drusnielClod?.stats?.counters ?? null;
 }
 
@@ -292,6 +343,23 @@ function writePerLevelStreamingCounters(counters: Record<string, number>, stats:
     counters[`live_clod_stream_stale_completed_l${level}_pages`] = stats.staleCompletedPagesByLevel[level] ?? 0;
     counters[`live_clod_stream_worker_build_ms_l${level}_p95`] = stats.workerBuildMsP95ByLevel[level] ?? 0;
   }
+}
+
+function writeTransitionCounters(counters: Record<string, number>, stats: StreamingClodRootStats): void {
+  counters["live_clod_stream_transition_enabled"] = stats.transitionEnabled;
+  counters["live_clod_stream_transition_active_groups"] = stats.transitionActiveGroups;
+  counters["live_clod_stream_transition_active_roots"] = stats.transitionActiveRoots;
+  counters["live_clod_stream_transition_fade_in_roots"] = stats.transitionFadeInRoots;
+  counters["live_clod_stream_transition_fade_out_roots"] = stats.transitionFadeOutRoots;
+  counters["live_clod_stream_transition_hard_switches_total"] = stats.transitionHardSwitchesTotal;
+  counters["live_clod_stream_transition_cancelled_total"] = stats.transitionCancelledTotal;
+  counters["live_clod_stream_transition_capped_total"] = stats.transitionCappedTotal;
+  counters["live_clod_stream_transition_completed_total"] = stats.transitionCompletedTotal;
+  counters["live_clod_stream_transition_draw_overhead_roots"] = stats.transitionDrawOverheadRoots;
+  counters["live_clod_stream_transition_duration_frames"] = stats.transitionDurationFrames;
+  counters["live_clod_stream_transition_progress_min"] = stats.transitionProgressMin;
+  counters["live_clod_stream_transition_progress_max"] = stats.transitionProgressMax;
+  counters["live_clod_stream_transition_ms_p95"] = stats.transitionMsP95;
 }
 
 function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
@@ -321,6 +389,7 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_probe_evictions_total"] = stats.probeEvictionsTotal;
   counters["live_clod_stream_probe_stale_discards_total"] = stats.probeStaleDiscardsTotal;
   counters["live_clod_stream_out_of_world_edits_supported"] = stats.outOfWorldEditsSupported;
+  writeTransitionCounters(counters, stats);
   writePerLevelStreamingCounters(counters, stats);
   if (stats.probeActive === 1) {
     counters["live_clod_stream_built_total"] = stats.probeApplyPagesTotal;
@@ -362,6 +431,7 @@ function resetStreamingCounterMirrors(): void {
   counters["live_clod_stream_probe_apply_pages_total"] = 0;
   counters["live_clod_stream_probe_evictions_total"] = 0;
   counters["live_clod_stream_probe_stale_discards_total"] = 0;
+  writeTransitionCounters(counters, emptyStats());
   for (let level = 0; level < STREAM_COUNTER_LEVELS; level++) {
     counters[`live_clod_stream_requested_l${level}_pages`] = 0;
     counters[`live_clod_stream_applied_l${level}_pages`] = 0;
@@ -402,11 +472,7 @@ export function parseStreamingClodPageKey(key: string): { level: number; px: num
   return { level, px, pz };
 }
 
-export function streamingClodPageHasRequiredNotReadyDescendant(
-  pageKey: string,
-  required: Iterable<string>,
-  cached: ReadonlySet<string>,
-): boolean {
+export function streamingClodPageHasRequiredNotReadyDescendant(pageKey: string, required: Iterable<string>, cached: ReadonlySet<string>): boolean {
   const parent = parseStreamingClodPageKey(pageKey);
   for (const key of required) {
     if (cached.has(key)) continue;
@@ -452,13 +518,7 @@ export function streamingClodRequiredPageCoords(center: THREE.Vector3, radiusM: 
         const levelPageSize = pageSize * scale;
         const key = streamingClodPageKey(levelPx, levelPz, level);
         if (coordsById.has(key)) continue;
-        coordsById.set(key, {
-          px: levelPx,
-          pz: levelPz,
-          level,
-          centerX: (levelPx + 0.5) * levelPageSize,
-          centerZ: (levelPz + 0.5) * levelPageSize,
-        });
+        coordsById.set(key, { px: levelPx, pz: levelPz, level, centerX: (levelPx + 0.5) * levelPageSize, centerZ: (levelPz + 0.5) * levelPageSize });
       }
     }
   }
@@ -484,6 +544,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const maxRootLevel = resolveStreamingClodMaxRootLevel(deps.cfg, deps.maxRootLevel);
   const rootSwitchStableFrames = Math.max(0, Math.floor(deps.rootSwitchStableFrames ?? queryStreamingRootSwitchStableFrames() ?? 0));
+  const rootTransitionOptions = resolveRootTransitionOptions(deps.rootTransition);
   const cached = new Map<string, CachedPage>();
   const failed = new Map<string, FailedBuildState>();
   const ready: ReadyPage[] = [];
@@ -492,6 +553,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const appliedPagesByLevel = zeroLevelArray();
   const staleCompletedPagesByLevel = zeroLevelArray();
   const workerBuildSamplesByLevel = Array.from({ length: STREAM_COUNTER_LEVELS }, () => [] as number[]);
+  const transitionMsSamples: number[] = [];
   let frame = 0;
   let active = deps.enabled;
   let requiredNow = new Set<string>();
@@ -508,7 +570,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let pendingRootSwitchStableFrames = 0;
   let rootSwitchSuppressedFrames = 0;
   let rootSwitchesTotal = 0;
-  let latest: StreamingClodRootStats = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches);
+  let activeRootTransition: ActiveRootTransition | null = null;
+  let nextTransitionGroupId = 1;
+  let transitionHardSwitchesTotal = 0;
+  let transitionCancelledTotal = 0;
+  let transitionCappedTotal = 0;
+  let transitionCompletedTotal = 0;
+  let latest: StreamingClodRootStats = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches, rootTransitionOptions);
 
   const beginMovementProbe = (): void => {
     probe.active = true;
@@ -529,7 +597,17 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     centerZ: (node.footprint.minZ + node.footprint.maxZ) / 2,
   });
 
+  const clearNodeTransition = (id: string): void => {
+    const node = cached.get(id)?.node;
+    if (node?.rootTransition) delete node.rootTransition;
+  };
+
+  const clearAllRootTransitions = (): void => {
+    for (const id of cached.keys()) clearNodeTransition(id);
+  };
+
   const removeRoot = (id: string): void => {
+    clearNodeTransition(id);
     for (let i = deps.roots.length - 1; i >= 0; i--) if (deps.roots[i]?.id === id) deps.roots.splice(i, 1);
     for (let i = deps.allNodes.length - 1; i >= 0; i--) if (deps.allNodes[i]?.id === id) deps.allNodes.splice(i, 1);
   };
@@ -552,9 +630,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const resolveActiveRootIds = (): Set<string> => {
-    const eligibleKeys = [...cached.entries()]
-      .filter(([, entry]) => entry.activeEligible)
-      .map(([key]) => key);
+    const eligibleKeys = [...cached.entries()].filter(([, entry]) => entry.activeEligible).map(([key]) => key);
     const activeIds: string[] = [];
     const sortedKeys = eligibleKeys.sort((a, b) => {
       const pageA = parseStreamingClodPageKey(a);
@@ -580,24 +656,95 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return true;
   };
 
-  const commitActiveRootIds = (nextActiveRootIds: Set<string>): void => {
+  const setRenderableRootIds = (ids: Iterable<string>): void => {
     for (let i = deps.roots.length - 1; i >= 0; i--) {
       const id = deps.roots[i]?.id;
       if (id !== undefined && cached.has(id)) deps.roots.splice(i, 1);
     }
-    for (const id of [...nextActiveRootIds].sort()) {
+    for (const id of [...ids].sort()) {
       const node = cached.get(id)?.node;
       if (node) deps.roots.push(node);
     }
+  };
+
+  const commitActiveRootIds = (nextActiveRootIds: Set<string>): void => {
+    clearAllRootTransitions();
+    setRenderableRootIds(nextActiveRootIds);
     activeRootIds = nextActiveRootIds;
+    activeRootTransition = null;
     pendingRootSwitchIds = new Set<string>();
     pendingRootSwitchKey = "";
     pendingRootSwitchStableFrames = 0;
     rootSwitchesTotal++;
   };
 
-  const syncActiveRoots = (): boolean => {
+  const transitionProgress = (transition: ActiveRootTransition): number =>
+    Math.max(0, Math.min(1, (frame - transition.startedFrame) / transition.durationFrames));
+
+  const transitionRenderableRootIds = (transition: ActiveRootTransition): Set<string> =>
+    new Set([...transition.fromRootIds, ...transition.toRootIds].filter((id) => cached.has(id)));
+
+  const applyRootTransitionState = (transition: ActiveRootTransition): void => {
+    clearAllRootTransitions();
+    const progress = transitionProgress(transition);
+    for (const id of transitionRenderableRootIds(transition)) {
+      const node = cached.get(id)?.node;
+      if (!node) continue;
+      let mode: StreamedRootRenderState["mode"] = "stable";
+      if (transition.fromRootIds.has(id) && !transition.toRootIds.has(id)) mode = "fadeOut";
+      else if (transition.toRootIds.has(id) && !transition.fromRootIds.has(id)) mode = "fadeIn";
+      node.rootTransition = { mode, progress: mode === "stable" ? 1 : progress, groupId: transition.id, parentHeightMorphReady: false };
+    }
+    setRenderableRootIds(transitionRenderableRootIds(transition));
+  };
+
+  const hardSwitchActiveRootIds = (nextActiveRootIds: Set<string>, reason: "cancel" | "cap" | "safety" | "disabled"): void => {
+    if (reason === "cancel") transitionCancelledTotal++;
+    if (reason === "cap") transitionCappedTotal++;
+    if (reason === "cancel" || reason === "cap" || reason === "safety") transitionHardSwitchesTotal++;
+    commitActiveRootIds(nextActiveRootIds);
+  };
+
+  const transitionExtraRoots = (fromRootIds: ReadonlySet<string>, toRootIds: ReadonlySet<string>): number =>
+    [...fromRootIds].filter((id) => !toRootIds.has(id)).length;
+
+  const startRootTransition = (nextActiveRootIds: Set<string>): void => {
+    activeRootTransition = {
+      id: nextTransitionGroupId++,
+      fromRootIds: new Set(activeRootIds),
+      toRootIds: new Set(nextActiveRootIds),
+      startedFrame: frame,
+      durationFrames: rootTransitionOptions.durationFrames,
+    };
+    pendingRootSwitchIds = new Set<string>();
+    pendingRootSwitchKey = "";
+    pendingRootSwitchStableFrames = 0;
+    applyRootTransitionState(activeRootTransition);
+  };
+
+  const syncActiveRootsInner = (): boolean => {
     const nextActiveRootIds = resolveActiveRootIds();
+
+    if (activeRootTransition) {
+      const currentCoversSafety = rootSetCoversSafety(activeRootIds);
+      const nextCoversSafety = rootSetCoversSafety(nextActiveRootIds);
+      if (!currentCoversSafety) {
+        hardSwitchActiveRootIds(nextCoversSafety ? nextActiveRootIds : new Set(activeRootTransition.toRootIds), "safety");
+        return true;
+      }
+      if (!setEquals(nextActiveRootIds, activeRootTransition.toRootIds)) {
+        hardSwitchActiveRootIds(nextActiveRootIds, "cancel");
+        return true;
+      }
+      if (transitionProgress(activeRootTransition) >= 1) {
+        transitionCompletedTotal++;
+        commitActiveRootIds(new Set(activeRootTransition.toRootIds));
+        return true;
+      }
+      applyRootTransitionState(activeRootTransition);
+      return false;
+    }
+
     if (setEquals(nextActiveRootIds, activeRootIds)) {
       pendingRootSwitchIds = new Set<string>();
       pendingRootSwitchKey = "";
@@ -610,9 +757,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     const canHoldCurrent = rootSwitchStableFrames > 0 && currentCoversSafety && nextCoversSafety;
     if (canHoldCurrent) {
       const nextKey = stableSetKey(nextActiveRootIds);
-      if (nextKey === pendingRootSwitchKey) {
-        pendingRootSwitchStableFrames++;
-      } else {
+      if (nextKey === pendingRootSwitchKey) pendingRootSwitchStableFrames++;
+      else {
         pendingRootSwitchKey = nextKey;
         pendingRootSwitchIds = new Set(nextActiveRootIds);
         pendingRootSwitchStableFrames = 1;
@@ -621,12 +767,37 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         rootSwitchSuppressedFrames++;
         return false;
       }
-      commitActiveRootIds(new Set(pendingRootSwitchIds));
+    }
+
+    const targetIds = canHoldCurrent ? new Set(pendingRootSwitchIds) : nextActiveRootIds;
+    const canTransition = rootTransitionOptions.enabled
+      && rootTransitionOptions.mode === "crossfade"
+      && activeRootIds.size > 0
+      && currentCoversSafety
+      && rootSetCoversSafety(targetIds);
+    if (canTransition) {
+      if (transitionExtraRoots(activeRootIds, targetIds) > rootTransitionOptions.maxExtraRoots) {
+        hardSwitchActiveRootIds(targetIds, "cap");
+        return true;
+      }
+      startRootTransition(targetIds);
       return true;
     }
 
-    commitActiveRootIds(nextActiveRootIds);
+    hardSwitchActiveRootIds(targetIds, rootTransitionOptions.enabled && !currentCoversSafety ? "safety" : "disabled");
     return true;
+  };
+
+  const syncActiveRoots = (): boolean => {
+    const startedAt = performance.now();
+    try {
+      return syncActiveRootsInner();
+    } finally {
+      if (rootTransitionOptions.enabled) {
+        transitionMsSamples.push(Math.max(0, performance.now() - startedAt));
+        if (transitionMsSamples.length > TRANSITION_MS_SAMPLE_LIMIT) transitionMsSamples.shift();
+      }
+    }
   };
 
   const safetyCoverageRootIds = (safetyIds: ReadonlySet<string>): Set<string> => {
@@ -639,6 +810,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         }
       }
     }
+    if (activeRootTransition) for (const id of transitionRenderableRootIds(activeRootTransition)) protectedIds.add(id);
     return protectedIds;
   };
 
@@ -648,15 +820,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     removeRoot(id);
     activeRootIds.delete(id);
     pendingRootSwitchIds.delete(id);
+    if (activeRootTransition?.fromRootIds.has(id) || activeRootTransition?.toRootIds.has(id)) {
+      activeRootTransition = null;
+      transitionCancelledTotal++;
+    }
   };
 
-  const evictionPriority = (
-    id: string,
-    entry: CachedPage,
-    protectedSafetyIds: ReadonlySet<string>,
-    center: THREE.Vector3,
-    radiusM: number,
-  ): number => {
+  const evictionPriority = (id: string, entry: CachedPage, protectedSafetyIds: ReadonlySet<string>, center: THREE.Vector3, radiusM: number): number => {
     if (protectedSafetyIds.has(id)) return 99;
     const page = parseStreamingClodPageKey(id);
     if (page.level < maxRootLevel) return 0;
@@ -669,9 +839,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     const protectedSafetyIds = safetyCoverageRootIds(requiredSafetyIds(requiredNow));
     const outsideHorizon = [...cached.entries()]
       .filter(([, entry]) => !cacheHorizonContains(entry.centerX, entry.centerZ, center, radiusM))
-      .sort((a, b) =>
-        evictionPriority(a[0], a[1], protectedSafetyIds, center, radiusM)
-        - evictionPriority(b[0], b[1], protectedSafetyIds, center, radiusM)
+      .sort((a, b) => evictionPriority(a[0], a[1], protectedSafetyIds, center, radiusM) - evictionPriority(b[0], b[1], protectedSafetyIds, center, radiusM)
         || a[1].lastTouchFrame - b[1].lastTouchFrame
         || a[0].localeCompare(b[0]));
     for (const [id, entry] of outsideHorizon) {
@@ -683,9 +851,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       evictions++;
     }
     if (cached.size <= maxCachedPages) return evictions;
-    const lru = [...cached.entries()].sort((a, b) =>
-      evictionPriority(a[0], a[1], protectedSafetyIds, center, radiusM)
-      - evictionPriority(b[0], b[1], protectedSafetyIds, center, radiusM)
+    const lru = [...cached.entries()].sort((a, b) => evictionPriority(a[0], a[1], protectedSafetyIds, center, radiusM) - evictionPriority(b[0], b[1], protectedSafetyIds, center, radiusM)
       || a[1].lastTouchFrame - b[1].lastTouchFrame
       || a[0].localeCompare(b[0]));
     while (cached.size > maxCachedPages && lru.length > 0) {
@@ -794,8 +960,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     let parentCoverageViolations = 0;
 
     const inflightIds = currentInflightIds();
+    const coverageRoots = activeRootTransition ? transitionRenderableRootIds(activeRootTransition) : activeRootIds;
     for (const id of safetyIds) {
-      const covered = pageCoveredByActiveRoots(id, activeRootIds);
+      const covered = pageCoveredByActiveRoots(id, coverageRoots);
       if (covered) {
         safetyReadyPages++;
         continue;
@@ -811,16 +978,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       else refinementPendingPages++;
     }
 
-    return {
-      safetyRequiredPages: safetyIds.length,
-      safetyCacheCapacityOk: safetyIds.length <= maxCachedPages ? 1 : 0,
-      safetyReadyPages,
-      safetyPendingPages,
-      safetyInflightPages,
-      refinementPendingPages,
-      refinementInflightPages,
-      parentCoverageViolations,
-    };
+    return { safetyRequiredPages: safetyIds.length, safetyCacheCapacityOk: safetyIds.length <= maxCachedPages ? 1 : 0, safetyReadyPages, safetyPendingPages, safetyInflightPages, refinementPendingPages, refinementInflightPages, parentCoverageViolations };
   };
 
   const handleBuildRejection = (batch: InflightBatch, error: unknown): void => {
@@ -905,6 +1063,26 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return { scheduled, cost: scheduledCost };
   };
 
+  const transitionSnapshot = () => {
+    if (!activeRootTransition) return { activeGroups: 0, activeRoots: 0, fadeIn: 0, fadeOut: 0, drawOverhead: 0, progressMin: 0, progressMax: 0 };
+    const ids = transitionRenderableRootIds(activeRootTransition);
+    let fadeIn = 0;
+    let fadeOut = 0;
+    for (const id of ids) {
+      const mode = cached.get(id)?.node.rootTransition?.mode;
+      if (mode === "fadeIn") fadeIn++;
+      if (mode === "fadeOut") fadeOut++;
+    }
+    const progress = transitionProgress(activeRootTransition);
+    return { activeGroups: 1, activeRoots: fadeIn + fadeOut, fadeIn, fadeOut, drawOverhead: fadeOut, progressMin: progress, progressMax: progress };
+  };
+
+  const currentReadyPageKeys = (): string[] => {
+    const ids = new Set(activeRootIds);
+    if (activeRootTransition) for (const id of transitionRenderableRootIds(activeRootTransition)) ids.add(id);
+    return [...ids].sort();
+  };
+
   return {
     update(center, radiusM) {
       frame++;
@@ -917,7 +1095,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         pendingRootSwitchIds = new Set();
         pendingRootSwitchKey = "";
         pendingRootSwitchStableFrames = 0;
-        latest = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches);
+        activeRootTransition = null;
+        clearAllRootTransitions();
+        latest = emptyStats(maxRootLevel, maxCachedPages, maxInflightBatches, rootTransitionOptions);
         mirrorStreamingProbeCounters(latest);
         return latest;
       }
@@ -957,6 +1137,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       }
       const inflightPageLevels = [...inFlight.values()].flatMap((batch) => [...batch.coordsById.values()].map((coord) => coordLevel(coord)));
       const coverage = countStreamCoverage(requiredIds);
+      const transition = transitionSnapshot();
       latest = {
         requiredPages: requiredIds.size,
         cachedPages: cached.size,
@@ -969,7 +1150,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         inflightBatches: inFlight.size,
         maxInflightBatches,
         applyQueuePages: ready.length,
-        activeRootPages: activeRootIds.size,
+        activeRootPages: activeRootTransition ? transitionRenderableRootIds(activeRootTransition).size : activeRootIds.size,
         maxCachedPages,
         safetyCacheCapacityOk: coverage.safetyCacheCapacityOk,
         safetyRequiredPages: coverage.safetyRequiredPages,
@@ -979,7 +1160,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         refinementPendingPages: coverage.refinementPendingPages,
         refinementInflightPages: coverage.refinementInflightPages,
         parentCoverageViolations: coverage.parentCoverageViolations,
-        readyPages: activeRootIds.size,
+        readyPages: activeRootTransition ? transitionRenderableRootIds(activeRootTransition).size : activeRootIds.size,
         scheduledPagesThisFrame,
         applyPagesThisFrame: applied.applied,
         applyMs: applied.applyMs,
@@ -1006,12 +1187,26 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         appliedPagesByLevel: [...appliedPagesByLevel],
         staleCompletedPagesByLevel: [...staleCompletedPagesByLevel],
         workerBuildMsP95ByLevel: workerP95(workerBuildSamplesByLevel),
+        transitionEnabled: rootTransitionOptions.enabled ? 1 : 0,
+        transitionActiveGroups: transition.activeGroups,
+        transitionActiveRoots: transition.activeRoots,
+        transitionFadeInRoots: transition.fadeIn,
+        transitionFadeOutRoots: transition.fadeOut,
+        transitionHardSwitchesTotal,
+        transitionCancelledTotal,
+        transitionCappedTotal,
+        transitionCompletedTotal,
+        transitionDrawOverheadRoots: transition.drawOverhead,
+        transitionDurationFrames: rootTransitionOptions.durationFrames,
+        transitionProgressMin: transition.progressMin,
+        transitionProgressMax: transition.progressMax,
+        transitionMsP95: percentile95(transitionMsSamples),
       };
       mirrorStreamingProbeCounters(latest);
       return latest;
     },
     stats() { return latest; },
-    readyPageKeys() { return [...activeRootIds].sort(); },
+    readyPageKeys() { return currentReadyPageKeys(); },
     beginMovementProbe,
   };
 }
@@ -1020,6 +1215,7 @@ function emptyStats(
   maxRootLevel = 0,
   maxCachedPages = DEFAULT_MAX_CACHED_PAGES,
   maxInflightBatches = DEFAULT_MAX_INFLIGHT_BATCHES,
+  rootTransitionOptions: StreamingClodRootTransitionOptions = resolveRootTransitionOptions({ enabled: false }),
 ): StreamingClodRootStats {
   return {
     requiredPages: 0,
@@ -1070,5 +1266,19 @@ function emptyStats(
     appliedPagesByLevel: zeroLevelArray(),
     staleCompletedPagesByLevel: zeroLevelArray(),
     workerBuildMsP95ByLevel: zeroLevelArray(),
+    transitionEnabled: rootTransitionOptions.enabled ? 1 : 0,
+    transitionActiveGroups: 0,
+    transitionActiveRoots: 0,
+    transitionFadeInRoots: 0,
+    transitionFadeOutRoots: 0,
+    transitionHardSwitchesTotal: 0,
+    transitionCancelledTotal: 0,
+    transitionCappedTotal: 0,
+    transitionCompletedTotal: 0,
+    transitionDrawOverheadRoots: 0,
+    transitionDurationFrames: rootTransitionOptions.durationFrames,
+    transitionProgressMin: 0,
+    transitionProgressMax: 0,
+    transitionMsP95: 0,
   };
 }
