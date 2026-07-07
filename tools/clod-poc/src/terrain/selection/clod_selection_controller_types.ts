@@ -71,10 +71,24 @@ export interface ClodSelectionControllerDeps {
 }
 
 export interface ClodSelectionSubphases {
+  settings: number;
+  params: number;
+  compute: number;
+  readback: number;
+  parity: number;
+  lookup: number;
+  cache: number;
   cut: number;
   book: number;
+  markActive: number;
+  apply: number;
+  stats: number;
+  hash: number;
+  commit: number;
   info: number;
   overlays: number;
+  dispatch: number;
+  total: number;
 }
 
 export interface ClodSelectionStats {
