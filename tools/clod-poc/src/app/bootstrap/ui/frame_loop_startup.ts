@@ -112,6 +112,18 @@ function streamWorkPending(stats: StreamingClodRootStats): boolean {
     || stats.transitionActiveGroups > 0;
 }
 
+function streamingWorldCenter(
+  streamingScene: boolean,
+  interactionMode: string,
+  player: { spawned: boolean; position: { x: number; z: number } },
+  camera: { position: { x: number; z: number } },
+  controls: { target: { x: number; z: number } },
+): { x: number; z: number } {
+  if (interactionMode === "playing") return player.position;
+  if (streamingScene && player.spawned) return player.position;
+  return streamingScene ? camera.position : controls.target;
+}
+
 function mirrorStreamingClodRootCounters(
   counters: Record<string, number> | undefined,
   stats: StreamingClodRootStats,
@@ -317,7 +329,7 @@ export function runFrameLoopStartup(
   let lastStreamCenterZ = Number.NaN;
   const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
   const updateSelectionWithStreaming = () => {
-    const center = interaction.mode === "playing" ? player.position : (streamingScene ? camera.position : controls.target);
+    const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
     const previousStats = streamingClodRootController.stats();
     const dx = center.x - lastStreamCenterX;
     const dz = center.z - lastStreamCenterZ;
