@@ -22,7 +22,10 @@ let liveBubbleProbeEvictionsTotal = 0;
 let liveBubbleProbeColliderRemovalsTotal = 0;
 
 interface TerrainFadeView {
-  node: { id: string };
+  node: {
+    id: string;
+    rootTransition?: { mode: string; progress: number; groupId: number };
+  };
   fade: number;
   target: number;
   mesh: THREE.Mesh;
@@ -183,12 +186,30 @@ export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: num
   );
 }
 
+function applyRootTransitionFade(view: TerrainFadeView): boolean {
+  const transition = view.node.rootTransition;
+  if (transition?.mode !== "fadeIn" && transition?.mode !== "fadeOut") return false;
+
+  const progress = THREE.MathUtils.clamp(transition.progress, 0, 1);
+  const fade = transition.mode === "fadeOut" ? 1 - progress : progress;
+  view.fade = fade;
+  view.target = transition.mode === "fadeOut" ? 0 : 1;
+  view.mesh.visible = fade > 0.001;
+  view.mat.setFade(fade, transition.mode !== "fadeOut", fade > 0.001 && fade < 0.999);
+  return true;
+}
+
 export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFramePhaseResult {
   const activeTerrainViews = input.selectionController.activeTerrainViews() as Set<TerrainFadeView>;
   const currentTerrainViews = input.selectionController.currentTerrainViews();
   const selectionStats = input.selectionController.stats();
 
   for (const v of activeTerrainViews) {
+    if (applyRootTransitionFade(v)) {
+      const progress = v.node.rootTransition?.progress ?? 1;
+      if (progress >= 1) activeTerrainViews.delete(v);
+      continue;
+    }
     if (input.pageTransitionMode === "instant") {
       v.fade = v.target;
       v.mesh.visible = v.target > 0.5;
