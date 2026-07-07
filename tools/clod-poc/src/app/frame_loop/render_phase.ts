@@ -60,6 +60,8 @@ const grassProfileMs = (value: number | null): string => value === null ? "-" : 
 
 type UnderstoryStatsWithConsulted = UnderstoryStats & { gpuPrefilterFarSummaryConsulted?: number };
 
+type ExtraPhaseTiming = FramePerfPhaseTiming & Record<string, number>;
+
 const DYNAMIC_RESOLUTION_REASON_CODE: Record<DynamicResolutionStats["reason"], number> = {
   disabled: 0,
   mode_disabled: 1,
@@ -86,6 +88,11 @@ const SELECTION_CACHE_REASON_CODE: Record<string, number> = {
 
 function selectionCacheReasonCode(reason: string): number {
   return SELECTION_CACHE_REASON_CODE[reason] ?? -1;
+}
+
+function phaseExtra(input: FramePerfPhaseTiming, key: string): number {
+  const value = (input as ExtraPhaseTiming)[key];
+  return Number.isFinite(value) ? value : 0;
 }
 
 function logGrassProfile(
@@ -273,6 +280,9 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       frameSetupMs: input.phaseTiming.frameSetupMs,
       inputMs: input.phaseTiming.inputMs,
       selectionUpdateMs: input.phaseTiming.selectionUpdateMs,
+      "selectionOuter.updateCallMs": phaseExtra(input.phaseTiming, "selectionOuter.updateCallMs"),
+      "selectionOuter.statsCallMs": phaseExtra(input.phaseTiming, "selectionOuter.statsCallMs"),
+      "selectionOuter.wrapperGapMs": phaseExtra(input.phaseTiming, "selectionOuter.wrapperGapMs"),
       clodApplyMs: input.phaseTiming.clodApplyMs,
       longViewDiagnosticsMs: input.phaseTiming.longViewDiagnosticsMs,
       farSummaryMs: input.phaseTiming.farSummaryMs,
