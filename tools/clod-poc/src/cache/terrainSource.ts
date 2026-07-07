@@ -7,7 +7,10 @@ import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
-const TERRAIN_SOURCE_VERSION = "rectangular-world-v1";
+// v2: border coast is now disabled for infinite-island fields (islandShape.enabled),
+// so page geometry outside the startup world is the true procedural field instead of a
+// collapsed sea-level sheet. Bump invalidates any pages cached under the old finite coast.
+const TERRAIN_SOURCE_VERSION = "world-modes-v2";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);

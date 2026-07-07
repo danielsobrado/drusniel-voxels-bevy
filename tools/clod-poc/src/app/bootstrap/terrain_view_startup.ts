@@ -332,7 +332,18 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     },
   });
 
-  if (state.farShellEnabled) {
+  // The legacy far shell is built from the finite startup terrainSummary and is
+  // centered on the startup world (worldSizeCells/2), so for an infinite-island
+  // world it paints a small finite ring near the origin that disagrees with, and
+  // z-fights, the player-centered far terrain. When the far clipmap is present it
+  // owns far terrain, so drop the redundant finite shell to avoid two far owners.
+  const isInfiniteIslands = searchParams.get("scene") === "infinite-islands";
+  const farClipmapActive = searchParams.get("farClipmap") === "1";
+  const disableLegacyFarShell = isInfiniteIslands && farClipmapActive;
+
+  if (disableLegacyFarShell) {
+    farShellController.setEnabled(false);
+  } else if (state.farShellEnabled) {
     farShellController.rebuild();
   } else {
     farShellController.setEnabled(false);

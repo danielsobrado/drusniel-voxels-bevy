@@ -375,7 +375,20 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   });
   if (isRiverParityTestScene(searchParams.get("scene"))) waterConfig = applyRiverParityTestWaterConfig(waterConfig);
   waterConfig = resolveWaterConfig(waterConfig, worldCells);
-  setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
+
+  // Border coast is a finite-world feature. Infinite islands own their coast via
+  // the procedural island field, so the finite rectangular border coast must be
+  // disabled — otherwise everything outside the small startup world (worldCells,
+  // derived from startupWorld) collapses to a flat sea-level sheet. We pass the
+  // disabled config to the runtime, the worker, and the cache key so all three agree.
+  const borderCoastActive =
+    borderCoastOceanConfig.enabled &&
+    !isInfiniteIslands &&
+    !terrainFieldConfig.islandShape.enabled;
+  const effectiveBorderCoast: BorderCoastOceanConfig = borderCoastActive
+    ? borderCoastOceanConfig
+    : { ...borderCoastOceanConfig, enabled: false };
+  setBorderCoastRuntime(borderCoastActive ? effectiveBorderCoast : null, worldCells);
 
   const buildStatus = { value: "preparing" };
   const updateBuildOverlay = () => updateClodOverlay({
@@ -405,7 +418,15 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
       : null;
     if (system) {
-      setTerrainSurfaceOverride((x, z) => system.terrainHeight(x, z));
+      // The hydrology carved bed is a finite grid that edge-clamps outside
+      // [0, worldCells]. Outside the startup world, fall back to the base field so
+      // the main-thread live path (spawn, live bubble, grass, colliders) matches
+      // the worker's streamed-root builds (installHydrologyTerrain boundedToStartupWorld).
+      const hydroCells = system.grid.worldCells;
+      setTerrainSurfaceOverride((x, z) =>
+        (x < 0 || z < 0 || x > hydroCells || z > hydroCells)
+          ? baseSurfaceHeight(x, z)
+          : system.terrainHeight(x, z));
       console.log("[water] hydrology built", system.stats);
     } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
       setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
@@ -436,7 +457,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     generatorVersion: cfg.meshopt_package_version,
     digRevision: getDigEditRevision(),
     hydrologyTerrain,
-    borderCoastOceanConfig,
+    borderCoastOceanConfig: effectiveBorderCoast,
     waterConfig: {
       enabled: waterConfig.enabled,
       source: waterConfig.source,
@@ -478,7 +499,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       },
       terrainFieldConfig,
       hydrologyTerrain,
-      borderCoastOceanConfig,
+      effectiveBorderCoast,
       isCacheSessionDisabled(),
       terrainSource,
     ));

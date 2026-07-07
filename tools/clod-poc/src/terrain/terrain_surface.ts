@@ -189,7 +189,16 @@ export function setBorderCoastRuntime(
   worldCellsX = 0,
   worldCellsZ = worldCellsX,
 ): void {
-  if (!config || !config.enabled || worldCellsX <= 0 || worldCellsZ <= 0) {
+  // Border coast is a FINITE-world feature: applyBorderCoastShape() collapses
+  // every coordinate outside [0, worldCells]² to the ocean/beach waterline.
+  // Infinite island fields (islandShape.enabled) generate their own coasts and
+  // ocean procedurally across an unbounded domain, so the finite rectangular
+  // border coast must never be active in that mode — otherwise terrain far from
+  // the (small) startup world flattens to a sea-level sheet.
+  if (
+    !config || !config.enabled || worldCellsX <= 0 || worldCellsZ <= 0 ||
+    terrainFieldConfig.islandShape.enabled
+  ) {
     borderCoastRuntime = null;
     return;
   }
