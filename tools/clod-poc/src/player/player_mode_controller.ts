@@ -45,6 +45,8 @@ export interface QuerySpawnPoint {
 
 const ORBIT_RETURN_OFFSET = new THREE.Vector3(8, 7, 8);
 const QUERY_SPAWN_DRY_CLEARANCE_M = 2;
+const QUERY_SPAWN_FALLBACK_LIFT_M = 16;
+const QUERY_SPAWN_RAYCAST_HEIGHT_M = 512;
 const QUERY_SPAWN_SEARCH_RADII_M = [0, 16, 32, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] as const;
 const QUERY_SPAWN_SEARCH_DIRECTIONS = 24;
 
@@ -83,6 +85,18 @@ export function resolveQuerySpawnPoint(
 
   if (Number.isFinite(best.y)) return best;
   return { x, y: WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M, z, adjusted: false };
+}
+
+function resolveColliderSpawnPoint(
+  terrainColliders: TerrainColliderSet,
+  spawn: QuerySpawnPoint,
+): THREE.Vector3 {
+  const originY = Math.max(spawn.y + QUERY_SPAWN_RAYCAST_HEIGHT_M, WATER_LEVEL + QUERY_SPAWN_RAYCAST_HEIGHT_M);
+  const origin = new THREE.Vector3(spawn.x, originY, spawn.z);
+  const ray = new THREE.Ray(origin, new THREE.Vector3(0, -1, 0));
+  const hit = terrainColliders.raycastSpawn(ray);
+  if (hit) return hit.point.clone();
+  return new THREE.Vector3(spawn.x, spawn.y + QUERY_SPAWN_FALLBACK_LIFT_M, spawn.z);
 }
 
 export function createPlayerModeController(deps: PlayerModeControllerDeps): PlayerModeController {
@@ -196,6 +210,7 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     if (!Number.isFinite(xVal) || !Number.isFinite(zVal)) return;
 
     const spawn = resolveQuerySpawnPoint(xVal, zVal, deps.surfaceHeight);
+    const spawnPoint = resolveColliderSpawnPoint(deps.terrainColliders, spawn);
     if (spawn.adjusted) {
       console.info(
         `[player] query spawn adjusted to dry land: requested=(${xVal.toFixed(1)}, ${zVal.toFixed(1)}) ` +
@@ -203,12 +218,12 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
       );
     }
 
-    deps.controls.target.set(spawn.x, spawn.y, spawn.z);
-    deps.camera.position.set(spawn.x, spawn.y + 15, spawn.z + 20);
+    deps.controls.target.copy(spawnPoint);
+    deps.camera.position.set(spawnPoint.x, spawnPoint.y + 15, spawnPoint.z + 20);
     deps.camera.lookAt(deps.controls.target);
     deps.controls.update();
 
-    deps.player.spawn(new THREE.Vector3(spawn.x, spawn.y, spawn.z));
+    deps.player.spawn(spawnPoint);
     deps.onStartPlayingFacing(yawVal, 0);
     deps.interaction.startPlaying();
     deps.controls.enabled = false;
