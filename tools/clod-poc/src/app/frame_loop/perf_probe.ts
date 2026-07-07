@@ -107,11 +107,26 @@ function numericSample(sample: FramePerfSample, key: string): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function hasNumericSample(sample: FramePerfSample, key: string): boolean {
+  const value = sample[key];
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function selectionOuterStats(samples: readonly FramePerfSample[]): Record<string, import("./perf_probe_types.js").FramePerfMetricStats> {
+  const hasDirectSplit = samples.some((sample) => hasNumericSample(sample, "selectionOuter.updateCallMs") || hasNumericSample(sample, "selectionOuter.statsCallMs"));
+  const updateValues = samples.map((sample) => hasDirectSplit ? numericSample(sample, "selectionOuter.updateCallMs") : numericSample(sample, "selectionSub.total"));
+  const statsValues = samples.map((sample) => numericSample(sample, "selectionOuter.statsCallMs"));
+  const wrapperValues = samples.map((sample) => numericSample(sample, "selectionOuter.wrapperGapMs"));
   return {
     totalMs: statsForNumbers(samples.map((sample) => numericSample(sample, "selectionUpdateMs"))),
-    updateMs: statsForNumbers(samples.map((sample) => numericSample(sample, "selectionSub.total"))),
-    statsOrWrapperMs: statsForNumbers(samples.map((sample) => Math.max(0, numericSample(sample, "selectionUpdateMs") - numericSample(sample, "selectionSub.total")))),
+    updateMs: statsForNumbers(updateValues),
+    updateCallMs: statsForNumbers(updateValues),
+    statsCallMs: statsForNumbers(statsValues),
+    wrapperGapMs: statsForNumbers(wrapperValues),
+    statsOrWrapperMs: statsForNumbers(samples.map((sample, index) => {
+      if (hasDirectSplit) return statsValues[index] + wrapperValues[index];
+      return Math.max(0, numericSample(sample, "selectionUpdateMs") - numericSample(sample, "selectionSub.total"));
+    })),
   };
 }
 
@@ -356,6 +371,9 @@ function mirrorFramePerfCounters(
   const outerStats = selectionOuterStats(snapshot.samples);
   mirrorStats(counters, "selectionOuter.totalMs", outerStats.totalMs);
   mirrorStats(counters, "selectionOuter.updateMs", outerStats.updateMs);
+  mirrorStats(counters, "selectionOuter.updateCallMs", outerStats.updateCallMs);
+  mirrorStats(counters, "selectionOuter.statsCallMs", outerStats.statsCallMs);
+  mirrorStats(counters, "selectionOuter.wrapperGapMs", outerStats.wrapperGapMs);
   mirrorStats(counters, "selectionOuter.statsOrWrapperMs", outerStats.statsOrWrapperMs);
   snapshot.broadBucketsByP95.slice(0, MIRRORED_TOP_BUCKET_COUNT).forEach((bucket, index) => {
     counters[`framePerf.topBroad.${index}.p95`] = bucket.p95;
