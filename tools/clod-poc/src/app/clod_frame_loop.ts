@@ -286,6 +286,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       interaction: player.interaction,
       player: player.player,
       controls: player.controls,
+      camera: render.camera,
       selectionController: terrain.selectionController,
       nearFieldBubbleController: terrain.nearFieldBubbleController,
       views: terrain.views,
