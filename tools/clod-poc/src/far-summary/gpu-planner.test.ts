@@ -61,7 +61,8 @@ describe("planFarSummaryGpuDirtyTiles", () => {
   it("wraps existing required far-summary tile planning into GPU descriptors", () => {
     const tiles = planFarSummaryGpuDirtyTiles(CENTER, SUMMARY_CONFIG, gpuConfig({ sampleGrid: 32 }), "startup", 7);
     expect(tiles.length).toBeGreaterThan(0);
-    expect(tiles[0]).toMatchObject({
+    const first = tiles[0]!;
+    expect(first).toMatchObject({
       ring: 0,
       cellSizeM: 16,
       tileCells: 2,
@@ -69,8 +70,8 @@ describe("planFarSummaryGpuDirtyTiles", () => {
       reason: "startup",
       revision: 7,
     });
-    expect(tiles[0].sizeX).toBe(32);
-    expect(tiles[0].sizeZ).toBe(32);
+    expect(first.sizeX).toBe(32);
+    expect(first.sizeZ).toBe(32);
   });
 
   it("is deterministic for the same center and revision", () => {
@@ -82,7 +83,9 @@ describe("planFarSummaryGpuDirtyTiles", () => {
   });
 
   it("reports tile bounds consistently with descriptor origin and size", () => {
-    const [tile] = planFarSummaryGpuDirtyTiles(CENTER, SUMMARY_CONFIG, gpuConfig(), "startup", 1);
+    const tiles = planFarSummaryGpuDirtyTiles(CENTER, SUMMARY_CONFIG, gpuConfig(), "startup", 1);
+    expect(tiles.length).toBeGreaterThan(0);
+    const tile = tiles[0]!;
     const bounds = farSummaryGpuTileBounds(tile);
     expect(bounds.minX).toBe(tile.originX);
     expect(bounds.minZ).toBe(tile.originZ);
@@ -121,9 +124,10 @@ describe("buildFarSummaryGpuPlan", () => {
     const plan = buildFarSummaryGpuPlan(CENTER, SUMMARY_CONFIG, gpuConfig({ maxTilesPerBatch: 2, maxBatchesPerFrame: 1 }), "startup", 1);
     expect(plan.dirtyTiles.length).toBeGreaterThan(2);
     expect(plan.batches).toHaveLength(1);
-    expect(plan.batches[0].tiles).toHaveLength(2);
+    const firstBatch = plan.batches[0]!;
+    expect(firstBatch.tiles).toHaveLength(2);
     expect(plan.droppedTiles).toBe(plan.dirtyTiles.length - 2);
-    expect(plan.estimatedBufferBytes).toBe(plan.batches[0].totalBytes);
+    expect(plan.estimatedBufferBytes).toBe(firstBatch.totalBytes);
   });
 });
 
