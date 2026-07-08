@@ -24,6 +24,16 @@ export interface FarSummaryGpuDebugReadback {
   records: FarSummaryGpuRecord[];
 }
 
+export interface FarSummaryGpuCellReadback {
+  batchIndex: number;
+  records: FarSummaryGpuRecord[];
+}
+
+interface FarSummaryGpuBatchReadback {
+  debugRecords: FarSummaryGpuRecord[];
+  cellRecords: FarSummaryGpuRecord[];
+}
+
 export interface FarSummaryGpuBuilder {
   dispatch(plan: FarSummaryGpuPlan): Promise<FarSummaryGpuDispatchResult>;
   dispose(): void;
@@ -33,6 +43,7 @@ export interface FarSummaryGpuDispatchResult {
   ok: boolean;
   counters: FarSummaryGpuCounters;
   debugReadbacks?: FarSummaryGpuDebugReadback[];
+  cellReadbacks?: FarSummaryGpuCellReadback[];
   parity?: FarSummaryGpuParityEvaluation;
   error?: Error;
 }
@@ -79,6 +90,7 @@ export async function createFarSummaryGpuBuilder(
         { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
         { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
       ],
     });
     const pipeline = await device.createComputePipelineAsync({
@@ -190,7 +202,9 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
     counters.deviceReady = 1;
     counters.dirtyTiles = plan.dirtyTiles.length;
     counters.bufferBytes = plan.estimatedBufferBytes;
-    counters.summaryRecordsLive = plan.dirtyTiles.length;
+    counters.summaryRecordsLive = this.config.commitToCache
+      ? plan.batches.reduce((sum, batch) => sum + batch.cellRecordCount, 0)
+      : plan.dirtyTiles.length;
 
     if (this.disposed) {
       counters.failedBatches = plan.batches.length;
@@ -200,12 +214,14 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
     const timings: number[] = [];
     const readbackTimings: number[] = [];
     const debugReadbacks: FarSummaryGpuDebugReadback[] = [];
+    const cellReadbacks: FarSummaryGpuCellReadback[] = [];
     try {
       for (let batchIndex = 0; batchIndex < plan.batches.length; batchIndex++) {
         const batch = plan.batches[batchIndex]!;
         const startedAt = performance.now();
-        const records = await this.dispatchBatch(batch, readbackTimings);
-        if (records.length > 0) debugReadbacks.push({ batchIndex, records });
+        const readback = await this.dispatchBatch(batch, readbackTimings);
+        if (readback.debugRecords.length > 0) debugReadbacks.push({ batchIndex, records: readback.debugRecords });
+        if (readback.cellRecords.length > 0) cellReadbacks.push({ batchIndex, records: readback.cellRecords });
         timings.push(performance.now() - startedAt);
         counters.batchesDispatched++;
         counters.tilesDispatched += batch.tiles.length;
@@ -213,7 +229,12 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
       counters.computeMsP50 = percentile(timings, 0.5);
       counters.computeMsP95 = percentile(timings, 0.95);
       counters.readbackMsP95 = percentile(readbackTimings, 0.95);
-      return debugReadbacks.length > 0 ? { ok: true, counters, debugReadbacks } : { ok: true, counters };
+      return {
+        ok: true,
+        counters,
+        ...(debugReadbacks.length > 0 ? { debugReadbacks } : {}),
+        ...(cellReadbacks.length > 0 ? { cellReadbacks } : {}),
+      };
     } catch (error) {
       counters.failedBatches++;
       return { ok: false, counters, error: error instanceof Error ? error : new Error(String(error)) };
@@ -224,7 +245,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
     this.disposed = true;
   }
 
-  private async dispatchBatch(batch: FarSummaryGpuBatch, readbackTimings: number[]): Promise<FarSummaryGpuRecord[]> {
+  private async dispatchBatch(batch: FarSummaryGpuBatch, readbackTimings: number[]): Promise<FarSummaryGpuBatchReadback> {
     const buffers = createFarSummaryGpuBatchBuffers(this.device, batch, this.config, this.terrainFieldConfig);
     try {
       const bindGroup = this.device.createBindGroup({
@@ -235,6 +256,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
           { binding: 1, resource: { buffer: buffers.outputBuffer } },
           { binding: 2, resource: { buffer: buffers.digEditsBuffer } },
           { binding: 3, resource: { buffer: buffers.fieldParamsBuffer } },
+          { binding: 4, resource: { buffer: buffers.cellOutputBuffer } },
         ],
       });
       const encoder = this.device.createCommandEncoder({ label: "far summary gpu build encoder" });
@@ -246,19 +268,31 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
       if (buffers.readbackBuffer && buffers.readbackBytes > 0) {
         encoder.copyBufferToBuffer(buffers.outputBuffer, 0, buffers.readbackBuffer, 0, buffers.readbackBytes);
       }
+      if (buffers.cellReadbackBuffer && buffers.cellReadbackBytes > 0) {
+        encoder.copyBufferToBuffer(buffers.cellOutputBuffer, 0, buffers.cellReadbackBuffer, 0, buffers.cellReadbackBytes);
+      }
       this.device.queue.submit([encoder.finish()]);
-      if (!buffers.readbackBuffer || buffers.readbackBytes <= 0) return [];
 
-      const readbackStartedAt = performance.now();
-      await buffers.readbackBuffer.mapAsync(GPUMapMode.READ, 0, buffers.readbackBytes);
-      const mapped = buffers.readbackBuffer.getMappedRange(0, buffers.readbackBytes);
-      const copy = mapped.slice(0);
-      buffers.readbackBuffer.unmap();
-      readbackTimings.push(performance.now() - readbackStartedAt);
-      return decodeFarSummaryGpuRecords(copy, Math.floor(buffers.readbackBytes / FAR_SUMMARY_GPU_RECORD_BYTES));
+      const debugRecords = buffers.readbackBuffer && buffers.readbackBytes > 0
+        ? await this.mapRecords(buffers.readbackBuffer, buffers.readbackBytes, readbackTimings)
+        : [];
+      const cellRecords = buffers.cellReadbackBuffer && buffers.cellReadbackBytes > 0
+        ? await this.mapRecords(buffers.cellReadbackBuffer, buffers.cellReadbackBytes, readbackTimings)
+        : [];
+      return { debugRecords, cellRecords };
     } finally {
       buffers.destroy();
     }
+  }
+
+  private async mapRecords(buffer: GPUBuffer, bytes: number, readbackTimings: number[]): Promise<FarSummaryGpuRecord[]> {
+    const readbackStartedAt = performance.now();
+    await buffer.mapAsync(GPUMapMode.READ, 0, bytes);
+    const mapped = buffer.getMappedRange(0, bytes);
+    const copy = mapped.slice(0);
+    buffer.unmap();
+    readbackTimings.push(performance.now() - readbackStartedAt);
+    return decodeFarSummaryGpuRecords(copy, Math.floor(bytes / FAR_SUMMARY_GPU_RECORD_BYTES));
   }
 }
 
