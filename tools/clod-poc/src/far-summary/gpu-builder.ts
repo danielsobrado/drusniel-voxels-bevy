@@ -1,5 +1,5 @@
 import { requestWebGpuDevice } from "../gpu/webgpu_device.js";
-import shaderCode from "./shaders/far_summary_build.wgsl?raw";
+import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryGpuBatch, FarSummaryGpuPlan } from "./gpu-planner.js";
 import { FAR_SUMMARY_GPU_RECORD_BYTES, type FarSummaryGpuConfig, type FarSummaryGpuFallbackReason } from "./gpu-config.js";
@@ -7,6 +7,7 @@ import { farSummaryGpuFallbackDecision } from "./gpu-config.js";
 import { createFarSummaryGpuBatchBuffers } from "./gpu-buffers.js";
 import { createFarSummaryGpuCounters, publishFarSummaryGpuCounters, type FarSummaryGpuCounters } from "./gpu-counters.js";
 import { decodeFarSummaryGpuRecords, type FarSummaryGpuRecord } from "./gpu-records.js";
+import { composeFarSummaryGpuBuildShader } from "./gpu-shader.js";
 import {
   applyFarSummaryGpuParityEvaluationToCounters,
   evaluateFarSummaryGpuDebugReadbackParity,
@@ -39,6 +40,7 @@ export interface FarSummaryGpuDispatchResult {
 export interface CreateFarSummaryGpuBuilderOptions {
   config: FarSummaryGpuConfig;
   sharedDevice?: GPUDevice;
+  terrainFieldConfig?: TerrainFieldConfig;
 }
 
 export interface FarSummaryGpuDispatchOrFallbackInput {
@@ -69,12 +71,14 @@ export async function createFarSummaryGpuBuilder(
       }
       device = result.device;
     }
-    const module = device.createShaderModule({ label: "far summary gpu build shader", code: shaderCode });
+    const module = device.createShaderModule({ label: "far summary gpu build shader", code: composeFarSummaryGpuBuildShader() });
     const layout = device.createBindGroupLayout({
       label: "far summary gpu build layout",
       entries: [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       ],
     });
     const pipeline = await device.createComputePipelineAsync({
@@ -82,7 +86,7 @@ export async function createFarSummaryGpuBuilder(
       layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
       compute: { module, entryPoint: "build_far_summary" },
     });
-    return new WebGpuFarSummaryBuilder(device, layout, pipeline, options.config);
+    return new WebGpuFarSummaryBuilder(device, layout, pipeline, options.config, options.terrainFieldConfig);
   } catch (error) {
     console.warn("[far-summary-gpu] builder unavailable; CPU far-summary remains authoritative", error);
     publishFarSummaryGpuCounters(undefined, disabledFarSummaryGpuCounters(options.config));
@@ -177,6 +181,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
     private readonly layout: GPUBindGroupLayout,
     private readonly pipeline: GPUComputePipeline,
     private readonly config: FarSummaryGpuConfig,
+    private readonly terrainFieldConfig?: TerrainFieldConfig,
   ) {}
 
   async dispatch(plan: FarSummaryGpuPlan): Promise<FarSummaryGpuDispatchResult> {
@@ -220,7 +225,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
   }
 
   private async dispatchBatch(batch: FarSummaryGpuBatch, readbackTimings: number[]): Promise<FarSummaryGpuRecord[]> {
-    const buffers = createFarSummaryGpuBatchBuffers(this.device, batch, this.config);
+    const buffers = createFarSummaryGpuBatchBuffers(this.device, batch, this.config, this.terrainFieldConfig);
     try {
       const bindGroup = this.device.createBindGroup({
         label: "far summary gpu build bind group",
@@ -228,6 +233,8 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
         entries: [
           { binding: 0, resource: { buffer: buffers.descriptorBuffer } },
           { binding: 1, resource: { buffer: buffers.outputBuffer } },
+          { binding: 2, resource: { buffer: buffers.digEditsBuffer } },
+          { binding: 3, resource: { buffer: buffers.fieldParamsBuffer } },
         ],
       });
       const encoder = this.device.createCommandEncoder({ label: "far summary gpu build encoder" });
