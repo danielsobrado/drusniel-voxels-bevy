@@ -1,4 +1,5 @@
 import type { GrassStats } from "../grass.js";
+import type { StoneStats } from "../stones/stone_instances.js";
 import type { TreeStats } from "../trees/index.js";
 import type { UnderstoryStats } from "../understory/index.js";
 
@@ -53,6 +54,16 @@ export interface GpuVegetationEarlyRejectCounters {
   understoryGpuSourceFarSummary: number;
   understoryGpuSourceTerrainSampler: number;
   understoryGpuSourceFallback: number;
+  stoneGpuClustersTotal: number;
+  stoneGpuClustersRejectedEarly: number;
+  stoneGpuClustersAccepted: number;
+  stoneGpuRejectTerrainHidden: number;
+  stoneGpuRejectNoCoverage: number;
+  stoneGpuRejectSummaryMissing: number;
+  stoneGpuPrefilterFarSummaryConsulted: number;
+  stoneGpuSourceFarSummary: number;
+  stoneGpuSourceTerrainSampler: number;
+  stoneGpuSourceFallback: number;
   "grassReject.wrong_biome": number;
   "grassReject.too_steep": number;
   "grassReject.below_water": number;
@@ -72,6 +83,14 @@ export interface GpuVegetationEarlyRejectCounters {
   "understoryReject.height_range": number;
   "understoryReject.outside_world": number;
   "understoryReject.terrain_hidden": number;
+  "stoneReject.too_steep": number;
+  "stoneReject.below_water": number;
+  "stoneReject.outside_world": number;
+  "stoneReject.too_far": number;
+  "stoneReject.density_mask": number;
+  "stoneReject.tile_budget": number;
+  "stoneReject.class_budget": number;
+  "stoneReject.terrain_hidden": number;
 }
 
 type GrassStatsWithConsulted = GrassStats & { gpuRingPrefilterFarSummaryConsulted?: number };
@@ -129,6 +148,16 @@ export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejec
     understoryGpuSourceFarSummary: 0,
     understoryGpuSourceTerrainSampler: 0,
     understoryGpuSourceFallback: 0,
+    stoneGpuClustersTotal: 0,
+    stoneGpuClustersRejectedEarly: 0,
+    stoneGpuClustersAccepted: 0,
+    stoneGpuRejectTerrainHidden: 0,
+    stoneGpuRejectNoCoverage: 0,
+    stoneGpuRejectSummaryMissing: 0,
+    stoneGpuPrefilterFarSummaryConsulted: 0,
+    stoneGpuSourceFarSummary: 0,
+    stoneGpuSourceTerrainSampler: 0,
+    stoneGpuSourceFallback: 0,
     "grassReject.wrong_biome": 0,
     "grassReject.too_steep": 0,
     "grassReject.below_water": 0,
@@ -148,6 +177,14 @@ export function emptyGpuVegetationEarlyRejectCounters(): GpuVegetationEarlyRejec
     "understoryReject.height_range": 0,
     "understoryReject.outside_world": 0,
     "understoryReject.terrain_hidden": 0,
+    "stoneReject.too_steep": 0,
+    "stoneReject.below_water": 0,
+    "stoneReject.outside_world": 0,
+    "stoneReject.too_far": 0,
+    "stoneReject.density_mask": 0,
+    "stoneReject.tile_budget": 0,
+    "stoneReject.class_budget": 0,
+    "stoneReject.terrain_hidden": 0,
   };
 }
 
@@ -155,12 +192,14 @@ export function aggregateGpuVegetationEarlyRejectCounters(input: {
   treeStats?: TreeStats | null;
   grassStats?: GrassStats | null;
   understoryStats?: UnderstoryStats | null;
+  stoneStats?: StoneStats | null;
 }): GpuVegetationEarlyRejectCounters {
   const counters = emptyGpuVegetationEarlyRejectCounters();
 
   addTreeCounters(counters, input.treeStats ?? null);
   addGrassCounters(counters, input.grassStats ?? null);
   addUnderstoryCounters(counters, input.understoryStats ?? null);
+  addStoneCounters(counters, input.stoneStats ?? null);
 
   return counters;
 }
@@ -321,6 +360,66 @@ function addUnderstoryCounters(counters: GpuVegetationEarlyRejectCounters, under
   counters.vegetationGpuRejectBelowWater += belowWater;
   counters.vegetationGpuRejectOutsideTerrain += outsideWorld;
   counters.vegetationGpuRejectInvalidSurface += heightRange + tooSteep;
+}
+
+function addStoneCounters(counters: GpuVegetationEarlyRejectCounters, stone: StoneStats | null): void {
+  if (!stone) return;
+  const before = stone.gpuCandidateCountBeforePrefilter ?? stone.gpuCandidateCount ?? 0;
+  const after = stone.gpuCandidateCountAfterPrefilter ?? stone.total ?? 0;
+  const total = stone.gpuPrefilterTestedClusters ?? before;
+  const rejected = stone.gpuPrefilterRejectedClusters ?? Math.max(0, total - (stone.gpuPrefilterAcceptedClusters ?? after));
+  const accepted = stone.gpuPrefilterAcceptedClusters ?? Math.max(0, total - rejected);
+  const missing = stone.gpuPrefilterUnknownKeptClusters ?? 0;
+  const reasonCounts = stone.earlyTerrainReasonCounts ?? {};
+  const tooSteep = reasonCounts.too_steep ?? 0;
+  const belowWater = reasonCounts.below_water ?? 0;
+  const outsideWorld = reasonCounts.outside_world ?? 0;
+  const tooFar = reasonCounts.too_far ?? 0;
+  const densityMask = reasonCounts.density_mask ?? 0;
+  const tileBudget = reasonCounts.tile_budget ?? 0;
+  const classBudget = reasonCounts.class_budget ?? 0;
+  const terrainHidden = reasonCounts.terrain_hidden ?? rejected;
+  const farSummary = stone.gpuPrefilterSourceFarSummary ?? 0;
+  const consulted = stone.gpuPrefilterFarSummaryConsulted ?? farSummary;
+  const sampler = stone.gpuPrefilterSourceTerrainSampler ?? 0;
+  const fallback = stone.gpuPrefilterSourceFallback ?? 0;
+
+  counters.stoneGpuClustersTotal += total;
+  counters.stoneGpuClustersRejectedEarly += rejected;
+  counters.stoneGpuClustersAccepted += accepted;
+  counters.stoneGpuRejectTerrainHidden += terrainHidden;
+  counters.stoneGpuRejectNoCoverage += densityMask;
+  counters.stoneGpuRejectSummaryMissing += missing;
+  counters.stoneGpuPrefilterFarSummaryConsulted += consulted;
+  counters.stoneGpuSourceFarSummary += farSummary;
+  counters.stoneGpuSourceTerrainSampler += sampler;
+  counters.stoneGpuSourceFallback += fallback;
+  counters["stoneReject.too_steep"] += tooSteep;
+  counters["stoneReject.below_water"] += belowWater;
+  counters["stoneReject.outside_world"] += outsideWorld;
+  counters["stoneReject.too_far"] += tooFar;
+  counters["stoneReject.density_mask"] += densityMask;
+  counters["stoneReject.tile_budget"] += tileBudget;
+  counters["stoneReject.class_budget"] += classBudget;
+  counters["stoneReject.terrain_hidden"] += terrainHidden;
+
+  counters.vegetationGpuClustersTotal += total;
+  counters.vegetationGpuClustersRejectedEarly += rejected;
+  counters.vegetationGpuClustersAccepted += accepted;
+  counters.vegetationGpuClustersSummaryMissing += missing;
+  counters.vegetationGpuFarSummaryConsulted += consulted;
+  counters.vegetationGpuSourceFarSummary += farSummary;
+  counters.vegetationGpuSourceTerrainSampler += sampler;
+  counters.vegetationGpuSourceFallback += fallback;
+  counters.vegetationGpuCandidatesBudgetBeforeReject += before;
+  counters.vegetationGpuCandidatesBudgetAfterReject += after;
+  counters.vegetationGpuCandidatesGenerated += stone.gpuCandidateCount ?? 0;
+  counters.vegetationGpuRejectTerrainHidden += terrainHidden;
+  counters.vegetationGpuRejectNoCoverage += densityMask;
+  counters.vegetationGpuRejectBelowWater += belowWater;
+  counters.vegetationGpuRejectOutsideTerrain += outsideWorld;
+  counters.vegetationGpuRejectTooFar += tooFar;
+  counters.vegetationGpuRejectInvalidSurface += tooSteep;
 }
 
 function estimateClusterCount(before: number, after: number): number {
