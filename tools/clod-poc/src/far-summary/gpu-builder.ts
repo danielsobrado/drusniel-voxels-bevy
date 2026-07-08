@@ -1,5 +1,4 @@
 import { requestWebGpuDevice } from "../gpu/webgpu_device.js";
-import type { WebGpuUnavailable } from "../gpu/webgpu_device.js";
 import shaderCode from "./shaders/far_summary_build.wgsl?raw";
 import type { FarSummaryGpuBatch, FarSummaryGpuPlan } from "./gpu-planner.js";
 import type { FarSummaryGpuConfig } from "./gpu-config.js";
@@ -111,14 +110,6 @@ export function disabledFarSummaryGpuCounters(config: FarSummaryGpuConfig): FarS
   return counters;
 }
 
-function unavailableFromError(error: unknown): WebGpuUnavailable {
-  return {
-    ok: false,
-    reason: "device-request-failed",
-    message: error instanceof Error ? error.message : String(error),
-  };
-}
-
 class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
   private disposed = false;
 
@@ -207,5 +198,3 @@ function percentile(values: readonly number[], p: number): number {
   const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1));
   return sorted[index] ?? 0;
 }
-
-void unavailableFromError;
