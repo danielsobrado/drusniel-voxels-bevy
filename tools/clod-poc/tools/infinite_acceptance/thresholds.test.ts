@@ -50,6 +50,8 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
     live_clod_stream_gpu_chunk_slots_dispatched: 64,
     live_clod_stream_gpu_failed_batches: 0,
     live_clod_stream_worker_fallback_pages: 0,
+    live_clod_stream_bounds_guard_enabled: 1,
+    live_clod_stream_bounds_guard_checked_pages: 1,
     far_clipmap_enabled: 1,
     far_clipmap_visible: 1,
     far_clipmap_active_rings: 5,
