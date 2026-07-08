@@ -1,11 +1,17 @@
 import { requestWebGpuDevice } from "../gpu/webgpu_device.js";
 import shaderCode from "./shaders/far_summary_build.wgsl?raw";
+import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryGpuBatch, FarSummaryGpuPlan } from "./gpu-planner.js";
 import { FAR_SUMMARY_GPU_RECORD_BYTES, type FarSummaryGpuConfig, type FarSummaryGpuFallbackReason } from "./gpu-config.js";
 import { farSummaryGpuFallbackDecision } from "./gpu-config.js";
 import { createFarSummaryGpuBatchBuffers } from "./gpu-buffers.js";
 import { createFarSummaryGpuCounters, publishFarSummaryGpuCounters, type FarSummaryGpuCounters } from "./gpu-counters.js";
 import { decodeFarSummaryGpuRecords, type FarSummaryGpuRecord } from "./gpu-records.js";
+import {
+  applyFarSummaryGpuParityEvaluationToCounters,
+  evaluateFarSummaryGpuDebugReadbackParity,
+  type FarSummaryGpuParityEvaluation,
+} from "./gpu-parity.js";
 
 const WORKGROUP_SIZE = 64;
 
@@ -26,6 +32,7 @@ export interface FarSummaryGpuDispatchResult {
   ok: boolean;
   counters: FarSummaryGpuCounters;
   debugReadbacks?: FarSummaryGpuDebugReadback[];
+  parity?: FarSummaryGpuParityEvaluation;
   error?: Error;
 }
 
@@ -39,6 +46,9 @@ export interface FarSummaryGpuDispatchOrFallbackInput {
   config: FarSummaryGpuConfig;
   webGpuAvailable: boolean;
   builderFactory: () => Promise<FarSummaryGpuBuilder | null>;
+  terrainSampler?: FarTerrainSampler;
+  frameIndex?: number;
+  nowMs?: number;
 }
 
 export interface FarSummaryGpuDispatchOrFallbackResult extends FarSummaryGpuDispatchResult {
@@ -107,22 +117,45 @@ export async function dispatchFarSummaryGpuPlanOrFallback(
   }
 
   const result = await builder.dispatch(input.plan);
-  if (!result.ok) {
-    result.counters.fallbackTiles = input.plan.dirtyTiles.length;
+  const resultWithParity = applyStrictParityIfRequested(result, input);
+  if (!resultWithParity.ok) {
+    resultWithParity.counters.fallbackTiles = input.plan.dirtyTiles.length;
+    publishFarSummaryGpuCounters(undefined, resultWithParity.counters);
     return {
-      ...result,
+      ...resultWithParity,
       fallbackTiles: input.plan.dirtyTiles.length,
       fallbackReason: "dispatch_failed",
     };
   }
 
-  return { ...result, fallbackTiles: 0, fallbackReason: null };
+  publishFarSummaryGpuCounters(undefined, resultWithParity.counters);
+  return { ...resultWithParity, fallbackTiles: 0, fallbackReason: null };
 }
 
 export function disabledFarSummaryGpuCounters(config: FarSummaryGpuConfig): FarSummaryGpuCounters {
   const counters = createFarSummaryGpuCounters();
   counters.enabled = config.enabled ? 1 : 0;
   return counters;
+}
+
+function applyStrictParityIfRequested(
+  result: FarSummaryGpuDispatchResult,
+  input: FarSummaryGpuDispatchOrFallbackInput,
+): FarSummaryGpuDispatchResult {
+  if (!result.ok || !input.terrainSampler) return result;
+  const parity = evaluateFarSummaryGpuDebugReadbackParity({
+    config: input.config,
+    plan: input.plan,
+    debugReadbacks: result.debugReadbacks ?? [],
+    terrainSampler: input.terrainSampler,
+    frameIndex: input.frameIndex ?? 0,
+    nowMs: input.nowMs ?? performance.now(),
+  });
+  applyFarSummaryGpuParityEvaluationToCounters(result.counters, parity);
+  if (parity.enabled && parity.failedTiles > 0) {
+    return { ...result, ok: false, parity, error: new Error(`far-summary GPU strict parity failed for ${parity.failedTiles} tile(s)`) };
+  }
+  return { ...result, parity };
 }
 
 function nonReadyFallbackReason(reason: FarSummaryGpuFallbackReason): NonReadyFallbackReason {
@@ -175,11 +208,9 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
       counters.computeMsP50 = percentile(timings, 0.5);
       counters.computeMsP95 = percentile(timings, 0.95);
       counters.readbackMsP95 = percentile(readbackTimings, 0.95);
-      publishFarSummaryGpuCounters(undefined, counters);
       return debugReadbacks.length > 0 ? { ok: true, counters, debugReadbacks } : { ok: true, counters };
     } catch (error) {
       counters.failedBatches++;
-      publishFarSummaryGpuCounters(undefined, counters);
       return { ok: false, counters, error: error instanceof Error ? error : new Error(String(error)) };
     }
   }
