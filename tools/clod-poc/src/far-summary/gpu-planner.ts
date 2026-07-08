@@ -94,6 +94,7 @@ export function splitFarSummaryGpuBatches(
     const nextTiles: FarSummaryGpuDirtyTile[] = [];
     while (index < dirtyTiles.length && nextTiles.length < maxTilesPerBatch) {
       const candidate = dirtyTiles[index];
+      if (!candidate) break;
       const nextCount = nextTiles.length + 1;
       const nextBytes = estimateFarSummaryGpuBatchBytes(nextCount, config);
       if (nextBytes > config.maxBufferBytes && nextTiles.length > 0) break;
