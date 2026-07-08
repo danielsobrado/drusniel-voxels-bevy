@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryGpuPlan } from "./gpu-planner.js";
 import type { FarSummaryGpuConfig } from "./gpu-config.js";
 import { DEFAULT_FAR_SUMMARY_GPU_CONFIG } from "./gpu-config.js";
@@ -14,26 +15,33 @@ function config(overrides: Partial<FarSummaryGpuConfig> = {}): FarSummaryGpuConf
 }
 
 function plan(tileCount = 3): FarSummaryGpuPlan {
+  const tiles = Array.from({ length: tileCount }, (_, index) => ({
+    key: { ring: 0, x: index, z: 0, cellSizeM: 1 },
+    ring: 0,
+    tileX: index,
+    tileZ: 0,
+    cellSizeM: 1,
+    tileCells: 4,
+    originX: index * 4,
+    originZ: 0,
+    sizeX: 4,
+    sizeZ: 4,
+    sampleGrid: 16,
+    priority: index,
+    distanceToCamera: 0,
+    distanceToPredictedCenter: 0,
+    reason: "startup" as const,
+    revision: 1,
+  }));
   return {
-    dirtyTiles: Array.from({ length: tileCount }, (_, index) => ({
-      key: { ring: 0, x: index, z: 0, cellSizeM: 1 },
-      ring: 0,
-      tileX: index,
-      tileZ: 0,
-      cellSizeM: 1,
-      tileCells: 4,
-      originX: index * 4,
-      originZ: 0,
-      sizeX: 4,
-      sizeZ: 4,
-      sampleGrid: 16,
-      priority: index,
-      distanceToCamera: 0,
-      distanceToPredictedCenter: 0,
-      reason: "startup",
-      revision: 1,
-    })),
-    batches: [],
+    dirtyTiles: tiles,
+    batches: tiles.length > 0 ? [{
+      tiles,
+      descriptorBytes: 64 * tiles.length,
+      outputBytes: 128 * tiles.length,
+      readbackBytes: 128 * tiles.length,
+      totalBytes: 320 * tiles.length,
+    }] : [],
     droppedTiles: 0,
     estimatedBufferBytes: 1234,
   };
@@ -58,6 +66,35 @@ function successCounters(): FarSummaryGpuCounters {
   counters.batchesDispatched = 1;
   return counters;
 }
+
+function gpuRecord(height = 42) {
+  return {
+    heightMin: height,
+    heightMax: height,
+    heightAvg: height,
+    slopeMean: 0,
+    avgNormalX: 0,
+    avgNormalY: 1,
+    avgNormalZ: 0,
+    dominantMaterial: 1,
+    materialVariance: 0,
+    grassEligibility: 1,
+    roughnessMean: 0,
+    waterCoverage: 0,
+    canopyCoverage: 0,
+    slopeMax: 0,
+    revision: 1,
+    flags: 0,
+    sampleCount: 16,
+  };
+}
+
+const FLAT_GRASS: FarTerrainSampler = {
+  sampleHeight: () => 42,
+  sampleMaterial: () => 1,
+  sampleWaterCoverage: () => 0,
+  sampleCanopyCoverage: () => 0,
+};
 
 describe("dispatchFarSummaryGpuPlanOrFallback", () => {
   it("falls back when disabled", async () => {
@@ -128,33 +165,54 @@ describe("dispatchFarSummaryGpuPlanOrFallback", () => {
       builderFactory: async () => new FakeBuilder({
         ok: true,
         counters: successCounters(),
-        debugReadbacks: [{
-          batchIndex: 0,
-          records: [{
-            heightMin: 1,
-            heightMax: 2,
-            heightAvg: 1.5,
-            slopeMean: 0,
-            avgNormalX: 0,
-            avgNormalY: 1,
-            avgNormalZ: 0,
-            dominantMaterial: 1,
-            materialVariance: 0,
-            grassEligibility: 1,
-            roughnessMean: 0,
-            waterCoverage: 0,
-            canopyCoverage: 0,
-            slopeMax: 0,
-            revision: 1,
-            flags: 0,
-            sampleCount: 16,
-          }],
-        }],
+        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(1.5)] }],
       }),
     });
     expect(result.fallbackReason).toBeNull();
     expect(result.debugReadbacks?.[0]?.records).toHaveLength(1);
     expect(result.debugReadbacks?.[0]?.records[0]?.heightAvg).toBe(1.5);
+  });
+
+  it("evaluates strict parity when sampler and debug readbacks are provided", async () => {
+    const result = await dispatchFarSummaryGpuPlanOrFallback({
+      plan: plan(1),
+      config: config({ strictParity: true, debugReadback: true }),
+      webGpuAvailable: true,
+      terrainSampler: FLAT_GRASS,
+      frameIndex: 1,
+      nowMs: 2,
+      builderFactory: async () => new FakeBuilder({
+        ok: true,
+        counters: successCounters(),
+        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(42)] }],
+      }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.fallbackReason).toBeNull();
+    expect(result.parity?.checkedTiles).toBe(1);
+    expect(result.parity?.failedTiles).toBe(0);
+    expect(result.counters.parityCheckedTiles).toBe(1);
+  });
+
+  it("fails and falls back when strict parity detects mismatches", async () => {
+    const result = await dispatchFarSummaryGpuPlanOrFallback({
+      plan: plan(1),
+      config: config({ strictParity: true, debugReadback: true }),
+      webGpuAvailable: true,
+      terrainSampler: FLAT_GRASS,
+      frameIndex: 1,
+      nowMs: 2,
+      builderFactory: async () => new FakeBuilder({
+        ok: true,
+        counters: successCounters(),
+        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(12)] }],
+      }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.fallbackReason).toBe("dispatch_failed");
+    expect(result.fallbackTiles).toBe(1);
+    expect(result.parity?.failedTiles).toBe(1);
+    expect(result.counters.parityFailedTiles).toBe(1);
   });
 
   it("falls back all dirty tiles when dispatch fails", async () => {
