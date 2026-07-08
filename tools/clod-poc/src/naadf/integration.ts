@@ -254,7 +254,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
 
     queryHeight(x, z, purpose = "render") {
-      return queryTerrainHeight({ state, worldX: x, worldZ: z, purpose });
+      return queryTerrainHeight({ state, worldX: x, y, worldZ: z, purpose });
     },
 
     traceSun(x, y, z, sunDir, maxDist) {
@@ -334,4 +334,5 @@ function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig 
   if (isValidNaadfGpuAtlasWindowTiles(tiles)) {
     config.farShell.gpuAtlasWindowTiles = Math.floor(tiles);
   }
+  return config;
 }
