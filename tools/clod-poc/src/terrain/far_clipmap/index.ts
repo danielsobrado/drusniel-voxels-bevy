@@ -43,11 +43,13 @@ export {
   farClipmapMaterialDisplacementMode,
   setFarClipmapMaterialDebugMode,
   updateFarClipmapMaterialFrameUniforms,
+  updateFarClipmapMaterialSourceTexture,
 } from "./far_clipmap_material.js";
 export type {
   FarClipmapDisplacementMode,
   FarClipmapMaterial,
   FarClipmapMaterialUniforms,
+  FarClipmapSourceTextureStats,
 } from "./far_clipmap_material.js";
 
 export { createFarClipmapController } from "./far_clipmap_controller.js";
