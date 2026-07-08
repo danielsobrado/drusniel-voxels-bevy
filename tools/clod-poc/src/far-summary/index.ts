@@ -52,3 +52,78 @@ export { createFarSummaryStats, resetFrameStats, accumulateStats } from "./stats
 
 export { initFarSummaryIntegration } from "./integration.js";
 export type { FarSummaryIntegration, FarSummaryIntegrationOptions } from "./integration.js";
+
+export {
+  DEFAULT_FAR_SUMMARY_GPU_CONFIG,
+  farSummaryGpuConfigFromParams,
+  farSummaryGpuConfigFromWindow,
+  farSummaryGpuFallbackDecision,
+} from "./gpu-config.js";
+export type { FarSummaryGpuConfig, FarSummaryGpuFallbackDecision, FarSummaryGpuFallbackReason } from "./gpu-config.js";
+
+export {
+  planFarSummaryGpuDirtyTiles,
+  buildFarSummaryGpuPlan,
+  splitFarSummaryGpuBatches,
+  estimateFarSummaryGpuBatchBytes,
+  farSummaryGpuTileBounds,
+} from "./gpu-planner.js";
+export type {
+  FarSummaryGpuDirtyReason,
+  FarSummaryGpuDirtyTile,
+  FarSummaryGpuBatch,
+  FarSummaryGpuPlan,
+} from "./gpu-planner.js";
+
+export {
+  createFarSummaryGpuCounters,
+  publishFarSummaryGpuCounters,
+} from "./gpu-counters.js";
+export type { FarSummaryGpuCounters } from "./gpu-counters.js";
+
+export {
+  createFarSummaryGpuBuilder,
+  dispatchFarSummaryGpuPlanOrFallback,
+  disabledFarSummaryGpuCounters,
+} from "./gpu-builder.js";
+export type {
+  FarSummaryGpuBuilder,
+  FarSummaryGpuDebugReadback,
+  FarSummaryGpuDispatchResult,
+  FarSummaryGpuDispatchOrFallbackResult,
+} from "./gpu-builder.js";
+
+export {
+  decodeFarSummaryGpuRecord,
+  decodeFarSummaryGpuRecords,
+  compareFarSummaryGpuRecordToCpu,
+} from "./gpu-records.js";
+export type {
+  FarSummaryGpuRecord,
+  FarSummaryGpuParityTolerances,
+  FarSummaryGpuParityMismatch,
+  FarSummaryGpuParityResult,
+} from "./gpu-records.js";
+
+export {
+  evaluateFarSummaryGpuDebugReadbackParity,
+  shouldEvaluateFarSummaryGpuStrictParity,
+  applyFarSummaryGpuParityEvaluationToCounters,
+} from "./gpu-parity.js";
+export type {
+  FarSummaryGpuParityEvaluation,
+  FarSummaryGpuParityInput,
+  FarSummaryGpuParityReadback,
+  FarSummaryGpuParitySkipReason,
+  FarSummaryGpuTileParityFailure,
+} from "./gpu-parity.js";
+
+export {
+  FarSummaryGpuRuntime,
+  createFarSummaryGpuRuntimeFromParams,
+} from "./gpu-runtime.js";
+export type {
+  FarSummaryGpuRuntimeOptions,
+  FarSummaryGpuRuntimeDispatchInput,
+  FarSummaryGpuRuntimeStats,
+} from "./gpu-runtime.js";
