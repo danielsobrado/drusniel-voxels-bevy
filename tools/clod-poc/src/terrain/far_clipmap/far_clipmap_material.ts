@@ -329,6 +329,7 @@ function createWebGpuFarClipmapMaterial(input: {
 }): FarClipmapMaterial {
   const gridResolution = Math.max(2, Math.floor(input.gridResolution ?? 2));
   const sourceTexture = createSourceTexture(gridResolution);
+  const sourceData = (sourceTexture.image as { data: Float32Array }).data;
   const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
   const sampleUv: TslNode = positionGeometry.xz.div(uniforms.uGridMax);
   const sourceSample: TslNode = texture(sourceTexture, vec2(sampleUv.x, sampleUv.y));
@@ -362,7 +363,7 @@ function createWebGpuFarClipmapMaterial(input: {
   material.toneMapped = true;
   material.userData[FAR_CLIPMAP_NODE_UNIFORMS] = uniforms;
   material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] = sourceTexture;
-  material.userData[FAR_CLIPMAP_SOURCE_DATA] = sourceTexture.image.data;
+  material.userData[FAR_CLIPMAP_SOURCE_DATA] = sourceData;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;
 }
