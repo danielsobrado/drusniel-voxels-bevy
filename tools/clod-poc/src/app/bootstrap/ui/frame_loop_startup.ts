@@ -35,6 +35,7 @@ import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import { resolveLiveClodRootRadius } from "./live_clod_root_radius.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
+import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
@@ -120,9 +121,10 @@ function streamingWorldCenter(
   camera: { position: { x: number; z: number } },
   controls: { target: { x: number; z: number } },
 ): THREE.Vector3 {
+  if (streamingScene) return new THREE.Vector3(camera.position.x, 0, camera.position.z);
   if (interactionMode === "playing") return new THREE.Vector3(player.position.x, 0, player.position.z);
-  if (streamingScene && player.spawned) return new THREE.Vector3(player.position.x, 0, player.position.z);
-  const src = streamingScene ? camera.position : controls.target;
+  void player;
+  const src = controls.target;
   return new THREE.Vector3(src.x, 0, src.z);
 }
 
@@ -372,6 +374,6 @@ export function runFrameLoopStartup(
     combat: combatController ? { update: (timeMs) => combatController.update(timeMs) } : undefined,
     spells: spellVfxController ? { update: (timeMs) => spellVfxController.update(timeMs) } : undefined,
     clodShadow: clodShadowOverlayController ? { update: () => clodShadowOverlayController.update(), statsController: session.clodShadowStatsController, isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off" } : undefined,
-    canopy: input.terrainView.canopyShellSystem ? { update: (cameraX, cameraZ) => input.terrainView.canopyShellSystem!.update(cameraX, cameraZ) } : undefined,
+    canopy: input.terrainView.canopyShellSystem ? { update: (cameraX, cameraZ) => { input.terrainView.canopyShellSystem!.update(cameraX, cameraZ); publishWorldCenterStatsToCounters(longView.hooks?.stats?.counters, computeWorldCenterDebugStats({ camera: { x: cameraX, z: cameraZ }, canopyCenter: { x: cameraX, z: cameraZ } })); } } : undefined,
   });
 }
