@@ -1,5 +1,5 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
-import { resolveDigEdits, type ResolvedDigEdit } from "./terrain_field_core.js";
+import { getTerrainFieldCoreConfig, resolveDigEdits, type ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeUnderstoryRingShader } from "./wgsl_modules.js";
 import type { UnderstorySettings } from "../understory/understory_config.js";
 import {
@@ -310,6 +310,7 @@ export class UnderstoryGpuRingCompute {
       centerZ: params.centerZ,
       cameraY,
       worldCells: params.worldCells,
+      unbounded: getTerrainFieldCoreConfig().islandShape.enabled,
       grid: understoryRingGrid(this.settings),
       cell: understoryRingCell(this.settings),
       clusterDimSlots: PREFILTER_CLUSTER_DIM_SLOTS,

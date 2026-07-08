@@ -1,6 +1,6 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import { createGrassGpuRingFallbackOutputBuffers, createGrassHydrologyTexture } from "./grass_ring_compute_resources.js";
-import type { ResolvedDigEdit } from "./terrain_field_core.js";
+import { getTerrainFieldCoreConfig, type ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
 import { grassHeightDensityVector, grassMaterialDensityVector } from "../grass/grass_material_bias.js";
@@ -511,6 +511,7 @@ export class GrassGpuRingCompute {
       centerZ: params.centerZ,
       cameraY,
       worldCells: params.worldCells,
+      unbounded: getTerrainFieldCoreConfig().islandShape.enabled,
       grid: grassGpuRingGrid(this.ring),
       cell: grassGpuRingCell(this.ring),
       clusterDimSlots: GRASS_PREFILTER_CLUSTER_DIM_SLOTS,

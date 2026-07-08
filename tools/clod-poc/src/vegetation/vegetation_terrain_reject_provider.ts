@@ -58,6 +58,8 @@ export interface VegetationTerrainRejectQuery {
   cameraY: number;
   cameraZ: number;
   worldCells: number;
+  /** Infinite/island world: there is real terrain past [0, worldCells], so skip the box reject. */
+  unbounded?: boolean;
   visibility: TerrainVisibilitySettings;
   sampler?: TerrainHeightSampler;
   shadowPass?: boolean;
@@ -252,6 +254,8 @@ function withFarSummaryConsulted(
 }
 
 function outsideTerrain(query: VegetationTerrainRejectQuery): boolean {
+  // Island worlds have terrain everywhere; the [0, worldCells] box only bounds a finite world.
+  if (query.unbounded) return false;
   const halfSize = Math.max(0, query.descriptor.halfSize);
   return query.descriptor.centerX + halfSize < 0 ||
     query.descriptor.centerZ + halfSize < 0 ||

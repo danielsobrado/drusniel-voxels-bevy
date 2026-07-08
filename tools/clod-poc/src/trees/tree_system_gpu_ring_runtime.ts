@@ -12,7 +12,7 @@ import {
   type TreeGpuRingIndexCounts,
   type TreeGpuRingStats,
 } from "../gpu/tree_ring_compute.js";
-import { resolveDigEdits } from "../gpu/terrain_field_core.js";
+import { getTerrainFieldCoreConfig, resolveDigEdits } from "../gpu/terrain_field_core.js";
 import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
@@ -146,6 +146,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
         centerZ: center.z,
         cameraY: camera?.position.y ?? center.y,
         worldCells: input.worldCells,
+        unbounded: getTerrainFieldCoreConfig().islandShape.enabled,
         settings: input.settings,
         sampler: input.sampler,
         terrainRevision,

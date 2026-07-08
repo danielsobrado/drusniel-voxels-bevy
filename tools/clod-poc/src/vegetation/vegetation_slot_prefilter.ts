@@ -23,6 +23,8 @@ export interface VegetationSlotPrefilterOptions {
   centerZ: number;
   cameraY: number;
   worldCells: number;
+  /** Infinite/island world: skip the [0, worldCells] box reject (terrain exists past the box). */
+  unbounded?: boolean;
   grid: number;
   cell: number;
   clusterDimSlots: number;
@@ -250,6 +252,7 @@ function evaluateCluster(input: {
       cameraY: input.options.cameraY,
       cameraZ: input.options.centerZ,
       worldCells: input.options.worldCells,
+      unbounded: input.options.unbounded,
       visibility: input.options.visibility,
       sampler: input.options.sampler,
       terrainRevision: input.options.terrainRevision,

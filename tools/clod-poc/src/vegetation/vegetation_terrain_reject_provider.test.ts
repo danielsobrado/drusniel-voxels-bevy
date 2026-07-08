@@ -159,6 +159,24 @@ describe("VegetationTerrainRejectProvider", () => {
     expect(result).toMatchObject({ reject: true, reason: "outsideTerrain", confidence: "exact" });
   });
 
+  it("does not reject far clusters as outsideTerrain in an unbounded (island) world", () => {
+    // Same far cluster as above, but unbounded: island worlds have real terrain past worldCells, so
+    // the box reject must not fire (the vegetation-vanishes-past-the-startup-box regression).
+    const result = createVegetationTerrainRejectProvider().classifyCluster({
+      descriptor: descriptor({ centerX: 4096, centerZ: 4096, halfSize: 4 }),
+      kind: "grass",
+      cameraX: 4096,
+      cameraY: 2,
+      cameraZ: 4096,
+      worldCells: 128,
+      unbounded: true,
+      visibility,
+      sampler: { sampleHeight: () => ({ height: 0 }) },
+    });
+
+    expect(result.reason).not.toBe("outsideTerrain");
+  });
+
   it("rejects terrain-hidden clusters only when the segment proves occlusion", () => {
     const provider = createVegetationTerrainRejectProvider();
     const result = provider.classifyCluster({

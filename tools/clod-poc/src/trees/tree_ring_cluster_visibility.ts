@@ -21,6 +21,8 @@ export interface TreeRingClusterVisibilityOptions {
   centerZ: number;
   cameraY: number;
   worldCells: number;
+  /** Infinite/island world: skip the [0, worldCells] box reject (terrain exists past the box). */
+  unbounded?: boolean;
   settings: TreeSettings;
   sampler?: TreeTerrainSampler;
   clusterDimCells?: number;
@@ -87,6 +89,7 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     centerZ: options.centerZ,
     cameraY: options.cameraY,
     worldCells: options.worldCells,
+    unbounded: options.unbounded,
     grid,
     cell: TREE_GPU_RING_CELL,
     clusterDimSlots: clusterDimCells,
