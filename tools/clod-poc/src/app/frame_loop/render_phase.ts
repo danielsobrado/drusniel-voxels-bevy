@@ -7,6 +7,7 @@ import type { PropStats } from "../../props/prop_stats.js";
 import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { NodeLabelOverlay } from "../../ui/node_labels.js";
 import type { AppPostProcess } from "../app_post_process.js";
+import type { AppSky } from "../../scene/app_sky.js";
 import type { NearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { PlayerInteractionState } from "../../player_controller.js";
@@ -22,6 +23,8 @@ export interface RenderPhaseInput {
   renderer: FrameRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** Skydome/environment. Re-centred on the camera each frame so it reads as infinitely far. */
+  skyEnvironment: AppSky | null;
   postProcess: AppPostProcess | null;
   currentPostProcessSettings: () => PostProcessSettings;
   nodeLabelOverlay: NodeLabelOverlay;
@@ -158,6 +161,9 @@ function globalDynamicResolution(): DynamicResolutionController | undefined {
 }
 
 export function runRenderPhase(input: RenderPhaseInput): void {
+  // Keep the skydome centred on the camera so it never drifts / gets "left behind" as the player
+  // streams far from the world origin (the sky mesh is built once at the origin).
+  input.skyEnvironment?.updateCamera(input.camera);
   const selectionStats = input.selectionController.stats();
   input.nodeLabelOverlay.update({
     nodes: selectionStats.renderedNodes,

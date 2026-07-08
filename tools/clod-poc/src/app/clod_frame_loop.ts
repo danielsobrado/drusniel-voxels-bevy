@@ -425,6 +425,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       renderer: render.renderer,
       scene: render.scene,
       camera: render.camera,
+      skyEnvironment: render.skyEnvironment,
       gpuPasses: render.gpuPassTiming?.passes ?? null,
       postProcess: render.postProcess,
       currentPostProcessSettings: render.currentPostProcessSettings,

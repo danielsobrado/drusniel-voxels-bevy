@@ -10,6 +10,9 @@ export interface FarClipmapConfig {
   snapSizeM: number;
   heightScale: number;
   yOffset: number;
+  /** World-space sea level (m). The far terrain samples absolute world heights, so its underwater
+   *  colouring must use the same sea level as the ocean plane or the two disagree on the waterline. */
+  seaLevelM: number;
   maxRebuildsPerFrame: number;
   materialDebugMode: FarClipmapDebugMode;
   shaderDisplacement: boolean;
@@ -33,6 +36,7 @@ export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
   snapSizeM: 128,
   heightScale: 1,
   yOffset: 0,
+  seaLevelM: 18,
   maxRebuildsPerFrame: 2,
   materialDebugMode: "final",
   shaderDisplacement: true,
@@ -117,6 +121,7 @@ export function resolveFarClipmapConfig(
     snapSizeM: positiveNumber(partial.snapSizeM, base.snapSizeM),
     heightScale: finiteNumber(partial.heightScale, base.heightScale),
     yOffset: finiteNumber(partial.yOffset, base.yOffset),
+    seaLevelM: finiteNumber(partial.seaLevelM, base.seaLevelM),
     maxRebuildsPerFrame: nonNegativeInteger(partial.maxRebuildsPerFrame, base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(partial.materialDebugMode, base.materialDebugMode),
     shaderDisplacement: typeof partial.shaderDisplacement === "boolean" ? partial.shaderDisplacement : base.shaderDisplacement,
@@ -160,6 +165,9 @@ export function farClipmapConfigFromSearchParams(
     snapSizeM: positiveQueryNumber(params, "farClipmapSnapSize", base.snapSizeM),
     heightScale: numberFromQuery(params, "farClipmapHeightScale", base.heightScale),
     yOffset: numberFromQuery(params, "farClipmapYOffset", base.yOffset),
+    // Same sea level the world build reads (world_build_startup: seaLevel/sea_level, default 18) so the
+    // far terrain's waterline agrees with the ocean plane instead of fighting it.
+    seaLevelM: numberFromQuery(params, "seaLevel", numberFromQuery(params, "sea_level", base.seaLevelM)),
     maxRebuildsPerFrame: integerQueryNumber(params, "farClipmapMaxRebuildsPerFrame", base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(params.get("farClipmapDebug"), base.materialDebugMode),
     shaderDisplacement: boolFromQuery(params.get("farClipmapShaderDisplacement"), base.shaderDisplacement),
