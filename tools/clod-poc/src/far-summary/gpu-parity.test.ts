@@ -4,7 +4,9 @@ import type { FarSummaryGpuConfig } from "./gpu-config.js";
 import { DEFAULT_FAR_SUMMARY_GPU_CONFIG } from "./gpu-config.js";
 import type { FarSummaryGpuDirtyTile, FarSummaryGpuPlan } from "./gpu-planner.js";
 import type { FarSummaryGpuRecord } from "./gpu-records.js";
+import { createFarSummaryGpuCounters } from "./gpu-counters.js";
 import {
+  applyFarSummaryGpuParityEvaluationToCounters,
   evaluateFarSummaryGpuDebugReadbackParity,
   shouldEvaluateFarSummaryGpuStrictParity,
 } from "./gpu-parity.js";
@@ -179,5 +181,33 @@ describe("evaluateFarSummaryGpuDebugReadbackParity", () => {
     expect(missingTile.checkedTiles).toBe(1);
     expect(missingTile.failedTiles).toBe(1);
     expect(missingTile.failures[0]!.reason).toBe("missing_tile");
+  });
+});
+
+describe("applyFarSummaryGpuParityEvaluationToCounters", () => {
+  it("adds enabled parity results to GPU counters", () => {
+    const counters = createFarSummaryGpuCounters();
+    applyFarSummaryGpuParityEvaluationToCounters(counters, {
+      enabled: true,
+      checkedTiles: 3,
+      failedTiles: 1,
+      skippedReason: null,
+      failures: [],
+    });
+    expect(counters.parityCheckedTiles).toBe(3);
+    expect(counters.parityFailedTiles).toBe(1);
+  });
+
+  it("ignores skipped parity results", () => {
+    const counters = createFarSummaryGpuCounters();
+    applyFarSummaryGpuParityEvaluationToCounters(counters, {
+      enabled: false,
+      checkedTiles: 3,
+      failedTiles: 1,
+      skippedReason: "strict_parity_disabled",
+      failures: [],
+    });
+    expect(counters.parityCheckedTiles).toBe(0);
+    expect(counters.parityFailedTiles).toBe(0);
   });
 });
