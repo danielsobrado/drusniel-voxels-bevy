@@ -33,6 +33,7 @@ export interface StatsSyncPhaseInput {
 export interface StatsSyncPhaseResult {
   currentGrassStats: GrassStats | null;
   currentTreeStats: TreeStats | null;
+  currentStoneStats: StoneStats | null;
   currentUnderstoryStats: UnderstoryStats | null;
 }
 
@@ -80,7 +81,7 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
 
   const nextStoneStats = input.stoneSystem?.getStats();
   const stoneStats = input.getStoneStats();
-  if (nextStoneStats && (!stoneStats || nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible)) {
+  if (nextStoneStats && shouldUpdateStoneStats(nextStoneStats, stoneStats)) {
     input.setStoneStats(nextStoneStats);
     input.state.stoneTotal = nextStoneStats.total;
     input.state.stoneClassSummary = `${nextStoneStats.large}/${nextStoneStats.medium}/${nextStoneStats.small}`;
@@ -180,8 +181,21 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
   return {
     currentGrassStats: nextGrassStats ?? grassStats,
     currentTreeStats: nextTreeStats ?? treeStats,
+    currentStoneStats: nextStoneStats ?? stoneStats,
     currentUnderstoryStats: nextUnderstoryStats ?? understoryStats,
   };
+}
+
+function shouldUpdateStoneStats(next: StoneStats, previous: StoneStats | null): boolean {
+  return !previous ||
+    next.total !== previous.total ||
+    next.visible !== previous.visible ||
+    next.gpuCandidateCount !== previous.gpuCandidateCount ||
+    next.gpuCandidateCountBeforePrefilter !== previous.gpuCandidateCountBeforePrefilter ||
+    next.gpuCandidateCountAfterPrefilter !== previous.gpuCandidateCountAfterPrefilter ||
+    next.gpuPrefilterRejectedClusters !== previous.gpuPrefilterRejectedClusters ||
+    next.gpuPrefilterAcceptedClusters !== previous.gpuPrefilterAcceptedClusters ||
+    next.gpuPrefilterTestedClusters !== previous.gpuPrefilterTestedClusters;
 }
 
 function formatGrassCandidateSummary(stats: GrassStats): string {
