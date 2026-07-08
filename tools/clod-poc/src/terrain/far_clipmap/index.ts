@@ -40,10 +40,15 @@ export type { FarClipmapSource } from "./far_clipmap_source.js";
 export {
   createFarClipmapMaterial,
   farClipmapDebugModeCode,
+  farClipmapMaterialDisplacementMode,
   setFarClipmapMaterialDebugMode,
   updateFarClipmapMaterialFrameUniforms,
 } from "./far_clipmap_material.js";
-export type { FarClipmapMaterial, FarClipmapMaterialUniforms } from "./far_clipmap_material.js";
+export type {
+  FarClipmapDisplacementMode,
+  FarClipmapMaterial,
+  FarClipmapMaterialUniforms,
+} from "./far_clipmap_material.js";
 
 export { createFarClipmapController } from "./far_clipmap_controller.js";
 export type {
