@@ -32,6 +32,7 @@ function plan(tileCount = 3): FarSummaryGpuPlan {
     distanceToPredictedCenter: 0,
     reason: "startup" as const,
     revision: 1,
+    cellRecordOffset: index * 16,
   }));
   return {
     dirtyTiles: tiles,
@@ -39,7 +40,10 @@ function plan(tileCount = 3): FarSummaryGpuPlan {
       tiles,
       descriptorBytes: 64 * tiles.length,
       outputBytes: 128 * tiles.length,
+      cellOutputBytes: 0,
       readbackBytes: 128 * tiles.length,
+      cellReadbackBytes: 0,
+      cellRecordCount: 16 * tiles.length,
       totalBytes: 320 * tiles.length,
     }] : [],
     droppedTiles: 0,
