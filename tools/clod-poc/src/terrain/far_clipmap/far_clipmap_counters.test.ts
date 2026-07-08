@@ -12,6 +12,11 @@ function stats(overrides: Partial<FarClipmapStats> = {}): FarClipmapStats {
     pendingTiles: 0,
     rebuiltTilesThisFrame: 0,
     snapUpdatesThisFrame: 3,
+    sourceRefreshesThisFrame: 1,
+    sourceRefreshesTotal: 4,
+    sourceRefreshMsThisFrame: 0.5,
+    sourceRefreshMsTotal: 2.5,
+    sourceRevision: 42,
     innerRadiusM: 256,
     outerRadiusM: 4096,
     snapSizeM: 128,
@@ -52,6 +57,10 @@ describe("publishFarClipmapStatsToCounters", () => {
     expect(counters["far_clipmap_shader_displaced_tiles"]).toBe(3);
     expect(counters["far_clipmap_cpu_baked_tiles"]).toBe(0);
     expect(counters["far_clipmap_reusable_grid_tiles"]).toBe(3);
+    expect(counters["far_clipmap_source_refreshes_this_frame"]).toBe(1);
+    expect(counters["far_clipmap_source_refreshes_total"]).toBe(4);
+    expect(counters["far_clipmap_source_refresh_ms"]).toBe(0.5);
+    expect(counters["far_clipmap_source_revision"]).toBe(42);
     expect(counters["far_clipmap_vertices_built_this_frame"]).toBe(0);
     expect(counters["far_clipmap_triangles_built_this_frame"]).toBe(0);
     expect(counters["far_clipmap_center_x"]).toBe(513);
