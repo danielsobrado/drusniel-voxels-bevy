@@ -197,10 +197,82 @@ function injectedFilterBlock() {
   ].join("\n");
 }
 
+function injectPhase4StoneAcceptance(source) {
+  const sceneNeedle = "  {\n    name: \"biome-near\",";
+  const phase4Scene = [
+    "  {",
+    "    name: \"phase4-stones\",",
+    "    freeze: true,",
+    "    proceduralDebug: \"biome\",",
+    "    cam: OUTSIDE_STARTUP_CAM,",
+    "    extra: { gpuReadbacks: \"acceptance\", stoneGpuCounts: \"1\" },",
+    "    validation: \"stone-gpu\",",
+    "  },",
+  ].join("\n");
+  const withScene = source.includes(sceneNeedle)
+    ? source.replace(sceneNeedle, `${phase4Scene}\n${sceneNeedle}`)
+    : source;
+  if (withScene === source) throw new Error("Failed to inject phase4 stone acceptance scene");
+
+  const withSceneSpec = withScene.replace(
+    "  movementRoute?: boolean;\n}",
+    "  movementRoute?: boolean;\n  validation?: \"stone-gpu\";\n}",
+  );
+  if (withSceneSpec === withScene) throw new Error("Failed to inject phase4 scene validation type");
+
+  const evaluator = [
+    "function numericCounter(stats: JsonRecord, key: string): number {",
+    "  const counters = stats[\"counters\"] as Record<string, unknown> | undefined;",
+    "  const value = counters?.[key] ?? stats[key];",
+    "  return typeof value === \"number\" && Number.isFinite(value) ? value : Number.NaN;",
+    "}",
+    "",
+    "function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {",
+    "  if (scene.validation !== \"stone-gpu\") return [];",
+    "  const failures: string[] = [];",
+    "  const counters = (stats[\"counters\"] as Record<string, unknown> | undefined) ?? {};",
+    "  const total = numericCounter(stats, \"stoneGpuClustersTotal\");",
+    "  const accepted = numericCounter(stats, \"stoneGpuClustersAccepted\");",
+    "  const rejected = numericCounter(stats, \"stoneGpuClustersRejectedEarly\");",
+    "  const vegetationTotal = numericCounter(stats, \"vegetationGpuClustersTotal\");",
+    "  const centerDistance = numericCounter(stats, \"camera_to_vegetation_ring_center_m\");",
+    "  if (!(total > 0)) failures.push(`stoneGpuClustersTotal=${total} must be > 0`);",
+    "  if (!Number.isFinite(accepted) || accepted < 0) failures.push(`stoneGpuClustersAccepted=${accepted} must be finite and >= 0`);",
+    "  if (!Number.isFinite(rejected) || rejected < 0) failures.push(`stoneGpuClustersRejectedEarly=${rejected} must be finite and >= 0`);",
+    "  if (Number.isFinite(total) && Number.isFinite(accepted) && Number.isFinite(rejected) && accepted + rejected > total) {",
+    "    failures.push(`stone accepted+rejected ${accepted + rejected} exceeds total ${total}`);",
+    "  }",
+    "  if (Number.isFinite(total) && (!(vegetationTotal >= total))) failures.push(`vegetationGpuClustersTotal=${vegetationTotal} must include stone total ${total}`);",
+    "  if (!(centerDistance <= 8)) failures.push(`camera_to_vegetation_ring_center_m=${centerDistance} must be <= 8`);",
+    "  for (const key of [\"stoneReject.below_water\", \"stoneReject.too_steep\", \"stoneReject.outside_world\", \"stoneReject.too_far\", \"stoneReject.density_mask\", \"stoneReject.tile_budget\", \"stoneReject.class_budget\", \"stoneReject.terrain_hidden\"]) {",
+    "    const value = numericCounter(stats, key);",
+    "    if (!Number.isFinite(value) || value < 0) failures.push(`${key}=${value} must be finite and >= 0`);",
+    "  }",
+    "  const forbidden = Object.keys(counters).filter((key) => key.startsWith(\"veg_gpu_\"));",
+    "  if (forbidden.length > 0) failures.push(`forbidden veg_gpu_* counters present: ${forbidden.join(\", \")}`);",
+    "  return failures;",
+    "}",
+    "",
+  ].join("\n");
+  const withEvaluator = withSceneSpec.replace("function evaluateMovementRoute", `${evaluator}function evaluateMovementRoute`);
+  if (withEvaluator === withSceneSpec) throw new Error("Failed to inject phase4 scene counter evaluator");
+
+  const withFailures = withEvaluator.replace(
+    "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const failures = [",
+    "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);\n    const failures = [",
+  ).replace(
+    "      ...movementFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
+    "      ...movementFailures,\n      ...sceneSpecificFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
+  );
+  if (withFailures === withEvaluator) throw new Error("Failed to inject phase4 scene counter failures");
+  return withFailures;
+}
+
 function injectFilteredRunner(source) {
   const activeScenesBlock = /const PROFILE = parseProfile\(process\.argv\.slice\(2\)\);\nconst ACTIVE_SCENES = PROFILE === "fast"[\s\S]*?const SAMPLE_FRAMES = PROFILE === "fast" \? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;/;
-  const withSceneFilter = source.replace(activeScenesBlock, injectedFilterBlock());
-  if (withSceneFilter === source) throw new Error("Failed to inject infinite acceptance scene/gate filters");
+  const withPhase4 = injectPhase4StoneAcceptance(source);
+  const withSceneFilter = withPhase4.replace(activeScenesBlock, injectedFilterBlock());
+  if (withSceneFilter === withPhase4) throw new Error("Failed to inject infinite acceptance scene/gate filters");
   return withSceneFilter
     .replaceAll("for (const gate of GATE_MODES)", "for (const gate of ACTIVE_GATES)")
     .replace(
