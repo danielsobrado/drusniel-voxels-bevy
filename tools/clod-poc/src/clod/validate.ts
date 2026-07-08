@@ -55,10 +55,11 @@ function distToPerimeter(x: number, z: number, fp: PageFootprint): number {
 // Surface-nets vertices sit inside cells, so the open boundary hugs the footprint
 // perimeter within ~1 cell rather than lying exactly on it.
 const PERIMETER_BAND = 1.0;
-// Parent CLOD pages can preserve generated outer page-border chains a few cells inside
-// the footprint after recursive child simplification. Keep this narrow so arbitrary holes
-// deeper inside the page still hard-fail.
-const GENERATED_PARENT_PERIMETER_BAND = 4.0;
+// Parent CLOD pages can preserve generated outer page-border chains inside the footprint
+// after recursive child simplification. The allowance scales with the parent LOD because
+// higher-level parents are built from coarser child ownership spans. Arbitrary holes deeper
+// inside the page still hard-fail.
+const GENERATED_PARENT_PERIMETER_BASE_BAND = 4.0;
 const GENERATED_CHILD_SEAM_BAND = 1.0;
 const COAST_BOUNDARY_BAND = 0.01;
 
@@ -90,9 +91,13 @@ function nearInteriorDyadicLine(value: number, min: number, max: number, divisio
   return false;
 }
 
+function generatedParentPerimeterBand(level: number): number {
+  return Math.max(GENERATED_PARENT_PERIMETER_BASE_BAND, 2 ** (level + 1));
+}
+
 function isGeneratedParentPerimeterOpenBoundary(perimeterDistance: number, label?: string): boolean {
   const level = levelFromLabel(label);
-  return level !== null && level > 0 && perimeterDistance <= GENERATED_PARENT_PERIMETER_BAND;
+  return level !== null && level > 0 && perimeterDistance <= generatedParentPerimeterBand(level);
 }
 
 /**
