@@ -120,6 +120,43 @@ describe("dispatchFarSummaryGpuPlanOrFallback", () => {
     expect(result.counters.tilesDispatched).toBe(3);
   });
 
+  it("preserves debug readback records from successful dispatch", async () => {
+    const result = await dispatchFarSummaryGpuPlanOrFallback({
+      plan: plan(),
+      config: config({ debugReadback: true }),
+      webGpuAvailable: true,
+      builderFactory: async () => new FakeBuilder({
+        ok: true,
+        counters: successCounters(),
+        debugReadbacks: [{
+          batchIndex: 0,
+          records: [{
+            heightMin: 1,
+            heightMax: 2,
+            heightAvg: 1.5,
+            slopeMean: 0,
+            avgNormalX: 0,
+            avgNormalY: 1,
+            avgNormalZ: 0,
+            dominantMaterial: 1,
+            materialVariance: 0,
+            grassEligibility: 1,
+            roughnessMean: 0,
+            waterCoverage: 0,
+            canopyCoverage: 0,
+            slopeMax: 0,
+            revision: 1,
+            flags: 0,
+            sampleCount: 16,
+          }],
+        }],
+      }),
+    });
+    expect(result.fallbackReason).toBeNull();
+    expect(result.debugReadbacks?.[0]?.records).toHaveLength(1);
+    expect(result.debugReadbacks?.[0]?.records[0]?.heightAvg).toBe(1.5);
+  });
+
   it("falls back all dirty tiles when dispatch fails", async () => {
     const counters = successCounters();
     const result = await dispatchFarSummaryGpuPlanOrFallback({
