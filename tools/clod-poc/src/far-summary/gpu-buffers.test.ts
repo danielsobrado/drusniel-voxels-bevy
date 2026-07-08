@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FAR_SUMMARY_GPU_DESCRIPTOR_BYTES,
+  FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS,
   FAR_SUMMARY_GPU_RECORD_BYTES,
   type FarSummaryGpuConfig,
 } from "./gpu-config.js";
@@ -26,6 +27,7 @@ function tile(overrides: Partial<FarSummaryGpuDirtyTile> = {}): FarSummaryGpuDir
     distanceToPredictedCenter: 2,
     reason: "startup",
     revision: 17,
+    cellRecordOffset: 123,
     ...overrides,
   };
 }
@@ -59,6 +61,14 @@ describe("packFarSummaryGpuDescriptors", () => {
     expect(view.getUint32(36, true)).toBe(0);
     expect(view.getUint32(40, true)).toBe(16);
     expect(view.getFloat32(44, true)).toBe(32);
+    expect(view.getUint32(48, true)).toBe(123);
+  });
+
+  it("sets the cell-record flag only in commit mode", () => {
+    const noCommit = new DataView(packFarSummaryGpuDescriptors([tile()], { commitToCache: false }));
+    const commit = new DataView(packFarSummaryGpuDescriptors([tile()], { commitToCache: true }));
+    expect(noCommit.getUint32(36, true)).toBe(0);
+    expect(commit.getUint32(36, true)).toBe(FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS);
   });
 
   it("is deterministic", () => {
@@ -69,20 +79,25 @@ describe("packFarSummaryGpuDescriptors", () => {
 });
 
 describe("far-summary GPU byte estimates", () => {
-  it("matches descriptor and record byte constants", () => {
+  it("matches descriptor and aggregate record byte constants without readback", () => {
     expect(estimateFarSummaryGpuBatchBytes(3, CONFIG)).toBe(
       3 * (FAR_SUMMARY_GPU_DESCRIPTOR_BYTES + FAR_SUMMARY_GPU_RECORD_BYTES),
+    );
+  });
+
+  it("includes per-cell output and readback bytes in commit mode", () => {
+    const cellRecords = 48;
+    expect(estimateFarSummaryGpuBatchBytes(3, { ...CONFIG, commitToCache: true }, cellRecords)).toBe(
+      3 * (FAR_SUMMARY_GPU_DESCRIPTOR_BYTES + FAR_SUMMARY_GPU_RECORD_BYTES) +
+      cellRecords * FAR_SUMMARY_GPU_RECORD_BYTES * 2,
     );
   });
 });
 
 describe("farSummaryGpuReadbackTileCount", () => {
-  it("reads back all tiles in commit mode", () => {
-    expect(farSummaryGpuReadbackTileCount(12, { ...CONFIG, commitToCache: true, debugReadbackTiles: 2 })).toBe(12);
-  });
-
-  it("uses the debug readback cap outside commit mode", () => {
+  it("uses the debug readback cap for aggregate records", () => {
     expect(farSummaryGpuReadbackTileCount(12, { ...CONFIG, debugReadback: true, debugReadbackTiles: 2 })).toBe(2);
+    expect(farSummaryGpuReadbackTileCount(12, { ...CONFIG, commitToCache: true, debugReadback: false })).toBe(0);
     expect(farSummaryGpuReadbackTileCount(12, CONFIG)).toBe(0);
   });
 });
