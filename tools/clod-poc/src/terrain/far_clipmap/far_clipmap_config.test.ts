@@ -34,6 +34,8 @@ describe("far clipmap config", () => {
     expect(config.heightScale).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.heightScale);
     expect(config.yOffset).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.yOffset);
     expect(config.shaderDisplacement).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.shaderDisplacement);
+    expect(config.sourceRefreshMaxPerFrame).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.sourceRefreshMaxPerFrame);
+    expect(config.sourceRefreshIntervalFrames).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.sourceRefreshIntervalFrames);
   });
 
   it("accepts explicit zero y offset without flattening height scale", () => {
@@ -41,6 +43,15 @@ describe("far clipmap config", () => {
 
     expect(config.yOffset).toBe(0);
     expect(config.heightScale).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.heightScale);
+  });
+
+  it("accepts source refresh query budget params", () => {
+    const config = farClipmapConfigFromSearchParams(query(
+      "farClipmap=1&farClipmapSourceRefreshMaxPerFrame=3&farClipmapSourceRefreshIntervalFrames=17",
+    ));
+
+    expect(config.sourceRefreshMaxPerFrame).toBe(3);
+    expect(config.sourceRefreshIntervalFrames).toBe(17);
   });
 
   it("accepts query params and clamps outer radius to CLOD coverage", () => {
