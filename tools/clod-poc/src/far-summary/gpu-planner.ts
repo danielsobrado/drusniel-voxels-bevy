@@ -67,6 +67,16 @@ export function planFarSummaryGpuDirtyTiles(
   return requests.map((request) => requestToDirtyTile(request, farSummaryConfig, gpuConfig, reason, revision));
 }
 
+export function planFarSummaryGpuDirtyTilesFromRequests(
+  requests: readonly FarSummaryRingRequest[],
+  farSummaryConfig: FarSummaryConfig,
+  gpuConfig: FarSummaryGpuConfig,
+  reason: FarSummaryGpuDirtyReason,
+  revision: number,
+): FarSummaryGpuDirtyTile[] {
+  return requests.map((request) => requestToDirtyTile(request, farSummaryConfig, gpuConfig, reason, revision));
+}
+
 export function buildFarSummaryGpuPlan(
   center: StreamCenter,
   farSummaryConfig: FarSummaryConfig,
@@ -75,10 +85,28 @@ export function buildFarSummaryGpuPlan(
   revision: number,
 ): FarSummaryGpuPlan {
   const dirtyTiles = planFarSummaryGpuDirtyTiles(center, farSummaryConfig, gpuConfig, reason, revision);
+  return buildFarSummaryGpuPlanFromDirtyTiles(dirtyTiles, gpuConfig);
+}
+
+export function buildFarSummaryGpuPlanFromRequests(
+  requests: readonly FarSummaryRingRequest[],
+  farSummaryConfig: FarSummaryConfig,
+  gpuConfig: FarSummaryGpuConfig,
+  reason: FarSummaryGpuDirtyReason,
+  revision: number,
+): FarSummaryGpuPlan {
+  const dirtyTiles = planFarSummaryGpuDirtyTilesFromRequests(requests, farSummaryConfig, gpuConfig, reason, revision);
+  return buildFarSummaryGpuPlanFromDirtyTiles(dirtyTiles, gpuConfig);
+}
+
+export function buildFarSummaryGpuPlanFromDirtyTiles(
+  dirtyTiles: readonly FarSummaryGpuDirtyTile[],
+  gpuConfig: FarSummaryGpuConfig,
+): FarSummaryGpuPlan {
   const batches = splitFarSummaryGpuBatches(dirtyTiles, gpuConfig);
   const scheduledTiles = batches.reduce((sum, batch) => sum + batch.tiles.length, 0);
   return {
-    dirtyTiles,
+    dirtyTiles: [...dirtyTiles],
     batches,
     droppedTiles: Math.max(0, dirtyTiles.length - scheduledTiles),
     estimatedBufferBytes: batches.reduce((sum, batch) => Math.max(sum, batch.totalBytes), 0),
