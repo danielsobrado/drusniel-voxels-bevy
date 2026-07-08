@@ -8,6 +8,12 @@ import type { FarClipmapSource } from "./far_clipmap_source.js";
 type TslNode = any;
 type FarClipmapNodeUniform<T> = TslNode & { value: T };
 
+const tslMix = mix as unknown as (...args: TslNode[]) => TslNode;
+const tslSmoothstep = smoothstep as unknown as (...args: TslNode[]) => TslNode;
+const tslTexture = texture as unknown as (...args: TslNode[]) => TslNode;
+const tslVec2 = vec2 as unknown as (...args: TslNode[]) => TslNode;
+const tslVec3 = vec3 as unknown as (...args: TslNode[]) => TslNode;
+
 const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object.freeze({
   final: 0,
   biome: 1,
@@ -332,26 +338,30 @@ function createWebGpuFarClipmapMaterial(input: {
   const sourceData = (sourceTexture.image as { data: Float32Array }).data;
   const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
   const sampleUv: TslNode = positionGeometry.xz.div(uniforms.uGridMax);
-  const sourceSample: TslNode = texture(sourceTexture, vec2(sampleUv.x, sampleUv.y));
+  const sourceSample: TslNode = tslTexture(sourceTexture, tslVec2(sampleUv.x, sampleUv.y));
   const rawHeight: TslNode = sourceSample.x;
   const height: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
   const worldXZ: TslNode = positionGeometry.xz.mul(uniforms.uCellSize).add(uniforms.uRingOrigin);
   const distance: TslNode = worldXZ.sub(uniforms.uCameraXZ).length();
-  const localPosition: TslNode = vec3(
+  const localPosition: TslNode = tslVec3(
     positionGeometry.x.mul(uniforms.uCellSize),
     height,
     positionGeometry.z.mul(uniforms.uCellSize),
   );
-  const heightColor: TslNode = smoothstep(-16.0, 128.0, height);
-  const landColor: TslNode = mix(vec3(0.20, 0.27, 0.18), vec3(0.36, 0.35, 0.32), heightColor);
-  const waterColor: TslNode = vec3(0.07, 0.19, 0.26);
-  const terrainColor: TslNode = mix(waterColor, landColor, smoothstep(uniforms.uSeaLevel.sub(0.25), uniforms.uSeaLevel.add(0.25), height));
-  const fog: TslNode = smoothstep(uniforms.uClipOuterRadius.mul(0.55), uniforms.uClipOuterRadius, distance);
+  const heightColor: TslNode = tslSmoothstep(-16.0, 128.0, height);
+  const landColor: TslNode = tslMix(tslVec3(0.20, 0.27, 0.18), tslVec3(0.36, 0.35, 0.32), heightColor);
+  const waterColor: TslNode = tslVec3(0.07, 0.19, 0.26);
+  const terrainColor: TslNode = tslMix(
+    waterColor,
+    landColor,
+    tslSmoothstep(uniforms.uSeaLevel.sub(0.25), uniforms.uSeaLevel.add(0.25), height),
+  );
+  const fog: TslNode = tslSmoothstep(uniforms.uClipOuterRadius.mul(0.55), uniforms.uClipOuterRadius, distance);
 
   const material = new MeshBasicNodeMaterial() as FarClipmapMaterial & MeshBasicNodeMaterial;
   material.name = "FarClipmapTerrainNodeShader";
   material.positionNode = localPosition;
-  material.colorNode = mix(terrainColor, vec3(0.46, 0.52, 0.50), fog.mul(0.36));
+  material.colorNode = tslMix(terrainColor, tslVec3(0.46, 0.52, 0.50), fog.mul(0.36));
   material.maskNode = distance.greaterThanEqual(uniforms.uClipInnerRadius).and(distance.lessThanEqual(uniforms.uClipOuterRadius));
   material.depthWrite = true;
   material.depthTest = true;
@@ -398,7 +408,7 @@ export function createFarClipmapMaterial(input: {
     polygonOffsetUnits: -1,
     transparent: false,
     side: THREE.FrontSide,
-  }) as FarClipmapMaterial;
+  }) as unknown as FarClipmapMaterial;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;
 }
