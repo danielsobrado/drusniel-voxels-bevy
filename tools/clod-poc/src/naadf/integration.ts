@@ -236,6 +236,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
           const r = sample(x, z);
           return r.material;
         },
+        revision: () => state.frame + ((gpuAtlas?.view.revision ?? 0) * 1_000_000),
       };
     },
 
@@ -257,16 +258,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
 
     traceSun(x, y, z, sunDir, maxDist) {
-      return traceSunVisibility({
-        state,
-        worldX: x,
-        worldY: y,
-        worldZ: z,
-        sunDirX: sunDir.x,
-        sunDirY: sunDir.y,
-        sunDirZ: sunDir.z,
-        maxDistanceM: maxDist,
-      });
+      return traceSunVisibility({ state, worldX: x, y, worldZ: z, sunDir, maxDist });
     },
 
     getMetricsSnapshot() {
@@ -274,26 +266,35 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
 
     getAcceptanceStatus() {
-      const checks = runAcceptanceChecks(config, metrics.snapshot(), 120);
+      const checks = runAcceptanceChecks(state, metrics.snapshot(), config.acceptance);
       return { checks, passed: allAcceptancePassed(checks) };
     },
 
     dispose() {
-      disposeSaveInvalidationTarget(saveInvalidationCleanup);
-      disposeActiveIntegration(integration);
-      debugOverlay?.dispose();
-      gpuAtlas?.dispose();
       browserWindow?.removeEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
-      state.residents.length = 0;
-      state.residentIndexByKey.clear();
-      state.farTiles.clear();
-      state.farTileLastTouched.clear();
-      state.pendingJobs.clear();
+      debugOverlay?.dispose();
+      setNaadfIntegration(null);
+      if (activeIntegration === integration) activeIntegration = null;
+      activeSaveInvalidationCleanup?.();
+      activeSaveInvalidationCleanup = null;
     },
   };
 
-  replaceActiveIntegration(integration);
+  activeIntegration = integration;
+  setNaadfIntegration(integration);
+  if (browserWindow) {
+    browserWindow.__drusnielNaadf = integration;
+  }
   return integration;
+}
+
+export function getActiveNaadfIntegration(): NaadfIntegration | null {
+  return activeIntegration;
+}
+
+function disposeActiveIntegrationInstance(): void {
+  activeIntegration?.dispose();
+  activeIntegration = null;
 }
 
 function replaceActiveSaveInvalidationTarget(cleanup: () => void): void {
@@ -301,126 +302,36 @@ function replaceActiveSaveInvalidationTarget(cleanup: () => void): void {
   activeSaveInvalidationCleanup = cleanup;
 }
 
-function disposeActiveSaveInvalidationTarget(): void {
-  activeSaveInvalidationCleanup?.();
-  activeSaveInvalidationCleanup = null;
-}
-
-function disposeSaveInvalidationTarget(cleanup: () => void): void {
-  cleanup();
-  if (activeSaveInvalidationCleanup === cleanup) activeSaveInvalidationCleanup = null;
-}
-
-function disposeActiveIntegrationInstance(): void {
-  const current = activeIntegration;
-  if (!current) {
-    disposeActiveSaveInvalidationTarget();
-    clearActiveIntegration();
-    return;
-  }
-  current.dispose();
-}
-
-function replaceActiveIntegration(integration: NaadfIntegration): void {
-  activeIntegration = integration;
-  setNaadfIntegration(integration);
-}
-
-function disposeActiveIntegration(integration: NaadfIntegration): void {
-  if (activeIntegration !== integration) return;
-  clearActiveIntegration();
-}
-
-function clearActiveIntegration(): void {
-  activeIntegration = null;
-  setNaadfIntegration(undefined);
+function currentWindow(): (Window & { __drusnielNaadf?: NaadfIntegration }) | null {
+  return typeof window === "undefined"
+    ? null
+    : window as Window & { __drusnielNaadf?: NaadfIntegration };
 }
 
 function heightProviderKey(x: number, z: number): string {
-  const qx = Math.round(x * HEIGHT_PROVIDER_KEY_SCALE);
-  const qz = Math.round(z * HEIGHT_PROVIDER_KEY_SCALE);
-  return `${qx}:${qz}`;
-}
-
-function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig {
-  const params = currentSearchParams();
-  if (!params) return config;
-
-  const mode = params.get("naadfTraversal") ?? params.get("traversal");
-  if (mode && TRAVERSAL_MODES.has(mode as NaadfTraversalMode)) {
-    config.traversal.mode = mode as NaadfTraversalMode;
-  }
-
-  const bounds = params.get("naadfHddaBounds");
-  if (bounds === "1" || bounds === "true") config.traversal.hddaUseDirectionalBounds = true;
-  if (bounds === "0" || bounds === "false") config.traversal.hddaUseDirectionalBounds = false;
-
-  const heightMode = params.get("naadfHeightMode") ?? params.get("naadfFarShellHeightMode");
-  if (heightMode && HEIGHT_MODES.has(heightMode as NaadfFarShellHeightSamplingMode)) {
-    config.farShell.heightSamplingMode = heightMode as NaadfFarShellHeightSamplingMode;
-  }
-
-  const shellGrid = positiveIntParam(params.get("naadfShellGrid"));
-  if (shellGrid !== null) config.farShell.gridRes = shellGrid;
-
-  const atlasWindow = positiveIntParam(params.get("naadfAtlasWindow") ?? params.get("naadfGpuAtlasWindow"));
-  if (atlasWindow !== null && isValidNaadfGpuAtlasWindowTiles(atlasWindow)) {
-    config.farShell.gpuAtlasWindowTiles = atlasWindow;
-  }
-
-  const atlasFormat = params.get("farSummaryAtlas") ?? params.get("naadfFarSummaryAtlas");
-  if (atlasFormat && isValidFarSummaryAtlasFormat(atlasFormat)) {
-    config.farSummaryAtlas.format = atlasFormat;
-  }
-
-  return config;
-}
-
-function applyRuntimeMaterialCacheOverrides(config: ReturnType<typeof parseTerrainMaterialCacheConfig>): ReturnType<typeof parseTerrainMaterialCacheConfig> {
-  const params = currentSearchParams();
-  if (!params) return config;
-  const enabled = params.get("terrainMaterialCache");
-  if (enabled === "1" || enabled === "true") config.enabled = true;
-  if (enabled === "0" || enabled === "false") config.enabled = false;
-  const debugChannel = params.get("terrainMaterialCacheDebug");
-  if (debugChannel && TERRAIN_MATERIAL_CACHE_DEBUG_CHANNELS.includes(debugChannel as typeof config.debug.showFormatChannels)) {
-    config.debug.showFormatChannels = debugChannel as typeof config.debug.showFormatChannels;
-  }
-  if (params.get("terrainMaterialCacheForceRebake") === "1") config.debug.forceRebake = true;
-  return config;
+  return `${Math.round(x * HEIGHT_PROVIDER_KEY_SCALE)}:${Math.round(z * HEIGHT_PROVIDER_KEY_SCALE)}`;
 }
 
 function invalidateFarSummaryAtlasSignature(atlas: FarSummaryGpuAtlas): void {
   (atlas as unknown as { lastSignature: string }).lastSignature = "";
 }
 
-function positiveIntParam(value: string | null): number | null {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) return null;
-  return parsed;
-}
-
-function currentSearchParams(): URLSearchParams | null {
-  const browserWindow = currentWindow();
-  return browserWindow ? new URLSearchParams(browserWindow.location.search) : null;
-}
-
-function currentWindow(): Window | null {
-  return typeof window === "undefined" ? null : window;
-}
-
-declare global {
-  interface Window {
-    __drusnielNaadf?: NaadfIntegration;
+function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig {
+  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const traversal = params.get("naadfTraversal");
+  if (traversal && TRAVERSAL_MODES.has(traversal as NaadfTraversalMode)) {
+    config.traversal.mode = traversal as NaadfTraversalMode;
+  }
+  const heightMode = params.get("naadfFarShellHeightMode");
+  if (heightMode && HEIGHT_MODES.has(heightMode as NaadfFarShellHeightSamplingMode)) {
+    config.farShell.heightSamplingMode = heightMode as NaadfFarShellHeightSamplingMode;
+  }
+  const atlasFormat = params.get("naadfFarSummaryAtlasFormat");
+  if (atlasFormat && isValidFarSummaryAtlasFormat(atlasFormat)) {
+    config.farSummaryAtlas.format = atlasFormat;
+  }
+  const tiles = Number(params.get("naadfGpuAtlasWindowTiles"));
+  if (isValidNaadfGpuAtlasWindowTiles(tiles)) {
+    config.farShell.gpuAtlasWindowTiles = Math.floor(tiles);
   }
 }
-
-export {
-  parseNaadfPocConfig,
-  queryTerrainHeight,
-  tracePrimaryDebugRay,
-  traceSunVisibility,
-  NaadfMetricsCollector,
-  createNaadfWorldState,
-  updateSummaryStreaming,
-};
