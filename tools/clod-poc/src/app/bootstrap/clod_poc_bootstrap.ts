@@ -278,6 +278,7 @@ export async function bootstrapClodPoc() {
           sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
           sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
         },
+        terrainFieldConfig: world.worldSource.metadata.terrain,
         scene: renderer.scene,
         camera: renderer.camera,
         farShellMetrics,
@@ -336,7 +337,7 @@ export async function bootstrapClodPoc() {
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });
-
+    
     if (farShellCpuHeightsEnabled) infiniteFarShell.setHeightProvider(heightProvider);
     renderer.scene.add(infiniteFarShell.mesh);
 
@@ -436,7 +437,7 @@ export async function bootstrapClodPoc() {
     player: renderer.player,
     interaction: renderer.interaction,
     terrainColliders: renderer.terrainColliders,
-    terrainRaycast: renderer.terrainRaycast,
+    terrainRaycast: terrainView.terrainRaycast,
     isWebGpu: renderer.isWebGpu,
     worldCells: world.worldCells,
     clodWorker: world.clodWorker,
@@ -518,4 +519,10 @@ export async function bootstrapClodPoc() {
     treeConfig: world.treeConfig,
     understoryConfig: world.understoryConfig,
   });
+}
+
+declare global {
+  interface Window {
+    __drusnielFarOwnership?: ReturnType<typeof buildFarOwnershipSummary>;
+  }
 }
