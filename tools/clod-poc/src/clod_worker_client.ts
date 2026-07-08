@@ -42,13 +42,34 @@ import {
   streamingRootGpuMesherConfigFromWindow,
   type StreamingRootGpuMesherConfig,
 } from "./terrain/streaming/streamed_root_gpu_config.js";
+import {
+  StreamedPageBoundsGuardError,
+  createStreamedPageBoundsGuardStats,
+  isStreamedPageBoundsGuardError,
+  publishStreamedPageBoundsGuardStatsToCounters,
+  recordStreamedPageBoundsGuardBatchReject,
+  recordStreamedPageBoundsGuardCacheDrop,
+  recordStreamedPageBoundsGuardCpuFallbackPages,
+  recordStreamedPageBoundsGuardResult,
+  streamedPageBoundsGuardConfigFromWindow,
+  validateStreamedPageBounds,
+  type StreamedPageBoundsGuardConfig,
+} from "./terrain/streaming/streamed_page_bounds_guard.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
+
+type StreamRootBoundsGuardSource = "gpu" | "cpu" | "cache";
 
 export interface WorkerStreamRootsResult {
   nodes: ClodPageNode[];
   buildMs: number;
   transferBytes: number;
+}
+
+function globalClodCounters(): Record<string, number> | undefined {
+  return (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
 }
 
 export class ClodWorkerClient {
@@ -81,6 +102,8 @@ export class ClodWorkerClient {
   private streamRootGpuCreatePromise: Promise<GpuClodRootMesher | null> | null = null;
   private streamRootGpuUnavailable = false;
   private streamRootWorkerFallbackPages = 0;
+  private streamRootBoundsGuardConfig: StreamedPageBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
+  private streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -149,16 +172,24 @@ export class ClodWorkerClient {
   async buildStreamRoots(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
-    if (!this.streamRootGpuConfig.enabled) return this.buildStreamRootsOnWorker(coords);
+    this.refreshStreamRootBoundsGuardConfig();
+    if (!this.streamRootGpuConfig.enabled) {
+      const built = await this.buildStreamRootsOnWorker(coords);
+      this.assertStreamRootNodesValid(built.nodes, "cpu");
+      return built;
+    }
 
     try {
       const mesher = await this.getStreamRootGpuMesher();
       if (!mesher) {
         if (!this.streamRootGpuConfig.fallback) throw new Error("WebGPU streamed-root mesher unavailable");
-        return this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
+        const fallback = await this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
+        this.assertStreamRootNodesValid(fallback.nodes, "cpu");
+        return fallback;
       }
       return await this.buildStreamRootsOnGpuWithCache(mesher, coords);
     } catch (error) {
+      const guardRejected = isStreamedPageBoundsGuardError(error);
       const mesherDisabled = this.streamRootGpuMesher?.stats().enabled === 0;
       this.streamRootGpuMesher?.recordFallbackPages(coords.length);
       if (mesherDisabled) {
@@ -167,7 +198,13 @@ export class ClodWorkerClient {
       }
       if (!this.streamRootGpuConfig.fallback) throw error;
       console.warn(`[clod-stream-gpu] GPU streamed-root batch failed; falling back to CPU worker for ${coords.length} page(s)`, error);
-      return this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
+      const fallback = await this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
+      if (guardRejected) {
+        recordStreamedPageBoundsGuardCpuFallbackPages(this.streamRootBoundsGuardStats, coords.length);
+        this.publishStreamRootBoundsGuardStats();
+      }
+      this.assertStreamRootNodesValid(fallback.nodes, "cpu");
+      return fallback;
     }
   }
 
@@ -196,12 +233,13 @@ export class ClodWorkerClient {
     for (const coord of coords) {
       const rootLevel = this.streamRootLevel(coord.level);
       const cached = await tryLoadStreamRootNode(cacheCtx, "gpu", rootLevel, coord.px, coord.pz, cacheStats);
-      if (cached) nodesById.set(cached.id, cached);
+      if (cached && this.acceptStreamRootNode(cached, "cache")) nodesById.set(cached.id, cached);
       else misses.push(coord);
     }
 
     if (misses.length > 0) {
       const built = await mesher.buildPages(misses);
+      this.assertStreamRootNodesValid(built.nodes, "gpu");
       const avgBuildMs = built.nodes.length > 0 ? built.buildMs / built.nodes.length : 0;
       for (const node of built.nodes) {
         nodesById.set(node.id, node);
@@ -241,6 +279,43 @@ export class ClodWorkerClient {
     return this.buildStreamRootsOnWorker(coords);
   }
 
+  private refreshStreamRootBoundsGuardConfig(): void {
+    this.streamRootBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
+    this.streamRootBoundsGuardStats.enabled = this.streamRootBoundsGuardConfig.enabled ? 1 : 0;
+    this.publishStreamRootBoundsGuardStats();
+  }
+
+  private acceptStreamRootNode(node: ClodPageNode, source: StreamRootBoundsGuardSource): boolean {
+    const cfg = this.streamRootCfg;
+    if (!cfg) return true;
+    const result = validateStreamedPageBounds(node, cfg.page.chunk_size, this.streamRootBoundsGuardConfig);
+    recordStreamedPageBoundsGuardResult(this.streamRootBoundsGuardStats, result, this.streamRootBoundsGuardConfig);
+    if (!result.ok) {
+      if (source === "cache") recordStreamedPageBoundsGuardCacheDrop(this.streamRootBoundsGuardStats);
+      console.warn(`[clod-stream-bounds] rejected ${source} streamed page ${node.id}: ${result.reason ?? "unknown"}`);
+      this.publishStreamRootBoundsGuardStats();
+      return false;
+    }
+    this.publishStreamRootBoundsGuardStats();
+    return true;
+  }
+
+  private assertStreamRootNodesValid(nodes: readonly ClodPageNode[], source: StreamRootBoundsGuardSource): void {
+    const rejected = nodes.filter((node) => !this.acceptStreamRootNode(node, source));
+    if (rejected.length === 0) return;
+    if (source === "gpu") recordStreamedPageBoundsGuardBatchReject(this.streamRootBoundsGuardStats);
+    this.publishStreamRootBoundsGuardStats();
+    const results = rejected.map((node) => validateStreamedPageBounds(node, this.streamRootCfg!.page.chunk_size, this.streamRootBoundsGuardConfig));
+    throw new StreamedPageBoundsGuardError(
+      `streamed-root ${source} build produced ${rejected.length} invalid page(s)`,
+      results,
+    );
+  }
+
+  private publishStreamRootBoundsGuardStats(): void {
+    publishStreamedPageBoundsGuardStatsToCounters(globalClodCounters(), this.streamRootBoundsGuardStats);
+  }
+
   private async getStreamRootGpuMesher(): Promise<GpuClodRootMesher | null> {
     if (this.streamRootGpuMesher) return this.streamRootGpuMesher;
     if (this.streamRootGpuUnavailable || !this.streamRootCfg) return null;
@@ -278,6 +353,10 @@ export class ClodWorkerClient {
     this.streamRootWorldPagesX = worldPagesX;
     this.streamRootWorldPagesZ = worldPagesZ;
     this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
+    this.streamRootBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
+    this.streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
+    this.streamRootBoundsGuardStats.enabled = this.streamRootBoundsGuardConfig.enabled ? 1 : 0;
+    this.publishStreamRootBoundsGuardStats();
     this.streamRootGpuUnavailable = false;
     this.streamRootWorkerFallbackPages = 0;
     this.streamRootCacheInit = initClodCacheContext({
