@@ -2,7 +2,19 @@ const WORKGROUP_SIZE: u32 = 64u;
 const CLASS_LARGE: u32 = 0u;
 const CLASS_MEDIUM: u32 = 1u;
 const CLASS_SMALL: u32 = 2u;
-const COUNTER_TOTAL: u32 = 0u;
+const COUNTER_ACCEPTED_TOTAL: u32 = 0u;
+const COUNTER_CLASS_LARGE: u32 = 1u;
+const COUNTER_CLASS_MEDIUM: u32 = 2u;
+const COUNTER_CLASS_SMALL: u32 = 3u;
+const COUNTER_CANDIDATES_TOTAL: u32 = 4u;
+const COUNTER_REJECT_OUTSIDE_WORLD: u32 = 5u;
+const COUNTER_REJECT_TOO_FAR: u32 = 6u;
+const COUNTER_REJECT_BELOW_WATER: u32 = 7u;
+const COUNTER_REJECT_TOO_STEEP: u32 = 8u;
+const COUNTER_REJECT_DENSITY_MASK: u32 = 9u;
+const COUNTER_REJECT_TILE_BUDGET: u32 = 10u;
+const COUNTER_REJECT_CLASS_BUDGET: u32 = 11u;
+const STONE_COUNTER_COUNT: u32 = 12u;
 const TAU: f32 = 6.28318530718;
 const INDIRECT_STRIDE_U32: u32 = 5u;
 const STONE_HYDRO_WATER_CLEARANCE: f32 = 0.22;
@@ -194,6 +206,7 @@ fn process_cell(slot: u32) {
     return;
   }
 
+  atomicAdd(&counters[COUNTER_CANDIDATES_TOTAL], 1u);
   let wc = stone_world_cell(slot);
   let seed = params.counts_a.z;
   let jitter = pcg2d(wc, seed + 101u);
@@ -202,11 +215,13 @@ fn process_cell(slot: u32) {
   // have real terrain outside the startup square, so skip the box reject there and let the scatter
   // masks decide; otherwise stones form a fixed disc at the startup world edge.
   if (fieldParams.islandEnabled == 0u && (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= params.world.x || wpos.y >= params.world.x)) {
+    atomicAdd(&counters[COUNTER_REJECT_OUTSIDE_WORLD], 1u);
     return;
   }
 
   let dist = distance(wpos, params.ring.xy);
   if (dist > params.ring.z) {
+    atomicAdd(&counters[COUNTER_REJECT_TOO_FAR], 1u);
     return;
   }
 
@@ -221,12 +236,14 @@ fn process_cell(slot: u32) {
   let terrain = terrain_bias(h, weights);
   let hydro_streambed = hydrology_streambed_mask(hydro, h);
 
-  if (h < WATER_LEVEL + params.slope_water.z) {
+  if (h < WATER_LEVEL + params.slope_water.z || hydrology_reject_stone(hydro, h)) {
+    atomicAdd(&counters[COUNTER_REJECT_BELOW_WATER], 1u);
     return;
   }
   let denom = max(0.001, params.slope_water.x - params.slope_water.y);
   let repose = clamp((normal.y - params.slope_water.y) / denom, 0.0, 1.0);
   if (repose <= 0.0) {
+    atomicAdd(&counters[COUNTER_REJECT_TOO_STEEP], 1u);
     return;
   }
   let scree = clamp((params.slope_water.x - normal.y) / denom, 0.0, 1.0) * repose;
@@ -250,17 +267,20 @@ fn process_cell(slot: u32) {
   let ring_edge = ring_edge_fade(dist);
   let accept = params.world.z * base * clump * repose * terrain.x * ring_edge * (1.0 - snow * params.stream_snow_lean.z);
   if (pcg2d(wc, seed + 307u).x >= accept) {
+    atomicAdd(&counters[COUNTER_REJECT_DENSITY_MASK], 1u);
     return;
   }
 
-  let total_slot = atomicAdd(&counters[COUNTER_TOTAL], 1u);
+  let total_slot = atomicAdd(&counters[COUNTER_ACCEPTED_TOTAL], 1u);
   if (total_slot >= max_instances) {
+    atomicAdd(&counters[COUNTER_REJECT_TILE_BUDGET], 1u);
     return;
   }
 
   let cls = pick_class(scree, streambed, cliff_above, terrain, pcg2d(wc, seed + 523u).x);
   let class_slot = atomicAdd(&counters[cls + 1u], 1u);
   if (class_slot >= max_instances) {
+    atomicAdd(&counters[COUNTER_REJECT_CLASS_BUDGET], 1u);
     return;
   }
 
@@ -281,7 +301,7 @@ fn process_cell(slot: u32) {
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
-  if (i < 4u) {
+  if (i < STONE_COUNTER_COUNT) {
     atomicStore(&counters[i], 0u);
   }
   if (i < 15u) {
@@ -308,7 +328,7 @@ fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
   if (id.x != 0u) {
     return;
   }
-  write_draw_args(CLASS_LARGE, params.counts_a.w, atomicLoad(&counters[1u]));
-  write_draw_args(CLASS_MEDIUM, params.counts_b.x, atomicLoad(&counters[2u]));
-  write_draw_args(CLASS_SMALL, params.counts_b.y, atomicLoad(&counters[3u]));
+  write_draw_args(CLASS_LARGE, params.counts_a.w, atomicLoad(&counters[COUNTER_CLASS_LARGE]));
+  write_draw_args(CLASS_MEDIUM, params.counts_b.x, atomicLoad(&counters[COUNTER_CLASS_MEDIUM]));
+  write_draw_args(CLASS_SMALL, params.counts_b.y, atomicLoad(&counters[COUNTER_CLASS_SMALL]));
 }
