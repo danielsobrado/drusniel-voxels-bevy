@@ -45,6 +45,14 @@ export function packFarSummaryGpuDescriptors(tiles: readonly FarSummaryGpuDirtyT
   return buffer;
 }
 
+export function farSummaryGpuReadbackTileCount(
+  tileCount: number,
+  config: FarSummaryGpuConfig,
+): number {
+  if (config.commitToCache) return tileCount;
+  return config.debugReadback ? Math.min(tileCount, config.debugReadbackTiles) : 0;
+}
+
 export function createFarSummaryGpuBatchBuffers(
   device: GPUDevice,
   batch: FarSummaryGpuBatch,
@@ -53,7 +61,7 @@ export function createFarSummaryGpuBatchBuffers(
 ): FarSummaryGpuBatchBufferSet {
   const descriptorBytes = Math.max(4, batch.tiles.length * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES);
   const outputBytes = Math.max(4, batch.tiles.length * FAR_SUMMARY_GPU_RECORD_BYTES);
-  const readbackTiles = config.debugReadback ? Math.min(batch.tiles.length, config.debugReadbackTiles) : 0;
+  const readbackTiles = farSummaryGpuReadbackTileCount(batch.tiles.length, config);
   const readbackBytes = readbackTiles * FAR_SUMMARY_GPU_RECORD_BYTES;
   const digEditsBytes = DIG_EDIT_BYTES;
   const fieldParamsBytes = FIELD_PARAM_WORDS * U32;
