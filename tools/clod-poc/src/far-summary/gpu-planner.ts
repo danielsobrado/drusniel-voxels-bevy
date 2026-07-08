@@ -116,8 +116,7 @@ export function estimateFarSummaryGpuBatchBytes(tileCount: number, config: FarSu
   const safeTileCount = Math.max(0, Math.floor(tileCount));
   const descriptorBytes = safeTileCount * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES;
   const outputBytes = safeTileCount * FAR_SUMMARY_GPU_RECORD_BYTES;
-  const readbackTiles = config.debugReadback ? Math.min(safeTileCount, config.debugReadbackTiles) : 0;
-  const readbackBytes = readbackTiles * FAR_SUMMARY_GPU_RECORD_BYTES;
+  const readbackBytes = estimateFarSummaryGpuReadbackBytes(safeTileCount, config);
   return descriptorBytes + outputBytes + readbackBytes;
 }
 
@@ -158,8 +157,7 @@ function requestToDirtyTile(
 function createBatch(tiles: FarSummaryGpuDirtyTile[], config: FarSummaryGpuConfig): FarSummaryGpuBatch {
   const descriptorBytes = tiles.length * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES;
   const outputBytes = tiles.length * FAR_SUMMARY_GPU_RECORD_BYTES;
-  const readbackTiles = config.debugReadback ? Math.min(tiles.length, config.debugReadbackTiles) : 0;
-  const readbackBytes = readbackTiles * FAR_SUMMARY_GPU_RECORD_BYTES;
+  const readbackBytes = estimateFarSummaryGpuReadbackBytes(tiles.length, config);
   return {
     tiles,
     descriptorBytes,
@@ -167,4 +165,11 @@ function createBatch(tiles: FarSummaryGpuDirtyTile[], config: FarSummaryGpuConfi
     readbackBytes,
     totalBytes: descriptorBytes + outputBytes + readbackBytes,
   };
+}
+
+function estimateFarSummaryGpuReadbackBytes(tileCount: number, config: FarSummaryGpuConfig): number {
+  const readbackTiles = config.commitToCache
+    ? tileCount
+    : config.debugReadback ? Math.min(tileCount, config.debugReadbackTiles) : 0;
+  return readbackTiles * FAR_SUMMARY_GPU_RECORD_BYTES;
 }
