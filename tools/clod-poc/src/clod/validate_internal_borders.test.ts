@@ -35,6 +35,13 @@ const L2_FOOTPRINT: PageFootprint = {
   maxZ: 1024,
 };
 
+const L3_FOOTPRINT: PageFootprint = {
+  minX: 512,
+  maxX: 1024,
+  minZ: 512,
+  maxZ: 1024,
+};
+
 describe("assertNoInternalBorders generated child seams", () => {
   it("allows the L2 dyadic child seam reported by visual startup", () => {
     expect(() => assertNoInternalBorders(
@@ -52,6 +59,14 @@ describe("assertNoInternalBorders generated child seams", () => {
     )).not.toThrow();
   });
 
+  it("allows generated L3 outer page-border chains with a larger parent LOD band", () => {
+    expect(() => assertNoInternalBorders(
+      openQuad(820.5, 1012.5),
+      L3_FOOTPRINT,
+      "L3:1,1 final",
+    )).not.toThrow();
+  });
+
   it("still rejects arbitrary internal open boundaries", () => {
     expect(() => assertNoInternalBorders(
       openQuad(609.5, 910.5),
@@ -60,11 +75,19 @@ describe("assertNoInternalBorders generated child seams", () => {
     )).toThrow(/InternalBorderNotWelded/);
   });
 
-  it("still rejects boundaries just beyond the generated parent perimeter band", () => {
+  it("still rejects L2 boundaries just beyond the generated parent perimeter band", () => {
     expect(() => assertNoInternalBorders(
-      openQuad(699.5, 1018.5),
+      openQuad(699.5, 1014.5),
       L2_FOOTPRINT,
       "L2:2,3 final",
+    )).toThrow(/InternalBorderNotWelded/);
+  });
+
+  it("still rejects L3 boundaries just beyond the generated parent perimeter band", () => {
+    expect(() => assertNoInternalBorders(
+      openQuad(820.5, 1006.5),
+      L3_FOOTPRINT,
+      "L3:1,1 final",
     )).toThrow(/InternalBorderNotWelded/);
   });
 
