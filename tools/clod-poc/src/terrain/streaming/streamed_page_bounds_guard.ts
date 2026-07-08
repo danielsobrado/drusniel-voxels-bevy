@@ -263,12 +263,16 @@ function booleanFlag(params: URLSearchParams, key: string, fallback: boolean): b
 }
 
 function nonNegativeNumber(params: URLSearchParams, key: string, fallback: number): number {
-  const parsed = Number(params.get(key));
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function positiveNumber(params: URLSearchParams, key: string, fallback: number): number {
-  const parsed = Number(params.get(key));
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
