@@ -5,6 +5,7 @@ import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
+type FarClipmapNodeUniform<T> = TslNode & { value: T };
 
 const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object.freeze({
   final: 0,
@@ -31,15 +32,15 @@ export interface FarClipmapMaterialUniforms {
 }
 
 interface FarClipmapNodeUniforms {
-  uRingOrigin: { value: THREE.Vector2 };
-  uCellSize: { value: number };
-  uHeightScale: { value: number };
-  uYOffset: { value: number };
-  uSeaLevel: { value: number };
-  uDebugMode: { value: number };
-  uClipInnerRadius: { value: number };
-  uClipOuterRadius: { value: number };
-  uCameraXZ: { value: THREE.Vector2 };
+  uRingOrigin: FarClipmapNodeUniform<THREE.Vector2>;
+  uCellSize: FarClipmapNodeUniform<number>;
+  uHeightScale: FarClipmapNodeUniform<number>;
+  uYOffset: FarClipmapNodeUniform<number>;
+  uSeaLevel: FarClipmapNodeUniform<number>;
+  uDebugMode: FarClipmapNodeUniform<number>;
+  uClipInnerRadius: FarClipmapNodeUniform<number>;
+  uClipOuterRadius: FarClipmapNodeUniform<number>;
+  uCameraXZ: FarClipmapNodeUniform<THREE.Vector2>;
 }
 
 export type FarClipmapDisplacementMode = "shader" | "cpu-baked";
@@ -195,8 +196,7 @@ fn far_clipmap_terrain_sample(
     let h = clamp((height + 64.0) / 256.0, 0.0, 1.0);
     shaded = vec3<f32>(h, h, h);
   } else if (debug_mode >= 2.5 && debug_mode < 3.5) {
-    let ring_edge = min(abs(distance_m - 0.0), abs(distance_m - clip_outer_radius));
-    let edge_line = 1.0 - smoothstep(0.0, 16.0, ring_edge);
+    let edge_line = 1.0 - smoothstep(0.0, 16.0, abs(distance_m - clip_outer_radius));
     shaded = mix(vec3<f32>(0.05, 0.35, 0.95), vec3<f32>(1.0, 0.82, 0.18), edge_line);
   }
   return vec4<f32>(pow(max(shaded, vec3<f32>(0.0)), vec3<f32>(0.92)), height);
@@ -349,15 +349,15 @@ function createFarClipmapNodeUniforms(input: {
   cameraZ?: number;
 }): FarClipmapNodeUniforms {
   return {
-    uRingOrigin: uniform(new THREE.Vector2(input.ringOriginX ?? 0, input.ringOriginZ ?? 0)) as FarClipmapNodeUniforms["uRingOrigin"],
-    uCellSize: uniform(input.cellSizeM ?? 1) as FarClipmapNodeUniforms["uCellSize"],
-    uHeightScale: uniform(input.heightScale ?? 1) as FarClipmapNodeUniforms["uHeightScale"],
-    uYOffset: uniform(input.yOffset ?? 0) as FarClipmapNodeUniforms["uYOffset"],
-    uSeaLevel: uniform(input.seaLevel ?? 0) as FarClipmapNodeUniforms["uSeaLevel"],
-    uDebugMode: uniform(farClipmapDebugModeCode(input.debugMode)) as FarClipmapNodeUniforms["uDebugMode"],
-    uClipInnerRadius: uniform(input.clipInnerRadiusM) as FarClipmapNodeUniforms["uClipInnerRadius"],
-    uClipOuterRadius: uniform(input.clipOuterRadiusM) as FarClipmapNodeUniforms["uClipOuterRadius"],
-    uCameraXZ: uniform(new THREE.Vector2(input.cameraX ?? 0, input.cameraZ ?? 0)) as FarClipmapNodeUniforms["uCameraXZ"],
+    uRingOrigin: uniform(new THREE.Vector2(input.ringOriginX ?? 0, input.ringOriginZ ?? 0)) as FarClipmapNodeUniform<THREE.Vector2>,
+    uCellSize: uniform(input.cellSizeM ?? 1) as FarClipmapNodeUniform<number>,
+    uHeightScale: uniform(input.heightScale ?? 1) as FarClipmapNodeUniform<number>,
+    uYOffset: uniform(input.yOffset ?? 0) as FarClipmapNodeUniform<number>,
+    uSeaLevel: uniform(input.seaLevel ?? 0) as FarClipmapNodeUniform<number>,
+    uDebugMode: uniform(farClipmapDebugModeCode(input.debugMode)) as FarClipmapNodeUniform<number>,
+    uClipInnerRadius: uniform(input.clipInnerRadiusM) as FarClipmapNodeUniform<number>,
+    uClipOuterRadius: uniform(input.clipOuterRadiusM) as FarClipmapNodeUniform<number>,
+    uCameraXZ: uniform(new THREE.Vector2(input.cameraX ?? 0, input.cameraZ ?? 0)) as FarClipmapNodeUniform<THREE.Vector2>,
   };
 }
 
