@@ -11,6 +11,7 @@ import type { WaterController } from "../../runtime/water_weather/water_controll
 import type { WaterFieldResult } from "../../water/index.js";
 import type { WeatherController } from "../../runtime/water_weather/weather_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
+import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
 
 interface GuiDisplayController {
   updateDisplay: () => unknown;
@@ -95,6 +96,11 @@ function mirrorInfiniteHydrologyDiagnostics(input: VegetationFramePhaseInput): v
   }).window?.__drusnielClod;
   const counters = hooks?.stats?.counters;
   if (!counters || input.worldCells <= 0) return;
+
+  publishWorldCenterStatsToCounters(counters, computeWorldCenterDebugStats({
+    camera: input.camera.position,
+    waterOceanCenter: input.camera.position,
+  }));
 
   const outsideX = input.worldCells + HYDROLOGY_DIAGNOSTIC_OFFSET_M;
   const outsideZ = -HYDROLOGY_DIAGNOSTIC_OFFSET_M;
