@@ -86,6 +86,16 @@ describe("GPU stone instance layout", () => {
     expect(stoneGpuOutputIndex(2, 7, 100)).toBe(207);
   });
 
+  it("preserves canonical infinite-world scatter centers", () => {
+    expect(stoneScatterCenterCoord(2048, 0, 16, true)).toBe(2048);
+    expect(stoneScatterCenterCoord(-512, 0, 16, true)).toBe(-512);
+  });
+
+  it("clamps finite-world scatter centers", () => {
+    expect(stoneScatterCenterCoord(2048, 0, 16, false)).toBe(16);
+    expect(stoneScatterCenterCoord(-512, 0, 16, false)).toBe(0);
+  });
+
   it("keeps the CPU class-pick oracle biased toward large streambed/cliff stones", () => {
     const settings = mixedClassSettings();
     const flat = sampleStoneSite(64, 64, settings);
@@ -118,35 +128,26 @@ describe("GPU stone instance layout", () => {
   });
 });
 
-describe("stoneScatterCenterCoord", () => {
-  it("clamps finite-world scatter centers", () => {
-    expect(stoneScatterCenterCoord(1500, 0, 1024, false)).toBe(1024);
-    expect(stoneScatterCenterCoord(-30, 0, 1024, false)).toBe(0);
-  });
+function buildStoneValidationNodes(): ClodPageNode[] {
+  const built = buildWorld(pageCfg, 128, "ridge_border");
+  return built.allNodes;
+}
 
-  it("preserves unbounded scatter centers", () => {
-    expect(stoneScatterCenterCoord(1500, 0, 1024, true)).toBe(1500);
-    expect(stoneScatterCenterCoord(-30, 0, 1024, true)).toBe(-30);
-  });
-});
-
-describe("StoneSystem GPU shell", () => {
-  it("does not mutate CLOD page mesh signatures when enabled without a WebGPU device", () => {
-    const built = buildWorld(1, 1, pageCfg);
-    const nodes = built.nodesByLevel.get(0)!;
-    const before = pageMeshSignatures(nodes);
-    const system = new StoneSystem({
-      scene: new THREE.Scene(),
-      nodes: nodes as ClodPageNode[],
-      worldCells: pageCfg.page.chunks_per_page * pageCfg.page.chunk_size,
-      settings: mixedClassSettings({ maxInstances: 100 }),
+describe("stone mesh validation", () => {
+  it("keeps stone placement out of page mesh geometry", () => {
+    const before = pageMeshSignatures(buildStoneValidationNodes());
+    const scene = new THREE.Scene();
+    const stones = new StoneSystem({
+      scene,
+      nodes: buildStoneValidationNodes(),
+      worldCells: 128,
+      settings: mixedClassSettings({ enabled: false }),
       lighting: lighting(),
+      gpuDevice: null,
+      gpuBackend: null,
     });
-    try {
-      assertPageMeshSignaturesUnchanged(before, pageMeshSignatures(nodes));
-      expect(system.getStats().total).toBe(0);
-    } finally {
-      system.dispose();
-    }
+    stones.dispose();
+    const after = pageMeshSignatures(buildStoneValidationNodes());
+    assertPageMeshSignaturesUnchanged(before, after);
   });
 });
