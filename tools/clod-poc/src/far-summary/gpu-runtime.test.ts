@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FarSummaryTile } from "./types.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryConfig } from "./config.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
@@ -33,6 +34,28 @@ const CENTER = {
   velocityX: 0,
   velocityZ: 0,
 };
+
+function gpuRecord(height = 10) {
+  return {
+    heightMin: height,
+    heightMax: height,
+    heightAvg: height,
+    slopeMean: 0,
+    avgNormalX: 0,
+    avgNormalY: 1,
+    avgNormalZ: 0,
+    dominantMaterial: 1,
+    materialVariance: 0,
+    grassEligibility: 1,
+    roughnessMean: 0,
+    waterCoverage: 0,
+    canopyCoverage: 0,
+    slopeMax: 0,
+    revision: 3,
+    flags: 0,
+    sampleCount: 4,
+  };
+}
 
 describe("FarSummaryGpuRuntime", () => {
   it("does nothing when disabled", async () => {
@@ -78,6 +101,59 @@ describe("FarSummaryGpuRuntime", () => {
     expect(runtime.stats().scheduledFrames).toBe(1);
     expect(runtime.stats().lastFallbackReason).toBe("webgpu_unavailable");
     expect(runtime.stats().lastFallbackTiles).toBeGreaterThan(0);
+  });
+
+  it("commits successful GPU readbacks only when commit mode is enabled", async () => {
+    const committed: FarSummaryTile[] = [];
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: { ...GPU_CONFIG, commitToCache: true },
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      nowMs: () => 456,
+      commitTile: (tile) => committed.push(tile),
+      dispatch: async (input) => ({
+        ok: true,
+        counters: createFarSummaryGpuCounters(),
+        fallbackTiles: 0,
+        fallbackReason: null,
+        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(12)] }],
+      }),
+    });
+
+    runtime.update(CENTER, 9, "startup");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(committed).toHaveLength(1);
+    expect(committed[0]!.state).toBe("ready");
+    expect(committed[0]!.lastTouchedFrame).toBe(9);
+    expect(committed[0]!.lastTouchedTimeMs).toBe(456);
+    expect(committed[0]!.samples[0]!.heightAvg).toBe(12);
+    expect(runtime.stats().lastCommittedTiles).toBe(1);
+  });
+
+  it("does not commit failed GPU dispatches", async () => {
+    const committed: FarSummaryTile[] = [];
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: { ...GPU_CONFIG, commitToCache: true },
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      commitTile: (tile) => committed.push(tile),
+      dispatch: async () => ({
+        ok: false,
+        counters: createFarSummaryGpuCounters(),
+        fallbackTiles: 1,
+        fallbackReason: "dispatch_failed",
+        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(12)] }],
+      }),
+    });
+
+    runtime.update(CENTER, 1);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(committed).toHaveLength(0);
+    expect(runtime.stats().lastCommittedTiles).toBe(0);
   });
 
   it("skips new frames while a dispatch is inflight", async () => {
