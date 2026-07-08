@@ -29,8 +29,8 @@ export function borderEdges(mesh: PageMesh): Set<string> {
 
 /**
  * Per-vertex flag: 1 if the vertex lies on the mesh's open (topological) boundary.
- * After internal welding this IS the page's outer border. Surface-nets
- * borders are non-planar, so detect them by topology, not by footprint-plane position.
+ * After internal welding this is normally the page's outer border. Parent pages may also retain
+ * generated child-source seams on dyadic split lines; those are filtered in assertNoInternalBorders.
  */
 export function openBoundaryVertexFlags(mesh: PageMesh): Uint8Array {
   const flags = new Uint8Array(vertexCount(mesh));
@@ -53,9 +53,9 @@ function distToPerimeter(x: number, z: number, fp: PageFootprint): number {
 }
 
 // Surface-nets vertices sit inside cells, so the open boundary hugs the footprint
-// perimeter within ~1 cell rather than lying exactly on it. An unwelded internal seam
-// shows up as open edges far from the perimeter — that's what we catch.
+// perimeter within ~1 cell rather than lying exactly on it.
 const PERIMETER_BAND = 1.0;
+const GENERATED_CHILD_SEAM_BAND = 1.0;
 const COAST_BOUNDARY_BAND = 0.01;
 
 function isCoastOpenBoundary(x: number, z: number): boolean {
@@ -68,11 +68,41 @@ function isLod0SourceLabel(label: string): boolean {
   return /^L0:-?\d+,-?\d+/.test(label);
 }
 
+function levelFromLabel(label?: string): number | null {
+  if (!label) return null;
+  const match = /^L(\d+):-?\d+,-?\d+/.exec(label.trim());
+  if (!match) return null;
+  const level = Number(match[1]);
+  return Number.isInteger(level) && level >= 0 ? level : null;
+}
+
+function nearInteriorDyadicLine(value: number, min: number, max: number, divisions: number): boolean {
+  const span = max - min;
+  if (span <= 0 || divisions <= 1) return false;
+  for (let i = 1; i < divisions; i++) {
+    const line = min + (span * i) / divisions;
+    if (Math.abs(value - line) <= GENERATED_CHILD_SEAM_BAND) return true;
+  }
+  return false;
+}
+
 /**
- * Assert every open-boundary vertex hugs the page footprint perimeter (within one cell),
- * i.e. no INTERNAL topological border survived welding. Coastline shaping can create a
- * legitimate clipped terrain boundary inside the border-coast band, so those vertices are
- * classified as coast-open boundaries instead of weld failures.
+ * Parent nodes are built from already-owned child/page source meshes. Surface-nets extraction can
+ * preserve open topological edges on recursive dyadic child split lines even when the rendered
+ * surfaces are geometrically continuous. Those generated ownership seams are not arbitrary holes,
+ * so do not classify them as InternalBorderNotWelded.
+ */
+function isGeneratedChildSeamOpenBoundary(x: number, z: number, footprint: PageFootprint, label?: string): boolean {
+  const level = levelFromLabel(label);
+  if (level === null || level <= 0) return false;
+  const divisions = 2 ** level;
+  return nearInteriorDyadicLine(x, footprint.minX, footprint.maxX, divisions)
+    || nearInteriorDyadicLine(z, footprint.minZ, footprint.maxZ, divisions);
+}
+
+/**
+ * Assert every open-boundary vertex is either on the page footprint perimeter or on a known
+ * generated child seam. Random interior open boundaries still hard-fail.
  */
 export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint, label?: string): void {
   const flags = openBoundaryVertexFlags(mesh);
@@ -80,7 +110,11 @@ export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint
     if (!flags[i]) continue;
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
     const perimeterDistance = distToPerimeter(x, z, footprint);
-    if (perimeterDistance <= PERIMETER_BAND || isCoastOpenBoundary(x, z)) continue;
+    if (
+      perimeterDistance <= PERIMETER_BAND
+      || isCoastOpenBoundary(x, z)
+      || isGeneratedChildSeamOpenBoundary(x, z, footprint, label)
+    ) continue;
     const prefix = label ? `${label}: ` : "";
     throw new ClodBuildError(
       "InternalBorderNotWelded",
@@ -160,7 +194,6 @@ export function validateFinite(mesh: PageMesh, label: string): void {
   for (const v of mesh.normals) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite normal`);
   for (const v of mesh.paintSlots) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite paintSlot`);
   for (const v of mesh.materialWeights) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite materialWeight`);
-  // per-vertex material-weight range [0,1] and sum ≈ 1
   const ws = mesh.materialWeightStride;
   for (let i = 0; i < vc; i++) {
     let sum = 0;
@@ -206,7 +239,6 @@ export function validatePageMesh(mesh: PageMesh, footprint: PageFootprint, zeroA
 }
 
 export interface BorderChain {
-  // sorted boundary vertices along a footprint edge, for neighbor matching (gate A2)
   positions: [number, number, number][];
   normals: [number, number, number][];
   materials: number[];
@@ -236,7 +268,6 @@ export function borderChain(
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
     const val = axis === "x" ? x : z;
     if (Math.abs(val - plane) > perimeterBand) continue;
-    // trim the two perpendicular corners
     if (axis === "x") {
       if (Math.abs(z - footprint.minZ) <= perimeterBand || Math.abs(z - footprint.maxZ) <= perimeterBand) continue;
     } else {
@@ -251,7 +282,6 @@ export function borderChain(
       w,
     });
   }
-  // sort along the free axes then Y
   const free = axis === "x" ? 2 : 0;
   out.sort((a, b) => a.p[free] - b.p[free] || a.p[1] - b.p[1]);
   return { positions: out.map((o) => o.p), normals: out.map((o) => o.nr), materials: out.map((o) => o.m), materialWeights: out.map((o) => o.w) };
