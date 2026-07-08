@@ -229,6 +229,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
     private readonly source: FarClipmapSource,
     private readonly options: FarClipmapControllerOptions,
   ) {
+    void this.options;
     this.lastStats = makeStats(config, false, 0, emptyFrameStats(), false, {
       buildMs: 0,
       fallbackSamples: 0,
@@ -313,6 +314,8 @@ class FarClipmapControllerImpl implements FarClipmapController {
           frameStats.triangles += buildStats.triangles || triangleCount;
           frameStats.fallbackSamples += buildStats.fallbackSamples;
           frameStats.exceptionSamples += buildStats.exceptionSamples;
+          this.totalFallbackSamples += buildStats.fallbackSamples;
+          this.totalExceptionSamples += buildStats.exceptionSamples;
         }
 
         const buildMs = performance.now() - startedAt;
