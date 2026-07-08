@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG,
+  streamedPageBoundsGuardConfigFromParams,
   validateStreamedPageBounds,
   type StreamedPageBoundsGuardConfig,
 } from "./streamed_page_bounds_guard.js";
@@ -51,6 +52,32 @@ function node(mesh: PageMesh, minX = 64, minZ = 128, size = 64, minY = 0, maxY =
     lowBenefit: false,
   };
 }
+
+describe("streamedPageBoundsGuardConfigFromParams", () => {
+  it("uses numeric defaults for missing and blank query params", () => {
+    const missing = streamedPageBoundsGuardConfigFromParams(new URLSearchParams("liveClodRootBoundsGuard=1"));
+    expect(missing.marginXZ).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.marginXZ);
+    expect(missing.centroidMarginXZ).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.centroidMarginXZ);
+    expect(missing.maxExtentFootprintRatio).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.maxExtentFootprintRatio);
+    expect(missing.boundsMismatchMarginXZ).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.boundsMismatchMarginXZ);
+    expect(missing.boundsYMargin).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.boundsYMargin);
+    expect(missing.maxAbsY).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.maxAbsY);
+
+    const blank = streamedPageBoundsGuardConfigFromParams(new URLSearchParams(
+      "liveClodRootBoundsGuardMarginXZ=&liveClodRootBoundsGuardMaxExtentRatio= ",
+    ));
+    expect(blank.marginXZ).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.marginXZ);
+    expect(blank.maxExtentFootprintRatio).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.maxExtentFootprintRatio);
+  });
+
+  it("allows explicit zero only for non-negative numeric params", () => {
+    const config = streamedPageBoundsGuardConfigFromParams(new URLSearchParams(
+      "liveClodRootBoundsGuardMarginXZ=0&liveClodRootBoundsGuardMaxExtentRatio=0",
+    ));
+    expect(config.marginXZ).toBe(0);
+    expect(config.maxExtentFootprintRatio).toBe(DEFAULT_STREAMED_PAGE_BOUNDS_GUARD_CONFIG.maxExtentFootprintRatio);
+  });
+});
 
 describe("validateStreamedPageBounds", () => {
   it("passes a valid world-space node", () => {
