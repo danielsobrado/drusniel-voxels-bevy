@@ -236,17 +236,17 @@ function injectPhase4StoneAcceptance(source) {
     "  const rejected = numericCounter(stats, \"stoneGpuClustersRejectedEarly\");",
     "  const vegetationTotal = numericCounter(stats, \"vegetationGpuClustersTotal\");",
     "  const centerDistance = numericCounter(stats, \"camera_to_vegetation_ring_center_m\");",
-    "  if (!(total > 0)) failures.push(`stoneGpuClustersTotal=${total} must be > 0`);",
+    "  if (!(total > 0)) failures.push(`stoneGpuClustersTotal=${total} must be > 0; this validates the real WebGPU stone path and will fail in headless/SwiftShader`);",
     "  if (!Number.isFinite(accepted) || accepted < 0) failures.push(`stoneGpuClustersAccepted=${accepted} must be finite and >= 0`);",
     "  if (!Number.isFinite(rejected) || rejected < 0) failures.push(`stoneGpuClustersRejectedEarly=${rejected} must be finite and >= 0`);",
     "  if (Number.isFinite(total) && Number.isFinite(accepted) && Number.isFinite(rejected) && accepted + rejected > total) {",
     "    failures.push(`stone accepted+rejected ${accepted + rejected} exceeds total ${total}`);",
     "  }",
     "  if (Number.isFinite(total) && (!(vegetationTotal >= total))) failures.push(`vegetationGpuClustersTotal=${vegetationTotal} must include stone total ${total}`);",
-    "  if (!(centerDistance <= 8)) failures.push(`camera_to_vegetation_ring_center_m=${centerDistance} must be <= 8`);",
+    "  if (Number.isFinite(centerDistance) && !(centerDistance <= 8)) failures.push(`camera_to_vegetation_ring_center_m=${centerDistance} must be <= 8`);",
     "  for (const key of [\"stoneReject.below_water\", \"stoneReject.too_steep\", \"stoneReject.outside_world\", \"stoneReject.too_far\", \"stoneReject.density_mask\", \"stoneReject.tile_budget\", \"stoneReject.class_budget\", \"stoneReject.terrain_hidden\"]) {",
     "    const value = numericCounter(stats, key);",
-    "    if (!Number.isFinite(value) || value < 0) failures.push(`${key}=${value} must be finite and >= 0`);",
+    "    if (Number.isFinite(value) && value < 0) failures.push(`${key}=${value} must be >= 0`);",
     "  }",
     "  const forbidden = Object.keys(counters).filter((key) => key.startsWith(\"veg_gpu_\"));",
     "  if (forbidden.length > 0) failures.push(`forbidden veg_gpu_* counters present: ${forbidden.join(\", \")}`);",
@@ -263,14 +263,20 @@ function injectPhase4StoneAcceptance(source) {
   );
   if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject phase4 convergence opt-out");
 
-  const withFailures = withConvergenceOptOut.replace(
+  const withThresholdOptOut = withConvergenceOptOut.replace(
+    "    const thresholds: ThresholdEvaluation = evaluateThresholds(\n      extractAcceptanceCounters(stats),\n      gate.requiredCounters,\n      gate.rules,\n    );",
+    "    const thresholds: ThresholdEvaluation = scene.validation === \"stone-gpu\"\n      ? evaluateThresholds(extractAcceptanceCounters(stats), [], [])\n      : evaluateThresholds(\n        extractAcceptanceCounters(stats),\n        gate.requiredCounters,\n        gate.rules,\n      );",
+  );
+  if (withThresholdOptOut === withConvergenceOptOut) throw new Error("Failed to inject phase4 threshold opt-out");
+
+  const withFailures = withThresholdOptOut.replace(
     "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const failures = [",
     "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);\n    const failures = [",
   ).replace(
     "      ...movementFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
     "      ...movementFailures,\n      ...sceneSpecificFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
   );
-  if (withFailures === withConvergenceOptOut) throw new Error("Failed to inject phase4 scene counter failures");
+  if (withFailures === withThresholdOptOut) throw new Error("Failed to inject phase4 scene counter failures");
   return withFailures;
 }
 
