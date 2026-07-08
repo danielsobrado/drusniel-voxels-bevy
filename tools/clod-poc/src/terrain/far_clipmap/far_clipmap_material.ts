@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { positionGeometry, uniform, vec3, wgslFn } from "three/tsl";
+import { mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
 import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
+import type { FarClipmapSource } from "./far_clipmap_source.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -16,6 +17,8 @@ const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object
 
 const FAR_CLIPMAP_SHADER_RENDER_ORDER = 20;
 const FAR_CLIPMAP_NODE_UNIFORMS = "farClipmapNodeUniforms";
+const FAR_CLIPMAP_SOURCE_TEXTURE = "farClipmapSourceTexture";
+const FAR_CLIPMAP_SOURCE_DATA = "farClipmapSourceData";
 const FAR_CLIPMAP_DISPLACEMENT_MODE = "farClipmapDisplacementMode";
 
 export interface FarClipmapMaterialUniforms {
@@ -41,6 +44,12 @@ interface FarClipmapNodeUniforms {
   uClipInnerRadius: FarClipmapNodeUniform<number>;
   uClipOuterRadius: FarClipmapNodeUniform<number>;
   uCameraXZ: FarClipmapNodeUniform<THREE.Vector2>;
+  uGridMax: FarClipmapNodeUniform<number>;
+}
+
+export interface FarClipmapSourceTextureStats {
+  fallbackSamples: number;
+  exceptionSamples: number;
 }
 
 export type FarClipmapDisplacementMode = "shader" | "cpu-baked";
@@ -102,108 +111,6 @@ vec3 farTerrainBaseColor(float height, vec3 normal) {
   return mix(color, highland, smoothstep(56.0, 180.0, height) * 0.35);
 }
 `;
-
-const FAR_CLIPMAP_TERRAIN_SAMPLE_WGSL = `
-fn fc_hash21(p: vec2<f32>) -> f32 {
-  var q = fract(p * vec2<f32>(123.34, 456.21));
-  q = q + dot(q, q + 45.32);
-  return fract(q.x * q.y);
-}
-
-fn fc_value_noise(p: vec2<f32>) -> f32 {
-  let i = floor(p);
-  let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  let a = fc_hash21(i);
-  let b = fc_hash21(i + vec2<f32>(1.0, 0.0));
-  let c = fc_hash21(i + vec2<f32>(0.0, 1.0));
-  let d = fc_hash21(i + vec2<f32>(1.0, 1.0));
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-fn fc_fbm(p0: vec2<f32>) -> f32 {
-  var p = p0;
-  var total = 0.0;
-  var amplitude = 0.5;
-  for (var i = 0; i < 5; i = i + 1) {
-    total = total + fc_value_noise(p) * amplitude;
-    p = p * 2.03;
-    amplitude = amplitude * 0.5;
-  }
-  return total;
-}
-
-fn fc_height(world_xz: vec2<f32>) -> f32 {
-  let p = world_xz * 0.00225;
-  let continent = fc_fbm(p * 0.55) - 0.38;
-  let hills = fc_fbm(p * 4.0) * 28.0;
-  let ridges = abs(fc_fbm(p * 9.0) - 0.5) * 34.0;
-  let coast = smoothstep(-0.08, 0.24, continent);
-  return mix(-10.0, hills + ridges - 16.0, coast);
-}
-
-fn fc_base_color(height: f32, normal_value: vec3<f32>) -> vec3<f32> {
-  let slope = 1.0 - clamp(normal_value.y, 0.0, 1.0);
-  if (height <= 0.25) { return vec3<f32>(0.07, 0.18, 0.25); }
-  if (height < 4.0) { return vec3<f32>(0.42, 0.36, 0.20); }
-  let grass = vec3<f32>(0.20, 0.27, 0.18);
-  let rock = vec3<f32>(0.35, 0.34, 0.30);
-  let highland = vec3<f32>(0.32, 0.36, 0.24);
-  let color = mix(grass, rock, smoothstep(0.32, 0.72, slope));
-  return mix(color, highland, smoothstep(56.0, 180.0, height) * 0.35);
-}
-
-fn far_clipmap_terrain_sample(
-  world_xz: vec2<f32>,
-  cell_size: f32,
-  height_scale: f32,
-  y_offset: f32,
-  sea_level: f32,
-  camera_xz: vec2<f32>,
-  clip_outer_radius: f32,
-  debug_mode: f32,
-) -> vec4<f32> {
-  let raw_height = fc_height(world_xz);
-  let height = raw_height * height_scale + y_offset;
-  let sample_step = max(cell_size, 1.0);
-  let h_l = fc_height(world_xz - vec2<f32>(sample_step, 0.0)) * height_scale + y_offset;
-  let h_r = fc_height(world_xz + vec2<f32>(sample_step, 0.0)) * height_scale + y_offset;
-  let h_d = fc_height(world_xz - vec2<f32>(0.0, sample_step)) * height_scale + y_offset;
-  let h_u = fc_height(world_xz + vec2<f32>(0.0, sample_step)) * height_scale + y_offset;
-  let dx = vec3<f32>(2.0 * sample_step, h_r - h_l, 0.0);
-  let dz = vec3<f32>(0.0, h_u - h_d, 2.0 * sample_step);
-  let normal_value = normalize(cross(dz, dx));
-  let distance_m = length(world_xz - camera_xz);
-  var shaded = fc_base_color(height - sea_level, normal_value);
-  let sun_dir = normalize(vec3<f32>(0.38, 0.82, 0.34));
-  let direct_light = clamp(dot(normal_value, sun_dir), 0.0, 1.0);
-  let ambient_light = 0.34 + 0.24 * clamp(normal_value.y, 0.0, 1.0);
-  let slope = 1.0 - clamp(normal_value.y, 0.0, 1.0);
-  let elevation = clamp((height + 48.0) / 220.0, 0.0, 1.0);
-  shaded = mix(shaded, vec3<f32>(0.44, 0.43, 0.38), slope * 0.22);
-  shaded = mix(shaded, vec3<f32>(0.42, 0.46, 0.33), elevation * 0.18);
-  shaded = shaded * (ambient_light + direct_light * 0.78);
-  if (height <= sea_level + 0.25) {
-    let water_depth_hint = clamp((sea_level + 16.0 - height) / 32.0, 0.0, 1.0);
-    let water_color = mix(vec3<f32>(0.06, 0.16, 0.23), vec3<f32>(0.10, 0.28, 0.38), 1.0 - water_depth_hint);
-    shaded = mix(shaded, water_color, 0.72);
-  }
-  let horizon_fog = smoothstep(clip_outer_radius * 0.55, clip_outer_radius, distance_m);
-  shaded = mix(shaded, vec3<f32>(0.46, 0.52, 0.50), horizon_fog * 0.36);
-  if (debug_mode > 0.5 && debug_mode < 1.5) {
-    shaded = fc_base_color(height - sea_level, vec3<f32>(0.0, 1.0, 0.0));
-  } else if (debug_mode >= 1.5 && debug_mode < 2.5) {
-    let h = clamp((height + 64.0) / 256.0, 0.0, 1.0);
-    shaded = vec3<f32>(h, h, h);
-  } else if (debug_mode >= 2.5 && debug_mode < 3.5) {
-    let edge_line = 1.0 - smoothstep(0.0, 16.0, abs(distance_m - clip_outer_radius));
-    shaded = mix(vec3<f32>(0.05, 0.35, 0.95), vec3<f32>(1.0, 0.82, 0.18), edge_line);
-  }
-  return vec4<f32>(pow(max(shaded, vec3<f32>(0.0)), vec3<f32>(0.92)), height);
-}
-`;
-
-const farClipmapTerrainSampleGpu = wgslFn(FAR_CLIPMAP_TERRAIN_SAMPLE_WGSL);
 
 const VERTEX_SHADER = `
 uniform vec2 uRingOrigin;
@@ -272,10 +179,8 @@ void main() {
   float elevation = saturate((vHeight + 48.0) / 220.0);
 
   vec3 baseColor = farTerrainBaseColor(vHeight - uSeaLevel, normal);
-  vec3 rockTint = vec3(0.44, 0.43, 0.38);
-  vec3 highlandTint = vec3(0.42, 0.46, 0.33);
-  vec3 shadedColor = mix(baseColor, rockTint, slope * 0.22);
-  shadedColor = mix(shadedColor, highlandTint, elevation * 0.18);
+  vec3 shadedColor = mix(baseColor, vec3(0.44, 0.43, 0.38), slope * 0.22);
+  shadedColor = mix(shadedColor, vec3(0.42, 0.46, 0.33), elevation * 0.18);
   shadedColor *= ambientLight + directLight * 0.78;
 
   if (vHeight <= uSeaLevel + 0.25) {
@@ -347,7 +252,9 @@ function createFarClipmapNodeUniforms(input: {
   yOffset?: number;
   cameraX?: number;
   cameraZ?: number;
+  gridResolution?: number;
 }): FarClipmapNodeUniforms {
+  const gridMax = Math.max(1, Math.floor(input.gridResolution ?? 2) - 1);
   return {
     uRingOrigin: uniform(new THREE.Vector2(input.ringOriginX ?? 0, input.ringOriginZ ?? 0)) as FarClipmapNodeUniform<THREE.Vector2>,
     uCellSize: uniform(input.cellSizeM ?? 1) as FarClipmapNodeUniform<number>,
@@ -358,6 +265,7 @@ function createFarClipmapNodeUniforms(input: {
     uClipInnerRadius: uniform(input.clipInnerRadiusM) as FarClipmapNodeUniform<number>,
     uClipOuterRadius: uniform(input.clipOuterRadiusM) as FarClipmapNodeUniform<number>,
     uCameraXZ: uniform(new THREE.Vector2(input.cameraX ?? 0, input.cameraZ ?? 0)) as FarClipmapNodeUniform<THREE.Vector2>,
+    uGridMax: uniform(gridMax) as FarClipmapNodeUniform<number>,
   };
 }
 
@@ -386,6 +294,25 @@ function createCpuBakedFarClipmapMaterial(input: { debugMode: FarClipmapDebugMod
   return material;
 }
 
+function createSourceTexture(gridResolution: number): THREE.DataTexture {
+  const size = Math.max(2, Math.floor(gridResolution));
+  const data = new Float32Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    data[i * 4] = 0;
+    data[i * 4 + 1] = 0;
+    data[i * 4 + 2] = 1;
+    data[i * 4 + 3] = 0;
+  }
+  const sourceTexture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
+  sourceTexture.name = "FarClipmapSourceSummaryTexture";
+  sourceTexture.minFilter = THREE.NearestFilter;
+  sourceTexture.magFilter = THREE.NearestFilter;
+  sourceTexture.wrapS = THREE.ClampToEdgeWrapping;
+  sourceTexture.wrapT = THREE.ClampToEdgeWrapping;
+  sourceTexture.needsUpdate = true;
+  return sourceTexture;
+}
+
 function createWebGpuFarClipmapMaterial(input: {
   debugMode: FarClipmapDebugMode;
   seaLevel?: number;
@@ -398,30 +325,32 @@ function createWebGpuFarClipmapMaterial(input: {
   yOffset?: number;
   cameraX?: number;
   cameraZ?: number;
+  gridResolution?: number;
 }): FarClipmapMaterial {
-  const uniforms = createFarClipmapNodeUniforms(input);
+  const gridResolution = Math.max(2, Math.floor(input.gridResolution ?? 2));
+  const sourceTexture = createSourceTexture(gridResolution);
+  const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
+  const sampleUv: TslNode = positionGeometry.xz.div(uniforms.uGridMax);
+  const sourceSample: TslNode = texture(sourceTexture, vec2(sampleUv.x, sampleUv.y));
+  const rawHeight: TslNode = sourceSample.x;
+  const height: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
   const worldXZ: TslNode = positionGeometry.xz.mul(uniforms.uCellSize).add(uniforms.uRingOrigin);
-  const terrain: TslNode = farClipmapTerrainSampleGpu({
-    world_xz: worldXZ,
-    cell_size: uniforms.uCellSize,
-    height_scale: uniforms.uHeightScale,
-    y_offset: uniforms.uYOffset,
-    sea_level: uniforms.uSeaLevel,
-    camera_xz: uniforms.uCameraXZ,
-    clip_outer_radius: uniforms.uClipOuterRadius,
-    debug_mode: uniforms.uDebugMode,
-  });
+  const distance: TslNode = worldXZ.sub(uniforms.uCameraXZ).length();
   const localPosition: TslNode = vec3(
     positionGeometry.x.mul(uniforms.uCellSize),
-    terrain.w,
+    height,
     positionGeometry.z.mul(uniforms.uCellSize),
   );
-  const distance: TslNode = worldXZ.sub(uniforms.uCameraXZ).length();
+  const heightColor: TslNode = smoothstep(-16.0, 128.0, height);
+  const landColor: TslNode = mix(vec3(0.20, 0.27, 0.18), vec3(0.36, 0.35, 0.32), heightColor);
+  const waterColor: TslNode = vec3(0.07, 0.19, 0.26);
+  const terrainColor: TslNode = mix(waterColor, landColor, smoothstep(uniforms.uSeaLevel.sub(0.25), uniforms.uSeaLevel.add(0.25), height));
+  const fog: TslNode = smoothstep(uniforms.uClipOuterRadius.mul(0.55), uniforms.uClipOuterRadius, distance);
 
   const material = new MeshBasicNodeMaterial() as FarClipmapMaterial & MeshBasicNodeMaterial;
   material.name = "FarClipmapTerrainNodeShader";
   material.positionNode = localPosition;
-  material.colorNode = terrain.xyz;
+  material.colorNode = mix(terrainColor, vec3(0.46, 0.52, 0.50), fog.mul(0.36));
   material.maskNode = distance.greaterThanEqual(uniforms.uClipInnerRadius).and(distance.lessThanEqual(uniforms.uClipOuterRadius));
   material.depthWrite = true;
   material.depthTest = true;
@@ -432,6 +361,8 @@ function createWebGpuFarClipmapMaterial(input: {
   material.side = THREE.FrontSide;
   material.toneMapped = true;
   material.userData[FAR_CLIPMAP_NODE_UNIFORMS] = uniforms;
+  material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] = sourceTexture;
+  material.userData[FAR_CLIPMAP_SOURCE_DATA] = sourceTexture.image.data;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;
 }
@@ -450,6 +381,7 @@ export function createFarClipmapMaterial(input: {
   cameraZ?: number;
   webGpuCompatible?: boolean;
   shaderDisplacement?: boolean;
+  gridResolution?: number;
 }): FarClipmapMaterial {
   if (input.shaderDisplacement === false) return createCpuBakedFarClipmapMaterial(input);
   if (input.webGpuCompatible === true) return createWebGpuFarClipmapMaterial(input);
@@ -512,4 +444,69 @@ export function updateFarClipmapMaterialFrameUniforms(material: FarClipmapMateri
     nodeUniforms.uHeightScale.value = input.heightScale;
     nodeUniforms.uYOffset.value = input.yOffset;
   }
+}
+
+export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMaterial, input: {
+  source: FarClipmapSource;
+  gridResolution: number;
+  ringOriginX: number;
+  ringOriginZ: number;
+  cellSizeM: number;
+  cameraX: number;
+  cameraZ: number;
+}): FarClipmapSourceTextureStats {
+  const sourceTexture = material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] as THREE.DataTexture | undefined;
+  const data = material.userData[FAR_CLIPMAP_SOURCE_DATA] as Float32Array | undefined;
+  if (!sourceTexture || !data) return { fallbackSamples: 0, exceptionSamples: 0 };
+
+  const gridResolution = Math.max(2, Math.floor(input.gridResolution));
+  let fallbackSamples = 0;
+  let exceptionSamples = 0;
+  const summary = { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0, waterCoverage: 0 };
+  for (let z = 0; z < gridResolution; z++) {
+    for (let x = 0; x < gridResolution; x++) {
+      const worldX = input.ringOriginX + x * input.cellSizeM;
+      const worldZ = input.ringOriginZ + z * input.cellSizeM;
+      const distanceM = Math.hypot(worldX - input.cameraX, worldZ - input.cameraZ);
+      const offset = (z * gridResolution + x) * 4;
+      try {
+        const hasSummary = input.source.sampleSummaryInto?.(worldX, worldZ, distanceM, summary) === true;
+        if (!hasSummary) fallbackSamples++;
+        const height = hasSummary ? summary.height : input.source.sampleHeight(worldX, worldZ);
+        const normal = hasSummary
+          ? { x: summary.normalX, y: summary.normalY, z: summary.normalZ }
+          : estimateNormal(input.source, worldX, worldZ, input.cellSizeM);
+        data[offset] = finiteOr(height, 0);
+        data[offset + 1] = finiteOr(normal.x, 0);
+        data[offset + 2] = finiteOr(normal.y, 1);
+        data[offset + 3] = finiteOr(normal.z, 0);
+      } catch {
+        exceptionSamples++;
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 1;
+        data[offset + 3] = 0;
+      }
+    }
+  }
+  sourceTexture.needsUpdate = true;
+  return { fallbackSamples, exceptionSamples };
+}
+
+function estimateNormal(source: FarClipmapSource, x: number, z: number, cellSizeM: number): { x: number; y: number; z: number } {
+  const step = Math.max(1, cellSizeM);
+  const hL = source.sampleHeight(x - step, z);
+  const hR = source.sampleHeight(x + step, z);
+  const hD = source.sampleHeight(x, z - step);
+  const hU = source.sampleHeight(x, z + step);
+  const nx = hL - hR;
+  const ny = 2 * step;
+  const nz = hD - hU;
+  const len = Math.hypot(nx, ny, nz);
+  if (!Number.isFinite(len) || len <= 1e-10) return { x: 0, y: 1, z: 0 };
+  return { x: nx / len, y: ny / len, z: nz / len };
+}
+
+function finiteOr(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
 }
