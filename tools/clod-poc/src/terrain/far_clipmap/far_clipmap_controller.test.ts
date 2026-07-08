@@ -21,7 +21,7 @@ function config(overrides: Parameters<typeof resolveFarClipmapConfig>[0] = {}) {
 function unavailableSource(): FarClipmapSource {
   return {
     isReady: () => false,
-    sampleHeight: () => { throw new Error("CPU source must not be sampled by shader-displaced clipmap"); },
+    sampleHeight: () => { throw new Error("source must not be sampled while not ready"); },
     sampleMaterial: () => 0,
     sampleBiome: () => 0,
     sampleWater: () => 0,
@@ -39,9 +39,9 @@ function readyFlatSource(): FarClipmapSource {
 }
 
 describe("FarClipmapController shader displacement", () => {
-  it("updates reusable WebGPU grids without CPU terrain geometry rebuilds", () => {
+  it("updates reusable WebGPU grids from the source texture without CPU terrain geometry rebuilds", () => {
     const scene = new THREE.Scene();
-    const controller = createFarClipmapController(scene, config(), unavailableSource(), {
+    const controller = createFarClipmapController(scene, config(), readyFlatSource(), {
       webGpuCompatibleMaterial: true,
     });
 
@@ -54,6 +54,7 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.verticesBuiltThisFrame).toBe(0);
     expect(stats.trianglesBuiltThisFrame).toBe(0);
     expect(stats.buildMsThisFrame).toBe(0);
+    expect(stats.fallbackSamplesThisFrame).toBeGreaterThan(0);
     expect(stats.shaderDisplacementEnabled).toBe(1);
     expect(stats.shaderDisplacedTiles).toBe(2);
     expect(stats.cpuBakedTiles).toBe(0);
@@ -61,6 +62,25 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.snappedOriginX).toBe(256);
     expect(stats.snappedOriginZ).toBe(-192);
     expect(stats.snapErrorMaxM).toBeLessThan(64);
+
+    controller.dispose();
+  });
+
+  it("keeps shader rings pending until the far-summary source is ready", () => {
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(scene, config(), unavailableSource(), {
+      webGpuCompatibleMaterial: true,
+    });
+
+    const stats = controller.update(new THREE.Vector3(257.5, 0, -130.25));
+
+    expect(stats.sourceReady).toBe(0);
+    expect(stats.readyTiles).toBe(0);
+    expect(stats.pendingTiles).toBe(2);
+    expect(stats.snapUpdatesThisFrame).toBe(0);
+    expect(stats.rebuiltTilesThisFrame).toBe(0);
+    expect(stats.verticesBuiltThisFrame).toBe(0);
+    expect(stats.trianglesBuiltThisFrame).toBe(0);
 
     controller.dispose();
   });
