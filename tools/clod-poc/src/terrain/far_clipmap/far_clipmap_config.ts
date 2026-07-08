@@ -63,16 +63,21 @@ function nonNegativeInteger(value: unknown, fallback: number): number {
 
 function boolFromQuery(value: string | null, fallback: boolean): boolean {
   if (value === null || value.trim() === "") return fallback;
-  if (value === "1" || value === "true") return true;
-  if (value === "0" || value === "false") return false;
+  if (value === "1" || value.toLowerCase() === "true") return true;
+  if (value === "0" || value.toLowerCase() === "false") return false;
   return fallback;
 }
 
-function positiveQueryNumber(params: URLSearchParams, key: string, fallback: number): number {
+function numberFromQuery(params: URLSearchParams, key: string, fallback: number): number {
   const raw = params.get(key);
   if (raw === null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function positiveQueryNumber(params: URLSearchParams, key: string, fallback: number): number {
+  const parsed = numberFromQuery(params, key, fallback);
+  return parsed > 0 ? parsed : fallback;
 }
 
 function integerQueryNumber(params: URLSearchParams, key: string, fallback: number): number {
@@ -142,12 +147,8 @@ export function farClipmapConfigFromSearchParams(
     baseCellSizeM: positiveQueryNumber(params, "farClipmapBaseCellSize", base.baseCellSizeM),
     gridResolution: integerQueryNumber(params, "farClipmapGridResolution", base.gridResolution),
     snapSizeM: positiveQueryNumber(params, "farClipmapSnapSize", base.snapSizeM),
-    heightScale: Number.isFinite(Number(params.get("farClipmapHeightScale")))
-      ? Number(params.get("farClipmapHeightScale"))
-      : base.heightScale,
-    yOffset: Number.isFinite(Number(params.get("farClipmapYOffset")))
-      ? Number(params.get("farClipmapYOffset"))
-      : base.yOffset,
+    heightScale: numberFromQuery(params, "farClipmapHeightScale", base.heightScale),
+    yOffset: numberFromQuery(params, "farClipmapYOffset", base.yOffset),
     maxRebuildsPerFrame: integerQueryNumber(params, "farClipmapMaxRebuildsPerFrame", base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(params.get("farClipmapDebug"), base.materialDebugMode),
     shaderDisplacement: boolFromQuery(params.get("farClipmapShaderDisplacement"), base.shaderDisplacement),
