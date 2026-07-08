@@ -13,6 +13,8 @@ export interface FarClipmapConfig {
   maxRebuildsPerFrame: number;
   materialDebugMode: FarClipmapDebugMode;
   shaderDisplacement: boolean;
+  sourceRefreshMaxPerFrame: number;
+  sourceRefreshIntervalFrames: number;
 }
 
 export interface FarClipmapConfigConstraints {
@@ -34,6 +36,8 @@ export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
   maxRebuildsPerFrame: 2,
   materialDebugMode: "final",
   shaderDisplacement: true,
+  sourceRefreshMaxPerFrame: 1,
+  sourceRefreshIntervalFrames: 8,
 });
 
 const DEBUG_MODES: ReadonlySet<string> = new Set<FarClipmapDebugMode>([
@@ -80,6 +84,11 @@ function positiveQueryNumber(params: URLSearchParams, key: string, fallback: num
   return parsed > 0 ? parsed : fallback;
 }
 
+function nonNegativeQueryInteger(params: URLSearchParams, key: string, fallback: number): number {
+  const parsed = numberFromQuery(params, key, fallback);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+}
+
 function integerQueryNumber(params: URLSearchParams, key: string, fallback: number): number {
   return Math.floor(positiveQueryNumber(params, key, fallback));
 }
@@ -111,6 +120,8 @@ export function resolveFarClipmapConfig(
     maxRebuildsPerFrame: nonNegativeInteger(partial.maxRebuildsPerFrame, base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(partial.materialDebugMode, base.materialDebugMode),
     shaderDisplacement: typeof partial.shaderDisplacement === "boolean" ? partial.shaderDisplacement : base.shaderDisplacement,
+    sourceRefreshMaxPerFrame: nonNegativeInteger(partial.sourceRefreshMaxPerFrame, base.sourceRefreshMaxPerFrame),
+    sourceRefreshIntervalFrames: positiveInteger(partial.sourceRefreshIntervalFrames, base.sourceRefreshIntervalFrames),
   };
 
   const minInner = constraints.liveCollisionRadiusM === undefined
@@ -152,5 +163,7 @@ export function farClipmapConfigFromSearchParams(
     maxRebuildsPerFrame: integerQueryNumber(params, "farClipmapMaxRebuildsPerFrame", base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(params.get("farClipmapDebug"), base.materialDebugMode),
     shaderDisplacement: boolFromQuery(params.get("farClipmapShaderDisplacement"), base.shaderDisplacement),
+    sourceRefreshMaxPerFrame: nonNegativeQueryInteger(params, "farClipmapSourceRefreshMaxPerFrame", base.sourceRefreshMaxPerFrame),
+    sourceRefreshIntervalFrames: integerQueryNumber(params, "farClipmapSourceRefreshIntervalFrames", base.sourceRefreshIntervalFrames),
   }, constraints);
 }
