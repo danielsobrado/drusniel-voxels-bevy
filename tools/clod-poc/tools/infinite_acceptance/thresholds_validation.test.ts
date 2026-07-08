@@ -39,6 +39,12 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_gpu_chunk_slots_dispatched"] = 64;
   values["live_clod_stream_gpu_failed_batches"] = 0;
   values["live_clod_stream_worker_fallback_pages"] = 0;
+  values["live_clod_stream_bounds_guard_enabled"] = 1;
+  values["live_clod_stream_bounds_guard_checked_pages"] = 1;
+  values["live_clod_stream_bounds_guard_rejected_pages"] = 0;
+  values["live_clod_stream_bounds_guard_rejected_batches"] = 0;
+  values["live_clod_stream_bounds_guard_cache_drops"] = 0;
+  values["live_clod_stream_bounds_guard_cpu_fallback_pages"] = 0;
   values["far_clipmap_enabled"] = 1;
   values["far_clipmap_visible"] = 1;
   values["far_clipmap_active_rings"] = 5;
@@ -67,6 +73,11 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["owner_live_cells"] = 4;
   values["vegetation_ring_unbounded"] = 1;
   values["vegetation_ring_distance_to_grass_m"] = 0;
+  values["camera_to_vegetation_ring_center_m"] = 0;
+  values["camera_to_vegetation_grass_center_m"] = 0;
+  values["camera_to_vegetation_trees_center_m"] = 0;
+  values["camera_to_canopy_center_m"] = 0;
+  values["camera_to_water_ocean_center_m"] = 0;
   values["infinite_hydrology_outside_sample_valid"] = 1;
   values["infinite_hydrology_nonrepeat_delta"] = 1;
   values["infinite_hydrology_nonrepeat_ok"] = 1;
@@ -153,6 +164,14 @@ describe("infinite islands threshold validation", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_worker_fallback_pages: 1 })).passed).toBe(false);
   });
 
+  it("fails when streamed-root bounds guard is disabled or rejects pages", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_bounds_guard_enabled: 0 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_bounds_guard_checked_pages: 0 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_bounds_guard_rejected_pages: 1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_bounds_guard_rejected_batches: 1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ live_clod_stream_bounds_guard_cpu_fallback_pages: 1 })).passed).toBe(false);
+  });
+
   it("fails when streamed root apply work exceeds the main-thread budget", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_apply_ms: 2.01 })).passed).toBe(false);
   });
@@ -168,5 +187,13 @@ describe("infinite islands threshold validation", () => {
   it("fails when vegetation is still clamped to the startup grid", () => {
     expect(evaluateThresholds(validCounters({ vegetation_ring_unbounded: 0 })).passed).toBe(false);
     expect(evaluateThresholds(validCounters({ vegetation_ring_distance_to_grass_m: 8 })).passed).toBe(false);
+  });
+
+  it("fails when a center counter exceeds its threshold", () => {
+    expect(evaluateThresholds(validCounters({ camera_to_vegetation_ring_center_m: 8.1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ camera_to_vegetation_grass_center_m: 8.1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ camera_to_vegetation_trees_center_m: 8.1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ camera_to_canopy_center_m: 8.1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ camera_to_water_ocean_center_m: 8.1 })).passed).toBe(false);
   });
 });
