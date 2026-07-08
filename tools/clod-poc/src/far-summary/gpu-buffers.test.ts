@@ -6,7 +6,7 @@ import {
 } from "./gpu-config.js";
 import type { FarSummaryGpuDirtyTile } from "./gpu-planner.js";
 import { estimateFarSummaryGpuBatchBytes } from "./gpu-planner.js";
-import { packFarSummaryGpuDescriptors } from "./gpu-buffers.js";
+import { farSummaryGpuReadbackTileCount, packFarSummaryGpuDescriptors } from "./gpu-buffers.js";
 
 function tile(overrides: Partial<FarSummaryGpuDirtyTile> = {}): FarSummaryGpuDirtyTile {
   return {
@@ -34,6 +34,7 @@ const CONFIG: FarSummaryGpuConfig = {
   enabled: true,
   strictParity: false,
   debugReadback: false,
+  commitToCache: false,
   sampleGrid: 16,
   maxTilesPerBatch: 256,
   maxBatchesPerFrame: 1,
@@ -72,5 +73,16 @@ describe("far-summary GPU byte estimates", () => {
     expect(estimateFarSummaryGpuBatchBytes(3, CONFIG)).toBe(
       3 * (FAR_SUMMARY_GPU_DESCRIPTOR_BYTES + FAR_SUMMARY_GPU_RECORD_BYTES),
     );
+  });
+});
+
+describe("farSummaryGpuReadbackTileCount", () => {
+  it("reads back all tiles in commit mode", () => {
+    expect(farSummaryGpuReadbackTileCount(12, { ...CONFIG, commitToCache: true, debugReadbackTiles: 2 })).toBe(12);
+  });
+
+  it("uses the debug readback cap outside commit mode", () => {
+    expect(farSummaryGpuReadbackTileCount(12, { ...CONFIG, debugReadback: true, debugReadbackTiles: 2 })).toBe(2);
+    expect(farSummaryGpuReadbackTileCount(12, CONFIG)).toBe(0);
   });
 });
