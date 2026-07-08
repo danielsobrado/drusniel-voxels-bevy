@@ -1,5 +1,44 @@
 # Shader-Displaced Far Clipmap Grid Plan
 
+## Status on main — read before implementing (revised 2026-07-08)
+
+Audited against `main`. **A far clipmap system already exists** — with ring snapping, near/far exclusion, CPU fallback, and ~20 acceptance counters. This plan should **extend it to move vertex displacement into the shader**, not create a parallel `src/terrain/far_clipmap_grid/` module.
+
+### What already exists (extend it — do NOT create `far_clipmap_grid/`)
+
+[src/terrain/far_clipmap/](../src/terrain/far_clipmap/):
+- `far_clipmap_controller.ts` (`FarClipmapStats`), `far_clipmap_geometry.ts`, `far_clipmap_material.ts`, `far_clipmap_config.ts`, `far_clipmap_keys.ts`, `index.ts`.
+- `far_clipmap_source.ts` — `FarClipmapSource` (`sampleHeight/Material/Biome/Water`, `sampleSummaryInto`) already wired to the far-summary `FarHeightProvider`. This is your height/material source; it reads the summary from plan 3.
+- `far_clipmap_counters.ts` — `publishFarClipmapStatsToCounters` already emits `far_clipmap_enabled/visible/active_rings/ready_tiles/pending_tiles/inner_radius_m/outer_radius_m/snap_size_m/gpu_owned_cells/gpu_ownership_holes/build_ms/vertices_built_this_frame/triangles_built_this_frame/fallback_samples_*/exception_samples_*`. **Reuse and extend these; delete the invented `far_clipmap_grid_*` counters.**
+
+[src/gpu/far_terrain_shell.ts](../src/gpu/far_terrain_shell.ts) (LV-2) already implements the near/far handoff you describe: `cameraRelativeShell` mode with `innerExclusionRadius`, `centerX/centerZ`, `buildRelative`, fade-to-haze at the rim, unlit TSL material reproducing terrain shading. **Reuse its exclusion + fade approach** instead of re-deriving it.
+
+### Why the plan is still worth doing
+
+The existing far clipmap builds vertices on the **CPU every frame** — the counters `far_clipmap_vertices_built_this_frame` and `far_clipmap_build_ms` prove it. So the genuine delta here is real and valuable: **move displacement into a vertex shader** sampling the far-summary atlas texture (plan 3), so the CPU stops rebuilding far geometry. Reuse the ring/tile/snapping/exclusion/counter scaffolding above; change only where the vertex Y comes from.
+
+### Corrected paths
+
+| Plan says | Actually on main |
+| --- | --- |
+| new `src/terrain/far_clipmap_grid/*` | extend [src/terrain/far_clipmap/*](../src/terrain/far_clipmap/) |
+| new `far_clipmap_grid_*` counters | extend `FarClipmapStats` + `publishFarClipmapStatsToCounters` |
+| height/material source | existing `far_clipmap_source.ts` + far-summary atlas ([src/naadf/gpu/farSummaryAtlas.ts](../src/naadf/gpu/farSummaryAtlas.ts)) |
+| near exclusion / fade | reuse `far_terrain_shell.ts` `cameraRelativeShell` mode |
+| ring center | camera-derived canonical center (milestone 2.5) → existing snapping in `far_clipmap` |
+
+### Pinned decisions
+
+- Ring center = camera-derived canonical center; keep the existing `far_clipmap` snapping. `camera_to_far_shell_center_m` already exists ([ownership_coverage_oracle.ts](../src/stream/ownership_coverage_oracle.ts)) — assert it, don't add a new center counter.
+- Height source order: far-summary atlas (plan 3) → existing `far_clipmap_source` CPU sampler → flat conservative fallback. This is already the source's fallback chain; keep it.
+- WGSL has no bool uniform (use u32); verification headed/real-GPU (headless = SwiftShader); never run vitest/`vite build` under `rtk`.
+
+### Gate
+
+Do not start until milestone [2.5 root-cause coordinate fix](canonical-world-center-root-cause-fix-plan.md) passes **and** plan 3 (GPU far-summary) is landed — the shader displacement samples that summary. Shader-displaced far terrain makes wrong-center bugs more visible, not less.
+
+---
+
 ## Goal
 
 Replace CPU-created far terrain geometry with reusable GPU grid tiles displaced in shaders.

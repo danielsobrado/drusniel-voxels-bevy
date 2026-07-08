@@ -1,5 +1,52 @@
 # GPU Far-Summary Build Plan
 
+## Status on main — read before implementing (revised 2026-07-08)
+
+Audited against `main`. **This is not greenfield. A full CPU far-summary pipeline and a GPU summary atlas already exist.** Reframe this plan as "insert a WebGPU compute *build* stage that produces the existing summary records and feeds the existing cache/atlas," not "create a new far-summary module."
+
+### What already exists (reuse it — do NOT create `src/terrain/far_summary/`)
+
+CPU pipeline in [src/far-summary/](../src/far-summary/):
+- `summary-tile-builder.ts` — builds one summary tile per cell from a `FarTerrainSampler`. **This is your CPU parity oracle. Do not write a new one** (the plan's "Phase 2 CPU reference extraction" is already done here).
+- `types.ts` — `FarSummaryTile`, `FarSummaryStats`. **The GPU pass must emit records with these exact fields**, not the invented `FarSummaryTileRecord` below. Read this file and match it.
+- `summary-cache.ts` (`FarSummaryCache`), `clipmap-sampler.ts` (`FarSummaryClipmapSampler`, `FarHeightProvider`), `clipmap-rings.ts` (`computeRequiredFarSummaryTiles` — this is your dirty-tile planner), `config.ts` (`FarSummaryConfig`, `DEFAULT_FAR_SUMMARY_CONFIG`, `applyFarSummaryQueryOverrides`), `stats.ts`, `stream-center.ts`, `integration.ts` (`FarSummaryIntegration.update()` — the runtime entry point where the GPU build hooks in).
+
+GPU atlas in [src/naadf/gpu/farSummaryAtlas.ts](../src/naadf/gpu/farSummaryAtlas.ts):
+- Already uploads CPU-built `FarSummaryTile`s into a GPU texture atlas with **dirty-rect uploads**, packing (`farSummaryAtlasPacking.ts`: `packUnorm8`, `estimateFarSummaryAtlasBytes`), upload config (`farSummaryAtlasUploadConfig.ts`) and **upload counters** (`farSummaryAtlasUploadCounters.ts`). `summaryStreamer.ts`, `farClipmap.ts`, `canopyBridge.ts` are the downstream consumers.
+
+So the pipeline today is **CPU build → `FarSummaryCache` → (CPU `FarHeightProvider` sampling) + (upload to `farSummaryAtlas` for shaders)**.
+
+### The actual delta this plan should deliver
+
+Add a WebGPU compute pass that samples the terrain field (reuse the WGSL in [src/gpu/terrain_field_core.ts](../src/gpu/terrain_field_core.ts)) and produces the **same `FarSummaryTile` records** the CPU builder produces, then writes them into the existing `FarSummaryCache` / `farSummaryAtlas`. Everything else in this plan (parity oracle, dirty planner, consumers, counters) already exists and is reused, not rebuilt.
+
+- CPU parity oracle: existing `summary-tile-builder.ts`.
+- Dirty-tile planner: existing `computeRequiredFarSummaryTiles` in `clipmap-rings.ts`. Do not add a new `gpu_far_summary_planner.ts` unless it wraps that.
+- Consumers ("Integration phases → Phase 6"): grass/tree/understory early-reject already consult the summary (see plan 4 status), the far shell/canopy shells already sample it. You are changing *how the summary is built*, not adding consumers.
+
+### Corrected paths
+
+| Plan says | Actually on main |
+| --- | --- |
+| `src/terrain/far_summary/*` | [src/far-summary/](../src/far-summary/) (CPU) + [src/naadf/gpu/](../src/naadf/gpu/) (GPU atlas) |
+| new `gpu_far_summary_planner.ts` | reuse `far-summary/clipmap-rings.ts` |
+| new CPU reference builder | reuse `far-summary/summary-tile-builder.ts` |
+| `src/runtime/long_view_frame_diagnostics.ts` | [src/phase0/long_view_frame_diagnostics.ts](../src/phase0/long_view_frame_diagnostics.ts) |
+| `src/runtime/terrain_frame_phase.ts` | [src/app/frame_loop/terrain_frame_phase.ts](../src/app/frame_loop/terrain_frame_phase.ts) |
+| new shader dir | `src/far-summary/shaders/` or reuse `src/gpu/shaders/` + `terrain_field_core.ts` |
+
+### Pinned decisions
+
+- **GPU output type = existing `FarSummaryTile`.** Delete the invented `FarSummaryTileRecord` / `FarSummaryGpuRecord` structs unless they are an internal packing detail that unpacks to `FarSummaryTile`.
+- Counters extend the existing `FarSummaryStats` + `farSummaryAtlasUploadCounters`, published via the standard `publishXStatsToCounters` snake_case pattern (see [bounds-guard plan](streamed-page-gpu-bounds-guard-plan.md#counter-plumbing-fixed-convention--applies-to-all-six-plans)). Note `farSummaryMs` is an existing grab-bag bracket; report the new GPU build as its own `farSum*Ms` subphase, not folded into it.
+- Verification is headed/real-GPU. Headless = SwiftShader and will not run the compute build (it will silently stay on the CPU builder). Pure-TS parity tests (GPU record vs `summary-tile-builder` output for fixed tiles) run under vitest.
+
+### Gate
+
+Do not start until milestone [2.5 root-cause coordinate fix](canonical-world-center-root-cause-fix-plan.md) passes. A faster GPU summary must not make a wrong-origin summary harder to see.
+
+---
+
 ## Goal
 
 Move infinite-islands far-summary and stabilization summary work from repeated CPU-side scans into WebGPU compute-built textures/buffers.

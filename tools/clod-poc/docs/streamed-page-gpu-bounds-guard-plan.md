@@ -1,5 +1,44 @@
 # Streamed Page GPU Bounds Guard Plan
 
+## Status on main — read before implementing (revised 2026-07-08)
+
+This plan was audited against `main`. It is the most greenfield of the six and is cleared to implement, with the corrections below. **Do not invent new geometry/footprint types — the data you need already exists on the page node.**
+
+### Reuse, do not redeclare
+
+- A streamed page is a `ClodPageNode` (see [src/types.ts](../src/types.ts)). It already carries everything the guard needs:
+  - `id: string` — page key, format `"L0:0,0"` (`L<level>:<x>,<z>`).
+  - `level: number`, `revision?: number`.
+  - `mesh: PageMesh` — `positions` are **world-space** (see the `PageMesh` doc comment). Use `vertexCount(mesh)` / `triangleCount(mesh)` from the same file; do not recompute `positions.length / 3` by hand.
+  - `footprint: PageFootprint` — `{minX, minZ, maxX, maxZ}` in **cell units, max exclusive**. This IS the expected footprint. Do not re-parse the page key to derive it.
+  - `bounds: { center: [x,y,z]; radius; minY; maxY }` — the expected world-space center/extent.
+- **Delete `StreamedPageFootprint` and `StreamedPageMeshBounds` from the Proposed API below.** The guard takes `(node: ClodPageNode, chunkSize: number, config)` and validates `node.mesh` against `node.footprint` + `node.bounds`. The only conversion needed is cell → world: `worldMinX = node.footprint.minX * chunkSize`, etc. (chunk size comes from `cfg.page.chunk_size`, already threaded through the diagnostics deps).
+- Existing validators to sit beside / mirror, not duplicate: [src/clod/validate.ts](../src/clod/validate.ts), `PageMeshSignature` in [src/stones/stone_validation.ts](../src/stones/stone_validation.ts), and [src/trees/tree_system_mesh_bounds.ts](../src/trees/tree_system_mesh_bounds.ts).
+
+### Corrected paths
+
+| Plan says | Actually on main |
+| --- | --- |
+| `src/runtime/clod_frame_loop.ts` | [src/app/clod_frame_loop.ts](../src/app/clod_frame_loop.ts) |
+| `src/runtime/terrain_frame_phase.ts` | [src/app/frame_loop/terrain_frame_phase.ts](../src/app/frame_loop/terrain_frame_phase.ts) |
+| GPU batch return site | [src/terrain/streaming/gpu_clod_root_mesher.ts](../src/terrain/streaming/gpu_clod_root_mesher.ts) (+ [gpu_clod_root_batch_buffers.ts](../src/terrain/streaming/gpu_clod_root_batch_buffers.ts)) |
+| scheduler apply site | [src/terrain/streaming/clod_streaming_roots.ts](../src/terrain/streaming/clod_streaming_roots.ts) |
+| config module | new file next to [src/terrain/streaming/streamed_root_gpu_config.ts](../src/terrain/streaming/streamed_root_gpu_config.ts), following its exact `parseX / booleanFlag / positiveIntegerParam / DEFAULT_X / xFromWindow` pattern |
+
+### Counter plumbing (fixed convention — applies to all six plans)
+
+The counter pipeline on `main` is two layers: an **internal camelCase stats object** → a `publishXStatsToCounters(counters: Record<string, number>, stats)` function that writes **snake_case keys** → aggregated in [src/phase0/long_view_frame_diagnostics.ts](../src/phase0/long_view_frame_diagnostics.ts) → asserted in [tools/infinite_acceptance/thresholds.ts](../tools/infinite_acceptance/thresholds.ts) `REQUIRED_COUNTERS`. Follow this: define `BoundsGuardStats` (camelCase), write `publishBoundsGuardStatsToCounters`, keep the `live_clod_stream_bounds_guard_*` snake_case keys already listed below (they are consistent with the existing `live_clod_*` / `ring_boundary_holes` / `live_clod_overlap_cells` ownership counters). Do not introduce a third naming style.
+
+### Verification (fixed — applies to all six plans)
+
+Headless Playwright in this repo runs on **SwiftShader**, which does not exercise the real WebGPU path (it renders 0 trees and reports fake ~0.02 ms GPU timers). The GPU mesher path this guard protects therefore does **not** run under headless acceptance. Run the guard's browser acceptance **headed / real-GPU**, and state in the run notes that it was headed. Pure-TS unit tests (the validator, step 2) are unaffected and run normally under vitest.
+
+### Gate
+
+This is step 1 and unblocks the rest. It does **not** fix the coordinate bug — see the new milestone [2.5 root-cause coordinate fix](canonical-world-center-root-cause-fix-plan.md), which is what plans 3–6 are actually gated on.
+
+---
+
 ## Goal
 
 Stop malformed streamed CLOD pages from becoming visible.
@@ -105,16 +144,19 @@ The final apply guard is mandatory even if earlier paths validate. Earlier valid
 ## Files to inspect before implementation
 
 ```text
-tools/clod-poc/src/terrain/streaming/clod_streaming_roots.ts
-tools/clod-poc/src/terrain/streaming/gpu_clod_root_mesher.ts
+tools/clod-poc/src/types.ts                                       # PageMesh, PageFootprint, ClodPageNode, vertexCount/triangleCount
+tools/clod-poc/src/terrain/streaming/clod_streaming_roots.ts      # scheduler apply site (final guard)
+tools/clod-poc/src/terrain/streaming/gpu_clod_root_mesher.ts      # GPU batch return site
 tools/clod-poc/src/terrain/streaming/gpu_clod_root_batch_buffers.ts
-tools/clod-poc/src/clod/quadtree.ts
-tools/clod-poc/src/clod/source_mesh.ts
-tools/clod-poc/src/clod/validate.ts
-tools/clod-poc/src/clod_worker_client.ts
-tools/clod-poc/src/runtime/clod_frame_loop.ts
-tools/clod-poc/src/runtime/terrain_frame_phase.ts
+tools/clod-poc/src/terrain/streaming/streamed_root_gpu_config.ts  # config parsing pattern to copy
+tools/clod-poc/src/clod/validate.ts                               # existing mesh validation to mirror
+tools/clod-poc/src/stones/stone_validation.ts                     # existing PageMeshSignature pattern
+tools/clod-poc/src/app/clod_frame_loop.ts                         # (was src/runtime/…)
+tools/clod-poc/src/app/frame_loop/terrain_frame_phase.ts          # (was src/runtime/…)
+tools/clod-poc/src/phase0/long_view_frame_diagnostics.ts          # counter aggregation site
 ```
+
+Verify `src/clod/quadtree.ts`, `src/clod/source_mesh.ts`, and the CPU worker client path against `main` before touching them; the CPU worker client is not on the guard's critical path (the apply-site guard covers it).
 
 ## New module layout
 
@@ -129,6 +171,16 @@ Keep this module pure TypeScript logic. No Three.js, no WebGPU, no DOM.
 
 ## Proposed API
 
+`StreamedPageFootprint` and `StreamedPageMeshBounds` are **removed** — use `ClodPageNode.footprint` (`PageFootprint`, cell units) and `ClodPageNode.bounds` from [src/types.ts](../src/types.ts) as the expected footprint, and compute actual mesh bounds inline from `node.mesh.positions`. The public entry point is:
+
+```ts
+export function validateStreamedPageBounds(
+  node: ClodPageNode,        // carries mesh + footprint + bounds + id + level
+  chunkSize: number,         // cfg.page.chunk_size — converts footprint cell units to world meters
+  config: StreamedPageBoundsGuardConfig,
+): StreamedPageBoundsGuardResult;
+```
+
 ```ts
 export interface StreamedPageBoundsGuardConfig {
   enabled: boolean;
@@ -136,31 +188,6 @@ export interface StreamedPageBoundsGuardConfig {
   yMarginMeters: number;
   maxReasonableHeightMeters: number;
   rejectInvalid: boolean;
-}
-
-export interface StreamedPageFootprint {
-  pageKey: string;
-  level: number;
-  originX: number;
-  originZ: number;
-  sizeX: number;
-  sizeZ: number;
-  minY: number;
-  maxY: number;
-}
-
-export interface StreamedPageMeshBounds {
-  vertexCount: number;
-  indexCount: number;
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-  minZ: number;
-  maxZ: number;
-  centroidX: number;
-  centroidY: number;
-  centroidZ: number;
 }
 
 export type StreamedPageBoundsRejectReason =
@@ -179,42 +206,30 @@ export type StreamedPageBoundsRejectReason =
 export interface StreamedPageBoundsGuardResult {
   ok: boolean;
   reason: StreamedPageBoundsRejectReason;
-  footprint: StreamedPageFootprint;
-  bounds: StreamedPageMeshBounds;
+  pageKey: string;                 // node.id
+  // actual world-space mesh bounds, computed from node.mesh.positions:
+  bounds: { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number;
+            centroidX: number; centroidY: number; centroidZ: number; vertexCount: number; indexCount: number };
+  // expected world-space footprint, from node.footprint * chunkSize and node.bounds:
+  expected: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number };
   overflowX: number;
   overflowZ: number;
   overflowY: number;
 }
-
-export function validateStreamedPageBounds(
-  mesh: PageMesh,
-  footprint: StreamedPageFootprint,
-  config: StreamedPageBoundsGuardConfig,
-): StreamedPageBoundsGuardResult;
 ```
 
 ## Footprint derivation
 
-Do not infer footprint from mesh vertices. Derive it from page/root identity.
-
-The expected footprint should come from the same source used by scheduling:
+Do not infer the expected footprint from mesh vertices, and do not re-parse the page key — the scheduler already put the authoritative footprint on the node. Convert `node.footprint` (cell units, max exclusive) to world meters with `chunkSize`, and cross-check against `node.bounds`:
 
 ```text
-page key -> page level -> page world origin -> page size
+expected.minX = node.footprint.minX * chunkSize
+expected.maxX = node.footprint.maxX * chunkSize   // exclusive
+expected.minZ / maxZ likewise
+expected.minY / maxY = node.bounds.minY / maxY
 ```
 
-Add one helper:
-
-```ts
-export function expectedFootprintForStreamedPage(
-  pageKey: string,
-  level: number,
-  chunksPerPage: number,
-  chunkSize: number,
-): StreamedPageFootprint;
-```
-
-If existing code already has page key parsing, reuse it. Do not create a second incompatible parser.
+The only inputs are the node and `chunkSize`. If you ever need to parse `node.id` (`"L<level>:<x>,<z>"`), reuse `parsePageKey` from [src/stream/page_plan.ts](../src/stream/page_plan.ts) — do not write a second parser.
 
 ## Failure behavior
 

@@ -1,5 +1,42 @@
 # GPU Canopy Density and Impostor Buffer Plan
 
+## Status on main — read before implementing (revised 2026-07-08)
+
+Audited against `main`. **A far canopy shell already exists**, and a NAADF→canopy summary bridge already feeds it. Reframe this plan as "replace the single canopy skirt mesh with GPU-generated impostor instances driven by the far-summary density," reusing the existing canopy textures/config/bridge — not a fresh `src/vegetation/canopy_gpu/` module.
+
+### What already exists (reuse it)
+
+- [src/gpu/far_canopy_shell.ts](../src/gpu/far_canopy_shell.ts) (LV-4) — the far forest canopy shell: canopy-coverage lift, crown-scale hash bumps, impostor mid-range **dither/fade**, **inset ownership** (quads inside the live world square are skipped), unlit TSL material. Its fade + inset + lighting are exactly this plan's "near/far fade and ownership" — reuse them.
+- [src/naadf/canopyBridge.ts](../src/naadf/canopyBridge.ts) — connects the NAADF/far-summary data to canopy. This is your density input path (plan 3 feeds it).
+- [src/canopy/](../src/canopy/) — `canopy_texture.ts` (`CanopyTextureSet`), `canopy_types.ts`, `canopy_types_internal.ts` (`CanopyShellConfig`). Reuse these types; do not invent new canopy config/texture shapes.
+
+### The actual delta this plan should deliver
+
+Two genuinely-new things (everything else is reuse):
+1. **Per-impostor GPU generation + compaction.** Today the far canopy is a single skirt **mesh**. The new work is a compute pass that turns the far-summary density into compacted **impostor instances** with an indirect/counted draw. This is legitimately new code — but co-locate it with `far_canopy_shell.ts` and reuse `canopyBridge` + `src/canopy/` + the far-summary atlas; do not start a parallel tree under `src/vegetation/canopy_gpu/` that ignores them.
+2. **Camera-relative center.** `far_canopy_shell.ts` currently centers on `worldSize/2` (finite-world center) — that is precisely the "canopy around a stale finite-world origin" bug this plan lists. Move it to the camera-derived canonical center (milestone 2.5), mirroring `far_terrain_shell.ts` `cameraRelativeShell` mode, and publish `camera_to_canopy_center_m` (plan 2).
+
+### Corrected paths
+
+| Plan says | Actually on main |
+| --- | --- |
+| new `src/vegetation/canopy_gpu/*` | co-locate with [src/gpu/far_canopy_shell.ts](../src/gpu/far_canopy_shell.ts); reuse [src/canopy/](../src/canopy/) + [src/naadf/canopyBridge.ts](../src/naadf/canopyBridge.ts) |
+| new canopy config/types | reuse `CanopyShellConfig` / `CanopyTextureSet` in `src/canopy/` |
+| density source | far-summary atlas (plan 3) via `canopyBridge` |
+| `src/runtime/*` frame hooks | [src/app/clod_frame_loop.ts](../src/app/clod_frame_loop.ts), [src/app/frame_loop/terrain_frame_phase.ts](../src/app/frame_loop/terrain_frame_phase.ts) |
+
+### Pinned decisions
+
+- Density input = far-summary records (plan 3) via `canopyBridge`; do not add a second summary sampler. Integer hash = reuse [src/naadf/hash.ts](../src/naadf/hash.ts) / the ring hash shared with plan 4.
+- Counters follow the `publishXStatsToCounters` snake_case convention; report `canopyMs` compute/readback/render split as subphases (it is an existing named cost). Assert `camera_to_canopy_center_m` rather than inventing a new center counter family.
+- No individual impostor shadow casting in v1 (matches the plan). WGSL has no bool uniform; verification headed/real-GPU (headless = SwiftShader, 0 trees); never run vitest/`vite build` under `rtk`.
+
+### Gate
+
+Do not start until milestone [2.5 root-cause coordinate fix](canonical-world-center-root-cause-fix-plan.md) passes, plan 3 (GPU far-summary) is landed, and ideally plan 5 (far clipmap grid) so canopy and far terrain share the same center/summary. This is the last step.
+
+---
+
 ## Goal
 
 Move far canopy and far-forest generation from CPU-side per-frame or per-stabilization work into GPU-built density maps and impostor instance buffers.

@@ -1,5 +1,53 @@
 # Canonical World-Space Center Debug Plan
 
+## Status on main — read before implementing (revised 2026-07-08)
+
+Audited against `main`. **The core idea is partly built already — scope this plan down to extend the existing center machinery, not replace it.**
+
+### What already exists (reuse it)
+
+- The **canonical center is already the camera position.** [src/far-summary/stream-center.ts](../src/far-summary/stream-center.ts) (`updateStreamCenter(cameraPosition, prev, dt, preloadSeconds)`) derives the stream center from the camera, and the far-summary/streaming systems key off it.
+- **Per-system center divergence is already computed and published** in [src/stream/ownership_coverage_oracle.ts](../src/stream/ownership_coverage_oracle.ts): `camera_to_clod_center_m` (camera vs `snapshot.center`, the snapped CLOD center) and `camera_to_far_shell_center_m` (camera vs `farClipmap.centerX/centerZ`), plus `far_shell_recenter_count`. These flow through `publishOwnershipCoverageCounters` → [src/phase0/long_view_frame_diagnostics.ts](../src/phase0/long_view_frame_diagnostics.ts) → acceptance.
+
+So **do not re-emit clod/far-shell center counters under new `world_center_*` names.** Terrain, streamed roots, and far shell are already covered. This plan's real value is the systems the oracle does **not** yet cover, and the orbit-mode `controls.target` bug.
+
+### Reduced scope (the actual delta)
+
+Report camera-to-center distance for the currently-unmeasured systems, using the **same anchor (camera) and the same `camera_to_<system>_center_m` naming** as the oracle:
+
+```text
+camera_to_vegetation_ring_center_m       # the observed grass-ring offset
+camera_to_vegetation_grass_center_m
+camera_to_vegetation_trees_center_m
+camera_to_canopy_center_m
+camera_to_water_ocean_center_m
+```
+
+Also assert the already-existing `camera_to_clod_center_m` stays within threshold (no new counter needed). Drop the 13-entry `WorldCenterSystemName` union and the separate `world_center_<system>_x/y/z` per-axis counter explosion — distance is what acceptance checks; keep raw x/z only for the failing systems, behind the debug flag.
+
+### Corrected paths
+
+| Plan says | Actually on main |
+| --- | --- |
+| `src/runtime/world_center_debug.ts` | `src/stream/world_center_debug.ts` (co-locate with the oracle that already owns these counters) |
+| `src/runtime/clod_frame_loop.ts` | [src/app/clod_frame_loop.ts](../src/app/clod_frame_loop.ts) — compute the canonical center here once per frame |
+| `src/runtime/terrain_frame_phase.ts` | [src/app/frame_loop/terrain_frame_phase.ts](../src/app/frame_loop/terrain_frame_phase.ts) |
+| `src/terrain/far_summary/*` | [src/far-summary/](../src/far-summary/) (hyphen) |
+| player/orbit mode source | [src/player/player_mode_controller.ts](../src/player/player_mode_controller.ts) |
+| acceptance thresholds | [tools/infinite_acceptance/thresholds.ts](../tools/infinite_acceptance/thresholds.ts) (`REQUIRED_COUNTERS`), [thresholds_validation.ts](../tools/infinite_acceptance/thresholds_validation.ts) |
+
+### Pinned decisions
+
+- **Canonical center = camera world position** in both player and orbit mode (the oracle and stream-center already use the camera). The bug is not "which anchor" — it is that the **vegetation ring follows `controls.target` in orbit mode** while everything else follows the camera. So the fix (in the root-cause milestone) is to feed the vegetation ring the camera-derived center; this plan's job is to make that divergence a hard-checked counter.
+- New counters go through a `publishWorldCenterStatsToCounters(counters, stats)` (camelCase stats → snake_case keys), mirroring `publishOwnershipCoverageCounters`. See the counter-plumbing note in the [bounds-guard plan](streamed-page-gpu-bounds-guard-plan.md#counter-plumbing-fixed-convention--applies-to-all-six-plans).
+- Verification is headed/real-GPU (headless = SwiftShader). Pure-module tests run under vitest normally.
+
+### Gate
+
+This plan only makes the divergence **visible**. The actual repair of the divergence is the new milestone [2.5 root-cause coordinate fix](canonical-world-center-root-cause-fix-plan.md), which consumes these counters and is the gate for plans 3–6.
+
+---
+
 ## Goal
 
 Make every infinite-islands runtime system report which world-space center it is using, then hard-check that the centers match.

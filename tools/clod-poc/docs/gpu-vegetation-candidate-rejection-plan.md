@@ -1,5 +1,50 @@
 # GPU Vegetation Candidate Rejection Plan
 
+## Status on main — read before implementing (revised 2026-07-08)
+
+Audited against `main`. **The premise of this plan is mostly already true — grass, trees, and understory candidate rejection already run on the GPU with per-reason counters.** As written, this plan would build a *second, parallel* rejection system. Do not. Reframe it as: add stones to the existing path, wire the canonical center, and unify counters.
+
+### What already exists (this is the mechanism the plan proposes to "build")
+
+GPU ring compute + candidate generation + early rejection:
+- [src/gpu/grass_ring_compute.ts](../src/gpu/grass_ring_compute.ts), [src/gpu/understory_ring_compute.ts](../src/gpu/understory_ring_compute.ts), [src/gpu/tree_ring_compute.ts](../src/gpu/tree_ring_compute.ts), [src/gpu/stone_scatter_compute.ts](../src/gpu/stone_scatter_compute.ts), [src/gpu/prop_ring_compute.ts](../src/gpu/prop_ring_compute.ts), with WGSL in `src/gpu/shaders/{grass_ring,understory_ring,tree_ring,stone_scatter}.compute.wgsl`.
+- Tree runtime: [src/trees/tree_system_gpu_ring_runtime.ts](../src/trees/tree_system_gpu_ring_runtime.ts), [src/trees/tree_ring_cluster_visibility.ts](../src/trees/tree_ring_cluster_visibility.ts).
+
+Rejection counters, **already with the per-reason breakdown this plan asks for**, in [src/vegetation/gpu_vegetation_early_reject_counters.ts](../src/vegetation/gpu_vegetation_early_reject_counters.ts):
+- grass/tree/understory `*GpuClustersTotal/RejectedEarly/Accepted`, source counters (`*SourceFarSummary/TerrainSampler/Fallback`), candidate budgets, and dotted reason counters `grassReject.wrong_biome`, `treeReject.too_steep`, `understoryReject.below_water`, `*.height_range`, `*.outside_world`, `*.terrain_hidden`.
+- Terrain rejection sampling already chooses far-summary → terrain-sampler → fallback (exactly this plan's "preferred source / fallback source"): [src/vegetation/vegetation_terrain_reject_provider.ts](../src/vegetation/vegetation_terrain_reject_provider.ts), `terrain_rejection_cache.ts`, `terrain_rejection_config.ts`, `vegetation_slot_prefilter.ts`.
+
+### The actual delta this plan should deliver
+
+1. **Stones.** Grass/tree/understory are wired into the early-reject counters; **stones are not.** Add stone reject counters (mirroring the grass block in `gpu_vegetation_early_reject_counters.ts`) and wire `stone_scatter_compute` through the same terrain-reject prefilter. `StoneStats` lives in [src/stones/stone_instances.ts](../src/stones/stone_instances.ts).
+2. **Canonical center.** Ensure every ring's center is the camera-derived canonical center from milestone 2.5, and publish `camera_to_vegetation_ring_center_m` (plan 2). This is the fix for "grass ring in a different region."
+3. **Counter unification, not a new namespace.** Keep the existing camelCase + `groupReject.reason` dotted scheme. **Delete the invented `veg_gpu_grass_reject_*` snake_case names** — they would be a third convention. Where an acceptance counter is needed, add it via the standard `publishXStatsToCounters` translation used everywhere else.
+4. **Parity/spacing gaps only.** If a group lacks a spacing/`tile_budget`/`density_mask` reason today, add it to that group's existing shader + counter block. Do not fork a new pipeline to host it.
+
+### Do NOT create
+
+- `src/vegetation/gpu/vegetation_gpu_reject_{config,types,planner,builder,buffers,counters}.ts` or `shaders/vegetation_reject.wgsl`. These duplicate the four existing `*_ring_compute.ts` + `gpu_vegetation_early_reject_counters.ts`. Extend those files instead.
+
+### Corrected paths
+
+| Plan says | Actually on main |
+| --- | --- |
+| new `src/vegetation/gpu/*` reject system | extend [src/gpu/*_ring_compute.ts](../src/gpu/) + [src/vegetation/gpu_vegetation_early_reject_counters.ts](../src/vegetation/gpu_vegetation_early_reject_counters.ts) |
+| new WGSL `vegetation_reject.wgsl` | extend `src/gpu/shaders/{grass_ring,tree_ring,understory_ring,stone_scatter}.compute.wgsl` |
+| far-summary source | [src/far-summary/](../src/far-summary/) via `vegetation_terrain_reject_provider.ts` |
+
+### Pinned decisions
+
+- Integer-hash parity: reuse [src/naadf/hash.ts](../src/naadf/hash.ts) / existing ring hash helpers; do not add a new hash.
+- Verification is headed/real-GPU. **Critical for this plan:** headless = SwiftShader renders **0 trees** and fakes GPU timers, so headless "acceptance" cannot validate vegetation GPU rejection at all. Use headed runs and the tree-perf harness notes.
+- WGSL has no bool uniform (use u32 0/1); vitest needs `self = globalThis` for three/webgpu; never run vitest/`vite build` under `rtk` (only `tsc` typecheck is rtk-safe).
+
+### Gate
+
+Do not start until milestone [2.5 root-cause coordinate fix](canonical-world-center-root-cause-fix-plan.md) passes. This plan's whole point (rings on the correct center) depends on it.
+
+---
+
 ## Goal
 
 Move grass, tree, stone, and understory candidate rejection from CPU-side loops into WebGPU compute, while keeping CPU fallback and parity checks.
