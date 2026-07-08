@@ -49,6 +49,13 @@ export interface CanopyMetrics {
   fallbackSyntheticTiles: number;
   textureUploads: number;
   shellTriangles: number;
+  gpuImpostorEnabled: number;
+  gpuImpostorInstances: number;
+  gpuImpostorBuilds: number;
+  gpuImpostorMaxInstances: number;
+  gpuImpostorCoverageThreshold: number;
+  gpuImpostorCenterX: number;
+  gpuImpostorCenterZ: number;
   maxCoverage: number;
   averageCoverage: number;
   buildMs: number;
@@ -66,6 +73,13 @@ export function createEmptyCanopyMetrics(): CanopyMetrics {
     fallbackSyntheticTiles: 0,
     textureUploads: 0,
     shellTriangles: 0,
+    gpuImpostorEnabled: 0,
+    gpuImpostorInstances: 0,
+    gpuImpostorBuilds: 0,
+    gpuImpostorMaxInstances: 0,
+    gpuImpostorCoverageThreshold: 0,
+    gpuImpostorCenterX: 0,
+    gpuImpostorCenterZ: 0,
     maxCoverage: 0,
     averageCoverage: 0,
     buildMs: 0,
@@ -84,6 +98,13 @@ export function canopyMetricsToCounters(metrics: CanopyMetrics, enabled: boolean
     canopy_evicted_tiles: metrics.evictedTiles,
     canopy_texture_uploads: metrics.textureUploads,
     canopy_shell_tris: metrics.shellTriangles,
+    canopy_gpu_impostor_enabled: metrics.gpuImpostorEnabled,
+    canopy_gpu_impostor_instances: metrics.gpuImpostorInstances,
+    canopy_gpu_impostor_builds: metrics.gpuImpostorBuilds,
+    canopy_gpu_impostor_max_instances: metrics.gpuImpostorMaxInstances,
+    canopy_gpu_impostor_coverage_threshold: Math.round(metrics.gpuImpostorCoverageThreshold * 1000) / 1000,
+    canopy_gpu_impostor_center_x: Math.round(metrics.gpuImpostorCenterX * 100) / 100,
+    canopy_gpu_impostor_center_z: Math.round(metrics.gpuImpostorCenterZ * 100) / 100,
     canopy_build_ms: Math.round(metrics.buildMs * 100) / 100,
     canopy_upload_ms: Math.round(metrics.uploadMs * 100) / 100,
     canopy_fallback_synthetic_tiles: metrics.fallbackSyntheticTiles,
