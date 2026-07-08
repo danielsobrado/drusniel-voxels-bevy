@@ -44,9 +44,25 @@ describe("assertNoInternalBorders generated child seams", () => {
     )).not.toThrow();
   });
 
+  it("allows generated L2 outer page-border chains a few cells inside the footprint", () => {
+    expect(() => assertNoInternalBorders(
+      openQuad(699.5, 1020.5),
+      L2_FOOTPRINT,
+      "L2:2,3 final",
+    )).not.toThrow();
+  });
+
   it("still rejects arbitrary internal open boundaries", () => {
     expect(() => assertNoInternalBorders(
       openQuad(609.5, 910.5),
+      L2_FOOTPRINT,
+      "L2:2,3 final",
+    )).toThrow(/InternalBorderNotWelded/);
+  });
+
+  it("still rejects boundaries just beyond the generated parent perimeter band", () => {
+    expect(() => assertNoInternalBorders(
+      openQuad(699.5, 1018.5),
       L2_FOOTPRINT,
       "L2:2,3 final",
     )).toThrow(/InternalBorderNotWelded/);
