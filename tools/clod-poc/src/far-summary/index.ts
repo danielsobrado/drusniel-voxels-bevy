@@ -81,6 +81,8 @@ export {
 } from "./gpu-counters.js";
 export type { FarSummaryGpuCounters } from "./gpu-counters.js";
 
+export { composeFarSummaryGpuBuildShader } from "./gpu-shader.js";
+
 export {
   createFarSummaryGpuBuilder,
   dispatchFarSummaryGpuPlanOrFallback,
