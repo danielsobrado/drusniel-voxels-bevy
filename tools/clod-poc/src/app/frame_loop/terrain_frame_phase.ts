@@ -13,6 +13,7 @@ import {
 } from "../../terrain/streaming/root_height_morph.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { ClodPageNode } from "../../types.js";
+import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const RING_CLAMP_MARGIN = 2;
@@ -193,7 +194,7 @@ function mirrorCanonicalWorldCenter(input: TerrainFramePhaseInput, canonical: Ca
   counters["canonical_world_target_z"] = input.controls.target.z;
 }
 
-function mirrorVegetationRingStats(grassCenter: THREE.Vector3, ringCenter: THREE.Vector3, unbounded: boolean): void {
+function mirrorVegetationRingStats(cameraCenter: THREE.Vector3, grassCenter: THREE.Vector3, ringCenter: THREE.Vector3, unbounded: boolean): void {
   const counters = hooksCounters();
   if (!counters) return;
   counters["vegetation_ring_unbounded"] = unbounded ? 1 : 0;
@@ -202,6 +203,12 @@ function mirrorVegetationRingStats(grassCenter: THREE.Vector3, ringCenter: THREE
   counters["vegetation_grass_center_x"] = grassCenter.x;
   counters["vegetation_grass_center_z"] = grassCenter.z;
   counters["vegetation_ring_distance_to_grass_m"] = Math.hypot(ringCenter.x - grassCenter.x, ringCenter.z - grassCenter.z);
+  publishWorldCenterStatsToCounters(counters, computeWorldCenterDebugStats({
+    camera: cameraCenter,
+    vegetationRingCenter: ringCenter,
+    vegetationGrassCenter: grassCenter,
+    vegetationTreesCenter: ringCenter,
+  }));
 }
 
 function mirrorRootMorphStats(stats: RootMorphFrameStats): void {
@@ -220,14 +227,10 @@ function infiniteIslandsScene(): boolean {
 }
 
 function canonicalWorldCenter(input: TerrainFramePhaseInput, infiniteScene: boolean): CanonicalCenter {
+  const cameraCenter = input.camera?.position ?? input.controls.object.position;
+  if (infiniteScene) return { center: cameraCenter, source: "orbit_camera" };
   if (input.interaction.mode === "playing") {
     return { center: input.player.position, source: "playing_player" };
-  }
-  if (infiniteScene && input.player.spawned) {
-    return { center: input.player.position, source: "orbit_spawned_player" };
-  }
-  if (infiniteScene) {
-    return { center: input.camera?.position ?? input.controls.object.position, source: "orbit_camera" };
   }
   return { center: input.controls.target, source: "orbit_target" };
 }
@@ -338,7 +341,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;
   const ringCenter = vegetationRingCenter(grassCenter, input.worldCells, ringUnbounded);
-  mirrorVegetationRingStats(grassCenter, ringCenter, ringUnbounded);
+  mirrorVegetationRingStats(input.camera?.position ?? input.controls.object.position, grassCenter, ringCenter, ringUnbounded);
 
   return {
     chunkGroupsBuiltThisFrame: bubbleStats.chunkGroupsBuiltThisFrame,
