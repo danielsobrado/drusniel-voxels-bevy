@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createFarSummaryGpuCounters, publishFarSummaryGpuCounters } from "./gpu-counters.js";
 
+type MutableGlobal = typeof globalThis & { window?: unknown };
+const originalWindow = (globalThis as MutableGlobal).window;
+
 function filledCounters() {
   const counters = createFarSummaryGpuCounters();
   counters.enabled = 1;
@@ -45,7 +48,7 @@ function expectedCounters() {
 
 describe("publishFarSummaryGpuCounters", () => {
   afterEach(() => {
-    delete (globalThis as typeof globalThis & { window?: unknown }).window;
+    (globalThis as MutableGlobal).window = originalWindow;
   });
 
   it("publishes the acceptance-visible snake_case counter names", () => {
@@ -56,7 +59,7 @@ describe("publishFarSummaryGpuCounters", () => {
 
   it("publishes to global CLOD counters when target is omitted", () => {
     const counters: Record<string, number> = {};
-    (globalThis as typeof globalThis & { window?: unknown }).window = {
+    (globalThis as MutableGlobal).window = {
       __drusnielClod: { stats: { counters } },
     };
     publishFarSummaryGpuCounters(undefined, filledCounters());
@@ -64,6 +67,7 @@ describe("publishFarSummaryGpuCounters", () => {
   });
 
   it("does nothing without a target or global counters", () => {
+    (globalThis as MutableGlobal).window = undefined;
     expect(() => publishFarSummaryGpuCounters(undefined, createFarSummaryGpuCounters())).not.toThrow();
   });
 });
