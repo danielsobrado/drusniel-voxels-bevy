@@ -227,9 +227,8 @@ class FarClipmapControllerImpl implements FarClipmapController {
     private readonly scene: THREE.Scene,
     private readonly config: FarClipmapConfig,
     private readonly source: FarClipmapSource,
-    private readonly options: FarClipmapControllerOptions,
+    options: FarClipmapControllerOptions,
   ) {
-    void this.options;
     this.lastStats = makeStats(config, false, 0, emptyFrameStats(), false, {
       buildMs: 0,
       fallbackSamples: 0,
@@ -247,6 +246,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         heightScale: config.heightScale,
         yOffset: config.yOffset,
         webGpuCompatible: options.webGpuCompatibleMaterial === true,
+        shaderDisplacement: config.shaderDisplacement,
       });
       const mesh = new THREE.Mesh(createFarClipmapGridGeometry({ gridResolution: config.gridResolution }), material);
       this.geometryCreatesTotal++;
