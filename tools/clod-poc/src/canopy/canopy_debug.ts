@@ -62,7 +62,8 @@ export function formatCanopyStatsLine(
   syntheticFallback: boolean,
 ): string {
   const warn = syntheticFallback ? " SYNTHETIC" : "";
-  return `tiles ${metrics.visibleTiles} q${metrics.queuedTiles} cov ${metrics.averageCoverage.toFixed(2)}${warn}`;
+  const impostors = metrics.gpuImpostorEnabled ? ` imp ${metrics.gpuImpostorInstances}` : "";
+  return `tiles ${metrics.visibleTiles} q${metrics.queuedTiles} cov ${metrics.averageCoverage.toFixed(2)}${impostors}${warn}`;
 }
 
 export interface CanopyDebugOverlays {
