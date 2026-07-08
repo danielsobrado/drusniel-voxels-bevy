@@ -24,7 +24,7 @@ struct FarSummaryGpuRecord {
   material_cover_a: vec4<f32>,
   material_cover_b: vec4<f32>,
   canopy_occ: vec4<f32>,
-  meta: vec4<u32>,
+  record_meta: vec4<u32>,
   _pad0: vec4<u32>,
   _pad1: vec4<u32>,
 };
@@ -51,7 +51,7 @@ fn build_far_summary(@builtin(global_invocation_id) id: vec3<u32>) {
   record.material_cover_a = vec4<f32>(0.0, 1.0, 1.0, 0.0);
   record.material_cover_b = vec4<f32>(0.0, 0.0, 1.0, 1.0);
   record.canopy_occ = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-  record.meta = vec4<u32>(0u, descriptor.revision, descriptor.flags, descriptor.sample_grid * descriptor.sample_grid);
+  record.record_meta = vec4<u32>(0u, descriptor.revision, descriptor.flags, descriptor.sample_grid * descriptor.sample_grid);
   record._pad0 = vec4<u32>(0u);
   record._pad1 = vec4<u32>(0u);
   records[tile_index] = record;
