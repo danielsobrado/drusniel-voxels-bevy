@@ -53,7 +53,7 @@ function gpuRecord(height = 10) {
     slopeMax: 0,
     revision: 3,
     flags: 0,
-    sampleCount: 4,
+    sampleCount: 1,
   };
 }
 
@@ -103,7 +103,7 @@ describe("FarSummaryGpuRuntime", () => {
     expect(runtime.stats().lastFallbackTiles).toBeGreaterThan(0);
   });
 
-  it("commits successful GPU readbacks only when commit mode is enabled", async () => {
+  it("commits successful per-cell GPU readbacks only when commit mode is enabled", async () => {
     const committed: FarSummaryTile[] = [];
     const runtime = new FarSummaryGpuRuntime({
       gpuConfig: { ...GPU_CONFIG, commitToCache: true },
@@ -111,12 +111,12 @@ describe("FarSummaryGpuRuntime", () => {
       terrainSampler: TERRAIN,
       nowMs: () => 456,
       commitTile: (tile) => committed.push(tile),
-      dispatch: async (input) => ({
+      dispatch: async () => ({
         ok: true,
         counters: createFarSummaryGpuCounters(),
         fallbackTiles: 0,
         fallbackReason: null,
-        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(12)] }],
+        cellReadbacks: [{ batchIndex: 0, records: [gpuRecord(12), gpuRecord(13), gpuRecord(14), gpuRecord(15)] }],
       }),
     });
 
@@ -128,7 +128,7 @@ describe("FarSummaryGpuRuntime", () => {
     expect(committed[0]!.state).toBe("ready");
     expect(committed[0]!.lastTouchedFrame).toBe(9);
     expect(committed[0]!.lastTouchedTimeMs).toBe(456);
-    expect(committed[0]!.samples[0]!.heightAvg).toBe(12);
+    expect(committed[0]!.samples.map((sample) => sample.heightAvg)).toEqual([12, 13, 14, 15]);
     expect(runtime.stats().lastCommittedTiles).toBe(1);
   });
 
@@ -144,7 +144,7 @@ describe("FarSummaryGpuRuntime", () => {
         counters: createFarSummaryGpuCounters(),
         fallbackTiles: 1,
         fallbackReason: "dispatch_failed",
-        debugReadbacks: [{ batchIndex: 0, records: [gpuRecord(12)] }],
+        cellReadbacks: [{ batchIndex: 0, records: [gpuRecord(12), gpuRecord(13), gpuRecord(14), gpuRecord(15)] }],
       }),
     });
 
