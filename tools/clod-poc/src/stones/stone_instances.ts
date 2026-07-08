@@ -56,6 +56,17 @@ export interface StoneSystemOptions {
   onStats?: (stats: StoneStats) => void;
 }
 
+export interface StoneEarlyTerrainReasonCounts {
+  below_water?: number;
+  too_steep?: number;
+  outside_world?: number;
+  too_far?: number;
+  density_mask?: number;
+  tile_budget?: number;
+  class_budget?: number;
+  terrain_hidden?: number;
+}
+
 export interface StoneStats {
   total: number;
   large: number;
@@ -65,6 +76,18 @@ export interface StoneStats {
   drawnNear: number;
   drawnFar: number;
   groups: number;
+  gpuCandidateCount?: number;
+  gpuCandidateCountBeforePrefilter?: number;
+  gpuCandidateCountAfterPrefilter?: number;
+  gpuPrefilterTestedClusters?: number;
+  gpuPrefilterRejectedClusters?: number;
+  gpuPrefilterAcceptedClusters?: number;
+  gpuPrefilterUnknownKeptClusters?: number;
+  gpuPrefilterFarSummaryConsulted?: number;
+  gpuPrefilterSourceFarSummary?: number;
+  gpuPrefilterSourceTerrainSampler?: number;
+  gpuPrefilterSourceFallback?: number;
+  earlyTerrainReasonCounts?: StoneEarlyTerrainReasonCounts;
 }
 
 interface StoneDraw {
@@ -231,7 +254,7 @@ export class StoneSystem {
   }
 
   getStats(): StoneStats {
-    return { ...this.stats };
+    return { ...this.stats, earlyTerrainReasonCounts: { ...(this.stats.earlyTerrainReasonCounts ?? {}) } };
   }
 
   dispose(): void {
@@ -251,6 +274,7 @@ export class StoneSystem {
       worldCells: this.worldCells,
       centerX,
       centerZ,
+      unboundedWorld: unboundedCenter,
       settings: this.settings,
       indexCounts: this.indexCounts,
     }).then((counts) => {
@@ -260,6 +284,27 @@ export class StoneSystem {
       this.stats.medium = counts.medium;
       this.stats.small = counts.small;
       this.stats.total = counts.large + counts.medium + counts.small;
+      this.stats.gpuCandidateCount = counts.candidatesTotal;
+      this.stats.gpuCandidateCountBeforePrefilter = counts.candidatesTotal;
+      this.stats.gpuCandidateCountAfterPrefilter = counts.totalAccepted;
+      this.stats.gpuPrefilterTestedClusters = counts.candidatesTotal;
+      this.stats.gpuPrefilterRejectedClusters = counts.rejectedTotal;
+      this.stats.gpuPrefilterAcceptedClusters = counts.totalAccepted;
+      this.stats.gpuPrefilterUnknownKeptClusters = 0;
+      this.stats.gpuPrefilterFarSummaryConsulted = 0;
+      this.stats.gpuPrefilterSourceFarSummary = 0;
+      this.stats.gpuPrefilterSourceTerrainSampler = counts.candidatesTotal;
+      this.stats.gpuPrefilterSourceFallback = 0;
+      this.stats.earlyTerrainReasonCounts = {
+        outside_world: counts.rejectedOutsideWorld,
+        too_far: counts.rejectedTooFar,
+        below_water: counts.rejectedBelowWater,
+        too_steep: counts.rejectedTooSteep,
+        density_mask: counts.rejectedDensityMask,
+        tile_budget: counts.rejectedTileBudget,
+        class_budget: counts.rejectedClassBudget,
+        terrain_hidden: counts.rejectedTotal,
+      };
       this.stats.groups = this.draws.length;
       this.lastScatterCenter.set(centerX, 0, centerZ);
       this.applyClassVisibility();
