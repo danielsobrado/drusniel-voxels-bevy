@@ -35,13 +35,17 @@ export interface FarSummaryGpuDirtyTile {
   distanceToPredictedCenter: number;
   reason: FarSummaryGpuDirtyReason;
   revision: number;
+  cellRecordOffset?: number;
 }
 
 export interface FarSummaryGpuBatch {
   tiles: FarSummaryGpuDirtyTile[];
   descriptorBytes: number;
   outputBytes: number;
+  cellOutputBytes: number;
   readbackBytes: number;
+  cellReadbackBytes: number;
+  cellRecordCount: number;
   totalBytes: number;
 }
 
@@ -95,8 +99,8 @@ export function splitFarSummaryGpuBatches(
     while (index < dirtyTiles.length && nextTiles.length < maxTilesPerBatch) {
       const candidate = dirtyTiles[index];
       if (!candidate) break;
-      const nextCount = nextTiles.length + 1;
-      const nextBytes = estimateFarSummaryGpuBatchBytes(nextCount, config);
+      const candidateCellRecords = cellRecordCount([...nextTiles, candidate]);
+      const nextBytes = estimateFarSummaryGpuBatchBytes(nextTiles.length + 1, config, candidateCellRecords);
       if (nextBytes > config.maxBufferBytes && nextTiles.length > 0) break;
       if (nextBytes > config.maxBufferBytes) {
         index++;
@@ -112,12 +116,19 @@ export function splitFarSummaryGpuBatches(
   return batches;
 }
 
-export function estimateFarSummaryGpuBatchBytes(tileCount: number, config: FarSummaryGpuConfig): number {
+export function estimateFarSummaryGpuBatchBytes(
+  tileCount: number,
+  config: FarSummaryGpuConfig,
+  cellRecords = 0,
+): number {
   const safeTileCount = Math.max(0, Math.floor(tileCount));
+  const safeCellRecords = Math.max(0, Math.floor(cellRecords));
   const descriptorBytes = safeTileCount * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES;
   const outputBytes = safeTileCount * FAR_SUMMARY_GPU_RECORD_BYTES;
+  const cellOutputBytes = config.commitToCache ? safeCellRecords * FAR_SUMMARY_GPU_RECORD_BYTES : 0;
   const readbackBytes = estimateFarSummaryGpuReadbackBytes(safeTileCount, config);
-  return descriptorBytes + outputBytes + readbackBytes;
+  const cellReadbackBytes = config.commitToCache ? cellOutputBytes : 0;
+  return descriptorBytes + outputBytes + cellOutputBytes + readbackBytes + cellReadbackBytes;
 }
 
 export function farSummaryGpuTileBounds(tile: Pick<FarSummaryGpuDirtyTile, "key" | "cellSizeM" | "tileCells">): TileBounds {
@@ -155,21 +166,34 @@ function requestToDirtyTile(
 }
 
 function createBatch(tiles: FarSummaryGpuDirtyTile[], config: FarSummaryGpuConfig): FarSummaryGpuBatch {
-  const descriptorBytes = tiles.length * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES;
-  const outputBytes = tiles.length * FAR_SUMMARY_GPU_RECORD_BYTES;
-  const readbackBytes = estimateFarSummaryGpuReadbackBytes(tiles.length, config);
+  let offset = 0;
+  const tilesWithOffsets = tiles.map((tile) => {
+    const withOffset = { ...tile, cellRecordOffset: offset };
+    offset += tile.tileCells * tile.tileCells;
+    return withOffset;
+  });
+  const descriptorBytes = tilesWithOffsets.length * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES;
+  const outputBytes = tilesWithOffsets.length * FAR_SUMMARY_GPU_RECORD_BYTES;
+  const cellOutputBytes = config.commitToCache ? offset * FAR_SUMMARY_GPU_RECORD_BYTES : 0;
+  const readbackBytes = estimateFarSummaryGpuReadbackBytes(tilesWithOffsets.length, config);
+  const cellReadbackBytes = config.commitToCache ? cellOutputBytes : 0;
   return {
-    tiles,
+    tiles: tilesWithOffsets,
     descriptorBytes,
     outputBytes,
+    cellOutputBytes,
     readbackBytes,
-    totalBytes: descriptorBytes + outputBytes + readbackBytes,
+    cellReadbackBytes,
+    cellRecordCount: offset,
+    totalBytes: descriptorBytes + outputBytes + cellOutputBytes + readbackBytes + cellReadbackBytes,
   };
 }
 
 function estimateFarSummaryGpuReadbackBytes(tileCount: number, config: FarSummaryGpuConfig): number {
-  const readbackTiles = config.commitToCache
-    ? tileCount
-    : config.debugReadback ? Math.min(tileCount, config.debugReadbackTiles) : 0;
+  const readbackTiles = config.debugReadback ? Math.min(tileCount, config.debugReadbackTiles) : 0;
   return readbackTiles * FAR_SUMMARY_GPU_RECORD_BYTES;
+}
+
+function cellRecordCount(tiles: readonly Pick<FarSummaryGpuDirtyTile, "tileCells">[]): number {
+  return tiles.reduce((sum, tile) => sum + tile.tileCells * tile.tileCells, 0);
 }
