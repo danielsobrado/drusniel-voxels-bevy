@@ -78,10 +78,31 @@ function encode(records: readonly FarSummaryGpuRecord[]): ArrayBuffer {
   return buffer;
 }
 
+function expectDecodedRecordToMatch(decoded: FarSummaryGpuRecord, expected: FarSummaryGpuRecord): void {
+  expect(decoded.heightMin).toBeCloseTo(expected.heightMin, 6);
+  expect(decoded.heightMax).toBeCloseTo(expected.heightMax, 6);
+  expect(decoded.heightAvg).toBeCloseTo(expected.heightAvg, 6);
+  expect(decoded.slopeMean).toBeCloseTo(expected.slopeMean, 6);
+  expect(decoded.avgNormalX).toBeCloseTo(expected.avgNormalX, 6);
+  expect(decoded.avgNormalY).toBeCloseTo(expected.avgNormalY, 6);
+  expect(decoded.avgNormalZ).toBeCloseTo(expected.avgNormalZ, 6);
+  expect(decoded.materialVariance).toBeCloseTo(expected.materialVariance, 6);
+  expect(decoded.grassEligibility).toBeCloseTo(expected.grassEligibility, 6);
+  expect(decoded.roughnessMean).toBeCloseTo(expected.roughnessMean, 6);
+  expect(decoded.waterCoverage).toBeCloseTo(expected.waterCoverage, 6);
+  expect(decoded.canopyCoverage).toBeCloseTo(expected.canopyCoverage, 6);
+  expect(decoded.slopeMax).toBeCloseTo(expected.slopeMax, 6);
+  expect(decoded.dominantMaterial).toBe(expected.dominantMaterial);
+  expect(decoded.revision).toBe(expected.revision);
+  expect(decoded.flags).toBe(expected.flags);
+  expect(decoded.sampleCount).toBe(expected.sampleCount);
+}
+
 describe("decodeFarSummaryGpuRecords", () => {
   it("decodes the stable GPU summary record ABI", () => {
-    const decoded = decodeFarSummaryGpuRecord(encode([record()]), 0);
-    expect(decoded).toEqual(record());
+    const expected = record({ roughnessMean: 0.2, waterCoverage: 0.1, canopyCoverage: 0.3 });
+    const decoded = decodeFarSummaryGpuRecord(encode([expected]), 0);
+    expectDecodedRecordToMatch(decoded, expected);
   });
 
   it("decodes multiple records", () => {
