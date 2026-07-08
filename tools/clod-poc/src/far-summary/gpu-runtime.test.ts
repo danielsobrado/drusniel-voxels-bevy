@@ -35,6 +35,14 @@ const CENTER = {
   velocityZ: 0,
 };
 
+const DIRTY_REQUEST = {
+  ring: 0,
+  key: { ring: 0, x: 7, z: -3, cellSizeM: 16 },
+  priority: 0,
+  distanceToCamera: 0,
+  distanceToPredictedCenter: 0,
+};
+
 function gpuRecord(height = 10) {
   return {
     heightMin: height,
@@ -101,6 +109,30 @@ describe("FarSummaryGpuRuntime", () => {
     expect(runtime.stats().scheduledFrames).toBe(1);
     expect(runtime.stats().lastFallbackReason).toBe("webgpu_unavailable");
     expect(runtime.stats().lastFallbackTiles).toBeGreaterThan(0);
+  });
+
+  it("can schedule only explicitly dirty cache requests", async () => {
+    let inputSeen: FarSummaryGpuRuntimeDispatchInput | null = null;
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: GPU_CONFIG,
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      nowMs: () => 123,
+      dispatch: async (input) => {
+        inputSeen = input;
+        return { ok: true, counters: createFarSummaryGpuCounters(), fallbackTiles: 0, fallbackReason: null };
+      },
+    });
+
+    runtime.update(CENTER, 11, "camera_ring_shift", [DIRTY_REQUEST]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(inputSeen).not.toBeNull();
+    expect(inputSeen!.plan.dirtyTiles).toHaveLength(1);
+    expect(inputSeen!.plan.dirtyTiles[0]!.tileX).toBe(7);
+    expect(inputSeen!.plan.dirtyTiles[0]!.tileZ).toBe(-3);
+    expect(runtime.stats().lastDirtyTiles).toBe(1);
   });
 
   it("commits successful per-cell GPU readbacks only when commit mode is enabled", async () => {
