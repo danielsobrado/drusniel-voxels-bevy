@@ -2,9 +2,11 @@ import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import type { FarSummaryTile } from "./types.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryConfig } from "./config.js";
+import type { FarSummaryRingRequest } from "./clipmap-rings.js";
 import type { StreamCenter } from "./stream-center.js";
 import {
   buildFarSummaryGpuPlan,
+  buildFarSummaryGpuPlanFromRequests,
   type FarSummaryGpuPlan,
   type FarSummaryGpuDirtyReason,
 } from "./gpu-planner.js";
@@ -75,7 +77,12 @@ export class FarSummaryGpuRuntime {
     this.publishIdleCounters();
   }
 
-  update(center: StreamCenter, frameIndex: number, reason: FarSummaryGpuDirtyReason = "camera_ring_shift"): void {
+  update(
+    center: StreamCenter,
+    frameIndex: number,
+    reason: FarSummaryGpuDirtyReason = "camera_ring_shift",
+    dirtyRequests?: readonly FarSummaryRingRequest[],
+  ): void {
     if (this.disposed) return;
     if (!this.options.gpuConfig.enabled) {
       this.publishIdleCounters();
@@ -86,13 +93,22 @@ export class FarSummaryGpuRuntime {
       return;
     }
 
-    const plan = buildFarSummaryGpuPlan(
-      center,
-      this.options.farSummaryConfig,
-      this.options.gpuConfig,
-      reason,
-      ++this.revision,
-    );
+    const revision = ++this.revision;
+    const plan = dirtyRequests
+      ? buildFarSummaryGpuPlanFromRequests(
+        dirtyRequests,
+        this.options.farSummaryConfig,
+        this.options.gpuConfig,
+        reason,
+        revision,
+      )
+      : buildFarSummaryGpuPlan(
+        center,
+        this.options.farSummaryConfig,
+        this.options.gpuConfig,
+        reason,
+        revision,
+      );
     this.statsState.lastDirtyTiles = plan.dirtyTiles.length;
     this.statsState.lastBatches = plan.batches.length;
     this.statsState.scheduledFrames++;
