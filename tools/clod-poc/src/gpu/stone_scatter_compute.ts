@@ -7,7 +7,7 @@ import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js"
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
-const COUNTER_COUNT = 4;
+const COUNTER_COUNT = 12;
 const PARAM_BYTES = 16 * 20;
 const COUNTER_BYTES = COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_CLASS = 5;
@@ -16,12 +16,46 @@ const READBACK_INTERVAL_FRAMES = 30;
 export const STONE_GPU_RING_MAX_SAFE_GRID = 512;
 export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 5;
 
+const COUNTER_ACCEPTED_TOTAL = 0;
+const COUNTER_CLASS_LARGE = 1;
+const COUNTER_CLASS_MEDIUM = 2;
+const COUNTER_CLASS_SMALL = 3;
+const COUNTER_CANDIDATES_TOTAL = 4;
+const COUNTER_REJECT_OUTSIDE_WORLD = 5;
+const COUNTER_REJECT_TOO_FAR = 6;
+const COUNTER_REJECT_BELOW_WATER = 7;
+const COUNTER_REJECT_TOO_STEEP = 8;
+const COUNTER_REJECT_DENSITY_MASK = 9;
+const COUNTER_REJECT_TILE_BUDGET = 10;
+const COUNTER_REJECT_CLASS_BUDGET = 11;
+
 export type StoneGpuClassIndex = 0 | 1 | 2;
 
 export interface StoneHydrologyData { res: number; worldCells: number; data: Float32Array }
 export interface StoneGpuScatterBuffers { instanceA: GPUBuffer; instanceB: GPUBuffer; indirectArgs: GPUBuffer }
-export interface StoneGpuScatterParams { worldCells: number; centerX: number; centerZ: number; settings: StoneSettings; indexCounts: [number, number, number] }
-export interface StoneGpuScatterCounts { large: number; medium: number; small: number }
+export interface StoneGpuScatterParams {
+  worldCells: number;
+  centerX: number;
+  centerZ: number;
+  unboundedWorld?: boolean;
+  settings: StoneSettings;
+  indexCounts: [number, number, number];
+}
+export interface StoneGpuScatterCounts {
+  large: number;
+  medium: number;
+  small: number;
+  totalAccepted: number;
+  candidatesTotal: number;
+  rejectedTotal: number;
+  rejectedOutsideWorld: number;
+  rejectedTooFar: number;
+  rejectedBelowWater: number;
+  rejectedTooSteep: number;
+  rejectedDensityMask: number;
+  rejectedTileBudget: number;
+  rejectedClassBudget: number;
+}
 export interface StoneGpuClassRegion { start: number; end: number; firstInstance: number }
 
 type PipelineName = "clear_counters" | "scatter_stones" | "build_indirect_args";
@@ -152,8 +186,9 @@ export class StoneGpuScatterCompute {
     this.paramU32[39] = Math.max(0, Math.floor(params.indexCounts[0] ?? 0));
     this.paramU32[40] = Math.max(0, Math.floor(params.indexCounts[1] ?? 0));
     this.paramU32[41] = Math.max(0, Math.floor(params.indexCounts[2] ?? 0));
-    this.paramF32[44] = clampFinite(params.centerX, 0, params.worldCells);
-    this.paramF32[45] = clampFinite(params.centerZ, 0, params.worldCells);
+    this.paramU32[42] = params.unboundedWorld ? 1 : 0;
+    this.paramF32[44] = clampFinite(params.centerX, 0, params.worldCells, params.unboundedWorld === true);
+    this.paramF32[45] = clampFinite(params.centerZ, 0, params.worldCells, params.unboundedWorld === true);
     this.paramF32[46] = ringRadius;
     this.paramF32[47] = Math.max(0, settings.ringEdgeFadeM);
     this.writeTerrainConfig(48, settings.terrain.grass);
@@ -177,14 +212,37 @@ export class StoneGpuScatterCompute {
     if (requestReadback) encoder.copyBufferToBuffer(this.counterBuffer, 0, this.counterReadback, 0, COUNTER_BYTES);
     this.device.queue.submit([encoder.finish()]);
 
-    if (!requestReadback) return { large: 0, medium: 0, small: 0 };
+    if (!requestReadback) return emptyStoneGpuScatterCounts();
     await this.counterReadback.mapAsync(GPUMapMode.READ);
     const raw = new Uint32Array(this.counterReadback.getMappedRange(0, COUNTER_BYTES).slice(0));
     this.counterReadback.unmap();
+    const large = Math.min(raw[COUNTER_CLASS_LARGE] ?? 0, maxInstances);
+    const medium = Math.min(raw[COUNTER_CLASS_MEDIUM] ?? 0, maxInstances);
+    const small = Math.min(raw[COUNTER_CLASS_SMALL] ?? 0, maxInstances);
+    const accepted = Math.min(raw[COUNTER_ACCEPTED_TOTAL] ?? 0, maxInstances);
+    const rejectedTileBudget = raw[COUNTER_REJECT_TILE_BUDGET] ?? 0;
+    const rejectedClassBudget = raw[COUNTER_REJECT_CLASS_BUDGET] ?? 0;
     return {
-      large: Math.min(raw[1] ?? 0, maxInstances),
-      medium: Math.min(raw[2] ?? 0, maxInstances),
-      small: Math.min(raw[3] ?? 0, maxInstances),
+      large,
+      medium,
+      small,
+      totalAccepted: accepted,
+      candidatesTotal: raw[COUNTER_CANDIDATES_TOTAL] ?? 0,
+      rejectedTotal:
+        (raw[COUNTER_REJECT_OUTSIDE_WORLD] ?? 0) +
+        (raw[COUNTER_REJECT_TOO_FAR] ?? 0) +
+        (raw[COUNTER_REJECT_BELOW_WATER] ?? 0) +
+        (raw[COUNTER_REJECT_TOO_STEEP] ?? 0) +
+        (raw[COUNTER_REJECT_DENSITY_MASK] ?? 0) +
+        rejectedTileBudget +
+        rejectedClassBudget,
+      rejectedOutsideWorld: raw[COUNTER_REJECT_OUTSIDE_WORLD] ?? 0,
+      rejectedTooFar: raw[COUNTER_REJECT_TOO_FAR] ?? 0,
+      rejectedBelowWater: raw[COUNTER_REJECT_BELOW_WATER] ?? 0,
+      rejectedTooSteep: raw[COUNTER_REJECT_TOO_STEEP] ?? 0,
+      rejectedDensityMask: raw[COUNTER_REJECT_DENSITY_MASK] ?? 0,
+      rejectedTileBudget,
+      rejectedClassBudget,
     };
   }
 
@@ -231,9 +289,27 @@ export class StoneGpuScatterCompute {
   }
 }
 
-function clampFinite(value: number, min: number, max: number): number {
+function emptyStoneGpuScatterCounts(): StoneGpuScatterCounts {
+  return {
+    large: 0,
+    medium: 0,
+    small: 0,
+    totalAccepted: 0,
+    candidatesTotal: 0,
+    rejectedTotal: 0,
+    rejectedOutsideWorld: 0,
+    rejectedTooFar: 0,
+    rejectedBelowWater: 0,
+    rejectedTooSteep: 0,
+    rejectedDensityMask: 0,
+    rejectedTileBudget: 0,
+    rejectedClassBudget: 0,
+  };
+}
+
+function clampFinite(value: number, min: number, max: number, unbounded = false): number {
   if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
+  return unbounded ? value : Math.min(max, Math.max(min, value));
 }
 
 export const STONE_GPU_CLASS_COUNT = CLASS_COUNT;
