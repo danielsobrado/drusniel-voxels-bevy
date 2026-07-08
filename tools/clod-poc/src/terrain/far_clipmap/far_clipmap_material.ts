@@ -282,18 +282,23 @@ function farClipmapFallbackColor(mode: FarClipmapDebugMode): THREE.Color {
   return new THREE.Color(0x33432f);
 }
 
+// The CPU-baked path (farClipmapShaderDisplacement=0) is a fallback / no-WebGPU path only. It is
+// rendered as a flat, unlit debug ring — a single tint, not the per-vertex terrain colouring —
+// so it reads unmistakably as a placeholder and never masquerades as the shipping far terrain
+// (which is the GPU shader-displacement path). Flat colour also removes the coarse-grid vertex-
+// colour "blockiness"; DoubleSide stops grazing/underside angles from showing black through it.
 function createCpuBakedFarClipmapMaterial(input: { debugMode: FarClipmapDebugMode }): FarClipmapMaterial {
   const material = new THREE.MeshBasicMaterial({
     name: "FarClipmapTerrainCpuBakedFallback",
     color: farClipmapFallbackColor(input.debugMode),
-    vertexColors: true,
+    vertexColors: false,
     depthWrite: true,
     depthTest: true,
     polygonOffset: true,
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
     transparent: false,
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
     toneMapped: true,
   }) as FarClipmapMaterial;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "cpu-baked" satisfies FarClipmapDisplacementMode;
@@ -369,7 +374,9 @@ function createWebGpuFarClipmapMaterial(input: {
   material.polygonOffsetFactor = -1;
   material.polygonOffsetUnits = -1;
   material.transparent = false;
-  material.side = THREE.FrontSide;
+  // DoubleSide: far terrain is a thin displaced sheet; single-sided rendering lets grazing/underside
+  // camera angles see straight through it to the clear colour (the "black under-terrain" artifact).
+  material.side = THREE.DoubleSide;
   material.toneMapped = true;
   material.userData[FAR_CLIPMAP_NODE_UNIFORMS] = uniforms;
   material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] = sourceTexture;
@@ -407,7 +414,7 @@ export function createFarClipmapMaterial(input: {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
     transparent: false,
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
   }) as unknown as FarClipmapMaterial;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;

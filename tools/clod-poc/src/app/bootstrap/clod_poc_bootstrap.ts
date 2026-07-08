@@ -217,14 +217,18 @@ export async function bootstrapClodPoc() {
     streamingScene: queryScene?.startsWith("infinite-") ?? false,
   });
 
+  // farClipmapMode=replace hands the whole far band to the GPU clipmap, which then becomes the
+  // sole far-terrain owner: the player-centred InfiniteFarShell is kept out of the scene so the two
+  // do not z-fight or disagree on height across the mid-far band.
+  const farClipmapReplaceActive = searchParams.get("farClipmap") === "1" && farClipmapRendererAllowed(searchParams);
   const farRendererActivity = {
     legacyFarShell: world.worldMode.farOwner === "legacy_far_shell",
-    infiniteFarShell: isLongViewCapableScene(queryScene),
-    farClipmap: searchParams.get("farClipmap") === "1" && farClipmapRendererAllowed(searchParams),
+    infiniteFarShell: isLongViewCapableScene(queryScene) && !farClipmapReplaceActive,
+    farClipmap: farClipmapReplaceActive,
   };
   assertLegacyFarShellExclusive(farRendererActivity);
   window.__drusnielFarOwnership = buildFarOwnershipSummary({
-    farOwner: world.worldMode.farOwner,
+    farOwner: farClipmapReplaceActive && isLongViewCapableScene(queryScene) ? "far_clipmap" : world.worldMode.farOwner,
     streamingScene: streamingOwnership.streamingScene,
     activity: farRendererActivity,
     clodRadiusM: streamingOwnership.clodRadiusM,
@@ -327,7 +331,13 @@ export async function bootstrapClodPoc() {
     });
 
     if (farShellCpuHeightsEnabled) infiniteFarShell.setHeightProvider(heightProvider);
-    renderer.scene.add(infiniteFarShell.mesh);
+    // Keep farSummaryIntegration alive (it feeds the clipmap source via __drusnielFarSummary), but in
+    // replace mode do not add the shell mesh — the far clipmap owns the far band on its own.
+    if (!farClipmapReplaceActive) {
+      renderer.scene.add(infiniteFarShell.mesh);
+    } else {
+      infiniteFarShell.mesh.visible = false;
+    }
     terrainView.farShellController.setEnabled(false);
 
     terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {
