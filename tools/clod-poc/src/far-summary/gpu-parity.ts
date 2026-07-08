@@ -1,6 +1,7 @@
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryGpuPlan } from "./gpu-planner.js";
 import type { FarSummaryGpuConfig } from "./gpu-config.js";
+import type { FarSummaryGpuCounters } from "./gpu-counters.js";
 import {
   buildCpuFarSummaryTileReference,
   summarizeCpuFarSummaryTileReference,
@@ -124,6 +125,15 @@ export function evaluateFarSummaryGpuDebugReadbackParity(input: FarSummaryGpuPar
     skippedReason: null,
     failures,
   };
+}
+
+export function applyFarSummaryGpuParityEvaluationToCounters(
+  counters: FarSummaryGpuCounters,
+  evaluation: FarSummaryGpuParityEvaluation,
+): void {
+  if (!evaluation.enabled) return;
+  counters.parityCheckedTiles += evaluation.checkedTiles;
+  counters.parityFailedTiles += evaluation.failedTiles;
 }
 
 function paritySkipReason(config: FarSummaryGpuConfig, readbackCount: number): FarSummaryGpuParitySkipReason | null {
