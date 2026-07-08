@@ -55,6 +55,10 @@ function distToPerimeter(x: number, z: number, fp: PageFootprint): number {
 // Surface-nets vertices sit inside cells, so the open boundary hugs the footprint
 // perimeter within ~1 cell rather than lying exactly on it.
 const PERIMETER_BAND = 1.0;
+// Parent CLOD pages can preserve generated outer page-border chains a few cells inside
+// the footprint after recursive child simplification. Keep this narrow so arbitrary holes
+// deeper inside the page still hard-fail.
+const GENERATED_PARENT_PERIMETER_BAND = 4.0;
 const GENERATED_CHILD_SEAM_BAND = 1.0;
 const COAST_BOUNDARY_BAND = 0.01;
 
@@ -86,6 +90,11 @@ function nearInteriorDyadicLine(value: number, min: number, max: number, divisio
   return false;
 }
 
+function isGeneratedParentPerimeterOpenBoundary(perimeterDistance: number, label?: string): boolean {
+  const level = levelFromLabel(label);
+  return level !== null && level > 0 && perimeterDistance <= GENERATED_PARENT_PERIMETER_BAND;
+}
+
 /**
  * Parent nodes are built from already-owned child/page source meshes. Surface-nets extraction can
  * preserve open topological edges on recursive dyadic child split lines even when the rendered
@@ -112,6 +121,7 @@ export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint
     const perimeterDistance = distToPerimeter(x, z, footprint);
     if (
       perimeterDistance <= PERIMETER_BAND
+      || isGeneratedParentPerimeterOpenBoundary(perimeterDistance, label)
       || isCoastOpenBoundary(x, z)
       || isGeneratedChildSeamOpenBoundary(x, z, footprint, label)
     ) continue;
