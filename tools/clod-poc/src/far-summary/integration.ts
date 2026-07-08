@@ -5,7 +5,7 @@ import { FarSummaryCache } from "./summary-cache.js";
 import { FarSummaryClipmapSampler } from "./clipmap-sampler.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import { updateStreamCenter, type StreamCenter } from "./stream-center.js";
-import { computeRequiredFarSummaryTiles } from "./clipmap-rings.js";
+import { computeRequiredFarSummaryTiles, type FarSummaryRingRequest } from "./clipmap-rings.js";
 import { FarSummaryDebugOverlay } from "./debug-overlay.js";
 import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
@@ -81,6 +81,24 @@ function shouldRunFarSummaryProbes(params: URLSearchParams): boolean {
     || params.get("ownershipOracle") === "1";
 }
 
+function gpuDirtyRequestsForCache(
+  cache: FarSummaryCache,
+  requests: readonly FarSummaryRingRequest[],
+): FarSummaryRingRequest[] {
+  const dirty: FarSummaryRingRequest[] = [];
+  const seen = new Set<string>();
+  for (const request of requests) {
+    const key = `${request.key.ring}:${request.key.x}:${request.key.z}:${request.key.cellSizeM}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const tile = cache.getTile(request.key);
+    if (!tile || tile.state === "missing" || tile.state === "requested" || tile.state === "stale" || tile.state === "cooling" || tile.state === "evicted") {
+      dirty.push(request);
+    }
+  }
+  return dirty;
+}
+
 export function initFarSummaryIntegration(
   options: FarSummaryIntegrationOptions,
 ): FarSummaryIntegration {
@@ -93,6 +111,7 @@ export function initFarSummaryIntegration(
     debug: { ...DEFAULT_FAR_SUMMARY_CONFIG.debug, ...(options.config?.debug ?? {}) },
     rings: options.config?.rings ?? DEFAULT_FAR_SUMMARY_CONFIG.rings,
   }, queryParams);
+  const gpuConfig = farSummaryGpuConfigFromParams(queryParams);
 
   const runProbeDiagnostics = shouldRunFarSummaryProbes(queryParams);
   const buildIntervalFrames = resolveFarSummaryFrameInterval(
@@ -106,7 +125,7 @@ export function initFarSummaryIntegration(
   const debugOverlay = new FarSummaryDebugOverlay(config, cache, options.scene);
   const stats = createFarSummaryStats();
   const gpuRuntime = new FarSummaryGpuRuntime({
-    gpuConfig: farSummaryGpuConfigFromParams(queryParams),
+    gpuConfig,
     farSummaryConfig: config,
     terrainSampler: options.terrainSampler,
     terrainFieldConfig: options.terrainFieldConfig,
@@ -153,7 +172,7 @@ export function initFarSummaryIntegration(
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
 
-    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason);
+    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequestsForCache(cache, requests));
 
     cache.evictColdTiles(frameIndex, nowMs);
 
@@ -230,8 +249,8 @@ export function initFarSummaryIntegration(
     getHeightProvider,
     getStreamCenter: () => currentCenter,
     getGpuRuntimeStats: () => gpuRuntime.stats(),
-    setForceSlowBuilds: (on: boolean) => { forceSlowBuilds = on; },
-    setBuildDelayMs: (ms: number) => { buildDelayMs = ms; },
+    setForceSlowBuilds: (on) => { forceSlowBuilds = on; },
+    setBuildDelayMs: (ms) => { buildDelayMs = ms; },
     dispose: () => {
       gpuRuntime.dispose();
       debugOverlay.dispose();
