@@ -17,6 +17,25 @@ export interface P0DirtyAtlasExerciseRuntime {
 
 type ExerciseStatus = "disabled" | "pending" | "settling" | "done" | "skipped";
 
+type DirtyAtlasNaadfRuntime = {
+  config: { farClipmap: { tileCells: number } };
+  state: {
+    farTiles: Map<string, FarSummaryTile>;
+    revision: number;
+  };
+  getFarSummaryGpuAtlasView(): {
+    valid: number;
+    rings: Array<{
+      valid: number;
+      cellM: number;
+      widthCells: number;
+      heightCells: number;
+      originX: number;
+      originZ: number;
+    }>;
+  } | undefined;
+};
+
 const DEFAULT_INVALIDATED_TILES = 4;
 const MAX_INVALIDATED_TILES = 8;
 const DEFAULT_SETTLE_FRAMES = 18;
@@ -115,7 +134,7 @@ function shouldEnable(input: P0DirtyAtlasExerciseInput): boolean {
  * instead of a bounding box across rows.
  */
 function bumpPlacedFarSummaryTiles(requestedTiles: number): number {
-  const naadf = typeof window !== "undefined" ? window.__drusnielNaadf : undefined;
+  const naadf = naadfRuntime();
   const view = naadf?.getFarSummaryGpuAtlasView();
   if (!naadf || !view || view.valid !== 1) return 0;
   const ring = view.rings[0];
@@ -156,6 +175,11 @@ function bumpPlacedFarSummaryTiles(requestedTiles: number): number {
     bumped++;
   }
   return bumped;
+}
+
+function naadfRuntime(): DirtyAtlasNaadfRuntime | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as Window & { __drusnielNaadf?: DirtyAtlasNaadfRuntime }).__drusnielNaadf;
 }
 
 function clampTiles(value: number): number {
