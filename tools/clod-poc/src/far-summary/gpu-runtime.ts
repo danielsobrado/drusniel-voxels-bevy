@@ -19,7 +19,7 @@ import {
   type FarSummaryGpuBuilder,
   type FarSummaryGpuDispatchOrFallbackResult,
 } from "./gpu-builder.js";
-import { farSummaryGpuRecordToTile } from "./gpu-cache.js";
+import { farSummaryGpuCellRecordsToTile } from "./gpu-cache.js";
 import { createFarSummaryGpuCounters, publishFarSummaryGpuCounters } from "./gpu-counters.js";
 
 export interface FarSummaryGpuRuntimeOptions {
@@ -141,15 +141,17 @@ export class FarSummaryGpuRuntime {
   ): number {
     if (!this.options.gpuConfig.commitToCache || !result.ok || !this.options.commitTile) return 0;
     let committed = 0;
-    for (const readback of result.debugReadbacks ?? []) {
+    for (const readback of result.cellReadbacks ?? []) {
       const batch = plan.batches[readback.batchIndex];
       if (!batch) continue;
-      readback.records.forEach((record, recordIndex) => {
-        const descriptor = batch.tiles[recordIndex];
-        if (!descriptor) return;
-        this.options.commitTile!(farSummaryGpuRecordToTile({ descriptor, record, frameIndex, nowMs }));
+      for (const descriptor of batch.tiles) {
+        const offset = descriptor.cellRecordOffset ?? 0;
+        const count = descriptor.tileCells * descriptor.tileCells;
+        const records = readback.records.slice(offset, offset + count);
+        if (records.length < count) continue;
+        this.options.commitTile(farSummaryGpuCellRecordsToTile({ descriptor, records, frameIndex, nowMs }));
         committed++;
-      });
+      }
     }
     return committed;
   }
