@@ -1,3 +1,4 @@
+import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryConfig } from "./config.js";
 import type { StreamCenter } from "./stream-center.js";
@@ -23,6 +24,7 @@ export interface FarSummaryGpuRuntimeOptions {
   gpuConfig: FarSummaryGpuConfig;
   farSummaryConfig: FarSummaryConfig;
   terrainSampler: FarTerrainSampler;
+  terrainFieldConfig?: TerrainFieldConfig;
   webGpuAvailable?: () => boolean;
   nowMs?: () => number;
   builderFactory?: () => Promise<FarSummaryGpuBuilder | null>;
@@ -128,7 +130,10 @@ export class FarSummaryGpuRuntime {
     if (!this.builderPromise) {
       this.builderPromise = this.options.builderFactory
         ? this.options.builderFactory()
-        : createFarSummaryGpuBuilder({ config: this.options.gpuConfig });
+        : createFarSummaryGpuBuilder({
+            config: this.options.gpuConfig,
+            terrainFieldConfig: this.options.terrainFieldConfig,
+          });
     }
     return this.builderPromise;
   }
@@ -152,10 +157,12 @@ export function createFarSummaryGpuRuntimeFromParams(
   params: URLSearchParams,
   farSummaryConfig: FarSummaryConfig,
   terrainSampler: FarTerrainSampler,
+  terrainFieldConfig?: TerrainFieldConfig,
 ): FarSummaryGpuRuntime {
   return new FarSummaryGpuRuntime({
     gpuConfig: farSummaryGpuConfigFromParams(params, DEFAULT_FAR_SUMMARY_GPU_CONFIG),
     farSummaryConfig,
     terrainSampler,
+    terrainFieldConfig,
   });
 }
