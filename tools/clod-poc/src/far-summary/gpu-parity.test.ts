@@ -39,6 +39,7 @@ function dirtyTile(overrides: Partial<FarSummaryGpuDirtyTile> = {}): FarSummaryG
     distanceToPredictedCenter: 0,
     reason: "startup",
     revision: 9,
+    cellRecordOffset: 0,
     ...overrides,
   };
 }
@@ -50,7 +51,10 @@ function plan(tile = dirtyTile()): FarSummaryGpuPlan {
       tiles: [tile],
       descriptorBytes: 64,
       outputBytes: 128,
+      cellOutputBytes: 0,
       readbackBytes: 128,
+      cellReadbackBytes: 0,
+      cellRecordCount: tile.tileCells * tile.tileCells,
       totalBytes: 320,
     }],
     droppedTiles: 0,
