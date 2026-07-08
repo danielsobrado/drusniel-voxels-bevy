@@ -3,7 +3,7 @@ import type { EnvironmentLighting } from "../environment/environment.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
 
-interface CanopyGpuImpostorSample {
+export interface CanopyGpuImpostorSample {
   x: number;
   z: number;
   height: number;
@@ -164,8 +164,11 @@ export function selectCanopyGpuImpostorSamples(
 function textureFloatData(texture: THREE.DataTexture): Float32Array {
   const data = (texture.image as { data?: unknown }).data;
   if (data instanceof Float32Array) return data;
-  if (ArrayBuffer.isView(data)) return new Float32Array(data.buffer.slice(0));
-  return new Float32Array(0);
+  if (!ArrayBuffer.isView(data)) return new Float32Array(0);
+  const view = data as ArrayLike<number>;
+  const copied = new Float32Array(view.length);
+  for (let i = 0; i < view.length; i++) copied[i] = Number(view[i] ?? 0);
+  return copied;
 }
 
 function canopyCardSize(set: CanopyTextureSet, config: CanopyShellConfig, sample: CanopyGpuImpostorSample): number {
