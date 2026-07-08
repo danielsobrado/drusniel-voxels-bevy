@@ -2,6 +2,7 @@ export interface FarSummaryGpuConfig {
   enabled: boolean;
   strictParity: boolean;
   debugReadback: boolean;
+  commitToCache: boolean;
   sampleGrid: number;
   maxTilesPerBatch: number;
   maxBatchesPerFrame: number;
@@ -16,6 +17,7 @@ export const DEFAULT_FAR_SUMMARY_GPU_CONFIG: FarSummaryGpuConfig = {
   enabled: false,
   strictParity: false,
   debugReadback: false,
+  commitToCache: false,
   sampleGrid: 16,
   maxTilesPerBatch: 256,
   maxBatchesPerFrame: 1,
@@ -31,6 +33,7 @@ export function farSummaryGpuConfigFromParams(
     enabled: booleanFlag(params, "farSummaryGpu", defaults.enabled),
     strictParity: booleanFlag(params, "farSummaryGpuStrictParity", defaults.strictParity),
     debugReadback: booleanFlag(params, "farSummaryGpuDebugReadback", defaults.debugReadback),
+    commitToCache: booleanFlag(params, "farSummaryGpuCommit", defaults.commitToCache),
     sampleGrid: positiveInteger(params, "farSummaryGpuSampleGrid", defaults.sampleGrid),
     maxTilesPerBatch: positiveInteger(params, "farSummaryGpuMaxTilesPerBatch", defaults.maxTilesPerBatch),
     maxBatchesPerFrame: positiveInteger(params, "farSummaryGpuMaxBatchesPerFrame", defaults.maxBatchesPerFrame),
