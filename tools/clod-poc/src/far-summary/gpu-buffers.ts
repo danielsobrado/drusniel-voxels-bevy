@@ -85,9 +85,16 @@ export function createFarSummaryGpuBatchBuffers(
   }) : null;
 
   const descriptorData = packFarSummaryGpuDescriptors(batch.tiles);
+  const fieldParams = packFieldParams(0, terrainFieldConfig);
   device.queue.writeBuffer(descriptorBuffer, 0, descriptorData, 0, descriptorBytes);
   device.queue.writeBuffer(digEditsBuffer, 0, packDigEdits([]));
-  device.queue.writeBuffer(fieldParamsBuffer, 0, packFieldParams(0, terrainFieldConfig));
+  device.queue.writeBuffer(
+    fieldParamsBuffer,
+    0,
+    fieldParams.buffer as ArrayBuffer,
+    fieldParams.byteOffset,
+    fieldParams.byteLength,
+  );
 
   return {
     descriptorBuffer,
