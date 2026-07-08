@@ -291,8 +291,8 @@ export function createCanopyShellSystem(
 
     if (shell) {
       positionShellAtTextureCenter();
-      const mat = shell.mesh.material as THREE.Material & { wireframe?: boolean };
-      if ("wireframe" in mat) mat.wireframe = debugState.showShellWireframe;
+      const material = shell.mesh.material;
+      if (!Array.isArray(material) && "wireframe" in material) material.wireframe = debugState.showShellWireframe;
     }
 
     updateCanopyDebugOverlays(overlays, clipmap.getVisibleTiles(), config, centerX, centerZ, debugState);
