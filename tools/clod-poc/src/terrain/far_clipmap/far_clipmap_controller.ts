@@ -266,7 +266,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
       const cellSizeM = ringCellSize(config, range.outerRadiusM);
       const material = createFarClipmapMaterial({
         debugMode: config.materialDebugMode,
-        seaLevel: 0,
+        seaLevel: config.seaLevelM,
         clipInnerRadiusM: range.innerRadiusM,
         clipOuterRadiusM: range.outerRadiusM,
         cellSizeM,
