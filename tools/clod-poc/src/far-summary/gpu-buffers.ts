@@ -1,3 +1,5 @@
+import type { TerrainFieldConfig } from "../terrain/terrain.js";
+import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "../gpu/gpu_mesh_buffers.js";
 import type { FarSummaryGpuBatch, FarSummaryGpuDirtyTile } from "./gpu-planner.js";
 import {
   FAR_SUMMARY_GPU_DESCRIPTOR_BYTES,
@@ -12,6 +14,8 @@ const F32 = 4;
 export interface FarSummaryGpuBatchBufferSet {
   descriptorBuffer: GPUBuffer;
   outputBuffer: GPUBuffer;
+  digEditsBuffer: GPUBuffer;
+  fieldParamsBuffer: GPUBuffer;
   readbackBuffer: GPUBuffer | null;
   descriptorBytes: number;
   outputBytes: number;
@@ -45,11 +49,14 @@ export function createFarSummaryGpuBatchBuffers(
   device: GPUDevice,
   batch: FarSummaryGpuBatch,
   config: FarSummaryGpuConfig,
+  terrainFieldConfig?: TerrainFieldConfig,
 ): FarSummaryGpuBatchBufferSet {
   const descriptorBytes = Math.max(4, batch.tiles.length * FAR_SUMMARY_GPU_DESCRIPTOR_BYTES);
   const outputBytes = Math.max(4, batch.tiles.length * FAR_SUMMARY_GPU_RECORD_BYTES);
   const readbackTiles = config.debugReadback ? Math.min(batch.tiles.length, config.debugReadbackTiles) : 0;
   const readbackBytes = readbackTiles * FAR_SUMMARY_GPU_RECORD_BYTES;
+  const digEditsBytes = DIG_EDIT_BYTES;
+  const fieldParamsBytes = FIELD_PARAM_WORDS * U32;
 
   const descriptorBuffer = device.createBuffer({
     label: "far summary gpu descriptors",
@@ -61,6 +68,16 @@ export function createFarSummaryGpuBatchBuffers(
     size: outputBytes,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   });
+  const digEditsBuffer = device.createBuffer({
+    label: "far summary gpu dig edits",
+    size: digEditsBytes,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  const fieldParamsBuffer = device.createBuffer({
+    label: "far summary gpu field params",
+    size: fieldParamsBytes,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
   const readbackBuffer = readbackBytes > 0 ? device.createBuffer({
     label: "far summary gpu debug readback",
     size: Math.max(4, readbackBytes),
@@ -69,10 +86,14 @@ export function createFarSummaryGpuBatchBuffers(
 
   const descriptorData = packFarSummaryGpuDescriptors(batch.tiles);
   device.queue.writeBuffer(descriptorBuffer, 0, descriptorData, 0, descriptorBytes);
+  device.queue.writeBuffer(digEditsBuffer, 0, packDigEdits([]));
+  device.queue.writeBuffer(fieldParamsBuffer, 0, packFieldParams(0, terrainFieldConfig));
 
   return {
     descriptorBuffer,
     outputBuffer,
+    digEditsBuffer,
+    fieldParamsBuffer,
     readbackBuffer,
     descriptorBytes,
     outputBytes,
@@ -80,6 +101,8 @@ export function createFarSummaryGpuBatchBuffers(
     destroy: () => {
       descriptorBuffer.destroy();
       outputBuffer.destroy();
+      digEditsBuffer.destroy();
+      fieldParamsBuffer.destroy();
       readbackBuffer?.destroy();
     },
   };
