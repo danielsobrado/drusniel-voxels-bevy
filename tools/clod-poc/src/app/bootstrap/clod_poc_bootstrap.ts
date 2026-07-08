@@ -188,7 +188,7 @@ export async function bootstrapClodPoc() {
           world.proceduralTerrain = cached.terrain;
           world.bakedMacroTint = cached.macroTint;
           terrainTextureWindowSwaps++;
-          terrainView.materialController.setProceduralTerrain(cached.terrain, cached.config);
+          terrainView.materialController.setProceduralTerrain(cached.terrain, cached.config, cached.macroTint);
           terrainView.applyTerrainTextures();
           if (postRenderer.longViewHooks?.stats) {
             postRenderer.longViewHooks.stats.counters.terrainTextureWindowSwaps = terrainTextureWindowSwaps;
