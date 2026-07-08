@@ -146,6 +146,20 @@ export class FarSummaryCache implements FallbackStatsWriter {
     }
   }
 
+  commitExternalTile(tile: FarSummaryTile): void {
+    const keyStr = tileKeyToString(tile.key);
+    const committed: FarSummaryTile = {
+      ...tile,
+      state: "ready",
+      builtEpoch: this.invalidationEpoch,
+    };
+    this.pendingBuildKeys.delete(keyStr);
+    this.dropPendingCommit(keyStr);
+    if (this.activeBuild?.keyStr === keyStr) this.activeBuild = null;
+    this.stats.tilesBuiltThisFrame++;
+    this.commitBuiltTile(keyStr, committed);
+  }
+
   getTile(key: FarSummaryTileKey): FarSummaryTile | null {
     const ks = tileKeyToString(key);
     return this.tiles.get(ks) ?? null;
