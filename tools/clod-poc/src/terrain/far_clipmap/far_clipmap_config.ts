@@ -12,6 +12,7 @@ export interface FarClipmapConfig {
   yOffset: number;
   maxRebuildsPerFrame: number;
   materialDebugMode: FarClipmapDebugMode;
+  shaderDisplacement: boolean;
 }
 
 export interface FarClipmapConfigConstraints {
@@ -32,6 +33,7 @@ export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
   yOffset: 0,
   maxRebuildsPerFrame: 2,
   materialDebugMode: "final",
+  shaderDisplacement: true,
 });
 
 const DEBUG_MODES: ReadonlySet<string> = new Set<FarClipmapDebugMode>([
@@ -60,14 +62,16 @@ function nonNegativeInteger(value: unknown, fallback: number): number {
 }
 
 function boolFromQuery(value: string | null, fallback: boolean): boolean {
-  if (value === null) return fallback;
+  if (value === null || value.trim() === "") return fallback;
   if (value === "1" || value === "true") return true;
   if (value === "0" || value === "false") return false;
   return fallback;
 }
 
 function positiveQueryNumber(params: URLSearchParams, key: string, fallback: number): number {
-  const parsed = Number(params.get(key));
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
@@ -101,6 +105,7 @@ export function resolveFarClipmapConfig(
     yOffset: finiteNumber(partial.yOffset, base.yOffset),
     maxRebuildsPerFrame: nonNegativeInteger(partial.maxRebuildsPerFrame, base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(partial.materialDebugMode, base.materialDebugMode),
+    shaderDisplacement: typeof partial.shaderDisplacement === "boolean" ? partial.shaderDisplacement : base.shaderDisplacement,
   };
 
   const minInner = constraints.liveCollisionRadiusM === undefined
@@ -145,5 +150,6 @@ export function farClipmapConfigFromSearchParams(
       : base.yOffset,
     maxRebuildsPerFrame: integerQueryNumber(params, "farClipmapMaxRebuildsPerFrame", base.maxRebuildsPerFrame),
     materialDebugMode: debugMode(params.get("farClipmapDebug"), base.materialDebugMode),
+    shaderDisplacement: boolFromQuery(params.get("farClipmapShaderDisplacement"), base.shaderDisplacement),
   }, constraints);
 }
