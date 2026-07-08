@@ -165,9 +165,8 @@ function textureFloatData(texture: THREE.DataTexture): Float32Array {
   const data = (texture.image as { data?: unknown }).data;
   if (data instanceof Float32Array) return data;
   if (!ArrayBuffer.isView(data)) return new Float32Array(0);
-  const view = data as ArrayLike<number>;
-  const copied = new Float32Array(view.length);
-  for (let i = 0; i < view.length; i++) copied[i] = Number(view[i] ?? 0);
+  const copied = new Float32Array(data.byteLength / data.BYTES_PER_ELEMENT);
+  for (let i = 0; i < copied.length; i++) copied[i] = Number(data[i] ?? 0);
   return copied;
 }
 
