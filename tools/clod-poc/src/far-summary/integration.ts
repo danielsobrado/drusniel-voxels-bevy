@@ -95,9 +95,6 @@ export function initFarSummaryIntegration(
   }, queryParams);
 
   const runProbeDiagnostics = shouldRunFarSummaryProbes(queryParams);
-  // Tile builds are deadline-sliced inside buildSomeTiles (maxBuildMsPerFrame),
-  // so per-frame building is frame-safe; the old 30-frame infinite-islands
-  // throttle starved the clipmap (~9 ready of ~120 required per scene).
   const buildIntervalFrames = resolveFarSummaryFrameInterval(
     queryParams,
     "farSummaryBuildInterval",
@@ -113,6 +110,7 @@ export function initFarSummaryIntegration(
     farSummaryConfig: config,
     terrainSampler: options.terrainSampler,
     terrainFieldConfig: options.terrainFieldConfig,
+    commitTile: (tile) => cache.commitExternalTile(tile),
   });
 
   let frameIndex = 0;
