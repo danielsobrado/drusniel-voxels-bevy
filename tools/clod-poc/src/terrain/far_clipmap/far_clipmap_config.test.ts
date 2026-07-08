@@ -28,6 +28,21 @@ describe("far clipmap config", () => {
     expect(resolveFarClipmapConfig()).toEqual(DEFAULT_FAR_CLIPMAP_CONFIG);
   });
 
+  it("keeps missing numeric query params at defaults instead of coercing null to zero", () => {
+    const config = farClipmapConfigFromSearchParams(query("farClipmap=1"));
+
+    expect(config.heightScale).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.heightScale);
+    expect(config.yOffset).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.yOffset);
+    expect(config.shaderDisplacement).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.shaderDisplacement);
+  });
+
+  it("accepts explicit zero y offset without flattening height scale", () => {
+    const config = farClipmapConfigFromSearchParams(query("farClipmap=1&farClipmapYOffset=0"));
+
+    expect(config.yOffset).toBe(0);
+    expect(config.heightScale).toBe(DEFAULT_FAR_CLIPMAP_CONFIG.heightScale);
+  });
+
   it("accepts query params and clamps outer radius to CLOD coverage", () => {
     const config = farClipmapConfigFromSearchParams(
       query("farClipmap=1&farClipmapInnerRadius=384&farClipmapOuterRadius=1024&farClipmapRingCount=3"),
