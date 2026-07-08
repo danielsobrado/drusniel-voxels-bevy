@@ -267,8 +267,11 @@ fn process_understory_slot(slot: u32) {
   let jitter_x = understory_hash(wc, 1103u);
   let jitter_z = understory_hash(wc, 1200u);
   let wpos = (wc + vec2<f32>(jitter_x, jitter_z)) * cell_size;
+  // See grass_ring.compute.wgsl: the [0, world_max] box only bounds a finite world. Island worlds
+  // have real terrain far outside the startup square, so skip the box reject there and let the
+  // understory masks decide; otherwise understory forms a fixed disc at the startup world edge.
   let world_max = params.center_radius.w;
-  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) { return; }
+  if (fieldParams.islandEnabled == 0u && (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max)) { return; }
   let dist = distance(wpos, params.center_radius.xy);
   if (dist > params.center_radius.z) { return; }
   let base_height = surfaceHeightField(wpos.x, wpos.y);

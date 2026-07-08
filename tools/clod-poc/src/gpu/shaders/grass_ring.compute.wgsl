@@ -300,8 +300,12 @@ fn process_slot(slot: u32) {
   let seed = params.counts_b.z;
   let jitter = (pcg2d(wc, seed + 1103u) - vec2<f32>(0.5, 0.5)) * params.density_b.w;
   let wpos = (wc + vec2<f32>(0.5, 0.5) + jitter) * params.settings_a.x;
+  // The finite [0, world_max] box only bounds placement in a finite world. Island worlds have real
+  // terrain far outside the startup square (the ring is a player-centered window), so skip the box
+  // reject there and let the grass masks decide; otherwise grass forms a fixed disc at the startup
+  // world edge that the player walks out of.
   let world_max = params.center_radius.w;
-  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) { return; }
+  if (fieldParams.islandEnabled == 0u && (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max)) { return; }
   let dist = distance(wpos, params.center_radius.xy);
   if (dist > params.center_radius.z) { return; }
   let world_size = max(1.0, params.center_radius.w);

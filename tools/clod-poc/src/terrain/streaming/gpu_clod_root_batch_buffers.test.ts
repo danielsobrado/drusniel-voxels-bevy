@@ -4,6 +4,7 @@ import {
   chunkSlotsPerRootPage,
   estimateChunkSlotBytes,
   estimateRootRequestReadbackBytes,
+  findChunkVerticesOutOfBounds,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   splitRootGpuBatches,
@@ -14,6 +15,34 @@ const CFG = {
   chunk_size: 8,
   quadtree_levels: 3,
 };
+
+describe("findChunkVerticesOutOfBounds", () => {
+  // Chunk cell box [128,192]x[1536,1600] with a 2-cell halo -> allowed [126,194]x[1534,1602].
+  const minX = 126, maxX = 194, minZ = 1534, maxZ = 1602;
+
+  it("passes a chunk whose vertices sit inside its cell box (plus halo)", () => {
+    const positions = new Float32Array([
+      128.5, 40, 1536.5,
+      191.5, 41, 1599.5,
+      126.0, 42, 1602.0, // exactly on the halo edge
+    ]);
+    expect(findChunkVerticesOutOfBounds(positions, 3, minX, maxX, minZ, maxZ)).toBeNull();
+  });
+
+  it("flags a stale/garbage vertex far outside the chunk box", () => {
+    const positions = new Float32Array([
+      128.5, 40, 1536.5,
+      261.09, 8.99, 1285.94, // the reported mislocated vertex (~4 pages away in z)
+      191.5, 41, 1599.5,
+    ]);
+    const violation = findChunkVerticesOutOfBounds(positions, 3, minX, maxX, minZ, maxZ);
+    expect(violation).not.toBeNull();
+    expect(violation!.outCount).toBe(1);
+    expect(violation!.firstIndex).toBe(1);
+    expect(violation!.x).toBeCloseTo(261.09, 2);
+    expect(violation!.z).toBeCloseTo(1285.94, 2);
+  });
+});
 
 describe("streamed root batch planning", () => {
   it("plans one L0 root as one page worth of chunk slots", () => {

@@ -198,7 +198,10 @@ fn process_cell(slot: u32) {
   let seed = params.counts_a.z;
   let jitter = pcg2d(wc, seed + 101u);
   let wpos = (wc + jitter) * params.world.y;
-  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= params.world.x || wpos.y >= params.world.x) {
+  // See grass_ring.compute.wgsl: the finite [0, world] box only bounds a finite world. Island worlds
+  // have real terrain outside the startup square, so skip the box reject there and let the scatter
+  // masks decide; otherwise stones form a fixed disc at the startup world edge.
+  if (fieldParams.islandEnabled == 0u && (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= params.world.x || wpos.y >= params.world.x)) {
     return;
   }
 

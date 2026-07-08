@@ -10,7 +10,9 @@ const textEncoder = new TextEncoder();
 // v2: border coast is now disabled for infinite-island fields (islandShape.enabled),
 // so page geometry outside the startup world is the true procedural field instead of a
 // collapsed sea-level sheet. Bump invalidates any pages cached under the old finite coast.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v2";
+// v3: vertex weld now merges across quantization buckets within epsilon (fixes internal-seam
+// weld misses on streamed roots at large world coordinates); welded geometry can differ.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v3";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);

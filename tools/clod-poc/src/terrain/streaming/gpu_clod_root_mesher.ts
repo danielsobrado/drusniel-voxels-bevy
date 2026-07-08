@@ -32,7 +32,7 @@ import {
 import { composeTerrainFieldShader } from "../../gpu/wgsl_modules.js";
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
 import { buildOuterBorderLocks } from "../../lock.js";
-import type { ClodPageNode, PageMesh } from "../../types.js";
+import { ClodBuildError, type ClodPageNode, type PageMesh } from "../../types.js";
 import type { WorldBounds } from "../terrain_surface.js";
 import {
   RootGpuBatchLimitError,
@@ -40,6 +40,7 @@ import {
   estimateChunkSlotBytes,
   estimateRootRequestReadbackBytes,
   estimateRootRequestSlotBytes,
+  findChunkVerticesOutOfBounds,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   rootLevelForRequest,
@@ -278,6 +279,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   private readonly simplifierReady = initSimplifier();
   private readonly batchLimits: RuntimeBatchLimits;
   private readonly pool: PackedRootGpuBufferPool;
+  private buildTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly device: GPUDevice,
@@ -292,7 +294,28 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
     this.pool = new PackedRootGpuBufferPool(device, layout, cfg, world, this.batchLimits.maxChunkSlots);
   }
 
+  /**
+   * Serialize builds. This mesher owns a single PackedRootGpuBufferPool whose slot indices (0..N) are
+   * reused on every batch, so two concurrent builds — the streaming controller dispatches up to
+   * maxInflightBatches at once — would have batch B's prepare() zero the counters, rewrite meshParams
+   * and overwrite pool.positions at the same offsets while batch A is between its count and geometry
+   * readbacks, so A reads B's geometry (mixed-page "stale GPU pool geometry"). One build at a time per
+   * pool is the pool's invariant; enforce it here regardless of caller. buildTail only ever resolves
+   * (never rejects), so awaiting it cannot leak a prior build's failure into the next.
+   */
   async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
+    const prior = this.buildTail;
+    let release!: () => void;
+    this.buildTail = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await prior;
+      return await this.runBuildPages(batch);
+    } finally {
+      release();
+    }
+  }
+
+  private async runBuildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
     if (batch.length === 0) return { nodes: [], buildMs: 0, transferBytes: 0 };
     if (this.disabledError) throw this.disabledError;
     const startedAt = performance.now();
@@ -594,6 +617,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       const chunks = lod0Chunks.get(key) ?? new Array<PageMesh>(P * P);
       const mesh = meshesBySlot.get(slot.slotIndex);
       if (!mesh) throw new Error(`GPU streamed-root chunk ${slot.slotIndex} was not read back`);
+      this.assertChunkWithinCellBounds(mesh, slot);
       chunks[slot.localChunkIndex] = mesh;
       lod0Chunks.set(key, chunks);
     }
@@ -606,6 +630,31 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       lod0Nodes.set(coord, buildLod0Page(Number(pxText), Number(pzText), chunks, this.cfg));
     }
     return requests.map((request) => this.buildRootPageFromLod0(request, lod0Nodes));
+  }
+
+  /**
+   * Reject a GPU-produced chunk whose vertices leave its own cell box (a surface-nets chunk can only
+   * place vertices ~1 cell beyond [x0,x1]x[z0,z1]). A vertex far outside is stale/garbage GPU pool
+   * data — it renders as a stretched triangle. Throwing here is a soft failure that falls the batch
+   * back to the (f64, watertight) CPU worker and names the exact slot so the GPU bug can be found.
+   */
+  private assertChunkWithinCellBounds(mesh: PageMesh, slot: GpuRootChunkSlot): void {
+    const HALO = 2;
+    const minX = slot.dims.x0 - HALO;
+    const maxX = slot.dims.x1 + HALO;
+    const minZ = slot.dims.z0 - HALO;
+    const maxZ = slot.dims.z1 + HALO;
+    const vc = mesh.positions.length / 3;
+    const violation = findChunkVerticesOutOfBounds(mesh.positions, vc, minX, maxX, minZ, maxZ);
+    if (!violation) return;
+    throw new ClodBuildError(
+      "GpuChunkOutOfBounds",
+      `GPU chunk L0:${slot.lod0Px},${slot.lod0Pz} localChunk ${slot.localChunkIndex} ` +
+        `(slot ${slot.slotIndex}, cx=${slot.cx},cz=${slot.cz}) emitted ${violation.outCount}/${vc} ` +
+        `vertices outside cell bounds [${minX},${maxX}]x[${minZ},${maxZ}]; first at ` +
+        `(${violation.x.toFixed(2)},${violation.y.toFixed(2)},${violation.z.toFixed(2)}) — ` +
+        `stale GPU pool geometry, falling back to CPU`,
+    );
   }
 
   private buildRootPageFromLod0(

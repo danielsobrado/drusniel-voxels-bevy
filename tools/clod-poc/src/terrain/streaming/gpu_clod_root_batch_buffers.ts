@@ -231,6 +231,50 @@ export function splitRootGpuBatches<T extends RootBatchRequest>(
   return batches;
 }
 
+export interface ChunkBoundsViolation {
+  outCount: number;
+  firstIndex: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Find GPU-produced chunk vertices whose X/Z fall outside the chunk's own cell bounds (plus a small
+ * halo). A correct surface-nets chunk at cells [x0,x1]x[z0,z1] can only place vertices within about
+ * one cell of that box; a vertex hundreds of cells away is stale/garbage GPU pool data being read as
+ * this chunk's geometry (which renders as a stretched triangle). Returns the first offender and the
+ * total count, or null when the chunk is in bounds. Pure, for unit testing the guard.
+ */
+export function findChunkVerticesOutOfBounds(
+  positions: Float32Array | readonly number[],
+  vertexCount: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+): ChunkBoundsViolation | null {
+  let outCount = 0;
+  let firstIndex = -1;
+  let fx = 0;
+  let fy = 0;
+  let fz = 0;
+  for (let i = 0; i < vertexCount; i++) {
+    const x = positions[i * 3];
+    const z = positions[i * 3 + 2];
+    if (x < minX || x > maxX || z < minZ || z > maxZ) {
+      if (firstIndex < 0) {
+        firstIndex = i;
+        fx = x;
+        fy = positions[i * 3 + 1];
+        fz = z;
+      }
+      outCount++;
+    }
+  }
+  return outCount > 0 ? { outCount, firstIndex, x: fx, y: fy, z: fz } : null;
+}
+
 export function planGeometryReadbackLayout(counts: readonly ChunkReadbackCounts[]): GeometryReadbackLayout {
   let positionsBytes = 0;
   let normalsBytes = 0;

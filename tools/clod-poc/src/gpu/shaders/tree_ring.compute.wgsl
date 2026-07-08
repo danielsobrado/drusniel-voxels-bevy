@@ -508,8 +508,12 @@ fn process_tree_slot(slot: u32) {
   let wc = tree_world_cell_from_slot(slot, grid, cell_size, params.center_radius.xy);
   let jitter = tree_hash2(wc, 1103u);
   let wpos = (wc + jitter) * cell_size;
+  // See grass_ring.compute.wgsl: the [0, world_max] box only bounds a finite world. Island worlds
+  // have real terrain far outside the startup square (the ring is a player-centered window), so skip
+  // the box reject there and let the tree masks decide; otherwise trees form a fixed disc at the
+  // startup world edge the player walks out of.
   let world_max = params.center_radius.w;
-  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) { return; }
+  if (fieldParams.islandEnabled == 0u && (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max)) { return; }
   let dist = distance(wpos, params.center_radius.xy);
   if (dist > params.center_radius.z + params.lod.w) { return; }
 

@@ -4,6 +4,14 @@
 // or material mismatch is DirtyInput -> hard fail with the offending pair (never
 // count-and-continue: a rejected conflict survives as an unwelded internal border and
 // fails later with a worse message). Spatial hash, NOT a kd-tree (jglrxavpok perf trap).
+//
+// The hash buckets by round(pos/epsilon), but the merge decision uses the TRUE distance to
+// canonical vertices in the vertex's bucket AND its 26 neighbours. Pure single-bucket snapping
+// is fragile at bucket boundaries: two vertices that should be coincident but differ by sub-epsilon
+// f32 noise (e.g. the shared seam of two adjacent GPU-meshed LOD0 pages at large world
+// coordinates) can straddle a bucket edge and fail to weld, leaving an internal open border that
+// only fails later as InternalBorderNotWelded. Checking neighbours within epsilon fixes that
+// without ever merging genuinely distinct surface-nets vertices (which are >= ~0.5 cells apart).
 
 import { PageMesh, ClodBuildError, vertexCount, type BorderTolerances } from "../types.js";
 import { assertMaterialWeights, normalizeMaterialWeights } from "../material/material_weights.js";
@@ -19,13 +27,14 @@ export interface WeldResult {
   report: WeldReport;
 }
 
-type WeldKeyMap = Map<number, Map<number, Map<number, number>>>;
+/** quantized xyz bucket -> list of canonical NEW indices whose position rounds into that bucket. */
+type WeldKeyMap = Map<number, Map<number, Map<number, number[]>>>;
 
-function getCanonical(map: WeldKeyMap, qx: number, qy: number, qz: number): number | undefined {
+function bucketList(map: WeldKeyMap, qx: number, qy: number, qz: number): number[] | undefined {
   return map.get(qx)?.get(qy)?.get(qz);
 }
 
-function setCanonical(map: WeldKeyMap, qx: number, qy: number, qz: number, value: number): void {
+function addToBucket(map: WeldKeyMap, qx: number, qy: number, qz: number, value: number): void {
   let yz = map.get(qx);
   if (!yz) {
     yz = new Map();
@@ -36,7 +45,47 @@ function setCanonical(map: WeldKeyMap, qx: number, qy: number, qz: number, value
     z = new Map();
     yz.set(qy, z);
   }
-  z.set(qz, value);
+  const list = z.get(qz);
+  if (list) list.push(value);
+  else z.set(qz, [value]);
+}
+
+/**
+ * Nearest canonical vertex within `epsilon` (true distance) across the vertex's bucket and its 26
+ * neighbours; deterministic tie-break by smaller canonical index. Returns undefined when none.
+ */
+function findCanonicalWithinEpsilon(
+  map: WeldKeyMap,
+  pos: readonly number[],
+  px: number,
+  py: number,
+  pz: number,
+  qx: number,
+  qy: number,
+  qz: number,
+  epsilon: number,
+): number | undefined {
+  let best: number | undefined;
+  let bestD2 = epsilon * epsilon;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const list = bucketList(map, qx + dx, qy + dy, qz + dz);
+        if (!list) continue;
+        for (const ci of list) {
+          const cx = px - pos[ci * 3];
+          const cy = py - pos[ci * 3 + 1];
+          const cz = pz - pos[ci * 3 + 2];
+          const d2 = cx * cx + cy * cy + cz * cz;
+          if (d2 < bestD2 || (d2 === bestD2 && (best === undefined || ci < best))) {
+            bestD2 = d2;
+            best = ci;
+          }
+        }
+      }
+    }
+  }
+  return best;
 }
 
 export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: BorderTolerances): WeldResult {
@@ -58,10 +107,10 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
   for (let i = 0; i < n; i++) {
     const px = mesh.positions[i * 3], py = mesh.positions[i * 3 + 1], pz = mesh.positions[i * 3 + 2];
     const qx = Math.round(px * inv), qy = Math.round(py * inv), qz = Math.round(pz * inv);
-    const found = getCanonical(canonical, qx, qy, qz);
+    const found = findCanonicalWithinEpsilon(canonical, pos, px, py, pz, qx, qy, qz, epsilon);
     if (found === undefined) {
       const ni = pos.length / 3;
-      setCanonical(canonical, qx, qy, qz, ni);
+      addToBucket(canonical, qx, qy, qz, ni);
       remap[i] = ni;
       pos.push(px, py, pz);
       nrm.push(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);

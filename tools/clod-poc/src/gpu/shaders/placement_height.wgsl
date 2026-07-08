@@ -113,6 +113,12 @@ fn placement_beach_highland_preserve(edge_distance: f32, inland_height: f32, oce
 }
 
 fn placement_border_coast_height(wx: f32, wz: f32, inland_height: f32, world_size: f32) -> f32 {
+  // Infinite-island worlds have no finite rectangular coast: the analytic field shapes its own
+  // shoreline and there is terrain far outside the [0, world_size] startup box. The beach/ocean
+  // collapse below keys off distance to that box edge, so applying it in an island world flattens
+  // everything past the startup square to the waterline (the flat-ocean failure the terrain field
+  // already disables for islandEnabled). Leave the inland height untouched in that mode.
+  if (fieldParams.islandEnabled != 0u) { return inland_height; }
   let scale = placement_resolved_coast_scale(world_size);
   let ocean_start = max(1.0, floor(PLACEMENT_COAST_OCEAN_START_CELLS * scale));
   let shore_backshore = max(1.0, floor(PLACEMENT_COAST_SHORE_BACKSHORE_CELLS * scale));
