@@ -188,7 +188,7 @@ export async function bootstrapClodPoc() {
           world.proceduralTerrain = cached.terrain;
           world.bakedMacroTint = cached.macroTint;
           terrainTextureWindowSwaps++;
-          terrainView.materialController.setProceduralTerrain(cached.terrain, cached.config, cached.macroTint);
+          terrainView.materialController.setProceduralTerrain(cached.terrain, cached.config);
           terrainView.applyTerrainTextures();
           if (postRenderer.longViewHooks?.stats) {
             postRenderer.longViewHooks.stats.counters.terrainTextureWindowSwaps = terrainTextureWindowSwaps;
@@ -217,11 +217,6 @@ export async function bootstrapClodPoc() {
     streamingScene: queryScene?.startsWith("infinite-") ?? false,
   });
 
-  // Terrain-ownership contract: streamed CLOD owns near/mid, exactly one far renderer owns the far
-  // band (resolveStreamingOwnership already enforces the radial seam farShellInnerM >= clodRadiusM),
-  // and the legacy finite far shell must never render alongside the player-centred infinite shell.
-  // Predict the far renderer activity from the same conditions the systems use, assert the invariant,
-  // and publish the resolved ownership (with the real seam radii) for the HUD overlay.
   const farRendererActivity = {
     legacyFarShell: world.worldMode.farOwner === "legacy_far_shell",
     infiniteFarShell: isLongViewCapableScene(queryScene),
@@ -260,7 +255,6 @@ export async function bootstrapClodPoc() {
   if (isLongViewCapableScene(queryScene)) {
     const lvConfig = createDefaultLongViewConfig();
     applyLongViewScenePreset(lvConfig, queryScene, naadfIntegration);
-
     applyOwnershipToFarShellRange(lvConfig.farShell, streamingOwnership);
 
     farShellMetrics = createFarShellMetrics();
@@ -299,16 +293,10 @@ export async function bootstrapClodPoc() {
       ? naadfIntegration?.getFarSummaryGpuAtlasView()
       : undefined;
 
-    if (naadfHeightSamplingMode === "gpu" && !useParity) {
-      throw new Error("NAADF GPU height mode requires the WebGPU parity far terrain material");
-    }
-    if (naadfHeightSamplingMode === "gpu" && !farSummaryGpuAtlas) {
-      throw new Error("NAADF GPU height mode requires a far-summary GPU atlas");
-    }
+    if (naadfHeightSamplingMode === "gpu" && !useParity) throw new Error("NAADF GPU height mode requires the WebGPU parity far terrain material");
+    if (naadfHeightSamplingMode === "gpu" && !farSummaryGpuAtlas) throw new Error("NAADF GPU height mode requires a far-summary GPU atlas");
 
-    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu"
-      ? "gpu"
-      : naadfHeightSamplingMode;
+    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu" ? "gpu" : naadfHeightSamplingMode;
     if (farShellCpuHeightsEnabled && !heightProvider && effectiveHeightSamplingMode !== "gpu") {
       throw new Error("long-view scene requires NAADF or far-summary height provider");
     }
@@ -337,19 +325,15 @@ export async function bootstrapClodPoc() {
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });
-    
+
     if (farShellCpuHeightsEnabled) infiniteFarShell.setHeightProvider(heightProvider);
     renderer.scene.add(infiniteFarShell.mesh);
-
-    // InfiniteFarShell is the active long-view far renderer; keep the legacy controller disabled.
     terrainView.farShellController.setEnabled(false);
 
     terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {
       infiniteFarShell?.setReceiveSunShadows(enabled);
     });
-    if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) {
-      infiniteFarShell.setReceiveSunShadows(true);
-    }
+    if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) infiniteFarShell.setReceiveSunShadows(true);
 
     if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {
       farSummaryIntegration.setForceSlowBuilds(true);
@@ -437,7 +421,7 @@ export async function bootstrapClodPoc() {
     player: renderer.player,
     interaction: renderer.interaction,
     terrainColliders: renderer.terrainColliders,
-    terrainRaycast: terrainView.terrainRaycast,
+    terrainRaycast: renderer.terrainRaycast,
     isWebGpu: renderer.isWebGpu,
     worldCells: world.worldCells,
     clodWorker: world.clodWorker,
@@ -468,48 +452,35 @@ export async function bootstrapClodPoc() {
     floatingOrigin,
     onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming || infiniteFarShell || floatingOrigin)
       ? (() => {
-          // The shell first builds from procedural fallbacks (no tiles are
-          // ready that early); refresh its heights as tile commits land.
           let shellRefreshCommitRev = 0;
           let framesSinceShellRefresh = 0;
           const SHELL_REFRESH_INTERVAL_FRAMES = 120;
           return (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
-          const originStats = floatingOrigin.stats();
-          if (postRenderer.longViewHooks?.stats) {
-            postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
-            postRenderer.longViewHooks.stats.counters.floatingOriginRebaseCount = originStats.rebaseCount;
-            postRenderer.longViewHooks.stats.counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
-            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetX = originStats.originX;
-            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
-          }
-          infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
-          if (farSummaryIntegration) {
-            timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera));
-          }
-          if (naadfIntegration) {
-            timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
-          }
-          if (farSummaryIntegration && infiniteFarShell) {
-            framesSinceShellRefresh++;
-            if (
-              framesSinceShellRefresh >= SHELL_REFRESH_INTERVAL_FRAMES
-              && farSummaryIntegration.cache.hasNewCommitsSince(shellRefreshCommitRev)
-            ) {
-              shellRefreshCommitRev = farSummaryIntegration.cache.commitRevisionAt();
-              framesSinceShellRefresh = 0;
-              infiniteFarShell.requestHeightRefresh();
+            const originStats = floatingOrigin.stats();
+            if (postRenderer.longViewHooks?.stats) {
+              postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
+              postRenderer.longViewHooks.stats.counters.floatingOriginRebaseCount = originStats.rebaseCount;
+              postRenderer.longViewHooks.stats.counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
+              postRenderer.longViewHooks.stats.counters.floatingOriginOffsetX = originStats.originX;
+              postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
             }
-          }
-          if (infiniteFarShell) {
-            timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex));
-          }
-          if (terrainView.shadowProxyController) {
-            timeFarSummarySubphase("farSumShadowProxyMs", () => terrainView.shadowProxyController!.updateFrame(camera.position.x, camera.position.z));
-          }
-          if (postRenderer.state.terrainMaterialSource === "procedural" && biomeTextureStreaming) {
-            timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: camera.position.x, z: camera.position.z, frameIndex }));
-          }
-        };
+            infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
+            if (farSummaryIntegration) timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera));
+            if (naadfIntegration) timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
+            if (farSummaryIntegration && infiniteFarShell) {
+              framesSinceShellRefresh++;
+              if (framesSinceShellRefresh >= SHELL_REFRESH_INTERVAL_FRAMES && farSummaryIntegration.cache.hasNewCommitsSince(shellRefreshCommitRev)) {
+                shellRefreshCommitRev = farSummaryIntegration.cache.commitRevisionAt();
+                framesSinceShellRefresh = 0;
+                infiniteFarShell.requestHeightRefresh();
+              }
+            }
+            if (infiniteFarShell) timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex));
+            if (terrainView.shadowProxyController) timeFarSummarySubphase("farSumShadowProxyMs", () => terrainView.shadowProxyController!.updateFrame(camera.position.x, camera.position.z));
+            if (postRenderer.state.terrainMaterialSource === "procedural" && biomeTextureStreaming) {
+              timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: camera.position.x, z: camera.position.z, frameIndex }));
+            }
+          };
         })()
       : undefined,
     naadfIntegration,
