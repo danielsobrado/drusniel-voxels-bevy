@@ -160,6 +160,7 @@ export function initFarSummaryIntegration(
     const nowMs = performance.now();
 
     cache.requestTiles(requests, frameIndex, nowMs);
+    const gpuDirtyRequests = gpuDirtyRequestsForCache(cache, requests);
 
     const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
@@ -172,7 +173,7 @@ export function initFarSummaryIntegration(
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
 
-    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequestsForCache(cache, requests));
+    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests);
 
     cache.evictColdTiles(frameIndex, nowMs);
 
