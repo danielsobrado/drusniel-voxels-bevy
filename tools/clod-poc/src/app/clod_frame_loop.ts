@@ -1,7 +1,4 @@
-import { createLongViewFrameDiagnostics } from "../phase0/long_view_frame_diagnostics.js";
-import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
-import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
-import { createRendererOwnershipResidencyFeeds } from "../stream/ownership_residency.js";
+
 import { runTerrainFramePhase } from "./frame_loop/terrain_frame_phase.js";
 import { runVegetationFramePhase } from "./frame_loop/vegetation_frame_phase.js";
 import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
@@ -160,73 +157,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   let statsRevision = 0;
   let lastStatsModeKey = "";
   let lastStatsDecision: StatsSyncThrottleDecision = { shouldRun: false, reason: "skipped" };
-  const diagnosticsPageSizeM = diagnostics.longViewDiagnosticsCfg.page.chunks_per_page * diagnostics.longViewDiagnosticsCfg.page.chunk_size;
-  const diagnosticsChunksPerPage = diagnostics.longViewDiagnosticsCfg.page.chunks_per_page;
-  const ownershipRuntime = new TerrainOwnershipRuntime(
-    resolveStreamingOwnership({
-      streaming: diagnostics.phase0Streaming,
-      targetVisibleM: diagnostics.phase0TargetVisibleM,
-      targetFutureVisibleM: diagnostics.phase0Config.phase0.target_future_visible_m,
-      pageSizeM: diagnosticsPageSizeM,
-      streamingScene: diagnostics.queryScene?.startsWith("infinite-") ?? false,
-    }),
-    {
-      live: {
-        chunkSizeM: diagnostics.longViewDiagnosticsCfg.page.chunk_size,
-        hysteresisM: diagnostics.longViewDiagnosticsCfg.page.chunk_size * 2,
-      },
-      visualPages: {
-        pageSizeM: diagnosticsPageSizeM,
-        maxLevel: diagnostics.maxTerrainLevel,
-        hysteresisM: diagnosticsPageSizeM,
-      },
-    },
-  );
-  const rendererOwnershipResidencyFeeds = () => createRendererOwnershipResidencyFeeds({
-    liveReadyPageKeys: () => terrain.nearFieldBubbleController.readyPageKeys(),
-    clodReadyPageKeys: terrain.getClodReadyPageKeys ?? (() => []),
-    liveChunksPerPage: diagnosticsChunksPerPage,
-  });
-  const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
-    getHooks: render.getHooks,
-    getAverageFps: () => averageFpsRef.value,
-    getFrameStartMs: () => frameStart,
-    renderer: render.renderer,
-    getSelectionStats: () => terrain.selectionController.stats(),
-    maxTerrainLevel: diagnostics.maxTerrainLevel,
-    getGrassStats: stats.getGrassStats,
-    getTreeStats: stats.getTreeStats,
-    getStoneStats: stats.getStoneStats,
-    worldCells: terrain.worldCells,
-    getFarShellRadiusFactor: diagnostics.getFarShellRadiusFactor,
-    farShellBuilt: diagnostics.farShellBuilt,
-    farShellCanopyEnabled: diagnostics.farShellCanopyEnabled,
-    getFarShellMetrics: diagnostics.getFarShellMetrics,
-    infiniteFarShellActive: diagnostics.infiniteFarShellActive,
-    isLongView: diagnostics.isLongView,
-    getShadowProxyInert: diagnostics.getShadowProxyInert,
-    getShadowProxyEnabled: diagnostics.getShadowProxyEnabled,
-    phase0TargetVisibleM: diagnostics.phase0TargetVisibleM,
-    phase0Config: diagnostics.phase0Config,
-    queryScene: diagnostics.queryScene,
-    cfg: diagnostics.longViewDiagnosticsCfg,
-    camera: render.camera,
-    phase0VelocityX: diagnostics.phase0VelocityX,
-    phase0VelocityZ: diagnostics.phase0VelocityZ,
-    phase0Streaming: diagnostics.phase0Streaming,
-    ownershipRuntime,
-    getOwnershipResidencyFeeds: rendererOwnershipResidencyFeeds,
-    getFarClipmapOwnershipSnapshot: diagnostics.getFarClipmapOwnershipSnapshot,
-    borderOceanScene: diagnostics.queryScene === "border-ocean"
-      ? {
-          waterField: waterWeather.waterField,
-          deepOcean: waterWeather.deepOceanConfig,
-          deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
-          oceanSampler: waterWeather.oceanSampler,
-          playerConfig: player.player.config,
-        }
-      : undefined,
-  });
 
   render.renderer.setAnimationLoop(() => {
     materialChurnDiagnostics.beginFrame(++materialChurnFrame);
@@ -517,15 +447,21 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       chunkGroupsBuiltThisFrame: terrainPhaseResult.chunkGroupsBuiltThisFrame,
       nearFieldBubbleController: terrain.nearFieldBubbleController,
       interaction: player.interaction,
-      makeGrassFallback: vegetation.makeGrassFallback,
-      updateLongViewDiagnostics,
-      getFarSummaryStats: farSummary?.getFarSummaryStats,
-      getFarSummaryGpuRuntimeStats: farSummary?.getFarSummaryGpuRuntimeStats,
-      grassSystem: vegetation.grassSystem,
-      deepOceanSurface: waterWeather.deepOceanSurface,
-      profile: collectFrameTiming ? { phaseTiming } : undefined,
-      p0DirtyAtlasExercise,
-      statsSyncThrottle: lastStatsDecision,
+      makeGrassSettings: render.makeGrassSettings,
+      grassPrepassEnabled: render.grassPrepassEnabled,
+      perfProbe,
+      phaseTiming,
+      dynamicResolution: render.dynamicResolution,
+      statsSyncThrottle: { decision: lastStatsDecision, diagnostics: statsSyncThrottle.diagnostics() },
     });
+
+    render.gpuPassTiming?.update();
+    if (render.gpuPassTiming?.enabled) {
+      if (hooks?.stats) {
+        const dst = hooks.stats.gpuPasses;
+        for (const key of Object.keys(dst)) delete dst[key];
+        Object.assign(dst, render.gpuPassTiming.passes);
+      }
+    }
   });
 }
