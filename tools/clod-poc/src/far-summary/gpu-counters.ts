@@ -42,21 +42,28 @@ export function publishFarSummaryGpuCounters(
   target: Record<string, number> | undefined,
   counters: FarSummaryGpuCounters,
 ): void {
-  if (!target) return;
-  target["far_summary_gpu_enabled"] = counters.enabled;
-  target["far_summary_gpu_device_ready"] = counters.deviceReady;
-  target["far_summary_gpu_dirty_tiles"] = counters.dirtyTiles;
-  target["far_summary_gpu_tiles_dispatched"] = counters.tilesDispatched;
-  target["far_summary_gpu_batches_dispatched"] = counters.batchesDispatched;
-  target["far_summary_gpu_fallback_tiles"] = counters.fallbackTiles;
-  target["far_summary_gpu_failed_batches"] = counters.failedBatches;
-  target["far_summary_gpu_compute_ms_p50"] = counters.computeMsP50;
-  target["far_summary_gpu_compute_ms_p95"] = counters.computeMsP95;
-  target["far_summary_gpu_readback_ms_p95"] = counters.readbackMsP95;
-  target["far_summary_gpu_parity_checked_tiles"] = counters.parityCheckedTiles;
-  target["far_summary_gpu_parity_failed_tiles"] = counters.parityFailedTiles;
-  target["far_summary_gpu_summary_records_live"] = counters.summaryRecordsLive;
-  target["far_summary_gpu_buffer_bytes"] = counters.bufferBytes;
-  target["far_summary_gpu_dropped_stale_batches"] = counters.droppedStaleBatches;
-  target["far_summary_cpu_fallback_ms_p95"] = counters.cpuFallbackMsP95;
+  const out = target ?? globalClodCounters();
+  if (!out) return;
+  out["far_summary_gpu_enabled"] = counters.enabled;
+  out["far_summary_gpu_device_ready"] = counters.deviceReady;
+  out["far_summary_gpu_dirty_tiles"] = counters.dirtyTiles;
+  out["far_summary_gpu_tiles_dispatched"] = counters.tilesDispatched;
+  out["far_summary_gpu_batches_dispatched"] = counters.batchesDispatched;
+  out["far_summary_gpu_fallback_tiles"] = counters.fallbackTiles;
+  out["far_summary_gpu_failed_batches"] = counters.failedBatches;
+  out["far_summary_gpu_compute_ms_p50"] = counters.computeMsP50;
+  out["far_summary_gpu_compute_ms_p95"] = counters.computeMsP95;
+  out["far_summary_gpu_readback_ms_p95"] = counters.readbackMsP95;
+  out["far_summary_gpu_parity_checked_tiles"] = counters.parityCheckedTiles;
+  out["far_summary_gpu_parity_failed_tiles"] = counters.parityFailedTiles;
+  out["far_summary_gpu_summary_records_live"] = counters.summaryRecordsLive;
+  out["far_summary_gpu_buffer_bytes"] = counters.bufferBytes;
+  out["far_summary_gpu_dropped_stale_batches"] = counters.droppedStaleBatches;
+  out["far_summary_cpu_fallback_ms_p95"] = counters.cpuFallbackMsP95;
+}
+
+function globalClodCounters(): Record<string, number> | undefined {
+  return (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
 }
