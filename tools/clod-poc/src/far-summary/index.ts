@@ -55,6 +55,7 @@ export type { FarSummaryIntegration, FarSummaryIntegrationOptions } from "./inte
 
 export {
   DEFAULT_FAR_SUMMARY_GPU_CONFIG,
+  FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS,
   farSummaryGpuConfigFromParams,
   farSummaryGpuConfigFromWindow,
   farSummaryGpuFallbackDecision,
@@ -83,8 +84,14 @@ export type { FarSummaryGpuCounters } from "./gpu-counters.js";
 
 export { composeFarSummaryGpuBuildShader } from "./gpu-shader.js";
 
-export { farSummaryGpuRecordToTile } from "./gpu-cache.js";
-export type { FarSummaryGpuTileCommitInput } from "./gpu-cache.js";
+export {
+  farSummaryGpuCellRecordsToTile,
+  farSummaryGpuRecordToTile,
+} from "./gpu-cache.js";
+export type {
+  FarSummaryGpuCellTileCommitInput,
+  FarSummaryGpuTileCommitInput,
+} from "./gpu-cache.js";
 
 export {
   createFarSummaryGpuBuilder,
