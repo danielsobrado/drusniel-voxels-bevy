@@ -24,9 +24,10 @@ import {
   disposeCanopyTextureSet,
 } from "./canopy_texture.js";
 import {
-  buildFarCanopyShellFromTextureSet,
-  type FarCanopyShell,
-} from "../gpu/far_canopy_shell.js";
+  buildCanopyGpuImpostorsFromTextureSet,
+  maxCanopyGpuImpostorInstances,
+  type CanopyGpuImpostorShell,
+} from "./canopy_gpu_impostors.js";
 
 export interface CanopyShellSystemDeps {
   scene: THREE.Scene;
@@ -41,7 +42,7 @@ export interface CanopyShellSystemDeps {
 export interface CanopyShellSystem {
   readonly active: boolean;
   readonly debugState: CanopyDebugState;
-  readonly shell: FarCanopyShell | null;
+  readonly shell: CanopyGpuImpostorShell | null;
   update(cameraX: number, cameraZ: number): void;
   applyDebugConfig(): void;
   dispose(): void;
@@ -90,9 +91,11 @@ export function canopyTextureConfigKey(config: CanopyShellConfig): string {
 }
 
 export function shellCenterForTextureSet(set: CanopyTextureSet): { x: number; z: number } {
+  const x = set.originX + set.extentM * 0.5;
+  const z = set.originZ + set.extentM * 0.5;
   return {
-    x: set.originX + set.extentM * 0.5,
-    z: set.originZ + set.extentM * 0.5,
+    x: Number.isFinite(x) ? x : 0,
+    z: Number.isFinite(z) ? z : 0,
   };
 }
 
@@ -143,7 +146,7 @@ export function createCanopyShellSystem(
   const debugState = createCanopyDebugState(config);
   const overlays = createCanopyDebugOverlays(deps.scene);
 
-  let shell: FarCanopyShell | null = null;
+  let shell: CanopyGpuImpostorShell | null = null;
   let textureSet: CanopyTextureSet | null = null;
   let metrics = createEmptyCanopyMetrics();
   let uploadBudgetUsed = 0;
@@ -160,9 +163,10 @@ export function createCanopyShellSystem(
   };
 
   const positionShellAtTextureCenter = () => {
-    if (!shell || !textureSet) return;
-    const center = shellCenterForTextureSet(textureSet);
-    shell.mesh.position.set(center.x, 0, center.z);
+    if (!shell) return;
+    shell.mesh.position.set(shell.centerX, 0, shell.centerZ);
+    metrics.gpuImpostorCenterX = shell.centerX;
+    metrics.gpuImpostorCenterZ = shell.centerZ;
   };
 
   const disposeShellAndTextures = () => {
@@ -174,6 +178,10 @@ export function createCanopyShellSystem(
     disposeCanopyTextureSet(textureSet);
     textureSet = null;
     metrics.shellTriangles = 0;
+    metrics.gpuImpostorEnabled = 0;
+    metrics.gpuImpostorInstances = 0;
+    metrics.gpuImpostorMaxInstances = 0;
+    metrics.gpuImpostorCoverageThreshold = 0;
     debugState.syntheticFallbackActive = false;
   };
 
@@ -183,20 +191,18 @@ export function createCanopyShellSystem(
       shell.dispose();
     }
     const lighting = deps.getLighting();
-    shell = buildFarCanopyShellFromTextureSet(set, config, {
-      sunDirection: lighting.sunDirection,
-      sunColor: lighting.sunColor,
-      skyLight: lighting.skyLight,
-      groundLight: lighting.groundLight,
-    }, {
-      grid: shellGridForTriangleBudget(config.budgets.maxShellTris),
-      buildRelative: true,
-      skipInteriorHole: true,
-      showCoverageHeatmap: debugState.showCoverageHeatmap,
-      wireframe: debugState.showShellWireframe,
+    shell = buildCanopyGpuImpostorsFromTextureSet(set, config, lighting, {
+      maxInstances: maxCanopyGpuImpostorInstances(config.budgets.maxShellTris),
+      coverageThreshold: 0.12,
+      sampleStride: 1,
     });
     deps.scene.add(shell.mesh);
     metrics.shellTriangles = shell.triangleCount;
+    metrics.gpuImpostorEnabled = 1;
+    metrics.gpuImpostorInstances = shell.instanceCount;
+    metrics.gpuImpostorBuilds++;
+    metrics.gpuImpostorMaxInstances = shell.maxInstances;
+    metrics.gpuImpostorCoverageThreshold = shell.coverageThreshold;
     positionShellAtTextureCenter();
   };
 
