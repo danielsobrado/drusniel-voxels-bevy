@@ -83,6 +83,9 @@ export type { FarSummaryGpuCounters } from "./gpu-counters.js";
 
 export { composeFarSummaryGpuBuildShader } from "./gpu-shader.js";
 
+export { farSummaryGpuRecordToTile } from "./gpu-cache.js";
+export type { FarSummaryGpuTileCommitInput } from "./gpu-cache.js";
+
 export {
   createFarSummaryGpuBuilder,
   dispatchFarSummaryGpuPlanOrFallback,
