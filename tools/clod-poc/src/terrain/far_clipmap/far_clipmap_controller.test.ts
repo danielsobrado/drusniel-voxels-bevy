@@ -28,9 +28,10 @@ function unavailableSource(): FarClipmapSource {
   };
 }
 
-function readyFlatSource(): FarClipmapSource {
+function readyFlatSource(revision = 0): FarClipmapSource {
   return {
     isReady: () => true,
+    revision: () => revision,
     sampleHeight: () => 12,
     sampleMaterial: () => 1,
     sampleBiome: () => 1,
@@ -50,10 +51,13 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.readyTiles).toBe(2);
     expect(stats.pendingTiles).toBe(0);
     expect(stats.snapUpdatesThisFrame).toBe(2);
+    expect(stats.sourceRefreshesThisFrame).toBe(2);
+    expect(stats.sourceRefreshesTotal).toBe(2);
     expect(stats.rebuiltTilesThisFrame).toBe(0);
     expect(stats.verticesBuiltThisFrame).toBe(0);
     expect(stats.trianglesBuiltThisFrame).toBe(0);
     expect(stats.buildMsThisFrame).toBe(0);
+    expect(stats.sourceRefreshMsThisFrame).toBeGreaterThanOrEqual(0);
     expect(stats.fallbackSamplesThisFrame).toBeGreaterThan(0);
     expect(stats.shaderDisplacementEnabled).toBe(1);
     expect(stats.shaderDisplacedTiles).toBe(2);
@@ -62,6 +66,38 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.snappedOriginX).toBe(256);
     expect(stats.snappedOriginZ).toBe(-192);
     expect(stats.snapErrorMaxM).toBeLessThan(64);
+
+    controller.dispose();
+  });
+
+  it("refreshes stable shader rings when the far-summary source revision changes", () => {
+    let revision = 1;
+    const source: FarClipmapSource = {
+      isReady: () => true,
+      revision: () => revision,
+      sampleHeight: () => 12,
+      sampleMaterial: () => 1,
+      sampleBiome: () => 1,
+      sampleWater: () => 0,
+    };
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(
+      scene,
+      config({ sourceRefreshMaxPerFrame: 1, sourceRefreshIntervalFrames: 999 }),
+      source,
+      { webGpuCompatibleMaterial: true },
+    );
+
+    controller.update(new THREE.Vector3(257.5, 0, -130.25));
+    revision = 2;
+    const firstRefresh = controller.update(new THREE.Vector3(257.5, 0, -130.25));
+    const secondRefresh = controller.update(new THREE.Vector3(257.5, 0, -130.25));
+
+    expect(firstRefresh.snapUpdatesThisFrame).toBe(0);
+    expect(firstRefresh.sourceRefreshesThisFrame).toBe(1);
+    expect(firstRefresh.sourceRevision).toBe(2);
+    expect(secondRefresh.sourceRefreshesThisFrame).toBe(1);
+    expect(secondRefresh.sourceRefreshesTotal).toBe(4);
 
     controller.dispose();
   });
@@ -78,6 +114,7 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.readyTiles).toBe(0);
     expect(stats.pendingTiles).toBe(2);
     expect(stats.snapUpdatesThisFrame).toBe(0);
+    expect(stats.sourceRefreshesThisFrame).toBe(0);
     expect(stats.rebuiltTilesThisFrame).toBe(0);
     expect(stats.verticesBuiltThisFrame).toBe(0);
     expect(stats.trianglesBuiltThisFrame).toBe(0);
@@ -100,6 +137,7 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.shaderDisplacedTiles).toBe(0);
     expect(stats.cpuBakedTiles).toBe(2);
     expect(stats.rebuiltTilesThisFrame).toBe(2);
+    expect(stats.sourceRefreshesThisFrame).toBe(0);
     expect(stats.verticesBuiltThisFrame).toBeGreaterThan(0);
     expect(stats.trianglesBuiltThisFrame).toBeGreaterThan(0);
 
