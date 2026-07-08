@@ -7,6 +7,7 @@ import {
 } from "./far_clipmap_geometry.js";
 import {
   createFarClipmapMaterial,
+  farClipmapMaterialDisplacementMode,
   farClipmapShaderRenderOrder,
   setFarClipmapMaterialDebugMode,
   updateFarClipmapMaterialFrameUniforms,
@@ -23,9 +24,23 @@ export interface FarClipmapStats {
   readyTiles: number;
   pendingTiles: number;
   rebuiltTilesThisFrame: number;
+  snapUpdatesThisFrame: number;
   innerRadiusM: number;
   outerRadiusM: number;
   snapSizeM: number;
+  centerX: number;
+  centerZ: number;
+  snappedOriginX: number;
+  snappedOriginZ: number;
+  snapErrorXM: number;
+  snapErrorZM: number;
+  snapErrorMaxM: number;
+  shaderDisplacementEnabled: number;
+  shaderDisplacedTiles: number;
+  cpuBakedTiles: number;
+  reusableGridTiles: number;
+  geometryCreatesTotal: number;
+  geometryDisposalsTotal: number;
   gpuOwnedCells: number;
   gpuOwnershipHoles: number;
   sourceReady: number;
@@ -70,10 +85,12 @@ interface RingMesh {
   cellSizeM: number;
   readySnapX: number;
   readySnapZ: number;
+  displacementMode: "shader" | "cpu-baked";
 }
 
 interface BuildFrameStats {
   rebuilt: number;
+  snapUpdates: number;
   buildMs: number;
   vertices: number;
   triangles: number;
@@ -81,14 +98,41 @@ interface BuildFrameStats {
   exceptionSamples: number;
 }
 
+interface FarClipmapStatsSnapshotInput {
+  centerX: number;
+  centerZ: number;
+  snapX: number;
+  snapZ: number;
+  shaderDisplacedTiles: number;
+  cpuBakedTiles: number;
+  reusableGridTiles: number;
+  geometryCreatesTotal: number;
+  geometryDisposalsTotal: number;
+}
+
 function emptyFrameStats(): BuildFrameStats {
   return {
     rebuilt: 0,
+    snapUpdates: 0,
     buildMs: 0,
     vertices: 0,
     triangles: 0,
     fallbackSamples: 0,
     exceptionSamples: 0,
+  };
+}
+
+function emptySnapshot(): FarClipmapStatsSnapshotInput {
+  return {
+    centerX: 0,
+    centerZ: 0,
+    snapX: 0,
+    snapZ: 0,
+    shaderDisplacedTiles: 0,
+    cpuBakedTiles: 0,
+    reusableGridTiles: 0,
+    geometryCreatesTotal: 0,
+    geometryDisposalsTotal: 0,
   };
 }
 
@@ -99,8 +143,12 @@ function makeStats(
   frameStats: BuildFrameStats,
   sourceReady: boolean,
   totals: { buildMs: number; fallbackSamples: number; exceptionSamples: number },
+  snapshot: FarClipmapStatsSnapshotInput,
 ): FarClipmapStats {
   const pendingTiles = Math.max(0, config.ringCount - readyTiles);
+  const snapErrorXM = snapshot.centerX - snapshot.snapX;
+  const snapErrorZM = snapshot.centerZ - snapshot.snapZ;
+  const shaderDisplacementEnabled = snapshot.shaderDisplacedTiles > 0 ? 1 : 0;
   return {
     enabled: config.enabled ? 1 : 0,
     visible: visible && config.enabled ? 1 : 0,
@@ -109,9 +157,23 @@ function makeStats(
     readyTiles,
     pendingTiles,
     rebuiltTilesThisFrame: frameStats.rebuilt,
+    snapUpdatesThisFrame: frameStats.snapUpdates,
     innerRadiusM: config.innerRadiusM,
     outerRadiusM: config.outerRadiusM,
     snapSizeM: config.snapSizeM,
+    centerX: snapshot.centerX,
+    centerZ: snapshot.centerZ,
+    snappedOriginX: snapshot.snapX,
+    snappedOriginZ: snapshot.snapZ,
+    snapErrorXM,
+    snapErrorZM,
+    snapErrorMaxM: Math.max(Math.abs(snapErrorXM), Math.abs(snapErrorZM)),
+    shaderDisplacementEnabled,
+    shaderDisplacedTiles: snapshot.shaderDisplacedTiles,
+    cpuBakedTiles: snapshot.cpuBakedTiles,
+    reusableGridTiles: snapshot.reusableGridTiles,
+    geometryCreatesTotal: snapshot.geometryCreatesTotal,
+    geometryDisposalsTotal: snapshot.geometryDisposalsTotal,
     gpuOwnedCells: readyTiles,
     gpuOwnershipHoles: pendingTiles,
     sourceReady: sourceReady ? 1 : 0,
@@ -158,6 +220,8 @@ class FarClipmapControllerImpl implements FarClipmapController {
   private totalBuildMs = 0;
   private totalFallbackSamples = 0;
   private totalExceptionSamples = 0;
+  private geometryCreatesTotal = 0;
+  private geometryDisposalsTotal = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -169,7 +233,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
       buildMs: 0,
       fallbackSamples: 0,
       exceptionSamples: 0,
-    });
+    }, emptySnapshot());
     for (let ring = 0; ring < config.ringCount; ring++) {
       const range = farClipmapRingRange(config, ring);
       const cellSizeM = ringCellSize(config, range.outerRadiusM);
@@ -184,6 +248,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         webGpuCompatible: options.webGpuCompatibleMaterial === true,
       });
       const mesh = new THREE.Mesh(createFarClipmapGridGeometry({ gridResolution: config.gridResolution }), material);
+      this.geometryCreatesTotal++;
       mesh.name = "far-clipmap-ring-" + String(ring);
       mesh.frustumCulled = false;
       mesh.renderOrder = farClipmapShaderRenderOrder();
@@ -197,6 +262,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         cellSizeM,
         readySnapX: Number.NaN,
         readySnapZ: Number.NaN,
+        displacementMode: farClipmapMaterialDisplacementMode(material),
       });
     }
   }
@@ -205,7 +271,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
     const frameStats = emptyFrameStats();
     const sourceReady = this.source.isReady?.() ?? true;
     if (!this.config.enabled) {
-      this.lastStats = makeStats(this.config, false, 0, frameStats, sourceReady, this.totals());
+      this.lastStats = makeStats(this.config, false, 0, frameStats, sourceReady, this.totals(), this.snapshot());
       return this.lastStats;
     }
     this.centerX = cameraPosition.x;
@@ -218,14 +284,15 @@ class FarClipmapControllerImpl implements FarClipmapController {
     const triangleCount = ringTriangleCount(this.config);
     for (const ring of this.rings) {
       const stale = ring.readySnapX !== snap.snapX || ring.readySnapZ !== snap.snapZ;
-      if (stale && sourceReady && frameStats.rebuilt < this.config.maxRebuildsPerFrame) {
+      if (stale && this.canRefreshRing(ring, sourceReady, frameStats)) {
         const startedAt = performance.now();
         ring.readySnapX = snap.snapX;
         ring.readySnapZ = snap.snapZ;
-        frameStats.rebuilt++;
+        frameStats.snapUpdates++;
 
-        if (this.options.webGpuCompatibleMaterial === true) {
+        if (ring.displacementMode === "cpu-baked") {
           const oldGeo = ring.mesh.geometry;
+          const buildStats = { vertices: 0, triangles: 0, fallbackSamples: 0, exceptionSamples: 0 };
           const newGeo = createFarClipmapTerrainGeometry({
             gridResolution: this.config.gridResolution,
             centerX: snap.snapX,
@@ -235,35 +302,48 @@ class FarClipmapControllerImpl implements FarClipmapController {
             heightScale: this.config.heightScale,
             yOffset: this.config.yOffset,
             source: this.source,
+            stats: buildStats,
           });
           ring.mesh.geometry = newGeo;
           oldGeo.dispose();
+          this.geometryCreatesTotal++;
+          this.geometryDisposalsTotal++;
+          frameStats.rebuilt++;
+          frameStats.vertices += buildStats.vertices || vertexCount;
+          frameStats.triangles += buildStats.triangles || triangleCount;
+          frameStats.fallbackSamples += buildStats.fallbackSamples;
+          frameStats.exceptionSamples += buildStats.exceptionSamples;
         }
 
-        frameStats.vertices += vertexCount;
-        frameStats.triangles += triangleCount;
         const buildMs = performance.now() - startedAt;
-        frameStats.buildMs += buildMs;
-        this.totalBuildMs += buildMs;
+        frameStats.buildMs += ring.displacementMode === "cpu-baked" ? buildMs : 0;
+        this.totalBuildMs += ring.displacementMode === "cpu-baked" ? buildMs : 0;
       }
       const displaySnapX = Number.isFinite(ring.readySnapX) ? ring.readySnapX : snap.snapX;
       const displaySnapZ = Number.isFinite(ring.readySnapZ) ? ring.readySnapZ : snap.snapZ;
+      const ringOriginX = displaySnapX - ring.outerRadiusM;
+      const ringOriginZ = displaySnapZ - ring.outerRadiusM;
       updateFarClipmapMaterialFrameUniforms(ring.material, {
         cameraX: cameraPosition.x,
         cameraZ: cameraPosition.z,
         clipInnerRadiusM: ring.innerRadiusM,
         clipOuterRadiusM: ring.outerRadiusM,
-        ringOriginX: displaySnapX - ring.outerRadiusM,
-        ringOriginZ: displaySnapZ - ring.outerRadiusM,
+        ringOriginX,
+        ringOriginZ,
         cellSizeM: ring.cellSizeM,
         heightScale: this.config.heightScale,
         yOffset: this.config.yOffset,
       });
+      if (ring.displacementMode === "shader") {
+        ring.mesh.position.set(ringOriginX, 0, ringOriginZ);
+      } else {
+        ring.mesh.position.set(0, 0, 0);
+      }
       const ringReady = ring.readySnapX === snap.snapX && ring.readySnapZ === snap.snapZ;
       ring.mesh.visible = this.visible && this.config.enabled && ringReady;
       if (ringReady) ready++;
     }
-    this.lastStats = makeStats(this.config, this.visible, ready, frameStats, sourceReady, this.totals());
+    this.lastStats = makeStats(this.config, this.visible, ready, frameStats, sourceReady, this.totals(), this.snapshot());
     return this.lastStats;
   }
 
@@ -297,8 +377,38 @@ class FarClipmapControllerImpl implements FarClipmapController {
       this.scene.remove(ring.mesh);
       ring.mesh.geometry.dispose();
       ring.material.dispose();
+      this.geometryDisposalsTotal++;
     }
     this.rings.length = 0;
+  }
+
+  private canRefreshRing(ring: RingMesh, sourceReady: boolean, frameStats: BuildFrameStats): boolean {
+    if (ring.displacementMode === "shader") return true;
+    return sourceReady && frameStats.rebuilt < this.config.maxRebuildsPerFrame;
+  }
+
+  private snapshot(): FarClipmapStatsSnapshotInput {
+    let shaderDisplacedTiles = 0;
+    let cpuBakedTiles = 0;
+    let reusableGridTiles = 0;
+    for (const ring of this.rings) {
+      if (ring.displacementMode === "shader") shaderDisplacedTiles++;
+      else cpuBakedTiles++;
+      if (ring.mesh.geometry.getAttribute("position")?.count === this.config.gridResolution * this.config.gridResolution) {
+        reusableGridTiles++;
+      }
+    }
+    return {
+      centerX: this.centerX,
+      centerZ: this.centerZ,
+      snapX: Number.isFinite(this.snapX) ? this.snapX : 0,
+      snapZ: Number.isFinite(this.snapZ) ? this.snapZ : 0,
+      shaderDisplacedTiles,
+      cpuBakedTiles,
+      reusableGridTiles,
+      geometryCreatesTotal: this.geometryCreatesTotal,
+      geometryDisposalsTotal: this.geometryDisposalsTotal,
+    };
   }
 
   private totals(): { buildMs: number; fallbackSamples: number; exceptionSamples: number } {
