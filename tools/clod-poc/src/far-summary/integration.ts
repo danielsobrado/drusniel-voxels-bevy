@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG, type FarSummaryConfig } from "./config.js";
 import { FarSummaryCache } from "./summary-cache.js";
 import { FarSummaryClipmapSampler } from "./clipmap-sampler.js";
@@ -17,6 +18,7 @@ import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
 
 export interface FarSummaryIntegrationOptions {
   terrainSampler: FarTerrainSampler;
+  terrainFieldConfig?: TerrainFieldConfig;
   scene?: THREE.Scene;
   camera?: THREE.PerspectiveCamera;
   farShellMetrics?: FarShellMetrics;
@@ -110,6 +112,7 @@ export function initFarSummaryIntegration(
     gpuConfig: farSummaryGpuConfigFromParams(queryParams),
     farSummaryConfig: config,
     terrainSampler: options.terrainSampler,
+    terrainFieldConfig: options.terrainFieldConfig,
   });
 
   let frameIndex = 0;
