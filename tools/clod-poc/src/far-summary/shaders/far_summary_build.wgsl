@@ -5,6 +5,7 @@ const BIOME_MOUNTAIN: u32 = 3u;
 const BIOME_PLAINS: u32 = 4u;
 const BIOME_COAST: u32 = 5u;
 const BIOME_OCEAN: u32 = 6u;
+const FAR_SUMMARY_FLAG_CELL_RECORDS: u32 = 1u;
 
 const BIOME_REGION_CELL_M: f32 = 420.0;
 const BIOME_OCEAN_HEIGHT_MARGIN_M: f32 = 1.5;
@@ -112,6 +113,36 @@ fn dominantMaterialFromCounts(counts: array<u32, 7>) -> vec2<u32> {
   return vec2<u32>(bestMaterial, bestCount);
 }
 
+fn makeFarSummaryRecord(
+  heightMin: f32,
+  heightMax: f32,
+  heightAvg: f32,
+  slopeMean: f32,
+  normal: vec3<f32>,
+  material: u32,
+  materialVariance: f32,
+  grassEligibility: f32,
+  roughnessMean: f32,
+  waterCoverage: f32,
+  canopyCoverage: f32,
+  slopeMax: f32,
+  revision: u32,
+  flags: u32,
+  sampleCount: u32,
+) -> FarSummaryGpuRecord {
+  var record: FarSummaryGpuRecord;
+  record.height_min_max = vec2<f32>(heightMin, heightMax);
+  record.height_avg_slope = vec2<f32>(heightAvg, slopeMean);
+  record.normal_avg = vec4<f32>(normal, 0.0);
+  record.material_cover_a = vec4<f32>(f32(material), materialVariance, grassEligibility, roughnessMean);
+  record.material_cover_b = vec4<f32>(waterCoverage, canopyCoverage, slopeMax, 0.0);
+  record.canopy_occ = vec4<f32>(canopyCoverage, 0.0, 0.0, 0.0);
+  record.record_meta = vec4<u32>(0u, revision, flags, sampleCount);
+  record._pad0 = vec4<u32>(0u);
+  record._pad1 = vec4<u32>(0u);
+  return record;
+}
+
 @compute @workgroup_size(64)
 fn build_far_summary(@builtin(global_invocation_id) id: vec3<u32>) {
   let tileIndex = id.x;
@@ -123,6 +154,7 @@ fn build_far_summary(@builtin(global_invocation_id) id: vec3<u32>) {
   let tileCells = max(1u, descriptor.tile_cells);
   let cellM = descriptor.cell_size_m;
   let sampleCount = tileCells * tileCells;
+  let writeCellRecords = (descriptor.flags & FAR_SUMMARY_FLAG_CELL_RECORDS) != 0u;
 
   var heightMin: f32 = 3.402823e38;
   var heightMax: f32 = -3.402823e38;
@@ -151,6 +183,28 @@ fn build_far_summary(@builtin(global_invocation_id) id: vec3<u32>) {
       let roughness = roughnessAtCell(descriptor.origin_x, descriptor.origin_z, tileCells, cellM, sx, sz, h);
       let material = classifyBiomeMaterial(wx, wz, h);
       let water = select(0.0, 1.0, sampleMax < fieldParams.seaLevel);
+      let grassEligibility = clamp((1.0 - water) * (1.0 - slope / 0.75), 0.0, 1.0);
+
+      if (writeCellRecords) {
+        let cellIndex = sz * tileCells + sx;
+        cell_records[descriptor.cell_record_offset + cellIndex] = makeFarSummaryRecord(
+          sampleMin,
+          sampleMax,
+          h,
+          slope,
+          normal,
+          material,
+          0.0,
+          grassEligibility,
+          roughness,
+          water,
+          0.0,
+          slope,
+          descriptor.revision,
+          descriptor.flags,
+          1u,
+        );
+      }
 
       heightMin = min(heightMin, sampleMin);
       heightMax = max(heightMax, sampleMax);
@@ -171,17 +225,24 @@ fn build_far_summary(@builtin(global_invocation_id) id: vec3<u32>) {
   let materialVariance = 1.0 - f32(material.y) * invCount;
   let waterCoverage = waterSum * invCount;
   let slopeMean = slopeSum * invCount;
+  let canopyCoverage = canopySum * invCount;
   let grassEligibility = clamp((1.0 - waterCoverage) * (1.0 - slopeMean / 0.75), 0.0, 1.0);
 
-  var record: FarSummaryGpuRecord;
-  record.height_min_max = vec2<f32>(heightMin, heightMax);
-  record.height_avg_slope = vec2<f32>(heightSum * invCount, slopeMean);
-  record.normal_avg = vec4<f32>(avgNormal, 0.0);
-  record.material_cover_a = vec4<f32>(f32(material.x), materialVariance, grassEligibility, roughnessSum * invCount);
-  record.material_cover_b = vec4<f32>(waterCoverage, canopySum * invCount, slopeMax, 0.0);
-  record.canopy_occ = vec4<f32>(canopySum * invCount, 0.0, 0.0, 0.0);
-  record.record_meta = vec4<u32>(0u, descriptor.revision, descriptor.flags, sampleCount);
-  record._pad0 = vec4<u32>(0u);
-  record._pad1 = vec4<u32>(0u);
-  records[tileIndex] = record;
+  records[tileIndex] = makeFarSummaryRecord(
+    heightMin,
+    heightMax,
+    heightSum * invCount,
+    slopeMean,
+    avgNormal,
+    material.x,
+    materialVariance,
+    grassEligibility,
+    roughnessSum * invCount,
+    waterCoverage,
+    canopyCoverage,
+    slopeMax,
+    descriptor.revision,
+    descriptor.flags,
+    sampleCount,
+  );
 }
