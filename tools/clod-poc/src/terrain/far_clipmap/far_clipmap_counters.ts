@@ -8,6 +8,11 @@ export function publishFarClipmapStatsToCounters(counters: Record<string, number
   counters["far_clipmap_pending_tiles"] = stats.pendingTiles;
   counters["far_clipmap_rebuilt_this_frame"] = stats.rebuiltTilesThisFrame;
   counters["far_clipmap_snap_updates_this_frame"] = stats.snapUpdatesThisFrame;
+  counters["far_clipmap_source_refreshes_this_frame"] = stats.sourceRefreshesThisFrame;
+  counters["far_clipmap_source_refreshes_total"] = stats.sourceRefreshesTotal;
+  counters["far_clipmap_source_refresh_ms"] = stats.sourceRefreshMsThisFrame;
+  counters["far_clipmap_source_refresh_ms_total"] = stats.sourceRefreshMsTotal;
+  counters["far_clipmap_source_revision"] = stats.sourceRevision;
   counters["far_clipmap_inner_radius_m"] = stats.innerRadiusM;
   counters["far_clipmap_outer_radius_m"] = stats.outerRadiusM;
   counters["far_clipmap_snap_size_m"] = stats.snapSizeM;
