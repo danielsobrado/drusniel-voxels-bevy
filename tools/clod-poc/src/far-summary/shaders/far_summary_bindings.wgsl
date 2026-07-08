@@ -11,7 +11,7 @@ struct FarSummaryTileDescriptor {
   flags: u32,
   tile_cells: u32,
   cell_size_m: f32,
-  _pad0: u32,
+  cell_record_offset: u32,
   _pad1: u32,
   _pad2: u32,
   _pad3: u32,
@@ -33,3 +33,4 @@ struct FarSummaryGpuRecord {
 @group(0) @binding(1) var<storage, read_write> records: array<FarSummaryGpuRecord>;
 @group(0) @binding(2) var<storage, read> digEdits: array<DigEdit>;
 @group(0) @binding(3) var<uniform> fieldParams: FieldParams;
+@group(0) @binding(4) var<storage, read_write> cell_records: array<FarSummaryGpuRecord>;
