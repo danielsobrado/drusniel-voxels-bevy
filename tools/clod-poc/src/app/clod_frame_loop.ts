@@ -184,7 +184,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   );
   const rendererOwnershipResidencyFeeds = () => createRendererOwnershipResidencyFeeds({
     liveReadyPageKeys: () => terrain.nearFieldBubbleController.readyPageKeys(),
-    clodReadyPageKeys: () => terrain.getClodReadyPageKeys?.() ?? [],
+    clodReadyPageKeys: terrain.getClodReadyPageKeys ?? (() => []),
     liveChunksPerPage: diagnosticsChunksPerPage,
   });
   const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
@@ -397,6 +397,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       : {
           currentGrassStats: stats.getGrassStats(),
           currentTreeStats: stats.getTreeStats(),
+          currentStoneStats: stats.getStoneStats(),
           currentUnderstoryStats: stats.getUnderstoryStats(),
         };
 
@@ -426,6 +427,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           treeStats: statsSyncResult.currentTreeStats,
           grassStats: statsSyncResult.currentGrassStats,
           understoryStats: statsSyncResult.currentUnderstoryStats,
+          stoneStats: statsSyncResult.currentStoneStats,
         });
         for (const [key, value] of Object.entries(aggregateVegetationCounters)) counters[key] = value;
         const propStats = vegetation.propStats?.current ?? null;
@@ -515,27 +517,15 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       chunkGroupsBuiltThisFrame: terrainPhaseResult.chunkGroupsBuiltThisFrame,
       nearFieldBubbleController: terrain.nearFieldBubbleController,
       interaction: player.interaction,
-      makeGrassSettings: render.makeGrassSettings,
-      grassPrepassEnabled: render.grassPrepassEnabled,
-      perfProbe,
-      phaseTiming,
-      dynamicResolution: render.dynamicResolution,
-      statsSyncThrottle: {
-        decision: lastStatsDecision,
-        diagnostics: statsSyncThrottle.diagnostics(),
-      },
-      afterRenderDiagnostics: () => timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics),
+      makeGrassFallback: vegetation.makeGrassFallback,
+      updateLongViewDiagnostics,
+      getFarSummaryStats: farSummary?.getFarSummaryStats,
+      getFarSummaryGpuRuntimeStats: farSummary?.getFarSummaryGpuRuntimeStats,
+      grassSystem: vegetation.grassSystem,
+      deepOceanSurface: waterWeather.deepOceanSurface,
+      profile: collectFrameTiming ? { phaseTiming } : undefined,
+      p0DirtyAtlasExercise,
+      statsSyncThrottle: lastStatsDecision,
     });
-
-    render.gpuPassTiming?.update();
-    if (render.gpuPassTiming?.enabled) {
-      if (hooks?.stats) {
-        const dst = hooks.stats.gpuPasses;
-        for (const key of Object.keys(dst)) delete dst[key];
-        Object.assign(dst, render.gpuPassTiming.passes);
-      }
-    }
-
-    if (hooks?.stats) syncMaterialChurnCounters(hooks.stats.counters);
   });
 }
