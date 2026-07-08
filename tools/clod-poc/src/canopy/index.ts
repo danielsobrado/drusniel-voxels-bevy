@@ -6,5 +6,14 @@ export { createBlendedTerrainSampler, createAnalyticTerrainSampler, createSummar
 export { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summary_builder.js";
 export { createCanopyClipmap, updateCanopyClipmap, ringForDistance } from "./canopy_clipmap.js";
 export { buildCanopyTextureSet, disposeCanopyTextureSet } from "./canopy_texture.js";
+export {
+  buildCanopyGpuImpostorsFromTextureSet,
+  canopyTextureFiniteCenter,
+  maxCanopyGpuImpostorInstances,
+  selectCanopyGpuImpostorSamples,
+  type CanopyGpuImpostorOptions,
+  type CanopyGpuImpostorSample,
+  type CanopyGpuImpostorShell,
+} from "./canopy_gpu_impostors.js";
 export { createCanopyShellSystem, shouldRebuildCanopyShell, type CanopyShellSystem } from "./canopy_system.js";
 export { createCanopyDebugState, canopyDebugStateToConfig, applyConfigToCanopyDebugState, formatCanopyStatsLine } from "./canopy_debug.js";
