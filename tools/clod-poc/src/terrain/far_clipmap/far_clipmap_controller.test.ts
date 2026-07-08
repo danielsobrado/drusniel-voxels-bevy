@@ -4,7 +4,7 @@ import { resolveFarClipmapConfig } from "./far_clipmap_config.js";
 import { createFarClipmapController } from "./far_clipmap_controller.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 
-function config() {
+function config(overrides: Parameters<typeof resolveFarClipmapConfig>[0] = {}) {
   return resolveFarClipmapConfig({
     enabled: true,
     innerRadiusM: 64,
@@ -14,6 +14,7 @@ function config() {
     gridResolution: 17,
     snapSizeM: 64,
     maxRebuildsPerFrame: 0,
+    ...overrides,
   });
 }
 
@@ -23,6 +24,16 @@ function unavailableSource(): FarClipmapSource {
     sampleHeight: () => { throw new Error("CPU source must not be sampled by shader-displaced clipmap"); },
     sampleMaterial: () => 0,
     sampleBiome: () => 0,
+    sampleWater: () => 0,
+  };
+}
+
+function readyFlatSource(): FarClipmapSource {
+  return {
+    isReady: () => true,
+    sampleHeight: () => 12,
+    sampleMaterial: () => 1,
+    sampleBiome: () => 1,
     sampleWater: () => 0,
   };
 }
@@ -50,6 +61,27 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.snappedOriginX).toBe(256);
     expect(stats.snappedOriginZ).toBe(-192);
     expect(stats.snapErrorMaxM).toBeLessThan(64);
+
+    controller.dispose();
+  });
+
+  it("keeps an explicit CPU-baked fallback path", () => {
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(
+      scene,
+      config({ maxRebuildsPerFrame: 2, shaderDisplacement: false }),
+      readyFlatSource(),
+      { webGpuCompatibleMaterial: true },
+    );
+
+    const stats = controller.update(new THREE.Vector3(128, 0, 128));
+
+    expect(stats.shaderDisplacementEnabled).toBe(0);
+    expect(stats.shaderDisplacedTiles).toBe(0);
+    expect(stats.cpuBakedTiles).toBe(2);
+    expect(stats.rebuiltTilesThisFrame).toBe(2);
+    expect(stats.verticesBuiltThisFrame).toBeGreaterThan(0);
+    expect(stats.trianglesBuiltThisFrame).toBeGreaterThan(0);
 
     controller.dispose();
   });
