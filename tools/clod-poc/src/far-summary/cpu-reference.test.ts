@@ -94,7 +94,7 @@ describe("buildCpuFarSummaryTileReference", () => {
   it("mixed material tile has material variance", () => {
     const { metrics } = buildMetrics({
       sampleHeight: () => 0,
-      sampleMaterial: (x) => x < 10 ? 1 : 2,
+      sampleMaterial: (x) => x < 2 ? 1 : 2,
     }, tile({ key: { ring: 0, x: 0, z: 0, cellSizeM: 1 }, tileX: 0, tileZ: 0, originX: 0, originZ: 0 }));
     expect(metrics.dominantMaterial).toBe(1);
     expect(metrics.materialVariance).toBeGreaterThan(0);
