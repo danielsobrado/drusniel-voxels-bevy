@@ -9,6 +9,9 @@ import { FarSummaryDebugOverlay } from "./debug-overlay.js";
 import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
 import type { FarHeightProvider } from "./clipmap-sampler.js";
+import { farSummaryGpuConfigFromParams } from "./gpu-config.js";
+import { FarSummaryGpuRuntime } from "./gpu-runtime.js";
+import type { FarSummaryGpuRuntimeStats } from "./gpu-runtime.js";
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
 
@@ -29,6 +32,7 @@ export interface FarSummaryIntegration {
   update: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
   getHeightProvider: () => FarHeightProvider;
   getStreamCenter: () => StreamCenter;
+  getGpuRuntimeStats: () => FarSummaryGpuRuntimeStats;
   setForceSlowBuilds: (on: boolean) => void;
   setBuildDelayMs: (ms: number) => void;
   dispose: () => void;
@@ -102,6 +106,11 @@ export function initFarSummaryIntegration(
   const sampler = new FarSummaryClipmapSampler(cache, config, options.terrainSampler);
   const debugOverlay = new FarSummaryDebugOverlay(config, cache, options.scene);
   const stats = createFarSummaryStats();
+  const gpuRuntime = new FarSummaryGpuRuntime({
+    gpuConfig: farSummaryGpuConfigFromParams(queryParams),
+    farSummaryConfig: config,
+    terrainSampler: options.terrainSampler,
+  });
 
   let frameIndex = 0;
   let previousCenter: StreamCenter | null = null;
@@ -122,6 +131,7 @@ export function initFarSummaryIntegration(
       deltaSeconds,
       config.stream.preloadSeconds,
     );
+    const gpuDirtyReason = previousCenter ? "camera_ring_shift" : "startup";
     previousCenter = currentCenter;
     sampler.setSampleCenter(currentCenter.worldX, currentCenter.worldZ);
 
@@ -141,6 +151,8 @@ export function initFarSummaryIntegration(
         : Number.POSITIVE_INFINITY;
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
+
+    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason);
 
     cache.evictColdTiles(frameIndex, nowMs);
 
@@ -216,9 +228,11 @@ export function initFarSummaryIntegration(
     update,
     getHeightProvider,
     getStreamCenter: () => currentCenter,
+    getGpuRuntimeStats: () => gpuRuntime.stats(),
     setForceSlowBuilds: (on: boolean) => { forceSlowBuilds = on; },
     setBuildDelayMs: (ms: number) => { buildDelayMs = ms; },
     dispose: () => {
+      gpuRuntime.dispose();
       debugOverlay.dispose();
     },
   };
