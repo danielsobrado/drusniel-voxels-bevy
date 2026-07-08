@@ -129,8 +129,8 @@ describe("GPU stone instance layout", () => {
 });
 
 function buildStoneValidationNodes(): ClodPageNode[] {
-  const built = buildWorld(pageCfg, 128, "ridge_border");
-  return built.allNodes;
+  const built = buildWorld(8, 8, pageCfg);
+  return built.roots;
 }
 
 describe("stone mesh validation", () => {
