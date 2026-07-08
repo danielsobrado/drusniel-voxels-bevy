@@ -361,6 +361,31 @@ function createFarClipmapNodeUniforms(input: {
   };
 }
 
+function farClipmapFallbackColor(mode: FarClipmapDebugMode): THREE.Color {
+  if (mode === "biome") return new THREE.Color(0x3e5a30);
+  if (mode === "height") return new THREE.Color(0x6f7568);
+  if (mode === "ownership") return new THREE.Color(0x2d69c7);
+  return new THREE.Color(0x33432f);
+}
+
+function createCpuBakedFarClipmapMaterial(input: { debugMode: FarClipmapDebugMode }): FarClipmapMaterial {
+  const material = new THREE.MeshBasicMaterial({
+    name: "FarClipmapTerrainCpuBakedFallback",
+    color: farClipmapFallbackColor(input.debugMode),
+    vertexColors: true,
+    depthWrite: true,
+    depthTest: true,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+    transparent: false,
+    side: THREE.FrontSide,
+    toneMapped: true,
+  }) as FarClipmapMaterial;
+  material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "cpu-baked" satisfies FarClipmapDisplacementMode;
+  return material;
+}
+
 function createWebGpuFarClipmapMaterial(input: {
   debugMode: FarClipmapDebugMode;
   seaLevel?: number;
@@ -424,7 +449,9 @@ export function createFarClipmapMaterial(input: {
   cameraX?: number;
   cameraZ?: number;
   webGpuCompatible?: boolean;
+  shaderDisplacement?: boolean;
 }): FarClipmapMaterial {
+  if (input.shaderDisplacement === false) return createCpuBakedFarClipmapMaterial(input);
   if (input.webGpuCompatible === true) return createWebGpuFarClipmapMaterial(input);
   const material = new THREE.ShaderMaterial({
     name: "FarClipmapTerrainShader",
@@ -452,6 +479,7 @@ export function setFarClipmapMaterialDebugMode(material: FarClipmapMaterial, mod
   if (material.uniforms) material.uniforms.uDebugMode.value = code;
   const nodeUniforms = material.userData[FAR_CLIPMAP_NODE_UNIFORMS] as FarClipmapNodeUniforms | undefined;
   if (nodeUniforms) nodeUniforms.uDebugMode.value = code;
+  if (material instanceof THREE.MeshBasicMaterial) material.color.copy(farClipmapFallbackColor(mode));
 }
 
 export function updateFarClipmapMaterialFrameUniforms(material: FarClipmapMaterial, input: {
