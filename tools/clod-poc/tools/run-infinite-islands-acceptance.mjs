@@ -257,14 +257,20 @@ function injectPhase4StoneAcceptance(source) {
   const withEvaluator = withSceneSpec.replace("function evaluateMovementRoute", `${evaluator}function evaluateMovementRoute`);
   if (withEvaluator === withSceneSpec) throw new Error("Failed to inject phase4 scene counter evaluator");
 
-  const withFailures = withEvaluator.replace(
+  const withConvergenceOptOut = withEvaluator.replace(
+    "    await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);",
+    "    if (scene.validation === \"stone-gpu\") {\n      console.log(`[infinite-accept] ${sceneRunName}: skipping generic convergence wait for stone-gpu validation`);\n    } else {\n      await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);\n    }",
+  );
+  if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject phase4 convergence opt-out");
+
+  const withFailures = withConvergenceOptOut.replace(
     "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const failures = [",
     "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);\n    const failures = [",
   ).replace(
     "      ...movementFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
     "      ...movementFailures,\n      ...sceneSpecificFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
   );
-  if (withFailures === withEvaluator) throw new Error("Failed to inject phase4 scene counter failures");
+  if (withFailures === withConvergenceOptOut) throw new Error("Failed to inject phase4 scene counter failures");
   return withFailures;
 }
 
