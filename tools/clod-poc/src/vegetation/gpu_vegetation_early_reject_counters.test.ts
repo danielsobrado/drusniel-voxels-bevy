@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GrassStats } from "../grass.js";
+import type { StoneStats } from "../stones/stone_instances.js";
 import type { UnderstoryStats } from "../understory/index.js";
 import { aggregateGpuVegetationEarlyRejectCounters } from "./gpu_vegetation_early_reject_counters.js";
 
@@ -89,6 +90,41 @@ function understoryStats(overrides: Partial<UnderstoryStats> = {}): UnderstorySt
   };
 }
 
+function stoneStats(overrides: Partial<StoneStats> = {}): StoneStats {
+  return {
+    total: 9,
+    large: 1,
+    medium: 3,
+    small: 5,
+    visible: 9,
+    drawnNear: 9,
+    drawnFar: 0,
+    groups: 3,
+    gpuCandidateCount: 64,
+    gpuCandidateCountBeforePrefilter: 64,
+    gpuCandidateCountAfterPrefilter: 12,
+    gpuPrefilterTestedClusters: 64,
+    gpuPrefilterRejectedClusters: 52,
+    gpuPrefilterAcceptedClusters: 12,
+    gpuPrefilterUnknownKeptClusters: 0,
+    gpuPrefilterFarSummaryConsulted: 0,
+    gpuPrefilterSourceFarSummary: 0,
+    gpuPrefilterSourceTerrainSampler: 64,
+    gpuPrefilterSourceFallback: 0,
+    earlyTerrainReasonCounts: {
+      outside_world: 2,
+      too_far: 3,
+      below_water: 5,
+      too_steep: 7,
+      density_mask: 31,
+      tile_budget: 4,
+      class_budget: 0,
+      terrain_hidden: 52,
+    },
+    ...overrides,
+  };
+}
+
 describe("aggregateGpuVegetationEarlyRejectCounters", () => {
   it("uses exact grass and understory GPU prefilter cluster counters", () => {
     const counters = aggregateGpuVegetationEarlyRejectCounters({
@@ -119,6 +155,42 @@ describe("aggregateGpuVegetationEarlyRejectCounters", () => {
     expect(counters.vegetationGpuSourceFarSummary).toBe(7);
     expect(counters.vegetationGpuSourceTerrainSampler).toBe(9);
     expect(counters.vegetationGpuSourceFallback).toBe(11);
+  });
+
+  it("includes stone GPU early rejection counters in the existing namespace", () => {
+    const counters = aggregateGpuVegetationEarlyRejectCounters({
+      stoneStats: stoneStats(),
+    });
+
+    expect(counters.stoneGpuClustersTotal).toBe(64);
+    expect(counters.stoneGpuClustersRejectedEarly).toBe(52);
+    expect(counters.stoneGpuClustersAccepted).toBe(12);
+    expect(counters.stoneGpuSourceTerrainSampler).toBe(64);
+    expect(counters["stoneReject.below_water"]).toBe(5);
+    expect(counters["stoneReject.too_steep"]).toBe(7);
+    expect(counters["stoneReject.outside_world"]).toBe(2);
+    expect(counters["stoneReject.too_far"]).toBe(3);
+    expect(counters["stoneReject.density_mask"]).toBe(31);
+    expect(counters["stoneReject.tile_budget"]).toBe(4);
+    expect(counters["stoneReject.terrain_hidden"]).toBe(52);
+    expect(counters.vegetationGpuClustersTotal).toBe(64);
+    expect(counters.vegetationGpuRejectBelowWater).toBe(5);
+    expect(counters.vegetationGpuRejectInvalidSurface).toBe(7);
+    expect(counters.vegetationGpuRejectNoCoverage).toBe(31);
+    expect(counters.vegetationGpuRejectTooFar).toBe(3);
+  });
+
+  it("aggregates stones with grass and understory", () => {
+    const counters = aggregateGpuVegetationEarlyRejectCounters({
+      grassStats: grassStats(),
+      understoryStats: understoryStats(),
+      stoneStats: stoneStats(),
+    });
+
+    expect(counters.vegetationGpuClustersTotal).toBe(78);
+    expect(counters.vegetationGpuClustersRejectedEarly).toBe(57);
+    expect(counters.vegetationGpuClustersAccepted).toBe(21);
+    expect(counters.vegetationGpuSourceTerrainSampler).toBe(73);
   });
 
   it("does not count near-forced visible clusters as too-far rejections", () => {
