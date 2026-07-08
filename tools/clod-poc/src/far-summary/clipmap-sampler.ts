@@ -10,6 +10,7 @@ export interface FarHeightProvider {
   sampleNormal(x: number, z: number): THREE.Vector3;
   sampleMaterial?(x: number, z: number): number;
   sampleSummaryInto?(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean;
+  revision?(): number;
 }
 
 export interface FarHeightProviderSample {
@@ -74,6 +75,10 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
   sampleWaterCoverage(x: number, z: number, preferredRing?: number): number {
     const sample = this.sampleFull(x, z, this.resolvePreferredRing(x, z, preferredRing));
     return sample.waterCoverage;
+  }
+
+  revision(): number {
+    return this.cache.stateRevisionAt() * 1_000_000 + this.cache.commitRevisionAt();
   }
 
   sampleFull(x: number, z: number, preferredRing: number): FarSummarySample {
