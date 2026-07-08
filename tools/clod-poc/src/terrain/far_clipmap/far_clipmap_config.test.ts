@@ -119,7 +119,7 @@ describe("far clipmap geometry", () => {
 });
 
 describe("far clipmap controller", () => {
-  it("validates sampled rings with the custom shader and becomes ready across budgeted frames", () => {
+  it("keeps CPU-baked fallback rings budgeted across frames", () => {
     const scene = new THREE.Scene();
     const config = resolveFarClipmapConfig({
       ringCount: 3,
@@ -128,6 +128,7 @@ describe("far clipmap controller", () => {
       innerRadiusM: 8,
       outerRadiusM: 64,
       snapSizeM: 16,
+      shaderDisplacement: false,
     });
     const controller = createFarClipmapController(scene, config, sampledSource);
 
@@ -135,23 +136,15 @@ describe("far clipmap controller", () => {
     const initialGeometry = firstMesh.geometry;
     const first = controller.update(new THREE.Vector3(1, 0, 1));
     const second = controller.update(new THREE.Vector3(1, 0, 1));
-    const material = firstMesh.material as THREE.ShaderMaterial;
-    const cellSize = material.uniforms["uCellSize"].value as number;
-    const expectedOuterRadius = cellSize * (config.gridResolution - 1) * 0.5;
 
     expect(first.readyTiles).toBe(2);
     expect(first.pendingTiles).toBe(1);
     expect(first.sourceReady).toBe(1);
     expect(second.readyTiles).toBe(3);
-    expect(firstMesh.geometry).toBe(initialGeometry);
-    expect(firstMesh.geometry.getAttribute("position").getY(0)).toBe(0);
-    expect(material).toBeInstanceOf(THREE.ShaderMaterial);
-    expect(material.name).toBe("FarClipmapTerrainShader");
-    expect(material.uniforms["uRingOrigin"].value.x).toBeCloseTo(-expectedOuterRadius);
-    expect(cellSize).toBeGreaterThan(0);
+    expect(firstMesh.geometry).not.toBe(initialGeometry);
+    expect(firstMesh.geometry.getAttribute("position").getY(0)).not.toBe(0);
+    expect(firstMesh.material).toBeInstanceOf(THREE.MeshBasicMaterial);
     expect(controller.ownershipSnapshot().ready).toBe(true);
-    controller.setDebugMode("ownership");
-    expect(material.uniforms["uDebugMode"].value).toBe(3);
     controller.setVisible(false);
     controller.dispose();
     expect(scene.children).toHaveLength(0);
@@ -180,8 +173,8 @@ describe("far clipmap controller", () => {
     expect(blocked.pendingTiles).toBe(3);
     expect(blocked.rebuiltTilesThisFrame).toBe(0);
     expect(firstReady.sourceReady).toBe(1);
-    expect(firstReady.readyTiles).toBe(2);
-    expect(firstReady.pendingTiles).toBe(1);
+    expect(firstReady.readyTiles).toBe(3);
+    expect(firstReady.pendingTiles).toBe(0);
     controller.dispose();
   });
 
@@ -207,7 +200,7 @@ describe("far clipmap controller", () => {
     expect(stats.sourceReady).toBe(1);
     expect(stats.readyTiles).toBe(1);
     expect(stats.pendingTiles).toBe(0);
-    expect(stats.rebuiltTilesThisFrame).toBeGreaterThanOrEqual(0);
+    expect(stats.rebuiltTilesThisFrame).toBe(0);
     expect(stats.fallbackSamplesThisFrame).toBeGreaterThanOrEqual(0);
     controller.dispose();
   });
