@@ -17,7 +17,7 @@ import {
   type FarSummaryGpuBuilder,
   type FarSummaryGpuDispatchOrFallbackResult,
 } from "./gpu-builder.js";
-import { publishFarSummaryGpuCounters } from "./gpu-counters.js";
+import { createFarSummaryGpuCounters, publishFarSummaryGpuCounters } from "./gpu-counters.js";
 
 export interface FarSummaryGpuRuntimeOptions {
   gpuConfig: FarSummaryGpuConfig;
@@ -65,28 +65,15 @@ export class FarSummaryGpuRuntime {
   };
 
   constructor(private readonly options: FarSummaryGpuRuntimeOptions) {
-    publishFarSummaryGpuCounters(undefined, {
-      enabled: options.gpuConfig.enabled ? 1 : 0,
-      deviceReady: 0,
-      dirtyTiles: 0,
-      tilesDispatched: 0,
-      batchesDispatched: 0,
-      fallbackTiles: 0,
-      failedBatches: 0,
-      computeMsP50: 0,
-      computeMsP95: 0,
-      readbackMsP95: 0,
-      parityCheckedTiles: 0,
-      parityFailedTiles: 0,
-      summaryRecordsLive: 0,
-      bufferBytes: 0,
-      droppedStaleBatches: 0,
-      cpuFallbackMsP95: 0,
-    });
+    this.publishIdleCounters();
   }
 
   update(center: StreamCenter, frameIndex: number, reason: FarSummaryGpuDirtyReason = "camera_ring_shift"): void {
-    if (this.disposed || !this.options.gpuConfig.enabled) return;
+    if (this.disposed) return;
+    if (!this.options.gpuConfig.enabled) {
+      this.publishIdleCounters();
+      return;
+    }
     if (this.inFlight) {
       this.statsState.skippedInflightFrames++;
       return;
@@ -144,6 +131,12 @@ export class FarSummaryGpuRuntime {
         : createFarSummaryGpuBuilder({ config: this.options.gpuConfig });
     }
     return this.builderPromise;
+  }
+
+  private publishIdleCounters(): void {
+    const counters = createFarSummaryGpuCounters();
+    counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
+    publishFarSummaryGpuCounters(undefined, counters);
   }
 
   private webGpuAvailable(): boolean {
