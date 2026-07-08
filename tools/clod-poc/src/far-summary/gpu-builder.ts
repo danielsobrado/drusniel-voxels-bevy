@@ -1,12 +1,15 @@
 import { requestWebGpuDevice } from "../gpu/webgpu_device.js";
 import shaderCode from "./shaders/far_summary_build.wgsl?raw";
 import type { FarSummaryGpuBatch, FarSummaryGpuPlan } from "./gpu-planner.js";
-import type { FarSummaryGpuConfig } from "./gpu-config.js";
+import type { FarSummaryGpuConfig, FarSummaryGpuFallbackReason } from "./gpu-config.js";
 import { farSummaryGpuFallbackDecision } from "./gpu-config.js";
 import { createFarSummaryGpuBatchBuffers } from "./gpu-buffers.js";
 import { createFarSummaryGpuCounters, publishFarSummaryGpuCounters, type FarSummaryGpuCounters } from "./gpu-counters.js";
 
 const WORKGROUP_SIZE = 64;
+
+type NonReadyFallbackReason = Exclude<FarSummaryGpuFallbackReason, "ready">;
+type DispatchFallbackReason = NonReadyFallbackReason | "builder_unavailable" | "dispatch_failed" | null;
 
 export interface FarSummaryGpuBuilder {
   dispatch(plan: FarSummaryGpuPlan): Promise<FarSummaryGpuDispatchResult>;
@@ -33,7 +36,7 @@ export interface FarSummaryGpuDispatchOrFallbackInput {
 
 export interface FarSummaryGpuDispatchOrFallbackResult extends FarSummaryGpuDispatchResult {
   fallbackTiles: number;
-  fallbackReason: "disabled" | "webgpu_unavailable" | "no_dirty_tiles" | "builder_unavailable" | "dispatch_failed" | null;
+  fallbackReason: DispatchFallbackReason;
 }
 
 export async function createFarSummaryGpuBuilder(
@@ -79,7 +82,12 @@ export async function dispatchFarSummaryGpuPlanOrFallback(
     counters.dirtyTiles = input.plan.dirtyTiles.length;
     counters.fallbackTiles = input.plan.dirtyTiles.length;
     counters.bufferBytes = input.plan.estimatedBufferBytes;
-    return { ok: true, counters, fallbackTiles: input.plan.dirtyTiles.length, fallbackReason: decision.reason };
+    return {
+      ok: true,
+      counters,
+      fallbackTiles: input.plan.dirtyTiles.length,
+      fallbackReason: nonReadyFallbackReason(decision.reason),
+    };
   }
 
   const builder = await input.builderFactory();
@@ -108,6 +116,17 @@ export function disabledFarSummaryGpuCounters(config: FarSummaryGpuConfig): FarS
   const counters = createFarSummaryGpuCounters();
   counters.enabled = config.enabled ? 1 : 0;
   return counters;
+}
+
+function nonReadyFallbackReason(reason: FarSummaryGpuFallbackReason): NonReadyFallbackReason {
+  switch (reason) {
+    case "disabled":
+    case "webgpu_unavailable":
+    case "no_dirty_tiles":
+      return reason;
+    case "ready":
+      throw new Error("ready GPU far-summary decision cannot be returned as a fallback reason");
+  }
 }
 
 class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
