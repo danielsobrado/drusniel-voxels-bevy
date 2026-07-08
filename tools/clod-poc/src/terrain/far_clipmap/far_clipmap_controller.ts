@@ -11,6 +11,7 @@ import {
   farClipmapShaderRenderOrder,
   setFarClipmapMaterialDebugMode,
   updateFarClipmapMaterialFrameUniforms,
+  updateFarClipmapMaterialSourceTexture,
   type FarClipmapMaterial,
 } from "./far_clipmap_material.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
@@ -247,6 +248,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         yOffset: config.yOffset,
         webGpuCompatible: options.webGpuCompatibleMaterial === true,
         shaderDisplacement: config.shaderDisplacement,
+        gridResolution: config.gridResolution,
       });
       const mesh = new THREE.Mesh(createFarClipmapGridGeometry({ gridResolution: config.gridResolution }), material);
       this.geometryCreatesTotal++;
@@ -285,6 +287,11 @@ class FarClipmapControllerImpl implements FarClipmapController {
     const triangleCount = ringTriangleCount(this.config);
     for (const ring of this.rings) {
       const stale = ring.readySnapX !== snap.snapX || ring.readySnapZ !== snap.snapZ;
+      const displaySnapX = Number.isFinite(ring.readySnapX) && !stale ? ring.readySnapX : snap.snapX;
+      const displaySnapZ = Number.isFinite(ring.readySnapZ) && !stale ? ring.readySnapZ : snap.snapZ;
+      const ringOriginX = displaySnapX - ring.outerRadiusM;
+      const ringOriginZ = displaySnapZ - ring.outerRadiusM;
+
       if (stale && this.canRefreshRing(ring, sourceReady, frameStats)) {
         const startedAt = performance.now();
         ring.readySnapX = snap.snapX;
@@ -316,16 +323,27 @@ class FarClipmapControllerImpl implements FarClipmapController {
           frameStats.exceptionSamples += buildStats.exceptionSamples;
           this.totalFallbackSamples += buildStats.fallbackSamples;
           this.totalExceptionSamples += buildStats.exceptionSamples;
+        } else {
+          const textureStats = updateFarClipmapMaterialSourceTexture(ring.material, {
+            source: this.source,
+            gridResolution: this.config.gridResolution,
+            ringOriginX,
+            ringOriginZ,
+            cellSizeM: ring.cellSizeM,
+            cameraX: cameraPosition.x,
+            cameraZ: cameraPosition.z,
+          });
+          frameStats.fallbackSamples += textureStats.fallbackSamples;
+          frameStats.exceptionSamples += textureStats.exceptionSamples;
+          this.totalFallbackSamples += textureStats.fallbackSamples;
+          this.totalExceptionSamples += textureStats.exceptionSamples;
         }
 
         const buildMs = performance.now() - startedAt;
         frameStats.buildMs += ring.displacementMode === "cpu-baked" ? buildMs : 0;
         this.totalBuildMs += ring.displacementMode === "cpu-baked" ? buildMs : 0;
       }
-      const displaySnapX = Number.isFinite(ring.readySnapX) ? ring.readySnapX : snap.snapX;
-      const displaySnapZ = Number.isFinite(ring.readySnapZ) ? ring.readySnapZ : snap.snapZ;
-      const ringOriginX = displaySnapX - ring.outerRadiusM;
-      const ringOriginZ = displaySnapZ - ring.outerRadiusM;
+
       updateFarClipmapMaterialFrameUniforms(ring.material, {
         cameraX: cameraPosition.x,
         cameraZ: cameraPosition.z,
@@ -386,8 +404,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
   }
 
   private canRefreshRing(ring: RingMesh, sourceReady: boolean, frameStats: BuildFrameStats): boolean {
+    if (!sourceReady) return false;
     if (ring.displacementMode === "shader") return true;
-    return sourceReady && frameStats.rebuilt < this.config.maxRebuildsPerFrame;
+    return frameStats.rebuilt < this.config.maxRebuildsPerFrame;
   }
 
   private snapshot(): FarClipmapStatsSnapshotInput {
