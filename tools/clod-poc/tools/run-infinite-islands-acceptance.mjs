@@ -11,6 +11,7 @@ const PHASE_SCENES = new Set([
   "phase4-stones",
   "phase6-canopy",
 ]);
+const FAST_SCENES = new Set(["walk", "final-near"]);
 const DEFAULT_PERF_SCENES = ["walk", "biome-near", "biome-horizon", "final-near", "final-horizon"];
 
 process.env.CLOD_POC_BASE_URL ??= DEFAULT_BASE_URL;
@@ -211,13 +212,15 @@ function stripGateArgs(args) {
 
 function normalizeAcceptanceArgs(args) {
   const scenes = requestedScenes(args);
+  const fastUnsupportedScenes = hasFlag(args, "--fast") ? scenes.filter((scene) => !FAST_SCENES.has(scene)) : [];
+  if (fastUnsupportedScenes.length > 0) {
+    throw new Error(`--fast only supports ${[...FAST_SCENES].join(", ")}; unsupported scene(s): ${fastUnsupportedScenes.join(", ")}`);
+  }
+
   const hasPhaseScene = scenes.some((scene) => PHASE_SCENES.has(scene));
   const gate = lastCliValue(args, "--gate") ?? "all";
 
   if (hasPhaseScene) {
-    if (hasFlag(args, "--fast")) {
-      throw new Error("Phase coverage scenes cannot be combined with --fast; use --reuse or the default profile.");
-    }
     if (gate === "perf") {
       throw new Error("Phase coverage scenes are coverage-only; use --gate coverage.");
     }
