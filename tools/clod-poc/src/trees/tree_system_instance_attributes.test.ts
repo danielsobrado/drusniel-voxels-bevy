@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   cloneTreeSettings,
+  octFrameIndexForDirection,
   octFrames,
   TREE_IMPOSTOR_BLEND_SAMPLE_COUNT,
   TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
@@ -145,6 +146,29 @@ describe("tree system instance attribute writers", () => {
       expect(weight).toBeLessThanOrEqual(1);
     }
     expect(actualWeights.reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
+  });
+
+  it("selects CPU impostor atlas frames in tree-local yaw space", () => {
+    const mesh = testMesh();
+    const settings = cloneTreeSettings();
+    settings.impostors.debugFreezeFrame = -1;
+    const atlas = fakeAtlas("oak");
+    const instance = {
+      ...testInstance("oak"),
+      rotationY: Math.PI * 0.5,
+    };
+    const expected = atlas.frames[octFrameIndexForDirection(new THREE.Vector3(0, 0, 100), atlas.gridSize)];
+
+    writeTreeImpostorUvRectIfChanged({
+      mesh,
+      index: 0,
+      instance,
+      cameraPosition: new THREE.Vector3(100, 0, 0),
+      settings,
+      impostorAtlases: { oak: atlas },
+    });
+
+    expectUvRect(mesh, 0, [expected.uvMin[0], expected.uvMin[1], expected.uvMax[0], expected.uvMax[1]]);
   });
 });
 
