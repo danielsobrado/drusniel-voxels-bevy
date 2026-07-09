@@ -52,8 +52,9 @@ export function treeUnbakedImpostorFallbackLod(settings: TreeSettings): TreeLod 
 
 export function selectTreeSystemGeometry(input: TreeSystemGeometryInput): THREE.BufferGeometry {
   if (input.lod === "impostor") {
+    const atlas = input.impostorAtlases[input.species];
     if (treeCanUseBakedImpostor(input.settings, input.impostorAtlases, input.species)) {
-      input.bakedImpostorGeometries[input.species] ??= createTreeBakedImpostorGeometry(input.species, input.settings);
+      input.bakedImpostorGeometries[input.species] ??= createTreeBakedImpostorGeometry(input.species, input.settings, atlas);
       return input.bakedImpostorGeometries[input.species]!;
     }
     return input.geometries[input.species][treeUnbakedImpostorFallbackLod(input.settings)];
