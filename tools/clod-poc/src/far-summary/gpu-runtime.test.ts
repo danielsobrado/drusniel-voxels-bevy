@@ -111,6 +111,34 @@ describe("FarSummaryGpuRuntime", () => {
     expect(runtime.stats().lastFallbackTiles).toBeGreaterThan(0);
   });
 
+  it("surfaces failed GPU requests for real CPU fallback", async () => {
+    let fallbackCount = 0;
+    let fallbackReason: string | null = null;
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: { ...GPU_CONFIG, authoritative: true, commitToCache: true },
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      onFallbackRequests: (requests, reason) => {
+        fallbackCount += requests.length;
+        fallbackReason = reason;
+      },
+      dispatch: async () => ({
+        ok: false,
+        counters: createFarSummaryGpuCounters(),
+        fallbackTiles: 1,
+        fallbackReason: "dispatch_failed",
+      }),
+    });
+
+    runtime.update(CENTER, 5, "startup", [DIRTY_REQUEST], true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fallbackCount).toBe(1);
+    expect(fallbackReason).toBe("dispatch_failed");
+    expect(runtime.stats().lastFallbackTiles).toBe(1);
+  });
+
   it("can schedule only explicitly dirty cache requests", async () => {
     let inputSeen: FarSummaryGpuRuntimeDispatchInput | null = null;
     const runtime = new FarSummaryGpuRuntime({
@@ -216,6 +244,53 @@ describe("FarSummaryGpuRuntime", () => {
 
     expect(committed).toHaveLength(0);
     expect(runtime.stats().lastCommittedTiles).toBe(0);
+  });
+
+  it("ignores late async dispatch results after dispose", async () => {
+    let release!: () => void;
+    const committed: FarSummaryTile[] = [];
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: { ...GPU_CONFIG, commitToCache: true },
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      commitTile: (tile) => committed.push(tile),
+      dispatch: async () => {
+        await new Promise<void>((resolve) => { release = resolve; });
+        return {
+          ok: true,
+          counters: createFarSummaryGpuCounters(),
+          fallbackTiles: 0,
+          fallbackReason: null,
+          cellReadbacks: [{ batchIndex: 0, records: [gpuRecord(30), gpuRecord(31), gpuRecord(32), gpuRecord(33)] }],
+        };
+      },
+    });
+
+    runtime.update(CENTER, 1);
+    runtime.dispose();
+    release();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(committed).toHaveLength(0);
+    expect(runtime.stats().totalCommittedTiles).toBe(0);
+  });
+
+  it("disposes a resolved builder", async () => {
+    let disposed = 0;
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: GPU_CONFIG,
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      builderFactory: async () => ({ dispatch: async () => ({ ok: true, counters: createFarSummaryGpuCounters(), fallbackTiles: 0, fallbackReason: null }), dispose: () => { disposed++; } }),
+    });
+
+    runtime.update(CENTER, 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    runtime.dispose();
+
+    expect(disposed).toBeGreaterThanOrEqual(1);
   });
 
   it("skips new frames while a dispatch is inflight", async () => {
