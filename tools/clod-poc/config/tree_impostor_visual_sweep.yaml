@@ -1,0 +1,36 @@
+output_dir: shots/trees/impostor-sweep
+report: shots/trees/impostor-sweep/report.json
+cases:
+  - name: infinite_islands_default
+    scene: infinite-islands
+    target: [512, 32, 512]
+    radius: 220
+    height: 84
+    samples: 8
+    settle: 24
+    fov: 55
+  - name: infinite_islands_far_gpu_ring
+    scene: infinite-islands
+    target: [2048, 32, 2048]
+    radius: 260
+    height: 96
+    samples: 8
+    settle: 24
+    fov: 55
+    params:
+      farShell: 1
+      farClipmap: 1
+      canopy: 1
+      liveClodRootGpuMesher: 1
+      liveClodRootGpuFallback: 1
+  - name: infinite_islands_low_backlight
+    scene: infinite-islands
+    target: [512, 32, 512]
+    radius: 220
+    height: 52
+    samples: 8
+    settle: 24
+    fov: 60
+    thresholds:
+      maxRuns: 8
+      maxPixelRatio: 0.0008
