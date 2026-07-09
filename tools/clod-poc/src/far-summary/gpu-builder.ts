@@ -135,6 +135,7 @@ export async function dispatchFarSummaryGpuPlanOrFallback(
   const result = await builder.dispatch(input.plan);
   const resultWithParity = applyStrictParityIfRequested(result, input);
   if (!resultWithParity.ok) {
+    resultWithParity.counters.authoritative = input.config.authoritative ? 1 : 0;
     resultWithParity.counters.fallbackTiles = input.plan.dirtyTiles.length;
     publishFarSummaryGpuCounters(undefined, resultWithParity.counters);
     return {
@@ -144,6 +145,7 @@ export async function dispatchFarSummaryGpuPlanOrFallback(
     };
   }
 
+  resultWithParity.counters.authoritative = input.config.authoritative ? 1 : 0;
   publishFarSummaryGpuCounters(undefined, resultWithParity.counters);
   return { ...resultWithParity, fallbackTiles: 0, fallbackReason: null };
 }
@@ -151,6 +153,7 @@ export async function dispatchFarSummaryGpuPlanOrFallback(
 export function disabledFarSummaryGpuCounters(config: FarSummaryGpuConfig): FarSummaryGpuCounters {
   const counters = createFarSummaryGpuCounters();
   counters.enabled = config.enabled ? 1 : 0;
+  counters.authoritative = config.authoritative ? 1 : 0;
   return counters;
 }
 
@@ -199,6 +202,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
   async dispatch(plan: FarSummaryGpuPlan): Promise<FarSummaryGpuDispatchResult> {
     const counters = createFarSummaryGpuCounters();
     counters.enabled = this.config.enabled ? 1 : 0;
+    counters.authoritative = this.config.authoritative ? 1 : 0;
     counters.deviceReady = 1;
     counters.dirtyTiles = plan.dirtyTiles.length;
     counters.bufferBytes = plan.estimatedBufferBytes;
