@@ -184,6 +184,28 @@ describe("tree system instance attribute writers", () => {
 
     expectUvRect(mesh, 0, [expected.uvMin[0], expected.uvMin[1], expected.uvMax[0], expected.uvMax[1]]);
   });
+
+  it("selects CPU impostor UVs from the instance structural variant row", () => {
+    const mesh = testMesh();
+    const settings = cloneTreeSettings();
+    settings.impostors.debugFreezeFrame = 0;
+    const atlas = fakeAtlas("oak");
+    const instance = { ...testInstance("oak"), variant: 1 };
+    const expected = atlas.variantFrames?.[1]?.[0];
+    expect(expected).toBeDefined();
+
+    writeTreeImpostorUvRectIfChanged({
+      mesh,
+      index: 0,
+      instance,
+      cameraPosition: new THREE.Vector3(100, 0, 0),
+      settings,
+      impostorAtlases: { oak: atlas },
+    });
+
+    expectUvRect(mesh, 0, [expected!.uvMin[0], expected!.uvMin[1], expected!.uvMax[0], expected!.uvMax[1]]);
+    expectBlendUvRect(mesh, 0, 0, [expected!.uvMin[0], expected!.uvMin[1], expected!.uvMax[0], expected!.uvMax[1]]);
+  });
 });
 
 function expectUvRect(mesh: THREE.InstancedMesh, index: number, expected: [number, number, number, number]): void {
@@ -245,6 +267,7 @@ function testInstance(species: "oak" | "pine" | "dead"): TreeInstance {
     position: [0, 0, 0],
     normalY: 1,
     species,
+    variant: 0,
     scale: 1,
     rotationY: 0,
   } as TreeInstance;
@@ -252,6 +275,16 @@ function testInstance(species: "oak" | "pine" | "dead"): TreeInstance {
 
 function fakeAtlas(species: "oak" | "pine" | "dead"): TreeImpostorAtlas {
   const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  const base = octFrames(4, 32, 1).map((frame) => ({
+    ...frame,
+    uvMin: [frame.uvMin[0], frame.uvMin[1] * 0.5] as [number, number],
+    uvMax: [frame.uvMax[0], frame.uvMax[1] * 0.5] as [number, number],
+  }));
+  const variant = octFrames(4, 32, 1).map((frame) => ({
+    ...frame,
+    uvMin: [frame.uvMin[0], 0.5 + frame.uvMin[1] * 0.5] as [number, number],
+    uvMax: [frame.uvMax[0], 0.5 + frame.uvMax[1] * 0.5] as [number, number],
+  }));
   return {
     species,
     texture,
@@ -260,7 +293,11 @@ function fakeAtlas(species: "oak" | "pine" | "dead"): TreeImpostorAtlas {
     gridSize: 4,
     resolutionPx: 32,
     atlasSizePx: 128,
-    frames: octFrames(4, 32, 1),
+    atlasWidthPx: 128,
+    atlasHeightPx: 256,
+    variantCount: 2,
+    frames: base,
+    variantFrames: { 0: base, 1: variant },
     ready: true,
     dispose() {
       texture.dispose();
