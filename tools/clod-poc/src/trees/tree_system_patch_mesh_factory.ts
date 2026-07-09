@@ -3,6 +3,7 @@ import { instancedDepthPrepassTwin, type PrepassNodes } from "../rendering/veg_p
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeInstance } from "./tree_instances.js";
 import type { TreeSystemMeshGrid } from "./tree_system_lifecycle.js";
+import { TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME } from "./tree_system_instance_attributes.js";
 
 export interface TreePatchMeshFactoryInput {
   nodeId: string;
@@ -87,5 +88,6 @@ export function attachTreePatchInstanceAttributes(
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity), 1));
   if (lod === "impostor") {
     geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+    geometry.setAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
   }
 }
