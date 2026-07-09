@@ -207,7 +207,7 @@ function treeImpostorNodeDitherMask(): TslNode {
 function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode, billboardNormal: TslNode): TslNode {
   const rawNormal: TslNode = normalSample.xyz.mul(2).sub(1);
   const capturedNormal: TslNode = normalize(rawNormal);
-  const n0: TslNode = normalize(mix(billboardNormal, capturedNormal, float(TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
+  const n0: TslNode = normalize((mix as any)(billboardNormal, capturedNormal, float(TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
   const n: TslNode = frontFacing.select(n0, n0.negate());
   const sunDirection = uniform(TREE_IMPOSTOR_SUN_DIRECTION.clone());
   const sunColor = uniform(TREE_IMPOSTOR_SUN_COLOR.clone());

@@ -43,6 +43,8 @@ function expectedCounters() {
     far_summary_gpu_fallback_tiles: 4,
     far_summary_gpu_failed_batches: 5,
     far_summary_gpu_committed_tiles: 0,
+    far_summary_gpu_last_committed_tiles: 0,
+    far_summary_gpu_total_committed_tiles: 0,
     far_summary_cpu_builds_suppressed: 0,
     far_summary_gpu_runtime_error: 0,
     far_summary_gpu_compute_ms_p50: 6,
