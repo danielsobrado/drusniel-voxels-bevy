@@ -164,7 +164,8 @@ export function initFarSummaryIntegration(
 
     const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
-    if (buildAllowedByInterval && buildAllowedByDelay) {
+    const cpuBuildSuppressedByGpuAuthority = gpuConfig.enabled && gpuConfig.authoritative;
+    if (!cpuBuildSuppressedByGpuAuthority && buildAllowedByInterval && buildAllowedByDelay) {
       const budget = forceSlowBuilds ? 1 : undefined;
       const buildBudgetMs = Math.max(0, config.stream.maxBuildMsPerFrame);
       const deadlineMs = Number.isFinite(buildBudgetMs) && buildBudgetMs > 0
@@ -173,7 +174,7 @@ export function initFarSummaryIntegration(
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
 
-    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests);
+    gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests, cpuBuildSuppressedByGpuAuthority);
 
     cache.evictColdTiles(frameIndex, nowMs);
 
@@ -258,11 +259,13 @@ export function initFarSummaryIntegration(
     },
   };
 
-  if (typeof window !== "undefined") {
-    (window as unknown as Record<string, unknown>).__drusnielFarSummary = integration;
-  }
-
   return integration;
+}
+
+interface FarSummaryProbeResult {
+  samples: number;
+  missing: number;
+  heightErrorMaxM: number;
 }
 
 function runFarSummaryProbes(
@@ -270,26 +273,24 @@ function runFarSummaryProbes(
   config: FarSummaryConfig,
   terrainSampler: FarTerrainSampler,
   center: StreamCenter,
-): { heightErrorMaxM: number } {
+): FarSummaryProbeResult {
+  const probes = [
+    [0.65, 0],
+    [-0.65, 0],
+    [0, 0.65],
+    [0, -0.65],
+  ];
+  let missing = 0;
   let heightErrorMaxM = 0;
-  for (let ri = 0; ri < config.rings.length; ri++) {
-    const ring = config.rings[ri]!;
-    const radius = (ring.startM + ring.endM) * 0.5;
-    for (let i = 0; i < 16; i++) {
-      const theta = (i / 16) * Math.PI * 2;
-      const x = center.worldX + Math.cos(theta) * radius;
-      const z = center.worldZ + Math.sin(theta) * radius;
-      const summary = sampler.sampleFull(x, z, ri);
-      const sourceHeight = terrainSampler.sampleHeight(x, z);
-      const error = Math.abs(summary.heightAvg - sourceHeight);
-      if (Number.isFinite(error)) heightErrorMaxM = Math.max(heightErrorMaxM, error);
-    }
+  const ring = config.rings[0];
+  const radius = ring ? (ring.startM + ring.endM) * 0.5 : Math.max(512, config.targetVisibleM * 0.5);
+  for (const [dx, dz] of probes) {
+    const x = center.worldX + dx * radius;
+    const z = center.worldZ + dz * radius;
+    const summary = sampler.sampleHeight(x, z);
+    const procedural = terrainSampler.sampleHeight(x, z);
+    if (!Number.isFinite(summary)) missing++;
+    heightErrorMaxM = Math.max(heightErrorMaxM, Math.abs(summary - procedural));
   }
-  return { heightErrorMaxM };
-}
-
-declare global {
-  interface Window {
-    __drusnielFarSummary?: FarSummaryIntegration;
-  }
+  return { samples: probes.length, missing, heightErrorMaxM };
 }
