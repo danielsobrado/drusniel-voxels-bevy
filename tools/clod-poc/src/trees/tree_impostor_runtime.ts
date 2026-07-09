@@ -36,6 +36,8 @@ export interface TreeImpostorLightingInput {
   skyLight: THREE.Color;
   groundLight: THREE.Color;
   yawRadians: number;
+  billboardNormal?: THREE.Vector3;
+  normalDetailWeight?: number;
 }
 
 export interface TreeImpostorNormalBlendSample {
@@ -46,6 +48,7 @@ export interface TreeImpostorNormalBlendSample {
 const TREE_IMPOSTOR_LIGHT_AMBIENT = 0.25;
 const TREE_IMPOSTOR_LIGHT_TRANSMISSION = 0.22;
 const TREE_IMPOSTOR_LIGHT_SUN_MAX = 0.85;
+export const TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 
 export function createTreeImpostorBlendAttributes(instanceCount: number): TreeImpostorBlendAttributes {
   const safeCount = Math.max(0, Math.floor(instanceCount));
@@ -104,7 +107,8 @@ export function decodeAndLightTreeImpostorSample(
     decodeTreeImpostorNormalComponent(sample.normalDepth[1]),
     decodeTreeImpostorNormalComponent(sample.normalDepth[2]),
   );
-  const normal = rotateNormalY(safeNormalize(captureNormal), lighting.yawRadians).normalize();
+  const rotatedNormal = rotateNormalY(safeNormalize(captureNormal), lighting.yawRadians).normalize();
+  const normal = billboardBlendedTreeImpostorNormal(rotatedNormal, lighting);
   const lightDir = lighting.sunDirection.clone().normalize();
   const sun = Math.min(Math.max(0, normal.dot(lightDir)), TREE_IMPOSTOR_LIGHT_SUN_MAX);
   const sky = clamp01(normal.y * 0.5 + 0.5);
@@ -132,6 +136,15 @@ export function blendTreeImpostorPackedNormals(
   }
   const normal = safeNormalize(blended);
   return [normal.x, normal.y, normal.z];
+}
+
+function billboardBlendedTreeImpostorNormal(
+  rotatedNormal: THREE.Vector3,
+  lighting: TreeImpostorLightingInput,
+): THREE.Vector3 {
+  if (!lighting.billboardNormal) return rotatedNormal;
+  const weight = clamp01(lighting.normalDetailWeight ?? TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT);
+  return safeNormalize(lighting.billboardNormal).lerp(rotatedNormal, weight).normalize();
 }
 
 function toRuntimeSample(sample: OctahedralBlendSample): TreeImpostorRuntimeSample {
