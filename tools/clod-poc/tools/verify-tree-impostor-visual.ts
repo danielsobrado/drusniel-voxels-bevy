@@ -1,8 +1,11 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Page } from "playwright";
 import sharp from "sharp";
-import { clodUrl, launchWebGPU } from "./launch.js";
+import { clodBaseUrl, clodUrl, launchWebGPU } from "./launch.js";
 import {
   detectTreeImpostorDarkSpikes,
   type TreeImpostorDarkSpikeReport,
@@ -24,6 +27,24 @@ interface VisualGateReport {
   captures: CaptureReport[];
 }
 
+interface ManagedServer {
+  started: boolean;
+  stop(): Promise<void>;
+}
+
+const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const DEV_SERVER_POLL_MS = 500;
+const DEV_SERVER_START_TIMEOUT_MS = 45_000;
+const DEFAULT_VIEWPORT_WIDTH = 1280;
+const DEFAULT_VIEWPORT_HEIGHT = 720;
+const DEFAULT_ORBIT_SAMPLES = 8;
+const DEFAULT_SETTLE_FRAMES = 24;
+const DEFAULT_TIMEOUT_MS = 180_000;
+const DEFAULT_TARGET: [number, number, number] = [512, 32, 512];
+const DEFAULT_ORBIT_RADIUS_M = 220;
+const DEFAULT_CAMERA_HEIGHT_M = 84;
+const DEFAULT_FOV_DEG = 55;
+
 function parseArgs(argv: string[]): Args {
   const out: Args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -43,6 +64,10 @@ function parseArgs(argv: string[]): Args {
 
 function str(value: string | boolean | undefined): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function flag(args: Args, key: string): boolean {
+  return args[key] === true || args[key] === "1" || args[key] === "true";
 }
 
 function num(args: Args, key: string, fallback: number): number {
@@ -83,30 +108,104 @@ async function waitForReady(page: Page, timeoutMs: number): Promise<void> {
   if (error) throw new Error(`App reported fatal error:\n${error}`);
 }
 
+async function ensureDevServer(args: Args): Promise<ManagedServer> {
+  const baseUrl = clodBaseUrl();
+  if (await canReach(baseUrl)) return idleServer();
+  if (flag(args, "noServe")) {
+    throw new Error(`CLOD-POC dev server is not reachable at ${baseUrl}; run npm --prefix tools/clod-poc run dev or omit --noServe.`);
+  }
+  if (process.env["CLOD_POC_BASE_URL"]) {
+    throw new Error(`CLOD_POC_BASE_URL is set but is not reachable: ${baseUrl}`);
+  }
+
+  const command = process.platform === "win32" ? "npm.cmd" : "npm";
+  const child = spawn(command, ["run", "dev"], {
+    cwd: PACKAGE_ROOT,
+    env: process.env,
+    stdio: "pipe",
+  });
+  pipeServerLogs(child);
+  await waitForServer(baseUrl, child);
+  console.log(`[tree-impostor-visual] dev server ready at ${baseUrl}`);
+  return {
+    started: true,
+    async stop() {
+      await stopServer(child);
+    },
+  };
+}
+
+function idleServer(): ManagedServer {
+  return {
+    started: false,
+    async stop() {},
+  };
+}
+
+async function canReach(baseUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(baseUrl, { signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForServer(baseUrl: string, child: ChildProcessWithoutNullStreams): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < DEV_SERVER_START_TIMEOUT_MS) {
+    if (child.exitCode !== null) throw new Error(`Vite dev server exited with code ${child.exitCode}`);
+    if (await canReach(baseUrl)) return;
+    await delay(DEV_SERVER_POLL_MS);
+  }
+  throw new Error(`Timed out waiting for Vite dev server at ${baseUrl}`);
+}
+
+function pipeServerLogs(child: ChildProcessWithoutNullStreams): void {
+  child.stdout.on("data", (chunk: Buffer) => process.stdout.write(`[vite] ${chunk.toString()}`));
+  child.stderr.on("data", (chunk: Buffer) => process.stderr.write(`[vite] ${chunk.toString()}`));
+}
+
+async function stopServer(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null) return;
+  child.kill("SIGTERM");
+  for (let i = 0; i < 20; i++) {
+    if (child.exitCode !== null) return;
+    await delay(100);
+  }
+  child.kill("SIGKILL");
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const sceneArg = str(args.scene) ?? "infinite-islands";
   const scene = sceneArg === "main" || sceneArg === "default" ? null : sceneArg;
-  const width = num(args, "w", 1280);
-  const height = num(args, "h", 720);
-  const samples = Math.max(1, Math.floor(num(args, "samples", 8)));
-  const settleFrames = Math.max(0, Math.floor(num(args, "settle", 24)));
-  const timeoutMs = Math.max(1000, Math.floor(num(args, "timeout", 180000)));
-  const target = parseVec3(str(args.target), [512, 32, 512]);
-  const radius = Math.max(1, num(args, "radius", 220));
-  const cameraHeight = num(args, "height", 84);
-  const fov = num(args, "fov", 55);
+  const width = num(args, "w", DEFAULT_VIEWPORT_WIDTH);
+  const height = num(args, "h", DEFAULT_VIEWPORT_HEIGHT);
+  const samples = Math.max(1, Math.floor(num(args, "samples", DEFAULT_ORBIT_SAMPLES)));
+  const settleFrames = Math.max(0, Math.floor(num(args, "settle", DEFAULT_SETTLE_FRAMES)));
+  const timeoutMs = Math.max(1000, Math.floor(num(args, "timeout", DEFAULT_TIMEOUT_MS)));
+  const target = parseVec3(str(args.target), DEFAULT_TARGET);
+  const radius = Math.max(1, num(args, "radius", DEFAULT_ORBIT_RADIUS_M));
+  const cameraHeight = num(args, "height", DEFAULT_CAMERA_HEIGHT_M);
+  const fov = num(args, "fov", DEFAULT_FOV_DEG);
   const seed = Number(str(args.seed));
   const outDir = str(args.out) ?? "shots/trees/impostor-visual";
   const reportPath = str(args.report) ?? join(outDir, "report.json");
   const consumed = new Set([
     "scene", "seed", "target", "radius", "height", "fov", "samples", "settle", "timeout", "out", "report", "w", "h",
-    "dark", "neighborDelta", "minRun", "minRunRatio", "maxWidth", "maxRuns", "maxPixelRatio",
+    "dark", "neighborDelta", "minRun", "minRunRatio", "maxWidth", "maxRuns", "maxPixelRatio", "noServe",
   ]);
   const extra: Record<string, string> = { freeze: "1" };
   for (const [key, value] of Object.entries(args)) {
     if (!consumed.has(key)) extra[key] = value === true ? "1" : String(value);
   }
+
+  const server = await ensureDevServer(args);
   const url = clodUrl({
     scene,
     seed: Number.isFinite(seed) ? seed : undefined,
@@ -114,8 +213,8 @@ async function main(): Promise<void> {
     extra,
   });
 
-  const { browser } = await launchWebGPU();
   const captures: CaptureReport[] = [];
+  const { browser } = await launchWebGPU();
   try {
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
     page.on("console", (msg: { text(): string; type(): string }) => {
@@ -166,6 +265,7 @@ async function main(): Promise<void> {
     }
   } finally {
     await browser.close().catch(() => undefined);
+    if (server.started) await server.stop();
   }
 
   const report: VisualGateReport = {
