@@ -8,7 +8,7 @@ Last updated: 2026-07-09
 | --- | --- | --- |
 | 1 Bounds guard | Done | Validates existing streamed page node mesh data against the existing page footprint/bounds. The missing query-param coercion bug is fixed by treating absent/blank values as fallback defaults. |
 | 2 Center debug | Done | Center ownership counters are scoped through the existing world-center debug path for CLOD, far shell, vegetation ring/grass/trees, canopy, and ocean. |
-| 3 GPU far-summary | Opt-in authoritative mode added | GPU scheduling, dirty request capture, dispatch, readback decode, strict parity, optional cache commit, counters, guarded `farSummaryGpuAuthoritative=1`, and a dedicated coverage scene exist. CPU remains authoritative by default unless the authoritative flag is enabled. |
+| 3 GPU far-summary | Opt-in authoritative mode added and hardened | GPU scheduling, dirty request capture, dispatch, readback decode, strict parity, optional cache commit, counters, guarded `farSummaryGpuAuthoritative=1`, fallback-to-CPU re-enable, late-dispose protection, and a dedicated coverage scene exist. CPU remains authoritative by default unless the authoritative flag is enabled. |
 | 4 GPU vegetation reject + stones | Done | Stone reject accounting is unified into the existing GPU vegetation early-reject counter family. The real WebGPU gate is expected to fail under headless/SwiftShader if `stoneGpuClustersTotal=0`. |
 | 5 Far clipmap grid | Done for shader-displacement path | Far clipmap shader displacement uses source texture data and refreshes on snap/source revision/interval. CPU-baked fallback remains a fallback/debug path, not the acceptance path. |
 | 6 GPU canopy | Done / accepted | Far canopy is now GPU impostor based, using the existing canopy path. The visual guard prevents bright square-card regressions. |
@@ -56,6 +56,7 @@ Meaning:
 - `farSummaryGpuStrictParity=1` enables strict CPU/GPU parity checking.
 - `farSummaryGpuCommit=1` lets successful GPU readbacks commit into `FarSummaryCache`.
 - `farSummaryGpuAuthoritative=1` implies GPU enabled, debug readback, and cache commit, then suppresses CPU `buildSomeTiles` so GPU commits are the primary source for far-summary tiles.
+- If the authoritative GPU dispatch fails, the integration re-enables CPU tile building for a short fallback window so `far_summary_gpu_fallback_tiles > 0` has a real CPU recovery path instead of being only a counter.
 
 CPU tile building remains active by default. The authoritative mode must be enabled explicitly and should be validated on a real WebGPU browser, not only headless/SwiftShader.
 
@@ -63,7 +64,8 @@ Expected authoritative-mode counters:
 
 ```text
 far_summary_gpu_authoritative = 1
-far_summary_gpu_committed_tiles > 0
+far_summary_gpu_last_committed_tiles > 0
+far_summary_gpu_total_committed_tiles >= far_summary_gpu_last_committed_tiles
 far_summary_cpu_builds_suppressed = 1
 far_summary_gpu_fallback_tiles = 0
 far_summary_gpu_runtime_error = 0
