@@ -201,16 +201,30 @@ varying vec2 vTreeImpostorUv;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
 
+vec3 treeImpostorBillboardRight(vec3 origin) {
+  vec3 toCamera = cameraPosition - origin;
+  float lenSq = max(dot(toCamera.xz, toCamera.xz), 0.000001);
+  return vec3(toCamera.z, 0.0, -toCamera.x) * inversesqrt(lenSq);
+}
+
+vec3 treeImpostorBillboardWorldPosition(vec3 localPosition) {
+#ifdef USE_INSTANCING
+  vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  float scale = max(length(instanceMatrix[0].xyz), 0.001);
+  vec3 right = treeImpostorBillboardRight(origin);
+  return origin + right * localPosition.x * scale + vec3(0.0, localPosition.y * scale, 0.0);
+#else
+  return (modelMatrix * vec4(localPosition, 1.0)).xyz;
+#endif
+}
+
 void main() {
   vec2 atlasScale = treeImpostorUvRect.zw - treeImpostorUvRect.xy;
   vTreeImpostorUv = treeImpostorUvRect.xy + uv * atlasScale;
   vTreeImpostorLodFade = treeLodFade;
   vTreeImpostorLodDitherRole = treeLodDitherRole;
-  vec4 transformed = vec4(position, 1.0);
-#ifdef USE_INSTANCING
-  transformed = instanceMatrix * transformed;
-#endif
-  gl_Position = projectionMatrix * modelViewMatrix * transformed;
+  vec3 worldPosition = treeImpostorBillboardWorldPosition(position);
+  gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
 }
 `;
 
@@ -279,6 +293,23 @@ vec2 treeImpostorAtlasUv(vec4 rect) {
   return rect.xy + uv * (rect.zw - rect.xy);
 }
 
+vec3 treeImpostorBillboardRight(vec3 origin) {
+  vec3 toCamera = cameraPosition - origin;
+  float lenSq = max(dot(toCamera.xz, toCamera.xz), 0.000001);
+  return vec3(toCamera.z, 0.0, -toCamera.x) * inversesqrt(lenSq);
+}
+
+vec3 treeImpostorBillboardWorldPosition(vec3 localPosition) {
+#ifdef USE_INSTANCING
+  vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  float scale = max(length(instanceMatrix[0].xyz), 0.001);
+  vec3 right = treeImpostorBillboardRight(origin);
+  return origin + right * localPosition.x * scale + vec3(0.0, localPosition.y * scale, 0.0);
+#else
+  return (modelMatrix * vec4(localPosition, 1.0)).xyz;
+#endif
+}
+
 void main() {
   vTreeImpostorUv0 = treeImpostorAtlasUv(treeImpostorUvRect0);
   vTreeImpostorUv1 = treeImpostorAtlasUv(treeImpostorUvRect1);
@@ -287,11 +318,8 @@ void main() {
   vTreeImpostorBlendWeights = treeImpostorBlendWeights;
   vTreeImpostorLodFade = treeLodFade;
   vTreeImpostorLodDitherRole = treeLodDitherRole;
-  vec4 transformed = vec4(position, 1.0);
-#ifdef USE_INSTANCING
-  transformed = instanceMatrix * transformed;
-#endif
-  gl_Position = projectionMatrix * modelViewMatrix * transformed;
+  vec3 worldPosition = treeImpostorBillboardWorldPosition(position);
+  gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
 }
 `;
 
