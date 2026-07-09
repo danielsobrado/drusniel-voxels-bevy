@@ -21,6 +21,7 @@ export * from "./tree_impostor_material_selector.js";
 export * from "./tree_impostor_octahedral.js";
 export * from "./tree_impostor_orbit_gate.js";
 export * from "./tree_impostor_runtime.js";
+export * from "./tree_impostor_spike_detector.js";
 export * from "./tree_lod.js";
 export * from "./tree_lod_crossfade.js";
 export * from "./tree_lod_dither.js";
