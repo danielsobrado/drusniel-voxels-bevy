@@ -1,12 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:5173/";
 const SERVER_TIMEOUT_MS = 90_000;
 const SERVER_POLL_MS = 500;
 const ACCEPTANCE_SOURCE = path.resolve(process.cwd(), "tools", "infinite-islands-acceptance.ts");
-const FILTERED_ACCEPTANCE_SOURCE = path.resolve(process.cwd(), "tools", "infinite-islands-acceptance.filtered.tmp.ts");
 
 process.env.CLOD_POC_BASE_URL ??= DEFAULT_BASE_URL;
 
@@ -129,9 +127,7 @@ async function ensureServer() {
   const deadline = Date.now() + SERVER_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    if (server.exitCode !== null) {
-      throw new Error(`Vite exited before becoming ready with code ${server.exitCode}`);
-    }
+    if (server.exitCode !== null) throw new Error(`Vite exited before becoming ready with code ${server.exitCode}`);
     if (await isServerReady(process.env.CLOD_POC_BASE_URL)) return server;
     await delay(SERVER_POLL_MS);
   }
@@ -140,270 +136,23 @@ async function ensureServer() {
   throw new Error(`Timed out waiting for Vite at ${process.env.CLOD_POC_BASE_URL}`);
 }
 
-function hasFilterArgs(args) {
-  return args.some((arg) => arg === "--scene" || arg.startsWith("--scene=") || arg === "--gate" || arg.startsWith("--gate="));
-}
-
-function injectedFilterBlock() {
-  return [
-    "const CLI_ARGS = process.argv.slice(2);",
-    "",
-    "function cliValues(args: readonly string[], key: string): string[] {",
-    "  const values: string[] = [];",
-    "  for (let i = 0; i < args.length; i++) {",
-    "    const arg = args[i]!;",
-    "    if (arg === key) {",
-    "      const next = args[i + 1];",
-    "      if (next && !next.startsWith(\"--\")) {",
-    "        values.push(next);",
-    "        i += 1;",
-    "      }",
-    "    } else if (arg.startsWith(`${key}=`)) {",
-    "      const value = arg.slice(key.length + 1);",
-    "      if (value.length > 0) values.push(value);",
-    "    }",
-    "  }",
-    "  return values;",
-    "}",
-    "",
-    "function acceptanceSceneAlias(name: string): string {",
-    "  if (name === \"coverage/phase3-far-summary-gpu-authoritative\") return \"phase3-far-summary-gpu-authoritative\";",
-    "  if (name === \"coverage/phase4-stones\") return \"phase4-stones\";",
-    "  if (name === \"coverage/phase6-canopy\") return \"phase6-canopy\";",
-    "  return name;",
-    "}",
-    "",
-    "function filterActiveScenes(scenes: readonly SceneSpec[]): SceneSpec[] {",
-    "  const requested = cliValues(CLI_ARGS, \"--scene\").flatMap((value) => value.split(\",\")).map((value) => acceptanceSceneAlias(value.trim())).filter(Boolean);",
-    "  if (requested.length === 0) return [...scenes];",
-    "  const known = new Set(SCENES.map((scene) => scene.name));",
-    "  const unknown = requested.filter((name) => !known.has(name));",
-    "  if (unknown.length > 0) throw new Error(`Unknown --scene value(s): ${unknown.join(\", \")}. Valid scenes: ${[...known].join(\", \")}`);",
-    "  const requestedSet = new Set(requested);",
-    "  return scenes.filter((scene) => requestedSet.has(scene.name));",
-    "}",
-    "",
-    "function filterActiveGates(gates: readonly GateMode[]): GateMode[] {",
-    "  const requested = cliValues(CLI_ARGS, \"--gate\").at(-1)?.trim() ?? \"all\";",
-    "  if (requested === \"all\") return [...gates];",
-    "  if (requested !== \"coverage\" && requested !== \"perf\") {",
-    "    throw new Error(`Unknown --gate value: ${requested}. Valid gates: coverage, perf, all`);",
-    "  }",
-    "  return gates.filter((gate) => gate.name === requested);",
-    "}",
-    "",
-    "const PROFILE = parseProfile(CLI_ARGS);",
-    "const BASE_ACTIVE_SCENES = PROFILE === \"fast\"",
-    "  ? SCENES.filter((scene) => scene.name === \"walk\" || scene.name === \"final-near\")",
-    "  : PROFILE === \"reuse\"",
-    "    ? [...SCENES.filter((scene) => !scene.movementRoute), ...SCENES.filter((scene) => scene.movementRoute)]",
-    "    : SCENES;",
-    "const ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES);",
-    "const ACTIVE_GATES = filterActiveGates(GATE_MODES);",
-    "const SAMPLE_FRAMES = PROFILE === \"fast\" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;",
-  ].join("\n");
-}
-
-function injectPhaseAcceptanceScenes(source) {
-  const sceneNeedle = "  {\n    name: \"biome-near\",";
-  const injectedScenes = [
-    "  {",
-    "    name: \"phase3-far-summary-gpu-authoritative\",",
-    "    freeze: true,",
-    "    proceduralDebug: \"biome\",",
-    "    cam: OUTSIDE_STARTUP_CAM,",
-    "    extra: { farSummaryGpuAuthoritative: \"1\", farSummaryGpuStrictParity: \"0\" },",
-    "    validation: \"far-summary-gpu-authoritative\",",
-    "  },",
-    "  {",
-    "    name: \"phase4-stones\",",
-    "    freeze: true,",
-    "    proceduralDebug: \"biome\",",
-    "    cam: OUTSIDE_STARTUP_CAM,",
-    "    extra: { gpuReadbacks: \"acceptance\", stoneGpuCounts: \"1\" },",
-    "    validation: \"stone-gpu\",",
-    "  },",
-    "  {",
-    "    name: \"phase6-canopy\",",
-    "    freeze: true,",
-    "    proceduralDebug: \"biome\",",
-    "    cam: OUTSIDE_STARTUP_CAM,",
-    "    extra: { canopy: \"1\", farClipmap: \"1\", farClipmapMode: \"replace\", farClipmapShaderDisplacement: \"1\" },",
-    "    validation: \"phase6-canopy\",",
-    "  },",
-  ].join("\n");
-  const withScene = source.includes(sceneNeedle)
-    ? source.replace(sceneNeedle, `${injectedScenes}\n${sceneNeedle}`)
-    : source;
-  if (withScene === source) throw new Error("Failed to inject phase acceptance scenes");
-
-  const withSceneSpec = withScene.replace(
-    "  movementRoute?: boolean;\n}",
-    "  movementRoute?: boolean;\n  validation?: \"stone-gpu\" | \"phase6-canopy\" | \"far-summary-gpu-authoritative\";\n}",
-  );
-  if (withSceneSpec === withScene) throw new Error("Failed to inject scene validation type");
-
-  const evaluator = [
-    "function numericCounter(stats: JsonRecord, key: string): number {",
-    "  const counters = stats[\"counters\"] as Record<string, unknown> | undefined;",
-    "  const value = counters?.[key] ?? stats[key];",
-    "  return typeof value === \"number\" && Number.isFinite(value) ? value : Number.NaN;",
-    "}",
-    "",
-    "function evaluateStoneGpuCounters(stats: JsonRecord): string[] {",
-    "  const failures: string[] = [];",
-    "  const counters = (stats[\"counters\"] as Record<string, unknown> | undefined) ?? {};",
-    "  const total = numericCounter(stats, \"stoneGpuClustersTotal\");",
-    "  const accepted = numericCounter(stats, \"stoneGpuClustersAccepted\");",
-    "  const rejected = numericCounter(stats, \"stoneGpuClustersRejectedEarly\");",
-    "  const vegetationTotal = numericCounter(stats, \"vegetationGpuClustersTotal\");",
-    "  const centerDistance = numericCounter(stats, \"camera_to_vegetation_ring_center_m\");",
-    "  if (!(total > 0)) failures.push(`stoneGpuClustersTotal=${total} must be > 0; this validates the real WebGPU stone path and will fail in headless/SwiftShader`);",
-    "  if (!Number.isFinite(accepted) || accepted < 0) failures.push(`stoneGpuClustersAccepted=${accepted} must be finite and >= 0`);",
-    "  if (!Number.isFinite(rejected) || rejected < 0) failures.push(`stoneGpuClustersRejectedEarly=${rejected} must be finite and >= 0`);",
-    "  if (Number.isFinite(total) && Number.isFinite(accepted) && Number.isFinite(rejected) && accepted + rejected > total) {",
-    "    failures.push(`stone accepted+rejected ${accepted + rejected} exceeds total ${total}`);",
-    "  }",
-    "  if (Number.isFinite(total) && (!(vegetationTotal >= total))) failures.push(`vegetationGpuClustersTotal=${vegetationTotal} must include stone total ${total}`);",
-    "  if (Number.isFinite(centerDistance) && !(centerDistance <= 8)) failures.push(`camera_to_vegetation_ring_center_m=${centerDistance} must be <= 8`);",
-    "  for (const key of [\"stoneReject.below_water\", \"stoneReject.too_steep\", \"stoneReject.outside_world\", \"stoneReject.too_far\", \"stoneReject.density_mask\", \"stoneReject.tile_budget\", \"stoneReject.class_budget\", \"stoneReject.terrain_hidden\"]) {",
-    "    const value = numericCounter(stats, key);",
-    "    if (Number.isFinite(value) && value < 0) failures.push(`${key}=${value} must be >= 0`);",
-    "  }",
-    "  const forbidden = Object.keys(counters).filter((key) => key.startsWith(\"veg_gpu_\"));",
-    "  if (forbidden.length > 0) failures.push(`forbidden veg_gpu_* counters present: ${forbidden.join(\", \")}`);",
-    "  return failures;",
-    "}",
-    "",
-    "function evaluatePhase6CanopyCounters(stats: JsonRecord): string[] {",
-    "  const failures: string[] = [];",
-    "  const enabled = numericCounter(stats, \"canopy_gpu_impostor_enabled\");",
-    "  const instances = numericCounter(stats, \"canopy_gpu_impostor_instances\");",
-    "  const shellTris = numericCounter(stats, \"canopy_shell_tris\");",
-    "  const maxColor = numericCounter(stats, \"canopy_gpu_impostor_max_color_channel\");",
-    "  const opacity = numericCounter(stats, \"canopy_gpu_impostor_opacity\");",
-    "  const shaderDisplacement = numericCounter(stats, \"far_clipmap_shader_displacement_enabled\");",
-    "  const pendingTiles = numericCounter(stats, \"far_clipmap_pending_tiles\");",
-    "  if (enabled !== 1) failures.push(`canopy_gpu_impostor_enabled=${enabled} must equal 1`);",
-    "  if (!(instances > 0)) failures.push(`canopy_gpu_impostor_instances=${instances} must be > 0`);",
-    "  if (Number.isFinite(instances) && Number.isFinite(shellTris) && shellTris !== instances * 2) failures.push(`canopy_shell_tris=${shellTris} must equal canopy_gpu_impostor_instances*2 (${instances * 2})`);",
-    "  if (!(maxColor <= 0.42)) failures.push(`canopy_gpu_impostor_max_color_channel=${maxColor} must be <= 0.42`);",
-    "  if (!(opacity < 0.7)) failures.push(`canopy_gpu_impostor_opacity=${opacity} must be < 0.7`);",
-    "  if (shaderDisplacement !== 1) failures.push(`far_clipmap_shader_displacement_enabled=${shaderDisplacement} must equal 1`);",
-    "  if (pendingTiles !== 0) failures.push(`far_clipmap_pending_tiles=${pendingTiles} must equal 0`);",
-    "  return failures;",
-    "}",
-    "",
-    "function evaluateFarSummaryGpuAuthoritativeCounters(stats: JsonRecord): string[] {",
-    "  const failures: string[] = [];",
-    "  const enabled = numericCounter(stats, \"far_summary_gpu_enabled\");",
-    "  const deviceReady = numericCounter(stats, \"far_summary_gpu_device_ready\");",
-    "  const authoritative = numericCounter(stats, \"far_summary_gpu_authoritative\");",
-    "  const lastCommittedTiles = numericCounter(stats, \"far_summary_gpu_last_committed_tiles\");",
-    "  const totalCommittedTiles = numericCounter(stats, \"far_summary_gpu_total_committed_tiles\");",
-    "  const suppressed = numericCounter(stats, \"far_summary_cpu_builds_suppressed\");",
-    "  const fallbackTiles = numericCounter(stats, \"far_summary_gpu_fallback_tiles\");",
-    "  const runtimeError = numericCounter(stats, \"far_summary_gpu_runtime_error\");",
-    "  const dispatchedTiles = numericCounter(stats, \"far_summary_gpu_tiles_dispatched\");",
-    "  if (enabled !== 1) failures.push(`far_summary_gpu_enabled=${enabled} must equal 1`);",
-    "  if (deviceReady !== 1) failures.push(`far_summary_gpu_device_ready=${deviceReady} must equal 1`);",
-    "  if (authoritative !== 1) failures.push(`far_summary_gpu_authoritative=${authoritative} must equal 1`);",
-    "  if (!(lastCommittedTiles > 0)) failures.push(`far_summary_gpu_last_committed_tiles=${lastCommittedTiles} must be > 0`);",
-    "  if (!(totalCommittedTiles >= lastCommittedTiles && totalCommittedTiles > 0)) failures.push(`far_summary_gpu_total_committed_tiles=${totalCommittedTiles} must be >= last committed ${lastCommittedTiles} and > 0`);",
-    "  if (suppressed !== 1) failures.push(`far_summary_cpu_builds_suppressed=${suppressed} must equal 1`);",
-    "  if (fallbackTiles !== 0) failures.push(`far_summary_gpu_fallback_tiles=${fallbackTiles} must equal 0`);",
-    "  if (runtimeError !== 0) failures.push(`far_summary_gpu_runtime_error=${runtimeError} must equal 0`);",
-    "  if (!(dispatchedTiles > 0)) failures.push(`far_summary_gpu_tiles_dispatched=${dispatchedTiles} must be > 0`);",
-    "  return failures;",
-    "}",
-    "",
-    "function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {",
-    "  if (scene.validation === \"stone-gpu\") return evaluateStoneGpuCounters(stats);",
-    "  if (scene.validation === \"phase6-canopy\") return evaluatePhase6CanopyCounters(stats);",
-    "  if (scene.validation === \"far-summary-gpu-authoritative\") return evaluateFarSummaryGpuAuthoritativeCounters(stats);",
-    "  return [];",
-    "}",
-    "",
-  ].join("\n");
-  const withEvaluator = withSceneSpec.replace("function evaluateMovementRoute", `${evaluator}function evaluateMovementRoute`);
-  if (withEvaluator === withSceneSpec) throw new Error("Failed to inject scene counter evaluator");
-
-  const withConvergenceOptOut = withEvaluator.replace(
-    "    await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);",
-    "    if (scene.validation === \"stone-gpu\" || scene.validation === \"far-summary-gpu-authoritative\") {\n      console.log(`[infinite-accept] ${sceneRunName}: skipping generic convergence wait for ${scene.validation} validation`);\n    } else {\n      await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);\n    }",
-  );
-  if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject validation convergence opt-out");
-
-  const withThresholdOptOut = withConvergenceOptOut.replace(
-    "    const thresholds: ThresholdEvaluation = evaluateThresholds(\n      extractAcceptanceCounters(stats),\n      gate.requiredCounters,\n      gate.rules,\n    );",
-    "    const thresholds: ThresholdEvaluation = scene.validation\n      ? evaluateThresholds(extractAcceptanceCounters(stats), [], [])\n      : evaluateThresholds(\n        extractAcceptanceCounters(stats),\n        gate.requiredCounters,\n        gate.rules,\n      );",
-  );
-  if (withThresholdOptOut === withConvergenceOptOut) throw new Error("Failed to inject scene threshold opt-out");
-
-  const withFailures = withThresholdOptOut.replace(
-    "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const failures = [",
-    "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);\n    const failures = [",
-  ).replace(
-    "      ...movementFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
-    "      ...movementFailures,\n      ...sceneSpecificFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
-  );
-  if (withFailures === withThresholdOptOut) throw new Error("Failed to inject scene counter failures");
-  return withFailures;
-}
-
-function injectFilteredRunner(source) {
-  const activeScenesBlock = /const PROFILE = parseProfile\(process\.argv\.slice\(2\)\);\nconst ACTIVE_SCENES = PROFILE === "fast"[\s\S]*?const SAMPLE_FRAMES = PROFILE === "fast" \? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;/;
-  const withPhaseScenes = injectPhaseAcceptanceScenes(source);
-  const withSceneFilter = withPhaseScenes.replace(activeScenesBlock, injectedFilterBlock());
-  if (withSceneFilter === withPhaseScenes) throw new Error("Failed to inject infinite acceptance scene/gate filters");
-  return withSceneFilter
-    .replaceAll("for (const gate of GATE_MODES)", "for (const gate of ACTIVE_GATES)")
-    .replace(
-      "console.log(`[infinite-accept] profile ${PROFILE} scenes=${ACTIVE_SCENES.length} sampleFrames=${SAMPLE_FRAMES}`);",
-      "console.log(`[infinite-accept] profile ${PROFILE} gates=${ACTIVE_GATES.map((gate) => gate.name).join(\",\")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(\",\")} sampleFrames=${SAMPLE_FRAMES}`);",
-    );
-}
-
-function prepareAcceptanceScript(args) {
-  if (!hasFilterArgs(args)) return ACCEPTANCE_SOURCE;
-  const source = readFileSync(ACCEPTANCE_SOURCE, "utf8").replaceAll("\r\n", "\n");
-  const filtered = injectFilteredRunner(source);
-  writeFileSync(FILTERED_ACCEPTANCE_SOURCE, filtered);
-  return FILTERED_ACCEPTANCE_SOURCE;
-}
-
-function cleanupFilteredScript() {
-  if (!existsSync(FILTERED_ACCEPTANCE_SOURCE)) return;
-  try {
-    unlinkSync(FILTERED_ACCEPTANCE_SOURCE);
-  } catch {
-    // Best effort cleanup only.
-  }
-}
-
 function runAcceptance() {
   const args = process.argv.slice(2);
-  const acceptanceScript = prepareAcceptanceScript(args);
   return new Promise((resolve) => {
-    const child = spawnChild("playwright", nodeBin, [tsxCli, acceptanceScript, ...args], {
+    const child = spawnChild("playwright", nodeBin, [tsxCli, ACCEPTANCE_SOURCE, ...args], {
       filterStdout: true,
     });
-    child.on("exit", (code) => {
-      cleanupFilteredScript();
-      resolve(code ?? 1);
-    });
+    child.on("exit", (code) => resolve(code ?? 1));
   });
 }
 
 let server = null;
 try {
-  mkdirSync(path.dirname(FILTERED_ACCEPTANCE_SOURCE), { recursive: true });
   server = await ensureServer();
   const code = await runAcceptance();
   stopChildTree(server);
   process.exit(code);
 } catch (error) {
-  cleanupFilteredScript();
   stopChildTree(server);
   console.error("[infinite-accept] FAILED:", error instanceof Error ? error.message : error);
   process.exit(1);
