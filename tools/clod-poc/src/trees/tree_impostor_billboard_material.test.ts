@@ -71,6 +71,15 @@ describe("tree impostor billboard materials", () => {
     expect(source).toContain("material.normalNode = normalNode");
     expect(source).toContain("TREE_IMPOSTOR_PHYSICAL_ROUGHNESS");
   });
+
+  it("coverage-normalizes straight-alpha atlas colors before relighting", () => {
+    const source = readFileSync(new URL("./tree_impostor_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("decodeCoverageNormalizedTreeImpostorNodeAlbedo");
+    expect(source).toContain("sample.xyz.div(max(sample.w, float(TREE_IMPOSTOR_MIN_COVERAGE)))");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("color.rgb / max(color.a, 0.0001)");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorDecodeAlbedo(c0) * weightedCoverage.x");
+  });
 });
 
 function fakeAtlas(): TreeImpostorAtlas {
