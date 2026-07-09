@@ -225,7 +225,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     }));
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
-      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
+      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera, terrainPhaseResult.worldCenter);
       floatingOrigin?.controller.rebaseIfNeeded({ camera: render.camera, controls: player.controls, player: player.player, terrainColliders: floatingOrigin.terrainColliders, frameIndex: selectionStats.frameId });
     });
     timed(collectFrameTiming, phaseTiming, "shadowProxyMs", () => {

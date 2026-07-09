@@ -173,8 +173,10 @@ export interface FrameLoopDiagnosticsDeps {
 }
 
 export interface FrameLoopFarSummaryDeps {
-  /** Called each frame after terrain phase but before vegetation phase. */
-  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+  /** Called each frame after terrain phase but before vegetation phase. `worldCenter` is the
+   *  canonical frame center (player/orbit target) — far clipmap rings + far shell anchor to it so
+   *  they stay aligned with the near bubble instead of drifting to the camera eye. */
+  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, worldCenter: THREE.Vector3) => void;
 }
 
 export interface FrameLoopFloatingOriginDeps {

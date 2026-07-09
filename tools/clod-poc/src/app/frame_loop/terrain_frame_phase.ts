@@ -89,6 +89,9 @@ export interface TerrainFramePhaseResult {
   tPropsStart: number;
   ringCenter: THREE.Vector3;
   grassCenter: THREE.Vector3;
+  /** Canonical world-space center for the frame (player in play mode, orbit target otherwise).
+   *  Far systems (far clipmap rings, far shell) anchor to this so they align with the near bubble. */
+  worldCenter: THREE.Vector3;
 }
 
 function hooksCounters(): Record<string, number> | null {
@@ -226,9 +229,11 @@ function infiniteIslandsScene(): boolean {
   return cachedInfiniteIslandsScene;
 }
 
-function canonicalWorldCenter(input: TerrainFramePhaseInput, infiniteScene: boolean): CanonicalCenter {
-  const cameraCenter = input.camera?.position ?? input.controls.object.position;
-  if (infiniteScene) return { center: cameraCenter, source: "orbit_camera" };
+function canonicalWorldCenter(input: TerrainFramePhaseInput): CanonicalCenter {
+  // Stream around where you are / what you're looking at, not the camera eye. In infinite-islands
+  // orbit mode the eye orbits away from the start, so anchoring streaming (near bubble, rings,
+  // vegetation) to the eye dragged pages + rings off the start point. Play mode -> player position;
+  // orbit / free-camera -> the orbit target.
   if (input.interaction.mode === "playing") {
     return { center: input.player.position, source: "playing_player" };
   }
@@ -319,7 +324,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   mirrorRootMorphStats(morphStats);
 
   const ringUnbounded = infiniteIslandsScene();
-  const canonicalCenter = canonicalWorldCenter(input, ringUnbounded);
+  const canonicalCenter = canonicalWorldCenter(input);
   mirrorCanonicalWorldCenter(input, canonicalCenter);
   const bubbleCenter = canonicalCenter.center;
   const bubbleStats = input.nearFieldBubbleController.update({
@@ -350,5 +355,6 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     tPropsStart,
     ringCenter,
     grassCenter,
+    worldCenter: bubbleCenter,
   };
 }
