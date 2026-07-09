@@ -45,6 +45,8 @@ type TreeNodeMaterial = MeshBasicNodeMaterial & {
   normalNode?: TslNode;
 };
 
+type TreeImpostorNodeSample = { albedo: TslNode; coverage: TslNode; normal: TslNode | null };
+
 const TREE_IMPOSTOR_SUN_DIRECTION = new THREE.Vector3(0.4, 0.85, 0.3).normalize();
 const TREE_IMPOSTOR_SUN_COLOR = new THREE.Vector3(1.0, 0.96, 0.88);
 const TREE_IMPOSTOR_SKY_COLOR = new THREE.Vector3(0.42, 0.48, 0.58);
@@ -55,6 +57,7 @@ const TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_IMPOSTOR_PHYSICAL_ROUGHNESS = 0.82;
 const TREE_IMPOSTOR_PHYSICAL_METALNESS = 0.0;
+const TREE_IMPOSTOR_MIN_COVERAGE = 0.0001;
 
 export function createTreeImpostorNodeMaterial(
   settings: TreeSettings,
@@ -63,7 +66,7 @@ export function createTreeImpostorNodeMaterial(
   const uvRect: TslNode = attribute("treeImpostorUvRect", "vec4");
   const atlasUv: TslNode = uvRect.xy.add(uv().mul(uvRect.zw.sub(uvRect.xy)));
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
-  const albedo: TslNode = sample.xyz.mul(sample.xyz);
+  const albedo: TslNode = decodeCoverageNormalizedTreeImpostorNodeAlbedo(sample);
   const normalSample: TslNode | null = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null;
   const billboardNormal = treeImpostorNodeBillboardNormal();
   const normalNode = normalSample ? treeImpostorNodeSurfaceNormal(normalSample, billboardNormal) : billboardNormal;
@@ -89,16 +92,13 @@ export function createTreeImpostorBlendNodeMaterial(
   const sample1 = sampleTreeImpostorNode(atlas, attribute("treeImpostorUvRect1", "vec4"));
   const sample2 = sampleTreeImpostorNode(atlas, attribute("treeImpostorUvRect2", "vec4"));
   const sample3 = sampleTreeImpostorNode(atlas, attribute("treeImpostorUvRect3", "vec4"));
-  const albedo = sample0.albedo.mul(weights.x)
-    .add(sample1.albedo.mul(weights.y))
-    .add(sample2.albedo.mul(weights.z))
-    .add(sample3.albedo.mul(weights.w));
   const coverage = sample0.coverage.mul(weights.x)
     .add(sample1.coverage.mul(weights.y))
     .add(sample2.coverage.mul(weights.z))
     .add(sample3.coverage.mul(weights.w));
+  const albedo = blendCoverageNormalizedTreeImpostorNodeAlbedo(sample0, sample1, sample2, sample3, weights, coverage);
   const normalSample = sample0.normal && sample1.normal && sample2.normal && sample3.normal
-    ? blendTreeImpostorNormal(sample0.normal, sample1.normal, sample2.normal, sample3.normal, weights)
+    ? blendTreeImpostorNormal(sample0, sample1, sample2, sample3, weights, coverage)
     : null;
   const billboardNormal = treeImpostorNodeBillboardNormal();
   const normalNode = normalSample ? treeImpostorNodeSurfaceNormal(normalSample, billboardNormal) : billboardNormal;
@@ -168,14 +168,34 @@ export function updateTreeImpostorMaterialSettings(material: THREE.Material, set
   if (changed) setMaterialNeedsUpdate(materialChurnDiagnostics, material, "tree-impostor-flags");
 }
 
-function sampleTreeImpostorNode(atlas: TreeImpostorAtlas, uvRect: TslNode): { albedo: TslNode; coverage: TslNode; normal: TslNode | null } {
+function sampleTreeImpostorNode(atlas: TreeImpostorAtlas, uvRect: TslNode): TreeImpostorNodeSample {
   const atlasUv: TslNode = uvRect.xy.add(uv().mul(uvRect.zw.sub(uvRect.xy)));
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
   return {
-    albedo: sample.xyz.mul(sample.xyz),
+    albedo: decodeCoverageNormalizedTreeImpostorNodeAlbedo(sample),
     coverage: sample.w,
     normal: atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null,
   };
+}
+
+function decodeCoverageNormalizedTreeImpostorNodeAlbedo(sample: TslNode): TslNode {
+  const encoded: TslNode = clamp(sample.xyz.div(max(sample.w, float(TREE_IMPOSTOR_MIN_COVERAGE))), 0.0, 1.0);
+  return encoded.mul(encoded);
+}
+
+function blendCoverageNormalizedTreeImpostorNodeAlbedo(
+  sample0: TreeImpostorNodeSample,
+  sample1: TreeImpostorNodeSample,
+  sample2: TreeImpostorNodeSample,
+  sample3: TreeImpostorNodeSample,
+  weights: TslNode,
+  coverage: TslNode,
+): TslNode {
+  return sample0.albedo.mul(sample0.coverage).mul(weights.x)
+    .add(sample1.albedo.mul(sample1.coverage).mul(weights.y))
+    .add(sample2.albedo.mul(sample2.coverage).mul(weights.z))
+    .add(sample3.albedo.mul(sample3.coverage).mul(weights.w))
+    .div(max(coverage, float(TREE_IMPOSTOR_MIN_COVERAGE)));
 }
 
 function createTreePhysicalNodeMaterial(name: string): TreeNodeMaterial {
@@ -215,11 +235,19 @@ function treeImpostorNodeSurfaceNormal(normalSample: TslNode, billboardNormal: T
   return normalize((mix as any)(billboardNormal, capturedNormal, float(TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
 }
 
-function blendTreeImpostorNormal(n0: TslNode, n1: TslNode, n2: TslNode, n3: TslNode, weights: TslNode): TslNode {
-  const blended = decodeTreeImpostorPackedNormalNode(n0).mul(weights.x)
-    .add(decodeTreeImpostorPackedNormalNode(n1).mul(weights.y))
-    .add(decodeTreeImpostorPackedNormalNode(n2).mul(weights.z))
-    .add(decodeTreeImpostorPackedNormalNode(n3).mul(weights.w));
+function blendTreeImpostorNormal(
+  sample0: TreeImpostorNodeSample,
+  sample1: TreeImpostorNodeSample,
+  sample2: TreeImpostorNodeSample,
+  sample3: TreeImpostorNodeSample,
+  weights: TslNode,
+  coverage: TslNode,
+): TslNode {
+  const blended = decodeTreeImpostorPackedNormalNode(sample0.normal).mul(sample0.coverage).mul(weights.x)
+    .add(decodeTreeImpostorPackedNormalNode(sample1.normal).mul(sample1.coverage).mul(weights.y))
+    .add(decodeTreeImpostorPackedNormalNode(sample2.normal).mul(sample2.coverage).mul(weights.z))
+    .add(decodeTreeImpostorPackedNormalNode(sample3.normal).mul(sample3.coverage).mul(weights.w))
+    .div(max(coverage, float(TREE_IMPOSTOR_MIN_COVERAGE)));
   return { xyz: normalize(blended).mul(0.5).add(0.5) } as TslNode;
 }
 
@@ -320,6 +348,11 @@ bool treeImpostorDitherKeep(float ign, float fade, float role) {
   return ign >= 1.0 - fade;
 }
 
+vec3 treeImpostorDecodeAlbedo(vec4 color) {
+  vec3 encoded = clamp(color.rgb / max(color.a, 0.0001), 0.0, 1.0);
+  return encoded * encoded;
+}
+
 vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal) {
   vec3 capturedNormal = normalize(packedNormal * 2.0 - 1.0);
   vec3 n = normalize(mix(normalize(billboardNormal), capturedNormal, TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT));
@@ -339,7 +372,7 @@ void main() {
   vec4 color = texture2D(map, vTreeImpostorUv);
   if (color.a < alphaTest) discard;
   if (!treeImpostorDitherKeep(treeImpostorDither(gl_FragCoord.xy), vTreeImpostorLodFade, vTreeImpostorLodDitherRole)) discard;
-  vec3 albedo = color.rgb * color.rgb;
+  vec3 albedo = treeImpostorDecodeAlbedo(color);
   if (hasNormalDepthMap > 0.5) {
     vec4 normalDepth = texture2D(normalDepthMap, vTreeImpostorUv);
     albedo = treeImpostorRelight(albedo, normalDepth.rgb, vTreeImpostorBillboardNormal);
@@ -432,6 +465,11 @@ bool treeImpostorDitherKeep(float ign, float fade, float role) {
   return ign >= 1.0 - fade;
 }
 
+vec3 treeImpostorDecodeAlbedo(vec4 color) {
+  vec3 encoded = clamp(color.rgb / max(color.a, 0.0001), 0.0, 1.0);
+  return encoded * encoded;
+}
+
 vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal) {
   vec3 capturedNormal = normalize(packedNormal * 2.0 - 1.0);
   vec3 n = normalize(mix(normalize(billboardNormal), capturedNormal, TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT));
@@ -447,12 +485,14 @@ vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal) {
   return clamp(albedo * 0.25 + albedo * (hemi + sunColor * sun) + transmission, 0.0, 1.0);
 }
 
-vec3 treeImpostorBlendPackedNormal(vec3 n0, vec3 n1, vec3 n2, vec3 n3, vec4 weights) {
+vec3 treeImpostorBlendPackedNormal(vec3 n0, vec3 n1, vec3 n2, vec3 n3, vec4 coverages, vec4 weights, float coverage) {
+  vec4 weightedCoverage = coverages * weights;
   vec3 decoded =
-    (n0 * 2.0 - 1.0) * weights.x +
-    (n1 * 2.0 - 1.0) * weights.y +
-    (n2 * 2.0 - 1.0) * weights.z +
-    (n3 * 2.0 - 1.0) * weights.w;
+    (n0 * 2.0 - 1.0) * weightedCoverage.x +
+    (n1 * 2.0 - 1.0) * weightedCoverage.y +
+    (n2 * 2.0 - 1.0) * weightedCoverage.z +
+    (n3 * 2.0 - 1.0) * weightedCoverage.w;
+  decoded /= max(coverage, 0.0001);
   float lenSq = max(dot(decoded, decoded), 0.000001);
   return decoded * inversesqrt(lenSq) * 0.5 + 0.5;
 }
@@ -462,18 +502,25 @@ void main() {
   vec4 c1 = texture2D(map, vTreeImpostorUv1);
   vec4 c2 = texture2D(map, vTreeImpostorUv2);
   vec4 c3 = texture2D(map, vTreeImpostorUv3);
-  vec4 color = c0 * vTreeImpostorBlendWeights.x + c1 * vTreeImpostorBlendWeights.y + c2 * vTreeImpostorBlendWeights.z + c3 * vTreeImpostorBlendWeights.w;
-  if (color.a < alphaTest) discard;
+  vec4 coverages = vec4(c0.a, c1.a, c2.a, c3.a);
+  vec4 weightedCoverage = coverages * vTreeImpostorBlendWeights;
+  float coverage = dot(coverages, vTreeImpostorBlendWeights);
+  if (coverage < alphaTest) discard;
   if (!treeImpostorDitherKeep(treeImpostorDither(gl_FragCoord.xy), vTreeImpostorLodFade, vTreeImpostorLodDitherRole)) discard;
-  vec3 albedo = color.rgb * color.rgb;
+  vec3 albedo = (
+    treeImpostorDecodeAlbedo(c0) * weightedCoverage.x +
+    treeImpostorDecodeAlbedo(c1) * weightedCoverage.y +
+    treeImpostorDecodeAlbedo(c2) * weightedCoverage.z +
+    treeImpostorDecodeAlbedo(c3) * weightedCoverage.w
+  ) / max(coverage, 0.0001);
   if (hasNormalDepthMap > 0.5) {
     vec3 n0 = texture2D(normalDepthMap, vTreeImpostorUv0).rgb;
     vec3 n1 = texture2D(normalDepthMap, vTreeImpostorUv1).rgb;
     vec3 n2 = texture2D(normalDepthMap, vTreeImpostorUv2).rgb;
     vec3 n3 = texture2D(normalDepthMap, vTreeImpostorUv3).rgb;
-    vec3 normal = treeImpostorBlendPackedNormal(n0, n1, n2, n3, vTreeImpostorBlendWeights);
+    vec3 normal = treeImpostorBlendPackedNormal(n0, n1, n2, n3, coverages, vTreeImpostorBlendWeights, coverage);
     albedo = treeImpostorRelight(albedo, normal, vTreeImpostorBillboardNormal);
   }
-  gl_FragColor = vec4(albedo, color.a);
+  gl_FragColor = vec4(albedo, coverage);
 }
 `;
