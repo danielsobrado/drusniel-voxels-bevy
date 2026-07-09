@@ -4,6 +4,7 @@ import { DEFAULT_CANOPY_SHELL_CONFIG } from "./canopy_defaults.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
 import {
   buildCanopyGpuImpostorsFromTextureSet,
+  canopyImpostorDisplayColor,
   canopyTextureFiniteCenter,
   maxCanopyGpuImpostorInstances,
   selectCanopyGpuImpostorSamples,
@@ -83,6 +84,42 @@ describe("canopy GPU impostors", () => {
     expect(shell.mesh.position.z).toBe(-100);
     expect(shell.mesh.userData.canopyTextureSetRevision).toBe(7);
     expect(shell.mesh.userData.canopyGpuImpostorInstances).toBe(shell.instanceCount);
+    shell.dispose();
+  });
+
+  it("uses a soft alpha-masked material instead of visible square cards", () => {
+    const shell = buildCanopyGpuImpostorsFromTextureSet(textureSet(), DEFAULT_CANOPY_SHELL_CONFIG, lighting(), {
+      maxInstances: 5,
+      coverageThreshold: 0.2,
+      sampleStride: 1,
+    });
+    const material = shell.mesh.material as THREE.MeshBasicMaterial;
+
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+    expect(material.opacity).toBeLessThan(0.7);
+    expect(material.alphaTest).toBeGreaterThan(0);
+    expect(material.alphaMap).toBeInstanceOf(THREE.DataTexture);
+    shell.dispose();
+  });
+
+  it("clamps and desaturates impostor colors to avoid neon canopy blocks", () => {
+    const display = canopyImpostorDisplayColor(new THREE.Color(0.0, 1.0, 0.0), 1, 2);
+
+    expect(display.g).toBeLessThanOrEqual(0.42);
+    expect(display.r).toBeGreaterThan(0.05);
+    expect(display.b).toBeGreaterThan(0.04);
+  });
+
+  it("records a bounded max display channel on the mesh", () => {
+    const shell = buildCanopyGpuImpostorsFromTextureSet(textureSet(), DEFAULT_CANOPY_SHELL_CONFIG, lighting(), {
+      maxInstances: 5,
+      coverageThreshold: 0.2,
+      sampleStride: 1,
+    });
+
+    expect(shell.mesh.userData.canopyGpuImpostorMaxColorChannel).toBeLessThanOrEqual(0.42);
+    expect(shell.mesh.userData.canopyGpuImpostorOpacity).toBeLessThan(0.7);
     shell.dispose();
   });
 
