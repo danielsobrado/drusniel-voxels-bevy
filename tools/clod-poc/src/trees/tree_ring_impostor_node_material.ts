@@ -48,6 +48,7 @@ const LOD_COLORS: Record<TreeLod, THREE.Color> = {
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
+const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 
 function fallbackLighting(): EnvironmentLighting {
@@ -90,7 +91,8 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const c: TslNode = cos(aYaw);
     const s: TslNode = sin(aYaw);
     const localPosition: TslNode = positionGeometry.mul(aScale);
-    const positionNode: TslNode = treeRingCylindricalBillboardPosition(aWorldXZ, aHeight, localPosition);
+    const billboardNormal: TslNode = treeRingCylindricalBillboardNormal(aWorldXZ);
+    const positionNode: TslNode = treeRingCylindricalBillboardPosition(aWorldXZ, aHeight, localPosition, billboardNormal);
 
     const dirWorld: TslNode = normalize(vec3(
       cameraPosition.x.sub(aWorldXZ.x),
@@ -107,7 +109,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
       : impostor.albedo;
     const lit: TslNode = atlas.normalDepth && !debugColor
-      ? relightTreeRingImpostor(albedo, impostor.normal, c, s, uLight, uSun, uSky, uGround)
+      ? relightTreeRingImpostor(albedo, impostor.normal, billboardNormal, c, s, uLight, uSun, uSky, uGround)
       : albedo;
 
     const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest));
@@ -160,19 +162,24 @@ export function createTreeRingImpostorNodeMaterialHandle(
   };
 }
 
+function treeRingCylindricalBillboardNormal(worldXZ: TslNode): TslNode {
+  const toCamera: TslNode = vec3(
+    cameraPosition.x.sub(worldXZ.x),
+    float(0),
+    cameraPosition.z.sub(worldXZ.y),
+  );
+  return dot(toCamera, toCamera)
+    .greaterThan(float(0.000001))
+    .select(normalize(toCamera), vec3(0, 0, 1));
+}
+
 function treeRingCylindricalBillboardPosition(
   worldXZ: TslNode,
   groundY: TslNode,
   localPosition: TslNode,
+  billboardNormal: TslNode,
 ): TslNode {
-  const toCamera: TslNode = vec3(
-    cameraPosition.z.sub(worldXZ.y),
-    float(0),
-    cameraPosition.x.sub(worldXZ.x).negate(),
-  );
-  const right: TslNode = dot(toCamera, toCamera)
-    .greaterThan(float(0.000001))
-    .select(normalize(toCamera), vec3(1, 0, 0));
+  const right: TslNode = vec3(billboardNormal.z, float(0), billboardNormal.x.negate());
   return vec3(worldXZ.x, groundY, worldXZ.y)
     .add(right.mul(localPosition.x))
     .add(vec3(0, localPosition.y, 0));
@@ -275,6 +282,7 @@ function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
 function relightTreeRingImpostor(
   albedo: TslNode,
   localNormal: TslNode,
+  billboardNormal: TslNode,
   yawCos: TslNode,
   yawSin: TslNode,
   uLight: TslNode,
@@ -282,11 +290,12 @@ function relightTreeRingImpostor(
   uSky: TslNode,
   uGround: TslNode,
 ): TslNode {
-  const n0: TslNode = normalize(vec3(
+  const rotatedNormal: TslNode = normalize(vec3(
     localNormal.x.mul(yawCos).add(localNormal.z.mul(yawSin)),
     localNormal.y,
     localNormal.z.mul(yawCos).sub(localNormal.x.mul(yawSin)),
   ));
+  const n0: TslNode = normalize(mix(billboardNormal, rotatedNormal, float(TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
   const n: TslNode = frontFacing.select(n0, n0.negate());
   const sun: TslNode = clamp(max(dot(n, uLight), 0.0), 0.0, TREE_RING_IMPOSTOR_SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
