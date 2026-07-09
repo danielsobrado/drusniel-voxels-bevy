@@ -63,13 +63,22 @@ describe("GPU ring baked impostor node material", () => {
 
     expect(source).toContain("treeRingImpostorFourFrameSample");
     expect(source).toContain("treeRingOctEncode(viewDirection)");
-    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y0)");
-    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y0)");
-    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y1)");
-    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y1)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y0, variantIndex)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y0, variantIndex)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y1, variantIndex)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y1, variantIndex)");
     expect(source).toContain("cameraPosition.x.sub(aWorldXZ.x)");
     expect(source).toContain("decodeTreeRingImpostorPackedNormal");
     expect(source).toContain("localNormal.x.mul(yawCos)");
+  });
+
+  it("samples a deterministic variant row for GPU ring impostors", () => {
+    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("treeRingImpostorVariant(worldCell, uSeed, atlas)");
+    expect(source).toContain("TREE_RING_VARIANT_SALT");
+    expect(source).toContain("atlas.atlasHeightPx");
+    expect(source).toContain("variantIndex.mul(pageSize)");
   });
 
   it("blends captured normals with the cylindrical billboard facing normal", () => {
@@ -111,6 +120,9 @@ function atlas(): TreeImpostorAtlas {
     gridSize: 8,
     resolutionPx: 128,
     atlasSizePx: 1024,
+    atlasWidthPx: 1024,
+    atlasHeightPx: 2048,
+    variantCount: 2,
     frames: octFrames(8, 128, 2),
     radius: 1,
     centerY: 0,
