@@ -115,14 +115,20 @@ function streamWorkPending(stats: StreamingClodRootStats): boolean {
 }
 
 function streamingWorldCenter(
+  streamingScene: boolean,
   interactionMode: string,
-  player: { position: { x: number; z: number } },
+  player: { spawned: boolean; position: { x: number; z: number } },
+  camera: { position: { x: number; z: number } },
   controls: { target: { x: number; z: number } },
 ): THREE.Vector3 {
-  // Must match canonicalWorldCenter in terrain_frame_phase: player in play mode, orbit target
-  // otherwise. Anchoring streamed CLOD pages to the camera eye desynced them from the near
-  // bubble / vegetation / far shell, which already stream around the canonical center.
+  // Must match canonicalWorldCenter in terrain_frame_phase so streamed CLOD pages stay
+  // concentric with the near bubble / vegetation / far shell: player in play mode, the spawned
+  // player (camera before spawn) in streaming scenes, orbit target otherwise.
   if (interactionMode === "playing") return new THREE.Vector3(player.position.x, 0, player.position.z);
+  if (streamingScene) {
+    const src = player.spawned ? player.position : camera.position;
+    return new THREE.Vector3(src.x, 0, src.z);
+  }
   const src = controls.target;
   return new THREE.Vector3(src.x, 0, src.z);
 }
@@ -336,7 +342,7 @@ export function runFrameLoopStartup(
   let lastStreamCenterZ = Number.NaN;
   const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
   const updateSelectionWithStreaming = () => {
-    const center = streamingWorldCenter(interaction.mode, player, controls);
+    const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
     const previousStats = streamingClodRootController.stats();
     const dx = center.x - lastStreamCenterX;
     const dz = center.z - lastStreamCenterZ;

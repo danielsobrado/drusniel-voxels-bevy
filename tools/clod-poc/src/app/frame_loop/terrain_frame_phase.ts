@@ -230,12 +230,19 @@ function infiniteIslandsScene(): boolean {
 }
 
 function canonicalWorldCenter(input: TerrainFramePhaseInput): CanonicalCenter {
-  // Stream around where you are / what you're looking at, not the camera eye. In infinite-islands
-  // orbit mode the eye orbits away from the start, so anchoring streaming (near bubble, rings,
-  // vegetation) to the eye dragged pages + rings off the start point. Play mode -> player position;
-  // orbit / free-camera -> the orbit target.
+  // One canonical center for every streaming system (near bubble, streamed CLOD roots, rings,
+  // vegetation, far shell). Play mode -> player. Infinite-islands orbit mode -> the spawned
+  // player (stays at the start instead of dragging pages with the orbiting eye), falling back
+  // to the camera before spawn; acceptance gates assert centers track the camera XZ here.
+  // Other scenes -> the orbit target.
   if (input.interaction.mode === "playing") {
     return { center: input.player.position, source: "playing_player" };
+  }
+  if (infiniteIslandsScene()) {
+    if (input.player.spawned) {
+      return { center: input.player.position, source: "orbit_spawned_player" };
+    }
+    return { center: input.camera?.position ?? input.controls.object.position, source: "orbit_camera" };
   }
   return { center: input.controls.target, source: "orbit_target" };
 }
