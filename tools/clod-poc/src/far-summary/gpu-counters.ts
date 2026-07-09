@@ -1,11 +1,15 @@
 export interface FarSummaryGpuCounters {
   enabled: number;
   deviceReady: number;
+  authoritative: number;
   dirtyTiles: number;
   tilesDispatched: number;
   batchesDispatched: number;
   fallbackTiles: number;
   failedBatches: number;
+  committedTiles: number;
+  cpuBuildsSuppressed: number;
+  runtimeError: number;
   computeMsP50: number;
   computeMsP95: number;
   readbackMsP95: number;
@@ -21,11 +25,15 @@ export function createFarSummaryGpuCounters(): FarSummaryGpuCounters {
   return {
     enabled: 0,
     deviceReady: 0,
+    authoritative: 0,
     dirtyTiles: 0,
     tilesDispatched: 0,
     batchesDispatched: 0,
     fallbackTiles: 0,
     failedBatches: 0,
+    committedTiles: 0,
+    cpuBuildsSuppressed: 0,
+    runtimeError: 0,
     computeMsP50: 0,
     computeMsP95: 0,
     readbackMsP95: 0,
@@ -46,11 +54,15 @@ export function publishFarSummaryGpuCounters(
   if (!out) return;
   out["far_summary_gpu_enabled"] = counters.enabled;
   out["far_summary_gpu_device_ready"] = counters.deviceReady;
+  out["far_summary_gpu_authoritative"] = counters.authoritative;
   out["far_summary_gpu_dirty_tiles"] = counters.dirtyTiles;
   out["far_summary_gpu_tiles_dispatched"] = counters.tilesDispatched;
   out["far_summary_gpu_batches_dispatched"] = counters.batchesDispatched;
   out["far_summary_gpu_fallback_tiles"] = counters.fallbackTiles;
   out["far_summary_gpu_failed_batches"] = counters.failedBatches;
+  out["far_summary_gpu_committed_tiles"] = counters.committedTiles;
+  out["far_summary_cpu_builds_suppressed"] = counters.cpuBuildsSuppressed;
+  out["far_summary_gpu_runtime_error"] = counters.runtimeError;
   out["far_summary_gpu_compute_ms_p50"] = counters.computeMsP50;
   out["far_summary_gpu_compute_ms_p95"] = counters.computeMsP95;
   out["far_summary_gpu_readback_ms_p95"] = counters.readbackMsP95;
