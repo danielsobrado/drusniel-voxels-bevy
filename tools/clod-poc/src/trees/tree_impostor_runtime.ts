@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   decodeTreeImpostorAlbedo,
   decodeTreeImpostorNormalComponent,
+  treeImpostorFramesForVariant,
   type TreeImpostorAtlas,
 } from "./tree_impostor_baker.js";
 import { octFrameBlendForDirection, type OctahedralBlendSample } from "./tree_impostor_octahedral.js";
@@ -80,7 +81,9 @@ export function writeTreeImpostorBlendAttributes(
 export function treeImpostorRuntimeBlend(
   atlas: TreeImpostorAtlas,
   viewDirection: THREE.Vector3,
+  variant = 0,
 ): TreeImpostorRuntimeBlend {
+  const frames = treeImpostorFramesForVariant(atlas, variant);
   const blend = octFrameBlendForDirection(
     viewDirection,
     atlas.gridSize,
@@ -88,7 +91,10 @@ export function treeImpostorRuntimeBlend(
     inferAtlasPaddingPx(atlas),
   );
   return {
-    samples: blend.samples.map(toRuntimeSample) as TreeImpostorRuntimeBlend["samples"],
+    samples: blend.samples.map((sample) => toRuntimeSample({
+      frame: frames[sample.frame.index] ?? sample.frame,
+      weight: sample.weight,
+    })) as TreeImpostorRuntimeBlend["samples"],
   };
 }
 

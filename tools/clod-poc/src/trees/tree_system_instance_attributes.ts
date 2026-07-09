@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import type { TreeInstance } from "./tree_instances.js";
-import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { treeImpostorFramesForVariant, type TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import { octFrameIndexForDirection } from "./tree_impostor_octahedral.js";
 import {
   TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
@@ -103,17 +103,18 @@ export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput
     return singleChanged || blendChanged;
   }
 
-  const maxFrame = atlas.frames.length - 1;
+  const frames = treeImpostorFramesForVariant(atlas, input.instance.variant);
+  const maxFrame = frames.length - 1;
   const frozen = input.settings.impostors.debugFreezeFrame;
   const viewDirection = treeImpostorViewDirection(input.instance, input.cameraPosition);
   const frameIndex = frozen >= 0
     ? Math.min(maxFrame, frozen)
     : octFrameIndexForDirection(viewDirection, atlas.gridSize);
-  const frame = atlas.frames[frameIndex] ?? atlas.frames[0];
+  const frame = frames[frameIndex] ?? frames[0] ?? atlas.frames[0];
   const singleChanged = writeUvRectIfChanged(attribute, input.index, frame.uvMin[0], frame.uvMin[1], frame.uvMax[0], frame.uvMax[1]);
   const blendSamples = frozen >= 0
     ? frozenTreeImpostorRuntimeSamples(frame)
-    : treeImpostorRuntimeBlend(atlas, viewDirection).samples;
+    : treeImpostorRuntimeBlend(atlas, viewDirection, input.instance.variant).samples;
   const blendChanged = writeTreeImpostorBlendIfChanged(input.mesh, input.index, blendSamples);
   return singleChanged || blendChanged;
 }

@@ -13,6 +13,18 @@ Last updated: 2026-07-09
 | 5 Far clipmap grid | Done for shader-displacement path | Far clipmap shader displacement uses source texture data and refreshes on snap/source revision/interval. CPU-baked fallback remains a fallback/debug path, not the acceptance path. |
 | 6 GPU canopy | Done / accepted | Far canopy is now GPU impostor based, using the existing canopy path. The visual guard prevents bright square-card regressions. |
 
+## Acceptance harness cleanup
+
+The phase acceptance scenes now live directly in `tools/infinite-islands-acceptance.ts` as typed `SceneSpec` entries with typed validation handlers. The `.mjs` wrapper now only starts/reuses Vite and launches the TypeScript runner with the original CLI args. It no longer rewrites the TypeScript source or creates `infinite-islands-acceptance.filtered.tmp.ts`.
+
+Supported scene aliases:
+
+```text
+coverage/phase3-far-summary-gpu-authoritative -> phase3-far-summary-gpu-authoritative
+coverage/phase4-stones -> phase4-stones
+coverage/phase6-canopy -> phase6-canopy
+```
+
 ## Accepted Phase 6 coverage result
 
 `coverage/phase6-canopy` has been run and passed with 0 failures.

@@ -9,6 +9,7 @@ import {
 } from "three/tsl";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
+import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import { octFrames, type OctahedralFrame } from "./tree_impostor_octahedral.js";
 import {
   injectTreeFoliageFragmentShader,
@@ -36,8 +37,13 @@ export interface TreeImpostorAtlas {
   normalDepth?: THREE.Texture;
   gridSize: number;
   resolutionPx: number;
+  /** Legacy square size for one variant page. */
   atlasSizePx: number;
+  atlasWidthPx?: number;
+  atlasHeightPx?: number;
+  variantCount?: number;
   frames: OctahedralFrame[];
+  variantFrames?: Partial<Record<number, OctahedralFrame[]>>;
   radius?: number;
   centerY?: number;
   ready: boolean;
@@ -107,31 +113,37 @@ function bakeSpeciesAtlas(
   const { settings, geometries } = options;
   const gridSize = settings.impostors.octahedralGridSize;
   const resolutionPx = settings.impostors.resolutionPx;
+  const paddingPx = settings.impostors.atlasPaddingPx;
   const atlasSizePx = gridSize * resolutionPx;
-  const frames = octFrames(gridSize, resolutionPx, settings.impostors.atlasPaddingPx);
-  const albedoTarget = createRenderTarget(atlasSizePx, `tree-impostor-albedo-${species}`, THREE.SRGBColorSpace);
-  const normalDepthTarget = createRenderTarget(atlasSizePx, `tree-impostor-normal-depth-${species}`, THREE.NoColorSpace);
+  const variantCount = treeImpostorVariantCount(geometries, species);
+  const atlasWidthPx = atlasSizePx;
+  const atlasHeightPx = atlasSizePx * variantCount;
+  const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
+  const variantFrames = createTreeImpostorVariantFrames(baseFrames, atlasSizePx, atlasWidthPx, atlasHeightPx, resolutionPx, paddingPx, variantCount);
+  const albedoTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-albedo-${species}`, THREE.SRGBColorSpace);
+  const normalDepthTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-normal-depth-${species}`, THREE.NoColorSpace);
 
   const scene = new THREE.Scene();
-  const geometry = selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod);
-  geometry.computeBoundingSphere();
-  geometry.computeBoundingBox();
-  const radius = Math.max(geometry.boundingSphere?.radius ?? 1, 1);
-  const center = geometry.boundingSphere?.center ?? new THREE.Vector3();
-  const centerY = geometry.boundingBox?.getCenter(new THREE.Vector3()).y ?? center.y;
-  const near = 0.01;
-  const far = radius * 6;
-  const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, near, far);
+  const camera = new THREE.OrthographicCamera();
   const albedoMaterial = createBakeMaterial(options.material, settings);
-  const normalDepthMaterial = createNormalDepthBakeMaterial(near, far, options.webgpu === true);
-  const mesh = new THREE.Mesh(geometry, albedoMaterial);
-  mesh.position.copy(center).multiplyScalar(-1);
+  const variantBounds = computeTreeImpostorVariantBounds(geometries, species, settings.impostors.sourceLod, variantCount);
+  const normalDepthMaterial = createNormalDepthBakeMaterial(0.01, variantBounds.maxRadius * 6, options.webgpu === true);
+  const mesh = new THREE.Mesh(selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod), albedoMaterial);
   scene.add(mesh);
 
   try {
-    bakeAtlasTarget(renderer, albedoTarget, scene, camera, frames, resolutionPx, radius);
-    mesh.material = normalDepthMaterial;
-    bakeAtlasTarget(renderer, normalDepthTarget, scene, camera, frames, resolutionPx, radius);
+    for (let variant = 0; variant < variantCount; variant++) {
+      const geometry = selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod, variant);
+      const bounds = computeTreeImpostorGeometryBounds(geometry);
+      mesh.geometry = geometry;
+      mesh.position.copy(bounds.center).multiplyScalar(-1);
+      const yOffsetPx = variant * atlasSizePx;
+      configureBakeCamera(camera, bounds.radius);
+      mesh.material = albedoMaterial;
+      bakeAtlasTarget(renderer, albedoTarget, scene, camera, baseFrames, resolutionPx, bounds.radius, yOffsetPx);
+      mesh.material = normalDepthMaterial;
+      bakeAtlasTarget(renderer, normalDepthTarget, scene, camera, baseFrames, resolutionPx, bounds.radius, yOffsetPx);
+    }
   } finally {
     albedoMaterial.dispose();
     normalDepthMaterial.dispose();
@@ -145,9 +157,13 @@ function bakeSpeciesAtlas(
     gridSize,
     resolutionPx,
     atlasSizePx,
-    frames,
-    radius,
-    centerY,
+    atlasWidthPx,
+    atlasHeightPx,
+    variantCount,
+    frames: variantFrames[TREE_IMPOSTOR_CANONICAL_VARIANT] ?? variantFrames[0] ?? baseFrames,
+    variantFrames,
+    radius: variantBounds.maxRadius,
+    centerY: variantBounds.centerY,
     ready: true,
     dispose() {
       albedoTarget.dispose();
@@ -160,17 +176,103 @@ export function selectTreeImpostorBakeGeometry(
   geometries: TreeGeometryMap,
   species: TreeSpeciesId,
   sourceLod: TreeSettings["impostors"]["sourceLod"],
+  variant = TREE_IMPOSTOR_CANONICAL_VARIANT,
 ): THREE.BufferGeometry {
-  return geometries[species].variants?.[TREE_IMPOSTOR_CANONICAL_VARIANT]?.[sourceLod]
+  return geometries[species].variants?.[normalizeTreeImpostorVariant(variant)]?.[sourceLod]
+    ?? geometries[species].variants?.[TREE_IMPOSTOR_CANONICAL_VARIANT]?.[sourceLod]
     ?? geometries[species][sourceLod];
 }
 
-function createRenderTarget(
+export function treeImpostorFramesForVariant(
+  atlas: TreeImpostorAtlas,
+  variant: number,
+): OctahedralFrame[] {
+  return atlas.variantFrames?.[normalizeTreeImpostorVariant(variant)] ?? atlas.frames;
+}
+
+export function treeImpostorVariantCountForAtlas(atlas: TreeImpostorAtlas): number {
+  return Math.max(1, Math.floor(atlas.variantCount ?? 1));
+}
+
+function treeImpostorVariantCount(geometries: TreeGeometryMap, species: TreeSpeciesId): number {
+  const variants = geometries[species].variants;
+  if (!variants) return 1;
+  return Math.max(1, Math.min(TREE_STRUCTURAL_VARIANTS, Object.keys(variants).length));
+}
+
+function normalizeTreeImpostorVariant(variant: number): number {
+  return Math.max(0, Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(Number.isFinite(variant) ? variant : 0)));
+}
+
+function createTreeImpostorVariantFrames(
+  baseFrames: readonly OctahedralFrame[],
   atlasSizePx: number,
+  atlasWidthPx: number,
+  atlasHeightPx: number,
+  resolutionPx: number,
+  paddingPx: number,
+  variantCount: number,
+): Partial<Record<number, OctahedralFrame[]>> {
+  const out: Partial<Record<number, OctahedralFrame[]>> = {};
+  for (let variant = 0; variant < variantCount; variant++) {
+    const yOffsetPx = variant * atlasSizePx;
+    out[variant] = baseFrames.map((frame) => ({
+      ...frame,
+      uvMin: [
+        (frame.x * resolutionPx + paddingPx) / atlasWidthPx,
+        (yOffsetPx + frame.y * resolutionPx + paddingPx) / atlasHeightPx,
+      ],
+      uvMax: [
+        ((frame.x + 1) * resolutionPx - paddingPx) / atlasWidthPx,
+        (yOffsetPx + (frame.y + 1) * resolutionPx - paddingPx) / atlasHeightPx,
+      ],
+    }));
+  }
+  return out;
+}
+
+function computeTreeImpostorVariantBounds(
+  geometries: TreeGeometryMap,
+  species: TreeSpeciesId,
+  sourceLod: TreeSettings["impostors"]["sourceLod"],
+  variantCount: number,
+): { maxRadius: number; centerY: number } {
+  let maxRadius = 1;
+  let centerY = 0;
+  for (let variant = 0; variant < variantCount; variant++) {
+    const bounds = computeTreeImpostorGeometryBounds(selectTreeImpostorBakeGeometry(geometries, species, sourceLod, variant));
+    maxRadius = Math.max(maxRadius, bounds.radius);
+    if (variant === TREE_IMPOSTOR_CANONICAL_VARIANT) centerY = bounds.centerY;
+  }
+  return { maxRadius, centerY };
+}
+
+function computeTreeImpostorGeometryBounds(geometry: THREE.BufferGeometry): { radius: number; center: THREE.Vector3; centerY: number } {
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  const radius = Math.max(geometry.boundingSphere?.radius ?? 1, 1);
+  const center = geometry.boundingSphere?.center?.clone() ?? new THREE.Vector3();
+  const centerY = geometry.boundingBox?.getCenter(new THREE.Vector3()).y ?? center.y;
+  return { radius, center, centerY };
+}
+
+function configureBakeCamera(camera: THREE.OrthographicCamera, radius: number): void {
+  camera.left = -radius;
+  camera.right = radius;
+  camera.top = radius;
+  camera.bottom = -radius;
+  camera.near = 0.01;
+  camera.far = radius * 6;
+  camera.updateProjectionMatrix();
+}
+
+function createRenderTarget(
+  atlasWidthPx: number,
+  atlasHeightPx: number,
   name: string,
   colorSpace: THREE.ColorSpace,
 ): THREE.WebGLRenderTarget {
-  const renderTarget = new THREE.WebGLRenderTarget(atlasSizePx, atlasSizePx, {
+  const renderTarget = new THREE.WebGLRenderTarget(atlasWidthPx, atlasHeightPx, {
     depthBuffer: true,
     stencilBuffer: false,
     type: THREE.UnsignedByteType,
@@ -202,6 +304,7 @@ function bakeAtlasTarget(
   frames: readonly OctahedralFrame[],
   resolutionPx: number,
   radius: number,
+  yOffsetPx = 0,
 ): void {
   const oldTarget = renderer.getRenderTarget();
   const oldClearColor = renderer.getClearColor(new THREE.Color()).clone();
@@ -210,13 +313,13 @@ function bakeAtlasTarget(
   try {
     renderer.setRenderTarget(renderTarget);
     renderer.setClearColor(0x000000, 0);
-    renderer.clear(true, true, true);
+    if (yOffsetPx === 0) renderer.clear(true, true, true);
     for (const frame of frames) {
       const direction = new THREE.Vector3(frame.direction[0], frame.direction[1], frame.direction[2]);
       camera.position.copy(direction).multiplyScalar(radius * 3);
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
-      renderer.setViewport(frame.x * resolutionPx, frame.y * resolutionPx, resolutionPx, resolutionPx);
+      renderer.setViewport(frame.x * resolutionPx, yOffsetPx + frame.y * resolutionPx, resolutionPx, resolutionPx);
       renderer.render(scene, camera);
     }
   } finally {

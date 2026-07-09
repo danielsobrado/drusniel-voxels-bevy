@@ -166,7 +166,7 @@ export class TreeSystemAssets {
       geometries: this.geometries,
       impostorAtlases: this.impostorAtlases,
       bakedImpostorGeometries: this.bakedImpostorGeometries,
-      includeBlendAttributes: !this.webgpu,
+      includeBlendAttributes: true,
       meshBoundsState,
     });
   }
@@ -189,8 +189,8 @@ export class TreeSystemAssets {
         settings: this.settings,
         atlas,
         webgpu: this.webgpu,
-        viewBlend: !this.webgpu,
-        viewBlendGeometryReady: !this.webgpu,
+        viewBlend: true,
+        viewBlendGeometryReady: true,
         impostorMaterials: this.impostorMaterials,
       });
     }

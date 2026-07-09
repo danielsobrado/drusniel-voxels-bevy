@@ -30,6 +30,16 @@ describe("tree impostor runtime contract", () => {
     }
   });
 
+  it("selects variant-specific frame rows for runtime blends", () => {
+    const atlas = fakeAtlas();
+    const base = treeImpostorRuntimeBlend(atlas, new THREE.Vector3(1, 1, 2), 0);
+    const variant = treeImpostorRuntimeBlend(atlas, new THREE.Vector3(1, 1, 2), 1);
+
+    expect(variant.samples[0].uvMin[1]).toBeGreaterThan(base.samples[0].uvMin[1]);
+    expect(variant.samples[0].uvMax[1]).toBeGreaterThan(base.samples[0].uvMax[1]);
+    expect(variant.samples.reduce((sum, sample) => sum + sample.weight, 0)).toBeCloseTo(1, 6);
+  });
+
   it("packs four uv rects and weights per impostor instance", () => {
     const attributes = createTreeImpostorBlendAttributes(2);
     const blend = treeImpostorRuntimeBlend(fakeAtlas(), new THREE.Vector3(1, 1, 2));
@@ -170,6 +180,16 @@ describe("tree impostor runtime contract", () => {
 
 function fakeAtlas(): TreeImpostorAtlas {
   const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  const base = octFrames(8, 128, 2).map((frame) => ({
+    ...frame,
+    uvMin: [frame.uvMin[0], frame.uvMin[1] * 0.5] as [number, number],
+    uvMax: [frame.uvMax[0], frame.uvMax[1] * 0.5] as [number, number],
+  }));
+  const variant = octFrames(8, 128, 2).map((frame) => ({
+    ...frame,
+    uvMin: [frame.uvMin[0], 0.5 + frame.uvMin[1] * 0.5] as [number, number],
+    uvMax: [frame.uvMax[0], 0.5 + frame.uvMax[1] * 0.5] as [number, number],
+  }));
   return {
     species: "oak",
     texture,
@@ -178,7 +198,11 @@ function fakeAtlas(): TreeImpostorAtlas {
     gridSize: 8,
     resolutionPx: 128,
     atlasSizePx: 1024,
-    frames: octFrames(8, 128, 2),
+    atlasWidthPx: 1024,
+    atlasHeightPx: 2048,
+    variantCount: 2,
+    frames: base,
+    variantFrames: { 0: base, 1: variant },
     radius: 1,
     centerY: 0,
     ready: true,

@@ -129,9 +129,7 @@ async function ensureServer() {
   const deadline = Date.now() + SERVER_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    if (server.exitCode !== null) {
-      throw new Error(`Vite exited before becoming ready with code ${server.exitCode}`);
-    }
+    if (server.exitCode !== null) throw new Error(`Vite exited before becoming ready with code ${server.exitCode}`);
     if (await isServerReady(process.env.CLOD_POC_BASE_URL)) return server;
     await delay(SERVER_POLL_MS);
   }
@@ -382,27 +380,21 @@ function cleanupFilteredScript() {
 
 function runAcceptance() {
   const args = process.argv.slice(2);
-  const acceptanceScript = prepareAcceptanceScript(args);
   return new Promise((resolve) => {
-    const child = spawnChild("playwright", nodeBin, [tsxCli, acceptanceScript, ...args], {
+    const child = spawnChild("playwright", nodeBin, [tsxCli, ACCEPTANCE_SOURCE, ...args], {
       filterStdout: true,
     });
-    child.on("exit", (code) => {
-      cleanupFilteredScript();
-      resolve(code ?? 1);
-    });
+    child.on("exit", (code) => resolve(code ?? 1));
   });
 }
 
 let server = null;
 try {
-  mkdirSync(path.dirname(FILTERED_ACCEPTANCE_SOURCE), { recursive: true });
   server = await ensureServer();
   const code = await runAcceptance();
   stopChildTree(server);
   process.exit(code);
 } catch (error) {
-  cleanupFilteredScript();
   stopChildTree(server);
   console.error("[infinite-accept] FAILED:", error instanceof Error ? error.message : error);
   process.exit(1);

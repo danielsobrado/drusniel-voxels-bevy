@@ -4,6 +4,11 @@ import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tre
 import type { TreeInstance } from "./tree_instances.js";
 import type { TreeSystemMeshGrid } from "./tree_system_lifecycle.js";
 import { TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME } from "./tree_system_instance_attributes.js";
+import {
+  TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
+  TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+} from "./tree_impostor_blend_geometry.js";
+import { TREE_IMPOSTOR_BLEND_SAMPLE_COUNT } from "./tree_impostor_runtime.js";
 
 export interface TreePatchMeshFactoryInput {
   nodeId: string;
@@ -89,5 +94,18 @@ export function attachTreePatchInstanceAttributes(
   if (lod === "impostor") {
     geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
     geometry.setAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+    attachTreePatchImpostorBlendAttributes(geometry, safeCapacity);
   }
+}
+
+function attachTreePatchImpostorBlendAttributes(geometry: THREE.BufferGeometry, capacity: number): void {
+  for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
+    geometry.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));
+  }
+  const weights = new Float32Array(capacity * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
+  for (let index = 0; index < capacity; index++) weights[index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT] = 1;
+  geometry.setAttribute(
+    TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+    new THREE.InstancedBufferAttribute(weights, TREE_IMPOSTOR_BLEND_SAMPLE_COUNT),
+  );
 }

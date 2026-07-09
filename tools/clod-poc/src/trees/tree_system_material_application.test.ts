@@ -11,6 +11,7 @@ import {
   createTreeGeometryMap,
   disposeTreeGeometryMap,
   octFrames,
+  TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME,
   TREE_LODS,
   TREE_SPECIES,
   type TreeLod,
@@ -77,6 +78,8 @@ describe("tree system material application helpers", () => {
     expect(geometry.getAttribute("position")).toBeDefined();
     expect(geometry.getAttribute("treeWorldXZ").count).toBe(3);
     expect(geometry.getAttribute("treeWorldXZ").itemSize).toBe(2);
+    expect(geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME).count).toBe(3);
+    expect(geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME).itemSize).toBe(4);
     expect(geometry.getAttribute("treeLodFade").count).toBe(3);
     expect(geometry.getAttribute("treeLodFade").getX(0)).toBe(1);
     expect(geometry.getAttribute("treeImpostorUvRect").count).toBe(3);
@@ -90,16 +93,17 @@ describe("tree system material application helpers", () => {
     expect(geometry.getAttribute("treeImpostorBlendWeights").getX(0)).toBe(1);
   });
 
-  it("can omit impostor blend attributes for WebGPU-safe initial meshes", () => {
+  it("keeps four-frame blend attributes even when the legacy omit flag is false", () => {
     const source = new THREE.PlaneGeometry(1, 2);
     const geometry = createTreeSystemImpostorGeometryForCapacity(source, 3, false);
 
     expect(geometry.getAttribute("treeImpostorUvRect")).toBeDefined();
-    expect(geometry.getAttribute("treeImpostorUvRect0")).toBeUndefined();
-    expect(geometry.getAttribute("treeImpostorUvRect1")).toBeUndefined();
-    expect(geometry.getAttribute("treeImpostorUvRect2")).toBeUndefined();
-    expect(geometry.getAttribute("treeImpostorUvRect3")).toBeUndefined();
-    expect(geometry.getAttribute("treeImpostorBlendWeights")).toBeUndefined();
+    expect(geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME)).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorUvRect0")).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorUvRect1")).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorUvRect2")).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorUvRect3")).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorBlendWeights")).toBeDefined();
   });
 
   it("replaces one impostor mesh geometry and invalidates bounds state", () => {
@@ -114,6 +118,8 @@ describe("tree system material application helpers", () => {
 
     expect(mesh.geometry).not.toBe(oldGeometry);
     expect(mesh.geometry.getAttribute("treeWorldXZ").count).toBe(2);
+    expect(mesh.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME)).toBeDefined();
+    expect(mesh.geometry.getAttribute("treeImpostorBlendWeights")).toBeDefined();
     expect(oldDispose).toHaveBeenCalledTimes(1);
     expect(bounds.has(mesh)).toBe(false);
   });
@@ -140,6 +146,8 @@ describe("tree system material application helpers", () => {
       for (const species of TREE_SPECIES) {
         expect(patch.meshes[species].impostor.geometry).not.toBe(old[TREE_SPECIES.indexOf(species)]);
         expect(patch.meshes[species].impostor.geometry.getAttribute("treeImpostorUvRect")).toBeDefined();
+        expect(patch.meshes[species].impostor.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME)).toBeDefined();
+        expect(patch.meshes[species].impostor.geometry.getAttribute("treeImpostorBlendWeights")).toBeDefined();
         expect(bounds.has(patch.meshes[species].impostor)).toBe(false);
       }
       for (const dispose of disposals) expect(dispose).toHaveBeenCalledTimes(1);
