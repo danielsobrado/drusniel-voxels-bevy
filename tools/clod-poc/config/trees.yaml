@@ -40,9 +40,9 @@ trees:
     far_fraction: 0.30
     impostor_fraction: 1.0
     hysteresis_m: 8
-    crossfade_enabled: false
-    crossfade_band_m: 0
-    dither_enabled: false
+    crossfade_enabled: true
+    crossfade_band_m: 18
+    dither_enabled: true
     shadows_max_lod: none
     budgets:
       near_max_vertices: 180000
@@ -55,11 +55,11 @@ trees:
     bake_on_start: true
     fallback_to_placeholder: false
     swap_on_bake: true
-    source_lod: near
+    source_lod: mid
     resolution_px: 192
     octahedral_grid_size: 8
     atlas_padding_px: 2
-    alpha_test: 0.35
+    alpha_test: 0.38
     frame_update_distance_m: 3.0
     axial_billboard: true
     preserve_vertical: true
