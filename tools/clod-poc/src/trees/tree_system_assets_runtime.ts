@@ -9,6 +9,7 @@ import { createTreeCrownProxyGeometry } from "./tree_crown_proxy_math.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import { bakeTreeImpostorAtlases, type TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { publishTreeImpostorDebugStatus } from "./tree_impostor_debug.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
 import {
   disposeTreeSystemBakedImpostorGeometries,
@@ -57,6 +58,7 @@ export class TreeSystemAssets {
       ? createTreeNodeMaterialHandle(this.settings, options.lighting, options.hydrologyWater)
       : createTreeMaterialHandle(this.settings);
     if (options.impostorAtlases) this.setImpostorAtlases(options.impostorAtlases);
+    else publishTreeImpostorDebugStatus(this.impostorAtlases);
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
@@ -103,6 +105,7 @@ export class TreeSystemAssets {
   setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
     for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
     this.impostorAtlases = { ...atlases };
+    publishTreeImpostorDebugStatus(this.impostorAtlases);
     this.disposeImpostorMaterials();
     this.updateImpostorMaterials();
   }
@@ -177,6 +180,7 @@ export class TreeSystemAssets {
     this.disposeBakedImpostorGeometries();
     this.disposeImpostorMaterials();
     for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    publishTreeImpostorDebugStatus({});
     this.materialHandle.dispose();
   }
 
