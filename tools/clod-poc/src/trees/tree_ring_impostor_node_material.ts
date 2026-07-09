@@ -60,6 +60,7 @@ const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS = 0.82;
 const TREE_RING_IMPOSTOR_PHYSICAL_METALNESS = 0.0;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
+const TREE_RING_IMPOSTOR_MIN_COVERAGE = 0.0001;
 const TREE_RING_VARIANT_SALT = 1571;
 
 function fallbackLighting(): EnvironmentLighting {
@@ -237,14 +238,21 @@ function treeRingImpostorFourFrameSample(
   const s10 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y0, variantIndex);
   const s01 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y1, variantIndex);
   const s11 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y1, variantIndex);
+  const coverage: TslNode = s00.coverage.mul(w00).add(s10.coverage.mul(w10)).add(s01.coverage.mul(w01)).add(s11.coverage.mul(w11));
+  const safeCoverage: TslNode = max(coverage, float(TREE_RING_IMPOSTOR_MIN_COVERAGE));
   return {
-    albedo: s00.albedo.mul(w00).add(s10.albedo.mul(w10)).add(s01.albedo.mul(w01)).add(s11.albedo.mul(w11)),
-    coverage: s00.coverage.mul(w00).add(s10.coverage.mul(w10)).add(s01.coverage.mul(w01)).add(s11.coverage.mul(w11)),
+    albedo: s00.albedo.mul(s00.coverage).mul(w00)
+      .add(s10.albedo.mul(s10.coverage).mul(w10))
+      .add(s01.albedo.mul(s01.coverage).mul(w01))
+      .add(s11.albedo.mul(s11.coverage).mul(w11))
+      .div(safeCoverage),
+    coverage,
     normal: normalize(
-      decodeTreeRingImpostorPackedNormal(s00.normal).mul(w00)
-        .add(decodeTreeRingImpostorPackedNormal(s10.normal).mul(w10))
-        .add(decodeTreeRingImpostorPackedNormal(s01.normal).mul(w01))
-        .add(decodeTreeRingImpostorPackedNormal(s11.normal).mul(w11)),
+      decodeTreeRingImpostorPackedNormal(s00.normal).mul(s00.coverage).mul(w00)
+        .add(decodeTreeRingImpostorPackedNormal(s10.normal).mul(s10.coverage).mul(w10))
+        .add(decodeTreeRingImpostorPackedNormal(s01.normal).mul(s01.coverage).mul(w01))
+        .add(decodeTreeRingImpostorPackedNormal(s11.normal).mul(s11.coverage).mul(w11))
+        .div(safeCoverage),
     ),
   };
 }
@@ -270,9 +278,10 @@ function treeRingImpostorAtlasSample(
 ): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
   const atlasUv = treeRingImpostorAtlasUv(atlas, baseUv, frameX, frameY, variantIndex);
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
+  const encoded: TslNode = clamp(sample.xyz.div(max(sample.w, float(TREE_RING_IMPOSTOR_MIN_COVERAGE))), 0.0, 1.0);
   const normalSample: TslNode = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv).xyz : vec3(0.5, 1.0, 0.5);
   return {
-    albedo: sample.xyz.mul(sample.xyz),
+    albedo: encoded.mul(encoded),
     coverage: sample.w,
     normal: normalSample,
   };
