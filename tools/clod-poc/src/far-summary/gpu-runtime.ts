@@ -53,6 +53,10 @@ export interface FarSummaryGpuRuntimeStats {
   lastBatches: number;
   lastFallbackTiles: number;
   lastCommittedTiles: number;
+  totalCommittedTiles: number;
+  lastCpuBuildSuppressed: number;
+  totalCpuBuildsSuppressed: number;
+  authoritative: number;
   lastFallbackReason: FarSummaryGpuDispatchOrFallbackResult["fallbackReason"] | null;
   lastError: string | null;
 }
@@ -69,11 +73,16 @@ export class FarSummaryGpuRuntime {
     lastBatches: 0,
     lastFallbackTiles: 0,
     lastCommittedTiles: 0,
+    totalCommittedTiles: 0,
+    lastCpuBuildSuppressed: 0,
+    totalCpuBuildsSuppressed: 0,
+    authoritative: 0,
     lastFallbackReason: null,
     lastError: null,
   };
 
   constructor(private readonly options: FarSummaryGpuRuntimeOptions) {
+    this.statsState.authoritative = options.gpuConfig.authoritative ? 1 : 0;
     this.publishIdleCounters();
   }
 
@@ -82,8 +91,11 @@ export class FarSummaryGpuRuntime {
     frameIndex: number,
     reason: FarSummaryGpuDirtyReason = "camera_ring_shift",
     dirtyRequests?: readonly FarSummaryRingRequest[],
+    cpuBuildSuppressed = false,
   ): void {
     if (this.disposed) return;
+    this.statsState.lastCpuBuildSuppressed = cpuBuildSuppressed ? 1 : 0;
+    if (cpuBuildSuppressed) this.statsState.totalCpuBuildsSuppressed++;
     if (!this.options.gpuConfig.enabled) {
       this.publishIdleCounters();
       return;
@@ -117,6 +129,7 @@ export class FarSummaryGpuRuntime {
     void this.dispatchPlan(plan, frameIndex)
       .catch((error) => {
         this.statsState.lastError = error instanceof Error ? error.message : String(error);
+        this.publishErrorCounters();
       })
       .finally(() => {
         this.inFlight = false;
@@ -146,7 +159,14 @@ export class FarSummaryGpuRuntime {
     this.statsState.lastFallbackTiles = result.fallbackTiles;
     this.statsState.lastFallbackReason = result.fallbackReason;
     this.statsState.lastError = result.error?.message ?? null;
-    this.statsState.lastCommittedTiles = this.commitGpuReadbacks(plan, result, frameIndex, nowMs);
+    const committed = this.commitGpuReadbacks(plan, result, frameIndex, nowMs);
+    this.statsState.lastCommittedTiles = committed;
+    this.statsState.totalCommittedTiles += committed;
+    result.counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    result.counters.committedTiles = this.statsState.totalCommittedTiles;
+    result.counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
+    result.counters.runtimeError = this.statsState.lastError ? 1 : 0;
+    publishFarSummaryGpuCounters(undefined, result.counters);
   }
 
   private commitGpuReadbacks(
@@ -187,6 +207,22 @@ export class FarSummaryGpuRuntime {
   private publishIdleCounters(): void {
     const counters = createFarSummaryGpuCounters();
     counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
+    counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    counters.committedTiles = this.statsState.totalCommittedTiles;
+    counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
+    counters.runtimeError = this.statsState.lastError ? 1 : 0;
+    publishFarSummaryGpuCounters(undefined, counters);
+  }
+
+  private publishErrorCounters(): void {
+    const counters = createFarSummaryGpuCounters();
+    counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
+    counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    counters.dirtyTiles = this.statsState.lastDirtyTiles;
+    counters.fallbackTiles = this.statsState.lastDirtyTiles;
+    counters.committedTiles = this.statsState.totalCommittedTiles;
+    counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
+    counters.runtimeError = 1;
     publishFarSummaryGpuCounters(undefined, counters);
   }
 
