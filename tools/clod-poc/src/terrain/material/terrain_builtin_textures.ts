@@ -48,11 +48,15 @@ export const demoTextureUrl = (file: string): string => {
   return entry[1];
 };
 
+// Default to the demo textures (detailed albedo). The PBR built-ins have near-uniform albedo that
+// reads as flat terrain here, so they stay available in the palette but are not the default.
 export const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
-  { id: "pbr-grass-008", scale: 0.055, heightMin: 12, heightMax: 20 },
-  { id: "pbr-ground-054", scale: 0.05, heightMin: 18, heightMax: 42 },
-  { id: "pbr-ground-048", scale: 0.045, heightMin: 38, heightMax: 66 },
-  { id: "pbr-snow-007c", scale: 0.035, heightMin: 62, heightMax: 118 },
+  // scale = uv per world metre; 1/scale = tile size. ~0.06 gave a ~16m tile that reads flat up
+  // close, so these are tightened to ~4-5m tiles for visible detail at ground level.
+  { id: "grass-2", scale: 0.24, heightMin: 12, heightMax: 18 },
+  { id: "earth-2", scale: 0.16, heightMin: 18, heightMax: 40 },
+  { id: "earth-1", scale: 0.16, heightMin: 40, heightMax: 60 },
+  { id: "snow-rocks-1", scale: 0.1, heightMin: 60, heightMax: 118 },
 ] as const;
 
 export const BUILTIN_TERRAIN_TEXTURES: readonly BuiltinTerrainTexture[] = [

@@ -37,6 +37,7 @@ const CONFIG: FarSummaryGpuConfig = {
   strictParity: false,
   debugReadback: false,
   commitToCache: false,
+  authoritative: false,
   sampleGrid: 16,
   maxTilesPerBatch: 256,
   maxBatchesPerFrame: 1,

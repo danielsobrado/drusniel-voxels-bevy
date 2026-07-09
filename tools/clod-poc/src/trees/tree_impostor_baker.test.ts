@@ -72,7 +72,7 @@ describe("tree impostor baker", () => {
 
   it("uses a normal-depth shader with linear depth in alpha", () => {
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("vTreeImpostorLinearDepth");
-    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("normalMatrix * normal");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("normalize(normal)");
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("far - near");
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("packedNormal");
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("vTreeImpostorLinearDepth");

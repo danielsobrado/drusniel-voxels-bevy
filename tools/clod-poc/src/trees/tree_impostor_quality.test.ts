@@ -29,9 +29,9 @@ describe("tree impostor quality defaults", () => {
   it("uses configured baked impostor defaults", () => {
     const settings = cloneTreeSettings();
 
-    expect(settings.impostors.sourceLod).toBe("near");
+    expect(settings.impostors.sourceLod).toBe("mid");
     expect(settings.impostors.resolutionPx).toBe(192);
-    expect(settings.impostors.alphaTest).toBe(0.35);
+    expect(settings.impostors.alphaTest).toBe(0.38);
     expect(settings.impostors.fallbackToPlaceholder).toBe(false);
     expect(settings.impostors.swapOnBake).toBe(true);
   });

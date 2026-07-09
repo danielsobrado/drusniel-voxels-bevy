@@ -328,3 +328,32 @@ function nextFrame(): Promise<void> {
     else setTimeout(resolve, 0);
   });
 }
+
+export function encodeTreeImpostorAlbedo(channel: number): number {
+  return Math.sqrt(clamp01(channel));
+}
+
+export function decodeTreeImpostorAlbedo(channel: number): number {
+  const value = clamp01(channel);
+  return value * value;
+}
+
+export function encodeTreeImpostorNormalComponent(component: number): number {
+  return clamp01(component * 0.5 + 0.5);
+}
+
+export function decodeTreeImpostorNormalComponent(channel: number): number {
+  return clamp01(channel) * 2 - 1;
+}
+
+export function encodeTreeImpostorDepth(depth: number): number {
+  return clamp01(depth);
+}
+
+export function decodeTreeImpostorDepth(channel: number): number {
+  return clamp01(channel);
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
