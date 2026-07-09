@@ -33,12 +33,24 @@ describe("farSummaryGpuConfigFromParams", () => {
       strictParity: true,
       debugReadback: true,
       commitToCache: true,
+      authoritative: false,
       sampleGrid: 32,
       maxTilesPerBatch: 64,
       maxBatchesPerFrame: 2,
       maxBufferBytes: 4096,
       debugReadbackTiles: 4,
     });
+  });
+
+  it("makes authoritative mode opt-in and implies GPU enable, debug readback, and cache commit", () => {
+    const config = farSummaryGpuConfigFromParams(new URLSearchParams([
+      ["farSummaryGpuAuthoritative", "1"],
+    ]));
+
+    expect(config.enabled).toBe(true);
+    expect(config.authoritative).toBe(true);
+    expect(config.debugReadback).toBe(true);
+    expect(config.commitToCache).toBe(true);
   });
 
   it("rejects zero for positive-only params but allows zero debug readback tiles", () => {
