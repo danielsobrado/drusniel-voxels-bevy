@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { Page } from "playwright";
 import sharp from "sharp";
 import { clodUrl, launchWebGPU } from "./launch.js";
 import {
@@ -72,7 +73,7 @@ function lookAtPose(target: [number, number, number], radius: number, height: nu
   };
 }
 
-async function waitForReady(page: Awaited<ReturnType<Awaited<ReturnType<typeof launchWebGPU>>["browser"]["newPage"]>>, timeoutMs: number): Promise<void> {
+async function waitForReady(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(
     () => window.__drusnielClod && (window.__drusnielClod.ready || window.__drusnielClod.error !== null),
     undefined,
