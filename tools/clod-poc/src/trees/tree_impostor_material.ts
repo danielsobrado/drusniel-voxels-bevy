@@ -40,6 +40,7 @@ const TREE_IMPOSTOR_SKY_COLOR = new THREE.Vector3(0.42, 0.48, 0.58);
 const TREE_IMPOSTOR_GROUND_COLOR = new THREE.Vector3(0.18, 0.16, 0.13);
 const TREE_IMPOSTOR_AMBIENT = 0.25;
 const TREE_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
+const TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_IMPOSTOR_SUN_MAX = 0.85;
 
 export function createTreeImpostorNodeMaterial(
@@ -51,9 +52,10 @@ export function createTreeImpostorNodeMaterial(
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
   const albedo: TslNode = sample.xyz.mul(sample.xyz);
   const normalSample: TslNode | null = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null;
+  const billboardNormal = treeImpostorNodeBillboardNormal();
   const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), `tree-impostor-node-material:${atlas.species}`);
-  material.positionNode = treeImpostorNodeBillboardPosition();
-  material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
+  material.positionNode = treeImpostorNodeBillboardPosition(billboardNormal);
+  material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample, billboardNormal) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = sample.w;
   (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
   material.alphaTest = settings.impostors.alphaTest;
@@ -83,9 +85,10 @@ export function createTreeImpostorBlendNodeMaterial(
   const normalSample = sample0.normal && sample1.normal && sample2.normal && sample3.normal
     ? blendTreeImpostorNormal(sample0.normal, sample1.normal, sample2.normal, sample3.normal, weights)
     : null;
+  const billboardNormal = treeImpostorNodeBillboardNormal();
   const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), `tree-impostor-blend-node-material:${atlas.species}`);
-  material.positionNode = treeImpostorNodeBillboardPosition();
-  material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
+  material.positionNode = treeImpostorNodeBillboardPosition(billboardNormal);
+  material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample, billboardNormal) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = coverage;
   (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
   material.alphaTest = settings.impostors.alphaTest;
@@ -158,17 +161,21 @@ function sampleTreeImpostorNode(atlas: TreeImpostorAtlas, uvRect: TslNode): { al
   };
 }
 
-function treeImpostorNodeBillboardPosition(): TslNode {
+function treeImpostorNodeBillboardNormal(): TslNode {
   const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
-  const localPositionScale: TslNode = attribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, "vec4");
   const toCamera: TslNode = vec3(
-    cameraPosition.z.sub(worldXZ.y),
+    cameraPosition.x.sub(worldXZ.x),
     float(0),
-    cameraPosition.x.sub(worldXZ.x).negate(),
+    cameraPosition.z.sub(worldXZ.y),
   );
-  const right: TslNode = dot(toCamera, toCamera)
+  return dot(toCamera, toCamera)
     .greaterThan(float(0.000001))
-    .select(normalize(toCamera), vec3(1, 0, 0));
+    .select(normalize(toCamera), vec3(0, 0, 1));
+}
+
+function treeImpostorNodeBillboardPosition(billboardNormal: TslNode): TslNode {
+  const localPositionScale: TslNode = attribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, "vec4");
+  const right: TslNode = vec3(billboardNormal.z, float(0), billboardNormal.x.negate());
   return vec3(localPositionScale.x, localPositionScale.y, localPositionScale.z)
     .add(right.mul(positionGeometry.x.mul(localPositionScale.w)))
     .add(vec3(0, positionGeometry.y.mul(localPositionScale.w), 0));
@@ -197,9 +204,10 @@ function treeImpostorNodeDitherMask(): TslNode {
   return role.greaterThan(0.5).select(secondary, primary);
 }
 
-function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode): TslNode {
+function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode, billboardNormal: TslNode): TslNode {
   const rawNormal: TslNode = normalSample.xyz.mul(2).sub(1);
-  const n0: TslNode = normalize(rawNormal);
+  const capturedNormal: TslNode = normalize(rawNormal);
+  const n0: TslNode = normalize(mix(billboardNormal, capturedNormal, float(TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
   const n: TslNode = frontFacing.select(n0, n0.negate());
   const sunDirection = uniform(TREE_IMPOSTOR_SUN_DIRECTION.clone());
   const sunColor = uniform(TREE_IMPOSTOR_SUN_COLOR.clone());
