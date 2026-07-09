@@ -7,11 +7,14 @@ import {
   TREE_IMPOSTOR_BLEND_SAMPLE_COUNT,
   TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
   TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+  TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME,
   TREE_LOD_DITHER_SECONDARY,
+  treeImpostorLocalPositionScaleAttribute,
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
   treeWorldXZAttribute,
+  writeTreeImpostorLocalPositionScaleIfChanged,
   writeTreeImpostorUvRectIfChanged,
   writeTreeLodDitherRoleIfChanged,
   writeTreeLodFadeIfChanged,
@@ -29,6 +32,17 @@ describe("tree system instance attribute writers", () => {
     const attribute = treeWorldXZAttribute(mesh);
     expect(attribute.getX(1)).toBe(10);
     expect(attribute.getY(1)).toBe(20);
+  });
+
+  it("writes impostor local position and scale only when values change", () => {
+    const mesh = testMesh();
+    expect(writeTreeImpostorLocalPositionScaleIfChanged(mesh, 1, 1, 2, 3, 4)).toBe(true);
+    expect(writeTreeImpostorLocalPositionScaleIfChanged(mesh, 1, 1, 2, 3, 4)).toBe(false);
+    const attribute = treeImpostorLocalPositionScaleAttribute(mesh);
+    expect(attribute.getX(1)).toBe(1);
+    expect(attribute.getY(1)).toBe(2);
+    expect(attribute.getZ(1)).toBe(3);
+    expect(attribute.getW(1)).toBe(4);
   });
 
   it("writes lod fade only when values change", () => {
@@ -209,6 +223,7 @@ function testMesh(): THREE.InstancedMesh {
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3));
   geometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(4), 2));
+  geometry.setAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(new Float32Array(8), 4));
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(2).fill(1), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(2), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(8), 4));
