@@ -90,9 +90,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const c: TslNode = cos(aYaw);
     const s: TslNode = sin(aYaw);
     const localPosition: TslNode = positionGeometry.mul(aScale);
-    const rotX: TslNode = c.mul(localPosition.x).add(s.mul(localPosition.z));
-    const rotZ: TslNode = s.mul(localPosition.x).negate().add(c.mul(localPosition.z));
-    const positionNode: TslNode = vec3(aWorldXZ.x.add(rotX), aHeight.add(localPosition.y), aWorldXZ.y.add(rotZ));
+    const positionNode: TslNode = treeRingCylindricalBillboardPosition(aWorldXZ, aHeight, localPosition);
 
     const dirWorld: TslNode = normalize(vec3(
       cameraPosition.x.sub(aWorldXZ.x),
@@ -160,6 +158,22 @@ export function createTreeRingImpostorNodeMaterialHandle(
       for (const material of materials) material.dispose();
     },
   };
+}
+
+function treeRingCylindricalBillboardPosition(
+  worldXZ: TslNode,
+  groundY: TslNode,
+  localPosition: TslNode,
+): TslNode {
+  const toCamera: TslNode = vec3(
+    cameraPosition.z.sub(worldXZ.y),
+    float(0),
+    cameraPosition.x.sub(worldXZ.x).negate(),
+  );
+  const right: TslNode = normalize(toCamera);
+  return vec3(worldXZ.x, groundY, worldXZ.y)
+    .add(right.mul(localPosition.x))
+    .add(vec3(0, localPosition.y, 0));
 }
 
 function treeRingImpostorFourFrameSample(
