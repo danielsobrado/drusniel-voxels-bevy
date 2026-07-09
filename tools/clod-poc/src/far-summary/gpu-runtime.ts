@@ -9,6 +9,7 @@ import {
   buildFarSummaryGpuPlanFromRequests,
   type FarSummaryGpuPlan,
   type FarSummaryGpuDirtyReason,
+  type FarSummaryGpuDirtyTile,
 } from "./gpu-planner.js";
 import {
   DEFAULT_FAR_SUMMARY_GPU_CONFIG,
@@ -30,6 +31,7 @@ export interface FarSummaryGpuRuntimeOptions {
   terrainSampler: FarTerrainSampler;
   terrainFieldConfig?: TerrainFieldConfig;
   commitTile?: (tile: FarSummaryTile) => void;
+  onFallbackRequests?: (requests: readonly FarSummaryRingRequest[], reason: FarSummaryGpuDispatchOrFallbackResult["fallbackReason"]) => void;
   webGpuAvailable?: () => boolean;
   nowMs?: () => number;
   builderFactory?: () => Promise<FarSummaryGpuBuilder | null>;
@@ -63,6 +65,7 @@ export interface FarSummaryGpuRuntimeStats {
 
 export class FarSummaryGpuRuntime {
   private builderPromise: Promise<FarSummaryGpuBuilder | null> | null = null;
+  private builder: FarSummaryGpuBuilder | null = null;
   private inFlight = false;
   private disposed = false;
   private revision = 0;
@@ -128,6 +131,7 @@ export class FarSummaryGpuRuntime {
 
     void this.dispatchPlan(plan, frameIndex)
       .catch((error) => {
+        if (this.disposed) return;
         this.statsState.lastError = error instanceof Error ? error.message : String(error);
         this.publishErrorCounters();
       })
@@ -142,6 +146,11 @@ export class FarSummaryGpuRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.builder?.dispose();
+    this.builder = null;
+    if (this.builderPromise) {
+      void this.builderPromise.then((builder) => builder?.dispose()).catch(() => undefined);
+    }
   }
 
   private async dispatchPlan(plan: FarSummaryGpuPlan, frameIndex: number): Promise<void> {
@@ -156,13 +165,19 @@ export class FarSummaryGpuRuntime {
       frameIndex,
       nowMs,
     });
+    if (this.disposed) return;
     this.statsState.lastFallbackTiles = result.fallbackTiles;
     this.statsState.lastFallbackReason = result.fallbackReason;
     this.statsState.lastError = result.error?.message ?? null;
+    if (result.fallbackTiles > 0 && result.fallbackReason !== null) {
+      this.options.onFallbackRequests?.(dirtyTilesToRequests(plan.dirtyTiles), result.fallbackReason);
+    }
     const committed = this.commitGpuReadbacks(plan, result, frameIndex, nowMs);
     this.statsState.lastCommittedTiles = committed;
     this.statsState.totalCommittedTiles += committed;
     result.counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    result.counters.lastCommittedTiles = this.statsState.lastCommittedTiles;
+    result.counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     result.counters.committedTiles = this.statsState.totalCommittedTiles;
     result.counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
     result.counters.runtimeError = this.statsState.lastError ? 1 : 0;
@@ -194,12 +209,20 @@ export class FarSummaryGpuRuntime {
 
   private getBuilder(): Promise<FarSummaryGpuBuilder | null> {
     if (!this.builderPromise) {
-      this.builderPromise = this.options.builderFactory
+      this.builderPromise = (this.options.builderFactory
         ? this.options.builderFactory()
         : createFarSummaryGpuBuilder({
             config: this.options.gpuConfig,
             terrainFieldConfig: this.options.terrainFieldConfig,
-          });
+          }))
+        .then((builder) => {
+          if (this.disposed) {
+            builder?.dispose();
+            return null;
+          }
+          this.builder = builder;
+          return builder;
+        });
     }
     return this.builderPromise;
   }
@@ -208,6 +231,8 @@ export class FarSummaryGpuRuntime {
     const counters = createFarSummaryGpuCounters();
     counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
     counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    counters.lastCommittedTiles = this.statsState.lastCommittedTiles;
+    counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     counters.committedTiles = this.statsState.totalCommittedTiles;
     counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
     counters.runtimeError = this.statsState.lastError ? 1 : 0;
@@ -220,6 +245,8 @@ export class FarSummaryGpuRuntime {
     counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
     counters.dirtyTiles = this.statsState.lastDirtyTiles;
     counters.fallbackTiles = this.statsState.lastDirtyTiles;
+    counters.lastCommittedTiles = 0;
+    counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     counters.committedTiles = this.statsState.totalCommittedTiles;
     counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
     counters.runtimeError = 1;
@@ -233,6 +260,16 @@ export class FarSummaryGpuRuntime {
   private nowMs(): number {
     return this.options.nowMs?.() ?? performance.now();
   }
+}
+
+function dirtyTilesToRequests(tiles: readonly FarSummaryGpuDirtyTile[]): FarSummaryRingRequest[] {
+  return tiles.map((tile) => ({
+    ring: tile.ring,
+    key: tile.key,
+    priority: tile.priority,
+    distanceToCamera: tile.distanceToCamera,
+    distanceToPredictedCenter: tile.distanceToPredictedCenter,
+  }));
 }
 
 export function createFarSummaryGpuRuntimeFromParams(
