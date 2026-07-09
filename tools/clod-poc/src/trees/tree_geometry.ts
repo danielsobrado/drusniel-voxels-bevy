@@ -4,6 +4,7 @@ import { buildTree } from "../veg/veg_tree_builder.js";
 import { vegRng } from "../veg/veg_rng.js";
 import { VEG_BARK_COLOR, VEG_TREE_SPECIES } from "../veg/veg_species.js";
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
+import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import {
   type TreeVariantGeometryMap,
   type TreeSpeciesGeometryMap,
@@ -81,33 +82,46 @@ export function treeGeometryKey(settings: TreeSettings): string {
 export function createTreeBakedImpostorGeometry(
   species: TreeSpeciesId,
   settings: TreeSettings,
+  atlas?: Pick<TreeImpostorAtlas, "radius" | "centerY">,
 ): THREE.BufferGeometry {
   const config = settings.species[species];
-  const builder = new GeometryBuilder();
-  const height = species === "pine"
+  const fallbackHeight = species === "pine"
     ? config.trunkHeightM + config.crownRadiusM * 2.85 * config.morphology.crownFlattening
     : species === "oak"
       ? config.trunkHeightM + config.crownRadiusM * 1.7 / Math.max(0.55, config.morphology.crownFlattening)
       : config.trunkHeightM * 1.08;
-  const width = species === "pine"
+  const fallbackWidth = species === "pine"
     ? config.crownRadiusM * 1.9
     : species === "oak"
       ? config.crownRadiusM * 3.0
       : Math.max(config.trunkRadiusM * 4, config.morphology.branchLength * 1.6);
+  const radius = atlas?.radius && Number.isFinite(atlas.radius)
+    ? Math.max(0.25, atlas.radius)
+    : Math.max(0.25, fallbackWidth * 0.5, fallbackHeight * 0.5);
+  const centerY = atlas?.centerY && Number.isFinite(atlas.centerY)
+    ? atlas.centerY
+    : fallbackHeight * 0.5;
+  const geometry = createTreeReferenceImpostorQuadGeometry(radius, centerY);
+  setTreeVariantAttribute(geometry, 0);
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  return geometry;
+}
+
+export function createTreeReferenceImpostorQuadGeometry(radius: number, centerY: number): THREE.BufferGeometry {
+  const safeRadius = Math.max(0.25, Number.isFinite(radius) ? radius : 1);
+  const safeCenterY = Number.isFinite(centerY) ? centerY : safeRadius;
+  const builder = new GeometryBuilder();
   builder.addFlatCard(
-    new THREE.Vector3(0, height * 0.5, 0),
-    Math.max(0.25, width),
-    Math.max(0.5, height),
+    new THREE.Vector3(0, safeCenterY, 0),
+    safeRadius * 2,
+    safeRadius * 2,
     0, 0,
     new THREE.Color(0xffffff),
     0.08, 0,
     unitFrame(), 1,
   );
-  const geometry = builder.build();
-  setTreeVariantAttribute(geometry, 0);
-  geometry.computeBoundingSphere();
-  geometry.computeBoundingBox();
-  return geometry;
+  return builder.build();
 }
 
 export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
