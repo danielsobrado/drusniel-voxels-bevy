@@ -14,6 +14,7 @@ import {
 } from "./tree_impostor_runtime.js";
 
 export const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
+export const TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME = "treeImpostorLocalPositionScale";
 export const TREE_LOD_DITHER_PRIMARY = 0;
 export const TREE_LOD_DITHER_SECONDARY = 1;
 export type TreeLodDitherRole = typeof TREE_LOD_DITHER_PRIMARY | typeof TREE_LOD_DITHER_SECONDARY;
@@ -44,6 +45,32 @@ export function writeTreeWorldXZIfChanged(
   }
   array[offset] = x;
   array[offset + 1] = z;
+  return true;
+}
+
+export function writeTreeImpostorLocalPositionScaleIfChanged(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  localX: number,
+  localY: number,
+  localZ: number,
+  scale: number,
+): boolean {
+  const attribute = treeImpostorLocalPositionScaleAttribute(mesh);
+  const array = attribute.array as Float32Array;
+  const offset = index * 4;
+  if (
+    Math.abs(array[offset] - localX) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(array[offset + 1] - localY) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(array[offset + 2] - localZ) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(array[offset + 3] - scale) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
+  ) {
+    return false;
+  }
+  array[offset] = localX;
+  array[offset + 1] = localY;
+  array[offset + 2] = localZ;
+  array[offset + 3] = scale;
   return true;
 }
 
@@ -118,6 +145,10 @@ export function writeUvRectIfChanged(
 
 export function treeWorldXZAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
   return mesh.geometry.getAttribute("treeWorldXZ") as THREE.InstancedBufferAttribute;
+}
+
+export function treeImpostorLocalPositionScaleAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+  return mesh.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute;
 }
 
 export function treeLodFadeAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
