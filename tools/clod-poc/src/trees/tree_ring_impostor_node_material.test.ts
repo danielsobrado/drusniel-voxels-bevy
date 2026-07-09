@@ -72,6 +72,16 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("localNormal.x.mul(yawCos)");
   });
 
+  it("blends captured normals with the cylindrical billboard facing normal", () => {
+    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("treeRingCylindricalBillboardNormal");
+    expect(source).toContain("billboardNormal");
+    expect(source).toContain("TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
+    expect(source).toContain("normalize(mix(billboardNormal, rotatedNormal");
+    expect(source).toContain("relightTreeRingImpostor(albedo, impostor.normal, billboardNormal");
+  });
+
   it("disposes every owned material", () => {
     const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
     const materials = [handle.regularMaterial, ...Object.values(handle.debugMaterials)];
