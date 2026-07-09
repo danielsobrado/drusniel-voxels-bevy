@@ -166,7 +166,8 @@ export function initFarSummaryIntegration(
     const nowMs = performance.now();
 
     cache.requestTiles(requests, frameIndex, nowMs);
-    const gpuDirtyRequests = gpuDirtyRequestsForCache(cache, requests);
+    // The dirty scan allocates a key per request; skip it entirely when no GPU runtime consumes it.
+    const gpuDirtyRequests = gpuConfig.enabled ? gpuDirtyRequestsForCache(cache, requests) : [];
 
     const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;

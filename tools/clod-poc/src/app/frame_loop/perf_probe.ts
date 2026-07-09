@@ -7,6 +7,10 @@ export { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS, FRAME_PERF_ALL_METRI
 
 const RECENT_SAMPLE_LIMIT = 120;
 const MIRRORED_TOP_BUCKET_COUNT = 8;
+// Summarizing every metric over the sample window (sort per metric) is far too heavy to run per
+// frame; consumers poll the mirrored counters at >=250ms cadence, so mirror on that cadence plus
+// the ready flip (harness gates key off framePerf.ready).
+const MIRROR_INTERVAL_FRAMES = 15;
 const MIRRORED_METRICS: readonly FramePerfMetric[] = [
   "frameMs",
   "renderMs",
@@ -418,6 +422,8 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
   let ignoredConvergenceFrames = 0;
   let samples: FramePerfSample[] = [];
   let recentSamples: FramePerfSample[] = [];
+  let framesSinceMirror = MIRROR_INTERVAL_FRAMES;
+  let mirroredReady = false;
   const snapshot = (): FramePerfSnapshot => ({
     ready: samples.length >= targetSampleFrames,
     observedFrames,
@@ -444,6 +450,8 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
       ignoredConvergenceFrames = 0;
       samples = [];
       recentSamples = [];
+      framesSinceMirror = MIRROR_INTERVAL_FRAMES;
+      mirroredReady = false;
       hooks.ready = false;
       hooks.observedFrames = 0;
       hooks.sampleCount = 0;
@@ -462,19 +470,23 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
       appendRecentSample(recentSamples, sample);
       hooks.recentSamples = recentSamples;
       hooks.lastSample = sample;
-      if (!gateReady) {
+      if (gateReady) {
+        observedFrames += 1;
+        hooks.observedFrames = observedFrames;
+        if (observedFrames > warmupFrames && samples.length < targetSampleFrames) {
+          samples.push(sample);
+          hooks.sampleCount = samples.length;
+          hooks.ready = samples.length >= targetSampleFrames;
+        }
+      } else {
         ignoredConvergenceFrames += 1;
-        mirrorFramePerfCounters(snapshot(), { ignoredConvergenceFrames, acceptanceGateReady: false });
-        return;
       }
-      observedFrames += 1;
-      hooks.observedFrames = observedFrames;
-      if (observedFrames > warmupFrames && samples.length < targetSampleFrames) {
-        samples.push(sample);
-        hooks.sampleCount = samples.length;
-        hooks.ready = samples.length >= targetSampleFrames;
-      }
-      mirrorFramePerfCounters(snapshot(), { ignoredConvergenceFrames, acceptanceGateReady: true });
+      framesSinceMirror += 1;
+      const readyFlipped = hooks.ready !== mirroredReady;
+      if (framesSinceMirror < MIRROR_INTERVAL_FRAMES && !readyFlipped) return;
+      framesSinceMirror = 0;
+      mirroredReady = hooks.ready;
+      mirrorFramePerfCounters(snapshot(), { ignoredConvergenceFrames, acceptanceGateReady: gateReady });
     },
     reset: hooks.reset,
     snapshot,

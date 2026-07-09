@@ -169,16 +169,25 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     Math.min(deps.maxTerrainLevel, Math.floor(numericCounter(counters, "live_clod_stream_max_root_level", deps.maxTerrainLevel))),
   );
 
-  // URL flags are fixed for the page's lifetime; parse once instead of every frame.
-  const initParams = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
-  const ownershipOracleActive = initParams !== null
-    && ((initParams.get("acceptance") === "1" && initParams.get("ownershipOracle") !== "0") || initParams.get("ownershipOracle") === "1");
-  const acceptancePerfDiagnosticsActive = initParams !== null
-    && initParams.get("acceptance") === "1" && initParams.get("ownershipOracle") === "0";
+  // Reuse-mode acceptance swaps URL flags via history.replaceState without a reload (e.g. the
+  // perf gate turns the ownership oracle off after a coverage-gate page load), so the flags can
+  // change mid-session; re-parse only when the search string actually changes.
+  let resolvedFlagsSearch: string | null = null;
+  let ownershipOracleActive = false;
+  let acceptancePerfDiagnosticsActive = false;
   // Acceptance/QA harnesses gate on these counters per frame; interactive runs only need them at
   // HUD cadence, and the streaming simulation + ownership scans are too heavy for every frame.
-  const perFrameHeavyDiagnostics = initParams !== null
-    && (initParams.get("acceptance") === "1" || initParams.get("qa") === "1" || initParams.get("ownershipOracle") === "1");
+  let perFrameHeavyDiagnostics = false;
+  const resolveUrlFlags = (): void => {
+    const search = typeof window === "undefined" ? "" : window.location.search;
+    if (search === resolvedFlagsSearch) return;
+    resolvedFlagsSearch = search;
+    const params = new URLSearchParams(search);
+    ownershipOracleActive = (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0") || params.get("ownershipOracle") === "1";
+    acceptancePerfDiagnosticsActive = params.get("acceptance") === "1" && params.get("ownershipOracle") === "0";
+    perFrameHeavyDiagnostics = params.get("acceptance") === "1" || params.get("qa") === "1" || params.get("ownershipOracle") === "1";
+  };
+  resolveUrlFlags();
   let lastHeavyDiagnosticsMs = -Infinity;
 
   const ownershipOracleEnabled = (): boolean => ownershipOracleActive;
@@ -230,20 +239,25 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     return Math.hypot(dx, dz) <= PERF_DIAGNOSTICS_CAMERA_EPSILON_M;
   };
 
-  const publishPhase0Report = (counters: Record<string, number>): void => {
-    if (typeof window === "undefined") return;
-    const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in counters));
-    window.__drusnielPhase0Report = {
-      scene: deps.queryScene ?? "unknown",
-      config_hash: "phase0",
-      timestamp: new Date().toISOString(),
-      metrics: { ...counters },
-      required_counters_present: missingCounters.length === 0,
-      missing_counters: missingCounters,
-    };
-  };
-
   if (typeof window !== "undefined") {
+    // Copying ~900 counters into a fresh report object every frame is wasted work between harness
+    // reads; expose the report as a getter that materializes from the live counters on access.
+    Object.defineProperty(window, "__drusnielPhase0Report", {
+      configurable: true,
+      get: () => {
+        const counters = deps.getHooks()?.stats?.counters;
+        if (!counters) return undefined;
+        const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in counters));
+        return {
+          scene: deps.queryScene ?? "unknown",
+          config_hash: "phase0",
+          timestamp: new Date().toISOString(),
+          metrics: { ...counters },
+          required_counters_present: missingCounters.length === 0,
+          missing_counters: missingCounters,
+        };
+      },
+    });
     const resetAcceptanceScene = (): void => {
       streamReadyFrame = -1;
       backgroundQuiet = false;
@@ -266,6 +280,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
   return () => {
     const hooks = deps.getHooks();
     if (!hooks?.stats) return;
+    resolveUrlFlags();
 
     const s = hooks.stats;
     const selectionStats = deps.getSelectionStats();
@@ -342,7 +357,6 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     if (canReusePerfDiagnostics(s.counters)) {
       s.counters["ownership_oracle_ms"] = 0;
       s.counters["long_view_diagnostics_reused_frames"] = (s.counters["long_view_diagnostics_reused_frames"] ?? 0) + 1;
-      publishPhase0Report(s.counters);
       return;
     }
     const nowMs = performance.now();
@@ -485,7 +499,5 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       const hooks = (window as typeof window & { __drusnielClod?: { error?: string | null } }).__drusnielClod;
       if (hooks) hooks.error = `Streamed CLOD worker build timed out after ${inflightMs.toFixed(0)}ms (inflight batch exceeded ${timeoutThresholdMs / 1000}s threshold)`;
     }
-
-    publishPhase0Report(s.counters);
   };
 }

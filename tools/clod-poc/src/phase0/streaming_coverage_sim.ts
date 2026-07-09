@@ -22,13 +22,9 @@ export interface StreamingCoverageReport {
   nearestMissingDistanceM: number | null;
 }
 
-function chunkKey(cx: number, cz: number): string {
-  return `${cx},${cz}`;
-}
-
-function pageKey(px: number, pz: number): string {
-  return `${px},${pz}`;
-}
+// Pages dedupe through numeric keys instead of strings; 2^26 pages per axis is far beyond any
+// reachable world coordinate, so the packed key is collision-free in practice.
+const PAGE_KEY_STRIDE = 0x4000000;
 
 export function simulateStreamingCoverage(input: StreamingCoverageInput): StreamingCoverageReport {
   const {
@@ -47,8 +43,16 @@ export function simulateStreamingCoverage(input: StreamingCoverageInput): Stream
   const centerChunkZ = Math.round(predictedZ / chunkSize);
 
   const chunksPerPage = pageSizeCells / chunkSize;
-  const requiredChunks = new Set<string>();
-  const requiredPages = new Set<string>();
+  const worldChunks = worldCells / chunkSize;
+  const worldPages = Math.ceil(worldChunks / chunksPerPage);
+
+  // Chunk coordinates in the scan are unique by construction, so required/missing chunks are
+  // plain counts; this runs every frame under acceptance so it must not allocate per cell.
+  let requiredChunkCount = 0;
+  let missingChunkCount = 0;
+  let nearestMissingDist = Infinity;
+  const requiredPages = new Set<number>();
+  const missingPages = new Set<number>();
 
   for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
     for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
@@ -56,10 +60,21 @@ export function simulateStreamingCoverage(input: StreamingCoverageInput): Stream
       if (distM > effectiveRadius) continue;
       const cx = centerChunkX + dx;
       const cz = centerChunkZ + dz;
-      requiredChunks.add(chunkKey(cx, cz));
+      requiredChunkCount++;
       const px = Math.floor(cx / chunksPerPage);
       const pz = Math.floor(cz / chunksPerPage);
-      requiredPages.add(pageKey(px, pz));
+      requiredPages.add(px * PAGE_KEY_STRIDE + pz);
+      if (infiniteStreaming) continue;
+      if (cx < 0 || cz < 0 || cx >= worldChunks || cz >= worldChunks) {
+        missingChunkCount++;
+        const clampX = Math.max(0, Math.min(worldCells, cx * chunkSize));
+        const clampZ = Math.max(0, Math.min(worldCells, cz * chunkSize));
+        const dist = Math.hypot(clampX - predictedX, clampZ - predictedZ);
+        if (dist < nearestMissingDist) nearestMissingDist = dist;
+      }
+      if (px < 0 || pz < 0 || px >= worldPages || pz >= worldPages) {
+        missingPages.add(px * PAGE_KEY_STRIDE + pz);
+      }
     }
   }
 
@@ -67,7 +82,7 @@ export function simulateStreamingCoverage(input: StreamingCoverageInput): Stream
     return {
       predictedCenterX: predictedX,
       predictedCenterZ: predictedZ,
-      requiredChunkCount: requiredChunks.size,
+      requiredChunkCount,
       requiredPageCount: requiredPages.size,
       missingChunkCount: 0,
       missingPageCount: 0,
@@ -75,37 +90,13 @@ export function simulateStreamingCoverage(input: StreamingCoverageInput): Stream
     };
   }
 
-  const worldChunks = worldCells / chunkSize;
-  const missingChunks: string[] = [];
-  let nearestMissingDist = Infinity;
-
-  for (const key of requiredChunks) {
-    const [cx, cz] = key.split(",").map(Number);
-    if (cx < 0 || cz < 0 || cx >= worldChunks || cz >= worldChunks) {
-      missingChunks.push(key);
-      const clampX = Math.max(0, Math.min(worldCells, cx * chunkSize));
-      const clampZ = Math.max(0, Math.min(worldCells, cz * chunkSize));
-      const dist = Math.hypot(clampX - predictedX, clampZ - predictedZ);
-      if (dist < nearestMissingDist) nearestMissingDist = dist;
-    }
-  }
-
-  const worldPages = Math.ceil(worldChunks / chunksPerPage);
-  const missingPages = new Set<string>();
-  for (const key of requiredPages) {
-    const [px, pz] = key.split(",").map(Number);
-    if (px < 0 || pz < 0 || px >= worldPages || pz >= worldPages) {
-      missingPages.add(key);
-    }
-  }
-
   return {
     predictedCenterX: predictedX,
     predictedCenterZ: predictedZ,
-    requiredChunkCount: requiredChunks.size,
+    requiredChunkCount,
     requiredPageCount: requiredPages.size,
-    missingChunkCount: missingChunks.length,
+    missingChunkCount,
     missingPageCount: missingPages.size,
-    nearestMissingDistanceM: missingChunks.length > 0 ? nearestMissingDist : null,
+    nearestMissingDistanceM: missingChunkCount > 0 ? nearestMissingDist : null,
   };
 }
