@@ -167,6 +167,7 @@ function injectedFilterBlock() {
     "}",
     "",
     "function acceptanceSceneAlias(name: string): string {",
+    "  if (name === \"coverage/phase3-far-summary-gpu-authoritative\") return \"phase3-far-summary-gpu-authoritative\";",
     "  if (name === \"coverage/phase4-stones\") return \"phase4-stones\";",
     "  if (name === \"coverage/phase6-canopy\") return \"phase6-canopy\";",
     "  return name;",
@@ -207,6 +208,14 @@ function injectPhaseAcceptanceScenes(source) {
   const sceneNeedle = "  {\n    name: \"biome-near\",";
   const injectedScenes = [
     "  {",
+    "    name: \"phase3-far-summary-gpu-authoritative\",",
+    "    freeze: true,",
+    "    proceduralDebug: \"biome\",",
+    "    cam: OUTSIDE_STARTUP_CAM,",
+    "    extra: { farSummaryGpuAuthoritative: \"1\", farSummaryGpuStrictParity: \"0\" },",
+    "    validation: \"far-summary-gpu-authoritative\",",
+    "  },",
+    "  {",
     "    name: \"phase4-stones\",",
     "    freeze: true,",
     "    proceduralDebug: \"biome\",",
@@ -230,7 +239,7 @@ function injectPhaseAcceptanceScenes(source) {
 
   const withSceneSpec = withScene.replace(
     "  movementRoute?: boolean;\n}",
-    "  movementRoute?: boolean;\n  validation?: \"stone-gpu\" | \"phase6-canopy\";\n}",
+    "  movementRoute?: boolean;\n  validation?: \"stone-gpu\" | \"phase6-canopy\" | \"far-summary-gpu-authoritative\";\n}",
   );
   if (withSceneSpec === withScene) throw new Error("Failed to inject scene validation type");
 
@@ -285,9 +294,31 @@ function injectPhaseAcceptanceScenes(source) {
     "  return failures;",
     "}",
     "",
+    "function evaluateFarSummaryGpuAuthoritativeCounters(stats: JsonRecord): string[] {",
+    "  const failures: string[] = [];",
+    "  const enabled = numericCounter(stats, \"far_summary_gpu_enabled\");",
+    "  const deviceReady = numericCounter(stats, \"far_summary_gpu_device_ready\");",
+    "  const authoritative = numericCounter(stats, \"far_summary_gpu_authoritative\");",
+    "  const committedTiles = numericCounter(stats, \"far_summary_gpu_committed_tiles\");",
+    "  const suppressed = numericCounter(stats, \"far_summary_cpu_builds_suppressed\");",
+    "  const fallbackTiles = numericCounter(stats, \"far_summary_gpu_fallback_tiles\");",
+    "  const runtimeError = numericCounter(stats, \"far_summary_gpu_runtime_error\");",
+    "  const dispatchedTiles = numericCounter(stats, \"far_summary_gpu_tiles_dispatched\");",
+    "  if (enabled !== 1) failures.push(`far_summary_gpu_enabled=${enabled} must equal 1`);",
+    "  if (deviceReady !== 1) failures.push(`far_summary_gpu_device_ready=${deviceReady} must equal 1`);",
+    "  if (authoritative !== 1) failures.push(`far_summary_gpu_authoritative=${authoritative} must equal 1`);",
+    "  if (!(committedTiles > 0)) failures.push(`far_summary_gpu_committed_tiles=${committedTiles} must be > 0`);",
+    "  if (suppressed !== 1) failures.push(`far_summary_cpu_builds_suppressed=${suppressed} must equal 1`);",
+    "  if (fallbackTiles !== 0) failures.push(`far_summary_gpu_fallback_tiles=${fallbackTiles} must equal 0`);",
+    "  if (runtimeError !== 0) failures.push(`far_summary_gpu_runtime_error=${runtimeError} must equal 0`);",
+    "  if (!(dispatchedTiles > 0)) failures.push(`far_summary_gpu_tiles_dispatched=${dispatchedTiles} must be > 0`);",
+    "  return failures;",
+    "}",
+    "",
     "function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {",
     "  if (scene.validation === \"stone-gpu\") return evaluateStoneGpuCounters(stats);",
     "  if (scene.validation === \"phase6-canopy\") return evaluatePhase6CanopyCounters(stats);",
+    "  if (scene.validation === \"far-summary-gpu-authoritative\") return evaluateFarSummaryGpuAuthoritativeCounters(stats);",
     "  return [];",
     "}",
     "",
@@ -297,9 +328,9 @@ function injectPhaseAcceptanceScenes(source) {
 
   const withConvergenceOptOut = withEvaluator.replace(
     "    await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);",
-    "    if (scene.validation === \"stone-gpu\") {\n      console.log(`[infinite-accept] ${sceneRunName}: skipping generic convergence wait for stone-gpu validation`);\n    } else {\n      await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);\n    }",
+    "    if (scene.validation === \"stone-gpu\" || scene.validation === \"far-summary-gpu-authoritative\") {\n      console.log(`[infinite-accept] ${sceneRunName}: skipping generic convergence wait for ${scene.validation} validation`);\n    } else {\n      await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);\n    }",
   );
-  if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject stone convergence opt-out");
+  if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject validation convergence opt-out");
 
   const withThresholdOptOut = withConvergenceOptOut.replace(
     "    const thresholds: ThresholdEvaluation = evaluateThresholds(\n      extractAcceptanceCounters(stats),\n      gate.requiredCounters,\n      gate.rules,\n    );",
@@ -333,7 +364,7 @@ function injectFilteredRunner(source) {
 
 function prepareAcceptanceScript(args) {
   if (!hasFilterArgs(args)) return ACCEPTANCE_SOURCE;
-  const source = readFileSync(ACCEPTANCE_SOURCE, "utf8").replaceAll("\r\n", "\n");
+  const source = readFileSync(ACCEPTANCE_SOURCE, "utf8");
   const filtered = injectFilteredRunner(source);
   writeFileSync(FILTERED_ACCEPTANCE_SOURCE, filtered);
   return FILTERED_ACCEPTANCE_SOURCE;
