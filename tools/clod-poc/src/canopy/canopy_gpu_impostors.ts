@@ -188,7 +188,7 @@ export function selectCanopyGpuImpostorSamples(
 
 function createCanopyImpostorAlphaMap(): THREE.DataTexture {
   const size = CANOPY_IMPOSTOR_ALPHA_TEXTURE_SIZE;
-  const data = new Uint8Array(size * size);
+  const data = new Uint8Array(size * size * 4);
   const center = (size - 1) * 0.5;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -197,10 +197,15 @@ function createCanopyImpostorAlphaMap(): THREE.DataTexture {
       const radius = Math.hypot(dx, dy);
       const core = 1 - smoothstep(0.35, 1.0, radius);
       const dither = ((x * 17 + y * 31) % 11) / 255;
-      data[y * size + x] = Math.round(clamp01(core + dither) * 255);
+      const value = Math.round(clamp01(core + dither) * 255);
+      const offset = (y * size + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = value;
     }
   }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.UnsignedByteType);
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
   texture.name = "CanopyGpuImpostorAlphaMap";
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearFilter;
