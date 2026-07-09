@@ -32,6 +32,7 @@ import {
   type TreeEarlyTerrainRejectionStats,
 } from "./tree_patch_terrain_rejection.js";
 import {
+  writeTreeImpostorLocalPositionScaleIfChanged,
   writeTreeImpostorUvRectIfChanged,
   writeTreeLodDitherRoleIfChanged,
   writeTreeLodFadeIfChanged,
@@ -385,13 +386,17 @@ function placeTreeInstance(
   const renderLod = resolveLod === lod ? lod : resolveLod;
   const effectiveMesh = patch.meshes[instance.species][renderLod];
   const effectiveIndex = effectiveMesh === mesh ? writeIndex : treeMeshWriteCount(effectiveMesh, write);
+  const localX = instance.position[0] - patch.centerX;
+  const localY = instance.position[1];
+  const localZ = instance.position[2] - patch.centerZ;
   if (writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2])) markTreeMeshWorldXZChanged(effectiveMesh, write);
   if (writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (renderLod === "impostor") {
+    if (writeTreeImpostorLocalPositionScaleIfChanged(effectiveMesh, effectiveIndex, localX, localY, localZ, instance.scale)) markTreeMeshWorldXZChanged(effectiveMesh, write);
     if (writeTreeImpostorUvRectIfChanged({ mesh: effectiveMesh, index: effectiveIndex, instance, cameraPosition, settings: input.settings, impostorAtlases: input.impostorAtlases })) markTreeMeshImpostorUvChanged(effectiveMesh, write);
   }
-  TREE_CPU_TRANSLATION.set(instance.position[0] - patch.centerX, instance.position[1], instance.position[2] - patch.centerZ);
+  TREE_CPU_TRANSLATION.set(localX, localY, localZ);
   TREE_CPU_SCALE.set(instance.scale, instance.scale, instance.scale);
   TREE_CPU_ROTATION.setFromAxisAngle(TREE_CPU_UP_AXIS, instance.rotationY);
   TREE_CPU_MATRIX.compose(TREE_CPU_TRANSLATION, TREE_CPU_ROTATION, TREE_CPU_SCALE);
