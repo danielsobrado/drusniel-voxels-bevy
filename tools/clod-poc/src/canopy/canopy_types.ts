@@ -56,6 +56,8 @@ export interface CanopyMetrics {
   gpuImpostorCoverageThreshold: number;
   gpuImpostorCenterX: number;
   gpuImpostorCenterZ: number;
+  gpuImpostorMaxColorChannel: number;
+  gpuImpostorOpacity: number;
   maxCoverage: number;
   averageCoverage: number;
   buildMs: number;
@@ -80,6 +82,8 @@ export function createEmptyCanopyMetrics(): CanopyMetrics {
     gpuImpostorCoverageThreshold: 0,
     gpuImpostorCenterX: 0,
     gpuImpostorCenterZ: 0,
+    gpuImpostorMaxColorChannel: 0,
+    gpuImpostorOpacity: 0,
     maxCoverage: 0,
     averageCoverage: 0,
     buildMs: 0,
@@ -105,6 +109,8 @@ export function canopyMetricsToCounters(metrics: CanopyMetrics, enabled: boolean
     canopy_gpu_impostor_coverage_threshold: Math.round(metrics.gpuImpostorCoverageThreshold * 1000) / 1000,
     canopy_gpu_impostor_center_x: Math.round(metrics.gpuImpostorCenterX * 100) / 100,
     canopy_gpu_impostor_center_z: Math.round(metrics.gpuImpostorCenterZ * 100) / 100,
+    canopy_gpu_impostor_max_color_channel: Math.round(metrics.gpuImpostorMaxColorChannel * 1000) / 1000,
+    canopy_gpu_impostor_opacity: Math.round(metrics.gpuImpostorOpacity * 1000) / 1000,
     canopy_build_ms: Math.round(metrics.buildMs * 100) / 100,
     canopy_upload_ms: Math.round(metrics.uploadMs * 100) / 100,
     canopy_fallback_synthetic_tiles: metrics.fallbackSyntheticTiles,
