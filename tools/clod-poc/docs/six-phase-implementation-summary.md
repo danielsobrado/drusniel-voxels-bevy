@@ -8,7 +8,7 @@ Last updated: 2026-07-09
 | --- | --- | --- |
 | 1 Bounds guard | Done | Validates existing streamed page node mesh data against the existing page footprint/bounds. The missing query-param coercion bug is fixed by treating absent/blank values as fallback defaults. |
 | 2 Center debug | Done | Center ownership counters are scoped through the existing world-center debug path for CLOD, far shell, vegetation ring/grass/trees, canopy, and ocean. |
-| 3 GPU far-summary | Opt-in authoritative mode added | GPU scheduling, dirty request capture, dispatch, readback decode, strict parity, optional cache commit, counters, and guarded `farSummaryGpuAuthoritative=1` mode exist. CPU remains authoritative by default unless the authoritative flag is enabled. |
+| 3 GPU far-summary | Opt-in authoritative mode added | GPU scheduling, dirty request capture, dispatch, readback decode, strict parity, optional cache commit, counters, guarded `farSummaryGpuAuthoritative=1`, and a dedicated coverage scene exist. CPU remains authoritative by default unless the authoritative flag is enabled. |
 | 4 GPU vegetation reject + stones | Done | Stone reject accounting is unified into the existing GPU vegetation early-reject counter family. The real WebGPU gate is expected to fail under headless/SwiftShader if `stoneGpuClustersTotal=0`. |
 | 5 Far clipmap grid | Done for shader-displacement path | Far clipmap shader displacement uses source texture data and refreshes on snap/source revision/interval. CPU-baked fallback remains a fallback/debug path, not the acceptance path. |
 | 6 GPU canopy | Done / accepted | Far canopy is now GPU impostor based, using the existing canopy path. The visual guard prevents bright square-card regressions. |
@@ -69,9 +69,11 @@ far_summary_gpu_fallback_tiles = 0
 far_summary_gpu_runtime_error = 0
 ```
 
-## Remaining Phase 3 follow-up
+Dedicated acceptance scene:
 
-Add a dedicated browser acceptance scene for authoritative far-summary once the real-GPU local run is stable enough to gate it without flakiness.
+```powershell
+node tools/run-infinite-islands-acceptance.mjs --reuse --gate coverage --scene coverage/phase3-far-summary-gpu-authoritative
+```
 
 ## Recommended validation commands
 
@@ -84,5 +86,6 @@ npm test -- src/canopy/canopy_gpu_impostors.test.ts
 npm test -- src/canopy
 npm test -- src/terrain/far_clipmap
 npm run build
+node tools/run-infinite-islands-acceptance.mjs --reuse --gate coverage --scene coverage/phase3-far-summary-gpu-authoritative
 node tools/run-infinite-islands-acceptance.mjs --reuse --gate coverage --scene coverage/phase6-canopy
 ```
