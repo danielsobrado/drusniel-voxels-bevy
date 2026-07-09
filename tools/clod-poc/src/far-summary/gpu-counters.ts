@@ -8,6 +8,8 @@ export interface FarSummaryGpuCounters {
   fallbackTiles: number;
   failedBatches: number;
   committedTiles: number;
+  lastCommittedTiles: number;
+  totalCommittedTiles: number;
   cpuBuildsSuppressed: number;
   runtimeError: number;
   computeMsP50: number;
@@ -32,6 +34,8 @@ export function createFarSummaryGpuCounters(): FarSummaryGpuCounters {
     fallbackTiles: 0,
     failedBatches: 0,
     committedTiles: 0,
+    lastCommittedTiles: 0,
+    totalCommittedTiles: 0,
     cpuBuildsSuppressed: 0,
     runtimeError: 0,
     computeMsP50: 0,
@@ -60,7 +64,9 @@ export function publishFarSummaryGpuCounters(
   out["far_summary_gpu_batches_dispatched"] = counters.batchesDispatched;
   out["far_summary_gpu_fallback_tiles"] = counters.fallbackTiles;
   out["far_summary_gpu_failed_batches"] = counters.failedBatches;
-  out["far_summary_gpu_committed_tiles"] = counters.committedTiles;
+  out["far_summary_gpu_committed_tiles"] = counters.totalCommittedTiles;
+  out["far_summary_gpu_last_committed_tiles"] = counters.lastCommittedTiles;
+  out["far_summary_gpu_total_committed_tiles"] = counters.totalCommittedTiles;
   out["far_summary_cpu_builds_suppressed"] = counters.cpuBuildsSuppressed;
   out["far_summary_gpu_runtime_error"] = counters.runtimeError;
   out["far_summary_gpu_compute_ms_p50"] = counters.computeMsP50;
