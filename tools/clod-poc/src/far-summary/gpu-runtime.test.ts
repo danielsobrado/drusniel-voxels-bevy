@@ -222,6 +222,39 @@ describe("FarSummaryGpuRuntime", () => {
     expect(runtime.stats().totalCommittedTiles).toBe(1);
   });
 
+  it("does not erase last GPU commit counters on empty dirty frames", async () => {
+    let dispatches = 0;
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: { ...GPU_CONFIG, authoritative: true, commitToCache: true, debugReadback: true },
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      nowMs: () => 789,
+      commitTile: () => undefined,
+      dispatch: async () => {
+        dispatches++;
+        return {
+          ok: true,
+          counters: createFarSummaryGpuCounters(),
+          fallbackTiles: 0,
+          fallbackReason: null,
+          cellReadbacks: [{ batchIndex: 0, records: [gpuRecord(20), gpuRecord(21), gpuRecord(22), gpuRecord(23)] }],
+        };
+      },
+    });
+
+    runtime.update(CENTER, 12, "startup", [DIRTY_REQUEST], true);
+    await Promise.resolve();
+    await Promise.resolve();
+    runtime.update(CENTER, 13, "camera_ring_shift", [], true);
+    await Promise.resolve();
+
+    expect(dispatches).toBe(1);
+    expect(runtime.stats().lastDirtyTiles).toBe(0);
+    expect(runtime.stats().lastCommittedTiles).toBe(1);
+    expect(runtime.stats().totalCommittedTiles).toBe(1);
+    expect(runtime.stats().scheduledFrames).toBe(1);
+  });
+
   it("does not commit failed GPU dispatches", async () => {
     const committed: FarSummaryTile[] = [];
     const runtime = new FarSummaryGpuRuntime({
