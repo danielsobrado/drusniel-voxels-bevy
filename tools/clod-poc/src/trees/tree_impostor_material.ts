@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   attribute,
+  cameraPosition,
   clamp,
   dot,
   float,
@@ -10,13 +11,16 @@ import {
   max,
   mix,
   normalize,
+  positionGeometry,
   screenCoordinate,
   texture,
   uniform,
   uv,
+  vec3,
 } from "three/tsl";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME } from "./tree_system_instance_attributes.js";
 import {
   materialChurnDiagnostics,
   setMaterialNeedsUpdate,
@@ -48,6 +52,7 @@ export function createTreeImpostorNodeMaterial(
   const albedo: TslNode = sample.xyz.mul(sample.xyz);
   const normalSample: TslNode | null = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null;
   const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), `tree-impostor-node-material:${atlas.species}`);
+  material.positionNode = treeImpostorNodeBillboardPosition();
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = sample.w;
   (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
@@ -79,6 +84,7 @@ export function createTreeImpostorBlendNodeMaterial(
     ? blendTreeImpostorNormal(sample0.normal, sample1.normal, sample2.normal, sample3.normal, weights)
     : null;
   const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), `tree-impostor-blend-node-material:${atlas.species}`);
+  material.positionNode = treeImpostorNodeBillboardPosition();
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = coverage;
   (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
@@ -150,6 +156,22 @@ function sampleTreeImpostorNode(atlas: TreeImpostorAtlas, uvRect: TslNode): { al
     coverage: sample.w,
     normal: atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null,
   };
+}
+
+function treeImpostorNodeBillboardPosition(): TslNode {
+  const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+  const localPositionScale: TslNode = attribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, "vec4");
+  const toCamera: TslNode = vec3(
+    cameraPosition.z.sub(worldXZ.y),
+    float(0),
+    cameraPosition.x.sub(worldXZ.x).negate(),
+  );
+  const right: TslNode = dot(toCamera, toCamera)
+    .greaterThan(float(0.000001))
+    .select(normalize(toCamera), vec3(1, 0, 0));
+  return vec3(localPositionScale.x, localPositionScale.y, localPositionScale.z)
+    .add(right.mul(positionGeometry.x.mul(localPositionScale.w)))
+    .add(vec3(0, positionGeometry.y.mul(localPositionScale.w), 0));
 }
 
 function blendTreeImpostorNormal(n0: TslNode, n1: TslNode, n2: TslNode, n3: TslNode, weights: TslNode): TslNode {
