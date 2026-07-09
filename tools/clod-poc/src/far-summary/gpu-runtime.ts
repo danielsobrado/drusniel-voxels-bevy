@@ -132,6 +132,12 @@ export class FarSummaryGpuRuntime {
       );
     this.statsState.lastDirtyTiles = plan.dirtyTiles.length;
     this.statsState.lastBatches = plan.batches.length;
+    if (plan.dirtyTiles.length === 0) {
+      this.statsState.lastFallbackTiles = 0;
+      this.statsState.lastFallbackReason = null;
+      this.publishIdleCounters();
+      return;
+    }
     this.statsState.scheduledFrames++;
     this.inFlight = true;
 
@@ -249,6 +255,7 @@ export class FarSummaryGpuRuntime {
     counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
     counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
     counters.deviceReady = this.statsState.deviceReady;
+    counters.dirtyTiles = this.statsState.lastDirtyTiles;
     counters.lastCommittedTiles = this.statsState.lastCommittedTiles;
     counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     counters.committedTiles = this.statsState.totalCommittedTiles;
