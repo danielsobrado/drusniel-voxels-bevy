@@ -189,10 +189,12 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     clodReadyPageKeys: terrain.getClodReadyPageKeys ?? (() => []),
     liveChunksPerPage: diagnosticsChunksPerPage,
   });
+  let lastWorldCenter: { x: number; z: number } | null = null;
   const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
     getHooks: render.getHooks,
     getAverageFps: () => averageFpsRef.value,
     getFrameStartMs: () => frameStart,
+    getWorldCenter: () => lastWorldCenter,
     renderer: render.renderer,
     getSelectionStats: () => terrain.selectionController.stats(),
     maxTerrainLevel: diagnostics.maxTerrainLevel,
@@ -295,6 +297,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       worldCells: terrain.worldCells,
       pruneRenderNodeCache: terrain.pruneRenderNodeCache,
     }));
+    lastWorldCenter = terrainPhaseResult.worldCenter;
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
       farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera, terrainPhaseResult.worldCenter);
@@ -307,7 +310,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       clodShadow?.update();
     });
     timed(collectFrameTiming, phaseTiming, "canopyMs", () => {
-      canopy?.update(render.camera.position.x, render.camera.position.z);
+      canopy?.update(terrainPhaseResult.worldCenter.x, terrainPhaseResult.worldCenter.z);
     });
 
     elapsedSeconds += playerDelta;

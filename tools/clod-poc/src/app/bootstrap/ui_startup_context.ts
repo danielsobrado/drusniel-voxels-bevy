@@ -81,7 +81,7 @@ export interface UiStartupInput {
     farShellMetrics?: import("../../long-view/farShellMetrics.js").FarShellMetrics;
   };
   floatingOrigin?: FloatingOriginController;
-  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, worldCenter: THREE.Vector3) => void;
   naadfIntegration?: import("../../naadf/integration.js").NaadfIntegration;
   getClodErrorCompute: () => import("../../gpu/clod_error_px_compute.js").ClodErrorPxCompute | null;
   ensureClodErrorCompute: () => Promise<void>;

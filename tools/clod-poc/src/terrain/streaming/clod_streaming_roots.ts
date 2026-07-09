@@ -462,14 +462,24 @@ export function streamingClodPageKey(px: number, pz: number, level = 0): string 
   return `L${Math.max(0, Math.floor(level))}:${px},${pz}`;
 }
 
+// Parsing happens O(cached²) per frame inside eviction sorts and active-root/coverage checks;
+// memoize so steady-state frames do Map lookups instead of string splits + allocations.
+const parsedPageKeyCache = new Map<string, { level: number; px: number; pz: number }>();
+const PARSED_PAGE_KEY_CACHE_LIMIT = 8192;
+
 export function parseStreamingClodPageKey(key: string): { level: number; px: number; pz: number } {
+  const memo = parsedPageKeyCache.get(key);
+  if (memo) return memo;
   const [levelText, coordText] = key.split(":");
   const [pxText, pzText] = (coordText ?? "").split(",");
   const level = Number(levelText?.startsWith("L") ? levelText.slice(1) : levelText);
   const px = Number(pxText);
   const pz = Number(pzText);
   if (!Number.isInteger(level) || !Number.isInteger(px) || !Number.isInteger(pz)) throw new Error(`Invalid streaming CLOD page key ${key}`);
-  return { level, px, pz };
+  if (parsedPageKeyCache.size >= PARSED_PAGE_KEY_CACHE_LIMIT) parsedPageKeyCache.clear();
+  const parsed = { level, px, pz };
+  parsedPageKeyCache.set(key, parsed);
+  return parsed;
 }
 
 export function streamingClodPageHasRequiredNotReadyDescendant(pageKey: string, required: Iterable<string>, cached: ReadonlySet<string>): boolean {
@@ -565,6 +575,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let workerBuildFailures = 0;
   let workerBuildTimeouts = 0;
   let activeRootIds = new Set<string>();
+  // resolveActiveRootIds is O(cached²); only re-resolve when the cached set or eligibility changed
+  // (or a switch/transition is in progress) instead of every frame.
+  let activeRootSetDirty = true;
   let pendingRootSwitchIds = new Set<string>();
   let pendingRootSwitchKey = "";
   let pendingRootSwitchStableFrames = 0;
@@ -620,12 +633,16 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       existing.centerX = centerX;
       existing.centerZ = centerZ;
       existing.lastTouchFrame = frame;
-      existing.activeEligible = existing.activeEligible || activeEligible;
+      if (activeEligible && !existing.activeEligible) {
+        existing.activeEligible = true;
+        activeRootSetDirty = true;
+      }
       return false;
     }
     deps.allNodes.push(node);
     cached.set(node.id, { node, centerX, centerZ, lastTouchFrame: frame, activeEligible });
     failed.delete(node.id);
+    activeRootSetDirty = true;
     return true;
   };
 
@@ -723,7 +740,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const syncActiveRootsInner = (): boolean => {
+    if (!activeRootTransition && !activeRootSetDirty && pendingRootSwitchKey === "") return false;
     const nextActiveRootIds = resolveActiveRootIds();
+    activeRootSetDirty = false;
 
     if (activeRootTransition) {
       const currentCoversSafety = rootSetCoversSafety(activeRootIds);
@@ -817,6 +836,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const evictCachedPage = (id: string, cachedIds: Set<string>): void => {
     cached.delete(id);
     cachedIds.delete(id);
+    activeRootSetDirty = true;
     removeRoot(id);
     activeRootIds.delete(id);
     pendingRootSwitchIds.delete(id);
@@ -997,11 +1017,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)), coord]));
     const batch: InflightBatch = { id: nextBatchId++, ids: new Set(coordsById.keys()), coordsById, startMs: performance.now() };
     inFlight.set(batch.id, batch);
-    for (const coord of coords) {
-      const level = coordLevel(coord);
-      console.log(`[clod-stream] Dispatching build for page: L${level}:${coord.px},${coord.pz} (estimated LOD0 subtree size: ${pageBudgetCost(level)})`);
-      incrementLevel(requestedPagesByLevel, level);
-    }
+    for (const coord of coords) incrementLevel(requestedPagesByLevel, coordLevel(coord));
     if (probe.active) {
       for (const id of batch.ids) probe.requestedIds.add(id);
       probe.requestedPagesTotal += batch.ids.size;
@@ -1092,6 +1108,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         ready.length = 0;
         inFlight.clear();
         activeRootIds = new Set();
+        activeRootSetDirty = true;
         pendingRootSwitchIds = new Set();
         pendingRootSwitchKey = "";
         pendingRootSwitchStableFrames = 0;
@@ -1109,7 +1126,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         const existing = cached.get(streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)));
         if (existing) {
           existing.lastTouchFrame = frame;
-          existing.activeEligible = true;
+          if (!existing.activeEligible) {
+            existing.activeEligible = true;
+            activeRootSetDirty = true;
+          }
         }
       }
       const evictions = evict(center, radiusM);

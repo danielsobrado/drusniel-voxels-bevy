@@ -1,5 +1,3 @@
-import * as THREE from "three";
-
 export interface StreamCenter {
   worldX: number;
   worldZ: number;
@@ -13,7 +11,7 @@ const MAX_VELOCITY_MPS = 500;
 const VELOCITY_DECAY = 0.85;
 
 export function updateStreamCenter(
-  cameraPosition: THREE.Vector3,
+  cameraPosition: { x: number; z: number },
   previousCenter: StreamCenter | null,
   deltaSeconds: number,
   preloadSeconds: number,

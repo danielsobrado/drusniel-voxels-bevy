@@ -470,7 +470,7 @@ export async function bootstrapClodPoc() {
           let shellRefreshCommitRev = 0;
           let framesSinceShellRefresh = 0;
           const SHELL_REFRESH_INTERVAL_FRAMES = 120;
-          return (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          return (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, worldCenter: THREE.Vector3) => {
             const originStats = floatingOrigin.stats();
             if (postRenderer.longViewHooks?.stats) {
               postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
@@ -480,7 +480,7 @@ export async function bootstrapClodPoc() {
               postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
             }
             infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
-            if (farSummaryIntegration) timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera));
+            if (farSummaryIntegration) timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera, worldCenter));
             if (naadfIntegration) timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
             if (farSummaryIntegration && infiniteFarShell) {
               framesSinceShellRefresh++;
@@ -490,10 +490,12 @@ export async function bootstrapClodPoc() {
                 infiniteFarShell.requestHeightRefresh();
               }
             }
-            if (infiniteFarShell) timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex));
-            if (terrainView.shadowProxyController) timeFarSummarySubphase("farSumShadowProxyMs", () => terrainView.shadowProxyController!.updateFrame(camera.position.x, camera.position.z));
+            // Anchor streaming systems to the canonical world center (player / orbit target) so
+            // terrain, far shell, shadows, and texture windows stay concentric with the near bubble.
+            if (infiniteFarShell) timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(worldCenter.x, worldCenter.z, frameIndex));
+            if (terrainView.shadowProxyController) timeFarSummarySubphase("farSumShadowProxyMs", () => terrainView.shadowProxyController!.updateFrame(worldCenter.x, worldCenter.z));
             if (postRenderer.state.terrainMaterialSource === "procedural" && biomeTextureStreaming) {
-              timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: camera.position.x, z: camera.position.z, frameIndex }));
+              timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: worldCenter.x, z: worldCenter.z, frameIndex }));
             }
           };
         })()

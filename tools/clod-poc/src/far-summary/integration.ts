@@ -31,7 +31,7 @@ export interface FarSummaryIntegration {
   readonly debugOverlay: FarSummaryDebugOverlay;
   readonly stats: FarSummaryStats;
 
-  update: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+  update: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, streamCenter?: { x: number; z: number }) => void;
   getHeightProvider: () => FarHeightProvider;
   getStreamCenter: () => StreamCenter;
   getGpuRuntimeStats: () => FarSummaryGpuRuntimeStats;
@@ -146,11 +146,13 @@ export function initFarSummaryIntegration(
   let forceSlowBuilds = false;
   let buildDelayMs = 0;
 
-  const update = (_frameIndexArg: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+  const update = (_frameIndexArg: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, streamCenter?: { x: number; z: number }) => {
     frameIndex++;
 
+    // Prefer the canonical world center (player / orbit target) so far tiles stay concentric
+    // with the near bubble and streamed CLOD pages; the camera eye drifts away in orbit mode.
     currentCenter = updateStreamCenter(
-      camera.position,
+      streamCenter ?? camera.position,
       previousCenter,
       deltaSeconds,
       config.stream.preloadSeconds,

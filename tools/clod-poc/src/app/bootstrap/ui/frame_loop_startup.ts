@@ -115,15 +115,14 @@ function streamWorkPending(stats: StreamingClodRootStats): boolean {
 }
 
 function streamingWorldCenter(
-  streamingScene: boolean,
   interactionMode: string,
-  player: { spawned: boolean; position: { x: number; z: number } },
-  camera: { position: { x: number; z: number } },
+  player: { position: { x: number; z: number } },
   controls: { target: { x: number; z: number } },
 ): THREE.Vector3 {
-  if (streamingScene) return new THREE.Vector3(camera.position.x, 0, camera.position.z);
+  // Must match canonicalWorldCenter in terrain_frame_phase: player in play mode, orbit target
+  // otherwise. Anchoring streamed CLOD pages to the camera eye desynced them from the near
+  // bubble / vegetation / far shell, which already stream around the canonical center.
   if (interactionMode === "playing") return new THREE.Vector3(player.position.x, 0, player.position.z);
-  void player;
   const src = controls.target;
   return new THREE.Vector3(src.x, 0, src.z);
 }
@@ -304,16 +303,20 @@ export function runFrameLoopStartup(
   const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
   const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;
   const rootTransitionEnabled = enabledParam(searchParams, "liveClodRootTransition") && input.app.isWebGpu;
+  // Apply the acceptance-proven streaming budgets whenever the streamed controller is enabled.
+  // The library defaults (1 build / 1 apply per frame, 128 cached pages) starve interactive
+  // infinite-islands runs: pages appear at the horizon faster than one worker round-trip per page.
+  const streamBudgetProfile = longView.queryScene === INFINITE_ISLANDS_SCENE;
   const streamingClodRootController = createStreamingClodRootController({
     roots: input.result.roots,
     allNodes: input.allNodes,
     cfg,
     worldCells,
     enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
-    buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, acceptanceStreamProfile),
-    applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, acceptanceStreamProfile),
-    maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), acceptanceMaxStreamInflightBatches, acceptanceStreamProfile),
-    maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, acceptanceStreamProfile),
+    buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, streamBudgetProfile),
+    applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, streamBudgetProfile),
+    maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), acceptanceMaxStreamInflightBatches, streamBudgetProfile),
+    maxCachedPages: acceptanceMin(positiveIntegerParam(searchParams, "liveClodRootMaxCached"), ACCEPTANCE_MIN_STREAM_MAX_CACHED, streamBudgetProfile),
     maxRootLevel: acceptanceStreamProfile ? ACCEPTANCE_STREAM_MAX_LEVEL : nonNegativeIntegerParam(searchParams, "liveClodRootMaxLevel"),
     rootTransition: {
       enabled: rootTransitionEnabled,
@@ -333,7 +336,7 @@ export function runFrameLoopStartup(
   let lastStreamCenterZ = Number.NaN;
   const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
   const updateSelectionWithStreaming = () => {
-    const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
+    const center = streamingWorldCenter(interaction.mode, player, controls);
     const previousStats = streamingClodRootController.stats();
     const dx = center.x - lastStreamCenterX;
     const dz = center.z - lastStreamCenterZ;
@@ -368,7 +371,7 @@ export function runFrameLoopStartup(
     waterWeather: { waterController, deepOceanSurface, deepOceanMaterial, waterField, deepOceanConfig, deepOceanMeshPresent, oceanSampler, weatherController, updateWeatherStats, weatherStatsController: session.weatherStatsController },
     stats: { getGrassStats: () => grassStats.current, setGrassStats: (stats: GrassStats | null) => { grassStats.current = stats; }, getTreeStats: () => treeStats.current, setTreeStats: (stats: TreeStats | null) => { treeStats.current = stats; }, getStoneStats: () => stoneStats.current, setStoneStats: (stats: StoneStats | null) => { stoneStats.current = stats; }, getUnderstoryStats: () => understoryStats.current, setUnderstoryStats: (stats: UnderstoryStats | null) => { understoryStats.current = stats; }, getForestLightingStats: () => forestLightingStats.current, setForestLightingStats: (stats: ForestLightingStats | null) => { forestLightingStats.current = stats; }, formatTreeGpuSummary, formatUnderstoryGpuSummary, getPageGeometryCacheStats: () => input.terrainView.pageGeometryCache.stats(), getRenderNodeCacheStats: () => input.terrainView.renderNodeCache.stats(), statsPresenter, updateInfo, averageFpsRef: session.averageFpsRef, statsSyncThrottleConfig: clodRuntime.stats },
     diagnostics: { maxTerrainLevel: diagnosticsTerrainMaxLevel, farShellBuilt: () => farShellController.isBuilt(), farShellCanopyEnabled: () => farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null, getFarShellMetrics: () => longView.farShellMetrics, infiniteFarShellActive: () => longView.infiniteFarShell !== undefined, isLongView: longView.isLongView, phase0TargetVisibleM: longView.phase0TargetVisibleM, phase0Config: longView.phase0Config, queryScene: longView.queryScene, phase0VelocityX: longView.phase0VelocityX, phase0VelocityZ: longView.phase0VelocityZ, phase0Streaming: diagnosticsPhase0Streaming, longViewDiagnosticsCfg: { page: { chunk_size: cfg.page.chunk_size, chunks_per_page: cfg.page.chunks_per_page } }, getFarShellRadiusFactor: () => state.farShellRadiusFactor, getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert, getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled, getFarClipmapOwnershipSnapshot: () => farClipmapController?.ownershipSnapshot() },
-    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera, worldCenter) => { input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera); if (farClipmapController) { const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(worldCenter)); if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats); } if (streamingScene) timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(worldCenter.x, worldCenter.z)); timeFarSummarySubphase("farSumSunLightMs", () => { sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now()); syncSunLightCounters(); }); timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay()); } } : undefined,
+    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera, worldCenter) => { input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera, worldCenter); if (farClipmapController) { const stats = timeFarSummarySubphase("farSumShellMs", () => farClipmapController.update(worldCenter)); if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats); } if (streamingScene) timeFarSummarySubphase("farSumShellMs", () => farShellController.moveTo(worldCenter.x, worldCenter.z)); timeFarSummarySubphase("farSumSunLightMs", () => { sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now()); syncSunLightCounters(); }); timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay()); } } : undefined,
     floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,
     construction: constructionController ? { update: () => { constructionController.update(); session.constructionBuildActive = constructionController.stats().active; }, isActive: () => constructionController.stats().active } : undefined,
     combat: combatController ? { update: (timeMs) => combatController.update(timeMs) } : undefined,

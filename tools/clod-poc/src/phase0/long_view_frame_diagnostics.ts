@@ -24,6 +24,7 @@ import { parsePageKey } from "../stream/page_plan.js";
 
 const PHASE0_P95_WINDOW = 120;
 const PERF_DIAGNOSTICS_CAMERA_EPSILON_M = 1;
+const HEAVY_DIAGNOSTICS_MIN_INTERVAL_MS = 250;
 
 export interface LongViewFrameDiagnosticsDeps {
   getHooks: () => ClodHooks | null;
@@ -53,6 +54,8 @@ export interface LongViewFrameDiagnosticsDeps {
   phase0VelocityZ: number;
   phase0Streaming: Phase0Config["phase0"]["streaming"];
   ownershipRuntime: TerrainOwnershipRuntime;
+  /** Canonical streaming center (player / orbit target); falls back to the camera eye. */
+  getWorldCenter?: () => { x: number; z: number } | null;
   getOwnershipResidencyFeeds?: () => OwnershipResidencyFeeds;
   getFarClipmapOwnershipSnapshot?: () => FarClipmapOwnershipSnapshot | undefined;
   borderOceanScene?: {
@@ -166,17 +169,21 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     Math.min(deps.maxTerrainLevel, Math.floor(numericCounter(counters, "live_clod_stream_max_root_level", deps.maxTerrainLevel))),
   );
 
-  const ownershipOracleEnabled = (): boolean => {
-    if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    return (params.get("acceptance") === "1" && params.get("ownershipOracle") !== "0") || params.get("ownershipOracle") === "1";
-  };
+  // URL flags are fixed for the page's lifetime; parse once instead of every frame.
+  const initParams = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
+  const ownershipOracleActive = initParams !== null
+    && ((initParams.get("acceptance") === "1" && initParams.get("ownershipOracle") !== "0") || initParams.get("ownershipOracle") === "1");
+  const acceptancePerfDiagnosticsActive = initParams !== null
+    && initParams.get("acceptance") === "1" && initParams.get("ownershipOracle") === "0";
+  // Acceptance/QA harnesses gate on these counters per frame; interactive runs only need them at
+  // HUD cadence, and the streaming simulation + ownership scans are too heavy for every frame.
+  const perFrameHeavyDiagnostics = initParams !== null
+    && (initParams.get("acceptance") === "1" || initParams.get("qa") === "1" || initParams.get("ownershipOracle") === "1");
+  let lastHeavyDiagnosticsMs = -Infinity;
 
-  const acceptancePerfDiagnosticsEnabled = (): boolean => {
-    if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get("acceptance") === "1" && params.get("ownershipOracle") === "0";
-  };
+  const ownershipOracleEnabled = (): boolean => ownershipOracleActive;
+
+  const acceptancePerfDiagnosticsEnabled = (): boolean => acceptancePerfDiagnosticsActive;
 
   const backgroundQueuesQuiet = (counters: Readonly<Record<string, number>>): boolean => {
     const tilesMissing = numericCounter(counters, "far_summary_tiles_missing", -1);
@@ -338,14 +345,21 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       publishPhase0Report(s.counters);
       return;
     }
+    const nowMs = performance.now();
+    if (!perFrameHeavyDiagnostics && nowMs - lastHeavyDiagnosticsMs < HEAVY_DIAGNOSTICS_MIN_INTERVAL_MS) {
+      s.counters["long_view_diagnostics_throttled_frames"] = (s.counters["long_view_diagnostics_throttled_frames"] ?? 0) + 1;
+      return;
+    }
+    lastHeavyDiagnosticsMs = nowMs;
     s.counters["long_view_diagnostics_full_frames"] = (s.counters["long_view_diagnostics_full_frames"] ?? 0) + 1;
 
+    const streamCenter = deps.getWorldCenter?.() ?? { x: deps.camera.position.x, z: deps.camera.position.z };
     const streamingReport = simulateStreamingCoverage({
       worldCells: deps.worldCells,
       chunkSize: deps.cfg.page.chunk_size,
       pageSizeCells: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
-      playerX: deps.camera.position.x,
-      playerZ: deps.camera.position.z,
+      playerX: streamCenter.x,
+      playerZ: streamCenter.z,
       velocityX: deps.phase0VelocityX,
       velocityZ: deps.phase0VelocityZ,
       preloadSeconds: deps.phase0Streaming.preload_seconds,
@@ -358,7 +372,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
     s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
 
-    const ownershipSnapshot = deps.ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
+    const ownershipSnapshot = deps.ownershipRuntime.update({ x: streamCenter.x, z: streamCenter.z });
     publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
     const ownershipResidencyFeeds = deps.getOwnershipResidencyFeeds?.() ?? createSnapshotOwnershipResidencyFeeds(ownershipSnapshot);
     const rootLevel = requiredStreamingRootLevel(s.counters);
