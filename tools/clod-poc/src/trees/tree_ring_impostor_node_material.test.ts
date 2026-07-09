@@ -78,7 +78,7 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("treeRingImpostorVariant(worldCell, uSeed, atlas)");
     expect(source).toContain("TREE_RING_VARIANT_SALT");
     expect(source).toContain("atlas.atlasHeightPx");
-    expect(source).toContain("variantIndex.mul(pageSize)");
+    expect(source).toContain("safeVariant.mul(pageSize)");
   });
 
   it("blends captured normals with the cylindrical billboard facing normal", () => {
