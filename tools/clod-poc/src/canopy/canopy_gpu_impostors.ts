@@ -41,6 +41,17 @@ const CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL = 0.42;
 const TMP_OBJECT = new THREE.Object3D();
 const HORIZONTAL_CANOPY_CARD = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 
+type NumericTextureArray =
+  | Float32Array
+  | Float64Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | Uint16Array
+  | Uint32Array
+  | Int8Array
+  | Int16Array
+  | Int32Array;
+
 export function maxCanopyGpuImpostorInstances(maxShellTris: number): number {
   if (!Number.isFinite(maxShellTris) || maxShellTris <= 0) return DEFAULT_MIN_INSTANCES;
   return Math.max(DEFAULT_MIN_INSTANCES, Math.min(DEFAULT_MAX_INSTANCES, Math.floor(maxShellTris / 2)));
@@ -94,7 +105,7 @@ export function buildCanopyGpuImpostorsFromTextureSet(
   });
   const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, samples.length));
   mesh.name = "CanopyGpuImpostors";
-  mesh.frustumCulled = false;
+  mesh.frustumCulled = true;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.count = samples.length;
@@ -115,6 +126,8 @@ export function buildCanopyGpuImpostorsFromTextureSet(
     mesh.setColorAt(i, displayColor);
   }
   mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   mesh.position.set(center.x, 0, center.z);
   mesh.userData.canopyTextureSetRevision = set.revision;
@@ -218,11 +231,22 @@ function createCanopyImpostorAlphaMap(): THREE.DataTexture {
 function textureFloatData(texture: THREE.DataTexture): Float32Array {
   const data = (texture.image as { data?: unknown }).data;
   if (data instanceof Float32Array) return data;
-  if (!ArrayBuffer.isView(data)) return new Float32Array(0);
-  const source = data as unknown as ArrayLike<number>;
-  const copied = new Float32Array(source.length);
-  for (let i = 0; i < copied.length; i++) copied[i] = Number(source[i] ?? 0);
+  if (!isNumericTextureArray(data)) return new Float32Array(0);
+  const copied = new Float32Array(data.length);
+  for (let i = 0; i < copied.length; i++) copied[i] = Number(data[i] ?? 0);
   return copied;
+}
+
+function isNumericTextureArray(data: unknown): data is NumericTextureArray {
+  return data instanceof Float32Array
+    || data instanceof Float64Array
+    || data instanceof Uint8Array
+    || data instanceof Uint8ClampedArray
+    || data instanceof Uint16Array
+    || data instanceof Uint32Array
+    || data instanceof Int8Array
+    || data instanceof Int16Array
+    || data instanceof Int32Array;
 }
 
 function canopyCardSize(set: CanopyTextureSet, config: CanopyShellConfig, sample: CanopyGpuImpostorSample): number {
