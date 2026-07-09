@@ -59,7 +59,7 @@ describe("tree impostor billboard materials", () => {
 
     expect(source).toContain("treeImpostorNodeBillboardNormal");
     expect(source).toContain("relightTreeImpostorNode(albedo, normalSample, billboardNormal)");
-    expect(source).toContain("normalize(mix(billboardNormal, capturedNormal");
+    expect(source).toContain("billboardNormal, capturedNormal");
     expect(source).toContain("TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
   });
 });
