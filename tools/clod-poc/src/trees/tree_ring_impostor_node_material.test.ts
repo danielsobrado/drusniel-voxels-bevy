@@ -100,6 +100,15 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS");
   });
 
+  it("coverage-normalizes albedo and four-frame normal blends", () => {
+    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("TREE_RING_IMPOSTOR_MIN_COVERAGE");
+    expect(source).toContain("sample.xyz.div(max(sample.w, float(TREE_RING_IMPOSTOR_MIN_COVERAGE)))");
+    expect(source).toContain("s00.albedo.mul(s00.coverage).mul(w00)");
+    expect(source).toContain("decodeTreeRingImpostorPackedNormal(s00.normal).mul(s00.coverage).mul(w00)");
+  });
+
   it("disposes every owned material", () => {
     const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
     const materials = [handle.regularMaterial, ...Object.values(handle.debugMaterials)];
