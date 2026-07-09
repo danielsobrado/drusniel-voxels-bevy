@@ -166,8 +166,14 @@ function injectedFilterBlock() {
     "  return values;",
     "}",
     "",
+    "function acceptanceSceneAlias(name: string): string {",
+    "  if (name === \"coverage/phase4-stones\") return \"phase4-stones\";",
+    "  if (name === \"coverage/phase6-canopy\") return \"phase6-canopy\";",
+    "  return name;",
+    "}",
+    "",
     "function filterActiveScenes(scenes: readonly SceneSpec[]): SceneSpec[] {",
-    "  const requested = cliValues(CLI_ARGS, \"--scene\").flatMap((value) => value.split(\",\")).map((value) => value.trim()).filter(Boolean);",
+    "  const requested = cliValues(CLI_ARGS, \"--scene\").flatMap((value) => value.split(\",\")).map((value) => acceptanceSceneAlias(value.trim())).filter(Boolean);",
     "  if (requested.length === 0) return [...scenes];",
     "  const known = new Set(SCENES.map((scene) => scene.name));",
     "  const unknown = requested.filter((name) => !known.has(name));",
@@ -197,9 +203,9 @@ function injectedFilterBlock() {
   ].join("\n");
 }
 
-function injectPhase4StoneAcceptance(source) {
+function injectPhaseAcceptanceScenes(source) {
   const sceneNeedle = "  {\n    name: \"biome-near\",";
-  const phase4Scene = [
+  const injectedScenes = [
     "  {",
     "    name: \"phase4-stones\",",
     "    freeze: true,",
@@ -208,17 +214,25 @@ function injectPhase4StoneAcceptance(source) {
     "    extra: { gpuReadbacks: \"acceptance\", stoneGpuCounts: \"1\" },",
     "    validation: \"stone-gpu\",",
     "  },",
+    "  {",
+    "    name: \"phase6-canopy\",",
+    "    freeze: true,",
+    "    proceduralDebug: \"biome\",",
+    "    cam: OUTSIDE_STARTUP_CAM,",
+    "    extra: { canopy: \"1\", farClipmap: \"1\", farClipmapMode: \"replace\", farClipmapShaderDisplacement: \"1\" },",
+    "    validation: \"phase6-canopy\",",
+    "  },",
   ].join("\n");
   const withScene = source.includes(sceneNeedle)
-    ? source.replace(sceneNeedle, `${phase4Scene}\n${sceneNeedle}`)
+    ? source.replace(sceneNeedle, `${injectedScenes}\n${sceneNeedle}`)
     : source;
-  if (withScene === source) throw new Error("Failed to inject phase4 stone acceptance scene");
+  if (withScene === source) throw new Error("Failed to inject phase acceptance scenes");
 
   const withSceneSpec = withScene.replace(
     "  movementRoute?: boolean;\n}",
-    "  movementRoute?: boolean;\n  validation?: \"stone-gpu\";\n}",
+    "  movementRoute?: boolean;\n  validation?: \"stone-gpu\" | \"phase6-canopy\";\n}",
   );
-  if (withSceneSpec === withScene) throw new Error("Failed to inject phase4 scene validation type");
+  if (withSceneSpec === withScene) throw new Error("Failed to inject scene validation type");
 
   const evaluator = [
     "function numericCounter(stats: JsonRecord, key: string): number {",
@@ -227,8 +241,7 @@ function injectPhase4StoneAcceptance(source) {
     "  return typeof value === \"number\" && Number.isFinite(value) ? value : Number.NaN;",
     "}",
     "",
-    "function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {",
-    "  if (scene.validation !== \"stone-gpu\") return [];",
+    "function evaluateStoneGpuCounters(stats: JsonRecord): string[] {",
     "  const failures: string[] = [];",
     "  const counters = (stats[\"counters\"] as Record<string, unknown> | undefined) ?? {};",
     "  const total = numericCounter(stats, \"stoneGpuClustersTotal\");",
@@ -253,21 +266,46 @@ function injectPhase4StoneAcceptance(source) {
     "  return failures;",
     "}",
     "",
+    "function evaluatePhase6CanopyCounters(stats: JsonRecord): string[] {",
+    "  const failures: string[] = [];",
+    "  const enabled = numericCounter(stats, \"canopy_gpu_impostor_enabled\");",
+    "  const instances = numericCounter(stats, \"canopy_gpu_impostor_instances\");",
+    "  const shellTris = numericCounter(stats, \"canopy_shell_tris\");",
+    "  const maxColor = numericCounter(stats, \"canopy_gpu_impostor_max_color_channel\");",
+    "  const opacity = numericCounter(stats, \"canopy_gpu_impostor_opacity\");",
+    "  const shaderDisplacement = numericCounter(stats, \"far_clipmap_shader_displacement_enabled\");",
+    "  const pendingTiles = numericCounter(stats, \"far_clipmap_pending_tiles\");",
+    "  if (enabled !== 1) failures.push(`canopy_gpu_impostor_enabled=${enabled} must equal 1`);",
+    "  if (!(instances > 0)) failures.push(`canopy_gpu_impostor_instances=${instances} must be > 0`);",
+    "  if (Number.isFinite(instances) && Number.isFinite(shellTris) && shellTris !== instances * 2) failures.push(`canopy_shell_tris=${shellTris} must equal canopy_gpu_impostor_instances*2 (${instances * 2})`);",
+    "  if (!(maxColor <= 0.42)) failures.push(`canopy_gpu_impostor_max_color_channel=${maxColor} must be <= 0.42`);",
+    "  if (!(opacity < 0.7)) failures.push(`canopy_gpu_impostor_opacity=${opacity} must be < 0.7`);",
+    "  if (shaderDisplacement !== 1) failures.push(`far_clipmap_shader_displacement_enabled=${shaderDisplacement} must equal 1`);",
+    "  if (pendingTiles !== 0) failures.push(`far_clipmap_pending_tiles=${pendingTiles} must equal 0`);",
+    "  return failures;",
+    "}",
+    "",
+    "function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {",
+    "  if (scene.validation === \"stone-gpu\") return evaluateStoneGpuCounters(stats);",
+    "  if (scene.validation === \"phase6-canopy\") return evaluatePhase6CanopyCounters(stats);",
+    "  return [];",
+    "}",
+    "",
   ].join("\n");
   const withEvaluator = withSceneSpec.replace("function evaluateMovementRoute", `${evaluator}function evaluateMovementRoute`);
-  if (withEvaluator === withSceneSpec) throw new Error("Failed to inject phase4 scene counter evaluator");
+  if (withEvaluator === withSceneSpec) throw new Error("Failed to inject scene counter evaluator");
 
   const withConvergenceOptOut = withEvaluator.replace(
     "    await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);",
     "    if (scene.validation === \"stone-gpu\") {\n      console.log(`[infinite-accept] ${sceneRunName}: skipping generic convergence wait for stone-gpu validation`);\n    } else {\n      await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);\n    }",
   );
-  if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject phase4 convergence opt-out");
+  if (withConvergenceOptOut === withEvaluator) throw new Error("Failed to inject stone convergence opt-out");
 
   const withThresholdOptOut = withConvergenceOptOut.replace(
     "    const thresholds: ThresholdEvaluation = evaluateThresholds(\n      extractAcceptanceCounters(stats),\n      gate.requiredCounters,\n      gate.rules,\n    );",
-    "    const thresholds: ThresholdEvaluation = scene.validation === \"stone-gpu\"\n      ? evaluateThresholds(extractAcceptanceCounters(stats), [], [])\n      : evaluateThresholds(\n        extractAcceptanceCounters(stats),\n        gate.requiredCounters,\n        gate.rules,\n      );",
+    "    const thresholds: ThresholdEvaluation = scene.validation\n      ? evaluateThresholds(extractAcceptanceCounters(stats), [], [])\n      : evaluateThresholds(\n        extractAcceptanceCounters(stats),\n        gate.requiredCounters,\n        gate.rules,\n      );",
   );
-  if (withThresholdOptOut === withConvergenceOptOut) throw new Error("Failed to inject phase4 threshold opt-out");
+  if (withThresholdOptOut === withConvergenceOptOut) throw new Error("Failed to inject scene threshold opt-out");
 
   const withFailures = withThresholdOptOut.replace(
     "    const movementFailures = evaluateMovementRoute(scene.name, movement);\n    const failures = [",
@@ -276,15 +314,15 @@ function injectPhase4StoneAcceptance(source) {
     "      ...movementFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
     "      ...movementFailures,\n      ...sceneSpecificFailures,\n      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),",
   );
-  if (withFailures === withThresholdOptOut) throw new Error("Failed to inject phase4 scene counter failures");
+  if (withFailures === withThresholdOptOut) throw new Error("Failed to inject scene counter failures");
   return withFailures;
 }
 
 function injectFilteredRunner(source) {
   const activeScenesBlock = /const PROFILE = parseProfile\(process\.argv\.slice\(2\)\);\nconst ACTIVE_SCENES = PROFILE === "fast"[\s\S]*?const SAMPLE_FRAMES = PROFILE === "fast" \? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;/;
-  const withPhase4 = injectPhase4StoneAcceptance(source);
-  const withSceneFilter = withPhase4.replace(activeScenesBlock, injectedFilterBlock());
-  if (withSceneFilter === withPhase4) throw new Error("Failed to inject infinite acceptance scene/gate filters");
+  const withPhaseScenes = injectPhaseAcceptanceScenes(source);
+  const withSceneFilter = withPhaseScenes.replace(activeScenesBlock, injectedFilterBlock());
+  if (withSceneFilter === withPhaseScenes) throw new Error("Failed to inject infinite acceptance scene/gate filters");
   return withSceneFilter
     .replaceAll("for (const gate of GATE_MODES)", "for (const gate of ACTIVE_GATES)")
     .replace(
