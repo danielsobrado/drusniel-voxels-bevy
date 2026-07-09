@@ -282,6 +282,7 @@ describe("FarSummaryGpuRuntime", () => {
       gpuConfig: GPU_CONFIG,
       farSummaryConfig: FAR_CONFIG,
       terrainSampler: TERRAIN,
+      webGpuAvailable: () => true,
       builderFactory: async () => ({ dispatch: async () => ({ ok: true, counters: createFarSummaryGpuCounters(), fallbackTiles: 0, fallbackReason: null }), dispose: () => { disposed++; } }),
     });
 
