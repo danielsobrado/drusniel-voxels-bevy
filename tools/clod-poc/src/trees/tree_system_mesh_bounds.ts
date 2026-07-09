@@ -5,6 +5,7 @@ import {
   TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
 } from "./tree_impostor_blend_geometry.js";
 import {
+  treeImpostorLocalPositionScaleAttribute,
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
@@ -50,7 +51,10 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
   }
 
   if (input.matrixChanged) input.mesh.instanceMatrix.needsUpdate = true;
-  if (input.worldXZChanged) treeWorldXZAttribute(input.mesh).needsUpdate = true;
+  if (input.worldXZChanged) {
+    treeWorldXZAttribute(input.mesh).needsUpdate = true;
+    if (input.lod === "impostor") treeImpostorLocalPositionScaleAttribute(input.mesh).needsUpdate = true;
+  }
   if (input.fadeChanged) {
     treeLodFadeAttribute(input.mesh).needsUpdate = true;
     treeLodDitherRoleAttribute(input.mesh).needsUpdate = true;
