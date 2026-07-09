@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import sharp from "sharp";
 import { clodBaseUrl, clodUrl, launchWebGPU } from "./launch.js";
 import {
@@ -206,6 +206,8 @@ async function main(): Promise<void> {
   }
 
   const server = await ensureDevServer(args);
+  const captures: CaptureReport[] = [];
+  let browser: Browser | null = null;
   const url = clodUrl({
     scene,
     seed: Number.isFinite(seed) ? seed : undefined,
@@ -213,9 +215,9 @@ async function main(): Promise<void> {
     extra,
   });
 
-  const captures: CaptureReport[] = [];
-  const { browser } = await launchWebGPU();
   try {
+    const launch = await launchWebGPU();
+    browser = launch.browser;
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
     page.on("console", (msg: { text(): string; type(): string }) => {
       const text = msg.text();
@@ -264,7 +266,7 @@ async function main(): Promise<void> {
       captures.push({ index: i, pose, screenshotPath, spikeReport });
     }
   } finally {
-    await browser.close().catch(() => undefined);
+    await browser?.close().catch(() => undefined);
     if (server.started) await server.stop();
   }
 
