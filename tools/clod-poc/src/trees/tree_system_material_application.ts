@@ -90,7 +90,7 @@ export function replaceTreeSystemImpostorGeometry(
 export function createTreeSystemImpostorGeometryForCapacity(
   source: THREE.BufferGeometry,
   capacity: number,
-  includeBlendAttributes = true,
+  _includeBlendAttributes = true,
 ): THREE.BufferGeometry {
   const safeCapacity = Math.max(0, Math.floor(capacity));
   const geometry = source.clone();
@@ -99,7 +99,7 @@ export function createTreeSystemImpostorGeometryForCapacity(
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
   geometry.setAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
-  if (includeBlendAttributes) attachTreeSystemImpostorBlendAttributes(geometry, safeCapacity);
+  attachTreeSystemImpostorBlendAttributes(geometry, safeCapacity);
   return geometry;
 }
 
