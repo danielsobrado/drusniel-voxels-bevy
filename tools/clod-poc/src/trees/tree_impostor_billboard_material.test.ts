@@ -62,6 +62,15 @@ describe("tree impostor billboard materials", () => {
     expect(source).toContain("billboardNormal, capturedNormal");
     expect(source).toContain("TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
   });
+
+  it("uses physical WebGPU node materials with impostor normal nodes", () => {
+    const source = readFileSync(new URL("./tree_impostor_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("MeshPhysicalNodeMaterial");
+    expect(source).toContain("createTreePhysicalNodeMaterial");
+    expect(source).toContain("material.normalNode = normalNode");
+    expect(source).toContain("TREE_IMPOSTOR_PHYSICAL_ROUGHNESS");
+  });
 });
 
 function fakeAtlas(): TreeImpostorAtlas {
