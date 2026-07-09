@@ -112,7 +112,7 @@ function pixelOffset(width: number, x: number, y: number): number {
 function darkRunWidth(
   rgba: Uint8Array | Uint8ClampedArray,
   width: number,
-  height: number,
+  _height: number,
   x: number,
   y: number,
   threshold: number,
