@@ -50,6 +50,7 @@ const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
+const TREE_RING_VARIANT_SALT = 1571;
 
 function fallbackLighting(): EnvironmentLighting {
   return {
@@ -87,6 +88,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const aHeight: TslNode = aCell.z;
     const aScale: TslNode = max(aCell.w, float(0.001));
     const aYaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
+    const aVariant: TslNode = treeRingImpostorVariant(worldCell, uSeed, atlas);
 
     const c: TslNode = cos(aYaw);
     const s: TslNode = sin(aYaw);
@@ -104,7 +106,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
       dirWorld.y,
       dirWorld.x.mul(s).add(dirWorld.z.mul(c)),
     ));
-    const impostor = treeRingImpostorFourFrameSample(atlas, uv(), viewDirection);
+    const impostor = treeRingImpostorFourFrameSample(atlas, uv(), viewDirection, aVariant);
     const albedo: TslNode = debugColor
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
       : impostor.albedo;
@@ -189,6 +191,7 @@ function treeRingImpostorFourFrameSample(
   atlas: TreeImpostorAtlas,
   baseUv: TslNode,
   viewDirection: TslNode,
+  variantIndex: TslNode,
 ): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
   const encoded: TslNode = treeRingOctEncode(viewDirection);
   const grid = float(Math.max(1, Math.floor(atlas.gridSize)));
@@ -205,10 +208,10 @@ function treeRingImpostorFourFrameSample(
   const w10: TslNode = fraction.x.mul(one.sub(fraction.y));
   const w01: TslNode = one.sub(fraction.x).mul(fraction.y);
   const w11: TslNode = fraction.x.mul(fraction.y);
-  const s00 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y0);
-  const s10 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y0);
-  const s01 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y1);
-  const s11 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y1);
+  const s00 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y0, variantIndex);
+  const s10 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y0, variantIndex);
+  const s01 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y1, variantIndex);
+  const s11 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y1, variantIndex);
   return {
     albedo: s00.albedo.mul(w00).add(s10.albedo.mul(w10)).add(s01.albedo.mul(w01)).add(s11.albedo.mul(w11)),
     coverage: s00.coverage.mul(w00).add(s10.coverage.mul(w10)).add(s01.coverage.mul(w01)).add(s11.coverage.mul(w11)),
@@ -238,8 +241,9 @@ function treeRingImpostorAtlasSample(
   baseUv: TslNode,
   frameX: TslNode,
   frameY: TslNode,
+  variantIndex: TslNode,
 ): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
-  const atlasUv = treeRingImpostorAtlasUv(atlas, baseUv, frameX, frameY);
+  const atlasUv = treeRingImpostorAtlasUv(atlas, baseUv, frameX, frameY, variantIndex);
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
   const normalSample: TslNode = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv).xyz : vec3(0.5, 1.0, 0.5);
   return {
@@ -258,19 +262,31 @@ function treeRingImpostorAtlasUv(
   baseUv: TslNode,
   frameX: TslNode,
   frameY: TslNode,
+  variantIndex: TslNode,
 ): TslNode {
   const resolution = float(Math.max(1, Math.floor(atlas.resolutionPx)));
-  const atlasSize = float(Math.max(1, Math.floor(atlas.gridSize * atlas.resolutionPx)));
+  const pageSize = float(Math.max(1, Math.floor(atlas.gridSize * atlas.resolutionPx)));
+  const atlasWidth = float(Math.max(1, Math.floor(atlas.atlasWidthPx ?? atlas.gridSize * atlas.resolutionPx)));
+  const atlasHeight = float(Math.max(1, Math.floor(atlas.atlasHeightPx ?? atlas.gridSize * atlas.resolutionPx)));
+  const variantCount = float(Math.max(1, Math.floor(atlas.variantCount ?? 1)));
+  const safeVariant = clamp(variantIndex, 0, variantCount.sub(1));
+  const yOffset = safeVariant.mul(pageSize);
   const padding = float(inferAtlasPaddingPx(atlas));
   const minUv = vec2(
-    frameX.mul(resolution).add(padding).div(atlasSize),
-    frameY.mul(resolution).add(padding).div(atlasSize),
+    frameX.mul(resolution).add(padding).div(atlasWidth),
+    yOffset.add(frameY.mul(resolution)).add(padding).div(atlasHeight),
   );
   const maxUv = vec2(
-    frameX.add(1).mul(resolution).sub(padding).div(atlasSize),
-    frameY.add(1).mul(resolution).sub(padding).div(atlasSize),
+    frameX.add(1).mul(resolution).sub(padding).div(atlasWidth),
+    yOffset.add(frameY.add(1).mul(resolution)).sub(padding).div(atlasHeight),
   );
   return minUv.add(baseUv.mul(maxUv.sub(minUv)));
+}
+
+function treeRingImpostorVariant(worldCell: TslNode, seed: TslNode, atlas: TreeImpostorAtlas): TslNode {
+  const variantCount = Math.max(1, Math.floor(atlas.variantCount ?? 1));
+  if (variantCount <= 1) return float(0);
+  return clamp(floor(treeRingHash(worldCell, seed, TREE_RING_VARIANT_SALT).mul(float(variantCount))), 0, variantCount - 1);
 }
 
 function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
