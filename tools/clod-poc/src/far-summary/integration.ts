@@ -124,12 +124,16 @@ export function initFarSummaryIntegration(
   const sampler = new FarSummaryClipmapSampler(cache, config, options.terrainSampler);
   const debugOverlay = new FarSummaryDebugOverlay(config, cache, options.scene);
   const stats = createFarSummaryStats();
+  let authoritativeCpuFallbackFrames = 0;
   const gpuRuntime = new FarSummaryGpuRuntime({
     gpuConfig,
     farSummaryConfig: config,
     terrainSampler: options.terrainSampler,
     terrainFieldConfig: options.terrainFieldConfig,
     commitTile: (tile) => cache.commitExternalTile(tile),
+    onFallbackRequests: (requests) => {
+      if (requests.length > 0) authoritativeCpuFallbackFrames = Math.max(authoritativeCpuFallbackFrames, 2);
+    },
   });
 
   let frameIndex = 0;
@@ -164,7 +168,8 @@ export function initFarSummaryIntegration(
 
     const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
-    const cpuBuildSuppressedByGpuAuthority = gpuConfig.enabled && gpuConfig.authoritative;
+    const cpuFallbackAllowed = gpuConfig.enabled && gpuConfig.authoritative && authoritativeCpuFallbackFrames > 0;
+    const cpuBuildSuppressedByGpuAuthority = gpuConfig.enabled && gpuConfig.authoritative && !cpuFallbackAllowed;
     if (!cpuBuildSuppressedByGpuAuthority && buildAllowedByInterval && buildAllowedByDelay) {
       const budget = forceSlowBuilds ? 1 : undefined;
       const buildBudgetMs = Math.max(0, config.stream.maxBuildMsPerFrame);
@@ -173,6 +178,7 @@ export function initFarSummaryIntegration(
         : Number.POSITIVE_INFINITY;
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
     }
+    if (cpuFallbackAllowed) authoritativeCpuFallbackFrames--;
 
     gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests, cpuBuildSuppressedByGpuAuthority);
 
