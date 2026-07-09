@@ -3,6 +3,7 @@ export interface FarSummaryGpuConfig {
   strictParity: boolean;
   debugReadback: boolean;
   commitToCache: boolean;
+  authoritative: boolean;
   sampleGrid: number;
   maxTilesPerBatch: number;
   maxBatchesPerFrame: number;
@@ -19,6 +20,7 @@ export const DEFAULT_FAR_SUMMARY_GPU_CONFIG: FarSummaryGpuConfig = {
   strictParity: false,
   debugReadback: false,
   commitToCache: false,
+  authoritative: false,
   sampleGrid: 16,
   maxTilesPerBatch: 256,
   maxBatchesPerFrame: 1,
@@ -30,11 +32,16 @@ export function farSummaryGpuConfigFromParams(
   params: URLSearchParams,
   defaults: FarSummaryGpuConfig = DEFAULT_FAR_SUMMARY_GPU_CONFIG,
 ): FarSummaryGpuConfig {
+  const authoritative = booleanFlag(params, "farSummaryGpuAuthoritative", defaults.authoritative);
+  const enabled = booleanFlag(params, "farSummaryGpu", defaults.enabled) || authoritative;
+  const debugReadback = booleanFlag(params, "farSummaryGpuDebugReadback", defaults.debugReadback) || authoritative;
+  const commitToCache = booleanFlag(params, "farSummaryGpuCommit", defaults.commitToCache) || authoritative;
   return {
-    enabled: booleanFlag(params, "farSummaryGpu", defaults.enabled),
+    enabled,
     strictParity: booleanFlag(params, "farSummaryGpuStrictParity", defaults.strictParity),
-    debugReadback: booleanFlag(params, "farSummaryGpuDebugReadback", defaults.debugReadback),
-    commitToCache: booleanFlag(params, "farSummaryGpuCommit", defaults.commitToCache),
+    debugReadback,
+    commitToCache,
+    authoritative,
     sampleGrid: positiveInteger(params, "farSummaryGpuSampleGrid", defaults.sampleGrid),
     maxTilesPerBatch: positiveInteger(params, "farSummaryGpuMaxTilesPerBatch", defaults.maxTilesPerBatch),
     maxBatchesPerFrame: positiveInteger(params, "farSummaryGpuMaxBatchesPerFrame", defaults.maxBatchesPerFrame),
