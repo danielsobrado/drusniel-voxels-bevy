@@ -274,7 +274,22 @@ export function createCanopyShellSystem(
     const clipUpdate = clipmap.update(cameraX, cameraZ, config, terrainSampler, treeDistribution);
     centerX = clipUpdate.centerX;
     centerZ = clipUpdate.centerZ;
-    metrics = { ...metrics, ...clipUpdate.metrics };
+    const runtimeMetrics = {
+      fallbackSyntheticTiles: metrics.fallbackSyntheticTiles,
+      textureUploads: metrics.textureUploads,
+      shellTriangles: metrics.shellTriangles,
+      gpuImpostorEnabled: metrics.gpuImpostorEnabled,
+      gpuImpostorInstances: metrics.gpuImpostorInstances,
+      gpuImpostorBuilds: metrics.gpuImpostorBuilds,
+      gpuImpostorMaxInstances: metrics.gpuImpostorMaxInstances,
+      gpuImpostorCoverageThreshold: metrics.gpuImpostorCoverageThreshold,
+      gpuImpostorCenterX: metrics.gpuImpostorCenterX,
+      gpuImpostorCenterZ: metrics.gpuImpostorCenterZ,
+      gpuImpostorMaxColorChannel: metrics.gpuImpostorMaxColorChannel,
+      gpuImpostorOpacity: metrics.gpuImpostorOpacity,
+      uploadMs: metrics.uploadMs,
+    };
+    metrics = { ...clipUpdate.metrics, ...runtimeMetrics };
 
     if (!shouldKeepCanopyShellActive(config, false)) {
       disposeShellAndTextures();
