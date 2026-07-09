@@ -162,6 +162,36 @@ describe("FarSummaryGpuRuntime", () => {
     expect(committed[0]!.lastTouchedTimeMs).toBe(456);
     expect(committed[0]!.samples.map((sample) => sample.heightAvg)).toEqual([12, 13, 14, 15]);
     expect(runtime.stats().lastCommittedTiles).toBe(1);
+    expect(runtime.stats().totalCommittedTiles).toBe(1);
+  });
+
+  it("tracks authoritative CPU-build suppression and total GPU commits", async () => {
+    const committed: FarSummaryTile[] = [];
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: { ...GPU_CONFIG, authoritative: true, commitToCache: true, debugReadback: true },
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      nowMs: () => 789,
+      commitTile: (tile) => committed.push(tile),
+      dispatch: async () => ({
+        ok: true,
+        counters: createFarSummaryGpuCounters(),
+        fallbackTiles: 0,
+        fallbackReason: null,
+        cellReadbacks: [{ batchIndex: 0, records: [gpuRecord(20), gpuRecord(21), gpuRecord(22), gpuRecord(23)] }],
+      }),
+    });
+
+    runtime.update(CENTER, 12, "startup", [DIRTY_REQUEST], true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(committed).toHaveLength(1);
+    expect(runtime.stats().authoritative).toBe(1);
+    expect(runtime.stats().lastCpuBuildSuppressed).toBe(1);
+    expect(runtime.stats().totalCpuBuildsSuppressed).toBe(1);
+    expect(runtime.stats().lastCommittedTiles).toBe(1);
+    expect(runtime.stats().totalCommittedTiles).toBe(1);
   });
 
   it("does not commit failed GPU dispatches", async () => {
