@@ -69,6 +69,30 @@ const WALK_ROUTE: MovementSegment[] = [
 
 const SCENES: SceneSpec[] = [
   {
+    name: "phase3-far-summary-gpu-authoritative",
+    freeze: true,
+    proceduralDebug: "biome",
+    cam: OUTSIDE_STARTUP_CAM,
+    extra: { farSummaryGpuAuthoritative: "1", farSummaryGpuStrictParity: "0" },
+    validation: "far-summary-gpu-authoritative",
+  },
+  {
+    name: "phase4-stones",
+    freeze: true,
+    proceduralDebug: "biome",
+    cam: OUTSIDE_STARTUP_CAM,
+    extra: { gpuReadbacks: "acceptance", stoneGpuCounts: "1" },
+    validation: "stone-gpu",
+  },
+  {
+    name: "phase6-canopy",
+    freeze: true,
+    proceduralDebug: "biome",
+    cam: OUTSIDE_STARTUP_CAM,
+    extra: { canopy: "1", farClipmap: "1", farClipmapMode: "replace", farClipmapShaderDisplacement: "1" },
+    validation: "phase6-canopy",
+  },
+  {
     name: "walk",
     freeze: false,
     proceduralDebug: "biome",
@@ -119,6 +143,7 @@ type JsonRecord = Record<string, unknown>;
 type SceneExtra = Record<string, string>;
 type PoseTuple = [number, number, number];
 type CamPose = { p: PoseTuple; yaw: number; pitch: number; fov?: number };
+type SceneValidation = "stone-gpu" | "phase6-canopy" | "far-summary-gpu-authoritative";
 
 const REUSE_MODE_CODES: Record<AcceptanceProfile, number> = {
   full: 1,
@@ -134,6 +159,7 @@ interface SceneSpec {
   extra?: SceneExtra;
   summary?: boolean;
   movementRoute?: boolean;
+  validation?: SceneValidation;
 }
 
 interface GateMode {
@@ -209,12 +235,64 @@ function parseProfile(argv: readonly string[]): AcceptanceProfile {
   return "full";
 }
 
-const PROFILE = parseProfile(process.argv.slice(2));
-const ACTIVE_SCENES = PROFILE === "fast"
+function cliValues(args: readonly string[], key: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === key) {
+      const next = args[i + 1];
+      if (next && !next.startsWith("--")) {
+        values.push(next);
+        i += 1;
+      }
+    } else if (arg.startsWith(`${key}=`)) {
+      const value = arg.slice(key.length + 1);
+      if (value.length > 0) values.push(value);
+    }
+  }
+  return values;
+}
+
+function acceptanceSceneAlias(name: string): string {
+  if (name === "coverage/phase3-far-summary-gpu-authoritative") return "phase3-far-summary-gpu-authoritative";
+  if (name === "coverage/phase4-stones") return "phase4-stones";
+  if (name === "coverage/phase6-canopy") return "phase6-canopy";
+  return name;
+}
+
+function filterActiveScenes(scenes: readonly SceneSpec[], args: readonly string[]): SceneSpec[] {
+  const requested = cliValues(args, "--scene")
+    .flatMap((value) => value.split(","))
+    .map((value) => acceptanceSceneAlias(value.trim()))
+    .filter(Boolean);
+  if (requested.length === 0) return [...scenes];
+  const known = new Set(SCENES.map((scene) => scene.name));
+  const unknown = requested.filter((name) => !known.has(name));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown --scene value(s): ${unknown.join(", ")}. Valid scenes: ${[...known].join(", ")}`);
+  }
+  const requestedSet = new Set(requested);
+  return scenes.filter((scene) => requestedSet.has(scene.name));
+}
+
+function filterActiveGates(gates: readonly GateMode[], args: readonly string[]): GateMode[] {
+  const requested = cliValues(args, "--gate").at(-1)?.trim() ?? "all";
+  if (requested === "all") return [...gates];
+  if (requested !== "coverage" && requested !== "perf") {
+    throw new Error(`Unknown --gate value: ${requested}. Valid gates: coverage, perf, all`);
+  }
+  return gates.filter((gate) => gate.name === requested);
+}
+
+const CLI_ARGS = process.argv.slice(2);
+const PROFILE = parseProfile(CLI_ARGS);
+const BASE_ACTIVE_SCENES = PROFILE === "fast"
   ? SCENES.filter((scene) => scene.name === "walk" || scene.name === "final-near")
   : PROFILE === "reuse"
     ? [...SCENES.filter((scene) => !scene.movementRoute), ...SCENES.filter((scene) => scene.movementRoute)]
-  : SCENES;
+    : SCENES;
+const ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES, CLI_ARGS);
+const ACTIVE_GATES = filterActiveGates(GATE_MODES, CLI_ARGS);
 const SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;
 
 function elapsedSeconds(startedAt: number): string {
@@ -252,11 +330,14 @@ function numTiming(timings: Readonly<Record<string, number>>, key: string): numb
   return Number.isFinite(value) ? value : 0;
 }
 
+function numericCounter(stats: JsonRecord, key: string): number {
+  const counters = stats["counters"] as Record<string, unknown> | undefined;
+  const value = counters?.[key] ?? stats[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
+}
+
 async function createAcceptancePage(browser: Browser): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 });
-  // This script runs under tsx, whose esbuild keepNames transform injects
-  // __name(...) helper calls into functions inside page.evaluate closures.
-  // Define __name in the page (string form so this line itself is immune).
   await page.addInitScript({ content: "globalThis.__name = globalThis.__name || ((fn) => fn);" });
   return page;
 }
@@ -265,12 +346,7 @@ function parseCamPose(cam: string | undefined): CamPose | null {
   if (!cam) return null;
   const parts = cam.split(",").map((part) => Number(part));
   if (parts.length < 5 || parts.some((value) => !Number.isFinite(value))) return null;
-  return {
-    p: [parts[0]!, parts[1]!, parts[2]!],
-    yaw: parts[3]!,
-    pitch: parts[4]!,
-    fov: Number.isFinite(parts[5]) ? parts[5] : undefined,
-  };
+  return { p: [parts[0]!, parts[1]!, parts[2]!], yaw: parts[3]!, pitch: parts[4]!, fov: Number.isFinite(parts[5]) ? parts[5] : undefined };
 }
 
 function initialPoseForScene(scene: SceneSpec): CamPose | null {
@@ -280,12 +356,7 @@ function initialPoseForScene(scene: SceneSpec): CamPose | null {
   const z = Number(scene.extra?.["z"]);
   const yaw = Number(scene.extra?.["yaw"]);
   if (!Number.isFinite(x) || !Number.isFinite(z)) return parseCamPose(OUTSIDE_STARTUP_CAM);
-  return {
-    p: [x, 96, z],
-    yaw: Number.isFinite(yaw) ? yaw : 2.65,
-    pitch: -0.43,
-    fov: 55,
-  };
+  return { p: [x, 96, z], yaw: Number.isFinite(yaw) ? yaw : 2.65, pitch: -0.43, fov: 55 };
 }
 
 async function configureReusedScenePage(page: Page, url: string, scene: SceneSpec): Promise<void> {
@@ -293,10 +364,7 @@ async function configureReusedScenePage(page: Page, url: string, scene: SceneSpe
   await page.evaluate((input) => {
     window.history.replaceState(null, "", input.url);
     const hooks = window.__drusnielClod;
-    hooks?.setAcceptanceSceneOptions?.({
-      freeze: input.freeze,
-      proceduralDebug: input.proceduralDebug,
-    });
+    hooks?.setAcceptanceSceneOptions?.({ freeze: input.freeze, proceduralDebug: input.proceduralDebug });
     if (input.pose) {
       if (typeof hooks?.resetAcceptanceSceneForPose === "function") {
         hooks.resetAcceptanceSceneForPose(input.pose);
@@ -308,12 +376,7 @@ async function configureReusedScenePage(page: Page, url: string, scene: SceneSpe
     } else {
       hooks?.resetAcceptanceScene?.();
     }
-  }, {
-    url,
-    freeze: scene.freeze,
-    proceduralDebug: scene.proceduralDebug ?? null,
-    pose,
-  });
+  }, { url, freeze: scene.freeze, proceduralDebug: scene.proceduralDebug ?? null, pose });
 }
 
 function maxCounter(samples: readonly MovementSnapshot[], key: string): number {
@@ -334,19 +397,9 @@ async function writeBootstrapDiff(aPath: string, outPath: string): Promise<void>
   const metadata = await sharp(aPath).metadata();
   const width = Math.max(1, metadata.width ?? WIDTH);
   const height = Math.max(1, metadata.height ?? HEIGHT);
-  const diff = await sharp({
-    create: {
-      width,
-      height,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    },
-  }).png().toBuffer();
+  const diff = await sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
   mkdirSync(dirname(outPath), { recursive: true });
-  await sharp(aPath)
-    .composite([{ input: diff, left: 0, top: 0 }])
-    .png()
-    .toFile(outPath);
+  await sharp(aPath).composite([{ input: diff, left: 0, top: 0 }]).png().toFile(outPath);
 }
 
 function qaSummary(scene: string, stats: JsonRecord): JsonRecord {
@@ -356,22 +409,14 @@ function qaSummary(scene: string, stats: JsonRecord): JsonRecord {
 async function waitReady(page: Page, sceneName: string, failedPath: string): Promise<void> {
   await page.waitForFunction(
     () => {
-      const hooks = (window as typeof window & {
-        __drusnielClod?: { ready?: boolean; error?: string | null; progress?: number; progressMsg?: string };
-      }).__drusnielClod;
-      return Boolean(hooks && (
-        hooks.ready === true
-        || hooks.error != null
-        || (hooks.progressMsg === "ready" && (hooks.progress ?? 0) >= 1)
-      ));
+      const hooks = (window as typeof window & { __drusnielClod?: { ready?: boolean; error?: string | null; progress?: number; progressMsg?: string } }).__drusnielClod;
+      return Boolean(hooks && (hooks.ready === true || hooks.error != null || (hooks.progressMsg === "ready" && (hooks.progress ?? 0) >= 1)));
     },
     undefined,
     { timeout: READY_TIMEOUT_MS, polling: 250 },
   ).catch(async () => {
     const progress = await page.evaluate(() => {
-      const hooks = (window as typeof window & {
-        __drusnielClod?: { progress?: number; progressMsg?: string };
-      }).__drusnielClod;
+      const hooks = (window as typeof window & { __drusnielClod?: { progress?: number; progressMsg?: string } }).__drusnielClod;
       return hooks ? `${hooks.progressMsg ?? "unknown"} (${hooks.progress ?? 0})` : "no hooks";
     });
     throw new Error(`${sceneName}: timed out waiting for ready; last progress: ${progress}`);
@@ -397,13 +442,7 @@ async function failOnPageError(page: Page, sceneName: string, pageErrors: string
 async function readStats(page: Page): Promise<JsonRecord> {
   return await page.evaluate(() => {
     const w = window as typeof window & {
-      __drusnielClod?: {
-        ready?: boolean;
-        error?: string | null;
-        diag?: unknown;
-        startupTimings?: Record<string, number> | null;
-        stats?: Record<string, unknown> | null;
-      };
+      __drusnielClod?: { ready?: boolean; error?: string | null; diag?: unknown; startupTimings?: Record<string, number> | null; stats?: Record<string, unknown> | null };
       __drusnielStartupTimings?: Record<string, number>;
       __drusnielAcceptanceWorldCacheKey?: unknown;
     };
@@ -422,18 +461,13 @@ async function readStats(page: Page): Promise<JsonRecord> {
 async function readAcceptanceCacheKey(page: Page): Promise<JsonRecord | null> {
   return await page.evaluate(() => {
     const w = window as typeof window & { __drusnielAcceptanceWorldCacheKey?: unknown };
-    return w.__drusnielAcceptanceWorldCacheKey
-      ? JSON.parse(JSON.stringify(w.__drusnielAcceptanceWorldCacheKey)) as Record<string, unknown>
-      : null;
+    return w.__drusnielAcceptanceWorldCacheKey ? JSON.parse(JSON.stringify(w.__drusnielAcceptanceWorldCacheKey)) as Record<string, unknown> : null;
   });
 }
 
 async function readStartupTimings(page: Page): Promise<Record<string, number>> {
   return await page.evaluate(() => {
-    const w = window as typeof window & {
-      __drusnielClod?: { startupTimings?: Record<string, number> | null };
-      __drusnielStartupTimings?: Record<string, number>;
-    };
+    const w = window as typeof window & { __drusnielClod?: { startupTimings?: Record<string, number> | null }; __drusnielStartupTimings?: Record<string, number> };
     const hooks = w.__drusnielClod;
     return JSON.parse(JSON.stringify(hooks?.startupTimings ?? w.__drusnielStartupTimings ?? {})) as Record<string, number>;
   });
@@ -442,9 +476,7 @@ async function readStartupTimings(page: Page): Promise<Record<string, number>> {
 async function readPhase0Report(page: Page): Promise<JsonRecord> {
   return await page.evaluate(() => {
     const report = (window as typeof window & { __drusnielPhase0Report?: unknown }).__drusnielPhase0Report;
-    return report
-      ? { available: true, report: JSON.parse(JSON.stringify(report)) }
-      : { available: false };
+    return report ? { available: true, report: JSON.parse(JSON.stringify(report)) } : { available: false };
   });
 }
 
@@ -452,11 +484,6 @@ async function settle(page: Page, frames: number): Promise<void> {
   await settlePage(page, frames, SETTLE_TIMEOUT_MS);
 }
 
-// Sliced background work (shadow proxy, far-summary tiles, live-bubble page
-// meshing) takes far longer than WARMUP_FRAMES to converge. Wait until those
-// counters report quiet for a few consecutive polls so the sampled p95 window
-// measures steady state instead of the convergence ramp. Measurement fix
-// only — thresholds are unchanged; on timeout we proceed and let gates fail.
 async function waitForConvergence(page: Page, sceneName: string): Promise<void> {
   const startedAt = Date.now();
   const deadline = startedAt + CONVERGENCE_TIMEOUT_MS;
@@ -464,9 +491,7 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
   let lastSnapshot = "";
   while (Date.now() < deadline) {
     const c = await page.evaluate(() => {
-      const counters = (window as typeof window & {
-        __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
-      }).__drusnielClod?.stats?.counters ?? {};
+      const counters = (window as typeof window & { __drusnielClod?: { stats?: { counters?: Record<string, number> } | null } }).__drusnielClod?.stats?.counters ?? {};
       return {
         tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
         tilesBuilding: counters["far_summary_tiles_building"] ?? -1,
@@ -530,41 +555,24 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
 
 async function beginMovementRouteProbe(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const hook = (window as typeof window & {
-      __drusnielClod?: { beginMovementRouteProbe?: (() => void) | null };
-    }).__drusnielClod?.beginMovementRouteProbe;
-    if (typeof hook !== "function") {
-      throw new Error("movement route requires __drusnielClod.beginMovementRouteProbe");
-    }
+    const hook = (window as typeof window & { __drusnielClod?: { beginMovementRouteProbe?: (() => void) | null } }).__drusnielClod?.beginMovementRouteProbe;
+    if (typeof hook !== "function") throw new Error("movement route requires __drusnielClod.beginMovementRouteProbe");
     hook();
   });
 }
 
 async function readMovementSnapshot(page: Page, label: string): Promise<MovementSnapshot> {
   return await page.evaluate((sampleLabel) => {
-    const hooks = (window as typeof window & {
-      __drusnielClod?: {
-        getPose?: (() => { p: [number, number, number] }) | null;
-        stats?: { counters?: Record<string, number> } | null;
-      };
-    }).__drusnielClod;
+    const hooks = (window as typeof window & { __drusnielClod?: { getPose?: (() => { p: [number, number, number] }) | null; stats?: { counters?: Record<string, number> } | null } }).__drusnielClod;
     const pose = hooks?.getPose?.();
     if (!pose) throw new Error("movement route requires __drusnielClod.getPose");
-    return JSON.parse(JSON.stringify({
-      label: sampleLabel,
-      pose: pose.p,
-      counters: hooks?.stats?.counters ?? {},
-    })) as MovementSnapshot;
+    return JSON.parse(JSON.stringify({ label: sampleLabel, pose: pose.p, counters: hooks?.stats?.counters ?? {} })) as MovementSnapshot;
   }, label);
 }
 
 async function readAutomationPose(page: Page): Promise<CamPose> {
   return await page.evaluate(() => {
-    const pose = (window as typeof window & {
-      __drusnielClod?: {
-        getPose?: (() => { p: [number, number, number]; yaw: number; pitch: number; fov?: number }) | null;
-      };
-    }).__drusnielClod?.getPose?.();
+    const pose = (window as typeof window & { __drusnielClod?: { getPose?: (() => { p: [number, number, number]; yaw: number; pitch: number; fov?: number }) | null } }).__drusnielClod?.getPose?.();
     if (!pose) throw new Error("movement route requires __drusnielClod.getPose");
     return JSON.parse(JSON.stringify(pose)) as CamPose;
   });
@@ -572,11 +580,7 @@ async function readAutomationPose(page: Page): Promise<CamPose> {
 
 async function setAutomationPose(page: Page, pose: CamPose): Promise<void> {
   await page.evaluate((nextPose) => {
-    const setPose = (window as typeof window & {
-      __drusnielClod?: {
-        setPose?: ((pose: CamPose) => void) | null;
-      };
-    }).__drusnielClod?.setPose;
+    const setPose = (window as typeof window & { __drusnielClod?: { setPose?: ((pose: CamPose) => void) | null } }).__drusnielClod?.setPose;
     if (typeof setPose !== "function") throw new Error("movement route requires __drusnielClod.setPose");
     setPose(nextPose);
   }, pose);
@@ -584,24 +588,14 @@ async function setAutomationPose(page: Page, pose: CamPose): Promise<void> {
 
 async function runMovementSegment(page: Page, segment: MovementSegment, samples: MovementSnapshot[]): Promise<void> {
   const start = await readAutomationPose(page);
-  const target: CamPose = {
-    ...start,
-    p: [start.p[0] + segment.dx, start.p[1], start.p[2] + segment.dz],
-  };
+  const target: CamPose = { ...start, p: [start.p[0] + segment.dx, start.p[1], start.p[2] + segment.dz] };
   let elapsedFrames = 0;
   let sampleIndex = 0;
   while (elapsedFrames < segment.frames) {
     const frames = Math.min(MOVEMENT_SAMPLE_FRAMES, segment.frames - elapsedFrames);
     elapsedFrames += frames;
     const t = elapsedFrames / segment.frames;
-    await setAutomationPose(page, {
-      ...start,
-      p: [
-        start.p[0] + (target.p[0] - start.p[0]) * t,
-        start.p[1],
-        start.p[2] + (target.p[2] - start.p[2]) * t,
-      ],
-    });
+    await setAutomationPose(page, { ...start, p: [start.p[0] + (target.p[0] - start.p[0]) * t, start.p[1], start.p[2] + (target.p[2] - start.p[2]) * t] });
     await settle(page, frames);
     samples.push(await readMovementSnapshot(page, `${segment.label}:${sampleIndex}`));
     sampleIndex++;
@@ -612,9 +606,7 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
   const samples: MovementSnapshot[] = [];
   await beginMovementRouteProbe(page);
   samples.push(await readMovementSnapshot(page, "start"));
-  for (const segment of WALK_ROUTE) {
-    await runMovementSegment(page, segment, samples);
-  }
+  for (const segment of WALK_ROUTE) await runMovementSegment(page, segment, samples);
   const start = samples[0]!.pose;
   const end = samples.at(-1)!.pose;
   const worldCells = maxCounter(samples, "world_cells");
@@ -642,31 +634,95 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
 function evaluateMovementRoute(sceneName: string, movement: MovementReport | null): string[] {
   if (!movement) return [];
   const failures: string[] = [];
-  if (movement.horizontalDistanceM < MIN_WALK_ROUTE_DISTANCE_M) {
-    failures.push(`${sceneName}: movement route distance ${movement.horizontalDistanceM.toFixed(2)}m < ${MIN_WALK_ROUTE_DISTANCE_M}m`);
-  }
+  if (movement.horizontalDistanceM < MIN_WALK_ROUTE_DISTANCE_M) failures.push(`${sceneName}: movement route distance ${movement.horizontalDistanceM.toFixed(2)}m < ${MIN_WALK_ROUTE_DISTANCE_M}m`);
   if (!movement.startedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not start outside startup world`);
   if (!movement.endedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not end outside startup world`);
   if (movement.maxLiveBubbleReadyPages <= 0) failures.push(`${sceneName}: movement route never observed ready live-bubble pages`);
   if (movement.liveBubbleBuiltDelta <= 0) failures.push(`${sceneName}: movement route never built a live-bubble page during motion`);
   if (movement.maxStreamCachedPages <= 0) failures.push(`${sceneName}: movement route never observed cached streamed CLOD roots`);
   if (movement.streamApplyPagesDelta <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
-  if (movement.streamEvictionsDelta + movement.streamStaleDiscardsDelta <= 0) {
-    failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
-  }
+  if (movement.streamEvictionsDelta + movement.streamStaleDiscardsDelta <= 0) failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
   return failures;
 }
 
+function evaluateStoneGpuCounters(stats: JsonRecord): string[] {
+  const failures: string[] = [];
+  const counters = (stats["counters"] as Record<string, unknown> | undefined) ?? {};
+  const total = numericCounter(stats, "stoneGpuClustersTotal");
+  const accepted = numericCounter(stats, "stoneGpuClustersAccepted");
+  const rejected = numericCounter(stats, "stoneGpuClustersRejectedEarly");
+  const vegetationTotal = numericCounter(stats, "vegetationGpuClustersTotal");
+  const centerDistance = numericCounter(stats, "camera_to_vegetation_ring_center_m");
+  if (!(total > 0)) failures.push(`stoneGpuClustersTotal=${total} must be > 0; this validates the real WebGPU stone path and will fail in headless/SwiftShader`);
+  if (!Number.isFinite(accepted) || accepted < 0) failures.push(`stoneGpuClustersAccepted=${accepted} must be finite and >= 0`);
+  if (!Number.isFinite(rejected) || rejected < 0) failures.push(`stoneGpuClustersRejectedEarly=${rejected} must be finite and >= 0`);
+  if (Number.isFinite(total) && Number.isFinite(accepted) && Number.isFinite(rejected) && accepted + rejected > total) failures.push(`stone accepted+rejected ${accepted + rejected} exceeds total ${total}`);
+  if (Number.isFinite(total) && (!(vegetationTotal >= total))) failures.push(`vegetationGpuClustersTotal=${vegetationTotal} must include stone total ${total}`);
+  if (Number.isFinite(centerDistance) && !(centerDistance <= 8)) failures.push(`camera_to_vegetation_ring_center_m=${centerDistance} must be <= 8`);
+  for (const key of ["stoneReject.below_water", "stoneReject.too_steep", "stoneReject.outside_world", "stoneReject.too_far", "stoneReject.density_mask", "stoneReject.tile_budget", "stoneReject.class_budget", "stoneReject.terrain_hidden"]) {
+    const value = numericCounter(stats, key);
+    if (Number.isFinite(value) && value < 0) failures.push(`${key}=${value} must be >= 0`);
+  }
+  const forbidden = Object.keys(counters).filter((key) => key.startsWith("veg_gpu_"));
+  if (forbidden.length > 0) failures.push(`forbidden veg_gpu_* counters present: ${forbidden.join(", ")}`);
+  return failures;
+}
+
+function evaluatePhase6CanopyCounters(stats: JsonRecord): string[] {
+  const failures: string[] = [];
+  const enabled = numericCounter(stats, "canopy_gpu_impostor_enabled");
+  const instances = numericCounter(stats, "canopy_gpu_impostor_instances");
+  const shellTris = numericCounter(stats, "canopy_shell_tris");
+  const maxColor = numericCounter(stats, "canopy_gpu_impostor_max_color_channel");
+  const opacity = numericCounter(stats, "canopy_gpu_impostor_opacity");
+  const shaderDisplacement = numericCounter(stats, "far_clipmap_shader_displacement_enabled");
+  const pendingTiles = numericCounter(stats, "far_clipmap_pending_tiles");
+  if (enabled !== 1) failures.push(`canopy_gpu_impostor_enabled=${enabled} must equal 1`);
+  if (!(instances > 0)) failures.push(`canopy_gpu_impostor_instances=${instances} must be > 0`);
+  if (Number.isFinite(instances) && Number.isFinite(shellTris) && shellTris !== instances * 2) failures.push(`canopy_shell_tris=${shellTris} must equal canopy_gpu_impostor_instances*2 (${instances * 2})`);
+  if (!(maxColor <= 0.42)) failures.push(`canopy_gpu_impostor_max_color_channel=${maxColor} must be <= 0.42`);
+  if (!(opacity < 0.7)) failures.push(`canopy_gpu_impostor_opacity=${opacity} must be < 0.7`);
+  if (shaderDisplacement !== 1) failures.push(`far_clipmap_shader_displacement_enabled=${shaderDisplacement} must equal 1`);
+  if (pendingTiles !== 0) failures.push(`far_clipmap_pending_tiles=${pendingTiles} must equal 0`);
+  return failures;
+}
+
+function evaluateFarSummaryGpuAuthoritativeCounters(stats: JsonRecord): string[] {
+  const failures: string[] = [];
+  const enabled = numericCounter(stats, "far_summary_gpu_enabled");
+  const deviceReady = numericCounter(stats, "far_summary_gpu_device_ready");
+  const authoritative = numericCounter(stats, "far_summary_gpu_authoritative");
+  const lastCommittedTiles = numericCounter(stats, "far_summary_gpu_last_committed_tiles");
+  const totalCommittedTiles = numericCounter(stats, "far_summary_gpu_total_committed_tiles");
+  const suppressed = numericCounter(stats, "far_summary_cpu_builds_suppressed");
+  const fallbackTiles = numericCounter(stats, "far_summary_gpu_fallback_tiles");
+  const runtimeError = numericCounter(stats, "far_summary_gpu_runtime_error");
+  const dispatchedTiles = numericCounter(stats, "far_summary_gpu_tiles_dispatched");
+  if (enabled !== 1) failures.push(`far_summary_gpu_enabled=${enabled} must equal 1`);
+  if (deviceReady !== 1) failures.push(`far_summary_gpu_device_ready=${deviceReady} must equal 1`);
+  if (authoritative !== 1) failures.push(`far_summary_gpu_authoritative=${authoritative} must equal 1`);
+  if (!(lastCommittedTiles > 0)) failures.push(`far_summary_gpu_last_committed_tiles=${lastCommittedTiles} must be > 0`);
+  if (!(totalCommittedTiles >= lastCommittedTiles && totalCommittedTiles > 0)) failures.push(`far_summary_gpu_total_committed_tiles=${totalCommittedTiles} must be >= last committed ${lastCommittedTiles} and > 0`);
+  if (suppressed !== 1) failures.push(`far_summary_cpu_builds_suppressed=${suppressed} must equal 1`);
+  if (fallbackTiles !== 0) failures.push(`far_summary_gpu_fallback_tiles=${fallbackTiles} must equal 0`);
+  if (runtimeError !== 0) failures.push(`far_summary_gpu_runtime_error=${runtimeError} must equal 0`);
+  if (!(dispatchedTiles > 0)) failures.push(`far_summary_gpu_tiles_dispatched=${dispatchedTiles} must be > 0`);
+  return failures;
+}
+
+function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {
+  if (scene.validation === "stone-gpu") return evaluateStoneGpuCounters(stats);
+  if (scene.validation === "phase6-canopy") return evaluatePhase6CanopyCounters(stats);
+  if (scene.validation === "far-summary-gpu-authoritative") return evaluateFarSummaryGpuAuthoritativeCounters(stats);
+  return [];
+}
+
+function shouldSkipGenericConvergence(scene: SceneSpec): boolean {
+  return scene.validation === "stone-gpu" || scene.validation === "far-summary-gpu-authoritative";
+}
+
 function failedImageSanity(message = "screenshot was not captured"): ImageSanityResult {
-  return {
-    passed: false,
-    failures: [message],
-    width: 0,
-    height: 0,
-    meanLuma: 0,
-    rgbStddev: 0,
-    meanAlpha: 0,
-  };
+  return { passed: false, failures: [message], width: 0, height: 0, meanLuma: 0, rgbStddev: 0, meanAlpha: 0 };
 }
 
 async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: string, options: RunSceneOptions): Promise<SceneResult> {
@@ -676,7 +732,6 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
   let rejectPageError: ((error: Error) => void) | null = null;
   const pageErrorGate = new Promise<never>((_, reject) => { rejectPageError = reject; });
   pageErrorGate.catch(() => undefined);
-
   const loggedConsoleMessages = new Set<string>();
   let printedConsoleMessages = 0;
   let printedPageErrors = 0;
@@ -705,7 +760,6 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
       }
     }
   };
-
   const onPageError = (error: Error) => {
     if (pageErrors.length < PAGE_ERROR_STORE_LIMIT) pageErrors.push(error.message);
     rejectPageError?.(new Error(`${scene.name}: page error: ${error.message}`));
@@ -720,31 +774,13 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
 
   page.on("console", onConsole);
   page.on("pageerror", onPageError);
-
-  const extra: Record<string, string> = {
-    acceptance: "1",
-    acceptanceReuse: PROFILE,
-    acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]),
-    ownershipOracle: gate.ownershipOracle,
-    world: "16",
-    clodPerf: "1",
-    webgpuSelection: "1",
-    ...profileAcceptanceParams(PROFILE),
-    ...(scene.extra ?? {}),
-  };
+  const extra: Record<string, string> = { acceptance: "1", acceptanceReuse: PROFILE, acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]), ownershipOracle: gate.ownershipOracle, world: "16", clodPerf: "1", webgpuSelection: "1", ...profileAcceptanceParams(PROFILE), ...(scene.extra ?? {}) };
   if (PROFILE === "fast") {
     extra["startupWorld"] = FAST_STARTUP_WORLD;
     extra["infiniteStartupWorld"] = FAST_STARTUP_WORLD;
   }
   if (scene.proceduralDebug) extra["proceduralDebug"] = scene.proceduralDebug;
-  const url = clodUrl({
-    scene: "infinite-islands",
-    seed: 1,
-    hud: true,
-    freeze: scene.freeze,
-    cam: scene.cam,
-    extra,
-  });
+  const url = clodUrl({ scene: "infinite-islands", seed: 1, hud: true, freeze: scene.freeze, cam: scene.cam, extra });
 
   console.log(`[infinite-accept] ${gate.name}/${scene.name}: ${url}`);
   try {
@@ -752,25 +788,16 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     if (!options.reusePage || options.firstSceneOnPage) {
       const loadStartedAt = Date.now();
       await page.goto(url, { waitUntil: "domcontentloaded" });
-      console.log(
-        `[infinite-accept] ${sceneRunName}: loaded after ${elapsedSeconds(loadStartedAt)} ` +
-        `(total ${elapsedSeconds(sceneStartedAt)})`,
-      );
+      console.log(`[infinite-accept] ${sceneRunName}: loaded after ${elapsedSeconds(loadStartedAt)} (total ${elapsedSeconds(sceneStartedAt)})`);
     } else {
       const reuseStartedAt = Date.now();
       await configureReusedScenePage(page, url, scene);
-      console.log(
-        `[infinite-accept] ${sceneRunName}: reused page after ${elapsedSeconds(reuseStartedAt)} ` +
-        `(total ${elapsedSeconds(sceneStartedAt)})`,
-      );
+      console.log(`[infinite-accept] ${sceneRunName}: reused page after ${elapsedSeconds(reuseStartedAt)} (total ${elapsedSeconds(sceneStartedAt)})`);
     }
     const readyStartedAt = Date.now();
     await Promise.race([waitReady(page, sceneRunName, failedPath), pageErrorGate]);
     if (options.reusePage && options.firstSceneOnPage) await configureReusedScenePage(page, url, scene);
-    console.log(
-      `[infinite-accept] ${sceneRunName}: ready after ${elapsedSeconds(readyStartedAt)} ` +
-      `(total ${elapsedSeconds(sceneStartedAt)})`,
-    );
+    console.log(`[infinite-accept] ${sceneRunName}: ready after ${elapsedSeconds(readyStartedAt)} (total ${elapsedSeconds(sceneStartedAt)})`);
     const startupTimings = await readStartupTimings(page).catch((): Record<string, number> => ({}));
     if (Object.keys(startupTimings).length > 0) {
       console.log(
@@ -787,38 +814,29 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     }
     const reusedScene = options.reusePage && !options.firstSceneOnPage;
     const cacheEvidence = cacheEvidenceFromTimings(startupTimings, reusedScene);
-    console.log(
-      `[infinite-accept] ${sceneRunName}: scene boot: ` +
-      `cache ${cacheEvidence.clodCacheHit === 1 ? "hit" : "miss"} ` +
-      `buildWorld=${cacheEvidence.startupBuildWorldMs.toFixed(1)}ms ` +
-      `terrainSummary=${cacheEvidence.startupTerrainSummaryMs.toFixed(1)}ms ` +
-      `ready=${elapsedSeconds(readyStartedAt)}`,
-    );
+    console.log(`[infinite-accept] ${sceneRunName}: scene boot: cache ${cacheEvidence.clodCacheHit === 1 ? "hit" : "miss"} buildWorld=${cacheEvidence.startupBuildWorldMs.toFixed(1)}ms terrainSummary=${cacheEvidence.startupTerrainSummaryMs.toFixed(1)}ms ready=${elapsedSeconds(readyStartedAt)}`);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     await Promise.race([settle(page, WARMUP_FRAMES), pageErrorGate]);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
-    await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);
+    if (shouldSkipGenericConvergence(scene)) {
+      console.log(`[infinite-accept] ${sceneRunName}: skipping generic convergence wait for ${scene.validation} validation`);
+    } else {
+      await Promise.race([waitForConvergence(page, sceneRunName), pageErrorGate]);
+    }
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     if (scene.movementRoute) {
       movement = await Promise.race([runMovementRoute(page), pageErrorGate]);
       if (movementPath) writeJson(movementPath, movement);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
-      // The route ends mid-refill (bubble pages rebuilding at the new
-      // position); converge again so the sampled window is steady state.
       await Promise.race([waitForConvergence(page, `${sceneRunName}:post-route`), pageErrorGate]);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
     }
     const sampleStartedAt = Date.now();
     await Promise.race([settle(page, SAMPLE_FRAMES), pageErrorGate]);
-    console.log(
-      `[infinite-accept] ${sceneRunName}: sampled after ${elapsedSeconds(sampleStartedAt)} ` +
-      `(total ${elapsedSeconds(sceneStartedAt)})`,
-    );
+    console.log(`[infinite-accept] ${sceneRunName}: sampled after ${elapsedSeconds(sampleStartedAt)} (total ${elapsedSeconds(sceneStartedAt)})`);
     await failOnPageError(page, scene.name, pageErrors, failedPath);
-
     mkdirSync(outDir, { recursive: true });
     await page.screenshot({ path: screenshotPath });
-
     const stats = await readStats(page);
     const finalStartupTimings = await readStartupTimings(page).catch((): Record<string, number> => startupTimings);
     const finalCacheEvidence = cacheEvidenceFromTimings(finalStartupTimings, reusedScene);
@@ -827,21 +845,14 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     writeJson(statsPath, stats);
     writeJson(phase0Path, phase0);
     if (summaryPath) writeJson(summaryPath, qaSummary("infinite-islands", stats));
-
     await writeBootstrapDiff(screenshotPath, comparisonPath);
     const imageSanity = await inspectPngSanity(screenshotPath, { width: WIDTH, height: HEIGHT });
-    const thresholds: ThresholdEvaluation = evaluateThresholds(
-      extractAcceptanceCounters(stats),
-      gate.requiredCounters,
-      gate.rules,
-    );
+    const thresholds: ThresholdEvaluation = scene.validation
+      ? evaluateThresholds(extractAcceptanceCounters(stats), [], [])
+      : evaluateThresholds(extractAcceptanceCounters(stats), gate.requiredCounters, gate.rules);
     const movementFailures = evaluateMovementRoute(scene.name, movement);
-    const failures = [
-      ...pageErrors.map((error) => `page error: ${error}`),
-      ...thresholds.failures,
-      ...movementFailures,
-      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),
-    ];
+    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);
+    const failures = [...pageErrors.map((error) => `page error: ${error}`), ...thresholds.failures, ...movementFailures, ...sceneSpecificFailures, ...imageSanity.failures.map((failure) => `image sanity: ${failure}`)];
     return {
       name: `${gate.name}/${scene.name}`,
       url,
@@ -874,19 +885,13 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     if (movementPath && movement) writeJson(movementPath, movement);
     let imageSanity = failedImageSanity();
     if (existsSync(failedPath)) {
-      imageSanity = await inspectPngSanity(failedPath, { width: WIDTH, height: HEIGHT }).catch((sanityError: unknown) => (
-        failedImageSanity(`screenshot sanity failed: ${sanityError instanceof Error ? sanityError.message : String(sanityError)}`)
-      ));
+      imageSanity = await inspectPngSanity(failedPath, { width: WIDTH, height: HEIGHT }).catch((sanityError: unknown) => failedImageSanity(`screenshot sanity failed: ${sanityError instanceof Error ? sanityError.message : String(sanityError)}`));
       await writeBootstrapDiff(failedPath, comparisonPath).catch(() => undefined);
     }
     const thresholds = evaluateThresholds({}, gate.requiredCounters, gate.rules);
     const startupTimings: Record<string, number> = {};
     const cache = cacheEvidenceFromTimings(startupTimings, options.reusePage && !options.firstSceneOnPage);
-    const failures = [
-      message,
-      ...evaluateMovementRoute(scene.name, movement),
-      ...imageSanity.failures.map((failure) => `image sanity: ${failure}`),
-    ];
+    const failures = [message, ...evaluateMovementRoute(scene.name, movement), ...imageSanity.failures.map((failure) => `image sanity: ${failure}`)];
     return {
       name: `${gate.name}/${scene.name}`,
       url,
@@ -920,11 +925,9 @@ async function main(): Promise<void> {
   const timestamp = timestampForFolder();
   const outDir = resolve(RUN_ROOT, timestamp);
   mkdirSync(outDir, { recursive: true });
-
   console.log(`[infinite-accept] run ${rel(outDir)}`);
   console.log(`[infinite-accept] base ${process.env["CLOD_POC_BASE_URL"]}`);
-  console.log(`[infinite-accept] profile ${PROFILE} scenes=${ACTIVE_SCENES.length} sampleFrames=${SAMPLE_FRAMES}`);
-
+  console.log(`[infinite-accept] profile ${PROFILE} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES}`);
   const { browser, recipe } = await launchWebGPU();
   const sceneResults: SceneResult[] = [];
   try {
@@ -932,12 +935,9 @@ async function main(): Promise<void> {
       const page = await createAcceptancePage(browser);
       let firstSceneOnPage = true;
       try {
-        for (const gate of GATE_MODES) {
+        for (const gate of ACTIVE_GATES) {
           for (const scene of ACTIVE_SCENES) {
-            sceneResults.push(await runScene(page, scene, gate, outDir, {
-              reusePage: true,
-              firstSceneOnPage,
-            }));
+            sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: true, firstSceneOnPage }));
             firstSceneOnPage = false;
           }
         }
@@ -945,14 +945,11 @@ async function main(): Promise<void> {
         await page.close().catch(() => undefined);
       }
     } else {
-      for (const gate of GATE_MODES) {
+      for (const gate of ACTIVE_GATES) {
         for (const scene of ACTIVE_SCENES) {
           const page = await createAcceptancePage(browser);
           try {
-            sceneResults.push(await runScene(page, scene, gate, outDir, {
-              reusePage: false,
-              firstSceneOnPage: true,
-            }));
+            sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: false, firstSceneOnPage: true }));
           } finally {
             await page.close().catch(() => undefined);
           }
@@ -962,7 +959,6 @@ async function main(): Promise<void> {
   } finally {
     await browser.close().catch(() => undefined);
   }
-
   const failures = sceneResults.flatMap((scene) => scene.failures.map((failure) => `${scene.name}: ${failure}`));
   const passed = aggregatePassed(sceneResults, failures);
   const reportJsonPath = resolve(outDir, "report.json");
@@ -975,10 +971,7 @@ async function main(): Promise<void> {
     browser_launch_recipe: recipe,
     profile: PROFILE,
     sample_frames: SAMPLE_FRAMES,
-    world_pages: {
-      configured: numTiming(firstStartupTimings, "startup.configured_world_pages"),
-      startup: numTiming(firstStartupTimings, "startup.world_pages"),
-    },
+    world_pages: { configured: numTiming(firstStartupTimings, "startup.configured_world_pages"), startup: numTiming(firstStartupTimings, "startup.world_pages") },
     thresholds: {
       required_counters: REQUIRED_COUNTERS,
       rules: THRESHOLD_RULES.map((rule) => ({ key: rule.key, label: rule.label })),
@@ -1005,28 +998,12 @@ async function main(): Promise<void> {
       startup_world_pages: scene.startupWorldPages,
       cache: scene.cache,
       acceptance_cache_key: scene.acceptanceCacheKey,
-      artifacts: {
-        screenshot: scene.screenshot,
-        stats_json: scene.statsPath,
-        phase0_report_json: scene.phase0Path,
-        qa_summary_json: scene.summaryPath,
-        visual_comparison: scene.comparisonPath,
-      },
+      artifacts: { screenshot: scene.screenshot, stats_json: scene.statsPath, phase0_report_json: scene.phase0Path, qa_summary_json: scene.summaryPath, visual_comparison: scene.comparisonPath },
     })),
-    artifacts: {
-      run_dir: rel(outDir),
-      report_json: rel(reportJsonPath),
-      report_md: rel(reportMdPath),
-    },
+    artifacts: { run_dir: rel(outDir), report_json: rel(reportJsonPath), report_md: rel(reportMdPath) },
   };
   writeJson(reportJsonPath, report);
-  writeFileSync(reportMdPath, renderMarkdownReport({
-    passed,
-    scenes: sceneResults,
-    failures,
-    reportJsonPath: rel(reportJsonPath),
-  }));
-
+  writeFileSync(reportMdPath, renderMarkdownReport({ passed, scenes: sceneResults, failures, reportJsonPath: rel(reportJsonPath) }));
   console.log(`[infinite-accept] report ${rel(reportJsonPath)}`);
   if (!passed) {
     console.error(`[infinite-accept] FAILED with ${failures.length} failure(s)`);
