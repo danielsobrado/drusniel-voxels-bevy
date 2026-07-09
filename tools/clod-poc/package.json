@@ -54,6 +54,7 @@
     "trees:capture-parity-evidence": "tsx tools/verify-tree-parity-evidence.ts --commands",
     "trees:verify-parity-evidence": "tsx tools/verify-tree-parity-evidence.ts",
     "trees:report-parity-evidence": "tsx tools/verify-tree-parity-evidence.ts --report docs/performance/clod-poc-tree-parity-evidence-latest.md",
+    "trees:verify-impostor-visual": "tsx tools/verify-tree-impostor-visual.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
