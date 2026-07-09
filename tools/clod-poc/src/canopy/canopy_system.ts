@@ -182,6 +182,8 @@ export function createCanopyShellSystem(
     metrics.gpuImpostorInstances = 0;
     metrics.gpuImpostorMaxInstances = 0;
     metrics.gpuImpostorCoverageThreshold = 0;
+    metrics.gpuImpostorMaxColorChannel = 0;
+    metrics.gpuImpostorOpacity = 0;
     debugState.syntheticFallbackActive = false;
   };
 
@@ -203,6 +205,8 @@ export function createCanopyShellSystem(
     metrics.gpuImpostorBuilds++;
     metrics.gpuImpostorMaxInstances = shell.maxInstances;
     metrics.gpuImpostorCoverageThreshold = shell.coverageThreshold;
+    metrics.gpuImpostorMaxColorChannel = Number(shell.mesh.userData.canopyGpuImpostorMaxColorChannel) || 0;
+    metrics.gpuImpostorOpacity = Number(shell.mesh.userData.canopyGpuImpostorOpacity) || 0;
     positionShellAtTextureCenter();
   };
 
