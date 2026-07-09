@@ -22,6 +22,13 @@ function rgbaTexture(data: number[], res: number): THREE.DataTexture {
   return texture;
 }
 
+function dataViewTexture(res: number): THREE.DataTexture {
+  const view = new DataView(new ArrayBuffer(res * res * 4));
+  const texture = new THREE.DataTexture(view as unknown as Float32Array, res, res, THREE.RedFormat, THREE.FloatType);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function textureSet(overrides: Partial<CanopyTextureSet> = {}): CanopyTextureSet {
   const res = 4;
   return {
@@ -84,6 +91,8 @@ describe("canopy GPU impostors", () => {
     expect(shell.mesh.position.z).toBe(-100);
     expect(shell.mesh.userData.canopyTextureSetRevision).toBe(7);
     expect(shell.mesh.userData.canopyGpuImpostorInstances).toBe(shell.instanceCount);
+    expect(shell.mesh.frustumCulled).toBe(true);
+    expect(shell.mesh.boundingSphere).not.toBeNull();
     shell.dispose();
   });
 
@@ -121,6 +130,12 @@ describe("canopy GPU impostors", () => {
     expect(shell.mesh.userData.canopyGpuImpostorMaxColorChannel).toBeLessThanOrEqual(0.42);
     expect(shell.mesh.userData.canopyGpuImpostorOpacity).toBeLessThan(0.7);
     shell.dispose();
+  });
+
+  it("rejects DataView-backed texture data instead of casting it as a numeric array", () => {
+    const samples = selectCanopyGpuImpostorSamples(textureSet({ coverageTexture: dataViewTexture(4) }), 5, 0.2, 1);
+
+    expect(samples).toHaveLength(0);
   });
 
   it("sanitizes non-finite texture centers", () => {
