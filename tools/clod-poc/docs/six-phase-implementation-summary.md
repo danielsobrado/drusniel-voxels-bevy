@@ -8,7 +8,7 @@ Last updated: 2026-07-09
 | --- | --- | --- |
 | 1 Bounds guard | Done | Validates existing streamed page node mesh data against the existing page footprint/bounds. The missing query-param coercion bug is fixed by treating absent/blank values as fallback defaults. |
 | 2 Center debug | Done | Center ownership counters are scoped through the existing world-center debug path for CLOD, far shell, vegetation ring/grass/trees, canopy, and ocean. |
-| 3 GPU far-summary | Partial | GPU scheduling, dirty request capture, dispatch, readback decode, strict parity, optional cache commit, and counters exist. CPU remains authoritative by default. `farSummaryGpuAuthoritative=1` does not exist yet. |
+| 3 GPU far-summary | Opt-in authoritative mode added | GPU scheduling, dirty request capture, dispatch, readback decode, strict parity, optional cache commit, counters, and guarded `farSummaryGpuAuthoritative=1` mode exist. CPU remains authoritative by default unless the authoritative flag is enabled. |
 | 4 GPU vegetation reject + stones | Done | Stone reject accounting is unified into the existing GPU vegetation early-reject counter family. The real WebGPU gate is expected to fail under headless/SwiftShader if `stoneGpuClustersTotal=0`. |
 | 5 Far clipmap grid | Done for shader-displacement path | Far clipmap shader displacement uses source texture data and refreshes on snap/source revision/interval. CPU-baked fallback remains a fallback/debug path, not the acceptance path. |
 | 6 GPU canopy | Done / accepted | Far canopy is now GPU impostor based, using the existing canopy path. The visual guard prevents bright square-card regressions. |
@@ -37,15 +37,16 @@ node tools/run-infinite-islands-acceptance.mjs --reuse --gate coverage --scene c
 
 ## Current Phase 3 truth
 
-`farSummaryGpuAuthoritative=1` is not implemented in `main`.
+`farSummaryGpuAuthoritative=1` is now implemented as an opt-in mode in `main`.
 
-Current supported GPU far-summary flags:
+Supported GPU far-summary flags:
 
 ```text
 farSummaryGpu=1
 farSummaryGpuDebugReadback=1
 farSummaryGpuStrictParity=1
 farSummaryGpuCommit=1
+farSummaryGpuAuthoritative=1
 ```
 
 Meaning:
@@ -54,37 +55,34 @@ Meaning:
 - `farSummaryGpuDebugReadback=1` enables readback inspection.
 - `farSummaryGpuStrictParity=1` enables strict CPU/GPU parity checking.
 - `farSummaryGpuCommit=1` lets successful GPU readbacks commit into `FarSummaryCache`.
+- `farSummaryGpuAuthoritative=1` implies GPU enabled, debug readback, and cache commit, then suppresses CPU `buildSomeTiles` so GPU commits are the primary source for far-summary tiles.
 
-This is still not the same as GPU authority. CPU tile building still remains active by default unless a future authoritative mode suppresses CPU builds and makes GPU commit/fallback ownership explicit.
+CPU tile building remains active by default. The authoritative mode must be enabled explicitly and should be validated on a real WebGPU browser, not only headless/SwiftShader.
 
-## Future work to finish Phase 3 completely
-
-Add a guarded opt-in mode, probably:
+Expected authoritative-mode counters:
 
 ```text
-farSummaryGpuAuthoritative=1
+far_summary_gpu_authoritative = 1
+far_summary_gpu_committed_tiles > 0
+far_summary_cpu_builds_suppressed = 1
+far_summary_gpu_fallback_tiles = 0
+far_summary_gpu_runtime_error = 0
 ```
 
-Expected behavior for that future mode:
+## Remaining Phase 3 follow-up
 
-1. GPU readback commits are the primary source for far-summary tiles.
-2. CPU `buildSomeTiles` is skipped or used only as explicit fallback.
-3. GPU failure/fallback is counted clearly.
-4. Acceptance proves:
-   - `far_summary_gpu_authoritative = 1`
-   - `far_summary_gpu_committed_tiles > 0`
-   - `far_summary_cpu_builds_suppressed = 1`
-   - `far_summary_gpu_fallback_tiles = 0`
-   - no GPU runtime error
+Add a dedicated browser acceptance scene for authoritative far-summary once the real-GPU local run is stable enough to gate it without flakiness.
 
 ## Recommended validation commands
 
 ```powershell
 npm run typecheck
+npm test -- src/far-summary/gpu-config.test.ts
+npm test -- src/far-summary/gpu-runtime.test.ts
+npm test -- src/far-summary
 npm test -- src/canopy/canopy_gpu_impostors.test.ts
 npm test -- src/canopy
 npm test -- src/terrain/far_clipmap
-npm test -- src/far-summary
 npm run build
 node tools/run-infinite-islands-acceptance.mjs --reuse --gate coverage --scene coverage/phase6-canopy
 ```
