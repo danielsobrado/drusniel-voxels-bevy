@@ -113,12 +113,13 @@ function bakeSpeciesAtlas(
   const { settings, geometries } = options;
   const gridSize = settings.impostors.octahedralGridSize;
   const resolutionPx = settings.impostors.resolutionPx;
+  const paddingPx = settings.impostors.atlasPaddingPx;
   const atlasSizePx = gridSize * resolutionPx;
   const variantCount = treeImpostorVariantCount(geometries, species);
   const atlasWidthPx = atlasSizePx;
   const atlasHeightPx = atlasSizePx * variantCount;
-  const baseFrames = octFrames(gridSize, resolutionPx, settings.impostors.atlasPaddingPx);
-  const variantFrames = createTreeImpostorVariantFrames(baseFrames, atlasSizePx, atlasWidthPx, atlasHeightPx, variantCount);
+  const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
+  const variantFrames = createTreeImpostorVariantFrames(baseFrames, atlasSizePx, atlasWidthPx, atlasHeightPx, resolutionPx, paddingPx, variantCount);
   const albedoTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-albedo-${species}`, THREE.SRGBColorSpace);
   const normalDepthTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-normal-depth-${species}`, THREE.NoColorSpace);
 
@@ -208,6 +209,8 @@ function createTreeImpostorVariantFrames(
   atlasSizePx: number,
   atlasWidthPx: number,
   atlasHeightPx: number,
+  resolutionPx: number,
+  paddingPx: number,
   variantCount: number,
 ): Partial<Record<number, OctahedralFrame[]>> {
   const out: Partial<Record<number, OctahedralFrame[]>> = {};
@@ -216,12 +219,12 @@ function createTreeImpostorVariantFrames(
     out[variant] = baseFrames.map((frame) => ({
       ...frame,
       uvMin: [
-        (frame.x * frame.resolutionPx + frame.paddingPx) / atlasWidthPx,
-        (yOffsetPx + frame.y * frame.resolutionPx + frame.paddingPx) / atlasHeightPx,
+        (frame.x * resolutionPx + paddingPx) / atlasWidthPx,
+        (yOffsetPx + frame.y * resolutionPx + paddingPx) / atlasHeightPx,
       ],
       uvMax: [
-        ((frame.x + 1) * frame.resolutionPx - frame.paddingPx) / atlasWidthPx,
-        (yOffsetPx + (frame.y + 1) * frame.resolutionPx - frame.paddingPx) / atlasHeightPx,
+        ((frame.x + 1) * resolutionPx - paddingPx) / atlasWidthPx,
+        (yOffsetPx + (frame.y + 1) * resolutionPx - paddingPx) / atlasHeightPx,
       ],
     }));
   }
