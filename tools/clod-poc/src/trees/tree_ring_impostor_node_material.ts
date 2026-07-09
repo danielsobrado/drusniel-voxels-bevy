@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
+import * as THREE_WEBGPU from "three/webgpu";
 import {
   abs,
   cameraPosition,
@@ -38,6 +39,13 @@ import {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
+type TreeRingNodeMaterial = MeshBasicNodeMaterial & {
+  metalness?: number;
+  roughness?: number;
+  roughnessNode?: TslNode;
+  metalnessNode?: TslNode;
+  normalNode?: TslNode;
+};
 
 const LOD_COLORS: Record<TreeLod, THREE.Color> = {
   near: new THREE.Color(0x2e7d32),
@@ -49,6 +57,8 @@ const LOD_COLORS: Record<TreeLod, THREE.Color> = {
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
+const TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS = 0.82;
+const TREE_RING_IMPOSTOR_PHYSICAL_METALNESS = 0.0;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_RING_VARIANT_SALT = 1571;
 
@@ -74,9 +84,9 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
-  const materials: MeshBasicNodeMaterial[] = [];
+  const materials: TreeRingNodeMaterial[] = [];
 
-  const buildMaterial = (debugColor?: THREE.Color): MeshBasicNodeMaterial => {
+  const buildMaterial = (debugColor?: THREE.Color): TreeRingNodeMaterial => {
     const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
     const aCell: TslNode = cellStore.element(instanceIndex);
     const worldCell: TslNode = aCell.xy;
@@ -110,6 +120,9 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const albedo: TslNode = debugColor
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
       : impostor.albedo;
+    const normalNode: TslNode = atlas.normalDepth && !debugColor
+      ? treeRingImpostorSurfaceNormal(impostor.normal, billboardNormal, c, s)
+      : billboardNormal;
     const lit: TslNode = atlas.normalDepth && !debugColor
       ? relightTreeRingImpostor(albedo, impostor.normal, billboardNormal, c, s, uLight, uSun, uSky, uGround)
       : albedo;
@@ -118,9 +131,10 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const mask: TslNode = aboveWater ? alphaMask.and(aboveWater) : alphaMask;
 
-    const material = new MeshBasicNodeMaterial();
+    const material = createTreeRingPhysicalNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
+    material.normalNode = normalNode;
     (material as unknown as { opacityNode: TslNode }).opacityNode = impostor.coverage;
     (material as unknown as { maskNode: TslNode }).maskNode = mask;
     material.alphaTest = 0;
@@ -162,6 +176,17 @@ export function createTreeRingImpostorNodeMaterialHandle(
       for (const material of materials) material.dispose();
     },
   };
+}
+
+function createTreeRingPhysicalNodeMaterial(): TreeRingNodeMaterial {
+  const PhysicalCtor = ((THREE_WEBGPU as unknown as { MeshPhysicalNodeMaterial?: new () => MeshBasicNodeMaterial }).MeshPhysicalNodeMaterial
+    ?? MeshBasicNodeMaterial) as new () => MeshBasicNodeMaterial;
+  const material = new PhysicalCtor() as TreeRingNodeMaterial;
+  material.roughness = TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS;
+  material.metalness = TREE_RING_IMPOSTOR_PHYSICAL_METALNESS;
+  material.roughnessNode = float(TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS);
+  material.metalnessNode = float(TREE_RING_IMPOSTOR_PHYSICAL_METALNESS);
+  return material;
 }
 
 function treeRingCylindricalBillboardNormal(worldXZ: TslNode): TslNode {
@@ -295,6 +320,20 @@ function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
   return Math.max(0, Math.round(first.uvMin[0] * Math.max(1, atlas.gridSize * atlas.resolutionPx)));
 }
 
+function treeRingImpostorSurfaceNormal(
+  localNormal: TslNode,
+  billboardNormal: TslNode,
+  yawCos: TslNode,
+  yawSin: TslNode,
+): TslNode {
+  const rotatedNormal: TslNode = normalize(vec3(
+    localNormal.x.mul(yawCos).add(localNormal.z.mul(yawSin)),
+    localNormal.y,
+    localNormal.z.mul(yawCos).sub(localNormal.x.mul(yawSin)),
+  ));
+  return normalize((mix as any)(billboardNormal, rotatedNormal, float(TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
+}
+
 function relightTreeRingImpostor(
   albedo: TslNode,
   localNormal: TslNode,
@@ -306,12 +345,7 @@ function relightTreeRingImpostor(
   uSky: TslNode,
   uGround: TslNode,
 ): TslNode {
-  const rotatedNormal: TslNode = normalize(vec3(
-    localNormal.x.mul(yawCos).add(localNormal.z.mul(yawSin)),
-    localNormal.y,
-    localNormal.z.mul(yawCos).sub(localNormal.x.mul(yawSin)),
-  ));
-  const n0: TslNode = normalize((mix as any)(billboardNormal, rotatedNormal, float(TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
+  const n0: TslNode = treeRingImpostorSurfaceNormal(localNormal, billboardNormal, yawCos, yawSin);
   const n: TslNode = frontFacing.select(n0, n0.negate());
   const sun: TslNode = clamp(max(dot(n, uLight), 0.0), 0.0, TREE_RING_IMPOSTOR_SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
