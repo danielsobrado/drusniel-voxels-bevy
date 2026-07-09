@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 import {
+  cloneTreeSettings,
+  createTreeImpostorBlendNodeMaterial,
+  createTreeImpostorNodeMaterial,
+  octFrames,
   TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER,
   TREE_IMPOSTOR_BLEND_VERTEX_SHADER,
   TREE_IMPOSTOR_FRAGMENT_SHADER,
   TREE_IMPOSTOR_VERTEX_SHADER,
+  type TreeImpostorAtlas,
 } from "./index.js";
 
 describe("tree impostor billboard materials", () => {
@@ -36,4 +42,32 @@ describe("tree impostor billboard materials", () => {
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("mix(normalize(billboardNormal), capturedNormal");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorRelight(albedo, normal, vTreeImpostorBillboardNormal)");
   });
+
+  it("sets positionNode on WebGPU single-frame impostor materials", () => {
+    const material = createTreeImpostorNodeMaterial(cloneTreeSettings(), fakeAtlas());
+    expect((material as unknown as { positionNode?: unknown }).positionNode).toBeDefined();
+  });
+
+  it("sets positionNode on WebGPU four-tile blend impostor materials", () => {
+    const material = createTreeImpostorBlendNodeMaterial(cloneTreeSettings(), fakeAtlas());
+    expect((material as unknown as { positionNode?: unknown }).positionNode).toBeDefined();
+  });
 });
+
+function fakeAtlas(): TreeImpostorAtlas {
+  const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  return {
+    species: "oak",
+    texture,
+    albedo: texture,
+    normalDepth: texture,
+    gridSize: 8,
+    resolutionPx: 128,
+    atlasSizePx: 1024,
+    frames: octFrames(8, 128, 2),
+    ready: true,
+    dispose() {
+      texture.dispose();
+    },
+  };
+}
