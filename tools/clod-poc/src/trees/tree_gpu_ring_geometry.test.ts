@@ -27,7 +27,7 @@ describe("GPU ring tree geometry selector", () => {
     expect(result.geometry).toBe(geometries.oak.far);
   });
 
-  it("falls back to procedural impostor geometry when no atlas is ready", () => {
+  it("does not draw GPU ring impostors until the baked atlas is ready", () => {
     const geometries = geometryMap();
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
@@ -41,10 +41,11 @@ describe("GPU ring tree geometry selector", () => {
     });
 
     expect(result.bakedImpostor).toBe(false);
-    expect(result.geometry).toBe(geometries.pine.impostor);
+    expect(result.geometry).not.toBe(geometries.pine.impostor);
+    expect(result.geometry.getAttribute("position")).toBeUndefined();
   });
 
-  it("falls back to procedural impostor geometry when impostors are disabled", () => {
+  it("does not draw GPU ring impostors when impostors are disabled", () => {
     const geometries = geometryMap();
     const settings = cloneTreeSettings();
     settings.impostors.enabled = false;
@@ -58,7 +59,8 @@ describe("GPU ring tree geometry selector", () => {
     });
 
     expect(result.bakedImpostor).toBe(false);
-    expect(result.geometry).toBe(geometries.oak.far);
+    expect(result.geometry).not.toBe(geometries.oak.far);
+    expect(result.geometry.getAttribute("position")).toBeUndefined();
   });
 
   it("uses and caches baked billboard geometry when the species atlas is ready", () => {
@@ -66,13 +68,14 @@ describe("GPU ring tree geometry selector", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
     const bakedImpostorGeometries: Partial<Record<(typeof TREE_SPECIES)[number], THREE.BufferGeometry>> = {};
+    const atlas = fakeAtlas("dead", 4, 6);
 
     const first = selectTreeGpuRingGeometry({
       species: "dead",
       lod: "impostor",
       geometries,
       settings,
-      impostorAtlases: { dead: fakeAtlas("dead") },
+      impostorAtlases: { dead: atlas },
       bakedImpostorGeometries,
     });
     const second = selectTreeGpuRingGeometry({
@@ -80,7 +83,7 @@ describe("GPU ring tree geometry selector", () => {
       lod: "impostor",
       geometries,
       settings,
-      impostorAtlases: { dead: fakeAtlas("dead") },
+      impostorAtlases: { dead: atlas },
       bakedImpostorGeometries,
     });
 
@@ -90,12 +93,13 @@ describe("GPU ring tree geometry selector", () => {
     expect(bakedImpostorGeometries.dead).toBe(first.geometry);
     expect(first.geometry.getAttribute("uv")).toBeDefined();
     expect(first.geometry.getAttribute("treeVariant")).toBeDefined();
+    expectPositionExtents(first.geometry, { minX: -4, maxX: 4, minY: 2, maxY: 10, maxAbsZ: 0 });
   });
 
   it("keeps baked billboard UVs local so the ring material can select atlas frames", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
-    const geometry = createTreeGpuRingBakedImpostorGeometry("oak", settings);
+    const geometry = createTreeGpuRingBakedImpostorGeometry("oak", settings, fakeAtlas("oak"));
     const uv = geometry.getAttribute("uv");
 
     for (let index = 0; index < uv.count; index++) {
@@ -124,6 +128,21 @@ describe("GPU ring tree geometry selector", () => {
   });
 });
 
+function expectPositionExtents(
+  geometry: THREE.BufferGeometry,
+  expected: { minX: number; maxX: number; minY: number; maxY: number; maxAbsZ: number },
+): void {
+  const position = geometry.getAttribute("position");
+  const xs = Array.from({ length: position.count }, (_, index) => position.getX(index));
+  const ys = Array.from({ length: position.count }, (_, index) => position.getY(index));
+  const zs = Array.from({ length: position.count }, (_, index) => Math.abs(position.getZ(index)));
+  expect(Math.min(...xs)).toBeCloseTo(expected.minX);
+  expect(Math.max(...xs)).toBeCloseTo(expected.maxX);
+  expect(Math.min(...ys)).toBeCloseTo(expected.minY);
+  expect(Math.max(...ys)).toBeCloseTo(expected.maxY);
+  expect(Math.max(...zs)).toBeCloseTo(expected.maxAbsZ);
+}
+
 function geometryMap(): TreeGeometryMap {
   const out = {} as TreeGeometryMap;
   for (const species of TREE_SPECIES) {
@@ -142,7 +161,7 @@ function geometryMap(): TreeGeometryMap {
   return out;
 }
 
-function fakeAtlas(species: (typeof TREE_SPECIES)[number]): TreeImpostorAtlas {
+function fakeAtlas(species: (typeof TREE_SPECIES)[number], radius = 1, centerY = 0): TreeImpostorAtlas {
   const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
   texture.needsUpdate = true;
   return {
@@ -154,8 +173,8 @@ function fakeAtlas(species: (typeof TREE_SPECIES)[number]): TreeImpostorAtlas {
     resolutionPx: 128,
     atlasSizePx: 1024,
     frames: octFrames(8, 128, 2),
-    radius: 1,
-    centerY: 0,
+    radius,
+    centerY,
     ready: true,
     dispose() {
       texture.dispose();
