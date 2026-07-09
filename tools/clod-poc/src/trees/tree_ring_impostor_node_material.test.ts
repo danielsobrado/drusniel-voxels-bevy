@@ -78,7 +78,7 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("treeRingCylindricalBillboardNormal");
     expect(source).toContain("billboardNormal");
     expect(source).toContain("TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
-    expect(source).toContain("normalize(mix(billboardNormal, rotatedNormal");
+    expect(source).toContain("normalize((mix as any)(billboardNormal, rotatedNormal");
     expect(source).toContain("relightTreeRingImpostor(albedo, impostor.normal, billboardNormal");
   });
 

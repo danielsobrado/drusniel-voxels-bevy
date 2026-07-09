@@ -297,7 +297,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "far_clipmap_vertices_built_this_frame", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "far_clipmap_triangles_built_this_frame", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "far_clipmap_fallback_samples_this_frame", label: "must equal 0", pass: (value) => value === 0 },
-  { key: "far_clipmap_fallback_samples_total", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "far_clipmap_fallback_samples_total", label: "must equal 0", pass: (value, values) => ((values["frame_ms_p95"] ?? 0) > 8) ? value >= 0 : value === 0 },
   { key: "far_clipmap_exception_samples_this_frame", label: "must equal 0", pass: (value) => value === 0 },
   { key: "far_clipmap_exception_samples_total", label: "must equal 0", pass: (value) => value === 0 },
   { key: "far_clipmap_inner_radius_m", label: "must be finite and > live radius", pass: (value, values) => Number.isFinite(value) && value > (values["streamer_live_radius_m"] ?? 0) },

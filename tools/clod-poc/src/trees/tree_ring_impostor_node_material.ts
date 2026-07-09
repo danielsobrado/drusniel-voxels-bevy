@@ -295,7 +295,7 @@ function relightTreeRingImpostor(
     localNormal.y,
     localNormal.z.mul(yawCos).sub(localNormal.x.mul(yawSin)),
   ));
-  const n0: TslNode = normalize(mix(billboardNormal, rotatedNormal, float(TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
+  const n0: TslNode = normalize((mix as any)(billboardNormal, rotatedNormal, float(TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT)));
   const n: TslNode = frontFacing.select(n0, n0.negate());
   const sun: TslNode = clamp(max(dot(n, uLight), 0.0), 0.0, TREE_RING_IMPOSTOR_SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);

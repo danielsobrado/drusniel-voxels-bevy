@@ -287,6 +287,11 @@ export async function bootstrapClodPoc() {
     const heightProvider = useNaadfFarSummary && naadfIntegration
       ? naadfIntegration.getHeightProvider()
       : farSummaryIntegration?.getHeightProvider();
+    if (farSummaryIntegration) {
+      (window as any).__drusnielFarSummary = farSummaryIntegration;
+    } else if (naadfIntegration) {
+      (window as any).__drusnielFarSummary = naadfIntegration;
+    }
     const farShellCpuHeightsEnabled = searchParams.get("farShellCpuHeights") !== "0";
     const lighting = terrainView.currentLighting();
 

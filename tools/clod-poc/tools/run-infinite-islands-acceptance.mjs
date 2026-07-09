@@ -366,7 +366,7 @@ function injectFilteredRunner(source) {
 
 function prepareAcceptanceScript(args) {
   if (!hasFilterArgs(args)) return ACCEPTANCE_SOURCE;
-  const source = readFileSync(ACCEPTANCE_SOURCE, "utf8");
+  const source = readFileSync(ACCEPTANCE_SOURCE, "utf8").replaceAll("\r\n", "\n");
   const filtered = injectFilteredRunner(source);
   writeFileSync(FILTERED_ACCEPTANCE_SOURCE, filtered);
   return FILTERED_ACCEPTANCE_SOURCE;

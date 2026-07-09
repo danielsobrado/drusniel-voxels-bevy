@@ -59,6 +59,9 @@ export interface FarSummaryGpuRuntimeStats {
   lastCpuBuildSuppressed: number;
   totalCpuBuildsSuppressed: number;
   authoritative: number;
+  totalBatchesDispatched: number;
+  totalTilesDispatched: number;
+  deviceReady: number;
   lastFallbackReason: FarSummaryGpuDispatchOrFallbackResult["fallbackReason"] | null;
   lastError: string | null;
 }
@@ -80,6 +83,9 @@ export class FarSummaryGpuRuntime {
     lastCpuBuildSuppressed: 0,
     totalCpuBuildsSuppressed: 0,
     authoritative: 0,
+    totalBatchesDispatched: 0,
+    totalTilesDispatched: 0,
+    deviceReady: 0,
     lastFallbackReason: null,
     lastError: null,
   };
@@ -175,12 +181,20 @@ export class FarSummaryGpuRuntime {
     const committed = this.commitGpuReadbacks(plan, result, frameIndex, nowMs);
     this.statsState.lastCommittedTiles = committed;
     this.statsState.totalCommittedTiles += committed;
+    if (result.ok && result.counters.deviceReady === 1) {
+      this.statsState.deviceReady = 1;
+    }
+    this.statsState.totalBatchesDispatched += result.counters.batchesDispatched;
+    this.statsState.totalTilesDispatched += result.counters.tilesDispatched;
     result.counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
     result.counters.lastCommittedTiles = this.statsState.lastCommittedTiles;
     result.counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     result.counters.committedTiles = this.statsState.totalCommittedTiles;
     result.counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
     result.counters.runtimeError = this.statsState.lastError ? 1 : 0;
+    result.counters.deviceReady = this.statsState.deviceReady;
+    result.counters.batchesDispatched = this.statsState.totalBatchesDispatched;
+    result.counters.tilesDispatched = this.statsState.totalTilesDispatched;
     publishFarSummaryGpuCounters(undefined, result.counters);
   }
 
@@ -220,6 +234,9 @@ export class FarSummaryGpuRuntime {
             builder?.dispose();
             return null;
           }
+          if (builder) {
+            this.statsState.deviceReady = 1;
+          }
           this.builder = builder;
           return builder;
         });
@@ -231,10 +248,13 @@ export class FarSummaryGpuRuntime {
     const counters = createFarSummaryGpuCounters();
     counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
     counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    counters.deviceReady = this.statsState.deviceReady;
     counters.lastCommittedTiles = this.statsState.lastCommittedTiles;
     counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     counters.committedTiles = this.statsState.totalCommittedTiles;
     counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
+    counters.batchesDispatched = this.statsState.totalBatchesDispatched;
+    counters.tilesDispatched = this.statsState.totalTilesDispatched;
     counters.runtimeError = this.statsState.lastError ? 1 : 0;
     publishFarSummaryGpuCounters(undefined, counters);
   }
@@ -243,12 +263,15 @@ export class FarSummaryGpuRuntime {
     const counters = createFarSummaryGpuCounters();
     counters.enabled = this.options.gpuConfig.enabled ? 1 : 0;
     counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
+    counters.deviceReady = this.statsState.deviceReady;
     counters.dirtyTiles = this.statsState.lastDirtyTiles;
     counters.fallbackTiles = this.statsState.lastDirtyTiles;
     counters.lastCommittedTiles = 0;
     counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
     counters.committedTiles = this.statsState.totalCommittedTiles;
     counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
+    counters.batchesDispatched = this.statsState.totalBatchesDispatched;
+    counters.tilesDispatched = this.statsState.totalTilesDispatched;
     counters.runtimeError = 1;
     publishFarSummaryGpuCounters(undefined, counters);
   }

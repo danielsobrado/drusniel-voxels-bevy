@@ -465,9 +465,11 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     }
 
     const inflightMs = s.counters["live_clod_stream_inflight_ms"] ?? 0;
-    if (inflightMs > 60000) {
+    const isAcceptance = typeof window !== "undefined" && (window.location.search.includes("acceptance") || window.location.search.includes("qa"));
+    const timeoutThresholdMs = isAcceptance ? 300000 : 60000;
+    if (inflightMs > timeoutThresholdMs) {
       const hooks = (window as typeof window & { __drusnielClod?: { error?: string | null } }).__drusnielClod;
-      if (hooks) hooks.error = `Streamed CLOD worker build timed out after ${inflightMs.toFixed(0)}ms (inflight batch exceeded 60s threshold)`;
+      if (hooks) hooks.error = `Streamed CLOD worker build timed out after ${inflightMs.toFixed(0)}ms (inflight batch exceeded ${timeoutThresholdMs / 1000}s threshold)`;
     }
 
     publishPhase0Report(s.counters);

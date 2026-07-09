@@ -178,7 +178,7 @@ function treeImpostorNodeBillboardPosition(billboardNormal: TslNode): TslNode {
   const right: TslNode = vec3(billboardNormal.z, float(0), billboardNormal.x.negate());
   return vec3(localPositionScale.x, localPositionScale.y, localPositionScale.z)
     .add(right.mul(positionGeometry.x.mul(localPositionScale.w)))
-    .add(vec3(0, positionGeometry.y.mul(localPositionScale.w), 0));
+    .add((vec3 as any)(0, positionGeometry.y.mul(localPositionScale.w), 0));
 }
 
 function blendTreeImpostorNormal(n0: TslNode, n1: TslNode, n2: TslNode, n3: TslNode, weights: TslNode): TslNode {
