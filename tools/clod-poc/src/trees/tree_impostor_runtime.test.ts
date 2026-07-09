@@ -81,6 +81,42 @@ describe("tree impostor runtime contract", () => {
     expect(lit[3]).toBeCloseTo(0.2, 6);
   });
 
+  it("uses billboard-facing normal to stabilize impostor relighting", () => {
+    const sample = {
+      albedoCoverage: [
+        encodeTreeImpostorAlbedo(0.5),
+        encodeTreeImpostorAlbedo(0.5),
+        encodeTreeImpostorAlbedo(0.5),
+        1,
+      ] as [number, number, number, number],
+      normalDepth: [
+        encodeTreeImpostorNormalComponent(0),
+        encodeTreeImpostorNormalComponent(1),
+        encodeTreeImpostorNormalComponent(0),
+        0.5,
+      ] as [number, number, number, number],
+      weight: 1,
+    };
+    const baseLighting = {
+      sunDirection: new THREE.Vector3(0, 0, 1),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(0.5, 0.5, 0.5),
+      groundLight: new THREE.Color(0.1, 0.1, 0.1),
+      yawRadians: 0,
+    };
+
+    const capturedOnly = decodeAndLightTreeImpostorSample(sample, baseLighting);
+    const blended = decodeAndLightTreeImpostorSample(sample, {
+      ...baseLighting,
+      billboardNormal: new THREE.Vector3(0, 0, 1),
+      normalDetailWeight: 0.35,
+    });
+
+    expect(blended[0]).toBeGreaterThan(capturedOnly[0]);
+    expect(blended[1]).toBeGreaterThan(capturedOnly[1]);
+    expect(blended[2]).toBeGreaterThan(capturedOnly[2]);
+  });
+
   it("normalizes weighted normal blends after decoding packed samples", () => {
     const blended = blendTreeImpostorPackedNormals([
       {
