@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TREE_LODS, TREE_SPECIES, type TreeSpeciesId } from "./tree_config.js";
-import type { TreeGeometryMap } from "./tree_geometry.js";
+import { isTreeImpostorCardGeometry, type TreeGeometryMap } from "./tree_geometry.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import {
@@ -44,7 +44,7 @@ export function applyTreeSystemMaterials(input: ApplyTreeSystemMaterialsInput): 
     for (const species of TREE_SPECIES) {
       for (const lod of TREE_LODS) {
         const mesh = patch.meshes[species][lod];
-        mesh.material = selectTreeSystemMaterial({
+        const material = selectTreeSystemMaterial({
           species,
           lod,
           settings: input.settings,
@@ -52,6 +52,13 @@ export function applyTreeSystemMaterials(input: ApplyTreeSystemMaterialsInput): 
           impostorAtlases: input.impostorAtlases,
           impostorMaterials: input.impostorMaterials,
         });
+        // The billboard impostor shader flattens vertices along camera-right;
+        // on anything but the baked flat card (e.g. a retained pre-bake
+        // fallback mesh) it smears geometry into dark vertical streaks. Keep
+        // the regular material until the geometry swap has happened.
+        mesh.material = material === input.impostorMaterials[species] && !isTreeImpostorCardGeometry(mesh.geometry)
+          ? input.materialHandle.regularMaterial
+          : material;
         mesh.castShadow = treeLodCastsShadow(input.settings, lod);
       }
     }

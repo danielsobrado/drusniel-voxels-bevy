@@ -6,6 +6,7 @@ import {
   float,
   normalize,
   positionView,
+  sqrt,
 } from "three/tsl";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
@@ -120,12 +121,16 @@ function bakeSpeciesAtlas(
   const atlasHeightPx = atlasSizePx * variantCount;
   const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
   const variantFrames = createTreeImpostorVariantFrames(baseFrames, atlasSizePx, atlasWidthPx, atlasHeightPx, resolutionPx, paddingPx, variantCount);
-  const albedoTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-albedo-${species}`, THREE.SRGBColorSpace);
+  // Both atlases must stay in a linear/no-conversion color space: the samplers
+  // decode coverage-normalized (premultiplied-by-construction) texels as
+  // (rgb / a)^2, and any sRGB transfer applied after hardware filtering breaks
+  // that ratio at every partially covered or mip-filtered texel.
+  const albedoTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-albedo-${species}`, THREE.NoColorSpace);
   const normalDepthTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-normal-depth-${species}`, THREE.NoColorSpace);
 
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera();
-  const albedoMaterial = createBakeMaterial(options.material, settings);
+  const albedoMaterial = createBakeMaterial(options.material, settings, options.webgpu === true);
   const variantBounds = computeTreeImpostorVariantBounds(geometries, species, settings.impostors.sourceLod, variantCount);
   const normalDepthMaterial = createNormalDepthBakeMaterial(0.01, variantBounds.maxRadius * 6, options.webgpu === true);
   const mesh = new THREE.Mesh(selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod), albedoMaterial);
@@ -329,7 +334,21 @@ function bakeAtlasTarget(
   }
 }
 
-function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings): THREE.Material {
+function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings, webgpu: boolean): THREE.Material {
+  // WebGPURenderer ignores onBeforeCompile, so the GLSL sqrt-encode injection
+  // below never runs there; without this node material the atlas stores raw
+  // albedo that every sampler then squares into near-black impostors.
+  if (webgpu) {
+    const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), "tree-impostor-bake-albedo-node");
+    material.name = "tree-impostor-albedo-bake";
+    material.colorNode = sqrt(clamp(attribute("color", "vec3"), 0.0, 1.0));
+    material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
+    material.side = THREE.DoubleSide;
+    material.transparent = false;
+    material.depthWrite = true;
+    return material;
+  }
+
   const map = sourceMaterial instanceof THREE.MeshStandardMaterial || sourceMaterial instanceof THREE.MeshBasicMaterial
     ? sourceMaterial.map
     : null;

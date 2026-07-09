@@ -260,8 +260,10 @@ export class TreeSystem {
     const result = await this.assets.bakeImpostors(renderer);
     if (result.supported && this.settings.impostors.swapOnBake) {
       this.clearGpuRing();
-      this.assets.applyMaterials(this.patches);
+      // Geometry first: applyMaterials only assigns the billboard impostor
+      // material to meshes that already carry the baked flat-card geometry.
       this.assets.replaceImpostorMeshGeometries(this.patches, this.meshBoundsState);
+      this.assets.applyMaterials(this.patches);
       this.updatePatchLods(this.lastCenter, this.lastCenter);
     } else if (result.supported) {
       this.patchesDirty = true;

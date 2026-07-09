@@ -203,22 +203,18 @@ function writeBlendWeightIfChanged(
   return true;
 }
 
-function treeImpostorViewDirection(instance: TreeInstance, cameraPosition: THREE.Vector3): THREE.Vector3 {
-  const worldDirection = new THREE.Vector3(
-    cameraPosition.x - instance.position[0],
-    cameraPosition.y - instance.position[1],
-    cameraPosition.z - instance.position[2],
-  );
-  return rotateTreeImpostorDirectionByYaw(worldDirection, instance.rotationY);
-}
+const TREE_IMPOSTOR_VIEW_DIRECTION_SCRATCH = new THREE.Vector3();
 
-function rotateTreeImpostorDirectionByYaw(direction: THREE.Vector3, yawRadians: number): THREE.Vector3 {
-  const cos = Math.cos(yawRadians);
-  const sin = Math.sin(yawRadians);
-  return new THREE.Vector3(
-    direction.x * cos - direction.z * sin,
-    direction.y,
-    direction.x * sin + direction.z * cos,
+function treeImpostorViewDirection(instance: TreeInstance, cameraPosition: THREE.Vector3): THREE.Vector3 {
+  const dx = cameraPosition.x - instance.position[0];
+  const dy = cameraPosition.y - instance.position[1];
+  const dz = cameraPosition.z - instance.position[2];
+  const cos = Math.cos(instance.rotationY);
+  const sin = Math.sin(instance.rotationY);
+  return TREE_IMPOSTOR_VIEW_DIRECTION_SCRATCH.set(
+    dx * cos - dz * sin,
+    dy,
+    dx * sin + dz * cos,
   );
 }
 

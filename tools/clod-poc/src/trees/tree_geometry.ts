@@ -103,9 +103,18 @@ export function createTreeBakedImpostorGeometry(
     : fallbackHeight * 0.5;
   const geometry = createTreeReferenceImpostorQuadGeometry(radius, centerY);
   setTreeVariantAttribute(geometry, 0);
+  geometry.userData[TREE_IMPOSTOR_CARD_GEOMETRY_FLAG] = true;
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
+}
+
+/** Marks flat baked-impostor cards; billboard impostor materials may only be
+ *  applied to geometry carrying this flag. */
+export const TREE_IMPOSTOR_CARD_GEOMETRY_FLAG = "treeImpostorCard";
+
+export function isTreeImpostorCardGeometry(geometry: THREE.BufferGeometry): boolean {
+  return geometry.userData[TREE_IMPOSTOR_CARD_GEOMETRY_FLAG] === true;
 }
 
 export function createTreeReferenceImpostorQuadGeometry(radius: number, centerY: number): THREE.BufferGeometry {

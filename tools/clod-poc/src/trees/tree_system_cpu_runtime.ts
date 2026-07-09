@@ -82,7 +82,6 @@ export interface TreePatchRefreshResult {
 }
 
 const TREE_CPU_MATRIX = new THREE.Matrix4();
-const TREE_CPU_MATRIX_SCRATCH = new THREE.Matrix4();
 const TREE_CPU_SCALE = new THREE.Vector3();
 const TREE_CPU_ROTATION = new THREE.Quaternion();
 const TREE_CPU_TRANSLATION = new THREE.Vector3();
@@ -400,17 +399,6 @@ function placeTreeInstance(
   TREE_CPU_SCALE.set(instance.scale, instance.scale, instance.scale);
   TREE_CPU_ROTATION.setFromAxisAngle(TREE_CPU_UP_AXIS, instance.rotationY);
   TREE_CPU_MATRIX.compose(TREE_CPU_TRANSLATION, TREE_CPU_ROTATION, TREE_CPU_SCALE);
-  if (renderLod === "impostor") {
-    TREE_CPU_MATRIX_SCRATCH.copy(TREE_CPU_MATRIX);
-    const previous = input.meshBoundsState.get(effectiveMesh);
-    if (input.settings.impostors.axialBillboard && previous?.worldMatrix) {
-      effectiveMesh.matrixWorld.copy(previous.worldMatrix);
-    } else {
-      effectiveMesh.matrixWorld.multiplyMatrices(patch.group.matrixWorld, effectiveMesh.matrix);
-    }
-    effectiveMesh.matrixWorld.decompose(TREE_CPU_TRANSLATION, TREE_CPU_ROTATION, TREE_CPU_SCALE);
-    TREE_CPU_MATRIX_SCRATCH.copy(TREE_CPU_MATRIX);
-  }
   if (setTreeInstanceMatrixWhenChanged(effectiveMesh, effectiveIndex, TREE_CPU_MATRIX)) markTreeMeshMatrixChanged(effectiveMesh, write);
   incrementTreeMeshWriteCount(effectiveMesh, write);
 }
