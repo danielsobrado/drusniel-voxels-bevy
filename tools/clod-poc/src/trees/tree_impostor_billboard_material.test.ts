@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
@@ -51,6 +52,15 @@ describe("tree impostor billboard materials", () => {
   it("sets positionNode on WebGPU four-tile blend impostor materials", () => {
     const material = createTreeImpostorBlendNodeMaterial(cloneTreeSettings(), fakeAtlas());
     expect((material as unknown as { positionNode?: unknown }).positionNode).toBeDefined();
+  });
+
+  it("uses billboard-facing normals for WebGPU node relight", () => {
+    const source = readFileSync(new URL("./tree_impostor_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("treeImpostorNodeBillboardNormal");
+    expect(source).toContain("relightTreeImpostorNode(albedo, normalSample, billboardNormal)");
+    expect(source).toContain("normalize(mix(billboardNormal, capturedNormal");
+    expect(source).toContain("TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
   });
 });
 
