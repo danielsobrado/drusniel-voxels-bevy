@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
+  attribute,
   clamp,
   float,
   normalize,
-  normalView,
   positionView,
 } from "three/tsl";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
@@ -24,6 +24,7 @@ import {
 } from "../rendering/material_churn/tracked_material_factory.js";
 
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
+const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
 
 export interface TreeImpostorAtlas {
   species: TreeSpeciesId;
@@ -31,7 +32,7 @@ export interface TreeImpostorAtlas {
   texture: THREE.Texture;
   /** Sqrt-encoded RGB albedo + coverage in A. */
   albedo?: THREE.Texture;
-  /** View/capture-space normal in RGB, normalized linear depth in A. */
+  /** Tree-local normal in RGB, normalized linear depth in A. */
   normalDepth?: THREE.Texture;
   gridSize: number;
   resolutionPx: number;
@@ -112,7 +113,7 @@ function bakeSpeciesAtlas(
   const normalDepthTarget = createRenderTarget(atlasSizePx, `tree-impostor-normal-depth-${species}`, THREE.NoColorSpace);
 
   const scene = new THREE.Scene();
-  const geometry = geometries[species][settings.impostors.sourceLod];
+  const geometry = selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   const radius = Math.max(geometry.boundingSphere?.radius ?? 1, 1);
@@ -153,6 +154,15 @@ function bakeSpeciesAtlas(
       normalDepthTarget.dispose();
     },
   };
+}
+
+export function selectTreeImpostorBakeGeometry(
+  geometries: TreeGeometryMap,
+  species: TreeSpeciesId,
+  sourceLod: TreeSettings["impostors"]["sourceLod"],
+): THREE.BufferGeometry {
+  return geometries[species].variants?.[TREE_IMPOSTOR_CANONICAL_VARIANT]?.[sourceLod]
+    ?? geometries[species][sourceLod];
 }
 
 function createRenderTarget(
@@ -252,7 +262,7 @@ function createNormalDepthBakeMaterial(near: number, far: number, webgpu: boolea
       1.0,
     );
     material.name = "tree-impostor-normal-depth-bake";
-    material.colorNode = normalize(normalView).mul(0.5).add(0.5);
+    material.colorNode = normalize(attribute("normal", "vec3")).mul(0.5).add(0.5);
     material.opacityNode = linearDepth;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -277,50 +287,39 @@ function createNormalDepthBakeMaterial(near: number, far: number, webgpu: boolea
 export const TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER = `
 uniform float near;
 uniform float far;
-varying vec3 vTreeImpostorViewNormal;
+varying vec3 vTreeImpostorLocalNormal;
 varying float vTreeImpostorLinearDepth;
 
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  vTreeImpostorViewNormal = normalize(normalMatrix * normal);
+  vTreeImpostorLocalNormal = normalize(normal);
   vTreeImpostorLinearDepth = clamp((-mvPosition.z - near) / max(far - near, 0.0001), 0.0, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
 export const TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER = `
-varying vec3 vTreeImpostorViewNormal;
+varying vec3 vTreeImpostorLocalNormal;
 varying float vTreeImpostorLinearDepth;
 
 void main() {
-  vec3 packedNormal = normalize(vTreeImpostorViewNormal) * 0.5 + 0.5;
+  vec3 packedNormal = normalize(vTreeImpostorLocalNormal) * 0.5 + 0.5;
   gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth);
 }
 `;
 
-export function encodeTreeImpostorAlbedo(channel: number): number {
-  return Math.sqrt(clamp01(channel));
-}
-
-export function decodeTreeImpostorAlbedo(channel: number): number {
-  const value = clamp01(channel);
-  return value * value;
-}
-
-export function encodeTreeImpostorNormalComponent(component: number): number {
-  return clamp01(component * 0.5 + 0.5);
-}
-
-export function decodeTreeImpostorNormalComponent(channel: number): number {
-  return clamp01(channel) * 2 - 1;
-}
-
-export function encodeTreeImpostorDepth(depth: number): number {
-  return clamp01(depth);
-}
-
-export function decodeTreeImpostorDepth(channel: number): number {
-  return clamp01(channel);
+function isRenderTargetRenderer(value: unknown): value is RenderTargetRenderer {
+  if (!value || typeof value !== "object") return false;
+  const renderer = value as Partial<RenderTargetRenderer>;
+  return typeof renderer.render === "function"
+    && typeof renderer.setRenderTarget === "function"
+    && typeof renderer.getRenderTarget === "function"
+    && typeof renderer.getClearColor === "function"
+    && typeof renderer.getClearAlpha === "function"
+    && typeof renderer.setClearColor === "function"
+    && typeof renderer.clear === "function"
+    && typeof renderer.getViewport === "function"
+    && typeof renderer.setViewport === "function";
 }
 
 function nextFrame(): Promise<void> {
@@ -328,21 +327,4 @@ function nextFrame(): Promise<void> {
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
     else setTimeout(resolve, 0);
   });
-}
-
-function isRenderTargetRenderer(renderer: unknown): renderer is RenderTargetRenderer {
-  const candidate = renderer as Partial<RenderTargetRenderer>;
-  return typeof candidate.setRenderTarget === "function" &&
-    typeof candidate.getRenderTarget === "function" &&
-    typeof candidate.render === "function" &&
-    typeof candidate.getClearColor === "function" &&
-    typeof candidate.getClearAlpha === "function" &&
-    typeof candidate.setClearColor === "function" &&
-    typeof candidate.clear === "function" &&
-    typeof candidate.getViewport === "function" &&
-    typeof candidate.setViewport === "function";
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
 }
