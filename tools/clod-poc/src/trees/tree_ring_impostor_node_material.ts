@@ -170,7 +170,9 @@ function treeRingCylindricalBillboardPosition(
     float(0),
     cameraPosition.x.sub(worldXZ.x).negate(),
   );
-  const right: TslNode = normalize(toCamera);
+  const right: TslNode = dot(toCamera, toCamera)
+    .greaterThan(float(0.000001))
+    .select(normalize(toCamera), vec3(1, 0, 0));
   return vec3(worldXZ.x, groundY, worldXZ.y)
     .add(right.mul(localPosition.x))
     .add(vec3(0, localPosition.y, 0));
