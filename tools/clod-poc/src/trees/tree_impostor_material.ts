@@ -194,17 +194,24 @@ function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode): TslNod
 }
 
 export const TREE_IMPOSTOR_VERTEX_SHADER = `
+#define TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT 0.65
 attribute vec4 treeImpostorUvRect;
 attribute float treeLodFade;
 attribute float treeLodDitherRole;
 varying vec2 vTreeImpostorUv;
+varying vec3 vTreeImpostorBillboardNormal;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
 
-vec3 treeImpostorBillboardRight(vec3 origin) {
+vec3 treeImpostorBillboardNormal(vec3 origin) {
   vec3 toCamera = cameraPosition - origin;
   float lenSq = max(dot(toCamera.xz, toCamera.xz), 0.000001);
-  return vec3(toCamera.z, 0.0, -toCamera.x) * inversesqrt(lenSq);
+  return vec3(toCamera.x, 0.0, toCamera.z) * inversesqrt(lenSq);
+}
+
+vec3 treeImpostorBillboardRight(vec3 origin) {
+  vec3 normal = treeImpostorBillboardNormal(origin);
+  return vec3(normal.z, 0.0, -normal.x);
 }
 
 vec3 treeImpostorBillboardWorldPosition(vec3 localPosition) {
@@ -212,8 +219,11 @@ vec3 treeImpostorBillboardWorldPosition(vec3 localPosition) {
   vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   float scale = max(length(instanceMatrix[0].xyz), 0.001);
   vec3 right = treeImpostorBillboardRight(origin);
+  vTreeImpostorBillboardNormal = treeImpostorBillboardNormal(origin);
   return origin + right * localPosition.x * scale + vec3(0.0, localPosition.y * scale, 0.0);
 #else
+  vec3 origin = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vTreeImpostorBillboardNormal = treeImpostorBillboardNormal(origin);
   return (modelMatrix * vec4(localPosition, 1.0)).xyz;
 #endif
 }
@@ -229,11 +239,13 @@ void main() {
 `;
 
 export const TREE_IMPOSTOR_FRAGMENT_SHADER = `
+#define TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT 0.65
 uniform sampler2D map;
 uniform sampler2D normalDepthMap;
 uniform float hasNormalDepthMap;
 uniform float alphaTest;
 varying vec2 vTreeImpostorUv;
+varying vec3 vTreeImpostorBillboardNormal;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
 
@@ -246,8 +258,9 @@ bool treeImpostorDitherKeep(float ign, float fade, float role) {
   return ign >= 1.0 - fade;
 }
 
-vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
-  vec3 n = normalize(packedNormal * 2.0 - 1.0);
+vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal) {
+  vec3 capturedNormal = normalize(packedNormal * 2.0 - 1.0);
+  vec3 n = normalize(mix(normalize(billboardNormal), capturedNormal, TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT));
   vec3 sunDir = normalize(vec3(0.4, 0.85, 0.3));
   vec3 sunColor = vec3(1.0, 0.96, 0.88);
   vec3 skyColor = vec3(0.42, 0.48, 0.58);
@@ -267,13 +280,14 @@ void main() {
   vec3 albedo = color.rgb * color.rgb;
   if (hasNormalDepthMap > 0.5) {
     vec4 normalDepth = texture2D(normalDepthMap, vTreeImpostorUv);
-    albedo = treeImpostorRelight(albedo, normalDepth.rgb);
+    albedo = treeImpostorRelight(albedo, normalDepth.rgb, vTreeImpostorBillboardNormal);
   }
   gl_FragColor = vec4(albedo, color.a);
 }
 `;
 
 export const TREE_IMPOSTOR_BLEND_VERTEX_SHADER = `
+#define TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT 0.65
 attribute vec4 treeImpostorUvRect0;
 attribute vec4 treeImpostorUvRect1;
 attribute vec4 treeImpostorUvRect2;
@@ -285,6 +299,7 @@ varying vec2 vTreeImpostorUv0;
 varying vec2 vTreeImpostorUv1;
 varying vec2 vTreeImpostorUv2;
 varying vec2 vTreeImpostorUv3;
+varying vec3 vTreeImpostorBillboardNormal;
 varying vec4 vTreeImpostorBlendWeights;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
@@ -293,10 +308,15 @@ vec2 treeImpostorAtlasUv(vec4 rect) {
   return rect.xy + uv * (rect.zw - rect.xy);
 }
 
-vec3 treeImpostorBillboardRight(vec3 origin) {
+vec3 treeImpostorBillboardNormal(vec3 origin) {
   vec3 toCamera = cameraPosition - origin;
   float lenSq = max(dot(toCamera.xz, toCamera.xz), 0.000001);
-  return vec3(toCamera.z, 0.0, -toCamera.x) * inversesqrt(lenSq);
+  return vec3(toCamera.x, 0.0, toCamera.z) * inversesqrt(lenSq);
+}
+
+vec3 treeImpostorBillboardRight(vec3 origin) {
+  vec3 normal = treeImpostorBillboardNormal(origin);
+  return vec3(normal.z, 0.0, -normal.x);
 }
 
 vec3 treeImpostorBillboardWorldPosition(vec3 localPosition) {
@@ -304,8 +324,11 @@ vec3 treeImpostorBillboardWorldPosition(vec3 localPosition) {
   vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   float scale = max(length(instanceMatrix[0].xyz), 0.001);
   vec3 right = treeImpostorBillboardRight(origin);
+  vTreeImpostorBillboardNormal = treeImpostorBillboardNormal(origin);
   return origin + right * localPosition.x * scale + vec3(0.0, localPosition.y * scale, 0.0);
 #else
+  vec3 origin = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vTreeImpostorBillboardNormal = treeImpostorBillboardNormal(origin);
   return (modelMatrix * vec4(localPosition, 1.0)).xyz;
 #endif
 }
@@ -324,6 +347,7 @@ void main() {
 `;
 
 export const TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER = `
+#define TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT 0.65
 uniform sampler2D map;
 uniform sampler2D normalDepthMap;
 uniform float hasNormalDepthMap;
@@ -332,6 +356,7 @@ varying vec2 vTreeImpostorUv0;
 varying vec2 vTreeImpostorUv1;
 varying vec2 vTreeImpostorUv2;
 varying vec2 vTreeImpostorUv3;
+varying vec3 vTreeImpostorBillboardNormal;
 varying vec4 vTreeImpostorBlendWeights;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
@@ -345,8 +370,9 @@ bool treeImpostorDitherKeep(float ign, float fade, float role) {
   return ign >= 1.0 - fade;
 }
 
-vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
-  vec3 n = normalize(packedNormal * 2.0 - 1.0);
+vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal) {
+  vec3 capturedNormal = normalize(packedNormal * 2.0 - 1.0);
+  vec3 n = normalize(mix(normalize(billboardNormal), capturedNormal, TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT));
   vec3 sunDir = normalize(vec3(0.4, 0.85, 0.3));
   vec3 sunColor = vec3(1.0, 0.96, 0.88);
   vec3 skyColor = vec3(0.42, 0.48, 0.58);
@@ -384,7 +410,7 @@ void main() {
     vec3 n2 = texture2D(normalDepthMap, vTreeImpostorUv2).rgb;
     vec3 n3 = texture2D(normalDepthMap, vTreeImpostorUv3).rgb;
     vec3 normal = treeImpostorBlendPackedNormal(n0, n1, n2, n3, vTreeImpostorBlendWeights);
-    albedo = treeImpostorRelight(albedo, normal);
+    albedo = treeImpostorRelight(albedo, normal, vTreeImpostorBillboardNormal);
   }
   gl_FragColor = vec4(albedo, color.a);
 }
