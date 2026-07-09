@@ -172,10 +172,21 @@ function writeBlendWeightIfChanged(
 }
 
 function treeImpostorViewDirection(instance: TreeInstance, cameraPosition: THREE.Vector3): THREE.Vector3 {
-  return new THREE.Vector3(
+  const worldDirection = new THREE.Vector3(
     cameraPosition.x - instance.position[0],
     cameraPosition.y - instance.position[1],
     cameraPosition.z - instance.position[2],
+  );
+  return rotateTreeImpostorDirectionByYaw(worldDirection, instance.rotationY);
+}
+
+function rotateTreeImpostorDirectionByYaw(direction: THREE.Vector3, yawRadians: number): THREE.Vector3 {
+  const cos = Math.cos(yawRadians);
+  const sin = Math.sin(yawRadians);
+  return new THREE.Vector3(
+    direction.x * cos - direction.z * sin,
+    direction.y,
+    direction.x * sin + direction.z * cos,
   );
 }
 
