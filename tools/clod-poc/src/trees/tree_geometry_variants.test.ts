@@ -14,10 +14,11 @@ describe("tree variant geometry map", () => {
       for (const species of TREE_SPECIES) {
         expect(Object.keys(map[species].variants)).toHaveLength(TREE_STRUCTURAL_VARIANTS);
         for (const lod of TREE_LODS) {
-          expect(map[species][lod]).not.toBe(map[species].variants[0][lod]);
-          expect(map[species][lod].getAttribute("treeVariant")?.count).toBe(
-            map[species][lod].getAttribute("position")?.count,
-          );
+          const selector = map[species][lod];
+          const positionCount = selector.getAttribute("position")?.count;
+          expect(selector).not.toBe(map[species].variants[0][lod]);
+          expect(selector.getAttribute("treeVariant")?.count).toBe(positionCount);
+          expect(selector.getAttribute("treeFoliageCard")?.count).toBe(positionCount);
           expect(treeGeometryVariant(map, species, 0, lod)).toBe(map[species].variants[0][lod]);
         }
       }
@@ -45,12 +46,14 @@ describe("tree variant geometry map", () => {
     try {
       for (const species of TREE_SPECIES) {
         for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
-          const stats = treeHeroGeometryStats(treeGeometryVariant(map, species, variant, "near"));
+          const geometry = treeGeometryVariant(map, species, variant, "near");
+          const stats = treeHeroGeometryStats(geometry);
           expect(stats.triangleCount).toBeGreaterThan(0);
           if (species !== "dead") {
             expect(stats.triangleCount).toBeGreaterThanOrEqual(HERO_LEAFY_MIN_TRIANGLES_PER_VARIANT);
             expect(stats.foliageTriangleCount).toBeGreaterThan(0);
             expect(stats.hasRealFoliage).toBe(true);
+            expect(geometry.getAttribute("treeFoliageCard")).toBeTruthy();
           }
         }
       }
