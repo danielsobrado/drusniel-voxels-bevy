@@ -9,12 +9,22 @@ import {
 import type { GrassBladeInstance } from "./grass_cpu_patch.js";
 
 const BLADE_PLANES = {
-  single: [{ axis: "x" as const, normal: [0, 0, 1] }],
+  single: [{ axis: "x" as const }],
   crossed: [
-    { axis: "x" as const, normal: [0, 0, 1] },
-    { axis: "z" as const, normal: [1, 0, 0] },
+    { axis: "x" as const },
+    { axis: "z" as const },
   ],
 };
+const ROUNDED_SIDE_NORMAL = 0.616;
+const ROUNDED_FACE_NORMAL = 0.788;
+const ROUNDED_UP_NORMAL = 0.25;
+
+function roundedBladeNormal(axis: "x" | "z", side: 0 | 1): readonly [number, number, number] {
+  const sideSign = side === 0 ? -1 : 1;
+  return axis === "x"
+    ? [sideSign * ROUNDED_SIDE_NORMAL, ROUNDED_UP_NORMAL, -ROUNDED_FACE_NORMAL]
+    : [ROUNDED_FACE_NORMAL, ROUNDED_UP_NORMAL, sideSign * ROUNDED_SIDE_NORMAL];
+}
 
 export function createBladeGeometry(
   rows: readonly (readonly [number, number])[] = BLADE_ROWS,
@@ -33,7 +43,7 @@ export function createBladeGeometry(
         positions.push(0, y, -halfWidth, 0, y, halfWidth);
       }
       uvs.push(0, y, 1, y);
-      normals.push(...plane.normal, ...plane.normal);
+      normals.push(...roundedBladeNormal(plane.axis, 0), ...roundedBladeNormal(plane.axis, 1));
     }
     for (let row = 0; row < rows.length - 1; row++) {
       const lower = base + row * 2;
@@ -66,9 +76,9 @@ export function createGrassTuftGeometry(widthOrSettings: number | GrassSettings 
       positions.push(x * cosYaw, y, x * sinYaw);
       const side = x < 0 ? -1 : 1;
       normals.push(
-        -sinYaw * 0.62 + side * 0.38 * cosYaw,
-        0.42,
-        cosYaw * 0.62 + side * 0.38 * sinYaw,
+        -sinYaw * ROUNDED_FACE_NORMAL + side * ROUNDED_SIDE_NORMAL * cosYaw,
+        ROUNDED_UP_NORMAL,
+        cosYaw * ROUNDED_FACE_NORMAL + side * ROUNDED_SIDE_NORMAL * sinYaw,
       );
       uvs.push(x < 0 ? 0 : 1, y);
     }
@@ -168,74 +178,74 @@ export function populateGrassGeometry(
   instances: readonly GrassBladeInstance[],
   settings: GrassSettings,
 ): void {
-    geometry.setAttribute("position", bladeGeometry.getAttribute("position"));
-    geometry.setAttribute("uv", bladeGeometry.getAttribute("uv"));
-    geometry.setAttribute("normal", bladeGeometry.getAttribute("normal"));
-    geometry.setIndex(bladeGeometry.getIndex());
+  geometry.setAttribute("position", bladeGeometry.getAttribute("position"));
+  geometry.setAttribute("uv", bladeGeometry.getAttribute("uv"));
+  geometry.setAttribute("normal", bladeGeometry.getAttribute("normal"));
+  geometry.setIndex(bladeGeometry.getIndex());
 
-    const offsets = new Float32Array(instances.length * 3);
-    const heights = new Float32Array(instances.length);
-    const rotations = new Float32Array(instances.length);
-    const phases = new Float32Array(instances.length);
-    const colorMixes = new Float32Array(instances.length);
-    const edgeFades = new Float32Array(instances.length);
-    const normalYs = new Float32Array(instances.length);
-    const terrainNormals = new Float32Array(instances.length * 3);
-    const widthScales = new Float32Array(instances.length);
-    if (!bladeGeometry.boundingBox) bladeGeometry.computeBoundingBox();
-    const sourceBounds = bladeGeometry.boundingBox;
-    const sourceMinY = sourceBounds?.min.y ?? 0;
-    const sourceMaxY = sourceBounds?.max.y ?? 1;
-    const sourceHorizontalExtent = sourceBounds
-      ? Math.max(
-          Math.abs(sourceBounds.min.x),
-          Math.abs(sourceBounds.max.x),
-          Math.abs(sourceBounds.min.z),
-          Math.abs(sourceBounds.max.z),
-        )
-      : 1;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    let maxHeight = 0;
-    let maxWidthScale = 1;
-    for (let index = 0; index < instances.length; index++) {
-      const instance = instances[index];
-      const height = instance.height;
-      const widthScale = instance.widthScale ?? 1;
-      offsets.set(instance.offset, index * 3);
-      heights[index] = height;
-      rotations[index] = instance.rotationY;
-      phases[index] = instance.phase;
-      colorMixes[index] = instance.colorMix;
-      edgeFades[index] = instance.edgeFade;
-      normalYs[index] = instance.normalY;
-      terrainNormals.set(instance.terrainNormal, index * 3);
-      widthScales[index] = widthScale;
-      minY = Math.min(minY, instance.offset[1] + sourceMinY * height);
-      maxY = Math.max(maxY, instance.offset[1] + sourceMaxY * height);
-      maxHeight = Math.max(maxHeight, height);
-      maxWidthScale = Math.max(maxWidthScale, widthScale);
-    }
-    geometry.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offsets, 3));
-    geometry.setAttribute("aHeight", new THREE.InstancedBufferAttribute(heights, 1));
-    geometry.setAttribute("aRotY", new THREE.InstancedBufferAttribute(rotations, 1));
-    geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
-    geometry.setAttribute("aColorMix", new THREE.InstancedBufferAttribute(colorMixes, 1));
-    geometry.setAttribute("aEdgeFade", new THREE.InstancedBufferAttribute(edgeFades, 1));
-    geometry.setAttribute("aNormalY", new THREE.InstancedBufferAttribute(normalYs, 1));
-    geometry.setAttribute("aTerrainNormal", new THREE.InstancedBufferAttribute(terrainNormals, 3));
-    geometry.setAttribute("aWidthScale", new THREE.InstancedBufferAttribute(widthScales, 1));
-    geometry.instanceCount = instances.length;
-
-    if (instances.length === 0) {
-      minY = 0;
-      maxY = 0;
-    }
-    const margin = sourceHorizontalExtent * settings.bladeWidth * maxWidthScale
-      + maxHeight * settings.windStrength * 2;
-    geometry.boundingBox = new THREE.Box3(
-      new THREE.Vector3(footprint.minX - margin, minY, footprint.minZ - margin),
-      new THREE.Vector3(footprint.maxX + margin, maxY, footprint.maxZ + margin),
-    );
-    geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+  const offsets = new Float32Array(instances.length * 3);
+  const heights = new Float32Array(instances.length);
+  const rotations = new Float32Array(instances.length);
+  const phases = new Float32Array(instances.length);
+  const colorMixes = new Float32Array(instances.length);
+  const edgeFades = new Float32Array(instances.length);
+  const normalYs = new Float32Array(instances.length);
+  const terrainNormals = new Float32Array(instances.length * 3);
+  const widthScales = new Float32Array(instances.length);
+  if (!bladeGeometry.boundingBox) bladeGeometry.computeBoundingBox();
+  const sourceBounds = bladeGeometry.boundingBox;
+  const sourceMinY = sourceBounds?.min.y ?? 0;
+  const sourceMaxY = sourceBounds?.max.y ?? 1;
+  const sourceHorizontalExtent = sourceBounds
+    ? Math.max(
+        Math.abs(sourceBounds.min.x),
+        Math.abs(sourceBounds.max.x),
+        Math.abs(sourceBounds.min.z),
+        Math.abs(sourceBounds.max.z),
+      )
+    : 1;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxHeight = 0;
+  let maxWidthScale = 1;
+  for (let index = 0; index < instances.length; index++) {
+    const instance = instances[index];
+    const height = instance.height;
+    const widthScale = instance.widthScale ?? 1;
+    offsets.set(instance.offset, index * 3);
+    heights[index] = height;
+    rotations[index] = instance.rotationY;
+    phases[index] = instance.phase;
+    colorMixes[index] = instance.colorMix;
+    edgeFades[index] = instance.edgeFade;
+    normalYs[index] = instance.normalY;
+    terrainNormals.set(instance.terrainNormal, index * 3);
+    widthScales[index] = widthScale;
+    minY = Math.min(minY, instance.offset[1] + sourceMinY * height);
+    maxY = Math.max(maxY, instance.offset[1] + sourceMaxY * height);
+    maxHeight = Math.max(maxHeight, height);
+    maxWidthScale = Math.max(maxWidthScale, widthScale);
   }
+  geometry.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offsets, 3));
+  geometry.setAttribute("aHeight", new THREE.InstancedBufferAttribute(heights, 1));
+  geometry.setAttribute("aRotY", new THREE.InstancedBufferAttribute(rotations, 1));
+  geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
+  geometry.setAttribute("aColorMix", new THREE.InstancedBufferAttribute(colorMixes, 1));
+  geometry.setAttribute("aEdgeFade", new THREE.InstancedBufferAttribute(edgeFades, 1));
+  geometry.setAttribute("aNormalY", new THREE.InstancedBufferAttribute(normalYs, 1));
+  geometry.setAttribute("aTerrainNormal", new THREE.InstancedBufferAttribute(terrainNormals, 3));
+  geometry.setAttribute("aWidthScale", new THREE.InstancedBufferAttribute(widthScales, 1));
+  geometry.instanceCount = instances.length;
+
+  if (instances.length === 0) {
+    minY = 0;
+    maxY = 0;
+  }
+  const margin = sourceHorizontalExtent * settings.bladeWidth * maxWidthScale
+    + maxHeight * settings.windStrength * 2;
+  geometry.boundingBox = new THREE.Box3(
+    new THREE.Vector3(footprint.minX - margin, minY, footprint.minZ - margin),
+    new THREE.Vector3(footprint.maxX + margin, maxY, footprint.maxZ + margin),
+  );
+  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+}
