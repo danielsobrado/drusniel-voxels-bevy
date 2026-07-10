@@ -492,6 +492,21 @@ function streamRootLevel(level: number | undefined): number {
   return Math.max(0, Math.min(cfg.page.quadtree_levels - 1, Math.floor(level ?? 0)));
 }
 
+function buildStreamRootNode(
+  level: number,
+  px: number,
+  pz: number,
+  world: { cellsX: number; cellsZ: number; finite: false },
+): ClodPageNode {
+  if (!cfg) throw new Error("CLOD worker received buildStreamRoots before build completion");
+  installHydrologyTerrain(hydrologyTerrain, { boundedToStartupWorld: true });
+  try {
+    return buildStandaloneClodRootNode(level, px, pz, cfg, world);
+  } finally {
+    installHydrologyTerrain(hydrologyTerrain);
+  }
+}
+
 async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type: "buildStreamRoots" }>): Promise<void> {
   if (!result || !cfg) throw new Error("CLOD worker received buildStreamRoots before build completion");
   const pageSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
@@ -502,26 +517,21 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
   const cacheStats = createEmptyStreamRootCacheStats();
   const nodes: ClodPageNode[] = [];
 
-  installHydrologyTerrain(hydrologyTerrain, { boundedToStartupWorld: true });
-  try {
-    for (const { px, pz, level } of request.coords) {
-      const rootLevel = streamRootLevel(level);
-      const nodeId = `L${rootLevel}:${px},${pz}`;
-      const bypassCache = request.bypassCacheIds?.includes(nodeId) ?? false;
-      const cached = bypassCache ? null : await tryLoadStreamRootNode(workerCacheCtx, "cpu", rootLevel, px, pz, cacheStats);
-      if (cached) {
-        nodes.push(cached);
-        continue;
-      }
-
-      const buildStart = performance.now();
-      const node = buildStandaloneClodRootNode(rootLevel, px, pz, cfg, world);
-      const buildMs = performance.now() - buildStart;
-      nodes.push(node);
-      await storeStreamRootNode(workerCacheCtx, "cpu", node, buildMs, cacheStats);
+  for (const { px, pz, level } of request.coords) {
+    const rootLevel = streamRootLevel(level);
+    const nodeId = `L${rootLevel}:${px},${pz}`;
+    const bypassCache = request.bypassCacheIds?.includes(nodeId) ?? false;
+    const cached = bypassCache ? null : await tryLoadStreamRootNode(workerCacheCtx, "cpu", rootLevel, px, pz, cacheStats);
+    if (cached) {
+      nodes.push(cached);
+      continue;
     }
-  } finally {
-    installHydrologyTerrain(hydrologyTerrain);
+
+    const buildStart = performance.now();
+    const node = buildStreamRootNode(rootLevel, px, pz, world);
+    const buildMs = performance.now() - buildStart;
+    nodes.push(node);
+    await storeStreamRootNode(workerCacheCtx, "cpu", node, buildMs, cacheStats);
   }
   if (workerCacheCtx) await workerCacheCtx.service.flush();
 
