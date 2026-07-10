@@ -35,7 +35,7 @@ export interface TerraformMenu {
 }
 
 export function createTerraformMenu(deps: TerraformMenuDeps): TerraformMenu {
-  const activeTerrainSlots = () => deps.materialController.activeTerrainSlots();
+  const availableTerrainSlots = () => deps.materialController.availableTerrainSlots();
 
   const menuHeader = document.createElement("div");
   menuHeader.className = "tf-menu-header";
@@ -111,7 +111,7 @@ export function createTerraformMenu(deps: TerraformMenuDeps): TerraformMenu {
     }
   };
   const syncMaterialCarousel = () => {
-    const count = activeTerrainSlots().length;
+    const count = availableTerrainSlots().length;
     const bounds = materialCarouselBounds(count, materialSwatchPage);
     materialSwatchPage = bounds.page;
     materialCarousel.classList.toggle("tf-material-carousel-active", bounds.needsCarousel);
@@ -127,7 +127,7 @@ export function createTerraformMenu(deps: TerraformMenuDeps): TerraformMenu {
     syncMaterialCarousel();
   });
   carouselNext.addEventListener("click", () => {
-    const { maxPage } = materialCarouselBounds(activeTerrainSlots().length, materialSwatchPage);
+    const { maxPage } = materialCarouselBounds(availableTerrainSlots().length, materialSwatchPage);
     materialSwatchPage = Math.min(maxPage, materialSwatchPage + 1);
     syncMaterialCarousel();
   });
@@ -256,7 +256,7 @@ export function createTerraformMenu(deps: TerraformMenuDeps): TerraformMenu {
   );
 
   const refreshSwatches = () => {
-    const slots = activeTerrainSlots();
+    const slots = availableTerrainSlots();
     if (deps.state.brushMaterial >= slots.length) deps.state.brushMaterial = 0;
     materialSwatchPage = materialCarouselPageForSelection(
       deps.state.brushMaterial,
