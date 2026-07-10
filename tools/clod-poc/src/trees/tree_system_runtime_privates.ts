@@ -16,13 +16,18 @@ export function treeCpuPatchInput(self: TreeSystem) {
     worldCells: self.worldCells,
     meshBoundsState: self.meshBoundsState,
     impostorAtlases: self.assets.impostorAtlases,
-    geometryFor: (s: TreeSpeciesId, l: TreeLod) => self.assets.geometryFor(s, l),
-    materialFor: (s: TreeSpeciesId, l: TreeLod) => self.assets.materialFor(s, l),
-    castsShadow: (l: TreeLod) => treeLodCastsShadow(self.settings, l),
-    resolveLod: (s: TreeSpeciesId, l: TreeLod) => resolveTreeSystemLod({ species: s, lod: l, settings: self.settings, impostorAtlases: self.assets.impostorAtlases }),
+    geometryFor: (species: TreeSpeciesId, lod: TreeLod) => self.assets.geometryFor(species, lod),
+    materialFor: (species: TreeSpeciesId, lod: TreeLod) => self.assets.materialFor(species, lod),
+    castsShadow: (lod: TreeLod) => treeLodCastsShadow(self.settings, lod),
+    resolveLod: (species: TreeSpeciesId, lod: TreeLod) => resolveTreeSystemLod({
+      species,
+      lod,
+      settings: self.settings,
+      impostorAtlases: self.assets.impostorAtlases,
+    }),
     prepassNodesFor: self.useCpuTreePrepass
-      ? (_s: TreeSpeciesId, l: TreeLod) => treeLodWithinDepthPrepass(self.treePrepassMaxLod, l)
-        ? self.assets.materialHandle.prepassNodesFor?.(l)
+      ? (_species: TreeSpeciesId, lod: TreeLod) => treeLodWithinDepthPrepass(self.treePrepassMaxLod, lod)
+        ? self.assets.materialHandle.prepassNodesFor?.(lod)
         : undefined
       : undefined,
   };
@@ -36,21 +41,26 @@ export function treeGpuRingInput(self: TreeSystem) {
     supportsGpuTrees: self.supportsGpuTrees,
     unsupportedReason: self.gpuRingUnsupportedReason,
     lodCounts: self.lodCounts,
-    createDrawResources: (m: number) => self.createGpuRingResources(m),
-    geometryForGpuRing: (s: string, l: TreeLod) => self.assets.geometryForGpuRing(s as TreeSpeciesId, l),
+    createDrawResources: (maxInstances: number) => self.createGpuRingResources(maxInstances),
+    geometryForGpuRing: (species: string, lod: TreeLod) => self.assets.geometryForGpuRing(species as TreeSpeciesId, lod),
   };
 }
 
 export function treeCreateGpuRingResources(self: TreeSystem, maxInstancesPerGroup: number) {
   return createTreeSystemGpuRingDrawResources({
-    backend: self.gpuBackend!, root: self.root,
-    ringPrepassTwins: self.gpuRing.prepassTwins, settings: self.settings,
-    worldCells: self.worldCells, currentLighting: self.currentLighting,
-    hydrologyWater: self.hydrologyWater, impostorAtlases: self.assets.impostorAtlases,
+    backend: self.gpuBackend!,
+    root: self.root,
+    ringPrepassTwins: self.gpuRing.prepassTwins,
+    settings: self.settings,
+    worldCells: self.worldCells,
+    currentLighting: self.currentLighting,
+    hydrologyWater: self.hydrologyWater,
+    impostorAtlases: self.assets.impostorAtlases,
+    foliageAtlas: self.assets.foliageAtlas,
     crownProxyGeometry: self.assets.crownProxyGeometry,
     useTreePrepass: self.useTreePrepass,
     treePrepassMaxLod: self.treePrepassMaxLod,
-    geometryForGpuRing: (s, l) => self.assets.geometryForGpuRing(s, l),
+    geometryForGpuRing: (species, lod) => self.assets.geometryForGpuRing(species, lod),
   }, maxInstancesPerGroup);
 }
 
@@ -60,10 +70,14 @@ export function treeClearGpuRing(self: TreeSystem): void {
 
 export function treeUpdateStats(self: TreeSystem): void {
   self.stats = buildTreeRuntimeStats({
-    patches: self.patches, geometries: self.assets.geometries,
-    lodCounts: self.lodCounts, reportsGpuRingStats: true,
-    gpuRing: self.gpuRing, debugShowGpuCounts: self.settings.gpu.debugShowGpuCounts,
-    impostorStatus: self.assets.impostorStatus, impostorReason: self.assets.impostorReason,
+    patches: self.patches,
+    geometries: self.assets.geometries,
+    lodCounts: self.lodCounts,
+    reportsGpuRingStats: true,
+    gpuRing: self.gpuRing,
+    debugShowGpuCounts: self.settings.gpu.debugShowGpuCounts,
+    impostorStatus: self.assets.impostorStatus,
+    impostorReason: self.assets.impostorReason,
     earlyTerrainRejectionStats: self.earlyTerrainRejectionStats,
   });
 }
