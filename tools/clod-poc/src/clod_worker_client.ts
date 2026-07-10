@@ -55,6 +55,7 @@ import {
   validateStreamedPageBounds,
   type StreamedPageBoundsGuardConfig,
 } from "./terrain/streaming/streamed_page_bounds_guard.js";
+import { StreamRootEditState } from "./terrain/streaming/stream_root_edit_state.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
 
@@ -104,7 +105,7 @@ export class ClodWorkerClient {
   private streamRootWorkerFallbackPages = 0;
   private streamRootBoundsGuardConfig: StreamedPageBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
   private streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
-  private readonly dirtyStreamRootIds = new Set<string>();
+  private readonly streamRootEditState = new StreamRootEditState();
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -138,7 +139,7 @@ export class ClodWorkerClient {
         const [pageX, pageZ] = key.split(",").map(Number);
         for (let level = 0; level < cfg.page.quadtree_levels; level++) {
           const scale = 2 ** level;
-          this.dirtyStreamRootIds.add(`L${level}:${Math.floor(pageX / scale)},${Math.floor(pageZ / scale)}`);
+          this.streamRootEditState.markDirty(`L${level}:${Math.floor(pageX / scale)},${Math.floor(pageZ / scale)}`);
         }
       }
     }
@@ -189,12 +190,13 @@ export class ClodWorkerClient {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
     this.refreshStreamRootBoundsGuardConfig();
-    const dirtyIds = coords
-      .map((coord) => this.streamRootNodeId(coord))
-      .filter((id) => this.dirtyStreamRootIds.has(id));
-    if (dirtyIds.length > 0) {
-      const built = await this.buildStreamRootsOnWorker(coords, dirtyIds);
+    const ids = coords.map((coord) => this.streamRootNodeId(coord));
+    const dirtySnapshot = this.streamRootEditState.captureDirty(ids);
+    if (this.streamRootEditState.requiresCpu(ids)) {
+      const bypassCacheIds = dirtySnapshot.size > 0 ? [...dirtySnapshot.keys()] : undefined;
+      const built = await this.buildStreamRootsOnWorker(coords, bypassCacheIds);
       this.assertStreamRootNodesValid(built.nodes, "cpu");
+      this.streamRootEditState.acknowledge(dirtySnapshot);
       return built;
     }
     if (!this.streamRootGpuConfig.enabled) {
@@ -314,7 +316,7 @@ export class ClodWorkerClient {
       const minZ = Math.floor(bounds.minZ / span);
       const maxZ = Math.floor(bounds.maxZ / span);
       for (let pz = minZ; pz <= maxZ; pz++) {
-        for (let px = minX; px <= maxX; px++) this.dirtyStreamRootIds.add(`L${level}:${px},${pz}`);
+        for (let px = minX; px <= maxX; px++) this.streamRootEditState.markDirty(`L${level}:${px},${pz}`);
       }
     }
   }
@@ -406,7 +408,7 @@ export class ClodWorkerClient {
     this.publishStreamRootBoundsGuardStats();
     this.streamRootGpuUnavailable = false;
     this.streamRootWorkerFallbackPages = 0;
-    this.dirtyStreamRootIds.clear();
+    this.streamRootEditState.reset();
     this.streamRootCacheInit = initClodCacheContext({
       cfg,
       worldPages: worldPagesX,
