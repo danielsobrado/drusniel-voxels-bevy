@@ -9,6 +9,7 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
   const waterSurface = (record.water_surface ?? record.waterSurface ?? {}) as Record<string, unknown>;
   const moisture = (record.moisture ?? {}) as Record<string, unknown>;
   const talus = (record.talus ?? {}) as Record<string, unknown>;
+  const infinite = (record.infinite ?? {}) as Record<string, unknown>;
   const debug = (record.debug ?? {}) as Record<string, unknown>;
 
   return {
@@ -68,6 +69,12 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
       enabled: readBoolean(talus.enabled, fallback.talus.enabled),
       iterations: readNumber(talus.iterations, fallback.talus.iterations),
       strength: readNumber(talus.strength, fallback.talus.strength),
+    },
+    infinite: {
+      tileSizeM: Math.max(16, readNumber(infinite.tile_size_m ?? infinite.tileSizeM, fallback.infinite.tileSizeM)),
+      tileRes: Math.max(4, Math.floor(readNumber(infinite.tile_res ?? infinite.tileRes, fallback.infinite.tileRes))),
+      maxResidentTiles: Math.max(0, Math.floor(readNumber(infinite.max_resident_tiles ?? infinite.maxResidentTiles, fallback.infinite.maxResidentTiles))),
+      boundaryBlendM: Math.max(0, readNumber(infinite.boundary_blend_m ?? infinite.boundaryBlendM, fallback.infinite.boundaryBlendM)),
     },
     debug: {
       showFill: readBoolean(debug.show_fill ?? debug.showFill, fallback.debug.showFill),

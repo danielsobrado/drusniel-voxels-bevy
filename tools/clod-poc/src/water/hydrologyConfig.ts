@@ -64,6 +64,18 @@ export interface HydrologyTalusConfig {
   strength: number;
 }
 
+export interface HydrologyInfiniteConfig {
+  /** World metres covered by one hydrology tile (edge length). */
+  tileSizeM: number;
+  /** Cells per tile edge; arrays store (tileRes+1)^2 vertex samples so neighbours share edges. */
+  tileRes: number;
+  /** LRU budget for resident tiles; 0 disables the tile cache (direct analytic sampling). */
+  maxResidentTiles: number;
+  /** Width (metres) of the band inside the startup-world edge where grid hydrology blends
+   *  into the infinite field so the effective authority is continuous at the boundary. */
+  boundaryBlendM: number;
+}
+
 export interface HydrologyDebugConfig {
   showFill: boolean;
   showAccumulation: boolean;
@@ -83,6 +95,7 @@ export interface HydrologyConfig {
   waterSurface: HydrologyWaterSurfaceConfig;
   moisture: HydrologyMoistureConfig;
   talus: HydrologyTalusConfig;
+  infinite: HydrologyInfiniteConfig;
   debug: HydrologyDebugConfig;
 }
 
@@ -144,6 +157,12 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     iterations: 8,
     strength: 0.12,
   },
+  infinite: {
+    tileSizeM: 256,
+    tileRes: 64,
+    maxResidentTiles: 96,
+    boundaryBlendM: 48,
+  },
   debug: {
     showFill: false,
     showAccumulation: false,
@@ -163,6 +182,7 @@ export function cloneHydrologyConfig(config: HydrologyConfig = DEFAULT_HYDROLOGY
     waterSurface: { ...config.waterSurface },
     moisture: { ...config.moisture },
     talus: { ...config.talus },
+    infinite: { ...config.infinite },
     debug: { ...config.debug },
   };
 }

@@ -7,6 +7,7 @@ function wetSample(x: number, z: number): HydrologySample {
   return {
     terrainY,
     waterY: terrainY + 1,
+    depth: 1,
     bodyMask: 1,
     lakeMask: 1,
     riverMask: 0,
@@ -17,6 +18,8 @@ function wetSample(x: number, z: number): HydrologySample {
     waterYFar: terrainY + 1,
     moisture: 1,
     bodyKind: HYDROLOGY_BODY_LAKE,
+    bodyId: 1,
+    shoreDistance: 5,
   };
 }
 

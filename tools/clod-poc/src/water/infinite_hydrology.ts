@@ -26,11 +26,22 @@ export interface InfiniteHydrologyOptions {
   drySentinelDepthM?: number;
 }
 
-function hash2(ix: number, iz: number, salt: number): number {
+function hash2u(ix: number, iz: number, salt: number): number {
   let h = Math.imul(ix, 374761393) ^ Math.imul(iz, 668265263) ^ Math.imul(salt, 2246822519);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   h ^= h >>> 16;
-  return (h >>> 0) * HASH_UINT_SCALE;
+  return h >>> 0;
+}
+
+function hash2(ix: number, iz: number, salt: number): number {
+  return hash2u(ix, iz, salt) * HASH_UINT_SCALE;
+}
+
+// Deterministic non-zero body id for a procedural basin body. Stable per basin so
+// invariant checks see wet cells carrying a real id; not globally connected (Phase 3
+// replaces this fallback with the tile authority that supplies true connected ids).
+function basinBodyId(cx: number, cz: number, salt: number): number {
+  return (hash2u(cx, cz, salt) % 0x7ffffffe) + 1;
 }
 
 function clamp01(value: number): number {
@@ -59,6 +70,7 @@ function drySample(terrainY: number, dryDepthM: number): HydrologySample {
   return {
     terrainY,
     waterY: terrainY - dryDepthM,
+    depth: 0,
     bodyMask: 0,
     lakeMask: 0,
     riverMask: 0,
@@ -69,13 +81,15 @@ function drySample(terrainY: number, dryDepthM: number): HydrologySample {
     waterYFar: terrainY - dryDepthM,
     moisture: 0.18,
     bodyKind: HYDROLOGY_BODY_DRY,
+    bodyId: 0,
+    shoreDistance: 0,
   };
 }
 
 function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): HydrologySample | null {
   const bx = basinCoord(x);
   const bz = basinCoord(z);
-  let best: { mask: number; waterY: number; lakeMask: number; kind: number } | null = null;
+  let best: { mask: number; waterY: number; lakeMask: number; kind: number; radius: number; distance: number; id: number } | null = null;
   for (let oz = -1; oz <= 1; oz++) {
     for (let ox = -1; ox <= 1; ox++) {
       const cx = bx + ox;
@@ -94,19 +108,28 @@ function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hyd
       const levelOffset = spawn < 0.08 ? LAKE_LEVEL_OFFSET_M : POND_LEVEL_OFFSET_M;
       best = {
         mask,
+        // Basin spill level = terrain at the basin centre plus a small offset. This is a
+        // constant per body; the cell is only wet where terrain sits *below* it, so a lake
+        // never climbs the surrounding hillside.
         waterY: sampler.surfaceHeight(centerX, centerZ) + levelOffset,
         lakeMask: spawn < 0.08 ? mask : 0,
         kind: spawn < 0.08 ? HYDROLOGY_BODY_LAKE : HYDROLOGY_BODY_POND,
+        radius,
+        distance,
+        id: basinBodyId(cx, cz, 41),
       };
     }
   }
   if (!best) return null;
   const terrainY = sampler.surfaceHeight(x, z);
-  const waterY = Math.max(best.waterY, terrainY + 0.05);
-  const bodyMask = waterY > terrainY ? best.mask : 0;
+  const wet = best.waterY > terrainY;
+  if (!wet) return null; // basin water surface is below local terrain here: dry ground, not floating water.
+  const waterY = best.waterY;
+  const bodyMask = best.mask;
   return {
     terrainY,
     waterY,
+    depth: waterY - terrainY,
     bodyMask,
     lakeMask: best.lakeMask,
     riverMask: 0,
@@ -117,6 +140,8 @@ function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hyd
     waterYFar: waterY,
     moisture: Math.max(0.24, bodyMask),
     bodyKind: best.kind,
+    bodyId: best.id,
+    shoreDistance: Math.max(0, best.radius - best.distance),
   };
 }
 
@@ -124,8 +149,8 @@ function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hy
   const basinX = basinCoord(x);
   const basinZ = basinCoord(z);
   const angle = mix(-0.72, 0.72, hash2(basinX, basinZ, 101));
-  const dirX = Math.cos(angle);
-  const dirZ = Math.sin(angle);
+  let dirX = Math.cos(angle);
+  let dirZ = Math.sin(angle);
   const normalX = -dirZ;
   const normalZ = dirX;
   const along = x * dirX + z * dirZ;
@@ -137,13 +162,24 @@ function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hy
   if (distance > halfWidth + RIVER_EDGE_FADE_M) return null;
   const riverMask = 1 - smoothstep(halfWidth, halfWidth + RIVER_EDGE_FADE_M, distance);
   const terrainY = sampler.surfaceHeight(x, z);
-  const downstreamY = sampler.surfaceHeight(x + dirX * 36, z + dirZ * 36);
-  const waterY = Math.max(terrainY + 0.08, Math.min(terrainY, downstreamY) + RIVER_LEVEL_OFFSET_M);
+  // Orient flow so it points downhill along the (hashed) channel axis: sample terrain a
+  // step forward and backward and flip the axis if "forward" is uphill. Macro drainage
+  // routing is deferred to the Phase 3 tile authority; this keeps flow terrain-consistent
+  // rather than purely hash-driven.
+  const aheadY = sampler.surfaceHeight(x + dirX * 36, z + dirZ * 36);
+  const behindY = sampler.surfaceHeight(x - dirX * 36, z - dirZ * 36);
+  if (behindY < aheadY) { dirX = -dirX; dirZ = -dirZ; }
+  const downstreamY = Math.min(aheadY, behindY);
+  // Channel surface sits an offset above the local low point; the cell is wet only where
+  // terrain is below it, so the river stays in the valley instead of climbing hills.
+  const waterY = downstreamY + RIVER_LEVEL_OFFSET_M;
+  if (waterY <= terrainY) return null;
+  const depth = waterY - terrainY;
   const speed = Math.max(0.08, Math.abs(terrainY - downstreamY) * 0.25 + 0.18) * riverMask;
-  const depth = Math.max(0.05, waterY - terrainY);
   return {
     terrainY,
     waterY,
+    depth,
     bodyMask: riverMask,
     lakeMask: 0,
     riverMask,
@@ -154,6 +190,8 @@ function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hy
     waterYFar: waterY,
     moisture: Math.max(0.32, riverMask),
     bodyKind: HYDROLOGY_BODY_RIVER,
+    bodyId: basinBodyId(basinX, basinZ, 103),
+    shoreDistance: Math.max(0, halfWidth - distance),
   };
 }
 

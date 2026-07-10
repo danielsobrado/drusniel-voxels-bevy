@@ -9,6 +9,8 @@ import { buildWaterSurface } from "./waterSurfaceBuild.js";
 import { buildFarWaterSurface } from "./farWaterSurface.js";
 import { buildMoistureField } from "./moistureField.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
+import { computeBodyIds, computeShoreDistance } from "./bodyIdentity.js";
+import { HydrologyTileCache, type HydrologyTileCacheStats } from "./hydrologyTileSource.js";
 import {
   HYDROLOGY_BODY_DRY,
   HYDROLOGY_BODY_LAKE,
@@ -53,6 +55,8 @@ export class HydrologySystem {
   private readonly infiniteWorldSamples: boolean;
   private readonly sampler: TerrainHeightSampler;
   private readonly drySentinelDepthM: number;
+  private readonly tileCache: HydrologyTileCache | null;
+  private readonly boundaryBlendM: number;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
@@ -62,12 +66,16 @@ export class HydrologySystem {
     infiniteWorldSamples: boolean,
     sampler: TerrainHeightSampler,
     drySentinelDepthM: number,
+    tileCache: HydrologyTileCache | null,
+    boundaryBlendM: number,
   ) {
     this.grid = grid;
     this.stats = stats;
     this.infiniteWorldSamples = infiniteWorldSamples;
     this.sampler = sampler;
     this.drySentinelDepthM = drySentinelDepthM;
+    this.tileCache = tileCache;
+    this.boundaryBlendM = boundaryBlendM;
   }
 
   /**
@@ -131,7 +139,12 @@ export class HydrologySystem {
     this.fieldsTexture = null;
   }
 
-  static build(config: HydrologyConfig, worldCells: number, sampler: TerrainHeightSampler): HydrologySystem {
+  static build(
+    config: HydrologyConfig,
+    worldCells: number,
+    sampler: TerrainHeightSampler,
+    options: { infiniteWorldSamples?: boolean } = {},
+  ): HydrologySystem {
     const t0 = nowMs();
     const grid = createHydrologyGrid(config.simRes, worldCells, sampler, config.waterSurface.farReduceFactor);
     fillDepressions(grid, config.fill);
@@ -142,17 +155,33 @@ export class HydrologySystem {
       if (grid.riverMask[i] > 0.01) grid.waterYRaw[i] = grid.carvedBed[i] + grid.riverDepth[i];
     }
     buildWaterSurface(grid, config.waterSurface, config.waterSurface.drySentinelDepth);
+    // Body identity + shore distance are derived from the *final* wet mask, so they must
+    // run after buildWaterSurface (which can turn cliff cells dry) and before the far
+    // surface / stats consume them.
+    computeBodyIds(grid);
+    computeShoreDistance(grid);
     buildFarWaterSurface(grid, config.waterSurface);
     buildMoistureField(grid, config.moisture);
     const stats = collectStats(grid, config.accumulation.particles, nowMs() - t0);
     logHydrologySummary(stats);
     maybeDumpHydrologyFields(grid, config);
+    const infiniteWorldSamples = options.infiniteWorldSamples ?? infiniteIslandsScene();
+    const tileCache = infiniteWorldSamples && config.infinite.maxResidentTiles > 0
+      ? new HydrologyTileCache(sampler, {
+          tileSizeM: config.infinite.tileSizeM,
+          tileRes: config.infinite.tileRes,
+          maxResidentTiles: config.infinite.maxResidentTiles,
+          drySentinelDepthM: config.waterSurface.drySentinelDepth,
+        })
+      : null;
     return new HydrologySystem(
       grid,
       stats,
-      infiniteIslandsScene(),
+      infiniteWorldSamples,
       sampler,
       config.waterSurface.drySentinelDepth,
+      tileCache,
+      config.infinite.boundaryBlendM,
     );
   }
 
@@ -161,20 +190,71 @@ export class HydrologySystem {
   }
 
   sample(x: number, z: number): HydrologySample {
-    if (this.shouldUseInfiniteSample(x, z)) {
-      return sampleInfiniteHydrology(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
-    }
-    return sampleHydrologyGrid(this.grid, x, z);
+    if (!this.infiniteWorldSamples) return sampleHydrologyGrid(this.grid, x, z);
+    if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampleInfinite(x, z);
+    const t = this.gridWeight(x, z);
+    if (t >= 1) return sampleHydrologyGrid(this.grid, x, z);
+    // Boundary blend band: fade the finite grid into the infinite field as the world
+    // edge approaches so the effective authority is continuous across the boundary
+    // (t = 1 deep inside -> pure grid; t = 0 at the edge -> pure infinite, matching the
+    // outside limit exactly).
+    return blendHydrologySamples(this.sampleInfinite(x, z), sampleHydrologyGrid(this.grid, x, z), t);
   }
 
   terrainHeight(x: number, z: number): number {
-    if (this.shouldUseInfiniteSample(x, z)) return this.sampler.surfaceHeight(x, z);
-    return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
+    if (!this.infiniteWorldSamples) return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
+    if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampler.surfaceHeight(x, z);
+    const t = this.gridWeight(x, z);
+    if (t >= 1) return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
+    const carved = sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
+    return this.sampler.surfaceHeight(x, z) * (1 - t) + carved * t;
   }
 
-  private shouldUseInfiniteSample(x: number, z: number): boolean {
-    return this.infiniteWorldSamples && !hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells);
+  /** Blend weight of the finite grid at an inside-world coordinate (1 = pure grid). */
+  private gridWeight(x: number, z: number): number {
+    if (this.boundaryBlendM <= 0) return 1;
+    const worldCells = this.grid.worldCells;
+    const edgeDistance = Math.min(x, z, worldCells - x, worldCells - z);
+    const raw = edgeDistance / this.boundaryBlendM;
+    if (raw >= 1) return 1;
+    return raw * raw * (3 - 2 * raw);
   }
+
+  private sampleInfinite(x: number, z: number): HydrologySample {
+    if (this.tileCache) return this.tileCache.sample(x, z);
+    return sampleInfiniteHydrology(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
+  }
+
+  tileCacheStats(): HydrologyTileCacheStats | null {
+    return this.tileCache ? this.tileCache.stats : null;
+  }
+}
+
+/** Lerp two canonical samples; identity fields come from the dominant side. t = weight of `b`. */
+function blendHydrologySamples(a: HydrologySample, b: HydrologySample, t: number): HydrologySample {
+  const s = 1 - t;
+  const dominant = t >= 0.5 ? b : a;
+  const terrainY = a.terrainY * s + b.terrainY * t;
+  const waterY = a.waterY * s + b.waterY * t;
+  const bodyMask = a.bodyMask * s + b.bodyMask * t;
+  const depthRaw = waterY - terrainY;
+  return {
+    terrainY,
+    waterY,
+    depth: bodyMask > 0 && depthRaw > 0 ? depthRaw : 0,
+    bodyMask,
+    lakeMask: a.lakeMask * s + b.lakeMask * t,
+    riverMask: a.riverMask * s + b.riverMask * t,
+    flowX: a.flowX * s + b.flowX * t,
+    flowZ: a.flowZ * s + b.flowZ * t,
+    flowStrength: a.flowStrength * s + b.flowStrength * t,
+    riverDepth: a.riverDepth * s + b.riverDepth * t,
+    waterYFar: a.waterYFar * s + b.waterYFar * t,
+    moisture: a.moisture * s + b.moisture * t,
+    bodyKind: dominant.bodyKind,
+    bodyId: dominant.bodyId,
+    shoreDistance: a.shoreDistance * s + b.shoreDistance * t,
+  };
 }
 
 export function hydrologyCoordInsideStartupWorld(x: number, z: number, worldCells: number): boolean {

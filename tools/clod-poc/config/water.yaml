@@ -62,6 +62,14 @@ water:
       enabled: true
       iterations: 8
       strength: 0.12
+    # Infinite-world hydrology (outside the startup grid): deterministic tile cache over
+    # the world-space procedural field, plus the blend band that keeps the effective
+    # authority continuous at the startup-world boundary.
+    infinite:
+      tile_size_m: 256        # world metres per tile edge
+      tile_res: 64            # cells per tile edge ((res+1)^2 vertex samples)
+      max_resident_tiles: 96  # LRU budget; 0 = no cache (direct analytic sampling)
+      boundary_blend_m: 48    # grid->infinite blend band width inside the world edge
     debug:
       show_fill: false
       show_accumulation: false

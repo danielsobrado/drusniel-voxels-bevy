@@ -30,11 +30,24 @@ export interface HydrologyGrid {
   bodyKind: Uint8Array;
   flowDirX: Float32Array;
   flowDirZ: Float32Array;
+  // Stable connected-component id per water body (0 = dry / no body). Two wet cells
+  // share an id only when they are connected AND in the same hydrological class
+  // (flowing river vs still lake/pond/marsh vs ocean), so a river feeding a lake is a
+  // distinct id from the lake. Used to keep surface smoothing body-aware and to enforce
+  // per-lake flatness. Populated by computeBodyIds() after the water surface is built.
+  bodyId: Uint32Array;
+  // Unsigned distance (world metres) from each cell centre to the nearest wet<->dry
+  // boundary. Drives shoreline foam/wetness/vegetation-margin. Populated by
+  // computeShoreDistance() after the wet mask is final.
+  shoreDistance: Float32Array;
 }
 
 export interface HydrologySample {
+  /** Carved bed height (metres) at this world position. */
   terrainY: number;
   waterY: number;
+  /** waterY - terrainY, clamped to >= 0 for wet cells (0 when dry). */
+  depth: number;
   bodyMask: number;
   lakeMask: number;
   riverMask: number;
@@ -45,6 +58,10 @@ export interface HydrologySample {
   waterYFar: number;
   moisture: number;
   bodyKind: number;
+  /** Connected-component id (0 when dry). Constant across a single water body. */
+  bodyId: number;
+  /** Unsigned distance (metres) to the nearest wet<->dry boundary. */
+  shoreDistance: number;
 }
 
 export function createHydrologyGrid(
@@ -88,6 +105,8 @@ export function createHydrologyGrid(
     bodyKind: new Uint8Array(count),
     flowDirX: new Float32Array(count),
     flowDirZ: new Float32Array(count),
+    bodyId: new Uint32Array(count),
+    shoreDistance: new Float32Array(count),
   };
 }
 
@@ -150,11 +169,12 @@ export function sampleHydrologyGrid(grid: HydrologyGrid, x: number, z: number): 
   const terrainY = sampleGridBilinear(grid, grid.carvedBed, x, z);
   const waterY = sampleGridBilinear(grid, grid.waterY, x, z);
   const wet = sampleGridBilinear(grid, grid.wetMask, x, z);
-  const depth = waterY - terrainY;
-  const bodyMask = depth > 0 ? Math.max(0, Math.min(1, wet)) : 0;
+  const depthRaw = waterY - terrainY;
+  const bodyMask = depthRaw > 0 ? Math.max(0, Math.min(1, wet)) : 0;
   return {
     terrainY,
     waterY,
+    depth: bodyMask > 0 ? Math.max(0, depthRaw) : 0,
     bodyMask,
     lakeMask: sampleGridBilinear(grid, grid.lakeMask, x, z),
     riverMask: sampleGridBilinear(grid, grid.riverMask, x, z),
@@ -165,7 +185,18 @@ export function sampleHydrologyGrid(grid: HydrologyGrid, x: number, z: number): 
     waterYFar: sampleWaterYFar(grid, x, z),
     moisture: sampleGridBilinear(grid, grid.moisture, x, z),
     bodyKind: sampleBodyKindNearest(grid, x, z),
+    // Identity/shore are nearest-sampled: interpolating a body id or a signed
+    // distance across a boundary would be meaningless.
+    bodyId: sampleUint32Nearest(grid, grid.bodyId, x, z),
+    shoreDistance: sampleGridBilinear(grid, grid.shoreDistance, x, z),
   };
+}
+
+export function sampleUint32Nearest(grid: HydrologyGrid, field: Uint32Array, x: number, z: number): number {
+  const { gx, gz } = worldToGrid(grid, x, z);
+  const ix = Math.round(clampGridCoord(grid.res, gx));
+  const iz = Math.round(clampGridCoord(grid.res, gz));
+  return field[gridIndex(grid.res, ix, iz)];
 }
 
 export function triangleBlur(field: Float32Array, res: number, radius: number, scratch = new Float32Array(field.length)): void {

@@ -68,6 +68,8 @@
     "water:find": "tsx tools/find-water-shots.ts",
     "water:probe": "tsx tools/probe-water-margin.ts",
     "water:hydrology": "tsx tools/probe-water-hydrology.ts",
+    "water:seam": "tsx tools/water-hydrology-seam-report.ts",
+    "water:streaming": "tsx tools/water-streaming-report.ts",
     "water:ownership": "tsx tools/water-ownership-report.ts",
     "water:stats": "tsx tools/water-runtime-stats-report.ts",
     "water:report": "tsx tools/water-verify-report.ts",
