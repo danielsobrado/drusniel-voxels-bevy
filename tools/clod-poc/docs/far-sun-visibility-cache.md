@@ -12,7 +12,7 @@ The CLOD-POC far sun visibility cache is a GPU-first far-lighting prototype. CPU
 - The existing far-summary frame hook updates the cache, so its cost is included in `farSummaryMs`.
 - The cache builds a small number of tiles per frame under a millisecond budget.
 - `build.material_tile_radius` controls the camera-centered tile radius queued for far material lighting.
-- Terrain edit revision changes clear cached entries before new tiles are built.
+- Terrain revision bumps invalidate per region: only tiles within shadow-ray reach of newly changed voxel-edit deltas are dropped. Bumps that change no voxels (world rebuilds, snapshot reloads during streaming) leave the cache intact. Edits being removed or reloaded falls back to a full refresh.
 
 ## Cache key
 
@@ -20,7 +20,8 @@ Each entry is keyed by:
 
 - tile coordinates
 - sun direction bin
-- terrain edit revision
+
+Terrain changes invalidate by explicit deletion rather than by embedding a revision in the key, so a global revision bump that did not touch a tile leaves its entry reachable. Open items and future refinements are tracked in [lighting-cache-findings.md](lighting-cache-findings.md).
 
 ## Stored values
 
