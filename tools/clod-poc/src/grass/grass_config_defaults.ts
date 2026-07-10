@@ -12,8 +12,8 @@ import type {
 import { DEFAULT_GRASS_SHADER_MODE } from "./grass_config_types.js";
 
 export const DEFAULT_GRASS_PLACEMENT_SETTINGS: GrassPlacementSettings = {
-  spacingM: 1.45,
-  jitter: 0.34,
+  spacingM: 0.85,
+  jitter: 0.42,
   slopeMinY: 0.72,
   minHeightM: 12,
   maxHeightM: 28,
@@ -21,32 +21,32 @@ export const DEFAULT_GRASS_PLACEMENT_SETTINGS: GrassPlacementSettings = {
 };
 
 export const DEFAULT_GRASS_LOD_SETTINGS: GrassLodSettings = {
-  nearFraction: 0.42,
-  midFraction: 0.78,
-  farDensityRatio: 0.14,
-  midInstanceFraction: 0.35,
-  farInstanceFraction: 0.10,
+  nearFraction: 0.30,
+  midFraction: 0.68,
+  farDensityRatio: 0.16,
+  midInstanceFraction: 0.38,
+  farInstanceFraction: 0.12,
   ditherBandM: 12,
 };
 
 export const DEFAULT_GRASS_BLADE_SETTINGS: GrassBladeSettings = {
-  heightM: 1.15,
-  heightVariation: 0.75,
-  widthM: 0.08,
+  heightM: 0.62,
+  heightVariation: 0.48,
+  widthM: 0.026,
   nearBladesPerInstance: 5,
   midBladesPerInstance: 3,
   nearSegments: 4,
   midSegments: 2,
-  farTuftWidthM: 0.14,
+  farTuftWidthM: 0.11,
   nearCrossedQuads: true,
-  maxWidthCompensation: 1.35,
+  maxWidthCompensation: 1.45,
 };
 
 export const DEFAULT_GRASS_WIND_SETTINGS: GrassWindSettings = {
   direction: [0.8, 0.6],
-  strength: 0.32,
-  speed: 1.35,
-  gustStrength: 0.15,
+  strength: 0.22,
+  speed: 1.15,
+  gustStrength: 0.12,
 };
 
 export const DEFAULT_GRASS_RENDER_SETTINGS: GrassRenderSettings = {
@@ -60,17 +60,17 @@ export const DEFAULT_GRASS_DEBUG_SETTINGS: GrassDebugSettings = {
 };
 
 export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
-  grid: 512,
-  cell: 0.8,
+  grid: 640,
+  cell: 0.5,
   maxRadius: 160,
   ringDistance: 160,
-  nearMeters: 28,
-  midMeters: 80,
-  farMeters: 125,
-  farDistanceFraction: 0.94,
+  nearMeters: 32,
+  midMeters: 82,
+  farMeters: 120,
+  farDistanceFraction: 0.96,
   bandMeters: DEFAULT_GRASS_LOD_SETTINGS.ditherBandM,
-  scruffMeters: 30,
-  scruffMinDensity: 0.28,
+  scruffMeters: 34,
+  scruffMinDensity: 0.36,
 };
 
 export const DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS: GrassPatchFallbackSettings = {
@@ -81,7 +81,7 @@ export const DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS: GrassPatchFallbackSettings =
 export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   enabled: true,
   shaderMode: DEFAULT_GRASS_SHADER_MODE,
-  distanceM: 90,
+  distanceM: 125,
   refreshDistanceM: DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS.refreshDistance,
   maxNewPatchesPerFrame: DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS.maxNewPatchesPerRefresh,
   maxInstances: 32000,
@@ -93,7 +93,7 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   debug: { ...DEFAULT_GRASS_DEBUG_SETTINGS },
   alphaToCoverage: DEFAULT_GRASS_RENDER_SETTINGS.alphaToCoverage,
   nearCrossedQuads: DEFAULT_GRASS_BLADE_SETTINGS.nearCrossedQuads,
-  distance: 90,
+  distance: 125,
   bladeSpacing: DEFAULT_GRASS_PLACEMENT_SETTINGS.spacingM,
   bladeHeight: DEFAULT_GRASS_BLADE_SETTINGS.heightM,
   bladeHeightVariation: DEFAULT_GRASS_BLADE_SETTINGS.heightVariation,
