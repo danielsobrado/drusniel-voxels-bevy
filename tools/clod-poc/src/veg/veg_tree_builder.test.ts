@@ -13,24 +13,31 @@ describe("veg tree builder", () => {
     expect(geometry.getAttribute("position").count).toBeGreaterThan(0);
     expect(geometry.getAttribute("treeWind").itemSize).toBe(2);
     expect(geometry.getAttribute("treeFoliageMask")).toBeTruthy();
+    expect(geometry.getAttribute("treeFoliageCard")).toBeTruthy();
     expect(stats.branches).toBeGreaterThan(1);
     expect(stats.anchors).toBeGreaterThan(0);
     // both bark (mask 0) and foliage (mask 1) verts present
     const mask = geometry.getAttribute("treeFoliageMask");
+    const cards = geometry.getAttribute("treeFoliageCard");
     let min = 1;
     let max = 0;
+    let cardVertices = 0;
     for (let i = 0; i < mask.count; i++) {
       min = Math.min(min, mask.getX(i));
       max = Math.max(max, mask.getX(i));
+      if (cards.getX(i) > 0.5) cardVertices++;
     }
     expect(min).toBe(0);
     expect(max).toBe(1);
+    expect(cardVertices).toBeGreaterThan(0);
+    expect(cardVertices).toBeLessThan(mask.count);
   });
 
   it("is deterministic per seed", () => {
     const a = buildTree(VEG_TREE_SPECIES.pine, vegRng(5, "pine"), { lod: 0, barkColor: VEG_BARK_COLOR.pine });
     const b = buildTree(VEG_TREE_SPECIES.pine, vegRng(5, "pine"), { lod: 0, barkColor: VEG_BARK_COLOR.pine });
     expect(a.geometry.getAttribute("position").count).toBe(b.geometry.getAttribute("position").count);
+    expect(a.geometry.getAttribute("treeFoliageCard").count).toBe(b.geometry.getAttribute("treeFoliageCard").count);
     expect(a.stats).toEqual(b.stats);
   });
 
@@ -40,11 +47,15 @@ describe("veg tree builder", () => {
     expect(counts[2]).toBeLessThan(counts[1]);
   });
 
-  it("dead snag has no foliage (all bark)", () => {
+  it("dead snag has no foliage or foliage cards", () => {
     const { geometry, stats } = buildTree(VEG_TREE_SPECIES.dead, vegRng(3, "dead"), { lod: 0, barkColor: VEG_BARK_COLOR.dead });
     expect(stats.anchors).toBe(0);
     const mask = geometry.getAttribute("treeFoliageMask");
-    for (let i = 0; i < mask.count; i++) expect(mask.getX(i)).toBe(0);
+    const cards = geometry.getAttribute("treeFoliageCard");
+    for (let i = 0; i < mask.count; i++) {
+      expect(mask.getX(i)).toBe(0);
+      expect(cards.getX(i)).toBe(0);
+    }
   });
 
   it("reports per-species/per-LOD vertex counts (budget reconnaissance)", () => {
