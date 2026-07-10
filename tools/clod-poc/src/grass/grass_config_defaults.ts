@@ -33,8 +33,8 @@ export const DEFAULT_GRASS_BLADE_SETTINGS: GrassBladeSettings = {
   heightM: 0.62,
   heightVariation: 0.48,
   widthM: 0.026,
-  nearBladesPerInstance: 5,
-  midBladesPerInstance: 3,
+  nearBladesPerInstance: 7,
+  midBladesPerInstance: 4,
   nearSegments: 4,
   midSegments: 2,
   farTuftWidthM: 0.11,
@@ -60,8 +60,8 @@ export const DEFAULT_GRASS_DEBUG_SETTINGS: GrassDebugSettings = {
 };
 
 export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
-  grid: 640,
-  cell: 0.5,
+  grid: 512,
+  cell: 0.8,
   maxRadius: 160,
   ringDistance: 160,
   nearMeters: 32,
