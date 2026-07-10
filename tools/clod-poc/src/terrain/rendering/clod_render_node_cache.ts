@@ -77,6 +77,10 @@ export class ClodRenderNodeCache {
     this.deps = deps;
   }
 
+  get size(): number {
+    return this.viewMap.size;
+  }
+
   getOrCreate(input: CreateRenderNodeInput): ClodRenderNodeView {
     const existing = this.viewMap.get(input.node.id);
     if (existing) {
@@ -151,6 +155,14 @@ export class ClodRenderNodeCache {
     this.disposeNodeInternal(nodeId, evicted ? "evict" : "dispose");
   }
 
+  clear(): void {
+    for (const nodeId of [...this.viewMap.keys()]) this.disposeNodeInternal(nodeId, "invalidate");
+    this.deps.pageGeometryCache.invalidateAll();
+    this.activeNodeIds.clear();
+    this.warnedAtInactiveNodes = false;
+    this.lastPruneFrame = -Infinity;
+  }
+
   dispose(): void {
     for (const nodeId of [...this.viewMap.keys()]) this.disposeNodeInternal(nodeId, "invalidate");
   }
@@ -218,9 +230,7 @@ export class ClodRenderNodeCache {
       normalMode,
       createGeometry: () => {
         const created = toGeometry(node.mesh);
-        if (recomputedNormals) {
-          created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
-        }
+        if (recomputedNormals) created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
         return created;
       },
     });
@@ -277,10 +287,10 @@ export class ClodRenderNodeCache {
   }
 
   private isActiveView(view: ClodRenderNodeView): boolean {
-    return this.activeNodeIds.has(view.node.id) ||
-      view.selected ||
-      view.target > 0 ||
-      view.fade > 0.001 ||
-      view.mesh.visible;
+    return this.activeNodeIds.has(view.node.id)
+      || view.selected
+      || view.target > 0
+      || view.fade > 0.001
+      || view.mesh.visible;
   }
 }
