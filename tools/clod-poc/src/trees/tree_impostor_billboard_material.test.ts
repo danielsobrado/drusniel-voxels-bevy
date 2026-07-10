@@ -63,13 +63,13 @@ describe("tree impostor billboard materials", () => {
     expect(source).toContain("TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
   });
 
-  it("uses physical WebGPU node materials with impostor normal nodes", () => {
+  it("uses unlit WebGPU node materials so the manual relight is not lit twice", () => {
     const source = readFileSync(new URL("./tree_impostor_material.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("MeshPhysicalNodeMaterial");
-    expect(source).toContain("createTreePhysicalNodeMaterial");
+    expect(source).not.toContain("MeshPhysicalNodeMaterial");
+    expect(source).toContain("createTreeUnlitImpostorNodeMaterial");
+    expect(source).toContain("new MeshBasicNodeMaterial()");
     expect(source).toContain("material.normalNode = normalNode");
-    expect(source).toContain("TREE_IMPOSTOR_PHYSICAL_ROUGHNESS");
   });
 
   it("coverage-normalizes straight-alpha atlas colors before relighting", () => {

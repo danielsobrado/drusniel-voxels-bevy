@@ -91,13 +91,13 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("relightTreeRingImpostor(albedo, impostor.normal, billboardNormal");
   });
 
-  it("uses physical WebGPU node materials with impostor normal nodes", () => {
+  it("uses unlit WebGPU node materials so the manual relight is not lit twice", () => {
     const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("MeshPhysicalNodeMaterial");
-    expect(source).toContain("createTreeRingPhysicalNodeMaterial");
+    expect(source).not.toContain("MeshPhysicalNodeMaterial");
+    expect(source).toContain("createTreeRingUnlitImpostorNodeMaterial");
+    expect(source).toContain("new MeshBasicNodeMaterial()");
     expect(source).toContain("material.normalNode = normalNode");
-    expect(source).toContain("TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS");
   });
 
   it("coverage-normalizes albedo and four-frame normal blends", () => {

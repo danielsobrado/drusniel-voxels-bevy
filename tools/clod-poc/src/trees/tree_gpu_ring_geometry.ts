@@ -27,6 +27,9 @@ export function selectTreeGpuRingGeometry(input: TreeGpuRingGeometryInput): Tree
 
   const atlas = input.impostorAtlases[input.species];
   if (!input.settings.impostors.enabled || !atlas?.ready) {
+    if (input.settings.impostors.enabled && input.settings.impostors.fallbackToPlaceholder) {
+      return { geometry: input.geometries[input.species].impostor, bakedImpostor: false };
+    }
     return { geometry: EMPTY_GPU_RING_IMPOSTOR_GEOMETRY, bakedImpostor: false };
   }
 

@@ -4,9 +4,11 @@ import {
   attribute,
   clamp,
   float,
+  frontFacing,
   normalize,
   positionView,
   sqrt,
+  vec3,
 } from "three/tsl";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
@@ -25,8 +27,16 @@ import {
   trackedShaderMaterial,
 } from "../rendering/material_churn/tracked_material_factory.js";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type TslNode = any;
+
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
 const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
+/** Variant pages stacked in each atlas. Structural variants above this share
+ *  the canonical frames; yaw/scale variation covers the rest at impostor
+ *  distance. Each page costs gridSize²·resolution²·2 textures of GPU memory
+ *  and a full bake pass per species, so keep this small. */
+export const TREE_IMPOSTOR_MAX_ATLAS_VARIANTS = 2;
 
 export interface TreeImpostorAtlas {
   species: TreeSpeciesId;
@@ -202,7 +212,7 @@ export function treeImpostorVariantCountForAtlas(atlas: TreeImpostorAtlas): numb
 function treeImpostorVariantCount(geometries: TreeGeometryMap, species: TreeSpeciesId): number {
   const variants = geometries[species].variants;
   if (!variants) return 1;
-  return Math.max(1, Math.min(TREE_STRUCTURAL_VARIANTS, Object.keys(variants).length));
+  return Math.max(1, Math.min(TREE_STRUCTURAL_VARIANTS, TREE_IMPOSTOR_MAX_ATLAS_VARIANTS, Object.keys(variants).length));
 }
 
 function normalizeTreeImpostorVariant(variant: number): number {
@@ -341,7 +351,8 @@ function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettin
   if (webgpu) {
     const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), "tree-impostor-bake-albedo-node");
     material.name = "tree-impostor-albedo-bake";
-    material.colorNode = sqrt(clamp(attribute("color", "vec3"), 0.0, 1.0));
+    const vertexAlbedo: TslNode = clamp(attribute("color", "vec3"), vec3(0.0), vec3(1.0));
+    material.colorNode = sqrt(vertexAlbedo);
     material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -384,7 +395,12 @@ function createNormalDepthBakeMaterial(near: number, far: number, webgpu: boolea
       1.0,
     );
     material.name = "tree-impostor-normal-depth-bake";
-    material.colorNode = normalize(attribute("normal", "vec3")).mul(0.5).add(0.5);
+    // Flip backface normals into the camera-facing hemisphere: the source tree
+    // renders DoubleSide, and raw backface normals point into the tree, which
+    // relights sharp-mip card texels to near-black.
+    const localNormal: TslNode = normalize(attribute("normal", "vec3"));
+    const facingNormal: TslNode = (frontFacing as TslNode).select(localNormal, localNormal.negate());
+    material.colorNode = facingNormal.mul(0.5).add(0.5);
     material.opacityNode = linearDepth;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -425,7 +441,9 @@ varying vec3 vTreeImpostorLocalNormal;
 varying float vTreeImpostorLinearDepth;
 
 void main() {
-  vec3 packedNormal = normalize(vTreeImpostorLocalNormal) * 0.5 + 0.5;
+  vec3 facingNormal = normalize(vTreeImpostorLocalNormal);
+  if (!gl_FrontFacing) facingNormal = -facingNormal;
+  vec3 packedNormal = facingNormal * 0.5 + 0.5;
   gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth);
 }
 `;

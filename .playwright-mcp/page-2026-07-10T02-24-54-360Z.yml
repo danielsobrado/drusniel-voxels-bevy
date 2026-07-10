@@ -1,0 +1,66 @@
+- generic [active] [ref=e1]:
+  - generic:
+    - generic "CLOD runtime overlay":
+      - generic [ref=e2]:
+        - banner [ref=e3]:
+          - generic [ref=e4]: CLOD Runtime
+          - generic [ref=e5]:
+            - button "Minimize" [ref=e6] [cursor=pointer]: −
+            - button "Close" [ref=e7] [cursor=pointer]: ×
+        - generic [ref=e9]:
+          - strong [ref=e11]: 2x2 pages
+          - generic [ref=e12]:
+            - generic [ref=e14]:
+              - generic [ref=e15]: Triangles
+              - generic [ref=e16]: "0"
+            - generic [ref=e19]:
+              - generic [ref=e20]: LOD cut
+              - generic [ref=e21]: none
+            - generic [ref=e23]:
+              - generic [ref=e24]: 2:1 splits
+              - generic [ref=e25]: "0"
+            - generic [ref=e28]:
+              - generic [ref=e29]: Blocked
+              - generic [ref=e30]: "0"
+            - generic [ref=e33]:
+              - generic [ref=e34]: Bubble splits
+              - generic [ref=e35]: "0"
+            - generic [ref=e38]:
+              - generic [ref=e39]: Error threshold
+              - generic [ref=e40]: 1.00 px
+          - generic [ref=e43]:
+            - generic [ref=e44]: live cut
+            - generic [ref=e45]: tree gpu unknown
+            - generic [ref=e46]: preparing
+    - complementary "Runtime debug stats" [ref=e47]:
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - generic [ref=e50]: Debug stats
+          - generic [ref=e51]:
+            - button "Minimize" [ref=e52] [cursor=pointer]: −
+            - button "Close" [ref=e53] [cursor=pointer]: ×
+        - generic [ref=e54]:
+          - generic: building…
+  - navigation "Project and community links" [ref=e55]:
+    - button "Import project" [ref=e56] [cursor=pointer]:
+      - generic [ref=e58]: Import project
+    - button "Export project" [ref=e59] [cursor=pointer]:
+      - generic [ref=e61]: Export project
+    - link "Join us on Discord" [ref=e62] [cursor=pointer]:
+      - /url: https://discord.gg/JXrSfsDVF
+      - img [ref=e63]
+    - link "Star the repo" [ref=e65] [cursor=pointer]:
+      - /url: https://github.com/danielsobrado/drusniel-voxels-web
+      - img [ref=e66]
+  - generic "View mode" [ref=e68]:
+    - button "Orbit" [pressed] [ref=e69] [cursor=pointer]:
+      - generic [ref=e71]: Orbit
+    - button "Player" [ref=e72] [cursor=pointer]:
+      - generic [ref=e74]: Player
+    - generic [ref=e75]: Orbit camera
+  - generic "Terraform brush" [ref=e76]
+  - generic [ref=e77]:
+    - generic [ref=e78]:
+      - generic [ref=e79]: preparing
+      - generic [ref=e80]: 0%
+    - progressbar [ref=e81]

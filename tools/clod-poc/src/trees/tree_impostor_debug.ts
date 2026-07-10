@@ -45,6 +45,11 @@ export function publishTreeImpostorDebugStatus(
       centerY: Number.isFinite(atlas.centerY) ? atlas.centerY ?? null : null,
     };
   }
-  if (typeof window !== "undefined") window.__drusnielTreeImpostors = status;
+  if (typeof window !== "undefined") {
+    window.__drusnielTreeImpostors = status;
+    // Live atlas references for automation/diagnostic tooling (textures are
+    // owned by the atlases; this adds no GPU memory).
+    (window as unknown as { __drusnielTreeImpostorAtlasRefs?: unknown }).__drusnielTreeImpostorAtlasRefs = atlases;
+  }
   return status;
 }

@@ -90,7 +90,8 @@ describe("tree impostor material contracts", () => {
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("return ign < fade");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("return ign >= 1.0 - fade");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("vTreeImpostorLodDitherRole");
-    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("color.rgb * color.rgb");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorDecodeAlbedo");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("encoded * encoded");
   });
 
   it("keeps four-tile blend shader attributes, complementary dither roles, and weighted relighting path stable", () => {
@@ -102,7 +103,7 @@ describe("tree impostor material contracts", () => {
     expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("attribute float treeLodFade");
     expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("attribute float treeLodDitherRole");
     expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("varying float vTreeImpostorLodDitherRole");
-    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("vTreeImpostorBlendWeights.x");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("dot(coverages, vTreeImpostorBlendWeights)");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("normalDepthMap");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorRelight");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorBlendPackedNormal");

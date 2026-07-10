@@ -150,6 +150,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
+  (window as unknown as { __drusnielScene?: THREE.Scene }).__drusnielScene = scene;
   let anyBodyInWorld = false;
   for (const lake of waterConfig.fakeBodies.lakes) {
     if (lake.center[0] >= 0 && lake.center[0] <= worldCells && lake.center[1] >= 0 && lake.center[1] <= worldCells) {

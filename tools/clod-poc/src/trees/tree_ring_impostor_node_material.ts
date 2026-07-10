@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import * as THREE_WEBGPU from "three/webgpu";
 import {
   abs,
   cameraPosition,
@@ -57,8 +56,6 @@ const LOD_COLORS: Record<TreeLod, THREE.Color> = {
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
-const TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS = 0.82;
-const TREE_RING_IMPOSTOR_PHYSICAL_METALNESS = 0.0;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_RING_IMPOSTOR_MIN_COVERAGE = 0.0001;
 const TREE_RING_VARIANT_SALT = 1571;
@@ -132,7 +129,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const mask: TslNode = aboveWater ? alphaMask.and(aboveWater) : alphaMask;
 
-    const material = createTreeRingPhysicalNodeMaterial();
+    const material = createTreeRingUnlitImpostorNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
     material.normalNode = normalNode;
@@ -179,15 +176,12 @@ export function createTreeRingImpostorNodeMaterialHandle(
   };
 }
 
-function createTreeRingPhysicalNodeMaterial(): TreeRingNodeMaterial {
-  const PhysicalCtor = ((THREE_WEBGPU as unknown as { MeshPhysicalNodeMaterial?: new () => MeshBasicNodeMaterial }).MeshPhysicalNodeMaterial
-    ?? MeshBasicNodeMaterial) as new () => MeshBasicNodeMaterial;
-  const material = new PhysicalCtor() as TreeRingNodeMaterial;
-  material.roughness = TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS;
-  material.metalness = TREE_RING_IMPOSTOR_PHYSICAL_METALNESS;
-  material.roughnessNode = float(TREE_RING_IMPOSTOR_PHYSICAL_ROUGHNESS);
-  material.metalnessNode = float(TREE_RING_IMPOSTOR_PHYSICAL_METALNESS);
-  return material;
+function createTreeRingUnlitImpostorNodeMaterial(): TreeRingNodeMaterial {
+  // Unlit like every other tree material: colorNode already carries the manual
+  // sun/sky relight. A lit (physical) material would shade that color a second
+  // time with scene lights and the captured normal, collapsing sun-averse card
+  // texels to black and washing distant mips toward grey.
+  return new MeshBasicNodeMaterial() as TreeRingNodeMaterial;
 }
 
 function treeRingCylindricalBillboardNormal(worldXZ: TslNode): TslNode {

@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import * as THREE_WEBGPU from "three/webgpu";
 import {
   attribute,
   cameraPosition,
@@ -55,8 +54,6 @@ const TREE_IMPOSTOR_AMBIENT = 0.25;
 const TREE_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_IMPOSTOR_SUN_MAX = 0.85;
-const TREE_IMPOSTOR_PHYSICAL_ROUGHNESS = 0.82;
-const TREE_IMPOSTOR_PHYSICAL_METALNESS = 0.0;
 const TREE_IMPOSTOR_MIN_COVERAGE = 0.0001;
 
 export function createTreeImpostorNodeMaterial(
@@ -70,7 +67,7 @@ export function createTreeImpostorNodeMaterial(
   const normalSample: TslNode | null = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null;
   const billboardNormal = treeImpostorNodeBillboardNormal();
   const normalNode = normalSample ? treeImpostorNodeSurfaceNormal(normalSample, billboardNormal) : billboardNormal;
-  const material = createTreePhysicalNodeMaterial(`tree-impostor-node-material:${atlas.species}`);
+  const material = createTreeUnlitImpostorNodeMaterial(`tree-impostor-node-material:${atlas.species}`);
   material.positionNode = treeImpostorNodeBillboardPosition(billboardNormal);
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample, billboardNormal) : albedo;
   material.normalNode = normalNode;
@@ -102,7 +99,7 @@ export function createTreeImpostorBlendNodeMaterial(
     : null;
   const billboardNormal = treeImpostorNodeBillboardNormal();
   const normalNode = normalSample ? treeImpostorNodeSurfaceNormal(normalSample, billboardNormal) : billboardNormal;
-  const material = createTreePhysicalNodeMaterial(`tree-impostor-blend-node-material:${atlas.species}`);
+  const material = createTreeUnlitImpostorNodeMaterial(`tree-impostor-blend-node-material:${atlas.species}`);
   material.positionNode = treeImpostorNodeBillboardPosition(billboardNormal);
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample, billboardNormal) : albedo;
   material.normalNode = normalNode;
@@ -198,15 +195,12 @@ function blendCoverageNormalizedTreeImpostorNodeAlbedo(
     .div(max(coverage, float(TREE_IMPOSTOR_MIN_COVERAGE)));
 }
 
-function createTreePhysicalNodeMaterial(name: string): TreeNodeMaterial {
-  const PhysicalCtor = ((THREE_WEBGPU as unknown as { MeshPhysicalNodeMaterial?: new () => MeshBasicNodeMaterial }).MeshPhysicalNodeMaterial
-    ?? MeshBasicNodeMaterial) as new () => MeshBasicNodeMaterial;
-  const material = trackCreatedMaterial(new PhysicalCtor(), name) as TreeNodeMaterial;
-  material.roughness = TREE_IMPOSTOR_PHYSICAL_ROUGHNESS;
-  material.metalness = TREE_IMPOSTOR_PHYSICAL_METALNESS;
-  material.roughnessNode = float(TREE_IMPOSTOR_PHYSICAL_ROUGHNESS);
-  material.metalnessNode = float(TREE_IMPOSTOR_PHYSICAL_METALNESS);
-  return material;
+function createTreeUnlitImpostorNodeMaterial(name: string): TreeNodeMaterial {
+  // Unlit like every other tree material: colorNode already carries the manual
+  // sun/sky relight. A lit (physical) material would shade that color a second
+  // time with scene lights and the captured normal, collapsing sun-averse card
+  // texels to black and washing distant mips toward grey.
+  return trackCreatedMaterial(new MeshBasicNodeMaterial(), name) as TreeNodeMaterial;
 }
 
 function treeImpostorNodeBillboardNormal(): TslNode {

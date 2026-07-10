@@ -245,6 +245,8 @@ class FarClipmapControllerImpl implements FarClipmapController {
   private snapX = Number.NaN;
   private snapZ = Number.NaN;
   private lastSourceRevision = 0;
+  private firstObservedRevision = Number.NaN;
+  private revisionChannelLive = false;
   private lastStats: FarClipmapStats;
   private totalBuildMs = 0;
   private totalSourceRefreshes = 0;
@@ -303,6 +305,10 @@ class FarClipmapControllerImpl implements FarClipmapController {
     const frameStats = emptyFrameStats();
     const sourceReady = this.source.isReady?.() ?? true;
     this.lastSourceRevision = this.sourceRevision();
+    // Once the source's revision has been seen to change, the revision channel is trusted for
+    // change detection and the periodic full re-sample below becomes redundant.
+    if (!Number.isFinite(this.firstObservedRevision)) this.firstObservedRevision = this.lastSourceRevision;
+    else if (this.lastSourceRevision !== this.firstObservedRevision) this.revisionChannelLive = true;
     if (!this.config.enabled) {
       this.lastStats = makeStats(this.config, false, 0, frameStats, sourceReady, this.totals(), this.snapshot());
       return this.lastStats;
@@ -434,6 +440,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
     if (frameStats.sourceRefreshes >= this.config.sourceRefreshMaxPerFrame) return false;
     if (!Number.isFinite(ring.readySnapX) || !Number.isFinite(ring.readySnapZ)) return false;
     if (ring.sourceRevision !== this.lastSourceRevision) return true;
+    // Interval polling only guards sources that never report a revision change; each poll
+    // re-samples the full source texture on the CPU, far too hot to run against a live channel.
+    if (this.revisionChannelLive) return false;
     return this.frameIndex - ring.lastSourceRefreshFrame >= this.config.sourceRefreshIntervalFrames;
   }
 

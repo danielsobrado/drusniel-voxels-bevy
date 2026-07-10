@@ -74,6 +74,9 @@ export function createCanopyClipmap(): CanopyClipmap {
   let centerInitialized = false;
   let lastCenterX = 0;
   let lastCenterZ = 0;
+  // Tile cells are immutable once built, so the coverage aggregates only change when the tile
+  // set changes; scanning every cell of every tile per frame is far too hot for the frame loop.
+  let coverageStatsDirty = true;
 
   const buildTile = (
     key: CanopyWorldKey,
@@ -197,19 +200,22 @@ export function createCanopyClipmap(): CanopyClipmap {
       metrics.visibleTiles = tiles.size;
       metrics.buildMs = performance.now() - t0;
 
-      let covSum = 0;
-      let covMax = 0;
-      let covCount = 0;
-      for (const tile of tiles.values()) {
-        for (const cell of tile.cells) {
-          if (!Number.isFinite(cell.coverage)) continue;
-          covSum += cell.coverage;
-          covMax = Math.max(covMax, cell.coverage);
-          covCount++;
+      if (built > 0 || metrics.evictedTiles > 0 || coverageStatsDirty) {
+        let covSum = 0;
+        let covMax = 0;
+        let covCount = 0;
+        for (const tile of tiles.values()) {
+          for (const cell of tile.cells) {
+            if (!Number.isFinite(cell.coverage)) continue;
+            covSum += cell.coverage;
+            covMax = Math.max(covMax, cell.coverage);
+            covCount++;
+          }
         }
+        metrics.averageCoverage = covCount > 0 ? covSum / covCount : 0;
+        metrics.maxCoverage = covMax;
+        coverageStatsDirty = false;
       }
-      metrics.averageCoverage = covCount > 0 ? covSum / covCount : 0;
-      metrics.maxCoverage = covMax;
 
       return {
         metrics: { ...metrics },
@@ -238,6 +244,7 @@ export function createCanopyClipmap(): CanopyClipmap {
       staleSince.clear();
       rebuildQueue.length = 0;
       metrics = { ...createEmptyCanopyMetrics(), evictedTiles: n };
+      coverageStatsDirty = true;
     },
     dispose() {
       tiles.clear();
@@ -246,6 +253,7 @@ export function createCanopyClipmap(): CanopyClipmap {
       rebuildQueue.length = 0;
       metrics = createEmptyCanopyMetrics();
       centerInitialized = false;
+      coverageStatsDirty = true;
     },
   };
 }
