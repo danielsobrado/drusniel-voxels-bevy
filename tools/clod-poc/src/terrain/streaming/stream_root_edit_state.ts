@@ -9,8 +9,12 @@ export class StreamRootEditState {
     this.cpuAuthoritativeIds.add(id);
   }
 
+  cpuAuthoritative(ids: readonly string[]): string[] {
+    return ids.filter((id) => this.cpuAuthoritativeIds.has(id));
+  }
+
   requiresCpu(ids: readonly string[]): boolean {
-    return ids.some((id) => this.cpuAuthoritativeIds.has(id));
+    return this.cpuAuthoritative(ids).length > 0;
   }
 
   captureDirty(ids: readonly string[]): StreamRootDirtySnapshot {
