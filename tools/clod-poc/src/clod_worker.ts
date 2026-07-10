@@ -531,7 +531,7 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
     const node = buildStreamRootNode(rootLevel, px, pz, world);
     const buildMs = performance.now() - buildStart;
     nodes.push(node);
-    await storeStreamRootNode(workerCacheCtx, "cpu", node, buildMs, cacheStats);
+    if (!bypassCache) await storeStreamRootNode(workerCacheCtx, "cpu", node, buildMs, cacheStats);
   }
   if (workerCacheCtx) await workerCacheCtx.service.flush();
 
