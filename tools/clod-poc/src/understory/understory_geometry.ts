@@ -13,6 +13,9 @@ export { GeometryBuilder, maxAttributeValue } from "./understory_geometry_builde
 
 export type UnderstoryGeometryMap = Record<UnderstoryClass, THREE.BufferGeometry>;
 
+const GROUND_LITTER_DARK = new THREE.Color(0x3b3324);
+const GROUND_LITTER_LIGHT = new THREE.Color(0x786646);
+
 function classSeed(seed: number, cls: UnderstoryClass): number {
   return (Math.floor(seed) ^ CLASS_SALT[cls]) | 0;
 }
@@ -45,6 +48,7 @@ export function createUnderstoryGeometry(cls: UnderstoryClass, settings: Underst
   else if (cls === "flower") appendFlower(builder, settings.classes.flower.windWeight, rng);
   else if (cls === "dead_log") appendDeadLog(builder);
   else appendStump(builder);
+  appendGroundLitter(builder, rng, groundLitterCount(cls));
   const geometry = builder.build();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
@@ -196,4 +200,60 @@ function appendDeadLog(builder: GeometryBuilder): void {
 function appendStump(builder: GeometryBuilder): void {
   builder.addCylinder(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.42, 0), 0.18, 0.15, 9, BARK, 0);
   builder.addDisk(new THREE.Vector3(0, 0.43, 0), 0.15, 9, DEAD_WOOD);
+}
+
+function groundLitterCount(cls: UnderstoryClass): number {
+  if (cls === "fern") return 4;
+  if (cls === "dead_log") return 4;
+  if (cls === "shrub" || cls === "stump") return 3;
+  if (cls === "sapling") return 2;
+  return 0;
+}
+
+function appendGroundLitter(builder: GeometryBuilder, rng: Rng, count: number): void {
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < count; i++) {
+    const radialAngle = rng.float() * Math.PI * 2;
+    const radius = 0.12 + rng.float() * 0.42;
+    const centerX = Math.cos(radialAngle) * radius;
+    const centerZ = Math.sin(radialAngle) * radius;
+    const yaw = rng.float() * Math.PI * 2;
+    const length = 0.10 + rng.float() * 0.12;
+    const width = 0.025 + rng.float() * 0.035;
+    const dirX = Math.cos(yaw);
+    const dirZ = Math.sin(yaw);
+    const acrossX = -dirZ;
+    const acrossZ = dirX;
+    const y = 0.006 + i * 0.0005;
+    const color = GROUND_LITTER_DARK.clone().lerp(GROUND_LITTER_LIGHT, 0.2 + rng.float() * 0.65);
+    const base = builder.addVertex(
+      new THREE.Vector3(centerX - dirX * length * 0.5, y, centerZ - dirZ * length * 0.5),
+      up,
+      color,
+      0,
+      [0.5, 0],
+    );
+    const left = builder.addVertex(
+      new THREE.Vector3(centerX - acrossX * width, y + 0.002, centerZ - acrossZ * width),
+      up,
+      color,
+      0,
+      [0, 0.5],
+    );
+    const tip = builder.addVertex(
+      new THREE.Vector3(centerX + dirX * length * 0.5, y + 0.008, centerZ + dirZ * length * 0.5),
+      up,
+      color,
+      0,
+      [0.5, 1],
+    );
+    const right = builder.addVertex(
+      new THREE.Vector3(centerX + acrossX * width, y + 0.002, centerZ + acrossZ * width),
+      up,
+      color,
+      0,
+      [1, 0.5],
+    );
+    builder.addQuad(base, left, tip, right);
+  }
 }
