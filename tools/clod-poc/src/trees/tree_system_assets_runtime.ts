@@ -13,6 +13,7 @@ import { publishTreeImpostorDebugStatus } from "./tree_impostor_debug.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import { bakeTreeFoliageAtlas, replaceTreeFoliageAtlasData } from "./tree_foliage_atlas_baker.js";
+import { publishTreeFoliageAtlasDebugStatus } from "./tree_foliage_atlas_debug.js";
 import { decorateTreeMaterialHandle } from "./tree_material_parity.js";
 import {
   disposeTreeSystemBakedImpostorGeometries,
@@ -66,6 +67,7 @@ export class TreeSystemAssets {
     this.geometryKey = treeGeometryKey(this.settings);
     this.foliageAtlas = createTreeFoliageAtlas(this.settings);
     this.materialHandle = this.createMaterialHandle();
+    this.publishFoliageAtlasStatus();
     this.impostorStatus = this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
       ? "pending"
       : "disabled";
@@ -93,6 +95,7 @@ export class TreeSystemAssets {
     this.foliageAtlasStatus = "generated";
     this.foliageAtlasReason = null;
     this.materialHandle = this.createMaterialHandle();
+    this.publishFoliageAtlasStatus();
     this.disposeBakedImpostorGeometries();
   }
 
@@ -209,6 +212,7 @@ export class TreeSystemAssets {
   private async captureFoliageAtlas(renderer: unknown): Promise<void> {
     this.foliageAtlasStatus = "capturing";
     this.foliageAtlasReason = null;
+    this.publishFoliageAtlasStatus();
     const result = await bakeTreeFoliageAtlas({
       renderer,
       settings: this.settings,
@@ -217,10 +221,20 @@ export class TreeSystemAssets {
     if (result.supported && result.atlas) {
       replaceTreeFoliageAtlasData(this.foliageAtlas, result.atlas);
       this.foliageAtlasStatus = "captured";
+      this.publishFoliageAtlasStatus();
       return;
     }
     this.foliageAtlasStatus = "fallback";
     this.foliageAtlasReason = result.reason;
+    this.publishFoliageAtlasStatus();
+  }
+
+  private publishFoliageAtlasStatus(): void {
+    publishTreeFoliageAtlasDebugStatus(
+      this.foliageAtlas,
+      this.foliageAtlasStatus,
+      this.foliageAtlasReason,
+    );
   }
 
   private createMaterialHandle(): TreeMaterialHandle {
