@@ -20,9 +20,29 @@ export interface SdfBrushRasterizeInput {
   epsilon?: number;
 }
 
+function emptyTransaction(input: SdfBrushRasterizeInput): VoxelEditTransaction {
+  return {
+    id: input.id,
+    source: "sdf-brush",
+    revisionBase: input.revisionBase,
+    deltas: [],
+    previousValues: [],
+    dirtyChunks: [],
+    dirtyBounds: { ...input.bounds },
+    affectedMaterialSlots: [],
+  };
+}
+
 export function rasterizeSdfBrushToVoxelTransaction(
   input: SdfBrushRasterizeInput,
 ): VoxelEditTransaction {
+  if (!Number.isFinite(input.brush.strength) || !Number.isFinite(input.brush.radius) || !Number.isFinite(input.brush.height)) {
+    throw new Error("SDF brush dimensions and strength must be finite");
+  }
+  if (input.brush.strength <= 0 || input.brush.radius <= 0 || input.brush.height <= 0) {
+    return emptyTransaction(input);
+  }
+
   const epsilon = input.epsilon ?? 1e-6;
   const deltas: VoxelEditTransaction["deltas"] extends readonly (infer T)[] ? T[] : never = [];
   const dirtyChunks = new Map<string, VoxelChunkKey>();
