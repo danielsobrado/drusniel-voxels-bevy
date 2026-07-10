@@ -63,13 +63,13 @@ const FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vWorldNormal;
 
   void main() {
-    vec3 darkGreen = vec3(0.035, 0.12, 0.025);
-    vec3 midGreen = vec3(0.12, 0.34, 0.055);
-    vec3 tipGreen = vec3(0.34, 0.56, 0.12);
-    vec3 dryGrass = vec3(0.52, 0.42, 0.12);
+    vec3 darkGreen = vec3(0.018, 0.055, 0.012);
+    vec3 midGreen = vec3(0.075, 0.16, 0.035);
+    vec3 tipGreen = vec3(0.18, 0.28, 0.08);
+    vec3 dryGrass = vec3(0.28, 0.22, 0.08);
     vec3 grassColor = mix(darkGreen, midGreen, smoothstep(0.0, 0.62, vUv.y));
     grassColor = mix(grassColor, tipGreen, smoothstep(0.58, 1.0, vUv.y));
-    grassColor = mix(grassColor, dryGrass, vColorMix * 0.58);
+    grassColor = mix(grassColor, dryGrass, vColorMix * 0.48);
 
     vec3 n = normalize(vWorldNormal);
     if (!gl_FrontFacing) n = -n;
@@ -78,9 +78,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     float back = max(dot(-n, lightDirection), 0.0);
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
-    vec3 direct = uSunColor * pow(sun, 1.25);
-    vec3 transmission = vec3(0.46, 0.55, 0.12) * back * (0.16 + vUv.y * 0.5);
-    gl_FragColor = vec4(grassColor * (hemi + direct) + transmission * grassColor, 1.0);
+    vec3 direct = uSunColor * pow(sun, 1.25) * 0.82;
+    vec3 transmission = vec3(0.32, 0.42, 0.10) * back * (0.12 + vUv.y * 0.34);
+    vec3 ambientFloor = grassColor * 0.22;
+    gl_FragColor = vec4(ambientFloor + grassColor * (hemi + direct) + transmission * grassColor, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -192,13 +193,13 @@ const TERRAIN_PATCH_FRAGMENT_SHADER = /* glsl */ `
     float cutoff = a2c ? 0.003 : bayer4(gl_FragCoord.xy);
     if (coverage < cutoff) discard;
 
-    vec3 base = vec3(0.04, 0.16, 0.035);
-    vec3 mid = vec3(0.16, 0.36, 0.075);
-    vec3 tip = vec3(0.43, 0.58, 0.16);
-    vec3 dry = vec3(0.48, 0.38, 0.11);
+    vec3 base = vec3(0.018, 0.055, 0.012);
+    vec3 mid = vec3(0.075, 0.17, 0.035);
+    vec3 tip = vec3(0.20, 0.30, 0.085);
+    vec3 dry = vec3(0.30, 0.24, 0.09);
     vec3 color = mix(base, mid, smoothstep(0.0, 0.7, vUv.y));
     color = mix(color, tip, smoothstep(0.62, 1.0, vUv.y));
-    color = mix(color, dry, vColorMix * 0.42);
+    color = mix(color, dry, vColorMix * 0.35);
 
     vec3 n = normalize(vWorldNormal);
     if (!gl_FrontFacing) n = -n;
@@ -207,9 +208,10 @@ const TERRAIN_PATCH_FRAGMENT_SHADER = /* glsl */ `
     float wrap = clamp(dot(n, lightDirection) * 0.45 + 0.55, 0.0, 1.0);
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
-    vec3 direct = uSunColor * (sun * 0.65 + wrap * 0.28);
-    vec3 transmission = vec3(0.42, 0.52, 0.12) * max(dot(-n, lightDirection), 0.0) * (0.14 + vUv.y * 0.42);
-    gl_FragColor = vec4(color * (hemi + direct) + transmission * color, a2c ? coverage : 1.0);
+    vec3 direct = uSunColor * (sun * 0.58 + wrap * 0.22);
+    vec3 transmission = vec3(0.32, 0.42, 0.10) * max(dot(-n, lightDirection), 0.0) * (0.12 + vUv.y * 0.34);
+    vec3 ambientFloor = color * 0.22;
+    gl_FragColor = vec4(ambientFloor + color * (hemi + direct) + transmission * color, a2c ? coverage : 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
