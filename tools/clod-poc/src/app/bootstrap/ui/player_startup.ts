@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { surfaceHeight } from "../../../terrain/terrain.js";
+import { getDigEditRevision, surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
 import { createFirstPersonWeapon, createSwordAttackController } from "../../../combat/index.js";
@@ -95,6 +95,7 @@ export function runPlayerStartup(
       brushOp: state.brushOp,
       digRadius: state.digRadius,
       brushHeight: state.brushHeight,
+      terrainRevision: getDigEditRevision(),
       raycastEditableTerrain: (ray) => terrainRaycast.raycastEditableTerrain(ray),
       getPlayingAimRay: () => playerInputController.getPlayingAimRay(),
       getOrbitHoverRay: () => playerInputController.getOrbitHoverRay(),
