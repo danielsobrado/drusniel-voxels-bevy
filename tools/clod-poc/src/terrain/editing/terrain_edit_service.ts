@@ -213,8 +213,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   const dirtyReasonFor = (edit: DigEdit, label: string): TerrainEditDirtyReason => {
     if (label.startsWith("construction")) return "build";
-    if (edit.op === "add") return edit.material === undefined ? "raise" : "paint";
-    return "dig";
+    return edit.op === "add" ? "raise" : "dig";
   };
 
   const publishDirtyEdit = (edit: DigEdit, label: string): void => {
@@ -234,6 +233,12 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       counters["terrain_edit_dirty_queue_size"] = snapshot.queued;
       counters["terrain_edit_dirty_revision"] = snapshot.latestRevision;
     }
+  };
+
+  const reportNoOp = (summary: string): void => {
+    lastDigAt = performance.now();
+    deps.setLastDigSummary(summary);
+    deps.updateInfo();
   };
 
   const performEditRebuild = async (
@@ -334,8 +339,12 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       material: brushParams.brushOp === "add" ? brushParams.brushMaterial : undefined,
       height: brushParams.brushHeight, strength: brushParams.brushStrength, falloff: brushParams.brushFalloff,
     };
-    const hadPaintedTerrain = hasPaintedTerrainEdits();
     const transaction = voxelTransactionFromDigEdit(edit);
+    if (transaction.deltas.length === 0) {
+      reportNoOp("no terrain changed");
+      return;
+    }
+    const hadPaintedTerrain = hasPaintedTerrainEdits();
     applyDigEditTransaction(transaction, edit);
 
     emitAudio(brushParams.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
@@ -398,28 +407,38 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       falloff: request.falloffM,
     };
 
+    let changed = false;
     const hadPaintedTerrain = hasPaintedTerrainEdits();
     const fillTransaction = voxelTransactionFromDigEdit(fillEdit);
-    applyDigEditTransaction(fillTransaction, fillEdit);
-    emitAudio("terrain.raise");
-    const fillStatus = await performEditRebuild(fillEdit, fillTransaction, hit, radius, "construction terrain fill");
-    if (fillStatus === "rejected") {
-      rollbackDigEditTransaction(fillTransaction);
+    if (fillTransaction.deltas.length > 0) {
+      applyDigEditTransaction(fillTransaction, fillEdit);
+      emitAudio("terrain.raise");
+      const fillStatus = await performEditRebuild(fillEdit, fillTransaction, hit, radius, "construction terrain fill");
+      if (fillStatus === "rejected") {
+        rollbackDigEditTransaction(fillTransaction);
+        if (!hadPaintedTerrain) deps.applyTerrainTextures();
+        deps.updateInfo();
+        return;
+      }
+      changed = true;
       if (!hadPaintedTerrain) deps.applyTerrainTextures();
-      deps.updateInfo();
-      return;
     }
-    if (!hadPaintedTerrain) deps.applyTerrainTextures();
 
     if (request.trimHeightM > 0) {
       const trimTransaction = voxelTransactionFromDigEdit(trimEdit);
-      applyDigEditTransaction(trimTransaction, trimEdit);
-      const trimStatus = await performEditRebuild(trimEdit, trimTransaction, hit, radius, "construction terrain trim");
-      if (trimStatus === "rejected") {
-        rollbackDigEditTransaction(trimTransaction);
-        deps.updateInfo();
+      if (trimTransaction.deltas.length > 0) {
+        applyDigEditTransaction(trimTransaction, trimEdit);
+        const trimStatus = await performEditRebuild(trimEdit, trimTransaction, hit, radius, "construction terrain trim");
+        if (trimStatus === "rejected") {
+          rollbackDigEditTransaction(trimTransaction);
+          deps.updateInfo();
+        } else {
+          changed = true;
+        }
       }
     }
+
+    if (!changed) reportNoOp("construction terrain already conformed");
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
