@@ -37,7 +37,7 @@ export const OAK: SpeciesParams = {
   },
   flare: { amp: 0.55, height: 1.2, lobes: 6 },
   barkRepeats: 4,
-  foliageColor: { r: 0.06, g: 0.145, b: 0.035, hueVar: 0.3 },
+  foliageColor: { r: 0.052, g: 0.128, b: 0.032, hueVar: 0.26 },
   brokenTop: 0,
   stubChance: 0.02,
 };
@@ -69,7 +69,7 @@ export const PINE: SpeciesParams = {
   },
   flare: { amp: 0.42, height: 0.8, lobes: 4 },
   barkRepeats: 4,
-  foliageColor: { r: 0.04, g: 0.092, b: 0.048, hueVar: 0.22 },
+  foliageColor: { r: 0.034, g: 0.082, b: 0.045, hueVar: 0.18 },
   brokenTop: 0,
   stubChance: 0.04,
 };
@@ -99,7 +99,7 @@ export const BIRCH: SpeciesParams = {
   ...OAK,
   id: "birch",
   label: "Birch broadleaf",
-  foliageColor: { r: 0.08, g: 0.16, b: 0.045, hueVar: 0.24 },
+  foliageColor: { r: 0.066, g: 0.14, b: 0.04, hueVar: 0.20 },
 };
 
 export const WILLOW: SpeciesParams = {
@@ -108,7 +108,7 @@ export const WILLOW: SpeciesParams = {
   label: "Willow lowland broadleaf",
   crown: "irregular",
   asym: 0.42,
-  foliageColor: { r: 0.075, g: 0.17, b: 0.055, hueVar: 0.28 },
+  foliageColor: { r: 0.062, g: 0.15, b: 0.05, hueVar: 0.24 },
 };
 
 export const SPRUCE: SpeciesParams = {
@@ -116,7 +116,7 @@ export const SPRUCE: SpeciesParams = {
   id: "spruce",
   label: "Spruce conifer",
   crown: "cone",
-  foliageColor: { r: 0.03, g: 0.075, b: 0.052, hueVar: 0.18 },
+  foliageColor: { r: 0.026, g: 0.068, b: 0.048, hueVar: 0.16 },
 };
 
 /** Grammar species keyed by clod-poc TreeSpeciesId. */
@@ -131,10 +131,10 @@ export const VEG_TREE_SPECIES = {
 
 /** Bark base colour per species (hue-jittered per branch by the tube builder). */
 export const VEG_BARK_COLOR: Record<keyof typeof VEG_TREE_SPECIES, THREE.Color> = {
-  oak: new THREE.Color(0x5b3a22),
-  pine: new THREE.Color(0x4f3a26),
-  dead: new THREE.Color(0x7a6653),
-  birch: new THREE.Color(0xd8d3c4),
-  willow: new THREE.Color(0x6a4a2d),
-  spruce: new THREE.Color(0x3f2f22),
+  oak: new THREE.Color(0x46382b),
+  pine: new THREE.Color(0x3c3429),
+  dead: new THREE.Color(0x6a6258),
+  birch: new THREE.Color(0xb9b6aa),
+  willow: new THREE.Color(0x514331),
+  spruce: new THREE.Color(0x342f29),
 };
