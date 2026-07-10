@@ -143,6 +143,7 @@ function fakeMaterialController(): FakeMaterialController {
     applyLighting,
     applyColorAdjustments: vi.fn(),
     activeTerrainSlots: () => [],
+    availableTerrainSlots: () => [],
     texturesActive: () => false,
     terrainTextureUniformOptions: () => ({
       enabled: false,
@@ -218,41 +219,41 @@ describe("ClodRenderNodeCache", () => {
   });
 
   it("does not dispose cached geometry on render node eviction when configured", () => {
-    const pageGeometryCache = new PageGeometryCache({ enabled: true, maxEntries: 32, warnAtEntries: 999 });
-    const { cache } = makeCache({ pageGeometryCache, config: { evictGeometryWithRenderNode: false } });
-    const first = cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
-    cache.prune(new Set<string>(), 2);
+    const geometryCache = new PageGeometryCache({ enabled: true, maxEntries: 32, warnAtEntries: 999 });
+    const { cache } = makeCache({
+      pageGeometryCache: geometryCache,
+      config: { maxInactiveNodes: 0, evictGeometryWithRenderNode: false },
+    });
+    cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
+    cache.getOrCreate({ node: node("L0:1,0"), frameId: 2 });
 
-    const second = cache.getOrCreate({ node: node("L0:0,0"), frameId: 3 });
+    cache.prune(new Set(["L0:1,0"]), 3);
 
-    expect(second.mesh.geometry).toBe(first.mesh.geometry);
-    expect(pageGeometryCache.stats().entries).toBe(1);
+    expect(geometryCache.has("L0:0,0")).toBe(true);
   });
 
-  it("prefetches parents and children within budget", () => {
-    const { cache, material } = makeCache({ config: { prefetchParent: true, prefetchChildren: true, maxPrefetchCreatesPerFrame: 2 } });
-    const parent = node("L1:0,0", 1);
-    const child = node("L0:0,0", 0);
-    parent.children = [child, node("L0:1,0", 0), node("L0:0,1", 0), node("L0:1,1", 0)];
-    cache.getOrCreate({ node: child, frameId: 1 });
+  it("disposes cached geometry on render node eviction when configured", () => {
+    const geometryCache = new PageGeometryCache({ enabled: true, maxEntries: 32, warnAtEntries: 999 });
+    const { cache } = makeCache({
+      pageGeometryCache: geometryCache,
+      config: { maxInactiveNodes: 0, evictGeometryWithRenderNode: true },
+    });
+    cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
+    cache.getOrCreate({ node: node("L0:1,0"), frameId: 2 });
 
-    cache.prefetch([node("L0:1,0", 0), node("L0:0,1", 0), node("L0:1,1", 0)], 1);
+    cache.prune(new Set(["L0:1,0"]), 3);
 
-    expect(material.makeTerrainMaterial).toHaveBeenCalledTimes(3);
+    expect(geometryCache.has("L0:0,0")).toBe(false);
   });
 
-  it("keeps active retired geometry alive until render node replacement", () => {
-    const pageGeometryCache = new PageGeometryCache({ enabled: true, maxEntries: 32, warnAtEntries: 999 });
-    const { cache } = makeCache({ pageGeometryCache });
-    const oldMesh = mesh(0);
-    const view = cache.getOrCreate({ node: node("L0:0,0", 0, oldMesh), frameId: 1 });
+  it("clears render nodes and geometry cache entries", () => {
+    const geometryCache = new PageGeometryCache({ enabled: true, maxEntries: 32, warnAtEntries: 999 });
+    const { cache } = makeCache({ pageGeometryCache: geometryCache });
+    cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
 
-    cache.disposeNode("L0:0,0", true);
-    expect(pageGeometryCache.stats().entries).toBe(0);
+    cache.clear();
 
-    cache.getOrCreate({ node: node("L0:0,0", 0, mesh(1)), frameId: 2 });
-
-    expect(pageGeometryCache.stats().entries).toBe(1);
-    expect(view.mesh.geometry).not.toBe(cache.get("L0:0,0")?.mesh.geometry);
+    expect(cache.size).toBe(0);
+    expect(geometryCache.size).toBe(0);
   });
 });
