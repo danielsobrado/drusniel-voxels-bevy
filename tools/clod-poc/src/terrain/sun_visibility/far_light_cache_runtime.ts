@@ -1,8 +1,8 @@
-import { sunVisibilityTileKeyToString, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
+import { sunVisibilityTileBounds, sunVisibilityTileKeyToString, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
 import { createLightTileBuild, finalizeLightTile, stepLightTileBuild, type LightTileBuild } from "./light_builder.js";
 import { createSunLightCacheCore } from "./light_cache_core.js";
 import { sunBinKey } from "./sun_bins.js";
-import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
+import type { createTerrainSummaryLightHeightProvider, TerrainChangedRegion } from "./far_light_height.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 
 /** Pending tiles farther than materialTileRadius + this margin from the camera
@@ -13,6 +13,10 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
   const core = createSunLightCacheCore(options);
   const staleTiles = new Set<string>();
   let inProgress: { key: string; build: LightTileBuild } | null = null;
+  /** Bumped whenever the set of built entries changes (build, eviction,
+   *  invalidation), so consumers like the GPU atlas can skip repacking when
+   *  nothing they read has changed. */
+  let contentRevision = 0;
 
   const prunePending = (centerTile: SunVisibilityTileKey | undefined): void => {
     const maxDistance = options.build.materialTileRadius + PENDING_PRUNE_MARGIN_TILES;
@@ -67,6 +71,13 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
       const startedAt = performance.now();
       const deadlineMs = nowMs + options.build.maxBuildMsPerFrame;
       prunePending(centerTile);
+      // A build for a superseded sun bin would burn the budget on a tile no
+      // current lookup can read; drop it and let the tile re-enqueue under the
+      // active bin.
+      const currentBin = core.stats.currentSunBin;
+      if (inProgress && currentBin && sunBinKey(inProgress.build.request.sunBin) !== sunBinKey(currentBin)) {
+        inProgress = null;
+      }
 
       while (core.stats.tilesBuiltThisFrame < options.build.maxTilesPerFrame) {
         if (!inProgress) {
@@ -86,6 +97,7 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
         const tile = finalizeLightTile(inProgress.build);
         core.entries.set(inProgress.key, { tile, lastUsedFrame: frameIndex });
         staleTiles.delete(sunVisibilityTileKeyToString(tile.key));
+        contentRevision += 1;
         core.stats.tilesBuiltThisFrame += 1;
         core.stats.tilesBuiltTotal += 1;
         inProgress = null;
@@ -96,14 +108,45 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
       core.stats.buildMsAvg = core.stats.tilesBuiltTotal > 0
         ? core.stats.buildMsAvg * 0.9 + core.stats.buildMsLastFrame * 0.1
         : core.stats.buildMsLastFrame;
+      const evictionsBefore = core.stats.evictions;
       core.evictIfNeeded();
+      if (core.stats.evictions !== evictionsBefore) contentRevision += 1;
+    },
+    /** Drops built entries whose tile could be lit differently after a terrain
+     *  change in the given regions. A receiver is affected when a change lies
+     *  within the shadow-ray reach of its tile, so tiles are tested with their
+     *  bounds expanded by ray.maxDistanceWorld. Pending requests stay queued
+     *  (they sample live heights when built) and an in-progress build is only
+     *  discarded when its own tile is affected. */
+    invalidateRegions(regions: readonly TerrainChangedRegion[]) {
+      if (regions.length === 0) return;
+      const reach = options.ray.maxDistanceWorld;
+      const intersects = (tile: SunVisibilityTileKey): boolean => {
+        const bounds = sunVisibilityTileBounds(tile, options.tile);
+        for (const region of regions) {
+          if (bounds.minX - reach <= region.maxX && bounds.maxX + reach >= region.minX
+            && bounds.minZ - reach <= region.maxZ && bounds.maxZ + reach >= region.minZ) return true;
+        }
+        return false;
+      };
+      for (const [key, entry] of core.entries) {
+        if (intersects(entry.tile.key)) {
+          core.entries.delete(key);
+          contentRevision += 1;
+        }
+      }
+      if (inProgress && intersects(inProgress.build.request.tile)) inProgress = null;
     },
     markAllStale() {
       core.entries.clear();
       core.pending.clear();
       staleTiles.clear();
       inProgress = null;
+      contentRevision += 1;
       core.stats.refreshes += 1;
+    },
+    contentRevision() {
+      return contentRevision;
     },
     tiles() {
       return [...core.entries.values()].map((entry) => entry.tile);

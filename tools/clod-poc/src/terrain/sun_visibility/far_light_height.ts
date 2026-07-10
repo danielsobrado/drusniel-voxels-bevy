@@ -1,5 +1,49 @@
-import { getDigEditRevision } from "../terrain.js";
+import { getDigEditRevision, getVoxelEditSnapshot } from "../terrain.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
+
+export interface TerrainChangedRegion {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
+/** Diffs voxel-edit deltas between calls so light-cache invalidation can be
+ *  scoped to the regions that actually changed. The global dig revision also
+ *  bumps on world rebuilds and snapshot reloads that leave every voxel intact;
+ *  those must not rebuild the far light cache. Returns null when the change set
+ *  is unknown (edits were removed or reloaded) and only a full refresh is safe. */
+export function createTerrainEditChangeTracker() {
+  const initial = getVoxelEditSnapshot();
+  let lastRevision = initial.revision;
+  let lastDeltaCount = initial.deltas.length;
+  return {
+    consumeChangedRegions(): TerrainChangedRegion[] | null {
+      const snapshot = getVoxelEditSnapshot();
+      const removedOrReloaded = snapshot.deltas.length < lastDeltaCount || snapshot.revision < lastRevision;
+      let regions: TerrainChangedRegion[] | null = null;
+      if (!removedOrReloaded) {
+        const byRevision = new Map<number, TerrainChangedRegion>();
+        for (const delta of snapshot.deltas) {
+          if (delta.revision <= lastRevision) continue;
+          const region = byRevision.get(delta.revision);
+          if (region) {
+            region.minX = Math.min(region.minX, delta.x);
+            region.minZ = Math.min(region.minZ, delta.z);
+            region.maxX = Math.max(region.maxX, delta.x);
+            region.maxZ = Math.max(region.maxZ, delta.z);
+          } else {
+            byRevision.set(delta.revision, { minX: delta.x, minZ: delta.z, maxX: delta.x, maxZ: delta.z });
+          }
+        }
+        regions = [...byRevision.values()];
+      }
+      lastRevision = snapshot.revision;
+      lastDeltaCount = snapshot.deltas.length;
+      return regions;
+    },
+  };
+}
 
 export function createTerrainSummaryLightHeightProvider(field: TerrainSummaryField) {
   const terrainRevision = () => getDigEditRevision();

@@ -1,7 +1,7 @@
 import type * as THREE from "three";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { worldToSunVisibilityTile } from "./sun_visibility_tile.js";
-import { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
+import { createTerrainEditChangeTracker, createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
@@ -33,10 +33,12 @@ export function createLightUpdate(args: LightUpdateArgs) {
   const options = loadBundledSunLightOptions();
   applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
+  const changeTracker = createTerrainEditChangeTracker();
   const cache = createSunLightCacheRuntime(options);
   const overlay = createSunLightDebugOverlay();
   let lastTerrainRevision = provider.terrainRevision();
   let lastStableFrameKey = "";
+  let lastAtlasSignature = "";
   const globals = window as unknown as Record<string, unknown>;
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
@@ -44,6 +46,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
     cache.markAllStale();
     invalidateSunLightGpuAtlas();
     lastStableFrameKey = "";
+    lastAtlasSignature = "";
   };
   globals.__drusnielSunLightPeekWorld = (x: number, z: number, sunVec: THREE.Vector3) => cache.peekWorld(x, z, sunVec, provider);
   return {
@@ -51,8 +54,17 @@ export function createLightUpdate(args: LightUpdateArgs) {
       globals.__drusnielSunLightSunDirection = sunVec.clone();
       const terrainRevision = provider.terrainRevision();
       if (terrainRevision !== lastTerrainRevision) {
-        cache.markAllStale();
-        invalidateSunLightGpuAtlas();
+        // The global revision also bumps on world rebuilds and snapshot reloads
+        // that change no voxels (constant during infinite-islands streaming), so
+        // invalidate only the tiles reachable from regions with new edit deltas.
+        const changedRegions = changeTracker.consumeChangedRegions();
+        if (changedRegions === null) {
+          cache.markAllStale();
+          invalidateSunLightGpuAtlas();
+          lastAtlasSignature = "";
+        } else if (changedRegions.length > 0) {
+          cache.invalidateRegions(changedRegions);
+        }
         lastTerrainRevision = terrainRevision;
         lastStableFrameKey = "";
       }
@@ -60,6 +72,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
         invalidateSunLightGpuAtlas();
         overlay.update([], options);
         lastStableFrameKey = "";
+        lastAtlasSignature = "";
         return;
       }
       const centerTile = worldToSunVisibilityTile(camera.position.x, camera.position.z, options.tile);
@@ -80,7 +93,13 @@ export function createLightUpdate(args: LightUpdateArgs) {
         }
       }
       cache.updateBudgeted(provider, frameIndex, nowMs, centerTile);
-      updateSunLightGpuAtlas(centerTile, cache.tiles(), options);
+      // Repacking and re-uploading the full atlas is a per-frame allocation and
+      // GPU transfer; skip it unless the built tile set or the window moved.
+      const atlasSignature = `${centerTile.tileX},${centerTile.tileZ}|${cache.contentRevision()}|${options.build.materialTileRadius}`;
+      if (atlasSignature !== lastAtlasSignature) {
+        updateSunLightGpuAtlas(centerTile, cache.tiles(), options);
+        lastAtlasSignature = atlasSignature;
+      }
       overlay.update(cache.tiles(), options);
       lastStableFrameKey = cache.stats().pendingTiles === 0 ? frameKey : "";
     },
@@ -91,6 +110,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       overlay.dispose();
       invalidateSunLightGpuAtlas();
       lastStableFrameKey = "";
+      lastAtlasSignature = "";
     },
   };
 }
