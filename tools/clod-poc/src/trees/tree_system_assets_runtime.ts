@@ -12,6 +12,7 @@ import { bakeTreeImpostorAtlases, type TreeImpostorAtlas } from "./tree_impostor
 import { publishTreeImpostorDebugStatus } from "./tree_impostor_debug.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import { bakeTreeFoliageAtlas, replaceTreeFoliageAtlasData } from "./tree_foliage_atlas_baker.js";
 import { decorateTreeMaterialHandle } from "./tree_material_parity.js";
 import {
   disposeTreeSystemBakedImpostorGeometries,
@@ -35,10 +36,14 @@ export interface TreeSystemAssetsOptions {
   impostorAtlases?: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
 }
 
+export type TreeFoliageAtlasStatus = "generated" | "capturing" | "captured" | "fallback";
+
 export class TreeSystemAssets {
   readonly crownProxyGeometry = createTreeCrownProxyGeometry();
   materialHandle: TreeMaterialHandle;
   foliageAtlas: TreeFoliageAtlas;
+  foliageAtlasStatus: TreeFoliageAtlasStatus = "generated";
+  foliageAtlasReason: string | null = null;
   geometries: TreeGeometryMap;
   geometryKey: string;
   impostorStatus: TreeImpostorStatus;
@@ -85,11 +90,14 @@ export class TreeSystemAssets {
     this.materialHandle.dispose();
     this.foliageAtlas.dispose();
     this.foliageAtlas = createTreeFoliageAtlas(this.settings);
+    this.foliageAtlasStatus = "generated";
+    this.foliageAtlasReason = null;
     this.materialHandle = this.createMaterialHandle();
     this.disposeBakedImpostorGeometries();
   }
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
+    await this.captureFoliageAtlas(renderer);
     if (!this.settings.impostors.enabled || !this.settings.impostors.bakeOnStart) {
       this.impostorStatus = "disabled";
       this.impostorReason = "tree impostor baking disabled";
@@ -198,10 +206,27 @@ export class TreeSystemAssets {
     this.foliageAtlas.dispose();
   }
 
+  private async captureFoliageAtlas(renderer: unknown): Promise<void> {
+    this.foliageAtlasStatus = "capturing";
+    this.foliageAtlasReason = null;
+    const result = await bakeTreeFoliageAtlas({
+      renderer,
+      settings: this.settings,
+      webgpu: this.webgpu,
+    });
+    if (result.supported && result.atlas) {
+      replaceTreeFoliageAtlasData(this.foliageAtlas, result.atlas);
+      this.foliageAtlasStatus = "captured";
+      return;
+    }
+    this.foliageAtlasStatus = "fallback";
+    this.foliageAtlasReason = result.reason;
+  }
+
   private createMaterialHandle(): TreeMaterialHandle {
     const base = this.webgpu
       ? createTreeNodeMaterialHandle(this.settings, this.currentLighting, this.hydrologyWater)
-      : createTreeMaterialHandle(this.settings);
+      : createTreeMaterialHandle(this.settings, this.foliageAtlas);
     const handle = decorateTreeMaterialHandle(base, { foliageAtlas: this.foliageAtlas });
     if (this.currentForestLighting) handle.updateForestLighting?.(this.currentForestLighting);
     return handle;
