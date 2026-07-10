@@ -109,7 +109,9 @@ export function runTerrainEditStartup(
     enqueueApplyNodes: (nodes) => clodApplyQueue.enqueueNodes(nodes),
     applyNearFieldChunks: (patches) => {
       for (const patch of patches) {
-        input.terrainView.nearFieldBubbleController.replaceChunks(patch.nodeId, patch.chunks, patch.revision);
+        // Worker patches are CPU-meshed while the live page may be GPU-meshed.
+        // Rebuild the page with one backend until backend-consistent chunk patching is available.
+        input.terrainView.nearFieldBubbleController.invalidatePage(patch.nodeId);
       }
     },
     invalidateStreamedRoots: (bounds) => session.streamingClodRootController?.invalidateBounds(bounds),
