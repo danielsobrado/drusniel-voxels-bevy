@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { getDigEditsSnapshot } from "../../terrain/terrain.js";
+import { hasPaintedTerrainEdits } from "../../terrain/terrain.js";
 import type { TerrainColorAdjustments } from "../../material/material.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import {
@@ -122,7 +122,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     const state = deps.getMaterialState();
     const proceduralActive = state.terrainMaterialSource === "procedural" && proceduralTerrain !== null;
     if (!proceduralActive) deps.textureController.ensureTextureArrays(state.terrainMaterialSource);
-    const painted = getDigEditsSnapshot().some((edit) => edit.op === "add");
+    const painted = hasPaintedTerrainEdits();
     const masks = proceduralTextureConfig.terrain.masks;
     const materials = proceduralTextureConfig.terrain.materials;
     return {
