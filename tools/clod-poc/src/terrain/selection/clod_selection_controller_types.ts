@@ -81,7 +81,9 @@ export interface ClodSelectionSubphases {
   cache: number;
   cut: number;
   book: number;
+  views: number;
   markActive: number;
+  prefetch: number;
   apply: number;
   stats: number;
   hash: number;

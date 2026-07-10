@@ -330,7 +330,7 @@ export class InfiniteFarShell {
       return;
     }
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
-    const minStepVerts = 32;
+    const minStepVerts = 8;
     const smallRebuildVerts = 192;
     const vertexCount = this.computeVertexCount();
     const completeSmallRebuild = vertexCount <= smallRebuildVerts;

@@ -52,7 +52,9 @@ const emptySelectionSubphases = (): ClodSelectionSubphases => ({
   cache: 0,
   cut: 0,
   book: 0,
+  views: 0,
   markActive: 0,
+  prefetch: 0,
   apply: 0,
   stats: 0,
   hash: 0,
@@ -188,21 +190,23 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   const applyRenderedCut = (rendered: ClodPageNode[], settings: ClodSelectionSettings): void => {
     const cutIds = new Set(rendered.map((n) => n.id));
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
-    for (const node of rendered) {
-      const view = deps.getOrCreateView(node, selectionFrameId);
-      const target = streamedRootTarget(node);
-      view.selected = target > 0.5;
-      if (view.target !== target) {
-        view.target = target;
-        activeTerrainViews.add(view);
-      } else if (node.rootTransition?.mode === "fadeIn" || node.rootTransition?.mode === "fadeOut") {
-        activeTerrainViews.add(view);
+    timeSelectionSubphase(selSub, "views", () => {
+      for (const node of rendered) {
+        const view = deps.getOrCreateView(node, selectionFrameId);
+        const target = streamedRootTarget(node);
+        view.selected = target > 0.5;
+        if (view.target !== target) {
+          view.target = target;
+          activeTerrainViews.add(view);
+        } else if (node.rootTransition?.mode === "fadeIn" || node.rootTransition?.mode === "fadeOut") {
+          activeTerrainViews.add(view);
+        }
+        applyMaterialTier(view, settings);
+        if (target > 0.5) nextTerrainViews.add(view);
       }
-      applyMaterialTier(view, settings);
-      if (target > 0.5) nextTerrainViews.add(view);
-    }
+    });
     timeSelectionSubphase(selSub, "markActive", () => deps.markActiveNodes?.(cutIds, selectionFrameId));
-    deps.prefetchNodes?.(rendered, selectionFrameId);
+    timeSelectionSubphase(selSub, "prefetch", () => deps.prefetchNodes?.(rendered, selectionFrameId));
     for (const view of currentTerrainViews) {
       if (cutIds.has(view.node.id)) continue;
       view.selected = false;

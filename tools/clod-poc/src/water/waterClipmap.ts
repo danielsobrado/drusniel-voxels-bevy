@@ -3,9 +3,13 @@
 // One reusable square grid geometry per level (cells_per_level+1 vertices per edge).
 // Each level uses a different cell size from config; coarser levels always surround
 // finer ones. Per frame, after camera movement, each level snaps its origin to
-// `cell_size * snap_cells` and refills vertex positions/attributes from the
-// WaterField. The shader discards pixels inside the previous (finer) level's world
-// rectangle so only the ring between levels is drawn, avoiding overdraw and seams.
+// `cell_size * snap_cells`. Vertex storage is TOROIDAL: world column c / row r lives at
+// slot (c mod verts, r mod verts), so a snap only resamples the newly exposed columns
+// and rows from the WaterField — the dominant cost is the per-vertex hydrology sample,
+// and this bounds it by movement instead of ring area. The index buffer is rebuilt per
+// snap (cheap, no field sampling) because slot connectivity crosses the wrap seam.
+// The shader discards pixels inside the previous (finer) level's world rectangle so
+// only the ring between levels is drawn, avoiding overdraw and seams.
 //
 // Water meshes are a separate render layer: frustumCulled is disabled (the grid
 // follows the camera; a conservative bound would need updating each origin change),
@@ -41,6 +45,34 @@ export interface WaterClipmapOptions {
 
 const DEGENERATE_INNER: WaterRect = { minX: 1e30, minZ: 1e30, maxX: -1e30, maxZ: -1e30 };
 
+/** Cumulative water-clipmap update-cost counters (shared across levels, reset never). */
+export interface WaterClipmapUpdateStats {
+  /** Origin snaps that triggered any refill work. */
+  snaps: number;
+  /** Refills that sampled every vertex (initialisation / teleports). */
+  fullRefills: number;
+  /** Refills that only sampled newly exposed rows/columns (normal movement). */
+  partialRefills: number;
+  columnsSampled: number;
+  rowsSampled: number;
+  /** Individual WaterField samples taken (the dominant CPU cost). */
+  fieldSamples: number;
+  /** Index-buffer rebuilds (no field sampling; bounded CPU + one upload each). */
+  indexRebuilds: number;
+}
+
+export function createWaterClipmapUpdateStats(): WaterClipmapUpdateStats {
+  return {
+    snaps: 0,
+    fullRefills: 0,
+    partialRefills: 0,
+    columnsSampled: 0,
+    rowsSampled: 0,
+    fieldSamples: 0,
+    indexRebuilds: 0,
+  };
+}
+
 export function finiteWaterWorldBounds(worldBounds: WaterWorldBounds): boolean {
   return worldBounds.cellsX > 0 && worldBounds.cellsZ > 0;
 }
@@ -59,12 +91,20 @@ class WaterLevel {
   private readonly handle: WaterMaterialHandle;
   private readonly field: WaterField;
   private readonly worldBounds: WaterWorldBounds;
+  private readonly stats: WaterClipmapUpdateStats;
   private readonly positions: Float32Array;
   private readonly terrainY: Float32Array;
   private readonly bodyMask: Float32Array;
   private readonly flow: Float32Array;
   private readonly levelAttr: Float32Array;
   private readonly indices: Uint32Array;
+  // Toroidal slot mapping: world column c lives at slot (c mod vertsPerEdge); these
+  // record which world column/row each slot currently holds so a snap can resample
+  // only slots whose mapping changed.
+  private readonly slotCol: Float64Array;
+  private readonly slotRow: Float64Array;
+  private readonly dirtyCol: Uint8Array;
+  private readonly dirtyRow: Uint8Array;
   private originX = Number.NaN;
   private originZ = Number.NaN;
   private rect: WaterRect = { ...DEGENERATE_INNER };
@@ -78,6 +118,7 @@ class WaterLevel {
     field: WaterField,
     handle: WaterMaterialHandle,
     worldBounds: WaterWorldBounds,
+    stats: WaterClipmapUpdateStats,
   ) {
     this.index = index;
     this.cellSize = cellSize;
@@ -86,6 +127,7 @@ class WaterLevel {
     this.field = field;
     this.handle = handle;
     this.worldBounds = worldBounds;
+    this.stats = stats;
 
     const vertsPerEdge = cellsPerLevel + 1;
     const vertexCount = vertsPerEdge * vertsPerEdge;
@@ -95,6 +137,10 @@ class WaterLevel {
     this.flow = new Float32Array(vertexCount * 4);
     this.levelAttr = new Float32Array(vertexCount);
     this.levelAttr.fill(index);
+    this.slotCol = new Float64Array(vertsPerEdge).fill(Number.NaN);
+    this.slotRow = new Float64Array(vertsPerEdge).fill(Number.NaN);
+    this.dirtyCol = new Uint8Array(vertsPerEdge);
+    this.dirtyRow = new Uint8Array(vertsPerEdge);
 
     this.indices = new Uint32Array(cellsPerLevel * cellsPerLevel * 6);
     const geometry = new THREE.BufferGeometry();
@@ -127,7 +173,11 @@ class WaterLevel {
     this.originZ = originZ;
     this.initialized = true;
     const half = this.cellsPerLevel * this.cellSize * 0.5;
-    this.refillVertices(originX, originZ, half);
+    // World-integer column/row of the ring's min corner. half is an integer multiple of
+    // cellSize (cellsPerLevel/2 cells) and origin snaps to whole cells, so this is exact.
+    const baseCol = Math.round((originX - half) / this.cellSize);
+    const baseRow = Math.round((originZ - half) / this.cellSize);
+    this.refill(baseCol, baseRow);
     this.rect = {
       minX: originX - half,
       minZ: originZ - half,
@@ -136,70 +186,115 @@ class WaterLevel {
     };
   }
 
-  private refillVertices(originX: number, originZ: number, half: number): void {
-    const { cellsPerLevel, cellSize, field, positions, terrainY, bodyMask, flow, worldBounds } = this;
+  /** Resample only slots whose world column/row mapping changed, then rebuild indices. */
+  private refill(baseCol: number, baseRow: number): void {
+    const { cellsPerLevel, field, cellSize, positions, terrainY, bodyMask, flow, worldBounds, stats } = this;
     const vertsPerEdge = cellsPerLevel + 1;
-    let vi = 0;
-    let fi = 0;
-    for (let iz = 0; iz < vertsPerEdge; iz++) {
-      const worldZ = originZ + iz * cellSize - half;
-      for (let ix = 0; ix < vertsPerEdge; ix++) {
-        const worldX = originX + ix * cellSize - half;
-        if (waterPointInBounds(worldX, worldZ, worldBounds)) {
-          const sample = field.sampleForCellSize(worldX, worldZ, cellSize);
-          positions[vi] = worldX;
-          positions[vi + 1] = sample.waterY;
-          positions[vi + 2] = worldZ;
-          terrainY[vi / 3] = sample.terrainY;
-          bodyMask[vi / 3] = sample.bodyMask;
-          flow[fi] = sample.flow.x;
-          flow[fi + 1] = sample.flow.z;
-          flow[fi + 2] = sample.flow.speed;
-          flow[fi + 3] = sample.flow.drop;
-        } else {
-          positions[vi] = worldX;
-          positions[vi + 1] = 0;
-          positions[vi + 2] = worldZ;
-          terrainY[vi / 3] = 0;
-          bodyMask[vi / 3] = 0;
-          flow[fi] = 0;
-          flow[fi + 1] = 0;
-          flow[fi + 2] = 0;
-          flow[fi + 3] = 0;
-        }
-        vi += 3;
-        fi += 4;
+    this.dirtyCol.fill(0);
+    this.dirtyRow.fill(0);
+    let dirtyCols = 0;
+    let dirtyRows = 0;
+    for (let i = 0; i < vertsPerEdge; i++) {
+      const c = baseCol + i;
+      const sx = torusSlot(c, vertsPerEdge);
+      if (this.slotCol[sx] !== c) {
+        this.slotCol[sx] = c;
+        this.dirtyCol[sx] = 1;
+        dirtyCols++;
+      }
+      const r = baseRow + i;
+      const sz = torusSlot(r, vertsPerEdge);
+      if (this.slotRow[sz] !== r) {
+        this.slotRow[sz] = r;
+        this.dirtyRow[sz] = 1;
+        dirtyRows++;
       }
     }
-    const indexCount = this.refillIndices();
+    stats.snaps++;
+    if (dirtyCols > 0 || dirtyRows > 0) {
+      if (dirtyCols === vertsPerEdge && dirtyRows === vertsPerEdge) stats.fullRefills++;
+      else stats.partialRefills++;
+      stats.columnsSampled += dirtyCols;
+      stats.rowsSampled += dirtyRows;
+      for (let sz = 0; sz < vertsPerEdge; sz++) {
+        const rowDirty = this.dirtyRow[sz] === 1;
+        const worldZ = this.slotRow[sz] * cellSize;
+        for (let sx = 0; sx < vertsPerEdge; sx++) {
+          if (!rowDirty && this.dirtyCol[sx] === 0) continue;
+          const worldX = this.slotCol[sx] * cellSize;
+          const slot = sz * vertsPerEdge + sx;
+          const vi = slot * 3;
+          const fi = slot * 4;
+          stats.fieldSamples++;
+          if (waterPointInBounds(worldX, worldZ, worldBounds)) {
+            const sample = field.sampleForCellSize(worldX, worldZ, cellSize);
+            positions[vi] = worldX;
+            positions[vi + 1] = sample.waterY;
+            positions[vi + 2] = worldZ;
+            terrainY[slot] = sample.terrainY;
+            bodyMask[slot] = sample.bodyMask;
+            flow[fi] = sample.flow.x;
+            flow[fi + 1] = sample.flow.z;
+            flow[fi + 2] = sample.flow.speed;
+            flow[fi + 3] = sample.flow.drop;
+          } else {
+            positions[vi] = worldX;
+            positions[vi + 1] = 0;
+            positions[vi + 2] = worldZ;
+            terrainY[slot] = 0;
+            bodyMask[slot] = 0;
+            flow[fi] = 0;
+            flow[fi + 1] = 0;
+            flow[fi + 2] = 0;
+            flow[fi + 3] = 0;
+          }
+        }
+      }
+      const geo = this.mesh.geometry;
+      (geo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+      (geo.getAttribute("aTerrainY") as THREE.BufferAttribute).needsUpdate = true;
+      (geo.getAttribute("aBodyMask") as THREE.BufferAttribute).needsUpdate = true;
+      (geo.getAttribute("aFlow") as THREE.BufferAttribute).needsUpdate = true;
+    }
+    const indexCount = this.refillIndices(baseCol, baseRow);
     const geo = this.mesh.geometry;
-    (geo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
-    (geo.getAttribute("aTerrainY") as THREE.BufferAttribute).needsUpdate = true;
-    (geo.getAttribute("aBodyMask") as THREE.BufferAttribute).needsUpdate = true;
-    (geo.getAttribute("aFlow") as THREE.BufferAttribute).needsUpdate = true;
     (geo.getIndex() as THREE.BufferAttribute).needsUpdate = true;
     geo.setDrawRange(0, indexCount);
     this.mesh.visible = indexCount > 0;
   }
 
-  private refillIndices(): number {
+  /**
+   * Rebuild the index buffer over world quads. Slot connectivity crosses the toroidal
+   * wrap seam, so indices cannot be static — but this pass takes no field samples and is
+   * bounded CPU per snap.
+   */
+  private refillIndices(baseCol: number, baseRow: number): number {
     const { cellsPerLevel, positions, terrainY, bodyMask, flow, worldBounds, indices } = this;
     const vertsPerEdge = cellsPerLevel + 1;
     const maskEpsilon = 1e-4;
     let p = 0;
-    for (let iz = 0; iz < cellsPerLevel; iz++) {
-      for (let ix = 0; ix < cellsPerLevel; ix++) {
-        const a = iz * vertsPerEdge + ix;
-        const b = a + 1;
-        const c = a + vertsPerEdge;
-        const d = c + 1;
+    for (let qj = 0; qj < cellsPerLevel; qj++) {
+      const sza = torusSlot(baseRow + qj, vertsPerEdge);
+      const szb = torusSlot(baseRow + qj + 1, vertsPerEdge);
+      for (let qi = 0; qi < cellsPerLevel; qi++) {
+        const sxa = torusSlot(baseCol + qi, vertsPerEdge);
+        const sxb = torusSlot(baseCol + qi + 1, vertsPerEdge);
+        const a = sza * vertsPerEdge + sxa;
+        const b = sza * vertsPerEdge + sxb;
+        const c = szb * vertsPerEdge + sxa;
+        const d = szb * vertsPerEdge + sxb;
         if (!waterQuadRenderable([a, b, c, d], positions, terrainY, bodyMask, flow, worldBounds, maskEpsilon)) continue;
         indices[p++] = a; indices[p++] = c; indices[p++] = b;
         indices[p++] = b; indices[p++] = c; indices[p++] = d;
       }
     }
+    this.stats.indexRebuilds++;
     return p;
   }
+}
+
+function torusSlot(worldIndex: number, vertsPerEdge: number): number {
+  return ((worldIndex % vertsPerEdge) + vertsPerEdge) % vertsPerEdge;
 }
 
 export function waterQuadRenderable(
@@ -233,6 +328,7 @@ export class WaterClipmap {
   private readonly scene: THREE.Scene;
   private readonly root = new THREE.Group();
   private readonly levels: WaterLevel[];
+  private readonly updateCost = createWaterClipmapUpdateStats();
   private readonly field: WaterField;
   private readonly sunDirection: THREE.Vector3;
   private readonly cameraPosition: THREE.Vector3;
@@ -274,6 +370,7 @@ export class WaterClipmap {
         this.field,
         handle,
         opts.worldBounds,
+        this.updateCost,
       );
       handle.setDebugMode(this.debugMode);
       handle.setClipmapTint(this.clipmapTint);
@@ -345,6 +442,7 @@ export class WaterClipmap {
 
   get debugModeId(): WaterDebugModeId { return this.debugMode; }
   get levelCount(): number { return this.levels.length; }
+  get updateCostStats(): WaterClipmapUpdateStats { return { ...this.updateCost }; }
   getLevelRect(index: number): WaterRect | null {
     if (index >= 0 && index < this.levels.length) {
       return this.levels[index].currentRect;

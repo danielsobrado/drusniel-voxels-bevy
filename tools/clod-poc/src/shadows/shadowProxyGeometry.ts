@@ -41,7 +41,7 @@ export interface ShadowProxyGeometryJob {
 }
 
 /** Samples between budget checks; one batch must stay well under a frame. */
-const BUDGET_CHECK_INTERVAL = 32;
+const BUDGET_CHECK_INTERVAL = 8;
 
 /**
  * Incremental heightfield build so streaming rebuilds never stall a frame:

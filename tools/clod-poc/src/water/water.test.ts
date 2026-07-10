@@ -343,6 +343,13 @@ describe("WaterClipmap", () => {
       expect(mesh.geometry.drawRange.count).toBe(0);
     }
     clipmap.update(0.016, new THREE.Vector3(80, 50, -70));
+    expect(clipmap.updateCostStats).toMatchObject({
+      snaps: cfg.cellSizes.length,
+      fullRefills: cfg.cellSizes.length,
+    });
+    expect(clipmap.updateCostStats.fieldSamples).toBeGreaterThan(0);
+    clipmap.update(0.016, new THREE.Vector3(80, 50, -70));
+    expect(clipmap.updateCostStats.snaps).toBe(cfg.cellSizes.length);
     clipmap.dispose();
   });
 
