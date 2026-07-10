@@ -100,6 +100,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   let vegetationFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastDigAt = -Infinity;
   let digInFlight = false;
+  let editOperationTail: Promise<void> = Promise.resolve();
   const queuedDigRays: THREE.Ray[] = [];
   let scheduledDigRay: THREE.Ray | null = null;
   const pendingGrassNodeIds = new Set<string>();
@@ -177,6 +178,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   };
 
   const flushAncestors = async () => {
+    await editOperationTail;
     await deps.clodWorker.flushParents();
   };
 
@@ -200,6 +202,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (error instanceof Error && error.name === "ClodBuildError") {
       emitAudio("clod.validation.error");
     }
+    const message = error instanceof Error ? error.message : String(error);
+    deps.setLastDigSummary(`${label} rebuild failed: ${message}`);
+    deps.updateInfo();
     console.error(`${label} rebuild failed:`, error);
   };
 
@@ -239,6 +244,18 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     lastDigAt = performance.now();
     deps.setLastDigSummary(summary);
     deps.updateInfo();
+  };
+
+  const enqueueEditOperation = (label: string, operation: () => Promise<void>): Promise<void> => {
+    const queued = editOperationTail.then(operation);
+    const safe = queued.catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.setLastDigSummary(`${label} failed: ${message}`);
+      deps.updateInfo();
+      console.error(`[terrain-edit] ${label} failed`, error);
+    });
+    editOperationTail = safe;
+    return safe;
   };
 
   const performEditRebuild = async (
@@ -370,7 +387,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }
     digInFlight = true;
     try {
-      await performDig(ray);
+      await enqueueEditOperation("terrain brush", () => performDig(ray));
     } finally {
       digInFlight = false;
       const next = queuedDigRays.shift() ?? null;
@@ -432,9 +449,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         if (trimStatus === "rejected") {
           rollbackDigEditTransaction(trimTransaction);
           deps.updateInfo();
-        } else {
-          changed = true;
+          return;
         }
+        changed = true;
       }
     }
 
@@ -456,7 +473,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (conformDebounceTimer !== null) clearTimeout(conformDebounceTimer);
     conformDebounceTimer = setTimeout(() => {
       conformDebounceTimer = null;
-      void performConstructionTerrainConform(request);
+      void enqueueEditOperation("construction terrain conform", () => performConstructionTerrainConform(request));
     }, CONSTRUCTION_CONFORM_DEBOUNCE_MS);
   };
 
