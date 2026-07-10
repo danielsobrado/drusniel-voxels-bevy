@@ -89,7 +89,12 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
       void deps.renderer.domElement.requestPointerLock();
     } else if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement === deps.renderer.domElement) {
       deps.triggerSwordAttack?.();
-    } else if (deps.interaction.mode === "orbit" && event.button === 0 && deps.getDigEnabled()) {
+    } else if (
+      deps.interaction.mode === "orbit"
+      && event.button === 0
+      && deps.getDigEnabled()
+      && deps.getTerraformEditActive()
+    ) {
       digPointerDown = { x: event.clientX, y: event.clientY };
     }
   });
@@ -98,7 +103,12 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
     if (!digPointerDown || event.button !== 0) return;
     const moved = Math.hypot(event.clientX - digPointerDown.x, event.clientY - digPointerDown.y);
     digPointerDown = null;
-    if (moved > 4 || deps.interaction.mode !== "orbit" || !deps.getDigEnabled()) return;
+    if (
+      moved > 4
+      || deps.interaction.mode !== "orbit"
+      || !deps.getDigEnabled()
+      || !deps.getTerraformEditActive()
+    ) return;
     const rect = deps.renderer.domElement.getBoundingClientRect();
     playerPointer.set(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
