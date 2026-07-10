@@ -5,6 +5,7 @@ import { vegRng } from "../veg/veg_rng.js";
 import { VEG_BARK_COLOR, VEG_TREE_SPECIES } from "../veg/veg_species.js";
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { treeSpeciesAtlasIndex } from "./tree_alpha_mask.js";
 import {
   type TreeVariantGeometryMap,
   type TreeSpeciesGeometryMap,
@@ -34,14 +35,10 @@ export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
     const variants = {} as TreeVariantGeometryMap;
     for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
       variants[variant] = {} as Record<TreeLod, THREE.BufferGeometry>;
-      for (const lod of TREE_LODS) {
-        variants[variant][lod] = createTreeGeometry(species, variant, lod, settings);
-      }
+      for (const lod of TREE_LODS) variants[variant][lod] = createTreeGeometry(species, variant, lod, settings);
     }
     const speciesMap = {} as TreeSpeciesGeometryMap;
-    for (const lod of TREE_LODS) {
-      speciesMap[lod] = createTreeVariantSelectorGeometry(variants, lod);
-    }
+    for (const lod of TREE_LODS) speciesMap[lod] = createTreeVariantSelectorGeometry(variants, lod);
     speciesMap.variants = variants;
     out[species] = speciesMap;
   }
@@ -93,7 +90,7 @@ export function createTreeBakedImpostorGeometry(
   const fallbackWidth = species === "pine"
     ? config.crownRadiusM * 1.9
     : species === "oak"
-      ? config.crownRadiusM * 3.0
+      ? config.crownRadiusM * 3
       : Math.max(config.trunkRadiusM * 4, config.morphology.branchLength * 1.6);
   const radius = atlas?.radius && Number.isFinite(atlas.radius)
     ? Math.max(0.25, atlas.radius)
@@ -103,14 +100,13 @@ export function createTreeBakedImpostorGeometry(
     : fallbackHeight * 0.5;
   const geometry = createTreeReferenceImpostorQuadGeometry(radius, centerY);
   setTreeVariantAttribute(geometry, 0);
+  setTreeSpeciesAttribute(geometry, species);
   geometry.userData[TREE_IMPOSTOR_CARD_GEOMETRY_FLAG] = true;
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
 }
 
-/** Marks flat baked-impostor cards; billboard impostor materials may only be
- *  applied to geometry carrying this flag. */
 export const TREE_IMPOSTOR_CARD_GEOMETRY_FLAG = "treeImpostorCard";
 
 export function isTreeImpostorCardGeometry(geometry: THREE.BufferGeometry): boolean {
@@ -141,6 +137,7 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
   colorCount: number;
   maxFoliageMask: number;
   maxFoliageCard: number;
+  maxSpeciesIndex: number;
 } {
   return {
     vertexCount: geometry.getAttribute("position")?.count ?? 0,
@@ -150,6 +147,7 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
     colorCount: geometry.getAttribute("color")?.count ?? 0,
     maxFoliageMask: maxAttributeValue(geometry.getAttribute("treeFoliageMask")),
     maxFoliageCard: maxAttributeValue(geometry.getAttribute("treeFoliageCard")),
+    maxSpeciesIndex: maxAttributeValue(geometry.getAttribute("treeSpeciesIndex")),
   };
 }
 
@@ -173,12 +171,16 @@ function createTreeGeometry(
   if (lod === "impostor" || (species === "dead" && lod === "far")) {
     const geometry = createOpaqueImpostorTree(species, config);
     setTreeVariantAttribute(geometry, variant);
+    setTreeSpeciesAttribute(geometry, species);
     return geometry;
   }
-  const sp = VEG_TREE_SPECIES[species];
+  const grammar = VEG_TREE_SPECIES[species];
   const rng = vegRng(settings.seed, `tree/${species}/${variant}`);
-  const variantBudget = Math.max(1, Math.floor(settings.lod.budgets[TREE_LOD_VERTEX_BUDGET[lod]] / TREE_STRUCTURAL_VARIANTS));
-  const built = buildTree(sp, rng, {
+  const variantBudget = Math.max(
+    1,
+    Math.floor(settings.lod.budgets[TREE_LOD_VERTEX_BUDGET[lod]] / TREE_STRUCTURAL_VARIANTS),
+  );
+  const built = buildTree(grammar, rng, {
     lod: GRAMMAR_LOD[lod],
     barkColor: VEG_BARK_COLOR[species],
     vertexBudget: variantBudget,
@@ -186,13 +188,22 @@ function createTreeGeometry(
   const geometry = built.geometry;
   const target = targetTreeHeight(species, config);
   if (built.stats.height > 1e-3 && target > 1e-3) {
-    const s = target / built.stats.height;
-    geometry.scale(s, s, s);
+    const scale = target / built.stats.height;
+    geometry.scale(scale, scale, scale);
   }
   setTreeVariantAttribute(geometry, variant);
+  setTreeSpeciesAttribute(geometry, species);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
+}
+
+function setTreeSpeciesAttribute(geometry: THREE.BufferGeometry, species: TreeSpeciesId): void {
+  const vertexCount = geometry.getAttribute("position")?.count ?? 0;
+  geometry.setAttribute(
+    "treeSpeciesIndex",
+    new THREE.Float32BufferAttribute(new Float32Array(vertexCount).fill(treeSpeciesAtlasIndex(species)), 1),
+  );
 }
 
 function createTreeVariantSelectorGeometry(
@@ -206,6 +217,7 @@ function createTreeVariantSelectorGeometry(
   const wind: number[] = [];
   const foliageMasks: number[] = [];
   const foliageCards: number[] = [];
+  const speciesIndices: number[] = [];
   const treeVariants: number[] = [];
   const indices: number[] = [];
 
@@ -224,14 +236,15 @@ function createTreeVariantSelectorGeometry(
     appendAttribute(source, "treeWind", 2, wind, vertexCount);
     appendAttribute(source, "treeFoliageMask", 1, foliageMasks, vertexCount);
     appendAttribute(source, "treeFoliageCard", 1, foliageCards, vertexCount);
-    for (let i = 0; i < vertexCount; i++) treeVariants.push(variant);
+    appendAttribute(source, "treeSpeciesIndex", 1, speciesIndices, vertexCount);
+    for (let index = 0; index < vertexCount; index++) treeVariants.push(variant);
 
     const sourceIndex = source.getIndex();
     if (sourceIndex) {
       const array = sourceIndex.array;
-      for (let i = 0; i < array.length; i++) indices.push(vertexOffset + Number(array[i]));
+      for (let index = 0; index < array.length; index++) indices.push(vertexOffset + Number(array[index]));
     } else {
-      for (let i = 0; i < vertexCount; i++) indices.push(vertexOffset + i);
+      for (let index = 0; index < vertexCount; index++) indices.push(vertexOffset + index);
     }
   }
 
@@ -243,6 +256,7 @@ function createTreeVariantSelectorGeometry(
   geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(wind, 2));
   geometry.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(foliageMasks, 1));
   geometry.setAttribute("treeFoliageCard", new THREE.Float32BufferAttribute(foliageCards, 1));
+  geometry.setAttribute("treeSpeciesIndex", new THREE.Float32BufferAttribute(speciesIndices, 1));
   geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(treeVariants, 1));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
