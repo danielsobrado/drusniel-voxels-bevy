@@ -79,5 +79,5 @@ grass:
     far_meters: 120
     far_distance_fraction: 0.96
     band_meters: 12
-    scruff_meters: 34
-    scruff_min_density: 0.36
+    scruff_meters: 38
+    scruff_min_density: 0.42
