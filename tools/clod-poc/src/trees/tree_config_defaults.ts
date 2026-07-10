@@ -214,13 +214,13 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     minSpacingM: 4.0,
   },
   lod: {
-    nearFraction: 0.040,
-    midFraction: 0.15,
-    farFraction: 0.30,
+    nearFraction: 0.062,
+    midFraction: 0.24,
+    farFraction: 0.62,
     impostorFraction: 1.0,
     hysteresisM: 8,
     crossfadeEnabled: true,
-    crossfadeBandM: 18,
+    crossfadeBandM: 20,
     ditherEnabled: true,
     shadowsMaxLod: "none",
     budgets: {
