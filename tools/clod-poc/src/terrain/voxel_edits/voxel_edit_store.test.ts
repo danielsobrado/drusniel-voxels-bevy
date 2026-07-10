@@ -62,6 +62,39 @@ describe("VoxelEditStore", () => {
     expect(store.editedYRange(0, 16, 0, 16)).toEqual({ minY: 2, maxY: 2 });
   });
 
+  it("removes empty chunk columns after rollback", () => {
+    const store = new VoxelEditStore();
+    const edit = transaction(
+      1,
+      0,
+      [{ x: 160, y: 2, z: -160, density: 4 }],
+      [{ x: 160, y: 2, z: -160, value: null }],
+    );
+
+    store.apply(edit);
+    store.rollback(edit);
+
+    expect(store.snapshotBounds(144, 176, -176, -144).deltas).toEqual([]);
+    expect(store.editedYRange(144, 176, -176, -144)).toBeNull();
+    expect(store.count()).toBe(0);
+  });
+
+  it("keeps material counts correct when a loaded snapshot repeats a voxel", () => {
+    const store = new VoxelEditStore();
+
+    store.load({
+      revision: 7,
+      deltas: [
+        { x: 1, y: 2, z: 3, density: 1, materialSlot: 2, revision: 6 },
+        { x: 1, y: 2, z: 3, density: 2, materialSlot: 5, revision: 7 },
+      ],
+    });
+
+    expect(store.count()).toBe(1);
+    expect(store.materialSlots()).toEqual([5]);
+    expect(store.voxelAt(1, 2, 3)).toEqual(expect.objectContaining({ density: 2, materialSlot: 5 }));
+  });
+
   it("rejects an out-of-order transaction", () => {
     const store = new VoxelEditStore();
     expect(() => store.apply(transaction(1, 2, [{ x: 0, y: 0, z: 0, density: 1 }]))).toThrow(/revision mismatch/);
