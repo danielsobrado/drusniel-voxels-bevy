@@ -34,6 +34,11 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
       : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
+  // When hydrology can answer outside the startup world (infinite-islands), the clipmap
+  // and water shaders must not clamp water to [0, worldCells]²: cellsX/Z = 0 is the
+  // designed "unbounded" sentinel (finiteWorldBounds checks `> 0`). Otherwise the camera
+  // spawn region beyond the original world renders no water at all.
+  const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
   const clipmap = new WaterClipmap({
     scene: deps.scene,
     config: deps.waterConfig,
@@ -41,7 +46,9 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     createMaterial: waterMaterialFactory,
     sunDirection: deps.getSunDirection().clone(),
     cameraPosition: deps.camera.position as THREE.Vector3,
-    worldBounds: { cellsX: deps.worldCells, cellsZ: deps.worldCells },
+    worldBounds: infiniteWorldWater
+      ? { cellsX: 0, cellsZ: 0 }
+      : { cellsX: deps.worldCells, cellsZ: deps.worldCells },
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);

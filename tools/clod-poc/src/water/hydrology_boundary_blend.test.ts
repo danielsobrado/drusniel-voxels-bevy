@@ -44,9 +44,8 @@ describe("hydrology boundary blend", () => {
     }
   });
 
-  it("keeps adjacent effective samples bounded while walking across the boundary", () => {
+  it("keeps the water surface continuous while walking across the boundary", () => {
     let maxWaterYStep = 0;
-    let maxMaskStep = 0;
     for (const z of [96, 256, 410]) {
       let prev = hydrology.sample(WORLD_CELLS - 96, z);
       for (let x = WORLD_CELLS - 96 + 0.5; x <= WORLD_CELLS + 96; x += 0.5) {
@@ -54,12 +53,13 @@ describe("hydrology boundary blend", () => {
         if (prev.bodyMask > 0.05 || cur.bodyMask > 0.05) {
           maxWaterYStep = Math.max(maxWaterYStep, Math.abs(cur.waterY - prev.waterY));
         }
-        maxMaskStep = Math.max(maxMaskStep, Math.abs(cur.bodyMask - prev.bodyMask));
         prev = cur;
       }
     }
-    // 0.5 m steps over smooth fields: no hard jumps (a hard authority seam is metres tall).
+    // 0.5 m steps over smooth fields: no hard surface jumps (a hard authority seam is
+    // metres tall). The body mask is intentionally NOT bounded here: basin/channel
+    // containment uses hard wet->dry cutoffs at shorelines, so mask steps are legitimate
+    // wherever a body edge crosses the walk.
     expect(maxWaterYStep).toBeLessThan(1.0);
-    expect(maxMaskStep).toBeLessThan(0.25);
   });
 });

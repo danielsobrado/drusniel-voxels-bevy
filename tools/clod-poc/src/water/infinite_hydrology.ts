@@ -10,15 +10,11 @@ import {
 const BASIN_SIZE_M = 768;
 const LAKE_RADIUS_MIN_M = 42;
 const LAKE_RADIUS_MAX_M = 118;
-const LAKE_EDGE_FADE_M = 18;
 const RIVER_WIDTH_MIN_M = 10;
 const RIVER_WIDTH_MAX_M = 28;
-const RIVER_EDGE_FADE_M = 12;
 const RIVER_MEANDER_M = 58;
 const RIVER_MEANDER_SCALE = 0.0055;
 const RIVER_LEVEL_OFFSET_M = 1.25;
-const LAKE_LEVEL_OFFSET_M = 0.85;
-const POND_LEVEL_OFFSET_M = 0.45;
 const DRY_DEPTH_M = 16;
 const HASH_UINT_SCALE = 1 / 0xffffffff;
 
@@ -86,6 +82,36 @@ function drySample(terrainY: number, dryDepthM: number): HydrologySample {
   };
 }
 
+// Rim samples used to validate a basin: the lake level may never exceed the lowest
+// point of its rim, otherwise water would hang above the downhill slope outside it.
+const LAKE_RIM_SAMPLES = 8;
+const LAKE_RIM_MARGIN_M = 0.4;
+const LAKE_MIN_DEPRESSION_M = 1.0;
+const LAKE_DESCENT_STEP_M = 72;
+const LAKE_DESCENT_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [LAKE_DESCENT_STEP_M, 0],
+  [-LAKE_DESCENT_STEP_M, 0],
+  [0, LAKE_DESCENT_STEP_M],
+  [0, -LAKE_DESCENT_STEP_M],
+];
+
+/**
+ * Spill level for a candidate basin, or null when the disc is not a real depression.
+ * Contained means: the terrain at the centre sits at least LAKE_MIN_DEPRESSION_M below
+ * the lowest rim sample; the water fills half the depression, capped under the rim so the
+ * waterline always closes inside the disc (no floating sheet past the downhill rim).
+ */
+function lakeSpillLevel(centerX: number, centerZ: number, radius: number, sampler: TerrainHeightSampler): number | null {
+  const centerY = sampler.surfaceHeight(centerX, centerZ);
+  let rimMin = Number.POSITIVE_INFINITY;
+  for (let k = 0; k < LAKE_RIM_SAMPLES; k++) {
+    const a = (k / LAKE_RIM_SAMPLES) * Math.PI * 2;
+    rimMin = Math.min(rimMin, sampler.surfaceHeight(centerX + Math.cos(a) * radius, centerZ + Math.sin(a) * radius));
+  }
+  if (rimMin < centerY + LAKE_MIN_DEPRESSION_M) return null; // slope, not a basin
+  return Math.min(centerY + (rimMin - centerY) * 0.5, rimMin - LAKE_RIM_MARGIN_M);
+}
+
 function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): HydrologySample | null {
   const bx = basinCoord(x);
   const bz = basinCoord(z);
@@ -95,25 +121,52 @@ function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hyd
       const cx = bx + ox;
       const cz = bz + oz;
       const spawn = hash2(cx, cz, 11);
-      if (spawn > 0.34) continue;
-      const centerX = basinCenter(cx, hash2(cx, cz, 17));
-      const centerZ = basinCenter(cz, hash2(cx, cz, 23));
+      if (spawn > 0.55) continue;
+      let centerX = basinCenter(cx, hash2(cx, cz, 17));
+      let centerZ = basinCenter(cz, hash2(cx, cz, 23));
       const radius = mix(LAKE_RADIUS_MIN_M, LAKE_RADIUS_MAX_M, hash2(cx, cz, 31));
+      // The refined centre below moves at most 2 descent steps; skip basins whose disc
+      // cannot reach this sample even after that move (keeps per-sample terrain lookups
+      // bounded away from basin centres).
+      const reach = radius + LAKE_DESCENT_STEP_M * 2;
+      if (Math.hypot(x - centerX, z - centerZ) > reach) continue;
+      // Deterministic descent: hashed centres rarely coincide with real depressions on
+      // hilly terrain, so walk the centre toward the local low spot before validating the
+      // basin. Same inputs -> same descent -> same lake for every sample/tile.
+      for (let step = 0; step < 2; step++) {
+        let lowY = sampler.surfaceHeight(centerX, centerZ);
+        let moveX = centerX;
+        let moveZ = centerZ;
+        for (const [ddx, ddz] of LAKE_DESCENT_OFFSETS) {
+          const px = centerX + ddx;
+          const pz = centerZ + ddz;
+          const py = sampler.surfaceHeight(px, pz);
+          if (py < lowY) {
+            lowY = py;
+            moveX = px;
+            moveZ = pz;
+          }
+        }
+        if (moveX === centerX && moveZ === centerZ) break;
+        centerX = moveX;
+        centerZ = moveZ;
+      }
       const dx = x - centerX;
       const dz = z - centerZ;
       const distance = Math.hypot(dx, dz);
-      if (distance > radius + LAKE_EDGE_FADE_M) continue;
-      const mask = 1 - smoothstep(radius, radius + LAKE_EDGE_FADE_M, distance);
+      // Hard containment at the rim radius: no fade band outside it, otherwise terrain
+      // that falls away past the rim would carry floating water. Shoreline softness comes
+      // from the depth->0 crossing inside the basin, not from the radial mask.
+      if (distance > radius) continue;
+      const mask = 1 - smoothstep(radius * 0.82, radius, distance);
       if (mask <= (best?.mask ?? 0)) continue;
-      const levelOffset = spawn < 0.08 ? LAKE_LEVEL_OFFSET_M : POND_LEVEL_OFFSET_M;
+      const waterY = lakeSpillLevel(centerX, centerZ, radius, sampler);
+      if (waterY === null) continue; // invalid basin: reject the lake rather than forcing it
       best = {
         mask,
-        // Basin spill level = terrain at the basin centre plus a small offset. This is a
-        // constant per body; the cell is only wet where terrain sits *below* it, so a lake
-        // never climbs the surrounding hillside.
-        waterY: sampler.surfaceHeight(centerX, centerZ) + levelOffset,
-        lakeMask: spawn < 0.08 ? mask : 0,
-        kind: spawn < 0.08 ? HYDROLOGY_BODY_LAKE : HYDROLOGY_BODY_POND,
+        waterY,
+        lakeMask: spawn < 0.15 ? mask : 0,
+        kind: spawn < 0.15 ? HYDROLOGY_BODY_LAKE : HYDROLOGY_BODY_POND,
         radius,
         distance,
         id: basinBodyId(cx, cz, 41),
@@ -157,10 +210,14 @@ function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hy
   const across = x * normalX + z * normalZ;
   const channelOffset = (hash2(basinX, basinZ, 107) - 0.5) * BASIN_SIZE_M * 0.72;
   const meander = Math.sin(along * RIVER_MEANDER_SCALE + hash2(basinX, basinZ, 109) * Math.PI * 2) * RIVER_MEANDER_M;
-  const distance = Math.abs(across - channelOffset - meander);
+  const acrossTarget = channelOffset + meander;
+  const distance = Math.abs(across - acrossTarget);
   const halfWidth = mix(RIVER_WIDTH_MIN_M, RIVER_WIDTH_MAX_M, hash2(basinX, basinZ, 113));
-  if (distance > halfWidth + RIVER_EDGE_FADE_M) return null;
-  const riverMask = 1 - smoothstep(halfWidth, halfWidth + RIVER_EDGE_FADE_M, distance);
+  // Hard containment at the channel half-width: no fade band outside it — on a
+  // cross-slope, terrain past the low bank keeps falling and a fade band there would
+  // carry floating water. Shoreline softness comes from the depth->0 crossing.
+  if (distance > halfWidth) return null;
+  const riverMask = 1 - smoothstep(halfWidth * 0.7, halfWidth, distance);
   const terrainY = sampler.surfaceHeight(x, z);
   // Orient flow so it points downhill along the (hashed) channel axis: sample terrain a
   // step forward and backward and flip the axis if "forward" is uphill. Macro drainage
@@ -170,9 +227,18 @@ function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hy
   const behindY = sampler.surfaceHeight(x - dirX * 36, z - dirZ * 36);
   if (behindY < aheadY) { dirX = -dirX; dirZ = -dirZ; }
   const downstreamY = Math.min(aheadY, behindY);
+  // Bank containment on cross-slopes: the surface may not sit above the channel's low
+  // bank plus the channel offset, or the water would overhang the falling side. Sample
+  // both banks at the channel centreline nearest this point.
+  const centerShift = acrossTarget - across;
+  const ccx = x + normalX * centerShift;
+  const ccz = z + normalZ * centerShift;
+  const bankA = sampler.surfaceHeight(ccx + normalX * halfWidth, ccz + normalZ * halfWidth);
+  const bankB = sampler.surfaceHeight(ccx - normalX * halfWidth, ccz - normalZ * halfWidth);
+  const lowBank = Math.min(bankA, bankB);
   // Channel surface sits an offset above the local low point; the cell is wet only where
   // terrain is below it, so the river stays in the valley instead of climbing hills.
-  const waterY = downstreamY + RIVER_LEVEL_OFFSET_M;
+  const waterY = Math.min(downstreamY, lowBank) + RIVER_LEVEL_OFFSET_M;
   if (waterY <= terrainY) return null;
   const depth = waterY - terrainY;
   const speed = Math.max(0.08, Math.abs(terrainY - downstreamY) * 0.25 + 0.18) * riverMask;

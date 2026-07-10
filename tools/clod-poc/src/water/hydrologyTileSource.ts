@@ -82,6 +82,16 @@ export class HydrologyTileCache {
     this.drySentinelDepthM = Math.max(1, options.drySentinelDepthM);
   }
 
+  /**
+   * Consumers sampling coarser than this (metres per consumer cell) should bypass the
+   * tile cache and hit the analytic field directly: a ring coarser than ~3 tile cells
+   * covers so much area that caching its tiles would evict everything the fine rings
+   * rely on (LRU thrash), while its own vertices barely resolve one tile cell anyway.
+   */
+  get coarseBypassCellSize(): number {
+    return this.cellSize * 3;
+  }
+
   get residentTiles(): number {
     return this.tiles.size;
   }

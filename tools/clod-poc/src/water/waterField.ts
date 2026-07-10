@@ -121,7 +121,7 @@ export class WaterField {
 
   private sampleHydrology(x: number, z: number, cellSize: number): WaterFieldResult {
     if (!this.hydrology) return this.sampleDry(x, z);
-    const s = this.hydrology.sample(x, z);
+    const s = this.hydrology.sample(x, z, cellSize);
     const useFar = cellSize >= this.farLevelMinCellSize;
     const baseWaterY = useFar ? s.waterYFar : s.waterY;
     const baseDepth = baseWaterY - s.terrainY;
@@ -131,7 +131,7 @@ export class WaterField {
     if (flowDirLen > FLOW_EPSILON && flowSpeed > FLOW_EPSILON) {
       const dirX = s.flowX / flowDirLen;
       const dirZ = s.flowZ / flowDirLen;
-      const drop = cascadeWhitewaterDrop(this.hydrologyRiverLocalDrop(x, z, dirX, dirZ), flowSpeed);
+      const drop = cascadeWhitewaterDrop(this.hydrologyRiverLocalDrop(x, z, dirX, dirZ, cellSize), flowSpeed);
       const bodyMask = baseDepth > 0 ? s.bodyMask : 0;
       const waterY = shapeRiverSurfaceY(x, z, baseWaterY, s.terrainY, cellSize, dirX, dirZ, flowSpeed, drop, bodyMask, riverMask, Math.max(baseDepth, s.riverDepth));
       const depth = waterY - s.terrainY;
@@ -222,12 +222,12 @@ export class WaterField {
     return { waterY, terrainY, depth: waterY - terrainY, bodyMask, flow: bestFlow };
   }
 
-  private hydrologyRiverLocalDrop(x: number, z: number, dirX: number, dirZ: number): number {
+  private hydrologyRiverLocalDrop(x: number, z: number, dirX: number, dirZ: number, cellSize = 0): number {
     if (!this.hydrology) return 0;
     const grid = this.hydrology.grid;
     const sampleStep = Math.max(1, grid.worldCells / Math.max(1, grid.res - 1)) * 2;
-    const up = this.hydrology.sample(x - dirX * sampleStep, z - dirZ * sampleStep);
-    const down = this.hydrology.sample(x + dirX * sampleStep, z + dirZ * sampleStep);
+    const up = this.hydrology.sample(x - dirX * sampleStep, z - dirZ * sampleStep, cellSize);
+    const down = this.hydrology.sample(x + dirX * sampleStep, z + dirZ * sampleStep, cellSize);
     if (up.riverMask <= 0.05 && down.riverMask <= 0.05) return 0;
     return Math.max(0, up.waterY - down.waterY);
   }

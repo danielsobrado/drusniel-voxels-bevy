@@ -189,16 +189,24 @@ export class HydrologySystem {
     return this.infiniteWorldSamples;
   }
 
-  sample(x: number, z: number): HydrologySample {
+  /**
+   * Canonical world-space hydrology sample. `cellSizeHint` (metres per consumer cell,
+   * e.g. the water clipmap ring cell size) only selects the infinite-field access path:
+   * fine consumers go through the tile cache, coarse rings (whose footprint would blow
+   * the LRU budget — the 48 m ring spans ±3 km ≈ hundreds of tiles) sample the analytic
+   * field directly. Tile bilinear vs analytic differ by at most the interpolation delta
+   * of one 4 m tile cell, well below what a coarse ring can resolve.
+   */
+  sample(x: number, z: number, cellSizeHint = 0): HydrologySample {
     if (!this.infiniteWorldSamples) return sampleHydrologyGrid(this.grid, x, z);
-    if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampleInfinite(x, z);
+    if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampleInfinite(x, z, cellSizeHint);
     const t = this.gridWeight(x, z);
     if (t >= 1) return sampleHydrologyGrid(this.grid, x, z);
     // Boundary blend band: fade the finite grid into the infinite field as the world
     // edge approaches so the effective authority is continuous across the boundary
     // (t = 1 deep inside -> pure grid; t = 0 at the edge -> pure infinite, matching the
     // outside limit exactly).
-    return blendHydrologySamples(this.sampleInfinite(x, z), sampleHydrologyGrid(this.grid, x, z), t);
+    return blendHydrologySamples(this.sampleInfinite(x, z, cellSizeHint), sampleHydrologyGrid(this.grid, x, z), t);
   }
 
   terrainHeight(x: number, z: number): number {
@@ -220,8 +228,10 @@ export class HydrologySystem {
     return raw * raw * (3 - 2 * raw);
   }
 
-  private sampleInfinite(x: number, z: number): HydrologySample {
-    if (this.tileCache) return this.tileCache.sample(x, z);
+  private sampleInfinite(x: number, z: number, cellSizeHint = 0): HydrologySample {
+    if (this.tileCache && cellSizeHint <= this.tileCache.coarseBypassCellSize) {
+      return this.tileCache.sample(x, z);
+    }
     return sampleInfiniteHydrology(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
   }
 
