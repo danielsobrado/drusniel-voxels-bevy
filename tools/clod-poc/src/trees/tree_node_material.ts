@@ -25,9 +25,11 @@ import {
   positionGeometry,
   screenCoordinate,
   sin,
+  smoothstep,
   storage,
   texture,
   uniform,
+  uv,
   vec2,
   vec3,
 } from "three/tsl";
@@ -49,6 +51,10 @@ type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_VARIANT_HASH_SALT = 1103;
+const FOLIAGE_CARD_RADIUS_X = 0.48;
+const FOLIAGE_CARD_RADIUS_Y = 0.50;
+const FOLIAGE_CARD_EDGE_START = 0.72;
+const FOLIAGE_CARD_KEEP_THRESHOLD = 0.22;
 
 const LOD_COLORS: Record<TreeLod, THREE.Color> = {
   near: new THREE.Color(0x2e7d32),
@@ -99,6 +105,29 @@ function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: 
   return texture(hydrology.texture, wetUv).y.lessThan(0.5);
 }
 
+export function treeFoliageCardCoverageAt(u: number, v: number): number {
+  const localU = ((u * 2) % 1 + 1) % 1;
+  const localV = ((v * 2) % 1 + 1) % 1;
+  const dx = (localU - 0.5) / FOLIAGE_CARD_RADIUS_X;
+  const dy = (localV - 0.5) / FOLIAGE_CARD_RADIUS_Y;
+  const distanceSquared = dx * dx + dy * dy;
+  if (distanceSquared <= FOLIAGE_CARD_EDGE_START) return 1;
+  if (distanceSquared >= 1) return 0;
+  const t = (distanceSquared - FOLIAGE_CARD_EDGE_START) / (1 - FOLIAGE_CARD_EDGE_START);
+  const smooth = t * t * (3 - 2 * t);
+  return 1 - smooth;
+}
+
+function treeFoliageCardKeep(cardTag: TslNode): TslNode {
+  const localUv: TslNode = fract(uv().mul(2));
+  const centered: TslNode = localUv.sub(vec2(0.5, 0.5));
+  const dx: TslNode = centered.x.div(FOLIAGE_CARD_RADIUS_X);
+  const dy: TslNode = centered.y.div(FOLIAGE_CARD_RADIUS_Y);
+  const distanceSquared: TslNode = dx.mul(dx).add(dy.mul(dy));
+  const coverage: TslNode = float(1).sub(smoothstep(FOLIAGE_CARD_EDGE_START, 1, distanceSquared));
+  return mix(float(1), coverage, clamp(cardTag, 0, 1)).greaterThan(FOLIAGE_CARD_KEEP_THRESHOLD);
+}
+
 export function createTreeNodeMaterialHandle(
   settings: TreeSettings,
   lighting: EnvironmentLighting = fallbackLighting(),
@@ -137,6 +166,7 @@ export function createTreeNodeMaterialHandle(
   const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
+    const aFoliageCard: TslNode = attribute("treeFoliageCard", "float");
     const aVariant: TslNode = attribute("treeVariant", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
     const aWindWeight: TslNode = aWind.x;
@@ -194,8 +224,9 @@ export function createTreeNodeMaterialHandle(
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
     const lodMask: TslNode = ign.lessThan(aLodFade);
+    const cardKeep: TslNode = treeFoliageCardKeep(aFoliageCard);
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
-    const maskNode: TslNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
+    const maskNode: TslNode = aboveWater ? lodMask.and(cardKeep).and(aboveWater) : lodMask.and(cardKeep);
     (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
@@ -290,6 +321,7 @@ export function createTreeRingNodeMaterialHandle(
   const buildMaterial = (albedoFactory: (vertexColor: TslNode, tint: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
+    const aFoliageCard: TslNode = attribute("treeFoliageCard", "float");
     const aVariant: TslNode = attribute("treeVariant", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
     const aWindWeight: TslNode = aWind.x;
@@ -350,8 +382,10 @@ export function createTreeRingNodeMaterialHandle(
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
+    const cardKeep: TslNode = treeFoliageCardKeep(aFoliageCard);
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
-    if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
+    const maskNode: TslNode = aboveWater ? cardKeep.and(aboveWater) : cardKeep;
+    (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -359,7 +393,7 @@ export function createTreeRingNodeMaterialHandle(
     materials.push(material);
     prepassNodes.set(material, {
       positionNode,
-      maskNode: aboveWater ?? undefined,
+      maskNode,
       side: material.side,
     });
     return material;
