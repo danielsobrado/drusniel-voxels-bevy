@@ -6,7 +6,6 @@ import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_
 import { TerrainEditDirtyQueue, type TerrainEditDirtyEvent } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
 import {
   canCommitBuild,
-  canCommitTerrainEdit,
   publishPlayerEditAuthorityDecision,
   resolvePlayerEditAuthorityConfig,
 } from "../../../player/player_edit_authority.js";
@@ -137,20 +136,6 @@ export function runTerrainEditStartup(
     setPendingParentMs: (ms) => { session.pendingParentMs = ms; },
   });
 
-  const scheduleDig = (ray: THREE.Ray): void => {
-    const hit = terrainRaycast.raycastEditableTerrain(ray);
-    if (hit) {
-      const decision = canCommitTerrainEdit(editAuthority, authorityOrigin(), hit.point);
-      publishPlayerEditAuthorityDecision(authorityCounters(), decision);
-      if (!decision.allowed) {
-        session.lastDigSummary = `terrain edit rejected: ${decision.reason}`;
-        updateInfo();
-        return;
-      }
-    }
-    terrainEditService.scheduleDig(ray);
-  };
-
   const scheduleConstructionTerrainConform = (request: ConstructionTerrainConformRequest): void => {
     const decision = canCommitBuild(editAuthority, authorityOrigin(), request.position);
     publishPlayerEditAuthorityDecision(authorityCounters(), decision);
@@ -165,7 +150,7 @@ export function runTerrainEditStartup(
   return {
     terrainEditService,
     flushAncestors: () => terrainEditService.flushAncestors(),
-    scheduleDig,
+    scheduleDig: (ray) => terrainEditService.scheduleDig(ray),
     scheduleConstructionTerrainConform,
     playerTerraformEditActive,
   };
