@@ -16,11 +16,28 @@ export interface VoxelDelta extends VoxelCoord {
   revision: number;
 }
 
+export interface VoxelDeltaBefore extends VoxelCoord {
+  value: VoxelDelta | null;
+}
+
+export interface VoxelEditBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+}
+
 export interface VoxelEditTransaction {
   id: number;
   source: string;
   revisionBase: number;
   deltas: readonly Omit<VoxelDelta, "revision">[];
+  previousValues: readonly VoxelDeltaBefore[];
+  dirtyChunks: readonly VoxelChunkKey[];
+  dirtyBounds: VoxelEditBounds;
+  affectedMaterialSlots: readonly number[];
 }
 
 export interface VoxelEditResult {

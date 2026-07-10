@@ -1,4 +1,3 @@
-import { editIndex, cellKey, brushSdf, editHeight, activePaintSlots } from "./terrain_edits.js";
 import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
 
 export const MATERIAL_PAINT_BAND = 0.75;
@@ -27,22 +26,6 @@ export function paintMaterialAt(x: number, y: number, z: number): number {
   const voxelSlot = voxelEditStore.materialAt(x, y, z);
   if (voxelSlot !== undefined) return voxelSlot + 1;
 
-  if (editIndex.size > 0) {
-    const key = cellKey(x, y, z);
-    const bucket = editIndex.get(key);
-    if (bucket) {
-      for (let i = bucket.length - 1; i >= 0; i--) {
-        const e = bucket[i];
-        if (e.op !== "add") continue;
-        const h = editHeight(e);
-        const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-        if (brushSdf(e.shape, dx, dy, dz, e.r, h) <= MATERIAL_PAINT_BAND) {
-          const slot = Math.max(0, (e.material ?? 0) | 0);
-          return slot + 1;
-        }
-      }
-    }
-  }
   return 0;
 }
 
@@ -50,7 +33,7 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
   const slots = new Array<number>(PAINT_BLEND_CHANNELS).fill(-1);
   const weights = new Array<number>(PAINT_BLEND_CHANNELS).fill(0);
 
-  const globalSlots = [...activePaintSlots].sort((a, b) => a - b);
+  const globalSlots = voxelEditStore.materialSlots();
   for (let c = 0; c < Math.min(globalSlots.length, PAINT_BLEND_CHANNELS); c++) {
     slots[c] = globalSlots[c];
   }
@@ -63,25 +46,5 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
     return { slots, weights };
   }
 
-  const bucket = editIndex.size > 0 ? editIndex.get(cellKey(x, y, z)) : undefined;
-  if (!bucket) return { slots, weights };
-
-  const cover = new Map<number, number>();
-  for (let i = bucket.length - 1; i >= 0; i--) {
-    const e = bucket[i];
-    if (e.op !== "add") continue;
-    const h = editHeight(e);
-    const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-    const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
-    if (sdf >= PAINT_FADE) continue;
-    const t = Math.min(Math.max((sdf - MATERIAL_PAINT_BAND) / (PAINT_FADE - MATERIAL_PAINT_BAND), 0), 1);
-    const w = 1 - t * t * (3 - 2 * t);
-    if (w <= 0) continue;
-    const slot = Math.max(0, (e.material ?? 0) | 0);
-    cover.set(slot, Math.max(cover.get(slot) ?? 0, w));
-  }
-  for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
-    if (slots[c] >= 0) weights[c] = cover.get(slots[c]) ?? 0;
-  }
   return { slots, weights };
 }

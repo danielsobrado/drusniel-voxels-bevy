@@ -268,6 +268,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     terrainColliders,
     surfaceHeight,
     worldCells,
+    getMode: () => interaction.mode,
   });
 
   return {

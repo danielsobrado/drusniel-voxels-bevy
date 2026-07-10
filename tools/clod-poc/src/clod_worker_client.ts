@@ -1,5 +1,5 @@
 import type { BuildProgress, BuildResult } from "./clod/quadtree.js";
-import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "./terrain/terrain.js";
+import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
@@ -104,6 +104,7 @@ export class ClodWorkerClient {
   private streamRootWorkerFallbackPages = 0;
   private streamRootBoundsGuardConfig: StreamedPageBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
   private streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
+  private readonly dirtyStreamRootIds = new Set<string>();
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -130,6 +131,17 @@ export class ClodWorkerClient {
   ): Promise<BuildResult> => {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     this.resetStreamRootGpuMesherForWorld(worldPagesX, worldPagesZ, cfg, terrainSource, cacheDisabled);
+    if (voxelEdits.deltas.length > 0) {
+      const baseSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
+      const basePages = new Set(voxelEdits.deltas.map((delta) => `${Math.floor(delta.x / baseSpan)},${Math.floor(delta.z / baseSpan)}`));
+      for (const key of basePages) {
+        const [pageX, pageZ] = key.split(",").map(Number);
+        for (let level = 0; level < cfg.page.quadtree_levels; level++) {
+          const scale = 2 ** level;
+          this.dirtyStreamRootIds.add(`L${level}:${Math.floor(pageX / scale)},${Math.floor(pageZ / scale)}`);
+        }
+      }
+    }
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
       type: "build", requestId, worldPagesX, worldPagesZ, cfg, voxelEdits,
@@ -142,17 +154,21 @@ export class ClodWorkerClient {
     });
   };
 
-  rebuildAfterDig(edit: DigEdit, dirty: import("./clod/quadtree.js").DirtyCellBounds): Promise<WorkerLod0Rebuild> {
-    return new Promise((resolve, reject) => {
+  rebuildAfterDig(transaction: VoxelEditTransaction, dirty: import("./clod/quadtree.js").DirtyCellBounds): Promise<WorkerLod0Rebuild> {
+    const pending = new Promise<WorkerLod0Rebuild>((resolve, reject) => {
       if (this.stopped) { reject(new Error(WORKER_STOPPED_ERROR)); return; }
       if (!this.digPending) {
-        this.digPending = { edits: [edit], dirtyRegions: [{ ...dirty }], resolvers: [{ resolve, reject }] };
+        this.digPending = { transactions: [transaction], dirtyRegions: [{ ...dirty }], resolvers: [{ resolve, reject }] };
       } else {
-        this.digPending.edits.push(edit);
+        this.digPending.transactions.push(transaction);
         this.digPending.dirtyRegions.push({ ...dirty });
         this.digPending.resolvers.push({ resolve, reject });
       }
       void this.pumpDigQueue();
+    });
+    return pending.then((rebuilt) => {
+      this.markStreamRootsDirty(transaction);
+      return rebuilt;
     });
   }
 
@@ -173,6 +189,14 @@ export class ClodWorkerClient {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
     this.refreshStreamRootBoundsGuardConfig();
+    const dirtyIds = coords
+      .map((coord) => this.streamRootNodeId(coord))
+      .filter((id) => this.dirtyStreamRootIds.has(id));
+    if (dirtyIds.length > 0) {
+      const built = await this.buildStreamRootsOnWorker(coords, dirtyIds);
+      this.assertStreamRootNodesValid(built.nodes, "cpu");
+      return built;
+    }
     if (!this.streamRootGpuConfig.enabled) {
       const built = await this.buildStreamRootsOnWorker(coords);
       this.assertStreamRootNodesValid(built.nodes, "cpu");
@@ -264,12 +288,35 @@ export class ClodWorkerClient {
     };
   }
 
-  private buildStreamRootsOnWorker(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
+  private buildStreamRootsOnWorker(
+    coords: readonly { px: number; pz: number; level?: number }[],
+    bypassCacheIds?: readonly string[],
+  ): Promise<WorkerStreamRootsResult> {
     return postTrackedRequest(this.streamRootsRequests, this.worker, {
       type: "buildStreamRoots",
       requestId: this.nextRequestId++,
       coords: coords.map(({ px, pz, level }) => ({ px, pz, level })),
+      bypassCacheIds: bypassCacheIds ? [...bypassCacheIds] : undefined,
     });
+  }
+
+  private markStreamRootsDirty(transaction: VoxelEditTransaction): void {
+    this.markStreamRootBoundsDirty(transaction.dirtyBounds);
+  }
+
+  private markStreamRootBoundsDirty(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void {
+    if (!this.streamRootCfg) return;
+    const baseSpan = this.streamRootCfg.page.chunks_per_page * this.streamRootCfg.page.chunk_size;
+    for (let level = 0; level < this.streamRootCfg.page.quadtree_levels; level++) {
+      const span = baseSpan * (2 ** level);
+      const minX = Math.floor(bounds.minX / span);
+      const maxX = Math.floor(bounds.maxX / span);
+      const minZ = Math.floor(bounds.minZ / span);
+      const maxZ = Math.floor(bounds.maxZ / span);
+      for (let pz = minZ; pz <= maxZ; pz++) {
+        for (let px = minX; px <= maxX; px++) this.dirtyStreamRootIds.add(`L${level}:${px},${pz}`);
+      }
+    }
   }
 
   private buildStreamRootsOnWorkerWithFallbackCounter(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
@@ -359,6 +406,7 @@ export class ClodWorkerClient {
     this.publishStreamRootBoundsGuardStats();
     this.streamRootGpuUnavailable = false;
     this.streamRootWorkerFallbackPages = 0;
+    this.dirtyStreamRootIds.clear();
     this.streamRootCacheInit = initClodCacheContext({
       cfg,
       worldPages: worldPagesX,
@@ -448,6 +496,9 @@ export class ClodWorkerClient {
           serializedBytes: message.serializedBytes, chunksRemeshed: message.chunksRemeshed,
           chunksTotal: message.chunksTotal, pendingParents: message.pendingParents,
           requestCount: message.editCount,
+          chunkPatches: message.chunkPatches ?? [],
+          fullPageFallbacks: message.fullPageFallbacks ?? 0,
+          pageWeldMs: message.pageWeldMs ?? 0,
         };
         for (const rid of message.requestIds) {
           const pending = this.digRequests.get(rid);

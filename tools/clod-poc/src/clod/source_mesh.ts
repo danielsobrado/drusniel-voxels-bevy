@@ -176,35 +176,40 @@ export function rebuildPageChunks(
   cfg: ClodPagesConfig,
   world: WorldBounds,
   dirty: DirtyChunkBounds,
-): { mesh: PageMesh; remeshed: number } {
+): { mesh: PageMesh; remeshed: number; remeshedIndices: number[]; fullPageFallback: boolean; weldMs: number } {
   const P = cfg.page.chunks_per_page;
   const toRemesh = dirtyPageChunkIndices(pageX, pageZ, cfg, dirty);
   const footprint = pageFootprint(pageX, pageZ, cfg);
 
   if (toRemesh.length === 0) {
+    const weldStartedAt = performance.now();
     const { mesh } = weldChunkMeshes(chunkMeshes, cfg);
     validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, `L0:${pageX},${pageZ} unchanged-page weld`);
-    return { mesh, remeshed: 0 };
+    return { mesh, remeshed: 0, remeshedIndices: [], fullPageFallback: false, weldMs: performance.now() - weldStartedAt };
   }
 
   try {
     const partialChunks = chunkMeshes.slice();
     for (const li of toRemesh) remeshChunk(partialChunks, li, pageX, pageZ, cfg, world);
+    const weldStartedAt = performance.now();
     const { mesh } = weldChunkMeshes(partialChunks, cfg);
     validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, `L0:${pageX},${pageZ} partial edit-rebuild`);
     commitChunks(chunkMeshes, partialChunks, toRemesh);
-    return { mesh, remeshed: toRemesh.length };
-  } catch {
+    return { mesh, remeshed: toRemesh.length, remeshedIndices: toRemesh, fullPageFallback: false, weldMs: performance.now() - weldStartedAt };
+  } catch (error) {
+    if (!(error instanceof ClodBuildError) || error.code !== "DegenerateGeometry") throw error;
     const fullChunks = chunkMeshes.slice();
     const allChunks: number[] = [];
     for (let li = 0; li < P * P; li++) {
       remeshChunk(fullChunks, li, pageX, pageZ, cfg, world);
       allChunks.push(li);
     }
+    const weldStartedAt = performance.now();
     const { mesh } = weldChunkMeshes(fullChunks, cfg);
     validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, `L0:${pageX},${pageZ} full edit-rebuild fallback`);
     commitChunks(chunkMeshes, fullChunks, allChunks);
-    return { mesh, remeshed: P * P };
+    void error;
+    return { mesh, remeshed: P * P, remeshedIndices: allChunks, fullPageFallback: true, weldMs: performance.now() - weldStartedAt };
   }
 }
 

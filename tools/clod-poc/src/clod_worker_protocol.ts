@@ -5,7 +5,7 @@ import type {
   DirtyCellBounds,
   NodeBuildStat,
 } from "./clod/quadtree.js";
-import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "./terrain/terrain.js";
+import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
@@ -63,12 +63,12 @@ export type ClodWorkerRequest =
   | {
       type: "dig";
       requestId: number;
-      edits: DigEdit[];
+      transactions: VoxelEditTransaction[];
       dirtyRegions: DirtyCellBounds[];
     }
   | { type: "flush"; requestId: number }
   | { type: "clearCache"; requestId: number }
-  | { type: "buildStreamRoots"; requestId: number; coords: Array<{ px: number; pz: number; level?: number }> };
+  | { type: "buildStreamRoots"; requestId: number; coords: Array<{ px: number; pz: number; level?: number }>; bypassCacheIds?: string[] };
 
 export interface SerializedLod0RebuildResult {
   requestIds: number[];
@@ -82,6 +82,15 @@ export interface SerializedLod0RebuildResult {
   chunksRemeshed: number;
   chunksTotal: number;
   pendingParents: number;
+  chunkPatches: SerializedLod0ChunkPatch[];
+  fullPageFallbacks: number;
+  pageWeldMs: number;
+}
+
+export interface SerializedLod0ChunkPatch {
+  nodeId: string;
+  revision: number;
+  chunks: Array<{ localIndex: number; mesh: PageMesh }>;
 }
 
 export interface SerializedParentBatch {
@@ -109,7 +118,7 @@ export type ClodWorkerResponse =
   | { type: "streamRootsBuilt"; requestId: number; nodes: SerializedClodNode[]; buildMs: number; transferBytes: number; cacheStats?: WorkerCacheBuildStats }
   | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
-function cloneMesh(mesh: PageMesh): PageMesh {
+export function cloneMesh(mesh: PageMesh): PageMesh {
   return {
     positions: mesh.positions.slice(),
     normals: mesh.normals.slice(),

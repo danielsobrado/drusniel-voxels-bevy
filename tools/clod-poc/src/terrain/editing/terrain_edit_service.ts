@@ -3,14 +3,16 @@ import { emitAudio } from "../../audio/index.js";
 import type { ClodWorkerClient } from "../../clod_worker_client.js";
 import type { ConstructionTerrainConformRequest } from "../../construction/types.js";
 import {
-  addDigEdit,
+  applyDigEditTransaction,
   DIG_INFLUENCE_MARGIN,
   getDigEditRevision,
-  getDigEditsSnapshot,
-  replaceDigEdits,
+  hasPaintedTerrainEdits,
+  rollbackDigEditTransaction,
+  voxelTransactionFromDigEdit,
   type BrushOp,
   type BrushShape,
   type DigEdit,
+  type VoxelEditTransaction,
 } from "../../terrain/terrain.js";
 import type { ClodPageNode } from "../../types.js";
 import type { ClodSelectionController } from "../selection/clod_selection_controller.js";
@@ -31,6 +33,7 @@ const DIG_REBUILD_DEBOUNCE_MS = 40;
 const CONSTRUCTION_CONFORM_DEBOUNCE_MS = 20;
 const VEGETATION_REBUILD_DEBOUNCE_MS = 160;
 const VEGETATION_REBUILD_RETRY_MS = 1000;
+const MAX_PENDING_DIG_SAMPLES = 32;
 
 export interface TerrainBrushParams {
   digRadius: number;
@@ -54,6 +57,8 @@ export interface TerrainEditServiceDeps {
   getBrushParams: () => TerrainBrushParams;
   getVegetationState: () => TerrainEditVegetationState;
   enqueueApplyNodes: (nodes: readonly ClodPageNode[]) => void;
+  applyNearFieldChunks?: (patches: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>["chunkPatches"]) => void;
+  invalidateStreamedRoots?: (bounds: VoxelEditTransaction["dirtyBounds"]) => void;
   recordClodWorkerRebuild: (ms: number) => void;
   markEditedAncestorsStale: (lod0Nodes: readonly ClodPageNode[]) => void;
   selectionController: Pick<ClodSelectionController, "patchNodes" | "invalidate">;
@@ -87,13 +92,16 @@ interface TerrainRebuildHit {
   point: THREE.Vector3;
 }
 
+type EditCommitStatus = "committed" | "committed_render_stale" | "rejected";
+
 export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainEditService {
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let conformDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let vegetationFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastDigAt = -Infinity;
   let digInFlight = false;
-  let queuedDigRay: THREE.Ray | null = null;
+  const queuedDigRays: THREE.Ray[] = [];
+  let scheduledDigRay: THREE.Ray | null = null;
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
   const pendingUnderstoryNodeIds = new Set<string>();
@@ -172,7 +180,12 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     await deps.clodWorker.flushParents();
   };
 
-  const applyLod0Result = (changed: readonly ClodPageNode[], pendingParents: number): void => {
+  const applyLod0Result = (
+    changed: readonly ClodPageNode[],
+    pendingParents: number,
+    chunkPatches: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>["chunkPatches"],
+  ): void => {
+    deps.applyNearFieldChunks?.(chunkPatches);
     deps.enqueueApplyNodes(changed);
     if (pendingParents > 0) deps.markEditedAncestorsStale(changed);
     deps.selectionController.patchNodes(changed);
@@ -225,36 +238,52 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   const performEditRebuild = async (
     edit: DigEdit,
+    transaction: VoxelEditTransaction,
     hit: TerrainRebuildHit,
     radius: number,
     label: string,
-  ): Promise<boolean> => {
+  ): Promise<EditCommitStatus> => {
     const t0 = performance.now();
     lastDigAt = t0;
     const margin = radius + DIG_INFLUENCE_MARGIN;
     let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
     try {
       const workerStartedAt = performance.now();
-      lod0 = await deps.clodWorker.rebuildAfterDig(edit, {
+      lod0 = await deps.clodWorker.rebuildAfterDig(transaction, {
         minX: hit.point.x - margin,
         maxX: hit.point.x + margin,
         minZ: hit.point.z - margin,
         maxZ: hit.point.z + margin,
       });
       deps.recordClodWorkerRebuild(performance.now() - workerStartedAt);
+      const counters = authorityCounters();
+      if (counters) {
+        counters["terrain_edit_partial_chunk_count"] = lod0.chunksRemeshed;
+        counters["terrain_edit_full_page_fallback_count"] = lod0.fullPageFallbacks;
+        counters["terrain_edit_validation_failure_count"] = lod0.fullPageFallbacks;
+        counters["terrain_edit_page_weld_ms"] = lod0.pageWeldMs;
+      }
     } catch (error) {
       reportRebuildFailure(label, error);
-      return false;
+      return "rejected";
     }
 
+    deps.invalidateStreamedRoots?.(transaction.dirtyBounds);
+    publishDirtyEdit(edit, label);
     try {
-      applyLod0Result(lod0.changed, lod0.pendingParents);
-      publishDirtyEdit(edit, label);
+      applyLod0Result(lod0.changed, lod0.pendingParents, lod0.chunkPatches);
       deps.setPendingParentNodes(0);
       deps.setPendingParentMs(0);
     } catch (error) {
       reportApplyFailure(label, error);
-      return true;
+      setTimeout(() => {
+        try {
+          applyLod0Result(lod0.changed, lod0.pendingParents, lod0.chunkPatches);
+        } catch (retryError) {
+          reportApplyFailure(`${label} retry`, retryError);
+        }
+      }, 0);
+      return "committed_render_stale";
     }
 
     const totalMs = performance.now() - t0;
@@ -266,7 +295,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     console.log(
       `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
     );
-    return true;
+    return "committed";
   };
 
   const terrainCommitAllowed = (point: THREE.Vector3): boolean => {
@@ -305,15 +334,15 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       material: brushParams.brushOp === "add" ? brushParams.brushMaterial : undefined,
       height: brushParams.brushHeight, strength: brushParams.brushStrength, falloff: brushParams.brushFalloff,
     };
-    const previousEdits = getDigEditsSnapshot();
-    const hadPaintedTerrain = previousEdits.some((existing) => existing.op === "add");
-    addDigEdit(edit);
+    const hadPaintedTerrain = hasPaintedTerrainEdits();
+    const transaction = voxelTransactionFromDigEdit(edit);
+    applyDigEditTransaction(transaction, edit);
 
     emitAudio(brushParams.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
 
-    const ok = await performEditRebuild(edit, hit, radius, `${brushParams.brushOp} ${brushParams.brushShape}`);
-    if (!ok) {
-      replaceDigEdits(previousEdits);
+    const status = await performEditRebuild(edit, transaction, hit, radius, `${brushParams.brushOp} ${brushParams.brushShape}`);
+    if (status === "rejected") {
+      rollbackDigEditTransaction(transaction);
       if (!hadPaintedTerrain && edit.op === "add") deps.applyTerrainTextures();
       deps.updateInfo();
       return;
@@ -323,7 +352,11 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   const runDigExclusive = async (ray: THREE.Ray): Promise<void> => {
     if (digInFlight) {
-      queuedDigRay = ray.clone();
+      const previous = queuedDigRays[queuedDigRays.length - 1];
+      if (!previous || previous.origin.distanceTo(ray.origin) > 0.25 || previous.direction.distanceTo(ray.direction) > 0.01) {
+        queuedDigRays.push(ray.clone());
+        if (queuedDigRays.length > MAX_PENDING_DIG_SAMPLES) queuedDigRays.shift();
+      }
       return;
     }
     digInFlight = true;
@@ -331,8 +364,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       await performDig(ray);
     } finally {
       digInFlight = false;
-      const next = queuedDigRay;
-      queuedDigRay = null;
+      const next = queuedDigRays.shift() ?? null;
       if (next) void runDigExclusive(next);
     }
   };
@@ -366,13 +398,13 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       falloff: request.falloffM,
     };
 
-    const beforeFill = getDigEditsSnapshot();
-    const hadPaintedTerrain = beforeFill.some((existing) => existing.op === "add");
-    addDigEdit(fillEdit);
+    const hadPaintedTerrain = hasPaintedTerrainEdits();
+    const fillTransaction = voxelTransactionFromDigEdit(fillEdit);
+    applyDigEditTransaction(fillTransaction, fillEdit);
     emitAudio("terrain.raise");
-    const fillOk = await performEditRebuild(fillEdit, hit, radius, "construction terrain fill");
-    if (!fillOk) {
-      replaceDigEdits(beforeFill);
+    const fillStatus = await performEditRebuild(fillEdit, fillTransaction, hit, radius, "construction terrain fill");
+    if (fillStatus === "rejected") {
+      rollbackDigEditTransaction(fillTransaction);
       if (!hadPaintedTerrain) deps.applyTerrainTextures();
       deps.updateInfo();
       return;
@@ -380,22 +412,24 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (!hadPaintedTerrain) deps.applyTerrainTextures();
 
     if (request.trimHeightM > 0) {
-      const beforeTrim = getDigEditsSnapshot();
-      addDigEdit(trimEdit);
-      const trimOk = await performEditRebuild(trimEdit, hit, radius, "construction terrain trim");
-      if (!trimOk) {
-        replaceDigEdits(beforeTrim);
+      const trimTransaction = voxelTransactionFromDigEdit(trimEdit);
+      applyDigEditTransaction(trimTransaction, trimEdit);
+      const trimStatus = await performEditRebuild(trimEdit, trimTransaction, hit, radius, "construction terrain trim");
+      if (trimStatus === "rejected") {
+        rollbackDigEditTransaction(trimTransaction);
         deps.updateInfo();
       }
     }
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
-    const cloned = ray.clone();
-    if (digDebounceTimer !== null) clearTimeout(digDebounceTimer);
+    scheduledDigRay = ray.clone();
+    if (digDebounceTimer !== null) return;
     digDebounceTimer = setTimeout(() => {
       digDebounceTimer = null;
-      void runDigExclusive(cloned);
+      const next = scheduledDigRay;
+      scheduledDigRay = null;
+      if (next) void runDigExclusive(next);
     }, DIG_REBUILD_DEBOUNCE_MS);
   };
 

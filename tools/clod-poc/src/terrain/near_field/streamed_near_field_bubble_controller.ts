@@ -363,6 +363,10 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
       const entry = entries.get(nodeId);
       if (entry) disposeEntry(nodeId, entry);
     },
+    replaceChunks(nodeId): void {
+      const entry = entries.get(nodeId);
+      if (entry) disposeEntry(nodeId, entry);
+    },
     applyTint(enabled: boolean): void {
       const color = enabled ? 0xc94b4b : 0xffffff;
       for (const entry of entries.values()) for (const mat of entry.mats) mat.setBaseColor(color);

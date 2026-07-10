@@ -31,6 +31,13 @@ export function voxelChunkKeyString(chunk: VoxelChunkKey): string {
   return `${chunk.x},${chunk.y},${chunk.z}`;
 }
 
+export function voxelLocalIndex(x: number, y: number, z: number): number {
+  const lx = ((x % VOXEL_CHUNK_SIZE) + VOXEL_CHUNK_SIZE) % VOXEL_CHUNK_SIZE;
+  const ly = ((y % VOXEL_CHUNK_SIZE) + VOXEL_CHUNK_SIZE) % VOXEL_CHUNK_SIZE;
+  const lz = ((z % VOXEL_CHUNK_SIZE) + VOXEL_CHUNK_SIZE) % VOXEL_CHUNK_SIZE;
+  return lx | (ly << VOXEL_CHUNK_SHIFT) | (lz << (VOXEL_CHUNK_SHIFT * 2));
+}
+
 export function legacyVoxelCellKey(x: number, y: number, z: number): number {
   return ((x + KEY_OFFSET) * KEY_STRIDE + (y + KEY_OFFSET)) * KEY_STRIDE + (z + KEY_OFFSET);
 }

@@ -23,42 +23,10 @@ export interface DigEdit {
 export const BEDROCK_Y = 1;
 export const DIG_INFLUENCE_MARGIN = 4;
 
-export const CELL_SHIFT = 4;
-export const CELL_SIZE = 16;
-
-export type CellKey = string;
-
-export function editCellKey(cx: number, cy: number, cz: number): CellKey {
-  return `${cx},${cy},${cz}`;
-}
-
-export function cellKey(x: number, y: number, z: number): CellKey {
-  return editCellKey(x >> CELL_SHIFT, y >> CELL_SHIFT, z >> CELL_SHIFT);
-}
-
-export function overlappingCells(ex: number, ey: number, ez: number, r: number, h: number): CellKey[] {
-  const minX = Math.floor((ex - r) / CELL_SIZE);
-  const maxX = Math.floor((ex + r) / CELL_SIZE);
-  const minY = Math.floor((ey - h) / CELL_SIZE);
-  const maxY = Math.floor((ey + h) / CELL_SIZE);
-  const minZ = Math.floor((ez - r) / CELL_SIZE);
-  const maxZ = Math.floor((ez + r) / CELL_SIZE);
-  const keys: CellKey[] = [];
-  for (let cx = minX; cx <= maxX; cx++) {
-    for (let cy = minY; cy <= maxY; cy++) {
-      for (let cz = minZ; cz <= maxZ; cz++) {
-        keys.push(editCellKey(cx, cy, cz));
-      }
-    }
-  }
-  return keys;
-}
-
-export const editIndex = new Map<CellKey, DigEdit[]>();
 let digEditRevision = 0;
-export const editIds = new WeakMap<DigEdit, number>();
 let editIdCounter = 0;
-export const activePaintSlots = new Set<number>();
+const brushHistory: Array<{ id: number; edit: DigEdit }> = [];
+let voxelHistoryComplete = true;
 
 function proceduralDensity(x: number, y: number, z: number): number {
   return surfaceHeight(x, z) - y;
@@ -83,10 +51,11 @@ function sdfBrushFromDigEdit(edit: DigEdit): SdfBrush {
   };
 }
 
-function voxelTransactionFromDigEdit(edit: DigEdit, id: number): VoxelEditTransaction {
+export function voxelTransactionFromDigEdit(edit: DigEdit): VoxelEditTransaction {
+  const id = ++editIdCounter;
   const h = editHeight(edit);
   const r = edit.r + DIG_INFLUENCE_MARGIN;
-  return rasterizeSdfBrushToVoxelTransaction({
+  const transaction = rasterizeSdfBrushToVoxelTransaction({
     id,
     revisionBase: voxelEditStore.revision(),
     brush: sdfBrushFromDigEdit(edit),
@@ -100,60 +69,62 @@ function voxelTransactionFromDigEdit(edit: DigEdit, id: number): VoxelEditTransa
     },
     sampleDensity: editedDensityAt,
   });
+  return {
+    ...transaction,
+    previousValues: transaction.deltas.map(({ x, y, z }) => {
+      const previous = voxelEditStore.voxelAt(x, y, z);
+      return { x, y, z, value: previous ? { ...previous } : null };
+    }),
+  };
 }
 
-export function addDigEdit(edit: DigEdit): void {
-  const id = ++editIdCounter;
-  const h = editHeight(edit);
-  const r = edit.r + DIG_INFLUENCE_MARGIN;
-  for (const key of overlappingCells(edit.x, edit.y, edit.z, r, h)) {
-    let bucket = editIndex.get(key);
-    if (!bucket) {
-      bucket = [];
-      editIndex.set(key, bucket);
-    }
-    const copy = { ...edit };
-    editIds.set(copy, id);
-    bucket.push(copy);
-  }
-  if (edit.op === "add") activePaintSlots.add(Math.max(0, edit.material ?? 0));
-  voxelEditStore.apply(voxelTransactionFromDigEdit(edit, id));
+export function applyDigEditTransaction(transaction: VoxelEditTransaction, edit?: DigEdit): void {
+  voxelEditStore.apply(transaction);
+  if (edit) brushHistory.push({ id: transaction.id, edit: { ...edit } });
   digEditRevision++;
 }
 
-export function getDigEditsSnapshot(): DigEdit[] {
-  const seen = new Set<number>();
-  const all: DigEdit[] = [];
-  for (const bucket of editIndex.values()) {
-    for (const edit of bucket) {
-      const id = editIds.get(edit) ?? 0;
-      if (!seen.has(id)) {
-        seen.add(id);
-        all.push({ ...edit });
-      }
+export function rollbackDigEditTransaction(transaction: VoxelEditTransaction): void {
+  voxelEditStore.rollback(transaction);
+  let historyIndex = -1;
+  for (let i = brushHistory.length - 1; i >= 0; i--) {
+    if (brushHistory[i]!.id === transaction.id) {
+      historyIndex = i;
+      break;
     }
   }
-  return all;
+  if (historyIndex >= 0) brushHistory.splice(historyIndex, 1);
+  digEditRevision++;
+}
+
+export function addDigEdit(edit: DigEdit): void {
+  applyDigEditTransaction(voxelTransactionFromDigEdit(edit), edit);
+}
+
+export function getDigEditsSnapshot(): DigEdit[] {
+  return brushHistory.map(({ edit }) => ({ ...edit }));
 }
 
 export function replaceDigEdits(edits: readonly DigEdit[]): void {
-  editIndex.clear();
-  activePaintSlots.clear();
+  brushHistory.length = 0;
   voxelEditStore.clear();
+  voxelHistoryComplete = true;
   for (const edit of edits) addDigEdit(edit);
 }
 
 export function clearDigEdits(): void {
-  editIndex.clear();
-  activePaintSlots.clear();
+  brushHistory.length = 0;
   voxelEditStore.clear();
+  voxelHistoryComplete = true;
   digEditRevision++;
 }
 
 export function digEditCount(): number {
-  let n = 0;
-  for (const bucket of editIndex.values()) n += bucket.length;
-  return n;
+  return brushHistory.length;
+}
+
+export function hasPaintedTerrainEdits(): boolean {
+  return voxelEditStore.materialSlots().length > 0;
 }
 
 export function getDigEditRevision(): number {
@@ -178,37 +149,33 @@ export function densityFromEdits(
 export function collectOverlappingEdits(
   x0: number, x1: number, z0: number, z1: number,
 ): DigEdit[] {
-  const visited = new Set<number>();
-  const chunkEdits: DigEdit[] = [];
-  const minGX = Math.floor(x0 / CELL_SIZE) - 1;
-  const maxGX = Math.floor((x1 - 1) / CELL_SIZE) + 1;
-  const minGZ = Math.floor(z0 / CELL_SIZE) - 1;
-  const maxGZ = Math.floor((z1 - 1) / CELL_SIZE) + 1;
-  for (let gx = minGX; gx <= maxGX; gx++) {
-    for (let gz = minGZ; gz <= maxGZ; gz++) {
-      for (let gy = 0; gy < 32; gy++) {
-        const bucket = editIndex.get(editCellKey(gx, gy, gz));
-        if (!bucket) continue;
-        for (const e of bucket) {
-          const id = editIds.get(e) ?? 0;
-          if (!visited.has(id)) {
-            visited.add(id);
-            chunkEdits.push(e);
-          }
-        }
-      }
-    }
-  }
-  return chunkEdits;
+  return brushHistory
+    .map(({ edit }) => edit)
+    .filter((edit) => {
+      const radius = edit.r + DIG_INFLUENCE_MARGIN;
+      return edit.x + radius >= x0 && edit.x - radius < x1 && edit.z + radius >= z0 && edit.z - radius < z1;
+    });
 }
 
 export function getVoxelEditSnapshot() {
   return voxelEditStore.snapshot();
 }
 
+export function getVoxelEditSnapshotForBounds(minX: number, maxX: number, minZ: number, maxZ: number) {
+  return voxelEditStore.snapshotBounds(minX, maxX, minZ, maxZ);
+}
+
+export function voxelEditCount(): number {
+  return voxelEditStore.count();
+}
+
+export function voxelEditsRequireCpuDerivedMeshing(): boolean {
+  return !voxelHistoryComplete && voxelEditStore.hasEdits();
+}
+
 export function replaceVoxelEdits(snapshot: ReturnType<typeof getVoxelEditSnapshot>): void {
-  editIndex.clear();
-  activePaintSlots.clear();
+  brushHistory.length = 0;
   voxelEditStore.load(snapshot);
+  voxelHistoryComplete = snapshot.deltas.length === 0;
   digEditRevision = Math.max(digEditRevision + 1, snapshot.revision);
 }

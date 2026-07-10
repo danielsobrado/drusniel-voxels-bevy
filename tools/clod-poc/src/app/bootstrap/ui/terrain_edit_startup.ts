@@ -107,6 +107,12 @@ export function runTerrainEditStartup(
       understoryEnabled: state.understoryEnabled,
     }),
     enqueueApplyNodes: (nodes) => clodApplyQueue.enqueueNodes(nodes),
+    applyNearFieldChunks: (patches) => {
+      for (const patch of patches) {
+        input.terrainView.nearFieldBubbleController.replaceChunks(patch.nodeId, patch.chunks, patch.revision);
+      }
+    },
+    invalidateStreamedRoots: (bounds) => session.streamingClodRootController?.invalidateBounds(bounds),
     recordClodWorkerRebuild: (ms) => clodApplyQueue.recordWorkerRebuild(ms),
     markEditedAncestorsStale,
     selectionController,

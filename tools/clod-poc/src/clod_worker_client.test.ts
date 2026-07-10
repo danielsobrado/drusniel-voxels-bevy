@@ -1,6 +1,20 @@
 import { describe, expect, it, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import type { ClodPageNode, PageMesh } from "./types.js";
+import type { VoxelEditTransaction } from "./terrain/terrain.js";
+
+function transaction(x: number): VoxelEditTransaction {
+  return {
+    id: x + 1,
+    source: "test",
+    revisionBase: x,
+    deltas: [],
+    previousValues: [],
+    dirtyChunks: [],
+    dirtyBounds: { minX: x, maxX: x + 1, minY: 0, maxY: 1, minZ: 0, maxZ: 1 },
+    affectedMaterialSlots: [],
+  };
+}
 
 class MockWorker {
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -67,7 +81,7 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     const mockWorker = (client as unknown as { worker: MockWorker }).worker;
 
     const digPromise = client.rebuildAfterDig(
-      { x: 0, y: 0, z: 0, r: 1 },
+      transaction(0),
       { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
     );
 
@@ -91,7 +105,7 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     expect(client.isParentsHealthy()).toBe(false);
 
     const digPromise = client.rebuildAfterDig(
-      { x: 0, y: 0, z: 0, r: 1 },
+      transaction(0),
       { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
     );
 
@@ -109,14 +123,14 @@ describe("ClodWorkerClient parent error lifecycle", () => {
   it("splits queued dig bursts into capped worker batches", async () => {
     const mockWorker = (client as unknown as { worker: MockWorker }).worker;
     const first = client.rebuildAfterDig(
-      { x: 0, y: 0, z: 0, r: 1 },
+      transaction(0),
       { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
     );
     const firstCall = digCalls(mockWorker)[0];
     expect(firstCall).toBeDefined();
 
     const queued = Array.from({ length: 9 }, (_, i) => client.rebuildAfterDig(
-      { x: i + 1, y: 0, z: 0, r: 1 },
+      transaction(i + 1),
       { minX: i + 1, maxX: i + 2, minZ: 0, maxZ: 1 },
     ));
 
@@ -126,7 +140,7 @@ describe("ClodWorkerClient parent error lifecycle", () => {
 
     const secondCall = digCalls(mockWorker)[1];
     expect(secondCall).toBeDefined();
-    expect((secondCall as { edits: unknown[] }).edits).toHaveLength(8);
+    expect((secondCall as { transactions: unknown[] }).transactions).toHaveLength(8);
     expect((secondCall as { dirtyRegions: unknown[] }).dirtyRegions).toHaveLength(8);
 
     resolveDig(mockWorker, requestId(secondCall), 8);
@@ -135,7 +149,7 @@ describe("ClodWorkerClient parent error lifecycle", () => {
 
     const thirdCall = digCalls(mockWorker)[2];
     expect(thirdCall).toBeDefined();
-    expect((thirdCall as { edits: unknown[] }).edits).toHaveLength(1);
+    expect((thirdCall as { transactions: unknown[] }).transactions).toHaveLength(1);
     expect((thirdCall as { dirtyRegions: unknown[] }).dirtyRegions).toHaveLength(1);
 
     resolveDig(mockWorker, requestId(thirdCall), 1);
@@ -145,13 +159,13 @@ describe("ClodWorkerClient parent error lifecycle", () => {
   it("rejects sent and unsent dig work when disposed", async () => {
     const mockWorker = (client as unknown as { worker: MockWorker }).worker;
     const first = client.rebuildAfterDig(
-      { x: 0, y: 0, z: 0, r: 1 },
+      transaction(0),
       { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
     );
     expect(digCalls(mockWorker)).toHaveLength(1);
 
     const queued = client.rebuildAfterDig(
-      { x: 2, y: 0, z: 0, r: 1 },
+      transaction(2),
       { minX: 2, maxX: 3, minZ: 0, maxZ: 1 },
     );
 
@@ -165,7 +179,7 @@ describe("ClodWorkerClient parent error lifecycle", () => {
   it("rejects new dig work after disposal", async () => {
     client.dispose();
     await expect(client.rebuildAfterDig(
-      { x: 0, y: 0, z: 0, r: 1 },
+      transaction(0),
       { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
     )).rejects.toThrow("stopped");
   });

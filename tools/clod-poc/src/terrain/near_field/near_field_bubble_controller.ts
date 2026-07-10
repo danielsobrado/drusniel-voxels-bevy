@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
-import { meshChunk, getDigEditsSnapshot } from "../../terrain/terrain.js";
+import { meshChunk, getDigEditsSnapshot, voxelEditsRequireCpuDerivedMeshing } from "../../terrain/terrain.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
 import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { toGeometry } from "../geometry/page_geometry.js";
@@ -96,6 +96,7 @@ export interface NearFieldBubbleControllerDeps {
 export interface NearFieldBubbleController {
   update(input: NearFieldBubbleUpdate): NearFieldBubbleStats;
   invalidatePage(nodeId: string): void;
+  replaceChunks(nodeId: string, chunks: readonly { localIndex: number; mesh: PageMesh }[], revision: number): void;
   applyTint(enabled: boolean): void;
   size(): number;
   chunkGroupValues(): Iterable<ChunkGroupEntry>;
@@ -306,6 +307,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const gpuWaitBuilds = new Map<string, PendingGpuWaitPageBuild>();
   const gpuPendingBuilds = new Map<string, PendingGpuPageBuild>();
   const terrainColliders = deps.terrainColliders ?? null;
+  const pageRevisions = new Map<string, number>();
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
   let gpuRetriesTotal = 0;
@@ -366,21 +368,55 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     cm: PageMesh | ChunkMesh,
     colliderId: string,
     footprint: TerrainColliderFootprint,
+    localIndex: number,
   ) => {
     const mat = buildChunkMaterial();
     const geometry = toGeometry(cm);
     const mesh = new THREE.Mesh(geometry, mat.material);
-    unsubs.push(mat.onMaterialChanged((material) => {
+    const unsub = mat.onMaterialChanged((material) => {
       mesh.material = material;
-    }));
+    });
+    unsubs.push(unsub);
+    mesh.userData["liveChunkIndex"] = localIndex;
+    mesh.userData["liveChunkMaterial"] = mat;
+    mesh.userData["liveChunkUnsub"] = unsub;
     group.add(mesh);
     mats.push(mat);
     const colliderAllowed = currentColliderRadius === null
       || footprintIntersectsCircle(footprint, currentBubbleCenter, currentColliderRadius);
     if (cm.indices.length > 0 && terrainColliders && colliderAllowed) {
       terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
-      colliderIds.push(colliderId);
+      if (!colliderIds.includes(colliderId)) colliderIds.push(colliderId);
       colliderRegistrations++;
+    }
+  };
+
+  const disposeChunkMesh = (nodeId: string, entry: ChunkGroupEntry, mesh: THREE.Mesh, removeCollider: boolean): void => {
+    const localIndex = Number(mesh.userData["liveChunkIndex"]);
+    const mat = mesh.userData["liveChunkMaterial"] as TerrainMaterialHandle | undefined;
+    const unsub = mesh.userData["liveChunkUnsub"] as (() => void) | undefined;
+    entry.group.remove(mesh);
+    mesh.geometry.dispose();
+    if (unsub) {
+      unsub();
+      const index = entry.unsubs.indexOf(unsub);
+      if (index >= 0) entry.unsubs.splice(index, 1);
+    }
+    if (mat) {
+      const index = entry.mats.indexOf(mat);
+      if (index >= 0) entry.mats.splice(index, 1);
+      if (mat !== deps.materialController.sharedMaterial) {
+        deps.materialController.materials.delete(mat);
+        mat.material.dispose();
+      }
+    }
+    if (removeCollider && Number.isInteger(localIndex)) {
+      const dx = localIndex % P;
+      const dz = (localIndex / P) | 0;
+      const colliderId = chunkColliderId(nodeId, dx, dz);
+      if (terrainColliders?.removePage(colliderId)) colliderRemovals++;
+      const colliderIndex = entry.colliderIds.indexOf(colliderId);
+      if (colliderIndex >= 0) entry.colliderIds.splice(colliderIndex, 1);
     }
   };
 
@@ -407,6 +443,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     cpuPendingBuilds.delete(nodeId);
     gpuWaitBuilds.delete(nodeId);
     gpuPendingBuilds.delete(nodeId);
+    pageRevisions.delete(nodeId);
   };
 
   const createDeferredEntry = (
@@ -486,7 +523,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     const unsubs: Array<() => void> = [];
     const colliderIds: string[] = [];
     const worldBounds = buildWorldBoundsForPage(px, pz);
-    const gpuMesher = deps.getGpuMesher();
+    const requiresCpuMeshing = voxelEditsRequireCpuDerivedMeshing();
+    const gpuMesher = requiresCpuMeshing ? null : deps.getGpuMesher();
 
     if (gpuMesher) {
       const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
@@ -494,7 +532,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       return entry;
     }
 
-    if (liveStreamingEnabled) {
+    if (liveStreamingEnabled && !requiresCpuMeshing) {
       const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
       gpuWaitBuilds.set(key, { px, pz });
       return entry;
@@ -597,6 +635,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
                   cm,
                   chunkColliderId(key, dx, dz),
                   liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
+                  dz * P + dx,
                 );
               } else {
                 job.emptyChunks++;
@@ -637,6 +676,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           meshChunk(job.px * P + dx, job.pz * P + dz, deps.cfg, job.worldBounds),
           chunkColliderId(key, dx, dz),
           liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
+          dz * P + dx,
         );
       } catch (error) {
         job.failures++;
@@ -846,6 +886,37 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       const entry = chunkGroups.get(nodeId);
       if (!entry) return;
       disposeEntry(nodeId, entry);
+    },
+    replaceChunks(nodeId, chunks, revision) {
+      const previousRevision = pageRevisions.get(nodeId) ?? -1;
+      if (revision < previousRevision) return;
+      pageRevisions.set(nodeId, revision);
+      const entry = chunkGroups.get(nodeId);
+      if (!entry || !entry.ready || entry.failed) return;
+      const { px, pz } = parsePageGroupKey(nodeId);
+      for (const { localIndex, mesh: chunkMesh } of chunks) {
+        const dx = localIndex % P;
+        const dz = (localIndex / P) | 0;
+        const oldMesh = entry.group.children.find(
+          (child) => Number(child.userData["liveChunkIndex"]) === localIndex,
+        ) as THREE.Mesh | undefined;
+        if (chunkMesh.indices.length > 0) {
+          addChunkMesh(
+            entry.group,
+            entry.mats,
+            entry.unsubs,
+            entry.colliderIds,
+            chunkMesh,
+            chunkColliderId(nodeId, dx, dz),
+            liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
+            localIndex,
+          );
+          if (oldMesh) disposeChunkMesh(nodeId, entry, oldMesh, false);
+        } else if (oldMesh) {
+          disposeChunkMesh(nodeId, entry, oldMesh, true);
+        }
+      }
+      entry.validEmpty = entry.group.children.length === 0;
     },
     applyTint(enabled) {
       const color = enabled ? 0xc94b4b : 0xffffff;

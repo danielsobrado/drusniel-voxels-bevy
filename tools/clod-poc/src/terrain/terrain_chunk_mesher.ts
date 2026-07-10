@@ -3,8 +3,7 @@ import { ClodPagesConfig } from "../config.js";
 import { surfaceHeight, type WorldBounds } from "./terrain_surface.js";
 import { density } from "./terrain_density.js";
 import { paintMaterialAt, terrainWeights } from "./terrain_paint.js";
-import { editIndex, editIds, editHeight, editCellKey, DIG_INFLUENCE_MARGIN, CELL_SIZE } from "./terrain_edits.js";
-import type { DigEdit } from "./terrain_edits.js";
+import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
 
 const MIN_Y_CELL = -64;
 const MAX_Y_CELL = 128;
@@ -190,29 +189,7 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
 
   const x0 = cx * S, x1 = (cx + 1) * S;
   const z0 = cz * S, z1 = (cz + 1) * S;
-  const isFiniteWorld = finiteBounds(world);
-
-  const visited = new Set<number>();
-  const chunkEdits: DigEdit[] = [];
-  const minGX = isFiniteWorld ? Math.max(0, Math.floor(x0 / CELL_SIZE) - 1) : Math.floor(x0 / CELL_SIZE) - 1;
-  const maxGX = Math.floor((x1 - 1) / CELL_SIZE) + 1;
-  const minGZ = isFiniteWorld ? Math.max(0, Math.floor(z0 / CELL_SIZE) - 1) : Math.floor(z0 / CELL_SIZE) - 1;
-  const maxGZ = Math.floor((z1 - 1) / CELL_SIZE) + 1;
-  for (let gx = minGX; gx <= maxGX; gx++) {
-    for (let gz = minGZ; gz <= maxGZ; gz++) {
-      for (let gy = 0; gy < 32; gy++) {
-        const bucket = editIndex.get(editCellKey(gx, gy, gz));
-        if (!bucket) continue;
-        for (const e of bucket) {
-          const id = editIds.get(e) ?? 0;
-          if (!visited.has(id)) {
-            visited.add(id);
-            chunkEdits.push(e);
-          }
-        }
-      }
-    }
-  }
+  const editedYRange = voxelEditStore.editedYRange(x0 - 1, x1 + 1, z0 - 1, z1 + 1);
 
   for (let i = x0; i < x1; i++) {
     for (let k = z0; k < z1; k++) {
@@ -222,11 +199,9 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
       ];
       let j0 = Math.max(MIN_Y_CELL, Math.floor(Math.min(...nearbyHeights)) - 2);
       let j1 = Math.min(MAX_Y_CELL - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
-      for (const e of chunkEdits) {
-        if (Math.abs(i - e.x) > e.r + DIG_INFLUENCE_MARGIN || Math.abs(k - e.z) > e.r + DIG_INFLUENCE_MARGIN) continue;
-        const eh = editHeight(e);
-        j0 = Math.max(MIN_Y_CELL, Math.min(j0, Math.floor(e.y - eh - DIG_INFLUENCE_MARGIN)));
-        j1 = Math.min(MAX_Y_CELL - 1, Math.max(j1, Math.ceil(e.y + eh + DIG_INFLUENCE_MARGIN)));
+      if (editedYRange) {
+        j0 = Math.max(MIN_Y_CELL, Math.min(j0, editedYRange.minY - 1));
+        j1 = Math.min(MAX_Y_CELL - 1, Math.max(j1, editedYRange.maxY + 1));
       }
       for (let j = j0; j <= j1; j++) {
         emitAxis("x", i, j, k, buf, indices, world, posInv, sampler);

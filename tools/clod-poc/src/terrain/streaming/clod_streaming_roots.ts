@@ -72,6 +72,7 @@ export interface StreamingClodRootController {
   stats(): StreamingClodRootStats;
   readyPageKeys(): readonly string[];
   beginMovementProbe(): void;
+  invalidateBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void;
 }
 
 export interface PageCoord {
@@ -136,6 +137,7 @@ interface InflightBatch {
   ids: Set<string>;
   coordsById: Map<string, PageCoord>;
   startMs: number;
+  revisionById: Map<string, number>;
   timedOut?: boolean;
 }
 
@@ -568,6 +570,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let active = deps.enabled;
   let requiredNow = new Set<string>();
   const inFlight = new Map<number, InflightBatch>();
+  const contentRevisions = new Map<string, number>();
+  const staleRootIds = new Set<string>();
   let nextBatchId = 1;
   let completedWorkerBuildMs = 0;
   let completedWorkerTransferBytes = 0;
@@ -626,6 +630,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const cacheNode = (node: ClodPageNode, activeEligible: boolean): boolean => {
+    staleRootIds.delete(node.id);
     const existing = cached.get(node.id);
     const { centerX, centerZ } = pageCenter(node);
     if (existing) {
@@ -885,7 +890,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return evictions;
   };
 
-  const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && !cached.has(id);
+  const buildStillWanted = (id: string): boolean => active && requiredNow.has(id) && (!cached.has(id) || staleRootIds.has(id));
   const buildInFlight = (id: string): boolean => {
     for (const batch of inFlight.values()) if (batch.ids.has(id)) return true;
     return false;
@@ -1015,7 +1020,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const dispatchBuild = (coords: readonly PageCoord[]): number => {
     if (!deps.buildPages || coords.length === 0 || inFlight.size >= maxInflightBatches) return 0;
     const coordsById = new Map(coords.map((coord) => [streamingClodPageKey(coord.px, coord.pz, coordLevel(coord)), coord]));
-    const batch: InflightBatch = { id: nextBatchId++, ids: new Set(coordsById.keys()), coordsById, startMs: performance.now() };
+    const batch: InflightBatch = {
+      id: nextBatchId++,
+      ids: new Set(coordsById.keys()),
+      coordsById,
+      startMs: performance.now(),
+      revisionById: new Map([...coordsById.keys()].map((id) => [id, contentRevisions.get(id) ?? 0])),
+    };
     inFlight.set(batch.id, batch);
     for (const coord of coords) incrementLevel(requestedPagesByLevel, coordLevel(coord));
     if (probe.active) {
@@ -1036,6 +1047,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       completedWorkerTransferBytes += Number.isFinite(built.transferBytes) ? Math.max(0, built.transferBytes ?? 0) : 0;
       rememberWorkerBuildSample(built.nodes, buildMs);
       for (const node of built.nodes) {
+        if ((batch.revisionById.get(node.id) ?? 0) !== (contentRevisions.get(node.id) ?? 0)) {
+          countStaleCompleted(node.id);
+          completedStaleDiscards++;
+          continue;
+        }
         if (buildStillWanted(node.id)) ready.push({ node, staleCounted: false });
         else {
           ready.push({ node, staleCounted: true });
@@ -1063,7 +1079,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       let currentCost = 0;
       for (const coord of candidates) {
         const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
-        if (scheduledIds.has(id) || cached.has(id) || buildInFlight(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
+        if (scheduledIds.has(id) || (cached.has(id) && !staleRootIds.has(id)) || buildInFlight(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
         const pageCost = pageBudgetCost(coordLevel(coord));
         if (batch.length > 0 && currentCost + pageCost > buildBudget) break;
         batch.push(coord);
@@ -1227,6 +1243,26 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     },
     stats() { return latest; },
     readyPageKeys() { return currentReadyPageKeys(); },
+    invalidateBounds(bounds) {
+      for (let level = 0; level <= maxRootLevel; level++) {
+        const span = pageSize * (2 ** level);
+        const minPx = Math.floor(bounds.minX / span);
+        const maxPx = Math.floor(bounds.maxX / span);
+        const minPz = Math.floor(bounds.minZ / span);
+        const maxPz = Math.floor(bounds.maxZ / span);
+        for (let pz = minPz; pz <= maxPz; pz++) {
+          for (let px = minPx; px <= maxPx; px++) {
+            const id = streamingClodPageKey(px, pz, level);
+            contentRevisions.set(id, (contentRevisions.get(id) ?? 0) + 1);
+            staleRootIds.add(id);
+            failed.delete(id);
+            for (let i = ready.length - 1; i >= 0; i--) {
+              if (ready[i]!.node.id === id) ready.splice(i, 1);
+            }
+          }
+        }
+      }
+    },
     beginMovementProbe,
   };
 }

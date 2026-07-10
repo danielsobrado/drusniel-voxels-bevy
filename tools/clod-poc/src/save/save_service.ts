@@ -40,6 +40,7 @@ export interface SaveDirtyRegionsInput {
   dirtyRegionKeys: readonly string[];
   propsByRegion?: ReadonlyMap<string, SaveRegionRecords["props"]>;
   snapshot?: VoxelEditSnapshot;
+  snapshotForRegion?: (regionKey: string) => VoxelEditSnapshot;
   maxRegionWrites?: number;
 }
 
@@ -158,13 +159,16 @@ export function selectDirtyRegionWriteBatch(
 }
 
 export async function flushDirtyRegionBatch(input: SaveDirtyRegionsInput): Promise<DirtyRegionBatchResult> {
-  const snapshot = input.snapshot ?? getVoxelEditSnapshot();
-  const partsByRegion = new Map(partitionVoxelSnapshot(snapshot).map((part) => [part.regionKey, part]));
   const batch = selectDirtyRegionWriteBatch(input.dirtyRegionKeys, input.maxRegionWrites ?? SAVE_MAX_REGION_WRITES_PER_FRAME);
+  const partsByRegion = input.snapshotForRegion
+    ? null
+    : new Map(partitionVoxelSnapshot(input.snapshot ?? getVoxelEditSnapshot()).map((part) => [part.regionKey, part]));
   const written: string[] = [];
 
   for (const regionKey of batch) {
-    const voxelDeltas = partsByRegion.get(regionKey) ?? { schemaVersion: 1 as const, regionKey, format: "json" as const, deltas: [] };
+    const voxelDeltas = input.snapshotForRegion
+      ? { schemaVersion: 1 as const, regionKey, format: "json" as const, deltas: [...input.snapshotForRegion(regionKey).deltas] }
+      : partsByRegion?.get(regionKey) ?? { schemaVersion: 1 as const, regionKey, format: "json" as const, deltas: [] };
     const deltas = regionVoxelDeltasToDeltas(voxelDeltas);
     const props = input.propsByRegion?.get(regionKey) ?? [];
     const existing = await readRegionRecords(input.db, input.saveId, regionKey);

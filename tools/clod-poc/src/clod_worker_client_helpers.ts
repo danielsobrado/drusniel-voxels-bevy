@@ -21,12 +21,12 @@ export function postTrackedRequest<T>(
 }
 
 export function splitDigBatch(batch: DigBatchSlot): DigBatchSlot[] {
-  if (batch.edits.length <= MAX_DIG_EDITS_PER_WORKER_BATCH) return [batch];
+  if (batch.transactions.length <= MAX_DIG_EDITS_PER_WORKER_BATCH) return [batch];
   const out: DigBatchSlot[] = [];
-  for (let start = 0; start < batch.edits.length; start += MAX_DIG_EDITS_PER_WORKER_BATCH) {
-    const end = Math.min(batch.edits.length, start + MAX_DIG_EDITS_PER_WORKER_BATCH);
+  for (let start = 0; start < batch.transactions.length; start += MAX_DIG_EDITS_PER_WORKER_BATCH) {
+    const end = Math.min(batch.transactions.length, start + MAX_DIG_EDITS_PER_WORKER_BATCH);
     out.push({
-      edits: batch.edits.slice(start, end),
+      transactions: batch.transactions.slice(start, end),
       dirtyRegions: batch.dirtyRegions.slice(start, end),
       resolvers: batch.resolvers.slice(start, end),
     });
@@ -44,7 +44,7 @@ export function sendDigBatchFn(
 ): Promise<any> {
   if (stopped()) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
   const requestId = nextRequestId();
-  const request: ClodWorkerRequest = { type: "dig", requestId, edits: batch.edits, dirtyRegions: batch.dirtyRegions };
+  const request: ClodWorkerRequest = { type: "dig", requestId, transactions: batch.transactions, dirtyRegions: batch.dirtyRegions };
   return postTrackedRequest(digRequests, worker, request);
 }
 

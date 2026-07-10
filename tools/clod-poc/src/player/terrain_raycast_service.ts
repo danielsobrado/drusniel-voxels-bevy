@@ -5,6 +5,7 @@ export interface TerrainRaycastServiceDeps {
   terrainColliders: TerrainColliderSet;
   surfaceHeight: (x: number, z: number) => number;
   worldCells: number;
+  getMode?: () => string;
 }
 
 export interface TerrainRaycastService {
@@ -44,8 +45,10 @@ export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): Te
     return null;
   };
 
-  const raycastEditableTerrain = (ray: THREE.Ray): TerrainSurfaceHit | null =>
-    deps.terrainColliders.raycastSurface(ray) ?? raycastTerrainHeightfield(ray);
+  const raycastEditableTerrain = (ray: THREE.Ray): TerrainSurfaceHit | null => {
+    const maxDistance = deps.getMode?.() === "playing" ? 8 : 4000;
+    return deps.terrainColliders.raycastSurface(ray, maxDistance);
+  };
 
   return { raycastTerrainHeightfield, raycastEditableTerrain };
 }

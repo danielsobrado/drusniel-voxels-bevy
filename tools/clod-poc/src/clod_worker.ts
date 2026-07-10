@@ -21,9 +21,8 @@ import {
   tryLoadStreamRootNode,
 } from "./cache/clodStreamRootCache.js";
 import {
-  addDigEdit,
-  getDigEditsSnapshot,
-  replaceDigEdits,
+  applyDigEditTransaction,
+  rollbackDigEditTransaction,
   replaceVoxelEdits,
   setTerrainFieldConfig,
 } from "./terrain/terrain.js";
@@ -31,6 +30,7 @@ import { setTerrainFieldCoreConfig } from "./gpu/terrain_field_core.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
+  cloneMesh,
   serializeBuildResult,
   serializeNodes,
   type ClodWorkerRequest,
@@ -371,11 +371,30 @@ function rebuildDirtyRegionGroups(regions: readonly DirtyCellBounds[]): Combined
   let lod0Ms = 0;
   let chunksRemeshed = 0;
   let chunksTotal = 0;
+  const chunkPatches = new Map<string, CombinedLod0Rebuild["chunkPatches"][number]>();
+  let fullPageFallbacks = 0;
+  let pageWeldMs = 0;
   for (const dirty of pageParentDirtyGroups(regions)) {
     const partial = rebuildDirtyLod0Pages(result, dirty, cfg, index);
     lod0Ms += partial.lod0Ms;
     chunksRemeshed += partial.chunksRemeshed;
     chunksTotal += partial.chunksTotal;
+    for (const patch of partial.chunkPatches) {
+      const existing = chunkPatches.get(patch.nodeId);
+      if (!existing) {
+        chunkPatches.set(patch.nodeId, patch);
+        continue;
+      }
+      const chunks = new Map(existing.chunks.map((chunk) => [chunk.localIndex, chunk]));
+      for (const chunk of patch.chunks) chunks.set(chunk.localIndex, chunk);
+      chunkPatches.set(patch.nodeId, {
+        nodeId: patch.nodeId,
+        revision: patch.revision,
+        chunks: [...chunks.values()].sort((a, b) => a.localIndex - b.localIndex),
+      });
+    }
+    fullPageFallbacks += partial.fullPageFallbacks;
+    pageWeldMs += partial.pageWeldMs;
     for (const node of partial.changed) changedById.set(node.id, node);
     for (const [x, z] of partial.dirtyCoords) dirtyCoordKeys.add(`${x},${z}`);
   }
@@ -387,6 +406,9 @@ function rebuildDirtyRegionGroups(regions: readonly DirtyCellBounds[]): Combined
     lod0Ms,
     chunksRemeshed,
     chunksTotal,
+    chunkPatches: [...chunkPatches.values()],
+    fullPageFallbacks,
+    pageWeldMs,
   };
 }
 
@@ -402,6 +424,11 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
 
   const tSer = performance.now();
   const lod0Serialized = serializeNodes(lod0.changed);
+  const chunkPatches = lod0.chunkPatches.map((patch) => ({
+    nodeId: patch.nodeId,
+    revision: patch.revision,
+    chunks: patch.chunks.map(({ localIndex, mesh }) => ({ localIndex, mesh: cloneMesh(mesh) })),
+  }));
   const serializeMs = performance.now() - tSer;
   let serializedBytes = 0;
   const transferables: Transferable[] = [];
@@ -412,6 +439,22 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
       + node.mesh.materialWeights.byteLength
       + node.mesh.indices.byteLength;
     collectNodeTransferables(node, transferables);
+  }
+  for (const patch of chunkPatches) {
+    for (const chunk of patch.chunks) {
+      serializedBytes += chunk.mesh.positions.byteLength
+        + chunk.mesh.normals.byteLength
+        + chunk.mesh.paintSlots.byteLength
+        + chunk.mesh.materialWeights.byteLength
+        + chunk.mesh.indices.byteLength;
+      transferables.push(
+        chunk.mesh.positions.buffer,
+        chunk.mesh.normals.buffer,
+        chunk.mesh.paintSlots.buffer,
+        chunk.mesh.materialWeights.buffer,
+        chunk.mesh.indices.buffer,
+      );
+    }
   }
 
   post({
@@ -427,19 +470,25 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
     pendingParents,
+    chunkPatches,
+    fullPageFallbacks: lod0.fullPageFallbacks,
+    pageWeldMs: lod0.pageWeldMs,
   }, transferables);
 }
 
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
-  const previousEdits = getDigEditsSnapshot();
   const lod0Snapshot = snapshotLod0Nodes(request.dirtyRegions);
   const parentQueueSnapshot = snapshotParentQueue();
+  const applied = [] as typeof request.transactions;
   try {
-    for (const edit of request.edits) addDigEdit(edit);
-    postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
+    for (const transaction of request.transactions) {
+      applyDigEditTransaction(transaction);
+      applied.push(transaction);
+    }
+    postLod0Rebuild([request.requestId], request.dirtyRegions, request.transactions.length);
   } catch (error) {
-    replaceDigEdits(previousEdits);
+    for (let i = applied.length - 1; i >= 0; i--) rollbackDigEditTransaction(applied[i]!);
     restoreLod0Nodes(lod0Snapshot);
     restoreParentQueue(parentQueueSnapshot);
     throw error;
@@ -461,14 +510,13 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
   const cacheStats = createEmptyStreamRootCacheStats();
   const nodes: ClodPageNode[] = [];
 
-  // Streamed roots are not registered in the dig index: terrain edits outside
-  // the startup world only affect live bubble chunks, not these visual pages.
-  // TODO: route out-of-world dig edits to streamed root rebuilds.
   installHydrologyTerrain(hydrologyTerrain, { boundedToStartupWorld: true });
   try {
     for (const { px, pz, level } of request.coords) {
       const rootLevel = streamRootLevel(level);
-      const cached = await tryLoadStreamRootNode(workerCacheCtx, "cpu", rootLevel, px, pz, cacheStats);
+      const nodeId = `L${rootLevel}:${px},${pz}`;
+      const bypassCache = request.bypassCacheIds?.includes(nodeId) ?? false;
+      const cached = bypassCache ? null : await tryLoadStreamRootNode(workerCacheCtx, "cpu", rootLevel, px, pz, cacheStats);
       if (cached) {
         nodes.push(cached);
         continue;

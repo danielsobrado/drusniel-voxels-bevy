@@ -1,6 +1,6 @@
-import type { ClodPageNode } from "./types.js";
+import type { ClodPageNode, PageMesh } from "./types.js";
 import type { DirtyCellBounds } from "./clod/quadtree.js";
-import type { DigEdit } from "./terrain/terrain.js";
+import type { VoxelEditTransaction } from "./terrain/terrain.js";
 import type { SerializedClodNode } from "./clod_worker_protocol.js";
 
 export interface WorkerLod0Rebuild {
@@ -14,6 +14,9 @@ export interface WorkerLod0Rebuild {
   chunksTotal: number;
   pendingParents: number;
   requestCount: number;
+  chunkPatches: Array<{ nodeId: string; revision: number; chunks: Array<{ localIndex: number; mesh: PageMesh }> }>;
+  fullPageFallbacks: number;
+  pageWeldMs: number;
 }
 
 export interface WorkerParentBatch {
@@ -30,7 +33,7 @@ export interface PendingRequest<T> {
 }
 
 export interface DigBatchSlot {
-  edits: DigEdit[];
+  transactions: VoxelEditTransaction[];
   dirtyRegions: DirtyCellBounds[];
   resolvers: Array<PendingRequest<WorkerLod0Rebuild>>;
 }

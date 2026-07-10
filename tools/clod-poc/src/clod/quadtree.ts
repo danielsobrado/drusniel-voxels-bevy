@@ -104,6 +104,15 @@ export interface Lod0RebuildResult {
   lod0Ms: number;
   chunksRemeshed: number;
   chunksTotal: number;
+  chunkPatches: Lod0ChunkPatch[];
+  fullPageFallbacks: number;
+  pageWeldMs: number;
+}
+
+export interface Lod0ChunkPatch {
+  nodeId: string;
+  revision: number;
+  chunks: Array<{ localIndex: number; mesh: PageMesh }>;
 }
 
 export interface AncestorRebuildResult {
@@ -583,6 +592,9 @@ export function rebuildDirtyLod0Pages(
   const backups = new Map<ClodPageNode, Lod0NodeBackup>();
   let chunksRemeshed = 0;
   let chunksTotal = 0;
+  const chunkPatches: Lod0ChunkPatch[] = [];
+  let fullPageFallbacks = 0;
+  let pageWeldMs = 0;
   const startedAt = performance.now();
 
   try {
@@ -595,21 +607,31 @@ export function rebuildDirtyLod0Pages(
       if (!backups.has(node)) backups.set(node, backupLod0Node(node));
 
       let mesh: PageMesh;
+      let remeshedIndices: number[];
       if (node.chunkMeshes) {
         const rebuilt = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
         if (rebuilt.remeshed === 0) continue;
         mesh = rebuilt.mesh;
         chunksRemeshed += rebuilt.remeshed;
+        remeshedIndices = rebuilt.remeshedIndices;
+        if (rebuilt.fullPageFallback) fullPageFallbacks++;
+        pageWeldMs += rebuilt.weldMs;
       } else {
         const src = buildLod0PageSource(px, pz, cfg, world);
         node.chunkMeshes = src.chunks;
         mesh = src.mesh;
         chunksRemeshed += src.chunks.length;
+        remeshedIndices = src.chunks.map((_, index) => index);
       }
       validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
       node.mesh = mesh;
       node.bounds = boundsOf(mesh);
       bumpNodeRevision(node);
+      chunkPatches.push({
+        nodeId: node.id,
+        revision: node.revision ?? 0,
+        chunks: remeshedIndices.map((localIndex) => ({ localIndex, mesh: node.chunkMeshes![localIndex]! })),
+      });
       changed.push(node);
       dirtyCoords.push([px, pz]);
     }
@@ -618,7 +640,7 @@ export function rebuildDirtyLod0Pages(
     throw error;
   }
 
-  return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - startedAt, chunksRemeshed, chunksTotal };
+  return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - startedAt, chunksRemeshed, chunksTotal, chunkPatches, fullPageFallbacks, pageWeldMs };
 }
 
 export function resimplifyParent(

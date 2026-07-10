@@ -1,5 +1,5 @@
 import { projectPropEditStore } from "../project/prop_edit_store.js";
-import { getVoxelEditSnapshot } from "../terrain/terrain.js";
+import { getVoxelEditSnapshotForBounds, voxelEditCount } from "../terrain/terrain.js";
 import { SAVE_AUTOSAVE_INTERVAL_S, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
 import type { LoadedSavedWorld } from "./save_service.js";
 import { finalizeSaveManifestAndMetadata, flushDirtyRegionBatch } from "./save_service.js";
@@ -214,8 +214,7 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
   const startedAt = nowMs();
   const db = await openSaveDb();
   try {
-    const snapshot = getVoxelEditSnapshot();
-    activeState.voxelDeltaCount = snapshot.deltas.length;
+    activeState.voxelDeltaCount = voxelEditCount();
     const propsByRegion = partitionSavedPropsByRegion(savedPropStore.snapshot());
     const dirtyRegionKeys = [...activeState.dirtyRegionKeys].sort();
     const result = await flushDirtyRegionBatch({
@@ -225,7 +224,10 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
       metadata: activeState.metadata,
       dirtyRegionKeys,
       propsByRegion,
-      snapshot,
+      snapshotForRegion: (regionKey) => {
+        const bounds = boundsForRegion(regionKey);
+        return getVoxelEditSnapshotForBounds(bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ);
+      },
       maxRegionWrites,
     });
     for (const key of result.written) {

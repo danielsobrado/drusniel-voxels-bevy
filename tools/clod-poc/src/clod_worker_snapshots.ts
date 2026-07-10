@@ -16,6 +16,7 @@ export function snapshotLod0Node(node: ClodPageNode): Lod0Snapshot {
     mesh: node.mesh,
     bounds: cloneBounds(node.bounds),
     chunkMeshes: node.chunkMeshes ? [...node.chunkMeshes] : undefined,
+    revision: node.revision,
   };
 }
 
@@ -25,6 +26,8 @@ export function restoreLod0Nodes(snapshots: readonly Lod0Snapshot[]): void {
     snapshot.node.bounds = cloneBounds(snapshot.bounds);
     if (snapshot.chunkMeshes) snapshot.node.chunkMeshes = snapshot.chunkMeshes;
     else delete snapshot.node.chunkMeshes;
+    if (snapshot.revision === undefined) delete snapshot.node.revision;
+    else snapshot.node.revision = snapshot.revision;
   }
 }
 
@@ -35,6 +38,7 @@ export function snapshotParentNode(node: ClodPageNode): ParentNodeSnapshot {
     bounds: cloneBounds(node.bounds),
     errorWorld: node.errorWorld,
     lowBenefit: node.lowBenefit,
+    revision: node.revision,
   };
 }
 
@@ -44,6 +48,8 @@ export function restoreParentNodes(snapshots: ReadonlyMap<ClodPageNode, ParentNo
     node.bounds = cloneBounds(snapshot.bounds);
     node.errorWorld = snapshot.errorWorld;
     node.lowBenefit = snapshot.lowBenefit;
+    if (snapshot.revision === undefined) delete node.revision;
+    else node.revision = snapshot.revision;
   }
 }
 

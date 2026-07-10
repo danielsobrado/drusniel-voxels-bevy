@@ -31,7 +31,7 @@ function resolveMaxEvents(maxEvents: number): number {
 }
 
 export class TerrainEditDirtyQueue {
-  private readonly events: TerrainEditDirtyEvent[] = [];
+  private readonly events = new Map<string, TerrainEditDirtyEvent>();
   private readonly maxEvents: number;
   private latestRevisionValue = 0;
   private droppedValue = 0;
@@ -41,25 +41,45 @@ export class TerrainEditDirtyQueue {
   }
 
   enqueue(event: TerrainEditDirtyEvent): void {
-    this.events.push(event);
+    const centerX = (event.worldAabb.minX + event.worldAabb.maxX) * 0.5;
+    const centerZ = (event.worldAabb.minZ + event.worldAabb.maxZ) * 0.5;
+    const key = `${event.reason}:${Math.floor(centerX / 16)},${Math.floor(centerZ / 16)}`;
+    const previous = this.events.get(key);
+    this.events.set(key, previous ? {
+      ...event,
+      editRevision: Math.max(previous.editRevision, event.editRevision),
+      worldAabb: {
+        minX: Math.min(previous.worldAabb.minX, event.worldAabb.minX),
+        maxX: Math.max(previous.worldAabb.maxX, event.worldAabb.maxX),
+        minY: Math.min(previous.worldAabb.minY, event.worldAabb.minY),
+        maxY: Math.max(previous.worldAabb.maxY, event.worldAabb.maxY),
+        minZ: Math.min(previous.worldAabb.minZ, event.worldAabb.minZ),
+        maxZ: Math.max(previous.worldAabb.maxZ, event.worldAabb.maxZ),
+      },
+      affectsHeight: previous.affectsHeight || event.affectsHeight,
+      affectsCollision: previous.affectsCollision || event.affectsCollision,
+      affectsVegetation: previous.affectsVegetation || event.affectsVegetation,
+    } : event);
     this.latestRevisionValue = Math.max(this.latestRevisionValue, event.editRevision);
-    while (this.events.length > this.maxEvents) {
-      this.events.shift();
+    while (this.events.size > this.maxEvents) {
+      this.events.delete(this.events.keys().next().value!);
       this.droppedValue++;
     }
   }
 
   drain(): TerrainEditDirtyEvent[] {
-    return this.events.splice(0);
+    const drained = [...this.events.values()];
+    this.events.clear();
+    return drained;
   }
 
   peek(): readonly TerrainEditDirtyEvent[] {
-    return this.events;
+    return [...this.events.values()];
   }
 
   snapshot(): TerrainEditDirtyQueueSnapshot {
     return {
-      queued: this.events.length,
+      queued: this.events.size,
       latestRevision: this.latestRevisionValue,
       dropped: this.droppedValue,
     };

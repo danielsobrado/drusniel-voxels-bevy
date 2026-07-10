@@ -599,7 +599,6 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     if (node.level !== 0) return 0;
     const tc = performance.now();
     terrainColliders.updatePage(node.id, node.mesh);
-    nearFieldBubbleController.invalidatePage(node.id);
     return performance.now() - tc;
   };
 

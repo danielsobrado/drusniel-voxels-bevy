@@ -62,6 +62,7 @@ const trianglePoint = new THREE.Vector3();
 const capsulePoint = new THREE.Vector3();
 const pushDirection = new THREE.Vector3();
 const triangleNormal = new THREE.Vector3();
+const COLLIDER_SPATIAL_CELL_SIZE = 64;
 
 function overlapsFootprint(box: THREE.Box3, footprint: TerrainColliderFootprint): boolean {
   return box.max.x >= footprint.minX
@@ -108,26 +109,31 @@ function entryFromPage(page: TerrainColliderPage): ColliderEntry {
 }
 
 export class TerrainColliderSet {
-  private readonly entries: ColliderEntry[];
+  private readonly entries: Map<string, ColliderEntry>;
+  private readonly spatialCells = new Map<string, Set<string>>();
+  private readonly entryCells = new Map<string, string[]>();
 
   constructor(
     pages: readonly TerrainColliderPage[],
     private readonly heightFallback: TerrainHeightFallback | null = null,
   ) {
-    this.entries = pages.map(entryFromPage);
+    this.entries = new Map(pages.map((page) => [page.id, entryFromPage(page)]));
+    for (const entry of this.entries.values()) this.indexEntry(entry);
   }
 
   loadedPageCount(): number {
-    return this.entries.filter((entry) => entry.boundsTree !== null).length;
+    let count = 0;
+    for (const entry of this.entries.values()) if (entry.boundsTree !== null) count++;
+    return count;
   }
 
   pageCount(): number {
-    return this.entries.length;
+    return this.entries.size;
   }
 
   translateHorizontal(dx: number, dz: number): void {
     if (dx === 0 && dz === 0) return;
-    for (const entry of this.entries) {
+    for (const entry of this.entries.values()) {
       entry.footprint.minX += dx;
       entry.footprint.maxX += dx;
       entry.footprint.minZ += dz;
@@ -138,6 +144,70 @@ export class TerrainColliderSet {
       entry.geometry = null;
       entry.boundsTree = null;
     }
+    this.rebuildSpatialIndex();
+  }
+
+  private indexEntry(entry: ColliderEntry): void {
+    const minX = Math.floor(entry.footprint.minX / COLLIDER_SPATIAL_CELL_SIZE);
+    const maxX = Math.floor((entry.footprint.maxX - 1e-6) / COLLIDER_SPATIAL_CELL_SIZE);
+    const minZ = Math.floor(entry.footprint.minZ / COLLIDER_SPATIAL_CELL_SIZE);
+    const maxZ = Math.floor((entry.footprint.maxZ - 1e-6) / COLLIDER_SPATIAL_CELL_SIZE);
+    const keys: string[] = [];
+    for (let z = minZ; z <= maxZ; z++) {
+      for (let x = minX; x <= maxX; x++) {
+        const key = `${x},${z}`;
+        const ids = this.spatialCells.get(key) ?? new Set<string>();
+        ids.add(entry.id);
+        this.spatialCells.set(key, ids);
+        keys.push(key);
+      }
+    }
+    this.entryCells.set(entry.id, keys);
+  }
+
+  private unindexEntry(id: string): void {
+    for (const key of this.entryCells.get(id) ?? []) {
+      const ids = this.spatialCells.get(key);
+      ids?.delete(id);
+      if (ids?.size === 0) this.spatialCells.delete(key);
+    }
+    this.entryCells.delete(id);
+  }
+
+  private rebuildSpatialIndex(): void {
+    this.spatialCells.clear();
+    this.entryCells.clear();
+    for (const entry of this.entries.values()) this.indexEntry(entry);
+  }
+
+  private entriesForCellKeys(keys: Iterable<string>): ColliderEntry[] {
+    const ids = new Set<string>();
+    for (const key of keys) for (const id of this.spatialCells.get(key) ?? []) ids.add(id);
+    return [...ids].map((id) => this.entries.get(id)).filter((entry): entry is ColliderEntry => entry !== undefined);
+  }
+
+  private entriesForRay(ray: THREE.Ray, maxDistance: number): ColliderEntry[] {
+    if (!Number.isFinite(maxDistance)) return [...this.entries.values()];
+    const horizontalDistance = maxDistance * Math.hypot(ray.direction.x, ray.direction.z);
+    const steps = Math.max(1, Math.ceil(horizontalDistance / COLLIDER_SPATIAL_CELL_SIZE));
+    const keys = new Set<string>();
+    for (let step = 0; step <= steps; step++) {
+      const distance = maxDistance * (step / steps);
+      const cellX = Math.floor((ray.origin.x + ray.direction.x * distance) / COLLIDER_SPATIAL_CELL_SIZE);
+      const cellZ = Math.floor((ray.origin.z + ray.direction.z * distance) / COLLIDER_SPATIAL_CELL_SIZE);
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) keys.add(`${cellX + dx},${cellZ + dz}`);
+    }
+    return this.entriesForCellKeys(keys);
+  }
+
+  private entriesForBox(box: THREE.Box3): ColliderEntry[] {
+    const keys: string[] = [];
+    const minX = Math.floor(box.min.x / COLLIDER_SPATIAL_CELL_SIZE);
+    const maxX = Math.floor(box.max.x / COLLIDER_SPATIAL_CELL_SIZE);
+    const minZ = Math.floor(box.min.z / COLLIDER_SPATIAL_CELL_SIZE);
+    const maxZ = Math.floor(box.max.z / COLLIDER_SPATIAL_CELL_SIZE);
+    for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) keys.push(`${x},${z}`);
+    return this.entriesForCellKeys(keys);
   }
 
   private ensureEntry(entry: ColliderEntry): MeshBVH {
@@ -178,7 +248,7 @@ export class TerrainColliderSet {
     let nearest: TerrainSpawnHit | null = null;
     let nearestDistance = Number.POSITIVE_INFINITY;
 
-    for (const entry of this.entries) {
+    for (const entry of this.entriesForRay(ray, 10000)) {
       if (!rayCanHitFootprint(ray, entry.footprint)) continue;
       const hit = this.ensureEntry(entry).raycastFirst(ray, THREE.DoubleSide);
       if (!hit || hit.distance >= nearestDistance || !hit.face) continue;
@@ -199,12 +269,12 @@ export class TerrainColliderSet {
   }
 
   /** Nearest terrain hit with no slope filter — walls and ceilings count (dig targeting). */
-  raycastSurface(ray: THREE.Ray): TerrainSurfaceHit | null {
+  raycastSurface(ray: THREE.Ray, maxDistance = Number.POSITIVE_INFINITY): TerrainSurfaceHit | null {
     let nearest: TerrainSurfaceHit | null = null;
-    for (const entry of this.entries) {
+    for (const entry of this.entriesForRay(ray, maxDistance)) {
       if (!rayCanHitFootprint(ray, entry.footprint)) continue;
       const hit = this.ensureEntry(entry).raycastFirst(ray, THREE.DoubleSide);
-      if (!hit) continue;
+      if (!hit || hit.distance > maxDistance) continue;
       if (!nearest || hit.distance < nearest.distance) {
         nearest = { point: hit.point.clone(), distance: hit.distance, pageId: entry.id };
       }
@@ -214,39 +284,36 @@ export class TerrainColliderSet {
 
   /** Replace one page's collision geometry (after a terrain edit) and rebuild its BVH. */
   updatePage(id: string, source: THREE.BufferGeometry | PageMesh): boolean {
-    const entry = this.entries.find((e) => e.id === id);
+    const entry = this.entries.get(id);
     if (!entry) return false;
     const wasLoaded = entry.boundsTree !== null;
-    entry.geometry?.dispose();
-    entry.sourceGeometry?.dispose();
-    entry.geometry = null;
-    entry.boundsTree = null;
-    if (source instanceof THREE.BufferGeometry) {
-      entry.sourceGeometry = source.clone();
-      entry.sourceMesh = null;
-    } else {
-      entry.sourceGeometry = null;
-      entry.sourceMesh = { ...source, positions: new Float32Array(source.positions) };
-    }
-    if (wasLoaded) this.ensureEntry(entry);
+    const replacement = entryFromPage({
+      id,
+      footprint: entry.footprint,
+      ...(source instanceof THREE.BufferGeometry ? { geometry: source } : { mesh: source }),
+    });
+    if (wasLoaded) this.ensureEntry(replacement);
+    this.entries.set(id, replacement);
+    this.disposeEntry(entry);
     return true;
   }
 
   upsertPage(page: TerrainColliderPage): void {
-    const index = this.entries.findIndex((entry) => entry.id === page.id);
-    if (index < 0) {
-      this.entries.push(entryFromPage(page));
-      return;
-    }
-    this.disposeEntry(this.entries[index]!);
-    this.entries[index] = entryFromPage(page);
+    const previous = this.entries.get(page.id);
+    const replacement = entryFromPage(page);
+    if (previous?.boundsTree) this.ensureEntry(replacement);
+    this.entries.set(page.id, replacement);
+    this.unindexEntry(page.id);
+    this.indexEntry(replacement);
+    if (previous) this.disposeEntry(previous);
   }
 
   removePage(id: string): boolean {
-    const index = this.entries.findIndex((entry) => entry.id === id);
-    if (index < 0) return false;
-    this.disposeEntry(this.entries[index]!);
-    this.entries.splice(index, 1);
+    const entry = this.entries.get(id);
+    if (!entry) return false;
+    this.entries.delete(id);
+    this.unindexEntry(id);
+    this.disposeEntry(entry);
     return true;
   }
 
@@ -268,7 +335,7 @@ export class TerrainColliderSet {
     let grounded = false;
     let pagesTested = 0;
 
-    for (const entry of this.entries) {
+    for (const entry of this.entriesForBox(tempBox)) {
       if (!overlapsFootprint(tempBox, entry.footprint)) continue;
       pagesTested++;
       this.ensureEntry(entry).shapecast({
@@ -320,6 +387,9 @@ export class TerrainColliderSet {
   }
 
   dispose(): void {
-    for (const entry of this.entries) this.disposeEntry(entry);
+    for (const entry of this.entries.values()) this.disposeEntry(entry);
+    this.entries.clear();
+    this.spatialCells.clear();
+    this.entryCells.clear();
   }
 }

@@ -26,7 +26,7 @@ export interface PlayerEditAuthorityPoint {
 type PlayerEditAuthorityTuple = readonly [number, number, number];
 
 export const DEFAULT_PLAYER_EDIT_AUTHORITY: PlayerEditAuthorityConfig = {
-  terrainEditRadiusM: 96,
+  terrainEditRadiusM: 8,
   buildCommitRadiusM: 80,
   buildPreviewRadiusM: 160,
   allowFarPreview: true,

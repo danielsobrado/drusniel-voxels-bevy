@@ -334,6 +334,7 @@ export function runFrameLoopStartup(
     onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
     onRootsChanged: () => selectionController.invalidate(),
   });
+  session.streamingClodRootController = streamingClodRootController;
   const streamingClodReadyPageKeys = (): string[] => {
     if (!streamingScene) return input.allNodes.map((node) => node.id);
     return [...new Set([...input.allNodes.map((node) => node.id), ...streamingClodRootController.readyPageKeys()])];

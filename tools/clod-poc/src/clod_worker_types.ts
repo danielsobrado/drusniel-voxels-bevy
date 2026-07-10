@@ -1,4 +1,4 @@
-import type { BuildResult, DirtyCellBounds, NodeIndex } from "./clod/quadtree.js";
+import type { BuildResult, DirtyCellBounds, Lod0ChunkPatch, NodeIndex } from "./clod/quadtree.js";
 import type { ClodCacheContext } from "./cache/clodCacheContext.js";
 import type { ClodPagesConfig } from "./config.js";
 import type { ClodPageNode, PageMesh } from "./types.js";
@@ -24,6 +24,9 @@ export interface CombinedLod0Rebuild {
   lod0Ms: number;
   chunksRemeshed: number;
   chunksTotal: number;
+  chunkPatches: Lod0ChunkPatch[];
+  fullPageFallbacks: number;
+  pageWeldMs: number;
 }
 
 export interface Lod0Snapshot {
@@ -31,6 +34,7 @@ export interface Lod0Snapshot {
   mesh: PageMesh;
   bounds: ClodPageNode["bounds"];
   chunkMeshes?: PageMesh[];
+  revision?: number;
 }
 
 export interface ParentNodeSnapshot {
@@ -39,6 +43,7 @@ export interface ParentNodeSnapshot {
   bounds: ClodPageNode["bounds"];
   errorWorld: number;
   lowBenefit: boolean;
+  revision?: number;
 }
 
 export interface ParentQueueSnapshot {
