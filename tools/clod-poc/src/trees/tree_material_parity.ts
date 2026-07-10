@@ -67,7 +67,7 @@ export function decorateTreeMaterialHandle(
     .filter((material, index, all) => all.indexOf(material) === index) as NodeMaterialLike[];
 
   for (const material of materials) {
-    const previousMask = material.maskNode;
+    const previousMask = material.maskNode as TslNode | undefined;
     material.maskNode = previousMask ? previousMask.and(card.keep) : card.keep;
   }
 
@@ -84,9 +84,10 @@ export function decorateTreeMaterialHandle(
   handle.prepassNodesFor = (lod: TreeLod): PrepassNodes | undefined => {
     const base = originalPrepass?.(lod);
     if (!base) return undefined;
+    const baseMask = base.maskNode as TslNode | undefined;
     return {
       ...base,
-      maskNode: base.maskNode ? base.maskNode.and(card.keep) : card.keep,
+      maskNode: baseMask ? baseMask.and(card.keep) : card.keep,
     };
   };
   handle.updateForestLighting = (state: ForestLightingMaterialState | null): void => {
@@ -106,8 +107,9 @@ function createCardNodes(atlas: TreeFoliageAtlas): {
   keep: TslNode;
 } {
   const cardTag: TslNode = clamp(attribute("treeFoliageCard", "float"), 0, 1);
+  const speciesAttribute: TslNode = attribute("treeSpeciesIndex", "float");
   const speciesIndex: TslNode = clamp(
-    floor(attribute("treeSpeciesIndex", "float").add(0.5)),
+    floor(speciesAttribute.add(0.5)),
     0,
     TREE_FOLIAGE_ATLAS_ROWS - 1,
   );
