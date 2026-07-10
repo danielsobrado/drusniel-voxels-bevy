@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { cloneTreeSettings, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import { octFrames } from "./tree_impostor_octahedral.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeWebGpuBackendAccess } from "./tree_system_types.js";
 import { createTreeSystemGpuRingDrawResources } from "./tree_system_gpu_ring_resources.js";
@@ -26,6 +27,10 @@ vi.mock("./tree_ring_far_node_material.js", () => ({
   treeRingUsesFarMaterial: (lod: string) => lod === "far" || lod === "impostor",
 }));
 
+vi.mock("./tree_material_parity.js", () => ({
+  decorateTreeMaterialHandle: (handle: TreeMaterialHandle) => handle,
+}));
+
 describe("tree system GPU ring resources", () => {
   beforeEach(() => {
     materialFactoryMocks.regular.mockReset();
@@ -40,14 +45,12 @@ describe("tree system GPU ring resources", () => {
 
   it("switches the impostor LOD from regular ring material to baked impostor material when the atlas is ready", () => {
     const pending = createResources({ oak: atlas("oak", false) });
-
     expect(pending.materialHandles["oak:impostor"].regularMaterial.name).toBe("far:impostor");
     expect(materialFactoryMocks.impostor).not.toHaveBeenCalled();
 
     materialFactoryMocks.regular.mockClear();
     const readyAtlas = atlas("oak", true);
     const ready = createResources({ oak: readyAtlas });
-
     expect(ready.materialHandles["oak:impostor"].regularMaterial.name).toBe("impostor:oak");
     expect(materialFactoryMocks.impostor).toHaveBeenCalledTimes(1);
     expect(materialFactoryMocks.impostor.mock.calls[0]?.[2]).toBe(readyAtlas);
@@ -55,7 +58,6 @@ describe("tree system GPU ring resources", () => {
 
   it("does not create renderable GPU ring meshes for empty source geometry", () => {
     const resources = createResources({}, new THREE.BufferGeometry());
-
     expect(resources.meshes).toHaveLength(0);
   });
 });
@@ -74,6 +76,7 @@ function createResources(
     currentLighting: undefined,
     hydrologyWater: undefined,
     impostorAtlases,
+    foliageAtlas: fakeFoliageAtlas(),
     crownProxyGeometry: sourceGeometry,
     useTreePrepass: false,
     treePrepassMaxLod: "far",
@@ -116,6 +119,19 @@ function fakeHandle(name: string): TreeMaterialHandle {
     dispose() {
       regularMaterial.dispose();
       debugMaterial.dispose();
+    },
+  };
+}
+
+function fakeFoliageAtlas(): TreeFoliageAtlas {
+  const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  return {
+    texture,
+    columns: 1,
+    rows: 1,
+    cellSize: 1,
+    dispose() {
+      texture.dispose();
     },
   };
 }
