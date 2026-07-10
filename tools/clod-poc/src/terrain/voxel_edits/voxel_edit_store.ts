@@ -1,5 +1,6 @@
 import type {
   BaseDensitySampler,
+  VoxelChunkKey,
   VoxelDelta,
   VoxelEditResult,
   VoxelEditSnapshot,
@@ -11,8 +12,13 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+function chunkColumnKey(chunk: Pick<VoxelChunkKey, "x" | "z">): string {
+  return `${chunk.x},${chunk.z}`;
+}
+
 export class VoxelEditStore {
   private readonly chunks = new Map<string, Map<number, VoxelDelta>>();
+  private readonly chunkColumns = new Map<string, Set<string>>();
   private readonly materialSlotCounts = new Map<number, number>();
   private voxelCount = 0;
   private currentRevision = 0;
@@ -23,6 +29,7 @@ export class VoxelEditStore {
 
   clear(): void {
     this.chunks.clear();
+    this.chunkColumns.clear();
     this.voxelCount = 0;
     this.materialSlotCounts.clear();
     this.currentRevision++;
@@ -41,16 +48,11 @@ export class VoxelEditStore {
       if (!Number.isFinite(delta.density)) throw new Error("voxel density must be finite");
       const voxel: VoxelDelta = { ...delta, revision: nextRevision };
       const chunk = voxelChunkKeyFor(delta.x, delta.y, delta.z);
-      const chunkKey = voxelChunkKeyString(chunk);
-      let bucket = this.chunks.get(chunkKey);
-      if (!bucket) {
-        bucket = new Map<number, VoxelDelta>();
-        this.chunks.set(chunkKey, bucket);
-      }
+      const bucket = this.ensureChunkBucket(chunk);
       const localIndex = voxelLocalIndex(delta.x, delta.y, delta.z);
       const previous = bucket.get(localIndex);
       if (previous) this.removeMaterialSlot(previous.materialSlot);
-      if (!bucket.has(localIndex)) this.voxelCount++;
+      else this.voxelCount++;
       bucket.set(localIndex, voxel);
       this.addMaterialSlot(voxel.materialSlot);
     }
@@ -75,17 +77,13 @@ export class VoxelEditStore {
       const current = bucket?.get(localIndex);
       if (current) this.removeMaterialSlot(current.materialSlot);
       if (previous.value) {
-        let target = bucket;
-        if (!target) {
-          target = new Map<number, VoxelDelta>();
-          this.chunks.set(chunkKey, target);
-        }
+        const target = bucket ?? this.ensureChunkBucket(chunk);
         if (!target.has(localIndex)) this.voxelCount++;
         target.set(localIndex, { ...previous.value });
         this.addMaterialSlot(previous.value.materialSlot);
       } else if (bucket?.delete(localIndex)) {
         this.voxelCount--;
-        if (bucket.size === 0) this.chunks.delete(chunkKey);
+        if (bucket.size === 0) this.removeChunkBucket(chunk, chunkKey);
       }
     }
     this.currentRevision = transaction.revisionBase;
@@ -93,20 +91,19 @@ export class VoxelEditStore {
 
   load(snapshot: VoxelEditSnapshot): void {
     this.chunks.clear();
+    this.chunkColumns.clear();
     this.voxelCount = 0;
     this.materialSlotCounts.clear();
     this.currentRevision = snapshot.revision;
 
     for (const delta of snapshot.deltas) {
+      if (!Number.isFinite(delta.density)) throw new Error("voxel density must be finite");
       const chunk = voxelChunkKeyFor(delta.x, delta.y, delta.z);
-      const chunkKey = voxelChunkKeyString(chunk);
-      let bucket = this.chunks.get(chunkKey);
-      if (!bucket) {
-        bucket = new Map<number, VoxelDelta>();
-        this.chunks.set(chunkKey, bucket);
-      }
+      const bucket = this.ensureChunkBucket(chunk);
       const localIndex = voxelLocalIndex(delta.x, delta.y, delta.z);
-      if (!bucket.has(localIndex)) this.voxelCount++;
+      const previous = bucket.get(localIndex);
+      if (previous) this.removeMaterialSlot(previous.materialSlot);
+      else this.voxelCount++;
       bucket.set(localIndex, { ...delta });
       this.addMaterialSlot(delta.materialSlot);
     }
@@ -121,17 +118,16 @@ export class VoxelEditStore {
 
   snapshotBounds(minX: number, maxX: number, minZ: number, maxZ: number): VoxelEditSnapshot {
     const deltas: VoxelDelta[] = [];
+    if (maxX <= minX || maxZ <= minZ) return { revision: this.currentRevision, deltas };
     const minChunkX = Math.floor(minX / VOXEL_CHUNK_SIZE);
     const maxChunkX = Math.floor((maxX - 1) / VOXEL_CHUNK_SIZE);
     const minChunkZ = Math.floor(minZ / VOXEL_CHUNK_SIZE);
     const maxChunkZ = Math.floor((maxZ - 1) / VOXEL_CHUNK_SIZE);
-    for (const [key, bucket] of this.chunks) {
-      const [cx, , cz] = key.split(",").map(Number);
-      if (cx < minChunkX || cx > maxChunkX || cz < minChunkZ || cz > maxChunkZ) continue;
+    this.forEachBucketInColumns(minChunkX, maxChunkX, minChunkZ, maxChunkZ, (bucket) => {
       for (const delta of bucket.values()) {
         if (delta.x >= minX && delta.x < maxX && delta.z >= minZ && delta.z < maxZ) deltas.push({ ...delta });
       }
-    }
+    });
     return {
       revision: this.currentRevision,
       deltas,
@@ -147,21 +143,20 @@ export class VoxelEditStore {
   }
 
   editedYRange(x0: number, x1: number, z0: number, z1: number): { minY: number; maxY: number } | null {
+    if (x1 <= x0 || z1 <= z0) return null;
     const minChunkX = Math.floor(x0 / VOXEL_CHUNK_SIZE);
     const maxChunkX = Math.floor((x1 - 1) / VOXEL_CHUNK_SIZE);
     const minChunkZ = Math.floor(z0 / VOXEL_CHUNK_SIZE);
     const maxChunkZ = Math.floor((z1 - 1) / VOXEL_CHUNK_SIZE);
     let minY = Number.POSITIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
-    for (const [key, bucket] of this.chunks) {
-      const [cx, , cz] = key.split(",").map(Number);
-      if (cx < minChunkX || cx > maxChunkX || cz < minChunkZ || cz > maxChunkZ) continue;
+    this.forEachBucketInColumns(minChunkX, maxChunkX, minChunkZ, maxChunkZ, (bucket) => {
       for (const delta of bucket.values()) {
         if (delta.x < x0 || delta.x >= x1 || delta.z < z0 || delta.z >= z1) continue;
         minY = Math.min(minY, delta.y);
         maxY = Math.max(maxY, delta.y);
       }
-    }
+    });
     return Number.isFinite(minY) ? { minY, maxY } : null;
   }
 
@@ -220,6 +215,46 @@ export class VoxelEditStore {
 
   materialAt(x: number, y: number, z: number): number | undefined {
     return this.voxelAt(Math.round(x), Math.round(y), Math.round(z))?.materialSlot;
+  }
+
+  private ensureChunkBucket(chunk: VoxelChunkKey): Map<number, VoxelDelta> {
+    const key = voxelChunkKeyString(chunk);
+    const existing = this.chunks.get(key);
+    if (existing) return existing;
+    const bucket = new Map<number, VoxelDelta>();
+    this.chunks.set(key, bucket);
+    const column = chunkColumnKey(chunk);
+    const chunkKeys = this.chunkColumns.get(column) ?? new Set<string>();
+    chunkKeys.add(key);
+    this.chunkColumns.set(column, chunkKeys);
+    return bucket;
+  }
+
+  private removeChunkBucket(chunk: VoxelChunkKey, key: string): void {
+    this.chunks.delete(key);
+    const column = chunkColumnKey(chunk);
+    const chunkKeys = this.chunkColumns.get(column);
+    chunkKeys?.delete(key);
+    if (chunkKeys?.size === 0) this.chunkColumns.delete(column);
+  }
+
+  private forEachBucketInColumns(
+    minChunkX: number,
+    maxChunkX: number,
+    minChunkZ: number,
+    maxChunkZ: number,
+    visit: (bucket: ReadonlyMap<number, VoxelDelta>) => void,
+  ): void {
+    for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+      for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+        const chunkKeys = this.chunkColumns.get(`${chunkX},${chunkZ}`);
+        if (!chunkKeys) continue;
+        for (const key of chunkKeys) {
+          const bucket = this.chunks.get(key);
+          if (bucket) visit(bucket);
+        }
+      }
+    }
   }
 
   private *iterDeltas(): Iterable<VoxelDelta> {
