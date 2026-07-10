@@ -92,6 +92,9 @@ export function updateSunLightGpuAtlas(
 }
 
 export function invalidateSunLightGpuAtlas(): void {
+  // Called every frame while the feature is disabled; re-invalidating would
+  // reallocate the texture and bump the version consumers re-upload on.
+  if (state.valid === 0 && state.texture.image.width === DEFAULT_ATLAS_SIZE && state.texture.image.height === DEFAULT_ATLAS_SIZE) return;
   state.valid = 0;
   state.version += 1;
   resizeTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT]));

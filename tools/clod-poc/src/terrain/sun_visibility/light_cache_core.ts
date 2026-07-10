@@ -21,8 +21,12 @@ interface SunLightCacheStats {
   currentSunBin: SunDirectionBin | null;
 }
 
-function fullKey(tile: SunVisibilityTileKey, bin: SunDirectionBin, revision: number): string {
-  return `${sunVisibilityTileKeyToString(tile)}|${sunBinKey(bin)}|${revision}`;
+/** Entries are keyed by tile and sun bin only. Terrain changes invalidate by
+ *  explicit deletion (invalidateRegions/markAllStale in the runtime) rather
+ *  than by embedding a revision in the key, so a global revision bump that did
+ *  not touch a tile leaves its entry reachable. */
+function fullKey(tile: SunVisibilityTileKey, bin: SunDirectionBin): string {
+  return `${sunVisibilityTileKeyToString(tile)}|${sunBinKey(bin)}`;
 }
 
 function readTileValue(tile: LightTile, x: number, z: number, options: SunLightOptions): number {
@@ -67,7 +71,7 @@ export function createSunLightCacheCore(options: SunLightOptions) {
   ) => {
     const sunBin = toSunBin(sunVec, options.directionBins);
     const terrainRevision = provider.tileRevision(tile);
-    const key = fullKey(tile, sunBin, terrainRevision);
+    const key = fullKey(tile, sunBin);
     stats.currentSunBin = sunBin;
     const entry = entries.get(key);
     if (entry) {
@@ -92,11 +96,11 @@ export function createSunLightCacheCore(options: SunLightOptions) {
     }
   };
 
-  const peekWorld = (x: number, z: number, sunVec: THREE.Vector3, provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>) => {
+  const peekWorld = (x: number, z: number, sunVec: THREE.Vector3, _provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>) => {
     if (!options.active) return { kind: "lit", value: 1 } as const;
     const tile = worldToSunVisibilityTile(x, z, options.tile);
     const sunBin = toSunBin(sunVec, options.directionBins);
-    const entry = entries.get(fullKey(tile, sunBin, provider.tileRevision(tile)));
+    const entry = entries.get(fullKey(tile, sunBin));
     if (!entry) return { kind: "pending", value: options.cache.keepLastKnown ? 0.5 : 1 } as const;
     return valueToLookup(readTileValue(entry.tile, x, z, options));
   };
