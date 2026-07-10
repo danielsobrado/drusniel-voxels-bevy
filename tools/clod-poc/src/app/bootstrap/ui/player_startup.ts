@@ -24,11 +24,13 @@ export function runPlayerStartup(
     player,
     interaction,
     terrainColliders,
+    terrainRaycast,
     searchParams,
     bindings,
     state,
     dom: { orbitModeButton, playerModeButton, playerModeStatus },
   } = input;
+  const { brushPreview } = input.terrainView;
   const { updateInfo } = infoPanel;
   const { scheduleDig, playerTerraformEditActive, terrainEditService } = terrainEdit;
 
@@ -78,16 +80,28 @@ export function runPlayerStartup(
   controls.update = () => (interaction.mode === "orbit" ? updateOrbitControls() : false);
 
   let lastPlayerFrameAt = performance.now();
-  const updatePlayingInput = (now: number): void => {
+  const updatePlayerInteraction = (now: number): void => {
     const deltaSeconds = Math.min(Math.max((now - lastPlayerFrameAt) / 1000, 0), MAX_PLAYER_FRAME_DELTA_SECONDS);
     lastPlayerFrameAt = now;
     if (interaction.mode === "playing") {
       playerInputController.updateFrame(deltaSeconds);
       playerInputController.updateHoldToDig();
     }
-    requestAnimationFrame(updatePlayingInput);
+    brushPreview.update({
+      digEnabled: state.digEnabled,
+      interactionMode: interaction.mode,
+      terraformEditActive: playerTerraformEditActive(),
+      brushShape: state.brushShape,
+      brushOp: state.brushOp,
+      digRadius: state.digRadius,
+      brushHeight: state.brushHeight,
+      raycastEditableTerrain: (ray) => terrainRaycast.raycastEditableTerrain(ray),
+      getPlayingAimRay: () => playerInputController.getPlayingAimRay(),
+      getOrbitHoverRay: () => playerInputController.getOrbitHoverRay(),
+    });
+    requestAnimationFrame(updatePlayerInteraction);
   };
-  requestAnimationFrame(updatePlayingInput);
+  requestAnimationFrame(updatePlayerInteraction);
 
   const playerModeController = createPlayerModeController({
     renderer,
