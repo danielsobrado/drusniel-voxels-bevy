@@ -9,6 +9,7 @@ import {
   floor,
   fract,
   instanceIndex,
+  max,
   mix,
   normalWorld,
   normalize,
@@ -71,7 +72,7 @@ export function decorateTreeMaterialHandle(
   }
 
   const regular = handle.regularMaterial as NodeMaterialLike;
-  if (regular.colorNode) regular.colorNode = mix(regular.colorNode, regular.colorNode.mul(card.albedo), card.cardTag);
+  if (regular.colorNode) regular.colorNode = mix(regular.colorNode, regular.colorNode.mul(card.shade), card.cardTag);
 
   const forest = options.ring?.forestLighting
     ? createRingForestLighting(options.ring.settings, options.ring.buffers, regular)
@@ -101,7 +102,7 @@ export function decorateTreeMaterialHandle(
 
 function createCardNodes(atlas: TreeFoliageAtlas): {
   cardTag: TslNode;
-  albedo: TslNode;
+  shade: TslNode;
   keep: TslNode;
 } {
   const cardTag: TslNode = clamp(attribute("treeFoliageCard", "float"), 0, 1);
@@ -132,8 +133,10 @@ function createCardNodes(atlas: TreeFoliageAtlas): {
   );
   const coverage: TslNode = sampled.w.mul(edgeFade);
   const keep: TslNode = mix(float(1), coverage, cardTag).greaterThan(CARD_ALPHA_THRESHOLD);
-  const albedo: TslNode = mix(vec3(1), sampled.rgb.mul(1.08), cardTag);
-  return { cardTag, albedo, keep };
+  const atlasValue: TslNode = max(max(sampled.x, sampled.y), sampled.z);
+  const cardShade: TslNode = mix(0.72, 1.08, clamp(atlasValue.mul(4), 0, 1));
+  const shade: TslNode = mix(vec3(1), vec3(cardShade), cardTag);
+  return { cardTag, shade, keep };
 }
 
 function createRingForestLighting(
