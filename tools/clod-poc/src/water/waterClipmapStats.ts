@@ -1,9 +1,11 @@
 import type * as THREE from "three";
-import type { WaterRect } from "./waterClipmap.js";
+import type { WaterRect, WaterClipmapUpdateStats } from "./waterClipmap.js";
 
 export interface WaterClipmapStatsSource {
   readonly isEnabled: boolean;
   readonly levelCount: number;
+  /** Cumulative update-cost counters (partial vs full refills, field samples, ...). */
+  readonly updateCostStats?: WaterClipmapUpdateStats;
   getLevelRect(index: number): WaterRect | null;
 }
 
@@ -23,6 +25,7 @@ export interface WaterClipmapRuntimeStats {
   visibleLevelCount: number;
   indexCount: number;
   triangleCount: number;
+  updateCost: WaterClipmapUpdateStats | null;
   levels: WaterClipmapLevelStats[];
 }
 
@@ -92,6 +95,7 @@ export function collectWaterClipmapRuntimeStats(
     visibleLevelCount,
     indexCount,
     triangleCount,
+    updateCost: clipmap.updateCostStats ? { ...clipmap.updateCostStats } : null,
     levels,
   };
 }

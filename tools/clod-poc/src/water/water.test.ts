@@ -758,10 +758,18 @@ describe("CPU hydrology modules", () => {
 });
 
 describe("water clipmap quad guards", () => {
-  it("skips a quad with one dry corner", () => {
+  it("keeps a quad with one dry corner (conservative coverage: thin rivers survive)", () => {
     const positions = new Float32Array([0, 11, 0, 1, 11, 0, 0, 11, 1, 1, 11, 1]);
     const terrainY = new Float32Array([10, 10, 10, 10]);
     const bodyMask = new Float32Array([1, 1, 0, 1]);
+    const flow = new Float32Array(16);
+    expect(waterQuadRenderable([0, 1, 2, 3], positions, terrainY, bodyMask, flow, { cellsX: 4, cellsZ: 4 })).toBe(true);
+  });
+
+  it("skips a quad with no wet corner", () => {
+    const positions = new Float32Array([0, 9, 0, 1, 9, 0, 0, 9, 1, 1, 9, 1]);
+    const terrainY = new Float32Array([10, 10, 10, 10]); // surface below terrain everywhere
+    const bodyMask = new Float32Array([1, 1, 1, 1]);
     const flow = new Float32Array(16);
     expect(waterQuadRenderable([0, 1, 2, 3], positions, terrainY, bodyMask, flow, { cellsX: 4, cellsZ: 4 })).toBe(false);
   });

@@ -92,12 +92,53 @@ terrain sampler). Movement into new regions pays one build per new tile; steady-
 sampling is cache hits. If browser profiling shows hitches at tile boundaries, add
 neighbour prefetch/async builds (deferred).
 
+## Toroidal water clipmap (Phase 5)
+
+`WaterClipmap` (`src/water/waterClipmap.ts`) stores ring vertices toroidally: world column
+`c` / row `r` lives at slot `(c mod verts, r mod verts)`, so an origin snap resamples only
+the newly exposed columns/rows — the per-vertex `WaterField` sample is the dominant CPU
+cost and is now bounded by movement, not ring area (a one-snap eastward move samples
+1 column instead of the full grid; verified bit-equal to a freshly built clipmap in
+`waterClipmapToroidal.test.ts`). The index buffer is rebuilt per snap (slot connectivity
+crosses the wrap seam) but takes no field samples. Cumulative counters
+(`WaterClipmap.updateCostStats`: snaps, full vs partial refills, columns/rows sampled,
+field samples, index rebuilds) are exposed through `collectWaterClipmapRuntimeStats`.
+
+Quad emission is conservative (`waterQuadRenderable`): a quad renders when ANY corner is
+wet; dry corners carry a below-terrain sentinel and every water material discards
+`depth <= 0` fragments, so the interpolated surface clips against terrain at the true
+waterline. This keeps thin rivers visible at coarse rings (the old corner-AND rule eroded
+them) without shoreline artifacts.
+
+## Ownership oracle (Phase 6)
+
+`npm run water:ownership <worldCells>` runs a per-sample oracle in addition to the legacy
+renderer-count summary: it wires a `WaterField` exactly like the runtime water controller
+(shore-surf band + deep-ocean clipmap-exclusion band from `border_coast_ocean.yaml`) and
+walks a world-space grid asserting every hydrology-wet sample has exactly one renderer
+owner — clipmap outside the exclusion band, deep ocean inside it, with the shore-surf band
+as the only intentional weighted overlap. Exit 1 on zero-owner (dry gap) or double-owner
+(double render) samples.
+
+## Body-driven visuals (Phase 7, first pass)
+
+`WaterFieldResult.bodyKind` (HYDROLOGY_BODY_*) flows into the clipmap as the `aBodyKind`
+vertex attribute. All three water materials (WebGPU perf, WebGPU hq, WebGL) share a
+Beer–Lambert depth response (`1 - exp(-depth/depthScale)`) so water colour no longer
+saturates to the deep tone within one depth-scale and does not depend on the material
+path. The perf material additionally treats ponds/marshes (kind ≥ 4) as murkier standing
+water: green sediment tint, extra turbidity, damped sky reflection. Rapid foam remains
+flow-gated (calm lakes never show it). Full per-kind config presets (spec §M) are
+deferred — current variation uses documented in-shader constants on top of the existing
+`visual.*` config.
+
 ## Validation
 
 ```
 npm run water:hydrology 2048   # invariants + body/flatness/monotonic report
 npm run water:seam 1024        # raw seam magnitude + effective-authority continuity
 npm run water:streaming 1024   # rebuild + tile-eviction determinism + invariants
+npm run water:ownership 1024   # per-sample exactly-one-owner oracle
 npm test -- src/water          # unit tests
 ```
 
@@ -112,7 +153,9 @@ npm test -- src/water          # unit tests
   `HydrologyTile` arrays, so vegetation/terrain compute reads correct hydrology outside
   `[0, worldCells]` (today those consumers clamp to the finite-grid edge — a documented
   approximation, not a solution).
-- **Phase 5** — static/toroidal water clipmap (no full resample per snap) and conservative
-  coverage so thin rivers survive coarse rings (currently corner-AND rejection).
-- **Phase 6/7** — far-shell ownership unification and visual upgrade (depth colour, flow
-  normals, foam) driven by the canonical fields above.
+- **Phase 5b** — fully static topology (vertex shader samples a hydrology atlas; no index
+  rebuild per snap) once the Phase 4b atlas exists.
+- **Phase 7b** — config-driven per-body visual presets (shallow/deep/absorption/
+  roughness per kind in `water.yaml`), shore-distance-driven foam and terrain wetness
+  (the shoreDistance channel is already packed on the GPU), and RGB absorption instead of
+  the scalar depth-scale.

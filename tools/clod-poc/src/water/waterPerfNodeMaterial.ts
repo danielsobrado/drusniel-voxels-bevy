@@ -5,6 +5,7 @@ import {
   attribute,
   clamp,
   dot,
+  exp,
   float,
   Fn,
   fract,
@@ -76,6 +77,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
 
   const aTerrainY = attribute("aTerrainY", "float") as TslNode;
   const aBodyMask = attribute("aBodyMask", "float") as TslNode;
+  const aBodyKind = attribute("aBodyKind", "float") as TslNode;
   const aFlow = attribute("aFlow", "vec4") as TslNode;
   const aLevel = attribute("aLevel", "float") as TslNode;
   const worldPos: TslNode = positionWorld;
@@ -95,7 +97,13 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const depth: TslNode = worldPos.y.sub(aTerrainY);
     or(outsideWorld, or(insideInner, or(depth.lessThanEqual(float(0)), aBodyMask.lessThanEqual(float(0))))).discard();
 
-    const depthNorm: TslNode = clamp(depth.div(uDepthScale), 0.0, 1.0);
+    // Beer–Lambert style depth response: smooth shallow->deep gradient instead of a
+    // linear ramp that saturates to the deep colour within ~1 depth-scale (which read as
+    // a flat dark decal on carved rivers).
+    const depthNorm: TslNode = float(1).sub(exp(depth.negate().div(max(uDepthScale, float(0.05)))));
+    // HYDROLOGY_BODY_* kinds: 2 lake, 3 river, 4 pond, 5 marsh. The attribute
+    // interpolates across body boundaries, so weights use smooth windows.
+    const pondWeight: TslNode = smoothstep(float(3.5), float(4.0), aBodyKind);
     const flowSpeed: TslNode = aFlow.z;
     const flowDrop: TslNode = abs(aFlow.w);
     const riverWeight: TslNode = smoothstep(0.001, 0.02, flowSpeed);
@@ -126,8 +134,12 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
       mix(deepBlue, vec3(0.0, 0.055, 0.13), clamp(uRiverCenterChannelDarkening.mul(0.35), 0.0, 1.0)),
       riverCenter,
     );
-    const waterBase: TslNode = mix(mix(shallowTeal, deepBlue, depthNorm), riverTint, clamp(riverWeight.mul(0.72), 0.0, 1.0))
+    const clearBase: TslNode = mix(mix(shallowTeal, deepBlue, depthNorm), riverTint, clamp(riverWeight.mul(0.72), 0.0, 1.0))
       .add(shallowTeal.mul(uTurbidity).mul(shallowEdge).mul(0.22));
+    // Ponds/marshes read murkier and greener than lakes/rivers; they also reflect less
+    // (fresnel damped below) since standing shallow water carries suspended sediment.
+    const waterBase: TslNode = mix(clearBase, vec3(0.06, 0.16, 0.10), pondWeight.mul(0.38))
+      .add(shallowTeal.mul(pondWeight).mul(0.10));
 
     const foamHash: TslNode = fract(sin(dot(worldPos.xz.mul(uFoamNoiseScale).add(mainDir.mul(phase.mul(0.25))), vec2(12.9898, 78.233))).mul(43758.5453));
     const bankContact: TslNode = float(1).sub(smoothstep(uShoreFoamStart, uShoreFoamEnd, depth));
@@ -143,7 +155,8 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const skyReflection: TslNode = mix(vec3(0.04, 0.10, 0.22), vec3(0.25, 0.48, 0.78), clamp(normal.y.mul(0.75).add(0.15), 0.0, 1.0));
     const spec: TslNode = vec3(1.0, 0.92, 0.78).mul(pow(sun, float(WATER_SPEC_POWER)).mul(WATER_SPEC_GAIN));
     const scatter: TslNode = shallowTeal.mul(pow(backlit, float(3.0)).mul(WATER_BACKLIGHT_GAIN));
-    const lit: TslNode = mix(waterBase, skyReflection, clamp(fresnel.mul(0.70), 0.0, 0.82)).add(spec).add(scatter);
+    const reflectionScale: TslNode = float(0.70).mul(float(1).sub(pondWeight.mul(0.45)));
+    const lit: TslNode = mix(waterBase, skyReflection, clamp(fresnel.mul(reflectionScale), 0.0, 0.82)).add(spec).add(scatter);
     const finalColor: TslNode = mix(mix(lit, uFoam, foam), waterLevelColorTsl(aLevel), uClipmapTint.mul(0.18));
     const alpha: TslNode = clamp(uAlpha.add(fresnel.mul(0.18)), 0.0, 1.0);
 

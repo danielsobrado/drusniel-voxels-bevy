@@ -171,7 +171,9 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       )
     ).discard();
 
-    const depthNorm: TslNode = clamp(depth.div(uDepthScale), 0.0, 1.0);
+    // Beer–Lambert style depth response, matching waterPerfNodeMaterial and the WebGL
+    // fragment so water colour does not depend on which material path renders it.
+    const depthNorm: TslNode = float(1).sub(exp(depth.negate().div(max(uDepthScale, float(0.05)))));
 
     // Procedural caustics: layered sine waves, fading with depth.
     // Gated by uCausticsEnabled — produces 0 when disabled.

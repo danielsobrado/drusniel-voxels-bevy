@@ -162,7 +162,8 @@ export const WATER_FRAG = /* glsl */ `
     }
     float depth = worldPos.y - vTerrainY;
     if (depth <= 0.0) discard;
-    float depthNorm = clamp(depth / uDepthScale, 0.0, 1.0);
+    // Beer-Lambert style depth response; matches the WebGPU node materials.
+    float depthNorm = 1.0 - exp(-depth / max(uDepthScale, 0.05));
 
     float caustic = 0.0;
     if (uCausticsEnabled > 0.5) {

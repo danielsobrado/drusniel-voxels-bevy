@@ -1,5 +1,6 @@
 import type { WaterConfig } from "./waterConfig.js";
 import type { HydrologySystem } from "./hydrologySystem.js";
+import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_OCEAN, HYDROLOGY_BODY_LAKE, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 import {
   FLOW_EPSILON,
   STILL_FLOW,
@@ -138,12 +139,13 @@ export class WaterField {
       return {
         waterY, terrainY: s.terrainY, depth,
         bodyMask: depth > 0 ? bodyMask : 0,
+        bodyKind: s.bodyKind,
         flow: { x: dirX, z: dirZ, speed: flowSpeed, progress: 0, drop },
       };
     }
     return {
       waterY: baseWaterY, terrainY: s.terrainY, depth: baseDepth,
-      bodyMask: baseDepth > 0 ? s.bodyMask : 0, flow: { ...STILL_FLOW },
+      bodyMask: baseDepth > 0 ? s.bodyMask : 0, bodyKind: s.bodyKind, flow: { ...STILL_FLOW },
     };
   }
 
@@ -219,7 +221,8 @@ export class WaterField {
     if (usingRiver && bestFlow.speed > FLOW_EPSILON) {
       waterY = shapeRiverSurfaceY(x, z, waterY, terrainY, cellSize, bestFlow.x, bestFlow.z, bestFlow.speed, bestFlow.drop, bodyMask, maxRiverMask, waterY - terrainY);
     }
-    return { waterY, terrainY, depth: waterY - terrainY, bodyMask, flow: bestFlow };
+    const fakeKind = usingRiver ? HYDROLOGY_BODY_RIVER : bestLakeWeight > 0 ? HYDROLOGY_BODY_LAKE : HYDROLOGY_BODY_DRY;
+    return { waterY, terrainY, depth: waterY - terrainY, bodyMask, bodyKind: bodyMask > 0 ? fakeKind : HYDROLOGY_BODY_DRY, flow: bestFlow };
   }
 
   private hydrologyRiverLocalDrop(x: number, z: number, dirX: number, dirZ: number, cellSize = 0): number {
@@ -235,7 +238,7 @@ export class WaterField {
   private sampleDry(x: number, z: number): WaterFieldResult {
     const terrainY = this.terrainYAt(x, z);
     const waterY = terrainY - this.drySentinelDepth;
-    return { waterY, terrainY, depth: waterY - terrainY, bodyMask: 0, flow: { ...STILL_FLOW } };
+    return { waterY, terrainY, depth: waterY - terrainY, bodyMask: 0, bodyKind: HYDROLOGY_BODY_DRY, flow: { ...STILL_FLOW } };
   }
 
   private isInsidePlayableWorld(x: number, z: number): boolean {
@@ -266,6 +269,6 @@ export class WaterField {
     const depth = waterY - terrainY;
     if (depth <= 0) return null;
     const shallowNorm = Math.min(1, depth / Math.max(0.01, this.shoreSurf.maxShallowDepth));
-    return { waterY, terrainY, depth, bodyMask: Math.min(1, strength * shallowNorm), flow: { ...STILL_FLOW } };
+    return { waterY, terrainY, depth, bodyMask: Math.min(1, strength * shallowNorm), bodyKind: HYDROLOGY_BODY_OCEAN, flow: { ...STILL_FLOW } };
   }
 }

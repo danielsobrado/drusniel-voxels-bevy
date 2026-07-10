@@ -95,6 +95,7 @@ class WaterLevel {
   private readonly positions: Float32Array;
   private readonly terrainY: Float32Array;
   private readonly bodyMask: Float32Array;
+  private readonly bodyKind: Float32Array;
   private readonly flow: Float32Array;
   private readonly levelAttr: Float32Array;
   private readonly indices: Uint32Array;
@@ -134,6 +135,7 @@ class WaterLevel {
     this.positions = new Float32Array(vertexCount * 3);
     this.terrainY = new Float32Array(vertexCount);
     this.bodyMask = new Float32Array(vertexCount);
+    this.bodyKind = new Float32Array(vertexCount);
     this.flow = new Float32Array(vertexCount * 4);
     this.levelAttr = new Float32Array(vertexCount);
     this.levelAttr.fill(index);
@@ -147,6 +149,7 @@ class WaterLevel {
     geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     geometry.setAttribute("aTerrainY", new THREE.BufferAttribute(this.terrainY, 1));
     geometry.setAttribute("aBodyMask", new THREE.BufferAttribute(this.bodyMask, 1));
+    geometry.setAttribute("aBodyKind", new THREE.BufferAttribute(this.bodyKind, 1));
     geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 4));
     geometry.setAttribute("aLevel", new THREE.BufferAttribute(this.levelAttr, 1));
     geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
@@ -188,7 +191,7 @@ class WaterLevel {
 
   /** Resample only slots whose world column/row mapping changed, then rebuild indices. */
   private refill(baseCol: number, baseRow: number): void {
-    const { cellsPerLevel, field, cellSize, positions, terrainY, bodyMask, flow, worldBounds, stats } = this;
+    const { cellsPerLevel, field, cellSize, positions, terrainY, bodyMask, bodyKind, flow, worldBounds, stats } = this;
     const vertsPerEdge = cellsPerLevel + 1;
     this.dirtyCol.fill(0);
     this.dirtyRow.fill(0);
@@ -233,6 +236,7 @@ class WaterLevel {
             positions[vi + 2] = worldZ;
             terrainY[slot] = sample.terrainY;
             bodyMask[slot] = sample.bodyMask;
+            bodyKind[slot] = sample.bodyKind;
             flow[fi] = sample.flow.x;
             flow[fi + 1] = sample.flow.z;
             flow[fi + 2] = sample.flow.speed;
@@ -243,6 +247,7 @@ class WaterLevel {
             positions[vi + 2] = worldZ;
             terrainY[slot] = 0;
             bodyMask[slot] = 0;
+            bodyKind[slot] = 0;
             flow[fi] = 0;
             flow[fi + 1] = 0;
             flow[fi + 2] = 0;
@@ -254,6 +259,7 @@ class WaterLevel {
       (geo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
       (geo.getAttribute("aTerrainY") as THREE.BufferAttribute).needsUpdate = true;
       (geo.getAttribute("aBodyMask") as THREE.BufferAttribute).needsUpdate = true;
+      (geo.getAttribute("aBodyKind") as THREE.BufferAttribute).needsUpdate = true;
       (geo.getAttribute("aFlow") as THREE.BufferAttribute).needsUpdate = true;
     }
     const indexCount = this.refillIndices(baseCol, baseRow);
@@ -297,6 +303,14 @@ function torusSlot(worldIndex: number, vertsPerEdge: number): number {
   return ((worldIndex % vertsPerEdge) + vertsPerEdge) % vertsPerEdge;
 }
 
+/**
+ * Conservative coverage: a quad renders when ANY corner is wet (mask above epsilon and
+ * water above terrain). Requiring all four corners wet erodes thin rivers at coarse
+ * rings. Dry corners carry a below-terrain sentinel waterY, so the interpolated surface
+ * crosses the terrain near the true waterline and every water material discards
+ * `depth <= 0` fragments — the shoreline stays correct without extra quad culling.
+ * The height-discontinuity guard applies across wet corners only.
+ */
 export function waterQuadRenderable(
   corners: readonly [number, number, number, number],
   positions: Float32Array,
@@ -309,17 +323,19 @@ export function waterQuadRenderable(
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
   let maxFlow = 0;
+  let wetCorners = 0;
   for (const vi of corners) {
     const px = positions[vi * 3];
     const py = positions[vi * 3 + 1];
     const pz = positions[vi * 3 + 2];
     if (!waterPointInBounds(px, pz, worldBounds)) return false;
-    if (bodyMask[vi] <= maskEpsilon) return false;
-    if (py - terrainY[vi] <= 0) return false;
+    if (bodyMask[vi] <= maskEpsilon || py - terrainY[vi] <= 0) continue;
+    wetCorners++;
     minY = Math.min(minY, py);
     maxY = Math.max(maxY, py);
     maxFlow = Math.max(maxFlow, flow[vi * 4 + 2]);
   }
+  if (wetCorners === 0) return false;
   const threshold = maxFlow > 0.02 ? 1.25 : 0.45;
   return maxY - minY <= threshold;
 }

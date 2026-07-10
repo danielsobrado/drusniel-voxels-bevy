@@ -9,6 +9,7 @@ function sample(partial: Partial<WaterFieldResult>): WaterFieldResult {
     terrainY: 9,
     depth: 1,
     bodyMask: 1,
+    bodyKind: 3, // river
     ...partial,
     flow: { x: 1, z: 0, speed: 0, progress: 0, drop: 0, ...partial.flow },
   };

@@ -15,6 +15,8 @@ export interface WaterFieldResult {
   terrainY: number;
   depth: number;
   bodyMask: number;
+  /** HYDROLOGY_BODY_* kind (0 = dry); lets materials pick per-body visual behaviour. */
+  bodyKind: number;
   flow: WaterFlow;
 }
 
