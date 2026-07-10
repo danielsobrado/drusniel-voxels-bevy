@@ -35,13 +35,13 @@ trees:
     min_spacing_m: 4.0
 
   lod:
-    near_fraction: 0.040
-    mid_fraction: 0.15
-    far_fraction: 0.30
+    near_fraction: 0.062
+    mid_fraction: 0.24
+    far_fraction: 0.62
     impostor_fraction: 1.0
     hysteresis_m: 8
     crossfade_enabled: true
-    crossfade_band_m: 18
+    crossfade_band_m: 20
     dither_enabled: true
     shadows_max_lod: none
     budgets:
