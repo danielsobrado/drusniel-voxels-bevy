@@ -11,6 +11,7 @@ import type { SavedBounds2D } from "./world_metadata/metadata_schema.js";
 import { boundsForRegion, regionKeysForBounds } from "./world_metadata/metadata_store.js";
 import { partitionSavedPropsByRegion } from "./prop_partition.js";
 import { savedPropStore } from "./prop_store.js";
+import { SaveDirtyRegionRevisions } from "./save_dirty_region_revisions.js";
 
 export interface SaveRuntimeCounters extends SaveFarInvalidationCounters {
   save_loaded: number;
@@ -30,7 +31,7 @@ interface SaveRuntimeState {
   saveId: string;
   manifest: SaveWorldManifest;
   metadata: WorldMetadataRecord;
-  dirtyRegionKeys: Set<string>;
+  dirtyRegions: SaveDirtyRegionRevisions;
   completedRegionKeys: Set<string>;
   revision: number;
   voxelDeltaCount: number;
@@ -75,7 +76,7 @@ function publishCounters(): void {
   seedSaveRuntimeCounters(state.counters);
   state.counters.save_loaded = 1;
   state.counters.save_id_hash = saveIdHash(state.saveId);
-  state.counters.save_dirty_region_count = state.dirtyRegionKeys.size;
+  state.counters.save_dirty_region_count = state.dirtyRegions.size;
   state.counters.save_dirty_revision = state.revision;
   state.counters.save_metadata_revision = state.metadata.revision;
   state.counters.save_prop_count = savedPropStore.snapshot().length;
@@ -123,7 +124,7 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     saveId: loadedWorld.saveId,
     manifest: { ...loadedWorld.manifest, regionKeys: [...loadedWorld.manifest.regionKeys] },
     metadata: structuredClone(loadedWorld.metadata) as WorldMetadataRecord,
-    dirtyRegionKeys: new Set<string>(),
+    dirtyRegions: new SaveDirtyRegionRevisions(),
     completedRegionKeys: new Set<string>(),
     revision: loadedWorld.manifest.regionKeys.length,
     voxelDeltaCount: loadedWorld.voxelDeltaCount,
@@ -155,9 +156,9 @@ export function hasLoadedSavePropAuthority(): boolean {
 export function markSaveRegionsDirtyForBounds(bounds: SavedBounds2D): string[] {
   if (!state) return [];
   const keys = regionKeysForBounds(bounds);
-  for (const key of keys) state.dirtyRegionKeys.add(key);
   markSaveInvalidationBounds(bounds);
   state.revision++;
+  state.dirtyRegions.mark(keys, state.revision);
   publishCounters();
   scheduleFlush();
   return keys;
@@ -167,13 +168,11 @@ function markSaveRegionsDirtyForBoundList(boundsList: readonly SavedBounds2D[]):
   if (!state) return [];
   const keys = new Set<string>();
   for (const bounds of boundsList) {
-    for (const key of regionKeysForBounds(bounds)) {
-      keys.add(key);
-      state.dirtyRegionKeys.add(key);
-    }
+    for (const key of regionKeysForBounds(bounds)) keys.add(key);
     markSaveInvalidationBounds(bounds);
   }
   state.revision++;
+  state.dirtyRegions.mark(keys, state.revision);
   publishCounters();
   scheduleFlush();
   return [...keys].sort();
@@ -208,7 +207,7 @@ export function removeSaveRuntimeProp(id: string, dirtyBounds: SavedBounds2D): s
 }
 
 export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME): Promise<void> {
-  if (!state || state.flushing || state.dirtyRegionKeys.size === 0) return;
+  if (!state || state.flushing || state.dirtyRegions.size === 0) return;
   const activeState = state;
   activeState.flushing = true;
   const startedAt = nowMs();
@@ -216,7 +215,8 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
   try {
     activeState.voxelDeltaCount = voxelEditCount();
     const propsByRegion = partitionSavedPropsByRegion(savedPropStore.snapshot());
-    const dirtyRegionKeys = [...activeState.dirtyRegionKeys].sort();
+    const dirtyRegionKeys = activeState.dirtyRegions.keys();
+    const dirtySnapshot = activeState.dirtyRegions.capture(dirtyRegionKeys);
     const result = await flushDirtyRegionBatch({
       db,
       saveId: activeState.saveId,
@@ -230,11 +230,10 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
       },
       maxRegionWrites,
     });
-    for (const key of result.written) {
-      activeState.dirtyRegionKeys.delete(key);
+    for (const key of activeState.dirtyRegions.acknowledge(result.written, dirtySnapshot)) {
       activeState.completedRegionKeys.add(key);
     }
-    if (activeState.dirtyRegionKeys.size === 0) {
+    if (activeState.dirtyRegions.size === 0) {
       activeState.manifest = await finalizeSaveManifestAndMetadata(
         db,
         activeState.manifest,
@@ -244,7 +243,7 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
       activeState.completedRegionKeys.clear();
     }
     activeState.counters.save_last_flush_written_regions = result.written.length;
-    activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegionKeys.size;
+    activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegions.size;
     activeState.counters.save_last_flush_ms = nowMs() - startedAt;
     activeState.counters.save_last_error = 0;
   } catch (error) {
@@ -254,6 +253,6 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
     db.close();
     activeState.flushing = false;
     publishCounters();
-    if (activeState.dirtyRegionKeys.size > 0) scheduleFlush();
+    if (activeState.dirtyRegions.size > 0) scheduleFlush();
   }
 }
