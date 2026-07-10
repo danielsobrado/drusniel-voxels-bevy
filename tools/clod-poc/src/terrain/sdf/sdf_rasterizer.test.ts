@@ -17,6 +17,16 @@ function brush(overrides: Partial<SdfBrush> = {}): SdfBrush {
   };
 }
 
+function rasterize(overrides: Partial<SdfBrush> = {}) {
+  return rasterizeSdfBrushToVoxelTransaction({
+    id: 1,
+    revisionBase: 0,
+    brush: brush(overrides),
+    bounds: { minX: -1, maxX: 1, minY: -1, maxY: 1, minZ: -1, maxZ: 1 },
+    sampleDensity: () => -10,
+  });
+}
+
 describe("SDF brush rasterizer", () => {
   it("rasterizes changed densities into a voxel transaction", () => {
     const transaction = rasterizeSdfBrushToVoxelTransaction({
@@ -55,5 +65,18 @@ describe("SDF brush rasterizer", () => {
 
     expect(add.deltas[0]!.materialSlot).toBe(3);
     expect(remove.deltas[0]!.materialSlot).toBeUndefined();
+  });
+
+  it("does not paint or change terrain at zero strength", () => {
+    expect(rasterize({ strength: 0, materialSlot: 3 }).deltas).toEqual([]);
+  });
+
+  it("treats non-positive brush dimensions as no-ops", () => {
+    expect(rasterize({ radius: 0 }).deltas).toEqual([]);
+    expect(rasterize({ height: 0 }).deltas).toEqual([]);
+  });
+
+  it("rejects non-finite brush inputs", () => {
+    expect(() => rasterize({ strength: Number.NaN })).toThrow(/must be finite/);
   });
 });
