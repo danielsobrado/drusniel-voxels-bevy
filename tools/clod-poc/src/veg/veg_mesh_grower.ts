@@ -5,11 +5,11 @@
  *
  * The reference packs (hue, flex, phase, AO) into a `vdata` vec4 consumed by its
  * own materials. clod-poc's tree node material instead reads `color` (vec3),
- * `treeWind` (vec2 = [windWeight, flutter]) and `treeFoliageMask` (0 = bark
- * triplanar, 1 = leaf lighting), with sway phase derived per-instance from
- * `treeWorldXZ`. So this grower stores those attributes directly: hue/AO fold
- * into vertex `color` at push time, and `crownAO` darkens stored colour
- * post-hoc (there is no AO channel to scale).
+ * `treeWind` (vec2 = [windWeight, flutter]), `treeFoliageMask` (0 = bark
+ * triplanar, 1 = leaf lighting), and `treeFoliageCard` (0 = real geometry,
+ * 1 = procedural cluster card). Sway phase derives per-instance from
+ * `treeWorldXZ`. Hue/AO fold into vertex `color` at push time, and `crownAO`
+ * darkens stored colour post-hoc.
  */
 
 import * as THREE from "three";
@@ -21,6 +21,7 @@ export class VegMeshGrower {
   private readonly uvs: number[] = [];
   private readonly wind: number[] = [];
   private readonly mask: number[] = [];
+  private readonly card: number[] = [];
   private readonly idx: number[] = [];
   vertCount = 0;
 
@@ -31,6 +32,7 @@ export class VegMeshGrower {
     r: number, g: number, b: number,
     windWeight: number, flutter: number,
     foliageMask: number,
+    foliageCard = 0,
   ): number {
     this.pos.push(px, py, pz);
     this.nrm.push(nx, ny, nz);
@@ -38,6 +40,7 @@ export class VegMeshGrower {
     this.uvs.push(u, v);
     this.wind.push(clamp01(windWeight), clamp01(flutter));
     this.mask.push(clamp01(foliageMask));
+    this.card.push(clamp01(foliageCard));
     return this.vertCount++;
   }
 
@@ -98,6 +101,7 @@ export class VegMeshGrower {
     g.setAttribute("uv", new THREE.Float32BufferAttribute(this.uvs, 2));
     g.setAttribute("treeWind", new THREE.Float32BufferAttribute(this.wind, 2));
     g.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(this.mask, 1));
+    g.setAttribute("treeFoliageCard", new THREE.Float32BufferAttribute(this.card, 1));
     g.setIndex(
       this.vertCount > 65535
         ? new THREE.Uint32BufferAttribute(this.idx, 1)
