@@ -4,6 +4,11 @@ import type { TerrainSurfaceHit } from "../terrain/terrain_collider.js";
 import type { PlayerInteractionMode } from "../player_controller.js";
 import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
+const DIG_PREVIEW_COLOR = 0xff5533;
+const RAISE_PREVIEW_COLOR = 0x55dd66;
+const PREVIEW_OPACITY = 0.35;
+const PREVIEW_RENDER_ORDER = 100;
+
 export interface BrushPreviewController {
   readonly mesh: THREE.Mesh;
   update(options: {
@@ -27,10 +32,16 @@ export function createBrushPreviewController(scene: THREE.Scene): BrushPreviewCo
     cube: new THREE.BoxGeometry(2, 2, 2),
     cylinder: new THREE.CylinderGeometry(1, 1, 2, 28),
   };
-  const mesh = new THREE.Mesh(
-    brushPreviewGeometries.sphere,
-    trackedMeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.28, depthWrite: false }, "brush-preview"),
-  );
+  const material = trackedMeshBasicMaterial({
+    color: DIG_PREVIEW_COLOR,
+    transparent: true,
+    opacity: PREVIEW_OPACITY,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }, "brush-preview");
+  const mesh = new THREE.Mesh(brushPreviewGeometries.sphere, material);
+  mesh.renderOrder = PREVIEW_RENDER_ORDER;
   mesh.visible = false;
   scene.add(mesh);
 
@@ -38,19 +49,22 @@ export function createBrushPreviewController(scene: THREE.Scene): BrushPreviewCo
     mesh,
     update(options) {
       let digAimHit: TerrainSurfaceHit | null = null;
-      if (options.digEnabled && options.interactionMode === "playing" && options.terraformEditActive) {
+      const previewEnabled = options.digEnabled && options.terraformEditActive;
+      if (previewEnabled && options.interactionMode === "playing") {
         digAimHit = options.raycastEditableTerrain(options.getPlayingAimRay());
-      } else if (options.digEnabled && options.interactionMode === "orbit") {
+      } else if (previewEnabled && options.interactionMode === "orbit") {
         const hoverRay = options.getOrbitHoverRay();
         if (hoverRay) digAimHit = options.raycastEditableTerrain(hoverRay);
       }
       if (digAimHit) {
         mesh.position.copy(digAimHit.point);
-        mesh.scale.set(options.digRadius, options.brushHeight, options.digRadius);
-        mesh.geometry = brushPreviewGeometries[options.brushShape];
-        (mesh.material as THREE.MeshBasicMaterial).color.setHex(
-          options.brushOp === "add" ? 0x55dd66 : 0xff5533,
+        mesh.scale.set(
+          Math.max(0.001, options.digRadius),
+          Math.max(0.001, options.brushHeight),
+          Math.max(0.001, options.digRadius),
         );
+        mesh.geometry = brushPreviewGeometries[options.brushShape];
+        material.color.setHex(options.brushOp === "add" ? RAISE_PREVIEW_COLOR : DIG_PREVIEW_COLOR);
       }
       mesh.visible = digAimHit !== null;
     },
