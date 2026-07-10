@@ -83,9 +83,25 @@ that number only goes to ~0 when both sides share one generation algorithm (see 
 work).
 
 Physical validity of the infinite field itself: water can no longer float above terrain —
-lakes/rivers are wet only where the basin/channel surface sits above local terrain, and
-river flow is oriented downhill (`src/water/infinite_hydrology.ts`). The old
-`Math.max(terrainY + ε, …)` hill-climb is removed.
+lakes/rivers are wet only where the basin/channel surface sits above local terrain. The
+old `Math.max(terrainY + ε, …)` hill-climb is removed.
+
+### Terrain-traced drainage (Phase 3b, infinite side)
+
+Rivers in the infinite field are no longer hashed straight lines: each spawned basin
+seeds one channel that is traced downhill along the terrain gradient with inertia
+(`traceChannel` in `src/water/infinite_hydrology.ts`). The polyline is a pure function of
+(basin coords, terrain sampler) — memoized per sampler in a bounded map, retraced
+bit-identically after eviction — so tiles and direct samples agree exactly. The channel
+carries a non-increasing downstream water profile (bank-clamped per vertex so cross-slope
+water cannot overhang the low bank), width grows downstream as an accumulation proxy,
+flow vectors come from the traced segment directions, and the whole channel shares one
+`bodyId`. Where independent channels overlap, the deeper one owns the sample. Lakes
+validate real depressions (deterministic descent to the local low + 8-point rim check;
+level capped under the lowest rim; invalid basins are rejected, not forced).
+
+Cold tile builds cost ~33 ms (64-res tile, reference sampler) including first-touch
+channel traces; traces amortize across neighbouring tiles via the memo.
 
 Tile builds are synchronous on first touch (~14 ms for a 64-res tile with the reference
 terrain sampler). Movement into new regions pays one build per new tile; steady-state
@@ -144,11 +160,13 @@ npm test -- src/water          # unit tests
 
 ## Deferred (later phases)
 
-- **Phase 3b** — one generation algorithm on both sides of the startup boundary
-  (tile-based terrain-driven drainage everywhere) so the raw `seam.*` disagreement goes to
-  ~0 and the blend band becomes unnecessary. Requires making depression fill / flow
-  accumulation tile-local with halos, or a macro drainage field. Also: async tile builds +
-  neighbour prefetch if browser profiling shows boundary hitches.
+- **Phase 3b remainder** — the infinite side is now terrain-driven (traced drainage,
+  above), but the startup world still uses the finite grid pipeline, so the raw `seam.*`
+  disagreement at the boundary persists (masked by the blend band). Removing it means the
+  startup world also generates through the traced/tile authority — which changes the
+  inside-world terrain carve and therefore cascades into worker terrain parity and page
+  caches. Also: async tile builds + neighbour prefetch if browser profiling shows
+  boundary hitches (~33 ms cold builds).
 - **Phase 4b** — streaming GPU atlas beyond the startup world, uploaded from
   `HydrologyTile` arrays, so vegetation/terrain compute reads correct hydrology outside
   `[0, worldCells]` (today those consumers clamp to the finite-grid edge — a documented

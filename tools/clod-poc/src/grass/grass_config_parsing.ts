@@ -16,15 +16,15 @@ type RawObject = Record<string, unknown>;
 
 const DEFAULT_GRASS_RUNTIME_BUDGET = {
   maxInstances: 32000,
-  distanceM: 90,
+  distanceM: 125,
   maxNewPatchesPerFrame: 1,
   refreshDistanceM: 8,
   ringGrid: 512,
   ringCell: 0.8,
   ringDistance: 160,
   ringMaxRadius: 160,
-  ringNearMeters: 28,
-  ringMidMeters: 80,
+  ringNearMeters: 32,
+  ringMidMeters: 82,
   ringFarMeters: 125,
 } as const;
 

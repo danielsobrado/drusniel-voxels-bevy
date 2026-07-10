@@ -12,11 +12,30 @@ const LAKE_RADIUS_MIN_M = 42;
 const LAKE_RADIUS_MAX_M = 118;
 const RIVER_WIDTH_MIN_M = 10;
 const RIVER_WIDTH_MAX_M = 28;
-const RIVER_MEANDER_M = 58;
-const RIVER_MEANDER_SCALE = 0.0055;
 const RIVER_LEVEL_OFFSET_M = 1.25;
 const DRY_DEPTH_M = 16;
 const HASH_UINT_SCALE = 1 / 0xffffffff;
+
+// Terrain-driven channel tracing (Phase 3b): each spawned basin seeds one channel that
+// follows the terrain gradient downhill. The trace is a pure function of the basin
+// coordinates and the terrain sampler, so every tile/sample reconstructs the identical
+// polyline — seam-free by construction.
+const RIVER_SPAWN_THRESHOLD = 0.85;
+const RIVER_TRACE_STEPS = 48;
+const RIVER_TRACE_STEP_M = 24;
+const RIVER_GRAD_STEP_M = 12;
+const RIVER_MIN_TRACE_POINTS = 6;
+/** Stop tracing when the local slope falls below this (m per m): reached a flat/basin. */
+const RIVER_FLAT_SLOPE_STOP = 0.005;
+const RIVER_TRACE_INERTIA = 0.55;
+/**
+ * Channel search radius in basins. Must satisfy: max seed-to-sample distance a channel
+ * can bridge (trace length + half-width ≈ 1.2 km) < (radius - 0.5+) * BASIN_SIZE_M, so a
+ * sample near a channel tail still finds the seed basin (radius 2 -> 1536 m guaranteed).
+ */
+const RIVER_SEARCH_RADIUS_BASINS = 2;
+/** Bounded memo of traced channels; rebuilt entries are bit-identical (pure function). */
+const CHANNEL_MEMO_MAX = 512;
 
 export interface InfiniteHydrologyOptions {
   drySentinelDepthM?: number;
@@ -198,50 +217,204 @@ function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hyd
   };
 }
 
+interface ChannelVertex {
+  x: number;
+  z: number;
+  terrainY: number;
+  /** Non-increasing downstream water level (bank-clamped). */
+  level: number;
+  halfWidth: number;
+}
+
+interface TracedChannel {
+  points: ChannelVertex[];
+  id: number;
+  /** AABB (inflated by max half-width) for cheap sample rejection. */
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
+/**
+ * Per-sampler memo of traced channels. Keyed by the sampler (WeakMap) so tests with
+ * different terrain functions never share entries; content is a pure function of
+ * (basin coords, sampler), so eviction + rebuild is bit-identical.
+ */
+const channelMemos = new WeakMap<TerrainHeightSampler, Map<string, TracedChannel | null>>();
+
+function channelMemoFor(sampler: TerrainHeightSampler): Map<string, TracedChannel | null> {
+  let memo = channelMemos.get(sampler);
+  if (!memo) {
+    memo = new Map();
+    channelMemos.set(sampler, memo);
+  }
+  return memo;
+}
+
+/**
+ * Trace one drainage channel for a basin: start at a hashed seed, follow the terrain
+ * gradient downhill with inertia, stop on flat ground or step budget. Returns null when
+ * the basin does not spawn a channel or the trace is too short to be a river.
+ */
+function traceChannel(basinX: number, basinZ: number, sampler: TerrainHeightSampler): TracedChannel | null {
+  if (hash2(basinX, basinZ, 101) > RIVER_SPAWN_THRESHOLD) return null;
+  let px = basinCenter(basinX, hash2(basinX, basinZ, 107));
+  let pz = basinCenter(basinZ, hash2(basinX, basinZ, 109));
+  let dirX = 0;
+  let dirZ = 0;
+  const xs: number[] = [];
+  const zs: number[] = [];
+  const heights: number[] = [];
+  for (let i = 0; i < RIVER_TRACE_STEPS; i++) {
+    const y = sampler.surfaceHeight(px, pz);
+    // Central-difference gradient; descent direction is -gradient.
+    const gx = (sampler.surfaceHeight(px + RIVER_GRAD_STEP_M, pz) - sampler.surfaceHeight(px - RIVER_GRAD_STEP_M, pz)) / (2 * RIVER_GRAD_STEP_M);
+    const gz = (sampler.surfaceHeight(px, pz + RIVER_GRAD_STEP_M) - sampler.surfaceHeight(px, pz - RIVER_GRAD_STEP_M)) / (2 * RIVER_GRAD_STEP_M);
+    const slope = Math.hypot(gx, gz);
+    xs.push(px);
+    zs.push(pz);
+    heights.push(y);
+    if (slope < RIVER_FLAT_SLOPE_STOP) break; // reached a flat / basin floor
+    const stepX = -gx / slope;
+    const stepZ = -gz / slope;
+    const blendX = dirX * RIVER_TRACE_INERTIA + stepX * (1 - RIVER_TRACE_INERTIA);
+    const blendZ = dirZ * RIVER_TRACE_INERTIA + stepZ * (1 - RIVER_TRACE_INERTIA);
+    const blendLen = Math.hypot(blendX, blendZ) || 1;
+    dirX = blendX / blendLen;
+    dirZ = blendZ / blendLen;
+    px += dirX * RIVER_TRACE_STEP_M;
+    pz += dirZ * RIVER_TRACE_STEP_M;
+  }
+  const count = xs.length;
+  if (count < RIVER_MIN_TRACE_POINTS) return null;
+
+  const points: ChannelVertex[] = new Array(count);
+  let minX = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  let level = heights[0] + RIVER_LEVEL_OFFSET_M;
+  let maxHalfWidth = 0;
+  for (let i = 0; i < count; i++) {
+    // Width grows downstream as an accumulation proxy.
+    const halfWidth = mix(RIVER_WIDTH_MIN_M, RIVER_WIDTH_MAX_M, i / Math.max(1, count - 1));
+    // Non-increasing downstream profile: water never flows uphill along the channel.
+    level = Math.min(level, heights[i] + RIVER_LEVEL_OFFSET_M);
+    // Bank containment on cross-slopes: the surface may not sit above the channel's low
+    // bank plus the offset, or water would overhang the falling side.
+    const nextI = Math.min(count - 1, i + 1);
+    const prevI = Math.max(0, i - 1);
+    let segX = xs[nextI] - xs[prevI];
+    let segZ = zs[nextI] - zs[prevI];
+    const segLen = Math.hypot(segX, segZ) || 1;
+    segX /= segLen;
+    segZ /= segLen;
+    const bankA = sampler.surfaceHeight(xs[i] - segZ * halfWidth, zs[i] + segX * halfWidth);
+    const bankB = sampler.surfaceHeight(xs[i] + segZ * halfWidth, zs[i] - segX * halfWidth);
+    level = Math.min(level, Math.min(bankA, bankB) + RIVER_LEVEL_OFFSET_M);
+    points[i] = { x: xs[i], z: zs[i], terrainY: heights[i], level, halfWidth };
+    maxHalfWidth = Math.max(maxHalfWidth, halfWidth);
+    minX = Math.min(minX, xs[i]);
+    minZ = Math.min(minZ, zs[i]);
+    maxX = Math.max(maxX, xs[i]);
+    maxZ = Math.max(maxZ, zs[i]);
+  }
+  return {
+    points,
+    id: basinBodyId(basinX, basinZ, 103),
+    minX: minX - maxHalfWidth,
+    minZ: minZ - maxHalfWidth,
+    maxX: maxX + maxHalfWidth,
+    maxZ: maxZ + maxHalfWidth,
+  };
+}
+
+function getChannel(basinX: number, basinZ: number, sampler: TerrainHeightSampler): TracedChannel | null {
+  const memo = channelMemoFor(sampler);
+  const key = `${basinX},${basinZ}`;
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  const traced = traceChannel(basinX, basinZ, sampler);
+  if (memo.size >= CHANNEL_MEMO_MAX) {
+    const oldest = memo.keys().next().value as string;
+    memo.delete(oldest);
+  }
+  memo.set(key, traced);
+  return traced;
+}
+
+interface ChannelHit {
+  level: number;
+  halfWidth: number;
+  distance: number;
+  flowX: number;
+  flowZ: number;
+  drop: number;
+  id: number;
+}
+
+/** Nearest in-channel hit across a channel's segments, or null when outside its width. */
+function channelHitAt(channel: TracedChannel, x: number, z: number): ChannelHit | null {
+  if (x < channel.minX || x > channel.maxX || z < channel.minZ || z > channel.maxZ) return null;
+  const pts = channel.points;
+  let best: ChannelHit | null = null;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const abX = b.x - a.x;
+    const abZ = b.z - a.z;
+    const abLen2 = abX * abX + abZ * abZ;
+    if (abLen2 <= 0) continue;
+    const t = clamp01(((x - a.x) * abX + (z - a.z) * abZ) / abLen2);
+    const cx = a.x + abX * t;
+    const cz = a.z + abZ * t;
+    const distance = Math.hypot(x - cx, z - cz);
+    const halfWidth = mix(a.halfWidth, b.halfWidth, t);
+    if (distance > halfWidth) continue;
+    if (best && distance >= best.distance) continue;
+    const abLen = Math.sqrt(abLen2);
+    best = {
+      level: mix(a.level, b.level, t),
+      halfWidth,
+      distance,
+      flowX: abX / abLen,
+      flowZ: abZ / abLen,
+      drop: Math.max(0, a.level - b.level),
+      id: channel.id,
+    };
+  }
+  return best;
+}
+
 function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): HydrologySample | null {
-  const basinX = basinCoord(x);
-  const basinZ = basinCoord(z);
-  const angle = mix(-0.72, 0.72, hash2(basinX, basinZ, 101));
-  let dirX = Math.cos(angle);
-  let dirZ = Math.sin(angle);
-  const normalX = -dirZ;
-  const normalZ = dirX;
-  const along = x * dirX + z * dirZ;
-  const across = x * normalX + z * normalZ;
-  const channelOffset = (hash2(basinX, basinZ, 107) - 0.5) * BASIN_SIZE_M * 0.72;
-  const meander = Math.sin(along * RIVER_MEANDER_SCALE + hash2(basinX, basinZ, 109) * Math.PI * 2) * RIVER_MEANDER_M;
-  const acrossTarget = channelOffset + meander;
-  const distance = Math.abs(across - acrossTarget);
-  const halfWidth = mix(RIVER_WIDTH_MIN_M, RIVER_WIDTH_MAX_M, hash2(basinX, basinZ, 113));
-  // Hard containment at the channel half-width: no fade band outside it — on a
-  // cross-slope, terrain past the low bank keeps falling and a fade band there would
-  // carry floating water. Shoreline softness comes from the depth->0 crossing.
-  if (distance > halfWidth) return null;
-  const riverMask = 1 - smoothstep(halfWidth * 0.7, halfWidth, distance);
+  const bx = basinCoord(x);
+  const bz = basinCoord(z);
+  let best: ChannelHit | null = null;
+  let bestDepth = 0;
   const terrainY = sampler.surfaceHeight(x, z);
-  // Orient flow so it points downhill along the (hashed) channel axis: sample terrain a
-  // step forward and backward and flip the axis if "forward" is uphill. Macro drainage
-  // routing is deferred to the Phase 3 tile authority; this keeps flow terrain-consistent
-  // rather than purely hash-driven.
-  const aheadY = sampler.surfaceHeight(x + dirX * 36, z + dirZ * 36);
-  const behindY = sampler.surfaceHeight(x - dirX * 36, z - dirZ * 36);
-  if (behindY < aheadY) { dirX = -dirX; dirZ = -dirZ; }
-  const downstreamY = Math.min(aheadY, behindY);
-  // Bank containment on cross-slopes: the surface may not sit above the channel's low
-  // bank plus the channel offset, or the water would overhang the falling side. Sample
-  // both banks at the channel centreline nearest this point.
-  const centerShift = acrossTarget - across;
-  const ccx = x + normalX * centerShift;
-  const ccz = z + normalZ * centerShift;
-  const bankA = sampler.surfaceHeight(ccx + normalX * halfWidth, ccz + normalZ * halfWidth);
-  const bankB = sampler.surfaceHeight(ccx - normalX * halfWidth, ccz - normalZ * halfWidth);
-  const lowBank = Math.min(bankA, bankB);
-  // Channel surface sits an offset above the local low point; the cell is wet only where
-  // terrain is below it, so the river stays in the valley instead of climbing hills.
-  const waterY = Math.min(downstreamY, lowBank) + RIVER_LEVEL_OFFSET_M;
-  if (waterY <= terrainY) return null;
-  const depth = waterY - terrainY;
-  const speed = Math.max(0.08, Math.abs(terrainY - downstreamY) * 0.25 + 0.18) * riverMask;
+  for (let oz = -RIVER_SEARCH_RADIUS_BASINS; oz <= RIVER_SEARCH_RADIUS_BASINS; oz++) {
+    for (let ox = -RIVER_SEARCH_RADIUS_BASINS; ox <= RIVER_SEARCH_RADIUS_BASINS; ox++) {
+      const channel = getChannel(bx + ox, bz + oz, sampler);
+      if (!channel) continue;
+      const hit = channelHitAt(channel, x, z);
+      if (!hit) continue;
+      const depth = hit.level - terrainY;
+      // Where independent channels overlap (a natural confluence), the deeper one owns
+      // the sample so the surface has one well-defined height.
+      if (depth > bestDepth) {
+        bestDepth = depth;
+        best = hit;
+      }
+    }
+  }
+  // Wet only where terrain sits below the (bank-clamped, monotonic) channel level.
+  if (!best || bestDepth <= 0) return null;
+  const riverMask = 1 - smoothstep(best.halfWidth * 0.7, best.halfWidth, best.distance);
+  if (riverMask <= 0) return null;
+  const waterY = best.level;
+  const depth = bestDepth;
+  const speed = Math.max(0.08, best.drop * 0.35 + 0.18) * riverMask;
   return {
     terrainY,
     waterY,
@@ -249,15 +422,15 @@ function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hy
     bodyMask: riverMask,
     lakeMask: 0,
     riverMask,
-    flowX: dirX,
-    flowZ: dirZ,
+    flowX: best.flowX,
+    flowZ: best.flowZ,
     flowStrength: speed,
     riverDepth: depth,
     waterYFar: waterY,
     moisture: Math.max(0.32, riverMask),
     bodyKind: HYDROLOGY_BODY_RIVER,
-    bodyId: basinBodyId(basinX, basinZ, 103),
-    shoreDistance: Math.max(0, halfWidth - distance),
+    bodyId: best.id,
+    shoreDistance: Math.max(0, best.halfWidth - best.distance),
   };
 }
 

@@ -4,6 +4,7 @@ import { createEmptyCanopyMetrics, stableTileKey } from "./canopy_types.js";
 import { createCanopySummaryTileJob, tileResolutionForCellSize, type CanopySummaryTileJob } from "./canopy_summary_builder.js";
 import type { CanopyTerrainSampler } from "./canopy_terrain_sampler.js";
 import type { TreeDistribution } from "./deterministic_tree_distribution.js";
+import type { CanopyRemoteTileBuilder, CanopyWorkerTileCoord } from "./canopy_worker_client.js";
 
 export interface CanopyClipmapUpdate {
   metrics: CanopyMetrics;
@@ -61,7 +62,10 @@ function wantedTileMap(
   return wanted;
 }
 
-export function createCanopyClipmap(): CanopyClipmap {
+const REMOTE_BATCH_TILES = 8;
+const REMOTE_MAX_INFLIGHT_TILES = 32;
+
+export function createCanopyClipmap(remote?: CanopyRemoteTileBuilder | null): CanopyClipmap {
   const tiles = new Map<string, CanopySummaryTile>();
   const tileRing = new Map<string, number>();
   const staleSince = new Map<string, number>();
@@ -75,9 +79,25 @@ export function createCanopyClipmap(): CanopyClipmap {
   let lastCenterX = 0;
   let lastCenterZ = 0;
   let activeBuild: { stableKey: string; ring: number; job: CanopySummaryTileJob } | null = null;
+  // Tiles dispatched to the build worker and not yet answered; completed results wait in
+  // remoteCompleted until the next update adopts the ones that are still wanted.
+  const remoteInflight = new Map<string, number>();
+  let remoteCompleted: CanopySummaryTile[] = [];
   // Tile cells are immutable once built, so the coverage aggregates only change when the tile
   // set changes; scanning every cell of every tile per frame is far too hot for the frame loop.
   let coverageStatsDirty = true;
+
+  const tileGeometry = (key: CanopyWorldKey, config: CanopyShellConfig) => {
+    const ringCfg = config.clipmap.rings[key.ring] ?? config.clipmap.rings[0];
+    const cellSizeM = ringCfg.cellSizeM;
+    const tileSizeM = config.clipmap.tileSizeM;
+    return {
+      cellSizeM,
+      resolution: tileResolutionForCellSize(tileSizeM, cellSizeM),
+      originX: key.tileX * tileSizeM,
+      originZ: key.tileZ * tileSizeM,
+    };
+  };
 
   const createTileJob = (
     key: CanopyWorldKey,
@@ -85,24 +105,75 @@ export function createCanopyClipmap(): CanopyClipmap {
     terrainSampler: CanopyTerrainSampler,
     treeDistribution: TreeDistribution,
   ): CanopySummaryTileJob => {
-    const ringCfg = config.clipmap.rings[key.ring] ?? config.clipmap.rings[0];
-    const cellSizeM = ringCfg.cellSizeM;
-    const tileSizeM = config.clipmap.tileSizeM;
-    const resolution = tileResolutionForCellSize(tileSizeM, cellSizeM);
-    const originX = key.tileX * tileSizeM;
-    const originZ = key.tileZ * tileSizeM;
+    const geometry = tileGeometry(key, config);
     revision++;
     return createCanopySummaryTileJob({
       key,
-      originX,
-      originZ,
-      cellSizeM,
-      resolution,
+      originX: geometry.originX,
+      originZ: geometry.originZ,
+      cellSizeM: geometry.cellSizeM,
+      resolution: geometry.resolution,
       config,
       terrainSampler,
       treeDistribution,
       revision,
     });
+  };
+
+  const remoteActive = (): boolean => remote?.available() === true;
+
+  /** Adopt worker-built tiles that are still wanted with an unchanged ring. */
+  const adoptRemoteTiles = (wanted: Map<string, CanopyWorldKey>): number => {
+    if (remoteCompleted.length === 0) return 0;
+    const completed = remoteCompleted;
+    remoteCompleted = [];
+    let adopted = 0;
+    for (const tile of completed) {
+      const stableKey = stableTileKey(tile.key.tileX, tile.key.tileZ);
+      remoteInflight.delete(stableKey);
+      if (wanted.get(stableKey)?.ring !== tile.key.ring) continue;
+      tiles.set(stableKey, tile);
+      tileRing.set(stableKey, tile.key.ring);
+      adopted++;
+    }
+    return adopted;
+  };
+
+  const dispatchRemoteBuilds = (config: CanopyShellConfig): void => {
+    if (!remote) return;
+    while (remoteInflight.size < REMOTE_MAX_INFLIGHT_TILES && rebuildQueue.length > 0) {
+      const batch: CanopyWorkerTileCoord[] = [];
+      while (batch.length < REMOTE_BATCH_TILES && rebuildQueue.length > 0 && remoteInflight.size < REMOTE_MAX_INFLIGHT_TILES) {
+        const key = rebuildQueue.shift()!;
+        const stableKey = stableTileKey(key.tileX, key.tileZ);
+        const geometry = tileGeometry(key, config);
+        revision++;
+        remoteInflight.set(stableKey, key.ring);
+        batch.push({
+          key: { ...key },
+          originX: geometry.originX,
+          originZ: geometry.originZ,
+          cellSizeM: geometry.cellSizeM,
+          resolution: geometry.resolution,
+          revision,
+        });
+      }
+      if (batch.length === 0) return;
+      remote.build(batch).then((built) => {
+        remoteCompleted.push(...built);
+        // Batches answered as [] raced a reconfigure; release their slots so they re-queue.
+        if (built.length < batch.length) {
+          const builtKeys = new Set(built.map((tile) => stableTileKey(tile.key.tileX, tile.key.tileZ)));
+          for (const coord of batch) {
+            const stableKey = stableTileKey(coord.key.tileX, coord.key.tileZ);
+            if (!builtKeys.has(stableKey)) remoteInflight.delete(stableKey);
+          }
+        }
+      }).catch(() => {
+        // Worker failed; release the slots so the local build path picks the tiles back up.
+        for (const coord of batch) remoteInflight.delete(stableTileKey(coord.key.tileX, coord.key.tileZ));
+      });
+    }
   };
 
   return {
@@ -132,6 +203,8 @@ export function createCanopyClipmap(): CanopyClipmap {
         staleSince.clear();
         rebuildQueue.length = 0;
         activeBuild = null;
+        remoteInflight.clear();
+        remoteCompleted = [];
         metrics = {
           ...createEmptyCanopyMetrics(),
           evictedTiles: evicted,
@@ -152,10 +225,16 @@ export function createCanopyClipmap(): CanopyClipmap {
 
       rebuildQueue.length = 0;
       if (activeBuild && wanted.get(activeBuild.stableKey)?.ring !== activeBuild.ring) activeBuild = null;
+      for (const [stableKey, ring] of remoteInflight) {
+        if (wanted.get(stableKey)?.ring !== ring) remoteInflight.delete(stableKey);
+      }
+      const adopted = adoptRemoteTiles(wanted);
       for (const [stableKey, key] of wanted) {
         const existingRing = tileRing.get(stableKey);
         if (!tiles.has(stableKey) || existingRing !== key.ring) {
-          if (activeBuild?.stableKey !== stableKey || activeBuild.ring !== key.ring) rebuildQueue.push(key);
+          const buildingLocally = activeBuild?.stableKey === stableKey && activeBuild.ring === key.ring;
+          const buildingRemotely = remoteInflight.get(stableKey) === key.ring;
+          if (!buildingLocally && !buildingRemotely) rebuildQueue.push(key);
         }
         staleSince.delete(stableKey);
       }
@@ -186,28 +265,34 @@ export function createCanopyClipmap(): CanopyClipmap {
         }
       }
 
-      metrics.queuedTiles = rebuildQueue.length + (activeBuild ? 1 : 0);
-      const budget = config.budgets.maxTilesBuiltPerFrame;
-      const buildBudgetMs = Math.max(0.25, config.budgets.maxBuildMsPerFrame);
-      const buildStartedAt = performance.now();
-      let built = 0;
-      while (built < budget && (activeBuild || rebuildQueue.length > 0)) {
-        if (!activeBuild) {
-          const key = rebuildQueue.shift()!;
-          const stableKey = stableTileKey(key.tileX, key.tileZ);
-          activeBuild = { stableKey, ring: key.ring, job: createTileJob(key, config, terrainSampler, treeDistribution) };
+      metrics.queuedTiles = rebuildQueue.length + remoteInflight.size + (activeBuild ? 1 : 0);
+      let built = adopted;
+      if (remoteActive()) {
+        // Worker path: tiles build off-thread; this frame only pays for dispatch bookkeeping
+        // and adopting completed results above.
+        dispatchRemoteBuilds(config);
+      } else {
+        const budget = config.budgets.maxTilesBuiltPerFrame;
+        const buildBudgetMs = Math.max(0.25, config.budgets.maxBuildMsPerFrame);
+        const buildStartedAt = performance.now();
+        while (built - adopted < budget && (activeBuild || rebuildQueue.length > 0)) {
+          if (!activeBuild) {
+            const key = rebuildQueue.shift()!;
+            const stableKey = stableTileKey(key.tileX, key.tileZ);
+            activeBuild = { stableKey, ring: key.ring, job: createTileJob(key, config, terrainSampler, treeDistribution) };
+          }
+          const remainingMs = Math.max(0, buildBudgetMs - (performance.now() - buildStartedAt));
+          const tile = activeBuild.job.step(remainingMs);
+          if (!tile) break;
+          tiles.set(activeBuild.stableKey, tile);
+          tileRing.set(activeBuild.stableKey, activeBuild.ring);
+          activeBuild = null;
+          built++;
+          if (performance.now() - buildStartedAt >= buildBudgetMs) break;
         }
-        const remainingMs = Math.max(0, buildBudgetMs - (performance.now() - buildStartedAt));
-        const tile = activeBuild.job.step(remainingMs);
-        if (!tile) break;
-        tiles.set(activeBuild.stableKey, tile);
-        tileRing.set(activeBuild.stableKey, activeBuild.ring);
-        activeBuild = null;
-        built++;
-        if (performance.now() - buildStartedAt >= buildBudgetMs) break;
       }
       metrics.builtThisFrame = built;
-      metrics.queuedTiles = rebuildQueue.length + (activeBuild ? 1 : 0);
+      metrics.queuedTiles = rebuildQueue.length + remoteInflight.size + (activeBuild ? 1 : 0);
       metrics.builtTiles = tiles.size;
       metrics.visibleTiles = tiles.size;
       metrics.buildMs = performance.now() - t0;
@@ -256,6 +341,8 @@ export function createCanopyClipmap(): CanopyClipmap {
       staleSince.clear();
       rebuildQueue.length = 0;
       activeBuild = null;
+      remoteInflight.clear();
+      remoteCompleted = [];
       metrics = { ...createEmptyCanopyMetrics(), evictedTiles: n };
       coverageStatsDirty = true;
     },
@@ -265,6 +352,8 @@ export function createCanopyClipmap(): CanopyClipmap {
       staleSince.clear();
       rebuildQueue.length = 0;
       activeBuild = null;
+      remoteInflight.clear();
+      remoteCompleted = [];
       metrics = createEmptyCanopyMetrics();
       centerInitialized = false;
       coverageStatsDirty = true;

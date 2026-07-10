@@ -29,3 +29,61 @@ describe("sampleInfiniteHydrology", () => {
     }
   });
 });
+
+describe("terrain-traced drainage channels", () => {
+  // Undulating terrain with clear valleys so traced channels exist.
+  const hilly = {
+    surfaceHeight: (x: number, z: number) =>
+      30 + Math.sin(x * 0.004) * 16 + Math.cos(z * 0.0031) * 12 + Math.sin((x + z) * 0.0012) * 6,
+  };
+
+  function findRiverSamples(count: number): Array<ReturnType<typeof sampleInfiniteHydrology>> {
+    const found: Array<ReturnType<typeof sampleInfiniteHydrology>> = [];
+    for (let z = 0; z < 6000 && found.length < count; z += 24) {
+      for (let x = 0; x < 6000 && found.length < count; x += 24) {
+        const s = sampleInfiniteHydrology(x, z, hilly);
+        if (s.riverMask > 0.3 && s.depth > 0.1) found.push(s);
+      }
+    }
+    return found;
+  }
+
+  it("produces rivers whose flow is normalized and whose water sits above terrain", () => {
+    const rivers = findRiverSamples(25);
+    expect(rivers.length).toBeGreaterThan(0);
+    for (const s of rivers) {
+      expect(s.waterY).toBeGreaterThan(s.terrainY); // never floats below/inside terrain
+      const flowLen = Math.hypot(s.flowX, s.flowZ);
+      expect(flowLen).toBeGreaterThan(0.99); // normalized flow direction
+      expect(Number.isFinite(s.flowStrength)).toBe(true);
+    }
+  });
+
+  it("keeps the water surface non-increasing when walking along the flow direction", () => {
+    // Walk one step downstream from strong river samples; the canonical level must not
+    // rise (small tolerance for crossing between segments/channels).
+    let checked = 0;
+    for (let z = 0; z < 6000 && checked < 10; z += 24) {
+      for (let x = 0; x < 6000 && checked < 10; x += 24) {
+        const s = sampleInfiniteHydrology(x, z, hilly);
+        if (s.riverMask < 0.6 || s.depth < 0.15) continue;
+        const down = sampleInfiniteHydrology(x + s.flowX * 24, z + s.flowZ * 24, hilly);
+        if (down.riverMask < 0.3) continue; // walked off the channel
+        expect(down.waterY).toBeLessThanOrEqual(s.waterY + 0.05);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("reproduces identical rivers after the channel memo evicts (pure retrace)", () => {
+    const before = findRiverSamples(5);
+    expect(before.length).toBeGreaterThan(0);
+    // Flood the bounded channel memo with distant basins to force evictions.
+    for (let i = 0; i < 600; i++) {
+      sampleInfiniteHydrology(100_000 + i * 768, -50_000 - i * 768, hilly);
+    }
+    const again = findRiverSamples(5);
+    expect(again).toEqual(before);
+  });
+});

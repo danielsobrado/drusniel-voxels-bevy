@@ -19,10 +19,10 @@ import {
 import { cloneUnderstorySettings } from "./understory_config_defaults.js";
 
 const DEFAULT_UNDERSTORY_RUNTIME_BUDGET = {
-  distanceM: 100,
+  distanceM: 110,
   refreshDistanceM: 16,
   maxNewPatchesPerFrame: 1,
-  maxInstances: 7000,
+  maxInstances: 10000,
   gpuMaxVisible: 24000,
 } as const;
 
