@@ -27,6 +27,8 @@ describe("tree material shader injections", () => {
   it("adds deterministic per-instance shape variation before wind", () => {
     const shader = injectTreeWindShader(vertexShader);
     expect(shader).toContain("attribute float treeLodDitherRole");
+    expect(shader).toContain("attribute float treeFoliageCard");
+    expect(shader).toContain("attribute float treeSpeciesIndex");
     expect(shader).toContain("varying float vTreeLodDitherRole");
     expect(shader).toContain("vTreeLodDitherRole = treeLodDitherRole");
     expect(shader).toContain("treeShapePhase");
@@ -37,17 +39,19 @@ describe("tree material shader injections", () => {
 
   it("adds complementary primary and secondary LOD dither masks", () => {
     const shader = injectTreeLodFadeFragmentShader(fragmentShader);
-
     expect(shader).toContain("varying float vTreeLodDitherRole");
     expect(shader).toContain("if (vTreeLodDitherRole < 0.5)");
     expect(shader).toContain("if (treeLodIgn >= vTreeLodFade) discard");
     expect(shader).toContain("if (treeLodIgn < 1.0 - vTreeLodFade) discard");
   });
 
-  it("keeps retired foliage alpha fragment injection inert", () => {
+  it("samples the species foliage atlas only for card geometry", () => {
     const shader = injectTreeFoliageFragmentShader(fragmentShader);
-    expect(shader).toContain("retired alpha-card");
-    expect(shader).toContain("mix(1.0, diffuseColor.a)");
-    expect(shader).not.toContain("diffuseColor.a = mix");
+    expect(shader).toContain("varying float vTreeFoliageCard");
+    expect(shader).toContain("varying float vTreeSpeciesIndex");
+    expect(shader).toContain("treeAtlasSample = texture2D(map, treeAtlasUv)");
+    expect(shader).toContain("treeAtlasSample.a < 0.32");
+    expect(shader).toContain("mix(vec3(1.0), treeAtlasSample.rgb * 1.08, treeCard)");
+    expect(shader).not.toContain("#include <map_fragment>");
   });
 });
