@@ -42,6 +42,25 @@ gated by hydrological class (flowing river vs still lake/pond/marsh vs ocean) so
 feeding a lake keeps a distinct id from the lake. `computeShoreDistance` is a chamfer
 distance transform giving per-cell metres-to-shore.
 
+## Canonical GPU packing (Phase 4)
+
+`src/water/hydrologyGpuPacking.ts` is the only definition of the hydrology→GPU texel
+layout; `HydrologySystem.waterSurfaceTexture()`, `hydrologyFieldsTexture()` and the
+understory ring upload (`src/systems/hydrology_packing.ts`) all build from it.
+
+| Layout | R | G | B | A |
+| --- | --- | --- | --- | --- |
+| A "water surface" | waterY (m) | wetMask (0/1) | carvedBedY (m) | shoreDistance (m) |
+| B "render fields" | flowX·speed | flowZ·speed | moisture [0,1] | bodyKind/255 |
+
+Both are RGBA32F, res×res over the startup world, nearest-filtered (manual bilinear in
+shader helpers), texel (ix,iz) ↔ world (ix/(res−1)·worldCells, iz/(res−1)·worldCells).
+The former duplicated `waterY` in A.a and the unread `flowStrength/riverDepth` channels in
+B are gone; flow *direction* and shore distance are now on the GPU. CPU↔GPU parity is
+tested in `hydrologyGpuPacking.test.ts` (texels equal `sampleHydrologyGrid` at
+texel-aligned coordinates). Clamp-to-edge applies only inside the startup world — see
+deferred Phase 4b for streaming coverage beyond it.
+
 ## Infinite-world tiles + boundary blend (Phase 3)
 
 Outside the startup world the authority is `HydrologyTileCache`
@@ -89,10 +108,10 @@ npm test -- src/water          # unit tests
   ~0 and the blend band becomes unnecessary. Requires making depression fill / flow
   accumulation tile-local with halos, or a macro drainage field. Also: async tile builds +
   neighbour prefetch if browser profiling shows boundary hitches.
-- **Phase 4** — unified GPU atlas (flow direction, shore distance, bodyId) consumed by
-  water/terrain/vegetation, uploaded from `HydrologyTile` arrays; today
-  `hydrology_packing.ts` and the DataTextures pack only `waterY/wetMask/carvedBed` from
-  the finite grid (clamp-to-edge) and duplicate `waterY`.
+- **Phase 4b** — streaming GPU atlas beyond the startup world, uploaded from
+  `HydrologyTile` arrays, so vegetation/terrain compute reads correct hydrology outside
+  `[0, worldCells]` (today those consumers clamp to the finite-grid edge — a documented
+  approximation, not a solution).
 - **Phase 5** — static/toroidal water clipmap (no full resample per snap) and conservative
   coverage so thin rivers survive coarse rings (currently corner-AND rejection).
 - **Phase 6/7** — far-shell ownership unification and visual upgrade (depth colour, flow

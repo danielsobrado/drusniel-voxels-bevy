@@ -17,6 +17,7 @@ export * from "./hydrologySystem.js";
 export * from "./hydrologyTileSource.js";
 export * from "./hydrologyInvariants.js";
 export * from "./bodyIdentity.js";
+export * from "./hydrologyGpuPacking.js";
 export * from "./fakeBodyCarve.js";
 export * from "./visualHydrologyField.js";
 export * from "./farWaterSurface.js";

@@ -11,6 +11,7 @@ import { buildMoistureField } from "./moistureField.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import { computeBodyIds, computeShoreDistance } from "./bodyIdentity.js";
 import { HydrologyTileCache, type HydrologyTileCacheStats } from "./hydrologyTileSource.js";
+import { packHydrologyFieldsTexels, packHydrologyWaterSurfaceTexels } from "./hydrologyGpuPacking.js";
 import {
   HYDROLOGY_BODY_DRY,
   HYDROLOGY_BODY_LAKE,
@@ -79,28 +80,22 @@ export class HydrologySystem {
   }
 
   /**
-   * Hydrology field as a GPU texture (RGBA32F, nearest-filtered so no
-   * `float32-filterable` feature is required). Channels:
-   *   R = water-surface Y (dry cells carry a below-ground sentinel) — grass uses this
-   *       vs its ground Y for partial-submersion discard.
-   *   G = wet mask (1 inside a water body, else 0) — trees use this (XZ-only) to drop
-   *       instances standing in lakes/rivers.
-   *   B = carved-bed Y — the height the terrain mesh is actually built at; GPU veg
-   *       snaps its ground to this so it stops floating over the carved terrain.
-   * Cached. Consumed by the grass/tree node materials.
+   * Hydrology "water surface" GPU texture (canonical Layout A — see
+   * hydrologyGpuPacking.ts for the channel table: R=waterY, G=wetMask, B=carvedBedY,
+   * A=shoreDistance; RGBA32F, nearest-filtered so no `float32-filterable` feature is
+   * required). Cached. Consumed by grass/tree/stone/understory node materials and
+   * placement compute.
    */
   waterSurfaceTexture(): THREE.DataTexture {
     if (this.waterTexture) return this.waterTexture;
     const res = this.grid.res;
-    const data = new Float32Array(res * res * 4);
-    for (let i = 0; i < res * res; i++) {
-      const w = this.grid.waterY[i];
-      data[i * 4] = w;
-      data[i * 4 + 1] = this.grid.wetMask[i];
-      data[i * 4 + 2] = this.grid.carvedBed[i];
-      data[i * 4 + 3] = w;
-    }
-    const texture = new THREE.DataTexture(data, res, res, THREE.RGBAFormat, THREE.FloatType);
+    const texture = new THREE.DataTexture(
+      packHydrologyWaterSurfaceTexels(this.grid),
+      res,
+      res,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
     texture.name = "hydrology-water-surface";
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
@@ -111,17 +106,22 @@ export class HydrologySystem {
     return texture;
   }
 
+  /**
+   * Hydrology "render fields" GPU texture (canonical Layout B — see
+   * hydrologyGpuPacking.ts: R/G = flow direction scaled by strength, B = moisture,
+   * A = bodyKind/255). Cached. Consumed by the post-fx froxel volume (moisture) and
+   * available to flow-driven water/terrain materials.
+   */
   hydrologyFieldsTexture(): THREE.DataTexture {
     if (this.fieldsTexture) return this.fieldsTexture;
     const res = this.grid.res;
-    const data = new Float32Array(res * res * 4);
-    for (let i = 0; i < res * res; i++) {
-      data[i * 4] = this.grid.flowStrength[i];
-      data[i * 4 + 1] = this.grid.riverDepth[i];
-      data[i * 4 + 2] = this.grid.moisture[i];
-      data[i * 4 + 3] = this.grid.bodyKind[i] / 255;
-    }
-    const texture = new THREE.DataTexture(data, res, res, THREE.RGBAFormat, THREE.FloatType);
+    const texture = new THREE.DataTexture(
+      packHydrologyFieldsTexels(this.grid),
+      res,
+      res,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
     texture.name = "hydrology-render-fields";
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
