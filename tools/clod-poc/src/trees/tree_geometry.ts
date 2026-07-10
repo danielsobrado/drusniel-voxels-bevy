@@ -140,6 +140,7 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
   maxFlutterWeight: number;
   colorCount: number;
   maxFoliageMask: number;
+  maxFoliageCard: number;
 } {
   return {
     vertexCount: geometry.getAttribute("position")?.count ?? 0,
@@ -148,6 +149,7 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
     maxFlutterWeight: maxAttributeComponent(geometry.getAttribute("treeWind"), "y"),
     colorCount: geometry.getAttribute("color")?.count ?? 0,
     maxFoliageMask: maxAttributeValue(geometry.getAttribute("treeFoliageMask")),
+    maxFoliageCard: maxAttributeValue(geometry.getAttribute("treeFoliageCard")),
   };
 }
 
@@ -203,6 +205,7 @@ function createTreeVariantSelectorGeometry(
   const uvs: number[] = [];
   const wind: number[] = [];
   const foliageMasks: number[] = [];
+  const foliageCards: number[] = [];
   const treeVariants: number[] = [];
   const indices: number[] = [];
 
@@ -220,6 +223,7 @@ function createTreeVariantSelectorGeometry(
     appendAttribute(source, "uv", 2, uvs, vertexCount);
     appendAttribute(source, "treeWind", 2, wind, vertexCount);
     appendAttribute(source, "treeFoliageMask", 1, foliageMasks, vertexCount);
+    appendAttribute(source, "treeFoliageCard", 1, foliageCards, vertexCount);
     for (let i = 0; i < vertexCount; i++) treeVariants.push(variant);
 
     const sourceIndex = source.getIndex();
@@ -238,6 +242,7 @@ function createTreeVariantSelectorGeometry(
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(wind, 2));
   geometry.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(foliageMasks, 1));
+  geometry.setAttribute("treeFoliageCard", new THREE.Float32BufferAttribute(foliageCards, 1));
   geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(treeVariants, 1));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
