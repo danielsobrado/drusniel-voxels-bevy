@@ -1,14 +1,14 @@
 understory:
   enabled: true
   seed: 9137
-  distance_m: 100
+  distance_m: 110
   refresh_distance_m: 16
   max_new_patches_per_frame: 1
-  max_instances: 7000
+  max_instances: 10000
 
   placement:
-    spacing_m: 3.0
-    jitter: 0.55
+    spacing_m: 2.6
+    jitter: 0.62
     slope_min_y: 0.68
     min_height_m: 8
     max_height_m: 52
@@ -17,39 +17,39 @@ understory:
 
   ecology:
     enabled: true
-    forest_influence_scale_m: 36
+    forest_influence_scale_m: 32
     forest_edge_width_m: 18
     clearing_preference: 0.55
     moisture_noise_scale_m: 80
     moisture_strength: 0.65
-    shade_strength: 0.75
+    shade_strength: 0.82
     density_noise_scale_m: 28
-    density_noise_strength: 0.55
+    density_noise_strength: 0.62
     deadfall_old_forest_bias: 0.75
 
   terrain:
     grass:
-      density: 1.20
-      shrub: 1.00
-      fern: 1.18
-      sapling: 0.92
-      flower: 1.30
-      dead_log: 0.60
-      stump: 0.65
+      density: 1.25
+      shrub: 1.08
+      fern: 1.35
+      sapling: 0.96
+      flower: 0.75
+      dead_log: 0.72
+      stump: 0.72
     rock:
       density: 0.48
       shrub: 0.62
-      fern: 0.24
+      fern: 0.28
       sapling: 0.55
-      flower: 0.08
+      flower: 0.06
       dead_log: 1.35
       stump: 1.28
     sand:
       density: 0.62
       shrub: 0.44
-      fern: 0.22
+      fern: 0.24
       sapling: 0.24
-      flower: 0.75
+      flower: 0.55
       dead_log: 0.48
       stump: 0.44
     snow:
@@ -64,74 +64,74 @@ understory:
   classes:
     shrub:
       enabled: true
-      weight: 0.30
-      density: 1.0
-      min_scale: 0.7
-      max_scale: 1.6
+      weight: 0.28
+      density: 1.10
+      min_scale: 0.65
+      max_scale: 1.55
       height_preference: any
-      shade_preference: 0.55
+      shade_preference: 0.62
       moisture_preference: 0.45
-      forest_edge_bias: 0.65
+      forest_edge_bias: 0.58
       wind_weight: 0.35
 
     fern:
       enabled: true
-      weight: 0.24
-      density: 1.0
+      weight: 0.34
+      density: 1.30
       min_scale: 0.55
-      max_scale: 1.25
+      max_scale: 1.35
       height_preference: low
-      shade_preference: 0.85
-      moisture_preference: 0.80
-      forest_edge_bias: 0.25
+      shade_preference: 0.92
+      moisture_preference: 0.82
+      forest_edge_bias: 0.20
       wind_weight: 0.55
 
     sapling:
       enabled: true
       weight: 0.16
-      density: 0.55
+      density: 0.62
       min_scale: 0.45
       max_scale: 1.15
       height_preference: any
-      shade_preference: 0.45
+      shade_preference: 0.50
       moisture_preference: 0.50
-      forest_edge_bias: 0.55
+      forest_edge_bias: 0.50
       wind_weight: 0.45
 
     flower:
       enabled: true
-      weight: 0.18
-      density: 0.85
+      weight: 0.10
+      density: 0.50
       min_scale: 0.35
-      max_scale: 0.95
+      max_scale: 0.90
       height_preference: low
-      shade_preference: 0.15
+      shade_preference: 0.10
       moisture_preference: 0.45
-      forest_edge_bias: 0.85
+      forest_edge_bias: 0.90
       wind_weight: 0.65
 
     dead_log:
       enabled: true
       weight: 0.08
-      density: 0.22
+      density: 0.25
       min_scale: 0.8
       max_scale: 1.9
       height_preference: any
-      shade_preference: 0.75
+      shade_preference: 0.80
       moisture_preference: 0.55
-      forest_edge_bias: 0.30
+      forest_edge_bias: 0.25
       wind_weight: 0.0
 
     stump:
       enabled: true
       weight: 0.04
-      density: 0.16
+      density: 0.18
       min_scale: 0.7
       max_scale: 1.4
       height_preference: any
-      shade_preference: 0.65
+      shade_preference: 0.72
       moisture_preference: 0.45
-      forest_edge_bias: 0.25
+      forest_edge_bias: 0.20
       wind_weight: 0.0
 
   render:
