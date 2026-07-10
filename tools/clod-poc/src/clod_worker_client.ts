@@ -192,9 +192,9 @@ export class ClodWorkerClient {
     this.refreshStreamRootBoundsGuardConfig();
     const ids = coords.map((coord) => this.streamRootNodeId(coord));
     const dirtySnapshot = this.streamRootEditState.captureDirty(ids);
-    if (this.streamRootEditState.requiresCpu(ids)) {
-      const bypassCacheIds = dirtySnapshot.size > 0 ? [...dirtySnapshot.keys()] : undefined;
-      const built = await this.buildStreamRootsOnWorker(coords, bypassCacheIds);
+    const cpuAuthoritativeIds = this.streamRootEditState.cpuAuthoritative(ids);
+    if (cpuAuthoritativeIds.length > 0) {
+      const built = await this.buildStreamRootsOnWorker(coords, cpuAuthoritativeIds);
       this.assertStreamRootNodesValid(built.nodes, "cpu");
       this.streamRootEditState.acknowledge(dirtySnapshot);
       return built;
