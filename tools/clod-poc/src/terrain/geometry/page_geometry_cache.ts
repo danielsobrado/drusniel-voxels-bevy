@@ -93,9 +93,7 @@ function requestKey(request: PageGeometryRequest): string {
 
 function estimatedGeometryBytes(geometry: THREE.BufferGeometry): number {
   let bytes = 0;
-  for (const attribute of Object.values(geometry.attributes)) {
-    bytes += attribute.array.byteLength;
-  }
+  for (const attribute of Object.values(geometry.attributes)) bytes += attribute.array.byteLength;
   if (geometry.index) bytes += geometry.index.array.byteLength;
   return bytes;
 }
@@ -118,6 +116,17 @@ export class PageGeometryCache {
       maxEntries: Math.max(1, Math.floor(config.maxEntries)),
       warnAtEntries: Math.max(1, Math.floor(config.warnAtEntries)),
     };
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  has(nodeId: string): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.nodeId === nodeId) return true;
+    }
+    return false;
   }
 
   getOrCreate(request: PageGeometryRequest): THREE.BufferGeometry {
@@ -144,9 +153,7 @@ export class PageGeometryCache {
       );
     }
 
-    if (existing && !existing.active) {
-      this.disposeEntry(existing, false);
-    }
+    if (existing && !existing.active) this.disposeEntry(existing, false);
 
     const geometry = request.createGeometry();
     const entry: CacheEntry = {
@@ -231,8 +238,7 @@ export class PageGeometryCache {
     while (this.entries.size > this.config.maxEntries) {
       let oldest: CacheEntry | null = null;
       for (const entry of this.entries.values()) {
-        if (entry.key === protectedKey) continue;
-        if (entry.active) continue;
+        if (entry.key === protectedKey || entry.active) continue;
         if (!oldest || entry.lastAccessedMs < oldest.lastAccessedMs) oldest = entry;
       }
       if (!oldest) return;
