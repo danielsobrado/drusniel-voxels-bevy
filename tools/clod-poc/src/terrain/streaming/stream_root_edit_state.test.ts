@@ -10,6 +10,7 @@ describe("StreamRootEditState", () => {
     state.acknowledge(snapshot);
 
     expect(state.captureDirty(["L0:1,2"]).size).toBe(0);
+    expect(state.cpuAuthoritative(["L0:1,2", "L0:9,9"])).toEqual(["L0:1,2"]);
     expect(state.requiresCpu(["L0:1,2"])).toBe(true);
   });
 
@@ -31,6 +32,7 @@ describe("StreamRootEditState", () => {
     state.reset();
 
     expect(state.requiresCpu(["L0:1,2"])).toBe(false);
+    expect(state.cpuAuthoritative(["L0:1,2"])).toEqual([]);
     expect(state.captureDirty(["L0:1,2"]).size).toBe(0);
   });
 });
