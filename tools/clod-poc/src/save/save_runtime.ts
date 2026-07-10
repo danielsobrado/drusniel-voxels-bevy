@@ -212,6 +212,7 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
   activeState.flushing = true;
   const startedAt = nowMs();
   let db: IDBDatabase | null = null;
+  let acknowledgedRegionKeys: string[] = [];
   try {
     db = await openSaveDb();
     activeState.voxelDeltaCount = voxelEditCount();
@@ -231,9 +232,8 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
       },
       maxRegionWrites,
     });
-    for (const key of activeState.dirtyRegions.acknowledge(result.written, dirtySnapshot)) {
-      activeState.completedRegionKeys.add(key);
-    }
+    acknowledgedRegionKeys = activeState.dirtyRegions.acknowledge(result.written, dirtySnapshot);
+    for (const key of acknowledgedRegionKeys) activeState.completedRegionKeys.add(key);
     if (activeState.dirtyRegions.size === 0) {
       activeState.manifest = await finalizeSaveManifestAndMetadata(
         db,
@@ -248,6 +248,10 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
     activeState.counters.save_last_flush_ms = nowMs() - startedAt;
     activeState.counters.save_last_error = 0;
   } catch (error) {
+    if (acknowledgedRegionKeys.length > 0 && activeState.dirtyRegions.size === 0) {
+      activeState.revision++;
+      activeState.dirtyRegions.mark(acknowledgedRegionKeys, activeState.revision);
+    }
     activeState.counters.save_last_error = 1;
     console.error("[save-runtime] autosave flush failed", error);
   } finally {
