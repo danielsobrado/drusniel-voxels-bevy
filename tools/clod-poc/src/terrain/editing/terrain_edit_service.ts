@@ -246,6 +246,10 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     deps.updateInfo();
   };
 
+  const syncPaintedTerrainState = (previous: boolean): void => {
+    if (hasPaintedTerrainEdits() !== previous) deps.applyTerrainTextures();
+  };
+
   const enqueueEditOperation = (label: string, operation: () => Promise<void>): Promise<void> => {
     const queued = editOperationTail.then(operation);
     const safe = queued.catch((error) => {
@@ -369,11 +373,11 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     const status = await performEditRebuild(edit, transaction, hit, radius, `${brushParams.brushOp} ${brushParams.brushShape}`);
     if (status === "rejected") {
       rollbackDigEditTransaction(transaction);
-      if (!hadPaintedTerrain && edit.op === "add") deps.applyTerrainTextures();
+      syncPaintedTerrainState(hadPaintedTerrain);
       deps.updateInfo();
       return;
     }
-    if (!hadPaintedTerrain && edit.op === "add") deps.applyTerrainTextures();
+    syncPaintedTerrainState(hadPaintedTerrain);
   };
 
   const runDigExclusive = async (ray: THREE.Ray): Promise<void> => {
@@ -433,12 +437,11 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       const fillStatus = await performEditRebuild(fillEdit, fillTransaction, hit, radius, "construction terrain fill");
       if (fillStatus === "rejected") {
         rollbackDigEditTransaction(fillTransaction);
-        if (!hadPaintedTerrain) deps.applyTerrainTextures();
+        syncPaintedTerrainState(hadPaintedTerrain);
         deps.updateInfo();
         return;
       }
       changed = true;
-      if (!hadPaintedTerrain) deps.applyTerrainTextures();
     }
 
     if (request.trimHeightM > 0) {
@@ -448,6 +451,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         const trimStatus = await performEditRebuild(trimEdit, trimTransaction, hit, radius, "construction terrain trim");
         if (trimStatus === "rejected") {
           rollbackDigEditTransaction(trimTransaction);
+          syncPaintedTerrainState(hadPaintedTerrain);
           deps.updateInfo();
           return;
         }
@@ -455,7 +459,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       }
     }
 
-    if (!changed) reportNoOp("construction terrain already conformed");
+    if (changed) syncPaintedTerrainState(hadPaintedTerrain);
+    else reportNoOp("construction terrain already conformed");
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
