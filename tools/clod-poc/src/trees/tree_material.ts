@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
-import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import {
+  createTreeFoliageAtlas,
+  TREE_FOLIAGE_ATLAS_COLUMNS,
+  TREE_FOLIAGE_ATLAS_ROWS,
+  type TreeFoliageAtlas,
+} from "./tree_alpha_mask.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   createForestLightingUniforms,
@@ -51,10 +56,14 @@ interface TreeWindUniforms {
   uTreeVariantSeed: { value: number };
 }
 
-export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHandle {
+export function createTreeMaterialHandle(
+  settings: TreeSettings,
+  providedAtlas?: TreeFoliageAtlas,
+): TreeMaterialHandle {
   const uniforms = createTreeWindUniforms(settings);
   const forestUniforms = createForestLightingUniforms();
-  let foliageAtlas: TreeFoliageAtlas | null = null;
+  const foliageAtlas = providedAtlas ?? createTreeFoliageAtlas(settings);
+  const ownsAtlas = providedAtlas === undefined;
   const regularMaterial = trackedMeshStandardMaterial({
     vertexColors: true,
     roughness: 0.95,
@@ -63,10 +72,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     transparent: false,
     depthWrite: true,
   }, "tree-regular-material");
-  applyFoliageMaterialSettings(regularMaterial, (atlas) => {
-    foliageAtlas?.dispose();
-    foliageAtlas = atlas;
-  });
+  applyFoliageMaterialSettings(regularMaterial, foliageAtlas);
   attachTreeShader(regularMaterial, uniforms, forestUniforms);
 
   const debugMaterials = {} as Record<TreeLod, THREE.MeshBasicMaterial>;
@@ -75,6 +81,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
       color: LOD_COLORS[lod],
       side: THREE.DoubleSide,
       transparent: false,
+      map: foliageAtlas.texture,
     }, `tree-debug-material:${lod}`);
     attachTreeShader(material, uniforms, forestUniforms);
     debugMaterials[lod] = material;
@@ -88,16 +95,13 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     },
     updateSettings(nextSettings: TreeSettings) {
       updateTreeWindUniforms(uniforms, nextSettings);
-      applyFoliageMaterialSettings(regularMaterial, (atlas) => {
-        foliageAtlas?.dispose();
-        foliageAtlas = atlas;
-      });
+      applyFoliageMaterialSettings(regularMaterial, foliageAtlas);
     },
     updateForestLighting(state) {
       updateForestLightingUniforms(forestUniforms, state, "tree");
     },
     dispose() {
-      foliageAtlas?.dispose();
+      if (ownsAtlas) foliageAtlas.dispose();
       regularMaterial.dispose();
       for (const material of Object.values(debugMaterials)) material.dispose();
     },
@@ -167,11 +171,17 @@ export function injectTreeFoliageVertexShader(vertexShader: string): string {
     "#include <common>",
     `#include <common>
 attribute float treeFoliageMask;
-varying float vTreeFoliageMask;`,
+attribute float treeFoliageCard;
+attribute float treeSpeciesIndex;
+varying float vTreeFoliageMask;
+varying float vTreeFoliageCard;
+varying float vTreeSpeciesIndex;`,
   ).replace(
     "#include <begin_vertex>",
     `#include <begin_vertex>
-vTreeFoliageMask = treeFoliageMask;`,
+vTreeFoliageMask = treeFoliageMask;
+vTreeFoliageCard = treeFoliageCard;
+vTreeSpeciesIndex = treeSpeciesIndex;`,
   );
 }
 
@@ -179,11 +189,27 @@ export function injectTreeFoliageFragmentShader(fragmentShader: string): string 
   return fragmentShader.replace(
     "#include <common>",
     `#include <common>
-// retired alpha-card varying: varying float vTreeFoliageMask;`,
+varying float vTreeFoliageMask;
+varying float vTreeFoliageCard;
+varying float vTreeSpeciesIndex;`,
   ).replace(
     "#include <map_fragment>",
-    `#include <map_fragment>
-// retired alpha-card mix: mix(1.0, diffuseColor.a)`,
+    `#ifdef USE_MAP
+vec2 treeLocalUv = clamp(vMapUv, vec2(0.0), vec2(0.9999));
+vec2 treeScaledUv = treeLocalUv * 2.0;
+vec2 treeTileXY = floor(treeScaledUv);
+float treeTile = treeTileXY.x + treeTileXY.y * 2.0;
+vec2 treeWithinTile = fract(treeScaledUv);
+float treeSpeciesRow = clamp(floor(vTreeSpeciesIndex + 0.5), 0.0, ${TREE_FOLIAGE_ATLAS_ROWS - 1}.0);
+vec2 treeAtlasUv = vec2(
+  (treeTile + treeWithinTile.x) / ${TREE_FOLIAGE_ATLAS_COLUMNS}.0,
+  (treeSpeciesRow + treeWithinTile.y) / ${TREE_FOLIAGE_ATLAS_ROWS}.0
+);
+vec4 treeAtlasSample = texture2D(map, treeAtlasUv);
+float treeCard = clamp(vTreeFoliageCard, 0.0, 1.0);
+if (treeCard > 0.5 && treeAtlasSample.a < 0.32) discard;
+diffuseColor.rgb *= mix(vec3(1.0), treeAtlasSample.rgb * 1.08, treeCard);
+#endif`,
   );
 }
 
@@ -222,15 +248,14 @@ function attachTreeShader(
 
 function applyFoliageMaterialSettings(
   material: THREE.MeshStandardMaterial,
-  replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
+  atlas: TreeFoliageAtlas,
 ): void {
   let changed = false;
   changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", THREE.DoubleSide, "tree-foliage-settings") || changed;
   changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "transparent", false, "tree-foliage-settings") || changed;
   changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", true, "tree-foliage-settings") || changed;
   changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "alphaTest", 0, "tree-foliage-settings") || changed;
-  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "map", null, "tree-foliage-settings") || changed;
-  replaceAtlas(null);
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "map", atlas.texture, "tree-foliage-settings") || changed;
   if (changed) setMaterialNeedsUpdate(materialChurnDiagnostics, material, "tree-foliage-settings");
 }
 
