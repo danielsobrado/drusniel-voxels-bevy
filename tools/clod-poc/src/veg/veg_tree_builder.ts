@@ -2,7 +2,8 @@
  * Grammar species + seed → one renderable tree BufferGeometry (bark tubes +
  * real leaf/needle foliage merged into a single indexed buffer, matching the
  * clod-poc tree attribute contract: position/normal/color/uv/treeWind/
- * treeFoliageMask). Ported/adapted from the reference `vegetation/TreeBuilder.ts`.
+ * treeFoliageMask/treeFoliageCard). Ported/adapted from the reference
+ * `vegetation/TreeBuilder.ts`.
  */
 
 import * as THREE from "three";
@@ -57,13 +58,16 @@ const CARD_ANCHOR_TARGETS: Record<VegLod, number> = {
   2: 64,
 };
 
-const DEFAULT_CONIFER_CARD: FoliageCardParams = { mode: "lying", sizeK: 2.6, bend: 0.04 };
-const DEFAULT_PINE_CARD: FoliageCardParams = { mode: "cross", sizeK: 2.2, bend: 0.05 };
-const DEFAULT_BROADLEAF_CARD: FoliageCardParams = { mode: "cross", sizeK: 2.3, bend: 0.1 };
+const DEFAULT_CONIFER_CARD: FoliageCardParams = { mode: "lying", sizeK: 1.8, bend: 0.04 };
+const DEFAULT_PINE_CARD: FoliageCardParams = { mode: "cross", sizeK: 1.7, bend: 0.05 };
+const DEFAULT_BROADLEAF_CARD: FoliageCardParams = { mode: "cross", sizeK: 1.8, bend: 0.1 };
 const EMPTY_CARD: FoliageCardParams = { mode: "lying", sizeK: 0 };
 
 const CARD_WIND_WEIGHT = 0.65;
 const CARD_FLUTTER = 0.45;
+const FOLIAGE_CARD_ROWS = 3;
+const BROADLEAF_LEAFLET_COUNT = 3;
+const CONIFER_LEAFLET_COUNT = 4;
 
 const cardRight = new THREE.Vector3();
 const cardUp = new THREE.Vector3();
@@ -103,7 +107,10 @@ function budgetedAnchorTargets(sp: SpeciesParams, lod: VegLod, vertexBudget: num
     ? Math.min(vertexBudget, lod === 2 ? 360 : 900)
     : Math.min(vertexBudget * 0.28, lod === 0 ? 12_000 : lod === 1 ? 5_000 : 1_800);
   const foliageBudget = Math.max(0, vertexBudget - barkReserve) * 0.35;
-  const cardVertexCost = (sp.foliage.card?.mode ?? (sp.id === "pine" ? "cross" : "cross")) === "cross" ? 16 : 8;
+  const isCrossCard = (sp.foliage.card?.mode ?? "cross") === "cross";
+  const isConifer = sp.kind === "conifer";
+  const leafletCount = isConifer ? CONIFER_LEAFLET_COUNT : BROADLEAF_LEAFLET_COUNT;
+  const cardVertexCost = leafletCount * (FOLIAGE_CARD_ROWS + 1) * 2 * (isCrossCard ? 2 : 1);
   const leafVertexCost = sp.foliage.kind === "needleSpray"
     ? 366
     : 17 * ((sp.foliage.clusterSize[0] + sp.foliage.clusterSize[1]) * 0.5);
@@ -179,7 +186,7 @@ function buildFoliageCards(
   if (card.sizeK <= 0) return;
 
   for (const anchor of anchors) {
-    pushFoliageCard(g, anchor, rng, base, sp.foliageColor.hueVar, card);
+    pushFoliageCard(g, sp, anchor, rng, base, sp.foliageColor.hueVar, card);
   }
 }
 
@@ -194,6 +201,7 @@ function resolveCardParams(sp: SpeciesParams): FoliageCardParams {
 
 function pushFoliageCard(
   g: VegMeshGrower,
+  sp: SpeciesParams,
   anchor: LeafAnchor,
   rng: Rng,
   base: THREE.Color,
@@ -207,10 +215,11 @@ function pushFoliageCard(
   const tile = rng.int(4);
   const u0 = (tile % 2) * 0.5;
   const v0 = Math.floor(tile / 2) * 0.5;
-  const s = anchor.scale * card.sizeK * (0.82 + rng.float() * 0.32);
+  const clusterScale = anchor.scale * card.sizeK * (0.82 + rng.float() * 0.32);
   const roll = (rng.float() - 0.5) * 0.7;
   const bend = (card.bend ?? 0) * (0.75 + rng.float() * 0.5);
-  const rows = Math.abs(bend) > 1e-4 ? 3 : 1;
+  const conifer = sp.kind === "conifer";
+  const leafletCount = conifer ? CONIFER_LEAFLET_COUNT : BROADLEAF_LEAFLET_COUNT;
 
   cardQuat.copy(anchor.quat);
   cardRollQuat.setFromAxisAngle(CARD_Z, roll);
@@ -223,41 +232,62 @@ function pushFoliageCard(
   for (let plane = 0; plane < planes; plane++) {
     cardWidthAxis.copy(plane === 0 ? cardRight : cardUp);
     cardNormal.copy(plane === 0 ? cardUp : cardRight);
-    const baseVertex = g.vertCount;
-    cardRowPos.copy(anchor.pos).addScaledVector(cardOut, -0.08 * s);
 
-    for (let row = 0; row <= rows; row++) {
-      const t = row / rows;
-      const angle = bend * t;
-      cardDirRow.copy(cardOut).multiplyScalar(Math.cos(angle)).addScaledVector(cardNormal, -Math.sin(angle));
-      cardNrmRow.copy(cardNormal).multiplyScalar(Math.cos(angle)).addScaledVector(cardOut, Math.sin(angle)).normalize();
+    for (let leaflet = 0; leaflet < leafletCount; leaflet++) {
+      const centered = leaflet - (leafletCount - 1) * 0.5;
+      const leafLength = clusterScale * (conifer ? 0.44 + rng.float() * 0.12 : 0.52 + rng.float() * 0.12);
+      const leafWidth = leafLength * (conifer ? 0.17 : 0.38);
+      const lateral = centered * clusterScale * (conifer ? 0.09 : 0.18);
+      const longitudinal = (leaflet % 2 === 0 ? -0.06 : 0.08) * clusterScale;
+      const normalOffset = (leaflet % 2 === 0 ? -0.025 : 0.035) * clusterScale;
+      const leafletBend = bend * (0.8 + rng.float() * 0.4);
+      const baseVertex = g.vertCount;
 
-      for (let side = 0; side <= 1; side++) {
-        cardPosition.copy(cardRowPos).addScaledVector(cardWidthAxis, (side - 0.5) * s);
-        g.vertex(
-          cardPosition.x,
-          cardPosition.y,
-          cardPosition.z,
-          cardNrmRow.x,
-          cardNrmRow.y,
-          cardNrmRow.z,
-          u0 + side * 0.5,
-          v0 + t * 0.5,
-          cardColor.r,
-          cardColor.g,
-          cardColor.b,
-          CARD_WIND_WEIGHT,
-          CARD_FLUTTER,
-          1,
-        );
+      cardRowPos.copy(anchor.pos)
+        .addScaledVector(cardWidthAxis, lateral)
+        .addScaledVector(cardNormal, normalOffset)
+        .addScaledVector(cardOut, longitudinal - leafLength * 0.5);
+
+      for (let row = 0; row <= FOLIAGE_CARD_ROWS; row++) {
+        const t = row / FOLIAGE_CARD_ROWS;
+        const widthEnvelope = t <= 0.5
+          ? 0.1 + t * 1.8
+          : 1.0 - (t - 0.5) * 1.8;
+        const angle = leafletBend * t;
+        cardDirRow.copy(cardOut).multiplyScalar(Math.cos(angle)).addScaledVector(cardNormal, -Math.sin(angle));
+        cardNrmRow.copy(cardNormal).multiplyScalar(Math.cos(angle)).addScaledVector(cardOut, Math.sin(angle)).normalize();
+
+        for (let side = 0; side <= 1; side++) {
+          cardPosition.copy(cardRowPos).addScaledVector(
+            cardWidthAxis,
+            (side - 0.5) * leafWidth * widthEnvelope,
+          );
+          g.vertex(
+            cardPosition.x,
+            cardPosition.y,
+            cardPosition.z,
+            cardNrmRow.x,
+            cardNrmRow.y,
+            cardNrmRow.z,
+            u0 + side * 0.5,
+            v0 + t * 0.5,
+            cardColor.r,
+            cardColor.g,
+            cardColor.b,
+            CARD_WIND_WEIGHT,
+            CARD_FLUTTER,
+            1,
+            1,
+          );
+        }
+
+        if (row < FOLIAGE_CARD_ROWS) cardRowPos.addScaledVector(cardDirRow, leafLength / FOLIAGE_CARD_ROWS);
       }
 
-      if (row < rows) cardRowPos.addScaledVector(cardDirRow, s / rows);
-    }
-
-    for (let row = 0; row < rows; row++) {
-      const i = baseVertex + row * 2;
-      g.quad(i, i + 1, i + 3, i + 2);
+      for (let row = 0; row < FOLIAGE_CARD_ROWS; row++) {
+        const i = baseVertex + row * 2;
+        g.quad(i, i + 1, i + 3, i + 2);
+      }
     }
   }
 }
