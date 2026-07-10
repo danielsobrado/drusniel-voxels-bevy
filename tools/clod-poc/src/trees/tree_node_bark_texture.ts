@@ -100,7 +100,8 @@ function triplanarBarkSample(barkTexture: THREE.Texture): TslNode {
   const position: TslNode = positionGeometry.mul(BARK_TILE_SCALE);
   const normal: TslNode = abs(normalGeometry);
   const weightSum: TslNode = normal.x.add(normal.y).add(normal.z).add(0.0001);
-  const speciesIndex: TslNode = floor(attribute("treeSpeciesIndex", "float").add(0.5));
+  const speciesAttribute: TslNode = attribute("treeSpeciesIndex", "float");
+  const speciesIndex: TslNode = floor(speciesAttribute.add(0.5));
   const sampleX: TslNode = texture(barkTexture, barkAtlasUv(vec2(position.z, position.y), speciesIndex));
   const sampleY: TslNode = texture(barkTexture, barkAtlasUv(vec2(position.x, position.z), speciesIndex));
   const sampleZ: TslNode = texture(barkTexture, barkAtlasUv(vec2(position.x, position.y), speciesIndex));
