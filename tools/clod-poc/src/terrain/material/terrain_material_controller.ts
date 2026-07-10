@@ -68,6 +68,7 @@ export interface TerrainMaterialController {
   applyLighting(mat: TerrainMaterialHandle, lighting?: EnvironmentLighting): void;
   applyColorAdjustments(): void;
   activeTerrainSlots(): readonly (TerrainTextureSlot | ProceduralTerrainSlot)[];
+  availableTerrainSlots(): readonly (TerrainTextureSlot | ProceduralTerrainSlot)[];
   texturesActive(): boolean;
   terrainTextureUniformOptions(): TerrainTextureApplyOptions;
   applyTerrainTextures(): void;
@@ -108,6 +109,13 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     if (state.terrainMaterialSource === "procedural" && proceduralTerrain) return proceduralTerrain.slots;
     if (state.terrainMaterialSource === "debug_flat") return [];
     return deps.textureController.slots;
+  };
+
+  const availableTerrainSlots = (): readonly (TerrainTextureSlot | ProceduralTerrainSlot)[] => {
+    const active = activeTerrainSlots();
+    if (active.length > 0) return active;
+    if (deps.textureController.hasAnyLoadedTexture()) return deps.textureController.slots;
+    return proceduralTerrain?.slots ?? deps.textureController.slots;
   };
 
   const texturesActive = () => {
@@ -262,6 +270,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
       for (const m of terrainMaterials) m.setColorAdjust(adjustments);
     },
     activeTerrainSlots,
+    availableTerrainSlots,
     texturesActive,
     terrainTextureUniformOptions,
     applyTerrainTextures,
