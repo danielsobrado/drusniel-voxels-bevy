@@ -211,8 +211,9 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
   const activeState = state;
   activeState.flushing = true;
   const startedAt = nowMs();
-  const db = await openSaveDb();
+  let db: IDBDatabase | null = null;
   try {
+    db = await openSaveDb();
     activeState.voxelDeltaCount = voxelEditCount();
     const propsByRegion = partitionSavedPropsByRegion(savedPropStore.snapshot());
     const dirtyRegionKeys = activeState.dirtyRegions.keys();
@@ -250,7 +251,7 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
     activeState.counters.save_last_error = 1;
     console.error("[save-runtime] autosave flush failed", error);
   } finally {
-    db.close();
+    db?.close();
     activeState.flushing = false;
     publishCounters();
     if (activeState.dirtyRegions.size > 0) scheduleFlush();
