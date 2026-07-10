@@ -60,6 +60,7 @@ export const DEFAULT_CANOPY_SHELL_CONFIG: CanopyShellConfig = {
   },
   budgets: {
     maxTilesBuiltPerFrame: 4,
+    maxBuildMsPerFrame: 2,
     maxTextureUploadsPerFrame: 2,
     maxShellTris: 250000,
   },

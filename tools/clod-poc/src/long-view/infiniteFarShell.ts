@@ -46,7 +46,6 @@ export class InfiniteFarShell {
   private renderOriginX = 0;
   private renderOriginZ = 0;
   private rebuildCount = 0;
-  private rebuildRestartCount = 0;
   private lastRebuildMs = 0;
   private pendingHeightRebuild: PendingFarShellHeightRebuild | null = null;
   private materialOptions: InfiniteFarShellMaterialOptions;
@@ -167,18 +166,9 @@ export class InfiniteFarShell {
     this.metrics.farShellRebuildVertices = this.computeVertexCount();
   }
 
-  private requestSlicedHeightRebuild(restart = false): void {
+  private requestSlicedHeightRebuild(): void {
     if (this.heightSamplingMode !== "cpu") return;
-    if (restart && this.pendingHeightRebuild && this.pendingHeightRebuild.cursor > 0) {
-      this.rebuildRestartCount++;
-      this.metrics.farShellRebuildRestarts = this.rebuildRestartCount;
-    }
-    if (
-      this.pendingHeightRebuild
-      && !restart
-      && this.pendingHeightRebuild.snapX === this.snappedX
-      && this.pendingHeightRebuild.snapZ === this.snappedZ
-    ) {
+    if (this.pendingHeightRebuild) {
       this.publishRebuildProgress();
       return;
     }
@@ -196,7 +186,7 @@ export class InfiniteFarShell {
 
   setHeightProvider(provider: FarHeightProvider | undefined): void {
     this.heightProvider = provider;
-    this.requestSlicedHeightRebuild(true);
+    this.requestSlicedHeightRebuild();
     this.stepPendingHeightRebuild();
   }
 
@@ -243,7 +233,7 @@ export class InfiniteFarShell {
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
     if ((snappedChanged || (this.rebuildCount === 0 && !this.pendingHeightRebuild)) && this.heightSamplingMode === "cpu") {
-      this.requestSlicedHeightRebuild(true);
+      this.requestSlicedHeightRebuild();
     }
     if (this.heightSamplingMode === "cpu") this.stepPendingHeightRebuild();
     else this.publishRebuildProgress();
@@ -340,9 +330,10 @@ export class InfiniteFarShell {
       return;
     }
     const budgetMs = this.options.cpuRebuildBudgetMs ?? 2;
-    const minStepVerts = 64;
+    const minStepVerts = 32;
+    const smallRebuildVerts = 192;
     const vertexCount = this.computeVertexCount();
-    const completeSmallRebuild = vertexCount <= minStepVerts * 3;
+    const completeSmallRebuild = vertexCount <= smallRebuildVerts;
     if (pending.phase === "sample" && pending.cursor === 0) this.prepareHeightBuffers(vertexCount);
     const started = performance.now();
     const elapsedMs = () => performance.now() - started;
@@ -366,6 +357,7 @@ export class InfiniteFarShell {
         this.pendingHeightRebuild = null;
         this.attachBiomeVertexColors();
         this.finishHeightRebuild(pending.buildMs);
+        if (pending.snapX !== this.snappedX || pending.snapZ !== this.snappedZ) this.requestSlicedHeightRebuild();
         return;
       }
     }
@@ -405,6 +397,7 @@ export class InfiniteFarShell {
     this.pendingHeightRebuild = null;
     if (this.useParityMaterial) this.attachVertexColors();
     this.finishHeightRebuild(pending.buildMs);
+    if (pending.snapX !== this.snappedX || pending.snapZ !== this.snappedZ) this.requestSlicedHeightRebuild();
   }
 
   private flushAttributes(): void {

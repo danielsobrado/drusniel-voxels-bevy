@@ -3,13 +3,9 @@ import { join } from "node:path";
 import type { Browser } from "playwright";
 import { launchChromium, launchWebGPU } from "./launch.js";
 import type { FramePerfMetric, FramePerfSnapshot } from "../src/app/frame_loop/perf_probe.js";
+import { PERF_MAIN_CASES, selectPerfMainCases, type PerfMainCase } from "./perf-main-cases.js";
 
 type Args = Record<string, string | boolean>;
-
-interface PerfCase {
-  name: string;
-  params: Record<string, string>;
-}
 
 interface PerfCaseResult {
   name: string;
@@ -29,33 +25,6 @@ interface PerfCaseProgress {
   clodReady: boolean | null;
   lastFrameId: number | null;
 }
-
-const CASES: PerfCase[] = [
-  { name: "infinite-islands", params: {} },
-  { name: "current-textured", params: {} },
-  { name: "debug-flat", params: { terrainMaterial: "debug_flat", terrainTriplanar: "0" } },
-  { name: "triplanar-off", params: { terrainTriplanar: "0" } },
-  { name: "tree-gpu-ring", params: { treeGpu: "1" } },
-  { name: "tree-gpu-strict", params: { treeGpuStrict: "1" } },
-  { name: "tree-gpu-strict-counts", params: { treeGpuStrict: "1", treeGpuCounts: "1" } },
-  { name: "tree-gpu-force-cpu", params: { treeGpuForceCpu: "1" } },
-  { name: "tree-gpu-off", params: { treeGpu: "0" } },
-  { name: "tree-gpu-visible-12k", params: { treeGpu: "1", treeGpuMaxVisible: "12000" } },
-  { name: "tree-gpu-visible-9k", params: { treeGpu: "1", treeGpuMaxVisible: "9000" } },
-  { name: "tree-distance-360", params: { treeGpu: "1", treeDistance: "360" } },
-  { name: "tree-shadows-none", params: { treeGpuStrict: "1", treeShadowMaxLod: "none" } },
-  { name: "trees-off", params: { trees: "0", understory: "0" } },
-  { name: "grass-off", params: { grass: "0" } },
-  { name: "stones-off", params: { stones: "0" } },
-  { name: "vegetation-off", params: { grass: "0", trees: "0", stones: "0", understory: "0", weather: "off" } },
-  { name: "water-weather-off", params: { water: "0", weather: "off" } },
-  { name: "far-shell-off", params: { farShell: "0" } },
-  { name: "terrain-material-cache-enabled", params: { scene: "infinite-naadf-far", terrainMaterialCache: "1" } },
-  { name: "terrain-material-cache-disabled", params: { scene: "infinite-naadf-far", terrainMaterialCache: "0" } },
-  { name: "terrain-material-cache-debug", params: { scene: "infinite-naadf-far", terrainMaterialCache: "1", terrainMaterialCacheDebug: "far_color" } },
-  { name: "selection-cpu", params: { webgpuSelection: "0" } },
-  { name: "clod-perf-mode", params: { clodPerf: "1" } },
-];
 
 function parseArgs(argv: string[]): Args {
   const out: Args = {};
@@ -95,16 +64,6 @@ function buildUrl(baseUrl: string, params: Record<string, string>): string {
   const url = new URL(baseUrl);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return url.toString();
-}
-
-function selectCases(rawCase: string | undefined): PerfCase[] {
-  if (!rawCase) return CASES;
-  const wanted = new Set(rawCase.split(",").map((name) => name.trim()).filter(Boolean));
-  const selected = CASES.filter((perfCase) => wanted.has(perfCase.name));
-  const missing = [...wanted].filter((name) => !CASES.some((perfCase) => perfCase.name === name));
-  if (missing.length > 0) throw new Error(`Unknown perf case(s): ${missing.join(", ")}`);
-  if (selected.length === 0) throw new Error("No perf cases selected");
-  return selected;
 }
 
 function metric(snapshot: FramePerfSnapshot, name: FramePerfMetric): { avg: number; p50: number; p95: number } {
@@ -180,7 +139,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
 }
 
 async function runCase(
-  perfCase: PerfCase,
+  perfCase: PerfMainCase,
   baseParams: Record<string, string>,
   baseUrl: string,
   timeoutMs: number,
@@ -269,7 +228,7 @@ async function main(): Promise<void> {
   const warmupFrames = str(args["warmup"]) ?? "120";
   const sampleFrames = str(args["frames"]) ?? "300";
   const timeoutMs = Number(str(args["timeout"]) ?? 180000);
-  const selectedCases = selectCases(str(args["case"]));
+  const selectedCases = selectPerfMainCases(str(args["case"]), PERF_MAIN_CASES);
   const startedAt = new Date();
   const runId = startedAt.toISOString().replace(/[:.]/g, "-");
   const outDir = str(args["out"]) ?? join("perf-runs", `main-${runId}`);

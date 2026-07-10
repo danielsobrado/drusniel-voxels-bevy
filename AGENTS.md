@@ -259,3 +259,17 @@ Understand first if you are under Windows or WSL and use the command accordingly
 
 
 Do not mention the name of the refernece in the code comments like Fable 5 for example.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are local Markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five-state triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository using root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.

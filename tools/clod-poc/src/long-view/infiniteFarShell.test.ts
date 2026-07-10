@@ -189,7 +189,7 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     shell.dispose();
   });
 
-  it("counts restart when a snap change replaces a pending sliced rebuild", () => {
+  it("keeps useful work when the snap changes during a sliced rebuild", () => {
     const metrics = createFarShellMetrics();
     const shell = new InfiniteFarShell({
       ...makeDefaultOptions(),
@@ -201,10 +201,12 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     });
 
     shell.update(0, 0, 0);
+    const firstCursor = metrics.farShellRebuildCursor ?? 0;
     expect(metrics.farShellRebuildPending).toBe(1);
     shell.update(250, 0, 1);
 
-    expect(metrics.farShellRebuildRestarts).toBe(1);
+    expect(metrics.farShellRebuildRestarts).toBe(0);
+    expect(metrics.farShellRebuildCursor ?? 0).toBeGreaterThan(firstCursor);
     shell.dispose();
   });
 

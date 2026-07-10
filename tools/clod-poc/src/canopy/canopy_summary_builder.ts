@@ -19,6 +19,12 @@ export interface BuildCanopySummaryTileParams {
   revision?: number;
 }
 
+export interface CanopySummaryTileJob {
+  step(budgetMs: number): CanopySummaryTile | null;
+}
+
+const BUILD_BUDGET_CHECK_INTERVAL = 16;
+
 function lightSmoothCoverage(cells: CanopySummaryCell[], res: number): void {
   const copy = cells.map((c) => ({ ...c }));
   for (let gz = 0; gz < res; gz++) {
@@ -46,35 +52,7 @@ function isSteepRejectCell(cell: CanopySummaryCell, threshold: number): boolean 
   return cell.slope >= threshold && cell.coverage < 0.05;
 }
 
-export function buildCanopySummaryTile(params: BuildCanopySummaryTileParams): CanopySummaryTile {
-  const { key, originX, originZ, cellSizeM, resolution, treeDistribution, revision = 1 } = params;
-  const cells: CanopySummaryCell[] = new Array(resolution * resolution);
-
-  const naadf = getNaadfIntegrationFromWindow();
-  for (let gz = 0; gz < resolution; gz++) {
-    for (let gx = 0; gx < resolution; gx++) {
-      const localX = originX + gx * cellSizeM;
-      const localZ = originZ + gz * cellSizeM;
-      const { cx, cz } = worldCellIndex(localX + cellSizeM * 0.5, localZ + cellSizeM * 0.5, cellSizeM);
-      const worldOrigin = worldCellOrigin(cx, cz, cellSizeM);
-      cells[gz * resolution + gx] = treeDistribution.accumulateCanopyCell(
-        worldOrigin.x,
-        worldOrigin.z,
-        cellSizeM,
-        params.terrainSampler,
-      );
-      if (naadf) {
-        const idx = gz * resolution + gx;
-        const sampleX = localX + cellSizeM * 0.5;
-        const sampleZ = localZ + cellSizeM * 0.5;
-        const summary = naadf.queryHeight(sampleX, sampleZ, "canopy");
-        if (Number.isFinite(summary.canopyCoverage)) {
-          cells[idx]!.coverage = clamp01(Math.max(cells[idx]!.coverage, summary.canopyCoverage));
-        }
-      }
-    }
-  }
-
+function finalizeCanopyCells(cells: CanopySummaryCell[], resolution: number, config: CanopyShellConfig): void {
   lightSmoothCoverage(cells, resolution);
 
   for (const cell of cells) {
@@ -89,20 +67,68 @@ export function buildCanopySummaryTile(params: BuildCanopySummaryTileParams): Ca
       cell.speciesBroadleaf /= sp;
       cell.speciesDeadwood /= sp;
     }
-    if (isSteepRejectCell(cell, params.config.treeDistribution.slopeRejectEnd)) {
+    if (isSteepRejectCell(cell, config.treeDistribution.slopeRejectEnd)) {
       cell.coverage = 0;
     }
   }
+}
+
+export function createCanopySummaryTileJob(
+  params: BuildCanopySummaryTileParams,
+  now: () => number = () => performance.now(),
+): CanopySummaryTileJob {
+  const { key, originX, originZ, cellSizeM, resolution, treeDistribution, revision = 1 } = params;
+  const cells: CanopySummaryCell[] = new Array(resolution * resolution);
+  const naadf = getNaadfIntegrationFromWindow();
+  let cursor = 0;
+  let result: CanopySummaryTile | null = null;
 
   return {
-    key,
-    originX,
-    originZ,
-    cellSizeM,
-    resolution,
-    cells,
-    revision,
+    step(budgetMs: number): CanopySummaryTile | null {
+      if (result) return result;
+      const startedAt = now();
+      const safeBudgetMs = Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : Number.POSITIVE_INFINITY;
+      const total = resolution * resolution;
+
+      while (cursor < total) {
+        const batchEnd = Math.min(total, cursor + BUILD_BUDGET_CHECK_INTERVAL);
+        for (; cursor < batchEnd; cursor++) {
+          const gx = cursor % resolution;
+          const gz = (cursor - gx) / resolution;
+      const localX = originX + gx * cellSizeM;
+      const localZ = originZ + gz * cellSizeM;
+      const { cx, cz } = worldCellIndex(localX + cellSizeM * 0.5, localZ + cellSizeM * 0.5, cellSizeM);
+      const worldOrigin = worldCellOrigin(cx, cz, cellSizeM);
+      cells[gz * resolution + gx] = treeDistribution.accumulateCanopyCell(
+        worldOrigin.x,
+        worldOrigin.z,
+        cellSizeM,
+        params.terrainSampler,
+      );
+          if (naadf) {
+            const idx = gz * resolution + gx;
+        const sampleX = localX + cellSizeM * 0.5;
+        const sampleZ = localZ + cellSizeM * 0.5;
+        const summary = naadf.queryHeight(sampleX, sampleZ, "canopy");
+        if (Number.isFinite(summary.canopyCoverage)) {
+          cells[idx]!.coverage = clamp01(Math.max(cells[idx]!.coverage, summary.canopyCoverage));
+        }
+          }
+        }
+        if (cursor < total && now() - startedAt >= safeBudgetMs) return null;
+      }
+
+      finalizeCanopyCells(cells, resolution, params.config);
+      result = { key, originX, originZ, cellSizeM, resolution, cells, revision };
+      return result;
+    },
   };
+}
+
+export function buildCanopySummaryTile(params: BuildCanopySummaryTileParams): CanopySummaryTile {
+  const result = createCanopySummaryTileJob(params).step(Number.POSITIVE_INFINITY);
+  if (!result) throw new Error("canopy summary tile did not complete with an unbounded budget");
+  return result;
 }
 
 export function sampleSummaryCellAtWorld(

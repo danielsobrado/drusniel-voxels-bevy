@@ -121,6 +121,7 @@ function parseConfig(raw: Record<string, unknown> | undefined, fallback: Config)
     },
     budgets: {
       maxTilesBuiltPerFrame: Math.floor(readNumber(budgets.max_tiles_built_per_frame, fallback.budgets.maxTilesBuiltPerFrame)),
+      maxBuildMsPerFrame: readNumber(budgets.max_build_ms_per_frame, fallback.budgets.maxBuildMsPerFrame),
       maxTextureUploadsPerFrame: Math.floor(readNumber(budgets.max_texture_uploads_per_frame, fallback.budgets.maxTextureUploadsPerFrame)),
       maxShellTris: Math.floor(readNumber(budgets.max_shell_tris, fallback.budgets.maxShellTris)),
     },
@@ -175,6 +176,9 @@ export function validateCanopyShellConfig(config: CanopyShellConfig): void {
   }
   if (config.budgets.maxTilesBuiltPerFrame < 0) {
     throw new Error("canopy_shell: budgets.max_tiles_built_per_frame must be >= 0");
+  }
+  if (config.budgets.maxBuildMsPerFrame <= 0) {
+    throw new Error("canopy_shell: budgets.max_build_ms_per_frame must be > 0");
   }
   if (config.budgets.maxTextureUploadsPerFrame < 0) {
     throw new Error("canopy_shell: budgets.max_texture_uploads_per_frame must be >= 0");

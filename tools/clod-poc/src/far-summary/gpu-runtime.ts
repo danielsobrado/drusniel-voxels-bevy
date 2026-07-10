@@ -109,6 +109,14 @@ export class FarSummaryGpuRuntime {
       this.publishIdleCounters();
       return;
     }
+    if (dirtyRequests?.length === 0) {
+      this.statsState.lastDirtyTiles = 0;
+      this.statsState.lastBatches = 0;
+      this.statsState.lastFallbackTiles = 0;
+      this.statsState.lastFallbackReason = null;
+      this.publishIdleCounters();
+      return;
+    }
     if (this.inFlight) {
       this.statsState.skippedInflightFrames++;
       return;

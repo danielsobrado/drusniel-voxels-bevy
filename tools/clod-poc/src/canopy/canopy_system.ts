@@ -106,6 +106,19 @@ export function shouldAttemptTextureUpload(
   return maxTextureUploadsPerFrame > uploadsUsedThisFrame;
 }
 
+export interface CanopyTextureRefreshState {
+  hasTextureSet: boolean;
+  texturesDirty: boolean;
+  textureRefreshPending: boolean;
+  queuedTiles: number;
+}
+
+export function shouldRefreshCanopyTextures(state: CanopyTextureRefreshState): boolean {
+  if (!state.texturesDirty && !state.textureRefreshPending) return false;
+  if (!state.hasTextureSet) return true;
+  return state.queuedTiles <= 0;
+}
+
 export function shouldUseSyntheticCanopyFallback(
   config: CanopyShellConfig,
   forceSynthetic: boolean,
@@ -300,7 +313,13 @@ export function createCanopyShellSystem(
     }
 
     uploadBudgetUsed = 0;
-    if (clipUpdate.texturesDirty || textureRefreshPending || !textureSet) {
+    if (clipUpdate.texturesDirty) textureRefreshPending = true;
+    if (shouldRefreshCanopyTextures({
+      hasTextureSet: textureSet !== null,
+      texturesDirty: clipUpdate.texturesDirty,
+      textureRefreshPending,
+      queuedTiles: clipUpdate.metrics.queuedTiles,
+    })) {
       if (shouldAttemptTextureUpload(config.budgets.maxTextureUploadsPerFrame, uploadBudgetUsed)) {
         const uploaded = ensureTextures(false);
         if (uploaded) textureRefreshPending = false;

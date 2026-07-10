@@ -270,12 +270,6 @@ export async function bootstrapClodPoc() {
     if (!useNaadfFarSummary) {
       const seaLevel = world.worldSource.metadata.seaLevel;
       const farSummaryConfig = longViewConfigToFarSummaryConfig(lvConfig);
-      if (streamingOwnership.streamingScene) {
-        // Streaming scenes: use the acceptance-proven 6ms/frame tile-build budget so far tiles
-        // converge ~3x faster while moving; the cost is bounded and only paid while tiles are
-        // dirty. farSummaryMaxBuildMsPerFrame in the URL still overrides.
-        farSummaryConfig.stream.maxBuildMsPerFrame = Math.max(farSummaryConfig.stream.maxBuildMsPerFrame, 6);
-      }
       farSummaryIntegration = initFarSummaryIntegration({
         terrainSampler: {
           sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),

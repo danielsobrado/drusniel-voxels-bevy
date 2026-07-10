@@ -63,6 +63,7 @@ export interface CanopyDebugConfig {
 
 export interface CanopyBudgetConfig {
   maxTilesBuiltPerFrame: number;
+  maxBuildMsPerFrame: number;
   maxTextureUploadsPerFrame: number;
   maxShellTris: number;
 }

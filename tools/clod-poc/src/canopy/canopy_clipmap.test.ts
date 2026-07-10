@@ -16,9 +16,13 @@ describe("canopy clipmap", () => {
 
   it("builds within per-frame budget", () => {
     const clipmap = createCanopyClipmap();
-    const update = clipmap.update(0, 0, config, terrain, trees);
-    expect(update.metrics.builtThisFrame).toBeLessThanOrEqual(config.budgets.maxTilesBuiltPerFrame);
-    expect(update.metrics.visibleTiles).toBeGreaterThan(0);
+    let visibleTiles = 0;
+    for (let frame = 0; frame < 1000 && visibleTiles === 0; frame++) {
+      const update = clipmap.update(0, 0, config, terrain, trees);
+      expect(update.metrics.builtThisFrame).toBeLessThanOrEqual(config.budgets.maxTilesBuiltPerFrame);
+      visibleTiles = update.metrics.visibleTiles;
+    }
+    expect(visibleTiles).toBeGreaterThan(0);
   });
 
   it("evicts tiles when camera moves far away", () => {
@@ -62,7 +66,7 @@ describe("canopy clipmap", () => {
 
   it("skips tile builds when clipmap is disabled", () => {
     const clipmap = createCanopyClipmap();
-    clipmap.update(0, 0, config, terrain, trees);
+    while (clipmap.getVisibleTiles().length === 0) clipmap.update(0, 0, config, terrain, trees);
     expect(clipmap.getVisibleTiles().length).toBeGreaterThan(0);
 
     const disabled = {

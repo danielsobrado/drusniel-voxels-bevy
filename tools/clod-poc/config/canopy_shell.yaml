@@ -58,5 +58,6 @@ canopy_shell:
 
   budgets:
     max_tiles_built_per_frame: 4
+    max_build_ms_per_frame: 2.0
     max_texture_uploads_per_frame: 2
     max_shell_tris: 250000

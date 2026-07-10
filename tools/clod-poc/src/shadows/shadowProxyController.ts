@@ -14,7 +14,7 @@ import {
 import { shadowProxyStatsToCounters } from "./shadowProxyStats.js";
 import { computeShadowProxyCoverage } from "./shadowProxyValidation.js";
 
-const SHADOW_PROXY_PENDING_MAX_MS = 1000;
+const SHADOW_PROXY_PENDING_MAX_MS = 30_000;
 
 export interface ShadowProxyControllerDeps {
   scene: THREE.Scene;
@@ -189,12 +189,9 @@ export function createShadowProxyController(
     applyCompletedBuild(done, buildShadowProxyMesh(done.summaryRef, done.config, done.coverage, result));
   };
 
-  const shouldRestartPendingForCenter = (centerX: number, centerZ: number): boolean => {
+  const pendingJobIsStale = (): boolean => {
     if (!pendingJob) return true;
-    const distance = Math.hypot(centerX - pendingJob.centerX, centerZ - pendingJob.centerZ);
-    const maxDistance = Math.max(1, deps.rebuildSnapMeters);
-    const stale = performance.now() - pendingJob.startedMs > SHADOW_PROXY_PENDING_MAX_MS;
-    return distance > maxDistance || stale;
+    return performance.now() - pendingJob.startedMs > SHADOW_PROXY_PENDING_MAX_MS;
   };
 
   const rebuildProxy = (force = false) => {
@@ -217,7 +214,7 @@ export function createShadowProxyController(
     config = { ...config, ...liveConfig };
     const terrainSummary = deps.getTerrainSummary();
     const center = resolveCoverageCenter(deps);
-    if (!force && pendingJob && terrainSummary === pendingJob.summaryRef && !shouldRestartPendingForCenter(center.x, center.z)) {
+    if (!force && pendingJob && terrainSummary === pendingJob.summaryRef && !pendingJobIsStale()) {
       publishCounters();
       return;
     }
@@ -324,7 +321,7 @@ export function createShadowProxyController(
       const targetCenterX = pendingJob ? pendingJob.centerX : builtCenterX;
       const targetCenterZ = pendingJob ? pendingJob.centerZ : builtCenterZ;
       if ((snapped.x !== targetCenterX || snapped.z !== targetCenterZ) && !frozen) {
-        if (!pendingJob || shouldRestartPendingForCenter(snapped.x, snapped.z)) rebuildProxy(true);
+        if (!pendingJob || pendingJobIsStale()) rebuildProxy(true);
       }
       updateStreamingFollow();
       publishCounters();
@@ -343,7 +340,7 @@ export function createShadowProxyController(
         || targetCenterX !== center.x
         || targetCenterZ !== center.z
       ) {
-        rebuildProxy(force || !pendingJob || shouldRestartPendingForCenter(center.x, center.z));
+        rebuildProxy(force || !pendingJob || pendingJobIsStale());
       }
     },
     setOnSunShadowsChanged(handler: ((enabled: boolean) => void) | undefined) {

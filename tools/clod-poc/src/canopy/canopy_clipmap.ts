@@ -1,7 +1,7 @@
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopyMetrics, CanopySummaryTile, CanopyWorldKey } from "./canopy_types.js";
 import { createEmptyCanopyMetrics, stableTileKey } from "./canopy_types.js";
-import { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summary_builder.js";
+import { createCanopySummaryTileJob, tileResolutionForCellSize, type CanopySummaryTileJob } from "./canopy_summary_builder.js";
 import type { CanopyTerrainSampler } from "./canopy_terrain_sampler.js";
 import type { TreeDistribution } from "./deterministic_tree_distribution.js";
 
@@ -74,16 +74,17 @@ export function createCanopyClipmap(): CanopyClipmap {
   let centerInitialized = false;
   let lastCenterX = 0;
   let lastCenterZ = 0;
+  let activeBuild: { stableKey: string; ring: number; job: CanopySummaryTileJob } | null = null;
   // Tile cells are immutable once built, so the coverage aggregates only change when the tile
   // set changes; scanning every cell of every tile per frame is far too hot for the frame loop.
   let coverageStatsDirty = true;
 
-  const buildTile = (
+  const createTileJob = (
     key: CanopyWorldKey,
     config: CanopyShellConfig,
     terrainSampler: CanopyTerrainSampler,
     treeDistribution: TreeDistribution,
-  ): CanopySummaryTile => {
+  ): CanopySummaryTileJob => {
     const ringCfg = config.clipmap.rings[key.ring] ?? config.clipmap.rings[0];
     const cellSizeM = ringCfg.cellSizeM;
     const tileSizeM = config.clipmap.tileSizeM;
@@ -91,7 +92,7 @@ export function createCanopyClipmap(): CanopyClipmap {
     const originX = key.tileX * tileSizeM;
     const originZ = key.tileZ * tileSizeM;
     revision++;
-    return buildCanopySummaryTile({
+    return createCanopySummaryTileJob({
       key,
       originX,
       originZ,
@@ -130,6 +131,7 @@ export function createCanopyClipmap(): CanopyClipmap {
         tileRing.clear();
         staleSince.clear();
         rebuildQueue.length = 0;
+        activeBuild = null;
         metrics = {
           ...createEmptyCanopyMetrics(),
           evictedTiles: evicted,
@@ -149,10 +151,11 @@ export function createCanopyClipmap(): CanopyClipmap {
       metrics.evictedTiles = 0;
 
       rebuildQueue.length = 0;
+      if (activeBuild && wanted.get(activeBuild.stableKey)?.ring !== activeBuild.ring) activeBuild = null;
       for (const [stableKey, key] of wanted) {
         const existingRing = tileRing.get(stableKey);
         if (!tiles.has(stableKey) || existingRing !== key.ring) {
-          rebuildQueue.push(key);
+          if (activeBuild?.stableKey !== stableKey || activeBuild.ring !== key.ring) rebuildQueue.push(key);
         }
         staleSince.delete(stableKey);
       }
@@ -183,19 +186,28 @@ export function createCanopyClipmap(): CanopyClipmap {
         }
       }
 
-      metrics.queuedTiles = rebuildQueue.length;
+      metrics.queuedTiles = rebuildQueue.length + (activeBuild ? 1 : 0);
       const budget = config.budgets.maxTilesBuiltPerFrame;
+      const buildBudgetMs = Math.max(0.25, config.budgets.maxBuildMsPerFrame);
+      const buildStartedAt = performance.now();
       let built = 0;
-      while (built < budget && rebuildQueue.length > 0) {
-        const key = rebuildQueue.shift()!;
-        const stableKey = stableTileKey(key.tileX, key.tileZ);
-        const tile = buildTile(key, config, terrainSampler, treeDistribution);
-        tiles.set(stableKey, tile);
-        tileRing.set(stableKey, key.ring);
+      while (built < budget && (activeBuild || rebuildQueue.length > 0)) {
+        if (!activeBuild) {
+          const key = rebuildQueue.shift()!;
+          const stableKey = stableTileKey(key.tileX, key.tileZ);
+          activeBuild = { stableKey, ring: key.ring, job: createTileJob(key, config, terrainSampler, treeDistribution) };
+        }
+        const remainingMs = Math.max(0, buildBudgetMs - (performance.now() - buildStartedAt));
+        const tile = activeBuild.job.step(remainingMs);
+        if (!tile) break;
+        tiles.set(activeBuild.stableKey, tile);
+        tileRing.set(activeBuild.stableKey, activeBuild.ring);
+        activeBuild = null;
         built++;
+        if (performance.now() - buildStartedAt >= buildBudgetMs) break;
       }
       metrics.builtThisFrame = built;
-      metrics.queuedTiles = rebuildQueue.length;
+      metrics.queuedTiles = rebuildQueue.length + (activeBuild ? 1 : 0);
       metrics.builtTiles = tiles.size;
       metrics.visibleTiles = tiles.size;
       metrics.buildMs = performance.now() - t0;
@@ -243,6 +255,7 @@ export function createCanopyClipmap(): CanopyClipmap {
       tileRing.clear();
       staleSince.clear();
       rebuildQueue.length = 0;
+      activeBuild = null;
       metrics = { ...createEmptyCanopyMetrics(), evictedTiles: n };
       coverageStatsDirty = true;
     },
@@ -251,6 +264,7 @@ export function createCanopyClipmap(): CanopyClipmap {
       tileRing.clear();
       staleSince.clear();
       rebuildQueue.length = 0;
+      activeBuild = null;
       metrics = createEmptyCanopyMetrics();
       centerInitialized = false;
       coverageStatsDirty = true;

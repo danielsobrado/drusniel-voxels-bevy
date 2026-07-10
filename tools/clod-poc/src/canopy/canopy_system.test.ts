@@ -6,6 +6,7 @@ import {
   shellGridForTriangleBudget,
   shouldAttemptTextureUpload,
   shouldKeepCanopyShellActive,
+  shouldRefreshCanopyTextures,
   shouldRebuildCanopyShell,
   shouldUseSyntheticCanopyFallback,
   treeDistributionConfigKey,
@@ -74,6 +75,41 @@ describe("shouldAttemptTextureUpload", () => {
     expect(shouldAttemptTextureUpload(1, 0)).toBe(true);
     expect(shouldAttemptTextureUpload(1, 1)).toBe(false);
     expect(shouldAttemptTextureUpload(2, 1)).toBe(true);
+  });
+});
+
+describe("shouldRefreshCanopyTextures", () => {
+  it("uploads the first available texture immediately", () => {
+    expect(shouldRefreshCanopyTextures({
+      hasTextureSet: false,
+      texturesDirty: true,
+      textureRefreshPending: false,
+      queuedTiles: 40,
+    })).toBe(true);
+  });
+
+  it("coalesces subsequent dirty batches until the tile queue drains", () => {
+    expect(shouldRefreshCanopyTextures({
+      hasTextureSet: true,
+      texturesDirty: true,
+      textureRefreshPending: true,
+      queuedTiles: 4,
+    })).toBe(false);
+    expect(shouldRefreshCanopyTextures({
+      hasTextureSet: true,
+      texturesDirty: true,
+      textureRefreshPending: true,
+      queuedTiles: 0,
+    })).toBe(true);
+  });
+
+  it("applies an explicit refresh when no tile builds are pending", () => {
+    expect(shouldRefreshCanopyTextures({
+      hasTextureSet: true,
+      texturesDirty: false,
+      textureRefreshPending: true,
+      queuedTiles: 0,
+    })).toBe(true);
   });
 });
 
