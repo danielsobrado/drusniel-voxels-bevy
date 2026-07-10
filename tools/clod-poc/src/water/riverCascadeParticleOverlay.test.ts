@@ -4,15 +4,17 @@ import { cascadeParticleSignal } from "./riverCascadeParticleOverlay.js";
 import { DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS } from "./riverCascadeParticlesRuntime.js";
 
 function sample(partial: Partial<WaterFieldResult>): WaterFieldResult {
-  return {
+  const result = {
     waterY: 10,
     terrainY: 9,
     depth: 1,
     bodyMask: 1,
     bodyKind: 3, // river
     ...partial,
+    bodyKind: 0,
     flow: { x: 1, z: 0, speed: 0, progress: 0, drop: 0, ...partial.flow },
   };
+  return result;
 }
 
 describe("cascade particle signal", () => {
