@@ -161,13 +161,6 @@ function enqueueParentsForChildren(childLevel: number, childCoords: readonly [nu
   enqueueParentSiblingGroup(childLevel + 1, uniqueParentCoords(childCoords));
 }
 
-function clearPendingParentsFrom(level: number): void {
-  for (let l = level; l <= topLevel; l++) pendingByLevel.delete(l);
-  for (const l of [...pendingChildCoordsByLevel.keys()]) {
-    if (l >= level - 1) pendingChildCoordsByLevel.delete(l);
-  }
-}
-
 function recordResimplifiedChild(level: number, nx: number, nz: number): void {
   let coords = pendingChildCoordsByLevel.get(level);
   if (!coords) {
@@ -185,7 +178,6 @@ function flushChildEnqueues(completedLevel: number): void {
 }
 
 function enqueueParentsForLod0(coords: readonly [number, number][]): void {
-  clearPendingParentsFrom(1);
   enqueueParentsForChildren(0, coords);
 }
 
