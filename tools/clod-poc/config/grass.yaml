@@ -47,8 +47,8 @@ grass:
     height_m: 0.62
     height_variation: 0.48
     width_m: 0.026
-    near_blades_per_instance: 5
-    mid_blades_per_instance: 3
+    near_blades_per_instance: 7
+    mid_blades_per_instance: 4
     near_segments: 4
     mid_segments: 2
     far_tuft_width_m: 0.11
@@ -70,8 +70,8 @@ grass:
     show_patch_bounds: false
 
   ring:
-    grid: 640
-    cell: 0.5
+    grid: 512
+    cell: 0.8
     max_radius: 160
     ring_distance: 160
     near_meters: 32
