@@ -14,6 +14,7 @@ function baseOptions() {
     brushOp: "remove" as const,
     digRadius: 4,
     brushHeight: 6,
+    terrainRevision: 1,
     raycastEditableTerrain: vi.fn(() => ({ point: HIT_POINT.clone(), distance: 10, pageId: "L0:0,0" })),
     getPlayingAimRay: vi.fn(() => orbitRay),
     getOrbitHoverRay: vi.fn(() => orbitRay),
@@ -54,5 +55,26 @@ describe("brush preview controller", () => {
     expect(options.getPlayingAimRay).toHaveBeenCalledOnce();
     expect(options.getOrbitHoverRay).not.toHaveBeenCalled();
     expect(controller.mesh.visible).toBe(true);
+  });
+
+  it("reuses the hit while the ray and terrain revision are unchanged", () => {
+    const controller = createBrushPreviewController(new THREE.Scene());
+    const options = baseOptions();
+
+    controller.update(options);
+    controller.update(options);
+
+    expect(options.raycastEditableTerrain).toHaveBeenCalledOnce();
+    expect(controller.mesh.visible).toBe(true);
+  });
+
+  it("refreshes the hit after a terrain edit revision", () => {
+    const controller = createBrushPreviewController(new THREE.Scene());
+    const options = baseOptions();
+
+    controller.update(options);
+    controller.update({ ...options, terrainRevision: 2 });
+
+    expect(options.raycastEditableTerrain).toHaveBeenCalledTimes(2);
   });
 });
