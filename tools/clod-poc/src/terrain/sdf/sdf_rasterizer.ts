@@ -1,6 +1,6 @@
 import type { BaseDensitySampler, VoxelChunkKey, VoxelEditTransaction } from "../voxel_edits/voxel_edit_types.js";
 import { voxelChunkKeyFor, voxelChunkKeyString, VOXEL_CHUNK_SIZE } from "../voxel_edits/voxel_keys.js";
-import { applyBrushSdfToDensity, sampleBrushSdf, type SdfBrush } from "./sdf_brush.js";
+import { applySampledBrushSdfToDensity, sampleBrushSdf, type SdfBrush } from "./sdf_brush.js";
 
 export interface SdfRasterBounds {
   minX: number;
@@ -89,7 +89,7 @@ export function rasterizeSdfBrushToVoxelTransaction(
               );
               if (sdf > 0) continue;
               const before = input.sampleDensity(x, y, z);
-              const after = applyBrushSdfToDensity(input.brush, x, y, z, before);
+              const after = applySampledBrushSdfToDensity(input.brush, sdf, before);
               const materialSlot = input.brush.op === "add" && input.brush.materialSlot !== undefined
                 ? Math.max(0, input.brush.materialSlot | 0)
                 : undefined;
