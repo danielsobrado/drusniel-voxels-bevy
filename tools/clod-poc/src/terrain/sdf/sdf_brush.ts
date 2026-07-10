@@ -41,6 +41,20 @@ export function sampleBrushSdf(
   }
 }
 
+export function applySampledBrushSdfToDensity(
+  brush: SdfBrush,
+  sdf: number,
+  currentDensity: number,
+): number {
+  const full = brush.op === "add"
+    ? Math.max(currentDensity, -sdf)
+    : Math.min(currentDensity, sdf);
+  const weight = brush.falloff > 0
+    ? Math.min(1, Math.max(0, -sdf / Math.max(1e-3, brush.falloff * brush.radius))) * brush.strength
+    : sdf <= 0 ? brush.strength : 0;
+  return currentDensity + (full - currentDensity) * weight;
+}
+
 export function applyBrushSdfToDensity(
   brush: SdfBrush,
   x: number,
@@ -56,11 +70,5 @@ export function applyBrushSdfToDensity(
     brush.radius,
     brush.height,
   );
-  const full = brush.op === "add"
-    ? Math.max(currentDensity, -sdf)
-    : Math.min(currentDensity, sdf);
-  const weight = brush.falloff > 0
-    ? Math.min(1, Math.max(0, -sdf / Math.max(1e-3, brush.falloff * brush.radius))) * brush.strength
-    : sdf <= 0 ? brush.strength : 0;
-  return currentDensity + (full - currentDensity) * weight;
+  return applySampledBrushSdfToDensity(brush, sdf, currentDensity);
 }
