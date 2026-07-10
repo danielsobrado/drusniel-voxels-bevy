@@ -125,6 +125,7 @@ export async function bootstrapClodPoc() {
     worldSizeCells: world.worldSizeCells,
     worldMode: world.worldMode,
     terrainSummary: world.terrainSummary,
+    terrainFieldConfig: world.worldSource.metadata.terrain,
     hydrologyFieldsTexture: world.hydrologySystem?.hydrologyFieldsTexture() ?? null,
     isLongView: postRenderer.isLongView,
     queryFarShell: queries.queryFarShell,

@@ -53,8 +53,8 @@ export interface CanopyWorkerBuiltTile {
   cellSizeM: number;
   resolution: number;
   revision: number;
-  /** CANOPY_CELL_FLOATS floats per cell, row-major; see packCanopyCells. */
-  cells: Float32Array;
+  /** CANOPY_CELL_FLOATS values per cell, row-major; f64 keeps worker tiles bit-identical. */
+  cells: Float64Array;
 }
 
 export type CanopyWorkerResponse =
@@ -63,8 +63,8 @@ export type CanopyWorkerResponse =
 
 export const CANOPY_CELL_FLOATS = 9;
 
-export function packCanopyCells(cells: readonly CanopySummaryCell[]): Float32Array {
-  const out = new Float32Array(cells.length * CANOPY_CELL_FLOATS);
+export function packCanopyCells(cells: readonly CanopySummaryCell[]): Float64Array {
+  const out = new Float64Array(cells.length * CANOPY_CELL_FLOATS);
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i]!;
     const base = i * CANOPY_CELL_FLOATS;
@@ -81,7 +81,7 @@ export function packCanopyCells(cells: readonly CanopySummaryCell[]): Float32Arr
   return out;
 }
 
-export function unpackCanopyCells(packed: Float32Array, cellCount: number): CanopySummaryCell[] {
+export function unpackCanopyCells(packed: Float64Array, cellCount: number): CanopySummaryCell[] {
   const cells: CanopySummaryCell[] = new Array(cellCount);
   for (let i = 0; i < cellCount; i++) {
     const base = i * CANOPY_CELL_FLOATS;

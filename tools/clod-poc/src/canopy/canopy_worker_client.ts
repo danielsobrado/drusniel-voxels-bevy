@@ -18,10 +18,13 @@ import {
 
 export type { CanopyWorkerTileCoord } from "./canopy_worker_protocol.js";
 
-export interface CanopyRemoteTileBuilder {
+export interface CanopyRemoteTileSource {
   available(): boolean;
   /** Resolves to the built tiles, or [] when the batch raced a reconfigure; rejects on worker failure. */
   build(tiles: CanopyWorkerTileCoord[]): Promise<CanopySummaryTile[]>;
+}
+
+export interface CanopyRemoteTileBuilder extends CanopyRemoteTileSource {
   configure(input: {
     terrainFieldConfig: TerrainFieldConfig | null;
     terrainSummary: TerrainSummaryField | null;

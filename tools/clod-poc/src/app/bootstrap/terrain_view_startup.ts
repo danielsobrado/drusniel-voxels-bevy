@@ -100,6 +100,8 @@ export interface TerrainViewStartupInput {
   worldSizeCells: number;
   worldMode: import("../world_mode.js").WorldModeConfig;
   terrainSummary: TerrainSummaryField;
+  /** Resolved procedural terrain config (worldSource.metadata.terrain); powers worker-side canopy builds. */
+  terrainFieldConfig?: import("../../terrain/terrain.js").TerrainFieldConfig | null;
   hydrologyFieldsTexture: THREE.Texture | null;
   isLongView: boolean;
   queryFarShell: boolean;
@@ -356,6 +358,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
       scene,
       terrainSummary,
       worldSizeCells,
+      terrainFieldConfig: input.terrainFieldConfig ?? null,
       getLighting: currentLighting,
       getConfig: () => liveCanopyConfig,
       getDebugState: () => canopyDebugState!,

@@ -4,7 +4,7 @@ import { createEmptyCanopyMetrics, stableTileKey } from "./canopy_types.js";
 import { createCanopySummaryTileJob, tileResolutionForCellSize, type CanopySummaryTileJob } from "./canopy_summary_builder.js";
 import type { CanopyTerrainSampler } from "./canopy_terrain_sampler.js";
 import type { TreeDistribution } from "./deterministic_tree_distribution.js";
-import type { CanopyRemoteTileBuilder, CanopyWorkerTileCoord } from "./canopy_worker_client.js";
+import type { CanopyRemoteTileSource, CanopyWorkerTileCoord } from "./canopy_worker_client.js";
 
 export interface CanopyClipmapUpdate {
   metrics: CanopyMetrics;
@@ -65,7 +65,7 @@ function wantedTileMap(
 const REMOTE_BATCH_TILES = 8;
 const REMOTE_MAX_INFLIGHT_TILES = 32;
 
-export function createCanopyClipmap(remote?: CanopyRemoteTileBuilder | null): CanopyClipmap {
+export function createCanopyClipmap(remote?: CanopyRemoteTileSource | null): CanopyClipmap {
   const tiles = new Map<string, CanopySummaryTile>();
   const tileRing = new Map<string, number>();
   const staleSince = new Map<string, number>();

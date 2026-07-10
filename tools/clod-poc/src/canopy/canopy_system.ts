@@ -28,11 +28,16 @@ import {
   maxCanopyGpuImpostorInstances,
   type CanopyGpuImpostorShell,
 } from "./canopy_gpu_impostors.js";
+import { createCanopyRemoteTileBuilder } from "./canopy_worker_client.js";
+import { getNaadfIntegrationFromWindow } from "../naadf/canopyBridge.js";
+import type { TerrainFieldConfig } from "../terrain/terrain.js";
 
 export interface CanopyShellSystemDeps {
   scene: THREE.Scene;
   terrainSummary: TerrainSummaryField;
   worldSizeCells: number;
+  /** Resolved procedural terrain config; enables worker-side canopy tile builds when present. */
+  terrainFieldConfig?: TerrainFieldConfig | null;
   getLighting: () => EnvironmentLighting;
   getConfig: () => CanopyShellConfig;
   getDebugState: () => CanopyDebugState;
@@ -147,7 +152,26 @@ export function createCanopyShellSystem(
   const active = shouldUseDeterministicCanopy(scene, config, queryCanopy);
   if (!active) return null;
 
-  const clipmap = createCanopyClipmap();
+  // Canopy tiles build in a worker whenever one is available; NAADF scenes stay on the
+  // main-thread path because the NAADF coverage merge lives in main-thread integration state.
+  const remoteBuilder = createCanopyRemoteTileBuilder();
+  const remoteSource = remoteBuilder
+    ? {
+      available: () => remoteBuilder.available() && getNaadfIntegrationFromWindow() === undefined,
+      build: remoteBuilder.build,
+    }
+    : null;
+  const configureRemoteBuilder = (): void => {
+    remoteBuilder?.configure({
+      terrainFieldConfig: deps.terrainFieldConfig ?? null,
+      terrainSummary: deps.terrainSummary,
+      farRadius: config.distances.shellEndM,
+      config,
+    });
+  };
+  configureRemoteBuilder();
+
+  const clipmap = createCanopyClipmap(remoteSource);
   let treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
   let treeDistributionKey = treeDistributionConfigKey(config);
   let textureConfigKey = canopyTextureConfigKey(config);
@@ -266,6 +290,7 @@ export function createCanopyShellSystem(
       terrainSamplerRadius = config.distances.shellEndM;
       terrainSampler = createBlendedTerrainSampler(deps.terrainSummary, terrainSamplerRadius);
       clipmap.disposeFarTiles();
+      configureRemoteBuilder();
       textureRefreshPending = true;
     }
 
@@ -274,6 +299,7 @@ export function createCanopyShellSystem(
       treeDistributionKey = nextTreeKey;
       treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
       clipmap.disposeFarTiles();
+      configureRemoteBuilder();
       textureRefreshPending = true;
     }
 
@@ -364,6 +390,7 @@ export function createCanopyShellSystem(
       disposeShellAndTextures();
       clipmap.dispose();
       overlays.dispose();
+      remoteBuilder?.dispose();
     },
   };
 }
