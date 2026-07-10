@@ -4,6 +4,7 @@ import { DEFAULT_TREE_SETTINGS } from "./tree_config.js";
 import { createTreeGeometryMap, disposeTreeGeometryMap, treeGeometryVariant } from "./tree_geometry.js";
 import { treeHeroGeometryStats } from "./tree_hero_fidelity.js";
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
+import { treeSpeciesAtlasIndex } from "./tree_alpha_mask.js";
 
 const HERO_LEAFY_MIN_TRIANGLES_PER_VARIANT = 512;
 
@@ -19,6 +20,8 @@ describe("tree variant geometry map", () => {
           expect(selector).not.toBe(map[species].variants[0][lod]);
           expect(selector.getAttribute("treeVariant")?.count).toBe(positionCount);
           expect(selector.getAttribute("treeFoliageCard")?.count).toBe(positionCount);
+          expect(selector.getAttribute("treeSpeciesIndex")?.count).toBe(positionCount);
+          expect(selector.getAttribute("treeSpeciesIndex")?.getX(0)).toBe(treeSpeciesAtlasIndex(species));
           expect(treeGeometryVariant(map, species, 0, lod)).toBe(map[species].variants[0][lod]);
         }
       }
