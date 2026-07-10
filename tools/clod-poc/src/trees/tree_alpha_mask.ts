@@ -1,50 +1,18 @@
 import * as THREE from "three";
-import type { TreeSettings, TreeSpeciesFoliageSettings, TreeSpeciesId } from "./tree_config.js";
+import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import { VEG_TREE_SPECIES } from "../veg/veg_species.js";
 import { clamp01, hash3, smoothstep } from "./tree_noise.js";
+
+export const TREE_FOLIAGE_ATLAS_VARIANTS = 4;
+export const TREE_FOLIAGE_ATLAS_COLUMNS = TREE_FOLIAGE_ATLAS_VARIANTS;
+export const TREE_FOLIAGE_ATLAS_ROWS = TREE_SPECIES.length;
 
 export interface TreeFoliageAtlas {
   texture: THREE.DataTexture;
   columns: number;
   rows: number;
+  cellSize: number;
   dispose(): void;
-}
-
-export function createTreeFoliageAtlas(settings: TreeSettings): TreeFoliageAtlas {
-  const foliage = settings.foliage;
-  const cellSize = foliage.maskResolutionPx;
-  const columns = foliage.textureAtlasColumns;
-  const rows = foliage.textureAtlasRows;
-  const width = columns * cellSize;
-  const height = rows * cellSize;
-  const data = new Uint8Array(width * height * 4);
-  for (let cell = 0; cell < columns * rows; cell++) {
-    const species: TreeSpeciesId = cell < Math.ceil(columns * rows * 0.5) ? "oak" : "pine";
-    const speciesSettings = species === "oak" ? foliage.oak : foliage.pine;
-    writeMaskCell(data, width, cellSize, columns, cell, species, speciesSettings, settings.seed);
-  }
-  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
-  texture.name = "tree-foliage-alpha-atlas";
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
-  return {
-    texture,
-    columns,
-    rows,
-    dispose() {
-      texture.dispose();
-    },
-  };
-}
-
-export function foliageAtlasCell(species: Exclude<TreeSpeciesId, "dead">, variant: number, settings: TreeSettings): number {
-  const cellCount = settings.foliage.textureAtlasColumns * settings.foliage.textureAtlasRows;
-  const split = Math.max(1, Math.ceil(cellCount * 0.5));
-  if (species === "oak") return Math.abs(Math.floor(variant)) % split;
-  return split + (Math.abs(Math.floor(variant)) % Math.max(1, cellCount - split));
 }
 
 interface Leaflet {
@@ -54,136 +22,252 @@ interface Leaflet {
   sin: number;
   length: number;
   width: number;
-  hue: number;
   value: number;
+  coolWarm: number;
 }
 
-/**
- * Each atlas cell is a CLUSTER of small leaflets rather than one solid blob, so a
- * leaf card reads as dappled foliage (gaps between leaves, internal veins, per-leaf
- * value/edge shading) instead of a flat green silhouette. RGB carries a darkening
- * detail modulation (≤1) so the material's per-card vertex colour still drives hue;
- * alpha is the union silhouette of the leaflets.
- */
-function writeMaskCell(
+interface LeafletSample {
+  alpha: number;
+  shade: number;
+  coolWarm: number;
+}
+
+const EMPTY_LEAFLET: LeafletSample = { alpha: 0, shade: 0.5, coolWarm: 0 };
+const DILATION_PASSES = 6;
+const FOLIAGE_ATLAS_ANISOTROPY = 4;
+
+export function createTreeFoliageAtlas(settings: TreeSettings): TreeFoliageAtlas {
+  const cellSize = Math.max(32, Math.floor(settings.foliage.maskResolutionPx));
+  const width = TREE_FOLIAGE_ATLAS_COLUMNS * cellSize;
+  const height = TREE_FOLIAGE_ATLAS_ROWS * cellSize;
+  const data = new Uint8Array(width * height * 4);
+
+  for (let speciesIndex = 0; speciesIndex < TREE_SPECIES.length; speciesIndex++) {
+    const species = TREE_SPECIES[speciesIndex] as TreeSpeciesId;
+    if (!VEG_TREE_SPECIES[species].foliage) continue;
+    for (let variant = 0; variant < TREE_FOLIAGE_ATLAS_VARIANTS; variant++) {
+      writeClusterCell(data, width, cellSize, speciesIndex, variant, species, settings.seed);
+    }
+  }
+  dilateTransparentRgb(data, width, height, DILATION_PASSES);
+
+  const texture = new THREE.DataTexture(
+    data,
+    width,
+    height,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  texture.name = "tree-foliage-cluster-atlas";
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = FOLIAGE_ATLAS_ANISOTROPY;
+  texture.needsUpdate = true;
+
+  return {
+    texture,
+    columns: TREE_FOLIAGE_ATLAS_COLUMNS,
+    rows: TREE_FOLIAGE_ATLAS_ROWS,
+    cellSize,
+    dispose() {
+      texture.dispose();
+    },
+  };
+}
+
+export function treeSpeciesAtlasIndex(species: TreeSpeciesId): number {
+  return Math.max(0, TREE_SPECIES.indexOf(species));
+}
+
+export function foliageAtlasCell(
+  species: Exclude<TreeSpeciesId, "dead">,
+  variant: number,
+  _settings?: TreeSettings,
+): number {
+  return treeSpeciesAtlasIndex(species) * TREE_FOLIAGE_ATLAS_COLUMNS
+    + Math.abs(Math.floor(variant)) % TREE_FOLIAGE_ATLAS_VARIANTS;
+}
+
+export function foliageAtlasUvAt(
+  localU: number,
+  localV: number,
+  speciesIndex: number,
+): readonly [number, number] {
+  const u = clamp01(localU);
+  const v = clamp01(localV);
+  const tileX = Math.min(1, Math.floor(u * 2));
+  const tileY = Math.min(1, Math.floor(v * 2));
+  const tile = tileX + tileY * 2;
+  const withinU = u * 2 - tileX;
+  const withinV = v * 2 - tileY;
+  const row = Math.max(0, Math.min(TREE_FOLIAGE_ATLAS_ROWS - 1, Math.floor(speciesIndex)));
+  return [
+    (tile + withinU) / TREE_FOLIAGE_ATLAS_COLUMNS,
+    (row + withinV) / TREE_FOLIAGE_ATLAS_ROWS,
+  ];
+}
+
+function writeClusterCell(
   data: Uint8Array,
   textureWidth: number,
   cellSize: number,
-  columns: number,
-  cell: number,
-  species: Exclude<TreeSpeciesId, "dead">,
-  settings: TreeSpeciesFoliageSettings,
+  speciesIndex: number,
+  variant: number,
+  species: TreeSpeciesId,
   seed: number,
 ): void {
-  const cellX = cell % columns;
-  const cellY = Math.floor(cell / columns);
-  const leaflets = buildLeaflets(species, settings, seed, cell);
-  const roundness = settings.cutoutRoundness;
+  const leaflets = buildLeaflets(species, seed, variant);
+  const cellX = variant;
+  const cellY = speciesIndex;
+
   for (let py = 0; py < cellSize; py++) {
     for (let px = 0; px < cellSize; px++) {
       const x = (px + 0.5) / cellSize * 2 - 1;
       const y = (py + 0.5) / cellSize * 2 - 1;
-      let alpha = 0;
-      let shade = 0.5;
-      let hue = 0;
+      let best = EMPTY_LEAFLET;
       for (const leaf of leaflets) {
-        const sample = evalLeaflet(leaf, x, y, roundness);
-        if (sample.alpha > alpha) {
-          alpha = sample.alpha;
-          shade = sample.shade;
-          hue = sample.hue;
-        }
+        const sample = evalLeaflet(leaf, x, y, species);
+        if (sample.alpha > best.alpha) best = sample;
       }
-      const index = ((cellY * cellSize + py) * textureWidth + cellX * cellSize + px) * 4;
-      data[index] = Math.round(255 * shade * (1 - Math.max(0, -hue) * 0.12));
-      data[index + 1] = Math.round(255 * shade);
-      data[index + 2] = Math.round(255 * shade * (1 - Math.max(0, hue) * 0.12));
-      data[index + 3] = Math.round(clamp01(alpha) * 255);
+
+      const offset = ((cellY * cellSize + py) * textureWidth + cellX * cellSize + px) * 4;
+      const cool = Math.max(0, -best.coolWarm);
+      const warm = Math.max(0, best.coolWarm);
+      data[offset] = Math.round(255 * clamp01(best.shade * (1 + warm * 0.1 - cool * 0.08)));
+      data[offset + 1] = Math.round(255 * clamp01(best.shade));
+      data[offset + 2] = Math.round(255 * clamp01(best.shade * (1 + cool * 0.1 - warm * 0.1)));
+      data[offset + 3] = Math.round(255 * clamp01(best.alpha));
     }
   }
 }
 
-function buildLeaflets(
-  species: Exclude<TreeSpeciesId, "dead">,
-  settings: TreeSpeciesFoliageSettings,
-  seed: number,
-  cell: number,
-): Leaflet[] {
-  const isPine = species === "pine";
-  const count = isPine
-    ? Math.max(8, Math.min(20, Math.round(settings.lobeCount * 1.8 + 8)))
-    : Math.max(7, Math.min(16, Math.round(settings.lobeCount + 6)));
+function buildLeaflets(species: TreeSpeciesId, seed: number, variant: number): Leaflet[] {
+  const params = VEG_TREE_SPECIES[species];
+  const conifer = params.kind === "conifer";
+  const baseCount = conifer
+    ? Math.max(18, Math.round((params.foliage?.leaf.needleCount ?? 24) * 0.55))
+    : 15;
+  const count = Math.min(conifer ? 42 : 22, baseCount + variant * (conifer ? 2 : 1));
   const leaflets: Leaflet[] = [];
-  for (let k = 0; k < count; k++) {
-    const h0 = hash3(cell, k, 1, seed + 24001);
-    const h1 = hash3(cell, k, 2, seed + 24011);
-    const h2 = hash3(cell, k, 3, seed + 24021);
-    const h3 = hash3(cell, k, 4, seed + 24031);
-    const h4 = hash3(cell, k, 5, seed + 24041);
-    if (isPine) {
-      // needles fanning up from a base spread near the bottom of the card
-      const angle = Math.PI * 0.5 + (h2 - 0.5) * (1.1 + settings.edgeNoise);
+
+  for (let index = 0; index < count; index++) {
+    const h0 = hash3(variant, index, 1, seed + treeSpeciesAtlasIndex(species) * 17011);
+    const h1 = hash3(variant, index, 2, seed + treeSpeciesAtlasIndex(species) * 17021);
+    const h2 = hash3(variant, index, 3, seed + treeSpeciesAtlasIndex(species) * 17031);
+    const h3 = hash3(variant, index, 4, seed + treeSpeciesAtlasIndex(species) * 17041);
+    const h4 = hash3(variant, index, 5, seed + treeSpeciesAtlasIndex(species) * 17051);
+
+    if (conifer) {
+      const t = count <= 1 ? 0 : index / (count - 1);
+      const side = index % 2 === 0 ? 1 : -1;
+      const angle = Math.PI * 0.5 + side * (0.42 + h2 * 0.85);
       leaflets.push({
-        cx: (h0 - 0.5) * 0.9,
-        cy: -0.92 + h1 * 0.55,
+        cx: side * (0.05 + h0 * 0.34) * (0.45 + t),
+        cy: -0.86 + t * 1.5 + (h1 - 0.5) * 0.16,
         cos: Math.cos(angle),
         sin: Math.sin(angle),
-        length: 0.95 + h3 * 0.6,
-        width: 0.035 + h4 * 0.03,
-        hue: (h2 - 0.5) * 2,
-        value: 0.66 + h4 * 0.34,
+        length: 0.48 + h3 * 0.42,
+        width: 0.022 + h4 * 0.035,
+        value: 0.68 + h4 * 0.32,
+        coolWarm: (h2 - 0.5) * 2,
       });
     } else {
-      // broadleaf leaflets radiating outward in a rosette disk
-      const r = Math.sqrt(h0) * 0.62;
-      const a = h1 * Math.PI * 2;
-      const angle = a + (h2 - 0.5) * 1.5;
+      const radial = Math.sqrt(h0) * 0.65;
+      const around = h1 * Math.PI * 2;
+      const direction = around + (h2 - 0.5) * 1.35;
       leaflets.push({
-        cx: Math.cos(a) * r,
-        cy: Math.sin(a) * r,
-        cos: Math.cos(angle),
-        sin: Math.sin(angle),
-        length: 0.42 + h3 * 0.3,
-        width: 0.17 + h4 * 0.12,
-        hue: (h2 - 0.5) * 2,
+        cx: Math.cos(around) * radial,
+        cy: Math.sin(around) * radial * 0.78,
+        cos: Math.cos(direction),
+        sin: Math.sin(direction),
+        length: 0.4 + h3 * 0.34,
+        width: 0.14 + h4 * 0.13,
         value: 0.64 + h4 * 0.36,
+        coolWarm: (h2 - 0.5) * 2,
       });
     }
   }
   return leaflets;
 }
 
-interface LeafletSample {
-  alpha: number;
-  shade: number;
-  hue: number;
-}
-
-const EMPTY_LEAFLET: LeafletSample = { alpha: 0, shade: 0.5, hue: 0 };
-
-function evalLeaflet(leaf: Leaflet, x: number, y: number, roundness: number): LeafletSample {
+function evalLeaflet(
+  leaf: Leaflet,
+  x: number,
+  y: number,
+  species: TreeSpeciesId,
+): LeafletSample {
   const dx = x - leaf.cx;
   const dy = y - leaf.cy;
-  const along = dx * leaf.cos + dy * leaf.sin; // 0 at base → length at tip
+  const along = dx * leaf.cos + dy * leaf.sin;
   const across = -dx * leaf.sin + dy * leaf.cos;
   const s = along / leaf.length;
   if (s < 0 || s > 1) return EMPTY_LEAFLET;
-  const half = leaf.width * leafProfile(s, roundness);
-  if (half <= 0) return EMPTY_LEAFLET;
-  const a = Math.abs(across);
-  const edge = (half - a) / Math.max(half * 0.5, 0.01); // 1 at midrib, 0 at edge
+
+  const profile = VEG_TREE_SPECIES[species].kind === "conifer"
+    ? Math.sin(Math.PI * clamp01(s)) ** 0.35
+    : leafProfile(s, VEG_TREE_SPECIES[species].foliage?.leaf.shapePow ?? 1.2);
+  const halfWidth = leaf.width * profile;
+  if (halfWidth <= 0) return EMPTY_LEAFLET;
+  const edge = (halfWidth - Math.abs(across)) / Math.max(halfWidth * 0.45, 0.006);
   if (edge <= 0) return EMPTY_LEAFLET;
+
   const alpha = clamp01(edge * 4);
-  const midrib = Math.exp(-((a / (half * 0.18 + 0.004)) ** 2)); // bright spine
-  const valueGrad = 0.62 + 0.38 * s; // dark base → light tip
-  const edgeAO = 0.7 + 0.3 * clamp01(edge);
-  const vein = 0.88 + 0.12 * midrib;
-  const shade = clamp01(valueGrad * edgeAO * vein * leaf.value);
-  return { alpha, shade: Math.max(0.4, shade), hue: leaf.hue };
+  const midrib = Math.exp(-((Math.abs(across) / (halfWidth * 0.2 + 0.003)) ** 2));
+  const valueGradient = 0.68 + 0.32 * s;
+  const edgeAo = 0.72 + 0.28 * clamp01(edge);
+  const shade = clamp01(valueGradient * edgeAo * (0.9 + 0.1 * midrib) * leaf.value);
+  return { alpha, shade: Math.max(0.38, shade), coolWarm: leaf.coolWarm };
 }
 
-function leafProfile(s: number, roundness: number): number {
-  const base = smoothstep(0, 0.14, s); // rounded base
-  const tip = Math.pow(1 - s, 0.55 + roundness * 0.6); // pointed tip
-  return base * tip;
+function leafProfile(s: number, shapePower: number): number {
+  const base = smoothstep(0, 0.13, s);
+  const body = Math.pow(Math.sin(Math.PI * Math.min(1, s * 0.91 + 0.045)), Math.max(0.5, shapePower));
+  const tip = Math.pow(1 - s, 0.28);
+  return base * body * tip;
+}
+
+function dilateTransparentRgb(data: Uint8Array, width: number, height: number, passes: number): void {
+  const originalAlpha = new Uint8Array(width * height);
+  for (let pixel = 0; pixel < width * height; pixel++) originalAlpha[pixel] = data[pixel * 4 + 3] as number;
+
+  for (let pass = 0; pass < passes; pass++) {
+    const source = data.slice();
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const pixel = y * width + x;
+        const offset = pixel * 4;
+        if ((originalAlpha[pixel] as number) > 0) continue;
+        let red = 0;
+        let green = 0;
+        let blue = 0;
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const sampleX = x + dx;
+            const sampleY = y + dy;
+            if (sampleX < 0 || sampleY < 0 || sampleX >= width || sampleY >= height) continue;
+            const sampleOffset = (sampleY * width + sampleX) * 4;
+            if ((source[sampleOffset] as number) === 0
+              && (source[sampleOffset + 1] as number) === 0
+              && (source[sampleOffset + 2] as number) === 0) continue;
+            red += source[sampleOffset] as number;
+            green += source[sampleOffset + 1] as number;
+            blue += source[sampleOffset + 2] as number;
+            count++;
+          }
+        }
+        if (count > 0) {
+          data[offset] = Math.round(red / count);
+          data[offset + 1] = Math.round(green / count);
+          data[offset + 2] = Math.round(blue / count);
+          data[offset + 3] = 0;
+        }
+      }
+    }
+  }
 }
