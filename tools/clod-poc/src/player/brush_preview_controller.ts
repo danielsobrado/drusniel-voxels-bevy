@@ -8,6 +8,8 @@ const DIG_PREVIEW_COLOR = 0xff5533;
 const RAISE_PREVIEW_COLOR = 0x55dd66;
 const PREVIEW_OPACITY = 0.35;
 const PREVIEW_RENDER_ORDER = 100;
+const PREVIEW_RAYCAST_INTERVAL_MS = 33;
+const PREVIEW_RAY_EPSILON_SQ = 1e-8;
 
 export interface BrushPreviewController {
   readonly mesh: THREE.Mesh;
@@ -19,6 +21,7 @@ export interface BrushPreviewController {
     brushOp: BrushOp;
     digRadius: number;
     brushHeight: number;
+    terrainRevision: number;
     raycastEditableTerrain: (ray: THREE.Ray) => TerrainSurfaceHit | null;
     getPlayingAimRay: () => THREE.Ray;
     getOrbitHoverRay: () => THREE.Ray | null;
@@ -41,23 +44,58 @@ export function createBrushPreviewController(scene: THREE.Scene): BrushPreviewCo
     side: THREE.DoubleSide,
   }, "brush-preview");
   const mesh = new THREE.Mesh(brushPreviewGeometries.sphere, material);
+  const lastRayOrigin = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  const lastRayDirection = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  let lastRaycastAt = -Infinity;
+  let lastTerrainRevision = -1;
+  let cachedHit: TerrainSurfaceHit | null = null;
   mesh.renderOrder = PREVIEW_RENDER_ORDER;
   mesh.visible = false;
   scene.add(mesh);
 
+  const clearCachedHit = (): void => {
+    cachedHit = null;
+    lastRaycastAt = -Infinity;
+    lastTerrainRevision = -1;
+    lastRayOrigin.set(Number.NaN, Number.NaN, Number.NaN);
+    lastRayDirection.set(Number.NaN, Number.NaN, Number.NaN);
+  };
+
   return {
     mesh,
     update(options) {
-      let digAimHit: TerrainSurfaceHit | null = null;
       const previewEnabled = options.digEnabled && options.terraformEditActive;
-      if (previewEnabled && options.interactionMode === "playing") {
-        digAimHit = options.raycastEditableTerrain(options.getPlayingAimRay());
-      } else if (previewEnabled && options.interactionMode === "orbit") {
-        const hoverRay = options.getOrbitHoverRay();
-        if (hoverRay) digAimHit = options.raycastEditableTerrain(hoverRay);
+      if (!previewEnabled) {
+        clearCachedHit();
+        mesh.visible = false;
+        return;
       }
-      if (digAimHit) {
-        mesh.position.copy(digAimHit.point);
+
+      const ray = options.interactionMode === "playing"
+        ? options.getPlayingAimRay()
+        : options.interactionMode === "orbit"
+          ? options.getOrbitHoverRay()
+          : null;
+      if (!ray) {
+        clearCachedHit();
+        mesh.visible = false;
+        return;
+      }
+
+      const now = performance.now();
+      const rayChanged = lastRayOrigin.distanceToSquared(ray.origin) > PREVIEW_RAY_EPSILON_SQ
+        || lastRayDirection.distanceToSquared(ray.direction) > PREVIEW_RAY_EPSILON_SQ;
+      const terrainChanged = options.terrainRevision !== lastTerrainRevision;
+      if (terrainChanged || (rayChanged && now - lastRaycastAt >= PREVIEW_RAYCAST_INTERVAL_MS)) {
+        cachedHit = options.raycastEditableTerrain(ray);
+        lastRayOrigin.copy(ray.origin);
+        lastRayDirection.copy(ray.direction);
+        lastRaycastAt = now;
+        lastTerrainRevision = options.terrainRevision;
+      }
+
+      if (cachedHit) {
+        mesh.position.copy(cachedHit.point);
         mesh.scale.set(
           Math.max(0.001, options.digRadius),
           Math.max(0.001, options.brushHeight),
@@ -66,9 +104,10 @@ export function createBrushPreviewController(scene: THREE.Scene): BrushPreviewCo
         mesh.geometry = brushPreviewGeometries[options.brushShape];
         material.color.setHex(options.brushOp === "add" ? RAISE_PREVIEW_COLOR : DIG_PREVIEW_COLOR);
       }
-      mesh.visible = digAimHit !== null;
+      mesh.visible = cachedHit !== null;
     },
     hide() {
+      clearCachedHit();
       mesh.visible = false;
     },
   };
