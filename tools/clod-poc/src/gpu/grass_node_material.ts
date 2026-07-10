@@ -155,13 +155,13 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     localY = pos.y.mul(aHeight);
     localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
-    const base = vec3(0.04, 0.16, 0.035);
-    const mid = vec3(0.16, 0.36, 0.075);
-    const tip = vec3(0.43, 0.58, 0.16);
-    const dry = vec3(0.48, 0.38, 0.11);
+    const base = vec3(0.018, 0.055, 0.012);
+    const mid = vec3(0.075, 0.17, 0.035);
+    const tip = vec3(0.20, 0.30, 0.085);
+    const dry = vec3(0.30, 0.24, 0.09);
     grassColor = mix(base, mid, smoothstep(0.0, 0.7, uvY));
     grassColor = mix(grassColor, tip, smoothstep(0.62, 1.0, uvY));
-    grassColor = mix(grassColor, dry, aColorMix.mul(0.42));
+    grassColor = mix(grassColor, dry, aColorMix.mul(0.35));
     if (debugAttributes) {
       grassColor = vec3(edge, normalY, 0.08);
     }
@@ -170,13 +170,13 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     localY = pos.y.mul(aHeight);
     localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
-    const darkGreen = vec3(0.035, 0.12, 0.025);
-    const midGreen = vec3(0.12, 0.34, 0.055);
-    const tipGreen = vec3(0.34, 0.56, 0.12);
-    const dryGrass = vec3(0.52, 0.42, 0.12);
+    const darkGreen = vec3(0.018, 0.055, 0.012);
+    const midGreen = vec3(0.075, 0.16, 0.035);
+    const tipGreen = vec3(0.18, 0.28, 0.08);
+    const dryGrass = vec3(0.28, 0.22, 0.08);
     grassColor = mix(darkGreen, midGreen, smoothstep(0.0, 0.62, uvY));
     grassColor = mix(grassColor, tipGreen, smoothstep(0.58, 1.0, uvY));
-    grassColor = mix(grassColor, dryGrass, aColorMix.mul(0.58));
+    grassColor = mix(grassColor, dryGrass, aColorMix.mul(0.48));
   }
 
   const c: TslNode = cos(aRotY);
@@ -205,14 +205,14 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let litColor: TslNode;
   if (isPatchV2) {
     const wrap: TslNode = clamp(dot(n, lightDir).mul(0.45).add(0.55), 0.0, 1.0);
-    const direct: TslNode = uSun.mul(sun.mul(0.65).add(wrap.mul(0.28)));
-    const transmission: TslNode = vec3(0.42, 0.52, 0.12).mul(back).mul(uvY.mul(0.42).add(0.14));
-    const ambientFloor: TslNode = grassColor.mul(0.24);
+    const direct: TslNode = uSun.mul(sun.mul(0.58).add(wrap.mul(0.22)));
+    const transmission: TslNode = vec3(0.32, 0.42, 0.10).mul(back).mul(uvY.mul(0.34).add(0.12));
+    const ambientFloor: TslNode = grassColor.mul(0.22);
     litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   } else {
-    const direct: TslNode = uSun.mul(pow(sun, 1.25));
-    const transmission: TslNode = vec3(0.46, 0.55, 0.12).mul(back).mul(uvY.mul(0.5).add(0.16));
-    const ambientFloor: TslNode = grassColor.mul(0.24);
+    const direct: TslNode = uSun.mul(pow(sun, 1.25)).mul(0.82);
+    const transmission: TslNode = vec3(0.32, 0.42, 0.10).mul(back).mul(uvY.mul(0.34).add(0.12));
+    const ambientFloor: TslNode = grassColor.mul(0.22);
     litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   }
 
