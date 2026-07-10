@@ -11,6 +11,8 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import { bakeTreeImpostorAtlases, type TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import { publishTreeImpostorDebugStatus } from "./tree_impostor_debug.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
+import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import { decorateTreeMaterialHandle } from "./tree_material_parity.js";
 import {
   disposeTreeSystemBakedImpostorGeometries,
   disposeTreeSystemImpostorMaterials,
@@ -35,7 +37,8 @@ export interface TreeSystemAssetsOptions {
 
 export class TreeSystemAssets {
   readonly crownProxyGeometry = createTreeCrownProxyGeometry();
-  readonly materialHandle: TreeMaterialHandle;
+  materialHandle: TreeMaterialHandle;
+  foliageAtlas: TreeFoliageAtlas;
   geometries: TreeGeometryMap;
   geometryKey: string;
   impostorStatus: TreeImpostorStatus;
@@ -45,27 +48,33 @@ export class TreeSystemAssets {
   impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>> = {};
   private readonly settings: TreeSettings;
   private readonly webgpu: boolean;
+  private readonly hydrologyWater: TreeHydrologyWater | undefined;
+  private currentLighting: EnvironmentLighting | undefined;
+  private currentForestLighting: ForestLightingMaterialState | null = null;
 
   constructor(options: TreeSystemAssetsOptions) {
     this.settings = options.settings;
     this.webgpu = options.webgpu;
+    this.currentLighting = options.lighting;
+    this.hydrologyWater = options.hydrologyWater;
     this.geometries = createTreeGeometryMap(this.settings);
     this.geometryKey = treeGeometryKey(this.settings);
+    this.foliageAtlas = createTreeFoliageAtlas(this.settings);
+    this.materialHandle = this.createMaterialHandle();
     this.impostorStatus = this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
       ? "pending"
       : "disabled";
-    this.materialHandle = this.webgpu
-      ? createTreeNodeMaterialHandle(this.settings, options.lighting, options.hydrologyWater)
-      : createTreeMaterialHandle(this.settings);
     if (options.impostorAtlases) this.setImpostorAtlases(options.impostorAtlases);
     else publishTreeImpostorDebugStatus(this.impostorAtlases);
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
+    this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
   }
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
+    this.currentForestLighting = state;
     this.materialHandle.updateForestLighting?.(state);
   }
 
@@ -73,6 +82,10 @@ export class TreeSystemAssets {
     this.geometryKey = treeGeometryKey(this.settings);
     disposeTreeGeometryMap(this.geometries);
     this.geometries = createTreeGeometryMap(this.settings);
+    this.materialHandle.dispose();
+    this.foliageAtlas.dispose();
+    this.foliageAtlas = createTreeFoliageAtlas(this.settings);
+    this.materialHandle = this.createMaterialHandle();
     this.disposeBakedImpostorGeometries();
   }
 
@@ -182,6 +195,16 @@ export class TreeSystemAssets {
     for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
     publishTreeImpostorDebugStatus({});
     this.materialHandle.dispose();
+    this.foliageAtlas.dispose();
+  }
+
+  private createMaterialHandle(): TreeMaterialHandle {
+    const base = this.webgpu
+      ? createTreeNodeMaterialHandle(this.settings, this.currentLighting, this.hydrologyWater)
+      : createTreeMaterialHandle(this.settings);
+    const handle = decorateTreeMaterialHandle(base, { foliageAtlas: this.foliageAtlas });
+    if (this.currentForestLighting) handle.updateForestLighting?.(this.currentForestLighting);
+    return handle;
   }
 
   private updateImpostorMaterials(): void {
