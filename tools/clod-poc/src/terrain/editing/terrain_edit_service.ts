@@ -199,9 +199,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   const reportRebuildFailure = (label: string, error: unknown): void => {
     emitAudio("clod.rebuild.error");
-    if (error instanceof Error && error.name === "ClodBuildError") {
-      emitAudio("clod.validation.error");
-    }
+    if (error instanceof Error && error.name === "ClodBuildError") emitAudio("clod.validation.error");
     const message = error instanceof Error ? error.message : String(error);
     deps.setLastDigSummary(`${label} rebuild failed: ${message}`);
     deps.updateInfo();
@@ -214,6 +212,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     deps.setLastDigSummary(`apply failed: ${message}`);
     deps.updateInfo();
     console.error(`${label} apply failed after worker rebuild:`, error);
+  };
+
+  const runDerivedUpdate = (label: string, update: () => void): void => {
+    try {
+      update();
+    } catch (error) {
+      console.error(`[terrain-edit] ${label} failed after authoritative commit`, error);
+    }
   };
 
   const dirtyReasonFor = (edit: DigEdit, label: string): TerrainEditDirtyReason => {
@@ -247,7 +253,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   };
 
   const syncPaintedTerrainState = (previous: boolean): void => {
-    if (hasPaintedTerrainEdits() !== previous) deps.applyTerrainTextures();
+    if (hasPaintedTerrainEdits() !== previous) {
+      runDerivedUpdate("terrain texture state sync", deps.applyTerrainTextures);
+    }
   };
 
   const enqueueEditOperation = (label: string, operation: () => Promise<void>): Promise<void> => {
@@ -272,30 +280,33 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     const t0 = performance.now();
     lastDigAt = t0;
     const margin = radius + DIG_INFLUENCE_MARGIN;
+    const workerStartedAt = performance.now();
     let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
     try {
-      const workerStartedAt = performance.now();
       lod0 = await deps.clodWorker.rebuildAfterDig(transaction, {
         minX: hit.point.x - margin,
         maxX: hit.point.x + margin,
         minZ: hit.point.z - margin,
         maxZ: hit.point.z + margin,
       });
-      deps.recordClodWorkerRebuild(performance.now() - workerStartedAt);
-      const counters = authorityCounters();
-      if (counters) {
-        counters["terrain_edit_partial_chunk_count"] = lod0.chunksRemeshed;
-        counters["terrain_edit_full_page_fallback_count"] = lod0.fullPageFallbacks;
-        counters["terrain_edit_validation_failure_count"] = lod0.fullPageFallbacks;
-        counters["terrain_edit_page_weld_ms"] = lod0.pageWeldMs;
-      }
     } catch (error) {
       reportRebuildFailure(label, error);
       return "rejected";
     }
 
-    deps.invalidateStreamedRoots?.(transaction.dirtyBounds);
-    publishDirtyEdit(edit, label);
+    const workerMs = performance.now() - workerStartedAt;
+    runDerivedUpdate("worker rebuild metrics", () => {
+      deps.recordClodWorkerRebuild(workerMs);
+      const counters = authorityCounters();
+      if (!counters) return;
+      counters["terrain_edit_partial_chunk_count"] = lod0.chunksRemeshed;
+      counters["terrain_edit_full_page_fallback_count"] = lod0.fullPageFallbacks;
+      counters["terrain_edit_validation_failure_count"] = lod0.fullPageFallbacks;
+      counters["terrain_edit_page_weld_ms"] = lod0.pageWeldMs;
+    });
+    runDerivedUpdate("streamed-root invalidation", () => deps.invalidateStreamedRoots?.(transaction.dirtyBounds));
+    runDerivedUpdate("dirty edit publication", () => publishDirtyEdit(edit, label));
+
     try {
       applyLod0Result(lod0.changed, lod0.pendingParents, lod0.chunkPatches);
       deps.setPendingParentNodes(0);
