@@ -79,12 +79,14 @@ export function voxelTransactionFromDigEdit(edit: DigEdit): VoxelEditTransaction
 }
 
 export function applyDigEditTransaction(transaction: VoxelEditTransaction, edit?: DigEdit): void {
+  if (transaction.deltas.length === 0) return;
   voxelEditStore.apply(transaction);
   if (edit) brushHistory.push({ id: transaction.id, edit: { ...edit } });
   digEditRevision++;
 }
 
 export function rollbackDigEditTransaction(transaction: VoxelEditTransaction): void {
+  if (transaction.deltas.length === 0) return;
   voxelEditStore.rollback(transaction);
   let historyIndex = -1;
   for (let i = brushHistory.length - 1; i >= 0; i--) {
