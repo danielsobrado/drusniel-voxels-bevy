@@ -14,6 +14,8 @@ import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_n
 import { createTreeRingFarNodeMaterialHandle, treeRingUsesFarMaterial } from "./tree_ring_far_node_material.js";
 import { createTreeCrownProxyNodeMaterialHandle } from "./tree_crown_proxy_node_material.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import { decorateTreeMaterialHandle } from "./tree_material_parity.js";
 import {
   TREE_RING_SHADOW_CASCADE_COUNT,
   treeRingShadowCasterGroupIndex,
@@ -42,6 +44,7 @@ export interface TreeGpuRingDrawResourcesInput {
   currentLighting: EnvironmentLighting | undefined;
   hydrologyWater: TreeHydrologyWater | undefined;
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
+  foliageAtlas: TreeFoliageAtlas;
   crownProxyGeometry: THREE.BufferGeometry;
   useTreePrepass: boolean;
   treePrepassMaxLod: TreeDepthPrepassMaxLod;
@@ -126,22 +129,31 @@ function createTreeGpuRingMaterialHandle(
       input.hydrologyWater,
     );
   }
-  if (input.settings.render.farCheapMaterial && treeRingUsesFarMaterial(lod)) {
-    return createTreeRingFarNodeMaterialHandle(
+
+  const base = input.settings.render.farCheapMaterial && treeRingUsesFarMaterial(lod)
+    ? createTreeRingFarNodeMaterialHandle(
+      input.settings,
+      buffers,
+      lod,
+      input.currentLighting ?? undefined,
+      input.hydrologyWater,
+    )
+    : createTreeRingNodeMaterialHandle(
       input.settings,
       buffers,
       lod,
       input.currentLighting ?? undefined,
       input.hydrologyWater,
     );
-  }
-  return createTreeRingNodeMaterialHandle(
-    input.settings,
-    buffers,
-    lod,
-    input.currentLighting ?? undefined,
-    input.hydrologyWater,
-  );
+
+  return decorateTreeMaterialHandle(base, {
+    foliageAtlas: input.foliageAtlas,
+    ring: {
+      settings: input.settings,
+      buffers,
+      forestLighting: true,
+    },
+  });
 }
 
 function createGpuRingTierDraw(
@@ -185,13 +197,21 @@ function createGpuRingShadowMaterialHandle(
   if (lod === "far" || lod === "impostor") {
     return createTreeCrownProxyNodeMaterialHandle(input.settings, buffers, species, lod);
   }
-  return createTreeRingNodeMaterialHandle(
+  const base = createTreeRingNodeMaterialHandle(
     input.settings,
     buffers,
     lod,
     input.currentLighting ?? undefined,
     input.hydrologyWater,
   );
+  return decorateTreeMaterialHandle(base, {
+    foliageAtlas: input.foliageAtlas,
+    ring: {
+      settings: input.settings,
+      buffers,
+      forestLighting: false,
+    },
+  });
 }
 
 function createGpuRingShadowTierDraw(
