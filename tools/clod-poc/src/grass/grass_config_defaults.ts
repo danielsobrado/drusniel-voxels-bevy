@@ -69,8 +69,8 @@ export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
   farMeters: 120,
   farDistanceFraction: 0.96,
   bandMeters: DEFAULT_GRASS_LOD_SETTINGS.ditherBandM,
-  scruffMeters: 34,
-  scruffMinDensity: 0.36,
+  scruffMeters: 38,
+  scruffMinDensity: 0.42,
 };
 
 export const DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS: GrassPatchFallbackSettings = {
