@@ -45,24 +45,27 @@ const CARD_WIND_WEIGHT = 0.65;
 const CARD_FLUTTER = 0.45;
 const CARD_Z = new THREE.Vector3(0, 0, 1);
 
-const DEFAULT_CARD_TARGETS: Record<VegLod, number> = { 0: 900, 1: 520, 2: 160 };
-const DEFAULT_MESH_TARGETS: Record<VegLod, number> = { 0: 650, 1: 0, 2: 0 };
+// Hero LOD uses real foliage for close structure and only enough cards to fill
+// gaps. Mid/far remain card-driven. The previous hero targets made dozens of
+// overlapping cards occupy the player near plane in dense forest.
+const DEFAULT_CARD_TARGETS: Record<VegLod, number> = { 0: 280, 1: 520, 2: 160 };
+const DEFAULT_MESH_TARGETS: Record<VegLod, number> = { 0: 480, 1: 0, 2: 0 };
 
 const SPECIES_CARD_TARGETS: Record<string, Partial<Record<VegLod, number>>> = {
-  oak: { 0: 1_200, 1: 700, 2: 220 },
-  birch: { 0: 1_350, 1: 760, 2: 240 },
-  willow: { 0: 1_200, 1: 680, 2: 220 },
-  pine: { 0: 620, 1: 360, 2: 120 },
-  spruce: { 0: 760, 1: 420, 2: 140 },
+  oak: { 0: 320, 1: 700, 2: 220 },
+  birch: { 0: 340, 1: 760, 2: 240 },
+  willow: { 0: 320, 1: 680, 2: 220 },
+  pine: { 0: 180, 1: 360, 2: 120 },
+  spruce: { 0: 220, 1: 420, 2: 140 },
   dead: { 0: 0, 1: 0, 2: 0 },
 };
 
 const SPECIES_MESH_TARGETS: Record<string, number> = {
-  oak: 720,
-  birch: 900,
-  willow: 760,
-  pine: 240,
-  spruce: 320,
+  oak: 520,
+  birch: 620,
+  willow: 540,
+  pine: 180,
+  spruce: 240,
   dead: 0,
 };
 
