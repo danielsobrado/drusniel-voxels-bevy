@@ -39,6 +39,14 @@ const slots: TerrainDiagnosticSlot[] = [
   },
 ];
 
+const runtimeSlots = slots.map((slot) => ({
+  name: slot.name,
+  selectedId: slot.selectedId,
+  scale: slot.baseScale,
+  heightMin: slot.heightMin,
+  heightMax: slot.heightMax,
+}));
+
 describe("terrain material diagnostics", () => {
   it("selects an in-band layer before nearest fallback", () => {
     expect(selectTerrainDiagnosticLayer(12, [0, 1, 2], slots, 2)).toEqual({
@@ -97,7 +105,7 @@ describe("terrain material diagnostics", () => {
         frontSideOnly: false,
         tintBubble: false,
       },
-      slots,
+      slots: runtimeSlots,
       options: {
         enabled: true,
         triplanar: true,
