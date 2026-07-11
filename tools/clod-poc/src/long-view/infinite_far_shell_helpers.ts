@@ -1,10 +1,18 @@
 import * as THREE from "three";
-import { getActiveFarSummaryGpuAtlasView } from "../far-summary/gpu-render-atlas.js";
+import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { writeBiomeRgb } from "../world_source/biome_colors.js";
 import type { InfiniteFarShellOptions, FarShellHeightSamplingMode } from "./infinite_far_shell_types.js";
 
-function resolveGpuSamplingAtlas(options: InfiniteFarShellOptions) {
-  return options.farSummaryGpuAtlas ?? getActiveFarSummaryGpuAtlasView();
+interface FarSummaryGpuAtlasProvider {
+  getGpuAtlasView(): FarSummaryGpuAtlasView | undefined;
+}
+
+function resolveGpuSamplingAtlas(options: InfiniteFarShellOptions): FarSummaryGpuAtlasView | undefined {
+  if (options.farSummaryGpuAtlas) return options.farSummaryGpuAtlas;
+  const integration = (globalThis as typeof globalThis & {
+    window?: { __drusnielFarSummary?: Partial<FarSummaryGpuAtlasProvider> };
+  }).window?.__drusnielFarSummary;
+  return integration?.getGpuAtlasView?.();
 }
 
 export function hasGpuSamplingInputs(options: InfiniteFarShellOptions): boolean {
