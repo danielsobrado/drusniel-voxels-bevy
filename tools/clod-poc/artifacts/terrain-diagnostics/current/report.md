@@ -1,6 +1,6 @@
 # Near CLOD Terrain Material Diagnosis
 
-Generated: 2026-07-11T06:16:45.616Z
+Generated: 2026-07-11T06:29:34.238Z
 
 URL: `http://127.0.0.1:5180/?scene=infinite-islands&seed=1&webgpuSelection=1&farShell=0&farClipmap=0&materialTiers=0&clodPerf=0&terrainMaterial=procedural&proceduralDebug=final&canopy=0&hud=0&freeze=1`
 
@@ -9,7 +9,7 @@ Screenshot: `F:\Development\workspace\GitHub\drus\drusniel-voxels-bevy\tools\clo
 ## Verdict
 
 - **INFO NO_CONFIG_FAULT_FOUND** — No material configuration or visible-layer collapse was detected in the isolated near CLOD path.
-- **ERROR GPU_TEXTURE_ARRAY_PROBE_FAILED** — texture-array probe returned 12160 bytes; expected 9216
+- **INFO GPU_TEXTURE_ARRAY_PROBE_PASSED** — Dynamic array indexing passed; 9/10 live terrain layers are distinguishable on the GPU.
 
 ## Material
 
@@ -29,21 +29,37 @@ Screenshot: `F:\Development\workspace\GitHub\drus\drusniel-voxels-bevy\tools\clo
 
 ## Direct GPU Texture-Array Probe
 
-| Supported | false |
-| Reason | texture-array probe returned 12160 bytes; expected 9216 |
-| Synthetic mapping | missing |
-| Live albedo mapping | missing |
+| Supported | true |
+| Reason | none |
+| Synthetic mapping | 100.0% correct, CPU unique 4, GPU unique 4 |
+| Live albedo mapping | 100.0% correct, CPU unique 9, GPU unique 9 |
 
 ### Synthetic nearest-layer mapping
 
 ```json
-null
+[
+  0,
+  1,
+  2,
+  3
+]
 ```
 
 ### Live albedo nearest-layer mapping
 
 ```json
-null
+[
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9
+]
 ```
 
 ## Visible CLOD Samples
