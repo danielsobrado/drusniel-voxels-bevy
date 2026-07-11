@@ -20,6 +20,7 @@ import type {
 } from "./terrain_material.js";
 import type { TerrainTextureSlotUniform } from "../material/material.js";
 import { EXPECTED_BIOME_REGION_IDS, getBiomeTextureSlotSet, loadContentRegistry } from "../content/index.js";
+import { resolveTerrainTextureScale } from "../terrain/material/terrain_texture_scale.js";
 import {
   materialChurnDiagnostics,
   setMaterialNeedsUpdate,
@@ -260,11 +261,12 @@ function toNodeTextures(
   if (!options.enabled || !options.albedoArray || slots.length === 0) return null;
   const normalMapMask = options.procedural?.normalMapMask
     ?? slots.map((slot) => (slot.normalTexture ? 1 : 0));
+  const procedural = options.procedural?.enabled === true;
   return {
     albedoArray: options.albedoArray,
     normalArray: options.normalMap ? options.normalArray : null,
     slots: slots.map((slot) => ({
-      scale: slot.scale * options.textureScale,
+      scale: resolveTerrainTextureScale(slot.scale, options.textureScale, procedural),
       heightMin: slot.heightMin,
       heightMax: slot.heightMax,
     })),
