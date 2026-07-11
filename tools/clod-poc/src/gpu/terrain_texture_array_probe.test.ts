@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { compactRgbaReadback } from "./terrain_texture_array_probe.js";
 import {
   diagnoseTerrainTextureArrayProbe,
   type TerrainTextureArrayProbePass,
@@ -61,5 +62,24 @@ describe("terrain texture-array probe diagnosis", () => {
       synthetic: pass(4),
       actual: gpuCollapsed,
     })[0]?.code).toBe("GPU_ALBEDO_LAYER_COLLAPSE");
+  });
+
+  it("removes WebGPU 256-byte row padding from readback data", () => {
+    const width = 96;
+    const height = 24;
+    const tightRowBytes = width * 4;
+    const paddedRowBytes = 512;
+    const padded = new Uint8Array((height - 1) * paddedRowBytes + tightRowBytes);
+    const expected = new Uint8Array(tightRowBytes * height);
+
+    for (let row = 0; row < height; row++) {
+      for (let byte = 0; byte < tightRowBytes; byte++) {
+        const value = (row * 17 + byte) & 0xff;
+        padded[row * paddedRowBytes + byte] = value;
+        expected[row * tightRowBytes + byte] = value;
+      }
+    }
+
+    expect(compactRgbaReadback(padded, width, height)).toEqual(expected);
   });
 });
