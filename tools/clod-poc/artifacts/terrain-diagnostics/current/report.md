@@ -1,6 +1,6 @@
 # Near CLOD Terrain Material Diagnosis
 
-Generated: 2026-07-11T06:29:34.238Z
+Generated: 2026-07-11T06:53:56.084Z
 
 URL: `http://127.0.0.1:5180/?scene=infinite-islands&seed=1&webgpuSelection=1&farShell=0&farClipmap=0&materialTiers=0&clodPerf=0&terrainMaterial=procedural&proceduralDebug=final&canopy=0&hud=0&freeze=1`
 
