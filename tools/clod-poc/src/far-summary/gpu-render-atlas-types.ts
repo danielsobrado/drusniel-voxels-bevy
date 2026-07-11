@@ -38,6 +38,7 @@ export interface FarSummaryGpuRenderAtlasPlan {
   signature: string;
   rings: FarSummaryGpuAtlasRingView[];
   tiles: FarSummaryGpuRenderAtlasTile[];
+  tilesPerSide: number;
 }
 
 export interface FarSummaryGpuRenderAtlasRuntime {
