@@ -29,6 +29,7 @@
     "accept:infinite-islands:fast": "node tools/run-infinite-islands-acceptance.mjs --fast",
     "accept:infinite-islands:reuse": "node tools/run-infinite-islands-acceptance.mjs --reuse",
     "accept:infinite-islands:full": "node tools/run-infinite-islands-acceptance.mjs",
+    "terrain:diagnose": "tsx tools/diagnose-terrain-material.ts",
     "trees:verify-terrain-cull": "node scripts/apply-tree-terrain-cull.mjs",
     "trees:wire-visible-cluster-mask": "node scripts/wire-tree-visible-cluster-mask-gpu.mjs",
     "trees:wire-visible-cluster-mask:check": "node scripts/wire-tree-visible-cluster-mask-gpu.mjs --dry-run",
@@ -95,7 +96,7 @@
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.70",
-    "@types/js-yaml": "^4.0.9",
+    "@types/js-yaml": "^4.1.0",
     "@types/node": "^20.16.0",
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.5",
