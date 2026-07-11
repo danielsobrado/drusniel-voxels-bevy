@@ -13,7 +13,6 @@ export type RendererBackend = "webgl" | "webgpu";
 
 const WEBGPU_SHADER_MATERIAL_GUARD_KEY = "__drusnielWebGpuShaderMaterialGuard";
 const WEBGPU_SHADER_MATERIAL_FALLBACK_KEY = "__drusnielWebGpuShaderMaterialFallback";
-const WEBGPU_TIMESTAMP_QUERY_PARAM = "gpuTimestamps";
 
 export function parseRendererBackend(params: URLSearchParams): RendererBackend {
   return params.get("renderer") === "webgl" ? "webgl" : "webgpu";
@@ -51,11 +50,9 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
 
   const renderer = new WebGPURenderer({
     antialias: true,
-    // Timestamp pools must be resolved continuously. Normal gameplay does not
-    // consume those values, so allocating them only creates an eventual pool
-    // overflow. Profiling tools can opt in explicitly with ?gpuTimestamps=1 and
-    // must resolve THREE.TimestampQuery.RENDER after every measured frame.
-    trackTimestamp: shouldTrackWebGpuTimestamps(),
+    // The application does not consume or resolve Three's timestamp pools.
+    // Enabling them therefore leaks query pairs until the pool overflows.
+    trackTimestamp: false,
     requiredLimits: buildRequiredLimits(diagnostics),
   });
   try {
@@ -90,11 +87,6 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   }
   // WebGPU exposes a high anisotropy limit; 16 matches typical hardware and the WebGL default.
   return { isWebGpu: true, renderer, maxAnisotropy: 16 };
-}
-
-function shouldTrackWebGpuTimestamps(): boolean {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get(WEBGPU_TIMESTAMP_QUERY_PARAM) === "1";
 }
 
 function installWebGpuShaderMaterialGuard(): void {
