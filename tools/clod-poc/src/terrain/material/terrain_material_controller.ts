@@ -13,6 +13,11 @@ import type { ProceduralTextureConfig } from "../../textures/materialRecipes.js"
 import { LOD_COLORS } from "../../app/clod_constants.js";
 import { PROCEDURAL_DEBUG_MODES, type ProceduralDebugMode } from "./terrain_material_constants.js";
 import type { TerrainTextureController, TerrainTextureSlot } from "./terrain_texture_controller.js";
+import {
+  createTerrainMaterialDiagnosticSnapshot,
+  installTerrainMaterialDiagnostics,
+  type TerrainMaterialDiagnosticSnapshot,
+} from "./terrain_material_diagnostics.js";
 
 export interface TerrainMaterialUiState {
   terrainMaterialSource: "procedural" | "external_pbr" | "debug_flat";
@@ -40,6 +45,8 @@ export interface TerrainMaterialUiState {
 export interface TerrainMaterialView {
   node: { level: number };
   mat: TerrainMaterialHandle;
+  mesh?: THREE.Mesh;
+  selected?: boolean;
 }
 
 export interface TerrainMaterialControllerDeps {
@@ -81,6 +88,7 @@ export interface TerrainMaterialController {
   applyColorByLodToMaterials(on: boolean): void;
   syncColorByLod(): void;
   configureChunkMaterial(mat: TerrainMaterialHandle): void;
+  diagnostics(): TerrainMaterialDiagnosticSnapshot;
   readonly sharedMaterial: TerrainMaterialHandle | null;
 }
 
@@ -121,8 +129,8 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   const texturesActive = () => {
     const state = deps.getMaterialState();
     return state.albedo && (
-      (state.terrainMaterialSource === "procedural" && proceduralTerrain !== null) ||
-      (state.terrainMaterialSource === "external_pbr" && deps.textureController.hasAnyLoadedTexture())
+      (state.terrainMaterialSource === "procedural" && proceduralTerrain !== null)
+      || (state.terrainMaterialSource === "external_pbr" && deps.textureController.hasAnyLoadedTexture())
     );
   };
 
@@ -194,7 +202,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   const applyTerrainTextures = () => {
     const slots = activeTerrainSlots();
     const options = terrainTextureUniformOptions();
-    for (const m of terrainMaterials) m.setTextures(slots, options);
+    for (const material of terrainMaterials) material.setTextures(slots, options);
     deps.onTexturesApplied();
     syncColorByLod();
   };
@@ -221,8 +229,8 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
 
   const applyColorByLodToMaterials = (on: boolean) => {
     if (deps.poolTerrainMaterial) return;
-    for (const v of deps.getViews()) {
-      v.mat.setBaseColor(on ? LOD_COLORS[Math.min(v.node.level, 3)] : 0xb9c0c8);
+    for (const view of deps.getViews()) {
+      view.mat.setBaseColor(on ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8);
     }
   };
 
@@ -256,18 +264,30 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     mat.setLighting(deps.getLighting());
   };
 
+  const diagnostics = (): TerrainMaterialDiagnosticSnapshot => createTerrainMaterialDiagnosticSnapshot({
+    backend: deps.isWebGpu ? "webgpu" : "webgl",
+    worldCells: deps.worldCells,
+    url: typeof location === "undefined" ? "http://localhost/" : location.href,
+    state: deps.getMaterialState(),
+    slots: activeTerrainSlots(),
+    options: terrainTextureUniformOptions(),
+    views: deps.getViews(),
+    texturesActive: texturesActive(),
+  });
+  installTerrainMaterialDiagnostics(diagnostics);
+
   return {
     materials: terrainMaterials,
     makeTerrainMaterial,
     forEachMaterial: (fn) => {
-      for (const m of terrainMaterials) fn(m);
+      for (const material of terrainMaterials) fn(material);
     },
     applyLighting: (mat, lighting = deps.getLighting()) => {
       mat.setLighting(lighting);
     },
     applyColorAdjustments: () => {
       const adjustments = deps.getColorAdjustments();
-      for (const m of terrainMaterials) m.setColorAdjust(adjustments);
+      for (const material of terrainMaterials) material.setColorAdjust(adjustments);
     },
     activeTerrainSlots,
     availableTerrainSlots,
@@ -279,6 +299,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     applyColorByLodToMaterials,
     syncColorByLod,
     configureChunkMaterial,
+    diagnostics,
     get sharedMaterial() { return sharedTerrainMaterial; },
   };
 }
