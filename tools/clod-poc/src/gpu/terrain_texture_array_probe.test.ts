@@ -3,7 +3,7 @@ import {
   diagnoseTerrainTextureArrayProbe,
   type TerrainTextureArrayProbePass,
   type TerrainTextureArrayProbeResult,
-} from "./terrain_texture_array_probe.js";
+} from "./terrain_texture_array_probe_types.js";
 
 function pass(layerCount: number, correctLayerRatio = 1, gpuUniqueColors = layerCount): TerrainTextureArrayProbePass {
   return {
