@@ -30,6 +30,7 @@ import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import { parseClodRuntimeConfig, type ClodRuntimeConfig } from "../runtime_config.js";
+import { defaultStartupCameraPose } from "./infinite_islands_startup_camera.js";
 import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
 import borderCoastOceanConfigText from "../../../config/border_coast_ocean.yaml?raw";
 import {
@@ -180,9 +181,12 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     0.5,
     8000,
   );
-  camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
+  const startupPose = defaultStartupCameraPose(searchParams.get("scene"), worldCells);
+  camera.position.fromArray(startupPose.eye);
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(mid, 24, mid);
+  controls.target.fromArray(startupPose.target);
+  camera.lookAt(controls.target);
+  controls.update();
 
   if (stagedImport) {
     camera.position.fromArray(stagedImport.manifest.camera.position);
