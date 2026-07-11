@@ -1,9 +1,6 @@
 import type { FarSummaryConfig, FarSummaryRingConfig } from "./config.js";
 import type { StreamCenter } from "./stream-center.js";
-import {
-  FAR_SUMMARY_RENDER_ATLAS_TILES_X,
-  FAR_SUMMARY_RENDER_ATLAS_TILES_Z,
-} from "./gpu-render-atlas-constants.js";
+import { FAR_SUMMARY_RENDER_ATLAS_MIN_TILES_PER_SIDE } from "./gpu-render-atlas-constants.js";
 import type { FarSummaryGpuRenderAtlasPlan } from "./gpu-render-atlas-types.js";
 
 export function planFarSummaryGpuRenderAtlas(
@@ -12,18 +9,20 @@ export function planFarSummaryGpuRenderAtlas(
   revision: number,
 ): FarSummaryGpuRenderAtlasPlan {
   const tileCells = commonFarSummaryRenderAtlasTileCells(config.rings);
-  const ringHeightCells = tileCells * FAR_SUMMARY_RENDER_ATLAS_TILES_Z;
+  const tilesPerSide = farSummaryRenderAtlasTilesPerSide(config.rings);
+  const ringHeightCells = tileCells * tilesPerSide;
   const rings: FarSummaryGpuRenderAtlasPlan["rings"] = [];
   const tiles: FarSummaryGpuRenderAtlasPlan["tiles"] = [];
-  const signatureParts: string[] = [];
+  const signatureParts: string[] = [`tiles:${tilesPerSide}`];
 
   for (let ringIndex = 0; ringIndex < config.rings.length; ringIndex++) {
     const ring = config.rings[ringIndex]!;
     const tileSpanM = ring.cellM * ring.tileCells;
-    const centerTileX = Math.floor(center.predictedX / tileSpanM);
-    const centerTileZ = Math.floor(center.predictedZ / tileSpanM);
-    const minTileX = centerTileX - Math.floor(FAR_SUMMARY_RENDER_ATLAS_TILES_X / 2);
-    const minTileZ = centerTileZ - Math.floor(FAR_SUMMARY_RENDER_ATLAS_TILES_Z / 2);
+    const centerTileX = Math.floor(center.worldX / tileSpanM);
+    const centerTileZ = Math.floor(center.worldZ / tileSpanM);
+    const halfTiles = Math.floor(tilesPerSide / 2);
+    const minTileX = centerTileX - halfTiles;
+    const minTileZ = centerTileZ - halfTiles;
     const rowOffsetCells = ringIndex * ringHeightCells;
 
     rings.push({
@@ -33,14 +32,14 @@ export function planFarSummaryGpuRenderAtlas(
       startM: ring.startM,
       endM: ring.endM,
       rowOffsetCells,
-      widthCells: ring.tileCells * FAR_SUMMARY_RENDER_ATLAS_TILES_X,
-      heightCells: ring.tileCells * FAR_SUMMARY_RENDER_ATLAS_TILES_Z,
+      widthCells: ring.tileCells * tilesPerSide,
+      heightCells: ring.tileCells * tilesPerSide,
       valid: 1,
     });
     signatureParts.push(`${ringIndex}:${minTileX}:${minTileZ}:${ring.cellM}:${ring.tileCells}`);
 
-    for (let localZ = 0; localZ < FAR_SUMMARY_RENDER_ATLAS_TILES_Z; localZ++) {
-      for (let localX = 0; localX < FAR_SUMMARY_RENDER_ATLAS_TILES_X; localX++) {
+    for (let localZ = 0; localZ < tilesPerSide; localZ++) {
+      for (let localX = 0; localX < tilesPerSide; localX++) {
         const tileX = minTileX + localX;
         const tileZ = minTileZ + localZ;
         tiles.push({
@@ -61,7 +60,7 @@ export function planFarSummaryGpuRenderAtlas(
     }
   }
 
-  return { signature: signatureParts.join(";"), rings, tiles };
+  return { signature: signatureParts.join(";"), rings, tiles, tilesPerSide };
 }
 
 export function commonFarSummaryRenderAtlasTileCells(rings: readonly FarSummaryRingConfig[]): number {
@@ -73,4 +72,14 @@ export function commonFarSummaryRenderAtlasTileCells(rings: readonly FarSummaryR
     }
   }
   return first;
+}
+
+export function farSummaryRenderAtlasTilesPerSide(rings: readonly FarSummaryRingConfig[]): number {
+  let required = FAR_SUMMARY_RENDER_ATLAS_MIN_TILES_PER_SIDE;
+  for (const ring of rings) {
+    const tileSpanM = ring.cellM * ring.tileCells;
+    if (tileSpanM <= 0) throw new Error("far-summary render atlas requires positive ring tile spans");
+    required = Math.max(required, Math.ceil(ring.endM / tileSpanM) * 2 + 1);
+  }
+  return required % 2 === 0 ? required + 1 : required;
 }
