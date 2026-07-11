@@ -1,4 +1,5 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { getTerrainFieldCoreConfig, resolveDigEdits, type ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeUnderstoryRingShader } from "./wgsl_modules.js";
 import type { UnderstorySettings } from "../understory/understory_config.js";
@@ -61,6 +62,9 @@ export interface UnderstoryGpuRingDispatchParams {
   indexCounts: [number, number, number, number, number, number];
   frustumPlanes: ArrayLike<number>;
   hydroEnabled?: boolean;
+  /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled);
+   *  filled from hydrologyAtlasGpuParams() at dispatch time when omitted. */
+  hydroAtlas?: [number, number, number, number];
   activeSlotIndices?: Uint32Array;
   candidateCountBeforePrefilter?: number;
   candidateCountAfterPrefilter?: number;
@@ -164,6 +168,7 @@ export class UnderstoryGpuRingCompute {
       storage(7, "read-only-storage"),
       { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       storage(9, "read-only-storage"),
+      { binding: 10, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
     ] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `understory ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
@@ -200,7 +205,11 @@ export class UnderstoryGpuRingCompute {
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? understoryRingSlotCount(this.settings)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
-    packUnderstoryRingParams(this.settings, params, this.paramScratch);
+    packUnderstoryRingParams(
+      this.settings,
+      params.hydroAtlas ? params : { ...params, hydroAtlas: hydrologyAtlasGpuParams() },
+      this.paramScratch,
+    );
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     this.device.queue.writeBuffer(this.activeSlotBuffer, 0, activeSlots.data.buffer, activeSlots.data.byteOffset, activeSlots.data.byteLength);
     packUnderstoryRingClassParams(this.settings, this.classParamsScratch);
@@ -277,6 +286,7 @@ export class UnderstoryGpuRingCompute {
       { binding: 7, resource: { buffer: this.digEdits } },
       { binding: 8, resource: { buffer: this.fieldParams } },
       { binding: 9, resource: { buffer: this.activeSlotBuffer } },
+      { binding: 10, resource: hydrologyAtlasGpuTexture(this.device).createView() },
     ] });
   }
 

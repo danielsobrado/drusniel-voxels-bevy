@@ -80,6 +80,7 @@ struct TreeRingParams {
   species_material_spruce: vec4<f32>,
   planes: array<vec4<f32>, 6>,
   shadow_planes: array<vec4<f32>, 24>,
+  hydro_atlas: vec4<f32>,
 };
 
 struct TreeHydrologySample {
@@ -98,6 +99,11 @@ struct TreeHydrologySample {
 @group(0) @binding(6) var<storage, read_write> out_shadow_cell: array<vec4<f32>>;
 @group(0) @binding(9) var hydro_texture: texture_2d<f32>;
 @group(0) @binding(10) var hydro_sampler: sampler;
+@group(0) @binding(13) var hydro_atlas_texture: texture_2d<f32>;
+
+fn placement_hydro_atlas_params() -> vec4<f32> {
+  return params.hydro_atlas;
+}
 
 fn tree_pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -151,6 +157,13 @@ fn tree_hydrology_at(wx: f32, wz: f32) -> TreeHydrologySample {
     return TreeHydrologySample(0.0, 0.0, 0.0, 0.0);
   }
   let world_size = max(1.0, params.center_radius.w);
+  if (!placement_inside_startup_world(wx, wz, world_size) && placement_hydro_atlas_enabled()) {
+    let atlas = placement_sample_hydro_atlas(wx, wz);
+    if (!placement_hydro_sample_valid(atlas)) {
+      return TreeHydrologySample(0.0, 0.0, 0.0, 0.0);
+    }
+    return TreeHydrologySample(atlas.x, atlas.y, atlas.z, 1.0);
+  }
   let uv = clamp(vec2<f32>(wx, wz) / world_size, vec2<f32>(0.0), vec2<f32>(1.0));
   let h = textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
   return TreeHydrologySample(h.x, h.y, h.z, 1.0);

@@ -11,7 +11,7 @@ const UNDERSTORY_SHRUB_END_M: f32 = 18.0;
 struct UnderstoryRingParams {
   center_radius: vec4<f32>, accept_a: vec4<f32>, accept_b: vec4<f32>, ecology_a: vec4<f32>, ecology_b: vec4<f32>,
   ecology_c: vec4<f32>, settings_u: vec4<u32>, settings_extra: vec4<u32>, class_index_counts: vec4<u32>,
-  hydro_params: vec4<f32>, planes: array<vec4<f32>, 6>,
+  hydro_params: vec4<f32>, planes: array<vec4<f32>, 6>, hydro_atlas: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> params: UnderstoryRingParams;
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
@@ -21,6 +21,11 @@ struct UnderstoryRingParams {
 @group(0) @binding(5) var hydro_texture: texture_2d<f32>;
 @group(0) @binding(6) var hydro_sampler: sampler;
 @group(0) @binding(9) var<storage, read> active_slots: array<u32>;
+@group(0) @binding(10) var hydro_atlas_texture: texture_2d<f32>;
+
+fn placement_hydro_atlas_params() -> vec4<f32> {
+  return params.hydro_atlas;
+}
 fn understory_hash2(x: f32, z: f32, seed: u32) -> f32 {
   var v: u32 = seed;
   v = v ^ (u32(i32(floor(x))) * 0x27d4eb2du);
@@ -97,6 +102,7 @@ fn hydrologyHeight(wx: f32, wz: f32, base_height: f32, normal_y: f32) -> vec4<f3
   let hydro_enabled = params.hydro_params.y;
   if (hydro_enabled < 0.5 || world_size <= 0.0) { return vec4<f32>(base_height, 0.0, 0.0, 0.0); }
   let hydro = sampleHydrology(wx, wz, world_size);
+  if (!placement_hydro_sample_valid(hydro)) { return vec4<f32>(base_height, 0.0, 0.0, 0.0); }
   let carved_bed = hydro.z;
   let wet_mask = hydro.y;
   let height_diff = abs(carved_bed - base_height);

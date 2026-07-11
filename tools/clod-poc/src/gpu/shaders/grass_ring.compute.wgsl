@@ -31,6 +31,7 @@ struct Params {
   height_density_a: vec4<f32>,
   height_density_b: vec4<f32>,
   planes: array<vec4<f32>, 6>,
+  hydro_atlas: vec4<f32>,
 };
 
 struct HydrologySample {
@@ -58,6 +59,11 @@ struct GrassRiverBand {
 @group(0) @binding(9) var hydro_texture: texture_2d<f32>;
 @group(0) @binding(10) var hydro_sampler: sampler;
 @group(0) @binding(11) var<storage, read> active_slots: array<u32>;
+@group(0) @binding(12) var hydro_atlas_texture: texture_2d<f32>;
+
+fn placement_hydro_atlas_params() -> vec4<f32> {
+  return params.hydro_atlas;
+}
 
 fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -96,6 +102,9 @@ fn hydrology_at(wx: f32, wz: f32) -> HydrologySample {
   }
   let world_size = max(1.0, params.center_radius.w);
   let h = placement_sample_hydro_bilinear(wx, wz, world_size);
+  if (!placement_hydro_sample_valid(h)) {
+    return HydrologySample(0.0, 0.0, 0.0, 0.0);
+  }
   return HydrologySample(h.x, h.y, h.z, 1.0);
 }
 

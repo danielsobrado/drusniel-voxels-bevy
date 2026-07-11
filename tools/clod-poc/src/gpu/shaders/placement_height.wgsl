@@ -2,6 +2,14 @@
 // Requires the including shader to declare:
 //   @group(0) @binding(N) var hydro_texture: texture_2d<f32>;
 //   @group(0) @binding(M) var hydro_sampler: sampler;
+//   @group(0) @binding(K) a texture_2d<f32> named hydro_atlas_texture
+// and to provide a placement_hydro_atlas_params accessor returning
+// vec4(originX, originZ, cellSize, enabled).
+//
+// hydro_texture covers the startup world [0, world_size] only (clamp-to-edge outside).
+// hydro_atlas_texture is the streaming Layout A window (hydrologyAtlas.ts) that answers
+// OUTSIDE the startup world; texels with w (shoreDistance) < 0 carry no tile data yet,
+// and any sample touching one reports invalid so callers keep plain-terrain semantics.
 
 const PLACEMENT_COAST_OCEAN_START_CELLS: f32 = 48.0;
 const PLACEMENT_COAST_SHORE_BACKSHORE_CELLS: f32 = 32.0;
@@ -35,7 +43,53 @@ fn placement_sample_hydro_texel(ix: u32, iz: u32, res: u32) -> vec4<f32> {
   return textureSampleLevel(hydro_texture, hydro_sampler, placement_hydro_texel_uv(ix, iz, res), 0.0);
 }
 
+fn placement_hydro_invalid_sample() -> vec4<f32> {
+  return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+}
+
+fn placement_hydro_sample_valid(sample: vec4<f32>) -> bool {
+  return sample.w >= 0.0;
+}
+
+fn placement_hydro_atlas_enabled() -> bool {
+  let p = placement_hydro_atlas_params();
+  return p.w > 0.5 && p.z > 0.0 && textureDimensions(hydro_atlas_texture).x > 1u;
+}
+
+fn placement_inside_startup_world(wx: f32, wz: f32, world_size: f32) -> bool {
+  return wx >= 0.0 && wz >= 0.0 && wx <= world_size && wz <= world_size;
+}
+
+fn placement_sample_hydro_atlas(wx: f32, wz: f32) -> vec4<f32> {
+  let p = placement_hydro_atlas_params();
+  let res = i32(textureDimensions(hydro_atlas_texture).x);
+  let gx = (wx - p.x) / p.z;
+  let gz = (wz - p.y) / p.z;
+  if (gx < 0.0 || gz < 0.0 || gx > f32(res - 1) || gz > f32(res - 1)) {
+    return placement_hydro_invalid_sample();
+  }
+  let x0 = clamp(i32(floor(gx)), 0, res - 1);
+  let z0 = clamp(i32(floor(gz)), 0, res - 1);
+  let x1 = min(x0 + 1, res - 1);
+  let z1 = min(z0 + 1, res - 1);
+  let a = textureLoad(hydro_atlas_texture, vec2<i32>(x0, z0), 0);
+  let b = textureLoad(hydro_atlas_texture, vec2<i32>(x1, z0), 0);
+  let c = textureLoad(hydro_atlas_texture, vec2<i32>(x0, z1), 0);
+  let d = textureLoad(hydro_atlas_texture, vec2<i32>(x1, z1), 0);
+  if (a.w < 0.0 || b.w < 0.0 || c.w < 0.0 || d.w < 0.0) {
+    return placement_hydro_invalid_sample();
+  }
+  let fx = clamp(gx - f32(x0), 0.0, 1.0);
+  let fz = clamp(gz - f32(z0), 0.0, 1.0);
+  return mix(mix(a, b, fx), mix(c, d, fx), fz);
+}
+
 fn placement_sample_hydro_bilinear(wx: f32, wz: f32, world_size: f32) -> vec4<f32> {
+  // Outside the startup world the startup texture only clamps its edge texels; route to
+  // the streaming atlas when it is active (legacy clamp behaviour is kept as fallback).
+  if (!placement_inside_startup_world(wx, wz, world_size) && placement_hydro_atlas_enabled()) {
+    return placement_sample_hydro_atlas(wx, wz);
+  }
   let res = max(placement_hydro_res(), 2u);
   let scale = f32(res - 1u) / max(world_size, 1.0);
   let gx = wx * scale;
@@ -53,10 +107,6 @@ fn placement_sample_hydro_bilinear(wx: f32, wz: f32, world_size: f32) -> vec4<f3
   let ab = mix(a, b, fx);
   let cd = mix(c, d, fx);
   return mix(ab, cd, fz);
-}
-
-fn placement_sample_carved_bed_bilinear(wx: f32, wz: f32, world_size: f32) -> f32 {
-  return placement_sample_hydro_bilinear(wx, wz, world_size).z;
 }
 
 fn placement_max_coast_band_cells(world_size: f32) -> f32 {
@@ -137,8 +187,11 @@ fn placement_ground_height(wx: f32, wz: f32, world_size: f32) -> f32 {
   if (!placement_hydro_enabled()) {
     return placement_border_coast_height(wx, wz, raw_height, world_size);
   }
-  let carved_bed = placement_sample_carved_bed_bilinear(wx, wz, world_size);
-  return placement_border_coast_height(wx, wz, carved_bed, world_size);
+  let hydro = placement_sample_hydro_bilinear(wx, wz, world_size);
+  if (!placement_hydro_sample_valid(hydro)) {
+    return placement_border_coast_height(wx, wz, raw_height, world_size);
+  }
+  return placement_border_coast_height(wx, wz, hydro.z, world_size);
 }
 
 fn placement_hydrology_height(wx: f32, wz: f32, world_size: f32, base_height: f32) -> vec2<f32> {
@@ -146,6 +199,9 @@ fn placement_hydrology_height(wx: f32, wz: f32, world_size: f32, base_height: f3
     return vec2<f32>(placement_border_coast_height(wx, wz, base_height, world_size), 0.0);
   }
   let hydro = placement_sample_hydro_bilinear(wx, wz, world_size);
+  if (!placement_hydro_sample_valid(hydro)) {
+    return vec2<f32>(placement_border_coast_height(wx, wz, base_height, world_size), 0.0);
+  }
   let carved_bed = placement_border_coast_height(wx, wz, hydro.z, world_size);
   let wet_mask = hydro.y;
   let height_diff = abs(carved_bed - base_height);

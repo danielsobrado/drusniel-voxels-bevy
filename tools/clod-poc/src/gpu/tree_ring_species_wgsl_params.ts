@@ -27,6 +27,7 @@ export function treeRingSixSpeciesParamsStructSource(): string {
   species_material_spruce: vec4<f32>,
   planes: array<vec4<f32>, 6>,
   shadow_planes: array<vec4<f32>, 24>,
+  hydro_atlas: vec4<f32>,
 };`;
 }
 

@@ -3,12 +3,13 @@ import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
+import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
 const COUNTER_COUNT = 12;
-const PARAM_BYTES = 16 * 20;
+const PARAM_BYTES = 16 * 21;
 const COUNTER_BYTES = COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_CLASS = 5;
 const INDIRECT_BYTES = CLASS_COUNT * INDIRECT_ARGS_PER_CLASS * Uint32Array.BYTES_PER_ELEMENT;
@@ -121,6 +122,7 @@ export class StoneGpuScatterCompute {
         { binding: 6, resource: { buffer: this.fieldParams } },
         { binding: 7, resource: this.hydroTexture.createView() },
         { binding: 8, resource: hydroSampler },
+        { binding: 9, resource: hydrologyAtlasGpuTexture(device).createView() },
       ],
     });
   }
@@ -137,6 +139,7 @@ export class StoneGpuScatterCompute {
         { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -201,6 +204,8 @@ export class StoneGpuScatterCompute {
     this.paramF32[76] = settings.terrain.lowHeightM;
     this.paramF32[77] = settings.terrain.highHeightM;
     this.paramF32[78] = Math.max(0.001, settings.terrain.heightBlendM);
+    const hydroAtlas = hydrologyAtlasGpuParams();
+    for (let i = 0; i < 4; i++) this.paramF32[80 + i] = hydroAtlas[i] ?? 0;
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
 
     const frame = this.frame++;

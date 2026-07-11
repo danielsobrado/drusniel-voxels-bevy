@@ -8,6 +8,7 @@ import {
   TREE_RING_SHADOW_PLANE_WORDS,
 } from "../trees/tree_ring_shadow_casters.js";
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { createTreeHydrologyTexture } from "./tree_ring_compute_resources.js";
 import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
@@ -97,6 +98,9 @@ export interface TreeGpuRingDispatchParams {
   activeSlotIndices?: Uint32Array;
   candidateCountBeforePrefilter?: number;
   candidateCountAfterPrefilter?: number;
+  /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled);
+   *  filled from hydrologyAtlasGpuParams() at dispatch time when omitted. */
+  hydroAtlas?: [number, number, number, number];
 }
 
 interface ReadbackSlot {
@@ -309,6 +313,8 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
       f32[TREE_GPU_RING_LAYOUT.shadowPlanesOffset + i] = params.shadowCascadePlanes[i] ?? 0;
     }
   }
+  const atlas = params.hydroAtlas ?? [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) f32[TREE_GPU_RING_LAYOUT.hydroAtlasOffset + i] = atlas[i] ?? 0;
   return scratch;
 }
 
@@ -405,6 +411,7 @@ export class TreeGpuRingCompute {
         { binding: 10, resource: hydroSampler },
         { binding: 11, resource: { buffer: this.visibleClusterMaskBuffer } },
         { binding: 12, resource: { buffer: this.activeSlotBuffer } },
+        { binding: 13, resource: hydrologyAtlasGpuTexture(device).createView() },
       ],
     });
   }
@@ -422,6 +429,7 @@ export class TreeGpuRingCompute {
     { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
     storage(11, "read-only-storage"),
     storage(12, "read-only-storage"),
+    { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
     ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -444,7 +452,11 @@ export class TreeGpuRingCompute {
     const activeSlots = this.prepareActiveSlotIndices(effectiveParams.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(effectiveParams.candidateCountBeforePrefilter ?? treeGpuRingSlotCount(this.settings)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(effectiveParams.candidateCountAfterPrefilter ?? activeSlots.count));
-    packTreeGpuRingParams(this.settings, effectiveParams, this.paramScratch);
+    packTreeGpuRingParams(
+      this.settings,
+      effectiveParams.hydroAtlas ? effectiveParams : { ...effectiveParams, hydroAtlas: hydrologyAtlasGpuParams() },
+      this.paramScratch,
+    );
     const u32 = new Uint32Array(this.paramScratch);
     u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = readbackSlot ? 1 : 0;
     if (effectiveParams.visibleClusterMaskWords && effectiveParams.visibleClusterMaskWords.length > 0) {

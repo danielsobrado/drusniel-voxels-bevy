@@ -1,5 +1,6 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import { createGrassGpuRingFallbackOutputBuffers, createGrassHydrologyTexture } from "./grass_ring_compute_resources.js";
+import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { getTerrainFieldCoreConfig, type ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
@@ -13,7 +14,7 @@ import {
 } from "../vegetation/vegetation_slot_prefilter.js";
 
 const WORKGROUP_SIZE = 64;
-const PARAM_BYTES = 16 * 17;
+const PARAM_BYTES = 16 * 18;
 const COUNTER_BYTES = 4 * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_TIER = 5;
 const TIER_COUNT = 4;
@@ -90,6 +91,9 @@ export interface GrassGpuRingDispatchParams {
   activeSlotIndices?: Uint32Array;
   candidateCountBeforePrefilter?: number;
   candidateCountAfterPrefilter?: number;
+  /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled);
+   *  filled from hydrologyAtlasGpuParams() at dispatch time when omitted. */
+  hydroAtlas?: [number, number, number, number];
 }
 
 export interface GrassGpuRingDensityParams {
@@ -265,6 +269,8 @@ export function packGrassGpuRingParams(
   if (params.frustumPlanes) {
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[44 + i] = params.frustumPlanes[i] ?? 0;
   }
+  const atlas = params.hydroAtlas ?? [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) f32[68 + i] = atlas[i] ?? 0;
   return scratch;
 }
 
@@ -358,6 +364,7 @@ export class GrassGpuRingCompute {
         { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
         storage(11, "read-only-storage"),
+        { binding: 12, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -396,7 +403,12 @@ export class GrassGpuRingCompute {
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? grassGpuRingSlotCount(this.ring)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
-    packGrassGpuRingParams(params, indexCounts, this.ring, this.paramScratch);
+    packGrassGpuRingParams(
+      params.hydroAtlas ? params : { ...params, hydroAtlas: hydrologyAtlasGpuParams() },
+      indexCounts,
+      this.ring,
+      this.paramScratch,
+    );
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     this.device.queue.writeBuffer(this.activeSlotBuffer, 0, activeSlots.data.buffer, activeSlots.data.byteOffset, activeSlots.data.byteLength);
 
@@ -471,6 +483,7 @@ export class GrassGpuRingCompute {
         { binding: 9, resource: this.hydroTexture.createView() },
         { binding: 10, resource: this.hydroSampler },
         { binding: 11, resource: { buffer: this.activeSlotBuffer } },
+        { binding: 12, resource: hydrologyAtlasGpuTexture(this.device).createView() },
       ],
     });
   }

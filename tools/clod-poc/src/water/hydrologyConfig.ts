@@ -74,6 +74,10 @@ export interface HydrologyInfiniteConfig {
   /** Width (metres) of the band inside the startup-world edge where grid hydrology blends
    *  into the infinite field so the effective authority is continuous at the boundary. */
   boundaryBlendM: number;
+  /** Edge length (tiles) of the streaming GPU hydrology atlas that gives vegetation
+   *  placement compute real hydrology outside the startup world; 0 disables the atlas
+   *  (GPU consumers fall back to clamping the startup texture). */
+  atlasTilesPerSide: number;
 }
 
 export interface HydrologyDebugConfig {
@@ -162,6 +166,7 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     tileRes: 64,
     maxResidentTiles: 96,
     boundaryBlendM: 48,
+    atlasTilesPerSide: 6,
   },
   debug: {
     showFill: false,

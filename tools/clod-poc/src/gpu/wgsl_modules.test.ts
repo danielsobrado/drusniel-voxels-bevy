@@ -77,6 +77,15 @@ describe("WGSL module composition", () => {
     expect(source).toContain("if (max_shadow_lod < 0.0 || f32(lod) > max_shadow_lod) { return; }");
   });
 
+  it("gives every placement shader exactly one hydrology atlas binding and params accessor", () => {
+    for (const source of [composeGrassRingShader(), composeStoneScatterShader(), composeTreeRingShader(), composeUnderstoryRingShader()]) {
+      expect(bindingDeclarationCount(source, "hydro_atlas_texture")).toBe(1);
+      expect([...source.matchAll(/fn placement_hydro_atlas_params\(\)/g)].length).toBe(1);
+      expect(source).toContain("fn placement_sample_hydro_atlas");
+      expect(source).toContain("hydro_atlas: vec4<f32>,");
+    }
+  });
+
   it("injects tree ring layout constants from TS layout helpers", () => {
     const source = composeTreeRingShader();
     const layout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);

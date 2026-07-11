@@ -21,7 +21,8 @@ describe("tree ring species layout", () => {
     expect(layout.speciesMaterialOffset).toBe(60);
     expect(layout.visiblePlanesOffset).toBe(72);
     expect(layout.shadowPlanesOffset).toBe(96);
-    expect(layout.paramBytes).toBe(16 * 48);
+    expect(layout.hydroAtlasOffset).toBe(96 + 4 * 24);
+    expect(layout.paramBytes).toBe(16 * 49);
   });
 
   it("moves index/material/plane slots after two species-weight vec4s for 6 species", () => {
@@ -39,7 +40,8 @@ describe("tree ring species layout", () => {
     expect(layout.speciesMaterialOffset).toBe(76);
     expect(layout.visiblePlanesOffset).toBe(100);
     expect(layout.shadowPlanesOffset).toBe(124);
-    expect(layout.paramBytes).toBe(16 * 55);
+    expect(layout.hydroAtlasOffset).toBe(124 + 4 * 24);
+    expect(layout.paramBytes).toBe(16 * 56);
   });
 
   it("indexes groups by species then lod", () => {

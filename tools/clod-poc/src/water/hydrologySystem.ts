@@ -11,6 +11,7 @@ import { buildMoistureField } from "./moistureField.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import { computeBodyIds, computeShoreDistance } from "./bodyIdentity.js";
 import { HydrologyTileCache, type HydrologyTileCacheStats, type HydrologyTileRemoteSource } from "./hydrologyTileSource.js";
+import type { HydrologyTileAtlasSource } from "./hydrologyAtlas.js";
 import { packHydrologyFieldsTexels, packHydrologyWaterSurfaceTexels } from "./hydrologyGpuPacking.js";
 import {
   HYDROLOGY_BODY_DRY,
@@ -58,6 +59,7 @@ export class HydrologySystem {
   private readonly drySentinelDepthM: number;
   private readonly tileCache: HydrologyTileCache | null;
   private readonly boundaryBlendM: number;
+  private readonly atlasTilesPerSide: number;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
@@ -69,6 +71,7 @@ export class HydrologySystem {
     drySentinelDepthM: number,
     tileCache: HydrologyTileCache | null,
     boundaryBlendM: number,
+    atlasTilesPerSide: number,
   ) {
     this.grid = grid;
     this.stats = stats;
@@ -77,6 +80,7 @@ export class HydrologySystem {
     this.drySentinelDepthM = drySentinelDepthM;
     this.tileCache = tileCache;
     this.boundaryBlendM = boundaryBlendM;
+    this.atlasTilesPerSide = atlasTilesPerSide;
   }
 
   /**
@@ -182,6 +186,7 @@ export class HydrologySystem {
       config.waterSurface.drySentinelDepth,
       tileCache,
       config.infinite.boundaryBlendM,
+      config.infinite.atlasTilesPerSide,
     );
   }
 
@@ -247,6 +252,20 @@ export class HydrologySystem {
 
   attachTileRemote(remote: HydrologyTileRemoteSource | null): void {
     this.tileCache?.attachRemote(remote);
+  }
+
+  /** Tile-backed source for the streaming GPU hydrology atlas (Phase 4b); null when this
+   *  system has no tile cache or the atlas is disabled by config. */
+  tileAtlasSource(): HydrologyTileAtlasSource | null {
+    const cache = this.tileCache;
+    if (!cache || this.atlasTilesPerSide <= 0) return null;
+    return {
+      tileSizeM: cache.tileSize,
+      tileRes: cache.tileResolution,
+      atlasTilesPerSide: this.atlasTilesPerSide,
+      peek: (tileX, tileZ) => cache.peekTile(tileX, tileZ),
+      prefetch: (centerX, centerZ, radiusM) => cache.prefetchAround(centerX, centerZ, radiusM),
+    };
   }
 
   /** Forward to the tile cache prefetcher (see HydrologyTileCache.prefetchAround);

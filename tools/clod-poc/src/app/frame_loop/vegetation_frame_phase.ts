@@ -12,6 +12,7 @@ import type { WaterFieldResult } from "../../water/index.js";
 import type { WeatherController } from "../../runtime/water_weather/weather_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
+import { hydrologyAtlasGpuStats, updateHydrologyAtlasGpu } from "../../gpu/hydrology_atlas_gpu.js";
 
 interface GuiDisplayController {
   updateDisplay: () => unknown;
@@ -125,6 +126,15 @@ function mirrorInfiniteHydrologyDiagnostics(input: VegetationFramePhaseInput): v
   counters["infinite_hydrology_nonrepeat_delta"] = nonrepeatDelta;
   counters["infinite_hydrology_nonrepeat_ok"] = nonrepeatDelta > HYDROLOGY_NONREPEAT_EPSILON_M ? 1 : 0;
   counters["infinite_hydrology_camera_outside_startup"] = cameraOutside ? 1 : 0;
+
+  const atlas = hydrologyAtlasGpuStats();
+  counters["hydrology_atlas_active"] = atlas ? 1 : 0;
+  if (atlas) {
+    counters["hydrology_atlas_filled_tiles"] = atlas.filledTiles;
+    counters["hydrology_atlas_total_tiles"] = atlas.totalTiles;
+    counters["hydrology_atlas_recenters"] = atlas.recenters;
+    counters["hydrology_atlas_uploads"] = atlas.uploads;
+  }
 }
 
 function updateForestLighting(input: VegetationFramePhaseInput): void {
@@ -174,6 +184,9 @@ function updateUntimed(input: VegetationFramePhaseInput): VegetationFrameTiming 
 }
 
 export function runVegetationFramePhase(input: VegetationFramePhaseInput): VegetationFrameTiming {
+  // Refill/upload the streaming hydrology atlas before any ring compute dispatches so
+  // this frame's placement already sees tiles the worker delivered since last frame.
+  updateHydrologyAtlasGpu(input.ringCenter.x, input.ringCenter.z);
   if (!input.collectTiming) return updateUntimed(input);
 
   const phaseStart = performance.now();

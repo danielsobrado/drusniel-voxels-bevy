@@ -40,6 +40,7 @@ struct Params {
   terrain_mid: vec4<f32>,
   terrain_high: vec4<f32>,
   terrain_height: vec4<f32>,
+  hydro_atlas: vec4<f32>,
 };
 
 struct StoneHydrologySample {
@@ -86,12 +87,23 @@ fn stone_world_cell(slot: u32) -> vec2<f32> {
   );
 }
 
+fn placement_hydro_atlas_params() -> vec4<f32> {
+  return params.hydro_atlas;
+}
+
 fn hydrology_at(wx: f32, wz: f32) -> StoneHydrologySample {
   let dims = textureDimensions(hydro_texture);
   if (dims.x <= 1u || dims.y <= 1u) {
     return StoneHydrologySample(0.0, 0.0, 0.0, 0.0);
   }
   let world_size = max(1.0, params.world.x);
+  if (!placement_inside_startup_world(wx, wz, world_size) && placement_hydro_atlas_enabled()) {
+    let atlas = placement_sample_hydro_atlas(wx, wz);
+    if (!placement_hydro_sample_valid(atlas)) {
+      return StoneHydrologySample(0.0, 0.0, 0.0, 0.0);
+    }
+    return StoneHydrologySample(atlas.x, atlas.y, atlas.z, 1.0);
+  }
   let uv = clamp(vec2<f32>(wx, wz) / world_size, vec2<f32>(0.0), vec2<f32>(1.0));
   let h = textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
   return StoneHydrologySample(h.x, h.y, h.z, 1.0);

@@ -10,7 +10,7 @@ import {
 } from "./understory_config.js";
 
 export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_CLASSES.length;
-export const UNDERSTORY_RING_PARAM_BYTES = 16 * 16;
+export const UNDERSTORY_RING_PARAM_BYTES = 16 * 17;
 export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 12;
 
 export interface UnderstoryRingDispatchParams {
@@ -21,6 +21,8 @@ export interface UnderstoryRingDispatchParams {
   indexCounts: [number, number, number, number, number, number];
   frustumPlanes: ArrayLike<number>;
   hydroEnabled?: boolean;
+  /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled). */
+  hydroAtlas?: [number, number, number, number];
 }
 
 export interface UnderstoryRingAcceptParams {
@@ -307,6 +309,8 @@ export function packUnderstoryRingParams(
     f32[dst + 2] = fp[src + 2] ?? 0;
     f32[dst + 3] = fp[src + 3] ?? 0;
   }
+  const atlas = params.hydroAtlas ?? [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) f32[64 + i] = atlas[i] ?? 0;
   return scratch;
 }
 

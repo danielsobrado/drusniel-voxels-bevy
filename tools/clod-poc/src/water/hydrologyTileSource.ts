@@ -192,6 +192,23 @@ export class HydrologyTileCache {
     return this.tileSizeM;
   }
 
+  get tileResolution(): number {
+    return this.res;
+  }
+
+  /** Resident tile lookup that never builds (the streaming atlas polls unfilled slots
+   *  every frame; a synchronous build here would reintroduce the 100–250 ms stall the
+   *  worker path exists to avoid). Refreshes LRU recency without touching hit/miss
+   *  stats so atlas polling does not distort cache diagnostics. */
+  peekTile(tileX: number, tileZ: number): HydrologyTile | null {
+    const key = `${tileX},${tileZ}`;
+    const existing = this.tiles.get(key);
+    if (!existing) return null;
+    this.tiles.delete(key);
+    this.tiles.set(key, existing);
+    return existing;
+  }
+
   attachRemote(remote: HydrologyTileRemoteSource | null): void {
     this.remote = remote;
   }

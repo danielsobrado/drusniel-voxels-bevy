@@ -58,8 +58,41 @@ shader helpers), texel (ix,iz) ↔ world (ix/(res−1)·worldCells, iz/(res−1)
 The former duplicated `waterY` in A.a and the unread `flowStrength/riverDepth` channels in
 B are gone; flow *direction* and shore distance are now on the GPU. CPU↔GPU parity is
 tested in `hydrologyGpuPacking.test.ts` (texels equal `sampleHydrologyGrid` at
-texel-aligned coordinates). Clamp-to-edge applies only inside the startup world — see
-deferred Phase 4b for streaming coverage beyond it.
+texel-aligned coordinates). Clamp-to-edge applies only inside the startup world — the
+streaming atlas (Phase 4b, below) covers vegetation placement beyond it.
+
+### Streaming vegetation atlas (Phase 4b)
+
+Outside `[0, worldCells]` the vegetation placement computes (grass/understory/stone/tree
+rings) no longer clamp the startup texture: they sample a second, camera-following
+Layout A texture — the streaming hydrology atlas.
+
+- `src/water/hydrologyAtlas.ts` — `HydrologyStreamingAtlas`: a tile-aligned window of
+  `atlas_tiles_per_side²` hydrology tiles (config `hydrology.infinite.atlas_tiles_per_side`,
+  default 6 ⇒ 385×385 texels at 4 m, ±512 m worst-case coverage). Texels are copied
+  verbatim from `HydrologyTile` vertex arrays, so the atlas is bit-identical to the CPU
+  tile authority wherever it has data (`hydrologyAtlas.test.ts`). Texels without a
+  resident tile carry `shoreDistance = −1` ("no data").
+- `src/gpu/hydrology_atlas_gpu.ts` — one shared rgba32float texture, initialized in
+  `runVegetationStartup` before any ring compute binds it, refreshed once per frame from
+  the vegetation frame phase (prefetch → CPU refill → dirty-rect `writeTexture`). Tiles
+  arrive through the existing build worker; while a tile is missing, GPU samples touching
+  its texels report invalid and the shader keeps plain-terrain (hydro-disabled) semantics
+  for that sample, self-correcting when the upload lands.
+- `placement_height.wgsl` routes `placement_sample_hydro_bilinear` to the atlas only for
+  outside-world coordinates; inside-world sampling is unchanged (bit-identical), and with
+  the atlas off (finite worlds, `atlas_tiles_per_side: 0`) the legacy clamp behaviour
+  remains as fallback. Stone/tree keep their nearest-filter inside-world paths and use
+  the atlas outside only.
+- Runtime counters: `hydrology_atlas_active/filled_tiles/total_tiles/recenters/uploads`
+  (30-frame mirror cadence); browser gate: `npx tsx tools/probe-hydrology-atlas.ts`.
+
+Not covered by the atlas (still clamp): the TSL vegetation node materials
+(grass/stone tint via `sampleHydrologyBilinearTsl`) and the Layout B consumers
+(froxel moisture) — visual-only, documented approximation. GPU sampling also does not
+replicate the CPU boundary blend band: at the world edge the shader switches from pure
+grid to pure tile data (the raw seam the blend band masks on the CPU side); vegetation
+placement tolerates this until Phase 3b unifies the generators.
 
 ## Infinite-world tiles + boundary blend (Phase 3)
 
@@ -167,12 +200,12 @@ npm test -- src/water          # unit tests
   inside-world terrain carve and therefore cascades into worker terrain parity and page
   caches. Also: async tile builds + neighbour prefetch if browser profiling shows
   boundary hitches (~33 ms cold builds).
-- **Phase 4b** — streaming GPU atlas beyond the startup world, uploaded from
-  `HydrologyTile` arrays, so vegetation/terrain compute reads correct hydrology outside
-  `[0, worldCells]` (today those consumers clamp to the finite-grid edge — a documented
-  approximation, not a solution).
+- **Phase 4b remainder** — the placement-compute atlas is done (above); still clamping:
+  TSL vegetation node materials (`sampleHydrologyBilinearTsl` tint) and Layout B
+  consumers (froxel moisture). Terrain compute needs nothing: outside-world terrain is
+  intentionally uncarved (the infinite field's `terrainY` *is* the base surface).
 - **Phase 5b** — fully static topology (vertex shader samples a hydrology atlas; no index
-  rebuild per snap) once the Phase 4b atlas exists.
+  rebuild per snap) now that the Phase 4b atlas exists.
 - **Phase 7b** — config-driven per-body visual presets (shallow/deep/absorption/
   roughness per kind in `water.yaml`), shore-distance-driven foam and terrain wetness
   (the shoreDistance channel is already packed on the GPU), and RGB absorption instead of
