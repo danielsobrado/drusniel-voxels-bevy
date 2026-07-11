@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { resolveTerrainTextureScale } from "./material/terrain_texture_scale.js";
 import { MAX_TERRAIN_TEXTURES } from "./terrain_textures.js";
 
 export function createTerrainTextureUniforms(): Record<string, { value: unknown }> {
@@ -134,9 +135,10 @@ export function applyTerrainTextureUniforms(
   (mat.uniforms.uProceduralSnowTint.value as THREE.Vector3).fromArray(p?.snowTint ?? [0.86, 0.89, 0.90]);
   const scales = mat.uniforms.uTextureScales.value as Float32Array;
   const masks = mat.uniforms.uNormalMapMask.value as Float32Array;
+  const procedural = options.procedural?.enabled === true;
   for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {
     const slot = slots[i];
-    scales[i] = (slot?.scale ?? 1 / 64) * options.textureScale;
+    scales[i] = resolveTerrainTextureScale(slot?.scale ?? 1 / 64, options.textureScale, procedural);
     masks[i] = options.procedural?.normalMapMask?.[i] ?? (slot?.normalTexture ? 1 : 0);
     (mat.uniforms.uTextureRanges.value as THREE.Vector2[])[i].set(slot?.heightMin ?? 0, slot?.heightMax ?? 0);
   }
