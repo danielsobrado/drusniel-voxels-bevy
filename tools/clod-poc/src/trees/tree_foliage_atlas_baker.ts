@@ -46,6 +46,10 @@ export interface TreeFoliageAtlasBakeResult {
 const CAPTURE_MIN_CELL_SIZE = 128;
 const DILATION_PASSES = 6;
 const TILE_HALF_EXTENT = 0.46;
+const MIN_LEAFY_ALPHA_COVERAGE = 0.005;
+const MAX_LEAFY_ALPHA_COVERAGE = 0.82;
+const MAX_DEAD_ALPHA_COVERAGE = 0.005;
+const ALPHA_PRESENT_THRESHOLD = 16;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const tilePosition = new THREE.Vector3();
@@ -108,6 +112,10 @@ export async function bakeTreeFoliageAtlas(
     const raw = await options.renderer.readRenderTargetPixelsAsync(renderTarget, 0, 0, width, height);
     const pixels = copyPixels(raw, width * height * 4);
     if (options.webgpu) flipRows(pixels, width, height);
+
+    const validationError = validateCapturedFoliageAtlasAlpha(pixels, width, height, cellSize);
+    if (validationError) return { atlas: null, supported: false, reason: validationError };
+
     dilateTransparentRgb(pixels, width, height, DILATION_PASSES);
     const atlas = createCapturedAtlas(pixels, width, height, cellSize);
     return { atlas, supported: true, reason: null };
@@ -282,6 +290,48 @@ function copyPixels(raw: ArrayBufferView, expectedLength: number): Uint8Array {
     throw new Error(`foliage atlas readback returned ${source.length} bytes; expected ${expectedLength}`);
   }
   return source.slice();
+}
+
+export function validateCapturedFoliageAtlasAlpha(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  cellSize: number,
+): string | null {
+  const expectedWidth = TREE_FOLIAGE_ATLAS_COLUMNS * cellSize;
+  const expectedHeight = TREE_FOLIAGE_ATLAS_ROWS * cellSize;
+  if (width !== expectedWidth || height !== expectedHeight || pixels.length !== width * height * 4) {
+    return `foliage atlas alpha validation received invalid dimensions ${width}x${height}`;
+  }
+
+  for (let speciesIndex = 0; speciesIndex < TREE_SPECIES.length; speciesIndex++) {
+    const species = TREE_SPECIES[speciesIndex] as TreeSpeciesId;
+    for (let variant = 0; variant < TREE_FOLIAGE_ATLAS_VARIANTS; variant++) {
+      let covered = 0;
+      for (let y = 0; y < cellSize; y++) {
+        for (let x = 0; x < cellSize; x++) {
+          const atlasX = variant * cellSize + x;
+          const atlasY = speciesIndex * cellSize + y;
+          const alpha = pixels[(atlasY * width + atlasX) * 4 + 3] as number;
+          if (alpha >= ALPHA_PRESENT_THRESHOLD) covered++;
+        }
+      }
+      const coverage = covered / (cellSize * cellSize);
+      if (species === "dead") {
+        if (coverage > MAX_DEAD_ALPHA_COVERAGE) {
+          return `foliage atlas dead row is unexpectedly opaque (${coverage.toFixed(3)})`;
+        }
+        continue;
+      }
+      if (coverage < MIN_LEAFY_ALPHA_COVERAGE) {
+        return `foliage atlas ${species} variant ${variant} is empty (${coverage.toFixed(3)})`;
+      }
+      if (coverage > MAX_LEAFY_ALPHA_COVERAGE) {
+        return `foliage atlas ${species} variant ${variant} is too opaque (${coverage.toFixed(3)})`;
+      }
+    }
+  }
+  return null;
 }
 
 export function flipRows(pixels: Uint8Array, width: number, height: number): void {
