@@ -94,11 +94,6 @@ export interface TreeHydrologyWater {
   worldSize: number;
 }
 
-/**
- * Keep-mask that drops trees standing in a hydrology water body (so they stop
- * floating over lakes/rivers). XZ-only via the wet mask, so it works for both the
- * CPU InstancedMesh path and the GPU ring path. Returns null when no hydrology.
- */
 function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: TslNode): TslNode | null {
   if (!hydrology?.texture) return null;
   const wetUv: TslNode = worldXZ.div(float(hydrology.worldSize || 1));
@@ -168,7 +163,7 @@ export function createTreeNodeMaterialHandle(
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aFoliageCard: TslNode = attribute("treeFoliageCard", "float");
     const aVariant: TslNode = attribute("treeVariant", "float");
-    const aWind: TslNode = attribute("treeWind", "vec2");
+    const aWind: TslNode = attribute("treeWind", "vec3");
     const aWindWeight: TslNode = aWind.x;
     const aFlutterWeight: TslNode = aWind.y;
     const aWorldXZ: TslNode = attribute("treeWorldXZ", "vec2");
@@ -323,7 +318,7 @@ export function createTreeRingNodeMaterialHandle(
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aFoliageCard: TslNode = attribute("treeFoliageCard", "float");
     const aVariant: TslNode = attribute("treeVariant", "float");
-    const aWind: TslNode = attribute("treeWind", "vec2");
+    const aWind: TslNode = attribute("treeWind", "vec3");
     const aWindWeight: TslNode = aWind.x;
     const aFlutterWeight: TslNode = aWind.y;
     const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
@@ -440,8 +435,7 @@ export function createTreeRingNodeMaterialHandle(
       uGround.value.copy(v3(next.groundLight));
     },
     updateForestLighting() {
-      // Stage 1 ring trees validate the draw path first; forest lighting integration stays
-      // on the existing CPU/WebGPU material until the all-LOD quality stage.
+      // Ring forest lighting is attached by tree_material_parity.
     },
     dispose() {
       for (const material of materials) material.dispose();
