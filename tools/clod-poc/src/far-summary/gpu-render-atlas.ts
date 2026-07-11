@@ -3,11 +3,13 @@ import {
   FAR_SUMMARY_RENDER_ATLAS_HALF_FLOAT_BYTES,
   FAR_SUMMARY_RENDER_ATLAS_RGBA_COMPONENTS,
   FAR_SUMMARY_RENDER_ATLAS_TEXTURE_COUNT,
-  FAR_SUMMARY_RENDER_ATLAS_TILES_X,
-  FAR_SUMMARY_RENDER_ATLAS_TILES_Z,
 } from "./gpu-render-atlas-constants.js";
 import { createFarSummaryRenderAtlasPipeline, submitFarSummaryRenderAtlasPlan } from "./gpu-render-atlas-pipeline.js";
-import { commonFarSummaryRenderAtlasTileCells, planFarSummaryGpuRenderAtlas } from "./gpu-render-atlas-plan.js";
+import {
+  commonFarSummaryRenderAtlasTileCells,
+  farSummaryRenderAtlasTilesPerSide,
+  planFarSummaryGpuRenderAtlas,
+} from "./gpu-render-atlas-plan.js";
 import {
   createFarSummaryRenderAtlasBackTextures,
   createFarSummaryRenderAtlasFrontTextures,
@@ -47,15 +49,17 @@ export function createFarSummaryGpuRenderAtlasRuntime(
   if (options.config.rings.length === 0) return null;
 
   let tileCells: number;
+  let tilesPerSide: number;
   try {
     tileCells = commonFarSummaryRenderAtlasTileCells(options.config.rings);
+    tilesPerSide = farSummaryRenderAtlasTilesPerSide(options.config.rings);
   } catch (error) {
     console.warn("[far-summary-render-atlas] incompatible ring layout", error);
     return null;
   }
 
-  const width = tileCells * FAR_SUMMARY_RENDER_ATLAS_TILES_X;
-  const ringHeight = tileCells * FAR_SUMMARY_RENDER_ATLAS_TILES_Z;
+  const width = tileCells * tilesPerSide;
+  const ringHeight = tileCells * tilesPerSide;
   const height = ringHeight * options.config.rings.length;
   const front = createFarSummaryRenderAtlasFrontTextures(width, height);
   let frontGpu: FarSummaryRenderAtlasTextureSet;
@@ -113,7 +117,7 @@ export function createFarSummaryGpuRenderAtlasRuntime(
   let revision = 0;
   let builds = 0;
 
-  publishRenderAtlasCounters(view, false, false, builds, 0);
+  publishRenderAtlasCounters(view, false, false, builds, 0, tilesPerSide);
 
   const drain = async (): Promise<void> => {
     if (running || disposed) return;
@@ -127,13 +131,13 @@ export function createFarSummaryGpuRenderAtlasRuntime(
         commitPlan(view, plan);
         builds++;
         submittedSignature = plan.signature;
-        publishRenderAtlasCounters(view, pendingPlan !== null, true, builds, plan.tiles.length);
+        publishRenderAtlasCounters(view, pendingPlan !== null, true, builds, plan.tiles.length, tilesPerSide);
       }
     } catch (error) {
       console.warn("[far-summary-render-atlas] GPU build failed; retaining previous atlas", error);
     } finally {
       running = false;
-      publishRenderAtlasCounters(view, pendingPlan !== null, false, builds, 0);
+      publishRenderAtlasCounters(view, pendingPlan !== null, false, builds, 0, tilesPerSide);
       if (!disposed && pendingPlan) void drain();
     }
   };
@@ -145,7 +149,7 @@ export function createFarSummaryGpuRenderAtlasRuntime(
       const plan = planFarSummaryGpuRenderAtlas(center, options.config, ++revision);
       if (plan.signature === submittedSignature || plan.signature === pendingPlan?.signature) return;
       pendingPlan = plan;
-      publishRenderAtlasCounters(view, true, running, builds, plan.tiles.length);
+      publishRenderAtlasCounters(view, true, running, builds, plan.tiles.length, tilesPerSide);
       void drain();
     },
     dispose() {
@@ -155,7 +159,7 @@ export function createFarSummaryGpuRenderAtlasRuntime(
       if (activeAtlasView === view) activeAtlasView = undefined;
       disposeFarSummaryRenderAtlasFrontTextures(front);
       destroyFarSummaryRenderAtlasTextureSet(back);
-      publishRenderAtlasCounters(view, false, false, builds, 0, false);
+      publishRenderAtlasCounters(view, false, false, builds, 0, tilesPerSide, false);
     },
   };
 }
@@ -201,6 +205,7 @@ function publishRenderAtlasCounters(
   inFlight: boolean,
   builds: number,
   tiles: number,
+  tilesPerSide: number,
   enabled = true,
 ): void {
   const counters = (globalThis as typeof globalThis & {
@@ -212,6 +217,7 @@ function publishRenderAtlasCounters(
   counters["farSummaryRenderAtlas.revision"] = view.revision;
   counters["farSummaryRenderAtlas.builds"] = builds;
   counters["farSummaryRenderAtlas.tilesSubmitted"] = tiles;
+  counters["farSummaryRenderAtlas.tilesPerSide"] = tilesPerSide;
   counters["farSummaryRenderAtlas.pending"] = pending ? 1 : 0;
   counters["farSummaryRenderAtlas.inFlight"] = inFlight ? 1 : 0;
 }
