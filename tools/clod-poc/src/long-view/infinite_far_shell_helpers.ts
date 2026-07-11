@@ -1,9 +1,11 @@
 import * as THREE from "three";
+import { getActiveFarSummaryGpuAtlasView } from "../far-summary/gpu-render-atlas.js";
 import { writeBiomeRgb } from "../world_source/biome_colors.js";
 import type { InfiniteFarShellOptions, FarShellHeightSamplingMode } from "./infinite_far_shell_types.js";
 
 export function hasGpuSamplingInputs(options: InfiniteFarShellOptions): boolean {
-  return Boolean(options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas);
+  const atlas = options.farSummaryGpuAtlas ?? getActiveFarSummaryGpuAtlasView();
+  return Boolean(options.useParityMaterial && options.parityConfig && atlas);
 }
 
 export function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
