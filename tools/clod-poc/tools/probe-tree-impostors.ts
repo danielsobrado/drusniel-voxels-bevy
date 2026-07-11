@@ -3,9 +3,9 @@
 import { clodUrl, launchWebGPU } from "./launch.js";
 
 const CLOSE_POSE = {
-  p: [434, 80, 590] as [number, number, number],
-  yaw: Math.atan2(-(512 - 434), -(512 - 590)),
-  pitch: -0.35,
+  p: [512, 116, 732] as [number, number, number],
+  yaw: 0,
+  pitch: -0.365,
   fov: 55,
 };
 
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     await page.evaluate(async (pose) => {
       window.__drusnielClod?.flyCamEnabled?.(false);
       window.__drusnielClod?.setPose?.(pose);
-      await window.__drusnielClod?.settle?.(32);
+      await window.__drusnielClod?.settle?.(600);
     }, CLOSE_POSE);
 
     const inventory = await page.evaluate(() => {
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
       }, tier);
     }
 
-    for (const hide of ["trees", "understory", "vegetation", "veg", "grass", "props"]) {
+    for (const hide of ["CanopyTileBounds", "CanopyFadeZone", "CanopyGpuImpostors", "trees"]) {
       const hidden = await page.evaluate(async (name) => {
         const scene = (window as unknown as SceneWindow).__drusnielScene;
         const group = scene?.getObjectByName(name);

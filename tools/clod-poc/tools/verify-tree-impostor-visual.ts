@@ -229,6 +229,10 @@ async function main(): Promise<void> {
     console.log(`[tree-impostor-visual] ${url}`);
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await waitForReady(page, timeoutMs);
+    // The spike detector must only see the rendered scene: DOM overlays (GUI
+    // panels, HUD windows) have thin dark borders that register as permanent
+    // vertical spike false-positives at fixed screen columns.
+    await page.addStyleTag({ content: "body > *:not(canvas) { visibility: hidden !important; }" });
     await page.evaluate(async (frames: number) => {
       window.__drusnielClod?.flyCamEnabled?.(false);
       await window.__drusnielClod?.settle?.(frames);

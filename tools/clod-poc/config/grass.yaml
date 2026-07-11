@@ -5,7 +5,7 @@ grass:
   patch_distance_m: 125
   refresh_distance_m: 8
   max_new_patches_per_frame: 1
-  max_instances_per_tier: 32000
+  max_instances_per_tier: 64000
 
   placement:
     spacing_m: 0.85
@@ -70,8 +70,11 @@ grass:
     show_patch_bounds: false
 
   ring:
-    grid: 512
-    cell: 0.8
+    # 1024 @ 0.4 m keeps the same ~410 m coverage as 512 @ 0.8 m but quadruples
+    # slot density (1.56 -> 6.25 slots/m²) toward the fable5 meadow look; the
+    # GPU ring culls/compacts, so cost scales with visible instances, not slots.
+    grid: 1024
+    cell: 0.4
     max_radius: 160
     ring_distance: 160
     near_meters: 32

@@ -64,6 +64,8 @@ function wantedTileMap(
 
 const REMOTE_BATCH_TILES = 8;
 const REMOTE_MAX_INFLIGHT_TILES = 32;
+/** Unpacked worker tiles adopted per frame; bounds the main-thread cost of a drain burst. */
+const REMOTE_MAX_ADOPTIONS_PER_FRAME = 8;
 
 export function createCanopyClipmap(remote?: CanopyRemoteTileSource | null): CanopyClipmap {
   const tiles = new Map<string, CanopySummaryTile>();
@@ -125,10 +127,9 @@ export function createCanopyClipmap(remote?: CanopyRemoteTileSource | null): Can
   /** Adopt worker-built tiles that are still wanted with an unchanged ring. */
   const adoptRemoteTiles = (wanted: Map<string, CanopyWorldKey>): number => {
     if (remoteCompleted.length === 0) return 0;
-    const completed = remoteCompleted;
-    remoteCompleted = [];
     let adopted = 0;
-    for (const tile of completed) {
+    while (remoteCompleted.length > 0 && adopted < REMOTE_MAX_ADOPTIONS_PER_FRAME) {
+      const tile = remoteCompleted.shift()!;
       const stableKey = stableTileKey(tile.key.tileX, tile.key.tileZ);
       remoteInflight.delete(stableKey);
       if (wanted.get(stableKey)?.ring !== tile.key.ring) continue;
@@ -297,7 +298,11 @@ export function createCanopyClipmap(remote?: CanopyRemoteTileSource | null): Can
       metrics.visibleTiles = tiles.size;
       metrics.buildMs = performance.now() - t0;
 
-      if (built > 0 || metrics.evictedTiles > 0 || coverageStatsDirty) {
+      if (built > 0 || metrics.evictedTiles > 0) coverageStatsDirty = true;
+      // The scan walks every cell of every tile, so during a drain (tiles arriving each frame)
+      // it would rerun per frame; the aggregates are diagnostics, so recompute once at idle.
+      const buildQueuesIdle = rebuildQueue.length === 0 && remoteInflight.size === 0 && remoteCompleted.length === 0 && !activeBuild;
+      if (coverageStatsDirty && buildQueuesIdle) {
         let covSum = 0;
         let covMax = 0;
         let covCount = 0;
