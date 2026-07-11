@@ -28,7 +28,9 @@ describe("tree material shader injections", () => {
     const shader = injectTreeWindShader(vertexShader);
     expect(shader).toContain("attribute float treeLodDitherRole");
     expect(shader).toContain("attribute float treeFoliageCard");
-    expect(shader).toContain("attribute float treeSpeciesIndex");
+    expect(shader).toContain("attribute vec3 treeWind");
+    expect(shader).not.toContain("attribute float treeSpeciesIndex");
+    expect(shader).toContain("vTreeSpeciesIndex = treeWind.z");
     expect(shader).toContain("varying float vTreeLodDitherRole");
     expect(shader).toContain("vTreeLodDitherRole = treeLodDitherRole");
     expect(shader).toContain("treeShapePhase");
