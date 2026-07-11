@@ -80,11 +80,50 @@ export function resetFrameShellMetrics(m: FarShellMetrics): void {
   m.farSummaryProbeHeightErrorMaxM = 0;
 }
 
+// ?farDebug=1 — periodic console trace of the far/near handoff ("two areas" symptom):
+// how much of the far surface is still rendering procedural-fallback heights, and how
+// far the summary tile build has progressed. One line every ~2 s while warming, plus a
+// single "converged" line when fallbacks reach zero.
+const FAR_DEBUG_LOG_EVERY_FRAMES = 120;
+let farDebugEnabled: boolean | null = null;
+let farDebugFrame = 0;
+let farDebugConvergedLogged = false;
+
+function maybeLogFarDebug(metrics: FarShellMetrics): void {
+  if (farDebugEnabled === null) {
+    farDebugEnabled =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("farDebug") === "1";
+  }
+  if (!farDebugEnabled) return;
+  const warming =
+    metrics.farSummaryProceduralFallbackSamples > 0 ||
+    metrics.farSummaryTilesReady < metrics.farSummaryTilesRequired;
+  if (warming) {
+    farDebugConvergedLogged = false;
+    if (farDebugFrame++ % FAR_DEBUG_LOG_EVERY_FRAMES === 0) {
+      console.info(
+        `[far-debug] warming: proceduralFallbackSamples=${metrics.farSummaryProceduralFallbackSamples} ` +
+          `lower=${metrics.farSummaryLowerRingFallbackSamples} conservative=${metrics.farSummaryConservativeFallbackSamples} ` +
+          `summaryTiles=${metrics.farSummaryTilesReady}/${metrics.farSummaryTilesRequired} ` +
+          `building=${metrics.farSummaryTilesBuilding} missing=${metrics.farSummaryTilesMissing}`,
+      );
+    }
+  } else if (!farDebugConvergedLogged) {
+    farDebugConvergedLogged = true;
+    console.info(
+      `[far-debug] converged: summaryTiles=${metrics.farSummaryTilesReady}/${metrics.farSummaryTilesRequired}, ` +
+        "no procedural fallback samples this frame",
+    );
+  }
+}
+
 /** Publishes infinite-far-shell metrics into phase-0 / hook counter maps. */
 export function publishFarShellMetricsToCounters(
   counters: Record<string, number>,
   metrics: FarShellMetrics,
 ): void {
+  maybeLogFarDebug(metrics);
   counters["far_shell_inner_m"] = metrics.farShellInnerM;
   counters["far_shell_outer_m"] = metrics.farShellOuterM;
   counters["far_shell_vertices"] = metrics.farShellVertices;

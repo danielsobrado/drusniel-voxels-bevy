@@ -188,6 +188,26 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   camera.lookAt(controls.target);
   controls.update();
 
+  // Infinite-islands: honour cam=x,y,z[,yaw,pitch[,fov]] (the long-view/acceptance URL
+  // format) so inspection URLs teleport the startup orbit camera instead of silently
+  // ignoring the parameter. x/z spawn params still control the (gated) player spawn.
+  if (searchParams.get("scene") === "infinite-islands") {
+    const camParam = searchParams.get("cam");
+    const parts = camParam ? camParam.split(",").map(Number) : [];
+    if (parts.length >= 3 && parts.every(Number.isFinite)) {
+      camera.position.set(parts[0], parts[1], parts[2]);
+      camera.rotation.set(parts[4] ?? 0, parts[3] ?? 0, 0, "YXZ");
+      if (parts[5]) {
+        camera.fov = parts[5];
+        camera.updateProjectionMatrix();
+      }
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      controls.target.copy(camera.position).addScaledVector(forward, 120);
+      controls.update();
+    }
+  }
+
   if (stagedImport) {
     camera.position.fromArray(stagedImport.manifest.camera.position);
     controls.target.fromArray(stagedImport.manifest.camera.target);

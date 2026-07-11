@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
+import { createSpawnWaitIndicator } from "./spawn_wait_indicator.js";
 import {
   PlayerController,
   PlayerInteractionState,
@@ -271,18 +272,27 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     // player lands on real ground instead of dropping through un-meshed terrain. Frame-capped so a
     // stalled stream never hangs the spawn.
     let framesWaited = 0;
+    const waitIndicator = createSpawnWaitIndicator();
     const poll = () => {
-      if (deps.interaction.mode === "playing") return;
+      if (deps.interaction.mode === "playing") {
+        waitIndicator.done();
+        return;
+      }
       const counters = (typeof window !== "undefined" ? window.__drusnielClod?.stats?.counters : undefined) ?? {};
+      const safetyReady = counters["live_clod_stream_safety_ready_pages"] ?? 0;
+      const safetyRequired = counters["live_clod_stream_safety_required_pages"] ?? 0;
+      const collidersLoaded = deps.terrainColliders.loadedPageCount();
+      waitIndicator.update({ safetyReady, safetyRequired, collidersLoaded });
       const ready = shouldApplyQuerySpawnNow({
         enabled: true,
-        safetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
-        safetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
-        collidersLoaded: deps.terrainColliders.loadedPageCount(),
+        safetyReady,
+        safetyRequired,
+        collidersLoaded,
         framesWaited,
         maxFrames: SPAWN_GATE_MAX_FRAMES,
       });
       if (ready) {
+        waitIndicator.done();
         performQuerySpawn(xVal, zVal, yawVal);
         return;
       }

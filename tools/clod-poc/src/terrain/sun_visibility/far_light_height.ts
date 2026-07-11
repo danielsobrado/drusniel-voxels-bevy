@@ -45,24 +45,26 @@ export function createTerrainEditChangeTracker() {
   };
 }
 
-export function createTerrainSummaryLightHeightProvider(field: TerrainSummaryField) {
-  const terrainRevision = () => getDigEditRevision();
-  const res = field.res;
-  const worldSize = field.worldSize;
-  const heightMax = field.heightMax;
-  const analytic = field.analyticHeightSampler;
+/** Allocation-free height sampler over a summary heightMax grid; NaN = missing.
+ *  A tile build does up to resolution² × ray-steps samples, so this path must
+ *  not allocate result objects or consult the edit revision per sample.
+ *  Pure function of its inputs so the sun-light build worker samples heights
+ *  bit-identically to the main thread from a transferred heightMax snapshot. */
+export function createSunLightHeightSampler(
+  res: number,
+  worldSize: number,
+  heightMax: ArrayLike<number>,
+  analytic: ((x: number, z: number) => number) | undefined,
+): (x: number, z: number) => number {
   const maxIndex = res - 1;
 
   const cornerHeight = (lx: number, lz: number): number => {
     const cx = lx < 0 ? 0 : lx > maxIndex ? maxIndex : lx;
     const cz = lz < 0 ? 0 : lz > maxIndex ? maxIndex : lz;
-    return heightMax[cz * res + cx];
+    return heightMax[cz * res + cx]!;
   };
 
-  /** Allocation-free height sample for the tile-build hot loop; NaN = missing.
-   *  A tile build does up to resolution² × ray-steps samples, so this path must
-   *  not allocate result objects or consult the edit revision per sample. */
-  const heightAt = (x: number, z: number): number => {
+  return (x: number, z: number): number => {
     const inside = x >= 0 && z >= 0 && x <= worldSize && z <= worldSize;
     if (!inside) return analytic ? analytic(x, z) : Number.NaN;
     const fx = (x / worldSize) * res - 0.5;
@@ -76,6 +78,11 @@ export function createTerrainSummaryLightHeightProvider(field: TerrainSummaryFie
       + cornerHeight(ix, iz + 1) * (1 - tx) * tz
       + cornerHeight(ix + 1, iz + 1) * tx * tz;
   };
+}
+
+export function createTerrainSummaryLightHeightProvider(field: TerrainSummaryField) {
+  const terrainRevision = () => getDigEditRevision();
+  const heightAt = createSunLightHeightSampler(field.res, field.worldSize, field.heightMax, field.analyticHeightSampler);
 
   return {
     terrainRevision,

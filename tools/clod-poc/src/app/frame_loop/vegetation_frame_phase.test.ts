@@ -20,7 +20,7 @@ function installCounters(): Record<string, number> {
   return counters;
 }
 
-function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
+function makeInput(waterEnabled: boolean, selectionFrameId = 1): VegetationFramePhaseInput {
   const update = vi.fn();
   const propUpdate = vi.fn();
   return {
@@ -56,7 +56,7 @@ function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
     updateWeatherStats: vi.fn(),
     weatherStatsController: null,
     currentLighting: () => ({ sunDirection: new THREE.Vector3(0, 1, 0), skyLight: new THREE.Color(1, 1, 1) }),
-    selectionFrameId: 1,
+    selectionFrameId,
     worldCells: 1024,
     collectTiming: true,
   };
@@ -79,7 +79,7 @@ describe("vegetation frame phase", () => {
 
   it("mirrors infinite hydrology diagnostics even when water rendering is disabled", () => {
     const counters = installCounters();
-    const input = makeInput(false);
+    const input = makeInput(false, 30);
     input.camera.position.set(1500, 40, -300);
 
     runVegetationFramePhase(input);
@@ -101,7 +101,7 @@ describe("vegetation frame phase", () => {
 
   it("mirrors infinite hydrology diagnostics when stats counters are installed", () => {
     const counters = installCounters();
-    const input = makeInput(true);
+    const input = makeInput(true, 30);
     input.camera.position.set(1500, 40, -300);
 
     runVegetationFramePhase(input);
@@ -109,6 +109,17 @@ describe("vegetation frame phase", () => {
     expect(counters["infinite_hydrology_outside_sample_valid"]).toBe(1);
     expect(counters["infinite_hydrology_nonrepeat_ok"]).toBe(1);
     expect(counters["infinite_hydrology_camera_outside_startup"]).toBe(1);
+  });
+
+  it("skips the hydrology diagnostics mirror off its frame cadence", () => {
+    const counters = installCounters();
+    const input = makeInput(true, 31);
+    input.camera.position.set(1500, 40, -300);
+
+    runVegetationFramePhase(input);
+
+    expect(counters["infinite_hydrology_outside_sample_valid"]).toBeUndefined();
+    expect(input.waterController.update).toHaveBeenCalledOnce();
   });
 
   it("updates custom props with the vegetation ring center", () => {

@@ -71,6 +71,9 @@ const EMPTY_TIMING: VegetationFrameTiming = {
 
 const HYDROLOGY_DIAGNOSTIC_OFFSET_M = 173;
 const HYDROLOGY_NONREPEAT_EPSILON_M = 0.001;
+/** The hydrology mirror does two full water-field samples; that is diagnostics, not
+ *  simulation, so it runs on the same coarse cadence as the other stats mirrors. */
+const HYDROLOGY_DIAGNOSTIC_INTERVAL_FRAMES = 30;
 
 function measure(fn: () => void): number {
   const start = performance.now();
@@ -131,7 +134,9 @@ function updateForestLighting(input: VegetationFramePhaseInput): void {
 }
 
 function updateWater(input: VegetationFramePhaseInput): void {
-  mirrorInfiniteHydrologyDiagnostics(input);
+  if (input.selectionFrameId % HYDROLOGY_DIAGNOSTIC_INTERVAL_FRAMES === 0) {
+    mirrorInfiniteHydrologyDiagnostics(input);
+  }
   if (!input.state.waterEnabled) return;
   input.waterController.update(Math.min(input.playerDelta, 0.1), input.camera.position);
   input.waterController.logDevInitOnce(input.worldCells);

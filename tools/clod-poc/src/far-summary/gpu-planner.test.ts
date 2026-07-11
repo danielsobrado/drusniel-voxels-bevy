@@ -26,6 +26,9 @@ const SUMMARY_CONFIG: FarSummaryConfig = {
     maxBuildMsPerFrame: 2,
     evictionGraceSeconds: 12,
     keepStaleUntilReplacement: true,
+    warmupReadyRatio: 0.95,
+    warmupMaxTileBuildsPerFrame: 4,
+    warmupMaxBuildMsPerFrame: 12,
   },
   rings: [
     { name: "test", startM: 0, endM: 96, cellM: 16, tileCells: 2 },

@@ -35,8 +35,13 @@ export function parseStreamingRootGpuMesherConfig(
   params: URLSearchParams,
   defaults: StreamingRootGpuMesherConfig = DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
 ): StreamingRootGpuMesherConfig {
+  // Infinite-islands streams hundreds of root pages on boot/teleport; the serial CPU
+  // worker builds ~3 pages/s while the GPU mesher measures ~16 pages/s (5x) with the
+  // guarded CPU fallback still in place, so the GPU path is the scene default there.
+  // liveClodRootGpuMesher=0 opts back into the CPU worker.
+  const defaultEnabled = defaults.enabled || params.get("scene") === "infinite-islands";
   return {
-    enabled: booleanFlag(params, "liveClodRootGpuMesher", defaults.enabled),
+    enabled: booleanFlag(params, "liveClodRootGpuMesher", defaultEnabled),
     batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? defaults.batchSize,
     maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaults.maxInflightBatches,
     fallback: booleanFlag(params, "liveClodRootGpuFallback", defaults.fallback),

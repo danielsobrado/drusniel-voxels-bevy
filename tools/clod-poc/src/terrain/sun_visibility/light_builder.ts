@@ -1,7 +1,5 @@
-import * as THREE from "three";
 import { sunVisibilityTileBounds, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
 import type { SunDirectionBin } from "./sun_bins.js";
-import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 
 export const LIGHT_SAMPLE = {
@@ -10,9 +8,23 @@ export const LIGHT_SAMPLE = {
   shaded: 2,
 } as const;
 
+/** Structural so worker-side requests need no THREE dependency; the main thread
+ *  passes THREE.Vector3 instances, which satisfy this shape. */
+export interface SunLightVec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** Height source for a tile build; both the main-thread provider and the build
+ *  worker satisfy this with createSunLightHeightSampler-backed samplers. */
+export interface LightTileHeightSource {
+  heightAt(x: number, z: number): number;
+}
+
 export interface LightTileBuildRequest {
   tile: SunVisibilityTileKey;
-  sunVec: THREE.Vector3;
+  sunVec: SunLightVec3;
   sunBin: SunDirectionBin;
   terrainRevision: number;
   frameIndex: number;
@@ -49,7 +61,11 @@ export interface LightTileBuild {
 export function createLightTileBuild(request: LightTileBuildRequest, options: SunLightOptions): LightTileBuild {
   const resolution = options.tile.resolution;
   const bounds = sunVisibilityTileBounds(request.tile, options.tile);
-  const sun = request.sunVec.clone().normalize();
+  // Same math as THREE.Vector3.normalize (sqrt of the component sum), kept local
+  // so the build worker shares this exact code path without importing three.
+  const rawSun = request.sunVec;
+  const sunLength = Math.sqrt(rawSun.x * rawSun.x + rawSun.y * rawSun.y + rawSun.z * rawSun.z) || 1;
+  const sun = { x: rawSun.x / sunLength, y: rawSun.y / sunLength, z: rawSun.z / sunLength };
   const horizontalLength = Math.hypot(sun.x, sun.z);
   const zeroHorizontal = horizontalLength < 0.001;
   return {
@@ -69,7 +85,7 @@ export function createLightTileBuild(request: LightTileBuildRequest, options: Su
 
 export function stepLightTileBuild(
   build: LightTileBuild,
-  provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
+  provider: LightTileHeightSource,
   options: SunLightOptions,
   deadlineMs: number,
 ): boolean {
@@ -136,7 +152,7 @@ export function finalizeLightTile(build: LightTileBuild): LightTile {
 
 export function buildLightTile(
   request: LightTileBuildRequest,
-  provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
+  provider: LightTileHeightSource,
   options: SunLightOptions,
 ): LightTile {
   const build = createLightTileBuild(request, options);

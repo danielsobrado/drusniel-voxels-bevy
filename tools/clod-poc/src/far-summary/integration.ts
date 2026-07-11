@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
-import { DEFAULT_FAR_SUMMARY_CONFIG, type FarSummaryConfig } from "./config.js";
+import { DEFAULT_FAR_SUMMARY_CONFIG, resolveFarSummaryBuildBudgets, type FarSummaryConfig } from "./config.js";
 import { FarSummaryCache } from "./summary-cache.js";
 import { FarSummaryClipmapSampler } from "./clipmap-sampler.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
@@ -174,12 +174,18 @@ export function initFarSummaryIntegration(
     const cpuFallbackAllowed = gpuConfig.enabled && gpuConfig.authoritative && authoritativeCpuFallbackFrames > 0;
     const cpuBuildSuppressedByGpuAuthority = gpuConfig.enabled && gpuConfig.authoritative && !cpuFallbackAllowed;
     if (!cpuBuildSuppressedByGpuAuthority && buildAllowedByInterval && buildAllowedByDelay) {
-      const budget = forceSlowBuilds ? 1 : undefined;
-      const buildBudgetMs = Math.max(0, config.stream.maxBuildMsPerFrame);
-      const deadlineMs = Number.isFinite(buildBudgetMs) && buildBudgetMs > 0
-        ? nowMs + buildBudgetMs
+      // Warmup boost: while the required set is mostly cold, spend a real time slice per
+      // frame instead of the steady-state 2 ms sliver — otherwise a cold boot renders the
+      // flat procedural-fallback band for minutes (one tile every ~15 frames).
+      const preBuildStates = cache.countRequestStates(requests);
+      const requiredCount =
+        preBuildStates.ready + preBuildStates.building + preBuildStates.staleWithSamples + preBuildStates.missing;
+      const readyRatio = requiredCount > 0 ? preBuildStates.ready / requiredCount : 1;
+      const budgets = resolveFarSummaryBuildBudgets(config.stream, readyRatio, forceSlowBuilds);
+      const deadlineMs = Number.isFinite(budgets.budgetMs) && budgets.budgetMs > 0
+        ? nowMs + budgets.budgetMs
         : Number.POSITIVE_INFINITY;
-      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget, deadlineMs);
+      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budgets.maxBuilds, deadlineMs);
     }
     if (cpuFallbackAllowed) authoritativeCpuFallbackFrames--;
 

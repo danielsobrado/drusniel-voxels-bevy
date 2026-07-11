@@ -1,18 +1,29 @@
 import { sunVisibilityTileBounds, sunVisibilityTileKeyToString, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
-import { createLightTileBuild, finalizeLightTile, stepLightTileBuild, type LightTileBuild } from "./light_builder.js";
+import { createLightTileBuild, finalizeLightTile, stepLightTileBuild, type LightTileBuild, type LightTileBuildRequest } from "./light_builder.js";
 import { createSunLightCacheCore } from "./light_cache_core.js";
 import { sunBinKey } from "./sun_bins.js";
 import type { createTerrainSummaryLightHeightProvider, TerrainChangedRegion } from "./far_light_height.js";
 import type { SunLightOptions } from "./sun_light_options.js";
+import type { SunLightRemoteTileSource } from "./sun_light_worker_client.js";
+import type { SunLightWorkerBuiltTile, SunLightWorkerTileRequest } from "./sun_light_worker_protocol.js";
 
 /** Pending tiles farther than materialTileRadius + this margin from the camera
  *  tile are dropped; they re-enqueue if the camera comes back. */
 const PENDING_PRUNE_MARGIN_TILES = 2;
+/** Worker-path pacing: batches keep round-trips coarse, the inflight cap bounds
+ *  wasted work after an invalidation, and the adoption cap bounds per-frame cost. */
+const REMOTE_BATCH_TILES = 4;
+const REMOTE_MAX_INFLIGHT_TILES = 16;
+const REMOTE_MAX_ADOPTIONS_PER_FRAME = 24;
 
-export function createSunLightCacheRuntime(options: SunLightOptions) {
+export function createSunLightCacheRuntime(options: SunLightOptions, remote?: SunLightRemoteTileSource | null) {
   const core = createSunLightCacheCore(options);
   const staleTiles = new Set<string>();
   let inProgress: { key: string; build: LightTileBuild } | null = null;
+  // Tiles dispatched to the build worker and not yet adopted. Requests are retained so
+  // invalidation can intersect their bounds and failures can re-queue them.
+  const remoteInflight = new Map<string, LightTileBuildRequest>();
+  let remoteCompleted: SunLightWorkerBuiltTile[] = [];
   /** Bumped whenever the set of built entries changes (build, eviction,
    *  invalidation), so consumers like the GPU atlas can skip repacking when
    *  nothing they read has changed. */
@@ -54,6 +65,93 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
     return bestKey;
   };
 
+  const adoptRemoteTiles = (frameIndex: number): void => {
+    let adopted = 0;
+    while (remoteCompleted.length > 0 && adopted < REMOTE_MAX_ADOPTIONS_PER_FRAME) {
+      const built = remoteCompleted.shift()!;
+      const request = remoteInflight.get(built.key);
+      remoteInflight.delete(built.key);
+      // Dropped from inflight by invalidation / bin change while at the worker: discard.
+      if (!request) continue;
+      const currentBin = core.stats.currentSunBin;
+      if (currentBin && sunBinKey(request.sunBin) !== sunBinKey(currentBin)) continue;
+      core.entries.set(built.key, {
+        tile: {
+          key: request.tile,
+          sunBin: request.sunBin,
+          terrainRevision: request.terrainRevision,
+          resolution: built.resolution,
+          values: built.values,
+          builtAtFrame: frameIndex,
+        },
+        lastUsedFrame: frameIndex,
+      });
+      staleTiles.delete(sunVisibilityTileKeyToString(request.tile));
+      contentRevision += 1;
+      core.stats.tilesBuiltThisFrame += 1;
+      core.stats.tilesBuiltTotal += 1;
+      adopted++;
+    }
+  };
+
+  const dispatchRemoteBuilds = (centerTile: SunVisibilityTileKey | undefined): void => {
+    if (!remote) return;
+    while (remoteInflight.size < REMOTE_MAX_INFLIGHT_TILES && core.pending.size > 0) {
+      const batch: SunLightWorkerTileRequest[] = [];
+      const batchRequests: LightTileBuildRequest[] = [];
+      while (batch.length < REMOTE_BATCH_TILES && remoteInflight.size < REMOTE_MAX_INFLIGHT_TILES) {
+        // Skip tiles already built or already at the worker (enqueueTile re-adds
+        // inflight tiles to pending each frame since it cannot see the worker queue).
+        let key = nearestPending(centerTile);
+        while (key !== null && (core.entries.has(key) || remoteInflight.has(key))) {
+          core.pending.delete(key);
+          key = nearestPending(centerTile);
+        }
+        if (key === null) break;
+        const request = core.pending.get(key)!;
+        core.pending.delete(key);
+        remoteInflight.set(key, request);
+        batchRequests.push(request);
+        batch.push({
+          key,
+          tileX: request.tile.tileX,
+          tileZ: request.tile.tileZ,
+          lod: request.tile.lod,
+          sunVec: [request.sunVec.x, request.sunVec.y, request.sunVec.z],
+          sunBin: request.sunBin,
+          terrainRevision: request.terrainRevision,
+          frameIndex: request.frameIndex,
+        });
+      }
+      if (batch.length === 0) return;
+      remote.build(batch).then((built) => {
+        remoteCompleted.push(...built);
+        // Batches answered as [] raced a reconfigure; release their slots so they re-queue.
+        if (built.length < batch.length) {
+          const builtKeys = new Set(built.map((tile) => tile.key));
+          for (const tile of batch) {
+            if (builtKeys.has(tile.key)) continue;
+            const request = remoteInflight.get(tile.key);
+            remoteInflight.delete(tile.key);
+            if (request && !core.entries.has(tile.key) && !core.pending.has(tile.key)) {
+              core.pending.set(tile.key, request);
+            }
+          }
+        }
+      }).catch(() => {
+        // Worker failed; release the slots so the main-thread build path picks them back up.
+        for (let i = 0; i < batch.length; i++) {
+          const tile = batch[i]!;
+          const request = remoteInflight.get(tile.key);
+          remoteInflight.delete(tile.key);
+          if (request && !core.entries.has(tile.key) && !core.pending.has(tile.key)) {
+            core.pending.set(tile.key, request);
+          }
+        }
+      });
+    }
+  };
+
   return {
     readWorld: core.readWorld,
     peekWorld: core.peekWorld,
@@ -77,6 +175,33 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
       const currentBin = core.stats.currentSunBin;
       if (inProgress && currentBin && sunBinKey(inProgress.build.request.sunBin) !== sunBinKey(currentBin)) {
         inProgress = null;
+      }
+      if (currentBin) {
+        for (const [key, request] of remoteInflight) {
+          if (sunBinKey(request.sunBin) !== sunBinKey(currentBin)) remoteInflight.delete(key);
+        }
+      }
+
+      if (remote?.available()) {
+        // Worker path: tiles build off-thread; this frame only pays for adopting completed
+        // results and dispatch bookkeeping. A build already in progress on the main thread
+        // is re-queued so the worker owns it (its request is no longer in pending).
+        if (inProgress) {
+          if (!core.entries.has(inProgress.key) && !core.pending.has(inProgress.key)) {
+            core.pending.set(inProgress.key, inProgress.build.request);
+          }
+          inProgress = null;
+        }
+        adoptRemoteTiles(frameIndex);
+        dispatchRemoteBuilds(centerTile);
+        core.stats.buildMsLastFrame = performance.now() - startedAt;
+        core.stats.buildMsAvg = core.stats.tilesBuiltTotal > 0
+          ? core.stats.buildMsAvg * 0.9 + core.stats.buildMsLastFrame * 0.1
+          : core.stats.buildMsLastFrame;
+        const remoteEvictionsBefore = core.stats.evictions;
+        core.evictIfNeeded();
+        if (core.stats.evictions !== remoteEvictionsBefore) contentRevision += 1;
+        return;
       }
 
       while (core.stats.tilesBuiltThisFrame < options.build.maxTilesPerFrame) {
@@ -136,12 +261,17 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
         }
       }
       if (inProgress && intersects(inProgress.build.request.tile)) inProgress = null;
+      for (const [key, request] of remoteInflight) {
+        if (intersects(request.tile)) remoteInflight.delete(key);
+      }
     },
     markAllStale() {
       core.entries.clear();
       core.pending.clear();
       staleTiles.clear();
       inProgress = null;
+      remoteInflight.clear();
+      remoteCompleted = [];
       contentRevision += 1;
       core.stats.refreshes += 1;
     },
@@ -154,7 +284,7 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
     stats() {
       core.stats.active = options.active;
       core.stats.entries = core.entries.size;
-      core.stats.pendingTiles = core.pending.size + (inProgress ? 1 : 0);
+      core.stats.pendingTiles = core.pending.size + (inProgress ? 1 : 0) + remoteInflight.size + remoteCompleted.length;
       return { ...core.stats, staleTiles: staleTiles.size, currentSunBin: core.stats.currentSunBin ? { ...core.stats.currentSunBin } : null };
     },
   };

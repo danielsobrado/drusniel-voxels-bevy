@@ -1,5 +1,6 @@
 import type * as THREE from "three";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
+import { getTerrainFieldConfig } from "../terrain.js";
 import { worldToSunVisibilityTile } from "./sun_visibility_tile.js";
 import { createTerrainEditChangeTracker, createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
@@ -7,6 +8,7 @@ import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
 import { invalidateSunLightGpuAtlas, updateSunLightGpuAtlas } from "./sun_light_gpu_atlas.js";
 import { sunBinKey, toSunBin } from "./sun_bins.js";
+import { createSunLightRemoteTileBuilder } from "./sun_light_worker_client.js";
 
 interface LightUpdateArgs {
   terrainSummary: TerrainSummaryField;
@@ -29,12 +31,36 @@ function stableFrameKey(input: {
   return `${input.terrainRevision}|${input.tileX},${input.tileZ}|${input.sunBin}`;
 }
 
+function safeTerrainFieldConfig(): ReturnType<typeof getTerrainFieldConfig> | null {
+  try {
+    return getTerrainFieldConfig();
+  } catch {
+    return null;
+  }
+}
+
 export function createLightUpdate(args: LightUpdateArgs) {
   const options = loadBundledSunLightOptions();
   applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const changeTracker = createTerrainEditChangeTracker();
-  const cache = createSunLightCacheRuntime(options);
+  // Tile builds cost seconds of CPU each; the worker keeps them off the main thread.
+  // The worker samples a heightMax snapshot, so it must be reconfigured whenever the
+  // main-thread heights can have changed (terrain revision bumps, manual refresh).
+  const remote = options.active ? createSunLightRemoteTileBuilder() : null;
+  const configureRemote = (): void => {
+    remote?.configure({
+      terrainFieldConfig: safeTerrainFieldConfig(),
+      summary: {
+        res: args.terrainSummary.res,
+        worldSize: args.terrainSummary.worldSize,
+        heightMax: args.terrainSummary.heightMax,
+      },
+      options,
+    });
+  };
+  configureRemote();
+  const cache = createSunLightCacheRuntime(options, remote);
   const overlay = createSunLightDebugOverlay();
   let lastTerrainRevision = provider.terrainRevision();
   let lastStableFrameKey = "";
@@ -45,6 +71,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
   globals.__drusnielSunLightRefresh = () => {
     cache.markAllStale();
     invalidateSunLightGpuAtlas();
+    configureRemote();
     lastStableFrameKey = "";
     lastAtlasSignature = "";
   };
@@ -61,9 +88,12 @@ export function createLightUpdate(args: LightUpdateArgs) {
         if (changedRegions === null) {
           cache.markAllStale();
           invalidateSunLightGpuAtlas();
+          configureRemote();
           lastAtlasSignature = "";
         } else if (changedRegions.length > 0) {
           cache.invalidateRegions(changedRegions);
+          // Rebuilds must sample post-edit heights; refresh the worker's snapshot.
+          configureRemote();
         }
         lastTerrainRevision = terrainRevision;
         lastStableFrameKey = "";
@@ -107,6 +137,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       return cache.stats();
     },
     dispose() {
+      remote?.dispose();
       overlay.dispose();
       invalidateSunLightGpuAtlas();
       lastStableFrameKey = "";

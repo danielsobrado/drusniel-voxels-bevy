@@ -9,6 +9,19 @@ describe("streamed root GPU mesher config", () => {
     expect(parseStreamingRootGpuMesherConfig(new URLSearchParams())).toEqual(DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG);
   });
 
+  it("defaults enabled for the infinite-islands scene (5x streamed-root throughput)", () => {
+    const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "infinite-islands" }));
+    expect(parsed.enabled).toBe(true);
+    expect(parsed.fallback).toBe(true); // guarded CPU fallback stays on
+  });
+
+  it("infinite-islands scene default can be opted out with liveClodRootGpuMesher=0", () => {
+    const parsed = parseStreamingRootGpuMesherConfig(
+      new URLSearchParams({ scene: "infinite-islands", liveClodRootGpuMesher: "0" }),
+    );
+    expect(parsed.enabled).toBe(false);
+  });
+
   it("parses explicit query flags", () => {
     const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({
       liveClodRootGpuMesher: "1",

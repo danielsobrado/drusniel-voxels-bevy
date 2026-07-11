@@ -46,6 +46,19 @@ export interface HydrologyTileCacheOptions {
   drySentinelDepthM: number;
 }
 
+export interface HydrologyTileBuildOptions {
+  tileSizeM: number;
+  tileRes: number;
+  drySentinelDepthM: number;
+}
+
+/** Off-thread tile source (build worker). Tiles are pure functions of their coords,
+ *  so remote builds are bit-identical to the synchronous fallback path. */
+export interface HydrologyTileRemoteSource {
+  available(): boolean;
+  build(tiles: { tileX: number; tileZ: number }[]): Promise<HydrologyTile[]>;
+}
+
 export interface HydrologyTileCacheStats {
   builds: number;
   hits: number;
@@ -53,6 +66,78 @@ export interface HydrologyTileCacheStats {
   evictions: number;
   buildMsTotal: number;
   samples: number;
+  /** Tiles adopted from the build worker (bypassing the synchronous path). */
+  remoteBuilds: number;
+  /** Tiles currently being built by the worker. */
+  remoteInflight: number;
+}
+
+/** Worker-path pacing: small batches keep round-trips coarse; the inflight cap bounds
+ *  wasted work when the camera turns away from a prefetched direction. */
+const REMOTE_BATCH_TILES = 2;
+const REMOTE_MAX_INFLIGHT_TILES = 8;
+
+/** Pure tile build shared by the cache's synchronous fallback and the build worker;
+ *  a tile is a pure function of (tileX, tileZ, sampler, options), so both paths
+ *  produce bit-identical data. */
+export function buildHydrologyTileData(
+  tileX: number,
+  tileZ: number,
+  sampler: TerrainHeightSampler,
+  options: HydrologyTileBuildOptions,
+): HydrologyTile {
+  const tileSizeM = Math.max(16, options.tileSizeM);
+  const res = Math.max(4, Math.floor(options.tileRes));
+  const cellSize = tileSizeM / res;
+  const drySentinelDepthM = Math.max(1, options.drySentinelDepthM);
+  const verts = res + 1;
+  const count = verts * verts;
+  const originX = tileX * tileSizeM;
+  const originZ = tileZ * tileSizeM;
+  const tile: HydrologyTile = {
+    tileX,
+    tileZ,
+    originX,
+    originZ,
+    cellSize,
+    res,
+    terrainY: new Float32Array(count),
+    waterY: new Float32Array(count),
+    bodyMask: new Float32Array(count),
+    lakeMask: new Float32Array(count),
+    riverMask: new Float32Array(count),
+    flowX: new Float32Array(count),
+    flowZ: new Float32Array(count),
+    flowStrength: new Float32Array(count),
+    riverDepth: new Float32Array(count),
+    moisture: new Float32Array(count),
+    shoreDistance: new Float32Array(count),
+    bodyKind: new Uint8Array(count),
+    bodyId: new Uint32Array(count),
+  };
+  const sampleOptions = { drySentinelDepthM };
+  for (let iz = 0; iz < verts; iz++) {
+    const wz = originZ + iz * cellSize;
+    for (let ix = 0; ix < verts; ix++) {
+      const wx = originX + ix * cellSize;
+      const s = sampleInfiniteHydrology(wx, wz, sampler, sampleOptions);
+      const i = iz * verts + ix;
+      tile.terrainY[i] = s.terrainY;
+      tile.waterY[i] = s.waterY;
+      tile.bodyMask[i] = s.bodyMask;
+      tile.lakeMask[i] = s.lakeMask;
+      tile.riverMask[i] = s.riverMask;
+      tile.flowX[i] = s.flowX;
+      tile.flowZ[i] = s.flowZ;
+      tile.flowStrength[i] = s.flowStrength;
+      tile.riverDepth[i] = s.riverDepth;
+      tile.moisture[i] = s.moisture;
+      tile.shoreDistance[i] = s.shoreDistance;
+      tile.bodyKind[i] = s.bodyKind;
+      tile.bodyId[i] = s.bodyId;
+    }
+  }
+  return tile;
 }
 
 export class HydrologyTileCache {
@@ -71,7 +156,14 @@ export class HydrologyTileCache {
     evictions: 0,
     buildMsTotal: 0,
     samples: 0,
+    remoteBuilds: 0,
+    remoteInflight: 0,
   };
+  private remote: HydrologyTileRemoteSource | null = null;
+  private readonly remoteInflight = new Set<string>();
+  private remoteCompleted: HydrologyTile[] = [];
+  private lastPrefetchTileX = Number.NaN;
+  private lastPrefetchTileZ = Number.NaN;
 
   constructor(sampler: TerrainHeightSampler, options: HydrologyTileCacheOptions) {
     this.sampler = sampler;
@@ -96,6 +188,97 @@ export class HydrologyTileCache {
     return this.tiles.size;
   }
 
+  get tileSize(): number {
+    return this.tileSizeM;
+  }
+
+  attachRemote(remote: HydrologyTileRemoteSource | null): void {
+    this.remote = remote;
+  }
+
+  /**
+   * Keep the tiles the fine clipmap rings will need resident *before* their refills
+   * sample them, so the synchronous build inside `sample()` (a 100–250 ms stall)
+   * stays a rare fallback instead of the steady-state path during traversal.
+   * Cheap when idle: re-enumerates candidates only after the camera crosses a tile
+   * boundary or while worker results are outstanding.
+   */
+  prefetchAround(centerX: number, centerZ: number, radiusM: number): void {
+    if (this.remoteCompleted.length > 0) {
+      for (const tile of this.remoteCompleted) this.adoptRemoteTile(tile);
+      this.remoteCompleted = [];
+    }
+    this.stats.remoteInflight = this.remoteInflight.size;
+    if (!this.remote?.available() || radiusM <= 0) return;
+    const centerTileX = Math.floor(centerX / this.tileSizeM);
+    const centerTileZ = Math.floor(centerZ / this.tileSizeM);
+    if (
+      centerTileX === this.lastPrefetchTileX
+      && centerTileZ === this.lastPrefetchTileZ
+      && this.remoteInflight.size === 0
+    ) {
+      return;
+    }
+    this.lastPrefetchTileX = centerTileX;
+    this.lastPrefetchTileZ = centerTileZ;
+    if (this.remoteInflight.size >= REMOTE_MAX_INFLIGHT_TILES) return;
+
+    const tileRadius = Math.ceil(radiusM / this.tileSizeM);
+    const missing: { tileX: number; tileZ: number; d2: number }[] = [];
+    for (let tz = centerTileZ - tileRadius; tz <= centerTileZ + tileRadius; tz++) {
+      for (let tx = centerTileX - tileRadius; tx <= centerTileX + tileRadius; tx++) {
+        const key = `${tx},${tz}`;
+        if (this.tiles.has(key) || this.remoteInflight.has(key)) continue;
+        const dx = tx - centerTileX;
+        const dz = tz - centerTileZ;
+        missing.push({ tileX: tx, tileZ: tz, d2: dx * dx + dz * dz });
+      }
+    }
+    if (missing.length === 0) return;
+    missing.sort((a, b) => a.d2 - b.d2);
+    let index = 0;
+    while (this.remoteInflight.size < REMOTE_MAX_INFLIGHT_TILES && index < missing.length) {
+      const batch: { tileX: number; tileZ: number }[] = [];
+      while (batch.length < REMOTE_BATCH_TILES && this.remoteInflight.size < REMOTE_MAX_INFLIGHT_TILES && index < missing.length) {
+        const candidate = missing[index++]!;
+        this.remoteInflight.add(`${candidate.tileX},${candidate.tileZ}`);
+        batch.push({ tileX: candidate.tileX, tileZ: candidate.tileZ });
+      }
+      if (batch.length === 0) break;
+      this.remote.build(batch).then((tiles) => {
+        this.remoteCompleted.push(...tiles);
+        // Tiles missing from the response raced a reconfigure; free their slots so the
+        // next prefetch pass re-queues them.
+        const builtKeys = new Set(tiles.map((tile) => `${tile.tileX},${tile.tileZ}`));
+        for (const coord of batch) {
+          const key = `${coord.tileX},${coord.tileZ}`;
+          if (!builtKeys.has(key)) this.remoteInflight.delete(key);
+        }
+      }).catch(() => {
+        // Worker failed; the synchronous fallback still guarantees correctness.
+        for (const coord of batch) this.remoteInflight.delete(`${coord.tileX},${coord.tileZ}`);
+      });
+    }
+    this.stats.remoteInflight = this.remoteInflight.size;
+  }
+
+  private adoptRemoteTile(tile: HydrologyTile): void {
+    const key = `${tile.tileX},${tile.tileZ}`;
+    this.remoteInflight.delete(key);
+    if (this.tiles.has(key)) return;
+    this.tiles.set(key, tile);
+    this.stats.remoteBuilds++;
+    this.trimToBudget();
+  }
+
+  private trimToBudget(): void {
+    while (this.tiles.size > this.maxResidentTiles) {
+      const oldest = this.tiles.keys().next().value as string;
+      this.tiles.delete(oldest);
+      this.stats.evictions++;
+    }
+  }
+
   sample(x: number, z: number): HydrologySample {
     this.stats.samples++;
     const tileX = Math.floor(x / this.tileSizeM);
@@ -116,67 +299,16 @@ export class HydrologyTileCache {
     }
     this.stats.misses++;
     const t0 = nowMs();
-    const tile = this.buildTile(tileX, tileZ);
+    const tile = buildHydrologyTileData(tileX, tileZ, this.sampler, {
+      tileSizeM: this.tileSizeM,
+      tileRes: this.res,
+      drySentinelDepthM: this.drySentinelDepthM,
+    });
     this.stats.builds++;
     this.stats.buildMsTotal += nowMs() - t0;
+    this.remoteInflight.delete(key);
     this.tiles.set(key, tile);
-    while (this.tiles.size > this.maxResidentTiles) {
-      const oldest = this.tiles.keys().next().value as string;
-      this.tiles.delete(oldest);
-      this.stats.evictions++;
-    }
-    return tile;
-  }
-
-  private buildTile(tileX: number, tileZ: number): HydrologyTile {
-    const res = this.res;
-    const verts = res + 1;
-    const count = verts * verts;
-    const originX = tileX * this.tileSizeM;
-    const originZ = tileZ * this.tileSizeM;
-    const tile: HydrologyTile = {
-      tileX,
-      tileZ,
-      originX,
-      originZ,
-      cellSize: this.cellSize,
-      res,
-      terrainY: new Float32Array(count),
-      waterY: new Float32Array(count),
-      bodyMask: new Float32Array(count),
-      lakeMask: new Float32Array(count),
-      riverMask: new Float32Array(count),
-      flowX: new Float32Array(count),
-      flowZ: new Float32Array(count),
-      flowStrength: new Float32Array(count),
-      riverDepth: new Float32Array(count),
-      moisture: new Float32Array(count),
-      shoreDistance: new Float32Array(count),
-      bodyKind: new Uint8Array(count),
-      bodyId: new Uint32Array(count),
-    };
-    const options = { drySentinelDepthM: this.drySentinelDepthM };
-    for (let iz = 0; iz < verts; iz++) {
-      const wz = originZ + iz * this.cellSize;
-      for (let ix = 0; ix < verts; ix++) {
-        const wx = originX + ix * this.cellSize;
-        const s = sampleInfiniteHydrology(wx, wz, this.sampler, options);
-        const i = iz * verts + ix;
-        tile.terrainY[i] = s.terrainY;
-        tile.waterY[i] = s.waterY;
-        tile.bodyMask[i] = s.bodyMask;
-        tile.lakeMask[i] = s.lakeMask;
-        tile.riverMask[i] = s.riverMask;
-        tile.flowX[i] = s.flowX;
-        tile.flowZ[i] = s.flowZ;
-        tile.flowStrength[i] = s.flowStrength;
-        tile.riverDepth[i] = s.riverDepth;
-        tile.moisture[i] = s.moisture;
-        tile.shoreDistance[i] = s.shoreDistance;
-        tile.bodyKind[i] = s.bodyKind;
-        tile.bodyId[i] = s.bodyId;
-      }
-    }
+    this.trimToBudget();
     return tile;
   }
 }
