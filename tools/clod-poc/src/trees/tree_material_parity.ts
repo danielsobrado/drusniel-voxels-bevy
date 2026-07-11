@@ -116,9 +116,9 @@ function createTreeVisibilityNodes(atlas: TreeFoliageAtlas): {
   keep: TslNode;
 } {
   const cardTag: TslNode = clamp(attribute("treeFoliageCard", "float"), 0, 1);
-  const speciesAttribute: TslNode = attribute("treeSpeciesIndex", "float");
+  const packedTreeWind: TslNode = attribute("treeWind", "vec3");
   const speciesIndex: TslNode = clamp(
-    floor(speciesAttribute.add(0.5)),
+    floor(packedTreeWind.z.add(0.5)),
     0,
     TREE_FOLIAGE_ATLAS_ROWS - 1,
   );
@@ -145,10 +145,6 @@ function createTreeVisibilityNodes(atlas: TreeFoliageAtlas): {
   const coverage: TslNode = sampled.w.mul(edgeFade);
   const cardKeep: TslNode = mix(float(1), coverage, cardTag).greaterThan(CARD_ALPHA_THRESHOLD);
 
-  // Player cameras can enter a crown or pass very close to a trunk. Without a
-  // small camera bubble, one card or branch can cover the entire near plane.
-  // Use the same dither mask in color and depth prepass so the fade cannot leave
-  // an invisible occluder or a one-frame depth slab.
   const cameraFade: TslNode = smoothstep(CAMERA_FADE_START_M, CAMERA_FADE_END_M, cameraDistance);
   const cameraNoise: TslNode = fract(
     fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
