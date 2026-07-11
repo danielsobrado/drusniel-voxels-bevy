@@ -15,6 +15,12 @@ import {
   sampleAuthoredBiomeMaterial,
 } from "./authoredBiomeMaterials.js";
 
+declare global {
+  interface Window {
+    __drusnielTerrainAlbedoArray?: THREE.DataArrayTexture;
+  }
+}
+
 export interface ProceduralTerrainSlot {
   texture: THREE.Texture | null;
   normalTexture: THREE.Texture | null;
@@ -207,6 +213,7 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
 
   const albedoArray = makeArrayTexture(albedo, layerSize, layers, THREE.SRGBColorSpace);
   const normalArray = makeArrayTexture(normal, layerSize, layers, THREE.NoColorSpace);
+  if (typeof window !== "undefined") window.__drusnielTerrainAlbedoArray = albedoArray;
   const slots = order.map((id, index) => ({
     texture: null,
     normalTexture: null,
