@@ -14,6 +14,7 @@ import {
   normalWorld,
   normalize,
   positionWorld,
+  screenCoordinate,
   sin,
   smoothstep,
   storage,
@@ -57,22 +58,30 @@ export interface TreeMaterialParityOptions {
 const CARD_ALPHA_THRESHOLD = 0.32;
 const CARD_EDGE_NEAR_M = 35;
 const CARD_EDGE_FAR_M = 70;
+const CAMERA_FADE_START_M = 0.85;
+const CAMERA_FADE_END_M = 2.6;
 
 export function decorateTreeMaterialHandle(
   handle: TreeMaterialHandle,
   options: TreeMaterialParityOptions,
 ): TreeMaterialHandle {
-  const card = createCardNodes(options.foliageAtlas);
+  const visibility = createTreeVisibilityNodes(options.foliageAtlas);
   const materials = [handle.regularMaterial, ...Object.values(handle.debugMaterials)]
     .filter((material, index, all) => all.indexOf(material) === index) as NodeMaterialLike[];
 
   for (const material of materials) {
     const previousMask = material.maskNode as TslNode | undefined;
-    material.maskNode = previousMask ? previousMask.and(card.keep) : card.keep;
+    material.maskNode = previousMask ? previousMask.and(visibility.keep) : visibility.keep;
   }
 
   const regular = handle.regularMaterial as NodeMaterialLike;
-  if (regular.colorNode) regular.colorNode = mix(regular.colorNode, regular.colorNode.mul(card.shade), card.cardTag);
+  if (regular.colorNode) {
+    regular.colorNode = mix(
+      regular.colorNode,
+      regular.colorNode.mul(visibility.cardShade),
+      visibility.cardTag,
+    );
+  }
 
   const forest = options.ring?.forestLighting
     ? createRingForestLighting(options.ring.settings, options.ring.buffers, regular)
@@ -87,7 +96,7 @@ export function decorateTreeMaterialHandle(
     const baseMask = base.maskNode as TslNode | undefined;
     return {
       ...base,
-      maskNode: baseMask ? baseMask.and(card.keep) : card.keep,
+      maskNode: baseMask ? baseMask.and(visibility.keep) : visibility.keep,
     };
   };
   handle.updateForestLighting = (state: ForestLightingMaterialState | null): void => {
@@ -101,9 +110,9 @@ export function decorateTreeMaterialHandle(
   return handle;
 }
 
-function createCardNodes(atlas: TreeFoliageAtlas): {
+function createTreeVisibilityNodes(atlas: TreeFoliageAtlas): {
   cardTag: TslNode;
-  shade: TslNode;
+  cardShade: TslNode;
   keep: TslNode;
 } {
   const cardTag: TslNode = clamp(attribute("treeFoliageCard", "float"), 0, 1);
@@ -125,20 +134,31 @@ function createCardNodes(atlas: TreeFoliageAtlas): {
   );
   const sampled: TslNode = texture(atlas.texture, atlasUv);
 
+  const cameraDistance: TslNode = positionWorld.sub(cameraPosition).length();
   const viewDirection: TslNode = normalize(cameraPosition.sub(positionWorld));
   const edgeFacing: TslNode = abs(dot(normalize(normalWorld), viewDirection));
-  const cameraDistance: TslNode = positionWorld.sub(cameraPosition).length();
   const edgeFade: TslNode = mix(
     smoothstep(0.06, 0.2, edgeFacing),
     float(1),
     smoothstep(CARD_EDGE_NEAR_M, CARD_EDGE_FAR_M, cameraDistance),
   );
   const coverage: TslNode = sampled.w.mul(edgeFade);
-  const keep: TslNode = mix(float(1), coverage, cardTag).greaterThan(CARD_ALPHA_THRESHOLD);
+  const cardKeep: TslNode = mix(float(1), coverage, cardTag).greaterThan(CARD_ALPHA_THRESHOLD);
+
+  // Player cameras can enter a crown or pass very close to a trunk. Without a
+  // small camera bubble, one card or branch can cover the entire near plane.
+  // Use the same dither mask in color and depth prepass so the fade cannot leave
+  // an invisible occluder or a one-frame depth slab.
+  const cameraFade: TslNode = smoothstep(CAMERA_FADE_START_M, CAMERA_FADE_END_M, cameraDistance);
+  const cameraNoise: TslNode = fract(
+    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
+  );
+  const cameraKeep: TslNode = cameraNoise.lessThan(cameraFade);
+
   const atlasValue: TslNode = max(max(sampled.x, sampled.y), sampled.z);
-  const cardShade: TslNode = mix(0.72, 1.08, clamp(atlasValue.mul(4), 0, 1));
-  const shade: TslNode = mix(vec3(1), vec3(cardShade), cardTag);
-  return { cardTag, shade, keep };
+  const cardShadeValue: TslNode = mix(0.72, 1.08, clamp(atlasValue.mul(4), 0, 1));
+  const cardShade: TslNode = mix(vec3(1), vec3(cardShadeValue), cardTag);
+  return { cardTag, cardShade, keep: cardKeep.and(cameraKeep) };
 }
 
 function createRingForestLighting(
