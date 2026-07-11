@@ -173,6 +173,38 @@ function layerScale(layer: TslNode, slots: readonly TerrainNodeTextureSlot[]): T
   return scale;
 }
 
+function layerHeightMin(layer: TslNode, slots: readonly TerrainNodeTextureSlot[]): TslNode {
+  let value: TslNode = float(slots[0]?.heightMin ?? 0);
+  for (let i = 1; i < slots.length; i++) {
+    value = mix(value, float(slots[i].heightMin), step(abs(roundedLayer(layer).sub(i)), 0.5));
+  }
+  return value;
+}
+
+function layerHeightMax(layer: TslNode, slots: readonly TerrainNodeTextureSlot[]): TslNode {
+  let value: TslNode = float(slots[0]?.heightMax ?? 0);
+  for (let i = 1; i < slots.length; i++) {
+    value = mix(value, float(slots[i].heightMax), step(abs(roundedLayer(layer).sub(i)), 0.5));
+  }
+  return value;
+}
+
+function layerHeightCenter(layer: TslNode, slots: readonly TerrainNodeTextureSlot[]): TslNode {
+  return layerHeightMin(layer, slots).add(layerHeightMax(layer, slots)).mul(0.5);
+}
+
+function layerHeightBandWeight(
+  layer: TslNode,
+  slots: readonly TerrainNodeTextureSlot[],
+  height: TslNode,
+  blendWidth: TslNode,
+): TslNode {
+  const minEdge = layerHeightMin(layer, slots);
+  const maxEdge = layerHeightMax(layer, slots);
+  return smoothstep(minEdge.sub(blendWidth), minEdge.add(blendWidth), height)
+    .mul(float(1).sub(smoothstep(maxEdge.sub(blendWidth), maxEdge.add(blendWidth), height)));
+}
+
 function layerNormalMask(layer: TslNode, normalMapMask?: readonly number[] | Float32Array): TslNode {
   let mask: TslNode = float(normalMapMask?.[0] ?? 1);
   for (let i = 1; i < (normalMapMask?.length ?? 0); i++) {
@@ -293,16 +325,6 @@ function biomeLayer(biome: TslNode, sets: readonly BiomeLayerSet[], channel: 0 |
   return roundedLayer(layer);
 }
 
-function biomeBlendWeights(worldPos: TslNode, normal: TslNode): { low: TslNode; mid: TslNode; high: TslNode } {
-  const slope = clamp(float(1).sub(normal.y), 0.0, 1.0);
-  const low = float(1).sub(smoothstep(18.0, 34.0, worldPos.y));
-  const steep = smoothstep(0.42, 0.78, slope);
-  const highElevation = smoothstep(78.0, 112.0, worldPos.y);
-  const high = clamp(max(steep, highElevation), 0.0, 1.0);
-  const mid = clamp(float(1).sub(low).sub(high), 0.0, 1.0);
-  return { low, mid, high };
-}
-
 function sampleBiomeTerrainTexture(
   tex: THREE.DataArrayTexture,
   slots: readonly TerrainNodeTextureSlot[],
@@ -310,6 +332,7 @@ function sampleBiomeTerrainTexture(
   worldPos: TslNode,
   normal: TslNode,
   biomeId: TslNode,
+  blendWidth: TslNode,
   useTriplanar: boolean,
 ): TslNode {
   const weights = triplanarWeights(normal);
@@ -317,13 +340,25 @@ function sampleBiomeTerrainTexture(
   const lowLayer = biomeLayer(biome, biomeLayerSets, 0);
   const midLayer = biomeLayer(biome, biomeLayerSets, 1);
   const highLayer = biomeLayer(biome, biomeLayerSets, 2);
-  const blend = biomeBlendWeights(worldPos, normal);
   const low = triplanarAlbedo(tex, lowLayer, worldPos, layerScale(lowLayer, slots), weights, useTriplanar);
   const mid = triplanarAlbedo(tex, midLayer, worldPos, layerScale(midLayer, slots), weights, useTriplanar);
   const high = triplanarAlbedo(tex, highLayer, worldPos, layerScale(highLayer, slots), weights, useTriplanar);
-  const base = low.mul(blend.low).add(mid.mul(blend.mid)).add(high.mul(blend.high));
-  const wsum = max(blend.low.add(blend.mid).add(blend.high), 0.001);
-  return base.div(wsum);
+  const lowWeight = layerHeightBandWeight(lowLayer, slots, worldPos.y, blendWidth);
+  const midWeight = layerHeightBandWeight(midLayer, slots, worldPos.y, blendWidth);
+  const highWeight = layerHeightBandWeight(highLayer, slots, worldPos.y, blendWidth);
+  const acc = low.mul(lowWeight).add(mid.mul(midWeight)).add(high.mul(highWeight));
+  const wsum = lowWeight.add(midWeight).add(highWeight);
+
+  let nearest: TslNode = low;
+  let bestDist: TslNode = abs(worldPos.y.sub(layerHeightCenter(lowLayer, slots)));
+  const midDist: TslNode = abs(worldPos.y.sub(layerHeightCenter(midLayer, slots)));
+  const midCloser: TslNode = step(midDist, bestDist);
+  nearest = mix(nearest, mid, midCloser);
+  bestDist = min(bestDist, midDist);
+  const highDist: TslNode = abs(worldPos.y.sub(layerHeightCenter(highLayer, slots)));
+  nearest = mix(nearest, high, step(highDist, bestDist));
+
+  return mix(nearest, acc.div(max(wsum, 0.001)), step(0.0001, wsum));
 }
 
 function sampleBiomeTerrainNormal(
@@ -333,6 +368,7 @@ function sampleBiomeTerrainNormal(
   worldPos: TslNode,
   baseNormal: TslNode,
   biomeId: TslNode,
+  blendWidth: TslNode,
   normalIntensity: TslNode,
   normalMapMask?: readonly number[] | Float32Array,
 ): TslNode {
@@ -341,13 +377,25 @@ function sampleBiomeTerrainNormal(
   const lowLayer = biomeLayer(biome, biomeLayerSets, 0);
   const midLayer = biomeLayer(biome, biomeLayerSets, 1);
   const highLayer = biomeLayer(biome, biomeLayerSets, 2);
-  const blend = biomeBlendWeights(worldPos, baseNormal);
   const low = triplanarNormal(tex, lowLayer, worldPos, baseNormal, layerScale(lowLayer, slots), weights, normalIntensity, layerNormalMask(lowLayer, normalMapMask));
   const mid = triplanarNormal(tex, midLayer, worldPos, baseNormal, layerScale(midLayer, slots), weights, normalIntensity, layerNormalMask(midLayer, normalMapMask));
   const high = triplanarNormal(tex, highLayer, worldPos, baseNormal, layerScale(highLayer, slots), weights, normalIntensity, layerNormalMask(highLayer, normalMapMask));
-  const base = low.mul(blend.low).add(mid.mul(blend.mid)).add(high.mul(blend.high));
-  const wsum = max(blend.low.add(blend.mid).add(blend.high), 0.001);
-  return normalize(base.div(wsum));
+  const lowWeight = layerHeightBandWeight(lowLayer, slots, worldPos.y, blendWidth);
+  const midWeight = layerHeightBandWeight(midLayer, slots, worldPos.y, blendWidth);
+  const highWeight = layerHeightBandWeight(highLayer, slots, worldPos.y, blendWidth);
+  const acc = low.mul(lowWeight).add(mid.mul(midWeight)).add(high.mul(highWeight));
+  const wsum = lowWeight.add(midWeight).add(highWeight);
+
+  let nearest: TslNode = low;
+  let bestDist: TslNode = abs(worldPos.y.sub(layerHeightCenter(lowLayer, slots)));
+  const midDist: TslNode = abs(worldPos.y.sub(layerHeightCenter(midLayer, slots)));
+  const midCloser: TslNode = step(midDist, bestDist);
+  nearest = mix(nearest, mid, midCloser);
+  bestDist = min(bestDist, midDist);
+  const highDist: TslNode = abs(worldPos.y.sub(layerHeightCenter(highLayer, slots)));
+  nearest = mix(nearest, high, step(highDist, bestDist));
+
+  return normalize(mix(nearest, acc.div(max(wsum, 0.001)), step(0.0001, wsum)));
 }
 
 function paintedAlbedo(
@@ -470,6 +518,8 @@ export function createTerrainNodeMaterial(
 
   const geomN = normalize(normalGeometry);
   const rootMorphDeltaY: TslNode = attribute(ROOT_HEIGHT_MORPH_ATTRIBUTE, "float");
+  // CLOD page vertices are stored in absolute world coordinates and render-node meshes remain at
+  // the identity transform. Root morph only adjusts Y, so this is the authoritative world sample.
   const worldPos = positionGeometry.add(vec3(0.0, rootMorphDeltaY.mul(uRootMorphInfluence), 0.0));
   const paintSlots: TslNode = attribute("paintSlots", "vec4");
   const paintWeights: TslNode = attribute("paintWeights", "vec4");
@@ -481,7 +531,7 @@ export function createTerrainNodeMaterial(
   if (textures?.albedoArray && textures.slots.length > 0 && useArrayTextures) {
     const weights = triplanarWeights(geomN);
     let tex: TslNode = useBiomeLayers
-      ? sampleBiomeTerrainTexture(textures.albedoArray, textures.slots, textures.biomeLayerSets!, worldPos, geomN, biomeId, useTriplanar)
+      ? sampleBiomeTerrainTexture(textures.albedoArray, textures.slots, textures.biomeLayerSets!, worldPos, geomN, biomeId, uBlendWidth, useTriplanar)
       : sampleTerrainTexture(textures.albedoArray, textures.slots, worldPos, geomN, worldPos.y, uBlendWidth, useTriplanar);
     if (textures.procedural) tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
     if (textures.bakedMacroTint) {
@@ -517,7 +567,7 @@ export function createTerrainNodeMaterial(
   if (textures?.normalArray && textures.slots.length > 0 && useArrayTextures) {
     const normalWeight = isFarTier.select(0.0, 1.0);
     let detailN: TslNode = useBiomeLayers
-      ? sampleBiomeTerrainNormal(textures.normalArray, textures.slots, textures.biomeLayerSets!, worldPos, geomN, biomeId, uNormalIntensity, textures.normalMapMask)
+      ? sampleBiomeTerrainNormal(textures.normalArray, textures.slots, textures.biomeLayerSets!, worldPos, geomN, biomeId, uBlendWidth, uNormalIntensity, textures.normalMapMask)
       : sampleTerrainNormal(textures.normalArray, textures.slots, worldPos, geomN, worldPos.y, uBlendWidth, uNormalIntensity, textures.normalMapMask);
     if (textures.painted) {
       detailN = mix(detailN, paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask), paint);
