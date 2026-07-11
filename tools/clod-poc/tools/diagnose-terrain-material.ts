@@ -1,11 +1,16 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { Page } from "playwright";
 import { clodBaseUrl, launchWebGPU } from "./launch.js";
 import type {
   TerrainDiagnosticFinding,
   TerrainMaterialDiagnosticSnapshot,
 } from "../src/terrain/material/terrain_material_diagnostics.js";
+import {
+  diagnoseTerrainTextureArrayProbe,
+  type TerrainTextureArrayProbeFinding,
+  type TerrainTextureArrayProbeResult,
+} from "../src/gpu/terrain_texture_array_probe.js";
 
 type Args = Record<string, string | boolean>;
 
@@ -13,6 +18,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_SETTLE_FRAMES = 48;
 const DEFAULT_WIDTH = 1600;
 const DEFAULT_HEIGHT = 900;
+const PACKAGE_PATH_PREFIX = "tools/clod-poc/";
 
 function parseArgs(argv: string[]): Args {
   const out: Args = {};
@@ -42,6 +48,16 @@ function numberArg(value: string | boolean | undefined, fallback: number): numbe
 
 function timestamp(): string {
   return new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
+}
+
+function resolveOutputDirectory(value: string | undefined): string {
+  const requested = value ?? join("artifacts", "terrain-diagnostics", timestamp());
+  if (isAbsolute(requested)) return requested;
+  const normalized = requested.replaceAll("\\", "/");
+  const packageRelative = normalized.startsWith(PACKAGE_PATH_PREFIX)
+    ? normalized.slice(PACKAGE_PATH_PREFIX.length)
+    : normalized;
+  return resolve(process.cwd(), packageRelative);
 }
 
 function buildDiagnosticUrl(rawUrl: string): URL {
@@ -112,8 +128,27 @@ async function readSnapshot(page: Page, timeoutMs: number): Promise<TerrainMater
   });
 }
 
+async function readGpuArrayProbe(page: Page, timeoutMs: number): Promise<TerrainTextureArrayProbeResult> {
+  await page.waitForFunction(
+    () => typeof (window as typeof window & {
+      __drusnielTerrainTextureArrayProbe?: unknown;
+    }).__drusnielTerrainTextureArrayProbe === "function",
+    undefined,
+    { timeout: timeoutMs, polling: 250 },
+  );
+  return await page.evaluate(async () => {
+    const probe = (window as typeof window & {
+      __drusnielTerrainTextureArrayProbe?: () => Promise<TerrainTextureArrayProbeResult>;
+    }).__drusnielTerrainTextureArrayProbe;
+    if (!probe) throw new Error("terrain texture-array GPU probe is missing");
+    return await probe();
+  });
+}
+
 function renderMarkdown(
   snapshot: TerrainMaterialDiagnosticSnapshot,
+  gpuProbe: TerrainTextureArrayProbeResult,
+  probeFindings: readonly TerrainTextureArrayProbeFinding[],
   screenshotPath: string,
   consoleMessages: readonly string[],
 ): string {
@@ -130,7 +165,7 @@ function renderMarkdown(
     "",
   ];
 
-  for (const finding of snapshot.findings) {
+  for (const finding of [...snapshot.findings, ...probeFindings]) {
     lines.push(`- **${finding.severity.toUpperCase()} ${finding.code}** — ${finding.message}`);
   }
 
@@ -151,6 +186,25 @@ function renderMarkdown(
     `| Blend width | ${snapshot.material.blendWidth.toFixed(2)} m |`,
     `| Albedo array | ${formatTexture(snapshot.textures.albedo)} |`,
     `| Normal array | ${formatTexture(snapshot.textures.normal)} |`,
+    "",
+    "## Direct GPU Texture-Array Probe",
+    "",
+    `| Supported | ${gpuProbe.supported} |`,
+    `| Reason | ${gpuProbe.reason ?? "none"} |`,
+    `| Synthetic mapping | ${formatProbePass(gpuProbe.synthetic)} |`,
+    `| Live albedo mapping | ${formatProbePass(gpuProbe.actual)} |`,
+    "",
+    "### Synthetic nearest-layer mapping",
+    "",
+    "```json",
+    JSON.stringify(gpuProbe.synthetic?.nearestCpuLayerByStripe ?? null, null, 2),
+    "```",
+    "",
+    "### Live albedo nearest-layer mapping",
+    "",
+    "```json",
+    JSON.stringify(gpuProbe.actual?.nearestCpuLayerByStripe ?? null, null, 2),
+    "```",
     "",
     "## Visible CLOD Samples",
     "",
@@ -219,12 +273,17 @@ function formatTexture(texture: TerrainMaterialDiagnosticSnapshot["textures"]["a
   return `${texture.width}×${texture.height}×${texture.depth}, mipmaps=${texture.mipmaps}`;
 }
 
+function formatProbePass(pass: TerrainTextureArrayProbeResult["actual"]): string {
+  if (!pass) return "missing";
+  return `${(pass.correctLayerRatio * 100).toFixed(1)}% correct, CPU unique ${pass.cpuUniqueColors}, GPU unique ${pass.gpuUniqueColors}`;
+}
+
 function formatRange(min: number | null, max: number | null, unit: string): string {
   if (min === null || max === null) return "n/a";
   return `${min.toFixed(2)}–${max.toFixed(2)} ${unit}`;
 }
 
-function printFinding(finding: TerrainDiagnosticFinding): void {
+function printFinding(finding: TerrainDiagnosticFinding | TerrainTextureArrayProbeFinding): void {
   const prefix = finding.severity === "error"
     ? "ERROR"
     : finding.severity === "warning"
@@ -241,7 +300,7 @@ async function main(): Promise<void> {
   const settleFrames = numberArg(args.settle, DEFAULT_SETTLE_FRAMES);
   const width = numberArg(args.w, DEFAULT_WIDTH);
   const height = numberArg(args.h, DEFAULT_HEIGHT);
-  const outputDir = stringArg(args.out) ?? join("artifacts", "terrain-diagnostics", timestamp());
+  const outputDir = resolveOutputDirectory(stringArg(args.out));
   const screenshotPath = join(outputDir, "near-clod-final.png");
   const jsonPath = join(outputDir, "report.json");
   const markdownPath = join(outputDir, "report.md");
@@ -262,18 +321,22 @@ async function main(): Promise<void> {
     await waitForReady(page, timeoutMs);
     await settle(page, settleFrames);
     const snapshot = await readSnapshot(page, timeoutMs);
+    const gpuProbe = await readGpuArrayProbe(page, timeoutMs);
+    const probeFindings = diagnoseTerrainTextureArrayProbe(gpuProbe);
     await page.screenshot({ path: screenshotPath, fullPage: false });
 
-    writeFileSync(jsonPath, JSON.stringify({ snapshot, consoleMessages }, null, 2));
-    writeFileSync(markdownPath, renderMarkdown(snapshot, screenshotPath, consoleMessages));
+    writeFileSync(jsonPath, JSON.stringify({ snapshot, gpuProbe, probeFindings, consoleMessages }, null, 2));
+    writeFileSync(markdownPath, renderMarkdown(snapshot, gpuProbe, probeFindings, screenshotPath, consoleMessages));
 
     for (const finding of snapshot.findings) printFinding(finding);
+    for (const finding of probeFindings) printFinding(finding);
     console.log(`[terrain:diagnose] JSON: ${jsonPath}`);
     console.log(`[terrain:diagnose] report: ${markdownPath}`);
     console.log(`[terrain:diagnose] screenshot: ${screenshotPath}`);
 
-    const hasError = snapshot.findings.some((finding) => finding.severity === "error");
-    const hasWarning = snapshot.findings.some((finding) => finding.severity === "warning");
+    const allFindings = [...snapshot.findings, ...probeFindings];
+    const hasError = allFindings.some((finding) => finding.severity === "error");
+    const hasWarning = allFindings.some((finding) => finding.severity === "warning");
     if (hasError || (args.strict === true && hasWarning)) process.exitCode = 1;
   } finally {
     await browser.close().catch(() => undefined);
