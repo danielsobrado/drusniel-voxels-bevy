@@ -34,12 +34,17 @@ export function maxAttributeValue(attribute: THREE.BufferAttribute | THREE.Inter
 
 export function maxAttributeComponent(
   attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined,
-  component: "x" | "y",
+  component: "x" | "y" | "z",
 ): number {
   if (!attribute) return 0;
   let max = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < attribute.count; i++) {
-    max = Math.max(max, component === "x" ? attribute.getX(i) : attribute.getY(i));
+    const value = component === "x"
+      ? attribute.getX(i)
+      : component === "y"
+        ? attribute.getY(i)
+        : attribute.getZ(i);
+    max = Math.max(max, value);
   }
   return max === Number.NEGATIVE_INFINITY ? 0 : max;
 }
@@ -258,11 +263,15 @@ export class GeometryBuilder {
     const p1 = center.clone().addScaledVector(right, halfWidth).addScaledVector(up, -halfHeight);
     const p2 = center.clone().addScaledVector(right, halfWidth).addScaledVector(up, halfHeight);
     const p3 = center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, halfHeight);
-    const a = this.addVertex(p0, normal, color, windWeight, flutterWeight, [frame.u0, frame.v1], foliageMask);
-    const b = this.addVertex(p1, normal, color, windWeight, flutterWeight, [frame.u1, frame.v1], foliageMask);
-    const c = this.addVertex(p2, normal, color, windWeight, flutterWeight, [frame.u1, frame.v0], foliageMask);
-    const d = this.addVertex(p3, normal, color, windWeight, flutterWeight, [frame.u0, frame.v0], foliageMask);
-    this.addQuad(a, b, c, d);
+    const uv0: [number, number] = [frame.u0, frame.v0];
+    const uv1: [number, number] = [frame.u1, frame.v0];
+    const uv2: [number, number] = [frame.u1, frame.v1];
+    const uv3: [number, number] = [frame.u0, frame.v1];
+    const base = this.addVertex(p0, normal, color, windWeight, flutterWeight, uv0, foliageMask);
+    this.addVertex(p1, normal, color, windWeight, flutterWeight, uv1, foliageMask);
+    this.addVertex(p2, normal, color, windWeight, flutterWeight, uv2, foliageMask);
+    this.addVertex(p3, normal, color, windWeight, flutterWeight, uv3, foliageMask);
+    this.addQuad(base, base + 1, base + 2, base + 3);
   }
 
   build(): THREE.BufferGeometry {
@@ -271,12 +280,12 @@ export class GeometryBuilder {
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(this.uvs, 2));
-    const treeWind = new Float32Array(this.windWeights.length * 2);
+    const wind = new Float32Array(this.windWeights.length * 2);
     for (let i = 0; i < this.windWeights.length; i++) {
-      treeWind[i * 2] = this.windWeights[i];
-      treeWind[i * 2 + 1] = this.flutterWeights[i];
+      wind[i * 2] = this.windWeights[i] as number;
+      wind[i * 2 + 1] = this.flutterWeights[i] as number;
     }
-    geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(treeWind, 2));
+    geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(wind, 2));
     geometry.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(this.foliageMasks, 1));
     geometry.setIndex(this.indices);
     return geometry;
