@@ -35,6 +35,7 @@ import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import { resolveLiveClodRootRadius } from "./live_clod_root_radius.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
+import type { ClodPageNode } from "../../../types.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
@@ -313,6 +314,49 @@ export function runFrameLoopStartup(
   // The library defaults (1 build / 1 apply per frame, 128 cached pages) starve interactive
   // infinite-islands runs: pages appear at the horizon faster than one worker round-trip per page.
   const streamBudgetProfile = longView.queryScene === INFINITE_ISLANDS_SCENE;
+  const viewPrewarmQueue: ClodPageNode[] = [];
+  // Creating one L1 root view (material + geometry) can cost ~20ms, so the drain is
+  // time-budgeted: always at least one node per frame (forward progress), stop after
+  // the deadline. Remaining nodes wait; a node still unwarmed at root-switch time just
+  // falls back to switch-frame creation.
+  const VIEW_PREWARM_BUDGET_MS = 3;
+  const precompileViewPipelines = (mesh: THREE.Mesh): void => {
+    // WebGPU pipelines, bind groups, and geometry uploads otherwise happen at the mesh's
+    // first *visible* draw — all at once on the root-switch frame (renderMs spikes in the
+    // 100-700ms class). compileAsync builds them ahead of time against the real scene so
+    // cache keys match the later render. The scene traversal inside compileAsync runs
+    // synchronously and skips invisible objects, so the mesh is made visible only for the
+    // duration of the call — the actual render happens later in the frame, after the flag
+    // is already restored.
+    if (!input.app.isWebGpu) return;
+    const compile = (renderer as unknown as {
+      compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera, targetScene?: THREE.Scene | null) => Promise<unknown>;
+    }).compileAsync;
+    if (typeof compile !== "function") return;
+    const wasVisible = mesh.visible;
+    mesh.visible = true;
+    try {
+      void compile.call(renderer, mesh, camera, scene).catch(() => undefined);
+    } finally {
+      mesh.visible = wasVisible;
+    }
+  };
+  const drainViewPrewarmQueue = (): void => {
+    if (viewPrewarmQueue.length === 0) return;
+    const cache = input.terrainView.renderNodeCache;
+    // Same frame-id domain as markActive/prune, so pre-warmed views age correctly in the LRU.
+    const frameId = selectionController.stats().frameId;
+    const deadline = performance.now() + VIEW_PREWARM_BUDGET_MS;
+    let created = 0;
+    while (viewPrewarmQueue.length > 0 && created < clodRuntime.renderNodeCache.maxPrefetchCreatesPerFrame) {
+      const node = viewPrewarmQueue.shift()!;
+      cache.prefetch([node], frameId);
+      created++;
+      const view = cache.get(node.id);
+      if (view) precompileViewPipelines(view.mesh);
+      if (performance.now() >= deadline) break;
+    }
+  };
   const streamingClodRootController = createStreamingClodRootController({
     roots: input.result.roots,
     allNodes: input.allNodes,
@@ -331,7 +375,15 @@ export function runFrameLoopStartup(
       maxExtraRoots: nonNegativeIntegerParam(searchParams, "liveClodRootTransitionMaxExtraRoots") ?? DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS,
     },
     buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
-    onNodesBuilt: (nodes) => selectionController.patchNodes(nodes),
+    onNodesBuilt: (nodes) => {
+      selectionController.patchNodes(nodes);
+      // Queue freshly applied stream pages for render-view pre-warm. A root switch
+      // swaps a whole page set into the rendered cut at once; materializing all their
+      // views (material + geometry) in that one selection pass is a 100ms-class spike.
+      // Pages sit cached for several frames before the switch stabilizes, so their
+      // views are created here a few per frame and the switch finds them resident.
+      for (const node of nodes) viewPrewarmQueue.push(node);
+    },
     onRootsChanged: () => selectionController.invalidate(),
   });
   session.streamingClodRootController = streamingClodRootController;
@@ -355,6 +407,7 @@ export function runFrameLoopStartup(
       lastStreamCenterZ = center.z;
     }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
+    drainViewPrewarmQueue();
     updateSelection();
   };
 

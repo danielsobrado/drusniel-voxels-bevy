@@ -1,0 +1,123 @@
+# QA gates for the infinite-islands movement benchmark (tools/perf-move.ts).
+#
+# Produce the summary, then evaluate:
+#   npm --prefix tools/clod-poc run perf:move -- --out perf-runs/<run>
+#   npm --prefix tools/clod-poc run qa -- --config config/qa_perf_move.yaml --summary perf-runs/<run>/qa-summary.json
+#
+# The moving frame p95 gate encodes the 90 fps playable-traversal target
+# (1000 / 90 = 11.1ms). Burst gates cap the phase max values that historically
+# caused traversal hitches; they are generous versus steady state but far below
+# the pre-fix spikes (waterMs 253, selectionSub.views 129, canopyMs 46).
+qa:
+  output_root: "qa-runs"
+  baseline_root: "qa-baselines"
+  report_json_name: "qa-report.json"
+  report_markdown_name: "qa-report.md"
+  image_diff:
+    # Route screenshots are validated by luminance/variance probes; pixel-diff
+    # baselines can be blessed later per machine.
+    enabled: false
+  timing:
+    enabled: true
+    fail_on_threshold: true
+  scenes:
+    - id: "infinite_islands_move_static"
+      bench_scene: "infinite-islands-move"
+      checkpoint: "static"
+      screenshots:
+        - id: "cp-0"
+          name: "cp-0.png"
+      probes:
+        - id: "static_has_signal"
+          type: "region_luminance"
+          screenshot: "cp-0"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min: 0.02
+          max: 0.95
+        - id: "static_not_flat"
+          type: "region_variance"
+          screenshot: "cp-0"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "static_frame_p95"
+          area: "__frame"
+          field: "p95_ms"
+          max_ms: 11.1
+
+    - id: "infinite_islands_move_moving"
+      bench_scene: "infinite-islands-move"
+      checkpoint: "moving"
+      screenshots:
+        - id: "cp-0"
+          name: "cp-0.png"
+        - id: "cp-25"
+          name: "cp-25.png"
+        - id: "cp-50"
+          name: "cp-50.png"
+        - id: "cp-75"
+          name: "cp-75.png"
+        - id: "cp-100"
+          name: "cp-100.png"
+      probes:
+        - id: "cp25_has_signal"
+          type: "region_luminance"
+          screenshot: "cp-25"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min: 0.02
+          max: 0.95
+        - id: "cp50_has_signal"
+          type: "region_luminance"
+          screenshot: "cp-50"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min: 0.02
+          max: 0.95
+        - id: "cp75_has_signal"
+          type: "region_luminance"
+          screenshot: "cp-75"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min: 0.02
+          max: 0.95
+        - id: "cp100_has_signal"
+          type: "region_luminance"
+          screenshot: "cp-100"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min: 0.02
+          max: 0.95
+        - id: "cp50_not_flat"
+          type: "region_variance"
+          screenshot: "cp-50"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        # 90 fps playable-traversal success criterion.
+        - id: "moving_frame_p95"
+          area: "__frame"
+          field: "p95_ms"
+          max_ms: 11.1
+        # Burst gates on historical traversal-hitch sources.
+        - id: "water_burst"
+          area: "phases_max"
+          field: "waterMs"
+          max_ms: 30.0
+        - id: "selection_views_burst"
+          area: "phases_max"
+          field: "selectionSub.views"
+          max_ms: 15.0
+        - id: "canopy_burst"
+          area: "phases_max"
+          field: "canopyMs"
+          max_ms: 15.0
+      checks:
+        - id: "streaming_exercised"
+          area: "streaming"
+          field: "exercised"
+          equals: 1
+        - id: "startup_converged"
+          area: "streaming"
+          field: "startup_converged"
+          equals: 1
+        - id: "stream_pages_applied"
+          area: "streaming"
+          field: "live_clod_stream_apply_pages_total"
+          min: 1

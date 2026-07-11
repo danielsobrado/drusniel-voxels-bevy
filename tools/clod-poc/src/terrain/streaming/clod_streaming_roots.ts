@@ -403,7 +403,20 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
 
 function mirrorStreamingProbeCounters(stats: StreamingClodRootStats): void {
   writeStreamingProbeCounters(stats);
-  globalThis.queueMicrotask?.(() => writeStreamingProbeCounters(stats));
+  // The frame-loop counter mirror runs later in the same frame and overwrites the
+  // shared totals with its cumulative counts, so an active probe must re-assert its
+  // overrides after it. Only those four counters conflict — everything else either
+  // has a single writer or receives identical values from both mirrors — and outside
+  // probe mode there is nothing to re-assert, so normal gameplay pays no microtask.
+  if (stats.probeActive !== 1) return;
+  globalThis.queueMicrotask?.(() => {
+    const counters = clodCounters();
+    if (!counters) return;
+    counters["live_clod_stream_built_total"] = stats.probeApplyPagesTotal;
+    counters["live_clod_stream_apply_pages_total"] = stats.probeApplyPagesTotal;
+    counters["live_clod_stream_evictions_total"] = stats.probeEvictionsTotal;
+    counters["live_clod_stream_stale_discards_total"] = stats.probeStaleDiscardsTotal;
+  });
 }
 
 function resetStreamingCounterMirrors(): void {
@@ -565,6 +578,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const appliedPagesByLevel = zeroLevelArray();
   const staleCompletedPagesByLevel = zeroLevelArray();
   const workerBuildSamplesByLevel = Array.from({ length: STREAM_COUNTER_LEVELS }, () => [] as number[]);
+  // Worker samples only arrive when a batch completes, so the per-level p95 (a copy +
+  // sort of up to 128 samples per level) is cached until the next sample lands.
+  let workerBuildP95Cache: number[] | null = null;
   const transitionMsSamples: number[] = [];
   let frame = 0;
   let active = deps.enabled;
@@ -971,6 +987,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       samples.push(perNodeMs);
       if (samples.length > WORKER_BUILD_MS_SAMPLE_LIMIT) samples.shift();
     }
+    workerBuildP95Cache = null;
   };
 
   const buildStillQueued = (id: string): boolean => ready.some((entry) => entry.node.id === id);
@@ -1222,7 +1239,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         requestedPagesByLevel: [...requestedPagesByLevel],
         appliedPagesByLevel: [...appliedPagesByLevel],
         staleCompletedPagesByLevel: [...staleCompletedPagesByLevel],
-        workerBuildMsP95ByLevel: workerP95(workerBuildSamplesByLevel),
+        workerBuildMsP95ByLevel: [...(workerBuildP95Cache ??= workerP95(workerBuildSamplesByLevel))],
         transitionEnabled: rootTransitionOptions.enabled ? 1 : 0,
         transitionActiveGroups: transition.activeGroups,
         transitionActiveRoots: transition.activeRoots,

@@ -10,7 +10,7 @@ import { buildFarWaterSurface } from "./farWaterSurface.js";
 import { buildMoistureField } from "./moistureField.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import { computeBodyIds, computeShoreDistance } from "./bodyIdentity.js";
-import { HydrologyTileCache, type HydrologyTileCacheStats } from "./hydrologyTileSource.js";
+import { HydrologyTileCache, type HydrologyTileCacheStats, type HydrologyTileRemoteSource } from "./hydrologyTileSource.js";
 import { packHydrologyFieldsTexels, packHydrologyWaterSurfaceTexels } from "./hydrologyGpuPacking.js";
 import {
   HYDROLOGY_BODY_DRY,
@@ -237,6 +237,22 @@ export class HydrologySystem {
 
   tileCacheStats(): HydrologyTileCacheStats | null {
     return this.tileCache ? this.tileCache.stats : null;
+  }
+
+  /** Metres per consumer cell above which sampleInfinite bypasses the tile cache;
+   *  null when this system has no tile cache (finite worlds, cache disabled). */
+  tileCoarseBypassCellSize(): number | null {
+    return this.tileCache ? this.tileCache.coarseBypassCellSize : null;
+  }
+
+  attachTileRemote(remote: HydrologyTileRemoteSource | null): void {
+    this.tileCache?.attachRemote(remote);
+  }
+
+  /** Forward to the tile cache prefetcher (see HydrologyTileCache.prefetchAround);
+   *  no-op without a cache. */
+  prefetchTiles(centerX: number, centerZ: number, radiusM: number): void {
+    this.tileCache?.prefetchAround(centerX, centerZ, radiusM);
   }
 }
 

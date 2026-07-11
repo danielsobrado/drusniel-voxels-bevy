@@ -8,6 +8,8 @@ import {
 } from "../../water/index.js";
 import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
+import { createHydrologyTileRemoteBuilder } from "../../water/hydrology_tile_worker_client.js";
+import { getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
 import { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
 import type { WaterDebugPoseHooks, WaterControllerDeps, WaterController } from "./water_controller_types.js";
@@ -52,6 +54,33 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
+
+  // A hydrology tile built synchronously inside a clipmap refill costs 100–250 ms of
+  // main-thread CPU (a frame spike during traversal). The build worker keeps the tiles
+  // the fine rings will need resident ahead of the camera; the synchronous path stays
+  // as the bit-identical fallback. Prefetch must cover the largest ring that samples
+  // through the tile cache (cellSize <= the cache's coarse bypass threshold).
+  const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
+  const hydrologyRemote = tileBypassCellSize !== null ? createHydrologyTileRemoteBuilder() : null;
+  let hydrologyPrefetchRadiusM = 0;
+  if (hydrologyRemote && deps.hydrologySystem) {
+    hydrologyRemote.configure({
+      terrainFieldConfig: getTerrainFieldConfig(),
+      fakeBodies: deps.waterConfig.fakeBodies,
+      tileSizeM: deps.waterConfig.hydrology.infinite.tileSizeM,
+      tileRes: deps.waterConfig.hydrology.infinite.tileRes,
+      drySentinelDepthM: deps.waterConfig.hydrology.waterSurface.drySentinelDepth,
+    });
+    deps.hydrologySystem.attachTileRemote(hydrologyRemote);
+    for (const cellSize of deps.waterConfig.cellSizes) {
+      if (cellSize <= tileBypassCellSize!) {
+        hydrologyPrefetchRadiusM = Math.max(
+          hydrologyPrefetchRadiusM,
+          (cellSize * deps.waterConfig.cellsPerLevel) / 2,
+        );
+      }
+    }
+  }
   const ui = deps.getUiState();
   clipmap.setVisible(ui.waterEnabled);
   residueOverlay.setVisible(ui.waterEnabled);
@@ -135,6 +164,11 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       clipmap.updateSunDirection(direction);
     },
     update(deltaSeconds, cameraPosition) {
+      // Adopt worker-built tiles and queue the next ring of prefetches before the
+      // clipmap refill samples, so refills this frame already find tiles resident.
+      if (hydrologyPrefetchRadiusM > 0) {
+        deps.hydrologySystem?.prefetchTiles(cameraPosition.x, cameraPosition.z, hydrologyPrefetchRadiusM);
+      }
       clipmap.update(deltaSeconds, cameraPosition);
       residueOverlay.update(deltaSeconds, cameraPosition);
       cascadeParticles.update(deltaSeconds, cameraPosition);
@@ -149,6 +183,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       logWaterDevInit(clipmap, deps, field, cascadeParticles, devLogged);
     },
     dispose() {
+      deps.hydrologySystem?.attachTileRemote(null);
+      hydrologyRemote?.dispose();
       cascadeParticles.dispose();
       residueOverlay.dispose();
       clipmap.dispose();

@@ -248,10 +248,12 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
         disposeAndCount(key, entry);
       }
     }
-    const lru = [...entries.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame);
-    while (entries.size > deps.maxCachedChunkGroups && lru.length > 0) {
-      const [key, entry] = lru.shift()!;
-      disposeAndCount(key, entry);
+    if (entries.size > deps.maxCachedChunkGroups) {
+      const lru = [...entries.entries()].sort((a, b) => a[1].lastTouchFrame - b[1].lastTouchFrame);
+      while (entries.size > deps.maxCachedChunkGroups && lru.length > 0) {
+        const [key, entry] = lru.shift()!;
+        disposeAndCount(key, entry);
+      }
     }
     return { evictions, colliderEvictions };
   };
@@ -328,6 +330,12 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
       }
 
       const required = countRequired(requiredCoords);
+      let streamedColliderPages = 0;
+      let validEmptyPages = 0;
+      for (const entry of entries.values()) {
+        if (entry.colliderIds.length > 0) streamedColliderPages++;
+        if (entry.ready && !entry.failed && entry.validEmpty) validEmptyPages++;
+      }
       return {
         chunkGroupsBuiltThisFrame,
         bubbleMs: performance.now() - startedAt,
@@ -338,8 +346,8 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
         failedPages: required.failedPages,
         evictions,
         colliderEvictions,
-        streamedColliderPages: [...entries.values()].filter((entry) => entry.colliderIds.length > 0).length,
-        validEmptyPages: [...entries.values()].filter((entry) => entry.ready && !entry.failed && entry.validEmpty).length,
+        streamedColliderPages,
+        validEmptyPages,
         gpuRetryPages: 0,
         gpuRetriesTotal: 0,
         gpuTerminalFailuresTotal: 0,

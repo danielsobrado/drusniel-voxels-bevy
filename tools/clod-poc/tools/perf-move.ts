@@ -480,6 +480,42 @@ function fmt(value: number): string {
   return value.toFixed(2);
 }
 
+/** Phase stats flattened into QA `areas` maps (area.field addressing, see qaTypes.ts). */
+function qaAreasFromWindow(summary: WindowSummary): Record<string, Record<string, number>> {
+  const p95: Record<string, number> = {};
+  const max: Record<string, number> = {};
+  const avg: Record<string, number> = {};
+  for (const [key, stats] of Object.entries(summary.phases)) {
+    p95[key] = Number(stats.p95.toFixed(3));
+    max[key] = Number(stats.max.toFixed(3));
+    avg[key] = Number(stats.avg.toFixed(3));
+  }
+  return {
+    phases_p95: p95,
+    phases_max: max,
+    phases_avg: avg,
+    counters: { ...summary.counters, fps_avg: Number(summary.fpsAvg.toFixed(2)), fps_p5: Number(summary.fpsP5.toFixed(2)) },
+  };
+}
+
+/** Checkpoint screenshots in QA summary form; sanity lumas are 0..255, QA probes expect 0..1. */
+function qaScreenshots(checkpoints: readonly CheckpointResult[]): {
+  id: string;
+  name: string;
+  path: string;
+  metrics: { luminance_mean: number; luminance_stddev: number };
+}[] {
+  return checkpoints.map((cp) => ({
+    id: cp.label,
+    name: `${cp.label}.png`,
+    path: cp.png.replaceAll("\\", "/"),
+    metrics: {
+      luminance_mean: Number((cp.sanity.meanLuma / 255).toFixed(4)),
+      luminance_stddev: Number((cp.sanity.rgbStddev / 255).toFixed(4)),
+    },
+  }));
+}
+
 function windowMarkdown(name: string, summary: WindowSummary): string[] {
   const lines = [
     `## ${name}`,
@@ -610,6 +646,42 @@ async function main(): Promise<void> {
       errors: errors.slice(0, 50),
     };
     writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
+
+    // QA-framework summary (WebQaSummary shape, see src/qa/qaTypes.ts). Evaluate with:
+    //   npm run qa -- --config config/qa_perf_move.yaml --summary <outDir>/qa-summary.json
+    // cp-0 sits at the route start (the static pose), so it doubles as the static
+    // checkpoint's screenshot; the moving checkpoint carries the full route set.
+    const shots = qaScreenshots(checkpoints);
+    const qaSummary = {
+      scene: "infinite-islands-move",
+      run_started_utc: summary.startedAt,
+      checkpoints: [
+        {
+          name: "static",
+          median_frame_ms: staticSummary.phases["frameMs"]!.p50,
+          p95_frame_ms: staticSummary.phases["frameMs"]!.p95,
+          p99_frame_ms: staticSummary.phases["frameMs"]!.p99,
+          areas: qaAreasFromWindow(staticSummary),
+          screenshots: shots.filter((shot) => shot.id === "cp-0"),
+        },
+        {
+          name: "moving",
+          median_frame_ms: movingSummary.phases["frameMs"]!.p50,
+          p95_frame_ms: movingSummary.phases["frameMs"]!.p95,
+          p99_frame_ms: movingSummary.phases["frameMs"]!.p99,
+          areas: {
+            ...qaAreasFromWindow(movingSummary),
+            streaming: {
+              ...streamingDeltas,
+              exercised: streamingExercised ? 1 : 0,
+              startup_converged: startupConverged ? 1 : 0,
+            },
+          },
+          screenshots: shots,
+        },
+      ],
+    };
+    writeFileSync(join(outDir, "qa-summary.json"), JSON.stringify(qaSummary, null, 2));
 
     const md = [
       "# clod-poc infinite-islands movement perf",
