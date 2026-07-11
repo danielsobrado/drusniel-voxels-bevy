@@ -52,6 +52,7 @@ declare global {
 
 const PROBE_STRIPE_WIDTH = 24;
 const PROBE_HEIGHT = 24;
+const RGBA_BYTES_PER_PIXEL = 4;
 const COLOR_CLUSTER_EPSILON = 0.035;
 const SYNTHETIC_COLORS: readonly TerrainTextureArrayProbeColor[] = [
   { r: 1, g: 0.04, b: 0.04 },
@@ -151,7 +152,7 @@ async function probeTexture(
     renderer.clear(true, false, false);
     await Promise.resolve(renderer.render(scene, camera));
     const raw = await renderer.readRenderTargetPixelsAsync(renderTarget, 0, 0, width, height);
-    const pixels = copyPixels(raw, width * height * 4);
+    const pixels = compactRgbaReadback(raw, width, height);
     const gpuStripeMeans = stripeMeans(pixels, width, height, layerCount);
     const cpuLayerMeans = cpuLayerMeansFor(textureArray, layerCount);
     const nearestCpuLayerByStripe = gpuStripeMeans.map((color) => nearestColorIndex(color, cpuLayerMeans));
@@ -179,12 +180,12 @@ async function probeTexture(
 
 function createSyntheticTextureArray(): THREE.DataArrayTexture {
   const size = 8;
-  const data = new Uint8Array(size * size * SYNTHETIC_COLORS.length * 4);
-  const layerStride = size * size * 4;
+  const data = new Uint8Array(size * size * SYNTHETIC_COLORS.length * RGBA_BYTES_PER_PIXEL);
+  const layerStride = size * size * RGBA_BYTES_PER_PIXEL;
   for (let layer = 0; layer < SYNTHETIC_COLORS.length; layer++) {
     const color = SYNTHETIC_COLORS[layer] as TerrainTextureArrayProbeColor;
     for (let pixel = 0; pixel < size * size; pixel++) {
-      const offset = layer * layerStride + pixel * 4;
+      const offset = layer * layerStride + pixel * RGBA_BYTES_PER_PIXEL;
       data[offset] = Math.round(color.r * 255);
       data[offset + 1] = Math.round(color.g * 255);
       data[offset + 2] = Math.round(color.b * 255);
@@ -219,7 +220,7 @@ function cpuLayerMeansFor(
   if (!raw) return Array.from({ length: layerCount }, () => ({ r: 0, g: 0, b: 0 }));
   const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
   const layerPixels = width * height;
-  const layerStride = layerPixels * 4;
+  const layerStride = layerPixels * RGBA_BYTES_PER_PIXEL;
   const sampleStride = Math.max(1, Math.floor(layerPixels / 4096));
   const srgb = textureArray.colorSpace === THREE.SRGBColorSpace;
   const means: TerrainTextureArrayProbeColor[] = [];
@@ -230,7 +231,7 @@ function cpuLayerMeansFor(
     let b = 0;
     let samples = 0;
     for (let pixel = 0; pixel < layerPixels; pixel += sampleStride) {
-      const offset = layer * layerStride + pixel * 4;
+      const offset = layer * layerStride + pixel * RGBA_BYTES_PER_PIXEL;
       if (offset + 2 >= bytes.length) break;
       r += decodeChannel(bytes[offset] as number, srgb);
       g += decodeChannel(bytes[offset + 1] as number, srgb);
@@ -260,7 +261,7 @@ function stripeMeans(
     let samples = 0;
     for (let y = 2; y < height - 2; y++) {
       for (let x = startX; x < endX; x++) {
-        const offset = (y * width + x) * 4;
+        const offset = (y * width + x) * RGBA_BYTES_PER_PIXEL;
         r += (pixels[offset] as number) / 255;
         g += (pixels[offset + 1] as number) / 255;
         b += (pixels[offset + 2] as number) / 255;
@@ -315,12 +316,37 @@ function colorDistance(a: TerrainTextureArrayProbeColor, b: TerrainTextureArrayP
   return Math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-function copyPixels(raw: ArrayBufferView, expectedLength: number): Uint8Array {
+export function compactRgbaReadback(
+  raw: ArrayBufferView,
+  width: number,
+  height: number,
+): Uint8Array {
+  const tightRowBytes = width * RGBA_BYTES_PER_PIXEL;
+  const tightLength = tightRowBytes * height;
   const source = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-  if (source.length !== expectedLength) {
-    throw new Error(`texture-array probe returned ${source.length} bytes; expected ${expectedLength}`);
+  if (source.length === tightLength) return source.slice();
+  if (height <= 1 || source.length < tightLength) {
+    throw new Error(`texture-array probe returned ${source.length} bytes; expected at least ${tightLength}`);
   }
-  return source.slice();
+
+  // WebGPU copies texture rows with bytesPerRow aligned to 256 bytes. Three.js
+  // can expose that padded staging layout directly: every row except the final
+  // row includes padding, so total bytes are (height - 1) * stride + tightRow.
+  const paddedBytes = source.length - tightRowBytes;
+  const rowStride = paddedBytes / (height - 1);
+  if (!Number.isInteger(rowStride) || rowStride < tightRowBytes) {
+    throw new Error(
+      `texture-array probe returned unsupported row layout: ${source.length} bytes for ${width}x${height}`,
+    );
+  }
+
+  const compacted = new Uint8Array(tightLength);
+  for (let row = 0; row < height; row++) {
+    const sourceOffset = row * rowStride;
+    const targetOffset = row * tightRowBytes;
+    compacted.set(source.subarray(sourceOffset, sourceOffset + tightRowBytes), targetOffset);
+  }
+  return compacted;
 }
 
 function isTextureArrayProbeRenderer(value: unknown): value is TextureArrayProbeRenderer {
