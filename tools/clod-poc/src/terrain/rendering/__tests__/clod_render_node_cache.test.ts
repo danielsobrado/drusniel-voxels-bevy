@@ -165,6 +165,9 @@ function fakeMaterialController(): FakeMaterialController {
     applyColorByLodToMaterials: vi.fn(),
     syncColorByLod: vi.fn(),
     configureChunkMaterial: vi.fn(),
+    diagnostics: vi.fn(() => {
+      throw new Error("terrain diagnostics are not used by this test double");
+    }),
     sharedMaterial: null,
   };
   return { controller, makeTerrainMaterial, applyLighting, handles };
