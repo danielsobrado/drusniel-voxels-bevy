@@ -113,7 +113,7 @@ export function injectTreeWindShader(vertexShader: string): string {
     .replace(
       "#include <common>",
       `#include <common>
-attribute vec2 treeWind;
+attribute vec3 treeWind;
 attribute vec2 treeWorldXZ;
 attribute float treeLodFade;
 attribute float treeLodDitherRole;
@@ -172,7 +172,6 @@ export function injectTreeFoliageVertexShader(vertexShader: string): string {
     `#include <common>
 attribute float treeFoliageMask;
 attribute float treeFoliageCard;
-attribute float treeSpeciesIndex;
 varying float vTreeFoliageMask;
 varying float vTreeFoliageCard;
 varying float vTreeSpeciesIndex;`,
@@ -181,7 +180,7 @@ varying float vTreeSpeciesIndex;`,
     `#include <begin_vertex>
 vTreeFoliageMask = treeFoliageMask;
 vTreeFoliageCard = treeFoliageCard;
-vTreeSpeciesIndex = treeSpeciesIndex;`,
+vTreeSpeciesIndex = treeWind.z;`,
   );
 }
 
