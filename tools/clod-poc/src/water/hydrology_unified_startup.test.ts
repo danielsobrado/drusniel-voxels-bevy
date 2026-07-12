@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHydrologyGrid } from "./hydrologyGrid.js";
 import { HydrologySystem } from "./hydrologySystem.js";
 import { HydrologyTileCache } from "./hydrologyTileSource.js";
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
@@ -111,10 +112,15 @@ describe("unified startup hydrology (Phase 3b)", () => {
   });
 
   it("evaluates sparse traced body ids without dense allocation", () => {
-    const report = evaluateHydrologyInvariants(unified.grid);
-    expect(report.bodyCount).toBeGreaterThan(0);
-    expect(report.bodyCount).toBeLessThanOrEqual(unified.grid.res * unified.grid.res);
-    expect(Number.isFinite(report.withinBodyMaxJump)).toBe(true);
+    const grid = createHydrologyGrid(2, 1, { surfaceHeight: () => 0 });
+    grid.wetMask[0] = 1;
+    grid.lakeMask[0] = 1;
+    grid.bodyKind[0] = 2;
+    grid.bodyId[0] = 2_000_000_000;
+    grid.waterY[0] = 1;
+    const report = evaluateHydrologyInvariants(grid);
+    expect(report.bodyCount).toBe(1);
+    expect(report.wetWithoutBodyIdCount).toBe(0);
   });
 
   it("keeps legacy finite-grid mode available when the flag is off", () => {
