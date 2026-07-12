@@ -1,4 +1,4 @@
-// Bevy runtime handoff for the Fable-style CLOD shadow path.
+// Bevy runtime handoff for the  CLOD shadow path.
 //
 // PRs 0001-0005 keep the shadow policy, manifest, proxy mesh generation, and
 // viewer validation inside clod-poc.  This module is the explicit handoff shape

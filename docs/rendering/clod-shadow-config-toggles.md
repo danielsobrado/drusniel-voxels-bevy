@@ -1,6 +1,6 @@
 # CLOD Shadow Config + Render Toggles
 
-PR 0010 adds a single feature gate for the Fable-style CLOD shadow path.
+PR 0010 adds a single feature gate for the  CLOD shadow path.
 
 It builds on:
 
@@ -158,6 +158,6 @@ clod shadow config: mode proxy load true proxies true f3 true bench true path as
 - `VOXEL_CLOD_SHADOWS=off` disables the CLOD shadow path.
 - `VOXEL_CLOD_SHADOWS=visual` turns proxy plans into visual mesh casters.
 - `VOXEL_CLOD_SHADOWS=nocast` turns all CLOD terrain pages into no-cast pages.
-- `VOXEL_CLOD_SHADOWS=proxy` preserves the exported Fable-style plan.
+- `VOXEL_CLOD_SHADOWS=proxy` preserves the exported  plan.
 - Bench output records which mode was active for A/B comparisons.
 - F3 shows the mode and snapshot path when enabled.

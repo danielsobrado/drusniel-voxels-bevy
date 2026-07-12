@@ -1,6 +1,6 @@
 # CLOD Shadow Spawn Wiring
 
-PR 0007 wires the Fable-style CLOD shadow manifest into Bevy entities.
+PR 0007 wires the  CLOD shadow manifest into Bevy entities.
 
 This PR is the first runtime step after the `clod-poc` validation/export work:
 

@@ -1,6 +1,6 @@
 # CLOD Shadow Bench Presets
 
-PR 0012 adds ready-to-run bench presets for the Fable-style CLOD shadow path.
+PR 0012 adds ready-to-run bench presets for the  CLOD shadow path.
 
 The presets build on the config/runtime wiring from PR 0010 and PR 0011.  They
 all use the same snapshot path so the only intended variable is the runtime

@@ -1,4 +1,4 @@
-//! Config/toggle integration for the Fable-style CLOD shadow runtime path.
+//! Config/toggle integration for the  CLOD shadow runtime path.
 //!
 //! This module centralizes the feature gate used by the PR 0006-0009 shadow
 //! pipeline.  The goal is to make the path easy to A/B in normal runs, F3, and

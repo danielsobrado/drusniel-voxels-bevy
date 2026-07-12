@@ -1,6 +1,6 @@
 # CLOD Shadow Bench Workflow
 
-PR 0015 makes the Fable-style CLOD shadow regression check repeatable without
+PR 0015 makes the  CLOD shadow regression check repeatable without
 forcing expensive GPU-like benches on every push.
 
 It builds on:

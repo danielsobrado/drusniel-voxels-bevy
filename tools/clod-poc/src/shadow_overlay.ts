@@ -1,4 +1,4 @@
-// Viewer-facing overlay model for the Fable-style terrain shadow cut.
+// Viewer-facing overlay model for theterrain shadow cut.
 //
 // shadow_clod.ts selects the caster cut and shadow_manifest.ts gives the
 // runtime/export contract.  This module keeps the debug viewer deterministic:

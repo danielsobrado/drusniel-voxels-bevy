@@ -1,4 +1,4 @@
-// Shadow-only proxy mesh generation for the Fable-style CLOD shadow path.
+// Shadow-only proxy mesh generation for the CLOD shadow path.
 //
 // shadow_clod.ts selects which pages may cast; shadow_manifest.ts turns that
 // decision into runtime metadata.  This module materializes ClodShadowMesh

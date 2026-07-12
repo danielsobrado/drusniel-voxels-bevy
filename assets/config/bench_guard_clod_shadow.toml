@@ -1,4 +1,4 @@
-# Optional bench_guard thresholds for the Fable-style CLOD shadow path.
+# Optional bench_guard thresholds for the  CLOD shadow path.
 #
 # Copy this section into assets/config/bench_guard.toml once the bench_guard
 # binary is wired to call src/rendering/clod_shadow_bench_guard.rs.

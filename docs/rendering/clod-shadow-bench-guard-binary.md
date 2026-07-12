@@ -1,6 +1,6 @@
 # CLOD Shadow Bench Guard Binary
 
-PR 0014 wires the Fable-style CLOD shadow guard into the documented benchmark
+PR 0014 wires the  CLOD shadow guard into the documented benchmark
 regression command:
 
 ```bash

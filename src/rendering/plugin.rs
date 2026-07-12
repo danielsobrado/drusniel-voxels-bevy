@@ -109,7 +109,7 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WeatherOverlayPlugin)
             // Shadow budget: terrain shadow culling + point light shadow limits
             .add_plugins(ShadowBudgetPlugin)
-            // Fable-style CLOD shadow runtime: config, snapshot load, entity spawn, F3, bench rows.
+            //  CLOD shadow runtime: config, snapshot load, entity spawn, F3, bench rows.
             .add_plugins((
                 ClodShadowConfigPlugin,
                 ClodShadowSnapshotLoaderPlugin,

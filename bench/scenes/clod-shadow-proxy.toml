@@ -1,4 +1,4 @@
-# CLOD shadow A/B preset: Fable-style proxy path.
+# CLOD shadow A/B preset:  proxy path.
 #
 # Run with:
 #   cargo run --release -- --bench bench/scenes/clod-shadow-proxy.toml

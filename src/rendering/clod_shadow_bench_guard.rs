@@ -1,4 +1,4 @@
-//! Bench-guard helpers for the Fable-style CLOD shadow runtime path.
+//! Bench-guard helpers for the  CLOD shadow runtime path.
 //!
 //! The normal bench output already records stable `Clod Shadow ...` metrics.
 //! This module gives the regression guard a small, deterministic evaluator for

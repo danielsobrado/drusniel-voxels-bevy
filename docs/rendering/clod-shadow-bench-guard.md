@@ -1,6 +1,6 @@
 # CLOD Shadow Bench Guard Thresholds
 
-PR 0013 adds regression-guard inputs for the Fable-style CLOD shadow path.
+PR 0013 adds regression-guard inputs for the  CLOD shadow path.
 
 It builds on:
 

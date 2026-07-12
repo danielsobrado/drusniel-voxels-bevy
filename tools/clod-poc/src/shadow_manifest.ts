@@ -1,4 +1,4 @@
-// Runtime/export contract for the Fable-style CLOD shadow cut.
+// Runtime/export contract for the CLOD shadow cut.
 //
 // shadow_clod.ts decides which pages cast this frame.  This module turns that
 // decision into stable metadata that the viewer, exporter, and later Bevy port

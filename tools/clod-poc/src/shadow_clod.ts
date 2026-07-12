@@ -1,8 +1,8 @@
-// Fable-style CLOD terrain shadow planning for the PoC.
+// CLOD terrain shadow planning for the PoC.
 //
 // This is deliberately separate from selection.ts.  The visual cut decides what
 // the camera sees; the shadow cut decides what the sun-shadow pass is allowed to
-// rasterize.  Fable's key optimisation is the same separation: dense terrain is
+// rasterize.  key optimisation is the same separation: dense terrain is
 // visible, but coarse terrain/proxy geometry is what casts far CSM shadows.
 
 import type { ClodPageNode } from "./types.js";
