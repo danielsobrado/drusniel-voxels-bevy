@@ -5,6 +5,7 @@ import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
 import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import type { StartupHeightfieldDescriptor } from "../terrain/startup_heightfield_raster.js";
+import type { WorldManifest } from "../world/world_manifest.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
@@ -108,6 +109,8 @@ export interface TerrainSourceInputs {
   stagedImportHash: string | null;
   voxelSnapshotHash?: string | null;
   longViewScene: boolean;
+  /** Descriptive identity for worker-side future tile caches. Deliberately excluded from v6 hashing. */
+  worldManifest?: WorldManifest;
 }
 
 export function normalizeTerrainSourceInputs(
@@ -144,6 +147,7 @@ export function normalizeTerrainSourceInputs(
     stagedImportHash: input.stagedImportHash ?? null,
     voxelSnapshotHash: input.voxelSnapshotHash ?? null,
     longViewScene: input.longViewScene ?? false,
+    worldManifest: input.worldManifest,
   };
 }
 
