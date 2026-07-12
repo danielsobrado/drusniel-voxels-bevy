@@ -2,6 +2,12 @@
 
 Keep profiling in the loop as features are added. Rendering work in this repo is performance-sensitive, and unmeasured changes are not enough.
 
+## Documentation Dates
+
+- New Markdown documentation files must include their creation date as a `-YYYY-MM-DD.md` filename suffix so age is visible from the filename alone.
+- Exempt fixed-name convention and control files such as `README.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, and generated reports whose names are defined by tooling.
+- Do not rename existing undated documentation only to satisfy this rule. When replacing an old dated document, create a new file with the current creation date; do not change the date for minor edits.
+
 ## Performance Expectations
 
 - Use `cargo run --release -- --bench ...` for any change that could affect frame time, render passes, terrain meshing, props, water, shadows, or post effects.

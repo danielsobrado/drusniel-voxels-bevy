@@ -4,6 +4,12 @@ Keep changes surgical, simple, and verified. This repo has an active rendering/p
 
 Use `$godogen` to generate or update this Bevy game from a natural-language description.
 
+## Documentation Dates
+
+- New Markdown documentation files must include their creation date as a `-YYYY-MM-DD.md` filename suffix so age is visible from the filename alone.
+- Exempt fixed-name convention and control files such as `README.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, and generated reports whose names are defined by tooling.
+- Do not rename existing undated documentation only to satisfy this rule. When replacing an old dated document, create a new file with the current creation date; do not change the date for minor edits.
+
 ## Shell Rules
 
 - Always prefix shell commands with `rtk`.

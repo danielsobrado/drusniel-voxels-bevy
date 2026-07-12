@@ -112,8 +112,16 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
 
   const currentOverlaySnapshot = (): ClodOverlaySnapshot => {
     const selection = selectionController.stats();
+    const renderPosition = interaction.mode === "playing" ? player.position : input.camera.position;
+    const origin = input.floatingOrigin?.stats();
     return {
       worldSize: WORLD,
+      position: {
+        x: renderPosition.x + (origin?.originX ?? 0),
+        y: renderPosition.y,
+        z: renderPosition.z + (origin?.originZ ?? 0),
+      },
+      averageFps: session.averageFpsRef.value,
       renderedTriangles: selection.triCount,
       nodesByLod: selection.nodesByLod,
       forcedSplits: selection.forcedSplits,

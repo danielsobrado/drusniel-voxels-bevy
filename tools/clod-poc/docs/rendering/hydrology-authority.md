@@ -90,9 +90,10 @@ Layout A texture — the streaming hydrology atlas.
 Not covered by the atlas (still clamp): the TSL vegetation node materials
 (grass/stone tint via `sampleHydrologyBilinearTsl`) and the Layout B consumers
 (froxel moisture) — visual-only, documented approximation. GPU sampling also does not
-replicate the CPU boundary blend band: at the world edge the shader switches from pure
-grid to pure tile data (the raw seam the blend band masks on the CPU side); vegetation
-placement tolerates this until Phase 3b unifies the generators.
+replicate the CPU boundary blend band, but with `unified_startup` the inside-world grid
+texture *is* the traced/tile authority (rasterized), so the world-edge switch from grid
+texture to tile data is continuous by construction — no raw seam to mask. (In legacy mode
+the shader still switches from pure grid to pure tile data at the edge.)
 
 ## Infinite-world tiles + boundary blend (Phase 3)
 
@@ -108,12 +109,12 @@ sample the same world coordinates. Config: `hydrology.infinite` in `config/water
 
 At the startup-world edge, `HydrologySystem.sample` blends the finite grid into the
 infinite field across `boundary_blend_m` (smoothstep; pure infinite at the edge, matching
-the outside limit exactly, pure grid deep inside). The *effective* authority every
-consumer reads is therefore continuous across the boundary: `npm run water:seam` reports
-`effectiveContinuity.maxWaterYStep ≈ 0.42 m` per 1 m step (no hard wall); the residual
-`seam.*` fields still record the raw algorithm disagreement between grid and infinite —
-that number only goes to ~0 when both sides share one generation algorithm (see deferred
-work).
+the outside limit exactly, pure grid deep inside) — **legacy path only**. With
+`unified_startup` (default in `config/water.yaml`, see the startup-side subsection above)
+this blend is bypassed entirely: both sides share one generation algorithm, so
+`seam.maxWaterYError → 0` and `effectiveContinuity.maxWaterYStep ≈ 0.83 m` per 1 m step
+with no authority handoff. When the flag is off, the blend runs and the residual `seam.*`
+fields record the raw finite-grid-vs-infinite algorithm disagreement the band masks.
 
 Physical validity of the infinite field itself: water can no longer float above terrain —
 lakes/rivers are wet only where the basin/channel surface sits above local terrain. The
@@ -140,6 +141,43 @@ Tile builds are synchronous on first touch (~14 ms for a 64-res tile with the re
 terrain sampler). Movement into new regions pays one build per new tile; steady-state
 sampling is cache hits. If browser profiling shows hitches at tile boundaries, add
 neighbour prefetch/async builds (deferred).
+
+### Unified startup authority (Phase 3b, startup side)
+
+Behind `hydrology.infinite.unified_startup` (`config/water.yaml`: `true`;
+`DEFAULT_HYDROLOGY_CONFIG`: `false`), active only when infinite-world sampling is on
+(`infiniteWorldSamples`), the startup world samples the **same** traced/tile authority as
+outside it. There is no longer a finite-grid sim inside `[0, worldCells]`, so the raw
+`seam.*` disagreement and the smoothstep blend band disappear by construction.
+
+- `HydrologySystem.build` routes to `buildUnifiedStartupGrid`
+  (`src/water/hydrologySystem.ts`): it rasterizes the tile authority (`tileCache.sample`,
+  or analytic `sampleInfiniteHydrology` when the cache is disabled) into the res×res
+  lattice. `carvedBed === originalBed` (uncarved terrain — no second carve authority),
+  `wetMask/bodyKind/bodyId/shoreDistance/flow/...` are copied straight from the sample. No
+  `fillDepressions`/`flowAccumulation`/`carveRivers`/`buildWaterSurface`, no
+  `computeBodyIds`/`computeShoreDistance` — those values already exist in the traced field.
+  `buildLegacyHydrologyGrid` (the finite sim) still runs when the flag is off.
+- `HydrologySystem.sample` and `terrainHeight` bypass the blend band entirely in unified
+  mode (`sample → sampleInfinite`; `terrainHeight → sampler.surfaceHeight`);
+  `unifiedStartupActive()` exposes the mode. The startup `HydrologyGrid` is now a raster
+  **view** of the authority for GPU textures / stats / the worker lattice, not an
+  independent authority (`grid.authority === "unified_traced"`).
+- `world_build_startup.ts` cascades: unified ⇒ no terrain surface override
+  (`setTerrainSurfaceOverride(null)`), `terrainSource.hydrologyTerrain = null` (workers
+  regenerate the procedural field directly; there is no carve to serialize). Because
+  `hydrologyTerrain` goes from a populated object to `null`, the page/world cache key
+  (`src/cache/acceptanceWorldCacheKey.ts`, which hashes `hydrologyTerrain`) invalidates
+  across the toggle, so a stale carved page cannot survive it.
+
+Measured (world = 1024, reference sampler): `water:seam` reports `unifiedStartup: true`,
+`seam.maxWaterYError = 0` / `maxDepthError = 0` / `maxFlowDirectionErrorRadians = 0` (the
+raster matches the analytic authority exactly at wet cells; only edge-quantization wetMask
+mismatches remain), `effectiveContinuity.maxWaterYStep ≈ 0.83 m` per 1 m step with no
+authority handoff. `water:streaming` invariants pass on the rasterized traced grid
+(`invariantsPassed: true`, `deterministic: true`, `evictionMaxDelta = 0`). Startup
+hydrology build is ~3.5× faster than the legacy sim (≈1.18 s vs ≈4.08 s) because it does
+no sim — only tile rasterization.
 
 ## Toroidal water clipmap (Phase 5) + static topology (Phase 5b)
 
@@ -223,13 +261,14 @@ npm test -- src/water          # unit tests
 
 ## Deferred (later phases)
 
-- **Phase 3b remainder** — the infinite side is now terrain-driven (traced drainage,
-  above), but the startup world still uses the finite grid pipeline, so the raw `seam.*`
-  disagreement at the boundary persists (masked by the blend band). Removing it means the
-  startup world also generates through the traced/tile authority — which changes the
-  inside-world terrain carve and therefore cascades into worker terrain parity and page
-  caches. Also: async tile builds + neighbour prefetch if browser profiling shows
-  boundary hitches (~33 ms cold builds).
+- **Phase 3b remainder** — *done*: with `unified_startup` the startup world generates
+  through the traced/tile authority (raster view, no finite-grid sim, no second carve, no
+  blend band; seam removed by construction — see "Unified startup authority" above). The
+  cascade landed too: no inside-world terrain override, `hydrologyTerrain = null` so
+  workers regenerate the procedural field with nothing to serialize, and the page/world
+  cache key invalidates on the toggle. Still open: async tile builds + neighbour prefetch
+  if browser profiling shows boundary hitches (~33 ms cold builds), and flipping the
+  `DEFAULT_HYDROLOGY_CONFIG` default from `false` once the unified path has soaked.
 - **Phase 4b remainder** — the placement-compute atlas is done (above); still clamping:
   TSL vegetation node materials (`sampleHydrologyBilinearTsl` tint) and Layout B
   consumers (froxel moisture). Terrain compute needs nothing: outside-world terrain is

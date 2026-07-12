@@ -2,6 +2,8 @@ import { createMeterRow, type MeterRow } from "./meter_rows.js";
 
 export interface ClodOverlaySnapshot {
   worldSize: number;
+  position?: { x: number; y: number; z: number };
+  averageFps?: number;
   renderedTriangles: number;
   nodesByLod: Record<number, number>;
   forcedSplits: number;
@@ -24,6 +26,23 @@ let activeOverlay: ClodOverlay | null = null;
 
 const formatCount = (value: number) => Math.round(value).toLocaleString();
 
+function formatCoordinate(value: number): string {
+  return Number.isFinite(value)
+    ? value.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    : "--";
+}
+
+export function formatOverlayPosition(position?: ClodOverlaySnapshot["position"]): string {
+  if (!position) return "X --   Z --   H --";
+  return `X ${formatCoordinate(position.x)}   Z ${formatCoordinate(position.z)}   H ${formatCoordinate(position.y)}`;
+}
+
+export function formatOverlayAverageFps(averageFps?: number): string {
+  return typeof averageFps === "number" && Number.isFinite(averageFps) && averageFps > 0
+    ? `AVG FPS ${Math.round(averageFps)}`
+    : "AVG FPS --";
+}
+
 function lodText(nodesByLod: Record<number, number>): string {
   const parts = Object.entries(nodesByLod)
     .map(([level, count]) => [Number(level), count] as const)
@@ -42,6 +61,10 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
       <header>
         <strong class="clod-overlay-world">world --</strong>
       </header>
+      <div class="clod-overlay-primary-stats">
+        <strong data-overlay-position>X -- &nbsp; Z -- &nbsp; H --</strong>
+        <strong data-overlay-average-fps>AVG FPS --</strong>
+      </div>
       <div class="clod-overlay-meters"></div>
       <div class="clod-overlay-flags">
         <span data-overlay-freeze>live cut</span>
@@ -66,6 +89,8 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
   const overlay: ClodOverlay = {
     update(snapshot) {
       setText(root, ".clod-overlay-world", `${snapshot.worldSize}x${snapshot.worldSize} pages`);
+      setText(root, "[data-overlay-position]", formatOverlayPosition(snapshot.position));
+      setText(root, "[data-overlay-average-fps]", formatOverlayAverageFps(snapshot.averageFps));
       meters[0].update({
         label: "Triangles",
         value: formatCount(snapshot.renderedTriangles),

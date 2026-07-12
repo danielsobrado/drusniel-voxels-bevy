@@ -158,6 +158,33 @@
   white-space: nowrap;
 }
 
+.clod-overlay-primary-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  color: #f3e8c5;
+  background: rgba(5, 7, 9, 0.56);
+  border: 1px solid rgba(233, 201, 106, 0.3);
+  border-radius: 4px;
+  font-family: var(--clod-ui-font);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 1px 1px 2px #000;
+}
+
+.clod-overlay-primary-stats [data-overlay-position] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clod-overlay-primary-stats [data-overlay-average-fps] {
+  color: #c8e6a0;
+  white-space: nowrap;
+}
+
 .clod-overlay-meters {
   display: grid;
   gap: 5px;

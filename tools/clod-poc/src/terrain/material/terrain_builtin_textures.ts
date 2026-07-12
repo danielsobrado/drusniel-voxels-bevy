@@ -53,10 +53,10 @@ export const demoTextureUrl = (file: string): string => {
 export const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
   // scale = uv per world metre; 1/scale = tile size. ~0.06 gave a ~16m tile that reads flat up
   // close, so these are tightened to ~4-5m tiles for visible detail at ground level.
-  { id: "grass-2", scale: 0.24, heightMin: 12, heightMax: 18 },
-  { id: "earth-2", scale: 0.16, heightMin: 18, heightMax: 40 },
-  { id: "earth-1", scale: 0.16, heightMin: 40, heightMax: 60 },
-  { id: "snow-rocks-1", scale: 0.1, heightMin: 60, heightMax: 118 },
+  { id: "grass-2", scale: 0.24, heightMin: 0, heightMax: 18 },
+  { id: "earth-2", scale: 0.16, heightMin: 14, heightMax: 40 },
+  { id: "earth-1", scale: 0.16, heightMin: 36, heightMax: 60 },
+  { id: "snow-rocks-1", scale: 0.1, heightMin: 56, heightMax: 118 },
 ] as const;
 
 export const BUILTIN_TERRAIN_TEXTURES: readonly BuiltinTerrainTexture[] = [
