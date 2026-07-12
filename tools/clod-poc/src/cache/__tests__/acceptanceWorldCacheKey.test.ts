@@ -111,6 +111,64 @@ describe("acceptance world cache key", () => {
     expect(diffAcceptanceWorldCacheKeyFields(a, b)).toEqual(expect.arrayContaining(["hydrologyTerrain", "waterConfig"]));
   });
 
+  it("distinguishes legacy carved-grid mode from unified startup mode", async () => {
+    const legacySource = baseTerrainSource();
+    const legacy = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: {
+        ...legacySource,
+        hydrologyTerrain: { res: 2, worldCells: 128, carvedBed: new Float32Array([1, 2, 3, 4]) },
+        waterConfig: {
+          ...legacySource.waterConfig,
+          enabled: true,
+          source: "hydrology",
+          hydrology: { enabled: true, unifiedStartup: false },
+        },
+      },
+    });
+    const unifiedSource = baseTerrainSource();
+    const unified = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: {
+        ...unifiedSource,
+        hydrologyTerrain: null,
+        waterConfig: {
+          ...unifiedSource.waterConfig,
+          enabled: true,
+          source: "hydrology",
+          hydrology: { enabled: true, unifiedStartup: true },
+        },
+      },
+    });
+    expect(legacy.key).not.toBe(unified.key);
+    expect(diffAcceptanceWorldCacheKeyFields(legacy, unified)).toEqual(
+      expect.arrayContaining(["hydrologyTerrain", "waterConfig"]),
+    );
+  });
+
+  it("changes when hydrologyTerrain flips populated to null with identical water config", async () => {
+    const waterConfig = {
+      enabled: true,
+      source: "hydrology" as const,
+      fakeBodies: { carveTerrain: false },
+      hydrology: { enabled: true, unifiedStartup: false },
+    };
+    const populated = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: {
+        ...baseTerrainSource(),
+        hydrologyTerrain: { res: 2, worldCells: 128, carvedBed: new Float32Array([1, 2, 3, 4]) },
+        waterConfig,
+      },
+    });
+    const nulled = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: { ...baseTerrainSource(), hydrologyTerrain: null, waterConfig },
+    });
+    expect(populated.key).not.toBe(nulled.key);
+    expect(diffAcceptanceWorldCacheKeyFields(populated, nulled)).toContain("hydrologyTerrain");
+  });
+
   it("changes when the startup hydrology authority changes", async () => {
     const a = await buildAcceptanceWorldCacheKey({ cfg, terrainSource: baseTerrainSource() });
     const source = baseTerrainSource();

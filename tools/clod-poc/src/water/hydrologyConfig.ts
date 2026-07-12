@@ -167,7 +167,7 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     tileSizeM: 256,
     tileRes: 64,
     maxResidentTiles: 96,
-    unifiedStartup: false,
+    unifiedStartup: true,
     boundaryBlendM: 48,
     atlasTilesPerSide: 6,
   },

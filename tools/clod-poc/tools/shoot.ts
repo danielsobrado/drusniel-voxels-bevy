@@ -133,6 +133,7 @@ async function main(): Promise<void> {
         ready: hooks?.ready ?? false,
         error: hooks ? hooks.error ?? null : "missing hooks",
         diag: hooks?.diag ?? null,
+        startupTimings: hooks?.startupTimings ?? window.__drusnielStartupTimings ?? null,
         ...(hooks?.stats ?? {}),
       }, null, 2);
     });

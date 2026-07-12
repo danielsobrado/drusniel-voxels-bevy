@@ -13,8 +13,10 @@ const sampler: TerrainHeightSampler = {
 
 function buildSystem(): HydrologySystem {
   // Small, fast hydrology build — the boundary behaviour under test does not depend on
-  // simulation fidelity.
+  // simulation fidelity. This suite covers the legacy grid + boundary blend, so it pins
+  // unifiedStartup off now that the default is the unified authority.
   const config = cloneHydrologyConfig();
+  config.infinite.unifiedStartup = false;
   config.simRes = 64;
   config.accumulation.particles = 4000;
   config.accumulation.maxSteps = 60;

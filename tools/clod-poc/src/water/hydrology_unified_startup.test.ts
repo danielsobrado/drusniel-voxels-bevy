@@ -57,10 +57,10 @@ function expectSameSample(
 describe("unified startup hydrology (Phase 3b)", () => {
   const unified = buildUnified();
 
-  it("parses the YAML authority flag while preserving the legacy default", () => {
-    expect(cloneHydrologyConfig().infinite.unifiedStartup).toBe(false);
-    const parsed = readHydrologyConfig({ infinite: { unified_startup: true } });
-    expect(parsed.infinite.unifiedStartup).toBe(true);
+  it("defaults to the unified authority and parses the YAML flag both ways", () => {
+    expect(cloneHydrologyConfig().infinite.unifiedStartup).toBe(true);
+    const parsed = readHydrologyConfig({ infinite: { unified_startup: false } });
+    expect(parsed.infinite.unifiedStartup).toBe(false);
   });
 
   it("records the traced authority explicitly", () => {

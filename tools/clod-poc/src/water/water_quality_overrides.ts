@@ -78,5 +78,8 @@ export function applyWaterQueryOverrides(config: WaterConfig, searchParams: URLS
   const waterCaustics = flagParam(searchParams, ["waterCaustics", "caustics"]);
   if (waterCaustics !== null) next.caustics.enabled = waterCaustics;
 
+  const hydroUnified = flagParam(searchParams, ["hydroUnified", "hydroUnifiedStartup"]);
+  if (hydroUnified !== null) next.hydrology.infinite.unifiedStartup = hydroUnified;
+
   return next;
 }

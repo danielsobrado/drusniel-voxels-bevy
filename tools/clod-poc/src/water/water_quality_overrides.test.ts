@@ -28,4 +28,15 @@ describe("water quality overrides", () => {
     expect(config.visual.refraction.enabled).toBe(true);
     expect(config.caustics.enabled).toBe(true);
   });
+
+  it("overrides unified startup hydrology via hydroUnified flag", () => {
+    const off = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams({ hydroUnified: "0" }));
+    expect(off.hydrology.infinite.unifiedStartup).toBe(false);
+
+    const on = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams({ hydroUnified: "1" }));
+    expect(on.hydrology.infinite.unifiedStartup).toBe(true);
+
+    const untouched = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams());
+    expect(untouched.hydrology.infinite.unifiedStartup).toBe(DEFAULT_WATER_CONFIG.hydrology.infinite.unifiedStartup);
+  });
 });
