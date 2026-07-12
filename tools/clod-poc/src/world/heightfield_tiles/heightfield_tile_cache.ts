@@ -165,6 +165,11 @@ export class HeightfieldTileCache {
     this.previousCenter = { x: input.x, z: input.z, frameIndex: input.frameIndex };
   }
 
+  setBuildAllowed(allowed: boolean): void {
+    this.buildAllowed = allowed;
+    if (allowed) this.dispatch();
+  }
+
   get(key: WorldTileKey): HeightfieldTile | null {
     const entry = this.resident.get(tileKeyString(key));
     if (!entry) return null;
