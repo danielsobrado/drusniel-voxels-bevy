@@ -19,6 +19,7 @@
     "perf:p0": "tsx tools/perf-p0.ts",
     "perf:p0:extract": "tsx tools/perf-p0-extract.ts",
     "perf:postfx": "tsx tools/postfx-perf-matrix.ts",
+    "perf:heightfield-raster": "tsx tools/benchmark-startup-heightfield-raster.ts",
     "postfx:verify": "tsx tools/verify-postfx.ts",
     "shoot-props": "tsx tools/shoot-props.ts",
     "compare": "tsx tools/compare.ts",
@@ -98,7 +99,7 @@
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.70",
-    "@types/js-yaml": "^4.1.0",
+    "@types/js-yaml": "^4.0.0",
     "@types/node": "^20.16.0",
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.5",
