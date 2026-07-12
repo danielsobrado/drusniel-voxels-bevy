@@ -48,27 +48,31 @@ export interface CreateHeightfieldTileRuntimeInput {
   searchParams?: URLSearchParams;
 }
 
+const DISABLED_COUNTERS: HeightfieldTileCacheCounters = Object.freeze({
+  enabled: 0,
+  resident: 0,
+  required: 0,
+  pending: 0,
+  inflight: 0,
+  buildsTotal: 0,
+  buildMsP95: 0,
+  evictionsTotal: 0,
+  fallbackSamplesTotal: 0,
+  bytesResident: 0,
+  storeHits: 0,
+  storeMisses: 0,
+  storeErrors: 0,
+  failuresTotal: 0,
+});
+
 function diagnosticsCounters(): Record<string, number> | null {
   return window.__drusnielClod?.stats?.counters ?? null;
 }
 
-function publishDisabledCounters(): void {
-  publishHeightfieldTileCounters(diagnosticsCounters(), {
-    enabled: 0,
-    resident: 0,
-    required: 0,
-    pending: 0,
-    inflight: 0,
-    buildsTotal: 0,
-    buildMsP95: 0,
-    evictionsTotal: 0,
-    fallbackSamplesTotal: 0,
-    bytesResident: 0,
-    storeHits: 0,
-    storeMisses: 0,
-    storeErrors: 0,
-    failuresTotal: 0,
-  });
+function publishInitialCounters(counters: HeightfieldTileCacheCounters): void {
+  const startupTimings = window.__drusnielStartupTimings;
+  if (startupTimings) publishHeightfieldTileCounters(startupTimings, counters);
+  publishHeightfieldTileCounters(diagnosticsCounters(), counters);
 }
 
 function legacySurfaceOverrideActive(input: CreateHeightfieldTileRuntimeInput): boolean {
@@ -83,13 +87,13 @@ export async function createHeightfieldTileRuntime(
   if (typeof window === "undefined") return null;
   const config = parseHeightfieldTileConfig(heightfieldTileConfigText);
   const searchParams = input.searchParams ?? new URLSearchParams(window.location.search);
-  if (!heightfieldTilesEnabled(config, searchParams, input.terrainSource.worldMode)) {
-    publishDisabledCounters();
+  if (!heightfieldTilesEnabled(config, searchParams, input.terrainSource.worldMode ?? "finite")) {
+    publishInitialCounters(DISABLED_COUNTERS);
     return null;
   }
   if (legacySurfaceOverrideActive(input)) {
     console.warn("[heightfield-tiles] disabled because a legacy carved surface override is active");
-    publishDisabledCounters();
+    publishInitialCounters(DISABLED_COUNTERS);
     return null;
   }
 
@@ -129,11 +133,12 @@ export async function createHeightfieldTileRuntime(
     counters: () => cache.counters(),
     dispose() {
       cache.clear();
+      store?.close();
       setTerrainSurfaceOverride(startup?.sampleHeight ?? procedural.sampleHeight);
-      publishDisabledCounters();
+      publishHeightfieldTileCounters(diagnosticsCounters(), DISABLED_COUNTERS);
     },
   };
-  publishHeightfieldTileCounters(diagnosticsCounters(), cache.counters());
+  publishInitialCounters(cache.counters());
   console.info("[heightfield-tiles] enabled", {
     radiusM: config.radiusM,
     maxResidentTiles: config.maxResidentTiles,
