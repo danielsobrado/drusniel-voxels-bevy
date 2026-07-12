@@ -85,6 +85,9 @@ seed, and startup-world size already present in the key.
 
 ## Startup counters
 
+- `startup.heightfield_raster_requested`
+- `startup.heightfield_raster_budget_enabled`
+- `startup.heightfield_raster_budget_reason_code` (`0=enabled`, `1=invalid`, `2=sample budget`, `3=byte budget`)
 - `startup.heightfield_raster_enabled`
 - `startup.heightfield_raster_ms`
 - `startup.heightfield_raster_res`
