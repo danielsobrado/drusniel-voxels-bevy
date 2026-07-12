@@ -122,4 +122,8 @@ export class IndexedDbHeightfieldTileStore implements HeightfieldTileStore {
     );
     await transactionDone(transaction);
   }
+
+  close(): void {
+    this.db.close();
+  }
 }
