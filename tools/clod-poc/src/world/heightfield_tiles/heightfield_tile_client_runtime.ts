@@ -21,11 +21,26 @@ function stopRuntime(client: ClodWorkerClient): void {
   activeRuntimes.delete(client);
 }
 
+function streamedRootWorkerIdle(): boolean {
+  const counters = window.__drusnielClod?.stats?.counters;
+  if (!counters) return true;
+  return (counters["live_clod_stream_pending_pages"] ?? 0) === 0
+    && (counters["live_clod_stream_inflight_batches"] ?? 0) === 0
+    && (counters["live_clod_stream_apply_queue_pages"] ?? 0) === 0
+    && (counters["live_clod_stream_safety_pending_pages"] ?? 0) === 0
+    && (counters["live_clod_stream_safety_inflight_pages"] ?? 0) === 0;
+}
+
 export function updateHeightfieldTileClientRuntime(
   client: ClodWorkerClient,
   input: HeightfieldTileRuntimeUpdate,
 ): void {
-  activeRuntimes.get(client)?.update(input);
+  const runtime = activeRuntimes.get(client);
+  if (!runtime) return;
+  runtime.update({
+    ...input,
+    buildAllowed: input.buildAllowed ?? streamedRootWorkerIdle(),
+  });
 }
 
 export function installHeightfieldTileClientRuntime(): void {
