@@ -2,10 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
 import { baseSurfaceHeight, meshChunk, setTerrainSurfaceOverride } from "./terrain.js";
 import {
+  STARTUP_HEIGHTFIELD_DEFAULT_MAX_BYTES,
   STARTUP_HEIGHTFIELD_PADDING_CELLS,
+  STARTUP_HEIGHTFIELD_SAMPLING_MODE,
   buildStartupHeightfieldRaster,
   makeStartupHeightfieldSampler,
+  planStartupHeightfieldRaster,
   startupHeightfieldDescriptor,
+  type StartupHeightfieldRaster,
 } from "./startup_heightfield_raster.js";
 
 const TEST_CFG: ClodPagesConfig = {
@@ -43,19 +47,27 @@ const TEST_CFG: ClodPagesConfig = {
 
 const WORLD_CELLS = 32;
 
+function requireRaster(worldCells = WORLD_CELLS): StartupHeightfieldRaster {
+  const raster = buildStartupHeightfieldRaster(worldCells);
+  expect(raster).not.toBeNull();
+  return raster!;
+}
+
 describe("startup heightfield raster", () => {
   afterEach(() => setTerrainSurfaceOverride(null));
 
-  it("covers the startup world plus padding", () => {
-    const raster = buildStartupHeightfieldRaster(WORLD_CELLS);
+  it("covers the startup world plus padding within the configured budget", () => {
+    const raster = requireRaster();
     expect(raster.minCell).toBe(-STARTUP_HEIGHTFIELD_PADDING_CELLS);
     expect(raster.res).toBe(WORLD_CELLS + STARTUP_HEIGHTFIELD_PADDING_CELLS * 2 + 1);
     expect(raster.heights.length).toBe(raster.res * raster.res);
+    expect(raster.sampleCount).toBe(raster.heights.length);
+    expect(raster.byteLength).toBe(raster.heights.byteLength);
+    expect(raster.samplingMode).toBe(STARTUP_HEIGHTFIELD_SAMPLING_MODE);
   });
 
   it("is bit-identical to the procedural field at integer lattice coordinates", () => {
-    const raster = buildStartupHeightfieldRaster(WORLD_CELLS);
-    const sampler = makeStartupHeightfieldSampler(raster);
+    const sampler = makeStartupHeightfieldSampler(requireRaster());
     for (const [x, z] of [
       [-STARTUP_HEIGHTFIELD_PADDING_CELLS, -STARTUP_HEIGHTFIELD_PADDING_CELLS],
       [0, 0],
@@ -67,20 +79,22 @@ describe("startup heightfield raster", () => {
     }
   });
 
-  it("reconstructs fractional coordinates bilinearly from lattice samples", () => {
-    const raster = buildStartupHeightfieldRaster(WORLD_CELLS);
-    const sampler = makeStartupHeightfieldSampler(raster);
-    const manual =
-      (baseSurfaceHeight(4, 9) * 0.75 + baseSurfaceHeight(5, 9) * 0.25) * 0.4 +
-      (baseSurfaceHeight(4, 10) * 0.75 + baseSurfaceHeight(5, 10) * 0.25) * 0.6;
-    expect(sampler(4.25, 9.6)).toBeCloseTo(manual, 12);
+  it("bypasses the raster for fractional coordinates", () => {
+    const sampler = makeStartupHeightfieldSampler(requireRaster());
+    for (const [x, z] of [
+      [4.25, 9.6],
+      [0.5, 0],
+      [WORLD_CELLS - 0.25, WORLD_CELLS + 0.5],
+      [-1.5, 3.75],
+    ] as const) {
+      expect(sampler(x, z)).toBe(baseSurfaceHeight(x, z));
+    }
   });
 
   it("falls back to the procedural field outside the padded domain", () => {
-    const raster = buildStartupHeightfieldRaster(WORLD_CELLS);
-    const sampler = makeStartupHeightfieldSampler(raster);
+    const sampler = makeStartupHeightfieldSampler(requireRaster());
     for (const [x, z] of [
-      [WORLD_CELLS + STARTUP_HEIGHTFIELD_PADDING_CELLS + 0.5, 10],
+      [WORLD_CELLS + STARTUP_HEIGHTFIELD_PADDING_CELLS + 1, 10],
       [-STARTUP_HEIGHTFIELD_PADDING_CELLS - 1, 4],
       [1300.4, -250.7],
     ] as const) {
@@ -88,36 +102,45 @@ describe("startup heightfield raster", () => {
     }
   });
 
-  it("keeps meshed vertex positions bit-identical to direct procedural meshing", () => {
+  it("keeps meshed positions, normals, indices, and weights identical to direct procedural meshing", () => {
     const world = { cellsX: WORLD_CELLS, cellsZ: WORLD_CELLS };
     const direct = meshChunk(0, 0, TEST_CFG, world);
     expect(direct.positions.length).toBeGreaterThan(0);
 
-    const raster = buildStartupHeightfieldRaster(WORLD_CELLS);
-    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(raster));
+    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(requireRaster()));
     const rastered = meshChunk(0, 0, TEST_CFG, world);
 
     expect(rastered.positions).toEqual(direct.positions);
+    expect(rastered.normals).toEqual(direct.normals);
     expect(rastered.indices).toEqual(direct.indices);
+    expect(rastered.materialWeights).toEqual(direct.materialWeights);
+  });
 
-    // Normals sample the field at fractional ±0.5 offsets, so they see the bilinear
-    // reconstruction instead of the true field; require them to stay close.
-    expect(rastered.normals.length).toBe(direct.normals.length);
-    for (let i = 0; i < direct.normals.length; i += 3) {
-      const dot = rastered.normals[i]! * direct.normals[i]!
-        + rastered.normals[i + 1]! * direct.normals[i + 1]!
-        + rastered.normals[i + 2]! * direct.normals[i + 2]!;
-      expect(dot).toBeGreaterThan(0.95);
-    }
+  it("rejects rasters above the default memory budget", () => {
+    const plan = planStartupHeightfieldRaster(2048);
+    expect(plan.byteLength).toBeGreaterThan(STARTUP_HEIGHTFIELD_DEFAULT_MAX_BYTES);
+    expect(plan.enabled).toBe(false);
+    expect(plan.reason).toBe("sample_budget");
+    expect(buildStartupHeightfieldRaster(2048)).toBeNull();
+  });
+
+  it("supports explicit smaller budgets for deterministic gating", () => {
+    const plan = planStartupHeightfieldRaster(WORLD_CELLS, { maxSamples: 100 });
+    expect(plan.enabled).toBe(false);
+    expect(plan.reason).toBe("sample_budget");
+    expect(buildStartupHeightfieldRaster(WORLD_CELLS, baseSurfaceHeight, { maxSamples: 100 })).toBeNull();
   });
 
   it("exposes a plain descriptor for cache identity", () => {
     expect(startupHeightfieldDescriptor(null)).toBeNull();
-    const raster = buildStartupHeightfieldRaster(WORLD_CELLS);
+    const raster = requireRaster();
     expect(startupHeightfieldDescriptor(raster)).toEqual({
       worldCells: WORLD_CELLS,
       minCell: -STARTUP_HEIGHTFIELD_PADDING_CELLS,
       res: raster.res,
+      sampleCount: raster.sampleCount,
+      byteLength: raster.byteLength,
+      samplingMode: STARTUP_HEIGHTFIELD_SAMPLING_MODE,
     });
   });
 });
