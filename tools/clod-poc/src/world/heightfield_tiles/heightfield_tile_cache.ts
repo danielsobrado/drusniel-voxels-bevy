@@ -34,6 +34,7 @@ export interface HeightfieldTileCacheUpdate {
   deltaSeconds?: number;
   velocityX?: number;
   velocityZ?: number;
+  buildAllowed?: boolean;
 }
 
 export interface HeightfieldTileCacheCounters {
@@ -123,8 +124,11 @@ export class HeightfieldTileCache {
   private readonly buildSamples: number[] = [];
   private required = new Map<string, PlannedTile>();
   private previousCenter: { x: number; z: number; frameIndex: number } | null = null;
+  private evictionCenter = { x: 0, z: 0 };
   private inflightBatches = 0;
   private currentFrame = 0;
+  private epoch = 0;
+  private buildAllowed = true;
   private buildsTotal = 0;
   private evictionsTotal = 0;
   private fallbackSamplesTotal = 0;
@@ -142,9 +146,11 @@ export class HeightfieldTileCache {
 
   update(input: HeightfieldTileCacheUpdate): void {
     this.currentFrame = input.frameIndex;
+    this.buildAllowed = input.buildAllowed !== false;
     const velocity = this.resolveVelocity(input);
     const predictedX = input.x + velocity.x * this.config.predictionSeconds;
     const predictedZ = input.z + velocity.z * this.config.predictionSeconds;
+    this.evictionCenter = { x: predictedX, z: predictedZ };
     const planned = planHeightfieldTileKeys(predictedX, predictedZ, this.config.radiusM)
       .slice(0, this.config.maxResidentTiles);
     this.required = new Map(planned.map((entry) => [entry.id, entry]));
@@ -203,9 +209,12 @@ export class HeightfieldTileCache {
   }
 
   clear(): void {
+    this.epoch++;
+    this.buildAllowed = false;
     this.resident.clear();
     this.required.clear();
     this.failures.clear();
+    this.inflightIds.clear();
   }
 
   private resolveVelocity(input: HeightfieldTileCacheUpdate): { x: number; z: number } {
@@ -243,7 +252,7 @@ export class HeightfieldTileCache {
   }
 
   private dispatch(): void {
-    if (!this.builder || this.inflightBatches >= this.config.maxInflightBatches) return;
+    if (!this.buildAllowed || !this.builder || this.inflightBatches >= this.config.maxInflightBatches) return;
     const candidates = [...this.required.values()].filter((entry) => {
       if (this.resident.has(entry.id) || this.inflightIds.has(entry.id)) return false;
       const failure = this.failures.get(entry.id);
@@ -252,16 +261,17 @@ export class HeightfieldTileCache {
     if (candidates.length === 0) return;
 
     const batch = candidates.slice(0, this.config.maxTilesPerBatch);
+    const epoch = this.epoch;
     for (const entry of batch) this.inflightIds.add(entry.id);
     this.inflightBatches++;
-    void this.loadOrBuild(batch).finally(() => {
+    void this.loadOrBuild(batch, epoch).finally(() => {
       for (const entry of batch) this.inflightIds.delete(entry.id);
-      this.inflightBatches--;
-      this.dispatch();
+      this.inflightBatches = Math.max(0, this.inflightBatches - 1);
+      if (epoch === this.epoch) this.dispatch();
     });
   }
 
-  private async loadOrBuild(batch: readonly PlannedTile[]): Promise<void> {
+  private async loadOrBuild(batch: readonly PlannedTile[], epoch: number): Promise<void> {
     const loaded = new Map<string, HeightfieldTile>();
     const misses: PlannedTile[] = [];
 
@@ -269,6 +279,7 @@ export class HeightfieldTileCache {
       for (const entry of batch) {
         try {
           const tile = await this.store.load(entry.key, this.sourceRevision);
+          if (epoch !== this.epoch) return;
           if (tile) {
             assertTile(tile, entry.key, this.sourceRevision);
             loaded.set(entry.id, tile);
@@ -278,6 +289,7 @@ export class HeightfieldTileCache {
             misses.push(entry);
           }
         } catch {
+          if (epoch !== this.epoch) return;
           this.storeErrors++;
           misses.push(entry);
         }
@@ -286,11 +298,13 @@ export class HeightfieldTileCache {
       misses.push(...batch);
     }
 
+    if (epoch !== this.epoch) return;
     for (const [id, tile] of loaded) this.install(id, tile);
     if (misses.length === 0) return;
 
     try {
       const built = await this.builder!(misses.map((entry) => entry.key), this.sourceRevision);
+      if (epoch !== this.epoch) return;
       if (built.tiles.length !== misses.length) {
         throw new Error(`heightfield tile builder returned ${built.tiles.length} tiles for ${misses.length} requests`);
       }
@@ -305,10 +319,13 @@ export class HeightfieldTileCache {
         this.buildsTotal++;
         this.failures.delete(entry.id);
         if (this.store) {
-          void this.store.save(tile).catch(() => { this.storeErrors++; });
+          void this.store.save(tile).catch(() => {
+            if (epoch === this.epoch) this.storeErrors++;
+          });
         }
       }
     } catch {
+      if (epoch !== this.epoch) return;
       this.failuresTotal += misses.length;
       for (const entry of misses) {
         const previous = this.failures.get(entry.id);
@@ -323,7 +340,7 @@ export class HeightfieldTileCache {
   private install(id: string, tile: HeightfieldTile): void {
     this.resident.set(id, { tile, lastTouchFrame: this.currentFrame });
     if (this.resident.size > this.config.maxResidentTiles) {
-      this.evict(tileOriginM(tile.key).x, tileOriginM(tile.key).z);
+      this.evict(this.evictionCenter.x, this.evictionCenter.z);
     }
   }
 }
