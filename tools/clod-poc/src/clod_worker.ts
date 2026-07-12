@@ -35,7 +35,6 @@ import {
   serializeBuildResult,
   serializeNodes,
   type ClodWorkerRequest,
-  type ClodWorkerResponse,
   type SerializedHydrologyTerrain,
 } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
