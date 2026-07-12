@@ -81,9 +81,9 @@ describe("publishFarClipmapStatsToCounters", () => {
     counters["stream_ready_frame"] = 42;
     publishFarClipmapStatsToCounters(counters, stats({
       sourceReady: 1,
-      fallbackSamplesTotal: 90_000,
+      fallbackSamplesTotal: 90_001,
     }));
-    expect(counters["far_clipmap_fallback_samples_total"]).toBe(0);
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(1);
 
     publishFarClipmapStatsToCounters(counters, stats({
       sourceReady: 1,
