@@ -24,10 +24,22 @@ raster no longer reconstructs fractional samples bilinearly, the two paths share
 and derivative semantics. `startup_heightfield_gpu_parity.test.ts` locks the CPU sampler against
 the GPU-shaped TypeScript field core at and across the raster boundary for multiple seeds.
 
+## Canonical sampler contract
+
+`src/world/heightfield_sampler.ts` is now the shared surface-height interface for the continent
+work. Phase 1 provides two adapters only:
+
+- `proceduralHeightfieldSampler` delegates directly to `baseSurfaceHeight`.
+- `startupRasterHeightfieldSampler` wraps the existing integer-lattice raster policy.
+
+The wrapper is descriptive and does not change authority. `TERRAIN_SOURCE_VERSION` remains
+`world-modes-v6`; tile authority is intentionally deferred until the coordinated Phase 3 carve
+switch.
+
 ## Runtime wiring
 
-- **Main thread**: `world_build_startup.ts` installs the sampler as the terrain surface override in
-  unified infinite-islands mode.
+- **Main thread**: `world_build_startup.ts` installs the startup-raster adapter's `sampleHeight`
+  function as the terrain surface override in unified infinite-islands mode.
 - **CPU CLOD worker**: the raster rides the initial `build` request and is installed by
   `installWorkerTerrainOverride`. CPU fallback streamed roots reuse it inside its bounded domain
   and fall back to the procedural field outside.
@@ -83,6 +95,10 @@ The terrain-source key includes the raster descriptor:
 Raster contents are not hashed because they are a pure function of the terrain field configuration,
 seed, and startup-world size already present in the key.
 
+The Phase 1 `WorldManifest` stores the already-computed terrain-source hash as descriptive identity.
+The manifest is attached only after the hash is computed and is explicitly excluded from v6 hash
+normalization, so introducing the contract cannot invalidate existing cache entries.
+
 ## Startup counters
 
 - `startup.heightfield_raster_requested`
@@ -95,6 +111,8 @@ seed, and startup-world size already present in the key.
 - `startup.heightfield_raster_bytes`
 - `startup.heightfield_raster_worker_clone_ms`
 - `startup.heightfield_raster_worker_transfer_ms`
+- `world_manifest_present`
+- `world_manifest_seed`
 
 ## Original measured result
 
