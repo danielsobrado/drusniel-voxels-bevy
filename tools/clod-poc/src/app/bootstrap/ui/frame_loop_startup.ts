@@ -38,6 +38,7 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 import type { ClodPageNode } from "../../../types.js";
 import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
+import { updateHeightfieldTileClientRuntime } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
@@ -450,6 +451,11 @@ export function runFrameLoopStartup(
   const updateSelectionWithStreaming = () => {
     beginStreamViewPreparationFrame();
     const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
+    updateHeightfieldTileClientRuntime(input.clodWorker, {
+      x: center.x,
+      z: center.z,
+      frameIndex: selectionController.stats().frameId,
+    });
     const previousStats = streamingClodRootController.stats();
     const dx = center.x - lastStreamCenterX;
     const dz = center.z - lastStreamCenterZ;
