@@ -6,10 +6,9 @@ import type { WaterConfig } from "./waterConfig.js";
 
 // The worker (hydrology_tile_build_worker.ts) reconstructs the main-thread sampler as
 // makeFakeBodyCarvedSampler({ fakeBodies } as WaterConfig, { surfaceHeight: baseSurfaceHeight })
-// with the same terrain field config installed. This test locks that exactness contract:
-// tiles carved through the minimal configure payload must match tiles carved through the
-// full water config bit for bit — if makeFakeBodyCarvedSampler ever starts reading more
-// of WaterConfig, the worker path silently diverges and this test bites.
+// with the same terrain field config installed. These tests lock both authority contracts:
+// legacy mode carries the configured fake-body carve, while unified startup explicitly
+// disables that carve and reconstructs the procedural terrain sampler bit for bit.
 
 const FAKE_BODIES: WaterConfig["fakeBodies"] = {
   carveTerrain: true,
@@ -31,37 +30,56 @@ describe("hydrology tile worker parity", () => {
     setTerrainFieldConfig(null);
   });
 
-  it("worker-style sampler reconstruction builds tiles bit-identical to the main-thread path", () => {
+  it("worker-style sampler reconstruction builds legacy carved tiles bit-identically", () => {
     setTerrainFieldConfig({ seed: 1337 });
 
-    // Main-thread path: full water config (world_build_startup.ts).
     const fullConfig = { fakeBodies: FAKE_BODIES, enabled: true, source: "hydrology" } as WaterConfig;
     const mainSampler = makeFakeBodyCarvedSampler(fullConfig, { surfaceHeight: baseSurfaceHeight });
     const mainTiles = TILES.map((coord) =>
       buildHydrologyTileData(coord.tileX, coord.tileZ, mainSampler, BUILD_OPTIONS));
 
-    // Worker path: minimal configure payload cast (hydrology_tile_build_worker.ts).
     const workerConfig = { fakeBodies: FAKE_BODIES } as WaterConfig;
     const workerSampler = makeFakeBodyCarvedSampler(workerConfig, { surfaceHeight: baseSurfaceHeight });
     const workerTiles = TILES.map((coord) =>
       buildHydrologyTileData(coord.tileX, coord.tileZ, workerSampler, BUILD_OPTIONS));
 
-    for (let i = 0; i < TILES.length; i++) {
-      const main = mainTiles[i]!;
-      const worker = workerTiles[i]!;
-      expect(worker.res).toBe(main.res);
-      expect(worker.cellSize).toBe(main.cellSize);
-      expect(Array.from(worker.terrainY)).toEqual(Array.from(main.terrainY));
-      expect(Array.from(worker.waterY)).toEqual(Array.from(main.waterY));
-      expect(Array.from(worker.bodyMask)).toEqual(Array.from(main.bodyMask));
-      expect(Array.from(worker.flowX)).toEqual(Array.from(main.flowX));
-      expect(Array.from(worker.flowZ)).toEqual(Array.from(main.flowZ));
-      expect(Array.from(worker.moisture)).toEqual(Array.from(main.moisture));
-      expect(Array.from(worker.bodyKind)).toEqual(Array.from(main.bodyKind));
-      expect(Array.from(worker.bodyId)).toEqual(Array.from(main.bodyId));
-    }
-    // Sanity: the terrain is not trivially flat (the parity assertion must bite).
+    expectTilesEqual(workerTiles, mainTiles);
     const distinct = new Set(mainTiles.flatMap((tile) => Array.from(tile.terrainY)));
     expect(distinct.size).toBeGreaterThan(1);
   });
+
+  it("worker-style sampler reconstruction matches the unified no-carve authority", () => {
+    setTerrainFieldConfig({ seed: 1337 });
+    const noCarve = { ...FAKE_BODIES, carveTerrain: false };
+    const mainTiles = TILES.map((coord) =>
+      buildHydrologyTileData(coord.tileX, coord.tileZ, { surfaceHeight: baseSurfaceHeight }, BUILD_OPTIONS));
+    const workerSampler = makeFakeBodyCarvedSampler(
+      { fakeBodies: noCarve } as WaterConfig,
+      { surfaceHeight: baseSurfaceHeight },
+    );
+    const workerTiles = TILES.map((coord) =>
+      buildHydrologyTileData(coord.tileX, coord.tileZ, workerSampler, BUILD_OPTIONS));
+
+    expectTilesEqual(workerTiles, mainTiles);
+  });
 });
+
+function expectTilesEqual(
+  actual: ReturnType<typeof buildHydrologyTileData>[],
+  expected: ReturnType<typeof buildHydrologyTileData>[],
+): void {
+  for (let index = 0; index < expected.length; index++) {
+    const got = actual[index]!;
+    const want = expected[index]!;
+    expect(got.res).toBe(want.res);
+    expect(got.cellSize).toBe(want.cellSize);
+    expect(Array.from(got.terrainY)).toEqual(Array.from(want.terrainY));
+    expect(Array.from(got.waterY)).toEqual(Array.from(want.waterY));
+    expect(Array.from(got.bodyMask)).toEqual(Array.from(want.bodyMask));
+    expect(Array.from(got.flowX)).toEqual(Array.from(want.flowX));
+    expect(Array.from(got.flowZ)).toEqual(Array.from(want.flowZ));
+    expect(Array.from(got.moisture)).toEqual(Array.from(want.moisture));
+    expect(Array.from(got.bodyKind)).toEqual(Array.from(want.bodyKind));
+    expect(Array.from(got.bodyId)).toEqual(Array.from(want.bodyId));
+  }
+}

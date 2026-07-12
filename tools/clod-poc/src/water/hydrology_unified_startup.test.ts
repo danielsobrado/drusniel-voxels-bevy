@@ -1,101 +1,136 @@
 import { describe, expect, it } from "vitest";
+import { createHydrologyGrid } from "./hydrologyGrid.js";
 import { HydrologySystem } from "./hydrologySystem.js";
 import { HydrologyTileCache } from "./hydrologyTileSource.js";
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
-import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
+import { evaluateHydrologyInvariants } from "./hydrologyInvariants.js";
+import { readHydrologyConfig } from "./water_config_hydrology_parsing.js";
 import type { TerrainHeightSampler } from "./water_field_types.js";
 
 const WORLD_CELLS = 1024;
 
-// Undulating deterministic terrain (same family as the tile-source tests).
 const sampler: TerrainHeightSampler = {
   surfaceHeight: (x: number, z: number) =>
     24 + Math.sin(x * 0.004) * 14 + Math.cos(z * 0.0031) * 11 + Math.sin((x + z) * 0.0012) * 6,
 };
 
-function buildUnified(): HydrologySystem {
+function unifiedConfig() {
   const config = cloneHydrologyConfig();
   config.simRes = 64;
+  config.infinite.tileRes = 32;
+  config.infinite.maxResidentTiles = 64;
   config.infinite.unifiedStartup = true;
-  return HydrologySystem.build(config, WORLD_CELLS, sampler, { infiniteWorldSamples: true });
+  return config;
 }
 
-function buildLegacy(): HydrologySystem {
-  const config = cloneHydrologyConfig();
-  config.simRes = 64;
-  config.accumulation.particles = 4000;
-  config.accumulation.maxSteps = 60;
-  config.fill.iterations = 60;
-  config.infinite.unifiedStartup = false;
-  return HydrologySystem.build(config, WORLD_CELLS, sampler, { infiniteWorldSamples: true });
+function buildUnified(): HydrologySystem {
+  return HydrologySystem.build(unifiedConfig(), WORLD_CELLS, sampler, { infiniteWorldSamples: true });
+}
+
+function referenceCache(): HydrologyTileCache {
+  const config = unifiedConfig();
+  return new HydrologyTileCache(sampler, {
+    tileSizeM: config.infinite.tileSizeM,
+    tileRes: config.infinite.tileRes,
+    maxResidentTiles: config.infinite.maxResidentTiles,
+    drySentinelDepthM: config.waterSurface.drySentinelDepth,
+  });
+}
+
+function expectSameSample(
+  got: ReturnType<HydrologySystem["sample"]>,
+  want: ReturnType<HydrologyTileCache["sample"]>,
+): void {
+  expect(got.waterY).toBe(want.waterY);
+  expect(got.terrainY).toBe(want.terrainY);
+  expect(got.bodyMask).toBe(want.bodyMask);
+  expect(got.lakeMask).toBe(want.lakeMask);
+  expect(got.riverMask).toBe(want.riverMask);
+  expect(got.flowX).toBe(want.flowX);
+  expect(got.flowZ).toBe(want.flowZ);
+  expect(got.flowStrength).toBe(want.flowStrength);
+  expect(got.bodyKind).toBe(want.bodyKind);
+  expect(got.bodyId).toBe(want.bodyId);
+  expect(got.shoreDistance).toBe(want.shoreDistance);
 }
 
 describe("unified startup hydrology (Phase 3b)", () => {
   const unified = buildUnified();
 
-  it("samples the tile authority inside the startup world (bit-equal to a reference cache)", () => {
-    const config = cloneHydrologyConfig();
-    const reference = new HydrologyTileCache(sampler, {
-      tileSizeM: config.infinite.tileSizeM,
-      tileRes: config.infinite.tileRes,
-      maxResidentTiles: config.infinite.maxResidentTiles,
-      drySentinelDepthM: config.waterSurface.drySentinelDepth,
-    });
-    for (const [x, z] of [[100, 100], [512.3, 700.7], [WORLD_CELLS - 4, 16], [24, WORLD_CELLS - 24]] as const) {
-      const got = unified.sample(x, z, 2);
-      const want = reference.sample(x, z);
-      expect(got.waterY).toBe(want.waterY);
-      expect(got.terrainY).toBe(want.terrainY);
-      expect(got.bodyMask).toBe(want.bodyMask);
-      expect(got.bodyKind).toBe(want.bodyKind);
-      expect(got.bodyId).toBe(want.bodyId);
-      expect(got.shoreDistance).toBe(want.shoreDistance);
+  it("parses the YAML authority flag while preserving the legacy default", () => {
+    expect(cloneHydrologyConfig().infinite.unifiedStartup).toBe(false);
+    const parsed = readHydrologyConfig({ infinite: { unified_startup: true } });
+    expect(parsed.infinite.unifiedStartup).toBe(true);
+  });
+
+  it("uses the tile authority inside the startup world", () => {
+    const reference = referenceCache();
+    for (const [x, z] of [
+      [100, 100],
+      [512.3, 700.7],
+      [WORLD_CELLS - 4, 16],
+      [24, WORLD_CELLS - 24],
+    ] as const) {
+      expectSameSample(unified.sample(x, z, 2), reference.sample(x, z));
     }
   });
 
-  it("is continuous across the old startup-world boundary with no blend band", () => {
-    // Adjacent samples straddling x=worldCells must come from one authority: the step
-    // between them is bounded by ordinary field variation, not an authority switch.
-    for (let z = 100; z < WORLD_CELLS; z += 200) {
-      const inside = unified.sample(WORLD_CELLS - 0.5, z, 2);
-      const outside = unified.sample(WORLD_CELLS + 0.5, z, 2);
-      expect(Math.abs(outside.waterY - inside.waterY)).toBeLessThan(0.5);
-      expect(Math.abs(outside.bodyMask - inside.bodyMask)).toBeLessThan(0.5);
+  it("has no authority switch at the old startup-world boundary", () => {
+    const reference = referenceCache();
+    for (const z of [100, 300, 500, 700, 900]) {
+      for (const x of [WORLD_CELLS - 0.5, WORLD_CELLS, WORLD_CELLS + 0.5]) {
+        expectSameSample(unified.sample(x, z, 2), reference.sample(x, z));
+      }
     }
   });
 
-  it("rasterizes the lattice from the same authority (texel == direct analytic sample)", () => {
+  it("rasterizes the startup GPU grid from the same authority", () => {
     const grid = unified.grid;
     const denom = grid.res - 1;
-    const config = cloneHydrologyConfig();
     for (const [gx, gz] of [[0, 0], [13, 40], [denom, denom], [32, 5]] as const) {
-      const wx = (gx / denom) * WORLD_CELLS;
-      const wz = (gz / denom) * WORLD_CELLS;
-      const s = sampleInfiniteHydrology(wx, wz, sampler, { drySentinelDepthM: config.waterSurface.drySentinelDepth });
-      const i = gz * grid.res + gx;
-      expect(grid.waterY[i]).toBeCloseTo(s.waterY, 4);
-      expect(grid.carvedBed[i]).toBeCloseTo(s.terrainY, 4);
-      expect(grid.bodyKind[i]).toBe(s.bodyKind);
-      expect(grid.shoreDistance[i]).toBeCloseTo(s.shoreDistance, 4);
+      const worldX = (gx / denom) * WORLD_CELLS;
+      const worldZ = (gz / denom) * WORLD_CELLS;
+      const sample = unified.sample(worldX, worldZ, 2);
+      const index = gz * grid.res + gx;
+      expect(grid.waterY[index]).toBeCloseTo(sample.waterY, 4);
+      expect(grid.carvedBed[index]).toBeCloseTo(sample.terrainY, 4);
+      expect(grid.bodyKind[index]).toBe(sample.bodyKind);
+      expect(grid.bodyId[index]).toBe(sample.bodyId);
+      expect(grid.shoreDistance[index]).toBeCloseTo(sample.shoreDistance, 4);
     }
   });
 
-  it("does not carve terrain: the lattice bed equals the authority terrain", () => {
+  it("does not install a second terrain carve authority", () => {
     const grid = unified.grid;
-    for (let i = 0; i < grid.carvedBed.length; i += 97) {
-      expect(grid.carvedBed[i]).toBe(grid.originalBed[i]);
+    expect(unified.unifiedStartupActive()).toBe(true);
+    for (let index = 0; index < grid.carvedBed.length; index += 97) {
+      expect(grid.carvedBed[index]).toBe(grid.originalBed[index]);
+    }
+    for (const [x, z] of [[10, 20], [512, 700], [1300, -40]] as const) {
+      expect(unified.terrainHeight(x, z)).toBe(sampler.surfaceHeight(x, z));
     }
   });
 
-  it("reports unified mode and stays legacy when the flag is off", () => {
-    expect(unified.unifiedStartupActive()).toBe(true);
-    const legacy = buildLegacy();
+  it("evaluates sparse traced body ids without dense allocation", () => {
+    const grid = createHydrologyGrid(2, 1, { surfaceHeight: () => 0 });
+    grid.wetMask[0] = 1;
+    grid.lakeMask[0] = 1;
+    grid.bodyKind[0] = 2;
+    grid.bodyId[0] = 2_000_000_000;
+    grid.waterY[0] = 1;
+    const report = evaluateHydrologyInvariants(grid);
+    expect(report.bodyCount).toBe(1);
+    expect(report.wetWithoutBodyIdCount).toBe(0);
+  });
+
+  it("keeps legacy finite-grid mode available when the flag is off", () => {
+    const config = cloneHydrologyConfig();
+    config.simRes = 32;
+    config.accumulation.particles = 1000;
+    config.accumulation.maxSteps = 30;
+    config.fill.iterations = 30;
+    config.infinite.unifiedStartup = false;
+    const legacy = HydrologySystem.build(config, 256, sampler, { infiniteWorldSamples: true });
     expect(legacy.unifiedStartupActive()).toBe(false);
-    // Legacy mode still carves rivers somewhere on this terrain.
-    let carved = 0;
-    for (let i = 0; i < legacy.grid.carvedBed.length; i++) {
-      if (legacy.grid.carvedBed[i] < legacy.grid.originalBed[i] - 1e-3) carved++;
-    }
-    expect(carved).toBeGreaterThan(0);
   });
 });

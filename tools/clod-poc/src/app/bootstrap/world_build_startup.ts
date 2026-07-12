@@ -435,30 +435,42 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const voxelSnapshot = importedVoxelSnapshot(stagedImport);
   replaceVoxelEdits(voxelSnapshot);
 
+  const unifiedHydrologyRequested = isInfiniteIslands
+    && waterConfig.enabled
+    && waterConfig.source === "hydrology"
+    && waterConfig.hydrology.enabled
+    && waterConfig.hydrology.infinite.unifiedStartup;
   const hydrologySystem = measure(startupTimings, "startup.hydrology_ms", () => {
-    const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
+    const baseTerrainSampler = { surfaceHeight: baseSurfaceHeight };
+    const preHydrologyTerrain = unifiedHydrologyRequested
+      ? baseTerrainSampler
+      : makeFakeBodyCarvedSampler(waterConfig, baseTerrainSampler);
     const system = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
-      ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
+      ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain, {
+          infiniteWorldSamples: isInfiniteIslands,
+        })
       : null;
-    if (system) {
-      // The hydrology carved bed is a finite grid that edge-clamps outside
-      // [0, worldCells]. Outside the startup world, fall back to the base field so
-      // the main-thread live path (spawn, live bubble, grass, colliders) matches
-      // the worker's streamed-root builds (installHydrologyTerrain boundedToStartupWorld).
+    if (system?.unifiedStartupActive()) {
+      // Water is now a raster/view of the traced authority. Terrain remains the procedural
+      // field on main and worker paths, so there is no startup-grid carve to serialize.
+      setTerrainSurfaceOverride(null);
+    } else if (system) {
       const hydroCells = system.grid.worldCells;
       setTerrainSurfaceOverride((x, z) =>
         (x < 0 || z < 0 || x > hydroCells || z > hydroCells)
           ? baseSurfaceHeight(x, z)
           : system.terrainHeight(x, z));
-      console.log("[water] hydrology built", system.stats);
     } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
       setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
     } else {
       setTerrainSurfaceOverride(null);
     }
+    if (system) console.log("[water] hydrology built", system.stats);
     return system;
   });
-  const hydrologyTerrain = hydrologySystem
+  const unifiedHydrology = hydrologySystem?.unifiedStartupActive() === true;
+  startupTimings["startup.hydrology_unified_startup"] = unifiedHydrology ? 1 : 0;
+  const hydrologyTerrain = hydrologySystem && !unifiedHydrology
     ? {
         res: hydrologySystem.grid.res,
         worldCells: hydrologySystem.grid.worldCells,
@@ -487,7 +499,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       enabled: waterConfig.enabled,
       source: waterConfig.source,
       fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
-      hydrology: { enabled: waterConfig.hydrology.enabled },
+      hydrology: { enabled: waterConfig.hydrology.enabled, unifiedStartup: unifiedHydrology },
     },
     proceduralTextureEnabled: proceduralTextureConfig.enabled,
     stagedImportHash,

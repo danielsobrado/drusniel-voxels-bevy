@@ -23,7 +23,7 @@ const baseTerrainSource = (): TerrainSourceInputs => ({
     enabled: false,
     source: "fake_bodies",
     fakeBodies: { carveTerrain: false },
-    hydrology: { enabled: false },
+    hydrology: { enabled: false, unifiedStartup: false },
   },
   proceduralTextureEnabled: false,
   proceduralTextureHash: null,
@@ -52,6 +52,19 @@ describe("terrain source hash", () => {
       borderCoastOceanConfig: {
         ...input.borderCoastOceanConfig,
         coast: { ...input.borderCoastOceanConfig.coast, oceanStartCells: 999 },
+      },
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it("changes when hydrology startup authority changes", async () => {
+    const input = baseTerrainSource();
+    const a = await computeTerrainSourceHash(input);
+    const b = await computeTerrainSourceHash({
+      ...input,
+      waterConfig: {
+        ...input.waterConfig,
+        hydrology: { enabled: true, unifiedStartup: true },
       },
     });
     expect(a).not.toBe(b);

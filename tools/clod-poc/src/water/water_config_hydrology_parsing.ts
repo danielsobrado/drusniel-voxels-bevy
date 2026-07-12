@@ -74,6 +74,7 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
       tileSizeM: Math.max(16, readNumber(infinite.tile_size_m ?? infinite.tileSizeM, fallback.infinite.tileSizeM)),
       tileRes: Math.max(4, Math.floor(readNumber(infinite.tile_res ?? infinite.tileRes, fallback.infinite.tileRes))),
       maxResidentTiles: Math.max(0, Math.floor(readNumber(infinite.max_resident_tiles ?? infinite.maxResidentTiles, fallback.infinite.maxResidentTiles))),
+      unifiedStartup: readBoolean(infinite.unified_startup ?? infinite.unifiedStartup, fallback.infinite.unifiedStartup),
       boundaryBlendM: Math.max(0, readNumber(infinite.boundary_blend_m ?? infinite.boundaryBlendM, fallback.infinite.boundaryBlendM)),
       atlasTilesPerSide: Math.max(0, Math.floor(readNumber(infinite.atlas_tiles_per_side ?? infinite.atlasTilesPerSide, fallback.infinite.atlasTilesPerSide))),
       unifiedStartup: readBoolean(infinite.unified_startup ?? infinite.unifiedStartup, fallback.infinite.unifiedStartup),

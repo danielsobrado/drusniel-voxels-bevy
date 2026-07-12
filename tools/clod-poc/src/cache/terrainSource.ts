@@ -12,7 +12,9 @@ const textEncoder = new TextEncoder();
 // collapsed sea-level sheet. Bump invalidates any pages cached under the old finite coast.
 // v3: vertex weld now merges across quantization buckets within epsilon (fixes internal-seam
 // weld misses on streamed roots at large world coordinates); welded geometry can differ.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v3";
+// v4: unified startup hydrology removes the serialized finite carve from terrain geometry;
+// cache identity must distinguish that authority from the legacy carved-grid source.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v4";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -91,7 +93,7 @@ export interface TerrainSourceInputs {
   borderCoastOceanConfig: BorderCoastOceanConfig;
   waterConfig: Pick<WaterConfig, "enabled" | "source"> & {
     fakeBodies: { carveTerrain: boolean };
-    hydrology: { enabled: boolean };
+    hydrology: { enabled: boolean; unifiedStartup: boolean };
   };
   proceduralTextureEnabled: boolean;
   proceduralTextureHash: string | null;
@@ -123,7 +125,10 @@ export function normalizeTerrainSourceInputs(
       enabled: input.waterConfig?.enabled ?? false,
       source: input.waterConfig?.source ?? "fake_bodies",
       fakeBodies: { carveTerrain: input.waterConfig?.fakeBodies?.carveTerrain ?? false },
-      hydrology: { enabled: input.waterConfig?.hydrology?.enabled ?? false },
+      hydrology: {
+        enabled: input.waterConfig?.hydrology?.enabled ?? false,
+        unifiedStartup: input.waterConfig?.hydrology?.unifiedStartup ?? false,
+      },
     },
     proceduralTextureEnabled: input.proceduralTextureEnabled ?? false,
     proceduralTextureHash: input.proceduralTextureHash ?? null,
@@ -177,6 +182,7 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
       source: source.waterConfig.source,
       carveTerrain: source.waterConfig.fakeBodies.carveTerrain,
       hydrologyEnabled: source.waterConfig.hydrology.enabled,
+      unifiedStartup: source.waterConfig.hydrology.unifiedStartup,
     },
     proceduralTextureEnabled: source.proceduralTextureEnabled,
     proceduralTextureHash: source.proceduralTextureHash,
