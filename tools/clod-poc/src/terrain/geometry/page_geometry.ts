@@ -97,9 +97,10 @@ export function primePageAttributesBudgeted(mesh: MeshLike, deadlineMs: number):
     attributePrimeStates.set(mesh, state);
   }
   const vertexCount = mesh.positions.length / 3;
-  // Deadline checks per vertex would dominate the loop; a stride of 2048 vertices keeps
-  // overshoot below ~1ms while amortising the clock reads.
-  const CHECK_STRIDE = 2048;
+  // Paint + biome sampling is expensive enough that a 2,048-vertex stride can overshoot a
+  // 1 ms frame budget by several milliseconds. A 256-vertex stride keeps the deadline real
+  // while still amortising clock reads across substantial work.
+  const CHECK_STRIDE = 256;
   while (state.cursor < vertexCount) {
     const sliceEnd = Math.min(vertexCount, state.cursor + CHECK_STRIDE);
     for (let i = state.cursor; i < sliceEnd; i++) {

@@ -42,9 +42,11 @@ export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
   shaderDisplacement: true,
   sourceRefreshMaxPerFrame: 1,
   // Per-ring floor between stable-ring source refreshes (revision-driven included).
-  // Far content sits 384m+ out; refreshing each ring at most ~3x/second is imperceptible
-  // and keeps the CPU resample (~1-2ms per ring texture) off most frames.
-  sourceRefreshIntervalFrames: 20,
+  // Far content sits 384m+ out. Five rings refreshed every 60 frames put the CPU texture
+  // resample in more than 5% of frames, making it a direct p95 cost. Stable rings refresh
+  // every 120 frames; snap changes still refresh immediately, so traversal never moves a
+  // stale texture window and the previous GPU texture remains visible between updates.
+  sourceRefreshIntervalFrames: 120,
 });
 
 const DEBUG_MODES: ReadonlySet<string> = new Set<FarClipmapDebugMode>([

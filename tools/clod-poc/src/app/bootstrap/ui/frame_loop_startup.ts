@@ -315,12 +315,11 @@ export function runFrameLoopStartup(
   // The library defaults (1 build / 1 apply per frame, 128 cached pages) starve interactive
   // infinite-islands runs: pages appear at the horizon faster than one worker round-trip per page.
   const streamBudgetProfile = longView.queryScene === INFINITE_ISLANDS_SCENE;
-  const viewPrewarmQueue: ClodPageNode[] = [];
-  // Creating one L1 root view (material + geometry) can cost ~20ms, so the drain is
-  // time-budgeted: always at least one node per frame (forward progress), stop after
-  // the deadline. Remaining nodes wait; a node still unwarmed at root-switch time just
-  // falls back to switch-frame creation.
-  const VIEW_PREWARM_BUDGET_MS = 3;
+  // Creating one L1 root view (material + geometry) can cost tens of milliseconds. Keep
+  // streamed pages in the controller's ready queue until their attributes and render view
+  // are resident; the previous roots remain visible instead of paying that cost in the
+  // root-switch selection pass.
+  const VIEW_PREWARM_BUDGET_MS = 1;
   // ?viewPrewarmCompile=0 disables the compileAsync half of pre-warming for A/B
   // attribution. The frozen-build pair fable90-b2-compile-on/off measured OFF as
   // uniformly worse (moving fps p5 21.9 -> 13.3, p95 45.8 -> 75.5), so ON is the default:
@@ -390,37 +389,30 @@ export function runFrameLoopStartup(
     view.mesh.frustumCulled = true;
     if (!view.selected && view.target === 0 && view.fade <= 0.001) view.mesh.visible = false;
   };
-  const drainViewPrewarmQueue = (): void => {
+  let preparedStreamViewThisFrame = false;
+  const beginStreamViewPreparationFrame = (): void => {
+    preparedStreamViewThisFrame = false;
     restoreWarmDraw();
-    if (viewPrewarmQueue.length === 0) {
-      input.terrainView.materialController.ensureRecycleReserve(MATERIAL_RESERVE_TARGET);
-      return;
-    }
+  };
+  const prepareStreamNodeForApply = (node: ClodPageNode, deadline: number): boolean => {
     const cache = input.terrainView.renderNodeCache;
-    // Same frame-id domain as markActive/prune, so pre-warmed views age correctly in the LRU.
-    const frameId = selectionController.stats().frameId;
-    const deadline = performance.now() + VIEW_PREWARM_BUDGET_MS;
-    let created = 0;
-    while (viewPrewarmQueue.length > 0 && created < clodRuntime.renderNodeCache.maxPrefetchCreatesPerFrame) {
-      const node = viewPrewarmQueue[0]!;
-      // Paint/biome attributes are real per-vertex work (34-68ms synchronously for a big
-      // page); prime them a slice at a time so view creation below finds warm caches.
-      if (!primePageAttributesBudgeted(node.mesh, deadline)) break;
-      viewPrewarmQueue.shift();
-      cache.prefetch([node], frameId);
-      created++;
-      const view = cache.get(node.id);
-      if (view) {
-        precompileViewPipelines(view.mesh);
-        if (viewWarmDrawEnabled && warmDrawView === null && !view.selected) {
-          view.mesh.visible = true;
-          view.mesh.frustumCulled = false;
-          (view.mesh.geometry as THREE.BufferGeometry).setDrawRange(0, 3);
-          warmDrawView = view;
-        }
-      }
-      if (performance.now() >= deadline) break;
+    if (cache.has(node.id)) return true;
+    if (!primePageAttributesBudgeted(node.mesh, deadline)) return false;
+    cache.prefetch([node], selectionController.stats().frameId);
+    const view = cache.get(node.id);
+    if (!view) return false;
+    preparedStreamViewThisFrame = true;
+    precompileViewPipelines(view.mesh);
+    if (viewWarmDrawEnabled && warmDrawView === null && !view.selected) {
+      view.mesh.visible = true;
+      view.mesh.frustumCulled = false;
+      (view.mesh.geometry as THREE.BufferGeometry).setDrawRange(0, 3);
+      warmDrawView = view;
     }
+    return true;
+  };
+  const finishStreamViewPreparationFrame = (): void => {
+    if (!preparedStreamViewThisFrame) input.terrainView.materialController.ensureRecycleReserve(MATERIAL_RESERVE_TARGET);
   };
   const streamingClodRootController = createStreamingClodRootController({
     roots: input.result.roots,
@@ -440,14 +432,10 @@ export function runFrameLoopStartup(
       maxExtraRoots: nonNegativeIntegerParam(searchParams, "liveClodRootTransitionMaxExtraRoots") ?? DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS,
     },
     buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
+    prepareNodeForApply: prepareStreamNodeForApply,
+    prepareNodeBudgetMs: VIEW_PREWARM_BUDGET_MS,
     onNodesBuilt: (nodes) => {
       selectionController.patchNodes(nodes);
-      // Queue freshly applied stream pages for render-view pre-warm. A root switch
-      // swaps a whole page set into the rendered cut at once; materializing all their
-      // views (material + geometry) in that one selection pass is a 100ms-class spike.
-      // Pages sit cached for several frames before the switch stabilizes, so their
-      // views are created here a few per frame and the switch finds them resident.
-      for (const node of nodes) viewPrewarmQueue.push(node);
     },
     onRootsChanged: () => selectionController.invalidate(),
   });
@@ -460,6 +448,7 @@ export function runFrameLoopStartup(
   let lastStreamCenterZ = Number.NaN;
   const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
   const updateSelectionWithStreaming = () => {
+    beginStreamViewPreparationFrame();
     const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
     const previousStats = streamingClodRootController.stats();
     const dx = center.x - lastStreamCenterX;
@@ -473,7 +462,7 @@ export function runFrameLoopStartup(
     }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
     maybeWarmScenePipelines();
-    drainViewPrewarmQueue();
+    finishStreamViewPreparationFrame();
     updateSelection();
   };
 

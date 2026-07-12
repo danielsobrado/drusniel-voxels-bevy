@@ -135,7 +135,7 @@ export const DEFAULT_FOREST_LIGHTING_SETTINGS: ForestLightingSettings = {
     resolution: 128,
     updateDistanceM: 8,
     maxUpdatePagesPerFrame: 2,
-    maxBuildMsPerFrame: 2.0,
+    maxBuildMsPerFrame: 0.75,
     blurRadiusCells: 2,
     canopyInfluenceRadiusM: 7.5,
     understoryInfluenceRadiusM: 2.5,

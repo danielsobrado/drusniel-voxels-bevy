@@ -7,7 +7,7 @@ forest_lighting:
     update_distance_m: 8
     max_update_pages_per_frame: 2
     # Per-frame CPU budget for the amortized rebuild (tree proxy scan + field build).
-    max_build_ms_per_frame: 2.0
+    max_build_ms_per_frame: 0.75
     blur_radius_cells: 2
     canopy_influence_radius_m: 7.5
     understory_influence_radius_m: 2.5

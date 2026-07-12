@@ -24,7 +24,8 @@ import { parsePageKey } from "../stream/page_plan.js";
 
 const PHASE0_P95_WINDOW = 120;
 const PERF_DIAGNOSTICS_CAMERA_EPSILON_M = 1;
-const HEAVY_DIAGNOSTICS_MIN_INTERVAL_MS = 250;
+const HEAVY_DIAGNOSTICS_MIN_INTERVAL_MS = 1_000;
+const HEAVY_DIAGNOSTICS_SOFT_FRAME_DEADLINE_MS = 8;
 
 export interface LongViewFrameDiagnosticsDeps {
   getHooks: () => ClodHooks | null;
@@ -360,6 +361,10 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       return;
     }
     const nowMs = performance.now();
+    if (!perFrameHeavyDiagnostics && nowMs - deps.getFrameStartMs() >= HEAVY_DIAGNOSTICS_SOFT_FRAME_DEADLINE_MS) {
+      s.counters["long_view_diagnostics_budget_deferred_frames"] = (s.counters["long_view_diagnostics_budget_deferred_frames"] ?? 0) + 1;
+      return;
+    }
     if (!perFrameHeavyDiagnostics && nowMs - lastHeavyDiagnosticsMs < HEAVY_DIAGNOSTICS_MIN_INTERVAL_MS) {
       s.counters["long_view_diagnostics_throttled_frames"] = (s.counters["long_view_diagnostics_throttled_frames"] ?? 0) + 1;
       return;

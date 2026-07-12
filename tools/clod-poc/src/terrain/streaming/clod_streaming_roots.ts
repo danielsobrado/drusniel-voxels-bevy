@@ -115,6 +115,13 @@ export interface StreamingClodRootControllerDeps {
   rootSwitchStableFrames?: number;
   rootTransition?: Partial<StreamingClodRootTransitionOptions>;
   buildPages: ((coords: readonly PageCoord[]) => Promise<StreamingClodRootBuildResult>) | null;
+  /**
+   * Optional sliced preparation gate run before a page becomes activation-eligible.
+   * Returning false keeps the page in the ready queue so the currently rendered roots
+   * remain visible until the replacement view is resident.
+   */
+  prepareNodeForApply?: (node: ClodPageNode, deadlineMs: number) => boolean;
+  prepareNodeBudgetMs?: number;
   onNodesBuilt?: (nodes: readonly ClodPageNode[]) => void;
   onRootsChanged?: () => void;
 }
@@ -955,10 +962,12 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     if (applyBudget <= 0 || ready.length === 0) return { applied: 0, applyMs: 0, staleDiscards };
     const appliedNodes: ClodPageNode[] = [];
     const startedAt = performance.now();
+    const prepareDeadlineMs = startedAt + Math.max(0, deps.prepareNodeBudgetMs ?? 0);
     while (ready.length > 0 && appliedNodes.length < applyBudget) {
-      const entry = ready.shift()!;
+      const entry = ready[0]!;
       const node = entry.node;
       if (!buildStillWanted(node.id)) {
+        ready.shift();
         const { centerX, centerZ } = pageCenter(node);
         if (cacheHorizonContains(centerX, centerZ, center, radiusM)) {
           cacheNode(node, false);
@@ -969,6 +978,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         }
         continue;
       }
+      if (deps.prepareNodeForApply && !deps.prepareNodeForApply(node, prepareDeadlineMs)) break;
+      ready.shift();
       cacheNode(node, true);
       appliedNodes.push(node);
       incrementLevel(appliedPagesByLevel, node.level);

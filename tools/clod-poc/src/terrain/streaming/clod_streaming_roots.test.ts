@@ -502,6 +502,38 @@ describe("createStreamingClodRootController", () => {
     expect(secondApply.applyPagesThisFrame).toBe(1);
   });
 
+  it("keeps a page queued until its render preparation is complete", async () => {
+    let prepared = false;
+    const onNodesBuilt = vi.fn();
+    const prepareNodeForApply = vi.fn((_node: ClodPageNode, deadlineMs: number) => {
+      expect(Number.isFinite(deadlineMs)).toBe(true);
+      return prepared;
+    });
+    const { controller, roots, buildPages, requests } = makeController({
+      prepareNodeForApply,
+      prepareNodeBudgetMs: 3,
+      onNodesBuilt,
+    });
+    const center = new THREE.Vector3(192, 0, 0);
+    controller.update(center, 40);
+    const coords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    resolveRequest(requests[0]!, coords);
+    await flushAsync();
+
+    const deferredApply = controller.update(center, 40);
+    expect(deferredApply.applyPagesThisFrame).toBe(0);
+    expect(deferredApply.applyQueuePages).toBe(1);
+    expect(roots).toHaveLength(0);
+    expect(onNodesBuilt).not.toHaveBeenCalled();
+
+    prepared = true;
+    const completedApply = controller.update(center, 40);
+    expect(completedApply.applyPagesThisFrame).toBe(1);
+    expect(completedApply.applyQueuePages).toBe(0);
+    expect(roots).toHaveLength(1);
+    expect(onNodesBuilt).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps resident ready roots nonzero after the apply queue drains", async () => {
     const { controller, roots, buildPages, requests } = makeController();
     controller.update(new THREE.Vector3(192, 0, 0), 40);
