@@ -87,13 +87,14 @@ function attachWorldManifest(diagnostics: GpuDiagnostics | null, manifest: World
 
 function manifestOnlyDiagnostics(manifest: WorldManifest | undefined): GpuDiagnostics | null {
   if (!manifest) return null;
-  return {
+  const diagnostics: GpuDiagnostics = {
     ok: true,
     reason: "world manifest initialized",
     features: [],
     limits: {},
-    worldManifest: manifest,
   };
+  attachWorldManifest(diagnostics, manifest);
+  return diagnostics;
 }
 
 export function publishWorldManifestForDiagnostics(manifest: WorldManifest): void {
