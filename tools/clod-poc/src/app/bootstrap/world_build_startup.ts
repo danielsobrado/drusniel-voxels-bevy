@@ -19,6 +19,7 @@ import { setTerrainFieldCoreConfig } from "../../gpu/terrain_field_core.js";
 import {
   buildStartupHeightfieldRaster,
   makeStartupHeightfieldSampler,
+  planStartupHeightfieldRaster,
   startupHeightfieldDescriptor,
 } from "../../terrain/startup_heightfield_raster.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
@@ -119,6 +120,12 @@ function booleanParam(searchParams: URLSearchParams, keys: readonly string[], fa
 }
 
 const DEFAULT_INFINITE_BOOTSTRAP_WORLD_PAGES = 2;
+const HEIGHTFIELD_RASTER_REASON_CODES = {
+  enabled: 0,
+  invalid_world_cells: 1,
+  sample_budget: 2,
+  byte_budget: 3,
+} as const;
 
 type StartupTimings = Record<string, number>;
 
@@ -476,15 +483,15 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const unifiedHydrology = hydrologySystem?.unifiedStartupActive() === true;
   startupTimings["startup.hydrology_unified_startup"] = unifiedHydrology ? 1 : 0;
 
-  // Unified mode has no carved-grid override, so without a cache every mesher/worker/live
-  // sample would evaluate the full procedural field. Rasterize the field once at exact cell
-  // resolution and install it as the shared build-time sampler (main thread + clod worker).
-  // Geometry authority stays the procedural field: lattice samples are exact, so vertex
-  // positions are unchanged; the raster descriptor rides the terrain-source cache key.
   const heightfieldRasterRequested = unifiedHydrology
-    && worldCells <= 4096
     && booleanParam(searchParams, ["heightfieldRaster", "heightfield_raster"], true);
-  const startupHeightfield = heightfieldRasterRequested
+  const heightfieldRasterPlan = planStartupHeightfieldRaster(worldCells);
+  startupTimings["startup.heightfield_raster_requested"] = heightfieldRasterRequested ? 1 : 0;
+  startupTimings["startup.heightfield_raster_budget_enabled"] = heightfieldRasterPlan.enabled ? 1 : 0;
+  startupTimings["startup.heightfield_raster_budget_reason_code"] = HEIGHTFIELD_RASTER_REASON_CODES[heightfieldRasterPlan.reason];
+  startupTimings["startup.heightfield_raster_samples"] = heightfieldRasterPlan.sampleCount;
+  startupTimings["startup.heightfield_raster_bytes"] = heightfieldRasterPlan.byteLength;
+  const startupHeightfield = heightfieldRasterRequested && heightfieldRasterPlan.enabled
     ? measure(startupTimings, "startup.heightfield_raster_ms", () => buildStartupHeightfieldRaster(worldCells))
     : null;
   if (startupHeightfield) {

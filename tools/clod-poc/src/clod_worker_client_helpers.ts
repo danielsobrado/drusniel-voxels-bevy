@@ -3,6 +3,38 @@ import { MAX_DIG_EDITS_PER_WORKER_BATCH } from "./clod_worker_client_types.js";
 import type { ClodWorkerRequest, SerializedClodNode, SerializedParentBatch } from "./clod_worker_protocol.js";
 import { applySerializedNode } from "./clod_worker_protocol.js";
 import type { PendingRequest, DigBatchSlot, NodeTarget, WorkerParentBatch } from "./clod_worker_client_types.js";
+import { cloneStartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
+
+function startupTimings(): Record<string, number> | null {
+  const root = globalThis as typeof globalThis & {
+    window?: { __drusnielStartupTimings?: Record<string, number> };
+    __drusnielStartupTimings?: Record<string, number>;
+  };
+  return root.window?.__drusnielStartupTimings ?? root.__drusnielStartupTimings ?? null;
+}
+
+function postBuildRequest(worker: Worker, request: Extract<ClodWorkerRequest, { type: "build" }>): void {
+  const raster = request.startupHeightfield;
+  if (!raster) {
+    worker.postMessage(request);
+    return;
+  }
+
+  const cloneStartedAt = performance.now();
+  const workerRaster = cloneStartupHeightfieldRaster(raster);
+  const cloneMs = performance.now() - cloneStartedAt;
+  const outbound: typeof request = { ...request, startupHeightfield: workerRaster };
+  const transferStartedAt = performance.now();
+  worker.postMessage(outbound, [workerRaster.heights.buffer as ArrayBuffer]);
+  const transferMs = performance.now() - transferStartedAt;
+
+  const timings = startupTimings();
+  if (!timings) return;
+  timings["startup.heightfield_raster_samples"] = raster.sampleCount;
+  timings["startup.heightfield_raster_bytes"] = raster.byteLength;
+  timings["startup.heightfield_raster_worker_clone_ms"] = cloneMs;
+  timings["startup.heightfield_raster_worker_transfer_ms"] = transferMs;
+}
 
 export function postTrackedRequest<T>(
   requests: Map<number, PendingRequest<T>>,
@@ -12,7 +44,8 @@ export function postTrackedRequest<T>(
   return new Promise((resolve, reject) => {
     requests.set(request.requestId, { resolve, reject });
     try {
-      worker.postMessage(request);
+      if (request.type === "build") postBuildRequest(worker, request);
+      else worker.postMessage(request);
     } catch (error) {
       requests.delete(request.requestId);
       reject(error);

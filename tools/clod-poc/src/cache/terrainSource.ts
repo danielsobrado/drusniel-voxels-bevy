@@ -15,12 +15,12 @@ const textEncoder = new TextEncoder();
 // weld misses on streamed roots at large world coordinates); welded geometry can differ.
 // v4: unified startup hydrology removes the serialized finite carve from terrain geometry;
 // cache identity must distinguish that authority from the legacy carved-grid source.
-// v5: unified-mode startup builds sample the terrain field through the exact-res startup
-// heightfield raster. Vertex positions stay bit-identical to direct procedural evaluation
-// (mesher corners are integer-lattice, where the raster is exact), but normals sampled at
-// fractional offsets go through bilinear reconstruction, so page bytes can differ. The
-// raster is derived from already-keyed inputs; identity carries its descriptor only.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v5";
+// v5: unified-mode startup builds sampled all coordinates through the exact-res startup
+// heightfield raster, so fractional normal/material queries used bilinear reconstruction.
+// v6: the startup raster is now integer-lattice-only. Fractional normal, prop, collider,
+// raycast, and CPU fallback samples use the direct procedural field, matching GPU streamed
+// roots and removing the raster-domain derivative seam. The descriptor includes the policy.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v6";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -96,7 +96,7 @@ export interface TerrainSourceInputs {
   generatorVersion: string;
   digRevision: number;
   hydrologyTerrain: SerializedHydrologyTerrain | null;
-  /** Descriptor of the exact-res startup heightfield raster; null when builds sample the field directly. */
+  /** Descriptor of the bounded integer-lattice startup cache; null when direct field sampling is used. */
   startupHeightfield?: StartupHeightfieldDescriptor | null;
   borderCoastOceanConfig: BorderCoastOceanConfig;
   waterConfig: Pick<WaterConfig, "enabled" | "source"> & {
