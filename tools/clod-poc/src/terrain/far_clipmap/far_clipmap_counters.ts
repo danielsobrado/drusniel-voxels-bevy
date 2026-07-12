@@ -2,6 +2,7 @@ import type { FarClipmapStats } from "./far_clipmap_controller.js";
 
 interface FallbackEpochState {
   baselineTotal: number | null;
+  lastLifetimeTotal: number;
 }
 
 const fallbackEpochByCounters = new WeakMap<Record<string, number>, FallbackEpochState>();
@@ -12,7 +13,7 @@ function fallbackSamplesSinceStreamReady(
 ): number {
   let state = fallbackEpochByCounters.get(counters);
   if (!state) {
-    state = { baselineTotal: null };
+    state = { baselineTotal: null, lastLifetimeTotal: stats.fallbackSamplesTotal };
     fallbackEpochByCounters.set(counters, state);
   }
 
@@ -22,14 +23,20 @@ function fallbackSamplesSinceStreamReady(
     && stats.sourceReady === 1
     && stats.pendingTiles === 0;
 
+  if (stats.fallbackSamplesTotal < state.lastLifetimeTotal) {
+    state.baselineTotal = null;
+  }
+
   if (!ready) {
     state.baselineTotal = null;
+    state.lastLifetimeTotal = stats.fallbackSamplesTotal;
     return 0;
   }
 
-  if (state.baselineTotal === null || stats.fallbackSamplesTotal < state.baselineTotal) {
-    state.baselineTotal = stats.fallbackSamplesTotal;
+  if (state.baselineTotal === null) {
+    state.baselineTotal = Math.min(state.lastLifetimeTotal, stats.fallbackSamplesTotal);
   }
+  state.lastLifetimeTotal = stats.fallbackSamplesTotal;
   return Math.max(0, stats.fallbackSamplesTotal - state.baselineTotal);
 }
 
