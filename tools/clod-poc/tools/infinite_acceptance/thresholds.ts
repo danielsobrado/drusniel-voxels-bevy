@@ -1,4 +1,5 @@
 export const REQUIRED_COUNTERS = [
+  "world_manifest_present",
   "frame_ms_p95",
   "frame_ms_p99",
   "frame_ms_avg",
@@ -259,6 +260,7 @@ const ORACLE_COUNTERS = new Set<RequiredCounter>([
 ]);
 
 export const THRESHOLD_RULES: ThresholdRule[] = [
+  { key: "world_manifest_present", label: "must equal 1", pass: (value) => value === 1 },
   { key: "frame_ms_p95", label: "must be finite, >= 0 and <= 8", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 8 },
   { key: "frame_ms_p99", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "stream_ready_frame", label: "must be finite and >= 0", pass: (value) => Number.isFinite(value) && value >= 0 },
