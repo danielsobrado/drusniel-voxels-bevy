@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { Browser } from "playwright";
-import { clodUrl, launchChromium } from "./launch.js";
+import type { BrowserContext } from "playwright";
+import { clodUrl, launchWebGPU } from "./launch.js";
 
 const DEFAULT_WORLD_PAGES = [4, 8, 16, 32] as const;
 const DEFAULT_TIMEOUT_MS = 360_000;
@@ -39,13 +39,13 @@ function outputPath(argv: readonly string[]): string {
 }
 
 async function runStartup(
-  browser: Browser,
+  context: BrowserContext,
   worldPages: number,
   cache: "0" | "1",
   label: string,
   timeout: number,
 ): Promise<RunResult> {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  const page = await context.newPage();
   const url = clodUrl({
     scene: "infinite-islands",
     seed: 1,
@@ -115,20 +115,25 @@ async function main(): Promise<void> {
   const worlds = parseWorldPages(argv);
   const timeout = timeoutMs(argv);
   const out = outputPath(argv);
-  const { browser, recipe } = await launchChromium();
+  const { browser, recipe } = await launchWebGPU();
   const runs: RunResult[] = [];
   try {
     for (const worldPages of worlds) {
-      console.log(`[heightfield-bench] world=${worldPages}: cold cache-disabled run`);
-      const cold = await runStartup(browser, worldPages, "0", "cold", timeout);
-      runs.push(cold);
+      const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+      try {
+        console.log(`[heightfield-bench] world=${worldPages}: cold cache-disabled run`);
+        const cold = await runStartup(context, worldPages, "0", "cold", timeout);
+        runs.push(cold);
 
-      console.log(`[heightfield-bench] world=${worldPages}: priming page cache`);
-      await runStartup(browser, worldPages, "1", "prime", timeout);
+        console.log(`[heightfield-bench] world=${worldPages}: priming page cache`);
+        await runStartup(context, worldPages, "1", "prime", timeout);
 
-      console.log(`[heightfield-bench] world=${worldPages}: warm cache run`);
-      const warm = await runStartup(browser, worldPages, "1", "warm", timeout);
-      runs.push(warm);
+        console.log(`[heightfield-bench] world=${worldPages}: warm cache run`);
+        const warm = await runStartup(context, worldPages, "1", "warm", timeout);
+        runs.push(warm);
+      } finally {
+        await context.close();
+      }
     }
   } finally {
     await browser.close();
