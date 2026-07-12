@@ -1,67 +1,120 @@
 # Startup-world heightfield raster cache
 
-Fixes the unified-startup cold `startup.build_world_ms` regression (~16.0 s vs ~6.7 s legacy
-at world=8) introduced by hydrology Phase 3b. Legacy mode installed the carved hydrology grid
-as the terrain surface override, so build-time `surfaceHeight` sampling was a bilinear array
-lookup; unified mode set the override to null and every sample evaluated the full procedural
-noise field.
+Fixes the unified-startup cold `startup.build_world_ms` regression introduced by hydrology Phase
+3b without creating a second terrain authority.
 
-## Design
+## Current design
 
-`src/terrain/startup_heightfield_raster.ts` rasterizes `baseSurfaceHeight` once over the
-startup world at **exact cell resolution** (one f64 sample per integer cell corner, padded two
-cells past the world bounds) and installs the bilinear sampler as the terrain surface override:
+`src/terrain/startup_heightfield_raster.ts` stores `baseSurfaceHeight` at exact integer cell
+corners, padded two cells past the startup-world bounds.
 
-- **Main thread**: installed in `world_build_startup.ts` where unified mode previously set the
-  override to null, so live-bubble chunks, colliders, and prop placement share the build-time
-  sampler.
-- **CLOD worker**: the raster rides the `build` request (`startupHeightfield`) and is installed
-  by `installWorkerTerrainOverride`, which prefers the raster over the legacy carved-grid path.
-  Streamed roots need no special bounding: the raster falls back to `baseSurfaceHeight`
-  outside its padded domain.
+The raster is an **integer-lattice cache only**:
 
-Gated to unified infinite-islands mode, `worldCells <= 4096`, and the `heightfieldRaster=0`
-query param disables it for A/B runs.
+- Integer `(x, z)` samples inside the padded domain return the stored f64 value.
+- Fractional samples use `baseSurfaceHeight` directly.
+- Samples outside the padded domain use `baseSurfaceHeight` directly.
+
+Surface Nets density corners are integer lattice reads, so startup CPU geometry keeps the cached
+fast path and remains bit-identical to direct procedural evaluation. Normals, prop placement,
+colliders, raycasts, and other fractional queries stay on the canonical procedural field.
+
+This policy also matches the live GPU streamed-root mesher. The GPU path continues to evaluate the
+procedural WGSL field directly; it does not upload or sample the startup raster. Because the CPU
+raster no longer reconstructs fractional samples bilinearly, the two paths share the same normal
+and derivative semantics. `startup_heightfield_gpu_parity.test.ts` locks the CPU sampler against
+the GPU-shaped TypeScript field core at and across the raster boundary for multiple seeds.
+
+## Runtime wiring
+
+- **Main thread**: `world_build_startup.ts` installs the sampler as the terrain surface override in
+  unified infinite-islands mode.
+- **CPU CLOD worker**: the raster rides the initial `build` request and is installed by
+  `installWorkerTerrainOverride`. CPU fallback streamed roots reuse it inside its bounded domain
+  and fall back to the procedural field outside.
+- **GPU CLOD streamed roots**: use the direct procedural WGSL field. They intentionally do not own
+  a raster resource.
+
+The main thread retains its raster. `clod_worker_client_helpers.ts` creates one explicit copy and
+transfers that copy's `ArrayBuffer` to the worker. This replaces the opaque structured-clone path
+and exposes copy and transfer timings.
+
+## Budget
+
+The default limit is 16 MiB or 2,097,152 f64 samples, whichever is reached first. Planning happens
+before allocation in `planStartupHeightfieldRaster`; over-budget rasters return `null` and the
+runtime uses direct procedural sampling.
+
+With the current 64-cell page span:
+
+| Startup pages | Approximate raster bytes | Default policy |
+| ---: | ---: | --- |
+| 4 | 0.51 MiB | enabled |
+| 8 | 2.04 MiB | enabled |
+| 16 | 8.08 MiB | enabled |
+| 32 | 32.16 MiB | disabled |
+
+`heightfieldRaster=0` still disables the optimization for A/B runs. The lower-level budget remains
+active even when the query flag requests the raster.
 
 ## Authority and fidelity
 
-The procedural terrain field remains the geometry authority; the raster is a regenerable cache
-of it, not a hydrology-carve side effect. The Surface Nets mesher reads corner densities only
-at integer lattice coordinates, where the raster returns the exact stored f64 sample, so
-**vertex positions are bit-identical** to direct procedural evaluation — unlike the legacy
-hydrology grid, whose coarser resolution effectively low-passed geometry.
+The procedural terrain field remains the geometry authority. The raster is a regenerable cache of
+already-keyed inputs, not a hydrology carve and not an independent terrain source.
 
-The remaining reconstruction difference is confined to fractional (x, z) samples: normal
-gradients (±0.5 offsets around vertex positions) and prop/collider/raycast queries see the
-bilinear reconstruction between exact lattice samples instead of the true field.
-`startup_heightfield_raster.test.ts` locks position bit-parity and bounds the normal
-divergence. Hydrology is unaffected: `HydrologySystem` binds `baseSurfaceHeight` directly, so
-tile parity between sync and worker hydrology tiles is untouched.
+Integer cache reads are exact. Fractional direct reads remove the previous bilinear normal drift,
+prop/collider/raycast height drift, and the derivative switch at the padded raster edge.
+
+Hydrology remains independent: `HydrologySystem` binds `baseSurfaceHeight` directly before the
+startup raster is installed, so sync and worker hydrology tile parity is unchanged.
 
 ## Cache identity
 
-`TERRAIN_SOURCE_VERSION` bumped to `world-modes-v5`. The raster is a pure function of inputs
-already in the key (terrain field config, seed, startup world size), so identity carries only
-its descriptor (`worldCells`, `minCell`, `res`) — never hashed contents — preserving the
-input-derived identity semantics established by `world-modes-v4`.
+`TERRAIN_SOURCE_VERSION` is `world-modes-v6`.
+
+The terrain-source key includes the raster descriptor:
+
+- `worldCells`
+- `minCell`
+- `res`
+- `sampleCount`
+- `byteLength`
+- `samplingMode: integer_lattice_only`
+
+Raster contents are not hashed because they are a pure function of the terrain field configuration,
+seed, and startup-world size already present in the key.
 
 ## Startup counters
 
-- `startup.heightfield_raster_enabled` (0/1)
-- `startup.heightfield_raster_ms` — raster build cost on the main thread
-- `startup.heightfield_raster_res` — samples per axis
+- `startup.heightfield_raster_enabled`
+- `startup.heightfield_raster_ms`
+- `startup.heightfield_raster_res`
+- `startup.heightfield_raster_samples`
+- `startup.heightfield_raster_bytes`
+- `startup.heightfield_raster_worker_clone_ms`
+- `startup.heightfield_raster_worker_transfer_ms`
 
-## Measured result (world=8, seed=1, cache=0, cold, shoot harness)
+## Original measured result
 
-`scene=infinite-islands`, stats in `shots/heightfield-raster/*-stats.json`:
+The first raster implementation measured the following at `world=8`, seed 1, cold cache:
 
 | Run | `startup.build_world_ms` | `startup.heightfield_raster_ms` | `startup.first_render_ready_ms` |
-| --- | --- | --- | --- |
-| baseline (pre-change) ×2 | 16072 / 15938 | — | 33029 / 31208 |
-| after (raster on) ×2 | **5266 / 5392** | 688 / 694 | 22349 / 22458 |
-| after + `heightfieldRaster=0` control | 17220 | — | 32713 |
+| --- | ---: | ---: | ---: |
+| baseline before raster, two runs | 16072 / 15938 | — | 33029 / 31208 |
+| first raster implementation, two runs | 5266 / 5392 | 688 / 694 | 22349 / 22458 |
+| raster disabled control | 17220 | — | 32713 |
 
-Cold world build is ~3× faster (−10.6 s); the toggle-off control reproduces the regression,
-confirming attribution. `startup.hydrology_ms` is unchanged (~450 ms) in all runs. Screenshot
-pixel diff baseline↔after is 0.39/255 mean (convergence-state noise; position bit-parity is
-locked by unit test).
+Those measurements predate the integer-only sampling and explicit worker-transfer follow-up.
+
+## Current benchmark procedure
+
+Start Vite, then run the browser harness:
+
+```powershell
+npm --prefix tools/clod-poc run dev
+npm --prefix tools/clod-poc run perf:heightfield-raster
+```
+
+The harness records cold cache-disabled and warm cache-enabled startup runs for startup worlds
+4, 8, 16, and 32. Results are written under `perf-runs/startup-heightfield-raster/` and include
+build time, raster time, budget enablement, bytes, samples, worker copy/transfer time, and cache hit.
+Use `--worlds=4,8` or `--timeout=600000` after `--` to narrow or extend a run.
