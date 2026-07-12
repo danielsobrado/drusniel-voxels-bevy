@@ -28,10 +28,6 @@ export function updateHeightfieldTileClientRuntime(
   activeRuntimes.get(client)?.update(input);
 }
 
-export function heightfieldTileClientRuntimeActive(client: ClodWorkerClient): boolean {
-  return activeRuntimes.has(client);
-}
-
 export function installHeightfieldTileClientRuntime(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
