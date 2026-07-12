@@ -1,5 +1,6 @@
 import heightfieldTileConfigText from "../../../config/heightfield_tiles.yaml?raw";
-import { setTerrainSurfaceOverride, type StartupHeightfieldRaster } from "../../terrain/terrain.js";
+import { setTerrainSurfaceOverride } from "../../terrain/terrain.js";
+import type { StartupHeightfieldRaster } from "../../terrain/startup_heightfield_raster.js";
 import {
   proceduralHeightfieldSampler,
   startupRasterHeightfieldSampler,
