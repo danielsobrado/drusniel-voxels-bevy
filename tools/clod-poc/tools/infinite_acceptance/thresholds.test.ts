@@ -12,6 +12,7 @@ import {
 function validCounters(overrides: Record<string, number> = {}): Record<string, number> {
   const counters = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
   Object.assign(counters, {
+    world_manifest_present: 1,
     frame_ms_p95: 7.9,
     frame_ms_p99: 9,
     target_visible_m: 4096,
@@ -92,6 +93,13 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
 describe("infinite islands thresholds", () => {
   it("passes a valid zero-hole sample", () => {
     expect(evaluateThresholds(validCounters()).passed).toBe(true);
+  });
+
+  it("requires a world manifest", () => {
+    expect(evaluateThresholds(validCounters({ world_manifest_present: 1 })).passed).toBe(true);
+    expect(evaluateThresholds(validCounters({ world_manifest_present: 0 })).failures).toContain(
+      "world_manifest_present=0 failed: must equal 1",
+    );
   });
 
   it("reports missing counters and threshold failures", () => {
@@ -230,6 +238,7 @@ describe("infinite islands thresholds", () => {
   it("extracts counters from stats.counters", () => {
     const counters = validCounters();
 
+    expect(extractAcceptanceCounters({ counters })["world_manifest_present"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_bubble_collider_registrations"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_cached_pages"]).toBe(1);
     expect(extractAcceptanceCounters({ counters })["live_clod_stream_worker_transfer_bytes"]).toBe(0);
