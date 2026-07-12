@@ -11,6 +11,7 @@ interface ActiveRuntime {
 
 interface ClientPrototype {
   buildWorld: ClodWorkerClient["buildWorld"];
+  buildHeightfieldTiles: ClodWorkerClient["buildHeightfieldTiles"];
   dispose: ClodWorkerClient["dispose"];
 }
 
@@ -61,7 +62,10 @@ export function installHeightfieldTileClientRuntime(): void {
   const originalBuildWorld = prototype.buildWorld;
   const originalDispose = prototype.dispose;
 
-  prototype.buildWorld = async function (...args) {
+  prototype.buildWorld = async function (
+    this: ClodWorkerClient,
+    ...args: Parameters<ClodWorkerClient["buildWorld"]>
+  ) {
     stopRuntime(this);
     const result = await originalBuildWorld.apply(this, args);
     const terrainSource = args[9];
@@ -85,7 +89,7 @@ export function installHeightfieldTileClientRuntime(): void {
     return result;
   };
 
-  prototype.dispose = function () {
+  prototype.dispose = function (this: ClodWorkerClient) {
     stopRuntime(this);
     originalDispose.call(this);
   };
