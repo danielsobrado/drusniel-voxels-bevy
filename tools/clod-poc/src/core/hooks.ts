@@ -1,3 +1,5 @@
+import type { WorldManifest } from "../world/world_manifest.js";
+
 export interface CamPose {
   p: [number, number, number];
   yaw: number;
@@ -30,6 +32,7 @@ export interface GpuDiagnostics {
   description?: string;
   features: string[];
   limits: Record<string, number>;
+  readonly worldManifest?: WorldManifest;
 }
 
 export interface ClodHooks {
@@ -64,6 +67,7 @@ declare global {
     __drusnielClod?: ClodHooks;
     __drusnielStartupTimings?: Record<string, number>;
     __drusnielWorldMode?: import("../app/world_mode.js").WorldModeConfig;
+    __drusnielWorldManifest?: WorldManifest;
     __drusnielFarOwnership?: import("../app/far_ownership.js").FarOwnershipSummary;
     __drusnielAcceptanceWorldCacheKey?: import("../cache/acceptanceWorldCacheKey.js").AcceptanceWorldCacheKey;
     __drusnielTerrainSummary?: import("../clod/terrain_summary.js").TerrainSummaryField;
@@ -71,12 +75,32 @@ declare global {
   }
 }
 
+function attachWorldManifest(diagnostics: GpuDiagnostics | null, manifest: WorldManifest | undefined): void {
+  if (!diagnostics || !manifest || diagnostics.worldManifest === manifest) return;
+  Object.defineProperty(diagnostics, "worldManifest", {
+    value: manifest,
+    enumerable: true,
+    configurable: true,
+    writable: false,
+  });
+}
+
+export function publishWorldManifestForDiagnostics(manifest: WorldManifest): void {
+  window.__drusnielWorldManifest = manifest;
+  attachWorldManifest(window.__drusnielClod?.diag ?? null, manifest);
+}
+
 export function initHooks(): ClodHooks {
+  let diagnostics: GpuDiagnostics | null = null;
   const hooks: ClodHooks = {
     ready: false,
     error: null,
     stats: null,
-    diag: null,
+    get diag() { return diagnostics; },
+    set diag(value) {
+      diagnostics = value;
+      attachWorldManifest(diagnostics, window.__drusnielWorldManifest);
+    },
     startupTimings: window.__drusnielStartupTimings ?? null,
     progress: 0,
     progressMsg: "boot",
