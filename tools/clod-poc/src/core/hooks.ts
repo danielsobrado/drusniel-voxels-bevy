@@ -85,13 +85,24 @@ function attachWorldManifest(diagnostics: GpuDiagnostics | null, manifest: World
   });
 }
 
+function manifestOnlyDiagnostics(manifest: WorldManifest | undefined): GpuDiagnostics | null {
+  if (!manifest) return null;
+  return {
+    ok: true,
+    reason: "world manifest initialized",
+    features: [],
+    limits: {},
+    worldManifest: manifest,
+  };
+}
+
 export function publishWorldManifestForDiagnostics(manifest: WorldManifest): void {
   window.__drusnielWorldManifest = manifest;
   attachWorldManifest(window.__drusnielClod?.diag ?? null, manifest);
 }
 
 export function initHooks(): ClodHooks {
-  let diagnostics: GpuDiagnostics | null = null;
+  let diagnostics: GpuDiagnostics | null = manifestOnlyDiagnostics(window.__drusnielWorldManifest);
   const hooks: ClodHooks = {
     ready: false,
     error: null,
