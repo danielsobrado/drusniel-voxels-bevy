@@ -18,10 +18,12 @@ import {
 import { setTerrainFieldCoreConfig } from "../../gpu/terrain_field_core.js";
 import {
   buildStartupHeightfieldRaster,
-  makeStartupHeightfieldSampler,
   planStartupHeightfieldRaster,
   startupHeightfieldDescriptor,
 } from "../../terrain/startup_heightfield_raster.js";
+import { startupRasterHeightfieldSampler } from "../../world/heightfield_sampler.js";
+import { buildWorldManifest, type WorldManifest } from "../../world/world_manifest.js";
+import { publishWorldManifestForDiagnostics } from "../../core/hooks.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import {
   initClodCacheContext,
@@ -258,6 +260,7 @@ export interface WorldBuildResult {
   worldCells: number;
   worldSizeCells: number;
   worldMode: WorldModeConfig;
+  worldManifest: WorldManifest;
   lod0Nodes: ClodPageNode[];
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
@@ -495,7 +498,8 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     ? measure(startupTimings, "startup.heightfield_raster_ms", () => buildStartupHeightfieldRaster(worldCells))
     : null;
   if (startupHeightfield) {
-    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(startupHeightfield));
+    const sampler = startupRasterHeightfieldSampler(startupHeightfield);
+    setTerrainSurfaceOverride(sampler.sampleHeight);
     startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
   }
   startupTimings["startup.heightfield_raster_enabled"] = startupHeightfield ? 1 : 0;
@@ -540,6 +544,16 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   };
   const acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
   window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
+  const worldManifest = buildWorldManifest({
+    worldMode,
+    terrainFieldConfig,
+    terrainSourceHash: acceptanceCacheKey.terrainSourceHash,
+    seaLevelM: seaLevel,
+  });
+  terrainSource.worldManifest = worldManifest;
+  startupTimings["world_manifest_present"] = 1;
+  startupTimings["world_manifest_seed"] = worldManifest.seed;
+  publishWorldManifestForDiagnostics(worldManifest);
   const cacheContext = await initClodCacheContext({
     cfg,
     worldPages: WORLD,
@@ -638,6 +652,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     worldCells,
     worldSizeCells: worldCells,
     worldMode,
+    worldManifest,
     lod0Nodes,
     allNodes,
     maxTerrainLevel,
