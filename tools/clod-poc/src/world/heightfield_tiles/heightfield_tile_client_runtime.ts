@@ -42,9 +42,15 @@ export function updateHeightfieldTileClientRuntime(
 ): void {
   const runtime = activeRuntimes.get(client);
   if (!runtime) return;
-  runtime.update({
-    ...input,
-    buildAllowed: input.buildAllowed ?? heightfieldTileBuildAllowed(window.__drusnielClod?.stats?.counters),
+  if (input.buildAllowed !== undefined) {
+    runtime.update(input);
+    return;
+  }
+
+  runtime.update({ ...input, buildAllowed: false });
+  queueMicrotask(() => {
+    if (activeRuntimes.get(client) !== runtime) return;
+    runtime.cache.setBuildAllowed(heightfieldTileBuildAllowed(window.__drusnielClod?.stats?.counters));
   });
 }
 
