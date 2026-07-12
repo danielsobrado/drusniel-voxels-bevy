@@ -57,10 +57,17 @@ import {
   type StreamedPageBoundsGuardConfig,
 } from "./terrain/streaming/streamed_page_bounds_guard.js";
 import { StreamRootEditState } from "./terrain/streaming/stream_root_edit_state.js";
+import type { HeightfieldTileBuildResult } from "./world/heightfield_tiles/heightfield_tile_cache.js";
+import type { WorldTileKey } from "./world/tile_key.js";
+import type {
+  HeightfieldTileWorkerBuildRequest,
+  HeightfieldTileWorkerResponse,
+} from "./world/heightfield_tiles/heightfield_tile_worker_protocol.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
 
 type StreamRootBoundsGuardSource = "gpu" | "cpu" | "cache";
+type ExtendedClodWorkerResponse = ClodWorkerResponse | HeightfieldTileWorkerResponse;
 
 export interface WorkerStreamRootsResult {
   nodes: ClodPageNode[];
@@ -88,6 +95,7 @@ export class ClodWorkerClient {
   private flushRequests = new Map<number, PendingRequest<void>>();
   private clearCacheRequests = new Map<number, PendingRequest<void>>();
   private streamRootsRequests = new Map<number, PendingRequest<WorkerStreamRootsResult>>();
+  private heightfieldTileRequests = new Map<number, PendingRequest<HeightfieldTileBuildResult>>();
   private progressHandlers = new Map<number, (progress: BuildProgress) => void>();
   private digPending: DigBatchSlot | null = null;
   private digPumpActive = false;
@@ -112,7 +120,7 @@ export class ClodWorkerClient {
     attachMainThreadCacheBroker(this.worker);
     this.worker.onmessage = (event: MessageEvent) => {
       if (this.stopped || isCacheRpcMessage(event.data)) return;
-      try { this.handleMessage(event.data as ClodWorkerResponse); }
+      try { this.handleMessage(event.data as ExtendedClodWorkerResponse); }
       catch (error) { this.failClosed(error); }
     };
     this.worker.onerror = (event) => { this.failClosed(new Error(event.message || "CLOD worker failed")); };
@@ -186,6 +194,30 @@ export class ClodWorkerClient {
     if (cacheCtx) await cacheCtx.service.clear();
     this.streamRootCacheInit = null;
     return postTrackedRequest(this.clearCacheRequests, this.worker, { type: "clearCache", requestId: this.nextRequestId++ });
+  }
+
+  buildHeightfieldTiles(
+    keys: readonly WorldTileKey[],
+    sourceRevision = 0,
+  ): Promise<HeightfieldTileBuildResult> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
+    if (keys.length > 2) return Promise.reject(new Error("heightfield tile worker batches are limited to 2 tiles"));
+    const requestId = this.nextRequestId++;
+    const request: HeightfieldTileWorkerBuildRequest = {
+      type: "buildHeightfieldTiles",
+      requestId,
+      keys: keys.map((key) => ({ x: key.x, z: key.z })),
+      sourceRevision,
+    };
+    return new Promise((resolve, reject) => {
+      this.heightfieldTileRequests.set(requestId, { resolve, reject });
+      try {
+        this.worker.postMessage(request);
+      } catch (error) {
+        this.heightfieldTileRequests.delete(requestId);
+        reject(error);
+      }
+    });
   }
 
   async buildStreamRoots(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
@@ -474,9 +506,16 @@ export class ClodWorkerClient {
     }
   }
 
-  private handleMessage(message: ClodWorkerResponse): void {
+  private handleMessage(message: ExtendedClodWorkerResponse): void {
     if (!message || typeof message !== "object" || typeof message.type !== "string") return;
     switch (message.type) {
+      case "heightfieldTilesBuilt": {
+        const pending = this.heightfieldTileRequests.get(message.requestId);
+        if (!pending) break;
+        this.heightfieldTileRequests.delete(message.requestId);
+        pending.resolve({ tiles: message.tiles, buildMs: message.buildMs });
+        break;
+      }
       case "progress": this.progressHandlers.get(message.requestId)?.(message); break;
       case "buildComplete": {
         const pending = this.buildRequests.get(message.requestId);
@@ -556,13 +595,19 @@ export class ClodWorkerClient {
 
   private handleError(requestId: number | null, error: Error): void {
     if (requestId !== null) {
-      const pending = this.buildRequests.get(requestId) ?? this.digRequests.get(requestId) ?? this.flushRequests.get(requestId) ?? this.clearCacheRequests.get(requestId) ?? this.streamRootsRequests.get(requestId);
+      const pending = this.buildRequests.get(requestId)
+        ?? this.digRequests.get(requestId)
+        ?? this.flushRequests.get(requestId)
+        ?? this.clearCacheRequests.get(requestId)
+        ?? this.streamRootsRequests.get(requestId)
+        ?? this.heightfieldTileRequests.get(requestId);
       if (pending) {
         this.buildRequests.delete(requestId);
         this.digRequests.delete(requestId);
         this.flushRequests.delete(requestId);
         this.clearCacheRequests.delete(requestId);
         this.streamRootsRequests.delete(requestId);
+        this.heightfieldTileRequests.delete(requestId);
         pending.reject(error);
         return;
       }
@@ -611,6 +656,7 @@ export class ClodWorkerClient {
       this.flushRequests,
       this.clearCacheRequests,
       this.streamRootsRequests,
+      this.heightfieldTileRequests,
     ], this.progressHandlers, error);
     this.rejectPendingDig(error);
     this.parentsWaiters.splice(0);
