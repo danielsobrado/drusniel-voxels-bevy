@@ -22,6 +22,7 @@ import {
 } from "./cache/clodStreamRootCache.js";
 import {
   applyDigEditTransaction,
+  baseSurfaceHeight,
   rollbackDigEditTransaction,
   replaceVoxelEdits,
   setTerrainFieldConfig,
@@ -59,12 +60,21 @@ import {
   installBorderCoastRuntime,
   installWorkerTerrainOverride,
   postWorkerMessage,
+  type ExtendedClodWorkerResponse,
 } from "./clod_worker_runtime.js";
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
+import { buildHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile.js";
+import {
+  collectHeightfieldTileTransferables,
+  type HeightfieldTileWorkerBuildRequest,
+  type HeightfieldTileWorkerRequest,
+} from "./world/heightfield_tiles/heightfield_tile_worker_protocol.js";
+
+type ExtendedClodWorkerRequest = ClodWorkerRequest | HeightfieldTileWorkerRequest;
 
 const ctx = self as unknown as {
-  postMessage: (message: ClodWorkerResponse, transfer?: Transferable[]) => void;
-  onmessage: ((event: MessageEvent<ClodWorkerRequest>) => void) | null;
+  postMessage: (message: ExtendedClodWorkerResponse, transfer?: Transferable[]) => void;
+  onmessage: ((event: MessageEvent<ExtendedClodWorkerRequest>) => void) | null;
 };
 
 let cfg: ClodPagesConfig | null = null;
@@ -127,7 +137,7 @@ function restoreParentQueue(snapshot: ParentQueueSnapshot): void {
   });
 }
 
-function post(message: ClodWorkerResponse, transfer?: Transferable[]): void {
+function post(message: ExtendedClodWorkerResponse, transfer?: Transferable[]): void {
   postWorkerMessage(ctx, message, transfer);
 }
 
@@ -559,6 +569,30 @@ async function handleBuildStreamRoots(request: Extract<ClodWorkerRequest, { type
   }, transferables);
 }
 
+function handleBuildHeightfieldTiles(request: HeightfieldTileWorkerBuildRequest): void {
+  if (!result || !cfg) throw new Error("CLOD worker received buildHeightfieldTiles before build completion");
+  if (request.keys.length === 0) {
+    post({ type: "heightfieldTilesBuilt", requestId: request.requestId, tiles: [], buildMs: 0, transferBytes: 0 });
+    return;
+  }
+  if (request.keys.length > 2) throw new Error("heightfield tile worker batches are limited to 2 tiles");
+
+  const startedAt = performance.now();
+  const tiles = request.keys.map((key) => buildHeightfieldTile(
+    key,
+    { sampleHeight: baseSurfaceHeight, sourceRevision: request.sourceRevision },
+    request.sourceRevision,
+  ));
+  const transferBytes = tiles.reduce((sum, tile) => sum + tile.heights.byteLength, 0);
+  post({
+    type: "heightfieldTilesBuilt",
+    requestId: request.requestId,
+    tiles,
+    buildMs: performance.now() - startedAt,
+    transferBytes,
+  }, collectHeightfieldTileTransferables(tiles));
+}
+
 function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
   drainParents(Number.POSITIVE_INFINITY);
   post({ type: "flushed", requestId: request.requestId });
@@ -574,7 +608,7 @@ async function handleClearCache(request: Extract<ClodWorkerRequest, { type: "cle
   post({ type: "cacheCleared", requestId: request.requestId });
 }
 
-ctx.onmessage = (event: MessageEvent<ClodWorkerRequest>) => {
+ctx.onmessage = (event: MessageEvent<ExtendedClodWorkerRequest>) => {
   if (isCacheRpcResponse(event.data)) {
     dispatchCacheRpcResponse(event.data);
     return;
@@ -589,6 +623,8 @@ ctx.onmessage = (event: MessageEvent<ClodWorkerRequest>) => {
       void handleClearCache(request).catch((error) => post(errorResponse(request.requestId, error)));
     } else if (request.type === "buildStreamRoots") {
       void handleBuildStreamRoots(request).catch((error) => post(errorResponse(request.requestId, error)));
+    } else if (request.type === "buildHeightfieldTiles") {
+      handleBuildHeightfieldTiles(request);
     } else {
       handleFlush(request);
     }
