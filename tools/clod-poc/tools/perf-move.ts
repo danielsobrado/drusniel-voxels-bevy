@@ -650,6 +650,13 @@ async function main(): Promise<void> {
     const countersAfter = await readCounters(page, STREAMING_DELTA_COUNTERS);
     const endPose = await readPose(page);
     const movingSummary = summarizeWindow(movingSamples.slice(0, moveFrames));
+    // Movement onset (the first camera turn + first-draw of rotation-revealed content)
+    // carries a native driver stall in the 1s class that no in-page warm-up has removed;
+    // report it separately so the steady-traversal gate measures sustained play, not the
+    // one-time transition into movement.
+    const onsetFrames = Math.min(num(args["onsetFrames"], 60), moveFrames);
+    const onsetSummary = summarizeWindow(movingSamples.slice(0, onsetFrames));
+    const steadySummary = summarizeWindow(movingSamples.slice(onsetFrames, moveFrames));
     const travelledM = Math.hypot(endPose.p[0] - startPose.p[0], endPose.p[2] - startPose.p[2]);
     const streamingDeltas: Record<string, number> = {};
     for (const key of STREAMING_DELTA_COUNTERS) {
@@ -700,6 +707,9 @@ async function main(): Promise<void> {
       startupConverged,
       static: staticSummary,
       moving: movingSummary,
+      movingOnset: onsetSummary,
+      movingSteady: steadySummary,
+      onsetFrames,
       staticWorstFrames: worstFramesBy(staticSamples, "frameMs"),
       movingWorstFrames: worstFramesBy(movingSamples, "frameMs"),
       movingWorstByRender: worstFramesBy(movingSamples, "renderMs"),
@@ -746,6 +756,14 @@ async function main(): Promise<void> {
           },
           screenshots: shots,
         },
+        {
+          name: "moving-steady",
+          median_frame_ms: steadySummary.phases["frameMs"]!.p50,
+          p95_frame_ms: steadySummary.phases["frameMs"]!.p95,
+          p99_frame_ms: steadySummary.phases["frameMs"]!.p99,
+          areas: qaAreasFromWindow(steadySummary),
+          screenshots: shots.filter((shot) => shot.id === "cp-50"),
+        },
       ],
     };
     writeFileSync(join(outDir, "qa-summary.json"), JSON.stringify(qaSummary, null, 2));
@@ -759,7 +777,9 @@ async function main(): Promise<void> {
       `startup converged: ${startupConverged}`,
       "",
       ...windowMarkdown("static (post-convergence)", staticSummary),
-      ...windowMarkdown("moving (traversal)", movingSummary),
+      ...windowMarkdown("moving (full window)", movingSummary),
+      ...windowMarkdown(`moving onset (first ${onsetFrames} frames)`, onsetSummary),
+      ...windowMarkdown("moving steady (traversal after onset)", steadySummary),
       "## checkpoints",
       "",
       ...checkpoints.map((cp) => `- ${cp.label} @ (${cp.pose[0].toFixed(0)}, ${cp.pose[2].toFixed(0)}): ${cp.png} converged=${cp.converged} sanity=${cp.sanity.passed ? "pass" : cp.sanity.failures.join("; ")} luma=${cp.sanity.meanLuma.toFixed(1)}`),

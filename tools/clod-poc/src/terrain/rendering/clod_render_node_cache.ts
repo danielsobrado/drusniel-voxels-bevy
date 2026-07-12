@@ -210,8 +210,12 @@ export class ClodRenderNodeCache {
     }
 
     if (view.mat !== this.deps.materialController.sharedMaterial) {
-      this.deps.materialController.materials.delete(view.mat);
-      view.mat.material.dispose();
+      // Recycle the handle when the controller pool accepts it (reconfiguring a pooled
+      // material on the next create is far cheaper than building a new node material);
+      // dispose only when the pool declines.
+      if (!this.deps.materialController.releaseTerrainMaterial(view.mat)) {
+        view.mat.material.dispose();
+      }
     }
     this.statDisposals++;
     if (reason === "evict") this.statEvictions++;

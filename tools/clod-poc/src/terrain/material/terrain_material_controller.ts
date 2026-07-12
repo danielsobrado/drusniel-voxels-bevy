@@ -71,6 +71,15 @@ export interface TerrainMaterialControllerDeps {
 export interface TerrainMaterialController {
   readonly materials: Set<TerrainMaterialHandle>;
   makeTerrainMaterial(color: number): TerrainMaterialHandle;
+  /** Returns a per-node material handle to the recycle pool instead of destroying it.
+   *  Returns false when the pool declined (shared material, pool full, WebGL) — the
+   *  caller must then dispose the material itself. */
+  releaseTerrainMaterial(handle: TerrainMaterialHandle): boolean;
+  /** Creates at most one pooled handle per call until the recycle reserve holds `count`
+   *  materials. Root switches create many views before any old view is disposed, so an
+   *  empty pool helps them not at all — an idle-frame top-up keeps pre-built materials
+   *  ready for exactly that burst. Returns true when the reserve is at or above target. */
+  ensureRecycleReserve(count: number): boolean;
   forEachMaterial(fn: (mat: TerrainMaterialHandle) => void): void;
   applyLighting(mat: TerrainMaterialHandle, lighting?: EnvironmentLighting): void;
   applyColorAdjustments(): void;
@@ -101,15 +110,50 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   let proceduralTextureConfig = deps.proceduralTextureConfig;
   let bakedMacroTint = deps.bakedMacroTint;
 
+  // Creating a WebGPU terrain node material builds a full TSL node graph — the dominant
+  // cost of materializing a render view (root-switch bursts create many at once). Handles
+  // released by disposed views are recycled instead: reconfiguring an existing material is
+  // a handful of uniform writes and, with an unchanged texture signature, no rebuild.
+  const MATERIAL_RECYCLE_CAP = 64;
+  const recycledMaterials: TerrainMaterialHandle[] = [];
+
   const makeTerrainMaterial = (color: number): TerrainMaterialHandle => {
     if (deps.poolTerrainMaterial) {
       sharedTerrainMaterial ??= createWebGpuTerrainMaterial(0xb9c0c8);
       terrainMaterials.add(sharedTerrainMaterial);
       return sharedTerrainMaterial;
     }
+    const recycled = recycledMaterials.pop();
+    if (recycled) {
+      recycled.setBaseColor(color);
+      terrainMaterials.add(recycled);
+      return recycled;
+    }
     const handle = deps.isWebGpu ? createWebGpuTerrainMaterial(color) : createWebGlTerrainMaterial(color);
     terrainMaterials.add(handle);
     return handle;
+  };
+
+  const ensureRecycleReserve = (count: number): boolean => {
+    if (!deps.isWebGpu || deps.poolTerrainMaterial) return true;
+    const target = Math.min(count, MATERIAL_RECYCLE_CAP);
+    if (recycledMaterials.length >= target) return true;
+    recycledMaterials.push(createWebGpuTerrainMaterial(0xb9c0c8));
+    return recycledMaterials.length >= target;
+  };
+
+  const releaseTerrainMaterial = (handle: TerrainMaterialHandle): boolean => {
+    if (handle === sharedTerrainMaterial) return false;
+    terrainMaterials.delete(handle);
+    if (!deps.isWebGpu || recycledMaterials.length >= MATERIAL_RECYCLE_CAP) return false;
+    // Reset the transient per-node state to fresh-material defaults; everything else
+    // (color, lighting, textures, debug, side, wireframe) is re-applied on reuse by the
+    // render node cache's create path.
+    handle.setFade(1, true, false);
+    handle.setRootMorph(0);
+    handle.setTier(0);
+    recycledMaterials.push(handle);
+    return true;
   };
 
   const activeTerrainSlots = (): readonly (TerrainTextureSlot | ProceduralTerrainSlot)[] => {
@@ -279,6 +323,8 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   return {
     materials: terrainMaterials,
     makeTerrainMaterial,
+    releaseTerrainMaterial,
+    ensureRecycleReserve,
     forEachMaterial: (fn) => {
       for (const material of terrainMaterials) fn(material);
     },

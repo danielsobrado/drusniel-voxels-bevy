@@ -369,8 +369,16 @@ export function runFrameLoopStartup(
       mesh.visible = wasVisible;
     }
   };
+  // Root switches create many views before any old view is disposed, so the material
+  // recycle pool is empty exactly when the burst hits unless it is topped up ahead of
+  // time; one pre-built material per idle frame keeps switch-time creation to uniform
+  // writes on pooled handles. Sized to a typical switch set.
+  const MATERIAL_RESERVE_TARGET = 32;
   const drainViewPrewarmQueue = (): void => {
-    if (viewPrewarmQueue.length === 0) return;
+    if (viewPrewarmQueue.length === 0) {
+      input.terrainView.materialController.ensureRecycleReserve(MATERIAL_RESERVE_TARGET);
+      return;
+    }
     const cache = input.terrainView.renderNodeCache;
     // Same frame-id domain as markActive/prune, so pre-warmed views age correctly in the LRU.
     const frameId = selectionController.stats().frameId;

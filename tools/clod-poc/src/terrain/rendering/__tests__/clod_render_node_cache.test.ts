@@ -137,6 +137,12 @@ function fakeMaterialController(): FakeMaterialController {
       materials.add(handle);
       return handle;
     },
+    // Declining keeps the pre-pool dispose behavior these tests assert on.
+    releaseTerrainMaterial: (handle) => {
+      materials.delete(handle);
+      return false;
+    },
+    ensureRecycleReserve: () => true,
     forEachMaterial: (fn) => {
       for (const mat of materials) fn(mat);
     },
