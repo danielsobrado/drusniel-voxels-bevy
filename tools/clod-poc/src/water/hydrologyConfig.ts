@@ -71,8 +71,10 @@ export interface HydrologyInfiniteConfig {
   tileRes: number;
   /** LRU budget for resident tiles; 0 disables the tile cache (direct analytic sampling). */
   maxResidentTiles: number;
-  /** Width (metres) of the band inside the startup-world edge where grid hydrology blends
-   *  into the infinite field so the effective authority is continuous at the boundary. */
+  /** Uses the traced/tile authority inside the startup world as well as outside it. */
+  unifiedStartup: boolean;
+  /** Width (metres) of the legacy band inside the startup-world edge where grid hydrology
+   *  blends into the infinite field. Ignored when unifiedStartup is enabled. */
   boundaryBlendM: number;
   /** Edge length (tiles) of the streaming GPU hydrology atlas that gives vegetation
    *  placement compute real hydrology outside the startup world; 0 disables the atlas
@@ -165,6 +167,7 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     tileSizeM: 256,
     tileRes: 64,
     maxResidentTiles: 96,
+    unifiedStartup: false,
     boundaryBlendM: 48,
     atlasTilesPerSide: 6,
   },

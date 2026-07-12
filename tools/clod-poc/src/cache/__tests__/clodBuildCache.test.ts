@@ -59,7 +59,7 @@ function terrainSource(): TerrainSourceInputs {
       enabled: false,
       source: "fake_bodies",
       fakeBodies: { carveTerrain: false },
-      hydrology: { enabled: false },
+      hydrology: { enabled: false, unifiedStartup: false },
     },
     proceduralTextureEnabled: false,
     proceduralTextureHash: null,

@@ -40,22 +40,34 @@ export const DEFAULT_HYDROLOGY_INVARIANT_TOLERANCES: HydrologyInvariantTolerance
   withinBodyJump: 6,
 };
 
+interface BodyAggregate {
+  sum: number;
+  count: number;
+  still: boolean;
+}
+
 export function evaluateHydrologyInvariants(grid: HydrologyGrid): HydrologyInvariantReport {
   const { res, waterY, carvedBed, wetMask, riverMask, bodyKind, bodyId, flowDirX, flowDirZ } = grid;
   const count = res * res;
 
-  // Per-body mean for still-water flatness.
-  let maxId = 0;
-  for (let i = 0; i < count; i++) if (bodyId[i] > maxId) maxId = bodyId[i];
-  const sum = new Float64Array(maxId + 1);
-  const num = new Uint32Array(maxId + 1);
-  const still = new Uint8Array(maxId + 1);
+  // Traced/tile hydrology uses stable sparse 31-bit body hashes. A dense array indexed by
+  // max(bodyId) can allocate gigabytes, so aggregates must remain sparse.
+  const bodies = new Map<number, BodyAggregate>();
   for (let i = 0; i < count; i++) {
     const id = bodyId[i];
     if (id === 0 || wetMask[i] <= 0.5) continue;
-    if (isStillBodyKind(bodyKind[i])) still[id] = 1;
-    sum[id] += waterY[i];
-    num[id]++;
+    const aggregate = bodies.get(id);
+    if (aggregate) {
+      aggregate.sum += waterY[i];
+      aggregate.count++;
+      aggregate.still ||= isStillBodyKind(bodyKind[i]);
+    } else {
+      bodies.set(id, {
+        sum: waterY[i],
+        count: 1,
+        still: isStillBodyKind(bodyKind[i]),
+      });
+    }
   }
 
   let lakeFlatnessMaxDeviation = 0;
@@ -83,9 +95,10 @@ export function evaluateHydrologyInvariants(grid: HydrologyGrid): HydrologyInvar
       // Strictly-negative depth is unrenderable; depth == 0 is a valid waterline edge.
       if (waterY[i] < carvedBed[i] - 1e-3) wetBelowBedCount++;
 
-      if (still[id]) {
+      const aggregate = bodies.get(id);
+      if (aggregate?.still) {
         stillCells++;
-        const mean = num[id] > 0 ? sum[id] / num[id] : waterY[i];
+        const mean = aggregate.count > 0 ? aggregate.sum / aggregate.count : waterY[i];
         lakeFlatnessMaxDeviation = Math.max(lakeFlatnessMaxDeviation, Math.abs(waterY[i] - mean));
       }
 
@@ -138,7 +151,7 @@ export function evaluateHydrologyInvariants(grid: HydrologyGrid): HydrologyInvar
     wetCells,
     stillCells,
     riverCells,
-    bodyCount: maxId,
+    bodyCount: bodies.size,
   };
 }
 
