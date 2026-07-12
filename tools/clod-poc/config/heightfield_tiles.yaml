@@ -1,0 +1,9 @@
+enabled: false
+radius_m: 768
+max_resident_tiles: 64
+max_inflight_batches: 1
+max_tiles_per_batch: 2
+evict_distance_multiplier: 1.5
+retry_cooldown_frames: 120
+prediction_seconds: 4
+persistence_enabled: true
