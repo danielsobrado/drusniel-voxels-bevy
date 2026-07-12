@@ -94,6 +94,26 @@ describe("terrain source hash", () => {
     expect(withOtherRes).not.toBe(withRaster);
   });
 
+  it("keeps descriptive world manifest metadata out of the v6 hash", async () => {
+    const source = baseTerrainSource();
+    const withoutManifest = await computeTerrainSourceHash(source);
+    const withManifest = await computeTerrainSourceHash({
+      ...source,
+      worldManifest: {
+        worldId: "ephemeral:0",
+        seed: 0,
+        generatorVersion: "world-modes-v6",
+        terrainSourceHash: withoutManifest,
+        mode: "finite",
+        sizeM: { x: 512, z: 512 },
+        seaLevelM: 18,
+        startupWorld: { pages: 8, cells: 512 },
+        artifacts: {},
+      },
+    });
+    expect(withManifest).toBe(withoutManifest);
+  });
+
   it("changes when hydrology carved bed changes outside sample window", async () => {
     const bedA = new Float32Array(4096);
     const bedB = new Float32Array(4096);
