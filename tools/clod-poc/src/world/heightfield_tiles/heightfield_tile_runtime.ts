@@ -71,6 +71,12 @@ function publishDisabledCounters(): void {
   });
 }
 
+function legacySurfaceOverrideActive(input: CreateHeightfieldTileRuntimeInput): boolean {
+  if (input.startupHeightfield) return false;
+  return input.terrainSource.hydrologyTerrain !== null
+    || input.terrainSource.waterConfig.fakeBodies.carveTerrain;
+}
+
 export async function createHeightfieldTileRuntime(
   input: CreateHeightfieldTileRuntimeInput,
 ): Promise<HeightfieldTileRuntime | null> {
@@ -78,6 +84,11 @@ export async function createHeightfieldTileRuntime(
   const config = parseHeightfieldTileConfig(heightfieldTileConfigText);
   const searchParams = input.searchParams ?? new URLSearchParams(window.location.search);
   if (!heightfieldTilesEnabled(config, searchParams, input.terrainSource.worldMode)) {
+    publishDisabledCounters();
+    return null;
+  }
+  if (legacySurfaceOverrideActive(input)) {
+    console.warn("[heightfield-tiles] disabled because a legacy carved surface override is active");
     publishDisabledCounters();
     return null;
   }
