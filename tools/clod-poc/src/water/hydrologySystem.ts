@@ -55,6 +55,7 @@ export class HydrologySystem {
   readonly grid: HydrologyGrid;
   readonly stats: HydrologyStats;
   private readonly infiniteWorldSamples: boolean;
+  private readonly unifiedStartup: boolean;
   private readonly sampler: TerrainHeightSampler;
   private readonly drySentinelDepthM: number;
   private readonly tileCache: HydrologyTileCache | null;
@@ -67,6 +68,7 @@ export class HydrologySystem {
     grid: HydrologyGrid,
     stats: HydrologyStats,
     infiniteWorldSamples: boolean,
+    unifiedStartup: boolean,
     sampler: TerrainHeightSampler,
     drySentinelDepthM: number,
     tileCache: HydrologyTileCache | null,
@@ -76,6 +78,7 @@ export class HydrologySystem {
     this.grid = grid;
     this.stats = stats;
     this.infiniteWorldSamples = infiniteWorldSamples;
+    this.unifiedStartup = unifiedStartup;
     this.sampler = sampler;
     this.drySentinelDepthM = drySentinelDepthM;
     this.tileCache = tileCache;
@@ -150,26 +153,8 @@ export class HydrologySystem {
     options: { infiniteWorldSamples?: boolean } = {},
   ): HydrologySystem {
     const t0 = nowMs();
-    const grid = createHydrologyGrid(config.simRes, worldCells, sampler, config.waterSurface.farReduceFactor);
-    fillDepressions(grid, config.fill);
-    computeFlowAccumulation(grid, config.accumulation, config.fill, config.rivers);
-    carveRiversAndClassifyWater(grid, config.fill, config.rivers, config.talus);
-    applyRiverFlowSpeedMultiplier(grid, config.rivers.flowSpeedMultiplier);
-    for (let i = 0; i < grid.waterYRaw.length; i++) {
-      if (grid.riverMask[i] > 0.01) grid.waterYRaw[i] = grid.carvedBed[i] + grid.riverDepth[i];
-    }
-    buildWaterSurface(grid, config.waterSurface, config.waterSurface.drySentinelDepth);
-    // Body identity + shore distance are derived from the *final* wet mask, so they must
-    // run after buildWaterSurface (which can turn cliff cells dry) and before the far
-    // surface / stats consume them.
-    computeBodyIds(grid);
-    computeShoreDistance(grid);
-    buildFarWaterSurface(grid, config.waterSurface);
-    buildMoistureField(grid, config.moisture);
-    const stats = collectStats(grid, config.accumulation.particles, nowMs() - t0);
-    logHydrologySummary(stats);
-    maybeDumpHydrologyFields(grid, config);
     const infiniteWorldSamples = options.infiniteWorldSamples ?? infiniteIslandsScene();
+    const unifiedStartup = infiniteWorldSamples && config.infinite.unifiedStartup;
     const tileCache = infiniteWorldSamples && config.infinite.maxResidentTiles > 0
       ? new HydrologyTileCache(sampler, {
           tileSizeM: config.infinite.tileSizeM,
@@ -178,10 +163,19 @@ export class HydrologySystem {
           drySentinelDepthM: config.waterSurface.drySentinelDepth,
         })
       : null;
+
+    const grid = unifiedStartup
+      ? buildUnifiedStartupGrid(config, worldCells, sampler, tileCache)
+      : buildLegacyHydrologyGrid(config, worldCells, sampler);
+    const stats = collectStats(grid, unifiedStartup ? 0 : config.accumulation.particles, nowMs() - t0);
+    logHydrologySummary(stats);
+    maybeDumpHydrologyFields(grid, config);
+
     return new HydrologySystem(
       grid,
       stats,
       infiniteWorldSamples,
+      unifiedStartup,
       sampler,
       config.waterSurface.drySentinelDepth,
       tileCache,
@@ -194,6 +188,10 @@ export class HydrologySystem {
     return this.infiniteWorldSamples;
   }
 
+  unifiedStartupActive(): boolean {
+    return this.unifiedStartup;
+  }
+
   /**
    * Canonical world-space hydrology sample. `cellSizeHint` (metres per consumer cell,
    * e.g. the water clipmap ring cell size) only selects the infinite-field access path:
@@ -204,17 +202,17 @@ export class HydrologySystem {
    */
   sample(x: number, z: number, cellSizeHint = 0): HydrologySample {
     if (!this.infiniteWorldSamples) return sampleHydrologyGrid(this.grid, x, z);
+    if (this.unifiedStartup) return this.sampleInfinite(x, z, cellSizeHint);
     if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampleInfinite(x, z, cellSizeHint);
     const t = this.gridWeight(x, z);
     if (t >= 1) return sampleHydrologyGrid(this.grid, x, z);
-    // Boundary blend band: fade the finite grid into the infinite field as the world
-    // edge approaches so the effective authority is continuous across the boundary
-    // (t = 1 deep inside -> pure grid; t = 0 at the edge -> pure infinite, matching the
-    // outside limit exactly).
+    // Legacy boundary blend: finite grid inside, traced field outside. Unified startup
+    // bypasses this entire path and therefore has no authority handoff band.
     return blendHydrologySamples(this.sampleInfinite(x, z, cellSizeHint), sampleHydrologyGrid(this.grid, x, z), t);
   }
 
   terrainHeight(x: number, z: number): number {
+    if (this.unifiedStartup) return this.sampler.surfaceHeight(x, z);
     if (!this.infiniteWorldSamples) return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
     if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampler.surfaceHeight(x, z);
     const t = this.gridWeight(x, z);
@@ -273,6 +271,69 @@ export class HydrologySystem {
   prefetchTiles(centerX: number, centerZ: number, radiusM: number): void {
     this.tileCache?.prefetchAround(centerX, centerZ, radiusM);
   }
+}
+
+function buildLegacyHydrologyGrid(
+  config: HydrologyConfig,
+  worldCells: number,
+  sampler: TerrainHeightSampler,
+): HydrologyGrid {
+  const grid = createHydrologyGrid(config.simRes, worldCells, sampler, config.waterSurface.farReduceFactor);
+  fillDepressions(grid, config.fill);
+  computeFlowAccumulation(grid, config.accumulation, config.fill, config.rivers);
+  carveRiversAndClassifyWater(grid, config.fill, config.rivers, config.talus);
+  applyRiverFlowSpeedMultiplier(grid, config.rivers.flowSpeedMultiplier);
+  for (let i = 0; i < grid.waterYRaw.length; i++) {
+    if (grid.riverMask[i] > 0.01) grid.waterYRaw[i] = grid.carvedBed[i] + grid.riverDepth[i];
+  }
+  buildWaterSurface(grid, config.waterSurface, config.waterSurface.drySentinelDepth);
+  // Body identity + shore distance are derived from the final wet mask.
+  computeBodyIds(grid);
+  computeShoreDistance(grid);
+  buildFarWaterSurface(grid, config.waterSurface);
+  buildMoistureField(grid, config.moisture);
+  return grid;
+}
+
+function buildUnifiedStartupGrid(
+  config: HydrologyConfig,
+  worldCells: number,
+  sampler: TerrainHeightSampler,
+  tileCache: HydrologyTileCache | null,
+): HydrologyGrid {
+  const grid = createHydrologyGrid(config.simRes, worldCells, sampler, config.waterSurface.farReduceFactor);
+  const denom = Math.max(1, grid.res - 1);
+  const options = { drySentinelDepthM: config.waterSurface.drySentinelDepth };
+  for (let z = 0; z < grid.res; z++) {
+    const worldZ = (z / denom) * worldCells;
+    for (let x = 0; x < grid.res; x++) {
+      const worldX = (x / denom) * worldCells;
+      const sample = tileCache
+        ? tileCache.sample(worldX, worldZ)
+        : sampleInfiniteHydrology(worldX, worldZ, sampler, options);
+      const index = z * grid.res + x;
+      grid.originalBed[index] = sample.terrainY;
+      grid.carvedBed[index] = sample.terrainY;
+      grid.filledSurface[index] = sample.bodyMask > 0 ? sample.waterY : sample.terrainY;
+      grid.accumulation[index] = 0;
+      grid.flowStrength[index] = sample.flowStrength;
+      grid.waterStrength[index] = sample.bodyMask;
+      grid.riverDepth[index] = sample.riverDepth;
+      grid.waterYRaw[index] = sample.waterY;
+      grid.waterY[index] = sample.waterY;
+      grid.wetMask[index] = sample.bodyMask;
+      grid.lakeMask[index] = sample.lakeMask;
+      grid.riverMask[index] = sample.riverMask;
+      grid.moisture[index] = sample.moisture;
+      grid.bodyKind[index] = sample.bodyKind;
+      grid.flowDirX[index] = sample.flowX;
+      grid.flowDirZ[index] = sample.flowZ;
+      grid.bodyId[index] = sample.bodyId;
+      grid.shoreDistance[index] = sample.shoreDistance;
+    }
+  }
+  buildFarWaterSurface(grid, config.waterSurface);
+  return grid;
 }
 
 /** Lerp two canonical samples; identity fields come from the dominant side. t = weight of `b`. */
