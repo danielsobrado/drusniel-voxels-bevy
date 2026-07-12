@@ -1,5 +1,38 @@
 import type { FarClipmapStats } from "./far_clipmap_controller.js";
 
+interface FallbackEpochState {
+  baselineTotal: number | null;
+}
+
+const fallbackEpochByCounters = new WeakMap<Record<string, number>, FallbackEpochState>();
+
+function fallbackSamplesSinceStreamReady(
+  counters: Record<string, number>,
+  stats: FarClipmapStats,
+): number {
+  let state = fallbackEpochByCounters.get(counters);
+  if (!state) {
+    state = { baselineTotal: null };
+    fallbackEpochByCounters.set(counters, state);
+  }
+
+  const streamReadyFrame = counters["stream_ready_frame"];
+  const ready = Number.isFinite(streamReadyFrame)
+    && streamReadyFrame >= 0
+    && stats.sourceReady === 1
+    && stats.pendingTiles === 0;
+
+  if (!ready) {
+    state.baselineTotal = null;
+    return 0;
+  }
+
+  if (state.baselineTotal === null || stats.fallbackSamplesTotal < state.baselineTotal) {
+    state.baselineTotal = stats.fallbackSamplesTotal;
+  }
+  return Math.max(0, stats.fallbackSamplesTotal - state.baselineTotal);
+}
+
 export function publishFarClipmapStatsToCounters(counters: Record<string, number>, stats: FarClipmapStats): void {
   counters["far_clipmap_enabled"] = stats.enabled;
   counters["far_clipmap_visible"] = stats.visible;
@@ -37,7 +70,8 @@ export function publishFarClipmapStatsToCounters(counters: Record<string, number
   counters["far_clipmap_vertices_built_this_frame"] = stats.verticesBuiltThisFrame;
   counters["far_clipmap_triangles_built_this_frame"] = stats.trianglesBuiltThisFrame;
   counters["far_clipmap_fallback_samples_this_frame"] = stats.fallbackSamplesThisFrame;
-  counters["far_clipmap_fallback_samples_total"] = stats.fallbackSamplesTotal;
+  counters["far_clipmap_fallback_samples_lifetime_total"] = stats.fallbackSamplesTotal;
+  counters["far_clipmap_fallback_samples_total"] = fallbackSamplesSinceStreamReady(counters, stats);
   counters["far_clipmap_exception_samples_this_frame"] = stats.exceptionSamplesThisFrame;
   counters["far_clipmap_exception_samples_total"] = stats.exceptionSamplesTotal;
 }
