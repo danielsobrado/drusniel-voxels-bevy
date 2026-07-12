@@ -29,3 +29,5 @@ Terrain-source version `world-modes-v4` includes the unified startup authority f
 - continued availability of legacy mode.
 
 `water:seam` reports `unifiedStartup` and treats its raw seam metrics as raster approximation error when the unified authority is active.
+
+The repository Phase 3 workflow validates typecheck, the full unit suite, the acceptance gate, production build, and browser visual gate before merge.
