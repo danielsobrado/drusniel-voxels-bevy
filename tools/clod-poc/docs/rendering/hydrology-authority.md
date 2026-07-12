@@ -141,23 +141,43 @@ terrain sampler). Movement into new regions pays one build per new tile; steady-
 sampling is cache hits. If browser profiling shows hitches at tile boundaries, add
 neighbour prefetch/async builds (deferred).
 
-## Toroidal water clipmap (Phase 5)
+## Toroidal water clipmap (Phase 5) + static topology (Phase 5b)
 
 `WaterClipmap` (`src/water/waterClipmap.ts`) stores ring vertices toroidally: world column
 `c` / row `r` lives at slot `(c mod verts, r mod verts)`, so an origin snap resamples only
 the newly exposed columns/rows — the per-vertex `WaterField` sample is the dominant CPU
-cost and is now bounded by movement, not ring area (a one-snap eastward move samples
+cost and is bounded by movement, not ring area (a one-snap eastward move samples
 1 column instead of the full grid; verified bit-equal to a freshly built clipmap in
-`waterClipmapToroidal.test.ts`). The index buffer is rebuilt per snap (slot connectivity
-crosses the wrap seam) but takes no field samples. Cumulative counters
-(`WaterClipmap.updateCostStats`: snaps, full vs partial refills, columns/rows sampled,
-field samples, index rebuilds) are exposed through `collectWaterClipmapRuntimeStats`.
+`waterClipmapToroidal.test.ts`). Cumulative counters (`WaterClipmap.updateCostStats`)
+are exposed through `collectWaterClipmapRuntimeStats`.
 
-Quad emission is conservative (`waterQuadRenderable`): a quad renders when ANY corner is
-wet; dry corners carry a below-terrain sentinel and every water material discards
-`depth <= 0` fragments, so the interpolated surface clips against terrain at the true
-waterline. This keeps thin rivers visible at coarse rings (the old corner-AND rule eroded
-them) without shoreline artifacts.
+Since Phase 5b the toroidal samples land in one of two per-level backends:
+
+- **Static topology** (default, `water.static_topology`; `waterStaticClipmap=0` opts
+  out) — used when the material consumes `params.staticGrid`, which both TSL WebGPU
+  materials do. Samples go into two toroidal RGBA32F texel textures per level
+  (`waterClipmapTexels.ts`: A = waterY/terrainY/bodyMask/bodyKind, B = flow); the grid
+  geometry (positions = grid indices, full index buffer) is built once and never
+  changes. A snap costs the dirty-row/column field samples, one texture upload, and two
+  origin uniforms — **no index rebuild, no vertex-buffer re-upload**. The shared vertex
+  stage (`water_node_static_grid.ts`) reconstructs world position and the legacy
+  attribute values via `textureLoad`. Gold parity with the legacy path is tested in
+  `waterClipmapStatic.test.ts` (moved texels bit-equal a fresh build and direct field
+  samples), and static-vs-legacy browser shots at the spawn river are pixel-equivalent
+  (lit + clipmapLevel tint).
+- **Legacy buffers** (WebGL shader material): CPU vertex attributes; the index buffer is
+  rebuilt per snap because slot connectivity crosses the wrap seam.
+
+Quad emission on the legacy path is conservative (`waterQuadRenderable`): a quad renders
+when ANY corner is wet; dry corners carry a below-terrain sentinel and every water
+material discards `depth <= 0` fragments, so the interpolated surface clips against
+terrain at the true waterline. This keeps thin rivers visible at coarse rings (the old
+corner-AND rule eroded them) without shoreline artifacts. The static path renders every
+quad and resolves dryness per fragment with the same sentinel + discard; the legacy
+index-time height-discontinuity guard (skip quads whose wet corners span >0.45 m, 1.25 m
+flowing) is replaced by an equivalent fragment-side slope discard
+(`wallDiscard` in `water_node_static_grid.ts`), gated on `depth > 0.5 m` so shoreline
+sentinel ramps stay intact.
 
 ## Ownership oracle (Phase 6)
 
@@ -204,8 +224,13 @@ npm test -- src/water          # unit tests
   TSL vegetation node materials (`sampleHydrologyBilinearTsl` tint) and Layout B
   consumers (froxel moisture). Terrain compute needs nothing: outside-world terrain is
   intentionally uncarved (the infinite field's `terrainY` *is* the base surface).
-- **Phase 5b** — fully static topology (vertex shader samples a hydrology atlas; no index
-  rebuild per snap) now that the Phase 4b atlas exists.
+- **Phase 5b remainder** — static topology is done for the TSL WebGPU materials (above),
+  but the per-vertex CPU field sampling on snaps intentionally remains (it is the
+  authority — the Phase 4b atlas covers neither the effective inside-world blend nor
+  flow/bodyKind, so the vertex stage samples per-level texel textures filled by the same
+  CPU sampler instead). The WebGL shader material still uses the legacy index-rebuild
+  path; texture uploads on snap are full-texture (partial writeTexture is a possible
+  follow-up if profiling shows it matters).
 - **Phase 7b** — config-driven per-body visual presets (shallow/deep/absorption/
   roughness per kind in `water.yaml`), shore-distance-driven foam and terrain wetness
   (the shoreDistance channel is already packed on the GPU), and RGB absorption instead of

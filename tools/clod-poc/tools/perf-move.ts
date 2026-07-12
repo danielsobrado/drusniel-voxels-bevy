@@ -13,9 +13,10 @@
 //   npm --prefix tools/clod-poc run perf:move -- --out perf-runs/move-baseline
 //   npm --prefix tools/clod-poc run perf:move -- --speed 0.25 --moveFrames 900 --shots 0
 
+import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Browser, Page } from "playwright";
+import type { Browser, CDPSession, Page } from "playwright";
 import { launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import {
@@ -98,19 +99,37 @@ const PHASE_KEYS = [
 
 const WORST_FRAME_COUNT = 12;
 
-/** Full numeric field dump of the slowest frames, for spike forensics. */
-function worstFrames(samples: readonly Record<string, unknown>[]): Record<string, number>[] {
+/** Full numeric field dump of the slowest frames by `key`, for spike forensics.
+ *  Independent per-phase percentiles cannot be added; these rows show what actually
+ *  co-occurred inside the same bad frame. */
+function worstFramesBy(
+  samples: readonly Record<string, unknown>[],
+  key: string,
+  count = WORST_FRAME_COUNT,
+): Record<string, number>[] {
   return [...samples]
-    .sort((a, b) => (Number(b["frameMs"]) || 0) - (Number(a["frameMs"]) || 0))
-    .slice(0, WORST_FRAME_COUNT)
+    .sort((a, b) => (Number(b[key]) || 0) - (Number(a[key]) || 0))
+    .slice(0, count)
     .map((sample) => {
       const out: Record<string, number> = {};
-      for (const [key, value] of Object.entries(sample)) {
+      for (const [fieldKey, value] of Object.entries(sample)) {
         const numeric = Number(value);
-        if (Number.isFinite(numeric) && (numeric !== 0 || key === "frameId")) out[key] = numeric;
+        if (Number.isFinite(numeric) && (numeric !== 0 || fieldKey === "frameId")) out[fieldKey] = numeric;
       }
       return out;
     });
+}
+
+/** Repo identity so runs are comparable: SHA + dirty flag. Never trust silent failure —
+ *  report "unknown" explicitly when git is unavailable. */
+function gitIdentity(): { sha: string; dirty: boolean | null } {
+  try {
+    const sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    const status = execSync("git status --porcelain", { encoding: "utf8" }).trim();
+    return { sha, dirty: status.length > 0 };
+  } catch {
+    return { sha: "unknown", dirty: null };
+  }
 }
 
 const COUNTER_KEYS = [
@@ -248,6 +267,8 @@ function buildParams(args: Args): Record<string, string> {
     params["renderScale"] = renderScale;
     params["dprCap"] = "1";
   }
+  const viewPrewarmCompile = str(args["viewPrewarmCompile"]);
+  if (viewPrewarmCompile) params["viewPrewarmCompile"] = viewPrewarmCompile;
   return params;
 }
 
@@ -480,6 +501,24 @@ function fmt(value: number): string {
   return value.toFixed(2);
 }
 
+/** V8 sampling profiler over a measurement window (--cpuprofile). The resulting
+ *  .cpuprofile (loadable in Chrome DevTools > Performance) attributes long render
+ *  frames to GC, JS self time, or idle — the render spikes survived two pipeline
+ *  precompile hypotheses, so classification must come from a profile, not guesses. */
+async function startCpuProfile(page: Page): Promise<CDPSession> {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Profiler.enable");
+  await session.send("Profiler.setSamplingInterval", { interval: 200 });
+  await session.send("Profiler.start");
+  return session;
+}
+
+async function stopCpuProfile(session: CDPSession, outPath: string): Promise<void> {
+  const { profile } = await session.send("Profiler.stop") as { profile: unknown };
+  writeFileSync(outPath, JSON.stringify(profile));
+  await session.detach().catch(() => undefined);
+}
+
 /** Phase stats flattened into QA `areas` maps (area.field addressing, see qaTypes.ts). */
 function qaAreasFromWindow(summary: WindowSummary): Record<string, Record<string, number>> {
   const p95: Record<string, number> = {};
@@ -577,6 +616,9 @@ async function main(): Promise<void> {
     const segments = routeSegments(moveFrames * speed);
     const countersBefore = await readCounters(page, STREAMING_DELTA_COUNTERS);
     await resetPerfProbe(page);
+    const profileSession = args["cpuprofile"] !== undefined && args["cpuprofile"] !== "0"
+      ? await startCpuProfile(page)
+      : null;
     await startMoveDriver(page, speed, segments);
     let driver = await readMoveDriver(page);
     const moveDeadline = Date.now() + Math.max(180_000, moveFrames * 300);
@@ -585,6 +627,10 @@ async function main(): Promise<void> {
       driver = await readMoveDriver(page);
     }
     await stopMoveDriver(page);
+    if (profileSession) {
+      await stopCpuProfile(profileSession, join(outDir, "moving.cpuprofile"));
+      console.log(`[perf-move] wrote ${join(outDir, "moving.cpuprofile")}`);
+    }
     if (driver.error) throw new Error(`move driver failed: ${driver.error}`);
     const movingSamples = await readPerfSamples(page);
     const countersAfter = await readCounters(page, STREAMING_DELTA_COUNTERS);
@@ -624,9 +670,13 @@ async function main(): Promise<void> {
       }
     }
 
+    const git = gitIdentity();
     const summary = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       startedAt: new Date().toISOString(),
+      gitSha: git.sha,
+      gitDirty: git.dirty,
+      viewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
       baseUrl,
       url,
       launchRecipe: recipe,
@@ -635,8 +685,10 @@ async function main(): Promise<void> {
       startupConverged,
       static: staticSummary,
       moving: movingSummary,
-      staticWorstFrames: worstFrames(staticSamples),
-      movingWorstFrames: worstFrames(movingSamples),
+      staticWorstFrames: worstFramesBy(staticSamples, "frameMs"),
+      movingWorstFrames: worstFramesBy(movingSamples, "frameMs"),
+      movingWorstByRender: worstFramesBy(movingSamples, "renderMs"),
+      movingWorstByViews: worstFramesBy(movingSamples, "selectionSub.views"),
       streamingDeltas,
       streamingExercised,
       checkpoints: checkpoints.map((cp) => ({ ...cp, png: cp.png.replaceAll("\\", "/") })),
@@ -686,6 +738,7 @@ async function main(): Promise<void> {
     const md = [
       "# clod-poc infinite-islands movement perf",
       "",
+      `git: ${git.sha.slice(0, 10)}${git.dirty === null ? " (dirty state unknown)" : git.dirty ? " (dirty tree)" : ""}`,
       `route: ${(moveFrames * speed).toFixed(0)}m at ${speed} m/frame over ${moveFrames} frames — streaming exercised: **${streamingExercised}** ` +
       `(bubble +${streamingDeltas["live_bubble_built_total"]}, stream +${streamingDeltas["live_clod_stream_apply_pages_total"]})`,
       `startup converged: ${startupConverged}`,

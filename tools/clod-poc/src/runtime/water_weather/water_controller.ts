@@ -51,6 +51,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     worldBounds: infiniteWorldWater
       ? { cellsX: 0, cellsZ: 0 }
       : { cellsX: deps.worldCells, cellsZ: deps.worldCells },
+    staticTopology: deps.waterConfig.staticTopology
+      && deps.searchParams.get("waterStaticClipmap") !== "0",
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);

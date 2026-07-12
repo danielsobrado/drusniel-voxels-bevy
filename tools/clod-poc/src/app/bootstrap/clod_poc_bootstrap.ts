@@ -484,7 +484,13 @@ export async function bootstrapClodPoc() {
             infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
             if (farSummaryIntegration) timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera, worldCenter));
             if (naadfIntegration) timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
-            if (farSummaryIntegration && infiniteFarShell) {
+            // In far-clipmap replace mode the shell mesh is hidden and out of the scene —
+            // the clipmap owns the far band — so the shell's sliced CPU height rebuild
+            // would resample every vertex of a mesh nothing renders. Skip refreshes and
+            // updates while hidden; the stale commit revision makes the first visible
+            // frame trigger a refresh if a debug toggle ever re-shows the shell.
+            const farShellRendered = infiniteFarShell !== undefined && infiniteFarShell.mesh.visible;
+            if (farSummaryIntegration && infiniteFarShell && farShellRendered) {
               framesSinceShellRefresh++;
               if (framesSinceShellRefresh >= SHELL_REFRESH_INTERVAL_FRAMES && farSummaryIntegration.cache.hasNewCommitsSince(shellRefreshCommitRev)) {
                 shellRefreshCommitRev = farSummaryIntegration.cache.commitRevisionAt();
@@ -494,7 +500,7 @@ export async function bootstrapClodPoc() {
             }
             // Anchor streaming systems to the canonical world center (player / orbit target) so
             // terrain, far shell, shadows, and texture windows stay concentric with the near bubble.
-            if (infiniteFarShell) timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(worldCenter.x, worldCenter.z, frameIndex));
+            if (infiniteFarShell && farShellRendered) timeFarSummarySubphase("farSumShellMs", () => infiniteFarShell.update(worldCenter.x, worldCenter.z, frameIndex));
             if (terrainView.shadowProxyController) timeFarSummarySubphase("farSumShadowProxyMs", () => terrainView.shadowProxyController!.updateFrame(worldCenter.x, worldCenter.z));
             if (postRenderer.state.terrainMaterialSource === "procedural" && biomeTextureStreaming) {
               timeFarSummarySubphase("farSumBiomeStreamMs", () => biomeTextureStreaming.update({ x: worldCenter.x, z: worldCenter.z, frameIndex }));

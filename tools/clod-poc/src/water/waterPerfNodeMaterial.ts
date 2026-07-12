@@ -26,6 +26,7 @@ import { makeWaterUniforms, type WaterMaterialHandle, type WaterMaterialParams }
 import type { WaterVisualConfig } from "./waterConfig.js";
 import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 import { waterLevelColorTsl } from "./water_node_level_color.js";
+import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -75,10 +76,14 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   const uRiverShallowBankTintStrength = uniform(riverMaterial.shallowBankTintStrength) as TslNode;
   const uRiverCenterChannelDarkening = uniform(riverMaterial.centerChannelDarkening) as TslNode;
 
-  const aTerrainY = attribute("aTerrainY", "float") as TslNode;
-  const aBodyMask = attribute("aBodyMask", "float") as TslNode;
-  const aBodyKind = attribute("aBodyKind", "float") as TslNode;
-  const aFlow = attribute("aFlow", "vec4") as TslNode;
+  // Static-topology mode (Phase 5b): per-vertex water data comes from the level's
+  // toroidal texel textures via the shared vertex-stage builder instead of CPU-filled
+  // attributes; the wall discard replaces the legacy index-time quad guard.
+  const staticGrid = params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
+  const aTerrainY = (staticGrid ? staticGrid.terrainY : attribute("aTerrainY", "float")) as TslNode;
+  const aBodyMask = (staticGrid ? staticGrid.bodyMask : attribute("aBodyMask", "float")) as TslNode;
+  const aBodyKind = (staticGrid ? staticGrid.bodyKind : attribute("aBodyKind", "float")) as TslNode;
+  const aFlow = (staticGrid ? staticGrid.flow : attribute("aFlow", "vec4")) as TslNode;
   const aLevel = attribute("aLevel", "float") as TslNode;
   const worldPos: TslNode = positionWorld;
 
@@ -95,7 +100,8 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
       .and(worldPos.z.greaterThan(uInnerRect.y))
       .and(worldPos.z.lessThan(uInnerRect.w));
     const depth: TslNode = worldPos.y.sub(aTerrainY);
-    or(outsideWorld, or(insideInner, or(depth.lessThanEqual(float(0)), aBodyMask.lessThanEqual(float(0))))).discard();
+    const baseDiscard: TslNode = or(outsideWorld, or(insideInner, or(depth.lessThanEqual(float(0)), aBodyMask.lessThanEqual(float(0)))));
+    (staticGrid ? or(baseDiscard, staticGrid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
 
     // Beer–Lambert style depth response: smooth shallow->deep gradient instead of a
     // linear ramp that saturates to the deep colour within ~1 depth-scale (which read as
@@ -183,6 +189,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   });
 
   const material = new MeshBasicNodeMaterial();
+  if (staticGrid) material.positionNode = staticGrid.positionNode;
   material.fragmentNode = fragment();
   material.transparent = true;
   material.depthWrite = params.visual.depthWrite;
@@ -233,6 +240,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
 
   return {
     material,
+    ...(staticGrid ? { staticGrid: staticGrid.handle } : {}),
     setTime: (t) => { uTime.value = t; },
     setDebugMode: (mode) => { uDebugMode.value = mode; },
     setInnerRect: (minX, minZ, maxX, maxZ) => { uInnerRect.value.set(minX, minZ, maxX, maxZ); },

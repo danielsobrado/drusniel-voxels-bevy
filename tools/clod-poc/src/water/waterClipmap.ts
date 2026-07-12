@@ -6,8 +6,19 @@
 // `cell_size * snap_cells`. Vertex storage is TOROIDAL: world column c / row r lives at
 // slot (c mod verts, r mod verts), so a snap only resamples the newly exposed columns
 // and rows from the WaterField — the dominant cost is the per-vertex hydrology sample,
-// and this bounds it by movement instead of ring area. The index buffer is rebuilt per
-// snap (cheap, no field sampling) because slot connectivity crosses the wrap seam.
+// and this bounds it by movement instead of ring area.
+//
+// Two per-level modes share that toroidal sampling:
+// - STATIC topology (Phase 5b, materials that consume params.staticGrid — both TSL
+//   WebGPU materials): samples land in two toroidal texel textures
+//   (waterClipmapTexels.ts), the geometry (grid indices + full index buffer) never
+//   changes, and a snap costs texel writes plus two origin uniforms. No index rebuild,
+//   no attribute re-upload; dry areas resolve per fragment (depth<=0 discard plus the
+//   shader-side wall guard in water_node_static_grid.ts).
+// - LEGACY buffers (WebGL shader material): CPU vertex attributes; the index buffer is
+//   rebuilt per snap (cheap, no field sampling) because slot connectivity crosses the
+//   wrap seam, and conservative any-corner-wet quad emission happens at index time.
+//
 // The shader discards pixels inside the previous (finer) level's world rectangle so
 // only the ring between levels is drawn, avoiding overdraw and seams.
 //
@@ -20,6 +31,7 @@ import type { WaterConfig } from "./waterConfig.js";
 import { WATER_DEBUG_MODES, type WaterDebugModeId, type WaterVisualConfig } from "./waterConfig.js";
 import type { WaterField } from "./waterField.js";
 import type { WaterMaterialHandle, WaterMaterialParams } from "./waterMaterial.js";
+import { createStaticWaterGridGeometry, WaterLevelTexelStore } from "./waterClipmapTexels.js";
 
 export interface WaterRect {
   minX: number;
@@ -41,6 +53,9 @@ export interface WaterClipmapOptions {
   sunDirection: THREE.Vector3;
   cameraPosition: THREE.Vector3;
   worldBounds: WaterWorldBounds;
+  /** Offer static-topology resources to the material (config water.static_topology).
+   *  Materials that ignore them (WebGL) keep the legacy per-snap index rebuild path. */
+  staticTopology?: boolean;
 }
 
 const DEGENERATE_INNER: WaterRect = { minX: 1e30, minZ: 1e30, maxX: -1e30, maxZ: -1e30 };
@@ -57,8 +72,10 @@ export interface WaterClipmapUpdateStats {
   rowsSampled: number;
   /** Individual WaterField samples taken (the dominant CPU cost). */
   fieldSamples: number;
-  /** Index-buffer rebuilds (no field sampling; bounded CPU + one upload each). */
+  /** Index-buffer rebuilds (legacy-mode levels only; static-topology levels never rebuild). */
   indexRebuilds: number;
+  /** Snaps handled by static-topology levels (texel writes + origin uniforms only). */
+  staticSnaps: number;
 }
 
 export function createWaterClipmapUpdateStats(): WaterClipmapUpdateStats {
@@ -70,6 +87,7 @@ export function createWaterClipmapUpdateStats(): WaterClipmapUpdateStats {
     rowsSampled: 0,
     fieldSamples: 0,
     indexRebuilds: 0,
+    staticSnaps: 0,
   };
 }
 
@@ -92,13 +110,14 @@ class WaterLevel {
   private readonly field: WaterField;
   private readonly worldBounds: WaterWorldBounds;
   private readonly stats: WaterClipmapUpdateStats;
-  private readonly positions: Float32Array;
-  private readonly terrainY: Float32Array;
-  private readonly bodyMask: Float32Array;
-  private readonly bodyKind: Float32Array;
-  private readonly flow: Float32Array;
-  private readonly levelAttr: Float32Array;
-  private readonly indices: Uint32Array;
+  /** Static-topology texel storage; null selects the legacy vertex-buffer path. */
+  private readonly texels: WaterLevelTexelStore | null;
+  private readonly positions: Float32Array | null;
+  private readonly terrainY: Float32Array | null;
+  private readonly bodyMask: Float32Array | null;
+  private readonly bodyKind: Float32Array | null;
+  private readonly flow: Float32Array | null;
+  private readonly indices: Uint32Array | null;
   // Toroidal slot mapping: world column c lives at slot (c mod vertsPerEdge); these
   // record which world column/row each slot currently holds so a snap can resample
   // only slots whose mapping changed.
@@ -120,6 +139,7 @@ class WaterLevel {
     handle: WaterMaterialHandle,
     worldBounds: WaterWorldBounds,
     stats: WaterClipmapUpdateStats,
+    texels: WaterLevelTexelStore | null,
   ) {
     this.index = index;
     this.cellSize = cellSize;
@@ -129,32 +149,44 @@ class WaterLevel {
     this.handle = handle;
     this.worldBounds = worldBounds;
     this.stats = stats;
+    this.texels = handle.staticGrid ? texels : null;
 
     const vertsPerEdge = cellsPerLevel + 1;
-    const vertexCount = vertsPerEdge * vertsPerEdge;
-    this.positions = new Float32Array(vertexCount * 3);
-    this.terrainY = new Float32Array(vertexCount);
-    this.bodyMask = new Float32Array(vertexCount);
-    this.bodyKind = new Float32Array(vertexCount);
-    this.flow = new Float32Array(vertexCount * 4);
-    this.levelAttr = new Float32Array(vertexCount);
-    this.levelAttr.fill(index);
     this.slotCol = new Float64Array(vertsPerEdge).fill(Number.NaN);
     this.slotRow = new Float64Array(vertsPerEdge).fill(Number.NaN);
     this.dirtyCol = new Uint8Array(vertsPerEdge);
     this.dirtyRow = new Uint8Array(vertsPerEdge);
 
-    this.indices = new Uint32Array(cellsPerLevel * cellsPerLevel * 6);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
-    geometry.setAttribute("aTerrainY", new THREE.BufferAttribute(this.terrainY, 1));
-    geometry.setAttribute("aBodyMask", new THREE.BufferAttribute(this.bodyMask, 1));
-    geometry.setAttribute("aBodyKind", new THREE.BufferAttribute(this.bodyKind, 1));
-    geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 4));
-    geometry.setAttribute("aLevel", new THREE.BufferAttribute(this.levelAttr, 1));
-    geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
-    geometry.setDrawRange(0, 0);
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Number.MAX_VALUE);
+    let geometry: THREE.BufferGeometry;
+    if (this.texels) {
+      this.positions = null;
+      this.terrainY = null;
+      this.bodyMask = null;
+      this.bodyKind = null;
+      this.flow = null;
+      this.indices = null;
+      geometry = createStaticWaterGridGeometry(cellsPerLevel, index);
+    } else {
+      const vertexCount = vertsPerEdge * vertsPerEdge;
+      this.positions = new Float32Array(vertexCount * 3);
+      this.terrainY = new Float32Array(vertexCount);
+      this.bodyMask = new Float32Array(vertexCount);
+      this.bodyKind = new Float32Array(vertexCount);
+      this.flow = new Float32Array(vertexCount * 4);
+      const levelAttr = new Float32Array(vertexCount);
+      levelAttr.fill(index);
+      this.indices = new Uint32Array(cellsPerLevel * cellsPerLevel * 6);
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
+      geometry.setAttribute("aTerrainY", new THREE.BufferAttribute(this.terrainY, 1));
+      geometry.setAttribute("aBodyMask", new THREE.BufferAttribute(this.bodyMask, 1));
+      geometry.setAttribute("aBodyKind", new THREE.BufferAttribute(this.bodyKind, 1));
+      geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 4));
+      geometry.setAttribute("aLevel", new THREE.BufferAttribute(levelAttr, 1));
+      geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
+      geometry.setDrawRange(0, 0);
+      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Number.MAX_VALUE);
+    }
 
     this.mesh = new THREE.Mesh(geometry, handle.material);
     this.mesh.name = `water-clipmap-L${index}`;
@@ -166,6 +198,12 @@ class WaterLevel {
   get object(): THREE.Object3D { return this.mesh; }
   get currentRect(): WaterRect { return this.rect; }
   get materialHandle(): WaterMaterialHandle { return this.handle; }
+  get staticTopology(): boolean { return this.texels !== null; }
+
+  disposeResources(): void {
+    this.texels?.dispose();
+    this.mesh.geometry.dispose();
+  }
 
   updateOrigin(cameraX: number, cameraZ: number, finerRect: WaterRect): void {
     const originX = Math.floor(cameraX / this.snap) * this.snap;
@@ -189,9 +227,10 @@ class WaterLevel {
     };
   }
 
-  /** Resample only slots whose world column/row mapping changed, then rebuild indices. */
+  /** Resample only slots whose world column/row mapping changed. Static levels write
+   *  texels + origin uniforms; legacy levels write vertex buffers + rebuild indices. */
   private refill(baseCol: number, baseRow: number): void {
-    const { cellsPerLevel, field, cellSize, positions, terrainY, bodyMask, bodyKind, flow, worldBounds, stats } = this;
+    const { cellsPerLevel, stats } = this;
     const vertsPerEdge = cellsPerLevel + 1;
     this.dirtyCol.fill(0);
     this.dirtyRow.fill(0);
@@ -219,6 +258,52 @@ class WaterLevel {
       else stats.partialRefills++;
       stats.columnsSampled += dirtyCols;
       stats.rowsSampled += dirtyRows;
+    }
+    if (this.texels) this.refillStatic(baseCol, baseRow, dirtyCols + dirtyRows > 0);
+    else this.refillLegacy(baseCol, baseRow, dirtyCols + dirtyRows > 0);
+  }
+
+  private refillStatic(baseCol: number, baseRow: number, anyDirty: boolean): void {
+    const { cellsPerLevel, field, cellSize, worldBounds, stats } = this;
+    const texels = this.texels!;
+    const vertsPerEdge = cellsPerLevel + 1;
+    if (anyDirty) {
+      for (let sz = 0; sz < vertsPerEdge; sz++) {
+        const rowDirty = this.dirtyRow[sz] === 1;
+        const worldZ = this.slotRow[sz] * cellSize;
+        for (let sx = 0; sx < vertsPerEdge; sx++) {
+          if (!rowDirty && this.dirtyCol[sx] === 0) continue;
+          const worldX = this.slotCol[sx] * cellSize;
+          const slot = sz * vertsPerEdge + sx;
+          stats.fieldSamples++;
+          if (waterPointInBounds(worldX, worldZ, worldBounds)) {
+            texels.writeSample(slot, field.sampleForCellSize(worldX, worldZ, cellSize));
+          } else {
+            texels.writeDry(slot);
+          }
+        }
+      }
+      texels.commit();
+    }
+    stats.staticSnaps++;
+    this.handle.staticGrid!.setOrigin(
+      baseCol * cellSize,
+      baseRow * cellSize,
+      torusSlot(baseCol, vertsPerEdge),
+      torusSlot(baseRow, vertsPerEdge),
+    );
+    this.mesh.visible = texels.wetVertexCount > 0;
+  }
+
+  private refillLegacy(baseCol: number, baseRow: number, anyDirty: boolean): void {
+    const { cellsPerLevel, field, cellSize, worldBounds, stats } = this;
+    const positions = this.positions!;
+    const terrainY = this.terrainY!;
+    const bodyMask = this.bodyMask!;
+    const bodyKind = this.bodyKind!;
+    const flow = this.flow!;
+    const vertsPerEdge = cellsPerLevel + 1;
+    if (anyDirty) {
       for (let sz = 0; sz < vertsPerEdge; sz++) {
         const rowDirty = this.dirtyRow[sz] === 1;
         const worldZ = this.slotRow[sz] * cellSize;
@@ -270,12 +355,17 @@ class WaterLevel {
   }
 
   /**
-   * Rebuild the index buffer over world quads. Slot connectivity crosses the toroidal
-   * wrap seam, so indices cannot be static — but this pass takes no field samples and is
-   * bounded CPU per snap.
+   * Rebuild the index buffer over world quads (legacy mode only). Slot connectivity
+   * crosses the toroidal wrap seam, so indices cannot be static — but this pass takes
+   * no field samples and is bounded CPU per snap.
    */
   private refillIndices(baseCol: number, baseRow: number): number {
-    const { cellsPerLevel, positions, terrainY, bodyMask, flow, worldBounds, indices } = this;
+    const { cellsPerLevel, worldBounds } = this;
+    const positions = this.positions!;
+    const terrainY = this.terrainY!;
+    const bodyMask = this.bodyMask!;
+    const flow = this.flow!;
+    const indices = this.indices!;
     const vertsPerEdge = cellsPerLevel + 1;
     const maskEpsilon = 1e-4;
     let p = 0;
@@ -370,6 +460,9 @@ export class WaterClipmap {
     this.scene.add(this.root);
 
     this.levels = opts.config.cellSizes.map((cellSize, index) => {
+      const texels = opts.staticTopology !== false
+        ? new WaterLevelTexelStore(opts.config.cellsPerLevel + 1, cellSize)
+        : null;
       const handle = opts.createMaterial({
         visual: this.visual,
         debugMode: this.debugMode,
@@ -377,7 +470,9 @@ export class WaterClipmap {
         cameraPosition: this.cameraPosition,
         worldBounds: opts.worldBounds,
         caustics: opts.config.caustics,
+        ...(texels ? { staticGrid: texels.materialParams() } : {}),
       });
+      if (texels && !handle.staticGrid) texels.dispose();
       const level = new WaterLevel(
         index,
         cellSize,
@@ -387,6 +482,7 @@ export class WaterClipmap {
         handle,
         opts.worldBounds,
         this.updateCost,
+        handle.staticGrid ? texels : null,
       );
       handle.setDebugMode(this.debugMode);
       handle.setClipmapTint(this.clipmapTint);
@@ -470,7 +566,7 @@ export class WaterClipmap {
   dispose(): void {
     for (const level of this.levels) {
       level.materialHandle.dispose();
-      (level.object as THREE.Mesh).geometry.dispose();
+      level.disposeResources();
     }
     this.root.clear();
     this.scene.remove(this.root);

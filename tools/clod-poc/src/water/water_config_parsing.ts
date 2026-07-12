@@ -30,6 +30,7 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
     cellsPerLevel: readNumber(waterRecord.cells_per_level ?? waterRecord.cellsPerLevel, DEFAULT_WATER_CONFIG.cellsPerLevel),
     cellSizes: readNumberArray(waterRecord.cell_sizes ?? waterRecord.cellSizes, DEFAULT_WATER_CONFIG.cellSizes),
     snapCells: readNumber(waterRecord.snap_cells ?? waterRecord.snapCells, DEFAULT_WATER_CONFIG.snapCells),
+    staticTopology: readBoolean(waterRecord.static_topology ?? waterRecord.staticTopology, DEFAULT_WATER_CONFIG.staticTopology),
     drySentinelDepth: readNumber(waterRecord.dry_sentinel_depth ?? waterRecord.drySentinelDepth, DEFAULT_WATER_CONFIG.drySentinelDepth),
     fakeBodies,
     hydrology,

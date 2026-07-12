@@ -119,6 +119,10 @@ export interface WaterConfig {
   cellsPerLevel: number;
   cellSizes: number[];
   snapCells: number;
+  /** Offer static clipmap topology to materials that support it (Phase 5b): per-level
+   *  toroidal texel textures + a fixed index buffer, so snaps stop rebuilding indices
+   *  and re-uploading vertex buffers. false forces the legacy CPU vertex-buffer path. */
+  staticTopology: boolean;
   drySentinelDepth: number;
   fakeBodies: {
     carveTerrain: boolean;

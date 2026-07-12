@@ -72,6 +72,7 @@ export const DEFAULT_WATER_CONFIG: WaterConfig = {
   cellsPerLevel: DEFAULT_WATER_CELLS_PER_LEVEL,
   cellSizes: DEFAULT_WATER_CELL_SIZES,
   snapCells: 2,
+  staticTopology: true,
   drySentinelDepth: 2.0,
   fakeBodies: {
     carveTerrain: true,

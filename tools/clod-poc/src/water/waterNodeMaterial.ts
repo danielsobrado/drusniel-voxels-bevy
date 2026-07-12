@@ -53,6 +53,7 @@ import { getWaterScreenResources } from "./waterScreenResources.js";
 import { DEFAULT_CAUSTICS_CONFIG, type CausticsConfig } from "./causticsConfig.js";
 import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 import { waterLevelColorTsl } from "./water_node_level_color.js";
+import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -137,9 +138,12 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uCausticsSunGateStart = uniform(causticsCfg.sunGateStart) as TslNode;
   const uCausticsSunGateEnd = uniform(causticsCfg.sunGateEnd) as TslNode;
 
-  const aTerrainY = attribute("aTerrainY", "float") as TslNode;
-  const aBodyMask = attribute("aBodyMask", "float") as TslNode;
-  const aFlow = attribute("aFlow", "vec4") as TslNode;
+  // Static-topology mode (Phase 5b): shared vertex-stage texel sampling, matching
+  // waterPerfNodeMaterial so the HQ and perf paths cannot drift.
+  const staticGrid = params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
+  const aTerrainY = (staticGrid ? staticGrid.terrainY : attribute("aTerrainY", "float")) as TslNode;
+  const aBodyMask = (staticGrid ? staticGrid.bodyMask : attribute("aBodyMask", "float")) as TslNode;
+  const aFlow = (staticGrid ? staticGrid.flow : attribute("aFlow", "vec4")) as TslNode;
   const aLevel = attribute("aLevel", "float") as TslNode;
 
   const worldPos: TslNode = positionWorld;
@@ -160,7 +164,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       .and(pz.lessThan(uInnerRect.w));
     const depth: TslNode = worldPos.y.sub(aTerrainY);
     // Discard clipmap-hole pixels, dry vertices, outside world, and outside body mask.
-    or(
+    const baseDiscard: TslNode = or(
       outsideWorld,
       or(
         insideInner,
@@ -169,7 +173,8 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
           aBodyMask.lessThanEqual(float(0))
         )
       )
-    ).discard();
+    );
+    (staticGrid ? or(baseDiscard, staticGrid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
 
     // Beer–Lambert style depth response, matching waterPerfNodeMaterial and the WebGL
     // fragment so water colour does not depend on which material path renders it.
@@ -472,6 +477,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   });
 
   const material = new MeshBasicNodeMaterial();
+  if (staticGrid) material.positionNode = staticGrid.positionNode;
   material.fragmentNode = fragment();
   material.transparent = true;
   material.depthWrite = false;
@@ -533,6 +539,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
 
   return {
     material,
+    ...(staticGrid ? { staticGrid: staticGrid.handle } : {}),
     setTime: (t) => { u.uTime.value = t; uTime.value = t; },
     setDebugMode: (mode) => { u.uDebugMode.value = mode; uDebugMode.value = mode; },
     setInnerRect: (minX, minZ, maxX, maxZ) => {

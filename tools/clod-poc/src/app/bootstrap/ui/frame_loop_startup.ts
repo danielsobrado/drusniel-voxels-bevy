@@ -320,6 +320,34 @@ export function runFrameLoopStartup(
   // the deadline. Remaining nodes wait; a node still unwarmed at root-switch time just
   // falls back to switch-frame creation.
   const VIEW_PREWARM_BUDGET_MS = 3;
+  // ?viewPrewarmCompile=0 disables the compileAsync half of pre-warming for A/B
+  // attribution. The frozen-build pair fable90-b2-compile-on/off measured OFF as
+  // uniformly worse (moving fps p5 21.9 -> 13.3, p95 45.8 -> 75.5), so ON is the default:
+  // Dawn's async pipeline path compiles driver PSOs off-thread, and pipelines first
+  // *used* later then hit warm caches instead of stalling the submit.
+  const viewPrewarmCompileEnabled = searchParams.get("viewPrewarmCompile") !== "0";
+  // One whole-scene compileAsync once the world has largely materialized: the movement-
+  // start camera turn otherwise first-draws never-rendered material families in a single
+  // submit, observed as a 300-800ms native (program) block in the CPU profile. PSOs are
+  // per material variant, so one visible instance of each family warms the whole class.
+  // Opt-in (?sceneCompileWarm=1): its only measurement so far ran while the machine was
+  // under unrelated load and is not attributable, so the default stays off until a clean
+  // A/B supports it.
+  const SCENE_PIPELINE_WARM_FRAME = 600;
+  const sceneCompileWarmEnabled = searchParams.get("sceneCompileWarm") === "1";
+  let sceneCompileWarmFired = false;
+  let sceneCompileWarmFrame = 0;
+  const maybeWarmScenePipelines = (): void => {
+    if (sceneCompileWarmFired || !sceneCompileWarmEnabled || !input.app.isWebGpu) return;
+    sceneCompileWarmFrame++;
+    if (sceneCompileWarmFrame < SCENE_PIPELINE_WARM_FRAME) return;
+    sceneCompileWarmFired = true;
+    const compile = (renderer as unknown as {
+      compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera) => Promise<unknown>;
+    }).compileAsync;
+    if (typeof compile !== "function") return;
+    void compile.call(renderer, scene, camera).catch(() => undefined);
+  };
   const precompileViewPipelines = (mesh: THREE.Mesh): void => {
     // WebGPU pipelines, bind groups, and geometry uploads otherwise happen at the mesh's
     // first *visible* draw — all at once on the root-switch frame (renderMs spikes in the
@@ -328,7 +356,7 @@ export function runFrameLoopStartup(
     // synchronously and skips invisible objects, so the mesh is made visible only for the
     // duration of the call — the actual render happens later in the frame, after the flag
     // is already restored.
-    if (!input.app.isWebGpu) return;
+    if (!viewPrewarmCompileEnabled || !input.app.isWebGpu) return;
     const compile = (renderer as unknown as {
       compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera, targetScene?: THREE.Scene | null) => Promise<unknown>;
     }).compileAsync;
@@ -407,6 +435,7 @@ export function runFrameLoopStartup(
       lastStreamCenterZ = center.z;
     }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
+    maybeWarmScenePipelines();
     drainViewPrewarmQueue();
     updateSelection();
   };
