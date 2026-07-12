@@ -16,6 +16,11 @@ import {
   type VoxelEditSnapshot,
 } from "../../terrain/terrain.js";
 import { setTerrainFieldCoreConfig } from "../../gpu/terrain_field_core.js";
+import {
+  buildStartupHeightfieldRaster,
+  makeStartupHeightfieldSampler,
+  startupHeightfieldDescriptor,
+} from "../../terrain/startup_heightfield_raster.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import {
   initClodCacheContext,
@@ -470,6 +475,24 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   });
   const unifiedHydrology = hydrologySystem?.unifiedStartupActive() === true;
   startupTimings["startup.hydrology_unified_startup"] = unifiedHydrology ? 1 : 0;
+
+  // Unified mode has no carved-grid override, so without a cache every mesher/worker/live
+  // sample would evaluate the full procedural field. Rasterize the field once at exact cell
+  // resolution and install it as the shared build-time sampler (main thread + clod worker).
+  // Geometry authority stays the procedural field: lattice samples are exact, so vertex
+  // positions are unchanged; the raster descriptor rides the terrain-source cache key.
+  const heightfieldRasterRequested = unifiedHydrology
+    && worldCells <= 4096
+    && booleanParam(searchParams, ["heightfieldRaster", "heightfield_raster"], true);
+  const startupHeightfield = heightfieldRasterRequested
+    ? measure(startupTimings, "startup.heightfield_raster_ms", () => buildStartupHeightfieldRaster(worldCells))
+    : null;
+  if (startupHeightfield) {
+    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(startupHeightfield));
+    startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
+  }
+  startupTimings["startup.heightfield_raster_enabled"] = startupHeightfield ? 1 : 0;
+
   const hydrologyTerrain = hydrologySystem && !unifiedHydrology
     ? {
         res: hydrologySystem.grid.res,
@@ -494,6 +517,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     generatorVersion: cfg.meshopt_package_version,
     digRevision: getDigEditRevision(),
     hydrologyTerrain,
+    startupHeightfield: startupHeightfieldDescriptor(startupHeightfield),
     borderCoastOceanConfig: effectiveBorderCoast,
     waterConfig: {
       enabled: waterConfig.enabled,
@@ -539,6 +563,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       effectiveBorderCoast,
       isCacheSessionDisabled(),
       terrainSource,
+      startupHeightfield,
     ));
   const workerCacheStats = getWorkerCacheBuildStats();
   startupTimings["startup_build_world_ms"] = startupTimings["startup.build_world_ms"];

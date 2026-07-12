@@ -4,6 +4,7 @@ import type { WaterConfig } from "../water/waterConfig.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
 import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
+import type { StartupHeightfieldDescriptor } from "../terrain/startup_heightfield_raster.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
@@ -14,7 +15,12 @@ const textEncoder = new TextEncoder();
 // weld misses on streamed roots at large world coordinates); welded geometry can differ.
 // v4: unified startup hydrology removes the serialized finite carve from terrain geometry;
 // cache identity must distinguish that authority from the legacy carved-grid source.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v4";
+// v5: unified-mode startup builds sample the terrain field through the exact-res startup
+// heightfield raster. Vertex positions stay bit-identical to direct procedural evaluation
+// (mesher corners are integer-lattice, where the raster is exact), but normals sampled at
+// fractional offsets go through bilinear reconstruction, so page bytes can differ. The
+// raster is derived from already-keyed inputs; identity carries its descriptor only.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v5";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -90,6 +96,8 @@ export interface TerrainSourceInputs {
   generatorVersion: string;
   digRevision: number;
   hydrologyTerrain: SerializedHydrologyTerrain | null;
+  /** Descriptor of the exact-res startup heightfield raster; null when builds sample the field directly. */
+  startupHeightfield?: StartupHeightfieldDescriptor | null;
   borderCoastOceanConfig: BorderCoastOceanConfig;
   waterConfig: Pick<WaterConfig, "enabled" | "source"> & {
     fakeBodies: { carveTerrain: boolean };
@@ -120,6 +128,7 @@ export function normalizeTerrainSourceInputs(
     generatorVersion: input.generatorVersion ?? "unknown",
     digRevision: input.digRevision ?? 0,
     hydrologyTerrain: input.hydrologyTerrain ?? null,
+    startupHeightfield: input.startupHeightfield ?? null,
     borderCoastOceanConfig: input.borderCoastOceanConfig ?? DEFAULT_BORDER_COAST_OCEAN_CONFIG,
     waterConfig: {
       enabled: input.waterConfig?.enabled ?? false,
@@ -176,6 +185,7 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     generatorVersion: source.generatorVersion,
     digRevision: source.digRevision,
     hydrologyHash,
+    startupHeightfield: source.startupHeightfield ?? null,
     borderCoastHash,
     water: {
       enabled: source.waterConfig.enabled,

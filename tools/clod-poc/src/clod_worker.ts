@@ -57,9 +57,10 @@ import type {
 import {
   errorResponse,
   installBorderCoastRuntime,
-  installHydrologyTerrain,
+  installWorkerTerrainOverride,
   postWorkerMessage,
 } from "./clod_worker_runtime.js";
+import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 
 const ctx = self as unknown as {
   postMessage: (message: ClodWorkerResponse, transfer?: Transferable[]) => void;
@@ -68,6 +69,7 @@ const ctx = self as unknown as {
 
 let cfg: ClodPagesConfig | null = null;
 let hydrologyTerrain: SerializedHydrologyTerrain | null = null;
+let startupHeightfield: StartupHeightfieldRaster | null = null;
 let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
 let index: NodeIndex | null = null;
@@ -269,7 +271,8 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   setTerrainFieldCoreConfig(request.terrainFieldConfig ?? null);
   replaceVoxelEdits(request.voxelEdits);
   hydrologyTerrain = request.hydrologyTerrain ?? null;
-  installHydrologyTerrain(hydrologyTerrain);
+  startupHeightfield = request.startupHeightfield ?? null;
+  installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain);
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
   pendingChildCoordsByLevel.clear();
@@ -499,11 +502,11 @@ function buildStreamRootNode(
   world: { cellsX: number; cellsZ: number; finite: false },
 ): ClodPageNode {
   if (!cfg) throw new Error("CLOD worker received buildStreamRoots before build completion");
-  installHydrologyTerrain(hydrologyTerrain, { boundedToStartupWorld: true });
+  installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, { boundedToStartupWorld: true });
   try {
     return buildStandaloneClodRootNode(level, px, pz, cfg, world);
   } finally {
-    installHydrologyTerrain(hydrologyTerrain);
+    installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain);
   }
 }
 
