@@ -53,10 +53,12 @@ switch.
   and fall back to the procedural field outside.
 - **GPU CLOD streamed roots**: use the direct procedural WGSL field. They intentionally do not own
   a raster resource.
-- **Optional Phase 2 tile cache**: `heightfield_tile_client_runtime.ts` wraps the initialized
-  `ClodWorkerClient` build lifecycle. With `heightTiles=1`, it creates the tile cache after the
-  initial world build, reuses the same worker for batches of at most two tiles, and updates once per
-  rendered engine frame. Floating-origin offsets are added back before planning tile residency.
+- **Optional Phase 2 tile cache**: `heightfield_tile_client_runtime.ts` extends the initialized
+  `ClodWorkerClient` lifecycle. With `heightTiles=1`, it creates the tile cache after the initial
+  world build and reuses the same worker for batches of at most two tiles. `frame_loop_startup.ts`
+  plans residency beside the canonical streamed-root update. Worker dispatch is deferred until the
+  current frame has published streamed-root counters and remains blocked while root safety,
+  inflight, pending, or apply work exists.
 
 The main thread retains its raster. `clod_worker_client_helpers.ts` creates one explicit copy and
 transfers that copy's `ArrayBuffer` to the worker. This replaces the opaque structured-clone path
@@ -66,7 +68,7 @@ and exposes copy and transfer timings.
 
 Each canonical cache tile covers 256×256 m and stores a 257×257 `Float64Array`. The duplicated final
 row and column are intentional: adjacent tiles share exact border samples without neighbour access.
-At the default cap of 64 resident tiles, height payload residency is approximately 34 MiB.
+At the default cap of 64 resident tiles, height payload residency is 32.25 MiB (33.8 MB).
 
 `config/heightfield_tiles.yaml` is the single source of truth:
 
