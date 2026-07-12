@@ -1,10 +1,13 @@
 import { baseSurfaceHeight, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import { makeStartupHeightfieldSampler, type StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import type { ClodWorkerRequest, ClodWorkerResponse, SerializedHydrologyTerrain } from "./clod_worker_protocol.js";
+import type { HeightfieldTileWorkerResponse } from "./world/heightfield_tiles/heightfield_tile_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
 
+export type ExtendedClodWorkerResponse = ClodWorkerResponse | HeightfieldTileWorkerResponse;
+
 export interface WorkerPostContext {
-  postMessage(message: ClodWorkerResponse, transfer?: Transferable[]): void;
+  postMessage(message: ExtendedClodWorkerResponse, transfer?: Transferable[]): void;
 }
 
 export interface InstallHydrologyTerrainOptions {
@@ -74,7 +77,7 @@ export function installBorderCoastRuntime(
   setBorderCoastRuntime(config ?? null, worldCells);
 }
 
-export function postWorkerMessage(ctx: WorkerPostContext, message: ClodWorkerResponse, transfer?: Transferable[]): void {
+export function postWorkerMessage(ctx: WorkerPostContext, message: ExtendedClodWorkerResponse, transfer?: Transferable[]): void {
   if (!transfer || transfer.length === 0) {
     ctx.postMessage(message);
     return;
