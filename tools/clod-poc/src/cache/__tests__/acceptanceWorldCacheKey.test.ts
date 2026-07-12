@@ -33,7 +33,7 @@ function baseTerrainSource(): TerrainSourceInputs {
       enabled: false,
       source: "fake_bodies",
       fakeBodies: { carveTerrain: false },
-      hydrology: { enabled: false },
+      hydrology: { enabled: false, unifiedStartup: false },
     },
     proceduralTextureEnabled: true,
     proceduralTextureHash: "procedural-a",
@@ -103,11 +103,28 @@ describe("acceptance world cache key", () => {
           enabled: true,
           source: "hydrology",
           fakeBodies: { carveTerrain: true },
-          hydrology: { enabled: true },
+          hydrology: { enabled: true, unifiedStartup: false },
         },
       },
     });
     expect(a.key).not.toBe(b.key);
     expect(diffAcceptanceWorldCacheKeyFields(a, b)).toEqual(expect.arrayContaining(["hydrologyTerrain", "waterConfig"]));
+  });
+
+  it("changes when the startup hydrology authority changes", async () => {
+    const a = await buildAcceptanceWorldCacheKey({ cfg, terrainSource: baseTerrainSource() });
+    const source = baseTerrainSource();
+    const b = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: {
+        ...source,
+        waterConfig: {
+          ...source.waterConfig,
+          hydrology: { enabled: true, unifiedStartup: true },
+        },
+      },
+    });
+    expect(a.key).not.toBe(b.key);
+    expect(diffAcceptanceWorldCacheKeyFields(a, b)).toContain("waterConfig");
   });
 });
