@@ -10,10 +10,9 @@
 // Grid layout: arrays hold (tileRes+1)^2 vertex samples; vertex (ix, iz) sits at world
 // (tileX*tileSizeM + ix*cellSize, tileZ*tileSizeM + iz*cellSize) with
 // cellSize = tileSizeM / tileRes. Continuous fields sample bilinearly; identity fields
-// (bodyKind, bodyId) sample nearest — interpolating an id across a boundary would be
-// meaningless.
+// (bodyKind, bodyId) come from the nearest valid wet corner.
 import type { TerrainHeightSampler } from "./water_field_types.js";
-import type { HydrologySample } from "./hydrologyGrid.js";
+import { HYDROLOGY_BODY_DRY, type HydrologySample } from "./hydrologyGrid.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 
 export interface HydrologyTile {
@@ -76,6 +75,7 @@ export interface HydrologyTileCacheStats {
  *  wasted work when the camera turns away from a prefetched direction. */
 const REMOTE_BATCH_TILES = 2;
 const REMOTE_MAX_INFLIGHT_TILES = 8;
+const IDENTITY_DISTANCE_EPSILON = 1e-12;
 
 /** Pure tile build shared by the cache's synchronous fallback and the build worker;
  *  a tile is a pure function of (tileX, tileZ, sampler, options), so both paths
@@ -345,17 +345,26 @@ export function sampleTile(tile: HydrologyTile, x: number, z: number): Hydrology
   const i01 = z1 * verts + x0;
   const i11 = z1 * verts + x1;
 
-  const bilinear = (f: Float32Array): number => {
-    const a = f[i00] * (1 - fx) + f[i10] * fx;
-    const b = f[i01] * (1 - fx) + f[i11] * fx;
+  const bilinear = (field: Float32Array): number => {
+    const a = field[i00] * (1 - fx) + field[i10] * fx;
+    const b = field[i01] * (1 - fx) + field[i11] * fx;
     return a * (1 - fz) + b * fz;
   };
-  const nearest = fx < 0.5 ? (fz < 0.5 ? i00 : i01) : fz < 0.5 ? i10 : i11;
 
   const terrainY = bilinear(tile.terrainY);
   const waterY = bilinear(tile.waterY);
   const depthRaw = waterY - terrainY;
-  const bodyMask = depthRaw > 0 ? clamp(bilinear(tile.bodyMask), 0, 1) : 0;
+  const interpolatedBodyMask = depthRaw > 0 ? clamp(bilinear(tile.bodyMask), 0, 1) : 0;
+  const identityIndex = interpolatedBodyMask > 0
+    ? nearestWetIdentityIndex(tile, [
+        { index: i00, distanceSquared: fx * fx + fz * fz },
+        { index: i10, distanceSquared: (1 - fx) * (1 - fx) + fz * fz },
+        { index: i01, distanceSquared: fx * fx + (1 - fz) * (1 - fz) },
+        { index: i11, distanceSquared: (1 - fx) * (1 - fx) + (1 - fz) * (1 - fz) },
+      ])
+    : -1;
+  const bodyMask = identityIndex >= 0 ? interpolatedBodyMask : 0;
+
   return {
     terrainY,
     waterY,
@@ -369,10 +378,34 @@ export function sampleTile(tile: HydrologyTile, x: number, z: number): Hydrology
     riverDepth: bilinear(tile.riverDepth),
     waterYFar: waterY,
     moisture: bilinear(tile.moisture),
-    bodyKind: tile.bodyKind[nearest],
-    bodyId: tile.bodyId[nearest],
+    bodyKind: identityIndex >= 0 ? tile.bodyKind[identityIndex] : HYDROLOGY_BODY_DRY,
+    bodyId: identityIndex >= 0 ? tile.bodyId[identityIndex] : 0,
     shoreDistance: bilinear(tile.shoreDistance),
   };
+}
+
+interface IdentityCandidate {
+  index: number;
+  distanceSquared: number;
+}
+
+function nearestWetIdentityIndex(tile: HydrologyTile, candidates: readonly IdentityCandidate[]): number {
+  let bestIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestMask = Number.NEGATIVE_INFINITY;
+  for (const candidate of candidates) {
+    const bodyId = tile.bodyId[candidate.index];
+    const bodyKind = tile.bodyKind[candidate.index];
+    const bodyMask = tile.bodyMask[candidate.index];
+    if (bodyMask <= 0 || bodyId === 0 || bodyKind === HYDROLOGY_BODY_DRY) continue;
+    const nearer = candidate.distanceSquared < bestDistance - IDENTITY_DISTANCE_EPSILON;
+    const sameDistance = Math.abs(candidate.distanceSquared - bestDistance) <= IDENTITY_DISTANCE_EPSILON;
+    if (!nearer && (!sameDistance || bodyMask <= bestMask)) continue;
+    bestIndex = candidate.index;
+    bestDistance = candidate.distanceSquared;
+    bestMask = bodyMask;
+  }
+  return bestIndex;
 }
 
 function clamp(value: number, min: number, max: number): number {

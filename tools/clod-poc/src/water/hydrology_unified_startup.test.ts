@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createHydrologyGrid } from "./hydrologyGrid.js";
+import { createHydrologyGrid, HYDROLOGY_BODY_DRY } from "./hydrologyGrid.js";
 import { HydrologySystem } from "./hydrologySystem.js";
 import { HydrologyTileCache } from "./hydrologyTileSource.js";
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
@@ -63,6 +63,10 @@ describe("unified startup hydrology (Phase 3b)", () => {
     expect(parsed.infinite.unifiedStartup).toBe(true);
   });
 
+  it("records the traced authority explicitly", () => {
+    expect(unified.grid.authority).toBe("unified_traced");
+  });
+
   it("uses the tile authority inside the startup world", () => {
     const reference = referenceCache();
     for (const [x, z] of [
@@ -97,6 +101,10 @@ describe("unified startup hydrology (Phase 3b)", () => {
       expect(grid.bodyKind[index]).toBe(sample.bodyKind);
       expect(grid.bodyId[index]).toBe(sample.bodyId);
       expect(grid.shoreDistance[index]).toBeCloseTo(sample.shoreDistance, 4);
+      if (grid.wetMask[index] > 0) {
+        expect(grid.bodyKind[index]).not.toBe(HYDROLOGY_BODY_DRY);
+        expect(grid.bodyId[index]).not.toBe(0);
+      }
     }
   });
 
@@ -132,5 +140,6 @@ describe("unified startup hydrology (Phase 3b)", () => {
     config.infinite.unifiedStartup = false;
     const legacy = HydrologySystem.build(config, 256, sampler, { infiniteWorldSamples: true });
     expect(legacy.unifiedStartupActive()).toBe(false);
+    expect(legacy.grid.authority).toBe("finite_grid");
   });
 });

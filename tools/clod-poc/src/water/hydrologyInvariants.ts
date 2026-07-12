@@ -40,6 +40,8 @@ export const DEFAULT_HYDROLOGY_INVARIANT_TOLERANCES: HydrologyInvariantTolerance
   withinBodyJump: 6,
 };
 
+const UNIFIED_TRACED_RIVER_UPWARD_STEP_TOLERANCE = 0.85;
+
 interface BodyAggregate {
   sum: number;
   count: number;
@@ -170,11 +172,11 @@ export function checkHydrologyInvariants(
   if (report.lakeFlatnessMaxDeviation > tol.lakeFlatness) {
     failures.push(`lake flatness deviation ${report.lakeFlatnessMaxDeviation.toFixed(4)} > ${tol.lakeFlatness}`);
   }
-  const isUnified = grid.carvedBed[0] === grid.originalBed[0]
-    && grid.carvedBed[grid.carvedBed.length - 1] === grid.originalBed[grid.originalBed.length - 1];
-  const riverUpwardStepTol = isUnified ? 0.85 : tol.riverUpwardStep;
-  if (report.riverMaxUpwardStep > riverUpwardStepTol) {
-    failures.push(`river upward step ${report.riverMaxUpwardStep.toFixed(4)} > ${riverUpwardStepTol}`);
+  const riverUpwardStepTolerance = grid.authority === "unified_traced"
+    ? UNIFIED_TRACED_RIVER_UPWARD_STEP_TOLERANCE
+    : tol.riverUpwardStep;
+  if (report.riverMaxUpwardStep > riverUpwardStepTolerance) {
+    failures.push(`river upward step ${report.riverMaxUpwardStep.toFixed(4)} > ${riverUpwardStepTolerance}`);
   }
   if (report.withinBodyMaxJump > tol.withinBodyJump) {
     failures.push(`within-body jump ${report.withinBodyMaxJump.toFixed(4)} > ${tol.withinBodyJump}`);

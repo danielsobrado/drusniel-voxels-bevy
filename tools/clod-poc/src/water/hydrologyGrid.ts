@@ -7,7 +7,10 @@ export const HYDROLOGY_BODY_RIVER = 3;
 export const HYDROLOGY_BODY_POND = 4;
 export const HYDROLOGY_BODY_MARSH = 5;
 
+export type HydrologyAuthority = "finite_grid" | "unified_traced";
+
 export interface HydrologyGrid {
+  authority: HydrologyAuthority;
   res: number;
   worldCells: number;
   texel: number;
@@ -69,6 +72,7 @@ export function createHydrologyGrid(
   worldCells: number,
   sampler: TerrainHeightSampler,
   farReduceFactor = 1,
+  authority: HydrologyAuthority = "finite_grid",
 ): HydrologyGrid {
   const count = res * res;
   const reduce = Math.max(1, Math.floor(farReduceFactor));
@@ -83,6 +87,7 @@ export function createHydrologyGrid(
     }
   }
   return {
+    authority,
     res,
     worldCells,
     texel,
