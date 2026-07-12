@@ -1,12 +1,9 @@
 // Hydrology authority-seam report.
 //
-// Quantifies the discontinuity between the two hydrology authorities that meet at the
-// original finite-world boundary: the precomputed finite grid (used inside [0,worldCells])
-// vs sampleInfiniteHydrology (used outside). It samples matched points straddling the
-// x=worldCells edge and reports how far the two authorities disagree on water height, wet
-// mask, flow direction and body kind. A large disagreement is the streaming seam that the
-// tile-based authority (Phase 3) must remove; this tool records the current magnitude and
-// is the regression gate for that work.
+// In unified startup mode the traced/tile field owns both sides of the original finite
+// world boundary. The startup grid remains a raster view for GPU consumers; this report
+// compares that raster against the analytic authority and measures the effective samples
+// consumers receive while walking across the former boundary.
 //
 // Imports specific modules (never the water barrel) so it runs under bare `tsx` — the
 // barrel pulls `*.wgsl?raw`, which only resolves under Vite.
@@ -25,9 +22,8 @@ const waterConfig = resolveWaterConfig(
   worldCells,
 );
 const sampler = { surfaceHeight };
-// Force infinite-world sampling on: probes run under Node where the URL-based
-// infinite-islands detection is unavailable, but the seam under test only exists in that
-// mode.
+// Force infinite-world sampling on: probes run under Node where URL-based scene detection
+// is unavailable.
 const hydrology = HydrologySystem.build(waterConfig.hydrology, worldCells, sampler, { infiniteWorldSamples: true });
 
 function flowAngle(fx: number, fz: number): number {
@@ -40,38 +36,40 @@ function angleDiff(a: number, b: number): number {
   return d;
 }
 
-// Walk the x = worldCells seam along z, comparing grid authority (clamped to its edge
-// outside the world) against the infinite authority at the same coordinate.
+// Compare the startup texture raster against the analytic authority around x=worldCells.
+// In legacy mode this is the old finite-grid-vs-infinite disagreement; in unified mode it
+// measures only expected raster interpolation error.
 let maxWaterYError = 0;
 let maxDepthError = 0;
 let wetMismatch = 0;
 let maxFlowAngleError = 0;
 let bodyKindMismatch = 0;
 let samples = 0;
-const BAND = 24; // metres either side of the seam
+const BAND = 24;
 const STEP = 4;
 for (let z = 0; z <= worldCells; z += 8) {
   for (let dx = -BAND; dx <= BAND; dx += STEP) {
     const x = worldCells + dx;
     const grid = sampleHydrologyGrid(hydrology.grid, x, z);
-    const inf = sampleInfiniteHydrology(x, z, sampler, { drySentinelDepthM: waterConfig.hydrology.drySentinelDepth });
+    const authority = sampleInfiniteHydrology(x, z, sampler, {
+      drySentinelDepthM: waterConfig.hydrology.drySentinelDepth,
+    });
     const gridWet = grid.bodyMask > 0.5;
-    const infWet = inf.bodyMask > 0.5;
-    if (gridWet !== infWet) wetMismatch++;
-    if (gridWet && infWet) {
-      maxWaterYError = Math.max(maxWaterYError, Math.abs(grid.waterY - inf.waterY));
-      maxDepthError = Math.max(maxDepthError, Math.abs(grid.depth - inf.depth));
-      maxFlowAngleError = Math.max(maxFlowAngleError, angleDiff(flowAngle(grid.flowX, grid.flowZ), flowAngle(inf.flowX, inf.flowZ)));
+    const authorityWet = authority.bodyMask > 0.5;
+    if (gridWet !== authorityWet) wetMismatch++;
+    if (gridWet && authorityWet) {
+      maxWaterYError = Math.max(maxWaterYError, Math.abs(grid.waterY - authority.waterY));
+      maxDepthError = Math.max(maxDepthError, Math.abs(grid.depth - authority.depth));
+      maxFlowAngleError = Math.max(
+        maxFlowAngleError,
+        angleDiff(flowAngle(grid.flowX, grid.flowZ), flowAngle(authority.flowX, authority.flowZ)),
+      );
     }
-    if (grid.bodyKind !== inf.bodyKind) bodyKindMismatch++;
+    if (grid.bodyKind !== authority.bodyKind) bodyKindMismatch++;
     samples++;
   }
 }
 
-// Effective-authority continuity: walk fine-grained lines across the boundary sampling
-// what consumers actually see (HydrologySystem.sample with the blend band active) and
-// measure the worst step between adjacent samples. This is the metric that maps to a
-// visible seam; the raw algorithm disagreement above is the Phase 3 gate.
 let effMaxWaterYStep = 0;
 let effMaxBodyMaskStep = 0;
 const EFF_STEP = 1;
@@ -80,7 +78,6 @@ for (let z = 16; z < worldCells; z += 64) {
   let prev = hydrology.sample(worldCells - EFF_BAND, z);
   for (let x = worldCells - EFF_BAND + EFF_STEP; x <= worldCells + EFF_BAND; x += EFF_STEP) {
     const cur = hydrology.sample(x, z);
-    // Compare surfaces only where at least one side renders water; dry sentinel drift is invisible.
     if (prev.bodyMask > 0.05 || cur.bodyMask > 0.05) {
       effMaxWaterYStep = Math.max(effMaxWaterYStep, Math.abs(cur.waterY - prev.waterY));
     }
@@ -92,6 +89,7 @@ for (let z = 16; z < worldCells; z += 64) {
 const report = {
   worldCells,
   samples,
+  unifiedStartup: hydrology.unifiedStartupActive(),
   seam: {
     maxWaterYError: Number(maxWaterYError.toFixed(4)),
     maxDepthError: Number(maxDepthError.toFixed(4)),
@@ -106,9 +104,8 @@ const report = {
     maxBodyMaskStep: Number(effMaxBodyMaskStep.toFixed(4)),
   },
   tileCache: hydrology.tileCacheStats(),
-  note:
-    "seam = raw disagreement between the finite grid and the infinite field at x=worldCells " +
-    "(finding #1; Phase 3 tile-authority gate). effectiveContinuity = worst adjacent-sample " +
-    "step of the blended authority consumers actually read; large steps there are visible seams.",
+  note: hydrology.unifiedStartupActive()
+    ? "The traced/tile authority owns both sides of x=worldCells. seam is startup-raster approximation error; effectiveContinuity has no authority blend or handoff."
+    : "Legacy mode: seam is finite-grid vs traced-field disagreement; effectiveContinuity includes the configured boundary blend.",
 };
 console.log(JSON.stringify(report, null, 2));
