@@ -1,4 +1,5 @@
 import { baseSurfaceHeight, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import { makeStartupHeightfieldSampler, type StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import type { ClodWorkerRequest, ClodWorkerResponse, SerializedHydrologyTerrain } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
 
@@ -44,6 +45,24 @@ export function installHydrologyTerrain(
     const b = carvedBed[z1 * res + x0] * (1 - fx) + carvedBed[z1 * res + x1] * fx;
     return a * (1 - fz) + b * fz;
   });
+}
+
+/**
+ * Install the active terrain surface override for worker builds. The startup heightfield
+ * raster (unified mode) wins when present: it already falls back to the base field outside
+ * its padded domain, so it covers both the startup-world build and the bounded semantics
+ * streamed roots need. Otherwise the legacy carved hydrology grid path applies.
+ */
+export function installWorkerTerrainOverride(
+  startupHeightfield: StartupHeightfieldRaster | null | undefined,
+  hydrologyTerrain: SerializedHydrologyTerrain | null | undefined,
+  options: InstallHydrologyTerrainOptions = {},
+): void {
+  if (startupHeightfield) {
+    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(startupHeightfield));
+    return;
+  }
+  installHydrologyTerrain(hydrologyTerrain, options);
 }
 
 export function installBorderCoastRuntime(

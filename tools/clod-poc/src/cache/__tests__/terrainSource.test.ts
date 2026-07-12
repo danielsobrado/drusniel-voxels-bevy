@@ -70,6 +70,20 @@ describe("terrain source hash", () => {
     expect(a).not.toBe(b);
   });
 
+  it("changes when the startup heightfield raster descriptor changes", async () => {
+    const withoutRaster = await computeTerrainSourceHash(baseTerrainSource());
+    const withRaster = await computeTerrainSourceHash({
+      ...baseTerrainSource(),
+      startupHeightfield: { worldCells: 512, minCell: -2, res: 517 },
+    });
+    const withOtherRes = await computeTerrainSourceHash({
+      ...baseTerrainSource(),
+      startupHeightfield: { worldCells: 512, minCell: -2, res: 259 },
+    });
+    expect(withRaster).not.toBe(withoutRaster);
+    expect(withOtherRes).not.toBe(withRaster);
+  });
+
   it("changes when hydrology carved bed changes outside sample window", async () => {
     const bedA = new Float32Array(4096);
     const bedB = new Float32Array(4096);

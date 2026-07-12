@@ -1,5 +1,6 @@
 import type { BuildProgress, BuildResult } from "./clod/quadtree.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
+import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
@@ -129,6 +130,7 @@ export class ClodWorkerClient {
     borderCoastOceanConfig: BorderCoastOceanConfig | null = null,
     cacheDisabled = false,
     terrainSource: TerrainSourceInputs,
+    startupHeightfield: StartupHeightfieldRaster | null = null,
   ): Promise<BuildResult> => {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     this.resetStreamRootGpuMesherForWorld(worldPagesX, worldPagesZ, cfg, terrainSource, cacheDisabled);
@@ -146,7 +148,7 @@ export class ClodWorkerClient {
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
       type: "build", requestId, worldPagesX, worldPagesZ, cfg, voxelEdits,
-      terrainFieldConfig, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled, terrainSource,
+      terrainFieldConfig, hydrologyTerrain, startupHeightfield, borderCoastOceanConfig, cacheDisabled, terrainSource,
     };
     this.progressHandlers.set(requestId, onProgress);
     return postTrackedRequest(this.buildRequests, this.worker, request).catch((error) => {

@@ -6,6 +6,7 @@ import type {
   NodeBuildStat,
 } from "./clod/quadtree.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
+import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
@@ -55,6 +56,8 @@ export type ClodWorkerRequest =
       voxelEdits: VoxelEditSnapshot;
       terrainFieldConfig?: TerrainFieldConfig | null;
       hydrologyTerrain?: SerializedHydrologyTerrain | null;
+      /** Exact-res startup-world heightfield raster (unified mode); Float64Array clones structurally. */
+      startupHeightfield?: StartupHeightfieldRaster | null;
       borderCoastOceanConfig?: BorderCoastOceanConfig | null;
       cacheDisabled?: boolean;
       digRevision?: number;
