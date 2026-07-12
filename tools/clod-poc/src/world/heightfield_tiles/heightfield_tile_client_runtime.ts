@@ -1,13 +1,9 @@
 import { ClodWorkerClient } from "../../clod_worker_client.js";
-import { createHeightfieldTileRuntime, type HeightfieldTileRuntime } from "./heightfield_tile_runtime.js";
-
-interface ActiveRuntime {
-  runtime: HeightfieldTileRuntime;
-  animationFrameId: number;
-  lastEngineFrame: number;
-  lastUpdateMs: number;
-  fallbackFrame: number;
-}
+import {
+  createHeightfieldTileRuntime,
+  type HeightfieldTileRuntime,
+  type HeightfieldTileRuntimeUpdate,
+} from "./heightfield_tile_runtime.js";
 
 interface ClientPrototype {
   buildWorld: ClodWorkerClient["buildWorld"];
@@ -15,43 +11,25 @@ interface ClientPrototype {
   dispose: ClodWorkerClient["dispose"];
 }
 
-const activeRuntimes = new WeakMap<ClodWorkerClient, ActiveRuntime>();
+const activeRuntimes = new WeakMap<ClodWorkerClient, HeightfieldTileRuntime>();
 let installed = false;
 
 function stopRuntime(client: ClodWorkerClient): void {
-  const active = activeRuntimes.get(client);
-  if (!active) return;
-  cancelAnimationFrame(active.animationFrameId);
-  active.runtime.dispose();
+  const runtime = activeRuntimes.get(client);
+  if (!runtime) return;
+  runtime.dispose();
   activeRuntimes.delete(client);
 }
 
-function scheduleRuntimeUpdate(client: ClodWorkerClient, active: ActiveRuntime): void {
-  active.animationFrameId = requestAnimationFrame((nowMs) => {
-    if (activeRuntimes.get(client) !== active) return;
-    const hooks = window.__drusnielClod;
-    const pose = hooks?.getPose?.();
-    const stats = hooks?.stats;
-    const engineFrame = stats?.frame;
-    const hasEngineFrame = typeof engineFrame === "number" && Number.isFinite(engineFrame);
-    const frameIndex = hasEngineFrame ? engineFrame : active.fallbackFrame++;
+export function updateHeightfieldTileClientRuntime(
+  client: ClodWorkerClient,
+  input: HeightfieldTileRuntimeUpdate,
+): void {
+  activeRuntimes.get(client)?.update(input);
+}
 
-    if (pose && frameIndex !== active.lastEngineFrame) {
-      const counters = stats?.counters;
-      const originX = counters?.["floatingOriginOffsetX"] ?? 0;
-      const originZ = counters?.["floatingOriginOffsetZ"] ?? 0;
-      active.runtime.update({
-        x: pose.p[0] + originX,
-        z: pose.p[2] + originZ,
-        frameIndex,
-        deltaSeconds: Math.max(0, (nowMs - active.lastUpdateMs) / 1000),
-      });
-      active.lastEngineFrame = frameIndex;
-      active.lastUpdateMs = nowMs;
-    }
-
-    scheduleRuntimeUpdate(client, active);
-  });
+export function heightfieldTileClientRuntimeActive(client: ClodWorkerClient): boolean {
+  return activeRuntimes.has(client);
 }
 
 export function installHeightfieldTileClientRuntime(): void {
@@ -75,17 +53,7 @@ export function installHeightfieldTileClientRuntime(): void {
       startupHeightfield,
       buildTiles: (keys, sourceRevision) => this.buildHeightfieldTiles(keys, sourceRevision),
     });
-    if (runtime) {
-      const active: ActiveRuntime = {
-        runtime,
-        animationFrameId: 0,
-        lastEngineFrame: -1,
-        lastUpdateMs: performance.now(),
-        fallbackFrame: 0,
-      };
-      activeRuntimes.set(this, active);
-      scheduleRuntimeUpdate(this, active);
-    }
+    if (runtime) activeRuntimes.set(this, runtime);
     return result;
   };
 
