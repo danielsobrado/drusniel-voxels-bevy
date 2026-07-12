@@ -32,6 +32,7 @@ export interface HeightfieldTileRuntimeUpdate {
   deltaSeconds?: number;
   velocityX?: number;
   velocityZ?: number;
+  buildAllowed?: boolean;
 }
 
 export interface HeightfieldTileRuntime {
