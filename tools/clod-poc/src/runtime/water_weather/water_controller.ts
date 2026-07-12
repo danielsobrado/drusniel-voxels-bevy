@@ -66,9 +66,12 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const hydrologyRemote = tileBypassCellSize !== null ? createHydrologyTileRemoteBuilder() : null;
   let hydrologyPrefetchRadiusM = 0;
   if (hydrologyRemote && deps.hydrologySystem) {
+    const fakeBodies = deps.hydrologySystem.unifiedStartupActive()
+      ? { ...deps.waterConfig.fakeBodies, carveTerrain: false }
+      : deps.waterConfig.fakeBodies;
     hydrologyRemote.configure({
       terrainFieldConfig: getTerrainFieldConfig(),
-      fakeBodies: deps.waterConfig.fakeBodies,
+      fakeBodies,
       tileSizeM: deps.waterConfig.hydrology.infinite.tileSizeM,
       tileRes: deps.waterConfig.hydrology.infinite.tileRes,
       drySentinelDepthM: deps.waterConfig.hydrology.waterSurface.drySentinelDepth,
