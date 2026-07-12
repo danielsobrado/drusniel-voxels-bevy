@@ -439,11 +439,17 @@ class FarClipmapControllerImpl implements FarClipmapController {
     if (!sourceReady || ring.displacementMode !== "shader") return false;
     if (frameStats.sourceRefreshes >= this.config.sourceRefreshMaxPerFrame) return false;
     if (!Number.isFinite(ring.readySnapX) || !Number.isFinite(ring.readySnapZ)) return false;
+    // The interval is a per-ring floor for every stable-ring refresh, revision-driven
+    // included: during traversal the far-summary revision bumps almost every frame, and
+    // without the floor each bump re-samples a full ring texture on the CPU (~1-2ms,
+    // effectively every frame). Far content is 384m+ away — refreshing a ring at most
+    // once per interval is imperceptible, and the deferred commits land on the next
+    // refresh because the revision comparison below still sees them.
+    if (this.frameIndex - ring.lastSourceRefreshFrame < this.config.sourceRefreshIntervalFrames) return false;
     if (ring.sourceRevision !== this.lastSourceRevision) return true;
     // Interval polling only guards sources that never report a revision change; each poll
     // re-samples the full source texture on the CPU, far too hot to run against a live channel.
-    if (this.revisionChannelLive) return false;
-    return this.frameIndex - ring.lastSourceRefreshFrame >= this.config.sourceRefreshIntervalFrames;
+    return !this.revisionChannelLive;
   }
 
   private refreshShaderSourceTexture(

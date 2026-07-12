@@ -41,7 +41,10 @@ export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
   materialDebugMode: "final",
   shaderDisplacement: true,
   sourceRefreshMaxPerFrame: 1,
-  sourceRefreshIntervalFrames: 8,
+  // Per-ring floor between stable-ring source refreshes (revision-driven included).
+  // Far content sits 384m+ out; refreshing each ring at most ~3x/second is imperceptible
+  // and keeps the CPU resample (~1-2ms per ring texture) off most frames.
+  sourceRefreshIntervalFrames: 20,
 });
 
 const DEBUG_MODES: ReadonlySet<string> = new Set<FarClipmapDebugMode>([

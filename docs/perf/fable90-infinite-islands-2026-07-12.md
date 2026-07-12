@@ -112,6 +112,53 @@ geometry conversion (`toGeometry` allocates two `(verts×4)` paint arrays + biom
 page) and/or a switch set larger than the pre-warm got through. The next structural step
 is pre-building geometry (or pooling those attribute arrays) in the same pre-warm path.
 
+## Boot-wedge investigation (midday) — IMPORTANT
+
+While validating the next round (attribute priming + flagged warm draw), infinite-islands
+**stopped booting**: world build hangs at "LOD0 pages 0%" inside `clodWorker.buildWorld`,
+after "[water] hydrology built" logs **flat stats (`wet=0 lake=0 river=0`, moisture
+constant)**. Ground truth so far (Playwright mini-runs — `perf:move --staticFrames 30
+--moveFrames 60 --shots 0`):
+
+- `16e6c6a7` ("fable hydro 5b") **boots**.
+- The current main tree (hydro 7b commits + uncommitted hydro edits + my perf changes)
+  **does not boot**.
+- The clod worker chunk is byte-identical between good and bad builds, so the hang is in
+  the worker's *inputs* — pointing at the hydrology carved-bed/grid data changed by the
+  hydro-unification work, not the worker itself. Bisect of `cd22a62f`/`260dbb03` pending.
+
+Two tooling lessons captured in memory:
+
+- **The embedded browser pane cannot boot this app at all** (stalls at LOD0 0% even on
+  known-good builds) — an initial pane-based bisect produced false "everything broken"
+  results. Boot checks must use Playwright mini-runs.
+- **A bench worktree now exists** (`F:\drusniel-cache\bench-worktree`, port 5182, own
+  build, junctioned node_modules): benchmarks there are isolated from live edits in the
+  main tree, which retires the mid-run tree-drift failure mode for good.
+
+## Also landed midday (reference-demo inspired, per relaxed far-band quality policy)
+
+The reference demo (github.com/Braffolk/fable5-world-demo) draws all terrain as ONE
+InstancedMesh with per-tile data in a storage buffer and a far shell whose height is
+*analytic in the shader* — no CPU resample, ever. Adopted pragmatically:
+
+1. **Far-clipmap refresh throttle**: the per-ring `sourceRefreshIntervalFrames` floor now
+   applies to revision-driven refreshes too (previously every far-summary commit
+   re-sampled a full ring texture ≈ every frame while moving); default raised 8 → 20.
+   `farClipmapSourceRefreshIntervalFrames` overrides.
+2. **Aerial-perspective fog retuned** to dilute far-band transitions: start 120 → 260m
+   (near field stays crisp), end 1800 → 2600m, strength 0.35 → 0.5.
+3. Strategic follow-up noted: an analytic-height far-clipmap material (terrain field
+   already exists in WGSL) would eliminate ring resampling entirely, demo-style.
+4. **Budgeted paint/biome priming** (`primePageAttributesBudgeted`): the 34–68ms views
+   bursts are per-vertex paint lookups + biome noise, now computed a slice at a time in
+   the pre-warm drain ahead of the switch (parity-tested). Covers both GPU-mesher and
+   worker page paths.
+5. **Flagged real-triangle warm draw** (`?viewPrewarmDraw=1`): one actual triangle of a
+   freshly pre-warmed page for one frame — 0-count draws are skipped before the driver
+   compiles, so this is the first true test of the driver-PSO theory. Unvalidated: the
+   validation pair wedged on the boot issue above.
+
 ## Next steps
 
 1. **Views burst root-cause**: instrument `createRenderNodeView` (material vs geometry vs

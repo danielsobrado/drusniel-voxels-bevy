@@ -283,6 +283,8 @@ function buildParams(args: Args): Record<string, string> {
   if (viewPrewarmCompile) params["viewPrewarmCompile"] = viewPrewarmCompile;
   const sceneCompileWarm = str(args["sceneCompileWarm"]);
   if (sceneCompileWarm) params["sceneCompileWarm"] = sceneCompileWarm;
+  const viewPrewarmDraw = str(args["viewPrewarmDraw"]);
+  if (viewPrewarmDraw) params["viewPrewarmDraw"] = viewPrewarmDraw;
   return params;
 }
 

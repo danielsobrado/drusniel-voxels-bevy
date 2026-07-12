@@ -70,8 +70,9 @@ water:
       tile_size_m: 256        # world metres per tile edge
       tile_res: 64            # cells per tile edge ((res+1)^2 vertex samples)
       max_resident_tiles: 96  # LRU budget; 0 = no cache (direct analytic sampling)
-      boundary_blend_m: 48    # grid->infinite blend band width inside the world edge
+      boundary_blend_m: 48    # grid->infinite blend band width inside the world edge (legacy mode only)
       atlas_tiles_per_side: 6 # streaming GPU atlas window edge (tiles); 0 = no atlas
+      unified_startup: true   # Phase 3b: startup world uses the traced/tile authority (no grid sim, no carve, no seam)
     debug:
       show_fill: false
       show_accumulation: false

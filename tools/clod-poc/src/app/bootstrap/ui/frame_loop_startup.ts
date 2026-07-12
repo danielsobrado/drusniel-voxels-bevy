@@ -36,6 +36,7 @@ import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import { resolveLiveClodRootRadius } from "./live_clod_root_radius.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 import type { ClodPageNode } from "../../../types.js";
+import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
@@ -374,7 +375,23 @@ export function runFrameLoopStartup(
   // time; one pre-built material per idle frame keeps switch-time creation to uniform
   // writes on pooled handles. Sized to a typical switch set.
   const MATERIAL_RESERVE_TARGET = 32;
+  // Warm draw (?viewPrewarmDraw=1): render ONE real triangle of a freshly pre-warmed
+  // page for exactly one frame. Zero-count draws are skipped before the driver compiles
+  // anything, so the earlier zero-range experiment proved nothing about PSO compilation;
+  // a single real triangle forces the driver through the full pipeline + buffer upload
+  // in the real pass. The triangle is actual terrain at its true position — imperceptible.
+  const viewWarmDrawEnabled = searchParams.get("viewPrewarmDraw") === "1";
+  let warmDrawView: ReturnType<typeof input.terrainView.renderNodeCache.get> | null = null;
+  const restoreWarmDraw = (): void => {
+    const view = warmDrawView;
+    warmDrawView = null;
+    if (!view) return;
+    (view.mesh.geometry as THREE.BufferGeometry).setDrawRange(0, Infinity);
+    view.mesh.frustumCulled = true;
+    if (!view.selected && view.target === 0 && view.fade <= 0.001) view.mesh.visible = false;
+  };
   const drainViewPrewarmQueue = (): void => {
+    restoreWarmDraw();
     if (viewPrewarmQueue.length === 0) {
       input.terrainView.materialController.ensureRecycleReserve(MATERIAL_RESERVE_TARGET);
       return;
@@ -385,11 +402,23 @@ export function runFrameLoopStartup(
     const deadline = performance.now() + VIEW_PREWARM_BUDGET_MS;
     let created = 0;
     while (viewPrewarmQueue.length > 0 && created < clodRuntime.renderNodeCache.maxPrefetchCreatesPerFrame) {
-      const node = viewPrewarmQueue.shift()!;
+      const node = viewPrewarmQueue[0]!;
+      // Paint/biome attributes are real per-vertex work (34-68ms synchronously for a big
+      // page); prime them a slice at a time so view creation below finds warm caches.
+      if (!primePageAttributesBudgeted(node.mesh, deadline)) break;
+      viewPrewarmQueue.shift();
       cache.prefetch([node], frameId);
       created++;
       const view = cache.get(node.id);
-      if (view) precompileViewPipelines(view.mesh);
+      if (view) {
+        precompileViewPipelines(view.mesh);
+        if (viewWarmDrawEnabled && warmDrawView === null && !view.selected) {
+          view.mesh.visible = true;
+          view.mesh.frustumCulled = false;
+          (view.mesh.geometry as THREE.BufferGeometry).setDrawRange(0, 3);
+          warmDrawView = view;
+        }
+      }
       if (performance.now() >= deadline) break;
     }
   };

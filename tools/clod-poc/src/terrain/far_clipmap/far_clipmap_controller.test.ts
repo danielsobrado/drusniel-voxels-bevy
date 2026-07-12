@@ -70,7 +70,7 @@ describe("FarClipmapController shader displacement", () => {
     controller.dispose();
   });
 
-  it("refreshes stable shader rings when the far-summary source revision changes", () => {
+  it("floors revision-driven stable-ring refreshes by the per-ring interval, then catches up", () => {
     let revision = 1;
     const source: FarClipmapSource = {
       isReady: () => true,
@@ -83,17 +83,25 @@ describe("FarClipmapController shader displacement", () => {
     const scene = new THREE.Scene();
     const controller = createFarClipmapController(
       scene,
-      config({ sourceRefreshMaxPerFrame: 1, sourceRefreshIntervalFrames: 999 }),
+      config({ sourceRefreshMaxPerFrame: 1, sourceRefreshIntervalFrames: 3 }),
       source,
       { webGpuCompatibleMaterial: true },
     );
+    const center = new THREE.Vector3(257.5, 0, -130.25);
 
-    controller.update(new THREE.Vector3(257.5, 0, -130.25));
+    controller.update(center); // snap refresh primes both rings
     revision = 2;
-    const firstRefresh = controller.update(new THREE.Vector3(257.5, 0, -130.25));
-    const secondRefresh = controller.update(new THREE.Vector3(257.5, 0, -130.25));
+    // A revision bump inside the interval must NOT re-sample the ring textures — during
+    // traversal the far-summary revision bumps almost every frame, and per-bump full
+    // resamples were a steady ~1-2ms/frame CPU cost for imperceptible far-band change.
+    const deferred = controller.update(center);
+    const stillDeferred = controller.update(center);
+    const firstRefresh = controller.update(center);
+    const secondRefresh = controller.update(center);
 
-    expect(firstRefresh.snapUpdatesThisFrame).toBe(0);
+    expect(deferred.snapUpdatesThisFrame).toBe(0);
+    expect(deferred.sourceRefreshesThisFrame).toBe(0);
+    expect(stillDeferred.sourceRefreshesThisFrame).toBe(0);
     expect(firstRefresh.sourceRefreshesThisFrame).toBe(1);
     expect(firstRefresh.sourceRevision).toBe(2);
     expect(secondRefresh.sourceRefreshesThisFrame).toBe(1);

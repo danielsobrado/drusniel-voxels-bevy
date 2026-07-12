@@ -1,6 +1,10 @@
+# Distance haze doubles as the dilution layer for far-band handoffs (far clipmap
+# 384-4096m): starts past the near field so close terrain stays crisp, reaches full
+# strength across the band where streamed pages, clipmap refreshes, and the horizon
+# meet. Tuned 2026-07-12 alongside the far-clipmap refresh throttle.
 aerial_perspective:
   enabled: true
-  start_m: 120
-  end_m: 1800
-  strength: 0.35
+  start_m: 260
+  end_m: 2600
+  strength: 0.5
   color: [0.62, 0.72, 0.86]

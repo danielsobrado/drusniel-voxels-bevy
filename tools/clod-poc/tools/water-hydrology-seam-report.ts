@@ -92,6 +92,10 @@ for (let z = 16; z < worldCells; z += 64) {
 const report = {
   worldCells,
   samples,
+  // Phase 3b: with the unified startup authority active, `seam.*` only measures how far
+  // the (legacy-format) lattice rasterization interpolates away from the exact field;
+  // `effectiveContinuity` is what consumers see and should be near-zero steps.
+  unifiedStartup: hydrology.unifiedStartupActive(),
   seam: {
     maxWaterYError: Number(maxWaterYError.toFixed(4)),
     maxDepthError: Number(maxDepthError.toFixed(4)),
