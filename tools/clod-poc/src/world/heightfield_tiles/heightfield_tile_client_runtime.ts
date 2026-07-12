@@ -21,9 +21,14 @@ function stopRuntime(client: ClodWorkerClient): void {
   activeRuntimes.delete(client);
 }
 
-function streamedRootWorkerIdle(): boolean {
-  const counters = window.__drusnielClod?.stats?.counters;
-  if (!counters) return true;
+export function heightfieldTileBuildAllowed(
+  counters: Readonly<Record<string, number>> | null | undefined,
+): boolean {
+  if (!counters) return false;
+  const requiredPages = counters["live_clod_stream_required_pages"];
+  const readyPages = counters["live_clod_stream_ready_pages"];
+  if (!Number.isFinite(requiredPages) || !Number.isFinite(readyPages)) return false;
+  if (requiredPages! > 0 && readyPages! <= 0) return false;
   return (counters["live_clod_stream_pending_pages"] ?? 0) === 0
     && (counters["live_clod_stream_inflight_batches"] ?? 0) === 0
     && (counters["live_clod_stream_apply_queue_pages"] ?? 0) === 0
@@ -39,7 +44,7 @@ export function updateHeightfieldTileClientRuntime(
   if (!runtime) return;
   runtime.update({
     ...input,
-    buildAllowed: input.buildAllowed ?? streamedRootWorkerIdle(),
+    buildAllowed: input.buildAllowed ?? heightfieldTileBuildAllowed(window.__drusnielClod?.stats?.counters),
   });
 }
 
