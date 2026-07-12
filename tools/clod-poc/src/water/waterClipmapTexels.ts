@@ -9,8 +9,10 @@
 // legacy toroidal vertex slots exactly):
 //   A: R = waterY, G = terrainY, B = bodyMask, A = bodyKind
 //   B: R = flowX,  G = flowZ,    B = flowSpeed, A = flowDrop
+//   C: R = shoreDistance (r32float)
 import * as THREE from "three";
 import type { WaterFieldResult } from "./waterField.js";
+import { WATER_SHORE_DISTANCE_UNKNOWN } from "./water_field_types.js";
 import type { WaterStaticGridParams } from "./water_material_types.js";
 
 export class WaterLevelTexelStore {
@@ -18,8 +20,10 @@ export class WaterLevelTexelStore {
   readonly cellSize: number;
   readonly dataA: Float32Array;
   readonly dataB: Float32Array;
+  readonly dataC: Float32Array;
   readonly texelsA: THREE.DataTexture;
   readonly texelsB: THREE.DataTexture;
+  readonly texelsC: THREE.DataTexture;
   /** Wet-vertex count so a fully dry ring can stay hidden like the legacy path. */
   private wetCount = 0;
   private readonly wetFlags: Uint8Array;
@@ -30,9 +34,11 @@ export class WaterLevelTexelStore {
     const count = vertsPerEdge * vertsPerEdge;
     this.dataA = new Float32Array(count * 4);
     this.dataB = new Float32Array(count * 4);
+    this.dataC = new Float32Array(count);
     this.wetFlags = new Uint8Array(count);
     this.texelsA = makeTexelTexture(this.dataA, vertsPerEdge, "water-clipmap-texels-a");
     this.texelsB = makeTexelTexture(this.dataB, vertsPerEdge, "water-clipmap-texels-b");
+    this.texelsC = makeTexelTexture(this.dataC, vertsPerEdge, "water-clipmap-texels-c", THREE.RedFormat);
   }
 
   get wetVertexCount(): number {
@@ -43,6 +49,7 @@ export class WaterLevelTexelStore {
     return {
       texelsA: this.texelsA,
       texelsB: this.texelsB,
+      texelsC: this.texelsC,
       vertsPerEdge: this.vertsPerEdge,
       cellSize: this.cellSize,
     };
@@ -58,6 +65,7 @@ export class WaterLevelTexelStore {
     this.dataB[i + 1] = sample.flow.z;
     this.dataB[i + 2] = sample.flow.speed;
     this.dataB[i + 3] = sample.flow.drop;
+    this.dataC[slot] = sample.shoreDistance;
     this.trackWet(slot, sample.bodyMask > 0 && sample.waterY - sample.terrainY > 0);
   }
 
@@ -71,18 +79,21 @@ export class WaterLevelTexelStore {
     this.dataB[i + 1] = 0;
     this.dataB[i + 2] = 0;
     this.dataB[i + 3] = 0;
+    this.dataC[slot] = WATER_SHORE_DISTANCE_UNKNOWN;
     this.trackWet(slot, false);
   }
 
-  /** Mark both textures for upload after a batch of writes. */
+  /** Mark the textures for upload after a batch of writes. */
   commit(): void {
     this.texelsA.needsUpdate = true;
     this.texelsB.needsUpdate = true;
+    this.texelsC.needsUpdate = true;
   }
 
   dispose(): void {
     this.texelsA.dispose();
     this.texelsB.dispose();
+    this.texelsC.dispose();
   }
 
   private trackWet(slot: number, wet: boolean): void {
@@ -92,8 +103,13 @@ export class WaterLevelTexelStore {
   }
 }
 
-function makeTexelTexture(data: Float32Array, vertsPerEdge: number, name: string): THREE.DataTexture {
-  const texture = new THREE.DataTexture(data, vertsPerEdge, vertsPerEdge, THREE.RGBAFormat, THREE.FloatType);
+function makeTexelTexture(
+  data: Float32Array,
+  vertsPerEdge: number,
+  name: string,
+  format: THREE.PixelFormat = THREE.RGBAFormat,
+): THREE.DataTexture {
+  const texture = new THREE.DataTexture(data, vertsPerEdge, vertsPerEdge, format, THREE.FloatType);
   texture.name = name;
   // rgba32float is not filterable without an optional feature; the vertex stage reads
   // exact texels via textureLoad, so nearest/no-mips is both sufficient and required.

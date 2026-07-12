@@ -93,6 +93,7 @@ function texelSnapshot(capture: StaticCapture): Map<string, number[]> {
   const baseRow = Math.round(origin.originMinZ / CELL_SIZE);
   const dataA = grid.texelsA.image.data as Float32Array;
   const dataB = grid.texelsB.image.data as Float32Array;
+  const dataC = grid.texelsC.image.data as Float32Array;
   const out = new Map<string, number[]>();
   for (let j = 0; j <= CELLS_PER_LEVEL; j++) {
     for (let i = 0; i <= CELLS_PER_LEVEL; i++) {
@@ -100,6 +101,7 @@ function texelSnapshot(capture: StaticCapture): Map<string, number[]> {
       out.set(`${(baseCol + i) * CELL_SIZE},${(baseRow + j) * CELL_SIZE}`, [
         dataA[slot * 4], dataA[slot * 4 + 1], dataA[slot * 4 + 2], dataA[slot * 4 + 3],
         dataB[slot * 4], dataB[slot * 4 + 1], dataB[slot * 4 + 2], dataB[slot * 4 + 3],
+        dataC[slot],
       ]);
     }
   }
@@ -185,6 +187,7 @@ describe("static-topology water clipmap", () => {
     expect(texel[5]).toBeCloseTo(sample.flow.z, 5);
     expect(texel[6]).toBeCloseTo(sample.flow.speed, 5);
     expect(texel[7]).toBeCloseTo(sample.flow.drop, 5);
+    expect(texel[8]).toBeCloseTo(sample.shoreDistance, 3);
 
     clipmapA.dispose();
     clipmapB.dispose();

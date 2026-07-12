@@ -31,6 +31,7 @@ import type { WaterConfig } from "./waterConfig.js";
 import { WATER_DEBUG_MODES, type WaterDebugModeId, type WaterVisualConfig } from "./waterConfig.js";
 import type { WaterField } from "./waterField.js";
 import type { WaterMaterialHandle, WaterMaterialParams } from "./waterMaterial.js";
+import { WATER_SHORE_DISTANCE_UNKNOWN } from "./water_field_types.js";
 import { createStaticWaterGridGeometry, WaterLevelTexelStore } from "./waterClipmapTexels.js";
 
 export interface WaterRect {
@@ -117,6 +118,7 @@ class WaterLevel {
   private readonly bodyMask: Float32Array | null;
   private readonly bodyKind: Float32Array | null;
   private readonly flow: Float32Array | null;
+  private readonly shoreDistance: Float32Array | null;
   private readonly indices: Uint32Array | null;
   // Toroidal slot mapping: world column c lives at slot (c mod vertsPerEdge); these
   // record which world column/row each slot currently holds so a snap can resample
@@ -164,6 +166,7 @@ class WaterLevel {
       this.bodyMask = null;
       this.bodyKind = null;
       this.flow = null;
+      this.shoreDistance = null;
       this.indices = null;
       geometry = createStaticWaterGridGeometry(cellsPerLevel, index);
     } else {
@@ -173,6 +176,7 @@ class WaterLevel {
       this.bodyMask = new Float32Array(vertexCount);
       this.bodyKind = new Float32Array(vertexCount);
       this.flow = new Float32Array(vertexCount * 4);
+      this.shoreDistance = new Float32Array(vertexCount);
       const levelAttr = new Float32Array(vertexCount);
       levelAttr.fill(index);
       this.indices = new Uint32Array(cellsPerLevel * cellsPerLevel * 6);
@@ -182,6 +186,7 @@ class WaterLevel {
       geometry.setAttribute("aBodyMask", new THREE.BufferAttribute(this.bodyMask, 1));
       geometry.setAttribute("aBodyKind", new THREE.BufferAttribute(this.bodyKind, 1));
       geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 4));
+      geometry.setAttribute("aShoreDistance", new THREE.BufferAttribute(this.shoreDistance, 1));
       geometry.setAttribute("aLevel", new THREE.BufferAttribute(levelAttr, 1));
       geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
       geometry.setDrawRange(0, 0);
@@ -302,6 +307,7 @@ class WaterLevel {
     const bodyMask = this.bodyMask!;
     const bodyKind = this.bodyKind!;
     const flow = this.flow!;
+    const shoreDistance = this.shoreDistance!;
     const vertsPerEdge = cellsPerLevel + 1;
     if (anyDirty) {
       for (let sz = 0; sz < vertsPerEdge; sz++) {
@@ -326,6 +332,7 @@ class WaterLevel {
             flow[fi + 1] = sample.flow.z;
             flow[fi + 2] = sample.flow.speed;
             flow[fi + 3] = sample.flow.drop;
+            shoreDistance[slot] = sample.shoreDistance;
           } else {
             positions[vi] = worldX;
             positions[vi + 1] = 0;
@@ -337,6 +344,7 @@ class WaterLevel {
             flow[fi + 1] = 0;
             flow[fi + 2] = 0;
             flow[fi + 3] = 0;
+            shoreDistance[slot] = WATER_SHORE_DISTANCE_UNKNOWN;
           }
         }
       }
@@ -346,6 +354,7 @@ class WaterLevel {
       (geo.getAttribute("aBodyMask") as THREE.BufferAttribute).needsUpdate = true;
       (geo.getAttribute("aBodyKind") as THREE.BufferAttribute).needsUpdate = true;
       (geo.getAttribute("aFlow") as THREE.BufferAttribute).needsUpdate = true;
+      (geo.getAttribute("aShoreDistance") as THREE.BufferAttribute).needsUpdate = true;
     }
     const indexCount = this.refillIndices(baseCol, baseRow);
     const geo = this.mesh.geometry;

@@ -166,6 +166,41 @@ export class FarSummaryCache implements FallbackStatsWriter {
   }
 
   sampleExactRing(x: number, z: number, ringIndex: number): FarSummarySample | null {
+    const tile = this.sampleableTileAt(x, z, ringIndex);
+    if (!tile) return null;
+    const sample = sampleFromTile(tile, x, z);
+    if (sample) {
+      this.stats.cacheHits++;
+    } else {
+      this.stats.cacheMisses++;
+    }
+    return sample;
+  }
+
+  /** Allocation-free variant of sampleExactRing for per-vertex refill loops: writes the
+   *  blended sample into `out` and returns whether it was produced. */
+  sampleExactRingInto(x: number, z: number, ringIndex: number, out: FarSummarySample): boolean {
+    const tile = this.sampleableTileAt(x, z, ringIndex);
+    if (!tile) return false;
+    const ok = sampleFromTileInto(tile, x, z, out);
+    if (ok) {
+      this.stats.cacheHits++;
+    } else {
+      this.stats.cacheMisses++;
+    }
+    return ok;
+  }
+
+  /** Tile lookup shared by the sampling paths. Runs per vertex of every refill, so the
+   *  key string is memoized: consecutive samples overwhelmingly land in the same tile,
+   *  and reusing the string skips both the key-object and template allocation. State
+   *  checks always run against the fresh Map lookup, so the memo cannot serve a stale
+   *  or evicted tile. */
+  private lastSampleRing = -1;
+  private lastSampleTx = Number.NaN;
+  private lastSampleTz = Number.NaN;
+  private lastSampleKs = "";
+  private sampleableTileAt(x: number, z: number, ringIndex: number): FarSummaryTile | null {
     const ringConfig = this.config.rings[ringIndex];
     if (!ringConfig) {
       this.stats.cacheMisses++;
@@ -173,9 +208,13 @@ export class FarSummaryCache implements FallbackStatsWriter {
     }
     const tx = worldToTileCoord(x, ringConfig.cellM, ringConfig.tileCells);
     const tz = worldToTileCoord(z, ringConfig.cellM, ringConfig.tileCells);
-    const key: FarSummaryTileKey = { ring: ringIndex, x: tx, z: tz, cellSizeM: ringConfig.cellM };
-    const ks = tileKeyToString(key);
-    const tile = this.tiles.get(ks);
+    if (ringIndex !== this.lastSampleRing || tx !== this.lastSampleTx || tz !== this.lastSampleTz) {
+      this.lastSampleRing = ringIndex;
+      this.lastSampleTx = tx;
+      this.lastSampleTz = tz;
+      this.lastSampleKs = tileKeyToString({ ring: ringIndex, x: tx, z: tz, cellSizeM: ringConfig.cellM });
+    }
+    const tile = this.tiles.get(this.lastSampleKs);
     if (!tile || tile.state === "evicted") {
       this.stats.cacheMisses++;
       return null;
@@ -184,13 +223,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
       this.stats.cacheMisses++;
       return null;
     }
-    const sample = sampleFromTile(tile, x, z);
-    if (sample) {
-      this.stats.cacheHits++;
-    } else {
-      this.stats.cacheMisses++;
-    }
-    return sample;
+    return tile;
   }
 
   /** Fallback scan across all cached tiles (slow — for debug/safety only). */
@@ -470,6 +503,15 @@ function sampleFromTile(tile: FarSummaryTile, x: number, z: number): FarSummaryS
   return bilinearTileSample(tile, localX, localZ);
 }
 
+function sampleFromTileInto(tile: FarSummaryTile, x: number, z: number, out: FarSummarySample): boolean {
+  const { cellSizeM, tileCells, originX, originZ, samples } = tile;
+  if (samples.length === 0) return false;
+  const localX = (x - originX) / cellSizeM;
+  const localZ = (z - originZ) / cellSizeM;
+  if (localX < 0 || localX >= tileCells || localZ < 0 || localZ >= tileCells) return false;
+  return bilinearTileSampleInto(tile, localX, localZ, out);
+}
+
 export function readTileSample(
   tile: FarSummaryTile,
   cellX: number,
@@ -512,7 +554,17 @@ function emptySample(): FarSummarySample {
   };
 }
 
-function bilinearTileSample(tile: FarSummaryTile, localX: number, localZ: number): FarSummarySample | null {
+/** Read-only reference to a stored cell sample; the corner values are only read during
+ *  the bilinear blend, so no defensive copy is needed. */
+function cornerSampleRef(tile: FarSummaryTile, cellX: number, cellZ: number): FarSummarySample | null {
+  if (cellX < 0 || cellX >= tile.tileCells || cellZ < 0 || cellZ >= tile.tileCells) return null;
+  return tile.samples[cellZ * tile.tileCells + cellX] ?? null;
+}
+
+/** Bilinear blend written into `out`. This runs per vertex of every clipmap/shell refill
+ *  (thousands of calls per refill), so it must not allocate: corners are referenced, not
+ *  copied, and the result lands in a caller-provided sample. */
+function bilinearTileSampleInto(tile: FarSummaryTile, localX: number, localZ: number, out: FarSummarySample): boolean {
   const sampleX = localX - 0.5;
   const sampleZ = localZ - 0.5;
   const baseX = Math.floor(sampleX);
@@ -523,20 +575,13 @@ function bilinearTileSample(tile: FarSummaryTile, localX: number, localZ: number
   const z1 = clampInt(baseZ + 1, 0, tile.tileCells - 1);
   const tx = x0 === x1 ? 0 : Math.max(0, Math.min(1, sampleX - baseX));
   const tz = z0 === z1 ? 0 : Math.max(0, Math.min(1, sampleZ - baseZ));
-  const s00 = emptySample();
-  const s10 = emptySample();
-  const s01 = emptySample();
-  const s11 = emptySample();
-  if (
-    !readTileSample(tile, x0, z0, s00) ||
-    !readTileSample(tile, x1, z0, s10) ||
-    !readTileSample(tile, x0, z1, s01) ||
-    !readTileSample(tile, x1, z1, s11)
-  ) {
-    return null;
-  }
+  if (tile.samples.length === 0) return false;
+  const s00 = cornerSampleRef(tile, x0, z0);
+  const s10 = cornerSampleRef(tile, x1, z0);
+  const s01 = cornerSampleRef(tile, x0, z1);
+  const s11 = cornerSampleRef(tile, x1, z1);
+  if (!s00 || !s10 || !s01 || !s11) return false;
 
-  const out = emptySample();
   out.heightAvg = bilerp(s00.heightAvg, s10.heightAvg, s01.heightAvg, s11.heightAvg, tx, tz);
   out.heightMin = bilerp(s00.heightMin, s10.heightMin, s01.heightMin, s11.heightMin, tx, tz);
   out.heightMax = bilerp(s00.heightMax, s10.heightMax, s01.heightMax, s11.heightMax, tx, tz);
@@ -548,6 +593,10 @@ function bilinearTileSample(tile: FarSummaryTile, localX: number, localZ: number
     out.normalX = nx / normalLen;
     out.normalY = ny / normalLen;
     out.normalZ = nz / normalLen;
+  } else {
+    out.normalX = 0;
+    out.normalY = 1;
+    out.normalZ = 0;
   }
   out.dominantMaterial = nearestMaterial(s00, s10, s01, s11, tx, tz);
   out.materialVariance = bilerp(s00.materialVariance, s10.materialVariance, s01.materialVariance, s11.materialVariance, tx, tz);
@@ -555,7 +604,12 @@ function bilinearTileSample(tile: FarSummaryTile, localX: number, localZ: number
   out.waterCoverage = bilerp(s00.waterCoverage, s10.waterCoverage, s01.waterCoverage, s11.waterCoverage, tx, tz);
   out.slope = bilerp(s00.slope, s10.slope, s01.slope, s11.slope, tx, tz);
   out.roughness = bilerp(s00.roughness, s10.roughness, s01.roughness, s11.roughness, tx, tz);
-  return out;
+  return true;
+}
+
+function bilinearTileSample(tile: FarSummaryTile, localX: number, localZ: number): FarSummarySample | null {
+  const out = emptySample();
+  return bilinearTileSampleInto(tile, localX, localZ, out) ? out : null;
 }
 
 function bilerp(v00: number, v10: number, v01: number, v11: number, tx: number, tz: number): number {

@@ -1,5 +1,25 @@
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
+import type { WaterBodyVisualPreset, WaterBodyVisualPresets } from "./water_body_presets.js";
 import type { WaterConfig } from "./water_config_types.js";
+
+function cloneWaterBodyPreset(preset: WaterBodyVisualPreset): WaterBodyVisualPreset {
+  return {
+    ...preset,
+    shallowColor: [...preset.shallowColor],
+    deepColor: [...preset.deepColor],
+    absorption: [...preset.absorption],
+  };
+}
+
+function cloneWaterBodyPresets(presets: WaterBodyVisualPresets): WaterBodyVisualPresets {
+  return {
+    ocean: cloneWaterBodyPreset(presets.ocean),
+    lake: cloneWaterBodyPreset(presets.lake),
+    river: cloneWaterBodyPreset(presets.river),
+    pond: cloneWaterBodyPreset(presets.pond),
+    marsh: cloneWaterBodyPreset(presets.marsh),
+  };
+}
 
 export function cloneWaterConfig(config: WaterConfig): WaterConfig {
   return {
@@ -32,6 +52,7 @@ export function cloneWaterConfig(config: WaterConfig): WaterConfig {
       foam: { ...config.visual.foam },
       fresnel: { ...config.visual.fresnel },
       color: { ...config.visual.color },
+      bodies: cloneWaterBodyPresets(config.visual.bodies),
       refraction: { ...config.visual.refraction },
       reflection: { ...config.visual.reflection },
     },

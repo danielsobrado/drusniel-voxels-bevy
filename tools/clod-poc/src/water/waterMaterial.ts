@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import type { WaterMaterialParams, WaterMaterialHandle } from "./water_material_types.js";
-import { makeWaterUniforms, WATER_VERT, WATER_FRAG, type WaterUniforms } from "./water_material_uniforms.js";
+import { makeWaterUniforms, syncWaterBodyUniformArrays, WATER_VERT, WATER_FRAG, type WaterUniforms } from "./water_material_uniforms.js";
 import {
   materialChurnDiagnostics,
   setMaterialNeedsUpdate,
@@ -29,6 +29,9 @@ export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig):
   uniforms.uLakeBreeze.value.set(v.lakeBreeze[0], v.lakeBreeze[1]);
   uniforms.uShoreFoamStart.value = v.shoreFoamStart;
   uniforms.uShoreFoamEnd.value = v.shoreFoamEnd;
+  uniforms.uShoreDistFoamStart.value = v.foam.shoreDistanceStart;
+  uniforms.uShoreDistFoamEnd.value = v.foam.shoreDistanceEnd;
+  syncWaterBodyUniformArrays(uniforms, v.bodies);
   uniforms.uFoamNoiseScale.value = v.foam.noiseScale;
   uniforms.uFoamShoreStrength.value = v.foam.shoreStrength;
   uniforms.uFoamRiverStrength.value = v.foam.riverStrength;

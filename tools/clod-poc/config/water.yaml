@@ -119,6 +119,8 @@ water:
       speed_end: 0.82
       drop_start: 0.22
       drop_end: 1.45
+      shore_distance_start: 0.0 # metres-to-shoreline foam band (hydrology shoreDistance)
+      shore_distance_end: 1.2
     fresnel:
       base: 0.045
       power: 4.2
@@ -126,6 +128,23 @@ water:
     color:
       depth_scale: 4.6
       turbidity: 0.12
+    # Per-body-kind presets. absorption = Beer-Lambert extinction per metre per RGB
+    # channel (red dies first in clear water); unset kinds derive from the base scalars.
+    bodies:
+      lake:
+        absorption: [0.34, 0.20, 0.15]
+      river:
+        absorption: [0.36, 0.22, 0.17]
+      ocean:
+        absorption: [0.30, 0.17, 0.12]
+      pond:
+        absorption: [0.55, 0.32, 0.44]
+        turbidity: 0.38
+        reflection_damping: 0.55
+      marsh:
+        absorption: [0.68, 0.40, 0.55]
+        turbidity: 0.48
+        reflection_damping: 0.45
     refraction:
       enabled: true
       strength: 0.055

@@ -54,7 +54,10 @@ export function buildRiverTerrainWetnessMask(options: RiverTerrainWetnessMaskOpt
       const worldX = ((x + 0.5) / res) * worldCells;
       const worldZ = ((z + 0.5) / res) * worldCells;
       const here = options.field.sample(worldX, worldZ);
-      let wet = 0;
+      // Shore-distance wetness (Phase 7b): the hydrology chamfer distance hugs the true
+      // shoreline of every body; the tap loop below stays for flow-driven foam residue
+      // and as the only wet signal where shoreDistance is unavailable (fake bodies).
+      let wet = smooth01(1 - here.shoreDistance / searchRadius) * 0.85;
       let foam = 0;
       let droplets = 0;
       const dryBank = here.depth <= 0.08;

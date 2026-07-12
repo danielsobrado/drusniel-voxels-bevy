@@ -4,10 +4,12 @@ import type { CausticsConfig } from "./causticsConfig.js";
 
 /** Static-topology clipmap level resources (Phase 5b): per-level toroidal texel
  *  textures the material's vertex stage samples instead of CPU-filled attributes.
- *  Texture A = (waterY, terrainY, bodyMask, bodyKind); B = (flowX, flowZ, speed, drop). */
+ *  Texture A = (waterY, terrainY, bodyMask, bodyKind); B = (flowX, flowZ, speed, drop);
+ *  C = shoreDistance (r32float). */
 export interface WaterStaticGridParams {
   texelsA: THREE.DataTexture;
   texelsB: THREE.DataTexture;
+  texelsC: THREE.DataTexture;
   vertsPerEdge: number;
   cellSize: number;
 }

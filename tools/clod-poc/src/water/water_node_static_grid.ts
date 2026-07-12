@@ -40,6 +40,7 @@ export interface WaterStaticGridNodes {
   bodyMask: TslNode;
   bodyKind: TslNode;
   flow: TslNode;
+  shoreDistance: TslNode;
   /**
    * Fragment-side replacement for the legacy index-time height-discontinuity guard
    * (waterQuadRenderable): the CPU used to skip quads whose wet corners spanned more
@@ -68,6 +69,7 @@ export function buildWaterStaticGridNodes(grid: WaterStaticGridParams): WaterSta
   );
   const texelA: TslNode = textureLoad(grid.texelsA, slot, int(0));
   const texelB: TslNode = textureLoad(grid.texelsB, slot, int(0));
+  const texelC: TslNode = textureLoad(grid.texelsC, slot, int(0));
   const worldX: TslNode = uOriginMin.x.add(gridI.mul(float(grid.cellSize)));
   const worldZ: TslNode = uOriginMin.y.add(gridJ.mul(float(grid.cellSize)));
   const positionNode: TslNode = vec3(worldX, texelA.x, worldZ);
@@ -90,6 +92,7 @@ export function buildWaterStaticGridNodes(grid: WaterStaticGridParams): WaterSta
     bodyMask: vertexStage(texelA.z),
     bodyKind: vertexStage(texelA.w),
     flow: vertexStage(texelB),
+    shoreDistance: vertexStage(texelC.x),
     wallDiscard,
     handle: {
       setOrigin: (originMinX, originMinZ, baseSlotX, baseSlotZ) => {

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { WaterRefractionConfig, WaterReflectionConfig } from "./waterConfig.js";
 import type { WaterMaterialParams } from "./water_material_types.js";
 import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
+import { WATER_BODY_KIND_COUNT, waterBodyPresetsByKind, type WaterBodyVisualPresets } from "./water_body_presets.js";
 
 const LEVEL_PALETTE: Array<[number, number, number]> = [
   [0.36, 0.62, 0.95],
@@ -19,19 +20,25 @@ export function waterLevelColor(level: number): [number, number, number] {
 export const WATER_VERT = /* glsl */ `
   attribute float aTerrainY;
   attribute float aBodyMask;
+  attribute float aBodyKind;
   attribute vec4 aFlow;
+  attribute float aShoreDistance;
   attribute float aLevel;
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
+  varying float vBodyKind;
   varying vec4 vFlow;
+  varying float vShoreDistance;
   varying float vLevel;
 
   void main() {
     vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
     vTerrainY = aTerrainY;
     vBodyMask = aBodyMask;
+    vBodyKind = aBodyKind;
     vFlow = aFlow;
+    vShoreDistance = aShoreDistance;
     vLevel = aLevel;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
@@ -71,6 +78,8 @@ export const WATER_FRAG = /* glsl */ `
   uniform vec2 uLakeBreeze;
   uniform float uShoreFoamStart;
   uniform float uShoreFoamEnd;
+  uniform float uShoreDistFoamStart;
+  uniform float uShoreDistFoamEnd;
   uniform float uFoamNoiseScale;
   uniform float uFoamShoreStrength;
   uniform float uFoamRiverStrength;
@@ -92,10 +101,16 @@ export const WATER_FRAG = /* glsl */ `
   uniform float uCausticsGain;
   uniform float uCausticsScale;
   uniform float uCausticsSpeed;
+  uniform vec3 uBodyShallow[6];
+  uniform vec3 uBodyDeep[6];
+  uniform vec3 uBodyAbsorption[6];
+  uniform vec2 uBodyExtra[6];
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
+  varying float vBodyKind;
   varying vec4 vFlow;
+  varying float vShoreDistance;
   varying float vLevel;
 
   ${levelColorGlsl()}
@@ -162,8 +177,18 @@ export const WATER_FRAG = /* glsl */ `
     }
     float depth = worldPos.y - vTerrainY;
     if (depth <= 0.0) discard;
-    // Beer-Lambert style depth response; matches the WebGPU node materials.
-    float depthNorm = 1.0 - exp(-depth / max(uDepthScale, 0.05));
+    // Per-body-kind preset blend (Phase 7b); fract window matches the TSL helper.
+    float bodyK = clamp(vBodyKind, 0.0, 5.0);
+    int bodyK0 = int(floor(bodyK));
+    int bodyK1 = int(min(floor(bodyK) + 1.0, 5.0));
+    float bodyKt = smoothstep(0.35, 0.65, fract(bodyK));
+    vec3 bodyShallow = mix(uBodyShallow[bodyK0], uBodyShallow[bodyK1], bodyKt);
+    vec3 bodyDeep = mix(uBodyDeep[bodyK0], uBodyDeep[bodyK1], bodyKt);
+    vec3 bodyAbsorption = mix(uBodyAbsorption[bodyK0], uBodyAbsorption[bodyK1], bodyKt);
+    vec2 bodyExtra = mix(uBodyExtra[bodyK0], uBodyExtra[bodyK1], bodyKt);
+    // Per-channel Beer-Lambert depth response; matches the WebGPU node materials.
+    vec3 depthMixRgb = 1.0 - exp(-depth * bodyAbsorption);
+    float depthNorm = (depthMixRgb.r + depthMixRgb.g + depthMixRgb.b) / 3.0;
 
     float caustic = 0.0;
     if (uCausticsEnabled > 0.5) {
@@ -201,10 +226,10 @@ export const WATER_FRAG = /* glsl */ `
     float ndotv = max(dot(viewDir, fresnelNormal), 0.0);
     float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - ndotv, uFresnelPower);
 
-    vec3 deepBlue = mix(vec3(0.0, 0.025, 0.10), uDeepColor, 0.65);
-    vec3 shallowTeal = mix(uShallowColor, vec3(0.0, 0.45, 0.62), 0.35);
-    vec3 waterColor = mix(shallowTeal, deepBlue, depthNorm);
-    waterColor = mix(waterColor, shallowTeal, uTurbidity * (1.0 - depthNorm) * 0.50);
+    vec3 deepBlue = mix(vec3(0.0, 0.025, 0.10), bodyDeep, 0.65);
+    vec3 shallowTeal = mix(bodyShallow, vec3(0.0, 0.45, 0.62), 0.35);
+    vec3 waterColor = mix(shallowTeal, deepBlue, depthMixRgb);
+    waterColor = mix(waterColor, shallowTeal, bodyExtra.x * (1.0 - depthNorm) * 0.50);
     waterColor += caustic * vec3(0.10, 0.18, 0.16);
 
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
@@ -219,7 +244,12 @@ export const WATER_FRAG = /* glsl */ `
     float foamDetail = (mix(foamA2, foamB2, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
     float breakup = smoothstep(0.35, 0.82, foamBlend * 0.62 + foamDetail * 0.38);
     float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
-    float shore = (1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)) * wetFade * breakup * uFoamShoreStrength;
+    // Shore contact: real metres-to-shoreline where available, depth band as fallback.
+    float bankContact = max(
+      1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth),
+      1.0 - smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, vShoreDistance)
+    );
+    float shore = bankContact * wetFade * breakup * uFoamShoreStrength;
     float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
     float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, vFlow.w);
     float riverFoam = riverFast * riverDrop * uFoamRiverStrength * wetFade * (0.25 + 0.75 * breakup);
@@ -230,7 +260,7 @@ export const WATER_FRAG = /* glsl */ `
     vec3 sss = mix(vec3(0.01, 0.04, 0.14), shallowTeal, 0.55) * (backlit + crestScatter) * (1.0 - depthNorm * 0.45);
     float specDot = max(dot(reflect(-sunDir, normal), viewDir), 0.0);
     vec3 sunSpec = vec3(1.0, 0.92, 0.76) * (pow(specDot, 384.0) * 1.15 + pow(specDot, 96.0) * 0.28);
-    vec3 litWater = mix(waterColor + sss + sunSpec, envReflection, clamp(fres * 0.72, 0.0, 0.82));
+    vec3 litWater = mix(waterColor + sss + sunSpec, envReflection, clamp(fres * 0.72 * bodyExtra.y, 0.0, 0.82));
 
     vec3 finalColor = mix(litWater, uFoamColor, foam);
     finalColor = mix(finalColor, waterLevelColor(vLevel), uClipmapTint * 0.18);
@@ -271,6 +301,12 @@ export interface WaterUniforms {
   uLakeBreeze: { value: THREE.Vector2 };
   uShoreFoamStart: { value: number };
   uShoreFoamEnd: { value: number };
+  uShoreDistFoamStart: { value: number };
+  uShoreDistFoamEnd: { value: number };
+  uBodyShallow: { value: THREE.Vector3[] };
+  uBodyDeep: { value: THREE.Vector3[] };
+  uBodyAbsorption: { value: THREE.Vector3[] };
+  uBodyExtra: { value: THREE.Vector2[] };
   uFoamNoiseScale: { value: number };
   uFoamShoreStrength: { value: number };
   uFoamRiverStrength: { value: number };
@@ -296,9 +332,30 @@ export interface WaterUniforms {
   uCausticsSpeed: { value: number };
 }
 
+/** Per-kind preset uniform arrays, indexed by HYDROLOGY_BODY_* (dry slot mirrors lake). */
+export function syncWaterBodyUniformArrays(
+  uniforms: Pick<WaterUniforms, "uBodyShallow" | "uBodyDeep" | "uBodyAbsorption" | "uBodyExtra">,
+  bodies: WaterBodyVisualPresets,
+): void {
+  waterBodyPresetsByKind(bodies).forEach((preset, kind) => {
+    uniforms.uBodyShallow.value[kind].set(preset.shallowColor[0], preset.shallowColor[1], preset.shallowColor[2]);
+    uniforms.uBodyDeep.value[kind].set(preset.deepColor[0], preset.deepColor[1], preset.deepColor[2]);
+    uniforms.uBodyAbsorption.value[kind].set(preset.absorption[0], preset.absorption[1], preset.absorption[2]);
+    uniforms.uBodyExtra.value[kind].set(preset.turbidity, preset.reflectionDamping);
+  });
+}
+
 export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
   const v = params.visual;
+  const bodyArrays = {
+    uBodyShallow: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
+    uBodyDeep: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
+    uBodyAbsorption: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
+    uBodyExtra: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector2()) },
+  };
+  syncWaterBodyUniformArrays(bodyArrays, v.bodies);
   return {
+    ...bodyArrays,
     uTime: { value: 0 },
     uShallowColor: { value: new THREE.Color(v.shallowColor[0], v.shallowColor[1], v.shallowColor[2]) },
     uDeepColor: { value: new THREE.Color(v.deepColor[0], v.deepColor[1], v.deepColor[2]) },
@@ -316,6 +373,8 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uLakeBreeze: { value: new THREE.Vector2(v.lakeBreeze[0], v.lakeBreeze[1]) },
     uShoreFoamStart: { value: v.shoreFoamStart },
     uShoreFoamEnd: { value: v.shoreFoamEnd },
+    uShoreDistFoamStart: { value: v.foam.shoreDistanceStart },
+    uShoreDistFoamEnd: { value: v.foam.shoreDistanceEnd },
     uFoamNoiseScale: { value: v.foam.noiseScale },
     uFoamShoreStrength: { value: v.foam.shoreStrength },
     uFoamRiverStrength: { value: v.foam.riverStrength },

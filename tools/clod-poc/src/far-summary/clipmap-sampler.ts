@@ -114,9 +114,18 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
     return this.sampleConservativeDefault();
   }
 
+  /** Reused by sampleSummaryInto — the per-vertex refill path must not allocate. */
+  private readonly summaryScratch: FarSummarySample = {
+    heightMin: 0, heightMax: 0, heightAvg: 0,
+    normalX: 0, normalY: 1, normalZ: 0,
+    dominantMaterial: 0, materialVariance: 0,
+    canopyCoverage: 0, waterCoverage: 0,
+    slope: 0, roughness: 0,
+  };
+
   sampleSummaryInto(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean {
-    const sample = this.cache.sampleExactRing(x, z, ringIndexForDistance(distanceM, this.config));
-    if (!sample) return false;
+    const sample = this.summaryScratch;
+    if (!this.cache.sampleExactRingInto(x, z, ringIndexForDistance(distanceM, this.config), sample)) return false;
     out.height = sample.heightAvg;
     out.normalX = sample.normalX;
     out.normalY = sample.normalY;

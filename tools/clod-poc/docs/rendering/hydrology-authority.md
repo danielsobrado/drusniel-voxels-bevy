@@ -189,17 +189,27 @@ owner — clipmap outside the exclusion band, deep ocean inside it, with the sho
 as the only intentional weighted overlap. Exit 1 on zero-owner (dry gap) or double-owner
 (double render) samples.
 
-## Body-driven visuals (Phase 7, first pass)
+## Body-driven visuals (Phase 7 + 7b)
 
-`WaterFieldResult.bodyKind` (HYDROLOGY_BODY_*) flows into the clipmap as the `aBodyKind`
-vertex attribute. All three water materials (WebGPU perf, WebGPU hq, WebGL) share a
-Beer–Lambert depth response (`1 - exp(-depth/depthScale)`) so water colour no longer
-saturates to the deep tone within one depth-scale and does not depend on the material
-path. The perf material additionally treats ponds/marshes (kind ≥ 4) as murkier standing
-water: green sediment tint, extra turbidity, damped sky reflection. Rapid foam remains
-flow-gated (calm lakes never show it). Full per-kind config presets (spec §M) are
-deferred — current variation uses documented in-shader constants on top of the existing
-`visual.*` config.
+`WaterFieldResult.bodyKind` (HYDROLOGY_BODY_*) flows into the clipmap (attribute or
+static-grid texel), and since Phase 7b every fragment shades from a **per-body-kind
+preset** defined in `water.visual.bodies` (`src/water/water_body_presets.ts`):
+shallow/deep colour, RGB Beer–Lambert absorption per metre, turbidity, and reflection
+damping. All three materials (WebGPU perf, WebGPU hq, WebGL) share the kind-blend and
+the per-channel depth response `1 - exp(-depth · absorptionRGB)` (red dies first with
+the spectral extinction configured in `config/water.yaml`), replacing the old scalar
+depth-scale; unset kinds derive neutrally from the base scalars so an unconfigured
+`bodies:` section reproduces the pre-7b look exactly (`water_body_presets.test.ts`).
+The former in-shader pond/marsh murk constants now live in the pond/marsh presets and
+apply on every material path, not just perf.
+
+`WaterFieldResult.shoreDistance` (the hydrology chamfer distance) also reaches the GPU
+(legacy `aShoreDistance` attribute / static-grid texture C): shore foam is driven by
+real metres-to-shoreline (`foam.shore_distance_start/end`) with the depth band kept as
+the fallback for sources without a shoreline metric (fake bodies report a far sentinel),
+and the baked river terrain wetness mask (`riverTerrainWetnessMask.ts`) gains a
+shore-distance wetness term that hugs the true shoreline of every body. Rapid foam
+remains flow-gated (calm lakes never show it).
 
 ## Validation
 
@@ -231,7 +241,7 @@ npm test -- src/water          # unit tests
   CPU sampler instead). The WebGL shader material still uses the legacy index-rebuild
   path; texture uploads on snap are full-texture (partial writeTexture is a possible
   follow-up if profiling shows it matters).
-- **Phase 7b** — config-driven per-body visual presets (shallow/deep/absorption/
-  roughness per kind in `water.yaml`), shore-distance-driven foam and terrain wetness
-  (the shoreDistance channel is already packed on the GPU), and RGB absorption instead of
-  the scalar depth-scale.
+- **Phase 7b remainder** — presets, RGB absorption, shore-distance foam and the baked
+  wetness-mask term are done (above). Not covered: live (non-baked) terrain-material
+  wetness outside the startup world, and per-kind ripple/normal parameters if per-kind
+  colour alone proves insufficient.

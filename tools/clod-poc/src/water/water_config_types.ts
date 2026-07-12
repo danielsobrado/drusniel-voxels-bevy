@@ -38,6 +38,8 @@ export interface RiverBodyConfig {
   downstreamDrop: number;
 }
 
+import type { WaterBodyVisualPresets } from "./water_body_presets.js";
+
 export interface WaterVisualConfig {
   shallowColor: [number, number, number];
   deepColor: [number, number, number];
@@ -59,6 +61,8 @@ export interface WaterVisualConfig {
   foam: WaterFoamVisualConfig;
   fresnel: WaterFresnelVisualConfig;
   color: WaterColorVisualConfig;
+  /** Per-body-kind colour/absorption/turbidity/reflection presets (Phase 7b). */
+  bodies: WaterBodyVisualPresets;
   refraction: WaterRefractionConfig;
   reflection: WaterReflectionConfig;
   depthWrite: boolean;
@@ -78,6 +82,10 @@ export interface WaterFoamVisualConfig {
   speedEnd: number;
   dropStart: number;
   dropEnd: number;
+  /** Shore foam band in metres-to-shoreline (hydrology shoreDistance); complements the
+   *  depth-based band, which stays as the fallback where shoreDistance is unavailable. */
+  shoreDistanceStart: number;
+  shoreDistanceEnd: number;
 }
 
 export interface WaterFresnelVisualConfig {

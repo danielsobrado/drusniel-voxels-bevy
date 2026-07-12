@@ -1,12 +1,39 @@
 import type { CausticsConfig } from "./causticsConfig.js";
 import type { WaterVisualConfig } from "./water_config_types.js";
 import {
+  deriveDefaultWaterBodyPresets,
+  type WaterBodyVisualPreset,
+  type WaterBodyVisualPresets,
+} from "./water_body_presets.js";
+import {
   readBoolean,
   readColorTuple,
   readNumber,
   readNumberTuple,
   recordFrom,
 } from "./water_config_readers.js";
+
+function readBodyPreset(value: unknown, defaults: WaterBodyVisualPreset): WaterBodyVisualPreset {
+  const body = recordFrom(value);
+  return {
+    shallowColor: readColorTuple(body.shallow_color ?? body.shallowColor, defaults.shallowColor),
+    deepColor: readColorTuple(body.deep_color ?? body.deepColor, defaults.deepColor),
+    absorption: readColorTuple(body.absorption, defaults.absorption),
+    turbidity: readNumber(body.turbidity, defaults.turbidity),
+    reflectionDamping: readNumber(body.reflection_damping ?? body.reflectionDamping, defaults.reflectionDamping),
+  };
+}
+
+function readBodyPresets(value: unknown, defaults: WaterBodyVisualPresets): WaterBodyVisualPresets {
+  const bodies = recordFrom(value);
+  return {
+    ocean: readBodyPreset(bodies.ocean, defaults.ocean),
+    lake: readBodyPreset(bodies.lake, defaults.lake),
+    river: readBodyPreset(bodies.river, defaults.river),
+    pond: readBodyPreset(bodies.pond, defaults.pond),
+    marsh: readBodyPreset(bodies.marsh, defaults.marsh),
+  };
+}
 
 export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfig): WaterVisualConfig {
   const visual = recordFrom(value);
@@ -15,6 +42,14 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
   const color = recordFrom(visual.color);
   const refraction = recordFrom(visual.refraction);
   const reflection = recordFrom(visual.reflection);
+  // Body presets default from the *parsed* base scalars, so overriding only
+  // shallow_color/deep_color/depth_scale keeps unconfigured kinds consistent with them.
+  const parsedBase = {
+    shallowColor: readColorTuple(visual.shallow_color ?? visual.shallowColor, defaults.shallowColor),
+    deepColor: readColorTuple(visual.deep_color ?? visual.deepColor, defaults.deepColor),
+    depthScale: readNumber(color.depth_scale ?? color.depthScale, defaults.color.depthScale),
+    turbidity: readNumber(color.turbidity, defaults.color.turbidity),
+  };
 
   return {
     shallowColor: readColorTuple(visual.shallow_color ?? visual.shallowColor, defaults.shallowColor),
@@ -42,6 +77,8 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       speedEnd: readNumber(foam.speed_end ?? foam.speedEnd, defaults.foam.speedEnd),
       dropStart: readNumber(foam.drop_start ?? foam.dropStart, defaults.foam.dropStart),
       dropEnd: readNumber(foam.drop_end ?? foam.dropEnd, defaults.foam.dropEnd),
+      shoreDistanceStart: readNumber(foam.shore_distance_start ?? foam.shoreDistanceStart, defaults.foam.shoreDistanceStart),
+      shoreDistanceEnd: readNumber(foam.shore_distance_end ?? foam.shoreDistanceEnd, defaults.foam.shoreDistanceEnd),
     },
     fresnel: {
       base: readNumber(fresnel.base, defaults.fresnel.base),
@@ -52,6 +89,7 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       depthScale: readNumber(color.depth_scale ?? color.depthScale, defaults.color.depthScale),
       turbidity: readNumber(color.turbidity, defaults.color.turbidity),
     },
+    bodies: readBodyPresets(visual.bodies, deriveDefaultWaterBodyPresets(parsedBase)),
     refraction: {
       enabled: readBoolean(refraction.enabled, defaults.refraction.enabled),
       strength: readNumber(refraction.strength, defaults.refraction.strength),

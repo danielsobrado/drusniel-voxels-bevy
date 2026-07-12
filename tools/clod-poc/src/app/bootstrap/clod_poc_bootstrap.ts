@@ -337,7 +337,10 @@ export async function bootstrapClodPoc() {
       metrics: farShellMetrics,
     });
 
-    if (farShellCpuHeightsEnabled) infiniteFarShell.setHeightProvider(heightProvider);
+    // In replace mode the shell mesh is hidden and its per-frame update is skipped, so a
+    // height provider would only queue an initial sliced rebuild that never steps —
+    // leaving farShellRebuildPending stuck at 1 and blocking the convergence gate.
+    if (farShellCpuHeightsEnabled && !farClipmapReplaceActive) infiniteFarShell.setHeightProvider(heightProvider);
     // Keep farSummaryIntegration alive (it feeds the clipmap source via __drusnielFarSummary), but in
     // replace mode do not add the shell mesh — the far clipmap owns the far band on its own.
     if (!farClipmapReplaceActive) {

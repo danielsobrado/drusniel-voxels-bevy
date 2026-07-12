@@ -1,5 +1,6 @@
 import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
+import { deriveDefaultWaterBodyPresets } from "./water_body_presets.js";
 import type { WaterConfig, WaterVisualConfig } from "./water_config_types.js";
 import { WATER_DEBUG_MODES } from "./water_config_types.js";
 
@@ -33,6 +34,8 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     speedEnd: 1.0,
     dropStart: 0.5,
     dropEnd: 2.0,
+    shoreDistanceStart: 0.0,
+    shoreDistanceEnd: 2.5,
   },
   fresnel: {
     base: 0.045,
@@ -43,6 +46,12 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     depthScale: 5.0,
     turbidity: 0.10,
   },
+  bodies: deriveDefaultWaterBodyPresets({
+    shallowColor: [0.00, 0.32, 0.55],
+    deepColor: [0.00, 0.025, 0.12],
+    depthScale: 5.0,
+    turbidity: 0.10,
+  }),
   refraction: {
     enabled: false,
     strength: DEFAULT_WATER_REFRACTION_STRENGTH,

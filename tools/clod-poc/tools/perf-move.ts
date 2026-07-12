@@ -14,7 +14,7 @@
 //   npm --prefix tools/clod-poc run perf:move -- --speed 0.25 --moveFrames 900 --shots 0
 
 import { execSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Browser, CDPSession, Page } from "playwright";
 import { launchWebGPU } from "./launch.js";
@@ -60,6 +60,8 @@ const PHASE_KEYS = [
   "farSumTilesMs",
   "farSumNaadfMs",
   "farSumShellMs",
+  "farSumClipmapMs",
+  "farSumShellMoveMs",
   "farSumShadowProxyMs",
   "farSumBiomeStreamMs",
   "farSumSunLightMs",
@@ -129,6 +131,16 @@ function gitIdentity(): { sha: string; dirty: boolean | null } {
     return { sha, dirty: status.length > 0 };
   } catch {
     return { sha: "unknown", dirty: null };
+  }
+}
+
+/** When benchmarking a frozen `vite preview` build, the SOURCE SHA at run time can be
+ *  newer than what dist serves; the dist mtime disambiguates which build was measured. */
+function distBuiltAt(): string | null {
+  try {
+    return statSync("dist/index.html").mtime.toISOString();
+  } catch {
+    return null;
   }
 }
 
@@ -269,6 +281,8 @@ function buildParams(args: Args): Record<string, string> {
   }
   const viewPrewarmCompile = str(args["viewPrewarmCompile"]);
   if (viewPrewarmCompile) params["viewPrewarmCompile"] = viewPrewarmCompile;
+  const sceneCompileWarm = str(args["sceneCompileWarm"]);
+  if (sceneCompileWarm) params["sceneCompileWarm"] = sceneCompileWarm;
   return params;
 }
 
@@ -676,6 +690,7 @@ async function main(): Promise<void> {
       startedAt: new Date().toISOString(),
       gitSha: git.sha,
       gitDirty: git.dirty,
+      distBuiltAt: distBuiltAt(),
       viewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
       baseUrl,
       url,

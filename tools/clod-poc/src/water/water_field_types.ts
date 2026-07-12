@@ -17,8 +17,15 @@ export interface WaterFieldResult {
   bodyMask: number;
   /** HYDROLOGY_BODY_* kind (0 = dry); lets materials pick per-body visual behaviour. */
   bodyKind: number;
+  /** Metres to the nearest wet<->dry boundary (hydrology chamfer distance; 0 on the
+   *  waterline, grows both inland and into open water). Sources without a shoreline
+   *  metric report WATER_SHORE_DISTANCE_UNKNOWN so shore-driven effects stay inert. */
+  shoreDistance: number;
   flow: WaterFlow;
 }
+
+/** Neutral shoreDistance for fake-body/dry samples: far outside any foam/wetness band. */
+export const WATER_SHORE_DISTANCE_UNKNOWN = 1e4;
 
 export interface ShoreSurfBandSettings {
   enabled: boolean;

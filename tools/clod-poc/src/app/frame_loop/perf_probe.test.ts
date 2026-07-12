@@ -22,6 +22,8 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     farSumTilesMs: 0,
     farSumNaadfMs: 0,
     farSumShellMs: 0,
+    farSumClipmapMs: 0,
+    farSumShellMoveMs: 0,
     farSumShadowProxyMs: 0,
     farSumBiomeStreamMs: 0,
     farSumSunLightMs: 0,
