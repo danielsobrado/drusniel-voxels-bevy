@@ -75,6 +75,43 @@ describe("HeightfieldTileCache", () => {
     expect(cache.counters().buildMsP95).toBe(4.5);
   });
 
+  it("plans while blocked and dispatches after streamed-root work drains", async () => {
+    const calls: WorldTileKey[][] = [];
+    const builder: HeightfieldTileBatchBuilder = async (keys, revision) => {
+      calls.push([...keys]);
+      return { tiles: keys.map((key) => tile(key, revision)), buildMs: 1 };
+    };
+    const cache = new HeightfieldTileCache(config(), 0, builder);
+
+    cache.update({ x: 128, z: 128, frameIndex: 1, buildAllowed: false });
+    expect(cache.counters().required).toBe(1);
+    expect(cache.counters().pending).toBe(1);
+    expect(calls).toHaveLength(0);
+
+    cache.update({ x: 128, z: 128, frameIndex: 2, buildAllowed: true });
+    await drainMicrotasks();
+    expect(calls).toHaveLength(1);
+    expect(cache.counters().resident).toBe(1);
+  });
+
+  it("ignores a worker result that resolves after disposal", async () => {
+    const pending = deferred<HeightfieldTileBuildResult>();
+    const calls: WorldTileKey[][] = [];
+    const cache = new HeightfieldTileCache(config(), 0, (keys) => {
+      calls.push([...keys]);
+      return pending.promise;
+    });
+
+    cache.update({ x: 128, z: 128, frameIndex: 1 });
+    cache.clear();
+    pending.resolve({ tiles: calls[0]!.map((key) => tile(key)), buildMs: 1 });
+    await drainMicrotasks();
+
+    expect(cache.counters().resident).toBe(0);
+    expect(cache.counters().buildsTotal).toBe(0);
+    expect(cache.counters().inflight).toBe(0);
+  });
+
   it("evicts old tiles after the required ring moves", async () => {
     const builder: HeightfieldTileBatchBuilder = async (keys, revision) => ({
       tiles: keys.map((key) => tile(key, revision)),
