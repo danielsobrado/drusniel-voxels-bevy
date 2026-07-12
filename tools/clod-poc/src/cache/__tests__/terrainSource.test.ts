@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../../terrain/border_coast_config.js";
+import { STARTUP_HEIGHTFIELD_SAMPLING_MODE } from "../../terrain/startup_heightfield_raster.js";
 import {
   buildStagedImportHash,
   canonicalizeDigEdits,
@@ -29,6 +30,15 @@ const baseTerrainSource = (): TerrainSourceInputs => ({
   proceduralTextureHash: null,
   stagedImportHash: null,
   longViewScene: false,
+});
+
+const rasterDescriptor = (res: number) => ({
+  worldCells: 512,
+  minCell: -2,
+  res,
+  sampleCount: res * res,
+  byteLength: res * res * Float64Array.BYTES_PER_ELEMENT,
+  samplingMode: STARTUP_HEIGHTFIELD_SAMPLING_MODE,
 });
 
 describe("terrain source hash", () => {
@@ -74,11 +84,11 @@ describe("terrain source hash", () => {
     const withoutRaster = await computeTerrainSourceHash(baseTerrainSource());
     const withRaster = await computeTerrainSourceHash({
       ...baseTerrainSource(),
-      startupHeightfield: { worldCells: 512, minCell: -2, res: 517 },
+      startupHeightfield: rasterDescriptor(517),
     });
     const withOtherRes = await computeTerrainSourceHash({
       ...baseTerrainSource(),
-      startupHeightfield: { worldCells: 512, minCell: -2, res: 259 },
+      startupHeightfield: rasterDescriptor(259),
     });
     expect(withRaster).not.toBe(withoutRaster);
     expect(withOtherRes).not.toBe(withRaster);
