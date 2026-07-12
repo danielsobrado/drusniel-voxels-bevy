@@ -67,4 +67,46 @@ describe("publishFarClipmapStatsToCounters", () => {
     expect(counters["far_clipmap_snapped_origin_z"]).toBe(-384);
     expect(Object.keys(counters).some((key) => key.startsWith("far_clipmap_grid_"))).toBe(false);
   });
+
+  it("excludes startup fallback samples and counts fallback after stream readiness", () => {
+    const counters: Record<string, number> = { stream_ready_frame: -1 };
+
+    publishFarClipmapStatsToCounters(counters, stats({
+      sourceReady: 1,
+      fallbackSamplesTotal: 90_000,
+    }));
+    expect(counters["far_clipmap_fallback_samples_lifetime_total"]).toBe(90_000);
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(0);
+
+    counters["stream_ready_frame"] = 42;
+    publishFarClipmapStatsToCounters(counters, stats({
+      sourceReady: 1,
+      fallbackSamplesTotal: 90_000,
+    }));
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(0);
+
+    publishFarClipmapStatsToCounters(counters, stats({
+      sourceReady: 1,
+      fallbackSamplesTotal: 90_003,
+    }));
+    expect(counters["far_clipmap_fallback_samples_lifetime_total"]).toBe(90_003);
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(3);
+  });
+
+  it("starts a new fallback epoch when acceptance resets stream readiness", () => {
+    const counters: Record<string, number> = { stream_ready_frame: 10 };
+
+    publishFarClipmapStatsToCounters(counters, stats({ sourceReady: 1, fallbackSamplesTotal: 100 }));
+    publishFarClipmapStatsToCounters(counters, stats({ sourceReady: 1, fallbackSamplesTotal: 102 }));
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(2);
+
+    counters["stream_ready_frame"] = -1;
+    publishFarClipmapStatsToCounters(counters, stats({ sourceReady: 1, fallbackSamplesTotal: 120 }));
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(0);
+
+    counters["stream_ready_frame"] = 50;
+    publishFarClipmapStatsToCounters(counters, stats({ sourceReady: 1, fallbackSamplesTotal: 120 }));
+    publishFarClipmapStatsToCounters(counters, stats({ sourceReady: 1, fallbackSamplesTotal: 121 }));
+    expect(counters["far_clipmap_fallback_samples_total"]).toBe(1);
+  });
 });
