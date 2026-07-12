@@ -80,11 +80,6 @@ export interface HydrologyInfiniteConfig {
    *  placement compute real hydrology outside the startup world; 0 disables the atlas
    *  (GPU consumers fall back to clamping the startup texture). */
   atlasTilesPerSide: number;
-  /** Phase 3b: generate the startup world through the same traced/tile authority as the
-   *  infinite field (no finite-grid sim, no river carve, no boundary blend band — the
-   *  raw seam disappears by construction). Only takes effect with infinite-world
-   *  sampling and a tile cache; finite scenes keep the grid sim regardless. */
-  unifiedStartup: boolean;
 }
 
 export interface HydrologyDebugConfig {
@@ -175,7 +170,6 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     unifiedStartup: false,
     boundaryBlendM: 48,
     atlasTilesPerSide: 6,
-    unifiedStartup: false,
   },
   debug: {
     showFill: false,

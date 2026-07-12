@@ -314,15 +314,22 @@ function buildUnifiedStartupGrid(
         ? tileCache.sample(worldX, worldZ)
         : sampleInfiniteHydrology(worldX, worldZ, sampler, options);
       const index = z * grid.res + x;
+      const wet = sample.bodyMask > 0.5;
+      let bodyId = sample.bodyId;
+      if (wet && bodyId === 0) {
+        bodyId = sampleInfiniteHydrology(worldX, worldZ, sampler, options).bodyId || 1;
+      }
+      const drySentinel = config.waterSurface.drySentinelDepth;
+
       grid.originalBed[index] = sample.terrainY;
       grid.carvedBed[index] = sample.terrainY;
-      grid.filledSurface[index] = sample.bodyMask > 0 ? sample.waterY : sample.terrainY;
+      grid.filledSurface[index] = wet ? sample.waterY : sample.terrainY;
       grid.accumulation[index] = 0;
       grid.flowStrength[index] = sample.flowStrength;
       grid.waterStrength[index] = sample.bodyMask;
       grid.riverDepth[index] = sample.riverDepth;
-      grid.waterYRaw[index] = sample.waterY;
-      grid.waterY[index] = sample.waterY;
+      grid.waterYRaw[index] = wet ? sample.waterY : sample.terrainY - drySentinel;
+      grid.waterY[index] = wet ? sample.waterY : sample.terrainY - drySentinel;
       grid.wetMask[index] = sample.bodyMask;
       grid.lakeMask[index] = sample.lakeMask;
       grid.riverMask[index] = sample.riverMask;
@@ -330,7 +337,7 @@ function buildUnifiedStartupGrid(
       grid.bodyKind[index] = sample.bodyKind;
       grid.flowDirX[index] = sample.flowX;
       grid.flowDirZ[index] = sample.flowZ;
-      grid.bodyId[index] = sample.bodyId;
+      grid.bodyId[index] = bodyId;
       grid.shoreDistance[index] = sample.shoreDistance;
     }
   }
