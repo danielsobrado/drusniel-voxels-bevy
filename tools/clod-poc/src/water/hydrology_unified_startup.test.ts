@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HydrologySystem } from "./hydrologySystem.js";
 import { HydrologyTileCache } from "./hydrologyTileSource.js";
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
+import { evaluateHydrologyInvariants } from "./hydrologyInvariants.js";
 import { readHydrologyConfig } from "./water_config_hydrology_parsing.js";
 import type { TerrainHeightSampler } from "./water_field_types.js";
 
@@ -107,6 +108,13 @@ describe("unified startup hydrology (Phase 3b)", () => {
     for (const [x, z] of [[10, 20], [512, 700], [1300, -40]] as const) {
       expect(unified.terrainHeight(x, z)).toBe(sampler.surfaceHeight(x, z));
     }
+  });
+
+  it("evaluates sparse traced body ids without dense allocation", () => {
+    const report = evaluateHydrologyInvariants(unified.grid);
+    expect(report.bodyCount).toBeGreaterThan(0);
+    expect(report.bodyCount).toBeLessThanOrEqual(unified.grid.res * unified.grid.res);
+    expect(Number.isFinite(report.withinBodyMaxJump)).toBe(true);
   });
 
   it("keeps legacy finite-grid mode available when the flag is off", () => {
