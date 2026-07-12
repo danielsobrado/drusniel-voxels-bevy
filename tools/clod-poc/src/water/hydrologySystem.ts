@@ -188,7 +188,6 @@ export class HydrologySystem {
     return this.infiniteWorldSamples;
   }
 
-
   unifiedStartupActive(): boolean {
     return this.unifiedStartup;
   }
@@ -303,7 +302,13 @@ function buildUnifiedStartupGrid(
   sampler: TerrainHeightSampler,
   tileCache: HydrologyTileCache | null,
 ): HydrologyGrid {
-  const grid = createHydrologyGrid(config.simRes, worldCells, sampler, config.waterSurface.farReduceFactor);
+  const grid = createHydrologyGrid(
+    config.simRes,
+    worldCells,
+    sampler,
+    config.waterSurface.farReduceFactor,
+    "unified_traced",
+  );
   const denom = Math.max(1, grid.res - 1);
   const options = { drySentinelDepthM: config.waterSurface.drySentinelDepth };
   for (let z = 0; z < grid.res; z++) {
@@ -315,10 +320,6 @@ function buildUnifiedStartupGrid(
         : sampleInfiniteHydrology(worldX, worldZ, sampler, options);
       const index = z * grid.res + x;
       const wet = sample.bodyMask > 0.5;
-      let bodyId = sample.bodyId;
-      if (wet && bodyId === 0) {
-        bodyId = sampleInfiniteHydrology(worldX, worldZ, sampler, options).bodyId || 1;
-      }
       const drySentinel = config.waterSurface.drySentinelDepth;
 
       grid.originalBed[index] = sample.terrainY;
@@ -337,7 +338,7 @@ function buildUnifiedStartupGrid(
       grid.bodyKind[index] = sample.bodyKind;
       grid.flowDirX[index] = sample.flowX;
       grid.flowDirZ[index] = sample.flowZ;
-      grid.bodyId[index] = bodyId;
+      grid.bodyId[index] = sample.bodyId;
       grid.shoreDistance[index] = sample.shoreDistance;
     }
   }
@@ -392,7 +393,6 @@ function infiniteIslandsScene(): boolean {
   if (typeof window === "undefined") return false;
   return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
 }
-
 
 function applyRiverFlowSpeedMultiplier(grid: HydrologyGrid, multiplier: number): void {
   const safeMultiplier = Number.isFinite(multiplier) ? Math.max(0, multiplier) : 1;
