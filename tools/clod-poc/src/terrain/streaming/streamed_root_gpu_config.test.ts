@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_INFINITE_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES,
   DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
   parseStreamingRootGpuMesherConfig,
 } from "./streamed_root_gpu_config.js";
@@ -9,17 +10,23 @@ describe("streamed root GPU mesher config", () => {
     expect(parseStreamingRootGpuMesherConfig(new URLSearchParams())).toEqual(DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG);
   });
 
-  it("defaults enabled for the infinite-islands scene (5x streamed-root throughput)", () => {
+  it("defaults enabled with two pools for the infinite-islands scene", () => {
     const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "infinite-islands" }));
     expect(parsed.enabled).toBe(true);
-    expect(parsed.fallback).toBe(true); // guarded CPU fallback stays on
+    expect(parsed.maxInflightBatches).toBe(DEFAULT_INFINITE_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES);
+    expect(parsed.fallback).toBe(true);
   });
 
-  it("infinite-islands scene default can be opted out with liveClodRootGpuMesher=0", () => {
-    const parsed = parseStreamingRootGpuMesherConfig(
+  it("infinite-islands scene defaults can be opted out or reduced to one pool", () => {
+    const disabled = parseStreamingRootGpuMesherConfig(
       new URLSearchParams({ scene: "infinite-islands", liveClodRootGpuMesher: "0" }),
     );
-    expect(parsed.enabled).toBe(false);
+    expect(disabled.enabled).toBe(false);
+
+    const singlePool = parseStreamingRootGpuMesherConfig(
+      new URLSearchParams({ scene: "infinite-islands", liveClodRootGpuMaxInflightBatches: "1" }),
+    );
+    expect(singlePool.maxInflightBatches).toBe(1);
   });
 
   it("enables single-page GPU batches only when continent tile meshing is requested", () => {
@@ -27,6 +34,7 @@ describe("streamed root GPU mesher config", () => {
     const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "continent", gpuTileMesh: "1" }));
     expect(parsed.enabled).toBe(true);
     expect(parsed.batchSize).toBe(1);
+    expect(parsed.maxInflightBatches).toBe(DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG.maxInflightBatches);
   });
 
   it("parses explicit query flags", () => {

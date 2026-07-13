@@ -10,6 +10,7 @@ export interface StreamingRootGpuMesherConfig {
 
 export const DEFAULT_STREAMING_ROOT_GPU_BATCH_SIZE = 4;
 export const DEFAULT_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES = 1;
+export const DEFAULT_INFINITE_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES = 2;
 
 export const DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG: StreamingRootGpuMesherConfig = {
   enabled: false,
@@ -35,17 +36,20 @@ export function parseStreamingRootGpuMesherConfig(
   params: URLSearchParams,
   defaults: StreamingRootGpuMesherConfig = DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
 ): StreamingRootGpuMesherConfig {
-  // Infinite-islands streams hundreds of root pages on boot/teleport; the serial CPU
-  // worker builds ~3 pages/s while the GPU mesher measures ~16 pages/s (5x) with the
-  // guarded CPU fallback still in place, so the GPU path is the scene default there.
-  // liveClodRootGpuMesher=0 opts back into the CPU worker.
+  // Infinite-islands streams hundreds of root pages on boot/teleport. The guarded GPU path is
+  // the scene default, and two independent buffer pools overlap compute/readback with CPU page
+  // assembly without increasing the configured aggregate slot/readback memory budgets.
+  const scene = params.get("scene");
   const gpuTileMesh = booleanFlag(params, "gpuTileMesh", false);
-  const defaultEnabled = defaults.enabled || params.get("scene") === "infinite-islands"
-    || (params.get("scene") === "continent" && gpuTileMesh);
+  const infiniteIslands = scene === "infinite-islands";
+  const defaultEnabled = defaults.enabled || infiniteIslands || (scene === "continent" && gpuTileMesh);
+  const defaultInflight = infiniteIslands
+    ? Math.max(defaults.maxInflightBatches, DEFAULT_INFINITE_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES)
+    : defaults.maxInflightBatches;
   return {
     enabled: booleanFlag(params, "liveClodRootGpuMesher", defaultEnabled),
     batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? (gpuTileMesh ? 1 : defaults.batchSize),
-    maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaults.maxInflightBatches,
+    maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaultInflight,
     fallback: booleanFlag(params, "liveClodRootGpuFallback", defaults.fallback),
     maxChunkSlots: positiveIntegerParam(params, "liveClodRootGpuMaxChunkSlots") ?? defaults.maxChunkSlots,
     maxTotalSlotBytes: positiveIntegerParam(params, "liveClodRootGpuMaxSlotBytes") ?? defaults.maxTotalSlotBytes,
