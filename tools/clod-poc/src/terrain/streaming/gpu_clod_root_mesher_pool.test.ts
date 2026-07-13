@@ -26,6 +26,25 @@ function fakeMesher(
   };
 }
 
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function withGlobalCounters(run: (counters: Record<string, number>) => Promise<void>): Promise<void> {
+  type CounterWindow = { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  const scope = globalThis as typeof globalThis & { window?: CounterWindow };
+  const previousWindow = scope.window;
+  const counters: Record<string, number> = {};
+  scope.window = { __drusnielClod: { stats: { counters } } };
+  try {
+    await run(counters);
+  } finally {
+    if (previousWindow === undefined) delete scope.window;
+    else scope.window = previousWindow;
+  }
+}
+
 describe("pooled GPU CLOD root mesher", () => {
   it("runs one build per pool concurrently and queues overflow", async () => {
     const gates = [deferred(), deferred(), deferred()];
@@ -43,8 +62,7 @@ describe("pooled GPU CLOD root mesher", () => {
     const first = pool.buildPages([{ px: 0, pz: 0 }]);
     const second = pool.buildPages([{ px: 1, pz: 0 }]);
     const third = pool.buildPages([{ px: 2, pz: 0 }]);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushPromises();
 
     expect(started).toBe(2);
     expect(active).toBe(2);
@@ -57,8 +75,7 @@ describe("pooled GPU CLOD root mesher", () => {
     });
 
     gates[0]!.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushPromises();
     expect(started).toBe(3);
 
     gates[1]!.resolve();
@@ -69,6 +86,38 @@ describe("pooled GPU CLOD root mesher", () => {
       maxActive: 2,
       overlapEventsTotal: 2,
       waiters: 0,
+    });
+  });
+
+  it("publishes waiter changes while overflow work is queued", async () => {
+    await withGlobalCounters(async (counters) => {
+      const gates = [deferred(), deferred(), deferred()];
+      let started = 0;
+      const make = () => fakeMesher(async () => {
+        const gate = gates[started++]!;
+        await gate.promise;
+        return { nodes: [], buildMs: 1, transferBytes: 0 };
+      });
+      const pool = new PooledGpuClodRootMesher([make(), make()]);
+
+      const first = pool.buildPages([{ px: 0, pz: 0 }]);
+      const second = pool.buildPages([{ px: 1, pz: 0 }]);
+      const third = pool.buildPages([{ px: 2, pz: 0 }]);
+      await flushPromises();
+
+      expect(counters["live_clod_stream_gpu_pool_active"]).toBe(2);
+      expect(counters["live_clod_stream_gpu_pool_waiters"]).toBe(1);
+      expect(counters["live_clod_stream_gpu_pool_overlap_events_total"]).toBe(1);
+
+      gates[0]!.resolve();
+      await flushPromises();
+      expect(counters["live_clod_stream_gpu_pool_waiters"]).toBe(0);
+
+      gates[1]!.resolve();
+      gates[2]!.resolve();
+      await Promise.all([first, second, third]);
+      expect(counters["live_clod_stream_gpu_pool_active"]).toBe(0);
+      expect(counters["live_clod_stream_gpu_pool_waiters"]).toBe(0);
     });
   });
 
