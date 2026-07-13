@@ -26,6 +26,22 @@ export interface GraphTerrainCarveConfig {
   readonly lakeBedDepthM: number;
 }
 
+/**
+ * Makes water depth and shoreline tests use the carved canonical terrain
+ * surface, while retaining the same graph records used to carve its tiles.
+ */
+export function createCarvedGraphHydrologySampler(
+  graph: HydrologyGraph,
+  terrain: TerrainHeightSampler,
+  carve: GraphTerrainCarveConfig,
+  drySentinelDepthM = 2,
+): GraphHydrologySampler {
+  const base = createGraphHydrologySampler(graph, terrain, drySentinelDepthM);
+  return createGraphHydrologySampler(graph, {
+    surfaceHeight: (x, z) => base.carveHeight(x, z, terrain.surfaceHeight(x, z), carve),
+  }, drySentinelDepthM);
+}
+
 function numericId(id: string): number {
   const hex = id.slice(id.lastIndexOf(":") + 1);
   return (Number.parseInt(hex, 16) >>> 0) || 1;

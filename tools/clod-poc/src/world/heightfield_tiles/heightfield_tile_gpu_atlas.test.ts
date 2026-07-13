@@ -25,6 +25,12 @@ describe("heightfield tile GPU atlas", () => {
     expect(shader).toContain("@binding(11)");
   });
 
+  it("quantizes tile-atlas normal probes before finite differences so welded f32 seam vertices agree", () => {
+    const shader = terrainFieldShaderWithTileAtlas();
+    expect(shader).toContain("fn continentStableNormalCoordinate");
+    expect(shader).toContain("densityGradient(continentStableNormalCoordinate(p.x)");
+  });
+
   it("mirrors exact f32 lattice reads across positive and negative tile borders", () => {
     const side = 7;
     const atlasRes = side * HEIGHTFIELD_TILE_RES;

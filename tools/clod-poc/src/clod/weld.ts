@@ -129,7 +129,12 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
       }
       if (dot < tol.normalDot || paintDelta > tol.material || maxWeightDelta > tol.material) {
         const parts: string[] = [`weld conflict at (${px.toFixed(3)},${py.toFixed(3)},${pz.toFixed(3)})`];
-        if (dot < tol.normalDot) parts.push(`normal dot ${dot.toFixed(5)} (need >= ${tol.normalDot})`);
+        if (dot < tol.normalDot) {
+          const dx = px - pos[found * 3];
+          const dy = py - pos[found * 3 + 1];
+          const dz = pz - pos[found * 3 + 2];
+          parts.push(`normal dot ${dot.toFixed(5)} (need >= ${tol.normalDot}); position delta (${dx.toExponential(2)},${dy.toExponential(2)},${dz.toExponential(2)}); normal (${mesh.normals[i * 3].toFixed(4)},${mesh.normals[i * 3 + 1].toFixed(4)},${mesh.normals[i * 3 + 2].toFixed(4)}) vs (${nrm[found * 3].toFixed(4)},${nrm[found * 3 + 1].toFixed(4)},${nrm[found * 3 + 2].toFixed(4)})`);
+        }
         if (paintDelta > tol.material) parts.push(`paint delta ${paintDelta.toExponential(2)} (need <= ${tol.material})`);
         if (maxWeightDelta > tol.material) parts.push(`max weight delta ${maxWeightDelta.toExponential(2)} (need <= ${tol.material})`);
         throw new ClodBuildError("DirtyInput", parts.join("; "));

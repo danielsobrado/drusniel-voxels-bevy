@@ -109,7 +109,7 @@ import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
 import { ProceduralWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
-import { createGraphHydrologySampler } from "../../water/graph_hydrology.js";
+import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
 
 function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
   for (const key of keys) {
@@ -632,6 +632,12 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       { surfaceHeight: baseSurfaceHeight },
       waterConfig.hydrology.waterSurface.drySentinelDepth,
     );
+    const carvedGraphSampler = createCarvedGraphHydrologySampler(
+      hydrologyGraphArtifact.graph,
+      { surfaceHeight: baseSurfaceHeight },
+      graphCarveConfig!,
+      waterConfig.hydrology.waterSurface.drySentinelDepth,
+    );
     waterConfig.hydrology.infinite.source = "graph";
     if (heightfieldRasterRequested && heightfieldRasterPlan.enabled) {
       startupHeightfield = measure(startupTimings, "startup.heightfield_raster_ms", () =>
@@ -649,7 +655,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       { surfaceHeight: baseSurfaceHeight },
       {
         infiniteWorldSamples: true,
-        worldSampler: (x, z) => graphSampler.sample(x, z),
+        worldSampler: (x, z) => carvedGraphSampler.sample(x, z),
       },
     ));
     terrainSource.startupHeightfield = startupHeightfieldDescriptor(startupHeightfield);

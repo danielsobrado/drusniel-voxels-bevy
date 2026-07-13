@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildHydrologyGraph } from "../world/hydrology_graph/hydrology_graph_builder.js";
-import { createGraphHydrologySampler } from "./graph_hydrology.js";
+import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "./graph_hydrology.js";
 import { buildHydrologyTileData } from "./hydrologyTileSource.js";
 
 describe("graph hydrology sampling", () => {
@@ -35,5 +35,19 @@ describe("graph hydrology sampling", () => {
       expect(left.waterY[z * 17 + 16]).toBe(right.waterY[z * 17]);
       expect(left.bodyId[z * 17 + 16]).toBe(right.bodyId[z * 17]);
     }
+  });
+
+  it("reports water depth against the same carved surface as canonical terrain tiles", () => {
+    const terrain = { surfaceHeight: (_x: number, z: number) => 100 - z };
+    const graph = buildHydrologyGraph({
+      worldId: "carved-water", seed: 3, sizeM: { x: 32, z: 32 }, sampleHeight: terrain.surfaceHeight,
+      config: { spacingM: 1, channelThresholdCells: 3 },
+    });
+    const base = createGraphHydrologySampler(graph, terrain);
+    const carved = createCarvedGraphHydrologySampler(graph, terrain, { depthM: 2, power: 1, lakeBedDepthM: 1 });
+    const river = graph.rivers.flatMap((record) => record.vertices)[1]!;
+    const expectedTerrainY = base.carveHeight(river.x, river.z, terrain.surfaceHeight(river.x, river.z), { depthM: 2, power: 1, lakeBedDepthM: 1 });
+
+    expect(carved.sample(river.x, river.z).terrainY).toBe(expectedTerrainY);
   });
 });

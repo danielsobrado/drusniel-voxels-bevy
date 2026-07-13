@@ -713,16 +713,29 @@ function tileAtlasMesherRequested(): boolean {
 }
 
 export function terrainFieldShaderWithTileAtlas(): string {
-  const procedural = composeTerrainFieldShader().replace(
-    "fn surfaceHeightField(x : f32, z : f32) -> f32 {",
-    "fn proceduralSurfaceHeightField(x : f32, z : f32) -> f32 {",
-  );
+  const procedural = composeTerrainFieldShader()
+    .replace(
+      "fn surfaceHeightField(x : f32, z : f32) -> f32 {",
+      "fn proceduralSurfaceHeightField(x : f32, z : f32) -> f32 {",
+    )
+    .replace(
+      "let nrm = densityGradient(p.x, p.y, p.z);",
+      "let nrm = densityGradient(continentStableNormalCoordinate(p.x), continentStableNormalCoordinate(p.y), continentStableNormalCoordinate(p.z));",
+    );
   return `${procedural}
 @group(0) @binding(10) var continentHeightAtlas : texture_2d<f32>;
 @group(0) @binding(11) var<uniform> continentHeightAtlasParams : vec4<f32>;
 
 fn continentPositiveMod(value : i32, divisor : i32) -> i32 {
   return ((value % divisor) + divisor) % divisor;
+}
+
+// Adjacent surface-net chunks can differ by one f32 ULP at an otherwise shared
+// vertex. Snap only the finite-difference probe in atlas mode so the nearest-
+// lattice lookup cannot select opposite sides of a half-cell boundary.
+fn continentStableNormalCoordinate(value : f32) -> f32 {
+  if (continentHeightAtlasParams.w < 0.5) { return value; }
+  return floor(value * 64.0 + 0.5) / 64.0;
 }
 
 fn surfaceHeightField(x : f32, z : f32) -> f32 {
