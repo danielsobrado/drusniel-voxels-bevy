@@ -219,6 +219,7 @@ function scenarioUrl(scenario: Scenario): string {
       z: String(START_POSE.p[2]),
       yaw: String(START_POSE.yaw),
       liveBubble: "0",
+      liveClodRootRadius: "512",
       liveClodRootGpuMesher: "1",
       liveClodRootGpuBatchSize: "1",
       liveClodRootGpuMaxInflightBatches: String(scenario.poolCount),
@@ -262,6 +263,15 @@ async function runScenario(
     await page.evaluate(async () => {
       await window.__drusnielClod?.settle?.(30);
     });
+    const initialBaseline = await readSnapshot(page);
+    await waitForMeasuredStream(
+      page,
+      scenario,
+      initialBaseline.pagesDispatched,
+      0,
+      options.timeoutMs,
+      pageErrors,
+    );
     const baseline = await readSnapshot(page);
     await page.evaluate((pose) => {
       const hooks = window.__drusnielClod;
