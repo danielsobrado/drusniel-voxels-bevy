@@ -157,7 +157,10 @@ export async function createGpuClodRootMesher(
   opts: CreateGpuClodRootMesherOptions,
 ): Promise<GpuClodRootMesher | null> {
   const poolCount = resolvePoolCount(opts.config.maxInflightBatches);
-  if (poolCount === 1) return createSingleGpuClodRootMesher(opts);
+  if (poolCount === 1) {
+    const mesher = await createSingleGpuClodRootMesher(opts);
+    return mesher ? new PooledGpuClodRootMesher([mesher]) : null;
+  }
 
   let device = opts.sharedDevice ?? null;
   if (!device) {
