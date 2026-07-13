@@ -50,6 +50,7 @@ import {
   type RootGpuBatchLimits,
 } from "./gpu_clod_root_batch_buffers.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
+import { createHeightfieldTileGpuAtlas } from "../../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 const STREAM_COUNTER_SAMPLE_LIMIT = 128;
 const DEFAULT_MATERIAL_WEIGHT_STRIDE = 4;
@@ -132,6 +133,12 @@ interface RuntimeBatchLimits extends RootGpuBatchLimits {
   maxReadbackBufferBytes: number;
 }
 
+interface HeightAtlasBindings {
+  readonly view: GPUTextureView;
+  readonly params: GPUBuffer;
+  readonly dispose?: () => void;
+}
+
 class PackedRootGpuBufferPool {
   readonly dims: MeshDims;
   readonly positionStrideBytes: number;
@@ -157,6 +164,7 @@ class PackedRootGpuBufferPool {
     private readonly cfg: ClodPagesConfig,
     private readonly world: WorldBounds,
     readonly capacity: number,
+    private readonly heightAtlas: HeightAtlasBindings,
   ) {
     this.dims = computeMeshDims(0, 0, cfg.page.chunk_size);
     this.positionStrideBytes = this.dims.maxVertices * 3 * F32;
@@ -233,6 +241,8 @@ class PackedRootGpuBufferPool {
         { binding: 7, resource: { buffer: this.indices } },
         { binding: 8, resource: { buffer: this.indexCounts } },
         { binding: 9, resource: { buffer: this.vertexCounts } },
+        { binding: 10, resource: this.heightAtlas.view },
+        { binding: 11, resource: { buffer: this.heightAtlas.params } },
       ],
     });
   }
@@ -289,9 +299,10 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
     private readonly cfg: ClodPagesConfig,
     world: WorldBounds,
     config: StreamingRootGpuMesherConfig,
+    private readonly heightAtlas: HeightAtlasBindings,
   ) {
     this.batchLimits = resolveRuntimeBatchLimits(device, config, cfg.page.chunk_size);
-    this.pool = new PackedRootGpuBufferPool(device, layout, cfg, world, this.batchLimits.maxChunkSlots);
+    this.pool = new PackedRootGpuBufferPool(device, layout, cfg, world, this.batchLimits.maxChunkSlots, heightAtlas);
   }
 
   /**
@@ -368,6 +379,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
 
   dispose(): void {
     this.pool.destroy();
+    this.heightAtlas.dispose?.();
   }
 
   private rootBatchPageConfig(): RootBatchPageConfig {
@@ -694,6 +706,61 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   }
 }
 
+function tileAtlasMesherRequested(): boolean {
+  const search = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window?.location?.search ?? "";
+  const raw = new URLSearchParams(search).get("gpuTileMesh");
+  return raw === "1" || raw?.toLowerCase() === "true";
+}
+
+export function terrainFieldShaderWithTileAtlas(): string {
+  const procedural = composeTerrainFieldShader().replace(
+    "fn surfaceHeightField(x : f32, z : f32) -> f32 {",
+    "fn proceduralSurfaceHeightField(x : f32, z : f32) -> f32 {",
+  );
+  return `${procedural}
+@group(0) @binding(10) var continentHeightAtlas : texture_2d<f32>;
+@group(0) @binding(11) var<uniform> continentHeightAtlasParams : vec4<f32>;
+
+fn continentPositiveMod(value : i32, divisor : i32) -> i32 {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+fn surfaceHeightField(x : f32, z : f32) -> f32 {
+  if (continentHeightAtlasParams.w < 0.5) {
+    return proceduralSurfaceHeightField(x, z);
+  }
+  let tileSize = continentHeightAtlasParams.x;
+  let tileRes = i32(continentHeightAtlasParams.y);
+  let tilesPerSide = i32(continentHeightAtlasParams.z);
+  let tileX = i32(floor(x / tileSize));
+  let tileZ = i32(floor(z / tileSize));
+  let localX = clamp(i32(round(x - f32(tileX) * tileSize)), 0, tileRes - 1);
+  let localZ = clamp(i32(round(z - f32(tileZ) * tileSize)), 0, tileRes - 1);
+  let slotX = continentPositiveMod(tileX, tilesPerSide);
+  let slotZ = continentPositiveMod(tileZ, tilesPerSide);
+  return textureLoad(continentHeightAtlas, vec2<i32>(slotX * tileRes + localX, slotZ * tileRes + localZ), 0).x;
+}
+`;
+}
+
+function createHeightAtlasBindings(device: GPUDevice): HeightAtlasBindings {
+  const active = tileAtlasMesherRequested() ? createHeightfieldTileGpuAtlas(device) : null;
+  if (active) return { view: active.view, params: active.params };
+  const texture = device.createTexture({
+    label: "continent heightfield tile atlas disabled",
+    size: { width: 1, height: 1 },
+    format: "r32float",
+    usage: GPUTextureUsage.TEXTURE_BINDING,
+  });
+  const params = device.createBuffer({
+    label: "continent heightfield tile atlas disabled params",
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(params, 0, new Float32Array([1, 1, 1, 0]));
+  return { view: texture.createView(), params, dispose: () => { texture.destroy(); params.destroy(); } };
+}
+
 export async function createGpuClodRootMesher(opts: CreateGpuClodRootMesherOptions): Promise<GpuClodRootMesher | null> {
   let device = opts.sharedDevice ?? null;
   try {
@@ -702,7 +769,8 @@ export async function createGpuClodRootMesher(opts: CreateGpuClodRootMesherOptio
       if (!result.ok) throw new Error(result.message ?? result.reason);
       device = result.device;
     }
-    const module = device.createShaderModule({ label: "gpu clod root mesher shader", code: composeTerrainFieldShader() });
+    const module = device.createShaderModule({ label: "gpu clod root mesher shader", code: terrainFieldShaderWithTileAtlas() });
+    const heightAtlas = createHeightAtlasBindings(device);
     const storage = (i: number): GPUBindGroupLayoutEntry => ({
       binding: i,
       visibility: GPUShaderStage.COMPUTE,
@@ -721,6 +789,8 @@ export async function createGpuClodRootMesher(opts: CreateGpuClodRootMesherOptio
         storage(7),
         storage(8),
         storage(9),
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 11, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -736,7 +806,7 @@ export async function createGpuClodRootMesher(opts: CreateGpuClodRootMesherOptio
         compute: { module, entryPoint: "quadPass" },
       }),
     ]);
-    const mesher = new BatchedGpuClodRootMesher(device, layout, vertexPipeline, quadPipeline, opts.cfg, opts.world, opts.config);
+    const mesher = new BatchedGpuClodRootMesher(device, layout, vertexPipeline, quadPipeline, opts.cfg, opts.world, opts.config, heightAtlas);
     publishGpuClodRootMesherCounters(mesher.stats());
     return mesher;
   } catch (error) {

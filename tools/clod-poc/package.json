@@ -74,6 +74,8 @@
     "water:graph": "tsx tools/build-water-graph.ts",
     "water:graph-startup": "tsx tools/probe-water-graph-startup.ts",
     "water:graph-semantics": "tsx tools/water-graph-semantics.ts",
+    "water:tile-carve-perf": "tsx tools/benchmark-heightfield-tile-carve.ts",
+    "continent:tile-mesh-probe": "tsx tools/probe-continent-tile-mesh.ts",
     "water:seam": "tsx tools/water-hydrology-seam-report.ts",
     "water:streaming": "tsx tools/water-streaming-report.ts",
     "water:ownership": "tsx tools/water-ownership-report.ts",

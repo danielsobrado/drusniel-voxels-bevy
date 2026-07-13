@@ -26,6 +26,7 @@ import {
   rollbackDigEditTransaction,
   replaceVoxelEdits,
   setTerrainFieldConfig,
+  setTerrainSurfaceOverride,
 } from "./terrain/terrain.js";
 import { setTerrainFieldCoreConfig } from "./gpu/terrain_field_core.js";
 import {
@@ -519,7 +520,13 @@ function buildStreamRootNode(
   world: { cellsX: number; cellsZ: number; finite: false },
 ): ClodPageNode {
   if (!cfg) throw new Error("CLOD worker received buildStreamRoots before build completion");
-  installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, { boundedToStartupWorld: true });
+  if (graphHydrology && graphCarve) {
+    setTerrainSurfaceOverride((x, z) => Math.fround(
+      graphHydrology!.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarve!),
+    ));
+  } else {
+    installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, { boundedToStartupWorld: true });
+  }
   try {
     return buildStandaloneClodRootNode(level, px, pz, cfg, world);
   } finally {

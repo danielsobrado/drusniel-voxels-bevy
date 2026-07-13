@@ -4,6 +4,7 @@ import {
   type HeightfieldTileRuntime,
   type HeightfieldTileRuntimeUpdate,
 } from "./heightfield_tile_runtime.js";
+import { WORLD_TILE_SIZE_M } from "../tile_key.js";
 
 interface ClientPrototype {
   buildWorld: ClodWorkerClient["buildWorld"];
@@ -19,6 +20,27 @@ function stopRuntime(client: ClodWorkerClient): void {
   if (!runtime) return;
   runtime.dispose();
   activeRuntimes.delete(client);
+}
+
+export function heightfieldTilesReadyForPage(
+  client: ClodWorkerClient,
+  coord: { px: number; pz: number; level?: number },
+  basePageSizeM: number,
+): boolean {
+  const runtime = activeRuntimes.get(client);
+  if (!runtime?.authoritative) return true;
+  const level = Math.max(0, Math.floor(coord.level ?? 0));
+  const span = basePageSizeM * (2 ** level);
+  const minX = coord.px * span;
+  const minZ = coord.pz * span;
+  const maxX = minX + span - Number.EPSILON;
+  const maxZ = minZ + span - Number.EPSILON;
+  for (let tileZ = Math.floor(minZ / WORLD_TILE_SIZE_M); tileZ <= Math.floor(maxZ / WORLD_TILE_SIZE_M); tileZ++) {
+    for (let tileX = Math.floor(minX / WORLD_TILE_SIZE_M); tileX <= Math.floor(maxX / WORLD_TILE_SIZE_M); tileX++) {
+      if (!runtime.cache.get({ x: tileX, z: tileZ })) return false;
+    }
+  }
+  return true;
 }
 
 export function heightfieldTileBuildAllowed(
@@ -42,6 +64,10 @@ export function updateHeightfieldTileClientRuntime(
 ): void {
   const runtime = activeRuntimes.get(client);
   if (!runtime) return;
+  if (runtime.authoritative) {
+    runtime.update({ ...input, buildAllowed: true });
+    return;
+  }
   if (input.buildAllowed !== undefined) {
     runtime.update(input);
     return;

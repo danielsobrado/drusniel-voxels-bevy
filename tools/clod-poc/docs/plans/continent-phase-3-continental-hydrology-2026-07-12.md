@@ -37,6 +37,15 @@ Updated 2026-07-13.
     `shots/continent/phase3-c33-graph.png`, `shots/continent/phase3-c33-graph-stats.json`;
     graph startup-grid rasterization 120.90 ms, hydrology atlas active with 13 uploads.
 - [ ] C3.4 carved canonical tiles and CPU authority switch.
+  - Implementation in progress: graph/carve payload reaches the CLOD worker; authoritative tiles
+    are f32; the startup raster is rebuilt from the identical f32 carve; continent tiles default
+    on only when the manifest carries a hydrology graph; fractional CPU samples bilerp resident
+    tiles; `TERRAIN_SOURCE_VERSION` is `world-modes-v7` and hashes graph + carve inputs.
+  - Focused tile/raster/CPU authority tests pass. `water:tile-carve-perf` measures base tile p95
+    131.58 ms, carved p95 140.34 ms, carve overhead p95 8.76 ms (≤ 15 ms budget).
+  - Remaining gate: repeat native-Windows startup/movement evidence. The first long capture reached
+    ready but the shared WebGPU device then exhausted memory allocating pre-existing tree-impostor
+    textures; no successful C3.4 stats artifact is claimed from that run.
 - [ ] C3.5 GPU tile-atlas streamed-root authority.
 - [ ] C3.6 water/vegetation consumer integration.
 - [ ] C3.7 acceptance, soak and default flip.

@@ -10,6 +10,7 @@ export interface StreamingClodRootStats {
   evictions: number;
   buildMs: number;
   pendingPages: number;
+  waitingOnTiles: number;
   buildBudget: number;
   inflightBatches: number;
   maxInflightBatches: number;
@@ -115,6 +116,7 @@ export interface StreamingClodRootControllerDeps {
   rootSwitchStableFrames?: number;
   rootTransition?: Partial<StreamingClodRootTransitionOptions>;
   buildPages: ((coords: readonly PageCoord[]) => Promise<StreamingClodRootBuildResult>) | null;
+  canBuildPage?: (coord: PageCoord) => boolean;
   /**
    * Optional sliced preparation gate run before a page becomes activation-eligible.
    * Returning false keeps the page in the ready queue so the currently rendered roots
@@ -1096,10 +1098,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return required;
   };
 
-  const scheduleBuilds = (required: readonly PageCoord[], coverage: ReturnType<typeof countStreamCoverage>): { scheduled: number; cost: number } => {
-    if (!deps.buildPages || buildBudget <= 0) return { scheduled: 0, cost: 0 };
+  const scheduleBuilds = (required: readonly PageCoord[], coverage: ReturnType<typeof countStreamCoverage>): { scheduled: number; cost: number; waitingOnTiles: number } => {
+    if (!deps.buildPages || buildBudget <= 0) return { scheduled: 0, cost: 0, waitingOnTiles: 0 };
     let scheduled = 0;
     let scheduledCost = 0;
+    let waitingOnTiles = 0;
     const scheduledIds = new Set<string>();
     const candidates = safetyFirstCandidates(required, coverage);
     while (inFlight.size < maxInflightBatches) {
@@ -1108,6 +1111,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       for (const coord of candidates) {
         const id = streamingClodPageKey(coord.px, coord.pz, coordLevel(coord));
         if (scheduledIds.has(id) || (cached.has(id) && !staleRootIds.has(id)) || buildInFlight(id) || missingRequiredAncestor(id) || failedBuildCoolingDown(id) || buildStillQueued(id)) continue;
+        if (deps.canBuildPage && !deps.canBuildPage(coord)) {
+          waitingOnTiles++;
+          continue;
+        }
         const pageCost = pageBudgetCost(coordLevel(coord));
         if (batch.length > 0 && currentCost + pageCost > buildBudget) break;
         batch.push(coord);
@@ -1120,7 +1127,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       scheduled += batchScheduled;
       scheduledCost += currentCost;
     }
-    return { scheduled, cost: scheduledCost };
+    return { scheduled, cost: scheduledCost, waitingOnTiles };
   };
 
   const transitionSnapshot = () => {
@@ -1188,7 +1195,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       staleDiscards += applied.staleDiscards;
       const activeRootsChanged = syncActiveRoots();
       const coverageBeforeSchedule = countStreamCoverage(requiredIds);
-      const { scheduled: scheduledPagesThisFrame, cost: scheduledBudgetCost } = scheduleBuilds(required, coverageBeforeSchedule);
+      const { scheduled: scheduledPagesThisFrame, cost: scheduledBudgetCost, waitingOnTiles } = scheduleBuilds(required, coverageBeforeSchedule);
       if (evictions > 0 || activeRootsChanged || applied.applied > 0) deps.onRootsChanged?.();
       let inflightMs = 0;
       for (const batch of inFlight.values()) {
@@ -1210,6 +1217,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         evictions,
         buildMs: workerBuildMs,
         pendingPages: [...inFlight.values()].reduce((sum, batch) => sum + batch.ids.size, 0),
+        waitingOnTiles,
         buildBudget,
         inflightBatches: inFlight.size,
         maxInflightBatches,
@@ -1309,6 +1317,7 @@ function emptyStats(
     evictions: 0,
     buildMs: 0,
     pendingPages: 0,
+    waitingOnTiles: 0,
     buildBudget: DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME,
     inflightBatches: 0,
     maxInflightBatches,

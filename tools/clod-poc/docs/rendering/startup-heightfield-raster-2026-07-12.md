@@ -66,7 +66,9 @@ and exposes copy and transfer timings.
 
 ## Phase 2 streamed tile format
 
-Each canonical cache tile covers 256×256 m and stores a 257×257 `Float64Array`. The duplicated final
+Before the v7 authority switch each cache tile stored a 257×257 `Float64Array`. Continent v7 tiles
+store the canonical 257×257 lattice as `Float32Array`; the explicit quantization halves resident
+memory and is now part of the terrain contract. The duplicated final
 row and column are intentional: adjacent tiles share exact border samples without neighbour access.
 At the default cap of 64 resident tiles, height payload residency is 32.25 MiB (33.8 MB).
 

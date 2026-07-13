@@ -38,7 +38,10 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 import type { ClodPageNode } from "../../../types.js";
 import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
-import { updateHeightfieldTileClientRuntime } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
+import {
+  heightfieldTilesReadyForPage,
+  updateHeightfieldTileClientRuntime,
+} from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
@@ -158,6 +161,7 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_evictions_total"] = streamEvictionsTotal;
   target["live_clod_stream_build_ms"] = stats.buildMs;
   target["live_clod_stream_pending_pages"] = stats.pendingPages;
+  target["live_clod_stream_waiting_on_tiles"] = stats.waitingOnTiles;
   target["live_clod_stream_build_budget"] = stats.buildBudget;
   target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
   target["live_clod_stream_max_inflight_batches"] = stats.maxInflightBatches;
@@ -249,7 +253,8 @@ export function runFrameLoopStartup(
   const { updateInfo } = infoPanel;
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
-  const streamingScene = longView.queryScene?.startsWith("infinite-") ?? false;
+  const streamingScene = (longView.queryScene?.startsWith("infinite-") ?? false)
+    || longView.queryScene === "continent";
   const acceptanceStreamProfile = searchParams.get("acceptance") === "1" && longView.queryScene === INFINITE_ISLANDS_SCENE;
   const diagnosticsTerrainMaxLevel = acceptanceStreamProfile ? Math.min(maxTerrainLevel, ACCEPTANCE_STREAM_MAX_LEVEL) : maxTerrainLevel;
   const combatController = session.combatController;
@@ -420,7 +425,7 @@ export function runFrameLoopStartup(
     allNodes: input.allNodes,
     cfg,
     worldCells,
-    enabled: longView.queryScene === INFINITE_ISLANDS_SCENE,
+    enabled: streamingScene,
     buildBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootBudget"), ACCEPTANCE_MIN_STREAM_BUILD_BUDGET, streamBudgetProfile),
     applyBudgetPagesPerFrame: acceptanceMin(nonNegativeIntegerParam(searchParams, "liveClodRootApplyBudget"), ACCEPTANCE_MIN_STREAM_APPLY_BUDGET, streamBudgetProfile),
     maxInflightBatches: acceptanceMax(positiveIntegerParam(searchParams, "liveClodRootMaxInflightBatches"), acceptanceMaxStreamInflightBatches, streamBudgetProfile),
@@ -433,6 +438,11 @@ export function runFrameLoopStartup(
       maxExtraRoots: nonNegativeIntegerParam(searchParams, "liveClodRootTransitionMaxExtraRoots") ?? DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS,
     },
     buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
+    canBuildPage: (coord) => heightfieldTilesReadyForPage(
+      input.clodWorker,
+      coord,
+      cfg.page.chunks_per_page * cfg.page.chunk_size,
+    ),
     prepareNodeForApply: prepareStreamNodeForApply,
     prepareNodeBudgetMs: VIEW_PREWARM_BUDGET_MS,
     onNodesBuilt: (nodes) => {

@@ -65,6 +65,7 @@ import type {
   HeightfieldTileWorkerBuildRequest,
   HeightfieldTileWorkerResponse,
 } from "./world/heightfield_tiles/heightfield_tile_worker_protocol.js";
+import { uploadHeightfieldTilesForPage } from "./world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
 
@@ -252,6 +253,14 @@ export class ClodWorkerClient {
         this.assertStreamRootNodesValid(fallback.nodes, "cpu");
         return fallback;
       }
+      if (this.streamRootGpuTileMeshRequested()) {
+        const pageSize = this.streamRootCfg!.page.chunks_per_page * this.streamRootCfg!.page.chunk_size;
+        for (const coord of coords) {
+          if (!uploadHeightfieldTilesForPage(coord, pageSize)) {
+            throw new Error(`GPU tile mesher missing resident heightfield tile for L${coord.level ?? 0}:${coord.px},${coord.pz}`);
+          }
+        }
+      }
       return await this.buildStreamRootsOnGpuWithCache(mesher, coords);
     } catch (error) {
       const guardRejected = isStreamedPageBoundsGuardError(error);
@@ -371,6 +380,11 @@ export class ClodWorkerClient {
     this.streamRootBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
     this.streamRootBoundsGuardStats.enabled = this.streamRootBoundsGuardConfig.enabled ? 1 : 0;
     this.publishStreamRootBoundsGuardStats();
+  }
+
+  private streamRootGpuTileMeshRequested(): boolean {
+    const raw = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("gpuTileMesh");
+    return raw === "1" || raw?.toLowerCase() === "true";
   }
 
   private acceptStreamRootNode(node: ClodPageNode, source: StreamRootBoundsGuardSource): boolean {

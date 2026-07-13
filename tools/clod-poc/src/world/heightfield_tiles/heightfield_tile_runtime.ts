@@ -24,6 +24,12 @@ import {
   IndexedDbHeightfieldTileStore,
   openHeightfieldTileDb,
 } from "./heightfield_tile_store.js";
+import {
+  registerHeightfieldTileGpuSource,
+  heightfieldTileGpuAtlasStats,
+  unregisterHeightfieldTileGpuSource,
+  updateHeightfieldTileGpuAtlas,
+} from "./heightfield_tile_gpu_atlas.js";
 
 export interface HeightfieldTileRuntimeUpdate {
   x: number;
@@ -37,6 +43,7 @@ export interface HeightfieldTileRuntimeUpdate {
 
 export interface HeightfieldTileRuntime {
   readonly cache: HeightfieldTileCache;
+  readonly authoritative: boolean;
   update(input: HeightfieldTileRuntimeUpdate): void;
   counters(): HeightfieldTileCacheCounters;
   dispose(): void;
@@ -129,16 +136,28 @@ export async function createHeightfieldTileRuntime(
     : null;
   const sampler = heightfieldTileSampler(cache, procedural, startup);
   setTerrainSurfaceOverride(sampler.sampleHeight);
+  const authoritative = input.terrainSource.worldMode === "continent" && Boolean(manifest.artifacts.hydrologyGraph);
+  registerHeightfieldTileGpuSource(cache, authoritative);
 
   const runtime: HeightfieldTileRuntime = {
     cache,
+    authoritative,
     update(updateInput) {
       cache.update(updateInput);
+      updateHeightfieldTileGpuAtlas(updateInput.x, updateInput.z);
+      const gpuAtlas = heightfieldTileGpuAtlasStats();
+      const counters = diagnosticsCounters();
+      if (counters) {
+        counters["heightfield_tile_gpu_atlas_enabled"] = gpuAtlas.enabled;
+        counters["heightfield_tile_gpu_atlas_uploads"] = gpuAtlas.uploads;
+        counters["heightfield_tile_gpu_atlas_resident"] = gpuAtlas.resident;
+      }
       publishHeightfieldTileCounters(diagnosticsCounters(), cache.counters());
     },
     counters: () => cache.counters(),
     dispose() {
       cache.clear();
+      unregisterHeightfieldTileGpuSource(cache);
       store?.close();
       setTerrainSurfaceOverride(startup?.sampleHeight ?? procedural.sampleHeight);
       publishHeightfieldTileCounters(diagnosticsCounters(), DISABLED_COUNTERS);

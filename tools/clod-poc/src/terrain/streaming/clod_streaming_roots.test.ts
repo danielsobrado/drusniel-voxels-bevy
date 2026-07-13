@@ -230,6 +230,19 @@ describe("createStreamingClodRootController", () => {
     expect(roots).toHaveLength(0);
   });
 
+  it("keeps required pages pending until their authoritative tiles are resident", () => {
+    let tilesReady = false;
+    const { controller, buildPages } = makeController({ canBuildPage: () => tilesReady });
+    const waiting = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    expect(waiting.waitingOnTiles).toBeGreaterThan(0);
+    expect(buildPages).not.toHaveBeenCalled();
+
+    tilesReady = true;
+    const scheduled = controller.update(new THREE.Vector3(192, 0, 0), 40);
+    expect(scheduled.waitingOnTiles).toBe(0);
+    expect(buildPages).toHaveBeenCalledTimes(1);
+  });
+
   it("dispatches a coarse-to-fine worker batch that respects build budget", () => {
     const { controller, buildPages } = makeController({
       buildBudgetPagesPerFrame: 2,

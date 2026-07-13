@@ -39,10 +39,12 @@ export function parseStreamingRootGpuMesherConfig(
   // worker builds ~3 pages/s while the GPU mesher measures ~16 pages/s (5x) with the
   // guarded CPU fallback still in place, so the GPU path is the scene default there.
   // liveClodRootGpuMesher=0 opts back into the CPU worker.
-  const defaultEnabled = defaults.enabled || params.get("scene") === "infinite-islands";
+  const gpuTileMesh = booleanFlag(params, "gpuTileMesh", false);
+  const defaultEnabled = defaults.enabled || params.get("scene") === "infinite-islands"
+    || (params.get("scene") === "continent" && gpuTileMesh);
   return {
     enabled: booleanFlag(params, "liveClodRootGpuMesher", defaultEnabled),
-    batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? defaults.batchSize,
+    batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? (gpuTileMesh ? 1 : defaults.batchSize),
     maxInflightBatches: positiveIntegerParam(params, "liveClodRootGpuMaxInflightBatches") ?? defaults.maxInflightBatches,
     fallback: booleanFlag(params, "liveClodRootGpuFallback", defaults.fallback),
     maxChunkSlots: positiveIntegerParam(params, "liveClodRootGpuMaxChunkSlots") ?? defaults.maxChunkSlots,
