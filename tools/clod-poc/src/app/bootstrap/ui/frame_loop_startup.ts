@@ -66,7 +66,8 @@ function positiveIntegerParam(params: URLSearchParams, key: string): number | un
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
-function nonNegativeIntegerParam(params: URLSearchParams, key: string): number | undefined {
+export function nonNegativeIntegerParam(params: URLSearchParams, key: string): number | undefined {
+  if (!params.has(key)) return undefined;
   const parsed = Number(params.get(key));
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
 }
