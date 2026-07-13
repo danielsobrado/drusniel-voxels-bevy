@@ -37,6 +37,7 @@ export interface GpuClodRootPoolStats {
   poolCount: number;
   active: number;
   maxActive: number;
+  overlapEventsTotal: number;
   waiters: number;
 }
 
@@ -45,6 +46,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private readonly waiters: PoolWaiter[] = [];
   private active = 0;
   private maxActive = 0;
+  private overlapEventsTotal = 0;
   private fallbackPages = 0;
   private workerFallbackPages = 0;
   private disposed = false;
@@ -58,6 +60,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
     const index = await this.acquire();
     this.active++;
+    if (this.active > 1) this.overlapEventsTotal++;
     this.maxActive = Math.max(this.maxActive, this.active);
     this.publishCounters();
     try {
@@ -96,6 +99,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       poolCount: this.meshers.length,
       active: this.active,
       maxActive: this.maxActive,
+      overlapEventsTotal: this.overlapEventsTotal,
       waiters: this.waiters.length,
     };
   }
@@ -144,6 +148,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     counters["live_clod_stream_gpu_pool_count"] = pool.poolCount;
     counters["live_clod_stream_gpu_pool_active"] = pool.active;
     counters["live_clod_stream_gpu_pool_max_active"] = pool.maxActive;
+    counters["live_clod_stream_gpu_pool_overlap_events_total"] = pool.overlapEventsTotal;
     counters["live_clod_stream_gpu_pool_waiters"] = pool.waiters;
   }
 }
