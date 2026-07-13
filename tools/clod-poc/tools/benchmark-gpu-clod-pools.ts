@@ -96,11 +96,6 @@ function parseOptions(argv: readonly string[]): BenchmarkOptions {
   };
 }
 
-function counter(counters: Readonly<Record<string, number>>, key: string): number {
-  const value = counters[key];
-  return Number.isFinite(value) ? value : 0;
-}
-
 async function readSnapshot(page: Page): Promise<CounterSnapshot> {
   return await page.evaluate(() => {
     const hooks = window.__drusnielClod;
