@@ -20,6 +20,8 @@
     "perf:p0:extract": "tsx tools/perf-p0-extract.ts",
     "perf:postfx": "tsx tools/postfx-perf-matrix.ts",
     "perf:heightfield-raster": "tsx tools/benchmark-startup-heightfield-raster.ts",
+    "perf:gpu-clod-pools": "node tools/run-gpu-clod-pool-benchmark.mjs",
+    "perf:gpu-clod-pools:gate": "node tools/run-gpu-clod-pool-benchmark.mjs --runs=3 --max-dual-ratio=1.10",
     "postfx:verify": "tsx tools/verify-postfx.ts",
     "shoot-props": "tsx tools/shoot-props.ts",
     "compare": "tsx tools/compare.ts",
