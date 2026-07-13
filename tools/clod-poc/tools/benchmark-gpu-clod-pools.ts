@@ -491,9 +491,6 @@ function scenarioUrl(scenario: Scenario): string {
       startupWorld: "4",
       infiniteStartupWorld: "4",
       cache: "0",
-      x: String(START_POSE.p[0]),
-      z: String(START_POSE.p[2]),
-      yaw: String(START_POSE.yaw),
       liveBubble: "0",
       liveClodRootRadius: "512",
       liveClodRootGpuMesher: "1",
@@ -532,6 +529,10 @@ async function runScenario(
   try {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await waitReady(page, options.timeoutMs);
+    const playerMode = await page.evaluate(() => document.body.dataset.playerMode ?? "");
+    if (playerMode === "playing") {
+      throw new Error("GPU pool benchmark must remain in orbit mode so camera teleports drive the streaming center");
+    }
     const adapter = await readAdapterIdentity(page);
     validateAdapter(adapter, options);
     await page.evaluate(async () => {
@@ -552,6 +553,10 @@ async function runScenario(
       if (hooks?.resetAcceptanceSceneForPose) hooks.resetAcceptanceSceneForPose(pose);
       else hooks?.setPose?.(pose);
     }, TEST_POSE);
+    const teleportedPose = await page.evaluate(() => window.__drusnielClod?.getPose?.() ?? null);
+    if (!teleportedPose || Math.abs(teleportedPose.p[0] - TEST_POSE.p[0]) > 0.1 || Math.abs(teleportedPose.p[2] - TEST_POSE.p[2]) > 0.1) {
+      throw new Error("benchmark teleport did not move the canonical orbit camera to the measured destination");
+    }
 
     const measured = await waitForMeasuredStream(
       page,
