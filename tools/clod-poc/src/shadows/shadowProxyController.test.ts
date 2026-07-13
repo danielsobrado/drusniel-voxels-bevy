@@ -36,6 +36,13 @@ function makeDeps(overrides: Partial<Parameters<typeof createShadowProxyControll
   };
 }
 
+function drainProxyBuild(controller: ReturnType<typeof createShadowProxyController>) {
+  for (let i = 0; i < 1000 && !controller.runtime.stats.built; i++) {
+    controller.rebuildIfNeeded();
+  }
+  expect(controller.runtime.stats.built).toBe(true);
+}
+
 describe("shadow proxy controller", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -50,7 +57,7 @@ describe("shadow proxy controller", () => {
         getCoverageCenter: () => ({ x: 0, z: 0 }),
       }),
     );
-    controller.rebuildIfNeeded(); // drain the sliced boot build so it cannot complete inside updateFrame below
+    drainProxyBuild(controller);
     const initialBuilds = buildSpy.mock.calls.length;
     controller.updateFrame(1500, 0);
     expect(buildSpy.mock.calls.length).toBe(initialBuilds);
@@ -80,7 +87,7 @@ describe("shadow proxy controller", () => {
         getCoverageCenter: () => ({ x: cameraX, z: 0 }),
       }),
     );
-    controller.rebuildIfNeeded(); // drain the sliced boot build
+    drainProxyBuild(controller);
     const buildsAfterInit = buildSpy.mock.calls.length;
     cameraX = 200;
     controller.updateFrame(cameraX, 0);
@@ -101,7 +108,7 @@ describe("shadow proxy controller", () => {
         getCoverageCenter: () => ({ x: cameraX, z: 0 }),
       }),
     );
-    controller.rebuildIfNeeded(); // drain the sliced boot build
+    drainProxyBuild(controller);
     expect(controller.runtime.mesh?.position.x).toBe(0);
 
     cameraX = 1100;

@@ -44,7 +44,7 @@ describe("canopy clipmap", () => {
   it("keeps old tile visible when ring changes before replacement is built", () => {
     const clipmap = createCanopyClipmap();
     clipmap.update(1024, 1024, config, terrain, trees);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 1000 && clipmap.getVisibleTiles().length === 0; i++) {
       clipmap.update(1024, 1024, config, terrain, trees);
     }
     const before = clipmap.getVisibleTiles();
