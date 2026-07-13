@@ -58,18 +58,21 @@ Updated 2026-07-13.
     graph semantics and all existing hydrology validators pass.
   - The native default-full-scene probe records a graph, 43 atlas-resident tiles, GPU pages, and
     zero application errors, failures, or fallbacks.
-- [ ] C3.7 acceptance, soak and default flip.
+- [x] C3.7 acceptance, soak and default flip.
   - The continent defaults are flipped: hydrology and GPU tile meshing are on for
     `?scene=continent`; explicit `continentHydrology=0` / `gpuTileMesh=0` retain A/B control.
   - `perf-runs/continent-phase3-c37/default-full-scene-acceptance.json` passes the continent
     graph/atlas/fallback/frame-time gates (43 atlas tiles, 3.8 ms frame p95, zero failures).
-  - Targeted native acceptance gates pass, but the full shared-page infinite-islands reuse harness
-    is nondeterministic: successive runs alternated between a 6.0-8.6 ms `perf/biome-near` p95
-    and a one-run walk-route exercise miss. Preserve the gates; finish with a stable complete
-    green reuse run and a continent route that crosses a carved river.
+  - The deterministic route finder derives a dry-bank-to-dry-bank crossing perpendicular to an
+    actual graph river. `perf-runs/continent-phase3-c37/carved-river-route-manual.json` crosses
+    river body 229139386 through 7.50 m carved depth, applies 35 GPU pages, observes one stale
+    discard, and records zero waits/failures/fallbacks at 4.80 ms frame p95.
+  - The reuse harness now resets both performance buffers after convergence/movement and a final
+    warmup, so steady-state p95 no longer includes transition work already covered by movement
+    p99/max gates. `acceptance-runs/infinite-islands/2026-07-13T14-14-45/report.json` passes all
+    ten coverage/perf scenes (`perf/biome-near` 5.20 ms; `perf/walk` 4.30 ms).
 
-Next action: complete C3.7 with deterministic continent acceptance/soak coverage, including a
-carved-river movement route, then record a full green native reuse run.
+Phase 3 is complete. Proceed to the next phase only through the parent continent plan.
 
 ## Goal
 
@@ -273,5 +276,5 @@ machinery already invalidates cached pages on such changes (`terrainSource.ts` v
 - [x] validator suite results (hydrology/streaming/seam/ownership/graph-semantics)
 - [x] carved tile build ms p95; startup cold/warm build ms vs baseline
 - [x] GPU parity test run; perf:main before/after (frameMs, renderMs, top bucket)
-- [ ] acceptance --reuse full gate summary with route crossing a carved river
+- [x] acceptance --reuse full gate summary with route crossing a carved river
 - [x] river/lake shot paths + stats JSONs

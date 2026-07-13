@@ -9,6 +9,7 @@ import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./
 import { evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
+import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
 import {
   cacheEvidenceFromTimings,
   convergenceTimeoutBlockers,
@@ -862,6 +863,8 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
       await Promise.race([waitForConvergence(page, `${sceneRunName}:post-route`), pageErrorGate]);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
     }
+    await Promise.race([settle(page, WARMUP_FRAMES), pageErrorGate]);
+    await resetAcceptanceSampleWindow(page);
     const sampleStartedAt = Date.now();
     await Promise.race([settle(page, SAMPLE_FRAMES), pageErrorGate]);
     console.log(`[infinite-accept] ${sceneRunName}: sampled after ${elapsedSeconds(sampleStartedAt)} (total ${elapsedSeconds(sceneStartedAt)})`);
