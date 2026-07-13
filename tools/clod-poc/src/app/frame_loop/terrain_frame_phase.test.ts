@@ -37,6 +37,7 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
   colliderRequiredPages: 0,
   colliderReadyPages: 0,
   colliderSkippedPages: 0,
+  cpuWorkUnitMaxMs: 0,
 };
 
 function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePhaseInput {
@@ -52,6 +53,13 @@ function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePh
       activeTerrainViews: () => new Set(),
       currentTerrainViews: () => new Set(),
       stats: () => ({ frameId }),
+      terrainCutSnapshot: () => ({
+        activeTerrainViews: new Set(),
+        currentTerrainViews: new Set(),
+        terrainViews: new Set(),
+        protectedNodeIds: new Set(),
+        stats: { frameId },
+      }),
     } as unknown as TerrainFramePhaseInput["selectionController"],
     nearFieldBubbleController: {
       update: vi.fn(() => stats),

@@ -29,6 +29,28 @@ interface TerrainSampler {
   surfaceHeight(x: number, z: number): number;
 }
 
+export interface ChunkMeshBuild {
+  readonly cx: number;
+  readonly cz: number;
+  readonly world: WorldBounds;
+  readonly posInv: number;
+  readonly x0: number;
+  readonly x1: number;
+  readonly z0: number;
+  readonly z1: number;
+  readonly editedYRange: { minY: number; maxY: number } | null;
+  readonly buf: VertBuf;
+  readonly indices: number[];
+  readonly sampler: TerrainSampler;
+  phase: "cells" | "weights" | "complete";
+  i: number;
+  k: number;
+  j: number | null;
+  j1: number;
+  weightCursor: number;
+  vertWeights: Float32Array | null;
+}
+
 function cellKeySN(ci: number, cj: number, ck: number): string {
   return `${ci},${cj},${ck}`;
 }
@@ -180,19 +202,23 @@ function createTerrainSampler(): TerrainSampler {
   };
 }
 
-export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: WorldBounds): PageMesh {
+export function createChunkMeshBuild(cx: number, cz: number, cfg: ClodPagesConfig, world: WorldBounds): ChunkMeshBuild {
   const S = cfg.page.chunk_size;
   const posInv = 1 / cfg.simplify.weld_epsilon_cells;
   const buf: VertBuf = { pos: [], nrm: [], mat: [], index: new Map(), posIndex: new Map(), mergeCount: [] };
   const indices: number[] = [];
   const sampler = createTerrainSampler();
-
   const x0 = cx * S, x1 = (cx + 1) * S;
   const z0 = cz * S, z1 = (cz + 1) * S;
   const editedYRange = voxelEditStore.editedYRange(x0 - 1, x1 + 1, z0 - 1, z1 + 1);
+  return {
+    cx, cz, world, posInv, x0, x1, z0, z1, editedYRange, buf, indices, sampler,
+    phase: "cells", i: x0, k: z0, j: null, j1: 0, weightCursor: 0, vertWeights: null,
+  };
+}
 
-  for (let i = x0; i < x1; i++) {
-    for (let k = z0; k < z1; k++) {
+function prepareCellColumn(build: ChunkMeshBuild): void {
+  const { i, k, sampler, editedYRange } = build;
       const nearbyHeights = [
         sampler.surfaceHeight(i, k), sampler.surfaceHeight(i + 1, k), sampler.surfaceHeight(i - 1, k),
         sampler.surfaceHeight(i, k + 1), sampler.surfaceHeight(i, k - 1),
@@ -203,31 +229,68 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
         j0 = Math.max(MIN_Y_CELL, Math.min(j0, editedYRange.minY - 1));
         j1 = Math.min(MAX_Y_CELL - 1, Math.max(j1, editedYRange.maxY + 1));
       }
-      for (let j = j0; j <= j1; j++) {
-        emitAxis("x", i, j, k, buf, indices, world, posInv, sampler);
-        emitAxis("y", i, j, k, buf, indices, world, posInv, sampler);
-        emitAxis("z", i, j, k, buf, indices, world, posInv, sampler);
+  build.j = j0;
+  build.j1 = j1;
+}
+
+function advanceCell(build: ChunkMeshBuild): void {
+  build.k++;
+  if (build.k < build.z1) return;
+  build.k = build.z0;
+  build.i++;
+}
+
+/** Advances at least one bounded Surface Nets unit before consulting the deadline. */
+export function stepChunkMeshBuild(build: ChunkMeshBuild, deadlineMs: number): boolean {
+  if (build.phase === "complete") return true;
+  if (build.phase === "cells") {
+    while (build.i < build.x1) {
+      if (build.j === null) prepareCellColumn(build);
+      const j = build.j!;
+      emitAxis("x", build.i, j, build.k, build.buf, build.indices, build.world, build.posInv, build.sampler);
+      emitAxis("y", build.i, j, build.k, build.buf, build.indices, build.world, build.posInv, build.sampler);
+      emitAxis("z", build.i, j, build.k, build.buf, build.indices, build.world, build.posInv, build.sampler);
+      build.j = j + 1;
+      if (build.j > build.j1) {
+        build.j = null;
+        advanceCell(build);
       }
+      if (performance.now() >= deadlineMs) return false;
     }
+    build.phase = "weights";
+    build.vertWeights = new Float32Array(build.buf.mat.length * 4);
   }
 
-  const nv = buf.mat.length;
-  const vertWeights = new Float32Array(nv * 4);
-  for (let i = 0; i < nv; i++) {
-    const py = buf.pos[i * 3 + 1];
-    const ny2 = buf.nrm[i * 3 + 1];
+  const vertWeights = build.vertWeights!;
+  while (build.weightCursor < build.buf.mat.length) {
+    const i = build.weightCursor++;
+    const py = build.buf.pos[i * 3 + 1];
+    const ny2 = build.buf.nrm[i * 3 + 1];
     const [g, r, s, sn] = terrainWeights(py, ny2);
     vertWeights[i * 4 + 0] = g;
     vertWeights[i * 4 + 1] = r;
     vertWeights[i * 4 + 2] = s;
     vertWeights[i * 4 + 3] = sn;
+    if (performance.now() >= deadlineMs) return false;
   }
+  build.phase = "complete";
+  return true;
+}
+
+export function finalizeChunkMeshBuild(build: ChunkMeshBuild): PageMesh {
+  if (build.phase !== "complete" || !build.vertWeights) throw new Error("cannot finalize an incomplete chunk mesh build");
   return {
-    positions: new Float32Array(buf.pos),
-    normals: new Float32Array(buf.nrm),
-    paintSlots: new Float32Array(buf.mat),
-    materialWeights: vertWeights,
+    positions: new Float32Array(build.buf.pos),
+    normals: new Float32Array(build.buf.nrm),
+    paintSlots: new Float32Array(build.buf.mat),
+    materialWeights: build.vertWeights,
     materialWeightStride: 4,
-    indices: new Uint32Array(indices),
+    indices: new Uint32Array(build.indices),
   };
+}
+
+export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: WorldBounds): PageMesh {
+  const build = createChunkMeshBuild(cx, cz, cfg, world);
+  stepChunkMeshBuild(build, Number.POSITIVE_INFINITY);
+  return finalizeChunkMeshBuild(build);
 }

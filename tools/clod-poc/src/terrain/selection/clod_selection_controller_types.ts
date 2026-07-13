@@ -111,12 +111,21 @@ export interface ClodSelectionStats {
   cachedFastHits: number;
 }
 
+export interface TerrainCutSnapshot {
+  currentTerrainViews: ReadonlySet<ClodSelectionTerrainView>;
+  activeTerrainViews: Set<ClodSelectionTerrainView>;
+  terrainViews: Set<ClodSelectionTerrainView>;
+  protectedNodeIds: Set<string>;
+  stats: ClodSelectionStats;
+}
+
 export interface ClodSelectionController {
   update(): void;
   advanceFrame(): void;
   invalidate(): void;
   resetSelState(): void;
   stats(): ClodSelectionStats;
+  terrainCutSnapshot(): TerrainCutSnapshot;
   currentTerrainViews(): Set<ClodSelectionTerrainView>;
   activeTerrainViews(): Set<ClodSelectionTerrainView>;
   webGpuStats(webgpuSelectionEnabled: boolean): ClodErrorPxStats;

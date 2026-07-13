@@ -6,14 +6,18 @@ Not genuinely infinite islands.
 
 This is the umbrella document. Phase details live in:
 
-| Phase | Document |
-| --- | --- |
-| 1. Canonical world contract | `continent-phase-1-canonical-contract-2026-07-12.md` |
-| 2. Streamed heightfield tiles | `continent-phase-2-heightfield-tiles-2026-07-12.md` |
-| 3. Continental hydrology | `continent-phase-3-continental-hydrology-2026-07-12.md` |
-| 4. Unified world summary | `continent-phase-4-unified-world-summary-2026-07-12.md` |
-| 5. Voxel overlay and complex regions | `continent-phase-5-voxel-overlay-2026-07-12.md` |
-| 6. RPG features and persistence | `continent-phase-6-rpg-persistence-2026-07-12.md` |
+| Phase | Document | Status (2026-07-12) |
+| --- | --- | --- |
+| 1. Canonical world contract | `continent-phase-1-canonical-contract-2026-07-12.md` | IN PROGRESS |
+| 2. Streamed heightfield tiles | `continent-phase-2-heightfield-tiles-2026-07-12.md` | not started |
+| 3. Continental hydrology | `continent-phase-3-continental-hydrology-2026-07-12.md` | not started |
+| 4. Unified world summary | `continent-phase-4-unified-world-summary-2026-07-12.md` | not started |
+| 5. Voxel overlay and complex regions | `continent-phase-5-voxel-overlay-2026-07-12.md` | not started |
+| 6. RPG features and persistence | `continent-phase-6-rpg-persistence-2026-07-12.md` | not started |
+
+Each phase document carries a `## Status` section (per-commit checklist + next action) that is
+updated **immediately after every commit-sized chunk of implementation**, so an interrupted
+session loses nothing. Resume by reading the phase doc's Status section first.
 
 ## Verdict on the proposal
 

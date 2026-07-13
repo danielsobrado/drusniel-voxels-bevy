@@ -3,6 +3,7 @@ import { evaluateThresholds, REQUIRED_COUNTERS } from "./thresholds.js";
 
 function validCounters(overrides: Record<string, number> = {}): Record<string, number> {
   const values = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
+  values["world_manifest_present"] = 1;
   values["frame_ms_p95"] = 8;
   values["frame_ms_p99"] = 9;
   values["target_visible_m"] = 4096;

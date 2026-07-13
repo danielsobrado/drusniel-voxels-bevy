@@ -6,6 +6,7 @@ import type { Browser, ConsoleMessage, Page } from "playwright";
 import { clodUrl, launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
+import { evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import {
@@ -48,6 +49,9 @@ const CONVERGENCE_POLL_MS = 500;
 const CONVERGENCE_STABLE_POLLS = 3;
 const MIN_WALK_ROUTE_DISTANCE_M = 48;
 const MOVEMENT_SAMPLE_FRAMES = 30;
+const MAX_ROUTE_FRAME_P99_MS = 100;
+const MAX_ROUTE_FRAME_MS = 1500;
+const MAX_ROUTE_WORK_UNIT_MS = 8;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
 const FAST_STARTUP_WORLD = "4";
 
@@ -192,6 +196,10 @@ interface MovementReport {
   maxStreamStaleDiscards: number;
   streamEvictionsDelta: number;
   streamStaleDiscardsDelta: number;
+  frameSampleCount: number;
+  frameP99Ms: number;
+  maxFrameMs: number;
+  maxWorkUnitMs: number;
   samples: MovementSnapshot[];
 }
 
@@ -610,6 +618,14 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
   const start = samples[0]!.pose;
   const end = samples.at(-1)!.pose;
   const worldCells = maxCounter(samples, "world_cells");
+  const frameTimes = await page.evaluate(() => {
+    const perf = (window as typeof window & {
+      __drusnielPerf?: { snapshot(): { recentSamples?: Array<{ frameMs?: number }> } };
+    }).__drusnielPerf?.snapshot();
+    return (perf?.recentSamples ?? []).map((sample) => Number(sample.frameMs)).filter(Number.isFinite);
+  });
+  const sortedFrameTimes = [...frameTimes].sort((a, b) => a - b);
+  const frameP99Index = Math.max(0, Math.ceil(sortedFrameTimes.length * 0.99) - 1);
   return {
     start,
     end,
@@ -627,6 +643,10 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     maxStreamStaleDiscards: maxCounter(samples, "live_clod_stream_stale_discards"),
     streamEvictionsDelta: counterDelta(samples, "live_clod_stream_evictions_total"),
     streamStaleDiscardsDelta: counterDelta(samples, "live_clod_stream_stale_discards_total"),
+    frameSampleCount: sortedFrameTimes.length,
+    frameP99Ms: sortedFrameTimes[frameP99Index] ?? 0,
+    maxFrameMs: sortedFrameTimes.at(-1) ?? 0,
+    maxWorkUnitMs: maxCounter(samples, "live_bubble_probe_cpu_work_unit_max_ms"),
     samples,
   };
 }
@@ -642,6 +662,12 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   if (movement.maxStreamCachedPages <= 0) failures.push(`${sceneName}: movement route never observed cached streamed CLOD roots`);
   if (movement.streamApplyPagesDelta <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
   if (movement.streamEvictionsDelta + movement.streamStaleDiscardsDelta <= 0) failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
+  failures.push(...evaluateMovementPerformance(sceneName, movement, {
+    minFrameSamples: WALK_ROUTE.reduce((total, segment) => total + segment.frames, 0),
+    maxFrameP99Ms: MAX_ROUTE_FRAME_P99_MS,
+    maxFrameMs: MAX_ROUTE_FRAME_MS,
+    maxWorkUnitMs: MAX_ROUTE_WORK_UNIT_MS,
+  }));
   return failures;
 }
 
@@ -826,6 +852,11 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     await failOnPageError(page, scene.name, pageErrors, failedPath);
     if (scene.movementRoute) {
       movement = await Promise.race([runMovementRoute(page), pageErrorGate]);
+      console.log(
+        `[infinite-accept] ${sceneRunName}: movement ${movement.frameSampleCount}f ` +
+        `p99=${movement.frameP99Ms.toFixed(2)}ms max=${movement.maxFrameMs.toFixed(2)}ms ` +
+        `workMax=${movement.maxWorkUnitMs.toFixed(2)}ms`,
+      );
       if (movementPath) writeJson(movementPath, movement);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
       await Promise.race([waitForConvergence(page, `${sceneRunName}:post-route`), pageErrorGate]);

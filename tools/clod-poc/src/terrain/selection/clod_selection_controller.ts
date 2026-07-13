@@ -39,6 +39,7 @@ export type {
   ClodSelectionControllerDeps,
   ClodSelectionSubphases,
   ClodSelectionStats,
+  TerrainCutSnapshot,
   ClodSelectionController,
 } from "./clod_selection_controller_types.js";
 
@@ -342,6 +343,23 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     selSub.total = lastSelectionMs;
   };
 
+  const stats = (): import("./clod_selection_controller_types.js").ClodSelectionStats => ({
+    renderedCount: lastRenderedCount,
+    renderedNodes: lastRenderedNodes,
+    nodesByLod: lastNodesByLod,
+    levelSummary: lastLevelSummary,
+    triCount: lastTriCount,
+    forcedSplits: lastForced,
+    nearFieldForcedSplits: lastNearFieldForced,
+    crossLodAdjacencyCount: lastCrossLodAdjacencyCount,
+    selectionMs: lastSelectionMs,
+    selectionSource: lastSelectionSource,
+    frameId: selectionFrameId,
+    subphases: { ...selSub },
+    selectionCache: selectionCutCache.stats(),
+    cachedFastHits,
+  });
+
   return {
     update,
     advanceFrame: () => {
@@ -356,23 +374,18 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       selState = { split: new Set() };
       selectionCutCache.invalidate("forced_invalidate");
     },
-    stats: () => {
-      const selectionCache = selectionCutCache.stats();
+    stats,
+    terrainCutSnapshot: () => {
+      const terrainViews = new Set(currentTerrainViews);
+      for (const view of activeTerrainViews) terrainViews.add(view);
+      const protectedNodeIds = new Set<string>();
+      for (const view of terrainViews) protectedNodeIds.add(view.node.id);
       return {
-        renderedCount: lastRenderedCount,
-        renderedNodes: lastRenderedNodes,
-        nodesByLod: lastNodesByLod,
-        levelSummary: lastLevelSummary,
-        triCount: lastTriCount,
-        forcedSplits: lastForced,
-        nearFieldForcedSplits: lastNearFieldForced,
-        crossLodAdjacencyCount: lastCrossLodAdjacencyCount,
-        selectionMs: lastSelectionMs,
-        selectionSource: lastSelectionSource,
-        frameId: selectionFrameId,
-        subphases: { ...selSub },
-        selectionCache,
-        cachedFastHits,
+        currentTerrainViews,
+        activeTerrainViews,
+        terrainViews,
+        protectedNodeIds,
+        stats: stats(),
       };
     },
     currentTerrainViews: () => currentTerrainViews,

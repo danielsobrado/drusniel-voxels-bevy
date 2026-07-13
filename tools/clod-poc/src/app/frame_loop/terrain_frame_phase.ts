@@ -35,6 +35,7 @@ let liveBubbleProbeActive = false;
 let liveBubbleProbeBuiltTotal = 0;
 let liveBubbleProbeEvictionsTotal = 0;
 let liveBubbleProbeColliderRemovalsTotal = 0;
+let liveBubbleProbeCpuWorkUnitMaxMs = 0;
 
 interface TerrainFadeView {
   node: Pick<ClodPageNode, "id" | "mesh" | "rootTransition">;
@@ -54,6 +55,7 @@ interface MovementProbeWindow {
   };
   __drusnielBeginLiveBubbleMovementProbe?: () => void;
   __drusnielBeginStreamingMovementProbe?: () => void;
+  __drusnielPerf?: { reset(): void };
 }
 
 interface RootMorphFrameStats {
@@ -107,6 +109,7 @@ function registerGlobalLiveBubbleProbe(): void {
     maybeWindow.__drusnielClod.beginMovementRouteProbe = () => {
       beginLiveBubbleMovementProbe();
       maybeWindow.__drusnielBeginStreamingMovementProbe?.();
+      maybeWindow.__drusnielPerf?.reset();
     };
   }
 }
@@ -119,6 +122,7 @@ function resetLiveBubbleCounterMirrors(): void {
   counters["live_bubble_probe_built_total"] = 0;
   counters["live_bubble_probe_evictions_total"] = 0;
   counters["live_bubble_probe_collider_removals_total"] = 0;
+  counters["live_bubble_probe_cpu_work_unit_max_ms"] = 0;
 }
 
 export function beginLiveBubbleMovementProbe(): void {
@@ -128,6 +132,7 @@ export function beginLiveBubbleMovementProbe(): void {
   liveBubbleProbeBuiltTotal = 0;
   liveBubbleProbeEvictionsTotal = 0;
   liveBubbleProbeColliderRemovalsTotal = 0;
+  liveBubbleProbeCpuWorkUnitMaxMs = 0;
   liveBubbleLastColliderRemovals = Number.isFinite(currentColliderRemovals) ? currentColliderRemovals! : null;
   resetLiveBubbleCounterMirrors();
 }
@@ -146,6 +151,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
     liveBubbleProbeBuiltTotal += stats.chunkGroupsBuiltThisFrame;
     liveBubbleProbeEvictionsTotal += stats.evictions;
     liveBubbleProbeColliderRemovalsTotal += colliderRemovalDelta;
+    liveBubbleProbeCpuWorkUnitMaxMs = Math.max(liveBubbleProbeCpuWorkUnitMaxMs, stats.cpuWorkUnitMaxMs);
   }
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
@@ -176,10 +182,12 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_collider_required_pages"] = stats.colliderRequiredPages;
   counters["live_bubble_collider_ready_pages"] = stats.colliderReadyPages;
   counters["live_bubble_collider_skipped_pages"] = stats.colliderSkippedPages;
+  counters["live_bubble_cpu_work_unit_max_ms"] = stats.cpuWorkUnitMaxMs;
   counters["live_bubble_probe_active"] = liveBubbleProbeActive ? 1 : 0;
   counters["live_bubble_probe_built_total"] = liveBubbleProbeBuiltTotal;
   counters["live_bubble_probe_evictions_total"] = liveBubbleProbeEvictionsTotal;
   counters["live_bubble_probe_collider_removals_total"] = liveBubbleProbeColliderRemovalsTotal;
+  counters["live_bubble_probe_cpu_work_unit_max_ms"] = liveBubbleProbeCpuWorkUnitMaxMs;
 }
 
 function mirrorCanonicalWorldCenter(input: TerrainFramePhaseInput, canonical: CanonicalCenter): void {
@@ -300,10 +308,10 @@ function applyRootTransitionFade(
 }
 
 export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFramePhaseResult {
-  const activeTerrainViews = input.selectionController.activeTerrainViews() as Set<TerrainFadeView>;
-  const currentTerrainViews = input.selectionController.currentTerrainViews() as Set<TerrainFadeView>;
-  const selectionStats = input.selectionController.stats();
-  const transitionViews = new Set<TerrainFadeView>([...currentTerrainViews, ...activeTerrainViews]);
+  const cutSnapshot = input.selectionController.terrainCutSnapshot();
+  const activeTerrainViews = cutSnapshot.activeTerrainViews as Set<TerrainFadeView>;
+  const selectionStats = cutSnapshot.stats;
+  const transitionViews = cutSnapshot.terrainViews as unknown as Set<TerrainFadeView>;
   const transitionGroups = buildTransitionGroups(transitionViews);
   const morphStats: RootMorphFrameStats = { builtRoots: 0, builtVertices: 0, buildMs: 0 };
 
@@ -338,16 +346,13 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     enabled: input.state.bubble,
     bubbleRadius: input.state.bubbleRadius,
     bubbleCenter,
-    bubbleViews: new Set([...currentTerrainViews, ...activeTerrainViews]) as unknown as Set<NearFieldBubbleView>,
+    bubbleViews: transitionViews as unknown as Set<NearFieldBubbleView>,
     getView: (nodeId) => input.views.get(nodeId) as unknown as NearFieldBubbleView | undefined,
     frameId: selectionStats.frameId,
   });
   mirrorLiveBubbleStats(bubbleStats);
   if (input.pruneRenderNodeCache) {
-    const protectedNodeIds = new Set<string>();
-    for (const view of currentTerrainViews) protectedNodeIds.add(view.node.id);
-    for (const view of activeTerrainViews) protectedNodeIds.add(view.node.id);
-    input.pruneRenderNodeCache(protectedNodeIds, selectionStats.frameId);
+    input.pruneRenderNodeCache(cutSnapshot.protectedNodeIds, selectionStats.frameId);
   }
 
   const tPropsStart = performance.now();

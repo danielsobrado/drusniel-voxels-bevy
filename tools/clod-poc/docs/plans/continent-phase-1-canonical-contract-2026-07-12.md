@@ -2,6 +2,19 @@
 
 Parent: `continent-plan-overview-2026-07-12.md`
 
+## Status
+
+| Commit | State | Notes |
+| --- | --- | --- |
+| C1.1 HeightfieldSampler + adapters | IN PROGRESS | |
+| C1.2 WorldTileKey + adapter tests | pending | |
+| C1.3 WorldManifest + diagnostics | pending | |
+| C1.4 Thread manifest | pending | |
+| C1.5 Docs + acceptance counter | pending | |
+
+**Next action:** implement `src/world/heightfield_sampler.ts` (C1.1) — wrap the raster install
+site in `world_build_startup.ts:494-498` behind the interface with bit-identical behavior.
+
 ## Goal
 
 Introduce the identity and interface layer — `WorldManifest`, `WorldTileKey`,

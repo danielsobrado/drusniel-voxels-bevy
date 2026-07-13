@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
 import { buildLod0PageSource } from "../clod/source_mesh.js";
 import { assertNoInternalBorders } from "../clod/validate.js";
-import { setTerrainSurfaceOverride } from "./terrain.js";
+import {
+  createChunkMeshBuild,
+  finalizeChunkMeshBuild,
+  meshChunk,
+  setTerrainSurfaceOverride,
+  stepChunkMeshBuild,
+} from "./terrain.js";
 
 const TEST_CFG: ClodPagesConfig = {
   page: { chunks_per_page: 1, chunk_size: 16, halo_chunks: 1, quadtree_levels: 1 },
@@ -47,5 +53,21 @@ describe("meshChunk vertical scan bounds", () => {
 
     expect(source.mesh.indices.length).toBeGreaterThan(0);
     expect(() => assertNoInternalBorders(source.mesh, source.footprint, "L0:0,0")).not.toThrow();
+  });
+
+  it("resumes CPU meshing across bounded steps without changing the mesh", () => {
+    const world = { cellsX: 16, cellsZ: 16, finite: false };
+    const direct = meshChunk(0, 0, TEST_CFG, world);
+    const build = createChunkMeshBuild(0, 0, TEST_CFG, world);
+    let steps = 0;
+    while (!stepChunkMeshBuild(build, performance.now() - 1)) steps++;
+    const resumed = finalizeChunkMeshBuild(build);
+
+    expect(steps).toBeGreaterThan(1);
+    expect(resumed.positions).toEqual(direct.positions);
+    expect(resumed.normals).toEqual(direct.normals);
+    expect(resumed.paintSlots).toEqual(direct.paintSlots);
+    expect(resumed.materialWeights).toEqual(direct.materialWeights);
+    expect(resumed.indices).toEqual(direct.indices);
   });
 });

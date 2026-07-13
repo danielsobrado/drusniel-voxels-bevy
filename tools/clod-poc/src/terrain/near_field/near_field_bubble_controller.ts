@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
-import { meshChunk, getDigEditsSnapshot, voxelEditsRequireCpuDerivedMeshing } from "../../terrain/terrain.js";
+import {
+  createChunkMeshBuild,
+  finalizeChunkMeshBuild,
+  stepChunkMeshBuild,
+  getDigEditsSnapshot,
+  voxelEditsRequireCpuDerivedMeshing,
+  type ChunkMeshBuild,
+} from "../../terrain/terrain.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
 import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { toGeometry } from "../geometry/page_geometry.js";
@@ -12,7 +19,7 @@ import type { WorldBounds } from "../../terrain/terrain_surface.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
-/** Per-frame budget for CPU-fallback chunk meshing; one chunk can cost 10–90 ms, so at most one runs once the budget is spent. */
+/** Per-frame budget for resumable CPU-fallback chunk meshing. */
 const CPU_CHUNK_MESH_BUDGET_MS = 6;
 const DEFAULT_GPU_CHUNK_DISPATCH_BUDGET = 2;
 const DEFAULT_GPU_MAX_INFLIGHT_CHUNKS = Number.MAX_SAFE_INTEGER;
@@ -77,6 +84,7 @@ export interface NearFieldBubbleStats {
   colliderRequiredPages: number;
   colliderReadyPages: number;
   colliderSkippedPages: number;
+  cpuWorkUnitMaxMs: number;
 }
 
 export interface NearFieldBubbleControllerDeps {
@@ -104,11 +112,32 @@ export interface NearFieldBubbleController {
   dispose(): void;
 }
 
-interface PageCoord {
+export interface PageCoord {
   px: number;
   pz: number;
   centerX: number;
   centerZ: number;
+}
+
+export interface RequiredStreamingPageCoordCache {
+  get(center: THREE.Vector3, bubbleRadius: number, pageSize: number): readonly PageCoord[];
+}
+
+export function createRequiredStreamingPageCoordCache(): RequiredStreamingPageCoordCache {
+  let key = "";
+  let coords: readonly PageCoord[] = [];
+  return {
+    get(center, bubbleRadius, pageSize) {
+      const centerPx = Math.floor(center.x / pageSize);
+      const centerPz = Math.floor(center.z / pageSize);
+      const nextKey = `${centerPx},${centerPz}:${bubbleRadius}:${pageSize}`;
+      if (nextKey !== key) {
+        key = nextKey;
+        coords = requiredStreamingPageCoords(center, bubbleRadius, pageSize);
+      }
+      return coords;
+    },
+  };
 }
 
 interface PendingCpuPageBuild {
@@ -116,6 +145,7 @@ interface PendingCpuPageBuild {
   pz: number;
   worldBounds: WorldBounds;
   chunks: Array<[number, number]>;
+  active: { dx: number; dz: number; build: ChunkMeshBuild } | null;
   failures: number;
 }
 
@@ -245,26 +275,34 @@ export function requiredStreamingPageCoords(
   bubbleRadius: number,
   pageSize: number,
 ): PageCoord[] {
-  const minPx = Math.floor((center.x - bubbleRadius) / pageSize);
-  const maxPx = Math.floor((center.x + bubbleRadius) / pageSize);
-  const minPz = Math.floor((center.z - bubbleRadius) / pageSize);
-  const maxPz = Math.floor((center.z + bubbleRadius) / pageSize);
-  const halfDiag = pageSize * Math.SQRT2 * 0.5;
+  const centerPx = Math.floor(center.x / pageSize);
+  const centerPz = Math.floor(center.z / pageSize);
+  const centerX = (centerPx + 0.5) * pageSize;
+  const centerZ = (centerPz + 0.5) * pageSize;
+  const residencyRadius = bubbleRadius + pageSize * Math.SQRT2 * 0.5;
+  const residencyRadiusSq = residencyRadius * residencyRadius;
+  const radiusPages = Math.ceil(residencyRadius / pageSize);
   const coords: PageCoord[] = [];
 
-  for (let px = minPx; px <= maxPx; px++) {
-    for (let pz = minPz; pz <= maxPz; pz++) {
-      const centerX = (px + 0.5) * pageSize;
-      const centerZ = (pz + 0.5) * pageSize;
-      if (Math.hypot(center.x - centerX, center.z - centerZ) <= bubbleRadius + halfDiag) {
-        coords.push({ px, pz, centerX, centerZ });
+  for (let px = centerPx - radiusPages; px <= centerPx + radiusPages; px++) {
+    for (let pz = centerPz - radiusPages; pz <= centerPz + radiusPages; pz++) {
+      const pageCenterX = (px + 0.5) * pageSize;
+      const pageCenterZ = (pz + 0.5) * pageSize;
+      const dx = centerX - pageCenterX;
+      const dz = centerZ - pageCenterZ;
+      if (dx * dx + dz * dz <= residencyRadiusSq) {
+        coords.push({ px, pz, centerX: pageCenterX, centerZ: pageCenterZ });
       }
     }
   }
 
   return coords.sort((a, b) => {
-    const da = Math.hypot(center.x - a.centerX, center.z - a.centerZ);
-    const db = Math.hypot(center.x - b.centerX, center.z - b.centerZ);
+    const dax = centerPx - a.px;
+    const daz = centerPz - a.pz;
+    const dbx = centerPx - b.px;
+    const dbz = centerPz - b.pz;
+    const da = dax * dax + daz * daz;
+    const db = dbx * dbx + dbz * dbz;
     return da - db || a.px - b.px || a.pz - b.pz;
   });
 }
@@ -280,7 +318,10 @@ export function liveBubbleOwnsPageView(
   const centerX = (node.footprint.minX + node.footprint.maxX) / 2;
   const centerZ = (node.footprint.minZ + node.footprint.maxZ) / 2;
   const halfDiag = pageSize * Math.SQRT2 * 0.5;
-  return Math.hypot(bubbleCenter.x - centerX, bubbleCenter.z - centerZ) <= bubbleRadius + halfDiag;
+  const dx = bubbleCenter.x - centerX;
+  const dz = bubbleCenter.z - centerZ;
+  const radius = bubbleRadius + halfDiag;
+  return dx * dx + dz * dz <= radius * radius;
 }
 
 function footprintIntersectsCircle(
@@ -290,7 +331,9 @@ function footprintIntersectsCircle(
 ): boolean {
   const closestX = THREE.MathUtils.clamp(center.x, footprint.minX, footprint.maxX);
   const closestZ = THREE.MathUtils.clamp(center.z, footprint.minZ, footprint.maxZ);
-  return Math.hypot(center.x - closestX, center.z - closestZ) <= radius;
+  const dx = center.x - closestX;
+  const dz = center.z - closestZ;
+  return dx * dx + dz * dz <= radius * radius;
 }
 
 export function createNearFieldBubbleController(deps: NearFieldBubbleControllerDeps): NearFieldBubbleController {
@@ -306,6 +349,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
   const gpuWaitBuilds = new Map<string, PendingGpuWaitPageBuild>();
   const gpuPendingBuilds = new Map<string, PendingGpuPageBuild>();
+  const requiredCoordCache = createRequiredStreamingPageCoordCache();
   const terrainColliders = deps.terrainColliders ?? null;
   const pageRevisions = new Map<string, number>();
   let colliderRegistrations = 0;
@@ -318,6 +362,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   let currentFrame = 0;
   let currentBubbleCenter = new THREE.Vector3();
   let currentColliderRadius: number | null = null;
+  let lastEvictionCenterPage = "";
+  let cpuWorkUnitMaxMsThisFrame = 0;
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
     (node.footprint.minX + node.footprint.maxX) / 2,
@@ -512,7 +558,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       existing.chunks.push([dx, dz]);
       return;
     }
-    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: [[dx, dz]], failures: 0 });
+    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: [[dx, dz]], active: null, failures: 0 });
   };
 
   const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
@@ -542,7 +588,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     // and drain them in update() under a per-frame budget. The entry follows
     // the same deferred-ready contract as the GPU path.
     const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
-    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: pageChunks(), failures: 0 });
+    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: pageChunks(), active: null, failures: 0 });
     return entry;
   };
 
@@ -658,31 +704,51 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   };
 
   const drainCpuPendingBuilds = (tBubbleStart: number) => {
+    const deadlineMs = tBubbleStart + CPU_CHUNK_MESH_BUDGET_MS;
     while (cpuPendingBuilds.size > 0) {
       const next = cpuPendingBuilds.entries().next().value as [string, PendingCpuPageBuild];
       const [key, job] = next;
       const entry = chunkGroups.get(key);
-      if (!entry || job.chunks.length === 0) {
+      if (!entry || (job.chunks.length === 0 && !job.active)) {
         cpuPendingBuilds.delete(key);
         continue;
       }
-      const [dx, dz] = job.chunks.shift()!;
       try {
+        const unitStartedAt = performance.now();
+        if (!job.active) {
+          const [dx, dz] = job.chunks.shift()!;
+          job.active = {
+            dx,
+            dz,
+            build: createChunkMeshBuild(job.px * P + dx, job.pz * P + dz, deps.cfg, job.worldBounds),
+          };
+        }
+        const complete = stepChunkMeshBuild(job.active.build, deadlineMs);
+        if (!complete) {
+          cpuWorkUnitMaxMsThisFrame = Math.max(cpuWorkUnitMaxMsThisFrame, performance.now() - unitStartedAt);
+          return;
+        }
+        const { dx, dz, build } = job.active;
         addChunkMesh(
           entry.group,
           entry.mats,
           entry.unsubs,
           entry.colliderIds,
-          meshChunk(job.px * P + dx, job.pz * P + dz, deps.cfg, job.worldBounds),
+          finalizeChunkMeshBuild(build),
           chunkColliderId(key, dx, dz),
           liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
           dz * P + dx,
         );
+        job.active = null;
+        cpuWorkUnitMaxMsThisFrame = Math.max(cpuWorkUnitMaxMsThisFrame, performance.now() - unitStartedAt);
       } catch (error) {
         job.failures++;
+        const dx = job.active?.dx ?? -1;
+        const dz = job.active?.dz ?? -1;
+        job.active = null;
         console.error(`[bubble] CPU chunk meshing failed for page ${key} chunk (${dx},${dz})`, error);
       }
-      if (job.chunks.length === 0) {
+      if (job.chunks.length === 0 && !job.active) {
         cpuPendingBuilds.delete(key);
         if (!gpuPendingBuilds.has(key)) {
           entry.failed = job.failures > 0;
@@ -690,7 +756,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           entry.ready = true;
         }
       }
-      if (performance.now() - tBubbleStart >= CPU_CHUNK_MESH_BUDGET_MS) return;
+      if (performance.now() >= deadlineMs) return;
     }
   };
 
@@ -709,8 +775,10 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       evictions++;
     };
     for (const [nodeId, entry] of [...chunkGroups.entries()]) {
-      const dist = Math.hypot(bubbleCenter.x - entry.centerX, bubbleCenter.z - entry.centerZ);
-      if (dist > bubbleRadius * deps.evictDistanceMultiplier) {
+      const dx = bubbleCenter.x - entry.centerX;
+      const dz = bubbleCenter.z - entry.centerZ;
+      const evictRadius = bubbleRadius * deps.evictDistanceMultiplier;
+      if (dx * dx + dz * dz > evictRadius * evictRadius) {
         disposeAndCount(nodeId, entry);
       }
     }
@@ -743,7 +811,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       pendingChunks += job.chunks.length;
       inflightChunks += job.inflight;
     }
-    for (const job of cpuPendingBuilds.values()) pendingChunks += job.chunks.length;
+    for (const job of cpuPendingBuilds.values()) pendingChunks += job.chunks.length + (job.active ? 1 : 0);
     return { pendingChunks, inflightChunks };
   };
 
@@ -784,6 +852,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   return {
     update(input) {
       const tBubbleStart = performance.now();
+      cpuWorkUnitMaxMsThisFrame = 0;
       currentFrame = input.frameId;
       currentBubbleCenter = input.bubbleCenter;
       currentColliderRadius = colliderRadiusOverride;
@@ -793,7 +862,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       let requiredCoords: PageCoord[] = [];
       if (input.enabled) {
         if (liveStreamingEnabled) {
-          requiredCoords = requiredStreamingPageCoords(input.bubbleCenter, input.bubbleRadius, pageSize);
+          requiredCoords = requiredCoordCache.get(input.bubbleCenter, input.bubbleRadius, pageSize) as PageCoord[];
           for (const coord of requiredCoords) {
             const key = pageGroupKey(coord.px, coord.pz);
             let grp = chunkGroups.get(key);
@@ -839,9 +908,13 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         promoteGpuWaitBuilds();
         drainGpuPendingBuilds();
         drainCpuPendingBuilds(tBubbleStart);
-        const evictStats = evictColliderBearingCache(input.bubbleCenter, input.bubbleRadius);
-        evictions = evictStats.evictions;
-        colliderEvictions = evictStats.colliderEvictions;
+        const centerPage = `${Math.floor(input.bubbleCenter.x / pageSize)},${Math.floor(input.bubbleCenter.z / pageSize)}:${input.bubbleRadius}`;
+        if (centerPage !== lastEvictionCenterPage || chunkGroups.size > deps.maxCachedChunkGroups) {
+          lastEvictionCenterPage = centerPage;
+          const evictStats = evictColliderBearingCache(input.bubbleCenter, input.bubbleRadius);
+          evictions = evictStats.evictions;
+          colliderEvictions = evictStats.colliderEvictions;
+        }
       } else if (chunkGroups.size > 0) {
         for (const [nodeId, { group }] of chunkGroups) {
           group.visible = false;
@@ -880,6 +953,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         colliderRequiredPages: required.colliderRequiredPages,
         colliderReadyPages: required.colliderReadyPages,
         colliderSkippedPages: required.colliderSkippedPages,
+        cpuWorkUnitMaxMs: cpuWorkUnitMaxMsThisFrame,
       };
     },
     invalidatePage(nodeId) {

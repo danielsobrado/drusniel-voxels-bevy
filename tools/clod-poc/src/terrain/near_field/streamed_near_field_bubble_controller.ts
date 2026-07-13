@@ -8,13 +8,14 @@ import { toGeometry } from "../geometry/page_geometry.js";
 import {
   liveBubbleChunkFootprint,
   liveBubbleOwnsPageView,
-  requiredStreamingPageCoords,
+  createRequiredStreamingPageCoordCache,
   resolveLiveBubbleBuildBudget,
   resolveLiveBubbleColliderRadius,
   type ChunkGroupEntry,
   type NearFieldBubbleController,
   type NearFieldBubbleStats,
   type NearFieldBubbleUpdate,
+  type PageCoord,
 } from "./near_field_bubble_controller.js";
 import type { LiveBubbleStreamPageBuilder } from "./live_bubble_stream_page_builder.js";
 
@@ -77,7 +78,9 @@ function pageColliderId(pageKey: string): string {
 function footprintIntersectsCircle(footprint: TerrainColliderFootprint, center: THREE.Vector3, radius: number): boolean {
   const closestX = THREE.MathUtils.clamp(center.x, footprint.minX, footprint.maxX);
   const closestZ = THREE.MathUtils.clamp(center.z, footprint.minZ, footprint.maxZ);
-  return Math.hypot(center.x - closestX, center.z - closestZ) <= radius;
+  const dx = center.x - closestX;
+  const dz = center.z - closestZ;
+  return dx * dx + dz * dz <= radius * radius;
 }
 
 export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldBubbleControllerDeps): NearFieldBubbleController {
@@ -89,12 +92,14 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
   const terrainColliders = deps.terrainColliders ?? null;
   const entries = new Map<string, ChunkGroupEntry>();
   const pending = new Map<string, PendingPageBuild>();
+  const requiredCoordCache = createRequiredStreamingPageCoordCache();
   let inflight = new Set<string>();
   let currentFrame = 0;
   let currentCenter = new THREE.Vector3();
   let colliderRegistrations = 0;
   let colliderRemovals = 0;
   let slowestPageMs = 0;
+  let lastEvictionCenterPage = "";
 
   const pageEntryReady = (entry: ChunkGroupEntry): boolean => (
     entry.ready && !entry.failed && (entry.group.children.length > 0 || entry.colliderIds.length > 0 || entry.validEmpty)
@@ -244,7 +249,10 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
       evictions++;
     };
     for (const [key, entry] of [...entries.entries()]) {
-      if (Math.hypot(center.x - entry.centerX, center.z - entry.centerZ) > radius * deps.evictDistanceMultiplier) {
+      const dx = center.x - entry.centerX;
+      const dz = center.z - entry.centerZ;
+      const evictRadius = radius * deps.evictDistanceMultiplier;
+      if (dx * dx + dz * dz > evictRadius * evictRadius) {
         disposeAndCount(key, entry);
       }
     }
@@ -289,10 +297,10 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
       let chunkGroupsBuiltThisFrame = 0;
       let evictions = 0;
       let colliderEvictions = 0;
-      let requiredCoords: ReturnType<typeof requiredStreamingPageCoords> = [];
+      let requiredCoords: readonly PageCoord[] = [];
 
       if (input.enabled) {
-        requiredCoords = requiredStreamingPageCoords(input.bubbleCenter, input.bubbleRadius, pageSize);
+        requiredCoords = requiredCoordCache.get(input.bubbleCenter, input.bubbleRadius, pageSize);
         for (const coord of requiredCoords) {
           const key = pageGroupKey(coord.px, coord.pz);
           let entry = entries.get(key);
@@ -318,9 +326,13 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
         }
 
         drainPending();
-        const evictStats = evictCache(input.bubbleCenter, input.bubbleRadius);
-        evictions = evictStats.evictions;
-        colliderEvictions = evictStats.colliderEvictions;
+        const centerPage = `${Math.floor(input.bubbleCenter.x / pageSize)},${Math.floor(input.bubbleCenter.z / pageSize)}:${input.bubbleRadius}`;
+        if (centerPage !== lastEvictionCenterPage || entries.size > deps.maxCachedChunkGroups) {
+          lastEvictionCenterPage = centerPage;
+          const evictStats = evictCache(input.bubbleCenter, input.bubbleRadius);
+          evictions = evictStats.evictions;
+          colliderEvictions = evictStats.colliderEvictions;
+        }
       } else {
         for (const [key, entry] of entries) {
           entry.group.visible = false;
@@ -365,6 +377,7 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
         colliderRequiredPages: required.colliderRequiredPages,
         colliderReadyPages: required.colliderReadyPages,
         colliderSkippedPages: required.colliderSkippedPages,
+        cpuWorkUnitMaxMs: 0,
       };
     },
     invalidatePage(nodeId: string): void {

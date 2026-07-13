@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import {
   createNearFieldBubbleController,
+  createRequiredStreamingPageCoordCache,
   liveBubbleChunkFootprint,
   liveBubbleOwnsPageView,
   requiredStreamingPageCoords,
@@ -15,6 +16,7 @@ const terrainMocks = vi.hoisted(() => ({
   meshChunk: vi.fn((): ChunkMesh => {
     throw new Error("cpu fallback fail");
   }),
+  stepChunkMeshBuild: vi.fn(() => true),
 }));
 
 vi.mock("../../terrain/terrain.js", async (importOriginal) => {
@@ -22,6 +24,9 @@ vi.mock("../../terrain/terrain.js", async (importOriginal) => {
   return {
     ...actual,
     meshChunk: terrainMocks.meshChunk,
+    createChunkMeshBuild: vi.fn(() => ({})),
+    stepChunkMeshBuild: terrainMocks.stepChunkMeshBuild,
+    finalizeChunkMeshBuild: terrainMocks.meshChunk,
   };
 });
 
@@ -129,6 +134,18 @@ describe("requiredStreamingPageCoords", () => {
     expect(coords.length).toBeGreaterThan(0);
     expect(keys.has("128,-64")).toBe(true);
   });
+
+  it("reuses residency coordinates until the center crosses a page boundary", () => {
+    const cache = createRequiredStreamingPageCoordCache();
+    const first = cache.get(new THREE.Vector3(33, 0, 33), 96, 32);
+    const samePage = cache.get(new THREE.Vector3(63.9, 0, 63.9), 96, 32);
+    const nextPage = cache.get(new THREE.Vector3(64, 0, 64), 96, 32);
+
+    expect(samePage).toBe(first);
+    expect(nextPage).not.toBe(first);
+    expect(first[0]).toMatchObject({ px: 1, pz: 1 });
+    expect(nextPage[0]).toMatchObject({ px: 2, pz: 2 });
+  });
 });
 
 describe("liveBubbleChunkFootprint", () => {
@@ -173,6 +190,8 @@ describe("liveBubbleOwnsPageView", () => {
 describe("createNearFieldBubbleController", () => {
   beforeEach(() => {
     terrainMocks.meshChunk.mockReset();
+    terrainMocks.stepChunkMeshBuild.mockReset();
+    terrainMocks.stepChunkMeshBuild.mockReturnValue(true);
     terrainMocks.meshChunk.mockImplementation((): ChunkMesh => {
       throw new Error("cpu fallback fail");
     });
@@ -339,8 +358,8 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.chunkGroupsBuiltThisFrame).toBe(1);
     expect(mesher.meshChunk).toHaveBeenCalledTimes(2);
     const firstCall = mesher.meshChunk.mock.calls[0] as unknown as [number, number];
-    expect(firstCall[0]).toBe(2);
-    expect(firstCall[1]).toBe(2);
+    expect(firstCall[0]).toBe(4);
+    expect(firstCall[1]).toBe(4);
   });
 
   it("does not enqueue all GPU chunks when a page is created", () => {
@@ -530,6 +549,27 @@ describe("createNearFieldBubbleController", () => {
       frameId: 1,
     });
 
+    expect(terrainMocks.meshChunk).toHaveBeenCalled();
+  });
+
+  it("resumes CPU fallback work before finalizing a chunk", () => {
+    terrainMocks.meshChunk.mockImplementation(() => NON_EMPTY_CHUNK);
+    terrainMocks.stepChunkMeshBuild.mockReturnValueOnce(false).mockReturnValue(true);
+    const controller = makeController({ getGpuMesher: () => null, streamingLiveTerrain: false });
+    const node = makeNode();
+    const view = makeView(node);
+    const input = {
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(24, 0, 24),
+      bubbleViews: [view],
+      getView: (id: string) => (id === node.id ? view : undefined),
+      frameId: 1,
+    };
+
+    controller.update(input);
+    expect(terrainMocks.meshChunk).not.toHaveBeenCalled();
+    controller.update({ ...input, frameId: 2 });
     expect(terrainMocks.meshChunk).toHaveBeenCalled();
   });
 

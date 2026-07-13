@@ -43,11 +43,11 @@ near_field:
   show_mask: true
 
 debug:
-  show_wireframe: true
-  show_page_boundaries: true
+  show_wireframe: false
+  show_page_boundaries: false
   show_locked_border_vertices: false
-  show_error_labels: true
-  show_stats_panel: true
+  show_error_labels: false
+  show_stats_panel: false
   lod_colors:
     lod0: "#3b82f6"
     lod1: "#22c55e"
