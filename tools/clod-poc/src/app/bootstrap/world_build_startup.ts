@@ -358,7 +358,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const isContinent = sceneName === CONTINENT_SCENE;
   const isStreamedWorld = isInfiniteIslands || isContinent;
   const continentHydrologyRequested = isContinent
-    && booleanParam(searchParams, ["continentHydrology", "continent_hydrology"], false);
+    && booleanParam(searchParams, ["continentHydrology", "continent_hydrology"], true);
   const terrainFieldConfig = resolveTerrainFieldConfig({
     seed,
     seaLevel,

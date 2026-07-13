@@ -42,6 +42,7 @@ import {
   type GpuClodRootMesher,
 } from "./terrain/streaming/gpu_clod_root_mesher.js";
 import {
+  continentTileMeshingEnabled,
   streamingRootGpuMesherConfigFromWindow,
   type StreamingRootGpuMesherConfig,
 } from "./terrain/streaming/streamed_root_gpu_config.js";
@@ -383,8 +384,7 @@ export class ClodWorkerClient {
   }
 
   private streamRootGpuTileMeshRequested(): boolean {
-    const raw = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("gpuTileMesh");
-    return raw === "1" || raw?.toLowerCase() === "true";
+    return typeof window !== "undefined" && continentTileMeshingEnabled(new URLSearchParams(window.location.search));
   }
 
   private acceptStreamRootNode(node: ClodPageNode, source: StreamRootBoundsGuardSource): boolean {

@@ -51,6 +51,7 @@ import {
 } from "./gpu_clod_root_batch_buffers.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
 import { createHeightfieldTileGpuAtlas } from "../../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
+import { continentTileMeshingEnabled } from "./streamed_root_gpu_config.js";
 
 const STREAM_COUNTER_SAMPLE_LIMIT = 128;
 const DEFAULT_MATERIAL_WEIGHT_STRIDE = 4;
@@ -708,8 +709,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
 
 function tileAtlasMesherRequested(): boolean {
   const search = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window?.location?.search ?? "";
-  const raw = new URLSearchParams(search).get("gpuTileMesh");
-  return raw === "1" || raw?.toLowerCase() === "true";
+  return continentTileMeshingEnabled(new URLSearchParams(search));
 }
 
 export function terrainFieldShaderWithTileAtlas(): string {

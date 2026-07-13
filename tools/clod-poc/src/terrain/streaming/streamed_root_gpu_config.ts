@@ -31,6 +31,10 @@ function booleanFlag(params: URLSearchParams, key: string, fallback: boolean): b
   return fallback;
 }
 
+export function continentTileMeshingEnabled(params: URLSearchParams): boolean {
+  return params.get("scene") === "continent" && booleanFlag(params, "gpuTileMesh", true);
+}
+
 export function parseStreamingRootGpuMesherConfig(
   params: URLSearchParams,
   defaults: StreamingRootGpuMesherConfig = DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
@@ -39,9 +43,9 @@ export function parseStreamingRootGpuMesherConfig(
   // worker builds ~3 pages/s while the GPU mesher measures ~16 pages/s (5x) with the
   // guarded CPU fallback still in place, so the GPU path is the scene default there.
   // liveClodRootGpuMesher=0 opts back into the CPU worker.
-  const gpuTileMesh = booleanFlag(params, "gpuTileMesh", false);
+  const gpuTileMesh = continentTileMeshingEnabled(params);
   const defaultEnabled = defaults.enabled || params.get("scene") === "infinite-islands"
-    || (params.get("scene") === "continent" && gpuTileMesh);
+    || gpuTileMesh;
   return {
     enabled: booleanFlag(params, "liveClodRootGpuMesher", defaultEnabled),
     batchSize: positiveIntegerParam(params, "liveClodRootGpuBatchSize") ?? (gpuTileMesh ? 1 : defaults.batchSize),

@@ -22,11 +22,11 @@ describe("streamed root GPU mesher config", () => {
     expect(parsed.enabled).toBe(false);
   });
 
-  it("enables single-page GPU batches only when continent tile meshing is requested", () => {
-    expect(parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "continent" })).enabled).toBe(false);
-    const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "continent", gpuTileMesh: "1" }));
+  it("defaults continent to single-page GPU tile batches and keeps an explicit opt-out", () => {
+    const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "continent" }));
     expect(parsed.enabled).toBe(true);
     expect(parsed.batchSize).toBe(1);
+    expect(parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "continent", gpuTileMesh: "0" })).enabled).toBe(false);
   });
 
   it("parses explicit query flags", () => {

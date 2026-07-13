@@ -50,6 +50,11 @@ describe("splitWorldBuildNodes", () => {
 });
 
 describe("lod0Nodes / allNodes bootstrap wiring", () => {
+  it("defaults continent startup to graph hydrology while retaining query opt-outs", () => {
+    const source = readSource("world_build_startup.ts");
+    expect(source).toContain('booleanParam(searchParams, ["continentHydrology", "continent_hydrology"], true)');
+  });
+
   it("world_build_startup builds terrain summary from lod0Nodes only", () => {
     const source = readSource("world_build_startup.ts");
     expect(source).toContain("splitWorldBuildNodes(result.nodesByLevel)");
