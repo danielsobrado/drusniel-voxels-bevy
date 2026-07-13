@@ -128,7 +128,10 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     if (this.disposed) return Promise.reject(new Error("GPU CLOD root pool disposed"));
     const index = this.available.shift();
     if (index !== undefined) return Promise.resolve(index);
-    return new Promise<number>((resolve, reject) => this.waiters.push({ resolve, reject }));
+    return new Promise<number>((resolve, reject) => {
+      this.waiters.push({ resolve, reject });
+      this.publishCounters();
+    });
   }
 
   private release(index: number): void {
