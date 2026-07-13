@@ -1,4 +1,8 @@
 import type { WorldManifest } from "../world/world_manifest.js";
+import type {
+  ContinentRiverCrossingRoute,
+  ContinentRiverRouteSearchOptions,
+} from "../water/continent_river_route.js";
 
 export interface CamPose {
   p: [number, number, number];
@@ -48,6 +52,7 @@ export interface ClodHooks {
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
   beginMovementRouteProbe: (() => void) | null;
+  findContinentRiverCrossingRoute: ((options?: ContinentRiverRouteSearchOptions) => ContinentRiverCrossingRoute | null) | null;
   setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => void) | null;
   resetAcceptanceScene: (() => void) | null;
   resetAcceptanceSceneForPose: ((pose: CamPose) => void) | null;
@@ -121,6 +126,7 @@ export function initHooks(): ClodHooks {
     settle: null,
     flyCamEnabled: null,
     beginMovementRouteProbe: null,
+    findContinentRiverCrossingRoute: null,
     setAcceptanceSceneOptions: null,
     resetAcceptanceScene: null,
     resetAcceptanceSceneForPose: null,

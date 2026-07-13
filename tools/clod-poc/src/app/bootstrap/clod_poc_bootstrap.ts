@@ -37,6 +37,7 @@ import {
   materialChurnConfigForQuery,
   materialChurnDiagnostics,
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
+import { findContinentRiverCrossingRoute } from "../../water/continent_river_route.js";
 
 const MAX_TERRAIN_TEXTURE_WINDOW_CACHE = 8;
 
@@ -74,7 +75,6 @@ export async function bootstrapClodPoc() {
     buildProgressBar: dom.buildProgressBar,
     info: dom.info,
   });
-
   const renderer = await runRendererStartup({
     searchParams,
     clodRuntime,
@@ -107,6 +107,14 @@ export async function bootstrapClodPoc() {
     world,
     renderer,
   });
+  if (postRenderer.longViewHooks) {
+    postRenderer.longViewHooks.findContinentRiverCrossingRoute = world.hydrologySystem
+      ? (options) => findContinentRiverCrossingRoute(
+          (x, z) => world.hydrologySystem!.sample(x, z, 64),
+          options,
+        )
+      : null;
+  }
   attachSaveRuntimeCounters(postRenderer.longViewHooks?.stats?.counters ?? null);
 
   const terrainView = runTerrainViewStartup({
