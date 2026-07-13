@@ -135,11 +135,11 @@ fn makeFarSummaryRecord(
   record.height_avg_slope = vec2<f32>(heightAvg, slopeMean);
   record.normal_avg = vec4<f32>(normal, 0.0);
   record.material_cover_a = vec4<f32>(f32(material), materialVariance, grassEligibility, roughnessMean);
-  record.material_cover_b = vec4<f32>(waterCoverage, canopyCoverage, slopeMax, 0.0);
-  record.canopy_occ = vec4<f32>(canopyCoverage, 0.0, 0.0, 0.0);
+  record.material_cover_b = vec4<f32>(waterCoverage, canopyCoverage, slopeMax, heightAvg);
+  record.canopy_summary = vec4<f32>(heightAvg, 0.0, 0.0, 0.0);
   record.record_meta = vec4<u32>(0u, revision, flags, sampleCount);
-  record._pad0 = vec4<u32>(0u);
-  record._pad1 = vec4<u32>(0u);
+  record.world_summary_a = vec4<f32>(0.0);
+  record.world_summary_b = vec4<f32>(0.0);
   return record;
 }
 

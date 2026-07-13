@@ -14,6 +14,8 @@ import { runTerrainViewStartup } from "./terrain_view_startup.js";
 import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
+import { createFarSummaryCanopySource, sampleFarSummaryHydrology } from "../../far-summary/unified-sources.js";
+import type { FarTerrainSampler } from "../../far-summary/summary-tile-builder.js";
 import { timeFarSummarySubphase } from "../frame_loop/far_summary_subphase_timing.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
 import { clearSaveInvalidationTargets, registerSaveInvalidationTarget } from "../../save/save_far_summary_bridge.js";
@@ -279,13 +281,36 @@ export async function bootstrapClodPoc() {
     if (!useNaadfFarSummary) {
       const seaLevel = world.worldSource.metadata.seaLevel;
       const farSummaryConfig = longViewConfigToFarSummaryConfig(lvConfig);
+      const farSummaryTerrainSampler: FarTerrainSampler = {
+        sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
+        sampleMaterial: (x: number, z: number) => world.worldSource.sampleMaterial(x, z),
+        sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
+        sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
+      };
+      if (searchParams.get("farSummaryLayout") === "2") {
+        const hydrologySystem = world.hydrologySystem;
+        const sampleWater = hydrologySystem
+          ? (x: number, z: number, cellSizeM = 1) => sampleFarSummaryHydrology(hydrologySystem, x, z, cellSizeM)
+          : undefined;
+        farSummaryTerrainSampler.sampleWaterSummary = sampleWater;
+        farSummaryTerrainSampler.sampleCanopySummary = createFarSummaryCanopySource({
+          getConfig: terrainView.getCanopyConfig,
+          sampleHeight: farSummaryTerrainSampler.sampleHeight,
+          sampleMaterial: farSummaryTerrainSampler.sampleMaterial,
+          sampleWater: sampleWater
+            ? (x, z) => sampleWater(x, z, 1)
+            : (x, z) => ({
+              coverage: farSummaryTerrainSampler.sampleHeight(x, z) < seaLevel ? 1 : 0,
+              waterLevel: seaLevel,
+              bodyKind: 0,
+              shoreDistance: 0,
+              flowX: 0,
+              flowZ: 0,
+            }),
+        });
+      }
       farSummaryIntegration = initFarSummaryIntegration({
-        terrainSampler: {
-          sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
-          sampleMaterial: (x: number, z: number) => world.worldSource.sampleMaterial(x, z),
-          sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
-          sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
-        },
+        terrainSampler: farSummaryTerrainSampler,
         terrainFieldConfig: world.worldSource.metadata.terrain,
         scene: renderer.scene,
         camera: renderer.camera,

@@ -1,6 +1,7 @@
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "../gpu/gpu_mesh_buffers.js";
 import type { FarSummaryGpuBatch, FarSummaryGpuDirtyTile } from "./gpu-planner.js";
+import { FAR_SUMMARY_LAYOUT_VERSION } from "./types.js";
 import {
   FAR_SUMMARY_GPU_DESCRIPTOR_BYTES,
   FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS,
@@ -51,6 +52,7 @@ export function packFarSummaryGpuDescriptors(
     view.setUint32(base + I32 * 4 + F32 * 4 + U32 * 2, tile.tileCells, true);
     view.setFloat32(base + I32 * 4 + F32 * 4 + U32 * 3, tile.cellSizeM, true);
     view.setUint32(base + I32 * 4 + F32 * 4 + U32 * 4, tile.cellRecordOffset ?? 0, true);
+    view.setUint32(base + I32 * 4 + F32 * 4 + U32 * 5, FAR_SUMMARY_LAYOUT_VERSION, true);
   }
   return buffer;
 }

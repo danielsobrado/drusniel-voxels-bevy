@@ -16,9 +16,45 @@ export interface FarSummaryGpuRecord {
   waterCoverage: number;
   canopyCoverage: number;
   slopeMax: number;
+  waterLevel: number;
+  bodyKind: number;
+  shoreDistance: number;
+  flowX: number;
+  flowZ: number;
+  canopyHeightAvg: number;
+  speciesPine: number;
+  speciesBroadleaf: number;
+  speciesDeadwood: number;
+  structureCoverage: number;
+  caveEntranceCoverage: number;
+  occluderHeight: number;
   revision: number;
   flags: number;
   sampleCount: number;
+}
+
+export type FarSummaryGpuV2Channels = Pick<FarSummaryGpuRecord,
+  | "waterLevel" | "bodyKind" | "shoreDistance" | "flowX" | "flowZ"
+  | "canopyHeightAvg" | "speciesPine" | "speciesBroadleaf" | "speciesDeadwood"
+  | "structureCoverage" | "caveEntranceCoverage" | "occluderHeight"
+>;
+
+/** Neutral layout-v2 values used when no graph/canopy source is attached. */
+export function farSummaryGpuV2FallbackChannels(height: number): FarSummaryGpuV2Channels {
+  return {
+    waterLevel: height,
+    bodyKind: 0,
+    shoreDistance: 0,
+    flowX: 0,
+    flowZ: 0,
+    canopyHeightAvg: height,
+    speciesPine: 0,
+    speciesBroadleaf: 0,
+    speciesDeadwood: 0,
+    structureCoverage: 0,
+    caveEntranceCoverage: 0,
+    occluderHeight: 0,
+  };
 }
 
 export interface FarSummaryGpuParityTolerances {
@@ -82,6 +118,18 @@ export function decodeFarSummaryGpuRecord(buffer: ArrayBuffer, index: number): F
     waterCoverage: view.getFloat32(base + 48, true),
     canopyCoverage: view.getFloat32(base + 52, true),
     slopeMax: view.getFloat32(base + 56, true),
+    waterLevel: view.getFloat32(base + 60, true),
+    canopyHeightAvg: view.getFloat32(base + 64, true),
+    speciesPine: view.getFloat32(base + 68, true),
+    speciesBroadleaf: view.getFloat32(base + 72, true),
+    speciesDeadwood: view.getFloat32(base + 76, true),
+    bodyKind: view.getUint32(base + 80, true),
+    shoreDistance: view.getFloat32(base + 96, true),
+    flowX: view.getFloat32(base + 100, true),
+    flowZ: view.getFloat32(base + 104, true),
+    structureCoverage: view.getFloat32(base + 108, true),
+    caveEntranceCoverage: view.getFloat32(base + 112, true),
+    occluderHeight: view.getFloat32(base + 116, true),
     revision: view.getUint32(base + 84, true),
     flags: view.getUint32(base + 88, true),
     sampleCount: view.getUint32(base + 92, true),
@@ -107,8 +155,22 @@ export function compareFarSummaryGpuRecordToCpu(
   compareNumber(mismatches, "waterCoverage", gpu.waterCoverage, cpu.waterCoverage, tolerances.coverage);
   compareNumber(mismatches, "roughnessMean", gpu.roughnessMean, cpu.roughnessMean, tolerances.roughness);
   compareNumber(mismatches, "grassEligibility", gpu.grassEligibility, cpu.grassEligibility, tolerances.grassEligibility);
+  compareNumber(mismatches, "waterLevel", gpu.waterLevel, cpu.waterLevel, tolerances.height);
+  compareNumber(mismatches, "shoreDistance", gpu.shoreDistance, cpu.shoreDistance, tolerances.height);
+  compareNumber(mismatches, "flowX", gpu.flowX, cpu.flowX, tolerances.coverage);
+  compareNumber(mismatches, "flowZ", gpu.flowZ, cpu.flowZ, tolerances.coverage);
+  compareNumber(mismatches, "canopyHeightAvg", gpu.canopyHeightAvg, cpu.canopyHeightAvg, tolerances.height);
+  compareNumber(mismatches, "speciesPine", gpu.speciesPine, cpu.speciesPine, tolerances.coverage);
+  compareNumber(mismatches, "speciesBroadleaf", gpu.speciesBroadleaf, cpu.speciesBroadleaf, tolerances.coverage);
+  compareNumber(mismatches, "speciesDeadwood", gpu.speciesDeadwood, cpu.speciesDeadwood, tolerances.coverage);
+  compareNumber(mismatches, "structureCoverage", gpu.structureCoverage, cpu.structureCoverage, tolerances.coverage);
+  compareNumber(mismatches, "caveEntranceCoverage", gpu.caveEntranceCoverage, cpu.caveEntranceCoverage, tolerances.coverage);
+  compareNumber(mismatches, "occluderHeight", gpu.occluderHeight, cpu.occluderHeight, tolerances.height);
   if (gpu.dominantMaterial !== cpu.dominantMaterial) {
     mismatches.push({ field: "dominantMaterial", gpu: gpu.dominantMaterial, cpu: cpu.dominantMaterial, tolerance: 0 });
+  }
+  if (gpu.bodyKind !== cpu.bodyKind) {
+    mismatches.push({ field: "bodyKind", gpu: gpu.bodyKind, cpu: cpu.bodyKind, tolerance: 0 });
   }
   return { passed: mismatches.length === 0, mismatches };
 }

@@ -34,6 +34,7 @@ export interface TreeDistribution {
 }
 
 const STRATIFIED_OFFSETS = [0.25, 0.75];
+export const CANOPY_STRATIFIED_SAMPLE_COUNT = STRATIFIED_OFFSETS.length * STRATIFIED_OFFSETS.length;
 
 export function createTreeDistribution(
   config: CanopyTreeDistributionConfig,

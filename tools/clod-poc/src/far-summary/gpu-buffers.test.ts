@@ -8,6 +8,7 @@ import {
 import type { FarSummaryGpuDirtyTile } from "./gpu-planner.js";
 import { estimateFarSummaryGpuBatchBytes } from "./gpu-planner.js";
 import { farSummaryGpuReadbackTileCount, packFarSummaryGpuDescriptors } from "./gpu-buffers.js";
+import { FAR_SUMMARY_LAYOUT_VERSION } from "./types.js";
 
 function tile(overrides: Partial<FarSummaryGpuDirtyTile> = {}): FarSummaryGpuDirtyTile {
   return {
@@ -63,6 +64,7 @@ describe("packFarSummaryGpuDescriptors", () => {
     expect(view.getUint32(40, true)).toBe(16);
     expect(view.getFloat32(44, true)).toBe(32);
     expect(view.getUint32(48, true)).toBe(123);
+    expect(view.getUint32(52, true)).toBe(FAR_SUMMARY_LAYOUT_VERSION);
   });
 
   it("sets the cell-record flag only in commit mode", () => {

@@ -8,6 +8,27 @@ export interface FarTerrainSampler {
   sampleCanopyCoverage?(x: number, z: number): number;
   sampleWaterCoverage?(x: number, z: number): number;
   sampleWaterCoverageForHeight?(x: number, z: number, height: number): number;
+  /** Canonical hydrology graph sample when the world has one. */
+  sampleWaterSummary?(x: number, z: number, cellSizeM: number): FarSummaryWaterSample;
+  /** Same deterministic forest distribution used by near canopy. */
+  sampleCanopySummary?(cellOriginX: number, cellOriginZ: number, cellSizeM: number): FarSummaryCanopySample;
+}
+
+export interface FarSummaryWaterSample {
+  coverage: number;
+  waterLevel: number;
+  bodyKind: number;
+  shoreDistance: number;
+  flowX: number;
+  flowZ: number;
+}
+
+export interface FarSummaryCanopySample {
+  coverage: number;
+  canopyHeightAvg: number;
+  speciesPine: number;
+  speciesBroadleaf: number;
+  speciesDeadwood: number;
 }
 
 export interface FarSummaryBuildInput {
@@ -232,11 +253,17 @@ function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySam
   const [nx, ny, nz] = normalFromHeights(hLeft, hRight, hDown, hUp, cellM);
   const slope = Math.acos(clamp01(ny));
   const material = terrainSampler.sampleMaterial?.(wx, wz) ?? 0;
-  const canopy = terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
+  const canopySummary = terrainSampler.sampleCanopySummary?.(
+    build.originX + sx * cellM,
+    build.originZ + sz * cellM,
+    cellM,
+  );
+  const canopy = canopySummary?.coverage ?? terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
   const waterHeight = Number.isFinite(hMax) ? hMax : sampleH;
-  const water = heightValid
+  const waterSummary = heightValid ? terrainSampler.sampleWaterSummary?.(wx, wz, cellM) : undefined;
+  const water = waterSummary?.coverage ?? (heightValid
     ? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, waterHeight) ?? terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0
-    : 0;
+    : 0);
   const roughness = computeRoughnessFromGrid(build.heightGrid, sx, sz);
 
   if (heightValid) {
@@ -257,9 +284,25 @@ function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySam
     materialVariance: 0,
     canopyCoverage: clamp01(canopy),
     waterCoverage: clamp01(water),
+    waterLevel: finiteOr(waterSummary?.waterLevel, sampleH),
+    bodyKind: finiteOr(waterSummary?.bodyKind, 0),
+    shoreDistance: finiteOr(waterSummary?.shoreDistance, 0),
+    flowX: finiteOr(waterSummary?.flowX, 0),
+    flowZ: finiteOr(waterSummary?.flowZ, 0),
+    canopyHeightAvg: finiteOr(canopySummary?.canopyHeightAvg, sampleH),
+    speciesPine: clamp01(canopySummary?.speciesPine ?? 0),
+    speciesBroadleaf: clamp01(canopySummary?.speciesBroadleaf ?? 0),
+    speciesDeadwood: clamp01(canopySummary?.speciesDeadwood ?? 0),
+    structureCoverage: 0,
+    caveEntranceCoverage: 0,
+    occluderHeight: 0,
     slope: Number.isFinite(slope) ? slope : 0,
     roughness,
   };
+}
+
+function finiteOr(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) ? value : fallback;
 }
 
 function computeRoughnessFromGrid(grid: HeightGrid, cx: number, cz: number): number {
@@ -294,6 +337,18 @@ function fallbackSample(height: number): FarSummarySample {
     materialVariance: 0,
     canopyCoverage: 0,
     waterCoverage: 0,
+    waterLevel: height,
+    bodyKind: 0,
+    shoreDistance: 0,
+    flowX: 0,
+    flowZ: 0,
+    canopyHeightAvg: height,
+    speciesPine: 0,
+    speciesBroadleaf: 0,
+    speciesDeadwood: 0,
+    structureCoverage: 0,
+    caveEntranceCoverage: 0,
+    occluderHeight: 0,
     slope: 0,
     roughness: 0,
   };

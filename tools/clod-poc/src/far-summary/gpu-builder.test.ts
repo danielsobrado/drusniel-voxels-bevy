@@ -9,6 +9,7 @@ import {
   type FarSummaryGpuBuilder,
   type FarSummaryGpuDispatchResult,
 } from "./gpu-builder.js";
+import { farSummaryGpuV2FallbackChannels } from "./gpu-records.js";
 
 function config(overrides: Partial<FarSummaryGpuConfig> = {}): FarSummaryGpuConfig {
   return { ...DEFAULT_FAR_SUMMARY_GPU_CONFIG, enabled: true, ...overrides };
@@ -87,6 +88,7 @@ function gpuRecord(height = 42) {
     waterCoverage: 0,
     canopyCoverage: 0,
     slopeMax: 0,
+    ...farSummaryGpuV2FallbackChannels(height),
     revision: 1,
     flags: 0,
     sampleCount: 16,

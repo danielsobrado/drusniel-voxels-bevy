@@ -7,6 +7,7 @@ export type {
   FarSummaryDebugConfig,
 } from "./config.js";
 
+export { FAR_SUMMARY_LAYOUT_VERSION } from "./types.js";
 export type {
   FarSummaryTileState,
   FarSummarySample,
@@ -39,7 +40,8 @@ export {
   buildFarSummaryTile,
   computeNormalFiniteDifference,
 } from "./summary-tile-builder.js";
-export type { FarTerrainSampler, FarSummaryBuildInput } from "./summary-tile-builder.js";
+export type { FarTerrainSampler, FarSummaryBuildInput, FarSummaryWaterSample, FarSummaryCanopySample } from "./summary-tile-builder.js";
+export { createFarSummaryCanopySource, sampleFarSummaryHydrology } from "./unified-sources.js";
 
 export { FarSummaryCache } from "./summary-cache.js";
 
@@ -109,6 +111,7 @@ export {
   decodeFarSummaryGpuRecord,
   decodeFarSummaryGpuRecords,
   compareFarSummaryGpuRecordToCpu,
+  farSummaryGpuV2FallbackChannels,
 } from "./gpu-records.js";
 export type {
   FarSummaryGpuRecord,

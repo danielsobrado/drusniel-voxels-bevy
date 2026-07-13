@@ -280,6 +280,47 @@ describe("far summary cache", () => {
       expect(midpoint?.heightAvg).toBe(4160);
       expect(midpoint?.dominantMaterial).toBe(2);
     });
+
+    it("preserves and interpolates layout-v2 channels", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      const sampler: FarTerrainSampler = {
+        sampleHeight: () => 40,
+        sampleWaterSummary: (x) => ({
+          coverage: 1,
+          waterLevel: x,
+          bodyKind: x < 2080 ? 1 : 2,
+          shoreDistance: x * 0.5,
+          flowX: 0.25,
+          flowZ: -0.5,
+        }),
+        sampleCanopySummary: (x) => ({
+          coverage: 0.5,
+          canopyHeightAvg: 60 + x * 0.01,
+          speciesPine: 0.2,
+          speciesBroadleaf: 0.7,
+          speciesDeadwood: 0.1,
+        }),
+      };
+      const cache = new FarSummaryCache(config);
+      const requests = computeRequiredFarSummaryTiles({
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      }, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(sampler, 0, 0);
+
+      const midpoint = cache.sample(2080, 2080, 0)!;
+      expect(midpoint.waterLevel).toBe(2080);
+      expect(midpoint.bodyKind).toBe(2);
+      expect(midpoint.shoreDistance).toBe(1040);
+      expect(midpoint.flowX).toBe(0.25);
+      expect(midpoint.flowZ).toBe(-0.5);
+      expect(midpoint.canopyHeightAvg).toBeCloseTo(80.64, 5);
+      expect(midpoint.speciesBroadleaf).toBeCloseTo(0.7, 6);
+    });
   });
 
   describe("stale tile lifecycle", () => {

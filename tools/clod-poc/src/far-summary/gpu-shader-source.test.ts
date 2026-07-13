@@ -22,4 +22,12 @@ describe("far summary WGSL shader source", () => {
     expect(shaderCode).toContain("@group(0) @binding(2) var<storage, read> digEdits");
     expect(shaderCode).toContain("@group(0) @binding(3) var<uniform> fieldParams");
   });
+
+  it("names the layout-v2 world-summary channels in the stable 128-byte record", () => {
+    const shaderCode = composeFarSummaryGpuBuildShader();
+    expect(shaderCode).toContain("layout_version: u32");
+    expect(shaderCode).toContain("canopy_summary: vec4<f32>");
+    expect(shaderCode).toContain("world_summary_a: vec4<f32>");
+    expect(shaderCode).toContain("world_summary_b: vec4<f32>");
+  });
 });

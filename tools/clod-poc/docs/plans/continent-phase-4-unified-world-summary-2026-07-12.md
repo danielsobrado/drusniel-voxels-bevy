@@ -3,6 +3,47 @@
 Parent: `continent-plan-overview-2026-07-12.md`. Requires Phase 3 (graph + carved tiles) for
 water channels; the canopy work (C4.3–C4.4) can start after Phase 1 if needed earlier.
 
+## Status
+
+Updated 2026-07-13.
+
+- [x] C4.1 extended sample layout and builder channels.
+  - `FAR_SUMMARY_LAYOUT_VERSION = 2` adds graph water, deterministic canopy, and reserved
+    structure/cave/occluder channels without increasing the 128-byte GPU record.
+  - GPU descriptors carry the layout version; CPU/GPU record decoding, cache commit, exact reads,
+    bilinear interpolation, and strict parity cover every v2 field. Categorical `bodyKind` uses
+    nearest-cell selection rather than interpolation.
+  - `?farSummaryLayout=2` attaches the active hydrology authority and the same deterministic tree
+    distribution used by near canopy. The flag defaults off, so existing consumers and visuals are
+    unchanged until C4.2/C4.3 are ready.
+  - Review fixed two silent-data hazards before handoff: v2 fields were initially omitted from the
+    cache hot read/interpolation paths, and aggregate body kind initially allowed dry cells to hide
+    a present water-body kind.
+  - Verification: typecheck, full Vitest suite, production build, sample QA, and 138 focused
+    far-summary tests pass. Sample QA reports its expected `baseline_missing` status.
+  - Controlled native-Windows A/B (`scene=continent`, `continentHydrology=0`, 120 warmup / 300
+    frames): layout v1 `frameMs` p50/p95 5.20/6.30 ms, `farSummaryMs` p95 2.30 ms,
+    `renderMs` p95 1.10 ms; layout v2 5.10/6.20 ms, 2.40 ms, 1.20 ms respectively. The far-summary
+    p95 increase is 4.3%, below the 20% split threshold. Runs:
+    `perf-runs/continent-phase4-c41-layout-v{1,2}/summary.json`.
+  - The standard flag-off run measured 2.50/3.50 ms baseline versus 2.70/4.10 ms after for frame
+    p50/p95, with render p95 2.10 versus 2.20 ms. Since layout v2 was disabled in both runs, record
+    this as a regression/noise signal, not a C4.1 win. Runs:
+    `perf-runs/continent-phase4-c41-{baseline,after}/summary.json`.
+  - Remaining evidence gap: steady-state `farSumTilesMs` was zero after warmup, so these runs do
+    not establish tile-build p95. A graph-enabled cold browser run also remained in world creation
+    without publishing frame hooks and was stopped; do not treat the graph-disabled A/B as graph
+    startup evidence.
+- [ ] C4.2 far clipmap and far water consume unified channels.
+- [ ] C4.3 canopy summary re-source.
+- [ ] C4.4 persistent shell, incremental textures, and crossfade.
+- [ ] C4.5 GPU-authoritative far summary for continent.
+- [ ] C4.6 shadow/occlusion proxy and old controller decision.
+
+**Next action:** C4.2 — expose the v2 water fields through `sampleSummaryInto`, route far water and
+shore tinting through them behind the same flag, and capture graph-warm horizon-water shots plus
+fallback counters.
+
 ## Goal
 
 One streamed **world summary tile** lifecycle feeds the far terrain clipmap, far water, far

@@ -8,6 +8,7 @@ import { DEFAULT_FAR_SUMMARY_GPU_CONFIG } from "./gpu-config.js";
 import type { FarSummaryGpuRuntimeDispatchInput } from "./gpu-runtime.js";
 import { FarSummaryGpuRuntime } from "./gpu-runtime.js";
 import { createFarSummaryGpuCounters } from "./gpu-counters.js";
+import { farSummaryGpuV2FallbackChannels } from "./gpu-records.js";
 
 const FAR_CONFIG: FarSummaryConfig = {
   ...DEFAULT_FAR_SUMMARY_CONFIG,
@@ -59,6 +60,7 @@ function gpuRecord(height = 10) {
     waterCoverage: 0,
     canopyCoverage: 0,
     slopeMax: 0,
+    ...farSummaryGpuV2FallbackChannels(height),
     revision: 3,
     flags: 0,
     sampleCount: 1,

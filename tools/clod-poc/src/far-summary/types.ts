@@ -7,6 +7,12 @@ export type FarSummaryTileState =
   | 'cooling'
   | 'evicted';
 
+/**
+ * Versioned CPU/GPU sample layout. Consumers must tolerate newer additive fields
+ * so a saved world-summary tile remains readable during a staged rollout.
+ */
+export const FAR_SUMMARY_LAYOUT_VERSION = 2;
+
 export interface FarSummarySample {
   heightMin: number;
   heightMax: number;
@@ -18,6 +24,18 @@ export interface FarSummarySample {
   materialVariance: number;
   canopyCoverage: number;
   waterCoverage: number;
+  waterLevel: number;
+  bodyKind: number;
+  shoreDistance: number;
+  flowX: number;
+  flowZ: number;
+  canopyHeightAvg: number;
+  speciesPine: number;
+  speciesBroadleaf: number;
+  speciesDeadwood: number;
+  structureCoverage: number;
+  caveEntranceCoverage: number;
+  occluderHeight: number;
   slope: number;
   roughness: number;
 }

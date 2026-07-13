@@ -532,6 +532,18 @@ export function readTileSample(
   out.materialVariance = sample.materialVariance;
   out.canopyCoverage = sample.canopyCoverage;
   out.waterCoverage = sample.waterCoverage;
+  out.waterLevel = sample.waterLevel;
+  out.bodyKind = sample.bodyKind;
+  out.shoreDistance = sample.shoreDistance;
+  out.flowX = sample.flowX;
+  out.flowZ = sample.flowZ;
+  out.canopyHeightAvg = sample.canopyHeightAvg;
+  out.speciesPine = sample.speciesPine;
+  out.speciesBroadleaf = sample.speciesBroadleaf;
+  out.speciesDeadwood = sample.speciesDeadwood;
+  out.structureCoverage = sample.structureCoverage;
+  out.caveEntranceCoverage = sample.caveEntranceCoverage;
+  out.occluderHeight = sample.occluderHeight;
   out.slope = sample.slope;
   out.roughness = sample.roughness;
   return true;
@@ -549,6 +561,18 @@ function emptySample(): FarSummarySample {
     materialVariance: 0,
     canopyCoverage: 0,
     waterCoverage: 0,
+    waterLevel: 0,
+    bodyKind: 0,
+    shoreDistance: 0,
+    flowX: 0,
+    flowZ: 0,
+    canopyHeightAvg: 0,
+    speciesPine: 0,
+    speciesBroadleaf: 0,
+    speciesDeadwood: 0,
+    structureCoverage: 0,
+    caveEntranceCoverage: 0,
+    occluderHeight: 0,
     slope: 0,
     roughness: 0,
   };
@@ -598,10 +622,23 @@ function bilinearTileSampleInto(tile: FarSummaryTile, localX: number, localZ: nu
     out.normalY = 1;
     out.normalZ = 0;
   }
-  out.dominantMaterial = nearestMaterial(s00, s10, s01, s11, tx, tz);
+  const nearest = nearestSample(s00, s10, s01, s11, tx, tz);
+  out.dominantMaterial = nearest.dominantMaterial;
   out.materialVariance = bilerp(s00.materialVariance, s10.materialVariance, s01.materialVariance, s11.materialVariance, tx, tz);
   out.canopyCoverage = bilerp(s00.canopyCoverage, s10.canopyCoverage, s01.canopyCoverage, s11.canopyCoverage, tx, tz);
   out.waterCoverage = bilerp(s00.waterCoverage, s10.waterCoverage, s01.waterCoverage, s11.waterCoverage, tx, tz);
+  out.waterLevel = bilerp(s00.waterLevel, s10.waterLevel, s01.waterLevel, s11.waterLevel, tx, tz);
+  out.bodyKind = nearest.bodyKind;
+  out.shoreDistance = bilerp(s00.shoreDistance, s10.shoreDistance, s01.shoreDistance, s11.shoreDistance, tx, tz);
+  out.flowX = bilerp(s00.flowX, s10.flowX, s01.flowX, s11.flowX, tx, tz);
+  out.flowZ = bilerp(s00.flowZ, s10.flowZ, s01.flowZ, s11.flowZ, tx, tz);
+  out.canopyHeightAvg = bilerp(s00.canopyHeightAvg, s10.canopyHeightAvg, s01.canopyHeightAvg, s11.canopyHeightAvg, tx, tz);
+  out.speciesPine = bilerp(s00.speciesPine, s10.speciesPine, s01.speciesPine, s11.speciesPine, tx, tz);
+  out.speciesBroadleaf = bilerp(s00.speciesBroadleaf, s10.speciesBroadleaf, s01.speciesBroadleaf, s11.speciesBroadleaf, tx, tz);
+  out.speciesDeadwood = bilerp(s00.speciesDeadwood, s10.speciesDeadwood, s01.speciesDeadwood, s11.speciesDeadwood, tx, tz);
+  out.structureCoverage = bilerp(s00.structureCoverage, s10.structureCoverage, s01.structureCoverage, s11.structureCoverage, tx, tz);
+  out.caveEntranceCoverage = bilerp(s00.caveEntranceCoverage, s10.caveEntranceCoverage, s01.caveEntranceCoverage, s11.caveEntranceCoverage, tx, tz);
+  out.occluderHeight = bilerp(s00.occluderHeight, s10.occluderHeight, s01.occluderHeight, s11.occluderHeight, tx, tz);
   out.slope = bilerp(s00.slope, s10.slope, s01.slope, s11.slope, tx, tz);
   out.roughness = bilerp(s00.roughness, s10.roughness, s01.roughness, s11.roughness, tx, tz);
   return true;
@@ -618,16 +655,16 @@ function bilerp(v00: number, v10: number, v01: number, v11: number, tx: number, 
   return a + (b - a) * tz;
 }
 
-function nearestMaterial(
+function nearestSample(
   s00: FarSummarySample,
   s10: FarSummarySample,
   s01: FarSummarySample,
   s11: FarSummarySample,
   tx: number,
   tz: number,
-): number {
-  if (tx < 0.5) return tz < 0.5 ? s00.dominantMaterial : s01.dominantMaterial;
-  return tz < 0.5 ? s10.dominantMaterial : s11.dominantMaterial;
+): FarSummarySample {
+  if (tx < 0.5) return tz < 0.5 ? s00 : s01;
+  return tz < 0.5 ? s10 : s11;
 }
 
 function clampInt(value: number, min: number, max: number): number {

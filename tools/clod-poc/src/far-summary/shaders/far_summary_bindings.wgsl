@@ -12,7 +12,7 @@ struct FarSummaryTileDescriptor {
   tile_cells: u32,
   cell_size_m: f32,
   cell_record_offset: u32,
-  _pad1: u32,
+  layout_version: u32,
   _pad2: u32,
   _pad3: u32,
 };
@@ -23,10 +23,10 @@ struct FarSummaryGpuRecord {
   normal_avg: vec4<f32>,
   material_cover_a: vec4<f32>,
   material_cover_b: vec4<f32>,
-  canopy_occ: vec4<f32>,
+  canopy_summary: vec4<f32>,
   record_meta: vec4<u32>,
-  _pad0: vec4<u32>,
-  _pad1: vec4<u32>,
+  world_summary_a: vec4<f32>,
+  world_summary_b: vec4<f32>,
 };
 
 @group(0) @binding(0) var<storage, read> descriptors: array<FarSummaryTileDescriptor>;

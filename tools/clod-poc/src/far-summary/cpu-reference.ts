@@ -28,6 +28,18 @@ export interface FarSummaryCpuReferenceMetrics {
   slopeMax: number;
   roughnessMean: number;
   grassEligibility: number;
+  waterLevel: number;
+  bodyKind: number;
+  shoreDistance: number;
+  flowX: number;
+  flowZ: number;
+  canopyHeightAvg: number;
+  speciesPine: number;
+  speciesBroadleaf: number;
+  speciesDeadwood: number;
+  structureCoverage: number;
+  caveEntranceCoverage: number;
+  occluderHeight: number;
 }
 
 export function buildCpuFarSummaryTileReference(input: FarSummaryCpuReferenceInput): FarSummaryTile {
@@ -59,6 +71,18 @@ export function summarizeCpuFarSummaryTileReference(tile: FarSummaryTile): FarSu
   let slopeMax = 0;
   let roughness = 0;
   let grassEligibility = 0;
+  let waterLevel = 0;
+  let shoreDistance = 0;
+  let flowX = 0;
+  let flowZ = 0;
+  let canopyHeightAvg = 0;
+  let speciesPine = 0;
+  let speciesBroadleaf = 0;
+  let speciesDeadwood = 0;
+  let structureCoverage = 0;
+  let caveEntranceCoverage = 0;
+  let occluderHeight = 0;
+  const bodyKindCounts = new Map<number, number>();
   const materialCounts = new Map<number, number>();
 
   for (const sample of samples) {
@@ -74,6 +98,18 @@ export function summarizeCpuFarSummaryTileReference(tile: FarSummaryTile): FarSu
     slopeMax = Math.max(slopeMax, sample.slope);
     roughness += sample.roughness;
     grassEligibility += grassEligibilityForSample(sample);
+    waterLevel += sample.waterLevel;
+    shoreDistance += sample.shoreDistance;
+    flowX += sample.flowX;
+    flowZ += sample.flowZ;
+    canopyHeightAvg += sample.canopyHeightAvg;
+    speciesPine += sample.speciesPine;
+    speciesBroadleaf += sample.speciesBroadleaf;
+    speciesDeadwood += sample.speciesDeadwood;
+    structureCoverage += sample.structureCoverage;
+    caveEntranceCoverage += sample.caveEntranceCoverage;
+    occluderHeight += sample.occluderHeight;
+    bodyKindCounts.set(sample.bodyKind, (bodyKindCounts.get(sample.bodyKind) ?? 0) + 1);
     materialCounts.set(sample.dominantMaterial, (materialCounts.get(sample.dominantMaterial) ?? 0) + 1);
   }
 
@@ -98,6 +134,18 @@ export function summarizeCpuFarSummaryTileReference(tile: FarSummaryTile): FarSu
     slopeMax,
     roughnessMean: roughness * invSampleCount,
     grassEligibility: grassEligibility * invSampleCount,
+    waterLevel: waterLevel * invSampleCount,
+    bodyKind: dominantNonZeroValueFromCounts(bodyKindCounts),
+    shoreDistance: shoreDistance * invSampleCount,
+    flowX: flowX * invSampleCount,
+    flowZ: flowZ * invSampleCount,
+    canopyHeightAvg: canopyHeightAvg * invSampleCount,
+    speciesPine: speciesPine * invSampleCount,
+    speciesBroadleaf: speciesBroadleaf * invSampleCount,
+    speciesDeadwood: speciesDeadwood * invSampleCount,
+    structureCoverage: structureCoverage * invSampleCount,
+    caveEntranceCoverage: caveEntranceCoverage * invSampleCount,
+    occluderHeight: occluderHeight * invSampleCount,
   };
 }
 
@@ -123,6 +171,11 @@ function dominantMaterialFromCounts(counts: ReadonlyMap<number, number>): number
   return dominantMaterial;
 }
 
+function dominantNonZeroValueFromCounts(counts: ReadonlyMap<number, number>): number {
+  const nonZero = new Map([...counts].filter(([value]) => value !== 0));
+  return nonZero.size > 0 ? dominantMaterialFromCounts(nonZero) : 0;
+}
+
 function grassEligibilityForSample(sample: FarSummarySample): number {
   const waterFactor = clamp01(1 - sample.waterCoverage);
   const slopeFactor = clamp01(1 - sample.slope / GRASS_ELIGIBLE_MAX_SLOPE_RAD);
@@ -146,6 +199,18 @@ function emptyMetrics(): FarSummaryCpuReferenceMetrics {
     slopeMax: 0,
     roughnessMean: 0,
     grassEligibility: 0,
+    waterLevel: 0,
+    bodyKind: 0,
+    shoreDistance: 0,
+    flowX: 0,
+    flowZ: 0,
+    canopyHeightAvg: 0,
+    speciesPine: 0,
+    speciesBroadleaf: 0,
+    speciesDeadwood: 0,
+    structureCoverage: 0,
+    caveEntranceCoverage: 0,
+    occluderHeight: 0,
   };
 }
 

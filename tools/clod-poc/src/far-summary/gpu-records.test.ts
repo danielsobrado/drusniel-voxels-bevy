@@ -5,6 +5,7 @@ import {
   compareFarSummaryGpuRecordToCpu,
   decodeFarSummaryGpuRecord,
   decodeFarSummaryGpuRecords,
+  farSummaryGpuV2FallbackChannels,
   type FarSummaryGpuRecord,
 } from "./gpu-records.js";
 
@@ -24,6 +25,7 @@ function record(overrides: Partial<FarSummaryGpuRecord> = {}): FarSummaryGpuReco
     waterCoverage: 0.125,
     canopyCoverage: 0.5,
     slopeMax: 0.5,
+    ...farSummaryGpuV2FallbackChannels(2),
     revision: 7,
     flags: 11,
     sampleCount: 16,
@@ -48,6 +50,7 @@ function cpu(overrides: Partial<FarSummaryCpuReferenceMetrics> = {}): FarSummary
     slopeMax: 0.5,
     roughnessMean: 0.25,
     grassEligibility: 0.75,
+    ...farSummaryGpuV2FallbackChannels(2),
     ...overrides,
   };
 }
@@ -71,9 +74,21 @@ function encode(records: readonly FarSummaryGpuRecord[]): ArrayBuffer {
     view.setFloat32(base + 48, item.waterCoverage, true);
     view.setFloat32(base + 52, item.canopyCoverage, true);
     view.setFloat32(base + 56, item.slopeMax, true);
+    view.setFloat32(base + 60, item.waterLevel, true);
+    view.setFloat32(base + 64, item.canopyHeightAvg, true);
+    view.setFloat32(base + 68, item.speciesPine, true);
+    view.setFloat32(base + 72, item.speciesBroadleaf, true);
+    view.setFloat32(base + 76, item.speciesDeadwood, true);
+    view.setUint32(base + 80, item.bodyKind, true);
     view.setUint32(base + 84, item.revision, true);
     view.setUint32(base + 88, item.flags, true);
     view.setUint32(base + 92, item.sampleCount, true);
+    view.setFloat32(base + 96, item.shoreDistance, true);
+    view.setFloat32(base + 100, item.flowX, true);
+    view.setFloat32(base + 104, item.flowZ, true);
+    view.setFloat32(base + 108, item.structureCoverage, true);
+    view.setFloat32(base + 112, item.caveEntranceCoverage, true);
+    view.setFloat32(base + 116, item.occluderHeight, true);
   });
   return buffer;
 }
@@ -92,6 +107,18 @@ function expectDecodedRecordToMatch(decoded: FarSummaryGpuRecord, expected: FarS
   expect(decoded.waterCoverage).toBeCloseTo(expected.waterCoverage, 6);
   expect(decoded.canopyCoverage).toBeCloseTo(expected.canopyCoverage, 6);
   expect(decoded.slopeMax).toBeCloseTo(expected.slopeMax, 6);
+  expect(decoded.waterLevel).toBeCloseTo(expected.waterLevel, 6);
+  expect(decoded.bodyKind).toBe(expected.bodyKind);
+  expect(decoded.shoreDistance).toBeCloseTo(expected.shoreDistance, 6);
+  expect(decoded.flowX).toBeCloseTo(expected.flowX, 6);
+  expect(decoded.flowZ).toBeCloseTo(expected.flowZ, 6);
+  expect(decoded.canopyHeightAvg).toBeCloseTo(expected.canopyHeightAvg, 6);
+  expect(decoded.speciesPine).toBeCloseTo(expected.speciesPine, 6);
+  expect(decoded.speciesBroadleaf).toBeCloseTo(expected.speciesBroadleaf, 6);
+  expect(decoded.speciesDeadwood).toBeCloseTo(expected.speciesDeadwood, 6);
+  expect(decoded.structureCoverage).toBeCloseTo(expected.structureCoverage, 6);
+  expect(decoded.caveEntranceCoverage).toBeCloseTo(expected.caveEntranceCoverage, 6);
+  expect(decoded.occluderHeight).toBeCloseTo(expected.occluderHeight, 6);
   expect(decoded.dominantMaterial).toBe(expected.dominantMaterial);
   expect(decoded.revision).toBe(expected.revision);
   expect(decoded.flags).toBe(expected.flags);
@@ -100,7 +127,23 @@ function expectDecodedRecordToMatch(decoded: FarSummaryGpuRecord, expected: FarS
 
 describe("decodeFarSummaryGpuRecords", () => {
   it("decodes the stable GPU summary record ABI", () => {
-    const expected = record({ roughnessMean: 0.2, waterCoverage: 0.1, canopyCoverage: 0.3 });
+    const expected = record({
+      roughnessMean: 0.2,
+      waterCoverage: 0.1,
+      canopyCoverage: 0.3,
+      waterLevel: 11,
+      bodyKind: 2,
+      shoreDistance: 7,
+      flowX: 0.4,
+      flowZ: -0.2,
+      canopyHeightAvg: 33,
+      speciesPine: 0.2,
+      speciesBroadleaf: 0.7,
+      speciesDeadwood: 0.1,
+      structureCoverage: 0.25,
+      caveEntranceCoverage: 0.125,
+      occluderHeight: 18,
+    });
     const decoded = decodeFarSummaryGpuRecord(encode([expected]), 0);
     expectDecodedRecordToMatch(decoded, expected);
   });
@@ -136,5 +179,12 @@ describe("compareFarSummaryGpuRecordToCpu", () => {
     const result = compareFarSummaryGpuRecordToCpu(record({ dominantMaterial: 3 }), cpu());
     expect(result.passed).toBe(false);
     expect(result.mismatches).toContainEqual({ field: "dominantMaterial", gpu: 3, cpu: 2, tolerance: 0 });
+  });
+
+  it("fails layout-v2 channel mismatches", () => {
+    const result = compareFarSummaryGpuRecordToCpu(record({ waterLevel: 20, bodyKind: 2 }), cpu());
+    expect(result.passed).toBe(false);
+    expect(result.mismatches.some((mismatch) => mismatch.field === "waterLevel")).toBe(true);
+    expect(result.mismatches.some((mismatch) => mismatch.field === "bodyKind")).toBe(true);
   });
 });

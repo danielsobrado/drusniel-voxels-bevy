@@ -168,6 +168,50 @@ describe("summary tile builder", () => {
     expect(tile.samples.some((sample) => sample.waterCoverage === 0)).toBe(true);
   });
 
+  it("fills layout-v2 hydrology and deterministic canopy channels", () => {
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 1 },
+      terrainSampler: {
+        sampleHeight: () => 40,
+        sampleWaterSummary: (_x, _z, cellSizeM) => ({
+          coverage: 0.8,
+          waterLevel: 43,
+          bodyKind: 2,
+          shoreDistance: cellSizeM * 0.25,
+          flowX: 0.5,
+          flowZ: -0.25,
+        }),
+        sampleCanopySummary: (originX, originZ, cellSizeM) => ({
+          coverage: 0.6,
+          canopyHeightAvg: 55,
+          speciesPine: originX === 0 ? 0.2 : 0,
+          speciesBroadleaf: originZ === 0 ? 0.7 : 0,
+          speciesDeadwood: cellSizeM === 32 ? 0.1 : 0,
+        }),
+      },
+      frameIndex: 0,
+      nowMs: 0,
+    });
+
+    expect(tile.samples[0]).toMatchObject({
+      waterCoverage: 0.8,
+      waterLevel: 43,
+      bodyKind: 2,
+      shoreDistance: 8,
+      flowX: 0.5,
+      flowZ: -0.25,
+      canopyCoverage: 0.6,
+      canopyHeightAvg: 55,
+      speciesPine: 0.2,
+      speciesBroadleaf: 0.7,
+      speciesDeadwood: 0.1,
+      structureCoverage: 0,
+      caveEntranceCoverage: 0,
+      occluderHeight: 0,
+    });
+  });
+
   it("finite difference normal computation works", () => {
     const h = () => 50;
     const [nx, ny, nz] = computeNormalFiniteDifference(h, 0, 0, 1);

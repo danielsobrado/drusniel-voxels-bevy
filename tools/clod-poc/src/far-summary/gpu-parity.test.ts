@@ -3,7 +3,7 @@ import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryGpuConfig } from "./gpu-config.js";
 import { DEFAULT_FAR_SUMMARY_GPU_CONFIG } from "./gpu-config.js";
 import type { FarSummaryGpuDirtyTile, FarSummaryGpuPlan } from "./gpu-planner.js";
-import type { FarSummaryGpuRecord } from "./gpu-records.js";
+import { farSummaryGpuV2FallbackChannels, type FarSummaryGpuRecord } from "./gpu-records.js";
 import { createFarSummaryGpuCounters } from "./gpu-counters.js";
 import {
   applyFarSummaryGpuParityEvaluationToCounters,
@@ -78,6 +78,7 @@ function record(overrides: Partial<FarSummaryGpuRecord> = {}): FarSummaryGpuReco
     waterCoverage: 0,
     canopyCoverage: 0,
     slopeMax: 0,
+    ...farSummaryGpuV2FallbackChannels(42),
     revision: 9,
     flags: 0,
     sampleCount: 16,

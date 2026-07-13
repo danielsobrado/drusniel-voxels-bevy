@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FarSummaryGpuDirtyTile } from "./gpu-planner.js";
-import type { FarSummaryGpuRecord } from "./gpu-records.js";
+import { farSummaryGpuV2FallbackChannels, type FarSummaryGpuRecord } from "./gpu-records.js";
 import { farSummaryGpuRecordToTile } from "./gpu-cache.js";
 
 function descriptor(overrides: Partial<FarSummaryGpuDirtyTile> = {}): FarSummaryGpuDirtyTile {
@@ -41,6 +41,7 @@ function record(overrides: Partial<FarSummaryGpuRecord> = {}): FarSummaryGpuReco
     waterCoverage: 0.25,
     canopyCoverage: 0.375,
     slopeMax: 0.75,
+    ...farSummaryGpuV2FallbackChannels(15),
     revision: 7,
     flags: 0,
     sampleCount: 16,
@@ -75,6 +76,9 @@ describe("farSummaryGpuRecordToTile", () => {
       materialVariance: 0.125,
       canopyCoverage: 0.375,
       waterCoverage: 0.25,
+      waterLevel: 15,
+      bodyKind: 0,
+      canopyHeightAvg: 15,
       slope: 0.25,
       roughness: 0.5,
     });
