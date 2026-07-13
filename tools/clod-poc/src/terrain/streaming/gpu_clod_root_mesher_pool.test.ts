@@ -48,7 +48,13 @@ describe("pooled GPU CLOD root mesher", () => {
 
     expect(started).toBe(2);
     expect(active).toBe(2);
-    expect(pool.poolStats()).toMatchObject({ poolCount: 2, active: 2, maxActive: 2, waiters: 1 });
+    expect(pool.poolStats()).toMatchObject({
+      poolCount: 2,
+      active: 2,
+      maxActive: 2,
+      overlapEventsTotal: 1,
+      waiters: 1,
+    });
 
     gates[0]!.resolve();
     await Promise.resolve();
@@ -58,7 +64,29 @@ describe("pooled GPU CLOD root mesher", () => {
     gates[1]!.resolve();
     gates[2]!.resolve();
     await Promise.all([first, second, third]);
-    expect(pool.poolStats()).toMatchObject({ active: 0, maxActive: 2, waiters: 0 });
+    expect(pool.poolStats()).toMatchObject({
+      active: 0,
+      maxActive: 2,
+      overlapEventsTotal: 2,
+      waiters: 0,
+    });
+  });
+
+  it("does not record overlap for serial builds", async () => {
+    const pool = new PooledGpuClodRootMesher([
+      fakeMesher(async () => ({ nodes: [], buildMs: 1, transferBytes: 0 })),
+    ]);
+
+    await pool.buildPages([{ px: 0, pz: 0 }]);
+    await pool.buildPages([{ px: 1, pz: 0 }]);
+
+    expect(pool.poolStats()).toMatchObject({
+      poolCount: 1,
+      active: 0,
+      maxActive: 1,
+      overlapEventsTotal: 0,
+      waiters: 0,
+    });
   });
 
   it("aggregates child throughput and wrapper fallback counters", () => {
