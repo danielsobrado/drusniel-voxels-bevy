@@ -13,6 +13,8 @@ import { FarSummaryClipmapSampler } from "./clipmap-sampler.js";
 import {
   createFarSummaryUnifiedEnrichment,
   stepFarSummaryUnifiedEnrichment,
+  stepFarSummaryUnifiedWaterEnrichment,
+  takeFarSummaryUnifiedWaterSnapshot,
   type FarSummaryUnifiedEnrichmentState,
   type FarTerrainSampler,
 } from "./summary-tile-builder.js";
@@ -238,17 +240,30 @@ export function initFarSummaryIntegration(
     }
 
     gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests, cpuBuildSuppressedByGpuAuthority);
-    // Unified canopy is the dominant v2 enrichment cost. Use the existing cold-coverage
-    // warmup slice so graph-authoritative startup converges in seconds, then return to the
-    // bounded 4 ms steady slice used for recenter and edit replacements.
+    // Water/terrain snapshots unblock far ownership before the more expensive canopy
+    // representation catches up. Canopy stays on the same tile lifecycle and commits a
+    // coherent replacement when its deadline-sliced enrichment finishes.
     const enrichmentBudgetMs = resolveFarSummaryEnrichmentBudgetMs(budgets);
     const enrichmentDeadlineMs = performance.now() + enrichmentBudgetMs;
-    for (const [key, enrichment] of pendingGpuEnrichment) {
-      if (stepFarSummaryUnifiedEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs)) {
-        cache.commitExternalTile(enrichment.tile);
-        pendingGpuEnrichment.delete(key);
+    for (const enrichment of pendingGpuEnrichment.values()) {
+      if (enrichment.nextSample >= enrichment.tile.samples.length) continue;
+      if (stepFarSummaryUnifiedWaterEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs)
+        && options.terrainSampler.sampleCanopySummary) {
+        const waterSnapshot = takeFarSummaryUnifiedWaterSnapshot(enrichment);
+        if (waterSnapshot) cache.commitExternalTile(waterSnapshot);
       }
       if (performance.now() >= enrichmentDeadlineMs) break;
+    }
+    if (performance.now() < enrichmentDeadlineMs) {
+      for (const [key, enrichment] of pendingGpuEnrichment) {
+        if (enrichment.nextSample < enrichment.tile.samples.length) continue;
+        const complete = stepFarSummaryUnifiedEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs);
+        if (complete) {
+          cache.commitExternalTile(enrichment.tile);
+          pendingGpuEnrichment.delete(key);
+        }
+        if (performance.now() >= enrichmentDeadlineMs) break;
+      }
     }
 
     cache.evictColdTiles(frameIndex, nowMs);

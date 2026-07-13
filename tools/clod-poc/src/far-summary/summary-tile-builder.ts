@@ -242,10 +242,23 @@ export interface FarSummaryUnifiedEnrichmentState {
   tile: FarSummaryTile;
   nextSample: number;
   nextCanopySample: number;
+  waterSnapshotTaken: boolean;
 }
 
 export function createFarSummaryUnifiedEnrichment(tile: FarSummaryTile): FarSummaryUnifiedEnrichmentState {
-  return { tile, nextSample: 0, nextCanopySample: 0 };
+  return { tile, nextSample: 0, nextCanopySample: 0, waterSnapshotTaken: false };
+}
+
+export function takeFarSummaryUnifiedWaterSnapshot(
+  state: FarSummaryUnifiedEnrichmentState,
+): FarSummaryTile | null {
+  if (state.waterSnapshotTaken || state.nextSample < state.tile.samples.length) return null;
+  state.waterSnapshotTaken = true;
+  return {
+    ...state.tile,
+    key: { ...state.tile.key },
+    samples: state.tile.samples.map((sample) => ({ ...sample })),
+  };
 }
 
 export function stepFarSummaryUnifiedEnrichment(
@@ -258,28 +271,11 @@ export function stepFarSummaryUnifiedEnrichment(
     state.nextCanopySample = coarseCanopySampleCount(state.tile.tileCells);
     return true;
   }
-  let stepped = false;
-  while (state.nextSample < state.tile.samples.length && (!stepped || performance.now() < deadlineMs)) {
-    const idx = state.nextSample++;
-    const sample = state.tile.samples[idx]!;
-    const sx = idx % state.tile.tileCells;
-    const sz = Math.floor(idx / state.tile.tileCells);
-    const tile = state.tile;
-    const wx = tile.originX + (sx + 0.5) * tile.cellSizeM;
-    const wz = tile.originZ + (sz + 0.5) * tile.cellSizeM;
-    const water = terrainSampler.sampleWaterSummary?.(wx, wz, tile.cellSizeM);
-    sample.waterCoverage = clamp01(water?.coverage
-      ?? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, sample.heightAvg)
-      ?? sample.waterCoverage);
-    sample.waterLevel = finiteOr(water?.waterLevel, sample.waterLevel);
-    sample.bodyKind = finiteOr(water?.bodyKind, sample.bodyKind);
-    sample.shoreDistance = finiteOr(water?.shoreDistance, sample.shoreDistance);
-    sample.flowX = finiteOr(water?.flowX, sample.flowX);
-    sample.flowZ = finiteOr(water?.flowZ, sample.flowZ);
-    if (sample.waterCoverage > 0.05) sample.canopyCoverage = 0;
-    stepped = true;
-  }
+  const waterWasComplete = state.nextSample >= state.tile.samples.length;
+  if (!stepFarSummaryUnifiedWaterEnrichment(state, terrainSampler, deadlineMs)) return false;
+  if (!waterWasComplete && performance.now() >= deadlineMs) return false;
 
+  let stepped = false;
   const canopySampleCount = coarseCanopySampleCount(state.tile.tileCells);
   if (!terrainSampler.sampleCanopySummary) {
     state.nextCanopySample = canopySampleCount;
@@ -302,7 +298,36 @@ export function stepFarSummaryUnifiedEnrichment(
     }
     stepped = true;
   }
-  return state.nextSample >= state.tile.samples.length && state.nextCanopySample >= canopySampleCount;
+  return state.nextCanopySample >= canopySampleCount;
+}
+
+export function stepFarSummaryUnifiedWaterEnrichment(
+  state: FarSummaryUnifiedEnrichmentState,
+  terrainSampler: FarTerrainSampler,
+  deadlineMs: number,
+): boolean {
+  let stepped = false;
+  while (state.nextSample < state.tile.samples.length && (!stepped || performance.now() < deadlineMs)) {
+    const idx = state.nextSample++;
+    const sample = state.tile.samples[idx]!;
+    const sx = idx % state.tile.tileCells;
+    const sz = Math.floor(idx / state.tile.tileCells);
+    const tile = state.tile;
+    const wx = tile.originX + (sx + 0.5) * tile.cellSizeM;
+    const wz = tile.originZ + (sz + 0.5) * tile.cellSizeM;
+    const water = terrainSampler.sampleWaterSummary?.(wx, wz, tile.cellSizeM);
+    sample.waterCoverage = clamp01(water?.coverage
+      ?? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, sample.heightAvg)
+      ?? sample.waterCoverage);
+    sample.waterLevel = finiteOr(water?.waterLevel, sample.waterLevel);
+    sample.bodyKind = finiteOr(water?.bodyKind, sample.bodyKind);
+    sample.shoreDistance = finiteOr(water?.shoreDistance, sample.shoreDistance);
+    sample.flowX = finiteOr(water?.flowX, sample.flowX);
+    sample.flowZ = finiteOr(water?.flowZ, sample.flowZ);
+    if (sample.waterCoverage > 0.05) sample.canopyCoverage = 0;
+    stepped = true;
+  }
+  return state.nextSample >= state.tile.samples.length;
 }
 
 function coarseCanopySampleCount(tileCells: number): number {

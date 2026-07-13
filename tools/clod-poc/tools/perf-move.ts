@@ -264,7 +264,7 @@ function summarizeWindow(samples: readonly Record<string, unknown>[]): WindowSum
   };
 }
 
-export function buildParams(args: Args): Record<string, string> {
+function buildParams(args: Args): Record<string, string> {
   const world = str(args["world"]) ?? "16";
   const seed = str(args["seed"]) ?? "1";
   const moveFrames = num(args["moveFrames"], 900);

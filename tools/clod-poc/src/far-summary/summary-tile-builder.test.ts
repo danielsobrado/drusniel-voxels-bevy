@@ -4,6 +4,7 @@ import {
   computeNormalFiniteDifference,
   createFarSummaryUnifiedEnrichment,
   stepFarSummaryUnifiedEnrichment,
+  takeFarSummaryUnifiedWaterSnapshot,
 } from "./summary-tile-builder.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
@@ -283,6 +284,45 @@ describe("summary tile builder", () => {
 
     expect(complete).toBe(true);
     expect(canopyCalls).toBe(16);
+  });
+
+  it("publishes a stable water snapshot while canopy enrichment continues", () => {
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 1 },
+      terrainSampler: flatSampler,
+      frameIndex: 0,
+      nowMs: 0,
+    });
+    const state = createFarSummaryUnifiedEnrichment(tile);
+    const sampler = {
+      ...flatSampler,
+      sampleWaterSummary: () => ({
+        coverage: 1,
+        waterLevel: 55,
+        bodyKind: 1,
+        shoreDistance: 0,
+        flowX: 0,
+        flowZ: 0,
+      }),
+      sampleCanopySummary: () => ({
+        coverage: 0.5,
+        canopyHeightAvg: 60,
+        speciesPine: 1,
+        speciesBroadleaf: 0,
+        speciesDeadwood: 0,
+      }),
+    };
+
+    expect(stepFarSummaryUnifiedEnrichment(state, sampler, Number.NEGATIVE_INFINITY)).toBe(false);
+    const snapshot = takeFarSummaryUnifiedWaterSnapshot(state);
+    expect(snapshot?.samples[0]).toMatchObject({ waterCoverage: 1, waterLevel: 55, canopyCoverage: 0 });
+    const snapshotCanopyHeight = snapshot?.samples[0]?.canopyHeightAvg;
+    expect(takeFarSummaryUnifiedWaterSnapshot(state)).toBeNull();
+
+    expect(stepFarSummaryUnifiedEnrichment(state, sampler, Number.POSITIVE_INFINITY)).toBe(true);
+    expect(snapshot?.samples[0]?.canopyHeightAvg).toBe(snapshotCanopyHeight);
+    expect(tile.samples[0]?.canopyHeightAvg).toBe(60);
   });
 
   it("rejects coarse canopy coverage from authoritative water cells", () => {

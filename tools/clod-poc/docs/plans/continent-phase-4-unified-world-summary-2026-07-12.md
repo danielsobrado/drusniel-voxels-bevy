@@ -58,22 +58,24 @@ Updated 2026-07-13.
 - [x] C4.5 GPU-authoritative far summary for continent.
   - Layout-v2 continent runs default to GPU-authoritative terrain records using the renderer's
     existing `GPUDevice`, avoiding a second adapter/device request. Batches are limited to eight.
-  - Canonical water/canopy v2 enrichment remains CPU-side and is deadline-sliced to 4 ms per frame;
-    a tile commits only after that enrichment is coherent. Layout v1 bypasses enrichment. This is
-    intentionally a hybrid authority until the graph channels have GPU inputs; it is not described
-    as a fully GPU-only v2 builder.
+  - Canonical water/canopy v2 enrichment remains CPU-side and deadline-sliced. A coherent
+    terrain/water snapshot commits first so far ownership cannot be blocked by expensive canopy
+    sampling; canopy then commits a coherent representation-lagged replacement on the same tile
+    lifecycle. Layout v1 bypasses enrichment. This is intentionally a hybrid authority until the
+    graph channels have GPU inputs; it is not described as a fully GPU-only v2 builder.
 - [x] C4.6 shadow/occlusion proxy and old controller decision.
   - The shadow proxy consumes unified `occluderHeight`. The finite `far_shell_controller` remains
     for long-view compatibility, but the deterministic continent path no longer uses it as a
     second canopy authority.
 
-**Implementation status:** complete. The graph-water horizon acceptance is blocked upstream by
-the Phase-3/CLOD seam failure `InternalBorderNotWelded: L3:0,0 final: open-boundary vertex ... weld
-missed an internal seam`. The graph-enabled shot runner was stopped after it failed to publish a
-capture and then remained alive; it must not be treated as Phase-4 evidence.
+**Implementation status:** complete and accepted. The upstream CLOD blocker was repaired by
+validating parent simplification candidates with the actual LOD label; the unlabeled validation
+had rejected a valid welded recursive seam and retained the simplified mesh containing the real
+internal hole. The graph-water and 4 km canopy movement gates now have bounded native-Windows
+evidence below.
 
-**Next action:** repair the Phase-3/CLOD internal seam, then rerun the graph-enabled 2–6 km horizon
-water shot. No additional Phase-4 code defect is currently known.
+**Next action:** Phase 5 voxel overlay. Graph-mode canopy enrichment remains deliberately
+representation-lagged after terrain/water readiness; it no longer blocks far ownership or water.
 
 ## Goal
 
@@ -228,13 +230,23 @@ test oracle (the Bevy-port "no second truth" rule: same inputs, parity-tested ou
   zero failed or fallback builds, zero CPU terrain-fallback frames, and retained asynchronous
   compute p50/p95 132.4/132.4 ms plus readback p95 114.2 ms. These are batch wall times, not
   main-thread frame buckets, and must not be summed with frame timing.
-- [x] Verification: typecheck; 531 Vitest files / 2874 tests; production build; focused final GPU
-  runtime/counter tests (15 tests); and sample QA. Sample QA reports its expected
-  `baseline_missing` status.
-- [ ] The requested graph-hydrology horizon-water acceptance remains blocked by the upstream CLOD
-  seam error above. The graph-disabled capture proves Phase-4 wiring and counters only, not visual
-  agreement with authoritative Phase-3 water.
-- [ ] A dedicated 4 km canopy-heavy flythrough route was not captured. The bounded stationary
-  harness above establishes the steady far-system budget; a synthetic 8192-instance stress probe
-  confirmed bounded upload bytes but took 1435.5 ms on the legacy full-512 diagnostic path and is
-  not a performance pass.
+- [x] Graph-hydrology horizon-water acceptance:
+  `shots/phase-4/graph-water-horizon-clean.png` and sibling stats/summary JSON show graph-water
+  basins across the near/far ownership band. The normal graph+canopy capture
+  `shots/phase-4/unified-world-summary-graph-water-default-final-stats.json` records 204 ready plus
+  one stale-with-samples, zero building/missing, latched `far_clipmap_source_ready=1`, five
+  GPU-owned clipmap rings, zero ownership holes, zero fallback samples, zero GPU fallback tiles,
+  and zero CPU fallback frames. The separate `farSummaryCanopy=0` capture reached 205/205 and
+  isolates the water contract; it is supporting evidence, not the normal-path result.
+- [x] Dedicated 4 km canopy-heavy movement A/B (1000 frames at 4 m/frame, streaming exercised):
+  legacy moving frame p50/p95 6.10/15.80 ms versus persistent 4.70/10.10 ms; steady moving p95
+  15.20 versus 9.30 ms. Canopy p95 fell 4.70→0.10 ms and render p95 4.20→2.00 ms. The legacy
+  path rebuilt the shell 448 times; the persistent path recorded two startup builds, 25 bounded
+  texture uploads / 1,301,500 total bytes, 11,005 summary hits, and 1,307 representation-lag
+  misses during rapid traversal. Both ended coherent at 200/200 tiles with zero far-clipmap
+  fallbacks. Evidence: `perf-runs/continent-phase4-canopy-move-4km-{legacy,after}/summary.json`.
+- [x] The movement harness now accepts scene/query passthrough and explicit ready, convergence,
+  movement, and checkpoint timeouts; Phase-4 counters are persisted in `summary.json`, preventing
+  open-ended runs and incomplete rebuild/upload evidence.
+- [x] Final verification: typecheck; 532 Vitest files / 2881 tests; production build; and sample
+  QA. Sample QA reports its expected `baseline_missing` status.

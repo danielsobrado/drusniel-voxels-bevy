@@ -11,7 +11,7 @@ This is the umbrella document. Phase details live in:
 | 1. Canonical world contract | `continent-phase-1-canonical-contract-2026-07-12.md` | IN PROGRESS |
 | 2. Streamed heightfield tiles | `continent-phase-2-heightfield-tiles-2026-07-12.md` | not started |
 | 3. Continental hydrology | `continent-phase-3-continental-hydrology-2026-07-12.md` | not started |
-| 4. Unified world summary | `continent-phase-4-unified-world-summary-2026-07-12.md` | IMPLEMENTATION COMPLETE; graph-water acceptance blocked by Phase-3/CLOD seam |
+| 4. Unified world summary | `continent-phase-4-unified-world-summary-2026-07-12.md` | COMPLETE — graph-water and 4 km canopy A/B accepted |
 | 5. Voxel overlay and complex regions | `continent-phase-5-voxel-overlay-2026-07-12.md` | not started |
 | 6. RPG features and persistence | `continent-phase-6-rpg-persistence-2026-07-12.md` | not started |
 
