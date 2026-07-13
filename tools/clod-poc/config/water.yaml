@@ -67,6 +67,7 @@ water:
     # streamed space. The startup grid is only a raster view for GPU consumers, not a
     # second simulation authority. boundary_blend_m remains for legacy mode/tests.
     infinite:
+      source: traced              # traced | graph; graph is selected by continentHydrology
       tile_size_m: 256        # world metres per tile edge
       tile_res: 64            # cells per tile edge ((res+1)^2 vertex samples)
       max_resident_tiles: 96  # LRU budget; 0 = direct analytic sampling

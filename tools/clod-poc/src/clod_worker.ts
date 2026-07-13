@@ -63,6 +63,8 @@ import {
 } from "./clod_worker_runtime.js";
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import { buildHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile.js";
+import { buildCarvedHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile_carve.js";
+import { createGraphHydrologySampler, type GraphHydrologySampler, type GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
 import {
   collectHeightfieldTileTransferables,
   type HeightfieldTileWorkerBuildRequest,
@@ -79,6 +81,8 @@ const ctx = self as unknown as {
 let cfg: ClodPagesConfig | null = null;
 let hydrologyTerrain: SerializedHydrologyTerrain | null = null;
 let startupHeightfield: StartupHeightfieldRaster | null = null;
+let graphHydrology: GraphHydrologySampler | null = null;
+let graphCarve: GraphTerrainCarveConfig | null = null;
 let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
 let index: NodeIndex | null = null;
@@ -281,6 +285,10 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   replaceVoxelEdits(request.voxelEdits);
   hydrologyTerrain = request.hydrologyTerrain ?? null;
   startupHeightfield = request.startupHeightfield ?? null;
+  graphHydrology = request.hydrologyGraph
+    ? createGraphHydrologySampler(request.hydrologyGraph, { surfaceHeight: baseSurfaceHeight })
+    : null;
+  graphCarve = request.hydrologyCarve ?? null;
   installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain);
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
@@ -577,11 +585,10 @@ function handleBuildHeightfieldTiles(request: HeightfieldTileWorkerBuildRequest)
   if (request.keys.length > 2) throw new Error("heightfield tile worker batches are limited to 2 tiles");
 
   const startedAt = performance.now();
-  const tiles = request.keys.map((key) => buildHeightfieldTile(
-    key,
-    { sampleHeight: baseSurfaceHeight, sourceRevision: request.sourceRevision },
-    request.sourceRevision,
-  ));
+  const field = { sampleHeight: baseSurfaceHeight, sourceRevision: request.sourceRevision };
+  const tiles = request.keys.map((key) => graphHydrology && graphCarve
+    ? buildCarvedHeightfieldTile(key, field, graphHydrology, graphCarve, request.sourceRevision)
+    : buildHeightfieldTile(key, field, request.sourceRevision));
   const transferBytes = tiles.reduce((sum, tile) => sum + tile.heights.byteLength, 0);
   post({
     type: "heightfieldTilesBuilt",

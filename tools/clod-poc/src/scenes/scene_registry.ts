@@ -97,6 +97,12 @@ const BASE_SCENE_REGISTRY: readonly SceneRegistryEntry[] = [
     longView: true,
   },
   {
+    id: "continent",
+    label: "continent",
+    phase0ConfigKey: "infinite_islands",
+    longView: true,
+  },
+  {
     id: "infinite-far-shell-straight",
     label: "far shell straight",
     phase0ConfigKey: "infinite_far_shell_straight",

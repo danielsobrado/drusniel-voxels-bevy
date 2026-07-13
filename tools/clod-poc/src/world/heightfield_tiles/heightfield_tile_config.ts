@@ -60,6 +60,6 @@ export function heightfieldTilesEnabled(
   worldMode: string,
 ): boolean {
   const raw = searchParams.get("heightTiles") ?? searchParams.get("height_tiles");
-  const requested = raw === null ? config.enabled : raw !== "0" && raw !== "false";
+  const requested = raw === null ? (worldMode === "continent" || config.enabled) : raw !== "0" && raw !== "false";
   return requested && (worldMode === "infinite_islands" || worldMode === "continent");
 }

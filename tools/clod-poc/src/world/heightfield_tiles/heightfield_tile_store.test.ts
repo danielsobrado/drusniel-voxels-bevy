@@ -20,7 +20,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 describe("IndexedDbHeightfieldTileStore", () => {
-  it("round-trips f64 tile payloads", async () => {
+  it("round-trips authoritative f32 tile payloads", async () => {
     const db = await openHeightfieldTileDb(indexedDB, dbName());
     const store = new IndexedDbHeightfieldTileStore(db, "terrain-a");
     const source = buildHeightfieldTile({ x: -2, z: 3 }, { sampleHeight: (x, z) => x + z * 0.25 }, 7);

@@ -12,8 +12,9 @@
 import { resolveFarOwner, type FarOwner } from "./far_ownership.js";
 
 export const INFINITE_ISLANDS_SCENE = "infinite-islands";
+export const CONTINENT_SCENE = "continent";
 
-export type WorldMode = "finite" | "infinite_islands";
+export type WorldMode = "finite" | "infinite_islands" | "continent";
 
 export type { FarOwner } from "./far_ownership.js";
 
@@ -57,8 +58,9 @@ export interface ResolveWorldModeInput {
 }
 
 export function resolveWorldMode(input: ResolveWorldModeInput): WorldModeConfig {
+  const isContinent = input.scene === CONTINENT_SCENE;
   const isInfiniteIslands = input.scene === INFINITE_ISLANDS_SCENE || input.islandShapeEnabled;
-  const mode: WorldMode = isInfiniteIslands ? "infinite_islands" : "finite";
+  const mode: WorldMode = isContinent ? "continent" : isInfiniteIslands ? "infinite_islands" : "finite";
   const borderCoastEnabled = mode === "finite" && input.borderCoastConfigEnabled;
   return {
     mode,
@@ -66,10 +68,10 @@ export function resolveWorldMode(input: ResolveWorldModeInput): WorldModeConfig 
     startupWorldPages: input.startupWorldPages,
     configuredWorldCells: input.configuredWorldPages * input.pageCells,
     startupWorldCells: input.startupWorldPages * input.pageCells,
-    proceduralWorldRadiusM: mode === "infinite_islands" && input.oceanRim ? input.worldRadiusM : null,
+    proceduralWorldRadiusM: mode !== "finite" && input.oceanRim ? input.worldRadiusM : null,
     borderCoastEnabled,
     farOwner: resolveFarOwner({
-      isInfinite: mode === "infinite_islands",
+      isInfinite: mode !== "finite",
       longViewCapable: input.longViewCapable,
       farClipmapRequested: input.searchParams.get("farClipmap") === "1",
       farClipmapRendererAllowed: input.farClipmapRendererAllowed,

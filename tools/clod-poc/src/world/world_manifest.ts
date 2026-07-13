@@ -64,3 +64,14 @@ export function buildWorldManifest(input: BuildWorldManifestInput): WorldManifes
     artifacts: Object.freeze({}),
   });
 }
+
+export function withWorldManifestArtifact(
+  manifest: WorldManifest,
+  name: keyof WorldManifest["artifacts"],
+  artifact: WorldArtifactRef,
+): WorldManifest {
+  return Object.freeze({
+    ...manifest,
+    artifacts: Object.freeze({ ...manifest.artifacts, [name]: Object.freeze({ ...artifact }) }),
+  });
+}

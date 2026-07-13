@@ -89,6 +89,26 @@ describe("resolveWorldMode", () => {
     expect(world.farOwner).toBe("legacy_far_shell");
   });
 
+  it("represents the continent as bounded streaming rather than a finite bootstrap world", () => {
+    const world = resolveWorldMode({
+      scene: "continent",
+      searchParams: params(""),
+      configuredWorldPages: 16,
+      startupWorldPages: 8,
+      pageCells: PAGE_CELLS,
+      islandShapeEnabled: false,
+      borderCoastConfigEnabled: true,
+      oceanRim: true,
+      worldRadiusM: 16_384,
+      longViewCapable: true,
+      farClipmapRendererAllowed: false,
+    });
+    expect(world.mode).toBe("continent");
+    expect(world.proceduralWorldRadiusM).toBe(16_384);
+    expect(world.borderCoastEnabled).toBe(false);
+    expect(world.startupWorldCells).toBe(512);
+  });
+
   it("respects a disabled border-coast config in finite worlds", () => {
     const world = resolveWorldMode({
       scene: "default",

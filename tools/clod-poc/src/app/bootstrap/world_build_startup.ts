@@ -22,7 +22,14 @@ import {
   startupHeightfieldDescriptor,
 } from "../../terrain/startup_heightfield_raster.js";
 import { startupRasterHeightfieldSampler } from "../../world/heightfield_sampler.js";
-import { buildWorldManifest, type WorldManifest } from "../../world/world_manifest.js";
+import { buildWorldManifest, withWorldManifestArtifact, type WorldManifest } from "../../world/world_manifest.js";
+import {
+  computeHydrologyGraphParamsHash,
+  createHydrologyGraphWorkerClient,
+  IndexedDbHydrologyGraphStore,
+  openHydrologyGraphDb,
+  type HydrologyGraphArtifact,
+} from "../../world/hydrology_graph/index.js";
 import { publishWorldManifestForDiagnostics } from "../../core/hooks.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import {
@@ -70,6 +77,7 @@ import type { ClodPageNode } from "../../types.js";
 import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import {
+  CONTINENT_SCENE,
   INFINITE_ISLANDS_SCENE,
   describeWorldMode,
   resolveWorldMode,
@@ -101,6 +109,7 @@ import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
 import { ProceduralWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
+import { createGraphHydrologySampler } from "../../water/graph_hydrology.js";
 
 function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
   for (const key of keys) {
@@ -261,6 +270,7 @@ export interface WorldBuildResult {
   worldSizeCells: number;
   worldMode: WorldModeConfig;
   worldManifest: WorldManifest;
+  hydrologyGraphArtifact: HydrologyGraphArtifact | null;
   lod0Nodes: ClodPageNode[];
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
@@ -345,13 +355,17 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const seed = numberParam(searchParams, ["seed"]) ?? 0;
   const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
   const isInfiniteIslands = sceneName === INFINITE_ISLANDS_SCENE;
+  const isContinent = sceneName === CONTINENT_SCENE;
+  const isStreamedWorld = isInfiniteIslands || isContinent;
+  const continentHydrologyRequested = isContinent
+    && booleanParam(searchParams, ["continentHydrology", "continent_hydrology"], false);
   const terrainFieldConfig = resolveTerrainFieldConfig({
     seed,
     seaLevel,
     islandShape: {
       enabled: booleanParam(searchParams, ["islands"], isInfiniteIslands),
-      oceanRim: booleanParam(searchParams, ["oceanRim", "ocean_rim"], isInfiniteIslands),
-      worldRadiusM: numberParam(searchParams, ["worldRadius", "world_radius_m"]) ?? (isInfiniteIslands ? 8192 : 8192),
+      oceanRim: booleanParam(searchParams, ["oceanRim", "ocean_rim"], isStreamedWorld),
+      worldRadiusM: numberParam(searchParams, ["worldRadius", "world_radius_m"]) ?? (isContinent ? 16_384 : 8192),
       spacingM: numberParam(searchParams, ["islandSpacing", "island_spacing_m"]) ?? 1500,
       radiusM: numberParam(searchParams, ["islandRadius", "island_radius_m"]) ?? 560,
       blendM: numberParam(searchParams, ["islandBlend", "island_blend_m"]) ?? 260,
@@ -455,14 +469,15 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     && waterConfig.source === "hydrology"
     && waterConfig.hydrology.enabled
     && waterConfig.hydrology.infinite.unifiedStartup;
-  const hydrologySystem = measure(startupTimings, "startup.hydrology_ms", () => {
+  let hydrologySystem = measure(startupTimings, "startup.hydrology_ms", () => {
+    if (continentHydrologyRequested) return null;
     const baseTerrainSampler = { surfaceHeight: baseSurfaceHeight };
     const preHydrologyTerrain = unifiedHydrologyRequested
       ? baseTerrainSampler
       : makeFakeBodyCarvedSampler(waterConfig, baseTerrainSampler);
     const system = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
       ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain, {
-          infiniteWorldSamples: isInfiniteIslands,
+          infiniteWorldSamples: isStreamedWorld,
         })
       : null;
     if (system?.unifiedStartupActive()) {
@@ -483,7 +498,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     if (system) console.log("[water] hydrology built", system.stats);
     return system;
   });
-  const unifiedHydrology = hydrologySystem?.unifiedStartupActive() === true;
+  const unifiedHydrology = continentHydrologyRequested || hydrologySystem?.unifiedStartupActive() === true;
   startupTimings["startup.hydrology_unified_startup"] = unifiedHydrology ? 1 : 0;
 
   const heightfieldRasterRequested = unifiedHydrology
@@ -494,7 +509,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   startupTimings["startup.heightfield_raster_budget_reason_code"] = HEIGHTFIELD_RASTER_REASON_CODES[heightfieldRasterPlan.reason];
   startupTimings["startup.heightfield_raster_samples"] = heightfieldRasterPlan.sampleCount;
   startupTimings["startup.heightfield_raster_bytes"] = heightfieldRasterPlan.byteLength;
-  const startupHeightfield = heightfieldRasterRequested && heightfieldRasterPlan.enabled
+  let startupHeightfield = heightfieldRasterRequested && heightfieldRasterPlan.enabled && !continentHydrologyRequested
     ? measure(startupTimings, "startup.heightfield_raster_ms", () => buildStartupHeightfieldRaster(worldCells))
     : null;
   if (startupHeightfield) {
@@ -518,6 +533,11 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   );
   const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
   const voxelSnapshotHash = await buildVoxelSnapshotHash(voxelSnapshot);
+  const graphCarveConfig = continentHydrologyRequested ? {
+    depthM: waterConfig.hydrology.rivers.carveDepthM,
+    power: waterConfig.hydrology.rivers.carvePower,
+    lakeBedDepthM: waterConfig.hydrology.rivers.visibleDepthM,
+  } : null;
   const terrainSource: TerrainSourceInputs = {
     scene: sceneName,
     worldSeed: String(seed),
@@ -541,15 +561,109 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     voxelSnapshotHash,
     proceduralTextureHash,
     longViewScene: queryLongViewScene,
+    hydrologyGraphHash: null,
+    hydrologyCarve: null,
   };
-  const acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
+  let acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
   window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
-  const worldManifest = buildWorldManifest({
+  let worldManifest = buildWorldManifest({
     worldMode,
     terrainFieldConfig,
     terrainSourceHash: acceptanceCacheKey.terrainSourceHash,
     seaLevelM: seaLevel,
   });
+  let hydrologyGraphArtifact: HydrologyGraphArtifact | null = null;
+  startupTimings["hydrology_graph_present"] = 0;
+  startupTimings["hydrology_graph_build_pct"] = 0;
+  startupTimings["hydrology_graph_store_hit"] = 0;
+  if (continentHydrologyRequested) {
+    if (!worldManifest.sizeM) throw new Error("continent hydrology requires bounded manifest size");
+    const originM = { x: -worldManifest.sizeM.x / 2, z: -worldManifest.sizeM.z / 2 };
+    const graphParamsHash = await computeHydrologyGraphParamsHash({
+      worldId: worldManifest.worldId,
+      seed,
+      sizeM: worldManifest.sizeM,
+      originM,
+      terrainFieldConfig,
+    });
+    const graphDb = await openHydrologyGraphDb();
+    const graphStore = new IndexedDbHydrologyGraphStore(
+      graphDb,
+      acceptanceCacheKey.terrainSourceHash,
+      graphParamsHash,
+    );
+    const graphStartedAt = performance.now();
+    try {
+      hydrologyGraphArtifact = await graphStore.load();
+      if (hydrologyGraphArtifact) {
+        startupTimings["hydrology_graph_store_hit"] = 1;
+        startupTimings["hydrology_graph_build_pct"] = 100;
+      } else {
+        const graphWorker = createHydrologyGraphWorkerClient();
+        if (!graphWorker) throw new Error("continent hydrology graph worker is unavailable");
+        try {
+          hydrologyGraphArtifact = await graphWorker.build({
+            worldId: worldManifest.worldId,
+            seed,
+            sizeM: worldManifest.sizeM,
+            originM,
+            terrainFieldConfig,
+          }, (buildPct) => {
+            startupTimings["hydrology_graph_build_pct"] = buildPct;
+            buildProgress.hidden = false;
+            buildProgressPhase.textContent = "continental hydrology";
+            buildProgressPercent.textContent = `${Math.round(buildPct)}%`;
+            buildProgressBar.value = buildPct / 100;
+            buildStatus.value = "continental hydrology";
+            updateBuildOverlay();
+          });
+          await graphStore.save(hydrologyGraphArtifact);
+        } finally {
+          graphWorker.dispose();
+        }
+      }
+    } finally {
+      graphStore.close();
+      startupTimings["startup.hydrology_graph_ms"] = performance.now() - graphStartedAt;
+    }
+    startupTimings["hydrology_graph_present"] = 1;
+    const graphSampler = createGraphHydrologySampler(
+      hydrologyGraphArtifact.graph,
+      { surfaceHeight: baseSurfaceHeight },
+      waterConfig.hydrology.waterSurface.drySentinelDepth,
+    );
+    waterConfig.hydrology.infinite.source = "graph";
+    if (heightfieldRasterRequested && heightfieldRasterPlan.enabled) {
+      startupHeightfield = measure(startupTimings, "startup.heightfield_raster_ms", () =>
+        buildStartupHeightfieldRaster(worldCells, (x, z) =>
+          Math.fround(graphSampler.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarveConfig!))));
+      if (startupHeightfield) {
+        setTerrainSurfaceOverride(startupRasterHeightfieldSampler(startupHeightfield).sampleHeight);
+        startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
+      }
+      startupTimings["startup.heightfield_raster_enabled"] = startupHeightfield ? 1 : 0;
+    }
+    hydrologySystem = measure(startupTimings, "startup.hydrology_graph_grid_ms", () => HydrologySystem.build(
+      waterConfig.hydrology,
+      worldCells,
+      { surfaceHeight: baseSurfaceHeight },
+      {
+        infiniteWorldSamples: true,
+        worldSampler: (x, z) => graphSampler.sample(x, z),
+      },
+    ));
+    terrainSource.startupHeightfield = startupHeightfieldDescriptor(startupHeightfield);
+    terrainSource.hydrologyGraphHash = hydrologyGraphArtifact.ref.hash;
+    terrainSource.hydrologyCarve = graphCarveConfig;
+    acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
+    window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
+    worldManifest = withWorldManifestArtifact(buildWorldManifest({
+      worldMode,
+      terrainFieldConfig,
+      terrainSourceHash: acceptanceCacheKey.terrainSourceHash,
+      seaLevelM: seaLevel,
+    }), "hydrologyGraph", hydrologyGraphArtifact.ref);
+  }
   terrainSource.worldManifest = worldManifest;
   startupTimings["world_manifest_present"] = 1;
   startupTimings["world_manifest_seed"] = worldManifest.seed;
@@ -585,6 +699,8 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       isCacheSessionDisabled(),
       terrainSource,
       startupHeightfield,
+      hydrologyGraphArtifact?.graph ?? null,
+      hydrologyGraphArtifact ? graphCarveConfig : null,
     ));
   const workerCacheStats = getWorkerCacheBuildStats();
   startupTimings["startup_build_world_ms"] = startupTimings["startup.build_world_ms"];
@@ -653,6 +769,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     worldSizeCells: worldCells,
     worldMode,
     worldManifest,
+    hydrologyGraphArtifact,
     lod0Nodes,
     allNodes,
     maxTerrainLevel,

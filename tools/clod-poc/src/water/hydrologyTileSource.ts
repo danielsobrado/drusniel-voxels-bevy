@@ -51,6 +51,8 @@ export interface HydrologyTileBuildOptions {
   drySentinelDepthM: number;
 }
 
+export type HydrologyWorldSampler = (x: number, z: number, sampler: TerrainHeightSampler, options: { drySentinelDepthM: number }) => HydrologySample;
+
 /** Off-thread tile source (build worker). Tiles are pure functions of their coords,
  *  so remote builds are bit-identical to the synchronous fallback path. */
 export interface HydrologyTileRemoteSource {
@@ -85,6 +87,7 @@ export function buildHydrologyTileData(
   tileZ: number,
   sampler: TerrainHeightSampler,
   options: HydrologyTileBuildOptions,
+  sampleHydrology: HydrologyWorldSampler = sampleInfiniteHydrology,
 ): HydrologyTile {
   const tileSizeM = Math.max(16, options.tileSizeM);
   const res = Math.max(4, Math.floor(options.tileRes));
@@ -120,7 +123,7 @@ export function buildHydrologyTileData(
     const wz = originZ + iz * cellSize;
     for (let ix = 0; ix < verts; ix++) {
       const wx = originX + ix * cellSize;
-      const s = sampleInfiniteHydrology(wx, wz, sampler, sampleOptions);
+      const s = sampleHydrology(wx, wz, sampler, sampleOptions);
       const i = iz * verts + ix;
       tile.terrainY[i] = s.terrainY;
       tile.waterY[i] = s.waterY;
@@ -147,6 +150,7 @@ export class HydrologyTileCache {
   private readonly cellSize: number;
   private readonly maxResidentTiles: number;
   private readonly drySentinelDepthM: number;
+  private readonly sampleHydrology: HydrologyWorldSampler;
   /** Insertion-ordered; re-inserted on access so the first key is the LRU victim. */
   private readonly tiles = new Map<string, HydrologyTile>();
   readonly stats: HydrologyTileCacheStats = {
@@ -165,13 +169,14 @@ export class HydrologyTileCache {
   private lastPrefetchTileX = Number.NaN;
   private lastPrefetchTileZ = Number.NaN;
 
-  constructor(sampler: TerrainHeightSampler, options: HydrologyTileCacheOptions) {
+  constructor(sampler: TerrainHeightSampler, options: HydrologyTileCacheOptions, sampleHydrology: HydrologyWorldSampler = sampleInfiniteHydrology) {
     this.sampler = sampler;
     this.tileSizeM = Math.max(16, options.tileSizeM);
     this.res = Math.max(4, Math.floor(options.tileRes));
     this.cellSize = this.tileSizeM / this.res;
     this.maxResidentTiles = Math.max(1, Math.floor(options.maxResidentTiles));
     this.drySentinelDepthM = Math.max(1, options.drySentinelDepthM);
+    this.sampleHydrology = sampleHydrology;
   }
 
   /**
@@ -320,7 +325,7 @@ export class HydrologyTileCache {
       tileSizeM: this.tileSizeM,
       tileRes: this.res,
       drySentinelDepthM: this.drySentinelDepthM,
-    });
+    }, this.sampleHydrology);
     this.stats.builds++;
     this.stats.buildMsTotal += nowMs() - t0;
     this.remoteInflight.delete(key);

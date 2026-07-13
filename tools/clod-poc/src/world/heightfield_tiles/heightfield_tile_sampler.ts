@@ -1,6 +1,6 @@
 import type { HeightfieldSampler } from "../heightfield_sampler.js";
 import { tileOriginM, worldToTile } from "../tile_key.js";
-import { heightfieldTileSample } from "./heightfield_tile.js";
+import { heightfieldTileSampleBilinear } from "./heightfield_tile.js";
 import type { HeightfieldTileCache, HeightfieldTileCacheCounters } from "./heightfield_tile_cache.js";
 
 function insideDomain(sampler: HeightfieldSampler, x: number, z: number): boolean {
@@ -22,16 +22,19 @@ export function heightfieldTileSampler(
     domain: null,
     sourceRevision: cache.sourceRevision,
     sampleHeight(x: number, z: number): number {
-      if (!Number.isInteger(x) || !Number.isInteger(z)) return procedural.sampleHeight(x, z);
-      if (startupRaster && insideDomain(startupRaster, x, z)) return startupRaster.sampleHeight(x, z);
+      if (startupRaster && Number.isInteger(x) && Number.isInteger(z) && insideDomain(startupRaster, x, z)) {
+        return startupRaster.sampleHeight(x, z);
+      }
 
       const key = worldToTile(x, z);
       const tile = cache.get(key);
       if (tile) {
         const origin = tileOriginM(key);
-        const height = heightfieldTileSample(tile, x - origin.x, z - origin.z);
+        const height = heightfieldTileSampleBilinear(tile, x - origin.x, z - origin.z);
         if (Number.isFinite(height)) return height;
       }
+
+      if (startupRaster && insideDomain(startupRaster, x, z)) return startupRaster.sampleHeight(x, z);
 
       cache.recordFallbackSample();
       return procedural.sampleHeight(x, z);

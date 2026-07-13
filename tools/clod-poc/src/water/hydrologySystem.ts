@@ -10,7 +10,7 @@ import { buildFarWaterSurface } from "./farWaterSurface.js";
 import { buildMoistureField } from "./moistureField.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import { computeBodyIds, computeShoreDistance } from "./bodyIdentity.js";
-import { HydrologyTileCache, type HydrologyTileCacheStats, type HydrologyTileRemoteSource } from "./hydrologyTileSource.js";
+import { HydrologyTileCache, type HydrologyTileCacheStats, type HydrologyTileRemoteSource, type HydrologyWorldSampler } from "./hydrologyTileSource.js";
 import type { HydrologyTileAtlasSource } from "./hydrologyAtlas.js";
 import { packHydrologyFieldsTexels, packHydrologyWaterSurfaceTexels } from "./hydrologyGpuPacking.js";
 import {
@@ -61,6 +61,8 @@ export class HydrologySystem {
   private readonly tileCache: HydrologyTileCache | null;
   private readonly boundaryBlendM: number;
   private readonly atlasTilesPerSide: number;
+  private readonly worldSampler: HydrologyWorldSampler;
+  private readonly acceptsRemoteTiles: boolean;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
@@ -74,6 +76,8 @@ export class HydrologySystem {
     tileCache: HydrologyTileCache | null,
     boundaryBlendM: number,
     atlasTilesPerSide: number,
+    worldSampler: HydrologyWorldSampler,
+    acceptsRemoteTiles: boolean,
   ) {
     this.grid = grid;
     this.stats = stats;
@@ -84,6 +88,8 @@ export class HydrologySystem {
     this.tileCache = tileCache;
     this.boundaryBlendM = boundaryBlendM;
     this.atlasTilesPerSide = atlasTilesPerSide;
+    this.worldSampler = worldSampler;
+    this.acceptsRemoteTiles = acceptsRemoteTiles;
   }
 
   /**
@@ -150,22 +156,23 @@ export class HydrologySystem {
     config: HydrologyConfig,
     worldCells: number,
     sampler: TerrainHeightSampler,
-    options: { infiniteWorldSamples?: boolean } = {},
+    options: { infiniteWorldSamples?: boolean; worldSampler?: HydrologyWorldSampler } = {},
   ): HydrologySystem {
     const t0 = nowMs();
     const infiniteWorldSamples = options.infiniteWorldSamples ?? infiniteIslandsScene();
     const unifiedStartup = infiniteWorldSamples && config.infinite.unifiedStartup;
+    const worldSampler = options.worldSampler ?? sampleInfiniteHydrology;
     const tileCache = infiniteWorldSamples && config.infinite.maxResidentTiles > 0
       ? new HydrologyTileCache(sampler, {
           tileSizeM: config.infinite.tileSizeM,
           tileRes: config.infinite.tileRes,
           maxResidentTiles: config.infinite.maxResidentTiles,
           drySentinelDepthM: config.waterSurface.drySentinelDepth,
-        })
+        }, worldSampler)
       : null;
 
     const grid = unifiedStartup
-      ? buildUnifiedStartupGrid(config, worldCells, sampler, tileCache)
+      ? buildUnifiedStartupGrid(config, worldCells, sampler, options.worldSampler ? null : tileCache, worldSampler)
       : buildLegacyHydrologyGrid(config, worldCells, sampler);
     const stats = collectStats(grid, unifiedStartup ? 0 : config.accumulation.particles, nowMs() - t0);
     logHydrologySummary(stats);
@@ -181,6 +188,8 @@ export class HydrologySystem {
       tileCache,
       config.infinite.boundaryBlendM,
       config.infinite.atlasTilesPerSide,
+      worldSampler,
+      options.worldSampler === undefined,
     );
   }
 
@@ -236,7 +245,7 @@ export class HydrologySystem {
     if (this.tileCache && cellSizeHint <= this.tileCache.coarseBypassCellSize) {
       return this.tileCache.sample(x, z);
     }
-    return sampleInfiniteHydrology(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
+    return this.worldSampler(x, z, this.sampler, { drySentinelDepthM: this.drySentinelDepthM });
   }
 
   tileCacheStats(): HydrologyTileCacheStats | null {
@@ -250,7 +259,7 @@ export class HydrologySystem {
   }
 
   attachTileRemote(remote: HydrologyTileRemoteSource | null): void {
-    this.tileCache?.attachRemote(remote);
+    this.tileCache?.attachRemote(this.acceptsRemoteTiles ? remote : null);
   }
 
   /** Tile-backed source for the streaming GPU hydrology atlas (Phase 4b); null when this
@@ -301,6 +310,7 @@ function buildUnifiedStartupGrid(
   worldCells: number,
   sampler: TerrainHeightSampler,
   tileCache: HydrologyTileCache | null,
+  worldSampler: HydrologyWorldSampler = sampleInfiniteHydrology,
 ): HydrologyGrid {
   const grid = createHydrologyGrid(
     config.simRes,
@@ -317,7 +327,7 @@ function buildUnifiedStartupGrid(
       const worldX = (x / denom) * worldCells;
       const sample = tileCache
         ? tileCache.sample(worldX, worldZ)
-        : sampleInfiniteHydrology(worldX, worldZ, sampler, options);
+        : worldSampler(worldX, worldZ, sampler, options);
       const index = z * grid.res + x;
       const wet = sample.bodyMask > 0.5;
       const drySentinel = config.waterSurface.drySentinelDepth;

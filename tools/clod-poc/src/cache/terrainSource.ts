@@ -21,7 +21,9 @@ const textEncoder = new TextEncoder();
 // v6: the startup raster is now integer-lattice-only. Fractional normal, prop, collider,
 // raycast, and CPU fallback samples use the direct procedural field, matching GPU streamed
 // roots and removing the raster-domain derivative seam. The descriptor includes the policy.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v6";
+// v7: continent hydrology graph carving makes canonical f32 heightfield tiles authoritative;
+// the graph artifact and carve profile now participate in terrain identity.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v7";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -111,6 +113,8 @@ export interface TerrainSourceInputs {
   longViewScene: boolean;
   /** Descriptive identity for worker-side future tile caches. Deliberately excluded from v6 hashing. */
   worldManifest?: WorldManifest;
+  hydrologyGraphHash?: string | null;
+  hydrologyCarve?: { depthM: number; power: number; lakeBedDepthM: number } | null;
 }
 
 export function normalizeTerrainSourceInputs(
@@ -148,6 +152,8 @@ export function normalizeTerrainSourceInputs(
     voxelSnapshotHash: input.voxelSnapshotHash ?? null,
     longViewScene: input.longViewScene ?? false,
     worldManifest: input.worldManifest,
+    hydrologyGraphHash: input.hydrologyGraphHash ?? null,
+    hydrologyCarve: input.hydrologyCarve ?? null,
   };
 }
 
@@ -189,6 +195,8 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     generatorVersion: source.generatorVersion,
     digRevision: source.digRevision,
     hydrologyHash,
+    hydrologyGraphHash: source.hydrologyGraphHash,
+    hydrologyCarve: source.hydrologyCarve,
     startupHeightfield: source.startupHeightfield ?? null,
     borderCoastHash,
     water: {

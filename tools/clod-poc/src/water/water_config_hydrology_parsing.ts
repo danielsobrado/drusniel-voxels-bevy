@@ -71,6 +71,7 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
       strength: readNumber(talus.strength, fallback.talus.strength),
     },
     infinite: {
+      source: (infinite.source === "graph" || infinite.source === "traced") ? infinite.source : fallback.infinite.source,
       tileSizeM: Math.max(16, readNumber(infinite.tile_size_m ?? infinite.tileSizeM, fallback.infinite.tileSizeM)),
       tileRes: Math.max(4, Math.floor(readNumber(infinite.tile_res ?? infinite.tileRes, fallback.infinite.tileRes))),
       maxResidentTiles: Math.max(0, Math.floor(readNumber(infinite.max_resident_tiles ?? infinite.maxResidentTiles, fallback.infinite.maxResidentTiles))),

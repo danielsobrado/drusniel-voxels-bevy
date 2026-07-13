@@ -88,6 +88,11 @@ export async function createHeightfieldTileRuntime(
   if (typeof window === "undefined") return null;
   const config = parseHeightfieldTileConfig(heightfieldTileConfigText);
   const searchParams = input.searchParams ?? new URLSearchParams(window.location.search);
+  if (input.terrainSource.worldMode === "continent"
+    && !input.terrainSource.worldManifest?.artifacts.hydrologyGraph) {
+    publishInitialCounters(DISABLED_COUNTERS);
+    return null;
+  }
   if (!heightfieldTilesEnabled(config, searchParams, input.terrainSource.worldMode ?? "finite")) {
     publishInitialCounters(DISABLED_COUNTERS);
     return null;

@@ -12,6 +12,8 @@ import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
 import type { WorkerCacheBuildStats } from "./cache/cacheMetrics.js";
 import type { ClodCacheMetrics } from "./cache/cacheMetrics.js";
+import type { HydrologyGraph } from "./world/hydrology_graph/hydrology_graph.js";
+import type { GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
 
 export interface SerializedHydrologyTerrain {
   res: number;
@@ -58,6 +60,8 @@ export type ClodWorkerRequest =
       hydrologyTerrain?: SerializedHydrologyTerrain | null;
       /** Exact-res startup-world heightfield raster (unified mode); Float64Array clones structurally. */
       startupHeightfield?: StartupHeightfieldRaster | null;
+      hydrologyGraph?: HydrologyGraph | null;
+      hydrologyCarve?: GraphTerrainCarveConfig | null;
       borderCoastOceanConfig?: BorderCoastOceanConfig | null;
       cacheDisabled?: boolean;
       digRevision?: number;

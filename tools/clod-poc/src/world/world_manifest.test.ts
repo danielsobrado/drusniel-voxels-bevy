@@ -7,7 +7,7 @@ import {
   type TerrainSourceInputs,
 } from "../cache/terrainSource.js";
 import type { WorldModeConfig } from "../app/world_mode.js";
-import { buildWorldManifest } from "./world_manifest.js";
+import { buildWorldManifest, withWorldManifestArtifact } from "./world_manifest.js";
 
 const terrainFieldConfig = resolveTerrainFieldConfig({ seed: 73, seaLevel: 18 });
 
@@ -85,5 +85,17 @@ describe("world manifest", () => {
 
     expect(bounded.sizeM).toEqual({ x: 16_384, z: 16_384 });
     expect(unbounded.sizeM).toBeNull();
+  });
+
+  it("immutably attaches a generated artifact", () => {
+    const manifest = buildWorldManifest({
+      worldMode: finiteWorldMode,
+      terrainFieldConfig,
+      terrainSourceHash: "terrain",
+    });
+    const next = withWorldManifestArtifact(manifest, "hydrologyGraph", { id: "graph:1", hash: "abc" });
+    expect(manifest.artifacts).toEqual({});
+    expect(next.artifacts.hydrologyGraph).toEqual({ id: "graph:1", hash: "abc" });
+    expect(Object.isFrozen(next.artifacts)).toBe(true);
   });
 });

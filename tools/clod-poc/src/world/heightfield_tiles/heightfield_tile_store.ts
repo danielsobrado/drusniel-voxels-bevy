@@ -6,7 +6,7 @@ import type { HeightfieldTileStore } from "./heightfield_tile_cache.js";
 import { tileKeyString, type WorldTileKey } from "../tile_key.js";
 
 export const HEIGHTFIELD_TILE_DB_NAME = "drusniel-heightfield-tiles";
-export const HEIGHTFIELD_TILE_DB_VERSION = 1;
+export const HEIGHTFIELD_TILE_DB_VERSION = 2;
 export const HEIGHTFIELD_TILE_STORE_NAME = "heightfield_tiles";
 
 interface HeightfieldTileRecord {
@@ -58,7 +58,7 @@ function validRecord(
     && typeof record.builtMs === "number"
     && Number.isFinite(record.builtMs)
     && record.heights instanceof ArrayBuffer
-    && record.heights.byteLength === HEIGHTFIELD_TILE_RES * HEIGHTFIELD_TILE_RES * Float64Array.BYTES_PER_ELEMENT;
+    && record.heights.byteLength === HEIGHTFIELD_TILE_RES * HEIGHTFIELD_TILE_RES * Float32Array.BYTES_PER_ELEMENT;
 }
 
 export async function openHeightfieldTileDb(
@@ -94,7 +94,7 @@ export class IndexedDbHeightfieldTileStore implements HeightfieldTileStore {
     return {
       key: Object.freeze({ x: value.tileX, z: value.tileZ }),
       res: value.res,
-      heights: new Float64Array(value.heights.slice(0)),
+      heights: new Float32Array(value.heights.slice(0)),
       sourceRevision: value.sourceRevision,
       builtMs: value.builtMs,
     };

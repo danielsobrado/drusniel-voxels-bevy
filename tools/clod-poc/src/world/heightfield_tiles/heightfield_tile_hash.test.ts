@@ -28,7 +28,7 @@ function source(): TerrainSourceInputs {
 }
 
 describe("heightfield tile cache identity", () => {
-  it("does not change the v6 terrain hash when Phase 2 cache metadata changes", async () => {
+  it("does not change the v7 terrain hash when cache residency metadata changes", async () => {
     const base = source();
     const withoutTiles = await computeTerrainSourceHash(base);
     const withTiles = await computeTerrainSourceHash({
@@ -41,5 +41,14 @@ describe("heightfield tile cache identity", () => {
     } as TerrainSourceInputs & { heightfieldTiles: object });
 
     expect(withTiles).toBe(withoutTiles);
+  });
+
+  it("keys authoritative continent geometry by graph artifact and carve profile", async () => {
+    const base = { ...source(), worldMode: "continent", hydrologyGraphHash: "graph-a",
+      hydrologyCarve: { depthM: 7.5, power: 1.35, lakeBedDepthM: 3.3 } };
+    const first = await computeTerrainSourceHash(base);
+    expect(await computeTerrainSourceHash({ ...base, hydrologyGraphHash: "graph-b" })).not.toBe(first);
+    expect(await computeTerrainSourceHash({ ...base,
+      hydrologyCarve: { ...base.hydrologyCarve, depthM: 8 } })).not.toBe(first);
   });
 });

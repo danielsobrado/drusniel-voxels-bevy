@@ -33,6 +33,12 @@ describe("heightfield tile config", () => {
     expect(heightfieldTilesEnabled(config, new URLSearchParams("heightTiles=1"), "finite")).toBe(false);
   });
 
+  it("defaults authoritative tiles on for continent mode", () => {
+    const config = parseHeightfieldTileConfig(configText);
+    expect(heightfieldTilesEnabled(config, new URLSearchParams(), "continent")).toBe(true);
+    expect(heightfieldTilesEnabled(config, new URLSearchParams("heightTiles=0"), "continent")).toBe(false);
+  });
+
   it("rejects invalid budgets", () => {
     expect(() => parseHeightfieldTileConfig(`
       enabled: true

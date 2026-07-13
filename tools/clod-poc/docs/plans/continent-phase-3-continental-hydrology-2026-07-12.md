@@ -2,6 +2,48 @@
 
 Parent: `continent-plan-overview-2026-07-12.md`. Requires Phases 1–2.
 
+## Status
+
+Updated 2026-07-13.
+
+- [x] C3.1 pure macro field and hydrology graph builder.
+  - Deterministic priority-flood, D8 drainage, exact flow accumulation, lake extraction,
+    connected headwater-to-terminal river records, stable world/cell IDs and monotone discharge
+    profiles live under `src/world/hydrology_graph/`.
+  - Synthetic bowl/plane/saddle, bit-determinism and reduced 4 km real-field tests pass.
+  - `npm run water:graph -- 32768 19`: 2049×2049 / 4,198,401 cells in 12,067.17 ms,
+    13,979 rivers, 30,155 lakes, zero unresolved terminals (within the 20 s cold-build budget).
+- [x] C3.2 worker hosting, checkpointing, persistence and manifest artifact.
+  - Dedicated worker samples the 16 m macro field in resumable 32-row bands, publishes progress,
+    extracts/compacts the graph, hashes it, and transfers only canonical runtime fields.
+  - IndexedDB is namespaced by terrain-source + graph-params hashes; the manifest is immutably
+    updated with the graph artifact. `?scene=continent&continentHydrology=1` is default-off.
+  - Native-Windows browser cold/warm evidence:
+    `perf-runs/continent-phase3-c32/startup-cold-warm-json-store.json`. Cold graph build/load/save
+    10,554.10 ms; warm store load 183.50 ms; artifact
+    `cfe5407017c7e4e2e4958113b2f3e5e1730a8152e5903afcee44c146c4763ae1`.
+  - Flag-on shot/stats smoke:
+    `shots/continent/phase3-c32-cold.png`, `shots/continent/phase3-c32-cold-stats.json`.
+- [x] C3.3 graph-backed hydrology sampling and validator parity.
+  - Spatially bucketed river segments + macro lake index implement the existing
+    `HydrologySample` contract. The unchanged tile cache accepts a pluggable world sampler while
+    graph mode rejects the traced worker backend to prevent mixed authority.
+  - `water:graph-semantics`: 326 rivers / 812 lakes on the reduced real field; zero broken
+    terminals, width regressions, or invalid outlets; hydrology invariants PASS.
+  - Existing `water:hydrology`, `water:streaming`, `water:seam`, and `water:ownership` all pass;
+    streaming remains deterministic with zero field/probe/eviction deltas and ownership reports
+    zero missing/double owners.
+  - Native-Windows graph shot/stats:
+    `shots/continent/phase3-c33-graph.png`, `shots/continent/phase3-c33-graph-stats.json`;
+    graph startup-grid rasterization 120.90 ms, hydrology atlas active with 13 uploads.
+- [ ] C3.4 carved canonical tiles and CPU authority switch.
+- [ ] C3.5 GPU tile-atlas streamed-root authority.
+- [ ] C3.6 water/vegetation consumer integration.
+- [ ] C3.7 acceptance, soak and default flip.
+
+Next action: implement C3.3 graph-backed `HydrologySample` and the tile-cache backend switch, then
+run the hydrology/streaming/seam/ownership and graph-semantics validators.
+
 ## Goal
 
 Replace per-basin local river/lake decisions with a **global watershed graph computed once per

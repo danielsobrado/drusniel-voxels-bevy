@@ -28,7 +28,7 @@ describe("buildHeightfieldTile", () => {
     { seed: 1, key: { x: 0, z: 0 } },
     { seed: 2, key: { x: -1, z: 0 } },
     { seed: 3, key: { x: 0, z: -1 } },
-  ])("is bit-exact with the procedural field for seed $seed at $key", ({ seed, key }) => {
+  ])("stores the authoritative f32 quantization of the procedural field for seed $seed at $key", ({ seed, key }) => {
     const tile = buildForSeed(seed, key);
     const origin = tileOriginM(key);
     const probes = [
@@ -43,7 +43,7 @@ describe("buildHeightfieldTile", () => {
     expect(tile.res).toBe(HEIGHTFIELD_TILE_RES);
     for (const [localX, localZ] of probes) {
       expect(heightfieldTileSample(tile, localX, localZ)).toBe(
-        baseSurfaceHeight(origin.x + localX, origin.z + localZ),
+        Math.fround(baseSurfaceHeight(origin.x + localX, origin.z + localZ)),
       );
     }
   });

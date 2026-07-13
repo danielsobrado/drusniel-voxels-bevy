@@ -65,6 +65,8 @@ export interface HydrologyTalusConfig {
 }
 
 export interface HydrologyInfiniteConfig {
+  /** Analytic per-basin tracing or the persisted continent graph. */
+  source: "traced" | "graph";
   /** World metres covered by one hydrology tile (edge length). */
   tileSizeM: number;
   /** Cells per tile edge; arrays store (tileRes+1)^2 vertex samples so neighbours share edges. */
@@ -164,6 +166,7 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     strength: 0.12,
   },
   infinite: {
+    source: "traced",
     tileSizeM: 256,
     tileRes: 64,
     maxResidentTiles: 96,

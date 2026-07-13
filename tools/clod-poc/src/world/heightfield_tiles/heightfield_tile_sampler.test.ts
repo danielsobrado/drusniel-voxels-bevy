@@ -42,7 +42,7 @@ describe("heightfieldTileSampler", () => {
 
     expect(sampler.sampleHeight(0, 0)).toBe(50);
     expect(sampler.sampleHeight(100, 100)).toBe(100);
-    expect(sampler.sampleHeight(100.5, 100)).toBe(7);
+    expect(sampler.sampleHeight(100.5, 100)).toBe(100);
     expect(cache.counters().fallbackSamplesTotal).toBe(0);
 
     expect(sampler.sampleHeight(1024, 1024)).toBe(7);
