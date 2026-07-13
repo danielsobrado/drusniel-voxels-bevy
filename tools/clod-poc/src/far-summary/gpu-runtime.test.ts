@@ -234,9 +234,13 @@ describe("FarSummaryGpuRuntime", () => {
       commitTile: () => undefined,
       dispatch: async () => {
         dispatches++;
+        const counters = createFarSummaryGpuCounters();
+        counters.computeMsP50 = 2;
+        counters.computeMsP95 = 3;
+        counters.readbackMsP95 = 4;
         return {
           ok: true,
-          counters: createFarSummaryGpuCounters(),
+          counters,
           fallbackTiles: 0,
           fallbackReason: null,
           cellReadbacks: [{ batchIndex: 0, records: [gpuRecord(20), gpuRecord(21), gpuRecord(22), gpuRecord(23)] }],
@@ -254,6 +258,9 @@ describe("FarSummaryGpuRuntime", () => {
     expect(runtime.stats().lastDirtyTiles).toBe(0);
     expect(runtime.stats().lastCommittedTiles).toBe(1);
     expect(runtime.stats().totalCommittedTiles).toBe(1);
+    expect(runtime.stats().lastComputeMsP50).toBe(2);
+    expect(runtime.stats().lastComputeMsP95).toBe(3);
+    expect(runtime.stats().lastReadbackMsP95).toBe(4);
     expect(runtime.stats().scheduledFrames).toBe(1);
   });
 

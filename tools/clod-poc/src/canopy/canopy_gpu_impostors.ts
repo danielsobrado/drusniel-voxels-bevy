@@ -103,55 +103,91 @@ export function buildCanopyGpuImpostorsFromTextureSet(
     side: THREE.DoubleSide,
     toneMapped: true,
   });
-  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, samples.length));
+  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, maxInstances));
   mesh.name = "CanopyGpuImpostors";
   mesh.frustumCulled = true;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.count = samples.length;
 
-  const center = canopyTextureFiniteCenter(set);
-  const sunScale = canopySunScale(lighting);
-  let maxDisplayChannel = 0;
-  for (let i = 0; i < samples.length; i++) {
-    const sample = samples[i]!;
-    const cardSize = canopyCardSize(set, config, sample);
-    TMP_OBJECT.position.set(sample.x - center.x, sample.height, sample.z - center.z);
-    TMP_OBJECT.quaternion.copy(HORIZONTAL_CANOPY_CARD);
-    TMP_OBJECT.scale.set(cardSize, cardSize, 1);
-    TMP_OBJECT.updateMatrix();
-    mesh.setMatrixAt(i, TMP_OBJECT.matrix);
-    const displayColor = canopyImpostorDisplayColor(sample.color, sample.coverage, sunScale);
-    maxDisplayChannel = Math.max(maxDisplayChannel, displayColor.r, displayColor.g, displayColor.b);
-    mesh.setColorAt(i, displayColor);
-  }
-  mesh.instanceMatrix.needsUpdate = true;
-  mesh.computeBoundingBox();
-  mesh.computeBoundingSphere();
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  mesh.position.set(center.x, 0, center.z);
-  mesh.userData.canopyTextureSetRevision = set.revision;
-  mesh.userData.canopyGpuImpostorInstances = samples.length;
-  mesh.userData.canopyGpuImpostorCenterX = center.x;
-  mesh.userData.canopyGpuImpostorCenterZ = center.z;
-  mesh.userData.canopyGpuImpostorMaxColorChannel = maxDisplayChannel;
-  mesh.userData.canopyGpuImpostorOpacity = CANOPY_IMPOSTOR_OPACITY;
-
-  return {
+  const shell: CanopyGpuImpostorShell = {
     mesh,
-    triangleCount: samples.length * 2,
-    instanceCount: samples.length,
+    triangleCount: 0,
+    instanceCount: 0,
     maxInstances,
     coverageThreshold,
-    centerX: center.x,
-    centerZ: center.z,
-    textureSetRevision: set.revision,
+    centerX: 0,
+    centerZ: 0,
+    textureSetRevision: -1,
     dispose: () => {
       geometry.dispose();
       alphaMap.dispose();
       material.dispose();
     },
   };
+  updateCanopyGpuImpostorsFromTextureSet(shell, set, config, lighting, sampleStride, samples);
+  return shell;
+}
+
+export function updateCanopyGpuImpostorsFromTextureSet(
+  shell: CanopyGpuImpostorShell,
+  set: CanopyTextureSet,
+  config: CanopyShellConfig,
+  lighting: EnvironmentLighting,
+  sampleStride = DEFAULT_SAMPLE_STRIDE,
+  selected?: CanopyGpuImpostorSample[],
+): void {
+  const samples = selected ?? selectCanopyGpuImpostorSamples(
+    set,
+    shell.maxInstances,
+    shell.coverageThreshold,
+    sampleStride,
+  );
+  const center = canopyTextureFiniteCenter(set);
+  const sunScale = canopySunScale(lighting);
+  let maxDisplayChannel = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const sample = samples[i]!;
+    const unifiedDensity = shell.coverageThreshold < DEFAULT_COVERAGE_THRESHOLD;
+    const cardSize = canopyCardSize(set, config, sample, shell.coverageThreshold);
+    const jitter = unifiedDensity ? canopyCardJitter(sample.x, sample.z, set.extentM / set.resolution) : { x: 0, z: 0 };
+    TMP_OBJECT.position.set(sample.x + jitter.x - center.x, sample.height, sample.z + jitter.z - center.z);
+    TMP_OBJECT.quaternion.copy(HORIZONTAL_CANOPY_CARD);
+    TMP_OBJECT.scale.set(cardSize, cardSize, 1);
+    TMP_OBJECT.updateMatrix();
+    shell.mesh.setMatrixAt(i, TMP_OBJECT.matrix);
+    const displayCoverage = unifiedDensity ? clamp01(sample.coverage / 0.05) : sample.coverage;
+    const displayColor = canopyImpostorDisplayColor(sample.color, displayCoverage, sunScale);
+    maxDisplayChannel = Math.max(maxDisplayChannel, displayColor.r, displayColor.g, displayColor.b);
+    shell.mesh.setColorAt(i, displayColor);
+  }
+  shell.mesh.count = samples.length;
+  shell.mesh.instanceMatrix.needsUpdate = true;
+  if (shell.mesh.instanceColor) shell.mesh.instanceColor.needsUpdate = true;
+  shell.mesh.computeBoundingBox();
+  shell.mesh.computeBoundingSphere();
+  shell.mesh.position.set(center.x, 0, center.z);
+  shell.mesh.userData.canopyTextureSetRevision = set.revision;
+  shell.mesh.userData.canopyGpuImpostorInstances = samples.length;
+  shell.mesh.userData.canopyGpuImpostorCenterX = center.x;
+  shell.mesh.userData.canopyGpuImpostorCenterZ = center.z;
+  shell.mesh.userData.canopyGpuImpostorMaxColorChannel = maxDisplayChannel;
+  shell.mesh.userData.canopyGpuImpostorOpacity = (shell.mesh.material as THREE.MeshBasicMaterial).opacity;
+  shell.triangleCount = samples.length * 2;
+  shell.instanceCount = samples.length;
+  shell.centerX = center.x;
+  shell.centerZ = center.z;
+  shell.textureSetRevision = set.revision;
+}
+
+export function setCanopyGpuImpostorOpacity(shell: CanopyGpuImpostorShell, opacity: number): void {
+  const material = shell.mesh.material as THREE.MeshBasicMaterial;
+  material.opacity = THREE.MathUtils.clamp(opacity, 0, CANOPY_IMPOSTOR_OPACITY);
+  shell.mesh.userData.canopyGpuImpostorOpacity = material.opacity;
+}
+
+export function canopyGpuImpostorDefaultOpacity(): number {
+  return CANOPY_IMPOSTOR_OPACITY;
 }
 
 export function selectCanopyGpuImpostorSamples(
@@ -249,14 +285,38 @@ function isNumericTextureArray(data: unknown): data is NumericTextureArray {
     || data instanceof Int32Array;
 }
 
-function canopyCardSize(set: CanopyTextureSet, config: CanopyShellConfig, sample: CanopyGpuImpostorSample): number {
+function canopyCardSize(
+  set: CanopyTextureSet,
+  config: CanopyShellConfig,
+  sample: CanopyGpuImpostorSample,
+  coverageThreshold: number,
+): number {
   const resolution = Math.max(1, set.resolution);
   const cellM = Math.max(1, set.extentM / resolution);
+  if (coverageThreshold < DEFAULT_COVERAGE_THRESHOLD) {
+    const minPatch = Math.max(config.treeDistribution.crownRadiusMinM * 2, Math.min(40, cellM * 0.12));
+    const maxPatch = Math.max(minPatch, Math.min(72, cellM * 0.30));
+    const coverageT = clamp01((sample.coverage - coverageThreshold) / Math.max(0.01, 0.05 - coverageThreshold));
+    return THREE.MathUtils.lerp(minPatch, maxPatch, coverageT * 0.75 + clamp01(sample.roughness) * 0.15);
+  }
   const minCrown = Math.max(cellM * 0.55, config.treeDistribution.crownRadiusMinM * 2);
   const maxCrown = Math.max(minCrown, Math.min(cellM * 1.35, config.treeDistribution.crownRadiusMaxM * 2.2));
   const coverageT = clamp01((sample.coverage - DEFAULT_COVERAGE_THRESHOLD) / Math.max(0.01, 1 - DEFAULT_COVERAGE_THRESHOLD));
   const roughT = clamp01(sample.roughness);
   return THREE.MathUtils.lerp(minCrown, maxCrown, coverageT * 0.7 + roughT * 0.15);
+}
+
+function canopyCardJitter(x: number, z: number, cellM: number): { x: number; z: number } {
+  const scale = Math.max(0, cellM) * 0.22;
+  return {
+    x: (hash01(x, z) - 0.5) * scale,
+    z: (hash01(z + 19.7, x - 7.3) - 0.5) * scale,
+  };
+}
+
+function hash01(x: number, z: number): number {
+  const value = Math.sin(x * 12.9898 + z * 78.233) * 43_758.5453;
+  return value - Math.floor(value);
 }
 
 function canopySunScale(lighting: EnvironmentLighting): number {

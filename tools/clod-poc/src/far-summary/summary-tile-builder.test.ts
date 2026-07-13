@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildFarSummaryTile, computeNormalFiniteDifference } from "./summary-tile-builder.js";
+import {
+  buildFarSummaryTile,
+  computeNormalFiniteDifference,
+  createFarSummaryUnifiedEnrichment,
+  stepFarSummaryUnifiedEnrichment,
+} from "./summary-tile-builder.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 
@@ -210,6 +215,133 @@ describe("summary tile builder", () => {
       caveEntranceCoverage: 0,
       occluderHeight: 0,
     });
+  });
+
+  it("coarsens GPU canopy enrichment without diluting the native summary cell size", () => {
+    const ringConfig = { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 16 };
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig,
+      terrainSampler: flatSampler,
+      frameIndex: 0,
+      nowMs: 0,
+    });
+    let canopyCalls = 0;
+    const state = createFarSummaryUnifiedEnrichment(tile);
+
+    expect(stepFarSummaryUnifiedEnrichment(state, {
+      ...flatSampler,
+      sampleCanopySummary: (_x, _z, cellSizeM) => {
+        canopyCalls++;
+        return {
+          coverage: cellSizeM === 32 ? 0.5 : 0,
+          canopyHeightAvg: 60,
+          speciesPine: 0.5,
+          speciesBroadleaf: 0.3,
+          speciesDeadwood: 0.2,
+        };
+      },
+    }, Number.POSITIVE_INFINITY)).toBe(true);
+
+    expect(canopyCalls).toBe(16);
+    expect(tile.samples.filter((sample) => sample.canopyCoverage === 0.5)).toHaveLength(16);
+    expect(tile.samples.filter((sample) => sample.canopyHeightAvg === 60)).toHaveLength(16);
+  });
+
+  it("resumes coarse canopy enrichment one expensive sample at a time after its deadline", () => {
+    const ringConfig = { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 16 };
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig,
+      terrainSampler: flatSampler,
+      frameIndex: 0,
+      nowMs: 0,
+    });
+    let canopyCalls = 0;
+    const state = createFarSummaryUnifiedEnrichment(tile);
+    const sampler = {
+      ...flatSampler,
+      sampleCanopySummary: () => {
+        canopyCalls++;
+        return {
+          coverage: 0.5,
+          canopyHeightAvg: 60,
+          speciesPine: 0.5,
+          speciesBroadleaf: 0.3,
+          speciesDeadwood: 0.2,
+        };
+      },
+    };
+
+    let complete = false;
+    let calls = 0;
+    while (!complete && calls++ < 300) {
+      const before = canopyCalls;
+      complete = stepFarSummaryUnifiedEnrichment(state, sampler, Number.NEGATIVE_INFINITY);
+      expect(canopyCalls - before).toBeLessThanOrEqual(1);
+    }
+
+    expect(complete).toBe(true);
+    expect(canopyCalls).toBe(16);
+  });
+
+  it("rejects coarse canopy coverage from authoritative water cells", () => {
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 1 },
+      terrainSampler: flatSampler,
+      frameIndex: 0,
+      nowMs: 0,
+    });
+    const state = createFarSummaryUnifiedEnrichment(tile);
+
+    stepFarSummaryUnifiedEnrichment(state, {
+      ...flatSampler,
+      sampleWaterSummary: () => ({
+        coverage: 1,
+        waterLevel: 55,
+        bodyKind: 1,
+        shoreDistance: 0,
+        flowX: 0,
+        flowZ: 0,
+      }),
+      sampleCanopySummary: () => ({
+        coverage: 0.5,
+        canopyHeightAvg: 60,
+        speciesPine: 1,
+        speciesBroadleaf: 0,
+        speciesDeadwood: 0,
+      }),
+    }, Number.POSITIVE_INFINITY);
+
+    expect(tile.samples[0]?.waterCoverage).toBe(1);
+    expect(tile.samples[0]?.canopyCoverage).toBe(0);
+  });
+
+  it("rejects coarse canopy coverage using the sea-level fallback when graph water is disabled", () => {
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 1 },
+      terrainSampler: flatSampler,
+      frameIndex: 0,
+      nowMs: 0,
+    });
+    const state = createFarSummaryUnifiedEnrichment(tile);
+
+    stepFarSummaryUnifiedEnrichment(state, {
+      ...flatSampler,
+      sampleWaterCoverageForHeight: () => 1,
+      sampleCanopySummary: () => ({
+        coverage: 0.5,
+        canopyHeightAvg: 60,
+        speciesPine: 1,
+        speciesBroadleaf: 0,
+        speciesDeadwood: 0,
+      }),
+    }, Number.POSITIVE_INFINITY);
+
+    expect(tile.samples[0]?.waterCoverage).toBe(1);
+    expect(tile.samples[0]?.canopyCoverage).toBe(0);
   });
 
   it("finite difference normal computation works", () => {

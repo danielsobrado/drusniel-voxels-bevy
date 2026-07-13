@@ -67,7 +67,8 @@ export function createShadowProxyGeometryJob(
   }
 
   const resolvedCoverage = coverage ?? computeShadowProxyCoverage(terrainSummary.worldSize, config);
-  // TODO: Replace finite-world summary coverage with streamed far-summary clipmap tiles.
+  // Coverage remains camera/config driven; sampleProxyHeight resolves streamed far-summary
+  // heights and occluders first, then retains the finite summary as the compatibility fallback.
   const { centerX, centerZ, extentM, buildRelative = false } = resolvedCoverage;
   const gridRes = config.gridRes;
   const n = gridRes + 1;

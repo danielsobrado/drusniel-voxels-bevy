@@ -140,6 +140,10 @@ export function resolveFarSummaryBuildBudgets(
   };
 }
 
+export function resolveFarSummaryEnrichmentBudgetMs(budgets: FarSummaryBuildBudgets): number {
+  return budgets.warming ? Math.max(4, budgets.budgetMs) : 4;
+}
+
 export function farSummaryRingForDistance(
   distanceM: number,
   config: FarSummaryConfig,

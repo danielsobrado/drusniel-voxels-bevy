@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
+import type { FarHeightProvider, FarHeightProviderSample } from "../far-summary/clipmap-sampler.js";
 import { createExtendedCanopyTexture, createExtendedHeightTexture } from "../clod/terrain_summary.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopySummaryTile, CanopyTextureSet } from "./canopy_types.js";
@@ -117,6 +118,21 @@ export interface BuildCanopyTextureSetParams {
   farRadius?: number;
 }
 
+function farSummaryTextureResolutionForConfig(config: CanopyShellConfig): number {
+  // The unified far summary is already spatially filtered into coarse rings. Sampling its
+  // 16 km square at the legacy near-canopy texture density performs 262k cache lookups per
+  // refresh without adding information; 128 cells preserves the finest far-summary cadence.
+  return Math.min(128, textureResolutionForConfig(config));
+}
+
+export interface FarSummaryCanopyTextureBuild {
+  set: CanopyTextureSet;
+  hits: number;
+  misses: number;
+  averageCoverage: number;
+  maxCoverage: number;
+}
+
 let textureRevision = 0;
 
 export function buildCanopyTextureSet(params: BuildCanopyTextureSetParams): CanopyTextureSet {
@@ -196,12 +212,134 @@ export function buildCanopyTextureSet(params: BuildCanopyTextureSetParams): Cano
   };
 }
 
+export function buildCanopyTextureSetFromFarSummary(params: {
+  provider: FarHeightProvider;
+  config: CanopyShellConfig;
+  centerX: number;
+  centerZ: number;
+}): FarSummaryCanopyTextureBuild {
+  const { provider, config, centerX, centerZ } = params;
+  const shellEndM = Math.max(1, finiteOr(config.distances.shellEndM, 1024));
+  const extentM = shellEndM * 2;
+  const originX = centerX - shellEndM;
+  const originZ = centerZ - shellEndM;
+  const resolution = farSummaryTextureResolutionForConfig(config);
+  const sampleCellM = extentM / resolution;
+  const heightData = new Float32Array(resolution * resolution);
+  const coverageData = new Float32Array(resolution * resolution);
+  const speciesData = new Float32Array(resolution * resolution * 3);
+  const roughnessData = new Float32Array(resolution * resolution);
+  const sample: FarHeightProviderSample = {
+    height: 0,
+    normalX: 0,
+    normalY: 1,
+    normalZ: 0,
+    material: 0,
+  };
+  let hits = 0;
+  let misses = 0;
+  let coverageTotal = 0;
+  let maxCoverage = 0;
+
+  for (let j = 0; j < resolution; j++) {
+    for (let i = 0; i < resolution; i++) {
+      const wx = originX + ((i + 0.5) / resolution) * extentM;
+      const wz = originZ + ((j + 0.5) / resolution) * extentM;
+      const distanceM = Math.hypot(wx - centerX, wz - centerZ);
+      const idx = j * resolution + i;
+      // The circular shell never renders the square texture corners or the final sample-cell
+      // halo. Keeping those cells empty avoids requesting bilinear neighbours beyond the
+      // far-summary ownership radius.
+      if (distanceM > shellEndM - sampleCellM * Math.SQRT2) {
+        speciesData[idx * 3] = config.material.baseTint[0];
+        speciesData[idx * 3 + 1] = config.material.baseTint[1];
+        speciesData[idx * 3 + 2] = config.material.baseTint[2];
+        continue;
+      }
+      const hit = provider.sampleSummaryInto?.(wx, wz, distanceM, sample) === true;
+      if (!hit) {
+        misses++;
+        heightData[idx] = 0;
+        coverageData[idx] = 0;
+        speciesData[idx * 3] = config.material.baseTint[0];
+        speciesData[idx * 3 + 1] = config.material.baseTint[1];
+        speciesData[idx * 3 + 2] = config.material.baseTint[2];
+        roughnessData[idx] = 0;
+        continue;
+      }
+
+      hits++;
+      heightData[idx] = finiteOr(sample.canopyHeightAvg ?? sample.height, sample.height);
+      const coverage = safeCoverage(sample.canopyCoverage ?? 0, config.material.coverageAlphaPower);
+      coverageData[idx] = coverage;
+      coverageTotal += coverage;
+      maxCoverage = Math.max(maxCoverage, coverage);
+      const tint = safeSpeciesTint(
+        sample.speciesPine ?? 0,
+        sample.speciesBroadleaf ?? 0,
+        sample.speciesDeadwood ?? 0,
+        config,
+      );
+      speciesData[idx * 3] = tint[0];
+      speciesData[idx * 3 + 1] = tint[1];
+      speciesData[idx * 3 + 2] = tint[2];
+      roughnessData[idx] = clamp01(finiteOr(sample.roughness ?? 0, 0));
+    }
+  }
+
+  textureRevision++;
+  return {
+    set: {
+      heightTexture: makeDataTexture(heightData, resolution),
+      coverageTexture: makeDataTexture(coverageData, resolution),
+      speciesTexture: makeRgbTexture(speciesData, resolution),
+      roughnessTexture: makeDataTexture(roughnessData, resolution),
+      originX,
+      originZ,
+      extentM,
+      resolution,
+      syntheticFallback: false,
+      revision: provider.revision?.() ?? textureRevision,
+    },
+    hits,
+    misses,
+    averageCoverage: hits > 0 ? coverageTotal / hits : 0,
+    maxCoverage,
+  };
+}
+
 export function disposeCanopyTextureSet(set: CanopyTextureSet | null): void {
   if (!set) return;
   set.heightTexture.dispose();
   set.coverageTexture.dispose();
   set.speciesTexture.dispose();
   set.roughnessTexture.dispose();
+}
+
+export function updateCanopyTextureSetInPlace(target: CanopyTextureSet, source: CanopyTextureSet): boolean {
+  if (target.resolution !== source.resolution) return false;
+  const pairs = [
+    [target.heightTexture, source.heightTexture],
+    [target.coverageTexture, source.coverageTexture],
+    [target.speciesTexture, source.speciesTexture],
+    [target.roughnessTexture, source.roughnessTexture],
+  ] as const;
+  for (const [targetTexture, sourceTexture] of pairs) {
+    const targetData = targetTexture.image.data as Float32Array;
+    const sourceData = sourceTexture.image.data as Float32Array;
+    if (!(targetData instanceof Float32Array) || !(sourceData instanceof Float32Array) || targetData.length !== sourceData.length) {
+      return false;
+    }
+  }
+  for (const [targetTexture, sourceTexture] of pairs) {
+    (targetTexture.image.data as Float32Array).set(sourceTexture.image.data as Float32Array);
+  }
+  target.originX = source.originX;
+  target.originZ = source.originZ;
+  target.extentM = source.extentM;
+  target.syntheticFallback = source.syntheticFallback;
+  target.revision = source.revision;
+  return true;
 }
 
 export function clampTextureValues(set: CanopyTextureSet): boolean {

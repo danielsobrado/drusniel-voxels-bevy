@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
+import { max, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
 import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 
@@ -25,6 +25,8 @@ const FAR_CLIPMAP_SHADER_RENDER_ORDER = 20;
 const FAR_CLIPMAP_NODE_UNIFORMS = "farClipmapNodeUniforms";
 const FAR_CLIPMAP_SOURCE_TEXTURE = "farClipmapSourceTexture";
 const FAR_CLIPMAP_SOURCE_DATA = "farClipmapSourceData";
+const FAR_CLIPMAP_WATER_TEXTURE = "farClipmapWaterTexture";
+const FAR_CLIPMAP_WATER_DATA = "farClipmapWaterData";
 const FAR_CLIPMAP_DISPLACEMENT_MODE = "farClipmapDisplacementMode";
 
 export interface FarClipmapMaterialUniforms {
@@ -305,7 +307,7 @@ function createCpuBakedFarClipmapMaterial(input: { debugMode: FarClipmapDebugMod
   return material;
 }
 
-function createSourceTexture(gridResolution: number): THREE.DataTexture {
+function createSourceTexture(gridResolution: number, name = "FarClipmapSourceSummaryTexture"): THREE.DataTexture {
   const size = Math.max(2, Math.floor(gridResolution));
   const data = new Float32Array(size * size * 4);
   for (let i = 0; i < size * size; i++) {
@@ -315,7 +317,7 @@ function createSourceTexture(gridResolution: number): THREE.DataTexture {
     data[i * 4 + 3] = 0;
   }
   const sourceTexture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
-  sourceTexture.name = "FarClipmapSourceSummaryTexture";
+  sourceTexture.name = name;
   sourceTexture.minFilter = THREE.NearestFilter;
   sourceTexture.magFilter = THREE.NearestFilter;
   sourceTexture.wrapS = THREE.ClampToEdgeWrapping;
@@ -341,11 +343,19 @@ function createWebGpuFarClipmapMaterial(input: {
   const gridResolution = Math.max(2, Math.floor(input.gridResolution ?? 2));
   const sourceTexture = createSourceTexture(gridResolution);
   const sourceData = (sourceTexture.image as { data: Float32Array }).data;
+  const waterTexture = createSourceTexture(gridResolution, "FarClipmapWaterSummaryTexture");
+  const waterData = (waterTexture.image as { data: Float32Array }).data;
   const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
   const sampleUv: TslNode = positionGeometry.xz.div(uniforms.uGridMax);
   const sourceSample: TslNode = tslTexture(sourceTexture, tslVec2(sampleUv.x, sampleUv.y));
+  const waterSample: TslNode = tslTexture(waterTexture, tslVec2(sampleUv.x, sampleUv.y));
   const rawHeight: TslNode = sourceSample.x;
-  const height: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
+  const terrainHeight: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
+  const unifiedChannels: TslNode = tslSmoothstep(-0.5, 0.0, waterSample.w);
+  const waterCoverage: TslNode = max(0.0, waterSample.w);
+  const waterMask: TslNode = tslSmoothstep(0.04, 0.35, waterCoverage).mul(unifiedChannels);
+  const waterHeight: TslNode = waterSample.x.mul(uniforms.uHeightScale).add(uniforms.uYOffset).add(0.18);
+  const height: TslNode = tslMix(terrainHeight, waterHeight, waterMask);
   const worldXZ: TslNode = positionGeometry.xz.mul(uniforms.uCellSize).add(uniforms.uRingOrigin);
   const distance: TslNode = worldXZ.sub(uniforms.uCameraXZ).length();
   const localPosition: TslNode = tslVec3(
@@ -356,11 +366,19 @@ function createWebGpuFarClipmapMaterial(input: {
   const heightColor: TslNode = tslSmoothstep(-16.0, 128.0, height);
   const landColor: TslNode = tslMix(tslVec3(0.20, 0.27, 0.18), tslVec3(0.36, 0.35, 0.32), heightColor);
   const waterColor: TslNode = tslVec3(0.07, 0.19, 0.26);
-  const terrainColor: TslNode = tslMix(
+  const legacyTerrainColor: TslNode = tslMix(
     waterColor,
     landColor,
-    tslSmoothstep(uniforms.uSeaLevel.sub(0.25), uniforms.uSeaLevel.add(0.25), height),
+    tslSmoothstep(uniforms.uSeaLevel.sub(0.25), uniforms.uSeaLevel.add(0.25), terrainHeight),
   );
+  const shoreTint: TslNode = tslSmoothstep(0.0, 96.0, waterSample.z).oneMinus();
+  const bodyTint: TslNode = tslSmoothstep(1.0, 3.0, waterSample.y).mul(0.12);
+  const unifiedWaterColor: TslNode = tslMix(
+    waterColor,
+    tslVec3(0.12, 0.30, 0.34),
+    max(shoreTint.mul(0.45), bodyTint),
+  );
+  const terrainColor: TslNode = tslMix(legacyTerrainColor, unifiedWaterColor, waterMask);
   const fog: TslNode = tslSmoothstep(uniforms.uClipOuterRadius.mul(0.55), uniforms.uClipOuterRadius, distance);
 
   const material = new MeshBasicNodeMaterial() as FarClipmapMaterial & MeshBasicNodeMaterial;
@@ -381,6 +399,8 @@ function createWebGpuFarClipmapMaterial(input: {
   material.userData[FAR_CLIPMAP_NODE_UNIFORMS] = uniforms;
   material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] = sourceTexture;
   material.userData[FAR_CLIPMAP_SOURCE_DATA] = sourceData;
+  material.userData[FAR_CLIPMAP_WATER_TEXTURE] = waterTexture;
+  material.userData[FAR_CLIPMAP_WATER_DATA] = waterData;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;
 }
@@ -422,6 +442,11 @@ export function createFarClipmapMaterial(input: {
 
 export function farClipmapMaterialDisplacementMode(material: FarClipmapMaterial): FarClipmapDisplacementMode {
   return material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] === "cpu-baked" ? "cpu-baked" : "shader";
+}
+
+export function disposeFarClipmapMaterialSourceTextures(material: FarClipmapMaterial): void {
+  (material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] as THREE.DataTexture | undefined)?.dispose();
+  (material.userData[FAR_CLIPMAP_WATER_TEXTURE] as THREE.DataTexture | undefined)?.dispose();
 }
 
 export function setFarClipmapMaterialDebugMode(material: FarClipmapMaterial, mode: FarClipmapDebugMode): void {
@@ -472,21 +497,44 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
   cellSizeM: number;
   cameraX: number;
   cameraZ: number;
+  clipInnerRadiusM?: number;
+  clipOuterRadiusM?: number;
 }): FarClipmapSourceTextureStats {
   const sourceTexture = material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] as THREE.DataTexture | undefined;
   const data = material.userData[FAR_CLIPMAP_SOURCE_DATA] as Float32Array | undefined;
-  if (!sourceTexture || !data) return { fallbackSamples: 0, exceptionSamples: 0 };
+  const waterTexture = material.userData[FAR_CLIPMAP_WATER_TEXTURE] as THREE.DataTexture | undefined;
+  const waterData = material.userData[FAR_CLIPMAP_WATER_DATA] as Float32Array | undefined;
+  if (!sourceTexture || !data || !waterTexture || !waterData) return { fallbackSamples: 0, exceptionSamples: 0 };
 
   const gridResolution = Math.max(2, Math.floor(input.gridResolution));
   let fallbackSamples = 0;
   let exceptionSamples = 0;
-  const summary = { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0, waterCoverage: 0 };
+  const summary = {
+    height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0,
+    waterCoverage: 0, waterLevel: 0, bodyKind: 0, shoreDistance: 0,
+    unifiedChannels: false,
+  };
   for (let z = 0; z < gridResolution; z++) {
     for (let x = 0; x < gridResolution; x++) {
       const worldX = input.ringOriginX + x * input.cellSizeM;
       const worldZ = input.ringOriginZ + z * input.cellSizeM;
       const distanceM = Math.hypot(worldX - input.cameraX, worldZ - input.cameraZ);
       const offset = (z * gridResolution + x) * 4;
+      const outsideInnerRadius = input.clipInnerRadiusM !== undefined
+        && distanceM + input.cellSizeM < input.clipInnerRadiusM;
+      const outsideOuterRadius = input.clipOuterRadiusM !== undefined
+        && distanceM > input.clipOuterRadiusM + input.cellSizeM;
+      if (outsideInnerRadius || outsideOuterRadius) {
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 1;
+        data[offset + 3] = 0;
+        waterData[offset] = 0;
+        waterData[offset + 1] = 0;
+        waterData[offset + 2] = 0;
+        waterData[offset + 3] = -1;
+        continue;
+      }
       try {
         const hasSummary = input.source.sampleSummaryInto?.(worldX, worldZ, distanceM, summary) === true;
         if (!hasSummary) fallbackSamples++;
@@ -498,16 +546,27 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
         data[offset + 1] = finiteOr(normal.x, 0);
         data[offset + 2] = finiteOr(normal.y, 1);
         data[offset + 3] = finiteOr(normal.z, 0);
+        waterData[offset] = finiteOr(hasSummary ? summary.waterLevel : height, height);
+        waterData[offset + 1] = finiteOr(hasSummary ? summary.bodyKind : 0, 0);
+        waterData[offset + 2] = finiteOr(hasSummary ? summary.shoreDistance : 0, 0);
+        waterData[offset + 3] = hasSummary && summary.unifiedChannels === true
+          ? finiteOr(summary.waterCoverage, 0)
+          : -1;
       } catch {
         exceptionSamples++;
         data[offset] = 0;
         data[offset + 1] = 0;
         data[offset + 2] = 1;
         data[offset + 3] = 0;
+        waterData[offset] = 0;
+        waterData[offset + 1] = 0;
+        waterData[offset + 2] = 0;
+        waterData[offset + 3] = -1;
       }
     }
   }
   sourceTexture.needsUpdate = true;
+  waterTexture.needsUpdate = true;
   return { fallbackSamples, exceptionSamples };
 }
 

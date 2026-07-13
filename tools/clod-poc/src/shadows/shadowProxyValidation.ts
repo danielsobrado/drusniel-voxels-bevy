@@ -1,6 +1,22 @@
 import type { ShadowProxyConfig, ShadowProxyCoverage, ShadowProxySource } from "./shadowProxyTypes.js";
 import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
 import { getNaadfIntegrationFromWindow } from "../naadf/canopyBridge.js";
+import type { FarHeightProvider, FarHeightProviderSample } from "../far-summary/clipmap-sampler.js";
+
+const farSummaryScratch: FarHeightProviderSample = {
+  height: 0,
+  normalX: 0,
+  normalY: 1,
+  normalZ: 0,
+  material: 0,
+  occluderHeight: 0,
+};
+
+function getFarSummaryProvider(): FarHeightProvider | undefined {
+  return (globalThis as typeof globalThis & {
+    window?: { __drusnielFarSummary?: { getHeightProvider?: () => FarHeightProvider | undefined } };
+  }).window?.__drusnielFarSummary?.getHeightProvider?.();
+}
 
 export interface ShadowProxyValidationResult {
   ok: boolean;
@@ -84,6 +100,18 @@ export function sampleProxyHeight(
   config: ShadowProxyConfig,
   dist: number,
 ): number {
+  const provider = getFarSummaryProvider();
+  if (provider?.sampleSummaryInto?.(x, z, dist, farSummaryScratch)) {
+    const terrainHeight = farSummaryScratch.height;
+    const occluderHeight = Math.max(0, farSummaryScratch.occluderHeight ?? 0);
+    if (Number.isFinite(terrainHeight) && Number.isFinite(occluderHeight)) {
+      const biased = clampProxyHeight(terrainHeight + occluderHeight + config.heightBiasM, config);
+      const fade = ringFadeWeight(dist, config);
+      const farBase = summaryBaseLevel(terrainSummary);
+      return farBase + (biased - farBase) * fade;
+    }
+  }
+
   const naadf = getNaadfIntegrationFromWindow();
   if (naadf) {
     const sample = naadf.queryHeight(x, z, "shadow");

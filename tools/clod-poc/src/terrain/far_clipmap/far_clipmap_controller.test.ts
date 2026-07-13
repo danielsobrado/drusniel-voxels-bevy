@@ -48,11 +48,11 @@ describe("FarClipmapController shader displacement", () => {
 
     const stats = controller.update(new THREE.Vector3(257.5, 0, -130.25));
 
-    expect(stats.readyTiles).toBe(2);
-    expect(stats.pendingTiles).toBe(0);
-    expect(stats.snapUpdatesThisFrame).toBe(2);
-    expect(stats.sourceRefreshesThisFrame).toBe(2);
-    expect(stats.sourceRefreshesTotal).toBe(2);
+    expect(stats.readyTiles).toBe(1);
+    expect(stats.pendingTiles).toBe(1);
+    expect(stats.snapUpdatesThisFrame).toBe(1);
+    expect(stats.sourceRefreshesThisFrame).toBe(1);
+    expect(stats.sourceRefreshesTotal).toBe(1);
     expect(stats.rebuiltTilesThisFrame).toBe(0);
     expect(stats.verticesBuiltThisFrame).toBe(0);
     expect(stats.trianglesBuiltThisFrame).toBe(0);
@@ -67,6 +67,75 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.snappedOriginZ).toBe(-192);
     expect(stats.snapErrorMaxM).toBeLessThan(64);
 
+    const caughtUp = controller.update(new THREE.Vector3(257.5, 0, -130.25));
+    expect(caughtUp.readyTiles).toBe(2);
+    expect(caughtUp.pendingTiles).toBe(0);
+    expect(caughtUp.sourceRefreshesThisFrame).toBe(1);
+
+    controller.dispose();
+  });
+
+  it("uploads unified water level, body kind, shore distance, and coverage", () => {
+    const source: FarClipmapSource = {
+      ...readyFlatSource(),
+      sampleSummaryInto: (_x, _z, _distanceM, out) => {
+        out.height = 12;
+        out.normalX = 0;
+        out.normalY = 1;
+        out.normalZ = 0;
+        out.material = 1;
+        out.waterLevel = 34;
+        out.bodyKind = 2;
+        out.shoreDistance = 80;
+        out.waterCoverage = 0.75;
+        out.unifiedChannels = true;
+        return true;
+      },
+    };
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(scene, config({ ringCount: 1 }), source, {
+      webGpuCompatibleMaterial: true,
+    });
+
+    const stats = controller.update(new THREE.Vector3(0, 0, 0));
+    const mesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+    const material = mesh?.material as THREE.Material | undefined;
+    const waterData = material?.userData.farClipmapWaterData as Float32Array | undefined;
+
+    expect(stats.fallbackSamplesThisFrame).toBe(0);
+    const centerOffset = (8 * 17 + 8) * 4;
+    expect(waterData?.slice(centerOffset, centerOffset + 4)).toEqual(new Float32Array([34, 2, 80, 0.75]));
+
+    controller.dispose();
+  });
+
+  it("marks layout-v1 summary water as non-authoritative", () => {
+    const source: FarClipmapSource = {
+      ...readyFlatSource(),
+      sampleSummaryInto: (_x, _z, _distanceM, out) => {
+        out.height = 12;
+        out.normalX = 0;
+        out.normalY = 1;
+        out.normalZ = 0;
+        out.material = 1;
+        out.waterCoverage = 1;
+        out.waterLevel = 0;
+        out.unifiedChannels = false;
+        return true;
+      },
+    };
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(scene, config({ ringCount: 1 }), source, {
+      webGpuCompatibleMaterial: true,
+    });
+
+    controller.update(new THREE.Vector3(0, 0, 0));
+    const mesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+    const material = mesh?.material as THREE.Material | undefined;
+    const waterData = material?.userData.farClipmapWaterData as Float32Array | undefined;
+
+    const centerOffset = (8 * 17 + 8) * 4;
+    expect(waterData?.[centerOffset + 3]).toBe(-1);
     controller.dispose();
   });
 
@@ -89,7 +158,8 @@ describe("FarClipmapController shader displacement", () => {
     );
     const center = new THREE.Vector3(257.5, 0, -130.25);
 
-    controller.update(center); // snap refresh primes both rings
+    controller.update(center);
+    controller.update(center); // source-refresh budget primes one ring per frame
     revision = 2;
     // A revision bump inside the interval must NOT re-sample the ring textures — during
     // traversal the far-summary revision bumps almost every frame, and per-bump full
@@ -101,10 +171,11 @@ describe("FarClipmapController shader displacement", () => {
 
     expect(deferred.snapUpdatesThisFrame).toBe(0);
     expect(deferred.sourceRefreshesThisFrame).toBe(0);
-    expect(stillDeferred.sourceRefreshesThisFrame).toBe(0);
+    expect(stillDeferred.sourceRefreshesThisFrame).toBe(1);
+    expect(stillDeferred.sourceRevision).toBe(2);
     expect(firstRefresh.sourceRefreshesThisFrame).toBe(1);
     expect(firstRefresh.sourceRevision).toBe(2);
-    expect(secondRefresh.sourceRefreshesThisFrame).toBe(1);
+    expect(secondRefresh.sourceRefreshesThisFrame).toBe(0);
     expect(secondRefresh.sourceRefreshesTotal).toBe(4);
 
     controller.dispose();

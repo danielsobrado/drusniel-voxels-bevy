@@ -64,6 +64,10 @@ export interface CanopyMetrics {
   uploadMs: number;
   queuedTiles: number;
   builtThisFrame: number;
+  farSummaryHits: number;
+  farSummaryMisses: number;
+  shellRebuildsTotal: number;
+  textureUploadBytesTotal: number;
 }
 
 export function createEmptyCanopyMetrics(): CanopyMetrics {
@@ -90,6 +94,10 @@ export function createEmptyCanopyMetrics(): CanopyMetrics {
     uploadMs: 0,
     queuedTiles: 0,
     builtThisFrame: 0,
+    farSummaryHits: 0,
+    farSummaryMisses: 0,
+    shellRebuildsTotal: 0,
+    textureUploadBytesTotal: 0,
   };
 }
 
@@ -117,6 +125,10 @@ export function canopyMetricsToCounters(metrics: CanopyMetrics, enabled: boolean
     canopy_average_coverage: Math.round(metrics.averageCoverage * 1000) / 1000,
     canopy_max_coverage: Math.round(metrics.maxCoverage * 1000) / 1000,
     canopy_built_this_frame: metrics.builtThisFrame,
+    canopy_far_summary_hits: metrics.farSummaryHits,
+    canopy_far_summary_misses: metrics.farSummaryMisses,
+    canopy_shell_rebuilds_total: metrics.shellRebuildsTotal,
+    canopy_texture_upload_bytes_total: metrics.textureUploadBytesTotal,
   };
 }
 

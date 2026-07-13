@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildCanopyTextureSet } from "./canopy_texture.js";
+import * as THREE from "three";
+import { buildCanopyTextureSet, buildCanopyTextureSetFromFarSummary, disposeCanopyTextureSet, updateCanopyTextureSetInPlace } from "./canopy_texture.js";
 import { parseCanopyShellConfig } from "./canopy_config.js";
 import canopyYaml from "../../config/canopy_shell.yaml?raw";
 import { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summary_builder.js";
@@ -22,6 +23,66 @@ describe("canopy texture", () => {
     config,
     terrainSampler: terrain,
     treeDistribution: trees,
+  });
+
+  it("builds canopy textures directly from unified far-summary samples", () => {
+    const unifiedConfig = structuredClone(config);
+    unifiedConfig.distances.shellEndM = 64;
+    const built = buildCanopyTextureSetFromFarSummary({
+      provider: {
+        sampleHeight: () => 10,
+        sampleNormal: () => new THREE.Vector3(0, 1, 0),
+        revision: () => 7,
+        sampleSummaryInto: (_x, _z, _distance, out) => {
+          Object.assign(out, {
+            height: 10,
+            normalX: 0,
+            normalY: 1,
+            normalZ: 0,
+            material: 1,
+            canopyCoverage: 0.5,
+            canopyHeightAvg: 26,
+            speciesPine: 0.6,
+            speciesBroadleaf: 0.3,
+            speciesDeadwood: 0.1,
+            roughness: 0.4,
+          });
+          return true;
+        },
+      },
+      config: unifiedConfig,
+      centerX: 128,
+      centerZ: -64,
+    });
+
+    expect(built.hits).toBeGreaterThan(0);
+    expect(built.hits).toBeLessThan(built.set.resolution ** 2);
+    expect(built.misses).toBe(0);
+    expect(built.averageCoverage).toBeGreaterThan(0);
+    expect(built.maxCoverage + 1e-6).toBeGreaterThanOrEqual(built.averageCoverage);
+    expect(built.set.revision).toBe(7);
+    const centerIndex = Math.floor(built.set.resolution / 2) * built.set.resolution
+      + Math.floor(built.set.resolution / 2);
+    expect((built.set.heightTexture.image.data as Float32Array)[centerIndex]).toBe(26);
+    expect((built.set.coverageTexture.image.data as Float32Array)[centerIndex])
+      .toBeCloseTo(Math.pow(0.5, unifiedConfig.material.coverageAlphaPower));
+    expect((built.set.roughnessTexture.image.data as Float32Array)[centerIndex]).toBeCloseTo(0.4);
+    disposeCanopyTextureSet(built.set);
+  });
+
+  it("updates fixed texture storage in place", () => {
+    const first = buildCanopyTextureSet({ visibleTiles: [tile], config, centerX: 0, centerZ: 0 });
+    const second = buildCanopyTextureSet({ visibleTiles: [tile], config, centerX: 128, centerZ: 0 });
+    const heightTexture = first.heightTexture;
+    const nextRevision = second.revision;
+
+    expect(updateCanopyTextureSetInPlace(first, second)).toBe(true);
+    expect(first.heightTexture).toBe(heightTexture);
+    expect(first.originX).toBe(second.originX);
+    expect(first.revision).toBe(nextRevision);
+
+    disposeCanopyTextureSet(first);
+    disposeCanopyTextureSet(second);
   });
 
   it("clamps coverage values and avoids NaNs", () => {

@@ -50,4 +50,27 @@ describe("graph hydrology sampling", () => {
 
     expect(carved.sample(river.x, river.z).terrainY).toBe(expectedTerrainY);
   });
+
+  it("matches the two-pass carved sampler semantics across dry, lake, and river samples", () => {
+    const terrain = { surfaceHeight: (x: number, z: number) => 18 + x * 0.04 + z * 0.02 };
+    const graph = buildHydrologyGraph({
+      worldId: "combined-carved-sample",
+      seed: 9,
+      sizeM: { x: 256, z: 256 },
+      originM: { x: 0, z: 0 },
+      sampleHeight: terrain.surfaceHeight,
+    });
+    const carve = { depthM: 2.5, power: 1.2, lakeBedDepthM: 1.5 };
+    const base = createGraphHydrologySampler(graph, terrain);
+    const oracle = createGraphHydrologySampler(graph, {
+      surfaceHeight: (x, z) => base.carveHeight(x, z, terrain.surfaceHeight(x, z), carve),
+    });
+    const combined = createCarvedGraphHydrologySampler(graph, terrain, carve);
+
+    for (let z = 0; z <= 256; z += 8) {
+      for (let x = 0; x <= 256; x += 8) {
+        expect(combined.sample(x, z)).toEqual(oracle.sample(x, z));
+      }
+    }
+  });
 });

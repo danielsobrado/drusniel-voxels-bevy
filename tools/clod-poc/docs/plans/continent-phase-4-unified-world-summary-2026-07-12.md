@@ -34,15 +34,46 @@ Updated 2026-07-13.
     not establish tile-build p95. A graph-enabled cold browser run also remained in world creation
     without publishing frame hooks and was stopped; do not treat the graph-disabled A/B as graph
     startup evidence.
-- [ ] C4.2 far clipmap and far water consume unified channels.
-- [ ] C4.3 canopy summary re-source.
-- [ ] C4.4 persistent shell, incremental textures, and crossfade.
-- [ ] C4.5 GPU-authoritative far summary for continent.
-- [ ] C4.6 shadow/occlusion proxy and old controller decision.
+- [x] C4.2 far clipmap and far water consume unified channels.
+  - The provider exposes all v2 fields. The far clipmap uploads water level, body kind, shore
+    distance, and coverage, masks samples outside each ring's ownership, and refreshes at most one
+    ring per frame. Layout v1 and explicit `continentHydrology=0` use a `-1` water sentinel so
+    missing authority cannot flatten terrain to sea level.
+  - The Phase-4 first ring begins at the clipmap's 384 m inner radius for
+    `scene=continent&farSummaryLayout=2`, closing the former 384–1536 m authority gap. Provider
+    readiness latches after the first coherent fill so recentering retains stale-but-valid data
+    while replacements stream.
+- [x] C4.3 canopy summary re-source.
+  - The continent v2 path reads canopy directly from far-summary tiles. The separate worker path
+    remains only as the one-cycle compatibility switch `?canopySource=legacy`.
+  - The coarse source samples four deterministic native cells per 8×8 block at their actual world
+    positions; it does not dilute one tree sample over a 256 m cell or broadcast a hit across the
+    block. Water-covered cells are rejected when authoritative water channels are present.
+- [x] C4.4 persistent shell, bounded texture updates, and crossfade.
+  - Two shell geometries are prebuilt, then reused while matrices, colors, and the 128×128 unified
+    texture source update. Recenter cadence is snapped to 128–256 m, content updates debounce for
+    500 ms, and front/back states crossfade for one second.
+  - `?canopyShellRebuild=legacy` retains the old rebuild path. Counters record shell rebuilds,
+    texture-upload bytes, upload time, and summary hits/misses.
+- [x] C4.5 GPU-authoritative far summary for continent.
+  - Layout-v2 continent runs default to GPU-authoritative terrain records using the renderer's
+    existing `GPUDevice`, avoiding a second adapter/device request. Batches are limited to eight.
+  - Canonical water/canopy v2 enrichment remains CPU-side and is deadline-sliced to 4 ms per frame;
+    a tile commits only after that enrichment is coherent. Layout v1 bypasses enrichment. This is
+    intentionally a hybrid authority until the graph channels have GPU inputs; it is not described
+    as a fully GPU-only v2 builder.
+- [x] C4.6 shadow/occlusion proxy and old controller decision.
+  - The shadow proxy consumes unified `occluderHeight`. The finite `far_shell_controller` remains
+    for long-view compatibility, but the deterministic continent path no longer uses it as a
+    second canopy authority.
 
-**Next action:** C4.2 — expose the v2 water fields through `sampleSummaryInto`, route far water and
-shore tinting through them behind the same flag, and capture graph-warm horizon-water shots plus
-fallback counters.
+**Implementation status:** complete. The graph-water horizon acceptance is blocked upstream by
+the Phase-3/CLOD seam failure `InternalBorderNotWelded: L3:0,0 final: open-boundary vertex ... weld
+missed an internal seam`. The graph-enabled shot runner was stopped after it failed to publish a
+capture and then remained alive; it must not be treated as Phase-4 evidence.
+
+**Next action:** repair the Phase-3/CLOD internal seam, then rerun the graph-enabled 2–6 km horizon
+water shot. No additional Phase-4 code defect is currently known.
 
 ## Goal
 
@@ -177,10 +208,33 @@ test oracle (the Bevy-port "no second truth" rule: same inputs, parity-tested ou
 - *Deleting the canopy worker path too early* → keep behind `?canopySource=legacy` for one soak
   cycle, then delete.
 
-## Evidence (fill before merging final commit)
+## Evidence
 
-- [ ] tile build ms p95 (layout v1 vs v2), CPU and GPU
-- [ ] canopy rebuild spike before (ms) vs after (0 rebuilds, upload bytes)
-- [ ] flythrough perf route numbers; far bucket ms from diagnostics
-- [ ] gpu-parity run on layout v2; authoritative-mode CPU-fallback counter = 0
-- [ ] horizon water/canopy shot paths + stats
+- [x] C4.1 controlled CPU layout comparison: v1/v2 `frameMs` p50/p95 5.20/6.30 versus
+  5.10/6.20 ms; `farSummaryMs` p95 2.30 versus 2.40 ms. This is the layout-cost comparison, not
+  a claim that Phase 4 improved frame time.
+- [x] Final graph-disabled deterministic perf run, after 1600 warmup frames and over 300 measured
+  frames: `frameMs` p50/p95 2.80/3.70 ms, `renderMs` p95 1.20 ms, top broad phase
+  `selectionUpdateMs` p95 1.60 ms, and top prop bucket `propsRestMs` p95 0.50 ms.
+  `farSummaryMs` p95 was 0.40 ms (`farSumTilesMs` 0.30 ms, far-clipmap refresh 0.10 ms) and
+  canopy p95 was 0.10 ms. These nested/overlapping rows are not added together. Evidence:
+  `perf-runs/continent-phase4-unified-final2/summary.{md,json}`.
+- [x] Final deterministic unified-source capture:
+  `shots/phase-4/unified-world-summary-final17.png` and sibling stats/summary JSON. It records
+  205/205 summary tiles ready, 727 canopy instances, 12,312 hits / 0 misses, two startup shell
+  builds with no steady-state geometry rebuild, 165,756 total texture-upload bytes, 3.9 ms upload
+  time, 263,169 shadow-proxy vertices, zero steady fallback samples, and zero ownership holes.
+- [x] GPU-authoritative evidence in the same capture: 205 tiles dispatched/committed in 26 batches,
+  zero failed or fallback builds, zero CPU terrain-fallback frames, and retained asynchronous
+  compute p50/p95 132.4/132.4 ms plus readback p95 114.2 ms. These are batch wall times, not
+  main-thread frame buckets, and must not be summed with frame timing.
+- [x] Verification: typecheck; 531 Vitest files / 2874 tests; production build; focused final GPU
+  runtime/counter tests (15 tests); and sample QA. Sample QA reports its expected
+  `baseline_missing` status.
+- [ ] The requested graph-hydrology horizon-water acceptance remains blocked by the upstream CLOD
+  seam error above. The graph-disabled capture proves Phase-4 wiring and counters only, not visual
+  agreement with authoritative Phase-3 water.
+- [ ] A dedicated 4 km canopy-heavy flythrough route was not captured. The bounded stationary
+  harness above establishes the steady far-system budget; a synthetic 8192-instance stress probe
+  confirmed bounded upload bytes but took 1435.5 ms on the legacy full-512 diagnostic path and is
+  not a performance pass.

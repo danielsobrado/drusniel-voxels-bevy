@@ -228,6 +228,107 @@ export function buildFarSummaryTile(input: FarSummaryBuildInput): FarSummaryTile
   return finishFarSummaryTileBuild(build);
 }
 
+export function enrichFarSummaryTileUnifiedChannels(
+  tile: FarSummaryTile,
+  terrainSampler: FarTerrainSampler,
+): FarSummaryTile {
+  if (!terrainSampler.sampleWaterSummary && !terrainSampler.sampleCanopySummary) return tile;
+  const state = createFarSummaryUnifiedEnrichment(tile);
+  stepFarSummaryUnifiedEnrichment(state, terrainSampler, Number.POSITIVE_INFINITY);
+  return tile;
+}
+
+export interface FarSummaryUnifiedEnrichmentState {
+  tile: FarSummaryTile;
+  nextSample: number;
+  nextCanopySample: number;
+}
+
+export function createFarSummaryUnifiedEnrichment(tile: FarSummaryTile): FarSummaryUnifiedEnrichmentState {
+  return { tile, nextSample: 0, nextCanopySample: 0 };
+}
+
+export function stepFarSummaryUnifiedEnrichment(
+  state: FarSummaryUnifiedEnrichmentState,
+  terrainSampler: FarTerrainSampler,
+  deadlineMs: number,
+): boolean {
+  if (!terrainSampler.sampleWaterSummary && !terrainSampler.sampleCanopySummary) {
+    state.nextSample = state.tile.samples.length;
+    state.nextCanopySample = coarseCanopySampleCount(state.tile.tileCells);
+    return true;
+  }
+  let stepped = false;
+  while (state.nextSample < state.tile.samples.length && (!stepped || performance.now() < deadlineMs)) {
+    const idx = state.nextSample++;
+    const sample = state.tile.samples[idx]!;
+    const sx = idx % state.tile.tileCells;
+    const sz = Math.floor(idx / state.tile.tileCells);
+    const tile = state.tile;
+    const wx = tile.originX + (sx + 0.5) * tile.cellSizeM;
+    const wz = tile.originZ + (sz + 0.5) * tile.cellSizeM;
+    const water = terrainSampler.sampleWaterSummary?.(wx, wz, tile.cellSizeM);
+    sample.waterCoverage = clamp01(water?.coverage
+      ?? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, sample.heightAvg)
+      ?? sample.waterCoverage);
+    sample.waterLevel = finiteOr(water?.waterLevel, sample.waterLevel);
+    sample.bodyKind = finiteOr(water?.bodyKind, sample.bodyKind);
+    sample.shoreDistance = finiteOr(water?.shoreDistance, sample.shoreDistance);
+    sample.flowX = finiteOr(water?.flowX, sample.flowX);
+    sample.flowZ = finiteOr(water?.flowZ, sample.flowZ);
+    if (sample.waterCoverage > 0.05) sample.canopyCoverage = 0;
+    stepped = true;
+  }
+
+  const canopySampleCount = coarseCanopySampleCount(state.tile.tileCells);
+  if (!terrainSampler.sampleCanopySummary) {
+    state.nextCanopySample = canopySampleCount;
+  }
+  while (state.nextCanopySample < canopySampleCount && (!stepped || performance.now() < deadlineMs)) {
+    const target = coarseCanopySampleTarget(state.tile.tileCells, state.nextCanopySample++);
+    const tile = state.tile;
+    const canopy = terrainSampler.sampleCanopySummary!(
+      tile.originX + target.sx * tile.cellSizeM,
+      tile.originZ + target.sz * tile.cellSizeM,
+      tile.cellSizeM,
+    );
+    if (target.sx < tile.tileCells && target.sz < tile.tileCells) {
+      const sample = tile.samples[target.sz * tile.tileCells + target.sx]!;
+      sample.canopyCoverage = sample.waterCoverage > 0.05 ? 0 : clamp01(canopy.coverage);
+      sample.canopyHeightAvg = finiteOr(canopy.canopyHeightAvg, sample.canopyHeightAvg);
+      sample.speciesPine = clamp01(canopy.speciesPine);
+      sample.speciesBroadleaf = clamp01(canopy.speciesBroadleaf);
+      sample.speciesDeadwood = clamp01(canopy.speciesDeadwood);
+    }
+    stepped = true;
+  }
+  return state.nextSample >= state.tile.samples.length && state.nextCanopySample >= canopySampleCount;
+}
+
+function coarseCanopySampleCount(tileCells: number): number {
+  const blockSize = Math.min(8, tileCells);
+  const blocksPerAxis = Math.ceil(tileCells / blockSize);
+  const representativesPerAxis = blockSize > 1 ? 2 : 1;
+  return blocksPerAxis * blocksPerAxis * representativesPerAxis * representativesPerAxis;
+}
+
+function coarseCanopySampleTarget(tileCells: number, sampleIndex: number): { sx: number; sz: number } {
+  const blockSize = Math.min(8, tileCells);
+  const blocksPerAxis = Math.ceil(tileCells / blockSize);
+  const representativeCells = blockSize > 1
+    ? [Math.floor(blockSize * 0.25), Math.floor(blockSize * 0.75)]
+    : [0];
+  const samplesPerBlock = representativeCells.length * representativeCells.length;
+  const blockIndex = Math.floor(sampleIndex / samplesPerBlock);
+  const localIndex = sampleIndex % samplesPerBlock;
+  const blockX = blockIndex % blocksPerAxis;
+  const blockZ = Math.floor(blockIndex / blocksPerAxis);
+  return {
+    sx: blockX * blockSize + representativeCells[localIndex % representativeCells.length]!,
+    sz: blockZ * blockSize + representativeCells[Math.floor(localIndex / representativeCells.length)]!,
+  };
+}
+
 function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySample {
   const { ringConfig, terrainSampler } = build.input;
   const { cellM, tileCells } = ringConfig;

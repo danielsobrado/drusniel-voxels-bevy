@@ -28,6 +28,20 @@ export const DEFAULT_FAR_SUMMARY_GPU_CONFIG: FarSummaryGpuConfig = {
   debugReadbackTiles: 8,
 };
 
+export function farSummaryGpuDefaultsForScene(params: URLSearchParams): FarSummaryGpuConfig {
+  if (params.get("scene") !== "continent" || params.get("farSummaryLayout") !== "2") {
+    return DEFAULT_FAR_SUMMARY_GPU_CONFIG;
+  }
+  return {
+    ...DEFAULT_FAR_SUMMARY_GPU_CONFIG,
+    enabled: true,
+    debugReadback: true,
+    commitToCache: true,
+    authoritative: true,
+    maxTilesPerBatch: 8,
+  };
+}
+
 export function farSummaryGpuConfigFromParams(
   params: URLSearchParams,
   defaults: FarSummaryGpuConfig = DEFAULT_FAR_SUMMARY_GPU_CONFIG,

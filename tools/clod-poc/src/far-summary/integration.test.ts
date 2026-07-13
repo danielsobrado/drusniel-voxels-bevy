@@ -3,11 +3,14 @@ import * as THREE from "three";
 import { createFarShellMetrics } from "../long-view/farShellMetrics.js";
 import {
   applyFarSummaryQueryOverrides,
+  farSummaryRingsForScene,
   initFarSummaryIntegration,
+  prunePendingGpuEnrichment,
   resolveFarSummaryFrameInterval,
 } from "./integration.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
+import type { FarSummaryRingRequest } from "./clipmap-rings.js";
 
 describe("resolveFarSummaryFrameInterval", () => {
   it("uses the provided default when no query override is present", () => {
@@ -37,6 +40,48 @@ describe("applyFarSummaryQueryOverrides", () => {
 
     expect(config.stream.maxTileBuildsPerFrame).toBe(4);
     expect(config.stream.maxBuildMsPerFrame).toBe(6);
+  });
+});
+
+describe("farSummaryRingsForScene", () => {
+  it("covers the continent unified clipmap inner band without changing other scenes", () => {
+    const rings = DEFAULT_FAR_SUMMARY_CONFIG.rings;
+    const unified = farSummaryRingsForScene(
+      new URLSearchParams("scene=continent&farSummaryLayout=2"),
+      rings,
+    );
+
+    expect(unified[0]?.startM).toBe(384);
+    expect(rings[0]?.startM).toBe(1536);
+    expect(farSummaryRingsForScene(new URLSearchParams("scene=continent"), rings)[0]?.startM).toBe(1536);
+  });
+
+  it("respects an explicit far clipmap inner radius", () => {
+    const unified = farSummaryRingsForScene(
+      new URLSearchParams("scene=continent&farSummaryLayout=2&farClipmapInnerRadius=768"),
+      DEFAULT_FAR_SUMMARY_CONFIG.rings,
+    );
+
+    expect(unified[0]?.startM).toBe(768);
+  });
+});
+
+describe("prunePendingGpuEnrichment", () => {
+  it("drops obsolete pre-recenter work without discarding current required tiles", () => {
+    const request = (x: number): FarSummaryRingRequest => ({
+      ring: 0,
+      key: { ring: 0, x, z: 2, cellSizeM: 32 },
+      priority: 0,
+      distanceToCamera: 0,
+      distanceToPredictedCenter: 0,
+    });
+    const pending = new Map([
+      ["0:1:2:32", { progress: 100 }],
+      ["0:9:2:32", { progress: 900 }],
+    ]);
+
+    expect(prunePendingGpuEnrichment([request(9)], pending)).toBe(1);
+    expect([...pending.keys()]).toEqual(["0:9:2:32"]);
   });
 });
 

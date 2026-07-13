@@ -240,6 +240,7 @@ export function shouldUseDeterministicCanopy(
 ): boolean {
   if (!config.enabled) return false;
   if (scene === "long-view-forest-4km") return true;
+  if (scene === "continent") return true;
   if (queryCanopy) return true;
   if (scene === "long-view-edit-stress") return true;
   if (scene?.startsWith("infinite-")) return true;

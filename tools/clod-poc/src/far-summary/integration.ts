@@ -1,16 +1,28 @@
 import * as THREE from "three";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
-import { DEFAULT_FAR_SUMMARY_CONFIG, resolveFarSummaryBuildBudgets, type FarSummaryConfig } from "./config.js";
+import { DEFAULT_FAR_CLIPMAP_CONFIG } from "../terrain/far_clipmap/far_clipmap_config.js";
+import {
+  DEFAULT_FAR_SUMMARY_CONFIG,
+  resolveFarSummaryBuildBudgets,
+  resolveFarSummaryEnrichmentBudgetMs,
+  type FarSummaryConfig,
+  type FarSummaryRingConfig,
+} from "./config.js";
 import { FarSummaryCache } from "./summary-cache.js";
 import { FarSummaryClipmapSampler } from "./clipmap-sampler.js";
-import type { FarTerrainSampler } from "./summary-tile-builder.js";
+import {
+  createFarSummaryUnifiedEnrichment,
+  stepFarSummaryUnifiedEnrichment,
+  type FarSummaryUnifiedEnrichmentState,
+  type FarTerrainSampler,
+} from "./summary-tile-builder.js";
 import { updateStreamCenter, type StreamCenter } from "./stream-center.js";
 import { computeRequiredFarSummaryTiles, type FarSummaryRingRequest } from "./clipmap-rings.js";
 import { FarSummaryDebugOverlay } from "./debug-overlay.js";
 import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
 import type { FarHeightProvider } from "./clipmap-sampler.js";
-import { farSummaryGpuConfigFromParams } from "./gpu-config.js";
+import { farSummaryGpuConfigFromParams, farSummaryGpuDefaultsForScene } from "./gpu-config.js";
 import { FarSummaryGpuRuntime } from "./gpu-runtime.js";
 import type { FarSummaryGpuRuntimeStats } from "./gpu-runtime.js";
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
@@ -19,6 +31,7 @@ import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
 export interface FarSummaryIntegrationOptions {
   terrainSampler: FarTerrainSampler;
   terrainFieldConfig?: TerrainFieldConfig;
+  sharedDevice?: GPUDevice | null;
   scene?: THREE.Scene;
   camera?: THREE.PerspectiveCamera;
   farShellMetrics?: FarShellMetrics;
@@ -84,6 +97,7 @@ function shouldRunFarSummaryProbes(params: URLSearchParams): boolean {
 function gpuDirtyRequestsForCache(
   cache: FarSummaryCache,
   requests: readonly FarSummaryRingRequest[],
+  pendingEnrichmentKeys: { has(key: string): boolean } = new Set(),
 ): FarSummaryRingRequest[] {
   const dirty: FarSummaryRingRequest[] = [];
   const seen = new Set<string>();
@@ -91,6 +105,7 @@ function gpuDirtyRequestsForCache(
     const key = `${request.key.ring}:${request.key.x}:${request.key.z}:${request.key.cellSizeM}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    if (pendingEnrichmentKeys.has(key)) continue;
     const tile = cache.getTile(request.key);
     if (!tile || tile.state === "missing" || tile.state === "requested" || tile.state === "stale" || tile.state === "cooling" || tile.state === "evicted") {
       dirty.push(request);
@@ -99,19 +114,36 @@ function gpuDirtyRequestsForCache(
   return dirty;
 }
 
+export function prunePendingGpuEnrichment<T>(
+  requests: readonly FarSummaryRingRequest[],
+  pending: Map<string, T>,
+): number {
+  const required = new Set(requests.map((request) =>
+    `${request.key.ring}:${request.key.x}:${request.key.z}:${request.key.cellSizeM}`));
+  let removed = 0;
+  for (const key of pending.keys()) {
+    if (required.has(key)) continue;
+    pending.delete(key);
+    removed++;
+  }
+  return removed;
+}
+
 export function initFarSummaryIntegration(
   options: FarSummaryIntegrationOptions,
 ): FarSummaryIntegration {
   const queryParams = currentQueryParams();
+  const unifiedLayout = queryParams.get("farSummaryLayout") === "2";
+  const configuredRings = options.config?.rings ?? DEFAULT_FAR_SUMMARY_CONFIG.rings;
   const config: FarSummaryConfig = applyFarSummaryQueryOverrides({
     ...DEFAULT_FAR_SUMMARY_CONFIG,
     ...options.config,
     stream: { ...DEFAULT_FAR_SUMMARY_CONFIG.stream, ...(options.config?.stream ?? {}) },
     sampling: { ...DEFAULT_FAR_SUMMARY_CONFIG.sampling, ...(options.config?.sampling ?? {}) },
     debug: { ...DEFAULT_FAR_SUMMARY_CONFIG.debug, ...(options.config?.debug ?? {}) },
-    rings: options.config?.rings ?? DEFAULT_FAR_SUMMARY_CONFIG.rings,
+    rings: farSummaryRingsForScene(queryParams, configuredRings),
   }, queryParams);
-  const gpuConfig = farSummaryGpuConfigFromParams(queryParams);
+  const gpuConfig = farSummaryGpuConfigFromParams(queryParams, farSummaryGpuDefaultsForScene(queryParams));
 
   const runProbeDiagnostics = shouldRunFarSummaryProbes(queryParams);
   const buildIntervalFrames = resolveFarSummaryFrameInterval(
@@ -125,12 +157,22 @@ export function initFarSummaryIntegration(
   const debugOverlay = new FarSummaryDebugOverlay(config, cache, options.scene);
   const stats = createFarSummaryStats();
   let authoritativeCpuFallbackFrames = 0;
+  let authoritativeCpuFallbackFramesTotal = 0;
+  const pendingGpuEnrichment = new Map<string, FarSummaryUnifiedEnrichmentState>();
   const gpuRuntime = new FarSummaryGpuRuntime({
     gpuConfig,
     farSummaryConfig: config,
     terrainSampler: options.terrainSampler,
     terrainFieldConfig: options.terrainFieldConfig,
-    commitTile: (tile) => cache.commitExternalTile(tile),
+    sharedDevice: options.sharedDevice,
+    commitTile: (tile) => {
+      if (!unifiedLayout) {
+        cache.commitExternalTile(tile);
+        return;
+      }
+      const key = `${tile.key.ring}:${tile.key.x}:${tile.key.z}:${tile.key.cellSizeM}`;
+      pendingGpuEnrichment.set(key, createFarSummaryUnifiedEnrichment(tile));
+    },
     onFallbackRequests: (requests) => {
       if (requests.length > 0) authoritativeCpuFallbackFrames = Math.max(authoritativeCpuFallbackFrames, 2);
     },
@@ -166,8 +208,16 @@ export function initFarSummaryIntegration(
     const nowMs = performance.now();
 
     cache.requestTiles(requests, frameIndex, nowMs);
+    prunePendingGpuEnrichment(requests, pendingGpuEnrichment);
+    const preBuildStates = cache.countRequestStates(requests);
+    const requiredCount =
+      preBuildStates.ready + preBuildStates.building + preBuildStates.staleWithSamples + preBuildStates.missing;
+    const readyRatio = requiredCount > 0 ? preBuildStates.ready / requiredCount : 1;
+    const budgets = resolveFarSummaryBuildBudgets(config.stream, readyRatio, forceSlowBuilds);
     // The dirty scan allocates a key per request; skip it entirely when no GPU runtime consumes it.
-    const gpuDirtyRequests = gpuConfig.enabled ? gpuDirtyRequestsForCache(cache, requests) : [];
+    const gpuDirtyRequests = gpuConfig.enabled
+      ? gpuDirtyRequestsForCache(cache, requests, pendingGpuEnrichment)
+      : [];
 
     const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
@@ -177,19 +227,29 @@ export function initFarSummaryIntegration(
       // Warmup boost: while the required set is mostly cold, spend a real time slice per
       // frame instead of the steady-state 2 ms sliver — otherwise a cold boot renders the
       // flat procedural-fallback band for minutes (one tile every ~15 frames).
-      const preBuildStates = cache.countRequestStates(requests);
-      const requiredCount =
-        preBuildStates.ready + preBuildStates.building + preBuildStates.staleWithSamples + preBuildStates.missing;
-      const readyRatio = requiredCount > 0 ? preBuildStates.ready / requiredCount : 1;
-      const budgets = resolveFarSummaryBuildBudgets(config.stream, readyRatio, forceSlowBuilds);
       const deadlineMs = Number.isFinite(budgets.budgetMs) && budgets.budgetMs > 0
         ? nowMs + budgets.budgetMs
         : Number.POSITIVE_INFINITY;
       cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budgets.maxBuilds, deadlineMs);
     }
-    if (cpuFallbackAllowed) authoritativeCpuFallbackFrames--;
+    if (cpuFallbackAllowed) {
+      authoritativeCpuFallbackFrames--;
+      authoritativeCpuFallbackFramesTotal++;
+    }
 
     gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests, cpuBuildSuppressedByGpuAuthority);
+    // Unified canopy is the dominant v2 enrichment cost. Use the existing cold-coverage
+    // warmup slice so graph-authoritative startup converges in seconds, then return to the
+    // bounded 4 ms steady slice used for recenter and edit replacements.
+    const enrichmentBudgetMs = resolveFarSummaryEnrichmentBudgetMs(budgets);
+    const enrichmentDeadlineMs = performance.now() + enrichmentBudgetMs;
+    for (const [key, enrichment] of pendingGpuEnrichment) {
+      if (stepFarSummaryUnifiedEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs)) {
+        cache.commitExternalTile(enrichment.tile);
+        pendingGpuEnrichment.delete(key);
+      }
+      if (performance.now() >= enrichmentDeadlineMs) break;
+    }
 
     cache.evictColdTiles(frameIndex, nowMs);
 
@@ -253,6 +313,7 @@ export function initFarSummaryIntegration(
     }
 
     cache.resetFallbackCounters();
+    publishCpuFallbackFrameCounter(authoritativeCpuFallbackFramesTotal);
   };
 
   const getHeightProvider = (): FarHeightProvider => sampler;
@@ -275,6 +336,29 @@ export function initFarSummaryIntegration(
   };
 
   return integration;
+}
+
+export function farSummaryRingsForScene(
+  params: URLSearchParams,
+  rings: readonly FarSummaryRingConfig[],
+): FarSummaryRingConfig[] {
+  if (params.get("scene") !== "continent" || params.get("farSummaryLayout") !== "2") {
+    return [...rings];
+  }
+  const queryInnerRadius = Number(params.get("farClipmapInnerRadius"));
+  const innerRadiusM = Number.isFinite(queryInnerRadius) && queryInnerRadius > 0
+    ? queryInnerRadius
+    : DEFAULT_FAR_CLIPMAP_CONFIG.innerRadiusM;
+  return rings.map((ring, index) => index === 0
+    ? { ...ring, startM: Math.min(ring.startM, innerRadiusM) }
+    : ring);
+}
+
+function publishCpuFallbackFrameCounter(total: number): void {
+  const counters = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+  if (counters) counters.far_summary_cpu_fallback_frames = total;
 }
 
 interface FarSummaryProbeResult {

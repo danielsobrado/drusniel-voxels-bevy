@@ -7,6 +7,7 @@ import {
 } from "./far_clipmap_geometry.js";
 import {
   createFarClipmapMaterial,
+  disposeFarClipmapMaterialSourceTextures,
   farClipmapMaterialDisplacementMode,
   farClipmapShaderRenderOrder,
   setFarClipmapMaterialDebugMode,
@@ -423,6 +424,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
     for (const ring of this.rings) {
       this.scene.remove(ring.mesh);
       ring.mesh.geometry.dispose();
+      disposeFarClipmapMaterialSourceTextures(ring.material);
       ring.material.dispose();
       this.geometryDisposalsTotal++;
     }
@@ -431,7 +433,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
 
   private canRefreshRing(ring: RingMesh, sourceReady: boolean, frameStats: BuildFrameStats): boolean {
     if (!sourceReady) return false;
-    if (ring.displacementMode === "shader") return true;
+    if (ring.displacementMode === "shader") {
+      return frameStats.sourceRefreshes < this.config.sourceRefreshMaxPerFrame;
+    }
     return frameStats.rebuilt < this.config.maxRebuildsPerFrame;
   }
 
@@ -468,6 +472,8 @@ class FarClipmapControllerImpl implements FarClipmapController {
       cellSizeM: ring.cellSizeM,
       cameraX: cameraPosition.x,
       cameraZ: cameraPosition.z,
+      clipInnerRadiusM: ring.innerRadiusM,
+      clipOuterRadiusM: ring.outerRadiusM,
     });
     const refreshMs = performance.now() - startedAt;
     ring.sourceRevision = this.lastSourceRevision;

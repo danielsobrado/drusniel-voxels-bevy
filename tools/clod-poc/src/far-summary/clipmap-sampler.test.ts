@@ -48,6 +48,56 @@ describe("clipmap sampler", () => {
     expect(h).toBe(50);
   });
 
+  it("exposes every unified summary channel through the allocation-free sample path", () => {
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+    config.stream.maxTileBuildsPerFrame = 100;
+    config.stream.maxTileCommitsPerFrame = 100;
+    const terrainSampler: FarTerrainSampler = {
+      ...flatSampler,
+      sampleWaterSummary: () => ({
+        coverage: 0.75,
+        waterLevel: 34,
+        bodyKind: 2,
+        shoreDistance: 80,
+        flowX: 0.25,
+        flowZ: -0.5,
+      }),
+      sampleCanopySummary: () => ({
+        coverage: 0.6,
+        canopyHeightAvg: 68,
+        speciesPine: 0.5,
+        speciesBroadleaf: 0.3,
+        speciesDeadwood: 0.2,
+      }),
+    };
+    const cache = new FarSummaryCache(config);
+    const center: StreamCenter = {
+      worldX: 0, worldZ: 0, predictedX: 0, predictedZ: 0, velocityX: 0, velocityZ: 0,
+    };
+    cache.requestTiles(computeRequiredFarSummaryTiles(center, config), 0, 0);
+    cache.buildSomeTiles(terrainSampler, 0, 0);
+    const sampler = new FarSummaryClipmapSampler(cache, config, terrainSampler);
+    const out = { height: 0, normalX: 0, normalY: 0, normalZ: 0, material: 0 };
+
+    expect(sampler.sampleSummaryInto(0, 0, 100, out)).toBe(true);
+    expect(out).toMatchObject({
+      waterCoverage: 0.75,
+      waterLevel: 34,
+      bodyKind: 2,
+      shoreDistance: 80,
+      flowX: 0.25,
+      flowZ: -0.5,
+      canopyCoverage: 0.6,
+      canopyHeightAvg: 68,
+      speciesPine: 0.5,
+      speciesBroadleaf: 0.3,
+      speciesDeadwood: 0.2,
+      structureCoverage: 0,
+      caveEntranceCoverage: 0,
+      occluderHeight: 0,
+    });
+  });
+
   it("coarser ring fallback works", () => {
     const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
     config.stream.maxTileBuildsPerFrame = 500;

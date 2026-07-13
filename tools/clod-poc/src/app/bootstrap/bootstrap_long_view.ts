@@ -4,10 +4,15 @@ import { isNaadfScene, type NaadfIntegration } from "../../naadf/integration.js"
 
 export type LongViewConfig = ReturnType<typeof createDefaultLongViewConfig>;
 
+export function farSummaryCanopyEnabled(params: URLSearchParams): boolean {
+  return params.get("farSummaryCanopy") !== "0";
+}
+
 export function isLongViewCapableScene(queryScene: string | null): boolean {
   return queryScene === "infinite-stream-far-summary"
     || queryScene === "infinite-stream-slow-builds"
     || queryScene === "infinite-islands"
+    || queryScene === "continent"
     || queryScene === "infinite-stream-straight"
     || queryScene === "infinite-stream-fast-turn"
     || queryScene === "long-view-4km"

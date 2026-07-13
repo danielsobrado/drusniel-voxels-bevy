@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FAR_SUMMARY_GPU_CONFIG,
   farSummaryGpuConfigFromParams,
+  farSummaryGpuDefaultsForScene,
   farSummaryGpuFallbackDecision,
 } from "./gpu-config.js";
 
@@ -51,6 +52,25 @@ describe("farSummaryGpuConfigFromParams", () => {
     expect(config.authoritative).toBe(true);
     expect(config.debugReadback).toBe(true);
     expect(config.commitToCache).toBe(true);
+  });
+
+  it("defaults continent layout v2 to GPU-authoritative while preserving explicit opt-out", () => {
+    const params = new URLSearchParams("scene=continent&farSummaryLayout=2");
+    const defaults = farSummaryGpuDefaultsForScene(params);
+    const config = farSummaryGpuConfigFromParams(params, defaults);
+    const disabled = farSummaryGpuConfigFromParams(
+      new URLSearchParams("scene=continent&farSummaryLayout=2&farSummaryGpuAuthoritative=0&farSummaryGpu=0"),
+      defaults,
+    );
+
+    expect(config).toMatchObject({
+      enabled: true,
+      authoritative: true,
+      commitToCache: true,
+      debugReadback: true,
+      maxTilesPerBatch: 8,
+    });
+    expect(disabled).toMatchObject({ enabled: false, authoritative: false });
   });
 
   it("rejects zero for positive-only params but allows zero debug readback tiles", () => {

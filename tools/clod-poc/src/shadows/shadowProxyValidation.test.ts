@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildTerrainSummary, sampleHeight, sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
 import { DEFAULT_SHADOW_PROXY_CONFIG } from "../config/longViewDefaults.js";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
@@ -11,6 +11,9 @@ import {
 } from "./shadowProxyValidation.js";
 
 describe("shadow proxy validation", () => {
+  afterEach(() => {
+    delete (globalThis as unknown as { window?: unknown }).window;
+  });
   it("flags invalid config", () => {
     expect(validateShadowProxyConfig({ ...DEFAULT_SHADOW_PROXY_CONFIG, gridRes: 0 }).ok).toBe(false);
     expect(validateShadowProxyConfig({ ...DEFAULT_SHADOW_PROXY_CONFIG, endM: -1 }).ok).toBe(false);
@@ -52,5 +55,24 @@ describe("shadow proxy validation", () => {
       farBase + (clampProxyHeight(skirt + config.heightBiasM, config) - farBase) * ringFadeWeight(dist, config),
       4,
     );
+  });
+
+  it("adds unified-summary occluder height to the shadow proxy", () => {
+    const summary = buildTerrainSummary([], 512, 8);
+    const config = { ...DEFAULT_SHADOW_PROXY_CONFIG, startM: 0, endM: 4096, edgeFadeM: 0 };
+    (globalThis as unknown as { window?: unknown }).window = {
+      __drusnielFarSummary: {
+        getHeightProvider: () => ({
+          sampleHeight: () => 40,
+          sampleNormal: () => ({ x: 0, y: 1, z: 0 }),
+          sampleSummaryInto: (_x: number, _z: number, _distance: number, out: Record<string, number>) => {
+            Object.assign(out, { height: 40, occluderHeight: 12 });
+            return true;
+          },
+        }),
+      },
+    };
+
+    expect(sampleProxyHeight(summary, 100, 100, config, 1000)).toBeCloseTo(52 + config.heightBiasM);
   });
 });

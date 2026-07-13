@@ -25,7 +25,11 @@ type FarHeightProviderWithRevision = FarHeightProviderWithWater & {
 
 type GlobalFarSummaryProvider = {
   getHeightProvider: () => FarHeightProvider | undefined;
+  stats?: { requestedTiles: number; readyTiles: number };
 };
+
+let latchedIntegration: GlobalFarSummaryProvider | undefined;
+let latchedCoherentProvider: FarHeightProvider | undefined;
 
 function providerWater(provider: FarHeightProvider | undefined, x: number, z: number): number {
   return (provider as FarHeightProviderWithWater | undefined)?.sampleWaterCoverage?.(x, z) ?? 0;
@@ -40,11 +44,23 @@ function providerRevision(provider: FarHeightProvider | undefined): number {
     ?? 0;
 }
 
-function globalFarSummaryProvider(): FarHeightProvider | undefined {
+export function getGlobalCoherentFarSummaryProvider(): FarHeightProvider | undefined {
   if (typeof window === "undefined") return undefined;
-  return (window as typeof window & { __drusnielFarSummary?: GlobalFarSummaryProvider })
-    .__drusnielFarSummary
-    ?.getHeightProvider();
+  const integration = (window as typeof window & { __drusnielFarSummary?: GlobalFarSummaryProvider })
+    .__drusnielFarSummary;
+  if (integration !== latchedIntegration) {
+    latchedIntegration = integration;
+    latchedCoherentProvider = undefined;
+  }
+  const stats = integration?.stats;
+  if (!stats) return integration?.getHeightProvider();
+  if (stats.requestedTiles > 0 && stats.readyTiles >= stats.requestedTiles) {
+    latchedCoherentProvider = integration?.getHeightProvider();
+  }
+  // Once coherent, keep the cache-backed provider live while a recenter/invalidation batch is
+  // filling. The cache retains stale resident tiles until replacements commit, so dropping the
+  // provider here would incorrectly make the clipmap fail its source-ready gate every batch.
+  return latchedCoherentProvider;
 }
 
 export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightProvider): FarClipmapSource {
@@ -75,7 +91,7 @@ export function createFarClipmapSourceFromProviderGetter(
 }
 
 export function createDefaultFarClipmapSource(fallbackHeightM = 0): FarClipmapSource {
-  return createFarClipmapSourceFromProviderGetter(globalFarSummaryProvider, fallbackHeightM);
+  return createFarClipmapSourceFromProviderGetter(getGlobalCoherentFarSummaryProvider, fallbackHeightM);
 }
 
 export function createFarClipmapSourceFromTerrainSampler(sampler: FarTerrainSampler): FarClipmapSource {

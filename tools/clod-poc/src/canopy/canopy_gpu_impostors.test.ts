@@ -7,7 +7,9 @@ import {
   canopyImpostorDisplayColor,
   canopyTextureFiniteCenter,
   maxCanopyGpuImpostorInstances,
+  setCanopyGpuImpostorOpacity,
   selectCanopyGpuImpostorSamples,
+  updateCanopyGpuImpostorsFromTextureSet,
 } from "./canopy_gpu_impostors.js";
 
 function redTexture(data: number[], res: number): THREE.DataTexture {
@@ -109,6 +111,25 @@ describe("canopy GPU impostors", () => {
     expect(material.opacity).toBeLessThan(0.7);
     expect(material.alphaTest).toBeGreaterThan(0);
     expect(material.alphaMap).toBeInstanceOf(THREE.DataTexture);
+    shell.dispose();
+  });
+
+  it("refreshes instance content without rebuilding shell geometry", () => {
+    const shell = buildCanopyGpuImpostorsFromTextureSet(textureSet(), DEFAULT_CANOPY_SHELL_CONFIG, lighting(), {
+      maxInstances: 8,
+      coverageThreshold: 0.2,
+    });
+    const geometry = shell.mesh.geometry;
+    const next = textureSet({ originX: 500, originZ: 100, revision: 8 });
+
+    updateCanopyGpuImpostorsFromTextureSet(shell, next, DEFAULT_CANOPY_SHELL_CONFIG, lighting());
+    setCanopyGpuImpostorOpacity(shell, 0.25);
+
+    expect(shell.mesh.geometry).toBe(geometry);
+    expect(shell.textureSetRevision).toBe(8);
+    expect(shell.centerX).toBe(700);
+    expect(shell.centerZ).toBe(300);
+    expect((shell.mesh.material as THREE.MeshBasicMaterial).opacity).toBe(0.25);
     shell.dispose();
   });
 

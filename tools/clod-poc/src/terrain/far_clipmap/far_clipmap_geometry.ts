@@ -105,6 +105,19 @@ function sampleExactSummary(
     normalZ: 0,
     material: 0,
     waterCoverage: 0,
+    waterLevel: 0,
+    bodyKind: 0,
+    shoreDistance: 0,
+    flowX: 0,
+    flowZ: 0,
+    canopyCoverage: 0,
+    canopyHeightAvg: 0,
+    speciesPine: 0,
+    speciesBroadleaf: 0,
+    speciesDeadwood: 0,
+    structureCoverage: 0,
+    caveEntranceCoverage: 0,
+    occluderHeight: 0,
   };
   try {
     const ok = source.sampleSummaryInto(x, z, distanceM, scratch);

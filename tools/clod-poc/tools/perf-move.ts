@@ -159,6 +159,27 @@ const STREAMING_DELTA_COUNTERS = [
   "live_clod_stream_stale_discards_total",
 ] as const;
 
+const PHASE4_COUNTER_KEYS = [
+  "canopy_texture_uploads",
+  "canopy_shell_tris",
+  "canopy_gpu_impostor_instances",
+  "canopy_gpu_impostor_builds",
+  "canopy_upload_ms",
+  "canopy_far_summary_hits",
+  "canopy_far_summary_misses",
+  "canopy_shell_rebuilds_total",
+  "canopy_texture_upload_bytes_total",
+  "far_summary_tiles_required",
+  "far_summary_tiles_ready",
+  "far_summary_tiles_building",
+  "far_summary_tiles_missing",
+  "far_summary_gpu_total_committed_tiles",
+  "far_summary_gpu_fallback_tiles",
+  "far_summary_cpu_fallback_frames",
+  "far_clipmap_source_ready",
+  "far_clipmap_fallback_samples_total",
+] as const;
+
 interface PhaseStats { avg: number; p50: number; p95: number; p99: number; max: number }
 interface WindowSummary {
   frames: number;
@@ -243,7 +264,7 @@ function summarizeWindow(samples: readonly Record<string, unknown>[]): WindowSum
   };
 }
 
-function buildParams(args: Args): Record<string, string> {
+export function buildParams(args: Args): Record<string, string> {
   const world = str(args["world"]) ?? "16";
   const seed = str(args["seed"]) ?? "1";
   const moveFrames = num(args["moveFrames"], 900);
@@ -266,14 +287,14 @@ function buildParams(args: Args): Record<string, string> {
   params["perfSampleFrames"] = String(Math.max(moveFrames, staticFrames) * 4);
   delete params["perfProbeConvergenceGate"];
 
-  params["scene"] = "infinite-islands";
+  params["scene"] = str(args["scene"]) ?? "infinite-islands";
   params["world"] = world;
   params["seed"] = seed;
   params["webgpuSelection"] = "1";
   params["farShell"] = "1";
-  params["x"] = String(SPAWN_X);
-  params["z"] = String(SPAWN_Z);
-  params["yaw"] = String(SPAWN_YAW);
+  params["x"] = str(args["x"]) ?? String(SPAWN_X);
+  params["z"] = str(args["z"]) ?? String(SPAWN_Z);
+  params["yaw"] = str(args["yaw"]) ?? String(SPAWN_YAW);
   const renderScale = str(args["renderScale"]);
   if (renderScale) {
     params["renderScale"] = renderScale;
@@ -285,6 +306,16 @@ function buildParams(args: Args): Record<string, string> {
   if (sceneCompileWarm) params["sceneCompileWarm"] = sceneCompileWarm;
   const viewPrewarmDraw = str(args["viewPrewarmDraw"]);
   if (viewPrewarmDraw) params["viewPrewarmDraw"] = viewPrewarmDraw;
+
+  const runnerArgs = new Set([
+    "baseUrl", "out", "profile", "world", "seed", "scene", "x", "z", "yaw",
+    "staticFrames", "moveFrames", "speed", "shots", "cpuprofile", "onsetFrames",
+    "readyTimeout", "convergenceTimeout", "moveTimeout", "checkpointConvergenceTimeout",
+    "renderScale", "viewPrewarmCompile", "sceneCompileWarm", "viewPrewarmDraw",
+  ]);
+  for (const [key, value] of Object.entries(args)) {
+    if (!runnerArgs.has(key)) params[key] = value === true ? "1" : String(value);
+  }
   return params;
 }
 
@@ -294,10 +325,10 @@ function buildUrl(baseUrl: string, params: Record<string, string>): string {
   return url.toString();
 }
 
-async function waitForReady(page: Page): Promise<void> {
+async function waitForReady(page: Page, timeoutMs: number): Promise<void> {
   const start = Date.now();
   let lastLog = 0;
-  while (Date.now() - start < READY_TIMEOUT_MS) {
+  while (Date.now() - start < timeoutMs) {
     const state = await page.evaluate(() => {
       const clod = window.__drusnielClod;
       return { ready: clod?.ready ?? false, error: clod?.error ?? null, msg: clod?.progressMsg ?? null };
@@ -310,7 +341,7 @@ async function waitForReady(page: Page): Promise<void> {
     }
     await page.waitForTimeout(250);
   }
-  throw new Error(`app not ready after ${READY_TIMEOUT_MS}ms`);
+  throw new Error(`app not ready after ${timeoutMs}ms`);
 }
 
 async function readConvergenceSnapshot(page: Page): Promise<ConvergenceSnapshot> {
@@ -596,6 +627,13 @@ async function main(): Promise<void> {
   const staticFrames = num(args["staticFrames"], 300);
   const moveFrames = num(args["moveFrames"], 900);
   const speed = num(args["speed"], 0.25);
+  const readyTimeoutMs = num(args["readyTimeout"], READY_TIMEOUT_MS);
+  const convergenceTimeoutMs = num(args["convergenceTimeout"], CONVERGENCE_TIMEOUT_MS);
+  const moveTimeoutMs = num(args["moveTimeout"], Math.max(180_000, moveFrames * 300));
+  const checkpointConvergenceTimeoutMs = num(
+    args["checkpointConvergenceTimeout"],
+    CHECKPOINT_CONVERGE_TIMEOUT_MS,
+  );
   const takeShots = str(args["shots"]) !== "0";
   const outDir = resolve(str(args["out"]) ?? join("perf-runs", `move-${new Date().toISOString().replace(/[:.]/g, "-")}`));
   mkdirSync(outDir, { recursive: true });
@@ -617,8 +655,8 @@ async function main(): Promise<void> {
     });
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await waitForReady(page);
-    const startupConverged = await waitForConvergence(page, "startup", CONVERGENCE_TIMEOUT_MS);
+    await waitForReady(page, readyTimeoutMs);
+    const startupConverged = await waitForConvergence(page, "startup", convergenceTimeoutMs);
 
     // --- static window ---
     await resetPerfProbe(page);
@@ -637,7 +675,7 @@ async function main(): Promise<void> {
       : null;
     await startMoveDriver(page, speed, segments);
     let driver = await readMoveDriver(page);
-    const moveDeadline = Date.now() + Math.max(180_000, moveFrames * 300);
+    const moveDeadline = Date.now() + moveTimeoutMs;
     while (driver.active && Date.now() < moveDeadline) {
       await settleFrames(page, 60, 60_000);
       driver = await readMoveDriver(page);
@@ -650,6 +688,7 @@ async function main(): Promise<void> {
     if (driver.error) throw new Error(`move driver failed: ${driver.error}`);
     const movingSamples = await readPerfSamples(page);
     const countersAfter = await readCounters(page, STREAMING_DELTA_COUNTERS);
+    const phase4Counters = await readCounters(page, PHASE4_COUNTER_KEYS);
     const endPose = await readPose(page);
     const movingSummary = summarizeWindow(movingSamples.slice(0, moveFrames));
     // Movement onset (the first camera turn + first-draw of rotation-revealed content)
@@ -683,7 +722,7 @@ async function main(): Promise<void> {
         const pose = routePoint(startPose, segments, fraction);
         await setPose(page, pose);
         await settleFrames(page, CHECKPOINT_SETTLE_FRAMES, 60_000);
-        const converged = await waitForConvergence(page, label, CHECKPOINT_CONVERGE_TIMEOUT_MS);
+        const converged = await waitForConvergence(page, label, checkpointConvergenceTimeoutMs);
         await settleFrames(page, 10, 30_000);
         const png = join(outDir, `${label}.png`);
         await page.screenshot({ path: png });
@@ -718,6 +757,7 @@ async function main(): Promise<void> {
       movingWorstByViews: worstFramesBy(movingSamples, "selectionSub.views"),
       streamingDeltas,
       streamingExercised,
+      phase4Counters,
       checkpoints: checkpoints.map((cp) => ({ ...cp, png: cp.png.replaceAll("\\", "/") })),
       staticSampleCount: staticSamples.length,
       movingSampleCount: movingSamples.length,
@@ -732,7 +772,7 @@ async function main(): Promise<void> {
     // checkpoint's screenshot; the moving checkpoint carries the full route set.
     const shots = qaScreenshots(checkpoints);
     const qaSummary = {
-      scene: "infinite-islands-move",
+      scene: `${params["scene"] ?? "infinite-islands"}-move`,
       run_started_utc: summary.startedAt,
       checkpoints: [
         {
@@ -771,12 +811,13 @@ async function main(): Promise<void> {
     writeFileSync(join(outDir, "qa-summary.json"), JSON.stringify(qaSummary, null, 2));
 
     const md = [
-      "# clod-poc infinite-islands movement perf",
+      `# clod-poc ${params["scene"] ?? "infinite-islands"} movement perf`,
       "",
       `git: ${git.sha.slice(0, 10)}${git.dirty === null ? " (dirty state unknown)" : git.dirty ? " (dirty tree)" : ""}`,
       `route: ${(moveFrames * speed).toFixed(0)}m at ${speed} m/frame over ${moveFrames} frames — streaming exercised: **${streamingExercised}** ` +
       `(bubble +${streamingDeltas["live_bubble_built_total"]}, stream +${streamingDeltas["live_clod_stream_apply_pages_total"]})`,
       `startup converged: ${startupConverged}`,
+      `phase 4 counters: ${Object.entries(phase4Counters).map(([key, value]) => `${key}=${value}`).join(", ")}`,
       "",
       ...windowMarkdown("static (post-convergence)", staticSummary),
       ...windowMarkdown("moving (full window)", movingSummary),

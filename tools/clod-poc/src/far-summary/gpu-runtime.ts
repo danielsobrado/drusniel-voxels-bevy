@@ -30,6 +30,7 @@ export interface FarSummaryGpuRuntimeOptions {
   farSummaryConfig: FarSummaryConfig;
   terrainSampler: FarTerrainSampler;
   terrainFieldConfig?: TerrainFieldConfig;
+  sharedDevice?: GPUDevice | null;
   commitTile?: (tile: FarSummaryTile) => void;
   onFallbackRequests?: (requests: readonly FarSummaryRingRequest[], reason: FarSummaryGpuDispatchOrFallbackResult["fallbackReason"]) => void;
   webGpuAvailable?: () => boolean;
@@ -62,6 +63,9 @@ export interface FarSummaryGpuRuntimeStats {
   totalBatchesDispatched: number;
   totalTilesDispatched: number;
   deviceReady: number;
+  lastComputeMsP50: number;
+  lastComputeMsP95: number;
+  lastReadbackMsP95: number;
   lastFallbackReason: FarSummaryGpuDispatchOrFallbackResult["fallbackReason"] | null;
   lastError: string | null;
 }
@@ -86,6 +90,9 @@ export class FarSummaryGpuRuntime {
     totalBatchesDispatched: 0,
     totalTilesDispatched: 0,
     deviceReady: 0,
+    lastComputeMsP50: 0,
+    lastComputeMsP95: 0,
+    lastReadbackMsP95: 0,
     lastFallbackReason: null,
     lastError: null,
   };
@@ -200,6 +207,9 @@ export class FarSummaryGpuRuntime {
     }
     this.statsState.totalBatchesDispatched += result.counters.batchesDispatched;
     this.statsState.totalTilesDispatched += result.counters.tilesDispatched;
+    this.statsState.lastComputeMsP50 = result.counters.computeMsP50;
+    this.statsState.lastComputeMsP95 = result.counters.computeMsP95;
+    this.statsState.lastReadbackMsP95 = result.counters.readbackMsP95;
     result.counters.authoritative = this.options.gpuConfig.authoritative ? 1 : 0;
     result.counters.lastCommittedTiles = this.statsState.lastCommittedTiles;
     result.counters.totalCommittedTiles = this.statsState.totalCommittedTiles;
@@ -239,10 +249,11 @@ export class FarSummaryGpuRuntime {
     if (!this.builderPromise) {
       this.builderPromise = (this.options.builderFactory
         ? this.options.builderFactory()
-        : createFarSummaryGpuBuilder({
-            config: this.options.gpuConfig,
-            terrainFieldConfig: this.options.terrainFieldConfig,
-          }))
+         : createFarSummaryGpuBuilder({
+             config: this.options.gpuConfig,
+             sharedDevice: this.options.sharedDevice ?? undefined,
+             terrainFieldConfig: this.options.terrainFieldConfig,
+           }))
         .then((builder) => {
           if (this.disposed) {
             builder?.dispose();
@@ -270,6 +281,9 @@ export class FarSummaryGpuRuntime {
     counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
     counters.batchesDispatched = this.statsState.totalBatchesDispatched;
     counters.tilesDispatched = this.statsState.totalTilesDispatched;
+    counters.computeMsP50 = this.statsState.lastComputeMsP50;
+    counters.computeMsP95 = this.statsState.lastComputeMsP95;
+    counters.readbackMsP95 = this.statsState.lastReadbackMsP95;
     counters.runtimeError = this.statsState.lastError ? 1 : 0;
     publishFarSummaryGpuCounters(undefined, counters);
   }
@@ -287,6 +301,9 @@ export class FarSummaryGpuRuntime {
     counters.cpuBuildsSuppressed = this.statsState.lastCpuBuildSuppressed;
     counters.batchesDispatched = this.statsState.totalBatchesDispatched;
     counters.tilesDispatched = this.statsState.totalTilesDispatched;
+    counters.computeMsP50 = this.statsState.lastComputeMsP50;
+    counters.computeMsP95 = this.statsState.lastComputeMsP95;
+    counters.readbackMsP95 = this.statsState.lastReadbackMsP95;
     counters.runtimeError = 1;
     publishFarSummaryGpuCounters(undefined, counters);
   }

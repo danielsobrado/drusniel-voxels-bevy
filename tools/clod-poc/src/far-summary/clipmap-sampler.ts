@@ -20,6 +20,22 @@ export interface FarHeightProviderSample {
   normalZ: number;
   material: number;
   waterCoverage?: number;
+  waterLevel?: number;
+  bodyKind?: number;
+  shoreDistance?: number;
+  flowX?: number;
+  flowZ?: number;
+  canopyCoverage?: number;
+  canopyHeightAvg?: number;
+  speciesPine?: number;
+  speciesBroadleaf?: number;
+  speciesDeadwood?: number;
+  structureCoverage?: number;
+  caveEntranceCoverage?: number;
+  occluderHeight?: number;
+  slope?: number;
+  roughness?: number;
+  unifiedChannels?: boolean;
 }
 
 export function ringIndexForDistance(distanceM: number, config: FarSummaryConfig): number {
@@ -135,6 +151,22 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
     out.normalZ = sample.normalZ;
     out.material = sample.dominantMaterial;
     out.waterCoverage = sample.waterCoverage;
+    out.waterLevel = sample.waterLevel;
+    out.bodyKind = sample.bodyKind;
+    out.shoreDistance = sample.shoreDistance;
+    out.flowX = sample.flowX;
+    out.flowZ = sample.flowZ;
+    out.canopyCoverage = sample.canopyCoverage;
+    out.canopyHeightAvg = sample.canopyHeightAvg;
+    out.speciesPine = sample.speciesPine;
+    out.speciesBroadleaf = sample.speciesBroadleaf;
+    out.speciesDeadwood = sample.speciesDeadwood;
+    out.structureCoverage = sample.structureCoverage;
+    out.caveEntranceCoverage = sample.caveEntranceCoverage;
+    out.occluderHeight = sample.occluderHeight;
+    out.slope = sample.slope;
+    out.roughness = sample.roughness;
+    out.unifiedChannels = Boolean(this.terrainSampler.sampleWaterSummary);
     return Number.isFinite(out.height)
       && Number.isFinite(out.normalX)
       && Number.isFinite(out.normalY)

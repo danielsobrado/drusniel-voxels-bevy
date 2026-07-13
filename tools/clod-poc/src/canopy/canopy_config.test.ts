@@ -62,6 +62,7 @@ describe("canopy config", () => {
 
   it("enables deterministic canopy for forest long-view scene", () => {
     expect(shouldUseDeterministicCanopy("long-view-forest-4km", DEFAULT_CANOPY_SHELL_CONFIG, false)).toBe(true);
+    expect(shouldUseDeterministicCanopy("continent", DEFAULT_CANOPY_SHELL_CONFIG, false)).toBe(true);
     expect(shouldUseDeterministicCanopy("long-view-4km", DEFAULT_CANOPY_SHELL_CONFIG, false)).toBe(false);
     expect(shouldUseDeterministicCanopy("long-view-4km", DEFAULT_CANOPY_SHELL_CONFIG, true)).toBe(true);
   });

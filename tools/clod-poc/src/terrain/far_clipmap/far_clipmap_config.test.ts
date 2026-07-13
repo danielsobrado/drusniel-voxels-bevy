@@ -178,14 +178,17 @@ describe("far clipmap controller", () => {
     const blocked = controller.update(new THREE.Vector3(1, 0, 1));
     ready = true;
     const firstReady = controller.update(new THREE.Vector3(1, 0, 1));
+    controller.update(new THREE.Vector3(1, 0, 1));
+    const caughtUp = controller.update(new THREE.Vector3(1, 0, 1));
 
     expect(blocked.sourceReady).toBe(0);
     expect(blocked.readyTiles).toBe(0);
     expect(blocked.pendingTiles).toBe(3);
     expect(blocked.rebuiltTilesThisFrame).toBe(0);
     expect(firstReady.sourceReady).toBe(1);
-    expect(firstReady.readyTiles).toBe(3);
-    expect(firstReady.pendingTiles).toBe(0);
+    expect(firstReady.readyTiles).toBe(1);
+    expect(caughtUp.readyTiles).toBe(3);
+    expect(caughtUp.pendingTiles).toBe(0);
     controller.dispose();
   });
 

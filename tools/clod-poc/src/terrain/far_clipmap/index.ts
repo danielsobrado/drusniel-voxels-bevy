@@ -39,6 +39,7 @@ export type { FarClipmapSource } from "./far_clipmap_source.js";
 
 export {
   createFarClipmapMaterial,
+  disposeFarClipmapMaterialSourceTextures,
   farClipmapDebugModeCode,
   farClipmapMaterialDisplacementMode,
   setFarClipmapMaterialDebugMode,

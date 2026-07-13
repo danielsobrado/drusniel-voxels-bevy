@@ -21,16 +21,23 @@ import {
 } from "./canopy_debug.js";
 import {
   buildCanopyTextureSet,
+  buildCanopyTextureSetFromFarSummary,
   disposeCanopyTextureSet,
+  updateCanopyTextureSetInPlace,
 } from "./canopy_texture.js";
 import {
   buildCanopyGpuImpostorsFromTextureSet,
+  canopyGpuImpostorDefaultOpacity,
   maxCanopyGpuImpostorInstances,
+  setCanopyGpuImpostorOpacity,
+  updateCanopyGpuImpostorsFromTextureSet,
   type CanopyGpuImpostorShell,
 } from "./canopy_gpu_impostors.js";
 import { createCanopyRemoteTileBuilder } from "./canopy_worker_client.js";
 import { getNaadfIntegrationFromWindow } from "../naadf/canopyBridge.js";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
+import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
+import { getGlobalCoherentFarSummaryProvider } from "../terrain/far_clipmap/far_clipmap_source.js";
 
 export interface CanopyShellSystemDeps {
   scene: THREE.Scene;
@@ -42,6 +49,7 @@ export interface CanopyShellSystemDeps {
   getConfig: () => CanopyShellConfig;
   getDebugState: () => CanopyDebugState;
   onCounters?: (counters: Record<string, number>) => void;
+  getFarSummaryProvider?: () => FarHeightProvider | undefined;
 }
 
 export interface CanopyShellSystem {
@@ -59,6 +67,8 @@ export function shouldRebuildCanopyShell(
 ): boolean {
   if (!prev) return true;
   if (prev.syntheticFallback !== next.syntheticFallback) return true;
+  if (prev.originX !== next.originX || prev.originZ !== next.originZ) return true;
+  if (prev.extentM !== next.extentM || prev.resolution !== next.resolution) return true;
   return prev.revision !== next.revision;
 }
 
@@ -152,9 +162,15 @@ export function createCanopyShellSystem(
   const active = shouldUseDeterministicCanopy(scene, config, queryCanopy);
   if (!active) return null;
 
+  const unifiedSource = searchParams.get("farSummaryLayout") === "2"
+    && searchParams.get("canopySource") !== "legacy";
+  const persistentShell = unifiedSource && searchParams.get("canopyShellRebuild") !== "legacy";
+  const impostorCoverageThreshold = unifiedSource ? 0.01 : 0.12;
+  const getFarSummaryProvider = deps.getFarSummaryProvider ?? getGlobalCoherentFarSummaryProvider;
+
   // Canopy tiles build in a worker whenever one is available; NAADF scenes stay on the
   // main-thread path because the NAADF coverage merge lives in main-thread integration state.
-  const remoteBuilder = createCanopyRemoteTileBuilder();
+  const remoteBuilder = unifiedSource ? null : createCanopyRemoteTileBuilder();
   const remoteSource = remoteBuilder
     ? {
       available: () => remoteBuilder.available() && getNaadfIntegrationFromWindow() === undefined,
@@ -184,12 +200,20 @@ export function createCanopyShellSystem(
   const overlays = createCanopyDebugOverlays(deps.scene);
 
   let shell: CanopyGpuImpostorShell | null = null;
+  let standbyShell: CanopyGpuImpostorShell | null = null;
+  let fadingFromShell: CanopyGpuImpostorShell | null = null;
+  let fadingToShell: CanopyGpuImpostorShell | null = null;
   let textureSet: CanopyTextureSet | null = null;
   let metrics = createEmptyCanopyMetrics();
   let uploadBudgetUsed = 0;
   let textureRefreshPending = false;
   let centerX = deps.worldSizeCells / 2;
   let centerZ = deps.worldSizeCells / 2;
+  let farSummaryRevision = -1;
+  let farSummaryCenterX = Number.NaN;
+  let farSummaryCenterZ = Number.NaN;
+  let textureDirtySinceMs = 0;
+  let fadeStartedAtMs = -1;
 
   clipmap.setFreezeCenter(config.debug.freezeClipCenter);
 
@@ -202,6 +226,7 @@ export function createCanopyShellSystem(
   const positionShellAtTextureCenter = () => {
     if (!shell) return;
     shell.mesh.position.set(shell.centerX, 0, shell.centerZ);
+    if (standbyShell) standbyShell.mesh.position.set(standbyShell.centerX, 0, standbyShell.centerZ);
     metrics.gpuImpostorCenterX = shell.centerX;
     metrics.gpuImpostorCenterZ = shell.centerZ;
   };
@@ -212,6 +237,13 @@ export function createCanopyShellSystem(
       shell.dispose();
       shell = null;
     }
+    if (standbyShell) {
+      deps.scene.remove(standbyShell.mesh);
+      standbyShell.dispose();
+      standbyShell = null;
+    }
+    fadingFromShell = null;
+    fadingToShell = null;
     disposeCanopyTextureSet(textureSet);
     textureSet = null;
     metrics.shellTriangles = 0;
@@ -232,7 +264,7 @@ export function createCanopyShellSystem(
     const lighting = deps.getLighting();
     shell = buildCanopyGpuImpostorsFromTextureSet(set, config, lighting, {
       maxInstances: maxCanopyGpuImpostorInstances(config.budgets.maxShellTris),
-      coverageThreshold: 0.12,
+      coverageThreshold: impostorCoverageThreshold,
       sampleStride: 1,
     });
     deps.scene.add(shell.mesh);
@@ -240,10 +272,44 @@ export function createCanopyShellSystem(
     metrics.gpuImpostorEnabled = 1;
     metrics.gpuImpostorInstances = shell.instanceCount;
     metrics.gpuImpostorBuilds++;
+    metrics.shellRebuildsTotal++;
     metrics.gpuImpostorMaxInstances = shell.maxInstances;
     metrics.gpuImpostorCoverageThreshold = shell.coverageThreshold;
     metrics.gpuImpostorMaxColorChannel = Number(shell.mesh.userData.canopyGpuImpostorMaxColorChannel) || 0;
     metrics.gpuImpostorOpacity = Number(shell.mesh.userData.canopyGpuImpostorOpacity) || 0;
+    positionShellAtTextureCenter();
+    if (persistentShell && !standbyShell) {
+      standbyShell = buildCanopyGpuImpostorsFromTextureSet(set, config, lighting, {
+        maxInstances: maxCanopyGpuImpostorInstances(config.budgets.maxShellTris),
+        coverageThreshold: impostorCoverageThreshold,
+        sampleStride: 1,
+      });
+      setCanopyGpuImpostorOpacity(standbyShell, 0);
+      standbyShell.mesh.visible = false;
+      deps.scene.add(standbyShell.mesh);
+      metrics.gpuImpostorBuilds++;
+      metrics.shellRebuildsTotal++;
+    }
+  };
+
+  const refreshPersistentShell = (set: CanopyTextureSet) => {
+    if (!shell) {
+      rebuildShell(set);
+      return;
+    }
+    if (!standbyShell) return;
+    updateCanopyGpuImpostorsFromTextureSet(standbyShell, set, config, deps.getLighting());
+    metrics.shellTriangles = standbyShell.triangleCount;
+    metrics.gpuImpostorInstances = standbyShell.instanceCount;
+    metrics.gpuImpostorCenterX = standbyShell.centerX;
+    metrics.gpuImpostorCenterZ = standbyShell.centerZ;
+    metrics.gpuImpostorMaxColorChannel = Number(standbyShell.mesh.userData.canopyGpuImpostorMaxColorChannel) || 0;
+    metrics.textureUploadBytesTotal += standbyShell.instanceCount * (16 + 3) * Float32Array.BYTES_PER_ELEMENT;
+    setCanopyGpuImpostorOpacity(standbyShell, 0);
+    standbyShell.mesh.visible = true;
+    fadingFromShell = shell;
+    fadingToShell = standbyShell;
+    fadeStartedAtMs = performance.now();
     positionShellAtTextureCenter();
   };
 
@@ -254,26 +320,48 @@ export function createCanopyShellSystem(
       return false;
     }
 
-    const visibleTiles = clipmap.getVisibleTiles();
     const farRadius = config.distances.shellEndM;
-    const useSynthetic = shouldUseSyntheticCanopyFallback(config, forceSynthetic, visibleTiles.length);
-
     const t0 = performance.now();
-    const next = buildCanopyTextureSet({
-      visibleTiles,
-      config,
-      centerX,
-      centerZ,
-      syntheticFallback: useSynthetic,
-      terrainSummary: deps.terrainSummary,
-      farRadius,
-    });
+    let next: CanopyTextureSet;
+    if (unifiedSource && !forceSynthetic && !config.debug.forceSyntheticSource) {
+      const provider = getFarSummaryProvider();
+      if (!provider?.sampleSummaryInto) return false;
+      const built = buildCanopyTextureSetFromFarSummary({ provider, config, centerX, centerZ });
+      next = built.set;
+      metrics.farSummaryHits = built.hits;
+      metrics.farSummaryMisses = built.misses;
+      metrics.averageCoverage = built.averageCoverage;
+      metrics.maxCoverage = built.maxCoverage;
+      farSummaryRevision = provider.revision?.() ?? farSummaryRevision;
+      farSummaryCenterX = centerX;
+      farSummaryCenterZ = centerZ;
+    } else {
+      const visibleTiles = clipmap.getVisibleTiles();
+      const useSynthetic = shouldUseSyntheticCanopyFallback(config, forceSynthetic, visibleTiles.length);
+      next = buildCanopyTextureSet({
+        visibleTiles,
+        config,
+        centerX,
+        centerZ,
+        syntheticFallback: useSynthetic,
+        terrainSummary: deps.terrainSummary,
+        farRadius,
+      });
+    }
     debugState.syntheticFallbackActive = next.syntheticFallback;
     if (next.syntheticFallback) metrics.fallbackSyntheticTiles++;
     metrics.uploadMs = performance.now() - t0;
     metrics.textureUploads++;
 
-    if (shouldRebuildCanopyShell(textureSet, next)) {
+    if (persistentShell) {
+      refreshPersistentShell(next);
+      if (textureSet && updateCanopyTextureSetInPlace(textureSet, next)) {
+        disposeCanopyTextureSet(next);
+      } else {
+        disposeCanopyTextureSet(textureSet);
+        textureSet = next;
+      }
+    } else if (shouldRebuildCanopyShell(textureSet, next)) {
       disposeCanopyTextureSet(textureSet);
       textureSet = next;
       rebuildShell(next);
@@ -309,10 +397,7 @@ export function createCanopyShellSystem(
       textureRefreshPending = true;
     }
 
-    clipmap.setFreezeCenter(config.debug.freezeClipCenter || debugState.freezeClipCenter);
-    const clipUpdate = clipmap.update(cameraX, cameraZ, config, terrainSampler, treeDistribution);
-    centerX = clipUpdate.centerX;
-    centerZ = clipUpdate.centerZ;
+    const freezeCenter = config.debug.freezeClipCenter || debugState.freezeClipCenter;
     const runtimeMetrics = {
       fallbackSyntheticTiles: metrics.fallbackSyntheticTiles,
       textureUploads: metrics.textureUploads,
@@ -327,8 +412,45 @@ export function createCanopyShellSystem(
       gpuImpostorMaxColorChannel: metrics.gpuImpostorMaxColorChannel,
       gpuImpostorOpacity: metrics.gpuImpostorOpacity,
       uploadMs: metrics.uploadMs,
+      averageCoverage: metrics.averageCoverage,
+      maxCoverage: metrics.maxCoverage,
+      farSummaryHits: metrics.farSummaryHits,
+      farSummaryMisses: metrics.farSummaryMisses,
+      shellRebuildsTotal: metrics.shellRebuildsTotal,
+      textureUploadBytesTotal: metrics.textureUploadBytesTotal,
     };
-    metrics = { ...clipUpdate.metrics, ...runtimeMetrics };
+    let texturesDirty = false;
+    if (unifiedSource) {
+      const provider = getFarSummaryProvider();
+      const snapM = Math.max(128, Math.min(256, (config.clipmap.rings[0]?.cellSizeM ?? 32) * 4));
+      const nextCenterX = freezeCenter && Number.isFinite(farSummaryCenterX)
+        ? farSummaryCenterX
+        : Math.round(cameraX / snapM) * snapM;
+      const nextCenterZ = freezeCenter && Number.isFinite(farSummaryCenterZ)
+        ? farSummaryCenterZ
+        : Math.round(cameraZ / snapM) * snapM;
+      const revision = provider?.revision?.() ?? -1;
+      texturesDirty = textureSet === null
+        || nextCenterX !== farSummaryCenterX
+        || nextCenterZ !== farSummaryCenterZ
+        || revision !== farSummaryRevision;
+      centerX = nextCenterX;
+      centerZ = nextCenterZ;
+      metrics = {
+        ...createEmptyCanopyMetrics(),
+        ...runtimeMetrics,
+        requestedTiles: provider ? 1 : 0,
+        visibleTiles: provider ? 1 : 0,
+        queuedTiles: provider ? 0 : 1,
+      };
+    } else {
+      clipmap.setFreezeCenter(freezeCenter);
+      const clipUpdate = clipmap.update(cameraX, cameraZ, config, terrainSampler, treeDistribution);
+      centerX = clipUpdate.centerX;
+      centerZ = clipUpdate.centerZ;
+      texturesDirty = clipUpdate.texturesDirty;
+      metrics = { ...clipUpdate.metrics, ...runtimeMetrics };
+    }
 
     if (!shouldKeepCanopyShellActive(config, false)) {
       disposeShellAndTextures();
@@ -339,21 +461,43 @@ export function createCanopyShellSystem(
     }
 
     uploadBudgetUsed = 0;
-    if (clipUpdate.texturesDirty) textureRefreshPending = true;
+    if (texturesDirty && !textureRefreshPending) {
+      textureRefreshPending = true;
+      textureDirtySinceMs = performance.now();
+    }
+    const debounceReady = textureSet === null
+      || !persistentShell
+      || (fadeStartedAtMs < 0 && performance.now() - textureDirtySinceMs >= 500);
     if (shouldRefreshCanopyTextures({
       hasTextureSet: textureSet !== null,
-      texturesDirty: clipUpdate.texturesDirty,
+      texturesDirty,
       textureRefreshPending,
-      queuedTiles: clipUpdate.metrics.queuedTiles,
-    })) {
+      queuedTiles: metrics.queuedTiles,
+    }) && debounceReady) {
       if (shouldAttemptTextureUpload(config.budgets.maxTextureUploadsPerFrame, uploadBudgetUsed)) {
         const uploaded = ensureTextures(false);
-        if (uploaded) textureRefreshPending = false;
+        if (uploaded) {
+          textureRefreshPending = false;
+          textureDirtySinceMs = 0;
+        }
         uploadBudgetUsed++;
       }
     }
 
     if (shell) {
+      if (fadeStartedAtMs >= 0) {
+        const fadeT = Math.min(1, (performance.now() - fadeStartedAtMs) / 1000);
+        if (fadingFromShell) setCanopyGpuImpostorOpacity(fadingFromShell, canopyGpuImpostorDefaultOpacity() * (1 - fadeT));
+        if (fadingToShell) setCanopyGpuImpostorOpacity(fadingToShell, canopyGpuImpostorDefaultOpacity() * fadeT);
+        if (fadeT >= 1 && fadingFromShell && fadingToShell) {
+          fadingFromShell.mesh.visible = false;
+          standbyShell = fadingFromShell;
+          shell = fadingToShell;
+          fadingFromShell = null;
+          fadingToShell = null;
+          fadeStartedAtMs = -1;
+        }
+      }
       positionShellAtTextureCenter();
       const material = shell.mesh.material;
       if (!Array.isArray(material) && "wireframe" in material) material.wireframe = debugState.showShellWireframe;

@@ -5,9 +5,12 @@ export { createTreeDistribution, worldCellIndex, worldCellOrigin } from "./deter
 export { createBlendedTerrainSampler, createAnalyticTerrainSampler, createSummaryTerrainSampler } from "./canopy_terrain_sampler.js";
 export { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summary_builder.js";
 export { createCanopyClipmap, updateCanopyClipmap, ringForDistance } from "./canopy_clipmap.js";
-export { buildCanopyTextureSet, disposeCanopyTextureSet } from "./canopy_texture.js";
+export { buildCanopyTextureSet, buildCanopyTextureSetFromFarSummary, disposeCanopyTextureSet, updateCanopyTextureSetInPlace } from "./canopy_texture.js";
 export {
   buildCanopyGpuImpostorsFromTextureSet,
+  updateCanopyGpuImpostorsFromTextureSet,
+  setCanopyGpuImpostorOpacity,
+  canopyGpuImpostorDefaultOpacity,
   canopyTextureFiniteCenter,
   maxCanopyGpuImpostorInstances,
   selectCanopyGpuImpostorSamples,

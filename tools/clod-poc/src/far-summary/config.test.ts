@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_FAR_SUMMARY_CONFIG, resolveFarSummaryBuildBudgets } from "./config.js";
+import {
+  DEFAULT_FAR_SUMMARY_CONFIG,
+  resolveFarSummaryBuildBudgets,
+  resolveFarSummaryEnrichmentBudgetMs,
+} from "./config.js";
 
 const stream = DEFAULT_FAR_SUMMARY_CONFIG.stream;
 
@@ -35,5 +39,12 @@ describe("resolveFarSummaryBuildBudgets", () => {
     const budgets = resolveFarSummaryBuildBudgets(wide, 0.1, false);
     expect(budgets.maxBuilds).toBe(3);
     expect(budgets.budgetMs).toBe(4);
+  });
+});
+
+describe("resolveFarSummaryEnrichmentBudgetMs", () => {
+  it("uses the cold-coverage slice and returns to four milliseconds when coherent", () => {
+    expect(resolveFarSummaryEnrichmentBudgetMs({ maxBuilds: 4, budgetMs: 12, warming: true })).toBe(12);
+    expect(resolveFarSummaryEnrichmentBudgetMs({ maxBuilds: undefined, budgetMs: 2, warming: false })).toBe(4);
   });
 });

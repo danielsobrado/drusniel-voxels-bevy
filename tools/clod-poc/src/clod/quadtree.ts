@@ -132,20 +132,41 @@ interface ParentBuildOutput {
   polish: DiagonalPolishStats;
 }
 
-function simplifyParentPage(welded: PageMesh, locks: Uint8Array, footprint: PageFootprint, cfg: ClodPagesConfig): SimplifyOutput {
-  const sim = simplifyPage(clonePageMesh(welded), locks, cfg);
+export function selectParentSimplificationCandidate(
+  sim: SimplifyOutput,
+  welded: PageMesh,
+  footprint: PageFootprint,
+  zeroAreaEpsilon: number,
+  label: string,
+): SimplifyOutput {
   try {
-    stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-    assertNoInternalBorders(sim.mesh, footprint);
+    stripDegenerateTriangles(sim.mesh, zeroAreaEpsilon);
+    assertNoInternalBorders(sim.mesh, footprint, label);
     return sim;
   } catch {
     try {
-      assertNoInternalBorders(welded, footprint);
+      assertNoInternalBorders(welded, footprint, label);
       return { mesh: welded, resultError: 0, errorWorld: 0, lowBenefit: true };
     } catch {
       return { mesh: sim.mesh, resultError: sim.resultError, errorWorld: sim.errorWorld, lowBenefit: true };
     }
   }
+}
+
+function simplifyParentPage(
+  welded: PageMesh,
+  locks: Uint8Array,
+  footprint: PageFootprint,
+  cfg: ClodPagesConfig,
+  label: string,
+): SimplifyOutput {
+  return selectParentSimplificationCandidate(
+    simplifyPage(clonePageMesh(welded), locks, cfg),
+    welded,
+    footprint,
+    cfg.validation.zero_area_epsilon,
+    label,
+  );
 }
 
 function pageMeshPolishConfig(cfg: ClodPagesConfig) {
@@ -186,7 +207,7 @@ function buildParentOutput(
   validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
   const footprint = footprintFor(level, nx, nz, cfg);
   const locks = buildOuterBorderLocks(welded);
-  const sim = simplifyParentPage(welded, locks, footprint, cfg);
+  const sim = simplifyParentPage(welded, locks, footprint, cfg, `L${level}:${nx},${nz}`);
   const simplified = sim.mesh !== welded;
   let polish = emptyDiagonalPolishStats();
   if (simplified) {

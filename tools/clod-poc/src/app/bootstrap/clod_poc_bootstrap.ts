@@ -34,7 +34,11 @@ import { createProceduralTerrainTextures } from "../../textures/terrainTextureAr
 import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
 import { booleanQueryParam, positiveNumberQueryParam } from "./bootstrap_query_params.js";
-import { applyLongViewScenePreset, isLongViewCapableScene } from "./bootstrap_long_view.js";
+import {
+  applyLongViewScenePreset,
+  farSummaryCanopyEnabled,
+  isLongViewCapableScene,
+} from "./bootstrap_long_view.js";
 import {
   materialChurnConfigForQuery,
   materialChurnDiagnostics,
@@ -289,29 +293,34 @@ export async function bootstrapClodPoc() {
       };
       if (searchParams.get("farSummaryLayout") === "2") {
         const hydrologySystem = world.hydrologySystem;
-        const sampleWater = hydrologySystem
+        const graphHydrologyEnabled = searchParams.get("continentHydrology") !== "0"
+          && searchParams.get("continent_hydrology") !== "0";
+        const sampleWater = hydrologySystem && graphHydrologyEnabled
           ? (x: number, z: number, cellSizeM = 1) => sampleFarSummaryHydrology(hydrologySystem, x, z, cellSizeM)
           : undefined;
         farSummaryTerrainSampler.sampleWaterSummary = sampleWater;
-        farSummaryTerrainSampler.sampleCanopySummary = createFarSummaryCanopySource({
-          getConfig: terrainView.getCanopyConfig,
-          sampleHeight: farSummaryTerrainSampler.sampleHeight,
-          sampleMaterial: farSummaryTerrainSampler.sampleMaterial,
-          sampleWater: sampleWater
-            ? (x, z) => sampleWater(x, z, 1)
-            : (x, z) => ({
-              coverage: farSummaryTerrainSampler.sampleHeight(x, z) < seaLevel ? 1 : 0,
-              waterLevel: seaLevel,
-              bodyKind: 0,
-              shoreDistance: 0,
-              flowX: 0,
-              flowZ: 0,
-            }),
-        });
+        if (farSummaryCanopyEnabled(searchParams)) {
+          farSummaryTerrainSampler.sampleCanopySummary = createFarSummaryCanopySource({
+            getConfig: terrainView.getCanopyConfig,
+            sampleHeight: farSummaryTerrainSampler.sampleHeight,
+            sampleMaterial: farSummaryTerrainSampler.sampleMaterial,
+            sampleWater: sampleWater
+              ? (x, z) => sampleWater(x, z, 1)
+              : (x, z) => ({
+                coverage: farSummaryTerrainSampler.sampleHeight(x, z) < seaLevel ? 1 : 0,
+                waterLevel: seaLevel,
+                bodyKind: 0,
+                shoreDistance: 0,
+                flowX: 0,
+                flowZ: 0,
+              }),
+          });
+        }
       }
       farSummaryIntegration = initFarSummaryIntegration({
         terrainSampler: farSummaryTerrainSampler,
         terrainFieldConfig: world.worldSource.metadata.terrain,
+        sharedDevice: renderer.rendererWebGpuDevice,
         scene: renderer.scene,
         camera: renderer.camera,
         farShellMetrics,
