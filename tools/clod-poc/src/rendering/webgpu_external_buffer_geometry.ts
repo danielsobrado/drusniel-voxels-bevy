@@ -67,7 +67,8 @@ export function createExternalGpuClodGeometry(
 
   let indirectEnabled = false;
   if (page.meshlets && page.meshlets.meshletCount > 0) {
-    const indirect = new IndirectStorageBufferAttribute(INDEXED_INDIRECT_COMMAND_WORDS, 1);
+    const indirectWordCount = page.meshlets.meshletCount * INDEXED_INDIRECT_COMMAND_WORDS;
+    const indirect = new IndirectStorageBufferAttribute(indirectWordCount, 1);
     geometry.indirect = indirect;
     geometry.indirectOffset = Array.from(
       { length: page.meshlets.meshletCount },
