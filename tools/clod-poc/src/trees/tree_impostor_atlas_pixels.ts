@@ -29,12 +29,16 @@ interface TileDilationState {
   phase: "coverage" | "seed" | "flood";
 }
 
-export function copyTreeImpostorPixels(raw: ArrayBufferView, expectedLength: number): Uint8Array {
+export function viewTreeImpostorPixels(raw: ArrayBufferView, expectedLength: number): Uint8Array {
   const source = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
   if (source.length !== expectedLength) {
     throw new Error(`tree impostor readback returned ${source.length} bytes; expected ${expectedLength}`);
   }
-  return source.slice();
+  return source;
+}
+
+export function copyTreeImpostorPixels(raw: ArrayBufferView, expectedLength: number): Uint8Array {
+  return viewTreeImpostorPixels(raw, expectedLength).slice();
 }
 
 export function createTreeImpostorRowFlipJob(
@@ -85,6 +89,10 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
   const tilesX = width / tileSize;
   const tilesY = height / tileSize;
   const totalTiles = tilesX * tilesY;
+  const pixelCount = tileSize * tileSize;
+  const filled = new Uint8Array(pixelCount);
+  const queued = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
   let tileIndex = 0;
   let state: TileDilationState | null = null;
 
@@ -94,15 +102,14 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
   ) * BYTES_PER_PIXEL;
 
   const createState = (): TileDilationState => {
-    const originX = (tileIndex % tilesX) * tileSize;
-    const originY = Math.floor(tileIndex / tilesX) * tileSize;
-    const pixelCount = tileSize * tileSize;
+    filled.fill(0);
+    queued.fill(0);
     return {
-      originX,
-      originY,
-      filled: new Uint8Array(pixelCount),
-      queued: new Uint8Array(pixelCount),
-      queue: new Int32Array(pixelCount),
+      originX: (tileIndex % tilesX) * tileSize,
+      originY: Math.floor(tileIndex / tilesX) * tileSize,
+      filled,
+      queued,
+      queue,
       head: 0,
       tail: 0,
       cursor: 0,
@@ -197,7 +204,6 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
       let operations = 0;
       while (tileIndex < totalTiles && operations < limit) {
         state ??= createState();
-        const pixelCount = tileSize * tileSize;
         if (state.phase === "coverage") {
           const index = state.cursor;
           const x = index % tileSize;
