@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
 import {
   PooledGpuClodRootMesher,
@@ -139,33 +139,29 @@ describe("pooled GPU CLOD root mesher", () => {
     });
   });
 
-  it("isolates optional resident hierarchy failures from terrain builds", async () => {
+  it("does not re-ingest completed CPU page results into the resident cache", async () => {
     await withGlobalCounters(async (counters) => {
       let ingests = 0;
       let disposals = 0;
       const residentPages = {
-        ingest: () => {
-          ingests++;
-          throw new Error("synthetic resident cache failure");
-        },
+        ingest: () => { ingests++; },
         dispose: () => { disposals++; },
       } as unknown as GpuClodResidentPageCache;
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-      try {
-        const pool = new PooledGpuClodRootMesher([
-          fakeMesher(async () => ({ nodes: [], buildMs: 1, transferBytes: 0 })),
-        ], residentPages);
+      const pool = new PooledGpuClodRootMesher([
+        fakeMesher(async () => ({ nodes: [], buildMs: 1, transferBytes: 0 })),
+      ], residentPages);
 
-        await expect(pool.buildPages([{ px: 0, pz: 0 }])).resolves.toMatchObject({ buildMs: 1 });
-        await expect(pool.buildPages([{ px: 1, pz: 0 }])).resolves.toMatchObject({ buildMs: 1 });
+      await expect(pool.buildPages([{ px: 0, pz: 0 }])).resolves.toMatchObject({ buildMs: 1 });
+      await expect(pool.buildPages([{ px: 1, pz: 0 }])).resolves.toMatchObject({ buildMs: 1 });
 
-        expect(ingests).toBe(1);
-        expect(disposals).toBe(1);
-        expect(counters["live_clod_gpu_hierarchy_failures_total"]).toBe(1);
-        expect(counters["live_clod_gpu_hierarchy_runtime_disabled"]).toBe(1);
-      } finally {
-        warn.mockRestore();
-      }
+      expect(ingests).toBe(0);
+      expect(disposals).toBe(0);
+      expect(counters["live_clod_gpu_hierarchy_failures_total"]).toBe(0);
+      expect(counters["live_clod_gpu_hierarchy_runtime_disabled"]).toBe(0);
+
+      pool.dispose();
+      expect(disposals).toBe(1);
+      expect(counters["live_clod_gpu_hierarchy_runtime_disabled"]).toBe(1);
     });
   });
 
