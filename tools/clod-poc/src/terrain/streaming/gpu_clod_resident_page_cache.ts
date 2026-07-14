@@ -43,6 +43,7 @@ export interface GpuClodResidentPageCacheStats {
 
 interface ResidentEntry {
   page: GpuClodResidentPage;
+  sourceMesh: PageMesh;
   lastTouch: number;
 }
 
@@ -125,7 +126,7 @@ export class GpuClodResidentPageCache {
   private upsert(node: ClodPageNode): void {
     const revision = normalizedRevision(node.revision);
     const existing = this.entries.get(node.id);
-    if (existing?.page.revision === revision) {
+    if (existing?.page.revision === revision && existing.sourceMesh === node.mesh) {
       existing.lastTouch = ++this.clock;
       return;
     }
@@ -142,7 +143,7 @@ export class GpuClodResidentPageCache {
       })
       : null;
     const page = this.uploadPage(node, revision, hierarchy);
-    this.entries.set(node.id, { page, lastTouch: ++this.clock });
+    this.entries.set(node.id, { page, sourceMesh: node.mesh, lastTouch: ++this.clock });
     this.residentBytes += page.byteLength;
     this.uploadsTotal++;
     this.uploadBytesTotal += page.byteLength;
