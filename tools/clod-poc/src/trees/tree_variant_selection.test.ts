@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
+  TREE_IMPOSTOR_MAX_ATLAS_VARIANTS,
   treeImpostorFramesForVariant,
   type TreeImpostorAtlas,
 } from "./tree_impostor_baker.js";
+import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import {
   treeAtlasVariantIndex,
   treeVariantIndex,
@@ -15,8 +17,8 @@ const frame = (index: number) => ({
   x: index,
   y: 0,
   direction: [0, 1, 0] as [number, number, number],
-  uvMin: [0, 0] as [number, number],
-  uvMax: [1, 1] as [number, number],
+  uvMin: [0, index * 0.25] as [number, number],
+  uvMax: [1, (index + 1) * 0.25] as [number, number],
 });
 
 describe("tree structural variant selection", () => {
@@ -31,14 +33,19 @@ describe("tree structural variant selection", () => {
     }
   });
 
-  it("maps all structural variants onto the available atlas pages consistently", () => {
+  it("allocates one production atlas page per structural variant", () => {
+    expect(TREE_IMPOSTOR_MAX_ATLAS_VARIANTS).toBe(TREE_STRUCTURAL_VARIANTS);
+    expect(TREE_IMPOSTOR_MAX_ATLAS_VARIANTS).toBe(4);
+    expect([0, 1, 2, 3].map((variant) => treeAtlasVariantIndex(variant, 4))).toEqual([0, 1, 2, 3]);
+  });
+
+  it("keeps bounded page mapping for partial or legacy atlases", () => {
     expect([0, 1, 2, 3].map((variant) => treeAtlasVariantIndex(variant, 2))).toEqual([0, 1, 0, 1]);
   });
 
-  it("uses the same bounded atlas-page mapping in the CPU impostor runtime", () => {
+  it("returns the matching page for every production structural variant", () => {
     const texture = new THREE.Texture();
-    const frames0 = [frame(0)];
-    const frames1 = [frame(1)];
+    const frames = [0, 1, 2, 3].map((index) => [frame(index)]);
     const atlas: TreeImpostorAtlas = {
       species: "oak",
       texture,
@@ -47,17 +54,16 @@ describe("tree structural variant selection", () => {
       resolutionPx: 1,
       atlasSizePx: 1,
       atlasWidthPx: 1,
-      atlasHeightPx: 2,
-      variantCount: 2,
-      frames: frames0,
-      variantFrames: { 0: frames0, 1: frames1 },
+      atlasHeightPx: 4,
+      variantCount: 4,
+      frames: frames[0],
+      variantFrames: { 0: frames[0], 1: frames[1], 2: frames[2], 3: frames[3] },
       ready: true,
       dispose() {},
     };
 
-    expect(treeImpostorFramesForVariant(atlas, 0)).toBe(frames0);
-    expect(treeImpostorFramesForVariant(atlas, 1)).toBe(frames1);
-    expect(treeImpostorFramesForVariant(atlas, 2)).toBe(frames0);
-    expect(treeImpostorFramesForVariant(atlas, 3)).toBe(frames1);
+    for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
+      expect(treeImpostorFramesForVariant(atlas, variant)).toBe(frames[variant]);
+    }
   });
 });
