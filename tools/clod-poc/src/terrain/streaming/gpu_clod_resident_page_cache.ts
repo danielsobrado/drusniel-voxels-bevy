@@ -14,6 +14,7 @@ import {
 export type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 
 const MIN_BUFFER_BYTES = 4;
+const FIRST_VIEW_PROTECTION_TOUCHES = 128;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
 
@@ -33,6 +34,7 @@ interface ResidentEntry {
   page: GpuClodResidentPage;
   sourceMesh: PageMesh | null;
   lastTouch: number;
+  protectedUntilClock: number;
 }
 
 export class GpuClodResidentPageCache {
@@ -73,30 +75,40 @@ export class GpuClodResidentPageCache {
       return;
     }
 
-    const protectedIds = new Set<string>();
-    let protectedBytes = 0;
+    const incomingIds = new Set<string>();
+    let incomingBytes = 0;
     for (const page of pages) {
       if (page.level > this.config.residentMaxLevel) {
         throw new Error(
           `GPU CLOD resident page ${page.id} level ${page.level} exceeds configured max ${this.config.residentMaxLevel}`,
         );
       }
-      if (protectedIds.has(page.id)) throw new Error(`duplicate GPU CLOD resident page ${page.id} in one batch`);
-      protectedIds.add(page.id);
-      protectedBytes += page.byteLength;
+      if (incomingIds.has(page.id)) {
+        throw new Error(`duplicate GPU CLOD resident page ${page.id} in one batch`);
+      }
+      incomingIds.add(page.id);
+      incomingBytes += page.byteLength;
     }
 
     const budget = this.budgetBytes();
-    if (protectedBytes > budget) {
-      throw new Error(`GPU CLOD resident batch needs ${protectedBytes} bytes, budget is ${budget}`);
+    if (incomingBytes > budget) {
+      throw new Error(`GPU CLOD resident batch needs ${incomingBytes} bytes, budget is ${budget}`);
+    }
+
+    let retainedProtectedBytes = 0;
+    for (const [nodeId, entry] of this.entries) {
+      if (incomingIds.has(nodeId)) continue;
+      if (entry.protectedUntilClock > this.clock) retainedProtectedBytes += entry.page.byteLength;
+    }
+    if (incomingBytes + retainedProtectedBytes > budget) {
+      throw new Error(
+        `GPU CLOD resident batch plus pending first-view pages needs ${incomingBytes + retainedProtectedBytes} bytes, budget is ${budget}`,
+      );
     }
 
     for (const page of pages) this.replace(page, null);
     this.adoptedPagesTotal += pages.length;
-    this.evictToBudget(protectedIds);
-    if (this.residentBytes > budget) {
-      throw new Error(`GPU CLOD resident cache could not satisfy ${budget}-byte budget without evicting the active batch`);
-    }
+    this.evictToBudget(incomingIds);
     this.publishCounters();
   }
 
@@ -171,9 +183,31 @@ export class GpuClodResidentPageCache {
       retireGpuClodResidentPage(page.id, existing.page);
       this.residentBytes -= existing.page.byteLength;
     }
-    this.entries.set(page.id, { page, sourceMesh, lastTouch: ++this.clock });
+
+    const touch = ++this.clock;
+    const entry: ResidentEntry = {
+      page,
+      sourceMesh,
+      lastTouch: touch,
+      protectedUntilClock: sourceMesh === null ? touch + FIRST_VIEW_PROTECTION_TOUCHES : 0,
+    };
+    this.entries.set(page.id, entry);
     this.residentBytes += page.byteLength;
-    registerGpuClodResidentPage(page);
+    registerGpuClodResidentPage(
+      page,
+      sourceMesh === null
+        ? () => this.releaseFirstViewProtection(page)
+        : undefined,
+    );
+  }
+
+  private releaseFirstViewProtection(page: GpuClodResidentPage): void {
+    const entry = this.entries.get(page.id);
+    if (!entry || entry.page !== page) return;
+    entry.protectedUntilClock = 0;
+    entry.lastTouch = ++this.clock;
+    this.evictToBudget(new Set([page.id]));
+    this.publishCounters();
   }
 
   private uploadCpuNode(node: ClodPageNode, revision: number): GpuClodResidentPage {
@@ -244,7 +278,9 @@ export class GpuClodResidentPageCache {
       let oldestId: string | null = null;
       let oldestTouch = Infinity;
       for (const [id, entry] of this.entries) {
-        if (protectedIds.has(id) || entry.lastTouch >= oldestTouch) continue;
+        if (protectedIds.has(id)) continue;
+        if (entry.protectedUntilClock > this.clock) continue;
+        if (entry.lastTouch >= oldestTouch) continue;
         oldestId = id;
         oldestTouch = entry.lastTouch;
       }
