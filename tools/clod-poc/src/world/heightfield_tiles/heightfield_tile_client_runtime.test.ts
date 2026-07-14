@@ -1,5 +1,66 @@
-import { describe, expect, it } from "vitest";
-import { heightfieldTileBuildAllowed } from "./heightfield_tile_client_runtime.js";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+const clientMocks = vi.hoisted(() => ({
+  buildWorld: vi.fn(async () => ({})),
+  buildHeightfieldTiles: vi.fn(),
+  dispose: vi.fn(),
+}));
+const runtimeMocks = vi.hoisted(() => ({
+  create: vi.fn(),
+}));
+
+vi.mock("../../clod_worker_client.js", () => ({
+  ClodWorkerClient: class {
+    buildWorld(...args: unknown[]) {
+      return clientMocks.buildWorld(...args);
+    }
+
+    buildHeightfieldTiles(...args: unknown[]) {
+      return clientMocks.buildHeightfieldTiles(...args);
+    }
+
+    dispose(): void {
+      clientMocks.dispose();
+    }
+  },
+}));
+vi.mock("./heightfield_tile_runtime.js", () => ({
+  createHeightfieldTileRuntime: runtimeMocks.create,
+}));
+vi.mock("../../save/save_runtime.js", () => ({
+  getSaveRuntimeFeatureStamps: vi.fn(() => null),
+  subscribeSaveRuntimeFeatureStamps: vi.fn(),
+}));
+
+import { ClodWorkerClient } from "../../clod_worker_client.js";
+import {
+  heightfieldTileBuildAllowed,
+  heightfieldTilesReadyForPage,
+  installHeightfieldTileClientRuntime,
+} from "./heightfield_tile_client_runtime.js";
+
+const requestedTileIds: string[] = [];
+let client: ClodWorkerClient;
+
+beforeAll(async () => {
+  vi.stubGlobal("window", {});
+  runtimeMocks.create.mockResolvedValue({
+    authoritative: true,
+    cache: {
+      get: ({ x, z }: { x: number; z: number }) => {
+        requestedTileIds.push(`${x},${z}`);
+        return {};
+      },
+    },
+    update: vi.fn(),
+    counters: vi.fn(),
+    invalidateBounds: vi.fn(),
+    dispose: vi.fn(),
+  });
+  installHeightfieldTileClientRuntime();
+  client = new ClodWorkerClient();
+  await (client.buildWorld as (...args: unknown[]) => Promise<unknown>)(...Array(14).fill(null));
+});
 
 function idleCounters(overrides: Record<string, number> = {}): Record<string, number> {
   return {
@@ -13,6 +74,23 @@ function idleCounters(overrides: Record<string, number> = {}): Record<string, nu
     ...overrides,
   };
 }
+
+describe("heightfieldTilesReadyForPage", () => {
+  it.each([
+    ["large positive origin", 127, 127],
+    ["large negative origin", -128, -128],
+    ["small origin", 0, 0],
+  ])("uses half-open tile bounds at a %s", (_name, pageCoord, expectedTileCoord) => {
+    requestedTileIds.length = 0;
+
+    expect(heightfieldTilesReadyForPage(
+      client,
+      { px: pageCoord, pz: pageCoord, level: 2 },
+      64,
+    )).toBe(true);
+    expect(requestedTileIds).toEqual([`${expectedTileCoord},${expectedTileCoord}`]);
+  });
+});
 
 describe("heightfieldTileBuildAllowed", () => {
   it("blocks until streamed-root counters exist", () => {

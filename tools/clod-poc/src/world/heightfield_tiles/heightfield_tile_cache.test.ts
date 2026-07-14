@@ -7,7 +7,7 @@ import {
   type HeightfieldTileBuildResult,
 } from "./heightfield_tile_cache.js";
 import type { HeightfieldTileConfig } from "./heightfield_tile_config.js";
-import type { WorldTileKey } from "../tile_key.js";
+import { tileKeyString, WORLD_TILE_SIZE_M, type WorldTileKey } from "../tile_key.js";
 
 function config(overrides: Partial<HeightfieldTileConfig> = {}): HeightfieldTileConfig {
   return {
@@ -168,6 +168,81 @@ describe("HeightfieldTileCache", () => {
     cache.recordFallbackSample();
     cache.recordFallbackSample(3);
     expect(cache.counters().fallbackSamplesTotal).toBe(4);
+  });
+
+  it("keeps physical inflight accounting and current-epoch tile ownership across invalidation", async () => {
+    const requests: Array<{
+      keys: WorldTileKey[];
+      resolve: (result: HeightfieldTileBuildResult) => void;
+    }> = [];
+    let activeBuilds = 0;
+    let maxActiveBuilds = 0;
+    const builder: HeightfieldTileBatchBuilder = (keys) => {
+      const pending = deferred<HeightfieldTileBuildResult>();
+      activeBuilds++;
+      maxActiveBuilds = Math.max(maxActiveBuilds, activeBuilds);
+      requests.push({ keys: [...keys], resolve: pending.resolve });
+      return pending.promise.finally(() => {
+        activeBuilds--;
+      });
+    };
+    const cache = new HeightfieldTileCache(config({
+      radiusM: 300,
+      maxResidentTiles: 16,
+      maxInflightBatches: 2,
+      maxTilesPerBatch: 1,
+    }), 0, builder);
+
+    cache.update({ x: 128, z: 128, frameIndex: 1 });
+    cache.update({ x: 128, z: 128, frameIndex: 2 });
+    expect(requests).toHaveLength(2);
+    const staleRequests = requests.slice();
+    expect(new Set(staleRequests.map((request) => tileKeyString(request.keys[0]!))).size).toBe(2);
+
+    const invalidatedKey = staleRequests[0]!.keys[0]!;
+    const minX = invalidatedKey.x * WORLD_TILE_SIZE_M;
+    const minZ = invalidatedKey.z * WORLD_TILE_SIZE_M;
+    expect(cache.invalidateBounds({
+      minX,
+      minZ,
+      maxX: minX + WORLD_TILE_SIZE_M,
+      maxZ: minZ + WORLD_TILE_SIZE_M,
+    })).toBe(1);
+    cache.update({ x: 128, z: 128, frameIndex: 3 });
+    expect(requests).toHaveLength(2);
+
+    staleRequests[1]!.resolve({
+      tiles: staleRequests[1]!.keys.map((key) => tile(key)),
+      buildMs: 1,
+    });
+    await drainMicrotasks();
+    await drainMicrotasks();
+    cache.update({ x: 128, z: 128, frameIndex: 4 });
+    expect(requests).toHaveLength(3);
+    expect(tileKeyString(requests[2]!.keys[0]!)).toBe(tileKeyString(staleRequests[0]!.keys[0]!));
+
+    staleRequests[0]!.resolve({
+      tiles: staleRequests[0]!.keys.map((key) => tile(key)),
+      buildMs: 1,
+    });
+    await drainMicrotasks();
+    await drainMicrotasks();
+    cache.update({ x: 128, z: 128, frameIndex: 5 });
+    expect(requests).toHaveLength(4);
+
+    const currentEpochIds = requests.slice(staleRequests.length)
+      .map((request) => tileKeyString(request.keys[0]!));
+    expect(new Set(currentEpochIds).size).toBe(currentEpochIds.length);
+    expect(maxActiveBuilds).toBeLessThanOrEqual(2);
+
+    cache.clear();
+    for (const request of requests.slice(staleRequests.length)) {
+      request.resolve({ tiles: request.keys.map((key) => tile(key)), buildMs: 1 });
+    }
+    await drainMicrotasks();
+    await drainMicrotasks();
+    expect(activeBuilds).toBe(0);
+    expect((cache as unknown as { inflightBatches: number }).inflightBatches).toBe(0);
   });
 
   it("rebuilds invalidated bounds without reloading stale persisted tiles", async () => {

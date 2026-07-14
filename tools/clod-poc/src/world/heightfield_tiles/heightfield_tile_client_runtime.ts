@@ -60,10 +60,12 @@ export function heightfieldTilesReadyForPage(
   const span = basePageSizeM * (2 ** level);
   const minX = coord.px * span;
   const minZ = coord.pz * span;
-  const maxX = minX + span - Number.EPSILON;
-  const maxZ = minZ + span - Number.EPSILON;
-  for (let tileZ = Math.floor(minZ / WORLD_TILE_SIZE_M); tileZ <= Math.floor(maxZ / WORLD_TILE_SIZE_M); tileZ++) {
-    for (let tileX = Math.floor(minX / WORLD_TILE_SIZE_M); tileX <= Math.floor(maxX / WORLD_TILE_SIZE_M); tileX++) {
+  const firstTileX = Math.floor(minX / WORLD_TILE_SIZE_M);
+  const firstTileZ = Math.floor(minZ / WORLD_TILE_SIZE_M);
+  const lastTileX = Math.ceil((minX + span) / WORLD_TILE_SIZE_M) - 1;
+  const lastTileZ = Math.ceil((minZ + span) / WORLD_TILE_SIZE_M) - 1;
+  for (let tileZ = firstTileZ; tileZ <= lastTileZ; tileZ++) {
+    for (let tileX = firstTileX; tileX <= lastTileX; tileX++) {
       if (!runtime.cache.get({ x: tileX, z: tileZ })) return false;
     }
   }
