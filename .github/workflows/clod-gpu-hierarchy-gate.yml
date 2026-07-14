@@ -5,10 +5,13 @@ on:
     paths:
       - 'tools/clod-poc/src/terrain/streaming/gpu_clod_*.ts'
       - 'tools/clod-poc/src/terrain/streaming/root_height_morph.ts'
-      - 'tools/clod-poc/src/terrain/streaming/streamed_page_bounds_guard.ts'
+      - 'tools/clod-poc/src/terrain/streaming/streamed_page_bounds_guard*.ts'
       - 'tools/clod-poc/src/terrain/rendering/clod_render_node_cache.ts'
       - 'tools/clod-poc/src/rendering/webgpu_*.ts'
       - 'tools/clod-poc/src/cache/clodStreamRootCache.ts'
+      - 'tools/clod-poc/src/ui/gui/clod_gui.ts'
+      - 'tools/clod-poc/src/app/bootstrap/ui/imported_state_startup.ts'
+      - 'tools/clod-poc/tools/benchmark-gpu-clod-resident.ts'
       - 'tools/clod-poc/src/types.ts'
       - 'tools/clod-poc/package.json'
       - 'tools/clod-poc/package-lock.json'
@@ -17,10 +20,13 @@ on:
     paths:
       - 'tools/clod-poc/src/terrain/streaming/gpu_clod_*.ts'
       - 'tools/clod-poc/src/terrain/streaming/root_height_morph.ts'
-      - 'tools/clod-poc/src/terrain/streaming/streamed_page_bounds_guard.ts'
+      - 'tools/clod-poc/src/terrain/streaming/streamed_page_bounds_guard*.ts'
       - 'tools/clod-poc/src/terrain/rendering/clod_render_node_cache.ts'
       - 'tools/clod-poc/src/rendering/webgpu_*.ts'
       - 'tools/clod-poc/src/cache/clodStreamRootCache.ts'
+      - 'tools/clod-poc/src/ui/gui/clod_gui.ts'
+      - 'tools/clod-poc/src/app/bootstrap/ui/imported_state_startup.ts'
+      - 'tools/clod-poc/tools/benchmark-gpu-clod-resident.ts'
       - 'tools/clod-poc/src/types.ts'
       - 'tools/clod-poc/package.json'
       - 'tools/clod-poc/package-lock.json'
@@ -60,6 +66,7 @@ jobs:
           src/terrain/streaming/gpu_clod_root_mesher_pool.test.ts
           src/terrain/streaming/gpu_clod_resident_registry.test.ts
           src/terrain/streaming/gpu_clod_resident_adoption.test.ts
+          src/terrain/streaming/streamed_page_bounds_guard_resident.test.ts
           src/rendering/webgpu_device_bridge.test.ts
           src/rendering/webgpu_external_buffer_geometry.test.ts
           src/terrain/streaming/root_height_morph.test.ts
