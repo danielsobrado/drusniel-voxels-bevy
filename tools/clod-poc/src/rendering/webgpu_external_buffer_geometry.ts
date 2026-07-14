@@ -26,6 +26,7 @@ interface ExternalGeometryState {
   lease: GpuClodResidentPageLease;
   backend: WebGpuBackendBridge;
   backendKeys: object[];
+  originalDispose: () => void;
   released: boolean;
 }
 
@@ -37,6 +38,7 @@ export function createExternalGpuClodGeometry(
   const backend = renderer.backend as unknown as WebGpuBackendBridge;
   const backendKeys: object[] = [];
   const geometry = new THREE.BufferGeometry();
+  const originalDispose = geometry.dispose.bind(geometry);
   const interleaved = new THREE.InterleavedBuffer(
     new Float32Array(GPU_CLOD_VERTEX_FLOATS),
     GPU_CLOD_VERTEX_FLOATS,
@@ -100,8 +102,10 @@ export function createExternalGpuClodGeometry(
     lease,
     backend,
     backendKeys,
+    originalDispose,
     released: false,
   } satisfies ExternalGeometryState;
+  geometry.dispose = () => releaseExternalGpuClodGeometry(geometry);
   recordResidentView(indirectEnabled);
   return geometry;
 }
@@ -115,7 +119,7 @@ export function releaseExternalGpuClodGeometry(geometry: THREE.BufferGeometry): 
   if (!state || state.released) return;
   state.released = true;
   for (const key of state.backendKeys) state.backend.get(key).buffer = NON_OWNING_DISPOSE_BUFFER;
-  geometry.dispose();
+  state.originalDispose();
   state.lease.release();
   delete geometry.userData[EXTERNAL_GEOMETRY_KEY];
 }
