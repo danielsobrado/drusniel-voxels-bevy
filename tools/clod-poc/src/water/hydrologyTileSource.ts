@@ -186,7 +186,7 @@ export class HydrologyTileCache {
    * rely on (LRU thrash), while its own vertices barely resolve one tile cell anyway.
    */
   get coarseBypassCellSize(): number {
-    return this.cellSize * 3;
+    return Math.min(this.cellSize * 3, 24);
   }
 
   get residentTiles(): number {

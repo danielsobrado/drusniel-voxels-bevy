@@ -37,6 +37,29 @@ describe("far summary cache", () => {
     expect(cache.countRequestStates(requests).ready).toBe(1);
   });
 
+  it("preserves a required tile's fresh touch time when delayed external work commits", () => {
+    const config = structuredClone(DEFAULT_FAR_SUMMARY_CONFIG);
+    config.stream.maxTileBuildsPerFrame = 1;
+    config.stream.evictionGraceSeconds = 12;
+    const cache = new FarSummaryCache(config);
+    const requests = computeRequiredFarSummaryTiles({
+      worldX: 0, worldZ: 0,
+      predictedX: 0, predictedZ: 0,
+      velocityX: 0, velocityZ: 0,
+    }, config);
+    const deferred: Parameters<FarSummaryCache["commitExternalTile"]>[0][] = [];
+
+    cache.requestTiles(requests, 0, 0);
+    cache.buildSomeTiles(flatSampler, 0, 0, 1, Number.POSITIVE_INFINITY, (tile) => deferred.push(tile));
+    const delayed = deferred[0]!;
+
+    cache.requestTiles(requests, 100, 20_000);
+    cache.commitExternalTile(delayed);
+    cache.evictColdTiles(100, 20_000);
+
+    expect(cache.getTile(delayed.key)?.state).toBe("ready");
+  });
+
   it("lifecycle: missing -> requested -> ready", () => {
     const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
     config.stream.maxTileBuildsPerFrame = 500;
