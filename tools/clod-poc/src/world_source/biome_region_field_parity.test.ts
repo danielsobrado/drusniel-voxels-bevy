@@ -86,7 +86,7 @@ describe("BiomeRegionField canonical classification", () => {
       { name: "ocean by island mask", x: 0, z: 0, height: 48, island: { ...LAND_ISLAND, mask: 0.02 }, expected: BIOME_IDS.ocean },
       { name: "coast by sea band", x: 0, z: 0, height: SEA_LEVEL + 2, island: LAND_ISLAND, expected: BIOME_IDS.coast },
       { name: "coast by shore distance", x: 0, z: 0, height: 48, island: { ...LAND_ISLAND, shoreDistanceM: 20 }, expected: BIOME_IDS.coast },
-      { name: "mountain", x: 0, z: 0, height: SEA_LEVEL + 70, island: LAND_ISLAND, expected: BIOME_IDS.mountain },
+      { name: "mountain", x: 0, z: 0, height: SEA_LEVEL + 50, island: LAND_ISLAND, expected: BIOME_IDS.mountain },
       { name: "swamp", x: -2000, z: -2000, height: SEA_LEVEL + 8, island: LAND_ISLAND, expected: BIOME_IDS.swamp },
       { name: "plains", x: -2000, z: 700, height: 48, island: LAND_ISLAND, expected: BIOME_IDS.plains },
       { name: "forest", x: -2000, z: -1400, height: 48, island: { ...LAND_ISLAND, nearestCenterX: -2000, nearestCenterZ: -1400 }, expected: BIOME_IDS.forest },
@@ -112,7 +112,7 @@ describe("BiomeRegionField canonical classification", () => {
 
   it("does not allow duplicated threshold literals inside the WGSL classifier", () => {
     const classifier = wgslFunctionBody("classifyBiomeRegion");
-    for (const literal of ["1.5", "0.08", "4.0", "42.0", "420.0", "68.0", "8.0", "0.42", "0.72", "0.58", "0.46"]) {
+    for (const literal of ["1.5", "0.08", "4.0", "42.0", "420.0", "48.0", "8.0", "0.42", "0.72", "0.58", "0.46"]) {
       expect(classifier, `literal ${literal} must only live in defaultBiomeRegionContract`).not.toContain(literal);
     }
   });
