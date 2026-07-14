@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
@@ -7,6 +7,7 @@ import {
 } from "./gpu_clod_hierarchy_config.js";
 import { buildGpuClodMeshletHierarchy } from "./gpu_clod_meshlet_hierarchy.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
+import type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 import {
   GPU_CLOD_PACKED_VERTEX_FLOATS,
   GPU_CLOD_WELD_WGSL,
@@ -145,6 +146,35 @@ describe("GPU CLOD resident page cache", () => {
       else delete (globalThis as unknown as { GPUBufferUsage?: unknown }).GPUBufferUsage;
     }
   });
+
+  it("expires first-view protection instead of pinning a full cache forever", () => {
+    let now = 0;
+    const cache = new GpuClodResidentPageCache(
+      {} as GPUDevice,
+      {
+        ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
+        enabled: true,
+        residentMaxLevel: 0,
+        maxResidentBytes: 300,
+      },
+      () => now,
+    );
+    const first = residentPage("L0:0,0", 200);
+    const second = residentPage("L0:1,0", 200);
+    try {
+      cache.adopt(first);
+      now = 100;
+      expect(() => cache.adopt(second)).toThrow(/pending first-view pages/);
+      now = 6_000;
+      cache.adopt(second);
+      expect(cache.stats().residentPages).toBe(1);
+      expect(cache.stats().residentBytes).toBe(200);
+      expect(cache.stats().evictionsTotal).toBe(1);
+      expect(first.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      cache.dispose();
+    }
+  });
 });
 
 describe("GPU CLOD compute contracts", () => {
@@ -175,6 +205,22 @@ function pageNode(mesh: PageMesh, revision: number): ClodPageNode {
     mesh,
     footprint: { minX: 0, minZ: 0, maxX: 2, maxZ: 2 },
     bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
+    errorWorld: 0,
+    lowBenefit: false,
+  };
+}
+
+function residentPage(id: string, byteLength: number): GpuClodResidentPage {
+  return {
+    id,
+    revision: 1,
+    level: 0,
+    vertexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
+    indexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
+    vertexCount: 3,
+    indexCount: 3,
+    byteLength,
+    bounds: { center: [0, 0, 0], radius: 1, minY: 0, maxY: 0 },
     errorWorld: 0,
     lowBenefit: false,
   };
