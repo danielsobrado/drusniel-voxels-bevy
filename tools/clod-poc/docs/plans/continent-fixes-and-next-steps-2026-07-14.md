@@ -181,7 +181,7 @@ targeted micro-bench) shows the win. Ranked by expected gameplay impact.
 
 ### C3. Tile cache dispatches one batch per `dispatch()` call (MOOT at current config)
 
-- **Where:** `heightfield_tile_cache.ts:287` — no loop, so each
+- **Where:** `src/world/heightfield_tiles/heightfield_tile_cache.ts:287` — no loop, so each
   `dispatch()` starts at most one batch.
 - **Status:** the shipped config is `config/heightfield_tiles.yaml max_inflight_batches: 1`, so
   there is **no unused concurrency to fill** — this is currently a non-issue. It only becomes
