@@ -40,11 +40,10 @@ export function applyImportedStateSideEffects(
     material.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
   });
   for (const view of views.values()) {
-    if (isExternalGpuClodGeometry(view.mesh.geometry as THREE.BufferGeometry)) {
-      view.mat.setWireframe(false);
-    }
+    const resident = isExternalGpuClodGeometry(view.mesh.geometry as THREE.BufferGeometry);
+    if (resident) view.mat.setWireframe(false);
     view.mat.setBaseColor(state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8);
-    if (state.recomputedNormals) {
+    if (state.recomputedNormals && !resident) {
       setViewNormalMode(view, "recomputed");
     }
   }
