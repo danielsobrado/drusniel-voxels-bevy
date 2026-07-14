@@ -27,6 +27,7 @@ import type { EnvironmentLighting } from "../environment/environment.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import { TREE_LODS } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeHydrologyWater, TreeRingInstanceBuffers } from "./tree_node_material.js";
 import {
@@ -35,6 +36,12 @@ import {
   TREE_RING_JITTER_Z_SALT,
   TREE_RING_YAW_SALT,
 } from "./tree_ring_placement.js";
+import {
+  TREE_VARIANT_HASH_SALT,
+  TREE_VARIANT_HASH_SCALE,
+  TREE_VARIANT_HASH_X,
+  TREE_VARIANT_HASH_Z,
+} from "./tree_variant_selection.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -58,7 +65,6 @@ const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_RING_IMPOSTOR_MIN_COVERAGE = 0.0001;
-const TREE_RING_VARIANT_SALT = 1571;
 
 function fallbackLighting(): EnvironmentLighting {
   return {
@@ -96,7 +102,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const aHeight: TslNode = aCell.z;
     const aScale: TslNode = max(aCell.w, float(0.001));
     const aYaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
-    const aVariant: TslNode = treeRingImpostorVariant(worldCell, uSeed, atlas);
+    const aVariant: TslNode = treeRingImpostorVariant(aWorldXZ, uSeed, atlas);
 
     const c: TslNode = cos(aYaw);
     const s: TslNode = sin(aYaw);
@@ -152,7 +158,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     debugMaterials,
     setTime() {},
     setFadeCenter() {
-      // GPU ring LOD selection is resolved by compute; render materials do not dither LODs.
+      // GPU ring LOD fading is attached by the shared crossfade decorator.
     },
     updateSettings(next: TreeSettings) {
       uSeed.value = next.seed;
@@ -177,10 +183,6 @@ export function createTreeRingImpostorNodeMaterialHandle(
 }
 
 function createTreeRingUnlitImpostorNodeMaterial(): TreeRingNodeMaterial {
-  // Unlit like every other tree material: colorNode already carries the manual
-  // sun/sky relight. A lit (physical) material would shade that color a second
-  // time with scene lights and the captured normal, collapsing sun-averse card
-  // texels to black and washing distant mips toward grey.
   return new MeshBasicNodeMaterial() as TreeRingNodeMaterial;
 }
 
@@ -311,10 +313,21 @@ function treeRingImpostorAtlasUv(
   return minUv.add(baseUv.mul(maxUv.sub(minUv)));
 }
 
-function treeRingImpostorVariant(worldCell: TslNode, seed: TslNode, atlas: TreeImpostorAtlas): TslNode {
+function treeRingImpostorVariant(worldXZ: TslNode, seed: TslNode, atlas: TreeImpostorAtlas): TslNode {
   const variantCount = Math.max(1, Math.floor(atlas.variantCount ?? 1));
   if (variantCount <= 1) return float(0);
-  return clamp(floor(treeRingHash(worldCell, seed, TREE_RING_VARIANT_SALT).mul(float(variantCount))), 0, variantCount - 1);
+  const phase: TslNode = fract(
+    sin(dot(
+      worldXZ.add(vec2(
+        seed.mul(0.013).add(TREE_VARIANT_HASH_SALT),
+        seed.mul(0.037).sub(TREE_VARIANT_HASH_SALT),
+      )),
+      vec2(TREE_VARIANT_HASH_X, TREE_VARIANT_HASH_Z),
+    )).mul(TREE_VARIANT_HASH_SCALE),
+  );
+  const structural: TslNode = floor(phase.mul(TREE_STRUCTURAL_VARIANTS));
+  const count = float(variantCount);
+  return structural.sub(floor(structural.div(count)).mul(count));
 }
 
 function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
