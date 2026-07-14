@@ -37,6 +37,29 @@ export interface EarthSpellVfxConfig {
   glowDecay: number;
 }
 
+export interface LightningSpellVfxConfig {
+  handForwardM: number;
+  handRightM: number;
+  handUpM: number;
+  maxRange: number;
+  segmentCount: number;
+  branchCount: number;
+  branchLengthMin: number;
+  branchLengthMax: number;
+  jitter: number;
+  coreWidth: number;
+  glowWidth: number;
+  refreshHz: number;
+  impactRadius: number;
+  sparkCount: number;
+  coreColor: SpellColor;
+  glowColor: SpellColor;
+  sourceLightIntensity: number;
+  impactLightIntensity: number;
+  glowDistance: number;
+  glowDecay: number;
+}
+
 export interface FireSpellAudioConfig {
   volume: number;
 }
@@ -44,6 +67,7 @@ export interface FireSpellAudioConfig {
 export type WaterSpellAudioConfig = FireSpellAudioConfig;
 export type AirSpellAudioConfig = FireSpellAudioConfig;
 export type EarthSpellAudioConfig = FireSpellAudioConfig;
+export type LightningSpellAudioConfig = FireSpellAudioConfig;
 
 export interface SpellConfig {
   menu: {
@@ -77,6 +101,13 @@ export interface SpellConfig {
     castDurationMs: number;
     audio: EarthSpellAudioConfig;
     vfx: EarthSpellVfxConfig;
+  };
+  lightning: {
+    id: "lightning";
+    label: string;
+    castDurationMs: number;
+    audio: LightningSpellAudioConfig;
+    vfx: LightningSpellVfxConfig;
   };
 }
 
@@ -161,6 +192,34 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       glowDecay: 2.0,
     },
   },
+  lightning: {
+    id: "lightning",
+    label: "Lightning",
+    castDurationMs: 1250,
+    audio: { volume: 0.36 },
+    vfx: {
+      handForwardM: 0.58,
+      handRightM: 0.34,
+      handUpM: -0.32,
+      maxRange: 28,
+      segmentCount: 52,
+      branchCount: 12,
+      branchLengthMin: 0.7,
+      branchLengthMax: 2.4,
+      jitter: 0.42,
+      coreWidth: 0.035,
+      glowWidth: 0.18,
+      refreshHz: 28,
+      impactRadius: 0.8,
+      sparkCount: 36,
+      coreColor: [1.0, 1.0, 1.0],
+      glowColor: [0.18, 0.62, 1.0],
+      sourceLightIntensity: 4.5,
+      impactLightIntensity: 7.5,
+      glowDistance: 12,
+      glowDecay: 2.0,
+    },
+  },
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -229,6 +288,34 @@ function readEarthVfxConfig(record: Record<string, unknown> | undefined, fallbac
   };
 }
 
+function readLightningVfxConfig(
+  record: Record<string, unknown> | undefined,
+  fallback: LightningSpellVfxConfig,
+): LightningSpellVfxConfig {
+  return {
+    handForwardM: readNumber(record, "hand_forward_m", fallback.handForwardM, -5, 10),
+    handRightM: readNumber(record, "hand_right_m", fallback.handRightM, -5, 5),
+    handUpM: readNumber(record, "hand_up_m", fallback.handUpM, -5, 5),
+    maxRange: readNumber(record, "max_range", fallback.maxRange, 2, 80),
+    segmentCount: readInteger(record, "segment_count", fallback.segmentCount, 8, 128),
+    branchCount: readInteger(record, "branch_count", fallback.branchCount, 0, 32),
+    branchLengthMin: readNumber(record, "branch_length_min", fallback.branchLengthMin, 0.1, 10),
+    branchLengthMax: readNumber(record, "branch_length_max", fallback.branchLengthMax, 0.1, 16),
+    jitter: readNumber(record, "jitter", fallback.jitter, 0, 4),
+    coreWidth: readNumber(record, "core_width", fallback.coreWidth, 0.005, 0.5),
+    glowWidth: readNumber(record, "glow_width", fallback.glowWidth, 0.01, 2),
+    refreshHz: readNumber(record, "refresh_hz", fallback.refreshHz, 1, 60),
+    impactRadius: readNumber(record, "impact_radius", fallback.impactRadius, 0.05, 5),
+    sparkCount: readInteger(record, "spark_count", fallback.sparkCount, 0, 128),
+    coreColor: readColor(record, "core_color", fallback.coreColor),
+    glowColor: readColor(record, "glow_color", fallback.glowColor),
+    sourceLightIntensity: readNumber(record, "source_light_intensity", fallback.sourceLightIntensity, 0, 20),
+    impactLightIntensity: readNumber(record, "impact_light_intensity", fallback.impactLightIntensity, 0, 30),
+    glowDistance: readNumber(record, "glow_distance", fallback.glowDistance, 0, 40),
+    glowDecay: readNumber(record, "glow_decay", fallback.glowDecay, 0, 4),
+  };
+}
+
 function parseBeamSpellEntry<TId extends "fire" | "water" | "air">(
   id: TId,
   record: Record<string, unknown> | undefined,
@@ -257,6 +344,21 @@ function parseEarthSpellEntry(record: Record<string, unknown> | undefined, fallb
   };
 }
 
+function parseLightningSpellEntry(
+  record: Record<string, unknown> | undefined,
+  fallback: SpellConfig["lightning"],
+): SpellConfig["lightning"] {
+  const audio = asRecord(record?.audio);
+  const vfx = asRecord(record?.vfx);
+  return {
+    id: "lightning",
+    label: readString(record, "label", fallback.label),
+    castDurationMs: readNumber(record, "cast_duration_ms", fallback.castDurationMs, 250, 8000),
+    audio: { volume: readNumber(audio, "volume", fallback.audio.volume, 0, 1) },
+    vfx: readLightningVfxConfig(vfx, fallback.vfx),
+  };
+}
+
 export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
   try {
     const parsed = asRecord(load(text));
@@ -271,6 +373,7 @@ export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
       water: parseBeamSpellEntry("water", asRecord(root?.water), DEFAULT_SPELL_CONFIG.water),
       air: parseBeamSpellEntry("air", asRecord(root?.air), DEFAULT_SPELL_CONFIG.air),
       earth: parseEarthSpellEntry(asRecord(root?.earth), DEFAULT_SPELL_CONFIG.earth),
+      lightning: parseLightningSpellEntry(asRecord(root?.lightning), DEFAULT_SPELL_CONFIG.lightning),
     };
   } catch (error) {
     console.warn("[spells] Failed to parse spell config, using defaults.", error);
