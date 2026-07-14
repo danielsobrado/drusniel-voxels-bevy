@@ -25,7 +25,7 @@ function childMesher(
 }
 
 describe("GPU CLOD root pool failure policy", () => {
-  it("disables the runtime after a child build failure", async () => {
+  it("disables the runtime after a hard child build failure", async () => {
     let disposals = 0;
     const pool = new PooledGpuClodRootMesher([
       childMesher(async () => { throw new Error("GPU validation failed"); }, () => { disposals++; }),
@@ -37,6 +37,26 @@ describe("GPU CLOD root pool failure policy", () => {
     expect(disposals).toBe(1);
     await expect(pool.buildPages([{ px: 1, pz: 0 }])).rejects.toThrow("disabled after a build failure");
 
+    pool.dispose();
+    expect(disposals).toBe(1);
+  });
+
+  it("keeps recoverable page failures retryable", async () => {
+    let attempts = 0;
+    let disposals = 0;
+    const pool = new PooledGpuClodRootMesher([
+      childMesher(async () => {
+        attempts++;
+        if (attempts === 1) throw new Error("GPU CLOD weld exhausted hash probes");
+        return { nodes: [], buildMs: 1, transferBytes: 0 };
+      }, () => { disposals++; }),
+    ]);
+
+    await expect(pool.buildPages([{ px: 0, pz: 0 }])).rejects.toThrow("exhausted hash probes");
+    expect(pool.stats().enabled).toBe(1);
+    expect(disposals).toBe(0);
+
+    await expect(pool.buildPages([{ px: 1, pz: 0 }])).resolves.toMatchObject({ buildMs: 1 });
     pool.dispose();
     expect(disposals).toBe(1);
   });
