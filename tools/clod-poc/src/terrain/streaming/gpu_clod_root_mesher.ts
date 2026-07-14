@@ -1,4 +1,5 @@
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
+import { getCurrentRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
 import {
   createGpuClodRootMesher as createSingleGpuClodRootMesher,
   disabledGpuStats,
@@ -188,9 +189,10 @@ export async function createGpuClodRootMesher(
 ): Promise<GpuClodRootMesher | null> {
   const poolCount = resolvePoolCount(opts.config.maxInflightBatches);
   const hierarchyConfig = gpuClodHierarchyConfigFromWindow();
-  let device = opts.sharedDevice ?? null;
+  const rendererDevice = getCurrentRendererGpuDevice();
+  let device = opts.sharedDevice ?? rendererDevice;
 
-  if (!device && (poolCount > 1 || hierarchyConfig.enabled)) {
+  if (!device && poolCount > 1) {
     const requested = await requestWebGpuDevice();
     if (!requested.ok) {
       console.warn("[clod-stream-gpu] shared WebGPU device unavailable; using CPU worker fallback", requested.message ?? requested.reason);
@@ -200,12 +202,20 @@ export async function createGpuClodRootMesher(
     device = requested.device;
   }
 
-  const residentPages = device && hierarchyConfig.enabled
+  const residentDeviceCompatible = Boolean(
+    device
+    && hierarchyConfig.enabled
+    && (!hierarchyConfig.renderResidentPages || opts.sharedDevice === device || rendererDevice === device),
+  );
+  const residentPages = residentDeviceCompatible && device
     ? new GpuClodResidentPageCache(device, hierarchyConfig)
     : null;
   const childConfig = poolCount === 1 ? opts.config : splitPoolConfig(opts.config, poolCount);
 
-  if (hierarchyConfig.enabled && device && residentPages) {
+  if (hierarchyConfig.enabled && !residentDeviceCompatible) {
+    console.warn("[clod-stream-gpu] resident rendering requires the Three WebGPU device; using validated readback path");
+  }
+  if (residentPages && device) {
     const residentMeshers = await createResidentPool(
       opts,
       childConfig,
