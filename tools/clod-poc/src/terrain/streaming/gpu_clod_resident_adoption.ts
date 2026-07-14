@@ -27,6 +27,11 @@ export function createBufferedResidentAdoption(
 
   return {
     onPage(page) {
+      if (page.vertexCount <= 0 || page.indexCount <= 0 || page.indexCount % 3 !== 0) {
+        throw new Error(
+          `GPU CLOD resident page ${page.id} has invalid counts ${page.vertexCount}/${page.indexCount}`,
+        );
+      }
       pending.push(page);
     },
     wrap(mesher) {
