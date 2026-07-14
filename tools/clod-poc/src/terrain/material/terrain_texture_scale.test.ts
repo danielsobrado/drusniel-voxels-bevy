@@ -5,15 +5,19 @@ import {
 } from "./terrain_texture_scale.js";
 
 describe("terrain texture scale", () => {
-  it("raises procedural texel density without changing external PBR scale", () => {
+  it("adds moderate procedural detail without over-tiling the terrain", () => {
     expect(resolveTerrainTextureScale(0.06, 1, true)).toBeCloseTo(
       0.06 * PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN,
     );
+    expect(PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN).toBeGreaterThan(1);
+    expect(PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN).toBeLessThanOrEqual(1.5);
     expect(resolveTerrainTextureScale(0.06, 1, false)).toBeCloseTo(0.06);
   });
 
   it("retains the user multiplier", () => {
-    expect(resolveTerrainTextureScale(0.05, 1.5, true)).toBeCloseTo(0.3);
+    expect(resolveTerrainTextureScale(0.05, 1.5, true)).toBeCloseTo(
+      0.05 * 1.5 * PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN,
+    );
   });
 
   it("falls back safely for invalid values and clamps extreme scales", () => {
