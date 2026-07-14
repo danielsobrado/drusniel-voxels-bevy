@@ -57,6 +57,7 @@ export class TreeSystemAssets {
   private readonly hydrologyWater: TreeHydrologyWater | undefined;
   private currentLighting: EnvironmentLighting | undefined;
   private currentForestLighting: ForestLightingMaterialState | null = null;
+  private impostorBakeController: AbortController | null = null;
 
   constructor(options: TreeSystemAssetsOptions) {
     this.settings = options.settings;
@@ -85,7 +86,13 @@ export class TreeSystemAssets {
     this.materialHandle.updateForestLighting?.(state);
   }
 
+  cancelImpostorBake(reason = "tree impostor baking cancelled"): void {
+    this.impostorBakeController?.abort(reason);
+    this.impostorBakeController = null;
+  }
+
   rebuildGeometries(): void {
+    this.cancelImpostorBake("tree geometry rebuilt");
     this.geometryKey = treeGeometryKey(this.settings);
     disposeTreeGeometryMap(this.geometries);
     this.geometries = createTreeGeometryMap(this.settings);
@@ -100,31 +107,46 @@ export class TreeSystemAssets {
   }
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
-    await this.captureFoliageAtlas(renderer);
-    if (!this.settings.impostors.enabled || !this.settings.impostors.bakeOnStart) {
-      this.impostorStatus = "disabled";
-      this.impostorReason = "tree impostor baking disabled";
-      return { supported: false, reason: this.impostorReason };
-    }
-    this.impostorStatus = "baking";
-    this.impostorReason = null;
-    const result = await bakeTreeImpostorAtlases({
-      renderer,
-      settings: this.settings,
-      geometries: this.geometries,
-      material: this.materialHandle.regularMaterial,
-      foliageAtlas: this.foliageAtlas,
-      webgpu: this.webgpu,
-    });
-    if (result.supported) {
-      this.setImpostorAtlases(result.atlases);
-      this.impostorStatus = "baked";
+    this.cancelImpostorBake("superseded by a newer tree impostor bake");
+    const controller = new AbortController();
+    this.impostorBakeController = controller;
+    try {
+      await this.captureFoliageAtlas(renderer);
+      if (controller.signal.aborted) {
+        return { supported: false, reason: String(controller.signal.reason ?? "tree impostor baking cancelled") };
+      }
+      if (!this.settings.impostors.enabled || !this.settings.impostors.bakeOnStart) {
+        this.impostorStatus = "disabled";
+        this.impostorReason = "tree impostor baking disabled";
+        return { supported: false, reason: this.impostorReason };
+      }
+      this.impostorStatus = "baking";
       this.impostorReason = null;
-    } else {
-      this.impostorStatus = "fallback";
-      this.impostorReason = result.reason;
+      const result = await bakeTreeImpostorAtlases({
+        renderer,
+        settings: this.settings,
+        geometries: this.geometries,
+        material: this.materialHandle.regularMaterial,
+        foliageAtlas: this.foliageAtlas,
+        webgpu: this.webgpu,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || this.impostorBakeController !== controller) {
+        for (const atlas of Object.values(result.atlases)) atlas?.dispose();
+        return { supported: false, reason: String(controller.signal.reason ?? "tree impostor baking cancelled") };
+      }
+      if (result.supported) {
+        this.setImpostorAtlases(result.atlases);
+        this.impostorStatus = "baked";
+        this.impostorReason = null;
+      } else {
+        this.impostorStatus = "fallback";
+        this.impostorReason = result.reason;
+      }
+      return { supported: result.supported, reason: result.reason };
+    } finally {
+      if (this.impostorBakeController === controller) this.impostorBakeController = null;
     }
-    return { supported: result.supported, reason: result.reason };
   }
 
   setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
@@ -132,6 +154,7 @@ export class TreeSystemAssets {
     this.impostorAtlases = { ...atlases };
     publishTreeImpostorDebugStatus(this.impostorAtlases);
     this.disposeImpostorMaterials();
+    this.disposeBakedImpostorGeometries();
     this.updateImpostorMaterials();
   }
 
@@ -200,6 +223,7 @@ export class TreeSystemAssets {
   }
 
   dispose(): void {
+    this.cancelImpostorBake("tree system disposed");
     disposeTreeGeometryMap(this.geometries);
     this.crownProxyGeometry.dispose();
     this.disposeBakedImpostorGeometries();
