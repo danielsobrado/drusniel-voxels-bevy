@@ -63,6 +63,7 @@ jobs:
         run: >-
           npx vitest run
           src/terrain/streaming/gpu_clod_hierarchy.test.ts
+          src/terrain/streaming/gpu_clod_runtime_review.test.ts
           src/terrain/streaming/gpu_clod_root_mesher_pool.test.ts
           src/terrain/streaming/gpu_clod_resident_registry.test.ts
           src/terrain/streaming/gpu_clod_resident_adoption.test.ts
