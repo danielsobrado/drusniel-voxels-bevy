@@ -22,7 +22,7 @@ describe("environment lighting model", () => {
       DEFAULT_ENVIRONMENT_COLORS,
     );
     expect(luminance(lighting.sunColor)).toBeGreaterThan(luminance(lighting.skyLight) * 12);
-    expect(lighting.ambientFloor).toBeLessThan(0.04);
+    expect(lighting.ambientFloor ?? 1).toBeLessThan(0.04);
   });
 
   it("warms low sun through atmospheric transmittance", () => {
