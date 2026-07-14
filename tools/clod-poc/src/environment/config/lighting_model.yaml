@@ -1,0 +1,8 @@
+environment_lighting:
+  direct_scale: 2.6
+  sky_ambient_scale: 0.18
+  ground_ambient_scale: 0.08
+  ambient_floor: 0.025
+  horizon_fade_start: -0.04
+  horizon_fade_end: 0.06
+  extinction_rgb: [0.06, 0.12, 0.28]
