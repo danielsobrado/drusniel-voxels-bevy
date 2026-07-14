@@ -20,7 +20,7 @@ function cloneRegionRecords(records: SaveRegionRecords): SaveRegionRecords {
   return {
     manifest: { ...records.manifest },
     voxelDeltas: cloneVoxelDeltasRecord(records.voxelDeltas),
-    props: records.props.map((prop) => ({ ...prop, position: [...prop.position], rotation: [...prop.rotation], scale: [...prop.scale], tags: [...prop.tags] })),
+    props: records.props.map((prop) => ({ ...prop, position: [...prop.position], rotation: [...prop.rotation], scale: [...prop.scale], tags: [...prop.tags], environmental: prop.environmental ? { ...prop.environmental, tileKey: { ...prop.environmental.tileKey } } : undefined })),
   };
 }
 

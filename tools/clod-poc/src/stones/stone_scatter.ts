@@ -206,6 +206,7 @@ export interface RankedStoneInstance {
 export function generateRankedStoneInstances(
   footprint: PageFootprint,
   settings: StoneSettings,
+  featureField?: { excludesScatter(x: number, z: number): boolean },
 ): RankedStoneInstance[] {
   const ranked: RankedStoneInstance[] = [];
   const spacing = Math.max(0.1, settings.cellSizeM);
@@ -221,6 +222,7 @@ export function generateRankedStoneInstances(
       const jz = (hash2(gridX, gridZ, settings.seedSalt + SALT.jitterZ) * 2 - 1) * spacing * 0.34;
       const x = Math.min(footprint.maxX - 1e-3, Math.max(footprint.minX + 1e-3, footprint.minX + (column + 0.5) * spacing + jx));
       const z = Math.min(footprint.maxZ - 1e-3, Math.max(footprint.minZ + 1e-3, footprint.minZ + (row + 0.5) * spacing + jz));
+      if (featureField?.excludesScatter(x, z)) continue;
 
       const site = sampleStoneSite(x, z, settings);
       const weight = stoneWeight(site, settings, x, z);
@@ -269,10 +271,11 @@ export function generateStoneInstances(
   footprint: PageFootprint,
   settings: StoneSettings,
   maxInstances = settings.maxInstances,
+  featureField?: { excludesScatter(x: number, z: number): boolean },
 ): StoneInstance[] {
   const limit = Math.max(0, Math.floor(maxInstances));
   if (limit === 0 || settings.density <= 0) return [];
-  const ranked = generateRankedStoneInstances(footprint, settings);
+  const ranked = generateRankedStoneInstances(footprint, settings, featureField);
   return ranked.slice(0, limit).map((entry) => entry.instance);
 }
 

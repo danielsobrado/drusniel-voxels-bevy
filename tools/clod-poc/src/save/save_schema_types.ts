@@ -1,8 +1,10 @@
 import type { ProjectPropInstance } from "../project/project_props.js";
 import type { VoxelDelta } from "../terrain/voxel_edits/voxel_edit_types.js";
+import type { WorldManifest } from "../world/world_manifest.js";
+import type { EnvironmentalPropLayer } from "../world/prop_identity.js";
 
-export type SaveSchemaVersion = 1;
-export type SaveProceduralProfile = "infinite-islands-v1";
+export type SaveSchemaVersion = 1 | 2;
+export type SaveProceduralProfile = "infinite-islands-v1" | "continent-v1";
 export type SavedPropState = "active" | "hidden" | "destroyed";
 export type CriticalPathPurpose = "mainQuest" | "cityAccess" | "dungeonAccess" | "bossRoute" | "tutorial";
 export type CriticalPathStatus = "valid" | "warning" | "blocked" | "dirty";
@@ -19,6 +21,7 @@ export interface SaveWorldManifest {
   regionKeys: string[];
   createdAt: string;
   updatedAt: string;
+  worldManifest?: WorldManifest;
 }
 
 export interface RegionManifest {
@@ -48,6 +51,7 @@ export interface SavedPropInstance extends ProjectPropInstance {
   roadId?: string;
   criticalPathId?: string;
   ownerFactionId?: string;
+  environmental?: { tileKey: { x: number; z: number }; layer: EnvironmentalPropLayer; candidateIndex: number };
 }
 
 export interface SavedBounds2D { minX: number; minZ: number; maxX: number; maxZ: number }

@@ -1,11 +1,13 @@
 import type { ProjectPropInstance } from "../project/project_props.js";
 import type { VoxelDelta } from "../terrain/voxel_edits/voxel_edit_types.js";
+import type { WorldManifest } from "../world/world_manifest.js";
+import type { EnvironmentalPropLayer } from "../world/prop_identity.js";
 import { SAVE_CHUNK_SIZE_M, SAVE_PROCEDURAL_PROFILE, SAVE_REGION_SIZE_M, SAVE_SCHEMA_VERSION } from "./save_config.js";
 import { parseRegionKey, regionKeyForWorld } from "./region_key.js";
 import { decodeVoxelDeltasBin1, type VoxelDeltaBinaryPayload } from "./voxel_delta_binary.js";
 
-export type SaveSchemaVersion = 1;
-export type SaveProceduralProfile = "infinite-islands-v1";
+export type SaveSchemaVersion = 1 | 2;
+export type SaveProceduralProfile = "infinite-islands-v1" | "continent-v1";
 export type SavedPropState = "active" | "hidden" | "destroyed";
 export type CriticalPathPurpose = "mainQuest" | "cityAccess" | "dungeonAccess" | "bossRoute" | "tutorial";
 export type CriticalPathStatus = "valid" | "warning" | "blocked" | "dirty";
@@ -22,6 +24,8 @@ export interface SaveWorldManifest {
   regionKeys: string[];
   createdAt: string;
   updatedAt: string;
+  /** Required for schema v2. V1 records are upgraded explicitly by the migration loader. */
+  worldManifest?: WorldManifest;
 }
 
 export interface RegionManifest {
@@ -60,6 +64,12 @@ export interface SavedPropInstance extends ProjectPropInstance {
   roadId?: string;
   criticalPathId?: string;
   ownerFactionId?: string;
+  /** Address in the pinned deterministic baseline; only environmental deltas carry it. */
+  environmental?: {
+    tileKey: { x: number; z: number };
+    layer: EnvironmentalPropLayer;
+    candidateIndex: number;
+  };
 }
 
 export interface SavedBounds2D { minX: number; minZ: number; maxX: number; maxZ: number }
@@ -102,7 +112,7 @@ function isVec4(value: unknown): value is [number, number, number, number] {
 }
 
 function assertSchemaVersion(value: unknown, label: string): void {
-  if (value !== SAVE_SCHEMA_VERSION) throw new Error(`${label} has unsupported schemaVersion`);
+  if (value !== 1 && value !== SAVE_SCHEMA_VERSION) throw new Error(`${label} has unsupported schemaVersion`);
 }
 
 function assertString(value: unknown, label: string): asserts value is string {
@@ -174,13 +184,22 @@ export function assertSaveWorldManifest(value: unknown): asserts value is SaveWo
   assertString(value.saveId, "save manifest saveId");
   assertString(value.worldId, "save manifest worldId");
   assertFinite(value.seed, "save manifest seed");
-  if (value.proceduralProfile !== SAVE_PROCEDURAL_PROFILE) throw new Error("save manifest proceduralProfile is unsupported");
+  if (value.proceduralProfile !== "infinite-islands-v1" && value.proceduralProfile !== SAVE_PROCEDURAL_PROFILE) throw new Error("save manifest proceduralProfile is unsupported");
   if (value.regionSizeM !== SAVE_REGION_SIZE_M) throw new Error("save manifest regionSizeM mismatch");
   if (value.chunkSizeM !== SAVE_CHUNK_SIZE_M) throw new Error("save manifest chunkSizeM mismatch");
   assertStringList(value.regionKeys, "save manifest regionKeys");
   value.regionKeys.forEach(parseRegionKey);
   assertIso(value.createdAt, "save manifest createdAt");
   assertIso(value.updatedAt, "save manifest updatedAt");
+  if (value.schemaVersion === 2) assertPinnedWorldManifest(value.worldManifest);
+}
+
+function assertPinnedWorldManifest(value: unknown): asserts value is WorldManifest {
+  if (!isRecord(value)) throw new Error("schema v2 save manifest requires worldManifest");
+  for (const key of ["worldId", "generatorVersion", "terrainSourceHash", "mode"] as const) assertString(value[key], `worldManifest ${key}`);
+  assertFinite(value.seed, "worldManifest seed");
+  if (value.mode !== "finite" && value.mode !== "infinite_islands" && value.mode !== "continent") throw new Error("worldManifest mode is unsupported");
+  if (value.artifacts === undefined || !isRecord(value.artifacts)) throw new Error("worldManifest artifacts must be an object");
 }
 
 export function assertRegionManifest(value: unknown): asserts value is RegionManifest {
@@ -233,6 +252,13 @@ export function assertSavedPropInstance(value: unknown): asserts value is SavedP
   parseRegionKey(value.regionKey);
   if (value.state !== "active" && value.state !== "hidden" && value.state !== "destroyed") throw new Error("saved prop state is invalid");
   assertStringList(value.tags, "saved prop tags");
+  if (value.environmental !== undefined) {
+    if (!isRecord(value.environmental)) throw new Error("saved prop environmental address must be an object");
+    const tileKey = value.environmental.tileKey;
+    if (!isRecord(tileKey) || !isSafeInteger(tileKey.x) || !isSafeInteger(tileKey.z)) throw new Error("saved prop environmental tileKey is invalid");
+    if (!["tree", "stone", "grass"].includes(String(value.environmental.layer))) throw new Error("saved prop environmental layer is invalid");
+    if (!isSafeInteger(value.environmental.candidateIndex) || value.environmental.candidateIndex < 0) throw new Error("saved prop environmental candidateIndex is invalid");
+  }
 }
 
 export function assertRegionRecordSet(manifest: RegionManifest, voxelDeltas: RegionVoxelDeltas, props: readonly SavedPropInstance[]): void {

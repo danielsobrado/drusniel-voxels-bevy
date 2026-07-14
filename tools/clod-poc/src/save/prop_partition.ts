@@ -95,7 +95,7 @@ export function partitionSavedPropsByRegion(props: readonly SavedPropInstance[])
     assertSavedPropInstance(prop);
     const regionKey = regionKeyForWorld(prop.position[0], prop.position[2]);
     if (prop.regionKey !== regionKey) throw new Error(`saved prop ${prop.id} belongs to ${regionKey}, not ${prop.regionKey}`);
-    const copy = { ...prop, position: cloneVec3(prop.position), rotation: cloneVec4(prop.rotation), scale: cloneVec3(prop.scale), tags: [...prop.tags] };
+    const copy = { ...prop, position: cloneVec3(prop.position), rotation: cloneVec4(prop.rotation), scale: cloneVec3(prop.scale), tags: [...prop.tags], environmental: prop.environmental ? { ...prop.environmental, tileKey: { ...prop.environmental.tileKey } } : undefined };
     const region = byRegion.get(regionKey);
     if (region) region.push(copy);
     else byRegion.set(regionKey, [copy]);
@@ -110,7 +110,7 @@ export function mergeSavedPropsFromRegions(regions: Iterable<readonly SavedPropI
     for (const prop of region) {
       assertSavedPropInstance(prop);
       if (byId.has(prop.id)) throw new Error(`duplicate saved prop id: ${prop.id}`);
-      byId.set(prop.id, { ...prop, position: cloneVec3(prop.position), rotation: cloneVec4(prop.rotation), scale: cloneVec3(prop.scale), tags: [...prop.tags] });
+      byId.set(prop.id, { ...prop, position: cloneVec3(prop.position), rotation: cloneVec4(prop.rotation), scale: cloneVec3(prop.scale), tags: [...prop.tags], environmental: prop.environmental ? { ...prop.environmental, tileKey: { ...prop.environmental.tileKey } } : undefined });
     }
   }
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));

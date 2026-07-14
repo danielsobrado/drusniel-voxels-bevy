@@ -26,7 +26,7 @@ const textEncoder = new TextEncoder();
 // v7: continent hydrology graph carving makes canonical f32 heightfield tiles authoritative;
 // the graph artifact and carve profile now participate in terrain identity.
 // v8: sparse voxel-region references and authored stamp hashes change composed terrain geometry.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v8";
+export const TERRAIN_SOURCE_VERSION = "world-modes-v9-feature-stamps";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);

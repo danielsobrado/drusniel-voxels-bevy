@@ -7,6 +7,7 @@ export interface FarTerrainSampler {
   sampleHeight(x: number, z: number): number;
   sampleMaterial?(x: number, z: number): number;
   sampleCanopyCoverage?(x: number, z: number): number;
+  sampleStructureCoverage?(x: number, z: number, cellSizeM: number): number;
   sampleWaterCoverage?(x: number, z: number): number;
   sampleWaterCoverageForHeight?(x: number, z: number, height: number): number;
   /** Canonical hydrology graph sample when the world has one. */
@@ -420,7 +421,7 @@ function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySam
     speciesPine: clamp01(canopySummary?.speciesPine ?? 0),
     speciesBroadleaf: clamp01(canopySummary?.speciesBroadleaf ?? 0),
     speciesDeadwood: clamp01(canopySummary?.speciesDeadwood ?? 0),
-    structureCoverage: 0,
+    structureCoverage: clamp01(terrainSampler.sampleStructureCoverage?.(wx, wz, cellM) ?? 0),
     caveEntranceCoverage: sampleCaveEntranceCoverage(
       build.originX + sx * cellM,
       build.originZ + sz * cellM,

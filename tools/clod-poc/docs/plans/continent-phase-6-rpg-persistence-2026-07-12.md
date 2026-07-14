@@ -2,6 +2,16 @@
 
 Parent: `continent-plan-overview-2026-07-12.md`. Requires Phases 1–3; runs partly parallel to 4–5.
 
+## Status
+
+Implementation complete on 2026-07-14. Runtime contract: `../editor/world-persistence-contract-2026-07-14.md`.
+
+- [x] C6.1 stable prop identity and interaction/debug lookup
+- [x] C6.2 durable environmental deltas, sparse exclusions, reload counters, GPU upload contract
+- [x] C6.3 deterministic road/settlement stamps, scatter exclusions, source hash, far coverage
+- [x] C6.4 schema v2 manifest pinning, v1 fixture migration, regeneration reconciliation
+- [x] C6.5 `world:verify` and persistence documentation
+
 ## Goal
 
 Make the three prop/feature layers real and durable on the continent:
@@ -123,8 +133,8 @@ propId = hash64(manifest.worldId, tileKey, layer, candidateIndex)
 
 ## Evidence (fill before merging final commit)
 
-- [ ] prop id stability/uniqueness test run
+- [x] prop id stability/uniqueness test run
 - [ ] destroy→reload acceptance; exclusion perf A/B numbers
 - [ ] road stamp QA shots + critical-path validation output
-- [ ] v1 fixture migration test run
+- [x] v1 fixture migration test run
 - [ ] world:verify sweep output on a fresh continent

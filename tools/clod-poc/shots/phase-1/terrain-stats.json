@@ -43,12 +43,13 @@
       "maxUniformBuffersPerShaderStage": 12
     }
   },
-  "fps": 144.06484032090634,
-  "frameMs": 6.900000000001455,
-  "frameMsP95": 7,
-  "drawCalls": 16,
-  "triangles": 2102985,
-  "frame": 1043,
+  "startupTimings": null,
+  "fps": 143.98578742130883,
+  "frameMs": 6.899999999999636,
+  "frameMsP95": 7.099999999998545,
+  "drawCalls": 15,
+  "triangles": 497353,
+  "frame": 1045,
   "counters": {
     "phase0.timestampQuerySupported": 1,
     "phase1.gridSize": 2048,
@@ -66,7 +67,7 @@
     "phase1.internalBorderChecks": 42,
     "phase1.selectionErrorThresholdPx100": 2400,
     "phase1.selectionHysteresis100": 135,
-    "phase1.buildMs100": 548840,
+    "phase1.buildMs100": 540630,
     "phase1.debugMode": 0,
     "phase1.nodesRendered": 52,
     "phase1.trianglesRendered": 35768,
@@ -78,21 +79,21 @@
     "phase1.builtLod1Nodes": 16,
     "phase1.builtLod2Nodes": 4,
     "phase1.builtLod3Nodes": 1,
-    "phase1.selectionMs100": 10,
+    "phase1.selectionMs100": 20,
     "coast.enabled": 1,
     "coast.type": 0,
     "coast.distanceToBorder100": 85645,
     "clod.pageSourceTerrainTriangles": 41472,
-    "clod.excludedWaterOceanTriangles": 1048576,
+    "clod.excludedWaterOceanTriangles": 294912,
     "clod.waterTrianglesInSimplifier": 0,
-    "water.surfTriangles": 786432,
-    "water.deepOceanTriangles": 262144,
-    "water.oceanDrawCalls": 2,
-    "water.oceanSnapUpdates": 2
+    "water.surfTriangles": 196608,
+    "water.deepOceanTriangles": 98304,
+    "water.oceanDrawCalls": 3,
+    "water.oceanSnapUpdates": 3
   },
   "gpuPasses": {
-    "r.screen": 0.04096,
-    "render": 0.503808,
-    "r.rt#0(1920x1080)": 0.462848
+    "r.screen": 0.094208,
+    "render": 0.765952,
+    "r.rt#0(1920x1080)": 0.671744
   }
 }

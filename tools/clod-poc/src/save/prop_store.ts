@@ -17,6 +17,7 @@ function cloneSavedProp(prop: SavedPropInstance): SavedPropInstance {
     rotation: cloneVec4(prop.rotation),
     scale: cloneVec3(prop.scale),
     tags: [...prop.tags],
+    environmental: prop.environmental ? { ...prop.environmental, tileKey: { ...prop.environmental.tileKey } } : undefined,
   };
 }
 

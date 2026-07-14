@@ -67,6 +67,7 @@ import {
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import { buildHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile.js";
 import { buildCarvedHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile_carve.js";
+import { featureStampFieldFromStamps } from "./world/feature_stamps.js";
 import { buildHeightfieldTileComplexity } from "./world/heightfield_tiles/heightfield_tile_complexity.js";
 import { createGraphHydrologySampler, type GraphHydrologySampler, type GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
 import {
@@ -596,15 +597,20 @@ function handleBuildHeightfieldTiles(request: HeightfieldTileWorkerBuildRequest)
   if (request.keys.length > 2) throw new Error("heightfield tile worker batches are limited to 2 tiles");
 
   const startedAt = performance.now();
+  const features = request.featureStamps ? featureStampFieldFromStamps(request.featureStamps) : undefined;
   const tiles = request.keys.map((key) => {
     const field = {
       sampleHeight: baseSurfaceHeight,
       sourceRevision: request.sourceRevision,
       complexity: buildHeightfieldTileComplexity(key, getVoxelOverlaySource()),
     };
-    return graphHydrology && graphCarve
-      ? buildCarvedHeightfieldTile(key, field, graphHydrology, graphCarve, request.sourceRevision)
-      : buildHeightfieldTile(key, field, request.sourceRevision);
+    if (graphHydrology && graphCarve) {
+      return buildCarvedHeightfieldTile(key, field, graphHydrology, graphCarve, request.sourceRevision, features);
+    }
+    return buildHeightfieldTile(key, features ? {
+      ...field,
+      sampleHeight: (x, z) => features.sampleHeight(x, z, field.sampleHeight(x, z)),
+    } : field, request.sourceRevision);
   });
   const transferBytes = tiles.reduce((sum, tile) => sum + tile.heights.byteLength
     + (tile.complexVolumeMask?.byteLength ?? 0) + (tile.entranceMask?.byteLength ?? 0), 0);

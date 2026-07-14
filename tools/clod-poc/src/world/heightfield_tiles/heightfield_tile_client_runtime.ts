@@ -5,6 +5,7 @@ import {
   type HeightfieldTileRuntimeUpdate,
 } from "./heightfield_tile_runtime.js";
 import { WORLD_TILE_SIZE_M } from "../tile_key.js";
+import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 
 interface ClientPrototype {
   buildWorld: ClodWorkerClient["buildWorld"];
@@ -99,7 +100,11 @@ export function installHeightfieldTileClientRuntime(): void {
     const runtime = await createHeightfieldTileRuntime({
       terrainSource,
       startupHeightfield,
-      buildTiles: (keys, sourceRevision) => this.buildHeightfieldTiles(keys, sourceRevision),
+      buildTiles: (keys, sourceRevision) => this.buildHeightfieldTiles(
+        keys,
+        sourceRevision,
+        getSaveRuntimeFeatureStamps()?.stamps,
+      ),
     });
     if (runtime) activeRuntimes.set(this, runtime);
     return result;

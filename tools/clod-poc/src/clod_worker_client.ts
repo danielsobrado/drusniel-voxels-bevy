@@ -211,6 +211,7 @@ export class ClodWorkerClient {
   buildHeightfieldTiles(
     keys: readonly WorldTileKey[],
     sourceRevision = 0,
+    featureStamps?: HeightfieldTileWorkerBuildRequest["featureStamps"],
   ): Promise<HeightfieldTileBuildResult> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     if (keys.length > 2) return Promise.reject(new Error("heightfield tile worker batches are limited to 2 tiles"));
@@ -220,6 +221,7 @@ export class ClodWorkerClient {
       requestId,
       keys: keys.map((key) => ({ x: key.x, z: key.z })),
       sourceRevision,
+      featureStamps: featureStamps ? structuredClone(featureStamps) : undefined,
     };
     return new Promise((resolve, reject) => {
       this.heightfieldTileRequests.set(requestId, { resolve, reject });

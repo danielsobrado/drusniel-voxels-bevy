@@ -1,6 +1,7 @@
 import type { SaveRegionRecords } from "./region_store.js";
 import type { RegionVoxelDeltas, SaveWorldManifest, WorldMetadataRecord } from "./save_schema.js";
 import { assertRegionManifest, assertRegionRecordSet, assertRegionVoxelDeltas, assertSaveWorldManifest, assertWorldMetadataRecord } from "./save_schema.js";
+import { migrateSaveManifest } from "./save_migration.js";
 
 export const SAVE_DB_NAME = "drusniel-clod-saves";
 export const SAVE_DB_VERSION = 1;
@@ -84,7 +85,7 @@ export async function writeRegionRecords(
 
   manifests.put({ ...records.manifest }, regionManifestKey(saveId, regionKey));
   regions.put(cloneVoxelDeltasRecord(records.voxelDeltas), voxelDeltasKey(saveId, regionKey));
-  regions.put(records.props.map((prop) => ({ ...prop, position: [...prop.position], rotation: [...prop.rotation], scale: [...prop.scale], tags: [...prop.tags] })), propsKey(saveId, regionKey));
+  regions.put(records.props.map((prop) => ({ ...prop, position: [...prop.position], rotation: [...prop.rotation], scale: [...prop.scale], tags: [...prop.tags], environmental: prop.environmental ? { ...prop.environmental, tileKey: { ...prop.environmental.tileKey } } : undefined })), propsKey(saveId, regionKey));
 
   if (options.abortBeforeCommit) transaction.abort();
   await transactionDone(transaction);
@@ -133,7 +134,7 @@ export async function readSaveManifest(db: IDBDatabase, saveId: string): Promise
   await transactionDone(transaction);
   if (value === undefined) return null;
   assertSaveWorldManifest(value);
-  return value;
+  return migrateSaveManifest(value).manifest;
 }
 
 export async function readWorldMetadata(db: IDBDatabase, saveId: string): Promise<WorldMetadataRecord | null> {

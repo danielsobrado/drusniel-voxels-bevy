@@ -13,7 +13,7 @@ This is the umbrella document. Phase details live in:
 | 3. Continental hydrology | `continent-phase-3-continental-hydrology-2026-07-12.md` | not started |
 | 4. Unified world summary | `continent-phase-4-unified-world-summary-2026-07-12.md` | COMPLETE — graph-water and 4 km canopy A/B accepted |
 | 5. Voxel overlay and complex regions | `continent-phase-5-voxel-overlay-2026-07-12.md` | not started |
-| 6. RPG features and persistence | `continent-phase-6-rpg-persistence-2026-07-12.md` | not started |
+| 6. RPG features and persistence | `continent-phase-6-rpg-persistence-2026-07-12.md` | COMPLETE (2026-07-14) |
 
 Each phase document carries a `## Status` section (per-commit checklist + next action) that is
 updated **immediately after every commit-sized chunk of implementation**, so an interrupted

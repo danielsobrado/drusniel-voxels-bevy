@@ -12,6 +12,10 @@ import { boundsForRegion, regionKeysForBounds } from "./world_metadata/metadata_
 import { partitionSavedPropsByRegion } from "./prop_partition.js";
 import { savedPropStore } from "./prop_store.js";
 import { SaveDirtyRegionRevisions } from "./save_dirty_region_revisions.js";
+import { SparsePropExclusionBitsets } from "../world/prop_exclusion.js";
+import { deriveEnvironmentalPropId, type PropCandidateAddress } from "../world/prop_identity.js";
+import { regionKeyForWorld } from "./region_key.js";
+import { compileFeatureStamps, type FeatureStampField } from "../world/feature_stamps.js";
 
 export interface SaveRuntimeCounters extends SaveFarInvalidationCounters {
   save_loaded: number;
@@ -25,6 +29,8 @@ export interface SaveRuntimeCounters extends SaveFarInvalidationCounters {
   save_metadata_revision: number;
   save_prop_count: number;
   save_voxel_delta_count: number;
+  prop_delta_count: number;
+  prop_exclusion_tiles: number;
 }
 
 interface SaveRuntimeState {
@@ -42,6 +48,7 @@ interface SaveRuntimeState {
 
 let state: SaveRuntimeState | null = null;
 let attachedCounters: Partial<SaveRuntimeCounters> | null = null;
+let propExclusions = new SparsePropExclusionBitsets();
 
 function nowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
@@ -65,6 +72,8 @@ export function seedSaveRuntimeCounters(counters: Partial<SaveRuntimeCounters>):
   counters.save_metadata_revision = counters.save_metadata_revision ?? 0;
   counters.save_prop_count = counters.save_prop_count ?? 0;
   counters.save_voxel_delta_count = counters.save_voxel_delta_count ?? 0;
+  counters.prop_delta_count = counters.prop_delta_count ?? 0;
+  counters.prop_exclusion_tiles = counters.prop_exclusion_tiles ?? 0;
   seedSaveFarInvalidationCounters(counters);
 }
 
@@ -81,6 +90,7 @@ function publishCounters(): void {
   state.counters.save_metadata_revision = state.metadata.revision;
   state.counters.save_prop_count = savedPropStore.snapshot().length;
   state.counters.save_voxel_delta_count = state.voxelDeltaCount;
+  Object.assign(state.counters, propExclusions.counters());
 }
 
 function pointBoundsForProp(prop: SavedPropInstance): SavedBounds2D {
@@ -133,6 +143,7 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     counters: activeCounters,
   };
   savedPropStore.restore(loadedWorld.regions.flatMap((region) => region.props));
+  propExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropStore.snapshot());
   projectPropEditStore.restore(savedPropStore.activeProjectProps());
   publishCounters();
 }
@@ -141,6 +152,7 @@ export function clearSaveRuntime(): void {
   if (state?.flushTimer) clearTimeout(state.flushTimer);
   state = null;
   savedPropStore.clear();
+  propExclusions = new SparsePropExclusionBitsets();
   projectPropEditStore.clear();
   publishCounters();
 }
@@ -194,6 +206,7 @@ export function updateSaveRuntimeMetadata(metadata: WorldMetadataRecord, dirtyBo
 export function upsertSaveRuntimeProp(prop: SavedPropInstance): string[] {
   if (!state) return [];
   const previous = savedPropStore.upsert(prop);
+  propExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropStore.snapshot());
   projectPropEditStore.restore(savedPropStore.activeProjectProps());
   const boundsList = previous ? [pointBoundsForProp(previous), pointBoundsForProp(prop)] : [pointBoundsForProp(prop)];
   return markSaveRegionsDirtyForBoundList(boundsList);
@@ -202,8 +215,39 @@ export function upsertSaveRuntimeProp(prop: SavedPropInstance): string[] {
 export function removeSaveRuntimeProp(id: string, dirtyBounds: SavedBounds2D): string[] {
   if (!state) return [];
   const previous = savedPropStore.remove(id);
+  propExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropStore.snapshot());
   projectPropEditStore.restore(savedPropStore.activeProjectProps());
   return markSaveRegionsDirtyForBoundList(previous ? [pointBoundsForProp(previous), dirtyBounds] : [dirtyBounds]);
+}
+
+export function getSaveRuntimePropExclusions(): SparsePropExclusionBitsets {
+  return propExclusions;
+}
+
+export function getSaveRuntimeFeatureStamps(): FeatureStampField | null {
+  return state ? compileFeatureStamps(state.metadata) : null;
+}
+
+/** Interaction write path: deterministic baseline candidate -> durable destroyed delta. */
+export function destroyEnvironmentalPropCandidate(
+  address: PropCandidateAddress,
+  position: readonly [number, number, number],
+  prefabId: string,
+): string[] {
+  if (!state) return [];
+  const prop: SavedPropInstance = {
+    id: deriveEnvironmentalPropId(state.manifest.worldId, address),
+    prefabId,
+    position: [position[0], position[1], position[2]],
+    rotation: [0, 0, 0, 1],
+    scale: [1, 1, 1],
+    regionKey: regionKeyForWorld(position[0], position[2]),
+    state: "destroyed",
+    tags: ["environmental"],
+    environmental: address,
+    revision: state.revision + 1,
+  };
+  return upsertSaveRuntimeProp(prop);
 }
 
 export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME): Promise<void> {

@@ -43,12 +43,13 @@
       "maxUniformBuffersPerShaderStage": 12
     }
   },
-  "fps": 143.97156407611737,
+  "startupTimings": null,
+  "fps": 144.03590812340727,
   "frameMs": 7,
-  "frameMsP95": 7.100000000000364,
+  "frameMsP95": 7,
   "drawCalls": 6,
   "triangles": 186659,
-  "frame": 1035,
+  "frame": 1036,
   "counters": {
     "phase0.timestampQuerySupported": 1,
     "phase0.storageTextureBake": 1,
@@ -62,11 +63,11 @@
     "phase0.seedSignature": 151023802
   },
   "gpuPasses": {
-    "r.screen": 0.094208,
-    "render": 0.284672,
-    "c.compute?": 0.011424,
-    "compute": 0.011424,
-    "r.rt#0(1920x1080)": 0.190464,
+    "r.screen": 0.10752,
+    "render": 0.27545600000000003,
+    "c.compute?": 0.01248,
+    "compute": 0.01248,
+    "r.rt#0(1920x1080)": 0.167936,
     "r.shadow.c0": 0
   }
 }

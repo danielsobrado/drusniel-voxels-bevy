@@ -1,11 +1,13 @@
 import type { HeightfieldTile } from "./heightfield_tile.js";
 import type { WorldTileKey } from "../tile_key.js";
+import type { FeatureTerrainStamp } from "../feature_stamps.js";
 
 export interface HeightfieldTileWorkerBuildRequest {
   type: "buildHeightfieldTiles";
   requestId: number;
   keys: WorldTileKey[];
   sourceRevision: number;
+  featureStamps?: readonly FeatureTerrainStamp[];
 }
 
 export interface HeightfieldTileWorkerBuiltResponse {

@@ -39,6 +39,7 @@ export const CANOPY_STRATIFIED_SAMPLE_COUNT = STRATIFIED_OFFSETS.length * STRATI
 export function createTreeDistribution(
   config: CanopyTreeDistributionConfig,
   seed: number,
+  featureField?: { excludesScatter(x: number, z: number): boolean },
 ): TreeDistribution {
   const slopeReject = (slope: number): number => {
     if (slope <= config.slopeRejectStart) return 1;
@@ -66,6 +67,7 @@ export function createTreeDistribution(
   };
 
   const sampleTreeCandidate = (x: number, z: number, terrain: TerrainSample): TreeCandidate | null => {
+    if (featureField?.excludesScatter(x, z)) return null;
     if (config.waterReject && terrain.water) return null;
     const slopeFactor = slopeReject(terrain.slope);
     if (slopeFactor <= 0) return null;
