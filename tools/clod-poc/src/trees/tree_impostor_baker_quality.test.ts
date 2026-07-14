@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
+  cloneTreeSettings,
   octFrames,
   selectTreeImpostorBakeGeometry,
   treeImpostorFramesForVariant,
@@ -11,6 +12,7 @@ import {
   type TreeGeometryMap,
   type TreeImpostorAtlas,
 } from "./index.js";
+import { estimateTreeImpostorAtlasMemoryMiB } from "./tree_impostor_memory.js";
 
 describe("tree impostor baker quality", () => {
   it("selects every structural variant instead of the merged selector geometry", () => {
@@ -35,6 +37,15 @@ describe("tree impostor baker quality", () => {
     for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
       expect(selectTreeImpostorBakeGeometry(map, "oak", "mid", variant)).toBe(variants[variant]);
     }
+  });
+
+  it("accounts for all four variant pages in the production memory estimate", () => {
+    const settings = cloneTreeSettings();
+    settings.impostors.enabled = true;
+    settings.impostors.resolutionPx = 192;
+    settings.impostors.octahedralGridSize = 8;
+
+    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(576, 5);
   });
 
   it("stores tree-local normals, not camera-view normals", () => {
