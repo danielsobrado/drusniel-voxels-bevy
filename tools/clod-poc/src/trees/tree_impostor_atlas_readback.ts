@@ -46,34 +46,19 @@ export function configureTreeImpostorAtlasTexture(texture: THREE.Texture): void 
   texture.anisotropy = Math.max(texture.anisotropy, TREE_IMPOSTOR_ATLAS_ANISOTROPY);
 }
 
-export async function readCleanedTreeImpostorAtlasTextures(
+export async function readTreeImpostorAtlasPixels(
   renderer: TreeImpostorReadbackRenderer,
-  albedoTarget: THREE.WebGLRenderTarget,
-  normalDepthTarget: THREE.WebGLRenderTarget,
+  target: THREE.WebGLRenderTarget,
   width: number,
   height: number,
-  tileSize: number,
-  webgpu: boolean,
-): Promise<{ albedo: THREE.DataTexture; normalDepth: THREE.DataTexture } | null> {
+): Promise<Uint8Array | null> {
   const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
   if (!readPixels) return null;
-  const expectedLength = width * height * 4;
-  const rawAlbedo = await readPixels(albedoTarget, 0, 0, width, height);
-  const rawNormalDepth = await readPixels(normalDepthTarget, 0, 0, width, height);
-  const albedo = copyTreeImpostorPixels(rawAlbedo, expectedLength);
-  const normalDepth = copyTreeImpostorPixels(rawNormalDepth, expectedLength);
-  if (webgpu) {
-    flipTreeImpostorPixelRows(albedo, width, height);
-    flipTreeImpostorPixelRows(normalDepth, width, height);
-  }
-  dilateTreeImpostorAtlasTiles({ albedo, normalDepth, width, height, tileSize });
-  return {
-    albedo: createDataTexture(albedo, width, height, albedoTarget.texture.name),
-    normalDepth: createDataTexture(normalDepth, width, height, normalDepthTarget.texture.name),
-  };
+  const raw = await readPixels(target, 0, 0, width, height);
+  return copyTreeImpostorPixels(raw, width * height * 4);
 }
 
-function createDataTexture(
+export function createTreeImpostorDataTexture(
   pixels: Uint8Array,
   width: number,
   height: number,
@@ -91,4 +76,28 @@ function createDataTexture(
   configureTreeImpostorAtlasTexture(texture);
   texture.needsUpdate = true;
   return texture;
+}
+
+export async function readCleanedTreeImpostorAtlasTextures(
+  renderer: TreeImpostorReadbackRenderer,
+  albedoTarget: THREE.WebGLRenderTarget,
+  normalDepthTarget: THREE.WebGLRenderTarget,
+  width: number,
+  height: number,
+  tileSize: number,
+  webgpu: boolean,
+): Promise<{ albedo: THREE.DataTexture; normalDepth: THREE.DataTexture } | null> {
+  const albedo = await readTreeImpostorAtlasPixels(renderer, albedoTarget, width, height);
+  if (!albedo) return null;
+  const normalDepth = await readTreeImpostorAtlasPixels(renderer, normalDepthTarget, width, height);
+  if (!normalDepth) return null;
+  if (webgpu) {
+    flipTreeImpostorPixelRows(albedo, width, height);
+    flipTreeImpostorPixelRows(normalDepth, width, height);
+  }
+  dilateTreeImpostorAtlasTiles({ albedo, normalDepth, width, height, tileSize });
+  return {
+    albedo: createTreeImpostorDataTexture(albedo, width, height, albedoTarget.texture.name),
+    normalDepth: createTreeImpostorDataTexture(normalDepth, width, height, normalDepthTarget.texture.name),
+  };
 }
