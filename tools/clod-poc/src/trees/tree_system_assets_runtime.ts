@@ -113,6 +113,7 @@ export class TreeSystemAssets {
       settings: this.settings,
       geometries: this.geometries,
       material: this.materialHandle.regularMaterial,
+      foliageAtlas: this.foliageAtlas,
       webgpu: this.webgpu,
     });
     if (result.supported) {
