@@ -22,6 +22,50 @@ interface SegmentIndex {
 
 const SEGMENT_BUCKET_SIZE_M = 64;
 const segmentIndexCache = new WeakMap<HydrologyGraph, SegmentIndex>();
+const lakeShoreDistanceCache = new WeakMap<HydrologyGraph, Float32Array>();
+
+export function lakeShoreDistanceField(graph: HydrologyGraph): Float32Array {
+  const cached = lakeShoreDistanceCache.get(graph);
+  if (cached) return cached;
+  const { resX, resZ, spacingM, lakeIndex } = graph.macro;
+  const distance = new Float32Array(lakeIndex.length);
+  const inf = 1e9;
+  for (let z = 0; z < resZ; z++) {
+    for (let x = 0; x < resX; x++) {
+      const index = z * resX + x;
+      const lake = lakeIndex[index]!;
+      if (lake < 0) continue;
+      const boundary = x === 0 || z === 0 || x === resX - 1 || z === resZ - 1
+        || lakeIndex[index - 1] !== lake || lakeIndex[index + 1] !== lake
+        || lakeIndex[index - resX] !== lake || lakeIndex[index + resX] !== lake;
+      distance[index] = boundary ? 0 : inf;
+    }
+  }
+  const relax = (index: number, neighbor: number, cost: number): void => {
+    if (graph.macro.lakeIndex[neighbor] !== graph.macro.lakeIndex[index]) return;
+    distance[index] = Math.min(distance[index]!, distance[neighbor]! + cost);
+  };
+  const diagonal = Math.SQRT2;
+  for (let z = 0; z < resZ; z++) for (let x = 0; x < resX; x++) {
+    const index = z * resX + x;
+    if (lakeIndex[index]! < 0) continue;
+    if (x > 0) relax(index, index - 1, 1);
+    if (z > 0) relax(index, index - resX, 1);
+    if (x > 0 && z > 0) relax(index, index - resX - 1, diagonal);
+    if (x < resX - 1 && z > 0) relax(index, index - resX + 1, diagonal);
+  }
+  for (let z = resZ - 1; z >= 0; z--) for (let x = resX - 1; x >= 0; x--) {
+    const index = z * resX + x;
+    if (lakeIndex[index]! < 0) continue;
+    if (x < resX - 1) relax(index, index + 1, 1);
+    if (z < resZ - 1) relax(index, index + resX, 1);
+    if (x < resX - 1 && z < resZ - 1) relax(index, index + resX + 1, diagonal);
+    if (x > 0 && z < resZ - 1) relax(index, index + resX - 1, diagonal);
+  }
+  for (let index = 0; index < distance.length; index++) distance[index] *= spacingM;
+  lakeShoreDistanceCache.set(graph, distance);
+  return distance;
+}
 
 function graphSegmentIndex(graph: HydrologyGraph): SegmentIndex {
   const cached = segmentIndexCache.get(graph);
@@ -77,6 +121,7 @@ export function createCarvedGraphHydrologySampler(
 ): GraphHydrologySampler {
   const base = createGraphHydrologySampler(graph, terrain, drySentinelDepthM);
   const { bucketSize, buckets } = graphSegmentIndex(graph);
+  const lakeShoreDistance = lakeShoreDistanceField(graph);
   return {
     carveHeight: base.carveHeight,
     sample(x, z) {
@@ -90,7 +135,7 @@ export function createCarvedGraphHydrologySampler(
       const lake = lakeIndex >= 0 ? graph.lakes[lakeIndex]! : null;
       if (lake && lake.levelM > baseHeight + 0.01) {
         const terrainY = Math.min(baseHeight, lake.levelM - Math.max(0.05, carve.lakeBedDepthM));
-        return lakeSample(terrainY, lake.levelM, lake.id, drySentinelDepthM);
+        return lakeSample(terrainY, lake.levelM, lake.id, drySentinelDepthM, lakeShoreDistance[gz * macro.resX + gx]!);
       }
 
       const candidates = buckets.get(`${Math.floor(x / bucketSize)},${Math.floor(z / bucketSize)}`) ?? [];
@@ -119,7 +164,7 @@ export function createCarvedGraphHydrologySampler(
       }
 
       if (lake && lake.levelM > terrainY + 0.01) {
-        return lakeSample(terrainY, lake.levelM, lake.id, drySentinelDepthM);
+        return lakeSample(terrainY, lake.levelM, lake.id, drySentinelDepthM, lakeShoreDistance[gz * macro.resX + gx]!);
       }
       if (!best) return drySample(terrainY, drySentinelDepthM);
       return riverSample(terrainY, best.segment, best.t, best.distance, drySentinelDepthM);
@@ -138,10 +183,10 @@ function drySample(terrainY: number, sentinel: number): HydrologySample {
     moisture: 0, bodyKind: HYDROLOGY_BODY_DRY, bodyId: 0, shoreDistance: sentinel };
 }
 
-function lakeSample(terrainY: number, waterY: number, lakeId: string, sentinel: number): HydrologySample {
+function lakeSample(terrainY: number, waterY: number, lakeId: string, sentinel: number, shoreDistance: number): HydrologySample {
   return { ...drySample(terrainY, sentinel), waterY, waterYFar: waterY,
     depth: waterY - terrainY, bodyMask: 1, lakeMask: 1, moisture: 1,
-    bodyKind: HYDROLOGY_BODY_LAKE, bodyId: numericId(lakeId), shoreDistance: 0 };
+    bodyKind: HYDROLOGY_BODY_LAKE, bodyId: numericId(lakeId), shoreDistance };
 }
 
 function riverSample(
@@ -171,6 +216,7 @@ export function createGraphHydrologySampler(
   drySentinelDepthM = 2,
 ): GraphHydrologySampler {
   const { bucketSize, buckets } = graphSegmentIndex(graph);
+  const lakeShoreDistance = lakeShoreDistanceField(graph);
 
   return {
     carveHeight(x, z, baseHeight, config) {
@@ -212,7 +258,7 @@ export function createGraphHydrologySampler(
           const lake = graph.lakes[lakeIndex]!;
           if (lake.levelM <= terrainY + 0.01) return drySample(terrainY, drySentinelDepthM);
           const waterY = lake.levelM;
-          return lakeSample(terrainY, waterY, lake.id, drySentinelDepthM);
+          return lakeSample(terrainY, waterY, lake.id, drySentinelDepthM, lakeShoreDistance[gz * macro.resX + gx]!);
         }
       }
       const candidates = buckets.get(`${Math.floor(x / bucketSize)},${Math.floor(z / bucketSize)}`) ?? [];

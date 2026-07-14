@@ -4,16 +4,20 @@ Parent: `continent-plan-overview-2026-07-12.md`
 
 ## Status
 
+Updated 2026-07-14. **COMPLETE.** Verified by the full green suite (typecheck + 2924 vitest
+tests) and by Phases 3–6, which build on this contract and are themselves validated. The old
+"IN PROGRESS / next action" note below was stale — every artifact exists and is wired.
+
 | Commit | State | Notes |
 | --- | --- | --- |
-| C1.1 HeightfieldSampler + adapters | IN PROGRESS | |
-| C1.2 WorldTileKey + adapter tests | pending | |
-| C1.3 WorldManifest + diagnostics | pending | |
-| C1.4 Thread manifest | pending | |
-| C1.5 Docs + acceptance counter | pending | |
+| C1.1 HeightfieldSampler + adapters | DONE | `src/world/heightfield_sampler.ts` + startup install adapter |
+| C1.2 WorldTileKey + adapter tests | DONE | `src/world/tile_key.ts`, `tile_key.test.ts` (256 m tile vocabulary) |
+| C1.3 WorldManifest + diagnostics | DONE | `src/world/world_manifest.ts`; `world_manifest_present` / `world_manifest_seed` startup timings |
+| C1.4 Thread manifest | DONE | consumed by `cache/terrainSource.ts` (source hash), `save/save_schema.ts` + `save_migration.ts`, `world/hydrology_graph/hydrology_graph_artifact.ts` |
+| C1.5 Docs + acceptance counter | DONE (counters) | `heightfield_tiles_*` counters surfaced via `heightfield_tile_sampler.ts`; a formal acceptance **gate** is not yet in `tools/infinite_acceptance` — tracked as Phase 2 evidence backfill |
 
-**Next action:** implement `src/world/heightfield_sampler.ts` (C1.1) — wrap the raster install
-site in `world_build_startup.ts:494-498` behind the interface with bit-identical behavior.
+**Next action:** none — Phase 1 is closed. The only follow-up (heightfield-tile acceptance gate)
+lives in `continent-fixes-and-next-steps-2026-07-14.md`.
 
 ## Goal
 

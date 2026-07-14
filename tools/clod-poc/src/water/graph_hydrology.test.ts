@@ -20,6 +20,22 @@ describe("graph hydrology sampling", () => {
     expect(dry.waterY).toBe(dry.terrainY - 2);
   });
 
+  it("reports lake shore distance that grows toward the lake interior", () => {
+    const terrain = { surfaceHeight: (x: number, z: number) =>
+      x >= 2 && x <= 6 && z >= 2 && z <= 6 ? 0 : 10 };
+    const graph = buildHydrologyGraph({
+      worldId: "lake-shore-distance", seed: 1, sizeM: { x: 8, z: 8 },
+      sampleHeight: terrain.surfaceHeight,
+      config: { spacingM: 1, lakeMinDepthM: 0.01, channelThresholdCells: 999 },
+    });
+    const sampler = createGraphHydrologySampler(graph, terrain);
+    const edge = sampler.sample(2, 4);
+    const center = sampler.sample(4, 4);
+    expect(edge.lakeMask).toBe(1);
+    expect(edge.shoreDistance).toBe(0);
+    expect(center.shoreDistance).toBeGreaterThan(edge.shoreDistance);
+  });
+
   it("produces deterministic graph-backed tiles with exact shared borders", () => {
     const terrain = { surfaceHeight: (_x: number, z: number) => 100 - z };
     const graph = buildHydrologyGraph({

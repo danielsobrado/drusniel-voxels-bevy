@@ -6,14 +6,19 @@ Not genuinely infinite islands.
 
 This is the umbrella document. Phase details live in:
 
-| Phase | Document | Status (2026-07-13) |
+| Phase | Document | Status (2026-07-14) |
 | --- | --- | --- |
-| 1. Canonical world contract | `continent-phase-1-canonical-contract-2026-07-12.md` | IN PROGRESS |
-| 2. Streamed heightfield tiles | `continent-phase-2-heightfield-tiles-2026-07-12.md` | not started |
-| 3. Continental hydrology | `continent-phase-3-continental-hydrology-2026-07-12.md` | not started |
+| 1. Canonical world contract | `continent-phase-1-canonical-contract-2026-07-12.md` | COMPLETE — contract shipped, manifest threaded, counters surfaced |
+| 2. Streamed heightfield tiles | `continent-phase-2-heightfield-tiles-2026-07-12.md` | IMPLEMENTED — cache/store/runtime/atlas live + unit-tested; formal Evidence not yet recorded |
+| 3. Continental hydrology | `continent-phase-3-continental-hydrology-2026-07-12.md` | COMPLETE — C3.1–C3.7, GPU tile-atlas streamed-root authority |
 | 4. Unified world summary | `continent-phase-4-unified-world-summary-2026-07-12.md` | COMPLETE — graph-water and 4 km canopy A/B accepted |
-| 5. Voxel overlay and complex regions | `continent-phase-5-voxel-overlay-2026-07-12.md` | not started |
+| 5. Voxel overlay and complex regions | `continent-phase-5-voxel-overlay-2026-07-12.md` | COMPLETE (2026-07-14) — caves/masks, bounded NAADF occupancy |
 | 6. RPG features and persistence | `continent-phase-6-rpg-persistence-2026-07-12.md` | COMPLETE (2026-07-14) |
+
+**Fixes and next steps** (open bugs, perf work, Phase 2 evidence backfill, roadmap):
+`continent-fixes-and-next-steps-2026-07-14.md`.
+
+Green baseline as of 2026-07-14: `typecheck` clean; full `vitest` 543 files / 2924 tests pass.
 
 Each phase document carries a `## Status` section (per-commit checklist + next action) that is
 updated **immediately after every commit-sized chunk of implementation**, so an interrupted

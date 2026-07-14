@@ -3,6 +3,7 @@ import canopyYaml from "../../config/canopy_shell.yaml?raw";
 import {
   applyCanopyShellQueryOverrides,
   parseCanopyShellConfig,
+  shouldSkipLegacyCanopy,
   shouldUseDeterministicCanopy,
   validateCanopyShellConfig,
 } from "./canopy_config.js";
@@ -65,5 +66,12 @@ describe("canopy config", () => {
     expect(shouldUseDeterministicCanopy("continent", DEFAULT_CANOPY_SHELL_CONFIG, false)).toBe(true);
     expect(shouldUseDeterministicCanopy("long-view-4km", DEFAULT_CANOPY_SHELL_CONFIG, false)).toBe(false);
     expect(shouldUseDeterministicCanopy("long-view-4km", DEFAULT_CANOPY_SHELL_CONFIG, true)).toBe(true);
+  });
+
+  it("does not fall back to legacy canopy when canopy is explicitly disabled", () => {
+    const disabled = applyCanopyShellQueryOverrides(DEFAULT_CANOPY_SHELL_CONFIG, new URLSearchParams("canopy=0"));
+    expect(shouldSkipLegacyCanopy(disabled, false)).toBe(true);
+    expect(shouldSkipLegacyCanopy(DEFAULT_CANOPY_SHELL_CONFIG, true)).toBe(true);
+    expect(shouldSkipLegacyCanopy(DEFAULT_CANOPY_SHELL_CONFIG, false)).toBe(false);
   });
 });

@@ -2,6 +2,26 @@
 
 Parent: `continent-plan-overview-2026-07-12.md`. Requires Phase 1.
 
+## Status
+
+Updated 2026-07-14. **IMPLEMENTED — formal Evidence not yet recorded.**
+
+The full tile system is live and unit-tested: `heightfield_tile_cache.ts`, `heightfield_tile_store.ts`
+(IndexedDB), `heightfield_tile_runtime.ts` / `heightfield_tile_client_runtime.ts`,
+`heightfield_tile_gpu_atlas.ts`, `heightfield_tile_sampler.ts`, `heightfield_tile_carve.ts`,
+`heightfield_tile_complexity.ts`, and the worker protocol — with `heightfield_tiles_*` and
+`heightfield_tile_gpu_atlas_*` counters surfaced. Phase 3 (validated) drives this cache as the
+GPU tile-atlas streamed-root authority end-to-end, so it is exercised in a shipping path.
+
+Not done: the doc's own **Evidence** checklist below (perf:main flag on/off, perf:move route
+counters, cold-vs-warm store latency, `accept:infinite-islands --reuse` flag on/off) was never
+formally captured, and there is no dedicated heightfield-tile acceptance gate in
+`tools/infinite_acceptance`. Two correctness bugs in this phase's code are open — boundary
+over-request and inflight-batch accounting; both are detailed in
+`continent-fixes-and-next-steps-2026-07-14.md`. Per this plan's own rule ("a phase without
+recorded numbers is not done"), Phase 2 stays **IMPLEMENTED** rather than COMPLETE until the
+Evidence lands and the two bugs are fixed.
+
 ## Goal
 
 A camera-following cache of **256 m canonical surface tiles** (257×257 samples at 1 m), built in

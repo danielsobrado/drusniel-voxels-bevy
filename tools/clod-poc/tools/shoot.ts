@@ -34,12 +34,13 @@ async function main(): Promise<void> {
   const sceneLabel = scene ?? "main";
   const out = str(args["out"]) ?? `shots/phase-0/${sceneLabel}-${Date.now()}.png`;
   const settleFrames = Number(str(args["settle"]) ?? 8);
+  const waitForFar = str(args["waitfar"]) === "1";
   const timeoutMs = Number(str(args["timeout"]) ?? 120000);
   const rendererParam = str(args["renderer"]);
 
   const consumed = new Set([
     "scene", "seed", "cam", "out", "w", "h", "hud", "settle", "timeout", "stats",
-    "framealign", "gpusample", "freeze", "renderer",
+    "framealign", "gpusample", "freeze", "renderer", "waitfar", "inventory",
   ]);
   const extra: Record<string, string> = {};
   for (const [key, value] of Object.entries(args)) {
@@ -112,6 +113,54 @@ async function main(): Promise<void> {
     }
 
     await page.evaluate(async (frames: number) => window.__drusnielClod?.settle?.(frames), settleFrames);
+
+    if (waitForFar) {
+      await page.waitForFunction(() => {
+        const counters = window.__drusnielClod?.stats?.counters;
+        if (!counters) return false;
+        const required = Number(counters.far_summary_tiles_required ?? 0);
+        const ready = Number(counters.far_summary_tiles_ready ?? 0);
+        const building = Number(counters.far_summary_tiles_building ?? 0);
+        const runtimeError = Number(counters.far_summary_gpu_runtime_error ?? 0);
+        return runtimeError === 0 && (required === 0 || (ready >= required && building === 0));
+      }, { timeout: timeoutMs });
+      const far = await page.evaluate(() => {
+        const counters = window.__drusnielClod?.stats?.counters ?? {};
+        return {
+          required: counters.far_summary_tiles_required ?? 0,
+          ready: counters.far_summary_tiles_ready ?? 0,
+          building: counters.far_summary_tiles_building ?? 0,
+          gpuReady: counters.far_summary_gpu_device_ready ?? 0,
+        };
+      });
+      console.log(`[shoot] far summary converged ${JSON.stringify(far)}`);
+    }
+
+    if (str(args["inventory"]) === "1") {
+      const inventory = await page.evaluate(() => {
+        const scene = (window as unknown as { __drusnielScene?: import("three").Scene }).__drusnielScene;
+        if (!scene) return [];
+        const rows: Array<Record<string, string | number | boolean>> = [];
+        scene.traverse((object) => {
+          const mesh = object as import("three").Mesh & { count?: number };
+          if (!mesh.isMesh) return;
+          const vertices = mesh.geometry.index?.count ?? mesh.geometry.getAttribute("position")?.count ?? 0;
+          const instances = Number.isFinite(mesh.count) ? Math.max(0, mesh.count ?? 1) : 1;
+          rows.push({
+            name: mesh.name || "(unnamed)",
+            visible: mesh.visible,
+            vertices,
+            instances,
+            estimatedTriangles: Math.floor(vertices / 3) * instances,
+            material: Array.isArray(mesh.material)
+              ? mesh.material.map((item) => item.type).join(",")
+              : mesh.material.type,
+          });
+        });
+        return rows.sort((a, b) => Number(b.estimatedTriangles) - Number(a.estimatedTriangles)).slice(0, 30);
+      });
+      console.log(`[shoot] scene inventory ${JSON.stringify(inventory, null, 2)}`);
+    }
 
     const frameAlign = str(args["framealign"]);
     if (frameAlign !== undefined) {

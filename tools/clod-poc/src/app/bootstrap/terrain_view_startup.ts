@@ -51,6 +51,7 @@ import canopyShellYaml from "../../../config/canopy_shell.yaml?raw";
 import {
   applyCanopyShellQueryOverrides,
   parseCanopyShellConfig,
+  shouldSkipLegacyCanopy,
   shouldUseDeterministicCanopy,
 } from "../../canopy/canopy_config.js";
 import {
@@ -329,7 +330,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     useDebugLambertReceiver: () => Boolean(shadowProxyDebugState?.debugLambertFarShellReceiver),
     useParityMaterial: () => materialConfig.enabled,
     getParityConfig: () => parityUniformData,
-    skipLegacyCanopy: useDeterministicCanopy,
+    skipLegacyCanopy: shouldSkipLegacyCanopy(liveCanopyConfig, useDeterministicCanopy),
     onTriangleCount: (counter, count) => {
       if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
     },

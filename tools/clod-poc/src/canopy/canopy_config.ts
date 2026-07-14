@@ -247,3 +247,10 @@ export function shouldUseDeterministicCanopy(
   if (scene?.startsWith("long-view-shadow-proxy-forest")) return true;
   return false;
 }
+
+export function shouldSkipLegacyCanopy(
+  config: CanopyShellConfig,
+  useDeterministicCanopy: boolean,
+): boolean {
+  return useDeterministicCanopy || !config.enabled;
+}
