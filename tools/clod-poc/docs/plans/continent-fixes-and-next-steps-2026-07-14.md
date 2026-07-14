@@ -69,9 +69,11 @@ scaling toward real RPG content — not new architecture.
   exactly on a 256 m boundary at a **large positive** coordinate (e.g. origin 32512, span 256)
   requires exactly the one covered tile, not the next. Add a **large negative** coordinate case and
   a small-origin case to lock both edge directions and prevent an origin regression.
-- [ ] failing regression test (large +, large −, small origin)
-- [ ] fix
+- [x] failing regression test (large +, large −, small origin)
+- [x] fix
 - [ ] full `vitest` green
+- **2026-07-14 verification:** focused file failed before the fix (3 failed / 8 passed) and
+  passed after it (11 passed). Full repository Vitest remains pending.
 - [ ] `accept:infinite-islands --reuse` (continent scene): required/resident tile counts drop on
   tile-aligned pages; no page-readiness stall at the residency-ring edge
 
@@ -105,9 +107,11 @@ scaling toward real RPG content — not new architecture.
   then resolve the stale builders — assert (a) concurrent physical builds never exceed
   `maxInflightBatches` across the whole sequence, and (b) no tile ID is built twice. The existing
   invalidation test only covers rebuild-after-completed-load, so this race is currently uncovered.
-- [ ] failing regression test (concurrency ceiling + no duplicate build)
-- [ ] fix (physical counter + epoch-guarded ID deletion)
+- [x] failing regression test (concurrency ceiling + no duplicate build)
+- [x] fix (physical counter + epoch-guarded ID deletion)
 - [ ] full `vitest` green
+- **2026-07-14 verification:** focused file failed before the fix (1 failed / 9 passed) and
+  passed after it (10 passed). Full repository Vitest remains pending.
 
 ### Not-a-bug notes (verified this pass, keep for future readers)
 
@@ -177,7 +181,7 @@ targeted micro-bench) shows the win. Ranked by expected gameplay impact.
 
 ### C3. Tile cache dispatches one batch per `dispatch()` call (MOOT at current config)
 
-- **Where:** `src/world/heightfield_tiles/heightfield_tile_cache.ts:287` — no loop, so each
+- **Where:** `heightfield_tile_cache.ts:287` — no loop, so each
   `dispatch()` starts at most one batch.
 - **Status:** the shipped config is `config/heightfield_tiles.yaml max_inflight_batches: 1`, so
   there is **no unused concurrency to fill** — this is currently a non-issue. It only becomes
