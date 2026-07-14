@@ -2,7 +2,7 @@ name: CLOD GPU Hierarchy Gate
 
 on:
   push:
-    paths: &hierarchy_paths
+    paths:
       - 'tools/clod-poc/src/terrain/streaming/gpu_clod_*.ts'
       - 'tools/clod-poc/src/terrain/streaming/root_height_morph.ts'
       - 'tools/clod-poc/src/terrain/streaming/streamed_page_bounds_guard.ts'
@@ -14,7 +14,17 @@ on:
       - 'tools/clod-poc/package-lock.json'
       - '.github/workflows/clod-gpu-hierarchy-gate.yml'
   pull_request:
-    paths: *hierarchy_paths
+    paths:
+      - 'tools/clod-poc/src/terrain/streaming/gpu_clod_*.ts'
+      - 'tools/clod-poc/src/terrain/streaming/root_height_morph.ts'
+      - 'tools/clod-poc/src/terrain/streaming/streamed_page_bounds_guard.ts'
+      - 'tools/clod-poc/src/terrain/rendering/clod_render_node_cache.ts'
+      - 'tools/clod-poc/src/rendering/webgpu_*.ts'
+      - 'tools/clod-poc/src/cache/clodStreamRootCache.ts'
+      - 'tools/clod-poc/src/types.ts'
+      - 'tools/clod-poc/package.json'
+      - 'tools/clod-poc/package-lock.json'
+      - '.github/workflows/clod-gpu-hierarchy-gate.yml'
   workflow_dispatch:
 
 concurrency:
