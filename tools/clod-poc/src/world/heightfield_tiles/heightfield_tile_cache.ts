@@ -234,7 +234,6 @@ export class HeightfieldTileCache {
     if (count > 0) {
       this.epoch++;
       this.inflightIds.clear();
-      this.inflightBatches = 0;
     }
     this.dispatch();
     return count;
@@ -298,7 +297,9 @@ export class HeightfieldTileCache {
     for (const entry of batch) this.inflightIds.add(entry.id);
     this.inflightBatches++;
     void this.loadOrBuild(batch, epoch).finally(() => {
-      for (const entry of batch) this.inflightIds.delete(entry.id);
+      if (epoch === this.epoch) {
+        for (const entry of batch) this.inflightIds.delete(entry.id);
+      }
       this.inflightBatches = Math.max(0, this.inflightBatches - 1);
       if (epoch === this.epoch) this.dispatch();
     });
