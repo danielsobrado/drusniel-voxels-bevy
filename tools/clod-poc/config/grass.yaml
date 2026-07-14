@@ -44,9 +44,9 @@ grass:
     dither_band_m: 12
 
   blade:
-    height_m: 0.62
-    height_variation: 0.48
-    width_m: 0.026
+    height_m: 0.78
+    height_variation: 0.52
+    width_m: 0.04
     near_blades_per_instance: 7
     mid_blades_per_instance: 4
     near_segments: 4
