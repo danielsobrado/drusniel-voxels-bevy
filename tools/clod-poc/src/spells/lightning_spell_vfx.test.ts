@@ -75,6 +75,8 @@ describe("lightning spell VFX", () => {
     expect(impactLight.visible).toBe(false);
 
     vfx.play(1000);
+    clock = 1016;
+    vfx.update(clock);
     expect(core.visible).toBe(true);
     expect(glow.visible).toBe(true);
     expect(ring.visible).toBe(true);
