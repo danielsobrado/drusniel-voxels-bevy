@@ -110,7 +110,7 @@ export function disposeTreeImpostorLab(group: THREE.Group | null): void {
       object.material.dispose();
     }
   });
-  if (typeof window !== "undefined") window.__drusnielTreeImpostorLab = undefined;
+  if (typeof window !== "undefined") delete window.__drusnielTreeImpostorLab;
 }
 
 function createLabMaterial(atlas: TreeImpostorAtlas, channel: TreeImpostorLabChannel): THREE.Material {
@@ -127,7 +127,7 @@ function createLabMaterial(atlas: TreeImpostorAtlas, channel: TreeImpostorLabCha
   } else if (channel === "normal") {
     material.colorNode = sample.rgb;
   } else {
-    material.colorNode = vec3(sample.w);
+    material.colorNode = vec3(sample.w, sample.w, sample.w);
   }
   material.side = THREE.DoubleSide;
   material.transparent = false;
