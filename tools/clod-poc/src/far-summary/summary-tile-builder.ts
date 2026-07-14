@@ -68,6 +68,7 @@ export interface FarSummaryTileBuildState {
 
 const GRID_BORDER_CELLS = 1;
 const BUILD_DEADLINE_CHECK_INTERVAL_CELLS = 8;
+const WATER_COVERAGE_BLOCK_THRESHOLD = 0.05;
 
 export function computeNormalFiniteDifference(
   h: (x: number, z: number) => number,
@@ -234,7 +235,7 @@ export function enrichFarSummaryTileUnifiedChannels(
   tile: FarSummaryTile,
   terrainSampler: FarTerrainSampler,
 ): FarSummaryTile {
-  if (!terrainSampler.sampleWaterSummary && !terrainSampler.sampleCanopySummary) return tile;
+  if (!hasUnifiedEnrichment(terrainSampler)) return tile;
   const state = createFarSummaryUnifiedEnrichment(tile);
   stepFarSummaryUnifiedEnrichment(state, terrainSampler, Number.POSITIVE_INFINITY);
   return tile;
@@ -268,11 +269,12 @@ export function stepFarSummaryUnifiedEnrichment(
   terrainSampler: FarTerrainSampler,
   deadlineMs: number,
 ): boolean {
-  if (!terrainSampler.sampleWaterSummary && !terrainSampler.sampleCanopySummary) {
+  if (!hasUnifiedEnrichment(terrainSampler)) {
     state.nextSample = state.tile.samples.length;
     state.nextCanopySample = coarseCanopySampleCount(state.tile.tileCells);
     return true;
   }
+
   const waterWasComplete = state.nextSample >= state.tile.samples.length;
   if (!stepFarSummaryUnifiedWaterEnrichment(state, terrainSampler, deadlineMs)) return false;
   if (!waterWasComplete && performance.now() >= deadlineMs) return false;
@@ -282,24 +284,36 @@ export function stepFarSummaryUnifiedEnrichment(
   if (!terrainSampler.sampleCanopySummary) {
     state.nextCanopySample = canopySampleCount;
   }
+
   while (state.nextCanopySample < canopySampleCount && (!stepped || performance.now() < deadlineMs)) {
     const target = coarseCanopySampleTarget(state.tile.tileCells, state.nextCanopySample++);
     const tile = state.tile;
+
+    if (target.sx >= tile.tileCells || target.sz >= tile.tileCells) {
+      stepped = true;
+      continue;
+    }
+
+    const sample = tile.samples[target.sz * tile.tileCells + target.sx]!;
+    if (farSummaryCanopyWaterBlocked(tile, target.sx, target.sz)) {
+      clearCanopySample(sample);
+      stepped = true;
+      continue;
+    }
+
     const canopy = terrainSampler.sampleCanopySummary!(
       tile.originX + target.sx * tile.cellSizeM,
       tile.originZ + target.sz * tile.cellSizeM,
       tile.cellSizeM,
     );
-    if (target.sx < tile.tileCells && target.sz < tile.tileCells) {
-      const sample = tile.samples[target.sz * tile.tileCells + target.sx]!;
-      sample.canopyCoverage = sample.waterCoverage > 0.05 ? 0 : clamp01(canopy.coverage);
-      sample.canopyHeightAvg = finiteOr(canopy.canopyHeightAvg, sample.canopyHeightAvg);
-      sample.speciesPine = clamp01(canopy.speciesPine);
-      sample.speciesBroadleaf = clamp01(canopy.speciesBroadleaf);
-      sample.speciesDeadwood = clamp01(canopy.speciesDeadwood);
-    }
+    sample.canopyCoverage = clamp01(canopy.coverage);
+    sample.canopyHeightAvg = finiteOr(canopy.canopyHeightAvg, sample.canopyHeightAvg);
+    sample.speciesPine = clamp01(canopy.speciesPine);
+    sample.speciesBroadleaf = clamp01(canopy.speciesBroadleaf);
+    sample.speciesDeadwood = clamp01(canopy.speciesDeadwood);
     stepped = true;
   }
+
   return state.nextCanopySample >= canopySampleCount;
 }
 
@@ -326,10 +340,43 @@ export function stepFarSummaryUnifiedWaterEnrichment(
     sample.shoreDistance = finiteOr(water?.shoreDistance, sample.shoreDistance);
     sample.flowX = finiteOr(water?.flowX, sample.flowX);
     sample.flowZ = finiteOr(water?.flowZ, sample.flowZ);
-    if (sample.waterCoverage > 0.05) sample.canopyCoverage = 0;
+    if (sample.waterCoverage > WATER_COVERAGE_BLOCK_THRESHOLD) clearCanopySample(sample);
     stepped = true;
   }
   return state.nextSample >= state.tile.samples.length;
+}
+
+export function farSummaryCanopyWaterBlocked(
+  tile: FarSummaryTile,
+  sx: number,
+  sz: number,
+): boolean {
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = Math.max(0, Math.min(tile.tileCells - 1, sx + dx));
+      const z = Math.max(0, Math.min(tile.tileCells - 1, sz + dz));
+      if (tile.samples[z * tile.tileCells + x]!.waterCoverage > WATER_COVERAGE_BLOCK_THRESHOLD) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hasUnifiedEnrichment(terrainSampler: FarTerrainSampler): boolean {
+  return Boolean(
+    terrainSampler.sampleWaterSummary
+    || terrainSampler.sampleWaterCoverageForHeight
+    || terrainSampler.sampleCanopySummary
+  );
+}
+
+function clearCanopySample(sample: FarSummarySample): void {
+  sample.canopyCoverage = 0;
+  sample.canopyHeightAvg = sample.heightAvg;
+  sample.speciesPine = 0;
+  sample.speciesBroadleaf = 0;
+  sample.speciesDeadwood = 0;
 }
 
 function coarseCanopySampleCount(tileCells: number): number {
@@ -410,7 +457,7 @@ function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySam
     normalZ: nz,
     dominantMaterial: Math.max(0, Math.round(material)),
     materialVariance: 0,
-    canopyCoverage: clamp01(canopy),
+    canopyCoverage: clamp01(water) > WATER_COVERAGE_BLOCK_THRESHOLD ? 0 : clamp01(canopy),
     waterCoverage: clamp01(water),
     waterLevel: finiteOr(waterSummary?.waterLevel, sampleH),
     bodyKind: finiteOr(waterSummary?.bodyKind, 0),
