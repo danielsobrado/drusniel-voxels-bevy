@@ -12,7 +12,7 @@ function fakeBuffer(): GPUBuffer {
 }
 
 describe("external WebGPU CLOD geometry", () => {
-  it("binds existing GPU buffers to Three attributes without uploading CPU geometry", () => {
+  it("binds resident vertex, index, and meshlet indirect buffers without CPU geometry upload", () => {
     const backendData = new WeakMap<object, { buffer?: GPUBuffer }>();
     const renderer = {
       backend: {
@@ -29,6 +29,7 @@ describe("external WebGPU CLOD geometry", () => {
     const release = vi.fn();
     const vertexBuffer = fakeBuffer();
     const indexBuffer = fakeBuffer();
+    const indirectBuffer = fakeBuffer();
     const lease: GpuClodResidentPageLease = {
       page: {
         id: "L0:0,0",
@@ -40,6 +41,16 @@ describe("external WebGPU CLOD geometry", () => {
         indexCount: 18,
         byteLength: 1024,
         bounds: { center: [4, 2, 4], radius: 8, minY: -1, maxY: 5 },
+        meshlets: {
+          headers: fakeBuffer(),
+          bounds: fakeBuffer(),
+          hierarchyHeaders: fakeBuffer(),
+          hierarchyBounds: fakeBuffer(),
+          indirect: indirectBuffer,
+          meshletCount: 2,
+          hierarchyNodeCount: 1,
+          byteLength: 256,
+        },
         errorWorld: 0,
         lowBenefit: false,
       },
@@ -51,8 +62,10 @@ describe("external WebGPU CLOD geometry", () => {
     expect(position.count).toBe(12);
     expect(geometry.index?.count).toBe(18);
     expect(geometry.drawRange.count).toBe(18);
+    expect(geometry.indirectOffset).toEqual([0, 20]);
     expect(backendData.get((position as typeof position & { data: object }).data)?.buffer).toBe(vertexBuffer);
     expect(backendData.get(geometry.index as object)?.buffer).toBe(indexBuffer);
+    expect(backendData.get(geometry.indirect as object)?.buffer).toBe(indirectBuffer);
     expect(isExternalGpuClodGeometry(geometry)).toBe(true);
 
     releaseExternalGpuClodGeometry(geometry);
