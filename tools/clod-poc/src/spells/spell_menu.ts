@@ -7,13 +7,14 @@ export interface SpellMenu {
   castWater: () => void;
   castAir: () => void;
   castEarth: () => void;
+  castLightning: () => void;
   dispose: () => void;
 }
 
 export interface SpellMenuDeps {
   config?: SpellConfig;
   root?: HTMLElement;
-  /** In-scene VFX controller that plays the 3D spell billboards. */
+  /** In-scene VFX controller that plays the 3D spell effects. */
   controller?: SpellVfxController;
 }
 
@@ -26,6 +27,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   let waterActiveReset = 0;
   let airActiveReset = 0;
   let earthActiveReset = 0;
+  let lightningActiveReset = 0;
   let dragOffset: { x: number; y: number } | null = null;
 
   root.replaceChildren();
@@ -42,10 +44,11 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const waterButton = createSpellButton(`2 💧 ${config.water.label}`, `${config.water.label} spell (2)`, () => castWater());
   const airButton = createSpellButton(`3 💨 ${config.air.label}`, `${config.air.label} spell (3)`, () => castAir());
   const earthButton = createSpellButton(`4 🪨 ${config.earth.label}`, `${config.earth.label} spell (4)`, () => castEarth());
+  const lightningButton = createSpellButton(`5 ⚡ ${config.lightning.label}`, `${config.lightning.label} spell (5)`, () => castLightning());
 
   root.addEventListener("pointerdown", stopUiPropagation);
   root.addEventListener("click", stopUiPropagation);
-  slots.append(fireButton, waterButton, airButton, earthButton);
+  slots.append(fireButton, waterButton, airButton, earthButton, lightningButton);
   root.append(title, slots);
 
   title.addEventListener("pointerdown", onDragStart);
@@ -110,20 +113,34 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     earthActiveReset = window.setTimeout(() => earthButton.setAttribute("aria-pressed", "false"), config.earth.castDurationMs);
   }
 
+  function castLightning(): void {
+    window.clearTimeout(lightningActiveReset);
+    lightningButton.setAttribute("aria-pressed", "true");
+    controller?.playLightning(config.lightning.castDurationMs);
+    emitAudio("spell.lightning.cast", { volume: config.lightning.audio.volume, durationMs: config.lightning.castDurationMs });
+    lightningActiveReset = window.setTimeout(
+      () => lightningButton.setAttribute("aria-pressed", "false"),
+      config.lightning.castDurationMs,
+    );
+  }
+
   return {
     castFire,
     castWater,
     castAir,
     castEarth,
+    castLightning,
     dispose: () => {
       window.clearTimeout(fireActiveReset);
       window.clearTimeout(waterActiveReset);
       window.clearTimeout(airActiveReset);
       window.clearTimeout(earthActiveReset);
+      window.clearTimeout(lightningActiveReset);
       fireActiveReset = 0;
       waterActiveReset = 0;
       airActiveReset = 0;
       earthActiveReset = 0;
+      lightningActiveReset = 0;
       if (dragOffset) onDragEnd();
       title.removeEventListener("pointerdown", onDragStart);
       root.removeEventListener("pointerdown", stopUiPropagation);
@@ -132,6 +149,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       waterButton.remove();
       airButton.remove();
       earthButton.remove();
+      lightningButton.remove();
       if (shouldRemoveRoot) root.remove();
       else root.replaceChildren();
     },
