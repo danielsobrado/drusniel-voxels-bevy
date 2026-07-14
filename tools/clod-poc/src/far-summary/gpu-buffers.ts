@@ -8,6 +8,7 @@ import {
   FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CANONICAL_SAMPLES,
   FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS,
   FAR_SUMMARY_GPU_RECORD_BYTES,
+  farSummaryUnifiedLayoutEnabledForScene,
   type FarSummaryGpuConfig,
 } from "./gpu-config.js";
 
@@ -105,7 +106,8 @@ export function farSummaryGpuUsesCanonicalSamples(
   if (!terrainSampler) return false;
   if (params.get("farSummaryGpuCanonicalSamples") === "1") return true;
   if (params.get("farSummaryGpuCanonicalSamples") === "0") return false;
-  return params.get("scene") !== INFINITE_ISLANDS_SCENE || params.get("farSummaryLayout") !== "2";
+  return params.get("scene") !== INFINITE_ISLANDS_SCENE
+    || !farSummaryUnifiedLayoutEnabledForScene(params);
 }
 
 export function farSummaryGpuReadbackTileCount(

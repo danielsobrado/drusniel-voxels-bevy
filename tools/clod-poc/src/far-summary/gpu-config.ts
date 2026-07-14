@@ -29,11 +29,18 @@ export const DEFAULT_FAR_SUMMARY_GPU_CONFIG: FarSummaryGpuConfig = {
   debugReadbackTiles: 8,
 };
 
+export function farSummaryUnifiedLayoutEnabledForScene(params: URLSearchParams): boolean {
+  const layout = params.get("farSummaryLayout");
+  if (layout === "2") return true;
+  return layout === null && params.get("scene") === "infinite-islands";
+}
+
 export function farSummaryGpuDefaultsForScene(params: URLSearchParams): FarSummaryGpuConfig {
   const scene = params.get("scene");
-  const unifiedLayout = params.get("farSummaryLayout") === "2";
   const gpuFirstScene = scene === "continent" || scene === "infinite-islands";
-  if (!gpuFirstScene || !unifiedLayout) return DEFAULT_FAR_SUMMARY_GPU_CONFIG;
+  if (!gpuFirstScene || !farSummaryUnifiedLayoutEnabledForScene(params)) {
+    return DEFAULT_FAR_SUMMARY_GPU_CONFIG;
+  }
 
   return {
     ...DEFAULT_FAR_SUMMARY_GPU_CONFIG,
