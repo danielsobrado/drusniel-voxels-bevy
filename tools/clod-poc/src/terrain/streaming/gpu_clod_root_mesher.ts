@@ -76,7 +76,8 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       if (this.residentPages && !this.residentHierarchyDisabled) {
         this.residentHierarchyFailures++;
       }
-      this.disableRuntime(error);
+      const childDisabled = this.meshers[index]!.stats().enabled === 0;
+      if (childDisabled || isHardGpuRuntimeFailure(error)) this.disableRuntime(error);
       throw error;
     } finally {
       this.active = Math.max(0, this.active - 1);
@@ -339,6 +340,11 @@ function splitBudget(configured: number | undefined, fallback: number, poolCount
 
 function normalizedCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function isHardGpuRuntimeFailure(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /out.?of.?memory|device.?lost|validation|maxBufferSize|GPUValidationError|OperationError/i.test(message);
 }
 
 function sum(stats: readonly GpuClodRootMesherStats[], key: keyof GpuClodRootMesherStats): number {
