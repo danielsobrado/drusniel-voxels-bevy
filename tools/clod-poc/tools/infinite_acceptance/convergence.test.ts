@@ -173,7 +173,6 @@ describe("infinite acceptance convergence helpers", () => {
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "1",
       liveClodRootRadius: "384",
-      farClipmap: "1",
       farClipmapInnerRadius: "384",
       farClipmapOuterRadius: "4096",
       farSummaryMaxTileBuildsPerFrame: "4",
@@ -193,12 +192,15 @@ describe("infinite acceptance convergence helpers", () => {
       liveClodRootGpuBatchSize: "4",
       liveClodRootGpuMaxInflightBatches: "2",
       liveClodRootGpuFallback: "1",
-      farClipmap: "1",
       farClipmapInnerRadius: "384",
       farClipmapOuterRadius: "4096",
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     });
+    expect(profileAcceptanceParams("reuse")).not.toHaveProperty("farClipmap");
+    expect(profileAcceptanceParams("reuse")).not.toHaveProperty("farClipmapMode");
+    expect(profileAcceptanceParams("fast")).not.toHaveProperty("farClipmap");
+    expect(profileAcceptanceParams("fast")).not.toHaveProperty("farClipmapMode");
   });
 
   it("gives reuse a positive streamed CLOD budget and cache cap", () => {
