@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acquireGpuClodResidentPage,
   clearGpuClodResidentPages,
+  isGpuClodResidentPageLeased,
   registerGpuClodResidentPage,
   retireGpuClodResidentPage,
 } from "./gpu_clod_resident_registry.js";
@@ -40,24 +41,41 @@ describe("GPU CLOD resident registry", () => {
     expect(first?.page).toBe(residentPage);
     expect(second?.page).toBe(residentPage);
     expect(onFirstAcquire).toHaveBeenCalledTimes(1);
+    expect(isGpuClodResidentPageLeased(residentPage.id, residentPage)).toBe(true);
 
     first?.release();
+    expect(isGpuClodResidentPageLeased(residentPage.id, residentPage)).toBe(true);
     second?.release();
+    expect(isGpuClodResidentPageLeased(residentPage.id, residentPage)).toBe(false);
+  });
+
+  it("notifies every transition from leased to unleased", () => {
+    const residentPage = page();
+    const onFinalRelease = vi.fn();
+    registerGpuClodResidentPage(residentPage, undefined, onFinalRelease);
+
+    acquireGpuClodResidentPage(residentPage.id)?.release();
+    acquireGpuClodResidentPage(residentPage.id)?.release();
+
+    expect(onFinalRelease).toHaveBeenCalledTimes(2);
   });
 
   it("keeps retired buffers alive until the final render lease releases", () => {
     const residentPage = page();
-    registerGpuClodResidentPage(residentPage);
+    const onDestroyed = vi.fn();
+    registerGpuClodResidentPage(residentPage, undefined, undefined, onDestroyed);
     const lease = acquireGpuClodResidentPage(residentPage.id, residentPage.revision);
     expect(lease).not.toBeNull();
 
     retireGpuClodResidentPage(residentPage.id, residentPage);
     expect(residentPage.vertexBuffer.destroy).not.toHaveBeenCalled();
     expect(residentPage.indexBuffer.destroy).not.toHaveBeenCalled();
+    expect(onDestroyed).not.toHaveBeenCalled();
     expect(acquireGpuClodResidentPage(residentPage.id)).toBeNull();
 
     lease?.release();
     expect(residentPage.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
     expect(residentPage.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+    expect(onDestroyed).toHaveBeenCalledTimes(1);
   });
 });

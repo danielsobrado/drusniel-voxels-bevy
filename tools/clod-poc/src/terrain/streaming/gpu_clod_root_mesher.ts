@@ -56,6 +56,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private residentHierarchyFailures = 0;
   private residentHierarchyDisabled = false;
   private disposed = false;
+  private resourcesDisposed = false;
 
   constructor(
     private readonly meshers: readonly GpuClodRootMesher[],
@@ -68,10 +69,6 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
 
   async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
     const index = await this.acquire();
-    this.active++;
-    if (this.active > 1) this.overlapEventsTotal++;
-    this.maxActive = Math.max(this.maxActive, this.active);
-    this.publishCounters();
     try {
       return await this.meshers[index]!.buildPages(batch);
     } catch (error) {
@@ -80,8 +77,9 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       }
       throw error;
     } finally {
-      this.active--;
+      this.active = Math.max(0, this.active - 1);
       this.release(index);
+      this.disposeResourcesWhenIdle();
       this.publishCounters();
     }
   }
@@ -89,7 +87,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   stats(): GpuClodRootMesherStats {
     const stats = this.meshers.map((mesher) => mesher.stats());
     return {
-      enabled: stats.every((value) => value.enabled === 1) ? 1 : 0,
+      enabled: !this.disposed && stats.every((value) => value.enabled === 1) ? 1 : 0,
       batchesDispatched: sum(stats, "batchesDispatched"),
       pagesDispatched: sum(stats, "pagesDispatched"),
       batchPagesP95: max(stats, "batchPagesP95"),
@@ -134,20 +132,35 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     this.residentHierarchyDisabled = true;
     const error = new Error("GPU CLOD root pool disposed");
     for (const waiter of this.waiters.splice(0)) waiter.reject(error);
-    for (const mesher of this.meshers) mesher.dispose();
-    this.residentPages?.dispose();
     this.available.length = 0;
+    this.disposeResourcesWhenIdle();
     this.publishCounters();
   }
 
   private acquire(): Promise<number> {
     if (this.disposed) return Promise.reject(new Error("GPU CLOD root pool disposed"));
     const index = this.available.shift();
-    if (index !== undefined) return Promise.resolve(index);
+    if (index !== undefined) {
+      this.beginBuild();
+      return Promise.resolve(index);
+    }
     return new Promise<number>((resolve, reject) => {
-      this.waiters.push({ resolve, reject });
+      this.waiters.push({
+        resolve: (releasedIndex) => {
+          this.beginBuild();
+          resolve(releasedIndex);
+        },
+        reject,
+      });
       this.publishCounters();
     });
+  }
+
+  private beginBuild(): void {
+    this.active++;
+    if (this.active > 1) this.overlapEventsTotal++;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    this.publishCounters();
   }
 
   private release(index: number): void {
@@ -155,6 +168,13 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     const waiter = this.waiters.shift();
     if (waiter) waiter.resolve(index);
     else this.available.push(index);
+  }
+
+  private disposeResourcesWhenIdle(): void {
+    if (!this.disposed || this.active > 0 || this.resourcesDisposed) return;
+    this.resourcesDisposed = true;
+    for (const mesher of this.meshers) mesher.dispose();
+    this.residentPages?.dispose();
   }
 
   private publishCounters(): void {

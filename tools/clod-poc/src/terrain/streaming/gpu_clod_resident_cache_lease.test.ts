@@ -60,11 +60,55 @@ describe("GPU CLOD resident cache leases", () => {
       expect(cache.stats()).toMatchObject({
         residentPages: 1,
         residentBytes: 200,
+        retiredBytes: 0,
+        allocatedBytes: 200,
         evictionsTotal: 1,
       });
       expect(first.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
       expect(first.indexBuffer.destroy).toHaveBeenCalledTimes(1);
       expect(second.vertexBuffer.destroy).not.toHaveBeenCalled();
+    } finally {
+      cache.dispose();
+    }
+  });
+
+  it("budgets replaced leased buffers until the final release destroys them", () => {
+    const cache = new GpuClodResidentPageCache(
+      {} as GPUDevice,
+      {
+        ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
+        enabled: true,
+        residentMaxLevel: 0,
+        maxResidentBytes: 500,
+      },
+    );
+    const first = page("L0:0,0", 200);
+    const replacement = page("L0:0,0", 200);
+
+    try {
+      cache.adopt(first);
+      const lease = acquireGpuClodResidentPage(first.id, first.revision);
+      expect(lease).not.toBeNull();
+
+      cache.adopt(replacement);
+      expect(cache.stats()).toMatchObject({
+        residentPages: 1,
+        residentBytes: 200,
+        retiredBytes: 200,
+        allocatedBytes: 400,
+      });
+      expect(first.vertexBuffer.destroy).not.toHaveBeenCalled();
+
+      lease?.release();
+      expect(cache.stats()).toMatchObject({
+        residentPages: 1,
+        residentBytes: 200,
+        retiredBytes: 0,
+        allocatedBytes: 200,
+      });
+      expect(first.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+      expect(first.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+      expect(replacement.vertexBuffer.destroy).not.toHaveBeenCalled();
     } finally {
       cache.dispose();
     }

@@ -139,6 +139,31 @@ describe("pooled GPU CLOD root mesher", () => {
     });
   });
 
+  it("waits for active builds before disposing child resources", async () => {
+    const gate = deferred();
+    let disposals = 0;
+    const child = fakeMesher(async () => {
+      await gate.promise;
+      return { nodes: [], buildMs: 1, transferBytes: 0 };
+    });
+    child.dispose = () => { disposals++; };
+    const pool = new PooledGpuClodRootMesher([child]);
+
+    const activeBuild = pool.buildPages([{ px: 0, pz: 0 }]);
+    await flushPromises();
+    pool.dispose();
+
+    expect(disposals).toBe(0);
+    await expect(pool.buildPages([{ px: 1, pz: 0 }])).rejects.toThrow("disposed");
+
+    gate.resolve();
+    await activeBuild;
+    expect(disposals).toBe(1);
+
+    pool.dispose();
+    expect(disposals).toBe(1);
+  });
+
   it("does not re-ingest completed CPU page results into the resident cache", async () => {
     await withGlobalCounters(async (counters) => {
       let ingests = 0;

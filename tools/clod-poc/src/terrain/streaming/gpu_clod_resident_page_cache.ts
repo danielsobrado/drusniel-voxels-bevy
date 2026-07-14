@@ -2,6 +2,7 @@ import type { ClodPageNode, PageMesh } from "../../types.js";
 import { biomeIdsFor, paintAttributesFor } from "../geometry/page_geometry.js";
 import type { GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
 import {
+  isGpuClodResidentPageLeased,
   registerGpuClodResidentPage,
   retireGpuClodResidentPage,
 } from "./gpu_clod_resident_registry.js";
@@ -14,13 +15,18 @@ export type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 
 const MIN_BUFFER_BYTES = 4;
 const FIRST_VIEW_PROTECTION_MS = 5_000;
+const FINAL_RELEASE_GRACE_MS = 1_000;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
+
+type ProtectionReason = "first-view" | "lease-release" | null;
 
 export interface GpuClodResidentPageCacheStats {
   enabled: number;
   residentPages: number;
   residentBytes: number;
+  retiredBytes: number;
+  allocatedBytes: number;
   uploadsTotal: number;
   uploadBytesTotal: number;
   adoptedPagesTotal: number;
@@ -34,11 +40,14 @@ interface ResidentEntry {
   sourceMesh: PageMesh | null;
   lastTouch: number;
   protectedUntilMs: number;
+  protectionReason: ProtectionReason;
 }
 
 export class GpuClodResidentPageCache {
   private readonly entries = new Map<string, ResidentEntry>();
+  private readonly pendingRetiredPages = new Set<GpuClodResidentPage>();
   private residentBytes = 0;
+  private retiredBytes = 0;
   private uploadsTotal = 0;
   private uploadBytesTotal = 0;
   private adoptedPagesTotal = 0;
@@ -87,6 +96,9 @@ export class GpuClodResidentPageCache {
       if (incomingIds.has(page.id)) {
         throw new Error(`duplicate GPU CLOD resident page ${page.id} in one batch`);
       }
+      if (!Number.isFinite(page.byteLength) || page.byteLength < 0) {
+        throw new Error(`GPU CLOD resident page ${page.id} has invalid byte length ${page.byteLength}`);
+      }
       incomingIds.add(page.id);
       incomingBytes += page.byteLength;
     }
@@ -97,14 +109,35 @@ export class GpuClodResidentPageCache {
     }
 
     const now = this.now();
-    let retainedProtectedBytes = 0;
+    let leasedBytes = 0;
+    let leaseGraceBytes = 0;
+    let firstViewBytes = 0;
     for (const [nodeId, entry] of this.entries) {
-      if (incomingIds.has(nodeId)) continue;
-      if (entry.protectedUntilMs > now) retainedProtectedBytes += entry.page.byteLength;
+      const leased = isGpuClodResidentPageLeased(nodeId, entry.page);
+      if (incomingIds.has(nodeId) && !leased) continue;
+      if (leased) {
+        leasedBytes += entry.page.byteLength;
+        continue;
+      }
+      if (entry.protectedUntilMs <= now) continue;
+      if (entry.protectionReason === "lease-release") leaseGraceBytes += entry.page.byteLength;
+      else firstViewBytes += entry.page.byteLength;
     }
-    if (incomingBytes + retainedProtectedBytes > budget) {
+
+    const unavoidableBytes = incomingBytes
+      + this.retiredBytes
+      + leasedBytes
+      + leaseGraceBytes
+      + firstViewBytes;
+    if (unavoidableBytes > budget) {
+      const pinnedBytes = this.retiredBytes + leasedBytes + leaseGraceBytes;
+      if (pinnedBytes > 0) {
+        throw new Error(
+          `GPU CLOD resident batch plus pinned pages needs ${unavoidableBytes} bytes, budget is ${budget}`,
+        );
+      }
       throw new Error(
-        `GPU CLOD resident batch plus pending first-view pages needs ${incomingBytes + retainedProtectedBytes} bytes, budget is ${budget}`,
+        `GPU CLOD resident batch plus pending first-view pages needs ${unavoidableBytes} bytes, budget is ${budget}`,
       );
     }
 
@@ -131,7 +164,7 @@ export class GpuClodResidentPageCache {
     const entry = this.entries.get(nodeId);
     if (!entry) return;
     this.entries.delete(nodeId);
-    retireGpuClodResidentPage(nodeId, entry.page);
+    this.retireEntry(nodeId, entry);
     this.residentBytes -= entry.page.byteLength;
     this.publishCounters();
   }
@@ -143,10 +176,14 @@ export class GpuClodResidentPageCache {
       meshletsResident += entry.page.meshlets?.meshletCount ?? 0;
       hierarchyNodesResident += entry.page.meshlets?.hierarchyNodeCount ?? 0;
     }
+    const residentBytes = Math.max(0, this.residentBytes);
+    const retiredBytes = Math.max(0, this.retiredBytes);
     return {
-      enabled: this.config.enabled ? 1 : 0,
+      enabled: this.config.enabled && !this.disposed ? 1 : 0,
       residentPages: this.entries.size,
-      residentBytes: Math.max(0, this.residentBytes),
+      residentBytes,
+      retiredBytes,
+      allocatedBytes: residentBytes + retiredBytes,
       uploadsTotal: this.uploadsTotal,
       uploadBytesTotal: this.uploadBytesTotal,
       adoptedPagesTotal: this.adoptedPagesTotal,
@@ -159,7 +196,7 @@ export class GpuClodResidentPageCache {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const [nodeId, entry] of this.entries) retireGpuClodResidentPage(nodeId, entry.page);
+    for (const [nodeId, entry] of this.entries) this.retireEntry(nodeId, entry);
     this.entries.clear();
     this.residentBytes = 0;
     this.publishCounters();
@@ -182,7 +219,7 @@ export class GpuClodResidentPageCache {
     const existing = this.entries.get(page.id);
     if (existing) {
       this.entries.delete(page.id);
-      retireGpuClodResidentPage(page.id, existing.page);
+      this.retireEntry(page.id, existing);
       this.residentBytes -= existing.page.byteLength;
     }
 
@@ -191,6 +228,7 @@ export class GpuClodResidentPageCache {
       sourceMesh,
       lastTouch: ++this.clock,
       protectedUntilMs: sourceMesh === null ? now + FIRST_VIEW_PROTECTION_MS : 0,
+      protectionReason: sourceMesh === null ? "first-view" : null,
     };
     this.entries.set(page.id, entry);
     this.residentBytes += page.byteLength;
@@ -199,6 +237,8 @@ export class GpuClodResidentPageCache {
       sourceMesh === null
         ? () => this.releaseFirstViewProtection(page)
         : undefined,
+      () => this.protectAfterFinalRelease(page),
+      () => this.releaseRetiredAllocation(page),
     );
   }
 
@@ -206,8 +246,34 @@ export class GpuClodResidentPageCache {
     const entry = this.entries.get(page.id);
     if (!entry || entry.page !== page) return;
     entry.protectedUntilMs = 0;
+    entry.protectionReason = null;
     entry.lastTouch = ++this.clock;
     this.evictToBudget(new Set([page.id]));
+    this.publishCounters();
+  }
+
+  private protectAfterFinalRelease(page: GpuClodResidentPage): void {
+    const entry = this.entries.get(page.id);
+    if (!entry || entry.page !== page || this.disposed) return;
+    entry.protectedUntilMs = this.now() + FINAL_RELEASE_GRACE_MS;
+    entry.protectionReason = "lease-release";
+    entry.lastTouch = ++this.clock;
+    this.evictToBudget(new Set([page.id]));
+    this.publishCounters();
+  }
+
+  private retireEntry(nodeId: string, entry: ResidentEntry): void {
+    if (isGpuClodResidentPageLeased(nodeId, entry.page)
+      && !this.pendingRetiredPages.has(entry.page)) {
+      this.pendingRetiredPages.add(entry.page);
+      this.retiredBytes += entry.page.byteLength;
+    }
+    retireGpuClodResidentPage(nodeId, entry.page);
+  }
+
+  private releaseRetiredAllocation(page: GpuClodResidentPage): void {
+    if (!this.pendingRetiredPages.delete(page)) return;
+    this.retiredBytes -= page.byteLength;
     this.publishCounters();
   }
 
@@ -237,51 +303,68 @@ export class GpuClodResidentPageCache {
       packed[target + 14] = paint.weights[source4 + 2] ?? 0;
       packed[target + 15] = paint.weights[source4 + 3] ?? 0;
     }
-    const vertexBuffer = this.upload(
-      "vertices",
-      node.id,
-      packed,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.VERTEX,
-    );
-    const indexBuffer = this.upload(
-      "indices",
-      node.id,
-      node.mesh.indices,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.INDEX,
-    );
-    return {
-      id: node.id,
-      revision,
-      level: node.level,
-      vertexBuffer,
-      indexBuffer,
-      vertexCount,
-      indexCount: node.mesh.indices.length,
-      byteLength: packed.byteLength + node.mesh.indices.byteLength,
-      bounds: node.bounds,
-      errorWorld: node.errorWorld,
-      lowBenefit: node.lowBenefit,
-    };
+
+    let vertexBuffer: GPUBuffer | null = null;
+    let indexBuffer: GPUBuffer | null = null;
+    try {
+      vertexBuffer = this.upload(
+        "vertices",
+        node.id,
+        packed,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.VERTEX,
+      );
+      indexBuffer = this.upload(
+        "indices",
+        node.id,
+        node.mesh.indices,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.INDEX,
+      );
+      const page: GpuClodResidentPage = {
+        id: node.id,
+        revision,
+        level: node.level,
+        vertexBuffer,
+        indexBuffer,
+        vertexCount,
+        indexCount: node.mesh.indices.length,
+        byteLength: packed.byteLength + node.mesh.indices.byteLength,
+        bounds: node.bounds,
+        errorWorld: node.errorWorld,
+        lowBenefit: node.lowBenefit,
+      };
+      vertexBuffer = null;
+      indexBuffer = null;
+      return page;
+    } finally {
+      vertexBuffer?.destroy();
+      indexBuffer?.destroy();
+    }
   }
 
   private upload(label: string, nodeId: string, data: Float32Array | Uint32Array, usage: number): GPUBuffer {
     const size = Math.max(MIN_BUFFER_BYTES, align4(data.byteLength));
     const buffer = this.device.createBuffer({ label: `gpu clod resident ${nodeId} ${label}`, size, usage });
-    if (data.byteLength > 0) {
-      this.device.queue.writeBuffer(buffer, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
+    try {
+      if (data.byteLength > 0) {
+        this.device.queue.writeBuffer(buffer, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
+      }
+      return buffer;
+    } catch (error) {
+      buffer.destroy();
+      throw error;
     }
-    return buffer;
   }
 
   private evictToBudget(protectedIds: ReadonlySet<string>): void {
     const budget = this.budgetBytes();
     const now = this.now();
-    while (this.residentBytes > budget && this.entries.size > 0) {
+    while (this.totalAllocatedBytes() > budget && this.entries.size > 0) {
       let oldestId: string | null = null;
       let oldestTouch = Infinity;
       for (const [id, entry] of this.entries) {
         if (protectedIds.has(id)) continue;
         if (entry.protectedUntilMs > now) continue;
+        if (isGpuClodResidentPageLeased(id, entry.page)) continue;
         if (entry.lastTouch >= oldestTouch) continue;
         oldestId = id;
         oldestTouch = entry.lastTouch;
@@ -289,10 +372,14 @@ export class GpuClodResidentPageCache {
       if (oldestId === null) return;
       const entry = this.entries.get(oldestId)!;
       this.entries.delete(oldestId);
-      retireGpuClodResidentPage(oldestId, entry.page);
+      this.retireEntry(oldestId, entry);
       this.residentBytes -= entry.page.byteLength;
       this.evictionsTotal++;
     }
+  }
+
+  private totalAllocatedBytes(): number {
+    return Math.max(0, this.residentBytes) + Math.max(0, this.retiredBytes);
   }
 
   private budgetBytes(): number {
@@ -308,6 +395,8 @@ export class GpuClodResidentPageCache {
     counters["live_clod_gpu_hierarchy_enabled"] = stats.enabled;
     counters["live_clod_gpu_resident_pages"] = stats.residentPages;
     counters["live_clod_gpu_resident_bytes"] = stats.residentBytes;
+    counters["live_clod_gpu_retired_bytes"] = stats.retiredBytes;
+    counters["live_clod_gpu_allocated_bytes"] = stats.allocatedBytes;
     counters["live_clod_gpu_resident_uploads_total"] = stats.uploadsTotal;
     counters["live_clod_gpu_resident_upload_bytes_total"] = stats.uploadBytesTotal;
     counters["live_clod_gpu_resident_adopted_total"] = stats.adoptedPagesTotal;
