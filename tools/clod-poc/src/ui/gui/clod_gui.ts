@@ -3,9 +3,7 @@ import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { emitAudio } from "../../audio/index.js";
 import type { GuiController } from "./gui_controller.js";
-import {
-  isExternalGpuClodGeometry,
-} from "../../rendering/webgpu_external_buffer_geometry.js";
+import { isExternalGpuClodGeometry } from "../../rendering/webgpu_external_buffer_geometry.js";
 import type {
   RenderResolutionCamera,
   RenderResolutionRenderer,
@@ -176,10 +174,12 @@ export function createClodGui(
     emitAudio("clod.locked-border.toggle");
   });
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
-    for (const v of deps.views) {
-      const resident = isExternalGpuClodGeometry(v.mesh.geometry as THREE.BufferGeometry);
-      v.mat.setWireframe(on && !resident);
-    }
+    const views = [...deps.views];
+    const residentGeometryPresent = views.some((view) =>
+      isExternalGpuClodGeometry(view.mesh.geometry as THREE.BufferGeometry),
+    );
+    const safeWireframe = on && !residentGeometryPresent;
+    for (const view of views) view.mat.setWireframe(safeWireframe);
     emitAudio("clod.wireframe.toggle");
   });
   gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
@@ -218,8 +218,9 @@ export function createClodGui(
     deps.materialController.forEachMaterial((m) => m.setSide(on ? THREE.FrontSide : THREE.DoubleSide));
   });
   gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
-    for (const v of deps.views) {
-      deps.setViewNormalMode(v, on ? "recomputed" : "source");
+    for (const view of deps.views) {
+      if (isExternalGpuClodGeometry(view.mesh.geometry as THREE.BufferGeometry)) continue;
+      deps.setViewNormalMode(view, on ? "recomputed" : "source");
     }
   });
   const colorByLodController = gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {
