@@ -5,12 +5,12 @@ import {
 } from "./terrain_texture_scale.js";
 
 describe("terrain texture scale", () => {
-  it("adds moderate procedural detail without over-tiling the terrain", () => {
+  it("shrinks procedural tiles without changing external PBR scale", () => {
     expect(resolveTerrainTextureScale(0.06, 1, true)).toBeCloseTo(
       0.06 * PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN,
     );
-    expect(PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN).toBeGreaterThan(1);
-    expect(PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN).toBeLessThanOrEqual(1.5);
+    expect(PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN).toBeGreaterThanOrEqual(4);
+    expect(PROCEDURAL_TERRAIN_DETAIL_SCALE_GAIN).toBeLessThanOrEqual(8);
     expect(resolveTerrainTextureScale(0.06, 1, false)).toBeCloseTo(0.06);
   });
 
