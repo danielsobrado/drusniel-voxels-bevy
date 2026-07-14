@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
+import { DEFAULT_GPU_CLOD_HIERARCHY_CONFIG } from "./gpu_clod_hierarchy_config.js";
+import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
 import { createBufferedResidentAdoption } from "./gpu_clod_resident_adoption.js";
 import {
   disabledGpuStats,
@@ -71,5 +72,22 @@ describe("buffered resident page adoption", () => {
     expect(first.indexBuffer.destroy).toHaveBeenCalledTimes(1);
     expect(second.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
     expect(second.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps rejection cleanup single-owned when the real cache is disabled", async () => {
+    const cache = new GpuClodResidentPageCache(
+      {} as GPUDevice,
+      { ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG, enabled: false },
+    );
+    const adoption = createBufferedResidentAdoption(cache);
+    const resident = page("L0:0,0");
+    const wrapped = adoption.wrap(mesher(async () => {
+      adoption.onPage(resident);
+      return { nodes: [], buildMs: 1, transferBytes: 0 };
+    }));
+
+    await expect(wrapped.buildPages([{ px: 0, pz: 0 }])).rejects.toThrow("cache is disabled");
+    expect(resident.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+    expect(resident.indexBuffer.destroy).toHaveBeenCalledTimes(1);
   });
 });
