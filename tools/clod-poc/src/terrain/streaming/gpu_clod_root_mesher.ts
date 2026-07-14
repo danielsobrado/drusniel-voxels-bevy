@@ -56,6 +56,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private residentHierarchyFailures = 0;
   private residentHierarchyDisabled = false;
   private disposed = false;
+  private resourcesDisposed = false;
 
   constructor(
     private readonly meshers: readonly GpuClodRootMesher[],
@@ -82,6 +83,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     } finally {
       this.active--;
       this.release(index);
+      this.disposeResourcesWhenIdle();
       this.publishCounters();
     }
   }
@@ -89,7 +91,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   stats(): GpuClodRootMesherStats {
     const stats = this.meshers.map((mesher) => mesher.stats());
     return {
-      enabled: stats.every((value) => value.enabled === 1) ? 1 : 0,
+      enabled: !this.disposed && stats.every((value) => value.enabled === 1) ? 1 : 0,
       batchesDispatched: sum(stats, "batchesDispatched"),
       pagesDispatched: sum(stats, "pagesDispatched"),
       batchPagesP95: max(stats, "batchPagesP95"),
@@ -134,9 +136,8 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     this.residentHierarchyDisabled = true;
     const error = new Error("GPU CLOD root pool disposed");
     for (const waiter of this.waiters.splice(0)) waiter.reject(error);
-    for (const mesher of this.meshers) mesher.dispose();
-    this.residentPages?.dispose();
     this.available.length = 0;
+    this.disposeResourcesWhenIdle();
     this.publishCounters();
   }
 
@@ -155,6 +156,13 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     const waiter = this.waiters.shift();
     if (waiter) waiter.resolve(index);
     else this.available.push(index);
+  }
+
+  private disposeResourcesWhenIdle(): void {
+    if (!this.disposed || this.active > 0 || this.resourcesDisposed) return;
+    this.resourcesDisposed = true;
+    for (const mesher of this.meshers) mesher.dispose();
+    this.residentPages?.dispose();
   }
 
   private publishCounters(): void {
