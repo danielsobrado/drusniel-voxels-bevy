@@ -58,6 +58,7 @@ jobs:
           src/terrain/streaming/gpu_clod_page_pipeline_layout.test.ts
           src/terrain/streaming/gpu_clod_root_mesher_pool.test.ts
           src/terrain/streaming/gpu_clod_root_mesher_disposal.test.ts
+          src/terrain/streaming/gpu_clod_root_mesher_failure.test.ts
           src/terrain/streaming/gpu_clod_resident_registry.test.ts
           src/terrain/streaming/gpu_clod_resident_adoption.test.ts
           src/terrain/streaming/gpu_clod_resident_cache_lease.test.ts
