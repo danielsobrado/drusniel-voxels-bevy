@@ -1,6 +1,6 @@
 import type { ClodPageNode } from "../../types.js";
 
-export const GPU_CLOD_VERTEX_FLOATS = 20;
+export const GPU_CLOD_VERTEX_FLOATS = 16;
 export const GPU_CLOD_VERTEX_STRIDE_BYTES = GPU_CLOD_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 
 export const GPU_CLOD_VERTEX_LAYOUT = {
@@ -10,7 +10,6 @@ export const GPU_CLOD_VERTEX_LAYOUT = {
   biomeId: { offsetFloats: 7, itemSize: 1 },
   paintSlots: { offsetFloats: 8, itemSize: 4 },
   paintWeights: { offsetFloats: 12, itemSize: 4 },
-  materialWeights: { offsetFloats: 16, itemSize: 4 },
 } as const;
 
 export interface GpuClodMeshletBuffers {
