@@ -16,6 +16,7 @@ import { createTreeCrownProxyNodeMaterialHandle } from "./tree_crown_proxy_node_
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import { decorateTreeMaterialHandle } from "./tree_material_parity.js";
+import { decorateTreeRingLodCrossfade } from "./tree_ring_lod_crossfade_material.js";
 import {
   TREE_RING_SHADOW_CASCADE_COUNT,
   treeRingShadowCasterGroupIndex,
@@ -121,13 +122,14 @@ function createTreeGpuRingMaterialHandle(
 ): TreeMaterialHandle {
   const atlas = input.impostorAtlases[species];
   if (lod === "impostor" && input.settings.impostors.enabled && atlas?.ready) {
-    return createTreeRingImpostorNodeMaterialHandle(
+    const impostor = createTreeRingImpostorNodeMaterialHandle(
       input.settings,
       buffers,
       atlas,
       input.currentLighting ?? undefined,
       input.hydrologyWater,
     );
+    return decorateTreeRingLodCrossfade(impostor, input.settings, buffers, lod);
   }
 
   const base = input.settings.render.farCheapMaterial && treeRingUsesFarMaterial(lod)
@@ -145,8 +147,7 @@ function createTreeGpuRingMaterialHandle(
       input.currentLighting ?? undefined,
       input.hydrologyWater,
     );
-
-  return decorateTreeMaterialHandle(base, {
+  const parity = decorateTreeMaterialHandle(base, {
     foliageAtlas: input.foliageAtlas,
     ring: {
       settings: input.settings,
@@ -154,6 +155,7 @@ function createTreeGpuRingMaterialHandle(
       forestLighting: true,
     },
   });
+  return decorateTreeRingLodCrossfade(parity, input.settings, buffers, lod);
 }
 
 function createGpuRingTierDraw(
