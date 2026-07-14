@@ -25,9 +25,8 @@ export {
 };
 
 const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
-/** Variant pages stacked in each atlas. Structural variants above this share
- *  atlas pages deterministically to keep the runtime memory budget bounded. */
-export const TREE_IMPOSTOR_MAX_ATLAS_VARIANTS = 2;
+/** One atlas page per live structural variant keeps mesh and impostor silhouettes identical. */
+export const TREE_IMPOSTOR_MAX_ATLAS_VARIANTS = TREE_STRUCTURAL_VARIANTS;
 
 export interface TreeImpostorAtlas {
   species: TreeSpeciesId;
