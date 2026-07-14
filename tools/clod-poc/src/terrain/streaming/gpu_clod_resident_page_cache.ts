@@ -6,7 +6,8 @@ import {
 } from "./gpu_clod_meshlet_hierarchy.js";
 
 const MIN_BUFFER_BYTES = 4;
-const STORAGE_COPY = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+
+type UploadArray = Float32Array | Uint32Array;
 
 export interface GpuClodResidentPage {
   id: string;
@@ -153,17 +154,18 @@ export class GpuClodResidentPageCache {
     hierarchy: GpuClodMeshletHierarchy | null,
   ): GpuClodResidentPage {
     const mesh = node.mesh;
-    const positions = this.upload("positions", node.id, mesh.positions, STORAGE_COPY | GPUBufferUsage.VERTEX);
-    const normals = this.upload("normals", node.id, mesh.normals, STORAGE_COPY | GPUBufferUsage.VERTEX);
-    const paintSlots = this.upload("paint slots", node.id, mesh.paintSlots, STORAGE_COPY | GPUBufferUsage.VERTEX);
-    const materialWeights = this.upload("material weights", node.id, mesh.materialWeights, STORAGE_COPY | GPUBufferUsage.VERTEX);
-    const indices = this.upload("indices", node.id, mesh.indices, STORAGE_COPY | GPUBufferUsage.INDEX);
+    const storageCopy = storageCopyUsage();
+    const positions = this.upload("positions", node.id, mesh.positions, storageCopy | GPUBufferUsage.VERTEX);
+    const normals = this.upload("normals", node.id, mesh.normals, storageCopy | GPUBufferUsage.VERTEX);
+    const paintSlots = this.upload("paint slots", node.id, mesh.paintSlots, storageCopy | GPUBufferUsage.VERTEX);
+    const materialWeights = this.upload("material weights", node.id, mesh.materialWeights, storageCopy | GPUBufferUsage.VERTEX);
+    const indices = this.upload("indices", node.id, mesh.indices, storageCopy | GPUBufferUsage.INDEX);
     const optional = hierarchy ? {
-      meshletHeaders: this.upload("meshlet headers", node.id, hierarchy.meshletHeaders, STORAGE_COPY),
-      meshletVertexIndices: this.upload("meshlet vertices", node.id, hierarchy.vertexIndices, STORAGE_COPY),
-      meshletTriangleIndices: this.upload("meshlet triangles", node.id, hierarchy.triangleIndices, STORAGE_COPY),
-      hierarchyHeaders: this.upload("hierarchy headers", node.id, hierarchy.hierarchyHeaders, STORAGE_COPY),
-      hierarchyBounds: this.upload("hierarchy bounds", node.id, hierarchy.bounds, STORAGE_COPY),
+      meshletHeaders: this.upload("meshlet headers", node.id, hierarchy.meshletHeaders, storageCopy),
+      meshletVertexIndices: this.upload("meshlet vertices", node.id, hierarchy.vertexIndices, storageCopy),
+      meshletTriangleIndices: this.upload("meshlet triangles", node.id, hierarchy.triangleIndices, storageCopy),
+      hierarchyHeaders: this.upload("hierarchy headers", node.id, hierarchy.hierarchyHeaders, storageCopy),
+      hierarchyBounds: this.upload("hierarchy bounds", node.id, hierarchy.bounds, storageCopy),
     } : {};
     return {
       id: node.id,
@@ -183,11 +185,17 @@ export class GpuClodResidentPageCache {
     };
   }
 
-  private upload(label: string, nodeId: string, data: ArrayBufferView<ArrayBuffer>, usage: number): GPUBuffer {
+  private upload(label: string, nodeId: string, data: UploadArray, usage: number): GPUBuffer {
     const size = Math.max(MIN_BUFFER_BYTES, align4(data.byteLength));
     const buffer = this.device.createBuffer({ label: `gpu clod resident ${nodeId} ${label}`, size, usage });
     if (data.byteLength > 0) {
-      this.device.queue.writeBuffer(buffer, 0, data.buffer, data.byteOffset, data.byteLength);
+      this.device.queue.writeBuffer(
+        buffer,
+        0,
+        data.buffer as ArrayBuffer,
+        data.byteOffset,
+        data.byteLength,
+      );
     }
     return buffer;
   }
@@ -241,6 +249,10 @@ export class GpuClodResidentPageCache {
   }
 }
 
+function storageCopyUsage(): number {
+  return GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+}
+
 function meshBytes(mesh: PageMesh): number {
   return mesh.positions.byteLength
     + mesh.normals.byteLength
@@ -259,7 +271,7 @@ function hierarchyBytes(hierarchy: GpuClodMeshletHierarchy | null): number {
 }
 
 function normalizedRevision(value: number | undefined): number {
-  return Number.isFinite(value) ? Math.max(0, Math.floor(value!)) : 0;
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : 0;
 }
 
 function align4(value: number): number {
