@@ -12,6 +12,7 @@ import {
 const EXTERNAL_GEOMETRY_KEY = "gpuClodExternalGeometry";
 const INDEXED_INDIRECT_COMMAND_WORDS = 5;
 const INDEXED_INDIRECT_COMMAND_BYTES = INDEXED_INDIRECT_COMMAND_WORDS * Uint32Array.BYTES_PER_ELEMENT;
+const NON_OWNING_DISPOSE_BUFFER = { destroy: () => undefined } as unknown as GPUBuffer;
 
 interface WebGpuBackendData {
   buffer?: GPUBuffer;
@@ -23,6 +24,8 @@ interface WebGpuBackendBridge {
 
 interface ExternalGeometryState {
   lease: GpuClodResidentPageLease;
+  backend: WebGpuBackendBridge;
+  backendKeys: object[];
   released: boolean;
 }
 
@@ -32,6 +35,7 @@ export function createExternalGpuClodGeometry(
 ): THREE.BufferGeometry {
   const page = lease.page;
   const backend = renderer.backend as unknown as WebGpuBackendBridge;
+  const backendKeys: object[] = [];
   const geometry = new THREE.BufferGeometry();
   const interleaved = new THREE.InterleavedBuffer(
     new Float32Array(GPU_CLOD_VERTEX_FLOATS),
@@ -68,6 +72,7 @@ export function createExternalGpuClodGeometry(
       (_, meshletIndex) => meshletIndex * INDEXED_INDIRECT_COMMAND_BYTES,
     );
     backend.get(indirect).buffer = page.meshlets.indirect;
+    backendKeys.push(indirect);
     indirectEnabled = true;
   }
 
@@ -90,8 +95,11 @@ export function createExternalGpuClodGeometry(
 
   backend.get(interleaved).buffer = page.vertexBuffer;
   backend.get(index).buffer = page.indexBuffer;
+  backendKeys.push(interleaved, index);
   geometry.userData[EXTERNAL_GEOMETRY_KEY] = {
     lease,
+    backend,
+    backendKeys,
     released: false,
   } satisfies ExternalGeometryState;
   recordResidentView(indirectEnabled);
@@ -106,6 +114,8 @@ export function releaseExternalGpuClodGeometry(geometry: THREE.BufferGeometry): 
   const state = geometry.userData[EXTERNAL_GEOMETRY_KEY] as ExternalGeometryState | undefined;
   if (!state || state.released) return;
   state.released = true;
+  for (const key of state.backendKeys) state.backend.get(key).buffer = NON_OWNING_DISPOSE_BUFFER;
+  geometry.dispose();
   state.lease.release();
   delete geometry.userData[EXTERNAL_GEOMETRY_KEY];
 }
