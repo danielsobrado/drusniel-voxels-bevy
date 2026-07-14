@@ -69,10 +69,6 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
 
   async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
     const index = await this.acquire();
-    this.active++;
-    if (this.active > 1) this.overlapEventsTotal++;
-    this.maxActive = Math.max(this.maxActive, this.active);
-    this.publishCounters();
     try {
       return await this.meshers[index]!.buildPages(batch);
     } catch (error) {
@@ -81,7 +77,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       }
       throw error;
     } finally {
-      this.active--;
+      this.active = Math.max(0, this.active - 1);
       this.release(index);
       this.disposeResourcesWhenIdle();
       this.publishCounters();
@@ -144,11 +140,27 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private acquire(): Promise<number> {
     if (this.disposed) return Promise.reject(new Error("GPU CLOD root pool disposed"));
     const index = this.available.shift();
-    if (index !== undefined) return Promise.resolve(index);
+    if (index !== undefined) {
+      this.beginBuild();
+      return Promise.resolve(index);
+    }
     return new Promise<number>((resolve, reject) => {
-      this.waiters.push({ resolve, reject });
+      this.waiters.push({
+        resolve: (releasedIndex) => {
+          this.beginBuild();
+          resolve(releasedIndex);
+        },
+        reject,
+      });
       this.publishCounters();
     });
+  }
+
+  private beginBuild(): void {
+    this.active++;
+    if (this.active > 1) this.overlapEventsTotal++;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    this.publishCounters();
   }
 
   private release(index: number): void {
