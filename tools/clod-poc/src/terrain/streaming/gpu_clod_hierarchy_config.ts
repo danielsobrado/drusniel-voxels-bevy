@@ -46,10 +46,8 @@ export function parseGpuClodHierarchyConfig(
   params: URLSearchParams,
   defaults: GpuClodHierarchyConfig = DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
 ): GpuClodHierarchyConfig {
-  const scene = params.get("scene");
-  const defaultEnabled = defaults.enabled || scene === "infinite-islands" || scene === "continent";
   return {
-    enabled: booleanFlag(params, "liveClodGpuHierarchy", defaultEnabled),
+    enabled: booleanFlag(params, "liveClodGpuHierarchy", defaults.enabled),
     residentMaxLevel: nonNegativeInteger(params, "liveClodGpuResidentMaxLevel", defaults.residentMaxLevel),
     maxResidentBytes: positiveInteger(params, "liveClodGpuResidentBytes", defaults.maxResidentBytes),
     meshlets: booleanFlag(params, "liveClodGpuMeshlets", defaults.meshlets),
