@@ -7,7 +7,6 @@ import {
 } from "./gpu_clod_resident_registry.js";
 import {
   GPU_CLOD_VERTEX_FLOATS,
-  destroyGpuClodResidentPage,
   type GpuClodResidentPage,
 } from "./gpu_clod_resident_types.js";
 
@@ -72,7 +71,6 @@ export class GpuClodResidentPageCache {
   adoptMany(pages: readonly GpuClodResidentPage[]): void {
     if (pages.length === 0) return;
     if (!this.config.enabled || this.disposed) {
-      for (const page of pages) destroyGpuClodResidentPage(page);
       throw new Error(this.disposed
         ? "GPU CLOD resident cache is disposed"
         : "GPU CLOD resident cache is disabled");
