@@ -59,8 +59,8 @@ function boundedInteger(
   const raw = params.get(key);
   if (raw === null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, Math.floor(parsed)));
+  if (!Number.isFinite(parsed) || parsed < min) return fallback;
+  return Math.min(max, Math.floor(parsed));
 }
 
 function boundedNumber(
@@ -73,8 +73,8 @@ function boundedNumber(
   const raw = params.get(key);
   if (raw === null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
+  if (!Number.isFinite(parsed) || parsed < min) return fallback;
+  return Math.min(max, parsed);
 }
 
 export function parseGpuClodHierarchyConfig(
