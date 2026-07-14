@@ -42,13 +42,13 @@
     - id: meadows-field
       name: Meadows Field
       minHeight: 24
-      maxHeight: 90
+      maxHeight: 64
       materialId: top-soil
       textureSlotId: meadows-ground
     - id: meadows-high
       name: Meadows High
-      minHeight: 90
-      maxHeight: 160
+      minHeight: 64
+      maxHeight: 132
       materialId: rock
       textureSlotId: rock
 
@@ -76,13 +76,13 @@
     - id: forest-floor
       name: Forest Floor
       minHeight: 24
-      maxHeight: 78
+      maxHeight: 64
       materialId: top-soil
       textureSlotId: forest-floor
     - id: forest-rock
       name: Forest Rock
-      minHeight: 78
-      maxHeight: 160
+      minHeight: 64
+      maxHeight: 132
       materialId: rock
       textureSlotId: rock
 
@@ -110,13 +110,13 @@
     - id: swamp-bank
       name: Swamp Bank
       minHeight: 28
-      maxHeight: 78
+      maxHeight: 50
       materialId: clay
       textureSlotId: swamp-muck
     - id: swamp-rise
       name: Swamp Rise
-      minHeight: 78
-      maxHeight: 160
+      minHeight: 50
+      maxHeight: 132
       materialId: rock
       textureSlotId: rock
 
@@ -138,19 +138,19 @@
     - id: mountain-foot
       name: Mountain Foot
       minHeight: -50
-      maxHeight: 58
+      maxHeight: 64
       materialId: rock
       textureSlotId: rock
     - id: mountain-slope
       name: Mountain Slope
-      minHeight: 58
-      maxHeight: 92
+      minHeight: 64
+      maxHeight: 86
       materialId: rock
       textureSlotId: mountain-scree
     - id: mountain-snow
       name: Mountain Snow
-      minHeight: 92
-      maxHeight: 220
+      minHeight: 86
+      maxHeight: 132
       materialId: snow
       textureSlotId: snow
 
@@ -178,13 +178,13 @@
     - id: plains-grass
       name: Plains Grass
       minHeight: 26
-      maxHeight: 86
+      maxHeight: 64
       materialId: top-soil
       textureSlotId: plains-grass
     - id: plains-stone
       name: Plains Stone
-      minHeight: 86
-      maxHeight: 160
+      minHeight: 64
+      maxHeight: 132
       materialId: rock
       textureSlotId: rock
 
@@ -212,13 +212,13 @@
     - id: coast-dry
       name: Coast Dry
       minHeight: 22
-      maxHeight: 46
+      maxHeight: 44
       materialId: sand
       textureSlotId: coast-sand
     - id: coast-cliff
       name: Coast Cliff
-      minHeight: 46
-      maxHeight: 180
+      minHeight: 44
+      maxHeight: 132
       materialId: rock
       textureSlotId: rock
 
@@ -246,12 +246,12 @@
     - id: ocean-floor
       name: Ocean Floor
       minHeight: 20
-      maxHeight: 80
+      maxHeight: 28
       materialId: sand
       textureSlotId: ocean-floor
     - id: ocean-rise
       name: Ocean Rise
-      minHeight: 80
-      maxHeight: 180
+      minHeight: 28
+      maxHeight: 132
       materialId: rock
       textureSlotId: rock
