@@ -105,7 +105,7 @@ describe("GPU CLOD resident page cache", () => {
     } finally {
       cache.dispose();
       if (previousUsage) Object.defineProperty(globalThis, "GPUBufferUsage", previousUsage);
-      else delete (globalThis as typeof globalThis & { GPUBufferUsage?: unknown }).GPUBufferUsage;
+      else delete (globalThis as unknown as { GPUBufferUsage?: unknown }).GPUBufferUsage;
     }
   });
 });
