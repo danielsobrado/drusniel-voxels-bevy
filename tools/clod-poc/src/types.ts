@@ -53,6 +53,8 @@ export interface ClodPageNode {
   /** error_world = simplification_error_world + max(child.error_world). Monotone up the tree. */
   errorWorld: number;
   lowBenefit: boolean;
+  /** Geometry lives in the runtime GPU resident-page registry; mesh is metadata-only. */
+  gpuResidentOnly?: boolean;
   /** Lightweight streamed-root transition state consumed by terrain material uniforms. */
   rootTransition?: StreamedRootRenderState;
   /**
