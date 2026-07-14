@@ -11,7 +11,6 @@ import {
 } from "./gpu_clod_root_mesher_single.js";
 import { gpuClodHierarchyConfigFromWindow, type GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
-import { createResidentGpuClodRootMesher } from "./gpu_clod_root_resident_mesher.js";
 
 export {
   disabledGpuStats,
@@ -236,6 +235,7 @@ async function createResidentPool(
   residentPages: GpuClodResidentPageCache,
   poolCount: number,
 ): Promise<GpuClodRootMesher[] | null> {
+  const { createResidentGpuClodRootMesher } = await import("./gpu_clod_root_resident_mesher.js");
   const meshers: GpuClodRootMesher[] = [];
   for (let index = 0; index < poolCount; index++) {
     const mesher = await createResidentGpuClodRootMesher({
