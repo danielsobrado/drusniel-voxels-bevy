@@ -29,7 +29,7 @@ export function createExternalGpuClodGeometry(
   const backend = renderer.backend as unknown as WebGpuBackendBridge;
   const geometry = new THREE.BufferGeometry();
   const interleaved = new THREE.InterleavedBuffer(new Float32Array(GPU_CLOD_VERTEX_FLOATS), GPU_CLOD_VERTEX_FLOATS);
-  (interleaved as THREE.InterleavedBuffer & { count: number }).count = page.vertexCount;
+  Object.defineProperty(interleaved, "count", { configurable: true, value: page.vertexCount, writable: true });
 
   geometry.setAttribute("position", attribute(interleaved, GPU_CLOD_VERTEX_LAYOUT.position));
   geometry.setAttribute("rootMorphDeltaY", attribute(interleaved, GPU_CLOD_VERTEX_LAYOUT.rootMorphDeltaY));
@@ -39,13 +39,10 @@ export function createExternalGpuClodGeometry(
   geometry.setAttribute("paintWeights", attribute(interleaved, GPU_CLOD_VERTEX_LAYOUT.paintWeights));
 
   const index = new THREE.BufferAttribute(new Uint32Array(1), 1);
-  (index as THREE.BufferAttribute & { count: number }).count = page.indexCount;
+  Object.defineProperty(index, "count", { configurable: true, value: page.indexCount, writable: true });
   geometry.setIndex(index);
   geometry.setDrawRange(0, page.indexCount);
-  geometry.boundingSphere = new THREE.Sphere(
-    new THREE.Vector3(...page.bounds.center),
-    page.bounds.radius,
-  );
+  geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(...page.bounds.center), page.bounds.radius);
   geometry.boundingBox = new THREE.Box3(
     new THREE.Vector3(
       page.bounds.center[0] - page.bounds.radius,
@@ -81,10 +78,5 @@ function attribute(
   interleaved: THREE.InterleavedBuffer,
   layout: { readonly offsetFloats: number; readonly itemSize: number },
 ): THREE.InterleavedBufferAttribute {
-  return new THREE.InterleavedBufferAttribute(
-    interleaved,
-    layout.itemSize,
-    layout.offsetFloats,
-    false,
-  );
+  return new THREE.InterleavedBufferAttribute(interleaved, layout.itemSize, layout.offsetFloats, false);
 }
