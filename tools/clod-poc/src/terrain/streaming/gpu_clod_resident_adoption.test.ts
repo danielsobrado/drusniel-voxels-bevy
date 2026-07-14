@@ -90,4 +90,22 @@ describe("buffered resident page adoption", () => {
     expect(resident.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
     expect(resident.indexBuffer.destroy).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects empty pages before they enter the resident cache", async () => {
+    const adoptMany = vi.fn();
+    const cache = { adoptMany } as unknown as GpuClodResidentPageCache;
+    const adoption = createBufferedResidentAdoption(cache);
+    const resident = page("L0:0,0");
+    resident.vertexCount = 0;
+    resident.indexCount = 0;
+    const wrapped = adoption.wrap(mesher(async () => {
+      adoption.onPage(resident);
+      return { nodes: [], buildMs: 1, transferBytes: 0 };
+    }));
+
+    await expect(wrapped.buildPages([{ px: 0, pz: 0 }])).rejects.toThrow("invalid counts");
+    expect(adoptMany).not.toHaveBeenCalled();
+    expect(resident.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+    expect(resident.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+  });
 });
