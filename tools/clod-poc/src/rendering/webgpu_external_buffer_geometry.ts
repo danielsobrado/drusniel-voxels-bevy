@@ -59,6 +59,7 @@ export function createExternalGpuClodGeometry(
   geometry.setIndex(index);
   geometry.setDrawRange(0, page.indexCount);
 
+  let indirectEnabled = false;
   if (page.meshlets && page.meshlets.meshletCount > 0) {
     const indirect = new IndirectStorageBufferAttribute(INDEXED_INDIRECT_COMMAND_WORDS, 1);
     geometry.indirect = indirect;
@@ -67,6 +68,7 @@ export function createExternalGpuClodGeometry(
       (_, meshletIndex) => meshletIndex * INDEXED_INDIRECT_COMMAND_BYTES,
     );
     backend.get(indirect).buffer = page.meshlets.indirect;
+    indirectEnabled = true;
   }
 
   geometry.boundingSphere = new THREE.Sphere(
@@ -92,6 +94,7 @@ export function createExternalGpuClodGeometry(
     lease,
     released: false,
   } satisfies ExternalGeometryState;
+  recordResidentView(indirectEnabled);
   return geometry;
 }
 
@@ -117,4 +120,17 @@ function attribute(
     layout.offsetFloats,
     false,
   );
+}
+
+function recordResidentView(indirectEnabled: boolean): void {
+  const counters = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+  if (!counters) return;
+  counters["live_clod_gpu_resident_render_views_total"] =
+    (counters["live_clod_gpu_resident_render_views_total"] ?? 0) + 1;
+  if (indirectEnabled) {
+    counters["live_clod_gpu_indirect_render_views_total"] =
+      (counters["live_clod_gpu_indirect_render_views_total"] ?? 0) + 1;
+  }
 }
