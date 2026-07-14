@@ -14,6 +14,7 @@ import {
 const I32 = 4;
 const U32 = 4;
 const F32 = 4;
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
 export interface FarSummaryGpuBatchBufferSet {
   descriptorBuffer: GPUBuffer;
@@ -97,6 +98,16 @@ export function packFarSummaryCanonicalSamples(
   return packed;
 }
 
+export function farSummaryGpuUsesCanonicalSamples(
+  terrainSampler: FarTerrainSampler | undefined,
+  params = currentQueryParams(),
+): boolean {
+  if (!terrainSampler) return false;
+  if (params.get("farSummaryGpuCanonicalSamples") === "1") return true;
+  if (params.get("farSummaryGpuCanonicalSamples") === "0") return false;
+  return params.get("scene") !== INFINITE_ISLANDS_SCENE || params.get("farSummaryLayout") !== "2";
+}
+
 export function farSummaryGpuReadbackTileCount(
   tileCount: number,
   config: FarSummaryGpuConfig,
@@ -119,7 +130,10 @@ export function createFarSummaryGpuBatchBuffers(
   const cellReadbackBytes = config.commitToCache ? batch.cellReadbackBytes : 0;
   const digEditsBytes = DIG_EDIT_BYTES;
   const fieldParamsBytes = FIELD_PARAM_WORDS * U32;
-  const canonicalSampleData = terrainSampler ? packFarSummaryCanonicalSamples(batch.tiles, terrainSampler) : new Float32Array(2);
+  const useCanonicalSamples = farSummaryGpuUsesCanonicalSamples(terrainSampler);
+  const canonicalSampleData = useCanonicalSamples
+    ? packFarSummaryCanonicalSamples(batch.tiles, terrainSampler!)
+    : new Float32Array(2);
   const canonicalSampleBytes = Math.max(8, canonicalSampleData.byteLength);
 
   const descriptorBuffer = device.createBuffer({
@@ -163,7 +177,7 @@ export function createFarSummaryGpuBatchBuffers(
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   }) : null;
 
-  const descriptorData = packFarSummaryGpuDescriptors(batch.tiles, config, !!terrainSampler);
+  const descriptorData = packFarSummaryGpuDescriptors(batch.tiles, config, useCanonicalSamples);
   const fieldParams = packFieldParams(0, terrainFieldConfig);
   device.queue.writeBuffer(descriptorBuffer, 0, descriptorData, 0, descriptorBytes);
   device.queue.writeBuffer(digEditsBuffer, 0, packDigEdits([]));
@@ -207,4 +221,9 @@ export function createFarSummaryGpuBatchBuffers(
       cellReadbackBuffer?.destroy();
     },
   };
+}
+
+function currentQueryParams(): URLSearchParams {
+  const maybeWindow = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window;
+  return new URLSearchParams(maybeWindow?.location?.search ?? "");
 }

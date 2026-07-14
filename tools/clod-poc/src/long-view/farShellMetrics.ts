@@ -21,10 +21,6 @@ export interface FarShellMetrics {
   farSummaryTilesBuilding: number;
   farSummaryTilesMissing: number;
   farSummaryTilesStale: number;
-  farSummaryTerrainWaterReady: number;
-  farSummaryWaterPending: number;
-  farSummaryCanopyPending: number;
-  farSummaryFullyEnriched: number;
   farSummaryTilesBuiltThisFrame: number;
   farSummaryCacheSize: number;
   farSummaryFallbackSamples: number;
@@ -35,6 +31,10 @@ export interface FarShellMetrics {
   farSummaryBuildsDiscarded: number;
   farSummaryProbeFallbacks: number;
   farSummaryProbeHeightErrorMaxM: number;
+  farSummaryTerrainWaterReady?: number;
+  farSummaryWaterPending?: number;
+  farSummaryCanopyPending?: number;
+  farSummaryFullyEnriched?: number;
 }
 
 export function createFarShellMetrics(): FarShellMetrics {
@@ -60,10 +60,6 @@ export function createFarShellMetrics(): FarShellMetrics {
     farSummaryTilesBuilding: 0,
     farSummaryTilesMissing: 0,
     farSummaryTilesStale: 0,
-    farSummaryTerrainWaterReady: 0,
-    farSummaryWaterPending: 0,
-    farSummaryCanopyPending: 0,
-    farSummaryFullyEnriched: 0,
     farSummaryTilesBuiltThisFrame: 0,
     farSummaryCacheSize: 0,
     farSummaryFallbackSamples: 0,
@@ -74,6 +70,10 @@ export function createFarShellMetrics(): FarShellMetrics {
     farSummaryBuildsDiscarded: 0,
     farSummaryProbeFallbacks: 0,
     farSummaryProbeHeightErrorMaxM: 0,
+    farSummaryTerrainWaterReady: 0,
+    farSummaryWaterPending: 0,
+    farSummaryCanopyPending: 0,
+    farSummaryFullyEnriched: 0,
   };
 }
 
@@ -114,14 +114,15 @@ function maybeLogFarDebug(metrics: FarShellMetrics): void {
         `[far-debug] warming: proceduralFallbackSamples=${metrics.farSummaryProceduralFallbackSamples} ` +
           `lower=${metrics.farSummaryLowerRingFallbackSamples} conservative=${metrics.farSummaryConservativeFallbackSamples} ` +
           `summaryTiles=${metrics.farSummaryTilesReady}/${metrics.farSummaryTilesRequired} ` +
-          `building=${metrics.farSummaryTilesBuilding} missing=${metrics.farSummaryTilesMissing}`,
+          `building=${metrics.farSummaryTilesBuilding} missing=${metrics.farSummaryTilesMissing} ` +
+          `waterPending=${metrics.farSummaryWaterPending ?? 0} canopyPending=${metrics.farSummaryCanopyPending ?? 0}`,
       );
     }
   } else if (!farDebugConvergedLogged) {
     farDebugConvergedLogged = true;
     console.info(
-      `[far-debug] converged: summaryTiles=${metrics.farSummaryTilesReady}/${metrics.farSummaryTilesRequired}, ` +
-        "no procedural fallback samples this frame",
+      `[far-debug] converged: terrainWater=${metrics.farSummaryTerrainWaterReady ?? 0}/${metrics.farSummaryTilesRequired}, ` +
+        `fullyEnriched=${metrics.farSummaryFullyEnriched ?? 0}, canopyPending=${metrics.farSummaryCanopyPending ?? 0}`,
     );
   }
 }
@@ -146,10 +147,6 @@ export function publishFarShellMetricsToCounters(
   counters["far_summary_tiles_building"] = metrics.farSummaryTilesBuilding;
   counters["far_summary_tiles_missing"] = metrics.farSummaryTilesMissing;
   counters["far_summary_tiles_stale"] = metrics.farSummaryTilesStale;
-  counters["far_summary_terrain_water_ready"] = metrics.farSummaryTerrainWaterReady ?? 0;
-  counters["far_summary_water_pending"] = metrics.farSummaryWaterPending ?? 0;
-  counters["far_summary_canopy_pending"] = metrics.farSummaryCanopyPending ?? 0;
-  counters["far_summary_fully_enriched"] = metrics.farSummaryFullyEnriched ?? 0;
   counters["far_summary_tiles_built_this_frame"] = metrics.farSummaryTilesBuiltThisFrame;
   counters["far_summary_cache_size"] = metrics.farSummaryCacheSize;
   counters["far_summary_fallback_samples"] = metrics.farSummaryFallbackSamples;
@@ -160,6 +157,10 @@ export function publishFarShellMetricsToCounters(
   counters["far_summary_builds_discarded"] = metrics.farSummaryBuildsDiscarded;
   counters["far_summary_probe_fallbacks"] = metrics.farSummaryProbeFallbacks;
   counters["far_summary_probe_height_error_max_m"] = metrics.farSummaryProbeHeightErrorMaxM;
+  counters["far_summary_terrain_water_ready"] = metrics.farSummaryTerrainWaterReady ?? 0;
+  counters["far_summary_water_pending"] = metrics.farSummaryWaterPending ?? 0;
+  counters["far_summary_canopy_pending"] = metrics.farSummaryCanopyPending ?? 0;
+  counters["far_summary_fully_enriched"] = metrics.farSummaryFullyEnriched ?? 0;
 }
 
 export function exposeMetricsOnWindow(metrics: FarShellMetrics): void {
