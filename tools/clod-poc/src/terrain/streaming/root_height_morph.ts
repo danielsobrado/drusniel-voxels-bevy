@@ -4,7 +4,7 @@ import type { ClodPageNode } from "../../types.js";
 export const ROOT_HEIGHT_MORPH_ATTRIBUTE = "rootMorphDeltaY";
 
 export interface RootHeightMorphView {
-  node: Pick<ClodPageNode, "id" | "revision" | "mesh" | "rootTransition">;
+  node: Pick<ClodPageNode, "id" | "revision" | "mesh" | "gpuResidentOnly" | "rootTransition">;
   mesh: THREE.Mesh;
 }
 
@@ -99,6 +99,7 @@ function buildHeightSampler(sourceViews: readonly RootHeightMorphView[]): Height
   const fallbackVertices: HeightVertex[] = [];
 
   for (const view of sourceViews) {
+    if (view.node.gpuResidentOnly) continue;
     const positions = view.node.mesh.positions;
     const indices = view.node.mesh.indices;
     for (let i = 0; i < positions.length; i += 3) {
@@ -136,13 +137,13 @@ function buildHeightSampler(sourceViews: readonly RootHeightMorphView[]): Height
   const sampleFallback = (x: number, z: number): number | null => {
     let best: HeightVertex | null = null;
     let bestD2 = Number.POSITIVE_INFINITY;
-    for (const v of fallbackVertices) {
-      const dx = x - v.x;
-      const dz = z - v.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        best = v;
+    for (const vertex of fallbackVertices) {
+      const dx = x - vertex.x;
+      const dz = z - vertex.z;
+      const distanceSquared = dx * dx + dz * dz;
+      if (distanceSquared < bestD2) {
+        bestD2 = distanceSquared;
+        best = vertex;
       }
     }
     return best?.y ?? null;
@@ -202,7 +203,7 @@ function cachedHeightSampler(sourceViews: readonly RootHeightMorphView[]): Heigh
 
 function ensureRootMorphAttribute(geometry: THREE.BufferGeometry, vertexCount: number): THREE.BufferAttribute {
   const existing = geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
-  if (existing && existing.array.length === vertexCount) return existing;
+  if (existing && existing.count === vertexCount) return existing;
   const attribute = new THREE.BufferAttribute(new Float32Array(vertexCount), 1);
   geometry.setAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE, attribute);
   return attribute;
@@ -219,10 +220,10 @@ function buildDeltaY(view: RootHeightMorphView, sourceViews: readonly RootHeight
   const sampler = cachedHeightSampler(sourceViews);
   const positions = view.node.mesh.positions;
   const deltas = new Float32Array(positions.length / 3);
-  for (let i = 0; i < deltas.length; i++) {
-    const p = i * 3;
-    const sourceY = sampler.sample(positions[p], positions[p + 2]);
-    deltas[i] = sourceY === null ? 0 : clampDelta(sourceY - positions[p + 1]);
+  for (let index = 0; index < deltas.length; index++) {
+    const position = index * 3;
+    const sourceY = sampler.sample(positions[position], positions[position + 2]);
+    deltas[index] = sourceY === null ? 0 : clampDelta(sourceY - positions[position + 1]);
   }
   return deltas;
 }
@@ -231,6 +232,10 @@ export function applyRootHeightMorph(
   view: RootHeightMorphView,
   sourceViews: readonly RootHeightMorphView[],
 ): RootHeightMorphStats {
+  if (view.node.gpuResidentOnly || sourceViews.some((source) => source.node.gpuResidentOnly)) {
+    if (view.node.rootTransition) view.node.rootTransition.parentHeightMorphReady = false;
+    return { builtRoots: 0, builtVertices: 0, buildMs: 0 };
+  }
   if (sourceViews.length === 0) {
     resetRootHeightMorph(view);
     return { builtRoots: 0, builtVertices: 0, buildMs: 0 };
@@ -249,13 +254,13 @@ export function applyRootHeightMorph(
     builtVertices = deltas.length;
   }
   if (view.node.rootTransition) view.node.rootTransition.parentHeightMorphReady = true;
-
   return { builtRoots, builtVertices, buildMs: performance.now() - startedAt };
 }
 
 export function resetRootHeightMorph(view: RootHeightMorphView): void {
-  const geometry = view.mesh.geometry as THREE.BufferGeometry;
   if (view.node.rootTransition) view.node.rootTransition.parentHeightMorphReady = false;
+  if (view.node.gpuResidentOnly) return;
+  const geometry = view.mesh.geometry as THREE.BufferGeometry;
   if (geometry.userData[HEIGHT_MORPH_SIGNATURE_KEY] === undefined) return;
   const attribute = geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute | undefined;
   if (!attribute) return;
