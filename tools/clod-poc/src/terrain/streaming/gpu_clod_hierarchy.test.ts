@@ -3,6 +3,7 @@ import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
   parseGpuClodHierarchyConfig,
+  shouldKeepGpuClodPageResident,
 } from "./gpu_clod_hierarchy_config.js";
 import { buildGpuClodMeshletHierarchy } from "./gpu_clod_meshlet_hierarchy.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
@@ -13,14 +14,27 @@ import {
 } from "./gpu_clod_weld_compute.js";
 import { GPU_CLOD_SIMPLIFY_WGSL } from "./gpu_clod_simplify_compute.js";
 
- describe("GPU CLOD hierarchy config", () => {
+describe("GPU CLOD hierarchy config", () => {
   it("keeps the complete path behind one explicit runtime flag", () => {
     const config = parseGpuClodHierarchyConfig(new URLSearchParams("scene=infinite-islands"));
     expect(config.enabled).toBe(false);
     expect(config.renderResidentPages).toBe(true);
     expect(config.readbackMinLevel).toBe(1);
+    expect(config.residentMaxLevel).toBe(0);
     expect(config.gpuWeld).toBe(true);
     expect(config.gpuSimplify).toBe(true);
+  });
+
+  it("keeps defaults for missing and blank numeric options", () => {
+    const missing = parseGpuClodHierarchyConfig(new URLSearchParams());
+    const blank = parseGpuClodHierarchyConfig(new URLSearchParams([
+      ["liveClodGpuReadbackMinLevel", ""],
+      ["liveClodGpuResidentMaxLevel", "   "],
+    ]));
+    expect(missing.readbackMinLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.readbackMinLevel);
+    expect(missing.residentMaxLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.residentMaxLevel);
+    expect(blank.readbackMinLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.readbackMinLevel);
+    expect(blank.residentMaxLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.residentMaxLevel);
   });
 
   it("parses bounded hierarchy options", () => {
@@ -55,6 +69,19 @@ import { GPU_CLOD_SIMPLIFY_WGSL } from "./gpu_clod_simplify_compute.js";
   it("uses stable defaults for invalid values", () => {
     const config = parseGpuClodHierarchyConfig(new URLSearchParams("liveClodGpuResidentBytes=-1"));
     expect(config.maxResidentBytes).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.maxResidentBytes);
+  });
+
+  it("gives each level one geometry authority", () => {
+    const config = {
+      ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
+      enabled: true,
+      renderResidentPages: true,
+      residentMaxLevel: 2,
+      readbackMinLevel: 1,
+    };
+    expect(shouldKeepGpuClodPageResident(config, 0)).toBe(true);
+    expect(shouldKeepGpuClodPageResident(config, 1)).toBe(false);
+    expect(shouldKeepGpuClodPageResident(config, 2)).toBe(false);
   });
 });
 
