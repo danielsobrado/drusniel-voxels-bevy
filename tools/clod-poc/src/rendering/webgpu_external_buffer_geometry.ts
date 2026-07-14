@@ -1,5 +1,8 @@
 import * as THREE from "three";
-import type { WebGPURenderer } from "three/webgpu";
+import {
+  IndirectStorageBufferAttribute,
+  type WebGPURenderer,
+} from "three/webgpu";
 import {
   GPU_CLOD_VERTEX_FLOATS,
   GPU_CLOD_VERTEX_LAYOUT,
@@ -7,7 +10,8 @@ import {
 } from "../terrain/streaming/gpu_clod_resident_types.js";
 
 const EXTERNAL_GEOMETRY_KEY = "gpuClodExternalGeometry";
-const INDEXED_INDIRECT_COMMAND_BYTES = 5 * Uint32Array.BYTES_PER_ELEMENT;
+const INDEXED_INDIRECT_COMMAND_WORDS = 5;
+const INDEXED_INDIRECT_COMMAND_BYTES = INDEXED_INDIRECT_COMMAND_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 
 interface WebGpuBackendData {
   buffer?: GPUBuffer;
@@ -56,7 +60,7 @@ export function createExternalGpuClodGeometry(
   geometry.setDrawRange(0, page.indexCount);
 
   if (page.meshlets && page.meshlets.meshletCount > 0) {
-    const indirect = new THREE.BufferAttribute(new Uint32Array(5), 1);
+    const indirect = new IndirectStorageBufferAttribute(INDEXED_INDIRECT_COMMAND_WORDS, 1);
     geometry.indirect = indirect;
     geometry.indirectOffset = Array.from(
       { length: page.meshlets.meshletCount },
