@@ -51,6 +51,8 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private overlapEventsTotal = 0;
   private fallbackPages = 0;
   private workerFallbackPages = 0;
+  private residentHierarchyFailures = 0;
+  private residentHierarchyDisabled = false;
   private disposed = false;
 
   constructor(
@@ -70,7 +72,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     this.publishCounters();
     try {
       const result = await this.meshers[index]!.buildPages(batch);
-      this.residentPages?.ingest(result.nodes);
+      this.ingestResidentPages(result);
       return result;
     } finally {
       this.active--;
@@ -132,6 +134,21 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     this.publishCounters();
   }
 
+  private ingestResidentPages(result: GpuClodRootBuildResult): void {
+    if (!this.residentPages || this.residentHierarchyDisabled) return;
+    try {
+      this.residentPages.ingest(result.nodes);
+    } catch (error) {
+      this.residentHierarchyFailures++;
+      this.residentHierarchyDisabled = true;
+      this.residentPages.dispose();
+      console.warn(
+        "[clod-stream-gpu] optional resident hierarchy disabled; CPU render path remains authoritative",
+        error,
+      );
+    }
+  }
+
   private acquire(): Promise<number> {
     if (this.disposed) return Promise.reject(new Error("GPU CLOD root pool disposed"));
     const index = this.available.shift();
@@ -161,6 +178,8 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     counters["live_clod_stream_gpu_pool_max_active"] = pool.maxActive;
     counters["live_clod_stream_gpu_pool_overlap_events_total"] = pool.overlapEventsTotal;
     counters["live_clod_stream_gpu_pool_waiters"] = pool.waiters;
+    counters["live_clod_gpu_hierarchy_failures_total"] = this.residentHierarchyFailures;
+    counters["live_clod_gpu_hierarchy_runtime_disabled"] = this.residentHierarchyDisabled ? 1 : 0;
   }
 }
 
