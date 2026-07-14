@@ -44,12 +44,18 @@ import {
   materialChurnDiagnostics,
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
 import { findContinentRiverCrossingRoute } from "../../water/continent_river_route.js";
+import { applyContinentDefaults } from "./continent_defaults.js";
 
 const MAX_TERRAIN_TEXTURE_WINDOW_CACHE = 8;
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
   if (await runEarlyRoutes(searchParams)) return;
+  if (applyContinentDefaults(searchParams)) {
+    const url = new URL(location.href);
+    url.search = searchParams.toString();
+    history.replaceState(history.state, "", url);
+  }
 
   installGlobalErrorHooks();
   const clodRuntime = parseClodRuntimeConfig();

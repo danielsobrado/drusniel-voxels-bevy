@@ -169,4 +169,33 @@ describe("HeightfieldTileCache", () => {
     cache.recordFallbackSample(3);
     expect(cache.counters().fallbackSamplesTotal).toBe(4);
   });
+
+  it("rebuilds invalidated bounds without reloading stale persisted tiles", async () => {
+    let builds = 0;
+    const cache = new HeightfieldTileCache(
+      config(),
+      0,
+      async (keys, revision) => {
+        builds++;
+        return {
+          tiles: keys.map((key) => buildHeightfieldTile(key, { sampleHeight: () => 99 }, revision)),
+          buildMs: 1,
+        };
+      },
+      {
+        load: async (key, revision) => tile(key, revision),
+        save: async () => {},
+      },
+    );
+
+    cache.update({ x: 128, z: 128, frameIndex: 1 });
+    await drainMicrotasks();
+    expect(builds).toBe(0);
+
+    expect(cache.invalidateBounds({ minX: 0, minZ: 0, maxX: 256, maxZ: 256 })).toBe(1);
+    await drainMicrotasks();
+
+    expect(builds).toBe(1);
+    expect(cache.get({ x: 0, z: 0 })?.heights[0]).toBe(99);
+  });
 });

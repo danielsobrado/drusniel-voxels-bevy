@@ -5,7 +5,7 @@ import {
   type HeightfieldTileRuntimeUpdate,
 } from "./heightfield_tile_runtime.js";
 import { WORLD_TILE_SIZE_M } from "../tile_key.js";
-import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
+import { getSaveRuntimeFeatureStamps, subscribeSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 import { baseSurfaceHeight } from "../../terrain/terrain.js";
 import { createGraphHydrologySampler } from "../../water/graph_hydrology.js";
 import { featureStampFieldFromStamps, type FeatureTerrainStamp } from "../feature_stamps.js";
@@ -18,6 +18,7 @@ interface ClientPrototype {
 }
 
 const activeRuntimes = new WeakMap<ClodWorkerClient, HeightfieldTileRuntime>();
+const runtimeSet = new Set<HeightfieldTileRuntime>();
 let installed = false;
 
 function canonicalFallbackSampler(
@@ -27,13 +28,14 @@ function canonicalFallbackSampler(
 ): HeightfieldSampler | undefined {
   if (!graph || !carve) return undefined;
   const hydrology = createGraphHydrologySampler(graph, { surfaceHeight: baseSurfaceHeight });
-  const features = stamps ? featureStampFieldFromStamps(stamps) : null;
+  const initialFeatures = stamps ? featureStampFieldFromStamps(stamps) : null;
   return Object.freeze({
     kind: "heightfield_tiles" as const,
     domain: null,
     sourceRevision: 0,
     sampleHeight(x: number, z: number): number {
       const carved = hydrology.carveHeight(x, z, baseSurfaceHeight(x, z), carve);
+      const features = getSaveRuntimeFeatureStamps() ?? initialFeatures;
       return Math.fround(features?.sampleHeight(x, z, carved) ?? carved);
     },
   });
@@ -43,6 +45,7 @@ function stopRuntime(client: ClodWorkerClient): void {
   const runtime = activeRuntimes.get(client);
   if (!runtime) return;
   runtime.dispose();
+  runtimeSet.delete(runtime);
   activeRuntimes.delete(client);
 }
 
@@ -107,6 +110,9 @@ export function updateHeightfieldTileClientRuntime(
 export function installHeightfieldTileClientRuntime(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
+  subscribeSaveRuntimeFeatureStamps((bounds) => {
+    for (const runtime of runtimeSet) runtime.invalidateBounds(bounds);
+  });
 
   const prototype = ClodWorkerClient.prototype as ClientPrototype;
   const originalBuildWorld = prototype.buildWorld;
@@ -131,7 +137,10 @@ export function installHeightfieldTileClientRuntime(): void {
         getSaveRuntimeFeatureStamps()?.stamps ?? featureStamps,
       ),
     });
-    if (runtime) activeRuntimes.set(this, runtime);
+    if (runtime) {
+      activeRuntimes.set(this, runtime);
+      runtimeSet.add(runtime);
+    }
     return result;
   };
 

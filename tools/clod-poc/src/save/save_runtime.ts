@@ -37,6 +37,7 @@ interface SaveRuntimeState {
   saveId: string;
   manifest: SaveWorldManifest;
   metadata: WorldMetadataRecord;
+  featureStamps: FeatureStampField;
   dirtyRegions: SaveDirtyRegionRevisions;
   completedRegionKeys: Set<string>;
   revision: number;
@@ -49,6 +50,8 @@ interface SaveRuntimeState {
 let state: SaveRuntimeState | null = null;
 let attachedCounters: Partial<SaveRuntimeCounters> | null = null;
 let propExclusions = new SparsePropExclusionBitsets();
+type FeatureStampListener = (bounds: SavedBounds2D, field: FeatureStampField) => void;
+const featureStampListeners = new Set<FeatureStampListener>();
 
 function nowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
@@ -134,6 +137,7 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     saveId: loadedWorld.saveId,
     manifest: { ...loadedWorld.manifest, regionKeys: [...loadedWorld.manifest.regionKeys] },
     metadata: structuredClone(loadedWorld.metadata) as WorldMetadataRecord,
+    featureStamps: compileFeatureStamps(loadedWorld.metadata),
     dirtyRegions: new SaveDirtyRegionRevisions(),
     completedRegionKeys: new Set<string>(),
     revision: loadedWorld.manifest.regionKeys.length,
@@ -200,6 +204,8 @@ export function updateSaveRuntimeMetadata(metadata: WorldMetadataRecord, dirtyBo
   if (!state) return [];
   assertWorldMetadataRecord(metadata);
   state.metadata = structuredClone(metadata) as WorldMetadataRecord;
+  state.featureStamps = compileFeatureStamps(state.metadata);
+  for (const listener of featureStampListeners) listener(dirtyBounds, state.featureStamps);
   return markSaveRegionsDirtyForBounds(dirtyBounds);
 }
 
@@ -225,7 +231,12 @@ export function getSaveRuntimePropExclusions(): SparsePropExclusionBitsets {
 }
 
 export function getSaveRuntimeFeatureStamps(): FeatureStampField | null {
-  return state ? compileFeatureStamps(state.metadata) : null;
+  return state?.featureStamps ?? null;
+}
+
+export function subscribeSaveRuntimeFeatureStamps(listener: FeatureStampListener): () => void {
+  featureStampListeners.add(listener);
+  return () => featureStampListeners.delete(listener);
 }
 
 /** Interaction write path: deterministic baseline candidate -> durable destroyed delta. */

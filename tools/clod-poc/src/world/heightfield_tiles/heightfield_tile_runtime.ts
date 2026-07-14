@@ -47,6 +47,7 @@ export interface HeightfieldTileRuntime {
   readonly authoritative: boolean;
   update(input: HeightfieldTileRuntimeUpdate): void;
   counters(): HeightfieldTileCacheCounters;
+  invalidateBounds(bounds: { minX: number; minZ: number; maxX: number; maxZ: number }): number;
   dispose(): void;
 }
 
@@ -157,6 +158,7 @@ export async function createHeightfieldTileRuntime(
       publishHeightfieldTileCounters(diagnosticsCounters(), cache.counters());
     },
     counters: () => cache.counters(),
+    invalidateBounds: (bounds) => cache.invalidateBounds(bounds),
     dispose() {
       cache.clear();
       unregisterHeightfieldTileGpuSource(cache);

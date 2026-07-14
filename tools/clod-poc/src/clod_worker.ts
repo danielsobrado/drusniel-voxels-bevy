@@ -607,6 +607,7 @@ function handleBuildHeightfieldTiles(request: HeightfieldTileWorkerBuildRequest)
 
   const startedAt = performance.now();
   const features = request.featureStamps ? featureStampFieldFromStamps(request.featureStamps) : undefined;
+  featureStampField = features ?? null;
   const tiles = request.keys.map((key) => {
     const field = {
       sampleHeight: baseSurfaceHeight,

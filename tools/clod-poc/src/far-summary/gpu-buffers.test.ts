@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   FAR_SUMMARY_GPU_DESCRIPTOR_BYTES,
+  FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CANONICAL_SAMPLES,
   FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS,
   FAR_SUMMARY_GPU_RECORD_BYTES,
   type FarSummaryGpuConfig,
 } from "./gpu-config.js";
 import type { FarSummaryGpuDirtyTile } from "./gpu-planner.js";
 import { estimateFarSummaryGpuBatchBytes } from "./gpu-planner.js";
-import { farSummaryGpuReadbackTileCount, packFarSummaryGpuDescriptors } from "./gpu-buffers.js";
+import {
+  farSummaryGpuReadbackTileCount,
+  packFarSummaryCanonicalSamples,
+  packFarSummaryGpuDescriptors,
+} from "./gpu-buffers.js";
 import { FAR_SUMMARY_LAYOUT_VERSION } from "./types.js";
 
 function tile(overrides: Partial<FarSummaryGpuDirtyTile> = {}): FarSummaryGpuDirtyTile {
@@ -74,10 +79,36 @@ describe("packFarSummaryGpuDescriptors", () => {
     expect(commit.getUint32(36, true)).toBe(FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS);
   });
 
+  it("packs canonical sample offsets and flags", () => {
+    const descriptors = new DataView(packFarSummaryGpuDescriptors([
+      tile({ tileCells: 2 }),
+      tile({ tileCells: 3 }),
+    ], { commitToCache: false }, true));
+    expect(descriptors.getUint32(36, true)).toBe(FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CANONICAL_SAMPLES);
+    expect(descriptors.getUint32(56, true)).toBe(0);
+    expect(descriptors.getUint32(60, true)).toBe(4);
+    expect(descriptors.getUint32(FAR_SUMMARY_GPU_DESCRIPTOR_BYTES + 56, true)).toBe(16);
+    expect(descriptors.getUint32(FAR_SUMMARY_GPU_DESCRIPTOR_BYTES + 60, true)).toBe(5);
+  });
+
   it("is deterministic", () => {
     const a = new Uint8Array(packFarSummaryGpuDescriptors([tile(), tile({ tileX: 9 })]));
     const b = new Uint8Array(packFarSummaryGpuDescriptors([tile(), tile({ tileX: 9 })]));
     expect([...a]).toEqual([...b]);
+  });
+});
+
+describe("packFarSummaryCanonicalSamples", () => {
+  it("packs a one-cell tile with its one-cell border in row-major order", () => {
+    const samples = packFarSummaryCanonicalSamples([
+      tile({ tileCells: 1, originX: 100, originZ: 200, cellSizeM: 10 }),
+    ], {
+      sampleHeight: (x, z) => x + z,
+      sampleMaterial: (x, z) => x < 100 || z < 200 ? 5 : 1,
+    });
+    expect(samples.length).toBe(3 * 3 * 2);
+    expect([...samples.slice(0, 6)]).toEqual([290, 5, 300, 5, 310, 5]);
+    expect([...samples.slice(6, 10)]).toEqual([300, 5, 310, 1]);
   });
 });
 

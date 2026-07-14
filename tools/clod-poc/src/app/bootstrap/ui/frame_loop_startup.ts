@@ -42,6 +42,7 @@ import {
   heightfieldTilesReadyForPage,
   updateHeightfieldTileClientRuntime,
 } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
+import { subscribeSaveRuntimeFeatureStamps } from "../../../save/save_runtime.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
@@ -454,6 +455,10 @@ export function runFrameLoopStartup(
     onRootsChanged: () => selectionController.invalidate(),
   });
   session.streamingClodRootController = streamingClodRootController;
+  subscribeSaveRuntimeFeatureStamps((bounds) => {
+    streamingClodRootController.invalidateBounds(bounds);
+    selectionController.invalidate();
+  });
   const streamingClodReadyPageKeys = (): string[] => {
     if (!streamingScene) return input.allNodes.map((node) => node.id);
     return [...new Set([...input.allNodes.map((node) => node.id), ...streamingClodRootController.readyPageKeys()])];

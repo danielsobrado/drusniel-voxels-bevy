@@ -122,6 +122,7 @@ export class HeightfieldTileCache {
   private readonly inflightIds = new Set<string>();
   private readonly failures = new Map<string, FailureState>();
   private readonly buildSamples: number[] = [];
+  private readonly invalidated = new Set<string>();
   private required = new Map<string, PlannedTile>();
   private previousCenter: { x: number; z: number; frameIndex: number } | null = null;
   private evictionCenter = { x: 0, z: 0 };
@@ -214,6 +215,31 @@ export class HeightfieldTileCache {
     return [...this.resident.values()].map((entry) => entry.tile);
   }
 
+  invalidateBounds(bounds: { minX: number; minZ: number; maxX: number; maxZ: number }): number {
+    const min = worldToTile(bounds.minX, bounds.minZ);
+    const max = worldToTile(
+      bounds.maxX > bounds.minX ? bounds.maxX - 1e-7 : bounds.maxX,
+      bounds.maxZ > bounds.minZ ? bounds.maxZ - 1e-7 : bounds.maxZ,
+    );
+    let count = 0;
+    for (let z = min.z; z <= max.z; z++) {
+      for (let x = min.x; x <= max.x; x++) {
+        const id = tileKeyString({ x, z });
+        this.invalidated.add(id);
+        this.resident.delete(id);
+        this.failures.delete(id);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.epoch++;
+      this.inflightIds.clear();
+      this.inflightBatches = 0;
+    }
+    this.dispatch();
+    return count;
+  }
+
   clear(): void {
     this.epoch++;
     this.buildAllowed = false;
@@ -221,6 +247,7 @@ export class HeightfieldTileCache {
     this.required.clear();
     this.failures.clear();
     this.inflightIds.clear();
+    this.invalidated.clear();
   }
 
   private resolveVelocity(input: HeightfieldTileCacheUpdate): { x: number; z: number } {
@@ -283,6 +310,10 @@ export class HeightfieldTileCache {
 
     if (this.store) {
       for (const entry of batch) {
+        if (this.invalidated.has(entry.id)) {
+          misses.push(entry);
+          continue;
+        }
         try {
           const tile = await this.store.load(entry.key, this.sourceRevision);
           if (epoch !== this.epoch) return;
@@ -322,6 +353,7 @@ export class HeightfieldTileCache {
         if (!tile) throw new Error(`heightfield tile builder omitted ${entry.id}`);
         assertTile(tile, entry.key, this.sourceRevision);
         this.install(entry.id, tile);
+        this.invalidated.delete(entry.id);
         this.buildsTotal++;
         this.failures.delete(entry.id);
         if (this.store) {

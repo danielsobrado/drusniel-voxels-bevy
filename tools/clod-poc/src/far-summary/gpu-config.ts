@@ -14,6 +14,7 @@ export interface FarSummaryGpuConfig {
 export const FAR_SUMMARY_GPU_DESCRIPTOR_BYTES = 64;
 export const FAR_SUMMARY_GPU_RECORD_BYTES = 128;
 export const FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CELL_RECORDS = 1 << 0;
+export const FAR_SUMMARY_GPU_DESCRIPTOR_FLAG_CANONICAL_SAMPLES = 1 << 1;
 
 export const DEFAULT_FAR_SUMMARY_GPU_CONFIG: FarSummaryGpuConfig = {
   enabled: false,

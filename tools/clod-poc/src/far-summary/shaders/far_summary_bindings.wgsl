@@ -13,8 +13,8 @@ struct FarSummaryTileDescriptor {
   cell_size_m: f32,
   cell_record_offset: u32,
   layout_version: u32,
-  _pad2: u32,
-  _pad3: u32,
+  canonical_sample_offset: u32,
+  canonical_sample_stride: u32,
 };
 
 struct FarSummaryGpuRecord {
@@ -34,3 +34,4 @@ struct FarSummaryGpuRecord {
 @group(0) @binding(2) var<storage, read> digEdits: array<DigEdit>;
 @group(0) @binding(3) var<uniform> fieldParams: FieldParams;
 @group(0) @binding(4) var<storage, read_write> cell_records: array<FarSummaryGpuRecord>;
+@group(0) @binding(5) var<storage, read> canonical_samples: array<vec2<f32>>;

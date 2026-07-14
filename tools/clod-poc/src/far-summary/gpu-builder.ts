@@ -52,6 +52,7 @@ export interface CreateFarSummaryGpuBuilderOptions {
   config: FarSummaryGpuConfig;
   sharedDevice?: GPUDevice;
   terrainFieldConfig?: TerrainFieldConfig;
+  terrainSampler?: FarTerrainSampler;
 }
 
 export interface FarSummaryGpuDispatchOrFallbackInput {
@@ -91,6 +92,7 @@ export async function createFarSummaryGpuBuilder(
         { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       ],
     });
     const pipeline = await device.createComputePipelineAsync({
@@ -98,7 +100,7 @@ export async function createFarSummaryGpuBuilder(
       layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
       compute: { module, entryPoint: "build_far_summary" },
     });
-    return new WebGpuFarSummaryBuilder(device, layout, pipeline, options.config, options.terrainFieldConfig);
+    return new WebGpuFarSummaryBuilder(device, layout, pipeline, options.config, options.terrainFieldConfig, options.terrainSampler);
   } catch (error) {
     console.warn("[far-summary-gpu] builder unavailable; CPU far-summary remains authoritative", error);
     publishFarSummaryGpuCounters(undefined, disabledFarSummaryGpuCounters(options.config));
@@ -197,6 +199,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
     private readonly pipeline: GPUComputePipeline,
     private readonly config: FarSummaryGpuConfig,
     private readonly terrainFieldConfig?: TerrainFieldConfig,
+    private readonly terrainSampler?: FarTerrainSampler,
   ) {}
 
   async dispatch(plan: FarSummaryGpuPlan): Promise<FarSummaryGpuDispatchResult> {
@@ -250,7 +253,13 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
   }
 
   private async dispatchBatch(batch: FarSummaryGpuBatch, readbackTimings: number[]): Promise<FarSummaryGpuBatchReadback> {
-    const buffers = createFarSummaryGpuBatchBuffers(this.device, batch, this.config, this.terrainFieldConfig);
+    const buffers = createFarSummaryGpuBatchBuffers(
+      this.device,
+      batch,
+      this.config,
+      this.terrainFieldConfig,
+      this.terrainSampler,
+    );
     try {
       const bindGroup = this.device.createBindGroup({
         label: "far summary gpu build bind group",
@@ -261,6 +270,7 @@ class WebGpuFarSummaryBuilder implements FarSummaryGpuBuilder {
           { binding: 2, resource: { buffer: buffers.digEditsBuffer } },
           { binding: 3, resource: { buffer: buffers.fieldParamsBuffer } },
           { binding: 4, resource: { buffer: buffers.cellOutputBuffer } },
+          { binding: 5, resource: { buffer: buffers.canonicalSampleBuffer } },
         ],
       });
       const encoder = this.device.createCommandEncoder({ label: "far summary gpu build encoder" });

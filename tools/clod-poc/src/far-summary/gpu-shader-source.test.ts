@@ -21,6 +21,8 @@ describe("far summary WGSL shader source", () => {
     const shaderCode = composeFarSummaryGpuBuildShader();
     expect(shaderCode).toContain("@group(0) @binding(2) var<storage, read> digEdits");
     expect(shaderCode).toContain("@group(0) @binding(3) var<uniform> fieldParams");
+    expect(shaderCode).toContain("@group(0) @binding(5) var<storage, read> canonical_samples");
+    expect(shaderCode).toContain("terrainSampleAtCell(descriptor");
   });
 
   it("names the layout-v2 world-summary channels in the stable 128-byte record", () => {

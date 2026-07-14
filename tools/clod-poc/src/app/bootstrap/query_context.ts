@@ -1,6 +1,7 @@
 import type { WeatherMode } from "../../app/clod_constants.js";
 import { parseReadbackMode, type WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
 import { applyInfiniteIslandsFarDefaults } from "./infinite_islands_far_defaults.js";
+import { applyContinentDefaults } from "./continent_defaults.js";
 import {
   parsePhase0Config,
   type Phase0Config,
@@ -234,6 +235,7 @@ export function parseBootstrapQueryContext(
   searchParams: URLSearchParams,
   phase0ConfigText: string,
 ): BootstrapQueryContext {
+  applyContinentDefaults(searchParams);
   applyInfiniteIslandsFarDefaults(searchParams);
   const scene = parseSceneQueryFlags(searchParams);
   return {

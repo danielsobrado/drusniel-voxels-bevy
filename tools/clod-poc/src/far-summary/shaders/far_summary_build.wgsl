@@ -6,6 +6,7 @@ const BIOME_PLAINS: u32 = 4u;
 const BIOME_COAST: u32 = 5u;
 const BIOME_OCEAN: u32 = 6u;
 const FAR_SUMMARY_FLAG_CELL_RECORDS: u32 = 1u;
+const FAR_SUMMARY_FLAG_CANONICAL_SAMPLES: u32 = 2u;
 
 const BIOME_REGION_CELL_M: f32 = 420.0;
 const BIOME_OCEAN_HEIGHT_MARGIN_M: f32 = 1.5;
@@ -75,17 +76,30 @@ fn normalFromHeightsField(hL: f32, hR: f32, hD: f32, hU: f32, step: f32) -> vec3
   return n / len;
 }
 
-fn roughnessAtCell(originX: f32, originZ: f32, tileCells: u32, cellM: f32, sx: u32, sz: u32, centerHeight: f32) -> f32 {
+fn terrainSampleAtCell(descriptor: FarSummaryTileDescriptor, gx: i32, gz: i32) -> vec2<f32> {
+  let clampedX = clamp(gx, -1, i32(descriptor.tile_cells));
+  let clampedZ = clamp(gz, -1, i32(descriptor.tile_cells));
+  if ((descriptor.flags & FAR_SUMMARY_FLAG_CANONICAL_SAMPLES) != 0u) {
+    let index = descriptor.canonical_sample_offset
+      + u32(clampedZ + 1) * descriptor.canonical_sample_stride
+      + u32(clampedX + 1);
+    return canonical_samples[index];
+  }
+  let wx = descriptor.origin_x + (f32(clampedX) + 0.5) * descriptor.cell_size_m;
+  let wz = descriptor.origin_z + (f32(clampedZ) + 0.5) * descriptor.cell_size_m;
+  let height = surfaceHeightField(wx, wz);
+  return vec2<f32>(height, f32(classifyBiomeMaterial(wx, wz, height)));
+}
+
+fn roughnessAtCell(descriptor: FarSummaryTileDescriptor, sx: u32, sz: u32, centerHeight: f32) -> f32 {
   var sumSq: f32 = 0.0;
   var count: f32 = 0.0;
   for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {
     for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {
       if (dx == 0 && dz == 0) { continue; }
-      let gx = clamp(i32(sx) + dx, -1, i32(tileCells));
-      let gz = clamp(i32(sz) + dz, -1, i32(tileCells));
-      let wx = originX + (f32(gx) + 0.5) * cellM;
-      let wz = originZ + (f32(gz) + 0.5) * cellM;
-      let h = surfaceHeightField(wx, wz);
+      let gx = clamp(i32(sx) + dx, -1, i32(descriptor.tile_cells));
+      let gz = clamp(i32(sz) + dz, -1, i32(descriptor.tile_cells));
+      let h = terrainSampleAtCell(descriptor, gx, gz).x;
       let diff = h - centerHeight;
       sumSq = sumSq + diff * diff;
       count = count + 1.0;
@@ -171,17 +185,18 @@ fn build_far_summary(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var sx: u32 = 0u; sx < tileCells; sx = sx + 1u) {
       let wx = descriptor.origin_x + (f32(sx) + 0.5) * cellM;
       let wz = descriptor.origin_z + (f32(sz) + 0.5) * cellM;
-      let h = surfaceHeightField(wx, wz);
-      let hL = surfaceHeightField(descriptor.origin_x + (f32(max(i32(sx) - 1, -1)) + 0.5) * cellM, wz);
-      let hR = surfaceHeightField(descriptor.origin_x + (f32(min(i32(sx) + 1, i32(tileCells))) + 0.5) * cellM, wz);
-      let hD = surfaceHeightField(wx, descriptor.origin_z + (f32(max(i32(sz) - 1, -1)) + 0.5) * cellM);
-      let hU = surfaceHeightField(wx, descriptor.origin_z + (f32(min(i32(sz) + 1, i32(tileCells))) + 0.5) * cellM);
+      let terrain = terrainSampleAtCell(descriptor, i32(sx), i32(sz));
+      let h = terrain.x;
+      let hL = terrainSampleAtCell(descriptor, i32(sx) - 1, i32(sz)).x;
+      let hR = terrainSampleAtCell(descriptor, i32(sx) + 1, i32(sz)).x;
+      let hD = terrainSampleAtCell(descriptor, i32(sx), i32(sz) - 1).x;
+      let hU = terrainSampleAtCell(descriptor, i32(sx), i32(sz) + 1).x;
       let sampleMin = min(h, min(hL, min(hR, min(hD, hU))));
       let sampleMax = max(h, max(hL, max(hR, max(hD, hU))));
       let normal = normalFromHeightsField(hL, hR, hD, hU, cellM);
       let slope = acos(clamp(normal.y, 0.0, 1.0));
-      let roughness = roughnessAtCell(descriptor.origin_x, descriptor.origin_z, tileCells, cellM, sx, sz, h);
-      let material = classifyBiomeMaterial(wx, wz, h);
+      let roughness = roughnessAtCell(descriptor, sx, sz, h);
+      let material = u32(terrain.y);
       let water = select(0.0, 1.0, sampleMax < fieldParams.seaLevel);
       let grassEligibility = clamp((1.0 - water) * (1.0 - slope / 0.75), 0.0, 1.0);
 

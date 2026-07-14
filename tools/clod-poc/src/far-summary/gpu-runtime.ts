@@ -253,6 +253,7 @@ export class FarSummaryGpuRuntime {
              config: this.options.gpuConfig,
              sharedDevice: this.options.sharedDevice ?? undefined,
              terrainFieldConfig: this.options.terrainFieldConfig,
+             terrainSampler: this.options.terrainSampler,
            }))
         .then((builder) => {
           if (this.disposed) {
