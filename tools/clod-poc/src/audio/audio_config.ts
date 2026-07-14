@@ -41,6 +41,14 @@ const DEFAULT_EVENT_AUDIO: Partial<Record<AudioEventId, EventAudioConfig>> = {
     pitch: 180,
     duration_ms: 1700,
   },
+  "spell.lightning.cast": {
+    enabled: true,
+    volume: 0.36,
+    cooldown_ms: 140,
+    synth: "warning",
+    pitch: 1680,
+    duration_ms: 1250,
+  },
 };
 
 export function parseAudioConfig(text: string): AudioConfig {
