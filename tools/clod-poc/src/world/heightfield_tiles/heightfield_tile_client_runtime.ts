@@ -6,6 +6,10 @@ import {
 } from "./heightfield_tile_runtime.js";
 import { WORLD_TILE_SIZE_M } from "../tile_key.js";
 import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
+import { baseSurfaceHeight } from "../../terrain/terrain.js";
+import { createGraphHydrologySampler } from "../../water/graph_hydrology.js";
+import { featureStampFieldFromStamps, type FeatureTerrainStamp } from "../feature_stamps.js";
+import type { HeightfieldSampler } from "../heightfield_sampler.js";
 
 interface ClientPrototype {
   buildWorld: ClodWorkerClient["buildWorld"];
@@ -15,6 +19,25 @@ interface ClientPrototype {
 
 const activeRuntimes = new WeakMap<ClodWorkerClient, HeightfieldTileRuntime>();
 let installed = false;
+
+function canonicalFallbackSampler(
+  graph: Parameters<ClodWorkerClient["buildWorld"]>[11],
+  carve: Parameters<ClodWorkerClient["buildWorld"]>[12],
+  stamps: readonly FeatureTerrainStamp[] | undefined,
+): HeightfieldSampler | undefined {
+  if (!graph || !carve) return undefined;
+  const hydrology = createGraphHydrologySampler(graph, { surfaceHeight: baseSurfaceHeight });
+  const features = stamps ? featureStampFieldFromStamps(stamps) : null;
+  return Object.freeze({
+    kind: "heightfield_tiles" as const,
+    domain: null,
+    sourceRevision: 0,
+    sampleHeight(x: number, z: number): number {
+      const carved = hydrology.carveHeight(x, z, baseSurfaceHeight(x, z), carve);
+      return Math.fround(features?.sampleHeight(x, z, carved) ?? carved);
+    },
+  });
+}
 
 function stopRuntime(client: ClodWorkerClient): void {
   const runtime = activeRuntimes.get(client);
@@ -97,13 +120,15 @@ export function installHeightfieldTileClientRuntime(): void {
     const result = await originalBuildWorld.apply(this, args);
     const terrainSource = args[9];
     const startupHeightfield = args[10] ?? null;
+    const featureStamps = args[13];
     const runtime = await createHeightfieldTileRuntime({
       terrainSource,
       startupHeightfield,
+      fallbackSampler: canonicalFallbackSampler(args[11], args[12], featureStamps),
       buildTiles: (keys, sourceRevision) => this.buildHeightfieldTiles(
         keys,
         sourceRevision,
-        getSaveRuntimeFeatureStamps()?.stamps,
+        getSaveRuntimeFeatureStamps()?.stamps ?? featureStamps,
       ),
     });
     if (runtime) activeRuntimes.set(this, runtime);

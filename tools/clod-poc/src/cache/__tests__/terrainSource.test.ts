@@ -94,6 +94,30 @@ describe("terrain source hash", () => {
     expect(withOtherRes).not.toBe(withRaster);
   });
 
+  it("changes when authored feature geometry or its revision changes", async () => {
+    const base = baseTerrainSource();
+    const withoutFeatures = await computeTerrainSourceHash(base);
+    const featureA = await computeTerrainSourceHash({
+      ...base,
+      featureStampHash: "roads-a",
+      featureStampRevision: 1,
+    });
+    const featureB = await computeTerrainSourceHash({
+      ...base,
+      featureStampHash: "roads-b",
+      featureStampRevision: 1,
+    });
+    const revisionB = await computeTerrainSourceHash({
+      ...base,
+      featureStampHash: "roads-b",
+      featureStampRevision: 2,
+    });
+
+    expect(featureA).not.toBe(withoutFeatures);
+    expect(featureB).not.toBe(featureA);
+    expect(revisionB).not.toBe(featureB);
+  });
+
   it("keeps descriptive world manifest metadata out of the v6 hash", async () => {
     const source = baseTerrainSource();
     const withoutManifest = await computeTerrainSourceHash(source);

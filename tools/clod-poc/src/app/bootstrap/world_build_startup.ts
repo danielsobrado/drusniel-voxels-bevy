@@ -110,9 +110,10 @@ import type { CustomPropsSettings } from "../../props/prop_types.js";
 import type { PropPlacementScene } from "../../props/prop_types.js";
 import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
-import { ProceduralWorldSource } from "../../world_source/world_source.js";
+import { CanonicalWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
 import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
+import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 
 function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
   for (const key of keys) {
@@ -376,7 +377,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   });
   setTerrainFieldConfig(terrainFieldConfig);
   setTerrainFieldCoreConfig(terrainFieldConfig);
-  const worldSource = new ProceduralWorldSource(terrainFieldConfig);
+  const worldSource = new CanonicalWorldSource(terrainFieldConfig);
   const clodWorker = new ClodWorkerClient();
   clodWorker.onError = (error) => {
     emitAudio("clod.rebuild.error");
@@ -466,6 +467,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
 
   const voxelSnapshot = importedVoxelSnapshot(stagedImport);
   replaceVoxelEdits(voxelSnapshot);
+  const featureStamps = getSaveRuntimeFeatureStamps();
 
   const unifiedHydrologyRequested = isInfiniteIslands
     && waterConfig.enabled
@@ -567,6 +569,8 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     longViewScene: queryLongViewScene,
     hydrologyGraphHash: null,
     hydrologyCarve: null,
+    featureStampHash: featureStamps?.hash ?? null,
+    featureStampRevision: featureStamps?.revision ?? 0,
     voxelOverlay,
   };
   let acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
@@ -646,8 +650,10 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     waterConfig.hydrology.infinite.source = "graph";
     if (heightfieldRasterRequested && heightfieldRasterPlan.enabled) {
       startupHeightfield = measure(startupTimings, "startup.heightfield_raster_ms", () =>
-        buildStartupHeightfieldRaster(worldCells, (x, z) =>
-          Math.fround(graphSampler.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarveConfig!))));
+        buildStartupHeightfieldRaster(worldCells, (x, z) => {
+          const carved = graphSampler.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarveConfig!);
+          return Math.fround(featureStamps?.sampleHeight(x, z, carved) ?? carved);
+        }));
       if (startupHeightfield) {
         setTerrainSurfaceOverride(startupRasterHeightfieldSampler(startupHeightfield).sampleHeight);
         startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
@@ -717,6 +723,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       startupHeightfield,
       hydrologyGraphArtifact?.graph ?? null,
       hydrologyGraphArtifact ? graphCarveConfig : null,
+      featureStamps?.stamps,
     ));
   const workerCacheStats = getWorkerCacheBuildStats();
   startupTimings["startup_build_world_ms"] = startupTimings["startup.build_world_ms"];

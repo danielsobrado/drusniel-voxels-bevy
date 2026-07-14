@@ -4,6 +4,7 @@ import type { StartupHeightfieldRaster } from "../../terrain/startup_heightfield
 import {
   proceduralHeightfieldSampler,
   startupRasterHeightfieldSampler,
+  type HeightfieldSampler,
 } from "../heightfield_sampler.js";
 import type { TerrainSourceInputs } from "../../cache/terrainSource.js";
 import type { WorldTileKey } from "../tile_key.js";
@@ -52,6 +53,7 @@ export interface HeightfieldTileRuntime {
 export interface CreateHeightfieldTileRuntimeInput {
   terrainSource: TerrainSourceInputs;
   startupHeightfield: StartupHeightfieldRaster | null;
+  fallbackSampler?: HeightfieldSampler;
   buildTiles(keys: readonly WorldTileKey[], sourceRevision: number): Promise<HeightfieldTileBuildResult>;
   searchParams?: URLSearchParams;
 }
@@ -130,7 +132,7 @@ export async function createHeightfieldTileRuntime(
     (keys, revision) => input.buildTiles(keys, revision),
     store,
   );
-  const procedural = proceduralHeightfieldSampler(sourceRevision);
+  const procedural = input.fallbackSampler ?? proceduralHeightfieldSampler(sourceRevision);
   const startup = input.startupHeightfield
     ? startupRasterHeightfieldSampler(input.startupHeightfield, sourceRevision)
     : null;

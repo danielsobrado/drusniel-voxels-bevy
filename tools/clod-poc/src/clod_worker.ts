@@ -88,6 +88,7 @@ let hydrologyTerrain: SerializedHydrologyTerrain | null = null;
 let startupHeightfield: StartupHeightfieldRaster | null = null;
 let graphHydrology: GraphHydrologySampler | null = null;
 let graphCarve: GraphTerrainCarveConfig | null = null;
+let featureStampField: ReturnType<typeof featureStampFieldFromStamps> | null = null;
 let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
 let index: NodeIndex | null = null;
@@ -96,6 +97,12 @@ let activeParentRequestId: number | null = null;
 let parentNodes = 0;
 let parentMs = 0;
 let drainScheduled = false;
+
+function graphFeatureHeight(x: number, z: number): number {
+  if (!graphHydrology || !graphCarve) return baseSurfaceHeight(x, z);
+  const carved = graphHydrology.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarve);
+  return Math.fround(featureStampField?.sampleHeight(x, z, carved) ?? carved);
+}
 const pendingByLevel = new Map<number, Set<string>>();
 /** Child page coords resimplified at level L; flushed to enqueue level L+1 once level L drains. */
 const pendingChildCoordsByLevel = new Map<number, [number, number][]>();
@@ -295,7 +302,11 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
     ? createGraphHydrologySampler(request.hydrologyGraph, { surfaceHeight: baseSurfaceHeight })
     : null;
   graphCarve = request.hydrologyCarve ?? null;
+  featureStampField = request.featureStamps ? featureStampFieldFromStamps(request.featureStamps) : null;
   installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain);
+  if (!startupHeightfield && graphHydrology && graphCarve) {
+    setTerrainSurfaceOverride(graphFeatureHeight);
+  }
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
   pendingChildCoordsByLevel.clear();
@@ -526,9 +537,7 @@ function buildStreamRootNode(
 ): ClodPageNode {
   if (!cfg) throw new Error("CLOD worker received buildStreamRoots before build completion");
   if (graphHydrology && graphCarve) {
-    setTerrainSurfaceOverride((x, z) => Math.fround(
-      graphHydrology!.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarve!),
-    ));
+    setTerrainSurfaceOverride(graphFeatureHeight);
   } else {
     installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, { boundedToStartupWorld: true });
   }

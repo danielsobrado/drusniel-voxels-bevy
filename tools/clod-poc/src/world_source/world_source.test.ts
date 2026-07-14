@@ -1,12 +1,32 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { setTerrainFieldConfig, resolveTerrainFieldConfig } from "../terrain/terrain.js";
+import { setTerrainFieldConfig, resolveTerrainFieldConfig, setTerrainSurfaceOverride } from "../terrain/terrain.js";
 import { surfaceHeightCore, setTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
 import { BIOME_IDS, BIOME_REGION_CELL_M, BiomeRegionField } from "./biome_region_field.js";
-import { ProceduralWorldSource, StreamedVoxelWorldSource } from "./world_source.js";
+import { CanonicalWorldSource, ProceduralWorldSource, StreamedVoxelWorldSource } from "./world_source.js";
 
 afterEach(() => {
   setTerrainFieldConfig(null);
   setTerrainFieldCoreConfig(null);
+  setTerrainSurfaceOverride(null);
+});
+
+describe("CanonicalWorldSource", () => {
+  it("uses the installed surface authority for height, biome, material, and ocean queries", () => {
+    const terrain = resolveTerrainFieldConfig({ seed: 5, seaLevel: 18, islandShape: { enabled: false } });
+    setTerrainFieldConfig(terrain);
+    const source = new CanonicalWorldSource(terrain);
+
+    setTerrainSurfaceOverride(() => -100);
+
+    expect(source.sampleHeight(64, 64)).toBe(-100);
+    expect(source.sampleBiome(64, 64)).toBe(BIOME_IDS.ocean);
+    expect(source.sampleMaterial(64, 64)).toBe(BIOME_IDS.ocean);
+    expect(source.oceanMask(64, 64)).toBe(1);
+
+    setTerrainSurfaceOverride(() => 100);
+    expect(source.sampleBiome(64, 64)).toBe(BIOME_IDS.mountain);
+    expect(source.sampleMaterial(64, 64)).toBe(BIOME_IDS.mountain);
+  });
 });
 
 describe("ProceduralWorldSource", () => {

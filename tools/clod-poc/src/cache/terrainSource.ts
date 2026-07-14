@@ -118,6 +118,8 @@ export interface TerrainSourceInputs {
   worldManifest?: WorldManifest;
   hydrologyGraphHash?: string | null;
   hydrologyCarve?: { depthM: number; power: number; lakeBedDepthM: number } | null;
+  featureStampHash?: string | null;
+  featureStampRevision?: number;
   voxelOverlay?: VoxelOverlaySource | null;
 }
 
@@ -158,6 +160,8 @@ export function normalizeTerrainSourceInputs(
     worldManifest: input.worldManifest,
     hydrologyGraphHash: input.hydrologyGraphHash ?? null,
     hydrologyCarve: input.hydrologyCarve ?? null,
+    featureStampHash: input.featureStampHash ?? null,
+    featureStampRevision: input.featureStampRevision ?? 0,
     voxelOverlay: normalizeVoxelOverlaySource(input.voxelOverlay),
   };
 }
@@ -202,6 +206,8 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     hydrologyHash,
     hydrologyGraphHash: source.hydrologyGraphHash,
     hydrologyCarve: source.hydrologyCarve,
+    featureStampHash: source.featureStampHash,
+    featureStampRevision: source.featureStampRevision,
     startupHeightfield: source.startupHeightfield ?? null,
     borderCoastHash,
     water: {

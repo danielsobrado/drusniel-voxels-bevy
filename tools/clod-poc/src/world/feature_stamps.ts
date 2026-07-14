@@ -23,6 +23,7 @@ export interface SettlementTerrainStamp {
 export interface FeatureStampField {
   readonly stamps: readonly FeatureTerrainStamp[];
   readonly hash: string;
+  readonly revision: number;
   sampleHeight(x: number, z: number, inputHeight: number): number;
   excludesScatter(x: number, z: number): boolean;
   sampleStructureCoverage(x: number, z: number, cellSizeM?: number): number;
@@ -87,16 +88,22 @@ export function compileFeatureStamps(metadata: WorldMetadataRecord): FeatureStam
     ...metadata.cities.map(cityStamp),
     ...metadata.districts.map((district) => districtStamp(district, cities)),
   ].sort((a, b) => a.id.localeCompare(b.id));
-  return featureStampFieldFromStamps(stamps);
+  const revision = Math.max(
+    0,
+    ...metadata.roads.map((road) => road.revision),
+    ...metadata.cities.map((city) => city.revision),
+  );
+  return featureStampFieldFromStamps(stamps, revision);
 }
 
 /** Rehydrates the pure field after structured-cloning stamps through the tile worker boundary. */
-export function featureStampFieldFromStamps(input: readonly FeatureTerrainStamp[]): FeatureStampField {
+export function featureStampFieldFromStamps(input: readonly FeatureTerrainStamp[], revision = 0): FeatureStampField {
   const stamps = [...input].sort((a, b) => a.id.localeCompare(b.id));
   const canonical = JSON.stringify(stamps);
   return {
     stamps,
     hash: hashText(`${FEATURE_STAMP_SOURCE_VERSION}:${canonical}`),
+    revision,
     sampleHeight(x, z, inputHeight) {
       let height = inputHeight;
       for (const stamp of stamps) {

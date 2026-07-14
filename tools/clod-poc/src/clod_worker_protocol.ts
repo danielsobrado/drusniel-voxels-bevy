@@ -10,6 +10,7 @@ import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_ras
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
+import type { FeatureTerrainStamp } from "./world/feature_stamps.js";
 import type { WorkerCacheBuildStats } from "./cache/cacheMetrics.js";
 import type { ClodCacheMetrics } from "./cache/cacheMetrics.js";
 import type { HydrologyGraph } from "./world/hydrology_graph/hydrology_graph.js";
@@ -62,6 +63,7 @@ export type ClodWorkerRequest =
       startupHeightfield?: StartupHeightfieldRaster | null;
       hydrologyGraph?: HydrologyGraph | null;
       hydrologyCarve?: GraphTerrainCarveConfig | null;
+      featureStamps?: readonly FeatureTerrainStamp[];
       borderCoastOceanConfig?: BorderCoastOceanConfig | null;
       cacheDisabled?: boolean;
       digRevision?: number;

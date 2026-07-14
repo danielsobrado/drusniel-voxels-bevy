@@ -3,6 +3,7 @@ import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
 import {
   DEFAULT_TERRAIN_FIELD_CONFIG,
   resolveTerrainFieldConfig,
+  surfaceHeight,
   type TerrainFieldConfig,
   type TerrainFieldConfigInput,
 } from "../terrain/terrain.js";
@@ -107,6 +108,17 @@ export class ProceduralWorldSource implements WorldSource {
         return new THREE.Vector3((hL - hR) / (2 * e), 1, (hD - hU) / (2 * e)).normalize();
       },
     };
+  }
+}
+
+/**
+ * Runtime world authority. Unlike ProceduralWorldSource, this source follows the
+ * installed heightfield/hydrology authority, so far terrain, biomes, materials,
+ * props, collision queries, and near terrain classify the same surface.
+ */
+export class CanonicalWorldSource extends ProceduralWorldSource {
+  override sampleHeight(x: number, z: number): number {
+    return surfaceHeight(x, z);
   }
 }
 

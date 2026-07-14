@@ -23,6 +23,7 @@ describe("authored feature stamps", () => {
     expect(a.excludesScatter(128, 128)).toBe(true);
     expect(a.excludesScatter(128, 150)).toBe(false);
     expect(a.sampleStructureCoverage(128, 128, 8)).toBe(1);
+    expect(a.revision).toBe(1);
     expect(terrainSourceHashWithFeatureStamps("terrain", a)).toBe(terrainSourceHashWithFeatureStamps("terrain", b));
   });
 });

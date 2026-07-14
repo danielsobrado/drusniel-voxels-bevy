@@ -7,6 +7,7 @@ import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
+import type { FeatureTerrainStamp } from "./world/feature_stamps.js";
 import { initClodCacheContext, type ClodCacheContext } from "./cache/clodCacheContext.js";
 import {
   createEmptyStreamRootCacheStats,
@@ -150,6 +151,7 @@ export class ClodWorkerClient {
     startupHeightfield: StartupHeightfieldRaster | null = null,
     hydrologyGraph: HydrologyGraph | null = null,
     hydrologyCarve: GraphTerrainCarveConfig | null = null,
+    featureStamps: readonly FeatureTerrainStamp[] | undefined = undefined,
   ): Promise<BuildResult> => {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     this.resetStreamRootGpuMesherForWorld(worldPagesX, worldPagesZ, cfg, terrainSource, cacheDisabled);
@@ -167,7 +169,7 @@ export class ClodWorkerClient {
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
       type: "build", requestId, worldPagesX, worldPagesZ, cfg, voxelEdits,
-      terrainFieldConfig, hydrologyTerrain, startupHeightfield, hydrologyGraph, hydrologyCarve,
+      terrainFieldConfig, hydrologyTerrain, startupHeightfield, hydrologyGraph, hydrologyCarve, featureStamps,
       borderCoastOceanConfig, cacheDisabled, terrainSource,
     };
     this.progressHandlers.set(requestId, onProgress);
