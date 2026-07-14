@@ -115,10 +115,8 @@ export class TreeSystemAssets {
     this.impostorBakeController = controller;
     this.impostorBakeSettingsKey = bakeSettingsKey;
     try {
-      await this.captureFoliageAtlas(renderer);
-      if (controller.signal.aborted) {
-        return { supported: false, reason: String(controller.signal.reason ?? "tree impostor baking cancelled") };
-      }
+      await this.captureFoliageAtlas(renderer, controller.signal);
+      if (controller.signal.aborted) return this.cancelledBakeResult(controller.signal.reason);
       if (!this.settings.impostors.enabled || !this.settings.impostors.bakeOnStart) {
         this.impostorStatus = "disabled";
         this.impostorReason = "tree impostor baking disabled";
@@ -138,7 +136,7 @@ export class TreeSystemAssets {
       const stale = bakeSettingsKey !== this.currentImpostorBakeSettingsKey();
       if (controller.signal.aborted || this.impostorBakeController !== controller || stale) {
         for (const atlas of Object.values(result.atlases)) atlas?.dispose();
-        return { supported: false, reason: String(controller.signal.reason ?? "tree impostor baking cancelled") };
+        return this.cancelledBakeResult(controller.signal.reason);
       }
       if (result.supported) {
         this.setImpostorAtlases(result.atlases);
@@ -245,7 +243,7 @@ export class TreeSystemAssets {
     this.foliageAtlas.dispose();
   }
 
-  private async captureFoliageAtlas(renderer: unknown): Promise<void> {
+  private async captureFoliageAtlas(renderer: unknown, signal: AbortSignal): Promise<void> {
     this.foliageAtlasStatus = "capturing";
     this.foliageAtlasReason = null;
     this.publishFoliageAtlasStatus();
@@ -254,6 +252,10 @@ export class TreeSystemAssets {
       settings: this.settings,
       webgpu: this.webgpu,
     });
+    if (signal.aborted) {
+      result.atlas?.dispose();
+      return;
+    }
     if (result.supported && result.atlas) {
       replaceTreeFoliageAtlasData(this.foliageAtlas, result.atlas);
       this.foliageAtlasStatus = "captured";
@@ -263,6 +265,17 @@ export class TreeSystemAssets {
     this.foliageAtlasStatus = "fallback";
     this.foliageAtlasReason = result.reason;
     this.publishFoliageAtlasStatus();
+  }
+
+  private cancelledBakeResult(reason: unknown): { supported: false; reason: string } {
+    const message = String(reason ?? "tree impostor baking cancelled");
+    this.impostorStatus = !this.settings.impostors.enabled
+      ? "disabled"
+      : Object.values(this.impostorAtlases).some((atlas) => atlas?.ready)
+        ? "baked"
+        : "pending";
+    this.impostorReason = message;
+    return { supported: false, reason: message };
   }
 
   private publishFoliageAtlasStatus(): void {
