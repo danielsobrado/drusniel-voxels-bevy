@@ -5,6 +5,7 @@ import {
   createTreeImpostorRowFlipJob,
   dilateTreeImpostorAtlasTiles,
   flipTreeImpostorPixelRows,
+  viewTreeImpostorPixels,
 } from "./tree_impostor_atlas_pixels.js";
 
 const pixelOffset = (width: number, x: number, y: number): number => (y * width + x) * 4;
@@ -119,5 +120,13 @@ describe("tree impostor atlas pixels", () => {
     expect(stepped).toEqual(synchronous);
     expect(copyTreeImpostorPixels(stepped, 16)).not.toBe(stepped);
     expect(() => copyTreeImpostorPixels(stepped, 4)).toThrow(/expected 4/);
+  });
+
+  it("retains the asynchronous readback buffer without cloning it", () => {
+    const raw = new Uint8Array([1, 2, 3, 4]);
+    const view = viewTreeImpostorPixels(raw, raw.length);
+    expect(view.buffer).toBe(raw.buffer);
+    expect(view.byteOffset).toBe(raw.byteOffset);
+    expect(() => viewTreeImpostorPixels(raw, 3)).toThrow(/expected 3/);
   });
 });
