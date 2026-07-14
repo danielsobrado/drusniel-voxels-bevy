@@ -128,12 +128,14 @@ function gpuDirtyRequestsForCache(
 export function prunePendingGpuEnrichment<T>(
   requests: readonly FarSummaryRingRequest[],
   pending: Map<string, T>,
+  onPruned?: (value: T) => void,
 ): number {
   const required = new Set(requests.map((request) =>
     `${request.key.ring}:${request.key.x}:${request.key.z}:${request.key.cellSizeM}`));
   let removed = 0;
   for (const key of pending.keys()) {
     if (required.has(key)) continue;
+    onPruned?.(pending.get(key)!);
     pending.delete(key);
     removed++;
   }
@@ -169,7 +171,14 @@ export function initFarSummaryIntegration(
   const stats = createFarSummaryStats();
   let authoritativeCpuFallbackFrames = 0;
   let authoritativeCpuFallbackFramesTotal = 0;
-  const pendingGpuEnrichment = new Map<string, FarSummaryUnifiedEnrichmentState>();
+  const pendingUnifiedEnrichment = new Map<string, FarSummaryUnifiedEnrichmentState>();
+  const baseTerrainSampler: FarTerrainSampler = unifiedLayout
+    ? {
+        sampleHeight: options.terrainSampler.sampleHeight,
+        sampleMaterial: options.terrainSampler.sampleMaterial,
+        sampleStructureCoverage: options.terrainSampler.sampleStructureCoverage,
+      }
+    : options.terrainSampler;
   const gpuRuntime = new FarSummaryGpuRuntime({
     gpuConfig,
     farSummaryConfig: config,
@@ -182,7 +191,7 @@ export function initFarSummaryIntegration(
         return;
       }
       const key = `${tile.key.ring}:${tile.key.x}:${tile.key.z}:${tile.key.cellSizeM}`;
-      pendingGpuEnrichment.set(key, createFarSummaryUnifiedEnrichment(tile));
+      pendingUnifiedEnrichment.set(key, createFarSummaryUnifiedEnrichment(tile));
     },
     onFallbackRequests: (requests) => {
       if (requests.length > 0) authoritativeCpuFallbackFrames = Math.max(authoritativeCpuFallbackFrames, 2);
@@ -235,7 +244,11 @@ export function initFarSummaryIntegration(
     const nowMs = performance.now();
 
     cache.requestTiles(requests, frameIndex, nowMs);
-    prunePendingGpuEnrichment(requests, pendingGpuEnrichment);
+    prunePendingGpuEnrichment(
+      requests,
+      pendingUnifiedEnrichment,
+      (enrichment) => cache.discardDeferredTile(enrichment.tile.key),
+    );
     const preBuildStates = cache.countRequestStates(requests);
     const requiredCount =
       preBuildStates.ready + preBuildStates.building + preBuildStates.staleWithSamples + preBuildStates.missing;
@@ -243,34 +256,20 @@ export function initFarSummaryIntegration(
     const budgets = resolveFarSummaryBuildBudgets(config.stream, readyRatio, forceSlowBuilds);
     // The dirty scan allocates a key per request; skip it entirely when no GPU runtime consumes it.
     const gpuDirtyRequests = gpuConfig.enabled
-      ? gpuDirtyRequestsForCache(cache, requests, pendingGpuEnrichment)
+      ? gpuDirtyRequestsForCache(cache, requests, pendingUnifiedEnrichment)
       : [];
 
     const buildAllowedByInterval = frameIndex % buildIntervalFrames === 0;
     const buildAllowedByDelay = buildDelayMs <= 0 || frameIndex % Math.ceil(buildDelayMs / 16) === 0;
     const cpuFallbackAllowed = gpuConfig.enabled && gpuConfig.authoritative && authoritativeCpuFallbackFrames > 0;
     const cpuBuildSuppressedByGpuAuthority = gpuConfig.enabled && gpuConfig.authoritative && !cpuFallbackAllowed;
-    if (!cpuBuildSuppressedByGpuAuthority && buildAllowedByInterval && buildAllowedByDelay) {
-      // Warmup boost: while the required set is mostly cold, spend a real time slice per
-      // frame instead of the steady-state 2 ms sliver — otherwise a cold boot renders the
-      // flat procedural-fallback band for minutes (one tile every ~15 frames).
-      const deadlineMs = Number.isFinite(budgets.budgetMs) && budgets.budgetMs > 0
-        ? nowMs + budgets.budgetMs
-        : Number.POSITIVE_INFINITY;
-      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budgets.maxBuilds, deadlineMs);
-    }
-    if (cpuFallbackAllowed) {
-      authoritativeCpuFallbackFrames--;
-      authoritativeCpuFallbackFramesTotal++;
-    }
-
     gpuRuntime.update(currentCenter, frameIndex, gpuDirtyReason, gpuDirtyRequests, cpuBuildSuppressedByGpuAuthority);
     // Water/terrain snapshots unblock far ownership before the more expensive canopy
     // representation catches up. Canopy stays on the same tile lifecycle and commits a
     // coherent replacement when its deadline-sliced enrichment finishes.
     const enrichmentBudgetMs = resolveFarSummaryEnrichmentBudgetMs(budgets);
     const enrichmentDeadlineMs = performance.now() + enrichmentBudgetMs;
-    for (const enrichment of pendingGpuEnrichment.values()) {
+    for (const enrichment of pendingUnifiedEnrichment.values()) {
       if (enrichment.nextSample >= enrichment.tile.samples.length) continue;
       if (stepFarSummaryUnifiedWaterEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs)
         && options.terrainSampler.sampleCanopySummary) {
@@ -280,21 +279,64 @@ export function initFarSummaryIntegration(
       if (performance.now() >= enrichmentDeadlineMs) break;
     }
     if (performance.now() < enrichmentDeadlineMs) {
-      for (const [key, enrichment] of pendingGpuEnrichment) {
+      for (const [key, enrichment] of pendingUnifiedEnrichment) {
         if (enrichment.nextSample < enrichment.tile.samples.length) continue;
         const complete = stepFarSummaryUnifiedEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs);
         if (complete) {
           cache.commitExternalTile(enrichment.tile);
-          pendingGpuEnrichment.delete(key);
+          pendingUnifiedEnrichment.delete(key);
         }
         if (performance.now() >= enrichmentDeadlineMs) break;
       }
+    }
+
+    if (!cpuBuildSuppressedByGpuAuthority && buildAllowedByInterval && buildAllowedByDelay) {
+      // Unified CPU fallback shares one frame deadline with enrichment. Draining publishable
+      // water/canopy work first avoids a growing base-tile backlog and keeps the total frame
+      // slice at the configured budget.
+      const buildDeadlineMs = unifiedLayout
+        ? enrichmentDeadlineMs
+        : Number.isFinite(budgets.budgetMs) && budgets.budgetMs > 0
+          ? nowMs + budgets.budgetMs
+          : Number.POSITIVE_INFINITY;
+      cache.buildSomeTiles(
+        baseTerrainSampler,
+        frameIndex,
+        nowMs,
+        budgets.maxBuilds,
+        buildDeadlineMs,
+        unifiedLayout
+          ? (tile) => {
+              const key = `${tile.key.ring}:${tile.key.x}:${tile.key.z}:${tile.key.cellSizeM}`;
+              if (!pendingUnifiedEnrichment.has(key)) {
+                pendingUnifiedEnrichment.set(key, createFarSummaryUnifiedEnrichment(tile));
+              }
+            }
+          : undefined,
+      );
+    }
+    if (cpuFallbackAllowed) {
+      authoritativeCpuFallbackFrames--;
+      authoritativeCpuFallbackFramesTotal++;
     }
 
     cache.evictColdTiles(frameIndex, nowMs);
 
     let currentStats = cache.getStats();
     const requestStates = cache.countRequestStates(requests);
+    let terrainWaterReady = 0;
+    let canopyPending = 0;
+    let fullyEnriched = 0;
+    for (const request of requests) {
+      const tile = cache.getTile(request.key);
+      if (tile?.state !== "ready") continue;
+      const key = `${request.key.ring}:${request.key.x}:${request.key.z}:${request.key.cellSizeM}`;
+      const enrichment = pendingUnifiedEnrichment.get(key);
+      if (enrichment && enrichment.nextSample < enrichment.tile.samples.length) continue;
+      terrainWaterReady++;
+      if (enrichment) canopyPending++;
+      else fullyEnriched++;
+    }
     let probeFallbacks = 0;
     let probeHeightErrorMaxM = 0;
     if (options.farShellMetrics && runProbeDiagnostics) {
@@ -337,6 +379,10 @@ export function initFarSummaryIntegration(
       metrics.farSummaryTilesBuilding = requestStates.building;
       metrics.farSummaryTilesMissing = requestStates.missing;
       metrics.farSummaryTilesStale = requestStates.staleWithSamples;
+      metrics.farSummaryTerrainWaterReady = terrainWaterReady;
+      metrics.farSummaryWaterPending = Math.max(0, requests.length - terrainWaterReady);
+      metrics.farSummaryCanopyPending = canopyPending;
+      metrics.farSummaryFullyEnriched = fullyEnriched;
       metrics.farSummaryTilesBuiltThisFrame = stats.tilesBuiltThisFrame;
       metrics.farSummaryCacheSize = cache.getTileCount();
       metrics.farSummaryProceduralFallbackSamples = stats.proceduralFallbacks;

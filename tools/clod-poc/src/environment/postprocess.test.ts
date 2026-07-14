@@ -51,6 +51,8 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       gtaoEnabled: false,
       froxelsEnabled: true,
       bounceEnabled: false,
+      froxelDebugEnabled: false,
+      froxelDebugMode: "off",
       godRaysMode: "volumetric",
       godRaysDensity: 0.96,
       godRaysDecay: 0.92,
@@ -221,6 +223,28 @@ aerial_perspective:
         bounceEnabled: false,
         godRaysMode: "off",
       });
+  });
+
+  it("leaves the froxel debug overlay off by default", () => {
+    expect(DEFAULT_POST_PROCESS_SETTINGS.froxelDebugEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.froxelDebugMode).toBe("off");
+  });
+
+  it.each(["density", "transmittance", "scatter"])("turns on the froxel debug overlay for ?froxelDebug=%s", (mode) => {
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams(`froxelDebug=${mode}`)))
+      .toMatchObject({ froxelDebugEnabled: true, froxelDebugMode: mode });
+  });
+
+  it("turns the froxel debug overlay back off for ?froxelDebug=off", () => {
+    expect(applyPostProcessQueryOverrides(
+      { ...DEFAULT_POST_PROCESS_SETTINGS, froxelDebugEnabled: true, froxelDebugMode: "scatter" },
+      new URLSearchParams("froxelDebug=off"),
+    )).toMatchObject({ froxelDebugEnabled: false, froxelDebugMode: "off" });
+  });
+
+  it("keeps the froxel debug overlay after fx=0 strips the froxel stage", () => {
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams("fx=0&froxelDebug=density")))
+      .toMatchObject({ froxelsEnabled: false, froxelDebugEnabled: true, froxelDebugMode: "density" });
   });
 
   it("uses depth-aware volumetrics as the default forest shaft path", () => {

@@ -38,7 +38,6 @@ export interface FarSummaryCanopySourceInput {
   getConfig: () => CanopyShellConfig;
   sampleHeight: (x: number, z: number) => number;
   sampleMaterial?: (x: number, z: number) => number;
-  sampleWater?: (x: number, z: number, cellSizeHint: number) => FarSummaryWaterSample;
 }
 
 export function createFarSummaryCanopySource(
@@ -67,7 +66,7 @@ export function createFarSummaryCanopySource(
           normal,
           slope: Math.max(0, Math.min(1, 1 - normal.y)),
           materialHint: input.sampleMaterial?.(x, z) ?? 0,
-          water: (input.sampleWater?.(x, z, cellSizeM).coverage ?? 0) > 0,
+          water: false,
         };
       },
     });

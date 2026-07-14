@@ -144,7 +144,7 @@ export class WebGpuPostProcessPipeline {
   private readonly bounceEnabled: boolean;
   private readonly cloudsEnabled: boolean;
   private readonly froxelsEnabled: boolean;
-  private readonly froxelDebugMode: PostFxFroxelDebugMode;
+  private froxelDebugMode: PostFxFroxelDebugMode;
   private readonly gtaoEnabled: boolean;
   private readonly halfResEnabled: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
@@ -205,6 +205,7 @@ export class WebGpuPostProcessPipeline {
     this.cloudsEnabled = this.stageEnabled("clouds") && queryFlag(["clouds", "cloud", "volumetricClouds", "volumetricclouds"], this.clouds.enabled);
     this.froxelsEnabled = this.stageEnabled("froxels") && queryFlag(["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], this.atmosphere.froxels.enabled);
     this.froxelDebugMode = parsePostFxFroxelDebugMode(queryValue(["froxelDebug", "froxelsDebug", "volumetricDebug", "volumetricsDebug"]));
+    this.applyFroxelDebugSettings(settings);
     this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
     this.halfResEnabled = queryFlag(["halfres", "halfResScreenSpace", "halfresscreenspace"], true);
     if (this.shouldUseFroxelVolume()) {
@@ -221,10 +222,23 @@ export class WebGpuPostProcessPipeline {
   updateSettings(settings: Partial<PostProcessSettings>): void {
     const previousKey = this.graphKey();
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
+    this.applyFroxelDebugSettings(settings);
     this.applyRendererSettings();
     this.updateUniforms();
     const nextKey = this.graphKey();
     if (nextKey !== previousKey) this.disposePipeline();
+  }
+
+  /**
+   * The debug branch is baked into the TSL graph, so a change here must land before `graphKey()` is
+   * re-read (the caller then rebuilds the pipeline). Callers that never mention the froxel debug
+   * fields keep whatever the URL asked for.
+   */
+  private applyFroxelDebugSettings(settings: Partial<PostProcessSettings>): void {
+    if (settings.froxelDebugEnabled === undefined && settings.froxelDebugMode === undefined) return;
+    const enabled = settings.froxelDebugEnabled ?? this.settings.froxelDebugEnabled ?? false;
+    const mode = settings.froxelDebugMode ?? this.settings.froxelDebugMode ?? "off";
+    this.froxelDebugMode = enabled ? mode : "off";
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {

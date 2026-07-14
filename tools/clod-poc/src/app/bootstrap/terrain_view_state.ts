@@ -83,6 +83,8 @@ export function createTerrainViewStateReaders(state: ClodAppState): TerrainViewS
       gtaoEnabled: state.postProcessGtaoEnabled,
       froxelsEnabled: state.postProcessFroxelsEnabled,
       bounceEnabled: state.postProcessBounceEnabled,
+      froxelDebugEnabled: state.froxelDebugEnabled,
+      froxelDebugMode: state.froxelDebugMode,
       godRaysMode: state.godRaysMode,
       godRaysDensity: state.godRaysDensity,
       godRaysDecay: state.godRaysDecay,

@@ -5,6 +5,7 @@ import {
   type GodRaysMode,
   type PostProcessSettings,
 } from "../../environment/postprocess.js";
+import type { PostFxFroxelDebugMode } from "../../gpu/postfx_atmosphere.js";
 import { assignArchiveFields } from "./archive_fields.js";
 import type { PostProcessQualityPreset } from "./postprocess_quality_presets.js";
 
@@ -62,6 +63,8 @@ export interface EnvironmentSliceState {
   postProcessGtaoEnabled: boolean;
   postProcessFroxelsEnabled: boolean;
   postProcessBounceEnabled: boolean;
+  froxelDebugEnabled: boolean;
+  froxelDebugMode: PostFxFroxelDebugMode;
   godRaysMode: GodRaysMode;
   godRaysDensity: number;
   godRaysDecay: number;
@@ -138,6 +141,8 @@ export function createEnvironmentSliceState(input: {
     postProcessGtaoEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled,
     postProcessFroxelsEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled,
     postProcessBounceEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled,
+    froxelDebugEnabled: DEFAULT_POST_PROCESS_SETTINGS.froxelDebugEnabled,
+    froxelDebugMode: DEFAULT_POST_PROCESS_SETTINGS.froxelDebugMode,
     godRaysMode: DEFAULT_POST_PROCESS_SETTINGS.godRaysMode,
     godRaysDensity: DEFAULT_POST_PROCESS_SETTINGS.godRaysDensity,
     godRaysDecay: DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay,

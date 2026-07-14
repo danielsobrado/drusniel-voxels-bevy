@@ -32,6 +32,8 @@ function createState() {
     postProcessGtaoEnabled: true,
     postProcessFroxelsEnabled: true,
     postProcessBounceEnabled: true,
+    froxelDebugEnabled: false,
+    froxelDebugMode: "off",
     godRaysMode: "off",
     treeQualityPreset: "custom",
     treeDistance: 620,
@@ -195,5 +197,35 @@ describe("environment query overrides", () => {
     applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ quality: "perf", treeShadowMaxLod: "bad" }));
 
     expect(state.treeShadowMaxLod).toBe("near");
+  });
+
+  it.each(["density", "transmittance", "scatter"])("enables the froxel debug overlay for ?froxelDebug=%s", (mode) => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ froxelDebug: mode }));
+
+    expect(state.froxelDebugMode).toBe(mode);
+    expect(state.froxelDebugEnabled).toBe(true);
+  });
+
+  it("leaves the froxel debug overlay off without the param, and for an explicit off", () => {
+    const untouched = createState();
+    applyEnvironmentQueryOverrides(untouched as never, new URLSearchParams());
+    expect(untouched.froxelDebugMode).toBe("off");
+    expect(untouched.froxelDebugEnabled).toBe(false);
+
+    const disabled = createState();
+    disabled.froxelDebugEnabled = true;
+    disabled.froxelDebugMode = "scatter";
+    applyEnvironmentQueryOverrides(disabled as never, new URLSearchParams({ froxelDebug: "off" }));
+    expect(disabled.froxelDebugMode).toBe("off");
+    expect(disabled.froxelDebugEnabled).toBe(false);
+  });
+
+  it("keeps the froxel debug overlay usable in perf mode, which disables the froxel stage", () => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ fx: "0", froxelDebug: "density" }));
+
+    expect(state.froxelDebugEnabled).toBe(true);
+    expect(state.froxelDebugMode).toBe("density");
   });
 });

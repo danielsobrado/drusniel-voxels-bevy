@@ -12,6 +12,7 @@ import {
   DEFAULT_POST_PROCESS_SETTINGS,
   type PostProcessSettings,
 } from "../../environment/postprocess.js";
+import type { PostFxFroxelDebugMode } from "../../gpu/postfx_atmosphere.js";
 import { DEFAULT_TERRAIN_COLOR_ADJUSTMENTS } from "../../material/material.js";
 import type { GuiController } from "./gui_controller.js";
 
@@ -74,6 +75,8 @@ export function createEnvironmentGui(
     gtaoEnabled: state.postProcessGtaoEnabled,
     froxelsEnabled: state.postProcessFroxelsEnabled,
     bounceEnabled: state.postProcessBounceEnabled,
+    froxelDebugEnabled: state.froxelDebugEnabled,
+    froxelDebugMode: state.froxelDebugMode,
     godRaysMode: state.godRaysMode,
     godRaysDensity: state.godRaysDensity,
     godRaysDecay: state.godRaysDecay,
@@ -259,7 +262,7 @@ export function createEnvironmentGui(
 
   const godRaysFolder = gui.addFolder("god rays");
   const godRaysControllers: GuiController[] = [
-    godRaysFolder.add(state, "godRaysMode", ["off", "screen", "volumetric"]).name("mode").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysMode", ["off", "cheap", "heavy", "volumetric"]).name("mode").onChange(applyPostProcessSettings),
     godRaysFolder.add(state, "godRaysDensity", 0, 2, 0.01).name("density").onChange(applyPostProcessSettings),
     godRaysFolder.add(state, "godRaysDecay", 0, 1, 0.01).name("decay").onChange(applyPostProcessSettings),
     godRaysFolder.add(state, "godRaysWeight", 0, 1, 0.01).name("weight").onChange(applyPostProcessSettings),
@@ -277,4 +280,27 @@ export function createEnvironmentGui(
     },
   };
   godRaysFolder.add(godRaysActions, "reset").name("reset");
+
+  const froxelDebugFolder = gui.addFolder("froxel debug");
+  const froxelDebugControllers: GuiController[] = [
+    froxelDebugFolder.add(state, "froxelDebugEnabled").name("enabled").onChange(applyPostProcessSettings),
+    froxelDebugFolder
+      .add(state, "froxelDebugMode", ["off", "density", "transmittance", "scatter"])
+      .name("mode")
+      .onChange((mode: PostFxFroxelDebugMode) => {
+        // Picking a buffer implies the overlay is on; picking `off` turns it back off.
+        state.froxelDebugEnabled = mode !== "off";
+        applyPostProcessSettings();
+        for (const controller of froxelDebugControllers) controller.updateDisplay();
+      }),
+  ];
+  const froxelDebugActions = {
+    reset: () => {
+      state.froxelDebugEnabled = DEFAULT_POST_PROCESS_SETTINGS.froxelDebugEnabled;
+      state.froxelDebugMode = DEFAULT_POST_PROCESS_SETTINGS.froxelDebugMode;
+      applyPostProcessSettings();
+      for (const controller of froxelDebugControllers) controller.updateDisplay();
+    },
+  };
+  froxelDebugFolder.add(froxelDebugActions, "reset").name("reset");
 }

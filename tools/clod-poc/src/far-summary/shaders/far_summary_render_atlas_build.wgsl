@@ -18,7 +18,7 @@ fn build_far_summary_render_atlas(@builtin(global_invocation_id) id: vec3<u32>) 
   let descriptor = descriptors[tileIndex];
   let tileCells = max(1u, descriptor.tile_cells);
   let cellM = descriptor.cell_size_m;
-  let atlasOrigin = vec2<u32>(descriptor._pad1, descriptor._pad2);
+  let atlasOrigin = vec2<u32>(descriptor.layout_version, descriptor.canonical_sample_offset);
 
   for (var sz: u32 = 0u; sz < tileCells; sz = sz + 1u) {
     for (var sx: u32 = 0u; sx < tileCells; sx = sx + 1u) {

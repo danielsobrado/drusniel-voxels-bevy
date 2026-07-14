@@ -358,6 +358,44 @@ describe("summary tile builder", () => {
     expect(tile.samples[0]?.canopyCoverage).toBe(0);
   });
 
+  it("rejects canopy beside a narrow water cell at a cell boundary", () => {
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
+      ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 3 },
+      terrainSampler: flatSampler,
+      frameIndex: 0,
+      nowMs: 0,
+    });
+    const state = createFarSummaryUnifiedEnrichment(tile);
+    let waterCalls = 0;
+
+    stepFarSummaryUnifiedEnrichment(state, {
+      ...flatSampler,
+      sampleWaterSummary: (x, z) => {
+        waterCalls++;
+        return {
+          coverage: x === 48 && z === 48 ? 1 : 0,
+          waterLevel: 55,
+          bodyKind: 1,
+          shoreDistance: 0,
+          flowX: 0,
+          flowZ: 0,
+        };
+      },
+      sampleCanopySummary: () => ({
+        coverage: 0.5,
+        canopyHeightAvg: 60,
+        speciesPine: 1,
+        speciesBroadleaf: 0,
+        speciesDeadwood: 0,
+      }),
+    }, Number.POSITIVE_INFINITY);
+
+    expect(tile.samples[0]?.waterCoverage).toBe(0);
+    expect(tile.samples[0]?.canopyCoverage).toBe(0);
+    expect(waterCalls).toBe(tile.samples.length);
+  });
+
   it("rejects coarse canopy coverage using the sea-level fallback when graph water is disabled", () => {
     const tile = buildFarSummaryTile({
       key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },

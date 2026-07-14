@@ -156,6 +156,10 @@ export function seedLongViewStats(
   lvStats.counters["far_summary_tiles_ready"] = 0;
   lvStats.counters["far_summary_tiles_missing"] = 0;
   lvStats.counters["far_summary_tiles_stale"] = 0;
+  lvStats.counters["far_summary_terrain_water_ready"] = 0;
+  lvStats.counters["far_summary_water_pending"] = 0;
+  lvStats.counters["far_summary_canopy_pending"] = 0;
+  lvStats.counters["far_summary_fully_enriched"] = 0;
   lvStats.counters["far_summary_tiles_built_this_frame"] = 0;
   lvStats.counters["far_summary_cache_size"] = 0;
   lvStats.counters["far_summary_fallback_samples"] = 0;

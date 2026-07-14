@@ -310,16 +310,6 @@ export async function bootstrapClodPoc() {
             getConfig: terrainView.getCanopyConfig,
             sampleHeight: farSummaryTerrainSampler.sampleHeight,
             sampleMaterial: farSummaryTerrainSampler.sampleMaterial,
-            sampleWater: sampleWater
-              ? (x, z, cellSizeHint) => sampleWater(x, z, cellSizeHint)
-              : (x, z) => ({
-                coverage: farSummaryTerrainSampler.sampleHeight(x, z) < seaLevel ? 1 : 0,
-                waterLevel: seaLevel,
-                bodyKind: 0,
-                shoreDistance: 0,
-                flowX: 0,
-                flowZ: 0,
-              }),
           });
         }
       }

@@ -75,6 +75,8 @@ export class InfiniteFarShell {
       farShellRebuildCursor: 0, farShellRebuildVertices: 0, farSummaryTilesRequired: 0,
       farSummaryTilesReady: 0, farSummaryTilesBuilding: 0, farSummaryTilesMissing: 0,
       farSummaryTilesStale: 0, farSummaryTilesBuiltThisFrame: 0, farSummaryCacheSize: 0,
+      farSummaryTerrainWaterReady: 0, farSummaryWaterPending: 0,
+      farSummaryCanopyPending: 0, farSummaryFullyEnriched: 0,
       farSummaryFallbackSamples: 0, farSummaryProceduralFallbackSamples: 0,
       farSummaryLowerRingFallbackSamples: 0, farSummaryConservativeFallbackSamples: 0,
       farSummaryStaleRestores: 0, farSummaryBuildsDiscarded: 0,

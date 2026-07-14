@@ -1,4 +1,5 @@
 import type { PostProcessToneMapping } from "../../environment/postprocess.js";
+import { parsePostFxFroxelDebugMode } from "../../gpu/postfx_atmosphere.js";
 import type { ClodAppState } from "./index.js";
 import {
   applyPostProcessQualityPreset,
@@ -201,6 +202,16 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   }
   const godRays = flagParam(searchParams, "godRays", "godrays");
   if (godRays === false) state.godRaysMode = "off";
+  const froxelDebug = searchParams.get("froxelDebug")
+    ?? searchParams.get("froxelsDebug")
+    ?? searchParams.get("volumetricDebug")
+    ?? searchParams.get("volumetricsDebug");
+  if (froxelDebug !== null) {
+    // A named mode implies the overlay is on; `off` turns it back off.
+    const mode = parsePostFxFroxelDebugMode(froxelDebug);
+    state.froxelDebugMode = mode;
+    state.froxelDebugEnabled = mode !== "off";
+  }
   const toneMap = toneMappingParam(searchParams);
   if (toneMap !== null) state.postProcessToneMapping = toneMap;
 }

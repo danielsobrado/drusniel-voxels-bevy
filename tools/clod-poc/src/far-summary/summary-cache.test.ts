@@ -14,6 +14,29 @@ const flatSampler: FarTerrainSampler = {
 };
 
 describe("far summary cache", () => {
+  it("defers a completed base tile until enrichment publishes it", () => {
+    const config = structuredClone(DEFAULT_FAR_SUMMARY_CONFIG);
+    config.stream.maxTileBuildsPerFrame = 1;
+    config.stream.maxTileCommitsPerFrame = 1;
+    const cache = new FarSummaryCache(config);
+    const requests = computeRequiredFarSummaryTiles({
+      worldX: 0, worldZ: 0,
+      predictedX: 0, predictedZ: 0,
+      velocityX: 0, velocityZ: 0,
+    }, config);
+    const deferred: Parameters<FarSummaryCache["commitExternalTile"]>[0][] = [];
+
+    cache.requestTiles(requests, 0, 0);
+    cache.buildSomeTiles(flatSampler, 0, 0, 1, Number.POSITIVE_INFINITY, (tile) => deferred.push(tile));
+
+    expect(deferred).toHaveLength(1);
+    expect(cache.countRequestStates(requests).ready).toBe(0);
+    expect(cache.getTile(deferred[0]!.key)?.state).toBe("building");
+
+    cache.commitExternalTile(deferred[0]!);
+    expect(cache.countRequestStates(requests).ready).toBe(1);
+  });
+
   it("lifecycle: missing -> requested -> ready", () => {
     const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
     config.stream.maxTileBuildsPerFrame = 500;

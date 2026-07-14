@@ -1,4 +1,5 @@
 import { load } from "js-yaml";
+import { parsePostFxFroxelDebugMode, type PostFxFroxelDebugMode } from "../gpu/postfx_atmosphere.js";
 import aerialPerspectiveYaml from "./config/aerial_perspective.yaml?raw";
 import postProcessYaml from "./config/postprocess.yaml?raw";
 
@@ -60,6 +61,14 @@ export interface PostProcessSettings {
   froxelsEnabled?: boolean;
   /** WebGPU screen-space bounce stage. WebGL ignores this flag. */
   bounceEnabled?: boolean;
+  /**
+   * WebGPU froxel debug overlay. When enabled, the froxel volume replaces the final image with the
+   * buffer named by `froxelDebugMode`, and the volume runs even if `froxelsEnabled` is off. WebGL
+   * ignores this flag.
+   */
+  froxelDebugEnabled?: boolean;
+  /** Which froxel buffer the debug overlay visualizes. `off` renders the normal image. */
+  froxelDebugMode?: PostFxFroxelDebugMode;
   /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
   godRaysMode: GodRaysMode;
   /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
@@ -113,6 +122,8 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   gtaoEnabled: false,
   froxelsEnabled: false,
   bounceEnabled: false,
+  froxelDebugEnabled: false,
+  froxelDebugMode: "off",
   godRaysMode: "off",
   godRaysDensity: 0.96,
   godRaysDecay: 0.92,
@@ -310,6 +321,17 @@ export function applyPostProcessQueryOverrides(
     ?? flagValue(searchParams, "volumetricFog")
     ?? flagValue(searchParams, "volumetricfog");
   if (froxels !== null) next.froxelsEnabled = froxels;
+
+  const froxelDebug = searchParams.get("froxelDebug")
+    ?? searchParams.get("froxelsDebug")
+    ?? searchParams.get("volumetricDebug")
+    ?? searchParams.get("volumetricsDebug");
+  if (froxelDebug !== null) {
+    // A named mode implies the overlay is on; `off` turns it back off.
+    const mode = parsePostFxFroxelDebugMode(froxelDebug);
+    next.froxelDebugMode = mode;
+    next.froxelDebugEnabled = mode !== "off";
+  }
 
   const bounce = flagValue(searchParams, "bounce")
     ?? flagValue(searchParams, "ssBounce")

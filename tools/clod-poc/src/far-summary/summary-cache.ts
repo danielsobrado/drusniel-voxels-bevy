@@ -119,6 +119,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
     nowMs: number,
     overrideMaxBuilds?: number,
     deadlineMs = Number.POSITIVE_INFINITY,
+    deferCompletedTile?: (tile: FarSummaryTile) => void,
   ): void {
     this.frameIndex = frameIndex;
     const maxBuilds = Math.max(0, overrideMaxBuilds ?? this.config.stream.maxTileBuildsPerFrame);
@@ -139,7 +140,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
       this.stats.buildTimeMs += elapsed;
       if (!complete) return;
 
-      this.finishActiveBuild(active, commitBudget);
+      this.finishActiveBuild(active, commitBudget, deferCompletedTile);
       this.activeBuild = null;
       completedBuilds++;
       if (performance.now() >= deadlineMs) return;
@@ -158,6 +159,17 @@ export class FarSummaryCache implements FallbackStatsWriter {
     if (this.activeBuild?.keyStr === keyStr) this.activeBuild = null;
     this.stats.tilesBuiltThisFrame++;
     this.commitBuiltTile(keyStr, committed);
+  }
+
+  discardDeferredTile(key: FarSummaryTileKey): void {
+    const keyStr = tileKeyToString(key);
+    const tile = this.tiles.get(keyStr);
+    if (!tile || (tile.state !== "building" && tile.state !== "requested")) return;
+    this.pendingBuildKeys.delete(keyStr);
+    this.dropPendingCommit(keyStr);
+    if (this.activeBuild?.keyStr === keyStr) this.activeBuild = null;
+    tile.state = "evicted";
+    this.stateRevision++;
   }
 
   getTile(key: FarSummaryTileKey): FarSummaryTile | null {
@@ -391,7 +403,11 @@ export class FarSummaryCache implements FallbackStatsWriter {
     return true;
   }
 
-  private finishActiveBuild(active: ActiveBuild, commitBudget: number): void {
+  private finishActiveBuild(
+    active: ActiveBuild,
+    commitBudget: number,
+    deferCompletedTile?: (tile: FarSummaryTile) => void,
+  ): void {
     const existing = this.tiles.get(active.keyStr);
     if (!existing) return;
 
@@ -399,7 +415,9 @@ export class FarSummaryCache implements FallbackStatsWriter {
       const builtTile = finishFarSummaryTileBuild(active.state);
       builtTile.builtEpoch = this.invalidationEpoch;
       this.stats.tilesBuiltThisFrame++;
-      if (this.stats.tilesCommittedThisFrame >= commitBudget) {
+      if (deferCompletedTile) {
+        deferCompletedTile(builtTile);
+      } else if (this.stats.tilesCommittedThisFrame >= commitBudget) {
         this.pendingCommits.push({ keyStr: active.keyStr, req: active.req, tile: builtTile, startedAtMs: active.startedAtMs });
       } else {
         this.commitBuiltTile(active.keyStr, builtTile);

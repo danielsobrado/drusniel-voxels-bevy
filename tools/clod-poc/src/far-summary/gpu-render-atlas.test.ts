@@ -72,6 +72,13 @@ describe("far-summary GPU render atlas", () => {
     expect(view.getUint32(56, true)).toBe(tile.atlasY);
   });
 
+  it("uses the current shared descriptor field names in the render-atlas shader", async () => {
+    const shader = await import("./shaders/far_summary_render_atlas_build.wgsl?raw").then((module) => module.default);
+    expect(shader).toContain("descriptor.layout_version");
+    expect(shader).toContain("descriptor.canonical_sample_offset");
+    expect(shader).not.toContain("descriptor._pad");
+  });
+
   it("publishes the renderer-owned view for far-shell construction", () => {
     const view = { valid: 0 } as FarSummaryGpuAtlasView;
     setActiveFarSummaryGpuAtlasView(view);

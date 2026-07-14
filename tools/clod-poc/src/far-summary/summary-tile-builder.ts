@@ -292,7 +292,9 @@ export function stepFarSummaryUnifiedEnrichment(
     );
     if (target.sx < tile.tileCells && target.sz < tile.tileCells) {
       const sample = tile.samples[target.sz * tile.tileCells + target.sx]!;
-      sample.canopyCoverage = sample.waterCoverage > 0.05 ? 0 : clamp01(canopy.coverage);
+      sample.canopyCoverage = farSummaryWaterNeighbourhoodCoverage(tile, target.sx, target.sz) > 0.05
+        ? 0
+        : clamp01(canopy.coverage);
       sample.canopyHeightAvg = finiteOr(canopy.canopyHeightAvg, sample.canopyHeightAvg);
       sample.speciesPine = clamp01(canopy.speciesPine);
       sample.speciesBroadleaf = clamp01(canopy.speciesBroadleaf);
@@ -301,6 +303,24 @@ export function stepFarSummaryUnifiedEnrichment(
     stepped = true;
   }
   return state.nextCanopySample >= canopySampleCount;
+}
+
+export function farSummaryWaterNeighbourhoodCoverage(
+  tile: FarSummaryTile,
+  sx: number,
+  sz: number,
+): number {
+  let coverage = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    const nz = sz + dz;
+    if (nz < 0 || nz >= tile.tileCells) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = sx + dx;
+      if (nx < 0 || nx >= tile.tileCells) continue;
+      coverage = Math.max(coverage, tile.samples[nz * tile.tileCells + nx]?.waterCoverage ?? 0);
+    }
+  }
+  return coverage;
 }
 
 export function stepFarSummaryUnifiedWaterEnrichment(

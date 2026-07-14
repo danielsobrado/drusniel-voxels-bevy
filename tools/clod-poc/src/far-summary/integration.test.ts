@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { createFarShellMetrics } from "../long-view/farShellMetrics.js";
 import {
@@ -11,6 +11,8 @@ import {
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryRingRequest } from "./clipmap-rings.js";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("resolveFarSummaryFrameInterval", () => {
   it("uses the provided default when no query override is present", () => {
@@ -120,6 +122,61 @@ describe("far summary fallback publication", () => {
     expect(metrics.farSummaryProceduralFallbackSamples).toBe(0);
     expect(metrics.farSummaryFallbackSamples).toBe(0);
 
+    integration.dispose();
+  });
+
+  it("stages CPU unified tiles through water-ready snapshots before canopy completion", () => {
+    vi.stubGlobal("window", { location: { search: "?farSummaryLayout=2&farSummaryGpu=0" } });
+    const metrics = createFarShellMetrics();
+    let waterCalls = 0;
+    let canopyCalls = 0;
+    const integration = initFarSummaryIntegration({
+      terrainSampler: {
+        ...flatSampler,
+        sampleWaterSummary: () => {
+          waterCalls++;
+          return { coverage: 0, waterLevel: 0, bodyKind: 0, shoreDistance: 10, flowX: 0, flowZ: 0 };
+        },
+        sampleCanopySummary: () => {
+          canopyCalls++;
+          const until = performance.now() + 0.25;
+          while (performance.now() < until) {
+            // Model the real stratified canopy source so the staged snapshot is observable.
+          }
+          return {
+            coverage: 0.5,
+            canopyHeightAvg: 60,
+            speciesPine: 1,
+            speciesBroadleaf: 0,
+            speciesDeadwood: 0,
+          };
+        },
+      },
+      farShellMetrics: metrics,
+      config: {
+        ...DEFAULT_FAR_SUMMARY_CONFIG,
+        stream: {
+          ...DEFAULT_FAR_SUMMARY_CONFIG.stream,
+          maxTileBuildsPerFrame: 1,
+          warmupMaxTileBuildsPerFrame: 1,
+          maxBuildMsPerFrame: 0,
+          warmupMaxBuildMsPerFrame: 0,
+        },
+      },
+    });
+    const camera = new THREE.PerspectiveCamera();
+    let observedSplitReadiness = false;
+
+    for (let frame = 1; frame <= 80 && !observedSplitReadiness; frame++) {
+      integration.update(frame, 1 / 60, camera);
+      observedSplitReadiness = (metrics.farSummaryTerrainWaterReady ?? 0) > 0
+        && (metrics.farSummaryCanopyPending ?? 0) > 0
+        && (metrics.farSummaryFullyEnriched ?? 0) < (metrics.farSummaryTerrainWaterReady ?? 0);
+    }
+
+    expect(observedSplitReadiness).toBe(true);
+    expect(waterCalls).toBeGreaterThan(0);
+    expect(canopyCalls).toBeGreaterThan(0);
     integration.dispose();
   });
 });
