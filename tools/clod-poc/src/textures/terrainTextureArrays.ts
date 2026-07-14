@@ -53,21 +53,21 @@ function colorByte(value: number): number {
 
 function layerRanges(id: ProceduralMaterialId, fallbackIndex: number): { heightMin: number; heightMax: number; scale: number } {
   switch (id) {
-    case "sand": return { heightMin: 0, heightMax: 18, scale: 0.055 };
-    case "grass": return { heightMin: 12, heightMax: 46, scale: 0.06 };
-    case "dirt": return { heightMin: 16, heightMax: 58, scale: 0.045 };
-    case "rock": return { heightMin: 38, heightMax: 88, scale: 0.04 };
-    case "snow": return { heightMin: 62, heightMax: 128, scale: 0.035 };
-    case "moss": return { heightMin: 18, heightMax: 72, scale: 0.07 };
-    case "gravel": return { heightMin: 10, heightMax: 54, scale: 0.065 };
-    case "wet_soil": return { heightMin: 0, heightMax: 22, scale: 0.05 };
-    case "meadows-ground": return { heightMin: 20, heightMax: 92, scale: 0.062 };
-    case "forest-floor": return { heightMin: 18, heightMax: 88, scale: 0.07 };
-    case "swamp-muck": return { heightMin: 0, heightMax: 64, scale: 0.052 };
-    case "mountain-scree": return { heightMin: 42, heightMax: 118, scale: 0.037 };
-    case "plains-grass": return { heightMin: 18, heightMax: 88, scale: 0.068 };
-    case "coast-sand": return { heightMin: 0, heightMax: 44, scale: 0.058 };
-    case "ocean-floor": return { heightMin: -40, heightMax: 36, scale: 0.052 };
+    case "sand": return { heightMin: -40, heightMax: 24, scale: 0.055 };
+    case "grass": return { heightMin: 22, heightMax: 66, scale: 0.06 };
+    case "dirt": return { heightMin: 14, heightMax: 58, scale: 0.045 };
+    case "rock": return { heightMin: 58, heightMax: 106, scale: 0.04 };
+    case "snow": return { heightMin: 86, heightMax: 132, scale: 0.035 };
+    case "moss": return { heightMin: 20, heightMax: 68, scale: 0.07 };
+    case "gravel": return { heightMin: 48, heightMax: 94, scale: 0.065 };
+    case "wet_soil": return { heightMin: 0, heightMax: 30, scale: 0.05 };
+    case "meadows-ground": return { heightMin: 22, heightMax: 66, scale: 0.062 };
+    case "forest-floor": return { heightMin: 22, heightMax: 64, scale: 0.07 };
+    case "swamp-muck": return { heightMin: 18, heightMax: 50, scale: 0.052 };
+    case "mountain-scree": return { heightMin: 64, heightMax: 94, scale: 0.037 };
+    case "plains-grass": return { heightMin: 22, heightMax: 64, scale: 0.068 };
+    case "coast-sand": return { heightMin: 18, heightMax: 44, scale: 0.058 };
+    case "ocean-floor": return { heightMin: -40, heightMax: 28, scale: 0.052 };
     default: return { heightMin: fallbackIndex * 8, heightMax: fallbackIndex * 8 + 24, scale: 0.05 };
   }
 }
