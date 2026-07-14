@@ -80,6 +80,7 @@
     "water:hydrology": "tsx tools/probe-water-hydrology.ts",
     "water:graph": "tsx tools/build-water-graph.ts",
     "water:graph-startup": "tsx tools/probe-water-graph-startup.ts",
+    "water:graph-semantics": "tsx tools/water-graph-semantics.ts",
     "water:tile-carve-perf": "tsx tools/benchmark-heightfield-tile-carve.ts",
     "continent:tile-mesh-probe": "tsx tools/probe-continent-tile-mesh.ts",
     "water:seam": "tsx tools/water-hydrology-seam-report.ts",
@@ -95,7 +96,7 @@
     "water:shot:river-foam": "npm run water:shot -- --scene river-bend --debug foam --out shots/water/river-foam",
     "water:shot:flow": "npm run water:shot -- --scene river-bend --debug flow --out shots/water/flow-debug",
     "water:shot:clipmap": "npm run water:shot -- --scene clipmap-boundary --debug clipmap-level --out shots/water/clipmap-debug",
-    "water:shot:refraction": "npm run water:shot -- --scene lake-shoreline --debug refraction --out shots/water/lake-refraction",
+    "water:shot:refraction": "npm run water:shot -- --scene lake-shoreline --debug refraction --out shots/water/lake-depth",
     "water:shot:reflection": "npm run water:shot -- --scene lake-shoreline --debug reflection --out shots/water/lake-reflection",
     "water:shot:ssr-hit": "npm run water:shot -- --scene lake-shoreline --debug ssrHit --out shots/water/lake-ssr-hit",
     "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify"
