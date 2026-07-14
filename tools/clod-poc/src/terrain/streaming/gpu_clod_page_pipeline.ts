@@ -124,13 +124,51 @@ export class GpuClodPagePipeline {
       label: "gpu clod meshlet hierarchy",
       code: GPU_CLOD_MESHLET_HIERARCHY_WGSL,
     });
+
+    const packBindGroupLayout = device.createBindGroupLayout({
+      label: "gpu clod page pack layout",
+      entries: [
+        readOnlyStorage(0),
+        readOnlyStorage(1),
+        readOnlyStorage(2),
+        readOnlyStorage(3),
+        readOnlyStorage(4),
+        uniformBuffer(5),
+        uniformBuffer(6),
+        storageBuffer(7),
+        storageBuffer(8),
+      ],
+    });
+    const reductionBindGroupLayout = device.createBindGroupLayout({
+      label: "gpu clod page reduction layout",
+      entries: [
+        uniformBuffer(0),
+        readOnlyStorage(1),
+        readOnlyStorage(2),
+        storageBuffer(3),
+        storageBuffer(4),
+        storageBuffer(5),
+        storageBuffer(6),
+        storageBuffer(7),
+      ],
+    });
+    const packPipelineLayout = device.createPipelineLayout({
+      label: "gpu clod page pack pipeline layout",
+      bindGroupLayouts: [packBindGroupLayout],
+    });
+    const reductionPipelineLayout = device.createPipelineLayout({
+      label: "gpu clod page reduction pipeline layout",
+      bindGroupLayouts: [reductionBindGroupLayout],
+    });
+
     const pipeline = (
       label: string,
       module: GPUShaderModule,
       entryPoint: string,
+      layout: GPUPipelineLayout | "auto" = "auto",
     ): Promise<GPUComputePipeline> => device.createComputePipelineAsync({
       label,
-      layout: "auto",
+      layout,
       compute: { module, entryPoint },
     });
     const [
@@ -144,12 +182,12 @@ export class GpuClodPagePipeline {
       meshletPipeline,
       hierarchyPipeline,
     ] = await Promise.all([
-      pipeline("gpu clod pack vertices", packModule, "packVertices"),
-      pipeline("gpu clod pack indices", packModule, "packIndices"),
-      pipeline("gpu clod weld vertices", weldModule, "weldVertices"),
-      pipeline("gpu clod weld indices", weldModule, "weldIndices"),
-      pipeline("gpu clod simplify vertices", simplifyModule, "simplifyVertices"),
-      pipeline("gpu clod simplify indices", simplifyModule, "simplifyIndices"),
+      pipeline("gpu clod pack vertices", packModule, "packVertices", packPipelineLayout),
+      pipeline("gpu clod pack indices", packModule, "packIndices", packPipelineLayout),
+      pipeline("gpu clod weld vertices", weldModule, "weldVertices", reductionPipelineLayout),
+      pipeline("gpu clod weld indices", weldModule, "weldIndices", reductionPipelineLayout),
+      pipeline("gpu clod simplify vertices", simplifyModule, "simplifyVertices", reductionPipelineLayout),
+      pipeline("gpu clod simplify indices", simplifyModule, "simplifyIndices", reductionPipelineLayout),
       pipeline("gpu clod offset indices", indexModule, "offsetIndices"),
       pipeline("gpu clod build meshlets", meshletModule, "buildMeshlets"),
       pipeline("gpu clod build meshlet hierarchy", hierarchyModule, "buildHierarchy"),
@@ -844,9 +882,38 @@ export class GpuClodPagePipeline {
     byteLength = data.byteLength,
   ): GPUBuffer {
     const buffer = this.buffer(label, byteLength, usage);
-    if (byteLength > 0) this.device.queue.writeBuffer(buffer, 0, data, byteOffset, byteLength);
-    return buffer;
+    try {
+      if (byteLength > 0) this.device.queue.writeBuffer(buffer, 0, data, byteOffset, byteLength);
+      return buffer;
+    } catch (error) {
+      buffer.destroy();
+      throw error;
+    }
   }
+}
+
+function readOnlyStorage(binding: number): GPUBindGroupLayoutEntry {
+  return {
+    binding,
+    visibility: GPUShaderStage.COMPUTE,
+    buffer: { type: "read-only-storage" },
+  };
+}
+
+function storageBuffer(binding: number): GPUBindGroupLayoutEntry {
+  return {
+    binding,
+    visibility: GPUShaderStage.COMPUTE,
+    buffer: { type: "storage" },
+  };
+}
+
+function uniformBuffer(binding: number): GPUBindGroupLayoutEntry {
+  return {
+    binding,
+    visibility: GPUShaderStage.COMPUTE,
+    buffer: { type: "uniform" },
+  };
 }
 
 export function conservativeBounds(
