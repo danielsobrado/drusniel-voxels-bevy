@@ -2,8 +2,7 @@
 // MeshStandardMaterial + onBeforeCompile path in understory_material.ts. As with trees,
 // WebGPURenderer silently drops `onBeforeCompile`, so the classic path renders the
 // understory as solid black. This reauthors the same look as a node graph: lit vertex
-// colours + the understory sway wind. Forest-lighting AO/fog stays on the classic path
-// for now (node integration deferred), matching the tree ring material.
+// colours + the understory sway wind.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -37,6 +36,7 @@ import type { UnderstoryMaterialHandle } from "./understory_material.js";
 type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
+const UNDERSTORY_DEFAULT_AMBIENT_FLOOR = 0.025;
 
 const DEBUG_COLORS: Record<UnderstoryClass, THREE.Color> = {
   shrub: new THREE.Color(0x4f9a42),
@@ -50,9 +50,10 @@ const DEBUG_COLORS: Record<UnderstoryClass, THREE.Color> = {
 function fallbackLighting(): EnvironmentLighting {
   return {
     sunDirection: new THREE.Vector3(0.4, 0.85, 0.3).normalize(),
-    sunColor: new THREE.Color(1.0, 0.96, 0.88),
-    skyLight: new THREE.Color(0x6b7a94),
-    groundLight: new THREE.Color(0x2e2921),
+    sunColor: new THREE.Color(2.4, 2.3, 2.1),
+    skyLight: new THREE.Color(0.075, 0.085, 0.105),
+    groundLight: new THREE.Color(0.015, 0.013, 0.01),
+    ambientFloor: UNDERSTORY_DEFAULT_AMBIENT_FLOOR,
   };
 }
 
@@ -70,6 +71,7 @@ export function createUnderstoryNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uAmbientFloor = uniform(lighting.ambientFloor ?? UNDERSTORY_DEFAULT_AMBIENT_FLOOR);
   const materials: MeshBasicNodeMaterial[] = [];
   let regularPrepassNodes: PrepassNodes | undefined;
 
@@ -78,8 +80,6 @@ export function createUnderstoryNodeMaterialHandle(
     const aWindWeight: TslNode = attribute("understoryWindWeight", "float");
     const aWindPhase: TslNode = attribute("understoryWindPhase", "float");
 
-    // Sway, matching injectUnderstoryWindShader(): object-space XZ bend before the
-    // instance matrix, exactly like the classic <begin_vertex> injection.
     const wave: TslNode = sin(uTime.mul(uWindSpeed).add(aWindPhase).add(positionGeometry.y.mul(2.1)));
     const bend: TslNode = wave.mul(uWindStrength).mul(aWindWeight);
     const bendOffset: TslNode = vec3(uWindDirX, float(0), uWindDirZ).mul(bend);
@@ -91,7 +91,7 @@ export function createUnderstoryNodeMaterialHandle(
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const albedo: TslNode = albedoFactory(aColor);
-    const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(uSun.mul(sun))));
+    const lit: TslNode = albedo.mul(hemi.add(uSun.mul(sun)).add(uAmbientFloor));
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
@@ -121,13 +121,14 @@ export function createUnderstoryNodeMaterialHandle(
       uWindStrength.value = next.enabled ? 0.08 : 0;
     },
     updateForestLighting() {
-      // Node path: forest AO/fog integration deferred (mirrors the tree ring material).
+      // Forest atmospheric tint is depth-aware and owned by the froxel volume.
     },
     updateLighting(next: EnvironmentLighting) {
       uLight.value.copy(next.sunDirection).normalize();
       uSun.value.copy(v3(next.sunColor));
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
+      uAmbientFloor.value = next.ambientFloor ?? UNDERSTORY_DEFAULT_AMBIENT_FLOOR;
     },
     prepassNodesFor() {
       return regularPrepassNodes;
@@ -170,6 +171,7 @@ export function createUnderstoryRingNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uAmbientFloor = uniform(lighting.ambientFloor ?? UNDERSTORY_DEFAULT_AMBIENT_FLOOR);
   const uClassBaseOffset = uniform(classBaseOffset) as TslNode;
   const materials: MeshBasicNodeMaterial[] = [];
   let regularPrepassNodes: PrepassNodes | undefined;
@@ -199,13 +201,11 @@ export function createUnderstoryRingNodeMaterialHandle(
     const aYaw: TslNode = understoryRingHash(worldCell, uSeed, 701).mul(6.28318530718);
     const aWindPhase: TslNode = understoryRingHash(worldCell, uSeed, 809).mul(6.28318530718);
 
-    // Sway, matching injectUnderstoryWindShader(): object-space XZ bend.
     const wave: TslNode = sin(uTime.mul(uWindSpeed).add(aWindPhase).add(positionGeometry.y.mul(2.1)));
     const bend: TslNode = wave.mul(uWindStrength).mul(aWindWeight);
     const bendOffset: TslNode = vec3(uWindDirX, float(0), uWindDirZ).mul(bend);
     const localPosition: TslNode = positionGeometry.mul(aScale).add(bendOffset);
 
-    // Rotate around Y axis by aYaw, then translate to world position.
     const c: TslNode = cos(aYaw);
     const s: TslNode = sin(aYaw);
     const rotX: TslNode = c.mul(localPosition.x).add(s.mul(localPosition.z));
@@ -218,7 +218,7 @@ export function createUnderstoryRingNodeMaterialHandle(
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const albedo: TslNode = albedoFactory(aColor);
-    const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(uSun.mul(sun))));
+    const lit: TslNode = albedo.mul(hemi.add(uSun.mul(sun)).add(uAmbientFloor));
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
@@ -250,13 +250,14 @@ export function createUnderstoryRingNodeMaterialHandle(
       uSeed.value = next.seed;
     },
     updateForestLighting() {
-      // Node path: forest AO/fog integration deferred (mirrors the tree ring material).
+      // Forest atmospheric tint is depth-aware and owned by the froxel volume.
     },
     updateLighting(next: EnvironmentLighting) {
       uLight.value.copy(next.sunDirection).normalize();
       uSun.value.copy(v3(next.sunColor));
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
+      uAmbientFloor.value = next.ambientFloor ?? UNDERSTORY_DEFAULT_AMBIENT_FLOOR;
     },
     prepassNodesFor() {
       return regularPrepassNodes;
@@ -269,5 +270,7 @@ export function createUnderstoryRingNodeMaterialHandle(
 
 function understoryRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode {
   const salt = float(saltValue);
-  return fract(sin(dot(cell.add(vec2(seed, salt)), vec2(127.1, 311.7))).mul(43758.5453123));
+  return fract(
+    sin(dot(cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))), vec2(41.3, 289.1))).mul(43758.5453),
+  );
 }
