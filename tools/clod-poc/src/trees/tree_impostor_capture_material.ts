@@ -61,7 +61,8 @@ export function createTreeImpostorBakeMaterial(
       albedo = mix(albedo, albedo.mul(foliage.cardShade), foliage.cardTag);
       (material as unknown as { maskNode: TslNode }).maskNode = foliage.keep;
     }
-    material.colorNode = sqrt(clamp(albedo, vec3(0), vec3(1)));
+    const capturedAlbedo: TslNode = clamp(albedo, vec3(0), vec3(1));
+    material.colorNode = sqrt(capturedAlbedo);
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -150,8 +151,9 @@ function createFoliageCaptureNodes(atlas: TreeFoliageAtlas): {
   keep: TslNode;
 } {
   const cardTag: TslNode = clamp(attribute("treeFoliageCard", "float"), 0, 1);
+  const treeWind: TslNode = attribute("treeWind", "vec3");
   const speciesIndex: TslNode = clamp(
-    floor(attribute("treeWind", "vec3").z.add(0.5)),
+    floor(treeWind.z.add(0.5)),
     0,
     TREE_FOLIAGE_ATLAS_ROWS - 1,
   );

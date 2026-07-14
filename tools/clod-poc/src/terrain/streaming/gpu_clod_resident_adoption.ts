@@ -30,6 +30,8 @@ export function createBufferedResidentAdoption(
     onPage(page) {
       if (disposed) throw new Error("GPU CLOD resident adoption buffer is disposed");
       if (page.vertexCount <= 0 || page.indexCount <= 0 || page.indexCount % 3 !== 0) {
+        // The rejected page never reaches `pending`, so nothing else can free its GPU buffers.
+        destroyGpuClodResidentPage(page);
         throw new Error(
           `GPU CLOD resident page ${page.id} has invalid counts ${page.vertexCount}/${page.indexCount}`,
         );
@@ -47,7 +49,9 @@ export function createBufferedResidentAdoption(
           active = true;
           try {
             const result = await mesher.buildPages(batch);
-            cache.adoptMany(pending);
+            // Hand the cache its own array: `pending` is cleared right after, and must still hold
+            // the staged pages if the commit throws so the catch below can destroy them.
+            cache.adoptMany([...pending]);
             pending.length = 0;
             return result;
           } catch (error) {

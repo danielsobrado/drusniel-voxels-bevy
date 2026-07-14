@@ -209,11 +209,24 @@ function makeCache(options: {
 describe("ClodRenderNodeCache", () => {
   it("reuses active render nodes", () => {
     const { cache, material } = makeCache();
-    const viewA = cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
-    const viewB = cache.getOrCreate({ node: node("L0:0,0"), frameId: 2 });
+    // Same page mesh across frames: the geometry is unchanged, so the view must be reused.
+    const pageMesh = mesh();
+    const viewA = cache.getOrCreate({ node: node("L0:0,0", 0, pageMesh), frameId: 1 });
+    const viewB = cache.getOrCreate({ node: node("L0:0,0", 0, pageMesh), frameId: 2 });
 
     expect(viewB).toBe(viewA);
+    expect(viewB.lastUsedFrame).toBe(2);
     expect(material.makeTerrainMaterial).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the render node when its page mesh is replaced", () => {
+    const { cache, material } = makeCache();
+    const viewA = cache.getOrCreate({ node: node("L0:0,0", 0, mesh()), frameId: 1 });
+    const viewB = cache.getOrCreate({ node: node("L0:0,0", 0, mesh()), frameId: 2 });
+
+    // A replaced mesh must not reuse the previous view, or the node renders stale geometry.
+    expect(viewB).not.toBe(viewA);
+    expect(material.makeTerrainMaterial).toHaveBeenCalledTimes(2);
   });
 
   it("evicts inactive render nodes on prune", () => {

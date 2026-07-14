@@ -50,6 +50,8 @@ describe("forest lighting fields", () => {
     const settings = testSettings();
     settings.atmosphere.sunShaftsThreshold = 0;
     settings.atmosphere.sunShaftsStrength = 1;
+    settings.atmosphere.forestFogStrength = 0.22;
+    settings.atmosphere.edgeFogBoost = 0.18;
     const field = createForestLightingField(128, settings);
     splatCanopyInfluence(field, tree({ crownRadius: 12 }), settings);
     finalizeForestLightingField(field, new THREE.Vector3(1, 0.7, 0).normalize(), settings);
@@ -60,6 +62,17 @@ describe("forest lighting fields", () => {
     for (const array of arrays(field)) {
       expect([...array].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)).toBe(true);
     }
+  });
+
+  it("contributes no fog or shafts by default, leaving atmospherics to the volumetric system", () => {
+    const settings = testSettings();
+    const field = createForestLightingField(128, settings);
+    splatCanopyInfluence(field, tree({ crownRadius: 12 }), settings);
+    finalizeForestLightingField(field, new THREE.Vector3(1, 0.7, 0).normalize(), settings);
+    expect(max(field.fogDensity)).toBe(0);
+    expect(max(field.sunShaftMask)).toBe(0);
+    expect(max(field.ambientOcclusion)).toBeGreaterThan(0);
+    expect(max(field.shadowProxy)).toBeGreaterThan(0);
   });
 
   it("shadow proxy changes with sun direction", () => {

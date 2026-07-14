@@ -68,7 +68,9 @@ export function createExternalGpuClodGeometry(
   let indirectEnabled = false;
   if (page.meshlets && page.meshlets.meshletCount > 0) {
     const indirectWordCount = page.meshlets.meshletCount * INDEXED_INDIRECT_COMMAND_WORDS;
-    const indirect = new IndirectStorageBufferAttribute(indirectWordCount, 1);
+    // three accepts a count here, but its types only declare the array overload; this allocates the
+    // same Uint32Array the count path would have built internally.
+    const indirect = new IndirectStorageBufferAttribute(new Uint32Array(indirectWordCount), 1);
     geometry.indirect = indirect;
     geometry.indirectOffset = Array.from(
       { length: page.meshlets.meshletCount },

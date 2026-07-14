@@ -91,7 +91,9 @@ function createFrontTexture(width: number, height: number, name: string): THREE.
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.NoColorSpace;
-  (texture as THREE.DataTexture & { internalFormat?: GPUTextureFormat }).internalFormat = FAR_SUMMARY_RENDER_ATLAS_FORMAT;
+  // three types `internalFormat` as its WebGL-style `PixelFormatGPU`, so intersecting it with a
+  // WebGPU `GPUTextureFormat` collapses to `never`; widen instead of changing what is written.
+  (texture as unknown as { internalFormat: string }).internalFormat = FAR_SUMMARY_RENDER_ATLAS_FORMAT;
   texture.needsUpdate = true;
   return texture;
 }
