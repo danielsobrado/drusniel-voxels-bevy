@@ -7,6 +7,7 @@ import {
 } from "../terrain/streaming/gpu_clod_resident_types.js";
 
 const EXTERNAL_GEOMETRY_KEY = "gpuClodExternalGeometry";
+const INDEXED_INDIRECT_COMMAND_BYTES = 5 * Uint32Array.BYTES_PER_ELEMENT;
 
 interface WebGpuBackendData {
   buffer?: GPUBuffer;
@@ -28,8 +29,15 @@ export function createExternalGpuClodGeometry(
   const page = lease.page;
   const backend = renderer.backend as unknown as WebGpuBackendBridge;
   const geometry = new THREE.BufferGeometry();
-  const interleaved = new THREE.InterleavedBuffer(new Float32Array(GPU_CLOD_VERTEX_FLOATS), GPU_CLOD_VERTEX_FLOATS);
-  Object.defineProperty(interleaved, "count", { configurable: true, value: page.vertexCount, writable: true });
+  const interleaved = new THREE.InterleavedBuffer(
+    new Float32Array(GPU_CLOD_VERTEX_FLOATS),
+    GPU_CLOD_VERTEX_FLOATS,
+  );
+  Object.defineProperty(interleaved, "count", {
+    configurable: true,
+    value: page.vertexCount,
+    writable: true,
+  });
 
   geometry.setAttribute("position", attribute(interleaved, GPU_CLOD_VERTEX_LAYOUT.position));
   geometry.setAttribute("rootMorphDeltaY", attribute(interleaved, GPU_CLOD_VERTEX_LAYOUT.rootMorphDeltaY));
@@ -39,10 +47,28 @@ export function createExternalGpuClodGeometry(
   geometry.setAttribute("paintWeights", attribute(interleaved, GPU_CLOD_VERTEX_LAYOUT.paintWeights));
 
   const index = new THREE.BufferAttribute(new Uint32Array(1), 1);
-  Object.defineProperty(index, "count", { configurable: true, value: page.indexCount, writable: true });
+  Object.defineProperty(index, "count", {
+    configurable: true,
+    value: page.indexCount,
+    writable: true,
+  });
   geometry.setIndex(index);
   geometry.setDrawRange(0, page.indexCount);
-  geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(...page.bounds.center), page.bounds.radius);
+
+  if (page.meshlets && page.meshlets.meshletCount > 0) {
+    const indirect = new THREE.BufferAttribute(new Uint32Array(5), 1);
+    geometry.indirect = indirect;
+    geometry.indirectOffset = Array.from(
+      { length: page.meshlets.meshletCount },
+      (_, meshletIndex) => meshletIndex * INDEXED_INDIRECT_COMMAND_BYTES,
+    );
+    backend.get(indirect).buffer = page.meshlets.indirect;
+  }
+
+  geometry.boundingSphere = new THREE.Sphere(
+    new THREE.Vector3(...page.bounds.center),
+    page.bounds.radius,
+  );
   geometry.boundingBox = new THREE.Box3(
     new THREE.Vector3(
       page.bounds.center[0] - page.bounds.radius,
@@ -58,7 +84,10 @@ export function createExternalGpuClodGeometry(
 
   backend.get(interleaved).buffer = page.vertexBuffer;
   backend.get(index).buffer = page.indexBuffer;
-  geometry.userData[EXTERNAL_GEOMETRY_KEY] = { lease, released: false } satisfies ExternalGeometryState;
+  geometry.userData[EXTERNAL_GEOMETRY_KEY] = {
+    lease,
+    released: false,
+  } satisfies ExternalGeometryState;
   return geometry;
 }
 
@@ -78,5 +107,10 @@ function attribute(
   interleaved: THREE.InterleavedBuffer,
   layout: { readonly offsetFloats: number; readonly itemSize: number },
 ): THREE.InterleavedBufferAttribute {
-  return new THREE.InterleavedBufferAttribute(interleaved, layout.itemSize, layout.offsetFloats, false);
+  return new THREE.InterleavedBufferAttribute(
+    interleaved,
+    layout.itemSize,
+    layout.offsetFloats,
+    false,
+  );
 }
