@@ -31,6 +31,10 @@ export interface FarShellMetrics {
   farSummaryBuildsDiscarded: number;
   farSummaryProbeFallbacks: number;
   farSummaryProbeHeightErrorMaxM: number;
+  farSummaryTerrainWaterReady?: number;
+  farSummaryWaterPending?: number;
+  farSummaryCanopyPending?: number;
+  farSummaryFullyEnriched?: number;
 }
 
 export function createFarShellMetrics(): FarShellMetrics {
@@ -66,6 +70,10 @@ export function createFarShellMetrics(): FarShellMetrics {
     farSummaryBuildsDiscarded: 0,
     farSummaryProbeFallbacks: 0,
     farSummaryProbeHeightErrorMaxM: 0,
+    farSummaryTerrainWaterReady: 0,
+    farSummaryWaterPending: 0,
+    farSummaryCanopyPending: 0,
+    farSummaryFullyEnriched: 0,
   };
 }
 
@@ -80,10 +88,6 @@ export function resetFrameShellMetrics(m: FarShellMetrics): void {
   m.farSummaryProbeHeightErrorMaxM = 0;
 }
 
-// ?farDebug=1 — periodic console trace of the far/near handoff ("two areas" symptom):
-// how much of the far surface is still rendering procedural-fallback heights, and how
-// far the summary tile build has progressed. One line every ~2 s while warming, plus a
-// single "converged" line when fallbacks reach zero.
 const FAR_DEBUG_LOG_EVERY_FRAMES = 120;
 let farDebugEnabled: boolean | null = null;
 let farDebugFrame = 0;
@@ -106,14 +110,15 @@ function maybeLogFarDebug(metrics: FarShellMetrics): void {
         `[far-debug] warming: proceduralFallbackSamples=${metrics.farSummaryProceduralFallbackSamples} ` +
           `lower=${metrics.farSummaryLowerRingFallbackSamples} conservative=${metrics.farSummaryConservativeFallbackSamples} ` +
           `summaryTiles=${metrics.farSummaryTilesReady}/${metrics.farSummaryTilesRequired} ` +
-          `building=${metrics.farSummaryTilesBuilding} missing=${metrics.farSummaryTilesMissing}`,
+          `building=${metrics.farSummaryTilesBuilding} missing=${metrics.farSummaryTilesMissing} ` +
+          `waterPending=${metrics.farSummaryWaterPending ?? 0} canopyPending=${metrics.farSummaryCanopyPending ?? 0}`,
       );
     }
   } else if (!farDebugConvergedLogged) {
     farDebugConvergedLogged = true;
     console.info(
-      `[far-debug] converged: summaryTiles=${metrics.farSummaryTilesReady}/${metrics.farSummaryTilesRequired}, ` +
-        "no procedural fallback samples this frame",
+      `[far-debug] converged: terrainWater=${metrics.farSummaryTerrainWaterReady ?? 0}/${metrics.farSummaryTilesRequired}, ` +
+        `fullyEnriched=${metrics.farSummaryFullyEnriched ?? 0}, canopyPending=${metrics.farSummaryCanopyPending ?? 0}`,
     );
   }
 }
@@ -148,6 +153,10 @@ export function publishFarShellMetricsToCounters(
   counters["far_summary_builds_discarded"] = metrics.farSummaryBuildsDiscarded;
   counters["far_summary_probe_fallbacks"] = metrics.farSummaryProbeFallbacks;
   counters["far_summary_probe_height_error_max_m"] = metrics.farSummaryProbeHeightErrorMaxM;
+  counters["far_summary_terrain_water_ready"] = metrics.farSummaryTerrainWaterReady ?? 0;
+  counters["far_summary_water_pending"] = metrics.farSummaryWaterPending ?? 0;
+  counters["far_summary_canopy_pending"] = metrics.farSummaryCanopyPending ?? 0;
+  counters["far_summary_fully_enriched"] = metrics.farSummaryFullyEnriched ?? 0;
 }
 
 export function exposeMetricsOnWindow(metrics: FarShellMetrics): void {
