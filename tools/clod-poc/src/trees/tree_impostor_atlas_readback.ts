@@ -27,13 +27,14 @@ export function createTreeImpostorRenderTarget(
     stencilBuffer: false,
     type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,
-    minFilter: THREE.LinearMipmapLinearFilter,
+    minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
-    generateMipmaps: true,
+    generateMipmaps: false,
   });
   renderTarget.texture.name = name;
   renderTarget.texture.colorSpace = THREE.NoColorSpace;
-  configureTreeImpostorAtlasTexture(renderTarget.texture);
+  renderTarget.texture.wrapS = THREE.ClampToEdgeWrapping;
+  renderTarget.texture.wrapT = THREE.ClampToEdgeWrapping;
   return renderTarget;
 }
 
