@@ -11,6 +11,7 @@ import {
   speciesEcologyWeight,
   type TreeEcologySample,
 } from "./tree_ecology.js";
+import { treeVariantIndex } from "./tree_variant_selection.js";
 
 export const TREE_STRUCTURAL_VARIANTS = 4;
 
@@ -140,7 +141,7 @@ export function generateTreeInstances(
         continue;
       }
       const speciesSettings = settings.species[species];
-      const variant = Math.floor(treeHash2(gridX, gridZ, settings.seed + 509) * TREE_STRUCTURAL_VARIANTS) % TREE_STRUCTURAL_VARIANTS;
+      const variant = treeVariantIndex(x, z, settings.seed, TREE_STRUCTURAL_VARIANTS);
       const scale = (0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42) * (ecology?.scaleMultiplier ?? 1);
       const rotationY = treeHash2(gridX, gridZ, settings.seed + 907) * Math.PI * 2;
       ranked.push({
