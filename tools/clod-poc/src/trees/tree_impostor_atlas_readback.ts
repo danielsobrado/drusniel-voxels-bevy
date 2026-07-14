@@ -55,12 +55,11 @@ export async function readCleanedTreeImpostorAtlasTextures(
   tileSize: number,
   webgpu: boolean,
 ): Promise<{ albedo: THREE.DataTexture; normalDepth: THREE.DataTexture } | null> {
-  if (!renderer.readRenderTargetPixelsAsync) return null;
+  const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
+  if (!readPixels) return null;
   const expectedLength = width * height * 4;
-  const [rawAlbedo, rawNormalDepth] = await Promise.all([
-    renderer.readRenderTargetPixelsAsync(albedoTarget, 0, 0, width, height),
-    renderer.readRenderTargetPixelsAsync(normalDepthTarget, 0, 0, width, height),
-  ]);
+  const rawAlbedo = await readPixels(albedoTarget, 0, 0, width, height);
+  const rawNormalDepth = await readPixels(normalDepthTarget, 0, 0, width, height);
   const albedo = copyTreeImpostorPixels(rawAlbedo, expectedLength);
   const normalDepth = copyTreeImpostorPixels(rawNormalDepth, expectedLength);
   if (webgpu) {
