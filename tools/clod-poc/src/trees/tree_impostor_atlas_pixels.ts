@@ -1,6 +1,7 @@
 const BYTES_PER_PIXEL = 4;
 const COVERAGE_THRESHOLD = 8;
 const DEFAULT_DILATION_OPERATIONS = 1024;
+const MAX_RESUMABLE_OPERATIONS = 16;
 
 export interface TreeImpostorAtlasPixels {
   albedo: Uint8Array;
@@ -48,7 +49,7 @@ export function createTreeImpostorRowFlipJob(
   let currentRow = 0;
   return {
     step(maxOperations = 1): boolean {
-      const limit = Math.max(1, Math.floor(maxOperations));
+      const limit = Math.min(MAX_RESUMABLE_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
       let operations = 0;
       while (currentRow < totalRows && operations < limit) {
         const top = currentRow * rowLength;
@@ -192,7 +193,7 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
 
   return {
     step(maxOperations = DEFAULT_DILATION_OPERATIONS): boolean {
-      const limit = Math.max(1, Math.floor(maxOperations));
+      const limit = Math.min(MAX_RESUMABLE_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
       let operations = 0;
       while (tileIndex < totalTiles && operations < limit) {
         state ??= createState();
