@@ -51,18 +51,15 @@ describe("tree impostor baker quality", () => {
   });
 
   it("parses and clamps the YAML frame budget", () => {
-    expect(parseTreeImpostorBakeConfig(`
- tree_impostor_bake:
-   max_build_ms_per_frame: 1.5
-`).maxBuildMsPerFrame).toBe(1.5);
-    expect(parseTreeImpostorBakeConfig(`
- tree_impostor_bake:
-   max_build_ms_per_frame: 0
-`).maxBuildMsPerFrame).toBe(0.25);
-    expect(parseTreeImpostorBakeConfig(`
- tree_impostor_bake:
-   max_build_ms_per_frame: 999
-`).maxBuildMsPerFrame).toBe(16);
+    expect(parseTreeImpostorBakeConfig(
+      "tree_impostor_bake:\n  max_build_ms_per_frame: 1.5\n",
+    ).maxBuildMsPerFrame).toBe(1.5);
+    expect(parseTreeImpostorBakeConfig(
+      "tree_impostor_bake:\n  max_build_ms_per_frame: 0\n",
+    ).maxBuildMsPerFrame).toBe(0.25);
+    expect(parseTreeImpostorBakeConfig(
+      "tree_impostor_bake:\n  max_build_ms_per_frame: 999\n",
+    ).maxBuildMsPerFrame).toBe(16);
   });
 
   it("yields only after the configured frame deadline", async () => {
