@@ -240,9 +240,12 @@ function validateResidentNodeBounds(
   const resident = peekGpuClodResidentPage(node.id, normalizedRevision(node.revision));
   const vertices = resident?.vertexCount ?? 0;
   const triangles = resident ? resident.indexCount / 3 : 0;
+  if (!resident || vertices <= 0 || triangles <= 0) {
+    return reject(node, "unexpected_empty_mesh", vertices, triangles);
+  }
+
   const accepted = accept(node.id, vertices, triangles);
   if (!config.enabled) return accepted;
-  if (!resident || vertices <= 0 || triangles <= 0) return reject(node, "unexpected_empty_mesh", vertices, triangles);
   if (!validBounds(node.bounds)) return reject(node, "invalid_bounds", vertices, triangles);
 
   const footprint = normalizedFootprint(node.footprint);
