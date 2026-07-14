@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { float, texture, uv, vec3 } from "three/tsl";
+import { float, max, texture, uv, vec3 } from "three/tsl";
 import { TREE_SPECIES, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 
@@ -82,8 +82,10 @@ export function mountTreeImpostorLab(
       group.add(plane);
     }
 
-    const label = createLabel(`${species.toUpperCase()}  ${atlas.gridSize}x${atlas.gridSize}  ${atlas.resolutionPx}px`,
-      `ALBEDO          NORMAL          DEPTH   variants=${Math.max(1, atlas.variantCount ?? 1)}`);
+    const label = createLabel(
+      `${species.toUpperCase()}  ${atlas.gridSize}x${atlas.gridSize}  ${atlas.resolutionPx}px`,
+      `ALBEDO          NORMAL          DEPTH   variants=${Math.max(1, atlas.variantCount ?? 1)}`,
+    );
     label.position.set(speciesX, PLANE_HEIGHT_M + LABEL_HEIGHT_M * 0.7, 0.02);
     group.add(label);
   }
@@ -97,10 +99,16 @@ export function disposeTreeImpostorLab(group: THREE.Group | null): void {
   if (!group) return;
   group.removeFromParent();
   group.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) return;
-    object.geometry.dispose();
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    for (const material of materials) material.dispose();
+    if (object instanceof THREE.Mesh) {
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) material.dispose();
+      return;
+    }
+    if (object instanceof THREE.Sprite) {
+      object.material.map?.dispose();
+      object.material.dispose();
+    }
   });
   if (typeof window !== "undefined") window.__drusnielTreeImpostorLab = undefined;
 }
@@ -112,7 +120,7 @@ function createLabMaterial(atlas: TreeImpostorAtlas, channel: TreeImpostorLabCha
   const sample: TslNode = texture(source, uv() as never);
   if (channel === "albedo") {
     const coverage: TslNode = sample.w;
-    const encoded: TslNode = sample.rgb.div(coverage.max(float(0.0001))).clamp(0, 1);
+    const encoded: TslNode = sample.rgb.div(max(coverage, float(0.0001))).clamp(0, 1);
     material.colorNode = encoded.mul(encoded);
     material.opacityNode = coverage;
     (material as unknown as { maskNode: TslNode }).maskNode = coverage.greaterThan(0.001);
