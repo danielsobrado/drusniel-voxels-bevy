@@ -29,6 +29,14 @@ import { FarSummaryGpuRuntime } from "./gpu-runtime.js";
 import type { FarSummaryGpuRuntimeStats } from "./gpu-runtime.js";
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
+import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
+import { getActiveWebGpuRendererContext } from "../rendering/webgpu_renderer_context.js";
+import {
+  createFarSummaryGpuRenderAtlasRuntime,
+  setActiveFarSummaryGpuAtlasView,
+} from "./gpu-render-atlas.js";
+
+const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
 export interface FarSummaryIntegrationOptions {
   terrainSampler: FarTerrainSampler;
@@ -48,6 +56,7 @@ export interface FarSummaryIntegration {
 
   update: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, streamCenter?: { x: number; z: number }) => void;
   getHeightProvider: () => FarHeightProvider;
+  getGpuAtlasView: () => FarSummaryGpuAtlasView | undefined;
   getStreamCenter: () => StreamCenter;
   getGpuRuntimeStats: () => FarSummaryGpuRuntimeStats;
   setForceSlowBuilds: (on: boolean) => void;
@@ -180,6 +189,21 @@ export function initFarSummaryIntegration(
     },
   });
 
+  if (queryParams.get("scene") === INFINITE_ISLANDS_SCENE) setActiveFarSummaryGpuAtlasView(undefined);
+  const rendererContext = queryParams.get("scene") === INFINITE_ISLANDS_SCENE
+    && queryParams.get("farShellGpuAtlas") !== "0"
+    ? getActiveWebGpuRendererContext()
+    : null;
+  const gpuRenderAtlas = rendererContext
+    ? createFarSummaryGpuRenderAtlasRuntime({
+        renderer: rendererContext.renderer,
+        device: rendererContext.device,
+        config,
+        terrainFieldConfig: options.terrainFieldConfig,
+      })
+    : null;
+  if (gpuRenderAtlas) setActiveFarSummaryGpuAtlasView(gpuRenderAtlas.view);
+
   let frameIndex = 0;
   let previousCenter: StreamCenter | null = null;
   let currentCenter: StreamCenter = {
@@ -204,6 +228,7 @@ export function initFarSummaryIntegration(
     const gpuDirtyReason = previousCenter ? "camera_ring_shift" : "startup";
     previousCenter = currentCenter;
     sampler.setSampleCenter(currentCenter.worldX, currentCenter.worldZ);
+    gpuRenderAtlas?.update(currentCenter, frameIndex);
 
     const requests = computeRequiredFarSummaryTiles(currentCenter, config);
 
@@ -340,11 +365,13 @@ export function initFarSummaryIntegration(
     stats,
     update,
     getHeightProvider,
+    getGpuAtlasView: () => gpuRenderAtlas?.view,
     getStreamCenter: () => currentCenter,
     getGpuRuntimeStats: () => gpuRuntime.stats(),
     setForceSlowBuilds: (on) => { forceSlowBuilds = on; },
     setBuildDelayMs: (ms) => { buildDelayMs = ms; },
     dispose: () => {
+      gpuRenderAtlas?.dispose();
       gpuRuntime.dispose();
       debugOverlay.dispose();
     },

@@ -4,6 +4,7 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
+import { getActiveFarSummaryGpuAtlasView } from "../far-summary/gpu-render-atlas.js";
 import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 export type { FarTerrainVertexColors, FarTerrainSummaryRingUniformRefs, FarTerrainUniformRefs, FarTerrainMaterialOptions, TslNode } from "./far_terrain_material_types.js";
 import type { FarTerrainSummaryRingUniformRefs, FarTerrainUniformRefs, FarTerrainMaterialOptions, TslNode } from "./far_terrain_material_types.js";
@@ -68,7 +69,7 @@ export function createFarTerrainMaterial(
       .add(cos(worldX.mul(0.013).sub(worldZ.mul(0.011))).mul(5.0));
     const detail = sin(worldX.mul(0.041).add(worldZ.mul(0.033))).mul(1.4);
     let terrainHeight = float(46.0).add(continent).add(hills).add(detail);
-    const summaryAtlas = options.summaryAtlas;
+    const summaryAtlas = options.summaryAtlas ?? getActiveFarSummaryGpuAtlasView();
 
     if (summaryAtlas) {
       uSummaryWidthCells = uniform(summaryAtlas.widthCells);
@@ -192,6 +193,8 @@ export function updateFarTerrainMaterialCenter(material: MeshBasicNodeMaterial, 
   if (!refs) return;
   refs.uCenterX.value = centerX;
   refs.uCenterZ.value = centerZ;
+  const activeSummaryAtlas = getActiveFarSummaryGpuAtlasView();
+  if (activeSummaryAtlas) updateFarTerrainMaterialSummaryAtlas(material, activeSummaryAtlas);
   updateFarTerrainMaterialSunVisibility(material);
 }
 

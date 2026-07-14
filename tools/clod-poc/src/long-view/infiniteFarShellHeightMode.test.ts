@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M, InfiniteFarShell, type InfiniteFarShellOptions } from "./infiniteFarShell.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
+import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { BIOME_IDS } from "../world_source/biome_region_field.js";
 import { biomeRgbForId } from "../world_source/biome_colors.js";
 
@@ -70,6 +71,44 @@ function makeShell(overrides: Partial<InfiniteFarShellOptions> = {}): InfiniteFa
   });
 }
 
+function makeGpuAtlas(): FarSummaryGpuAtlasView {
+  const texture = new THREE.DataTexture(new Float32Array([1, 1, 1, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+  return {
+    texture,
+    materialTexture: texture,
+    normalTexture: texture,
+    coverageTexture: texture,
+    rings: [{
+      originX: -64,
+      originZ: -64,
+      cellM: 4,
+      startM: 0,
+      endM: 64,
+      rowOffsetCells: 0,
+      widthCells: 32,
+      heightCells: 32,
+      valid: 1,
+    }],
+    uploadStats: {
+      fullUploads: 0,
+      dirtyUploads: 0,
+      dirtyRects: 0,
+      dirtyPixels: 0,
+      dirtyPct: 0,
+      totalPixels: 1024,
+      lastUploadMode: "none",
+      fallbackReason: null,
+    },
+    originX: -64,
+    originZ: -64,
+    cellM: 4,
+    widthCells: 32,
+    heightCells: 32,
+    valid: 1,
+    revision: 1,
+  };
+}
+
 describe("InfiniteFarShell height sampling mode", () => {
   it("keeps CPU provider heights as the default with parity material", () => {
     const shell = makeShell({ useParityMaterial: true, parityConfig });
@@ -90,6 +129,28 @@ describe("InfiniteFarShell height sampling mode", () => {
       parityConfig,
       heightSamplingMode: "gpu",
     })).toThrow(/GPU mode requires parity material, parity config, and a GPU far-summary atlas/);
+  });
+
+  it("keeps geometry static and creates the water overlay in GPU mode", () => {
+    const shell = makeShell({
+      useParityMaterial: true,
+      parityConfig,
+      heightSamplingMode: "gpu",
+      farSummaryGpuAtlas: makeGpuAtlas(),
+    });
+    const positions = shell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const versionBefore = positions.version;
+
+    shell.setHeightProvider({
+      sampleHeight: () => 123,
+      sampleNormal: () => new THREE.Vector3(0, 1, 0),
+    });
+    shell.update(20, 20, 1);
+
+    expect(positions.version).toBe(versionBefore);
+    expect(positions.getY(0)).toBe(0);
+    expect(shell.mesh.children.some((child) => child.name === "naadf-far-water-overlay")).toBe(true);
+    shell.dispose();
   });
 
   it("attaches initial vertex colors for parity material before provider rebuild", () => {

@@ -1,17 +1,32 @@
 import * as THREE from "three";
+import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { writeBiomeRgb } from "../world_source/biome_colors.js";
 import type { InfiniteFarShellOptions, FarShellHeightSamplingMode } from "./infinite_far_shell_types.js";
 
+interface FarSummaryGpuAtlasProvider {
+  getGpuAtlasView(): FarSummaryGpuAtlasView | undefined;
+}
+
+function resolveGpuSamplingAtlas(options: InfiniteFarShellOptions): FarSummaryGpuAtlasView | undefined {
+  if (options.farSummaryGpuAtlas) return options.farSummaryGpuAtlas;
+  const integration = (globalThis as typeof globalThis & {
+    window?: { __drusnielFarSummary?: Partial<FarSummaryGpuAtlasProvider> };
+  }).window?.__drusnielFarSummary;
+  return integration?.getGpuAtlasView?.();
+}
+
 export function hasGpuSamplingInputs(options: InfiniteFarShellOptions): boolean {
-  return Boolean(options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas);
+  return Boolean(options.useParityMaterial && options.parityConfig && resolveGpuSamplingAtlas(options));
 }
 
 export function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
   const requested = options.heightSamplingMode ?? (hasGpuSamplingInputs(options) ? "gpu" : "cpu");
   if (requested !== "gpu") return "cpu";
-  if (!hasGpuSamplingInputs(options)) {
+  const atlas = resolveGpuSamplingAtlas(options);
+  if (!options.useParityMaterial || !options.parityConfig || !atlas) {
     throw new Error("Far shell GPU mode requires parity material, parity config, and a GPU far-summary atlas");
   }
+  options.farSummaryGpuAtlas = atlas;
   return "gpu";
 }
 

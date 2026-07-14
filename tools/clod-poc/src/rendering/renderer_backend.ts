@@ -9,6 +9,10 @@ import { buildRequiredLimits, describeDiagnostics, probeWebGPU } from "../core/d
 import { installTerrainTextureArrayProbe } from "../gpu/terrain_texture_array_probe.js";
 import { installMaterialKeyMemo } from "./three_patches.js";
 import { installPositionInvariance } from "./veg_prepass.js";
+import {
+  clearActiveWebGpuRendererContext,
+  setActiveWebGpuRendererContext,
+} from "./webgpu_renderer_context.js";
 
 export type RendererBackend = "webgl" | "webgpu";
 
@@ -35,6 +39,7 @@ export interface WebGpuAppRenderer {
 export type AppRenderer = WebGlAppRenderer | WebGpuAppRenderer;
 
 export function createWebGlAppRenderer(): WebGlAppRenderer {
+  clearActiveWebGpuRendererContext();
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.shadowMap.enabled = true;
   installTerrainTextureArrayProbe(renderer);
@@ -77,11 +82,13 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   // fail-loud: surface WebGPU validation errors instead of silent black frames.
   const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
   if (device) {
+    setActiveWebGpuRendererContext(renderer, device);
     let reported = 0;
     device.onuncapturederror = (e: GPUUncapturedErrorEvent): void => {
       if (reported++ < 8) console.error("[webgpu] uncaptured error:", e.error.message);
     };
     void device.lost.then((info) => {
+      clearActiveWebGpuRendererContext(renderer);
       console.error("[webgpu] device lost:", info.reason, info.message);
       if (window.__drusnielClod) {
         window.__drusnielClod.error = `WebGPU device lost: ${info.reason || "unknown"}\n${info.message}`;
