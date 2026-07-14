@@ -65,13 +65,16 @@ const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_RING_IMPOSTOR_MIN_COVERAGE = 0.0001;
+const TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR = 0.025;
+const TREE_RING_IMPOSTOR_HDR_MAX = 4.0;
 
 function fallbackLighting(): EnvironmentLighting {
   return {
     sunDirection: new THREE.Vector3(0.4, 0.85, 0.3).normalize(),
-    sunColor: new THREE.Color(1.0, 0.96, 0.88),
-    skyLight: new THREE.Color(0x6b7a94),
-    groundLight: new THREE.Color(0x2e2921),
+    sunColor: new THREE.Color(2.4, 2.3, 2.1),
+    skyLight: new THREE.Color(0.075, 0.085, 0.105),
+    groundLight: new THREE.Color(0.015, 0.013, 0.01),
+    ambientFloor: TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR,
   };
 }
 
@@ -88,6 +91,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uAmbientFloor = uniform(lighting.ambientFloor ?? TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR);
   const materials: TreeRingNodeMaterial[] = [];
 
   const buildMaterial = (debugColor?: THREE.Color): TreeRingNodeMaterial => {
@@ -128,7 +132,18 @@ export function createTreeRingImpostorNodeMaterialHandle(
       ? treeRingImpostorSurfaceNormal(impostor.normal, billboardNormal, c, s)
       : billboardNormal;
     const lit: TslNode = atlas.normalDepth && !debugColor
-      ? relightTreeRingImpostor(albedo, impostor.normal, billboardNormal, c, s, uLight, uSun, uSky, uGround)
+      ? relightTreeRingImpostor(
+          albedo,
+          impostor.normal,
+          billboardNormal,
+          c,
+          s,
+          uLight,
+          uSun,
+          uSky,
+          uGround,
+          uAmbientFloor,
+        )
       : albedo;
 
     const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest));
@@ -174,6 +189,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
       uSun.value.copy(v3(next.sunColor));
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
+      uAmbientFloor.value = next.ambientFloor ?? TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR;
     },
     updateForestLighting() {},
     dispose() {
@@ -360,6 +376,7 @@ function relightTreeRingImpostor(
   uSun: TslNode,
   uSky: TslNode,
   uGround: TslNode,
+  uAmbientFloor: TslNode,
 ): TslNode {
   const n0: TslNode = treeRingImpostorSurfaceNormal(localNormal, billboardNormal, yawCos, yawSin);
   const n: TslNode = frontFacing.select(n0, n0.negate());
@@ -369,8 +386,8 @@ function relightTreeRingImpostor(
   const direct: TslNode = uSun.mul(sun);
   const back: TslNode = max(dot(n.negate(), uLight), 0.0);
   const transmission: TslNode = albedo.mul(uSun).mul(back).mul(TREE_RING_IMPOSTOR_LEAF_TRANSMISSION);
-  const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
-  return clamp(lit, 0.0, 1.0);
+  const lit: TslNode = albedo.mul(hemi.add(direct).add(uAmbientFloor)).add(transmission);
+  return clamp(lit, 0.0, TREE_RING_IMPOSTOR_HDR_MAX);
 }
 
 function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: TslNode): TslNode | null {
