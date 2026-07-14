@@ -30,9 +30,9 @@ export const DEFAULT_GRASS_LOD_SETTINGS: GrassLodSettings = {
 };
 
 export const DEFAULT_GRASS_BLADE_SETTINGS: GrassBladeSettings = {
-  heightM: 0.62,
-  heightVariation: 0.48,
-  widthM: 0.026,
+  heightM: 0.78,
+  heightVariation: 0.52,
+  widthM: 0.04,
   nearBladesPerInstance: 7,
   midBladesPerInstance: 4,
   nearSegments: 4,
