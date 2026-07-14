@@ -9,6 +9,10 @@ import { buildGpuClodMeshletHierarchy } from "./gpu_clod_meshlet_hierarchy.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
 import type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 import {
+  GPU_CLOD_SIMPLIFY_RUNTIME_WGSL,
+  GPU_CLOD_WELD_RUNTIME_WGSL,
+} from "./gpu_clod_page_compute_shaders.js";
+import {
   GPU_CLOD_PACKED_VERTEX_FLOATS,
   GPU_CLOD_WELD_WGSL,
   packGpuClodMesh,
@@ -193,6 +197,13 @@ describe("GPU CLOD compute contracts", () => {
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn simplify_vertices");
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn simplify_triangles");
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn is_locked");
+  });
+
+  it("bounds cross-workgroup hash publication waits", () => {
+    for (const source of [GPU_CLOD_WELD_RUNTIME_WGSL, GPU_CLOD_SIMPLIFY_RUNTIME_WGSL]) {
+      expect(source).toContain("publishWaitLimit");
+      expect(source).not.toContain("while (valuePlusOne == 0u)");
+    }
   });
 });
 
