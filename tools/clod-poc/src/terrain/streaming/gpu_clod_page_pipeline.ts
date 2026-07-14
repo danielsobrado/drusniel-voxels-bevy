@@ -1,15 +1,19 @@
 import type { ClodPageNode, PageFootprint, PageMesh } from "../../types.js";
-import type { GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
+import {
+  shouldKeepGpuClodPageResident,
+  type GpuClodHierarchyConfig,
+} from "./gpu_clod_hierarchy_config.js";
 import {
   GPU_CLOD_INDEX_OFFSET_WGSL,
   GPU_CLOD_MESHLET_HIERARCHY_WGSL,
   GPU_CLOD_MESHLET_WGSL,
   GPU_CLOD_PACK_WGSL,
   GPU_CLOD_PAGE_WORKGROUP_SIZE,
-  GPU_CLOD_SIMPLIFY_RUNTIME_WGSL,
   GPU_CLOD_WELD_RUNTIME_WGSL,
 } from "./gpu_clod_page_compute_shaders.js";
+import { GPU_CLOD_SIMPLIFY_RUNTIME_WGSL } from "./gpu_clod_simplify_runtime_shader.js";
 import {
+  GPU_CLOD_VERTEX_FLOATS,
   GPU_CLOD_VERTEX_STRIDE_BYTES,
   destroyGpuClodResidentPage,
   type GpuClodMeshletBuffers,
@@ -226,9 +230,21 @@ export class GpuClodPagePipeline {
   }
 
   async attachMeshlets(page: GpuClodResidentPage): Promise<GpuClodResidentPage> {
-    if (!this.options.config.meshlets || page.indexCount === 0 || page.meshlets) return page;
-    const meshlets = this.buildMeshlets(page);
-    return { ...page, meshlets, byteLength: page.byteLength + meshlets.byteLength };
+    if (
+      !this.options.config.meshlets
+      || !shouldKeepGpuClodPageResident(this.options.config, page.level)
+      || page.indexCount === 0
+      || page.meshlets
+    ) {
+      return page;
+    }
+    try {
+      const meshlets = this.buildMeshlets(page);
+      return { ...page, meshlets, byteLength: page.byteLength + meshlets.byteLength };
+    } catch (error) {
+      this.destroyPage(page);
+      throw error;
+    }
   }
 
   async readbackPage(page: GpuClodResidentPage): Promise<PageMesh> {
@@ -255,7 +271,7 @@ export class GpuClodPagePipeline {
       const paintSlots = new Float32Array(page.vertexCount);
       const materialWeights = new Float32Array(page.vertexCount * 4);
       for (let vertex = 0; vertex < page.vertexCount; vertex++) {
-        const source = vertex * 16;
+        const source = vertex * GPU_CLOD_VERTEX_FLOATS;
         const target3 = vertex * 3;
         const target4 = vertex * 4;
         positions[target3] = packed[source] ?? 0;
