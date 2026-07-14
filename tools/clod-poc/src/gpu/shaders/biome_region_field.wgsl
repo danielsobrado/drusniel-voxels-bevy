@@ -27,7 +27,7 @@ fn defaultBiomeRegionContract() -> BiomeRegionContract {
     0.08,
     4.0,
     42.0,
-    68.0,
+    48.0,
     8.0,
     0.42,
     0.72,
