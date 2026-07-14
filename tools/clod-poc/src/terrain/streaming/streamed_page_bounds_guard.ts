@@ -1,4 +1,5 @@
 import { triangleCount, vertexCount, type ClodPageNode, type PageMesh, type PageFootprint } from "../../types.js";
+import { peekGpuClodResidentPage } from "./gpu_clod_resident_registry.js";
 
 export const STREAMED_PAGE_BOUNDS_GUARD_REASONS = [
   "unexpected_empty_mesh",
@@ -120,61 +121,58 @@ export function validateStreamedPageBounds(
   chunkSize: number,
   config: StreamedPageBoundsGuardConfig,
 ): StreamedPageBoundsGuardResult {
+  void chunkSize;
+  if (node.gpuResidentOnly) return validateResidentNodeBounds(node, config);
+
   const vertices = vertexCount(node.mesh);
   const triangles = triangleCount(node.mesh);
-  const disabled: StreamedPageBoundsGuardResult = {
-    ok: true,
-    nodeId: node.id,
-    reasonCode: 0,
-    vertexCount: vertices,
-    triangleCount: triangles,
-    overflowXZ: 0,
-    overflowY: 0,
-  };
-  if (!config.enabled) return disabled;
-
+  const accepted = accept(node.id, vertices, triangles);
+  if (!config.enabled) return accepted;
   if (!validMeshShape(node.mesh)) return reject(node, "invalid_mesh_counts", vertices, triangles);
   if (vertices === 0 || triangles === 0) return reject(node, "unexpected_empty_mesh", vertices, triangles);
   if (!validBounds(node.bounds)) return reject(node, "invalid_bounds", vertices, triangles);
-  const nonFinite = firstNonFinitePosition(node.mesh.positions);
-  if (nonFinite >= 0) return reject(node, "non_finite_position", vertices, triangles);
+  if (firstNonFinitePosition(node.mesh.positions) >= 0) return reject(node, "non_finite_position", vertices, triangles);
   if (firstOutOfRangeIndex(node.mesh.indices, vertices) >= 0) return reject(node, "index_out_of_range", vertices, triangles);
 
   const footprint = normalizedFootprint(node.footprint);
   const meshBounds = xzBounds(node.mesh);
   const expectedSpanX = Math.max(1, footprint.maxX - footprint.minX);
   const expectedSpanZ = Math.max(1, footprint.maxZ - footprint.minZ);
-  const overflowXZ = footprintOverflow(meshBounds.minX, meshBounds.maxX, meshBounds.minZ, meshBounds.maxZ, footprint, config.marginXZ);
+  const overflowXZ = footprintOverflow(
+    meshBounds.minX,
+    meshBounds.maxX,
+    meshBounds.minZ,
+    meshBounds.maxZ,
+    footprint,
+    config.marginXZ,
+  );
   if (overflowXZ > 0) return reject(node, "xz_out_of_bounds", vertices, triangles, overflowXZ);
 
-  const boundsOverflow = footprintOverflow(node.bounds.center[0], node.bounds.center[0], node.bounds.center[2], node.bounds.center[2], footprint, config.boundsMismatchMarginXZ + node.bounds.radius);
+  const boundsOverflow = boundsCenterOverflow(node, footprint, config);
   if (boundsOverflow > 0) return reject(node, "bounds_xz_mismatch", vertices, triangles, boundsOverflow);
 
   const centroid = meshCentroid(node.mesh);
-  const centroidOverflow = footprintOverflow(centroid.x, centroid.x, centroid.z, centroid.z, footprint, config.centroidMarginXZ);
+  const centroidOverflow = footprintOverflow(
+    centroid.x,
+    centroid.x,
+    centroid.z,
+    centroid.z,
+    footprint,
+    config.centroidMarginXZ,
+  );
   if (centroidOverflow > 0) return reject(node, "centroid_out_of_bounds", vertices, triangles, centroidOverflow);
 
-  const extentX = meshBounds.maxX - meshBounds.minX;
-  const extentZ = meshBounds.maxZ - meshBounds.minZ;
   const extentOverflow = Math.max(
     0,
-    extentX - expectedSpanX * config.maxExtentFootprintRatio,
-    extentZ - expectedSpanZ * config.maxExtentFootprintRatio,
+    meshBounds.maxX - meshBounds.minX - expectedSpanX * config.maxExtentFootprintRatio,
+    meshBounds.maxZ - meshBounds.minZ - expectedSpanZ * config.maxExtentFootprintRatio,
   );
   if (extentOverflow > 0) return reject(node, "xz_extent_too_large", vertices, triangles, extentOverflow);
 
   const y = yBounds(node.mesh);
-  const overflowY = Math.max(
-    0,
-    y.maxY - (node.bounds.maxY + config.boundsYMargin),
-    node.bounds.minY - config.boundsYMargin - y.minY,
-    Math.abs(y.maxY) - config.maxAbsY,
-    Math.abs(y.minY) - config.maxAbsY,
-  );
+  const overflowY = yOverflow(node, y.minY, y.maxY, config);
   if (overflowY > 0) return reject(node, "y_out_of_bounds", vertices, triangles, 0, overflowY);
-
-  void chunkSize;
-  return disabled;
+  return accepted;
 }
 
 export function recordStreamedPageBoundsGuardResult(
@@ -231,7 +229,40 @@ export function publishStreamedPageBoundsGuardStatsToCounters(
 }
 
 export function isStreamedPageBoundsGuardError(error: unknown): error is StreamedPageBoundsGuardError {
-  return error instanceof StreamedPageBoundsGuardError || (error instanceof Error && error.name === "StreamedPageBoundsGuardError");
+  return error instanceof StreamedPageBoundsGuardError
+    || (error instanceof Error && error.name === "StreamedPageBoundsGuardError");
+}
+
+function validateResidentNodeBounds(
+  node: ClodPageNode,
+  config: StreamedPageBoundsGuardConfig,
+): StreamedPageBoundsGuardResult {
+  const resident = peekGpuClodResidentPage(node.id, normalizedRevision(node.revision));
+  const vertices = resident?.vertexCount ?? 0;
+  const triangles = resident ? resident.indexCount / 3 : 0;
+  const accepted = accept(node.id, vertices, triangles);
+  if (!config.enabled) return accepted;
+  if (!resident || vertices <= 0 || triangles <= 0) return reject(node, "unexpected_empty_mesh", vertices, triangles);
+  if (!validBounds(node.bounds)) return reject(node, "invalid_bounds", vertices, triangles);
+
+  const footprint = normalizedFootprint(node.footprint);
+  const boundsOverflow = boundsCenterOverflow(node, footprint, config);
+  if (boundsOverflow > 0) return reject(node, "bounds_xz_mismatch", vertices, triangles, boundsOverflow);
+  const overflowY = yOverflow(node, node.bounds.minY, node.bounds.maxY, config);
+  if (overflowY > 0) return reject(node, "y_out_of_bounds", vertices, triangles, 0, overflowY);
+  return accepted;
+}
+
+function accept(nodeId: string, vertices: number, triangles: number): StreamedPageBoundsGuardResult {
+  return {
+    ok: true,
+    nodeId,
+    reasonCode: 0,
+    vertexCount: vertices,
+    triangleCount: triangles,
+    overflowXZ: 0,
+    overflowY: 0,
+  };
 }
 
 function reject(
@@ -252,6 +283,36 @@ function reject(
     overflowXZ: Math.max(0, overflowXZ),
     overflowY: Math.max(0, overflowY),
   };
+}
+
+function boundsCenterOverflow(
+  node: ClodPageNode,
+  footprint: PageFootprint,
+  config: StreamedPageBoundsGuardConfig,
+): number {
+  return footprintOverflow(
+    node.bounds.center[0],
+    node.bounds.center[0],
+    node.bounds.center[2],
+    node.bounds.center[2],
+    footprint,
+    config.boundsMismatchMarginXZ + node.bounds.radius,
+  );
+}
+
+function yOverflow(
+  node: ClodPageNode,
+  minY: number,
+  maxY: number,
+  config: StreamedPageBoundsGuardConfig,
+): number {
+  return Math.max(
+    0,
+    maxY - (node.bounds.maxY + config.boundsYMargin),
+    node.bounds.minY - config.boundsYMargin - minY,
+    Math.abs(maxY) - config.maxAbsY,
+    Math.abs(minY) - config.maxAbsY,
+  );
 }
 
 function booleanFlag(params: URLSearchParams, key: string, fallback: boolean): boolean {
@@ -277,7 +338,9 @@ function positiveNumber(params: URLSearchParams, key: string, fallback: number):
 }
 
 function zeroReasons(): Record<StreamedPageBoundsGuardReason, number> {
-  return Object.fromEntries(STREAMED_PAGE_BOUNDS_GUARD_REASONS.map((reason) => [reason, 0])) as Record<StreamedPageBoundsGuardReason, number>;
+  return Object.fromEntries(
+    STREAMED_PAGE_BOUNDS_GUARD_REASONS.map((reason) => [reason, 0]),
+  ) as Record<StreamedPageBoundsGuardReason, number>;
 }
 
 function validMeshShape(mesh: PageMesh): boolean {
@@ -303,12 +366,16 @@ function validBounds(bounds: ClodPageNode["bounds"]): boolean {
 }
 
 function firstNonFinitePosition(positions: Float32Array): number {
-  for (let i = 0; i < positions.length; i++) if (!Number.isFinite(positions[i])) return i;
+  for (let index = 0; index < positions.length; index++) {
+    if (!Number.isFinite(positions[index])) return index;
+  }
   return -1;
 }
 
 function firstOutOfRangeIndex(indices: Uint32Array, vertices: number): number {
-  for (let i = 0; i < indices.length; i++) if (indices[i] >= vertices) return i;
+  for (let index = 0; index < indices.length; index++) {
+    if (indices[index] >= vertices) return index;
+  }
   return -1;
 }
 
@@ -326,11 +393,11 @@ function xzBounds(mesh: PageMesh): { minX: number; maxX: number; minZ: number; m
   let maxX = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
-  for (let i = 0; i < mesh.positions.length; i += 3) {
-    minX = Math.min(minX, mesh.positions[i]);
-    maxX = Math.max(maxX, mesh.positions[i]);
-    minZ = Math.min(minZ, mesh.positions[i + 2]);
-    maxZ = Math.max(maxZ, mesh.positions[i + 2]);
+  for (let index = 0; index < mesh.positions.length; index += 3) {
+    minX = Math.min(minX, mesh.positions[index]);
+    maxX = Math.max(maxX, mesh.positions[index]);
+    minZ = Math.min(minZ, mesh.positions[index + 2]);
+    maxZ = Math.max(maxZ, mesh.positions[index + 2]);
   }
   return { minX, maxX, minZ, maxZ };
 }
@@ -338,9 +405,9 @@ function xzBounds(mesh: PageMesh): { minX: number; maxX: number; minZ: number; m
 function yBounds(mesh: PageMesh): { minY: number; maxY: number } {
   let minY = Infinity;
   let maxY = -Infinity;
-  for (let i = 1; i < mesh.positions.length; i += 3) {
-    minY = Math.min(minY, mesh.positions[i]);
-    maxY = Math.max(maxY, mesh.positions[i]);
+  for (let index = 1; index < mesh.positions.length; index += 3) {
+    minY = Math.min(minY, mesh.positions[index]);
+    maxY = Math.max(maxY, mesh.positions[index]);
   }
   return { minY, maxY };
 }
@@ -349,9 +416,9 @@ function meshCentroid(mesh: PageMesh): { x: number; z: number } {
   let x = 0;
   let z = 0;
   const vertices = vertexCount(mesh);
-  for (let i = 0; i < mesh.positions.length; i += 3) {
-    x += mesh.positions[i];
-    z += mesh.positions[i + 2];
+  for (let index = 0; index < mesh.positions.length; index += 3) {
+    x += mesh.positions[index];
+    z += mesh.positions[index + 2];
   }
   return { x: x / vertices, z: z / vertices };
 }
@@ -371,4 +438,8 @@ function footprintOverflow(
     footprint.minZ - margin - minZ,
     maxZ - (footprint.maxZ + margin),
   );
+}
+
+function normalizedRevision(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : 0;
 }
