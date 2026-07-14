@@ -275,14 +275,12 @@ export class GrassSystem {
       if (this.cpuPatches.patches.length > 0) this.cpuPatches.clear();
       return presentation;
     }
-    if (this.cpuPatches.patches.length === 0) {
-      this.cpuPatches.refreshForCenter(center, this.settings);
-    }
+    this.cpuPatches.refreshIfNeeded(center, this.settings);
     return presentation;
   }
 
   private isGpuRingRendering(): boolean {
-    return this.gpuRing.meshes.some((mesh) => mesh.visible);
+    return this.settings.enabled && this.gpuRing.meshes.some((mesh) => mesh.visible);
   }
 
   private clearCpuAndGpu(): void {
