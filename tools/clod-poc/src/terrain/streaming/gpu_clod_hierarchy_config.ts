@@ -43,17 +43,23 @@ function booleanFlag(params: URLSearchParams, key: string, fallback: boolean): b
 }
 
 function nonNegativeInteger(params: URLSearchParams, key: string, fallback: number): number {
-  const parsed = Number(params.get(key));
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
 function positiveInteger(params: URLSearchParams, key: string, fallback: number): number {
-  const parsed = Number(params.get(key));
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
 function positiveNumber(params: URLSearchParams, key: string, fallback: number): number {
-  const parsed = Number(params.get(key));
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
@@ -79,6 +85,15 @@ export function parseGpuClodHierarchyConfig(
     ),
     maxHashProbe: positiveInteger(params, "liveClodGpuHashProbe", defaults.maxHashProbe),
   };
+}
+
+export function shouldKeepGpuClodPageResident(
+  config: GpuClodHierarchyConfig,
+  level: number,
+): boolean {
+  return config.renderResidentPages
+    && level <= config.residentMaxLevel
+    && level < config.readbackMinLevel;
 }
 
 export function gpuClodHierarchyConfigFromWindow(): GpuClodHierarchyConfig {
