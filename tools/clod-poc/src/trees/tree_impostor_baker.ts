@@ -1,36 +1,28 @@
 import * as THREE from "three";
-import { MeshBasicNodeMaterial } from "three/webgpu";
-import {
-  attribute,
-  clamp,
-  float,
-  frontFacing,
-  normalize,
-  positionView,
-  sqrt,
-  vec3,
-} from "three/tsl";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import { octFrames, type OctahedralFrame } from "./tree_impostor_octahedral.js";
+import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import {
-  injectTreeFoliageFragmentShader,
-  injectTreeFoliageVertexShader,
-} from "./tree_material.js";
+  createTreeImpostorBakeMaterial,
+  createTreeImpostorNormalDepthBakeMaterial,
+  TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER,
+  TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER,
+} from "./tree_impostor_capture_material.js";
 import {
-  materialChurnDiagnostics,
-} from "../rendering/material_churn/material_churn_diagnostics.js";
-import {
-  trackCreatedMaterial,
-  trackedMeshBasicMaterial,
-  trackedShaderMaterial,
-} from "../rendering/material_churn/tracked_material_factory.js";
+  configureTreeImpostorAtlasTexture,
+  createTreeImpostorRenderTarget,
+  readCleanedTreeImpostorAtlasTextures,
+  type TreeImpostorReadbackRenderer,
+} from "./tree_impostor_atlas_readback.js";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type TslNode = any;
+export {
+  configureTreeImpostorAtlasTexture,
+  TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER,
+  TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER,
+};
 
-const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
 const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
 /** Variant pages stacked in each atlas. Structural variants above this share
  *  the canonical frames; yaw/scale variation covers the rest at impostor
@@ -72,10 +64,11 @@ export interface TreeImpostorBakerOptions {
   settings: TreeSettings;
   geometries: TreeGeometryMap;
   material: THREE.Material;
+  foliageAtlas?: TreeFoliageAtlas;
   webgpu?: boolean;
 }
 
-interface RenderTargetRenderer {
+interface RenderTargetRenderer extends TreeImpostorReadbackRenderer {
   render(scene: THREE.Object3D, camera: THREE.Camera): void;
   setRenderTarget(target: THREE.WebGLRenderTarget | null): void;
   getRenderTarget(): THREE.WebGLRenderTarget | null;
@@ -101,10 +94,10 @@ export async function bakeTreeImpostorAtlases(
   try {
     const atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>> = {};
     const batch = Math.max(1, options.settings.impostors.maxBakesPerFrame);
-    for (let i = 0; i < TREE_SPECIES.length; i++) {
-      const species = TREE_SPECIES[i];
-      atlases[species] = bakeSpeciesAtlas(options.renderer, species, options);
-      if ((i + 1) % batch === 0 && i + 1 < TREE_SPECIES.length) await nextFrame();
+    for (let index = 0; index < TREE_SPECIES.length; index++) {
+      const species = TREE_SPECIES[index];
+      atlases[species] = await bakeSpeciesAtlas(options.renderer, species, options);
+      if ((index + 1) % batch === 0 && index + 1 < TREE_SPECIES.length) await nextFrame();
     }
     return { atlases, supported: true, reason: null };
   } catch (error) {
@@ -116,11 +109,11 @@ export async function bakeTreeImpostorAtlases(
   }
 }
 
-function bakeSpeciesAtlas(
+async function bakeSpeciesAtlas(
   renderer: RenderTargetRenderer,
   species: TreeSpeciesId,
   options: TreeImpostorBakerOptions,
-): TreeImpostorAtlas {
+): Promise<TreeImpostorAtlas> {
   const { settings, geometries } = options;
   const gridSize = settings.impostors.octahedralGridSize;
   const resolutionPx = settings.impostors.resolutionPx;
@@ -130,25 +123,60 @@ function bakeSpeciesAtlas(
   const atlasWidthPx = atlasSizePx;
   const atlasHeightPx = atlasSizePx * variantCount;
   const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
-  const variantFrames = createTreeImpostorVariantFrames(baseFrames, atlasSizePx, atlasWidthPx, atlasHeightPx, resolutionPx, paddingPx, variantCount);
-  // Both atlases must stay in a linear/no-conversion color space: the samplers
-  // decode coverage-normalized (premultiplied-by-construction) texels as
-  // (rgb / a)^2, and any sRGB transfer applied after hardware filtering breaks
-  // that ratio at every partially covered or mip-filtered texel.
-  const albedoTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-albedo-${species}`, THREE.NoColorSpace);
-  const normalDepthTarget = createRenderTarget(atlasWidthPx, atlasHeightPx, `tree-impostor-normal-depth-${species}`, THREE.NoColorSpace);
+  const variantFrames = createTreeImpostorVariantFrames(
+    baseFrames,
+    atlasSizePx,
+    atlasWidthPx,
+    atlasHeightPx,
+    resolutionPx,
+    paddingPx,
+    variantCount,
+  );
+  const albedoTarget = createTreeImpostorRenderTarget(
+    atlasWidthPx,
+    atlasHeightPx,
+    `tree-impostor-albedo-${species}`,
+  );
+  const normalDepthTarget = createTreeImpostorRenderTarget(
+    atlasWidthPx,
+    atlasHeightPx,
+    `tree-impostor-normal-depth-${species}`,
+  );
 
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera();
-  const albedoMaterial = createBakeMaterial(options.material, settings, options.webgpu === true);
-  const variantBounds = computeTreeImpostorVariantBounds(geometries, species, settings.impostors.sourceLod, variantCount);
-  const normalDepthMaterial = createNormalDepthBakeMaterial(0.01, variantBounds.maxRadius * 6, options.webgpu === true);
-  const mesh = new THREE.Mesh(selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod), albedoMaterial);
+  const albedoMaterial = createTreeImpostorBakeMaterial(
+    options.material,
+    settings,
+    options.foliageAtlas,
+    options.webgpu === true,
+  );
+  const variantBounds = computeTreeImpostorVariantBounds(
+    geometries,
+    species,
+    settings.impostors.sourceLod,
+    variantCount,
+  );
+  const normalDepthMaterial = createTreeImpostorNormalDepthBakeMaterial(
+    0.01,
+    variantBounds.maxRadius * 6,
+    options.foliageAtlas,
+    options.webgpu === true,
+  );
+  const mesh = new THREE.Mesh(
+    selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod),
+    albedoMaterial,
+  );
   scene.add(mesh);
 
   try {
     for (let variant = 0; variant < variantCount; variant++) {
-      const geometry = selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod, variant);
+      const geometry = selectTreeImpostorBakeGeometry(
+        geometries,
+        species,
+        settings.impostors.sourceLod,
+        variant,
+      );
       const bounds = computeTreeImpostorGeometryBounds(geometry);
       mesh.geometry = geometry;
       mesh.position.copy(bounds.center).multiplyScalar(-1);
@@ -164,11 +192,27 @@ function bakeSpeciesAtlas(
     normalDepthMaterial.dispose();
   }
 
+  const cleaned = await readCleanedTreeImpostorAtlasTextures(
+    renderer,
+    albedoTarget,
+    normalDepthTarget,
+    atlasWidthPx,
+    atlasHeightPx,
+    resolutionPx,
+    options.webgpu === true,
+  );
+  const albedo = cleaned?.albedo ?? albedoTarget.texture;
+  const normalDepth = cleaned?.normalDepth ?? normalDepthTarget.texture;
+  if (cleaned) {
+    albedoTarget.dispose();
+    normalDepthTarget.dispose();
+  }
+
   return {
     species,
-    texture: albedoTarget.texture,
-    albedo: albedoTarget.texture,
-    normalDepth: normalDepthTarget.texture,
+    texture: albedo,
+    albedo,
+    normalDepth,
     gridSize,
     resolutionPx,
     atlasSizePx,
@@ -181,8 +225,13 @@ function bakeSpeciesAtlas(
     centerY: variantBounds.centerY,
     ready: true,
     dispose() {
-      albedoTarget.dispose();
-      normalDepthTarget.dispose();
+      if (cleaned) {
+        albedo.dispose();
+        normalDepth.dispose();
+      } else {
+        albedoTarget.dispose();
+        normalDepthTarget.dispose();
+      }
     },
   };
 }
@@ -212,11 +261,17 @@ export function treeImpostorVariantCountForAtlas(atlas: TreeImpostorAtlas): numb
 function treeImpostorVariantCount(geometries: TreeGeometryMap, species: TreeSpeciesId): number {
   const variants = geometries[species].variants;
   if (!variants) return 1;
-  return Math.max(1, Math.min(TREE_STRUCTURAL_VARIANTS, TREE_IMPOSTOR_MAX_ATLAS_VARIANTS, Object.keys(variants).length));
+  return Math.max(
+    1,
+    Math.min(TREE_STRUCTURAL_VARIANTS, TREE_IMPOSTOR_MAX_ATLAS_VARIANTS, Object.keys(variants).length),
+  );
 }
 
 function normalizeTreeImpostorVariant(variant: number): number {
-  return Math.max(0, Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(Number.isFinite(variant) ? variant : 0)));
+  return Math.max(
+    0,
+    Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(Number.isFinite(variant) ? variant : 0)),
+  );
 }
 
 function createTreeImpostorVariantFrames(
@@ -255,14 +310,18 @@ function computeTreeImpostorVariantBounds(
   let maxRadius = 1;
   let centerY = 0;
   for (let variant = 0; variant < variantCount; variant++) {
-    const bounds = computeTreeImpostorGeometryBounds(selectTreeImpostorBakeGeometry(geometries, species, sourceLod, variant));
+    const bounds = computeTreeImpostorGeometryBounds(
+      selectTreeImpostorBakeGeometry(geometries, species, sourceLod, variant),
+    );
     maxRadius = Math.max(maxRadius, bounds.radius);
     if (variant === TREE_IMPOSTOR_CANONICAL_VARIANT) centerY = bounds.centerY;
   }
   return { maxRadius, centerY };
 }
 
-function computeTreeImpostorGeometryBounds(geometry: THREE.BufferGeometry): { radius: number; center: THREE.Vector3; centerY: number } {
+function computeTreeImpostorGeometryBounds(
+  geometry: THREE.BufferGeometry,
+): { radius: number; center: THREE.Vector3; centerY: number } {
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   const radius = Math.max(geometry.boundingSphere?.radius ?? 1, 1);
@@ -279,36 +338,6 @@ function configureBakeCamera(camera: THREE.OrthographicCamera, radius: number): 
   camera.near = 0.01;
   camera.far = radius * 6;
   camera.updateProjectionMatrix();
-}
-
-function createRenderTarget(
-  atlasWidthPx: number,
-  atlasHeightPx: number,
-  name: string,
-  colorSpace: THREE.ColorSpace,
-): THREE.WebGLRenderTarget {
-  const renderTarget = new THREE.WebGLRenderTarget(atlasWidthPx, atlasHeightPx, {
-    depthBuffer: true,
-    stencilBuffer: false,
-    type: THREE.UnsignedByteType,
-    format: THREE.RGBAFormat,
-    minFilter: THREE.LinearMipmapLinearFilter,
-    magFilter: THREE.LinearFilter,
-    generateMipmaps: true,
-  });
-  renderTarget.texture.name = name;
-  renderTarget.texture.colorSpace = colorSpace;
-  configureTreeImpostorAtlasTexture(renderTarget.texture);
-  return renderTarget;
-}
-
-export function configureTreeImpostorAtlasTexture(texture: THREE.Texture): void {
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = true;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = Math.max(texture.anisotropy, TREE_IMPOSTOR_ATLAS_ANISOTROPY);
 }
 
 function bakeAtlasTarget(
@@ -334,7 +363,12 @@ function bakeAtlasTarget(
       camera.position.copy(direction).multiplyScalar(radius * 3);
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
-      renderer.setViewport(frame.x * resolutionPx, yOffsetPx + frame.y * resolutionPx, resolutionPx, resolutionPx);
+      renderer.setViewport(
+        frame.x * resolutionPx,
+        yOffsetPx + frame.y * resolutionPx,
+        resolutionPx,
+        resolutionPx,
+      );
       renderer.render(scene, camera);
     }
   } finally {
@@ -343,110 +377,6 @@ function bakeAtlasTarget(
     renderer.setViewport(oldViewport);
   }
 }
-
-function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings, webgpu: boolean): THREE.Material {
-  // WebGPURenderer ignores onBeforeCompile, so the GLSL sqrt-encode injection
-  // below never runs there; without this node material the atlas stores raw
-  // albedo that every sampler then squares into near-black impostors.
-  if (webgpu) {
-    const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), "tree-impostor-bake-albedo-node");
-    material.name = "tree-impostor-albedo-bake";
-    const vertexAlbedo: TslNode = clamp(attribute("color", "vec3"), vec3(0.0), vec3(1.0));
-    material.colorNode = sqrt(vertexAlbedo);
-    material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
-    material.side = THREE.DoubleSide;
-    material.transparent = false;
-    material.depthWrite = true;
-    return material;
-  }
-
-  const map = sourceMaterial instanceof THREE.MeshStandardMaterial || sourceMaterial instanceof THREE.MeshBasicMaterial
-    ? sourceMaterial.map
-    : null;
-  const material = trackedMeshBasicMaterial({
-    vertexColors: true,
-    map,
-    alphaTest: settings.foliage.enabled ? settings.foliage.alphaTest : 0,
-    side: THREE.DoubleSide,
-    transparent: false,
-    depthWrite: true,
-  }, "tree-impostor-bake-albedo");
-  materialChurnDiagnostics.trackPipelineSensitiveMutation(material, "onBeforeCompile", null, "tree-impostor-bake", "tree-impostor-bake-shader");
-  material.onBeforeCompile = (shader) => {
-    shader.vertexShader = injectTreeFoliageVertexShader(shader.vertexShader);
-    shader.fragmentShader = injectTreeFoliageFragmentShader(shader.fragmentShader);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <opaque_fragment>",
-      "diffuseColor.rgb = sqrt(max(diffuseColor.rgb, vec3(0.0)));\n#include <opaque_fragment>",
-    );
-  };
-  return material;
-}
-
-function createNormalDepthBakeMaterial(near: number, far: number, webgpu: boolean): THREE.Material {
-  if (webgpu) {
-    const material = trackCreatedMaterial(
-      new MeshBasicNodeMaterial(),
-      "tree-impostor-bake-normal-depth-node",
-    );
-    const linearDepth = clamp(
-      positionView.z.negate().sub(float(near)).div(float(Math.max(far - near, 0.0001))),
-      0.0,
-      1.0,
-    );
-    material.name = "tree-impostor-normal-depth-bake";
-    // Flip backface normals into the camera-facing hemisphere: the source tree
-    // renders DoubleSide, and raw backface normals point into the tree, which
-    // relights sharp-mip card texels to near-black.
-    const localNormal: TslNode = normalize(attribute("normal", "vec3"));
-    const facingNormal: TslNode = (frontFacing as TslNode).select(localNormal, localNormal.negate());
-    material.colorNode = facingNormal.mul(0.5).add(0.5);
-    material.opacityNode = linearDepth;
-    material.side = THREE.DoubleSide;
-    material.transparent = false;
-    material.depthWrite = true;
-    return material;
-  }
-
-  return trackedShaderMaterial({
-    name: "tree-impostor-normal-depth-bake",
-    uniforms: {
-      near: { value: near },
-      far: { value: far },
-    },
-    vertexShader: TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER,
-    fragmentShader: TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER,
-    side: THREE.DoubleSide,
-    transparent: false,
-    depthWrite: true,
-  }, "tree-impostor-bake-normal-depth");
-}
-
-export const TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER = `
-uniform float near;
-uniform float far;
-varying vec3 vTreeImpostorLocalNormal;
-varying float vTreeImpostorLinearDepth;
-
-void main() {
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  vTreeImpostorLocalNormal = normalize(normal);
-  vTreeImpostorLinearDepth = clamp((-mvPosition.z - near) / max(far - near, 0.0001), 0.0, 1.0);
-  gl_Position = projectionMatrix * mvPosition;
-}
-`;
-
-export const TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER = `
-varying vec3 vTreeImpostorLocalNormal;
-varying float vTreeImpostorLinearDepth;
-
-void main() {
-  vec3 facingNormal = normalize(vTreeImpostorLocalNormal);
-  if (!gl_FrontFacing) facingNormal = -facingNormal;
-  vec3 packedNormal = facingNormal * 0.5 + 0.5;
-  gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth);
-}
-`;
 
 function isRenderTargetRenderer(value: unknown): value is RenderTargetRenderer {
   if (!value || typeof value !== "object") return false;
