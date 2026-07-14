@@ -54,7 +54,6 @@ export function createSkyNodeMaterial(
   const uSunDiskIntensity = uniform(settings.sunDiskIntensity);
   const uSunGlowIntensity = uniform(settings.sunGlowIntensity);
   const uHazeIntensity = uniform(settings.hazeIntensity);
-  let currentSettings = { ...settings };
 
   const dir: TslNode = normalize(positionGeometry);
   const up = clamp(dir.y.mul(0.5).add(0.5), 0, 1);
@@ -82,7 +81,6 @@ export function createSkyNodeMaterial(
     material,
     lighting: initialLighting,
     updateSettings(next) {
-      currentSettings = { ...next };
       const nextDirection = sunDirectionFromAngles(next.sunAzimuthDeg, next.sunElevationDeg);
       const nextLighting = deriveEnvironmentLighting(nextDirection, next, colors);
       uSunDir.value.copy(nextDirection);
@@ -96,6 +94,5 @@ export function createSkyNodeMaterial(
       handle.lighting = nextLighting;
     },
   };
-  void currentSettings;
   return handle;
 }
