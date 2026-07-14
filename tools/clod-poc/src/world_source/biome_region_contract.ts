@@ -18,7 +18,7 @@ export const BIOME_REGION_CONTRACT: Readonly<BiomeRegionContract> = Object.freez
   oceanIslandMaskMax: 0.08,
   coastHeightBandM: 4,
   coastShoreDistanceM: 42,
-  mountainHeightAboveSeaM: 68,
+  mountainHeightAboveSeaM: 48,
   swampHeightAboveSeaM: 8,
   swampNoiseMax: 0.42,
   plainsDistanceMin: 0.72,
