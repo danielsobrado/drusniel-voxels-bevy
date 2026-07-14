@@ -39,6 +39,6 @@ function restoreGlobal(name: "window" | "history", descriptor: PropertyDescripto
   if (descriptor) {
     Object.defineProperty(globalThis, name, descriptor);
   } else {
-    delete (globalThis as Record<string, unknown>)[name];
+    delete (globalThis as unknown as Record<string, unknown>)[name];
   }
 }
