@@ -2,6 +2,10 @@ import * as THREE from "three";
 import type { ForestLightingDebugMode, ForestLightingSettings } from "./forest_lighting_config.js";
 import type { ForestLightingTextureHandle } from "./forest_lighting_texture.js";
 
+const MATERIAL_AERIAL_TINT_SCALE = 0.15;
+const MATERIAL_AERIAL_TINT_MAX = 0.04;
+const MATERIAL_SHAFT_HINT_SCALE = 0.01;
+
 export interface ForestLightingMaterialState {
   textureHandle: ForestLightingTextureHandle;
   settings: ForestLightingSettings;
@@ -63,8 +67,8 @@ export function createForestLightingUniforms(): ForestLightingUniforms {
     uForestLightingWorldSize: { value: 1 },
     uForestAoStrength: { value: 1 },
     uForestShadowStrength: { value: 1 },
-    uForestFogStrength: { value: 1 },
-    uForestFogColor: { value: new THREE.Color(0xb9c8cf) },
+    uForestFogStrength: { value: 0 },
+    uForestFogColor: { value: new THREE.Color(0x66716d) },
     uForestDebugMode: { value: 0 },
   };
 }
@@ -88,7 +92,7 @@ export function updateForestLightingUniforms(
   uniforms.uForestLightingWorldSize.value = Math.max(1, state.worldCells);
   uniforms.uForestAoStrength.value = settings.ambientOcclusion.strength;
   uniforms.uForestShadowStrength.value = settings.shadowProxy.strength;
-  uniforms.uForestFogStrength.value = settings.atmosphere.forestFogStrength + settings.atmosphere.aerialTintStrength;
+  uniforms.uForestFogStrength.value = settings.atmosphere.aerialTintStrength * MATERIAL_AERIAL_TINT_SCALE;
   uniforms.uForestDebugMode.value = forestLightingDebugModeValue(settings.materialIntegration.debugMode);
 }
 
@@ -151,8 +155,8 @@ if (uForestLightingEnabled > 0.5) {
   } else {
     float forestDarken = clamp(forestAo * uForestAoStrength + forestShadow * uForestShadowStrength, 0.0, 0.72);
     diffuseColor.rgb *= 1.0 - forestDarken;
-    diffuseColor.rgb = mix(diffuseColor.rgb, uForestFogColor, clamp(forestFog * uForestFogStrength, 0.0, 0.35));
-    diffuseColor.rgb += vec3(forestShaft * 0.05);
+    diffuseColor.rgb = mix(diffuseColor.rgb, uForestFogColor, clamp(forestFog * uForestFogStrength, 0.0, ${MATERIAL_AERIAL_TINT_MAX.toFixed(2)}));
+    diffuseColor.rgb += vec3(forestShaft * ${MATERIAL_SHAFT_HINT_SCALE.toFixed(2)});
   }
 }`,
     );
