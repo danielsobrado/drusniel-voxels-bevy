@@ -13,8 +13,9 @@ import {
   clodPageNodeFromArtifact,
   clodPageNodeToArtifact,
 } from "./clodPageNodeArtifact.js";
+import { gpuClodHierarchyConfigFromWindow } from "../terrain/streaming/gpu_clod_hierarchy_config.js";
 
-const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v4-gpu-resident-pages";
+const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v5-gpu-resident-isolation";
 
 export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
@@ -40,7 +41,7 @@ export async function tryLoadStreamRootNode(
   pz: number,
   stats: StreamRootCacheStats,
 ): Promise<ClodPageNode | null> {
-  if (!ctx?.effective) return null;
+  if (!ctx?.effective || residentHierarchyEnabled()) return null;
   const nodeId = streamRootNodeId(level, px, pz);
   const result = await ctx.service.get(
     streamRootKeyParts(ctx, backend, level, px, pz, nodeId),
@@ -68,7 +69,7 @@ export async function storeStreamRootNode(
   buildMs: number,
   stats: StreamRootCacheStats,
 ): Promise<void> {
-  if (!ctx?.effective || node.mesh.indices.length === 0) return;
+  if (!ctx?.effective || residentHierarchyEnabled() || node.mesh.indices.length === 0) return;
   const parsed = parseStreamRootNodeId(node.id);
   stats.nodesBuilt++;
   stats.coldBuildMs += buildMs;
@@ -142,4 +143,8 @@ function parseStreamRootNodeId(nodeId: string): { level: number; pageX: number; 
   const match = /^L(\d+):(-?\d+),(-?\d+)$/.exec(nodeId);
   if (!match) throw new Error(`invalid streamed root node id ${nodeId}`);
   return { level: Number(match[1]), pageX: Number(match[2]), pageZ: Number(match[3]) };
+}
+
+function residentHierarchyEnabled(): boolean {
+  return gpuClodHierarchyConfigFromWindow().enabled;
 }

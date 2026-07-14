@@ -227,8 +227,14 @@ fn weldVertices(@builtin(global_invocation_id) gid : vec3<u32>) {
     }
     if (claim.old_value != key) { continue; }
     var valuePlusOne = atomicLoad(&hashSlots[slotIndex].valuePlusOne);
-    while (valuePlusOne == 0u) {
+    let publishWaitLimit = max(1024u, params.maxProbe * 64u);
+    for (var publishWait = 0u; publishWait < publishWaitLimit && valuePlusOne == 0u; publishWait++) {
       valuePlusOne = atomicLoad(&hashSlots[slotIndex].valuePlusOne);
+    }
+    if (valuePlusOne == 0u) {
+      atomicAdd(&counters.probeFailures, 1u);
+      vertexRemap[vertexId] = 0xffffffffu;
+      return;
     }
     let outputId = valuePlusOne - 1u;
     let existing = outputVertices[outputId];
@@ -363,8 +369,14 @@ fn simplifyVertices(@builtin(global_invocation_id) gid : vec3<u32>) {
     }
     if (claim.old_value != key) { continue; }
     var valuePlusOne = atomicLoad(&hashSlots[slotIndex].valuePlusOne);
-    while (valuePlusOne == 0u) {
+    let publishWaitLimit = max(1024u, params.maxProbe * 64u);
+    for (var publishWait = 0u; publishWait < publishWaitLimit && valuePlusOne == 0u; publishWait++) {
       valuePlusOne = atomicLoad(&hashSlots[slotIndex].valuePlusOne);
+    }
+    if (valuePlusOne == 0u) {
+      atomicAdd(&counters.probeFailures, 1u);
+      vertexRemap[vertexId] = 0xffffffffu;
+      return;
     }
     let outputId = valuePlusOne - 1u;
     let representative = outputVertices[outputId];

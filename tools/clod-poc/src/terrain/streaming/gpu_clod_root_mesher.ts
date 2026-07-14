@@ -73,9 +73,12 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     this.maxActive = Math.max(this.maxActive, this.active);
     this.publishCounters();
     try {
-      const result = await this.meshers[index]!.buildPages(batch);
-      this.ingestResidentPages(result);
-      return result;
+      return await this.meshers[index]!.buildPages(batch);
+    } catch (error) {
+      if (this.residentPages && !this.residentHierarchyDisabled) {
+        this.residentHierarchyFailures++;
+      }
+      throw error;
     } finally {
       this.active--;
       this.release(index);
@@ -128,27 +131,13 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.residentHierarchyDisabled = true;
     const error = new Error("GPU CLOD root pool disposed");
     for (const waiter of this.waiters.splice(0)) waiter.reject(error);
     for (const mesher of this.meshers) mesher.dispose();
     this.residentPages?.dispose();
     this.available.length = 0;
     this.publishCounters();
-  }
-
-  private ingestResidentPages(result: GpuClodRootBuildResult): void {
-    if (!this.residentPages || this.residentHierarchyDisabled) return;
-    try {
-      this.residentPages.ingest(result.nodes);
-    } catch (error) {
-      this.residentHierarchyFailures++;
-      this.residentHierarchyDisabled = true;
-      this.residentPages.dispose();
-      console.warn(
-        "[clod-stream-gpu] optional resident hierarchy disabled; validated render path remains authoritative",
-        error,
-      );
-    }
   }
 
   private acquire(): Promise<number> {
@@ -208,7 +197,7 @@ export async function createGpuClodRootMesher(
     && hierarchyConfig.enabled
     && (!hierarchyConfig.renderResidentPages || opts.sharedDevice === device || rendererDevice === device),
   );
-  const residentPages = residentDeviceCompatible && device
+  let residentPages = residentDeviceCompatible && device
     ? new GpuClodResidentPageCache(device, hierarchyConfig)
     : null;
   const childConfig = poolCount === 1 ? opts.config : splitPoolConfig(opts.config, poolCount);
@@ -226,16 +215,17 @@ export async function createGpuClodRootMesher(
       poolCount,
     );
     if (residentMeshers) return new PooledGpuClodRootMesher(residentMeshers, residentPages);
+    residentPages.dispose();
+    residentPages = null;
     console.warn("[clod-stream-gpu] resident CLOD path failed to initialize; reverting to validated GPU readback path");
   }
 
   const standardMeshers = await createStandardPool(opts, childConfig, device, poolCount);
   if (!standardMeshers) {
-    residentPages?.dispose();
     publishGpuClodRootMesherCounters(disabledGpuStats());
     return null;
   }
-  return new PooledGpuClodRootMesher(standardMeshers, residentPages);
+  return new PooledGpuClodRootMesher(standardMeshers);
 }
 
 async function createResidentPool(

@@ -12,7 +12,7 @@ function fakeBuffer(): GPUBuffer {
 }
 
 describe("external WebGPU CLOD geometry", () => {
-  it("binds resident vertex, index, and meshlet indirect buffers without CPU geometry upload", () => {
+  it("binds resident buffers and disposes renderer metadata without destroying cache-owned buffers", () => {
     const backendData = new WeakMap<object, { buffer?: GPUBuffer }>();
     const renderer = {
       backend: {
@@ -58,6 +58,8 @@ describe("external WebGPU CLOD geometry", () => {
     };
 
     const geometry = createExternalGpuClodGeometry(renderer, lease);
+    const dispose = vi.fn();
+    geometry.addEventListener("dispose", dispose);
     const position = geometry.getAttribute("position");
     expect(position.count).toBe(12);
     expect(geometry.index?.count).toBe(18);
@@ -68,9 +70,13 @@ describe("external WebGPU CLOD geometry", () => {
     expect(backendData.get(geometry.indirect as object)?.buffer).toBe(indirectBuffer);
     expect(isExternalGpuClodGeometry(geometry)).toBe(true);
 
+    geometry.dispose();
     releaseExternalGpuClodGeometry(geometry);
-    releaseExternalGpuClodGeometry(geometry);
+    expect(dispose).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
+    expect(vertexBuffer.destroy).not.toHaveBeenCalled();
+    expect(indexBuffer.destroy).not.toHaveBeenCalled();
+    expect(indirectBuffer.destroy).not.toHaveBeenCalled();
     expect(isExternalGpuClodGeometry(geometry)).toBe(false);
   });
 });

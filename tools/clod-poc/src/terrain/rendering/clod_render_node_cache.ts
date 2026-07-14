@@ -32,6 +32,7 @@ export interface ClodRenderNodeCacheStats {
   prefetches: number;
   gpuResidentViews: number;
   gpuResidentNormalFallbacks: number;
+  gpuResidentWireframeFallbacks: number;
 }
 
 export interface ClodRenderNodeView {
@@ -83,6 +84,7 @@ export class ClodRenderNodeCache {
   private statPrefetches = 0;
   private statGpuResidentViews = 0;
   private statGpuResidentNormalFallbacks = 0;
+  private statGpuResidentWireframeFallbacks = 0;
   private lastPruneFrame = -Infinity;
   private warnedAtInactiveNodes = false;
 
@@ -96,11 +98,13 @@ export class ClodRenderNodeCache {
 
   getOrCreate(input: CreateRenderNodeInput): ClodRenderNodeView {
     const existing = this.viewMap.get(input.node.id);
-    if (existing) {
+    if (existing && canReuseViewGeometry(existing.node, input.node)) {
+      existing.node = input.node;
       existing.lastUsedFrame = input.frameId;
       this.statReuses++;
       return existing;
     }
+    if (existing) this.disposeNodeInternal(input.node.id, "invalidate");
     const entry = this.createRenderNodeView(input.node, input.frameId);
     this.entries.set(input.node.id, entry);
     this.viewMap.set(input.node.id, entry.view);
@@ -195,6 +199,7 @@ export class ClodRenderNodeCache {
       prefetches: this.statPrefetches,
       gpuResidentViews: this.statGpuResidentViews,
       gpuResidentNormalFallbacks: this.statGpuResidentNormalFallbacks,
+      gpuResidentWireframeFallbacks: this.statGpuResidentWireframeFallbacks,
     };
   }
 
@@ -219,6 +224,7 @@ export class ClodRenderNodeCache {
       geometry.dispose();
     }
     this.releaseMaterial(view.mat);
+    this.syncWireframeState();
     this.statDisposals++;
     if (reason === "evict") this.statEvictions++;
   }
@@ -227,7 +233,7 @@ export class ClodRenderNodeCache {
     const mat = this.deps.materialController.makeTerrainMaterial(this.deps.getMaterialColorForNode(node));
     mat.setColorAdjust(this.deps.getColorAdjustments());
     this.deps.materialController.applyLighting(mat, this.deps.getLighting());
-    this.configureCurrentMaterialState(mat);
+    this.configureCurrentMaterialState(mat, node);
 
     const normalMode = this.deps.getNormalMode();
     const webGpuRenderer = node.gpuResidentOnly
@@ -305,9 +311,13 @@ export class ClodRenderNodeCache {
     if (!this.deps.materialController.releaseTerrainMaterial(mat)) mat.material.dispose();
   }
 
-  private configureCurrentMaterialState(mat: TerrainMaterialHandle): void {
+  private configureCurrentMaterialState(mat: TerrainMaterialHandle, node: ClodPageNode): void {
     const state = this.deps.getMaterialState();
-    mat.setWireframe(state.wireframe);
+    const residentPresent = node.gpuResidentOnly || this.hasResidentViews();
+    const sharedWithResident = mat === this.deps.materialController.sharedMaterial && residentPresent;
+    const wireframe = state.wireframe && !node.gpuResidentOnly && !sharedWithResident;
+    if (state.wireframe && !wireframe) this.statGpuResidentWireframeFallbacks++;
+    mat.setWireframe(wireframe);
     mat.setDebug({
       normalColor: state.normalColor,
       normalDivergence: state.normalDivergence,
@@ -319,6 +329,23 @@ export class ClodRenderNodeCache {
       this.deps.materialController.activeTerrainSlots(),
       this.deps.materialController.terrainTextureUniformOptions(),
     );
+  }
+
+  private syncWireframeState(): void {
+    const state = this.deps.getMaterialState();
+    const residentPresent = this.hasResidentViews();
+    const sharedMaterial = this.deps.materialController.sharedMaterial;
+    for (const view of this.viewMap.values()) {
+      const sharedWithResident = view.mat === sharedMaterial && residentPresent;
+      view.mat.setWireframe(state.wireframe && !view.node.gpuResidentOnly && !sharedWithResident);
+    }
+  }
+
+  private hasResidentViews(): boolean {
+    for (const view of this.viewMap.values()) {
+      if (view.node.gpuResidentOnly) return true;
+    }
+    return false;
   }
 
   private canDisposeView(view: ClodRenderNodeView, protectedNodeIds: ReadonlySet<string>): boolean {
@@ -333,6 +360,12 @@ export class ClodRenderNodeCache {
       || view.fade > 0.001
       || view.mesh.visible;
   }
+}
+
+function canReuseViewGeometry(current: ClodPageNode, next: ClodPageNode): boolean {
+  if (current === next) return true;
+  if (current.gpuResidentOnly || next.gpuResidentOnly) return false;
+  return current.mesh === next.mesh;
 }
 
 function normalizedRevision(value: number | undefined): number {

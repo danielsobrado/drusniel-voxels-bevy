@@ -120,7 +120,7 @@ async function readCounters(page: Page): Promise<ResidentCounters> {
       streamInflightBatches: value("live_clod_stream_inflight_batches"),
       streamFailedPages: value("live_clod_stream_failed_pages"),
       streamFallbackPages: value("live_clod_stream_gpu_fallback_pages"),
-      streamWorkerFallbackPages: value("live_clod_stream_gpu_worker_fallback_pages"),
+      streamWorkerFallbackPages: value("live_clod_stream_worker_fallback_pages"),
       geometryReadbackMsP95: value("live_clod_stream_gpu_geometry_readback_ms_p95"),
       countReadbackMsP95: value("live_clod_stream_gpu_count_readback_ms_p95"),
       buildMsP95: value("live_clod_stream_gpu_build_ms_p95"),

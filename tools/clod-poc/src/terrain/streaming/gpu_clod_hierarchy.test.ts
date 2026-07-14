@@ -1,11 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
   parseGpuClodHierarchyConfig,
+  shouldKeepGpuClodPageResident,
 } from "./gpu_clod_hierarchy_config.js";
 import { buildGpuClodMeshletHierarchy } from "./gpu_clod_meshlet_hierarchy.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
+import type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
+import {
+  GPU_CLOD_SIMPLIFY_RUNTIME_WGSL,
+  GPU_CLOD_WELD_RUNTIME_WGSL,
+} from "./gpu_clod_page_compute_shaders.js";
 import {
   GPU_CLOD_PACKED_VERTEX_FLOATS,
   GPU_CLOD_WELD_WGSL,
@@ -13,14 +19,27 @@ import {
 } from "./gpu_clod_weld_compute.js";
 import { GPU_CLOD_SIMPLIFY_WGSL } from "./gpu_clod_simplify_compute.js";
 
- describe("GPU CLOD hierarchy config", () => {
+describe("GPU CLOD hierarchy config", () => {
   it("keeps the complete path behind one explicit runtime flag", () => {
     const config = parseGpuClodHierarchyConfig(new URLSearchParams("scene=infinite-islands"));
     expect(config.enabled).toBe(false);
     expect(config.renderResidentPages).toBe(true);
     expect(config.readbackMinLevel).toBe(1);
+    expect(config.residentMaxLevel).toBe(0);
     expect(config.gpuWeld).toBe(true);
     expect(config.gpuSimplify).toBe(true);
+  });
+
+  it("keeps defaults for missing and blank numeric options", () => {
+    const missing = parseGpuClodHierarchyConfig(new URLSearchParams());
+    const blank = parseGpuClodHierarchyConfig(new URLSearchParams([
+      ["liveClodGpuReadbackMinLevel", ""],
+      ["liveClodGpuResidentMaxLevel", "   "],
+    ]));
+    expect(missing.readbackMinLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.readbackMinLevel);
+    expect(missing.residentMaxLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.residentMaxLevel);
+    expect(blank.readbackMinLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.readbackMinLevel);
+    expect(blank.residentMaxLevel).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.residentMaxLevel);
   });
 
   it("parses bounded hierarchy options", () => {
@@ -55,6 +74,19 @@ import { GPU_CLOD_SIMPLIFY_WGSL } from "./gpu_clod_simplify_compute.js";
   it("uses stable defaults for invalid values", () => {
     const config = parseGpuClodHierarchyConfig(new URLSearchParams("liveClodGpuResidentBytes=-1"));
     expect(config.maxResidentBytes).toBe(DEFAULT_GPU_CLOD_HIERARCHY_CONFIG.maxResidentBytes);
+  });
+
+  it("gives each level one geometry authority", () => {
+    const config = {
+      ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
+      enabled: true,
+      renderResidentPages: true,
+      residentMaxLevel: 2,
+      readbackMinLevel: 1,
+    };
+    expect(shouldKeepGpuClodPageResident(config, 0)).toBe(true);
+    expect(shouldKeepGpuClodPageResident(config, 1)).toBe(false);
+    expect(shouldKeepGpuClodPageResident(config, 2)).toBe(false);
   });
 });
 
@@ -118,6 +150,35 @@ describe("GPU CLOD resident page cache", () => {
       else delete (globalThis as unknown as { GPUBufferUsage?: unknown }).GPUBufferUsage;
     }
   });
+
+  it("expires first-view protection instead of pinning a full cache forever", () => {
+    let now = 0;
+    const cache = new GpuClodResidentPageCache(
+      {} as GPUDevice,
+      {
+        ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
+        enabled: true,
+        residentMaxLevel: 0,
+        maxResidentBytes: 300,
+      },
+      () => now,
+    );
+    const first = residentPage("L0:0,0", 200);
+    const second = residentPage("L0:1,0", 200);
+    try {
+      cache.adopt(first);
+      now = 100;
+      expect(() => cache.adopt(second)).toThrow(/pending first-view pages/);
+      now = 6_000;
+      cache.adopt(second);
+      expect(cache.stats().residentPages).toBe(1);
+      expect(cache.stats().residentBytes).toBe(200);
+      expect(cache.stats().evictionsTotal).toBe(1);
+      expect(first.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      cache.dispose();
+    }
+  });
 });
 
 describe("GPU CLOD compute contracts", () => {
@@ -137,6 +198,13 @@ describe("GPU CLOD compute contracts", () => {
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn simplify_triangles");
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn is_locked");
   });
+
+  it("bounds cross-workgroup hash publication waits", () => {
+    for (const source of [GPU_CLOD_WELD_RUNTIME_WGSL, GPU_CLOD_SIMPLIFY_RUNTIME_WGSL]) {
+      expect(source).toContain("publishWaitLimit");
+      expect(source).not.toContain("while (valuePlusOne == 0u)");
+    }
+  });
 });
 
 function pageNode(mesh: PageMesh, revision: number): ClodPageNode {
@@ -148,6 +216,22 @@ function pageNode(mesh: PageMesh, revision: number): ClodPageNode {
     mesh,
     footprint: { minX: 0, minZ: 0, maxX: 2, maxZ: 2 },
     bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
+    errorWorld: 0,
+    lowBenefit: false,
+  };
+}
+
+function residentPage(id: string, byteLength: number): GpuClodResidentPage {
+  return {
+    id,
+    revision: 1,
+    level: 0,
+    vertexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
+    indexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
+    vertexCount: 3,
+    indexCount: 3,
+    byteLength,
+    bounds: { center: [0, 0, 0], radius: 1, minY: 0, maxY: 0 },
     errorWorld: 0,
     lowBenefit: false,
   };

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
+import { DEFAULT_GPU_CLOD_HIERARCHY_CONFIG } from "./gpu_clod_hierarchy_config.js";
+import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
 import { createBufferedResidentAdoption } from "./gpu_clod_resident_adoption.js";
 import {
   disabledGpuStats,
@@ -7,15 +8,15 @@ import {
 } from "./gpu_clod_root_mesher_single.js";
 import type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 
-function page(id: string): GpuClodResidentPage {
+function page(id: string, vertexCount = 3, indexCount = 3): GpuClodResidentPage {
   return {
     id,
     revision: 1,
     level: 0,
     vertexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
     indexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
-    vertexCount: 3,
-    indexCount: 3,
+    vertexCount,
+    indexCount,
     byteLength: 256,
     bounds: { center: [0, 0, 0], radius: 1, minY: 0, maxY: 0 },
     errorWorld: 0,
@@ -71,5 +72,38 @@ describe("buffered resident page adoption", () => {
     expect(first.indexBuffer.destroy).toHaveBeenCalledTimes(1);
     expect(second.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
     expect(second.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps rejection cleanup single-owned when the real cache is disabled", async () => {
+    const cache = new GpuClodResidentPageCache(
+      {} as GPUDevice,
+      { ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG, enabled: false },
+    );
+    const adoption = createBufferedResidentAdoption(cache);
+    const resident = page("L0:0,0");
+    const wrapped = adoption.wrap(mesher(async () => {
+      adoption.onPage(resident);
+      return { nodes: [], buildMs: 1, transferBytes: 0 };
+    }));
+
+    await expect(wrapped.buildPages([{ px: 0, pz: 0 }])).rejects.toThrow("cache is disabled");
+    expect(resident.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+    expect(resident.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects empty pages before they enter the resident cache", async () => {
+    const adoptMany = vi.fn();
+    const cache = { adoptMany } as unknown as GpuClodResidentPageCache;
+    const adoption = createBufferedResidentAdoption(cache);
+    const resident = page("L0:0,0", 0, 0);
+    const wrapped = adoption.wrap(mesher(async () => {
+      adoption.onPage(resident);
+      return { nodes: [], buildMs: 1, transferBytes: 0 };
+    }));
+
+    await expect(wrapped.buildPages([{ px: 0, pz: 0 }])).rejects.toThrow("invalid counts");
+    expect(adoptMany).not.toHaveBeenCalled();
+    expect(resident.vertexBuffer.destroy).toHaveBeenCalledTimes(1);
+    expect(resident.indexBuffer.destroy).toHaveBeenCalledTimes(1);
   });
 });

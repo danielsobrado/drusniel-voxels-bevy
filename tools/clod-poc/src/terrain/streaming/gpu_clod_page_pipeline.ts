@@ -1,15 +1,19 @@
 import type { ClodPageNode, PageFootprint, PageMesh } from "../../types.js";
-import type { GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
+import {
+  shouldKeepGpuClodPageResident,
+  type GpuClodHierarchyConfig,
+} from "./gpu_clod_hierarchy_config.js";
 import {
   GPU_CLOD_INDEX_OFFSET_WGSL,
   GPU_CLOD_MESHLET_HIERARCHY_WGSL,
   GPU_CLOD_MESHLET_WGSL,
   GPU_CLOD_PACK_WGSL,
   GPU_CLOD_PAGE_WORKGROUP_SIZE,
-  GPU_CLOD_SIMPLIFY_RUNTIME_WGSL,
   GPU_CLOD_WELD_RUNTIME_WGSL,
 } from "./gpu_clod_page_compute_shaders.js";
+import { GPU_CLOD_SIMPLIFY_RUNTIME_WGSL } from "./gpu_clod_simplify_runtime_shader.js";
 import {
+  GPU_CLOD_VERTEX_FLOATS,
   GPU_CLOD_VERTEX_STRIDE_BYTES,
   destroyGpuClodResidentPage,
   type GpuClodMeshletBuffers,
@@ -21,8 +25,14 @@ const F32 = Float32Array.BYTES_PER_ELEMENT;
 const MIN_BUFFER_BYTES = 4;
 const INVALID_INDEX = 0xffff_ffff;
 const MESHLET_FANOUT = 4;
-const VERTEX_USAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX;
-const INDEX_USAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | GPUBufferUsage.INDEX;
+const VERTEX_USAGE = GPUBufferUsage.STORAGE
+  | GPUBufferUsage.COPY_SRC
+  | GPUBufferUsage.COPY_DST
+  | GPUBufferUsage.VERTEX;
+const INDEX_USAGE = GPUBufferUsage.STORAGE
+  | GPUBufferUsage.COPY_SRC
+  | GPUBufferUsage.COPY_DST
+  | GPUBufferUsage.INDEX;
 const STORAGE_USAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
 
 export interface GpuClodChunkSource {
@@ -74,6 +84,12 @@ interface CounterResult {
   maxError: number;
 }
 
+interface ReductionStage {
+  pipeline: GPUComputePipeline;
+  bindGroup: GPUBindGroup;
+  workItems: number;
+}
+
 export class GpuClodPagePipeline {
   private constructor(
     private readonly device: GPUDevice,
@@ -89,14 +105,30 @@ export class GpuClodPagePipeline {
     private readonly hierarchyPipeline: GPUComputePipeline,
   ) {}
 
-  static async create(device: GPUDevice, options: GpuClodPagePipelineOptions): Promise<GpuClodPagePipeline> {
+  static async create(
+    device: GPUDevice,
+    options: GpuClodPagePipelineOptions,
+  ): Promise<GpuClodPagePipeline> {
     const packModule = device.createShaderModule({ label: "gpu clod page pack", code: GPU_CLOD_PACK_WGSL });
     const weldModule = device.createShaderModule({ label: "gpu clod page weld", code: GPU_CLOD_WELD_RUNTIME_WGSL });
-    const simplifyModule = device.createShaderModule({ label: "gpu clod page simplify", code: GPU_CLOD_SIMPLIFY_RUNTIME_WGSL });
-    const indexModule = device.createShaderModule({ label: "gpu clod parent index offset", code: GPU_CLOD_INDEX_OFFSET_WGSL });
+    const simplifyModule = device.createShaderModule({
+      label: "gpu clod page simplify",
+      code: GPU_CLOD_SIMPLIFY_RUNTIME_WGSL,
+    });
+    const indexModule = device.createShaderModule({
+      label: "gpu clod parent index offset",
+      code: GPU_CLOD_INDEX_OFFSET_WGSL,
+    });
     const meshletModule = device.createShaderModule({ label: "gpu clod meshlets", code: GPU_CLOD_MESHLET_WGSL });
-    const hierarchyModule = device.createShaderModule({ label: "gpu clod meshlet hierarchy", code: GPU_CLOD_MESHLET_HIERARCHY_WGSL });
-    const pipeline = (label: string, module: GPUShaderModule, entryPoint: string) => device.createComputePipelineAsync({
+    const hierarchyModule = device.createShaderModule({
+      label: "gpu clod meshlet hierarchy",
+      code: GPU_CLOD_MESHLET_HIERARCHY_WGSL,
+    });
+    const pipeline = (
+      label: string,
+      module: GPUShaderModule,
+      entryPoint: string,
+    ): Promise<GPUComputePipeline> => device.createComputePipelineAsync({
       label,
       layout: "auto",
       compute: { module, entryPoint },
@@ -143,10 +175,25 @@ export class GpuClodPagePipeline {
     chunks: readonly GpuClodChunkSource[],
   ): Promise<GpuClodResidentPage> {
     if (chunks.length === 0) return this.emptyPage(identity);
-    const packed = this.packChunks(sourceBuffers, chunks);
-    const welded = this.options.config.gpuWeld ? await this.weld(packed) : packed;
-    if (welded !== packed) destroyMeshBuffers(packed);
-    return this.finalize(identity, welded, conservativeBounds(identity.footprint, this.options.terrainMinY, this.options.terrainMaxY));
+    let owned: MeshBuffers | null = this.packChunks(sourceBuffers, chunks);
+    try {
+      if (this.options.config.gpuWeld) {
+        const welded = await this.weld(owned);
+        if (welded !== owned) {
+          destroyMeshBuffers(owned);
+          owned = welded;
+        }
+      }
+      const page = this.finalize(
+        identity,
+        owned,
+        conservativeBounds(identity.footprint, this.options.terrainMinY, this.options.terrainMaxY),
+      );
+      owned = null;
+      return page;
+    } finally {
+      if (owned) destroyMeshBuffers(owned);
+    }
   }
 
   async buildParentPage(
@@ -154,24 +201,50 @@ export class GpuClodPagePipeline {
     children: readonly GpuClodResidentPage[],
   ): Promise<GpuClodResidentPage> {
     if (children.length !== 4) throw new Error(`${identity.id} requires exactly four GPU child pages`);
-    const merged = this.mergeChildren(children);
-    const welded = this.options.config.gpuWeld ? await this.weld(merged) : merged;
-    if (welded !== merged) destroyMeshBuffers(merged);
-    const simplified = this.options.config.gpuSimplify
-      ? await this.simplify(welded, identity.footprint, identity.level)
-      : welded;
-    if (simplified !== welded) destroyMeshBuffers(welded);
-    const bounds = unionBounds(children.map((child) => child.bounds));
-    return this.finalize(identity, {
-      ...simplified,
-      errorWorld: simplified.errorWorld + Math.max(...children.map((child) => child.errorWorld)),
-    }, bounds);
+    let owned: MeshBuffers | null = this.mergeChildren(children);
+    try {
+      if (this.options.config.gpuWeld) {
+        const welded = await this.weld(owned);
+        if (welded !== owned) {
+          destroyMeshBuffers(owned);
+          owned = welded;
+        }
+      }
+      if (this.options.config.gpuSimplify) {
+        const simplified = await this.simplify(owned, identity.footprint, identity.level);
+        if (simplified !== owned) {
+          destroyMeshBuffers(owned);
+          owned = simplified;
+        }
+      }
+      const mesh = {
+        ...owned,
+        errorWorld: owned.errorWorld + Math.max(...children.map((child) => child.errorWorld)),
+      };
+      const page = this.finalize(identity, mesh, unionBounds(children.map((child) => child.bounds)));
+      owned = null;
+      return page;
+    } finally {
+      if (owned) destroyMeshBuffers(owned);
+    }
   }
 
   async attachMeshlets(page: GpuClodResidentPage): Promise<GpuClodResidentPage> {
-    if (!this.options.config.meshlets || page.indexCount === 0 || page.meshlets) return page;
-    const meshlets = this.buildMeshlets(page);
-    return { ...page, meshlets, byteLength: page.byteLength + meshlets.byteLength };
+    if (
+      !this.options.config.meshlets
+      || !shouldKeepGpuClodPageResident(this.options.config, page.level)
+      || page.indexCount === 0
+      || page.meshlets
+    ) {
+      return page;
+    }
+    try {
+      const meshlets = this.buildMeshlets(page);
+      return { ...page, meshlets, byteLength: page.byteLength + meshlets.byteLength };
+    } catch (error) {
+      this.destroyPage(page);
+      throw error;
+    }
   }
 
   async readbackPage(page: GpuClodResidentPage): Promise<PageMesh> {
@@ -198,7 +271,7 @@ export class GpuClodPagePipeline {
       const paintSlots = new Float32Array(page.vertexCount);
       const materialWeights = new Float32Array(page.vertexCount * 4);
       for (let vertex = 0; vertex < page.vertexCount; vertex++) {
-        const source = vertex * 16;
+        const source = vertex * GPU_CLOD_VERTEX_FLOATS;
         const target3 = vertex * 3;
         const target4 = vertex * 4;
         positions[target3] = packed[source] ?? 0;
@@ -226,7 +299,10 @@ export class GpuClodPagePipeline {
     destroyGpuClodResidentPage(page);
   }
 
-  private packChunks(source: GpuClodSourceBuffers, chunks: readonly GpuClodChunkSource[]): MeshBuffers {
+  private packChunks(
+    source: GpuClodSourceBuffers,
+    chunks: readonly GpuClodChunkSource[],
+  ): MeshBuffers {
     let totalVertices = 0;
     let totalIndices = 0;
     const descriptors = new Uint32Array(chunks.length * 8);
@@ -244,186 +320,283 @@ export class GpuClodPagePipeline {
       totalVertices += chunk.vertexCount;
       totalIndices += chunk.indexCount;
     }
-    const vertexBuffer = this.buffer("gpu clod packed input vertices", totalVertices * GPU_CLOD_VERTEX_STRIDE_BYTES, VERTEX_USAGE);
-    const indexBuffer = this.buffer("gpu clod packed input indices", totalIndices * U32, INDEX_USAGE);
-    const descriptorBuffer = this.upload("gpu clod chunk descriptors", descriptors, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-    const paramsBuffer = this.upload("gpu clod pack params", new Uint32Array([chunks.length, totalVertices, totalIndices, 0]), GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
-    const bindGroup = this.device.createBindGroup({
-      label: "gpu clod pack bind group",
-      layout: this.packVerticesPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: source.positions } },
-        { binding: 1, resource: { buffer: source.normals } },
-        { binding: 2, resource: { buffer: source.materials } },
-        { binding: 3, resource: { buffer: source.indices } },
-        { binding: 4, resource: { buffer: descriptorBuffer } },
-        { binding: 5, resource: { buffer: this.options.fieldParams } },
-        { binding: 6, resource: { buffer: paramsBuffer } },
-        { binding: 7, resource: { buffer: vertexBuffer } },
-        { binding: 8, resource: { buffer: indexBuffer } },
-      ],
-    });
-    const encoder = this.device.createCommandEncoder({ label: "gpu clod pack page" });
-    const vertexPass = encoder.beginComputePass();
-    vertexPass.setPipeline(this.packVerticesPipeline);
-    vertexPass.setBindGroup(0, bindGroup);
-    vertexPass.dispatchWorkgroups(workgroups(totalVertices));
-    vertexPass.end();
-    const indexPass = encoder.beginComputePass();
-    indexPass.setPipeline(this.packIndicesPipeline);
-    indexPass.setBindGroup(0, bindGroup);
-    indexPass.dispatchWorkgroups(workgroups(totalIndices));
-    indexPass.end();
-    this.device.queue.submit([encoder.finish()]);
-    descriptorBuffer.destroy();
-    paramsBuffer.destroy();
-    return { vertexBuffer, indexBuffer, vertexCount: totalVertices, indexCount: totalIndices, errorWorld: 0, lowBenefit: false };
+
+    let vertexBuffer: GPUBuffer | null = null;
+    let indexBuffer: GPUBuffer | null = null;
+    let descriptorBuffer: GPUBuffer | null = null;
+    let paramsBuffer: GPUBuffer | null = null;
+    try {
+      vertexBuffer = this.buffer(
+        "gpu clod packed input vertices",
+        totalVertices * GPU_CLOD_VERTEX_STRIDE_BYTES,
+        VERTEX_USAGE,
+      );
+      indexBuffer = this.buffer("gpu clod packed input indices", totalIndices * U32, INDEX_USAGE);
+      descriptorBuffer = this.upload(
+        "gpu clod chunk descriptors",
+        descriptors,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      );
+      paramsBuffer = this.upload(
+        "gpu clod pack params",
+        new Uint32Array([chunks.length, totalVertices, totalIndices, 0]),
+        GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      );
+      const bindGroup = this.device.createBindGroup({
+        label: "gpu clod pack bind group",
+        layout: this.packVerticesPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: source.positions } },
+          { binding: 1, resource: { buffer: source.normals } },
+          { binding: 2, resource: { buffer: source.materials } },
+          { binding: 3, resource: { buffer: source.indices } },
+          { binding: 4, resource: { buffer: descriptorBuffer } },
+          { binding: 5, resource: { buffer: this.options.fieldParams } },
+          { binding: 6, resource: { buffer: paramsBuffer } },
+          { binding: 7, resource: { buffer: vertexBuffer } },
+          { binding: 8, resource: { buffer: indexBuffer } },
+        ],
+      });
+      const encoder = this.device.createCommandEncoder({ label: "gpu clod pack page" });
+      const vertexPass = encoder.beginComputePass();
+      vertexPass.setPipeline(this.packVerticesPipeline);
+      vertexPass.setBindGroup(0, bindGroup);
+      vertexPass.dispatchWorkgroups(workgroups(totalVertices));
+      vertexPass.end();
+      const indexPass = encoder.beginComputePass();
+      indexPass.setPipeline(this.packIndicesPipeline);
+      indexPass.setBindGroup(0, bindGroup);
+      indexPass.dispatchWorkgroups(workgroups(totalIndices));
+      indexPass.end();
+      this.device.queue.submit([encoder.finish()]);
+      const result: MeshBuffers = {
+        vertexBuffer,
+        indexBuffer,
+        vertexCount: totalVertices,
+        indexCount: totalIndices,
+        errorWorld: 0,
+        lowBenefit: false,
+      };
+      vertexBuffer = null;
+      indexBuffer = null;
+      return result;
+    } finally {
+      descriptorBuffer?.destroy();
+      paramsBuffer?.destroy();
+      vertexBuffer?.destroy();
+      indexBuffer?.destroy();
+    }
   }
 
   private mergeChildren(children: readonly GpuClodResidentPage[]): MeshBuffers {
     const totalVertices = children.reduce((sum, child) => sum + child.vertexCount, 0);
     const totalIndices = children.reduce((sum, child) => sum + child.indexCount, 0);
-    const vertexBuffer = this.buffer("gpu clod parent merged vertices", totalVertices * GPU_CLOD_VERTEX_STRIDE_BYTES, VERTEX_USAGE);
-    const indexBuffer = this.buffer("gpu clod parent merged indices", totalIndices * U32, INDEX_USAGE);
-    const encoder = this.device.createCommandEncoder({ label: "gpu clod merge parent" });
-    let vertexOffset = 0;
-    let indexOffset = 0;
+    let vertexBuffer: GPUBuffer | null = null;
+    let indexBuffer: GPUBuffer | null = null;
     const transientParams: GPUBuffer[] = [];
-    for (const child of children) {
-      const vertexBytes = child.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES;
-      if (vertexBytes > 0) encoder.copyBufferToBuffer(child.vertexBuffer, 0, vertexBuffer, vertexOffset * GPU_CLOD_VERTEX_STRIDE_BYTES, vertexBytes);
-      if (child.indexCount > 0) {
-        const params = this.upload(
-          "gpu clod index offset params",
-          new Uint32Array([child.indexCount, indexOffset, vertexOffset, 0]),
-          GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        );
-        transientParams.push(params);
-        const bindGroup = this.device.createBindGroup({
-          label: "gpu clod index offset bind group",
-          layout: this.indexOffsetPipeline.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: { buffer: params } },
-            { binding: 1, resource: { buffer: child.indexBuffer } },
-            { binding: 2, resource: { buffer: indexBuffer } },
-          ],
-        });
-        const pass = encoder.beginComputePass();
-        pass.setPipeline(this.indexOffsetPipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.dispatchWorkgroups(workgroups(child.indexCount));
-        pass.end();
+    try {
+      vertexBuffer = this.buffer(
+        "gpu clod parent merged vertices",
+        totalVertices * GPU_CLOD_VERTEX_STRIDE_BYTES,
+        VERTEX_USAGE,
+      );
+      indexBuffer = this.buffer("gpu clod parent merged indices", totalIndices * U32, INDEX_USAGE);
+      const encoder = this.device.createCommandEncoder({ label: "gpu clod merge parent" });
+      let vertexOffset = 0;
+      let indexOffset = 0;
+      for (const child of children) {
+        const vertexBytes = child.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES;
+        if (vertexBytes > 0) {
+          encoder.copyBufferToBuffer(
+            child.vertexBuffer,
+            0,
+            vertexBuffer,
+            vertexOffset * GPU_CLOD_VERTEX_STRIDE_BYTES,
+            vertexBytes,
+          );
+        }
+        if (child.indexCount > 0) {
+          const params = this.upload(
+            "gpu clod index offset params",
+            new Uint32Array([child.indexCount, indexOffset, vertexOffset, 0]),
+            GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+          );
+          transientParams.push(params);
+          const bindGroup = this.device.createBindGroup({
+            label: "gpu clod index offset bind group",
+            layout: this.indexOffsetPipeline.getBindGroupLayout(0),
+            entries: [
+              { binding: 0, resource: { buffer: params } },
+              { binding: 1, resource: { buffer: child.indexBuffer } },
+              { binding: 2, resource: { buffer: indexBuffer } },
+            ],
+          });
+          const pass = encoder.beginComputePass();
+          pass.setPipeline(this.indexOffsetPipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.dispatchWorkgroups(workgroups(child.indexCount));
+          pass.end();
+        }
+        vertexOffset += child.vertexCount;
+        indexOffset += child.indexCount;
       }
-      vertexOffset += child.vertexCount;
-      indexOffset += child.indexCount;
+      this.device.queue.submit([encoder.finish()]);
+      const result: MeshBuffers = {
+        vertexBuffer,
+        indexBuffer,
+        vertexCount: totalVertices,
+        indexCount: totalIndices,
+        errorWorld: 0,
+        lowBenefit: false,
+      };
+      vertexBuffer = null;
+      indexBuffer = null;
+      return result;
+    } finally {
+      for (const params of transientParams) params.destroy();
+      vertexBuffer?.destroy();
+      indexBuffer?.destroy();
     }
-    this.device.queue.submit([encoder.finish()]);
-    for (const params of transientParams) params.destroy();
-    return { vertexBuffer, indexBuffer, vertexCount: totalVertices, indexCount: totalIndices, errorWorld: 0, lowBenefit: false };
   }
 
   private async weld(input: MeshBuffers): Promise<MeshBuffers> {
     if (input.vertexCount === 0 || input.indexCount === 0) return input;
     const hashCapacity = nextPowerOfTwo(Math.max(4, input.vertexCount * 2));
-    const hashBuffer = this.buffer("gpu clod weld hash", hashCapacity * 2 * U32, STORAGE_USAGE);
-    const remapBuffer = this.buffer("gpu clod weld remap", input.vertexCount * U32, STORAGE_USAGE);
-    const outputVertices = this.buffer("gpu clod welded vertices", input.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES, VERTEX_USAGE);
-    const outputIndices = this.buffer("gpu clod welded indices", input.indexCount * U32, INDEX_USAGE);
-    const counters = this.buffer("gpu clod weld counters", 4 * U32, STORAGE_USAGE);
-    const params = this.weldParams(input, hashCapacity - 1);
-    const bindGroup = this.device.createBindGroup({
-      label: "gpu clod weld bind group",
-      layout: this.weldVerticesPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: params } },
-        { binding: 1, resource: { buffer: input.vertexBuffer } },
-        { binding: 2, resource: { buffer: input.indexBuffer } },
-        { binding: 3, resource: { buffer: hashBuffer } },
-        { binding: 4, resource: { buffer: remapBuffer } },
-        { binding: 5, resource: { buffer: outputVertices } },
-        { binding: 6, resource: { buffer: outputIndices } },
-        { binding: 7, resource: { buffer: counters } },
-      ],
-    });
-    const counterResult = await this.runReduction(
-      "gpu clod weld",
-      hashBuffer,
-      counters,
-      4 * U32,
-      [
-        { pipeline: this.weldVerticesPipeline, bindGroup, workItems: input.vertexCount },
-        { pipeline: this.weldIndicesPipeline, bindGroup, workItems: Math.ceil(input.indexCount / 3) },
-      ],
-    );
-    params.destroy();
-    hashBuffer.destroy();
-    remapBuffer.destroy();
-    counters.destroy();
-    if (counterResult.probeFailures > 0) {
-      outputVertices.destroy();
-      outputIndices.destroy();
-      throw new Error(`GPU CLOD weld exhausted hash probes for ${counterResult.probeFailures} vertices`);
+    let hashBuffer: GPUBuffer | null = null;
+    let remapBuffer: GPUBuffer | null = null;
+    let outputVertices: GPUBuffer | null = null;
+    let outputIndices: GPUBuffer | null = null;
+    let counters: GPUBuffer | null = null;
+    let params: GPUBuffer | null = null;
+    try {
+      hashBuffer = this.buffer("gpu clod weld hash", hashCapacity * 2 * U32, STORAGE_USAGE);
+      remapBuffer = this.buffer("gpu clod weld remap", input.vertexCount * U32, STORAGE_USAGE);
+      outputVertices = this.buffer(
+        "gpu clod welded vertices",
+        input.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES,
+        VERTEX_USAGE,
+      );
+      outputIndices = this.buffer("gpu clod welded indices", input.indexCount * U32, INDEX_USAGE);
+      counters = this.buffer("gpu clod weld counters", 4 * U32, STORAGE_USAGE);
+      params = this.weldParams(input, hashCapacity - 1);
+      const bindGroup = this.device.createBindGroup({
+        label: "gpu clod weld bind group",
+        layout: this.weldVerticesPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: params } },
+          { binding: 1, resource: { buffer: input.vertexBuffer } },
+          { binding: 2, resource: { buffer: input.indexBuffer } },
+          { binding: 3, resource: { buffer: hashBuffer } },
+          { binding: 4, resource: { buffer: remapBuffer } },
+          { binding: 5, resource: { buffer: outputVertices } },
+          { binding: 6, resource: { buffer: outputIndices } },
+          { binding: 7, resource: { buffer: counters } },
+        ],
+      });
+      const result = await this.runReduction(
+        "gpu clod weld",
+        hashBuffer,
+        counters,
+        4 * U32,
+        [
+          { pipeline: this.weldVerticesPipeline, bindGroup, workItems: input.vertexCount },
+          { pipeline: this.weldIndicesPipeline, bindGroup, workItems: Math.ceil(input.indexCount / 3) },
+        ],
+      );
+      if (result.probeFailures > 0) {
+        throw new Error(`GPU CLOD weld exhausted hash probes for ${result.probeFailures} vertices`);
+      }
+      const mesh: MeshBuffers = {
+        vertexBuffer: outputVertices,
+        indexBuffer: outputIndices,
+        vertexCount: result.vertexCount,
+        indexCount: result.indexCount,
+        errorWorld: input.errorWorld,
+        lowBenefit: result.indexCount >= input.indexCount * 0.95,
+      };
+      outputVertices = null;
+      outputIndices = null;
+      return mesh;
+    } finally {
+      params?.destroy();
+      hashBuffer?.destroy();
+      remapBuffer?.destroy();
+      counters?.destroy();
+      outputVertices?.destroy();
+      outputIndices?.destroy();
     }
-    return {
-      vertexBuffer: outputVertices,
-      indexBuffer: outputIndices,
-      vertexCount: counterResult.vertexCount,
-      indexCount: counterResult.indexCount,
-      errorWorld: input.errorWorld,
-      lowBenefit: counterResult.indexCount >= input.indexCount * 0.95,
-    };
   }
 
-  private async simplify(input: MeshBuffers, footprint: PageFootprint, level: number): Promise<MeshBuffers> {
+  private async simplify(
+    input: MeshBuffers,
+    footprint: PageFootprint,
+    level: number,
+  ): Promise<MeshBuffers> {
     if (input.vertexCount === 0 || input.indexCount === 0) return input;
     const hashCapacity = nextPowerOfTwo(Math.max(4, input.vertexCount * 2));
-    const hashBuffer = this.buffer("gpu clod simplify hash", hashCapacity * 2 * U32, STORAGE_USAGE);
-    const remapBuffer = this.buffer("gpu clod simplify remap", input.vertexCount * U32, STORAGE_USAGE);
-    const outputVertices = this.buffer("gpu clod simplified vertices", input.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES, VERTEX_USAGE);
-    const outputIndices = this.buffer("gpu clod simplified indices", input.indexCount * U32, INDEX_USAGE);
-    const counters = this.buffer("gpu clod simplify counters", 6 * U32, STORAGE_USAGE);
-    const params = this.simplifyParams(input, footprint, level, hashCapacity - 1);
-    const bindGroup = this.device.createBindGroup({
-      label: "gpu clod simplify bind group",
-      layout: this.simplifyVerticesPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: params } },
-        { binding: 1, resource: { buffer: input.vertexBuffer } },
-        { binding: 2, resource: { buffer: input.indexBuffer } },
-        { binding: 3, resource: { buffer: hashBuffer } },
-        { binding: 4, resource: { buffer: remapBuffer } },
-        { binding: 5, resource: { buffer: outputVertices } },
-        { binding: 6, resource: { buffer: outputIndices } },
-        { binding: 7, resource: { buffer: counters } },
-      ],
-    });
-    const result = await this.runReduction(
-      "gpu clod simplify",
-      hashBuffer,
-      counters,
-      6 * U32,
-      [
-        { pipeline: this.simplifyVerticesPipeline, bindGroup, workItems: input.vertexCount },
-        { pipeline: this.simplifyIndicesPipeline, bindGroup, workItems: Math.ceil(input.indexCount / 3) },
-      ],
-    );
-    params.destroy();
-    hashBuffer.destroy();
-    remapBuffer.destroy();
-    counters.destroy();
-    if (result.probeFailures > 0 || result.indexCount === 0) {
-      outputVertices.destroy();
-      outputIndices.destroy();
-      throw new Error(`GPU CLOD simplifier failed: probes=${result.probeFailures}, indices=${result.indexCount}`);
+    let hashBuffer: GPUBuffer | null = null;
+    let remapBuffer: GPUBuffer | null = null;
+    let outputVertices: GPUBuffer | null = null;
+    let outputIndices: GPUBuffer | null = null;
+    let counters: GPUBuffer | null = null;
+    let params: GPUBuffer | null = null;
+    try {
+      hashBuffer = this.buffer("gpu clod simplify hash", hashCapacity * 2 * U32, STORAGE_USAGE);
+      remapBuffer = this.buffer("gpu clod simplify remap", input.vertexCount * U32, STORAGE_USAGE);
+      outputVertices = this.buffer(
+        "gpu clod simplified vertices",
+        input.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES,
+        VERTEX_USAGE,
+      );
+      outputIndices = this.buffer("gpu clod simplified indices", input.indexCount * U32, INDEX_USAGE);
+      counters = this.buffer("gpu clod simplify counters", 6 * U32, STORAGE_USAGE);
+      params = this.simplifyParams(input, footprint, level, hashCapacity - 1);
+      const bindGroup = this.device.createBindGroup({
+        label: "gpu clod simplify bind group",
+        layout: this.simplifyVerticesPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: params } },
+          { binding: 1, resource: { buffer: input.vertexBuffer } },
+          { binding: 2, resource: { buffer: input.indexBuffer } },
+          { binding: 3, resource: { buffer: hashBuffer } },
+          { binding: 4, resource: { buffer: remapBuffer } },
+          { binding: 5, resource: { buffer: outputVertices } },
+          { binding: 6, resource: { buffer: outputIndices } },
+          { binding: 7, resource: { buffer: counters } },
+        ],
+      });
+      const result = await this.runReduction(
+        "gpu clod simplify",
+        hashBuffer,
+        counters,
+        6 * U32,
+        [
+          { pipeline: this.simplifyVerticesPipeline, bindGroup, workItems: input.vertexCount },
+          { pipeline: this.simplifyIndicesPipeline, bindGroup, workItems: Math.ceil(input.indexCount / 3) },
+        ],
+      );
+      if (result.probeFailures > 0 || result.indexCount === 0) {
+        throw new Error(`GPU CLOD simplifier failed: probes=${result.probeFailures}, indices=${result.indexCount}`);
+      }
+      const mesh: MeshBuffers = {
+        vertexBuffer: outputVertices,
+        indexBuffer: outputIndices,
+        vertexCount: result.vertexCount,
+        indexCount: result.indexCount,
+        errorWorld: result.maxError,
+        lowBenefit: result.indexCount >= input.indexCount * 0.95,
+      };
+      outputVertices = null;
+      outputIndices = null;
+      return mesh;
+    } finally {
+      params?.destroy();
+      hashBuffer?.destroy();
+      remapBuffer?.destroy();
+      counters?.destroy();
+      outputVertices?.destroy();
+      outputIndices?.destroy();
     }
-    return {
-      vertexBuffer: outputVertices,
-      indexBuffer: outputIndices,
-      vertexCount: result.vertexCount,
-      indexCount: result.indexCount,
-      errorWorld: result.maxError,
-      lowBenefit: result.indexCount >= input.indexCount * 0.95,
-    };
   }
 
   private async runReduction(
@@ -431,7 +604,7 @@ export class GpuClodPagePipeline {
     hashBuffer: GPUBuffer,
     counters: GPUBuffer,
     counterBytes: number,
-    stages: readonly { pipeline: GPUComputePipeline; bindGroup: GPUBindGroup; workItems: number }[],
+    stages: readonly ReductionStage[],
   ): Promise<CounterResult> {
     const readback = this.device.createBuffer({
       label: `${label} counter readback`,
@@ -478,84 +651,121 @@ export class GpuClodPagePipeline {
     const meshletCount = Math.max(1, Math.ceil(triangleCount / triangleLimit));
     const hierarchyLevels = hierarchyLevelPlan(meshletCount, MESHLET_FANOUT);
     const hierarchyNodeCount = hierarchyLevels.reduce((sum, level) => sum + level.count, 0);
-    const headers = this.buffer("gpu clod meshlet headers", meshletCount * 8 * U32, STORAGE_USAGE);
-    const bounds = this.buffer("gpu clod meshlet bounds", meshletCount * 4 * F32, STORAGE_USAGE);
-    const indirect = this.buffer("gpu clod meshlet indirect", meshletCount * 5 * U32, STORAGE_USAGE | GPUBufferUsage.INDIRECT);
-    const hierarchyHeaders = this.buffer("gpu clod hierarchy headers", hierarchyNodeCount * 4 * U32, STORAGE_USAGE);
-    const hierarchyBounds = this.buffer("gpu clod hierarchy bounds", hierarchyNodeCount * 4 * F32, STORAGE_USAGE);
-    const meshletParams = this.upload(
-      "gpu clod meshlet params",
-      new Uint32Array([page.indexCount, triangleLimit, meshletCount, 0]),
-      GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    );
-    const meshletBindGroup = this.device.createBindGroup({
-      label: "gpu clod meshlet bind group",
-      layout: this.meshletPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: meshletParams } },
-        { binding: 1, resource: { buffer: page.vertexBuffer } },
-        { binding: 2, resource: { buffer: page.indexBuffer } },
-        { binding: 3, resource: { buffer: headers } },
-        { binding: 4, resource: { buffer: bounds } },
-        { binding: 5, resource: { buffer: indirect } },
-      ],
-    });
-    const encoder = this.device.createCommandEncoder({ label: `gpu clod meshlets ${page.id}` });
-    const meshletPass = encoder.beginComputePass();
-    meshletPass.setPipeline(this.meshletPipeline);
-    meshletPass.setBindGroup(0, meshletBindGroup);
-    meshletPass.dispatchWorkgroups(workgroups(meshletCount));
-    meshletPass.end();
+    let headers: GPUBuffer | null = null;
+    let bounds: GPUBuffer | null = null;
+    let indirect: GPUBuffer | null = null;
+    let hierarchyHeaders: GPUBuffer | null = null;
+    let hierarchyBounds: GPUBuffer | null = null;
+    let meshletParams: GPUBuffer | null = null;
     const hierarchyParams: GPUBuffer[] = [];
-    for (const level of hierarchyLevels) {
-      const params = this.upload(
-        "gpu clod hierarchy params",
-        new Uint32Array([
-          level.childStart,
-          level.childCount,
-          level.parentStart,
-          level.count,
-          MESHLET_FANOUT,
-          level.level,
-          level.childIsLeaf ? 1 : 0,
-          0,
-        ]),
+    try {
+      headers = this.buffer("gpu clod meshlet headers", meshletCount * 8 * U32, STORAGE_USAGE);
+      bounds = this.buffer("gpu clod meshlet bounds", meshletCount * 4 * F32, STORAGE_USAGE);
+      indirect = this.buffer(
+        "gpu clod meshlet indirect",
+        meshletCount * 5 * U32,
+        STORAGE_USAGE | GPUBufferUsage.INDIRECT,
+      );
+      hierarchyHeaders = this.buffer(
+        "gpu clod hierarchy headers",
+        hierarchyNodeCount * 4 * U32,
+        STORAGE_USAGE,
+      );
+      hierarchyBounds = this.buffer(
+        "gpu clod hierarchy bounds",
+        hierarchyNodeCount * 4 * F32,
+        STORAGE_USAGE,
+      );
+      meshletParams = this.upload(
+        "gpu clod meshlet params",
+        new Uint32Array([page.indexCount, triangleLimit, meshletCount, 0]),
         GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       );
-      hierarchyParams.push(params);
-      const bindGroup = this.device.createBindGroup({
-        label: "gpu clod hierarchy bind group",
-        layout: this.hierarchyPipeline.getBindGroupLayout(0),
+      const meshletBindGroup = this.device.createBindGroup({
+        label: "gpu clod meshlet bind group",
+        layout: this.meshletPipeline.getBindGroupLayout(0),
         entries: [
-          { binding: 0, resource: { buffer: headers } },
-          { binding: 1, resource: { buffer: bounds } },
-          { binding: 2, resource: { buffer: hierarchyHeaders } },
-          { binding: 3, resource: { buffer: hierarchyBounds } },
-          { binding: 4, resource: { buffer: params } },
+          { binding: 0, resource: { buffer: meshletParams } },
+          { binding: 1, resource: { buffer: page.vertexBuffer } },
+          { binding: 2, resource: { buffer: page.indexBuffer } },
+          { binding: 3, resource: { buffer: headers } },
+          { binding: 4, resource: { buffer: bounds } },
+          { binding: 5, resource: { buffer: indirect } },
         ],
       });
-      const pass = encoder.beginComputePass();
-      pass.setPipeline(this.hierarchyPipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(workgroups(level.count));
-      pass.end();
+      const encoder = this.device.createCommandEncoder({ label: `gpu clod meshlets ${page.id}` });
+      const meshletPass = encoder.beginComputePass();
+      meshletPass.setPipeline(this.meshletPipeline);
+      meshletPass.setBindGroup(0, meshletBindGroup);
+      meshletPass.dispatchWorkgroups(workgroups(meshletCount));
+      meshletPass.end();
+      for (const level of hierarchyLevels) {
+        const params = this.upload(
+          "gpu clod hierarchy params",
+          new Uint32Array([
+            level.childStart,
+            level.childCount,
+            level.parentStart,
+            level.count,
+            MESHLET_FANOUT,
+            level.level,
+            level.childIsLeaf ? 1 : 0,
+            0,
+          ]),
+          GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        );
+        hierarchyParams.push(params);
+        const bindGroup = this.device.createBindGroup({
+          label: "gpu clod hierarchy bind group",
+          layout: this.hierarchyPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: headers } },
+            { binding: 1, resource: { buffer: bounds } },
+            { binding: 2, resource: { buffer: hierarchyHeaders } },
+            { binding: 3, resource: { buffer: hierarchyBounds } },
+            { binding: 4, resource: { buffer: params } },
+          ],
+        });
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(this.hierarchyPipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(workgroups(level.count));
+        pass.end();
+      }
+      this.device.queue.submit([encoder.finish()]);
+      const result: GpuClodMeshletBuffers = {
+        headers,
+        bounds,
+        hierarchyHeaders,
+        hierarchyBounds,
+        indirect,
+        meshletCount,
+        hierarchyNodeCount,
+        byteLength: meshletCount * (8 * U32 + 4 * F32 + 5 * U32)
+          + hierarchyNodeCount * (4 * U32 + 4 * F32),
+      };
+      headers = null;
+      bounds = null;
+      indirect = null;
+      hierarchyHeaders = null;
+      hierarchyBounds = null;
+      return result;
+    } finally {
+      meshletParams?.destroy();
+      for (const params of hierarchyParams) params.destroy();
+      headers?.destroy();
+      bounds?.destroy();
+      indirect?.destroy();
+      hierarchyHeaders?.destroy();
+      hierarchyBounds?.destroy();
     }
-    this.device.queue.submit([encoder.finish()]);
-    meshletParams.destroy();
-    for (const params of hierarchyParams) params.destroy();
-    return {
-      headers,
-      bounds,
-      hierarchyHeaders,
-      hierarchyBounds,
-      indirect,
-      meshletCount,
-      hierarchyNodeCount,
-      byteLength: meshletCount * (8 * U32 + 4 * F32 + 5 * U32) + hierarchyNodeCount * (4 * U32 + 4 * F32),
-    };
   }
 
-  private finalize(identity: GpuClodPageIdentity, mesh: MeshBuffers, bounds: ClodPageNode["bounds"]): GpuClodResidentPage {
+  private finalize(
+    identity: GpuClodPageIdentity,
+    mesh: MeshBuffers,
+    bounds: ClodPageNode["bounds"],
+  ): GpuClodResidentPage {
     return {
       id: identity.id,
       revision: identity.revision,
@@ -595,7 +805,12 @@ export class GpuClodPagePipeline {
     return this.uploadBytes("gpu clod weld params", bytes, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
   }
 
-  private simplifyParams(input: MeshBuffers, footprint: PageFootprint, level: number, hashMask: number): GPUBuffer {
+  private simplifyParams(
+    input: MeshBuffers,
+    footprint: PageFootprint,
+    level: number,
+    hashMask: number,
+  ): GPUBuffer {
     const bytes = new ArrayBuffer(64);
     const view = new DataView(bytes);
     view.setUint32(0, input.vertexCount, true);
@@ -621,7 +836,13 @@ export class GpuClodPagePipeline {
     return this.uploadBytes(label, data.buffer as ArrayBuffer, usage, data.byteOffset, data.byteLength);
   }
 
-  private uploadBytes(label: string, data: ArrayBuffer, usage: number, byteOffset = 0, byteLength = data.byteLength): GPUBuffer {
+  private uploadBytes(
+    label: string,
+    data: ArrayBuffer,
+    usage: number,
+    byteOffset = 0,
+    byteLength = data.byteLength,
+  ): GPUBuffer {
     const buffer = this.buffer(label, byteLength, usage);
     if (byteLength > 0) this.device.queue.writeBuffer(buffer, 0, data, byteOffset, byteLength);
     return buffer;
@@ -662,11 +883,23 @@ function unionBounds(bounds: readonly ClodPageNode["bounds"][]): ClodPageNode["b
     maxY = Math.max(maxY, bound.maxY);
     maxZ = Math.max(maxZ, bound.center[2] + bound.radius);
   }
-  const center: [number, number, number] = [(minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5];
-  return { center, radius: Math.hypot(maxX - center[0], maxY - center[1], maxZ - center[2]), minY, maxY };
+  const center: [number, number, number] = [
+    (minX + maxX) * 0.5,
+    (minY + maxY) * 0.5,
+    (minZ + maxZ) * 0.5,
+  ];
+  return {
+    center,
+    radius: Math.hypot(maxX - center[0], maxY - center[1], maxZ - center[2]),
+    minY,
+    maxY,
+  };
 }
 
-function hierarchyLevelPlan(meshletCount: number, fanout: number): Array<{
+function hierarchyLevelPlan(
+  meshletCount: number,
+  fanout: number,
+): Array<{
   childStart: number;
   childCount: number;
   parentStart: number;
