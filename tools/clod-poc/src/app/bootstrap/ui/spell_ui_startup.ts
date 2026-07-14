@@ -27,8 +27,17 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
 export function runSpellUiStartup(ctx: UiStartupContext): void {
   const config = defaultSpellConfig;
   const { scene, camera, terrainRaycast } = ctx.input;
-  const earthRay = new THREE.Ray();
-  const earthDir = new THREE.Vector3();
+  const targetRay = new THREE.Ray();
+  const targetDirection = new THREE.Vector3();
+  const targetNormal = new THREE.Vector3(0, 1, 0);
+
+  const getTerrainTarget = () => {
+    camera.getWorldDirection(targetDirection).normalize();
+    targetRay.origin.copy(camera.position);
+    targetRay.direction.copy(targetDirection);
+    const hit = terrainRaycast.raycastEditableTerrain(targetRay);
+    return hit ? { point: hit.point, normal: targetNormal } : null;
+  };
 
   const controller = createSpellVfxController({
     scene,
@@ -37,13 +46,9 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     water: meshConfig(config.water.vfx),
     air: meshConfig(config.air.vfx),
     earth: config.earth.vfx,
-    getEarthTarget: () => {
-      camera.getWorldDirection(earthDir).normalize();
-      earthRay.origin.copy(camera.position);
-      earthRay.direction.copy(earthDir);
-      const hit = terrainRaycast.raycastEditableTerrain(earthRay);
-      return hit ? { point: hit.point, normal: new THREE.Vector3(0, 1, 0) } : null;
-    },
+    getEarthTarget: getTerrainTarget,
+    lightning: config.lightning.vfx,
+    getLightningTarget: getTerrainTarget,
   });
   ctx.session.spellVfxController = controller;
 
@@ -81,6 +86,12 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     if (event.code === "Digit4" || event.code === "Numpad4") {
       event.preventDefault();
       menu.castEarth();
+      return;
+    }
+
+    if (event.code === "Digit5" || event.code === "Numpad5") {
+      event.preventDefault();
+      menu.castLightning();
     }
   };
 
