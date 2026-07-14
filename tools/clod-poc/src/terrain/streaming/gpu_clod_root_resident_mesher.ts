@@ -10,14 +10,8 @@ import {
   packMeshParams,
   type MeshDims,
 } from "../../gpu/gpu_mesh_buffers.js";
-import { buildOuterBorderLocks } from "../../lock.js";
 import { ClodBuildError, type ClodPageNode, type PageMesh } from "../../types.js";
-import {
-  assertNoInternalBorders,
-  stripDegenerateTriangles,
-  validateFinalPageMesh,
-  validateWeldedIntermediate,
-} from "../../clod/validate.js";
+import { validateFinalPageMesh } from "../../clod/validate.js";
 import { boundsOf, footprintFor, INITIAL_NODE_REVISION } from "../../clod/quadtree_support.js";
 import type { WorldBounds } from "../terrain_surface.js";
 import { createHeightfieldTileGpuAtlas } from "../../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
@@ -51,6 +45,7 @@ const F32 = Float32Array.BYTES_PER_ELEMENT;
 const DEFAULT_MAX_CHUNK_SLOTS = 64;
 const DEFAULT_MAX_TOTAL_SLOT_BYTES = 512 * 1024 * 1024;
 const SAMPLE_LIMIT = 128;
+const MATERIAL_WEIGHT_STRIDE = 4;
 
 interface ResidentMesherOptions extends CreateGpuClodRootMesherOptions {
   hierarchyConfig: GpuClodHierarchyConfig;
@@ -124,7 +119,9 @@ class ResidentChunkPool {
   }
 
   prepare(plans: readonly GpuRootChunkPlan[]): PoolSlot[] {
-    if (plans.length > this.capacity) throw new Error(`GPU resident CLOD pool needs ${plans.length} slots, capacity ${this.capacity}`);
+    if (plans.length > this.capacity) {
+      throw new Error(`GPU resident CLOD pool needs ${plans.length} slots, capacity ${this.capacity}`);
+    }
     this.device.queue.writeBuffer(this.digEdits, 0, packDigEdits([]));
     this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0) as Uint32Array<ArrayBuffer>);
     const zeros = new Uint32Array(Math.max(1, plans.length));
@@ -311,77 +308,106 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
         lod0Requests.push({ px: request.px * scale + dx, pz: request.pz * scale + dz, level: 0 });
       }
     }
+
     let current = new Map<string, GpuClodResidentPage>();
-    for (const batch of chunked(lod0Requests, this.maxLod0PagesPerDispatch())) {
-      const built = await this.buildLod0Batch(batch);
+    for (const requestBatch of chunked(lod0Requests, this.maxLod0PagesPerDispatch())) {
+      const built = await this.buildLod0Batch(requestBatch);
       for (const [key, page] of built) current.set(key, page);
     }
 
     try {
       for (let level = 1; level <= rootLevel; level++) {
         const next = new Map<string, GpuClodResidentPage>();
-        const parentCoords = new Set<string>();
-        for (const key of current.keys()) {
-          const [x, z] = key.split(",").map(Number);
-          parentCoords.add(`${Math.floor(x! / 2)},${Math.floor(z! / 2)}`);
+        try {
+          const parentCoords = new Set<string>();
+          for (const key of current.keys()) {
+            const [x, z] = key.split(",").map(Number);
+            parentCoords.add(`${Math.floor(x! / 2)},${Math.floor(z! / 2)}`);
+          }
+          for (const coord of [...parentCoords].sort()) {
+            const [px, pz] = coord.split(",").map(Number);
+            const children = [
+              current.get(`${px! * 2},${pz! * 2}`),
+              current.get(`${px! * 2 + 1},${pz! * 2}`),
+              current.get(`${px! * 2},${pz! * 2 + 1}`),
+              current.get(`${px! * 2 + 1},${pz! * 2 + 1}`),
+            ];
+            if (children.some((child) => !child)) {
+              throw new Error(`GPU CLOD parent L${level}:${coord} is missing a child`);
+            }
+            next.set(
+              coord,
+              await this.pagePipeline.buildParentPage(
+                this.identity(level, px!, pz!),
+                children as GpuClodResidentPage[],
+              ),
+            );
+          }
+        } catch (error) {
+          destroyPages(this.pagePipeline, next.values());
+          throw error;
         }
-        for (const coord of [...parentCoords].sort()) {
-          const [px, pz] = coord.split(",").map(Number);
-          const children = [
-            current.get(`${px! * 2},${pz! * 2}`),
-            current.get(`${px! * 2 + 1},${pz! * 2}`),
-            current.get(`${px! * 2},${pz! * 2 + 1}`),
-            current.get(`${px! * 2 + 1},${pz! * 2 + 1}`),
-          ];
-          if (children.some((child) => !child)) throw new Error(`GPU CLOD parent L${level}:${coord} is missing a child`);
-          const identity = this.identity(level, px!, pz!);
-          next.set(coord, await this.pagePipeline.buildParentPage(identity, children as GpuClodResidentPage[]));
-        }
-        for (const page of current.values()) this.pagePipeline.destroyPage(page);
+        destroyPages(this.pagePipeline, current.values());
         current = next;
       }
 
-      const root = current.get(`${request.px},${request.pz}`);
-      if (!root) throw new Error(`GPU resident CLOD request L${rootLevel}:${request.px},${request.pz} produced no root`);
-      let finalPage = await this.pagePipeline.attachMeshlets(root);
-      current.delete(`${request.px},${request.pz}`);
-      const shouldReadback = rootLevel >= this.hierarchyConfig.readbackMinLevel;
-      let mesh = emptyPageMesh();
-      let transferBytes = 0;
-      if (shouldReadback) {
-        const readbackStartedAt = performance.now();
-        mesh = await this.pagePipeline.readbackPage(finalPage);
-        pushSample(this.selectiveReadbackSamples, performance.now() - readbackStartedAt);
-        transferBytes = meshBytes(mesh);
-        this.validateReadback(mesh, finalPage, rootLevel, request.px, request.pz);
+      const rootKey = `${request.px},${request.pz}`;
+      const root = current.get(rootKey);
+      if (!root) {
+        throw new Error(`GPU resident CLOD request L${rootLevel}:${rootKey} produced no root`);
       }
-      const shouldResidencyOwn = this.hierarchyConfig.renderResidentPages && rootLevel <= this.hierarchyConfig.residentMaxLevel;
-      if (shouldResidencyOwn) {
-        this.onResidentPage(finalPage);
-      } else {
-        this.pagePipeline.destroyPage(finalPage);
-      }
-      finalPage = null as unknown as GpuClodResidentPage;
-      return {
-        node: {
+      current.delete(rootKey);
+      const shouldResidencyOwn = this.hierarchyConfig.renderResidentPages
+        && rootLevel <= this.hierarchyConfig.residentMaxLevel;
+      const shouldReadback = rootLevel >= this.hierarchyConfig.readbackMinLevel || !shouldResidencyOwn;
+      let finalPage: GpuClodResidentPage | null = null;
+      try {
+        finalPage = await this.pagePipeline.attachMeshlets(root);
+        let mesh = emptyPageMesh();
+        let transferBytes = 0;
+        let nodeBounds = root.bounds;
+        if (shouldReadback) {
+          const readbackStartedAt = performance.now();
+          mesh = await this.pagePipeline.readbackPage(finalPage);
+          pushSample(this.selectiveReadbackSamples, performance.now() - readbackStartedAt);
+          normalizeReadbackMaterialWeights(mesh);
+          this.validateReadback(mesh, finalPage, rootLevel, request.px, request.pz);
+          nodeBounds = boundsOf(mesh);
+          transferBytes = meshBytes(mesh);
+        }
+
+        const node: ClodPageNode = {
           id: `L${rootLevel}:${request.px},${request.pz}`,
           revision: INITIAL_NODE_REVISION,
           level: rootLevel,
           children: [],
           mesh,
           footprint: footprintFor(rootLevel, request.px, request.pz, this.cfg),
-          bounds: root.bounds,
+          bounds: nodeBounds,
           errorWorld: root.errorWorld,
           lowBenefit: root.lowBenefit,
-        },
-        transferBytes,
-      };
+          gpuResidentOnly: shouldResidencyOwn && !shouldReadback,
+        };
+
+        if (shouldResidencyOwn) {
+          this.onResidentPage(finalPage);
+          finalPage = null;
+        } else {
+          this.pagePipeline.destroyPage(finalPage);
+          finalPage = null;
+        }
+        return { node, transferBytes };
+      } finally {
+        if (finalPage) this.pagePipeline.destroyPage(finalPage);
+      }
     } finally {
-      for (const page of current.values()) this.pagePipeline.destroyPage(page);
+      destroyPages(this.pagePipeline, current.values());
     }
   }
 
-  private async buildLod0Batch(requests: readonly GpuClodRootBuildRequest[]): Promise<Map<string, GpuClodResidentPage>> {
+  private async buildLod0Batch(
+    requests: readonly GpuClodRootBuildRequest[],
+  ): Promise<Map<string, GpuClodResidentPage>> {
     const plans = planRootBatchChunkSlots(requests, this.pageConfig());
     if (plans.length === 0) return new Map();
     this.batchesDispatched++;
@@ -396,37 +422,48 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
       pageSlots.push(slot);
       byPage.set(key, pageSlots);
     }
+
     const result = new Map<string, GpuClodResidentPage>();
-    for (const [coord, pageSlots] of byPage) {
-      pageSlots.sort((a, b) => a.localChunkIndex - b.localChunkIndex);
-      const [px, pz] = coord.split(",").map(Number);
-      const chunks: GpuClodChunkSource[] = pageSlots.map((slot) => {
-        const count = counts.get(slot.slotIndex);
-        if (!count) throw new Error(`GPU resident CLOD slot ${slot.slotIndex} has no count result`);
-        return {
-          positionBaseF32: slot.positionOffsetBytes / F32,
-          normalBaseF32: slot.normalOffsetBytes / F32,
-          materialBaseF32: slot.materialOffsetBytes / F32,
-          indexBaseU32: slot.indexOffsetBytes / U32,
-          vertexCount: count.vertexCount,
-          indexCount: count.indexCount,
-        };
-      });
-      result.set(coord, await this.pagePipeline.buildLod0Page(
-        this.identity(0, px!, pz!),
-        {
-          positions: this.pool.positions,
-          normals: this.pool.normals,
-          materials: this.pool.materials,
-          indices: this.pool.indices,
-        },
-        chunks,
-      ));
+    try {
+      for (const [coord, pageSlots] of byPage) {
+        pageSlots.sort((a, b) => a.localChunkIndex - b.localChunkIndex);
+        const [px, pz] = coord.split(",").map(Number);
+        const chunks: GpuClodChunkSource[] = pageSlots.map((slot) => {
+          const count = counts.get(slot.slotIndex);
+          if (!count) throw new Error(`GPU resident CLOD slot ${slot.slotIndex} has no count result`);
+          return {
+            positionBaseF32: slot.positionOffsetBytes / F32,
+            normalBaseF32: slot.normalOffsetBytes / F32,
+            materialBaseF32: slot.materialOffsetBytes / F32,
+            indexBaseU32: slot.indexOffsetBytes / U32,
+            vertexCount: count.vertexCount,
+            indexCount: count.indexCount,
+          };
+        });
+        result.set(
+          coord,
+          await this.pagePipeline.buildLod0Page(
+            this.identity(0, px!, pz!),
+            {
+              positions: this.pool.positions,
+              normals: this.pool.normals,
+              materials: this.pool.materials,
+              indices: this.pool.indices,
+            },
+            chunks,
+          ),
+        );
+      }
+      return result;
+    } catch (error) {
+      destroyPages(this.pagePipeline, result.values());
+      throw error;
     }
-    return result;
   }
 
-  private async dispatchAndReadCounts(slots: readonly PoolSlot[]): Promise<Map<number, { vertexCount: number; indexCount: number }>> {
+  private async dispatchAndReadCounts(
+    slots: readonly PoolSlot[],
+  ): Promise<Map<number, { vertexCount: number; indexCount: number }>> {
     const readback = this.device.createBuffer({
       label: "gpu resident CLOD count readback",
       size: Math.max(4, slots.length * 2 * U32),
@@ -445,16 +482,31 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
     quadPass.setPipeline(this.quadPipeline);
     for (const slot of slots) {
       quadPass.setBindGroup(0, slot.bindGroup);
-      quadPass.dispatchWorkgroups(Math.ceil((this.cfg.page.chunk_size * this.cfg.page.chunk_size * Y_CELLS * 3) / WORKGROUP_SIZE));
+      quadPass.dispatchWorkgroups(
+        Math.ceil((this.cfg.page.chunk_size * this.cfg.page.chunk_size * Y_CELLS * 3) / WORKGROUP_SIZE),
+      );
     }
     quadPass.end();
     for (let index = 0; index < slots.length; index++) {
       const slot = slots[index]!;
-      encoder.copyBufferToBuffer(this.pool.vertexCounts, slot.counterSlot * U32, readback, index * 2 * U32, U32);
-      encoder.copyBufferToBuffer(this.pool.indexCounts, slot.counterSlot * U32, readback, index * 2 * U32 + U32, U32);
+      encoder.copyBufferToBuffer(
+        this.pool.vertexCounts,
+        slot.counterSlot * U32,
+        readback,
+        index * 2 * U32,
+        U32,
+      );
+      encoder.copyBufferToBuffer(
+        this.pool.indexCounts,
+        slot.counterSlot * U32,
+        readback,
+        index * 2 * U32 + U32,
+        U32,
+      );
     }
     this.device.queue.submit([encoder.finish()]);
     pushSample(this.encodeSamples, performance.now() - encodeStartedAt);
+
     const readStartedAt = performance.now();
     let mapped = false;
     try {
@@ -482,13 +534,19 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
     }
   }
 
-  private validateReadback(mesh: PageMesh, page: GpuClodResidentPage, level: number, px: number, pz: number): void {
-    const footprint = footprintFor(level, px, pz, this.cfg);
-    validateWeldedIntermediate(mesh, `${page.id} GPU selective readback`, this.cfg.validation.zero_area_epsilon);
-    stripDegenerateTriangles(mesh, this.cfg.validation.zero_area_epsilon);
-    assertNoInternalBorders(mesh, footprint, `${page.id} GPU selective readback`);
-    buildOuterBorderLocks(mesh);
-    validateFinalPageMesh(mesh, footprint, this.cfg.validation.zero_area_epsilon, `${page.id} GPU selective readback`);
+  private validateReadback(
+    mesh: PageMesh,
+    page: GpuClodResidentPage,
+    level: number,
+    px: number,
+    pz: number,
+  ): void {
+    validateFinalPageMesh(
+      mesh,
+      footprintFor(level, px, pz, this.cfg),
+      this.cfg.validation.zero_area_epsilon,
+      `${page.id} GPU selective readback`,
+    );
   }
 
   private identity(level: number, px: number, pz: number): GpuClodPageIdentity {
@@ -514,7 +572,9 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
   }
 }
 
-export async function createResidentGpuClodRootMesher(options: ResidentMesherOptions): Promise<GpuClodRootMesher | null> {
+export async function createResidentGpuClodRootMesher(
+  options: ResidentMesherOptions,
+): Promise<GpuClodRootMesher | null> {
   const device = options.sharedDevice;
   if (!device) return null;
   try {
@@ -559,7 +619,14 @@ export async function createResidentGpuClodRootMesher(options: ResidentMesherOpt
       }),
     ]);
     const capacity = resolvePoolCapacity(device, options.cfg, options.config);
-    const pool = new ResidentChunkPool(device, layout, options.cfg, options.world, capacity, heightAtlas);
+    const pool = new ResidentChunkPool(
+      device,
+      layout,
+      options.cfg,
+      options.world,
+      capacity,
+      heightAtlas,
+    );
     const pagePipeline = await GpuClodPagePipeline.create(device, {
       fieldParams: pool.fieldParams,
       config: options.hierarchyConfig,
@@ -582,16 +649,24 @@ export async function createResidentGpuClodRootMesher(options: ResidentMesherOpt
     publishGpuClodRootMesherCounters(mesher.stats());
     return mesher;
   } catch (error) {
-    console.warn("[clod-stream-gpu] resident hierarchy mesher unavailable; using validated GPU/CPU fallback", error);
+    console.warn(
+      "[clod-stream-gpu] resident hierarchy mesher unavailable; using validated GPU/CPU fallback",
+      error,
+    );
     publishGpuClodRootMesherCounters(disabledGpuStats());
     return null;
   }
 }
 
 function createHeightAtlasBindings(device: GPUDevice): HeightAtlasBindings {
-  const search = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window?.location?.search ?? "";
-  const active = continentTileMeshingEnabled(new URLSearchParams(search)) ? createHeightfieldTileGpuAtlas(device) : null;
+  const search = (globalThis as typeof globalThis & {
+    window?: { location?: { search?: string } };
+  }).window?.location?.search ?? "";
+  const active = continentTileMeshingEnabled(new URLSearchParams(search))
+    ? createHeightfieldTileGpuAtlas(device)
+    : null;
   if (active) return { view: active.view, params: active.params };
+
   const texture = device.createTexture({
     label: "gpu resident CLOD disabled height atlas",
     size: { width: 1, height: 1 },
@@ -604,7 +679,14 @@ function createHeightAtlasBindings(device: GPUDevice): HeightAtlasBindings {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   device.queue.writeBuffer(params, 0, new Float32Array([1, 1, 1, 0]));
-  return { view: texture.createView(), params, dispose: () => { texture.destroy(); params.destroy(); } };
+  return {
+    view: texture.createView(),
+    params,
+    dispose: () => {
+      texture.destroy();
+      params.destroy();
+    },
+  };
 }
 
 function resolvePoolCapacity(
@@ -619,14 +701,47 @@ function resolvePoolCapacity(
     dims.slotCount * U32,
     dims.maxIndices * U32,
   );
-  const maxBinding = Number((device.limits as { maxStorageBufferBindingSize?: number }).maxStorageBufferBindingSize ?? Number.MAX_SAFE_INTEGER);
+  const maxBinding = Number(
+    (device.limits as { maxStorageBufferBindingSize?: number }).maxStorageBufferBindingSize
+      ?? Number.MAX_SAFE_INTEGER,
+  );
   const bindingCapacity = Math.max(1, Math.floor(maxBinding / Math.max(1, largestPerSlot)));
   const configuredSlots = positiveInteger(config.maxChunkSlots, DEFAULT_MAX_CHUNK_SLOTS);
-  const slotBytes = dims.maxVertices * 7 * F32 + dims.slotCount * U32 + dims.maxIndices * U32 + 2 * U32;
+  const slotBytes = dims.maxVertices * 7 * F32
+    + dims.slotCount * U32
+    + dims.maxIndices * U32
+    + 2 * U32;
   const totalBudget = positiveInteger(config.maxTotalSlotBytes, DEFAULT_MAX_TOTAL_SLOT_BYTES);
   const budgetCapacity = Math.max(1, Math.floor(totalBudget / Math.max(1, slotBytes)));
+  const capacity = Math.min(configuredSlots, bindingCapacity, budgetCapacity);
   const pageSlots = cfg.page.chunks_per_page ** 2;
-  return Math.max(pageSlots, Math.min(configuredSlots, bindingCapacity, budgetCapacity));
+  if (capacity < pageSlots) {
+    throw new Error(
+      `GPU resident CLOD requires ${pageSlots} chunk slots per L0 page, device/budget permits ${capacity}`,
+    );
+  }
+  return capacity;
+}
+
+function normalizeReadbackMaterialWeights(mesh: PageMesh): void {
+  const vertexTotal = mesh.positions.length / 3;
+  const weights = new Float32Array(vertexTotal * MATERIAL_WEIGHT_STRIDE);
+  for (let vertex = 0; vertex < vertexTotal; vertex++) {
+    const material = Math.max(
+      0,
+      Math.min(MATERIAL_WEIGHT_STRIDE - 1, Math.floor(mesh.paintSlots[vertex] ?? 0)),
+    );
+    weights[vertex * MATERIAL_WEIGHT_STRIDE + material] = 1;
+  }
+  mesh.materialWeights = weights;
+  mesh.materialWeightStride = MATERIAL_WEIGHT_STRIDE;
+}
+
+function destroyPages(
+  pipeline: GpuClodPagePipeline,
+  pages: Iterable<GpuClodResidentPage>,
+): void {
+  for (const page of pages) pipeline.destroyPage(page);
 }
 
 function emptyPageMesh(): PageMesh {
@@ -635,7 +750,7 @@ function emptyPageMesh(): PageMesh {
     normals: new Float32Array(0),
     paintSlots: new Float32Array(0),
     materialWeights: new Float32Array(0),
-    materialWeightStride: 4,
+    materialWeightStride: MATERIAL_WEIGHT_STRIDE,
     indices: new Uint32Array(0),
   };
 }
@@ -662,7 +777,9 @@ function normalizedCount(value: number): number {
 
 function chunked<T>(values: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
-  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
   return chunks;
 }
 
