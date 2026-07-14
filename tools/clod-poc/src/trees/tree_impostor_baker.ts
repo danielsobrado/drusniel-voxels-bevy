@@ -12,10 +12,28 @@ import {
 } from "./tree_impostor_capture_material.js";
 import {
   configureTreeImpostorAtlasTexture,
+  createTreeImpostorDataTexture,
   createTreeImpostorRenderTarget,
-  readCleanedTreeImpostorAtlasTextures,
+  readTreeImpostorAtlasPixels,
   type TreeImpostorReadbackRenderer,
 } from "./tree_impostor_atlas_readback.js";
+import {
+  createTreeImpostorAtlasDilationJob,
+  createTreeImpostorRowFlipJob,
+  type TreeImpostorPixelJob,
+} from "./tree_impostor_atlas_pixels.js";
+import { TREE_IMPOSTOR_BAKE_CONFIG } from "./tree_impostor_bake_config.js";
+import {
+  TreeImpostorFrameBudget,
+  isTreeImpostorBakeAbort,
+  throwIfTreeImpostorBakeAborted,
+} from "./tree_impostor_bake_scheduler.js";
+import {
+  publishTreeImpostorBakeProgress,
+  type TreeImpostorBakeChannel,
+  type TreeImpostorBakeProgress,
+  type TreeImpostorBakeStage,
+} from "./tree_impostor_bake_progress.js";
 import { treeAtlasVariantIndex } from "./tree_variant_selection.js";
 
 export {
@@ -25,6 +43,7 @@ export {
 };
 
 const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
+const PIXEL_JOB_OPERATIONS_PER_STEP = 256;
 /** One atlas page per live structural variant keeps mesh and impostor silhouettes identical. */
 export const TREE_IMPOSTOR_MAX_ATLAS_VARIANTS = TREE_STRUCTURAL_VARIANTS;
 
@@ -64,6 +83,9 @@ export interface TreeImpostorBakerOptions {
   material: THREE.Material;
   foliageAtlas?: TreeFoliageAtlas;
   webgpu?: boolean;
+  signal?: AbortSignal;
+  maxBuildMsPerFrame?: number;
+  onProgress?: (progress: TreeImpostorBakeProgress) => void;
 }
 
 interface RenderTargetRenderer extends TreeImpostorReadbackRenderer {
@@ -79,6 +101,61 @@ interface RenderTargetRenderer extends TreeImpostorReadbackRenderer {
   setViewport(x: number, y: number, width: number, height: number): void;
 }
 
+interface SpeciesBakeContext {
+  species: TreeSpeciesId;
+  speciesIndex: number;
+  variantCount: number;
+  gridSize: number;
+  resolutionPx: number;
+  atlasSizePx: number;
+  atlasWidthPx: number;
+  atlasHeightPx: number;
+  baseFrames: OctahedralFrame[];
+  variantFrames: Partial<Record<number, OctahedralFrame[]>>;
+  variantBounds: { maxRadius: number; centerY: number };
+}
+
+class BakeProgressTracker {
+  private completedWork = 0;
+  private readonly totalWork: number;
+
+  constructor(
+    private readonly options: TreeImpostorBakerOptions,
+    private readonly budget: TreeImpostorFrameBudget,
+  ) {
+    this.totalWork = estimateTotalBakeWork(options);
+  }
+
+  publish(
+    stage: TreeImpostorBakeStage,
+    context: SpeciesBakeContext | null,
+    detail: {
+      variant?: number | null;
+      channel?: TreeImpostorBakeChannel;
+      tileIndex?: number;
+      tileCount?: number;
+      completedDelta?: number;
+    } = {},
+  ): void {
+    this.completedWork = Math.min(this.totalWork, this.completedWork + Math.max(0, detail.completedDelta ?? 0));
+    publishTreeImpostorBakeProgress({
+      stage,
+      species: context?.species ?? null,
+      speciesIndex: context?.speciesIndex ?? TREE_SPECIES.length,
+      speciesCount: TREE_SPECIES.length,
+      variant: detail.variant ?? null,
+      variantCount: context?.variantCount ?? TREE_STRUCTURAL_VARIANTS,
+      channel: detail.channel ?? null,
+      tileIndex: detail.tileIndex ?? 0,
+      tileCount: detail.tileCount ?? 0,
+      completedWork: this.completedWork,
+      totalWork: this.totalWork,
+      percent: this.totalWork > 0 ? this.completedWork / this.totalWork : 1,
+      frameMs: Math.max(this.budget.reportedFrameMs(), this.budget.elapsedMs()),
+    }, this.options.onProgress);
+  }
+}
+
 export async function bakeTreeImpostorAtlases(
   options: TreeImpostorBakerOptions,
 ): Promise<TreeImpostorBakeResult> {
@@ -89,20 +166,32 @@ export async function bakeTreeImpostorAtlases(
     return { atlases: {}, supported: false, reason: "renderer does not expose render-target baking" };
   }
 
+  const maxBuildMs = options.maxBuildMsPerFrame ?? TREE_IMPOSTOR_BAKE_CONFIG.maxBuildMsPerFrame;
+  const budget = new TreeImpostorFrameBudget(maxBuildMs);
+  const progress = new BakeProgressTracker(options, budget);
+  const atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>> = {};
+
   try {
-    const atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>> = {};
-    const batch = Math.max(1, options.settings.impostors.maxBakesPerFrame);
     for (let index = 0; index < TREE_SPECIES.length; index++) {
+      throwIfTreeImpostorBakeAborted(options.signal);
       const species = TREE_SPECIES[index];
-      atlases[species] = await bakeSpeciesAtlas(options.renderer, species, options);
-      if ((index + 1) % batch === 0 && index + 1 < TREE_SPECIES.length) await nextFrame();
+      const atlas = await bakeSpeciesAtlas(options.renderer, species, index, options, budget, progress);
+      atlases[species] = atlas;
+      progress.publish("committing", createSpeciesContext(species, index, options), { completedDelta: 1 });
+      await budget.yieldIfExpired(true);
     }
+    progress.publish("complete", null);
     return { atlases, supported: true, reason: null };
   } catch (error) {
+    for (const atlas of Object.values(atlases)) atlas?.dispose();
+    const cancelled = isTreeImpostorBakeAbort(error);
+    progress.publish(cancelled ? "cancelled" : "failed", null);
     return {
       atlases: {},
       supported: false,
-      reason: error instanceof Error ? error.message : String(error),
+      reason: cancelled
+        ? error instanceof Error ? error.message : "tree impostor baking cancelled"
+        : error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -110,8 +199,265 @@ export async function bakeTreeImpostorAtlases(
 async function bakeSpeciesAtlas(
   renderer: RenderTargetRenderer,
   species: TreeSpeciesId,
+  speciesIndex: number,
   options: TreeImpostorBakerOptions,
+  budget: TreeImpostorFrameBudget,
+  progress: BakeProgressTracker,
 ): Promise<TreeImpostorAtlas> {
+  const context = createSpeciesContext(species, speciesIndex, options);
+  progress.publish("allocating", context, { completedDelta: 1 });
+  throwIfTreeImpostorBakeAborted(options.signal);
+
+  const albedoTarget = createTreeImpostorRenderTarget(
+    context.atlasWidthPx,
+    context.atlasHeightPx,
+    `tree-impostor-albedo-${species}`,
+  );
+  const normalDepthTarget = createTreeImpostorRenderTarget(
+    context.atlasWidthPx,
+    context.atlasHeightPx,
+    `tree-impostor-normal-depth-${species}`,
+  );
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera();
+  const albedoMaterial = createTreeImpostorBakeMaterial(
+    options.material,
+    options.settings,
+    options.foliageAtlas,
+    options.webgpu === true,
+  );
+  const normalDepthMaterial = createTreeImpostorNormalDepthBakeMaterial(
+    0.01,
+    context.variantBounds.maxRadius * 6,
+    options.foliageAtlas,
+    options.webgpu === true,
+  );
+  const mesh = new THREE.Mesh(
+    selectTreeImpostorBakeGeometry(options.geometries, species, options.settings.impostors.sourceLod),
+    albedoMaterial,
+  );
+  scene.add(mesh);
+
+  let cleanedAlbedo: THREE.DataTexture | null = null;
+  let cleanedNormalDepth: THREE.DataTexture | null = null;
+  let keepRenderTargets = true;
+  try {
+    clearBakeTarget(renderer, albedoTarget);
+    clearBakeTarget(renderer, normalDepthTarget);
+    await budget.yieldIfExpired();
+
+    await captureSpeciesChannel(
+      renderer,
+      albedoTarget,
+      scene,
+      camera,
+      mesh,
+      albedoMaterial,
+      "albedo",
+      context,
+      options,
+      budget,
+      progress,
+    );
+    await captureSpeciesChannel(
+      renderer,
+      normalDepthTarget,
+      scene,
+      camera,
+      mesh,
+      normalDepthMaterial,
+      "normal-depth",
+      context,
+      options,
+      budget,
+      progress,
+    );
+
+    progress.publish("readback", context, { channel: "albedo" });
+    await budget.yieldIfExpired(true);
+    const albedoPixels = await readTreeImpostorAtlasPixels(
+      renderer,
+      albedoTarget,
+      context.atlasWidthPx,
+      context.atlasHeightPx,
+    );
+    progress.publish("readback", context, { channel: "albedo", completedDelta: 1 });
+
+    progress.publish("readback", context, { channel: "normal-depth" });
+    await budget.yieldIfExpired(true);
+    const normalDepthPixels = await readTreeImpostorAtlasPixels(
+      renderer,
+      normalDepthTarget,
+      context.atlasWidthPx,
+      context.atlasHeightPx,
+    );
+    progress.publish("readback", context, { channel: "normal-depth", completedDelta: 1 });
+
+    if (albedoPixels && normalDepthPixels) {
+      if (options.webgpu === true) {
+        await runPixelJob(
+          createTreeImpostorRowFlipJob(albedoPixels, context.atlasWidthPx, context.atlasHeightPx),
+          "row-flip",
+          "albedo",
+          context,
+          options,
+          budget,
+          progress,
+        );
+        await runPixelJob(
+          createTreeImpostorRowFlipJob(normalDepthPixels, context.atlasWidthPx, context.atlasHeightPx),
+          "row-flip",
+          "normal-depth",
+          context,
+          options,
+          budget,
+          progress,
+        );
+      }
+
+      await runPixelJob(
+        createTreeImpostorAtlasDilationJob({
+          albedo: albedoPixels,
+          normalDepth: normalDepthPixels,
+          width: context.atlasWidthPx,
+          height: context.atlasHeightPx,
+          tileSize: context.resolutionPx,
+        }),
+        "dilating",
+        null,
+        context,
+        options,
+        budget,
+        progress,
+      );
+
+      throwIfTreeImpostorBakeAborted(options.signal);
+      progress.publish("uploading", context, { channel: "albedo" });
+      await budget.yieldIfExpired(true);
+      cleanedAlbedo = createTreeImpostorDataTexture(
+        albedoPixels,
+        context.atlasWidthPx,
+        context.atlasHeightPx,
+        albedoTarget.texture.name,
+      );
+      progress.publish("uploading", context, { channel: "albedo", completedDelta: 1 });
+
+      progress.publish("uploading", context, { channel: "normal-depth" });
+      await budget.yieldIfExpired(true);
+      cleanedNormalDepth = createTreeImpostorDataTexture(
+        normalDepthPixels,
+        context.atlasWidthPx,
+        context.atlasHeightPx,
+        normalDepthTarget.texture.name,
+      );
+      progress.publish("uploading", context, { channel: "normal-depth", completedDelta: 1 });
+      keepRenderTargets = false;
+    }
+
+    const albedo = cleanedAlbedo ?? albedoTarget.texture;
+    const normalDepth = cleanedNormalDepth ?? normalDepthTarget.texture;
+    if (!keepRenderTargets) {
+      albedoTarget.dispose();
+      normalDepthTarget.dispose();
+    }
+    return createAtlas(context, albedo, normalDepth, keepRenderTargets ? { albedoTarget, normalDepthTarget } : null);
+  } catch (error) {
+    cleanedAlbedo?.dispose();
+    cleanedNormalDepth?.dispose();
+    albedoTarget.dispose();
+    normalDepthTarget.dispose();
+    throw error;
+  } finally {
+    albedoMaterial.dispose();
+    normalDepthMaterial.dispose();
+  }
+}
+
+async function captureSpeciesChannel(
+  renderer: RenderTargetRenderer,
+  target: THREE.WebGLRenderTarget,
+  scene: THREE.Scene,
+  camera: THREE.OrthographicCamera,
+  mesh: THREE.Mesh,
+  material: THREE.Material,
+  channel: Exclude<TreeImpostorBakeChannel, null>,
+  context: SpeciesBakeContext,
+  options: TreeImpostorBakerOptions,
+  budget: TreeImpostorFrameBudget,
+  progress: BakeProgressTracker,
+): Promise<void> {
+  mesh.material = material;
+  const tileCount = context.baseFrames.length * context.variantCount;
+  let tileIndex = 0;
+  for (let variant = 0; variant < context.variantCount; variant++) {
+    throwIfTreeImpostorBakeAborted(options.signal);
+    const geometry = selectTreeImpostorBakeGeometry(
+      options.geometries,
+      context.species,
+      options.settings.impostors.sourceLod,
+      variant,
+    );
+    const bounds = computeTreeImpostorGeometryBounds(geometry);
+    mesh.geometry = geometry;
+    mesh.position.copy(bounds.center).multiplyScalar(-1);
+    configureBakeCamera(camera, bounds.radius);
+    const yOffsetPx = variant * context.atlasSizePx;
+    for (const frame of context.baseFrames) {
+      throwIfTreeImpostorBakeAborted(options.signal);
+      bakeAtlasTile(
+        renderer,
+        target,
+        scene,
+        camera,
+        frame,
+        context.resolutionPx,
+        bounds.radius,
+        yOffsetPx,
+      );
+      tileIndex++;
+      progress.publish("capturing", context, {
+        variant,
+        channel,
+        tileIndex,
+        tileCount,
+        completedDelta: 1,
+      });
+      await budget.yieldIfExpired();
+    }
+  }
+}
+
+async function runPixelJob(
+  job: TreeImpostorPixelJob,
+  stage: "row-flip" | "dilating",
+  channel: TreeImpostorBakeChannel,
+  context: SpeciesBakeContext,
+  options: TreeImpostorBakerOptions,
+  budget: TreeImpostorFrameBudget,
+  progress: BakeProgressTracker,
+): Promise<void> {
+  let previousCompleted = 0;
+  while (true) {
+    throwIfTreeImpostorBakeAborted(options.signal);
+    const done = job.step(PIXEL_JOB_OPERATIONS_PER_STEP);
+    const completed = job.completed();
+    progress.publish(stage, context, {
+      channel,
+      tileIndex: completed,
+      tileCount: job.total(),
+      completedDelta: Math.max(0, completed - previousCompleted),
+    });
+    previousCompleted = completed;
+    if (done) return;
+    await budget.yieldIfExpired();
+  }
+}
+
+function createSpeciesContext(
+  species: TreeSpeciesId,
+  speciesIndex: number,
+  options: TreeImpostorBakerOptions,
+): SpeciesBakeContext {
   const { settings, geometries } = options;
   const gridSize = settings.impostors.octahedralGridSize;
   const resolutionPx = settings.impostors.resolutionPx;
@@ -121,117 +467,132 @@ async function bakeSpeciesAtlas(
   const atlasWidthPx = atlasSizePx;
   const atlasHeightPx = atlasSizePx * variantCount;
   const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
-  const variantFrames = createTreeImpostorVariantFrames(
-    baseFrames,
-    atlasSizePx,
-    atlasWidthPx,
-    atlasHeightPx,
-    resolutionPx,
-    paddingPx,
-    variantCount,
-  );
-  const albedoTarget = createTreeImpostorRenderTarget(
-    atlasWidthPx,
-    atlasHeightPx,
-    `tree-impostor-albedo-${species}`,
-  );
-  const normalDepthTarget = createTreeImpostorRenderTarget(
-    atlasWidthPx,
-    atlasHeightPx,
-    `tree-impostor-normal-depth-${species}`,
-  );
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera();
-  const albedoMaterial = createTreeImpostorBakeMaterial(
-    options.material,
-    settings,
-    options.foliageAtlas,
-    options.webgpu === true,
-  );
-  const variantBounds = computeTreeImpostorVariantBounds(
-    geometries,
-    species,
-    settings.impostors.sourceLod,
-    variantCount,
-  );
-  const normalDepthMaterial = createTreeImpostorNormalDepthBakeMaterial(
-    0.01,
-    variantBounds.maxRadius * 6,
-    options.foliageAtlas,
-    options.webgpu === true,
-  );
-  const mesh = new THREE.Mesh(
-    selectTreeImpostorBakeGeometry(geometries, species, settings.impostors.sourceLod),
-    albedoMaterial,
-  );
-  scene.add(mesh);
-
-  try {
-    for (let variant = 0; variant < variantCount; variant++) {
-      const geometry = selectTreeImpostorBakeGeometry(
-        geometries,
-        species,
-        settings.impostors.sourceLod,
-        variant,
-      );
-      const bounds = computeTreeImpostorGeometryBounds(geometry);
-      mesh.geometry = geometry;
-      mesh.position.copy(bounds.center).multiplyScalar(-1);
-      const yOffsetPx = variant * atlasSizePx;
-      configureBakeCamera(camera, bounds.radius);
-      mesh.material = albedoMaterial;
-      bakeAtlasTarget(renderer, albedoTarget, scene, camera, baseFrames, resolutionPx, bounds.radius, yOffsetPx);
-      mesh.material = normalDepthMaterial;
-      bakeAtlasTarget(renderer, normalDepthTarget, scene, camera, baseFrames, resolutionPx, bounds.radius, yOffsetPx);
-    }
-  } finally {
-    albedoMaterial.dispose();
-    normalDepthMaterial.dispose();
-  }
-
-  const cleaned = await readCleanedTreeImpostorAtlasTextures(
-    renderer,
-    albedoTarget,
-    normalDepthTarget,
-    atlasWidthPx,
-    atlasHeightPx,
-    resolutionPx,
-    options.webgpu === true,
-  );
-  const albedo = cleaned?.albedo ?? albedoTarget.texture;
-  const normalDepth = cleaned?.normalDepth ?? normalDepthTarget.texture;
-  if (cleaned) {
-    albedoTarget.dispose();
-    normalDepthTarget.dispose();
-  }
-
   return {
     species,
-    texture: albedo,
-    albedo,
-    normalDepth,
+    speciesIndex,
+    variantCount,
     gridSize,
     resolutionPx,
     atlasSizePx,
     atlasWidthPx,
     atlasHeightPx,
-    variantCount,
-    frames: variantFrames[TREE_IMPOSTOR_CANONICAL_VARIANT] ?? variantFrames[0] ?? baseFrames,
-    variantFrames,
-    radius: variantBounds.maxRadius,
-    centerY: variantBounds.centerY,
+    baseFrames,
+    variantFrames: createTreeImpostorVariantFrames(
+      baseFrames,
+      atlasSizePx,
+      atlasWidthPx,
+      atlasHeightPx,
+      resolutionPx,
+      paddingPx,
+      variantCount,
+    ),
+    variantBounds: computeTreeImpostorVariantBounds(
+      geometries,
+      species,
+      settings.impostors.sourceLod,
+      variantCount,
+    ),
+  };
+}
+
+function createAtlas(
+  context: SpeciesBakeContext,
+  albedo: THREE.Texture,
+  normalDepth: THREE.Texture,
+  renderTargets: {
+    albedoTarget: THREE.WebGLRenderTarget;
+    normalDepthTarget: THREE.WebGLRenderTarget;
+  } | null,
+): TreeImpostorAtlas {
+  return {
+    species: context.species,
+    texture: albedo,
+    albedo,
+    normalDepth,
+    gridSize: context.gridSize,
+    resolutionPx: context.resolutionPx,
+    atlasSizePx: context.atlasSizePx,
+    atlasWidthPx: context.atlasWidthPx,
+    atlasHeightPx: context.atlasHeightPx,
+    variantCount: context.variantCount,
+    frames: context.variantFrames[TREE_IMPOSTOR_CANONICAL_VARIANT] ?? context.variantFrames[0] ?? context.baseFrames,
+    variantFrames: context.variantFrames,
+    radius: context.variantBounds.maxRadius,
+    centerY: context.variantBounds.centerY,
     ready: true,
     dispose() {
-      if (cleaned) {
+      if (renderTargets) {
+        renderTargets.albedoTarget.dispose();
+        renderTargets.normalDepthTarget.dispose();
+      } else {
         albedo.dispose();
         normalDepth.dispose();
-      } else {
-        albedoTarget.dispose();
-        normalDepthTarget.dispose();
       }
     },
   };
+}
+
+function estimateTotalBakeWork(options: TreeImpostorBakerOptions): number {
+  let total = 0;
+  for (const species of TREE_SPECIES) {
+    const gridSize = options.settings.impostors.octahedralGridSize;
+    const variantCount = treeImpostorVariantCount(options.geometries, species);
+    const captureTiles = gridSize * gridSize * variantCount * 2;
+    const atlasHeight = gridSize * options.settings.impostors.resolutionPx * variantCount;
+    const flipRows = options.webgpu === true ? Math.floor(atlasHeight / 2) * 2 : 0;
+    const dilationTiles = gridSize * gridSize * variantCount;
+    total += 1 + captureTiles + 2 + flipRows + dilationTiles + 2 + 1;
+  }
+  return Math.max(1, total);
+}
+
+function clearBakeTarget(renderer: RenderTargetRenderer, target: THREE.WebGLRenderTarget): void {
+  withBakeTarget(renderer, target, () => renderer.clear(true, true, true));
+}
+
+function bakeAtlasTile(
+  renderer: RenderTargetRenderer,
+  renderTarget: THREE.WebGLRenderTarget,
+  scene: THREE.Scene,
+  camera: THREE.OrthographicCamera,
+  frame: OctahedralFrame,
+  resolutionPx: number,
+  radius: number,
+  yOffsetPx: number,
+): void {
+  withBakeTarget(renderer, renderTarget, () => {
+    const direction = new THREE.Vector3(frame.direction[0], frame.direction[1], frame.direction[2]);
+    camera.position.copy(direction).multiplyScalar(radius * 3);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+    renderer.setViewport(
+      frame.x * resolutionPx,
+      yOffsetPx + frame.y * resolutionPx,
+      resolutionPx,
+      resolutionPx,
+    );
+    renderer.render(scene, camera);
+  });
+}
+
+function withBakeTarget(
+  renderer: RenderTargetRenderer,
+  target: THREE.WebGLRenderTarget,
+  operation: () => void,
+): void {
+  const oldTarget = renderer.getRenderTarget();
+  const oldClearColor = renderer.getClearColor(new THREE.Color()).clone();
+  const oldClearAlpha = renderer.getClearAlpha();
+  const oldViewport = renderer.getViewport(new THREE.Vector4()).clone();
+  try {
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 0);
+    operation();
+  } finally {
+    renderer.setRenderTarget(oldTarget);
+    renderer.setClearColor(oldClearColor, oldClearAlpha);
+    renderer.setViewport(oldViewport);
+  }
 }
 
 export function selectTreeImpostorBakeGeometry(
@@ -342,44 +703,6 @@ function configureBakeCamera(camera: THREE.OrthographicCamera, radius: number): 
   camera.updateProjectionMatrix();
 }
 
-function bakeAtlasTarget(
-  renderer: RenderTargetRenderer,
-  renderTarget: THREE.WebGLRenderTarget,
-  scene: THREE.Scene,
-  camera: THREE.OrthographicCamera,
-  frames: readonly OctahedralFrame[],
-  resolutionPx: number,
-  radius: number,
-  yOffsetPx = 0,
-): void {
-  const oldTarget = renderer.getRenderTarget();
-  const oldClearColor = renderer.getClearColor(new THREE.Color()).clone();
-  const oldClearAlpha = renderer.getClearAlpha();
-  const oldViewport = renderer.getViewport(new THREE.Vector4()).clone();
-  try {
-    renderer.setRenderTarget(renderTarget);
-    renderer.setClearColor(0x000000, 0);
-    if (yOffsetPx === 0) renderer.clear(true, true, true);
-    for (const frame of frames) {
-      const direction = new THREE.Vector3(frame.direction[0], frame.direction[1], frame.direction[2]);
-      camera.position.copy(direction).multiplyScalar(radius * 3);
-      camera.lookAt(0, 0, 0);
-      camera.updateProjectionMatrix();
-      renderer.setViewport(
-        frame.x * resolutionPx,
-        yOffsetPx + frame.y * resolutionPx,
-        resolutionPx,
-        resolutionPx,
-      );
-      renderer.render(scene, camera);
-    }
-  } finally {
-    renderer.setRenderTarget(oldTarget);
-    renderer.setClearColor(oldClearColor, oldClearAlpha);
-    renderer.setViewport(oldViewport);
-  }
-}
-
 function isRenderTargetRenderer(value: unknown): value is RenderTargetRenderer {
   if (!value || typeof value !== "object") return false;
   const renderer = value as Partial<RenderTargetRenderer>;
@@ -392,13 +715,6 @@ function isRenderTargetRenderer(value: unknown): value is RenderTargetRenderer {
     && typeof renderer.clear === "function"
     && typeof renderer.getViewport === "function"
     && typeof renderer.setViewport === "function";
-}
-
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
-    else setTimeout(resolve, 0);
-  });
 }
 
 export function encodeTreeImpostorAlbedo(channel: number): number {
