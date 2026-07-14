@@ -44,7 +44,6 @@ describe("lightning spell VFX", () => {
 
     const vfx = createLightningSpellVfx({
       scene,
-      camera: undefined,
       config: {
         ...defaultSpellConfig.lightning.vfx,
         segmentCount: 12,
@@ -61,7 +60,7 @@ describe("lightning spell VFX", () => {
         normal: new THREE.Vector3(0, 1, 0),
       }),
       now: () => clock,
-    } as Parameters<typeof createLightningSpellVfx>[0]);
+    });
 
     const core = scene.getObjectByName("lightning-spell-core") as THREE.Mesh;
     const glow = scene.getObjectByName("lightning-spell-glow") as THREE.Mesh;
