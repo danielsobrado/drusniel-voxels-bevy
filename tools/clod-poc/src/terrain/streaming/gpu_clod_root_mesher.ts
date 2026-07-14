@@ -12,6 +12,7 @@ import {
 } from "./gpu_clod_root_mesher_single.js";
 import { gpuClodHierarchyConfigFromWindow, type GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
+import { createBufferedResidentAdoption } from "./gpu_clod_resident_adoption.js";
 
 export {
   disabledGpuStats,
@@ -248,18 +249,19 @@ async function createResidentPool(
   const { createResidentGpuClodRootMesher } = await import("./gpu_clod_root_resident_mesher.js");
   const meshers: GpuClodRootMesher[] = [];
   for (let index = 0; index < poolCount; index++) {
+    const adoption = createBufferedResidentAdoption(residentPages);
     const mesher = await createResidentGpuClodRootMesher({
       ...opts,
       sharedDevice: device,
       config: childConfig,
       hierarchyConfig,
-      onResidentPage: (page) => residentPages.adopt(page),
+      onResidentPage: adoption.onPage,
     });
     if (!mesher) {
       for (const created of meshers) created.dispose();
       return null;
     }
-    meshers.push(mesher);
+    meshers.push(adoption.wrap(mesher));
   }
   return meshers;
 }
