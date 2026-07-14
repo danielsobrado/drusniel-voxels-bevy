@@ -20,6 +20,7 @@ export function createBufferedResidentAdoption(
 ): BufferedResidentAdoption {
   const pending: GpuClodResidentPage[] = [];
   let active = false;
+  let disposed = false;
 
   const clearPending = (): void => {
     for (const page of pending.splice(0)) destroyGpuClodResidentPage(page);
@@ -27,6 +28,7 @@ export function createBufferedResidentAdoption(
 
   return {
     onPage(page) {
+      if (disposed) throw new Error("GPU CLOD resident adoption buffer is disposed");
       if (page.vertexCount <= 0 || page.indexCount <= 0 || page.indexCount % 3 !== 0) {
         throw new Error(
           `GPU CLOD resident page ${page.id} has invalid counts ${page.vertexCount}/${page.indexCount}`,
@@ -37,6 +39,7 @@ export function createBufferedResidentAdoption(
     wrap(mesher) {
       return {
         async buildPages(batch: readonly GpuClodRootBuildRequest[]): Promise<GpuClodRootBuildResult> {
+          if (disposed) throw new Error("GPU CLOD resident adoption buffer is disposed");
           if (active || pending.length > 0) {
             clearPending();
             throw new Error("GPU CLOD resident adoption buffer entered an invalid overlapping state");
@@ -64,6 +67,8 @@ export function createBufferedResidentAdoption(
           mesher.recordWorkerFallbackPages(count);
         },
         dispose(): void {
+          if (disposed) return;
+          disposed = true;
           clearPending();
           mesher.dispose();
         },
