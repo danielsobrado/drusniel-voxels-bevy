@@ -12,6 +12,8 @@ import {
   type TreeGeometryMap,
   type TreeImpostorAtlas,
 } from "./index.js";
+import { parseTreeImpostorBakeConfig } from "./tree_impostor_bake_config.js";
+import { TreeImpostorFrameBudget } from "./tree_impostor_bake_scheduler.js";
 import { estimateTreeImpostorAtlasMemoryMiB } from "./tree_impostor_memory.js";
 
 describe("tree impostor baker quality", () => {
@@ -46,6 +48,41 @@ describe("tree impostor baker quality", () => {
     settings.impostors.octahedralGridSize = 8;
 
     expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(576, 5);
+  });
+
+  it("parses and clamps the YAML frame budget", () => {
+    expect(parseTreeImpostorBakeConfig(`
+ tree_impostor_bake:
+   max_build_ms_per_frame: 1.5
+`).maxBuildMsPerFrame).toBe(1.5);
+    expect(parseTreeImpostorBakeConfig(`
+ tree_impostor_bake:
+   max_build_ms_per_frame: 0
+`).maxBuildMsPerFrame).toBe(0.25);
+    expect(parseTreeImpostorBakeConfig(`
+ tree_impostor_bake:
+   max_build_ms_per_frame: 999
+`).maxBuildMsPerFrame).toBe(16);
+  });
+
+  it("yields only after the configured frame deadline", async () => {
+    let now = 0;
+    let yields = 0;
+    const budget = new TreeImpostorFrameBudget(2, {
+      now: () => now,
+      nextFrame: async () => {
+        yields++;
+        now += 0.1;
+      },
+    });
+
+    now = 1.9;
+    expect(await budget.yieldIfExpired()).toBe(false);
+    expect(yields).toBe(0);
+    now = 2.1;
+    expect(await budget.yieldIfExpired()).toBe(true);
+    expect(yields).toBe(1);
+    expect(budget.reportedFrameMs()).toBeCloseTo(2.1);
   });
 
   it("stores tree-local normals, not camera-view normals", () => {
