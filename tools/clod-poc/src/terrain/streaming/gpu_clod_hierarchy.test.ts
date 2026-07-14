@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { PageMesh } from "../../types.js";
+import type { ClodPageNode, PageMesh } from "../../types.js";
 import {
   DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
   parseGpuClodHierarchyConfig,
 } from "./gpu_clod_hierarchy_config.js";
 import { buildGpuClodMeshletHierarchy } from "./gpu_clod_meshlet_hierarchy.js";
+import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
 import {
   GPU_CLOD_PACKED_VERTEX_FLOATS,
   GPU_CLOD_WELD_WGSL,
@@ -73,6 +74,42 @@ describe("GPU CLOD meshlet hierarchy", () => {
   });
 });
 
+describe("GPU CLOD resident page cache", () => {
+  it("re-uploads a rebuilt page when its mesh identity changes at the same numeric revision", () => {
+    const previousUsage = Object.getOwnPropertyDescriptor(globalThis, "GPUBufferUsage");
+    Object.defineProperty(globalThis, "GPUBufferUsage", {
+      configurable: true,
+      value: { STORAGE: 1, COPY_DST: 2, COPY_SRC: 4, VERTEX: 8, INDEX: 16 },
+    });
+    let destroyed = 0;
+    const device = {
+      queue: { writeBuffer: () => undefined },
+      createBuffer: () => ({ destroy: () => { destroyed++; } }),
+    } as unknown as GPUDevice;
+    const cache = new GpuClodResidentPageCache(device, {
+      ...DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
+      enabled: true,
+      meshlets: false,
+      maxResidentBytes: 1_048_576,
+    });
+    try {
+      const first = gridMesh(2, 2);
+      const second = gridMesh(2, 2);
+      second.positions[1] = 1;
+      cache.ingest([pageNode(first, 1)]);
+      cache.ingest([pageNode(first, 1)]);
+      expect(cache.stats().uploadsTotal).toBe(1);
+      cache.ingest([pageNode(second, 1)]);
+      expect(cache.stats().uploadsTotal).toBe(2);
+      expect(destroyed).toBe(5);
+    } finally {
+      cache.dispose();
+      if (previousUsage) Object.defineProperty(globalThis, "GPUBufferUsage", previousUsage);
+      else delete (globalThis as typeof globalThis & { GPUBufferUsage?: unknown }).GPUBufferUsage;
+    }
+  });
+});
+
 describe("GPU CLOD compute contracts", () => {
   it("packs the canonical four-channel page attributes", () => {
     const mesh = gridMesh(2, 2);
@@ -91,6 +128,20 @@ describe("GPU CLOD compute contracts", () => {
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn is_locked");
   });
 });
+
+function pageNode(mesh: PageMesh, revision: number): ClodPageNode {
+  return {
+    id: "L0:0,0",
+    revision,
+    level: 0,
+    children: [],
+    mesh,
+    footprint: { minX: 0, minZ: 0, maxX: 2, maxZ: 2 },
+    bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
+    errorWorld: 0,
+    lowBenefit: false,
+  };
+}
 
 function gridMesh(width: number, depth: number): PageMesh {
   const positions: number[] = [];
