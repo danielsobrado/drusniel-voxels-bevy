@@ -15,6 +15,7 @@ import type { TreeSettings } from "../../trees/tree_config.js";
 import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import { createEmptyTreeSystemStats } from "../../trees/tree_system_stats.js";
 import { estimateTreeImpostorAtlasMemoryMiB } from "../../trees/tree_impostor_memory.js";
+import { mountTreeImpostorLabFromWindow } from "../../trees/tree_impostor_lab.js";
 
 export interface TreeStartupInput {
   scene: THREE.Scene;
@@ -157,6 +158,7 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   if (shouldBakeImpostorsOnStart) {
     void treeController.bakeImpostors(renderer).then((result) => {
       if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
+      else mountTreeImpostorLabFromWindow(scene, worldCells);
       treeController.refreshStats();
     }).catch((error) => {
       console.warn("[trees] impostor baking failed", error);
