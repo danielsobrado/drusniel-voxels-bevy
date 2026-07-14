@@ -9,8 +9,9 @@ import {
   type GpuClodRootMesher,
   type GpuClodRootMesherStats,
 } from "./gpu_clod_root_mesher_single.js";
-import { gpuClodHierarchyConfigFromWindow } from "./gpu_clod_hierarchy_config.js";
+import { gpuClodHierarchyConfigFromWindow, type GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
 import { GpuClodResidentPageCache } from "./gpu_clod_resident_page_cache.js";
+import { createResidentGpuClodRootMesher } from "./gpu_clod_root_resident_mesher.js";
 
 export {
   disabledGpuStats,
@@ -143,7 +144,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       this.residentHierarchyDisabled = true;
       this.residentPages.dispose();
       console.warn(
-        "[clod-stream-gpu] optional resident hierarchy disabled; CPU render path remains authoritative",
+        "[clod-stream-gpu] optional resident hierarchy disabled; validated render path remains authoritative",
         error,
       );
     }
@@ -203,41 +204,89 @@ export async function createGpuClodRootMesher(
   const residentPages = device && hierarchyConfig.enabled
     ? new GpuClodResidentPageCache(device, hierarchyConfig)
     : null;
+  const childConfig = poolCount === 1 ? opts.config : splitPoolConfig(opts.config, poolCount);
 
-  if (poolCount === 1) {
-    const mesher = await createSingleGpuClodRootMesher({ ...opts, sharedDevice: device ?? opts.sharedDevice });
-    if (!mesher) {
-      residentPages?.dispose();
-      return null;
-    }
-    return new PooledGpuClodRootMesher([mesher], residentPages);
+  if (hierarchyConfig.enabled && device && residentPages) {
+    const residentMeshers = await createResidentPool(
+      opts,
+      childConfig,
+      hierarchyConfig,
+      device,
+      residentPages,
+      poolCount,
+    );
+    if (residentMeshers) return new PooledGpuClodRootMesher(residentMeshers, residentPages);
+    console.warn("[clod-stream-gpu] resident CLOD path failed to initialize; reverting to validated GPU readback path");
   }
 
-  if (!device) {
+  const standardMeshers = await createStandardPool(opts, childConfig, device, poolCount);
+  if (!standardMeshers) {
     residentPages?.dispose();
     publishGpuClodRootMesherCounters(disabledGpuStats());
     return null;
   }
+  return new PooledGpuClodRootMesher(standardMeshers, residentPages);
+}
 
-  const childConfig = {
-    ...opts.config,
-    maxInflightBatches: 1,
-    maxChunkSlots: splitBudget(opts.config.maxChunkSlots, DEFAULT_TOTAL_CHUNK_SLOTS, poolCount),
-    maxTotalSlotBytes: splitBudget(opts.config.maxTotalSlotBytes, DEFAULT_TOTAL_SLOT_BYTES, poolCount),
-    maxReadbackBufferBytes: splitBudget(opts.config.maxReadbackBufferBytes, DEFAULT_TOTAL_READBACK_BYTES, poolCount),
-  };
+async function createResidentPool(
+  opts: CreateGpuClodRootMesherOptions,
+  childConfig: CreateGpuClodRootMesherOptions["config"],
+  hierarchyConfig: GpuClodHierarchyConfig,
+  device: GPUDevice,
+  residentPages: GpuClodResidentPageCache,
+  poolCount: number,
+): Promise<GpuClodRootMesher[] | null> {
   const meshers: GpuClodRootMesher[] = [];
   for (let index = 0; index < poolCount; index++) {
-    const mesher = await createSingleGpuClodRootMesher({ ...opts, sharedDevice: device, config: childConfig });
+    const mesher = await createResidentGpuClodRootMesher({
+      ...opts,
+      sharedDevice: device,
+      config: childConfig,
+      hierarchyConfig,
+      onResidentPage: (page) => residentPages.adopt(page),
+    });
     if (!mesher) {
       for (const created of meshers) created.dispose();
-      residentPages?.dispose();
-      publishGpuClodRootMesherCounters(disabledGpuStats());
       return null;
     }
     meshers.push(mesher);
   }
-  return new PooledGpuClodRootMesher(meshers, residentPages);
+  return meshers;
+}
+
+async function createStandardPool(
+  opts: CreateGpuClodRootMesherOptions,
+  childConfig: CreateGpuClodRootMesherOptions["config"],
+  device: GPUDevice | null,
+  poolCount: number,
+): Promise<GpuClodRootMesher[] | null> {
+  const meshers: GpuClodRootMesher[] = [];
+  for (let index = 0; index < poolCount; index++) {
+    const mesher = await createSingleGpuClodRootMesher({
+      ...opts,
+      sharedDevice: device ?? opts.sharedDevice,
+      config: childConfig,
+    });
+    if (!mesher) {
+      for (const created of meshers) created.dispose();
+      return null;
+    }
+    meshers.push(mesher);
+  }
+  return meshers;
+}
+
+function splitPoolConfig(
+  config: CreateGpuClodRootMesherOptions["config"],
+  poolCount: number,
+): CreateGpuClodRootMesherOptions["config"] {
+  return {
+    ...config,
+    maxInflightBatches: 1,
+    maxChunkSlots: splitBudget(config.maxChunkSlots, DEFAULT_TOTAL_CHUNK_SLOTS, poolCount),
+    maxTotalSlotBytes: splitBudget(config.maxTotalSlotBytes, DEFAULT_TOTAL_SLOT_BYTES, poolCount),
+    maxReadbackBufferBytes: splitBudget(config.maxReadbackBufferBytes, DEFAULT_TOTAL_READBACK_BYTES, poolCount),
+  };
 }
 
 function resolvePoolCount(requested: number): number {
