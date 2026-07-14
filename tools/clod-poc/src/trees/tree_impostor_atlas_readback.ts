@@ -3,6 +3,7 @@ import {
   copyTreeImpostorPixels,
   dilateTreeImpostorAtlasTiles,
   flipTreeImpostorPixelRows,
+  viewTreeImpostorPixels,
 } from "./tree_impostor_atlas_pixels.js";
 
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
@@ -56,7 +57,7 @@ export async function readTreeImpostorAtlasPixels(
   const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
   if (!readPixels) return null;
   const raw = await readPixels(target, 0, 0, width, height);
-  return copyTreeImpostorPixels(raw, width * height * 4);
+  return viewTreeImpostorPixels(raw, width * height * 4);
 }
 
 export function createTreeImpostorDataTexture(
@@ -88,10 +89,13 @@ export async function readCleanedTreeImpostorAtlasTextures(
   tileSize: number,
   webgpu: boolean,
 ): Promise<{ albedo: THREE.DataTexture; normalDepth: THREE.DataTexture } | null> {
-  const albedo = await readTreeImpostorAtlasPixels(renderer, albedoTarget, width, height);
-  if (!albedo) return null;
-  const normalDepth = await readTreeImpostorAtlasPixels(renderer, normalDepthTarget, width, height);
-  if (!normalDepth) return null;
+  const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
+  if (!readPixels) return null;
+  const expectedLength = width * height * 4;
+  const rawAlbedo = await readPixels(albedoTarget, 0, 0, width, height);
+  const rawNormalDepth = await readPixels(normalDepthTarget, 0, 0, width, height);
+  const albedo = copyTreeImpostorPixels(rawAlbedo, expectedLength);
+  const normalDepth = copyTreeImpostorPixels(rawNormalDepth, expectedLength);
   if (webgpu) {
     flipTreeImpostorPixelRows(albedo, width, height);
     flipTreeImpostorPixelRows(normalDepth, width, height);
