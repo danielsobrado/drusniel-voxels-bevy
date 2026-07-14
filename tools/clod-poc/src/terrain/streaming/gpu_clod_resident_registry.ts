@@ -46,7 +46,14 @@ export function acquireGpuClodResidentPage(
   entry.leases++;
   const onFirstAcquire = entry.onFirstAcquire;
   entry.onFirstAcquire = undefined;
-  onFirstAcquire?.();
+  try {
+    onFirstAcquire?.();
+  } catch (error) {
+    entry.leases = Math.max(0, entry.leases - 1);
+    if (!entry.retired) entry.onFirstAcquire = onFirstAcquire;
+    destroyIfUnused(entry);
+    throw error;
+  }
   let released = false;
   return {
     page: entry.page,

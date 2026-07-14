@@ -55,6 +55,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   private workerFallbackPages = 0;
   private residentHierarchyFailures = 0;
   private residentHierarchyDisabled = false;
+  private runtimeDisabled = false;
   private disposed = false;
   private resourcesDisposed = false;
 
@@ -75,6 +76,8 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       if (this.residentPages && !this.residentHierarchyDisabled) {
         this.residentHierarchyFailures++;
       }
+      const childDisabled = this.meshers[index]!.stats().enabled === 0;
+      if (childDisabled || isHardGpuRuntimeFailure(error)) this.disableRuntime(error);
       throw error;
     } finally {
       this.active = Math.max(0, this.active - 1);
@@ -87,7 +90,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   stats(): GpuClodRootMesherStats {
     const stats = this.meshers.map((mesher) => mesher.stats());
     return {
-      enabled: !this.disposed && stats.every((value) => value.enabled === 1) ? 1 : 0,
+      enabled: !this.disposed && !this.runtimeDisabled && stats.every((value) => value.enabled === 1) ? 1 : 0,
       batchesDispatched: sum(stats, "batchesDispatched"),
       pagesDispatched: sum(stats, "pagesDispatched"),
       batchPagesP95: max(stats, "batchPagesP95"),
@@ -130,8 +133,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
     if (this.disposed) return;
     this.disposed = true;
     this.residentHierarchyDisabled = true;
-    const error = new Error("GPU CLOD root pool disposed");
-    for (const waiter of this.waiters.splice(0)) waiter.reject(error);
+    this.rejectWaiters(new Error("GPU CLOD root pool disposed"));
     this.available.length = 0;
     this.disposeResourcesWhenIdle();
     this.publishCounters();
@@ -139,6 +141,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
 
   private acquire(): Promise<number> {
     if (this.disposed) return Promise.reject(new Error("GPU CLOD root pool disposed"));
+    if (this.runtimeDisabled) return Promise.reject(new Error("GPU CLOD root pool disabled after a build failure"));
     const index = this.available.shift();
     if (index !== undefined) {
       this.beginBuild();
@@ -164,14 +167,26 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   }
 
   private release(index: number): void {
-    if (this.disposed) return;
+    if (this.disposed || this.runtimeDisabled) return;
     const waiter = this.waiters.shift();
     if (waiter) waiter.resolve(index);
     else this.available.push(index);
   }
 
+  private disableRuntime(cause: unknown): void {
+    if (this.runtimeDisabled || this.disposed) return;
+    this.runtimeDisabled = true;
+    if (this.residentPages) this.residentHierarchyDisabled = true;
+    this.rejectWaiters(new Error("GPU CLOD root pool disabled after a build failure", { cause }));
+    this.available.length = 0;
+  }
+
+  private rejectWaiters(error: Error): void {
+    for (const waiter of this.waiters.splice(0)) waiter.reject(error);
+  }
+
   private disposeResourcesWhenIdle(): void {
-    if (!this.disposed || this.active > 0 || this.resourcesDisposed) return;
+    if ((!this.disposed && !this.runtimeDisabled) || this.active > 0 || this.resourcesDisposed) return;
     this.resourcesDisposed = true;
     for (const mesher of this.meshers) mesher.dispose();
     this.residentPages?.dispose();
@@ -325,6 +340,11 @@ function splitBudget(configured: number | undefined, fallback: number, poolCount
 
 function normalizedCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function isHardGpuRuntimeFailure(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /out.?of.?memory|device.?lost|validation|maxBufferSize|GPUValidationError|OperationError/i.test(message);
 }
 
 function sum(stats: readonly GpuClodRootMesherStats[], key: keyof GpuClodRootMesherStats): number {

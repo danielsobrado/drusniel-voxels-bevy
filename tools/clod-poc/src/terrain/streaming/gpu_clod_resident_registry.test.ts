@@ -49,6 +49,22 @@ describe("GPU CLOD resident registry", () => {
     expect(isGpuClodResidentPageLeased(residentPage.id, residentPage)).toBe(false);
   });
 
+  it("rolls back and retries a failed first acquisition", () => {
+    const residentPage = page();
+    const onFirstAcquire = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("first view failed"); })
+      .mockImplementationOnce(() => undefined);
+    registerGpuClodResidentPage(residentPage, onFirstAcquire);
+
+    expect(() => acquireGpuClodResidentPage(residentPage.id)).toThrow("first view failed");
+    expect(isGpuClodResidentPageLeased(residentPage.id, residentPage)).toBe(false);
+
+    const lease = acquireGpuClodResidentPage(residentPage.id);
+    expect(lease).not.toBeNull();
+    expect(onFirstAcquire).toHaveBeenCalledTimes(2);
+    lease?.release();
+  });
+
   it("notifies every transition from leased to unleased", () => {
     const residentPage = page();
     const onFinalRelease = vi.fn();
