@@ -218,9 +218,7 @@ export class ClodRenderNodeCache {
     } else {
       geometry.dispose();
     }
-    if (view.mat !== this.deps.materialController.sharedMaterial) {
-      if (!this.deps.materialController.releaseTerrainMaterial(view.mat)) view.mat.material.dispose();
-    }
+    this.releaseMaterial(view.mat);
     this.statDisposals++;
     if (reason === "evict") this.statEvictions++;
   }
@@ -232,28 +230,46 @@ export class ClodRenderNodeCache {
     this.configureCurrentMaterialState(mat);
 
     const normalMode = this.deps.getNormalMode();
-    const webGpuRenderer = this.deps.webGpuRenderer ?? getCurrentWebGpuRenderer();
-    const residentLease = webGpuRenderer
+    const webGpuRenderer = node.gpuResidentOnly
+      ? this.deps.webGpuRenderer ?? getCurrentWebGpuRenderer()
+      : null;
+    const residentLease = node.gpuResidentOnly && webGpuRenderer
       ? acquireGpuClodResidentPage(node.id, normalizedRevision(node.revision))
       : null;
+
+    if (node.gpuResidentOnly && (!webGpuRenderer || !residentLease)) {
+      this.releaseMaterial(mat);
+      throw new Error(
+        `[clod] GPU-only page ${node.id} revision ${normalizedRevision(node.revision)} has no resident render buffer`,
+      );
+    }
+
     let recomputedNormals: Float32Array | null = null;
     let geometry: THREE.BufferGeometry;
-    if (residentLease && webGpuRenderer) {
-      geometry = createExternalGpuClodGeometry(webGpuRenderer, residentLease);
-      this.statGpuResidentViews++;
-      if (normalMode === "recomputed") this.statGpuResidentNormalFallbacks++;
-    } else {
-      recomputedNormals = normalMode === "recomputed" ? computeGeometryNormals(node.mesh) : null;
-      geometry = this.deps.pageGeometryCache.getOrCreate({
-        node,
-        normalMode,
-        createGeometry: () => {
-          const created = toGeometry(node.mesh);
-          if (recomputedNormals) created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
-          return created;
-        },
-      });
-      this.deps.pageGeometryCache.setGeometryActive(geometry, true);
+    try {
+      if (residentLease && webGpuRenderer) {
+        geometry = createExternalGpuClodGeometry(webGpuRenderer, residentLease);
+        this.statGpuResidentViews++;
+        if (normalMode === "recomputed") this.statGpuResidentNormalFallbacks++;
+      } else {
+        recomputedNormals = normalMode === "recomputed" ? computeGeometryNormals(node.mesh) : null;
+        geometry = this.deps.pageGeometryCache.getOrCreate({
+          node,
+          normalMode,
+          createGeometry: () => {
+            const created = toGeometry(node.mesh);
+            if (recomputedNormals) {
+              created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
+            }
+            return created;
+          },
+        });
+        this.deps.pageGeometryCache.setGeometryActive(geometry, true);
+      }
+    } catch (error) {
+      residentLease?.release();
+      this.releaseMaterial(mat);
+      throw error;
     }
 
     const mesh = new THREE.Mesh(geometry, mat.material);
@@ -282,6 +298,11 @@ export class ClodRenderNodeCache {
       },
       unsubscribeMaterial,
     };
+  }
+
+  private releaseMaterial(mat: TerrainMaterialHandle): void {
+    if (mat === this.deps.materialController.sharedMaterial) return;
+    if (!this.deps.materialController.releaseTerrainMaterial(mat)) mat.material.dispose();
   }
 
   private configureCurrentMaterialState(mat: TerrainMaterialHandle): void {
