@@ -224,6 +224,7 @@ export class ClodRenderNodeCache {
       geometry.dispose();
     }
     this.releaseMaterial(view.mat);
+    this.syncWireframeState();
     this.statDisposals++;
     if (reason === "evict") this.statEvictions++;
   }
@@ -312,8 +313,10 @@ export class ClodRenderNodeCache {
 
   private configureCurrentMaterialState(mat: TerrainMaterialHandle, node: ClodPageNode): void {
     const state = this.deps.getMaterialState();
-    const wireframe = state.wireframe && !node.gpuResidentOnly;
-    if (state.wireframe && node.gpuResidentOnly) this.statGpuResidentWireframeFallbacks++;
+    const residentPresent = node.gpuResidentOnly || this.hasResidentViews();
+    const sharedWithResident = mat === this.deps.materialController.sharedMaterial && residentPresent;
+    const wireframe = state.wireframe && !node.gpuResidentOnly && !sharedWithResident;
+    if (state.wireframe && !wireframe) this.statGpuResidentWireframeFallbacks++;
     mat.setWireframe(wireframe);
     mat.setDebug({
       normalColor: state.normalColor,
@@ -326,6 +329,23 @@ export class ClodRenderNodeCache {
       this.deps.materialController.activeTerrainSlots(),
       this.deps.materialController.terrainTextureUniformOptions(),
     );
+  }
+
+  private syncWireframeState(): void {
+    const state = this.deps.getMaterialState();
+    const residentPresent = this.hasResidentViews();
+    const sharedMaterial = this.deps.materialController.sharedMaterial;
+    for (const view of this.viewMap.values()) {
+      const sharedWithResident = view.mat === sharedMaterial && residentPresent;
+      view.mat.setWireframe(state.wireframe && !view.node.gpuResidentOnly && !sharedWithResident);
+    }
+  }
+
+  private hasResidentViews(): boolean {
+    for (const view of this.viewMap.values()) {
+      if (view.node.gpuResidentOnly) return true;
+    }
+    return false;
   }
 
   private canDisposeView(view: ClodRenderNodeView, protectedNodeIds: ReadonlySet<string>): boolean {
