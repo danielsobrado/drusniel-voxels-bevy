@@ -13,10 +13,10 @@ export function buildCarvedHeightfieldTile(
 ): HeightfieldTile {
   return buildHeightfieldTile(key, {
     sourceRevision,
+    complexity: field.complexity,
     sampleHeight(x, z) {
       const baseHeight = field.sampleHeight(x, z);
       return hydrology.carveHeight(x, z, baseHeight, carve);
     },
   }, sourceRevision);
 }
-

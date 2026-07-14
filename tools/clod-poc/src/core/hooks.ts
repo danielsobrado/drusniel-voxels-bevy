@@ -16,6 +16,14 @@ export interface AcceptanceSceneOptions {
   proceduralDebug?: string | null;
 }
 
+export interface TerrainEditProbeResult {
+  readonly editRevision: number;
+  readonly voxelDeltaCount: number;
+  readonly dirtyRevision: number;
+  readonly streamInvalidations: number;
+  readonly streamRebuilds: number;
+}
+
 export interface EngineStats {
   fps: number;
   frameMs: number;
@@ -52,6 +60,8 @@ export interface ClodHooks {
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
   beginMovementRouteProbe: (() => void) | null;
+  runTerrainEditProbe: ((ray: { origin: [number, number, number]; direction: [number, number, number] }) => Promise<TerrainEditProbeResult>) | null;
+  getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
   findContinentRiverCrossingRoute: ((options?: ContinentRiverRouteSearchOptions) => ContinentRiverCrossingRoute | null) | null;
   setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => void) | null;
   resetAcceptanceScene: (() => void) | null;
@@ -126,6 +136,8 @@ export function initHooks(): ClodHooks {
     settle: null,
     flyCamEnabled: null,
     beginMovementRouteProbe: null,
+    runTerrainEditProbe: null,
+    getStreamingRootReadyPageKeys: null,
     findContinentRiverCrossingRoute: null,
     setAcceptanceSceneOptions: null,
     resetAcceptanceScene: null,

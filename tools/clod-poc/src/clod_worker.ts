@@ -23,8 +23,10 @@ import {
 import {
   applyDigEditTransaction,
   baseSurfaceHeight,
+  getVoxelOverlaySource,
   rollbackDigEditTransaction,
   replaceVoxelEdits,
+  setVoxelOverlaySource,
   setTerrainFieldConfig,
   setTerrainSurfaceOverride,
 } from "./terrain/terrain.js";
@@ -65,6 +67,7 @@ import {
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import { buildHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile.js";
 import { buildCarvedHeightfieldTile } from "./world/heightfield_tiles/heightfield_tile_carve.js";
+import { buildHeightfieldTileComplexity } from "./world/heightfield_tiles/heightfield_tile_complexity.js";
 import { createGraphHydrologySampler, type GraphHydrologySampler, type GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
 import {
   collectHeightfieldTileTransferables,
@@ -284,6 +287,7 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   setTerrainFieldConfig(request.terrainFieldConfig ?? null);
   setTerrainFieldCoreConfig(request.terrainFieldConfig ?? null);
   replaceVoxelEdits(request.voxelEdits);
+  setVoxelOverlaySource(request.terrainSource.voxelOverlay);
   hydrologyTerrain = request.hydrologyTerrain ?? null;
   startupHeightfield = request.startupHeightfield ?? null;
   graphHydrology = request.hydrologyGraph
@@ -592,11 +596,18 @@ function handleBuildHeightfieldTiles(request: HeightfieldTileWorkerBuildRequest)
   if (request.keys.length > 2) throw new Error("heightfield tile worker batches are limited to 2 tiles");
 
   const startedAt = performance.now();
-  const field = { sampleHeight: baseSurfaceHeight, sourceRevision: request.sourceRevision };
-  const tiles = request.keys.map((key) => graphHydrology && graphCarve
-    ? buildCarvedHeightfieldTile(key, field, graphHydrology, graphCarve, request.sourceRevision)
-    : buildHeightfieldTile(key, field, request.sourceRevision));
-  const transferBytes = tiles.reduce((sum, tile) => sum + tile.heights.byteLength, 0);
+  const tiles = request.keys.map((key) => {
+    const field = {
+      sampleHeight: baseSurfaceHeight,
+      sourceRevision: request.sourceRevision,
+      complexity: buildHeightfieldTileComplexity(key, getVoxelOverlaySource()),
+    };
+    return graphHydrology && graphCarve
+      ? buildCarvedHeightfieldTile(key, field, graphHydrology, graphCarve, request.sourceRevision)
+      : buildHeightfieldTile(key, field, request.sourceRevision);
+  });
+  const transferBytes = tiles.reduce((sum, tile) => sum + tile.heights.byteLength
+    + (tile.complexVolumeMask?.byteLength ?? 0) + (tile.entranceMask?.byteLength ?? 0), 0);
   post({
     type: "heightfieldTilesBuilt",
     requestId: request.requestId,

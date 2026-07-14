@@ -103,6 +103,12 @@ const BASE_SCENE_REGISTRY: readonly SceneRegistryEntry[] = [
     longView: true,
   },
   {
+    id: "cave-test",
+    label: "cave test",
+    phase0ConfigKey: "cave_test",
+    longView: true,
+  },
+  {
     id: "infinite-far-shell-straight",
     label: "far shell straight",
     phase0ConfigKey: "infinite_far_shell_straight",

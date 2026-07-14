@@ -185,4 +185,48 @@ describe("acceptance world cache key", () => {
     expect(a.key).not.toBe(b.key);
     expect(diffAcceptanceWorldCacheKeyFields(a, b)).toContain("waterConfig");
   });
+
+  it("includes voxel region refs and stamp hashes in terrain geometry identity", async () => {
+    const plain = await buildAcceptanceWorldCacheKey({ cfg, terrainSource: baseTerrainSource() });
+    const complex = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: {
+        ...baseTerrainSource(),
+        voxelOverlay: {
+          regions: [{
+            id: "region-a",
+            bounds: { minX: 0, minY: -8, minZ: 0, maxX: 16, maxY: 8, maxZ: 16 },
+            caveSystem: null,
+            caveEntrances: [],
+            stamps: [{
+              id: "stamp-a",
+              hash: "stamp-hash-a",
+              operation: "carve",
+              shape: "sphere",
+              start: [8, 0, 8],
+              radiusM: 4,
+            }],
+          }],
+        },
+      },
+    });
+
+    expect(complex.key).not.toBe(plain.key);
+    expect(diffAcceptanceWorldCacheKeyFields(plain, complex)).toContain("voxelOverlay");
+  });
+
+  it("uses one cache identity for omitted, null, and empty voxel overlays", async () => {
+    const omitted = await buildAcceptanceWorldCacheKey({ cfg, terrainSource: baseTerrainSource() });
+    const nulled = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: { ...baseTerrainSource(), voxelOverlay: null },
+    });
+    const empty = await buildAcceptanceWorldCacheKey({
+      cfg,
+      terrainSource: { ...baseTerrainSource(), voxelOverlay: { regions: [] } },
+    });
+
+    expect(nulled.key).toBe(omitted.key);
+    expect(empty.key).toBe(omitted.key);
+  });
 });

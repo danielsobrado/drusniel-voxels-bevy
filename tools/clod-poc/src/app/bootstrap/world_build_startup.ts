@@ -12,6 +12,8 @@ import {
   setTerrainSurfaceOverride,
   setBorderCoastRuntime,
   parseBorderCoastOceanConfig,
+  buildCaveTestVoxelOverlay,
+  setVoxelOverlaySource,
   type BorderCoastOceanConfig,
   type VoxelEditSnapshot,
 } from "../../terrain/terrain.js";
@@ -78,6 +80,7 @@ import type { VoxelProjectArchiveContents } from "../../project/voxel_project_ar
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import {
   CONTINENT_SCENE,
+  CAVE_TEST_SCENE,
   INFINITE_ISLANDS_SCENE,
   describeWorldMode,
   resolveWorldMode,
@@ -355,7 +358,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const seed = numberParam(searchParams, ["seed"]) ?? 0;
   const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
   const isInfiniteIslands = sceneName === INFINITE_ISLANDS_SCENE;
-  const isContinent = sceneName === CONTINENT_SCENE;
+  const isContinent = sceneName === CONTINENT_SCENE || sceneName === CAVE_TEST_SCENE;
   const isStreamedWorld = isInfiniteIslands || isContinent;
   const continentHydrologyRequested = isContinent
     && booleanParam(searchParams, ["continentHydrology", "continent_hydrology"], true);
@@ -538,6 +541,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     power: waterConfig.hydrology.rivers.carvePower,
     lakeBedDepthM: waterConfig.hydrology.rivers.visibleDepthM,
   } : null;
+  let voxelOverlay = sceneName === CAVE_TEST_SCENE ? buildCaveTestVoxelOverlay(baseSurfaceHeight) : null;
   const terrainSource: TerrainSourceInputs = {
     scene: sceneName,
     worldSeed: String(seed),
@@ -563,6 +567,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     longViewScene: queryLongViewScene,
     hydrologyGraphHash: null,
     hydrologyCarve: null,
+    voxelOverlay,
   };
   let acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
   window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
@@ -661,6 +666,10 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     terrainSource.startupHeightfield = startupHeightfieldDescriptor(startupHeightfield);
     terrainSource.hydrologyGraphHash = hydrologyGraphArtifact.ref.hash;
     terrainSource.hydrologyCarve = graphCarveConfig;
+    if (sceneName === CAVE_TEST_SCENE) {
+      voxelOverlay = buildCaveTestVoxelOverlay((x, z) => graphSampler.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarveConfig!));
+      terrainSource.voxelOverlay = voxelOverlay;
+    }
     acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
     window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
     worldManifest = withWorldManifestArtifact(buildWorldManifest({
@@ -671,6 +680,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     }), "hydrologyGraph", hydrologyGraphArtifact.ref);
   }
   terrainSource.worldManifest = worldManifest;
+  setVoxelOverlaySource(voxelOverlay);
   startupTimings["world_manifest_present"] = 1;
   startupTimings["world_manifest_seed"] = worldManifest.seed;
   publishWorldManifestForDiagnostics(worldManifest);

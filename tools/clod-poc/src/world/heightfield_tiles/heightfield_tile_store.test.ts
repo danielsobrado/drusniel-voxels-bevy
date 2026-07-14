@@ -36,6 +36,27 @@ describe("IndexedDbHeightfieldTileStore", () => {
     db.close();
   });
 
+  it("round-trips sparse voxel complexity payloads", async () => {
+    const db = await openHeightfieldTileDb(indexedDB, dbName());
+    const store = new IndexedDbHeightfieldTileStore(db, "terrain-complex");
+    const source = buildHeightfieldTile({ x: 0, z: 0 }, {
+      sampleHeight: () => 2,
+      complexity: {
+        complexVolumeMask: new Uint8Array([0, 1, 0, 1]),
+        entranceMask: new Uint8Array([1, 0, 0, 0]),
+        voxelRegionRefs: ["cave-a"],
+      },
+    });
+
+    await store.save(source);
+    const loaded = await store.load(source.key, source.sourceRevision);
+
+    expect(loaded?.complexVolumeMask).toEqual(source.complexVolumeMask);
+    expect(loaded?.entranceMask).toEqual(source.entranceMask);
+    expect(loaded?.voxelRegionRefs).toEqual(["cave-a"]);
+    db.close();
+  });
+
   it("namespaces entries by terrain source hash", async () => {
     const db = await openHeightfieldTileDb(indexedDB, dbName());
     const tile = buildHeightfieldTile({ x: 0, z: 0 }, { sampleHeight: () => 2 }, 0);

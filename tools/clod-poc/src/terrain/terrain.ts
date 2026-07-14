@@ -19,6 +19,23 @@ export { parseBorderCoastOceanConfig, type BorderCoastOceanConfig } from "./bord
 export { coastMask, worldEdgeDistance, applyBorderCoastShape, sampleCoastType } from "./border_coast.js";
 export { density, surfaceNormal } from "./terrain_density.js";
 export {
+  buildCaveTestVoxelOverlay,
+  CAVE_TEST_ENTRANCE_X,
+  CAVE_TEST_ENTRANCE_Z,
+  composeVoxelOverlayDensity,
+  getVoxelOverlaySource,
+  isCaveEntranceBoundary,
+  normalizeVoxelOverlaySource,
+  sampleCaveEntranceCoverage,
+  setVoxelOverlaySource,
+  voxelOverlayHasContent,
+  voxelOverlayIntersectsBounds,
+  type VoxelOverlayBounds,
+  type VoxelOverlaySource,
+  type VoxelRegionDefinition,
+  type VoxelVolumeStamp,
+} from "./voxel_overlay/voxel_overlay.js";
+export {
   type DigEdit,
   type BrushShape,
   type BrushOp,

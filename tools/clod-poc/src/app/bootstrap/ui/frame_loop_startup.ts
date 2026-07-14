@@ -46,6 +46,7 @@ import {
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const CAVE_TEST_SCENE = "cave-test";
 const ACCEPTANCE_MIN_STREAM_BUILD_BUDGET = 16;
 const ACCEPTANCE_MIN_STREAM_APPLY_BUDGET = 4;
 const ACCEPTANCE_MIN_STREAM_MAX_CACHED = 512;
@@ -255,7 +256,8 @@ export function runFrameLoopStartup(
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
   const streamingScene = (longView.queryScene?.startsWith("infinite-") ?? false)
-    || longView.queryScene === "continent";
+    || longView.queryScene === "continent"
+    || longView.queryScene === CAVE_TEST_SCENE;
   const acceptanceStreamProfile = searchParams.get("acceptance") === "1" && longView.queryScene === INFINITE_ISLANDS_SCENE;
   const diagnosticsTerrainMaxLevel = acceptanceStreamProfile ? Math.min(maxTerrainLevel, ACCEPTANCE_STREAM_MAX_LEVEL) : maxTerrainLevel;
   const combatController = session.combatController;

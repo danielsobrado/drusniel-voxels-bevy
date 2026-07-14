@@ -8,6 +8,12 @@ import {
   voxelEditsRequireCpuDerivedMeshing,
   type ChunkMeshBuild,
 } from "../../terrain/terrain.js";
+import {
+  getVoxelOverlaySource,
+  setVoxelOverlayResidentBounds,
+  voxelOverlayIntersectsBounds,
+  type VoxelOverlayBounds,
+} from "../voxel_overlay/voxel_overlay.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
 import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { toGeometry } from "../geometry/page_geometry.js";
@@ -37,6 +43,7 @@ export interface ChunkGroupEntry {
   centerX: number;
   centerZ: number;
   lastTouchFrame: number;
+  voxelOverlayBounds: Pick<VoxelOverlayBounds, "minX" | "minZ" | "maxX" | "maxZ"> | null;
 }
 
 export interface NearFieldBubbleView {
@@ -117,6 +124,20 @@ export interface PageCoord {
   pz: number;
   centerX: number;
   centerZ: number;
+}
+
+export function nearFieldPageIntersectsVoxelOverlay(
+  px: number,
+  pz: number,
+  pageSize: number,
+  source = getVoxelOverlaySource(),
+): boolean {
+  return voxelOverlayIntersectsBounds(source, {
+    minX: px * pageSize,
+    minZ: pz * pageSize,
+    maxX: (px + 1) * pageSize,
+    maxZ: (pz + 1) * pageSize,
+  });
 }
 
 export interface RequiredStreamingPageCoordCache {
@@ -483,6 +504,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   };
 
   const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
+    setVoxelOverlayResidentBounds(nodeId, null);
     deps.scene.remove(entry.group);
     clearEntryContent(entry);
     chunkGroups.delete(nodeId);
@@ -500,6 +522,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     colliderIds: string[],
     centerX: number,
     centerZ: number,
+    voxelOverlayBounds: ChunkGroupEntry["voxelOverlayBounds"],
   ): ChunkGroupEntry => {
     group.visible = false;
     deps.scene.add(group);
@@ -514,6 +537,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       centerX,
       centerZ,
       lastTouchFrame: 0,
+      voxelOverlayBounds,
     };
     chunkGroups.set(key, entry);
     return entry;
@@ -569,17 +593,24 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     const unsubs: Array<() => void> = [];
     const colliderIds: string[] = [];
     const worldBounds = buildWorldBoundsForPage(px, pz);
-    const requiresCpuMeshing = voxelEditsRequireCpuDerivedMeshing();
+    const pageBounds = {
+      minX: px * pageSize,
+      minZ: pz * pageSize,
+      maxX: (px + 1) * pageSize,
+      maxZ: (pz + 1) * pageSize,
+    };
+    const complexOverlay = nearFieldPageIntersectsVoxelOverlay(px, pz, pageSize);
+    const requiresCpuMeshing = voxelEditsRequireCpuDerivedMeshing() || complexOverlay;
     const gpuMesher = requiresCpuMeshing ? null : deps.getGpuMesher();
 
     if (gpuMesher) {
-      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
+      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
       enqueueGpuPageBuild(key, px, pz, worldBounds);
       return entry;
     }
 
     if (liveStreamingEnabled && !requiresCpuMeshing) {
-      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
+      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
       gpuWaitBuilds.set(key, { px, pz });
       return entry;
     }
@@ -587,7 +618,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     // CPU fallback: never mesh a whole page synchronously — queue the chunks
     // and drain them in update() under a per-frame budget. The entry follows
     // the same deferred-ready contract as the GPU path.
-    const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ);
+    const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
     cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: pageChunks(), active: null, failures: 0 });
     return entry;
   };
@@ -627,6 +658,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     entry.failed = job.failures > 0;
     entry.validEmpty = job.failures === 0 && job.meshChunks === 0;
     entry.ready = true;
+    setVoxelOverlayResidentBounds(key, entry.voxelOverlayBounds);
     slowestPageMs = Math.max(slowestPageMs, performance.now() - job.startedAtMs);
   };
 
@@ -754,6 +786,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           entry.failed = job.failures > 0;
           entry.validEmpty = job.failures === 0 && entry.group.children.length === 0;
           entry.ready = true;
+          setVoxelOverlayResidentBounds(key, entry.voxelOverlayBounds);
         }
       }
       if (performance.now() >= deadlineMs) return;

@@ -42,6 +42,7 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
   values["live_clod_stream_worker_fallback_pages"] = 0;
   values["live_clod_stream_bounds_guard_enabled"] = 1;
   values["live_clod_stream_bounds_guard_checked_pages"] = 1;
+  values["live_clod_stream_out_of_world_edits_supported"] = 1;
   values["live_clod_stream_bounds_guard_rejected_pages"] = 0;
   values["live_clod_stream_bounds_guard_rejected_batches"] = 0;
   values["live_clod_stream_bounds_guard_cache_drops"] = 0;

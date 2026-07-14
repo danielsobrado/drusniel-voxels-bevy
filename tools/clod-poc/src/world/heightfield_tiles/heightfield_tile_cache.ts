@@ -201,7 +201,8 @@ export class HeightfieldTileCache {
       buildMsP95: percentile95(this.buildSamples),
       evictionsTotal: this.evictionsTotal,
       fallbackSamplesTotal: this.fallbackSamplesTotal,
-      bytesResident: this.resident.size * HEIGHTFIELD_TILE_BYTE_LENGTH,
+      bytesResident: [...this.resident.values()].reduce((sum, entry) => sum + HEIGHTFIELD_TILE_BYTE_LENGTH
+        + (entry.tile.complexVolumeMask?.byteLength ?? 0) + (entry.tile.entranceMask?.byteLength ?? 0), 0),
       storeHits: this.storeHits,
       storeMisses: this.storeMisses,
       storeErrors: this.storeErrors,

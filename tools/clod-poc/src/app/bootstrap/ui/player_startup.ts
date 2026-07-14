@@ -123,7 +123,8 @@ export function runPlayerStartup(
     onStartPlayingFacing: (yaw, pitch) => playerInputController.setPlayerYawPitch(yaw, pitch),
     // Infinite-island worlds stream terrain around the player; gate the query spawn on streamed-root
     // safety coverage + colliders so the player never drops through un-meshed ground at startup.
-    spawnGateEnabled: window.__drusnielWorldMode?.mode === "infinite_islands",
+    spawnGateEnabled: window.__drusnielWorldMode?.mode === "infinite_islands"
+      || searchParams.get("scene") === "cave-test",
   });
 
   const automationHooks = input.longView.hooks;

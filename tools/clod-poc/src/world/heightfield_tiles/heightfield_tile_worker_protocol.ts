@@ -22,5 +22,9 @@ export type HeightfieldTileWorkerResponse = HeightfieldTileWorkerBuiltResponse;
 export function collectHeightfieldTileTransferables(
   tiles: readonly HeightfieldTile[],
 ): Transferable[] {
-  return tiles.map((tile) => tile.heights.buffer as ArrayBuffer);
+  return tiles.flatMap((tile) => [
+    tile.heights.buffer as ArrayBuffer,
+    ...(tile.complexVolumeMask ? [tile.complexVolumeMask.buffer as ArrayBuffer] : []),
+    ...(tile.entranceMask ? [tile.entranceMask.buffer as ArrayBuffer] : []),
+  ]);
 }

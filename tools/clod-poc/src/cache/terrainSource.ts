@@ -6,6 +6,8 @@ import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
 import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import type { StartupHeightfieldDescriptor } from "../terrain/startup_heightfield_raster.js";
 import type { WorldManifest } from "../world/world_manifest.js";
+import type { VoxelOverlaySource } from "../terrain/voxel_overlay/voxel_overlay.js";
+import { normalizeVoxelOverlaySource } from "../terrain/voxel_overlay/voxel_overlay.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
@@ -23,7 +25,8 @@ const textEncoder = new TextEncoder();
 // roots and removing the raster-domain derivative seam. The descriptor includes the policy.
 // v7: continent hydrology graph carving makes canonical f32 heightfield tiles authoritative;
 // the graph artifact and carve profile now participate in terrain identity.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v7";
+// v8: sparse voxel-region references and authored stamp hashes change composed terrain geometry.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v8";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -115,6 +118,7 @@ export interface TerrainSourceInputs {
   worldManifest?: WorldManifest;
   hydrologyGraphHash?: string | null;
   hydrologyCarve?: { depthM: number; power: number; lakeBedDepthM: number } | null;
+  voxelOverlay?: VoxelOverlaySource | null;
 }
 
 export function normalizeTerrainSourceInputs(
@@ -154,6 +158,7 @@ export function normalizeTerrainSourceInputs(
     worldManifest: input.worldManifest,
     hydrologyGraphHash: input.hydrologyGraphHash ?? null,
     hydrologyCarve: input.hydrologyCarve ?? null,
+    voxelOverlay: normalizeVoxelOverlaySource(input.voxelOverlay),
   };
 }
 
@@ -210,6 +215,7 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     proceduralTextureHash: source.proceduralTextureHash,
     stagedImportHash: source.stagedImportHash,
     voxelSnapshotHash: source.voxelSnapshotHash,
+    voxelOverlay: source.voxelOverlay,
     longViewScene: source.longViewScene,
   });
 }

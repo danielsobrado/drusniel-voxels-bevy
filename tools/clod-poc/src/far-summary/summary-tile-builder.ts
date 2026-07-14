@@ -1,6 +1,7 @@
 import type { FarSummarySample, FarSummaryTile, FarSummaryTileKey } from "./types.js";
 import type { FarSummaryRingConfig } from "./config.js";
 import { tileOrigin } from "./tile-key.js";
+import { sampleCaveEntranceCoverage } from "../terrain/voxel_overlay/voxel_overlay.js";
 
 export interface FarTerrainSampler {
   sampleHeight(x: number, z: number): number;
@@ -420,7 +421,11 @@ function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySam
     speciesBroadleaf: clamp01(canopySummary?.speciesBroadleaf ?? 0),
     speciesDeadwood: clamp01(canopySummary?.speciesDeadwood ?? 0),
     structureCoverage: 0,
-    caveEntranceCoverage: 0,
+    caveEntranceCoverage: sampleCaveEntranceCoverage(
+      build.originX + sx * cellM,
+      build.originZ + sz * cellM,
+      cellM,
+    ),
     occluderHeight: 0,
     slope: Number.isFinite(slope) ? slope : 0,
     roughness,

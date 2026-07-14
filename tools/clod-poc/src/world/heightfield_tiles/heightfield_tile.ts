@@ -1,12 +1,16 @@
 import type { HeightfieldSampler } from "../heightfield_sampler.js";
 import { tileOriginM, type WorldTileKey, WORLD_TILE_SIZE_M } from "../tile_key.js";
+import {
+  EMPTY_HEIGHTFIELD_TILE_COMPLEXITY,
+  type HeightfieldTileComplexity,
+} from "./heightfield_tile_complexity.js";
 
 export const HEIGHTFIELD_TILE_SAMPLE_SPACING_M = 1;
 export const HEIGHTFIELD_TILE_RES = WORLD_TILE_SIZE_M / HEIGHTFIELD_TILE_SAMPLE_SPACING_M + 1;
 export const HEIGHTFIELD_TILE_SAMPLE_COUNT = HEIGHTFIELD_TILE_RES * HEIGHTFIELD_TILE_RES;
 export const HEIGHTFIELD_TILE_BYTE_LENGTH = HEIGHTFIELD_TILE_SAMPLE_COUNT * Float32Array.BYTES_PER_ELEMENT;
 
-export interface HeightfieldTile {
+export interface HeightfieldTile extends HeightfieldTileComplexity {
   readonly key: WorldTileKey;
   readonly res: number;
   readonly heights: Float32Array;
@@ -17,6 +21,7 @@ export interface HeightfieldTile {
 export interface HeightfieldTileField {
   sampleHeight(x: number, z: number): number;
   readonly sourceRevision?: number;
+  readonly complexity?: HeightfieldTileComplexity;
 }
 
 function assertSourceRevision(sourceRevision: number): void {
@@ -33,6 +38,7 @@ export function buildHeightfieldTile(
   assertSourceRevision(sourceRevision);
   const origin = tileOriginM(key);
   const heights = new Float32Array(HEIGHTFIELD_TILE_SAMPLE_COUNT);
+  const complexity = ("complexity" in field ? field.complexity : undefined) ?? EMPTY_HEIGHTFIELD_TILE_COMPLEXITY;
   const startedAt = performance.now();
 
   let index = 0;
@@ -48,6 +54,9 @@ export function buildHeightfieldTile(
     key: Object.freeze({ x: key.x, z: key.z }),
     res: HEIGHTFIELD_TILE_RES,
     heights,
+    complexVolumeMask: complexity.complexVolumeMask,
+    entranceMask: complexity.entranceMask,
+    voxelRegionRefs: complexity.voxelRegionRefs,
     sourceRevision,
     builtMs: performance.now() - startedAt,
   };

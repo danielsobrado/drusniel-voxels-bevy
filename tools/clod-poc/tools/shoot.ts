@@ -95,6 +95,22 @@ async function main(): Promise<void> {
     }
     console.log(`[shoot] ready in ${((Date.now() - start) / 1000).toFixed(1)}s`);
 
+    const cam = str(args["cam"]);
+    if (cam) {
+      const values = cam.split(",").map(Number);
+      if (values.length < 5 || values.some((value) => !Number.isFinite(value))) {
+        throw new Error(`Invalid --cam pose: ${cam}`);
+      }
+      await page.evaluate((poseValues) => {
+        window.__drusnielClod?.setPose?.({
+          p: [poseValues[0]!, poseValues[1]!, poseValues[2]!],
+          yaw: poseValues[3]!,
+          pitch: poseValues[4]!,
+          fov: poseValues[5],
+        });
+      }, values);
+    }
+
     await page.evaluate(async (frames: number) => window.__drusnielClod?.settle?.(frames), settleFrames);
 
     const frameAlign = str(args["framealign"]);

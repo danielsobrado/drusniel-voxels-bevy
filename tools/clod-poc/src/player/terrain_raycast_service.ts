@@ -5,6 +5,7 @@ export interface TerrainRaycastServiceDeps {
   terrainColliders: TerrainColliderSet;
   surfaceHeight: (x: number, z: number) => number;
   worldCells: number;
+  allowOutOfWorld?: boolean;
   getMode?: () => string;
 }
 
@@ -24,7 +25,7 @@ export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): Te
     const step = 2;
     let previousT = 0;
     ray.at(previousT, samplePoint);
-    const previousInWorld = samplePoint.x >= 0
+    const previousInWorld = deps.allowOutOfWorld === true || samplePoint.x >= 0
       && samplePoint.x <= deps.worldCells
       && samplePoint.z >= 0
       && samplePoint.z <= deps.worldCells;
@@ -34,7 +35,7 @@ export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): Te
 
     for (let t = step; t <= maxDistance; t += step) {
       ray.at(t, samplePoint);
-      const inWorld = samplePoint.x >= 0
+      const inWorld = deps.allowOutOfWorld === true || samplePoint.x >= 0
         && samplePoint.x <= deps.worldCells
         && samplePoint.z >= 0
         && samplePoint.z <= deps.worldCells;

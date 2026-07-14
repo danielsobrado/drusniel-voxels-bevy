@@ -83,6 +83,7 @@ export interface TerrainEditServiceDeps {
 
 export interface TerrainEditService {
   scheduleDig(ray: THREE.Ray): void;
+  runDigNow(ray: THREE.Ray): Promise<void>;
   scheduleConstructionTerrainConform(request: ConstructionTerrainConformRequest): void;
   flushAncestors(): Promise<void>;
   readonly lastDigAt: number;
@@ -495,6 +496,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   return {
     scheduleDig,
+    runDigNow: (ray) => runDigExclusive(ray),
     scheduleConstructionTerrainConform,
     flushAncestors,
     get lastDigAt() {

@@ -119,6 +119,11 @@ export class ClodWorkerClient {
   private streamRootBoundsGuardConfig: StreamedPageBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
   private streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
   private readonly streamRootEditState = new StreamRootEditState();
+  private readonly streamRootComplexIds = new Set<string>();
+  private streamRootComplexRequestedTotal = 0;
+  private streamRootOrdinaryRequestedTotal = 0;
+  private readonly streamRootSdfBuildSamplesByLevel: number[][] = [];
+  private readonly streamRootHeightfieldBuildSamplesByLevel: number[][] = [];
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -232,10 +237,15 @@ export class ClodWorkerClient {
     this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
     this.refreshStreamRootBoundsGuardConfig();
     const ids = coords.map((coord) => this.streamRootNodeId(coord));
+    const complexIds = ids.filter((id) => this.streamRootComplexIds.has(id));
+    this.streamRootComplexRequestedTotal += complexIds.length;
+    this.streamRootOrdinaryRequestedTotal += ids.length - complexIds.length;
+    this.publishStreamRootComplexStats();
     const dirtySnapshot = this.streamRootEditState.captureDirty(ids);
     const cpuAuthoritativeIds = this.streamRootEditState.cpuAuthoritative(ids);
     if (cpuAuthoritativeIds.length > 0) {
       const built = await this.buildStreamRootsOnWorker(coords, cpuAuthoritativeIds);
+      if (complexIds.length > 0) this.recordStreamRootSdfBuild(coords, built.buildMs, complexIds);
       this.assertStreamRootNodesValid(built.nodes, "cpu");
       this.streamRootEditState.acknowledge(dirtySnapshot);
       return built;
@@ -262,7 +272,9 @@ export class ClodWorkerClient {
           }
         }
       }
-      return await this.buildStreamRootsOnGpuWithCache(mesher, coords);
+      const built = await this.buildStreamRootsOnGpuWithCache(mesher, coords);
+      this.recordStreamRootHeightfieldBuild(coords, built.buildMs, complexIds);
+      return built;
     } catch (error) {
       const guardRejected = isStreamedPageBoundsGuardError(error);
       const mesherDisabled = this.streamRootGpuMesher?.stats().enabled === 0;
@@ -355,7 +367,7 @@ export class ClodWorkerClient {
     this.markStreamRootBoundsDirty(transaction.dirtyBounds);
   }
 
-  private markStreamRootBoundsDirty(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void {
+  private markStreamRootBoundsDirty(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }, complex = false): void {
     if (!this.streamRootCfg) return;
     const baseSpan = this.streamRootCfg.page.chunks_per_page * this.streamRootCfg.page.chunk_size;
     for (let level = 0; level < this.streamRootCfg.page.quadtree_levels; level++) {
@@ -365,7 +377,11 @@ export class ClodWorkerClient {
       const minZ = Math.floor(bounds.minZ / span);
       const maxZ = Math.floor(bounds.maxZ / span);
       for (let pz = minZ; pz <= maxZ; pz++) {
-        for (let px = minX; px <= maxX; px++) this.streamRootEditState.markDirty(`L${level}:${px},${pz}`);
+        for (let px = minX; px <= maxX; px++) {
+          const id = `L${level}:${px},${pz}`;
+          this.streamRootEditState.markDirty(id);
+          if (complex) this.streamRootComplexIds.add(id);
+        }
       }
     }
   }
@@ -462,6 +478,15 @@ export class ClodWorkerClient {
     this.streamRootGpuUnavailable = false;
     this.streamRootWorkerFallbackPages = 0;
     this.streamRootEditState.reset();
+    this.streamRootComplexIds.clear();
+    this.streamRootComplexRequestedTotal = 0;
+    this.streamRootOrdinaryRequestedTotal = 0;
+    this.streamRootSdfBuildSamplesByLevel.length = 0;
+    this.streamRootHeightfieldBuildSamplesByLevel.length = 0;
+    for (const region of terrainSource.voxelOverlay?.regions ?? []) {
+      this.markStreamRootBoundsDirty(region.bounds, true);
+    }
+    this.publishStreamRootComplexStats();
     this.streamRootCacheInit = initClodCacheContext({
       cfg,
       worldPages: worldPagesX,
@@ -497,6 +522,59 @@ export class ClodWorkerClient {
       + node.mesh.paintSlots.byteLength
       + node.mesh.materialWeights.byteLength
       + node.mesh.indices.byteLength;
+  }
+
+  private recordStreamRootSdfBuild(
+    coords: readonly { px: number; pz: number; level?: number }[],
+    buildMs: number,
+    complexIds: readonly string[],
+  ): void {
+    const perPageMs = coords.length > 0 ? buildMs / coords.length : 0;
+    const complexSet = new Set(complexIds);
+    for (const coord of coords) {
+      if (!complexSet.has(this.streamRootNodeId(coord))) continue;
+      const level = this.streamRootLevel(coord.level);
+      const samples = this.streamRootSdfBuildSamplesByLevel[level] ??= [];
+      samples.push(perPageMs);
+      if (samples.length > 128) samples.shift();
+    }
+    this.publishStreamRootComplexStats();
+  }
+
+  private recordStreamRootHeightfieldBuild(
+    coords: readonly { px: number; pz: number; level?: number }[],
+    buildMs: number,
+    complexIds: readonly string[],
+  ): void {
+    const perPageMs = coords.length > 0 ? buildMs / coords.length : 0;
+    const complexSet = new Set(complexIds);
+    for (const coord of coords) {
+      if (complexSet.has(this.streamRootNodeId(coord))) continue;
+      const level = this.streamRootLevel(coord.level);
+      const samples = this.streamRootHeightfieldBuildSamplesByLevel[level] ??= [];
+      samples.push(perPageMs);
+      if (samples.length > 128) samples.shift();
+    }
+    this.publishStreamRootComplexStats();
+  }
+
+  private publishStreamRootComplexStats(): void {
+    const counters = typeof window !== "undefined" ? window.__drusnielClod?.stats?.counters : null;
+    if (!counters) return;
+    const total = this.streamRootComplexRequestedTotal + this.streamRootOrdinaryRequestedTotal;
+    counters["live_clod_stream_complex_pages_requested_total"] = this.streamRootComplexRequestedTotal;
+    counters["live_clod_stream_heightfield_pages_requested_total"] = this.streamRootOrdinaryRequestedTotal;
+    counters["live_clod_stream_complex_page_share"] = total > 0 ? this.streamRootComplexRequestedTotal / total : 0;
+    for (let level = 0; level < this.streamRootSdfBuildSamplesByLevel.length; level++) {
+      const sorted = [...(this.streamRootSdfBuildSamplesByLevel[level] ?? [])].sort((a, b) => a - b);
+      const index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
+      counters[`live_clod_stream_sdf_build_ms_p95_l${level}`] = sorted[index] ?? 0;
+    }
+    for (let level = 0; level < this.streamRootHeightfieldBuildSamplesByLevel.length; level++) {
+      const sorted = [...(this.streamRootHeightfieldBuildSamplesByLevel[level] ?? [])].sort((a, b) => a - b);
+      const index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
+      counters[`live_clod_stream_heightfield_build_ms_p95_l${level}`] = sorted[index] ?? 0;
+    }
   }
 
   private async pumpDigQueue(): Promise<void> {

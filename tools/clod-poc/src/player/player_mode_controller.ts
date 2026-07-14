@@ -247,6 +247,7 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     deps.onStartPlayingFacing(yawVal, 0);
     deps.interaction.startPlaying();
     deps.controls.enabled = false;
+    updatePlayerModeUi();
 
     deps.camera.position.copy(deps.player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, deps.player.config.eyeHeight);
     deps.camera.rotation.set(0, yawVal, 0, "YXZ");

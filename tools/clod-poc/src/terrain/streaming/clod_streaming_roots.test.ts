@@ -126,6 +126,12 @@ function makeController(overrides: Partial<StreamingClodRootControllerDeps> = {}
   return { controller, roots, allNodes, buildPages, requests };
 }
 
+describe("streamed-root voxel edits", () => {
+  it("advertises out-of-world edit rebuild support", () => {
+    expect(makeController().controller.stats().outOfWorldEditsSupported).toBe(1);
+  });
+});
+
 function resolveRequest(
   request: Deferred<StreamingClodRootBuildResult>,
   coords: readonly PageCoord[],
@@ -489,6 +495,33 @@ describe("createStreamingClodRootController", () => {
     expect(controller.readyPageKeys()).toEqual([
       streamingClodPageKey(coords[0]!.px, coords[0]!.pz, coords[0]!.level),
     ]);
+  });
+
+  it("rebuilds an out-of-startup-world page after edit invalidation", async () => {
+    const { controller, buildPages, requests } = makeController({
+      cfg: { ...TEST_CFG, page: { ...TEST_CFG.page, quadtree_levels: 1 } },
+    });
+    const center = new THREE.Vector3(640, 0, 96);
+    controller.update(center, 0);
+    const firstCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    resolveRequest(requests[0]!, firstCoords);
+    await flushAsync();
+    controller.update(center, 0);
+
+    const edited = firstCoords[0]!;
+    const span = TEST_CFG.page.chunk_size * TEST_CFG.page.chunks_per_page * (2 ** (edited.level ?? 0));
+    controller.invalidateBounds({
+      minX: edited.px * span + 1,
+      maxX: edited.px * span + 2,
+      minZ: edited.pz * span + 1,
+      maxZ: edited.pz * span + 2,
+    });
+    controller.update(center, 0);
+
+    const rebuiltCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[1]![0] as readonly PageCoord[];
+    expect(rebuiltCoords.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toContain(
+      streamingClodPageKey(edited.px, edited.pz, edited.level),
+    );
   });
 
   it("throttles ready page application with an apply budget", async () => {

@@ -37,6 +37,12 @@ describe("streamed root GPU mesher config", () => {
     expect(parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "continent", gpuTileMesh: "0" })).enabled).toBe(false);
   });
 
+  it("keeps ordinary cave-test pages on the continent heightfield path", () => {
+    const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({ scene: "cave-test" }));
+    expect(parsed.enabled).toBe(true);
+    expect(parsed.batchSize).toBe(1);
+  });
+
   it("parses explicit query flags", () => {
     const parsed = parseStreamingRootGpuMesherConfig(new URLSearchParams({
       liveClodRootGpuMesher: "1",

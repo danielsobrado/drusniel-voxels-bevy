@@ -13,4 +13,24 @@ describe("heightfield tile worker protocol", () => {
     expect(transferables).toEqual(tiles.map((tile) => tile.heights.buffer));
     expect(new Set(transferables).size).toBe(2);
   });
+
+  it("transfers non-null complexity masks without penalizing ordinary tiles", () => {
+    const ordinary = buildHeightfieldTile({ x: 0, z: 0 }, { sampleHeight: () => 1 });
+    const complex = buildHeightfieldTile({ x: 1, z: 0 }, {
+      sampleHeight: () => 1,
+      complexity: {
+        complexVolumeMask: new Uint8Array(4096),
+        entranceMask: new Uint8Array(4096),
+        voxelRegionRefs: ["cave-a"],
+      },
+    });
+
+    const transferables = collectHeightfieldTileTransferables([ordinary, complex]);
+    expect(transferables).toEqual([
+      ordinary.heights.buffer,
+      complex.heights.buffer,
+      complex.complexVolumeMask?.buffer,
+      complex.entranceMask?.buffer,
+    ]);
+  });
 });

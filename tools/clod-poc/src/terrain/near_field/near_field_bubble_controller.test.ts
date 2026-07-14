@@ -5,8 +5,10 @@ import {
   createRequiredStreamingPageCoordCache,
   liveBubbleChunkFootprint,
   liveBubbleOwnsPageView,
+  nearFieldPageIntersectsVoxelOverlay,
   requiredStreamingPageCoords,
 } from "./near_field_bubble_controller.js";
+import { buildCaveTestVoxelOverlay } from "../voxel_overlay/voxel_overlay.js";
 import type { ClodPageNode, PageFootprint } from "../../types.js";
 import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import type { TerrainMaterialController } from "../material/terrain_material_controller.js";
@@ -33,6 +35,12 @@ vi.mock("../../terrain/terrain.js", async (importOriginal) => {
 const TEST_CFG = {
   page: { chunks_per_page: 2, chunk_size: 16 },
 } as import("../../config.js").ClodPagesConfig;
+
+it("keeps ordinary near-field pages on the fast path when a sparse overlay exists elsewhere", () => {
+  const source = buildCaveTestVoxelOverlay(() => 10);
+  expect(nearFieldPageIntersectsVoxelOverlay(22, 3, 32, source)).toBe(true);
+  expect(nearFieldPageIntersectsVoxelOverlay(0, 0, 32, source)).toBe(false);
+});
 
 const NON_EMPTY_CHUNK: ChunkMesh = {
   positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),

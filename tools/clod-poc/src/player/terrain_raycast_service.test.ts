@@ -34,4 +34,20 @@ describe("terrain edit raycasts", () => {
     expect(raycastSurface).toHaveBeenCalledWith(ray, 8);
     expect(surfaceHeight).not.toHaveBeenCalled();
   });
+
+  it("allows orbit editing on streamed terrain beyond the configured world", () => {
+    const service = createTerrainRaycastService({
+      terrainColliders: { raycastSurface: vi.fn(() => null) } as never,
+      surfaceHeight: () => 12,
+      worldCells: 512,
+      allowOutOfWorld: true,
+      getMode: () => "orbit",
+    });
+
+    const hit = service.raycastEditableTerrain(new THREE.Ray(
+      new THREE.Vector3(576, 100, 320),
+      new THREE.Vector3(0, -1, 0),
+    ));
+    expect(hit?.point.y).toBeCloseTo(12, 2);
+  });
 });

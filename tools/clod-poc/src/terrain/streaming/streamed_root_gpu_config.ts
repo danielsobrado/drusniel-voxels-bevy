@@ -33,7 +33,8 @@ function booleanFlag(params: URLSearchParams, key: string, fallback: boolean): b
 }
 
 export function continentTileMeshingEnabled(params: URLSearchParams): boolean {
-  return params.get("scene") === "continent" && booleanFlag(params, "gpuTileMesh", true);
+  const scene = params.get("scene");
+  return (scene === "continent" || scene === "cave-test") && booleanFlag(params, "gpuTileMesh", true);
 }
 
 export function parseStreamingRootGpuMesherConfig(

@@ -100,6 +100,16 @@ phase0:
         look_distance_m: 8192
       require_visible_m: 8192
 
+    cave_test:
+      world: 4
+      camera:
+        mode: fixed
+        x_ratio: 2.8125
+        z_ratio: 0.375
+        y_offset_m: 15
+        look_distance_m: 100
+      require_visible_m: 640
+
     infinite_far_shell_straight:
       world: 16
       camera:

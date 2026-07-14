@@ -13,6 +13,7 @@ import { resolveFarOwner, type FarOwner } from "./far_ownership.js";
 
 export const INFINITE_ISLANDS_SCENE = "infinite-islands";
 export const CONTINENT_SCENE = "continent";
+export const CAVE_TEST_SCENE = "cave-test";
 
 export type WorldMode = "finite" | "infinite_islands" | "continent";
 
@@ -58,7 +59,7 @@ export interface ResolveWorldModeInput {
 }
 
 export function resolveWorldMode(input: ResolveWorldModeInput): WorldModeConfig {
-  const isContinent = input.scene === CONTINENT_SCENE;
+  const isContinent = input.scene === CONTINENT_SCENE || input.scene === CAVE_TEST_SCENE;
   const isInfiniteIslands = input.scene === INFINITE_ISLANDS_SCENE || input.islandShapeEnabled;
   const mode: WorldMode = isContinent ? "continent" : isInfiniteIslands ? "infinite_islands" : "finite";
   const borderCoastEnabled = mode === "finite" && input.borderCoastConfigEnabled;

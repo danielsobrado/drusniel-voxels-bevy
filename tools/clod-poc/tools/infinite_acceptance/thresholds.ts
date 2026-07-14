@@ -419,7 +419,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
     pass: streamProbeEvictionOrNoPressure,
   },
   { key: "live_clod_stream_probe_stale_discards_total", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_clod_stream_out_of_world_edits_supported", label: "must be explicit 0 or 1", pass: (value) => value === 0 || value === 1 },
+  { key: "live_clod_stream_out_of_world_edits_supported", label: "must equal 1", pass: (value) => value === 1 },
   { key: "vegetation_ring_unbounded", label: "must equal 1 for infinite-islands", pass: (value) => value === 1 },
   { key: "vegetation_ring_distance_to_grass_m", label: "must equal 0 for unbounded vegetation rings", pass: (value) => value === 0 },
   { key: "infinite_hydrology_outside_sample_valid", label: "must equal 1", pass: (value) => value === 1 },

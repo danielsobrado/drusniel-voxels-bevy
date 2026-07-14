@@ -38,6 +38,9 @@ const SEEDED_COUNTERS = [
   "live_clod_stream_probe_evictions_total",
   "live_clod_stream_probe_stale_discards_total",
   "live_clod_stream_out_of_world_edits_supported",
+  "live_clod_stream_invalidations_total",
+  "live_clod_stream_invalidated_pages_total",
+  "live_clod_stream_rebuilt_after_invalidation_total",
 ] as const;
 
 export function publishTerrainSummaryForDiagnostics(summary: TerrainSummaryField): void {

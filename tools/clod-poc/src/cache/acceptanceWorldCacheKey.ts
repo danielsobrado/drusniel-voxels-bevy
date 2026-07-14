@@ -38,6 +38,7 @@ export async function buildAcceptanceWorldCacheKey(
     proceduralTextureHash: terrainSource.proceduralTextureHash,
     stagedImportHash: terrainSource.stagedImportHash,
     voxelSnapshotHash: terrainSource.voxelSnapshotHash,
+    voxelOverlay: terrainSource.voxelOverlay,
     longViewScene: terrainSource.longViewScene,
     clodPage: input.cfg.page,
     clodSimplify: input.cfg.simplify,

@@ -53,6 +53,7 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
     live_clod_stream_worker_fallback_pages: 0,
     live_clod_stream_bounds_guard_enabled: 1,
     live_clod_stream_bounds_guard_checked_pages: 1,
+    live_clod_stream_out_of_world_edits_supported: 1,
     far_clipmap_enabled: 1,
     far_clipmap_visible: 1,
     far_clipmap_active_rings: 5,
@@ -93,6 +94,10 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
 describe("infinite islands thresholds", () => {
   it("passes a valid zero-hole sample", () => {
     expect(evaluateThresholds(validCounters()).passed).toBe(true);
+  });
+
+  it("requires out-of-world edit support", () => {
+    expect(evaluateThresholds(validCounters({ live_clod_stream_out_of_world_edits_supported: 0 })).passed).toBe(false);
   });
 
   it("requires a world manifest", () => {

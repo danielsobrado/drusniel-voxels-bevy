@@ -167,6 +167,7 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
       centerX: job.centerX,
       centerZ: job.centerZ,
       lastTouchFrame: 0,
+      voxelOverlayBounds: null,
     };
     entries.set(key, entry);
     pending.set(key, { ...job, startedAtMs: performance.now() });

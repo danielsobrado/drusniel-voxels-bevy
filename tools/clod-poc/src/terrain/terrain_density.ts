@@ -1,8 +1,9 @@
 import { surfaceHeight } from "./terrain_surface.js";
 import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
+import { composeVoxelOverlayDensity } from "./voxel_overlay/voxel_overlay.js";
 
 function baseDensity(x: number, y: number, z: number): number {
-  return surfaceHeight(x, z) - y;
+  return composeVoxelOverlayDensity(surfaceHeight(x, z) - y, x, y, z);
 }
 
 export function density(x: number, y: number, z: number): number {

@@ -26,6 +26,7 @@ import {
 } from "../terrain/material-cache/terrainMaterialCacheConfig.js";
 import { TerrainMaterialCache } from "../terrain/material-cache/terrainMaterialCache.js";
 import { terrainMaterialCacheCountersForHud } from "../terrain/material-cache/terrainMaterialDebug.js";
+import { traceCaveOccupancy } from "./cave_occupancy.js";
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
@@ -258,6 +259,21 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
 
     traceSun(x, y, z, sunDir, maxDist) {
+      const cave = traceCaveOccupancy(x, y, z, sunDir.x, sunDir.y, sunDir.z, maxDist);
+      if (cave?.blocked) {
+        return {
+          visible: false,
+          unknown: false,
+          blocked: true,
+          steps: cave.steps,
+          aadfSkips: 0,
+          nearTableHits: 0,
+          hashFallbackHits: 0,
+          farClipmapHits: 0,
+          missingSamples: 0,
+          traversalMode: "dense",
+        };
+      }
       return traceSunVisibility({
         state,
         worldX: x,

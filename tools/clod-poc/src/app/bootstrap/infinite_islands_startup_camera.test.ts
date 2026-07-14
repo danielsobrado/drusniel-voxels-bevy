@@ -22,4 +22,10 @@ describe("infinite-islands startup camera", () => {
     ]);
     expect(pose.target).toEqual([worldCells * 0.5, 24, worldCells * 0.5]);
   });
+
+  it("frames the deterministic cave entrance from outside", () => {
+    const pose = defaultStartupCameraPose("cave-test", 1024);
+    expect(pose.eye[2]).toBeLessThan(pose.target[2]);
+    expect(pose.target[0]).toBe(720);
+  });
 });

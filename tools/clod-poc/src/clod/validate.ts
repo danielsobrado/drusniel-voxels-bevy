@@ -4,6 +4,7 @@
 import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount, type BorderTolerances } from "../types.js";
 import { coastMask } from "../terrain/border_coast.js";
 import { getBorderCoastRuntime } from "../terrain/terrain_surface.js";
+import { isCaveEntranceBoundary } from "../terrain/voxel_overlay/voxel_overlay.js";
 
 /** Undirected edge key for boundary-edge detection. String to avoid int overflow. */
 function edgeKey(a: number, b: number): string {
@@ -128,6 +129,7 @@ export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint
       perimeterDistance <= PERIMETER_BAND
       || isGeneratedParentPerimeterOpenBoundary(perimeterDistance, label)
       || isCoastOpenBoundary(x, z)
+      || isCaveEntranceBoundary(x, z)
       || isGeneratedChildSeamOpenBoundary(x, z, footprint, label)
     ) continue;
     const prefix = label ? `${label}: ` : "";

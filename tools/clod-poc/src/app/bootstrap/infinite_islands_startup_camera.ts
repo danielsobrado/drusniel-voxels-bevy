@@ -12,6 +12,12 @@ export function defaultStartupCameraPose(
   worldCells: number,
 ): StartupCameraPose {
   const mid = worldCells * 0.5;
+  if (scene === "cave-test") {
+    return {
+      eye: [720, 48, 60],
+      target: [720, 30, 100],
+    };
+  }
   if (scene === "infinite-islands") {
     return {
       eye: [mid, worldCells * DEFAULT_CAMERA_HEIGHT_RATIO, mid],

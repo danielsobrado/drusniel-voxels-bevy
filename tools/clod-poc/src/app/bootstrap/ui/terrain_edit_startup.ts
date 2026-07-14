@@ -1,7 +1,8 @@
-import type * as THREE from "three";
+import * as THREE from "three";
 import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
-import { markSaveRegionsDirtyForBounds } from "../../../save/save_runtime.js";
+import { flushSaveRuntimeOnce, markSaveRegionsDirtyForBounds } from "../../../save/save_runtime.js";
+import { getDigEditRevision, voxelEditCount } from "../../../terrain/terrain.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
 import { TerrainEditDirtyQueue, type TerrainEditDirtyEvent } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
 import {
@@ -135,6 +136,27 @@ export function runTerrainEditStartup(
     setPendingParentNodes: (nodes) => { session.pendingParentNodes = nodes; },
     setPendingParentMs: (ms) => { session.pendingParentMs = ms; },
   });
+
+  if (input.longView.hooks) {
+    input.longView.hooks.getStreamingRootReadyPageKeys = () =>
+      session.streamingClodRootController?.readyPageKeys() ?? [];
+    input.longView.hooks.runTerrainEditProbe = async (ray) => {
+      await terrainEditService.runDigNow(new THREE.Ray(
+        new THREE.Vector3(...ray.origin),
+        new THREE.Vector3(...ray.direction).normalize(),
+      ));
+      await terrainEditService.flushAncestors();
+      await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
+      const counters = authorityCounters() ?? {};
+      return {
+        editRevision: getDigEditRevision(),
+        voxelDeltaCount: voxelEditCount(),
+        dirtyRevision: counters["terrain_edit_dirty_revision"] ?? 0,
+        streamInvalidations: counters["live_clod_stream_invalidations_total"] ?? 0,
+        streamRebuilds: counters["live_clod_stream_rebuilt_after_invalidation_total"] ?? 0,
+      };
+    };
+  }
 
   const scheduleConstructionTerrainConform = (request: ConstructionTerrainConformRequest): void => {
     const decision = canCommitBuild(editAuthority, authorityOrigin(), request.position);

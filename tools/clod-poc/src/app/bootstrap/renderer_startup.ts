@@ -41,7 +41,12 @@ import {
 export type AppRenderer = Awaited<ReturnType<typeof createWebGpuAppRenderer>> | ReturnType<typeof createWebGlAppRenderer>;
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const CAVE_TEST_SCENE = "cave-test";
 const INFINITE_PLAYER_WORLD_RADIUS_M = 1_000_000_000;
+
+function usesUnboundedTerrain(scene: string | null): boolean {
+  return scene === INFINITE_ISLANDS_SCENE || scene === CAVE_TEST_SCENE;
+}
 
 export interface RendererStartupInput {
   searchParams: URLSearchParams;
@@ -76,7 +81,7 @@ export interface RendererStartupResult {
 }
 
 export function playerWorldBoundsForScene(searchParams: URLSearchParams, worldCells: number): HorizontalWorldBounds {
-  if (searchParams.get("scene") !== INFINITE_ISLANDS_SCENE) {
+  if (!usesUnboundedTerrain(searchParams.get("scene"))) {
     return { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells };
   }
   return {
@@ -283,7 +288,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       footprint: node.footprint,
     }));
   const terrainColliders = new TerrainColliderSet(colliderPages, {
-    enabled: searchParams.get("scene") === INFINITE_ISLANDS_SCENE,
+    enabled: usesUnboundedTerrain(searchParams.get("scene")),
     surfaceHeight,
   });
   const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
@@ -292,6 +297,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     terrainColliders,
     surfaceHeight,
     worldCells,
+    allowOutOfWorld: usesUnboundedTerrain(searchParams.get("scene")),
     getMode: () => interaction.mode,
   });
 

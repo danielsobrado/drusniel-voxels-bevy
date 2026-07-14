@@ -38,6 +38,9 @@ export interface StreamingClodRootStats {
   probeEvictionsTotal: number;
   probeStaleDiscardsTotal: number;
   outOfWorldEditsSupported: number;
+  invalidationsTotal: number;
+  invalidatedPagesTotal: number;
+  rebuiltAfterInvalidationTotal: number;
   inflightMs: number;
   inflightPageLevels: number[];
   scheduledBudgetCost: number;
@@ -190,7 +193,7 @@ const WORKER_BUILD_MS_SAMPLE_LIMIT = 128;
 const TRANSITION_MS_SAMPLE_LIMIT = 128;
 const BUILD_RETRY_BASE_COOLDOWN_FRAMES = 60;
 const BUILD_RETRY_MAX_COOLDOWN_FRAMES = 600;
-const OUT_OF_WORLD_EDITS_SUPPORTED = 0;
+const OUT_OF_WORLD_EDITS_SUPPORTED = 1;
 
 function resolveBudget(value: number | undefined, fallback: number): number {
   const raw = value ?? fallback;
@@ -400,6 +403,9 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_probe_evictions_total"] = stats.probeEvictionsTotal;
   counters["live_clod_stream_probe_stale_discards_total"] = stats.probeStaleDiscardsTotal;
   counters["live_clod_stream_out_of_world_edits_supported"] = stats.outOfWorldEditsSupported;
+  counters["live_clod_stream_invalidations_total"] = stats.invalidationsTotal;
+  counters["live_clod_stream_invalidated_pages_total"] = stats.invalidatedPagesTotal;
+  counters["live_clod_stream_rebuilt_after_invalidation_total"] = stats.rebuiltAfterInvalidationTotal;
   writeTransitionCounters(counters, stats);
   writePerLevelStreamingCounters(counters, stats);
   if (stats.probeActive === 1) {
@@ -601,6 +607,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   let completedWorkerBuildMs = 0;
   let completedWorkerTransferBytes = 0;
   let completedStaleDiscards = 0;
+  let invalidationsTotal = 0;
+  let invalidatedPagesTotal = 0;
+  let rebuiltAfterInvalidationTotal = 0;
   let workerBuildFailures = 0;
   let workerBuildTimeouts = 0;
   let activeRootIds = new Set<string>();
@@ -655,6 +664,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const cacheNode = (node: ClodPageNode, activeEligible: boolean): boolean => {
+    if (staleRootIds.has(node.id)) rebuiltAfterInvalidationTotal++;
     staleRootIds.delete(node.id);
     const existing = cached.get(node.id);
     const { centerX, centerZ } = pageCenter(node);
@@ -1245,6 +1255,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         probeEvictionsTotal: probe.evictionsTotal,
         probeStaleDiscardsTotal: probe.staleDiscardsTotal,
         outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
+        invalidationsTotal,
+        invalidatedPagesTotal,
+        rebuiltAfterInvalidationTotal,
         inflightMs,
         inflightPageLevels,
         scheduledBudgetCost,
@@ -1280,6 +1293,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     stats() { return latest; },
     readyPageKeys() { return currentReadyPageKeys(); },
     invalidateBounds(bounds) {
+      invalidationsTotal++;
       for (let level = 0; level <= maxRootLevel; level++) {
         const span = pageSize * (2 ** level);
         const minPx = Math.floor(bounds.minX / span);
@@ -1289,6 +1303,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         for (let pz = minPz; pz <= maxPz; pz++) {
           for (let px = minPx; px <= maxPx; px++) {
             const id = streamingClodPageKey(px, pz, level);
+            invalidatedPagesTotal++;
             contentRevisions.set(id, (contentRevisions.get(id) ?? 0) + 1);
             staleRootIds.add(id);
             failed.delete(id);
@@ -1345,6 +1360,9 @@ function emptyStats(
     probeEvictionsTotal: 0,
     probeStaleDiscardsTotal: 0,
     outOfWorldEditsSupported: OUT_OF_WORLD_EDITS_SUPPORTED,
+    invalidationsTotal: 0,
+    invalidatedPagesTotal: 0,
+    rebuiltAfterInvalidationTotal: 0,
     inflightMs: 0,
     inflightPageLevels: [],
     scheduledBudgetCost: 0,

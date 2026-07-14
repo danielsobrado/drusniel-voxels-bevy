@@ -6,11 +6,11 @@ import type { HeightfieldTileStore } from "./heightfield_tile_cache.js";
 import { tileKeyString, type WorldTileKey } from "../tile_key.js";
 
 export const HEIGHTFIELD_TILE_DB_NAME = "drusniel-heightfield-tiles";
-export const HEIGHTFIELD_TILE_DB_VERSION = 2;
+export const HEIGHTFIELD_TILE_DB_VERSION = 3;
 export const HEIGHTFIELD_TILE_STORE_NAME = "heightfield_tiles";
 
 interface HeightfieldTileRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   terrainSourceHash: string;
   tileX: number;
   tileZ: number;
@@ -19,6 +19,9 @@ interface HeightfieldTileRecord {
   res: number;
   builtMs: number;
   heights: ArrayBuffer;
+  complexVolumeMask: ArrayBuffer | null;
+  entranceMask: ArrayBuffer | null;
+  voxelRegionRefs: string[];
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -48,7 +51,7 @@ function validRecord(
 ): value is HeightfieldTileRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Partial<HeightfieldTileRecord>;
-  return record.schemaVersion === 1
+  return record.schemaVersion === 2
     && record.terrainSourceHash === terrainSourceHash
     && record.tileX === key.x
     && record.tileZ === key.z
@@ -58,7 +61,10 @@ function validRecord(
     && typeof record.builtMs === "number"
     && Number.isFinite(record.builtMs)
     && record.heights instanceof ArrayBuffer
-    && record.heights.byteLength === HEIGHTFIELD_TILE_RES * HEIGHTFIELD_TILE_RES * Float32Array.BYTES_PER_ELEMENT;
+    && record.heights.byteLength === HEIGHTFIELD_TILE_RES * HEIGHTFIELD_TILE_RES * Float32Array.BYTES_PER_ELEMENT
+    && (record.complexVolumeMask === null || record.complexVolumeMask instanceof ArrayBuffer)
+    && (record.entranceMask === null || record.entranceMask instanceof ArrayBuffer)
+    && Array.isArray(record.voxelRegionRefs) && record.voxelRegionRefs.every((ref) => typeof ref === "string");
 }
 
 export async function openHeightfieldTileDb(
@@ -95,6 +101,9 @@ export class IndexedDbHeightfieldTileStore implements HeightfieldTileStore {
       key: Object.freeze({ x: value.tileX, z: value.tileZ }),
       res: value.res,
       heights: new Float32Array(value.heights.slice(0)),
+      complexVolumeMask: value.complexVolumeMask ? new Uint8Array(value.complexVolumeMask.slice(0)) : null,
+      entranceMask: value.entranceMask ? new Uint8Array(value.entranceMask.slice(0)) : null,
+      voxelRegionRefs: [...value.voxelRegionRefs],
       sourceRevision: value.sourceRevision,
       builtMs: value.builtMs,
     };
@@ -102,7 +111,7 @@ export class IndexedDbHeightfieldTileStore implements HeightfieldTileStore {
 
   async save(tile: HeightfieldTile): Promise<void> {
     const record: HeightfieldTileRecord = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       terrainSourceHash: this.terrainSourceHash,
       tileX: tile.key.x,
       tileZ: tile.key.z,
@@ -114,6 +123,15 @@ export class IndexedDbHeightfieldTileStore implements HeightfieldTileStore {
         tile.heights.byteOffset,
         tile.heights.byteOffset + tile.heights.byteLength,
       ) as ArrayBuffer,
+      complexVolumeMask: tile.complexVolumeMask?.buffer.slice(
+        tile.complexVolumeMask.byteOffset,
+        tile.complexVolumeMask.byteOffset + tile.complexVolumeMask.byteLength,
+      ) as ArrayBuffer | undefined ?? null,
+      entranceMask: tile.entranceMask?.buffer.slice(
+        tile.entranceMask.byteOffset,
+        tile.entranceMask.byteOffset + tile.entranceMask.byteLength,
+      ) as ArrayBuffer | undefined ?? null,
+      voxelRegionRefs: [...tile.voxelRegionRefs],
     };
     const transaction = this.db.transaction(HEIGHTFIELD_TILE_STORE_NAME, "readwrite");
     transaction.objectStore(HEIGHTFIELD_TILE_STORE_NAME).put(

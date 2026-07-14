@@ -132,7 +132,36 @@ envelope (summary tiles ignore interior volume except the entrance/occluder chan
 
 ## Evidence (fill before merging final commit)
 
-- [ ] bubble parity + collider tests on carved route
-- [ ] SDF vs heightfield page build ms by level; masked-page share on route
-- [ ] cave-test scene shots + stats; perf:main baseline
-- [ ] out-of-world dig acceptance run (edit, rebuild, reload persistence)
+- [x] Bubble parity + collider tests on carved route: `heightfield_tile_carve.test.ts`
+  locks empty-overlay bubble positions, normals, and indices bit-equal through the canonical tile
+  sampler; `terrain_collider_fallback.test.ts` covers capsule grounding on a carved bank. Full suite:
+  535 files / 2,903 tests passed in the final full suite. The near-field regression also proves a
+  sparse overlay leaves non-intersecting pages on the GPU/heightfield fast path.
+- [x] SDF vs heightfield page build ms by level; masked-page share on route: native-Windows
+  `cave-test` exterior capture requested 2 complex and 86 ordinary pages (2.27% complex).
+  L1 p95 was 1,166.2 ms for SDF pages versus 252.3 ms for heightfield pages; GPU failures and
+  worker fallbacks were both zero. Evidence: `shots/phase-5/cave-outside-stats.json`.
+- [x] Cave-test scene shots + stats; perf:main baseline: exterior and interior captures are
+  `shots/phase-5/cave-outside.png` and `shots/phase-5/cave-interior.png`, with adjacent stats and
+  QA-summary JSON. The final `perf-runs/phase5-cave-final` run recorded frame p50/p95
+  3.70/5.70 ms, render p95 1.00 ms, top phase `selectionUpdateMs` 2.70 ms, and top prop bucket
+  `propsRestMs` 2.20 ms. The same world-4 heightfield control recorded frame p50/p95 2.00/2.90 ms in
+  `perf-runs/phase5-heightfield-control`.
+- [x] Cave gameplay acceptance: `acceptance-runs/phase5-voxel-overlay/report.json` records a
+  29.97 m first-person approach into the cave, two streamed collider pages before and after the
+  route, no failed bubble pages, and no fall-through (camera height rose from 51.97 m to 70.53 m).
+- [x] Out-of-world dig acceptance (edit, rebuild, reload persistence): the same report edits
+  streamed root `L1:4,2` at x=576 beyond the configured world-8 boundary (512 m), commits 80 voxel
+  deltas, records one invalidation and one completed streamed-root rebuild, then reloads the save
+  with all 80 deltas and no save error. Native-Windows full reuse acceptance also passed at
+  `acceptance-runs/infinite-islands/2026-07-13T22-00-57/report.json` with configured/startup worlds
+  16/2 and no gate failures.
+- [x] Bounded NAADF hookup: `cave_occupancy.test.ts` proves the query returns immediately while no
+  complex bubble page is resident, then performs a bounded march only after resident complex-page
+  bounds are published.
+
+Phase 5 implementation completed 2026-07-14. The ordinary-tile fast path retains null masks;
+complex tiles carry 4 m masks and region refs, deterministic cave/stamp/player composition is
+shared by main and worker density, masked streamed roots use the CPU SDF builder, ordinary roots
+retain GPU heightfield meshing, and NAADF cave occupancy is bounded and skips work until complex
+bubble pages are resident.
