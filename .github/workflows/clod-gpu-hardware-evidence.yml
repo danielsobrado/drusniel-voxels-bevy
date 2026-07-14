@@ -1,0 +1,82 @@
+name: CLOD GPU Hardware Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Balanced measured run count
+        required: true
+        default: '4'
+        type: string
+      max_dual_ratio:
+        description: Maximum accepted dual/single first-quiet ratio
+        required: true
+        default: '1.10'
+        type: string
+      commit_evidence:
+        description: Commit validated evidence to the selected branch
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  hardware-evidence:
+    runs-on: [self-hosted, gpu]
+    defaults:
+      run:
+        working-directory: tools/clod-poc
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: tools/clod-poc/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck hierarchy path
+        run: npm run typecheck
+
+      - name: Run focused hierarchy tests
+        run: npx vitest run src/terrain/streaming/gpu_clod_hierarchy.test.ts src/terrain/streaming/gpu_clod_root_mesher_pool.test.ts
+
+      - name: Capture hardware benchmark
+        run: npm run perf:gpu-clod-pools -- --runs=${{ inputs.runs }} --max-dual-ratio=${{ inputs.max_dual_ratio }} --out=perf-runs/gpu-clod-pools/hardware-summary.json
+
+      - name: Format validated evidence
+        run: npm run perf:gpu-clod-pools:evidence -- --input=perf-runs/gpu-clod-pools/hardware-summary.json --out=docs/performance/gpu-clod-pools-hardware-latest.md --commit=${{ github.sha }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu-clod-hardware-evidence
+          path: |
+            tools/clod-poc/perf-runs/gpu-clod-pools/hardware-summary.json
+            tools/clod-poc/docs/performance/gpu-clod-pools-hardware-latest.md
+          if-no-files-found: error
+
+      - name: Commit evidence
+        if: ${{ inputs.commit_evidence }}
+        working-directory: .
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/clod-poc/docs/performance/gpu-clod-pools-hardware-latest.md
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "perf(clod-poc): record GPU CLOD hardware evidence"
+            git push origin "HEAD:${{ github.ref_name }}"
+          }

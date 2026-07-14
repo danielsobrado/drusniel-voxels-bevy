@@ -23,6 +23,7 @@
     "perf:gpu-clod-pools": "node tools/run-gpu-clod-pool-benchmark.mjs",
     "perf:gpu-clod-pools:software": "node tools/run-gpu-clod-pool-benchmark.mjs --allow-software",
     "perf:gpu-clod-pools:gate": "node tools/run-gpu-clod-pool-benchmark.mjs --runs=4 --max-dual-ratio=1.10",
+    "perf:gpu-clod-pools:evidence": "tsx tools/format-gpu-clod-pool-evidence.ts",
     "postfx:verify": "tsx tools/verify-postfx.ts",
     "shoot-props": "tsx tools/shoot-props.ts",
     "compare": "tsx tools/compare.ts",
