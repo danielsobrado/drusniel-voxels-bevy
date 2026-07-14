@@ -82,8 +82,7 @@ function dilateTile(
   for (let y = 0; y < tileSize; y++) {
     for (let x = 0; x < tileSize; x++) {
       const index = localIndex(x, y);
-      if (filled[index]) continue;
-      if (hasFilledNeighbour(filled, x, y, tileSize)) enqueue(x, y);
+      if (!filled[index] && hasFilledNeighbour(filled, x, y, tileSize)) enqueue(x, y);
     }
   }
 
@@ -93,30 +92,43 @@ function dilateTile(
     if (filled[index]) continue;
     const x = index % tileSize;
     const y = Math.floor(index / tileSize);
-    const neighbours = filledNeighbours(filled, x, y, tileSize);
-    if (neighbours.length === 0) continue;
+    let count = 0;
+    let albedoR = 0;
+    let albedoG = 0;
+    let albedoB = 0;
+    let normalR = 0;
+    let normalG = 0;
+    let normalB = 0;
+    let depth = 0;
 
-    const albedoSum = [0, 0, 0];
-    const normalDepthSum = [0, 0, 0, 0];
-    for (const neighbour of neighbours) {
-      const nx = neighbour % tileSize;
-      const ny = Math.floor(neighbour / tileSize);
-      const offset = atlasOffset(nx, ny);
-      for (let channel = 0; channel < 3; channel++) {
-        albedoSum[channel] += albedo[offset + channel] as number;
-      }
-      for (let channel = 0; channel < 4; channel++) {
-        normalDepthSum[channel] += normalDepth[offset + channel] as number;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= tileSize || ny >= tileSize) continue;
+        if (!filled[localIndex(nx, ny)]) continue;
+        const offset = atlasOffset(nx, ny);
+        albedoR += albedo[offset] as number;
+        albedoG += albedo[offset + 1] as number;
+        albedoB += albedo[offset + 2] as number;
+        normalR += normalDepth[offset] as number;
+        normalG += normalDepth[offset + 1] as number;
+        normalB += normalDepth[offset + 2] as number;
+        depth += normalDepth[offset + 3] as number;
+        count++;
       }
     }
+    if (count === 0) continue;
 
     const target = atlasOffset(x, y);
-    for (let channel = 0; channel < 3; channel++) {
-      albedo[target + channel] = Math.round(albedoSum[channel] / neighbours.length);
-    }
-    for (let channel = 0; channel < 4; channel++) {
-      normalDepth[target + channel] = Math.round(normalDepthSum[channel] / neighbours.length);
-    }
+    albedo[target] = Math.round(albedoR / count);
+    albedo[target + 1] = Math.round(albedoG / count);
+    albedo[target + 2] = Math.round(albedoB / count);
+    normalDepth[target] = Math.round(normalR / count);
+    normalDepth[target + 1] = Math.round(normalG / count);
+    normalDepth[target + 2] = Math.round(normalB / count);
+    normalDepth[target + 3] = Math.round(depth / count);
     filled[index] = 1;
 
     for (let dy = -1; dy <= 1; dy++) {
@@ -132,22 +144,16 @@ function dilateTile(
 }
 
 function hasFilledNeighbour(filled: Uint8Array, x: number, y: number, tileSize: number): boolean {
-  return filledNeighbours(filled, x, y, tileSize).length > 0;
-}
-
-function filledNeighbours(filled: Uint8Array, x: number, y: number, tileSize: number): number[] {
-  const neighbours: number[] = [];
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       if (dx === 0 && dy === 0) continue;
       const nx = x + dx;
       const ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= tileSize || ny >= tileSize) continue;
-      const index = ny * tileSize + nx;
-      if (filled[index]) neighbours.push(index);
+      if (filled[ny * tileSize + nx]) return true;
     }
   }
-  return neighbours;
+  return false;
 }
 
 function validatePixelBuffer(pixels: Uint8Array, width: number, height: number, operation: string): void {
