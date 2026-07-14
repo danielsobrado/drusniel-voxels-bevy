@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { deriveEnvironmentLighting } from "./lighting_model.js";
 
 export interface EnvironmentSettings {
   sunAzimuthDeg: number;
@@ -27,6 +28,8 @@ export interface EnvironmentLighting {
   sunColor: THREE.Color;
   skyLight: THREE.Color;
   groundLight: THREE.Color;
+  /** Small diffuse safety floor. Materials must not invent a larger constant term. */
+  ambientFloor?: number;
 }
 
 export interface SkyEnvironmentOptions {
@@ -43,18 +46,18 @@ export const DEFAULT_ENVIRONMENT_SETTINGS: EnvironmentSettings = {
   sunIntensity: 1.0,
   skyIntensity: 1.0,
   groundIntensity: 1.0,
-  exposure: 1.05,
+  exposure: 1.0,
   horizonSoftness: 0.72,
   sunDiskIntensity: 1.0,
   sunGlowIntensity: 1.0,
-  hazeIntensity: 0.22,
+  hazeIntensity: 0.16,
 };
 
 export const DEFAULT_ENVIRONMENT_COLORS: EnvironmentColors = {
-  sun: new THREE.Color(0.95, 0.86, 0.68),
+  sun: new THREE.Color(1.0, 0.98, 0.92),
   zenith: new THREE.Color(0x476d9f),
-  horizon: new THREE.Color(0xbfc9d2),
-  ground: new THREE.Color(0x383328),
+  horizon: new THREE.Color(0xaebbc7),
+  ground: new THREE.Color(0x302d27),
   skyLight: new THREE.Color(0x6b7a94),
   groundLight: new THREE.Color(0x2e2921),
 };
@@ -176,10 +179,9 @@ export class SkyEnvironment {
   updateSettings(settings: Partial<EnvironmentSettings>): void {
     Object.assign(this.settings, settings);
     const uniforms = this.mesh.material.uniforms;
-    uniforms.uSunDir.value.copy(
-      sunDirectionFromAngles(this.settings.sunAzimuthDeg, this.settings.sunElevationDeg),
-    );
-    uniforms.uSunColor.value.copy(this.colors.sun).multiplyScalar(this.settings.sunIntensity);
+    const lighting = this.lighting();
+    uniforms.uSunDir.value.copy(lighting.sunDirection);
+    uniforms.uSunColor.value.copy(lighting.sunColor);
     uniforms.uSkyIntensity.value = this.settings.skyIntensity;
     uniforms.uGroundIntensity.value = this.settings.groundIntensity;
     uniforms.uHorizonSoftness.value = this.settings.horizonSoftness;
@@ -200,7 +202,7 @@ export class SkyEnvironment {
     if (colors.groundLight) this.colors.groundLight.copy(colors.groundLight);
 
     const uniforms = this.mesh.material.uniforms;
-    uniforms.uSunColor.value.copy(this.colors.sun).multiplyScalar(this.settings.sunIntensity);
+    uniforms.uSunColor.value.copy(this.lighting().sunColor);
     uniforms.uZenith.value.copy(this.colors.zenith);
     uniforms.uHorizon.value.copy(this.colors.horizon);
     uniforms.uGround.value.copy(this.colors.ground);
@@ -217,12 +219,11 @@ export class SkyEnvironment {
   }
 
   lighting(): EnvironmentLighting {
-    return {
-      sunDirection: sunDirectionFromAngles(this.settings.sunAzimuthDeg, this.settings.sunElevationDeg),
-      sunColor: this.colors.sun.clone().multiplyScalar(this.settings.sunIntensity),
-      skyLight: this.colors.skyLight.clone().multiplyScalar(this.settings.skyIntensity),
-      groundLight: this.colors.groundLight.clone().multiplyScalar(this.settings.groundIntensity),
-    };
+    return deriveEnvironmentLighting(
+      sunDirectionFromAngles(this.settings.sunAzimuthDeg, this.settings.sunElevationDeg),
+      this.settings,
+      this.colors,
+    );
   }
 
   dispose(): void {
