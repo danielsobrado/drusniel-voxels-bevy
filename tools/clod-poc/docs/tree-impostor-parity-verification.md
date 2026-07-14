@@ -11,6 +11,10 @@ The tree impostor path now uses the same source appearance contract as live tree
 - CPU tree instances, GPU mesh LODs, and impostor atlas pages use the same world-space structural-variant selector;
 - every one of the four live structural variants has its own atlas page; variants 2 and 3 are no longer folded onto pages 0 and 1;
 - GPU near, mid, far, and impostor rings use complementary material-side dither during compute overlap bands;
+- capture, readback cleanup, row flipping, and dilation are resumable and deadline-bounded;
+- temporary capture targets do not regenerate mipmaps after every tile;
+- the active atlas set is replaced only after the complete new set succeeds;
+- settings changes, rebuilds, repeated bake requests, and disposal cancel incomplete work;
 - an opt-in live atlas lab exposes every baked species and channel inside the actual world scene.
 
 ## Atlas memory contract
@@ -18,6 +22,27 @@ The tree impostor path now uses the same source appearance contract as live tree
 The production atlas preserves the current 8x8 views and 192-pixel frame resolution for all four structural variants. With six species, two RGBA8 textures per species, and mipmaps, the estimated impostor atlas allocation is approximately 576 MiB.
 
 This is an intentional fidelity tradeoff. Do not reduce the variant-page count below `TREE_STRUCTURAL_VARIANTS`; tune frame resolution or move to persistent compressed assets if the measured memory budget is too high.
+
+## Bake frame budget
+
+The scheduler reads:
+
+```yaml
+tree_impostor_bake:
+  max_build_ms_per_frame: 2.0
+```
+
+from `config/tree_impostor_bake.yaml`.
+
+The budget is checked between individual capture tiles and between small CPU cleanup chunks. Readbacks are asynchronous and final texture preparation is isolated into separate scheduled stages. A single GPU render, driver readback, or texture initialization can still exceed the requested budget on slow hardware, so the real-GPU startup trace remains the final authority.
+
+Runtime progress is available at:
+
+```js
+window.__drusnielTreeImpostorBake
+```
+
+The status includes the stage, species, variant, channel, tile progress, total progress, and most recently observed frame work time.
 
 ## Automated local gate
 
@@ -102,6 +127,7 @@ npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report
 Do not call visual parity complete from unit tests or a software WebGPU adapter. Completion requires:
 
 - the automated local gate passing;
+- a real-GPU startup trace showing acceptable worst-frame bake cost;
 - non-zero real-GPU impostor counts;
 - all enabled species reporting four atlas variant pages;
 - a clean orbit capture;
