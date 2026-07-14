@@ -12,6 +12,7 @@ import {
   applyMaterialIfChanged,
   materialChurnDiagnostics,
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
+import { getCurrentWebGpuRenderer } from "../../rendering/webgpu_device_bridge.js";
 import { acquireGpuClodResidentPage } from "../streaming/gpu_clod_resident_registry.js";
 import {
   createExternalGpuClodGeometry,
@@ -231,13 +232,14 @@ export class ClodRenderNodeCache {
     this.configureCurrentMaterialState(mat);
 
     const normalMode = this.deps.getNormalMode();
-    const residentLease = this.deps.webGpuRenderer
+    const webGpuRenderer = this.deps.webGpuRenderer ?? getCurrentWebGpuRenderer();
+    const residentLease = webGpuRenderer
       ? acquireGpuClodResidentPage(node.id, normalizedRevision(node.revision))
       : null;
     let recomputedNormals: Float32Array | null = null;
     let geometry: THREE.BufferGeometry;
-    if (residentLease && this.deps.webGpuRenderer) {
-      geometry = createExternalGpuClodGeometry(this.deps.webGpuRenderer, residentLease);
+    if (residentLease && webGpuRenderer) {
+      geometry = createExternalGpuClodGeometry(webGpuRenderer, residentLease);
       this.statGpuResidentViews++;
       if (normalMode === "recomputed") this.statGpuResidentNormalFallbacks++;
     } else {
