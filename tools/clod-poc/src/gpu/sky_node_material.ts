@@ -1,7 +1,5 @@
-// WebGPU sky dome material: TSL port of the SKY_FRAG gradient in
-// src/environment.ts: horizon/zenith/ground gradient + haze + sun disk/glow. Rendered on a
-// BackSide dome that follows the camera (depth off, drawn first). Also returns the derived
-// EnvironmentLighting so the terrain material can be lit by the same sun.
+// WebGPU sky dome material: horizon/zenith/ground gradient + haze + sun disk/glow.
+// The dome and scene lighting share the transmittance-tinted environment model.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -26,6 +24,7 @@ import {
   type EnvironmentLighting,
   type EnvironmentSettings,
 } from "../environment/environment.js";
+import { deriveEnvironmentLighting } from "../environment/lighting_model.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -42,12 +41,13 @@ export function createSkyNodeMaterial(
   settings: EnvironmentSettings = DEFAULT_ENVIRONMENT_SETTINGS,
   colors: EnvironmentColors = DEFAULT_ENVIRONMENT_COLORS,
 ): SkyNodeHandle {
-  const sunDir = sunDirectionFromAngles(settings.sunAzimuthDeg, settings.sunElevationDeg);
-  const uSunDir = uniform(sunDir.clone());
+  const initialDirection = sunDirectionFromAngles(settings.sunAzimuthDeg, settings.sunElevationDeg);
+  const initialLighting = deriveEnvironmentLighting(initialDirection, settings, colors);
+  const uSunDir = uniform(initialDirection.clone());
   const uZenith = uniform(v3(colors.zenith));
   const uHorizon = uniform(v3(colors.horizon));
   const uGround = uniform(v3(colors.ground));
-  const uSunColor = uniform(v3(colors.sun).multiplyScalar(settings.sunIntensity));
+  const uSunColor = uniform(v3(initialLighting.sunColor));
   const uSkyIntensity = uniform(settings.skyIntensity);
   const uGroundIntensity = uniform(settings.groundIntensity);
   const uHorizonSoftness = uniform(Math.max(settings.horizonSoftness, 0.01));
@@ -63,7 +63,6 @@ export function createSkyNodeMaterial(
   const groundBlend = smoothstep(-0.18, 0.03, dir.y);
   let sky: TslNode = mix(uGround.mul(uGroundIntensity), upperSky, groundBlend);
 
-  // haze = exp(-abs(dir.y) * 12) * hazeIntensity, blended toward the horizon colour.
   const haze = exp(abs(dir.y).mul(-12)).mul(uHazeIntensity);
   sky = mix(sky, uHorizon.mul(uSkyIntensity), clamp(haze, 0, 1));
 
@@ -81,30 +80,22 @@ export function createSkyNodeMaterial(
 
   const handle: SkyNodeHandle = {
     material,
-    lighting: {
-      sunDirection: sunDirectionFromAngles(currentSettings.sunAzimuthDeg, currentSettings.sunElevationDeg),
-      sunColor: colors.sun.clone().multiplyScalar(currentSettings.sunIntensity),
-      skyLight: colors.skyLight.clone().multiplyScalar(currentSettings.skyIntensity),
-      groundLight: colors.groundLight.clone().multiplyScalar(currentSettings.groundIntensity),
-    },
+    lighting: initialLighting,
     updateSettings(next) {
       currentSettings = { ...next };
-      const nextSunDirection = sunDirectionFromAngles(next.sunAzimuthDeg, next.sunElevationDeg);
-      uSunDir.value.copy(nextSunDirection);
-      uSunColor.value.copy(v3(colors.sun)).multiplyScalar(next.sunIntensity);
+      const nextDirection = sunDirectionFromAngles(next.sunAzimuthDeg, next.sunElevationDeg);
+      const nextLighting = deriveEnvironmentLighting(nextDirection, next, colors);
+      uSunDir.value.copy(nextDirection);
+      uSunColor.value.copy(v3(nextLighting.sunColor));
       uSkyIntensity.value = next.skyIntensity;
       uGroundIntensity.value = next.groundIntensity;
       uHorizonSoftness.value = Math.max(next.horizonSoftness, 0.01);
       uSunDiskIntensity.value = next.sunDiskIntensity;
       uSunGlowIntensity.value = next.sunGlowIntensity;
       uHazeIntensity.value = next.hazeIntensity;
-      handle.lighting = {
-        sunDirection: nextSunDirection,
-        sunColor: colors.sun.clone().multiplyScalar(next.sunIntensity),
-        skyLight: colors.skyLight.clone().multiplyScalar(next.skyIntensity),
-        groundLight: colors.groundLight.clone().multiplyScalar(next.groundIntensity),
-      };
+      handle.lighting = nextLighting;
     },
   };
+  void currentSettings;
   return handle;
 }
