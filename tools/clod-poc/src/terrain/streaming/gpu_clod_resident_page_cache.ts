@@ -14,7 +14,7 @@ import {
 export type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 
 const MIN_BUFFER_BYTES = 4;
-const FIRST_VIEW_PROTECTION_TOUCHES = 128;
+const FIRST_VIEW_PROTECTION_MS = 5_000;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
 
@@ -34,7 +34,7 @@ interface ResidentEntry {
   page: GpuClodResidentPage;
   sourceMesh: PageMesh | null;
   lastTouch: number;
-  protectedUntilClock: number;
+  protectedUntilMs: number;
 }
 
 export class GpuClodResidentPageCache {
@@ -50,6 +50,7 @@ export class GpuClodResidentPageCache {
   constructor(
     private readonly device: GPUDevice,
     private readonly config: GpuClodHierarchyConfig,
+    private readonly now: () => number = monotonicNow,
   ) {
     this.publishCounters();
   }
@@ -72,7 +73,9 @@ export class GpuClodResidentPageCache {
     if (pages.length === 0) return;
     if (!this.config.enabled || this.disposed) {
       for (const page of pages) destroyGpuClodResidentPage(page);
-      return;
+      throw new Error(this.disposed
+        ? "GPU CLOD resident cache is disposed"
+        : "GPU CLOD resident cache is disabled");
     }
 
     const incomingIds = new Set<string>();
@@ -95,10 +98,11 @@ export class GpuClodResidentPageCache {
       throw new Error(`GPU CLOD resident batch needs ${incomingBytes} bytes, budget is ${budget}`);
     }
 
+    const now = this.now();
     let retainedProtectedBytes = 0;
     for (const [nodeId, entry] of this.entries) {
       if (incomingIds.has(nodeId)) continue;
-      if (entry.protectedUntilClock > this.clock) retainedProtectedBytes += entry.page.byteLength;
+      if (entry.protectedUntilMs > now) retainedProtectedBytes += entry.page.byteLength;
     }
     if (incomingBytes + retainedProtectedBytes > budget) {
       throw new Error(
@@ -106,7 +110,7 @@ export class GpuClodResidentPageCache {
       );
     }
 
-    for (const page of pages) this.replace(page, null);
+    for (const page of pages) this.replace(page, null, now);
     this.adoptedPagesTotal += pages.length;
     this.evictToBudget(incomingIds);
     this.publishCounters();
@@ -171,12 +175,12 @@ export class GpuClodResidentPageCache {
       return;
     }
     const page = this.uploadCpuNode(node, revision);
-    this.replace(page, node.mesh);
+    this.replace(page, node.mesh, this.now());
     this.uploadsTotal++;
     this.uploadBytesTotal += page.byteLength;
   }
 
-  private replace(page: GpuClodResidentPage, sourceMesh: PageMesh | null): void {
+  private replace(page: GpuClodResidentPage, sourceMesh: PageMesh | null, now: number): void {
     const existing = this.entries.get(page.id);
     if (existing) {
       this.entries.delete(page.id);
@@ -184,12 +188,11 @@ export class GpuClodResidentPageCache {
       this.residentBytes -= existing.page.byteLength;
     }
 
-    const touch = ++this.clock;
     const entry: ResidentEntry = {
       page,
       sourceMesh,
-      lastTouch: touch,
-      protectedUntilClock: sourceMesh === null ? touch + FIRST_VIEW_PROTECTION_TOUCHES : 0,
+      lastTouch: ++this.clock,
+      protectedUntilMs: sourceMesh === null ? now + FIRST_VIEW_PROTECTION_MS : 0,
     };
     this.entries.set(page.id, entry);
     this.residentBytes += page.byteLength;
@@ -204,7 +207,7 @@ export class GpuClodResidentPageCache {
   private releaseFirstViewProtection(page: GpuClodResidentPage): void {
     const entry = this.entries.get(page.id);
     if (!entry || entry.page !== page) return;
-    entry.protectedUntilClock = 0;
+    entry.protectedUntilMs = 0;
     entry.lastTouch = ++this.clock;
     this.evictToBudget(new Set([page.id]));
     this.publishCounters();
@@ -274,12 +277,13 @@ export class GpuClodResidentPageCache {
 
   private evictToBudget(protectedIds: ReadonlySet<string>): void {
     const budget = this.budgetBytes();
+    const now = this.now();
     while (this.residentBytes > budget && this.entries.size > 0) {
       let oldestId: string | null = null;
       let oldestTouch = Infinity;
       for (const [id, entry] of this.entries) {
         if (protectedIds.has(id)) continue;
-        if (entry.protectedUntilClock > this.clock) continue;
+        if (entry.protectedUntilMs > now) continue;
         if (entry.lastTouch >= oldestTouch) continue;
         oldestId = id;
         oldestTouch = entry.lastTouch;
@@ -317,6 +321,10 @@ export class GpuClodResidentPageCache {
 
 function normalizedRevision(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : 0;
+}
+
+function monotonicNow(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function align4(value: number): number {
