@@ -22,6 +22,11 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
+import {
+  DEFAULT_ENVIRONMENT_COLORS,
+  DEFAULT_ENVIRONMENT_SETTINGS,
+} from "../environment/environment.js";
+import { deriveEnvironmentLighting } from "../environment/lighting_model.js";
 import type { PostFxAtmosphereSettings, PostFxFroxelSettings } from "./postfx_atmosphere.js";
 
 type TslAny = any;
@@ -58,6 +63,39 @@ export interface PostFxFroxelVolumeOptions {
   terrain?: PostFxFroxelVolumeTerrainInput | null;
 }
 
+export interface ProjectedCanopySample {
+  x: number;
+  z: number;
+  belowCanopy: boolean;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+export function postFxFroxelMoistureFactor(moisture: number): number {
+  const m = clamp01(moisture);
+  return 0.25 + 1.5 * m * m;
+}
+
+export function projectPostFxCanopySample(
+  worldX: number,
+  worldZ: number,
+  worldY: number,
+  groundY: number,
+  sunDirection: Vector3,
+  crownHeightMeters = 13,
+): ProjectedCanopySample {
+  const crownY = groundY + crownHeightMeters;
+  const dy = crownY - worldY;
+  const distance = Math.max(0, dy) / Math.max(0.08, sunDirection.y);
+  return {
+    x: worldX + sunDirection.x * distance,
+    z: worldZ + sunDirection.z * distance,
+    belowCanopy: dy > 0,
+  };
+}
+
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
   const gg = g * g;
   return float((1 - gg) / (4 * Math.PI)).div(float(1 + gg).sub(cosTheta.mul(2 * g)).pow(1.5));
@@ -84,6 +122,8 @@ export class PostFxFroxelVolume {
   private readonly uProjectionInverse = uniform(new Matrix4()) as unknown as MatrixUniformNode;
   private readonly uCameraWorld = uniform(new Matrix4()) as unknown as MatrixUniformNode;
   private readonly uSunDirection = uniform(new Vector3(0, 1, 0)) as unknown as VectorUniformNode;
+  private readonly uSunRadiance = uniform(new Vector3(2.4, 2.3, 2.1)) as unknown as VectorUniformNode;
+  private readonly uSkyRadiance = uniform(new Vector3(0.08, 0.09, 0.11)) as unknown as VectorUniformNode;
   private readonly projectionInverseScratch = new Matrix4();
   private readonly froxels: PostFxFroxelSettings;
 
@@ -96,7 +136,6 @@ export class PostFxFroxelVolume {
     const maxDistanceMeters = Math.max(this.froxels.nearMeters, this.froxels.maxDistanceMeters);
     const nearMeters = Math.max(0.0001, this.froxels.nearMeters);
     const maxRatio = maxDistanceMeters / nearMeters;
-    const hillaire = settings.hillaire;
     const froxels = this.froxels;
     const terrain = options.terrain ?? null;
     const terrainExtent = terrain ? Math.max(1, terrain.extentMeters) : 1;
@@ -147,11 +186,16 @@ export class PostFxFroxelVolume {
       const sunDir = vec3(this.uSunDirection).normalize().toVar();
 
       const groundY = sampleTerrainHeight(worldPos.xz);
-      const hGround = worldPos.y.sub(groundY).max(0);
-      const rhoGround = densityAtHeight(hGround, froxels.groundFalloffMeters).mul(froxels.groundFogDensity);
-      const rhoAlt = densityAtHeight(worldPos.y, froxels.altitudeFalloffMeters).mul(froxels.altitudeFogDensity);
+      const heightAboveGround = worldPos.y.sub(groundY).max(0);
+      const altitudeLayerStart = float(froxels.groundReferenceHeightMeters + 120);
+      const rhoGround = densityAtHeight(heightAboveGround, froxels.groundFalloffMeters)
+        .mul(froxels.groundFogDensity);
+      const rhoAltitude = densityAtHeight(
+        worldPos.y.sub(altitudeLayerStart).max(0),
+        froxels.altitudeFalloffMeters,
+      ).mul(froxels.altitudeFogDensity);
       const lowSun = float(1).sub(smoothstep(0.08, 0.65, sunDir.y));
-      const densitySunScale = lowSun.mul(froxels.sunDensityBoost).add(froxels.ambientDensityFloor);
+      const timeOfDayDensity = lowSun.mul(froxels.sunDensityBoost).add(froxels.ambientDensityFloor);
       const noiseUv = worldPos.xz
         .mul(0.037)
         .add(vec2(time.mul(0.19), time.mul(0.11)))
@@ -162,38 +206,50 @@ export class PostFxFroxelVolume {
         .mul(froxels.noiseStrength)
         .add(1)
         .max(0);
-      const canopyCoverage = sampleCanopy(worldPos.xz);
       const hydrologyMoisture = sampleHydrologyMoisture(worldPos.xz);
-      const moistureBoost = hydrologyMoisture.mul(0.7).add(canopyCoverage.mul(0.18)).add(1);
+      const moistureFactor = hydrologyMoisture.mul(hydrologyMoisture).mul(1.5).add(0.25);
+
       const terrainVisibility = float(1).toVar();
-      for (const probeDistance of [24, 60, 140, 320, 720]) {
+      for (const probeDistance of [12, 30, 75, 180, 420]) {
         const probePos = worldPos.add(sunDir.mul(probeDistance));
         const probeGroundY = sampleTerrainHeight(probePos.xz);
-        terrainVisibility.mulAssign(smoothstep(-6, 4, probePos.y.sub(probeGroundY)));
+        terrainVisibility.mulAssign(smoothstep(-10, 2, probePos.y.sub(probeGroundY)));
       }
-      const crownBase = groundY.add(3);
-      const crownTop = groundY.add(21);
-      const crownBand = smoothstep(crownBase, crownBase.add(5), worldPos.y)
-        .mul(float(1).sub(smoothstep(crownTop.sub(5), crownTop, worldPos.y)));
+
+      const crownSlabY = groundY.add(13);
+      const crownDeltaY = crownSlabY.sub(worldPos.y);
       const canopyProjection = worldPos.xz.add(
-        sunDir.xz.mul(crownTop.sub(worldPos.y).max(0).div(sunDir.y.max(0.08))),
+        sunDir.xz.mul(crownDeltaY.max(0).div(sunDir.y.max(0.08))),
       );
       const projectedCanopy = sampleCanopy(canopyProjection);
-      const canopyVisibility = clamp(float(1).sub(projectedCanopy.mul(0.85).mul(crownBand)), 0.15, 1);
+      const canopyVisibility = crownDeltaY.greaterThan(0).select(
+        clamp(float(1).sub(projectedCanopy.mul(0.88)), 0.08, 1),
+        float(1),
+      );
       const cloudVisibility = sampleCloudShadow(worldPos.xz.add(sunDir.xz.mul(280)));
       const cloudStrength = float(Math.max(0, Math.min(1, terrain?.cloudShadowStrength ?? 0)));
       const cloudVisibilityWeighted = float(1).sub(float(1).sub(cloudVisibility).mul(cloudStrength));
       const sunVisibility = terrainVisibility.mul(canopyVisibility).mul(cloudVisibilityWeighted);
-      const shaft = lowSun.mul(froxels.sunShaftsStrength).add(1);
-      const density = rhoGround.add(rhoAlt).mul(noise).mul(densitySunScale).mul(moistureBoost).mul(froxels.strength);
+
+      const density = rhoGround.add(rhoAltitude)
+        .mul(noise)
+        .mul(timeOfDayDensity)
+        .mul(moistureFactor)
+        .mul(froxels.strength);
       const phase = phaseHenyeyGreenstein(dirW.dot(sunDir), 0.5);
-      const fogColor = vec3(...hillaire.mieColor)
-        .mul(phase.mul(18).mul(shaft).mul(sunVisibility))
-        .add(vec3(...hillaire.rayleighColor).mul(0.035).mul(float(0.6).add(sunVisibility.mul(0.4))));
+      const shaftGain = lowSun.mul(froxels.sunShaftsStrength).mul(2).add(1);
+      const directScatter = vec3(this.uSunRadiance)
+        .mul(phase)
+        .mul(shaftGain)
+        .mul(sunVisibility);
+      const ambientScatter = vec3(this.uSkyRadiance)
+        .mul(0.018)
+        .mul(sunVisibility.mul(0.6).add(0.4));
+      const source = directScatter.add(ambientScatter);
       textureStore(
         this.scatterTexture,
         uvec3(x.toUint(), y.toUint(), z.toUint()),
-        vec4(fogColor.mul(density), density),
+        vec4(source.mul(density), density),
       ).toWriteOnly();
     })().compute(width * height * depth);
     (this.scatterKernel as ComputeNode).setName?.("postfxFroxelScatter");
@@ -250,6 +306,13 @@ export class PostFxFroxelVolume {
     this.uCameraWorld.value.copy(camera.matrixWorld);
     this.uCameraPosition.value.setFromMatrixPosition(camera.matrixWorld);
     this.uSunDirection.value.copy(sunDirection).normalize();
+    const lighting = deriveEnvironmentLighting(
+      this.uSunDirection.value,
+      DEFAULT_ENVIRONMENT_SETTINGS,
+      DEFAULT_ENVIRONMENT_COLORS,
+    );
+    this.uSunRadiance.value.set(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b);
+    this.uSkyRadiance.value.set(lighting.skyLight.r, lighting.skyLight.g, lighting.skyLight.b);
     renderer.compute(this.scatterKernel);
     renderer.compute(this.integrateKernel);
   }
