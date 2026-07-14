@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   copyTreeImpostorPixels,
+  createTreeImpostorAtlasDilationJob,
+  createTreeImpostorRowFlipJob,
   dilateTreeImpostorAtlasTiles,
   flipTreeImpostorPixelRows,
 } from "./tree_impostor_atlas_pixels.js";
@@ -61,17 +63,61 @@ describe("tree impostor atlas pixels", () => {
     expect(pixel(albedo, width, 3, 1)).toEqual([10, 10, 240, 0]);
   });
 
-  it("flips rows and validates readback lengths", () => {
-    const pixels = new Uint8Array([
+  it("produces identical cleanup when stepped one operation at a time", () => {
+    const width = 8;
+    const height = 4;
+    const tileSize = 4;
+    const sourceAlbedo = new Uint8Array(width * height * 4);
+    const sourceNormalDepth = new Uint8Array(width * height * 4);
+    setPixel(sourceAlbedo, width, 1, 1, [180, 100, 40, 255]);
+    setPixel(sourceNormalDepth, width, 1, 1, [128, 255, 128, 90]);
+    setPixel(sourceAlbedo, width, 6, 2, [20, 90, 170, 255]);
+    setPixel(sourceNormalDepth, width, 6, 2, [255, 128, 128, 180]);
+
+    const synchronousAlbedo = sourceAlbedo.slice();
+    const synchronousNormalDepth = sourceNormalDepth.slice();
+    dilateTreeImpostorAtlasTiles({
+      albedo: synchronousAlbedo,
+      normalDepth: synchronousNormalDepth,
+      width,
+      height,
+      tileSize,
+    });
+
+    const steppedAlbedo = sourceAlbedo.slice();
+    const steppedNormalDepth = sourceNormalDepth.slice();
+    const job = createTreeImpostorAtlasDilationJob({
+      albedo: steppedAlbedo,
+      normalDepth: steppedNormalDepth,
+      width,
+      height,
+      tileSize,
+    });
+    while (!job.step(1)) {
+      // Exercise every resumable boundary.
+    }
+
+    expect(steppedAlbedo).toEqual(synchronousAlbedo);
+    expect(steppedNormalDepth).toEqual(synchronousNormalDepth);
+    expect(job.completed()).toBe(job.total());
+  });
+
+  it("flips rows incrementally and validates readback lengths", () => {
+    const source = new Uint8Array([
       1, 2, 3, 4,
       5, 6, 7, 8,
+      9, 10, 11, 12,
+      13, 14, 15, 16,
     ]);
-    flipTreeImpostorPixelRows(pixels, 1, 2);
-    expect(Array.from(pixels)).toEqual([
-      5, 6, 7, 8,
-      1, 2, 3, 4,
-    ]);
-    expect(copyTreeImpostorPixels(pixels, 8)).not.toBe(pixels);
-    expect(() => copyTreeImpostorPixels(pixels, 4)).toThrow(/expected 4/);
+    const synchronous = source.slice();
+    flipTreeImpostorPixelRows(synchronous, 1, 4);
+
+    const stepped = source.slice();
+    const job = createTreeImpostorRowFlipJob(stepped, 1, 4);
+    expect(job.step(1)).toBe(false);
+    expect(job.step(1)).toBe(true);
+    expect(stepped).toEqual(synchronous);
+    expect(copyTreeImpostorPixels(stepped, 16)).not.toBe(stepped);
+    expect(() => copyTreeImpostorPixels(stepped, 4)).toThrow(/expected 4/);
   });
 });
