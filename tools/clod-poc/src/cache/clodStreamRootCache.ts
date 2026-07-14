@@ -14,7 +14,7 @@ import {
   clodPageNodeToArtifact,
 } from "./clodPageNodeArtifact.js";
 
-const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v3-island-border-skip";
+const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v4-gpu-resident-pages";
 
 export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
@@ -68,7 +68,7 @@ export async function storeStreamRootNode(
   buildMs: number,
   stats: StreamRootCacheStats,
 ): Promise<void> {
-  if (!ctx?.effective) return;
+  if (!ctx?.effective || node.mesh.indices.length === 0) return;
   const parsed = parseStreamRootNodeId(node.id);
   stats.nodesBuilt++;
   stats.coldBuildMs += buildMs;

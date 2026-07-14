@@ -2,93 +2,140 @@
 
 ## Purpose
 
-This path adds the foundations required to stop treating every streamed CLOD page as a CPU-only
-`THREE.BufferGeometry` artifact. It preserves the existing CLOD invariants: voxel terrain remains
-authoritative, parent levels are derived from child meshes, page borders remain locked, and the CPU
-worker/render path remains the fallback until GPU parity gates pass.
+This path keeps near streamed CLOD geometry in the WebGPU device, derives parent geometry on GPU,
+and maps geometry to the CPU only when a requested page reaches the configured persistent readback
+level. The existing GPU readback mesher and CPU worker remain hard fallbacks.
 
 ## Current rollout state
 
 | Capability | State | Notes |
 | --- | --- | --- |
-| Persistent GPU page buffers | Implemented, opt-in | L0 by default; byte-budgeted LRU; current Three.js render path still uses CPU geometry |
-| Deterministic meshlet hierarchy | Implemented, opt-in | Fixed vertex/triangle limits plus bounds hierarchy; indirect draw integration is pending |
-| GPU weld kernel | Implemented, disabled | Quantized-position hash weld with normal/material conflict preservation |
-| GPU parent simplifier kernel | Implemented, disabled | Border-locked cluster simplifier; must pass CPU topology/border validation before activation |
-| Selective readback | Pending renderer integration | Existing renderer requires CPU arrays; do not claim readback elimination yet |
-| Readback-free L0 rendering | Pending custom WebGPU draw path | Three.js `BufferGeometry` is still the active renderer contract |
-| Hardware performance evidence | Automated capture path implemented | Evidence is accepted only from a named non-software adapter with equivalent work and zero fallbacks |
+| Persistent GPU page buffers | Implemented, opt-in | Byte-budgeted LRU with leased view ownership and first-view protection |
+| Readback-free L0 rendering | Implemented, opt-in | Three WebGPU consumes the resident vertex/index buffers directly through `BufferGeometry` backend bindings |
+| Selective readback | Implemented, opt-in | Default maps requested level 1+ roots; L0 remains GPU-only |
+| GPU welding | Implemented, opt-in path | Quantized-position hash weld preserves normal, biome, paint-slot, and paint-weight seams |
+| GPU parent simplification | Implemented, opt-in path | Border vertices remain locked; selective readback passes the existing final page validator |
+| GPU meshlets | Implemented, opt-in path | GPU-generated bounds and indexed indirect commands are used for resident page rendering |
+| GPU meshlet hierarchy | Implemented, resident metadata | GPU-generated parent bounds/hierarchy remain available for a later visibility-compaction pass |
+| Hardware performance evidence | Capture workflow implemented | No hardware result is considered committed evidence until the self-hosted GPU gate succeeds |
 
 ## Runtime flags
 
-The entire hierarchy path is disabled by default.
+The complete path is disabled unless explicitly enabled:
 
 ```text
 liveClodGpuHierarchy=1
+```
+
+Defaults while the path is enabled:
+
+```text
+liveClodGpuResidentRender=1
+liveClodGpuReadbackMinLevel=1
 liveClodGpuResidentMaxLevel=0
 liveClodGpuResidentBytes=268435456
+liveClodGpuWeld=1
+liveClodGpuSimplify=1
+liveClodGpuSimplifyClusterCells=1.75
+liveClodGpuHashProbe=96
 liveClodGpuMeshlets=1
 liveClodGpuMeshletVertices=64
 liveClodGpuMeshletTriangles=64
 ```
 
-Experimental kernels remain separately disabled:
+Set `liveClodGpuReadbackMinLevel=0` to force every requested page back through the validated CPU
+geometry contract while exercising the GPU weld/simplification pipeline. Set
+`liveClodGpuResidentRender=0` to disable direct resident rendering without disabling the existing GPU
+terrain mesher.
 
-```text
-liveClodGpuWeld=1
-liveClodGpuSimplify=1
-```
+## Ownership and fallback rules
 
-Those two flags only express operator intent in this milestone. The production builder must not use
-the kernels until dispatch/readback parity, border-chain validation, and visual acceptance are wired.
+1. Resident rendering is used only when the mesher and Three renderer share the same `GPUDevice`.
+2. Completed resident pages are adopted atomically per `buildPages` call.
+3. New pages remain protected until their first render lease or until the bounded protection window expires.
+4. Eviction retires a page immediately but destroys its buffers only after all active render leases release.
+5. GPU-only node metadata is never serialized into the ordinary CPU page cache.
+6. If resident initialization fails, creation falls back to the previous GPU readback mesher.
+7. If that path fails, the existing streaming controller can use the CPU worker fallback.
+
+## Rendering contract
+
+Resident pages use the same Three WebGPU scene path as ordinary terrain. This preserves:
+
+- terrain node materials and texture slots,
+- depth and shadow passes,
+- fog and post-processing,
+- CLOD visibility and crossfade transitions,
+- scene culling through resident page bounds.
+
+GPU-only roots use crossfade transitions rather than the CPU-generated parent-height morph because
+that morph requires CPU vertex positions.
 
 ## Counters
 
 ```text
 live_clod_gpu_hierarchy_enabled
+live_clod_gpu_hierarchy_failures_total
+live_clod_gpu_hierarchy_runtime_disabled
 live_clod_gpu_resident_pages
 live_clod_gpu_resident_bytes
 live_clod_gpu_resident_uploads_total
 live_clod_gpu_resident_upload_bytes_total
+live_clod_gpu_resident_adopted_total
 live_clod_gpu_resident_evictions_total
 live_clod_gpu_meshlets_resident
 live_clod_gpu_hierarchy_nodes_resident
+live_clod_stream_gpu_pool_count
+live_clod_stream_gpu_pool_active
+live_clod_stream_gpu_pool_max_active
+live_clod_stream_gpu_pool_overlap_events_total
 ```
 
 ## Verification
 
 ```powershell
 npm --prefix tools/clod-poc run typecheck
-npm --prefix tools/clod-poc test -- src/terrain/streaming/gpu_clod_hierarchy.test.ts src/terrain/streaming/gpu_clod_root_mesher_pool.test.ts
+
+npm --prefix tools/clod-poc test -- `
+  src/terrain/streaming/gpu_clod_hierarchy.test.ts `
+  src/terrain/streaming/gpu_clod_root_mesher_pool.test.ts `
+  src/rendering/webgpu_device_bridge.test.ts `
+  src/rendering/webgpu_external_buffer_geometry.test.ts `
+  src/terrain/streaming/root_height_morph.test.ts
+
 npm --prefix tools/clod-poc run acceptance:clod:fast
 ```
 
-Hardware evidence must run on a self-hosted runner labelled `gpu`:
+Suggested first browser run:
+
+```text
+?scene=infinite-islands&liveClodGpuHierarchy=1&liveClodRootBoundsGuard=1
+```
+
+For an A/B that keeps GPU parent construction but forces CPU render geometry:
+
+```text
+?scene=infinite-islands&liveClodGpuHierarchy=1&liveClodGpuResidentRender=0&liveClodGpuReadbackMinLevel=0
+```
+
+## Hardware evidence
+
+Run the self-hosted workflow on a runner labelled `gpu`:
 
 ```text
 Actions -> CLOD GPU Hardware Evidence -> Run workflow
 ```
 
-The workflow runs the deterministic single-pool/dual-pool benchmark, rejects software adapters,
-rejects fallbacks or unequal work, uploads the raw JSON and Markdown report, and can optionally
-commit the validated report.
+The workflow rejects software adapters, unequal requested/applied work, failed batches, and fallback
+pages. It uploads raw JSON plus a Markdown report and can optionally commit the validated report.
 
-## Activation gates
+## Remaining acceptance work
 
-1. The existing CPU path remains the visual authority.
-2. GPU weld output must be read back in tests and pass the existing welded-intermediate validator.
-3. GPU simplification output must pass border locks, no-internal-border checks, degenerate removal,
-   and accumulated-error parity against the CPU hierarchy.
-4. The custom WebGPU page renderer must reproduce terrain material, depth, fog, shadow, transition,
-   and debug behaviour before CPU arrays may be omitted for active L0 pages.
-5. Only pages promoted to persistent parent CLOD construction may be read back after the custom L0
-   renderer is accepted.
-6. Hardware evidence must show zero fallback pages and equivalent requested/applied work.
+The code path is implemented, but these results still require real hardware execution:
 
-## Why this is staged
-
-The compute mesher and the Three.js renderer currently use different GPU ownership domains. Keeping a
-page resident in compute buffers is safe, but rendering those buffers without a CPU copy requires a
-custom WebGPU draw integration. Skipping that boundary would either duplicate memory silently or
-remove the validated terrain material and transition path. The flags keep this milestone measurable
-without changing shipping visuals.
+- GPU weld/simplification visual parity across caves, cliffs, edits, and material seams,
+- no-crack validation while moving across L0/L1 transitions,
+- resident-buffer memory stability during long movement runs,
+- direct resident rendering with shadows, post-processing, and debug modes,
+- before/after frame, build, readback, and transfer measurements,
+- hardware evidence commit produced by the GPU workflow.

@@ -1,5 +1,7 @@
 export interface GpuClodHierarchyConfig {
   enabled: boolean;
+  renderResidentPages: boolean;
+  readbackMinLevel: number;
   residentMaxLevel: number;
   maxResidentBytes: number;
   meshlets: boolean;
@@ -7,21 +9,29 @@ export interface GpuClodHierarchyConfig {
   meshletMaxTriangles: number;
   gpuWeld: boolean;
   gpuSimplify: boolean;
+  simplifyClusterSizeCells: number;
+  maxHashProbe: number;
 }
 
 const DEFAULT_MAX_RESIDENT_BYTES = 256 * 1024 * 1024;
 const DEFAULT_MESHLET_MAX_VERTICES = 64;
 const DEFAULT_MESHLET_MAX_TRIANGLES = 64;
+const DEFAULT_SIMPLIFY_CLUSTER_SIZE_CELLS = 1.75;
+const DEFAULT_MAX_HASH_PROBE = 96;
 
 export const DEFAULT_GPU_CLOD_HIERARCHY_CONFIG: GpuClodHierarchyConfig = {
   enabled: false,
+  renderResidentPages: true,
+  readbackMinLevel: 1,
   residentMaxLevel: 0,
   maxResidentBytes: DEFAULT_MAX_RESIDENT_BYTES,
   meshlets: true,
   meshletMaxVertices: DEFAULT_MESHLET_MAX_VERTICES,
   meshletMaxTriangles: DEFAULT_MESHLET_MAX_TRIANGLES,
-  gpuWeld: false,
-  gpuSimplify: false,
+  gpuWeld: true,
+  gpuSimplify: true,
+  simplifyClusterSizeCells: DEFAULT_SIMPLIFY_CLUSTER_SIZE_CELLS,
+  maxHashProbe: DEFAULT_MAX_HASH_PROBE,
 };
 
 function booleanFlag(params: URLSearchParams, key: string, fallback: boolean): boolean {
@@ -42,12 +52,19 @@ function positiveInteger(params: URLSearchParams, key: string, fallback: number)
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
+function positiveNumber(params: URLSearchParams, key: string, fallback: number): number {
+  const parsed = Number(params.get(key));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export function parseGpuClodHierarchyConfig(
   params: URLSearchParams,
   defaults: GpuClodHierarchyConfig = DEFAULT_GPU_CLOD_HIERARCHY_CONFIG,
 ): GpuClodHierarchyConfig {
   return {
     enabled: booleanFlag(params, "liveClodGpuHierarchy", defaults.enabled),
+    renderResidentPages: booleanFlag(params, "liveClodGpuResidentRender", defaults.renderResidentPages),
+    readbackMinLevel: nonNegativeInteger(params, "liveClodGpuReadbackMinLevel", defaults.readbackMinLevel),
     residentMaxLevel: nonNegativeInteger(params, "liveClodGpuResidentMaxLevel", defaults.residentMaxLevel),
     maxResidentBytes: positiveInteger(params, "liveClodGpuResidentBytes", defaults.maxResidentBytes),
     meshlets: booleanFlag(params, "liveClodGpuMeshlets", defaults.meshlets),
@@ -55,6 +72,12 @@ export function parseGpuClodHierarchyConfig(
     meshletMaxTriangles: positiveInteger(params, "liveClodGpuMeshletTriangles", defaults.meshletMaxTriangles),
     gpuWeld: booleanFlag(params, "liveClodGpuWeld", defaults.gpuWeld),
     gpuSimplify: booleanFlag(params, "liveClodGpuSimplify", defaults.gpuSimplify),
+    simplifyClusterSizeCells: positiveNumber(
+      params,
+      "liveClodGpuSimplifyClusterCells",
+      defaults.simplifyClusterSizeCells,
+    ),
+    maxHashProbe: positiveInteger(params, "liveClodGpuHashProbe", defaults.maxHashProbe),
   };
 }
 

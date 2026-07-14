@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { WebGPURenderer } from "three/webgpu";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { TerrainColorAdjustments } from "../../material/material.js";
 import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
@@ -11,6 +12,13 @@ import {
   applyMaterialIfChanged,
   materialChurnDiagnostics,
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
+import { getCurrentWebGpuRenderer } from "../../rendering/webgpu_device_bridge.js";
+import { acquireGpuClodResidentPage } from "../streaming/gpu_clod_resident_registry.js";
+import {
+  createExternalGpuClodGeometry,
+  isExternalGpuClodGeometry,
+  releaseExternalGpuClodGeometry,
+} from "../../rendering/webgpu_external_buffer_geometry.js";
 
 export interface ClodRenderNodeCacheStats {
   enabled: boolean;
@@ -22,6 +30,8 @@ export interface ClodRenderNodeCacheStats {
   disposals: number;
   evictions: number;
   prefetches: number;
+  gpuResidentViews: number;
+  gpuResidentNormalFallbacks: number;
 }
 
 export interface ClodRenderNodeView {
@@ -43,6 +53,7 @@ export interface CreateRenderNodeInput {
 
 export interface ClodRenderNodeCacheDeps {
   scene: THREE.Scene;
+  webGpuRenderer?: WebGPURenderer | null;
   materialController: TerrainMaterialController;
   pageGeometryCache: PageGeometryCache;
   getMaterialColorForNode: (node: ClodPageNode) => number;
@@ -70,6 +81,8 @@ export class ClodRenderNodeCache {
   private statDisposals = 0;
   private statEvictions = 0;
   private statPrefetches = 0;
+  private statGpuResidentViews = 0;
+  private statGpuResidentNormalFallbacks = 0;
   private lastPruneFrame = -Infinity;
   private warnedAtInactiveNodes = false;
 
@@ -88,7 +101,6 @@ export class ClodRenderNodeCache {
       this.statReuses++;
       return existing;
     }
-
     const entry = this.createRenderNodeView(input.node, input.frameId);
     this.entries.set(input.node.id, entry);
     this.viewMap.set(input.node.id, entry.view);
@@ -130,16 +142,13 @@ export class ClodRenderNodeCache {
     if (!config.enabled) return;
     if (frameId - this.lastPruneFrame < config.pruneIntervalFrames) return;
     this.lastPruneFrame = frameId;
-
     const inactive = [...this.viewMap.values()]
       .filter((view) => this.canDisposeView(view, protectedNodeIds))
       .sort((a, b) => a.lastUsedFrame - b.lastUsedFrame);
-
     if (inactive.length >= config.warnAtInactiveNodes && !this.warnedAtInactiveNodes) {
       this.warnedAtInactiveNodes = true;
       console.warn(`[clod] render node cache has ${inactive.length} inactive nodes`);
     }
-
     while (inactive.length > config.maxInactiveNodes) {
       const view = inactive.shift();
       if (!view) return;
@@ -173,9 +182,7 @@ export class ClodRenderNodeCache {
 
   stats(): ClodRenderNodeCacheStats {
     let activeNodes = 0;
-    for (const view of this.viewMap.values()) {
-      if (this.isActiveView(view)) activeNodes++;
-    }
+    for (const view of this.viewMap.values()) if (this.isActiveView(view)) activeNodes++;
     return {
       enabled: this.deps.config.enabled,
       materializedNodes: this.viewMap.size,
@@ -186,6 +193,8 @@ export class ClodRenderNodeCache {
       disposals: this.statDisposals,
       evictions: this.statEvictions,
       prefetches: this.statPrefetches,
+      gpuResidentViews: this.statGpuResidentViews,
+      gpuResidentNormalFallbacks: this.statGpuResidentNormalFallbacks,
     };
   }
 
@@ -195,12 +204,13 @@ export class ClodRenderNodeCache {
     this.entries.delete(nodeId);
     this.viewMap.delete(nodeId);
     this.activeNodeIds.delete(nodeId);
-
     const { view } = entry;
     this.deps.scene.remove(view.mesh);
     entry.unsubscribeMaterial();
     const geometry = view.mesh.geometry as THREE.BufferGeometry;
-    if (this.deps.pageGeometryCache.owns(geometry)) {
+    if (isExternalGpuClodGeometry(geometry)) {
+      releaseExternalGpuClodGeometry(geometry);
+    } else if (this.deps.pageGeometryCache.owns(geometry)) {
       this.deps.pageGeometryCache.setGeometryActive(geometry, false);
       if (reason !== "dispose" && this.deps.config.evictGeometryWithRenderNode) {
         this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
@@ -208,15 +218,7 @@ export class ClodRenderNodeCache {
     } else {
       geometry.dispose();
     }
-
-    if (view.mat !== this.deps.materialController.sharedMaterial) {
-      // Recycle the handle when the controller pool accepts it (reconfiguring a pooled
-      // material on the next create is far cheaper than building a new node material);
-      // dispose only when the pool declines.
-      if (!this.deps.materialController.releaseTerrainMaterial(view.mat)) {
-        view.mat.material.dispose();
-      }
-    }
+    this.releaseMaterial(view.mat);
     this.statDisposals++;
     if (reason === "evict") this.statEvictions++;
   }
@@ -228,17 +230,47 @@ export class ClodRenderNodeCache {
     this.configureCurrentMaterialState(mat);
 
     const normalMode = this.deps.getNormalMode();
-    const recomputedNormals = normalMode === "recomputed" ? computeGeometryNormals(node.mesh) : null;
-    const geometry = this.deps.pageGeometryCache.getOrCreate({
-      node,
-      normalMode,
-      createGeometry: () => {
-        const created = toGeometry(node.mesh);
-        if (recomputedNormals) created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
-        return created;
-      },
-    });
-    this.deps.pageGeometryCache.setGeometryActive(geometry, true);
+    const webGpuRenderer = node.gpuResidentOnly
+      ? this.deps.webGpuRenderer ?? getCurrentWebGpuRenderer()
+      : null;
+    const residentLease = node.gpuResidentOnly && webGpuRenderer
+      ? acquireGpuClodResidentPage(node.id, normalizedRevision(node.revision))
+      : null;
+
+    if (node.gpuResidentOnly && (!webGpuRenderer || !residentLease)) {
+      this.releaseMaterial(mat);
+      throw new Error(
+        `[clod] GPU-only page ${node.id} revision ${normalizedRevision(node.revision)} has no resident render buffer`,
+      );
+    }
+
+    let recomputedNormals: Float32Array | null = null;
+    let geometry: THREE.BufferGeometry;
+    try {
+      if (residentLease && webGpuRenderer) {
+        geometry = createExternalGpuClodGeometry(webGpuRenderer, residentLease);
+        this.statGpuResidentViews++;
+        if (normalMode === "recomputed") this.statGpuResidentNormalFallbacks++;
+      } else {
+        recomputedNormals = normalMode === "recomputed" ? computeGeometryNormals(node.mesh) : null;
+        geometry = this.deps.pageGeometryCache.getOrCreate({
+          node,
+          normalMode,
+          createGeometry: () => {
+            const created = toGeometry(node.mesh);
+            if (recomputedNormals) {
+              created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
+            }
+            return created;
+          },
+        });
+        this.deps.pageGeometryCache.setGeometryActive(geometry, true);
+      }
+    } catch (error) {
+      residentLease?.release();
+      this.releaseMaterial(mat);
+      throw error;
+    }
 
     const mesh = new THREE.Mesh(geometry, mat.material);
     mesh.visible = false;
@@ -252,7 +284,6 @@ export class ClodRenderNodeCache {
       );
     });
     this.deps.scene.add(mesh);
-
     return {
       view: {
         node,
@@ -267,6 +298,11 @@ export class ClodRenderNodeCache {
       },
       unsubscribeMaterial,
     };
+  }
+
+  private releaseMaterial(mat: TerrainMaterialHandle): void {
+    if (mat === this.deps.materialController.sharedMaterial) return;
+    if (!this.deps.materialController.releaseTerrainMaterial(mat)) mat.material.dispose();
   }
 
   private configureCurrentMaterialState(mat: TerrainMaterialHandle): void {
@@ -297,4 +333,8 @@ export class ClodRenderNodeCache {
       || view.fade > 0.001
       || view.mesh.visible;
   }
+}
+
+function normalizedRevision(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : 0;
 }

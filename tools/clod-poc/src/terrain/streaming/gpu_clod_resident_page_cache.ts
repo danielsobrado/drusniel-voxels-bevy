@@ -1,34 +1,22 @@
 import type { ClodPageNode, PageMesh } from "../../types.js";
+import { biomeIdsFor, paintAttributesFor } from "../geometry/page_geometry.js";
 import type { GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
 import {
-  buildGpuClodMeshletHierarchy,
-  type GpuClodMeshletHierarchy,
-} from "./gpu_clod_meshlet_hierarchy.js";
+  registerGpuClodResidentPage,
+  retireGpuClodResidentPage,
+} from "./gpu_clod_resident_registry.js";
+import {
+  GPU_CLOD_VERTEX_FLOATS,
+  destroyGpuClodResidentPage,
+  type GpuClodResidentPage,
+} from "./gpu_clod_resident_types.js";
+
+export type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 
 const MIN_BUFFER_BYTES = 4;
-
-type UploadArray = Float32Array | Uint32Array;
-
-export interface GpuClodResidentPage {
-  id: string;
-  revision: number;
-  level: number;
-  vertexCount: number;
-  indexCount: number;
-  byteLength: number;
-  positions: GPUBuffer;
-  normals: GPUBuffer;
-  paintSlots: GPUBuffer;
-  materialWeights: GPUBuffer;
-  indices: GPUBuffer;
-  meshletHeaders?: GPUBuffer;
-  meshletVertexIndices?: GPUBuffer;
-  meshletTriangleIndices?: GPUBuffer;
-  hierarchyHeaders?: GPUBuffer;
-  hierarchyBounds?: GPUBuffer;
-  meshletCount: number;
-  hierarchyNodeCount: number;
-}
+const FIRST_VIEW_PROTECTION_TOUCHES = 128;
+const F32 = Float32Array.BYTES_PER_ELEMENT;
+const U32 = Uint32Array.BYTES_PER_ELEMENT;
 
 export interface GpuClodResidentPageCacheStats {
   enabled: number;
@@ -36,6 +24,7 @@ export interface GpuClodResidentPageCacheStats {
   residentBytes: number;
   uploadsTotal: number;
   uploadBytesTotal: number;
+  adoptedPagesTotal: number;
   evictionsTotal: number;
   meshletsResident: number;
   hierarchyNodesResident: number;
@@ -43,8 +32,9 @@ export interface GpuClodResidentPageCacheStats {
 
 interface ResidentEntry {
   page: GpuClodResidentPage;
-  sourceMesh: PageMesh;
+  sourceMesh: PageMesh | null;
   lastTouch: number;
+  protectedUntilClock: number;
 }
 
 export class GpuClodResidentPageCache {
@@ -52,6 +42,7 @@ export class GpuClodResidentPageCache {
   private residentBytes = 0;
   private uploadsTotal = 0;
   private uploadBytesTotal = 0;
+  private adoptedPagesTotal = 0;
   private evictionsTotal = 0;
   private clock = 0;
   private disposed = false;
@@ -66,10 +57,58 @@ export class GpuClodResidentPageCache {
   ingest(nodes: readonly ClodPageNode[]): void {
     if (!this.config.enabled || this.disposed) return;
     for (const node of nodes) {
-      if (node.level > this.config.residentMaxLevel) continue;
-      this.upsert(node);
+      if (node.level > this.config.residentMaxLevel || node.mesh.indices.length === 0) continue;
+      this.upsertCpuNode(node);
     }
-    this.evictToBudget();
+    this.evictToBudget(new Set());
+    this.publishCounters();
+  }
+
+  adopt(page: GpuClodResidentPage): void {
+    this.adoptMany([page]);
+  }
+
+  adoptMany(pages: readonly GpuClodResidentPage[]): void {
+    if (pages.length === 0) return;
+    if (!this.config.enabled || this.disposed) {
+      for (const page of pages) destroyGpuClodResidentPage(page);
+      return;
+    }
+
+    const incomingIds = new Set<string>();
+    let incomingBytes = 0;
+    for (const page of pages) {
+      if (page.level > this.config.residentMaxLevel) {
+        throw new Error(
+          `GPU CLOD resident page ${page.id} level ${page.level} exceeds configured max ${this.config.residentMaxLevel}`,
+        );
+      }
+      if (incomingIds.has(page.id)) {
+        throw new Error(`duplicate GPU CLOD resident page ${page.id} in one batch`);
+      }
+      incomingIds.add(page.id);
+      incomingBytes += page.byteLength;
+    }
+
+    const budget = this.budgetBytes();
+    if (incomingBytes > budget) {
+      throw new Error(`GPU CLOD resident batch needs ${incomingBytes} bytes, budget is ${budget}`);
+    }
+
+    let retainedProtectedBytes = 0;
+    for (const [nodeId, entry] of this.entries) {
+      if (incomingIds.has(nodeId)) continue;
+      if (entry.protectedUntilClock > this.clock) retainedProtectedBytes += entry.page.byteLength;
+    }
+    if (incomingBytes + retainedProtectedBytes > budget) {
+      throw new Error(
+        `GPU CLOD resident batch plus pending first-view pages needs ${incomingBytes + retainedProtectedBytes} bytes, budget is ${budget}`,
+      );
+    }
+
+    for (const page of pages) this.replace(page, null);
+    this.adoptedPagesTotal += pages.length;
+    this.evictToBudget(incomingIds);
     this.publishCounters();
   }
 
@@ -90,7 +129,7 @@ export class GpuClodResidentPageCache {
     const entry = this.entries.get(nodeId);
     if (!entry) return;
     this.entries.delete(nodeId);
-    this.destroyPage(entry.page);
+    retireGpuClodResidentPage(nodeId, entry.page);
     this.residentBytes -= entry.page.byteLength;
     this.publishCounters();
   }
@@ -99,8 +138,8 @@ export class GpuClodResidentPageCache {
     let meshletsResident = 0;
     let hierarchyNodesResident = 0;
     for (const entry of this.entries.values()) {
-      meshletsResident += entry.page.meshletCount;
-      hierarchyNodesResident += entry.page.hierarchyNodeCount;
+      meshletsResident += entry.page.meshlets?.meshletCount ?? 0;
+      hierarchyNodesResident += entry.page.meshlets?.hierarchyNodeCount ?? 0;
     }
     return {
       enabled: this.config.enabled ? 1 : 0,
@@ -108,6 +147,7 @@ export class GpuClodResidentPageCache {
       residentBytes: Math.max(0, this.residentBytes),
       uploadsTotal: this.uploadsTotal,
       uploadBytesTotal: this.uploadBytesTotal,
+      adoptedPagesTotal: this.adoptedPagesTotal,
       evictionsTotal: this.evictionsTotal,
       meshletsResident,
       hierarchyNodesResident,
@@ -117,96 +157,129 @@ export class GpuClodResidentPageCache {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const entry of this.entries.values()) this.destroyPage(entry.page);
+    for (const [nodeId, entry] of this.entries) retireGpuClodResidentPage(nodeId, entry.page);
     this.entries.clear();
     this.residentBytes = 0;
     this.publishCounters();
   }
 
-  private upsert(node: ClodPageNode): void {
+  private upsertCpuNode(node: ClodPageNode): void {
     const revision = normalizedRevision(node.revision);
     const existing = this.entries.get(node.id);
     if (existing?.page.revision === revision && existing.sourceMesh === node.mesh) {
       existing.lastTouch = ++this.clock;
       return;
     }
-    if (existing) {
-      this.entries.delete(node.id);
-      this.destroyPage(existing.page);
-      this.residentBytes -= existing.page.byteLength;
-    }
-
-    const hierarchy = this.config.meshlets
-      ? buildGpuClodMeshletHierarchy(node.mesh, {
-        maxVertices: this.config.meshletMaxVertices,
-        maxTriangles: this.config.meshletMaxTriangles,
-      })
-      : null;
-    const page = this.uploadPage(node, revision, hierarchy);
-    this.entries.set(node.id, { page, sourceMesh: node.mesh, lastTouch: ++this.clock });
-    this.residentBytes += page.byteLength;
+    const page = this.uploadCpuNode(node, revision);
+    this.replace(page, node.mesh);
     this.uploadsTotal++;
     this.uploadBytesTotal += page.byteLength;
   }
 
-  private uploadPage(
-    node: ClodPageNode,
-    revision: number,
-    hierarchy: GpuClodMeshletHierarchy | null,
-  ): GpuClodResidentPage {
-    const mesh = node.mesh;
-    const storageCopy = storageCopyUsage();
-    const positions = this.upload("positions", node.id, mesh.positions, storageCopy | GPUBufferUsage.VERTEX);
-    const normals = this.upload("normals", node.id, mesh.normals, storageCopy | GPUBufferUsage.VERTEX);
-    const paintSlots = this.upload("paint slots", node.id, mesh.paintSlots, storageCopy | GPUBufferUsage.VERTEX);
-    const materialWeights = this.upload("material weights", node.id, mesh.materialWeights, storageCopy | GPUBufferUsage.VERTEX);
-    const indices = this.upload("indices", node.id, mesh.indices, storageCopy | GPUBufferUsage.INDEX);
-    const optional = hierarchy ? {
-      meshletHeaders: this.upload("meshlet headers", node.id, hierarchy.meshletHeaders, storageCopy),
-      meshletVertexIndices: this.upload("meshlet vertices", node.id, hierarchy.vertexIndices, storageCopy),
-      meshletTriangleIndices: this.upload("meshlet triangles", node.id, hierarchy.triangleIndices, storageCopy),
-      hierarchyHeaders: this.upload("hierarchy headers", node.id, hierarchy.hierarchyHeaders, storageCopy),
-      hierarchyBounds: this.upload("hierarchy bounds", node.id, hierarchy.bounds, storageCopy),
-    } : {};
+  private replace(page: GpuClodResidentPage, sourceMesh: PageMesh | null): void {
+    const existing = this.entries.get(page.id);
+    if (existing) {
+      this.entries.delete(page.id);
+      retireGpuClodResidentPage(page.id, existing.page);
+      this.residentBytes -= existing.page.byteLength;
+    }
+
+    const touch = ++this.clock;
+    const entry: ResidentEntry = {
+      page,
+      sourceMesh,
+      lastTouch: touch,
+      protectedUntilClock: sourceMesh === null ? touch + FIRST_VIEW_PROTECTION_TOUCHES : 0,
+    };
+    this.entries.set(page.id, entry);
+    this.residentBytes += page.byteLength;
+    registerGpuClodResidentPage(
+      page,
+      sourceMesh === null
+        ? () => this.releaseFirstViewProtection(page)
+        : undefined,
+    );
+  }
+
+  private releaseFirstViewProtection(page: GpuClodResidentPage): void {
+    const entry = this.entries.get(page.id);
+    if (!entry || entry.page !== page) return;
+    entry.protectedUntilClock = 0;
+    entry.lastTouch = ++this.clock;
+    this.evictToBudget(new Set([page.id]));
+    this.publishCounters();
+  }
+
+  private uploadCpuNode(node: ClodPageNode, revision: number): GpuClodResidentPage {
+    const vertexCount = node.mesh.positions.length / 3;
+    const packed = new Float32Array(vertexCount * GPU_CLOD_VERTEX_FLOATS);
+    const paint = paintAttributesFor(node.mesh);
+    const biomeIds = biomeIdsFor(node.mesh);
+    for (let vertex = 0; vertex < vertexCount; vertex++) {
+      const source3 = vertex * 3;
+      const source4 = vertex * 4;
+      const target = vertex * GPU_CLOD_VERTEX_FLOATS;
+      packed[target] = node.mesh.positions[source3] ?? 0;
+      packed[target + 1] = node.mesh.positions[source3 + 1] ?? 0;
+      packed[target + 2] = node.mesh.positions[source3 + 2] ?? 0;
+      packed[target + 3] = 0;
+      packed[target + 4] = node.mesh.normals[source3] ?? 0;
+      packed[target + 5] = node.mesh.normals[source3 + 1] ?? 1;
+      packed[target + 6] = node.mesh.normals[source3 + 2] ?? 0;
+      packed[target + 7] = biomeIds[vertex] ?? 0;
+      packed[target + 8] = paint.slots[source4] ?? -1;
+      packed[target + 9] = paint.slots[source4 + 1] ?? -1;
+      packed[target + 10] = paint.slots[source4 + 2] ?? -1;
+      packed[target + 11] = paint.slots[source4 + 3] ?? -1;
+      packed[target + 12] = paint.weights[source4] ?? 0;
+      packed[target + 13] = paint.weights[source4 + 1] ?? 0;
+      packed[target + 14] = paint.weights[source4 + 2] ?? 0;
+      packed[target + 15] = paint.weights[source4 + 3] ?? 0;
+    }
+    const vertexBuffer = this.upload(
+      "vertices",
+      node.id,
+      packed,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.VERTEX,
+    );
+    const indexBuffer = this.upload(
+      "indices",
+      node.id,
+      node.mesh.indices,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.INDEX,
+    );
     return {
       id: node.id,
       revision,
       level: node.level,
-      vertexCount: mesh.positions.length / 3,
-      indexCount: mesh.indices.length,
-      byteLength: meshBytes(mesh) + hierarchyBytes(hierarchy),
-      positions,
-      normals,
-      paintSlots,
-      materialWeights,
-      indices,
-      ...optional,
-      meshletCount: hierarchy?.meshletCount ?? 0,
-      hierarchyNodeCount: hierarchy?.hierarchyNodeCount ?? 0,
+      vertexBuffer,
+      indexBuffer,
+      vertexCount,
+      indexCount: node.mesh.indices.length,
+      byteLength: packed.byteLength + node.mesh.indices.byteLength,
+      bounds: node.bounds,
+      errorWorld: node.errorWorld,
+      lowBenefit: node.lowBenefit,
     };
   }
 
-  private upload(label: string, nodeId: string, data: UploadArray, usage: number): GPUBuffer {
+  private upload(label: string, nodeId: string, data: Float32Array | Uint32Array, usage: number): GPUBuffer {
     const size = Math.max(MIN_BUFFER_BYTES, align4(data.byteLength));
     const buffer = this.device.createBuffer({ label: `gpu clod resident ${nodeId} ${label}`, size, usage });
     if (data.byteLength > 0) {
-      this.device.queue.writeBuffer(
-        buffer,
-        0,
-        data.buffer as ArrayBuffer,
-        data.byteOffset,
-        data.byteLength,
-      );
+      this.device.queue.writeBuffer(buffer, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
     }
     return buffer;
   }
 
-  private evictToBudget(): void {
-    const budget = Math.max(MIN_BUFFER_BYTES, this.config.maxResidentBytes);
+  private evictToBudget(protectedIds: ReadonlySet<string>): void {
+    const budget = this.budgetBytes();
     while (this.residentBytes > budget && this.entries.size > 0) {
       let oldestId: string | null = null;
       let oldestTouch = Infinity;
       for (const [id, entry] of this.entries) {
+        if (protectedIds.has(id)) continue;
+        if (entry.protectedUntilClock > this.clock) continue;
         if (entry.lastTouch >= oldestTouch) continue;
         oldestId = id;
         oldestTouch = entry.lastTouch;
@@ -214,23 +287,14 @@ export class GpuClodResidentPageCache {
       if (oldestId === null) return;
       const entry = this.entries.get(oldestId)!;
       this.entries.delete(oldestId);
-      this.destroyPage(entry.page);
+      retireGpuClodResidentPage(oldestId, entry.page);
       this.residentBytes -= entry.page.byteLength;
       this.evictionsTotal++;
     }
   }
 
-  private destroyPage(page: GpuClodResidentPage): void {
-    page.positions.destroy();
-    page.normals.destroy();
-    page.paintSlots.destroy();
-    page.materialWeights.destroy();
-    page.indices.destroy();
-    page.meshletHeaders?.destroy();
-    page.meshletVertexIndices?.destroy();
-    page.meshletTriangleIndices?.destroy();
-    page.hierarchyHeaders?.destroy();
-    page.hierarchyBounds?.destroy();
+  private budgetBytes(): number {
+    return Math.max(MIN_BUFFER_BYTES, this.config.maxResidentBytes);
   }
 
   private publishCounters(): void {
@@ -244,31 +308,11 @@ export class GpuClodResidentPageCache {
     counters["live_clod_gpu_resident_bytes"] = stats.residentBytes;
     counters["live_clod_gpu_resident_uploads_total"] = stats.uploadsTotal;
     counters["live_clod_gpu_resident_upload_bytes_total"] = stats.uploadBytesTotal;
+    counters["live_clod_gpu_resident_adopted_total"] = stats.adoptedPagesTotal;
     counters["live_clod_gpu_resident_evictions_total"] = stats.evictionsTotal;
     counters["live_clod_gpu_meshlets_resident"] = stats.meshletsResident;
     counters["live_clod_gpu_hierarchy_nodes_resident"] = stats.hierarchyNodesResident;
   }
-}
-
-function storageCopyUsage(): number {
-  return GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
-}
-
-function meshBytes(mesh: PageMesh): number {
-  return mesh.positions.byteLength
-    + mesh.normals.byteLength
-    + mesh.paintSlots.byteLength
-    + mesh.materialWeights.byteLength
-    + mesh.indices.byteLength;
-}
-
-function hierarchyBytes(hierarchy: GpuClodMeshletHierarchy | null): number {
-  if (!hierarchy) return 0;
-  return hierarchy.meshletHeaders.byteLength
-    + hierarchy.vertexIndices.byteLength
-    + hierarchy.triangleIndices.byteLength
-    + hierarchy.hierarchyHeaders.byteLength
-    + hierarchy.bounds.byteLength;
 }
 
 function normalizedRevision(value: number | undefined): number {
@@ -278,3 +322,6 @@ function normalizedRevision(value: number | undefined): number {
 function align4(value: number): number {
   return (value + 3) & ~3;
 }
+
+export const GPU_CLOD_CPU_UPLOAD_BYTES_PER_VERTEX = GPU_CLOD_VERTEX_FLOATS * F32;
+export const GPU_CLOD_INDEX_BYTES = U32;
