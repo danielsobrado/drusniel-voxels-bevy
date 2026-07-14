@@ -30,8 +30,13 @@ export function applyImportedStateSideEffects(
   } = input.runtime;
   const { updateInfo } = infoPanel;
 
+  const viewList = [...views.values()];
+  const residentGeometryPresent = viewList.some((view) =>
+    isExternalGpuClodGeometry(view.mesh.geometry as THREE.BufferGeometry),
+  );
+  const safeWireframe = state.wireframe && !residentGeometryPresent;
   materialController.forEachMaterial((material) => {
-    material.setWireframe(state.wireframe);
+    material.setWireframe(safeWireframe);
     material.setDebug({
       normalColor: state.normalColor,
       normalDivergence: state.normalDivergence,
@@ -39,9 +44,8 @@ export function applyImportedStateSideEffects(
     });
     material.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
   });
-  for (const view of views.values()) {
+  for (const view of viewList) {
     const resident = isExternalGpuClodGeometry(view.mesh.geometry as THREE.BufferGeometry);
-    if (resident) view.mat.setWireframe(false);
     view.mat.setBaseColor(state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8);
     if (state.recomputedNormals && !resident) {
       setViewNormalMode(view, "recomputed");
