@@ -21,7 +21,10 @@ import {
   type RootBatchPageConfig,
 } from "./gpu_clod_root_batch_buffers.js";
 import { continentTileMeshingEnabled } from "./streamed_root_gpu_config.js";
-import type { GpuClodHierarchyConfig } from "./gpu_clod_hierarchy_config.js";
+import {
+  shouldKeepGpuClodPageResident,
+  type GpuClodHierarchyConfig,
+} from "./gpu_clod_hierarchy_config.js";
 import {
   GpuClodPagePipeline,
   type GpuClodChunkSource,
@@ -310,12 +313,16 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
     }
 
     let current = new Map<string, GpuClodResidentPage>();
-    for (const requestBatch of chunked(lod0Requests, this.maxLod0PagesPerDispatch())) {
-      const built = await this.buildLod0Batch(requestBatch);
-      for (const [key, page] of built) current.set(key, page);
-    }
-
     try {
+      for (const requestBatch of chunked(lod0Requests, this.maxLod0PagesPerDispatch())) {
+        const built = await this.buildLod0Batch(requestBatch);
+        for (const [key, page] of built) {
+          const previous = current.get(key);
+          if (previous) this.pagePipeline.destroyPage(previous);
+          current.set(key, page);
+        }
+      }
+
       for (let level = 1; level <= rootLevel; level++) {
         const next = new Map<string, GpuClodResidentPage>();
         try {
@@ -357,9 +364,8 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
         throw new Error(`GPU resident CLOD request L${rootLevel}:${rootKey} produced no root`);
       }
       current.delete(rootKey);
-      const shouldResidencyOwn = this.hierarchyConfig.renderResidentPages
-        && rootLevel <= this.hierarchyConfig.residentMaxLevel;
-      const shouldReadback = rootLevel >= this.hierarchyConfig.readbackMinLevel || !shouldResidencyOwn;
+      const shouldResidencyOwn = shouldKeepGpuClodPageResident(this.hierarchyConfig, rootLevel);
+      const shouldReadback = !shouldResidencyOwn;
       let finalPage: GpuClodResidentPage | null = null;
       try {
         finalPage = await this.pagePipeline.attachMeshlets(root);
@@ -386,7 +392,7 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
           bounds: nodeBounds,
           errorWorld: root.errorWorld,
           lowBenefit: root.lowBenefit,
-          gpuResidentOnly: shouldResidencyOwn && !shouldReadback,
+          gpuResidentOnly: shouldResidencyOwn,
         };
 
         if (shouldResidencyOwn) {
@@ -577,12 +583,14 @@ export async function createResidentGpuClodRootMesher(
 ): Promise<GpuClodRootMesher | null> {
   const device = options.sharedDevice;
   if (!device) return null;
+  let heightAtlas: HeightAtlasBindings | null = null;
+  let pool: ResidentChunkPool | null = null;
   try {
     const module = device.createShaderModule({
       label: "gpu resident CLOD terrain mesher",
       code: terrainFieldShaderWithTileAtlas(),
     });
-    const heightAtlas = createHeightAtlasBindings(device);
+    heightAtlas = createHeightAtlasBindings(device);
     const storage = (binding: number): GPUBindGroupLayoutEntry => ({
       binding,
       visibility: GPUShaderStage.COMPUTE,
@@ -619,7 +627,7 @@ export async function createResidentGpuClodRootMesher(
       }),
     ]);
     const capacity = resolvePoolCapacity(device, options.cfg, options.config);
-    const pool = new ResidentChunkPool(
+    pool = new ResidentChunkPool(
       device,
       layout,
       options.cfg,
@@ -649,6 +657,8 @@ export async function createResidentGpuClodRootMesher(
     publishGpuClodRootMesherCounters(mesher.stats());
     return mesher;
   } catch (error) {
+    if (pool) pool.destroy();
+    else heightAtlas?.dispose?.();
     console.warn(
       "[clod-stream-gpu] resident hierarchy mesher unavailable; using validated GPU/CPU fallback",
       error,
