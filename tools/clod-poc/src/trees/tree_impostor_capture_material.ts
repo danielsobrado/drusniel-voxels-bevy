@@ -59,7 +59,7 @@ export function createTreeImpostorBakeMaterial(
     if (foliageAtlas) {
       const foliage = createFoliageCaptureNodes(foliageAtlas);
       albedo = mix(albedo, albedo.mul(foliage.cardShade), foliage.cardTag);
-      material.maskNode = foliage.keep;
+      (material as unknown as { maskNode: TslNode }).maskNode = foliage.keep;
     }
     material.colorNode = sqrt(clamp(albedo, vec3(0), vec3(1)));
     material.alphaTest = 0;
@@ -119,7 +119,9 @@ export function createTreeImpostorNormalDepthBakeMaterial(
     const facingNormal: TslNode = (frontFacing as TslNode).select(localNormal, localNormal.negate());
     material.colorNode = facingNormal.mul(0.5).add(0.5);
     material.opacityNode = linearDepth;
-    if (foliageAtlas) material.maskNode = createFoliageCaptureNodes(foliageAtlas).keep;
+    if (foliageAtlas) {
+      (material as unknown as { maskNode: TslNode }).maskNode = createFoliageCaptureNodes(foliageAtlas).keep;
+    }
     material.side = THREE.DoubleSide;
     material.transparent = false;
     material.depthWrite = true;
