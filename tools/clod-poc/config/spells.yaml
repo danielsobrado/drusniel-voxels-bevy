@@ -77,3 +77,30 @@ spells:
       glow_intensity: 0.7
       glow_distance: 5.0
       glow_decay: 2.0
+  lightning:
+    id: lightning
+    label: Lightning
+    cast_duration_ms: 1250
+    audio:
+      volume: 0.36
+    vfx:
+      hand_forward_m: 0.58
+      hand_right_m: 0.34
+      hand_up_m: -0.32
+      max_range: 28.0
+      segment_count: 52
+      branch_count: 12
+      branch_length_min: 0.7
+      branch_length_max: 2.4
+      jitter: 0.42
+      core_width: 0.035
+      glow_width: 0.18
+      refresh_hz: 28.0
+      impact_radius: 0.8
+      spark_count: 36
+      core_color: [1.0, 1.0, 1.0]
+      glow_color: [0.18, 0.62, 1.0]
+      source_light_intensity: 4.5
+      impact_light_intensity: 7.5
+      glow_distance: 12.0
+      glow_decay: 2.0
