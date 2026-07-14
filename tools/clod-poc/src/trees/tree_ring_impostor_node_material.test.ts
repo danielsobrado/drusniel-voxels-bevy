@@ -53,6 +53,7 @@ describe("GPU ring baked impostor node material", () => {
       sunColor: new THREE.Color(1, 0.9, 0.8),
       skyLight: new THREE.Color(0.4, 0.5, 0.6),
       groundLight: new THREE.Color(0.2, 0.18, 0.16),
+      ambientFloor: 0.02,
     });
 
     expect(handle.regularMaterial).toBe(material);
@@ -72,11 +73,12 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("localNormal.x.mul(yawCos)");
   });
 
-  it("samples a deterministic variant row for GPU ring impostors", () => {
+  it("samples the shared deterministic structural variant page", () => {
     const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("treeRingImpostorVariant(worldCell, uSeed, atlas)");
-    expect(source).toContain("TREE_RING_VARIANT_SALT");
+    expect(source).toContain("treeRingImpostorVariant(aWorldXZ, uSeed, atlas)");
+    expect(source).toContain("TREE_VARIANT_HASH_SALT");
+    expect(source).toContain("TREE_STRUCTURAL_VARIANTS");
     expect(source).toContain("atlas.atlasHeightPx");
     expect(source).toContain("safeVariant.mul(pageSize)");
   });
@@ -88,7 +90,17 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("billboardNormal");
     expect(source).toContain("TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT");
     expect(source).toContain("treeRingImpostorSurfaceNormal");
-    expect(source).toContain("relightTreeRingImpostor(albedo, impostor.normal, billboardNormal");
+    expect(source).toContain("relightTreeRingImpostor(");
+  });
+
+  it("uses the shared ambient floor and preserves HDR highlights", () => {
+    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("uAmbientFloor");
+    expect(source).toContain("TREE_RING_IMPOSTOR_HDR_MAX");
+    expect(source).toContain("hemi.add(direct).add(uAmbientFloor)");
+    expect(source).not.toContain("albedo.mul(0.25)");
+    expect(source).not.toContain("clamp(lit, 0.0, 1.0)");
   });
 
   it("uses unlit WebGPU node materials so the manual relight is not lit twice", () => {
@@ -139,8 +151,8 @@ function atlas(): TreeImpostorAtlas {
     resolutionPx: 128,
     atlasSizePx: 1024,
     atlasWidthPx: 1024,
-    atlasHeightPx: 2048,
-    variantCount: 2,
+    atlasHeightPx: 4096,
+    variantCount: 4,
     frames: octFrames(8, 128, 2),
     radius: 1,
     centerY: 0,
