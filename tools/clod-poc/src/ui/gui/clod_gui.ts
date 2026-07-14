@@ -3,6 +3,9 @@ import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { emitAudio } from "../../audio/index.js";
 import type { GuiController } from "./gui_controller.js";
+import {
+  isExternalGpuClodGeometry,
+} from "../../rendering/webgpu_external_buffer_geometry.js";
 import type {
   RenderResolutionCamera,
   RenderResolutionRenderer,
@@ -173,7 +176,10 @@ export function createClodGui(
     emitAudio("clod.locked-border.toggle");
   });
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
-    for (const v of deps.views) v.mat.setWireframe(on);
+    for (const v of deps.views) {
+      const resident = isExternalGpuClodGeometry(v.mesh.geometry as THREE.BufferGeometry);
+      v.mat.setWireframe(on && !resident);
+    }
     emitAudio("clod.wireframe.toggle");
   });
   gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
