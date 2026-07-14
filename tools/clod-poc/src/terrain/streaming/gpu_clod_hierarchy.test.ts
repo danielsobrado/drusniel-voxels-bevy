@@ -13,32 +13,42 @@ import {
 } from "./gpu_clod_weld_compute.js";
 import { GPU_CLOD_SIMPLIFY_WGSL } from "./gpu_clod_simplify_compute.js";
 
-describe("GPU CLOD hierarchy config", () => {
-  it("stays opt-in until the custom render path is accepted", () => {
+ describe("GPU CLOD hierarchy config", () => {
+  it("keeps the complete path behind one explicit runtime flag", () => {
     const config = parseGpuClodHierarchyConfig(new URLSearchParams("scene=infinite-islands"));
     expect(config.enabled).toBe(false);
-    expect(config.gpuWeld).toBe(false);
-    expect(config.gpuSimplify).toBe(false);
+    expect(config.renderResidentPages).toBe(true);
+    expect(config.readbackMinLevel).toBe(1);
+    expect(config.gpuWeld).toBe(true);
+    expect(config.gpuSimplify).toBe(true);
   });
 
   it("parses bounded hierarchy options", () => {
     const config = parseGpuClodHierarchyConfig(new URLSearchParams([
       ["liveClodGpuHierarchy", "1"],
+      ["liveClodGpuResidentRender", "0"],
+      ["liveClodGpuReadbackMinLevel", "2"],
       ["liveClodGpuResidentMaxLevel", "2"],
       ["liveClodGpuResidentBytes", "1048576"],
       ["liveClodGpuMeshletVertices", "48"],
       ["liveClodGpuMeshletTriangles", "32"],
       ["liveClodGpuWeld", "1"],
       ["liveClodGpuSimplify", "1"],
+      ["liveClodGpuSimplifyClusterCells", "2.5"],
+      ["liveClodGpuHashProbe", "128"],
     ]));
     expect(config).toMatchObject({
       enabled: true,
+      renderResidentPages: false,
+      readbackMinLevel: 2,
       residentMaxLevel: 2,
       maxResidentBytes: 1_048_576,
       meshletMaxVertices: 48,
       meshletMaxTriangles: 32,
       gpuWeld: true,
       gpuSimplify: true,
+      simplifyClusterSizeCells: 2.5,
+      maxHashProbe: 128,
     });
   });
 
@@ -101,7 +111,7 @@ describe("GPU CLOD resident page cache", () => {
       expect(cache.stats().uploadsTotal).toBe(1);
       cache.ingest([pageNode(second, 1)]);
       expect(cache.stats().uploadsTotal).toBe(2);
-      expect(destroyed).toBe(5);
+      expect(destroyed).toBe(2);
     } finally {
       cache.dispose();
       if (previousUsage) Object.defineProperty(globalThis, "GPUBufferUsage", previousUsage);
