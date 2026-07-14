@@ -29,11 +29,15 @@ describe("far-summary layout-v2 sources", () => {
     const config = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
     config.treeDistribution.forestThreshold = 0;
     config.treeDistribution.densityScale = 2;
+    const waterCellSizeHints: Array<number | undefined> = [];
     const source = createFarSummaryCanopySource({
       getConfig: () => config,
       sampleHeight: () => 20,
       sampleMaterial: () => 1,
-      sampleWater: () => ({ coverage: 0, waterLevel: 0, bodyKind: 0, shoreDistance: 0, flowX: 0, flowZ: 0 }),
+      sampleWater: (...args: number[]) => {
+        waterCellSizeHints.push(args[2]);
+        return { coverage: 0, waterLevel: 0, bodyKind: 0, shoreDistance: 0, flowX: 0, flowZ: 0 };
+      },
     });
 
     const first = source(0, 0, 32);
@@ -42,5 +46,7 @@ describe("far-summary layout-v2 sources", () => {
     expect(first.canopyHeightAvg).toBeGreaterThanOrEqual(20);
     expect(first.coverage).toBeGreaterThanOrEqual(0);
     expect(first.speciesPine + first.speciesBroadleaf + first.speciesDeadwood).toBeLessThanOrEqual(1.000001);
+    expect(waterCellSizeHints).not.toHaveLength(0);
+    expect(waterCellSizeHints.every((hint) => hint === 32)).toBe(true);
   });
 });

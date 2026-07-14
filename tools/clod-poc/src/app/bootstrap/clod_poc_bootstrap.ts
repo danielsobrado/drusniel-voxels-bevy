@@ -305,7 +305,7 @@ export async function bootstrapClodPoc() {
             sampleHeight: farSummaryTerrainSampler.sampleHeight,
             sampleMaterial: farSummaryTerrainSampler.sampleMaterial,
             sampleWater: sampleWater
-              ? (x, z) => sampleWater(x, z, 1)
+              ? (x, z, cellSizeHint) => sampleWater(x, z, cellSizeHint)
               : (x, z) => ({
                 coverage: farSummaryTerrainSampler.sampleHeight(x, z) < seaLevel ? 1 : 0,
                 waterLevel: seaLevel,
