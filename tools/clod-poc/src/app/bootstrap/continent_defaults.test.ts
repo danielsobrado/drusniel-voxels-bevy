@@ -13,18 +13,19 @@ describe("continent defaults", () => {
       farSummaryLayout: "2",
       farClipmap: "1",
       farClipmapMode: "replace",
+      farClipmapInnerRadius: "768",
     });
   });
 
   it("preserves every explicit override", () => {
     const params = new URLSearchParams(
-      "scene=continent&continentHydrology=0&heightTiles=0&liveClodRootGpuMesher=0&farSummaryLayout=1&farClipmap=0&farClipmapMode=overlay",
+      "scene=continent&continentHydrology=0&heightTiles=0&liveClodRootGpuMesher=0&farSummaryLayout=1&farClipmap=0&farClipmapMode=overlay&farClipmapInnerRadius=512",
     );
 
     applyContinentDefaults(params);
 
     expect(params.toString()).toBe(
-      "scene=continent&continentHydrology=0&heightTiles=0&liveClodRootGpuMesher=0&farSummaryLayout=1&farClipmap=0&farClipmapMode=overlay",
+      "scene=continent&continentHydrology=0&heightTiles=0&liveClodRootGpuMesher=0&farSummaryLayout=1&farClipmap=0&farClipmapMode=overlay&farClipmapInnerRadius=512",
     );
   });
 

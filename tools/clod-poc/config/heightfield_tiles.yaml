@@ -1,6 +1,6 @@
 enabled: false
-radius_m: 768
-max_resident_tiles: 64
+radius_m: 1024
+max_resident_tiles: 96
 max_inflight_batches: 1
 max_tiles_per_batch: 2
 evict_distance_multiplier: 1.5

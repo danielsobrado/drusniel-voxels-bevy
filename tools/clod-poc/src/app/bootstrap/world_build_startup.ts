@@ -667,6 +667,10 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       {
         infiniteWorldSamples: true,
         worldSampler: (x, z) => carvedGraphSampler.sample(x, z),
+        remoteTileAuthority: {
+          graph: hydrologyGraphArtifact!.graph,
+          carve: graphCarveConfig!,
+        },
       },
     ));
     terrainSource.startupHeightfield = startupHeightfieldDescriptor(startupHeightfield);

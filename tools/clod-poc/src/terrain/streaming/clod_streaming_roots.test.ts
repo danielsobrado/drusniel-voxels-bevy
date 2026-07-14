@@ -224,6 +224,25 @@ describe("pageInsideFiniteStartupWorld", () => {
 });
 
 describe("createStreamingClodRootController", () => {
+  it("retires finite startup roots once streamed roots cover the safety ring", async () => {
+    const startupRoot = { ...makeNode(0, 0, 2), id: "startup-root" };
+    const { controller, roots, buildPages, requests } = makeController({
+      roots: [startupRoot],
+      allNodes: [startupRoot],
+      buildBudgetPagesPerFrame: 2,
+    });
+    const center = new THREE.Vector3(272, 0, 16);
+
+    controller.update(center, 1);
+    expect(roots.map((node) => node.id)).toEqual(["startup-root"]);
+    const parentCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[0]![0] as readonly PageCoord[];
+    resolveRequest(requests[0]!, parentCoords);
+    await flushAsync();
+
+    controller.update(center, 1);
+    expect(roots.map((node) => node.id)).toEqual(["L1:4,0"]);
+  });
+
   it("runs planner-only when buildPages is null", () => {
     const { controller, roots } = makeController({ buildPages: null });
 

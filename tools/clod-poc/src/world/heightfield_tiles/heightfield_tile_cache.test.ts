@@ -170,6 +170,25 @@ describe("HeightfieldTileCache", () => {
     expect(cache.counters().fallbackSamplesTotal).toBe(4);
   });
 
+  it("reports fallback samples recorded per frame so a settled scene can be gated", () => {
+    const cache = new HeightfieldTileCache(config(), 0, null);
+
+    cache.update({ x: 0, z: 0, frameIndex: 1 });
+    cache.recordFallbackSample(5);
+    expect(cache.counters().fallbackSamplesTotal).toBe(5);
+
+    cache.update({ x: 0, z: 0, frameIndex: 2 });
+    expect(cache.counters().fallbackSamplesThisFrame).toBe(5);
+
+    cache.recordFallbackSample(2);
+    cache.update({ x: 0, z: 0, frameIndex: 3 });
+    expect(cache.counters().fallbackSamplesThisFrame).toBe(2);
+
+    cache.update({ x: 0, z: 0, frameIndex: 4 });
+    expect(cache.counters().fallbackSamplesThisFrame).toBe(0);
+    expect(cache.counters().fallbackSamplesTotal).toBe(7);
+  });
+
   it("keeps physical inflight accounting and current-epoch tile ownership across invalidation", async () => {
     const requests: Array<{
       keys: WorldTileKey[];

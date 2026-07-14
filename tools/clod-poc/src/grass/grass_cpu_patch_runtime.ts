@@ -14,6 +14,7 @@ import { updateGrassPatchVisibility } from "./grass_patch_visibility.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
 import type { GrassPatch } from "./grass_system_support.js";
 import type { GrassSharedGeometries } from "./grass_shared_geometries.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 
 export interface GrassCpuPatchRuntimeOptions {
   nodes: ClodPageNode[];
@@ -29,7 +30,6 @@ interface GrassPatchSource {
   footprint: PageFootprint;
 }
 
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const DEFAULT_UNBOUNDED_GRASS_PATCH_M = 64;
 
 export class GrassCpuPatchRuntime {
@@ -58,7 +58,7 @@ export class GrassCpuPatchRuntime {
     this.geometries = options.geometries;
     this.injectedGeometryBuilder = options.injectedGeometryBuilder;
     this.materialFor = options.materialFor;
-    this.unboundedWorld = infiniteIslandsScene();
+    this.unboundedWorld = runtimeWorldUsesCameraRelativeCoordinates();
     this.unboundedPatchSize = grassFallbackPatchSize(this.nodes);
   }
 
@@ -226,10 +226,6 @@ function grassFallbackPatchSize(nodes: readonly ClodPageNode[]): number {
   return Number.isFinite(size) && size > 0 ? size : DEFAULT_UNBOUNDED_GRASS_PATCH_M;
 }
 
-function infiniteIslandsScene(): boolean {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
-}
 
 function emptyGrassGenerationStats(): GrassGenerationStats {
   return {

@@ -32,6 +32,7 @@ import type {
   TreeWebGpuBackendAccess,
 } from "./tree_system_types.js";
 import type { TreeSpeciesId } from "./tree_config.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 
 export interface TreeGpuRingRuntimeState {
   status: TreeStats["gpuStatus"];
@@ -146,7 +147,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
         centerZ: center.z,
         cameraY: camera?.position.y ?? center.y,
         worldCells: input.worldCells,
-        unbounded: getTerrainFieldCoreConfig().islandShape.enabled,
+        unbounded: runtimeWorldUsesCameraRelativeCoordinates() || getTerrainFieldCoreConfig().islandShape.enabled,
         settings: input.settings,
         sampler: input.sampler,
         terrainRevision,

@@ -68,6 +68,7 @@ const DISABLED_COUNTERS: HeightfieldTileCacheCounters = Object.freeze({
   buildsTotal: 0,
   buildMsP95: 0,
   evictionsTotal: 0,
+  fallbackSamplesThisFrame: 0,
   fallbackSamplesTotal: 0,
   bytesResident: 0,
   storeHits: 0,

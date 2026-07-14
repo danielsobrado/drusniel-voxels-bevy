@@ -35,12 +35,14 @@ async function main(): Promise<void> {
   const out = str(args["out"]) ?? `shots/phase-0/${sceneLabel}-${Date.now()}.png`;
   const settleFrames = Number(str(args["settle"]) ?? 8);
   const waitForFar = str(args["waitfar"]) === "1";
+  const waitForRoots = str(args["waitroots"]) === "1";
+  const waitForWater = str(args["waitwater"]) === "1";
   const timeoutMs = Number(str(args["timeout"]) ?? 120000);
   const rendererParam = str(args["renderer"]);
 
   const consumed = new Set([
     "scene", "seed", "cam", "out", "w", "h", "hud", "settle", "timeout", "stats",
-    "framealign", "gpusample", "freeze", "renderer", "waitfar", "inventory",
+    "framealign", "gpusample", "freeze", "renderer", "waitfar", "waitroots", "waitwater", "inventory",
   ]);
   const extra: Record<string, string> = {};
   for (const [key, value] of Object.entries(args)) {
@@ -123,7 +125,15 @@ async function main(): Promise<void> {
         const building = Number(counters.far_summary_tiles_building ?? 0);
         const runtimeError = Number(counters.far_summary_gpu_runtime_error ?? 0);
         return runtimeError === 0 && (required === 0 || (ready >= required && building === 0));
-      }, { timeout: timeoutMs });
+      }, undefined, { timeout: timeoutMs }).catch(async () => {
+        const counters = await page.evaluate(() => window.__drusnielClod?.stats?.counters ?? {});
+        throw new Error(`Timed out waiting for far-summary convergence: ${JSON.stringify({
+          required: counters.far_summary_tiles_required ?? 0,
+          ready: counters.far_summary_tiles_ready ?? 0,
+          building: counters.far_summary_tiles_building ?? 0,
+          runtimeError: counters.far_summary_gpu_runtime_error ?? 0,
+        })}`);
+      });
       const far = await page.evaluate(() => {
         const counters = window.__drusnielClod?.stats?.counters ?? {};
         return {
@@ -134,6 +144,71 @@ async function main(): Promise<void> {
         };
       });
       console.log(`[shoot] far summary converged ${JSON.stringify(far)}`);
+    }
+
+    if (waitForRoots) {
+      await page.waitForFunction(() => {
+        const counters = window.__drusnielClod?.stats?.counters;
+        if (!counters) return false;
+        const required = Number(counters.live_clod_stream_safety_required_pages ?? 0);
+        const ready = Number(counters.live_clod_stream_safety_ready_pages ?? 0);
+        const pending = Number(counters.live_clod_stream_safety_pending_pages ?? 0);
+        const inflight = Number(counters.live_clod_stream_safety_inflight_pages ?? 0);
+        const capacityOk = Number(counters.live_clod_stream_safety_cache_capacity_ok ?? 0);
+        return capacityOk === 1 && required > 0 && ready >= required && pending === 0 && inflight === 0;
+      }, undefined, { timeout: timeoutMs }).catch(async () => {
+        const counters = await page.evaluate(() => window.__drusnielClod?.stats?.counters ?? {});
+        throw new Error(`Timed out waiting for safety-root convergence: ${JSON.stringify({
+          required: counters.live_clod_stream_safety_required_pages ?? 0,
+          ready: counters.live_clod_stream_safety_ready_pages ?? 0,
+          pending: counters.live_clod_stream_safety_pending_pages ?? 0,
+          inflight: counters.live_clod_stream_safety_inflight_pages ?? 0,
+          cached: counters.live_clod_stream_cached_pages ?? 0,
+          capacity: counters.live_clod_stream_max_cached_pages ?? 0,
+          capacityOk: counters.live_clod_stream_safety_cache_capacity_ok ?? 0,
+          failures: counters.live_clod_stream_failed_pages ?? 0,
+        })}`);
+      });
+      const roots = await page.evaluate(() => {
+        const counters = window.__drusnielClod?.stats?.counters ?? {};
+        return {
+          required: counters.live_clod_stream_safety_required_pages ?? 0,
+          ready: counters.live_clod_stream_safety_ready_pages ?? 0,
+          cached: counters.live_clod_stream_cached_pages ?? 0,
+          capacity: counters.live_clod_stream_max_cached_pages ?? 0,
+        };
+      });
+      console.log(`[shoot] safety roots converged ${JSON.stringify(roots)}`);
+    }
+
+    if (waitForWater) {
+      await page.waitForFunction(() => {
+        const counters = window.__drusnielClod?.stats?.counters;
+        if (!counters) return false;
+        const active = Number(counters.hydrology_atlas_active ?? 0);
+        const filled = Number(counters.hydrology_atlas_filled_tiles ?? 0);
+        const total = Number(counters.hydrology_atlas_total_tiles ?? 0);
+        return active === 1 && total > 0 && filled >= total;
+      }, undefined, { timeout: timeoutMs }).catch(async () => {
+        const counters = await page.evaluate(() => window.__drusnielClod?.stats?.counters ?? {});
+        throw new Error(`Timed out waiting for hydrology-atlas convergence: ${JSON.stringify({
+          active: counters.hydrology_atlas_active ?? 0,
+          filled: counters.hydrology_atlas_filled_tiles ?? 0,
+          total: counters.hydrology_atlas_total_tiles ?? 0,
+          uploads: counters.hydrology_atlas_uploads ?? 0,
+          inflight: counters.hydrology_tile_remote_inflight ?? 0,
+          remoteBuilds: counters.hydrology_tile_remote_builds ?? 0,
+        })}`);
+      });
+      const water = await page.evaluate(() => {
+        const counters = window.__drusnielClod?.stats?.counters ?? {};
+        return {
+          filled: counters.hydrology_atlas_filled_tiles ?? 0,
+          total: counters.hydrology_atlas_total_tiles ?? 0,
+          uploads: counters.hydrology_atlas_uploads ?? 0,
+        };
+      });
+      console.log(`[shoot] hydrology atlas converged ${JSON.stringify(water)}`);
     }
 
     if (str(args["inventory"]) === "1") {

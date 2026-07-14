@@ -14,8 +14,8 @@ import {
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { ClodPageNode } from "../../types.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../../world/runtime_world_policy.js";
 
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const RING_CLAMP_MARGIN = 2;
 
 const CANONICAL_CENTER_SOURCE_CODE = {
@@ -27,7 +27,6 @@ const CANONICAL_CENTER_SOURCE_CODE = {
 
 type CanonicalCenterSource = keyof typeof CANONICAL_CENTER_SOURCE_CODE;
 
-let cachedInfiniteIslandsScene: boolean | null = null;
 let liveBubbleBuiltTotal = 0;
 let liveBubbleEvictionsTotal = 0;
 let liveBubbleLastColliderRemovals: number | null = null;
@@ -230,13 +229,6 @@ function mirrorRootMorphStats(stats: RootMorphFrameStats): void {
   counters["live_clod_stream_transition_height_morph_build_ms"] = stats.buildMs;
 }
 
-function infiniteIslandsScene(): boolean {
-  if (cachedInfiniteIslandsScene !== null) return cachedInfiniteIslandsScene;
-  const search = globalThis.location?.search;
-  cachedInfiniteIslandsScene = search ? new URLSearchParams(search).get("scene") === INFINITE_ISLANDS_SCENE : false;
-  return cachedInfiniteIslandsScene;
-}
-
 function canonicalWorldCenter(input: TerrainFramePhaseInput): CanonicalCenter {
   // One canonical center for every streaming system (near bubble, streamed CLOD roots, rings,
   // vegetation, far shell). Play mode -> player. Infinite-islands orbit mode -> the spawned
@@ -246,7 +238,7 @@ function canonicalWorldCenter(input: TerrainFramePhaseInput): CanonicalCenter {
   if (input.interaction.mode === "playing") {
     return { center: input.player.position, source: "playing_player" };
   }
-  if (infiniteIslandsScene()) {
+  if (runtimeWorldUsesCameraRelativeCoordinates()) {
     if (input.player.spawned) {
       return { center: input.player.position, source: "orbit_spawned_player" };
     }
@@ -338,7 +330,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   }
   mirrorRootMorphStats(morphStats);
 
-  const ringUnbounded = infiniteIslandsScene();
+  const ringUnbounded = runtimeWorldUsesCameraRelativeCoordinates();
   const canonicalCenter = canonicalWorldCenter(input);
   mirrorCanonicalWorldCenter(input, canonicalCenter);
   const bubbleCenter = canonicalCenter.center;

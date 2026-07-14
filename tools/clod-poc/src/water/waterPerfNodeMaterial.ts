@@ -8,7 +8,6 @@ import {
   exp,
   float,
   Fn,
-  fract,
   max,
   mix,
   normalize,
@@ -142,18 +141,22 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const waterBase: TslNode = mix(mix(shallowTeal, deepBlue, depthMixRgb), riverTint, clamp(riverWeight.mul(0.72), 0.0, 1.0))
       .add(shallowTeal.mul(body.turbidity).mul(shallowEdge).mul(0.22));
 
-    const foamHash: TslNode = fract(sin(dot(worldPos.xz.mul(uFoamNoiseScale).add(mainDir.mul(phase.mul(0.25))), vec2(12.9898, 78.233))).mul(43758.5453));
+    const foamWaveA: TslNode = sin(dot(worldPos.xz.mul(uFoamNoiseScale), vec2(0.91, 1.37)).add(phase.mul(0.25)));
+    const foamWaveB: TslNode = sin(dot(worldPos.xz.mul(uFoamNoiseScale.mul(0.47)), vec2(-1.21, 0.73)).sub(phase.mul(0.18)));
+    const foamBreakup: TslNode = float(0.35).add(foamWaveA.mul(foamWaveB).mul(0.5).add(0.5).mul(0.65));
     // Shore contact from real metres-to-shoreline where hydrology provides it, with the
     // depth band as the fallback for sources without a shoreline metric.
     const bankContact: TslNode = max(
       float(1).sub(smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)),
       float(1).sub(smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, aShoreDistance)),
     );
+    const wetFade: TslNode = smoothstep(0.005, 0.05, depth).mul(aBodyMask);
+    const shoreDetailFade: TslNode = float(1).sub(smoothstep(0.25, 1.25, aLevel));
     const rapid: TslNode = clamp(smoothstep(uFoamSpeedStart, uFoamSpeedEnd, flowSpeed).mul(0.35).add(smoothstep(uFoamDropStart, uFoamDropEnd, flowDrop).mul(0.95)), 0.0, 1.0);
     const foam: TslNode = clamp(
-      bankContact.mul(foamHash).mul(uFoamShoreStrength)
-        .add(rapid.mul(riverWeight).mul(uFoamRiverStrength).mul(uRiverRapidFoamStrength))
-        .add(bankContact.mul(riverWeight).mul(uRiverBankFoamStrength).mul(0.35)),
+      bankContact.mul(wetFade).mul(foamBreakup).mul(uFoamShoreStrength).mul(shoreDetailFade)
+        .add(rapid.mul(riverWeight).mul(wetFade).mul(uFoamRiverStrength).mul(uRiverRapidFoamStrength))
+        .add(bankContact.mul(riverWeight).mul(wetFade).mul(uRiverBankFoamStrength).mul(shoreDetailFade).mul(0.35)),
       0.0,
       1.0,
     );

@@ -99,6 +99,22 @@ describe("vegetation frame phase", () => {
     expect(input.waterController.logDevInitOnce).toHaveBeenCalledOnce();
   });
 
+  it("hides and skips the deep ocean when water is disabled", () => {
+    const input = makeInput(false);
+    const update = vi.fn();
+    const mesh = { visible: true };
+    input.deepOceanSurface = { mesh, update } as unknown as VegetationFramePhaseInput["deepOceanSurface"];
+    input.deepOceanMaterial = {
+      setTime: vi.fn(), updateCamera: vi.fn(), updateSunDirection: vi.fn(), updateHorizonColor: vi.fn(),
+    } as unknown as VegetationFramePhaseInput["deepOceanMaterial"];
+
+    runVegetationFramePhase(input);
+
+    expect(mesh.visible).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(input.deepOceanMaterial!.setTime).not.toHaveBeenCalled();
+  });
+
   it("mirrors infinite hydrology diagnostics when stats counters are installed", () => {
     const counters = installCounters();
     const input = makeInput(true, 30);

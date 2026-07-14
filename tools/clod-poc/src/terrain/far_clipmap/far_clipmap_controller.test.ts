@@ -100,10 +100,12 @@ describe("FarClipmapController shader displacement", () => {
     const stats = controller.update(new THREE.Vector3(0, 0, 0));
     const mesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
     const material = mesh?.material as THREE.Material | undefined;
+    const sourceData = material?.userData.farClipmapSourceData as Float32Array | undefined;
     const waterData = material?.userData.farClipmapWaterData as Float32Array | undefined;
 
     expect(stats.fallbackSamplesThisFrame).toBe(0);
     const centerOffset = (8 * 17 + 8) * 4;
+    expect(sourceData?.[centerOffset + 3]).toBe(1);
     expect(waterData?.slice(centerOffset, centerOffset + 4)).toEqual(new Float32Array([34, 2, 80, 0.75]));
 
     controller.dispose();

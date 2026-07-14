@@ -6,6 +6,8 @@
 // path is an optimization, never a correctness dependency.
 
 import type { TerrainFieldConfigInput } from "../terrain/terrain_surface.js";
+import type { HydrologyGraph } from "../world/hydrology_graph/hydrology_graph.js";
+import type { GraphTerrainCarveConfig } from "./graph_hydrology.js";
 import type { WaterConfig } from "./waterConfig.js";
 import type { HydrologyTile, HydrologyTileRemoteSource } from "./hydrologyTileSource.js";
 import type {
@@ -20,6 +22,8 @@ export interface HydrologyTileRemoteBuilder extends HydrologyTileRemoteSource {
     tileSizeM: number;
     tileRes: number;
     drySentinelDepthM: number;
+    hydrologyGraph: HydrologyGraph | null;
+    hydrologyCarve: GraphTerrainCarveConfig | null;
   }): void;
   dispose(): void;
 }
@@ -87,6 +91,8 @@ export function createHydrologyTileRemoteBuilder(): HydrologyTileRemoteBuilder |
         tileSizeM: input.tileSizeM,
         tileRes: input.tileRes,
         drySentinelDepthM: input.drySentinelDepthM,
+        hydrologyGraph: input.hydrologyGraph,
+        hydrologyCarve: input.hydrologyCarve,
       });
     },
     build(tiles) {

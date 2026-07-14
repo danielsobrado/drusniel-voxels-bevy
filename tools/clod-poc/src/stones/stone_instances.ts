@@ -25,6 +25,7 @@ import {
 import { buildRock, type RockPreset } from "./rock_builder.js";
 import { hashCombine, hashString, Rng } from "./seed.js";
 import { STONE_CLASSES, type StoneClass, type StoneSettings } from "./stone_config.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 
 export interface StoneLighting {
   light: THREE.Vector3;
@@ -109,7 +110,6 @@ const DRAW_PRESET: Record<StoneClass, RockPreset> = {
 };
 const DRAW_DETAIL: Record<StoneClass, number> = { large: 2, medium: 1, small: 1 };
 const STONE_RING_MIN_REFRESH_M = 0.5;
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
 export class StoneSystem {
   private readonly scene: THREE.Scene;
@@ -266,7 +266,7 @@ export class StoneSystem {
     const compute = this.scatterCompute;
     if (!compute || this.scatterRunning) return;
     const generation = this.generation;
-    const unboundedCenter = infiniteIslandsScene();
+    const unboundedCenter = runtimeWorldUsesCameraRelativeCoordinates();
     const centerX = stoneScatterCenterCoord(center.x, 0, this.worldCells, unboundedCenter);
     const centerZ = stoneScatterCenterCoord(center.z, 0, this.worldCells, unboundedCenter);
     this.scatterRunning = true;
@@ -416,10 +416,6 @@ function distance2d(a: THREE.Vector3, b: THREE.Vector3): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
-function infiniteIslandsScene(): boolean {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
-}
 
 export function stoneScatterCenterCoord(value: number, min: number, max: number, unbounded: boolean): number {
   if (!Number.isFinite(value)) return min;

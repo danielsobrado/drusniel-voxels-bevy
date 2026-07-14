@@ -19,6 +19,7 @@ export function applyContinentDefaults(params: URLSearchParams): boolean {
     changed = setDefault(params, "farClipmap", "1") || changed;
     if (params.get("farClipmap") === "1") {
       changed = setDefault(params, "farClipmapMode", "replace") || changed;
+      changed = setDefault(params, "farClipmapInnerRadius", "768") || changed;
     }
   }
 

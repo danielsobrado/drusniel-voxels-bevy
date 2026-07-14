@@ -74,6 +74,10 @@ export function nonNegativeIntegerParam(params: URLSearchParams, key: string): n
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
 }
 
+export function usesInteractiveStreamingBudgets(scene: string | null): boolean {
+  return scene === INFINITE_ISLANDS_SCENE || scene === "continent";
+}
+
 function acceptanceMin(value: number | undefined, minimum: number, acceptance: boolean): number | undefined {
   if (!acceptance) return value;
   return Math.max(value ?? minimum, minimum);
@@ -324,7 +328,7 @@ export function runFrameLoopStartup(
   // Apply the acceptance-proven streaming budgets whenever the streamed controller is enabled.
   // The library defaults (1 build / 1 apply per frame, 128 cached pages) starve interactive
   // infinite-islands runs: pages appear at the horizon faster than one worker round-trip per page.
-  const streamBudgetProfile = longView.queryScene === INFINITE_ISLANDS_SCENE;
+  const streamBudgetProfile = usesInteractiveStreamingBudgets(longView.queryScene);
   // Creating one L1 root view (material + geometry) can cost tens of milliseconds. Keep
   // streamed pages in the controller's ready queue until their attributes and render view
   // are resident; the previous roots remain visible instead of paying that cost in the

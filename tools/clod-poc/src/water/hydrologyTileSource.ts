@@ -226,6 +226,7 @@ export class HydrologyTileCache {
    * boundary or while worker results are outstanding.
    */
   prefetchAround(centerX: number, centerZ: number, radiusM: number): void {
+    const completedTiles = this.remoteCompleted.length;
     if (this.remoteCompleted.length > 0) {
       for (const tile of this.remoteCompleted) this.adoptRemoteTile(tile);
       this.remoteCompleted = [];
@@ -238,6 +239,7 @@ export class HydrologyTileCache {
       centerTileX === this.lastPrefetchTileX
       && centerTileZ === this.lastPrefetchTileZ
       && this.remoteInflight.size === 0
+      && completedTiles === 0
     ) {
       return;
     }

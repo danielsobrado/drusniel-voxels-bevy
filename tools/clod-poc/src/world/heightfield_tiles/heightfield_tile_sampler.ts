@@ -56,6 +56,7 @@ export function publishHeightfieldTileCounters(
   target["heightfield_tiles_build_ms_p95"] = counters.buildMsP95;
   target["heightfield_tiles_evictions_total"] = counters.evictionsTotal;
   target["heightfield_tiles_fallback_samples_total"] = counters.fallbackSamplesTotal;
+  target["heightfield_tiles_fallback_samples_this_frame"] = counters.fallbackSamplesThisFrame;
   target["heightfield_tiles_bytes_resident"] = counters.bytesResident;
   target["heightfield_tiles_store_hits"] = counters.storeHits;
   target["heightfield_tiles_store_misses"] = counters.storeMisses;

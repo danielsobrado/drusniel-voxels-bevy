@@ -8,6 +8,7 @@ import { grassHeightDensityVector, grassMaterialDensityVector } from "../grass/g
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 import { getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 import {
   buildVegetationSlotPrefilter,
   VegetationSlotPrefilterCache,
@@ -524,7 +525,7 @@ export class GrassGpuRingCompute {
       centerZ: params.centerZ,
       cameraY,
       worldCells: params.worldCells,
-      unbounded: getTerrainFieldCoreConfig().islandShape.enabled,
+      unbounded: runtimeWorldUsesCameraRelativeCoordinates() || getTerrainFieldCoreConfig().islandShape.enabled,
       grid: grassGpuRingGrid(this.ring),
       cell: grassGpuRingCell(this.ring),
       clusterDimSlots: GRASS_PREFILTER_CLUSTER_DIM_SLOTS,

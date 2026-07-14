@@ -10,8 +10,8 @@ describe("heightfield tile config", () => {
     const config = parseHeightfieldTileConfig(configText);
     expect(config).toEqual({
       enabled: false,
-      radiusM: 768,
-      maxResidentTiles: 64,
+      radiusM: 1024,
+      maxResidentTiles: 96,
       maxInflightBatches: 1,
       maxTilesPerBatch: 2,
       evictDistanceMultiplier: 1.5,

@@ -4,7 +4,13 @@ import {
   HYDROLOGY_BODY_LAKE,
   HYDROLOGY_BODY_RIVER,
 } from "./hydrologyGrid.js";
-import { HydrologyTileCache, sampleTile, type HydrologyTile } from "./hydrologyTileSource.js";
+import {
+  buildHydrologyTileData,
+  HydrologyTileCache,
+  sampleTile,
+  type HydrologyTile,
+  type HydrologyTileRemoteSource,
+} from "./hydrologyTileSource.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import type { TerrainHeightSampler } from "./water_field_types.js";
 
@@ -105,6 +111,30 @@ describe("HydrologyTileCache", () => {
     cache.sample(90, 80);
     expect(cache.stats.builds).toBe(1);
     expect(cache.stats.hits).toBe(2);
+  });
+
+  it("continues prefetching at a stationary center after each worker batch completes", async () => {
+    const options = { ...OPTIONS, maxResidentTiles: 64 };
+    const cache = new HydrologyTileCache(sampler, options);
+    const remote: HydrologyTileRemoteSource = {
+      available: () => true,
+      build: async (tiles) => tiles.map(({ tileX, tileZ }) => buildHydrologyTileData(
+        tileX,
+        tileZ,
+        sampler,
+        options,
+      )),
+    };
+    cache.attachRemote(remote);
+
+    for (let pass = 0; pass < 8; pass++) {
+      cache.prefetchAround(0, 0, 3 * options.tileSizeM);
+      await Promise.resolve();
+    }
+    cache.prefetchAround(0, 0, 3 * options.tileSizeM);
+
+    expect(cache.stats.remoteBuilds).toBe(49);
+    expect(cache.stats.remoteInflight).toBe(0);
   });
 });
 

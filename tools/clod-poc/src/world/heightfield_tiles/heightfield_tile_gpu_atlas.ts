@@ -123,11 +123,11 @@ export function uploadHeightfieldTilesForPage(
   const span = basePageSizeM * (2 ** Math.max(0, Math.floor(coord.level ?? 0)));
   const minX = coord.px * span;
   const minZ = coord.pz * span;
-  const maxX = minX + span - Number.EPSILON;
-  const maxZ = minZ + span - Number.EPSILON;
+  const lastTileX = Math.ceil((minX + span) / WORLD_TILE_SIZE_M) - 1;
+  const lastTileZ = Math.ceil((minZ + span) / WORLD_TILE_SIZE_M) - 1;
   let ready = true;
-  for (let z = Math.floor(minZ / WORLD_TILE_SIZE_M); z <= Math.floor(maxZ / WORLD_TILE_SIZE_M); z++) {
-    for (let x = Math.floor(minX / WORLD_TILE_SIZE_M); x <= Math.floor(maxX / WORLD_TILE_SIZE_M); x++) {
+  for (let z = Math.floor(minZ / WORLD_TILE_SIZE_M); z <= lastTileZ; z++) {
+    for (let x = Math.floor(minX / WORLD_TILE_SIZE_M); x <= lastTileX; x++) {
       ready = uploadHeightfieldTileToGpu({ x, z }) && ready;
     }
   }

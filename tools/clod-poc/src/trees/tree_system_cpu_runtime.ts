@@ -20,6 +20,7 @@ import {
   treeFootprintCenterZ,
   treeFootprintRadius,
 } from "./tree_system_math.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 import {
   isTreeClusterTerrainOccluded,
   type TreeTerrainOcclusionSampler,
@@ -86,7 +87,6 @@ const TREE_CPU_SCALE = new THREE.Vector3();
 const TREE_CPU_ROTATION = new THREE.Quaternion();
 const TREE_CPU_TRANSLATION = new THREE.Vector3();
 const TREE_CPU_UP_AXIS = new THREE.Vector3(0, 1, 0);
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const DEFAULT_UNBOUNDED_TREE_PATCH_M = 64;
 
 export function createTreeLodCounts(): TreeLodCounts {
@@ -322,8 +322,7 @@ function treeFallbackPatchSize(nodes: readonly ClodPageNode[]): number {
 }
 
 function treeCpuUnboundedWorld(): boolean {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("scene") === INFINITE_ISLANDS_SCENE;
+  return runtimeWorldUsesCameraRelativeCoordinates();
 }
 
 function treeTerrainOcclusionSettings(settings: TreeSettings): TreeTerrainOcclusionSettings {

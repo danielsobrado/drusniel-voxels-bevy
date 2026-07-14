@@ -180,15 +180,52 @@ export const REQUIRED_COUNTERS = [
 
 export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
 
+/**
+ * Streamed continent heightfield tiles are opt-in (`heightTiles`, and authoritative only in
+ * `scene=continent`), so these counters are absent from a default infinite-islands run. They are
+ * therefore optional — never reported as "missing" — but strictly gated whenever they are present.
+ */
+export const CONTINENT_TILE_COUNTERS = [
+  "heightfield_tiles_enabled",
+  "heightfield_tiles_resident",
+  "heightfield_tiles_required",
+  "heightfield_tiles_pending",
+  "heightfield_tiles_inflight",
+  "heightfield_tiles_builds_total",
+  "heightfield_tiles_build_ms_p95",
+  "heightfield_tiles_fallback_samples_total",
+  "heightfield_tiles_fallback_samples_this_frame",
+  "heightfield_tiles_store_errors",
+  "heightfield_tiles_failures_total",
+  "heightfield_tile_gpu_atlas_enabled",
+  "heightfield_tile_gpu_atlas_uploads",
+  "heightfield_tile_gpu_atlas_resident",
+] as const;
+
+export type ContinentTileCounter = typeof CONTINENT_TILE_COUNTERS[number];
+export type AcceptanceCounter = RequiredCounter | ContinentTileCounter;
+
 export interface ThresholdRule {
-  key: RequiredCounter;
+  key: AcceptanceCounter;
   label: string;
   pass: (value: number, values: Readonly<Record<string, number>>) => boolean;
 }
 
 const finiteNonNegative = (value: number): boolean => Number.isFinite(value) && value >= 0;
-const inactiveOrPositive = (activeKey: RequiredCounter) => (value: number, values: Readonly<Record<string, number>>): boolean =>
+const inactiveOrPositive = (activeKey: AcceptanceCounter) => (value: number, values: Readonly<Record<string, number>>): boolean =>
   finiteNonNegative(value) && (values[activeKey] !== 1 || value > 0);
+/**
+ * Calibrated 2026-07-14 from a settled `scene=continent` capture (world=8, startupWorld=2, cold
+ * store): worker tile-batch `build_ms_p95` measured 288.5 ms. The cap keeps ~2x headroom so this
+ * trips on a real regression rather than on run-to-run noise. Re-measure if the tile config
+ * (`config/heightfield_tiles.yaml`) or batch size changes.
+ */
+const CONTINENT_TILE_BUILD_MS_P95_MAX = 600;
+
+const continentTilesActive = (values: Readonly<Record<string, number>>): boolean =>
+  values["heightfield_tiles_enabled"] === 1;
+const drainedWhenContinentTilesActive = (value: number, values: Readonly<Record<string, number>>): boolean =>
+  finiteNonNegative(value) && (!continentTilesActive(values) || value === 0);
 const clodMissingCoveredOrReady = (value: number, values: Readonly<Record<string, number>>): boolean =>
   value === 0 || ((values["stream_ready_frame"] ?? -1) < 0 && (values["clod_parent_coverage_violations"] ?? 1) === 0);
 const streamProbeEvictionOrNoPressure = (value: number, values: Readonly<Record<string, number>>): boolean => {
@@ -220,13 +257,13 @@ const gpuStreamRootsProven = (values: Readonly<Record<string, number>>): boolean
   return gpuDispatch || gpuCacheReuse;
 };
 
-const FRAME_TIME_COUNTERS = new Set<RequiredCounter>([
+const FRAME_TIME_COUNTERS = new Set<AcceptanceCounter>([
   "frame_ms_p95",
   "frame_ms_p99",
   "frame_ms_avg",
 ]);
 
-const ORACLE_COUNTERS = new Set<RequiredCounter>([
+const ORACLE_COUNTERS = new Set<AcceptanceCounter>([
   "ring_boundary_holes",
   "live_clod_gap_holes",
   "clod_far_gap_holes",
@@ -426,6 +463,34 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "infinite_hydrology_nonrepeat_delta", label: "must be finite and > 0", pass: (value) => Number.isFinite(value) && value > 0 },
   { key: "infinite_hydrology_nonrepeat_ok", label: "must equal 1", pass: (value) => value === 1 },
   { key: "infinite_hydrology_camera_outside_startup", label: "must equal 1", pass: (value) => value === 1 },
+  { key: "heightfield_tiles_enabled", label: "must equal 0 or 1", pass: (value) => value === 0 || value === 1 },
+  { key: "heightfield_tiles_required", label: "must be > 0 while streamed tiles are enabled", pass: inactiveOrPositive("heightfield_tiles_enabled") },
+  {
+    key: "heightfield_tiles_resident",
+    label: "must cover every required tile while streamed tiles are enabled",
+    pass: (value, values) => finiteNonNegative(value)
+      && (!continentTilesActive(values) || (value > 0 && value >= (values["heightfield_tiles_required"] ?? Number.POSITIVE_INFINITY))),
+  },
+  { key: "heightfield_tiles_pending", label: "must drain to 0 while streamed tiles are enabled", pass: drainedWhenContinentTilesActive },
+  { key: "heightfield_tiles_inflight", label: "must drain to 0 while streamed tiles are enabled", pass: drainedWhenContinentTilesActive },
+  { key: "heightfield_tiles_failures_total", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "heightfield_tiles_store_errors", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "heightfield_tile_gpu_atlas_uploads", label: "must be > 0 while the tile atlas is enabled", pass: inactiveOrPositive("heightfield_tile_gpu_atlas_enabled") },
+  { key: "heightfield_tile_gpu_atlas_resident", label: "must be > 0 while the tile atlas is enabled", pass: inactiveOrPositive("heightfield_tile_gpu_atlas_enabled") },
+  {
+    key: "heightfield_tiles_fallback_samples_this_frame",
+    label: "must equal 0 once streamed tiles are resident",
+    pass: drainedWhenContinentTilesActive,
+  },
+  {
+    key: "heightfield_tiles_build_ms_p95",
+    label: `must be finite, > 0 and <= ${CONTINENT_TILE_BUILD_MS_P95_MAX} once tiles have been built`,
+    pass: (value, values) => {
+      if (!Number.isFinite(value) || value < 0) return false;
+      if (!continentTilesActive(values) || (values["heightfield_tiles_builds_total"] ?? 0) === 0) return true;
+      return value > 0 && value <= CONTINENT_TILE_BUILD_MS_P95_MAX;
+    },
+  },
 ];
 
 export const COVERAGE_REQUIRED_COUNTERS = REQUIRED_COUNTERS.filter((key) => !FRAME_TIME_COUNTERS.has(key));
@@ -443,7 +508,7 @@ export interface ThresholdEvaluation {
 export function extractAcceptanceCounters(stats: Record<string, unknown>): Record<string, number> {
   const counters = stats["counters"] as Record<string, unknown> | undefined;
   const out: Record<string, number> = {};
-  for (const key of REQUIRED_COUNTERS) {
+  for (const key of [...REQUIRED_COUNTERS, ...CONTINENT_TILE_COUNTERS]) {
     const value = counters?.[key] ?? stats[key];
     if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
   }

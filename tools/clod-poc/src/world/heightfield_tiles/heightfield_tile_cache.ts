@@ -47,6 +47,7 @@ export interface HeightfieldTileCacheCounters {
   buildMsP95: number;
   evictionsTotal: number;
   fallbackSamplesTotal: number;
+  fallbackSamplesThisFrame: number;
   bytesResident: number;
   storeHits: number;
   storeMisses: number;
@@ -133,6 +134,8 @@ export class HeightfieldTileCache {
   private buildsTotal = 0;
   private evictionsTotal = 0;
   private fallbackSamplesTotal = 0;
+  private fallbackSamplesThisFrame = 0;
+  private fallbackSamplesFrameBase = 0;
   private storeHits = 0;
   private storeMisses = 0;
   private storeErrors = 0;
@@ -147,6 +150,8 @@ export class HeightfieldTileCache {
 
   update(input: HeightfieldTileCacheUpdate): void {
     this.currentFrame = input.frameIndex;
+    this.fallbackSamplesThisFrame = this.fallbackSamplesTotal - this.fallbackSamplesFrameBase;
+    this.fallbackSamplesFrameBase = this.fallbackSamplesTotal;
     this.buildAllowed = input.buildAllowed !== false;
     const velocity = this.resolveVelocity(input);
     const predictedX = input.x + velocity.x * this.config.predictionSeconds;
@@ -202,6 +207,7 @@ export class HeightfieldTileCache {
       buildMsP95: percentile95(this.buildSamples),
       evictionsTotal: this.evictionsTotal,
       fallbackSamplesTotal: this.fallbackSamplesTotal,
+      fallbackSamplesThisFrame: this.fallbackSamplesThisFrame,
       bytesResident: [...this.resident.values()].reduce((sum, entry) => sum + HEIGHTFIELD_TILE_BYTE_LENGTH
         + (entry.tile.complexVolumeMask?.byteLength ?? 0) + (entry.tile.entranceMask?.byteLength ?? 0), 0),
       storeHits: this.storeHits,

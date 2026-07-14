@@ -18,4 +18,17 @@ describe("water shader world bounds", () => {
     expect(waterPerfNodeMaterialSource).toContain("const finiteWorldBounds: TslNode = uWorldBounds.x.greaterThan(float(0)).and(uWorldBounds.y.greaterThan(float(0)));");
     expect(waterPerfNodeMaterialSource).toContain("const outsideWorld: TslNode = finiteWorldBounds.and(");
   });
+
+  it("fades perf shoreline foam across partially wet edge fragments", () => {
+    expect(waterPerfNodeMaterialSource).toContain(
+      "const wetFade: TslNode = smoothstep(0.005, 0.05, depth).mul(aBodyMask);",
+    );
+    expect(waterPerfNodeMaterialSource).toContain(
+      "bankContact.mul(wetFade).mul(foamBreakup).mul(uFoamShoreStrength)",
+    );
+    expect(waterPerfNodeMaterialSource).toContain(
+      "const shoreDetailFade: TslNode = float(1).sub(smoothstep(0.25, 1.25, aLevel));",
+    );
+    expect(waterPerfNodeMaterialSource).not.toContain("const foamHash:");
+  });
 });

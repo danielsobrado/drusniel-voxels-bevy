@@ -153,6 +153,8 @@ function updateWater(input: VegetationFramePhaseInput): void {
 }
 
 function updateDeepOcean(input: VegetationFramePhaseInput): void {
+  if (input.deepOceanSurface) input.deepOceanSurface.mesh.visible = input.state.waterEnabled;
+  if (!input.state.waterEnabled) return;
   input.deepOceanSurface?.update(input.elapsedSeconds);
   if (!input.deepOceanMaterial) return;
   input.deepOceanMaterial.setTime(input.elapsedSeconds);

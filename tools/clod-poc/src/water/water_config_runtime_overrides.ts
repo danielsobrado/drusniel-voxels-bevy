@@ -19,6 +19,7 @@ export function applyRuntimeRiverOverrides(config: WaterConfig, options: WaterRu
   next.hydrology.rivers.visibleDepthM = queryNumber(params, "riverVisibleDepth", next.hydrology.rivers.visibleDepthM);
   next.hydrology.rivers.carveDepthM = queryNumber(params, "riverCarveDepth", next.hydrology.rivers.carveDepthM);
   next.hydrology.rivers.flowSpeedMultiplier = queryNumber(params, "riverFlowSpeed", next.hydrology.rivers.flowSpeedMultiplier);
+  next.visual.foam.shoreStrength = queryNumber(params, "shoreFoamStrength", next.visual.foam.shoreStrength);
   next.visual.foam.riverStrength = queryNumber(params, "riverFoamStrength", next.visual.foam.riverStrength);
   for (const river of next.fakeBodies.rivers) {
     river.width = Math.max(0.1, river.width * Math.max(0.1, next.hydrology.rivers.widenRadius / options.defaultHydrology.rivers.widenRadius));

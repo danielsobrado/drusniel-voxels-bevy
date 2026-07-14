@@ -35,6 +35,7 @@
     "accept:infinite-islands:fast": "node tools/run-infinite-islands-acceptance.mjs --fast",
     "accept:infinite-islands:reuse": "node tools/run-infinite-islands-acceptance.mjs --reuse",
     "accept:infinite-islands:full": "node tools/run-infinite-islands-acceptance.mjs",
+    "accept:continent-tiles": "tsx tools/continent-tiles-acceptance.ts",
     "accept:phase5-voxel-overlay": "tsx tools/phase5-voxel-overlay-acceptance.ts",
     "world:verify": "tsx tools/world-verify.ts",
     "accept:phase6-road-stamp": "tsx tools/phase6-road-stamp-acceptance.ts",

@@ -1,11 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { terrainFieldShaderWithTileAtlas } from "../../terrain/streaming/gpu_clod_root_mesher.js";
 import { HEIGHTFIELD_TILE_RES } from "./heightfield_tile.js";
-import { heightfieldTileAtlasTexel } from "./heightfield_tile_gpu_atlas.js";
+import {
+  createHeightfieldTileGpuAtlas,
+  heightfieldTileAtlasTexel,
+  registerHeightfieldTileGpuSource,
+  unregisterHeightfieldTileGpuSource,
+  uploadHeightfieldTilesForPage,
+} from "./heightfield_tile_gpu_atlas.js";
 import { buildHeightfieldTile } from "./heightfield_tile.js";
+import type { HeightfieldTileCache } from "./heightfield_tile_cache.js";
+import type { WorldTileKey } from "../tile_key.js";
 import { worldToTile } from "../tile_key.js";
 
+function stubDevice(): GPUDevice {
+  return {
+    createTexture: () => ({ createView: () => ({}), destroy: () => {} }),
+    createBuffer: () => ({ destroy: () => {} }),
+    queue: { writeBuffer: () => {}, writeTexture: () => {} },
+  } as unknown as GPUDevice;
+}
+
+function tileSourceCoveringOnly(residentIds: ReadonlySet<string>): {
+  cache: HeightfieldTileCache;
+  requested: string[];
+} {
+  const requested: string[] = [];
+  const cache = {
+    get: (key: WorldTileKey) => {
+      const id = `${key.x},${key.z}`;
+      requested.push(id);
+      if (!residentIds.has(id)) return null;
+      return buildHeightfieldTile(key, { sampleHeight: () => 1 });
+    },
+  } as unknown as HeightfieldTileCache;
+  return { cache, requested };
+}
+
 describe("heightfield tile GPU atlas", () => {
+  beforeAll(() => {
+    vi.stubGlobal("GPUTextureUsage", { TEXTURE_BINDING: 1, COPY_DST: 2 });
+    vi.stubGlobal("GPUBufferUsage", { UNIFORM: 1, COPY_DST: 2 });
+  });
+
   it("maps positive and negative world tiles into deterministic toroidal slots", () => {
     expect(heightfieldTileAtlasTexel({ x: 0, z: 0 }, 0, 0, 7)).toEqual({ x: 0, z: 0 });
     expect(heightfieldTileAtlasTexel({ x: 7, z: 7 }, 12, 34, 7)).toEqual({ x: 12, z: 34 });
@@ -50,6 +87,24 @@ describe("heightfield tile GPU atlas", () => {
       const localX = x - key.x * 256;
       const texel = heightfieldTileAtlasTexel(key, localX, 0, side);
       expect(data[texel.z * atlasRes + texel.x]).toBe(Math.fround(x * 0.125));
+    }
+  });
+
+  it.each([
+    ["large positive origin", 127, 127],
+    ["large negative origin", -128, -128],
+    ["small origin", 0, 0],
+  ])("uploads only the tiles a tile-aligned page overlaps at a %s", (_name, pageCoord, tileCoord) => {
+    const covered = `${tileCoord},${tileCoord}`;
+    const { cache, requested } = tileSourceCoveringOnly(new Set([covered]));
+    registerHeightfieldTileGpuSource(cache, true);
+    try {
+      expect(createHeightfieldTileGpuAtlas(stubDevice())).not.toBeNull();
+
+      expect(uploadHeightfieldTilesForPage({ px: pageCoord, pz: pageCoord, level: 2 }, 64)).toBe(true);
+      expect([...new Set(requested)]).toEqual([covered]);
+    } finally {
+      unregisterHeightfieldTileGpuSource(cache);
     }
   });
 });

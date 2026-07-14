@@ -583,6 +583,8 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const maxRootLevel = resolveStreamingClodMaxRootLevel(deps.cfg, deps.maxRootLevel);
+  const startupRoots = [...deps.roots];
+  const startupRootIds = new Set(startupRoots.map((node) => node.id));
   const rootSwitchStableFrames = Math.max(0, Math.floor(deps.rootSwitchStableFrames ?? queryStreamingRootSwitchStableFrames() ?? 0));
   const rootTransitionOptions = resolveRootTransitionOptions(deps.rootTransition);
   const cached = new Map<string, CachedPage>();
@@ -714,11 +716,13 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   };
 
   const setRenderableRootIds = (ids: Iterable<string>): void => {
+    const streamedIds = new Set(ids);
     for (let i = deps.roots.length - 1; i >= 0; i--) {
       const id = deps.roots[i]?.id;
-      if (id !== undefined && cached.has(id)) deps.roots.splice(i, 1);
+      if (id !== undefined && (cached.has(id) || startupRootIds.has(id))) deps.roots.splice(i, 1);
     }
-    for (const id of [...ids].sort()) {
+    if (!rootSetCoversSafety(streamedIds)) deps.roots.push(...startupRoots);
+    for (const id of [...streamedIds].sort()) {
       const node = cached.get(id)?.node;
       if (node) deps.roots.push(node);
     }

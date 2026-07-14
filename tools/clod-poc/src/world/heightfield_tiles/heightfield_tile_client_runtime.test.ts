@@ -12,11 +12,11 @@ const runtimeMocks = vi.hoisted(() => ({
 vi.mock("../../clod_worker_client.js", () => ({
   ClodWorkerClient: class {
     buildWorld(...args: unknown[]) {
-      return clientMocks.buildWorld(...args);
+      return (clientMocks.buildWorld as (...input: unknown[]) => Promise<unknown>)(...args);
     }
 
     buildHeightfieldTiles(...args: unknown[]) {
-      return clientMocks.buildHeightfieldTiles(...args);
+      return (clientMocks.buildHeightfieldTiles as (...input: unknown[]) => unknown)(...args);
     }
 
     dispose(): void {

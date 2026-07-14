@@ -71,9 +71,16 @@ scaling toward real RPG content — not new architecture.
   a small-origin case to lock both edge directions and prevent an origin regression.
 - [x] failing regression test (large +, large −, small origin)
 - [x] fix
-- [ ] full `vitest` green
+- [x] `vitest` green for this path (see 2026-07-14 re-verification below)
 - **2026-07-14 verification:** focused file failed before the fix (3 failed / 8 passed) and
   passed after it (11 passed). Full repository Vitest remains pending.
+- **2026-07-14 re-verification (independent pass):** re-confirmed the test bites by temporarily
+  restoring the `Number.EPSILON` bound: all three cases fail pre-fix, each requesting the full 2×2
+  tile block instead of the single overlapped tile (`['127,127','128,127','127,128','128,128']` at
+  the large-positive origin; likewise `-128,-128` and `0,0`), and all three pass post-fix.
+  `heightfield_tile_client_runtime.test.ts` + `heightfield_tile_cache.test.ts`: **21/21 pass**.
+  Full-repo Vitest is **not** green, but for reasons unrelated to A1/A2 — see
+  "Pre-existing `main` breakage" below.
 - [ ] `accept:infinite-islands --reuse` (continent scene): required/resident tile counts drop on
   tile-aligned pages; no page-readiness stall at the residency-ring edge
 
@@ -109,9 +116,59 @@ scaling toward real RPG content — not new architecture.
   invalidation test only covers rebuild-after-completed-load, so this race is currently uncovered.
 - [x] failing regression test (concurrency ceiling + no duplicate build)
 - [x] fix (physical counter + epoch-guarded ID deletion)
-- [ ] full `vitest` green
+- [x] `vitest` green for this path (see 2026-07-14 re-verification below)
 - **2026-07-14 verification:** focused file failed before the fix (1 failed / 9 passed) and
   passed after it (10 passed). Full repository Vitest remains pending.
+- **2026-07-14 re-verification (independent pass):** re-confirmed the test bites by temporarily
+  restoring `inflightBatches = 0` in `invalidateBounds` and the unconditional `inflightIds` delete:
+  the test fails pre-fix with **4 concurrent physical builds against `maxInflightBatches: 2`**
+  (`expected [...] to have a length of 2 but got 4`), i.e. the over-subscription window, and passes
+  post-fix. `heightfield_tile_cache.test.ts`: 10/10. The `clear()` composition holds — the test's
+  tail asserts `inflightBatches === 0` after `clear()` + late stale resolutions, so the pure-counter
+  change leaks nothing.
+### A3. Same half-open bug in the GPU tile atlas (found while verifying A1; fixed 2026-07-14)
+
+- **Where:** `heightfield_tile_gpu_atlas.ts:126-127` (`uploadHeightfieldTilesForPage`) used the
+  identical `maxX = minX + span - Number.EPSILON` pattern A1 removed from the client runtime.
+- **Consequence (worse than A1's):** the phantom +1 tile is passed to `uploadHeightfieldTileToGpu`,
+  which returns `false` when that tile is not resident — so the function reports the page as
+  not-ready and `clod_worker_client.ts:274` throws
+  `"GPU tile mesher missing resident heightfield tile"`, dropping the page **off the GPU tile-mesher
+  path onto the fallback** on every tile-aligned level-≥2 page. It also wastes slots in the fixed
+  7×7 (49-slot) atlas.
+- **Fix:** same half-open index math as A1 (`Math.ceil((min + span) / WORLD_TILE_SIZE_M) - 1`).
+- **Verification:** new `it.each` case in `heightfield_tile_gpu_atlas.test.ts` at large-positive,
+  large-negative and small origins. Pre-fix the test fails with `uploadHeightfieldTilesForPage`
+  returning `false` (the spurious not-ready); post-fix `heightfield_tiles/` is 54/54 green.
+- [x] failing regression test (large +, large −, small origin)
+- [x] fix
+- [x] `vitest` green for this path
+
+### Pre-existing `main` breakage (2026-07-14, NOT from A1/A2 — blocks the "all green" gate)
+
+The A1/A2 verification pass found that `main` is currently **red for unrelated reasons**, so the
+repo-wide `typecheck` + `vitest` gate cannot be claimed green by the continent work alone. This is
+recorded here so the next reader does not mistake it for continent fallout.
+
+- `npm --prefix tools/clod-poc test` → **2995 passed / 4 failed** (561 files). Failing:
+  - `src/terrain/rendering/__tests__/clod_render_node_cache.test.ts` › reuses active render nodes
+  - `src/terrain/streaming/gpu_clod_resident_adoption.test.ts` › commits all pages atomically after
+    the build succeeds; › rejects empty pages before they enter the resident cache
+  - `src/trees/tree_ring_impostor_node_material.test.ts` › samples a deterministic variant row
+  - `src/forest_lighting/forest_lighting_fields.test.ts` › finalization derives clamped AO, shadow,
+    fog, edges, and shafts (`expected 0 to be greater than 0`) — surfaced later in the same session;
+    every file in its import closure (`forest_lighting/*.ts`, plus only `three` and `vitest`) is
+    semantically identical to `HEAD`, so it is not continent fallout either. Fails 3/3 in isolation.
+- `npm --prefix tools/clod-poc run typecheck` → **4 errors**, in the same neighbourhoods:
+  `trees/tree_impostor_capture_material.ts` (×2), `rendering/webgpu_external_buffer_geometry.ts`,
+  `far-summary/gpu-render-atlas-textures.ts` (three.js TSL node typing).
+- `npm --prefix tools/clod-poc run build` → **green** (Vite/esbuild does not typecheck).
+- **Attribution proof:** all four test failures reproduce **with the A1 fix reverted**, and all four
+  erroring source files are byte-identical to `HEAD` (no uncommitted edits). They are independent of
+  A1/A2 and consistent with the in-flight tree-impostor / WebGPU readback work (`HEAD`: `c606a9f1`,
+  `b57e40f8`, `782b69e4`). The doc's earlier "543 files / 2924 tests pass" baseline predates them.
+- **Not fixed here:** repairing them would mean editing unrelated code, which the A1/A2 scope
+  forbids. Needs its own item/owner.
 
 ### Not-a-bug notes (verified this pass, keep for future readers)
 
@@ -143,8 +200,51 @@ heightfield-tile acceptance gate. Do this **after A1/A2** so the numbers reflect
 3. Flip Phase 2 to COMPLETE in its Status section and the overview table.
 
 - [ ] evidence captured and linked
-- [ ] acceptance gate added with real thresholds
+- [x] acceptance gate added with real thresholds (2026-07-14 — see below)
 - [ ] Phase 2 marked COMPLETE
+
+#### Acceptance gate landed 2026-07-14
+
+**`accept:infinite-islands` cannot cover this path, even with `heightTiles=1`.** Streamed tiles only
+become *authoritative* when `worldMode === "continent"` (`heightfield_tile_runtime.ts:142`), so on
+infinite-islands there is no page gating and `createHeightfieldTileGpuAtlas` returns `null` — no
+atlas, no atlas counters. The gate therefore needs the continent scene, so this pass added:
+
+- **`npm --prefix tools/clod-poc run accept:continent-tiles`** (`tools/continent-tiles-acceptance.ts`):
+  boots `scene=continent`, waits for the tile cache to converge at a fixed pose (every required tile
+  resident, queues drained), settles, then applies the shared rules. Writes
+  `acceptance-runs/continent-tiles/<ts>/report.json`.
+- **Continent tile rules in `tools/infinite_acceptance/thresholds.ts`.** They are *optional*
+  counters (absent on a default run → never reported "missing") but **strict when present**, so the
+  existing infinite-islands runs are unaffected.
+
+Thresholds are calibrated from real settled captures, not invented:
+
+| counter | measured (settled) | gate |
+| --- | --- | --- |
+| `heightfield_tiles_required` / `_resident` | 70 / 70 | resident must cover required |
+| `heightfield_tiles_pending` / `_inflight` | 0 / 0 | must drain to 0 |
+| `heightfield_tiles_build_ms_p95` | 288.5 / 311.1 / 311.7 ms | finite, > 0, **≤ 600** (≈2× headroom over ~8% run-to-run spread) |
+| `heightfield_tiles_fallback_samples_this_frame` | 0 | must be 0 once tiles are resident |
+| `heightfield_tile_gpu_atlas_resident` | 48 | must be > 0 while atlas enabled |
+| `heightfield_tiles_failures_total` / `_store_errors` | 0 / 0 | must be 0 |
+
+Two calibration findings that a guessed threshold would have got wrong:
+
+1. **`fallbackSamplesTotal` is not gateable as an absolute.** It reads **1,393,852** on a healthy
+   run (all accumulated during startup before tiles are resident), but its growth once settled is
+   exactly **0**. The real invariant is "fallback stops once tiles are resident", so this pass added
+   `heightfield_tiles_fallback_samples_this_frame` to the cache counters (mirroring the existing
+   `far_clipmap_fallback_samples_this_frame` convention) and gates **that** at 0. Gating the
+   cumulative total at 0 would fail every healthy run; gating it at `>= 0` would be theater.
+2. **The GPU atlas cannot cover the required set.** It is a fixed 7×7 (49-slot) toroidal ring, so
+   `atlas_resident` measured 48 against 70 required. A "resident ≥ required" atlas rule — the
+   obvious-looking one — would fail on healthy runs. The gate asserts `> 0` while enabled.
+
+Status: the gate **passes on a real continent run** (converges in ~14 s, `frame_ms_p95` 5.6 ms).
+Each rule's negative case is covered by unit tests in `thresholds.test.ts`. Evidence rows 1–3 of the
+Phase 2 checklist (perf:main on/off, perf:move route, cold-vs-warm latency) are still outstanding,
+so Phase 2 stays **IMPLEMENTED, evidence pending** — do not flip it to COMPLETE on this gate alone.
 
 ---
 

@@ -7,6 +7,8 @@
 // to the synchronous fallback path.
 
 import type { TerrainFieldConfigInput } from "../terrain/terrain_surface.js";
+import type { HydrologyGraph } from "../world/hydrology_graph/hydrology_graph.js";
+import type { GraphTerrainCarveConfig } from "./graph_hydrology.js";
 import type { WaterConfig } from "./waterConfig.js";
 
 export interface HydrologyTileWorkerConfigureRequest {
@@ -17,6 +19,8 @@ export interface HydrologyTileWorkerConfigureRequest {
   tileSizeM: number;
   tileRes: number;
   drySentinelDepthM: number;
+  hydrologyGraph: HydrologyGraph | null;
+  hydrologyCarve: GraphTerrainCarveConfig | null;
 }
 
 export interface HydrologyTileWorkerBuildRequest {

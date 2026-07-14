@@ -10,7 +10,12 @@
 
 import { baseSurfaceHeight, setTerrainFieldConfig } from "../terrain/terrain.js";
 import { makeFakeBodyCarvedSampler } from "./fakeBodyCarve.js";
-import { buildHydrologyTileData, type HydrologyTileBuildOptions } from "./hydrologyTileSource.js";
+import { createCarvedGraphHydrologySampler } from "./graph_hydrology.js";
+import {
+  buildHydrologyTileData,
+  type HydrologyTileBuildOptions,
+  type HydrologyWorldSampler,
+} from "./hydrologyTileSource.js";
 import type { TerrainHeightSampler } from "./water_field_types.js";
 import type { WaterConfig } from "./waterConfig.js";
 import {
@@ -28,6 +33,7 @@ const ctx = self as unknown as {
 interface WorkerState {
   configId: number;
   sampler: TerrainHeightSampler;
+  sampleHydrology?: HydrologyWorldSampler;
   options: HydrologyTileBuildOptions;
 }
 
@@ -38,9 +44,22 @@ function handleConfigure(request: HydrologyTileWorkerConfigureRequest): void {
   // makeFakeBodyCarvedSampler only reads config.fakeBodies; the cast keeps the
   // configure payload minimal instead of shipping the whole water config.
   const carveConfig = { fakeBodies: request.fakeBodies } as WaterConfig;
+  const graphSampler = request.hydrologyGraph && request.hydrologyCarve
+    ? createCarvedGraphHydrologySampler(
+        request.hydrologyGraph,
+        { surfaceHeight: baseSurfaceHeight },
+        request.hydrologyCarve,
+        request.drySentinelDepthM,
+      )
+    : null;
   state = {
     configId: request.configId,
-    sampler: makeFakeBodyCarvedSampler(carveConfig, { surfaceHeight: baseSurfaceHeight }),
+    sampler: graphSampler
+      ? { surfaceHeight: baseSurfaceHeight }
+      : makeFakeBodyCarvedSampler(carveConfig, { surfaceHeight: baseSurfaceHeight }),
+    sampleHydrology: graphSampler
+      ? (x, z) => graphSampler.sample(x, z)
+      : undefined,
     options: {
       tileSizeM: request.tileSizeM,
       tileRes: request.tileRes,
@@ -57,7 +76,13 @@ function handleBuild(request: Extract<HydrologyTileWorkerRequest, { type: "build
   }
   const t0 = performance.now();
   const tiles = request.tiles.map((coord) =>
-    buildHydrologyTileData(coord.tileX, coord.tileZ, state!.sampler, state!.options));
+    buildHydrologyTileData(
+      coord.tileX,
+      coord.tileZ,
+      state!.sampler,
+      state!.options,
+      state!.sampleHydrology,
+    ));
   ctx.postMessage({
     type: "built",
     requestId: request.requestId,

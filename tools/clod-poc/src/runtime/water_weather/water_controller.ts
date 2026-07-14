@@ -63,7 +63,10 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   // as the bit-identical fallback. Prefetch must cover the largest ring that samples
   // through the tile cache (cellSize <= the cache's coarse bypass threshold).
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
-  const hydrologyRemote = tileBypassCellSize !== null ? createHydrologyTileRemoteBuilder() : null;
+  const tileRemoteAuthority = deps.hydrologySystem?.tileRemoteAuthority() ?? null;
+  const hydrologyRemote = tileBypassCellSize !== null && tileRemoteAuthority
+    ? createHydrologyTileRemoteBuilder()
+    : null;
   let hydrologyPrefetchRadiusM = 0;
   if (hydrologyRemote && deps.hydrologySystem) {
     const fakeBodies = deps.hydrologySystem.unifiedStartupActive()
@@ -75,6 +78,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       tileSizeM: deps.waterConfig.hydrology.infinite.tileSizeM,
       tileRes: deps.waterConfig.hydrology.infinite.tileRes,
       drySentinelDepthM: deps.waterConfig.hydrology.waterSurface.drySentinelDepth,
+      hydrologyGraph: tileRemoteAuthority!.graph,
+      hydrologyCarve: tileRemoteAuthority!.carve,
     });
     deps.hydrologySystem.attachTileRemote(hydrologyRemote);
     for (const cellSize of deps.waterConfig.cellSizes) {

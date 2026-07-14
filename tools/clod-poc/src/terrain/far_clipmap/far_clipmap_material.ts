@@ -363,8 +363,34 @@ function createWebGpuFarClipmapMaterial(input: {
     height,
     positionGeometry.z.mul(uniforms.uCellSize),
   );
-  const heightColor: TslNode = tslSmoothstep(-16.0, 128.0, height);
-  const landColor: TslNode = tslMix(tslVec3(0.20, 0.27, 0.18), tslVec3(0.36, 0.35, 0.32), heightColor);
+  const materialId: TslNode = sourceSample.w;
+  const meadowColor: TslNode = tslVec3(0.18, 0.34, 0.12);
+  const forestColor: TslNode = tslVec3(0.08, 0.22, 0.07);
+  const swampColor: TslNode = tslVec3(0.16, 0.25, 0.10);
+  const mountainColor: TslNode = tslVec3(0.36, 0.35, 0.31);
+  const plainsColor: TslNode = tslVec3(0.30, 0.34, 0.15);
+  const coastColor: TslNode = tslVec3(0.48, 0.42, 0.27);
+  const biomeColor: TslNode = tslMix(
+    tslMix(
+      tslMix(
+        tslMix(
+          tslMix(meadowColor, forestColor, tslSmoothstep(0.15, 0.85, materialId)),
+          swampColor,
+          tslSmoothstep(1.15, 1.85, materialId),
+        ),
+        mountainColor,
+        tslSmoothstep(2.15, 2.85, materialId),
+      ),
+      plainsColor,
+      tslSmoothstep(3.15, 3.85, materialId),
+    ),
+    coastColor,
+    tslSmoothstep(4.15, 4.85, materialId),
+  );
+  const slopeRock: TslNode = tslSmoothstep(0.18, 0.62, sourceSample.z.oneMinus());
+  const elevationRock: TslNode = tslSmoothstep(uniforms.uSeaLevel.add(80), uniforms.uSeaLevel.add(220), terrainHeight).mul(0.62);
+  const macroLight: TslNode = max(0.62, sourceSample.z.mul(0.38).add(0.62));
+  const landColor: TslNode = tslMix(biomeColor, mountainColor, max(slopeRock, elevationRock)).mul(macroLight);
   const waterColor: TslNode = tslVec3(0.07, 0.19, 0.26);
   const legacyTerrainColor: TslNode = tslMix(
     waterColor,
@@ -545,7 +571,7 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
         data[offset] = finiteOr(height, 0);
         data[offset + 1] = finiteOr(normal.x, 0);
         data[offset + 2] = finiteOr(normal.y, 1);
-        data[offset + 3] = finiteOr(normal.z, 0);
+        data[offset + 3] = finiteOr(hasSummary ? summary.material : input.source.sampleMaterial(worldX, worldZ), 0);
         waterData[offset] = finiteOr(hasSummary ? summary.waterLevel : height, height);
         waterData[offset + 1] = finiteOr(hasSummary ? summary.bodyKind : 0, 0);
         waterData[offset + 2] = finiteOr(hasSummary ? summary.shoreDistance : 0, 0);

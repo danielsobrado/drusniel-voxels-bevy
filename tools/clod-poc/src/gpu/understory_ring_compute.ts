@@ -20,6 +20,7 @@ import {
 import { getDigEditsSnapshot, getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { buildVegetationSlotPrefilter, VegetationSlotPrefilterCache } from "../vegetation/vegetation_slot_prefilter.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 
 const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
@@ -320,7 +321,7 @@ export class UnderstoryGpuRingCompute {
       centerZ: params.centerZ,
       cameraY,
       worldCells: params.worldCells,
-      unbounded: getTerrainFieldCoreConfig().islandShape.enabled,
+      unbounded: runtimeWorldUsesCameraRelativeCoordinates() || getTerrainFieldCoreConfig().islandShape.enabled,
       grid: understoryRingGrid(this.settings),
       cell: understoryRingCell(this.settings),
       clusterDimSlots: PREFILTER_CLUSTER_DIM_SLOTS,

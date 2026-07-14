@@ -257,3 +257,121 @@ describe("infinite islands thresholds", () => {
     expect(extractAcceptanceCounters({ counters })["infinite_hydrology_nonrepeat_ok"]).toBe(1);
   });
 });
+
+/** A settled continent run: streamed tiles authoritative, atlas resident, queues drained. */
+function continentCounters(overrides: Record<string, number> = {}): Record<string, number> {
+  return validCounters({
+    heightfield_tiles_enabled: 1,
+    heightfield_tiles_required: 24,
+    heightfield_tiles_resident: 24,
+    heightfield_tiles_pending: 0,
+    heightfield_tiles_inflight: 0,
+    heightfield_tiles_builds_total: 24,
+    heightfield_tiles_build_ms_p95: 288.5,
+    heightfield_tiles_fallback_samples_total: 1_393_852,
+    heightfield_tiles_fallback_samples_this_frame: 0,
+    heightfield_tiles_store_errors: 0,
+    heightfield_tiles_failures_total: 0,
+    heightfield_tile_gpu_atlas_enabled: 1,
+    heightfield_tile_gpu_atlas_uploads: 24,
+    heightfield_tile_gpu_atlas_resident: 24,
+    ...overrides,
+  });
+}
+
+describe("continent heightfield tile gate", () => {
+  it("stays silent on a default run that never streams continent tiles", () => {
+    const result = evaluateThresholds(validCounters());
+    expect(result.passed).toBe(true);
+    expect(result.missing).not.toContain("heightfield_tiles_enabled");
+    expect(result.missing).not.toContain("heightfield_tile_gpu_atlas_resident");
+  });
+
+  it("passes a settled continent run", () => {
+    expect(evaluateThresholds(continentCounters()).passed).toBe(true);
+  });
+
+  it("fails when the tile queues have not drained", () => {
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_pending: 3 })).failures).toContain(
+      "heightfield_tiles_pending=3 failed: must drain to 0 while streamed tiles are enabled",
+    );
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_inflight: 1 })).failures).toContain(
+      "heightfield_tiles_inflight=1 failed: must drain to 0 while streamed tiles are enabled",
+    );
+  });
+
+  it("fails when residency does not cover every required tile", () => {
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_resident: 23 })).failures).toContain(
+      "heightfield_tiles_resident=23 failed: must cover every required tile while streamed tiles are enabled",
+    );
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_required: 0 })).failures).toContain(
+      "heightfield_tiles_required=0 failed: must be > 0 while streamed tiles are enabled",
+    );
+  });
+
+  it("fails on tile build failures or persistent-store errors", () => {
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_failures_total: 1 })).failures).toContain(
+      "heightfield_tiles_failures_total=1 failed: must equal 0",
+    );
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_store_errors: 2 })).failures).toContain(
+      "heightfield_tiles_store_errors=2 failed: must equal 0",
+    );
+  });
+
+  it("requires a resident GPU tile atlas once the atlas is enabled", () => {
+    expect(evaluateThresholds(continentCounters({ heightfield_tile_gpu_atlas_resident: 0 })).failures).toContain(
+      "heightfield_tile_gpu_atlas_resident=0 failed: must be > 0 while the tile atlas is enabled",
+    );
+    expect(evaluateThresholds(continentCounters({ heightfield_tile_gpu_atlas_uploads: 0 })).failures).toContain(
+      "heightfield_tile_gpu_atlas_uploads=0 failed: must be > 0 while the tile atlas is enabled",
+    );
+  });
+
+  it("tolerates an inactive atlas when tiles stream without continent authority", () => {
+    const nonAuthoritative = continentCounters({
+      heightfield_tile_gpu_atlas_enabled: 0,
+      heightfield_tile_gpu_atlas_uploads: 0,
+      heightfield_tile_gpu_atlas_resident: 0,
+    });
+    expect(evaluateThresholds(nonAuthoritative).passed).toBe(true);
+  });
+
+  it("tolerates a partially-resident atlas, which is smaller than the required tile set", () => {
+    // The GPU atlas is a fixed toroidal ring (7x7 slots), so it cannot hold every required tile.
+    // Measured on a settled continent run: 70 tiles required, 48 atlas-resident.
+    expect(evaluateThresholds(continentCounters({
+      heightfield_tiles_required: 70,
+      heightfield_tiles_resident: 70,
+      heightfield_tile_gpu_atlas_resident: 48,
+      heightfield_tile_gpu_atlas_uploads: 48,
+    })).passed).toBe(true);
+  });
+
+  it("fails when the sampler still falls back to procedural height after tiles are resident", () => {
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_fallback_samples_this_frame: 4 })).failures).toContain(
+      "heightfield_tiles_fallback_samples_this_frame=4 failed: must equal 0 once streamed tiles are resident",
+    );
+  });
+
+  it("bounds tile build time once tiles have actually been built", () => {
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_build_ms_p95: 900 })).failures).toContain(
+      "heightfield_tiles_build_ms_p95=900 failed: must be finite, > 0 and <= 600 once tiles have been built",
+    );
+    // A p95 of 0 alongside completed builds means the build timer is broken, not that it is fast.
+    expect(evaluateThresholds(continentCounters({ heightfield_tiles_build_ms_p95: 0 })).failures).toContain(
+      "heightfield_tiles_build_ms_p95=0 failed: must be finite, > 0 and <= 600 once tiles have been built",
+    );
+    // An all-store-hit run builds nothing, so a zero p95 is legitimate there.
+    expect(evaluateThresholds(continentCounters({
+      heightfield_tiles_builds_total: 0,
+      heightfield_tiles_build_ms_p95: 0,
+    })).passed).toBe(true);
+  });
+
+  it("extracts continent tile counters from stats", () => {
+    const counters = continentCounters();
+    expect(extractAcceptanceCounters({ counters })["heightfield_tiles_pending"]).toBe(0);
+    expect(extractAcceptanceCounters({ counters })["heightfield_tile_gpu_atlas_resident"]).toBe(24);
+    expect(extractAcceptanceCounters({ counters })["heightfield_tiles_fallback_samples_this_frame"]).toBe(0);
+  });
+});

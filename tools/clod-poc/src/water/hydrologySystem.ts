@@ -12,6 +12,8 @@ import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import { computeBodyIds, computeShoreDistance } from "./bodyIdentity.js";
 import { HydrologyTileCache, type HydrologyTileCacheStats, type HydrologyTileRemoteSource, type HydrologyWorldSampler } from "./hydrologyTileSource.js";
 import type { HydrologyTileAtlasSource } from "./hydrologyAtlas.js";
+import type { HydrologyGraph } from "../world/hydrology_graph/hydrology_graph.js";
+import type { GraphTerrainCarveConfig } from "./graph_hydrology.js";
 import { packHydrologyFieldsTexels, packHydrologyWaterSurfaceTexels } from "./hydrologyGpuPacking.js";
 import {
   HYDROLOGY_BODY_DRY,
@@ -49,6 +51,11 @@ export interface HydrologyStats {
   waterYFarMax: number;
 }
 
+export interface HydrologyTileRemoteAuthority {
+  readonly graph: HydrologyGraph | null;
+  readonly carve: GraphTerrainCarveConfig | null;
+}
+
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
 export class HydrologySystem {
@@ -63,6 +70,7 @@ export class HydrologySystem {
   private readonly atlasTilesPerSide: number;
   private readonly worldSampler: HydrologyWorldSampler;
   private readonly acceptsRemoteTiles: boolean;
+  private readonly remoteTileAuthority: HydrologyTileRemoteAuthority | null;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
@@ -77,7 +85,7 @@ export class HydrologySystem {
     boundaryBlendM: number,
     atlasTilesPerSide: number,
     worldSampler: HydrologyWorldSampler,
-    acceptsRemoteTiles: boolean,
+    remoteTileAuthority: HydrologyTileRemoteAuthority | null,
   ) {
     this.grid = grid;
     this.stats = stats;
@@ -89,7 +97,8 @@ export class HydrologySystem {
     this.boundaryBlendM = boundaryBlendM;
     this.atlasTilesPerSide = atlasTilesPerSide;
     this.worldSampler = worldSampler;
-    this.acceptsRemoteTiles = acceptsRemoteTiles;
+    this.acceptsRemoteTiles = remoteTileAuthority !== null;
+    this.remoteTileAuthority = remoteTileAuthority;
   }
 
   /**
@@ -156,7 +165,11 @@ export class HydrologySystem {
     config: HydrologyConfig,
     worldCells: number,
     sampler: TerrainHeightSampler,
-    options: { infiniteWorldSamples?: boolean; worldSampler?: HydrologyWorldSampler } = {},
+    options: {
+      infiniteWorldSamples?: boolean;
+      worldSampler?: HydrologyWorldSampler;
+      remoteTileAuthority?: HydrologyTileRemoteAuthority;
+    } = {},
   ): HydrologySystem {
     const t0 = nowMs();
     const infiniteWorldSamples = options.infiniteWorldSamples ?? infiniteIslandsScene();
@@ -189,7 +202,8 @@ export class HydrologySystem {
       config.infinite.boundaryBlendM,
       config.infinite.atlasTilesPerSide,
       worldSampler,
-      options.worldSampler === undefined,
+      options.remoteTileAuthority
+        ?? (options.worldSampler === undefined ? { graph: null, carve: null } : null),
     );
   }
 
@@ -260,6 +274,10 @@ export class HydrologySystem {
 
   attachTileRemote(remote: HydrologyTileRemoteSource | null): void {
     this.tileCache?.attachRemote(this.acceptsRemoteTiles ? remote : null);
+  }
+
+  tileRemoteAuthority(): HydrologyTileRemoteAuthority | null {
+    return this.remoteTileAuthority;
   }
 
   /** Tile-backed source for the streaming GPU hydrology atlas (Phase 4b); null when this
