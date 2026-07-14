@@ -70,7 +70,7 @@ describe("external WebGPU CLOD geometry", () => {
     expect(backendData.get(geometry.indirect as object)?.buffer).toBe(indirectBuffer);
     expect(isExternalGpuClodGeometry(geometry)).toBe(true);
 
-    releaseExternalGpuClodGeometry(geometry);
+    geometry.dispose();
     releaseExternalGpuClodGeometry(geometry);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
