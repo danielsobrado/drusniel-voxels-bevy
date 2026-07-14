@@ -7,8 +7,11 @@ import {
 } from "./gpu_clod_resident_registry.js";
 import {
   GPU_CLOD_VERTEX_FLOATS,
+  destroyGpuClodResidentPage,
   type GpuClodResidentPage,
 } from "./gpu_clod_resident_types.js";
+
+export type { GpuClodResidentPage } from "./gpu_clod_resident_types.js";
 
 const MIN_BUFFER_BYTES = 4;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
@@ -55,27 +58,45 @@ export class GpuClodResidentPageCache {
       if (node.level > this.config.residentMaxLevel || node.mesh.indices.length === 0) continue;
       this.upsertCpuNode(node);
     }
-    this.evictToBudget();
+    this.evictToBudget(new Set());
     this.publishCounters();
   }
 
   adopt(page: GpuClodResidentPage): void {
+    this.adoptMany([page]);
+  }
+
+  adoptMany(pages: readonly GpuClodResidentPage[]): void {
+    if (pages.length === 0) return;
     if (!this.config.enabled || this.disposed) {
-      page.vertexBuffer.destroy();
-      page.indexBuffer.destroy();
-      page.meshlets?.headers.destroy();
-      page.meshlets?.bounds.destroy();
-      page.meshlets?.hierarchyHeaders.destroy();
-      page.meshlets?.hierarchyBounds.destroy();
-      page.meshlets?.indirect.destroy();
+      for (const page of pages) destroyGpuClodResidentPage(page);
       return;
     }
-    if (page.level > this.config.residentMaxLevel) {
-      throw new Error(`GPU CLOD resident page ${page.id} level ${page.level} exceeds configured max ${this.config.residentMaxLevel}`);
+
+    const protectedIds = new Set<string>();
+    let protectedBytes = 0;
+    for (const page of pages) {
+      if (page.level > this.config.residentMaxLevel) {
+        throw new Error(
+          `GPU CLOD resident page ${page.id} level ${page.level} exceeds configured max ${this.config.residentMaxLevel}`,
+        );
+      }
+      if (protectedIds.has(page.id)) throw new Error(`duplicate GPU CLOD resident page ${page.id} in one batch`);
+      protectedIds.add(page.id);
+      protectedBytes += page.byteLength;
     }
-    this.replace(page, null);
-    this.adoptedPagesTotal++;
-    this.evictToBudget();
+
+    const budget = this.budgetBytes();
+    if (protectedBytes > budget) {
+      throw new Error(`GPU CLOD resident batch needs ${protectedBytes} bytes, budget is ${budget}`);
+    }
+
+    for (const page of pages) this.replace(page, null);
+    this.adoptedPagesTotal += pages.length;
+    this.evictToBudget(protectedIds);
+    if (this.residentBytes > budget) {
+      throw new Error(`GPU CLOD resident cache could not satisfy ${budget}-byte budget without evicting the active batch`);
+    }
     this.publishCounters();
   }
 
@@ -217,13 +238,13 @@ export class GpuClodResidentPageCache {
     return buffer;
   }
 
-  private evictToBudget(): void {
-    const budget = Math.max(MIN_BUFFER_BYTES, this.config.maxResidentBytes);
+  private evictToBudget(protectedIds: ReadonlySet<string>): void {
+    const budget = this.budgetBytes();
     while (this.residentBytes > budget && this.entries.size > 0) {
       let oldestId: string | null = null;
       let oldestTouch = Infinity;
       for (const [id, entry] of this.entries) {
-        if (entry.lastTouch >= oldestTouch) continue;
+        if (protectedIds.has(id) || entry.lastTouch >= oldestTouch) continue;
         oldestId = id;
         oldestTouch = entry.lastTouch;
       }
@@ -234,6 +255,10 @@ export class GpuClodResidentPageCache {
       this.residentBytes -= entry.page.byteLength;
       this.evictionsTotal++;
     }
+  }
+
+  private budgetBytes(): number {
+    return Math.max(MIN_BUFFER_BYTES, this.config.maxResidentBytes);
   }
 
   private publishCounters(): void {
