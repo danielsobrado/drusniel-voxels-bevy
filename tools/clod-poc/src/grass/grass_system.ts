@@ -14,6 +14,10 @@ import type {
   GrassMaterialHandle,
 } from "./grass_geometry.js";
 import type { GrassWebGpuBackendAccess } from "./grass_gpu_ring.js";
+import {
+  resolveGrassGpuPresentation,
+  type GrassGpuPresentation,
+} from "./grass_gpu_presentation.js";
 import { GrassCpuPatchRuntime } from "./grass_cpu_patch_runtime.js";
 import { GrassGpuRingRuntime } from "./grass_gpu_ring_runtime.js";
 import { GrassMaterialRuntime } from "./grass_material_runtime.js";
@@ -127,7 +131,7 @@ export class GrassSystem {
       this.updateStats();
       return;
     }
-    if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
+    if (this.updateGpuPresentation(this.lastCenter) !== "unavailable") {
       this.updateStats();
       return;
     }
@@ -157,7 +161,7 @@ export class GrassSystem {
     this.cpuPatches.markDirty();
     if (this.settings.enabled && !wasEnabled) {
       this.gpuRing.updateCpuFallbackStatus(this.settings);
-      if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
+      if (this.updateGpuPresentation(this.lastCenter) !== "unavailable") {
         this.updateStats();
         return;
       }
@@ -179,16 +183,9 @@ export class GrassSystem {
       this.updateStats();
       return;
     }
-    if (this.gpuRing.canUse(this.settings)) {
-      if (this.gpuRing.updateCounters(this.settings, center, camera)) {
-        if (this.cpuPatches.patches.length > 0) this.cpuPatches.clear();
-        this.updateStats();
-        return;
-      }
-      this.gpuRing.clearRing();
-      this.gpuRing.clearCompute();
-      this.gpuRing.updateCpuFallbackStatus(this.settings);
-      this.cpuPatches.markDirty();
+    if (this.updateGpuPresentation(center, camera) !== "unavailable") {
+      this.updateStats();
+      return;
     }
     if (this.gpuRing.hasResources) {
       this.gpuRing.clearRing();
@@ -201,15 +198,11 @@ export class GrassSystem {
   rebuild(): void {
     this.clearCpuAndGpu();
     this.gpuRing.resetFailure();
-    if (this.settings.enabled) {
-      if (this.gpuRing.canUse(this.settings) && this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
-        // GPU ring is active.
-      } else {
-        this.gpuRing.clearRing();
-        this.gpuRing.clearCompute();
-        this.gpuRing.updateCpuFallbackStatus(this.settings);
-        this.cpuPatches.refreshForCenter(this.lastCenter, this.settings);
-      }
+    if (this.settings.enabled && this.updateGpuPresentation(this.lastCenter) === "unavailable") {
+      this.gpuRing.clearRing();
+      this.gpuRing.clearCompute();
+      this.gpuRing.updateCpuFallbackStatus(this.settings);
+      this.cpuPatches.refreshForCenter(this.lastCenter, this.settings);
     }
     this.root.visible = this.settings.enabled;
     this.updateStats();
@@ -224,24 +217,18 @@ export class GrassSystem {
     if (ids.size === 0) return;
     if (this.gpuRing.canUse(this.settings)) {
       this.gpuRing.clearCompute();
-      if (this.gpuRing.updateCounters(this.settings, this.lastCenter)) {
+      if (this.updateGpuPresentation(this.lastCenter) === "rendering") {
         this.updateStats();
         return;
       }
-      this.gpuRing.clearRing();
-      this.gpuRing.updateCpuFallbackStatus(this.settings);
     }
     this.cpuPatches.removeForNodes(ids);
     this.updateStats();
   }
 
   rebuildNodePatches(nodeIds: Iterable<string>): void {
-    if (this.gpuRing.canUse(this.settings)) {
-      this.removePatchesForNodes(nodeIds);
-      if (this.gpuRing.hasDrawResources) return;
-    } else {
-      this.removePatchesForNodes(nodeIds);
-    }
+    this.removePatchesForNodes(nodeIds);
+    if (this.isGpuRingRendering()) return;
     this.cpuPatches.refreshForCenter(this.lastCenter, this.settings);
     this.updateStats();
   }
@@ -257,7 +244,7 @@ export class GrassSystem {
   }
 
   getBladeCount(): number {
-    return this.gpuRing.canUse(this.settings) ? this.gpuRing.bladeCount : this.cpuPatches.bladeCount;
+    return this.isGpuRingRendering() ? this.gpuRing.bladeCount : this.cpuPatches.bladeCount;
   }
 
   getStats(): GrassStats {
@@ -267,6 +254,35 @@ export class GrassSystem {
 
   setRingDebug(enabled: boolean): void {
     this.gpuRing.setDebug(enabled);
+  }
+
+  private updateGpuPresentation(
+    center: THREE.Vector3,
+    camera?: THREE.Camera,
+  ): GrassGpuPresentation {
+    if (!this.gpuRing.canUse(this.settings)) return "unavailable";
+
+    const ringKey = this.gpuRing.currentKey(this.settings);
+    const presentation = resolveGrassGpuPresentation(
+      this.gpuRing.updateCounters(this.settings, center, camera),
+      this.isGpuRingRendering(),
+    );
+    if (presentation === "unavailable") {
+      this.gpuRing.failedGpuRingKey = ringKey;
+      return presentation;
+    }
+    if (presentation === "rendering") {
+      if (this.cpuPatches.patches.length > 0) this.cpuPatches.clear();
+      return presentation;
+    }
+    if (this.cpuPatches.patches.length === 0) {
+      this.cpuPatches.refreshForCenter(center, this.settings);
+    }
+    return presentation;
+  }
+
+  private isGpuRingRendering(): boolean {
+    return this.gpuRing.meshes.some((mesh) => mesh.visible);
   }
 
   private clearCpuAndGpu(): void {
@@ -281,7 +297,7 @@ export class GrassSystem {
     this.stats = buildGrassStats({
       mode: this.settings.shaderMode,
       ringMode: this.gpuRing.isRingMode(this.settings),
-      activeGpu: this.gpuRing.canUse(this.settings),
+      activeGpu: this.isGpuRingRendering(),
       patches: this.cpuPatches.patches,
       ringMeshes: this.gpuRing.meshes,
       ringTierCounts: this.gpuRing.tierCounts,
