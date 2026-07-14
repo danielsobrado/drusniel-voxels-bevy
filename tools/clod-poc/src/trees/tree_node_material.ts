@@ -51,6 +51,11 @@ type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_VARIANT_HASH_SALT = 1103;
+const TREE_DEFAULT_AMBIENT_FLOOR = 0.025;
+const TREE_FOLIAGE_TRANSMISSION = 0.28;
+const TREE_MATERIAL_AERIAL_TINT_SCALE = 0.15;
+const TREE_MATERIAL_AERIAL_TINT_MAX = 0.04;
+const TREE_MATERIAL_SHAFT_HINT = 0.01;
 const FOLIAGE_CARD_RADIUS_X = 0.48;
 const FOLIAGE_CARD_RADIUS_Y = 0.50;
 const FOLIAGE_CARD_EDGE_START = 0.72;
@@ -66,9 +71,10 @@ const LOD_COLORS: Record<TreeLod, THREE.Color> = {
 function fallbackLighting(): EnvironmentLighting {
   return {
     sunDirection: new THREE.Vector3(0.4, 0.85, 0.3).normalize(),
-    sunColor: new THREE.Color(1.0, 0.96, 0.88),
-    skyLight: new THREE.Color(0x6b7a94),
-    groundLight: new THREE.Color(0x2e2921),
+    sunColor: new THREE.Color(2.4, 2.3, 2.1),
+    skyLight: new THREE.Color(0.075, 0.085, 0.105),
+    groundLight: new THREE.Color(0.015, 0.013, 0.01),
+    ambientFloor: TREE_DEFAULT_AMBIENT_FLOOR,
   };
 }
 
@@ -142,6 +148,7 @@ export function createTreeNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uAmbientFloor = uniform(lighting.ambientFloor ?? TREE_DEFAULT_AMBIENT_FLOOR);
   const neutralForestData = new Uint8Array([0, 0, 0, 0]);
   const neutralForestTexture = new THREE.DataTexture(neutralForestData, 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
   neutralForestTexture.needsUpdate = true;
@@ -149,8 +156,8 @@ export function createTreeNodeMaterialHandle(
   const uForestWorldSize = uniform(1);
   const uForestAoStrength = uniform(1);
   const uForestShadowStrength = uniform(1);
-  const uForestFogStrength = uniform(1);
-  const uForestFogColor = uniform(new THREE.Vector3(0.72, 0.78, 0.81));
+  const uForestFogStrength = uniform(0);
+  const uForestFogColor = uniform(new THREE.Vector3(0.40, 0.45, 0.43));
   const uVariantSeed = uniform(settings.seed);
 
   const forestMapNodes: TslNode[] = [];
@@ -198,16 +205,20 @@ export function createTreeNodeMaterialHandle(
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
     const back: TslNode = max(dot(n.negate(), uLight), 0.0);
-    const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(0.5);
-    const litBase: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
+    const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(TREE_FOLIAGE_TRANSMISSION);
+    const litBase: TslNode = albedo.mul(hemi.add(direct).add(uAmbientFloor)).add(transmission);
     const forestDarken: TslNode = clamp(
       forestPacked.x.mul(uForestAoStrength).add(forestPacked.y.mul(uForestShadowStrength)),
       0.0,
       0.72,
     ).mul(uForestEnabled);
-    const forestFog: TslNode = clamp(forestPacked.z.mul(uForestFogStrength).mul(uForestEnabled), 0.0, 0.35);
+    const forestFog: TslNode = clamp(
+      forestPacked.z.mul(uForestFogStrength).mul(uForestEnabled),
+      0.0,
+      TREE_MATERIAL_AERIAL_TINT_MAX,
+    );
     const lit: TslNode = mix(litBase.mul(float(1).sub(forestDarken)), uForestFogColor, forestFog)
-      .add(vec3(forestPacked.w.mul(0.05).mul(uForestEnabled)));
+      .add(vec3(forestPacked.w.mul(TREE_MATERIAL_SHAFT_HINT).mul(uForestEnabled)));
 
     const aLodFade: TslNode = attribute("treeLodFade", "float");
     const ign: TslNode = fract(
@@ -264,18 +275,19 @@ export function createTreeNodeMaterialHandle(
       uSun.value.copy(v3(next.sunColor));
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
+      uAmbientFloor.value = next.ambientFloor ?? TREE_DEFAULT_AMBIENT_FLOOR;
     },
     updateForestLighting(state: ForestLightingMaterialState | null) {
       if (!state) {
         uForestEnabled.value = 0;
         return;
       }
-      const settings = state.settings;
-      uForestEnabled.value = settings.enabled && settings.materialIntegration.treeEnabled ? 1 : 0;
+      const next = state.settings;
+      uForestEnabled.value = next.enabled && next.materialIntegration.treeEnabled ? 1 : 0;
       uForestWorldSize.value = Math.max(1, state.worldCells);
-      uForestAoStrength.value = settings.ambientOcclusion.strength;
-      uForestShadowStrength.value = settings.shadowProxy.strength;
-      uForestFogStrength.value = settings.atmosphere.forestFogStrength + settings.atmosphere.aerialTintStrength;
+      uForestAoStrength.value = next.ambientOcclusion.strength;
+      uForestShadowStrength.value = next.shadowProxy.strength;
+      uForestFogStrength.value = next.atmosphere.aerialTintStrength * TREE_MATERIAL_AERIAL_TINT_SCALE;
       for (const mapNode of forestMapNodes) mapNode.value = state.textureHandle.texture;
     },
     dispose() {
@@ -308,6 +320,7 @@ export function createTreeRingNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uAmbientFloor = uniform(lighting.ambientFloor ?? TREE_DEFAULT_AMBIENT_FLOOR);
   const barkTexture = sharedBarkTexture(settings.seed);
   const materials: MeshBasicNodeMaterial[] = [];
   let debugColorByLod = settings.render.debugColorByLod;
@@ -370,8 +383,8 @@ export function createTreeRingNodeMaterialHandle(
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
     const back: TslNode = max(dot(n.negate(), uLight), 0.0);
-    const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(0.5);
-    const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
+    const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(TREE_FOLIAGE_TRANSMISSION);
+    const lit: TslNode = albedo.mul(hemi.add(direct).add(uAmbientFloor)).add(transmission);
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
@@ -433,6 +446,7 @@ export function createTreeRingNodeMaterialHandle(
       uSun.value.copy(v3(next.sunColor));
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
+      uAmbientFloor.value = next.ambientFloor ?? TREE_DEFAULT_AMBIENT_FLOOR;
     },
     updateForestLighting() {
       // Ring forest lighting is attached by tree_material_parity.
