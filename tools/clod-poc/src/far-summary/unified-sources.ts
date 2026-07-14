@@ -38,6 +38,10 @@ export interface FarSummaryCanopySourceInput {
   getConfig: () => CanopyShellConfig;
   sampleHeight: (x: number, z: number) => number;
   sampleMaterial?: (x: number, z: number) => number;
+  /**
+   * Retained for source compatibility. Unified canopy masking consumes the tile's enriched
+   * water field and intentionally does not resample hydrology from this callback.
+   */
   sampleWater?: (x: number, z: number, cellSizeHint: number) => FarSummaryWaterSample;
 }
 
@@ -67,7 +71,7 @@ export function createFarSummaryCanopySource(
           normal,
           slope: Math.max(0, Math.min(1, 1 - normal.y)),
           materialHint: input.sampleMaterial?.(x, z) ?? 0,
-          water: (input.sampleWater?.(x, z, cellSizeM).coverage ?? 0) > 0,
+          water: false,
         };
       },
     });

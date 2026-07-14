@@ -30,9 +30,11 @@ export const DEFAULT_FAR_SUMMARY_GPU_CONFIG: FarSummaryGpuConfig = {
 };
 
 export function farSummaryGpuDefaultsForScene(params: URLSearchParams): FarSummaryGpuConfig {
-  if (params.get("scene") !== "continent" || params.get("farSummaryLayout") !== "2") {
-    return DEFAULT_FAR_SUMMARY_GPU_CONFIG;
-  }
+  const scene = params.get("scene");
+  const unifiedLayout = params.get("farSummaryLayout") === "2";
+  const gpuFirstScene = scene === "continent" || scene === "infinite-islands";
+  if (!gpuFirstScene || !unifiedLayout) return DEFAULT_FAR_SUMMARY_GPU_CONFIG;
+
   return {
     ...DEFAULT_FAR_SUMMARY_GPU_CONFIG,
     enabled: true,
