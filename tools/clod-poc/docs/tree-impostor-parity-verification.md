@@ -9,8 +9,15 @@ The tree impostor path now uses the same source appearance contract as live tree
 - albedo, normals, and depth are dilated independently inside each octahedral tile;
 - transparent coverage remains unchanged while RGB and normal-depth edge data are filled for safe filtering and mipmaps;
 - CPU tree instances, GPU mesh LODs, and impostor atlas pages use the same world-space structural-variant selector;
+- every one of the four live structural variants has its own atlas page; variants 2 and 3 are no longer folded onto pages 0 and 1;
 - GPU near, mid, far, and impostor rings use complementary material-side dither during compute overlap bands;
 - an opt-in live atlas lab exposes every baked species and channel inside the actual world scene.
+
+## Atlas memory contract
+
+The production atlas preserves the current 8x8 views and 192-pixel frame resolution for all four structural variants. With six species, two RGBA8 textures per species, and mipmaps, the estimated impostor atlas allocation is approximately 576 MiB.
+
+This is an intentional fidelity tradeoff. Do not reduce the variant-page count below `TREE_STRUCTURAL_VARIANTS`; tune frame resolution or move to persistent compressed assets if the measured memory budget is too high.
 
 ## Automated local gate
 
@@ -62,9 +69,10 @@ Each species displays three panels:
 
 Inspect for:
 
+- four vertically stacked variant pages per species;
 - no black or grey fringe around foliage at distant mip levels;
 - no colour or normal bleed between octahedral tiles or variant pages;
-- matching crown silhouette and colour between the source mesh and billboard;
+- matching crown silhouette and colour between the source mesh and billboard for variants 0, 1, 2, and 3;
 - no view-cell flip or dark spike during a full orbit;
 - no hole, brightness jump, or double-covered crown through the far-to-impostor boundary;
 - no structural crown change when the same tree switches from mesh to impostor.
@@ -95,6 +103,7 @@ Do not call visual parity complete from unit tests or a software WebGPU adapter.
 
 - the automated local gate passing;
 - non-zero real-GPU impostor counts;
+- all enabled species reporting four atlas variant pages;
 - a clean orbit capture;
 - a clean frozen far-to-impostor boundary capture;
 - the live atlas lab showing clean albedo, normal, and depth channels for all enabled species.
