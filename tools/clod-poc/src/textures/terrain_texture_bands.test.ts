@@ -28,7 +28,7 @@ function tinyConfig(): ProceduralTextureConfig {
 describe("procedural terrain height bands", () => {
   it("moves from green terrain into rock before the current mountain ceiling", () => {
     const terrain = createProceduralTerrainTextures(tinyConfig());
-    const byId = new Map(terrain.slots.map((slot) => [slot.selectedId, slot]));
+    const byId = new Map(terrain.slots.map((slot) => [slot.selectedId, slot] as const));
     const grass = byId.get("generated:grass")!;
     const rock = byId.get("generated:rock")!;
     const snow = byId.get("generated:snow")!;
