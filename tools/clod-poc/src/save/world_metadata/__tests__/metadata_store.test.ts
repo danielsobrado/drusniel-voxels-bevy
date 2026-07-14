@@ -83,7 +83,7 @@ describe("world metadata store", () => {
       caveSystems: 1,
       criticalPaths: 1,
     });
-    expect(createEmptyWorldMetadataRecord().schemaVersion).toBe(1);
+    expect(createEmptyWorldMetadataRecord().schemaVersion).toBe(2);
   });
 
   it("fails loud on dangling links", () => {

@@ -36,6 +36,7 @@
     "accept:infinite-islands:full": "node tools/run-infinite-islands-acceptance.mjs",
     "accept:phase5-voxel-overlay": "tsx tools/phase5-voxel-overlay-acceptance.ts",
     "world:verify": "tsx tools/world-verify.ts",
+    "accept:phase6-road-stamp": "tsx tools/phase6-road-stamp-acceptance.ts",
     "terrain:diagnose": "tsx tools/diagnose-terrain-material.ts",
     "trees:verify-terrain-cull": "node scripts/apply-tree-terrain-cull.mjs",
     "trees:wire-visible-cluster-mask": "node scripts/wire-tree-visible-cluster-mask-gpu.mjs",

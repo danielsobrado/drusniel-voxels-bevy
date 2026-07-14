@@ -134,7 +134,23 @@ propId = hash64(manifest.worldId, tileKey, layer, candidateIndex)
 ## Evidence (fill before merging final commit)
 
 - [x] prop id stability/uniqueness test run
-- [ ] destroy→reload acceptance; exclusion perf A/B numbers
-- [ ] road stamp QA shots + critical-path validation output
+- [x] destroy→reload acceptance; exclusion perf A/B numbers
+- [x] road stamp QA shots + critical-path validation output
 - [x] v1 fixture migration test run
-- [ ] world:verify sweep output on a fresh continent
+- [x] world:verify sweep output on a fresh continent
+
+### Measured evidence (2026-07-14)
+
+- Full suite: 541 files, 2,912 tests passed; typecheck and production build passed.
+- `world:verify --tiles 24`: 24 deterministic tiles and 6,144 unique stable prop IDs; one
+  destroyed delta restored into one sparse exclusion tile.
+- Tree GPU A/B (`warmup=600`, 300 frames): frame p50/p95 2.20/2.80 ms baseline and
+  2.10/2.50 ms with exclusions enabled; render p95 1.80/1.70 ms; `ring:300`, 0 errors.
+  The CPU A/B emitted pre-existing invalid render-pipeline errors in both cases and is not used
+  as performance evidence.
+- `shots/phase-6/road-stamp.png` and `road-stamp-stats.json`: hill center 65 m -> road bed
+  18 m, 2,560 scatter samples excluded, structure coverage 1, critical-path errors/warnings 0.
+- Infinite-islands reuse acceptance passed every scene/gate except one noisy perf sample:
+  `perf/biome-near frame_ms_p95=8.5` against an 8.0 ms gate. The Phase 6 focused GPU A/B above
+  is clean. The standard battery reached long-view and failed its existing `shadow_proxy_tris=0`
+  gate; all Phase 0/1 captures completed without runtime errors.
