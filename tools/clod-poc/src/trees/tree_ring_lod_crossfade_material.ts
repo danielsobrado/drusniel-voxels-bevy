@@ -12,7 +12,6 @@ import {
   storage,
   uniform,
   vec2,
-  vec3,
 } from "three/tsl";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
@@ -27,12 +26,11 @@ import {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
-type DitherRole = "primary" | "secondary";
+export type TreeRingDitherRole = "primary" | "secondary";
 
-interface TreeRingCrossfadeState {
-  active: boolean;
+export interface TreeRingCrossfadeState {
   fade: number;
-  role: DitherRole;
+  role: TreeRingDitherRole;
 }
 
 interface NodeMaterialLike extends THREE.Material {
@@ -41,6 +39,7 @@ interface NodeMaterialLike extends THREE.Material {
 
 interface CrossfadeUniforms {
   enabled: TslNode;
+  seed: TslNode;
   near: TslNode;
   mid: TslNode;
   far: TslNode;
@@ -56,7 +55,7 @@ export function decorateTreeRingLodCrossfade(
   lod: TreeLod,
 ): TreeMaterialHandle {
   const uniforms = createCrossfadeUniforms(settings);
-  const keep = createTreeRingCrossfadeKeepNode(settings, buffers, lod, uniforms);
+  const keep = createTreeRingCrossfadeKeepNode(buffers, lod, uniforms);
   const materials = [handle.regularMaterial, ...Object.values(handle.debugMaterials)]
     .filter((material, index, all) => all.indexOf(material) === index) as NodeMaterialLike[];
 
@@ -84,11 +83,8 @@ export function treeRingCrossfadeState(
   lod: TreeLod,
   settings: TreeSettings,
 ): TreeRingCrossfadeState {
-  if (!settings.lod.crossfadeEnabled || !settings.lod.ditherEnabled) {
-    return { active: true, fade: 1, role: "primary" };
-  }
+  if (!crossfadeEnabled(settings)) return { fade: 1, role: "primary" };
   const halfBand = Math.max(0, settings.lod.crossfadeBandM);
-  if (halfBand <= 0) return { active: true, fade: 1, role: "primary" };
   const thresholds = treeRingThresholds(settings);
   const index = LOD_ORDER.indexOf(lod);
   const previousThreshold = index > 0 ? thresholds[index - 1] : null;
@@ -96,13 +92,13 @@ export function treeRingCrossfadeState(
 
   if (previousThreshold !== null && inBand(distance, previousThreshold, halfBand)) {
     const fade = clamp01((distance - (previousThreshold - halfBand)) / (halfBand * 2));
-    return { active: true, fade, role: "secondary" };
+    return { fade, role: "secondary" };
   }
   if (nextThreshold !== null && inBand(distance, nextThreshold, halfBand)) {
     const fade = 1 - clamp01((distance - (nextThreshold - halfBand)) / (halfBand * 2));
-    return { active: true, fade, role: "primary" };
+    return { fade, role: "primary" };
   }
-  return { active: true, fade: 1, role: "primary" };
+  return { fade: 1, role: "primary" };
 }
 
 export function treeRingCrossfadeKeeps(noise: number, state: TreeRingCrossfadeState): boolean {
@@ -111,7 +107,6 @@ export function treeRingCrossfadeKeeps(noise: number, state: TreeRingCrossfadeSt
 }
 
 function createTreeRingCrossfadeKeepNode(
-  settings: TreeSettings,
   buffers: TreeRingInstanceBuffers,
   lod: TreeLod,
   uniforms: CrossfadeUniforms,
@@ -119,17 +114,16 @@ function createTreeRingCrossfadeKeepNode(
   const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
   const cell: TslNode = cellStore.element(instanceIndex);
   const worldCell: TslNode = cell.xy;
-  const seed = uniform(settings.seed);
   const jitter: TslNode = vec2(
-    treeRingHash(worldCell, seed, TREE_RING_JITTER_X_SALT),
-    treeRingHash(worldCell, seed, TREE_RING_JITTER_Z_SALT),
+    treeRingHash(worldCell, uniforms.seed, TREE_RING_JITTER_X_SALT),
+    treeRingHash(worldCell, uniforms.seed, TREE_RING_JITTER_Z_SALT),
   );
   const worldXZ: TslNode = worldCell.add(jitter).mul(TREE_RING_CELL_SIZE_M);
   const distance: TslNode = vec2(cameraPosition.x, cameraPosition.z).sub(worldXZ).length();
   const noise: TslNode = fract(
     fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
   );
-  const thresholds = [uniforms.near, uniforms.mid, uniforms.far];
+  const thresholds: readonly [TslNode, TslNode, TslNode] = [uniforms.near, uniforms.mid, uniforms.far];
   const index = LOD_ORDER.indexOf(lod);
   const previousThreshold = index > 0 ? thresholds[index - 1] : null;
   const nextThreshold = index < LOD_ORDER.length - 1 ? thresholds[index] : null;
@@ -160,6 +154,7 @@ function createCrossfadeUniforms(settings: TreeSettings): CrossfadeUniforms {
   const distances = treeRingThresholds(settings);
   return {
     enabled: uniform(crossfadeEnabled(settings) ? 1 : 0),
+    seed: uniform(settings.seed),
     near: uniform(distances[0]),
     mid: uniform(distances[1]),
     far: uniform(distances[2]),
@@ -170,6 +165,7 @@ function createCrossfadeUniforms(settings: TreeSettings): CrossfadeUniforms {
 function updateCrossfadeUniforms(uniforms: CrossfadeUniforms, settings: TreeSettings): void {
   const distances = treeRingThresholds(settings);
   uniforms.enabled.value = crossfadeEnabled(settings) ? 1 : 0;
+  uniforms.seed.value = settings.seed;
   uniforms.near.value = distances[0];
   uniforms.mid.value = distances[1];
   uniforms.far.value = distances[2];
