@@ -16,6 +16,7 @@ import {
   readCleanedTreeImpostorAtlasTextures,
   type TreeImpostorReadbackRenderer,
 } from "./tree_impostor_atlas_readback.js";
+import { treeAtlasVariantIndex } from "./tree_variant_selection.js";
 
 export {
   configureTreeImpostorAtlasTexture,
@@ -25,9 +26,7 @@ export {
 
 const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
 /** Variant pages stacked in each atlas. Structural variants above this share
- *  the canonical frames; yaw/scale variation covers the rest at impostor
- *  distance. Each page costs gridSize²·resolution²·2 textures of GPU memory
- *  and a full bake pass per species, so keep this small. */
+ *  atlas pages deterministically to keep the runtime memory budget bounded. */
 export const TREE_IMPOSTOR_MAX_ATLAS_VARIANTS = 2;
 
 export interface TreeImpostorAtlas {
@@ -251,7 +250,11 @@ export function treeImpostorFramesForVariant(
   atlas: TreeImpostorAtlas,
   variant: number,
 ): OctahedralFrame[] {
-  return atlas.variantFrames?.[normalizeTreeImpostorVariant(variant)] ?? atlas.frames;
+  const page = treeAtlasVariantIndex(
+    normalizeTreeImpostorVariant(variant),
+    treeImpostorVariantCountForAtlas(atlas),
+  );
+  return atlas.variantFrames?.[page] ?? atlas.frames;
 }
 
 export function treeImpostorVariantCountForAtlas(atlas: TreeImpostorAtlas): number {
