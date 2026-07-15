@@ -1,4 +1,10 @@
-import { EROSION_SCHEMA_VERSION, HEIGHT_UNITS_PER_METER, SEDIMENT_UNITS_PER_METER } from "./constants.js";
+import { yieldErosionTask } from "./abort.js";
+import {
+  EROSION_ASYNC_CELLS_PER_YIELD,
+  EROSION_SCHEMA_VERSION,
+  HEIGHT_UNITS_PER_METER,
+  SEDIMENT_UNITS_PER_METER,
+} from "./constants.js";
 import type { ErosionArtifact, ErosionArtifactSummary, ErosionDiagnostics, ErodedMacroField } from "./types.js";
 
 const EMPTY: ErosionDiagnostics = {
@@ -42,6 +48,22 @@ export function updateErosionProgress(percent: number): void {
   publish();
 }
 
+function summaryResult(
+  field: ErodedMacroField,
+  minHeight: number,
+  maxHeight: number,
+  eroded: number,
+  deposited: number,
+): ErosionArtifactSummary {
+  const cellArea = field.cellSizeM * field.cellSizeM;
+  return Object.freeze({
+    minHeightM: minHeight / HEIGHT_UNITS_PER_METER,
+    maxHeightM: maxHeight / HEIGHT_UNITS_PER_METER,
+    erodedM3: eroded / SEDIMENT_UNITS_PER_METER * cellArea,
+    depositedM3: deposited / SEDIMENT_UNITS_PER_METER * cellArea,
+  });
+}
+
 export function summarizeErosionField(field: ErodedMacroField): ErosionArtifactSummary {
   let minHeight = 0x7fffffff;
   let maxHeight = -0x80000000;
@@ -54,13 +76,26 @@ export function summarizeErosionField(field: ErodedMacroField): ErosionArtifactS
     if (delta < 0) eroded += -delta;
     else deposited += delta;
   }
-  const cellArea = field.cellSizeM * field.cellSizeM;
-  return Object.freeze({
-    minHeightM: minHeight / HEIGHT_UNITS_PER_METER,
-    maxHeightM: maxHeight / HEIGHT_UNITS_PER_METER,
-    erodedM3: eroded / SEDIMENT_UNITS_PER_METER * cellArea,
-    depositedM3: deposited / SEDIMENT_UNITS_PER_METER * cellArea,
-  });
+  return summaryResult(field, minHeight, maxHeight, eroded, deposited);
+}
+
+export async function summarizeErosionFieldAsync(
+  field: ErodedMacroField,
+  signal?: AbortSignal,
+): Promise<ErosionArtifactSummary> {
+  let minHeight = 0x7fffffff;
+  let maxHeight = -0x80000000;
+  let eroded = 0;
+  let deposited = 0;
+  for (let index = 0; index < field.heightFixed.length; index++) {
+    minHeight = Math.min(minHeight, field.heightFixed[index]!);
+    maxHeight = Math.max(maxHeight, field.heightFixed[index]!);
+    const delta = field.deposition[index]!;
+    if (delta < 0) eroded += -delta;
+    else deposited += delta;
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  return summaryResult(field, minHeight, maxHeight, eroded, deposited);
 }
 
 export function recordErosionArtifact(
