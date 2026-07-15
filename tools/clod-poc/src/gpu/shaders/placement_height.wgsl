@@ -24,6 +24,11 @@ const PLACEMENT_BEACH_HIGHLAND_FULL_EXTRA_CELLS: f32 = 12.0;
 const PLACEMENT_BEACH_HIGHLAND_PRESERVE_SHORE_FRACTION: f32 = 0.72;
 const PLACEMENT_CLIFF_MIN_HEIGHT_ABOVE_WATER: f32 = 16.0;
 const PLACEMENT_CLIFF_INLAND_BOOST: f32 = 4.0;
+const PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M: f32 = -500000.0;
+
+fn placement_ground_height_is_excluded(height_m: f32) -> bool {
+  return height_m <= PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M;
+}
 
 fn placement_hydro_enabled() -> bool {
   let dims = textureDimensions(hydro_texture);
@@ -163,6 +168,7 @@ fn placement_beach_highland_preserve(edge_distance: f32, inland_height: f32, oce
 }
 
 fn placement_border_coast_height(wx: f32, wz: f32, inland_height: f32, world_size: f32) -> f32 {
+  if (placement_ground_height_is_excluded(inland_height)) { return inland_height; }
   // Infinite-island worlds have no finite rectangular coast: the analytic field shapes its own
   // shoreline and there is terrain far outside the [0, world_size] startup box. The beach/ocean
   // collapse below keys off distance to that box edge, so applying it in an island world flattens
@@ -196,6 +202,7 @@ fn placement_base_ground_height(wx: f32, wz: f32) -> f32 {
 
 fn placement_ground_height(wx: f32, wz: f32, world_size: f32) -> f32 {
   let raw_height = placement_base_ground_height(wx, wz);
+  if (placement_ground_height_is_excluded(raw_height)) { return raw_height; }
   if (!placement_hydro_enabled()) {
     return placement_border_coast_height(wx, wz, raw_height, world_size);
   }
@@ -216,6 +223,9 @@ fn placement_ground_normal(wx: f32, wz: f32, world_size: f32, sample_distance: f
 }
 
 fn placement_hydrology_height(wx: f32, wz: f32, world_size: f32, base_height: f32) -> vec2<f32> {
+  if (placement_ground_height_is_excluded(base_height)) {
+    return vec2<f32>(base_height, 0.0);
+  }
   if (!placement_hydro_enabled()) {
     return vec2<f32>(placement_border_coast_height(wx, wz, base_height, world_size), 0.0);
   }
