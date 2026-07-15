@@ -68,4 +68,14 @@ describe("deterministic CPU erosion", () => {
     expect(new Set(artifact.field.heightFixed).size).toBe(1);
     expect(artifact.massErrorRatio).toBeLessThanOrEqual(1e-12);
   });
+
+  it("preserves AbortError before source sampling", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("cancelled", "AbortError");
+    controller.abort(reason);
+    await expect(buildErosionCpu({
+      ...input(testConfig()),
+      signal: controller.signal,
+    }, { seaLevelM: 18 })).rejects.toBe(reason);
+  });
 });
