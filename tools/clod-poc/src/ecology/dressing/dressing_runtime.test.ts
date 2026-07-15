@@ -78,7 +78,7 @@ describe("ecological dressing runtime", () => {
     };
     const hydrologySystem = {
       sample: () => ({
-        terrainY: 1_000,
+        terrainY: 20,
         depth: 0,
         shoreDistance: 999,
         flowX: 0,
@@ -87,7 +87,7 @@ describe("ecological dressing runtime", () => {
         riverMask: 0,
         flowStrength: 0,
       }),
-      terrainHeight: () => 1_000,
+      terrainHeight: () => 20,
     };
     const system = new DressingSystem({
       scene: new THREE.Scene(),
@@ -104,6 +104,9 @@ describe("ecological dressing runtime", () => {
     const visibleStumps = stats.perClass.stump_fresh.visible + stats.perClass.stump_rotten.visible;
     expect(visibleStumps).toBeGreaterThan(0);
     expect(generatedStumps).toBe(visibleStumps);
+    expect(stats.dressing_parent_attached_visible).toBeGreaterThan(0);
+    expect(stats.dressing_attachment_count).toBe(stats.dressing_parent_attached_visible);
+    expect(stats.dressing_attachment_parents).toBeGreaterThan(0);
     system.dispose();
   });
 
