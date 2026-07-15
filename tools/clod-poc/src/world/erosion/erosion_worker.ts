@@ -6,7 +6,7 @@ import { packErosionGpuInitialState } from "./gpu/buffers.js";
 import { finalizeErosionGpuRawOutput } from "./gpu/finalize.js";
 import { serializeErodedMacroField } from "./integration.js";
 import { sampleErosionSourceField } from "./state.js";
-import type { ErosionArtifact, ErosionGpuCheckpoint } from "./types.js";
+import type { ErosionArtifact } from "./types.js";
 import type {
   ErosionWorkerArtifactRecord,
   ErosionWorkerRequest,
