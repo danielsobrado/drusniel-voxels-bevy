@@ -166,6 +166,7 @@ export async function runRuntimeSystemsStartup(
     terrainOcclusionSampler,
     currentLighting,
     statControllers,
+    searchParams,
   });
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
 

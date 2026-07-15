@@ -54,6 +54,7 @@ export interface VegetationStartupInput {
   terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   currentLighting: () => EnvironmentLighting;
   statControllers: VegetationStatControllerRefs;
+  searchParams?: URLSearchParams;
 }
 
 export interface VegetationStartupResult {
@@ -72,6 +73,7 @@ export interface VegetationStartupResult {
   understoryController: ReturnType<typeof createUnderstoryController>;
   understorySystem: ReturnType<typeof createUnderstoryController>["system"];
   understoryStats: { current: UnderstoryStats | null };
+  dressingSystem: import("../../ecology/dressing/dressing_system.js").DressingSystem;
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
   onStoneScatterComplete: { current: (() => void) | null };

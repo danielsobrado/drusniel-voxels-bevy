@@ -5,7 +5,7 @@ import {
   dressingClassNumericId,
 } from "./class_registry.js";
 import { parseDressingConfig } from "./config.js";
-import { selectDecayClass } from "./decay.js";
+import { decayAge, selectDecayClass } from "./decay.js";
 import { evaluateCaveAffinity } from "./cave_affinity.js";
 import { evaluateHydrologyAffinity } from "./hydrology_affinity.js";
 import { DressingInvalidationQueue } from "./invalidation.js";
@@ -17,7 +17,13 @@ import {
   stableIdKey,
 } from "./stable_id.js";
 import { createGrassSuppressionField } from "./grass_suppression.js";
-import { resolveMossLichenSlot } from "./attachment_candidates.js";
+import {
+  attachmentAllowed,
+  attachmentId,
+  resolveMossLichenSlot,
+  type AttachmentParent,
+} from "./attachment_candidates.js";
+import type { DressingAttachmentAnchor } from "./attachment_anchors.js";
 import { acceptDeadLogCandidate, createPairedStumpId } from "./persistent_candidates.js";
 import { acceptTerrainCandidate } from "./terrain_candidates.js";
 import type { DressingEnvironmentSample } from "./types.js";
@@ -121,6 +127,38 @@ describe("ecological acceptance rules", () => {
     expect(selectDecayClass(0.9)).toBe("rotten");
     expect(resolveMossLichenSlot(0.61)).toBe("moss");
     expect(resolveMossLichenSlot(0.6)).toBe("lichen");
+    const id = { lo: 0x1234, hi: 0x87654321 };
+    expect(decayAge(id, 0.7, 0.8, 0.4)).toBe(decayAge(id, 0.7, 0.8, 0.4));
+  });
+
+  it("accepts attachments only for valid parent, anchor, and ecology rules", () => {
+    const parent: AttachmentParent = {
+      stableId: { lo: 1, hi: 0x80000000 },
+      transform: { position: [1, 2, 3], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+      age01: 0.8,
+      health01: 0.2,
+      decay01: 0.8,
+      destroyed: false,
+    };
+    const anchor: DressingAttachmentAnchor = {
+      slot: 3,
+      kind: "root_flare",
+      positionLocal: [0, 0, 0],
+      normalLocal: [0, 1, 0],
+      tangentLocal: [1, 0, 0],
+      radiusM: 0.4,
+      exposure01: 0.3,
+    };
+    expect(attachmentAllowed("shelf_fungus", parent, anchor, baseSample)).toBe(true);
+    expect(attachmentAllowed("cap_fungus", parent, anchor, baseSample)).toBe(true);
+    expect(attachmentAllowed("trunk_moss", parent, anchor, { ...baseSample, moisture: 0.8 })).toBe(true);
+    expect(attachmentAllowed("trunk_lichen", parent, anchor, { ...baseSample, moisture: 0.4 })).toBe(true);
+    expect(attachmentAllowed("hanging_vine", parent, anchor, baseSample)).toBe(true);
+    expect(attachmentAllowed("root_fern", parent, anchor, baseSample)).toBe(true);
+    expect(attachmentAllowed("root_fern", { ...parent, destroyed: true }, anchor, baseSample)).toBe(false);
+    expect(attachmentId(9, 1, parent, "root_fern", anchor)).toEqual(
+      attachmentId(9, 1, parent, "root_fern", anchor),
+    );
   });
 
   it("uses canopy, shore/flow, and cave policies", () => {
@@ -167,6 +205,8 @@ describe("ecological dressing mutation boundaries", () => {
     queue.register({ id: "b", bounds: { minX: 11, minY: 0, minZ: 0, maxX: 20, maxY: 10, maxZ: 10 } });
     queue.invalidate({ minX: 2, minY: 2, minZ: 2, maxX: 3, maxY: 3, maxZ: 3 });
     expect(queue.drain()).toEqual(["a"]);
+    queue.unregister("a");
+    expect(queue.pending).toBe(0);
   });
 
   it("applies reversible local grass suppression", () => {

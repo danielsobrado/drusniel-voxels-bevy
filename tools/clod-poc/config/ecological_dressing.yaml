@@ -1,0 +1,47 @@
+ecological_dressing:
+  schema_version: 1
+  enabled: true
+  cluster_size_m: 32
+  generator_schema_version: 1
+
+  persistence:
+    stable_environmental_props: true
+    save_cosmetic_items: false
+
+  densities:
+    deadfall_per_hectare: 28
+    stumps_per_hectare: 12
+    broken_snags_per_hectare: 6
+    moss_patches_per_hectare: 180
+    lichen_patches_per_hectare: 90
+    litter_clusters_per_hectare: 420
+    twig_clusters_per_hectare: 160
+    river_cobble_clusters_per_100m: 18
+    driftwood_per_100m: 2
+    cave_mouth_ferns_per_100m2: 8
+
+  cosmetic_density_multiplier:
+    ultra: 1.00
+    balanced: 0.75
+    perf: 0.50
+    potato: 0.30
+
+  lod:
+    persistent: [45, 180, 700]
+    parent_attached: [25, 90, 260]
+    terrain_attached: [20, 70, 220]
+
+  shadow:
+    persistent_near: true
+    persistent_proxy_far: true
+    parent_attached_near: false
+    terrain_attached_near: false
+
+  invalidation:
+    debounce_ms: 100
+    maximum_clusters_per_frame: 8
+
+  debug:
+    show_class: false
+    show_anchors: false
+    show_rejections: false

@@ -10,6 +10,7 @@ import {
 } from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
+import type { DressingSystem } from "../../ecology/dressing/dressing_system.js";
 
 export interface UnderstoryControllerUiState {
   understoryEnabled: boolean;
@@ -30,6 +31,7 @@ export interface UnderstoryControllerDeps {
   gpuBackend: GrassWebGpuBackendAccess | null;
   hydrologyData: UnderstoryHydrologyData | null;
   hydrologyWaterTexture: THREE.Texture | null;
+  dressingSystem?: DressingSystem | null;
   syncStatsToState: (stats: UnderstoryStats) => void;
 }
 
@@ -72,8 +74,8 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
         fern: { ...deps.understoryConfig.classes.fern },
         sapling: { ...deps.understoryConfig.classes.sapling },
         flower: { ...deps.understoryConfig.classes.flower },
-        dead_log: { ...deps.understoryConfig.classes.dead_log },
-        stump: { ...deps.understoryConfig.classes.stump },
+        dead_log: { ...deps.understoryConfig.classes.dead_log, enabled: deps.dressingSystem?.enabled ? false : deps.understoryConfig.classes.dead_log.enabled },
+        stump: { ...deps.understoryConfig.classes.stump, enabled: deps.dressingSystem?.enabled ? false : deps.understoryConfig.classes.stump.enabled },
       },
       render: {
         ...deps.understoryConfig.render,
@@ -114,6 +116,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     refreshStats: sync,
     update: (elapsedSeconds, ringCenter, camera) => {
       system.update(elapsedSeconds, ringCenter, camera);
+      deps.dressingSystem?.update(ringCenter);
     },
     updateLighting: (lighting) => system.updateLighting(lighting),
     setEnabled: (enabled) => {

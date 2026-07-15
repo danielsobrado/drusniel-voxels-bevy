@@ -20,6 +20,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
     queryGrassRingGrid, queryGrassRingCell,
     isWebGpu, rendererWebGpuDevice,
     hydrologySystem, terrainOcclusionSampler, currentLighting, statControllers,
+    searchParams,
   } = input;
 
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
@@ -57,6 +58,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
     scene, state, lod0Nodes, worldCells, understoryConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers,
+    searchParams,
   });
 
   return {
