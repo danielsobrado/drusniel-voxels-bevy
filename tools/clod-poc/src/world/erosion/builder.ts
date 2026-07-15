@@ -78,9 +78,9 @@ export async function buildCanonicalErosionArtifact(
           config: input.config,
           initial,
           ...(resume ? { checkpoint: resume } : {}),
-          signal: input.signal,
+          ...(input.signal ? { signal: input.signal } : {}),
         }, {
-          onProgress,
+          ...(onProgress ? { onProgress } : {}),
           onCheckpoint: async (next) => {
             const byteLength = next.stateAByteLength + next.stateBByteLength;
             await worker.saveGpuCheckpoint(next);
