@@ -188,6 +188,8 @@ export async function createErosionArtifact(input: {
   readonly readbackMs?: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
+  readonly gpuPassTimingsMs?: Readonly<Record<string, number>>;
+  readonly timestampQueriesSupported?: boolean;
 }): Promise<ErosionArtifact> {
   const canonicalBytes = encodeErosionArtifactCanonical(input.field, input.sourceTerrainHash, input.configHash);
   const hash = await sha256Hex(canonicalBytes);
@@ -214,6 +216,8 @@ export async function createErosionArtifact(input: {
     readbackMs: input.readbackMs ?? 0,
     checkpointCount: input.checkpointCount,
     massErrorRatio: input.massErrorRatio,
+    gpuPassTimingsMs: Object.freeze({ ...(input.gpuPassTimingsMs ?? {}) }),
+    timestampQueriesSupported: input.timestampQueriesSupported ?? false,
   });
 }
 
@@ -225,6 +229,8 @@ export async function decodeErosionArtifact(input: {
   readonly readbackMs: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
+  readonly gpuPassTimingsMs?: Readonly<Record<string, number>>;
+  readonly timestampQueriesSupported?: boolean;
 }): Promise<ErosionArtifact> {
   const canonicalBytes = decodeZstdRawFrame(input.compressedBytes);
   const hash = await sha256Hex(canonicalBytes);
@@ -234,5 +240,11 @@ export async function decodeErosionArtifact(input: {
     || field.originX !== input.ref.originX || field.originZ !== input.ref.originZ) {
     throw new Error("erosion artifact reference does not match its header");
   }
-  return Object.freeze({ ...input, field, canonicalBytes });
+  return Object.freeze({
+    ...input,
+    field,
+    canonicalBytes,
+    gpuPassTimingsMs: Object.freeze({ ...(input.gpuPassTimingsMs ?? {}) }),
+    timestampQueriesSupported: input.timestampQueriesSupported ?? false,
+  });
 }

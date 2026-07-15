@@ -1,6 +1,7 @@
 import type { FarTerrainVertexColors } from "./far_terrain_material_types.js";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
+import { sampleActiveErosionMaterialChannels } from "../world/erosion/integration.js";
 
 function cpuSmoothstep(edge0: number, edge1: number, v: number): number {
   const range = edge1 - edge0;
@@ -66,6 +67,7 @@ export function computeFarTerrainVertexColorsRange(
       height: y,
       slope: vertSlope,
       waterLevel: config.waterlineM,
+      erosion: sampleActiveErosionMaterialChannels(x, z),
       config: matConfig,
     });
 

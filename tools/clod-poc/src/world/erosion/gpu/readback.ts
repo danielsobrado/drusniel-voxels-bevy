@@ -1,73 +1,112 @@
-import { HEIGHT_UNITS_PER_METER } from "../constants.js";
-import type { ErodedMacroField, ErosionGpuInitialState } from "../types.js";
-import { GPU_OUTPUT_WORDS_PER_CELL } from "./buffers.js";
+import { EROSION_SCHEMA_VERSION } from "../constants.js";
+import type { ErosionGpuCheckpoint, ErosionGpuInitialState } from "../types.js";
+import type { ErosionGpuBuffers } from "./buffers.js";
+import { GPU_OUTPUT_WORDS_PER_CELL, GPU_STATE_A_WORDS_PER_CELL, GPU_STATE_B_WORDS_PER_CELL } from "./buffers.js";
 
-export interface ErosionGpuReadback {
-  readonly field: ErodedMacroField;
+const READBACK_CHUNK_BYTES = 4 * 1024 * 1024;
+
+export interface ErosionGpuChunkReadback {
+  readonly chunks: readonly ArrayBuffer[];
+  readonly byteLength: number;
   readonly readbackMs: number;
+  readonly maxMainThreadSliceMs: number;
 }
 
-export async function readErosionGpuOutput(
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function readBufferChunks(
+  device: GPUDevice,
+  source: GPUBuffer,
+  byteLength: number,
+  label: string,
+): Promise<ErosionGpuChunkReadback> {
+  const startedAt = performance.now();
+  const chunks: ArrayBuffer[] = [];
+  let maxMainThreadSliceMs = 0;
+  for (let offset = 0; offset < byteLength; offset += READBACK_CHUNK_BYTES) {
+    const chunkBytes = Math.min(READBACK_CHUNK_BYTES, byteLength - offset);
+    const readback = device.createBuffer({
+      label: `${label}-${offset}`,
+      size: chunkBytes,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    try {
+      const encoder = device.createCommandEncoder({ label: `${label}-copy-${offset}` });
+      encoder.copyBufferToBuffer(source, offset, readback, 0, chunkBytes);
+      device.queue.submit([encoder.finish()]);
+      await device.queue.onSubmittedWorkDone();
+      await readback.mapAsync(GPUMapMode.READ);
+      const sliceStartedAt = performance.now();
+      const chunk = readback.getMappedRange().slice(0);
+      maxMainThreadSliceMs = Math.max(maxMainThreadSliceMs, performance.now() - sliceStartedAt);
+      chunks.push(chunk);
+      readback.unmap();
+    } finally {
+      readback.destroy();
+    }
+    await nextTask();
+  }
+  return {
+    chunks,
+    byteLength,
+    readbackMs: performance.now() - startedAt,
+    maxMainThreadSliceMs,
+  };
+}
+
+export function erosionGpuOutputByteLength(initial: ErosionGpuInitialState): number {
+  return initial.sourceWidth * initial.sourceHeight * GPU_OUTPUT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+}
+
+export async function readErosionGpuOutputChunks(
   device: GPUDevice,
   output: GPUBuffer,
   initial: ErosionGpuInitialState,
-): Promise<ErosionGpuReadback> {
-  const startedAt = performance.now();
-  const byteLength = initial.sourceWidth * initial.sourceHeight * GPU_OUTPUT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
-  const readback = device.createBuffer({
-    label: "erosion-output-readback",
-    size: byteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+): Promise<ErosionGpuChunkReadback> {
+  return readBufferChunks(device, output, erosionGpuOutputByteLength(initial), "erosion-output-readback");
+}
+
+export async function readErosionGpuCheckpoint(
+  device: GPUDevice,
+  buffers: Pick<ErosionGpuBuffers, "stateA" | "stateB">,
+  initial: ErosionGpuInitialState,
+  sourceTerrainHash: string,
+  configHash: string,
+  hydraulicIteration: number,
+  thermalIteration: number,
+): Promise<{ readonly checkpoint: ErosionGpuCheckpoint; readonly readbackMs: number; readonly maxMainThreadSliceMs: number }> {
+  const cellCount = initial.width * initial.height;
+  const stateAByteLength = cellCount * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+  const stateBByteLength = cellCount * GPU_STATE_B_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+  const stateA = await readBufferChunks(device, buffers.stateA, stateAByteLength, "erosion-checkpoint-state-a");
+  const stateB = await readBufferChunks(device, buffers.stateB, stateBByteLength, "erosion-checkpoint-state-b");
+  const checkpoint: ErosionGpuCheckpoint = Object.freeze({
+    kind: "gpu",
+    schemaVersion: EROSION_SCHEMA_VERSION,
+    sourceTerrainHash,
+    configHash,
+    hydraulicIteration,
+    thermalIteration,
+    initial: Object.freeze({
+      sourceWidth: initial.sourceWidth,
+      sourceHeight: initial.sourceHeight,
+      width: initial.width,
+      height: initial.height,
+      borderCells: initial.borderCells,
+      cellSizeM: initial.cellSizeM,
+      originX: initial.originX,
+      originZ: initial.originZ,
+    }),
+    stateAByteLength,
+    stateBByteLength,
+    stateAChunks: stateA.chunks,
+    stateBChunks: stateB.chunks,
   });
-  const encoder = device.createCommandEncoder({ label: "erosion-output-copy" });
-  encoder.copyBufferToBuffer(output, 0, readback, 0, byteLength);
-  device.queue.submit([encoder.finish()]);
-  await device.queue.onSubmittedWorkDone();
-  await readback.mapAsync(GPUMapMode.READ);
-  const copy = readback.getMappedRange().slice(0);
-  readback.unmap();
-  readback.destroy();
-  const u32 = new Uint32Array(copy);
-  const i32 = new Int32Array(copy);
-  const count = initial.sourceWidth * initial.sourceHeight;
-  const heightFixed = new Int32Array(count);
-  const hardness = new Uint16Array(count);
-  const sediment = new Uint32Array(count);
-  const deposition = new Int32Array(count);
-  for (let index = 0; index < count; index++) {
-    const offset = index * GPU_OUTPUT_WORDS_PER_CELL;
-    heightFixed[index] = i32[offset]!;
-    hardness[index] = u32[offset + 1]! & 0xffff;
-    sediment[index] = u32[offset + 2]!;
-    deposition[index] = i32[offset + 3]!;
-  }
-  const field: ErodedMacroField = {
-    width: initial.sourceWidth,
-    height: initial.sourceHeight,
-    cellSizeM: initial.cellSizeM,
-    originX: initial.originX,
-    originZ: initial.originZ,
-    heightFixed,
-    hardness,
-    sediment,
-    deposition,
-    sampleHeightMeters(x, z) {
-      const fx = Math.max(0, Math.min(field.width - 1, (x - field.originX) / field.cellSizeM));
-      const fz = Math.max(0, Math.min(field.height - 1, (z - field.originZ) / field.cellSizeM));
-      const x0 = Math.floor(fx);
-      const z0 = Math.floor(fz);
-      const x1 = Math.min(field.width - 1, x0 + 1);
-      const z1 = Math.min(field.height - 1, z0 + 1);
-      const tx = fx - x0;
-      const tz = fz - z0;
-      const h00 = field.heightFixed[z0 * field.width + x0]!;
-      const h10 = field.heightFixed[z0 * field.width + x1]!;
-      const h01 = field.heightFixed[z1 * field.width + x0]!;
-      const h11 = field.heightFixed[z1 * field.width + x1]!;
-      const a = h00 + (h10 - h00) * tx;
-      const b = h01 + (h11 - h01) * tx;
-      return (a + (b - a) * tz) / HEIGHT_UNITS_PER_METER;
-    },
+  return {
+    checkpoint,
+    readbackMs: stateA.readbackMs + stateB.readbackMs,
+    maxMainThreadSliceMs: Math.max(stateA.maxMainThreadSliceMs, stateB.maxMainThreadSliceMs),
   };
-  return { field: Object.freeze(field), readbackMs: performance.now() - startedAt };
 }

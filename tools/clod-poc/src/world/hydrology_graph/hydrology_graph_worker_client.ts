@@ -26,7 +26,7 @@ function publishStartupPhase(phase: string, percent: number): void {
   if (progress) progress.hidden = false;
   if (phaseElement) phaseElement.textContent = phase;
   if (percentElement) percentElement.textContent = `${Math.round(percent)}%`;
-  if (bar) bar.value = Math.max(0, Math.min(100, percent));
+  if (bar) bar.value = Math.max(0, Math.min(1, percent / 100));
 }
 
 interface PendingBuild {

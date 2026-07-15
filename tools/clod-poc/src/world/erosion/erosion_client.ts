@@ -1,30 +1,49 @@
-import { decodeErosionArtifact } from "./artifact_codec.js";
 import { recordErosionArtifact, resetErosionDiagnostics, updateErosionProgress } from "./diagnostics.js";
-import { setActiveErodedMacroField, setLatestErosionArtifactRef } from "./integration.js";
-import type { ErosionArtifact, ErosionBuildProgress, ErosionGpuInitialState } from "./types.js";
+import { setActiveErodedMacroField, setLatestErosionArtifactRef, toErodedMacroField } from "./integration.js";
 import type {
+  ErosionArtifact,
+  ErosionBuildProgress,
+  ErosionGpuCheckpoint,
+  ErosionGpuInitialState,
+  ErosionGpuRawOutput,
+} from "./types.js";
+import type {
+  ErosionWorkerArtifactRecord,
   ErosionWorkerBuildRequest,
   ErosionWorkerResponse,
   ErosionWorkerSampleRequest,
+  ErosionWorkerStoreKey,
 } from "./worker_protocol.js";
 
-interface PendingBase {
+interface PendingBase<T> {
   readonly reject: (error: Error) => void;
+  readonly resolve: (value: T) => void;
   readonly worldId: string;
 }
 
-interface PendingBuild extends PendingBase {
+interface PendingArtifact extends PendingBase<ErosionArtifact | null> {
+  readonly kind: "artifact";
+}
+
+interface PendingBuild extends PendingBase<ErosionArtifact> {
   readonly kind: "build";
-  readonly resolve: (artifact: ErosionArtifact) => void;
   readonly onProgress?: (progress: ErosionBuildProgress) => void;
 }
 
-interface PendingSample extends PendingBase {
+interface PendingSample extends PendingBase<ErosionGpuInitialState> {
   readonly kind: "sample";
-  readonly resolve: (initial: ErosionGpuInitialState) => void;
 }
 
-type PendingRequest = PendingBuild | PendingSample;
+interface PendingCheckpoint extends PendingBase<ErosionGpuCheckpoint | null> {
+  readonly kind: "checkpoint";
+}
+
+interface PendingAck extends PendingBase<void> {
+  readonly kind: "ack";
+}
+
+type PendingRequest = PendingArtifact | PendingBuild | PendingSample | PendingCheckpoint | PendingAck;
+type PendingKind = PendingRequest["kind"];
 
 export interface ErosionWorkerClient {
   build(
@@ -32,8 +51,38 @@ export interface ErosionWorkerClient {
     onProgress?: (progress: ErosionBuildProgress) => void,
   ): Promise<ErosionArtifact>;
   sampleInitial(input: Omit<ErosionWorkerSampleRequest, "type" | "requestId">): Promise<ErosionGpuInitialState>;
+  loadArtifact(input: ErosionWorkerStoreKey, worldId: string): Promise<ErosionArtifact | null>;
+  loadGpuCheckpoint(input: ErosionWorkerStoreKey): Promise<ErosionGpuCheckpoint | null>;
+  saveGpuCheckpoint(checkpoint: ErosionGpuCheckpoint): Promise<void>;
+  clearCheckpoint(input: ErosionWorkerStoreKey): Promise<void>;
+  finalizeGpu(input: ErosionWorkerStoreKey & { readonly worldId: string; readonly raw: ErosionGpuRawOutput }): Promise<ErosionArtifact>;
   cancel(): void;
   dispose(): void;
+}
+
+function artifactFromRecord(record: ErosionWorkerArtifactRecord): ErosionArtifact {
+  const field = toErodedMacroField(record.field);
+  return Object.freeze({
+    ref: record.ref,
+    field,
+    canonicalBytes: record.canonicalBytes,
+    compressedBytes: record.compressedBytes,
+    buildMs: record.buildMs,
+    gpuMs: record.gpuMs,
+    readbackMs: record.readbackMs,
+    checkpointCount: record.checkpointCount,
+    massErrorRatio: record.massErrorRatio,
+    gpuPassTimingsMs: Object.freeze({ ...record.gpuPassTimingsMs }),
+    timestampQueriesSupported: record.timestampQueriesSupported,
+  });
+}
+
+function activateRecord(record: ErosionWorkerArtifactRecord, worldId: string): ErosionArtifact {
+  const artifact = artifactFromRecord(record);
+  setActiveErodedMacroField(artifact.field);
+  setLatestErosionArtifactRef(artifact.ref, worldId);
+  recordErosionArtifact(artifact, record.cacheHit, record.summary);
+  return artifact;
 }
 
 export function createErosionWorkerClient(): ErosionWorkerClient | null {
@@ -50,83 +99,149 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
 
   worker.onmessage = (event: MessageEvent<ErosionWorkerResponse>) => {
     const response = event.data;
-    const request = pending.get(response.requestId);
-    if (!request) return;
+    const pendingRequest = pending.get(response.requestId);
+    if (!pendingRequest) return;
     if (response.type === "erosionProgress") {
-      if (request.kind === "build") {
+      if (pendingRequest.kind === "build") {
         updateErosionProgress(response.progress.percent);
-        request.onProgress?.(response.progress);
+        pendingRequest.onProgress?.(response.progress);
       }
       return;
     }
     pending.delete(response.requestId);
     if (activeRequestId === response.requestId) activeRequestId = null;
     if (response.type === "erosionError") {
-      request.reject(new Error(response.message));
+      pendingRequest.reject(new Error(response.message));
       return;
     }
     if (response.type === "erosionSourceSampled") {
-      if (request.kind !== "sample") {
-        request.reject(new Error("erosion worker returned source data for an artifact build"));
+      if (pendingRequest.kind !== "sample") {
+        pendingRequest.reject(new Error("erosion worker returned source data for a different request"));
         return;
       }
-      request.resolve(response.initial);
+      pendingRequest.resolve(response.initial);
       return;
     }
-    if (request.kind !== "build") {
-      request.reject(new Error("erosion worker returned an artifact for a source request"));
+    if (response.type === "erosionArtifactLoaded") {
+      if (pendingRequest.kind !== "artifact") {
+        pendingRequest.reject(new Error("erosion worker returned a cached artifact for a different request"));
+        return;
+      }
+      pendingRequest.resolve(response.artifact ? activateRecord(response.artifact, pendingRequest.worldId) : null);
       return;
     }
-    void decodeErosionArtifact(response.artifact).then((artifact) => {
-      setActiveErodedMacroField(artifact.field);
-      setLatestErosionArtifactRef(artifact.ref, request.worldId);
-      recordErosionArtifact(artifact, response.artifact.cacheHit);
-      request.resolve(artifact);
-    }, request.reject);
+    if (response.type === "erosionGpuCheckpointLoaded") {
+      if (pendingRequest.kind !== "checkpoint") {
+        pendingRequest.reject(new Error("erosion worker returned a checkpoint for a different request"));
+        return;
+      }
+      pendingRequest.resolve(response.checkpoint);
+      return;
+    }
+    if (response.type === "erosionGpuCheckpointSaved" || response.type === "erosionCheckpointCleared") {
+      if (pendingRequest.kind !== "ack") {
+        pendingRequest.reject(new Error("erosion worker returned a persistence acknowledgement for a different request"));
+        return;
+      }
+      pendingRequest.resolve();
+      return;
+    }
+    if (pendingRequest.kind !== "build") {
+      pendingRequest.reject(new Error("erosion worker returned an artifact for a non-build request"));
+      return;
+    }
+    pendingRequest.resolve(activateRecord(response.artifact, pendingRequest.worldId));
   };
 
   worker.onerror = (event) => {
     const error = new Error(`erosion worker crashed: ${event.message ?? "unknown error"}`);
-    for (const request of pending.values()) request.reject(error);
+    for (const pendingRequest of pending.values()) pendingRequest.reject(error);
     pending.clear();
     activeRequestId = null;
   };
 
-  const reserve = (request: PendingRequest): number => {
-    if (disposed) throw new Error("erosion worker disposed");
-    if (activeRequestId !== null) throw new Error("erosion worker already has an active request");
-    const requestId = nextRequestId++;
-    activeRequestId = requestId;
-    pending.set(requestId, request);
-    return requestId;
-  };
+  function send<T>(input: {
+    readonly kind: PendingKind;
+    readonly worldId: string;
+    readonly onProgress?: (progress: ErosionBuildProgress) => void;
+    readonly message: (requestId: number) => object;
+    readonly transfer?: Transferable[];
+  }): Promise<T> {
+    if (disposed) return Promise.reject(new Error("erosion worker disposed"));
+    if (activeRequestId !== null) return Promise.reject(new Error("erosion worker already has an active request"));
+    return new Promise<T>((resolve, reject) => {
+      const requestId = nextRequestId++;
+      activeRequestId = requestId;
+      const entry = {
+        kind: input.kind,
+        worldId: input.worldId,
+        resolve,
+        reject,
+        ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+      } as unknown as PendingRequest;
+      pending.set(requestId, entry);
+      worker.postMessage(input.message(requestId), input.transfer ?? []);
+    });
+  }
 
   return {
     build(input, onProgress) {
-      if (disposed) return Promise.reject(new Error("erosion worker disposed"));
       resetErosionDiagnostics(input.config.erosion.enabled);
-      return new Promise((resolve, reject) => {
-        let requestId: number;
-        try {
-          requestId = reserve({ kind: "build", resolve, reject, worldId: input.worldId, ...(onProgress ? { onProgress } : {}) });
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
-          return;
-        }
-        worker.postMessage({ type: "buildErosion", requestId, ...input });
+      return send<ErosionArtifact>({
+        kind: "build",
+        worldId: input.worldId,
+        ...(onProgress ? { onProgress } : {}),
+        message: (requestId) => ({ type: "buildErosion", requestId, ...input }),
       });
     },
     sampleInitial(input) {
-      if (disposed) return Promise.reject(new Error("erosion worker disposed"));
-      return new Promise((resolve, reject) => {
-        let requestId: number;
-        try {
-          requestId = reserve({ kind: "sample", resolve, reject, worldId: input.worldId });
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
-          return;
-        }
-        worker.postMessage({ type: "sampleErosionSource", requestId, ...input });
+      return send<ErosionGpuInitialState>({
+        kind: "sample",
+        worldId: input.worldId,
+        message: (requestId) => ({ type: "sampleErosionSource", requestId, ...input }),
+      });
+    },
+    loadArtifact(input, worldId) {
+      return send<ErosionArtifact | null>({
+        kind: "artifact",
+        worldId,
+        message: (requestId) => ({ type: "loadErosionArtifact", requestId, ...input }),
+      });
+    },
+    loadGpuCheckpoint(input) {
+      return send<ErosionGpuCheckpoint | null>({
+        kind: "checkpoint",
+        worldId: "",
+        message: (requestId) => ({ type: "loadErosionGpuCheckpoint", requestId, ...input }),
+      });
+    },
+    saveGpuCheckpoint(checkpoint) {
+      return send<void>({
+        kind: "ack",
+        worldId: "",
+        message: (requestId) => ({
+          type: "saveErosionGpuCheckpoint",
+          requestId,
+          sourceTerrainHash: checkpoint.sourceTerrainHash,
+          configHash: checkpoint.configHash,
+          checkpoint,
+        }),
+        transfer: [...checkpoint.stateAChunks, ...checkpoint.stateBChunks],
+      });
+    },
+    clearCheckpoint(input) {
+      return send<void>({
+        kind: "ack",
+        worldId: "",
+        message: (requestId) => ({ type: "clearErosionCheckpoint", requestId, ...input }),
+      });
+    },
+    finalizeGpu(input) {
+      return send<ErosionArtifact>({
+        kind: "build",
+        worldId: input.worldId,
+        message: (requestId) => ({ type: "finalizeErosionGpu", requestId, ...input }),
+        transfer: [...input.raw.chunks],
       });
     },
     cancel() {
@@ -136,8 +251,9 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
       if (disposed) return;
       disposed = true;
       this.cancel();
-      for (const request of pending.values()) request.reject(new Error("erosion worker disposed"));
+      for (const pendingRequest of pending.values()) pendingRequest.reject(new Error("erosion worker disposed"));
       pending.clear();
+      activeRequestId = null;
       worker.terminate();
     },
   };

@@ -13,7 +13,7 @@ import {
   sampleErosionSourceField,
 } from "./state.js";
 import { relaxThermalTalus } from "./thermal_relaxation.js";
-import type { ErosionArtifact, ErosionBuildInput, ErosionBuildProgress, ErosionCheckpoint, ErosionState } from "./types.js";
+import type { ErosionArtifact, ErosionBuildInput, ErosionBuildProgress, ErosionCpuCheckpoint, ErosionState } from "./types.js";
 import { evaporateAndDrainBoundaries, updateWaterAndVelocity } from "./water.js";
 
 const HYDRAULIC_STAGES = 10;
@@ -22,7 +22,7 @@ const HEIGHT_TO_SEDIMENT_SCALE = 256;
 export interface BuildErosionCpuOptions {
   readonly seaLevelM: number;
   readonly onProgress?: (progress: ErosionBuildProgress) => void;
-  readonly onCheckpoint?: (checkpoint: ErosionCheckpoint) => void | Promise<void>;
+  readonly onCheckpoint?: (checkpoint: ErosionCpuCheckpoint) => void | Promise<void>;
   readonly yieldBetweenCheckpoints?: () => Promise<void>;
 }
 
@@ -82,11 +82,12 @@ export async function buildErosionCpu(
     ? restoreErosionCheckpoint(input.checkpoint, input.sourceTerrainHash, input.configHash)
     : createErosionState(sampleErosionSourceField({
         sizeM: input.sizeM,
-        originM: input.originM,
+        ...(input.originM ? { originM: input.originM } : {}),
         config: input.config,
         sampleHeightMeters: input.sampleHeightMeters,
         seed: input.seed,
         seaLevelM: options.seaLevelM,
+        ...(input.signal ? { signal: input.signal } : {}),
       }), input.config.erosion.borderCells);
   const initialMass = sourceMassUnits(state);
   const hydraulicTarget = input.config.erosion.enabled ? input.config.erosion.hydraulicIterations : 0;

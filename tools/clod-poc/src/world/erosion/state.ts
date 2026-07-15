@@ -20,6 +20,10 @@ import type {
   TerrainErosionConfig,
 } from "./types.js";
 
+function assertNotCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException("Erosion sampling cancelled", "AbortError");
+}
+
 export function resolveErosionConstants(config: TerrainErosionConfig): ResolvedErosionConstants {
   const value = config.erosion;
   const talusHeightUnitsByHardnessByte = new Uint32Array(256);
@@ -55,6 +59,7 @@ export function sampleErosionSourceField(input: {
   readonly sampleHeightMeters: (x: number, z: number) => number;
   readonly seed: number;
   readonly seaLevelM: number;
+  readonly signal?: AbortSignal;
 }): ErosionSourceField {
   const cellSizeM = input.config.erosion.cellSizeM;
   const width = Math.floor(input.sizeM.x / cellSizeM) + 1;
@@ -63,13 +68,24 @@ export function sampleErosionSourceField(input: {
   const origin = input.originM ?? { x: 0, z: 0 };
   const heightFixed = new Int32Array(width * height);
   for (let z = 0; z < height; z++) {
+    assertNotCancelled(input.signal);
     for (let x = 0; x < width; x++) {
       const sample = input.sampleHeightMeters(origin.x + x * cellSizeM, origin.z + z * cellSizeM);
       if (!Number.isFinite(sample)) throw new Error(`erosion sampler returned ${sample} at ${x},${z}`);
       heightFixed[z * width + x] = metersToHeightFixed(sample);
     }
   }
-  const hardness = buildHardnessField({ width, height, cellSizeM, seaLevelM: input.seaLevelM, seed: input.seed, heightFixed });
+  const hardness = buildHardnessField({
+    width,
+    height,
+    cellSizeM,
+    originX: origin.x,
+    originZ: origin.z,
+    seaLevelM: input.seaLevelM,
+    seed: input.seed,
+    heightFixed,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
   return Object.freeze({ width, height, cellSizeM, originX: origin.x, originZ: origin.z, heightFixed, hardness });
 }
 

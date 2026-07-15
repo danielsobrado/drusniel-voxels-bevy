@@ -2,7 +2,7 @@ import { indexedDB } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
 import { createErosionArtifact } from "./artifact_codec.js";
 import { EROSION_ARTIFACT_STORE_NAME, IndexedDbErosionArtifactStore, openErosionArtifactDb } from "./artifact_store.js";
-import type { ErodedMacroField } from "./types.js";
+import type { ErodedMacroField, ErosionGpuCheckpoint } from "./types.js";
 
 const SOURCE_HASH = "61".repeat(32);
 const CONFIG_HASH = "72".repeat(32);
@@ -23,8 +23,37 @@ function field(): ErodedMacroField {
   return result;
 }
 
+function gpuCheckpoint(): ErosionGpuCheckpoint {
+  const width = 2;
+  const height = 2;
+  const stateAByteLength = width * height * 7 * Uint32Array.BYTES_PER_ELEMENT;
+  const stateBByteLength = width * height * 6 * Uint32Array.BYTES_PER_ELEMENT;
+  return {
+    kind: "gpu",
+    schemaVersion: 1,
+    sourceTerrainHash: SOURCE_HASH,
+    configHash: CONFIG_HASH,
+    hydraulicIteration: 64,
+    thermalIteration: 16,
+    initial: {
+      sourceWidth: 2,
+      sourceHeight: 2,
+      width,
+      height,
+      borderCells: 0,
+      cellSizeM: 16,
+      originX: 0,
+      originZ: 0,
+    },
+    stateAByteLength,
+    stateBByteLength,
+    stateAChunks: [new Uint8Array(stateAByteLength).fill(7).buffer],
+    stateBChunks: [new Uint8Array(stateBByteLength).fill(11).buffer],
+  };
+}
+
 describe("erosion artifact store", () => {
-  it("returns the same canonical hash after a warm load", async () => {
+  it("returns the same canonical hash and GPU timing metadata after a warm load", async () => {
     const name = `erosion-store-${crypto.randomUUID()}`;
     const db = await openErosionArtifactDb(indexedDB, name);
     const store = new IndexedDbErosionArtifactStore(db, SOURCE_HASH, CONFIG_HASH);
@@ -35,10 +64,30 @@ describe("erosion artifact store", () => {
       buildMs: 12,
       checkpointCount: 3,
       massErrorRatio: 0,
+      gpuPassTimingsMs: { "erosion-rain": 1.25 },
+      timestampQueriesSupported: true,
     });
     await store.save(artifact);
     const loaded = await store.load();
     expect(loaded?.ref.hash).toBe(artifact.ref.hash);
+    expect(loaded?.gpuPassTimingsMs["erosion-rain"]).toBe(1.25);
+    expect(loaded?.timestampQueriesSupported).toBe(true);
+    store.close();
+  });
+
+  it("round-trips an exact GPU checkpoint", async () => {
+    const name = `erosion-checkpoint-${crypto.randomUUID()}`;
+    const db = await openErosionArtifactDb(indexedDB, name);
+    const store = new IndexedDbErosionArtifactStore(db, SOURCE_HASH, CONFIG_HASH);
+    const checkpoint = gpuCheckpoint();
+    await store.saveCheckpoint(checkpoint);
+    const loaded = await store.loadGpuCheckpoint();
+    expect(loaded?.hydraulicIteration).toBe(64);
+    expect(loaded?.thermalIteration).toBe(16);
+    expect(new Uint8Array(loaded!.stateAChunks[0]!)[0]).toBe(7);
+    expect(new Uint8Array(loaded!.stateBChunks[0]!)[0]).toBe(11);
+    await store.clearCheckpoint();
+    expect(await store.loadGpuCheckpoint()).toBeNull();
     store.close();
   });
 

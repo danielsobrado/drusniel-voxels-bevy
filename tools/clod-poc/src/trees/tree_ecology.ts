@@ -1,3 +1,4 @@
+import { sampleActiveErosionMaterialChannels } from "../world/erosion/integration.js";
 import type { TreeEcologySettings, TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import { treeSpeciesMaterialBias } from "./tree_material_bias.js";
 import { clamp, clamp01, fractalNoise2D, hash2, remap, smoothstep, valueNoise2D } from "./tree_noise.js";
@@ -51,7 +52,11 @@ export function sampleTreeEcology(
   const slope = smoothstep(terrain.slopeFadeStartY, terrain.slopeFadeEndY, normalY);
   const material = Math.pow(clamp01(groundWeight), terrain.materialWeightPower);
   const terrainSuitability = clamp01(lowerHeight * upperHeight * slope * material);
-  const moisture = fractalNoise2D(x + 913.7, z - 271.4, density.forestNoiseScaleM * 1.35, seed + 14009, 3);
+  const proceduralMoisture = fractalNoise2D(x + 913.7, z - 271.4, density.forestNoiseScaleM * 1.35, seed + 14009, 3);
+  const erosionWetness = sampleActiveErosionMaterialChannels(x, z)?.wetnessSeed;
+  const moisture = erosionWetness === undefined
+    ? proceduralMoisture
+    : clamp01(proceduralMoisture * 0.72 + erosionWetness * 0.28);
   const ageRoll = hash2(Math.floor(x * 8), Math.floor(z * 8), seed + 15013);
   const age = ageRoll < ecology.age.youngProbability
     ? "young"

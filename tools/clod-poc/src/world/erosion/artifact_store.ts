@@ -1,5 +1,5 @@
 import { decodeErosionArtifact } from "./artifact_codec.js";
-import type { ErosionArtifact, ErosionArtifactRef, ErosionCheckpoint } from "./types.js";
+import type { ErosionArtifact, ErosionArtifactRef, ErosionCheckpoint, ErosionGpuCheckpoint } from "./types.js";
 
 export const EROSION_DB_NAME = "drusniel-erosion-artifacts";
 export const EROSION_DB_VERSION = 1;
@@ -15,6 +15,8 @@ interface ErosionArtifactRecord {
   readonly readbackMs: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
+  readonly gpuPassTimingsMs: Readonly<Record<string, number>>;
+  readonly timestampQueriesSupported: boolean;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -35,6 +37,24 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 function artifactKey(sourceTerrainHash: string, configHash: string): string {
   if (!sourceTerrainHash || !configHash) throw new Error("erosion artifact store hashes are required");
   return `${sourceTerrainHash}/${configHash}`;
+}
+
+function isGpuCheckpoint(value: unknown): value is ErosionGpuCheckpoint {
+  if (!value || typeof value !== "object") return false;
+  const checkpoint = value as Partial<ErosionGpuCheckpoint>;
+  return checkpoint.kind === "gpu"
+    && checkpoint.schemaVersion === 1
+    && typeof checkpoint.sourceTerrainHash === "string"
+    && typeof checkpoint.configHash === "string"
+    && Number.isSafeInteger(checkpoint.hydraulicIteration)
+    && Number.isSafeInteger(checkpoint.thermalIteration)
+    && !!checkpoint.initial
+    && Number.isSafeInteger(checkpoint.stateAByteLength)
+    && Number.isSafeInteger(checkpoint.stateBByteLength)
+    && Array.isArray(checkpoint.stateAChunks)
+    && Array.isArray(checkpoint.stateBChunks)
+    && checkpoint.stateAChunks.every((chunk) => chunk instanceof ArrayBuffer)
+    && checkpoint.stateBChunks.every((chunk) => chunk instanceof ArrayBuffer);
 }
 
 export async function openErosionArtifactDb(
@@ -83,6 +103,8 @@ export class IndexedDbErosionArtifactStore {
         readbackMs: record.readbackMs,
         checkpointCount: record.checkpointCount,
         massErrorRatio: record.massErrorRatio,
+        gpuPassTimingsMs: record.gpuPassTimingsMs ?? {},
+        timestampQueriesSupported: record.timestampQueriesSupported ?? false,
       });
     } catch {
       await this.clearArtifact();
@@ -100,6 +122,8 @@ export class IndexedDbErosionArtifactStore {
       readbackMs: artifact.readbackMs,
       checkpointCount: artifact.checkpointCount,
       massErrorRatio: artifact.massErrorRatio,
+      gpuPassTimingsMs: { ...artifact.gpuPassTimingsMs },
+      timestampQueriesSupported: artifact.timestampQueriesSupported,
     };
     const transaction = this.db.transaction(EROSION_ARTIFACT_STORE_NAME, "readwrite");
     transaction.objectStore(EROSION_ARTIFACT_STORE_NAME).put(record, this.key);
@@ -110,7 +134,17 @@ export class IndexedDbErosionArtifactStore {
     const transaction = this.db.transaction(EROSION_CHECKPOINT_STORE_NAME, "readonly");
     const checkpoint = await requestResult(transaction.objectStore(EROSION_CHECKPOINT_STORE_NAME).get(this.key));
     await transactionDone(transaction);
-    return checkpoint && typeof checkpoint === "object" ? checkpoint as ErosionCheckpoint : null;
+    if (!checkpoint || typeof checkpoint !== "object") return null;
+    if ((checkpoint as { kind?: unknown }).kind === "gpu" && !isGpuCheckpoint(checkpoint)) {
+      await this.clearCheckpoint();
+      return null;
+    }
+    return checkpoint as ErosionCheckpoint;
+  }
+
+  async loadGpuCheckpoint(): Promise<ErosionGpuCheckpoint | null> {
+    const checkpoint = await this.loadCheckpoint();
+    return checkpoint && checkpoint.kind === "gpu" ? checkpoint : null;
   }
 
   async saveCheckpoint(checkpoint: ErosionCheckpoint): Promise<void> {

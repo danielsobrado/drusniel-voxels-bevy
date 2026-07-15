@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildErosionCpu } from "./cpu_builder.js";
 import { DEFAULT_TERRAIN_EROSION_CONFIG } from "./config.js";
-import type { ErosionCheckpoint, TerrainErosionConfig } from "./types.js";
+import type { ErosionCpuCheckpoint, TerrainErosionConfig } from "./types.js";
 
 const HASH_A = "aa".repeat(32);
 const HASH_B = "bb".repeat(32);
@@ -20,7 +20,7 @@ function testConfig(): TerrainErosionConfig {
   };
 }
 
-function input(config: TerrainErosionConfig, checkpoint?: ErosionCheckpoint) {
+function input(config: TerrainErosionConfig, checkpoint?: ErosionCpuCheckpoint) {
   return {
     worldId: "test",
     seed: 17,
@@ -46,7 +46,7 @@ describe("deterministic CPU erosion", () => {
   it("resumes bit-identically from a checkpoint", async () => {
     const config = testConfig();
     const uninterrupted = await buildErosionCpu(input(config), { seaLevelM: 18 });
-    let checkpoint: ErosionCheckpoint | undefined;
+    let checkpoint: ErosionCpuCheckpoint | undefined;
     await expect(buildErosionCpu(input(config), {
       seaLevelM: 18,
       onCheckpoint(value) {
@@ -67,5 +67,15 @@ describe("deterministic CPU erosion", () => {
     }, { seaLevelM: 18 });
     expect(new Set(artifact.field.heightFixed).size).toBe(1);
     expect(artifact.massErrorRatio).toBeLessThanOrEqual(1e-12);
+  });
+
+  it("preserves AbortError before source sampling", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("cancelled", "AbortError");
+    controller.abort(reason);
+    await expect(buildErosionCpu({
+      ...input(testConfig()),
+      signal: controller.signal,
+    }, { seaLevelM: 18 })).rejects.toBe(reason);
   });
 });

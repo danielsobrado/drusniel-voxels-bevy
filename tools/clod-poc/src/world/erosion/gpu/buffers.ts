@@ -1,4 +1,4 @@
-import type { ErosionGpuInitialState, ErosionSourceField } from "../types.js";
+import type { ErosionGpuCheckpoint, ErosionGpuInitialState, ErosionSourceField } from "../types.js";
 
 export const GPU_STATE_A_WORDS_PER_CELL = 7;
 export const GPU_STATE_B_WORDS_PER_CELL = 6;
@@ -12,7 +12,8 @@ export interface ErosionGpuBuffers {
   readonly sedimentScratch: GPUBuffer;
   readonly params: GPUBuffer;
   readonly talus: GPUBuffer;
-  readonly output: GPUBuffer;
+  readonly outputPlaceholder: GPUBuffer;
+  output: GPUBuffer | null;
 }
 
 export function packErosionGpuInitialState(source: ErosionSourceField, borderCells: number): ErosionGpuInitialState {
@@ -51,49 +52,80 @@ function createMappedBuffer(device: GPUDevice, label: string, data: ArrayBuffer,
   return buffer;
 }
 
+function createBufferFromChunks(
+  device: GPUDevice,
+  label: string,
+  byteLength: number,
+  usage: GPUBufferUsageFlags,
+  chunks: readonly ArrayBuffer[],
+): GPUBuffer {
+  const buffer = device.createBuffer({ label, size: byteLength, usage: usage | GPUBufferUsage.COPY_DST });
+  let offset = 0;
+  for (const chunk of chunks) {
+    if (offset + chunk.byteLength > byteLength) {
+      buffer.destroy();
+      throw new Error(`${label} checkpoint chunks exceed the declared byte length`);
+    }
+    device.queue.writeBuffer(buffer, offset, chunk);
+    offset += chunk.byteLength;
+  }
+  if (offset !== byteLength) {
+    buffer.destroy();
+    throw new Error(`${label} checkpoint chunks are incomplete`);
+  }
+  return buffer;
+}
+
 export function createErosionGpuBuffers(
   device: GPUDevice,
   initial: ErosionGpuInitialState,
   paramsData: ArrayBuffer,
   talusData: Uint32Array,
+  checkpoint?: ErosionGpuCheckpoint,
 ): ErosionGpuBuffers {
   const cellCount = initial.width * initial.height;
-  const outputCount = initial.sourceWidth * initial.sourceHeight;
+  const stateABytes = cellCount * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+  const stateBBytes = cellCount * GPU_STATE_B_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+  const stateAUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
+  const stateBUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
+  const stateA = checkpoint
+    ? createBufferFromChunks(device, "erosion-state-a", stateABytes, stateAUsage, checkpoint.stateAChunks)
+    : createMappedBuffer(device, "erosion-state-a", initial.stateAData, stateAUsage);
+  const stateB = checkpoint
+    ? createBufferFromChunks(device, "erosion-state-b", stateBBytes, stateBUsage, checkpoint.stateBChunks)
+    : device.createBuffer({ label: "erosion-state-b", size: stateBBytes, usage: stateBUsage });
   return {
-    stateA: createMappedBuffer(
-      device,
-      "erosion-state-a",
-      initial.stateAData,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    ),
-    stateB: device.createBuffer({
-      label: "erosion-state-b",
-      size: cellCount * GPU_STATE_B_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.STORAGE,
-    }),
+    stateA,
+    stateB,
     sedimentScratch: device.createBuffer({
       label: "erosion-sediment-scratch",
       size: cellCount * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
     }),
-    params: createMappedBuffer(
-      device,
-      "erosion-params",
-      paramsData,
-      GPUBufferUsage.UNIFORM,
-    ),
+    params: createMappedBuffer(device, "erosion-params", paramsData, GPUBufferUsage.UNIFORM),
     talus: createMappedBuffer(
       device,
       "erosion-talus-table",
       talusData.buffer.slice(talusData.byteOffset, talusData.byteOffset + talusData.byteLength) as ArrayBuffer,
       GPUBufferUsage.STORAGE,
     ),
-    output: device.createBuffer({
-      label: "erosion-output",
-      size: outputCount * GPU_OUTPUT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    outputPlaceholder: device.createBuffer({
+      label: "erosion-output-placeholder",
+      size: GPU_OUTPUT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT,
+      usage: GPUBufferUsage.STORAGE,
     }),
+    output: null,
   };
+}
+
+export function createErosionGpuOutputBuffer(device: GPUDevice, buffers: ErosionGpuBuffers, sourceCellCount: number): GPUBuffer {
+  if (buffers.output) return buffers.output;
+  buffers.output = device.createBuffer({
+    label: "erosion-output",
+    size: sourceCellCount * GPU_OUTPUT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  });
+  return buffers.output;
 }
 
 export function destroyErosionGpuSimulationBuffers(buffers: ErosionGpuBuffers): void {
@@ -102,9 +134,10 @@ export function destroyErosionGpuSimulationBuffers(buffers: ErosionGpuBuffers): 
   buffers.sedimentScratch.destroy();
   buffers.params.destroy();
   buffers.talus.destroy();
+  buffers.outputPlaceholder.destroy();
 }
 
 export function destroyErosionGpuBuffers(buffers: ErosionGpuBuffers): void {
   destroyErosionGpuSimulationBuffers(buffers);
-  buffers.output.destroy();
+  buffers.output?.destroy();
 }
