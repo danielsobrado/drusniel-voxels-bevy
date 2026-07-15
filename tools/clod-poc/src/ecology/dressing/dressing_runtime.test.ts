@@ -44,6 +44,68 @@ describe("ecological dressing runtime", () => {
     system.dispose();
   });
 
+  it("never creates an unpaired stump when deadfall density is zero", () => {
+    const config: DressingConfig = {
+      ...DEFAULT_DRESSING_CONFIG,
+      densities: {
+        ...DEFAULT_DRESSING_CONFIG.densities,
+        deadfallPerHectare: 0,
+        stumpsPerHectare: 10_000,
+      },
+    };
+    const system = new DressingSystem({
+      scene: new THREE.Scene(),
+      worldCells: 96,
+      worldSeed: 19,
+      config,
+      quality: "ultra",
+      maximumInstances: 2_000,
+    });
+
+    expect(system.getStats().perClass.stump_fresh.accepted).toBe(0);
+    expect(system.getStats().perClass.stump_rotten.accepted).toBe(0);
+    system.dispose();
+  });
+
+  it("checks deadfall endpoint support against the carved hydrology surface", () => {
+    const config: DressingConfig = {
+      ...DEFAULT_DRESSING_CONFIG,
+      densities: {
+        ...DEFAULT_DRESSING_CONFIG.densities,
+        deadfallPerHectare: 10_000,
+        stumpsPerHectare: 0,
+      },
+    };
+    const hydrologySystem = {
+      sample: () => ({
+        terrainY: 1_000,
+        depth: 0,
+        shoreDistance: 999,
+        flowX: 0,
+        flowZ: 0,
+        moisture: 0.5,
+        riverMask: 0,
+        flowStrength: 0,
+      }),
+      terrainHeight: () => 1_000,
+    };
+    const system = new DressingSystem({
+      scene: new THREE.Scene(),
+      worldCells: 96,
+      worldSeed: 19,
+      config,
+      hydrologySystem: hydrologySystem as never,
+      quality: "ultra",
+      maximumInstances: 2_000,
+    });
+
+    const stats = system.getStats();
+    expect(stats.perClass.dead_log_fresh.accepted
+      + stats.perClass.dead_log_mossy.accepted
+      + stats.perClass.dead_log_rotten.accepted).toBeGreaterThan(0);
+    system.dispose();
+  });
+
   it("reuses authored geometry across residency refreshes", () => {
     const scene = new THREE.Scene();
     const config: DressingConfig = {
