@@ -86,7 +86,7 @@ export interface SerializedErodedMacroField {
   readonly deposition: Int32Array;
 }
 
-export interface ErosionGpuInitialState {
+export interface ErosionGpuInitialMetadata {
   readonly sourceWidth: number;
   readonly sourceHeight: number;
   readonly width: number;
@@ -95,7 +95,22 @@ export interface ErosionGpuInitialState {
   readonly cellSizeM: number;
   readonly originX: number;
   readonly originZ: number;
+}
+
+export interface ErosionGpuInitialState extends ErosionGpuInitialMetadata {
   readonly stateAData: ArrayBuffer;
+}
+
+export interface ErosionGpuRawOutput {
+  readonly initial: ErosionGpuInitialMetadata;
+  readonly chunks: readonly ArrayBuffer[];
+  readonly byteLength: number;
+  readonly buildMs: number;
+  readonly gpuMs: number;
+  readonly readbackMs: number;
+  readonly checkpointCount: number;
+  readonly gpuPassTimingsMs: Readonly<Record<string, number>>;
+  readonly timestampQueriesSupported: boolean;
 }
 
 export interface ErosionArtifactRef {
@@ -121,6 +136,8 @@ export interface ErosionArtifact {
   readonly readbackMs: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
+  readonly gpuPassTimingsMs: Readonly<Record<string, number>>;
+  readonly timestampQueriesSupported: boolean;
 }
 
 export interface ErosionState {
@@ -150,7 +167,8 @@ export interface ErosionState {
   thermalIteration: number;
 }
 
-export interface ErosionCheckpoint {
+export interface ErosionCpuCheckpoint {
+  readonly kind?: "cpu";
   readonly schemaVersion: typeof EROSION_SCHEMA_VERSION;
   readonly configHash: string;
   readonly sourceTerrainHash: string;
@@ -158,6 +176,22 @@ export interface ErosionCheckpoint {
   readonly thermalIteration: number;
   readonly state: ErosionState;
 }
+
+export interface ErosionGpuCheckpoint {
+  readonly kind: "gpu";
+  readonly schemaVersion: typeof EROSION_SCHEMA_VERSION;
+  readonly configHash: string;
+  readonly sourceTerrainHash: string;
+  readonly hydraulicIteration: number;
+  readonly thermalIteration: number;
+  readonly initial: ErosionGpuInitialMetadata;
+  readonly stateAByteLength: number;
+  readonly stateBByteLength: number;
+  readonly stateAChunks: readonly ArrayBuffer[];
+  readonly stateBChunks: readonly ArrayBuffer[];
+}
+
+export type ErosionCheckpoint = ErosionCpuCheckpoint | ErosionGpuCheckpoint;
 
 export interface ErosionBuildInput {
   readonly worldId: string;
@@ -168,7 +202,7 @@ export interface ErosionBuildInput {
   readonly configHash: string;
   readonly config: TerrainErosionConfig;
   readonly sampleHeightMeters: (x: number, z: number) => number;
-  readonly checkpoint?: ErosionCheckpoint;
+  readonly checkpoint?: ErosionCpuCheckpoint;
   readonly signal?: AbortSignal;
 }
 
@@ -196,6 +230,10 @@ export interface ErosionDiagnostics {
   erosion_total_deposited_m3: number;
   erosion_mass_error_ratio: number;
   erosion_cpu_gpu_mismatch_count: number;
+  erosion_gpu_timestamp_supported: number;
+  erosion_gpu_checkpoint_bytes: number;
+  erosion_gpu_checkpoint_resume: number;
+  erosion_main_thread_max_slice_ms: number;
   erosion_artifact_hash_prefix: string;
 }
 
