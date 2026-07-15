@@ -1,4 +1,3 @@
-import { sampleActiveErosionMaterialChannels } from "../world/erosion/integration.js";
 import type { MaterialId, MaterialWeights, TerrainMaterialInput, TerrainMaterialSample } from "./terrainMaterialTypes.js";
 import { deterministicNoise2 } from "./macroTerrain.js";
 
@@ -93,7 +92,7 @@ function blendRoughness(weights: MaterialWeights): number {
 }
 
 function applyErosionMaterialBias(input: TerrainMaterialInput, weights: MaterialWeights): MaterialWeights {
-  const channels = sampleActiveErosionMaterialChannels(input.worldX, input.worldZ);
+  const channels = input.erosion;
   if (!channels) return weights;
   const deposited = Math.min(1, Math.max(0, channels.netDepositionM / 0.5));
   const eroded = Math.min(1, Math.max(0, -channels.netDepositionM / 0.35));
