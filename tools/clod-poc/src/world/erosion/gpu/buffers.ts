@@ -122,7 +122,6 @@ export function createErosionGpuBuffers(
   checkpoint?: ErosionGpuCheckpoint,
 ): ErosionGpuBuffers {
   const cellCount = initial.width * initial.height;
-  const stateABytes = cellCount * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
   const stateBBytes = cellCount * GPU_STATE_B_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
   return {
     stateA: createMappedBuffer(
