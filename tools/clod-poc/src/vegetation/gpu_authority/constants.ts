@@ -1,6 +1,8 @@
 export const VEGETATION_SCHEMA_VERSION = 1 as const;
 export const VEGETATION_CLUSTER_SIZE_M = 32 as const;
 export const VEGETATION_CLUSTER_PROBE_GRID = 3 as const;
+export const VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_M = -1_000_000 as const;
+export const VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_THRESHOLD_M = -500_000 as const;
 
 export const VEGETATION_CATEGORY = {
   TREE: 1,
