@@ -13,7 +13,7 @@ import {
   sampleErosionSourceField,
 } from "./state.js";
 import { relaxThermalTalus } from "./thermal_relaxation.js";
-import type { ErosionArtifact, ErosionBuildInput, ErosionBuildProgress, ErosionCheckpoint, ErosionState } from "./types.js";
+import type { ErosionArtifact, ErosionBuildInput, ErosionBuildProgress, ErosionCpuCheckpoint, ErosionState } from "./types.js";
 import { evaporateAndDrainBoundaries, updateWaterAndVelocity } from "./water.js";
 
 const HYDRAULIC_STAGES = 10;
@@ -22,7 +22,7 @@ const HEIGHT_TO_SEDIMENT_SCALE = 256;
 export interface BuildErosionCpuOptions {
   readonly seaLevelM: number;
   readonly onProgress?: (progress: ErosionBuildProgress) => void;
-  readonly onCheckpoint?: (checkpoint: ErosionCheckpoint) => void | Promise<void>;
+  readonly onCheckpoint?: (checkpoint: ErosionCpuCheckpoint) => void | Promise<void>;
   readonly yieldBetweenCheckpoints?: () => Promise<void>;
 }
 
