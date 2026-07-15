@@ -17,6 +17,7 @@ import { acceptTerrainCandidate } from "./terrain_candidates.js";
 import type { DressingEnvironmentSample, DressingStableId } from "./types.js";
 import { attachmentAllowed, type AttachmentParent } from "./attachment_candidates.js";
 import type { DressingAttachmentAnchor, DressingAnchorKind } from "./attachment_anchors.js";
+import { evaluateHydrologyAffinity } from "./hydrology_affinity.js";
 
 export interface DressingSystemOptions {
   readonly scene: THREE.Scene;
@@ -232,6 +233,11 @@ export class DressingSystem {
           if (Math.hypot(x - centerX, z - centerZ) > this.radiusM || !this.inWorld(x, z)) continue;
           const sample = this.sampleEnvironment(x, z);
           let yaw = treePcg2d01(id.lo | 0, id.hi | 0, 0x4202)[0] * Math.PI * 2;
+          if (classId === "large_driftwood" || classId === "small_driftwood") {
+            const affinity = evaluateHydrologyAffinity(classId, sample, rolls[1]);
+            if (!affinity.accepted || affinity.orientationRad === null) continue;
+            yaw = affinity.orientationRad;
+          }
           if (classId.startsWith("dead_log")) {
             const downhill = Math.atan2(-sample.normal[2], -sample.normal[0]);
             yaw = deadfallOrientation(downhill, Math.PI * 0.18, yaw, rolls[1]);
