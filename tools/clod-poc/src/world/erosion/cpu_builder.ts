@@ -82,12 +82,12 @@ export async function buildErosionCpu(
     ? restoreErosionCheckpoint(input.checkpoint, input.sourceTerrainHash, input.configHash)
     : createErosionState(sampleErosionSourceField({
         sizeM: input.sizeM,
-        originM: input.originM,
+        ...(input.originM ? { originM: input.originM } : {}),
         config: input.config,
         sampleHeightMeters: input.sampleHeightMeters,
         seed: input.seed,
         seaLevelM: options.seaLevelM,
-        signal: input.signal,
+        ...(input.signal ? { signal: input.signal } : {}),
       }), input.config.erosion.borderCells);
   const initialMass = sourceMassUnits(state);
   const hydraulicTarget = input.config.erosion.enabled ? input.config.erosion.hydraulicIterations : 0;
