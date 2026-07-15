@@ -1,18 +1,27 @@
 import { decodeErosionArtifact } from "./artifact_codec.js";
-import type { ErosionArtifact, ErosionArtifactRef, ErosionCheckpoint, ErosionGpuCheckpoint } from "./types.js";
+import { EROSION_SCHEMA_VERSION } from "./constants.js";
+import type {
+  ErosionArtifactRef,
+  ErosionCheckpoint,
+  ErosionGpuCheckpoint,
+  PersistedErosionArtifact,
+} from "./types.js";
 
 export const EROSION_DB_NAME = "drusniel-erosion-artifacts";
-export const EROSION_DB_VERSION = 1;
+export const EROSION_DB_VERSION = 2;
 export const EROSION_ARTIFACT_STORE_NAME = "artifacts";
 export const EROSION_CHECKPOINT_STORE_NAME = "checkpoints";
 
 interface ErosionArtifactRecord {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: typeof EROSION_SCHEMA_VERSION;
   readonly ref: ErosionArtifactRef;
   readonly compressedBytes: ArrayBuffer;
   readonly buildMs: number;
+  readonly samplingMs: number;
   readonly gpuMs: number;
   readonly readbackMs: number;
+  readonly finalizeMs: number;
+  readonly persistenceMs: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
   readonly gpuPassTimingsMs: Readonly<Record<string, number>>;
@@ -43,18 +52,15 @@ function isGpuCheckpoint(value: unknown): value is ErosionGpuCheckpoint {
   if (!value || typeof value !== "object") return false;
   const checkpoint = value as Partial<ErosionGpuCheckpoint>;
   return checkpoint.kind === "gpu"
-    && checkpoint.schemaVersion === 1
+    && checkpoint.schemaVersion === EROSION_SCHEMA_VERSION
     && typeof checkpoint.sourceTerrainHash === "string"
     && typeof checkpoint.configHash === "string"
     && Number.isSafeInteger(checkpoint.hydraulicIteration)
     && Number.isSafeInteger(checkpoint.thermalIteration)
     && !!checkpoint.initial
     && Number.isSafeInteger(checkpoint.stateAByteLength)
-    && Number.isSafeInteger(checkpoint.stateBByteLength)
     && Array.isArray(checkpoint.stateAChunks)
-    && Array.isArray(checkpoint.stateBChunks)
-    && checkpoint.stateAChunks.every((chunk) => chunk instanceof ArrayBuffer)
-    && checkpoint.stateBChunks.every((chunk) => chunk instanceof ArrayBuffer);
+    && checkpoint.stateAChunks.every((chunk) => chunk instanceof ArrayBuffer);
 }
 
 export async function openErosionArtifactDb(
@@ -84,23 +90,31 @@ export class IndexedDbErosionArtifactStore {
     this.key = artifactKey(sourceTerrainHash, configHash);
   }
 
-  async load(): Promise<ErosionArtifact | null> {
+  async load(): Promise<PersistedErosionArtifact | null> {
     const transaction = this.db.transaction(EROSION_ARTIFACT_STORE_NAME, "readonly");
     const value = await requestResult(transaction.objectStore(EROSION_ARTIFACT_STORE_NAME).get(this.key));
     await transactionDone(transaction);
     if (!value || typeof value !== "object") return null;
     const record = value as Partial<ErosionArtifactRecord>;
-    if (record.schemaVersion !== 1 || !record.ref || !(record.compressedBytes instanceof ArrayBuffer)
+    if (record.schemaVersion !== EROSION_SCHEMA_VERSION
+      || record.ref?.schemaVersion !== EROSION_SCHEMA_VERSION
+      || !record.ref || !(record.compressedBytes instanceof ArrayBuffer)
       || typeof record.buildMs !== "number" || typeof record.gpuMs !== "number"
       || typeof record.readbackMs !== "number" || typeof record.checkpointCount !== "number"
-      || typeof record.massErrorRatio !== "number") return null;
+      || typeof record.massErrorRatio !== "number") {
+      await this.clearArtifact();
+      return null;
+    }
     try {
       return await decodeErosionArtifact({
         ref: record.ref,
         compressedBytes: record.compressedBytes,
         buildMs: record.buildMs,
+        samplingMs: record.samplingMs ?? 0,
         gpuMs: record.gpuMs,
         readbackMs: record.readbackMs,
+        finalizeMs: record.finalizeMs ?? 0,
+        persistenceMs: record.persistenceMs ?? 0,
         checkpointCount: record.checkpointCount,
         massErrorRatio: record.massErrorRatio,
         gpuPassTimingsMs: record.gpuPassTimingsMs ?? {},
@@ -112,14 +126,17 @@ export class IndexedDbErosionArtifactStore {
     }
   }
 
-  async save(artifact: ErosionArtifact): Promise<void> {
+  async save(artifact: PersistedErosionArtifact): Promise<void> {
     const record: ErosionArtifactRecord = {
-      schemaVersion: 1,
+      schemaVersion: EROSION_SCHEMA_VERSION,
       ref: artifact.ref,
       compressedBytes: artifact.compressedBytes.slice(0),
       buildMs: artifact.buildMs,
+      samplingMs: artifact.samplingMs,
       gpuMs: artifact.gpuMs,
       readbackMs: artifact.readbackMs,
+      finalizeMs: artifact.finalizeMs,
+      persistenceMs: artifact.persistenceMs,
       checkpointCount: artifact.checkpointCount,
       massErrorRatio: artifact.massErrorRatio,
       gpuPassTimingsMs: { ...artifact.gpuPassTimingsMs },
@@ -135,6 +152,11 @@ export class IndexedDbErosionArtifactStore {
     const checkpoint = await requestResult(transaction.objectStore(EROSION_CHECKPOINT_STORE_NAME).get(this.key));
     await transactionDone(transaction);
     if (!checkpoint || typeof checkpoint !== "object") return null;
+    const schemaVersion = (checkpoint as { schemaVersion?: unknown }).schemaVersion;
+    if (schemaVersion !== EROSION_SCHEMA_VERSION) {
+      await this.clearCheckpoint();
+      return null;
+    }
     if ((checkpoint as { kind?: unknown }).kind === "gpu" && !isGpuCheckpoint(checkpoint)) {
       await this.clearCheckpoint();
       return null;
@@ -168,11 +190,11 @@ export class IndexedDbErosionArtifactStore {
   close(): void { this.db.close(); }
 }
 
-export function downloadErosionArtifact(artifact: ErosionArtifact, worldId: string): void {
+export function downloadErosionArtifact(artifact: PersistedErosionArtifact, worldId: string): void {
   if (typeof document === "undefined") throw new Error("erosion artifact download requires a browser document");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([artifact.compressedBytes], { type: "application/zstd" }));
-  link.download = `${worldId.replaceAll(/[^a-zA-Z0-9._-]/g, "_")}-erosion-v1.bin.zst`;
+  link.download = `${worldId.replaceAll(/[^a-zA-Z0-9._-]/g, "_")}-erosion-v${EROSION_SCHEMA_VERSION}.bin.zst`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
