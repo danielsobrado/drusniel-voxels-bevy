@@ -2,6 +2,7 @@ import { baseSurfaceHeight, setTerrainFieldConfig } from "../../terrain/terrain_
 import { IndexedDbErosionArtifactStore, openErosionArtifactDb } from "./artifact_store.js";
 import { buildErosionCpu } from "./cpu_builder.js";
 import { collectErosionGpuCheckpointTransferables } from "./checkpoint.js";
+import { summarizeErosionField } from "./diagnostics.js";
 import { packErosionGpuInitialState } from "./gpu/buffers.js";
 import { finalizeErosionGpuRawOutput } from "./gpu/finalize.js";
 import { serializeErodedMacroField } from "./integration.js";
@@ -24,6 +25,7 @@ function recordForTransfer(artifact: ErosionArtifact, cacheHit: boolean): Erosio
   return {
     ref: artifact.ref,
     field: serializeErodedMacroField(artifact.field),
+    summary: summarizeErosionField(artifact.field),
     canonicalBytes: artifact.canonicalBytes,
     compressedBytes: artifact.compressedBytes,
     buildMs: artifact.buildMs,
