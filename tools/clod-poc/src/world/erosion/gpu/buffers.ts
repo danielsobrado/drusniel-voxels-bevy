@@ -1,3 +1,5 @@
+import { assertErosionNotAborted, yieldErosionTask } from "../abort.js";
+import { EROSION_ASYNC_ROWS_PER_YIELD } from "../constants.js";
 import type { ErosionGpuCheckpoint, ErosionGpuInitialState, ErosionSourceField } from "../types.js";
 
 export const GPU_STATE_A_WORDS_PER_CELL = 7;
@@ -16,22 +18,9 @@ export interface ErosionGpuBuffers {
   output: GPUBuffer | null;
 }
 
-export function packErosionGpuInitialState(source: ErosionSourceField, borderCells: number): ErosionGpuInitialState {
+function initialLayout(source: ErosionSourceField, borderCells: number, samplingMs: number): ErosionGpuInitialState {
   const width = source.width + borderCells * 2;
   const height = source.height + borderCells * 2;
-  const data = new ArrayBuffer(width * height * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT);
-  const u32 = new Uint32Array(data);
-  const i32 = new Int32Array(data);
-  for (let z = 0; z < height; z++) {
-    const sourceZ = Math.min(source.height - 1, Math.max(0, z - borderCells));
-    for (let x = 0; x < width; x++) {
-      const sourceX = Math.min(source.width - 1, Math.max(0, x - borderCells));
-      const sourceIndex = sourceZ * source.width + sourceX;
-      const offset = (z * width + x) * GPU_STATE_A_WORDS_PER_CELL;
-      i32[offset] = source.heightFixed[sourceIndex]!;
-      u32[offset + 1] = source.hardness[sourceIndex]!;
-    }
-  }
   return {
     sourceWidth: source.width,
     sourceHeight: source.height,
@@ -41,8 +30,47 @@ export function packErosionGpuInitialState(source: ErosionSourceField, borderCel
     cellSizeM: source.cellSizeM,
     originX: source.originX,
     originZ: source.originZ,
-    stateAData: data,
+    stateAData: new ArrayBuffer(width * height * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT),
+    samplingMs,
   };
+}
+
+function packRow(source: ErosionSourceField, initial: ErosionGpuInitialState, z: number): void {
+  const u32 = new Uint32Array(initial.stateAData);
+  const i32 = new Int32Array(initial.stateAData);
+  const sourceZ = Math.min(source.height - 1, Math.max(0, z - initial.borderCells));
+  for (let x = 0; x < initial.width; x++) {
+    const sourceX = Math.min(source.width - 1, Math.max(0, x - initial.borderCells));
+    const sourceIndex = sourceZ * source.width + sourceX;
+    const offset = (z * initial.width + x) * GPU_STATE_A_WORDS_PER_CELL;
+    i32[offset] = source.heightFixed[sourceIndex]!;
+    u32[offset + 1] = source.hardness[sourceIndex]!;
+  }
+}
+
+export function packErosionGpuInitialState(
+  source: ErosionSourceField,
+  borderCells: number,
+  samplingMs = 0,
+): ErosionGpuInitialState {
+  const initial = initialLayout(source, borderCells, samplingMs);
+  for (let z = 0; z < initial.height; z++) packRow(source, initial, z);
+  return initial;
+}
+
+export async function packErosionGpuInitialStateAsync(
+  source: ErosionSourceField,
+  borderCells: number,
+  samplingMs: number,
+  signal?: AbortSignal,
+): Promise<ErosionGpuInitialState> {
+  const initial = initialLayout(source, borderCells, samplingMs);
+  for (let z = 0; z < initial.height; z++) {
+    assertErosionNotAborted(signal);
+    packRow(source, initial, z);
+    if ((z + 1) % EROSION_ASYNC_ROWS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  return initial;
 }
 
 function createMappedBuffer(device: GPUDevice, label: string, data: ArrayBuffer, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -87,16 +115,16 @@ export function createErosionGpuBuffers(
   const stateABytes = cellCount * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
   const stateBBytes = cellCount * GPU_STATE_B_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
   const stateAUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
-  const stateBUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
   const stateA = checkpoint
     ? createBufferFromChunks(device, "erosion-state-a", stateABytes, stateAUsage, checkpoint.stateAChunks)
     : createMappedBuffer(device, "erosion-state-a", initial.stateAData, stateAUsage);
-  const stateB = checkpoint
-    ? createBufferFromChunks(device, "erosion-state-b", stateBBytes, stateBUsage, checkpoint.stateBChunks)
-    : device.createBuffer({ label: "erosion-state-b", size: stateBBytes, usage: stateBUsage });
   return {
     stateA,
-    stateB,
+    stateB: device.createBuffer({
+      label: "erosion-state-b",
+      size: stateBBytes,
+      usage: GPUBufferUsage.STORAGE,
+    }),
     sedimentScratch: device.createBuffer({
       label: "erosion-sediment-scratch",
       size: cellCount * Uint32Array.BYTES_PER_ELEMENT,
