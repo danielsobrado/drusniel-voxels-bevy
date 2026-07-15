@@ -2,6 +2,8 @@ import { EROSION_SCHEMA_VERSION } from "./constants.js";
 import { cloneErosionState } from "./state.js";
 import type { ErosionCpuCheckpoint, ErosionGpuCheckpoint, ErosionState } from "./types.js";
 
+const GPU_CHECKPOINT_WORDS_PER_CELL = 8;
+
 export function createErosionCheckpoint(
   state: ErosionState,
   sourceTerrainHash: string,
@@ -45,11 +47,12 @@ export function validateErosionGpuCheckpoint(
   if (checkpoint.configHash !== configHash) throw new Error("erosion GPU checkpoint config hash mismatch");
   const cellCount = checkpoint.initial.width * checkpoint.initial.height;
   if (!Number.isSafeInteger(cellCount) || cellCount <= 0) throw new Error("erosion GPU checkpoint dimensions are invalid");
-  if (checkpoint.stateAByteLength !== cellCount * 7 * Uint32Array.BYTES_PER_ELEMENT) {
-    throw new Error("erosion GPU checkpoint state A byte length mismatch");
+  const expectedBytes = cellCount * GPU_CHECKPOINT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+  if (checkpoint.packedByteLength !== expectedBytes) {
+    throw new Error("erosion GPU checkpoint byte length mismatch");
   }
-  const stateABytes = checkpoint.stateAChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
-  if (stateABytes !== checkpoint.stateAByteLength) {
+  const packedBytes = checkpoint.packedChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  if (packedBytes !== checkpoint.packedByteLength) {
     throw new Error("erosion GPU checkpoint chunks are incomplete");
   }
   return checkpoint;
@@ -76,5 +79,5 @@ export function collectErosionCheckpointTransferables(checkpoint: ErosionCpuChec
 }
 
 export function collectErosionGpuCheckpointTransferables(checkpoint: ErosionGpuCheckpoint): Transferable[] {
-  return [...checkpoint.stateAChunks];
+  return [...checkpoint.packedChunks];
 }
