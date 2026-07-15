@@ -12,7 +12,7 @@ import type { DressingConfig, DressingQuality } from "./config.js";
 import { acceptsCosmeticAtQuality } from "./config.js";
 import { cloneDressingDiagnostics, createDressingDiagnostics, type DressingDiagnostics } from "./diagnostics.js";
 import { deadfallOrientation, acceptDeadLogCandidate, createPairedStumpId } from "./persistent_candidates.js";
-import { parentAttachmentStableId, terrainDressingStableId } from "./stable_id.js";
+import { parentAttachmentStableId, stableIdKey, terrainDressingStableId } from "./stable_id.js";
 import { acceptTerrainCandidate } from "./terrain_candidates.js";
 import type { DressingEnvironmentSample, DressingStableId } from "./types.js";
 import { attachmentAllowed, type AttachmentParent } from "./attachment_candidates.js";
@@ -37,6 +37,7 @@ interface RenderCandidate {
   readonly z: number;
   readonly yaw: number;
   readonly scale: number;
+  readonly parentStableId?: DressingStableId;
 }
 
 const CLASS_COLORS: Readonly<Record<DressingClassId, number>> = {
@@ -180,8 +181,13 @@ export class DressingSystem {
     this.diagnostics.dressing_clusters_active = Math.max(1, Math.ceil((this.radiusM * 2) / this.options.config.clusterSizeM) ** 2);
     this.diagnostics.dressing_candidates_accepted = candidates.length;
     this.diagnostics.dressing_persistent_visible = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "persistent").length;
-    this.diagnostics.dressing_parent_attached_visible = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "parent_attached").length;
+    const attachments = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "parent_attached");
+    this.diagnostics.dressing_parent_attached_visible = attachments.length;
     this.diagnostics.dressing_terrain_attached_visible = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "terrain_attached").length;
+    this.diagnostics.dressing_attachment_count = attachments.length;
+    this.diagnostics.dressing_attachment_parents = new Set(
+      attachments.flatMap((entry) => entry.parentStableId ? [stableIdKey(entry.parentStableId)] : []),
+    ).size;
     this.diagnostics.dressing_main_thread_ms = performance.now() - started;
     this.publishDiagnostics();
   }
@@ -312,6 +318,7 @@ export class DressingSystem {
         z: parent.z + Math.sin(parent.yaw) * offset,
         yaw: parent.yaw + rolls[1] * Math.PI,
         scale: 0.7 + rolls[1] * 0.5,
+        parentStableId: parent.stableId,
       });
       this.diagnostics.perClass[classId].generated++;
       this.diagnostics.perClass[classId].accepted++;
