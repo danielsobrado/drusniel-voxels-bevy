@@ -58,9 +58,9 @@ function isGpuCheckpoint(value: unknown): value is ErosionGpuCheckpoint {
     && Number.isSafeInteger(checkpoint.hydraulicIteration)
     && Number.isSafeInteger(checkpoint.thermalIteration)
     && !!checkpoint.initial
-    && Number.isSafeInteger(checkpoint.stateAByteLength)
-    && Array.isArray(checkpoint.stateAChunks)
-    && checkpoint.stateAChunks.every((chunk) => chunk instanceof ArrayBuffer);
+    && Number.isSafeInteger(checkpoint.packedByteLength)
+    && Array.isArray(checkpoint.packedChunks)
+    && checkpoint.packedChunks.every((chunk) => chunk instanceof ArrayBuffer);
 }
 
 export async function openErosionArtifactDb(
@@ -96,9 +96,10 @@ export class IndexedDbErosionArtifactStore {
     await transactionDone(transaction);
     if (!value || typeof value !== "object") return null;
     const record = value as Partial<ErosionArtifactRecord>;
-    if (record.schemaVersion !== EROSION_SCHEMA_VERSION
-      || record.ref?.schemaVersion !== EROSION_SCHEMA_VERSION
-      || !record.ref || !(record.compressedBytes instanceof ArrayBuffer)
+    if (!record.ref
+      || record.schemaVersion !== EROSION_SCHEMA_VERSION
+      || record.ref.schemaVersion !== EROSION_SCHEMA_VERSION
+      || !(record.compressedBytes instanceof ArrayBuffer)
       || typeof record.buildMs !== "number" || typeof record.gpuMs !== "number"
       || typeof record.readbackMs !== "number" || typeof record.checkpointCount !== "number"
       || typeof record.massErrorRatio !== "number") {
