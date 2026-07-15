@@ -16,11 +16,14 @@ const DIAGNOSTIC_LIMITS: readonly (keyof GPUSupportedLimits & string)[] = [
   "maxUniformBuffersPerShaderStage",
 ];
 
+const OPTIONAL_DEVICE_FEATURES: readonly GPUFeatureName[] = ["timestamp-query"];
+
 export interface SharedWebGpuDevice {
   readonly adapter: GPUAdapter;
   readonly device: GPUDevice;
   readonly diagnostics: GpuDiagnostics;
   readonly requiredLimits: Record<string, number>;
+  readonly requiredFeatures: readonly GPUFeatureName[];
 }
 
 let sharedPromise: Promise<SharedWebGpuDevice> | null = null;
@@ -57,8 +60,9 @@ export function requestSharedWebGpuDevice(): Promise<SharedWebGpuDevice> {
       if (!adapter) throw new Error("WebGPU adapter request returned null");
       const diagnostics = diagnosticsFromAdapter(adapter);
       const requiredLimits = buildRequiredLimits(diagnostics);
-      const device = await adapter.requestDevice({ requiredLimits });
-      const value = Object.freeze({ adapter, device, diagnostics, requiredLimits });
+      const requiredFeatures = OPTIONAL_DEVICE_FEATURES.filter((feature) => adapter.features.has(feature));
+      const device = await adapter.requestDevice({ requiredLimits, requiredFeatures });
+      const value = Object.freeze({ adapter, device, diagnostics, requiredLimits, requiredFeatures });
       sharedValue = value;
       void device.lost.then(() => {
         if (sharedValue?.device === device) sharedValue = null;
