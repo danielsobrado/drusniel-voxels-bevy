@@ -37,17 +37,23 @@ export async function buildCanonicalErosionArtifact(
   onProgress?: (progress: ErosionBuildProgress) => void,
 ): Promise<ErosionArtifact> {
   resetErosionDiagnostics(input.config.erosion.enabled);
+  if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
   const worker = createErosionWorkerClient();
   if (!worker) throw new Error("erosion source worker is unavailable");
+  const cancelWorker = (): void => worker.cancel();
+  input.signal?.addEventListener("abort", cancelWorker);
   const storeKey = { sourceTerrainHash: input.sourceTerrainHash, configHash: input.configHash };
   try {
     const cached = await worker.loadArtifact(storeKey, input.worldId);
     if (cached) return cached;
+    if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
 
     let gpuFailure: unknown = null;
     try {
       const shared = await requestSharedWebGpuDevice();
+      if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
       await assertErosionGpuParity(shared.device);
+      if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
       let checkpoint = await worker.loadGpuCheckpoint(storeKey);
       if (checkpoint) recordGpuCheckpoint(checkpoint.stateAByteLength + checkpoint.stateBByteLength, true);
 
@@ -63,6 +69,7 @@ export async function buildCanonicalErosionArtifact(
               terrainFieldConfig: input.terrainFieldConfig,
               config: input.config,
             });
+        if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
         const raw = await buildErosionGpuRaw(shared.device, {
           worldId: input.worldId,
           seed: input.seed,
@@ -81,6 +88,7 @@ export async function buildCanonicalErosionArtifact(
           },
           onMainThreadSlice: recordMainThreadSlice,
         });
+        if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
         return worker.finalizeGpu({ ...storeKey, worldId: input.worldId, raw });
       };
 
@@ -105,24 +113,19 @@ export async function buildCanonicalErosionArtifact(
       throw new Error(`canonical erosion requires WebGPU for ${cells.toLocaleString()} cells; GPU build failed: ${message}`);
     }
     console.warn("[erosion] WebGPU path unavailable; using the exact CPU fallback for a small grid", gpuFailure);
-    const cancelWorker = (): void => worker.cancel();
-    input.signal?.addEventListener("abort", cancelWorker, { once: true });
-    try {
-      return await worker.build({
-        worldId: input.worldId,
-        seed: input.seed,
-        seaLevelM: input.seaLevelM,
-        sizeM: input.sizeM,
-        originM: input.originM,
-        terrainFieldConfig: input.terrainFieldConfig,
-        sourceTerrainHash: input.sourceTerrainHash,
-        configHash: input.configHash,
-        config: input.config,
-      }, onProgress);
-    } finally {
-      input.signal?.removeEventListener("abort", cancelWorker);
-    }
+    return await worker.build({
+      worldId: input.worldId,
+      seed: input.seed,
+      seaLevelM: input.seaLevelM,
+      sizeM: input.sizeM,
+      originM: input.originM,
+      terrainFieldConfig: input.terrainFieldConfig,
+      sourceTerrainHash: input.sourceTerrainHash,
+      configHash: input.configHash,
+      config: input.config,
+    }, onProgress);
   } finally {
+    input.signal?.removeEventListener("abort", cancelWorker);
     worker.dispose();
   }
 }
