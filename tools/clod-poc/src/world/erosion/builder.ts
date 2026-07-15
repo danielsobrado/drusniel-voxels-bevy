@@ -1,10 +1,11 @@
 import { requestSharedWebGpuDevice } from "../../rendering/shared_webgpu_device.js";
+import type { TerrainFieldConfigInput } from "../../terrain/terrain_surface.js";
+import { isErosionAbort, throwErosionAbort } from "./abort.js";
 import { recordGpuCheckpoint, recordMainThreadSlice, resetErosionDiagnostics } from "./diagnostics.js";
 import { createErosionWorkerClient } from "./erosion_client.js";
 import { buildErosionGpuRaw } from "./gpu/dispatch.js";
 import { assertErosionGpuParity } from "./gpu/parity_gate.js";
 import type { ErosionArtifact, ErosionBuildProgress, ErosionGpuCheckpoint, ErosionGpuInitialState, TerrainErosionConfig } from "./types.js";
-import type { TerrainFieldConfigInput } from "../../terrain/terrain_surface.js";
 
 const CPU_FALLBACK_MAX_CELLS = 512 * 512;
 
@@ -25,18 +26,6 @@ function sourceCellCount(input: BuildCanonicalErosionInput): number {
   const width = Math.floor(input.sizeM.x / input.config.erosion.cellSizeM) + 1;
   const height = Math.floor(input.sizeM.z / input.config.erosion.cellSizeM) + 1;
   return width * height;
-}
-
-function isAbort(error: unknown, signal?: AbortSignal): boolean {
-  return signal?.aborted === true
-    || (error instanceof DOMException && error.name === "AbortError")
-    || (error instanceof Error && error.name === "AbortError");
-}
-
-function throwAbort(error: unknown, signal?: AbortSignal): never {
-  if (signal?.reason instanceof Error) throw signal.reason;
-  if (error instanceof Error) throw error;
-  throw new DOMException("Erosion build cancelled", "AbortError");
 }
 
 function initialFromCheckpoint(checkpoint: ErosionGpuCheckpoint): ErosionGpuInitialState {
@@ -60,9 +49,7 @@ export async function buildCanonicalErosionArtifact(
       const shared = await requestSharedWebGpuDevice();
       await assertErosionGpuParity(shared.device);
       let checkpoint = await worker.loadGpuCheckpoint(storeKey);
-      if (checkpoint) {
-        recordGpuCheckpoint(checkpoint.stateAByteLength + checkpoint.stateBByteLength, true);
-      }
+      if (checkpoint) recordGpuCheckpoint(checkpoint.stateAByteLength + checkpoint.stateBByteLength, true);
 
       const runGpu = async (resume: ErosionGpuCheckpoint | null): Promise<ErosionArtifact> => {
         const initial = resume
@@ -100,7 +87,7 @@ export async function buildCanonicalErosionArtifact(
       try {
         return await runGpu(checkpoint);
       } catch (error) {
-        if (isAbort(error, input.signal)) throwAbort(error, input.signal);
+        if (isErosionAbort(error, input.signal)) throwErosionAbort(error, input.signal);
         if (!checkpoint || !(error instanceof Error) || !error.message.toLowerCase().includes("checkpoint")) throw error;
         console.warn("[erosion] persisted GPU checkpoint was invalid; rebuilding from the canonical source", error);
         await worker.clearCheckpoint(storeKey);
@@ -108,7 +95,7 @@ export async function buildCanonicalErosionArtifact(
         return await runGpu(null);
       }
     } catch (error) {
-      if (isAbort(error, input.signal)) throwAbort(error, input.signal);
+      if (isErosionAbort(error, input.signal)) throwErosionAbort(error, input.signal);
       gpuFailure = error;
     }
 
