@@ -237,9 +237,7 @@ export async function buildErosionGpuRaw(
       gpuMs += await submitTimedBatch(device, encoder, timing, passTimingsMs);
       assertErosionNotAborted(input.signal);
       submissionCount++;
-      if (hydraulicIteration === hydraulicTarget || hydraulicIteration % persistenceInterval === 0) {
-        await persistCheckpoint();
-      }
+      if (hydraulicIteration === hydraulicTarget || hydraulicIteration % persistenceInterval === 0) await persistCheckpoint();
       const completed = hydraulicIteration * 10 + thermalIteration;
       const total = hydraulicTarget * 10 + thermalTarget;
       report("hydraulic", total === 0 ? 99 : Math.min(99, completed / total * 100));
@@ -256,9 +254,7 @@ export async function buildErosionGpuRaw(
       gpuMs += await submitTimedBatch(device, encoder, timing, passTimingsMs);
       assertErosionNotAborted(input.signal);
       submissionCount++;
-      if (thermalIteration === thermalTarget || thermalIteration % persistenceInterval === 0) {
-        await persistCheckpoint();
-      }
+      if (thermalIteration === thermalTarget || thermalIteration % persistenceInterval === 0) await persistCheckpoint();
       report("thermal", Math.min(99, (hydraulicTarget * 10 + thermalIteration) / Math.max(1, hydraulicTarget * 10 + thermalTarget) * 100));
     }
     report("encoding", 99);
@@ -286,7 +282,6 @@ export async function buildErosionGpuRaw(
     output.destroy();
     outputDestroyed = true;
     assertErosionNotAborted(input.signal);
-    report("complete", 100);
     return Object.freeze({
       initial: Object.freeze({
         sourceWidth: input.initial.sourceWidth,
@@ -321,10 +316,18 @@ export async function buildErosionGpu(
   options: ErosionGpuBuildOptions = {},
 ): Promise<PersistedErosionArtifact> {
   const raw = await buildErosionGpuRaw(device, input, options);
-  return finalizeErosionGpuRawOutput({
+  const artifact = await finalizeErosionGpuRawOutput({
     raw,
     sourceTerrainHash: input.sourceTerrainHash,
     configHash: input.configHash,
     ...(input.signal ? { signal: input.signal } : {}),
   });
+  options.onProgress?.({
+    phase: "complete",
+    hydraulicIteration: input.config.erosion.enabled ? input.config.erosion.hydraulicIterations : 0,
+    thermalIteration: input.config.erosion.enabled ? input.config.erosion.thermalIterations : 0,
+    percent: 100,
+    checkpointCount: raw.checkpointCount,
+  });
+  return artifact;
 }
