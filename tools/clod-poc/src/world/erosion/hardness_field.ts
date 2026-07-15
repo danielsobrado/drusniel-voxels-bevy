@@ -12,10 +12,15 @@ export interface HardnessFieldInput {
   readonly seaLevelM: number;
   readonly seed: number;
   readonly heightFixed: Int32Array;
+  readonly signal?: AbortSignal;
 }
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function assertNotCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException("Erosion sampling cancelled", "AbortError");
 }
 
 export function buildHardnessField(input: HardnessFieldInput): Uint16Array {
@@ -27,6 +32,7 @@ export function buildHardnessField(input: HardnessFieldInput): Uint16Array {
     macro_variation: { ...materialAuthority.macro_variation, enabled: false },
   };
   for (let z = 0; z < input.height; z++) {
+    assertNotCancelled(input.signal);
     for (let x = 0; x < input.width; x++) {
       const index = z * input.width + x;
       const center = input.heightFixed[index]!;
