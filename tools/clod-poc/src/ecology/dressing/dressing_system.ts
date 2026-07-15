@@ -132,7 +132,6 @@ export class DressingSystem {
   private rebuild(centerX: number, centerZ: number): void {
     const started = performance.now();
     const candidates = this.generateCandidates(centerX, centerZ);
-    this.clearMeshes();
     const byClass = new Map<DressingClassId, RenderCandidate[]>();
     for (const candidate of candidates) {
       const entries = byClass.get(candidate.classId) ?? [];
@@ -141,14 +140,29 @@ export class DressingSystem {
     }
     for (const classId of DRESSING_CLASSES) {
       const entries = byClass.get(classId);
-      if (!entries?.length) continue;
+      const existing = this.meshes.get(classId);
+      if (!entries?.length) {
+        if (existing) {
+          existing.count = 0;
+          existing.visible = false;
+        }
+        continue;
+      }
       const geometry = this.geometries.get(classId);
       const material = this.materials.get(classId);
       if (!geometry || !material) throw new Error(`missing authored dressing render resources: ${classId}`);
-      const mesh = new THREE.InstancedMesh(geometry, material, entries.length);
-      mesh.name = `dressing:${classId}`;
-      mesh.castShadow = DRESSING_CLASS_DEFINITIONS[classId].castsNearShadow;
-      mesh.receiveShadow = true;
+      let mesh = existing;
+      if (!mesh || mesh.instanceMatrix.count < entries.length) {
+        if (mesh) this.root.remove(mesh);
+        mesh = new THREE.InstancedMesh(geometry, material, nextPowerOfTwo(entries.length));
+        mesh.name = `dressing:${classId}`;
+        mesh.castShadow = DRESSING_CLASS_DEFINITIONS[classId].castsNearShadow;
+        mesh.receiveShadow = true;
+        this.root.add(mesh);
+        this.meshes.set(classId, mesh);
+      }
+      mesh.visible = true;
+      mesh.count = entries.length;
       for (let index = 0; index < entries.length; index++) {
         const entry = entries[index];
         this.position.set(entry.x, entry.y, entry.z);
@@ -159,8 +173,6 @@ export class DressingSystem {
       }
       mesh.instanceMatrix.needsUpdate = true;
       mesh.computeBoundingSphere();
-      this.root.add(mesh);
-      this.meshes.set(classId, mesh);
       this.diagnostics.perClass[classId].visible = entries.length;
     }
     this.lastCenterX = centerX;
@@ -379,6 +391,10 @@ export class DressingSystem {
       counters[`dressing_${classId}_visible`] = perClass.visible;
     }
   }
+}
+
+function nextPowerOfTwo(value: number): number {
+  return 2 ** Math.ceil(Math.log2(Math.max(1, value)));
 }
 
 function dressingAttachmentParent(parent: RenderCandidate): AttachmentParent {
