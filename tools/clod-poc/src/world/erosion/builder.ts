@@ -117,6 +117,13 @@ export async function buildCanonicalErosionArtifact(
         if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
         const artifact = await worker.finalizeGpu({ ...storeKey, worldId: input.worldId, raw });
         if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
+        reportProgress({
+          phase: "complete",
+          hydraulicIteration: input.config.erosion.enabled ? input.config.erosion.hydraulicIterations : 0,
+          thermalIteration: input.config.erosion.enabled ? input.config.erosion.thermalIterations : 0,
+          percent: 100,
+          checkpointCount: artifact.checkpointCount,
+        });
         return artifact;
       };
 
