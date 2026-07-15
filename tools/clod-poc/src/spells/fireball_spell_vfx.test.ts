@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import {
   computeFireballPosition,
@@ -34,6 +34,47 @@ describe("fireball spell VFX", () => {
       distance: 20,
     }));
     expect(miss).toBeNull();
+    expect(findFireballTerrainImpact(start, start, 0.25, () => null)).toBeNull();
+  });
+
+  it("handles a zero aim vector, one trail ember, and terrain hits without a normal", () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1000);
+    const scene = new THREE.Scene();
+    const vfx = createFireballSpellVfx({
+      scene,
+      config: {
+        ...defaultSpellConfig.fireball.vfx,
+        launchSpeed: 10,
+        liftSpeed: 0,
+        gravity: 10,
+        impactDurationMs: 600,
+        trailCount: 1,
+        sparkCount: 0,
+      },
+      getSource: () => ({
+        point: new THREE.Vector3(0, 1, 0),
+        direction: new THREE.Vector3(),
+      }),
+      raycastTerrain: (ray) => {
+        if (ray.direction.y >= 0) return null;
+        const distance = -ray.origin.y / ray.direction.y;
+        return { point: ray.at(distance, new THREE.Vector3()), distance };
+      },
+    });
+
+    try {
+      vfx.play(3000);
+      vfx.update(1100);
+      const trail = scene.getObjectByName("fireball-spell-trail") as THREE.InstancedMesh;
+      expect(trail.count).toBe(1);
+      expect(trail.visible).toBe(true);
+
+      vfx.update(1600);
+      expect(scene.getObjectByName("fireball-spell-impact")?.visible).toBe(true);
+    } finally {
+      vfx.dispose();
+      clock.mockRestore();
+    }
   });
 
   it("flies, impacts terrain, fades the burst, and disposes its scene graph", () => {
