@@ -165,10 +165,11 @@ describe("ecological dressing runtime", () => {
     const before = scene.getObjectByName("dressing:moss_patch") as THREE.InstancedMesh;
     expect(before).toBeDefined();
 
-    system.update({ x: 256, z: 256 });
+    system.update({ x: 258, z: 258 });
 
     const after = scene.getObjectByName("dressing:moss_patch") as THREE.InstancedMesh;
     expect(after).toBeDefined();
+    expect(after).toBe(before);
     expect(after.geometry).toBe(before.geometry);
     expect(after.material).toBe(before.material);
     system.dispose();
