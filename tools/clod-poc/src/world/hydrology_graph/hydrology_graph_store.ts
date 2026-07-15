@@ -1,10 +1,11 @@
+import { EROSION_SCHEMA_VERSION } from "../erosion/constants.js";
 import { setActiveErodedMacroField, setLatestErosionArtifactRef, toErodedMacroField } from "../erosion/integration.js";
 import type { ErosionArtifactRef } from "../erosion/types.js";
 import { compactHydrologyGraph, type HydrologyGraphArtifact } from "./hydrology_graph_artifact.js";
 import { HYDROLOGY_GRAPH_VERSION, type HydrologyErosionAuthority, type HydrologyGraph } from "./hydrology_graph.js";
 
 export const HYDROLOGY_GRAPH_DB_NAME = "drusniel-hydrology-graphs";
-export const HYDROLOGY_GRAPH_DB_VERSION = 3;
+export const HYDROLOGY_GRAPH_DB_VERSION = 4;
 export const HYDROLOGY_GRAPH_STORE_NAME = "hydrology_graphs";
 
 interface ErosionRecordMeta {
@@ -17,7 +18,7 @@ interface ErosionRecordMeta {
 }
 
 interface HydrologyGraphRecord {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly terrainSourceHash: string;
   readonly graphParamsHash: string;
   readonly ref: HydrologyGraphArtifact["ref"];
@@ -54,7 +55,9 @@ function graphShapeValid(graph: unknown): graph is HydrologyGraph {
   if (!graph || typeof graph !== "object") return false;
   const value = graph as Partial<HydrologyGraph>;
   const macro = value.macro;
-  if (value.version !== HYDROLOGY_GRAPH_VERSION || !macro?.erosion) return false;
+  if (value.version !== HYDROLOGY_GRAPH_VERSION
+    || !macro?.erosion
+    || macro.erosion.artifactRef.schemaVersion !== EROSION_SCHEMA_VERSION) return false;
   const count = macro.resX * macro.resZ;
   const erosionCount = macro.erosion.width * macro.erosion.height;
   return Number.isSafeInteger(macro.resX) && macro.resX > 1
@@ -97,10 +100,11 @@ export class IndexedDbHydrologyGraphStore {
     await transactionDone(transaction);
     if (!value || typeof value !== "object") return null;
     const record = value as Partial<HydrologyGraphRecord>;
-    if (record.schemaVersion !== 3
+    if (record.schemaVersion !== 4
       || record.terrainSourceHash !== this.terrainSourceHash
       || record.graphParamsHash !== this.graphParamsHash
       || !record.ref?.hash || !record.erosion?.artifactRef
+      || record.erosion.artifactRef.schemaVersion !== EROSION_SCHEMA_VERSION
       || typeof record.buildMs !== "number" || !Number.isFinite(record.buildMs)
       || typeof record.graphJson !== "string"
       || !(record.lakeIndex instanceof ArrayBuffer)
@@ -128,7 +132,7 @@ export class IndexedDbHydrologyGraphStore {
         macro: { ...parsed.macro, lakeIndex: new Int32Array(record.lakeIndex), erosion },
       };
       if (!graphShapeValid(graph)) return null;
-      setActiveErodedMacroField(toErodedMacroField(erosion));
+      setActiveErodedMacroField(toErodedMacroField(erosion), graph.worldId);
       setLatestErosionArtifactRef(erosion.artifactRef, graph.worldId);
       return { ref: record.ref, buildMs: record.buildMs, graph };
     } catch {
@@ -141,6 +145,9 @@ export class IndexedDbHydrologyGraphStore {
     const graph = compactHydrologyGraph(artifact.graph);
     const erosion = graph.macro.erosion;
     if (!erosion) throw new Error("continent hydrology graph cannot be persisted without erosion authority");
+    if (erosion.artifactRef.schemaVersion !== EROSION_SCHEMA_VERSION) {
+      throw new Error("continent hydrology graph erosion authority uses an obsolete schema");
+    }
     const macroJson = {
       resX: graph.macro.resX,
       resZ: graph.macro.resZ,
@@ -157,7 +164,7 @@ export class IndexedDbHydrologyGraphStore {
       originZ: erosion.originZ,
     };
     const record: HydrologyGraphRecord = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       terrainSourceHash: this.terrainSourceHash,
       graphParamsHash: this.graphParamsHash,
       ref: artifact.ref,
