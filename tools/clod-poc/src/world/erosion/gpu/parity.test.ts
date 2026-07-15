@@ -39,6 +39,16 @@ function initialState(config: TerrainErosionConfig) {
   return packErosionGpuInitialState(source, config.erosion.borderCells);
 }
 
+function commonInput(config: TerrainErosionConfig) {
+  return {
+    worldId: "gpu-resume",
+    seed: 37,
+    sourceTerrainHash: SOURCE_HASH,
+    configHash: CONFIG_HASH,
+    config,
+  };
+}
+
 describe("erosion GPU parity", () => {
   gpuIt("is bit-identical to the CPU oracle on golden and random seeded grids", async () => {
     const shared = await requestSharedWebGpuDevice();
@@ -49,13 +59,7 @@ describe("erosion GPU parity", () => {
   gpuIt("resumes bit-identically from a compact state-A checkpoint", async () => {
     const shared = await requestSharedWebGpuDevice();
     const config = resumeConfig();
-    const common = {
-      worldId: "gpu-resume",
-      seed: 37,
-      sourceTerrainHash: SOURCE_HASH,
-      configHash: CONFIG_HASH,
-      config,
-    };
+    const common = commonInput(config);
     const uninterrupted = await buildErosionGpu(shared.device, {
       ...common,
       initial: initialState(config),
@@ -80,5 +84,22 @@ describe("erosion GPU parity", () => {
     });
     assertErosionParity(uninterrupted.field, resumed.field);
     expect(resumed.ref.hash).toBe(uninterrupted.ref.hash);
+  });
+
+  gpuIt("continues the valid simulation when checkpoint persistence is disabled", async () => {
+    const shared = await requestSharedWebGpuDevice();
+    const config = resumeConfig();
+    let attempts = 0;
+    const artifact = await buildErosionGpu(shared.device, {
+      ...commonInput(config),
+      initial: initialState(config),
+    }, {
+      onCheckpoint() {
+        attempts++;
+        return false;
+      },
+    });
+    expect(attempts).toBe(1);
+    expect(artifact.ref.hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
