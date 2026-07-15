@@ -201,6 +201,7 @@ ctx.onmessage = (event) => {
         sampleHeightMeters: baseSurfaceHeight,
         seed: request.seed,
         seaLevelM: request.seaLevelM,
+        signal: controller.signal,
       });
       const initial = packErosionGpuInitialState(source, request.config.erosion.borderCells);
       ctx.postMessage(
