@@ -1,5 +1,5 @@
 import { HEIGHT_UNITS_PER_METER, SEDIMENT_UNITS_PER_METER } from "./constants.js";
-import type { ErosionArtifact, ErosionDiagnostics, ErodedMacroField } from "./types.js";
+import type { ErosionArtifact, ErosionArtifactSummary, ErosionDiagnostics, ErodedMacroField } from "./types.js";
 
 const EMPTY: ErosionDiagnostics = {
   erosion_enabled: 0,
@@ -38,8 +38,33 @@ export function updateErosionProgress(percent: number): void {
   publish();
 }
 
-export function recordErosionArtifact(artifact: ErosionArtifact, cacheHit: boolean): void {
-  const summary = summarizeField(artifact.field);
+export function summarizeErosionField(field: ErodedMacroField): ErosionArtifactSummary {
+  let minHeight = 0x7fffffff;
+  let maxHeight = -0x80000000;
+  let eroded = 0;
+  let deposited = 0;
+  for (let index = 0; index < field.heightFixed.length; index++) {
+    minHeight = Math.min(minHeight, field.heightFixed[index]!);
+    maxHeight = Math.max(maxHeight, field.heightFixed[index]!);
+    const delta = field.deposition[index]!;
+    if (delta < 0) eroded += -delta;
+    else deposited += delta;
+  }
+  const cellArea = field.cellSizeM * field.cellSizeM;
+  return Object.freeze({
+    minHeightM: minHeight / HEIGHT_UNITS_PER_METER,
+    maxHeightM: maxHeight / HEIGHT_UNITS_PER_METER,
+    erodedM3: eroded / SEDIMENT_UNITS_PER_METER * cellArea,
+    depositedM3: deposited / SEDIMENT_UNITS_PER_METER * cellArea,
+  });
+}
+
+export function recordErosionArtifact(
+  artifact: ErosionArtifact,
+  cacheHit: boolean,
+  precomputedSummary?: ErosionArtifactSummary,
+): void {
+  const summary = precomputedSummary ?? summarizeErosionField(artifact.field);
   gpuPassCounters = {};
   for (const [label, elapsedMs] of Object.entries(artifact.gpuPassTimingsMs)) {
     const key = `erosion_gpu_pass_${label.replace(/^erosion-/, "").replaceAll(/[^a-zA-Z0-9]+/g, "_")}_ms`;
@@ -87,32 +112,6 @@ export function recordMainThreadSlice(elapsedMs: number): void {
 
 export function getErosionDiagnostics(): Readonly<ErosionDiagnostics> {
   return Object.freeze({ ...diagnostics });
-}
-
-function summarizeField(field: ErodedMacroField): {
-  minHeightM: number;
-  maxHeightM: number;
-  erodedM3: number;
-  depositedM3: number;
-} {
-  let minHeight = 0x7fffffff;
-  let maxHeight = -0x80000000;
-  let eroded = 0;
-  let deposited = 0;
-  for (let index = 0; index < field.heightFixed.length; index++) {
-    minHeight = Math.min(minHeight, field.heightFixed[index]!);
-    maxHeight = Math.max(maxHeight, field.heightFixed[index]!);
-    const delta = field.deposition[index]!;
-    if (delta < 0) eroded += -delta;
-    else deposited += delta;
-  }
-  const cellArea = field.cellSizeM * field.cellSizeM;
-  return {
-    minHeightM: minHeight / HEIGHT_UNITS_PER_METER,
-    maxHeightM: maxHeight / HEIGHT_UNITS_PER_METER,
-    erodedM3: eroded / SEDIMENT_UNITS_PER_METER * cellArea,
-    depositedM3: deposited / SEDIMENT_UNITS_PER_METER * cellArea,
-  };
 }
 
 function publish(): void {
