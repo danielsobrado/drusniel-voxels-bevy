@@ -48,12 +48,8 @@ export function validateErosionGpuCheckpoint(
   if (checkpoint.stateAByteLength !== cellCount * 7 * Uint32Array.BYTES_PER_ELEMENT) {
     throw new Error("erosion GPU checkpoint state A byte length mismatch");
   }
-  if (checkpoint.stateBByteLength !== cellCount * 6 * Uint32Array.BYTES_PER_ELEMENT) {
-    throw new Error("erosion GPU checkpoint state B byte length mismatch");
-  }
   const stateABytes = checkpoint.stateAChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
-  const stateBBytes = checkpoint.stateBChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
-  if (stateABytes !== checkpoint.stateAByteLength || stateBBytes !== checkpoint.stateBByteLength) {
+  if (stateABytes !== checkpoint.stateAByteLength) {
     throw new Error("erosion GPU checkpoint chunks are incomplete");
   }
   return checkpoint;
@@ -80,5 +76,5 @@ export function collectErosionCheckpointTransferables(checkpoint: ErosionCpuChec
 }
 
 export function collectErosionGpuCheckpointTransferables(checkpoint: ErosionGpuCheckpoint): Transferable[] {
-  return [...checkpoint.stateAChunks, ...checkpoint.stateBChunks];
+  return [...checkpoint.stateAChunks];
 }
