@@ -1,4 +1,5 @@
 import { initHydrologyAtlasGpu, resetHydrologyAtlasGpu } from "../../gpu/hydrology_atlas_gpu.js";
+import { refreshVegetationAuthorityHeightfieldMask } from "../../vegetation/gpu_authority/heightfield_mask.js";
 import { resolveVegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import { runGrassStartup } from "./grass_startup.js";
 import { runStoneStartup } from "./stone_startup.js";
@@ -24,6 +25,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   } = input;
 
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
+  refreshVegetationAuthorityHeightfieldMask();
 
   // Streaming hydrology atlas (Phase 4b): must exist before any ring compute is created
   // so their bind groups capture the real atlas texture instead of the 1×1 fallback.
