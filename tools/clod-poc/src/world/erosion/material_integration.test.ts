@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { classifyTerrainMaterial } from "../../terrainMaterial/terrainMaterialBands.js";
+import {
+  clearActiveErodedMacroField,
+  getActiveErodedMacroField,
+  getActiveErosionWorldId,
+  sampleActiveErosionMaterialChannels,
+  setActiveErodedMacroField,
+} from "./integration.js";
+import type { ErodedMacroField } from "./types.js";
 
 const CONFIG = {
   waterline_m: 0,
@@ -30,6 +38,23 @@ function baseInput() {
   };
 }
 
+function authority(): ErodedMacroField {
+  return {
+    width: 2,
+    height: 2,
+    cellSizeM: 16,
+    originX: -16,
+    originZ: 8,
+    heightFixed: new Int32Array(4),
+    hardness: new Uint16Array(4).fill(32768),
+    sediment: new Uint32Array(4).fill(65536),
+    deposition: new Int32Array(4).fill(32768),
+    sampleHeightMeters: () => 0,
+  };
+}
+
+afterEach(() => clearActiveErodedMacroField());
+
 describe("erosion material integration", () => {
   it("uses only explicitly supplied erosion channels", () => {
     const base = classifyTerrainMaterial(baseInput());
@@ -58,5 +83,25 @@ describe("erosion material integration", () => {
       },
     });
     expect(deposited.weights.dirt).toBeGreaterThan(base.weights.dirt);
+  });
+
+  it("does not repeat edge channels outside the artifact footprint", () => {
+    setActiveErodedMacroField(authority(), "world-a");
+    expect(sampleActiveErosionMaterialChannels(-16, 8)).not.toBeNull();
+    expect(sampleActiveErosionMaterialChannels(0, 24)).not.toBeNull();
+    expect(sampleActiveErosionMaterialChannels(-16.001, 8)).toBeNull();
+    expect(sampleActiveErosionMaterialChannels(0, 24.001)).toBeNull();
+  });
+
+  it("keeps active authority scoped to its world", () => {
+    const field = authority();
+    setActiveErodedMacroField(field, "world-a");
+    expect(getActiveErodedMacroField("world-a")).toBe(field);
+    expect(getActiveErodedMacroField("world-b")).toBeNull();
+    expect(getActiveErosionWorldId()).toBe("world-a");
+    clearActiveErodedMacroField("world-b");
+    expect(getActiveErodedMacroField("world-a")).toBe(field);
+    clearActiveErodedMacroField("world-a");
+    expect(getActiveErodedMacroField()).toBeNull();
   });
 });
