@@ -1,5 +1,5 @@
 erosion:
-  schema_version: 1
+  schema_version: 2
   enabled: true
   cell_size_m: 16
   border_cells: 2
