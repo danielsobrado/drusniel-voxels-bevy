@@ -11,6 +11,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
       grassSystem,
       forestLightingController,
       treeController,
+      dressingSystem,
       stoneSystem,
       waterController,
       weatherController,
@@ -41,6 +42,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
     grassSystem.dispose();
     forestLightingController.dispose();
     treeController.dispose();
+    dressingSystem.dispose();
     stoneSystem.dispose();
     waterController.dispose();
     weatherController.dispose();
