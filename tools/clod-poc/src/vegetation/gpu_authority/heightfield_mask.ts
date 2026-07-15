@@ -71,8 +71,8 @@ interface MaskState {
   revision: number;
   voxelSource: VoxelOverlaySource | null;
   projectPropRevision: number;
+  savedPropRevision: number;
   constructionSnapshot: string;
-  footprints: readonly ExclusionFootprint[];
   byTile: ReadonlyMap<string, readonly ExclusionFootprint[]>;
   stats: VegetationAuthorityHeightfieldMaskStats;
 }
@@ -81,8 +81,8 @@ const state: MaskState = {
   revision: 0,
   voxelSource: null,
   projectPropRevision: -1,
+  savedPropRevision: -1,
   constructionSnapshot: "",
-  footprints: Object.freeze([]),
   byTile: new Map(),
   stats: Object.freeze({
     revision: 0,
@@ -95,14 +95,19 @@ const state: MaskState = {
   }),
 };
 
+let constructionReadWarningLogged = false;
+let constructionParseWarningLogged = false;
+
 export function refreshVegetationAuthorityHeightfieldMask(): boolean {
   const voxelSource = getVoxelOverlaySource();
   const projectPropRevision = projectPropEditStore.revision();
+  const savedPropRevision = savedPropStore.revision();
   const constructionSnapshot = readConstructionSnapshot();
   if (
     state.revision > 0
     && state.voxelSource === voxelSource
     && state.projectPropRevision === projectPropRevision
+    && state.savedPropRevision === savedPropRevision
     && state.constructionSnapshot === constructionSnapshot
   ) {
     return false;
@@ -118,8 +123,8 @@ export function refreshVegetationAuthorityHeightfieldMask(): boolean {
   state.revision++;
   state.voxelSource = voxelSource;
   state.projectPropRevision = projectPropRevision;
+  state.savedPropRevision = savedPropRevision;
   state.constructionSnapshot = constructionSnapshot;
-  state.footprints = footprints;
   state.byTile = byTile;
   state.stats = Object.freeze({
     revision: state.revision,
@@ -222,9 +227,9 @@ function destroyedPropFootprints(
     .map((prop): ProjectPropInstance => ({
       id: prop.id,
       prefabId: prop.prefabId,
-      position: [...prop.position],
-      rotation: [...prop.rotation],
-      scale: [...prop.scale],
+      position: [prop.position[0], prop.position[1], prop.position[2]],
+      rotation: [prop.rotation[0], prop.rotation[1], prop.rotation[2], prop.rotation[3]],
+      scale: [prop.scale[0], prop.scale[1], prop.scale[2]],
       anchor: prop.anchor,
       seed: prop.seed,
       variationId: prop.variationId,
@@ -240,8 +245,9 @@ function propFootprint(
   source: Extract<ExclusionSource, "project_prop" | "destroyed_prop">,
 ): ExclusionFootprint {
   const scale = Math.max(1, Math.abs(prop.scale[0]), Math.abs(prop.scale[2]));
-  const baseRadius = asset?.placement.flattenRadius && asset.placement.flattenRadius > 0
-    ? asset.placement.flattenRadius
+  const flattenRadius = asset?.placement.flattenRadius;
+  const baseRadius = flattenRadius !== undefined && flattenRadius > 0
+    ? flattenRadius
     : asset ? PROP_RADIUS_BY_CATEGORY[asset.category] : UNKNOWN_PROP_RADIUS_M;
   return circle(prop.position[0], prop.position[2], baseRadius * scale + EXCLUSION_MARGIN_M, source);
 }
@@ -403,7 +409,10 @@ function readConstructionSnapshot(): string {
       ? ""
       : localStorage.getItem(defaultConstructionConfig.placement.storageKey) ?? "";
   } catch (error) {
-    console.warn("[vegetation-authority] failed to read construction exclusions", error);
+    if (!constructionReadWarningLogged) {
+      constructionReadWarningLogged = true;
+      console.warn("[vegetation-authority] failed to read construction exclusions", error);
+    }
     return "";
   }
 }
@@ -415,7 +424,10 @@ function parseConstructionSnapshot(snapshot: string): readonly PlacedConstructio
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isPlacedConstructionPiece);
   } catch (error) {
-    console.warn("[vegetation-authority] failed to parse construction exclusions", error);
+    if (!constructionParseWarningLogged) {
+      constructionParseWarningLogged = true;
+      console.warn("[vegetation-authority] failed to parse construction exclusions", error);
+    }
     return [];
   }
 }
