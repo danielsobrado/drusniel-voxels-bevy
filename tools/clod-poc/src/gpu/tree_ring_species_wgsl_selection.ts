@@ -72,7 +72,8 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
 
 export function replaceTreeRingSpeciesSelection(source: string, replacement: string): string {
   const start = source.indexOf("fn species_material_bias(");
-  const end = source.indexOf("fn append_tree(", start);
+  const morphologyStart = source.indexOf("fn tree_species_morphology_runtime(", start);
+  const end = morphologyStart >= 0 ? morphologyStart : source.indexOf("fn append_tree(", start);
   if (start < 0 || end < 0) return source;
   return `${source.slice(0, start)}${replacement}\n\n${source.slice(end)}`;
 }

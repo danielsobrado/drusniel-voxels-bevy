@@ -9,6 +9,7 @@ import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js"
 import { getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
+import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 import {
   buildVegetationSlotPrefilter,
   VegetationSlotPrefilterCache,
@@ -362,10 +363,13 @@ export class GrassGpuRingCompute {
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
-        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
         storage(11, "read-only-storage"),
         { binding: 12, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+        { binding: 15, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -471,6 +475,7 @@ export class GrassGpuRingCompute {
   }
 
   private createBindGroup(): GPUBindGroup {
+    const canonicalHeight = heightfieldTileGpuAtlasBindings(this.device);
     return this.device.createBindGroup({
       label: "grass ring bind group",
       layout: this.layout,
@@ -485,6 +490,9 @@ export class GrassGpuRingCompute {
         { binding: 10, resource: this.hydroSampler },
         { binding: 11, resource: { buffer: this.activeSlotBuffer } },
         { binding: 12, resource: hydrologyAtlasGpuTexture(this.device).createView() },
+        { binding: 13, resource: canonicalHeight.heightView },
+        { binding: 14, resource: canonicalHeight.residencyView },
+        { binding: 15, resource: { buffer: canonicalHeight.params } },
       ],
     });
   }

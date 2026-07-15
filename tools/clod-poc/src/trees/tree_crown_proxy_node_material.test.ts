@@ -23,7 +23,9 @@ describe("tree crown proxy node material", () => {
     expect(source).toContain("uRadius.y.mul(crownFlattening).mul(ageHeightScale)");
     expect(source).toContain("treeCrownProxyDimensions(settings, species)");
     expect(source).toContain("smoothstep(float(0.70), float(1.0), radial)");
-    expect(source).toContain("proxyScreenHash(screenCoordinate.xy, baseWorldXZ, uSeed)");
+    expect(source).toContain("treeMorphologyHash01Node(");
+    expect(source).toContain("floatBitsToUint(record.identityBits.zw)");
+    expect(source).not.toContain("screenCoordinate");
     expect(source).toContain("proxyFade(distanceM, uFarDistance, uImpostorDistance, uBandDistance, uLodIndex)");
     expect(source).toContain("material.colorWrite = false");
   });

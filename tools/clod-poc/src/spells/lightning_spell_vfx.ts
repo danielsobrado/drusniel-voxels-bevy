@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { LightningSpellVfxConfig, SpellColor } from "./spell_config.js";
+import { createLightningArcNodeMaterial } from "./lightning_node_material.js";
 
 const MIN_ARC_LENGTH = 0.35;
 const BRANCH_SEGMENT_COUNT = 6;
@@ -7,6 +8,7 @@ const IMPACT_SURFACE_BIAS = 0.045;
 const LIGHTNING_RENDER_ORDER = 4300;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const WORLD_RIGHT = new THREE.Vector3(1, 0, 0);
+const WORLD_FORWARD = new THREE.Vector3(0, 0, 1);
 
 export interface LightningSpellSource {
   point: THREE.Vector3;
@@ -47,6 +49,7 @@ interface LightningState {
 interface RibbonGeometryHandle {
   geometry: THREE.BufferGeometry;
   position: THREE.BufferAttribute;
+  uv: THREE.BufferAttribute;
   maxSegments: number;
 }
 
@@ -95,10 +98,16 @@ function createArcMaterial(color: SpellColor, opacity: number): THREE.MeshBasicM
 function createRibbonGeometry(maxSegments: number): RibbonGeometryHandle {
   const geometry = new THREE.BufferGeometry();
   const position = new THREE.BufferAttribute(new Float32Array(Math.max(1, maxSegments) * 6 * 3), 3);
+  const uv = new THREE.BufferAttribute(new Float32Array(Math.max(1, maxSegments) * 6 * 2), 2);
+  const normals = new Float32Array(Math.max(1, maxSegments) * 6 * 3);
+  for (let index = 2; index < normals.length; index += 3) normals[index] = 1;
   position.setUsage(THREE.DynamicDrawUsage);
+  uv.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", position);
+  geometry.setAttribute("uv", uv);
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geometry.setDrawRange(0, 0);
-  return { geometry, position, maxSegments: Math.max(1, maxSegments) };
+  return { geometry, position, uv, maxSegments: Math.max(1, maxSegments) };
 }
 
 function writeVertex(array: Float32Array, offset: number, point: THREE.Vector3): number {
@@ -106,6 +115,12 @@ function writeVertex(array: Float32Array, offset: number, point: THREE.Vector3):
   array[offset + 1] = point.y;
   array[offset + 2] = point.z;
   return offset + 3;
+}
+
+function writeUv(array: Float32Array, offset: number, x: number, y: number): number {
+  array[offset] = x;
+  array[offset + 1] = y;
+  return offset + 2;
 }
 
 function resolveRibbonSide(
@@ -128,8 +143,10 @@ function writeRibbonGeometry(
   polylines: readonly (readonly THREE.Vector3[])[],
   cameraPosition: THREE.Vector3,
   width: number,
+  endWidthRatio: number,
 ): void {
   const array = handle.position.array as Float32Array;
+  const uvArray = handle.uv.array as Float32Array;
   const tangent = new THREE.Vector3();
   const side0 = new THREE.Vector3();
   const side1 = new THREE.Vector3();
@@ -139,18 +156,27 @@ function writeRibbonGeometry(
   const p1Right = new THREE.Vector3();
   let segmentCount = 0;
   let offset = 0;
+  let uvOffset = 0;
 
   for (const points of polylines) {
+    let hasPreviousEnd = false;
     for (let i = 0; i < points.length - 1 && segmentCount < handle.maxSegments; i++) {
+      const span = Math.max(1, points.length - 1);
+      const t0 = i / span;
+      const t1 = (i + 1) / span;
       const p0 = points[i]!;
       const p1 = points[i + 1]!;
       tangent.copy(p1).sub(p0);
       if (tangent.lengthSq() < 1e-10) continue;
       tangent.normalize();
-      resolveRibbonSide(p0, tangent, cameraPosition, width, side0);
-      resolveRibbonSide(p1, tangent, cameraPosition, width, side1);
-      p0Left.copy(p0).add(side0);
-      p0Right.copy(p0).sub(side0);
+      const width0 = width * THREE.MathUtils.lerp(1, endWidthRatio, smoothstep(0.05, 1, t0));
+      const width1 = width * THREE.MathUtils.lerp(1, endWidthRatio, smoothstep(0.05, 1, t1));
+      if (!hasPreviousEnd) {
+        resolveRibbonSide(p0, tangent, cameraPosition, width0, side0);
+        p0Left.copy(p0).add(side0);
+        p0Right.copy(p0).sub(side0);
+      }
+      resolveRibbonSide(p1, tangent, cameraPosition, width1, side1);
       p1Left.copy(p1).add(side1);
       p1Right.copy(p1).sub(side1);
 
@@ -160,12 +186,22 @@ function writeRibbonGeometry(
       offset = writeVertex(array, offset, p0Right);
       offset = writeVertex(array, offset, p1Right);
       offset = writeVertex(array, offset, p1Left);
+      uvOffset = writeUv(uvArray, uvOffset, 0, t0);
+      uvOffset = writeUv(uvArray, uvOffset, 1, t0);
+      uvOffset = writeUv(uvArray, uvOffset, 0, t1);
+      uvOffset = writeUv(uvArray, uvOffset, 1, t0);
+      uvOffset = writeUv(uvArray, uvOffset, 1, t1);
+      uvOffset = writeUv(uvArray, uvOffset, 0, t1);
+      p0Left.copy(p1Left);
+      p0Right.copy(p1Right);
+      hasPreviousEnd = true;
       segmentCount++;
     }
   }
 
   handle.geometry.setDrawRange(0, segmentCount * 6);
   handle.position.needsUpdate = true;
+  handle.uv.needsUpdate = true;
 }
 
 function createPointBuffer(segmentCount: number): THREE.Vector3[] {
@@ -187,6 +223,27 @@ function writeLightningArcPoints(
   const span = Math.max(1, points.length - 1);
   const jitterScale = jitter * Math.min(1.8, Math.max(0.55, Math.sqrt(length / 9)));
 
+  const valueNoise = (t: number, frequency: number, noiseSeed: number): number => {
+    const x = t * frequency;
+    const cell = Math.floor(x);
+    const blend = smoothstep(0, 1, x - cell);
+    const a = hash01(cell, noiseSeed) * 2 - 1;
+    const b = hash01(cell + 1, noiseSeed) * 2 - 1;
+    return THREE.MathUtils.lerp(a, b, blend);
+  };
+
+  const fractalNoise = (t: number, noiseSeed: number): number => {
+    let value = 0;
+    let amplitude = 1;
+    let normalization = 0;
+    for (let octave = 0; octave < 4; octave++) {
+      value += valueNoise(t, 2 ** (octave + 1), noiseSeed + octave * 19.7) * amplitude;
+      normalization += amplitude;
+      amplitude *= 0.5;
+    }
+    return value / normalization;
+  };
+
   for (let i = 0; i <= span; i++) {
     const t = i / span;
     const point = points[i]!;
@@ -194,9 +251,14 @@ function writeLightningArcPoints(
     if (i === 0 || i === span) continue;
 
     const envelope = Math.pow(Math.sin(Math.PI * t), 0.72);
-    const largeBend = Math.sin(t * Math.PI * 3.2 + seed * 0.17) * 0.35;
-    const sideNoise = (hash01(i, seed + 1.7) * 2 - 1 + largeBend) * jitterScale * envelope;
-    const upNoise = (hash01(i, seed + 9.3) * 2 - 1) * jitterScale * envelope;
+    const sideNoise = (
+      fractalNoise(t, seed + 1.7) * 0.9
+      + (hash01(i, seed + 31.9) * 2 - 1) * 0.1
+    ) * jitterScale * envelope;
+    const upNoise = (
+      fractalNoise(t, seed + 9.3) * 0.9
+      + (hash01(i, seed + 47.1) * 2 - 1) * 0.1
+    ) * jitterScale * envelope;
     point.addScaledVector(side, sideNoise).addScaledVector(up, upNoise);
   }
 }
@@ -225,7 +287,14 @@ export function computeLightningSpellFrame(
 
 export function computeLightningEnvelope(progress: number): number {
   const p = clamp01(progress);
-  return smoothstep(0, 0.045, p) * (1 - smoothstep(0.72, 1, p));
+  const pulse = (start: number, attackEnd: number, fadeStart: number, end: number, intensity: number): number => (
+    smoothstep(start, attackEnd, p) * (1 - smoothstep(fadeStart, end, p)) * intensity
+  );
+  return Math.max(
+    pulse(0, 0.006, 0.055, 0.16, 1),
+    pulse(0.17, 0.19, 0.27, 0.34, 0.82),
+    pulse(0.37, 0.39, 0.46, 0.56, 0.48),
+  );
 }
 
 function makeGroundQuaternion(normal: THREE.Vector3): THREE.Quaternion {
@@ -256,14 +325,14 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
   const branchCoreHandle = createRibbonGeometry(config.branchCount * BRANCH_SEGMENT_COUNT);
   const branchGlowHandle = createRibbonGeometry(config.branchCount * BRANCH_SEGMENT_COUNT);
 
-  const mainCoreMaterial = createArcMaterial(config.coreColor, 1);
-  const mainGlowMaterial = createArcMaterial(config.glowColor, 0.4);
-  const branchCoreMaterial = createArcMaterial(config.coreColor, 0.75);
-  const branchGlowMaterial = createArcMaterial(config.glowColor, 0.28);
-  const mainCore = new THREE.Mesh(mainCoreHandle.geometry, mainCoreMaterial);
-  const mainGlow = new THREE.Mesh(mainGlowHandle.geometry, mainGlowMaterial);
-  const branchCore = new THREE.Mesh(branchCoreHandle.geometry, branchCoreMaterial);
-  const branchGlow = new THREE.Mesh(branchGlowHandle.geometry, branchGlowMaterial);
+  const mainCoreShading = createLightningArcNodeMaterial({ name: "lightning-main-core-node", coreColor: config.coreColor, edgeColor: config.glowColor, opacity: 1, softness: 5.5 });
+  const mainGlowShading = createLightningArcNodeMaterial({ name: "lightning-main-glow-node", coreColor: config.glowColor, edgeColor: config.glowColor, opacity: 0.4, softness: 1.8 });
+  const branchCoreShading = createLightningArcNodeMaterial({ name: "lightning-branch-core-node", coreColor: config.coreColor, edgeColor: config.glowColor, opacity: 0.75, softness: 4.5 });
+  const branchGlowShading = createLightningArcNodeMaterial({ name: "lightning-branch-glow-node", coreColor: config.glowColor, edgeColor: config.glowColor, opacity: 0.28, softness: 1.6 });
+  const mainCore = new THREE.Mesh(mainCoreHandle.geometry, mainCoreShading.material);
+  const mainGlow = new THREE.Mesh(mainGlowHandle.geometry, mainGlowShading.material);
+  const branchCore = new THREE.Mesh(branchCoreHandle.geometry, branchCoreShading.material);
+  const branchGlow = new THREE.Mesh(branchGlowHandle.geometry, branchGlowShading.material);
   const arcMeshes = [mainGlow, branchGlow, mainCore, branchCore];
   arcMeshes.forEach((mesh, index) => {
     mesh.name = ["lightning-spell-glow", "lightning-spell-branch-glow", "lightning-spell-core", "lightning-spell-branch-core"][index]!;
@@ -290,7 +359,7 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
   scene.add(halo);
 
   const sparkStates = makeSparkStates(config.sparkCount);
-  const sparkGeometry = new THREE.TetrahedronGeometry(0.055, 0);
+  const sparkGeometry = new THREE.BoxGeometry(0.018, 0.018, 0.24);
   const sparkMaterial = createArcMaterial(config.coreColor, 0.9);
   const sparks = new THREE.InstancedMesh(sparkGeometry, sparkMaterial, Math.max(1, sparkStates.length));
   sparks.name = "lightning-spell-sparks";
@@ -323,7 +392,8 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
   const sparkMatrix = new THREE.Matrix4();
   const sparkPosition = new THREE.Vector3();
   const sparkScale = new THREE.Vector3();
-  const identityRotation = new THREE.Quaternion();
+  const sparkRotation = new THREE.Quaternion();
+  const sparkVelocity = new THREE.Vector3();
   const branchDirection = new THREE.Vector3();
   const branchEnd = new THREE.Vector3();
   const branchSide = new THREE.Vector3();
@@ -403,7 +473,9 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
         .addScaledVector(state.targetNormal, IMPACT_SURFACE_BIAS + lift);
       const size = spark.scale * (1 - age) * envelope;
       sparkScale.setScalar(Math.max(0.001, size));
-      sparkMatrix.compose(sparkPosition, identityRotation, sparkScale);
+      sparkVelocity.copy(spark.direction).addScaledVector(state.targetNormal, spark.lift * (1 - age)).normalize();
+      sparkRotation.setFromUnitVectors(WORLD_FORWARD, sparkVelocity);
+      sparkMatrix.compose(sparkPosition, sparkRotation, sparkScale);
       sparks.setMatrixAt(index, sparkMatrix);
     }
     sparks.instanceMatrix.needsUpdate = true;
@@ -424,29 +496,32 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
     updateBranches(seed);
 
     const cameraPosition = deps.getCamera().position;
-    writeRibbonGeometry(mainCoreHandle, [mainPoints], cameraPosition, config.coreWidth);
-    writeRibbonGeometry(mainGlowHandle, [mainPoints], cameraPosition, config.glowWidth);
-    writeRibbonGeometry(branchCoreHandle, branchPoints, cameraPosition, config.coreWidth * 0.62);
-    writeRibbonGeometry(branchGlowHandle, branchPoints, cameraPosition, config.glowWidth * 0.72);
+    writeRibbonGeometry(mainCoreHandle, [mainPoints], cameraPosition, config.coreWidth, 0.72);
+    writeRibbonGeometry(mainGlowHandle, [mainPoints], cameraPosition, config.glowWidth, 0.62);
+    writeRibbonGeometry(branchCoreHandle, branchPoints, cameraPosition, config.coreWidth * 0.58, 0.04);
+    writeRibbonGeometry(branchGlowHandle, branchPoints, cameraPosition, config.glowWidth * 0.64, 0.03);
 
     const envelope = computeLightningEnvelope(frame.progress);
     const flicker = 0.72 + hash01(refreshFrame, state.castSeed + 101) * 0.28;
-    mainCoreMaterial.opacity = clamp01(envelope * (0.88 + flicker * 0.35));
-    mainGlowMaterial.opacity = envelope * (0.24 + flicker * 0.28);
-    branchCoreMaterial.opacity = envelope * (0.48 + flicker * 0.32);
-    branchGlowMaterial.opacity = envelope * (0.13 + flicker * 0.22);
+    for (const handle of [mainCoreShading, mainGlowShading, branchCoreShading, branchGlowShading]) {
+      handle.uTime.value = frame.timeSeconds;
+    }
+    mainCoreShading.uOpacity.value = clamp01(envelope * (0.78 + flicker * 0.24));
+    mainGlowShading.uOpacity.value = envelope * (0.14 + flicker * 0.16);
+    branchCoreShading.uOpacity.value = envelope * (0.34 + flicker * 0.22);
+    branchGlowShading.uOpacity.value = envelope * (0.08 + flicker * 0.12);
 
     const ringPulse = 0.72 + Math.sin(frame.timeSeconds * 36) * 0.18 + flicker * 0.18;
     ring.position.copy(state.target).addScaledVector(state.targetNormal, IMPACT_SURFACE_BIAS);
     ring.quaternion.copy(makeGroundQuaternion(state.targetNormal));
     ring.scale.setScalar(config.impactRadius * ringPulse);
     ring.rotation.z = frame.timeSeconds * 2.4;
-    ringMaterial.opacity = envelope * (0.2 + flicker * 0.42);
+    ringMaterial.opacity = envelope * (0.12 + flicker * 0.24);
 
     halo.position.copy(state.target).addScaledVector(state.targetNormal, IMPACT_SURFACE_BIAS * 1.5);
-    halo.scale.setScalar(config.impactRadius * (0.13 + flicker * 0.18));
+    halo.scale.setScalar(config.impactRadius * (0.08 + flicker * 0.1));
     halo.rotation.set(frame.timeSeconds * 4.2, frame.timeSeconds * 5.3, frame.timeSeconds * 3.7);
-    haloMaterial.opacity = envelope * (0.48 + flicker * 0.4);
+    haloMaterial.opacity = envelope * (0.12 + flicker * 0.12);
 
     sourceLight.position.copy(state.source);
     impactLight.position.copy(state.target).addScaledVector(state.targetNormal, 0.15);
@@ -480,10 +555,10 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
       mainGlowHandle.geometry.dispose();
       branchCoreHandle.geometry.dispose();
       branchGlowHandle.geometry.dispose();
-      mainCoreMaterial.dispose();
-      mainGlowMaterial.dispose();
-      branchCoreMaterial.dispose();
-      branchGlowMaterial.dispose();
+      mainCoreShading.material.dispose();
+      mainGlowShading.material.dispose();
+      branchCoreShading.material.dispose();
+      branchGlowShading.material.dispose();
       ring.geometry.dispose();
       ringMaterial.dispose();
       halo.geometry.dispose();

@@ -34,6 +34,7 @@ describe("bindBootstrapDisposal", () => {
           grassSystem: disposable(calls, "grass"),
           forestLightingController: disposable(calls, "forest-lighting"),
           treeController: disposable(calls, "trees"),
+          dressingSystem: disposable(calls, "dressing"),
           stoneSystem: disposable(calls, "stones"),
           waterController: disposable(calls, "water"),
           weatherController: disposable(calls, "weather"),
@@ -60,5 +61,6 @@ describe("bindBootstrapDisposal", () => {
 
     expect(calls.slice(0, 2)).toEqual(["abort", "stop-loop"]);
     expect(calls).toContain("clod-compute");
+    expect(calls).toContain("dressing");
   });
 });

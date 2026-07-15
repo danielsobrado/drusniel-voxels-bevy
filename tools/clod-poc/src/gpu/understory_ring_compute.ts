@@ -21,6 +21,7 @@ import { getDigEditsSnapshot, getDigEditRevision, surfaceHeight } from "../terra
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { buildVegetationSlotPrefilter, VegetationSlotPrefilterCache } from "../vegetation/vegetation_slot_prefilter.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
+import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
@@ -164,12 +165,15 @@ export class UnderstoryGpuRingCompute {
     const layout = device.createBindGroupLayout({ label: "understory ring compute layout", entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       storage(1), storage(2), storage(3), storage(4, "read-only-storage"),
-      { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
-      { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
       storage(7, "read-only-storage"),
       { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       storage(9, "read-only-storage"),
       { binding: 10, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+      { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+      { binding: 12, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+      { binding: 13, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
     ] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `understory ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
@@ -276,6 +280,7 @@ export class UnderstoryGpuRingCompute {
   }
 
   private createBindGroup(): GPUBindGroup {
+    const canonicalHeight = heightfieldTileGpuAtlasBindings(this.device);
     return this.device.createBindGroup({ label: "understory ring bind group", layout: this.layout, entries: [
       { binding: 0, resource: { buffer: this.paramBuffer } },
       { binding: 1, resource: { buffer: this.counterBuffer } },
@@ -288,6 +293,9 @@ export class UnderstoryGpuRingCompute {
       { binding: 8, resource: { buffer: this.fieldParams } },
       { binding: 9, resource: { buffer: this.activeSlotBuffer } },
       { binding: 10, resource: hydrologyAtlasGpuTexture(this.device).createView() },
+      { binding: 11, resource: canonicalHeight.heightView },
+      { binding: 12, resource: canonicalHeight.residencyView },
+      { binding: 13, resource: { buffer: canonicalHeight.params } },
     ] });
   }
 

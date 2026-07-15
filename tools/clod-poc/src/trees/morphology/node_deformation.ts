@@ -4,7 +4,6 @@ import {
   clamp,
   cos,
   float,
-  floatBitsToUint,
   instanceIndex,
   max,
   mix,
@@ -19,6 +18,8 @@ import {
   vec3,
 } from "three/tsl";
 import type { TreeRingInstanceBuffers } from "../tree_node_material.js";
+import { TREE_SPECIES, type TreeSettings } from "../tree_config_types.js";
+import { targetTreeHeight } from "../tree_geometry_types.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type TreeMorphologyNode = any;
@@ -54,14 +55,13 @@ export function treeMorphologyRecordNodes(buffers: TreeRingInstanceBuffers): Tre
 }
 
 export function treeMorphologyHash01Node(
-  identityBits: TreeMorphologyNode,
+  identityWords: TreeMorphologyNode,
   channel: TreeMorphologyNode,
 ): TreeMorphologyNode {
-  const identity: TreeMorphologyNode = floatBitsToUint(identityBits.zw);
   const multiplier: TreeMorphologyNode = uint(1664525);
   const increment: TreeMorphologyNode = uint(1013904223);
-  const a0: TreeMorphologyNode = identity.x.add(uint(40000)).add(channel.bitAnd(uint(0x3fff)));
-  const b0: TreeMorphologyNode = identity.y.add(uint(40000)).add(channel.shiftRight(uint(14)).bitAnd(uint(0x3fff)));
+  const a0: TreeMorphologyNode = identityWords.x.add(uint(40000)).add(channel.bitAnd(uint(0x3fff)));
+  const b0: TreeMorphologyNode = identityWords.y.add(uint(40000)).add(channel.shiftRight(uint(14)).bitAnd(uint(0x3fff)));
   const a1: TreeMorphologyNode = a0.mul(multiplier).add(increment);
   const b1: TreeMorphologyNode = b0.mul(multiplier).add(increment);
   const a2: TreeMorphologyNode = a1.add(b1.mul(multiplier));
@@ -73,10 +73,35 @@ export function treeMorphologyHash01Node(
   return float(word.bitAnd(uint(0xffffff))).div(16777216);
 }
 
+function clampTreeMorphologyVectorNode(
+  value: TreeMorphologyNode,
+  maximum: number,
+): TreeMorphologyNode {
+  const magnitude: TreeMorphologyNode = value.length();
+  return magnitude.greaterThan(float(maximum)).select(
+    value.mul(maximum).div(max(magnitude, float(0.000001))),
+    value,
+  );
+}
+
+export function treeMorphologyCrownStartNode(settings: TreeSettings): TreeMorphologyNode {
+  const packedWind: TreeMorphologyNode = attribute("treeWind", "vec3");
+  const speciesIndex: TreeMorphologyNode = packedWind.z;
+  let crownStart: TreeMorphologyNode = float(0.4);
+  for (let index = TREE_SPECIES.length - 1; index >= 0; index--) {
+    const species = TREE_SPECIES[index]!;
+    const config = settings.species[species];
+    const ratio = clampNumber(config.trunkHeightM / Math.max(0.001, targetTreeHeight(species, config)), 0, 1);
+    crownStart = abs(speciesIndex.sub(float(index))).lessThan(float(0.5)).select(float(ratio), crownStart);
+  }
+  return crownStart;
+}
+
 export function treeMorphologyDeformationNodes(
   morphology0: TreeMorphologyNode,
   morphology1: TreeMorphologyNode,
   morphology2: TreeMorphologyNode,
+  crownStart01: TreeMorphologyNode,
 ): TreeMorphologyDeformationNodes {
   const height01: TreeMorphologyNode = clamp(attribute("treeHeight01", "float"), 0, 1);
   const radial01: TreeMorphologyNode = clamp(attribute("treeRadial01", "float"), 0, 1);
@@ -84,9 +109,9 @@ export function treeMorphologyDeformationNodes(
   const branchPhase: TreeMorphologyNode = clamp(attribute("treeBranchPhase", "float"), 0, 1);
   const rootMask: TreeMorphologyNode = clamp(attribute("treeRootMask", "float"), 0, 1);
   const age: TreeMorphologyNode = clamp(morphology0.x, 0, 1);
-  const lean: TreeMorphologyNode = clamp(morphology0.yz, vec2(-0.22), vec2(0.22));
+  const lean: TreeMorphologyNode = clampTreeMorphologyVectorNode(morphology0.yz, 0.22);
   const health: TreeMorphologyNode = clamp(morphology0.w, 0, 1);
-  const crownBias: TreeMorphologyNode = clamp(morphology1.xy, vec2(-0.35), vec2(0.35));
+  const crownBias: TreeMorphologyNode = clampTreeMorphologyVectorNode(morphology1.xy, 0.35);
   const crownWidth: TreeMorphologyNode = clamp(morphology1.z, 0.82, 1.18);
   const crownFlattening: TreeMorphologyNode = clamp(morphology1.w, 0.82, 1.2);
   const branchDroop: TreeMorphologyNode = clamp(morphology2.x, -0.18, 0.32);
@@ -101,8 +126,8 @@ export function treeMorphologyDeformationNodes(
   const ageSmooth: TreeMorphologyNode = smoothstep(0, 1, age);
   const heightScale: TreeMorphologyNode = mix(0.72, 1.08, ageSmooth);
   const radiusScale: TreeMorphologyNode = mix(0.78, 1.12, age);
-  const crownBlend: TreeMorphologyNode = smoothstep(0.30, 0.40, height01);
-  const crownBiasWeight: TreeMorphologyNode = smoothstep(0.40, 1, height01);
+  const crownBlend: TreeMorphologyNode = smoothstep(crownStart01.sub(0.1), crownStart01, height01);
+  const crownBiasWeight: TreeMorphologyNode = smoothstep(crownStart01, 1, height01);
 
   const ageX: TreeMorphologyNode = positionGeometry.x.mul(radiusScale);
   const ageY: TreeMorphologyNode = positionGeometry.y.mul(heightScale);
@@ -113,7 +138,7 @@ export function treeMorphologyDeformationNodes(
     local.y.add(mix(0.08, -0.04, age).mul(treeHeight).mul(crownBlend)),
     local.z.mul(mix(1, crownWidth, crownBlend)),
   );
-  const crownCenterY: TreeMorphologyNode = treeHeight.mul(heightScale).mul(0.7);
+  const crownCenterY: TreeMorphologyNode = mix(crownStart01, 1, 0.5).mul(treeHeight).mul(heightScale);
   local = vec3(
     local.x,
     mix(local.y, crownCenterY.add(local.y.sub(crownCenterY).mul(crownFlattening)), crownBlend),
@@ -163,4 +188,8 @@ export function treeMorphologyDeformationNodes(
     flutterScale: mix(0.75, 1.05, health),
     foliageRetention: foliageDensity.mul(mix(0.72, 1.0, health)),
   };
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }

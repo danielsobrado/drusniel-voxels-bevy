@@ -78,7 +78,7 @@ describe("ecological dressing runtime", () => {
     };
     const hydrologySystem = {
       sample: () => ({
-        terrainY: 1_000,
+        terrainY: 20,
         depth: 0,
         shoreDistance: 999,
         flowX: 0,
@@ -87,7 +87,7 @@ describe("ecological dressing runtime", () => {
         riverMask: 0,
         flowStrength: 0,
       }),
-      terrainHeight: () => 1_000,
+      terrainHeight: () => 20,
     };
     const system = new DressingSystem({
       scene: new THREE.Scene(),
@@ -104,6 +104,9 @@ describe("ecological dressing runtime", () => {
     const visibleStumps = stats.perClass.stump_fresh.visible + stats.perClass.stump_rotten.visible;
     expect(visibleStumps).toBeGreaterThan(0);
     expect(generatedStumps).toBe(visibleStumps);
+    expect(stats.dressing_parent_attached_visible).toBeGreaterThan(0);
+    expect(stats.dressing_attachment_count).toBe(stats.dressing_parent_attached_visible);
+    expect(stats.dressing_attachment_parents).toBeGreaterThan(0);
     system.dispose();
   });
 
@@ -146,6 +149,98 @@ describe("ecological dressing runtime", () => {
     system.dispose();
   });
 
+  it("places centered persistent geometry above its support surface", () => {
+    const scene = new THREE.Scene();
+    const config: DressingConfig = {
+      ...DEFAULT_DRESSING_CONFIG,
+      densities: {
+        ...DEFAULT_DRESSING_CONFIG.densities,
+        deadfallPerHectare: 10_000,
+        stumpsPerHectare: 10_000,
+        brokenSnagsPerHectare: 10_000,
+      },
+    };
+    const hydrologySystem = {
+      sample: () => ({
+        terrainY: 20,
+        depth: 0,
+        shoreDistance: 999,
+        flowX: 0,
+        flowZ: 0,
+        moisture: 1,
+        riverMask: 0,
+        flowStrength: 0,
+      }),
+      terrainHeight: () => 20,
+    };
+    const system = new DressingSystem({
+      scene,
+      worldCells: 96,
+      worldSeed: 19,
+      config,
+      hydrologySystem: hydrologySystem as never,
+      quality: "ultra",
+      maximumInstances: 4_000,
+    });
+    const position = new THREE.Vector3();
+    const matrix = new THREE.Matrix4();
+    const stump = scene.getObjectByName("dressing:stump_rotten") as THREE.InstancedMesh;
+    const snag = scene.getObjectByName("dressing:broken_snag") as THREE.InstancedMesh;
+
+    expect(stump).toBeDefined();
+    stump.getMatrixAt(0, matrix);
+    position.setFromMatrixPosition(matrix);
+    expect(position.y).toBeGreaterThan(20.2);
+    expect(snag).toBeDefined();
+    snag.getMatrixAt(0, matrix);
+    position.setFromMatrixPosition(matrix);
+    expect(position.y).toBeGreaterThan(21);
+    system.dispose();
+  });
+
+  it("aligns accepted driftwood with canonical hydrology flow", () => {
+    const scene = new THREE.Scene();
+    const config: DressingConfig = {
+      ...DEFAULT_DRESSING_CONFIG,
+      densities: { ...DEFAULT_DRESSING_CONFIG.densities, driftwoodPer100m: 10_000 },
+    };
+    const hydrologySystem = {
+      sample: () => ({
+        terrainY: 20,
+        depth: 0,
+        shoreDistance: 1,
+        flowX: 1,
+        flowZ: 0,
+        moisture: 0.8,
+        riverMask: 1,
+        flowStrength: 1,
+      }),
+      terrainHeight: () => 20,
+    };
+    const system = new DressingSystem({
+      scene,
+      worldCells: 96,
+      worldSeed: 19,
+      config,
+      hydrologySystem: hydrologySystem as never,
+      quality: "ultra",
+      maximumInstances: 4_000,
+    });
+    const matrix = new THREE.Matrix4();
+    for (const classId of ["large_driftwood", "small_driftwood"] as const) {
+      const mesh = scene.getObjectByName(`dressing:${classId}`) as THREE.InstancedMesh;
+      expect(mesh).toBeDefined();
+      for (let index = 0; index < mesh.count; index++) {
+        mesh.getMatrixAt(index, matrix);
+        const elements = matrix.elements;
+        const x = Math.abs(elements[0]);
+        const z = Math.abs(elements[2]);
+        expect(Math.min(x, z)).toBeLessThan(1e-5);
+      }
+    }
+    system.dispose();
+  });
+
   it("reuses authored geometry across residency refreshes", () => {
     const scene = new THREE.Scene();
     const config: DressingConfig = {
@@ -165,10 +260,11 @@ describe("ecological dressing runtime", () => {
     const before = scene.getObjectByName("dressing:moss_patch") as THREE.InstancedMesh;
     expect(before).toBeDefined();
 
-    system.update({ x: 256, z: 256 });
+    system.update({ x: 258, z: 258 });
 
     const after = scene.getObjectByName("dressing:moss_patch") as THREE.InstancedMesh;
     expect(after).toBeDefined();
+    expect(after).toBe(before);
     expect(after.geometry).toBe(before.geometry);
     expect(after.material).toBe(before.material);
     system.dispose();

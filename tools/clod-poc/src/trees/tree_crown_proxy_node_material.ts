@@ -5,13 +5,14 @@ import {
   cos,
   dot,
   float,
-  fract,
+  floatBitsToUint,
+  floor,
   max,
   mix,
   positionGeometry,
-  screenCoordinate,
   sin,
   smoothstep,
+  uint,
   uniform,
   vec2,
   vec3,
@@ -20,7 +21,7 @@ import { TREE_LODS, type TreeLod, type TreeSettings, type TreeSpeciesId } from "
 import { treeCrownProxyDimensions } from "./tree_crown_proxy_math.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
-import { treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
+import { treeMorphologyHash01Node, treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -41,7 +42,6 @@ export function createTreeCrownProxyNodeMaterialHandle(
   const uFarDistance = uniform(settings.distanceM * settings.lod.farFraction);
   const uImpostorDistance = uniform(settings.distanceM * settings.lod.impostorFraction);
   const uBandDistance = uniform(settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0);
-  const uSeed = uniform(settings.seed);
   const uLodIndex = uniform(TREE_LODS.indexOf(lod));
   const regularMaterial = buildMaterial(
     buffers,
@@ -52,7 +52,6 @@ export function createTreeCrownProxyNodeMaterialHandle(
     uFarDistance,
     uImpostorDistance,
     uBandDistance,
-    uSeed,
     uLodIndex,
     false,
   );
@@ -65,7 +64,6 @@ export function createTreeCrownProxyNodeMaterialHandle(
     uFarDistance,
     uImpostorDistance,
     uBandDistance,
-    uSeed,
     uLodIndex,
     true,
   );
@@ -85,7 +83,6 @@ export function createTreeCrownProxyNodeMaterialHandle(
       uFarDistance.value = next.distanceM * next.lod.farFraction;
       uImpostorDistance.value = next.distanceM * next.lod.impostorFraction;
       uBandDistance.value = next.lod.crossfadeEnabled ? next.lod.crossfadeBandM : 0;
-      uSeed.value = next.seed;
     },
     dispose() {
       regularMaterial.dispose();
@@ -103,7 +100,6 @@ function buildMaterial(
   uFarDistance: TslNode,
   uImpostorDistance: TslNode,
   uBandDistance: TslNode,
-  uSeed: TslNode,
   uLodIndex: TslNode,
   debug: boolean,
 ): MeshBasicNodeMaterial {
@@ -139,7 +135,18 @@ function buildMaterial(
   const edge: TslNode = float(1).sub(smoothstep(float(0.70), float(1.0), radial));
   const distanceM: TslNode = worldXZ.sub(uFadeCenter).length();
   const fade: TslNode = proxyFade(distanceM, uFarDistance, uImpostorDistance, uBandDistance, uLodIndex);
-  const noise: TslNode = proxyScreenHash(screenCoordinate.xy, baseWorldXZ, uSeed);
+  const localCell: TslNode = vec3(
+    uint(floor(clamp(local.x.mul(0.5).add(0.5), 0, 1).mul(31))),
+    uint(floor(clamp(local.y.mul(0.5).add(0.5), 0, 1).mul(31))),
+    uint(floor(clamp(local.z.mul(0.5).add(0.5), 0, 1).mul(31))),
+  );
+  const proxyChannel: TslNode = uint(0x1109).bitXor(
+    localCell.x.add(localCell.y.mul(uint(32))).add(localCell.z.mul(uint(1024))),
+  );
+  const noise: TslNode = treeMorphologyHash01Node(
+    floatBitsToUint(record.identityBits.zw),
+    proxyChannel,
+  );
   const retention: TslNode = clamp(record.morphology2.y.mul(mix(0.72, 1, record.morphology0.w)), 0, 1);
   const keep: TslNode = noise.lessThan(clamp(edge.mul(uDensity).mul(retention).mul(fade), 0.0, 1.0));
   const material = new MeshBasicNodeMaterial();
@@ -161,8 +168,4 @@ function proxyFade(distanceM: TslNode, farDistance: TslNode, impostorDistance: T
   const hardFade: TslNode = distanceM.lessThanEqual(impostorDistance).select(float(1), float(0));
   const fade: TslNode = band.lessThanEqual(float(0.001)).select(hardFade, fadeWithBand);
   return lodIndex.greaterThanEqual(float(TREE_LODS.indexOf("impostor") - 0.5)).select(fade, float(1));
-}
-
-function proxyScreenHash(screenXY: TslNode, worldCell: TslNode, seed: TslNode): TslNode {
-  return fract(sin(dot(screenXY.add(worldCell.mul(0.017)).add(vec2(seed.mul(0.013), seed.mul(0.021))), vec2(12.9898, 78.233))).mul(43758.5453));
 }

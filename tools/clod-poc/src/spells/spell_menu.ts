@@ -8,6 +8,7 @@ export interface SpellMenu {
   castAir: () => void;
   castEarth: () => void;
   castLightning: () => void;
+  castFireball: () => void;
   dispose: () => void;
 }
 
@@ -28,6 +29,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   let airActiveReset = 0;
   let earthActiveReset = 0;
   let lightningActiveReset = 0;
+  let fireballActiveReset = 0;
   let dragOffset: { x: number; y: number } | null = null;
 
   root.replaceChildren();
@@ -45,10 +47,11 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const airButton = createSpellButton(`3 💨 ${config.air.label}`, `${config.air.label} spell (3)`, () => castAir());
   const earthButton = createSpellButton(`4 🪨 ${config.earth.label}`, `${config.earth.label} spell (4)`, () => castEarth());
   const lightningButton = createSpellButton(`5 ⚡ ${config.lightning.label}`, `${config.lightning.label} spell (5)`, () => castLightning());
+  const fireballButton = createSpellButton(`6 ☄️ ${config.fireball.label}`, `${config.fireball.label} spell (6)`, () => castFireball());
 
   root.addEventListener("pointerdown", stopUiPropagation);
   root.addEventListener("click", stopUiPropagation);
-  slots.append(fireButton, waterButton, airButton, earthButton, lightningButton);
+  slots.append(fireButton, waterButton, airButton, earthButton, lightningButton, fireballButton);
   root.append(title, slots);
 
   title.addEventListener("pointerdown", onDragStart);
@@ -124,23 +127,37 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     );
   }
 
+  function castFireball(): void {
+    window.clearTimeout(fireballActiveReset);
+    fireballButton.setAttribute("aria-pressed", "true");
+    controller?.playFireball(config.fireball.castDurationMs);
+    emitAudio("spell.fireball.cast", { volume: config.fireball.audio.volume, durationMs: config.fireball.castDurationMs });
+    fireballActiveReset = window.setTimeout(
+      () => fireballButton.setAttribute("aria-pressed", "false"),
+      config.fireball.castDurationMs,
+    );
+  }
+
   return {
     castFire,
     castWater,
     castAir,
     castEarth,
     castLightning,
+    castFireball,
     dispose: () => {
       window.clearTimeout(fireActiveReset);
       window.clearTimeout(waterActiveReset);
       window.clearTimeout(airActiveReset);
       window.clearTimeout(earthActiveReset);
       window.clearTimeout(lightningActiveReset);
+      window.clearTimeout(fireballActiveReset);
       fireActiveReset = 0;
       waterActiveReset = 0;
       airActiveReset = 0;
       earthActiveReset = 0;
       lightningActiveReset = 0;
+      fireballActiveReset = 0;
       if (dragOffset) onDragEnd();
       title.removeEventListener("pointerdown", onDragStart);
       root.removeEventListener("pointerdown", stopUiPropagation);
@@ -150,6 +167,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       airButton.remove();
       earthButton.remove();
       lightningButton.remove();
+      fireballButton.remove();
       if (shouldRemoveRoot) root.remove();
       else root.replaceChildren();
     },

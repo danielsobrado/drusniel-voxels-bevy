@@ -55,6 +55,7 @@ describe("tree patch mesh factory", () => {
     expect(mesh.receiveShadow).toBe(false);
     expect(mesh.geometry).not.toBe(source);
     expect(mesh.geometry.getAttribute("treeWorldXZ").count).toBe(3);
+    expect(mesh.geometry.getAttribute("treeIdentityBits").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeLodFade").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeLodDitherRole").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeImpostorUvRect").count).toBe(3);

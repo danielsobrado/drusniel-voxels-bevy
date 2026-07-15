@@ -1,12 +1,26 @@
 # Fable5 Parity 2 — Canonical GPU Vegetation Authority and Compaction
 
-Status: implementation plan.
+Status: implementation in progress.
 
 Scope: `tools/clod-poc` first, then Rust/Bevy using the same data contracts and acceptance rules.
 
 This document is prescriptive. The implementer must not choose a different ownership model, candidate flow, terrain source, compaction method, buffer layout, fallback policy, or validation threshold.
 
 Cross-plan build order, the shared hash/terrain-sample contracts, and the reconciled frame and VRAM budget live in `fable5-parity-index-and-budget-2026-07-15.md`. Read it before implementing: this plan is the pipeline that Plans 4 and 5 extend, so its budget is a sub-allocation of the whole-frame gate, not an independent promise.
+
+## Implementation status — 2026-07-15
+
+| Milestone | Status | Evidence / remaining gate |
+|---|---|---|
+| VEG-GPU-1 | Code complete | Shared config, cluster grid/planner, integer PCG/hash modules, fixed surface/instance layouts, capacity validation, and packing/golden-vector tests are in `src/vegetation/gpu_authority`. The composed tree ring delegates to the shared PCG implementation. |
+| VEG-GPU-2 | In progress | Canonical carved-height atlas and explicit toroidal-slot residency are bound to tree, grass, understory, and stone compute. Startup and streaming hydrology remain authoritative over the base height, canonical finite-difference normals are shared, understory no longer reads procedural height directly, and the CPU oracle fixes provider precedence. Exact GPU voxel/occupancy, project-prop exclusion, and far-summary bindings plus the native Windows river/lake parity capture remain. |
+| VEG-GPU-3..8 | Pending | Do not start VEG-GPU-3 until the remaining VEG-GPU-2 bindings and native exit gate are complete. |
+
+Verification completed for the landed code: focused Vitest coverage for contracts, hashes,
+layouts, cluster planning, atlas residency, provider order, and composed WGSL; full
+`tools/clod-poc` TypeScript typecheck; production Vite build; and the sample QA smoke
+(reported `baseline_missing`, so it is not a visual baseline). Browser visual/performance
+acceptance is not claimed from this non-Windows run.
 
 ## 1. Goal
 
@@ -700,12 +714,18 @@ The Bevy render-world system consumes extracted immutable descriptors and GPU re
 
 ### VEG-GPU-1 — Shared contracts
 
+Status: code complete on 2026-07-15.
+
 - Add config, cluster IDs, hashes, layouts, capacity validation, and CPU packing tests.
 - Add canonical terrain-sample interface.
 
 Exit gate: TypeScript/WGSL layouts and hashes match exactly.
 
 ### VEG-GPU-2 — Canonical terrain bindings
+
+Status: in progress. Canonical height/hydrology integration is code complete; exact
+GPU voxel/occupancy, project-prop exclusion, far-summary binding, and native visual
+acceptance remain.
 
 - Bind the carved tile atlas, hydrology atlas, voxel overlay, exclusions, and far summary.
 - Remove direct procedural-height sampling from GPU understory and other active GPU categories.

@@ -10,7 +10,6 @@ describe("lightning arc node material", () => {
       edgeColor: [0.18, 0.62, 1],
       opacity: 0.7,
       softness: 1.8,
-      tipFade: 0.4,
     });
 
     expect(handle.material.name).toBe("lightning-test");

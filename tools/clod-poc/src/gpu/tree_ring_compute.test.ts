@@ -257,7 +257,8 @@ describe("tree GPU ring shader source", () => {
 
   it("samples competition from world positions with the same species channel as the CPU oracle", () => {
     expect(treeRingShader).toContain("fn tree_competition_sample(wpos: vec2<f32>, species: u32)");
-    expect(treeRingShader).toContain("floor((wpos + direction * radius_m) / max(params.settings_a.x, 0.001))");
+    expect(treeRingShader).toContain("floor((wpos + direction * radius_m) / 3.4)");
+    expect(treeRingShader).not.toContain("floor((wpos + direction * radius_m) / max(params.settings_a.x, 0.001))");
     expect(treeRingShader).toContain("params.settings_u.z ^ 0x1005u ^ species");
   });
 });

@@ -12,11 +12,12 @@ import type { DressingConfig, DressingQuality } from "./config.js";
 import { acceptsCosmeticAtQuality } from "./config.js";
 import { cloneDressingDiagnostics, createDressingDiagnostics, type DressingDiagnostics } from "./diagnostics.js";
 import { deadfallOrientation, acceptDeadLogCandidate, createPairedStumpId } from "./persistent_candidates.js";
-import { parentAttachmentStableId, terrainDressingStableId } from "./stable_id.js";
+import { parentAttachmentStableId, stableIdKey, terrainDressingStableId } from "./stable_id.js";
 import { acceptTerrainCandidate } from "./terrain_candidates.js";
 import type { DressingEnvironmentSample, DressingStableId } from "./types.js";
 import { attachmentAllowed, type AttachmentParent } from "./attachment_candidates.js";
 import type { DressingAttachmentAnchor, DressingAnchorKind } from "./attachment_anchors.js";
+import { evaluateHydrologyAffinity } from "./hydrology_affinity.js";
 
 export interface DressingSystemOptions {
   readonly scene: THREE.Scene;
@@ -37,6 +38,7 @@ interface RenderCandidate {
   readonly z: number;
   readonly yaw: number;
   readonly scale: number;
+  readonly parentStableId?: DressingStableId;
 }
 
 const CLASS_COLORS: Readonly<Record<DressingClassId, number>> = {
@@ -132,7 +134,6 @@ export class DressingSystem {
   private rebuild(centerX: number, centerZ: number): void {
     const started = performance.now();
     const candidates = this.generateCandidates(centerX, centerZ);
-    this.clearMeshes();
     const byClass = new Map<DressingClassId, RenderCandidate[]>();
     for (const candidate of candidates) {
       const entries = byClass.get(candidate.classId) ?? [];
@@ -141,14 +142,29 @@ export class DressingSystem {
     }
     for (const classId of DRESSING_CLASSES) {
       const entries = byClass.get(classId);
-      if (!entries?.length) continue;
+      const existing = this.meshes.get(classId);
+      if (!entries?.length) {
+        if (existing) {
+          existing.count = 0;
+          existing.visible = false;
+        }
+        continue;
+      }
       const geometry = this.geometries.get(classId);
       const material = this.materials.get(classId);
       if (!geometry || !material) throw new Error(`missing authored dressing render resources: ${classId}`);
-      const mesh = new THREE.InstancedMesh(geometry, material, entries.length);
-      mesh.name = `dressing:${classId}`;
-      mesh.castShadow = DRESSING_CLASS_DEFINITIONS[classId].castsNearShadow;
-      mesh.receiveShadow = true;
+      let mesh = existing;
+      if (!mesh || mesh.instanceMatrix.count < entries.length) {
+        if (mesh) this.root.remove(mesh);
+        mesh = new THREE.InstancedMesh(geometry, material, nextPowerOfTwo(entries.length));
+        mesh.name = `dressing:${classId}`;
+        mesh.castShadow = DRESSING_CLASS_DEFINITIONS[classId].castsNearShadow;
+        mesh.receiveShadow = true;
+        this.root.add(mesh);
+        this.meshes.set(classId, mesh);
+      }
+      mesh.visible = true;
+      mesh.count = entries.length;
       for (let index = 0; index < entries.length; index++) {
         const entry = entries[index];
         this.position.set(entry.x, entry.y, entry.z);
@@ -159,8 +175,6 @@ export class DressingSystem {
       }
       mesh.instanceMatrix.needsUpdate = true;
       mesh.computeBoundingSphere();
-      this.root.add(mesh);
-      this.meshes.set(classId, mesh);
       this.diagnostics.perClass[classId].visible = entries.length;
     }
     this.lastCenterX = centerX;
@@ -168,8 +182,13 @@ export class DressingSystem {
     this.diagnostics.dressing_clusters_active = Math.max(1, Math.ceil((this.radiusM * 2) / this.options.config.clusterSizeM) ** 2);
     this.diagnostics.dressing_candidates_accepted = candidates.length;
     this.diagnostics.dressing_persistent_visible = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "persistent").length;
-    this.diagnostics.dressing_parent_attached_visible = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "parent_attached").length;
+    const attachments = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "parent_attached");
+    this.diagnostics.dressing_parent_attached_visible = attachments.length;
     this.diagnostics.dressing_terrain_attached_visible = candidates.filter((entry) => DRESSING_CLASS_DEFINITIONS[entry.classId].ownership === "terrain_attached").length;
+    this.diagnostics.dressing_attachment_count = attachments.length;
+    this.diagnostics.dressing_attachment_parents = new Set(
+      attachments.flatMap((entry) => entry.parentStableId ? [stableIdKey(entry.parentStableId)] : []),
+    ).size;
     this.diagnostics.dressing_main_thread_ms = performance.now() - started;
     this.publishDiagnostics();
   }
@@ -214,6 +233,11 @@ export class DressingSystem {
           if (Math.hypot(x - centerX, z - centerZ) > this.radiusM || !this.inWorld(x, z)) continue;
           const sample = this.sampleEnvironment(x, z);
           let yaw = treePcg2d01(id.lo | 0, id.hi | 0, 0x4202)[0] * Math.PI * 2;
+          if (classId === "large_driftwood" || classId === "small_driftwood") {
+            const affinity = evaluateHydrologyAffinity(classId, sample, rolls[1]);
+            if (!affinity.accepted || affinity.orientationRad === null) continue;
+            yaw = affinity.orientationRad;
+          }
           if (classId.startsWith("dead_log")) {
             const downhill = Math.atan2(-sample.normal[2], -sample.normal[0]);
             yaw = deadfallOrientation(downhill, Math.PI * 0.18, yaw, rolls[1]);
@@ -229,7 +253,15 @@ export class DressingSystem {
             continue;
           }
           const scale = 0.75 + treePcg2d01(id.hi | 0, id.lo | 0, 0x4203)[1] * 0.65;
-          const candidate = { classId, stableId: id, x, y: sample.position[1] + geometryYOffset(classId), z, yaw, scale };
+          const candidate = {
+            classId,
+            stableId: id,
+            x,
+            y: sample.position[1] + geometrySupportOffset(classId) * scale,
+            z,
+            yaw,
+            scale,
+          };
           candidates.push(candidate);
           this.diagnostics.perClass[classId].accepted++;
           if (classId.startsWith("dead_log")) this.appendPairedStump(candidate, candidates);
@@ -256,7 +288,7 @@ export class DressingSystem {
       classId,
       stableId: stumpId,
       x,
-      y: this.surfaceHeightAt(x, z),
+      y: this.surfaceHeightAt(x, z) + geometrySupportOffset(classId) * deadfall.scale * 0.85,
       z,
       yaw: deadfall.yaw,
       scale: deadfall.scale * 0.85,
@@ -300,6 +332,7 @@ export class DressingSystem {
         z: parent.z + Math.sin(parent.yaw) * offset,
         yaw: parent.yaw + rolls[1] * Math.PI,
         scale: 0.7 + rolls[1] * 0.5,
+        parentStableId: parent.stableId,
       });
       this.diagnostics.perClass[classId].generated++;
       this.diagnostics.perClass[classId].accepted++;
@@ -381,6 +414,10 @@ export class DressingSystem {
   }
 }
 
+function nextPowerOfTwo(value: number): number {
+  return 2 ** Math.ceil(Math.log2(Math.max(1, value)));
+}
+
 function dressingAttachmentParent(parent: RenderCandidate): AttachmentParent {
   const decay01 = parent.classId.includes("rotten") || parent.classId === "broken_snag"
     ? 0.9
@@ -457,8 +494,12 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function geometryYOffset(classId: DressingClassId): number {
-  if (classId.startsWith("dead_log") || classId.includes("driftwood")) return 0.22;
+function geometrySupportOffset(classId: DressingClassId): number {
+  if (classId.startsWith("dead_log") || classId.includes("driftwood")) return 0.3;
+  if (classId.startsWith("stump")) return 0.325;
+  if (classId === "broken_snag") return 1.9;
+  if (classId === "large_talus_boulder" || classId === "small_talus") return 0.25;
+  if (classId === "river_cobbles" || classId === "wet_stone_cluster") return 0.14;
   if (classId.includes("litter") || classId.includes("patch") || classId === "moss_patch" || classId === "lichen_patch") return 0.015;
   return 0;
 }

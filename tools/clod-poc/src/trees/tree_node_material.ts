@@ -15,6 +15,7 @@ import {
   cos,
   dot,
   float,
+  floatBitsToUint,
   floor,
   fract,
   frontFacing,
@@ -42,6 +43,7 @@ import type { TreeMaterialHandle } from "./tree_material.js";
 import { barkTrunkAlbedo, sharedBarkTexture } from "./tree_node_bark_texture.js";
 import {
   treeMorphologyDeformationNodes,
+  treeMorphologyCrownStartNode,
   treeMorphologyHash01Node,
   treeMorphologyRecordNodes,
 } from "./morphology/node_deformation.js";
@@ -120,7 +122,7 @@ export function treeFoliageCardCoverageAt(u: number, v: number): number {
   return 1 - smooth;
 }
 
-function treeFoliageCardKeep(
+export function treeFoliageCardKeep(
   cardTag: TslNode,
   retention: TslNode = float(1),
   branchPhase: TslNode = float(0),
@@ -192,6 +194,7 @@ export function createTreeNodeMaterialHandle(
     const aFlutterWeight: TslNode = aWind.y;
     const aBranchPhase: TslNode = attribute("treeBranchPhase", "float");
     const aWorldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+    const aIdentityWords: TslNode = attribute("treeIdentityBits", "uvec2");
     const variantKeep: TslNode = treeVariantKeep(aVariant, aWorldXZ, uVariantSeed);
 
     const forestUv: TslNode = clamp(aWorldXZ.div(uForestWorldSize), vec2(0), vec2(1));
@@ -206,7 +209,12 @@ export function createTreeNodeMaterialHandle(
     const cpuMorphology0: TslNode = attribute("treeMorphology0", "vec4");
     const cpuMorphology1: TslNode = attribute("treeMorphology1", "vec4");
     const cpuMorphology2: TslNode = attribute("treeMorphology2", "vec4");
-    const deformation = treeMorphologyDeformationNodes(cpuMorphology0, cpuMorphology1, cpuMorphology2);
+    const deformation = treeMorphologyDeformationNodes(
+      cpuMorphology0,
+      cpuMorphology1,
+      cpuMorphology2,
+      treeMorphologyCrownStartNode(settings),
+    );
     const stressedTint: TslNode = mix(vec3(0.82, 0.76, 0.68), vec3(1.02, 0.72, 0.42), aFoliageMask);
     const albedo: TslNode = mix(healthyAlbedo.mul(stressedTint), healthyAlbedo, clamp(cpuMorphology0.w, 0, 1));
     const phase: TslNode = fract(sin(dot(aWorldXZ, vec2(127.1, 311.7))).mul(43758.5453123));
@@ -254,7 +262,13 @@ export function createTreeNodeMaterialHandle(
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
     const lodMask: TslNode = ign.lessThan(aLodFade);
-    const cardKeep: TslNode = treeFoliageCardKeep(aFoliageCard, deformation.foliageRetention, aBranchPhase);
+    const cardKeep: TslNode = treeFoliageCardKeep(
+      aFoliageCard,
+      deformation.foliageRetention,
+      aBranchPhase,
+      float(0),
+      aIdentityWords,
+    );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const maskNode: TslNode = aboveWater ? lodMask.and(cardKeep).and(aboveWater) : lodMask.and(cardKeep);
     (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
@@ -365,7 +379,12 @@ export function createTreeRingNodeMaterialHandle(
     const worldCell: TslNode = aWorldXZ;
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
     const variantKeep: TslNode = abs(aVariant.sub(record.rotationNormalY.z)).lessThan(0.5).select(float(1), float(0));
-    const deformation = treeMorphologyDeformationNodes(record.morphology0, record.morphology1, record.morphology2);
+    const deformation = treeMorphologyDeformationNodes(
+      record.morphology0,
+      record.morphology1,
+      record.morphology2,
+      treeMorphologyCrownStartNode(settings),
+    );
     const aBranchPhase: TslNode = attribute("treeBranchPhase", "float");
 
     const foliageAlbedo: TslNode = albedoFactory(aColor, aTint);
@@ -417,7 +436,7 @@ export function createTreeRingNodeMaterialHandle(
       deformation.foliageRetention,
       aBranchPhase,
       record.rotationNormalY.w,
-      record.identityBits,
+      floatBitsToUint(record.identityBits.zw),
     );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const maskNode: TslNode = aboveWater ? cardKeep.and(aboveWater) : cardKeep;

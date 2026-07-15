@@ -35,6 +35,7 @@ import {
 import {
   writeTreeImpostorLocalPositionScaleIfChanged,
   writeTreeImpostorUvRectIfChanged,
+  writeTreeIdentityIfChanged,
   writeTreeLodDitherRoleIfChanged,
   writeTreeMorphologyIfChanged,
   writeTreeLodFadeIfChanged,
@@ -389,6 +390,7 @@ function placeTreeInstance(
   const localY = instance.position[1];
   const localZ = instance.position[2] - patch.centerZ;
   if (writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2])) markTreeMeshWorldXZChanged(effectiveMesh, write);
+  if (writeTreeIdentityIfChanged(effectiveMesh, effectiveIndex, instance.identity)) markTreeMeshWorldXZChanged(effectiveMesh, write);
   if (writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (writeTreeMorphologyIfChanged(effectiveMesh, effectiveIndex, instance)) markTreeMeshWorldXZChanged(effectiveMesh, write);

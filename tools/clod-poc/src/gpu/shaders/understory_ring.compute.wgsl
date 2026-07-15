@@ -280,14 +280,13 @@ fn process_understory_slot(slot: u32) {
   if (fieldParams.islandEnabled == 0u && (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max)) { return; }
   let dist = distance(wpos, params.center_radius.xy);
   if (dist > params.center_radius.z) { return; }
-  let base_height = surfaceHeightField(wpos.x, wpos.y);
-  let base_normal = normalize(densityGradient(wpos.x, base_height, wpos.y));
-  let hydro = hydrologyHeight(wpos.x, wpos.y, base_height, base_normal.y);
+  let base_height = placement_base_ground_height(wpos.x, wpos.y);
+  let hydro = hydrologyHeight(wpos.x, wpos.y, base_height, 1.0);
   let height = hydro.x;
   let wet_mask = hydro.y;
   if (wet_mask > 0.5) { return; }
   if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
-  let normal = normalize(densityGradient(wpos.x, height, wpos.y));
+  let normal = placement_ground_normal(wpos.x, wpos.y, world_max, max(0.5, cell_size));
   let material = understory_material_weights(height, normal.y);
   let ground = understory_terrain_gate(height, normal.y, material);
   if (ground < 0.0) { return; }

@@ -26,8 +26,9 @@ import {
   openHeightfieldTileDb,
 } from "./heightfield_tile_store.js";
 import {
-  registerHeightfieldTileGpuSource,
   heightfieldTileGpuAtlasStats,
+  invalidateHeightfieldTileGpuAtlasBounds,
+  registerHeightfieldTileGpuSource,
   unregisterHeightfieldTileGpuSource,
   updateHeightfieldTileGpuAtlas,
 } from "./heightfield_tile_gpu_atlas.js";
@@ -159,7 +160,11 @@ export async function createHeightfieldTileRuntime(
       publishHeightfieldTileCounters(diagnosticsCounters(), cache.counters());
     },
     counters: () => cache.counters(),
-    invalidateBounds: (bounds) => cache.invalidateBounds(bounds),
+    invalidateBounds(bounds) {
+      const count = cache.invalidateBounds(bounds);
+      invalidateHeightfieldTileGpuAtlasBounds(cache, bounds);
+      return count;
+    },
     dispose() {
       cache.clear();
       unregisterHeightfieldTileGpuSource(cache);

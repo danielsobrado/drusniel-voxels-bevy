@@ -89,18 +89,41 @@ spells:
       hand_up_m: -0.32
       max_range: 28.0
       segment_count: 52
-      branch_count: 12
-      branch_length_min: 0.7
-      branch_length_max: 2.4
-      jitter: 0.42
-      core_width: 0.035
-      glow_width: 0.18
-      refresh_hz: 28.0
-      impact_radius: 0.8
-      spark_count: 36
+      branch_count: 8
+      branch_length_min: 0.45
+      branch_length_max: 1.8
+      jitter: 0.34
+      core_width: 0.018
+      glow_width: 0.11
+      refresh_hz: 36.0
+      impact_radius: 0.55
+      spark_count: 24
       core_color: [1.0, 1.0, 1.0]
       glow_color: [0.18, 0.62, 1.0]
-      source_light_intensity: 4.5
-      impact_light_intensity: 7.5
-      glow_distance: 12.0
+      source_light_intensity: 2.5
+      impact_light_intensity: 5.5
+      glow_distance: 9.0
+      glow_decay: 2.0
+  fireball:
+    id: fireball
+    label: Fireball
+    cast_duration_ms: 4200
+    audio:
+      volume: 0.40
+    vfx:
+      hand_forward_m: 0.68
+      hand_right_m: 0.35
+      hand_up_m: -0.30
+      launch_speed: 19.0
+      lift_speed: 2.8
+      gravity: 13.5
+      projectile_radius: 0.42
+      impact_radius: 3.4
+      impact_duration_ms: 850
+      trail_count: 18
+      spark_count: 28
+      core_color: [1.0, 0.88, 0.30]
+      glow_color: [1.0, 0.19, 0.025]
+      glow_intensity: 5.5
+      glow_distance: 10.0
       glow_decay: 2.0

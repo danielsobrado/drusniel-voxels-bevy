@@ -13,6 +13,7 @@ import {
   type TreeImpostorRuntimeSample,
 } from "./tree_impostor_runtime.js";
 import { packTreeInstanceMorphology } from "./morphology/packing.js";
+import type { TreeIdentity } from "./morphology/types.js";
 
 export const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
 export const TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME = "treeImpostorLocalPositionScale";
@@ -46,6 +47,22 @@ export function writeTreeWorldXZIfChanged(
   }
   array[offset] = x;
   array[offset + 1] = z;
+  return true;
+}
+
+export function writeTreeIdentityIfChanged(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  identity: TreeIdentity,
+): boolean {
+  const attribute = treeIdentityBitsAttribute(mesh);
+  const array = attribute.array as Uint32Array;
+  const offset = index * 2;
+  const stableIdLo = identity.stableIdLo >>> 0;
+  const stableIdHi = identity.stableIdHi >>> 0;
+  if (array[offset] === stableIdLo && array[offset + 1] === stableIdHi) return false;
+  array[offset] = stableIdLo;
+  array[offset + 1] = stableIdHi;
   return true;
 }
 
@@ -166,6 +183,10 @@ export function writeUvRectIfChanged(
 
 export function treeWorldXZAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
   return mesh.geometry.getAttribute("treeWorldXZ") as THREE.InstancedBufferAttribute;
+}
+
+export function treeIdentityBitsAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+  return mesh.geometry.getAttribute("treeIdentityBits") as THREE.InstancedBufferAttribute;
 }
 
 export function treeImpostorLocalPositionScaleAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {

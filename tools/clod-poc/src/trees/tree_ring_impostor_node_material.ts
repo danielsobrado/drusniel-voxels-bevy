@@ -8,6 +8,7 @@ import {
   cos,
   dot,
   float,
+  floatBitsToUint,
   floor,
   frontFacing,
   max,
@@ -150,7 +151,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const retention: TslNode = clamp(record.morphology2.y.mul(mix(0.72, 1, health)), 0, 1);
     const retentionCell: TslNode = uint(floor(uv().x.mul(8))).add(uint(floor(uv().y.mul(8))).mul(8));
     const retentionNoise: TslNode = treeMorphologyHash01Node(
-      record.identityBits,
+      floatBitsToUint(record.identityBits.zw),
       uint(0x1109).bitXor(retentionCell),
     );
     const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest)).and(retentionNoise.lessThan(retention));

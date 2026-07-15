@@ -10,6 +10,9 @@ import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
 import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
+import vegetationAuthorityPcg from "../vegetation/gpu_authority/pcg2d.wgsl?raw";
+import vegetationAuthorityHash from "../vegetation/gpu_authority/shaders/hash.wgsl?raw";
+import vegetationTerrainSampling from "../vegetation/gpu_authority/terrain_sampling.wgsl?raw";
 import { TREE_SPECIES } from "../trees/tree_config.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
@@ -22,6 +25,7 @@ import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeFinalPlacementHeight,
   withTreePcgHash,
+  withTreeSharedPcgModule,
   withTreeShadowLodGate,
   withTreeTerrainVisibilityCull,
 } from "./tree_ring_wgsl_transforms.js";
@@ -34,23 +38,23 @@ export function composeTerrainFieldShader(): string {
 
 export function composeGrassRingShader(): string {
   const grassEntry = withGrassActiveSlotList(withConservativeGrassFrustum(grassRingEntry));
-  return composeShader("grass ring shader", [grassBindings, terrainCommon, placementHeight, withRiverEcologyConstants(grassEntry)]);
+  return composeShader("grass ring shader", [grassBindings, terrainCommon, vegetationTerrainSampling, placementHeight, withRiverEcologyConstants(grassEntry)]);
 }
 
 export function composeStoneScatterShader(): string {
-  return composeShader("stone scatter shader", [stoneBindings, terrainCommon, placementHeight, withRiverEcologyConstants(stoneScatterEntry)]);
+  return composeShader("stone scatter shader", [stoneBindings, terrainCommon, vegetationTerrainSampling, placementHeight, withRiverEcologyConstants(stoneScatterEntry)]);
 }
 
 export function composeTreeRingShader(workgroupSize = 64): string {
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)))));
+  const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreeSharedPcgModule(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))))));
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
   const treeEntry = replaceConstU32(
     applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),
     "TREE_WORKGROUP_SIZE",
     workgroupSize,
   );
-  return composeShader("tree ring shader", [treeBindings, terrainCommon, placementHeight, treeEntry]);
+  return composeShader("tree ring shader", [vegetationAuthorityPcg, vegetationAuthorityHash, treeBindings, terrainCommon, vegetationTerrainSampling, placementHeight, treeEntry]);
 }
 
 export function composeUnderstoryRingShader(workgroupSize = 64): string {
@@ -59,5 +63,5 @@ export function composeUnderstoryRingShader(workgroupSize = 64): string {
     "UNDERSTORY_WORKGROUP_SIZE",
     workgroupSize,
   );
-  return composeShader("understory ring shader", [understoryBindings, terrainCommon, placementHeight, entry]);
+  return composeShader("understory ring shader", [understoryBindings, terrainCommon, vegetationTerrainSampling, placementHeight, entry]);
 }

@@ -182,8 +182,20 @@ fn placement_border_coast_height(wx: f32, wz: f32, inland_height: f32, world_siz
   return mix(beach, inland_height, preserve);
 }
 
+fn placement_sample_canonical_height(wx: f32, wz: f32) -> VegetationCanonicalHeightSample {
+  return vegetation_sample_canonical_height(wx, wz);
+}
+
+fn placement_base_ground_height(wx: f32, wz: f32) -> f32 {
+  let canonical = placement_sample_canonical_height(wx, wz);
+  if (canonical.validity >= 2u) {
+    return canonical.height_m;
+  }
+  return surfaceHeightField(wx, wz);
+}
+
 fn placement_ground_height(wx: f32, wz: f32, world_size: f32) -> f32 {
-  let raw_height = surfaceHeightField(wx, wz);
+  let raw_height = placement_base_ground_height(wx, wz);
   if (!placement_hydro_enabled()) {
     return placement_border_coast_height(wx, wz, raw_height, world_size);
   }
@@ -192,6 +204,15 @@ fn placement_ground_height(wx: f32, wz: f32, world_size: f32) -> f32 {
     return placement_border_coast_height(wx, wz, raw_height, world_size);
   }
   return placement_border_coast_height(wx, wz, hydro.z, world_size);
+}
+
+fn placement_ground_normal(wx: f32, wz: f32, world_size: f32, sample_distance: f32) -> vec3<f32> {
+  let e = max(0.5, sample_distance);
+  let hx0 = placement_ground_height(wx - e, wz, world_size);
+  let hx1 = placement_ground_height(wx + e, wz, world_size);
+  let hz0 = placement_ground_height(wx, wz - e, world_size);
+  let hz1 = placement_ground_height(wx, wz + e, world_size);
+  return normalize(vec3<f32>(hx0 - hx1, e * 2.0, hz0 - hz1));
 }
 
 fn placement_hydrology_height(wx: f32, wz: f32, world_size: f32, base_height: f32) -> vec2<f32> {
