@@ -89,7 +89,13 @@ export function parseTerrainErosionConfig(source: string): TerrainErosionConfig 
     "compression", "quantized_height_step_m", "keep_water_field", "keep_sediment_field", "keep_deposition_field",
   ], "erosion.persistence");
 
-  const schemaVersion = numberValue(erosion.schema_version, "erosion.schema_version", 1, 1, true);
+  const schemaVersion = numberValue(
+    erosion.schema_version,
+    "erosion.schema_version",
+    EROSION_SCHEMA_VERSION,
+    EROSION_SCHEMA_VERSION,
+    true,
+  );
   const compression = persistence.compression;
   if (compression !== "zstd") throw new Error("erosion.persistence.compression must be zstd");
   const quantizedHeightStepM = numberValue(
@@ -103,7 +109,7 @@ export function parseTerrainErosionConfig(source: string): TerrainErosionConfig 
 
   return Object.freeze({
     erosion: Object.freeze({
-      schemaVersion: schemaVersion as 1,
+      schemaVersion: schemaVersion as typeof EROSION_SCHEMA_VERSION,
       enabled: booleanValue(erosion.enabled, "erosion.enabled"),
       cellSizeM: numberValue(erosion.cell_size_m, "erosion.cell_size_m", 1, 1024),
       borderCells: numberValue(erosion.border_cells, "erosion.border_cells", 1, 16, true),
