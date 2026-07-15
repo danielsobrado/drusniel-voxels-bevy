@@ -1,6 +1,7 @@
 import type { TerrainFieldConfigInput } from "../../terrain/terrain_surface.js";
 import type {
   ErosionArtifactRef,
+  ErosionArtifactSummary,
   ErosionBuildProgress,
   ErosionGpuCheckpoint,
   ErosionGpuInitialState,
@@ -80,6 +81,7 @@ export type ErosionWorkerRequest =
 export interface ErosionWorkerArtifactRecord {
   readonly ref: ErosionArtifactRef;
   readonly field: SerializedErodedMacroField;
+  readonly summary: ErosionArtifactSummary;
   readonly canonicalBytes: ArrayBuffer;
   readonly compressedBytes: ArrayBuffer;
   readonly buildMs: number;
