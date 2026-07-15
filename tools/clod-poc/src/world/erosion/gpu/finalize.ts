@@ -1,22 +1,29 @@
 import { createErosionArtifact } from "../artifact_codec.js";
-import { HEIGHT_UNITS_PER_METER } from "../constants.js";
-import type { ErodedMacroField, ErosionArtifact, ErosionGpuRawOutput } from "../types.js";
+import { assertErosionNotAborted, yieldErosionTask } from "../abort.js";
+import { EROSION_ASYNC_CELLS_PER_YIELD, HEIGHT_UNITS_PER_METER } from "../constants.js";
+import type { ErodedMacroField, ErosionGpuRawOutput, PersistedErosionArtifact } from "../types.js";
 import { GPU_OUTPUT_WORDS_PER_CELL } from "./buffers.js";
 
-function assembleChunks(chunks: readonly ArrayBuffer[], byteLength: number): ArrayBuffer {
+async function assembleChunks(
+  chunks: readonly ArrayBuffer[],
+  byteLength: number,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer> {
   const result = new Uint8Array(byteLength);
   let offset = 0;
   for (const chunk of chunks) {
+    assertErosionNotAborted(signal);
     if (offset + chunk.byteLength > result.byteLength) throw new Error("erosion GPU output chunks exceed the declared byte length");
     result.set(new Uint8Array(chunk), offset);
     offset += chunk.byteLength;
+    await yieldErosionTask(signal);
   }
   if (offset !== byteLength) throw new Error("erosion GPU output chunks are incomplete");
   return result.buffer;
 }
 
-function unpackField(raw: ErosionGpuRawOutput): ErodedMacroField {
-  const packed = assembleChunks(raw.chunks, raw.byteLength);
+async function unpackField(raw: ErosionGpuRawOutput, signal?: AbortSignal): Promise<ErodedMacroField> {
+  const packed = await assembleChunks(raw.chunks, raw.byteLength, signal);
   const u32 = new Uint32Array(packed);
   const i32 = new Int32Array(packed);
   const count = raw.initial.sourceWidth * raw.initial.sourceHeight;
@@ -31,6 +38,7 @@ function unpackField(raw: ErosionGpuRawOutput): ErodedMacroField {
     hardness[index] = u32[offset + 1]! & 0xffff;
     sediment[index] = u32[offset + 2]!;
     deposition[index] = i32[offset + 3]!;
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
   }
   const field: ErodedMacroField = {
     width: raw.initial.sourceWidth,
@@ -63,12 +71,13 @@ function unpackField(raw: ErosionGpuRawOutput): ErodedMacroField {
   return Object.freeze(field);
 }
 
-function massErrorRatio(field: ErodedMacroField): number {
+async function massErrorRatio(field: ErodedMacroField, signal?: AbortSignal): Promise<number> {
   let sourceMass = 0;
   let difference = 0;
   for (let index = 0; index < field.heightFixed.length; index++) {
     sourceMass += field.heightFixed[index]! * 256 - field.deposition[index]!;
     difference += field.sediment[index]! + field.deposition[index]!;
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
   }
   if (!Number.isSafeInteger(sourceMass) || !Number.isSafeInteger(difference)) {
     throw new Error("GPU erosion mass diagnostics exceed deterministic JavaScript integer range");
@@ -80,18 +89,29 @@ export async function finalizeErosionGpuRawOutput(input: {
   readonly raw: ErosionGpuRawOutput;
   readonly sourceTerrainHash: string;
   readonly configHash: string;
-}): Promise<ErosionArtifact> {
-  const field = unpackField(input.raw);
-  return createErosionArtifact({
+  readonly signal?: AbortSignal;
+}): Promise<PersistedErosionArtifact> {
+  const startedAt = performance.now();
+  const field = await unpackField(input.raw, input.signal);
+  const massError = await massErrorRatio(field, input.signal);
+  const artifact = await createErosionArtifact({
     field,
     sourceTerrainHash: input.sourceTerrainHash,
     configHash: input.configHash,
     buildMs: input.raw.buildMs,
+    samplingMs: input.raw.samplingMs,
     gpuMs: input.raw.gpuMs,
     readbackMs: input.raw.readbackMs,
     checkpointCount: input.raw.checkpointCount,
-    massErrorRatio: massErrorRatio(field),
+    massErrorRatio: massError,
     gpuPassTimingsMs: input.raw.gpuPassTimingsMs,
     timestampQueriesSupported: input.raw.timestampQueriesSupported,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const finalizeMs = performance.now() - startedAt;
+  return Object.freeze({
+    ...artifact,
+    buildMs: input.raw.buildMs + finalizeMs,
+    finalizeMs,
   });
 }
