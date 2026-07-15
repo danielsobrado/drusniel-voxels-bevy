@@ -1,4 +1,5 @@
 import { sha256Hex } from "../../cache/checksum.js";
+import { loadLongViewMaterialsConfig } from "../../config/longViewMaterialsConfig.js";
 import { HARDNESS_MAX, SEDIMENT_UNITS_PER_METER } from "./constants.js";
 import type { ErodedMacroField, ErosionArtifactRef, ErosionMaterialChannels, SerializedErodedMacroField } from "./types.js";
 
@@ -138,5 +139,6 @@ export async function computeErosionSourceTerrainHash(input: {
     sizeM: input.sizeM,
     originM: input.originM,
     terrainFieldConfig: input.terrainFieldConfig,
+    hardnessMaterialAuthority: loadLongViewMaterialsConfig(),
   })).buffer);
 }
