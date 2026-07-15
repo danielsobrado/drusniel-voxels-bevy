@@ -65,11 +65,13 @@ function artifactFromRecord(record: ErosionWorkerArtifactRecord): ErosionArtifac
   return Object.freeze({
     ref: record.ref,
     field,
-    canonicalBytes: record.canonicalBytes,
-    compressedBytes: record.compressedBytes,
+    artifactBytes: record.artifactBytes,
     buildMs: record.buildMs,
+    samplingMs: record.samplingMs,
     gpuMs: record.gpuMs,
     readbackMs: record.readbackMs,
+    finalizeMs: record.finalizeMs,
+    persistenceMs: record.persistenceMs,
     checkpointCount: record.checkpointCount,
     massErrorRatio: record.massErrorRatio,
     gpuPassTimingsMs: Object.freeze({ ...record.gpuPassTimingsMs }),
@@ -79,7 +81,7 @@ function artifactFromRecord(record: ErosionWorkerArtifactRecord): ErosionArtifac
 
 function activateRecord(record: ErosionWorkerArtifactRecord, worldId: string): ErosionArtifact {
   const artifact = artifactFromRecord(record);
-  setActiveErodedMacroField(artifact.field);
+  setActiveErodedMacroField(artifact.field, worldId);
   setLatestErosionArtifactRef(artifact.ref, worldId);
   recordErosionArtifact(artifact, record.cacheHit, record.summary);
   return artifact;
@@ -111,7 +113,9 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
     pending.delete(response.requestId);
     if (activeRequestId === response.requestId) activeRequestId = null;
     if (response.type === "erosionError") {
-      pendingRequest.reject(new Error(response.message));
+      const error = new Error(response.message);
+      error.name = response.name;
+      pendingRequest.reject(error);
       return;
     }
     if (response.type === "erosionSourceSampled") {
@@ -184,6 +188,10 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
     });
   }
 
+  const cancel = (): void => {
+    if (activeRequestId !== null) worker.postMessage({ type: "cancelErosion", requestId: activeRequestId });
+  };
+
   return {
     build(input, onProgress) {
       resetErosionDiagnostics(input.config.erosion.enabled);
@@ -226,7 +234,7 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
           configHash: checkpoint.configHash,
           checkpoint,
         }),
-        transfer: [...checkpoint.stateAChunks, ...checkpoint.stateBChunks],
+        transfer: [...checkpoint.stateAChunks],
       });
     },
     clearCheckpoint(input) {
@@ -244,13 +252,11 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
         transfer: [...input.raw.chunks],
       });
     },
-    cancel() {
-      if (activeRequestId !== null) worker.postMessage({ type: "cancelErosion", requestId: activeRequestId });
-    },
+    cancel,
     dispose() {
       if (disposed) return;
       disposed = true;
-      this.cancel();
+      cancel();
       for (const pendingRequest of pending.values()) pendingRequest.reject(new Error("erosion worker disposed"));
       pending.clear();
       activeRequestId = null;
