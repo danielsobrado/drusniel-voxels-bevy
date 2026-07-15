@@ -308,7 +308,7 @@ export function runFrameLoopStartup(
     counters["sunLightCache.buildMsAvg"] = sunStats.buildMsAvg;
   };
 
-  const wantGpuTiming = searchParams.get("perfProbe") === "1" || searchParams.get("gpuTiming") === "1";
+  const wantGpuTiming = searchParams.get("gpuTiming") === "1";
   const gpuTimestampReady = input.app.isWebGpu && (input.app.renderer.backend as unknown as { trackTimestamp?: boolean }).trackTimestamp === true;
   const gpuPassTiming = input.app.isWebGpu ? new GpuPassTiming(input.app.renderer, gpuTimestampReady, wantGpuTiming && gpuTimestampReady) : null;
   const initialRenderResolution = window.__drusnielRenderResolution?.current();
@@ -362,7 +362,7 @@ export function runFrameLoopStartup(
     if (typeof compile !== "function") return;
     void compile.call(renderer, scene, camera).catch(() => undefined);
   };
-  const precompileViewPipelines = (mesh: THREE.Mesh): void => {
+  const precompileViewPipelines = (mesh: THREE.Mesh): Promise<unknown> | null => {
     // WebGPU pipelines, bind groups, and geometry uploads otherwise happen at the mesh's
     // first *visible* draw — all at once on the root-switch frame (renderMs spikes in the
     // 100-700ms class). compileAsync builds them ahead of time against the real scene so
@@ -370,15 +370,15 @@ export function runFrameLoopStartup(
     // synchronously and skips invisible objects, so the mesh is made visible only for the
     // duration of the call — the actual render happens later in the frame, after the flag
     // is already restored.
-    if (!viewPrewarmCompileEnabled || !input.app.isWebGpu) return;
+    if (!viewPrewarmCompileEnabled || !input.app.isWebGpu) return null;
     const compile = (renderer as unknown as {
       compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera, targetScene?: THREE.Scene | null) => Promise<unknown>;
     }).compileAsync;
-    if (typeof compile !== "function") return;
+    if (typeof compile !== "function") return null;
     const wasVisible = mesh.visible;
     mesh.visible = true;
     try {
-      void compile.call(renderer, mesh, camera, scene).catch(() => undefined);
+      return compile.call(renderer, mesh, camera, scene);
     } finally {
       mesh.visible = wasVisible;
     }
@@ -404,26 +404,44 @@ export function runFrameLoopStartup(
     if (!view.selected && view.target === 0 && view.fade <= 0.001) view.mesh.visible = false;
   };
   let preparedStreamViewThisFrame = false;
+  const preparedStreamViews = new WeakSet<THREE.Mesh>();
+  const preparingStreamViews = new WeakSet<THREE.Mesh>();
   const beginStreamViewPreparationFrame = (): void => {
     preparedStreamViewThisFrame = false;
     restoreWarmDraw();
   };
   const prepareStreamNodeForApply = (node: ClodPageNode, deadline: number): boolean => {
     const cache = input.terrainView.renderNodeCache;
-    if (cache.has(node.id)) return true;
-    if (!primePageAttributesBudgeted(node.mesh, deadline)) return false;
-    cache.prefetch([node], selectionController.stats().frameId);
+    if (!cache.has(node.id)) {
+      if (!primePageAttributesBudgeted(node.mesh, deadline)) return false;
+      cache.prefetch([node], selectionController.stats().frameId);
+    }
     const view = cache.get(node.id);
     if (!view) return false;
-    preparedStreamViewThisFrame = true;
-    precompileViewPipelines(view.mesh);
-    if (viewWarmDrawEnabled && warmDrawView === null && !view.selected) {
-      view.mesh.visible = true;
-      view.mesh.frustumCulled = false;
-      (view.mesh.geometry as THREE.BufferGeometry).setDrawRange(0, 3);
-      warmDrawView = view;
+    if (preparedStreamViews.has(view.mesh)) {
+      if (viewWarmDrawEnabled && warmDrawView === null && !view.selected) {
+        view.mesh.visible = true;
+        view.mesh.frustumCulled = false;
+        (view.mesh.geometry as THREE.BufferGeometry).setDrawRange(0, 3);
+        warmDrawView = view;
+      }
+      return true;
     }
-    return true;
+    if (preparingStreamViews.has(view.mesh)) return false;
+    preparedStreamViewThisFrame = true;
+    const compilePromise = precompileViewPipelines(view.mesh);
+    if (!compilePromise) {
+      preparedStreamViews.add(view.mesh);
+      return true;
+    }
+    preparingStreamViews.add(view.mesh);
+    void compilePromise
+      .catch(() => undefined)
+      .finally(() => {
+        preparingStreamViews.delete(view.mesh);
+        preparedStreamViews.add(view.mesh);
+      });
+    return false;
   };
   const finishStreamViewPreparationFrame = (): void => {
     if (!preparedStreamViewThisFrame) input.terrainView.materialController.ensureRecycleReserve(MATERIAL_RESERVE_TARGET);

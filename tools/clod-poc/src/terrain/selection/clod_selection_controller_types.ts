@@ -106,6 +106,7 @@ export interface ClodSelectionStats {
   selectionMs: number;
   selectionSource: "cpu" | "webgpu";
   frameId: number;
+  cutChanged: boolean;
   subphases: ClodSelectionSubphases;
   selectionCache: SelectionCutCacheStats;
   cachedFastHits: number;

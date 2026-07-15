@@ -74,17 +74,27 @@ const FALLING_TERMINAL_VELOCITY = 30;
 const FALLING_MAX_TILT = 0.3;
 const FALLING_TREE_MAX = 1024;
 
+export function createFallingTreeInstancedMesh(): THREE.InstancedMesh {
+  const geometry = new THREE.CylinderGeometry(0.15, 0.25, 1.5, 6);
+  const material = new THREE.MeshStandardMaterial({ color: 0x8B5E3C, roughness: 0.9 });
+  const mesh = new THREE.InstancedMesh(geometry, material, FALLING_TREE_MAX);
+  mesh.name = "falling-tree-instances";
+  mesh.count = 0;
+  mesh.visible = false;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  return mesh;
+}
+
 function clampAtLeast(value: number, min: number): number {
   return Number.isFinite(value) ? Math.max(min, value) : min;
 }
 
 export function createTreeController(deps: TreeControllerDeps): TreeController {
   const fallingTrees: FallingTree[] = [];
-  const fallingTrunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.5, 6);
-  const fallingTreeMat = new THREE.MeshStandardMaterial({ color: 0x8B5E3C, roughness: 0.9 });
-  const fallingTreeMesh = new THREE.InstancedMesh(fallingTrunkGeo, fallingTreeMat, FALLING_TREE_MAX);
+  const fallingTreeMesh = createFallingTreeInstancedMesh();
+  const fallingTrunkGeo = fallingTreeMesh.geometry;
+  const fallingTreeMat = fallingTreeMesh.material as THREE.Material;
   const fallingTreeDummy = new THREE.Object3D();
-  fallingTreeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   deps.scene.add(fallingTreeMesh);
 
   const makeSettings = (): TreeSettings => {
@@ -200,7 +210,11 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       return system.bakeImpostors(renderer);
     },
     updateFallingTrees(dt) {
-      if (fallingTrees.length === 0) { fallingTreeMesh.count = 0; return; }
+      if (fallingTrees.length === 0) {
+        fallingTreeMesh.count = 0;
+        fallingTreeMesh.visible = false;
+        return;
+      }
       for (let i = fallingTrees.length - 1; i >= 0; i--) {
         const t = fallingTrees[i];
         t.velocity = Math.min(t.velocity + FALLING_GRAVITY * dt, FALLING_TERMINAL_VELOCITY);
@@ -211,6 +225,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       }
       const count = Math.min(fallingTrees.length, FALLING_TREE_MAX);
       fallingTreeMesh.count = count;
+      fallingTreeMesh.visible = count > 0;
       for (let i = 0; i < count; i++) {
         const t = fallingTrees[i];
         const tilt = Math.min(t.velocity / FALLING_TERMINAL_VELOCITY, 1) * FALLING_MAX_TILT;

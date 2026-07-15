@@ -281,6 +281,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const selectionCacheReasonNumeric = selectionCacheReasonCode(selectionCacheReason);
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
+      selectionCutChanged: selectionStats.cutChanged ? 1 : 0,
       frameMs,
       selectionMs: selectionStats.selectionMs,
       frameSetupMs: input.phaseTiming.frameSetupMs,

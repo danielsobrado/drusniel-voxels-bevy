@@ -6,6 +6,8 @@ Scope: `tools/clod-poc` first, then Rust/Bevy using the same data contracts and 
 
 This document is prescriptive. The implementer must not choose a different ownership model, candidate flow, terrain source, compaction method, buffer layout, fallback policy, or validation threshold.
 
+Cross-plan build order, the shared hash/terrain-sample contracts, and the reconciled frame and VRAM budget live in `fable5-parity-index-and-budget-2026-07-15.md`. Read it before implementing: this plan is the pipeline that Plans 4 and 5 extend, so its budget is a sub-allocation of the whole-frame gate, not an independent promise.
+
 ## 1. Goal
 
 Move tree, grass, understory, stones, and ecological dressing candidate classification and compaction fully onto the GPU while keeping Drusniel's canonical carved terrain, voxel edits, caves, persistent props, construction exclusions, and deterministic world identity authoritative.
@@ -35,8 +37,7 @@ WorldManifest + terrain source hash
   -> unified far-summary / NAADF visibility providers
   -> deterministic vegetation cluster records
   -> GPU cluster classification
-  -> GPU candidate generation
-  -> GPU candidate acceptance and compaction
+  -> fused GPU candidate generation, terrain/ecology acceptance, and compaction
   -> GPU LOD/cascade classification
   -> indirect render and shadow draws
 ```
@@ -77,7 +78,12 @@ vegetation_gpu_authority:
   cluster_size_m: 32
   cluster_probe_grid: 3
   near_force_visible_radius_m: 64
-  maximum_cluster_distance_m: 4096
+  maximum_cluster_distance_m:
+    # Design defaults; VEG-GPU-6 tunes them only through measured preset changes.
+    ultra:    { trees: 620, grass: 192, understory: 192, stones: 1024, dressing: 512 }
+    balanced: { trees: 420, grass: 125, understory: 110, stones: 700,  dressing: 320 }
+    perf:     { trees: 300, grass: 96,  understory: 80,  stones: 600,  dressing: 224 }
+    potato:   { trees: 180, grass: 64,  understory: 56,  stones: 320,  dressing: 160 }
 ```
 
 Each cluster is identified by:
@@ -85,7 +91,8 @@ Each cluster is identified by:
 ```text
 cluster_x = floor(world_x / 32)
 cluster_z = floor(world_z / 32)
-cluster_id = stableHash(world_id, category, cluster_x, cluster_z)
+cluster_id_lo, cluster_id_hi = vegetationHash2(
+  world_seed, category, schema_version, cluster_x, cluster_z, CLUSTER_ID_CHANNEL)
 ```
 
 Cluster identity must not depend on camera location, ring index, residency order, or frame number.
@@ -103,7 +110,17 @@ candidate_spacing_m:
   dressing: 1.25
 ```
 
-The candidate count per cluster is derived only from cluster size and spacing. Candidate index plus cluster ID and world seed determine all random values.
+Candidate cells are a world-anchored lattice per category; they are not a rounded
+`32 / spacing` grid local to each cluster. A cluster owns every lattice-cell center in
+its half-open bounds `[cluster_min, cluster_max)`. Compute the inclusive/exclusive cell
+range with `ceil(cluster_min / spacing)` and `ceil(cluster_max / spacing)`. This defines
+an exact count even when spacing does not divide 32 m. Jitter and clustering offsets may
+move the final point across the owner boundary, but ownership and identity remain with
+the original global cell, so no neighboring cluster can duplicate it.
+
+The global candidate-cell coordinates, category, channel, schema version, and world seed
+determine all random values. A cluster-local enumeration index is diagnostic only and
+must not become identity.
 
 No candidate arrays are generated on the CPU.
 
@@ -123,7 +140,31 @@ It must sample in this order:
 4. NAADF/occupancy summary for caves, voids, ceilings, overhangs, and conservative terrain visibility.
 5. Unified far summary outside exact residency.
 
-The returned structure is fixed:
+The semantic TypeScript contract is fixed:
+
+```ts
+export interface VegetationSurfaceSample {
+  readonly positionWs: readonly [number, number, number];
+  readonly normalWs: readonly [number, number, number];
+  readonly materialWeights: readonly [number, number, number, number];
+  readonly waterDepthM: number;
+  readonly shoreDistanceM: number;
+  readonly wetness: number;
+  readonly moisture: number;
+  readonly sediment: number;
+  readonly deposition: number;
+  readonly hardness: number;
+  readonly flow: readonly [number, number];
+  readonly canopyCoverage: number;
+  readonly canopyHeightM: number;
+  readonly caveCoverage: number;
+  readonly structureCoverage: number;
+  readonly validity: number;
+  readonly flags: number;
+}
+```
+
+Its WGSL mirror is fixed:
 
 ```wgsl
 struct VegetationSurfaceSample {
@@ -133,14 +174,25 @@ struct VegetationSurfaceSample {
     water_depth_m: f32,
     shore_distance_m: f32,
     wetness: f32,
+    moisture: f32,
+    sediment: f32,
+    deposition: f32,
+    hardness: f32,
     flow: vec2<f32>,
     canopy_coverage: f32,
+    canopy_height_m: f32,
     cave_coverage: f32,
     structure_coverage: f32,
     validity: u32,
     flags: u32,
 };
 ```
+
+The host-shareable layout is 112 bytes: `position_ws` at 0, `normal_ws` at 16,
+`material_weights` at 32, scalar fields at 48..75, `flow` at 80, and remaining
+scalar/u32 fields at 88..111. TypeScript and Rust mirrors use these
+explicit offsets; implicit host-language struct layout is forbidden. Dressing's GPU
+sample preserves this 112-byte prefix exactly.
 
 Validity values:
 
@@ -162,12 +214,10 @@ A. Plan required world-anchored cluster ranges on CPU
 B. Upload only cluster range descriptors and revisions
 C. GPU classify clusters
 D. GPU compact active clusters with atomic append
-E. GPU generate candidates for active clusters only
-F. GPU evaluate terrain/ecology/exclusions
-G. GPU compact accepted instances
-H. GPU classify camera LOD and shadow cascades
-I. GPU write indirect arguments
-J. Render camera and shadow batches
+E. GPU generate, evaluate, and append accepted instances in one fused dispatch
+F. GPU classify camera LOD and shadow cascades
+G. GPU write indirect arguments
+H. Render camera and shadow batches
 ```
 
 CPU work is limited to planning ring bounds, uploading small descriptors, and binding resources.
@@ -186,12 +236,20 @@ atomic overflow flag
 
 Overflow is a hard acceptance failure, not a silently dropped condition.
 
+Atomic append makes compacted output order nondeterministic even though instance identity
+is stable. Streamed vegetation therefore uses only opaque or alpha-tested/coverage-dithered
+materials: trees, grass, understory, and dressing cards are coverage-dithered; stones are
+opaque. Order-dependent alpha blending is forbidden for these lists. A future category
+that requires blending must add a stable GPU sort and include its cost in the budget.
+Plan 6 determinism signatures are commutative multisets (count plus independent XOR and
+sum accumulators over both stable-ID words), never hashes of append order.
+
 ### 6.2 Dispatch granularity
 
 ```text
 cluster classification: one invocation per cluster
-candidate generation: one workgroup per active cluster
-candidate acceptance: one invocation per candidate
+fused generation/acceptance: one workgroup per active cluster, with invocations striding
+  the exact world-lattice cells owned by that cluster
 LOD/cascade classification: one invocation per accepted instance
 ```
 
@@ -199,8 +257,7 @@ Workgroup sizes:
 
 ```text
 cluster classification: 64 x 1 x 1
-candidate generation: 64 x 1 x 1
-candidate acceptance: 128 x 1 x 1
+fused generation/acceptance: 128 x 1 x 1
 LOD/cascade classification: 128 x 1 x 1
 ```
 
@@ -213,11 +270,11 @@ export interface VegetationClusterDescriptor {
   clusterX: number;
   clusterZ: number;
   category: number;
-  candidateStart: number;
   candidateCount: number;
   terrainRevision: number;
   providerRevision: number;
   flags: number;
+  reserved: number;
 }
 ```
 
@@ -228,11 +285,11 @@ struct VegetationClusterDescriptor {
     cluster_x: i32,
     cluster_z: i32,
     category: u32,
-    candidate_start: u32,
     candidate_count: u32,
     terrain_revision: u32,
     provider_revision: u32,
     flags: u32,
+    reserved: u32,
 };
 ```
 
@@ -247,27 +304,29 @@ struct ActiveVegetationCluster {
 };
 ```
 
-Candidate record:
+There is no global `VegetationCandidate` storage buffer. The fused dispatch keeps a
+candidate in invocation registers, samples terrain/ecology immediately, and appends only
+accepted records. The theoretical/generated/rejected counters remain available through
+atomics.
+
+Accepted records use one logical 48-byte identity/transform prefix. Layouts are flattened
+in WGSL storage structs but preserve this exact prefix:
 
 ```wgsl
-struct VegetationCandidate {
-    position_ws: vec4<f32>,      // xyz + scale
-    rotation_normal: vec4<f32>,  // rotationY + normal xyz
-    identity: vec4<u32>,         // category, class/species, variant, stable id low
-    ecology: vec4<f32>,          // moisture, exposure, forest influence, age
-    aux: vec4<f32>,              // wind phase, shore affinity, slope, health
-};
-```
-
-Accepted instance record:
-
-```wgsl
-struct VegetationInstance {
+struct VegetationGenericInstance { // 64 bytes
     position_scale: vec4<f32>,
     rotation_normal_y: vec4<f32>,
-    identity: vec4<u32>,
+    identity: vec4<u32>, // category, packed class|variant, stable_id_lo, stable_id_hi
+    render0: vec4<f32>,  // moisture, exposure, wind phase, health
+};
+
+struct VegetationTreeInstance { // 96 bytes
+    position_scale: vec4<f32>,
+    rotation_normal_y: vec4<f32>,
+    identity: vec4<u32>, // same 48-byte prefix
     morphology0: vec4<f32>,
     morphology1: vec4<f32>,
+    morphology2: vec4<f32>,
 };
 ```
 
@@ -306,13 +365,64 @@ Near clusters inside `near_force_visible_radius_m` bypass terrain-visibility rej
 
 ## 9. Candidate generation
 
-Candidate random values use a common integer hash:
+VEG-GPU-1 creates shared `pcg2d.ts` and `pcg2d.wgsl` modules and changes the existing
+tree-ring helpers to delegate to them. The integer core is the shipped PCG arithmetic:
+`M = 1664525`, `C = 1013904223`, the existing `+40000` signed-cell bias and 14-bit salt
+partition, and the same two xor-shift rounds. `treePcg2dU32` returns the unmasked
+`a5,b5` words; `treePcg2d01` alone applies the existing low-24-bit mask and `1/2^24`
+normalization.
+
+Category assignments are fixed:
 
 ```text
-hash(world_seed, category, cluster_x, cluster_z, candidate_index, channel)
+TREE=1, GRASS=2, UNDERSTORY=3, STONE=4, DRESSING=5
 ```
 
-The GPU hash implementation must match the CPU oracle bit-for-bit.
+Shared channel assignments are fixed:
+
+```text
+DOMAIN_CHANNEL=0x1001, CLUSTER_ID_CHANNEL=0x1002,
+IDENTITY_CHANNEL=0x1003, JITTER_CHANNEL=0x1004,
+CLASS_CHANNEL=0x1005, SCALE_CHANNEL=0x1006,
+ROTATION_CHANNEL=0x1007, WIND_CHANNEL=0x1008,
+AGE_CHANNEL=0x1009, HEALTH_CHANNEL=0x100a
+```
+
+Every caller uses this exact tuple fold (`rotl32` and all arithmetic wrap at u32):
+
+```text
+seed_hash = treePcg2dU32(bitcast_i32(world_seed),
+                         bitcast_i32(rotl32(world_seed, 16) ^ schema_version),
+                         DOMAIN_CHANNEL ^ category)
+domain_salt = seed_hash.x ^ seed_hash.y
+cell_hash = treePcg2dU32(global_cell_x, global_cell_z, domain_salt)
+value_hash(channel) = treePcg2dU32(bitcast_i32(cell_hash.x), bitcast_i32(cell_hash.y),
+                                   channel ^ seed_hash.y)
+identity_channel = IDENTITY_CHANNEL ^ (class_or_species_id * 0x9e3779b9u)
+identity_hash = value_hash(identity_channel)
+stable_id_lo = identity_hash.x
+stable_id_hi = identity_hash.y
+```
+
+Golden identity vectors (decimal u32) are normative:
+
+| world seed | category | schema | global cell | class/species | stable lo | stable hi |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 1 | (0, 0) | 2 | 3370872567 | 1728742118 |
+| 19 | 5 | 1 | (-1, -1) | 17 | 682912007 | 910565973 |
+| 4026531841 | 4 | 3 | (-40000, 40000) | 9 | 2440714017 | 2919868272 |
+
+`channel` is a numeric constant from the shared module; callers may not invent
+string hashing or reorder the tuple. Category and channel numeric assignments are
+versioned data. The `bitcast_i32` conversion above is a bit reinterpretation
+(`bitcast<i32>` in WGSL, `| 0` in TypeScript, `as i32` in Rust), not a saturating numeric
+conversion. ID always uses the fixed identity-channel fold after class/species selection;
+jitter, class selection, scale, rotation, and every other random value use their own
+fixed channel. The GPU implementation must match the TypeScript and Rust CPU oracles
+bit-for-bit, including negative cells and u32 wraparound. Golden vectors cover boundary
+coordinates, all categories, multiple channels, and stable IDs. Plans 4 and 5 consume
+the resulting two-word ID; their `hash64` notation means concatenating these words, not
+introducing another hash family.
 
 Candidate position:
 
@@ -322,9 +432,7 @@ world cell center
 + category-specific clustering offset
 ```
 
-Candidate generation writes positions only for active clusters. It must not sample terrain yet.
-
-Candidate acceptance samples canonical terrain and computes:
+The fused generation/acceptance dispatch samples canonical terrain and computes:
 
 - exact surface height;
 - exact or conservative normal;
@@ -448,8 +556,11 @@ vegetation_gpu_authority:
   cluster_size_m: 32
   cluster_probe_grid: 3
   near_force_visible_radius_m: 64
-  maximum_cluster_distance_m: 4096
-  active_cluster_capacity: 65536
+  maximum_cluster_distance_m:
+    ultra:    { trees: 620, grass: 192, understory: 192, stones: 1024, dressing: 512 }
+    balanced: { trees: 420, grass: 125, understory: 110, stones: 700,  dressing: 320 }
+    perf:     { trees: 300, grass: 96,  understory: 80,  stones: 600,  dressing: 224 }
+    potato:   { trees: 180, grass: 64,  understory: 56,  stones: 320,  dressing: 160 }
 
   candidate_spacing_m:
     trees: 3.4
@@ -458,17 +569,20 @@ vegetation_gpu_authority:
     stones: 2.2
     dressing: 1.25
 
-  capacities:
-    tree_candidates: 262144
-    grass_candidates: 2097152
-    understory_candidates: 1048576
-    stone_candidates: 524288
-    dressing_candidates: 1048576
-    tree_instances: 262144
-    grass_instances: 1572864
-    understory_instances: 786432
-    stone_instances: 393216
-    dressing_instances: 786432
+  # Design-stage starting allocations, not measurements. VEG-GPU-6 may change them
+  # only with the same-preset harness evidence and updated memory accounting.
+  accepted_instance_capacity:
+    ultra:    { trees: 50000, grass: 262144, understory: 65536, stones: 131072, dressing: 262144 }
+    balanced: { trees: 30000, grass: 131072, understory: 32768, stones: 65536,  dressing: 131072 }
+    perf:     { trees: 16000, grass: 65536,  understory: 16384, stones: 32768,  dressing: 65536 }
+    potato:   { trees: 8000,  grass: 32768,  understory: 8192,  stones: 16384,  dressing: 32768 }
+
+  authority_buffer_vram_mib_max:
+    ultra: 384
+    balanced: 256
+    perf: 160
+    potato: 96
+  portable_storage_binding_mib_max: 128
 
   rejection:
     maximum_tree_slope_degrees: 38
@@ -488,7 +602,21 @@ vegetation_gpu_authority:
     show_cluster_reasons: false
 ```
 
-Unknown keys and invalid capacities fail startup.
+Unknown keys and invalid capacities fail startup. Active-cluster descriptor capacity is
+derived at startup from the exact union of per-category cluster ranges for the selected
+preset, not a hand-written constant.
+
+The instance capacities above are initial design allocations and deliberately replace
+the former global candidate buffers. Allocate one double-buffered storage pair per
+category; never allocate one monolithic cross-category instance buffer. The active pair
+remains renderable while the replacement pair is filled, then swaps coherently. At
+startup, compute bytes as two times `tree_capacity * 96` plus two times
+`other_capacity * 64`, then add active clusters, counters, and indirect arguments. The
+total must fit the selected preset cap. Every category binding must fit both
+`device.limits.maxStorageBufferBindingSize` and the 128 MiB portable ceiling. Startup
+fails before allocation if either condition is false. Overflow is a hard failure. A smaller
+preset never silently truncates or changes identity; VEG-GPU-6 must tune distance,
+density acceptance, and capacity together and pass the worst-case acceptance scenes.
 
 ## 15. TypeScript module layout
 
@@ -522,8 +650,7 @@ tools/clod-poc/src/vegetation/gpu_authority/
     terrain_sampling.wgsl
     ecology.wgsl
     classify_clusters.compute.wgsl
-    generate_candidates.compute.wgsl
-    accept_candidates.compute.wgsl
+    generate_accept.compute.wgsl
     classify_lod_shadow.compute.wgsl
     finalize_indirect.compute.wgsl
 ```
@@ -534,6 +661,8 @@ Integration changes:
 - existing render materials and geometry remain in place;
 - existing CPU placement functions remain available only to tests, editor preview, and explicit oracle mode;
 - the old CPU-built active-slot prefilter is removed after parity acceptance.
+
+The existing per-category ring compute shaders are the code this pipeline replaces: `src/gpu/shaders/tree_ring.compute.wgsl`, `grass_ring.compute.wgsl`, `understory_ring.compute.wgsl`, and `stone_scatter.compute.wgsl`. For each, record in VEG-GPU-6 whether it is deleted or reduced to a thin wrapper that binds the unified compacted buffers, and delete the legacy scatter path at VEG-GPU-8. The §21 GPU budget must be booked as a net delta over this removed work, not as a fresh addition; measure the legacy scatter cost before removal so the delta is provable.
 
 ## 16. Rust/Bevy module layout
 
@@ -560,8 +689,7 @@ assets/shaders/vegetation_gpu_authority/
   terrain_sampling.wgsl
   ecology.wgsl
   classify_clusters.wgsl
-  generate_candidates.wgsl
-  accept_candidates.wgsl
+  generate_accept.wgsl
   classify_lod_shadow.wgsl
   finalize_indirect.wgsl
 ```
@@ -590,17 +718,18 @@ Exit gate: river and lake placement parity shows no CPU/GPU height mismatch.
 
 Exit gate: conservative CPU/GPU classification matches on deterministic scenes.
 
-### VEG-GPU-4 — Candidate generation
+### VEG-GPU-4 — Fused candidate generation and acceptance skeleton
 
-- Generate candidate positions only from active clusters.
-- Validate stable hashes and counts.
+- Enumerate the exact world-anchored lattice only for active clusters.
+- Generate, sample, and accept within one dispatch; do not materialize a candidate buffer.
+- Validate stable hashes, theoretical counts, generated counts, and positions.
 
 Exit gate: candidate identities and positions match CPU oracle samples.
 
-### VEG-GPU-5 — Acceptance and ecology
+### VEG-GPU-5 — Ecology, exclusions, and accepted compaction
 
-- Port ecology formulas and exclusions.
-- Compact accepted instances.
+- Complete the fused kernel with ecology formulas and exclusions.
+- Compact accepted generic/tree instance layouts.
 
 Exit gate: species/class distributions, rejection reasons, and accepted positions meet parity thresholds.
 
@@ -697,8 +826,7 @@ vegetation_gpu_shadow_casters
 vegetation_gpu_overflow_count
 vegetation_gpu_readback_count
 vegetation_gpu_classify_ms
-vegetation_gpu_generate_ms
-vegetation_gpu_accept_ms
+vegetation_gpu_generate_accept_ms
 vegetation_gpu_lod_shadow_ms
 vegetation_gpu_finalize_ms
 ```

@@ -8,7 +8,7 @@ import type { TreeIsolatedRenderer, TreeSystem } from "../../trees/tree_system_r
  * swapchain (WebGPU post-process is disabled), whose begin/end-of-pass
  * timestamps are unreliable on Dawn/RTX; an offscreen target times correctly.
  * The profiler labels this pass `r.treeMain` (via tagGpu on the target). Runs
- * only when `?gpuTiming=1`/`?perfProbe=1` and timestamps are supported, after the
+ * only when `?gpuTiming=1` and timestamps are supported, after the
  * visible frame — zero cost in normal play.
  */
 export class TreeTimingPass {

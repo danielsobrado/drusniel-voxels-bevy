@@ -120,7 +120,13 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const rendererBackend = parseRendererBackend(searchParams);
   let app: AppRenderer;
   try {
-    app = rendererBackend === "webgpu" ? await createWebGpuAppRenderer() : createWebGlAppRenderer();
+    app = rendererBackend === "webgpu"
+      ? await createWebGpuAppRenderer({
+          desiredMaximumFrameLatency: searchParams.has("frameLatency")
+            ? Number(searchParams.get("frameLatency"))
+            : undefined,
+        })
+      : createWebGlAppRenderer();
   } catch (error) {
     const details = [
       error instanceof Error ? error.message : String(error),

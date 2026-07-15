@@ -6,6 +6,8 @@ Scope: `tools/clod-poc`, Rust/Bevy QA, committed baselines, native Windows GPU e
 
 This plan is prescriptive. The implementer must not choose a different manifest format, capture contract, baseline policy, metric set, execution lanes, failure policy, timing policy, or update workflow.
 
+This plan is the acceptance harness for the whole parity effort; build order and the reconciled frame budget it enforces live in `fable5-parity-index-and-budget-2026-07-15.md`. Stand up the harness early (QA-U1..U7) and add each feature's scene baseline as that plan lands.
+
 ## 1. Goal
 
 Unify Drusniel's existing specialized screenshot, water, tree, CLOD, continent, performance, and acceptance tools into one deterministic regression system that can answer:
@@ -48,6 +50,14 @@ Lane A does not claim visual or GPU performance acceptance.
 ### 2.2 Lane B — Native Windows real-GPU gate
 
 Runs on the designated native Windows machine with Chrome WebGPU and the target discrete GPU.
+
+The canonical profile is native Windows, Chrome WebGPU, 2560 x 1440 CSS pixels,
+DPR 1, and `quality=balanced` on one designated discrete GPU. Its machine manifest
+records OS build, adapter vendor/device/backend, driver, and Chrome major. Every absolute
+millisecond allocation in Plans 1–5 refers to this exact profile. Their allocations are
+sub-allocations of the binding `frame_ms_p95 <= 11.1` combined/movement gate, not
+independent targets. The controlled stationary 8.0 ms figure is an advisory headroom
+target only.
 
 It performs:
 
@@ -128,14 +138,45 @@ Only `validation/baselines`, `validation/masks`, and manifests are committed. `v
 
 ## 4. Canonical manifest
 
-Create `validation/manifests/visual-regression.yaml` with schema version 1.
+Create `validation/manifests/visual-regression.yaml` and
+`validation/manifests/performance-regression.yaml` with schema version 1. Both use the
+scene contract below. The visual manifest owns frozen image/region baselines; the
+performance manifest owns 300+-frame stationary and movement routes. The loader merges
+them into one scene registry and rejects duplicate scene IDs across files.
 
-Top-level contract:
+The existing `tools/clod-poc/config/qa_visual.yaml` and `qa_perf_move.yaml` are migration
+inputs only. QA-U1 moves the first into the visual manifest and the second into the
+performance manifest, then deletes both files in the
+same change; generated copies and thin re-exports are forbidden. `src/qa/qaConfig.ts`
+then reads only the canonical manifest and projects selected scenes into the existing QA
+evaluator in memory. Existing `npm run qa` callers select manifest tags (`legacy-visual`
+or `movement`) instead of passing a legacy config path, and all command examples and
+`tools/perf-move.ts` comments are updated in that same change.
+
+Existing `min: 0` checks become `required: false` informational metrics, never passing
+gates. The existing 11.1 ms movement ceiling becomes the binding balanced gate; the
+former 24 ms visual-scene ceiling is retained with `enforcement: advisory`, not release
+performance acceptance. QA-U1 records every old scene/check ID and its new ID in a
+parser test fixture so no gate silently disappears.
+
+Top-level contracts (one root per file):
+
+`visual-regression.yaml`:
 
 ```yaml
 visual_regression:
   schema_version: 1
   baseline_version: 1
+  default_target: clod-poc
+  output_root: validation-runs
+  scenes: []
+```
+
+`performance-regression.yaml`:
+
+```yaml
+performance_regression:
+  schema_version: 1
   default_target: clod-poc
   output_root: validation-runs
   scenes: []
@@ -154,8 +195,9 @@ Scene contract:
     world_seed: 19
     world_mode: continent
     scene: continent
-    quality_preset: high
-    viewport: [1920, 1080]
+    quality: balanced
+    render_resolution_preset: high
+    viewport: [2560, 1440]
     device_pixel_ratio: 1
     camera:
       position: [1200.0, 184.0, -640.0]
@@ -203,10 +245,12 @@ Scene contract:
   region_probes: []
   timing_gates: []
   counter_gates: []
+  informational_metrics: []
   specialized_commands: []
 ```
 
-All fields are required except `mask`, `region_probes`, `timing_gates`, `counter_gates`, and `specialized_commands`, which default to empty arrays.
+All fields are required except `mask`, `region_probes`, `timing_gates`, `counter_gates`,
+`informational_metrics`, and `specialized_commands`, which default to empty arrays.
 
 Unknown fields fail manifest loading.
 
@@ -215,6 +259,12 @@ Unknown fields fail manifest loading.
 Both CLOD-POC and Bevy expose the same logical QA interface.
 
 ### 5.1 CLOD-POC browser hook
+
+Do not fork a second automation state surface. Keep `window.__drusnielClod` as the
+runtime owner of `ready`, `error`, `diag`, `stats`, pose control, `settle`, and fly-cam
+state. Expose `window.__drusnielQa` only as the thin typed adapter below: its methods
+delegate to `__drusnielClod` or to QA-only freeze/world-state helpers. It owns no copied
+ready/error/pose/stats state.
 
 Create:
 
@@ -235,6 +285,10 @@ window.__drusnielQa = {
   runCheckpoint(name: string): Promise<void>,
 };
 ```
+
+`ready()` returns `Boolean(__drusnielClod.ready)`, `error()` wraps its error property,
+`getPose`/`setPose`/`settle` delegate directly, and `captureStats()` snapshots
+`__drusnielClod.stats`. Tests fail if the adapter and runtime hook disagree.
 
 Create the implementation in:
 
@@ -290,10 +344,10 @@ baseline version
 world source hash
 terrain source version
 shader bundle hashes
-quality preset
+quality token and render-resolution preset
 ```
 
-A run with a dirty working tree is allowed locally but its report status is `non_authoritative`. It cannot update committed baselines or produce a release PASS.
+A run with a dirty working tree is allowed locally but its report status is `non_authoritative`. It cannot update committed baselines or produce a release PASS. A run whose adapter, driver, Chrome major, viewport, DPR, or quality differs from the accepted Lane B machine manifest is also `non_authoritative` until a deliberate rebaseline records the new environment.
 
 ## 7. Capture runner
 
@@ -447,13 +501,17 @@ Contract:
 ```yaml
 timing_gates:
   - metric: frame_ms_p95
-    max: 8.0
+    max: 11.1
+    enforcement: required
   - metric: frame_ms_p99
     max: 12.0
-  - metric: gpu_passes.c.probeGiTrace
+    enforcement: required
+  - metric: gpu_passes.probeGiTotal
     max: 3.0
+    enforcement: required
   - metric: main_thread.vegetationTotalMs_p95
     max: 1.0
+    enforcement: required
 ```
 
 Every timing scene records:
@@ -479,6 +537,14 @@ Rules:
 - `>= 0` gates are forbidden;
 - relative-only performance gates are forbidden; every gate has an absolute maximum;
 - reports also show baseline delta, but baseline delta does not replace the absolute maximum.
+- `enforcement` is exactly `required` or `advisory`; omitted means `required`.
+- advisory thresholds produce `ADVISORY_EXCEEDED`, never PASS or release failure.
+
+Stationary scenes encode the 8.0 ms headroom target as an
+`enforcement: advisory` timing gate. It does not produce PASS and does not fail the
+binding gate. Per-plan A/B scenes report
+feature-off, feature-on, and their measured frame p95 delta; no assumed compute/raster
+overlap is subtracted.
 
 ## 11. Counter gates
 
@@ -510,6 +576,18 @@ between
 Missing required counters fail.
 
 Optional counters must be explicitly marked `required: false`; absence is then reported as `not_applicable`, never PASS.
+
+Metrics retained only for visibility use a separate non-gating contract:
+
+```yaml
+informational_metrics:
+  - key: shadow_proxy.shadow_proxy_tris
+    required: false
+```
+
+Informational metrics display a value or `NOT_APPLICABLE`; they cannot produce PASS or
+FAIL and accept no `equals`/`min`/`max`/`between` operator. This is the required landing
+place for legacy `min: 0` existence checks.
 
 ## 12. Specialized validator orchestration
 
@@ -574,6 +652,13 @@ p95 absolute error <= 0.008
 changed pixel fraction <= 0.002
 all exact identity/signature counters equal
 ```
+
+Compacted GPU lists use order-independent signatures because atomic append order is not
+stable. For each list record: item count, XOR of `stable_id_lo`, XOR of
+`stable_id_hi`, wrapping sum of a second shared-PCG mix of both words, and the same
+values per category/LOD. These u32 accumulators are compared exactly. A sequential hash
+of buffer order is forbidden. Together with Plan 2's opaque/coverage-dithered material
+policy, append-order variation cannot change either the signature or blend result.
 
 A determinism failure is reported separately from a baseline regression.
 
@@ -664,7 +749,7 @@ Lane C adds matrices:
 ```text
 time of day: 06:30, 12:00, 17:30, 21:00
 weather: clear, overcast, rain, snow
-quality: low, high
+quality: potato, perf, balanced, ultra
 movement: fixed shot, slow dolly, 4 km route
 save state: fresh, edited, reload
 ```
@@ -821,8 +906,12 @@ Rust consumes the same YAML scene schema. Fields not applicable to a target are 
 ### QA-U1 — Schema and validation
 
 - Add canonical manifests, strict parsers, path/hash checks, and command generation.
+- Migrate every legacy QA scene/check through the ID mapping fixture, switch
+  `qaConfig.ts` and callers to manifest tags, and delete both legacy YAML files.
 
-Exit gate: malformed/unknown fields fail with exact paths and line context.
+Exit gate: malformed/unknown fields fail with exact paths and line context; the legacy
+ID mapping is complete; repository search finds no runtime or command reference to
+`config/qa_visual.yaml` or `config/qa_perf_move.yaml`.
 
 ### QA-U2 — Deterministic runtime hooks
 
@@ -914,7 +1003,7 @@ report generation = after process exit
 Runner limits:
 
 ```text
-single screenshot metric evaluation <= 3 s at 1920x1080
+single screenshot metric evaluation <= 5 s at 2560x1440
 single scene report generation <= 1 s excluding capture
 smoke battery <= 15 min on native GPU host
 full nightly battery <= 90 min

@@ -6,6 +6,8 @@ Scope: `tools/clod-poc` first, then the Rust/Bevy world generator through the sa
 
 This plan is prescriptive. The implementation must follow the architecture, data formats, ordering, defaults, file placement, tests, and gates below. No representation or algorithm choice is left to the implementer.
 
+Cross-plan milestone order and shared contracts live in `fable5-parity-index-and-budget-2026-07-15.md`. Erosion is a one-time generation step whose versioned `sediment`/`deposition`/`hardness` publication gate feeds vegetation acceptance and dressing. Their independent contracts, content work, and harness work may proceed before ERO-6; only consumption of these channels is blocked.
+
 ## 1. Goal
 
 Add real hydraulic erosion, sediment transport, deposition, and thermal talus relaxation to Drusniel's canonical continent-generation pipeline while preserving all voxel-specific capabilities:
@@ -70,12 +72,24 @@ erosion:
   border_cells: 2
   hydraulic_iterations: 192
   thermal_iterations: 48
+  thermal_interleave_every: 8
   checkpoint_every_iterations: 8
 ```
 
 For the default 32,768 m continent this produces a `2049 x 2049` canonical lattice before the two-cell simulation border is added.
 
 The grid origin and cell indexing must exactly match the macro field consumed by `src/world/hydrology_graph/`. No resampling transform is permitted between erosion output and hydrology input.
+
+The existing default macro spacing is already 16 m and the default 32,768 m world
+therefore resolves to 2049 samples. ERO-1 must lock that fact with a contract test and
+also verify the exact origin/index convention used by `buildHydrologyGraphFromMacro`.
+If the origin differs, align the macro source before ERO-5; do not insert a resampling
+step, because that would desynchronize erosion output from hydrology input.
+
+The 192/48 iteration counts are design defaults for this world's 16 m lattice, not
+quality or timing figures copied from a differently scaled reference simulation. ERO-3
+and the acceptance scenes calibrate them; any change requires a schema-version bump and
+new golden artifacts.
 
 ### 4.2 Fixed-point scales
 
@@ -108,7 +122,7 @@ Each hydraulic iteration performs these stages in order:
 9. Evaporation.
 10. Boundary drainage.
 
-After every four hydraulic iterations, execute one thermal-relaxation iteration. After the 192 hydraulic iterations complete, execute the remaining thermal iterations until the configured total of 48 is reached.
+After every `thermal_interleave_every` hydraulic iterations (8), execute one thermal-relaxation iteration; over the 192 hydraulic iterations this interleaves 24 thermal passes. After the 192 hydraulic iterations complete, execute the remaining 24 thermal iterations, reaching the configured total of 48. The interleave cadence intentionally equals `checkpoint_every_iterations`, so each checkpoint group contains exactly one interleaved thermal pass. (The earlier "one per four" cadence was inconsistent with a 48-total budget: 192/4 already consumed all 48 and left none for the final batch.)
 
 ### 4.4 Constants
 
@@ -122,6 +136,7 @@ erosion:
   border_cells: 2
   hydraulic_iterations: 192
   thermal_iterations: 48
+  thermal_interleave_every: 8
   checkpoint_every_iterations: 8
 
   rain:
@@ -421,6 +436,8 @@ The Rust runtime initially consumes prebuilt erosion artifacts. The Rust GPU bui
 - Add config, parser, fixed-point constants, types, manifest reference, and artifact header.
 - Add unknown-field and range validation.
 - Add hash-chain integration.
+- Add a default-world lattice test for 16 m spacing, 2049 x 2049 samples, and exact
+  hydrology origin/index agreement.
 
 Exit gate: config and artifact header round-trip tests pass.
 

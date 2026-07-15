@@ -1,5 +1,7 @@
 # Fable5 Tree Performance Gap Plan
 
+Status: **status / progress log**, not a prescriptive spec like the six numbered parity plans. Most items below are already implemented; the remaining work is browser measurement. Its shipped foundations — GPU tree ring, the `tree_pcg2d` hash, octahedral impostors, and the shadow-LOD budget — are the base Plans 2 and 4 build on, and the captures it calls for should gate whether Plans 2–5's millisecond budgets are realistic on the reference machine. Cross-plan coordination lives in `fable5-parity-index-and-budget-2026-07-15.md`.
+
 ## Goal
 
 Close the tree performance gap between `tools/clod-poc` and `Braffolk/fable5-world-demo` while keeping Drusniel's editable CLOD terrain workflow.
@@ -265,26 +267,36 @@ trees: cpu-patches 1,250 trees ... path=cpu-patches
 
 Implemented this checklist so the next step is measured, not guessed.
 
-Capture rules:
+Authoritative capture rules:
 
-- Use the same camera location and direction for every capture.
-- Reload the page before each capture.
-- Wait until tree stats stop changing before recording values.
-- Capture three runs per URL and use the median.
-- Keep debug readback off for normal preset comparison.
-- Enable `treeGpuCounts=1` only in the separate debug-count pass.
-- Record the exact browser, GPU, OS, window size, and commit SHA.
+- Use the deterministic perf harness, not a manual FPS/overlay sample.
+- Use the Plan 6 Lane B machine profile, fixed `scene=trees-perf`, world, camera route,
+  600-frame warmup, 300 measured frames, viewport, DPR, and browser state.
+- Run at least three harness samples per preset and report the median of run-level p95s.
+- Keep GPU counts, validation, debug overlays, and readback off during measured windows.
+- Record `frameMs` p50/p95, `renderMs` p95, top phase/prop bucket, GPU-tree status,
+  LOD distribution, dispatch timing when timestamp queries are available, triangles,
+  rendered count, and the exact `summary.json` path.
+- Run the debug-count pass only after timing completes; it explains counts but is not
+  performance evidence.
 
-Primary URLs:
+Start the server directly:
 
-```text
-?quality=ultra&treeGpu=1
-?quality=balanced&treeGpu=1
-?quality=perf&treeGpu=1
-?quality=potato&treeGpu=1
+```powershell
+npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 ```
 
-Fallback/control URLs:
+Then run one same-shape command per preset (shown for balanced):
+
+```powershell
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 8 --warmup 600 --frames 300 --case tree-gpu-ring --params scene=trees-perf,quality=balanced --out perf-runs/tree-balanced"
+```
+
+Repeat with `quality=ultra`, `perf`, and `potato`, changing only the quality and output
+directory. A run is authoritative only when `summary.json` records the Lane B profile
+and all debug/readback flags false.
+
+Fallback/control and debug URLs below remain useful for correctness captures, not timing proof:
 
 ```text
 ?quality=perf&treeGpu=0
@@ -317,7 +329,7 @@ The template includes:
 - capture metadata
 - scene setup
 - preflight checks
-- primary preset results
+- authoritative harness commands and `summary.json` results
 - debug-count results
 - CPU fallback control results
 - shadow-budget results
@@ -334,14 +346,8 @@ The CPU helper now matches the GPU hash/jitter and shadow LOD budget. It may sti
 
 ### Local validation still required
 
-The GitHub connector cannot run the local suite. The new work must be checked locally with:
-
-```bash
-cd tools/clod-poc
-npm run typecheck
-npm test
-npm run build
-```
+Run the repository's native Windows typecheck/test/build workflow and the deterministic
+perf commands above. Manual overlay FPS is diagnostic only.
 
 ## Implementation Plan
 

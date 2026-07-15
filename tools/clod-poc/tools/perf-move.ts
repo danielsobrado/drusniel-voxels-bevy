@@ -309,7 +309,7 @@ function buildParams(args: Args): Record<string, string> {
 
   const runnerArgs = new Set([
     "baseUrl", "out", "profile", "world", "seed", "scene", "x", "z", "yaw",
-    "staticFrames", "moveFrames", "speed", "shots", "cpuprofile", "onsetFrames",
+    "staticFrames", "moveFrames", "speed", "shots", "cpuprofile", "trace", "onsetFrames", "turnRate",
     "readyTimeout", "convergenceTimeout", "moveTimeout", "checkpointConvergenceTimeout",
     "renderScale", "viewPrewarmCompile", "sceneCompileWarm", "viewPrewarmDraw",
   ]);
@@ -399,6 +399,29 @@ async function waitForConvergence(page: Page, label: string, timeoutMs: number):
   const blockers = last ? convergenceTimeoutBlockers(last) : [];
   console.log(`[perf-move] ${label}: convergence timed out after ${(timeoutMs / 1000).toFixed(0)}s`);
   if (blockers.length > 0) console.log(`[perf-move] ${label}: blockers:\n${blockers.join("\n")}`);
+  return false;
+}
+
+async function waitForStreamDrain(page: Page, timeoutMs: number): Promise<boolean> {
+  const startedAt = Date.now();
+  let stablePolls = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    const quiet = await page.evaluate(() => {
+      const counters = window.__drusnielClod?.stats?.counters ?? {};
+      return (counters["live_clod_stream_pending_pages"] ?? 0) === 0
+        && (counters["live_clod_stream_inflight_batches"] ?? 0) === 0
+        && (counters["live_clod_stream_apply_queue_pages"] ?? 0) === 0
+        && (counters["live_clod_stream_refinement_pending_pages"] ?? 0) === 0
+        && (counters["live_clod_stream_refinement_inflight_pages"] ?? 0) === 0;
+    });
+    stablePolls = quiet ? stablePolls + 1 : 0;
+    if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
+      console.log(`[perf-move] stream queue drained after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+      return true;
+    }
+    await page.waitForTimeout(CONVERGENCE_POLL_MS);
+  }
+  console.log(`[perf-move] stream queue drain timed out after ${(timeoutMs / 1000).toFixed(0)}s`);
   return false;
 }
 
@@ -495,11 +518,17 @@ function routePoint(start: CamPose, segments: readonly RouteSegmentSpec[], fract
   return { p: [x, start.p[1], z], yaw, pitch: start.pitch, fov: start.fov };
 }
 
-async function startMoveDriver(page: Page, speedMPerFrame: number, segments: readonly RouteSegmentSpec[]): Promise<void> {
+async function startMoveDriver(
+  page: Page,
+  speedMPerFrame: number,
+  segments: readonly RouteSegmentSpec[],
+  turnRateRadPerFrame: number,
+): Promise<void> {
   // String-form evaluate: see settleFrames for why serialized callbacks are unsafe here.
   const driverSource =
     `(function(){` +
     `var speed = ${JSON.stringify(speedMPerFrame)};` +
+    `var turnRate = ${JSON.stringify(turnRateRadPerFrame)};` +
     `var route = ${JSON.stringify(segments)};` +
     `var clod = window.__drusnielClod;` +
     `if (!clod || typeof clod.setPose !== "function" || typeof clod.getPose !== "function") throw new Error("pose hooks missing");` +
@@ -516,7 +545,9 @@ async function startMoveDriver(page: Page, speedMPerFrame: number, segments: rea
     `if (!segment) { driver.active = false; return; }` +
     `pose.p[0] += segment.dux * speed;` +
     `pose.p[2] += segment.duz * speed;` +
-    `pose.yaw = Math.atan2(-segment.dux, -segment.duz);` +
+    `var targetYaw = Math.atan2(-segment.dux, -segment.duz);` +
+    `var yawDelta = Math.atan2(Math.sin(targetYaw - pose.yaw), Math.cos(targetYaw - pose.yaw));` +
+    `pose.yaw += Math.max(-turnRate, Math.min(turnRate, yawDelta));` +
     `segmentTravelled += speed;` +
     `driver.distanceM += speed;` +
     `driver.frames += 1;` +
@@ -563,6 +594,50 @@ async function startCpuProfile(page: Page): Promise<CDPSession> {
 async function stopCpuProfile(session: CDPSession, outPath: string): Promise<void> {
   const { profile } = await session.send("Profiler.stop") as { profile: unknown };
   writeFileSync(outPath, JSON.stringify(profile));
+  await session.detach().catch(() => undefined);
+}
+
+async function startChromeTrace(page: Page): Promise<CDPSession> {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Tracing.start", {
+    transferMode: "ReturnAsStream",
+    traceConfig: {
+      recordMode: "recordContinuously",
+      includedCategories: [
+        "toplevel",
+        "devtools.timeline",
+        "blink",
+        "cc",
+        "gpu",
+        "disabled-by-default-v8.gc",
+      ],
+    },
+  });
+  return session;
+}
+
+async function stopChromeTrace(session: CDPSession, outPath: string): Promise<void> {
+  const completed = new Promise<string>((resolve, reject) => {
+    session.once("Tracing.tracingComplete", (event) => {
+      const stream = (event as { stream?: string }).stream;
+      if (stream) resolve(stream);
+      else reject(new Error("Chrome trace completed without a data stream"));
+    });
+  });
+  await session.send("Tracing.end");
+  const stream = await completed;
+  const chunks: Buffer[] = [];
+  while (true) {
+    const result = await session.send("IO.read", { handle: stream }) as {
+      data: string;
+      base64Encoded?: boolean;
+      eof?: boolean;
+    };
+    chunks.push(Buffer.from(result.data, result.base64Encoded ? "base64" : "utf8"));
+    if (result.eof) break;
+  }
+  await session.send("IO.close", { handle: stream });
+  writeFileSync(outPath, Buffer.concat(chunks));
   await session.detach().catch(() => undefined);
 }
 
@@ -639,6 +714,7 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
 
   const params = buildParams(args);
+  const segments = routeSegments(moveFrames * speed);
   const url = buildUrl(baseUrl, params);
   console.log(`[perf-move] url: ${url}`);
   console.log(`[perf-move] static ${staticFrames}f, moving ${moveFrames}f @ ${speed} m/frame (${(moveFrames * speed).toFixed(0)}m route)`);
@@ -657,7 +733,7 @@ async function main(): Promise<void> {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await waitForReady(page, readyTimeoutMs);
     const startupConverged = await waitForConvergence(page, "startup", convergenceTimeoutMs);
-
+    await waitForStreamDrain(page, convergenceTimeoutMs);
     // --- static window ---
     await resetPerfProbe(page);
     await settleFrames(page, staticFrames, Math.max(120_000, staticFrames * 200));
@@ -667,13 +743,15 @@ async function main(): Promise<void> {
 
     // --- moving window ---
     const startPose = await readPose(page);
-    const segments = routeSegments(moveFrames * speed);
     const countersBefore = await readCounters(page, STREAMING_DELTA_COUNTERS);
     await resetPerfProbe(page);
     const profileSession = args["cpuprofile"] !== undefined && args["cpuprofile"] !== "0"
       ? await startCpuProfile(page)
       : null;
-    await startMoveDriver(page, speed, segments);
+    const traceSession = args["trace"] !== undefined && args["trace"] !== "0"
+      ? await startChromeTrace(page)
+      : null;
+    await startMoveDriver(page, speed, segments, num(args["turnRate"], 0.05));
     let driver = await readMoveDriver(page);
     const moveDeadline = Date.now() + moveTimeoutMs;
     while (driver.active && Date.now() < moveDeadline) {
@@ -685,19 +763,24 @@ async function main(): Promise<void> {
       await stopCpuProfile(profileSession, join(outDir, "moving.cpuprofile"));
       console.log(`[perf-move] wrote ${join(outDir, "moving.cpuprofile")}`);
     }
+    if (traceSession) {
+      await stopChromeTrace(traceSession, join(outDir, "moving-trace.json"));
+      console.log(`[perf-move] wrote ${join(outDir, "moving-trace.json")}`);
+    }
     if (driver.error) throw new Error(`move driver failed: ${driver.error}`);
     const movingSamples = await readPerfSamples(page);
+    const movingWindowSamples = movingSamples.slice(0, moveFrames);
     const countersAfter = await readCounters(page, STREAMING_DELTA_COUNTERS);
     const phase4Counters = await readCounters(page, PHASE4_COUNTER_KEYS);
     const endPose = await readPose(page);
-    const movingSummary = summarizeWindow(movingSamples.slice(0, moveFrames));
+    const movingSummary = summarizeWindow(movingWindowSamples);
     // Movement onset (the first camera turn + first-draw of rotation-revealed content)
     // carries a native driver stall in the 1s class that no in-page warm-up has removed;
     // report it separately so the steady-traversal gate measures sustained play, not the
     // one-time transition into movement.
     const onsetFrames = Math.min(num(args["onsetFrames"], 60), moveFrames);
-    const onsetSummary = summarizeWindow(movingSamples.slice(0, onsetFrames));
-    const steadySummary = summarizeWindow(movingSamples.slice(onsetFrames, moveFrames));
+    const onsetSummary = summarizeWindow(movingWindowSamples.slice(0, onsetFrames));
+    const steadySummary = summarizeWindow(movingWindowSamples.slice(onsetFrames));
     const travelledM = Math.hypot(endPose.p[0] - startPose.p[0], endPose.p[2] - startPose.p[2]);
     const streamingDeltas: Record<string, number> = {};
     for (const key of STREAMING_DELTA_COUNTERS) {
@@ -752,15 +835,16 @@ async function main(): Promise<void> {
       movingSteady: steadySummary,
       onsetFrames,
       staticWorstFrames: worstFramesBy(staticSamples, "frameMs"),
-      movingWorstFrames: worstFramesBy(movingSamples, "frameMs"),
-      movingWorstByRender: worstFramesBy(movingSamples, "renderMs"),
-      movingWorstByViews: worstFramesBy(movingSamples, "selectionSub.views"),
+      movingWorstFrames: worstFramesBy(movingWindowSamples, "frameMs"),
+      movingWorstByRender: worstFramesBy(movingWindowSamples, "renderMs"),
+      movingWorstByViews: worstFramesBy(movingWindowSamples, "selectionSub.views"),
       streamingDeltas,
       streamingExercised,
       phase4Counters,
       checkpoints: checkpoints.map((cp) => ({ ...cp, png: cp.png.replaceAll("\\", "/") })),
       staticSampleCount: staticSamples.length,
       movingSampleCount: movingSamples.length,
+      movingMeasuredSampleCount: movingWindowSamples.length,
       warnings: warnings.slice(0, 50),
       errors: errors.slice(0, 50),
     };

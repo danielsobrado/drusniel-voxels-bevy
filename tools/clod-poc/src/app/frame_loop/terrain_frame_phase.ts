@@ -7,10 +7,7 @@ import type {
   NearFieldBubbleView,
 } from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
-import {
-  applyRootHeightMorph,
-  resetRootHeightMorph,
-} from "../../terrain/streaming/root_height_morph.js";
+import { resetRootHeightMorph } from "../../terrain/streaming/root_height_morph.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { ClodPageNode } from "../../types.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
@@ -55,12 +52,6 @@ interface MovementProbeWindow {
   __drusnielBeginLiveBubbleMovementProbe?: () => void;
   __drusnielBeginStreamingMovementProbe?: () => void;
   __drusnielPerf?: { reset(): void };
-}
-
-interface RootMorphFrameStats {
-  builtRoots: number;
-  builtVertices: number;
-  buildMs: number;
 }
 
 interface CanonicalCenter {
@@ -221,14 +212,6 @@ function mirrorVegetationRingStats(cameraCenter: THREE.Vector3, grassCenter: THR
   }));
 }
 
-function mirrorRootMorphStats(stats: RootMorphFrameStats): void {
-  const counters = hooksCounters();
-  if (!counters) return;
-  counters["live_clod_stream_transition_height_morph_roots"] = stats.builtRoots;
-  counters["live_clod_stream_transition_height_morph_vertices"] = stats.builtVertices;
-  counters["live_clod_stream_transition_height_morph_build_ms"] = stats.buildMs;
-}
-
 function canonicalWorldCenter(input: TerrainFramePhaseInput): CanonicalCenter {
   // One canonical center for every streaming system (near bubble, streamed CLOD roots, rings,
   // vegetation, far shell). Play mode -> player. Infinite-islands orbit mode -> the spawned
@@ -256,45 +239,22 @@ export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: num
   );
 }
 
-function buildTransitionGroups(views: Iterable<TerrainFadeView>): Map<number, TerrainFadeView[]> {
-  const groups = new Map<number, TerrainFadeView[]>();
-  for (const view of views) {
-    const transition = view.node.rootTransition;
-    if (transition?.mode !== "fadeIn" && transition?.mode !== "fadeOut") continue;
-    const group = groups.get(transition.groupId);
-    if (group) group.push(view);
-    else groups.set(transition.groupId, [view]);
-  }
-  return groups;
-}
-
-function sourceViewsForMorph(view: TerrainFadeView, groups: ReadonlyMap<number, TerrainFadeView[]>): TerrainFadeView[] {
-  const transition = view.node.rootTransition;
-  if (!transition) return [];
-  const oppositeMode = transition.mode === "fadeIn" ? "fadeOut" : transition.mode === "fadeOut" ? "fadeIn" : "";
-  if (!oppositeMode) return [];
-  return (groups.get(transition.groupId) ?? []).filter((candidate) => candidate.node.rootTransition?.mode === oppositeMode);
-}
-
-function applyRootTransitionFade(
-  view: TerrainFadeView,
-  transitionGroups: ReadonlyMap<number, TerrainFadeView[]>,
-  morphStats: RootMorphFrameStats,
-): boolean {
+function applyRootTransitionFade(view: TerrainFadeView): boolean {
   const transition = view.node.rootTransition;
   if (transition?.mode !== "fadeIn" && transition?.mode !== "fadeOut") return false;
 
+  // Root height morph disabled: props/vegetation are GPU-scattered at the final analytic surface
+  // height and cannot cheaply track a transient per-vertex Y morph, so morphing the terrain root
+  // during an LOD crossfade left them floating. Terrain now renders at its true height throughout
+  // the transition (the crossfade alpha still hides the swap); accepted tradeoff is a subtle LOD
+  // height pop in place of floating props.
   const progress = THREE.MathUtils.clamp(transition.progress, 0, 1);
   const fade = transition.mode === "fadeOut" ? 1 - progress : progress;
-  const morphInfluence = transition.mode === "fadeIn" ? 1 - progress : progress;
-  const built = applyRootHeightMorph(view, sourceViewsForMorph(view, transitionGroups));
-  morphStats.builtRoots += built.builtRoots;
-  morphStats.builtVertices += built.builtVertices;
-  morphStats.buildMs += built.buildMs;
+  resetRootHeightMorph(view);
   view.fade = fade;
   view.target = transition.mode === "fadeOut" ? 0 : 1;
   view.mesh.visible = fade > 0.001;
-  view.mat.setRootMorph(morphInfluence);
+  view.mat.setRootMorph(0);
   view.mat.setFade(fade, transition.mode !== "fadeOut", fade > 0.001 && fade < 0.999);
   return true;
 }
@@ -304,11 +264,8 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   const activeTerrainViews = cutSnapshot.activeTerrainViews as Set<TerrainFadeView>;
   const selectionStats = cutSnapshot.stats;
   const transitionViews = cutSnapshot.terrainViews as unknown as Set<TerrainFadeView>;
-  const transitionGroups = buildTransitionGroups(transitionViews);
-  const morphStats: RootMorphFrameStats = { builtRoots: 0, builtVertices: 0, buildMs: 0 };
-
   for (const v of activeTerrainViews) {
-    if (applyRootTransitionFade(v, transitionGroups, morphStats)) {
+    if (applyRootTransitionFade(v)) {
       const progress = v.node.rootTransition?.progress ?? 1;
       if (progress >= 1) activeTerrainViews.delete(v);
       continue;
@@ -328,7 +285,6 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     v.mat.setFade(v.fade, v.target > 0.5, v.fade > 0.001 && v.fade < 0.999);
     if (v.fade === v.target) activeTerrainViews.delete(v);
   }
-  mirrorRootMorphStats(morphStats);
 
   const ringUnbounded = runtimeWorldUsesCameraRelativeCoordinates();
   const canonicalCenter = canonicalWorldCenter(input);

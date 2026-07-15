@@ -6,6 +6,8 @@ Scope: `tools/clod-poc` first, then Rust/Bevy through the same class registry, d
 
 This plan is prescriptive. The implementer must not choose different class ownership, persistence boundaries, placement order, attachment rules, render ownership, stable-ID formulas, or acceptance thresholds.
 
+Cross-plan milestone order and shared contracts live in `fable5-parity-index-and-budget-2026-07-15.md`. DRESS-1 and the persistent-deadfall content vertical slice may proceed independently. DRESS-7 GPU placement waits for VEG-GPU-5, and environment rules that consume `sediment`/`deposition`/`hardness` wait for ERO-6's versioned channel publication.
+
 ## 1. Goal
 
 Add the ecological layers that make Drusniel's terrain and vegetation look like a living environment rather than a terrain surface populated by isolated trees and generic understory.
@@ -188,11 +190,10 @@ Persistent environmental prop ID:
 
 ```text
 stable_id = hash64(
-  world_id,
+  world_seed,
   class_id,
-  cluster_x,
-  cluster_z,
-  candidate_index,
+  global_candidate_cell_x,
+  global_candidate_cell_z,
   generator_schema_version
 )
 ```
@@ -206,36 +207,46 @@ stable_id = hash64(parent_stable_id, class_id, attachment_slot)
 Terrain-attached ID:
 
 ```text
-stable_id = hash64(world_id, class_id, world_cell_x, world_cell_z, candidate_index)
+stable_id = hash64(world_seed, class_id, global_candidate_cell_x,
+                   global_candidate_cell_z, generator_schema_version)
 ```
 
 Camera position, LOD, residency, append order, and frame number are forbidden identity inputs.
+
+All three `hash64` expressions mean the two-word result of Plan 2's shared
+`treePcg2dU32` tuple fold. Persistent and terrain-attached cells use the canonical global
+candidate cell and Plan 2's `class_or_species_id` identity-channel fold. Parent-attached
+IDs use this exact extension:
+
+```text
+seed_hash = treePcg2dU32(bitcast_i32(world_seed),
+                         bitcast_i32(rotl32(world_seed, 16)
+                           ^ generator_schema_version),
+                         DOMAIN_CHANNEL ^ DRESSING)
+domain = seed_hash.x ^ seed_hash.y
+parent_hash = treePcg2dU32(bitcast_i32(parent_id_lo),
+                           bitcast_i32(parent_id_hi), domain)
+ATTACHMENT_ID_CHANNEL = 0x2101u
+attachment_channel = ATTACHMENT_ID_CHANNEL
+                   ^ (class_id * 0x9e3779b9u)
+                   ^ attachment_slot
+stable_id = treePcg2dU32(bitcast_i32(parent_hash.x),
+                         bitcast_i32(parent_hash.y), attachment_channel ^ seed_hash.y)
+```
+
+No ID is truncated to one u32 and `stable_id.ts` delegates to the shared hash module
+rather than implementing another family. Golden vectors include parent IDs whose high
+bit is set and multiple attachment slots.
 
 ## 6. Environmental sampling contract
 
 Every placement decision receives:
 
 ```ts
-export interface DressingEnvironmentSample {
-  readonly positionWs: readonly [number, number, number];
-  readonly normalWs: readonly [number, number, number];
-  readonly materialWeights: readonly [number, number, number, number];
-  readonly hardness: number;
-  readonly sediment: number;
-  readonly deposition: number;
-  readonly moisture: number;
-  readonly waterDepthM: number;
-  readonly shoreDistanceM: number;
-  readonly flowSpeed: number;
-  readonly flowDirection: readonly [number, number];
-  readonly canopyCoverage: number;
-  readonly canopyHeightM: number;
+export interface DressingEnvironmentSample extends VegetationSurfaceSample {
   readonly forestEdge: number;
   readonly sunExposure: number;
-  readonly caveCoverage: number;
   readonly caveMouthFactor: number;
-  readonly structureCoverage: number;
-  readonly terrainValidity: number;
 }
 ```
 
@@ -246,6 +257,11 @@ Source order is identical to GPU vegetation authority:
 3. hydrology channels;
 4. far-summary ecology channels;
 5. save and construction exclusion masks.
+
+`flowSpeed` and `flowDirection` are derived from the base sample's `flow`; they are not
+stored again. On GPU, dressing uses a flattened struct whose prefix is byte-identical to
+Plan 2 and appends only `forestEdge`, `sunExposure`, and `caveMouthFactor` plus padding.
+One canonical terrain sample is evaluated once and feeds both pipelines.
 
 Parent-attached records also receive parent bounds, orientation, species/class, age, health, decay, and authored attachment anchors.
 
@@ -441,6 +457,8 @@ export interface DressingAttachmentAnchor {
 
 Anchors are emitted by the source generator or imported asset metadata. Runtime geometric scanning to invent anchors is forbidden.
 
+Coordination: emitting tree anchors modifies the same grammar builder (`veg_tree_builder`, `veg_skeleton`) that Plan 4 modifies to add per-vertex morphology attributes. Sequence these two edits together — or land Plan 4's MORPH-2 first — so the builder is touched once, not twice with conflicting expectations.
+
 Attachment placement:
 
 1. Transform anchor to world.
@@ -482,6 +500,8 @@ flower_patch: 8 variants
 Near geometry must have real silhouette depth. Mid geometry may use cluster cards. Far geometry uses coverage cards or is omitted when below a two-pixel projected size.
 
 No class generates unique geometry on the gameplay frame path.
+
+Scope note: this section is the single largest labor item across all parity plans — roughly 150 generated meshes (20 families × 4–12 variants) plus the 10 material families in §10. The code is modest; the *content authoring* is not. Treat DRESS-2 as a genuine thin vertical slice (fresh/mossy/rotten logs, stumps, snags only), prove the pipeline end to end, then expand the family set. Do not block DRESS-1's registry/ID work on art.
 
 ## 10. Materials
 
@@ -608,6 +628,12 @@ ecological_dressing:
     driftwood_per_100m: 2
     cave_mouth_ferns_per_100m2: 8
 
+  cosmetic_density_multiplier:
+    ultra: 1.00
+    balanced: 0.75
+    perf: 0.50
+    potato: 0.30
+
   lod:
     persistent: [45, 180, 700]
     parent_attached: [25, 90, 260]
@@ -630,6 +656,12 @@ ecological_dressing:
 ```
 
 Class-specific parameters remain in the registry/config sections and are validated against the canonical class list.
+
+The multiplier applies only to parent-attached and terrain-attached cosmetic acceptance,
+using a stable-ID hash threshold so identities do not reshuffle. Persistent environmental
+props keep identical density and persistence semantics at every quality. Distances and
+accepted-instance capacities come from Plan 2's canonical preset table; this plan must
+not define a second ring.
 
 ## 15. TypeScript module layout
 

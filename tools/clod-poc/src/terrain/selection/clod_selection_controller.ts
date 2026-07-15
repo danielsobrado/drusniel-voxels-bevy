@@ -94,6 +94,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let lastNearFieldForced = 0;
   let lastCrossLodAdjacencyCount = 0;
   let lastRenderedCount = 0;
+  let cutChanged = false;
   let lastRenderedNodes: ClodPageNode[] = [];
   let lastRenderedNodeIds = new Set<string>();
   let currentTerrainViews = new Set<ClodSelectionTerrainView>();
@@ -264,6 +265,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
 
   const update = () => {
     const selectionStart = performance.now();
+    cutChanged = false;
     resetSelectionSubphases(selSub);
     const settings = timeSelectionSubphase(selSub, "settings", () => deps.getSettings());
     const params = timeSelectionSubphase(selSub, "params", () => buildSelectionParams(settings));
@@ -331,6 +333,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     const cutHash = timeSelectionSubphase(selSub, "hash", () => hashRenderedCut(rendered));
     if (cutHash !== lastCutHash) {
       lastCutHash = cutHash;
+      cutChanged = true;
       onCutChanged();
     }
     timeSelectionSubphase(selSub, "commit", () => selectionCutCache.commit({ ...initialCacheInput, debugKey: buildDebugKey(cutHash, settings) }, selectionFrameId));
@@ -355,6 +358,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     selectionMs: lastSelectionMs,
     selectionSource: lastSelectionSource,
     frameId: selectionFrameId,
+    cutChanged,
     subphases: { ...selSub },
     selectionCache: selectionCutCache.stats(),
     cachedFastHits,

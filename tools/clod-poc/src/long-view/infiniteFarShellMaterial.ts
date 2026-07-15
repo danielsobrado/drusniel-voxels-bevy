@@ -39,10 +39,10 @@ export function createInfiniteFarShellMaterial(
 
   const n = normalize(normalGeometry);
   const uLight = uniform(lighting.sunDirection.clone());
-  const uSun = uniform(v3c(lighting.sunColor));
-  const uSky = uniform(v3c(lighting.skyLight));
-  const uGround = uniform(v3c(lighting.groundLight));
-  const uHaze = uniform(v3c(lighting.skyLight));
+  const uSun: TslNode = uniform(v3c(lighting.sunColor));
+  const uSky: TslNode = uniform(v3c(lighting.skyLight));
+  const uGround: TslNode = uniform(v3c(lighting.groundLight));
+  const uHaze: TslNode = uniform(v3c(lighting.skyLight));
   const uInner = float(innerMeters);
   const uOuter = float(outerMeters);
   const uNearBlend = float(nearBlendMeters);

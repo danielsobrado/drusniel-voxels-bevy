@@ -31,7 +31,7 @@ export async function createPhase0StorageInstances(
 ): Promise<Phase0StorageInstances> {
   const offsets = instancedArray(count, "vec4");
   const colors = instancedArray(count, "vec4");
-  const seedU = uniform(seed % 100000);
+  const seedU = uniform(seed % 100000, "uint");
 
   const fill = Fn(() => {
     const i = instanceIndex;

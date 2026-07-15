@@ -6,6 +6,8 @@ Scope: `tools/clod-poc` first, then Rust/Bevy using the same deterministic morph
 
 This plan is prescriptive. The implementer must not choose a different parameter set, packing scheme, deformation order, age buckets, impostor representation, identity rule, or fallback policy.
 
+Cross-plan build order and shared contracts live in `fable5-parity-index-and-budget-2026-07-15.md`. This plan sits on top of Plan 2 (its GPU stage generates morphology during candidate acceptance) and reuses the shared `tree_pcg2d` hash; read the budget doc before implementing.
+
 ## 1. Goal
 
 Eliminate visible cloned-tree repetition while preserving Drusniel's existing procedural grammar, four structural variants per species, GPU ring rendering, hierarchical wind, per-cascade shadows, crown proxies, octahedral impostors, canonical terrain placement, voxel edits, and deterministic world identity.
@@ -30,7 +32,7 @@ Variation is instance data, not unique runtime mesh generation. Existing structu
 Every tree is identified by:
 
 ```text
-tree_id = stableHash(world_id, species, world_cell_x, world_cell_z, candidate_index)
+tree_id = [stable_id_hi, stable_id_lo] from Plan 2's canonical world-cell tuple
 ```
 
 Morphology values are derived only from:
@@ -56,14 +58,19 @@ They must not depend on:
 - save/load order;
 - platform-specific random generators.
 
-The same tree must produce the same morphology in CPU oracle, GPU ring, CLOD-POC, Bevy, save reload, and impostor selection.
+The full two-word ID is carried in Plan 2's 48-byte instance prefix. `hash01` and
+`hashSigned` below call the shared `treePcg2dU32` channel fold; they do not truncate the
+ID or introduce another hash. The same tree must produce the same morphology in CPU
+oracle, GPU ring, CLOD-POC, Bevy, save reload, and impostor selection.
 
 ## 3. Fixed morphology parameters
+
+Naming: this per-instance variation type is `TreeInstanceMorphology`, deliberately distinct from the existing `TreeMorphology` in `tree_morphology.ts`, which already means the *grown branch/leaf/crown skeleton*. Do not reuse the `TreeMorphology` name; the two types coexist (skeleton vs per-instance deformation) and conflating them breaks both.
 
 Extend every tree instance with exactly these values:
 
 ```ts
-export interface TreeMorphology {
+export interface TreeInstanceMorphology {
   age01: number;
   leanX: number;
   leanZ: number;
@@ -101,21 +108,34 @@ The values are clamped before packing and again after unpacking in WGSL.
 Create one pure function:
 
 ```ts
-export function deriveTreeMorphology(
+export function deriveTreeInstanceMorphology(
   identity: TreeIdentity,
   species: TreeSpeciesId,
   terrain: TreeTerrainSample,
   ecology: TreeEcologySample,
   competition: TreeCompetitionSample,
-): TreeMorphology;
+): TreeInstanceMorphology;
 ```
 
 Use these exact derivation rules.
 
+The morphology channels extend Plan 2's shared numeric registry:
+
+```text
+MORPH_AGE_CHANNEL=0x1101, MORPH_LEAN_CHANNEL=0x1102,
+MORPH_CROWN_BIAS_CHANNEL=0x1103, MORPH_WIDTH_CHANNEL=0x1104,
+MORPH_FLAT_CHANNEL=0x1105, MORPH_DROOP_CHANNEL=0x1106,
+MORPH_HEALTH_CHANNEL=0x1107, MORPH_FLARE_CHANNEL=0x1108,
+MORPH_FOLIAGE_CARD_CHANNEL=0x1109
+```
+
+Each `hash01`/`hashSigned` treats `tree_id_lo/hi` as the two bitcast cell words and
+calls the shared PCG tuple fold with the named channel. No local random helper is allowed.
+
 ### 4.1 Age
 
 ```text
-base = hash01(tree_id, AGE_CHANNEL)
+base = hash01(tree_id, MORPH_AGE_CHANNEL)
 old_forest = ecology.oldForestBias
 competition_penalty = competition.crownPressure * 0.18
 age01 = clamp(0.10 + base * 0.78 + old_forest * 0.22 - competition_penalty, 0, 1)
@@ -128,7 +148,7 @@ Lean combines slope, prevailing wind, and deterministic asymmetry:
 ```text
 slope_dir = normalized horizontal downhill direction
 wind_dir = normalized configured prevailing wind direction
-random_dir = unit vector from hash angle
+random_dir = unit vector from hash angle using MORPH_LEAN_CHANNEL
 
 lean_vector =
     slope_dir * terrain.slope01 * species.slopeLean
@@ -144,7 +164,7 @@ clamp vector length to 0.22
 
 ```text
 light_dir = competition.openLightDirectionXZ
-random_dir = hash unit vector
+random_dir = hash unit vector using MORPH_CROWN_BIAS_CHANNEL
 bias = light_dir * competition.directionalPressure * 0.28
      + random_dir * 0.07
 clamp vector length to 0.35
@@ -157,7 +177,7 @@ crownWidth = clamp(
   0.88
   + age01 * 0.20
   - competition.crownPressure * 0.12
-  + hashSigned(tree_id, WIDTH_CHANNEL) * 0.08,
+  + hashSigned(tree_id, MORPH_WIDTH_CHANNEL) * 0.08,
   0.82,
   1.18
 )
@@ -166,7 +186,7 @@ crownFlattening = clamp(
   1.00
   - terrain.exposure01 * species.exposureFlattening
   + age01 * species.ageFlattening
-  + hashSigned(tree_id, FLAT_CHANNEL) * 0.06,
+  + hashSigned(tree_id, MORPH_FLAT_CHANNEL) * 0.06,
   0.82,
   1.20
 )
@@ -179,7 +199,7 @@ branchDroop = clamp(
   species.baseDroop
   + age01 * species.ageDroop
   + ecology.moisture * species.moistureDroop
-  + hashSigned(tree_id, DROOP_CHANNEL) * 0.08,
+  + hashSigned(tree_id, MORPH_DROOP_CHANNEL) * 0.08,
   -0.18,
   0.32
 )
@@ -190,7 +210,7 @@ health01 = clamp(
   + ecology.temperatureSuitability * 0.14
   - competition.crownPressure * 0.18
   - ecology.stress * 0.32
-  + hashSigned(tree_id, HEALTH_CHANNEL) * 0.10,
+  + hashSigned(tree_id, MORPH_HEALTH_CHANNEL) * 0.10,
   0,
   1
 )
@@ -208,7 +228,7 @@ rootFlare = clamp(
   0.85
   + age01 * 0.28
   + terrain.exposedRootPotential * 0.18
-  + hashSigned(tree_id, FLARE_CHANNEL) * 0.08,
+  + hashSigned(tree_id, MORPH_FLARE_CHANNEL) * 0.08,
   0.75,
   1.35
 )
@@ -225,7 +245,7 @@ stiffness = clamp(
 
 ## 5. Species configuration
 
-Extend each species entry in `tools/clod-poc/config/trees.yaml` with:
+Each species entry in `tools/clod-poc/config/trees.yaml` already has a `morphology:` block that configures the structural grammar (the grown skeleton). This plan adds a **separate** `morphology_runtime:` block for per-instance deformation; the two blocks are distinct and must not be merged. Extend each species entry with:
 
 ```yaml
 morphology_runtime:
@@ -281,7 +301,7 @@ Unknown keys fail config parsing.
 Store morphology in three `vec4<f32>` values:
 
 ```wgsl
-struct TreeMorphologyGpu {
+struct TreeInstanceMorphologyGpu {
     morphology0: vec4<f32>, // age, leanX, leanZ, health
     morphology1: vec4<f32>, // crownBiasX, crownBiasZ, crownWidth, crownFlattening
     morphology2: vec4<f32>, // branchDroop, foliageDensity, rootFlare, stiffness
@@ -297,6 +317,11 @@ This layout is used by:
 - near/far/impostor render materials;
 - save/debug exports;
 - Bevy instance extraction.
+
+In the canonical Plan 2 storage layout these vectors immediately follow the shared
+48-byte transform/identity prefix, producing one 96-byte
+`VegetationTreeInstance`. There is no competing 80-byte tree record or separate
+morphology side buffer.
 
 Do not repack values into normalized integers in this phase. The extra 48 bytes per tree is accepted to keep parity and debugging exact. Compression may be considered only after measured memory pressure and is outside this plan.
 
@@ -437,7 +462,9 @@ The shader computes:
 
 ```text
 keep_threshold = foliageDensity * mix(0.72, 1.0, health01)
-keep = hash(tree_id, branch_phase, card_corner_identity) <= keep_threshold
+branch_phase_u24 = round(treeBranchPhase * 16777216)
+card_channel = MORPH_FOLIAGE_CARD_CHANNEL ^ branch_phase_u24 ^ card_corner_identity
+keep = hash01(tree_id, card_channel) <= keep_threshold
 ```
 
 The mask is world/tree anchored and identical in camera and shadow passes.
@@ -519,6 +546,19 @@ old:    age01 = 0.92
 
 Each layer contains the existing `8 x 8` hemi-octahedral view grid.
 
+Tile resolution is bound to the canonical quality token:
+
+| `quality` | tile px | full 8 x 8 layer | worst-case two-channel runtime bytes, 6 species x 12 layers |
+|---|---:|---:|---:|
+| `ultra` | 96 | 768 x 768 | 324 MiB |
+| `balanced` | 64 | 512 x 512 | 144 MiB |
+| `perf` | 48 | 384 x 384 | 81 MiB |
+| `potato` | 32 | 256 x 256 | 36 MiB |
+
+The byte column assumes two uncompressed RGBA8 channels and is therefore the portable
+fallback, not a compression claim. MORPH-7 records actual uploaded texture bytes and
+must remain within the selected row even when compressed texture support differs.
+
 Channels:
 
 ```text
@@ -584,7 +624,7 @@ tools/clod-poc/src/trees/tree_geometry_types.ts
 tools/clod-poc/src/trees/tree_config_types.ts
 tools/clod-poc/src/trees/tree_config_parsing.ts
 tools/clod-poc/src/trees/tree_node_material.ts
-tools/clod-poc/src/trees/tree_ring.compute.wgsl
+tools/clod-poc/src/gpu/shaders/tree_ring.compute.wgsl
 tools/clod-poc/src/trees/tree_ring_impostor_node_material.ts
 tools/clod-poc/src/trees/tree_crown_proxy_math.ts
 ```
@@ -606,6 +646,8 @@ tools/clod-poc/src/trees/morphology/
 ```
 
 `derive.ts` is the only production CPU implementation of morphology formulas. GPU formulas mirror it through `morphology.wgsl` and parity tests.
+
+The existing `src/trees/tree_morphology.ts` (structural skeleton) is unrelated to this new `src/trees/morphology/` directory (per-instance variation). Keep them separate; do not move skeleton code into the new directory or vice versa.
 
 ## 14. Rust/Bevy module layout
 
@@ -666,6 +708,8 @@ Exit gate: every leafy species/variant/LOD contains valid nonzero attribute rang
 Exit gate: CPU reference deformation and sampled GPU vertices agree within 1 mm.
 
 ### MORPH-4 — GPU generation integration
+
+Depends on Plan 2 (GPU vegetation authority): morphology is generated inside that plan's candidate-acceptance compute pass, so MORPH-4 cannot start until Plan 2's acceptance stage (VEG-GPU-5) exists. MORPH-1..3 can proceed on the existing tree ring beforehand.
 
 - Generate morphology during candidate acceptance.
 - Pack into visible and shadow instance records.
@@ -796,11 +840,14 @@ additional GPU tree render cost <= 0.40 ms p95
 additional GPU shadow cost <= 0.30 ms p95
 normal gameplay readbacks = 0
 instance morphology storage <= 48 bytes per tree
-impostor texture-array VRAM <= 384 MiB at configured resolution and compression
+impostor texture-array VRAM <= selected preset allocation (324/144/81/36 MiB)
 frame p95 regression <= 5%
 ```
 
-Texture arrays must use KTX2/Basis compression in the persisted Bevy asset bundle. Browser bake intermediates may use uncompressed render targets, but exported/runtime textures must be compressed.
+Texture arrays must use KTX2/Basis compression in the persisted Bevy asset bundle.
+Compression on disk is not reported as VRAM saved: the runtime reports the actual
+uploaded format and byte count. Browser bake intermediates and an uncompressed runtime
+fallback must still fit the preset's worst-case allocation above.
 
 ## 20. Visual gates
 

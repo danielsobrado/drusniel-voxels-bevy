@@ -6,6 +6,8 @@ Scope: `tools/clod-poc` first, then Rust/Bevy through the same probe data model 
 
 This document is prescriptive. The implementer must not select a different GI architecture, cascade count, probe format, update policy, visibility source order, fallback behavior, or temporal policy.
 
+Cross-plan build order and the reconciled frame budget live in `fable5-parity-index-and-budget-2026-07-15.md`. Probe GI is a material dependency (its `sample_probe_gi()` is consumed by Plans 2/4/5) rather than a pipeline dependency, and it is the largest single GPU line item. Its compute passes receive zero assumed overlap credit.
+
 ## 1. Goal
 
 Add stable world-space indirect diffuse lighting that improves forests, valleys, cave entrances, cliffs, water margins, CLOD transitions, and off-screen bounce while preserving Drusniel's voxel terrain, editable caves, existing raster renderer, Hillaire atmosphere, froxel fog, direct shadows, materials, and post-processing.
@@ -139,9 +141,11 @@ Each probe update traces 16 deterministic jittered Fibonacci-sphere directions.
 
 ```yaml
 probe_gi:
-  rays_per_probe: 16
-  probes_per_frame: 256
-  probes_per_frame_after_lighting_change: 1024
+  quality_presets:
+    ultra:    { rays_per_probe: 16, probes_per_frame: 384, boosted_probes_per_frame: 1536 }
+    balanced: { rays_per_probe: 16, probes_per_frame: 256, boosted_probes_per_frame: 1024 }
+    perf:     { rays_per_probe: 8,  probes_per_frame: 192, boosted_probes_per_frame: 768 }
+    potato:   { rays_per_probe: 8,  probes_per_frame: 128, boosted_probes_per_frame: 512 }
   lighting_change_boost_frames: 16
   history_blend: 0.18
   boosted_history_blend: 0.55
@@ -159,6 +163,11 @@ The update scheduler uses this fixed priority:
 6. Far cascade refresh.
 
 Within a priority group, use ascending stable probe ID.
+
+Near-cascade probes are eligible every frame, mid-cascade probes every two frames, and
+far-cascade probes every four. This affects which probes consume the selected preset's
+global quota; it does not reduce that quota while eligible work is backlogged. Report
+actual dispatched probes by cascade. Do not book a percentage saving from cadence alone.
 
 ## 6. Trace footprint and LOD
 
@@ -299,7 +308,24 @@ Small props, grass blades, leaves, particles, and water droplets do not receive 
 
 ## 11. Sampling in materials
 
-Create one shared function:
+Expose one logical sampler with target-native implementations:
+
+```text
+CLOD-POC TSL: sampleProbeGiNode(positionWorld, normalWorld) -> TslNode<vec3>
+Bevy WGSL:    sample_probe_gi(position_ws, normal_ws) -> vec3<f32>
+```
+
+The CLOD-POC implementation lives only in
+`tools/clod-poc/src/lighting/probe_gi/material_sampling_node.ts` and builds the complete
+cascade selection, safety margin, trilinear texture sampling, cascade blend, SH
+evaluation, and non-negative clamp with TSL nodes. Do not inject raw WGSL with
+`wgslFn`, do not use `onBeforeCompile`, and do not duplicate this math in individual
+materials. The Bevy implementation lives only in `assets/shaders/probe_gi/sample.wgsl`.
+Both are checked against `sample_reference.ts` golden samples; "one implementation"
+means one callable sampler per target plus cross-target parity, not source-string reuse
+between TSL and WGSL.
+
+The Bevy signature is:
 
 ```wgsl
 fn sample_probe_gi(position_ws: vec3<f32>, normal_ws: vec3<f32>) -> vec3<f32>
@@ -314,7 +340,7 @@ Sampling rules:
 5. Clamp negative irradiance to zero.
 6. Multiply by material diffuse albedo outside the function.
 
-The same function must be used by:
+The same target-native sampler must be used by:
 
 - terrain;
 - CLOD pages;
@@ -326,6 +352,41 @@ The same function must be used by:
 - project props;
 - construction;
 - characters where their material path supports custom irradiance.
+
+PGI-7 uses two fixed adapters:
+
+1. Existing manually lit `MeshBasicNodeMaterial` builders call
+   `sampleProbeGiNode(positionWorld, transformedNormalWorld)`, multiply the returned
+   irradiance by diffuse albedo, and replace their hemispheric ambient term before
+   assigning `colorNode`. This applies to terrain, far terrain/CLOD, trees including
+   far and impostor materials, grass, understory, stones, and GPU-ring props.
+2. Construction replaces its WebGPU `MeshStandardMaterial` with
+   `ProbeGiStandardNodeMaterial`, a single subclass of `MeshStandardNodeMaterial`.
+   It overrides `setupLightMap(builder)` to return Three's
+   `IrradianceNode(sampleProbeGiNode(positionWorld, transformedNormalWorld))`. The
+   physical lighting model therefore consumes probe irradiance through
+   `indirectDiffuse`; direct and specular lighting remain unchanged. No `lightsNode`
+   replacement or emissive workaround is allowed.
+
+The mandatory CLOD-POC integration manifest lists these builders and fails tests when a
+listed material omits the shared adapter:
+
+```text
+src/gpu/terrain_node_material.ts
+src/terrain/far_clipmap/far_clipmap_material.ts
+src/farTerrain/farTerrainMaterial.ts
+src/trees/tree_node_material.ts
+src/trees/tree_ring_far_node_material.ts
+src/trees/tree_ring_impostor_node_material.ts
+src/gpu/grass_node_material.ts
+src/understory/understory_node_material.ts
+src/gpu/stone_node_material.ts
+src/props/prop_gpu_ring_material.ts
+src/construction/materials.ts
+```
+
+Characters remain explicitly `NOT_APPLICABLE` in CLOD-POC until a character material
+builder exists; the Bevy character adapter is required when that target reaches PGI-7.
 
 The existing hemispheric ambient becomes a low fallback floor only:
 
@@ -359,9 +420,11 @@ Create `tools/clod-poc/config/probe_gi.yaml`:
 probe_gi:
   schema_version: 1
   enabled: true
-  rays_per_probe: 16
-  probes_per_frame: 256
-  probes_per_frame_after_lighting_change: 1024
+  quality_presets:
+    ultra:    { rays_per_probe: 16, probes_per_frame: 384, boosted_probes_per_frame: 1536 }
+    balanced: { rays_per_probe: 16, probes_per_frame: 256, boosted_probes_per_frame: 1024 }
+    perf:     { rays_per_probe: 8,  probes_per_frame: 192, boosted_probes_per_frame: 768 }
+    potato:   { rays_per_probe: 8,  probes_per_frame: 128, boosted_probes_per_frame: 512 }
   lighting_change_boost_frames: 16
   history_blend: 0.18
   boosted_history_blend: 0.55
@@ -428,6 +491,10 @@ tools/clod-poc/src/lighting/probe_gi/
   proxy_store.ts
   proxy_upload.ts
   material_bindings.ts
+  material_sampling_node.ts
+  probe_gi_standard_node_material.ts
+  material_integration_manifest.ts
+  sample_reference.ts
   diagnostics.ts
   validation.ts
   integration.ts
@@ -457,6 +524,9 @@ Rules:
 - `proxy_store.ts` owns proxy identity and revisions.
 - materials receive only published textures, cascade uniforms, and the shared sampling module.
 - no material implements its own probe selection logic.
+- published SH textures are double-buffered: compute writes the next set while raster
+  samples the last completed set, then swaps only at a frame boundary after completion.
+  Same-frame producer/consumer publication is forbidden.
 
 ## 15. Rust/Bevy module layout
 
@@ -536,10 +606,12 @@ Exit gate: movement and edits converge without full-volume rebuild spikes.
 
 ### PGI-7 — Material integration
 
-- Integrate terrain, CLOD, trees, impostors, grass, understory, stones, props, and construction.
+- Implement the one TSL sampler, standard-node-material subclass, and integration manifest above.
+- Integrate every listed builder; migrate construction to `MeshStandardNodeMaterial`.
 - Reduce hemispheric ambient and cap screen-space bounce.
 
-Exit gate: all material classes use the same sampling function and maintain LOD exposure parity.
+Exit gate: the integration-manifest test proves every material class calls one of the two
+fixed adapters, TSL/CPU golden samples pass, and LOD exposure parity is maintained.
 
 ### PGI-8 — Default flip
 
@@ -635,15 +707,22 @@ canopy extinction
 At 1440p target desktop:
 
 ```text
-probe GI total GPU p95 <= 3.0 ms
-normal update budget = 256 probes/frame
-boosted update budget = 1024 probes/frame for <= 16 frames
+probe GI total GPU p95 <= 3.0 ms at balanced
+normal update quota = 256 probes/frame at balanced
+boosted update quota = 1024 probes/frame for <= 16 frames at balanced
 main-thread p95 <= 0.5 ms
 proxy upload amortized <= 256 KiB/frame
 probe storage and textures <= 16 MiB
 no synchronous readback during gameplay
 movement max frame regression <= 3 ms
 ```
+
+The 3.0 ms figure is a design-stage pass allocation, not a predicted frame delta.
+WebGPU's ordered queue provides no schedulable async-compute guarantee, so trace,
+relocation, publish, and material sampling receive zero overlap credit. The N-1 published
+texture removes a same-frame data dependency, but only the GI-on versus GI-off harness
+delta may establish realized frame cost. Preset rays/update quotas are the reliable cost
+knob; all presets keep the three-cascade spatial architecture.
 
 ## 21. Visual gates
 

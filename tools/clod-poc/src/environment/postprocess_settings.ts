@@ -98,7 +98,7 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   fxaaEnabled: true,
   fxaaEdgeThreshold: 0.125,
   fxaaSubpixelBlend: 0.75,
-  taaEnabled: false,
+  taaEnabled: true,
   taaHistoryWeight: 0.88,
   taaDepthThreshold: 0.0025,
   taaSharpen: 0.06,

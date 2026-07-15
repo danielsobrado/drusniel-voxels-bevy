@@ -25,7 +25,7 @@ export async function createPhase0StorageTexture(
   seed: number,
 ): Promise<StorageTexture> {
   const storageTexture = new StorageTexture(size, size);
-  const seedU = uniform(seed % 100000);
+  const seedU = uniform(seed % 100000, "uint");
   const writeTexture = Fn(() => {
     const i = instanceIndex;
     const x = i.mod(size);

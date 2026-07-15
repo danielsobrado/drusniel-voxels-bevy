@@ -9,12 +9,16 @@
 | Branch | TODO |
 | Browser | TODO |
 | Browser version | TODO |
+| Chrome major | TODO |
 | OS | TODO |
 | GPU | TODO |
+| GPU vendor/device/backend | TODO |
+| Driver | TODO |
 | CPU | TODO |
 | RAM | TODO |
-| Window size | TODO |
-| Render scale | TODO |
+| Viewport | `2560 x 1440` |
+| Device pixel ratio | `1` |
+| Render resolution preset | `high` |
 | WebGPU enabled | TODO |
 | Notes | TODO |
 
@@ -30,42 +34,46 @@ Use one fixed dense-forest view for all captures.
 | Biome / area | TODO |
 | Time of day / lighting | TODO |
 | Weather / postprocess state | TODO |
-| Capture duration per run | TODO |
-| Runs per URL | 3 |
-| Recorded value | Median |
+| World | `8` |
+| Scene | `trees-perf` |
+| Warmup frames | `600` |
+| Measured frames | `300` |
+| Runs per profile | 3 |
+| Recorded value | Median of run-level p95s |
 
 ## Preflight Checks
 
 Run before measuring:
 
-```bash
-cd tools/clod-poc
-npm run typecheck
-npm test
-npm run build
+```powershell
+npm --prefix tools/clod-poc run typecheck
+npm --prefix tools/clod-poc test
+npm --prefix tools/clod-poc run build
 ```
 
 Browser checks:
 
-- Open DevTools console.
-- Confirm no shader compile errors.
-- Confirm no WebGPU initialization errors.
-- Confirm the overlay or lil-gui tree summary is visible.
-- Confirm camera and scene are stable before recording.
-- Use `trees (props) > log perf snapshot` after each run.
-- Paste the `Capture Table Row` line into the matching table when it has the same columns.
-- Paste the full console output into `Snapshot Blocks` when you need complete settings.
+- Start Vite directly with `npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort`.
+- Confirm no shader or WebGPU initialization errors.
+- Confirm every timing summary records `gpu-ring`, the fixed scene/profile, 600 warmup
+  frames, at least 300 measured frames, and all debug/readback flags false.
+- Manual overlay/log snapshots belong only in the diagnostic sections below.
 
 ## Primary Preset Results
 
-Use these runs to compare real user-facing preset cost. Keep debug readback off.
+Use the deterministic perf harness. Keep debug readback off. Repeat this command shape
+three times per quality, changing only `quality`, run suffix, and output directory:
 
-| URL | Runtime path | FPS | Frame ms | Total / counts | LOD n/m/f/i | Visual notes |
-|---|---|---:|---:|---|---|---|
-| `?quality=ultra&treeGpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=balanced&treeGpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=perf&treeGpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=potato&treeGpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
+```powershell
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 8 --warmup 600 --frames 300 --case tree-gpu-ring --params scene=trees-perf,quality=balanced --out perf-runs/tree-balanced-1"
+```
+
+| Quality | `summary.json` paths | Path | frame p50 ms | frame p95 ms | render p95 ms | Top phase/prop | LOD n/m/f/i | Triangles/rendered | Notes |
+|---|---|---|---:|---:|---:|---|---|---|---|
+| `ultra` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| `balanced` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| `perf` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| `potato` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
 
 Expected:
 
@@ -76,16 +84,18 @@ Expected:
 
 ## Debug Count Results
 
-Use these runs only for measurement detail. These are not normal gameplay settings because they enable readback.
+Use these runs only for diagnostic detail after all measured windows finish. They enable
+readback and cannot support performance claims. FPS/frame columns are intentionally
+absent.
 
 The `Capture Table Row` from the console matches this table shape.
 
-| URL | Runtime path | FPS | Frame ms | Dispatch ms | Candidates | Accepted | Visible | Shadow casters | Shadow overflow | Notes |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| `?quality=ultra&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=balanced&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=perf&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=potato&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| URL | Runtime path | Dispatch ms (diagnostic) | Candidates | Accepted | Visible | Shadow casters | Shadow overflow | Notes |
+|---|---|---:|---:|---:|---:|---:|---|---|
+| `?quality=ultra&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| `?quality=balanced&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| `?quality=perf&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| `?quality=potato&treeGpu=1&treeGpuCounts=1` | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
 
 Expected:
 
@@ -97,12 +107,12 @@ Expected:
 
 Use these to prove the switch paths work and to compare GPU ring versus CPU patches.
 
-| URL | Runtime path | FPS | Frame ms | Total / counts | LOD n/m/f/i | Notes |
-|---|---|---:|---:|---|---|---|
-| `?quality=perf&treeGpu=0` | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=perf&treeGpuForceCpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=perf&treeGpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=perf&treeGpuStrict=1` | TODO | TODO | TODO | TODO | TODO | Should fail loud instead of CPU fallback if GPU trees cannot run. |
+| URL | Runtime path | Total / counts | LOD n/m/f/i | Notes |
+|---|---|---|---|---|
+| `?quality=perf&treeGpu=0` | TODO | TODO | TODO | TODO |
+| `?quality=perf&treeGpuForceCpu=1` | TODO | TODO | TODO | TODO |
+| `?quality=perf&treeGpu=1` | TODO | TODO | TODO | TODO |
+| `?quality=perf&treeGpuStrict=1` | TODO | TODO | TODO | Should fail loud instead of CPU fallback if GPU trees cannot run. |
 
 Expected:
 
@@ -117,12 +127,12 @@ Use these to prove `treeShadowMaxLod` changes the GPU shadow workload.
 
 The `Capture Table Row` from the console also works here. Ignore the accepted/visible columns if you only care about shadow cost.
 
-| URL | Runtime path | FPS | Frame ms | Dispatch ms | Shadow casters | Shadow overflow | Visual shadow notes |
-|---|---|---:|---:|---:|---:|---|---|
-| `?quality=perf&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=none` | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=perf&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=near` | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=balanced&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=mid` | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| `?quality=ultra&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=far` | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+| URL | Runtime path | Dispatch ms (diagnostic) | Shadow casters | Shadow overflow | Visual shadow notes |
+|---|---|---:|---:|---|---|
+| `?quality=perf&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=none` | TODO | TODO | TODO | TODO | TODO |
+| `?quality=perf&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=near` | TODO | TODO | TODO | TODO | TODO |
+| `?quality=balanced&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=mid` | TODO | TODO | TODO | TODO | TODO |
+| `?quality=ultra&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=far` | TODO | TODO | TODO | TODO | TODO |
 
 Expected:
 
@@ -135,9 +145,9 @@ Expected:
 
 Use this only after the normal GPU path works. Validation enables readback and may affect performance.
 
-| URL | Runtime path | Console warnings | FPS | Frame ms | Notes |
-|---|---|---|---:|---:|---|
-| `?quality=perf&treeGpu=1&treeGpuValidate=1` | TODO | TODO | TODO | TODO | TODO |
+| URL | Runtime path | Console warnings | Notes |
+|---|---|---|---|
+| `?quality=perf&treeGpu=1&treeGpuValidate=1` | TODO | TODO | TODO |
 
 Expected:
 
@@ -163,7 +173,7 @@ TODO
 | Question | Result |
 |---|---|
 | Is the WebGPU tree path active? | TODO |
-| Does `perf` materially improve frame time over `ultra`? | TODO |
+| Does `perf` materially improve harness frame p95 over `ultra`? | TODO |
 | Does `potato` provide the cheapest safe path? | TODO |
 | Does CPU fallback still work? | TODO |
 | Does strict GPU mode fail loud instead of using CPU fallback? | TODO |
