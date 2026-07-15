@@ -25,6 +25,17 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   } = input;
 
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
+  const cpuOracleEnabled = enabledFlag(searchParams?.get("gpuEarlyReject"));
+  const treeAuthorityConfig = {
+    ...treeConfig,
+    gpu: {
+      ...treeConfig.gpu,
+      terrainVisibility: {
+        ...treeConfig.gpu.terrainVisibility,
+        enabled: cpuOracleEnabled,
+      },
+    },
+  };
   refreshVegetationAuthorityHeightfieldMask();
 
   // Streaming hydrology atlas (Phase 4b): must exist before any ring compute is created
@@ -50,7 +61,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   });
 
   const tree = runTreeStartup({
-    scene, state, lod0Nodes, worldCells, treeConfig,
+    scene, state, lod0Nodes, worldCells, treeConfig: treeAuthorityConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     terrainOcclusionSampler,
     currentLighting, statControllers, renderer: app.renderer,
@@ -72,4 +83,8 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
     formatTreeGpuSummary: tree.formatTreeGpuSummary,
     formatUnderstoryGpuSummary: understory.formatUnderstoryGpuSummary,
   };
+}
+
+function enabledFlag(value: string | null | undefined): boolean {
+  return value === "1" || value === "true" || value === "on";
 }
