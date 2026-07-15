@@ -1,6 +1,8 @@
 import { TERRAIN_SOURCE_VERSION } from "../cache/terrainSource.js";
 import type { WorldMode, WorldModeConfig } from "../app/world_mode.js";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
+import { getLatestErosionArtifactRef } from "./erosion/integration.js";
+import type { ErosionArtifactRef } from "./erosion/types.js";
 
 export interface WorldArtifactRef {
   readonly id: string;
@@ -20,6 +22,7 @@ export interface WorldManifest {
     readonly cells: number;
   };
   readonly artifacts: {
+    readonly erosion?: ErosionArtifactRef;
     readonly hydrologyGraph?: WorldArtifactRef;
     readonly macroFields?: WorldArtifactRef;
   };
@@ -49,8 +52,10 @@ function manifestSizeM(worldMode: WorldModeConfig): { x: number; z: number } | n
 export function buildWorldManifest(input: BuildWorldManifestInput): WorldManifest {
   if (!input.terrainSourceHash) throw new Error("terrainSourceHash is required");
   const seed = input.terrainFieldConfig.seed;
+  const worldId = input.worldId ?? `ephemeral:${seed}`;
+  const erosion = getLatestErosionArtifactRef(worldId);
   return Object.freeze({
-    worldId: input.worldId ?? `ephemeral:${seed}`,
+    worldId,
     seed,
     generatorVersion: input.generatorVersion ?? TERRAIN_SOURCE_VERSION,
     terrainSourceHash: input.terrainSourceHash,
@@ -61,7 +66,7 @@ export function buildWorldManifest(input: BuildWorldManifestInput): WorldManifes
       pages: input.worldMode.startupWorldPages,
       cells: input.worldMode.startupWorldCells,
     }),
-    artifacts: Object.freeze({}),
+    artifacts: Object.freeze({ ...(erosion ? { erosion } : {}) }),
   });
 }
 

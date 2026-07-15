@@ -1,3 +1,4 @@
+import { sampleActiveErosionMaterialChannels } from "../world/erosion/integration.js";
 import type { MaterialId, MaterialWeights, TerrainMaterialInput, TerrainMaterialSample } from "./terrainMaterialTypes.js";
 import { deterministicNoise2 } from "./macroTerrain.js";
 
@@ -18,10 +19,10 @@ const MATERIAL_ROUGHNESS: Record<MaterialId, number> = {
   snow: 0.65,
 };
 
-function smoothstep(edge0: number, edge1: number, v: number): number {
+function smoothstep(edge0: number, edge1: number, value: number): number {
   const range = edge1 - edge0;
-  const denom = Math.abs(range) < EPSILON ? EPSILON : range;
-  const t = Math.min(1, Math.max(0, (v - edge0) / denom));
+  const denominator = Math.abs(range) < EPSILON ? EPSILON : range;
+  const t = Math.min(1, Math.max(0, (value - edge0) / denominator));
   return t * t * (3 - 2 * t);
 }
 
@@ -46,9 +47,12 @@ function dominantMaterial(weights: MaterialWeights): MaterialId {
     ["snow", weights.snow],
   ];
   let best: MaterialId = "grass";
-  let bestW = -1;
-  for (const [id, w] of entries) {
-    if (w > bestW) { best = id; bestW = w; }
+  let bestWeight = -1;
+  for (const [id, weight] of entries) {
+    if (weight > bestWeight) {
+      best = id;
+      bestWeight = weight;
+    }
   }
   return best;
 }
@@ -57,7 +61,7 @@ function blendColor(
   weights: MaterialWeights,
   colors: Record<MaterialId, [number, number, number]>,
 ): [number, number, number] {
-  const c: [number, number, number] = [0, 0, 0];
+  const color: [number, number, number] = [0, 0, 0];
   const entries: [MaterialId, number][] = [
     ["sand", weights.sand],
     ["grass", weights.grass],
@@ -65,14 +69,14 @@ function blendColor(
     ["rock", weights.rock],
     ["snow", weights.snow],
   ];
-  for (const [id, w] of entries) {
-    if (w <= 0) continue;
-    const col = colors[id];
-    c[0] += col[0] * w;
-    c[1] += col[1] * w;
-    c[2] += col[2] * w;
+  for (const [id, weight] of entries) {
+    if (weight <= 0) continue;
+    const materialColor = colors[id];
+    color[0] += materialColor[0] * weight;
+    color[1] += materialColor[1] * weight;
+    color[2] += materialColor[2] * weight;
   }
-  return c;
+  return color;
 }
 
 function blendRoughness(weights: MaterialWeights): number {
@@ -83,112 +87,110 @@ function blendRoughness(weights: MaterialWeights): number {
     ["rock", weights.rock],
     ["snow", weights.snow],
   ];
-  let r = 0;
-  for (const [id, w] of entries) {
-    if (w > 0) r += MATERIAL_ROUGHNESS[id] * w;
-  }
-  return Math.min(1, Math.max(0, r));
+  let roughness = 0;
+  for (const [id, weight] of entries) if (weight > 0) roughness += MATERIAL_ROUGHNESS[id] * weight;
+  return Math.min(1, Math.max(0, roughness));
+}
+
+function applyErosionMaterialBias(input: TerrainMaterialInput, weights: MaterialWeights): MaterialWeights {
+  const channels = sampleActiveErosionMaterialChannels(input.worldX, input.worldZ);
+  if (!channels) return weights;
+  const deposited = Math.min(1, Math.max(0, channels.netDepositionM / 0.5));
+  const eroded = Math.min(1, Math.max(0, -channels.netDepositionM / 0.35));
+  const sediment = Math.min(1, channels.sedimentDepthM / 0.35);
+  const hardRock = smoothstep(0.55, 0.9, channels.hardness01);
+  const softGround = 1 - smoothstep(0.25, 0.6, channels.hardness01);
+  const nearWater = Math.max(0, 1 - Math.abs(input.height - input.waterLevel) / 12);
+  return {
+    sand: Math.max(0, weights.sand + deposited * nearWater * 0.8 + sediment * nearWater * 0.35),
+    grass: Math.max(0, weights.grass * (1 - eroded * 0.75) + channels.wetnessSeed * softGround * 0.18),
+    dirt: Math.max(0, weights.dirt + deposited * 0.7 + sediment * 0.45),
+    rock: Math.max(0, weights.rock + hardRock * 0.75 + eroded * 1.1),
+    snow: weights.snow,
+  };
 }
 
 export function classifyTerrainMaterial(input: TerrainMaterialInput): TerrainMaterialSample {
   const { height, slope, waterLevel, config } = input;
-  const hRel = height - waterLevel;
-
+  const heightRelativeToWater = height - waterLevel;
   let rawSand = 0;
   let rawGrass = 0;
   let rawDirt = 0;
   let rawRock = 0;
   let rawSnow = 0;
-
-  const aboveWater = hRel > 0;
-
-  if (aboveWater) {
-    rawSand = 1 - smoothstep(0, config.sand_max_height_m, hRel);
+  if (heightRelativeToWater > 0) {
+    rawSand = 1 - smoothstep(0, config.sand_max_height_m, heightRelativeToWater);
     rawSand *= 1 - smoothstep(0, 0.35, slope);
-
     rawGrass = smoothstep(config.grass_max_slope + 0.15, config.grass_max_slope - 0.05, slope);
     rawGrass *= 1 - rawSand;
-
     rawRock = smoothstep(config.rock_min_slope - 0.1, config.rock_min_slope + 0.2, slope);
-
-    const hF = smoothstep(config.snow_min_height_m - 20, config.snow_min_height_m + 40, height);
-    const sF = smoothstep(config.snow_min_slope - 0.05, config.snow_min_slope + 0.1, slope);
-    rawSnow = hF * sF;
+    const heightFactor = smoothstep(config.snow_min_height_m - 20, config.snow_min_height_m + 40, height);
+    const slopeFactor = smoothstep(config.snow_min_slope - 0.05, config.snow_min_slope + 0.1, slope);
+    rawSnow = heightFactor * slopeFactor;
     rawRock *= 1 - rawSnow * 0.6;
     rawGrass *= 1 - rawSnow;
-    const altGrass = smoothstep(config.snow_min_height_m + 50, config.snow_min_height_m - 20, height);
-    rawGrass *= altGrass;
-
-    rawDirt = 1 - rawSand - rawGrass - rawRock - rawSnow;
-    rawDirt = Math.max(0, rawDirt);
+    rawGrass *= smoothstep(config.snow_min_height_m + 50, config.snow_min_height_m - 20, height);
+    rawDirt = Math.max(0, 1 - rawSand - rawGrass - rawRock - rawSnow);
     rawDirt *= 1 - smoothstep(config.dirt_max_slope + 0.1, config.dirt_max_slope - 0.1, slope) * 0.6;
   } else {
     rawSand = 1;
   }
-
-  const rawWeights: MaterialWeights = {
+  const normalized = normalizeWeights(applyErosionMaterialBias(input, {
     sand: rawSand,
     grass: rawGrass,
     dirt: rawDirt,
     rock: rawRock,
     snow: rawSnow,
-  };
-  const normalized = normalizeWeights(rawWeights);
-  const matId = dominantMaterial(normalized);
+  }));
+  const materialId = dominantMaterial(normalized);
   const baseColor = blendColor(normalized, MATERIAL_BASE_COLORS);
   const roughness = blendRoughness(normalized);
-
   const macro = config.macro_variation.enabled
     ? computeMacroVariation(input.worldX, input.worldZ, slope, height, config.macro_variation)
     : 0;
-
   const finalColor: [number, number, number] = [
     clampColor(baseColor[0] * (1 + (macro - 0.5) * config.macro_variation.strength)),
     clampColor(baseColor[1] * (1 + (macro - 0.5) * config.macro_variation.strength)),
     clampColor(baseColor[2] * (1 + (macro - 0.5) * config.macro_variation.strength)),
   ];
-
   return {
-    materialId: matId,
+    materialId,
     weights: normalized,
     baseColor: finalColor,
     roughness,
     macroVariation: macro,
-    debugMaterialId: ["sand", "grass", "dirt", "rock", "snow"].indexOf(matId),
-    debugWeights: [
-      normalized.sand,
-      normalized.grass,
-      normalized.dirt,
-      normalized.rock,
-      normalized.snow,
-    ],
+    debugMaterialId: ["sand", "grass", "dirt", "rock", "snow"].indexOf(materialId),
+    debugWeights: [normalized.sand, normalized.grass, normalized.dirt, normalized.rock, normalized.snow],
     valid: true,
   };
 }
 
 function computeMacroVariation(
-  x: number, z: number, slope: number, height: number,
-  cfg: TerrainMaterialInput["config"]["macro_variation"],
+  x: number,
+  z: number,
+  slope: number,
+  height: number,
+  config: TerrainMaterialInput["config"]["macro_variation"],
 ): number {
-  const n1 = deterministicNoise2(x / cfg.world_scale_1, z / cfg.world_scale_1);
-  const n2 = deterministicNoise2(x / cfg.world_scale_2, z / cfg.world_scale_2);
-  let v = n1 * 0.65 + n2 * 0.35;
-  v += (slope - 0.5) * cfg.slope_strength;
-  v += (height / 200) * cfg.height_strength;
-  return Math.min(1, Math.max(0, v));
+  const noise1 = deterministicNoise2(x / config.world_scale_1, z / config.world_scale_1);
+  const noise2 = deterministicNoise2(x / config.world_scale_2, z / config.world_scale_2);
+  let value = noise1 * 0.65 + noise2 * 0.35;
+  value += (slope - 0.5) * config.slope_strength;
+  value += (height / 200) * config.height_strength;
+  return Math.min(1, Math.max(0, value));
 }
 
-function clampColor(v: number): number {
-  return Math.min(1, Math.max(0, v));
+function clampColor(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 export function materialColorForDebugId(id: number): [number, number, number] {
-  const DEBUG_BAND_COLORS: Record<number, [number, number, number]> = {
+  const colors: Record<number, [number, number, number]> = {
     0: [0.76, 0.70, 0.50],
     1: [0.30, 0.48, 0.24],
     2: [0.42, 0.34, 0.24],
     3: [0.50, 0.47, 0.42],
     4: [0.85, 0.88, 0.95],
   };
-  return DEBUG_BAND_COLORS[id % 5] ?? [0.5, 0.5, 0.5];
+  return colors[id % 5] ?? [0.5, 0.5, 0.5];
 }
