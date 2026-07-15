@@ -1,13 +1,14 @@
 import { baseSurfaceHeight, setTerrainFieldConfig } from "../../terrain/terrain_surface.js";
+import { assertErosionNotAborted } from "./abort.js";
 import { IndexedDbErosionArtifactStore, openErosionArtifactDb } from "./artifact_store.js";
 import { buildErosionCpu } from "./cpu_builder.js";
 import { collectErosionGpuCheckpointTransferables } from "./checkpoint.js";
-import { summarizeErosionField } from "./diagnostics.js";
-import { packErosionGpuInitialState } from "./gpu/buffers.js";
+import { summarizeErosionField, summarizeErosionFieldAsync } from "./diagnostics.js";
+import { packErosionGpuInitialStateAsync } from "./gpu/buffers.js";
 import { finalizeErosionGpuRawOutput } from "./gpu/finalize.js";
 import { serializeErodedMacroField } from "./integration.js";
-import { sampleErosionSourceField } from "./state.js";
-import type { ErosionArtifact } from "./types.js";
+import { sampleErosionSourceFieldAsync } from "./state.js";
+import type { ErosionArtifact, ErosionArtifactSummary, PersistedErosionArtifact } from "./types.js";
 import type {
   ErosionWorkerArtifactRecord,
   ErosionWorkerRequest,
@@ -21,16 +22,23 @@ const ctx = self as unknown as {
 };
 const controllers = new Map<number, AbortController>();
 
-function recordForTransfer(artifact: ErosionArtifact, cacheHit: boolean): ErosionWorkerArtifactRecord {
+function recordForTransfer(
+  artifact: ErosionArtifact,
+  cacheHit: boolean,
+  summary: ErosionArtifactSummary,
+  persistenceMs = artifact.persistenceMs,
+): ErosionWorkerArtifactRecord {
   return {
     ref: artifact.ref,
     field: serializeErodedMacroField(artifact.field),
-    summary: summarizeErosionField(artifact.field),
-    canonicalBytes: artifact.canonicalBytes,
-    compressedBytes: artifact.compressedBytes,
-    buildMs: artifact.buildMs,
+    summary,
+    artifactBytes: artifact.artifactBytes,
+    buildMs: artifact.buildMs + Math.max(0, persistenceMs - artifact.persistenceMs),
+    samplingMs: artifact.samplingMs,
     gpuMs: artifact.gpuMs,
     readbackMs: artifact.readbackMs,
+    finalizeMs: artifact.finalizeMs,
+    persistenceMs,
     checkpointCount: artifact.checkpointCount,
     massErrorRatio: artifact.massErrorRatio,
     gpuPassTimingsMs: artifact.gpuPassTimingsMs,
@@ -45,8 +53,6 @@ function artifactTransferables(record: ErosionWorkerArtifactRecord): Transferabl
     record.field.hardness.buffer,
     record.field.sediment.buffer,
     record.field.deposition.buffer,
-    record.canonicalBytes,
-    record.compressedBytes,
   ];
 }
 
@@ -64,6 +70,7 @@ function postError(requestId: number, error: unknown): void {
   ctx.postMessage({
     type: "erosionError",
     requestId,
+    name: error instanceof Error ? error.name : "Error",
     message: error instanceof Error ? error.message : String(error),
   });
 }
@@ -74,7 +81,7 @@ async function loadArtifact(request: Extract<ErosionWorkerRequest, { type: "load
     ctx.postMessage({ type: "erosionArtifactLoaded", requestId: request.requestId, artifact: null });
     return;
   }
-  const record = recordForTransfer(artifact, true);
+  const record = recordForTransfer(artifact, true, summarizeErosionField(artifact.field));
   ctx.postMessage({ type: "erosionArtifactLoaded", requestId: request.requestId, artifact: record }, artifactTransferables(record));
 }
 
@@ -100,66 +107,119 @@ async function clearCheckpoint(request: Extract<ErosionWorkerRequest, { type: "c
   ctx.postMessage({ type: "erosionCheckpointCleared", requestId: request.requestId });
 }
 
-async function finalizeGpu(request: Extract<ErosionWorkerRequest, { type: "finalizeErosionGpu" }>): Promise<void> {
+async function finalizeGpu(
+  request: Extract<ErosionWorkerRequest, { type: "finalizeErosionGpu" }>,
+  controller: AbortController,
+): Promise<void> {
   const artifact = await finalizeErosionGpuRawOutput({
     raw: request.raw,
     sourceTerrainHash: request.sourceTerrainHash,
     configHash: request.configHash,
+    signal: controller.signal,
   });
+  assertErosionNotAborted(controller.signal);
+  const persistenceStartedAt = performance.now();
   await withStore(request, async (store) => {
     await store.save(artifact);
     await store.clearCheckpoint();
   });
-  const record = recordForTransfer(artifact, false);
+  const persistenceMs = performance.now() - persistenceStartedAt;
+  assertErosionNotAborted(controller.signal);
+  const summary = await summarizeErosionFieldAsync(artifact.field, controller.signal);
+  const record = recordForTransfer(artifact, false, summary, persistenceMs);
   ctx.postMessage({ type: "erosionBuilt", requestId: request.requestId, artifact: record }, artifactTransferables(record));
 }
 
-async function buildCpu(request: Extract<ErosionWorkerRequest, { type: "buildErosion" }>, controller: AbortController): Promise<void> {
+async function buildCpu(
+  request: Extract<ErosionWorkerRequest, { type: "buildErosion" }>,
+  controller: AbortController,
+): Promise<void> {
   setTerrainFieldConfig(request.terrainFieldConfig);
   const result = await withStore(request, async (store) => {
     const cached = await store.load();
-    if (cached) return { artifact: cached, cacheHit: true };
+    if (cached) return { artifact: cached, cacheHit: true, persistenceMs: cached.persistenceMs };
     const loadedCheckpoint = await store.loadCheckpoint();
     let checkpoint = loadedCheckpoint && loadedCheckpoint.kind !== "gpu" ? loadedCheckpoint : null;
     if (loadedCheckpoint?.kind === "gpu") await store.clearCheckpoint();
-    try {
-      const artifact = await buildErosionCpu({
-        ...request,
-        sampleHeightMeters: baseSurfaceHeight,
-        ...(checkpoint ? { checkpoint } : {}),
-        signal: controller.signal,
-      }, {
-        seaLevelM: request.seaLevelM,
-        onProgress: (progress) => ctx.postMessage({ type: "erosionProgress", requestId: request.requestId, progress }),
-        onCheckpoint: (next) => store.saveCheckpoint(next),
-        yieldBetweenCheckpoints: () => new Promise((resolve) => setTimeout(resolve, 0)),
-      });
-      await store.save(artifact);
-      await store.clearCheckpoint();
-      return { artifact, cacheHit: false };
-    } catch (error) {
-      if (checkpoint && error instanceof Error && error.message.includes("checkpoint")) {
-        await store.clearCheckpoint();
-        checkpoint = null;
-        const artifact = await buildErosionCpu({
-          ...request,
-          sampleHeightMeters: baseSurfaceHeight,
-          signal: controller.signal,
-        }, {
-          seaLevelM: request.seaLevelM,
-          onProgress: (progress) => ctx.postMessage({ type: "erosionProgress", requestId: request.requestId, progress }),
-          onCheckpoint: (next) => store.saveCheckpoint(next),
-          yieldBetweenCheckpoints: () => new Promise((resolve) => setTimeout(resolve, 0)),
-        });
-        await store.save(artifact);
-        await store.clearCheckpoint();
-        return { artifact, cacheHit: false };
+    let checkpointPersistenceEnabled = true;
+    const saveCheckpoint = async (next: Parameters<typeof store.saveCheckpoint>[0]): Promise<void> => {
+      if (!checkpointPersistenceEnabled) return;
+      try {
+        await store.saveCheckpoint(next);
+      } catch (error) {
+        checkpointPersistenceEnabled = false;
+        console.warn("[erosion] CPU checkpoint persistence disabled after a storage failure", error);
       }
-      throw error;
+    };
+    const build = (resume: typeof checkpoint): Promise<PersistedErosionArtifact> => buildErosionCpu({
+      ...request,
+      sampleHeightMeters: baseSurfaceHeight,
+      ...(resume ? { checkpoint: resume } : {}),
+      signal: controller.signal,
+    }, {
+      seaLevelM: request.seaLevelM,
+      onProgress: (progress) => ctx.postMessage({ type: "erosionProgress", requestId: request.requestId, progress }),
+      onCheckpoint: saveCheckpoint,
+    });
+    let artifact: PersistedErosionArtifact;
+    try {
+      artifact = await build(checkpoint);
+    } catch (error) {
+      if (!checkpoint || !(error instanceof Error) || !error.message.includes("checkpoint")) throw error;
+      await store.clearCheckpoint();
+      checkpoint = null;
+      artifact = await build(null);
     }
+    assertErosionNotAborted(controller.signal);
+    const persistenceStartedAt = performance.now();
+    await store.save(artifact);
+    await store.clearCheckpoint();
+    return {
+      artifact,
+      cacheHit: false,
+      persistenceMs: performance.now() - persistenceStartedAt,
+    };
   });
-  const record = recordForTransfer(result.artifact, result.cacheHit);
+  assertErosionNotAborted(controller.signal);
+  const summary = await summarizeErosionFieldAsync(result.artifact.field, controller.signal);
+  const record = recordForTransfer(result.artifact, result.cacheHit, summary, result.persistenceMs);
   ctx.postMessage({ type: "erosionBuilt", requestId: request.requestId, artifact: record }, artifactTransferables(record));
+}
+
+async function sampleSource(
+  request: Extract<ErosionWorkerRequest, { type: "sampleErosionSource" }>,
+  controller: AbortController,
+): Promise<void> {
+  const startedAt = performance.now();
+  setTerrainFieldConfig(request.terrainFieldConfig);
+  const source = await sampleErosionSourceFieldAsync({
+    sizeM: request.sizeM,
+    ...(request.originM ? { originM: request.originM } : {}),
+    config: request.config,
+    sampleHeightMeters: baseSurfaceHeight,
+    seed: request.seed,
+    seaLevelM: request.seaLevelM,
+    signal: controller.signal,
+  });
+  const initial = await packErosionGpuInitialStateAsync(
+    source,
+    request.config.erosion.borderCells,
+    0,
+    controller.signal,
+  );
+  const result = Object.freeze({ ...initial, samplingMs: performance.now() - startedAt });
+  ctx.postMessage(
+    { type: "erosionSourceSampled", requestId: request.requestId, initial: result },
+    [result.stateAData],
+  );
+}
+
+function runControlled(requestId: number, run: (controller: AbortController) => Promise<void>): void {
+  const controller = new AbortController();
+  controllers.set(requestId, controller);
+  void run(controller)
+    .catch((error) => postError(requestId, error))
+    .finally(() => controllers.delete(requestId));
 }
 
 ctx.onmessage = (event) => {
@@ -185,37 +245,12 @@ ctx.onmessage = (event) => {
     return;
   }
   if (request.type === "finalizeErosionGpu") {
-    void finalizeGpu(request).catch((error) => postError(request.requestId, error));
+    runControlled(request.requestId, (controller) => finalizeGpu(request, controller));
     return;
   }
-  const controller = new AbortController();
-  controllers.set(request.requestId, controller);
   if (request.type === "sampleErosionSource") {
-    const startedAt = performance.now();
-    try {
-      setTerrainFieldConfig(request.terrainFieldConfig);
-      const source = sampleErosionSourceField({
-        sizeM: request.sizeM,
-        ...(request.originM ? { originM: request.originM } : {}),
-        config: request.config,
-        sampleHeightMeters: baseSurfaceHeight,
-        seed: request.seed,
-        seaLevelM: request.seaLevelM,
-        signal: controller.signal,
-      });
-      const initial = packErosionGpuInitialState(source, request.config.erosion.borderCells);
-      ctx.postMessage(
-        { type: "erosionSourceSampled", requestId: request.requestId, initial, sampleMs: performance.now() - startedAt },
-        [initial.stateAData],
-      );
-    } catch (error) {
-      postError(request.requestId, error);
-    } finally {
-      controllers.delete(request.requestId);
-    }
+    runControlled(request.requestId, (controller) => sampleSource(request, controller));
     return;
   }
-  void buildCpu(request, controller)
-    .catch((error) => postError(request.requestId, error))
-    .finally(() => controllers.delete(request.requestId));
+  runControlled(request.requestId, (controller) => buildCpu(request, controller));
 };

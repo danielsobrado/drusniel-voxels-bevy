@@ -1,11 +1,23 @@
 import { requestSharedWebGpuDevice } from "../../rendering/shared_webgpu_device.js";
 import type { TerrainFieldConfigInput } from "../../terrain/terrain_surface.js";
 import { isErosionAbort, throwErosionAbort } from "./abort.js";
-import { recordGpuCheckpoint, recordMainThreadSlice, resetErosionDiagnostics } from "./diagnostics.js";
+import {
+  recordGpuCheckpoint,
+  recordGpuCheckpointPersistenceFailure,
+  recordMainThreadSlice,
+  resetErosionDiagnostics,
+  updateErosionProgress,
+} from "./diagnostics.js";
 import { createErosionWorkerClient } from "./erosion_client.js";
 import { buildErosionGpuRaw } from "./gpu/dispatch.js";
 import { assertErosionGpuParity } from "./gpu/parity_gate.js";
-import type { ErosionArtifact, ErosionBuildProgress, ErosionGpuCheckpoint, ErosionGpuInitialState, TerrainErosionConfig } from "./types.js";
+import {
+  clearActiveErodedMacroField,
+  getActiveErosionWorldId,
+  getLatestErosionArtifactRef,
+  setLatestErosionArtifactRef,
+} from "./integration.js";
+import type { ErosionArtifact, ErosionBuildProgress, ErosionGpuCheckpoint, TerrainErosionConfig } from "./types.js";
 
 const CPU_FALLBACK_MAX_CELLS = 512 * 512;
 
@@ -28,19 +40,27 @@ function sourceCellCount(input: BuildCanonicalErosionInput): number {
   return width * height;
 }
 
-function initialFromCheckpoint(checkpoint: ErosionGpuCheckpoint): ErosionGpuInitialState {
-  return { ...checkpoint.initial, stateAData: new ArrayBuffer(0) };
-}
-
 export async function buildCanonicalErosionArtifact(
   input: BuildCanonicalErosionInput,
   onProgress?: (progress: ErosionBuildProgress) => void,
 ): Promise<ErosionArtifact> {
   resetErosionDiagnostics(input.config.erosion.enabled);
+  const activeRef = getLatestErosionArtifactRef(input.worldId);
+  if (getActiveErosionWorldId() !== input.worldId
+    || !activeRef
+    || activeRef.sourceTerrainHash !== input.sourceTerrainHash
+    || activeRef.configHash !== input.configHash) {
+    clearActiveErodedMacroField();
+    setLatestErosionArtifactRef(null);
+  }
   if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
   const worker = createErosionWorkerClient();
   if (!worker) throw new Error("erosion source worker is unavailable");
   const cancelWorker = (): void => worker.cancel();
+  const reportProgress = (progress: ErosionBuildProgress): void => {
+    updateErosionProgress(progress.percent);
+    onProgress?.(progress);
+  };
   input.signal?.addEventListener("abort", cancelWorker);
   const storeKey = { sourceTerrainHash: input.sourceTerrainHash, configHash: input.configHash };
   try {
@@ -55,20 +75,18 @@ export async function buildCanonicalErosionArtifact(
       await assertErosionGpuParity(shared.device);
       if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
       let checkpoint = await worker.loadGpuCheckpoint(storeKey);
-      if (checkpoint) recordGpuCheckpoint(checkpoint.stateAByteLength + checkpoint.stateBByteLength, true);
+      if (checkpoint) recordGpuCheckpoint(checkpoint.packedByteLength, true);
 
       const runGpu = async (resume: ErosionGpuCheckpoint | null): Promise<ErosionArtifact> => {
-        const initial = resume
-          ? initialFromCheckpoint(resume)
-          : await worker.sampleInitial({
-              worldId: input.worldId,
-              seed: input.seed,
-              seaLevelM: input.seaLevelM,
-              sizeM: input.sizeM,
-              originM: input.originM,
-              terrainFieldConfig: input.terrainFieldConfig,
-              config: input.config,
-            });
+        const initial = await worker.sampleInitial({
+          worldId: input.worldId,
+          seed: input.seed,
+          seaLevelM: input.seaLevelM,
+          sizeM: input.sizeM,
+          originM: input.originM,
+          terrainFieldConfig: input.terrainFieldConfig,
+          config: input.config,
+        });
         if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
         const raw = await buildErosionGpuRaw(shared.device, {
           worldId: input.worldId,
@@ -80,16 +98,32 @@ export async function buildCanonicalErosionArtifact(
           ...(resume ? { checkpoint: resume } : {}),
           ...(input.signal ? { signal: input.signal } : {}),
         }, {
-          ...(onProgress ? { onProgress } : {}),
+          onProgress: reportProgress,
           onCheckpoint: async (next) => {
-            const byteLength = next.stateAByteLength + next.stateBByteLength;
-            await worker.saveGpuCheckpoint(next);
-            recordGpuCheckpoint(byteLength);
+            try {
+              await worker.saveGpuCheckpoint(next);
+              recordGpuCheckpoint(next.packedByteLength);
+              return true;
+            } catch (error) {
+              if (isErosionAbort(error, input.signal)) throwErosionAbort(error, input.signal);
+              recordGpuCheckpointPersistenceFailure();
+              console.warn("[erosion] GPU checkpoint persistence disabled; continuing the active simulation", error);
+              return false;
+            }
           },
           onMainThreadSlice: recordMainThreadSlice,
         });
         if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
-        return worker.finalizeGpu({ ...storeKey, worldId: input.worldId, raw });
+        const artifact = await worker.finalizeGpu({ ...storeKey, worldId: input.worldId, raw });
+        if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
+        reportProgress({
+          phase: "complete",
+          hydraulicIteration: input.config.erosion.enabled ? input.config.erosion.hydraulicIterations : 0,
+          thermalIteration: input.config.erosion.enabled ? input.config.erosion.thermalIterations : 0,
+          percent: 100,
+          checkpointCount: artifact.checkpointCount,
+        });
+        return artifact;
       };
 
       try {
@@ -123,7 +157,7 @@ export async function buildCanonicalErosionArtifact(
       sourceTerrainHash: input.sourceTerrainHash,
       configHash: input.configHash,
       config: input.config,
-    }, onProgress);
+    }, reportProgress);
   } finally {
     input.signal?.removeEventListener("abort", cancelWorker);
     worker.dispose();

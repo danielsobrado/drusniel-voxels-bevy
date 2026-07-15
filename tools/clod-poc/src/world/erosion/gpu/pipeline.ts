@@ -26,6 +26,8 @@ export interface ErosionGpuPipelines {
   readonly thermalAccumulate: GPUComputePipeline;
   readonly thermalApply: GPUComputePipeline;
   readonly packOutput: GPUComputePipeline;
+  readonly packCheckpoint: GPUComputePipeline;
+  readonly restoreCheckpoint: GPUComputePipeline;
 }
 
 function module(device: GPUDevice, label: string, source: string): GPUShaderModule {
@@ -91,5 +93,7 @@ export function createErosionGpuPipelines(device: GPUDevice, buffers: ErosionGpu
     thermalAccumulate: pipeline(device, layout, "erosion-thermal-accumulate", thermalModule, "accumulate"),
     thermalApply: pipeline(device, layout, "erosion-thermal-apply", thermalModule, "apply_delta"),
     packOutput: pipeline(device, layout, "erosion-pack-output", initModule, "pack_output"),
+    packCheckpoint: pipeline(device, layout, "erosion-pack-checkpoint", initModule, "pack_checkpoint"),
+    restoreCheckpoint: pipeline(device, layout, "erosion-restore-checkpoint", initModule, "restore_checkpoint"),
   };
 }

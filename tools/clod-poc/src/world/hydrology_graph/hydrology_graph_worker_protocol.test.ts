@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { EROSION_SCHEMA_VERSION } from "../erosion/constants.js";
 import type { ErosionArtifactRef, SerializedErodedMacroField } from "../erosion/types.js";
 import {
   buildHydrologyGraphFromMacro,
@@ -26,7 +27,7 @@ function erosionField(): { field: SerializedErodedMacroField; ref: ErosionArtifa
       deposition: new Int32Array(count),
     },
     ref: {
-      schemaVersion: 1,
+      schemaVersion: EROSION_SCHEMA_VERSION,
       id: "erosion:worker",
       hash: "ab".repeat(32),
       width,

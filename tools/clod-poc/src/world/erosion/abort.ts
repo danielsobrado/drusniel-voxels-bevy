@@ -9,3 +9,13 @@ export function throwErosionAbort(error: unknown, signal?: AbortSignal): never {
   if (error instanceof Error) throw error;
   throw new DOMException("Erosion build cancelled", "AbortError");
 }
+
+export function assertErosionNotAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throwErosionAbort(signal.reason, signal);
+}
+
+export async function yieldErosionTask(signal?: AbortSignal): Promise<void> {
+  assertErosionNotAborted(signal);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assertErosionNotAborted(signal);
+}

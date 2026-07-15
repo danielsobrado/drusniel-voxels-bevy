@@ -3,6 +3,12 @@ import type { ErosionArtifactRef, SerializedErodedMacroField } from "../erosion/
 import type { BuildHydrologyGraphInput, HydrologyGraph, HydrologyMacroSampleCheckpoint } from "./hydrology_graph.js";
 import { buildHydrologyGraphFromMacro } from "./hydrology_graph_builder.js";
 
+export function containsErodedMacroPosition(field: SerializedErodedMacroField, x: number, z: number): boolean {
+  const maxX = field.originX + (field.width - 1) * field.cellSizeM;
+  const maxZ = field.originZ + (field.height - 1) * field.cellSizeM;
+  return x >= field.originX && x <= maxX && z >= field.originZ && z <= maxZ;
+}
+
 export function sampleErodedMacroHeight(field: SerializedErodedMacroField, x: number, z: number): number {
   const fx = Math.max(0, Math.min(field.width - 1, (x - field.originX) / field.cellSizeM));
   const fz = Math.max(0, Math.min(field.height - 1, (z - field.originZ) / field.cellSizeM));

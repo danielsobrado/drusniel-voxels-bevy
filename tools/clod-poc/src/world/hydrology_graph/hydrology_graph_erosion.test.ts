@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { EROSION_SCHEMA_VERSION } from "../erosion/constants.js";
 import type { ErosionArtifactRef, SerializedErodedMacroField } from "../erosion/types.js";
 import { computeHydrologyGraphArtifactHash } from "./hydrology_graph_artifact.js";
-import { buildHydrologyGraphFromErodedMacro } from "./hydrology_graph_erosion.js";
+import {
+  buildHydrologyGraphFromErodedMacro,
+  containsErodedMacroPosition,
+} from "./hydrology_graph_erosion.js";
 
 function field(delta = 0): SerializedErodedMacroField {
   const width = 5;
@@ -25,7 +29,7 @@ function field(delta = 0): SerializedErodedMacroField {
 
 function ref(hashByte: string): ErosionArtifactRef {
   return {
-    schemaVersion: 1,
+    schemaVersion: EROSION_SCHEMA_VERSION,
     id: `erosion:${hashByte}`,
     hash: hashByte.repeat(64),
     width: 5,
@@ -52,5 +56,13 @@ describe("erosion hydrology authority", () => {
       field(),
       ref("3"),
     )).toThrow(/spacing/);
+  });
+
+  it("contains only the exact persisted erosion footprint", () => {
+    const authority = field();
+    expect(containsErodedMacroPosition(authority, 0, 0)).toBe(true);
+    expect(containsErodedMacroPosition(authority, 64, 64)).toBe(true);
+    expect(containsErodedMacroPosition(authority, -0.001, 0)).toBe(false);
+    expect(containsErodedMacroPosition(authority, 64.001, 64)).toBe(false);
   });
 });

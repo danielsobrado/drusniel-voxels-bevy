@@ -1,5 +1,6 @@
 import { indexedDB } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
+import { EROSION_SCHEMA_VERSION } from "../erosion/constants.js";
 import type { ErosionArtifactRef, SerializedErodedMacroField } from "../erosion/types.js";
 import { createHydrologyGraphArtifact } from "./hydrology_graph_artifact.js";
 import { buildHydrologyGraphFromErodedMacro } from "./hydrology_graph_erosion.js";
@@ -37,7 +38,7 @@ function erosion(): { field: SerializedErodedMacroField; ref: ErosionArtifactRef
     deposition: new Int32Array(count),
   };
   const ref: ErosionArtifactRef = {
-    schemaVersion: 1,
+    schemaVersion: EROSION_SCHEMA_VERSION,
     id: "erosion:test",
     hash: "12".repeat(32),
     width,
@@ -85,11 +86,32 @@ describe("IndexedDbHydrologyGraphStore", () => {
     db.close();
   });
 
+  it("rejects obsolete v1 erosion authorities", async () => {
+    const db = await openHydrologyGraphDb(indexedDB, dbName());
+    const source = await artifact();
+    const erosionAuthority = source.graph.macro.erosion!;
+    const obsolete = {
+      ...source,
+      graph: {
+        ...source.graph,
+        macro: {
+          ...source.graph.macro,
+          erosion: {
+            ...erosionAuthority,
+            artifactRef: { ...erosionAuthority.artifactRef, schemaVersion: 1 as never },
+          },
+        },
+      },
+    };
+    await expect(new IndexedDbHydrologyGraphStore(db, "terrain-a", "params-a").save(obsolete)).rejects.toThrow(/obsolete schema/);
+    db.close();
+  });
+
   it("treats corrupt records as cache misses", async () => {
     const db = await openHydrologyGraphDb(indexedDB, dbName());
     const transaction = db.transaction(HYDROLOGY_GRAPH_STORE_NAME, "readwrite");
     transaction.objectStore(HYDROLOGY_GRAPH_STORE_NAME).put(
-      { schemaVersion: 3, terrainSourceHash: "terrain-a", graphParamsHash: "params-a" },
+      { schemaVersion: 4, terrainSourceHash: "terrain-a", graphParamsHash: "params-a" },
       "terrain-a/params-a",
     );
     await transactionDone(transaction);

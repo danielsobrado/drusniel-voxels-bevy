@@ -1,4 +1,6 @@
+import { assertErosionNotAborted, yieldErosionTask } from "./abort.js";
 import {
+  EROSION_ASYNC_ROWS_PER_YIELD,
   FRACTION_Q16_ONE,
   HEIGHT_UNITS_PER_METER,
   SEDIMENT_UNITS_PER_METER,
@@ -12,16 +14,31 @@ import {
   metersToWaterFixed,
   velocityCellsToFixed,
 } from "./fixed_point.js";
-import { buildHardnessField } from "./hardness_field.js";
+import { buildHardnessField, buildHardnessFieldAsync } from "./hardness_field.js";
 import type {
+  ErodedMacroField,
   ErosionSourceField,
   ErosionState,
   ResolvedErosionConstants,
   TerrainErosionConfig,
 } from "./types.js";
 
-function assertNotCancelled(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException("Erosion sampling cancelled", "AbortError");
+export interface ErosionSourceSampleInput {
+  readonly sizeM: { readonly x: number; readonly z: number };
+  readonly originM?: { readonly x: number; readonly z: number };
+  readonly config: TerrainErosionConfig;
+  readonly sampleHeightMeters: (x: number, z: number) => number;
+  readonly seed: number;
+  readonly seaLevelM: number;
+  readonly signal?: AbortSignal;
+}
+
+interface SourceGeometry {
+  readonly width: number;
+  readonly height: number;
+  readonly cellSizeM: number;
+  readonly originX: number;
+  readonly originZ: number;
 }
 
 export function resolveErosionConstants(config: TerrainErosionConfig): ResolvedErosionConstants {
@@ -52,59 +69,76 @@ export function resolveErosionConstants(config: TerrainErosionConfig): ResolvedE
   });
 }
 
-export function sampleErosionSourceField(input: {
-  readonly sizeM: { readonly x: number; readonly z: number };
-  readonly originM?: { readonly x: number; readonly z: number };
-  readonly config: TerrainErosionConfig;
-  readonly sampleHeightMeters: (x: number, z: number) => number;
-  readonly seed: number;
-  readonly seaLevelM: number;
-  readonly signal?: AbortSignal;
-}): ErosionSourceField {
+function sourceGeometry(input: ErosionSourceSampleInput): SourceGeometry {
   const cellSizeM = input.config.erosion.cellSizeM;
   const width = Math.floor(input.sizeM.x / cellSizeM) + 1;
   const height = Math.floor(input.sizeM.z / cellSizeM) + 1;
   if (width < 2 || height < 2) throw new Error("erosion bounds must contain at least 2 x 2 macro samples");
   const origin = input.originM ?? { x: 0, z: 0 };
-  const heightFixed = new Int32Array(width * height);
-  for (let z = 0; z < height; z++) {
-    assertNotCancelled(input.signal);
-    for (let x = 0; x < width; x++) {
-      const sample = input.sampleHeightMeters(origin.x + x * cellSizeM, origin.z + z * cellSizeM);
-      if (!Number.isFinite(sample)) throw new Error(`erosion sampler returned ${sample} at ${x},${z}`);
-      heightFixed[z * width + x] = metersToHeightFixed(sample);
-    }
+  return { width, height, cellSizeM, originX: origin.x, originZ: origin.z };
+}
+
+function sampleHeightRow(
+  input: ErosionSourceSampleInput,
+  geometry: SourceGeometry,
+  heightFixed: Int32Array,
+  z: number,
+): void {
+  for (let x = 0; x < geometry.width; x++) {
+    const sample = input.sampleHeightMeters(
+      geometry.originX + x * geometry.cellSizeM,
+      geometry.originZ + z * geometry.cellSizeM,
+    );
+    if (!Number.isFinite(sample)) throw new Error(`erosion sampler returned ${sample} at ${x},${z}`);
+    heightFixed[z * geometry.width + x] = metersToHeightFixed(sample);
   }
-  const hardness = buildHardnessField({
-    width,
-    height,
-    cellSizeM,
-    originX: origin.x,
-    originZ: origin.z,
+}
+
+function hardnessInput(
+  input: ErosionSourceSampleInput,
+  geometry: SourceGeometry,
+  heightFixed: Int32Array,
+) {
+  return {
+    width: geometry.width,
+    height: geometry.height,
+    cellSizeM: geometry.cellSizeM,
+    originX: geometry.originX,
+    originZ: geometry.originZ,
     seaLevelM: input.seaLevelM,
     seed: input.seed,
     heightFixed,
     ...(input.signal ? { signal: input.signal } : {}),
-  });
-  return Object.freeze({ width, height, cellSizeM, originX: origin.x, originZ: origin.z, heightFixed, hardness });
+  };
 }
 
-export function createErosionState(source: ErosionSourceField, borderCells: number): ErosionState {
+export function sampleErosionSourceField(input: ErosionSourceSampleInput): ErosionSourceField {
+  const geometry = sourceGeometry(input);
+  const heightFixed = new Int32Array(geometry.width * geometry.height);
+  for (let z = 0; z < geometry.height; z++) {
+    assertErosionNotAborted(input.signal);
+    sampleHeightRow(input, geometry, heightFixed, z);
+  }
+  const hardness = buildHardnessField(hardnessInput(input, geometry, heightFixed));
+  return Object.freeze({ ...geometry, heightFixed, hardness });
+}
+
+export async function sampleErosionSourceFieldAsync(input: ErosionSourceSampleInput): Promise<ErosionSourceField> {
+  const geometry = sourceGeometry(input);
+  const heightFixed = new Int32Array(geometry.width * geometry.height);
+  for (let z = 0; z < geometry.height; z++) {
+    assertErosionNotAborted(input.signal);
+    sampleHeightRow(input, geometry, heightFixed, z);
+    if ((z + 1) % EROSION_ASYNC_ROWS_PER_YIELD === 0) await yieldErosionTask(input.signal);
+  }
+  const hardness = await buildHardnessFieldAsync(hardnessInput(input, geometry, heightFixed));
+  return Object.freeze({ ...geometry, heightFixed, hardness });
+}
+
+function emptyErosionState(source: ErosionSourceField, borderCells: number): ErosionState {
   const width = source.width + borderCells * 2;
   const height = source.height + borderCells * 2;
   const count = width * height;
-  const heightFixed = new Int32Array(count);
-  const hardness = new Uint16Array(count);
-  for (let z = 0; z < height; z++) {
-    const sourceZ = Math.min(source.height - 1, Math.max(0, z - borderCells));
-    for (let x = 0; x < width; x++) {
-      const sourceX = Math.min(source.width - 1, Math.max(0, x - borderCells));
-      const sourceIndex = sourceZ * source.width + sourceX;
-      const index = z * width + x;
-      heightFixed[index] = source.heightFixed[sourceIndex]!;
-      hardness[index] = source.hardness[sourceIndex]!;
-    }
-  }
   return {
     sourceWidth: source.width,
     sourceHeight: source.height,
@@ -114,8 +148,8 @@ export function createErosionState(source: ErosionSourceField, borderCells: numb
     cellSizeM: source.cellSizeM,
     originX: source.originX,
     originZ: source.originZ,
-    heightFixed,
-    hardness,
+    heightFixed: new Int32Array(count),
+    hardness: new Uint16Array(count),
     water: new Uint32Array(count),
     sediment: new Uint32Array(count),
     sedimentScratch: new Uint32Array(count),
@@ -131,6 +165,37 @@ export function createErosionState(source: ErosionSourceField, borderCells: numb
     hydraulicIteration: 0,
     thermalIteration: 0,
   };
+}
+
+function copySourceRow(source: ErosionSourceField, state: ErosionState, z: number): void {
+  const sourceZ = Math.min(source.height - 1, Math.max(0, z - state.borderCells));
+  for (let x = 0; x < state.width; x++) {
+    const sourceX = Math.min(source.width - 1, Math.max(0, x - state.borderCells));
+    const sourceIndex = sourceZ * source.width + sourceX;
+    const index = z * state.width + x;
+    state.heightFixed[index] = source.heightFixed[sourceIndex]!;
+    state.hardness[index] = source.hardness[sourceIndex]!;
+  }
+}
+
+export function createErosionState(source: ErosionSourceField, borderCells: number): ErosionState {
+  const state = emptyErosionState(source, borderCells);
+  for (let z = 0; z < state.height; z++) copySourceRow(source, state, z);
+  return state;
+}
+
+export async function createErosionStateAsync(
+  source: ErosionSourceField,
+  borderCells: number,
+  signal?: AbortSignal,
+): Promise<ErosionState> {
+  const state = emptyErosionState(source, borderCells);
+  for (let z = 0; z < state.height; z++) {
+    assertErosionNotAborted(signal);
+    copySourceRow(source, state, z);
+    if ((z + 1) % EROSION_ASYNC_ROWS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  return state;
 }
 
 export function cloneErosionState(state: ErosionState): ErosionState {
@@ -165,30 +230,18 @@ export function assertCanonicalScale(config: TerrainErosionConfig): void {
   }
 }
 
-export function cropErodedMacroField(state: ErosionState): import("./types.js").ErodedMacroField {
+function createCroppedField(state: ErosionState): ErodedMacroField {
   const count = state.sourceWidth * state.sourceHeight;
-  const heightFixed = new Int32Array(count);
-  const hardness = new Uint16Array(count);
-  const sediment = new Uint32Array(count);
-  const deposition = new Int32Array(count);
-  for (let z = 0; z < state.sourceHeight; z++) {
-    const sourceOffset = (z + state.borderCells) * state.width + state.borderCells;
-    const targetOffset = z * state.sourceWidth;
-    heightFixed.set(state.heightFixed.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
-    hardness.set(state.hardness.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
-    sediment.set(state.sediment.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
-    deposition.set(state.deposition.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
-  }
-  const field: import("./types.js").ErodedMacroField = {
+  const field: ErodedMacroField = {
     width: state.sourceWidth,
     height: state.sourceHeight,
     cellSizeM: state.cellSizeM,
     originX: state.originX,
     originZ: state.originZ,
-    heightFixed,
-    hardness,
-    sediment,
-    deposition,
+    heightFixed: new Int32Array(count),
+    hardness: new Uint16Array(count),
+    sediment: new Uint32Array(count),
+    deposition: new Int32Array(count),
     sampleHeightMeters(x, z) {
       const fx = Math.max(0, Math.min(field.width - 1, (x - field.originX) / field.cellSizeM));
       const fz = Math.max(0, Math.min(field.height - 1, (z - field.originZ) / field.cellSizeM));
@@ -207,5 +260,30 @@ export function cropErodedMacroField(state: ErosionState): import("./types.js").
       return (a + (b - a) * tz) / HEIGHT_UNITS_PER_METER;
     },
   };
+  return field;
+}
+
+function cropRow(state: ErosionState, field: ErodedMacroField, z: number): void {
+  const sourceOffset = (z + state.borderCells) * state.width + state.borderCells;
+  const targetOffset = z * state.sourceWidth;
+  field.heightFixed.set(state.heightFixed.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
+  field.hardness.set(state.hardness.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
+  field.sediment.set(state.sediment.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
+  field.deposition.set(state.deposition.subarray(sourceOffset, sourceOffset + state.sourceWidth), targetOffset);
+}
+
+export function cropErodedMacroField(state: ErosionState): ErodedMacroField {
+  const field = createCroppedField(state);
+  for (let z = 0; z < state.sourceHeight; z++) cropRow(state, field, z);
+  return Object.freeze(field);
+}
+
+export async function cropErodedMacroFieldAsync(state: ErosionState, signal?: AbortSignal): Promise<ErodedMacroField> {
+  const field = createCroppedField(state);
+  for (let z = 0; z < state.sourceHeight; z++) {
+    assertErosionNotAborted(signal);
+    cropRow(state, field, z);
+    if ((z + 1) % EROSION_ASYNC_ROWS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
   return Object.freeze(field);
 }
