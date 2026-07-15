@@ -33,7 +33,7 @@ class TimestampTimingBatch implements ErosionGpuTimingBatch {
   private nextQuery = 0;
   private resolved = false;
 
-  constructor(private readonly device: GPUDevice, maxPasses: number) {
+  constructor(device: GPUDevice, maxPasses: number) {
     const queryCount = Math.max(2, maxPasses * 2);
     const byteLength = queryCount * TIMESTAMP_BYTES;
     this.querySet = device.createQuerySet({ label: "erosion-pass-timestamps", type: "timestamp", count: queryCount });
