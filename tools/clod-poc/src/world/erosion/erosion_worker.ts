@@ -28,12 +28,13 @@ function recordForTransfer(
   summary: ErosionArtifactSummary,
   persistenceMs = artifact.persistenceMs,
 ): ErosionWorkerArtifactRecord {
+  const persistenceAdjustment = Math.max(0, persistenceMs - artifact.persistenceMs);
   return {
     ref: artifact.ref,
     field: serializeErodedMacroField(artifact.field),
     summary,
     artifactBytes: artifact.artifactBytes,
-    buildMs: artifact.buildMs + Math.max(0, persistenceMs - artifact.persistenceMs),
+    buildMs: artifact.buildMs + persistenceAdjustment,
     samplingMs: artifact.samplingMs,
     gpuMs: artifact.gpuMs,
     readbackMs: artifact.readbackMs,

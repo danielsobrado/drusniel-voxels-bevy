@@ -122,14 +122,13 @@ export function createErosionGpuBuffers(
   checkpoint?: ErosionGpuCheckpoint,
 ): ErosionGpuBuffers {
   const cellCount = initial.width * initial.height;
+  const stateABytes = cellCount * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+  const stateAUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
   const stateBBytes = cellCount * GPU_STATE_B_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
   return {
-    stateA: createMappedBuffer(
-      device,
-      "erosion-state-a",
-      initial.stateAData,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    ),
+    stateA: checkpoint
+      ? device.createBuffer({ label: "erosion-state-a", size: stateABytes, usage: stateAUsage })
+      : createMappedBuffer(device, "erosion-state-a", initial.stateAData, stateAUsage),
     stateB: device.createBuffer({
       label: "erosion-state-b",
       size: stateBBytes,
