@@ -67,6 +67,46 @@ describe("ecological dressing runtime", () => {
     system.dispose();
   });
 
+  it("retains diagnostics for paired stumps generated earlier in the pass", () => {
+    const config: DressingConfig = {
+      ...DEFAULT_DRESSING_CONFIG,
+      densities: {
+        ...DEFAULT_DRESSING_CONFIG.densities,
+        deadfallPerHectare: 10_000,
+        stumpsPerHectare: 10_000,
+      },
+    };
+    const hydrologySystem = {
+      sample: () => ({
+        terrainY: 1_000,
+        depth: 0,
+        shoreDistance: 999,
+        flowX: 0,
+        flowZ: 0,
+        moisture: 1,
+        riverMask: 0,
+        flowStrength: 0,
+      }),
+      terrainHeight: () => 1_000,
+    };
+    const system = new DressingSystem({
+      scene: new THREE.Scene(),
+      worldCells: 96,
+      worldSeed: 19,
+      config,
+      hydrologySystem: hydrologySystem as never,
+      quality: "ultra",
+      maximumInstances: 4_000,
+    });
+
+    const stats = system.getStats();
+    const generatedStumps = stats.perClass.stump_fresh.generated + stats.perClass.stump_rotten.generated;
+    const visibleStumps = stats.perClass.stump_fresh.visible + stats.perClass.stump_rotten.visible;
+    expect(visibleStumps).toBeGreaterThan(0);
+    expect(generatedStumps).toBe(visibleStumps);
+    system.dispose();
+  });
+
   it("checks deadfall endpoint support against the carved hydrology surface", () => {
     const config: DressingConfig = {
       ...DEFAULT_DRESSING_CONFIG,

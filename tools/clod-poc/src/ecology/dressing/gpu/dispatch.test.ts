@@ -3,6 +3,7 @@ import terrainCandidatesSource from "./terrain_candidates.compute.wgsl?raw";
 import attachmentCandidatesSource from "./attachment_candidates.compute.wgsl?raw";
 import {
   createDressingCounterReset,
+  createDressingIndirectReset,
   DressingGpuDispatch,
   validateDressingGpuDispatchCounts,
 } from "./dispatch.js";
@@ -29,6 +30,18 @@ describe("dressing GPU dispatch", () => {
     expect(reset).toHaveLength(64);
     expect(reset[4]).toBe(17);
     expect(reset[5]).toBe(9);
+  });
+
+  it("resets instance counts without erasing indirect draw geometry", () => {
+    const reset = createDressingIndirectReset(2, [{
+      indexCount: 36,
+      firstIndex: 4,
+      baseVertex: -2,
+      firstInstance: 7,
+    }]);
+
+    expect(Array.from(reset.slice(0, 5))).toEqual([36, 0, 4, 0xffff_fffe, 7]);
+    expect(Array.from(reset.slice(5, 10))).toEqual([0, 0, 0, 0, 0]);
   });
 
   it("uses an explicit complete bind-group layout for every pipeline", () => {

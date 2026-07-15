@@ -221,6 +221,28 @@ describe("ecological dressing mutation boundaries", () => {
     expect(bridge.snapshot()).toEqual(original);
   });
 
+  it("does not expose nested persistence payload state through snapshots", () => {
+    const bridge = new DressingPersistenceBridge();
+    const id = terrainDressingStableId({
+      worldSeed: 4,
+      classId: "dead_log_rotten",
+      cellX: 6,
+      cellZ: 7,
+      generatorSchemaVersion: 1,
+    });
+    bridge.record({
+      stableId: id,
+      classId: "dead_log_rotten",
+      state: "destroyed",
+      payload: { decay: { stage: 2 } },
+    });
+
+    const snapshot = bridge.snapshot();
+    (snapshot[0].payload?.decay as { stage: number }).stage = 99;
+
+    expect(bridge.snapshot()[0].payload).toEqual({ decay: { stage: 2 } });
+  });
+
   it("invalidates only overlapping clusters within the frame budget", () => {
     const queue = new DressingInvalidationQueue(2);
     queue.register({ id: "a", bounds: { minX: 0, minY: 0, minZ: 0, maxX: 10, maxY: 10, maxZ: 10 } });
@@ -238,5 +260,13 @@ describe("ecological dressing mutation boundaries", () => {
     expect(field.sample(20, 20)).toBe(1);
     field.delete("litter");
     expect(field.sample(5, 5)).toBe(1);
+  });
+
+  it("rejects non-finite grass suppression patches and samples", () => {
+    const field = createGrassSuppressionField();
+    expect(() => field.set("x", { x: Number.NaN, z: 0, radiusM: 1, weight: 1 })).toThrow(/finite/i);
+    expect(() => field.set("x", { x: 0, z: 0, radiusM: Number.POSITIVE_INFINITY, weight: 1 })).toThrow(/finite/i);
+    expect(() => field.set("x", { x: 0, z: 0, radiusM: 1, weight: Number.NaN })).toThrow(/finite/i);
+    expect(() => field.sample(Number.NaN, 0)).toThrow(/finite/i);
   });
 });
