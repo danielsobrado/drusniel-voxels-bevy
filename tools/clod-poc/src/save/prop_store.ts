@@ -23,6 +23,11 @@ function cloneSavedProp(prop: SavedPropInstance): SavedPropInstance {
 
 export class SavedPropStore {
   private readonly props = new Map<string, SavedPropInstance>();
+  private mutationRevision = 0;
+
+  revision(): number {
+    return this.mutationRevision;
+  }
 
   restore(props: readonly SavedPropInstance[]): void {
     this.props.clear();
@@ -31,10 +36,13 @@ export class SavedPropStore {
       if (this.props.has(prop.id)) throw new Error(`duplicate saved prop id: ${prop.id}`);
       this.props.set(prop.id, cloneSavedProp(prop));
     }
+    this.mutationRevision++;
   }
 
   clear(): void {
+    if (this.props.size === 0) return;
     this.props.clear();
+    this.mutationRevision++;
   }
 
   hasProps(): boolean {
@@ -45,13 +53,16 @@ export class SavedPropStore {
     assertSavedPropInstance(prop);
     const previous = this.props.get(prop.id);
     this.props.set(prop.id, cloneSavedProp(prop));
+    this.mutationRevision++;
     return previous ? cloneSavedProp(previous) : null;
   }
 
   remove(id: string): SavedPropInstance | null {
     const previous = this.props.get(id);
+    if (!previous) return null;
     this.props.delete(id);
-    return previous ? cloneSavedProp(previous) : null;
+    this.mutationRevision++;
+    return cloneSavedProp(previous);
   }
 
   snapshot(): SavedPropInstance[] {
