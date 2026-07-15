@@ -199,6 +199,28 @@ describe("ecological dressing mutation boundaries", () => {
     })).toThrow(/persistent/i);
   });
 
+  it("restores persistence deltas transactionally and rejects duplicate identities", () => {
+    const bridge = new DressingPersistenceBridge();
+    const originalId = terrainDressingStableId({
+      worldSeed: 3,
+      classId: "dead_log_fresh",
+      cellX: 4,
+      cellZ: 5,
+      generatorSchemaVersion: 1,
+    });
+    bridge.record({ stableId: originalId, classId: "dead_log_fresh", state: "destroyed" });
+    const original = bridge.snapshot();
+    const replacement = { ...original[0], stableId: "1234567890abcdef" };
+
+    expect(() => bridge.restore([
+      replacement,
+      { ...replacement, stableId: "fedcba0987654321", classId: "moss_patch" as never },
+    ])).toThrow(/persistent/i);
+    expect(bridge.snapshot()).toEqual(original);
+    expect(() => bridge.restore([replacement, replacement])).toThrow(/duplicate/i);
+    expect(bridge.snapshot()).toEqual(original);
+  });
+
   it("invalidates only overlapping clusters within the frame budget", () => {
     const queue = new DressingInvalidationQueue(2);
     queue.register({ id: "a", bounds: { minX: 0, minY: 0, minZ: 0, maxX: 10, maxY: 10, maxZ: 10 } });
