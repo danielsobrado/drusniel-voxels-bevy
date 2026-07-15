@@ -77,6 +77,14 @@ function artifactFromRecord(record: ErosionWorkerArtifactRecord): ErosionArtifac
   });
 }
 
+function activateRecord(record: ErosionWorkerArtifactRecord, worldId: string): ErosionArtifact {
+  const artifact = artifactFromRecord(record);
+  setActiveErodedMacroField(artifact.field);
+  setLatestErosionArtifactRef(artifact.ref, worldId);
+  recordErosionArtifact(artifact, record.cacheHit, record.summary);
+  return artifact;
+}
+
 export function createErosionWorkerClient(): ErosionWorkerClient | null {
   let worker: Worker;
   try {
@@ -119,15 +127,7 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
         pendingRequest.reject(new Error("erosion worker returned a cached artifact for a different request"));
         return;
       }
-      if (!response.artifact) {
-        pendingRequest.resolve(null);
-        return;
-      }
-      const artifact = artifactFromRecord(response.artifact);
-      setActiveErodedMacroField(artifact.field);
-      setLatestErosionArtifactRef(artifact.ref, pendingRequest.worldId);
-      recordErosionArtifact(artifact, true);
-      pendingRequest.resolve(artifact);
+      pendingRequest.resolve(response.artifact ? activateRecord(response.artifact, pendingRequest.worldId) : null);
       return;
     }
     if (response.type === "erosionGpuCheckpointLoaded") {
@@ -150,11 +150,7 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
       pendingRequest.reject(new Error("erosion worker returned an artifact for a non-build request"));
       return;
     }
-    const artifact = artifactFromRecord(response.artifact);
-    setActiveErodedMacroField(artifact.field);
-    setLatestErosionArtifactRef(artifact.ref, pendingRequest.worldId);
-    recordErosionArtifact(artifact, response.artifact.cacheHit);
-    pendingRequest.resolve(artifact);
+    pendingRequest.resolve(activateRecord(response.artifact, pendingRequest.worldId));
   };
 
   worker.onerror = (event) => {
@@ -182,7 +178,7 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
         resolve,
         reject,
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
-      } as PendingRequest;
+      } as unknown as PendingRequest;
       pending.set(requestId, entry);
       worker.postMessage(input.message(requestId), input.transfer ?? []);
     });
