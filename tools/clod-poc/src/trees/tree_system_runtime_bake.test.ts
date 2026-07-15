@@ -27,11 +27,16 @@ describe("tree system bake ring invalidation", () => {
 
   it("clears the GPU ring and reapplies materials when a bake succeeds", async () => {
     const ctx = bakeContext({ supported: true, reason: null });
+    const onSubmittedWorkDone = vi.fn(async () => undefined);
 
-    const result = await TreeSystem.prototype.bakeImpostors.call(ctx as unknown as TreeSystem, {});
+    const result = await TreeSystem.prototype.bakeImpostors.call(ctx as unknown as TreeSystem, {
+      backend: { device: { queue: { onSubmittedWorkDone } } },
+    });
 
     expect(result).toEqual({ supported: true, reason: null });
+    expect(onSubmittedWorkDone).toHaveBeenCalledTimes(1);
     expect(ctx.clearGpuRing).toHaveBeenCalledTimes(1);
+    expect(onSubmittedWorkDone.mock.invocationCallOrder[0]).toBeLessThan(ctx.clearGpuRing.mock.invocationCallOrder[0]!);
     expect(ctx.assets.applyMaterials).toHaveBeenCalledWith(ctx.patches);
     expect(ctx.assets.replaceImpostorMeshGeometries).toHaveBeenCalledWith(ctx.patches, ctx.meshBoundsState);
     expect(ctx.updatePatchLods).toHaveBeenCalledWith(ctx.lastCenter, ctx.lastCenter);

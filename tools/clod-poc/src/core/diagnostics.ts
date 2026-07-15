@@ -13,12 +13,16 @@ const INTERESTING_LIMITS: readonly (keyof GPUSupportedLimits & string)[] = [
   "maxStorageTexturesPerShaderStage",
   "maxSampledTexturesPerShaderStage",
   "maxUniformBuffersPerShaderStage",
+  "maxVertexBuffers",
+  "maxVertexAttributes",
 ];
 
 export function buildRequiredLimits(diagnostics: GpuDiagnostics): Record<string, number> {
   const desired: Record<string, number> = {
     maxStorageBuffersPerShaderStage: 12,
     maxStorageTexturesPerShaderStage: 4,
+    maxVertexBuffers: 16,
+    maxVertexAttributes: 32,
   };
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(desired)) {

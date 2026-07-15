@@ -8,7 +8,7 @@ import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import { treeSpeciesAtlasIndex } from "./tree_alpha_mask.js";
 
 const HERO_LEAFY_MIN_TRIANGLES_PER_VARIANT = 512;
-const WEBGPU_MIN_MAX_VERTEX_BUFFERS = 8;
+const TREE_STATIC_VERTEX_BUFFER_BUDGET = 5;
 
 describe("tree variant geometry map", () => {
   it("builds selector geometries plus all configured structural variants", () => {
@@ -27,7 +27,7 @@ describe("tree variant geometry map", () => {
           expect(packedWind?.itemSize).toBe(3);
           expect(packedWind?.getZ(0)).toBe(treeSpeciesAtlasIndex(species));
           expect(selector.getAttribute("treeSpeciesIndex")).toBeUndefined();
-          expect(uniqueVertexBufferCount(selector)).toBeLessThanOrEqual(WEBGPU_MIN_MAX_VERTEX_BUFFERS);
+          expect(uniqueVertexBufferCount(selector)).toBeLessThanOrEqual(TREE_STATIC_VERTEX_BUFFER_BUDGET);
           expect(treeGeometryVariant(map, species, 0, lod)).toBe(map[species].variants[0][lod]);
         }
       }

@@ -103,6 +103,7 @@ export function createTreeBakedImpostorGeometry(
   ensureTreeMorphologyGeometryAttributes(geometry);
   setTreeVariantAttribute(geometry, 0);
   packTreeSpeciesIntoWind(geometry, species);
+  packTreeVertexAttributes(geometry);
   geometry.userData[TREE_IMPOSTOR_CARD_GEOMETRY_FLAG] = true;
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
@@ -175,6 +176,7 @@ function createTreeGeometry(
     ensureTreeMorphologyGeometryAttributes(geometry);
     setTreeVariantAttribute(geometry, variant);
     packTreeSpeciesIntoWind(geometry, species);
+    packTreeVertexAttributes(geometry);
     return geometry;
   }
   const grammar = VEG_TREE_SPECIES[species];
@@ -196,6 +198,7 @@ function createTreeGeometry(
   }
   setTreeVariantAttribute(geometry, variant);
   packTreeSpeciesIntoWind(geometry, species);
+  packTreeVertexAttributes(geometry);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
@@ -213,6 +216,44 @@ function packTreeSpeciesIntoWind(geometry: THREE.BufferGeometry, species: TreeSp
   }
   geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(packed, 3));
   geometry.deleteAttribute("treeSpeciesIndex");
+}
+
+function packTreeVertexAttributes(geometry: THREE.BufferGeometry): void {
+  const count = geometry.getAttribute("position")?.count ?? 0;
+  const wind = geometry.getAttribute("treeWind");
+  const foliageMask = geometry.getAttribute("treeFoliageMask");
+  const foliageCard = geometry.getAttribute("treeFoliageCard");
+  const height = geometry.getAttribute("treeHeight01");
+  const radial = geometry.getAttribute("treeRadial01");
+  const branchLevel = geometry.getAttribute("treeBranchLevel");
+  const branchPhase = geometry.getAttribute("treeBranchPhase");
+  const rootMask = geometry.getAttribute("treeRootMask");
+  const variant = geometry.getAttribute("treeVariant");
+  const packed = new Float32Array(count * 11);
+  for (let index = 0; index < count; index++) {
+    const offset = index * 11;
+    packed[offset] = wind?.getX(index) ?? 0;
+    packed[offset + 1] = wind?.getY(index) ?? 0;
+    packed[offset + 2] = wind?.getZ(index) ?? 0;
+    packed[offset + 3] = foliageMask?.getX(index) ?? 0;
+    packed[offset + 4] = foliageCard?.getX(index) ?? 0;
+    packed[offset + 5] = height?.getX(index) ?? 0;
+    packed[offset + 6] = radial?.getX(index) ?? 0;
+    packed[offset + 7] = branchLevel?.getX(index) ?? 0;
+    packed[offset + 8] = branchPhase?.getX(index) ?? 0;
+    packed[offset + 9] = rootMask?.getX(index) ?? 0;
+    packed[offset + 10] = variant?.getX(index) ?? 0;
+  }
+  const buffer = new THREE.InterleavedBuffer(packed, 11);
+  geometry.setAttribute("treeWind", new THREE.InterleavedBufferAttribute(buffer, 3, 0));
+  geometry.setAttribute("treeFoliageMask", new THREE.InterleavedBufferAttribute(buffer, 1, 3));
+  geometry.setAttribute("treeFoliageCard", new THREE.InterleavedBufferAttribute(buffer, 1, 4));
+  geometry.setAttribute("treeHeight01", new THREE.InterleavedBufferAttribute(buffer, 1, 5));
+  geometry.setAttribute("treeRadial01", new THREE.InterleavedBufferAttribute(buffer, 1, 6));
+  geometry.setAttribute("treeBranchLevel", new THREE.InterleavedBufferAttribute(buffer, 1, 7));
+  geometry.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(buffer, 1, 8));
+  geometry.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(buffer, 1, 9));
+  geometry.setAttribute("treeVariant", new THREE.InterleavedBufferAttribute(buffer, 1, 10));
 }
 
 function createTreeVariantSelectorGeometry(
@@ -289,6 +330,7 @@ function createTreeVariantSelectorGeometry(
   geometry.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 3));
   geometry.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 4));
   geometry.setAttribute("treeVariant", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 5));
+  packTreeVertexAttributes(geometry);
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();

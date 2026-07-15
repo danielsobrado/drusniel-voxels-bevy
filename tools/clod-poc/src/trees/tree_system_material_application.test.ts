@@ -110,6 +110,8 @@ describe("tree system material application helpers", () => {
     const source = new THREE.PlaneGeometry(1, 2);
     const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial(), 2);
     const oldGeometry = mesh.geometry;
+    const depthTwin = new THREE.InstancedMesh(oldGeometry, new THREE.MeshBasicMaterial(), 2);
+    mesh.userData.depthTwin = depthTwin;
     const oldDispose = vi.spyOn(oldGeometry, "dispose");
     const bounds = new WeakMap<THREE.InstancedMesh, unknown>();
     bounds.set(mesh, { hasBounds: true });
@@ -120,6 +122,7 @@ describe("tree system material application helpers", () => {
     expect(mesh.geometry.getAttribute("treeWorldXZ").count).toBe(2);
     expect(mesh.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME)).toBeDefined();
     expect(mesh.geometry.getAttribute("treeImpostorBlendWeights")).toBeDefined();
+    expect(depthTwin.geometry).toBe(mesh.geometry);
     expect(oldDispose).toHaveBeenCalledTimes(1);
     expect(bounds.has(mesh)).toBe(false);
   });

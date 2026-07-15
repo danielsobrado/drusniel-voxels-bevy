@@ -14,6 +14,8 @@ const DIAGNOSTIC_LIMITS: readonly (keyof GPUSupportedLimits & string)[] = [
   "maxStorageTexturesPerShaderStage",
   "maxSampledTexturesPerShaderStage",
   "maxUniformBuffersPerShaderStage",
+  "maxVertexBuffers",
+  "maxVertexAttributes",
 ];
 
 const OPTIONAL_DEVICE_FEATURES: readonly GPUFeatureName[] = ["timestamp-query"];

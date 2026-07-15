@@ -20,6 +20,7 @@ export const TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME = "treeImpostorLo
 export const TREE_LOD_DITHER_PRIMARY = 0;
 export const TREE_LOD_DITHER_SECONDARY = 1;
 export type TreeLodDitherRole = typeof TREE_LOD_DITHER_PRIMARY | typeof TREE_LOD_DITHER_SECONDARY;
+type TreeWritableAttribute = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
 
 export interface TreeImpostorUvWriteInput {
   mesh: THREE.InstancedMesh;
@@ -37,16 +38,13 @@ export function writeTreeWorldXZIfChanged(
   z: number,
 ): boolean {
   const attribute = treeWorldXZAttribute(mesh);
-  const array = attribute.array as Float32Array;
-  const offset = index * 2;
   if (
-    Math.abs(array[offset] - x) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 1] - z) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
+    Math.abs(attribute.getX(index) - x) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getY(index) - z) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
   ) {
     return false;
   }
-  array[offset] = x;
-  array[offset + 1] = z;
+  attribute.setXY(index, x, z);
   return true;
 }
 
@@ -75,28 +73,22 @@ export function writeTreeImpostorLocalPositionScaleIfChanged(
   scale: number,
 ): boolean {
   const attribute = treeImpostorLocalPositionScaleAttribute(mesh);
-  const array = attribute.array as Float32Array;
-  const offset = index * 4;
   if (
-    Math.abs(array[offset] - localX) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 1] - localY) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 2] - localZ) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 3] - scale) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
+    Math.abs(attribute.getX(index) - localX) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getY(index) - localY) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getZ(index) - localZ) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getW(index) - scale) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
   ) {
     return false;
   }
-  array[offset] = localX;
-  array[offset + 1] = localY;
-  array[offset + 2] = localZ;
-  array[offset + 3] = scale;
+  attribute.setXYZW(index, localX, localY, localZ, scale);
   return true;
 }
 
 export function writeTreeLodFadeIfChanged(mesh: THREE.InstancedMesh, index: number, fade: number): boolean {
   const attribute = treeLodFadeAttribute(mesh);
-  const array = attribute.array as Float32Array;
-  if (Math.abs(array[index] - fade) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
-  array[index] = fade;
+  if (Math.abs(attribute.getX(index) - fade) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+  attribute.setX(index, fade);
   return true;
 }
 
@@ -106,9 +98,8 @@ export function writeTreeLodDitherRoleIfChanged(
   role: TreeLodDitherRole,
 ): boolean {
   const attribute = treeLodDitherRoleAttribute(mesh);
-  const array = attribute.array as Float32Array;
-  if (Math.abs(array[index] - role) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
-  array[index] = role;
+  if (Math.abs(attribute.getX(index) - role) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+  attribute.setX(index, role);
   return true;
 }
 
@@ -116,17 +107,21 @@ export function writeTreeMorphologyIfChanged(mesh: THREE.InstancedMesh, index: n
   const packed = packTreeInstanceMorphology(instance.morphology);
   let changed = false;
   for (let vector = 0; vector < 3; vector++) {
-    const attribute = mesh.geometry.getAttribute(`treeMorphology${vector}`) as THREE.InstancedBufferAttribute | undefined;
+    const attribute = mesh.geometry.getAttribute(`treeMorphology${vector}`) as TreeWritableAttribute | undefined;
     if (!attribute) continue;
-    const array = attribute.array as Float32Array;
-    const targetOffset = index * 4;
     const sourceOffset = vector * 4;
-    for (let component = 0; component < 4; component++) {
-      const value = packed[sourceOffset + component] ?? 0;
-      if (Math.abs((array[targetOffset + component] ?? 0) - value) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) continue;
-      array[targetOffset + component] = value;
-      changed = true;
-    }
+    const x = packed[sourceOffset] ?? 0;
+    const y = packed[sourceOffset + 1] ?? 0;
+    const z = packed[sourceOffset + 2] ?? 0;
+    const w = packed[sourceOffset + 3] ?? 0;
+    if (
+      Math.abs(attribute.getX(index) - x) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+      Math.abs(attribute.getY(index) - y) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+      Math.abs(attribute.getZ(index) - z) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+      Math.abs(attribute.getW(index) - w) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
+    ) continue;
+    attribute.setXYZW(index, x, y, z, w);
+    changed = true;
   }
   return changed;
 }
@@ -157,52 +152,47 @@ export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput
 }
 
 export function writeUvRectIfChanged(
-  attribute: THREE.InstancedBufferAttribute,
+  attribute: TreeWritableAttribute,
   index: number,
   minU: number,
   minV: number,
   maxU: number,
   maxV: number,
 ): boolean {
-  const array = attribute.array as Float32Array;
-  const offset = index * 4;
   if (
-    Math.abs(array[offset] - minU) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 1] - minV) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 2] - maxU) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
-    Math.abs(array[offset + 3] - maxV) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
+    Math.abs(attribute.getX(index) - minU) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getY(index) - minV) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getZ(index) - maxU) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getW(index) - maxV) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
   ) {
     return false;
   }
-  array[offset] = minU;
-  array[offset + 1] = minV;
-  array[offset + 2] = maxU;
-  array[offset + 3] = maxV;
+  attribute.setXYZW(index, minU, minV, maxU, maxV);
   return true;
 }
 
-export function treeWorldXZAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
-  return mesh.geometry.getAttribute("treeWorldXZ") as THREE.InstancedBufferAttribute;
+export function treeWorldXZAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
+  return mesh.geometry.getAttribute("treeWorldXZ") as unknown as THREE.BufferAttribute;
 }
 
 export function treeIdentityBitsAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
   return mesh.geometry.getAttribute("treeIdentityBits") as THREE.InstancedBufferAttribute;
 }
 
-export function treeImpostorLocalPositionScaleAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
-  return mesh.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute;
+export function treeImpostorLocalPositionScaleAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
+  return mesh.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME) as unknown as THREE.BufferAttribute;
 }
 
-export function treeLodFadeAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
-  return mesh.geometry.getAttribute("treeLodFade") as THREE.InstancedBufferAttribute;
+export function treeLodFadeAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
+  return mesh.geometry.getAttribute("treeLodFade") as unknown as THREE.BufferAttribute;
 }
 
-export function treeLodDitherRoleAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
-  return mesh.geometry.getAttribute("treeLodDitherRole") as THREE.InstancedBufferAttribute;
+export function treeLodDitherRoleAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
+  return mesh.geometry.getAttribute("treeLodDitherRole") as unknown as THREE.BufferAttribute;
 }
 
-export function treeImpostorUvRectAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
-  return mesh.geometry.getAttribute("treeImpostorUvRect") as THREE.InstancedBufferAttribute;
+export function treeImpostorUvRectAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
+  return mesh.geometry.getAttribute("treeImpostorUvRect") as unknown as THREE.BufferAttribute;
 }
 
 function writeTreeImpostorBlendIfChanged(
@@ -210,11 +200,11 @@ function writeTreeImpostorBlendIfChanged(
   index: number,
   samples: readonly TreeImpostorRuntimeSample[],
 ): boolean {
-  const weights = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute | undefined;
+  const weights = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME) as TreeWritableAttribute | undefined;
   if (!weights) return false;
   let changed = false;
   for (let sampleIndex = 0; sampleIndex < TREE_IMPOSTOR_BLEND_SAMPLE_COUNT; sampleIndex++) {
-    const uvRect = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES[sampleIndex]) as THREE.InstancedBufferAttribute | undefined;
+    const uvRect = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES[sampleIndex]) as TreeWritableAttribute | undefined;
     const sample = samples[sampleIndex] ?? fallbackTreeImpostorRuntimeSamples()[sampleIndex];
     if (uvRect) {
       changed = writeUvRectIfChanged(
@@ -232,15 +222,22 @@ function writeTreeImpostorBlendIfChanged(
 }
 
 function writeBlendWeightIfChanged(
-  attribute: THREE.InstancedBufferAttribute,
+  attribute: TreeWritableAttribute,
   index: number,
   sampleIndex: number,
   weight: number,
 ): boolean {
-  const array = attribute.array as Float32Array;
-  const offset = index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT + sampleIndex;
-  if (Math.abs(array[offset] - weight) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
-  array[offset] = weight;
+  let x = attribute.getX(index);
+  let y = attribute.getY(index);
+  let z = attribute.getZ(index);
+  let w = attribute.getW(index);
+  const current = sampleIndex === 0 ? x : sampleIndex === 1 ? y : sampleIndex === 2 ? z : w;
+  if (Math.abs(current - weight) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+  if (sampleIndex === 0) x = weight;
+  else if (sampleIndex === 1) y = weight;
+  else if (sampleIndex === 2) z = weight;
+  else w = weight;
+  attribute.setXYZW(index, x, y, z, w);
   return true;
 }
 
