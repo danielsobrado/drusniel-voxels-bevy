@@ -69,11 +69,16 @@ export async function openErosionArtifactDb(
 ): Promise<IDBDatabase> {
   const request = factory.open(name, EROSION_DB_VERSION);
   request.onupgradeneeded = () => {
-    if (!request.result.objectStoreNames.contains(EROSION_ARTIFACT_STORE_NAME)) {
-      request.result.createObjectStore(EROSION_ARTIFACT_STORE_NAME);
+    const db = request.result;
+    if (!db.objectStoreNames.contains(EROSION_ARTIFACT_STORE_NAME)) {
+      db.createObjectStore(EROSION_ARTIFACT_STORE_NAME);
+    } else {
+      request.transaction?.objectStore(EROSION_ARTIFACT_STORE_NAME).clear();
     }
-    if (!request.result.objectStoreNames.contains(EROSION_CHECKPOINT_STORE_NAME)) {
-      request.result.createObjectStore(EROSION_CHECKPOINT_STORE_NAME);
+    if (!db.objectStoreNames.contains(EROSION_CHECKPOINT_STORE_NAME)) {
+      db.createObjectStore(EROSION_CHECKPOINT_STORE_NAME);
+    } else {
+      request.transaction?.objectStore(EROSION_CHECKPOINT_STORE_NAME).clear();
     }
   };
   return requestResult(request);
@@ -131,7 +136,7 @@ export class IndexedDbErosionArtifactStore {
     const record: ErosionArtifactRecord = {
       schemaVersion: EROSION_SCHEMA_VERSION,
       ref: artifact.ref,
-      compressedBytes: artifact.compressedBytes.slice(0),
+      compressedBytes: artifact.compressedBytes,
       buildMs: artifact.buildMs,
       samplingMs: artifact.samplingMs,
       gpuMs: artifact.gpuMs,
