@@ -7,6 +7,7 @@ import {
   resolveRuntimeTerrainErosionConfig,
 } from "../erosion/config.js";
 import {
+  clearActiveErodedMacroField,
   cloneSerializedErodedMacroField,
   collectSerializedErosionTransferables,
   computeErosionSourceTerrainHash,
@@ -69,8 +70,11 @@ export function createHydrologyGraphWorkerClient(): HydrologyGraphWorkerClient |
     }
     const erosion = response.artifact.graph.macro.erosion;
     if (erosion) {
-      setActiveErodedMacroField(toErodedMacroField(erosion));
+      setActiveErodedMacroField(toErodedMacroField(erosion), response.artifact.graph.worldId);
       setLatestErosionArtifactRef(erosion.artifactRef, response.artifact.graph.worldId);
+    } else {
+      clearActiveErodedMacroField();
+      setLatestErosionArtifactRef(null);
     }
     publishStartupPhase("Carving rivers and lakes", 100);
     request.resolve(response.artifact);
@@ -101,7 +105,7 @@ export function createHydrologyGraphWorkerClient(): HydrologyGraphWorkerClient |
           const configHash = await computeTerrainErosionConfigHash(config);
           const originM = input.originM ?? { x: 0, z: 0 };
           const sourceTerrainHash = await computeErosionSourceTerrainHash({
-            generatorVersion: `${TERRAIN_SOURCE_VERSION}:terrain-erosion-source-v1`,
+            generatorVersion: `${TERRAIN_SOURCE_VERSION}:terrain-erosion-source-v2`,
             worldId: input.worldId,
             seed: input.seed,
             sizeM: input.sizeM,
