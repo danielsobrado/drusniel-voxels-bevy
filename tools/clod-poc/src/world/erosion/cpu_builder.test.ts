@@ -78,4 +78,16 @@ describe("deterministic CPU erosion", () => {
       signal: controller.signal,
     }, { seaLevelM: 18 })).rejects.toBe(reason);
   });
+
+  it("cancels after source sampling has started", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("cancel active sampling", "AbortError");
+    const build = buildErosionCpu({
+      ...input(testConfig()),
+      sizeM: { x: 1024, z: 1024 },
+      signal: controller.signal,
+    }, { seaLevelM: 18 });
+    setTimeout(() => controller.abort(reason), 0);
+    await expect(build).rejects.toBe(reason);
+  });
 });
