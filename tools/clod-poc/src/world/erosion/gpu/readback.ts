@@ -3,7 +3,7 @@ import type { ErosionGpuCheckpoint, ErosionGpuInitialState } from "../types.js";
 import type { ErosionGpuBuffers } from "./buffers.js";
 import { GPU_OUTPUT_WORDS_PER_CELL, GPU_STATE_A_WORDS_PER_CELL, GPU_STATE_B_WORDS_PER_CELL } from "./buffers.js";
 
-const READBACK_CHUNK_BYTES = 64 * 1024 * 1024;
+const READBACK_CHUNK_BYTES = 4 * 1024 * 1024;
 
 export interface ErosionGpuChunkReadback {
   readonly chunks: readonly ArrayBuffer[];
