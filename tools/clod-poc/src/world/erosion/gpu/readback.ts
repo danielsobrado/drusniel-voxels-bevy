@@ -1,8 +1,7 @@
 import { assertErosionNotAborted, yieldErosionTask } from "../abort.js";
 import { EROSION_READBACK_CHUNK_BYTES, EROSION_SCHEMA_VERSION } from "../constants.js";
 import type { ErosionGpuCheckpoint, ErosionGpuInitialState } from "../types.js";
-import type { ErosionGpuBuffers } from "./buffers.js";
-import { GPU_OUTPUT_WORDS_PER_CELL, GPU_STATE_A_WORDS_PER_CELL } from "./buffers.js";
+import { GPU_CHECKPOINT_WORDS_PER_CELL, GPU_OUTPUT_WORDS_PER_CELL } from "./buffers.js";
 
 export interface ErosionGpuChunkReadback {
   readonly chunks: readonly ArrayBuffer[];
@@ -59,6 +58,10 @@ export function erosionGpuOutputByteLength(initial: ErosionGpuInitialState): num
   return initial.sourceWidth * initial.sourceHeight * GPU_OUTPUT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
 }
 
+export function erosionGpuCheckpointByteLength(initial: ErosionGpuInitialState): number {
+  return initial.width * initial.height * GPU_CHECKPOINT_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
+}
+
 export async function readErosionGpuOutputChunks(
   device: GPUDevice,
   output: GPUBuffer,
@@ -70,7 +73,7 @@ export async function readErosionGpuOutputChunks(
 
 export async function readErosionGpuCheckpoint(
   device: GPUDevice,
-  buffers: Pick<ErosionGpuBuffers, "stateA">,
+  packed: GPUBuffer,
   initial: ErosionGpuInitialState,
   sourceTerrainHash: string,
   configHash: string,
@@ -78,13 +81,12 @@ export async function readErosionGpuCheckpoint(
   thermalIteration: number,
   signal?: AbortSignal,
 ): Promise<{ readonly checkpoint: ErosionGpuCheckpoint; readonly readbackMs: number; readonly maxMainThreadSliceMs: number }> {
-  const cellCount = initial.width * initial.height;
-  const stateAByteLength = cellCount * GPU_STATE_A_WORDS_PER_CELL * Uint32Array.BYTES_PER_ELEMENT;
-  const stateA = await readBufferChunks(
+  const packedByteLength = erosionGpuCheckpointByteLength(initial);
+  const readback = await readBufferChunks(
     device,
-    buffers.stateA,
-    stateAByteLength,
-    "erosion-checkpoint-state-a",
+    packed,
+    packedByteLength,
+    "erosion-checkpoint-packed",
     signal,
   );
   const checkpoint: ErosionGpuCheckpoint = Object.freeze({
@@ -104,12 +106,12 @@ export async function readErosionGpuCheckpoint(
       originX: initial.originX,
       originZ: initial.originZ,
     }),
-    stateAByteLength,
-    stateAChunks: stateA.chunks,
+    packedByteLength,
+    packedChunks: readback.chunks,
   });
   return {
     checkpoint,
-    readbackMs: stateA.readbackMs,
-    maxMainThreadSliceMs: stateA.maxMainThreadSliceMs,
+    readbackMs: readback.readbackMs,
+    maxMainThreadSliceMs: readback.maxMainThreadSliceMs,
   };
 }
