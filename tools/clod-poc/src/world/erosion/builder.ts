@@ -47,7 +47,8 @@ export async function buildCanonicalErosionArtifact(
   resetErosionDiagnostics(input.config.erosion.enabled);
   const activeRef = getLatestErosionArtifactRef(input.worldId);
   if (getActiveErosionWorldId() !== input.worldId
-    || activeRef?.sourceTerrainHash !== input.sourceTerrainHash
+    || !activeRef
+    || activeRef.sourceTerrainHash !== input.sourceTerrainHash
     || activeRef.configHash !== input.configHash) {
     clearActiveErodedMacroField();
     setLatestErosionArtifactRef(null);
