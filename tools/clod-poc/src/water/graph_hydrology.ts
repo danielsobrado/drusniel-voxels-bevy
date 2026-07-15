@@ -128,7 +128,10 @@ function graphSegmentIndex(graph: HydrologyGraph): SegmentIndex {
 }
 
 function activateErosionAuthority(graph: HydrologyGraph): void {
-  if (graph.macro.erosion) setActiveErodedMacroField(toErodedMacroField(graph.macro.erosion));
+  setActiveErodedMacroField(
+    graph.macro.erosion ? toErodedMacroField(graph.macro.erosion) : null,
+    graph.worldId,
+  );
 }
 
 function canonicalBaseHeight(graph: HydrologyGraph, x: number, z: number, fallback: number): number {
