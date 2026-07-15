@@ -87,6 +87,7 @@ export async function buildErosionCpu(
         sampleHeightMeters: input.sampleHeightMeters,
         seed: input.seed,
         seaLevelM: options.seaLevelM,
+        signal: input.signal,
       }), input.config.erosion.borderCells);
   const initialMass = sourceMassUnits(state);
   const hydraulicTarget = input.config.erosion.enabled ? input.config.erosion.hydraulicIterations : 0;
