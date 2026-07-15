@@ -31,9 +31,24 @@ export interface VoxelOverlaySource {
   readonly regions: readonly VoxelRegionDefinition[];
 }
 
+export interface ProceduralCaveGeometry {
+  readonly start: readonly [number, number, number];
+  readonly end: readonly [number, number, number];
+  readonly tunnelRadiusM: number;
+  readonly chamberRadiusM: number;
+}
+
 export const EMPTY_VOXEL_OVERLAY_SOURCE: VoxelOverlaySource = Object.freeze({ regions: Object.freeze([]) });
 export const CAVE_TEST_ENTRANCE_X = 720;
 export const CAVE_TEST_ENTRANCE_Z = 96;
+
+const PROCEDURAL_CAVE_LENGTH_MIN_M = 22;
+const PROCEDURAL_CAVE_LENGTH_VARIATION_M = 10;
+const PROCEDURAL_CAVE_RADIUS_MIN_M = 3.25;
+const PROCEDURAL_CAVE_RADIUS_VARIATION_M = 1.25;
+const PROCEDURAL_CAVE_START_BACKTRACK_M = 2;
+const PROCEDURAL_CAVE_VERTICAL_DROP_M = 4;
+const PROCEDURAL_CAVE_CHAMBER_RADIUS_MULTIPLIER = 2.2;
 
 let activeSource: VoxelOverlaySource = EMPTY_VOXEL_OVERLAY_SOURCE;
 const residentBounds = new Map<string, Pick<VoxelOverlayBounds, "minX" | "minZ" | "maxX" | "maxZ">>();
@@ -109,6 +124,37 @@ function seededUnit(seed: number, salt: number): number {
   return value / 0xffffffff;
 }
 
+export function proceduralCaveGeometry(
+  system: SavedCaveSystem,
+  entrance: SavedCaveEntrance,
+  index: number,
+): ProceduralCaveGeometry {
+  const facingLength = Math.hypot(...entrance.facing) || 1;
+  const fx = entrance.facing[0] / facingLength;
+  const fy = entrance.facing[1] / facingLength;
+  const fz = entrance.facing[2] / facingLength;
+  const length = PROCEDURAL_CAVE_LENGTH_MIN_M
+    + seededUnit(system.proceduralSeed, index * 2 + 1) * PROCEDURAL_CAVE_LENGTH_VARIATION_M;
+  const tunnelRadiusM = PROCEDURAL_CAVE_RADIUS_MIN_M
+    + seededUnit(system.proceduralSeed, index * 2 + 2) * PROCEDURAL_CAVE_RADIUS_VARIATION_M;
+  const start: [number, number, number] = [
+    entrance.position[0] - fx * PROCEDURAL_CAVE_START_BACKTRACK_M,
+    entrance.position[1] - fy * PROCEDURAL_CAVE_START_BACKTRACK_M,
+    entrance.position[2] - fz * PROCEDURAL_CAVE_START_BACKTRACK_M,
+  ];
+  const end: [number, number, number] = [
+    entrance.position[0] + fx * length,
+    entrance.position[1] + fy * length - PROCEDURAL_CAVE_VERTICAL_DROP_M,
+    entrance.position[2] + fz * length,
+  ];
+  return Object.freeze({
+    start: Object.freeze(start),
+    end: Object.freeze(end),
+    tunnelRadiusM,
+    chamberRadiusM: tunnelRadiusM * PROCEDURAL_CAVE_CHAMBER_RADIUS_MULTIPLIER,
+  });
+}
+
 function applyProceduralCave(
   density: number,
   region: VoxelRegionDefinition,
@@ -121,26 +167,14 @@ function applyProceduralCave(
   let composed = density;
   for (let index = 0; index < region.caveEntrances.length; index++) {
     const entrance = region.caveEntrances[index]!;
-    const facingLength = Math.hypot(...entrance.facing) || 1;
-    const fx = entrance.facing[0] / facingLength;
-    const fy = entrance.facing[1] / facingLength;
-    const fz = entrance.facing[2] / facingLength;
-    const length = 22 + seededUnit(system.proceduralSeed, index * 2 + 1) * 10;
-    const radius = 3.25 + seededUnit(system.proceduralSeed, index * 2 + 2) * 1.25;
-    const start: [number, number, number] = [
-      entrance.position[0] - fx * 2,
-      entrance.position[1] - fy * 2,
-      entrance.position[2] - fz * 2,
-    ];
-    const end: [number, number, number] = [
-      entrance.position[0] + fx * length,
-      entrance.position[1] + fy * length - 4,
-      entrance.position[2] + fz * length,
-    ];
-    const tube = distanceToSegment(x, y, z, start, end) - radius;
-    const chamberRadius = radius * 2.2;
-    const chamber = Math.hypot(x - end[0], y - end[1], z - end[2]) - chamberRadius;
-    composed = Math.min(composed, tube, chamber);
+    const geometry = proceduralCaveGeometry(system, entrance, index);
+    const tunnel = distanceToSegment(x, y, z, geometry.start, geometry.end) - geometry.tunnelRadiusM;
+    const chamber = Math.hypot(
+      x - geometry.end[0],
+      y - geometry.end[1],
+      z - geometry.end[2],
+    ) - geometry.chamberRadiusM;
+    composed = Math.min(composed, tunnel, chamber);
   }
   return composed;
 }
