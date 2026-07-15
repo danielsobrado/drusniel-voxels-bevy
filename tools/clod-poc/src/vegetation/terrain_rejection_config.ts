@@ -32,8 +32,13 @@ export interface VegetationTerrainRejectionConfig {
   understoryCrownHeightM: number;
 }
 
+const DEFAULT_GPU_EARLY_REJECT_ENABLED = parseBooleanFlag(
+  browserSearchParams()?.get("gpuEarlyReject"),
+  false,
+);
+
 export const DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG: VegetationGpuEarlyRejectConfig = {
-  enabled: true,
+  enabled: DEFAULT_GPU_EARLY_REJECT_ENABLED,
   debugValidateCpuOracle: false,
   debugReadbackCounters: false,
   statsHz: 4,
@@ -52,7 +57,7 @@ export const DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG: VegetationGpuEarlyRejec
 };
 
 export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejectionConfig = {
-  enabled: true,
+  enabled: DEFAULT_GPU_EARLY_REJECT_ENABLED,
   gpuEarlyReject: DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG,
   staticRulesEnabled: false,
   viewRulesEnabled: true,
