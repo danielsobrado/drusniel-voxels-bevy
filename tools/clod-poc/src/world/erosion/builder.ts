@@ -14,9 +14,10 @@ import { assertErosionGpuParity } from "./gpu/parity_gate.js";
 import {
   clearActiveErodedMacroField,
   getActiveErosionWorldId,
+  getLatestErosionArtifactRef,
   setLatestErosionArtifactRef,
 } from "./integration.js";
-import type { ErosionArtifact, ErosionBuildProgress, ErosionGpuCheckpoint, ErosionGpuInitialState, TerrainErosionConfig } from "./types.js";
+import type { ErosionArtifact, ErosionBuildProgress, ErosionGpuCheckpoint, TerrainErosionConfig } from "./types.js";
 
 const CPU_FALLBACK_MAX_CELLS = 512 * 512;
 
@@ -39,16 +40,15 @@ function sourceCellCount(input: BuildCanonicalErosionInput): number {
   return width * height;
 }
 
-function initialFromCheckpoint(checkpoint: ErosionGpuCheckpoint): ErosionGpuInitialState {
-  return { ...checkpoint.initial, stateAData: new ArrayBuffer(0), samplingMs: 0 };
-}
-
 export async function buildCanonicalErosionArtifact(
   input: BuildCanonicalErosionInput,
   onProgress?: (progress: ErosionBuildProgress) => void,
 ): Promise<ErosionArtifact> {
   resetErosionDiagnostics(input.config.erosion.enabled);
-  if (getActiveErosionWorldId() !== input.worldId) {
+  const activeRef = getLatestErosionArtifactRef(input.worldId);
+  if (getActiveErosionWorldId() !== input.worldId
+    || activeRef?.sourceTerrainHash !== input.sourceTerrainHash
+    || activeRef.configHash !== input.configHash) {
     clearActiveErodedMacroField();
     setLatestErosionArtifactRef(null);
   }
@@ -74,20 +74,18 @@ export async function buildCanonicalErosionArtifact(
       await assertErosionGpuParity(shared.device);
       if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
       let checkpoint = await worker.loadGpuCheckpoint(storeKey);
-      if (checkpoint) recordGpuCheckpoint(checkpoint.stateAByteLength, true);
+      if (checkpoint) recordGpuCheckpoint(checkpoint.packedByteLength, true);
 
       const runGpu = async (resume: ErosionGpuCheckpoint | null): Promise<ErosionArtifact> => {
-        const initial = resume
-          ? initialFromCheckpoint(resume)
-          : await worker.sampleInitial({
-              worldId: input.worldId,
-              seed: input.seed,
-              seaLevelM: input.seaLevelM,
-              sizeM: input.sizeM,
-              originM: input.originM,
-              terrainFieldConfig: input.terrainFieldConfig,
-              config: input.config,
-            });
+        const initial = await worker.sampleInitial({
+          worldId: input.worldId,
+          seed: input.seed,
+          seaLevelM: input.seaLevelM,
+          sizeM: input.sizeM,
+          originM: input.originM,
+          terrainFieldConfig: input.terrainFieldConfig,
+          config: input.config,
+        });
         if (input.signal?.aborted) throwErosionAbort(input.signal.reason, input.signal);
         const raw = await buildErosionGpuRaw(shared.device, {
           worldId: input.worldId,
@@ -103,7 +101,7 @@ export async function buildCanonicalErosionArtifact(
           onCheckpoint: async (next) => {
             try {
               await worker.saveGpuCheckpoint(next);
-              recordGpuCheckpoint(next.stateAByteLength);
+              recordGpuCheckpoint(next.packedByteLength);
               return true;
             } catch (error) {
               if (isErosionAbort(error, input.signal)) throwErosionAbort(error, input.signal);
