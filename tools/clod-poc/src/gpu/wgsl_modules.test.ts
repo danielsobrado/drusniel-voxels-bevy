@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { TREE_SPECIES } from "../trees/tree_config.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
+import grassRingComputeSource from "./grass_ring_compute.ts?raw";
+import stoneScatterComputeSource from "./stone_scatter_compute.ts?raw";
+import treeRingComputeSource from "./tree_ring_compute.ts?raw";
+import understoryRingComputeSource from "./understory_ring_compute.ts?raw";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import {
   composeGrassRingShader,
@@ -44,6 +48,9 @@ describe("WGSL module composition", () => {
     expect(source).toContain("tree_terrain_visibility_enabled()");
     expect(source).toContain("terrain_ridge_filter(wpos, height, dist)");
     expect(source).toContain("tree_slot_visible_cluster_visible(slot)");
+    expect(source).toContain("fn derive_tree_instance_morphology(");
+    expect(source).toContain("fn write_tree_record(");
+    expect(source).toContain("fn write_shadow_tree_record(");
   });
 
   it("culls terrain-hidden trees before shadows but keeps cluster cull visible-only", () => {
@@ -92,6 +99,18 @@ describe("WGSL module composition", () => {
       expect([...source.matchAll(/fn placement_hydro_atlas_params\(\)/g)].length).toBe(1);
       expect(source).toContain("fn placement_sample_hydro_atlas");
       expect(source).toContain("hydro_atlas: vec4<f32>,");
+    }
+  });
+
+  it("declares rgba32float placement textures and samplers as non-filtering", () => {
+    for (const [source, textureBinding, samplerBinding] of [
+      [treeRingComputeSource, 9, 10],
+      [grassRingComputeSource, 9, 10],
+      [stoneScatterComputeSource, 7, 8],
+      [understoryRingComputeSource, 5, 6],
+    ] as const) {
+      expect(source).toContain(`{ binding: ${textureBinding}, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } }`);
+      expect(source).toContain(`{ binding: ${samplerBinding}, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } }`);
     }
   });
 

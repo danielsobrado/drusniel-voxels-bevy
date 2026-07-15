@@ -228,6 +228,13 @@ events:
     synth: smooth
     pitch: 420
     duration_ms: 2200
+  spell.fireball.cast:
+    enabled: true
+    volume: 0.40
+    cooldown_ms: 220
+    synth: fire_flame
+    pitch: 11800
+    duration_ms: 4200
 
   clod.rebuild.start:
     enabled: true

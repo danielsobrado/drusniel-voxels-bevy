@@ -619,7 +619,7 @@ fn tree_competition_sample(wpos: vec2<f32>, species: u32) -> TreeCompetitionSamp
     for (var direction_index = 0; direction_index < 8; direction_index = direction_index + 1) {
       let angle = f32(direction_index) * 0.78539816339;
       let direction = vec2<f32>(cos(angle), sin(angle));
-      let sample_cell = floor((wpos + direction * radius_m) / max(params.settings_a.x, 0.001));
+      let sample_cell = floor((wpos + direction * radius_m) / 3.4);
       let occupancy = tree_pcg2d(sample_cell, params.settings_u.z ^ 0x1005u ^ species).x;
       let pressure = smoothstep(0.42, 0.92, occupancy) / 3.0;
       pressure_sum = pressure_sum + pressure;

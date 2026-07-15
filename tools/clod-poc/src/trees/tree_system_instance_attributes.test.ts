@@ -13,11 +13,13 @@ import {
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
+  treeIdentityBitsAttribute,
   treeWorldXZAttribute,
   writeTreeImpostorLocalPositionScaleIfChanged,
   writeTreeImpostorUvRectIfChanged,
   writeTreeLodDitherRoleIfChanged,
   writeTreeLodFadeIfChanged,
+  writeTreeIdentityIfChanged,
   writeTreeWorldXZIfChanged,
   writeUvRectIfChanged,
   type TreeImpostorAtlas,
@@ -32,6 +34,16 @@ describe("tree system instance attribute writers", () => {
     const attribute = treeWorldXZAttribute(mesh);
     expect(attribute.getX(1)).toBe(10);
     expect(attribute.getY(1)).toBe(20);
+  });
+
+  it("preserves the full stable identity as bitcast instance data", () => {
+    const mesh = testMesh();
+    const identity = { stableIdLo: 0xfedc_ba98, stableIdHi: 0x8765_4321 };
+    expect(writeTreeIdentityIfChanged(mesh, 1, identity)).toBe(true);
+    expect(writeTreeIdentityIfChanged(mesh, 1, identity)).toBe(false);
+    const attribute = treeIdentityBitsAttribute(mesh);
+    const words = attribute.array as Uint32Array;
+    expect(Array.from(words.slice(2, 4))).toEqual([identity.stableIdLo, identity.stableIdHi]);
   });
 
   it("writes impostor local position and scale only when values change", () => {
@@ -245,6 +257,7 @@ function testMesh(): THREE.InstancedMesh {
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3));
   geometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(4), 2));
+  geometry.setAttribute("treeIdentityBits", new THREE.InstancedBufferAttribute(new Uint32Array(4), 2));
   geometry.setAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(new Float32Array(8), 4));
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(2).fill(1), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(2), 1));

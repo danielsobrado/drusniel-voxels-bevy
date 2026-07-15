@@ -7,6 +7,7 @@ import {
   cos,
   dot,
   float,
+  floatBitsToUint,
   fract,
   frontFacing,
   max,
@@ -23,8 +24,16 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
-import type { TreeHydrologyWater, TreeRingInstanceBuffers } from "./tree_node_material.js";
-import { treeMorphologyDeformationNodes, treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
+import {
+  treeFoliageCardKeep,
+  type TreeHydrologyWater,
+  type TreeRingInstanceBuffers,
+} from "./tree_node_material.js";
+import {
+  treeMorphologyCrownStartNode,
+  treeMorphologyDeformationNodes,
+  treeMorphologyRecordNodes,
+} from "./morphology/node_deformation.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -72,6 +81,8 @@ export function createTreeRingFarNodeMaterialHandle(
   const buildMaterial = (albedoFactory: (vertexColor: TslNode, tint: TslNode) => TslNode): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
+    const aFoliageCard: TslNode = attribute("treeFoliageCard", "float");
+    const aBranchPhase: TslNode = attribute("treeBranchPhase", "float");
     const aVariant: TslNode = attribute("treeVariant", "float");
     const record = treeMorphologyRecordNodes(buffers);
     const worldXZ: TslNode = record.positionScale.xz;
@@ -80,7 +91,12 @@ export function createTreeRingFarNodeMaterialHandle(
     const yaw: TslNode = record.rotationNormalY.x;
     const tint: TslNode = treeRingHash(worldXZ, uSeed, 1901);
     const variantKeep: TslNode = abs(aVariant.sub(record.rotationNormalY.z)).lessThan(0.5).select(float(1), float(0));
-    const deformation = treeMorphologyDeformationNodes(record.morphology0, record.morphology1, record.morphology2);
+    const deformation = treeMorphologyDeformationNodes(
+      record.morphology0,
+      record.morphology1,
+      record.morphology2,
+      treeMorphologyCrownStartNode(settings),
+    );
     const localPosition: TslNode = deformation.position.mul(scale).mul(variantKeep);
     const c: TslNode = cos(yaw);
     const s: TslNode = sin(yaw);
@@ -103,14 +119,22 @@ export function createTreeRingFarNodeMaterialHandle(
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
+    const cardKeep: TslNode = treeFoliageCardKeep(
+      aFoliageCard,
+      deformation.foliageRetention,
+      aBranchPhase,
+      record.rotationNormalY.w,
+      floatBitsToUint(record.identityBits.zw),
+    );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, worldXZ);
-    if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
+    const maskNode: TslNode = aboveWater ? cardKeep.and(aboveWater) : cardKeep;
+    (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
-    prepassNodes.set(material, { positionNode, maskNode: aboveWater ?? undefined, side: material.side });
+    prepassNodes.set(material, { positionNode, maskNode, side: material.side });
     return material;
   };
 

@@ -104,3 +104,26 @@ spells:
       impact_light_intensity: 5.5
       glow_distance: 9.0
       glow_decay: 2.0
+  fireball:
+    id: fireball
+    label: Fireball
+    cast_duration_ms: 4200
+    audio:
+      volume: 0.40
+    vfx:
+      hand_forward_m: 0.68
+      hand_right_m: 0.35
+      hand_up_m: -0.30
+      launch_speed: 19.0
+      lift_speed: 2.8
+      gravity: 13.5
+      projectile_radius: 0.42
+      impact_radius: 3.4
+      impact_duration_ms: 850
+      trail_count: 18
+      spark_count: 28
+      core_color: [1.0, 0.88, 0.30]
+      glow_color: [1.0, 0.19, 0.025]
+      glow_intensity: 5.5
+      glow_distance: 10.0
+      glow_decay: 2.0

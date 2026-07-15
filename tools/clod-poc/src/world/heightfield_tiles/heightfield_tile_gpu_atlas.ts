@@ -13,6 +13,7 @@ interface AtlasState {
   readonly params: GPUBuffer;
   readonly tilesPerSide: number;
   readonly uploaded: Set<string>;
+  readonly uploadedHeights: Map<string, Float32Array>;
   uploads: number;
 }
 
@@ -35,10 +36,30 @@ export interface HeightfieldTileGpuAtlasBindings {
 
 const keyString = (key: WorldTileKey): string => `${key.x},${key.z}`;
 const positiveMod = (value: number, divisor: number): number => ((value % divisor) + divisor) % divisor;
+const MISSING_RESIDENCY_KEY = -0x8000_0000;
+
+function clearAtlasTileResidency(target: AtlasState, key: WorldTileKey): boolean {
+  const id = keyString(key);
+  if (!target.uploaded.delete(id)) return false;
+  target.uploadedHeights.delete(id);
+  target.device.queue.writeTexture(
+    {
+      texture: target.residencyTexture,
+      origin: {
+        x: positiveMod(key.x, target.tilesPerSide),
+        y: positiveMod(key.z, target.tilesPerSide),
+      },
+    },
+    new Int32Array([MISSING_RESIDENCY_KEY, MISSING_RESIDENCY_KEY]),
+    { bytesPerRow: 2 * Int32Array.BYTES_PER_ELEMENT },
+    { width: 1, height: 1 },
+  );
+  return true;
+}
 
 function clearAtlasResidency(target: AtlasState): void {
   const missing = new Int32Array(target.tilesPerSide * target.tilesPerSide * 2);
-  missing.fill(-0x8000_0000);
+  missing.fill(MISSING_RESIDENCY_KEY);
   target.device.queue.writeTexture(
     { texture: target.residencyTexture },
     missing,
@@ -46,6 +67,7 @@ function clearAtlasResidency(target: AtlasState): void {
     { width: target.tilesPerSide, height: target.tilesPerSide },
   );
   target.uploaded.clear();
+  target.uploadedHeights.clear();
 }
 
 export function heightfieldTileAtlasTexel(
@@ -61,6 +83,7 @@ export function heightfieldTileAtlasTexel(
 }
 
 export function registerHeightfieldTileGpuSource(cache: HeightfieldTileCache, isAuthoritative: boolean): void {
+  if (atlas && (source !== cache || authoritative !== isAuthoritative)) clearAtlasResidency(atlas);
   source = cache;
   authoritative = isAuthoritative;
 }
@@ -111,6 +134,7 @@ export function createHeightfieldTileGpuAtlas(device: GPUDevice, tilesPerSide = 
     params,
     tilesPerSide: side,
     uploaded: new Set(),
+    uploadedHeights: new Map(),
     uploads: 0,
   };
   clearAtlasResidency(atlas);
@@ -162,15 +186,16 @@ export function heightfieldTileGpuAtlasBindings(device: GPUDevice): HeightfieldT
 export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
   if (!atlas || !source) return false;
   const id = keyString(key);
-  if (atlas.uploaded.has(id)) return true;
   const tile = source.get(key);
   if (!tile) return false;
+  if (atlas.uploadedHeights.get(id) === tile.heights) return true;
   const slotX = positiveMod(key.x, atlas.tilesPerSide);
   const slotZ = positiveMod(key.z, atlas.tilesPerSide);
   for (const uploaded of [...atlas.uploaded]) {
     const [x, z] = uploaded.split(",").map(Number);
     if (positiveMod(x!, atlas.tilesPerSide) === slotX && positiveMod(z!, atlas.tilesPerSide) === slotZ) {
       atlas.uploaded.delete(uploaded);
+      atlas.uploadedHeights.delete(uploaded);
     }
   }
   atlas.device.queue.writeTexture(
@@ -186,6 +211,7 @@ export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
     { width: 1, height: 1 },
   );
   atlas.uploaded.add(id);
+  atlas.uploadedHeights.set(id, tile.heights);
   atlas.uploads++;
   return true;
 }
@@ -197,7 +223,13 @@ export function updateHeightfieldTileGpuAtlas(centerX: number, centerZ: number):
   const candidates: Array<{ key: WorldTileKey; d2: number }> = [];
   for (let z = center.z - radius; z <= center.z + radius; z++) for (let x = center.x - radius; x <= center.x + radius; x++) {
     const key = { x, z };
-    if (atlas.uploaded.has(keyString(key)) || !source.get(key)) continue;
+    const id = keyString(key);
+    const tile = source.get(key);
+    if (!tile) {
+      clearAtlasTileResidency(atlas, key);
+      continue;
+    }
+    if (atlas.uploadedHeights.get(id) === tile.heights) continue;
     candidates.push({ key, d2: (x - center.x) ** 2 + (z - center.z) ** 2 });
   }
   candidates.sort((a, b) => a.d2 - b.d2);
@@ -206,6 +238,25 @@ export function updateHeightfieldTileGpuAtlas(centerX: number, centerZ: number):
 
 export function heightfieldTileGpuAtlasHas(key: WorldTileKey): boolean {
   return atlas?.uploaded.has(keyString(key)) ?? false;
+}
+
+export function invalidateHeightfieldTileGpuAtlasBounds(
+  cache: HeightfieldTileCache,
+  bounds: { minX: number; minZ: number; maxX: number; maxZ: number },
+): number {
+  if (!atlas || source !== cache) return 0;
+  const min = worldToTile(bounds.minX, bounds.minZ);
+  const max = worldToTile(
+    bounds.maxX > bounds.minX ? bounds.maxX - 1e-7 : bounds.maxX,
+    bounds.maxZ > bounds.minZ ? bounds.maxZ - 1e-7 : bounds.maxZ,
+  );
+  let invalidated = 0;
+  for (let z = min.z; z <= max.z; z++) {
+    for (let x = min.x; x <= max.x; x++) {
+      if (clearAtlasTileResidency(atlas, { x, z })) invalidated++;
+    }
+  }
+  return invalidated;
 }
 
 export function uploadHeightfieldTilesForPage(
@@ -228,7 +279,11 @@ export function uploadHeightfieldTilesForPage(
 }
 
 export function heightfieldTileGpuAtlasStats(): { enabled: number; uploads: number; resident: number } {
-  return { enabled: atlas ? 1 : 0, uploads: atlas?.uploads ?? 0, resident: atlas?.uploaded.size ?? 0 };
+  return {
+    enabled: atlas && source && authoritative ? 1 : 0,
+    uploads: atlas?.uploads ?? 0,
+    resident: atlas?.uploaded.size ?? 0,
+  };
 }
 
 export type HeightfieldTileGpuAtlas = AtlasState;

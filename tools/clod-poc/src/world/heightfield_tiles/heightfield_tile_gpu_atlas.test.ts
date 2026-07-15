@@ -5,6 +5,9 @@ import {
   createHeightfieldTileGpuAtlas,
   heightfieldTileAtlasTexel,
   heightfieldTileGpuAtlasBindings,
+  heightfieldTileGpuAtlasHas,
+  heightfieldTileGpuAtlasStats,
+  invalidateHeightfieldTileGpuAtlasBounds,
   registerHeightfieldTileGpuSource,
   unregisterHeightfieldTileGpuSource,
   uploadHeightfieldTileToGpu,
@@ -129,6 +132,60 @@ describe("heightfield tile GPU atlas", () => {
     } finally {
       unregisterHeightfieldTileGpuSource(cache);
     }
+  });
+
+  it("reuploads a rebuilt tile instead of accepting stale GPU contents", () => {
+    const heightWrites: ArrayBufferView[] = [];
+    const device = {
+      createTexture: ({ label }: { label: string }) => ({
+        label,
+        createView: () => ({ label }),
+        destroy: () => {},
+      }),
+      createBuffer: () => ({ destroy: () => {} }),
+      queue: {
+        writeBuffer: () => {},
+        writeTexture: (
+          destination: { texture: { label: string } },
+          data: ArrayBufferView,
+        ) => {
+          if (destination.texture.label === "continent heightfield tile atlas") heightWrites.push(data);
+        },
+      },
+    } as unknown as GPUDevice;
+    const key = { x: 2, z: -3 };
+    let tile = buildHeightfieldTile(key, { sampleHeight: () => 1 });
+    const cache = { get: () => tile } as unknown as HeightfieldTileCache;
+    registerHeightfieldTileGpuSource(cache, true);
+    try {
+      expect(createHeightfieldTileGpuAtlas(device, 7)).not.toBeNull();
+      expect(uploadHeightfieldTileToGpu(key)).toBe(true);
+      expect(uploadHeightfieldTileToGpu(key)).toBe(true);
+      expect(heightWrites).toHaveLength(1);
+
+      tile = buildHeightfieldTile(key, { sampleHeight: () => 9 });
+      expect(uploadHeightfieldTileToGpu(key)).toBe(true);
+      expect(heightWrites).toHaveLength(2);
+    } finally {
+      unregisterHeightfieldTileGpuSource(cache);
+    }
+  });
+
+  it("invalidates edited tile residency and disables diagnostics without an authority source", () => {
+    const key = { x: 1, z: 1 };
+    const { cache } = tileSourceCoveringOnly(new Set([`${key.x},${key.z}`]));
+    registerHeightfieldTileGpuSource(cache, true);
+    try {
+      expect(createHeightfieldTileGpuAtlas(stubDevice(), 7)).not.toBeNull();
+      expect(uploadHeightfieldTileToGpu(key)).toBe(true);
+      expect(heightfieldTileGpuAtlasHas(key)).toBe(true);
+
+      invalidateHeightfieldTileGpuAtlasBounds(cache, { minX: 256, minZ: 256, maxX: 512, maxZ: 512 });
+      expect(heightfieldTileGpuAtlasHas(key)).toBe(false);
+    } finally {
+      unregisterHeightfieldTileGpuSource(cache);
+    }
+    expect(heightfieldTileGpuAtlasStats().enabled).toBe(0);
   });
 
   it.each([

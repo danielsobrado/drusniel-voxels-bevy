@@ -18,8 +18,9 @@ Cross-plan build order, the shared hash/terrain-sample contracts, and the reconc
 
 Verification completed for the landed code: focused Vitest coverage for contracts, hashes,
 layouts, cluster planning, atlas residency, provider order, and composed WGSL; full
-`tools/clod-poc` TypeScript typecheck. Browser visual/performance acceptance is not
-claimed from this non-Windows run.
+`tools/clod-poc` TypeScript typecheck; production Vite build; and the sample QA smoke
+(reported `baseline_missing`, so it is not a visual baseline). Browser visual/performance
+acceptance is not claimed from this non-Windows run.
 
 ## 1. Goal
 

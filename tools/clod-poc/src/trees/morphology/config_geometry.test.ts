@@ -3,6 +3,9 @@ import { parseTreeConfig } from "../tree_config_parsing.js";
 import { DEFAULT_TREE_SETTINGS } from "../tree_config_defaults.js";
 import { createTreeGeometryMap, disposeTreeGeometryMap } from "../tree_geometry.js";
 import { TREE_LODS, TREE_SPECIES } from "../tree_config_types.js";
+import nodeDeformationSource from "./node_deformation.ts?raw";
+import treeNodeMaterialSource from "../tree_node_material.ts?raw";
+import treeFarMaterialSource from "../tree_ring_far_node_material.ts?raw";
 
 describe("tree runtime morphology integration", () => {
   it("parses the separate runtime morphology block", () => {
@@ -34,6 +37,18 @@ trees:
         slope_lean: 0.08
         invented_value: 1
 `, null)).toThrow(/invented_value/);
+  });
+
+  it("clamps packed direction vectors by magnitude in the runtime shader", () => {
+    expect(nodeDeformationSource).toContain("clampTreeMorphologyVectorNode(morphology0.yz, 0.22)");
+    expect(nodeDeformationSource).toContain("clampTreeMorphologyVectorNode(morphology1.xy, 0.35)");
+  });
+
+  it("uses each species crown start in detailed and cheap runtime deformation", () => {
+    expect(nodeDeformationSource).toContain("treeMorphologyCrownStartNode(settings: TreeSettings)");
+    expect(nodeDeformationSource).not.toContain("smoothstep(0.30, 0.40, height01)");
+    expect(treeNodeMaterialSource.match(/treeMorphologyCrownStartNode\(settings\)/g)).toHaveLength(2);
+    expect(treeFarMaterialSource).toContain("treeMorphologyCrownStartNode(settings)");
   });
 
   it("emits every required morphology attribute on every variant and LOD", () => {

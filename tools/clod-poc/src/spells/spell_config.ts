@@ -60,6 +60,25 @@ export interface LightningSpellVfxConfig {
   glowDecay: number;
 }
 
+export interface FireballSpellVfxConfig {
+  handForwardM: number;
+  handRightM: number;
+  handUpM: number;
+  launchSpeed: number;
+  liftSpeed: number;
+  gravity: number;
+  projectileRadius: number;
+  impactRadius: number;
+  impactDurationMs: number;
+  trailCount: number;
+  sparkCount: number;
+  coreColor: SpellColor;
+  glowColor: SpellColor;
+  glowIntensity: number;
+  glowDistance: number;
+  glowDecay: number;
+}
+
 export interface FireSpellAudioConfig {
   volume: number;
 }
@@ -68,6 +87,7 @@ export type WaterSpellAudioConfig = FireSpellAudioConfig;
 export type AirSpellAudioConfig = FireSpellAudioConfig;
 export type EarthSpellAudioConfig = FireSpellAudioConfig;
 export type LightningSpellAudioConfig = FireSpellAudioConfig;
+export type FireballSpellAudioConfig = FireSpellAudioConfig;
 
 export interface SpellConfig {
   menu: {
@@ -108,6 +128,13 @@ export interface SpellConfig {
     castDurationMs: number;
     audio: LightningSpellAudioConfig;
     vfx: LightningSpellVfxConfig;
+  };
+  fireball: {
+    id: "fireball";
+    label: string;
+    castDurationMs: number;
+    audio: FireballSpellAudioConfig;
+    vfx: FireballSpellVfxConfig;
   };
 }
 
@@ -220,6 +247,30 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       glowDecay: 2.0,
     },
   },
+  fireball: {
+    id: "fireball",
+    label: "Fireball",
+    castDurationMs: 4200,
+    audio: { volume: 0.4 },
+    vfx: {
+      handForwardM: 0.68,
+      handRightM: 0.35,
+      handUpM: -0.3,
+      launchSpeed: 19,
+      liftSpeed: 2.8,
+      gravity: 13.5,
+      projectileRadius: 0.42,
+      impactRadius: 3.4,
+      impactDurationMs: 850,
+      trailCount: 18,
+      sparkCount: 28,
+      coreColor: [1.0, 0.88, 0.3],
+      glowColor: [1.0, 0.19, 0.025],
+      glowIntensity: 5.5,
+      glowDistance: 10,
+      glowDecay: 2,
+    },
+  },
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -316,6 +367,30 @@ function readLightningVfxConfig(
   };
 }
 
+function readFireballVfxConfig(
+  record: Record<string, unknown> | undefined,
+  fallback: FireballSpellVfxConfig,
+): FireballSpellVfxConfig {
+  return {
+    handForwardM: readNumber(record, "hand_forward_m", fallback.handForwardM, -5, 10),
+    handRightM: readNumber(record, "hand_right_m", fallback.handRightM, -5, 5),
+    handUpM: readNumber(record, "hand_up_m", fallback.handUpM, -5, 5),
+    launchSpeed: readNumber(record, "launch_speed", fallback.launchSpeed, 1, 80),
+    liftSpeed: readNumber(record, "lift_speed", fallback.liftSpeed, -20, 40),
+    gravity: readNumber(record, "gravity", fallback.gravity, 0, 60),
+    projectileRadius: readNumber(record, "projectile_radius", fallback.projectileRadius, 0.08, 3),
+    impactRadius: readNumber(record, "impact_radius", fallback.impactRadius, 0.25, 20),
+    impactDurationMs: readNumber(record, "impact_duration_ms", fallback.impactDurationMs, 100, 4000),
+    trailCount: readInteger(record, "trail_count", fallback.trailCount, 0, 64),
+    sparkCount: readInteger(record, "spark_count", fallback.sparkCount, 0, 128),
+    coreColor: readColor(record, "core_color", fallback.coreColor),
+    glowColor: readColor(record, "glow_color", fallback.glowColor),
+    glowIntensity: readNumber(record, "glow_intensity", fallback.glowIntensity, 0, 24),
+    glowDistance: readNumber(record, "glow_distance", fallback.glowDistance, 0, 40),
+    glowDecay: readNumber(record, "glow_decay", fallback.glowDecay, 0, 4),
+  };
+}
+
 function parseBeamSpellEntry<TId extends "fire" | "water" | "air">(
   id: TId,
   record: Record<string, unknown> | undefined,
@@ -359,6 +434,21 @@ function parseLightningSpellEntry(
   };
 }
 
+function parseFireballSpellEntry(
+  record: Record<string, unknown> | undefined,
+  fallback: SpellConfig["fireball"],
+): SpellConfig["fireball"] {
+  const audio = asRecord(record?.audio);
+  const vfx = asRecord(record?.vfx);
+  return {
+    id: "fireball",
+    label: readString(record, "label", fallback.label),
+    castDurationMs: readNumber(record, "cast_duration_ms", fallback.castDurationMs, 250, 8000),
+    audio: { volume: readNumber(audio, "volume", fallback.audio.volume, 0, 1) },
+    vfx: readFireballVfxConfig(vfx, fallback.vfx),
+  };
+}
+
 export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
   try {
     const parsed = asRecord(load(text));
@@ -374,6 +464,7 @@ export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
       air: parseBeamSpellEntry("air", asRecord(root?.air), DEFAULT_SPELL_CONFIG.air),
       earth: parseEarthSpellEntry(asRecord(root?.earth), DEFAULT_SPELL_CONFIG.earth),
       lightning: parseLightningSpellEntry(asRecord(root?.lightning), DEFAULT_SPELL_CONFIG.lightning),
+      fireball: parseFireballSpellEntry(asRecord(root?.fireball), DEFAULT_SPELL_CONFIG.fireball),
     };
   } catch (error) {
     console.warn("[spells] Failed to parse spell config, using defaults.", error);

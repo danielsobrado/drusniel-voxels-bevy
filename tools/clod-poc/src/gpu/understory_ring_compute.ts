@@ -165,8 +165,8 @@ export class UnderstoryGpuRingCompute {
     const layout = device.createBindGroupLayout({ label: "understory ring compute layout", entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       storage(1), storage(2), storage(3), storage(4, "read-only-storage"),
-      { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
-      { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
       storage(7, "read-only-storage"),
       { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       storage(9, "read-only-storage"),
