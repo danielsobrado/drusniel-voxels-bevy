@@ -10,11 +10,13 @@ import {
 } from "./class_registry.js";
 import type { DressingConfig, DressingQuality } from "./config.js";
 import { acceptsCosmeticAtQuality } from "./config.js";
-import { createDressingDiagnostics, type DressingDiagnostics } from "./diagnostics.js";
-import { deadfallOrientation, acceptDeadLogCandidate } from "./persistent_candidates.js";
+import { cloneDressingDiagnostics, createDressingDiagnostics, type DressingDiagnostics } from "./diagnostics.js";
+import { deadfallOrientation, acceptDeadLogCandidate, createPairedStumpId } from "./persistent_candidates.js";
 import { parentAttachmentStableId, terrainDressingStableId } from "./stable_id.js";
 import { acceptTerrainCandidate } from "./terrain_candidates.js";
 import type { DressingEnvironmentSample, DressingStableId } from "./types.js";
+import { attachmentAllowed, type AttachmentParent } from "./attachment_candidates.js";
+import type { DressingAttachmentAnchor, DressingAnchorKind } from "./attachment_anchors.js";
 
 export interface DressingSystemOptions {
   readonly scene: THREE.Scene;
@@ -69,34 +71,6 @@ const CLASS_COLORS: Readonly<Record<DressingClassId, number>> = {
   flower_patch: 0xc989a5,
 };
 
-const PERSISTENT_DENSITY: Partial<Record<DressingClassId, number>> = {
-  dead_log_fresh: 7,
-  dead_log_mossy: 11,
-  dead_log_rotten: 10,
-  stump_fresh: 5,
-  stump_rotten: 7,
-  broken_snag: 6,
-  large_driftwood: 2,
-  large_talus_boulder: 4,
-};
-
-const TERRAIN_DENSITY: Partial<Record<DressingClassId, number>> = {
-  moss_patch: 180,
-  lichen_patch: 90,
-  leaf_litter: 210,
-  needle_litter: 210,
-  twig_cluster: 160,
-  bark_chip_cluster: 90,
-  small_talus: 70,
-  river_cobbles: 90,
-  wet_stone_cluster: 70,
-  small_driftwood: 10,
-  bank_fern: 40,
-  cave_mouth_fern: 8,
-  cliff_fern: 24,
-  flower_patch: 80,
-};
-
 export class DressingSystem {
   private readonly root = new THREE.Group();
   private readonly matrix = new THREE.Matrix4();
@@ -105,6 +79,8 @@ export class DressingSystem {
   private readonly scale = new THREE.Vector3();
   private readonly axisY = new THREE.Vector3(0, 1, 0);
   private readonly meshes = new Map<DressingClassId, THREE.InstancedMesh>();
+  private readonly geometries = new Map<DressingClassId, THREE.BufferGeometry>();
+  private readonly materials = new Map<DressingClassId, THREE.MeshStandardMaterial>();
   private readonly diagnostics: DressingDiagnostics;
   private readonly radiusM: number;
   private readonly maximumInstances: number;
@@ -115,6 +91,10 @@ export class DressingSystem {
     this.radiusM = Math.min(110, Math.max(32, options.config.lod.terrainAttached[1]));
     this.maximumInstances = Math.max(256, options.maximumInstances ?? 16_000);
     this.diagnostics = createDressingDiagnostics(options.config.enabled);
+    for (const classId of DRESSING_CLASSES) {
+      this.geometries.set(classId, createDressingGeometry(classId));
+      this.materials.set(classId, createDressingMaterial(classId));
+    }
     this.root.name = "ecological-dressing";
     this.root.visible = options.config.enabled;
     options.scene.add(this.root);
@@ -133,7 +113,7 @@ export class DressingSystem {
   }
 
   getStats(): DressingDiagnostics {
-    return this.diagnostics;
+    return cloneDressingDiagnostics(this.diagnostics);
   }
 
   get enabled(): boolean {
@@ -142,6 +122,10 @@ export class DressingSystem {
 
   dispose(): void {
     this.clearMeshes();
+    for (const geometry of this.geometries.values()) geometry.dispose();
+    for (const material of this.materials.values()) material.dispose();
+    this.geometries.clear();
+    this.materials.clear();
     this.options.scene.remove(this.root);
   }
 
@@ -158,8 +142,9 @@ export class DressingSystem {
     for (const classId of DRESSING_CLASSES) {
       const entries = byClass.get(classId);
       if (!entries?.length) continue;
-      const geometry = createDressingGeometry(classId);
-      const material = createDressingMaterial(classId);
+      const geometry = this.geometries.get(classId);
+      const material = this.materials.get(classId);
+      if (!geometry || !material) throw new Error(`missing authored dressing render resources: ${classId}`);
       const mesh = new THREE.InstancedMesh(geometry, material, entries.length);
       mesh.name = `dressing:${classId}`;
       mesh.castShadow = DRESSING_CLASS_DEFINITIONS[classId].castsNearShadow;
@@ -196,9 +181,11 @@ export class DressingSystem {
       this.diagnostics.perClass[classId].generated = 0;
       this.diagnostics.perClass[classId].accepted = 0;
       this.diagnostics.perClass[classId].visible = 0;
+    }
+    for (const classId of DRESSING_CLASSES) {
       const definition = DRESSING_CLASS_DEFINITIONS[classId];
-      if (definition.ownership === "parent_attached") continue;
-      const density = definition.ownership === "persistent" ? PERSISTENT_DENSITY[classId] : TERRAIN_DENSITY[classId];
+      if (definition.ownership === "parent_attached" || classId === "stump_fresh" || classId === "stump_rotten") continue;
+      const density = configuredDensityPerHectare(classId, this.options.config);
       if (!density) continue;
       const spacing = Math.max(2, definition.spacingM);
       const minCellX = Math.floor((centerX - this.radiusM) / spacing);
@@ -232,8 +219,8 @@ export class DressingSystem {
             yaw = deadfallOrientation(downhill, Math.PI * 0.18, yaw, rolls[1]);
             const halfLength = 1.5;
             const endpoints: [number, number] = [
-              Math.abs(surfaceHeight(x + Math.cos(yaw) * halfLength, z + Math.sin(yaw) * halfLength) - sample.position[1]),
-              Math.abs(surfaceHeight(x - Math.cos(yaw) * halfLength, z - Math.sin(yaw) * halfLength) - sample.position[1]),
+              Math.abs(this.surfaceHeightAt(x + Math.cos(yaw) * halfLength, z + Math.sin(yaw) * halfLength) - sample.position[1]),
+              Math.abs(this.surfaceHeightAt(x - Math.cos(yaw) * halfLength, z - Math.sin(yaw) * halfLength) - sample.position[1]),
             ];
             if (!acceptDeadLogCandidate(sample, endpoints)) continue;
           } else if (definition.ownership === "terrain_attached" && !acceptTerrainCandidate(classId, sample)) {
@@ -245,12 +232,39 @@ export class DressingSystem {
           const candidate = { classId, stableId: id, x, y: sample.position[1] + geometryYOffset(classId), z, yaw, scale };
           candidates.push(candidate);
           this.diagnostics.perClass[classId].accepted++;
+          if (classId.startsWith("dead_log")) this.appendPairedStump(candidate, candidates);
           this.appendParentAttachments(candidate, sample, candidates);
         }
       }
     }
     if (candidates.length >= this.maximumInstances) this.diagnostics.dressing_overflow_count++;
     return candidates;
+  }
+
+  private appendPairedStump(deadfall: RenderCandidate, candidates: RenderCandidate[]): void {
+    if (candidates.length >= this.maximumInstances) return;
+    const deadfallDensity = this.options.config.densities.deadfallPerHectare;
+    const stumpDensity = this.options.config.densities.stumpsPerHectare;
+    if (deadfallDensity <= 0 || stumpDensity <= 0) return;
+    const stumpId = createPairedStumpId(deadfall.stableId);
+    const pairingRoll = treePcg2d01(stumpId.lo | 0, stumpId.hi | 0, 0x4305)[0];
+    if (pairingRoll >= Math.min(1, stumpDensity / deadfallDensity)) return;
+    const classId: DressingClassId = deadfall.classId === "dead_log_fresh" ? "stump_fresh" : "stump_rotten";
+    const x = deadfall.x - Math.cos(deadfall.yaw) * 1.5;
+    const z = deadfall.z - Math.sin(deadfall.yaw) * 1.5;
+    const stump: RenderCandidate = {
+      classId,
+      stableId: stumpId,
+      x,
+      y: this.surfaceHeightAt(x, z),
+      z,
+      yaw: deadfall.yaw,
+      scale: deadfall.scale * 0.85,
+    };
+    candidates.push(stump);
+    this.diagnostics.perClass[classId].generated++;
+    this.diagnostics.perClass[classId].accepted++;
+    this.appendParentAttachments(stump, this.sampleEnvironment(x, z), candidates);
   }
 
   private appendParentAttachments(parent: RenderCandidate, sample: DressingEnvironmentSample, candidates: RenderCandidate[]): void {
@@ -268,6 +282,9 @@ export class DressingSystem {
       const classId = attachments[slot];
       const rolls = treePcg2d01(parent.stableId.lo | 0, parent.stableId.hi | 0, 0x4300 + slot);
       if (rolls[0] > Math.max(0.15, sample.moisture * 0.7)) continue;
+      const attachmentParent = dressingAttachmentParent(parent);
+      const anchor = dressingAttachmentAnchor(classId, slot);
+      if (!attachmentAllowed(classId, attachmentParent, anchor, sample)) continue;
       const offset = parent.classId.startsWith("stump") ? 0.35 : (slot - 1) * 0.55;
       candidates.push({
         classId,
@@ -295,8 +312,8 @@ export class DressingSystem {
 
   private sampleEnvironment(x: number, z: number): DressingEnvironmentSample {
     const hydrology = this.options.hydrologySystem?.sample(x, z, 4);
-    const height = hydrology?.terrainY ?? surfaceHeight(x, z);
-    const normal = surfaceNormal(x, z);
+    const height = hydrology?.terrainY ?? this.surfaceHeightAt(x, z);
+    const normal = this.surfaceNormalAt(x, z);
     const materials = terrainWeights(height, normal[1]);
     const forestNoise = treePcg2d01(Math.floor(x / 32), Math.floor(z / 32), this.options.worldSeed + 0x4401)[0];
     const forest = smoothstep(0.28, 0.78, forestNoise);
@@ -326,12 +343,23 @@ export class DressingSystem {
     };
   }
 
+  private surfaceHeightAt(x: number, z: number): number {
+    return this.options.hydrologySystem?.terrainHeight(x, z) ?? surfaceHeight(x, z);
+  }
+
+  private surfaceNormalAt(x: number, z: number): [number, number, number] {
+    if (!this.options.hydrologySystem) return surfaceNormal(x, z);
+    const step = 0.5;
+    const dx = this.surfaceHeightAt(x - step, z) - this.surfaceHeightAt(x + step, z);
+    const dz = this.surfaceHeightAt(x, z - step) - this.surfaceHeightAt(x, z + step);
+    const dy = step * 2;
+    const inverseLength = 1 / Math.max(1e-6, Math.hypot(dx, dy, dz));
+    return [dx * inverseLength, dy * inverseLength, dz * inverseLength];
+  }
+
   private clearMeshes(): void {
     for (const mesh of this.meshes.values()) {
       this.root.remove(mesh);
-      mesh.geometry.dispose();
-      if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
-      else mesh.material.dispose();
     }
     this.meshes.clear();
   }
@@ -351,6 +379,70 @@ export class DressingSystem {
       counters[`dressing_${classId}_visible`] = perClass.visible;
     }
   }
+}
+
+function dressingAttachmentParent(parent: RenderCandidate): AttachmentParent {
+  const decay01 = parent.classId.includes("rotten") || parent.classId === "broken_snag"
+    ? 0.9
+    : parent.classId.includes("mossy") ? 0.55 : 0.15;
+  return {
+    stableId: parent.stableId,
+    transform: {
+      position: [parent.x, parent.y, parent.z],
+      rotation: [0, Math.sin(parent.yaw * 0.5), 0, Math.cos(parent.yaw * 0.5)],
+      scale: [parent.scale, parent.scale, parent.scale],
+    },
+    age01: decay01,
+    health01: Math.max(0, 1 - decay01),
+    decay01,
+    destroyed: false,
+  };
+}
+
+function dressingAttachmentAnchor(classId: DressingClassId, slot: number): DressingAttachmentAnchor {
+  const kind: DressingAnchorKind = classId === "root_moss" || classId === "root_fern"
+    ? "root_flare"
+    : classId === "hanging_vine"
+      ? "trunk_high"
+      : classId === "cap_fungus"
+        ? "log_end"
+        : classId === "shelf_fungus"
+          ? "log_side"
+          : "trunk_mid";
+  return {
+    slot,
+    kind,
+    positionLocal: [0, 0, 0],
+    normalLocal: [0, 1, 0],
+    tangentLocal: [1, 0, 0],
+    radiusM: 0.4,
+    exposure01: 0.35,
+  };
+}
+
+function configuredDensityPerHectare(classId: DressingClassId, config: DressingConfig): number {
+  const densities = config.densities;
+  if (classId === "dead_log_fresh") return densities.deadfallPerHectare * 0.25;
+  if (classId === "dead_log_mossy") return densities.deadfallPerHectare * 0.4;
+  if (classId === "dead_log_rotten") return densities.deadfallPerHectare * 0.35;
+  if (classId === "stump_fresh") return densities.stumpsPerHectare * 0.42;
+  if (classId === "stump_rotten") return densities.stumpsPerHectare * 0.58;
+  if (classId === "broken_snag") return densities.brokenSnagsPerHectare;
+  if (classId === "large_driftwood") return densities.driftwoodPer100m * 5;
+  if (classId === "large_talus_boulder") return 4;
+  if (classId === "moss_patch") return densities.mossPatchesPerHectare;
+  if (classId === "lichen_patch") return densities.lichenPatchesPerHectare;
+  if (classId === "leaf_litter" || classId === "needle_litter") return densities.litterClustersPerHectare * 0.5;
+  if (classId === "twig_cluster") return densities.twigClustersPerHectare;
+  if (classId === "river_cobbles") return densities.riverCobbleClustersPer100m * 5;
+  if (classId === "small_driftwood") return densities.driftwoodPer100m * 5;
+  if (classId === "cave_mouth_fern") return densities.caveMouthFernsPer100m2 * 100;
+  if (classId === "bark_chip_cluster") return 90;
+  if (classId === "small_talus" || classId === "wet_stone_cluster") return 70;
+  if (classId === "bank_fern") return 40;
+  if (classId === "cliff_fern") return 24;
+  if (classId === "flower_patch") return 80;
+  return 0;
 }
 
 function persistentSurfaceAccepted(classId: DressingClassId, sample: DressingEnvironmentSample): boolean {

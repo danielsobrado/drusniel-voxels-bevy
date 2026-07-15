@@ -42,6 +42,8 @@ export interface VegetationStartupInput {
   state: ClodAppState;
   lod0Nodes: ClodPageNode[];
   worldCells: number;
+  worldSeed: number;
+  unboundedWorld: boolean;
   grassConfig: ReturnType<typeof import("../../grass.js").parseGrassConfig>;
   stoneConfig: ReturnType<typeof import("../../stones/stone_config.js").parseStoneConfig>;
   treeConfig: ReturnType<typeof import("../../trees/index.js").parseTreeConfig>;

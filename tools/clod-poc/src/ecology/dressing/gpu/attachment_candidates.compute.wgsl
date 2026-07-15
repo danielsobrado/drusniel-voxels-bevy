@@ -7,7 +7,8 @@
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= arrayLength(&terrain_candidates)) { return; }
+  let parent_count = atomicLoad(&counters[5]);
+  if (id.x >= parent_count || id.x >= arrayLength(&terrain_candidates)) { return; }
   let parent = terrain_candidates[id.x];
   if (parent.identity.x < DEAD_LOG_FRESH || parent.identity.x > DEAD_LOG_ROTTEN) { return; }
   let output = atomicAdd(&counters[1], 1u);

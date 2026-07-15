@@ -19,6 +19,8 @@ export interface UnderstoryStartupInput {
   state: ClodAppState;
   lod0Nodes: ClodPageNode[];
   worldCells: number;
+  worldSeed: number;
+  unboundedWorld: boolean;
   understoryConfig: ReturnType<typeof import("../../understory/index.js").parseUnderstoryConfig>;
   isWebGpu: boolean;
   hydrologySystem: HydrologySystem | null;
@@ -39,21 +41,19 @@ export interface UnderstoryStartupResult {
 
 export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryStartupResult {
   const {
-    scene, state, lod0Nodes, worldCells, understoryConfig,
+    scene, state, lod0Nodes, worldCells, worldSeed, unboundedWorld, understoryConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers,
   } = input;
 
   const understoryStats = { current: null as UnderstoryStats | null };
-  const worldSeed = Number(input.searchParams?.get("seed") ?? 0);
-  const sceneName = input.searchParams?.get("scene") ?? "";
   const dressingSystem = createDressingIntegration({
     scene,
     worldCells,
-    worldSeed: Number.isFinite(worldSeed) ? worldSeed : 0,
+    worldSeed,
     hydrologySystem,
     searchParams: input.searchParams,
-    unboundedWorld: sceneName.startsWith("infinite-") || sceneName === "continent",
+    unboundedWorld,
   });
 
   const understoryController = createUnderstoryController({

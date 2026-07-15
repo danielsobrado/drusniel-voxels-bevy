@@ -19,9 +19,18 @@ export class DressingPersistenceBridge {
   private readonly exclusions = new Set<string>();
 
   restore(deltas: readonly EnvironmentalPropDelta[]): void {
+    const nextDeltas = new Map<string, EnvironmentalPropDelta>();
+    const nextExclusions = new Set<string>();
+    for (const delta of deltas) {
+      const validated = validateSerializedDelta(delta);
+      if (nextDeltas.has(validated.stableId)) throw new Error(`duplicate dressing stable ID: ${validated.stableId}`);
+      nextDeltas.set(validated.stableId, validated);
+      if (validated.state === "destroyed" || validated.state === "harvested") nextExclusions.add(validated.stableId);
+    }
     this.deltas.clear();
     this.exclusions.clear();
-    for (const delta of deltas) this.recordSerialized(delta);
+    for (const [id, delta] of nextDeltas) this.deltas.set(id, delta);
+    for (const id of nextExclusions) this.exclusions.add(id);
   }
 
   record(input: DressingDeltaInput): void {
@@ -36,16 +45,10 @@ export class DressingPersistenceBridge {
   }
 
   private recordSerialized(delta: EnvironmentalPropDelta): void {
-    if (!isPersistentDressingClass(delta.classId as DressingClassId)) {
-      throw new Error(`only persistent dressing classes may be saved: ${delta.classId}`);
-    }
-    if (!/^[0-9a-f]{16}$/i.test(delta.stableId)) throw new Error(`invalid dressing stable ID: ${delta.stableId}`);
-    if ((delta.state === "moved" || delta.state === "replaced") && !delta.transformOverride) {
-      throw new Error(`${delta.state} dressing delta requires transformOverride`);
-    }
-    this.deltas.set(delta.stableId, cloneDelta(delta));
-    if (delta.state === "destroyed" || delta.state === "harvested") this.exclusions.add(delta.stableId);
-    else this.exclusions.delete(delta.stableId);
+    const validated = validateSerializedDelta(delta);
+    this.deltas.set(validated.stableId, validated);
+    if (validated.state === "destroyed" || validated.state === "harvested") this.exclusions.add(validated.stableId);
+    else this.exclusions.delete(validated.stableId);
   }
 
   isExcluded(stableId: DressingStableId): boolean {
@@ -57,6 +60,17 @@ export class DressingPersistenceBridge {
   }
 }
 
+function validateSerializedDelta(delta: EnvironmentalPropDelta): EnvironmentalPropDelta {
+  if (!isPersistentDressingClass(delta.classId as DressingClassId)) {
+    throw new Error(`only persistent dressing classes may be saved: ${delta.classId}`);
+  }
+  if (!/^[0-9a-f]{16}$/i.test(delta.stableId)) throw new Error(`invalid dressing stable ID: ${delta.stableId}`);
+  if ((delta.state === "moved" || delta.state === "replaced") && !delta.transformOverride) {
+    throw new Error(`${delta.state} dressing delta requires transformOverride`);
+  }
+  return cloneDelta(delta);
+}
+
 function cloneDelta(delta: EnvironmentalPropDelta): EnvironmentalPropDelta {
   return {
     ...delta,
@@ -65,6 +79,6 @@ function cloneDelta(delta: EnvironmentalPropDelta): EnvironmentalPropDelta {
       rotation: [...delta.transformOverride.rotation],
       scale: [...delta.transformOverride.scale],
     } : undefined,
-    payload: delta.payload ? { ...delta.payload } : undefined,
+    payload: delta.payload ? structuredClone(delta.payload) : undefined,
   };
 }

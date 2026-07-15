@@ -15,7 +15,7 @@ export type { GuiDisplayController, VegetationStatControllerRefs, VegetationStar
 
 export function runVegetationStartup(input: VegetationStartupInput): VegetationStartupResult {
   const {
-    app, scene, controls, state, lod0Nodes, worldCells,
+    app, scene, controls, state, lod0Nodes, worldCells, worldSeed, unboundedWorld,
     grassConfig, stoneConfig, treeConfig, understoryConfig,
     queryGrassRingGrid, queryGrassRingCell,
     isWebGpu, rendererWebGpuDevice,
@@ -55,7 +55,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   });
 
   const understory = runUnderstoryStartup({
-    scene, state, lod0Nodes, worldCells, understoryConfig,
+    scene, state, lod0Nodes, worldCells, worldSeed, unboundedWorld, understoryConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers,
     searchParams,

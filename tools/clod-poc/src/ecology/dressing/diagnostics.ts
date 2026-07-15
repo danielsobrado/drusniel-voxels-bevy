@@ -39,3 +39,10 @@ export function createDressingDiagnostics(enabled = true): DressingDiagnostics {
     perClass: Object.fromEntries(DRESSING_CLASSES.map((id) => [id, { generated: 0, accepted: 0, visible: 0 }])) as DressingDiagnostics["perClass"],
   };
 }
+
+export function cloneDressingDiagnostics(source: DressingDiagnostics): DressingDiagnostics {
+  return {
+    ...source,
+    perClass: Object.fromEntries(DRESSING_CLASSES.map((id) => [id, { ...source.perClass[id] }])) as DressingDiagnostics["perClass"],
+  };
+}
