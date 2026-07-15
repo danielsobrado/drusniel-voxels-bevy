@@ -27,7 +27,7 @@ function field(): ErodedMacroField {
 function gpuCheckpoint(): ErosionGpuCheckpoint {
   const width = 2;
   const height = 2;
-  const stateAByteLength = width * height * 7 * Uint32Array.BYTES_PER_ELEMENT;
+  const packedByteLength = width * height * 8 * Uint32Array.BYTES_PER_ELEMENT;
   return {
     kind: "gpu",
     schemaVersion: EROSION_SCHEMA_VERSION,
@@ -45,8 +45,8 @@ function gpuCheckpoint(): ErosionGpuCheckpoint {
       originX: 0,
       originZ: 0,
     },
-    stateAByteLength,
-    stateAChunks: [new Uint8Array(stateAByteLength).fill(7).buffer],
+    packedByteLength,
+    packedChunks: [new Uint8Array(packedByteLength).fill(7).buffer],
   };
 }
 
@@ -95,7 +95,7 @@ describe("erosion artifact store", () => {
     store.close();
   });
 
-  it("round-trips an exact state-A-only GPU checkpoint", async () => {
+  it("round-trips an exact compact GPU checkpoint", async () => {
     const name = `erosion-checkpoint-${crypto.randomUUID()}`;
     const db = await openErosionArtifactDb(indexedDB, name);
     const store = new IndexedDbErosionArtifactStore(db, SOURCE_HASH, CONFIG_HASH);
@@ -104,8 +104,8 @@ describe("erosion artifact store", () => {
     const loaded = await store.loadGpuCheckpoint();
     expect(loaded?.hydraulicIteration).toBe(64);
     expect(loaded?.thermalIteration).toBe(16);
-    expect(new Uint8Array(loaded!.stateAChunks[0]!)[0]).toBe(7);
-    expect("stateBChunks" in loaded!).toBe(false);
+    expect(new Uint8Array(loaded!.packedChunks[0]!)[0]).toBe(7);
+    expect(loaded?.packedByteLength).toBe(checkpoint.packedByteLength);
     await store.clearCheckpoint();
     expect(await store.loadGpuCheckpoint()).toBeNull();
     store.close();
