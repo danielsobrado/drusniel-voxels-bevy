@@ -140,6 +140,13 @@ export interface ErosionArtifact {
   readonly timestampQueriesSupported: boolean;
 }
 
+export interface ErosionArtifactSummary {
+  readonly minHeightM: number;
+  readonly maxHeightM: number;
+  readonly erodedM3: number;
+  readonly depositedM3: number;
+}
+
 export interface ErosionState {
   readonly sourceWidth: number;
   readonly sourceHeight: number;
