@@ -1,6 +1,7 @@
+import { VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_THRESHOLD_M } from "../vegetation/gpu_authority/constants.js";
 import terrainBindings from "./shaders/terrain_field_bindings_terrain.wgsl?raw";
 import terrainCommon from "./shaders/terrain_field_common.wgsl?raw";
-import placementHeight from "./shaders/placement_height.wgsl?raw";
+import placementHeightSource from "./shaders/placement_height.wgsl?raw";
 import terrainEntry from "./shaders/terrain_field_entry.wgsl?raw";
 import grassBindings from "./shaders/terrain_field_bindings_grass.wgsl?raw";
 import grassRingEntry from "./shaders/grass_ring.compute.wgsl?raw";
@@ -30,6 +31,15 @@ import {
   withTreeShadowLodGate,
   withTreeTerrainVisibilityCull,
 } from "./tree_ring_wgsl_transforms.js";
+
+export function withPlacementExcludedHeight(source: string): string {
+  return source.replace(
+    /const PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M: f32 = -?\d+(?:\.\d+)?;/,
+    `const PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M: f32 = ${VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_THRESHOLD_M}.0;`,
+  );
+}
+
+const placementHeight = withPlacementExcludedHeight(placementHeightSource);
 
 export { withTreePcgHash } from "./tree_ring_wgsl_transforms.js";
 

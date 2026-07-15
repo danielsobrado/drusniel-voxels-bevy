@@ -3,7 +3,6 @@ import type { PropCategory } from "../../props/prop_types.js";
 import { VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_M } from "./constants.js";
 
 export interface VegetationAuthorityExclusionConfig {
-  readonly invalidHeightM: number;
   readonly marginM: number;
   readonly unknownPropRadiusM: number;
   readonly propRadiusM: Readonly<Record<PropCategory, number>>;
@@ -47,7 +46,6 @@ export function parseVegetationAuthorityExclusionConfig(source: string): Vegetat
   }
 
   return Object.freeze({
-    invalidHeightM: VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_M,
     marginM: finiteNumber(exclusions.margin_m, "vegetation_authority_exclusions.margin_m", 0),
     unknownPropRadiusM: finiteNumber(
       exclusions.unknown_prop_radius_m,

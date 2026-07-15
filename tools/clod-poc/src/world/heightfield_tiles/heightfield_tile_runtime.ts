@@ -95,7 +95,7 @@ function legacySurfaceOverrideActive(input: CreateHeightfieldTileRuntimeInput): 
     || input.terrainSource.waterConfig.fakeBodies.carveTerrain;
 }
 
-function gpuAtlasIsAuthoritative(input: CreateHeightfieldTileRuntimeInput): boolean {
+export function gpuAtlasIsAuthoritative(input: CreateHeightfieldTileRuntimeInput): boolean {
   if (input.terrainSource.worldMode === "infinite_islands") return true;
   return input.terrainSource.worldMode === "continent"
     && Boolean(input.terrainSource.worldManifest?.artifacts.hydrologyGraph);

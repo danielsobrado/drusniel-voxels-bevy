@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TREE_SPECIES } from "../trees/tree_config.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
+import { VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_THRESHOLD_M } from "../vegetation/gpu_authority/constants.js";
 import grassRingComputeSource from "./grass_ring_compute.ts?raw";
 import stoneScatterComputeSource from "./stone_scatter_compute.ts?raw";
 import treeRingComputeSource from "./tree_ring_compute.ts?raw";
@@ -129,6 +130,9 @@ describe("WGSL module composition", () => {
     for (const source of [composeGrassRingShader(), composeStoneScatterShader(), composeTreeRingShader(), composeUnderstoryRingShader()]) {
       expect(source).toContain("fn placement_ground_height_is_excluded");
       expect(source).toContain("if (placement_ground_height_is_excluded(raw_height)) { return raw_height; }");
+      expect(source).toContain(
+        `const PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M: f32 = ${VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_THRESHOLD_M}.0;`,
+      );
     }
     expect(composeUnderstoryRingShader()).toContain(
       "let base_height = placement_base_ground_height(wpos.x, wpos.y);\n  if (placement_ground_height_is_excluded(base_height)) { return; }",
