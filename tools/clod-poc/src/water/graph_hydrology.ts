@@ -1,5 +1,8 @@
 import { setActiveErodedMacroField, toErodedMacroField } from "../world/erosion/integration.js";
-import { sampleErodedMacroHeight } from "../world/hydrology_graph/hydrology_graph_erosion.js";
+import {
+  containsErodedMacroPosition,
+  sampleErodedMacroHeight,
+} from "../world/hydrology_graph/hydrology_graph_erosion.js";
 import type { HydrologyGraph, HydrologyRiverRecord } from "../world/hydrology_graph/hydrology_graph.js";
 import {
   HYDROLOGY_BODY_DRY,
@@ -135,7 +138,10 @@ function activateErosionAuthority(graph: HydrologyGraph): void {
 }
 
 function canonicalBaseHeight(graph: HydrologyGraph, x: number, z: number, fallback: number): number {
-  return graph.macro.erosion ? sampleErodedMacroHeight(graph.macro.erosion, x, z) : fallback;
+  const erosion = graph.macro.erosion;
+  return erosion && containsErodedMacroPosition(erosion, x, z)
+    ? sampleErodedMacroHeight(erosion, x, z)
+    : fallback;
 }
 
 function lakeAt(graph: HydrologyGraph, x: number, z: number): { index: number; cell: number } {
