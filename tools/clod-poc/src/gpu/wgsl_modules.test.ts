@@ -125,6 +125,16 @@ describe("WGSL module composition", () => {
     }
   });
 
+  it("preserves authority exclusions through coast and hydrology placement", () => {
+    for (const source of [composeGrassRingShader(), composeStoneScatterShader(), composeTreeRingShader(), composeUnderstoryRingShader()]) {
+      expect(source).toContain("fn placement_ground_height_is_excluded");
+      expect(source).toContain("if (placement_ground_height_is_excluded(raw_height)) { return raw_height; }");
+    }
+    expect(composeUnderstoryRingShader()).toContain(
+      "let base_height = placement_base_ground_height(wpos.x, wpos.y);\n  if (placement_ground_height_is_excluded(base_height)) { return; }",
+    );
+  });
+
   it("injects tree ring layout constants from TS layout helpers", () => {
     const source = composeTreeRingShader();
     const layout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
