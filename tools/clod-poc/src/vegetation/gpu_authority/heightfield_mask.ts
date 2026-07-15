@@ -1,14 +1,16 @@
 import customPropsConfigText from "../../../config/custom_props.yaml?raw";
+import exclusionConfigText from "../../../config/vegetation_authority_exclusions.yaml?raw";
 import { defaultConstructionConfig } from "../../construction/config.js";
 import type { PlacedConstructionPiece } from "../../construction/types.js";
 import { projectPropEditStore } from "../../project/prop_edit_store.js";
 import type { ProjectPropInstance } from "../../project/project_props.js";
 import { parseCustomPropsConfig } from "../../props/prop_config.js";
-import type { CustomPropsSettings, PropAssetDef, PropCategory } from "../../props/prop_types.js";
+import type { CustomPropsSettings, PropAssetDef } from "../../props/prop_types.js";
 import { savedPropStore } from "../../save/prop_store.js";
 import type { SavedPropInstance } from "../../save/save_schema.js";
 import {
   getVoxelOverlaySource,
+  proceduralCaveGeometry,
   type VoxelOverlaySource,
   type VoxelVolumeStamp,
 } from "../../terrain/voxel_overlay/voxel_overlay.js";
@@ -21,19 +23,13 @@ import {
   WORLD_TILE_SIZE_M,
   type WorldTileKey,
 } from "../../world/tile_key.js";
+import { VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_M } from "./constants.js";
+import { parseVegetationAuthorityExclusionConfig } from "./heightfield_mask_config.js";
 
-export const VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_M = -1_000_000;
+export { VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_M } from "./constants.js";
 
 const CUSTOM_PROPS = parseCustomPropsConfig(customPropsConfigText);
-const PROP_RADIUS_BY_CATEGORY: Readonly<Record<PropCategory, number>> = Object.freeze({
-  small_decor: 0.75,
-  medium_static: 2,
-  large_static: 5,
-  vegetation: 2,
-  interactive: 1.5,
-});
-const UNKNOWN_PROP_RADIUS_M = 1.5;
-const EXCLUSION_MARGIN_M = 0.35;
+const EXCLUSION_CONFIG = parseVegetationAuthorityExclusionConfig(exclusionConfigText);
 
 type ExclusionSource = "voxel" | "project_prop" | "construction" | "destroyed_prop";
 
@@ -173,17 +169,21 @@ export function voxelFootprints(source: VoxelOverlaySource): readonly ExclusionF
     if (region.caveSystem && !region.caveSystem.authored) {
       for (let index = 0; index < region.caveEntrances.length; index++) {
         const entrance = region.caveEntrances[index]!;
-        const facingLength = Math.hypot(...entrance.facing) || 1;
-        const fx = entrance.facing[0] / facingLength;
-        const fz = entrance.facing[2] / facingLength;
-        const length = 22 + seededUnit(region.caveSystem.proceduralSeed, index * 2 + 1) * 10;
-        const radius = 3.25 + seededUnit(region.caveSystem.proceduralSeed, index * 2 + 2) * 1.25;
-        const startX = entrance.position[0] - fx * 2;
-        const startZ = entrance.position[2] - fz * 2;
-        const endX = entrance.position[0] + fx * length;
-        const endZ = entrance.position[2] + fz * length;
-        footprints.push(capsule(startX, startZ, endX, endZ, radius, "voxel"));
-        footprints.push(circle(endX, endZ, radius * 2.2, "voxel"));
+        const geometry = proceduralCaveGeometry(region.caveSystem, entrance, index);
+        footprints.push(capsule(
+          geometry.start[0],
+          geometry.start[2],
+          geometry.end[0],
+          geometry.end[2],
+          geometry.tunnelRadiusM,
+          "voxel",
+        ));
+        footprints.push(circle(
+          geometry.end[0],
+          geometry.end[2],
+          geometry.chamberRadiusM,
+          "voxel",
+        ));
       }
     }
     for (const stamp of region.stamps) {
@@ -212,7 +212,7 @@ export function constructionFootprints(snapshot: string): readonly ExclusionFoot
     if (!piece) continue;
     const radiusM = Math.hypot(piece.dimensionsM[0] * 0.5, piece.dimensionsM[2] * 0.5)
       + defaultConstructionConfig.placement.overlapPaddingM
-      + EXCLUSION_MARGIN_M;
+      + EXCLUSION_CONFIG.marginM;
     footprints.push(circle(entry.position[0], entry.position[2], radiusM, "construction"));
   }
   return Object.freeze(footprints);
@@ -248,8 +248,8 @@ function propFootprint(
   const flattenRadius = asset?.placement.flattenRadius;
   const baseRadius = flattenRadius !== undefined && flattenRadius > 0
     ? flattenRadius
-    : asset ? PROP_RADIUS_BY_CATEGORY[asset.category] : UNKNOWN_PROP_RADIUS_M;
-  return circle(prop.position[0], prop.position[2], baseRadius * scale + EXCLUSION_MARGIN_M, source);
+    : asset ? EXCLUSION_CONFIG.propRadiusM[asset.category] : EXCLUSION_CONFIG.unknownPropRadiusM;
+  return circle(prop.position[0], prop.position[2], baseRadius * scale + EXCLUSION_CONFIG.marginM, source);
 }
 
 function carveStampFootprint(stamp: VoxelVolumeStamp): ExclusionFootprint | null {
@@ -393,14 +393,6 @@ function clampSampleIndex(value: number): number {
 
 function tileKey(key: WorldTileKey): string {
   return `${key.x},${key.z}`;
-}
-
-function seededUnit(seed: number, salt: number): number {
-  let value = (seed ^ Math.imul(salt, 0x9e3779b1)) >>> 0;
-  value ^= value >>> 16;
-  value = Math.imul(value, 0x7feb352d) >>> 0;
-  value ^= value >>> 15;
-  return value / 0xffff_ffff;
 }
 
 function readConstructionSnapshot(): string {
