@@ -198,6 +198,49 @@ describe("ecological dressing runtime", () => {
     system.dispose();
   });
 
+  it("aligns accepted driftwood with canonical hydrology flow", () => {
+    const scene = new THREE.Scene();
+    const config: DressingConfig = {
+      ...DEFAULT_DRESSING_CONFIG,
+      densities: { ...DEFAULT_DRESSING_CONFIG.densities, driftwoodPer100m: 10_000 },
+    };
+    const hydrologySystem = {
+      sample: () => ({
+        terrainY: 20,
+        depth: 0,
+        shoreDistance: 1,
+        flowX: 1,
+        flowZ: 0,
+        moisture: 0.8,
+        riverMask: 1,
+        flowStrength: 1,
+      }),
+      terrainHeight: () => 20,
+    };
+    const system = new DressingSystem({
+      scene,
+      worldCells: 96,
+      worldSeed: 19,
+      config,
+      hydrologySystem: hydrologySystem as never,
+      quality: "ultra",
+      maximumInstances: 4_000,
+    });
+    const matrix = new THREE.Matrix4();
+    for (const classId of ["large_driftwood", "small_driftwood"] as const) {
+      const mesh = scene.getObjectByName(`dressing:${classId}`) as THREE.InstancedMesh;
+      expect(mesh).toBeDefined();
+      for (let index = 0; index < mesh.count; index++) {
+        mesh.getMatrixAt(index, matrix);
+        const elements = matrix.elements;
+        const x = Math.abs(elements[0]);
+        const z = Math.abs(elements[2]);
+        expect(Math.min(x, z)).toBeLessThan(1e-5);
+      }
+    }
+    system.dispose();
+  });
+
   it("reuses authored geometry across residency refreshes", () => {
     const scene = new THREE.Scene();
     const config: DressingConfig = {
