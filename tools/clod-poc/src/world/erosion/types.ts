@@ -200,8 +200,8 @@ export interface ErosionGpuCheckpoint {
   readonly hydraulicIteration: number;
   readonly thermalIteration: number;
   readonly initial: ErosionGpuInitialMetadata;
-  readonly stateAByteLength: number;
-  readonly stateAChunks: readonly ArrayBuffer[];
+  readonly packedByteLength: number;
+  readonly packedChunks: readonly ArrayBuffer[];
 }
 
 export type ErosionCheckpoint = ErosionCpuCheckpoint | ErosionGpuCheckpoint;
