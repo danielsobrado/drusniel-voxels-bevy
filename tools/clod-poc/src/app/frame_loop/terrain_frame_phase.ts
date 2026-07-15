@@ -32,6 +32,7 @@ let liveBubbleProbeBuiltTotal = 0;
 let liveBubbleProbeEvictionsTotal = 0;
 let liveBubbleProbeColliderRemovalsTotal = 0;
 let liveBubbleProbeCpuWorkUnitMaxMs = 0;
+let liveBubbleProbeGpuApplyMaxMs = 0;
 
 interface TerrainFadeView {
   node: Pick<ClodPageNode, "id" | "mesh" | "rootTransition">;
@@ -113,6 +114,7 @@ function resetLiveBubbleCounterMirrors(): void {
   counters["live_bubble_probe_evictions_total"] = 0;
   counters["live_bubble_probe_collider_removals_total"] = 0;
   counters["live_bubble_probe_cpu_work_unit_max_ms"] = 0;
+  counters["live_bubble_probe_gpu_apply_max_ms"] = 0;
 }
 
 export function beginLiveBubbleMovementProbe(): void {
@@ -123,6 +125,7 @@ export function beginLiveBubbleMovementProbe(): void {
   liveBubbleProbeEvictionsTotal = 0;
   liveBubbleProbeColliderRemovalsTotal = 0;
   liveBubbleProbeCpuWorkUnitMaxMs = 0;
+  liveBubbleProbeGpuApplyMaxMs = 0;
   liveBubbleLastColliderRemovals = Number.isFinite(currentColliderRemovals) ? currentColliderRemovals! : null;
   resetLiveBubbleCounterMirrors();
 }
@@ -142,6 +145,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
     liveBubbleProbeEvictionsTotal += stats.evictions;
     liveBubbleProbeColliderRemovalsTotal += colliderRemovalDelta;
     liveBubbleProbeCpuWorkUnitMaxMs = Math.max(liveBubbleProbeCpuWorkUnitMaxMs, stats.cpuWorkUnitMaxMs);
+    liveBubbleProbeGpuApplyMaxMs = Math.max(liveBubbleProbeGpuApplyMaxMs, stats.gpuApplyMaxMs);
   }
   counters["live_bubble_required_pages"] = stats.requiredPages;
   counters["live_bubble_ready_pages"] = stats.readyPages;
@@ -173,6 +177,8 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_collider_ready_pages"] = stats.colliderReadyPages;
   counters["live_bubble_collider_skipped_pages"] = stats.colliderSkippedPages;
   counters["live_bubble_cpu_work_unit_max_ms"] = stats.cpuWorkUnitMaxMs;
+  counters["live_bubble_gpu_apply_max_ms"] = stats.gpuApplyMaxMs;
+  counters["live_bubble_probe_gpu_apply_max_ms"] = liveBubbleProbeGpuApplyMaxMs;
   counters["live_bubble_probe_active"] = liveBubbleProbeActive ? 1 : 0;
   counters["live_bubble_probe_built_total"] = liveBubbleProbeBuiltTotal;
   counters["live_bubble_probe_evictions_total"] = liveBubbleProbeEvictionsTotal;

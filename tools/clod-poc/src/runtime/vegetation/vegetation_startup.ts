@@ -1,5 +1,6 @@
 import { initHydrologyAtlasGpu, resetHydrologyAtlasGpu } from "../../gpu/hydrology_atlas_gpu.js";
 import { refreshVegetationAuthorityHeightfieldMask } from "../../vegetation/gpu_authority/heightfield_mask.js";
+import { resolveVegetationTerrainRejectionConfig } from "../../vegetation/terrain_rejection_config.js";
 import { resolveVegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import { runGrassStartup } from "./grass_startup.js";
 import { runStoneStartup } from "./stone_startup.js";
@@ -25,14 +26,14 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   } = input;
 
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
-  const cpuOracleEnabled = enabledFlag(searchParams?.get("gpuEarlyReject"));
+  const rejectionConfig = resolveVegetationTerrainRejectionConfig(searchParams ?? undefined);
   const treeAuthorityConfig = {
     ...treeConfig,
     gpu: {
       ...treeConfig.gpu,
       terrainVisibility: {
         ...treeConfig.gpu.terrainVisibility,
-        enabled: cpuOracleEnabled,
+        enabled: rejectionConfig.enabled,
       },
     },
   };
@@ -83,8 +84,4 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
     formatTreeGpuSummary: tree.formatTreeGpuSummary,
     formatUnderstoryGpuSummary: understory.formatUnderstoryGpuSummary,
   };
-}
-
-function enabledFlag(value: string | null | undefined): boolean {
-  return value === "1" || value === "true" || value === "on";
 }

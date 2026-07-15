@@ -632,6 +632,38 @@ describe("createNearFieldBubbleController", () => {
     expect(stats.colliderRegistrations).toBe(4);
   });
 
+  it("defers GPU chunk application to the frame-budgeted drain, not the completion microtask", async () => {
+    const mesher = {
+      meshChunk: vi.fn(() => Promise.resolve(NON_EMPTY_CHUNK)),
+    };
+    const controller = makeController({
+      getGpuMesher: () => mesher as unknown as GpuChunkMesher,
+      streamingLiveTerrain: true,
+    });
+    const input = {
+      enabled: true,
+      bubbleRadius: 1,
+      bubbleCenter: new THREE.Vector3(48, 0, 48),
+      bubbleViews: [],
+      getView: () => undefined,
+      frameId: 1,
+    };
+
+    controller.update(input);
+    await flushPromises();
+
+    // Chunks have resolved in the microtask, but the expensive apply is deferred: nothing is in
+    // the scene group yet.
+    const entry = [...controller.chunkGroupValues()][0]!;
+    expect(entry.group.children.length).toBe(0);
+
+    const stats = controller.update({ ...input, frameId: 2 });
+
+    // The budgeted in-frame drain turned the resolved chunks into scene objects.
+    expect(entry.group.children.length).toBeGreaterThan(0);
+    expect(stats.gpuApplyMaxMs).toBeGreaterThanOrEqual(0);
+  });
+
   it("lets visual pages outside the collider radius become ready without registering colliders", async () => {
     vi.stubGlobal("window", { location: { search: "?liveBubbleGpuChunkBudget=4&liveBubbleColliderRadius=1" } });
     const mesher = {

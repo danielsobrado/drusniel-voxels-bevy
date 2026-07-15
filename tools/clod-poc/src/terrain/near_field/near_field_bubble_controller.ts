@@ -31,6 +31,8 @@ const DEFAULT_GPU_CHUNK_DISPATCH_BUDGET = 2;
 const DEFAULT_GPU_MAX_INFLIGHT_CHUNKS = Number.MAX_SAFE_INTEGER;
 const GPU_PAGE_RETRY_LIMIT = 3;
 const GPU_PAGE_RETRY_DELAY_FRAMES = 12;
+/** Per-frame budget for turning completed GPU chunk meshes into scene objects + colliders. */
+const GPU_APPLY_BUDGET_MS = 2;
 
 export interface ChunkGroupEntry {
   group: THREE.Group;
@@ -92,6 +94,7 @@ export interface NearFieldBubbleStats {
   colliderReadyPages: number;
   colliderSkippedPages: number;
   cpuWorkUnitMaxMs: number;
+  gpuApplyMaxMs: number;
 }
 
 export interface NearFieldBubbleControllerDeps {
@@ -370,6 +373,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
   const gpuWaitBuilds = new Map<string, PendingGpuWaitPageBuild>();
   const gpuPendingBuilds = new Map<string, PendingGpuPageBuild>();
+  const gpuApplyQueue: Array<{ key: string; entry: ChunkGroupEntry; job: PendingGpuPageBuild; dx: number; dz: number; cm: ChunkMesh }> = [];
   const requiredCoordCache = createRequiredStreamingPageCoordCache();
   const terrainColliders = deps.terrainColliders ?? null;
   const pageRevisions = new Map<string, number>();
@@ -385,6 +389,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   let currentColliderRadius: number | null = null;
   let lastEvictionCenterPage = "";
   let cpuWorkUnitMaxMsThisFrame = 0;
+  let gpuApplyMaxMsThisFrame = 0;
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
     (node.footprint.minX + node.footprint.maxX) / 2,
@@ -668,6 +673,33 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return inflightChunks;
   };
 
+  // Turn completed GPU chunk meshes into scene objects + colliders under a per-frame budget.
+  // Always applies at least one queued chunk so streaming keeps making progress even when the
+  // budget is tight; the deadline check runs after each apply so a single expensive chunk cannot
+  // be starved forever.
+  const drainGpuApplyQueue = (deadlineMs: number) => {
+    while (gpuApplyQueue.length > 0) {
+      const { key, entry, job, dx, dz, cm } = gpuApplyQueue.shift()!;
+      if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) {
+        const applyStartedAt = performance.now();
+        job.meshChunks++;
+        addChunkMesh(
+          entry.group,
+          entry.mats,
+          entry.unsubs,
+          entry.colliderIds,
+          cm,
+          chunkColliderId(key, dx, dz),
+          liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
+          dz * P + dx,
+        );
+        gpuApplyMaxMsThisFrame = Math.max(gpuApplyMaxMsThisFrame, performance.now() - applyStartedAt);
+      }
+      completeGpuChunk(key, entry, job);
+      if (performance.now() >= deadlineMs) break;
+    }
+  };
+
   const drainGpuPendingBuilds = () => {
     let dispatched = 0;
     let inflightChunks = countGpuInflightChunks();
@@ -702,24 +734,19 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           .then((cm) => {
             totalChunkMs += performance.now() - chunkStartedAt;
             completedChunks++;
-            if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) {
-              if (cm.indices.length > 0) {
-                job.meshChunks++;
-                addChunkMesh(
-                  entry.group,
-                  entry.mats,
-                  entry.unsubs,
-                  entry.colliderIds,
-                  cm,
-                  chunkColliderId(key, dx, dz),
-                  liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
-                  dz * P + dx,
-                );
-              } else {
-                job.emptyChunks++;
-                if (terrainColliders && !liveStreamingEnabled) {
-                  enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
-                }
+            const current = chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job;
+            if (current && cm.indices.length > 0) {
+              // Defer the expensive geometry/material/collider build to the frame-budgeted apply
+              // drain so a burst of GPU completions landing in one microtask flush cannot spike the
+              // main thread here. Inflight stays held until the mesh is actually applied, so the
+              // page cannot be reported ready before its objects exist.
+              gpuApplyQueue.push({ key, entry, job, dx, dz, cm });
+              return;
+            }
+            if (current) {
+              job.emptyChunks++;
+              if (terrainColliders && !liveStreamingEnabled) {
+                enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
               }
             }
             completeGpuChunk(key, entry, job);
@@ -886,6 +913,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     update(input) {
       const tBubbleStart = performance.now();
       cpuWorkUnitMaxMsThisFrame = 0;
+      gpuApplyMaxMsThisFrame = 0;
       currentFrame = input.frameId;
       currentBubbleCenter = input.bubbleCenter;
       currentColliderRadius = colliderRadiusOverride;
@@ -939,6 +967,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         }
 
         promoteGpuWaitBuilds();
+        drainGpuApplyQueue(performance.now() + GPU_APPLY_BUDGET_MS);
         drainGpuPendingBuilds();
         drainCpuPendingBuilds(tBubbleStart);
         const centerPage = `${Math.floor(input.bubbleCenter.x / pageSize)},${Math.floor(input.bubbleCenter.z / pageSize)}:${input.bubbleRadius}`;
@@ -987,6 +1016,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         colliderReadyPages: required.colliderReadyPages,
         colliderSkippedPages: required.colliderSkippedPages,
         cpuWorkUnitMaxMs: cpuWorkUnitMaxMsThisFrame,
+        gpuApplyMaxMs: gpuApplyMaxMsThisFrame,
       };
     },
     invalidatePage(nodeId) {

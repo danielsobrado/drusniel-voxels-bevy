@@ -379,6 +379,7 @@ export function createStreamedNearFieldBubbleController(deps: StreamedNearFieldB
         colliderReadyPages: required.colliderReadyPages,
         colliderSkippedPages: required.colliderSkippedPages,
         cpuWorkUnitMaxMs: 0,
+        gpuApplyMaxMs: 0,
       };
     },
     invalidatePage(nodeId: string): void {

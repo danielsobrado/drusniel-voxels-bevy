@@ -38,6 +38,7 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
   colliderReadyPages: 0,
   colliderSkippedPages: 0,
   cpuWorkUnitMaxMs: 0,
+  gpuApplyMaxMs: 0,
 };
 
 function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePhaseInput {

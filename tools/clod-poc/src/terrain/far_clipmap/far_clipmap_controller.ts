@@ -508,7 +508,10 @@ class FarClipmapControllerImpl implements FarClipmapController {
   setVisible(visible: boolean): void {
     this.visible = visible;
     for (const ring of this.rings) {
-      const ringReady = Number.isFinite(ring.readySnapX) && Number.isFinite(ring.readySnapZ);
+      const ringReady = ring.sourceUploadChannel === null
+        && ring.pendingSourceRefresh === null
+        && Number.isFinite(ring.readySnapX)
+        && Number.isFinite(ring.readySnapZ);
       ring.mesh.visible = visible && this.config.enabled && ringReady;
     }
   }
