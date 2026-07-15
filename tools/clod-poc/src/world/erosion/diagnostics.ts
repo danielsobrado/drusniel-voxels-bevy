@@ -1,14 +1,17 @@
-import { HEIGHT_UNITS_PER_METER, SEDIMENT_UNITS_PER_METER } from "./constants.js";
+import { EROSION_SCHEMA_VERSION, HEIGHT_UNITS_PER_METER, SEDIMENT_UNITS_PER_METER } from "./constants.js";
 import type { ErosionArtifact, ErosionArtifactSummary, ErosionDiagnostics, ErodedMacroField } from "./types.js";
 
 const EMPTY: ErosionDiagnostics = {
   erosion_enabled: 0,
-  erosion_schema_version: 1,
+  erosion_schema_version: EROSION_SCHEMA_VERSION,
   erosion_artifact_cache_hit: 0,
   erosion_artifact_bytes: 0,
   erosion_build_ms: 0,
+  erosion_sampling_ms: 0,
   erosion_gpu_ms: 0,
   erosion_readback_ms: 0,
+  erosion_finalize_ms: 0,
+  erosion_persistence_ms: 0,
   erosion_checkpoint_count: 0,
   erosion_progress_percent: 0,
   erosion_height_min_m: 0,
@@ -20,6 +23,7 @@ const EMPTY: ErosionDiagnostics = {
   erosion_gpu_timestamp_supported: 0,
   erosion_gpu_checkpoint_bytes: 0,
   erosion_gpu_checkpoint_resume: 0,
+  erosion_gpu_checkpoint_persistence_failures: 0,
   erosion_main_thread_max_slice_ms: 0,
   erosion_artifact_hash_prefix: "",
 };
@@ -74,10 +78,13 @@ export function recordErosionArtifact(
     ...diagnostics,
     erosion_enabled: diagnostics.erosion_enabled,
     erosion_artifact_cache_hit: cacheHit ? 1 : 0,
-    erosion_artifact_bytes: artifact.compressedBytes.byteLength,
+    erosion_artifact_bytes: artifact.artifactBytes,
     erosion_build_ms: artifact.buildMs,
+    erosion_sampling_ms: artifact.samplingMs,
     erosion_gpu_ms: artifact.gpuMs,
     erosion_readback_ms: artifact.readbackMs,
+    erosion_finalize_ms: artifact.finalizeMs,
+    erosion_persistence_ms: artifact.persistenceMs,
     erosion_checkpoint_count: artifact.checkpointCount,
     erosion_progress_percent: 100,
     erosion_height_min_m: summary.minHeightM,
@@ -99,6 +106,11 @@ export function recordCpuGpuMismatch(count: number): void {
 export function recordGpuCheckpoint(byteLength: number, resumed = false): void {
   diagnostics.erosion_gpu_checkpoint_bytes = Math.max(0, byteLength);
   if (resumed) diagnostics.erosion_gpu_checkpoint_resume = 1;
+  publish();
+}
+
+export function recordGpuCheckpointPersistenceFailure(): void {
+  diagnostics.erosion_gpu_checkpoint_persistence_failures++;
   publish();
 }
 
