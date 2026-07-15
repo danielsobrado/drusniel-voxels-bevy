@@ -104,7 +104,7 @@ Create a single registry in:
 tools/clod-poc/src/ecology/dressing/class_registry.ts
 ```
 
-The registry defines exactly these 27 classes:
+The registry defines exactly these 29 classes:
 
 ```ts
 export const DRESSING_CLASSES = [
