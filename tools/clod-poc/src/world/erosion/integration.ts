@@ -2,16 +2,32 @@ import { sha256Hex } from "../../cache/checksum.js";
 import { HARDNESS_MAX, SEDIMENT_UNITS_PER_METER } from "./constants.js";
 import type { ErodedMacroField, ErosionArtifactRef, ErosionMaterialChannels, SerializedErodedMacroField } from "./types.js";
 
-let activeField: ErodedMacroField | null = null;
+interface ActiveErosionAuthority {
+  readonly worldId: string | null;
+  readonly field: ErodedMacroField;
+}
+
+let activeAuthority: ActiveErosionAuthority | null = null;
 let latestArtifactRef: ErosionArtifactRef | null = null;
 let latestArtifactWorldId: string | null = null;
 
-export function setActiveErodedMacroField(field: ErodedMacroField | null): void {
-  activeField = field;
+export function setActiveErodedMacroField(field: ErodedMacroField | null, worldId: string | null = null): void {
+  activeAuthority = field ? Object.freeze({ field, worldId }) : null;
 }
 
-export function getActiveErodedMacroField(): ErodedMacroField | null {
-  return activeField;
+export function clearActiveErodedMacroField(worldId?: string): void {
+  if (worldId === undefined || activeAuthority?.worldId === worldId) activeAuthority = null;
+}
+
+export function getActiveErodedMacroField(worldId?: string): ErodedMacroField | null {
+  if (!activeAuthority) return null;
+  return worldId === undefined || activeAuthority.worldId === null || activeAuthority.worldId === worldId
+    ? activeAuthority.field
+    : null;
+}
+
+export function getActiveErosionWorldId(): string | null {
+  return activeAuthority?.worldId ?? null;
 }
 
 export function setLatestErosionArtifactRef(ref: ErosionArtifactRef | null, worldId: string | null = null): void {
@@ -79,7 +95,18 @@ export function collectSerializedErosionTransferables(field: SerializedErodedMac
   return [field.heightFixed.buffer, field.hardness.buffer, field.sediment.buffer, field.deposition.buffer];
 }
 
-export function sampleErosionMaterialChannels(field: ErodedMacroField, x: number, z: number): ErosionMaterialChannels {
+function containsWorldPosition(field: ErodedMacroField, x: number, z: number): boolean {
+  const maxX = field.originX + (field.width - 1) * field.cellSizeM;
+  const maxZ = field.originZ + (field.height - 1) * field.cellSizeM;
+  return x >= field.originX && x <= maxX && z >= field.originZ && z <= maxZ;
+}
+
+export function sampleErosionMaterialChannels(
+  field: ErodedMacroField,
+  x: number,
+  z: number,
+): ErosionMaterialChannels | null {
+  if (!containsWorldPosition(field, x, z)) return null;
   const gx = Math.max(0, Math.min(field.width - 1, Math.round((x - field.originX) / field.cellSizeM)));
   const gz = Math.max(0, Math.min(field.height - 1, Math.round((z - field.originZ) / field.cellSizeM)));
   const index = gz * field.width + gx;
@@ -91,7 +118,7 @@ export function sampleErosionMaterialChannels(field: ErodedMacroField, x: number
 }
 
 export function sampleActiveErosionMaterialChannels(x: number, z: number): ErosionMaterialChannels | null {
-  return activeField ? sampleErosionMaterialChannels(activeField, x, z) : null;
+  return activeAuthority ? sampleErosionMaterialChannels(activeAuthority.field, x, z) : null;
 }
 
 const encoder = new TextEncoder();
