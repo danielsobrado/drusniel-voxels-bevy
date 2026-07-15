@@ -234,7 +234,7 @@ export function createErosionWorkerClient(): ErosionWorkerClient | null {
           configHash: checkpoint.configHash,
           checkpoint,
         }),
-        transfer: [...checkpoint.stateAChunks],
+        transfer: [...checkpoint.packedChunks],
       });
     },
     clearCheckpoint(input) {
