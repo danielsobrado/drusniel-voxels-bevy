@@ -15,7 +15,7 @@ function straightBranch(segs: number, len: number, baseR: number): SkelBranch {
     radii.push(Math.max(0.01, baseR * (1 - t)));
     dirs.push(new THREE.Vector3(0, 1, 0));
   }
-  return { level: 0, pts, radii, dirs, len, tParent: 0, broken: false };
+  return { level: 0, phase: 0.25, pts, radii, dirs, len, tParent: 0, broken: false };
 }
 
 describe("veg tube mesh", () => {

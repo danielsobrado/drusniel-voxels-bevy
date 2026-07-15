@@ -246,6 +246,20 @@ describe("tree GPU ring shader source", () => {
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z");
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w");
   });
+
+  it("writes the canonical 96-byte tree record with inline morphology", () => {
+    expect(treeRingShader).toContain("const TREE_INSTANCE_VEC4S: u32 = 6u");
+    expect(treeRingShader).toContain("struct VegetationTreeInstance");
+    expect(treeRingShader).toContain("out_cell[base + 5u] = record.morphology2");
+    expect(treeRingShader).toContain("out_shadow_cell[base + 5u] = record.morphology2");
+    expect(treeRingShader).toContain("MORPH_FOLIAGE_CARD_CHANNEL: u32 = 0x1109u");
+  });
+
+  it("samples competition from world positions with the same species channel as the CPU oracle", () => {
+    expect(treeRingShader).toContain("fn tree_competition_sample(wpos: vec2<f32>, species: u32)");
+    expect(treeRingShader).toContain("floor((wpos + direction * radius_m) / max(params.settings_a.x, 0.001))");
+    expect(treeRingShader).toContain("params.settings_u.z ^ 0x1005u ^ species");
+  });
 });
 
 describe("tree GPU ring material source", () => {

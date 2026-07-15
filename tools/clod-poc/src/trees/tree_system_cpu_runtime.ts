@@ -36,6 +36,7 @@ import {
   writeTreeImpostorLocalPositionScaleIfChanged,
   writeTreeImpostorUvRectIfChanged,
   writeTreeLodDitherRoleIfChanged,
+  writeTreeMorphologyIfChanged,
   writeTreeLodFadeIfChanged,
   writeTreeWorldXZIfChanged,
   type TreeLodDitherRole,
@@ -390,6 +391,7 @@ function placeTreeInstance(
   if (writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2])) markTreeMeshWorldXZChanged(effectiveMesh, write);
   if (writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole)) markTreeMeshFadeChanged(effectiveMesh, write);
+  if (writeTreeMorphologyIfChanged(effectiveMesh, effectiveIndex, instance)) markTreeMeshWorldXZChanged(effectiveMesh, write);
   if (renderLod === "impostor") {
     if (writeTreeImpostorLocalPositionScaleIfChanged(effectiveMesh, effectiveIndex, localX, localY, localZ, instance.scale)) markTreeMeshWorldXZChanged(effectiveMesh, write);
     if (writeTreeImpostorUvRectIfChanged({ mesh: effectiveMesh, index: effectiveIndex, instance, cameraPosition, settings: input.settings, impostorAtlases: input.impostorAtlases })) markTreeMeshImpostorUvChanged(effectiveMesh, write);

@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { TREE_LODS, TREE_SPECIES } from "./tree_config.js";
 import { DEFAULT_TREE_SETTINGS } from "./tree_config.js";
@@ -26,7 +27,7 @@ describe("tree variant geometry map", () => {
           expect(packedWind?.itemSize).toBe(3);
           expect(packedWind?.getZ(0)).toBe(treeSpeciesAtlasIndex(species));
           expect(selector.getAttribute("treeSpeciesIndex")).toBeUndefined();
-          expect(Object.keys(selector.attributes).length).toBeLessThanOrEqual(WEBGPU_MIN_MAX_VERTEX_BUFFERS);
+          expect(uniqueVertexBufferCount(selector)).toBeLessThanOrEqual(WEBGPU_MIN_MAX_VERTEX_BUFFERS);
           expect(treeGeometryVariant(map, species, 0, lod)).toBe(map[species].variants[0][lod]);
         }
       }
@@ -70,3 +71,11 @@ describe("tree variant geometry map", () => {
     }
   }, 30000);
 });
+
+function uniqueVertexBufferCount(geometry: THREE.BufferGeometry): number {
+  const buffers = new Set<unknown>();
+  for (const attribute of Object.values(geometry.attributes)) {
+    buffers.add(attribute instanceof THREE.InterleavedBufferAttribute ? attribute.data : attribute);
+  }
+  return buffers.size;
+}

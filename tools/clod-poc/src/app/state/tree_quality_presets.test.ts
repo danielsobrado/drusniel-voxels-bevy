@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyTreeQualityPreset,
   isTreeShadowMaxLod,
+  treeImpostorTileResolutionForQualityPreset,
   treeLodBudgetsForQualityPreset,
   type TreeQualityPresetState,
 } from "./tree_quality_presets.js";
@@ -83,5 +84,13 @@ describe("tree quality presets", () => {
     expect(treeLodBudgetsForQualityPreset("perf", fallback).nearMaxVertices).toBeLessThan(fallback.nearMaxVertices);
     expect(treeLodBudgetsForQualityPreset("potato", fallback).nearMaxVertices)
       .toBeLessThan(treeLodBudgetsForQualityPreset("perf", fallback).nearMaxVertices);
+  });
+
+  it("binds impostor tile size to the canonical quality token", () => {
+    expect(treeImpostorTileResolutionForQualityPreset("ultra", 17)).toBe(96);
+    expect(treeImpostorTileResolutionForQualityPreset("balanced", 17)).toBe(64);
+    expect(treeImpostorTileResolutionForQualityPreset("perf", 17)).toBe(48);
+    expect(treeImpostorTileResolutionForQualityPreset("potato", 17)).toBe(32);
+    expect(treeImpostorTileResolutionForQualityPreset("custom", 17)).toBe(17);
   });
 });

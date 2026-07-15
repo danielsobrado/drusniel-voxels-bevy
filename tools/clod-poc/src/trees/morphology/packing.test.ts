@@ -11,10 +11,10 @@ import type { TreeInstanceMorphology } from "./types.js";
 
 const morphology: TreeInstanceMorphology = {
   age01: 0.4,
-  leanX: -0.1,
-  leanZ: 0.2,
-  crownBiasX: -0.2,
-  crownBiasZ: 0.3,
+  leanX: -0.08,
+  leanZ: 0.16,
+  crownBiasX: -0.15,
+  crownBiasZ: 0.2,
   crownWidth: 1.1,
   crownFlattening: 0.9,
   branchDroop: 0.1,
@@ -29,11 +29,14 @@ describe("tree morphology packing", () => {
     const packed = packTreeInstanceMorphology(morphology);
     expect(packed).toHaveLength(MORPHOLOGY_FLOATS);
     expect(Array.from(packed)).toEqual([
-      expect.closeTo(0.4), expect.closeTo(-0.1), expect.closeTo(0.2), expect.closeTo(0.7),
-      expect.closeTo(-0.2), expect.closeTo(0.3), expect.closeTo(1.1), expect.closeTo(0.9),
+      expect.closeTo(0.4), expect.closeTo(-0.08), expect.closeTo(0.16), expect.closeTo(0.7),
+      expect.closeTo(-0.15), expect.closeTo(0.2), expect.closeTo(1.1), expect.closeTo(0.9),
       expect.closeTo(0.1), expect.closeTo(0.8), expect.closeTo(1.2), expect.closeTo(0.95),
     ]);
-    expect(unpackTreeInstanceMorphology(packed)).toEqual(expect.objectContaining(morphology));
+    const unpacked = unpackTreeInstanceMorphology(packed);
+    for (const key of Object.keys(morphology) as (keyof TreeInstanceMorphology)[]) {
+      expect(unpacked[key]).toBeCloseTo(morphology[key], 6);
+    }
   });
 
   it("packs the canonical 96-byte record without a side buffer", () => {
@@ -49,10 +52,10 @@ describe("tree morphology packing", () => {
   });
 
   it("clamps malformed values before packing and after unpacking", () => {
-    const malformed = { ...morphology, age01: 99, leanX: -99, stiffness: Number.NaN };
+    const malformed = { ...morphology, age01: 99, leanX: -99, leanZ: 0, stiffness: Number.NaN };
     const unpacked = unpackTreeInstanceMorphology(packTreeInstanceMorphology(malformed));
     expect(unpacked.age01).toBe(1);
-    expect(unpacked.leanX).toBe(-0.22);
-    expect(unpacked.stiffness).toBe(0.65);
+    expect(unpacked.leanX).toBeCloseTo(-0.22, 6);
+    expect(unpacked.stiffness).toBeCloseTo(0.65, 6);
   });
 });

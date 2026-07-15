@@ -70,3 +70,21 @@ export * from "./tree_system_stats.js";
 export * from "./tree_system_write_state.js";
 export * from "./tree_system.js";
 export * from "./tree_info.js";
+export * from "./morphology/constants.js";
+export type {
+  TreeIdentity,
+  TreeInstanceMorphology,
+  TreeTerrainSample,
+  TreeCompetitionSample,
+  TreeVertexMorphologyAttributes,
+  TreeMorphologyRuntimeSettings,
+  TreeCompetitionInput,
+  TreeEcologySample as TreeInstanceMorphologyEcologySample,
+} from "./morphology/types.js";
+export * from "./morphology/derive.js";
+export * from "./morphology/competition.js";
+export * from "./morphology/packing.js";
+export * from "./morphology/deformation_reference.js";
+export * from "./morphology/impostor_layers.js";
+export * from "./morphology/diagnostics.js";
+export * from "./morphology/validation.js";

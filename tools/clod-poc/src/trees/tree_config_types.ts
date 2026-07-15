@@ -33,6 +33,7 @@ export interface TreeSpeciesSettings {
   trunkRadiusM: number;
   crownRadiusM: number;
   morphology: TreeSpeciesMorphologySettings;
+  morphologyRuntime: TreeSpeciesMorphologyRuntimeSettings;
   minScale?: number;
   maxScale?: number;
   minSlopeY?: number;
@@ -44,6 +45,18 @@ export interface TreeSpeciesSettings {
   altitudePreference?: "lowland" | "mid" | "highland" | "any";
   materialWeights?: Partial<Record<MaterialClass, number>>;
   tint?: string;
+}
+
+export interface TreeSpeciesMorphologyRuntimeSettings {
+  slopeLean: number;
+  windLean: number;
+  randomLean: number;
+  exposureFlattening: number;
+  ageFlattening: number;
+  baseDroop: number;
+  ageDroop: number;
+  moistureDroop: number;
+  baseStiffness: number;
 }
 
 export interface TreeSpeciesMorphologySettings {

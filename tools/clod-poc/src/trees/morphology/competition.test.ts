@@ -14,8 +14,8 @@ describe("tree competition and impostor morphology", () => {
 
   it("continuously blends the nearest age layers", () => {
     expect(impostorAgeLayerBlend(0.2)).toEqual({ lowerBucket: 0, upperBucket: 0, blend: 0 });
-    expect(impostorAgeLayerBlend(0.4)).toEqual({ lowerBucket: 0, upperBucket: 1, blend: 0.5 });
-    expect(impostorAgeLayerBlend(0.76)).toEqual({ lowerBucket: 1, upperBucket: 2, blend: 0.5 });
+    expect(impostorAgeLayerBlend(0.4)).toEqual({ lowerBucket: 0, upperBucket: 1, blend: expect.closeTo(0.5) });
+    expect(impostorAgeLayerBlend(0.76)).toEqual({ lowerBucket: 1, upperBucket: 2, blend: expect.closeTo(0.5) });
     expect(impostorLayerIndex(3, 2)).toBe(11);
   });
 });

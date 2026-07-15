@@ -2,20 +2,17 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   attribute,
+  abs,
   clamp,
   cos,
   dot,
   float,
   fract,
   frontFacing,
-  instanceIndex,
   max,
   mix,
-  normalGeometry,
   normalize,
-  positionGeometry,
   sin,
-  storage,
   texture,
   uniform,
   vec2,
@@ -27,17 +24,11 @@ import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeHydrologyWater, TreeRingInstanceBuffers } from "./tree_node_material.js";
-import {
-  TREE_RING_CELL_SIZE_M,
-  TREE_RING_JITTER_X_SALT,
-  TREE_RING_JITTER_Z_SALT,
-  TREE_RING_YAW_SALT,
-} from "./tree_ring_placement.js";
+import { treeMorphologyDeformationNodes, treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
-const TREE_VARIANT_HASH_SALT = 1103;
 const FAR_LOD_COLORS: Record<TreeLod, THREE.Color> = {
   near: new THREE.Color(0x2e7d32),
   mid: new THREE.Color(0xd98032),
@@ -69,7 +60,6 @@ export function createTreeRingFarNodeMaterialHandle(
   lighting: EnvironmentLighting = fallbackLighting(),
   hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
-  const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
   const uSeed = uniform(settings.seed);
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
@@ -81,29 +71,27 @@ export function createTreeRingFarNodeMaterialHandle(
 
   const buildMaterial = (albedoFactory: (vertexColor: TslNode, tint: TslNode) => TslNode): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
+    const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aVariant: TslNode = attribute("treeVariant", "float");
-    const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
-    const aCell: TslNode = cellStore.element(instanceIndex);
-    const worldCell: TslNode = aCell.xy;
-    const jitter: TslNode = vec2(
-      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_X_SALT),
-      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_Z_SALT),
-    );
-    const worldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
-    const height: TslNode = aCell.z;
-    const scale: TslNode = max(aCell.w, float(0.001));
-    const yaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
-    const tint: TslNode = treeRingHash(worldCell, uSeed, 1901);
-    const variantKeep: TslNode = treeVariantKeep(aVariant, worldXZ, uSeed);
-    const localPosition: TslNode = positionGeometry.mul(scale).mul(variantKeep);
+    const record = treeMorphologyRecordNodes(buffers);
+    const worldXZ: TslNode = record.positionScale.xz;
+    const height: TslNode = record.positionScale.y;
+    const scale: TslNode = max(record.positionScale.w, float(0.001));
+    const yaw: TslNode = record.rotationNormalY.x;
+    const tint: TslNode = treeRingHash(worldXZ, uSeed, 1901);
+    const variantKeep: TslNode = abs(aVariant.sub(record.rotationNormalY.z)).lessThan(0.5).select(float(1), float(0));
+    const deformation = treeMorphologyDeformationNodes(record.morphology0, record.morphology1, record.morphology2);
+    const localPosition: TslNode = deformation.position.mul(scale).mul(variantKeep);
     const c: TslNode = cos(yaw);
     const s: TslNode = sin(yaw);
     const rotX: TslNode = c.mul(localPosition.x).add(s.mul(localPosition.z));
     const rotZ: TslNode = s.mul(localPosition.x).negate().add(c.mul(localPosition.z));
     const positionNode: TslNode = vec3(worldXZ.x.add(rotX), height.add(localPosition.y), worldXZ.y.add(rotZ));
 
-    const albedo: TslNode = albedoFactory(aColor, tint);
-    const localNormal: TslNode = normalize(normalGeometry);
+    const healthyAlbedo: TslNode = albedoFactory(aColor, tint);
+    const stressedTint: TslNode = mix(vec3(0.82, 0.76, 0.68), vec3(1.02, 0.72, 0.42), aFoliageMask);
+    const albedo: TslNode = mix(healthyAlbedo.mul(stressedTint), healthyAlbedo, clamp(record.morphology0.w, 0, 1));
+    const localNormal: TslNode = deformation.normal;
     const rotatedNormal: TslNode = normalize(
       vec3(c.mul(localNormal.x).add(s.mul(localNormal.z)), localNormal.y, s.mul(localNormal.x).negate().add(c.mul(localNormal.z))),
     );
@@ -184,25 +172,4 @@ function treeRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode 
   return fract(
     sin(dot(cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))), vec2(41.3, 289.1))).mul(43758.5453),
   );
-}
-
-function treeVariantPhase(worldXZ: TslNode, seed: TslNode): TslNode {
-  return fract(
-    sin(dot(
-      worldXZ.add(vec2(seed.mul(0.013).add(TREE_VARIANT_HASH_SALT), seed.mul(0.037).sub(TREE_VARIANT_HASH_SALT))),
-      vec2(127.1, 311.7),
-    )).mul(43758.5453123),
-  );
-}
-
-function treeVariantKeep(aVariant: TslNode, worldXZ: TslNode, seed: TslNode): TslNode {
-  const phase = treeVariantPhase(worldXZ, seed);
-  const v0 = phase.lessThan(0.25).and(aVariant.lessThan(0.5));
-  const v1 = phase.greaterThanEqual(0.25).and(phase.lessThan(0.5))
-    .and(aVariant.greaterThanEqual(0.5)).and(aVariant.lessThan(1.5));
-  const v2 = phase.greaterThanEqual(0.5).and(phase.lessThan(0.75))
-    .and(aVariant.greaterThanEqual(1.5)).and(aVariant.lessThan(2.5));
-  const v3 = phase.greaterThanEqual(0.75)
-    .and(aVariant.greaterThanEqual(2.5)).and(aVariant.lessThan(3.5));
-  return v0.or(v1).or(v2).or(v3).select(float(1), float(0));
 }

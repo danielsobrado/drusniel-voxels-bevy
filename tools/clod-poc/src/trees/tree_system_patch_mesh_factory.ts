@@ -91,6 +91,9 @@ export function attachTreePatchInstanceAttributes(
   geometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 2), 2));
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity).fill(1), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity), 1));
+  geometry.setAttribute("treeMorphology0", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+  geometry.setAttribute("treeMorphology1", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+  geometry.setAttribute("treeMorphology2", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
   if (lod === "impostor") {
     geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
     geometry.setAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));

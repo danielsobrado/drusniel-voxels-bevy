@@ -56,7 +56,7 @@ trees:
     fallback_to_placeholder: false
     swap_on_bake: true
     source_lod: mid
-    resolution_px: 192
+    resolution_px: 64
     octahedral_grid_size: 8
     atlas_padding_px: 2
     alpha_test: 0.38
@@ -202,6 +202,16 @@ trees:
         crown_irregularity: 0.28
         leaf_cluster_count: 18
         leaf_card_count: 44
+      morphology_runtime:
+        slope_lean: 0.08
+        wind_lean: 0.04
+        random_lean: 0.05
+        exposure_flattening: 0.05
+        age_flattening: 0.08
+        base_droop: 0.03
+        age_droop: 0.12
+        moisture_droop: 0.05
+        base_stiffness: 0.90
     pine:
       enabled: true
       weight: 0.22
@@ -223,6 +233,16 @@ trees:
         crown_irregularity: 0.16
         leaf_cluster_count: 12
         leaf_card_count: 36
+      morphology_runtime:
+        slope_lean: 0.06
+        wind_lean: 0.05
+        random_lean: 0.03
+        exposure_flattening: 0.10
+        age_flattening: 0.02
+        base_droop: -0.02
+        age_droop: 0.06
+        moisture_droop: 0.02
+        base_stiffness: 1.15
     dead:
       enabled: true
       weight: 0.07
@@ -244,6 +264,16 @@ trees:
         crown_irregularity: 0.45
         leaf_cluster_count: 0
         leaf_card_count: 0
+      morphology_runtime:
+        slope_lean: 0.12
+        wind_lean: 0.08
+        random_lean: 0.08
+        exposure_flattening: 0.00
+        age_flattening: 0.00
+        base_droop: 0.08
+        age_droop: 0.14
+        moisture_droop: 0.00
+        base_stiffness: 0.78
     birch:
       enabled: true
       weight: 0.16
@@ -265,6 +295,16 @@ trees:
         crown_irregularity: 0.22
         leaf_cluster_count: 14
         leaf_card_count: 34
+      morphology_runtime:
+        slope_lean: 0.10
+        wind_lean: 0.07
+        random_lean: 0.05
+        exposure_flattening: 0.07
+        age_flattening: 0.04
+        base_droop: 0.04
+        age_droop: 0.10
+        moisture_droop: 0.06
+        base_stiffness: 0.82
     willow:
       enabled: true
       weight: 0.11
@@ -286,6 +326,16 @@ trees:
         crown_irregularity: 0.34
         leaf_cluster_count: 22
         leaf_card_count: 50
+      morphology_runtime:
+        slope_lean: 0.08
+        wind_lean: 0.04
+        random_lean: 0.04
+        exposure_flattening: 0.04
+        age_flattening: 0.10
+        base_droop: 0.12
+        age_droop: 0.16
+        moisture_droop: 0.10
+        base_stiffness: 0.72
     spruce:
       enabled: true
       weight: 0.10
@@ -307,3 +357,13 @@ trees:
         crown_irregularity: 0.14
         leaf_cluster_count: 14
         leaf_card_count: 38
+      morphology_runtime:
+        slope_lean: 0.05
+        wind_lean: 0.04
+        random_lean: 0.025
+        exposure_flattening: 0.09
+        age_flattening: 0.02
+        base_droop: 0.00
+        age_droop: 0.05
+        moisture_droop: 0.02
+        base_stiffness: 1.22

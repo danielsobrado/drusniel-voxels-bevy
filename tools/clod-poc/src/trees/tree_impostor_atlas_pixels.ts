@@ -45,19 +45,26 @@ export function createTreeImpostorRowFlipJob(
   pixels: Uint8Array,
   width: number,
   height: number,
+  pageHeight = height,
 ): TreeImpostorPixelJob {
   validatePixelBuffer(pixels, width, height, "tree impostor row flip");
+  if (!Number.isInteger(pageHeight) || pageHeight <= 0 || height % pageHeight !== 0) {
+    throw new Error(`tree impostor row flip page height ${pageHeight} does not divide ${height}`);
+  }
   const rowLength = width * BYTES_PER_PIXEL;
   const row = new Uint8Array(rowLength);
-  const totalRows = Math.floor(height / 2);
+  const pairsPerPage = Math.floor(pageHeight / 2);
+  const totalRows = pairsPerPage * (height / pageHeight);
   let currentRow = 0;
   return {
     step(maxOperations = 1): boolean {
       const limit = Math.min(MAX_RESUMABLE_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
       let operations = 0;
       while (currentRow < totalRows && operations < limit) {
-        const top = currentRow * rowLength;
-        const bottom = (height - 1 - currentRow) * rowLength;
+        const page = Math.floor(currentRow / pairsPerPage);
+        const localRow = currentRow % pairsPerPage;
+        const top = (page * pageHeight + localRow) * rowLength;
+        const bottom = (page * pageHeight + pageHeight - 1 - localRow) * rowLength;
         row.set(pixels.subarray(top, top + rowLength));
         pixels.copyWithin(top, bottom, bottom + rowLength);
         pixels.set(row, bottom);

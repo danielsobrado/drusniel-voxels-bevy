@@ -17,12 +17,13 @@ describe("tree crown proxy node material", () => {
   });
 
   it("keeps the proxy placement and mask contract in source", () => {
-    expect(source).toContain('storage(buffers.cell, "vec4", buffers.capacity).toReadOnly()');
+    expect(source).toContain("treeMorphologyRecordNodes(buffers)");
     expect(source).toContain("positionGeometry");
-    expect(source).toContain("uRadius.mul(treeScale)");
+    expect(source).toContain("uRadius.x.mul(crownWidth)");
+    expect(source).toContain("uRadius.y.mul(crownFlattening).mul(ageHeightScale)");
     expect(source).toContain("treeCrownProxyDimensions(settings, species)");
     expect(source).toContain("smoothstep(float(0.70), float(1.0), radial)");
-    expect(source).toContain("proxyScreenHash(screenCoordinate.xy, worldCell, uSeed)");
+    expect(source).toContain("proxyScreenHash(screenCoordinate.xy, baseWorldXZ, uSeed)");
     expect(source).toContain("proxyFade(distanceM, uFarDistance, uImpostorDistance, uBandDistance, uLodIndex)");
     expect(source).toContain("material.colorWrite = false");
   });

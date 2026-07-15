@@ -27,6 +27,7 @@ export interface TubeOpts {
   swayFlexTip: number;
   /** bark base colour (hue-jittered per branch) */
   color: THREE.Color;
+  maxBranchLevel?: number;
 }
 
 const _N = new THREE.Vector3();
@@ -82,6 +83,10 @@ export function tubeForBranch(
     const ring: number[] = [];
     const ringPos: number[] = [];
     const flex = opts.swayFlexBase + (opts.swayFlexTip - opts.swayFlexBase) * tt;
+    const rootMask = opts.flare && br.level === 0
+      ? Math.max(0, Math.min(1, 1 - (p.y - (br.pts[0] as THREE.Vector3).y) / Math.max(1e-6, opts.flare.height)))
+      : 0;
+    g.setMorphologyContext(br.level / Math.max(1, opts.maxBranchLevel ?? br.level), br.phase, rootMask);
     for (let k = 0; k <= segsAround; k++) {
       const a = (k / segsAround) * Math.PI * 2;
       const ca = Math.cos(a);
@@ -232,6 +237,7 @@ export function tubesForSkeleton(
 ): void {
   const maxLevel = opts.maxLevel ?? 99;
   const stride = opts.branchStride ?? 1;
+  const maxBranchLevel = Math.max(1, ...skel.branches.map((branch) => branch.level));
   const tint = new THREE.Color();
   let bi = 0;
   for (const br of skel.branches) {
@@ -253,6 +259,7 @@ export function tubesForSkeleton(
         swayFlexBase: flexB,
         swayFlexTip: flexT,
         color: tint,
+        maxBranchLevel,
       },
       rng,
     );

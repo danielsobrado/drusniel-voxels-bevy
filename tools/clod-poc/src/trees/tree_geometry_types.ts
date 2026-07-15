@@ -78,13 +78,69 @@ export function appendAttribute(
     for (let i = 0; i < vertexCount * itemSize; i++) target.push(0);
     return;
   }
-  const array = attribute.array;
-  for (let i = 0; i < vertexCount * itemSize; i++) target.push(Number(array[i]));
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    target.push(attribute.getX(vertex));
+    if (itemSize > 1) target.push(attribute.getY(vertex));
+    if (itemSize > 2) target.push(attribute.getZ(vertex));
+    if (itemSize > 3) target.push(attribute.getW(vertex));
+  }
+}
+
+export function ensureTreeMorphologyGeometryAttributes(geometry: THREE.BufferGeometry): void {
+  if (geometry.getAttribute("treeHeight01")) return;
+  const position = geometry.getAttribute("position");
+  if (!position) return;
+  let maxHeight = 1e-6;
+  let maxRadius = 1e-6;
+  for (let index = 0; index < position.count; index++) {
+    maxHeight = Math.max(maxHeight, position.getY(index));
+    maxRadius = Math.max(maxRadius, Math.hypot(position.getX(index), position.getZ(index)));
+  }
+  const packed = new Float32Array(position.count * 5);
+  const foliage = geometry.getAttribute("treeFoliageMask");
+  for (let index = 0; index < position.count; index++) {
+    const height01 = clamp01(position.getY(index) / maxHeight);
+    packed[index * 5] = height01;
+    packed[index * 5 + 1] = clamp01(Math.hypot(position.getX(index), position.getZ(index)) / maxRadius);
+    packed[index * 5 + 2] = foliage?.getX(index) ? 1 : 0;
+    packed[index * 5 + 3] = ((index + 1) * 0.6180339887498949) % 1;
+    packed[index * 5 + 4] = height01 < 0.08 ? 1 - height01 / 0.08 : 0;
+  }
+  const buffer = new THREE.InterleavedBuffer(packed, 5);
+  geometry.setAttribute("treeHeight01", new THREE.InterleavedBufferAttribute(buffer, 1, 0));
+  geometry.setAttribute("treeRadial01", new THREE.InterleavedBufferAttribute(buffer, 1, 1));
+  geometry.setAttribute("treeBranchLevel", new THREE.InterleavedBufferAttribute(buffer, 1, 2));
+  geometry.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(buffer, 1, 3));
+  geometry.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(buffer, 1, 4));
 }
 
 export function setTreeVariantAttribute(geometry: THREE.BufferGeometry, variant: number): void {
   const vertexCount = geometry.getAttribute("position")?.count ?? 0;
-  geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(new Float32Array(vertexCount).fill(variant), 1));
+  const height = geometry.getAttribute("treeHeight01");
+  const radial = geometry.getAttribute("treeRadial01");
+  const level = geometry.getAttribute("treeBranchLevel");
+  const phase = geometry.getAttribute("treeBranchPhase");
+  const root = geometry.getAttribute("treeRootMask");
+  if (!height || !radial || !level || !phase || !root) {
+    geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(new Float32Array(vertexCount).fill(variant), 1));
+    return;
+  }
+  const packed = new Float32Array(vertexCount * 6);
+  for (let index = 0; index < vertexCount; index++) {
+    packed[index * 6] = height.getX(index);
+    packed[index * 6 + 1] = radial.getX(index);
+    packed[index * 6 + 2] = level.getX(index);
+    packed[index * 6 + 3] = phase.getX(index);
+    packed[index * 6 + 4] = root.getX(index);
+    packed[index * 6 + 5] = variant;
+  }
+  const buffer = new THREE.InterleavedBuffer(packed, 6);
+  geometry.setAttribute("treeHeight01", new THREE.InterleavedBufferAttribute(buffer, 1, 0));
+  geometry.setAttribute("treeRadial01", new THREE.InterleavedBufferAttribute(buffer, 1, 1));
+  geometry.setAttribute("treeBranchLevel", new THREE.InterleavedBufferAttribute(buffer, 1, 2));
+  geometry.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(buffer, 1, 3));
+  geometry.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(buffer, 1, 4));
+  geometry.setAttribute("treeVariant", new THREE.InterleavedBufferAttribute(buffer, 1, 5));
 }
 
 export function disposeGeometryOnce(geometry: THREE.BufferGeometry, disposed: Set<THREE.BufferGeometry>): void {
@@ -130,6 +186,7 @@ export function createOpaqueImpostorTree(
   }
 
   const geometry = builder.build();
+  ensureTreeMorphologyGeometryAttributes(geometry);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;

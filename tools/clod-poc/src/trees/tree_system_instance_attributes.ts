@@ -12,6 +12,7 @@ import {
   treeImpostorRuntimeBlend,
   type TreeImpostorRuntimeSample,
 } from "./tree_impostor_runtime.js";
+import { packTreeInstanceMorphology } from "./morphology/packing.js";
 
 export const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
 export const TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME = "treeImpostorLocalPositionScale";
@@ -92,6 +93,25 @@ export function writeTreeLodDitherRoleIfChanged(
   if (Math.abs(array[index] - role) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
   array[index] = role;
   return true;
+}
+
+export function writeTreeMorphologyIfChanged(mesh: THREE.InstancedMesh, index: number, instance: TreeInstance): boolean {
+  const packed = packTreeInstanceMorphology(instance.morphology);
+  let changed = false;
+  for (let vector = 0; vector < 3; vector++) {
+    const attribute = mesh.geometry.getAttribute(`treeMorphology${vector}`) as THREE.InstancedBufferAttribute | undefined;
+    if (!attribute) continue;
+    const array = attribute.array as Float32Array;
+    const targetOffset = index * 4;
+    const sourceOffset = vector * 4;
+    for (let component = 0; component < 4; component++) {
+      const value = packed[sourceOffset + component] ?? 0;
+      if (Math.abs((array[targetOffset + component] ?? 0) - value) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) continue;
+      array[targetOffset + component] = value;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput): boolean {

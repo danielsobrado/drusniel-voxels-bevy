@@ -6,6 +6,7 @@ import {
   DEFAULT_TREE_GPU_SETTINGS,
   DEFAULT_TREE_SETTINGS,
   DEFAULT_TREE_WIND_SETTINGS,
+  generateTreeInstances,
   parseTreeConfig,
 } from "./index.js";
 import treeYamlText from "../../config/trees.yaml?raw";
@@ -113,5 +114,27 @@ trees:
       heightMarginM: 2.25,
       crownHeightM: 7,
     });
+  });
+
+  it("keeps generated identity and morphology deterministic across regeneration", () => {
+    const settings = cloneTreeSettings();
+    settings.ecology.enabled = false;
+    settings.placement.minGroundWeight = 0;
+    settings.placement.minSpacingM = 0;
+    for (const species of Object.keys(settings.species) as (keyof typeof settings.species)[]) {
+      settings.species[species].enabled = species === "oak";
+      settings.species[species].weight = species === "oak" ? 1 : 0;
+    }
+    const sampler = {
+      surfaceHeight: () => 20,
+      surfaceNormal: (): [number, number, number] => [0, 1, 0],
+      materialWeights: (): [number, number, number, number] => [1, 0, 0, 0],
+    };
+    const footprint = { minX: 0, minZ: 0, maxX: 48, maxZ: 48 };
+    const first = generateTreeInstances(footprint, settings, 100, undefined, sampler, 256);
+    const second = generateTreeInstances(footprint, settings, 100, undefined, sampler, 256);
+    expect(first.length).toBeGreaterThan(0);
+    expect(second.map(({ identity, morphology }) => ({ identity, morphology })))
+      .toEqual(first.map(({ identity, morphology }) => ({ identity, morphology })));
   });
 });

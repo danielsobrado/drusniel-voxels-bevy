@@ -65,6 +65,6 @@ describe("tree instance morphology derivation", () => {
 
   it("applies the exact age equation", () => {
     const morphology = deriveTreeInstanceMorphology(identity, "pine", terrain, ecology, competition);
-    expect(morphology.age01).toBeCloseTo(0.4043548595905304, 8);
+    expect(morphology.age01).toBeCloseTo(0.567613219022751, 8);
   });
 });

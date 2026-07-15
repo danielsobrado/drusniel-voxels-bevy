@@ -2,22 +2,22 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   abs,
+  attribute,
   cameraPosition,
   clamp,
   cos,
   dot,
   float,
   floor,
-  fract,
   frontFacing,
-  instanceIndex,
   max,
   mix,
   normalize,
   positionGeometry,
   sin,
-  storage,
+  smoothstep,
   texture,
+  uint,
   uniform,
   uv,
   vec2,
@@ -27,21 +27,9 @@ import type { EnvironmentLighting } from "../environment/environment.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import { TREE_LODS } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
-import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeHydrologyWater, TreeRingInstanceBuffers } from "./tree_node_material.js";
-import {
-  TREE_RING_CELL_SIZE_M,
-  TREE_RING_JITTER_X_SALT,
-  TREE_RING_JITTER_Z_SALT,
-  TREE_RING_YAW_SALT,
-} from "./tree_ring_placement.js";
-import {
-  TREE_VARIANT_HASH_SALT,
-  TREE_VARIANT_HASH_SCALE,
-  TREE_VARIANT_HASH_X,
-  TREE_VARIANT_HASH_Z,
-} from "./tree_variant_selection.js";
+import { treeMorphologyHash01Node, treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -85,8 +73,6 @@ export function createTreeRingImpostorNodeMaterialHandle(
   lighting: EnvironmentLighting = fallbackLighting(),
   hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
-  const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
-  const uSeed = uniform(settings.seed);
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
@@ -95,23 +81,37 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const materials: TreeRingNodeMaterial[] = [];
 
   const buildMaterial = (debugColor?: THREE.Color): TreeRingNodeMaterial => {
-    const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
-    const aCell: TslNode = cellStore.element(instanceIndex);
-    const worldCell: TslNode = aCell.xy;
-    const jitter: TslNode = vec2(
-      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_X_SALT),
-      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_Z_SALT),
-    );
-    const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
-    const aHeight: TslNode = aCell.z;
-    const aScale: TslNode = max(aCell.w, float(0.001));
-    const aYaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
-    const aVariant: TslNode = treeRingImpostorVariant(aWorldXZ, uSeed, atlas);
+    const record = treeMorphologyRecordNodes(buffers);
+    const aWorldXZ: TslNode = record.positionScale.xz;
+    const aHeight: TslNode = record.positionScale.y;
+    const aScale: TslNode = max(record.positionScale.w, float(0.001));
+    const aYaw: TslNode = record.rotationNormalY.x;
+    const aVariant: TslNode = clamp(record.rotationNormalY.z, 0, Math.max(0, (atlas.variantCount ?? 1) - 1));
 
     const c: TslNode = cos(aYaw);
     const s: TslNode = sin(aYaw);
-    const localPosition: TslNode = positionGeometry.mul(aScale);
     const billboardNormal: TslNode = treeRingCylindricalBillboardNormal(aWorldXZ);
+    const billboardRight: TslNode = vec2(billboardNormal.z, billboardNormal.x.negate());
+    const topWeight: TslNode = clamp(attribute("treeHeight01", "float"), 0, 1);
+    const age: TslNode = clamp(record.morphology0.x, 0, 1);
+    const health: TslNode = clamp(record.morphology0.w, 0, 1);
+    const heightScale: TslNode = mix(0.72, 1.08, smoothstep(0, 1, age));
+    const radiusScale: TslNode = mix(0.78, 1.12, age);
+    const widthScale: TslNode = clamp(record.morphology1.z, 0.82, 1.18).mul(radiusScale);
+    const flattening: TslNode = clamp(record.morphology1.w, 0.82, 1.2);
+    const cYaw: TslNode = cos(aYaw);
+    const sYaw: TslNode = sin(aYaw);
+    const localOffset: TslNode = record.morphology0.yz.mul(topWeight)
+      .add(record.morphology1.xy.mul(smoothstep(0.4, 1, topWeight)));
+    const worldOffset: TslNode = vec2(
+      cYaw.mul(localOffset.x).add(sYaw.mul(localOffset.y)),
+      sYaw.mul(localOffset.x).negate().add(cYaw.mul(localOffset.y)),
+    );
+    const projectedOffset: TslNode = dot(worldOffset, billboardRight).mul(float(atlas.radius ?? 1));
+    const impostorX: TslNode = positionGeometry.x.mul(widthScale).add(projectedOffset);
+    const impostorY: TslNode = positionGeometry.y.mul(heightScale).mul(mix(1, flattening, topWeight));
+    const impostorZ: TslNode = positionGeometry.z;
+    const localPosition: TslNode = vec3(impostorX, impostorY, impostorZ).mul(aScale);
     const positionNode: TslNode = treeRingCylindricalBillboardPosition(aWorldXZ, aHeight, localPosition, billboardNormal);
 
     const dirWorld: TslNode = normalize(vec3(
@@ -124,10 +124,11 @@ export function createTreeRingImpostorNodeMaterialHandle(
       dirWorld.y,
       dirWorld.x.mul(s).add(dirWorld.z.mul(c)),
     ));
-    const impostor = treeRingImpostorFourFrameSample(atlas, uv(), viewDirection, aVariant);
-    const albedo: TslNode = debugColor
+    const impostor = treeRingImpostorAgeSample(atlas, uv(), viewDirection, aVariant, age);
+    const sampledAlbedo: TslNode = debugColor
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
       : impostor.albedo;
+    const albedo: TslNode = debugColor ? sampledAlbedo : mix(sampledAlbedo.mul(vec3(1.05, 0.78, 0.52)), sampledAlbedo, health);
     const normalNode: TslNode = atlas.normalDepth && !debugColor
       ? treeRingImpostorSurfaceNormal(impostor.normal, billboardNormal, c, s)
       : billboardNormal;
@@ -146,7 +147,13 @@ export function createTreeRingImpostorNodeMaterialHandle(
         )
       : albedo;
 
-    const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest));
+    const retention: TslNode = clamp(record.morphology2.y.mul(mix(0.72, 1, health)), 0, 1);
+    const retentionCell: TslNode = uint(floor(uv().x.mul(8))).add(uint(floor(uv().y.mul(8))).mul(8));
+    const retentionNoise: TslNode = treeMorphologyHash01Node(
+      record.identityBits,
+      uint(0x1109).bitXor(retentionCell),
+    );
+    const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest)).and(retentionNoise.lessThan(retention));
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const mask: TslNode = aboveWater ? alphaMask.and(aboveWater) : alphaMask;
 
@@ -175,8 +182,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     setFadeCenter() {
       // GPU ring LOD fading is attached by the shared crossfade decorator.
     },
-    updateSettings(next: TreeSettings) {
-      uSeed.value = next.seed;
+    updateSettings(_next: TreeSettings) {
       for (const material of materials) {
         material.alphaTest = 0;
         material.transparent = false;
@@ -269,6 +275,39 @@ function treeRingImpostorFourFrameSample(
   };
 }
 
+function treeRingImpostorAgeSample(
+  atlas: TreeImpostorAtlas,
+  baseUv: TslNode,
+  viewDirection: TslNode,
+  variantIndex: TslNode,
+  age: TslNode,
+): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
+  const ageLayerCount = atlas.ageBuckets?.length ?? 0;
+  if (ageLayerCount !== 3 || (atlas.layerCount ?? 0) < (atlas.variantCount ?? 1) * ageLayerCount) {
+    return treeRingImpostorFourFrameSample(atlas, baseUv, viewDirection, variantIndex);
+  }
+  const young = age.lessThanEqual(float(0.20));
+  const mature = age.lessThanEqual(float(0.60));
+  const old = age.lessThan(float(0.92));
+  const lowerBucket: TslNode = young.select(float(0), mature.select(float(0), old.select(float(1), float(2))));
+  const upperBucket: TslNode = young.select(float(0), mature.select(float(1), old.select(float(2), float(2))));
+  const layerBlend: TslNode = young.select(
+    float(0),
+    mature.select(
+      clamp(age.sub(0.20).div(0.40), 0, 1),
+      old.select(clamp(age.sub(0.60).div(0.32), 0, 1), float(0)),
+    ),
+  );
+  const variantBase: TslNode = variantIndex.mul(3);
+  const lower = treeRingImpostorFourFrameSample(atlas, baseUv, viewDirection, variantBase.add(lowerBucket));
+  const upper = treeRingImpostorFourFrameSample(atlas, baseUv, viewDirection, variantBase.add(upperBucket));
+  return {
+    albedo: mix(lower.albedo, upper.albedo, layerBlend),
+    coverage: mix(lower.coverage, upper.coverage, layerBlend),
+    normal: normalize(mix(lower.normal, upper.normal, layerBlend)),
+  };
+}
+
 function treeRingOctEncode(direction: TslNode): TslNode {
   const l1: TslNode = max(abs(direction.x).add(abs(direction.y)).add(abs(direction.z)), float(0.0001));
   const projected: TslNode = direction.xy.div(l1);
@@ -314,9 +353,9 @@ function treeRingImpostorAtlasUv(
   const pageSize = float(Math.max(1, Math.floor(atlas.gridSize * atlas.resolutionPx)));
   const atlasWidth = float(Math.max(1, Math.floor(atlas.atlasWidthPx ?? atlas.gridSize * atlas.resolutionPx)));
   const atlasHeight = float(Math.max(1, Math.floor(atlas.atlasHeightPx ?? atlas.gridSize * atlas.resolutionPx)));
-  const variantCount = float(Math.max(1, Math.floor(atlas.variantCount ?? 1)));
-  const safeVariant = clamp(variantIndex, 0, variantCount.sub(1));
-  const yOffset = safeVariant.mul(pageSize);
+  const pageCount = float(Math.max(1, Math.floor(atlas.layerCount ?? atlas.variantCount ?? 1)));
+  const safePage = clamp(variantIndex, 0, pageCount.sub(1));
+  const yOffset = safePage.mul(pageSize);
   const padding = float(inferAtlasPaddingPx(atlas));
   const minUv = vec2(
     frameX.mul(resolution).add(padding).div(atlasWidth),
@@ -327,23 +366,6 @@ function treeRingImpostorAtlasUv(
     yOffset.add(frameY.add(1).mul(resolution)).sub(padding).div(atlasHeight),
   );
   return minUv.add(baseUv.mul(maxUv.sub(minUv)));
-}
-
-function treeRingImpostorVariant(worldXZ: TslNode, seed: TslNode, atlas: TreeImpostorAtlas): TslNode {
-  const variantCount = Math.max(1, Math.floor(atlas.variantCount ?? 1));
-  if (variantCount <= 1) return float(0);
-  const phase: TslNode = fract(
-    sin(dot(
-      worldXZ.add(vec2(
-        seed.mul(0.013).add(TREE_VARIANT_HASH_SALT),
-        seed.mul(0.037).sub(TREE_VARIANT_HASH_SALT),
-      )),
-      vec2(TREE_VARIANT_HASH_X, TREE_VARIANT_HASH_Z),
-    )).mul(TREE_VARIANT_HASH_SCALE),
-  );
-  const structural: TslNode = floor(phase.mul(TREE_STRUCTURAL_VARIANTS));
-  const count = float(variantCount);
-  return structural.sub(floor(structural.div(count)).mul(count));
 }
 
 function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
@@ -394,11 +416,4 @@ function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: 
   if (!hydrology?.texture) return null;
   const wetUv: TslNode = worldXZ.div(float(hydrology.worldSize || 1));
   return texture(hydrology.texture, wetUv).y.lessThan(0.5);
-}
-
-function treeRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode {
-  const salt = float(saltValue);
-  return fract(
-    sin(dot(cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))), vec2(41.3, 289.1))).mul(43758.5453),
-  );
 }

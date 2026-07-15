@@ -9,25 +9,26 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
+  abs,
   attribute,
   clamp,
   cos,
   dot,
   float,
+  floor,
   fract,
   frontFacing,
-  instanceIndex,
   max,
   mix,
-  normalGeometry,
   normalWorld,
   normalize,
   positionGeometry,
+  round,
   screenCoordinate,
   sin,
   smoothstep,
-  storage,
   texture,
+  uint,
   uniform,
   uv,
   vec2,
@@ -40,11 +41,10 @@ import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { barkTrunkAlbedo, sharedBarkTexture } from "./tree_node_bark_texture.js";
 import {
-  TREE_RING_CELL_SIZE_M,
-  TREE_RING_JITTER_X_SALT,
-  TREE_RING_JITTER_Z_SALT,
-  TREE_RING_YAW_SALT,
-} from "./tree_ring_placement.js";
+  treeMorphologyDeformationNodes,
+  treeMorphologyHash01Node,
+  treeMorphologyRecordNodes,
+} from "./morphology/node_deformation.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -90,6 +90,7 @@ interface TreeWindNodeUniforms {
 
 export interface TreeRingInstanceBuffers {
   cell: THREE.BufferAttribute;
+  /** Logical tree record capacity; the backing buffer stores six vec4 values per record. */
   capacity: number;
 }
 
@@ -119,14 +120,30 @@ export function treeFoliageCardCoverageAt(u: number, v: number): number {
   return 1 - smooth;
 }
 
-function treeFoliageCardKeep(cardTag: TslNode): TslNode {
+function treeFoliageCardKeep(
+  cardTag: TslNode,
+  retention: TslNode = float(1),
+  branchPhase: TslNode = float(0),
+  treeSeed: TslNode = float(0),
+  identityBits?: TslNode,
+): TslNode {
   const localUv: TslNode = fract(uv().mul(2));
   const centered: TslNode = localUv.sub(vec2(0.5, 0.5));
   const dx: TslNode = centered.x.div(FOLIAGE_CARD_RADIUS_X);
   const dy: TslNode = centered.y.div(FOLIAGE_CARD_RADIUS_Y);
   const distanceSquared: TslNode = dx.mul(dx).add(dy.mul(dy));
   const coverage: TslNode = float(1).sub(smoothstep(FOLIAGE_CARD_EDGE_START, 1, distanceSquared));
-  return mix(float(1), coverage, clamp(cardTag, 0, 1)).greaterThan(FOLIAGE_CARD_KEEP_THRESHOLD);
+  const shapeKeep: TslNode = mix(float(1), coverage, clamp(cardTag, 0, 1)).greaterThan(FOLIAGE_CARD_KEEP_THRESHOLD);
+  const occupancy: TslNode = identityBits
+    ? treeMorphologyHash01Node(
+        identityBits,
+        uint(0x1109)
+          .bitXor(uint(round(clamp(branchPhase, 0, 1).mul(16777216))))
+          .bitXor(uint(floor(uv().x.mul(2))).add(uint(floor(uv().y.mul(2))).mul(2))),
+      )
+    : fract(sin(branchPhase.mul(91.345).add(treeSeed.mul(47.17))).mul(43758.5453123));
+  const densityKeep: TslNode = occupancy.lessThan(clamp(retention, 0, 1));
+  return shapeKeep.and(cardTag.greaterThan(0.5).select(densityKeep, float(1).greaterThan(0)));
 }
 
 export function createTreeNodeMaterialHandle(
@@ -173,6 +190,7 @@ export function createTreeNodeMaterialHandle(
     const aWind: TslNode = attribute("treeWind", "vec3");
     const aWindWeight: TslNode = aWind.x;
     const aFlutterWeight: TslNode = aWind.y;
+    const aBranchPhase: TslNode = attribute("treeBranchPhase", "float");
     const aWorldXZ: TslNode = attribute("treeWorldXZ", "vec2");
     const variantKeep: TslNode = treeVariantKeep(aVariant, aWorldXZ, uVariantSeed);
 
@@ -180,21 +198,27 @@ export function createTreeNodeMaterialHandle(
     const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
     forestMapNodes.push(forestPacked);
     const foliageAlbedo: TslNode = albedoFactory(aColor);
-    const albedo: TslNode = withBark
+    const healthyAlbedo: TslNode = withBark
       ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
       : foliageAlbedo;
     const opacity: TslNode = float(1);
 
+    const cpuMorphology0: TslNode = attribute("treeMorphology0", "vec4");
+    const cpuMorphology1: TslNode = attribute("treeMorphology1", "vec4");
+    const cpuMorphology2: TslNode = attribute("treeMorphology2", "vec4");
+    const deformation = treeMorphologyDeformationNodes(cpuMorphology0, cpuMorphology1, cpuMorphology2);
+    const stressedTint: TslNode = mix(vec3(0.82, 0.76, 0.68), vec3(1.02, 0.72, 0.42), aFoliageMask);
+    const albedo: TslNode = mix(healthyAlbedo.mul(stressedTint), healthyAlbedo, clamp(cpuMorphology0.w, 0, 1));
     const phase: TslNode = fract(sin(dot(aWorldXZ, vec2(127.1, 311.7))).mul(43758.5453123));
     const t: TslNode = wind.uTime.mul(wind.uWindSpeed);
     const waveArg: TslNode = t.add(phase.mul(6.2831853)).add(dot(aWorldXZ, wind.uWindDir).mul(0.035));
     const sway: TslNode = sin(waveArg).mul(wind.uWindStrength)
       .add(sin(t.mul(0.37).add(phase.mul(12.9898))).mul(wind.uGust))
-      .mul(aWindWeight).mul(wind.uTrunkSway);
+      .mul(aWindWeight).mul(wind.uTrunkSway).mul(deformation.windScale);
     const flutter: TslNode = sin(t.mul(7.0).add(phase.mul(19.19)).add(positionGeometry.y.mul(2.3)))
-      .mul(wind.uWindStrength).mul(wind.uLeafFlutter).mul(aFlutterWeight);
+      .mul(wind.uWindStrength).mul(wind.uLeafFlutter).mul(aFlutterWeight).mul(deformation.flutterScale);
     const disp: TslNode = sway.add(flutter);
-    const positionNode: TslNode = positionGeometry.mul(variantKeep).add(
+    const positionNode: TslNode = deformation.position.mul(variantKeep).add(
       vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)).mul(variantKeep),
     );
 
@@ -230,7 +254,7 @@ export function createTreeNodeMaterialHandle(
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
     const lodMask: TslNode = ign.lessThan(aLodFade);
-    const cardKeep: TslNode = treeFoliageCardKeep(aFoliageCard);
+    const cardKeep: TslNode = treeFoliageCardKeep(aFoliageCard, deformation.foliageRetention, aBranchPhase);
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const maskNode: TslNode = aboveWater ? lodMask.and(cardKeep).and(aboveWater) : lodMask.and(cardKeep);
     (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
@@ -314,7 +338,6 @@ export function createTreeRingNodeMaterialHandle(
     uLeafFlutter: uniform(0),
   };
   applyWindUniforms(wind, settings);
-  const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
   const uSeed = uniform(settings.seed);
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
@@ -334,24 +357,23 @@ export function createTreeRingNodeMaterialHandle(
     const aWind: TslNode = attribute("treeWind", "vec3");
     const aWindWeight: TslNode = aWind.x;
     const aFlutterWeight: TslNode = aWind.y;
-    const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
-    const aCell: TslNode = cellStore.element(instanceIndex);
-    const worldCell: TslNode = aCell.xy;
-    const jitter: TslNode = vec2(
-      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_X_SALT),
-      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_Z_SALT),
-    );
-    const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
-    const aHeight: TslNode = aCell.z;
-    const aScale: TslNode = max(aCell.w, float(0.001));
-    const aYaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
+    const record = treeMorphologyRecordNodes(buffers);
+    const aWorldXZ: TslNode = record.positionScale.xz;
+    const aHeight: TslNode = record.positionScale.y;
+    const aScale: TslNode = max(record.positionScale.w, float(0.001));
+    const aYaw: TslNode = record.rotationNormalY.x;
+    const worldCell: TslNode = aWorldXZ;
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
-    const variantKeep: TslNode = treeVariantKeep(aVariant, aWorldXZ, uSeed);
+    const variantKeep: TslNode = abs(aVariant.sub(record.rotationNormalY.z)).lessThan(0.5).select(float(1), float(0));
+    const deformation = treeMorphologyDeformationNodes(record.morphology0, record.morphology1, record.morphology2);
+    const aBranchPhase: TslNode = attribute("treeBranchPhase", "float");
 
     const foliageAlbedo: TslNode = albedoFactory(aColor, aTint);
-    const albedo: TslNode = withBark
+    const healthyAlbedo: TslNode = withBark
       ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
       : foliageAlbedo;
+    const stressedTint: TslNode = mix(vec3(0.82, 0.76, 0.68), vec3(1.02, 0.72, 0.42), aFoliageMask);
+    const albedo: TslNode = mix(healthyAlbedo.mul(stressedTint), healthyAlbedo, clamp(record.morphology0.w, 0, 1));
     const opacity: TslNode = float(1);
 
     const phase: TslNode = fract(sin(dot(aWorldXZ, vec2(127.1, 311.7))).mul(43758.5453123));
@@ -359,11 +381,11 @@ export function createTreeRingNodeMaterialHandle(
     const waveArg: TslNode = t.add(phase.mul(6.2831853)).add(dot(aWorldXZ, wind.uWindDir).mul(0.035));
     const sway: TslNode = sin(waveArg).mul(wind.uWindStrength)
       .add(sin(t.mul(0.37).add(phase.mul(12.9898))).mul(wind.uGust))
-      .mul(aWindWeight).mul(wind.uTrunkSway).mul(aScale);
+      .mul(aWindWeight).mul(wind.uTrunkSway).mul(deformation.windScale).mul(aScale);
     const flutter: TslNode = sin(t.mul(7.0).add(phase.mul(19.19)).add(positionGeometry.y.mul(2.3)))
-      .mul(wind.uWindStrength).mul(wind.uLeafFlutter).mul(aFlutterWeight).mul(aScale);
+      .mul(wind.uWindStrength).mul(wind.uLeafFlutter).mul(aFlutterWeight).mul(deformation.flutterScale).mul(aScale);
     const disp: TslNode = sway.add(flutter);
-    const localPosition: TslNode = positionGeometry.mul(aScale).mul(variantKeep).add(
+    const localPosition: TslNode = deformation.position.mul(aScale).mul(variantKeep).add(
       vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)).mul(variantKeep),
     );
 
@@ -373,7 +395,7 @@ export function createTreeRingNodeMaterialHandle(
     const rotZ: TslNode = s.mul(localPosition.x).negate().add(c.mul(localPosition.z));
     const positionNode: TslNode = vec3(aWorldXZ.x.add(rotX), aHeight.add(localPosition.y), aWorldXZ.y.add(rotZ));
 
-    const localNormal: TslNode = normalize(normalGeometry);
+    const localNormal: TslNode = deformation.normal;
     const rotatedNormal: TslNode = normalize(
       vec3(c.mul(localNormal.x).add(s.mul(localNormal.z)), localNormal.y, s.mul(localNormal.x).negate().add(c.mul(localNormal.z))),
     );
@@ -390,7 +412,13 @@ export function createTreeRingNodeMaterialHandle(
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
-    const cardKeep: TslNode = treeFoliageCardKeep(aFoliageCard);
+    const cardKeep: TslNode = treeFoliageCardKeep(
+      aFoliageCard,
+      deformation.foliageRetention,
+      aBranchPhase,
+      record.rotationNormalY.w,
+      record.identityBits,
+    );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const maskNode: TslNode = aboveWater ? cardKeep.and(aboveWater) : cardKeep;
     (material as unknown as { maskNode: TslNode }).maskNode = maskNode;

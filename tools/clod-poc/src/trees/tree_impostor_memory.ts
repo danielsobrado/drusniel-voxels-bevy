@@ -1,9 +1,9 @@
 import { TREE_SPECIES, type TreeSettings } from "./tree_config.js";
 import { TREE_IMPOSTOR_MAX_ATLAS_VARIANTS, type TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { TREE_IMPOSTOR_AGE_BUCKETS } from "./morphology/constants.js";
 
 const BYTES_PER_RGBA8_PIXEL = 4;
 const TREE_IMPOSTOR_ATLAS_TEXTURES = 2;
-const MIPMAP_OVERHEAD = 4 / 3;
 const BYTES_PER_MIB = 1024 * 1024;
 
 export interface TreeImpostorAtlasMemoryStats {
@@ -16,8 +16,8 @@ export interface TreeImpostorAtlasMemoryStats {
 export function estimateTreeImpostorAtlasMemoryMiB(settings: TreeSettings, atlasCount: number = TREE_SPECIES.length): number {
   if (!settings.impostors.enabled) return 0;
   const atlasSizePx = settings.impostors.resolutionPx * settings.impostors.octahedralGridSize;
-  const atlasHeightPx = atlasSizePx * TREE_IMPOSTOR_MAX_ATLAS_VARIANTS;
-  const bytes = atlasSizePx * atlasHeightPx * BYTES_PER_RGBA8_PIXEL * TREE_IMPOSTOR_ATLAS_TEXTURES * MIPMAP_OVERHEAD * atlasCount;
+  const atlasHeightPx = atlasSizePx * TREE_IMPOSTOR_MAX_ATLAS_VARIANTS * TREE_IMPOSTOR_AGE_BUCKETS.length;
+  const bytes = atlasSizePx * atlasHeightPx * BYTES_PER_RGBA8_PIXEL * TREE_IMPOSTOR_ATLAS_TEXTURES * atlasCount;
   return bytes / BYTES_PER_MIB;
 }
 
