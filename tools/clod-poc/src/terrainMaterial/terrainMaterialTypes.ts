@@ -1,3 +1,5 @@
+import type { ErosionMaterialChannels } from "../world/erosion/types.js";
+
 export type MaterialId = "sand" | "grass" | "dirt" | "rock" | "snow";
 
 export const MATERIAL_IDS: readonly MaterialId[] = ["sand", "grass", "dirt", "rock", "snow"];
@@ -27,6 +29,7 @@ export interface TerrainMaterialInput {
   height: number;
   slope: number;
   waterLevel: number;
+  erosion?: ErosionMaterialChannels | null;
   config: {
     waterline_m: number;
     sand_max_height_m: number;
