@@ -76,8 +76,11 @@ export async function openHydrologyGraphDb(
 ): Promise<IDBDatabase> {
   const request = factory.open(name, HYDROLOGY_GRAPH_DB_VERSION);
   request.onupgradeneeded = () => {
-    if (!request.result.objectStoreNames.contains(HYDROLOGY_GRAPH_STORE_NAME)) {
-      request.result.createObjectStore(HYDROLOGY_GRAPH_STORE_NAME);
+    const db = request.result;
+    if (!db.objectStoreNames.contains(HYDROLOGY_GRAPH_STORE_NAME)) {
+      db.createObjectStore(HYDROLOGY_GRAPH_STORE_NAME);
+    } else {
+      request.transaction?.objectStore(HYDROLOGY_GRAPH_STORE_NAME).clear();
     }
   };
   return requestResult(request);
