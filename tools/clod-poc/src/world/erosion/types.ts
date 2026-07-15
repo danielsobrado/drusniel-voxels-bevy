@@ -99,12 +99,14 @@ export interface ErosionGpuInitialMetadata {
 
 export interface ErosionGpuInitialState extends ErosionGpuInitialMetadata {
   readonly stateAData: ArrayBuffer;
+  readonly samplingMs: number;
 }
 
 export interface ErosionGpuRawOutput {
   readonly initial: ErosionGpuInitialMetadata;
   readonly chunks: readonly ArrayBuffer[];
   readonly byteLength: number;
+  readonly samplingMs: number;
   readonly buildMs: number;
   readonly gpuMs: number;
   readonly readbackMs: number;
@@ -129,15 +131,21 @@ export interface ErosionArtifactRef {
 export interface ErosionArtifact {
   readonly ref: ErosionArtifactRef;
   readonly field: ErodedMacroField;
-  readonly canonicalBytes: ArrayBuffer;
-  readonly compressedBytes: ArrayBuffer;
+  readonly artifactBytes: number;
   readonly buildMs: number;
+  readonly samplingMs: number;
   readonly gpuMs: number;
   readonly readbackMs: number;
+  readonly finalizeMs: number;
+  readonly persistenceMs: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
   readonly gpuPassTimingsMs: Readonly<Record<string, number>>;
   readonly timestampQueriesSupported: boolean;
+}
+
+export interface PersistedErosionArtifact extends ErosionArtifact {
+  readonly compressedBytes: ArrayBuffer;
 }
 
 export interface ErosionArtifactSummary {
@@ -193,9 +201,7 @@ export interface ErosionGpuCheckpoint {
   readonly thermalIteration: number;
   readonly initial: ErosionGpuInitialMetadata;
   readonly stateAByteLength: number;
-  readonly stateBByteLength: number;
   readonly stateAChunks: readonly ArrayBuffer[];
-  readonly stateBChunks: readonly ArrayBuffer[];
 }
 
 export type ErosionCheckpoint = ErosionCpuCheckpoint | ErosionGpuCheckpoint;
@@ -227,8 +233,11 @@ export interface ErosionDiagnostics {
   erosion_artifact_cache_hit: number;
   erosion_artifact_bytes: number;
   erosion_build_ms: number;
+  erosion_sampling_ms: number;
   erosion_gpu_ms: number;
   erosion_readback_ms: number;
+  erosion_finalize_ms: number;
+  erosion_persistence_ms: number;
   erosion_checkpoint_count: number;
   erosion_progress_percent: number;
   erosion_height_min_m: number;
@@ -240,6 +249,7 @@ export interface ErosionDiagnostics {
   erosion_gpu_timestamp_supported: number;
   erosion_gpu_checkpoint_bytes: number;
   erosion_gpu_checkpoint_resume: number;
+  erosion_gpu_checkpoint_persistence_failures: number;
   erosion_main_thread_max_slice_ms: number;
   erosion_artifact_hash_prefix: string;
 }
