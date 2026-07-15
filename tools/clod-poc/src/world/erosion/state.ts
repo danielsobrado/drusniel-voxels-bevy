@@ -84,7 +84,7 @@ export function sampleErosionSourceField(input: {
     seaLevelM: input.seaLevelM,
     seed: input.seed,
     heightFixed,
-    signal: input.signal,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
   return Object.freeze({ width, height, cellSizeM, originX: origin.x, originZ: origin.z, heightFixed, hardness });
 }
