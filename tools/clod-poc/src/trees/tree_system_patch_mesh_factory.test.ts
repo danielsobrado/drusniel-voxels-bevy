@@ -75,6 +75,32 @@ describe("tree patch mesh factory", () => {
     expect(impostor.getAttribute("treeImpostorUvRect").itemSize).toBe(4);
     expect(impostor.getAttribute("treeLodFade").getX(0)).toBe(1);
   });
+
+  it("packs float instance attributes into one WebGPU vertex buffer", () => {
+    const geometry = new THREE.BufferGeometry();
+    attachTreePatchInstanceAttributes(geometry, "impostor", 2);
+    const names = [
+      "treeWorldXZ",
+      "treeLodFade",
+      "treeLodDitherRole",
+      "treeMorphology0",
+      "treeMorphology1",
+      "treeMorphology2",
+      "treeImpostorUvRect",
+      "treeImpostorLocalPositionScale",
+      "treeImpostorUvRect0",
+      "treeImpostorUvRect1",
+      "treeImpostorUvRect2",
+      "treeImpostorUvRect3",
+      "treeImpostorBlendWeights",
+    ];
+    const attributes = names.map((name) => geometry.getAttribute(name));
+
+    expect(attributes.every((attribute) => attribute instanceof THREE.InterleavedBufferAttribute)).toBe(true);
+    const buffers = new Set(attributes.map((attribute) => (attribute as THREE.InterleavedBufferAttribute).data));
+    expect(buffers.size).toBe(1);
+    expect((attributes[0] as THREE.InterleavedBufferAttribute).data).toBeInstanceOf(THREE.InstancedInterleavedBuffer);
+  });
 });
 
 function tree(species: TreeSpeciesId): TreeInstance {

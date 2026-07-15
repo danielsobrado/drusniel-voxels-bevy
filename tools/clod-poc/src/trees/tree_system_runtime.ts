@@ -34,6 +34,7 @@ import { TreePlacementDebugOverlay } from "./tree_placement_debug_overlay.js";
 import type { FallingTree, TreeLightingProxy, TreePatch, TreeStats, TreeSystemOptions, TreeWebGpuBackendAccess } from "./tree_system_types.js";
 import type { TreeIsolatedRenderer } from "./tree_system_runtime_types.js";
 import { treeCpuPatchInput, treeGpuRingInput, treeCreateGpuRingResources, treeClearGpuRing, treeUpdateStats } from "./tree_system_runtime_privates.js";
+import { waitForTreeRendererSubmittedWork } from "./tree_renderer_gpu_sync.js";
 
 export class TreeSystem {
   readonly scene: THREE.Scene;
@@ -259,6 +260,7 @@ export class TreeSystem {
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
     const result = await this.assets.bakeImpostors(renderer);
     if (result.supported && this.settings.impostors.swapOnBake) {
+      await waitForTreeRendererSubmittedWork(renderer);
       this.clearGpuRing();
       // Geometry first: applyMaterials only assigns the billboard impostor
       // material to meshes that already carry the baked flat-card geometry.
