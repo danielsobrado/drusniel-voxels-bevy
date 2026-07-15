@@ -1,5 +1,6 @@
 import { loadLongViewMaterialsConfig } from "../../config/longViewMaterialsConfig.js";
 import { classifyTerrainMaterial } from "../../terrainMaterial/terrainMaterialBands.js";
+import type { TerrainMaterialInput } from "../../terrainMaterial/terrainMaterialTypes.js";
 import { assertErosionNotAborted, yieldErosionTask } from "./abort.js";
 import { EROSION_ASYNC_ROWS_PER_YIELD, HARDNESS_MAX } from "./constants.js";
 import { hardness01ToU16, hashU32 } from "./fixed_point.js";
@@ -19,9 +20,7 @@ export interface HardnessFieldInput {
 interface HardnessContext {
   readonly result: Uint16Array;
   readonly heightUnitsPerCell: number;
-  readonly materialConfig: ReturnType<typeof loadLongViewMaterialsConfig>["terrain_bands"] & {
-    readonly macro_variation: ReturnType<typeof loadLongViewMaterialsConfig>["macro_variation"];
-  };
+  readonly materialConfig: TerrainMaterialInput["config"];
 }
 
 function clamp01(value: number): number {
