@@ -1,12 +1,14 @@
 import { sha256Hex } from "../../cache/checksum.js";
+import { assertErosionNotAborted, yieldErosionTask } from "./abort.js";
 import {
   EROSION_ARTIFACT_HEADER_BYTES,
   EROSION_ARTIFACT_MAGIC,
+  EROSION_ASYNC_CELLS_PER_YIELD,
   EROSION_SCHEMA_VERSION,
   HEIGHT_UNITS_PER_METER,
   MAX_ZSTD_RAW_BLOCK_BYTES,
 } from "./constants.js";
-import type { ErodedMacroField, ErosionArtifact, ErosionArtifactRef } from "./types.js";
+import type { ErodedMacroField, ErosionArtifactRef, PersistedErosionArtifact } from "./types.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -30,17 +32,21 @@ export function canonicalErosionArtifactByteLength(width: number, height: number
     + Uint32Array.BYTES_PER_ELEMENT + Int32Array.BYTES_PER_ELEMENT);
 }
 
-export function encodeErosionArtifactCanonical(
-  field: ErodedMacroField,
-  sourceTerrainHash: string,
-  configHash: string,
-): ArrayBuffer {
+function assertFieldLengths(field: ErodedMacroField): number {
   const count = field.width * field.height;
   if (field.heightFixed.length !== count || field.hardness.length !== count
     || field.sediment.length !== count || field.deposition.length !== count) {
     throw new Error("erosion artifact field lengths do not match dimensions");
   }
-  const buffer = new ArrayBuffer(canonicalErosionArtifactByteLength(field.width, field.height));
+  return count;
+}
+
+function writeHeader(
+  buffer: ArrayBuffer,
+  field: ErodedMacroField,
+  sourceTerrainHash: string,
+  configHash: string,
+): DataView {
   const bytes = new Uint8Array(buffer);
   bytes.set(encoder.encode(EROSION_ARTIFACT_MAGIC), 0);
   const view = new DataView(buffer);
@@ -52,11 +58,52 @@ export function encodeErosionArtifactCanonical(
   view.setInt32(28, Math.round(field.originZ * 1000), true);
   bytes.set(hashPrefixBytes(sourceTerrainHash), 32);
   bytes.set(hashPrefixBytes(configHash), 48);
+  return view;
+}
+
+export function encodeErosionArtifactCanonical(
+  field: ErodedMacroField,
+  sourceTerrainHash: string,
+  configHash: string,
+): ArrayBuffer {
+  const count = assertFieldLengths(field);
+  const buffer = new ArrayBuffer(canonicalErosionArtifactByteLength(field.width, field.height));
+  const view = writeHeader(buffer, field, sourceTerrainHash, configHash);
   let offset = EROSION_ARTIFACT_HEADER_BYTES;
   for (let index = 0; index < count; index++, offset += 4) view.setInt32(offset, field.heightFixed[index]!, true);
   for (let index = 0; index < count; index++, offset += 2) view.setUint16(offset, field.hardness[index]!, true);
   for (let index = 0; index < count; index++, offset += 4) view.setUint32(offset, field.sediment[index]!, true);
   for (let index = 0; index < count; index++, offset += 4) view.setInt32(offset, field.deposition[index]!, true);
+  return buffer;
+}
+
+async function encodeErosionArtifactCanonicalAsync(
+  field: ErodedMacroField,
+  sourceTerrainHash: string,
+  configHash: string,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer> {
+  const count = assertFieldLengths(field);
+  const buffer = new ArrayBuffer(canonicalErosionArtifactByteLength(field.width, field.height));
+  const view = writeHeader(buffer, field, sourceTerrainHash, configHash);
+  let offset = EROSION_ARTIFACT_HEADER_BYTES;
+  for (let index = 0; index < count; index++, offset += 4) {
+    view.setInt32(offset, field.heightFixed[index]!, true);
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  for (let index = 0; index < count; index++, offset += 2) {
+    view.setUint16(offset, field.hardness[index]!, true);
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  for (let index = 0; index < count; index++, offset += 4) {
+    view.setUint32(offset, field.sediment[index]!, true);
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  for (let index = 0; index < count; index++, offset += 4) {
+    view.setInt32(offset, field.deposition[index]!, true);
+    if ((index + 1) % EROSION_ASYNC_CELLS_PER_YIELD === 0) await yieldErosionTask(signal);
+  }
+  assertErosionNotAborted(signal);
   return buffer;
 }
 
@@ -149,6 +196,39 @@ export function encodeZstdRawFrame(canonicalBytes: ArrayBuffer): ArrayBuffer {
   return output.buffer;
 }
 
+async function encodeZstdRawFrameAsync(canonicalBytes: ArrayBuffer, signal?: AbortSignal): Promise<ArrayBuffer> {
+  if (canonicalBytes.byteLength > 0xffffffff) throw new Error("erosion artifact exceeds zstd single-segment size limit");
+  const blockCount = Math.max(1, Math.ceil(canonicalBytes.byteLength / MAX_ZSTD_RAW_BLOCK_BYTES));
+  const output = new Uint8Array(4 + 1 + 4 + blockCount * 3 + canonicalBytes.byteLength);
+  const view = new DataView(output.buffer);
+  view.setUint32(0, ZSTD_MAGIC, true);
+  output[4] = 0xa0;
+  view.setUint32(5, canonicalBytes.byteLength, true);
+  const input = new Uint8Array(canonicalBytes);
+  let inputOffset = 0;
+  let outputOffset = 9;
+  let copiedSinceYield = 0;
+  for (let block = 0; block < blockCount; block++) {
+    assertErosionNotAborted(signal);
+    const size = Math.min(MAX_ZSTD_RAW_BLOCK_BYTES, input.length - inputOffset);
+    const last = block === blockCount - 1 ? 1 : 0;
+    const header = (size << 3) | last;
+    output[outputOffset++] = header & 0xff;
+    output[outputOffset++] = (header >>> 8) & 0xff;
+    output[outputOffset++] = (header >>> 16) & 0xff;
+    output.set(input.subarray(inputOffset, inputOffset + size), outputOffset);
+    inputOffset += size;
+    outputOffset += size;
+    copiedSinceYield += size;
+    if (copiedSinceYield >= EROSION_ASYNC_CELLS_PER_YIELD * Uint32Array.BYTES_PER_ELEMENT) {
+      copiedSinceYield = 0;
+      await yieldErosionTask(signal);
+    }
+  }
+  assertErosionNotAborted(signal);
+  return output.buffer;
+}
+
 export function decodeZstdRawFrame(compressedBytes: ArrayBuffer): ArrayBuffer {
   if (compressedBytes.byteLength < 12) throw new Error("erosion zstd frame is truncated");
   const input = new Uint8Array(compressedBytes);
@@ -184,16 +264,27 @@ export async function createErosionArtifact(input: {
   readonly sourceTerrainHash: string;
   readonly configHash: string;
   readonly buildMs: number;
+  readonly samplingMs?: number;
   readonly gpuMs?: number;
   readonly readbackMs?: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
   readonly gpuPassTimingsMs?: Readonly<Record<string, number>>;
   readonly timestampQueriesSupported?: boolean;
-}): Promise<ErosionArtifact> {
-  const canonicalBytes = encodeErosionArtifactCanonical(input.field, input.sourceTerrainHash, input.configHash);
+  readonly signal?: AbortSignal;
+}): Promise<PersistedErosionArtifact> {
+  const finalizeStartedAt = performance.now();
+  const canonicalBytes = await encodeErosionArtifactCanonicalAsync(
+    input.field,
+    input.sourceTerrainHash,
+    input.configHash,
+    input.signal,
+  );
+  assertErosionNotAborted(input.signal);
   const hash = await sha256Hex(canonicalBytes);
-  const compressedBytes = encodeZstdRawFrame(canonicalBytes);
+  assertErosionNotAborted(input.signal);
+  const compressedBytes = await encodeZstdRawFrameAsync(canonicalBytes, input.signal);
+  const finalizeMs = performance.now() - finalizeStartedAt;
   const ref: ErosionArtifactRef = Object.freeze({
     schemaVersion: EROSION_SCHEMA_VERSION,
     id: `erosion:${hash.slice(0, 16)}`,
@@ -209,11 +300,14 @@ export async function createErosionArtifact(input: {
   return Object.freeze({
     ref,
     field: input.field,
-    canonicalBytes,
+    artifactBytes: compressedBytes.byteLength,
     compressedBytes,
-    buildMs: input.buildMs,
+    buildMs: input.buildMs + finalizeMs,
+    samplingMs: input.samplingMs ?? 0,
     gpuMs: input.gpuMs ?? 0,
     readbackMs: input.readbackMs ?? 0,
+    finalizeMs,
+    persistenceMs: 0,
     checkpointCount: input.checkpointCount,
     massErrorRatio: input.massErrorRatio,
     gpuPassTimingsMs: Object.freeze({ ...(input.gpuPassTimingsMs ?? {}) }),
@@ -225,13 +319,16 @@ export async function decodeErosionArtifact(input: {
   readonly ref: ErosionArtifactRef;
   readonly compressedBytes: ArrayBuffer;
   readonly buildMs: number;
+  readonly samplingMs?: number;
   readonly gpuMs: number;
   readonly readbackMs: number;
+  readonly finalizeMs?: number;
+  readonly persistenceMs?: number;
   readonly checkpointCount: number;
   readonly massErrorRatio: number;
   readonly gpuPassTimingsMs?: Readonly<Record<string, number>>;
   readonly timestampQueriesSupported?: boolean;
-}): Promise<ErosionArtifact> {
+}): Promise<PersistedErosionArtifact> {
   const canonicalBytes = decodeZstdRawFrame(input.compressedBytes);
   const hash = await sha256Hex(canonicalBytes);
   if (hash !== input.ref.hash) throw new Error("erosion artifact canonical hash mismatch");
@@ -241,9 +338,18 @@ export async function decodeErosionArtifact(input: {
     throw new Error("erosion artifact reference does not match its header");
   }
   return Object.freeze({
-    ...input,
+    ref: input.ref,
     field,
-    canonicalBytes,
+    artifactBytes: input.compressedBytes.byteLength,
+    compressedBytes: input.compressedBytes,
+    buildMs: input.buildMs,
+    samplingMs: input.samplingMs ?? 0,
+    gpuMs: input.gpuMs,
+    readbackMs: input.readbackMs,
+    finalizeMs: input.finalizeMs ?? 0,
+    persistenceMs: input.persistenceMs ?? 0,
+    checkpointCount: input.checkpointCount,
+    massErrorRatio: input.massErrorRatio,
     gpuPassTimingsMs: Object.freeze({ ...(input.gpuPassTimingsMs ?? {}) }),
     timestampQueriesSupported: input.timestampQueriesSupported ?? false,
   });
