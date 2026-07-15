@@ -1,6 +1,10 @@
 import type { HeightfieldTileCache } from "./heightfield_tile_cache.js";
 import { HEIGHTFIELD_TILE_RES } from "./heightfield_tile.js";
 import { WORLD_TILE_SIZE_M, worldToTile, type WorldTileKey } from "../tile_key.js";
+import {
+  maskVegetationAuthorityHeightfieldTile,
+  vegetationAuthorityHeightfieldMaskRevision,
+} from "../../vegetation/gpu_authority/heightfield_mask.js";
 
 const DEFAULT_TILES_PER_SIDE = 7;
 
@@ -14,6 +18,7 @@ interface AtlasState {
   readonly tilesPerSide: number;
   readonly uploaded: Set<string>;
   readonly uploadedHeights: Map<string, Float32Array>;
+  readonly uploadedMaskRevisions: Map<string, number>;
   uploads: number;
 }
 
@@ -42,6 +47,7 @@ function clearAtlasTileResidency(target: AtlasState, key: WorldTileKey): boolean
   const id = keyString(key);
   if (!target.uploaded.delete(id)) return false;
   target.uploadedHeights.delete(id);
+  target.uploadedMaskRevisions.delete(id);
   target.device.queue.writeTexture(
     {
       texture: target.residencyTexture,
@@ -68,6 +74,7 @@ function clearAtlasResidency(target: AtlasState): void {
   );
   target.uploaded.clear();
   target.uploadedHeights.clear();
+  target.uploadedMaskRevisions.clear();
 }
 
 export function heightfieldTileAtlasTexel(
@@ -135,6 +142,7 @@ export function createHeightfieldTileGpuAtlas(device: GPUDevice, tilesPerSide = 
     tilesPerSide: side,
     uploaded: new Set(),
     uploadedHeights: new Map(),
+    uploadedMaskRevisions: new Map(),
     uploads: 0,
   };
   clearAtlasResidency(atlas);
@@ -188,7 +196,13 @@ export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
   const id = keyString(key);
   const tile = source.get(key);
   if (!tile) return false;
-  if (atlas.uploadedHeights.get(id) === tile.heights) return true;
+  const maskRevision = vegetationAuthorityHeightfieldMaskRevision();
+  if (
+    atlas.uploadedHeights.get(id) === tile.heights
+    && atlas.uploadedMaskRevisions.get(id) === maskRevision
+  ) {
+    return true;
+  }
   const slotX = positiveMod(key.x, atlas.tilesPerSide);
   const slotZ = positiveMod(key.z, atlas.tilesPerSide);
   for (const uploaded of [...atlas.uploaded]) {
@@ -196,11 +210,13 @@ export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
     if (positiveMod(x!, atlas.tilesPerSide) === slotX && positiveMod(z!, atlas.tilesPerSide) === slotZ) {
       atlas.uploaded.delete(uploaded);
       atlas.uploadedHeights.delete(uploaded);
+      atlas.uploadedMaskRevisions.delete(uploaded);
     }
   }
+  const uploadHeights = maskVegetationAuthorityHeightfieldTile(key, tile.heights);
   atlas.device.queue.writeTexture(
     { texture: atlas.texture, origin: { x: slotX * HEIGHTFIELD_TILE_RES, y: slotZ * HEIGHTFIELD_TILE_RES } },
-    new Float32Array(tile.heights.buffer as ArrayBuffer, tile.heights.byteOffset, tile.heights.length),
+    new Float32Array(uploadHeights.buffer as ArrayBuffer, uploadHeights.byteOffset, uploadHeights.length),
     { bytesPerRow: HEIGHTFIELD_TILE_RES * Float32Array.BYTES_PER_ELEMENT },
     { width: HEIGHTFIELD_TILE_RES, height: HEIGHTFIELD_TILE_RES },
   );
@@ -212,6 +228,7 @@ export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
   );
   atlas.uploaded.add(id);
   atlas.uploadedHeights.set(id, tile.heights);
+  atlas.uploadedMaskRevisions.set(id, maskRevision);
   atlas.uploads++;
   return true;
 }
@@ -220,6 +237,7 @@ export function updateHeightfieldTileGpuAtlas(centerX: number, centerZ: number):
   if (!atlas || !source) return;
   const center = worldToTile(centerX, centerZ);
   const radius = Math.floor(atlas.tilesPerSide / 2);
+  const maskRevision = vegetationAuthorityHeightfieldMaskRevision();
   const candidates: Array<{ key: WorldTileKey; d2: number }> = [];
   for (let z = center.z - radius; z <= center.z + radius; z++) for (let x = center.x - radius; x <= center.x + radius; x++) {
     const key = { x, z };
@@ -229,7 +247,12 @@ export function updateHeightfieldTileGpuAtlas(centerX: number, centerZ: number):
       clearAtlasTileResidency(atlas, key);
       continue;
     }
-    if (atlas.uploadedHeights.get(id) === tile.heights) continue;
+    if (
+      atlas.uploadedHeights.get(id) === tile.heights
+      && atlas.uploadedMaskRevisions.get(id) === maskRevision
+    ) {
+      continue;
+    }
     candidates.push({ key, d2: (x - center.x) ** 2 + (z - center.z) ** 2 });
   }
   candidates.sort((a, b) => a.d2 - b.d2);
