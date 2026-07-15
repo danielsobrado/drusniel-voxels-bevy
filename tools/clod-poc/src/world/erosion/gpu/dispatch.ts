@@ -1,11 +1,13 @@
+import { assertErosionNotAborted } from "../abort.js";
 import { validateErosionGpuCheckpoint } from "../checkpoint.js";
+import { EROSION_GPU_PERSIST_GROUP_MULTIPLIER } from "../constants.js";
 import { resolveErosionConstants } from "../state.js";
 import type {
-  ErosionArtifact,
   ErosionBuildProgress,
   ErosionGpuCheckpoint,
   ErosionGpuInitialState,
   ErosionGpuRawOutput,
+  PersistedErosionArtifact,
   TerrainErosionConfig,
 } from "../types.js";
 import {
@@ -21,8 +23,6 @@ import { createErosionGpuPipelines, type ErosionGpuPipelines } from "./pipeline.
 import { readErosionGpuCheckpoint, readErosionGpuOutputChunks } from "./readback.js";
 import { createErosionGpuTimingBatch, mergeErosionGpuPassTimings, type ErosionGpuTimingBatch } from "./timing.js";
 
-const GPU_PERSIST_GROUP_MULTIPLIER = 8;
-
 export interface ErosionGpuBuildInput {
   readonly worldId: string;
   readonly seed: number;
@@ -36,12 +36,8 @@ export interface ErosionGpuBuildInput {
 
 export interface ErosionGpuBuildOptions {
   readonly onProgress?: (progress: ErosionBuildProgress) => void;
-  readonly onCheckpoint?: (checkpoint: ErosionGpuCheckpoint) => void | Promise<void>;
+  readonly onCheckpoint?: (checkpoint: ErosionGpuCheckpoint) => boolean | void | Promise<boolean | void>;
   readonly onMainThreadSlice?: (elapsedMs: number) => void;
-}
-
-function assertNotCancelled(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException("Erosion build cancelled", "AbortError");
 }
 
 function initialMetadataMatches(checkpoint: ErosionGpuCheckpoint, initial: ErosionGpuInitialState): boolean {
@@ -141,7 +137,7 @@ export async function buildErosionGpuRaw(
   input: ErosionGpuBuildInput,
   options: ErosionGpuBuildOptions = {},
 ): Promise<ErosionGpuRawOutput> {
-  assertNotCancelled(input.signal);
+  assertErosionNotAborted(input.signal);
   const startedAt = performance.now();
   const checkpoint = input.checkpoint
     ? validateErosionGpuCheckpoint(input.checkpoint, input.sourceTerrainHash, input.configHash)
@@ -154,6 +150,7 @@ export async function buildErosionGpuRaw(
   let gpuMs = 0;
   let readbackMs = 0;
   let checkpointCount = 0;
+  let checkpointingEnabled = options.onCheckpoint !== undefined;
   let submissionCount = 0;
   let simulationBuffersDestroyed = false;
   let outputDestroyed = false;
@@ -176,7 +173,7 @@ export async function buildErosionGpuRaw(
     const thermalTarget = input.config.erosion.enabled ? input.config.erosion.thermalIterations : 0;
     const persistenceInterval = Math.max(
       input.config.erosion.checkpointEveryIterations,
-      input.config.erosion.checkpointEveryIterations * GPU_PERSIST_GROUP_MULTIPLIER,
+      input.config.erosion.checkpointEveryIterations * EROSION_GPU_PERSIST_GROUP_MULTIPLIER,
     );
     let hydraulicIteration = checkpoint?.hydraulicIteration ?? 0;
     let thermalIteration = checkpoint?.thermalIteration ?? 0;
@@ -191,7 +188,8 @@ export async function buildErosionGpuRaw(
       checkpointCount,
     });
     const persistCheckpoint = async (): Promise<void> => {
-      if (!options.onCheckpoint) return;
+      if (!checkpointingEnabled || !options.onCheckpoint) return;
+      assertErosionNotAborted(input.signal);
       const snapshot = await readErosionGpuCheckpoint(
         device,
         buffers,
@@ -200,16 +198,22 @@ export async function buildErosionGpuRaw(
         input.configHash,
         hydraulicIteration,
         thermalIteration,
+        input.signal,
       );
       readbackMs += snapshot.readbackMs;
       options.onMainThreadSlice?.(snapshot.maxMainThreadSliceMs);
-      await options.onCheckpoint(snapshot.checkpoint);
+      const persisted = await options.onCheckpoint(snapshot.checkpoint);
+      assertErosionNotAborted(input.signal);
+      if (persisted === false) {
+        checkpointingEnabled = false;
+        return;
+      }
       checkpointCount++;
     };
 
     report(checkpoint ? "hydraulic" : "sampling", checkpoint ? Math.min(99, hydraulicIteration / Math.max(1, hydraulicTarget) * 100) : 0);
     while (hydraulicIteration < hydraulicTarget) {
-      assertNotCancelled(input.signal);
+      assertErosionNotAborted(input.signal);
       const groupEnd = Math.min(hydraulicTarget, hydraulicIteration + input.config.erosion.checkpointEveryIterations);
       const maxPasses = (groupEnd - hydraulicIteration) * 11;
       const timing = createErosionGpuTimingBatch(device, maxPasses);
@@ -231,6 +235,7 @@ export async function buildErosionGpuRaw(
         }
       }
       gpuMs += await submitTimedBatch(device, encoder, timing, passTimingsMs);
+      assertErosionNotAborted(input.signal);
       submissionCount++;
       if (hydraulicIteration === hydraulicTarget || hydraulicIteration % persistenceInterval === 0) {
         await persistCheckpoint();
@@ -240,7 +245,7 @@ export async function buildErosionGpuRaw(
       report("hydraulic", total === 0 ? 99 : Math.min(99, completed / total * 100));
     }
     while (thermalIteration < thermalTarget) {
-      assertNotCancelled(input.signal);
+      assertErosionNotAborted(input.signal);
       const groupEnd = Math.min(thermalTarget, thermalIteration + input.config.erosion.checkpointEveryIterations);
       const timing = createErosionGpuTimingBatch(device, (groupEnd - thermalIteration) * 3);
       const encoder = device.createCommandEncoder({ label: `erosion-thermal-submit-${submissionCount}` });
@@ -249,6 +254,7 @@ export async function buildErosionGpuRaw(
         thermalIteration++;
       }
       gpuMs += await submitTimedBatch(device, encoder, timing, passTimingsMs);
+      assertErosionNotAborted(input.signal);
       submissionCount++;
       if (thermalIteration === thermalTarget || thermalIteration % persistenceInterval === 0) {
         await persistCheckpoint();
@@ -271,13 +277,15 @@ export async function buildErosionGpuRaw(
       outputTiming,
     );
     gpuMs += await submitTimedBatch(device, outputEncoder, outputTiming, passTimingsMs);
+    assertErosionNotAborted(input.signal);
     destroyErosionGpuSimulationBuffers(buffers);
     simulationBuffersDestroyed = true;
-    const readback = await readErosionGpuOutputChunks(device, output, input.initial);
+    const readback = await readErosionGpuOutputChunks(device, output, input.initial, input.signal);
     readbackMs += readback.readbackMs;
     options.onMainThreadSlice?.(readback.maxMainThreadSliceMs);
     output.destroy();
     outputDestroyed = true;
+    assertErosionNotAborted(input.signal);
     report("complete", 100);
     return Object.freeze({
       initial: Object.freeze({
@@ -292,7 +300,8 @@ export async function buildErosionGpuRaw(
       }),
       chunks: readback.chunks,
       byteLength: readback.byteLength,
-      buildMs: performance.now() - startedAt,
+      samplingMs: input.initial.samplingMs,
+      buildMs: input.initial.samplingMs + performance.now() - startedAt,
       gpuMs,
       readbackMs,
       checkpointCount,
@@ -310,7 +319,12 @@ export async function buildErosionGpu(
   device: GPUDevice,
   input: ErosionGpuBuildInput,
   options: ErosionGpuBuildOptions = {},
-): Promise<ErosionArtifact> {
+): Promise<PersistedErosionArtifact> {
   const raw = await buildErosionGpuRaw(device, input, options);
-  return finalizeErosionGpuRawOutput({ raw, sourceTerrainHash: input.sourceTerrainHash, configHash: input.configHash });
+  return finalizeErosionGpuRawOutput({
+    raw,
+    sourceTerrainHash: input.sourceTerrainHash,
+    configHash: input.configHash,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
 }
