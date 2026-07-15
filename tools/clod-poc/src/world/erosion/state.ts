@@ -69,7 +69,16 @@ export function sampleErosionSourceField(input: {
       heightFixed[z * width + x] = metersToHeightFixed(sample);
     }
   }
-  const hardness = buildHardnessField({ width, height, cellSizeM, seaLevelM: input.seaLevelM, seed: input.seed, heightFixed });
+  const hardness = buildHardnessField({
+    width,
+    height,
+    cellSizeM,
+    originX: origin.x,
+    originZ: origin.z,
+    seaLevelM: input.seaLevelM,
+    seed: input.seed,
+    heightFixed,
+  });
   return Object.freeze({ width, height, cellSizeM, originX: origin.x, originZ: origin.z, heightFixed, hardness });
 }
 
