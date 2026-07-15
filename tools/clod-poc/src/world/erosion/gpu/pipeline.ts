@@ -13,6 +13,7 @@ import { EROSION_COMMON_WGSL, createErosionBindGroupLayout } from "./layouts.js"
 export interface ErosionGpuPipelines {
   readonly bindGroupLayout: GPUBindGroupLayout;
   readonly bindGroup: GPUBindGroup;
+  createOutputBindGroup(output: GPUBuffer): GPUBindGroup;
   readonly rain: GPUComputePipeline;
   readonly flux: GPUComputePipeline;
   readonly water: GPUComputePipeline;
@@ -41,21 +42,30 @@ function pipeline(
   return device.createComputePipeline({ label, layout, compute: { module: shader, entryPoint } });
 }
 
-export function createErosionGpuPipelines(device: GPUDevice, buffers: ErosionGpuBuffers): ErosionGpuPipelines {
-  const bindGroupLayout = createErosionBindGroupLayout(device);
-  const layout = device.createPipelineLayout({ label: "erosion-pipeline-layout", bindGroupLayouts: [bindGroupLayout] });
-  const bindGroup = device.createBindGroup({
+function createBindGroup(
+  device: GPUDevice,
+  layout: GPUBindGroupLayout,
+  buffers: ErosionGpuBuffers,
+  output: GPUBuffer,
+): GPUBindGroup {
+  return device.createBindGroup({
     label: "erosion-bind-group",
-    layout: bindGroupLayout,
+    layout,
     entries: [
       { binding: 0, resource: { buffer: buffers.stateA } },
       { binding: 1, resource: { buffer: buffers.stateB } },
       { binding: 2, resource: { buffer: buffers.sedimentScratch } },
       { binding: 3, resource: { buffer: buffers.params, offset: 0, size: 80 } },
       { binding: 4, resource: { buffer: buffers.talus } },
-      { binding: 5, resource: { buffer: buffers.output } },
+      { binding: 5, resource: { buffer: output } },
     ],
   });
+}
+
+export function createErosionGpuPipelines(device: GPUDevice, buffers: ErosionGpuBuffers): ErosionGpuPipelines {
+  const bindGroupLayout = createErosionBindGroupLayout(device);
+  const layout = device.createPipelineLayout({ label: "erosion-pipeline-layout", bindGroupLayouts: [bindGroupLayout] });
+  const bindGroup = createBindGroup(device, bindGroupLayout, buffers, buffers.outputPlaceholder);
   const rainModule = module(device, "erosion-rain-shader", rainShader);
   const fluxModule = module(device, "erosion-flux-shader", fluxShader);
   const waterModule = module(device, "erosion-water-shader", waterShader);
@@ -68,6 +78,7 @@ export function createErosionGpuPipelines(device: GPUDevice, buffers: ErosionGpu
   return {
     bindGroupLayout,
     bindGroup,
+    createOutputBindGroup: (output) => createBindGroup(device, bindGroupLayout, buffers, output),
     rain: pipeline(device, layout, "erosion-rain", rainModule),
     flux: pipeline(device, layout, "erosion-flux", fluxModule),
     water: pipeline(device, layout, "erosion-water", waterModule),
