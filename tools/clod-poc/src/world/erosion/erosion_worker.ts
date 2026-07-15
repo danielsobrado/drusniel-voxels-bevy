@@ -196,7 +196,7 @@ ctx.onmessage = (event) => {
       setTerrainFieldConfig(request.terrainFieldConfig);
       const source = sampleErosionSourceField({
         sizeM: request.sizeM,
-        originM: request.originM,
+        ...(request.originM ? { originM: request.originM } : {}),
         config: request.config,
         sampleHeightMeters: baseSurfaceHeight,
         seed: request.seed,
