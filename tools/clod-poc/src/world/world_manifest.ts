@@ -1,7 +1,12 @@
 import { TERRAIN_SOURCE_VERSION } from "../cache/terrainSource.js";
 import type { WorldMode, WorldModeConfig } from "../app/world_mode.js";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
-import { getLatestErosionArtifactRef } from "./erosion/integration.js";
+import {
+  clearActiveErodedMacroField,
+  getActiveErosionWorldId,
+  getLatestErosionArtifactRef,
+  setLatestErosionArtifactRef,
+} from "./erosion/integration.js";
 import type { ErosionArtifactRef } from "./erosion/types.js";
 
 export interface WorldArtifactRef {
@@ -53,6 +58,11 @@ export function buildWorldManifest(input: BuildWorldManifestInput): WorldManifes
   if (!input.terrainSourceHash) throw new Error("terrainSourceHash is required");
   const seed = input.terrainFieldConfig.seed;
   const worldId = input.worldId ?? `ephemeral:${seed}`;
+  const activeWorldId = getActiveErosionWorldId();
+  if (activeWorldId !== null && activeWorldId !== worldId) {
+    clearActiveErodedMacroField();
+    setLatestErosionArtifactRef(null);
+  }
   const erosion = getLatestErosionArtifactRef(worldId);
   return Object.freeze({
     worldId,
