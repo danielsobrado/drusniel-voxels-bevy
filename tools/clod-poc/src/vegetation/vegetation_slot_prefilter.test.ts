@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG } from "./terrain_rejection_config.js";
 import { buildVegetationSlotPrefilter, VegetationSlotPrefilterCache } from "./vegetation_slot_prefilter.js";
 import type { TerrainHeightSampler, TerrainVisibilitySettings } from "./vegetation_visibility_provider.js";
+
+beforeEach(() => {
+  DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.enabled = true;
+});
+afterEach(() => {
+  DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.enabled = false;
+});
 
 const VISIBILITY: TerrainVisibilitySettings = {
   enabled: true,

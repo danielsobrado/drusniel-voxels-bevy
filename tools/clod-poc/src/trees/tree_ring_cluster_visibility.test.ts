@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { DEFAULT_TREE_SETTINGS, cloneTreeSettings } from "./tree_config.js";
 import {
   buildTreeRingClusterVisibilityMask,
@@ -7,6 +8,13 @@ import {
   treeRingSlotClusterVisible,
 } from "./tree_ring_cluster_visibility.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
+
+beforeEach(() => {
+  DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.enabled = true;
+});
+afterEach(() => {
+  DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.enabled = false;
+});
 
 const EMPTY_SOURCE_COUNTS = {
   naadfFarSummary: 0,

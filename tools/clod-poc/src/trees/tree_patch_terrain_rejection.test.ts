@@ -1,6 +1,7 @@
 import * as THREE from "three";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ClodPageNode } from "../types.js";
+import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
 import {
@@ -9,6 +10,13 @@ import {
   recordTreeEarlyTerrainRejection,
   rejectTreePatchBeforeGeneration,
 } from "./tree_patch_terrain_rejection.js";
+
+beforeEach(() => {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.enabled = true;
+});
+afterEach(() => {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.enabled = false;
+});
 
 function makeNode(id = "node-a"): ClodPageNode {
   return {

@@ -33,6 +33,7 @@ describe("grass terrain rejection", () => {
   });
 
   it("skips candidate loops when opted in and the whole patch is outside grass height range", () => {
+    DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.enabled = true;
     DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = true;
     const settings = cloneGrassSettings(DEFAULT_GRASS_SETTINGS);
     settings.minHeight = 10_000;
@@ -52,5 +53,6 @@ describe("grass terrain rejection", () => {
 });
 
 function resetTerrainRejectionConfig(): void {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.enabled = false;
   DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
 }

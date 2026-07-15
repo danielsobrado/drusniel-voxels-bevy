@@ -35,6 +35,7 @@ describe("understory patch terrain rejection", () => {
   });
 
   it("rejects full patches when opted in and height is outside range", () => {
+    DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.enabled = true;
     DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = true;
     const footprint: PageFootprint = { minX: 10, minZ: 10, maxX: 26, maxZ: 26 };
     const decision = rejectUnderstoryPatchBeforeGeneration(
@@ -65,5 +66,6 @@ describe("understory patch terrain rejection", () => {
 });
 
 function resetTerrainRejectionConfig(): void {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.enabled = false;
   DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
 }
