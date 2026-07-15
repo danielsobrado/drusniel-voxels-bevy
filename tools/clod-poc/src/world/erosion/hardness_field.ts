@@ -24,7 +24,7 @@ export function buildHardnessField(input: HardnessFieldInput): Uint16Array {
   const materialAuthority = loadLongViewMaterialsConfig();
   const materialConfig = {
     ...materialAuthority.terrain_bands,
-    macro_variation: materialAuthority.macro_variation,
+    macro_variation: { ...materialAuthority.macro_variation, enabled: false },
   };
   for (let z = 0; z < input.height; z++) {
     for (let x = 0; x < input.width; x++) {
