@@ -21,6 +21,7 @@ import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
 import { composeShader } from "./wgsl_compose.js";
 import { replaceConstU32 } from "./wgsl_workgroup_size.js";
 import { withConservativeGrassFrustum, withGrassActiveSlotList } from "./grass_ring_wgsl_transforms.js";
+import { withUnderstoryAuthorityExclusion } from "./understory_ring_wgsl_transforms.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeFinalPlacementHeight,
@@ -59,7 +60,7 @@ export function composeTreeRingShader(workgroupSize = 64): string {
 
 export function composeUnderstoryRingShader(workgroupSize = 64): string {
   const entry = replaceConstU32(
-    withRiverEcologyConstants(understoryRingEntry),
+    withUnderstoryAuthorityExclusion(withRiverEcologyConstants(understoryRingEntry)),
     "UNDERSTORY_WORKGROUP_SIZE",
     workgroupSize,
   );
