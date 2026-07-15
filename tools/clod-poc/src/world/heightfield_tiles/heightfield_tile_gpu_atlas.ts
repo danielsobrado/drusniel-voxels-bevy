@@ -8,6 +8,8 @@ interface AtlasState {
   readonly device: GPUDevice;
   readonly texture: GPUTexture;
   readonly view: GPUTextureView;
+  readonly residencyTexture: GPUTexture;
+  readonly residencyView: GPUTextureView;
   readonly params: GPUBuffer;
   readonly tilesPerSide: number;
   readonly uploaded: Set<string>;
@@ -17,9 +19,34 @@ interface AtlasState {
 let source: HeightfieldTileCache | null = null;
 let authoritative = false;
 let atlas: AtlasState | null = null;
+let fallback: {
+  readonly device: GPUDevice;
+  readonly texture: GPUTexture;
+  readonly residencyTexture: GPUTexture;
+  readonly params: GPUBuffer;
+} | null = null;
+
+export interface HeightfieldTileGpuAtlasBindings {
+  readonly heightView: GPUTextureView;
+  readonly residencyView: GPUTextureView;
+  readonly params: GPUBuffer;
+  readonly enabled: boolean;
+}
 
 const keyString = (key: WorldTileKey): string => `${key.x},${key.z}`;
 const positiveMod = (value: number, divisor: number): number => ((value % divisor) + divisor) % divisor;
+
+function clearAtlasResidency(target: AtlasState): void {
+  const missing = new Int32Array(target.tilesPerSide * target.tilesPerSide * 2);
+  missing.fill(-0x8000_0000);
+  target.device.queue.writeTexture(
+    { texture: target.residencyTexture },
+    missing,
+    { bytesPerRow: target.tilesPerSide * 2 * Int32Array.BYTES_PER_ELEMENT },
+    { width: target.tilesPerSide, height: target.tilesPerSide },
+  );
+  target.uploaded.clear();
+}
 
 export function heightfieldTileAtlasTexel(
   key: WorldTileKey,
@@ -42,13 +69,14 @@ export function unregisterHeightfieldTileGpuSource(cache: HeightfieldTileCache):
   if (source !== cache) return;
   source = null;
   authoritative = false;
-  atlas?.uploaded.clear();
+  if (atlas) clearAtlasResidency(atlas);
 }
 
 export function createHeightfieldTileGpuAtlas(device: GPUDevice, tilesPerSide = DEFAULT_TILES_PER_SIDE): AtlasState | null {
   if (!source || !authoritative) return null;
   if (atlas?.device === device) return atlas;
   atlas?.texture.destroy();
+  atlas?.residencyTexture.destroy();
   atlas?.params.destroy();
   const side = Math.max(3, Math.floor(tilesPerSide));
   const texture = device.createTexture({
@@ -68,8 +96,67 @@ export function createHeightfieldTileGpuAtlas(device: GPUDevice, tilesPerSide = 
     side,
     1,
   ]));
-  atlas = { device, texture, view: texture.createView(), params, tilesPerSide: side, uploaded: new Set(), uploads: 0 };
+  const residencyTexture = device.createTexture({
+    label: "continent heightfield tile residency",
+    size: { width: side, height: side },
+    format: "rg32sint",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  atlas = {
+    device,
+    texture,
+    view: texture.createView(),
+    residencyTexture,
+    residencyView: residencyTexture.createView(),
+    params,
+    tilesPerSide: side,
+    uploaded: new Set(),
+    uploads: 0,
+  };
+  clearAtlasResidency(atlas);
   return atlas;
+}
+
+export function heightfieldTileGpuAtlasBindings(device: GPUDevice): HeightfieldTileGpuAtlasBindings {
+  const active = createHeightfieldTileGpuAtlas(device);
+  if (active) {
+    return {
+      heightView: active.view,
+      residencyView: active.residencyView,
+      params: active.params,
+      enabled: true,
+    };
+  }
+  if (!fallback || fallback.device !== device) {
+    fallback?.texture.destroy();
+    fallback?.residencyTexture.destroy();
+    fallback?.params.destroy();
+    const texture = device.createTexture({
+      label: "continent heightfield tile atlas fallback",
+      size: { width: 1, height: 1 },
+      format: "r32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
+    const residencyTexture = device.createTexture({
+      label: "continent heightfield tile residency fallback",
+      size: { width: 1, height: 1 },
+      format: "rg32sint",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
+    const params = device.createBuffer({
+      label: "continent heightfield tile atlas fallback params",
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(params, 0, new Float32Array([1, 1, 1, 0]));
+    fallback = { device, texture, residencyTexture, params };
+  }
+  return {
+    heightView: fallback.texture.createView(),
+    residencyView: fallback.residencyTexture.createView(),
+    params: fallback.params,
+    enabled: false,
+  };
 }
 
 export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
@@ -91,6 +178,12 @@ export function uploadHeightfieldTileToGpu(key: WorldTileKey): boolean {
     new Float32Array(tile.heights.buffer as ArrayBuffer, tile.heights.byteOffset, tile.heights.length),
     { bytesPerRow: HEIGHTFIELD_TILE_RES * Float32Array.BYTES_PER_ELEMENT },
     { width: HEIGHTFIELD_TILE_RES, height: HEIGHTFIELD_TILE_RES },
+  );
+  atlas.device.queue.writeTexture(
+    { texture: atlas.residencyTexture, origin: { x: slotX, y: slotZ } },
+    new Int32Array([key.x, key.z]),
+    { bytesPerRow: 2 * Int32Array.BYTES_PER_ELEMENT },
+    { width: 1, height: 1 },
   );
   atlas.uploaded.add(id);
   atlas.uploads++;

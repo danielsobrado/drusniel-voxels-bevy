@@ -5,6 +5,7 @@ import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
 import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
+import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
@@ -109,6 +110,7 @@ export class StoneGpuScatterCompute {
     device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
     this.hydroTexture = this.createHydrologyTexture(hydroData);
     const hydroSampler = device.createSampler({ label: "stone scatter hydro sampler", magFilter: "nearest", minFilter: "nearest" });
+    const canonicalHeight = heightfieldTileGpuAtlasBindings(device);
     this.bindGroup = device.createBindGroup({
       label: "stone scatter bind group",
       layout,
@@ -123,6 +125,9 @@ export class StoneGpuScatterCompute {
         { binding: 7, resource: this.hydroTexture.createView() },
         { binding: 8, resource: hydroSampler },
         { binding: 9, resource: hydrologyAtlasGpuTexture(device).createView() },
+        { binding: 10, resource: canonicalHeight.heightView },
+        { binding: 11, resource: canonicalHeight.residencyView },
+        { binding: 12, resource: { buffer: canonicalHeight.params } },
       ],
     });
   }
@@ -140,6 +145,9 @@ export class StoneGpuScatterCompute {
         { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: {} },
         { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+        { binding: 12, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });

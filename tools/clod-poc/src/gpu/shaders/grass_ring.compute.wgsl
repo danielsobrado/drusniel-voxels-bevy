@@ -321,7 +321,7 @@ fn process_slot(slot: u32) {
   let hydro = hydrology_at(wpos.x, wpos.y);
   let height = placement_ground_height(wpos.x, wpos.y, world_size);
   if (hydrology_reject_grass(hydro, height)) { return; }
-  let normal = normalize(densityGradient(wpos.x, height, wpos.y));
+  let normal = placement_ground_normal(wpos.x, wpos.y, world_size, max(0.5, params.settings_a.x));
   let mask = grass_mask(height, normal.y, dist, wpos.x, wpos.y, hydro);
   let thin = grass_thin(dist);
   let ring_edge = 1.0 - smoothstep(params.center_radius.z * 0.9, params.center_radius.z, dist);

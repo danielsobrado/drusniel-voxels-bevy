@@ -4,8 +4,10 @@ import { HEIGHTFIELD_TILE_RES } from "./heightfield_tile.js";
 import {
   createHeightfieldTileGpuAtlas,
   heightfieldTileAtlasTexel,
+  heightfieldTileGpuAtlasBindings,
   registerHeightfieldTileGpuSource,
   unregisterHeightfieldTileGpuSource,
+  uploadHeightfieldTileToGpu,
   uploadHeightfieldTilesForPage,
 } from "./heightfield_tile_gpu_atlas.js";
 import { buildHeightfieldTile } from "./heightfield_tile.js";
@@ -87,6 +89,45 @@ describe("heightfield tile GPU atlas", () => {
       const localX = x - key.x * 256;
       const texel = heightfieldTileAtlasTexel(key, localX, 0, side);
       expect(data[texel.z * atlasRes + texel.x]).toBe(Math.fround(x * 0.125));
+    }
+  });
+
+  it("uploads the world-tile key beside each toroidal height slot", () => {
+    const writes: Array<{ label: string; origin: { x?: number; y?: number }; data: ArrayBufferView }> = [];
+    const device = {
+      createTexture: ({ label }: { label: string }) => ({
+        label,
+        createView: () => ({ label }),
+        destroy: () => {},
+      }),
+      createBuffer: () => ({ destroy: () => {} }),
+      queue: {
+        writeBuffer: () => {},
+        writeTexture: (
+          destination: { texture: { label: string }; origin?: { x?: number; y?: number } },
+          data: ArrayBufferView,
+        ) => writes.push({ label: destination.texture.label, origin: destination.origin ?? {}, data }),
+      },
+    } as unknown as GPUDevice;
+    const key = { x: -1, z: 8 };
+    const { cache } = tileSourceCoveringOnly(new Set([`${key.x},${key.z}`]));
+    registerHeightfieldTileGpuSource(cache, true);
+    try {
+      const atlas = createHeightfieldTileGpuAtlas(device, 7);
+      expect(atlas).not.toBeNull();
+      expect(heightfieldTileGpuAtlasBindings(device).enabled).toBe(true);
+      expect(uploadHeightfieldTileToGpu(key)).toBe(true);
+
+      const residency = writes.find((write) =>
+        write.label === "continent heightfield tile residency" && write.origin.x !== undefined);
+      expect(residency?.origin).toEqual({ x: 6, y: 1 });
+      expect(Array.from(new Int32Array(
+        residency!.data.buffer,
+        residency!.data.byteOffset,
+        residency!.data.byteLength / Int32Array.BYTES_PER_ELEMENT,
+      ))).toEqual([-1, 8]);
+    } finally {
+      unregisterHeightfieldTileGpuSource(cache);
     }
   });
 

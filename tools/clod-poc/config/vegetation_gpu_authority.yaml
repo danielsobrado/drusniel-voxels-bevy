@@ -1,0 +1,48 @@
+vegetation_gpu_authority:
+  schema_version: 1
+  enabled: true
+  cluster_size_m: 32
+  cluster_probe_grid: 3
+  near_force_visible_radius_m: 64
+  maximum_cluster_distance_m:
+    ultra:    { trees: 620, grass: 192, understory: 192, stones: 1024, dressing: 512 }
+    balanced: { trees: 420, grass: 125, understory: 110, stones: 700,  dressing: 320 }
+    perf:     { trees: 300, grass: 96,  understory: 80,  stones: 600,  dressing: 224 }
+    potato:   { trees: 180, grass: 64,  understory: 56,  stones: 320,  dressing: 160 }
+
+  candidate_spacing_m:
+    trees: 3.4
+    grass: 0.85
+    understory: 1.7
+    stones: 2.2
+    dressing: 1.25
+
+  accepted_instance_capacity:
+    ultra:    { trees: 50000, grass: 262144, understory: 65536, stones: 131072, dressing: 262144 }
+    balanced: { trees: 30000, grass: 131072, understory: 32768, stones: 65536,  dressing: 131072 }
+    perf:     { trees: 16000, grass: 65536,  understory: 16384, stones: 32768,  dressing: 65536 }
+    potato:   { trees: 8000,  grass: 32768,  understory: 8192,  stones: 16384,  dressing: 32768 }
+
+  authority_buffer_vram_mib_max:
+    ultra: 384
+    balanced: 256
+    perf: 160
+    potato: 96
+  portable_storage_binding_mib_max: 128
+
+  rejection:
+    maximum_tree_slope_degrees: 38
+    maximum_grass_slope_degrees: 32
+    maximum_understory_slope_degrees: 42
+    support_ray_depth_m: 4
+    deep_water_m: 0.20
+
+  invalidation:
+    camera_cluster_snap: 1
+    terrain_revision_required: true
+    provider_revision_required: true
+
+  debug:
+    readback_counts: false
+    validate_against_cpu: false
+    show_cluster_reasons: false

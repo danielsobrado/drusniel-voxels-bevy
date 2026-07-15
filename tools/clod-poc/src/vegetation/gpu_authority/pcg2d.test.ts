@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import pcg2dWgsl from "./pcg2d.wgsl?raw";
+import hashWgsl from "./shaders/hash.wgsl?raw";
 import {
   VEGETATION_CATEGORY,
   treePcg2dU32,
@@ -38,5 +40,16 @@ describe("canonical vegetation PCG identity", () => {
     expect(Number.isInteger(lo)).toBe(true);
     expect(Number.isInteger(hi)).toBe(true);
     expect(lo).toBeGreaterThan(0xffffff);
+  });
+
+  it("keeps the WGSL authority on the same integer tuple fold", () => {
+    expect(pcg2dWgsl).toContain("fn treePcg2dU32");
+    expect(pcg2dWgsl).toContain("fn treePcg2d01");
+    expect(hashWgsl).toContain("const VEGETATION_DOMAIN_CHANNEL: u32 = 0x1001u");
+    expect(hashWgsl).toContain("const VEGETATION_CLUSTER_ID_CHANNEL: u32 = 0x1002u");
+    expect(hashWgsl).toContain("const VEGETATION_IDENTITY_CHANNEL: u32 = 0x1003u");
+    expect(hashWgsl).toContain("fn vegetationValueHash");
+    expect(hashWgsl).toContain("fn vegetationStableIdentity");
+    expect(`${pcg2dWgsl}\n${hashWgsl}`).not.toMatch(/fract\s*\(\s*sin/);
   });
 });

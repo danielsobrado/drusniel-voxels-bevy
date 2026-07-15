@@ -240,7 +240,7 @@ fn process_cell(slot: u32) {
   let world_size = params.world.x;
   let hydro = hydrology_at(wpos.x, wpos.y);
   let h = placement_ground_height(wpos.x, wpos.y, world_size);
-  let normal = normalize(densityGradient(wpos.x, h, wpos.y));
+  let normal = placement_ground_normal(wpos.x, wpos.y, world_size, max(0.5, params.world.y));
   let weights = material_weights(h);
   let rock = weights.y;
   let sand = weights.z;
