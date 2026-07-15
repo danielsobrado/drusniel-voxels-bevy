@@ -247,7 +247,15 @@ export class DressingSystem {
             continue;
           }
           const scale = 0.75 + treePcg2d01(id.hi | 0, id.lo | 0, 0x4203)[1] * 0.65;
-          const candidate = { classId, stableId: id, x, y: sample.position[1] + geometryYOffset(classId), z, yaw, scale };
+          const candidate = {
+            classId,
+            stableId: id,
+            x,
+            y: sample.position[1] + geometrySupportOffset(classId) * scale,
+            z,
+            yaw,
+            scale,
+          };
           candidates.push(candidate);
           this.diagnostics.perClass[classId].accepted++;
           if (classId.startsWith("dead_log")) this.appendPairedStump(candidate, candidates);
@@ -274,7 +282,7 @@ export class DressingSystem {
       classId,
       stableId: stumpId,
       x,
-      y: this.surfaceHeightAt(x, z),
+      y: this.surfaceHeightAt(x, z) + geometrySupportOffset(classId) * deadfall.scale * 0.85,
       z,
       yaw: deadfall.yaw,
       scale: deadfall.scale * 0.85,
@@ -480,8 +488,12 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function geometryYOffset(classId: DressingClassId): number {
-  if (classId.startsWith("dead_log") || classId.includes("driftwood")) return 0.22;
+function geometrySupportOffset(classId: DressingClassId): number {
+  if (classId.startsWith("dead_log") || classId.includes("driftwood")) return 0.3;
+  if (classId.startsWith("stump")) return 0.325;
+  if (classId === "broken_snag") return 1.9;
+  if (classId === "large_talus_boulder" || classId === "small_talus") return 0.25;
+  if (classId === "river_cobbles" || classId === "wet_stone_cluster") return 0.14;
   if (classId.includes("litter") || classId.includes("patch") || classId === "moss_patch" || classId === "lichen_patch") return 0.015;
   return 0;
 }
