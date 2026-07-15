@@ -1,0 +1,10 @@
+vegetation_authority_exclusions:
+  invalid_height_m: -1000000
+  margin_m: 0.35
+  unknown_prop_radius_m: 1.5
+  prop_radius_m:
+    small_decor: 0.75
+    medium_static: 2.0
+    large_static: 5.0
+    vegetation: 2.0
+    interactive: 1.5
