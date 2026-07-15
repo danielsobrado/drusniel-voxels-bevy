@@ -18,6 +18,7 @@ const edits = [
     alreadyApplied: [
       `  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);\n  const baseTreeEntry = withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))));\n  const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);\n  const treeEntry = replaceConstU32(\n    applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),`,
       `  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);\n  const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)))));\n  const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);\n  const treeEntry = replaceConstU32(\n    applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),`,
+      `  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);\n  const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreeSharedPcgModule(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))))));\n  const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);\n  const treeEntry = replaceConstU32(\n    applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),`,
     ],
   },
 ];

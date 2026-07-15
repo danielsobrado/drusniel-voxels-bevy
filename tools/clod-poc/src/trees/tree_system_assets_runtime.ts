@@ -28,6 +28,7 @@ import {
 } from "./tree_system_material_application.js";
 import type { TreePatch, TreeImpostorStatus } from "./tree_system_types.js";
 import type { TreeMeshBoundsState } from "./tree_system_mesh_bounds.js";
+import { waitForTreeRendererSubmittedWork } from "./tree_renderer_gpu_sync.js";
 
 export interface TreeSystemAssetsOptions {
   settings: TreeSettings;
@@ -139,6 +140,7 @@ export class TreeSystemAssets {
         return this.cancelledBakeResult(controller.signal.reason);
       }
       if (result.supported) {
+        await waitForTreeRendererSubmittedWork(renderer);
         this.setImpostorAtlases(result.atlases);
         this.impostorStatus = "baked";
         this.impostorReason = null;

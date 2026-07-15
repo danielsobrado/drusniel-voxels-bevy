@@ -12,12 +12,15 @@ import { understoryUiState } from "../../app/clod_app_state.js";
 import type { VegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import type { VegetationStatControllerRefs } from "./vegetation_types.js";
 import { formatUnderstoryGpuSummary } from "./vegetation_stats_presenter.js";
+import { createDressingIntegration, type DressingSystem } from "../../ecology/dressing/index.js";
 
 export interface UnderstoryStartupInput {
   scene: THREE.Scene;
   state: ClodAppState;
   lod0Nodes: ClodPageNode[];
   worldCells: number;
+  worldSeed: number;
+  unboundedWorld: boolean;
   understoryConfig: ReturnType<typeof import("../../understory/index.js").parseUnderstoryConfig>;
   isWebGpu: boolean;
   hydrologySystem: HydrologySystem | null;
@@ -25,6 +28,7 @@ export interface UnderstoryStartupInput {
   gpuBackend: VegetationGpuBackend | null;
   currentLighting: () => EnvironmentLighting;
   statControllers: VegetationStatControllerRefs;
+  searchParams?: URLSearchParams;
 }
 
 export interface UnderstoryStartupResult {
@@ -32,16 +36,25 @@ export interface UnderstoryStartupResult {
   understorySystem: ReturnType<typeof createUnderstoryController>["system"];
   understoryStats: { current: UnderstoryStats | null };
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
+  dressingSystem: DressingSystem;
 }
 
 export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryStartupResult {
   const {
-    scene, state, lod0Nodes, worldCells, understoryConfig,
+    scene, state, lod0Nodes, worldCells, worldSeed, unboundedWorld, understoryConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers,
   } = input;
 
   const understoryStats = { current: null as UnderstoryStats | null };
+  const dressingSystem = createDressingIntegration({
+    scene,
+    worldCells,
+    worldSeed,
+    hydrologySystem,
+    searchParams: input.searchParams,
+    unboundedWorld,
+  });
 
   const understoryController = createUnderstoryController({
     scene,
@@ -51,6 +64,7 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
     webgpu: isWebGpu,
     hydrologyData: hydrologySystem ? packHydrologyData(hydrologySystem) : null,
     hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
+    dressingSystem,
     gpuDevice: rendererWebGpuDevice,
     gpuBackend,
     getUiState: () => understoryUiState(state),
@@ -71,6 +85,6 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
   const understorySystem = understoryController.system;
 
   return {
-    understoryController, understorySystem, understoryStats, formatUnderstoryGpuSummary,
+    understoryController, understorySystem, understoryStats, formatUnderstoryGpuSummary, dressingSystem,
   };
 }

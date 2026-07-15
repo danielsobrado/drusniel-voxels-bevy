@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import type { TreeInstanceMorphology } from "./morphology/types.js";
 
 export interface TreeCrownProxyDimensions {
   radiusX: number;
@@ -32,6 +33,31 @@ export function treeCrownProxyDimensions(settings: TreeSettings, species: TreeSp
     centerY: config.trunkHeightM + Math.max(0.5, crownRadius * 0.42 * flattening),
     density,
   };
+}
+
+export function treeMorphologyCrownProxyDimensions(
+  base: TreeCrownProxyDimensions,
+  morphology: TreeInstanceMorphology,
+): TreeCrownProxyDimensions {
+  const ageHeightScale = 0.72 + (1.08 - 0.72) * smoothstepNumber(0, 1, morphology.age01);
+  const retention = morphology.foliageDensity * (0.72 + (1 - 0.72) * morphology.health01);
+  return {
+    radiusX: base.radiusX * morphology.crownWidth,
+    radiusZ: base.radiusZ * morphology.crownWidth,
+    height: base.height * morphology.crownFlattening * ageHeightScale,
+    centerY: base.centerY * ageHeightScale,
+    density: clampNumber(base.density * retention, 0, 1),
+  };
+}
+
+export function treeMorphologyCrownProxyOffset(
+  base: TreeCrownProxyDimensions,
+  morphology: TreeInstanceMorphology,
+): [number, number] {
+  return [
+    morphology.crownBiasX * base.radiusX + morphology.leanX * base.centerY * 0.49,
+    morphology.crownBiasZ * base.radiusZ + morphology.leanZ * base.centerY * 0.49,
+  ];
 }
 
 export function createTreeCrownProxyGeometry(

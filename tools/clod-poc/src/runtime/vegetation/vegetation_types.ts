@@ -42,6 +42,8 @@ export interface VegetationStartupInput {
   state: ClodAppState;
   lod0Nodes: ClodPageNode[];
   worldCells: number;
+  worldSeed: number;
+  unboundedWorld: boolean;
   grassConfig: ReturnType<typeof import("../../grass.js").parseGrassConfig>;
   stoneConfig: ReturnType<typeof import("../../stones/stone_config.js").parseStoneConfig>;
   treeConfig: ReturnType<typeof import("../../trees/index.js").parseTreeConfig>;
@@ -54,6 +56,7 @@ export interface VegetationStartupInput {
   terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   currentLighting: () => EnvironmentLighting;
   statControllers: VegetationStatControllerRefs;
+  searchParams?: URLSearchParams;
 }
 
 export interface VegetationStartupResult {
@@ -73,6 +76,7 @@ export interface VegetationStartupResult {
   understoryController: ReturnType<typeof createUnderstoryController>;
   understorySystem: ReturnType<typeof createUnderstoryController>["system"];
   understoryStats: { current: UnderstoryStats | null };
+  dressingSystem: import("../../ecology/dressing/dressing_system.js").DressingSystem;
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
   onStoneScatterComplete: { current: (() => void) | null };

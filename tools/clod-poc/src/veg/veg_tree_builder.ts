@@ -142,6 +142,7 @@ export function buildTree(sp: SpeciesParams, rng: Rng, opts: BuildTreeOpts): Bui
   const skel = growSkeleton(sp, rng, opts.inst);
   const anchorLevel = sp.foliage?.anchorLevel ?? 2;
   const grower = new VegMeshGrower();
+  grower.configureMorphology(skel.height, skel.crownRadius);
 
   const maxLevel = opts.lod === 0
     ? 99
@@ -235,6 +236,7 @@ function pushFoliageCard(
   card: FoliageCardParams,
   scaleMultiplier: number,
 ): void {
+  grower.setMorphologyContext(anchor.branchLevel, anchor.branchPhase, 0);
   const hue = 1 + (anchor.hue + (rng.float() - 0.5) * 0.3) * hueVar;
   const age = 1 - anchor.age * 0.18;
   cardColor.setRGB(baseColor.r * hue * age, baseColor.g * hue * age, baseColor.b * hue * age);

@@ -1,5 +1,6 @@
 import type { TreeSpeciesSettings, TreeSpeciesZoneSettings } from "./tree_config.js";
 import { clamp01, smoothstep } from "./tree_noise.js";
+import { TREE_MORPHOLOGY_RUNTIME_DEFAULTS } from "./morphology/constants.js";
 
 export const TREE_EXPANDED_SPECIES = ["oak", "pine", "dead", "birch", "willow", "spruce"] as const;
 export type TreeExpandedSpeciesId = typeof TREE_EXPANDED_SPECIES[number];
@@ -78,12 +79,12 @@ export const TREE_EXPANDED_SPECIES_NICHES: Record<TreeExpandedSpeciesId, TreeExp
 };
 
 export const TREE_EXPANDED_SPECIES_DEFAULTS: Record<TreeExpandedSpeciesId, TreeSpeciesSettings> = {
-  oak: species(0.34, 10, 42, 8.0, 0.36, 4.2, 0.18, 0.62, 3, 8, 3, 0.85, 0.42, 2.4, 0.72, 0.28, 18, 44),
-  pine: species(0.22, 14, 58, 9.5, 0.30, 3.1, 0.08, 0.42, 3, 9, 1, 0.58, -0.08, 2.0, 1.45, 0.16, 12, 36),
-  dead: species(0.07, 14, 58, 8.0, 0.27, 0.0, 0.26, 0.58, 2, 5, 1, 0.9, 0.18, 1.9, 1.0, 0.45, 0, 0),
-  birch: species(0.16, 11, 46, 7.2, 0.26, 3.2, 0.12, 0.58, 3, 7, 2, 0.72, 0.32, 2.0, 0.8, 0.22, 14, 34),
-  willow: species(0.11, 9, 36, 5.5, 0.34, 4.6, 0.24, 0.64, 3, 8, 3, 1.1, -0.08, 2.8, 0.62, 0.34, 22, 50),
-  spruce: species(0.10, 16, 60, 10.0, 0.32, 3.4, 0.05, 0.38, 5, 10, 1, 0.62, -0.12, 2.2, 1.55, 0.14, 14, 38),
+  oak: species(0.34, 10, 42, 8.0, 0.36, 4.2, 0.18, 0.62, 3, 8, 3, 0.85, 0.42, 2.4, 0.72, 0.28, 18, 44, TREE_MORPHOLOGY_RUNTIME_DEFAULTS.oak),
+  pine: species(0.22, 14, 58, 9.5, 0.30, 3.1, 0.08, 0.42, 3, 9, 1, 0.58, -0.08, 2.0, 1.45, 0.16, 12, 36, TREE_MORPHOLOGY_RUNTIME_DEFAULTS.pine),
+  dead: species(0.07, 14, 58, 8.0, 0.27, 0.0, 0.26, 0.58, 2, 5, 1, 0.9, 0.18, 1.9, 1.0, 0.45, 0, 0, TREE_MORPHOLOGY_RUNTIME_DEFAULTS.dead),
+  birch: species(0.16, 11, 46, 7.2, 0.26, 3.2, 0.12, 0.58, 3, 7, 2, 0.72, 0.32, 2.0, 0.8, 0.22, 14, 34, TREE_MORPHOLOGY_RUNTIME_DEFAULTS.birch),
+  willow: species(0.11, 9, 36, 5.5, 0.34, 4.6, 0.24, 0.64, 3, 8, 3, 1.1, -0.08, 2.8, 0.62, 0.34, 22, 50, TREE_MORPHOLOGY_RUNTIME_DEFAULTS.willow),
+  spruce: species(0.10, 16, 60, 10.0, 0.32, 3.4, 0.05, 0.38, 5, 10, 1, 0.62, -0.12, 2.2, 1.55, 0.14, 14, 38, TREE_MORPHOLOGY_RUNTIME_DEFAULTS.spruce),
 };
 
 export function treeExpandedSpeciesNicheWeight(
@@ -133,6 +134,7 @@ function species(
   crownIrregularity: number,
   leafClusterCount: number,
   leafCardCount: number,
+  morphologyRuntime: TreeSpeciesSettings["morphologyRuntime"],
 ): TreeSpeciesSettings {
   return {
     enabled: true,
@@ -156,5 +158,6 @@ function species(
       leafClusterCount,
       leafCardCount,
     },
+    morphologyRuntime: { ...morphologyRuntime },
   };
 }

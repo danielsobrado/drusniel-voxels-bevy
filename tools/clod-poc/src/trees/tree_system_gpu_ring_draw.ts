@@ -12,6 +12,7 @@ import type { TreeMaterialHandle } from "./tree_material.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT, treeRingShadowCasterGroupCount } from "./tree_ring_shadow_casters.js";
 
 export type TreeGpuRingMesh = THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>;
+export const TREE_GPU_RING_INSTANCE_VEC4S = 6;
 
 export type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
   setIndirect?(attribute: THREE.BufferAttribute, offset: number): void;
@@ -74,7 +75,10 @@ export function createTreeGpuRingStorageInstancedAttribute(
   name: string,
   count: number,
 ): StorageInstancedBufferAttribute {
-  const attribute = new StorageInstancedBufferAttribute(Math.max(1, Math.floor(count)), 4);
+  const attribute = new StorageInstancedBufferAttribute(
+    Math.max(1, Math.floor(count)) * TREE_GPU_RING_INSTANCE_VEC4S,
+    4,
+  );
   attribute.name = `tree-ring-${name}`;
   backend.createStorageAttribute(attribute);
   return attribute;

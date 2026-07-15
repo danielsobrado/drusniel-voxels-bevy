@@ -6,6 +6,7 @@ import {
 } from "./tree_impostor_blend_geometry.js";
 import {
   treeImpostorLocalPositionScaleAttribute,
+  treeIdentityBitsAttribute,
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
@@ -53,6 +54,11 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
   if (input.matrixChanged) input.mesh.instanceMatrix.needsUpdate = true;
   if (input.worldXZChanged) {
     treeWorldXZAttribute(input.mesh).needsUpdate = true;
+    treeIdentityBitsAttribute(input.mesh).needsUpdate = true;
+    for (let index = 0; index < 3; index++) {
+      const morphology = input.mesh.geometry.getAttribute(`treeMorphology${index}`) as THREE.InstancedBufferAttribute | undefined;
+      if (morphology) morphology.needsUpdate = true;
+    }
     if (input.lod === "impostor") treeImpostorLocalPositionScaleAttribute(input.mesh).needsUpdate = true;
   }
   if (input.fadeChanged) {

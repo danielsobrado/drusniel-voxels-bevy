@@ -61,6 +61,8 @@ export interface RuntimeSystemsStartupInput {
   bindings: ClodRuntimeBindings;
   lod0Nodes: ClodPageNode[];
   worldCells: number;
+  worldSeed: number;
+  unboundedWorld: boolean;
   grassConfig: ReturnType<typeof parseGrassConfig>;
   stoneConfig: ReturnType<typeof parseStoneConfig>;
   treeConfig: ReturnType<typeof parseTreeConfig>;
@@ -122,6 +124,8 @@ export async function runRuntimeSystemsStartup(
     bindings,
     lod0Nodes,
     worldCells,
+    worldSeed,
+    unboundedWorld,
     grassConfig,
     stoneConfig,
     treeConfig,
@@ -154,6 +158,8 @@ export async function runRuntimeSystemsStartup(
     state,
     lod0Nodes,
     worldCells,
+    worldSeed,
+    unboundedWorld,
     grassConfig,
     stoneConfig,
     treeConfig,
@@ -166,6 +172,7 @@ export async function runRuntimeSystemsStartup(
     terrainOcclusionSampler,
     currentLighting,
     statControllers,
+    searchParams,
   });
   await vegetation.impostorBakePromise;
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);

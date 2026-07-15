@@ -8,25 +8,23 @@ import {
 } from "./index.js";
 
 describe("tree ring placement constants", () => {
-  it("keeps the regular GPU ring material on shared placement constants", () => {
+  it("reads canonical placement from the shared 96-byte GPU record", () => {
     const source = readFileSync(new URL("./tree_node_material.ts", import.meta.url), "utf8");
 
     expect(TREE_RING_CELL_SIZE_M).toBe(3.4);
     expect(TREE_RING_JITTER_X_SALT).toBe(1103);
     expect(TREE_RING_JITTER_Z_SALT).toBe(1200);
     expect(TREE_RING_YAW_SALT).toBe(701);
-    expect(source).toContain("const uCellSize = uniform(TREE_RING_CELL_SIZE_M)");
-    expect(source).toContain("treeRingHash(worldCell, uSeed, TREE_RING_JITTER_X_SALT)");
-    expect(source).toContain("treeRingHash(worldCell, uSeed, TREE_RING_JITTER_Z_SALT)");
-    expect(source).toContain("treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT)");
+    expect(source).toContain("treeMorphologyRecordNodes(buffers)");
+    expect(source).toContain("record.positionScale.xz");
+    expect(source).toContain("record.rotationNormalY.x");
   });
 
-  it("keeps the ring impostor material on shared placement constants", () => {
+  it("reads the same canonical placement record in the impostor material", () => {
     const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("TREE_RING_CELL_SIZE_M");
-    expect(source).toContain("TREE_RING_JITTER_X_SALT");
-    expect(source).toContain("TREE_RING_JITTER_Z_SALT");
-    expect(source).toContain("TREE_RING_YAW_SALT");
+    expect(source).toContain("treeMorphologyRecordNodes(buffers)");
+    expect(source).toContain("record.positionScale.xz");
+    expect(source).toContain("record.rotationNormalY.x");
   });
 });

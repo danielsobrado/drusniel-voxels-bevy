@@ -5,8 +5,9 @@
 
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
-import { buildRequiredLimits, describeDiagnostics, probeWebGPU } from "../core/diagnostics.js";
+import { describeDiagnostics } from "../core/diagnostics.js";
 import { installTerrainTextureArrayProbe } from "../gpu/terrain_texture_array_probe.js";
+import { requestSharedWebGpuDevice } from "./shared_webgpu_device.js";
 import { installMaterialKeyMemo } from "./three_patches.js";
 import { installPositionInvariance } from "./veg_prepass.js";
 import {
@@ -36,6 +37,10 @@ export interface WebGpuAppRenderer {
   maxAnisotropy: number;
 }
 
+export interface WebGpuRendererOptions {
+  desiredMaximumFrameLatency?: number;
+}
+
 export type AppRenderer = WebGlAppRenderer | WebGpuAppRenderer;
 
 export function createWebGlAppRenderer(): WebGlAppRenderer {
@@ -46,24 +51,28 @@ export function createWebGlAppRenderer(): WebGlAppRenderer {
   return { isWebGpu: false, renderer, maxAnisotropy: renderer.capabilities.getMaxAnisotropy() };
 }
 
-export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
-  const diagnostics = await probeWebGPU();
-  if (!diagnostics.ok) {
+export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {}): Promise<WebGpuAppRenderer> {
+  let shared: Awaited<ReturnType<typeof requestSharedWebGpuDevice>>;
+  try {
+    shared = await requestSharedWebGpuDevice();
+  } catch (error) {
     throw new Error([
-      diagnostics.reason ?? "WebGPU probe failed.",
+      error instanceof Error ? error.message : String(error),
       "Try a hard browser restart or add ?renderer=webgl while the D3D12 device is recovering.",
     ].join("\n"));
   }
-
+  const { diagnostics, requiredLimits } = shared;
   const renderer = new WebGPURenderer({
     antialias: true,
     // The application does not consume or resolve Three's timestamp pools.
     // Enabling them therefore leaks query pairs until the pool overflows.
     trackTimestamp: false,
-    requiredLimits: buildRequiredLimits(diagnostics),
+    requiredLimits,
+    device: shared.device,
   });
   try {
     await renderer.init();
+    configureCanvasFrameLatency(renderer, options.desiredMaximumFrameLatency);
   } catch (error) {
     renderer.dispose();
     const message = error instanceof Error ? error.message : String(error);
@@ -84,10 +93,10 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   if (device) {
     setActiveWebGpuRendererContext(renderer, device);
     let reported = 0;
-    device.onuncapturederror = (e: GPUUncapturedErrorEvent): void => {
-      if (reported++ < 8) console.error("[webgpu] uncaptured error:", e.error.message);
+    device.onuncapturederror = (event: GPUUncapturedErrorEvent): void => {
+      if (reported++ < 8) console.error("[webgpu] uncaptured error:", event.error.message);
     };
-    void device.lost.then((info) => {
+    void device.lost.then((info: GPUDeviceLostInfo) => {
       clearActiveWebGpuRendererContext(renderer);
       console.error("[webgpu] device lost:", info.reason, info.message);
       if (window.__drusnielClod) {
@@ -97,6 +106,21 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   }
   // WebGPU exposes a high anisotropy limit; 16 matches typical hardware and the WebGL default.
   return { isWebGpu: true, renderer, maxAnisotropy: 16 };
+}
+
+function configureCanvasFrameLatency(renderer: WebGPURenderer, requested: number | undefined): void {
+  if (requested === undefined || !Number.isFinite(requested)) return;
+  const desiredMaximumFrameLatency = Math.max(1, Math.min(4, Math.round(requested)));
+  const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
+  const context = renderer.domElement.getContext("webgpu");
+  if (!device || !context) return;
+  context.configure({
+    device,
+    format: navigator.gpu.getPreferredCanvasFormat(),
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    alphaMode: "opaque",
+    desiredMaximumFrameLatency,
+  } as GPUCanvasConfiguration & { desiredMaximumFrameLatency: number });
 }
 
 function installWebGpuShaderMaterialGuard(): void {

@@ -141,6 +141,8 @@ export interface GrowthInstance {
 
 export interface SkelBranch {
   level: number;
+  /** Stable grammar branch identity in 0..1, shared by all LOD meshes. */
+  phase: number;
   /** polyline points (world-local, tree origin at 0,0,0) */
   pts: Vector3[];
   /** radius at each point */
@@ -162,6 +164,8 @@ export interface LeafAnchor {
   hue: number;
   /** 0 fresh .. 1 old/dry (inner/lower crown) */
   age: number;
+  branchLevel: number;
+  branchPhase: number;
 }
 
 export interface Skeleton {

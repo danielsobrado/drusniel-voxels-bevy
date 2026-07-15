@@ -428,6 +428,8 @@ export async function bootstrapClodPoc() {
     bindings: postRenderer.uiRefs.bindings,
     lod0Nodes: world.lod0Nodes,
     worldCells: world.worldCells,
+    worldSeed: world.worldManifest.seed,
+    unboundedWorld: world.worldSource.metadata.bounds === "infinite",
     grassConfig: world.grassConfig,
     stoneConfig: world.stoneConfig,
     treeConfig: world.treeConfig,

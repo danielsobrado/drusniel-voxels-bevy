@@ -35,12 +35,18 @@ describe("tree system mesh bounds updater", () => {
     const fade = treeLodFadeAttribute(mesh);
     const ditherRole = treeLodDitherRoleAttribute(mesh);
     const impostorUv = treeImpostorUvRectAttribute(mesh);
+    const identity = mesh.geometry.getAttribute("treeIdentityBits") as THREE.InstancedBufferAttribute;
+    const morphology = [0, 1, 2].map((index) =>
+      mesh.geometry.getAttribute(`treeMorphology${index}`) as THREE.InstancedBufferAttribute
+    );
     const versionsBefore = {
       matrix: mesh.instanceMatrix.version,
       worldXZ: worldXZ.version,
       fade: fade.version,
       ditherRole: ditherRole.version,
       impostorUv: impostorUv.version,
+      identity: identity.version,
+      morphology: morphology.map((attribute) => attribute.version),
     };
     const computeSphere = vi.spyOn(mesh, "computeBoundingSphere");
     const computeBox = vi.spyOn(mesh, "computeBoundingBox");
@@ -62,6 +68,10 @@ describe("tree system mesh bounds updater", () => {
     expect(fade.version).toBeGreaterThan(versionsBefore.fade);
     expect(ditherRole.version).toBeGreaterThan(versionsBefore.ditherRole);
     expect(impostorUv.version).toBeGreaterThan(versionsBefore.impostorUv);
+    expect(identity.version).toBeGreaterThan(versionsBefore.identity);
+    morphology.forEach((attribute, index) => {
+      expect(attribute.version).toBeGreaterThan(versionsBefore.morphology[index]!);
+    });
     expect(computeSphere).toHaveBeenCalledTimes(1);
     expect(computeBox).toHaveBeenCalledTimes(1);
     expect(state.hasBounds).toBe(true);
@@ -103,6 +113,10 @@ describe("tree system mesh bounds updater", () => {
 function testMesh(): THREE.InstancedMesh {
   const geometry = new THREE.BoxGeometry(1, 1, 1) as THREE.BufferGeometry;
   geometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(2), 2));
+  geometry.setAttribute("treeIdentityBits", new THREE.InstancedBufferAttribute(new Uint32Array(2), 2));
+  for (let index = 0; index < 3; index++) {
+    geometry.setAttribute(`treeMorphology${index}`, new THREE.InstancedBufferAttribute(new Float32Array(4), 4));
+  }
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array([1]), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(4), 4));

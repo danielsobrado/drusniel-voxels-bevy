@@ -1,0 +1,38 @@
+erosion:
+  schema_version: 2
+  enabled: true
+  cell_size_m: 16
+  border_cells: 2
+  hydraulic_iterations: 192
+  thermal_iterations: 48
+  checkpoint_every_iterations: 8
+
+  rain:
+    amount_per_iteration_m: 0.0025
+    spatial_variation: 0.20
+
+  water:
+    gravity_m_s2: 9.81
+    time_step_s: 0.04
+    evaporation_fraction: 0.012
+    max_velocity_cells_per_step: 2.0
+
+  sediment:
+    capacity_factor: 0.55
+    erosion_rate: 0.24
+    deposition_rate: 0.45
+    minimum_slope: 0.008
+    maximum_erosion_per_iteration_m: 0.04
+    maximum_deposition_per_iteration_m: 0.06
+
+  thermal:
+    rate: 0.12
+    soft_talus_degrees: 30.0
+    hard_talus_degrees: 72.0
+
+  persistence:
+    compression: zstd
+    quantized_height_step_m: 0.00390625
+    keep_water_field: false
+    keep_sediment_field: true
+    keep_deposition_field: true

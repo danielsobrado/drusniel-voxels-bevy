@@ -13,6 +13,10 @@ import type { WeatherController } from "../../runtime/water_weather/weather_cont
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
 import { hydrologyAtlasGpuStats, updateHydrologyAtlasGpu } from "../../gpu/hydrology_atlas_gpu.js";
+import {
+  refreshVegetationAuthorityHeightfieldMask,
+  vegetationAuthorityHeightfieldMaskStats,
+} from "../../vegetation/gpu_authority/heightfield_mask.js";
 
 interface GuiDisplayController {
   updateDisplay: () => unknown;
@@ -94,11 +98,27 @@ function finiteWaterSample(sample: WaterFieldResult): boolean {
     && Number.isFinite(sample.flow.drop);
 }
 
-function mirrorInfiniteHydrologyDiagnostics(input: VegetationFramePhaseInput): void {
-  const hooks = (globalThis as typeof globalThis & {
+function globalCounters(): Record<string, number> | null {
+  return (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
-  }).window?.__drusnielClod;
-  const counters = hooks?.stats?.counters;
+  }).window?.__drusnielClod?.stats?.counters ?? null;
+}
+
+function mirrorVegetationAuthorityMaskCounters(): void {
+  const counters = globalCounters();
+  if (!counters) return;
+  const stats = vegetationAuthorityHeightfieldMaskStats();
+  counters["vegetationAuthority.mask.revision"] = stats.revision;
+  counters["vegetationAuthority.mask.footprints"] = stats.footprints;
+  counters["vegetationAuthority.mask.voxelFootprints"] = stats.voxelFootprints;
+  counters["vegetationAuthority.mask.projectPropFootprints"] = stats.projectPropFootprints;
+  counters["vegetationAuthority.mask.constructionFootprints"] = stats.constructionFootprints;
+  counters["vegetationAuthority.mask.destroyedPropFootprints"] = stats.destroyedPropFootprints;
+  counters["vegetationAuthority.mask.indexedTiles"] = stats.indexedTiles;
+}
+
+function mirrorInfiniteHydrologyDiagnostics(input: VegetationFramePhaseInput): void {
+  const counters = globalCounters();
   if (!counters || input.worldCells <= 0) return;
 
   publishWorldCenterStatsToCounters(counters, computeWorldCenterDebugStats({
@@ -186,8 +206,12 @@ function updateUntimed(input: VegetationFramePhaseInput): VegetationFrameTiming 
 }
 
 export function runVegetationFramePhase(input: VegetationFramePhaseInput): VegetationFrameTiming {
-  // Refill/upload the streaming hydrology atlas before any ring compute dispatches so
-  // this frame's placement already sees tiles the worker delivered since last frame.
+  refreshVegetationAuthorityHeightfieldMask();
+  if (input.selectionFrameId % HYDROLOGY_DIAGNOSTIC_INTERVAL_FRAMES === 0) {
+    mirrorVegetationAuthorityMaskCounters();
+  }
+  // Refill/upload the streaming hydrology and authority-masked height atlases before any
+  // ring compute dispatch so this frame sees newly committed world edits without readback.
   updateHydrologyAtlasGpu(input.ringCenter.x, input.ringCenter.z);
   if (!input.collectTiming) return updateUntimed(input);
 

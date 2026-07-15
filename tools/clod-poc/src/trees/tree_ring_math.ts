@@ -2,6 +2,7 @@ import { terrainWeights, WATER_LEVEL } from "../terrain/terrain.js";
 import { DEFAULT_TREE_SETTINGS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { treeMaterialDensityVector } from "./tree_material_bias.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
+import { treePcg2d01 } from "../vegetation/gpu_authority/pcg2d.js";
 
 export interface TreeRingAcceptParams {
   seed: number;
@@ -39,22 +40,7 @@ export interface TreeRingLodState {
 }
 
 export function treePcg2d(cellX: number, cellZ: number, salt: number): [number, number] {
-  const m = 1664525;
-  const c = 1013904223;
-  const a0 = (Math.trunc(cellX) + 40000 + (salt & 0x3fff)) >>> 0;
-  const b0 = (Math.trunc(cellZ) + 40000 + ((salt >>> 14) & 0x3fff)) >>> 0;
-  const a1 = (Math.imul(a0, m) + c) >>> 0;
-  const b1 = (Math.imul(b0, m) + c) >>> 0;
-  const a2 = (a1 + Math.imul(b1, m)) >>> 0;
-  const b2 = (b1 + Math.imul(a2, m)) >>> 0;
-  const a3 = (a2 ^ (a2 >>> 16)) >>> 0;
-  const b3 = (b2 ^ (b2 >>> 16)) >>> 0;
-  const a4 = (a3 + Math.imul(b3, m)) >>> 0;
-  const b4 = (b3 + Math.imul(a4, m)) >>> 0;
-  const a5 = (a4 ^ (a4 >>> 16)) >>> 0;
-  const b5 = (b4 ^ (b4 >>> 16)) >>> 0;
-  const inv = 1 / 16777216;
-  return [(a5 & 0xffffff) * inv, (b5 & 0xffffff) * inv];
+  return treePcg2d01(cellX, cellZ, salt);
 }
 
 export function treeWorldCell(

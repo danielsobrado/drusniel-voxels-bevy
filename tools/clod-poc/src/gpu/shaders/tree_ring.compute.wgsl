@@ -16,6 +16,20 @@ const TREE_HYDRO_WATER_CLEARANCE: f32 = 1.5;
 const TREE_RIPARIAN_INNER_END_M: f32 = 8.0;
 const TREE_RIPARIAN_OUTER_START_M: f32 = 9.0;
 const TREE_RIPARIAN_OUTER_END_M: f32 = 32.0;
+const TREE_INSTANCE_VEC4S: u32 = 6u;
+const VEGETATION_SCHEMA_VERSION: u32 = 1u;
+const VEGETATION_TREE_CATEGORY: u32 = 1u;
+const VEGETATION_DOMAIN_CHANNEL: u32 = 0x1001u;
+const VEGETATION_IDENTITY_CHANNEL: u32 = 0x1003u;
+const MORPH_AGE_CHANNEL: u32 = 0x1101u;
+const MORPH_LEAN_CHANNEL: u32 = 0x1102u;
+const MORPH_CROWN_BIAS_CHANNEL: u32 = 0x1103u;
+const MORPH_WIDTH_CHANNEL: u32 = 0x1104u;
+const MORPH_FLAT_CHANNEL: u32 = 0x1105u;
+const MORPH_DROOP_CHANNEL: u32 = 0x1106u;
+const MORPH_HEALTH_CHANNEL: u32 = 0x1107u;
+const MORPH_FLARE_CHANNEL: u32 = 0x1108u;
+const MORPH_FOLIAGE_CARD_CHANNEL: u32 = 0x1109u;
 
 struct TreeAcceptParams {
   seed: u32,
@@ -90,6 +104,29 @@ struct TreeHydrologySample {
   enabled: f32,
 };
 
+struct TreeCompetitionSample {
+  crown_pressure: f32,
+  directional_pressure: f32,
+  open_light_direction: vec2<f32>,
+};
+
+struct TreeInstanceMorphologyGpu {
+  morphology0: vec4<f32>,
+  morphology1: vec4<f32>,
+  morphology2: vec4<f32>,
+};
+
+struct VegetationTreeInstance {
+  position_scale: vec4<f32>,
+  rotation_normal_y: vec4<f32>,
+  identity: vec4<u32>,
+  morphology0: vec4<f32>,
+  morphology1: vec4<f32>,
+  morphology2: vec4<f32>,
+};
+
+var<private> tree_current_record: VegetationTreeInstance;
+
 @group(0) @binding(0) var<uniform> params: TreeRingParams;
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
@@ -122,6 +159,46 @@ fn tree_pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let b5 = b4 ^ (b4 >> 16u);
   let inv = 1.0 / 16777216.0;
   return vec2<f32>(f32(a5 & 0xffffffu) * inv, f32(b5 & 0xffffffu) * inv);
+}
+
+fn tree_pcg2d_u32(cell: vec2<i32>, salt: u32) -> vec2<u32> {
+  let M = 1664525u;
+  let C = 1013904223u;
+  let a0 = bitcast<u32>(cell.x + 40000) + (salt & 0x3fffu);
+  let b0 = bitcast<u32>(cell.y + 40000) + ((salt >> 14u) & 0x3fffu);
+  let a1 = a0 * M + C;
+  let b1 = b0 * M + C;
+  let a2 = a1 + b1 * M;
+  let b2 = b1 + a2 * M;
+  let a3 = a2 ^ (a2 >> 16u);
+  let b3 = b2 ^ (b2 >> 16u);
+  let a4 = a3 + b3 * M;
+  let b4 = b3 + a4 * M;
+  return vec2<u32>(a4 ^ (a4 >> 16u), b4 ^ (b4 >> 16u));
+}
+
+fn vegetation_tree_identity(cell: vec2<i32>, species: u32) -> vec2<u32> {
+  let world_seed = params.settings_u.z;
+  let rotated_seed = (world_seed << 16u) | (world_seed >> 16u);
+  let seed_hash = tree_pcg2d_u32(
+    vec2<i32>(bitcast<i32>(world_seed), bitcast<i32>(rotated_seed ^ VEGETATION_SCHEMA_VERSION)),
+    VEGETATION_DOMAIN_CHANNEL ^ VEGETATION_TREE_CATEGORY,
+  );
+  let cell_hash = tree_pcg2d_u32(cell, seed_hash.x ^ seed_hash.y);
+  let identity_channel = VEGETATION_IDENTITY_CHANNEL ^ (species * 0x9e3779b9u);
+  return tree_pcg2d_u32(
+    vec2<i32>(bitcast<i32>(cell_hash.x), bitcast<i32>(cell_hash.y)),
+    identity_channel ^ seed_hash.y,
+  );
+}
+
+fn morphology_hash01(identity: vec2<u32>, channel: u32) -> f32 {
+  let value = tree_pcg2d_u32(vec2<i32>(bitcast<i32>(identity.x), bitcast<i32>(identity.y)), channel);
+  return f32(value.x & 0xffffffu) / 16777216.0;
+}
+
+fn morphology_hash_signed(identity: vec2<u32>, channel: u32) -> f32 {
+  return morphology_hash01(identity, channel) * 2.0 - 1.0;
 }
 
 fn tree_hash(cell: vec2<f32>, salt: u32) -> f32 {
@@ -255,12 +332,16 @@ fn tree_local_competition_mask(wc: vec2<f32>, wpos: vec2<f32>, cfg: TreeAcceptPa
 }
 
 fn tree_height_normal_y(wpos: vec2<f32>) -> f32 {
+  return tree_height_normal(wpos).y;
+}
+
+fn tree_height_normal(wpos: vec2<f32>) -> vec3<f32> {
   let e = max(params.settings_a.x, 1.0);
   let hx0 = placement_ground_height(wpos.x - e, wpos.y, params.center_radius.w);
   let hx1 = placement_ground_height(wpos.x + e, wpos.y, params.center_radius.w);
   let hz0 = placement_ground_height(wpos.x, wpos.y - e, params.center_radius.w);
   let hz1 = placement_ground_height(wpos.x, wpos.y + e, params.center_radius.w);
-  return normalize(vec3<f32>(hx0 - hx1, e * 2.0, hz0 - hz1)).y;
+  return normalize(vec3<f32>(hx0 - hx1, e * 2.0, hz0 - hz1));
 }
 
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
@@ -481,13 +562,183 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
   return TREE_SPECIES_COUNT - 1u;
 }
 
+fn tree_species_morphology_runtime(species: u32) -> array<vec4<f32>, 3> {
+  var values = array<vec4<f32>, 3>();
+  if (species == 0u) {
+    values[0] = vec4<f32>(0.08, 0.04, 0.05, 0.05);
+    values[1] = vec4<f32>(0.08, 0.03, 0.12, 0.05);
+    values[2] = vec4<f32>(0.90, 0.0, 0.0, 0.0);
+  } else if (species == 1u) {
+    values[0] = vec4<f32>(0.06, 0.05, 0.03, 0.10);
+    values[1] = vec4<f32>(0.02, -0.02, 0.06, 0.02);
+    values[2] = vec4<f32>(1.15, 0.0, 0.0, 0.0);
+  } else if (species == 2u) {
+    values[0] = vec4<f32>(0.12, 0.08, 0.08, 0.00);
+    values[1] = vec4<f32>(0.00, 0.08, 0.14, 0.00);
+    values[2] = vec4<f32>(0.78, 0.0, 0.0, 0.0);
+  } else if (species == 3u) {
+    values[0] = vec4<f32>(0.10, 0.07, 0.05, 0.07);
+    values[1] = vec4<f32>(0.04, 0.04, 0.10, 0.06);
+    values[2] = vec4<f32>(0.82, 0.0, 0.0, 0.0);
+  } else if (species == 4u) {
+    values[0] = vec4<f32>(0.08, 0.04, 0.04, 0.04);
+    values[1] = vec4<f32>(0.10, 0.12, 0.16, 0.10);
+    values[2] = vec4<f32>(0.72, 0.0, 0.0, 0.0);
+  } else {
+    values[0] = vec4<f32>(0.05, 0.04, 0.025, 0.09);
+    values[1] = vec4<f32>(0.02, 0.00, 0.05, 0.02);
+    values[2] = vec4<f32>(1.22, 0.0, 0.0, 0.0);
+  }
+  return values;
+}
+
+fn tree_species_old_forest_bias(species: u32) -> f32 {
+  if (species == 2u) { return 0.85; }
+  if (species == 3u) { return 0.12; }
+  if (species == 4u) { return 0.08; }
+  if (species == 5u) { return 0.18; }
+  return 0.0;
+}
+
+fn tree_species_moisture_preference(species: u32) -> f32 {
+  if (species == 0u) { return 0.65; }
+  if (species == 1u) { return 0.35; }
+  if (species == 2u) { return 0.45; }
+  if (species == 3u) { return 0.58; }
+  if (species == 4u) { return 0.86; }
+  return 0.42;
+}
+
+fn tree_competition_sample(wpos: vec2<f32>, species: u32) -> TreeCompetitionSample {
+  var pressure_sum = 0.0;
+  var pressure_vector = vec2<f32>(0.0);
+  for (var radius_index = 1; radius_index <= 3; radius_index = radius_index + 1) {
+    var radius_m = 8.0;
+    if (radius_index == 2) { radius_m = 16.0; }
+    if (radius_index == 3) { radius_m = 32.0; }
+    for (var direction_index = 0; direction_index < 8; direction_index = direction_index + 1) {
+      let angle = f32(direction_index) * 0.78539816339;
+      let direction = vec2<f32>(cos(angle), sin(angle));
+      let sample_cell = floor((wpos + direction * radius_m) / 3.4);
+      let occupancy = tree_pcg2d(sample_cell, params.settings_u.z ^ 0x1005u ^ species).x;
+      let pressure = smoothstep(0.42, 0.92, occupancy) / 3.0;
+      pressure_sum = pressure_sum + pressure;
+      pressure_vector = pressure_vector + direction * pressure;
+    }
+  }
+  let magnitude = length(pressure_vector);
+  let open_direction = select(vec2<f32>(1.0, 0.0), -pressure_vector / max(magnitude, 1e-6), magnitude > 1e-6);
+  return TreeCompetitionSample(
+    clamp(pressure_sum / 8.0, 0.0, 1.0),
+    clamp(magnitude / 8.0, 0.0, 1.0),
+    open_direction,
+  );
+}
+
+fn clamp_morphology_vector(value: vec2<f32>, maximum: f32) -> vec2<f32> {
+  let magnitude = length(value);
+  return select(value, value * maximum / max(magnitude, 1e-6), magnitude > maximum);
+}
+
+fn derive_tree_instance_morphology(
+  identity: vec2<u32>,
+  species: u32,
+  wpos: vec2<f32>,
+  terrain_normal: vec3<f32>,
+  height: f32,
+  competition: TreeCompetitionSample,
+) -> TreeInstanceMorphologyGpu {
+  let runtime = tree_species_morphology_runtime(species);
+  let slope01 = clamp(length(terrain_normal.xz), 0.0, 1.0);
+  let slope_direction = select(vec2<f32>(0.0), normalize(terrain_normal.xz), slope01 > 1e-6);
+  let exposure01 = clamp(1.0 - terrain_normal.y, 0.0, 1.0);
+  let forest_cover = tree_forest_cover_mask(wpos, tree_accept_params_from_uniforms());
+  let old_forest = tree_species_old_forest_bias(species) * forest_cover;
+  let moisture = 1.0 - clamp((height - WATER_LEVEL) / 42.0, 0.0, 1.0);
+  let moisture_suitability = 1.0 - min(1.0, abs(moisture - tree_species_moisture_preference(species)));
+  let temperature_suitability = 1.0 - min(1.0, abs(height - 34.0) / 58.0);
+  let stress = clamp(exposure01 * 0.35 + (1.0 - forest_cover) * 0.25, 0.0, 1.0);
+  let age = clamp(0.10 + morphology_hash01(identity, MORPH_AGE_CHANNEL) * 0.78
+    + old_forest * 0.22 - competition.crown_pressure * 0.18, 0.0, 1.0);
+  let droop = clamp(runtime[1].y + age * runtime[1].z + moisture * runtime[1].w
+    + morphology_hash_signed(identity, MORPH_DROOP_CHANNEL) * 0.08, -0.18, 0.32);
+  let health = clamp(0.72 + moisture_suitability * 0.18 + temperature_suitability * 0.14
+    - competition.crown_pressure * 0.18 - stress * 0.32
+    + morphology_hash_signed(identity, MORPH_HEALTH_CHANNEL) * 0.10, 0.0, 1.0);
+  let stiffness = clamp(runtime[2].x + (1.0 - age) * 0.12 + health * 0.08 - droop * 0.25, 0.65, 1.35);
+  let lean_angle = morphology_hash01(identity, MORPH_LEAN_CHANNEL) * 6.28318530718;
+  let random_lean = vec2<f32>(cos(lean_angle), sin(lean_angle));
+  var lean = slope_direction * slope01 * runtime[0].x
+    + normalize(vec2<f32>(0.8, 0.6)) * runtime[0].y + random_lean * runtime[0].z;
+  lean = lean * mix(0.55, 1.15, age) * mix(1.20, 0.75, stiffness);
+  lean = clamp_morphology_vector(lean, 0.22);
+  let bias_angle = morphology_hash01(identity, MORPH_CROWN_BIAS_CHANNEL) * 6.28318530718;
+  let random_bias = vec2<f32>(cos(bias_angle), sin(bias_angle));
+  let bias = clamp_morphology_vector(
+    competition.open_light_direction * competition.directional_pressure * 0.28 + random_bias * 0.07,
+    0.35,
+  );
+  let width = clamp(0.88 + age * 0.20 - competition.crown_pressure * 0.12
+    + morphology_hash_signed(identity, MORPH_WIDTH_CHANNEL) * 0.08, 0.82, 1.18);
+  let flattening = clamp(1.0 - exposure01 * runtime[0].w + age * runtime[1].x
+    + morphology_hash_signed(identity, MORPH_FLAT_CHANNEL) * 0.06, 0.82, 1.20);
+  let foliage = clamp(0.58 + health * 0.48 + age * 0.10 - competition.crown_pressure * 0.12, 0.55, 1.15);
+  let flare = clamp(0.85 + age * 0.28 + exposure01 * 0.18
+    + morphology_hash_signed(identity, MORPH_FLARE_CHANNEL) * 0.08, 0.75, 1.35);
+  return TreeInstanceMorphologyGpu(
+    vec4<f32>(age, lean.x, lean.y, health),
+    vec4<f32>(bias.x, bias.y, width, flattening),
+    vec4<f32>(droop, foliage, flare, stiffness),
+  );
+}
+
+fn tree_instance_record(
+  species: u32,
+  wc: vec2<f32>,
+  wpos: vec2<f32>,
+  height: f32,
+  scale: f32,
+  terrain_normal: vec3<f32>,
+) -> VegetationTreeInstance {
+  let identity = vegetation_tree_identity(vec2<i32>(wc), species);
+  let variant = min(3u, u32(floor(tree_hash(wc, 1103u) * 4.0)));
+  let yaw = tree_hash(wc, 701u) * 6.28318530718;
+  let morphology = derive_tree_instance_morphology(identity, species, wpos, terrain_normal, height, tree_competition_sample(wpos, species));
+  return VegetationTreeInstance(
+    vec4<f32>(wpos.x, height, wpos.y, scale),
+    vec4<f32>(yaw, terrain_normal.y, f32(variant), morphology_hash01(identity, MORPH_FOLIAGE_CARD_CHANNEL)),
+    vec4<u32>(VEGETATION_TREE_CATEGORY, species | (variant << 16u), identity.x, identity.y),
+    morphology.morphology0,
+    morphology.morphology1,
+    morphology.morphology2,
+  );
+}
+
+fn write_tree_record(base: u32, record: VegetationTreeInstance) {
+  out_cell[base] = record.position_scale;
+  out_cell[base + 1u] = record.rotation_normal_y;
+  out_cell[base + 2u] = bitcast<vec4<f32>>(record.identity);
+  out_cell[base + 3u] = record.morphology0;
+  out_cell[base + 4u] = record.morphology1;
+  out_cell[base + 5u] = record.morphology2;
+}
+
+fn write_shadow_tree_record(base: u32, record: VegetationTreeInstance) {
+  out_shadow_cell[base] = record.position_scale;
+  out_shadow_cell[base + 1u] = record.rotation_normal_y;
+  out_shadow_cell[base + 2u] = bitcast<vec4<f32>>(record.identity);
+  out_shadow_cell[base + 3u] = record.morphology0;
+  out_shadow_cell[base + 4u] = record.morphology1;
+  out_shadow_cell[base + 5u] = record.morphology2;
+}
+
 fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
   let max_per_group = params.settings_u.x;
   let group = group_index(species, lod);
   let slot = atomicAdd(&counters[group], 1u);
   if (slot >= max_per_group) { return; }
-  let out_index = group * max_per_group + slot;
-  out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
+  let out_index = (group * max_per_group + slot) * TREE_INSTANCE_VEC4S;
+  write_tree_record(out_index, tree_current_record);
 }
 
 fn append_shadow_tree(cascade: u32, species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
@@ -496,8 +747,8 @@ fn append_shadow_tree(cascade: u32, species: u32, lod: u32, wc: vec2<f32>, heigh
   let group = shadow_group_index(cascade, species, lod);
   let slot = atomicAdd(&shadow_counters[group], 1u);
   if (slot >= max_per_group) { return; }
-  let out_index = group * max_per_group + slot;
-  out_shadow_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
+  let out_index = (group * max_per_group + slot) * TREE_INSTANCE_VEC4S;
+  write_shadow_tree_record(out_index, tree_current_record);
 }
 
 fn append_lod_if_active(species: u32, lod: u32, lod_active: u32, wc: vec2<f32>, height: f32, scale: f32) {
@@ -535,13 +786,15 @@ fn process_tree_slot(slot: u32) {
   let hydro = tree_hydrology_at(wpos.x, wpos.y);
   let height = tree_hydrology_ground_height(raw_height, hydro);
   if (tree_hydrology_reject_tree(hydro, height, cfg)) { return; }
-  let normal_y = tree_height_normal_y(wpos);
+  let terrain_normal = tree_height_normal(wpos);
+  let normal_y = terrain_normal.y;
   let accept = tree_accept_mask(height, normal_y, wpos, cfg)
     * tree_hydrology_bank_density_mask(hydro, height, normal_y, cfg);
   if (tree_hash(wc, 809u) >= accept) { return; }
   let species = select_species(wc, wpos, height, normal_y);
   if (species >= TREE_SPECIES_COUNT) { return; }
   let scale = tree_instance_scale(wc, wpos, normal_y, species) * tree_hydrology_scale_mask(hydro, height);
+  tree_current_record = tree_instance_record(species, wc, wpos, height, scale, terrain_normal);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
   var terrain_hidden = false;

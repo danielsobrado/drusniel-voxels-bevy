@@ -49,6 +49,11 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     getEarthTarget: getTerrainTarget,
     lightning: config.lightning.vfx,
     getLightningTarget: getTerrainTarget,
+    fireball: config.fireball.vfx,
+    raycastFireballTerrain: (ray) => {
+      const hit = terrainRaycast.raycastEditableTerrain(ray);
+      return hit ? { ...hit, normal: targetNormal } : null;
+    },
   });
   ctx.session.spellVfxController = controller;
 
@@ -92,6 +97,12 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     if (event.code === "Digit5" || event.code === "Numpad5") {
       event.preventDefault();
       menu.castLightning();
+      return;
+    }
+
+    if (event.code === "Digit6" || event.code === "Numpad6") {
+      event.preventDefault();
+      menu.castFireball();
     }
   };
 

@@ -1,4 +1,5 @@
 import { initHydrologyAtlasGpu, resetHydrologyAtlasGpu } from "../../gpu/hydrology_atlas_gpu.js";
+import { refreshVegetationAuthorityHeightfieldMask } from "../../vegetation/gpu_authority/heightfield_mask.js";
 import { resolveVegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import { runGrassStartup } from "./grass_startup.js";
 import { runStoneStartup } from "./stone_startup.js";
@@ -15,14 +16,27 @@ export type { GuiDisplayController, VegetationStatControllerRefs, VegetationStar
 
 export function runVegetationStartup(input: VegetationStartupInput): VegetationStartupResult {
   const {
-    app, scene, controls, state, lod0Nodes, worldCells,
+    app, scene, controls, state, lod0Nodes, worldCells, worldSeed, unboundedWorld,
     grassConfig, stoneConfig, treeConfig, understoryConfig,
     queryGrassRingGrid, queryGrassRingCell,
     isWebGpu, rendererWebGpuDevice,
     hydrologySystem, terrainOcclusionSampler, currentLighting, statControllers,
+    searchParams,
   } = input;
 
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
+  const cpuOracleEnabled = enabledFlag(searchParams?.get("gpuEarlyReject"));
+  const treeAuthorityConfig = {
+    ...treeConfig,
+    gpu: {
+      ...treeConfig.gpu,
+      terrainVisibility: {
+        ...treeConfig.gpu.terrainVisibility,
+        enabled: cpuOracleEnabled,
+      },
+    },
+  };
+  refreshVegetationAuthorityHeightfieldMask();
 
   // Streaming hydrology atlas (Phase 4b): must exist before any ring compute is created
   // so their bind groups capture the real atlas texture instead of the 1×1 fallback.
@@ -47,16 +61,17 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   });
 
   const tree = runTreeStartup({
-    scene, state, lod0Nodes, worldCells, treeConfig,
+    scene, state, lod0Nodes, worldCells, treeConfig: treeAuthorityConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     terrainOcclusionSampler,
     currentLighting, statControllers, renderer: app.renderer,
   });
 
   const understory = runUnderstoryStartup({
-    scene, state, lod0Nodes, worldCells, understoryConfig,
+    scene, state, lod0Nodes, worldCells, worldSeed, unboundedWorld, understoryConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers,
+    searchParams,
   });
 
   return {
@@ -68,4 +83,8 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
     formatTreeGpuSummary: tree.formatTreeGpuSummary,
     formatUnderstoryGpuSummary: understory.formatUnderstoryGpuSummary,
   };
+}
+
+function enabledFlag(value: string | null | undefined): boolean {
+  return value === "1" || value === "true" || value === "on";
 }

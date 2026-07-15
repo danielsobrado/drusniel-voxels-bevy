@@ -22,8 +22,25 @@ export class VegMeshGrower {
   private readonly wind: number[] = [];
   private readonly mask: number[] = [];
   private readonly card: number[] = [];
+  private readonly morphology: number[] = [];
   private readonly idx: number[] = [];
+  private treeHeight = 1;
+  private crownRadius = 1;
+  private branchLevel = 0;
+  private branchPhase = 0;
+  private rootMask = 0;
   vertCount = 0;
+
+  configureMorphology(treeHeight: number, crownRadius: number): void {
+    this.treeHeight = Math.max(1e-6, treeHeight);
+    this.crownRadius = Math.max(1e-6, crownRadius);
+  }
+
+  setMorphologyContext(branchLevel: number, branchPhase: number, rootMask = 0): void {
+    this.branchLevel = clamp01(branchLevel);
+    this.branchPhase = clamp01(branchPhase);
+    this.rootMask = clamp01(rootMask);
+  }
 
   vertex(
     px: number, py: number, pz: number,
@@ -41,6 +58,13 @@ export class VegMeshGrower {
     this.wind.push(clamp01(windWeight), clamp01(flutter));
     this.mask.push(clamp01(foliageMask));
     this.card.push(clamp01(foliageCard));
+    this.morphology.push(
+      clamp01(py / this.treeHeight),
+      clamp01(Math.hypot(px, pz) / this.crownRadius),
+      this.branchLevel,
+      this.branchPhase,
+      this.rootMask,
+    );
     return this.vertCount++;
   }
 
@@ -102,6 +126,12 @@ export class VegMeshGrower {
     g.setAttribute("treeWind", new THREE.Float32BufferAttribute(this.wind, 2));
     g.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(this.mask, 1));
     g.setAttribute("treeFoliageCard", new THREE.Float32BufferAttribute(this.card, 1));
+    const morphologyBuffer = new THREE.InterleavedBuffer(new Float32Array(this.morphology), 5);
+    g.setAttribute("treeHeight01", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 0));
+    g.setAttribute("treeRadial01", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 1));
+    g.setAttribute("treeBranchLevel", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 2));
+    g.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 3));
+    g.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 4));
     g.setIndex(
       this.vertCount > 65535
         ? new THREE.Uint32BufferAttribute(this.idx, 1)

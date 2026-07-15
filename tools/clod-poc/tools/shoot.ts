@@ -43,6 +43,7 @@ async function main(): Promise<void> {
   const consumed = new Set([
     "scene", "seed", "cam", "out", "w", "h", "hud", "settle", "timeout", "stats",
     "framealign", "gpusample", "freeze", "renderer", "waitfar", "waitroots", "waitwater", "inventory",
+    "press", "waitms",
   ]);
   const extra: Record<string, string> = {};
   for (const [key, value] of Object.entries(args)) {
@@ -115,6 +116,15 @@ async function main(): Promise<void> {
     }
 
     await page.evaluate(async (frames: number) => window.__drusnielClod?.settle?.(frames), settleFrames);
+
+    const press = str(args["press"]);
+    if (press) {
+      await page.keyboard.press(press);
+      const waitMs = Math.max(0, Number(str(args["waitms"]) ?? 0));
+      if (waitMs > 0) await page.waitForTimeout(waitMs);
+      await page.evaluate(async () => window.__drusnielClod?.settle?.(2));
+      console.log(`[shoot] pressed ${press} and waited ${waitMs}ms`);
+    }
 
     if (waitForFar) {
       await page.waitForFunction(() => {

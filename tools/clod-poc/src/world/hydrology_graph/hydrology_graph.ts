@@ -1,4 +1,6 @@
-export const HYDROLOGY_GRAPH_VERSION = "continent-hydrology-v1";
+import type { ErosionArtifactRef, SerializedErodedMacroField } from "../erosion/types.js";
+
+export const HYDROLOGY_GRAPH_VERSION = "continent-hydrology-v2";
 export const DEFAULT_HYDROLOGY_MACRO_SPACING_M = 16;
 
 export interface HydrologyGraphConfig {
@@ -49,6 +51,10 @@ export interface HydrologyLakeRecord {
   readonly maxDepthM: number;
 }
 
+export interface HydrologyErosionAuthority extends SerializedErodedMacroField {
+  readonly artifactRef: ErosionArtifactRef;
+}
+
 export interface HydrologyMacroGrid {
   readonly resX: number;
   readonly resZ: number;
@@ -57,6 +63,8 @@ export interface HydrologyMacroGrid {
   readonly spacingM: number;
   /** Index into `lakes`, or -1 for cells outside a lake. */
   readonly lakeIndex: Int32Array;
+  /** Canonical generated base surface. Present for all continent-v2 artifacts. */
+  readonly erosion?: HydrologyErosionAuthority;
   /** Cold-build diagnostics. Worker artifacts discard these after graph extraction. */
   readonly buildFields?: {
     readonly originalHeight: Float32Array;

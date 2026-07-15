@@ -76,11 +76,12 @@ describe("GPU ring baked impostor node material", () => {
   it("samples the shared deterministic structural variant page", () => {
     const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("treeRingImpostorVariant(aWorldXZ, uSeed, atlas)");
-    expect(source).toContain("TREE_VARIANT_HASH_SALT");
-    expect(source).toContain("TREE_STRUCTURAL_VARIANTS");
+    expect(source).toContain("record.rotationNormalY.z");
+    expect(source).toContain("treeMorphologyRecordNodes(buffers)");
     expect(source).toContain("atlas.atlasHeightPx");
-    expect(source).toContain("safeVariant.mul(pageSize)");
+    expect(source).toContain("safePage.mul(pageSize)");
+    expect(source).toContain("treeRingImpostorAgeSample");
+    expect(source).toContain("variantIndex.mul(3)");
   });
 
   it("blends captured normals with the cylindrical billboard facing normal", () => {
@@ -151,8 +152,10 @@ function atlas(): TreeImpostorAtlas {
     resolutionPx: 128,
     atlasSizePx: 1024,
     atlasWidthPx: 1024,
-    atlasHeightPx: 4096,
+    atlasHeightPx: 12288,
     variantCount: 4,
+    layerCount: 12,
+    ageBuckets: [0.20, 0.60, 0.92],
     frames: octFrames(8, 128, 2),
     radius: 1,
     centerY: 0,

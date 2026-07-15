@@ -3,6 +3,7 @@ import type { ClodPageNode } from "../../types.js";
 import type { FarSummaryTile } from "../../naadf/types.js";
 import { materialColorForDebugId, classifyTerrainMaterial } from "../../terrainMaterial/terrainMaterialBands.js";
 import type { TerrainMaterialInput } from "../../terrainMaterial/terrainMaterialTypes.js";
+import { sampleActiveErosionMaterialChannels } from "../../world/erosion/integration.js";
 import type { TerrainMaterialCacheConfig } from "./terrainMaterialCacheConfig.js";
 import type { TerrainMaterialBakePayload } from "./terrainMaterialCacheTypes.js";
 import { clamp01, createUint16Channel, createUint8Channel, createUnavailableChannel, estimatePayloadBytes, packUnorm8 } from "./terrainMaterialPacking.js";
@@ -66,11 +67,18 @@ export function buildMaterialWeights(weights: readonly [number, number, number, 
   return data;
 }
 
-export function buildWetnessAndShoreline(heights: Float32Array, waterCoverage: Float32Array | null, resolution: number, waterLevel: number): Uint8Array {
+export function buildWetnessAndShoreline(
+  heights: Float32Array,
+  waterCoverage: Float32Array | null,
+  resolution: number,
+  waterLevel: number,
+  erosionWetness?: Float32Array | null,
+): Uint8Array {
   const data = new Uint8Array(resolution * resolution * 2);
   for (let i = 0; i < resolution * resolution; i++) {
     const h = heights[i] ?? 0;
-    const wetness = waterCoverage ? waterCoverage[i] ?? 0 : clamp01(1 - Math.abs(h - waterLevel) / 8);
+    const baseWetness = waterCoverage ? waterCoverage[i] ?? 0 : clamp01(1 - Math.abs(h - waterLevel) / 8);
+    const wetness = Math.max(baseWetness, erosionWetness?.[i] ?? 0);
     const shoreline = clamp01(1 - Math.abs(h - waterLevel) / 3);
     data[i * 2] = packUnorm8(wetness);
     data[i * 2 + 1] = packUnorm8(shoreline);
@@ -153,6 +161,7 @@ export function bakePageTerrainMaterial(source: TerrainMaterialPageBakeSource, c
   const heights = rasterizePageHeights(source.node, resolution);
   const colors: [number, number, number][] = [];
   const weights: [number, number, number, number][] = [];
+  const erosionWetness = new Float32Array(resolution * resolution);
   const pageWidth = Math.max(1, source.node.footprint.maxX - source.node.footprint.minX);
   const pageDepth = Math.max(1, source.node.footprint.maxZ - source.node.footprint.minZ);
   const cellM = Math.max(pageWidth, pageDepth) / resolution;
@@ -163,12 +172,15 @@ export function bakePageTerrainMaterial(source: TerrainMaterialPageBakeSource, c
       const wx = source.node.footprint.minX + ((x + 0.5) / resolution) * pageWidth;
       const wz = source.node.footprint.minZ + ((z + 0.5) / resolution) * pageDepth;
       const slope = slopeAt(heights, resolution, cellM, x, z);
+      const erosion = sampleActiveErosionMaterialChannels(wx, wz);
+      erosionWetness[idx] = erosion?.wetnessSeed ?? 0;
       const sample = classifyTerrainMaterial({
         worldX: wx,
         worldZ: wz,
         height: heights[idx] ?? 0,
         slope,
         waterLevel: source.waterLevel,
+        erosion,
         config: source.materialConfig,
       });
       colors.push(sample.baseColor);
@@ -185,7 +197,12 @@ export function bakePageTerrainMaterial(source: TerrainMaterialPageBakeSource, c
     macroTint: createUint8Channel(buildMacroTint(colors, resolution), resolution, resolution, config.formats.macroTint),
     slopeCurvature: createUint8Channel(buildSlopeCurvature(heights, resolution, cellM), resolution, resolution, config.formats.slopeCurvature),
     materialWeights: createUint8Channel(buildMaterialWeights(weights, resolution), resolution, resolution, config.formats.materialWeights),
-    wetnessShoreline: createUint8Channel(buildWetnessAndShoreline(heights, null, resolution, source.waterLevel), resolution, resolution, config.formats.wetnessShoreline),
+    wetnessShoreline: createUint8Channel(
+      buildWetnessAndShoreline(heights, null, resolution, source.waterLevel, erosionWetness),
+      resolution,
+      resolution,
+      config.formats.wetnessShoreline,
+    ),
     farColor: createUnavailableChannel(config.formats.farColor, resolution, resolution),
     coverage: createUnavailableChannel(config.formats.coverage, resolution, resolution),
     debug: {

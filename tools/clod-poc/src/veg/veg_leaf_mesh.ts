@@ -182,6 +182,7 @@ export function buildLeafCluster(
   baseColor: Color,
   hueVar: number,
 ): void {
+  g.setMorphologyContext(anchor.branchLevel, anchor.branchPhase, 0);
   const n = Math.round(clusterSize[0] + rng.float() * (clusterSize[1] - clusterSize[0]));
   const flex = 0.55 + rng.float() * 0.3;
   for (let i = 0; i < n; i++) {
@@ -206,6 +207,7 @@ export function buildSprayAt(
   baseColor: Color,
   hueVar: number,
 ): void {
+  g.setMorphologyContext(anchor.branchLevel, anchor.branchPhase, 0);
   _m.compose(anchor.pos, anchor.quat, new Vector3(1, 1, 1));
   const color = tintLeaf(_leafCol, baseColor, anchor.hue, hueVar);
   buildNeedleSpray(g, _m, shape, anchor.scale, rng, color, 0.5 + rng.float() * 0.3);

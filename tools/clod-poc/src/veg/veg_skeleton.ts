@@ -120,6 +120,7 @@ function growBranch(ctx: GrowCtx, spec: BranchSpec): SkelBranch | null {
 
   const branch: SkelBranch = {
     level: spec.level,
+    phase: ((ctx.branches.length + 1) * 0.6180339887498949) % 1,
     pts,
     radii,
     dirs,
@@ -251,6 +252,8 @@ function growBranch(ctx: GrowCtx, spec: BranchSpec): SkelBranch | null {
         scale: sc,
         hue: rng.float() * 2 - 1,
         age: Math.max(0, 1 - t) * 0.7 + rng.float() * 0.3,
+        branchLevel: spec.level / Math.max(1, sp.levels.length - 1),
+        branchPhase: (branch.phase + (i + 1) * 0.6180339887498949) % 1,
       });
     }
   }

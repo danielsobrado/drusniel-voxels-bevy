@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   cloneTreeSettings,
+  createTreeImpostorAgeGeometry,
   octFrames,
   selectTreeImpostorBakeGeometry,
   treeImpostorFramesForVariant,
@@ -41,13 +42,38 @@ describe("tree impostor baker quality", () => {
     }
   });
 
-  it("accounts for all four variant pages in the production memory estimate", () => {
+  it("accounts for all twelve variant/age layers in the production memory estimate", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
     settings.impostors.resolutionPx = 192;
     settings.impostors.octahedralGridSize = 8;
 
-    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(576, 5);
+    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(1296, 5);
+  });
+
+  it("bakes distinct monotonic young, mature, and old silhouettes", () => {
+    const source = new THREE.BufferGeometry();
+    source.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 10, 0], 3));
+    source.setAttribute("normal", new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0], 3));
+    source.setAttribute("treeHeight01", new THREE.Float32BufferAttribute([0, 1], 1));
+    source.setAttribute("treeRadial01", new THREE.Float32BufferAttribute([0, 0], 1));
+    source.setAttribute("treeBranchLevel", new THREE.Float32BufferAttribute([0, 0], 1));
+    source.setAttribute("treeBranchPhase", new THREE.Float32BufferAttribute([0, 0], 1));
+    source.setAttribute("treeRootMask", new THREE.Float32BufferAttribute([1, 0], 1));
+    const settings = cloneTreeSettings();
+    const young = createTreeImpostorAgeGeometry(source, "oak", 0.20, settings);
+    const mature = createTreeImpostorAgeGeometry(source, "oak", 0.60, settings);
+    const old = createTreeImpostorAgeGeometry(source, "oak", 0.92, settings);
+    try {
+      expect(young.getAttribute("position").getY(0)).toBe(0);
+      expect(young.getAttribute("position").getY(1)).toBeLessThan(mature.getAttribute("position").getY(1));
+      expect(mature.getAttribute("position").getY(1)).toBeLessThan(old.getAttribute("position").getY(1));
+    } finally {
+      young.dispose();
+      mature.dispose();
+      old.dispose();
+      source.dispose();
+    }
   });
 
   it("parses and clamps the YAML frame budget", () => {

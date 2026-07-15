@@ -1,0 +1,6 @@
+export const DRESSING_GENERATOR_SCHEMA_VERSION = 1;
+export const DRESSING_CLUSTER_SIZE_M = 32;
+export const DRESSING_CATEGORY_ID = 5;
+export const ATTACHMENT_ID_CHANNEL = 0x2101;
+export const MAXIMUM_DRESSING_CLUSTERS_PER_FRAME = 8;
+export const TAU = Math.PI * 2;

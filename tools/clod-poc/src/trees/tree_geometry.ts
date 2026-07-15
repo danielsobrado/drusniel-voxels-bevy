@@ -18,6 +18,7 @@ import {
   appendAttribute,
   setTreeVariantAttribute,
   disposeGeometryOnce,
+  ensureTreeMorphologyGeometryAttributes,
   unitFrame,
   maxAttributeValue,
   maxAttributeComponent,
@@ -99,8 +100,10 @@ export function createTreeBakedImpostorGeometry(
     ? atlas.centerY
     : fallbackHeight * 0.5;
   const geometry = createTreeReferenceImpostorQuadGeometry(radius, centerY);
+  ensureTreeMorphologyGeometryAttributes(geometry);
   setTreeVariantAttribute(geometry, 0);
   packTreeSpeciesIntoWind(geometry, species);
+  packTreeVertexAttributes(geometry);
   geometry.userData[TREE_IMPOSTOR_CARD_GEOMETRY_FLAG] = true;
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
@@ -170,8 +173,10 @@ function createTreeGeometry(
   const config = settings.species[species];
   if (lod === "impostor" || (species === "dead" && lod === "far")) {
     const geometry = createOpaqueImpostorTree(species, config);
+    ensureTreeMorphologyGeometryAttributes(geometry);
     setTreeVariantAttribute(geometry, variant);
     packTreeSpeciesIntoWind(geometry, species);
+    packTreeVertexAttributes(geometry);
     return geometry;
   }
   const grammar = VEG_TREE_SPECIES[species];
@@ -193,6 +198,7 @@ function createTreeGeometry(
   }
   setTreeVariantAttribute(geometry, variant);
   packTreeSpeciesIntoWind(geometry, species);
+  packTreeVertexAttributes(geometry);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
@@ -212,6 +218,44 @@ function packTreeSpeciesIntoWind(geometry: THREE.BufferGeometry, species: TreeSp
   geometry.deleteAttribute("treeSpeciesIndex");
 }
 
+function packTreeVertexAttributes(geometry: THREE.BufferGeometry): void {
+  const count = geometry.getAttribute("position")?.count ?? 0;
+  const wind = geometry.getAttribute("treeWind");
+  const foliageMask = geometry.getAttribute("treeFoliageMask");
+  const foliageCard = geometry.getAttribute("treeFoliageCard");
+  const height = geometry.getAttribute("treeHeight01");
+  const radial = geometry.getAttribute("treeRadial01");
+  const branchLevel = geometry.getAttribute("treeBranchLevel");
+  const branchPhase = geometry.getAttribute("treeBranchPhase");
+  const rootMask = geometry.getAttribute("treeRootMask");
+  const variant = geometry.getAttribute("treeVariant");
+  const packed = new Float32Array(count * 11);
+  for (let index = 0; index < count; index++) {
+    const offset = index * 11;
+    packed[offset] = wind?.getX(index) ?? 0;
+    packed[offset + 1] = wind?.getY(index) ?? 0;
+    packed[offset + 2] = wind?.getZ(index) ?? 0;
+    packed[offset + 3] = foliageMask?.getX(index) ?? 0;
+    packed[offset + 4] = foliageCard?.getX(index) ?? 0;
+    packed[offset + 5] = height?.getX(index) ?? 0;
+    packed[offset + 6] = radial?.getX(index) ?? 0;
+    packed[offset + 7] = branchLevel?.getX(index) ?? 0;
+    packed[offset + 8] = branchPhase?.getX(index) ?? 0;
+    packed[offset + 9] = rootMask?.getX(index) ?? 0;
+    packed[offset + 10] = variant?.getX(index) ?? 0;
+  }
+  const buffer = new THREE.InterleavedBuffer(packed, 11);
+  geometry.setAttribute("treeWind", new THREE.InterleavedBufferAttribute(buffer, 3, 0));
+  geometry.setAttribute("treeFoliageMask", new THREE.InterleavedBufferAttribute(buffer, 1, 3));
+  geometry.setAttribute("treeFoliageCard", new THREE.InterleavedBufferAttribute(buffer, 1, 4));
+  geometry.setAttribute("treeHeight01", new THREE.InterleavedBufferAttribute(buffer, 1, 5));
+  geometry.setAttribute("treeRadial01", new THREE.InterleavedBufferAttribute(buffer, 1, 6));
+  geometry.setAttribute("treeBranchLevel", new THREE.InterleavedBufferAttribute(buffer, 1, 7));
+  geometry.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(buffer, 1, 8));
+  geometry.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(buffer, 1, 9));
+  geometry.setAttribute("treeVariant", new THREE.InterleavedBufferAttribute(buffer, 1, 10));
+}
+
 function createTreeVariantSelectorGeometry(
   variants: TreeVariantGeometryMap,
   lod: TreeLod,
@@ -224,6 +268,11 @@ function createTreeVariantSelectorGeometry(
   const foliageMasks: number[] = [];
   const foliageCards: number[] = [];
   const treeVariants: number[] = [];
+  const treeHeight01: number[] = [];
+  const treeRadial01: number[] = [];
+  const treeBranchLevel: number[] = [];
+  const treeBranchPhase: number[] = [];
+  const treeRootMask: number[] = [];
   const indices: number[] = [];
 
   const entries = Object.entries(variants)
@@ -241,6 +290,11 @@ function createTreeVariantSelectorGeometry(
     appendAttribute(source, "treeWind", 3, wind, vertexCount);
     appendAttribute(source, "treeFoliageMask", 1, foliageMasks, vertexCount);
     appendAttribute(source, "treeFoliageCard", 1, foliageCards, vertexCount);
+    appendAttribute(source, "treeHeight01", 1, treeHeight01, vertexCount);
+    appendAttribute(source, "treeRadial01", 1, treeRadial01, vertexCount);
+    appendAttribute(source, "treeBranchLevel", 1, treeBranchLevel, vertexCount);
+    appendAttribute(source, "treeBranchPhase", 1, treeBranchPhase, vertexCount);
+    appendAttribute(source, "treeRootMask", 1, treeRootMask, vertexCount);
     for (let index = 0; index < vertexCount; index++) treeVariants.push(variant);
 
     const sourceIndex = source.getIndex();
@@ -260,7 +314,23 @@ function createTreeVariantSelectorGeometry(
   geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(wind, 3));
   geometry.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(foliageMasks, 1));
   geometry.setAttribute("treeFoliageCard", new THREE.Float32BufferAttribute(foliageCards, 1));
-  geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(treeVariants, 1));
+  const morphologyPacked = new Float32Array(treeHeight01.length * 6);
+  for (let index = 0; index < treeHeight01.length; index++) {
+    morphologyPacked[index * 6] = treeHeight01[index] ?? 0;
+    morphologyPacked[index * 6 + 1] = treeRadial01[index] ?? 0;
+    morphologyPacked[index * 6 + 2] = treeBranchLevel[index] ?? 0;
+    morphologyPacked[index * 6 + 3] = treeBranchPhase[index] ?? 0;
+    morphologyPacked[index * 6 + 4] = treeRootMask[index] ?? 0;
+    morphologyPacked[index * 6 + 5] = treeVariants[index] ?? 0;
+  }
+  const morphologyBuffer = new THREE.InterleavedBuffer(morphologyPacked, 6);
+  geometry.setAttribute("treeHeight01", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 0));
+  geometry.setAttribute("treeRadial01", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 1));
+  geometry.setAttribute("treeBranchLevel", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 2));
+  geometry.setAttribute("treeBranchPhase", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 3));
+  geometry.setAttribute("treeRootMask", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 4));
+  geometry.setAttribute("treeVariant", new THREE.InterleavedBufferAttribute(morphologyBuffer, 1, 5));
+  packTreeVertexAttributes(geometry);
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();

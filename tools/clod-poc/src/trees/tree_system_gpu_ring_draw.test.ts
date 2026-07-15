@@ -12,6 +12,7 @@ import {
   setTreeGpuRingMeshesVisible,
   treeGpuBufferForAttribute,
   treeGpuRingDrawCountForGeometry,
+  TREE_GPU_RING_INSTANCE_VEC4S,
   treeRingShadowCasterGroupCount,
   type TreeMaterialHandle,
   type TreeWebGpuBackendBufferAccess,
@@ -28,7 +29,7 @@ describe("tree system GPU ring draw helpers", () => {
     expect(bundle.indirect.count).toBe(2);
     expect(bundle.cell.name).toBe("tree-ring-cell");
     expect(bundle.cell.itemSize).toBe(4);
-    expect(bundle.cell.count).toBe(6);
+    expect(bundle.cell.count).toBe(6 * TREE_GPU_RING_INSTANCE_VEC4S);
     expect(bundle.shadowCell).toBeUndefined();
     expect(bundle.shadowIndirect).toBeUndefined();
     expect(backend.createIndirectStorageAttribute).toHaveBeenCalledTimes(1);
@@ -50,7 +51,7 @@ describe("tree system GPU ring draw helpers", () => {
     expect(bundle.shadowIndirect?.count).toBe(shadowGroups);
     expect(bundle.shadowCell?.name).toBe("tree-ring-shadow-cell");
     expect(bundle.shadowCell?.itemSize).toBe(4);
-    expect(bundle.shadowCell?.count).toBe(shadowGroups * 5);
+    expect(bundle.shadowCell?.count).toBe(shadowGroups * 5 * TREE_GPU_RING_INSTANCE_VEC4S);
     expect(bundle.outputBuffers.shadowCell).toBeDefined();
     expect(bundle.outputBuffers.shadowIndirectArgs).toBeDefined();
     expect(backend.createIndirectStorageAttribute).toHaveBeenCalledTimes(2);

@@ -5,8 +5,10 @@ import { createWaterNodeMaterial } from "./water_node_material.js";
 import { createAirNodeMaterial } from "./air_node_material.js";
 import { createEarthSpellVfx, type EarthSpellTarget } from "./earth_spell_vfx.js";
 import { createLightningSpellVfx, type LightningSpellTarget } from "./lightning_spell_vfx.js";
+import { createFireballSpellVfx, type FireballTerrainHit } from "./fireball_spell_vfx.js";
 import type {
   EarthSpellVfxConfig,
+  FireballSpellVfxConfig,
   FireSpellVfxConfig,
   LightningSpellVfxConfig,
   SpellColor,
@@ -117,6 +119,8 @@ export interface SpellVfxControllerDeps {
   getEarthTarget: () => EarthSpellTarget | null;
   lightning?: LightningSpellVfxConfig;
   getLightningTarget?: () => LightningSpellTarget | null;
+  fireball?: FireballSpellVfxConfig;
+  raycastFireballTerrain?: (ray: THREE.Ray) => FireballTerrainHit | null;
   now?: () => number;
 }
 
@@ -126,6 +130,7 @@ export interface SpellVfxController {
   playAir: (durationMs: number) => void;
   playEarth: (durationMs: number) => void;
   playLightning: (durationMs: number) => void;
+  playFireball: (durationMs: number) => void;
   update: (nowMs?: number) => void;
   dispose: () => void;
 }
@@ -251,6 +256,18 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     getTarget: deps.getLightningTarget ?? (() => null),
     now,
   }) : null;
+  const fireballConfig = deps.fireball;
+  const fireballPoseScratch = createPoseScratch();
+  const fireball = fireballConfig && deps.raycastFireballTerrain ? createFireballSpellVfx({
+    scene,
+    config: fireballConfig,
+    getSource: () => {
+      const pose = resolveSpellPose(getCamera(), fireballConfig, fireballPoseScratch);
+      return { point: pose.base, direction: pose.dir };
+    },
+    raycastTerrain: deps.raycastFireballTerrain,
+    now,
+  }) : null;
   const spells = [fire, water, air];
 
   const hasActiveSpells = (): boolean => spells.some((spell) => spell.active) || now() < selfTickUntilMs;
@@ -295,6 +312,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     for (const spell of spells) tick(spell, frameNow);
     earth.update(frameNow);
     lightning?.update(frameNow);
+    fireball?.update(frameNow);
   };
 
   const requestSelfTick = (): void => {
@@ -344,6 +362,9 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     playLightning: (durationMs) => {
       if (lightning) playStandalone(lightning.play, durationMs);
     },
+    playFireball: (durationMs) => {
+      if (fireball) playStandalone(fireball.play, durationMs);
+    },
     update: (nowMs) => updateAll(typeof nowMs === "number" && nowMs > 1000 ? nowMs : now()),
     dispose: () => {
       disposed = true;
@@ -358,6 +379,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
       }
       earth.dispose();
       lightning?.dispose();
+      fireball?.dispose();
     },
   };
 }

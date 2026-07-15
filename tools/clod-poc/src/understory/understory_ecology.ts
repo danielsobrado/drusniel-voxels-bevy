@@ -1,3 +1,4 @@
+import { sampleActiveErosionMaterialChannels } from "../world/erosion/integration.js";
 import type { UnderstoryClass, UnderstorySettings } from "./understory_config.js";
 import { clamp, clamp01, fractalNoise2D, smoothstep, valueNoise2D } from "../trees/tree_noise.js";
 
@@ -46,7 +47,11 @@ export function sampleUnderstoryEcology(
   const forestEdge = clamp01(Math.min(outer, 1 - inner) * 1.45);
   const moistureNoise = fractalNoise2D(x + 557.3, z - 811.9, ecology.moistureNoiseScaleM, seed + 22003, 3);
   const heightDamp = 1 - smoothstep(settings.placement.minHeightM, settings.placement.maxHeightM, height) * 0.3;
-  const moisture = clamp01(0.5 + (moistureNoise - 0.5) * ecology.moistureStrength + heightDamp * 0.16);
+  const proceduralMoisture = clamp01(0.5 + (moistureNoise - 0.5) * ecology.moistureStrength + heightDamp * 0.16);
+  const erosionWetness = sampleActiveErosionMaterialChannels(x, z)?.wetnessSeed;
+  const moisture = erosionWetness === undefined
+    ? proceduralMoisture
+    : clamp01(proceduralMoisture * 0.68 + erosionWetness * 0.32);
   const shade = clamp01(forestInfluence * ecology.shadeStrength + forestEdge * 0.2);
   const clearingNoise = valueNoise2D(x - 109.2, z + 73.4, ecology.forestInfluenceScaleM * 1.9, seed + 23011);
   const clearing = clamp01((1 - forestInfluence) * 0.75 + forestEdge * ecology.clearingPreference + clearingNoise * 0.2);

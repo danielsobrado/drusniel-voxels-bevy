@@ -15,6 +15,7 @@ import {
   type TreeSpeciesFoliageSettings,
   type TreeSpeciesId,
   type TreeSpeciesMorphologySettings,
+  type TreeSpeciesMorphologyRuntimeSettings,
   type TreeSpeciesSettings,
   type TreeSpeciesZoneSettings,
   type TreeWindSettings,
@@ -132,6 +133,38 @@ function parseMorphology(raw: unknown, fallback: TreeSpeciesMorphologySettings):
   };
 }
 
+const MORPHOLOGY_RUNTIME_KEYS = new Set([
+  "slope_lean",
+  "wind_lean",
+  "random_lean",
+  "exposure_flattening",
+  "age_flattening",
+  "base_droop",
+  "age_droop",
+  "moisture_droop",
+  "base_stiffness",
+]);
+
+class TreeConfigUnknownKeyError extends Error {}
+
+function parseMorphologyRuntime(raw: unknown, fallback: TreeSpeciesMorphologyRuntimeSettings): TreeSpeciesMorphologyRuntimeSettings {
+  const src = record(raw);
+  for (const key of Object.keys(src)) {
+    if (!MORPHOLOGY_RUNTIME_KEYS.has(key)) throw new TreeConfigUnknownKeyError(`unknown morphology_runtime key: ${key}`);
+  }
+  return {
+    slopeLean: numberFrom(src.slope_lean, fallback.slopeLean),
+    windLean: numberFrom(src.wind_lean, fallback.windLean),
+    randomLean: numberFrom(src.random_lean, fallback.randomLean),
+    exposureFlattening: numberFrom(src.exposure_flattening, fallback.exposureFlattening),
+    ageFlattening: numberFrom(src.age_flattening, fallback.ageFlattening),
+    baseDroop: numberFrom(src.base_droop, fallback.baseDroop),
+    ageDroop: numberFrom(src.age_droop, fallback.ageDroop),
+    moistureDroop: numberFrom(src.moisture_droop, fallback.moistureDroop),
+    baseStiffness: numberFrom(src.base_stiffness, fallback.baseStiffness),
+  };
+}
+
 function parseSpeciesSettings(raw: unknown, fallback: TreeSpeciesSettings): TreeSpeciesSettings {
   const src = record(raw);
   return {
@@ -144,6 +177,7 @@ function parseSpeciesSettings(raw: unknown, fallback: TreeSpeciesSettings): Tree
     trunkRadiusM: numberFrom(src.trunk_radius_m, fallback.trunkRadiusM),
     crownRadiusM: numberFrom(src.crown_radius_m, fallback.crownRadiusM),
     morphology: parseMorphology(src.morphology, fallback.morphology),
+    morphologyRuntime: parseMorphologyRuntime(src.morphology_runtime, fallback.morphologyRuntime),
   };
 }
 
@@ -369,6 +403,7 @@ export function parseTreeConfig(yamlText = treesYaml, warn: WarnHandler = consol
       ecology: parseEcology(roots, speciesZones, fallback.ecology),
     };
   } catch (error) {
+    if (error instanceof TreeConfigUnknownKeyError) throw error;
     warn?.(`[trees] failed to parse tree config yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`);
     return cloneTreeSettings(DEFAULT_TREE_SETTINGS);
   }

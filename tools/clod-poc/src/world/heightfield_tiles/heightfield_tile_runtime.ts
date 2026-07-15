@@ -26,11 +26,13 @@ import {
   openHeightfieldTileDb,
 } from "./heightfield_tile_store.js";
 import {
-  registerHeightfieldTileGpuSource,
   heightfieldTileGpuAtlasStats,
+  invalidateHeightfieldTileGpuAtlasBounds,
+  registerHeightfieldTileGpuSource,
   unregisterHeightfieldTileGpuSource,
   updateHeightfieldTileGpuAtlas,
 } from "./heightfield_tile_gpu_atlas.js";
+import { refreshVegetationAuthorityHeightfieldMask } from "../../vegetation/gpu_authority/heightfield_mask.js";
 
 export interface HeightfieldTileRuntimeUpdate {
   x: number;
@@ -141,6 +143,7 @@ export async function createHeightfieldTileRuntime(
   const sampler = heightfieldTileSampler(cache, procedural, startup);
   setTerrainSurfaceOverride(sampler.sampleHeight);
   const authoritative = input.terrainSource.worldMode === "continent" && Boolean(manifest.artifacts.hydrologyGraph);
+  refreshVegetationAuthorityHeightfieldMask();
   registerHeightfieldTileGpuSource(cache, authoritative);
 
   const runtime: HeightfieldTileRuntime = {
@@ -148,6 +151,7 @@ export async function createHeightfieldTileRuntime(
     authoritative,
     update(updateInput) {
       cache.update(updateInput);
+      refreshVegetationAuthorityHeightfieldMask();
       updateHeightfieldTileGpuAtlas(updateInput.x, updateInput.z);
       const gpuAtlas = heightfieldTileGpuAtlasStats();
       const counters = diagnosticsCounters();
@@ -159,7 +163,11 @@ export async function createHeightfieldTileRuntime(
       publishHeightfieldTileCounters(diagnosticsCounters(), cache.counters());
     },
     counters: () => cache.counters(),
-    invalidateBounds: (bounds) => cache.invalidateBounds(bounds),
+    invalidateBounds(bounds) {
+      const count = cache.invalidateBounds(bounds);
+      invalidateHeightfieldTileGpuAtlasBounds(cache, bounds);
+      return count;
+    },
     dispose() {
       cache.clear();
       unregisterHeightfieldTileGpuSource(cache);

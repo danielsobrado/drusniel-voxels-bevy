@@ -17,7 +17,12 @@ describe("lightning spell VFX", () => {
     });
     expect(computeLightningSpellFrame(1000, 1000, 2000).active).toBe(false);
     expect(computeLightningEnvelope(0)).toBe(0);
-    expect(computeLightningEnvelope(0.1)).toBeGreaterThan(0.9);
+    expect(computeLightningEnvelope(0.02)).toBeGreaterThan(0.9);
+    expect(computeLightningEnvelope(0.14)).toBeLessThan(0.25);
+    expect(computeLightningEnvelope(0.23)).toBeGreaterThan(0.5);
+    expect(computeLightningEnvelope(0.34)).toBeLessThan(0.2);
+    expect(computeLightningEnvelope(0.43)).toBeGreaterThan(0.25);
+    expect(computeLightningEnvelope(0.8)).toBeLessThan(0.05);
     expect(computeLightningEnvelope(1)).toBe(0);
   });
 
@@ -86,8 +91,20 @@ describe("lightning spell VFX", () => {
     clock = 1250;
     vfx.update(clock);
     const position = core.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const uv = core.geometry.getAttribute("uv") as THREE.BufferAttribute;
+    const normal = core.geometry.getAttribute("normal") as THREE.BufferAttribute;
     expect(core.geometry.drawRange.count).toBeGreaterThan(0);
     expect(Array.from(position.array).every(Number.isFinite)).toBe(true);
+    expect(uv.count).toBe(position.count);
+    expect(Array.from(uv.array).every(Number.isFinite)).toBe(true);
+    expect(normal.count).toBe(position.count);
+    expect(Array.from(normal.array).some((value) => Math.abs(value) > 0.5)).toBe(true);
+    expect(new THREE.Vector3().fromBufferAttribute(position, 2).distanceTo(
+      new THREE.Vector3().fromBufferAttribute(position, 6),
+    )).toBeLessThan(1e-6);
+    expect(new THREE.Vector3().fromBufferAttribute(position, 4).distanceTo(
+      new THREE.Vector3().fromBufferAttribute(position, 7),
+    )).toBeLessThan(1e-6);
     expect(impactLight.intensity).toBeGreaterThan(0);
     expect(ring.position.z).toBeCloseTo(-8);
 

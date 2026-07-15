@@ -13,6 +13,7 @@ import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { createTreeHydrologyTexture } from "./tree_ring_compute_resources.js";
 import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
+import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 const TREE_GPU_RING_LAYOUT = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
 
@@ -394,6 +395,7 @@ export class TreeGpuRingCompute {
     }));
     this.hydroTexture = createTreeHydrologyTexture(device, hydroData);
     const hydroSampler = device.createSampler({ label: "tree ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
+    const canonicalHeight = heightfieldTileGpuAtlasBindings(device);
     this.bindGroup = device.createBindGroup({
       label: "tree ring bind group",
       layout,
@@ -412,6 +414,9 @@ export class TreeGpuRingCompute {
         { binding: 11, resource: { buffer: this.visibleClusterMaskBuffer } },
         { binding: 12, resource: { buffer: this.activeSlotBuffer } },
         { binding: 13, resource: hydrologyAtlasGpuTexture(device).createView() },
+        { binding: 14, resource: canonicalHeight.heightView },
+        { binding: 15, resource: canonicalHeight.residencyView },
+        { binding: 16, resource: { buffer: canonicalHeight.params } },
       ],
     });
   }
@@ -425,11 +430,14 @@ export class TreeGpuRingCompute {
     { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
     storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
     { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
-    { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+    { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+    { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
     storage(11, "read-only-storage"),
     storage(12, "read-only-storage"),
     { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+    { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+    { binding: 15, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+    { binding: 16, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
     ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });

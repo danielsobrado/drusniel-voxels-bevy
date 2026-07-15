@@ -3,7 +3,11 @@ import type { ClodPageNode } from "../../types.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 import type { PostProcessQualityPreset } from "../../app/state/postprocess_quality_presets.js";
-import { treeLodBudgetsForQualityPreset, type TreeShadowMaxLod } from "../../app/state/tree_quality_presets.js";
+import {
+  treeImpostorTileResolutionForQualityPreset,
+  treeLodBudgetsForQualityPreset,
+  type TreeShadowMaxLod,
+} from "../../app/state/tree_quality_presets.js";
 import { TreeSystem, type FallingTree, type TreeSettings, type TreeStats } from "../../trees/index.js";
 import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
@@ -125,6 +129,10 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       },
       impostors: {
         ...deps.treeConfig.impostors,
+        resolutionPx: treeImpostorTileResolutionForQualityPreset(
+          state.treeQualityPreset,
+          deps.treeConfig.impostors.resolutionPx,
+        ),
         swapOnBake: state.treeImpostorSwapOnBake,
       },
       wind: {

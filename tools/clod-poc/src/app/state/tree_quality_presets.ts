@@ -164,6 +164,14 @@ export function treeLodBudgetsForQualityPreset(
   return { ...TREE_QUALITY_PRESETS[preset].budgets };
 }
 
+export function treeImpostorTileResolutionForQualityPreset(
+  preset: PostProcessQualityPreset,
+  fallback: number,
+): number {
+  if (preset === "custom") return fallback;
+  return { ultra: 96, balanced: 64, perf: 48, potato: 32 }[preset];
+}
+
 export function applyTreeQualityPreset(state: TreeQualityPresetState, preset: PostProcessQualityPreset): void {
   state.treeQualityPreset = preset;
   if (preset === "custom") return;

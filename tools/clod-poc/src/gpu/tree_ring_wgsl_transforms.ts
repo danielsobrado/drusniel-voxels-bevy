@@ -137,6 +137,46 @@ fn tree_hash2(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   );
 }
 
+export function withTreeSharedPcgModule(source: string): string {
+  let next = source.replace(/\r\n/g, "\n");
+  for (const name of [
+    "VEGETATION_SCHEMA_VERSION",
+    "VEGETATION_TREE_CATEGORY",
+    "VEGETATION_DOMAIN_CHANNEL",
+    "VEGETATION_IDENTITY_CHANNEL",
+  ]) {
+    next = next.replace(new RegExp(`const ${name}: u32 = [^;]+;\\n`), "");
+  }
+  next = next.replace(
+    /fn tree_pcg2d\(cell: vec2<f32>, salt: u32\) -> vec2<f32> \{[\s\S]*?\n\}\n\nfn tree_pcg2d_u32\(cell: vec2<i32>, salt: u32\) -> vec2<u32> \{[\s\S]*?\n\}/,
+    `fn tree_pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
+  return treePcg2d01(i32(cell.x), i32(cell.y), salt);
+}
+
+fn tree_pcg2d_u32(cell: vec2<i32>, salt: u32) -> vec2<u32> {
+  return treePcg2dU32(cell.x, cell.y, salt);
+}`,
+  );
+  next = next.replace(
+    /fn vegetation_tree_identity\(cell: vec2<i32>, species: u32\) -> vec2<u32> \{[\s\S]*?\n\}/,
+    `fn vegetation_tree_identity(cell: vec2<i32>, species: u32) -> vec2<u32> {
+  return vegetationStableIdentity(
+    params.settings_u.z,
+    VEGETATION_TREE_CATEGORY,
+    VEGETATION_SCHEMA_VERSION,
+    cell,
+    species,
+  );
+}`,
+  );
+  if (!next.includes("return treePcg2d01(i32(cell.x), i32(cell.y), salt);")
+    || !next.includes("return treePcg2dU32(cell.x, cell.y, salt);")
+    || !next.includes("return vegetationStableIdentity(")) {
+    throw new Error("tree ring WGSL shared PCG transform failed");
+  }
+  return next;
+}
+
 export function withTreeShadowLodGate(source: string): string {
   return source.replace(
     "if (lod_active == 0u || params.settings_u.w == 0u) { return; }",

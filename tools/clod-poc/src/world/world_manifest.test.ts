@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
-import { resolveTerrainFieldConfig } from "../terrain/terrain.js";
+import { afterEach, describe, expect, it } from "vitest";
+import type { WorldModeConfig } from "../app/world_mode.js";
 import {
   TERRAIN_SOURCE_VERSION,
   computeTerrainSourceHash,
   type TerrainSourceInputs,
 } from "../cache/terrainSource.js";
-import type { WorldModeConfig } from "../app/world_mode.js";
+import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
+import { resolveTerrainFieldConfig } from "../terrain/terrain.js";
+import { EROSION_SCHEMA_VERSION } from "./erosion/constants.js";
+import {
+  clearActiveErodedMacroField,
+  getActiveErodedMacroField,
+  setActiveErodedMacroField,
+  setLatestErosionArtifactRef,
+} from "./erosion/integration.js";
+import type { ErodedMacroField } from "./erosion/types.js";
 import { buildWorldManifest, withWorldManifestArtifact } from "./world_manifest.js";
 
 const terrainFieldConfig = resolveTerrainFieldConfig({ seed: 73, seaLevel: 18 });
@@ -49,6 +57,26 @@ function terrainSource(): TerrainSourceInputs {
   };
 }
 
+function erosionField(): ErodedMacroField {
+  return {
+    width: 2,
+    height: 2,
+    cellSizeM: 16,
+    originX: 0,
+    originZ: 0,
+    heightFixed: new Int32Array(4),
+    hardness: new Uint16Array(4),
+    sediment: new Uint32Array(4),
+    deposition: new Int32Array(4),
+    sampleHeightMeters: () => 0,
+  };
+}
+
+afterEach(() => {
+  clearActiveErodedMacroField();
+  setLatestErosionArtifactRef(null);
+});
+
 describe("world manifest", () => {
   it("is a deterministic, immutable description of the boot identity", async () => {
     const terrainSourceHash = await computeTerrainSourceHash(terrainSource());
@@ -85,6 +113,31 @@ describe("world manifest", () => {
 
     expect(bounded.sizeM).toEqual({ x: 16_384, z: 16_384 });
     expect(unbounded.sizeM).toBeNull();
+  });
+
+  it("clears stale erosion authority when the world identity changes", () => {
+    const field = erosionField();
+    setActiveErodedMacroField(field, "world-a");
+    setLatestErosionArtifactRef({
+      schemaVersion: EROSION_SCHEMA_VERSION,
+      id: "erosion:test",
+      hash: "11".repeat(32),
+      width: 2,
+      height: 2,
+      cellSizeM: 16,
+      originX: 0,
+      originZ: 0,
+      sourceTerrainHash: "22".repeat(32),
+      configHash: "33".repeat(32),
+    }, "world-a");
+    const manifest = buildWorldManifest({
+      worldMode: finiteWorldMode,
+      terrainFieldConfig,
+      terrainSourceHash: "world-b-terrain",
+      worldId: "world-b",
+    });
+    expect(getActiveErodedMacroField()).toBeNull();
+    expect(manifest.artifacts.erosion).toBeUndefined();
   });
 
   it("immutably attaches a generated artifact", () => {

@@ -122,6 +122,19 @@ describe("tree impostor atlas pixels", () => {
     expect(() => copyTreeImpostorPixels(stepped, 4)).toThrow(/expected 4/);
   });
 
+  it("flips each impostor layer without reversing layer order", () => {
+    const pixels = new Uint8Array(4 * 4);
+    pixels.set([1, 0, 0, 0], 0);
+    pixels.set([2, 0, 0, 0], 4);
+    pixels.set([3, 0, 0, 0], 8);
+    pixels.set([4, 0, 0, 0], 12);
+    const job = createTreeImpostorRowFlipJob(pixels, 1, 4, 2);
+    while (!job.step(1)) {
+      // Exercise the layer boundary.
+    }
+    expect([pixels[0], pixels[4], pixels[8], pixels[12]]).toEqual([2, 1, 4, 3]);
+  });
+
   it("retains the asynchronous readback buffer without cloning it", () => {
     const raw = new Uint8Array([1, 2, 3, 4]);
     const view = viewTreeImpostorPixels(raw, raw.length);

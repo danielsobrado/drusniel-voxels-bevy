@@ -35,6 +35,10 @@ import {
   type TreeImpostorBakeStage,
 } from "./tree_impostor_bake_progress.js";
 import { treeAtlasVariantIndex } from "./tree_variant_selection.js";
+import { TREE_IMPOSTOR_AGE_BUCKETS } from "./morphology/constants.js";
+import { deformTreeVertexReference } from "./morphology/deformation_reference.js";
+import { impostorLayerIndex } from "./morphology/impostor_layers.js";
+import type { TreeInstanceMorphology } from "./morphology/types.js";
 
 export {
   configureTreeImpostorAtlasTexture,
@@ -62,6 +66,8 @@ export interface TreeImpostorAtlas {
   atlasWidthPx?: number;
   atlasHeightPx?: number;
   variantCount?: number;
+  layerCount?: number;
+  ageBuckets?: readonly number[];
   frames: OctahedralFrame[];
   variantFrames?: Partial<Record<number, OctahedralFrame[]>>;
   radius?: number;
@@ -105,6 +111,7 @@ interface SpeciesBakeContext {
   species: TreeSpeciesId;
   speciesIndex: number;
   variantCount: number;
+  layerCount: number;
   gridSize: number;
   resolutionPx: number;
   atlasSizePx: number;
@@ -296,7 +303,7 @@ async function bakeSpeciesAtlas(
     if (albedoPixels && normalDepthPixels) {
       if (options.webgpu === true) {
         await runPixelJob(
-          createTreeImpostorRowFlipJob(albedoPixels, context.atlasWidthPx, context.atlasHeightPx),
+          createTreeImpostorRowFlipJob(albedoPixels, context.atlasWidthPx, context.atlasHeightPx, context.atlasSizePx),
           "row-flip",
           "albedo",
           context,
@@ -305,7 +312,7 @@ async function bakeSpeciesAtlas(
           progress,
         );
         await runPixelJob(
-          createTreeImpostorRowFlipJob(normalDepthPixels, context.atlasWidthPx, context.atlasHeightPx),
+          createTreeImpostorRowFlipJob(normalDepthPixels, context.atlasWidthPx, context.atlasHeightPx, context.atlasSizePx),
           "row-flip",
           "normal-depth",
           context,
@@ -387,42 +394,54 @@ async function captureSpeciesChannel(
   progress: BakeProgressTracker,
 ): Promise<void> {
   mesh.material = material;
-  const tileCount = context.baseFrames.length * context.variantCount;
+  const tileCount = context.baseFrames.length * context.layerCount;
   let tileIndex = 0;
   for (let variant = 0; variant < context.variantCount; variant++) {
     throwIfTreeImpostorBakeAborted(options.signal);
-    const geometry = selectTreeImpostorBakeGeometry(
+    const sourceGeometry = selectTreeImpostorBakeGeometry(
       options.geometries,
       context.species,
       options.settings.impostors.sourceLod,
       variant,
     );
-    const bounds = computeTreeImpostorGeometryBounds(geometry);
-    mesh.geometry = geometry;
-    mesh.position.copy(bounds.center).multiplyScalar(-1);
-    configureBakeCamera(camera, bounds.radius);
-    const yOffsetPx = variant * context.atlasSizePx;
-    for (const frame of context.baseFrames) {
-      throwIfTreeImpostorBakeAborted(options.signal);
-      bakeAtlasTile(
-        renderer,
-        target,
-        scene,
-        camera,
-        frame,
-        context.resolutionPx,
-        bounds.radius,
-        yOffsetPx,
+    for (let ageBucket = 0; ageBucket < TREE_IMPOSTOR_AGE_BUCKETS.length; ageBucket++) {
+      const geometry = createTreeImpostorAgeGeometry(
+        sourceGeometry,
+        context.species,
+        TREE_IMPOSTOR_AGE_BUCKETS[ageBucket],
+        options.settings,
       );
-      tileIndex++;
-      progress.publish("capturing", context, {
-        variant,
-        channel,
-        tileIndex,
-        tileCount,
-        completedDelta: 1,
-      });
-      await budget.yieldIfExpired();
+      try {
+        const bounds = computeTreeImpostorGeometryBounds(geometry);
+        mesh.geometry = geometry;
+        mesh.position.copy(bounds.center).multiplyScalar(-1);
+        configureBakeCamera(camera, bounds.radius);
+        const yOffsetPx = impostorLayerIndex(variant, ageBucket) * context.atlasSizePx;
+        for (const frame of context.baseFrames) {
+          throwIfTreeImpostorBakeAborted(options.signal);
+          bakeAtlasTile(
+            renderer,
+            target,
+            scene,
+            camera,
+            frame,
+            context.resolutionPx,
+            bounds.radius,
+            yOffsetPx,
+          );
+          tileIndex++;
+          progress.publish("capturing", context, {
+            variant,
+            channel,
+            tileIndex,
+            tileCount,
+            completedDelta: 1,
+          });
+          await budget.yieldIfExpired();
+        }
+      } finally {
+        geometry.dispose();
+      }
     }
   }
 }
@@ -464,13 +483,15 @@ function createSpeciesContext(
   const paddingPx = settings.impostors.atlasPaddingPx;
   const atlasSizePx = gridSize * resolutionPx;
   const variantCount = treeImpostorVariantCount(geometries, species);
+  const layerCount = variantCount * TREE_IMPOSTOR_AGE_BUCKETS.length;
   const atlasWidthPx = atlasSizePx;
-  const atlasHeightPx = atlasSizePx * variantCount;
+  const atlasHeightPx = atlasSizePx * layerCount;
   const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
   return {
     species,
     speciesIndex,
     variantCount,
+    layerCount,
     gridSize,
     resolutionPx,
     atlasSizePx,
@@ -515,6 +536,8 @@ function createAtlas(
     atlasWidthPx: context.atlasWidthPx,
     atlasHeightPx: context.atlasHeightPx,
     variantCount: context.variantCount,
+    layerCount: context.layerCount,
+    ageBuckets: TREE_IMPOSTOR_AGE_BUCKETS,
     frames: context.variantFrames[TREE_IMPOSTOR_CANONICAL_VARIANT] ?? context.variantFrames[0] ?? context.baseFrames,
     variantFrames: context.variantFrames,
     radius: context.variantBounds.maxRadius,
@@ -537,10 +560,11 @@ function estimateTotalBakeWork(options: TreeImpostorBakerOptions): number {
   for (const species of TREE_SPECIES) {
     const gridSize = options.settings.impostors.octahedralGridSize;
     const variantCount = treeImpostorVariantCount(options.geometries, species);
-    const captureTiles = gridSize * gridSize * variantCount * 2;
-    const atlasHeight = gridSize * options.settings.impostors.resolutionPx * variantCount;
+    const layerCount = variantCount * TREE_IMPOSTOR_AGE_BUCKETS.length;
+    const captureTiles = gridSize * gridSize * layerCount * 2;
+    const atlasHeight = gridSize * options.settings.impostors.resolutionPx * layerCount;
     const flipRows = options.webgpu === true ? Math.floor(atlasHeight / 2) * 2 : 0;
-    const dilationTiles = gridSize * gridSize * variantCount;
+    const dilationTiles = gridSize * gridSize * layerCount;
     total += 1 + captureTiles + 2 + flipRows + dilationTiles + 2 + 1;
   }
   return Math.max(1, total);
@@ -648,7 +672,7 @@ function createTreeImpostorVariantFrames(
 ): Partial<Record<number, OctahedralFrame[]>> {
   const out: Partial<Record<number, OctahedralFrame[]>> = {};
   for (let variant = 0; variant < variantCount; variant++) {
-    const yOffsetPx = variant * atlasSizePx;
+    const yOffsetPx = impostorLayerIndex(variant, 1) * atlasSizePx;
     out[variant] = baseFrames.map((frame) => ({
       ...frame,
       uvMin: [
@@ -662,6 +686,67 @@ function createTreeImpostorVariantFrames(
     }));
   }
   return out;
+}
+
+export function createTreeImpostorAgeGeometry(
+  source: THREE.BufferGeometry,
+  species: TreeSpeciesId,
+  age01: number,
+  settings: TreeSettings,
+): THREE.BufferGeometry {
+  const geometry = source.clone();
+  const position = geometry.getAttribute("position");
+  const normal = geometry.getAttribute("normal");
+  const height = geometry.getAttribute("treeHeight01");
+  const radial = geometry.getAttribute("treeRadial01");
+  const branchLevel = geometry.getAttribute("treeBranchLevel");
+  const branchPhase = geometry.getAttribute("treeBranchPhase");
+  const rootMask = geometry.getAttribute("treeRootMask");
+  if (!position || !normal || !height || !radial || !branchLevel || !branchPhase || !rootMask) return geometry;
+
+  source.computeBoundingBox();
+  const treeHeight = Math.max(1e-6, source.boundingBox?.max.y ?? settings.species[species].trunkHeightM);
+  const crownStart01 = Math.max(0, Math.min(1, settings.species[species].trunkHeightM / treeHeight));
+  const morphology: TreeInstanceMorphology = {
+    age01,
+    leanX: 0,
+    leanZ: 0,
+    crownBiasX: 0,
+    crownBiasZ: 0,
+    crownWidth: 1,
+    crownFlattening: 1,
+    branchDroop: settings.species[species].morphologyRuntime.baseDroop,
+    foliageDensity: 1,
+    health01: 1,
+    rootFlare: 1,
+    stiffness: 1,
+  };
+  for (let index = 0; index < position.count; index++) {
+    const result = deformTreeVertexReference({
+      position: [position.getX(index), position.getY(index), position.getZ(index)],
+      normal: [normal.getX(index), normal.getY(index), normal.getZ(index)],
+      attributes: {
+        treeHeight01: height.getX(index),
+        treeRadial01: radial.getX(index),
+        treeBranchLevel: branchLevel.getX(index),
+        treeBranchPhase: branchPhase.getX(index),
+        treeRootMask: rootMask.getX(index),
+        treeFoliageMask: geometry.getAttribute("treeFoliageMask")?.getX(index) ?? 0,
+        treeFoliageCard: geometry.getAttribute("treeFoliageCard")?.getX(index) ?? 0,
+      },
+      morphology,
+      treeHeight,
+      crownRadius: settings.species[species].crownRadiusM,
+      crownStart01,
+    });
+    position.setXYZ(index, ...result.position);
+    normal.setXYZ(index, ...result.normal);
+  }
+  position.needsUpdate = true;
+  normal.needsUpdate = true;
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 function computeTreeImpostorVariantBounds(

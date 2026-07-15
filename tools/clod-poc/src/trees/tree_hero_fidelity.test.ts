@@ -119,7 +119,7 @@ function patchWithLods(
       scale: 1,
       rotationY: 0,
       normalY: 1,
-    })),
+    })) as TreePatch["instances"],
     group: new THREE.Group(),
     meshes: {} as TreePatch["meshes"],
     previousLods: rows.map((row) => row.lod),
