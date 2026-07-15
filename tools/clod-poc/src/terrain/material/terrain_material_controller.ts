@@ -103,7 +103,8 @@ export interface TerrainMaterialController {
 
 export function createTerrainMaterialController(deps: TerrainMaterialControllerDeps): TerrainMaterialController {
   const terrainMaterials = new Set<TerrainMaterialHandle>();
-  let sharedTerrainMaterial: TerrainMaterialHandle | null = null;
+  const sharedTerrainVariants = new Map<string, TerrainMaterialHandle>();
+  const sharedHandleCleanup = new WeakMap<TerrainMaterialHandle, () => void>();
   let lastTexturesActive: boolean | null = null;
   let riverTerrainWetnessMask: THREE.Texture | null = null;
   let proceduralTerrain = deps.proceduralTerrain;
@@ -117,11 +118,153 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   const MATERIAL_RECYCLE_CAP = 64;
   const recycledMaterials: TerrainMaterialHandle[] = [];
 
+  type SharedVariantState = {
+    color: THREE.Color;
+    debug: { normalColor: boolean; normalDivergence: boolean; divergenceGain: number };
+    triplanar: boolean;
+    side: THREE.Side;
+    wireframe: boolean;
+    fade: number;
+    fadeIn: boolean;
+    dither: boolean;
+    rootMorph: number;
+    tier: number;
+  };
+
+  const variantKey = (state: SharedVariantState): string => [
+    state.color.getHexString(),
+    Number(state.debug.normalColor),
+    Number(state.debug.normalDivergence),
+    state.debug.divergenceGain,
+    Number(state.triplanar),
+    state.side,
+    Number(state.wireframe),
+    state.fade.toFixed(6),
+    Number(state.fadeIn),
+    Number(state.dither),
+    state.rootMorph.toFixed(6),
+    state.tier,
+  ].join("|");
+
+  const makeSharedVariantHandle = (color: number): TerrainMaterialHandle => {
+    const state: SharedVariantState = {
+      color: new THREE.Color(color),
+      debug: { normalColor: false, normalDivergence: false, divergenceGain: 1 },
+      triplanar: false,
+      side: THREE.DoubleSide,
+      wireframe: false,
+      fade: 1,
+      fadeIn: true,
+      dither: false,
+      rootMorph: 0,
+      tier: 0,
+    };
+    let adjust: Parameters<TerrainMaterialHandle["setColorAdjust"]>[0] | null = null;
+    let lighting: EnvironmentLighting | null = null;
+    let textureState: { slots: Parameters<TerrainMaterialHandle["setTextures"]>[0]; options: TerrainTextureApplyOptions } | null = null;
+    let current: TerrainMaterialHandle | null = null;
+    let unsubscribeCurrent: (() => void) | null = null;
+    const callbacks = new Set<(material: THREE.Material) => void>();
+
+    const resolve = (): TerrainMaterialHandle => {
+      const key = variantKey(state);
+      let next = sharedTerrainVariants.get(key);
+      if (!next) {
+        next = createWebGpuTerrainMaterial(state.color.getHex());
+        next.setDebug(state.debug);
+        next.setTriplanar(state.triplanar);
+        next.setSide(state.side);
+        next.setWireframe(state.wireframe);
+        next.setFade(state.fade, state.fadeIn, state.dither);
+        next.setRootMorph(state.rootMorph);
+        next.setTier(state.tier);
+        sharedTerrainVariants.set(key, next);
+      }
+      if (current === next) return next;
+      if (adjust) next.setColorAdjust(adjust);
+      if (lighting) next.setLighting(lighting);
+      if (textureState) next.setTextures(textureState.slots, textureState.options);
+      unsubscribeCurrent?.();
+      current = next;
+      unsubscribeCurrent = next.onMaterialChanged((material) => {
+        for (const callback of callbacks) callback(material);
+      });
+      for (const callback of callbacks) callback(next.material);
+      return next;
+    };
+
+    const stateChanged = (): void => { if (current || callbacks.size > 0) resolve(); };
+    const handle: TerrainMaterialHandle = {
+      get material() { return resolve().material; },
+      onMaterialChanged(callback) {
+        callbacks.add(callback);
+        return () => callbacks.delete(callback);
+      },
+      setBaseColor(value) {
+        const next = new THREE.Color(value);
+        if (state.color.equals(next)) return;
+        state.color.copy(next);
+        stateChanged();
+      },
+      setColorAdjust(value) { adjust = value; current?.setColorAdjust(value); },
+      setLighting(value) { lighting = value; current?.setLighting(value); },
+      setTextures(slots, options) {
+        textureState = { slots, options };
+        current?.setTextures(slots, options);
+      },
+      setDebug(value) {
+        if (state.debug.normalColor === value.normalColor &&
+          state.debug.normalDivergence === value.normalDivergence &&
+          state.debug.divergenceGain === value.divergenceGain) return;
+        state.debug = { ...value };
+        stateChanged();
+      },
+      setTriplanar(value) {
+        if (state.triplanar === value) return;
+        state.triplanar = value;
+        stateChanged();
+      },
+      setSide(value) {
+        if (state.side === value) return;
+        state.side = value;
+        stateChanged();
+      },
+      setWireframe(value) {
+        if (state.wireframe === value) return;
+        state.wireframe = value;
+        stateChanged();
+      },
+      setFade(fade, fadeIn, dither) {
+        if (state.fade === fade && state.fadeIn === fadeIn && state.dither === dither) return;
+        state.fade = fade;
+        state.fadeIn = fadeIn;
+        state.dither = dither;
+        stateChanged();
+      },
+      setRootMorph(value) {
+        if (state.rootMorph === value) return;
+        state.rootMorph = value;
+        stateChanged();
+      },
+      setTier(value) {
+        if (state.tier === value) return;
+        state.tier = value;
+        stateChanged();
+      },
+    };
+    sharedHandleCleanup.set(handle, () => {
+      unsubscribeCurrent?.();
+      unsubscribeCurrent = null;
+      callbacks.clear();
+    });
+    return handle;
+  };
+
   const makeTerrainMaterial = (color: number): TerrainMaterialHandle => {
     if (deps.poolTerrainMaterial) {
-      sharedTerrainMaterial ??= createWebGpuTerrainMaterial(0xb9c0c8);
-      terrainMaterials.add(sharedTerrainMaterial);
-      return sharedTerrainMaterial;
+      const handle = makeSharedVariantHandle(color);
+      terrainMaterials.add(handle);
+      return handle;
     }
     const recycled = recycledMaterials.pop();
     if (recycled) {
@@ -143,8 +286,12 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   };
 
   const releaseTerrainMaterial = (handle: TerrainMaterialHandle): boolean => {
-    if (handle === sharedTerrainMaterial) return false;
     terrainMaterials.delete(handle);
+    if (deps.poolTerrainMaterial) {
+      sharedHandleCleanup.get(handle)?.();
+      sharedHandleCleanup.delete(handle);
+      return true;
+    }
     if (!deps.isWebGpu || recycledMaterials.length >= MATERIAL_RECYCLE_CAP) return false;
     // Reset the transient per-node state to fresh-material defaults; everything else
     // (color, lighting, textures, debug, side, wireframe) is re-applied on reuse by the
@@ -272,7 +419,6 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   };
 
   const applyColorByLodToMaterials = (on: boolean) => {
-    if (deps.poolTerrainMaterial) return;
     for (const view of deps.getViews()) {
       view.mat.setBaseColor(on ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8);
     }
@@ -293,7 +439,6 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   };
 
   const configureChunkMaterial = (mat: TerrainMaterialHandle) => {
-    if (deps.poolTerrainMaterial) return;
     const state = deps.getMaterialState();
     mat.setDebug({
       normalColor: state.normalColor,
@@ -346,6 +491,6 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     syncColorByLod,
     configureChunkMaterial,
     diagnostics,
-    get sharedMaterial() { return sharedTerrainMaterial; },
+    get sharedMaterial() { return null; },
   };
 }

@@ -237,7 +237,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
           const r = sample(x, z);
           return r.material;
         },
-        revision: () => state.frame + ((gpuAtlas?.view.revision ?? 0) * 1_000_000),
+        revision: () => state.revision + ((gpuAtlas?.view.revision ?? 0) * 1_000_000),
       };
     },
 

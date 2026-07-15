@@ -167,6 +167,7 @@ export async function runRuntimeSystemsStartup(
     currentLighting,
     statControllers,
   });
+  await vegetation.impostorBakePromise;
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
 
   const {

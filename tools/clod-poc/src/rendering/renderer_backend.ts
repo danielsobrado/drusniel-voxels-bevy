@@ -36,10 +36,6 @@ export interface WebGpuAppRenderer {
   maxAnisotropy: number;
 }
 
-export interface WebGpuRendererOptions {
-  desiredMaximumFrameLatency?: number;
-}
-
 export type AppRenderer = WebGlAppRenderer | WebGpuAppRenderer;
 
 export function createWebGlAppRenderer(): WebGlAppRenderer {
@@ -50,7 +46,7 @@ export function createWebGlAppRenderer(): WebGlAppRenderer {
   return { isWebGpu: false, renderer, maxAnisotropy: renderer.capabilities.getMaxAnisotropy() };
 }
 
-export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {}): Promise<WebGpuAppRenderer> {
+export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   const diagnostics = await probeWebGPU();
   if (!diagnostics.ok) {
     throw new Error([
@@ -68,7 +64,6 @@ export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {
   });
   try {
     await renderer.init();
-    configureCanvasFrameLatency(renderer, options.desiredMaximumFrameLatency);
   } catch (error) {
     renderer.dispose();
     const message = error instanceof Error ? error.message : String(error);
@@ -102,21 +97,6 @@ export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {
   }
   // WebGPU exposes a high anisotropy limit; 16 matches typical hardware and the WebGL default.
   return { isWebGpu: true, renderer, maxAnisotropy: 16 };
-}
-
-function configureCanvasFrameLatency(renderer: WebGPURenderer, requested: number | undefined): void {
-  if (requested === undefined || !Number.isFinite(requested)) return;
-  const desiredMaximumFrameLatency = Math.max(1, Math.min(4, Math.round(requested)));
-  const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
-  const context = renderer.domElement.getContext("webgpu");
-  if (!device || !context) return;
-  context.configure({
-    device,
-    format: navigator.gpu.getPreferredCanvasFormat(),
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
-    alphaMode: "opaque",
-    desiredMaximumFrameLatency,
-  } as GPUCanvasConfiguration & { desiredMaximumFrameLatency: number });
 }
 
 function installWebGpuShaderMaterialGuard(): void {

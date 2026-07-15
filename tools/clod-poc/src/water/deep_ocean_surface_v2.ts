@@ -210,8 +210,9 @@ function createCameraRelativeDeepOceanSurface(config: DeepOceanRenderConfig, mat
     };
   };
   let current = snappedCenter();
-  let geometry = buildCameraRelativeGeometry(config, options, current.x, current.z);
+  const geometry = buildCameraRelativeGeometry(config, options, 0, 0);
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(current.x, 0, current.z);
   mesh.name = "deep-ocean-surface-camera-relative";
   mesh.frustumCulled = false;
   mesh.renderOrder = 9;
@@ -222,10 +223,7 @@ function createCameraRelativeDeepOceanSurface(config: DeepOceanRenderConfig, mat
       const next = snappedCenter();
       if (next.x === current.x && next.z === current.z) return;
       current = next;
-      const oldGeometry = geometry;
-      geometry = buildCameraRelativeGeometry(config, options, current.x, current.z);
-      mesh.geometry = geometry;
-      oldGeometry.dispose();
+      mesh.position.set(current.x, 0, current.z);
     },
     dispose() {
       geometry.dispose();

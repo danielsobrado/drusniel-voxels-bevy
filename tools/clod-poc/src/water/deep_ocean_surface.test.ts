@@ -56,4 +56,22 @@ describe("deep ocean surface", () => {
 
     surface.dispose();
   });
+
+  it("rebases a camera-relative surface without rebuilding its geometry", () => {
+    const center = new THREE.Vector3(10, 0, 20);
+    const surface = createDeepOceanSurface(
+      256,
+      DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      new THREE.MeshBasicMaterial(),
+      { mode: "camera-relative", getCenter: () => center, rebaseSnapM: 128 },
+    )!;
+    const geometry = surface.mesh.geometry;
+
+    center.set(140, 0, 270);
+    surface.update(1);
+
+    expect(surface.mesh.geometry).toBe(geometry);
+    expect(surface.mesh.position.toArray()).toEqual([128, 0, 256]);
+    surface.dispose();
+  });
 });

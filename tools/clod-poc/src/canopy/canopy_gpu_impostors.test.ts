@@ -94,6 +94,9 @@ describe("canopy GPU impostors", () => {
     expect(shell.mesh.userData.canopyTextureSetRevision).toBe(7);
     expect(shell.mesh.userData.canopyGpuImpostorInstances).toBe(shell.instanceCount);
     expect(shell.mesh.frustumCulled).toBe(true);
+    expect((shell.mesh.instanceMatrix as THREE.InstancedBufferAttribute & {
+      isStorageInstancedBufferAttribute?: boolean;
+    }).isStorageInstancedBufferAttribute).toBe(true);
     expect(shell.mesh.boundingSphere).not.toBeNull();
     shell.dispose();
   });

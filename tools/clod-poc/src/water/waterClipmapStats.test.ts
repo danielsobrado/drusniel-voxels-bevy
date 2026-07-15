@@ -69,4 +69,17 @@ describe("WaterClipmap runtime stats", () => {
 
     clipmap.dispose();
   });
+
+  it("spreads simultaneous level refills across frames", () => {
+    const { clipmap } = createTestClipmap(true);
+    const start = new THREE.Vector3(64, 40, 64);
+    clipmap.update(0.016, start);
+    clipmap.update(0.016, start);
+    const before = clipmap.updateCostStats.snaps;
+
+    clipmap.update(0.016, new THREE.Vector3(72, 40, 72));
+
+    expect(clipmap.updateCostStats.snaps - before).toBe(1);
+    clipmap.dispose();
+  });
 });

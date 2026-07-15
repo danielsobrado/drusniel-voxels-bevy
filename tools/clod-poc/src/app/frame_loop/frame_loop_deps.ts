@@ -70,6 +70,7 @@ export interface FrameLoopRenderDeps {
   gpuPassTiming?: GpuPassTiming | null;
   /** TP-1 gated offscreen tree-timing pass; runs after the visible frame. */
   runGpuTreeTiming?: (() => void) | null;
+  afterRenderWork?: (() => void) | null;
 }
 
 export interface FrameLoopPlayerDeps {

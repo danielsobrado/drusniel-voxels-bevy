@@ -183,6 +183,30 @@ describe("FarClipmapController shader displacement", () => {
     controller.dispose();
   });
 
+  it("does not poll an unchanged authoritative revision source", () => {
+    const source: FarClipmapSource = {
+      isReady: () => true,
+      revision: () => 1,
+      revisionIsAuthoritative: () => true,
+      sampleHeight: () => 12,
+      sampleMaterial: () => 1,
+      sampleBiome: () => 1,
+      sampleWater: () => 0,
+    };
+    const controller = createFarClipmapController(
+      new THREE.Scene(),
+      config({ sourceRefreshMaxPerFrame: 1, sourceRefreshIntervalFrames: 1 }),
+      source,
+      { webGpuCompatibleMaterial: true },
+    );
+    const center = new THREE.Vector3(257.5, 0, -130.25);
+    controller.update(center);
+    controller.update(center);
+
+    expect(controller.update(center).sourceRefreshesThisFrame).toBe(0);
+    controller.dispose();
+  });
+
   it("keeps shader rings pending until the far-summary source is ready", () => {
     const scene = new THREE.Scene();
     const controller = createFarClipmapController(scene, config(), unavailableSource(), {

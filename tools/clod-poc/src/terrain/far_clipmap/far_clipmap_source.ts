@@ -10,6 +10,7 @@ export interface FarClipmapSource {
   sampleSummaryInto?(x: number, z: number, distanceM: number, out: FarHeightProviderSample): boolean;
   isReady?: () => boolean;
   revision?: () => number;
+  revisionIsAuthoritative?: () => boolean;
 }
 
 type FarHeightProviderWithWater = FarHeightProvider & {
@@ -63,6 +64,14 @@ export function getGlobalCoherentFarSummaryProvider(): FarHeightProvider | undef
   return latchedCoherentProvider;
 }
 
+function providerHasRevision(provider: FarHeightProvider | undefined): boolean {
+  const withRevision = provider as FarHeightProviderWithRevision | undefined;
+  return typeof withRevision?.revision === "function"
+    || typeof withRevision?.revisionAt === "function"
+    || typeof withRevision?.stateRevisionAt === "function"
+    || typeof withRevision?.commitRevisionAt === "function";
+}
+
 export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightProvider): FarClipmapSource {
   return {
     sampleHeight: (x, z) => provider.sampleHeight(x, z),
@@ -72,6 +81,7 @@ export function createFarClipmapSourceFromFarHeightProvider(provider: FarHeightP
     sampleSummaryInto: provider.sampleSummaryInto?.bind(provider),
     isReady: () => true,
     revision: () => providerRevision(provider),
+    revisionIsAuthoritative: () => providerHasRevision(provider),
   };
 }
 
@@ -87,6 +97,7 @@ export function createFarClipmapSourceFromProviderGetter(
     sampleSummaryInto: (x, z, distanceM, out) => getProvider()?.sampleSummaryInto?.(x, z, distanceM, out) ?? false,
     isReady: () => getProvider() !== undefined,
     revision: () => providerRevision(getProvider()),
+    revisionIsAuthoritative: () => providerHasRevision(getProvider()),
   };
 }
 
@@ -102,6 +113,7 @@ export function createFarClipmapSourceFromTerrainSampler(sampler: FarTerrainSamp
     sampleWater: (x, z) => sampler.sampleWaterCoverage?.(x, z) ?? 0,
     isReady: () => true,
     revision: () => 0,
+    revisionIsAuthoritative: () => true,
   };
 }
 
@@ -113,5 +125,6 @@ export function createConservativeFarClipmapSource(heightM = 0): FarClipmapSourc
     sampleWater: () => 1,
     isReady: () => true,
     revision: () => 0,
+    revisionIsAuthoritative: () => true,
   };
 }

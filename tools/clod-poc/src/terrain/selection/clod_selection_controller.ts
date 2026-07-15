@@ -184,7 +184,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   };
 
   const applyMaterialTier = (view: ClodSelectionTerrainView, settings: ClodSelectionSettings): void => {
-    if (!settings.materialTiers || config.poolTerrainMaterial) return;
+    if (!settings.materialTiers) return;
     const tier = view.node.level <= 0 ? 0 : view.node.level === 1 ? 1 : 2;
     view.mat.setTier(tier);
   };

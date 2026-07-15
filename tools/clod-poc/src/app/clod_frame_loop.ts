@@ -309,10 +309,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     timed(collectFrameTiming, phaseTiming, "clodShadowMs", () => {
       clodShadow?.update();
     });
-    timed(collectFrameTiming, phaseTiming, "canopyMs", () => {
-      canopy?.update(terrainPhaseResult.worldCenter.x, terrainPhaseResult.worldCenter.z);
-    });
-
     elapsedSeconds += playerDelta;
     const vegetationTiming = timed(collectFrameTiming, phaseTiming, "vegetationTotalMs", () => runVegetationFramePhase({
       elapsedSeconds,
@@ -529,7 +525,13 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       phaseTiming,
       dynamicResolution: render.dynamicResolution,
       statsSyncThrottle: { decision: lastStatsDecision, diagnostics: statsSyncThrottle.diagnostics() },
-      afterRenderDiagnostics: () => timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics),
+      afterRenderDiagnostics: () => {
+        timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
+        timed(collectFrameTiming, phaseTiming, "canopyMs", () => {
+          canopy?.update(terrainPhaseResult.worldCenter.x, terrainPhaseResult.worldCenter.z);
+        });
+        render.afterRenderWork?.();
+      },
     });
 
     render.gpuPassTiming?.update();

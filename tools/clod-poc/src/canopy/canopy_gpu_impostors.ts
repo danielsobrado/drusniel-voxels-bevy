@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { StorageInstancedBufferAttribute } from "three/webgpu";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
@@ -104,6 +105,7 @@ export function buildCanopyGpuImpostorsFromTextureSet(
     toneMapped: true,
   });
   const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, maxInstances));
+  mesh.instanceMatrix = new StorageInstancedBufferAttribute(Math.max(1, maxInstances), 16);
   mesh.name = "CanopyGpuImpostors";
   mesh.frustumCulled = true;
   mesh.castShadow = false;

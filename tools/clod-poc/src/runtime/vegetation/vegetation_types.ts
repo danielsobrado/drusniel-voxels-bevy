@@ -69,6 +69,7 @@ export interface VegetationStartupResult {
   treeSystem: ReturnType<typeof createTreeController>["system"];
   fallingTrees: ReturnType<typeof createTreeController>["fallingTrees"];
   treeStats: { current: TreeStats | null };
+  impostorBakePromise: Promise<void>;
   understoryController: ReturnType<typeof createUnderstoryController>;
   understorySystem: ReturnType<typeof createUnderstoryController>["system"];
   understoryStats: { current: UnderstoryStats | null };

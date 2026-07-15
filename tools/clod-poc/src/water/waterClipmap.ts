@@ -205,6 +205,12 @@ class WaterLevel {
   get materialHandle(): WaterMaterialHandle { return this.handle; }
   get staticTopology(): boolean { return this.texels !== null; }
 
+  originChanged(cameraX: number, cameraZ: number): boolean {
+    const nextX = Math.floor(cameraX / this.snap) * this.snap;
+    const nextZ = Math.floor(cameraZ / this.snap) * this.snap;
+    return !this.initialized || nextX !== this.originX || nextZ !== this.originZ;
+  }
+
   disposeResources(): void {
     this.texels?.dispose();
     this.mesh.geometry.dispose();
@@ -522,10 +528,16 @@ export class WaterClipmap {
     this.cameraPosition.copy(cameraPosition);
     const cx = cameraPosition.x;
     const cz = cameraPosition.z;
+    let originRefilled = false;
     for (let i = 0; i < this.levels.length; i++) {
       const finer = i > 0 ? this.levels[i - 1].currentRect : DEGENERATE_INNER;
-      this.levels[i].updateOrigin(cx, cz, finer);
-      const handle = this.levels[i].materialHandle;
+      const level = this.levels[i];
+      const originChanged = level.originChanged(cx, cz);
+      if (!originChanged || !originRefilled) {
+        level.updateOrigin(cx, cz, finer);
+        originRefilled ||= originChanged;
+      }
+      const handle = level.materialHandle;
       handle.setTime(this.time);
       handle.updateCamera(this.cameraPosition);
     }

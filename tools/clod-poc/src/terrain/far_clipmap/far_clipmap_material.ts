@@ -1,8 +1,9 @@
 import * as THREE from "three";
-import { MeshBasicNodeMaterial } from "three/webgpu";
-import { max, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
+import { MeshBasicNodeMaterial, StorageBufferAttribute } from "three/webgpu";
+import { max, mix, positionGeometry, smoothstep, storage, uniform, vec3 } from "three/tsl";
 import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
+import { getActiveWebGpuRendererContext } from "../../rendering/webgpu_renderer_context.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -10,8 +11,6 @@ type FarClipmapNodeUniform<T> = TslNode & { value: T };
 
 const tslMix = mix as unknown as (...args: TslNode[]) => TslNode;
 const tslSmoothstep = smoothstep as unknown as (...args: TslNode[]) => TslNode;
-const tslTexture = texture as unknown as (...args: TslNode[]) => TslNode;
-const tslVec2 = vec2 as unknown as (...args: TslNode[]) => TslNode;
 const tslVec3 = vec3 as unknown as (...args: TslNode[]) => TslNode;
 
 const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object.freeze({
@@ -27,6 +26,8 @@ const FAR_CLIPMAP_SOURCE_TEXTURE = "farClipmapSourceTexture";
 const FAR_CLIPMAP_SOURCE_DATA = "farClipmapSourceData";
 const FAR_CLIPMAP_WATER_TEXTURE = "farClipmapWaterTexture";
 const FAR_CLIPMAP_WATER_DATA = "farClipmapWaterData";
+const FAR_CLIPMAP_SOURCE_STORAGE = "farClipmapSourceStorage";
+const FAR_CLIPMAP_WATER_STORAGE = "farClipmapWaterStorage";
 const FAR_CLIPMAP_DISPLACEMENT_MODE = "farClipmapDisplacementMode";
 
 export interface FarClipmapMaterialUniforms {
@@ -307,25 +308,6 @@ function createCpuBakedFarClipmapMaterial(input: { debugMode: FarClipmapDebugMod
   return material;
 }
 
-function createSourceTexture(gridResolution: number, name = "FarClipmapSourceSummaryTexture"): THREE.DataTexture {
-  const size = Math.max(2, Math.floor(gridResolution));
-  const data = new Float32Array(size * size * 4);
-  for (let i = 0; i < size * size; i++) {
-    data[i * 4] = 0;
-    data[i * 4 + 1] = 0;
-    data[i * 4 + 2] = 1;
-    data[i * 4 + 3] = 0;
-  }
-  const sourceTexture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
-  sourceTexture.name = name;
-  sourceTexture.minFilter = THREE.NearestFilter;
-  sourceTexture.magFilter = THREE.NearestFilter;
-  sourceTexture.wrapS = THREE.ClampToEdgeWrapping;
-  sourceTexture.wrapT = THREE.ClampToEdgeWrapping;
-  sourceTexture.needsUpdate = true;
-  return sourceTexture;
-}
-
 function createWebGpuFarClipmapMaterial(input: {
   debugMode: FarClipmapDebugMode;
   seaLevel?: number;
@@ -341,14 +323,15 @@ function createWebGpuFarClipmapMaterial(input: {
   gridResolution?: number;
 }): FarClipmapMaterial {
   const gridResolution = Math.max(2, Math.floor(input.gridResolution ?? 2));
-  const sourceTexture = createSourceTexture(gridResolution);
-  const sourceData = (sourceTexture.image as { data: Float32Array }).data;
-  const waterTexture = createSourceTexture(gridResolution, "FarClipmapWaterSummaryTexture");
-  const waterData = (waterTexture.image as { data: Float32Array }).data;
+  const sourceData = new Float32Array(gridResolution * gridResolution * 4);
+  const waterData = new Float32Array(gridResolution * gridResolution * 4);
+  for (let i = 0; i < gridResolution * gridResolution; i++) sourceData[i * 4 + 2] = 1;
+  const sourceStorage = new StorageBufferAttribute(sourceData, 4);
+  const waterStorage = new StorageBufferAttribute(waterData, 4);
   const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
-  const sampleUv: TslNode = positionGeometry.xz.div(uniforms.uGridMax);
-  const sourceSample: TslNode = tslTexture(sourceTexture, tslVec2(sampleUv.x, sampleUv.y));
-  const waterSample: TslNode = tslTexture(waterTexture, tslVec2(sampleUv.x, sampleUv.y));
+  const sampleIndex: TslNode = positionGeometry.z.mul(gridResolution).add(positionGeometry.x);
+  const sourceSample: TslNode = storage(sourceStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
+  const waterSample: TslNode = storage(waterStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
   const rawHeight: TslNode = sourceSample.x;
   const terrainHeight: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
   const unifiedChannels: TslNode = tslSmoothstep(-0.5, 0.0, waterSample.w);
@@ -423,10 +406,10 @@ function createWebGpuFarClipmapMaterial(input: {
   material.side = THREE.DoubleSide;
   material.toneMapped = true;
   material.userData[FAR_CLIPMAP_NODE_UNIFORMS] = uniforms;
-  material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] = sourceTexture;
   material.userData[FAR_CLIPMAP_SOURCE_DATA] = sourceData;
-  material.userData[FAR_CLIPMAP_WATER_TEXTURE] = waterTexture;
   material.userData[FAR_CLIPMAP_WATER_DATA] = waterData;
+  material.userData[FAR_CLIPMAP_SOURCE_STORAGE] = sourceStorage;
+  material.userData[FAR_CLIPMAP_WATER_STORAGE] = waterStorage;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;
 }
@@ -525,12 +508,17 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
   cameraZ: number;
   clipInnerRadiusM?: number;
   clipOuterRadiusM?: number;
+  deferUpload?: boolean;
 }): FarClipmapSourceTextureStats {
   const sourceTexture = material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] as THREE.DataTexture | undefined;
   const data = material.userData[FAR_CLIPMAP_SOURCE_DATA] as Float32Array | undefined;
   const waterTexture = material.userData[FAR_CLIPMAP_WATER_TEXTURE] as THREE.DataTexture | undefined;
   const waterData = material.userData[FAR_CLIPMAP_WATER_DATA] as Float32Array | undefined;
-  if (!sourceTexture || !data || !waterTexture || !waterData) return { fallbackSamples: 0, exceptionSamples: 0 };
+  const sourceStorage = material.userData[FAR_CLIPMAP_SOURCE_STORAGE] as StorageBufferAttribute | undefined;
+  const waterStorage = material.userData[FAR_CLIPMAP_WATER_STORAGE] as StorageBufferAttribute | undefined;
+  if (!data || !waterData || (!sourceTexture && !sourceStorage) || (!waterTexture && !waterStorage)) {
+    return { fallbackSamples: 0, exceptionSamples: 0 };
+  }
 
   const gridResolution = Math.max(2, Math.floor(input.gridResolution));
   let fallbackSamples = 0;
@@ -591,9 +579,49 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
       }
     }
   }
-  sourceTexture.needsUpdate = true;
-  waterTexture.needsUpdate = true;
+  if (input.deferUpload) return { fallbackSamples, exceptionSamples };
+  if (sourceStorage && waterStorage) {
+    sourceStorage.needsUpdate = true;
+    waterStorage.needsUpdate = true;
+  } else {
+    sourceTexture!.needsUpdate = true;
+    waterTexture!.needsUpdate = true;
+  }
   return { fallbackSamples, exceptionSamples };
+}
+
+export function commitFarClipmapMaterialSourceUpdate(
+  material: FarClipmapMaterial,
+  channel: "source" | "water",
+  byteOffset: number,
+  maxBytes: number,
+): boolean {
+  const sourceStorage = material.userData[FAR_CLIPMAP_SOURCE_STORAGE] as StorageBufferAttribute | undefined;
+  const waterStorage = material.userData[FAR_CLIPMAP_WATER_STORAGE] as StorageBufferAttribute | undefined;
+  if (sourceStorage && waterStorage) {
+    const context = getActiveWebGpuRendererContext();
+    const backend = context?.renderer.backend as unknown as {
+      get(attribute: StorageBufferAttribute): { buffer?: GPUBuffer };
+    } | undefined;
+    const sourceBuffer = backend?.get(sourceStorage).buffer;
+    const waterBuffer = backend?.get(waterStorage).buffer;
+    if (context && sourceBuffer && waterBuffer) {
+      const attribute = channel === "source" ? sourceStorage : waterStorage;
+      const buffer = channel === "source" ? sourceBuffer : waterBuffer;
+      const data = attribute.array as Float32Array;
+      const bytes = Math.min(maxBytes, data.byteLength - byteOffset);
+      context.device.queue.writeBuffer(buffer, byteOffset, data.buffer, data.byteOffset + byteOffset, bytes);
+      return byteOffset + bytes >= data.byteLength;
+    }
+    if (channel === "source") sourceStorage.needsUpdate = true;
+    else waterStorage.needsUpdate = true;
+    return true;
+  }
+  const sourceTexture = material.userData[FAR_CLIPMAP_SOURCE_TEXTURE] as THREE.DataTexture | undefined;
+  const waterTexture = material.userData[FAR_CLIPMAP_WATER_TEXTURE] as THREE.DataTexture | undefined;
+  if (channel === "source" && sourceTexture) sourceTexture.needsUpdate = true;
+  if (channel === "water" && waterTexture) waterTexture.needsUpdate = true;
+  return true;
 }
 
 function estimateNormal(source: FarClipmapSource, x: number, z: number, cellSizeM: number): { x: number; y: number; z: number } {

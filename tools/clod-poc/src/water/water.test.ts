@@ -344,11 +344,13 @@ describe("WaterClipmap", () => {
     }
     clipmap.update(0.016, new THREE.Vector3(80, 50, -70));
     expect(clipmap.updateCostStats).toMatchObject({
-      snaps: cfg.cellSizes.length,
-      fullRefills: cfg.cellSizes.length,
+      snaps: 1,
+      fullRefills: 1,
     });
     expect(clipmap.updateCostStats.fieldSamples).toBeGreaterThan(0);
-    clipmap.update(0.016, new THREE.Vector3(80, 50, -70));
+    for (let i = 1; i < cfg.cellSizes.length; i++) {
+      clipmap.update(0.016, new THREE.Vector3(80, 50, -70));
+    }
     expect(clipmap.updateCostStats.snaps).toBe(cfg.cellSizes.length);
     clipmap.dispose();
   });

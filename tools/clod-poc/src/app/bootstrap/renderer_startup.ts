@@ -96,7 +96,6 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const {
     searchParams,
     clodRuntime,
-    cfg,
     worldCells,
     lod0Nodes,
     waterConfig,
@@ -120,13 +119,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const rendererBackend = parseRendererBackend(searchParams);
   let app: AppRenderer;
   try {
-    app = rendererBackend === "webgpu"
-      ? await createWebGpuAppRenderer({
-          desiredMaximumFrameLatency: searchParams.has("frameLatency")
-            ? Number(searchParams.get("frameLatency"))
-            : undefined,
-        })
-      : createWebGlAppRenderer();
+    app = rendererBackend === "webgpu" ? await createWebGpuAppRenderer() : createWebGlAppRenderer();
   } catch (error) {
     const details = [
       error instanceof Error ? error.message : String(error),
@@ -144,8 +137,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const maxAnisotropy = app.maxAnisotropy;
   const isWebGpu = app.isWebGpu;
   const rendererWebGpuDevice = getRendererGpuDevice(app);
-  const rootTransitionEnabled = searchParams.get("liveClodRootTransition") === "1";
-  const poolTerrainMaterial = isWebGpu && cfg.selection.transition_mode === "instant" && !rootTransitionEnabled;
+  const poolTerrainMaterial = isWebGpu;
   const runtimeConfig = clodRuntime ?? parseClodRuntimeConfig();
   const renderResolution = createRenderResolutionRuntime(
     runtimeConfig.renderResolution,

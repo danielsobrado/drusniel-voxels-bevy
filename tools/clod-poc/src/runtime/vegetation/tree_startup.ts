@@ -39,6 +39,7 @@ export interface TreeStartupResult {
   fallingTrees: ReturnType<typeof createTreeController>["fallingTrees"];
   treeStats: { current: TreeStats | null };
   formatTreeGpuSummary: (stats: TreeStats) => string;
+  impostorBakePromise: Promise<void>;
 }
 
 function runtimeSearchParams(): URLSearchParams {
@@ -155,22 +156,23 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   const shouldBakeImpostorsOnStart = treeConfig.impostors.enabled &&
     treeConfig.impostors.bakeOnStart &&
     state.treeImpostorSwapOnBake;
-  if (shouldBakeImpostorsOnStart) {
-    void treeController.bakeImpostors(renderer).then((result) => {
+  const impostorBakePromise = shouldBakeImpostorsOnStart
+    ? treeController.bakeImpostors(renderer).then((result) => {
       if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
       else mountTreeImpostorLabFromWindow(scene, worldCells);
       treeController.refreshStats();
     }).catch((error) => {
       console.warn("[trees] impostor baking failed", error);
       treeController.refreshStats();
-    });
-  } else if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
+    })
+    : Promise.resolve();
+  if (!shouldBakeImpostorsOnStart && treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
     state.treeImpostorSummary = formatDeferredTreeImpostorSummary(treeConfig);
     statControllers.treeImpostorSummary?.updateDisplay();
   }
 
   return {
-    treeController, treeSystem, fallingTrees, treeStats, formatTreeGpuSummary,
+    treeController, treeSystem, fallingTrees, treeStats, formatTreeGpuSummary, impostorBakePromise,
   };
 }
 
@@ -228,5 +230,6 @@ function runPerfModeTreeStartup(input: TreeStartupInput): TreeStartupResult {
     fallingTrees: treeController.fallingTrees,
     treeStats,
     formatTreeGpuSummary,
+    impostorBakePromise: Promise.resolve(),
   };
 }
