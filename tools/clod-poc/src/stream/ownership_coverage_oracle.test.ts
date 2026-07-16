@@ -227,6 +227,70 @@ describe("ownership coverage oracle", () => {
     expect(counters.ring_boundary_holes).toBeGreaterThanOrEqual(counters.far_clipmap_ownership_holes);
   });
 
+  it("partitions a partially refined seam between refined CLOD cells and far clipmap fallback", () => {
+    const refinedReadyPageKeys = [
+      pageKey(0, -2, -1),
+      pageKey(0, -2, 0),
+      pageKey(0, 1, -1),
+      pageKey(0, 1, 0),
+    ];
+    const requiredRefinementPageKeys = [
+      ...refinedReadyPageKeys,
+      pageKey(0, -1, -2),
+      pageKey(0, 0, -2),
+      pageKey(0, -1, 1),
+      pageKey(0, 0, 1),
+      pageKey(0, -1, -1),
+      pageKey(0, 0, 0),
+    ];
+    expect(refinedReadyPageKeys).toHaveLength(requiredRefinementPageKeys.length * 0.4);
+
+    const counters = computeOwnershipCoverageCounters({
+      snapshot: snapshot({
+        ownership: { liveRadiusM: 16, clodRadiusM: 48 },
+        visualPages: {
+          center: { x: 0, z: 0 },
+          required: requiredRefinementPageKeys,
+          loaded: [pageKey(1, -1, -1), pageKey(1, -1, 0), pageKey(1, 0, -1), pageKey(1, 0, 0)],
+          evictable: [],
+        },
+        farShell: { innerRadiusM: 48, outerRadiusM: 128 },
+      }),
+      chunkSizeM: 16,
+      pageSizeM: 16,
+      maxLevel: 1,
+      requiredRootLevel: 1,
+      camera: { x: 0, z: 0 },
+      farShellCenter: { x: 0, z: 0 },
+      farShellRecenterCount: 0,
+      farShellLastRecenterFrame: -1,
+      farClipmap: {
+        enabled: true,
+        innerRadiusM: 48,
+        outerRadiusM: 128,
+        centerX: 0,
+        centerZ: 0,
+        snapX: 0,
+        snapZ: 0,
+        ready: true,
+        refinedClod: {
+          innerRadiusM: 16,
+          outerRadiusM: 48,
+          pageSizeM: 16,
+          readyPageKeys: refinedReadyPageKeys,
+        },
+      },
+      coverageCellM: 16,
+    });
+
+    expect(counters.owner_clod_refinement_cells).toBeGreaterThan(0);
+    expect(counters.owner_far_clipmap_cells).toBeGreaterThan(0);
+    expect(counters.priority_unowned_cells).toBe(0);
+    expect(counters.priority_owner_overlap_cells).toBe(0);
+    expect(counters.clod_far_gap_holes).toBe(0);
+    expect(counters.far_clipmap_ownership_holes).toBe(0);
+  });
+
   it("priority ownership is gap-free even though square tiles raw-overlap the circular rings", () => {
     const chunkSizeM = 32;
     const pageSizeM = 128;
