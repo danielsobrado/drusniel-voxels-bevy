@@ -25,6 +25,7 @@ const LONG_ROUTE: readonly MovementSegment[] = Object.freeze([
   { label: "south-east-long", frames: 360, dx: 600, dz: 600 },
   { label: "east-long-b", frames: 480, dx: 1_200, dz: 0 },
 ]);
+const LONG_ROUTE_FRAMES = LONG_ROUTE.reduce((sum, segment) => sum + segment.frames, 0);
 
 export function resolveMovementRouteProfile(longRoute: boolean): MovementRouteProfile {
   return longRoute
@@ -32,7 +33,7 @@ export function resolveMovementRouteProfile(longRoute: boolean): MovementRoutePr
       name: "long-route",
       segments: LONG_ROUTE,
       minHorizontalDistanceM: 3_000,
-      minFrameSamples: 1_024,
+      minFrameSamples: LONG_ROUTE_FRAMES,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     }

@@ -11,7 +11,7 @@ export interface SurfaceCommit {
 }
 
 export interface SurfaceCommitTarget {
-  markStale(bounds: SurfaceBounds): void;
+  markStale(bounds: SurfaceBounds | null): void;
 }
 
 const HISTORY_LIMIT = 4096;
@@ -56,7 +56,7 @@ export function emitSurfaceCommit(bounds: SurfaceBounds): SurfaceCommit {
   };
   history.push(commit);
   if (history.length > HISTORY_LIMIT) history = history.slice(-HISTORY_LIMIT);
-  for (const listener of listeners) listener(commit);
+  for (const listener of listeners) notifyListener(listener, commit);
   return commit;
 }
 
@@ -65,7 +65,7 @@ export function subscribeSurfaceCommits(
   options: { sinceRevision?: number } = {},
 ): () => void {
   const sinceRevision = Math.max(0, Math.floor(options.sinceRevision ?? globalRevision));
-  for (const commit of surfaceCommitsSince(sinceRevision)) listener(commit);
+  for (const commit of surfaceCommitsSince(sinceRevision)) notifyListener(listener, commit);
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
@@ -76,25 +76,48 @@ export function connectSurfaceCommitBridge(
 ): () => void {
   let active = true;
   let pendingBounds: SurfaceBounds | null = null;
+  let markAllStale = false;
   let flushScheduled = false;
-  const schedule = (commit: SurfaceCommit) => {
-    pendingBounds = unionBounds(pendingBounds, commit.bounds);
+  const scheduleFlush = () => {
     if (flushScheduled) return;
     flushScheduled = true;
     queueMicrotask(() => {
       flushScheduled = false;
-      if (!active || !pendingBounds) return;
+      if (!active || (!markAllStale && !pendingBounds)) return;
       const bounds = pendingBounds;
       pendingBounds = null;
-      target.markStale(bounds);
+      const invalidateAll = markAllStale;
+      markAllStale = false;
+      target.markStale(invalidateAll ? null : bounds);
     });
   };
-  const unsubscribe = subscribeSurfaceCommits(schedule, options);
+  const schedule = (commit: SurfaceCommit) => {
+    if (!markAllStale) pendingBounds = unionBounds(pendingBounds, commit.bounds);
+    scheduleFlush();
+  };
+  const sinceRevision = Math.max(0, Math.floor(options.sinceRevision ?? globalRevision));
+  const oldestRetainedRevision = history[0]?.globalRevision ?? globalRevision + 1;
+  const historyGap = sinceRevision < globalRevision && sinceRevision < oldestRetainedRevision - 1;
+  if (historyGap) {
+    markAllStale = true;
+    scheduleFlush();
+  }
+  const unsubscribe = subscribeSurfaceCommits(schedule, {
+    sinceRevision: historyGap ? globalRevision : sinceRevision,
+  });
   return () => {
     active = false;
     pendingBounds = null;
     unsubscribe();
   };
+}
+
+function notifyListener(listener: (commit: SurfaceCommit) => void, commit: SurfaceCommit): void {
+  try {
+    listener(commit);
+  } catch (error) {
+    console.error("[surface-cache] surface commit listener failed", error);
+  }
 }
 
 export function resetSurfaceCacheRevisionsForTests(): void {

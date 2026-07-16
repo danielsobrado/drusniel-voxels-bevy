@@ -401,7 +401,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
     let ready = 0;
     const vertexCount = ringVertexCount(this.config);
     const triangleCount = ringTriangleCount(this.config);
-    for (const ring of this.rings) {
+    for (const [ringIndex, ring] of this.rings.entries()) {
       const stale = ring.readySnapX !== snap.snapX || ring.readySnapZ !== snap.snapZ;
       const displaySnapX = Number.isFinite(ring.readySnapX) && !stale ? ring.readySnapX : snap.snapX;
       const displaySnapZ = Number.isFinite(ring.readySnapZ) && !stale ? ring.readySnapZ : snap.snapZ;
@@ -473,7 +473,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
         || ring.ownershipOriginX !== ringOriginX
         || ring.ownershipOriginZ !== ringOriginZ
       ) {
-        const ownershipInput = this.refinedClod ? {
+        const ownershipInput = ringIndex === 0 && this.refinedClod ? {
           gridResolution: this.config.gridResolution,
           ringOriginX,
           ringOriginZ,

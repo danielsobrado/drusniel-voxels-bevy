@@ -400,7 +400,8 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_parent_coverage_violations"] = stats.parentCoverageViolations;
   counters["live_clod_stream_ready_pages"] = stats.readyPages;
   counters["live_clod_stream_ready_frontier_m"] = stats.readyFrontierM;
-  counters["gpu_mesher_lane_busy_root"] = stats.inflightBatches;
+  counters["root_worker_batches_inflight"] = stats.inflightBatches;
+  counters["gpu_mesher_lane_busy_root"] = 0;
   counters["live_clod_stream_probe_active"] = stats.probeActive;
   counters["live_clod_stream_probe_requested_pages_total"] = stats.probeRequestedPagesTotal;
   counters["live_clod_stream_probe_apply_pages_total"] = stats.probeApplyPagesTotal;
@@ -1250,9 +1251,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       const inflightPageLevels = [...inFlight.values()].flatMap((batch) => [...batch.coordsById.values()].map((coord) => coordLevel(coord)));
       const coverage = countStreamCoverage(requiredIds);
       const refinedReadyIds = new Set(
-        [...cached.entries()]
-          .filter(([id, entry]) => parseStreamingClodPageKey(id).level === 0 && entry.activeEligible && !staleRootIds.has(id))
-          .map(([id]) => id),
+        currentReadyPageKeys().filter((id) => parseStreamingClodPageKey(id).level === 0),
       );
       const transition = transitionSnapshot();
       latest = {

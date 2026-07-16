@@ -1,5 +1,5 @@
 import type { FarSummaryConfig } from "./config.js";
-import type { FarSummaryRingRequest } from "./clipmap-rings.js";
+import type { FarSummaryRingRequest, TileBounds } from "./clipmap-rings.js";
 import type { FarSummaryCache } from "./summary-cache.js";
 import {
   createFarSummaryTileBuild,
@@ -105,6 +105,21 @@ export class FarSummaryCpuBaseBuilder {
 
   reset(): void {
     this.active = null;
+  }
+
+  invalidate(bounds: TileBounds | null): boolean {
+    if (!this.active) return false;
+    if (bounds !== null) {
+      const { originX, originZ } = this.active.state;
+      const { cellM, tileCells } = this.active.state.input.ringConfig;
+      const maxX = originX + cellM * tileCells;
+      const maxZ = originZ + cellM * tileCells;
+      if (originX >= bounds.maxX || maxX <= bounds.minX || originZ >= bounds.maxZ || maxZ <= bounds.minZ) {
+        return false;
+      }
+    }
+    this.active = null;
+    return true;
   }
 
   private prune(requests: readonly FarSummaryRingRequest[]): void {

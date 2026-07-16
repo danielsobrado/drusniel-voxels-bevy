@@ -20,7 +20,7 @@ import {
 } from "./summary-tile-builder.js";
 import type { StreamCenter } from "./stream-center.js";
 import type { StreamCursor } from "../stream/stream_cursor.js";
-import { computeRequiredFarSummaryTiles, type FarSummaryRingRequest } from "./clipmap-rings.js";
+import { computeRequiredFarSummaryTiles, type FarSummaryRingRequest, type TileBounds } from "./clipmap-rings.js";
 import { FarSummaryDebugOverlay } from "./debug-overlay.js";
 import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
@@ -152,6 +152,33 @@ export function prunePendingGpuEnrichment<T>(
   return removed;
 }
 
+export function invalidatePendingFarSummaryEnrichment<T extends { tile: {
+  originX: number;
+  originZ: number;
+  cellSizeM: number;
+  tileCells: number;
+} }>(
+  pending: Map<string, T>,
+  bounds: TileBounds | null,
+  onInvalidated?: (value: T, key: string) => void,
+): number {
+  let removed = 0;
+  for (const [key, value] of pending) {
+    const tile = value.tile;
+    const maxX = tile.originX + tile.cellSizeM * tile.tileCells;
+    const maxZ = tile.originZ + tile.cellSizeM * tile.tileCells;
+    const intersects = bounds === null || (
+      tile.originX < bounds.maxX && maxX > bounds.minX
+      && tile.originZ < bounds.maxZ && maxZ > bounds.minZ
+    );
+    if (!intersects) continue;
+    onInvalidated?.(value, key);
+    pending.delete(key);
+    removed++;
+  }
+  return removed;
+}
+
 function pruneCpuFallbackKeys(
   cache: FarSummaryCache,
   requests: readonly FarSummaryRingRequest[],
@@ -219,9 +246,12 @@ export function initFarSummaryIntegration(
 
   const originalMarkStale = cache.markStale.bind(cache);
   cache.markStale = (bounds) => {
-    cpuBaseBuilder.reset();
-    pendingCpuFallbackKeys.clear();
-    pendingUnifiedEnrichment.clear();
+    cpuBaseBuilder.invalidate(bounds);
+    invalidatePendingFarSummaryEnrichment(
+      pendingUnifiedEnrichment,
+      bounds,
+      (enrichment) => cache.discardDeferredTile(enrichment.tile.key),
+    );
     originalMarkStale(bounds);
   };
   const disconnectSurfaceCommitBridge = connectSurfaceCommitBridge(cache, { sinceRevision: 0 });

@@ -152,7 +152,7 @@ export function beginLiveBubbleMovementProbe(): void {
   resetLiveBubbleCounterMirrors();
 }
 
-function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
+function mirrorLiveBubbleStats(stats: NearFieldBubbleStats, accumulateFrameEvents: boolean): void {
   const counters = hooksCounters();
   registerGlobalLiveBubbleProbe();
   if (!counters) return;
@@ -160,11 +160,13 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
     ? 0
     : Math.max(0, stats.colliderRemovals - liveBubbleLastColliderRemovals);
   liveBubbleLastColliderRemovals = stats.colliderRemovals;
-  liveBubbleBuiltTotal += stats.chunkGroupsBuiltThisFrame;
-  liveBubbleEvictionsTotal += stats.evictions;
+  const builtThisFrame = accumulateFrameEvents ? stats.chunkGroupsBuiltThisFrame : 0;
+  const evictionsThisFrame = accumulateFrameEvents ? stats.evictions : 0;
+  liveBubbleBuiltTotal += builtThisFrame;
+  liveBubbleEvictionsTotal += evictionsThisFrame;
   if (liveBubbleProbeActive) {
-    liveBubbleProbeBuiltTotal += stats.chunkGroupsBuiltThisFrame;
-    liveBubbleProbeEvictionsTotal += stats.evictions;
+    liveBubbleProbeBuiltTotal += builtThisFrame;
+    liveBubbleProbeEvictionsTotal += evictionsThisFrame;
     liveBubbleProbeColliderRemovalsTotal += colliderRemovalDelta;
     liveBubbleProbeCpuWorkUnitMaxMs = Math.max(liveBubbleProbeCpuWorkUnitMaxMs, stats.cpuWorkUnitMaxMs);
     liveBubbleProbeGpuApplyMaxMs = Math.max(liveBubbleProbeGpuApplyMaxMs, stats.gpuApplyMaxMs);
@@ -177,10 +179,10 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_gpu_retry_pages"] = stats.gpuRetryPages;
   counters["live_bubble_gpu_retries_total"] = stats.gpuRetriesTotal;
   counters["live_bubble_gpu_failures_total"] = stats.gpuTerminalFailuresTotal;
-  counters["live_bubble_built_this_frame"] = stats.chunkGroupsBuiltThisFrame;
+  counters["live_bubble_built_this_frame"] = builtThisFrame;
   counters["live_bubble_built_total"] = liveBubbleProbeActive ? liveBubbleProbeBuiltTotal : liveBubbleBuiltTotal;
   counters["live_bubble_ms"] = stats.bubbleMs;
-  counters["live_bubble_evictions"] = stats.evictions;
+  counters["live_bubble_evictions"] = evictionsThisFrame;
   counters["live_bubble_evictions_total"] = liveBubbleEvictionsTotal;
   counters["live_bubble_cached_pages"] = stats.chunkGroupCount;
   counters["live_bubble_streamed_collider_pages"] = stats.streamedColliderPages;
@@ -314,7 +316,7 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   const bubbleStats = updatedBubbleStats
     ?? lastBubbleStatsByController.get(input.nearFieldBubbleController)
     ?? EMPTY_BUBBLE_STATS;
-  mirrorLiveBubbleStats(bubbleStats);
+  mirrorLiveBubbleStats(bubbleStats, updatedBubbleStats !== undefined);
   if (input.pruneRenderNodeCache) {
     input.pruneRenderNodeCache(cutSnapshot.protectedNodeIds, selectionStats.frameId);
   }

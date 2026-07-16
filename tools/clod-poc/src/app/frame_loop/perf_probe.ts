@@ -5,7 +5,7 @@ import { intParam, statsFor, rankBuckets, avgCounter, minPositiveCounter, avgGpu
 export type { FramePerfMetric, FramePerfBroadBucket, FramePerfPropBucket, FramePerfPhaseTiming, FramePerfSample, FramePerfMetricStats, FramePerfBucketRank, FramePerfSummary, FramePerfSnapshot, FramePerfHooks, FramePerfProbe } from "./perf_probe_types.js";
 export { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS, FRAME_PERF_ALL_METRICS } from "./perf_probe_constants.js";
 
-const RECENT_SAMPLE_LIMIT = 1024;
+const RECENT_SAMPLE_LIMIT = 1_320;
 const MIRRORED_TOP_BUCKET_COUNT = 8;
 // Summarizing every metric over the sample window (sort per metric) is far too heavy to run per
 // frame; consumers poll the mirrored counters at >=250ms cadence, so mirror on that cadence plus

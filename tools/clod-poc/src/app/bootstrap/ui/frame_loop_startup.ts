@@ -166,7 +166,8 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_waiting_on_tiles"] = stats.waitingOnTiles;
   target["live_clod_stream_build_budget"] = stats.buildBudget;
   target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
-  target["gpu_mesher_lane_busy_root"] = stats.inflightBatches;
+  target["root_worker_batches_inflight"] = stats.inflightBatches;
+  target["gpu_mesher_lane_busy_root"] = 0;
   target["live_clod_stream_max_inflight_batches"] = stats.maxInflightBatches;
   target["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   target["live_clod_stream_active_root_pages"] = stats.activeRootPages;
