@@ -27,10 +27,11 @@ describe("GPU ring tree geometry selector", () => {
     expect(result.geometry).toBe(geometries.oak.far);
   });
 
-  it("does not draw GPU ring impostors until the baked atlas is ready", () => {
+  it("keeps far geometry visible until the baked atlas is ready", () => {
     const geometries = geometryMap();
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
+    settings.impostors.fallbackToPlaceholder = false;
     const result = selectTreeGpuRingGeometry({
       species: "pine",
       lod: "impostor",
@@ -41,8 +42,25 @@ describe("GPU ring tree geometry selector", () => {
     });
 
     expect(result.bakedImpostor).toBe(false);
-    expect(result.geometry).not.toBe(geometries.pine.impostor);
-    expect(result.geometry.getAttribute("position")).toBeUndefined();
+    expect(result.geometry).toBe(geometries.pine.far);
+  });
+
+  it("uses placeholder geometry only when explicitly configured", () => {
+    const geometries = geometryMap();
+    const settings = cloneTreeSettings();
+    settings.impostors.enabled = true;
+    settings.impostors.fallbackToPlaceholder = true;
+    const result = selectTreeGpuRingGeometry({
+      species: "pine",
+      lod: "impostor",
+      geometries,
+      settings,
+      impostorAtlases: {},
+      bakedImpostorGeometries: {},
+    });
+
+    expect(result.bakedImpostor).toBe(false);
+    expect(result.geometry).toBe(geometries.pine.impostor);
   });
 
   it("does not draw GPU ring impostors when impostors are disabled", () => {
