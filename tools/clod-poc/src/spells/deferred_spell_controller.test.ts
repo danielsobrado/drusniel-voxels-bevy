@@ -17,12 +17,13 @@ function fakeController(): SpellVfxController {
 }
 
 describe("deferred spell controller", () => {
-  it("returns from the input event before starting the spell", () => {
+  it("returns from the input event before starting the spell", async () => {
     const target = fakeController();
     const tasks = new Map<number, () => void>();
     let nextId = 1;
     const deferred = createDeferredSpellController(
       target,
+      Promise.resolve(),
       (task) => {
         const id = nextId++;
         tasks.set(id, task);
@@ -34,15 +35,41 @@ describe("deferred spell controller", () => {
     deferred.controller.playFire(750);
     expect(target.playFire).not.toHaveBeenCalled();
 
+    await Promise.resolve();
     tasks.get(1)?.();
     expect(target.playFire).toHaveBeenCalledWith(750);
   });
 
-  it("cancels queued casts when disposed", () => {
+  it("waits for pipeline readiness before scheduling the cast", async () => {
+    const target = fakeController();
+    const tasks = new Map<number, () => void>();
+    let resolveReady: () => void = () => undefined;
+    const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
+    const deferred = createDeferredSpellController(
+      target,
+      ready,
+      (task) => {
+        tasks.set(1, task);
+        return 1;
+      },
+    );
+
+    deferred.controller.playLightning(500);
+    await Promise.resolve();
+    expect(tasks.size).toBe(0);
+
+    resolveReady();
+    await ready;
+    await Promise.resolve();
+    expect(tasks.size).toBe(1);
+  });
+
+  it("cancels queued casts when disposed", async () => {
     const target = fakeController();
     const tasks = new Map<number, () => void>();
     const deferred = createDeferredSpellController(
       target,
+      Promise.resolve(),
       (task) => {
         tasks.set(1, task);
         return 1;
@@ -51,6 +78,7 @@ describe("deferred spell controller", () => {
     );
 
     deferred.controller.playWater(500);
+    await Promise.resolve();
     deferred.dispose();
     tasks.get(1)?.();
 
