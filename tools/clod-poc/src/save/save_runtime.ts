@@ -43,7 +43,8 @@ interface SaveRuntimeState {
   revision: number;
   voxelDeltaCount: number;
   flushTimer: ReturnType<typeof setTimeout> | null;
-  flushing: boolean;
+  flushPromise: Promise<void> | null;
+  lastFlushError: unknown | null;
   counters: Partial<SaveRuntimeCounters>;
 }
 
@@ -143,7 +144,8 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     revision: loadedWorld.manifest.regionKeys.length,
     voxelDeltaCount: loadedWorld.voxelDeltaCount,
     flushTimer: null,
-    flushing: false,
+    flushPromise: null,
+    lastFlushError: null,
     counters: activeCounters,
   };
   savedPropStore.restore(loadedWorld.regions.flatMap((region) => region.props));
@@ -261,10 +263,11 @@ export function destroyEnvironmentalPropCandidate(
   return upsertSaveRuntimeProp(prop);
 }
 
-export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME): Promise<void> {
-  if (!state || state.flushing || state.dirtyRegions.size === 0) return;
-  const activeState = state;
-  activeState.flushing = true;
+async function performSaveRuntimeFlush(
+  activeState: SaveRuntimeState,
+  maxRegionWrites: number,
+  throwOnError: boolean,
+): Promise<void> {
   const startedAt = nowMs();
   let db: IDBDatabase | null = null;
   let acknowledgedRegionKeys: string[] = [];
@@ -302,17 +305,56 @@ export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRI
     activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegions.size;
     activeState.counters.save_last_flush_ms = nowMs() - startedAt;
     activeState.counters.save_last_error = 0;
+    activeState.lastFlushError = null;
   } catch (error) {
     if (acknowledgedRegionKeys.length > 0 && activeState.dirtyRegions.size === 0) {
       activeState.revision++;
       activeState.dirtyRegions.mark(acknowledgedRegionKeys, activeState.revision);
     }
     activeState.counters.save_last_error = 1;
+    activeState.lastFlushError = error;
     console.error("[save-runtime] autosave flush failed", error);
+    if (throwOnError) throw error;
   } finally {
     db?.close();
-    activeState.flushing = false;
     publishCounters();
     if (activeState.dirtyRegions.size > 0) scheduleFlush();
   }
+}
+
+async function flushSaveRuntime(
+  maxRegionWrites: number,
+  throwOnError: boolean,
+): Promise<void> {
+  const activeState = state;
+  if (!activeState) return;
+  // Re-check after every await: several callers can queue behind the same in-flight
+  // flush, and each must observe any flush a prior waiter started before proceeding.
+  while (activeState.flushPromise) {
+    try {
+      await activeState.flushPromise;
+    } catch (error) {
+      if (throwOnError) throw error;
+    }
+  }
+  if (state !== activeState || activeState.dirtyRegions.size === 0) {
+    if (throwOnError && activeState.lastFlushError) throw activeState.lastFlushError;
+    return;
+  }
+  const promise = performSaveRuntimeFlush(activeState, maxRegionWrites, throwOnError);
+  activeState.flushPromise = promise;
+  try {
+    await promise;
+  } finally {
+    if (activeState.flushPromise === promise) activeState.flushPromise = null;
+  }
+}
+
+export async function flushSaveRuntimeOnce(maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME): Promise<void> {
+  await flushSaveRuntime(maxRegionWrites, false);
+}
+
+/** Device-loss and shutdown path: waits for any active autosave and surfaces persistence errors. */
+export async function flushSaveRuntimeOrThrow(maxRegionWrites = SAVE_MAX_REGION_WRITES_PER_FRAME): Promise<void> {
+  await flushSaveRuntime(maxRegionWrites, true);
 }

@@ -188,6 +188,10 @@ export class HeightfieldTileCache {
     return this.resident.has(tileKeyString(key));
   }
 
+  residentKeys(): readonly string[] {
+    return [...this.resident.keys()].sort();
+  }
+
   recordFallbackSample(count = 1): void {
     if (Number.isFinite(count) && count > 0) this.fallbackSamplesTotal += Math.floor(count);
   }

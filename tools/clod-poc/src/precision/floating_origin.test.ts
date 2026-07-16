@@ -23,6 +23,15 @@ describe("FloatingOriginController", () => {
     expect(resolveFloatingOriginEnabled({ enabled: true, snapMeters: 1024, unboundedWorld: false })).toBe(false);
   });
 
+  it("allows an explicit bounded-world A/B without changing the default", () => {
+    expect(resolveFloatingOriginEnabled({
+      enabled: true,
+      snapMeters: 1024,
+      unboundedWorld: false,
+      allowBoundedWorld: true,
+    })).toBe(true);
+  });
+
   it("rebases render coordinates and keeps world camera coordinates stable", () => {
     const scene = new THREE.Scene();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));

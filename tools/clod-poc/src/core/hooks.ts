@@ -25,6 +25,29 @@ export interface TerrainEditProbeResult {
   readonly streamRebuilds: number;
 }
 
+export interface StreamingResidencySnapshot {
+  readonly clodCachedKeys: readonly string[];
+  readonly farSummaryResidentKeys: readonly string[];
+  readonly heightfieldResidentKeys: readonly string[];
+  readonly vegetationClusterKeys: readonly string[] | null;
+  readonly waterHydrologyKeys: readonly string[] | null;
+}
+
+export interface PrecisionLandmark {
+  readonly id: string;
+  readonly p: readonly [number, number, number];
+  readonly color?: string;
+  readonly radiusM?: number;
+}
+
+export interface PrecisionLandmarkScreenPosition {
+  readonly id: string;
+  readonly xPx: number;
+  readonly yPx: number;
+  readonly depthNdc: number;
+  readonly visible: boolean;
+}
+
 export interface EngineStats {
   fps: number;
   frameMs: number;
@@ -60,12 +83,16 @@ export interface ClodHooks {
   getPose: (() => CamPose) | null;
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
+  recoverAfterDeviceLoss: (() => Promise<void>) | null;
   beginMovementRouteProbe: (() => void) | null;
   runTerrainEditProbe: ((ray: {
     origin: [number, number, number];
     direction: [number, number, number];
   }) => Promise<TerrainEditProbeResult>) | null;
   getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
+  getStreamingResidencySnapshot: (() => StreamingResidencySnapshot) | null;
+  setPrecisionLandmarks: ((landmarks: readonly PrecisionLandmark[]) => void) | null;
+  getPrecisionLandmarkScreenPositions: (() => readonly PrecisionLandmarkScreenPosition[]) | null;
   findContinentRiverCrossingRoute: ((
     options?: ContinentRiverRouteSearchOptions,
   ) => ContinentRiverCrossingRoute | null) | null;
@@ -148,9 +175,13 @@ export function initHooks(): ClodHooks {
     getPose: null,
     settle: null,
     flyCamEnabled: null,
+    recoverAfterDeviceLoss: null,
     beginMovementRouteProbe: null,
     runTerrainEditProbe: null,
     getStreamingRootReadyPageKeys: null,
+    getStreamingResidencySnapshot: null,
+    setPrecisionLandmarks: null,
+    getPrecisionLandmarkScreenPositions: null,
     findContinentRiverCrossingRoute: null,
     setAcceptanceSceneOptions: null,
     resetAcceptanceScene: null,

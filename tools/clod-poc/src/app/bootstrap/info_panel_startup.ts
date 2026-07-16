@@ -220,7 +220,9 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     updateInfo();
   };
 
-  cutChangedRef.fn = updateInfo;
+  // The frame loop refreshes this panel every 250 ms. Rebuilding its DOM synchronously for
+  // every streamed cut change makes selection latency depend on diagnostic UI work.
+  cutChangedRef.fn = () => {};
 
   input.runtime.waterController.installDebugApi({
     exitToOrbit: () => input.interaction.exitToOrbit(),

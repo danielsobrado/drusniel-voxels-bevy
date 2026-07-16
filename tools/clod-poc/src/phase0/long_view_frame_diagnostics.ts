@@ -291,6 +291,13 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     const info = deps.renderer.info;
     s.drawCalls = info?.render.drawCalls ?? 0;
     s.triangles = info?.render.triangles ?? 0;
+    const resources = info as unknown as {
+      memory?: { geometries?: number; textures?: number };
+      programs?: readonly unknown[];
+    };
+    s.counters["renderer_geometries"] = resources.memory?.geometries ?? -1;
+    s.counters["renderer_textures"] = resources.memory?.textures ?? -1;
+    s.counters["renderer_programs"] = resources.programs?.length ?? -1;
     for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) s.counters[`built_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
     s.counters["terrain_draw_calls"] = selectionStats.renderedCount;
     s.counters["terrain_triangles"] = selectionStats.triCount;

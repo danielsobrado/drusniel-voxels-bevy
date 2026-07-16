@@ -109,6 +109,10 @@ export function updateHeightfieldTileClientRuntime(
   });
 }
 
+export function heightfieldTileResidentKeys(): readonly string[] {
+  return [...new Set([...runtimeSet].flatMap((runtime) => runtime.cache.residentKeys()))].sort();
+}
+
 export function installHeightfieldTileClientRuntime(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;

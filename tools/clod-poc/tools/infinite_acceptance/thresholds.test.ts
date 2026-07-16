@@ -108,21 +108,21 @@ describe("infinite islands thresholds", () => {
   });
 
   it("reports missing counters and threshold failures", () => {
-    const counters = validCounters({ frame_ms_p95: 8.1, ring_boundary_holes: 1 });
+    const counters = validCounters({ frame_ms_p95: 11.1, ring_boundary_holes: 1 });
     delete counters["frame_ms_p99"];
     const result = evaluateThresholds(counters);
 
     expect(result.passed).toBe(false);
     expect(result.missing).toContain("frame_ms_p99");
-    expect(result.failures).toContain("frame_ms_p95=8.1 failed: must be finite, >= 0 and <= 8");
+    expect(result.failures).toContain("frame_ms_p95=11.1 failed: must be finite, >= 0 and <= 11");
     expect(result.failures).toContain("ring_boundary_holes=1 failed: must equal 0");
   });
 
   it("splits coverage and perf gates so oracle cost does not affect frame timing", () => {
     expect(evaluateThresholds(validCounters({ frame_ms_p95: 30 }), COVERAGE_REQUIRED_COUNTERS, COVERAGE_RULES).passed).toBe(true);
     expect(evaluateThresholds(validCounters({ ring_boundary_holes: 7 }), PERF_REQUIRED_COUNTERS, PERF_RULES).passed).toBe(true);
-    expect(evaluateThresholds(validCounters({ frame_ms_p95: 8.1 }), PERF_REQUIRED_COUNTERS, PERF_RULES).failures).toContain(
-      "frame_ms_p95=8.1 failed: must be finite, >= 0 and <= 8",
+    expect(evaluateThresholds(validCounters({ frame_ms_p95: 11.1 }), PERF_REQUIRED_COUNTERS, PERF_RULES).failures).toContain(
+      "frame_ms_p95=11.1 failed: must be finite, >= 0 and <= 11",
     );
   });
 

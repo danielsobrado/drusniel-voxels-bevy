@@ -43,6 +43,8 @@ function createState() {
     treeShadowMaxLod: "mid",
     treeWindEnabled: true,
     treeWindStrength: 0.18,
+    grassWindStrength: 0.12,
+    grassWindSpeed: 1.2,
     treeGustStrength: 0.12,
     treeTrunkSwayStrength: 0.45,
     treeLeafFlutterStrength: 0.18,
@@ -151,6 +153,28 @@ describe("environment query overrides", () => {
     expect(state.treeGpuShowCounts).toBe(true);
     expect(state.treeGpuReadbackVisibleLists).toBe(true);
     expect(state.treeGpuValidateAgainstCpu).toBe(true);
+  });
+
+  it("halts animated environment inputs for deterministic diagnostics", () => {
+    const state = createState();
+    const params = new URLSearchParams({
+      clouds: "0",
+      froxels: "0",
+      treeWind: "0",
+      grassWind: "0",
+    });
+
+    applyEnvironmentQueryOverrides(state as never, params);
+
+    expect(state.postProcessCloudsEnabled).toBe(false);
+    expect(state.postProcessFroxelsEnabled).toBe(false);
+    expect(state.treeWindEnabled).toBe(false);
+    expect(state.treeWindStrength).toBe(0);
+    expect(state.treeGustStrength).toBe(0);
+    expect(state.treeTrunkSwayStrength).toBe(0);
+    expect(state.treeLeafFlutterStrength).toBe(0);
+    expect(state.grassWindStrength).toBe(0);
+    expect(state.grassWindSpeed).toBe(0);
   });
 
   it("enables strict tree GPU mode for fail-loud perf captures", () => {

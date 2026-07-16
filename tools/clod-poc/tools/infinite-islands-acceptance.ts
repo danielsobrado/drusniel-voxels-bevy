@@ -1,16 +1,29 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import sharp from "sharp";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { clodUrl, launchWebGPU } from "./launch.js";
+import { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS } from "../src/app/frame_loop/perf_probe_constants.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
 import { evaluateMovementCoverage, evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
-import { resolveMovementRouteProfile, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
+import { resolveMovementRouteProfile, type MovementRouteName, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
+import { withSampledPerfCounters } from "./infinite_acceptance/sampled_perf_counters.js";
+import { percentile, summarizeFrameTimes, summarizeNumericEnvelope, type NumericEnvelope } from "./infinite_acceptance/route_metrics.js";
+import {
+  evaluateRevisitEviction,
+  type ResidencySnapshot,
+  type RevisitEvictionEvidence,
+} from "./infinite_acceptance/revisit_eviction.js";
+import {
+  evaluateContinentRouteTails,
+  type ContinentRouteTailThresholds,
+} from "./infinite_acceptance/continent_route_thresholds.js";
+import { hostEnvironmentRecord } from "./infinite_acceptance/host_environment.js";
 import {
   cacheEvidenceFromTimings,
   convergenceTimeoutBlockers,
@@ -71,7 +84,26 @@ const OUTSIDE_STARTUP_SPAWN: SceneExtra = {
   liveClodRootMaxCached: "4",
 };
 
-const MOVEMENT_ROUTE_PROFILE = resolveMovementRouteProfile(process.argv.includes("--long-route"));
+// Infinite-islands acceptance validates the canonical unified-streaming renderer.
+// Individual scenes may override these only when they are an explicit A/B case.
+const UNIFIED_STREAMING_ACCEPTANCE_PARAMS: Readonly<Record<string, string>> = {
+  farSummaryLayout: "2",
+  farClipmap: "1",
+  farClipmapMode: "replace",
+};
+
+function requestedMovementRoute(argv: readonly string[]): MovementRouteName {
+  if (argv.includes("--revisit")) return "coast-to-coast-revisit";
+  if (argv.includes("--coast-to-coast")) return "coast-to-coast";
+  if (argv.includes("--short-route")) return "continent-short";
+  if (argv.includes("--long-route")) return "long-route";
+  return "walk";
+}
+
+const MOVEMENT_ROUTE_PROFILE = resolveMovementRouteProfile(requestedMovementRoute(process.argv));
+if (process.argv.includes("--representative")) {
+  throw new Error("The representative content profile is blocked by playable-world plan D1/D2; the infrastructure profile must not be reported as the release gate.");
+}
 const WALK_ROUTE = MOVEMENT_ROUTE_PROFILE.segments;
 
 const SCENES: SceneSpec[] = [
@@ -180,6 +212,35 @@ interface MovementSnapshot {
   label: string;
   pose: PoseTuple;
   counters: Record<string, number>;
+  routeDistanceM: number;
+  usedJsHeapBytes: number | null;
+}
+
+interface MovementFrameSample {
+  frameId: number;
+  frameMs: number;
+  renderMs: number;
+  phase: "outbound" | "revisit";
+  metrics: Record<string, number>;
+}
+
+interface BucketEvidence {
+  name: string;
+  p95Ms: number;
+  maxMs: number;
+}
+
+interface RevisitEconomics {
+  clodPageBuilds: number;
+  clodBuildMs: number;
+  farSummaryTileBuilds: number;
+  farSummaryBuildMs: number;
+  heightfieldTileBuilds: number;
+  heightfieldStoreHits: number;
+  heightfieldStoreMisses: number;
+  outboundFrameP99Ms: number;
+  revisitFrameP99Ms: number;
+  frameP99DeltaMs: number;
 }
 
 interface MovementReport {
@@ -201,14 +262,31 @@ interface MovementReport {
   streamEvictionsDelta: number;
   streamStaleDiscardsDelta: number;
   frameSampleCount: number;
+  frameP50Ms: number;
+  frameP95Ms: number;
   frameP99Ms: number;
+  frameP999Ms: number;
+  renderP95Ms: number;
   maxFrameMs: number;
+  framesOver16_7Ms: number;
+  framesOver33_3Ms: number;
+  framesOver100Ms: number;
+  longTaskCount: number;
+  longestLongTaskMs: number;
+  topPhaseBucket: BucketEvidence | null;
+  topPropBucket: BucketEvidence | null;
   maxWorkUnitMs: number;
   maxPriorityUnownedCells: number;
   maxClodFarGapHoles: number;
   maxFarClipmapOwnershipHoles: number;
   frontierLagSampleCount: number;
   frontierLagP95M: number;
+  maxHeightfieldFallbackSamples: number;
+  maxSettledHeightfieldFallbackSamples: number;
+  heapEnvelopeAfterWarmup: NumericEnvelope | null;
+  resourceEnvelopes: Record<string, NumericEnvelope>;
+  revisitEviction: RevisitEvictionEvidence | null;
+  revisitEconomics: RevisitEconomics | null;
   samples: MovementSnapshot[];
 }
 
@@ -296,6 +374,16 @@ function filterActiveGates(gates: readonly GateMode[], args: readonly string[]):
 
 const CLI_ARGS = process.argv.slice(2);
 const PROFILE = parseProfile(CLI_ARGS);
+const CONTINENT_ROUTE = MOVEMENT_ROUTE_PROFILE.name === "continent-short"
+  || MOVEMENT_ROUTE_PROFILE.name.startsWith("coast-to-coast");
+const ROUTE_CALIBRATION = CONTINENT_ROUTE && CLI_ARGS.includes("--calibrate");
+const ROUTE_THRESHOLDS_PATH = resolve(cliValues(CLI_ARGS, "--thresholds").at(-1) ?? "config/long_map_route_thresholds.json");
+const ROUTE_TAIL_THRESHOLDS: ContinentRouteTailThresholds | null = CONTINENT_ROUTE && !ROUTE_CALIBRATION && existsSync(ROUTE_THRESHOLDS_PATH)
+  ? JSON.parse(readFileSync(ROUTE_THRESHOLDS_PATH, "utf8")) as ContinentRouteTailThresholds
+  : null;
+if (CONTINENT_ROUTE && !ROUTE_CALIBRATION && !ROUTE_TAIL_THRESHOLDS) {
+  throw new Error(`continent route thresholds are missing at ${ROUTE_THRESHOLDS_PATH}; run with --calibrate for a non-proof baseline capture`);
+}
 const BASE_ACTIVE_SCENES = PROFILE === "fast"
   ? SCENES.filter((scene) => scene.name === "walk" || scene.name === "final-near")
   : PROFILE === "reuse"
@@ -360,6 +448,10 @@ function parseCamPose(cam: string | undefined): CamPose | null {
 }
 
 function initialPoseForScene(scene: SceneSpec): CamPose | null {
+  if (scene.movementRoute && MOVEMENT_ROUTE_PROFILE.start) {
+    const [x, y, z] = MOVEMENT_ROUTE_PROFILE.start;
+    return { p: [x, y, z], yaw: Math.PI / 2, pitch: -0.43, fov: 55 };
+  }
   const camPose = parseCamPose(scene.cam);
   if (camPose) return camPose;
   const x = Number(scene.extra?.["x"]);
@@ -399,9 +491,59 @@ function counterDelta(samples: readonly MovementSnapshot[], key: string): number
 }
 
 function percentile95(values: readonly number[]): number {
-  if (values.length === 0) return Number.NaN;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)]!;
+  return percentile(values, 0.95);
+}
+
+function topBucket(samples: readonly MovementFrameSample[], keys: readonly string[]): BucketEvidence | null {
+  let best: BucketEvidence | null = null;
+  for (const key of keys) {
+    const values = samples.map((sample) => sample.metrics[key] ?? 0);
+    const p95Ms = percentile95(values);
+    const maxMs = values.length > 0 ? Math.max(...values) : 0;
+    if (Number.isFinite(p95Ms) && (!best || p95Ms > best.p95Ms)) best = { name: key, p95Ms, maxMs };
+  }
+  return best;
+}
+
+function resourceEnvelopes(samples: readonly MovementSnapshot[]): Record<string, NumericEnvelope> {
+  const keys = new Set<string>();
+  for (const sample of samples) {
+    for (const key of Object.keys(sample.counters)) {
+      if (/(resident|cached|cache_size|ready_pages|geometries|textures|programs|buffer_bytes|bind_groups)/.test(key)) keys.add(key);
+    }
+  }
+  const result: Record<string, NumericEnvelope> = {};
+  for (const key of [...keys].sort()) {
+    const envelope = summarizeNumericEnvelope(samples.map((sample) => sample.counters[key] ?? 0));
+    if (envelope) result[key] = envelope;
+  }
+  return result;
+}
+
+async function startLongTaskObserver(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const scope = window as typeof window & {
+      __drusnielLongTasks?: number[];
+      __drusnielLongTaskObserver?: PerformanceObserver;
+    };
+    scope.__drusnielLongTasks = [];
+    // Reused pages run several movement routes; a single observer per page keeps
+    // each route's count from including pushes by observers of earlier routes.
+    if (scope.__drusnielLongTaskObserver) return;
+    try {
+      const observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) scope.__drusnielLongTasks?.push(entry.duration);
+      });
+      observer.observe({ type: "longtask", buffered: false });
+      scope.__drusnielLongTaskObserver = observer;
+    } catch {
+      // Browsers without Long Tasks support report an empty list; the report keeps this explicit.
+    }
+  });
+}
+
+async function readLongTasks(page: Page): Promise<number[]> {
+  return await page.evaluate(() => [...((window as typeof window & { __drusnielLongTasks?: number[] }).__drusnielLongTasks ?? [])]);
 }
 
 function outsideStartupWorld(pose: PoseTuple, worldCells: number): boolean {
@@ -577,13 +719,27 @@ async function beginMovementRouteProbe(page: Page): Promise<void> {
   });
 }
 
-async function readMovementSnapshot(page: Page, label: string): Promise<MovementSnapshot> {
-  return await page.evaluate((sampleLabel) => {
+async function readMovementSnapshot(page: Page, label: string, routeDistanceM: number): Promise<MovementSnapshot> {
+  return await page.evaluate(({ sampleLabel, distanceM }) => {
     const hooks = (window as typeof window & { __drusnielClod?: { getPose?: (() => { p: [number, number, number] }) | null; stats?: { counters?: Record<string, number> } | null } }).__drusnielClod;
     const pose = hooks?.getPose?.();
     if (!pose) throw new Error("movement route requires __drusnielClod.getPose");
-    return JSON.parse(JSON.stringify({ label: sampleLabel, pose: pose.p, counters: hooks?.stats?.counters ?? {} })) as MovementSnapshot;
-  }, label);
+    const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
+    const usedJsHeapBytes = Number(memory?.usedJSHeapSize);
+    return JSON.parse(JSON.stringify({
+      label: sampleLabel,
+      pose: pose.p,
+      counters: hooks?.stats?.counters ?? {},
+      routeDistanceM: distanceM,
+      usedJsHeapBytes: Number.isFinite(usedJsHeapBytes) ? usedJsHeapBytes : null,
+    })) as MovementSnapshot;
+  }, { sampleLabel: label, distanceM: routeDistanceM });
+}
+
+async function readResidencySnapshot(page: Page): Promise<ResidencySnapshot> {
+  const snapshot = await page.evaluate(() => window.__drusnielClod?.getStreamingResidencySnapshot?.() ?? null);
+  if (!snapshot) throw new Error("revisit route requires __drusnielClod.getStreamingResidencySnapshot");
+  return snapshot;
 }
 
 async function readAutomationPose(page: Page): Promise<CamPose> {
@@ -602,9 +758,61 @@ async function setAutomationPose(page: Page, pose: CamPose): Promise<void> {
   }, pose);
 }
 
-async function runMovementSegment(page: Page, segment: MovementSegment, samples: MovementSnapshot[]): Promise<void> {
+async function collectMovementFrames(page: Page, afterFrameId: number, phase: "outbound" | "revisit"): Promise<MovementFrameSample[]> {
+  return await page.evaluate(({ after, samplePhase, broadKeys, propKeys }) => {
+    const perf = (window as typeof window & { __drusnielPerf?: { recentSamples?: Array<Record<string, unknown>> } }).__drusnielPerf;
+    return (perf?.recentSamples ?? []).filter((sample) => Number(sample["frameId"]) > after).map((sample) => {
+      const metrics: Record<string, number> = {};
+      for (const key of [...broadKeys, ...propKeys]) {
+        const value = Number(sample[key]);
+        metrics[key] = Number.isFinite(value) ? value : 0;
+      }
+      return {
+        frameId: Number(sample["frameId"]),
+        frameMs: Number(sample["frameMs"]),
+        renderMs: Number(sample["renderMs"]),
+        phase: samplePhase,
+        metrics,
+      };
+    });
+  }, { after: afterFrameId, samplePhase: phase, broadKeys: FRAME_PERF_BROAD_BUCKETS, propKeys: FRAME_PERF_PROP_BUCKETS });
+}
+
+async function waitForRegionDrain(
+  page: Page,
+  frameSamples: MovementFrameSample[],
+  frameCursor: { lastFrameId: number },
+  phase: "outbound" | "revisit",
+): Promise<void> {
+  for (let waitedFrames = 0; waitedFrames < 240; waitedFrames += MOVEMENT_SAMPLE_FRAMES) {
+    const drained = await page.evaluate(() => {
+      const counters = window.__drusnielClod?.stats?.counters ?? {};
+      return (counters["heightfield_tiles_fallback_samples_this_frame"] ?? 0) === 0
+        && (counters["heightfield_tiles_pending"] ?? 0) === 0
+        && (counters["heightfield_tiles_inflight"] ?? 0) === 0
+        && (counters["live_clod_stream_safety_pending_pages"] ?? 0) === 0
+        && (counters["live_clod_stream_safety_inflight_pages"] ?? 0) === 0;
+    });
+    if (drained) return;
+    await settle(page, MOVEMENT_SAMPLE_FRAMES);
+    const nextFrames = await collectMovementFrames(page, frameCursor.lastFrameId, phase);
+    frameSamples.push(...nextFrames);
+    frameCursor.lastFrameId = frameSamples.at(-1)?.frameId ?? frameCursor.lastFrameId;
+  }
+}
+
+async function runMovementSegment(
+  page: Page,
+  segment: MovementSegment,
+  snapshots: MovementSnapshot[],
+  frameSamples: MovementFrameSample[],
+  frameCursor: { lastFrameId: number },
+  startRouteDistanceM: number,
+): Promise<number> {
   const start = await readAutomationPose(page);
   const target: CamPose = { ...start, p: [start.p[0] + segment.dx, start.p[1], start.p[2] + segment.dz] };
+  const segmentDistanceM = Math.hypot(segment.dx, segment.dz);
+  const phase = segment.phase ?? "outbound";
   let elapsedFrames = 0;
   let sampleIndex = 0;
   while (elapsedFrames < segment.frames) {
@@ -613,27 +821,44 @@ async function runMovementSegment(page: Page, segment: MovementSegment, samples:
     const t = elapsedFrames / segment.frames;
     await setAutomationPose(page, { ...start, p: [start.p[0] + (target.p[0] - start.p[0]) * t, start.p[1], start.p[2] + (target.p[2] - start.p[2]) * t] });
     await settle(page, frames);
-    samples.push(await readMovementSnapshot(page, `${segment.label}:${sampleIndex}`));
+    const nextFrames = await collectMovementFrames(page, frameCursor.lastFrameId, phase);
+    frameSamples.push(...nextFrames);
+    frameCursor.lastFrameId = frameSamples.at(-1)?.frameId ?? frameCursor.lastFrameId;
+    snapshots.push(await readMovementSnapshot(page, `${segment.label}:${sampleIndex}`, startRouteDistanceM + segmentDistanceM * t));
     sampleIndex++;
   }
+  await waitForRegionDrain(page, frameSamples, frameCursor, phase);
+  snapshots.push(await readMovementSnapshot(page, `${segment.label}:settled`, startRouteDistanceM + segmentDistanceM));
+  return startRouteDistanceM + segmentDistanceM;
 }
 
 async function runMovementRoute(page: Page): Promise<MovementReport> {
   const samples: MovementSnapshot[] = [];
+  const frameSamples: MovementFrameSample[] = [];
+  const frameCursor = { lastFrameId: -1 };
   await beginMovementRouteProbe(page);
-  samples.push(await readMovementSnapshot(page, "start"));
-  for (const segment of WALK_ROUTE) await runMovementSegment(page, segment, samples);
+  await startLongTaskObserver(page);
+  frameCursor.lastFrameId = await page.evaluate(() => Number((window as typeof window & {
+    __drusnielPerf?: { lastSample?: { frameId?: number } | null };
+  }).__drusnielPerf?.lastSample?.frameId ?? -1));
+  samples.push(await readMovementSnapshot(page, "start", 0));
+  const routeAResidency = MOVEMENT_ROUTE_PROFILE.name === "coast-to-coast-revisit"
+    ? await readResidencySnapshot(page)
+    : null;
+  let beforeReturnResidency: ResidencySnapshot | null = null;
+  let routeDistanceM = 0;
+  for (const segment of WALK_ROUTE) {
+    if (segment.phase === "revisit" && beforeReturnResidency === null) {
+      beforeReturnResidency = await readResidencySnapshot(page);
+    }
+    routeDistanceM = await runMovementSegment(page, segment, samples, frameSamples, frameCursor, routeDistanceM);
+  }
   const start = samples[0]!.pose;
   const end = samples.at(-1)!.pose;
   const worldCells = maxCounter(samples, "world_cells");
-  const frameTimes = await page.evaluate(() => {
-    const perf = (window as typeof window & {
-      __drusnielPerf?: { snapshot(): { recentSamples?: Array<{ frameMs?: number }> } };
-    }).__drusnielPerf?.snapshot();
-    return (perf?.recentSamples ?? []).map((sample) => Number(sample.frameMs)).filter(Number.isFinite);
-  });
-  const sortedFrameTimes = [...frameTimes].sort((a, b) => a - b);
-  const frameP99Index = Math.max(0, Math.ceil(sortedFrameTimes.length * 0.99) - 1);
+  const frameTimes = frameSamples.map((sample) => sample.frameMs).filter(Number.isFinite);
+  const renderTimes = frameSamples.map((sample) => sample.renderMs).filter(Number.isFinite);
+  const frameSummary = summarizeFrameTimes(frameTimes);
   const frontierLagSamples = samples.map((sample) => {
     const innerRadiusM = sample.counters["far_clipmap_inner_radius_m"];
     const frontierM = sample.counters["live_clod_stream_ready_frontier_m"];
@@ -641,6 +866,34 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
       ? Math.max(0, innerRadiusM! - frontierM!)
       : Number.NaN;
   }).filter(Number.isFinite);
+  const warmHeapSamples = samples.slice(Math.floor(samples.length * 0.2)).filter(
+    (sample): sample is MovementSnapshot & { usedJsHeapBytes: number } => sample.usedJsHeapBytes !== null,
+  );
+  const heapValues = warmHeapSamples.map((sample) => sample.usedJsHeapBytes);
+  const settledSamples = samples.filter((sample) => sample.label.endsWith(":settled"));
+  const revisitStartIndex = samples.findIndex((sample) => sample.label.startsWith("revisit-east-to-interior:0"));
+  const revisitStart = revisitStartIndex > 0 ? samples[revisitStartIndex - 1]! : null;
+  const revisitEnd = revisitStart ? samples.at(-1)! : null;
+  const outboundFrames = frameSamples.filter((sample) => sample.phase === "outbound");
+  const revisitFrames = frameSamples.filter((sample) => sample.phase === "revisit");
+  const outboundP99 = percentile(outboundFrames.map((sample) => sample.frameMs), 0.99);
+  const revisitP99 = percentile(revisitFrames.map((sample) => sample.frameMs), 0.99);
+  const longTasks = await readLongTasks(page);
+  const revisitEviction = routeAResidency && beforeReturnResidency
+    ? evaluateRevisitEviction(routeAResidency, beforeReturnResidency)
+    : null;
+  const revisitEconomics: RevisitEconomics | null = revisitStart && revisitEnd ? {
+    clodPageBuilds: Math.max(0, numCounter(revisitEnd.counters, "live_clod_stream_built_total") - numCounter(revisitStart.counters, "live_clod_stream_built_total")),
+    clodBuildMs: revisitFrames.reduce((sum, sample) => sum + (sample.metrics["clodApplyMs"] ?? 0), 0),
+    farSummaryTileBuilds: Math.max(0, numCounter(revisitEnd.counters, "far_summary_tiles_built_total") - numCounter(revisitStart.counters, "far_summary_tiles_built_total")),
+    farSummaryBuildMs: revisitFrames.reduce((sum, sample) => sum + (sample.metrics["farSummaryMs"] ?? 0), 0),
+    heightfieldTileBuilds: Math.max(0, numCounter(revisitEnd.counters, "heightfield_tiles_builds_total") - numCounter(revisitStart.counters, "heightfield_tiles_builds_total")),
+    heightfieldStoreHits: Math.max(0, numCounter(revisitEnd.counters, "heightfield_tiles_store_hits") - numCounter(revisitStart.counters, "heightfield_tiles_store_hits")),
+    heightfieldStoreMisses: Math.max(0, numCounter(revisitEnd.counters, "heightfield_tiles_store_misses") - numCounter(revisitStart.counters, "heightfield_tiles_store_misses")),
+    outboundFrameP99Ms: outboundP99,
+    revisitFrameP99Ms: revisitP99,
+    frameP99DeltaMs: revisitP99 - outboundP99,
+  } : null;
   return {
     start,
     end,
@@ -659,15 +912,32 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     maxStreamStaleDiscards: maxCounter(samples, "live_clod_stream_stale_discards"),
     streamEvictionsDelta: counterDelta(samples, "live_clod_stream_evictions_total"),
     streamStaleDiscardsDelta: counterDelta(samples, "live_clod_stream_stale_discards_total"),
-    frameSampleCount: sortedFrameTimes.length,
-    frameP99Ms: sortedFrameTimes[frameP99Index] ?? 0,
-    maxFrameMs: sortedFrameTimes.at(-1) ?? 0,
+    frameSampleCount: frameSummary.sampleCount,
+    frameP50Ms: frameSummary.p50Ms,
+    frameP95Ms: frameSummary.p95Ms,
+    frameP99Ms: frameSummary.p99Ms,
+    frameP999Ms: frameSummary.p999Ms,
+    renderP95Ms: percentile(renderTimes, 0.95),
+    maxFrameMs: frameSummary.maxMs,
+    framesOver16_7Ms: frameSummary.over16_7,
+    framesOver33_3Ms: frameSummary.over33_3,
+    framesOver100Ms: frameSummary.over100,
+    longTaskCount: longTasks.length,
+    longestLongTaskMs: longTasks.length > 0 ? Math.max(...longTasks) : 0,
+    topPhaseBucket: topBucket(frameSamples, FRAME_PERF_BROAD_BUCKETS),
+    topPropBucket: topBucket(frameSamples, FRAME_PERF_PROP_BUCKETS),
     maxWorkUnitMs: maxCounter(samples, "live_bubble_probe_cpu_work_unit_max_ms"),
     maxPriorityUnownedCells: maxCounter(samples, "priority_unowned_cells"),
     maxClodFarGapHoles: maxCounter(samples, "clod_far_gap_holes"),
     maxFarClipmapOwnershipHoles: maxCounter(samples, "far_clipmap_ownership_holes"),
     frontierLagSampleCount: frontierLagSamples.length,
     frontierLagP95M: percentile95(frontierLagSamples),
+    maxHeightfieldFallbackSamples: maxCounter(samples, "heightfield_tiles_fallback_samples_this_frame"),
+    maxSettledHeightfieldFallbackSamples: maxCounter(settledSamples, "heightfield_tiles_fallback_samples_this_frame"),
+    heapEnvelopeAfterWarmup: summarizeNumericEnvelope(heapValues),
+    resourceEnvelopes: resourceEnvelopes(samples),
+    revisitEviction,
+    revisitEconomics,
     samples,
   };
 }
@@ -685,6 +955,29 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   if (movement.streamEvictionsDelta + movement.streamStaleDiscardsDelta <= 0) failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
   if (movement.liveBubbleEvictionsDelta > MOVEMENT_ROUTE_PROFILE.maxLiveBubbleEvictions) failures.push(`${sceneName}: movement live-bubble evictions ${movement.liveBubbleEvictionsDelta} > ${MOVEMENT_ROUTE_PROFILE.maxLiveBubbleEvictions}`);
   if (movement.streamEvictionsDelta > MOVEMENT_ROUTE_PROFILE.maxStreamEvictions) failures.push(`${sceneName}: movement streamed-CLOD evictions ${movement.streamEvictionsDelta} > ${MOVEMENT_ROUTE_PROFILE.maxStreamEvictions}`);
+  if (MOVEMENT_ROUTE_PROFILE.name.startsWith("coast-to-coast") && movement.maxSettledHeightfieldFallbackSamples !== 0) {
+    failures.push(`${sceneName}: heightfield fallback samples did not return to zero after every route region (max ${movement.maxSettledHeightfieldFallbackSamples})`);
+  }
+  if (MOVEMENT_ROUTE_PROFILE.name === "coast-to-coast-revisit") {
+    if (!movement.revisitEviction) failures.push(`${sceneName}: revisit route did not capture pre-return residency evidence`);
+    else failures.push(...movement.revisitEviction.failures.map((failure) => `${sceneName}: ${failure}`));
+  }
+  if (ROUTE_TAIL_THRESHOLDS) {
+    failures.push(...evaluateContinentRouteTails({
+      frameP50Ms: movement.frameP50Ms,
+      frameP95Ms: movement.frameP95Ms,
+      frameP99Ms: movement.frameP99Ms,
+      frameP999Ms: movement.frameP999Ms,
+      maxFrameMs: movement.maxFrameMs,
+      framesOver16_7Ms: movement.framesOver16_7Ms,
+      framesOver33_3Ms: movement.framesOver33_3Ms,
+      longTaskCount: movement.longTaskCount,
+      longestLongTaskMs: movement.longestLongTaskMs,
+      topPhaseP95Ms: movement.topPhaseBucket?.p95Ms ?? Number.NaN,
+      topPhaseMaxMs: movement.topPhaseBucket?.maxMs ?? Number.NaN,
+    }, ROUTE_TAIL_THRESHOLDS).map((failure) => `${sceneName}: ${failure}`));
+  }
+  if (movement.framesOver100Ms !== 0) failures.push(`${sceneName}: movement had ${movement.framesOver100Ms} frame(s) over 100ms after warmup; expected zero`);
   failures.push(...evaluateMovementPerformance(sceneName, movement, {
     minFrameSamples: MOVEMENT_ROUTE_PROFILE.minFrameSamples,
     maxFrameP99Ms: MAX_ROUTE_FRAME_P99_MS,
@@ -827,7 +1120,11 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
 
   page.on("console", onConsole);
   page.on("pageerror", onPageError);
-  const extra: Record<string, string> = { acceptance: "1", acceptanceReuse: PROFILE, acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]), ownershipOracle: gate.ownershipOracle, world: "16", clodPerf: "1", webgpuSelection: "1", ...profileAcceptanceParams(PROFILE), ...(scene.extra ?? {}) };
+  const routeStart = scene.movementRoute ? MOVEMENT_ROUTE_PROFILE.start : undefined;
+  const routeStartExtra: Record<string, string> = routeStart
+    ? { x: String(routeStart[0]), z: String(routeStart[2]), yaw: "1.5708" }
+    : {};
+  const extra: Record<string, string> = { acceptance: "1", acceptanceReuse: PROFILE, acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]), ownershipOracle: gate.ownershipOracle, world: "16", clodPerf: "1", webgpuSelection: "1", ...UNIFIED_STREAMING_ACCEPTANCE_PARAMS, ...profileAcceptanceParams(PROFILE), ...(scene.extra ?? {}), ...routeStartExtra };
   if (PROFILE === "fast") {
     extra["startupWorld"] = FAST_STARTUP_WORLD;
     extra["infiniteStartupWorld"] = FAST_STARTUP_WORLD;
@@ -907,9 +1204,10 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     if (summaryPath) writeJson(summaryPath, qaSummary("infinite-islands", stats));
     await writeBootstrapDiff(screenshotPath, comparisonPath);
     const imageSanity = await inspectPngSanity(screenshotPath, { width: WIDTH, height: HEIGHT });
+    const acceptanceCounters = withSampledPerfCounters(extractAcceptanceCounters(stats), phase0);
     const thresholds: ThresholdEvaluation = scene.validation
-      ? evaluateThresholds(extractAcceptanceCounters(stats), [], [])
-      : evaluateThresholds(extractAcceptanceCounters(stats), gate.requiredCounters, gate.rules);
+      ? evaluateThresholds(acceptanceCounters, [], [])
+      : evaluateThresholds(acceptanceCounters, gate.requiredCounters, gate.rules);
     const movementFailures = evaluateMovementRoute(scene.name, movement);
     const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);
     const failures = [...pageErrors.map((error) => `page error: ${error}`), ...thresholds.failures, ...movementFailures, ...sceneSpecificFailures, ...imageSanity.failures.map((failure) => `image sanity: ${failure}`)];
@@ -983,12 +1281,14 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
 
 async function main(): Promise<void> {
   const timestamp = timestampForFolder();
-  const outDir = resolve(RUN_ROOT, timestamp);
+  const requestedOutDir = cliValues(CLI_ARGS, "--out").at(-1);
+  const outDir = requestedOutDir ? resolve(requestedOutDir) : resolve(RUN_ROOT, timestamp);
   mkdirSync(outDir, { recursive: true });
   console.log(`[infinite-accept] run ${rel(outDir)}`);
   console.log(`[infinite-accept] base ${process.env["CLOD_POC_BASE_URL"]}`);
-  console.log(`[infinite-accept] profile ${PROFILE} route=${MOVEMENT_ROUTE_PROFILE.name} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES}`);
+  console.log(`[infinite-accept] profile ${PROFILE} route=${MOVEMENT_ROUTE_PROFILE.name} content=${MOVEMENT_ROUTE_PROFILE.contentProfile} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES}`);
   const { browser, recipe } = await launchWebGPU();
+  const browserVersion = browser.version();
   const sceneResults: SceneResult[] = [];
   try {
     if (PROFILE === "reuse") {
@@ -1019,8 +1319,12 @@ async function main(): Promise<void> {
   } finally {
     await browser.close().catch(() => undefined);
   }
-  const failures = sceneResults.flatMap((scene) => scene.failures.map((failure) => `${scene.name}: ${failure}`));
-  const passed = aggregatePassed(sceneResults, failures);
+  const runtimeFailures = sceneResults.flatMap((scene) => scene.failures.map((failure) => `${scene.name}: ${failure}`));
+  const runtimePassed = aggregatePassed(sceneResults, runtimeFailures);
+  const failures = ROUTE_CALIBRATION
+    ? [...runtimeFailures, "calibration-only capture; five-run thresholds are not frozen"]
+    : runtimeFailures;
+  const passed = runtimePassed && !ROUTE_CALIBRATION;
   const reportJsonPath = resolve(outDir, "report.json");
   const reportMdPath = resolve(outDir, "report.md");
   const firstStartupTimings = sceneResults[0]?.startupTimings ?? {};
@@ -1029,8 +1333,19 @@ async function main(): Promise<void> {
     timestamp,
     commit_sha: gitSha(),
     browser_launch_recipe: recipe,
+    environment: {
+      ...hostEnvironmentRecord(),
+      browser_version: browserVersion,
+      capture_viewport: { width: WIDTH, height: HEIGHT, device_scale_factor: 1 },
+      cache_state: PROFILE === "reuse" ? "reuse-profile; per-scene hit/miss recorded below" : "fresh page per scene; per-scene hit/miss recorded below",
+    },
     profile: PROFILE,
     movement_route_profile: MOVEMENT_ROUTE_PROFILE.name,
+    movement_content_profile: MOVEMENT_ROUTE_PROFILE.contentProfile,
+    unified_streaming_baseline: UNIFIED_STREAMING_ACCEPTANCE_PARAMS,
+    route_tail_thresholds: ROUTE_TAIL_THRESHOLDS,
+    route_tail_thresholds_path: CONTINENT_ROUTE ? rel(ROUTE_THRESHOLDS_PATH) : null,
+    calibration_only: ROUTE_CALIBRATION,
     sample_frames: SAMPLE_FRAMES,
     world_pages: { configured: numTiming(firstStartupTimings, "startup.configured_world_pages"), startup: numTiming(firstStartupTimings, "startup.world_pages") },
     thresholds: {
@@ -1066,9 +1381,13 @@ async function main(): Promise<void> {
   writeJson(reportJsonPath, report);
   writeFileSync(reportMdPath, renderMarkdownReport({ passed, scenes: sceneResults, failures, reportJsonPath: rel(reportJsonPath) }));
   console.log(`[infinite-accept] report ${rel(reportJsonPath)}`);
-  if (!passed) {
+  if (!runtimePassed) {
     console.error(`[infinite-accept] FAILED with ${failures.length} failure(s)`);
     process.exit(1);
+  }
+  if (ROUTE_CALIBRATION) {
+    console.log("[infinite-accept] calibration captured; this report is deliberately not proof");
+    return;
   }
   console.log("[infinite-accept] ok");
 }

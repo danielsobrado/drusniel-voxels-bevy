@@ -14,6 +14,10 @@ export interface ClodFrameLoopUiState {
   weatherMode: string;
   waterEnabled: boolean;
   profileEnabled: boolean;
+  postProcessCloudsEnabled?: boolean;
+  postProcessFroxelsEnabled?: boolean;
+  treeWindEnabled?: boolean;
+  grassWindStrength?: number;
   grassBladeCount: number;
   grassVisiblePatches: string;
   grassTierSummary: string;

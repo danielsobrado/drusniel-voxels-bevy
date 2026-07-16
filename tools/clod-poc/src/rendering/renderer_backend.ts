@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
 import { describeDiagnostics } from "../core/diagnostics.js";
+import { flushSaveRuntimeOrThrow } from "../save/save_runtime.js";
 import { installTerrainTextureArrayProbe } from "../gpu/terrain_texture_array_probe.js";
 import { requestSharedWebGpuDevice } from "./shared_webgpu_device.js";
 import { installMaterialKeyMemo } from "./three_patches.js";
@@ -14,6 +15,7 @@ import {
   clearActiveWebGpuRendererContext,
   setActiveWebGpuRendererContext,
 } from "./webgpu_renderer_context.js";
+import { handleWebGpuDeviceLoss } from "./webgpu_device_loss.js";
 
 export type RendererBackend = "webgl" | "webgpu";
 
@@ -96,12 +98,19 @@ export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {
     device.onuncapturederror = (event: GPUUncapturedErrorEvent): void => {
       if (reported++ < 8) console.error("[webgpu] uncaptured error:", event.error.message);
     };
-    void device.lost.then((info: GPUDeviceLostInfo) => {
+    void device.lost.then(async (info: GPUDeviceLostInfo) => {
       clearActiveWebGpuRendererContext(renderer);
-      console.error("[webgpu] device lost:", info.reason, info.message);
-      if (window.__drusnielClod) {
-        window.__drusnielClod.error = `WebGPU device lost: ${info.reason || "unknown"}\n${info.message}`;
-      }
+      await handleWebGpuDeviceLoss(info, {
+        pauseSimulation: () => {
+          renderer.setAnimationLoop(null);
+          window.__drusnielClod?.flyCamEnabled?.(false);
+        },
+        preserveSave: async () => { await flushSaveRuntimeOrThrow(Number.MAX_SAFE_INTEGER); },
+        installControlledReload: (callback) => {
+          if (window.__drusnielClod) window.__drusnielClod.recoverAfterDeviceLoss = callback;
+        },
+        reload: () => window.location.reload(),
+      });
     });
   }
   // WebGPU exposes a high anisotropy limit; 16 matches typical hardware and the WebGL default.

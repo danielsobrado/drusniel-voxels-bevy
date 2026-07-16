@@ -22,6 +22,7 @@ export interface FarShellMetrics {
   farSummaryTilesMissing: number;
   farSummaryTilesStale: number;
   farSummaryTilesBuiltThisFrame: number;
+  farSummaryTilesBuiltTotal: number;
   farSummaryCacheSize: number;
   farSummaryFallbackSamples: number;
   farSummaryProceduralFallbackSamples: number;
@@ -61,6 +62,7 @@ export function createFarShellMetrics(): FarShellMetrics {
     farSummaryTilesMissing: 0,
     farSummaryTilesStale: 0,
     farSummaryTilesBuiltThisFrame: 0,
+    farSummaryTilesBuiltTotal: 0,
     farSummaryCacheSize: 0,
     farSummaryFallbackSamples: 0,
     farSummaryProceduralFallbackSamples: 0,
@@ -148,6 +150,7 @@ export function publishFarShellMetricsToCounters(
   counters["far_summary_tiles_missing"] = metrics.farSummaryTilesMissing;
   counters["far_summary_tiles_stale"] = metrics.farSummaryTilesStale;
   counters["far_summary_tiles_built_this_frame"] = metrics.farSummaryTilesBuiltThisFrame;
+  counters["far_summary_tiles_built_total"] = metrics.farSummaryTilesBuiltTotal;
   counters["far_summary_cache_size"] = metrics.farSummaryCacheSize;
   counters["far_summary_fallback_samples"] = metrics.farSummaryFallbackSamples;
   counters["far_summary_procedural_fallback_samples"] = metrics.farSummaryProceduralFallbackSamples;

@@ -6,6 +6,7 @@ import {
   parseBorderOceanSceneConfig,
   validateBorderOceanStats,
 } from "../src/debug/border_ocean_scene.js";
+import { INFINITE_ISLANDS_FRAME_MS_P95_MAX } from "./infinite_acceptance/thresholds.js";
 
 const SHOT_DIR = "shots/phase-0";
 const SANITY_SHOT = `${SHOT_DIR}/sanity.png`;
@@ -36,7 +37,6 @@ const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16, BORDER_OCEAN_SCE
 const INFINITE_ISLANDS_DIR = "shots/infinite-islands";
 const INFINITE_ISLANDS_SHOT = `${INFINITE_ISLANDS_DIR}/walk.png`;
 const INFINITE_ISLANDS_STATS = `${INFINITE_ISLANDS_DIR}/walk-stats.json`;
-const INFINITE_ISLANDS_FRAME_MS_P95_MAX = 8;
 const DEFAULT_BASE_URL = "http://127.0.0.1:5173/";
 const SERVER_TIMEOUT_MS = 90_000;
 const SERVER_POLL_MS = 500;

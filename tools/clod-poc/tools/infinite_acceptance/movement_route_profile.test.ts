@@ -19,4 +19,43 @@ describe("infinite-islands movement route profiles", () => {
     expect(profile.maxLiveBubbleEvictions).toBeGreaterThan(0);
     expect(profile.maxStreamEvictions).toBeGreaterThan(0);
   });
+
+  it("defines a deterministic west-to-east continent crossing", () => {
+    const profile = resolveMovementRouteProfile("coast-to-coast");
+    const displacementX = profile.segments.reduce((sum, segment) => sum + segment.dx, 0);
+    const pathDistanceM = profile.segments.reduce((sum, segment) => sum + Math.hypot(segment.dx, segment.dz), 0);
+
+    expect(profile.name).toBe("coast-to-coast");
+    expect(profile.start).toEqual([-8_000, 96, 0]);
+    expect(displacementX).toBe(16_000);
+    expect(pathDistanceM).toBeGreaterThanOrEqual(16_000);
+    expect(profile.segments.filter((segment) => segment.phase === "outbound")).toHaveLength(5);
+    expect(profile.segments.some((segment) => segment.landmark === "river")).toBe(true);
+    expect(profile.segments.some((segment) => segment.landmark === "village-site")).toBe(true);
+  });
+
+  it("defines a short per-change infrastructure route through cold boundaries", () => {
+    const profile = resolveMovementRouteProfile("continent-short");
+    const frames = profile.segments.reduce((sum, segment) => sum + segment.frames, 0);
+    const distance = profile.segments.reduce((sum, segment) => sum + Math.hypot(segment.dx, segment.dz), 0);
+
+    expect(profile.contentProfile).toBe("infrastructure");
+    expect(profile.start).toEqual([-8_000, 96, 0]);
+    expect(frames).toBeGreaterThanOrEqual(4_000);
+    expect(distance).toBeGreaterThanOrEqual(4_000);
+    expect(profile.segments.some((segment) => segment.landmark === "river")).toBe(true);
+  });
+
+  it("adds an eviction-forcing A-to-B-to-A revisit without changing the final pose", () => {
+    const crossing = resolveMovementRouteProfile("coast-to-coast");
+    const revisit = resolveMovementRouteProfile("coast-to-coast-revisit");
+    const revisitSegments = revisit.segments.filter((segment) => segment.phase === "revisit");
+    const revisitDistanceM = revisitSegments.reduce((sum, segment) => sum + Math.hypot(segment.dx, segment.dz), 0);
+
+    expect(revisit.name).toBe("coast-to-coast-revisit");
+    expect(revisit.segments.length).toBe(crossing.segments.length + 2);
+    expect(revisitDistanceM).toBeGreaterThanOrEqual(6_000);
+    expect(revisitSegments.reduce((sum, segment) => sum + segment.dx, 0)).toBe(0);
+    expect(revisitSegments.reduce((sum, segment) => sum + segment.dz, 0)).toBe(0);
+  });
 });

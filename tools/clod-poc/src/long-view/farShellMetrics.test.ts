@@ -19,4 +19,14 @@ describe("far-summary enrichment metrics", () => {
       far_summary_fully_enriched: 5,
     });
   });
+
+  it("publishes a cumulative far-summary tile build counter for revisit economics", () => {
+    const metrics = createFarShellMetrics();
+    metrics.farSummaryTilesBuiltTotal = 42;
+    const counters: Record<string, number> = {};
+
+    publishFarShellMetricsToCounters(counters, metrics);
+
+    expect(counters["far_summary_tiles_built_total"]).toBe(42);
+  });
 });

@@ -12,6 +12,8 @@ import {
 } from "../../../player/player_edit_authority.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
+import { heightfieldTileResidentKeys } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
+import type { FarSummaryIntegration } from "../../../far-summary/integration.js";
 
 export interface TerrainEditStartupResult {
   terrainEditService: ReturnType<typeof createTerrainEditService>;
@@ -140,6 +142,21 @@ export function runTerrainEditStartup(
   if (input.longView.hooks) {
     input.longView.hooks.getStreamingRootReadyPageKeys = () =>
       session.streamingClodRootController?.readyPageKeys() ?? [];
+    input.longView.hooks.getStreamingResidencySnapshot = () => {
+      // The global may hold the NAADF integration instead, which has no tile cache.
+      const farSummary = (window as typeof window & {
+        __drusnielFarSummary?: Partial<FarSummaryIntegration>;
+      }).__drusnielFarSummary;
+      return {
+        clodCachedKeys: session.streamingClodRootController?.cachedPageKeys() ?? [],
+        farSummaryResidentKeys: farSummary?.cache?.residentTileKeys() ?? [],
+        heightfieldResidentKeys: heightfieldTileResidentKeys(),
+        // Plan 2 owns stable vegetation cluster identities; null keeps revisit gates fail-closed.
+        vegetationClusterKeys: null,
+        // The current hydrology window publishes counts but no stable resident-key contract.
+        waterHydrologyKeys: null,
+      };
+    };
     input.longView.hooks.runTerrainEditProbe = async (ray) => {
       await terrainEditService.runDigNow(new THREE.Ray(
         new THREE.Vector3(...ray.origin),

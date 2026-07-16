@@ -348,6 +348,13 @@ export class FarSummaryCache implements FallbackStatsWriter {
     for (const tile of this.tiles.values()) fn(tile);
   }
 
+  residentTileKeys(): readonly string[] {
+    return [...this.tiles.entries()]
+      .filter(([, tile]) => tile.state !== "evicted" && tile.samples.length > 0)
+      .map(([key]) => key)
+      .sort();
+  }
+
   getStats(): FarSummaryStats {
     let requested = 0, building = 0, ready = 0, stale = 0, cooling = 0, evicted = 0;
     for (const [, tile] of this.tiles) {

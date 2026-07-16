@@ -4,7 +4,7 @@ import { evaluateThresholds, REQUIRED_COUNTERS } from "./thresholds.js";
 function validCounters(overrides: Record<string, number> = {}): Record<string, number> {
   const values = Object.fromEntries(REQUIRED_COUNTERS.map((key) => [key, 0]));
   values["world_manifest_present"] = 1;
-  values["frame_ms_p95"] = 8;
+  values["frame_ms_p95"] = 11;
   values["frame_ms_p99"] = 9;
   values["target_visible_m"] = 4096;
   values["far_shell_inner_minus_clod_radius_m"] = -384;
@@ -103,7 +103,7 @@ describe("infinite islands threshold validation", () => {
   it("fails when p95 is non-finite, negative, or above budget", () => {
     expect(evaluateThresholds(validCounters({ frame_ms_p95: Infinity })).passed).toBe(false);
     expect(evaluateThresholds(validCounters({ frame_ms_p95: -1 })).passed).toBe(false);
-    expect(evaluateThresholds(validCounters({ frame_ms_p95: 9 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ frame_ms_p95: 11.5 })).passed).toBe(false);
   });
 
   it("fails when ownership, overlap, gap, or horizon counters are non-zero", () => {

@@ -7,6 +7,7 @@ export interface FloatingOriginConfig {
   enabled: boolean;
   snapMeters: number;
   unboundedWorld: boolean;
+  allowBoundedWorld?: boolean;
 }
 
 export interface FloatingOriginStats {
@@ -40,7 +41,7 @@ function snapDelta(value: number, snapMeters: number): number {
 }
 
 export function resolveFloatingOriginEnabled(config: FloatingOriginConfig): boolean {
-  return config.enabled && config.unboundedWorld;
+  return config.enabled && (config.unboundedWorld || config.allowBoundedWorld === true);
 }
 
 export class FloatingOriginController {

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { clodUrl, launchWebGPU } from "./launch.js";
+import { INFINITE_ISLANDS_FRAME_MS_P95_MAX } from "./infinite_acceptance/thresholds.js";
 
 const outIndex = process.argv.indexOf("--out");
 const out = outIndex >= 0 ? process.argv[outIndex + 1] : undefined;
@@ -85,7 +86,7 @@ try {
     atlasResident: (counters.heightfield_tile_gpu_atlas_resident ?? 0) > 0,
     gpuPageDispatched: (counters.live_clod_stream_gpu_pages_dispatched ?? 0) > 0,
     waitingOnTilesBounded: (counters.live_clod_stream_waiting_on_tiles ?? 0) <= 128,
-    frameP95WithinBudget: (counters.frame_ms_p95 ?? Number.POSITIVE_INFINITY) <= 8,
+    frameP95WithinBudget: (counters.frame_ms_p95 ?? Number.POSITIVE_INFINITY) <= INFINITE_ISLANDS_FRAME_MS_P95_MAX,
     zeroTileFailures: (counters.heightfield_tiles_failures_total ?? 0) === 0,
     zeroGpuFailures: (counters.live_clod_stream_gpu_failed_batches ?? 0) === 0,
     zeroWorkerFallbacks: (counters.live_clod_stream_worker_fallback_pages ?? 0) === 0,
@@ -93,7 +94,7 @@ try {
       routeFound: routeEvidence?.route != null,
       routeHasCarvedDepth: (routeEvidence?.route?.centerDepthM ?? 0) > 0,
       routeStreamedPages: (routeEvidence?.counters?.live_clod_stream_probe_apply_pages_total ?? 0) > 0,
-      routeFrameP95WithinBudget: (routeEvidence?.counters?.frame_ms_p95 ?? Number.POSITIVE_INFINITY) <= 8,
+      routeFrameP95WithinBudget: (routeEvidence?.counters?.frame_ms_p95 ?? Number.POSITIVE_INFINITY) <= INFINITE_ISLANDS_FRAME_MS_P95_MAX,
       routeZeroGpuFailures: (routeEvidence?.counters?.live_clod_stream_gpu_failed_batches ?? 0) === 0,
       routeZeroWorkerFallbacks: (routeEvidence?.counters?.live_clod_stream_worker_fallback_pages ?? 0) === 0,
     } : {},

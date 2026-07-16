@@ -22,9 +22,9 @@ acceptance runner. LM0.4 reconciles that work with this revision — do not clob
 do not let it entrench contracts this plan supersedes (see LM5 readiness note).
 
 Execution evidence and per-file land/park decisions are recorded in
-`../performance/long-map-execution-evidence-2026-07-16.md`. LM0.2 and LM0.3 remain open;
-the document records why the attempted performance run and partial visual captures cannot
-be used as proof.
+`../performance/long-map-execution-evidence-2026-07-16.md`. LM0.2 is closed with a
+profiled fix, controlled-window gate correction, five-run recalibration, and clean-GPU
+confirmation. LM0.3 remains open; the partial visual captures cannot be used as proof.
 
 Plan 1 of 5 toward the browser RPG target (procedural ocean-bounded continent with free
 building, terrain deformation, melee + magic, settlements and dungeons; single-player;
@@ -79,10 +79,12 @@ port-shaped per `docs/architecture/bevy-world-source-port.md`).
   measurement yet — LM4 supplies it), memory-pressure signal (long route bounded: 360
   bubble / 125 root evictions), islands heightfield default (no A/B), annular-shell
   per-cell ownership (awaiting manual visual evidence).
-- **Open items this plan must close first**:
-  - Settled p95 gate red: 8.20 ms measured vs 8.00 ms limit on the unified route (two
-    pre-optimization runs: 8.50 / 8.20 ms — likely not a regression from the streaming
-    work itself; needs investigation and disposition, not silent recalibration).
+- **Baseline items this plan must close first**:
+  - Settled p95 disposition closed 2026-07-16: synchronous diagnostic-panel DOM work was
+    removed from streamed cut changes; the gate now reads the controlled 180-frame sample;
+    five clean runs measured 9.5-10.7 ms and recalibrated the canonical workload gate to
+    11.0 ms. Fresh-server confirmations passed at 9.7 and 9.0 ms. See the execution
+    evidence for the full attribution and route-tail table.
   - Manual visual QA steps 1–7 in the handover are unperformed; no shimmer/pop claim
     exists for the new seam ownership. The shell-path decision is gated on it.
   - Movement numbers at 3.06 km: p99 17.40 ms, max 24.90 ms, seam counters zero — the
@@ -120,7 +122,7 @@ port-shaped per `docs/architecture/bevy-world-source-port.md`).
    this revision, add the missing pieces named in LM2–LM5, land or explicitly park each
    piece. Nothing merges without its failing-test-first coverage.
 - [x] green trio + environment record on HEAD (recorded in the execution evidence)
-- [ ] settled p95 disposition (analysis + fix-or-recalibration recorded)
+- [x] settled p95 disposition (analysis + fix/recalibration recorded)
 - [ ] handover visual QA steps 1–7 done, artifacts linked, shell-path decision recorded
 - [x] in-flight work reconciled (per-file land/park decisions in the execution evidence)
 

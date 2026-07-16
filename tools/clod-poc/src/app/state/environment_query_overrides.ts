@@ -123,6 +123,22 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const treeGpuStrict = flagParam(searchParams, "treeGpuStrict", "treeGpuNoFallback", "treeGpuFailLoud");
   if (treeGpuStrict === true) enableStrictTreeGpuMode(state);
 
+  const treeWind = flagParam(searchParams, "treeWind");
+  if (treeWind !== null) {
+    state.treeWindEnabled = treeWind;
+    if (!treeWind) {
+      state.treeWindStrength = 0;
+      state.treeGustStrength = 0;
+      state.treeTrunkSwayStrength = 0;
+      state.treeLeafFlutterStrength = 0;
+    }
+  }
+  const grassWind = flagParam(searchParams, "grassWind");
+  if (grassWind === false) {
+    state.grassWindStrength = 0;
+    state.grassWindSpeed = 0;
+  }
+
   const treeGpuCounts = flagParam(searchParams, "treeGpuCounts", "treeCounts");
   if (treeGpuCounts !== null) {
     state.treeGpuShowCounts = treeGpuCounts;
@@ -194,6 +210,10 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   if (clarity !== null) state.postProcessClarityEnabled = clarity;
   const aerial = flagParam(searchParams, "aerial", "aerialPerspective");
   if (aerial !== null) state.postProcessAerialPerspectiveEnabled = aerial;
+  const clouds = flagParam(searchParams, "clouds");
+  if (clouds !== null) state.postProcessCloudsEnabled = clouds;
+  const froxels = flagParam(searchParams, "froxels", "volumetrics");
+  if (froxels !== null) state.postProcessFroxelsEnabled = froxels;
   const fog = flagParam(searchParams, "fog", "haze");
   if (fog === false) {
     state.hazeIntensity = 0;

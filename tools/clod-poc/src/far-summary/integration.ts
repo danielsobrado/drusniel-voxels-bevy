@@ -437,6 +437,7 @@ export function initFarSummaryIntegration(
       metrics.farSummaryTilesMissing = requestStates.missing;
       metrics.farSummaryTilesStale = requestStates.staleWithSamples;
       metrics.farSummaryTilesBuiltThisFrame = stats.tilesBuiltThisFrame;
+      metrics.farSummaryTilesBuiltTotal += stats.tilesBuiltThisFrame;
       metrics.farSummaryCacheSize = cache.getTileCount();
       metrics.farSummaryProceduralFallbackSamples = stats.proceduralFallbacks;
       metrics.farSummaryLowerRingFallbackSamples = stats.lowerRingFallbacks;

@@ -1,5 +1,6 @@
 
 import { createLongViewFrameDiagnostics } from "../phase0/long_view_frame_diagnostics.js";
+import { resolvePrecisionFrameDelta } from "../precision/precision_diagnostics.js";
 import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
 import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 import { createRendererOwnershipResidencyFeeds } from "../stream/ownership_residency.js";
@@ -20,6 +21,7 @@ import { aggregateGpuVegetationEarlyRejectCounters } from "../vegetation/gpu_veg
 import { runTerrainStreamingWork } from "../stream/terrain_streaming_control.js";
 import { publishStreamCursorCounters, StreamCursorTracker } from "../stream/stream_cursor.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
+import { installPrecisionLandmarkHooks } from "../precision/precision_landmarks.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
@@ -130,6 +132,20 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const grassProfileFrame = { value: 0 };
   let materialChurnFrame = 0;
   const debugQuery = new URLSearchParams(window.location.search);
+  const precisionDiagnostics = debugQuery.get("precisionDiag") === "1";
+  if (precisionDiagnostics) {
+    const hooks = render.getHooks();
+    if (hooks) installPrecisionLandmarkHooks({
+      hooks,
+      scene: render.scene,
+      camera: render.camera,
+      origin: () => {
+        const origin = floatingOrigin?.controller.stats();
+        return { x: origin?.originX ?? 0, z: origin?.originZ ?? 0 };
+      },
+      viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+    });
+  }
   const borderOceanDebugPanel = diagnostics.queryScene === "border-ocean" || debugQuery.get("borderOceanDebug") === "1"
     ? createBorderOceanDebugPanel(document.body)
     : null;
@@ -251,13 +267,13 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       terrain.selectionController.advanceFrame();
       selectionStats = terrain.selectionController.stats();
       player.playerInputController.playerTimer.update();
-      playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
+      playerDelta = resolvePrecisionFrameDelta(Math.min(player.playerInputController.playerTimer.getDelta(), 0.1), precisionDiagnostics);
     });
     updateAverageFps();
     p0DirtyAtlasExercise.update(selectionStats.frameId);
 
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
-      player.controls.update();
+      if (!precisionDiagnostics) player.controls.update();
     });
     const streamCursor = streamCursorTracker.update({
       frameId: selectionStats.frameId,
@@ -427,6 +443,14 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       recordStatsSyncThrottleCounters(hooks.stats.counters, statsDecision, statsSyncThrottle.diagnostics());
       hooks.stats.counters["terrain_streaming_enabled"] = terrainStreamingEnabled ? 1 : 0;
       hooks.stats.counters["terrain_streaming_frozen_frames"] = terrainStreamingFrozenFrames;
+      hooks.stats.counters["precision_diag_enabled"] = precisionDiagnostics ? 1 : 0;
+      hooks.stats.counters["precision_diag_sim_time_frozen"] = precisionDiagnostics && playerDelta === 0 ? 1 : 0;
+      hooks.stats.counters["precision_diag_camera_fixed"] = precisionDiagnostics ? 1 : 0;
+      hooks.stats.counters["precision_diag_selection_frozen"] = precisionDiagnostics && player.state.freeze ? 1 : 0;
+      hooks.stats.counters["precision_diag_clouds_disabled"] = precisionDiagnostics && !player.state.postProcessCloudsEnabled ? 1 : 0;
+      hooks.stats.counters["precision_diag_froxels_disabled"] = precisionDiagnostics && !player.state.postProcessFroxelsEnabled ? 1 : 0;
+      hooks.stats.counters["precision_diag_tree_wind_disabled"] = precisionDiagnostics && !player.state.treeWindEnabled ? 1 : 0;
+      hooks.stats.counters["precision_diag_grass_wind_disabled"] = precisionDiagnostics && player.state.grassWindStrength === 0 ? 1 : 0;
     }
 
     const mirrorDue = frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS;

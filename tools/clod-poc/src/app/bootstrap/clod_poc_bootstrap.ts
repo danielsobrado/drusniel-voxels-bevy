@@ -107,6 +107,7 @@ export async function bootstrapClodPoc() {
     enabled: booleanQueryParam(searchParams, "floatingOrigin") || booleanQueryParam(searchParams, "floating_origin"),
     snapMeters: positiveNumberQueryParam(searchParams, "floatingOriginSnap", 4096),
     unboundedWorld: world.worldSource.metadata.bounds === "infinite",
+    allowBoundedWorld: booleanQueryParam(searchParams, "floatingOrigin") || booleanQueryParam(searchParams, "floating_origin"),
   });
 
   const postRenderer = await runPostRendererStartup({
