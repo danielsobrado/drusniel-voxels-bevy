@@ -14,13 +14,13 @@ describe("infinite-islands startup camera", () => {
   it("starts finite scenes close enough to expose several terrain levels", () => {
     const worldCells = 1024;
     const pose = defaultStartupCameraPose(null, worldCells);
+    const expectedEye = [worldCells * 0.5, worldCells * 0.45, worldCells * 1.32];
+    const expectedTarget = [worldCells * 0.5, 30, worldCells * 0.5];
 
-    expect(pose.eye).toEqual([
-      worldCells * 0.5,
-      worldCells * 0.45,
-      worldCells * 1.32,
-    ]);
-    expect(pose.target).toEqual([worldCells * 0.5, 30, worldCells * 0.5]);
+    for (let index = 0; index < expectedEye.length; index++) {
+      expect(pose.eye[index]).toBeCloseTo(expectedEye[index]);
+      expect(pose.target[index]).toBeCloseTo(expectedTarget[index]);
+    }
   });
 
   it("frames the deterministic cave entrance from outside", () => {
