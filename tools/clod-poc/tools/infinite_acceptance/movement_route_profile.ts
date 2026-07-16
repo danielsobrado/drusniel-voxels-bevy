@@ -9,6 +9,7 @@ export interface MovementRouteProfile {
   name: "walk" | "long-route";
   segments: readonly MovementSegment[];
   minHorizontalDistanceM: number;
+  minFrameSamples: number;
   maxLiveBubbleEvictions: number;
   maxStreamEvictions: number;
 }
@@ -31,6 +32,7 @@ export function resolveMovementRouteProfile(longRoute: boolean): MovementRoutePr
       name: "long-route",
       segments: LONG_ROUTE,
       minHorizontalDistanceM: 3_000,
+      minFrameSamples: 1_024,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     }
@@ -38,6 +40,7 @@ export function resolveMovementRouteProfile(longRoute: boolean): MovementRoutePr
       name: "walk",
       segments: WALK_ROUTE,
       minHorizontalDistanceM: 48,
+      minFrameSamples: 460,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     };

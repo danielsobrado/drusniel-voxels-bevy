@@ -686,7 +686,7 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   if (movement.liveBubbleEvictionsDelta > MOVEMENT_ROUTE_PROFILE.maxLiveBubbleEvictions) failures.push(`${sceneName}: movement live-bubble evictions ${movement.liveBubbleEvictionsDelta} > ${MOVEMENT_ROUTE_PROFILE.maxLiveBubbleEvictions}`);
   if (movement.streamEvictionsDelta > MOVEMENT_ROUTE_PROFILE.maxStreamEvictions) failures.push(`${sceneName}: movement streamed-CLOD evictions ${movement.streamEvictionsDelta} > ${MOVEMENT_ROUTE_PROFILE.maxStreamEvictions}`);
   failures.push(...evaluateMovementPerformance(sceneName, movement, {
-    minFrameSamples: WALK_ROUTE.reduce((total, segment) => total + segment.frames, 0),
+    minFrameSamples: MOVEMENT_ROUTE_PROFILE.minFrameSamples,
     maxFrameP99Ms: MAX_ROUTE_FRAME_P99_MS,
     maxFrameMs: MAX_ROUTE_FRAME_MS,
     maxWorkUnitMs: MAX_ROUTE_WORK_UNIT_MS,
