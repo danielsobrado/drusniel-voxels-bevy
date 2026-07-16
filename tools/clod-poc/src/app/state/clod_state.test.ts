@@ -76,6 +76,10 @@ function createState(liveBubbleDefault?: { enabled: boolean; radiusM: number; pi
 }
 
 describe("createClodSliceState", () => {
+  it("enables the master terrain streaming switch by default", () => {
+    expect(createState().terrainStreamingEnabled).toBe(true);
+  });
+
   it("records the live bubble default and pin flag", () => {
     const state = createState({ enabled: true, radiusM: 200, pinned: true });
 

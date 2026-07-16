@@ -43,7 +43,7 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
 
 function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePhaseInput {
   return {
-    state: { bubble: true, bubbleRadius: 96 } as TerrainFramePhaseInput["state"],
+    state: { terrainStreamingEnabled: true, bubble: true, bubbleRadius: 96 } as TerrainFramePhaseInput["state"],
     pageTransitionMode: "instant",
     crossfadeStep: 1,
     interaction: { mode: "orbit" } as TerrainFramePhaseInput["interaction"],
@@ -122,6 +122,23 @@ describe("vegetationRingCenter", () => {
 });
 
 describe("terrain frame live-bubble probe counters", () => {
+  it("freezes and resumes the bubble without clearing its last rendered stats", () => {
+    installCounters();
+    const input = makeInput({ ...BASE_BUBBLE_STATS, readyPages: 5, chunkGroupCount: 5 }, 1);
+    const update = input.nearFieldBubbleController.update as ReturnType<typeof vi.fn>;
+
+    const running = runTerrainFramePhase(input);
+    input.state.terrainStreamingEnabled = false;
+    const frozen = runTerrainFramePhase(input);
+    input.state.terrainStreamingEnabled = true;
+    const resumed = runTerrainFramePhase(input);
+
+    expect(running.bubbleStats.readyPages).toBe(5);
+    expect(frozen.bubbleStats).toBe(running.bubbleStats);
+    expect(resumed.bubbleStats.readyPages).toBe(5);
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+
   it("adds collider removals by delta and keeps total evictions cumulative", () => {
     const counters = installCounters();
 
