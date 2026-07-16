@@ -3,9 +3,10 @@ export interface StartupCameraPose {
   target: readonly [number, number, number];
 }
 
-const DEFAULT_CAMERA_HEIGHT_RATIO = 0.7;
-const DEFAULT_LOOK_OFFSET_RATIO = 0.28;
-const DEFAULT_TARGET_HEIGHT_M = 24;
+const OVERVIEW_CAMERA_HEIGHT_RATIO = 0.45;
+const OVERVIEW_CAMERA_BACK_RATIO = 0.82;
+const INFINITE_LOOK_OFFSET_RATIO = 0.34;
+const DEFAULT_TARGET_HEIGHT_M = 30;
 
 export function defaultStartupCameraPose(
   scene: string | null,
@@ -20,13 +21,13 @@ export function defaultStartupCameraPose(
   }
   if (scene === "infinite-islands") {
     return {
-      eye: [mid, worldCells * DEFAULT_CAMERA_HEIGHT_RATIO, mid],
-      target: [mid, DEFAULT_TARGET_HEIGHT_M, mid - worldCells * DEFAULT_LOOK_OFFSET_RATIO],
+      eye: [mid, worldCells * OVERVIEW_CAMERA_HEIGHT_RATIO, mid],
+      target: [mid, DEFAULT_TARGET_HEIGHT_M, mid - worldCells * INFINITE_LOOK_OFFSET_RATIO],
     };
   }
 
   return {
-    eye: [mid, worldCells * DEFAULT_CAMERA_HEIGHT_RATIO, mid + worldCells * 1.1],
+    eye: [mid, worldCells * OVERVIEW_CAMERA_HEIGHT_RATIO, mid + worldCells * OVERVIEW_CAMERA_BACK_RATIO],
     target: [mid, DEFAULT_TARGET_HEIGHT_M, mid],
   };
 }
