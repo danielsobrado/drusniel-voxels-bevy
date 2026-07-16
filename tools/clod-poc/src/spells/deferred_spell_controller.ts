@@ -10,6 +10,7 @@ export interface DeferredSpellController {
 
 export function createDeferredSpellController(
   target: SpellVfxController,
+  ready: Promise<unknown> = Promise.resolve(),
   schedule: SpellTaskScheduler = (task) => window.setTimeout(task, 0),
   cancel: SpellTaskCanceller = (taskId) => window.clearTimeout(taskId),
 ): DeferredSpellController {
@@ -17,12 +18,14 @@ export function createDeferredSpellController(
   let disposed = false;
 
   const enqueue = (task: () => void): void => {
-    if (disposed) return;
-    const taskId = schedule(() => {
-      pending.delete(taskId);
-      if (!disposed) task();
+    void ready.finally(() => {
+      if (disposed) return;
+      const taskId = schedule(() => {
+        pending.delete(taskId);
+        if (!disposed) task();
+      });
+      pending.add(taskId);
     });
-    pending.add(taskId);
   };
 
   return {
