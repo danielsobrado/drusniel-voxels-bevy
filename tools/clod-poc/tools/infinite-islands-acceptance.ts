@@ -7,6 +7,7 @@ import { clodUrl, launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
 import { evaluateMovementCoverage, evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
+import { resolveMovementRouteProfile, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
@@ -48,7 +49,6 @@ const FAST_SAMPLE_FRAMES = 60;
 const CONVERGENCE_TIMEOUT_MS = 360_000;
 const CONVERGENCE_POLL_MS = 500;
 const CONVERGENCE_STABLE_POLLS = 3;
-const MIN_WALK_ROUTE_DISTANCE_M = 48;
 const MOVEMENT_SAMPLE_FRAMES = 30;
 const MAX_ROUTE_FRAME_P99_MS = 100;
 const MAX_ROUTE_FRAME_MS = 1500;
@@ -71,11 +71,8 @@ const OUTSIDE_STARTUP_SPAWN: SceneExtra = {
   liveClodRootMaxCached: "4",
 };
 
-const WALK_ROUTE: MovementSegment[] = [
-  { label: "east-a", frames: 180, dx: 160, dz: 0 },
-  { label: "south-east", frames: 160, dx: 96, dz: 96 },
-  { label: "east-b", frames: 120, dx: 128, dz: 0 },
-];
+const MOVEMENT_ROUTE_PROFILE = resolveMovementRouteProfile(process.argv.includes("--long-route"));
+const WALK_ROUTE = MOVEMENT_ROUTE_PROFILE.segments;
 
 const SCENES: SceneSpec[] = [
   {
@@ -195,6 +192,7 @@ interface MovementReport {
   maxLiveBubbleReadyPages: number;
   maxLiveBubbleBuiltThisFrame: number;
   liveBubbleBuiltDelta: number;
+  liveBubbleEvictionsDelta: number;
   maxStreamCachedPages: number;
   maxStreamApplyPagesThisFrame: number;
   streamApplyPagesDelta: number;
@@ -235,13 +233,6 @@ interface SceneResult extends SceneReportInput {
 interface RunSceneOptions {
   reusePage: boolean;
   firstSceneOnPage: boolean;
-}
-
-interface MovementSegment {
-  label: string;
-  frames: number;
-  dx: number;
-  dz: number;
 }
 
 function rel(path: string): string {
@@ -660,6 +651,7 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     maxLiveBubbleReadyPages: maxCounter(samples, "live_bubble_ready_pages"),
     maxLiveBubbleBuiltThisFrame: maxCounter(samples, "live_bubble_built_this_frame"),
     liveBubbleBuiltDelta: counterDelta(samples, "live_bubble_built_total"),
+    liveBubbleEvictionsDelta: counterDelta(samples, "live_bubble_evictions_total"),
     maxStreamCachedPages: maxCounter(samples, "live_clod_stream_cached_pages"),
     maxStreamApplyPagesThisFrame: maxCounter(samples, "live_clod_stream_apply_pages_this_frame"),
     streamApplyPagesDelta: counterDelta(samples, "live_clod_stream_apply_pages_total"),
@@ -683,7 +675,7 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
 function evaluateMovementRoute(sceneName: string, movement: MovementReport | null): string[] {
   if (!movement) return [];
   const failures: string[] = [];
-  if (movement.horizontalDistanceM < MIN_WALK_ROUTE_DISTANCE_M) failures.push(`${sceneName}: movement route distance ${movement.horizontalDistanceM.toFixed(2)}m < ${MIN_WALK_ROUTE_DISTANCE_M}m`);
+  if (movement.horizontalDistanceM < MOVEMENT_ROUTE_PROFILE.minHorizontalDistanceM) failures.push(`${sceneName}: movement route distance ${movement.horizontalDistanceM.toFixed(2)}m < ${MOVEMENT_ROUTE_PROFILE.minHorizontalDistanceM}m`);
   if (!movement.startedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not start outside startup world`);
   if (!movement.endedOutsideStartupWorld) failures.push(`${sceneName}: movement route did not end outside startup world`);
   if (movement.maxLiveBubbleReadyPages <= 0) failures.push(`${sceneName}: movement route never observed ready live-bubble pages`);
@@ -691,6 +683,8 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   if (movement.maxStreamCachedPages <= 0) failures.push(`${sceneName}: movement route never observed cached streamed CLOD roots`);
   if (movement.streamApplyPagesDelta <= 0) failures.push(`${sceneName}: movement route never applied streamed CLOD roots during motion`);
   if (movement.streamEvictionsDelta + movement.streamStaleDiscardsDelta <= 0) failures.push(`${sceneName}: movement route never exercised streamed CLOD eviction or stale-discard paths`);
+  if (movement.liveBubbleEvictionsDelta > MOVEMENT_ROUTE_PROFILE.maxLiveBubbleEvictions) failures.push(`${sceneName}: movement live-bubble evictions ${movement.liveBubbleEvictionsDelta} > ${MOVEMENT_ROUTE_PROFILE.maxLiveBubbleEvictions}`);
+  if (movement.streamEvictionsDelta > MOVEMENT_ROUTE_PROFILE.maxStreamEvictions) failures.push(`${sceneName}: movement streamed-CLOD evictions ${movement.streamEvictionsDelta} > ${MOVEMENT_ROUTE_PROFILE.maxStreamEvictions}`);
   failures.push(...evaluateMovementPerformance(sceneName, movement, {
     minFrameSamples: WALK_ROUTE.reduce((total, segment) => total + segment.frames, 0),
     maxFrameP99Ms: MAX_ROUTE_FRAME_P99_MS,
@@ -993,7 +987,7 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
   console.log(`[infinite-accept] run ${rel(outDir)}`);
   console.log(`[infinite-accept] base ${process.env["CLOD_POC_BASE_URL"]}`);
-  console.log(`[infinite-accept] profile ${PROFILE} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES}`);
+  console.log(`[infinite-accept] profile ${PROFILE} route=${MOVEMENT_ROUTE_PROFILE.name} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES}`);
   const { browser, recipe } = await launchWebGPU();
   const sceneResults: SceneResult[] = [];
   try {
@@ -1036,6 +1030,7 @@ async function main(): Promise<void> {
     commit_sha: gitSha(),
     browser_launch_recipe: recipe,
     profile: PROFILE,
+    movement_route_profile: MOVEMENT_ROUTE_PROFILE.name,
     sample_frames: SAMPLE_FRAMES,
     world_pages: { configured: numTiming(firstStartupTimings, "startup.configured_world_pages"), startup: numTiming(firstStartupTimings, "startup.world_pages") },
     thresholds: {
