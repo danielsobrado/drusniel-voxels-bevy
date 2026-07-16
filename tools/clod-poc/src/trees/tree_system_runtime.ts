@@ -33,7 +33,14 @@ import { TreeGpuLightingProxyCache } from "./tree_system_gpu_lighting_proxy_cach
 import { TreePlacementDebugOverlay } from "./tree_placement_debug_overlay.js";
 import type { FallingTree, TreeLightingProxy, TreePatch, TreeStats, TreeSystemOptions, TreeWebGpuBackendAccess } from "./tree_system_types.js";
 import type { TreeIsolatedRenderer } from "./tree_system_runtime_types.js";
-import { treeCpuPatchInput, treeGpuRingInput, treeCreateGpuRingResources, treeClearGpuRing, treeUpdateStats } from "./tree_system_runtime_privates.js";
+import {
+  treeCpuPatchInput,
+  treeGpuRingInput,
+  treeCreateGpuRingResources,
+  treeRefreshGpuRingImpostors,
+  treeClearGpuRing,
+  treeUpdateStats,
+} from "./tree_system_runtime_privates.js";
 import { waitForTreeRendererSubmittedWork } from "./tree_renderer_gpu_sync.js";
 
 export class TreeSystem {
@@ -261,7 +268,7 @@ export class TreeSystem {
     const result = await this.assets.bakeImpostors(renderer);
     if (result.supported && this.settings.impostors.swapOnBake) {
       await waitForTreeRendererSubmittedWork(renderer);
-      this.clearGpuRing();
+      this.refreshGpuRingImpostors();
       // Geometry first: applyMaterials only assigns the billboard impostor
       // material to meshes that already carry the baked flat-card geometry.
       this.assets.replaceImpostorMeshGeometries(this.patches, this.meshBoundsState);
@@ -291,6 +298,12 @@ export class TreeSystem {
   createGpuRingResources(maxInstancesPerGroup: number) {
     if (!this.gpuBackend) throw new Error("Cannot create WebGPU tree draw resources without a backend");
     return treeCreateGpuRingResources(this, maxInstancesPerGroup);
+  }
+
+  refreshGpuRingImpostors(): boolean {
+    const swapped = treeRefreshGpuRingImpostors(this);
+    if (swapped) this.gpuLightingProxyCache.clear();
+    return swapped;
   }
 
   clearPatches(): void {
