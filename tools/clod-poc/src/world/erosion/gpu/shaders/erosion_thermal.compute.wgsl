@@ -12,11 +12,11 @@ fn accumulate(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!in_grid(x, z) || x < border || z < border || x >= params.grid.x - border || z >= params.grid.y - border) { return; }
   let index = cell_index(x, z);
   let width = params.grid.x;
-  var target = index - 1u;
-  if (state_a[index + 1u].height < state_a[target].height) { target = index + 1u; }
-  if (state_a[index - width].height < state_a[target].height) { target = index - width; }
-  if (state_a[index + width].height < state_a[target].height) { target = index + width; }
-  let difference = state_a[index].height - state_a[target].height;
+  var target_index = index - 1u;
+  if (state_a[index + 1u].height < state_a[target_index].height) { target_index = index + 1u; }
+  if (state_a[index - width].height < state_a[target_index].height) { target_index = index - width; }
+  if (state_a[index + width].height < state_a[target_index].height) { target_index = index + width; }
+  let difference = state_a[index].height - state_a[target_index].height;
   let hardness_byte = state_a[index].hardness >> 8u;
   let talus_limit = i32(talus_table[hardness_byte]);
   if (difference <= talus_limit) { return; }
@@ -24,7 +24,7 @@ fn accumulate(@builtin(global_invocation_id) gid: vec3<u32>) {
   let transfer = min(excess >> 1u, mul_q16(excess, params.sediment.w));
   if (transfer == 0u) { return; }
   atomicAdd(&state_b[index].thermal_delta, -i32(transfer));
-  atomicAdd(&state_b[target].thermal_delta, i32(transfer));
+  atomicAdd(&state_b[target_index].thermal_delta, i32(transfer));
 }
 
 @compute @workgroup_size(8, 8)
