@@ -6,6 +6,7 @@ import type { StreamCenter } from "./stream-center.js";
 import { computeRequiredFarSummaryTiles } from "./clipmap-rings.js";
 import { ProceduralWorldSource } from "../world_source/world_source.js";
 import { resolveTerrainFieldConfig } from "../terrain/terrain.js";
+import { emitSurfaceCommit, resetSurfaceCacheRevisionsForTests, surfaceRevisionAt } from "../stream/surface_cache_revisions.js";
 
 
 const flatSampler: FarTerrainSampler = {
@@ -14,6 +15,27 @@ const flatSampler: FarTerrainSampler = {
 };
 
 describe("far summary cache", () => {
+  it("records the global surface revision at build start", () => {
+    resetSurfaceCacheRevisionsForTests();
+    emitSurfaceCommit({ minX: -10, minZ: -10, maxX: 10, maxZ: 10 });
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+    config.stream.maxTileBuildsPerFrame = 1;
+    config.stream.maxTileCommitsPerFrame = 1;
+    const cache = new FarSummaryCache(config, surfaceRevisionAt);
+    const requests = computeRequiredFarSummaryTiles({
+      worldX: 0, worldZ: 0, predictedX: 0, predictedZ: 0, velocityX: 0, velocityZ: 0,
+    }, config);
+
+    cache.requestTiles(requests, 0, 0);
+    cache.buildSomeTiles(flatSampler, 0, 0, 1);
+
+    let builtAt: number | undefined;
+    cache.forEachTile((tile) => {
+      if (tile.state === "ready") builtAt = tile.builtAtGlobalRevision;
+    });
+    expect(builtAt).toBe(1);
+  });
+
   it("defers a completed base tile until enrichment publishes it", () => {
     const config = structuredClone(DEFAULT_FAR_SUMMARY_CONFIG);
     config.stream.maxTileBuildsPerFrame = 1;

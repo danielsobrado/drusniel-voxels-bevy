@@ -53,6 +53,23 @@ describe("planHeightfieldTileKeys", () => {
 });
 
 describe("HeightfieldTileCache", () => {
+  it("emits a surface commit when a tile becomes resident", async () => {
+    const committed: HeightfieldTile[] = [];
+    const cache = new HeightfieldTileCache(
+      config(),
+      0,
+      async (keys, revision) => ({ tiles: keys.map((key) => tile(key, revision)), buildMs: 1 }),
+      null,
+      (residentTile) => committed.push(residentTile),
+    );
+
+    cache.update({ x: 128, z: 128, frameIndex: 1 });
+    await drainMicrotasks();
+
+    expect(committed).toHaveLength(1);
+    expect(committed[0]?.key).toEqual({ x: 0, z: 0 });
+  });
+
   it("respects the batch budget and applies resolved tiles", async () => {
     const first = deferred<HeightfieldTileBuildResult>();
     const calls: WorldTileKey[][] = [];
