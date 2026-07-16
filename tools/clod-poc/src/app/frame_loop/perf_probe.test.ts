@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createFramePerfProbeFromQuery,
   createFramePerfPhaseTiming,
   summarizeFramePerfSamples,
   type FramePerfSample,
@@ -165,6 +166,42 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
 }
 
 describe("frame perf probe", () => {
+  it("mirrors every far-summary subphase for headless diagnostics", () => {
+    const counters: Record<string, number> = {};
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __drusnielClod: { stats: { counters } } },
+    });
+    const probe = createFramePerfProbeFromQuery(new URLSearchParams({
+      perfProbe: "1",
+      perfWarmupFrames: "0",
+      perfSampleFrames: "1",
+    }));
+
+    probe?.record(sample({
+      farSummaryMs: 9,
+      farSumTilesMs: 1,
+      farSumNaadfMs: 2,
+      farSumShellMs: 3,
+      farSumClipmapMs: 4,
+      farSumShellMoveMs: 5,
+      farSumShadowProxyMs: 6,
+      farSumBiomeStreamMs: 7,
+      farSumSunLightMs: 8,
+      farSumStatsDomMs: 9,
+    }));
+
+    expect(counters["framePerf.p95.farSumTilesMs"]).toBe(1);
+    expect(counters["framePerf.p95.farSumNaadfMs"]).toBe(2);
+    expect(counters["framePerf.p95.farSumShellMs"]).toBe(3);
+    expect(counters["framePerf.p95.farSumClipmapMs"]).toBe(4);
+    expect(counters["framePerf.p95.farSumShellMoveMs"]).toBe(5);
+    expect(counters["framePerf.p95.farSumShadowProxyMs"]).toBe(6);
+    expect(counters["framePerf.p95.farSumBiomeStreamMs"]).toBe(7);
+    expect(counters["framePerf.p95.farSumSunLightMs"]).toBe(8);
+    expect(counters["framePerf.p95.farSumStatsDomMs"]).toBe(9);
+  });
+
   it("zeros every frame-loop phase bucket", () => {
     expect(createFramePerfPhaseTiming()).toEqual({
       frameSetupMs: 0,

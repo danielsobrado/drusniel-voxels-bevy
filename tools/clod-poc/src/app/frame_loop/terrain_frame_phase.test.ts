@@ -187,4 +187,15 @@ describe("terrain frame live-bubble probe counters", () => {
 
     expect(counters["live_bubble_building_pages"]).toBe(2);
   });
+
+  it("mirrors near-bubble GPU lane occupancy", () => {
+    const counters = installCounters();
+
+    runTerrainFramePhase(makeInput({
+      ...BASE_BUBBLE_STATS,
+      inflightChunks: 4,
+    }, 1));
+
+    expect(counters["gpu_mesher_lane_busy_bubble"]).toBe(4);
+  });
 });

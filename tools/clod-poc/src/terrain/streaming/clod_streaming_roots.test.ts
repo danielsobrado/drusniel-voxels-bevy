@@ -11,11 +11,48 @@ import {
   sortStreamingClodPageCoordsForLoad,
   streamingClodPageHasRequiredNotReadyDescendant,
   streamingClodPageKey,
+  streamingReadyFrontierM,
   streamingClodRequiredPageCoords,
   type PageCoord,
   type StreamingClodRootBuildResult,
   type StreamingClodRootControllerDeps,
 } from "./clod_streaming_roots.js";
+
+describe("streamingReadyFrontierM", () => {
+  const center = new THREE.Vector3(16, 0, 16);
+  const required: PageCoord[] = [
+    { px: 0, pz: 0, level: 0, centerX: 16, centerZ: 16 },
+    { px: 1, pz: 0, level: 0, centerX: 48, centerZ: 16 },
+    { px: 0, pz: 0, level: 1, centerX: 32, centerZ: 32 },
+  ];
+
+  it("reports the conservative radius before the first missing refined page", () => {
+    const frontier = streamingReadyFrontierM(
+      center,
+      64,
+      32,
+      required,
+      new Set([streamingClodPageKey(0, 0, 0)]),
+    );
+
+    expect(frontier).toBeCloseTo(32 - (32 * Math.SQRT2 * 0.5), 6);
+  });
+
+  it("reaches the requested radius when every required refined page is ready", () => {
+    const frontier = streamingReadyFrontierM(
+      center,
+      64,
+      32,
+      required,
+      new Set([
+        streamingClodPageKey(0, 0, 0),
+        streamingClodPageKey(1, 0, 0),
+      ]),
+    );
+
+    expect(frontier).toBe(64);
+  });
+});
 
 const TEST_CFG: ClodPagesConfig = {
   page: { chunks_per_page: 2, chunk_size: 16, halo_chunks: 1, quadtree_levels: 2 },
