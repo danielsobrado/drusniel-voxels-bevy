@@ -12,10 +12,11 @@ import {
   mix,
   normalize,
   positionGeometry,
-  screenCoordinate,
+  sin,
   texture,
   uniform,
   uv,
+  vec2,
   vec3,
 } from "three/tsl";
 import type { TreeSettings } from "./tree_config.js";
@@ -55,6 +56,7 @@ const TREE_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
 const TREE_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_IMPOSTOR_MIN_COVERAGE = 0.0001;
+const TREE_IMPOSTOR_DITHER_SALT = 1601;
 
 export function createTreeImpostorNodeMaterial(
   settings: TreeSettings,
@@ -72,7 +74,7 @@ export function createTreeImpostorNodeMaterial(
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample, billboardNormal) : albedo;
   material.normalNode = normalNode;
   (material as unknown as { opacityNode: TslNode }).opacityNode = sample.w;
-  (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
+  (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask(settings.seed);
   material.alphaTest = settings.impostors.alphaTest;
   material.side = THREE.DoubleSide;
   material.transparent = false;
@@ -104,7 +106,7 @@ export function createTreeImpostorBlendNodeMaterial(
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample, billboardNormal) : albedo;
   material.normalNode = normalNode;
   (material as unknown as { opacityNode: TslNode }).opacityNode = coverage;
-  (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
+  (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask(settings.seed);
   material.alphaTest = settings.impostors.alphaTest;
   material.side = THREE.DoubleSide;
   material.transparent = false;
@@ -123,6 +125,7 @@ export function createTreeImpostorMaterial(
       normalDepthMap: { value: atlas.normalDepth ?? null },
       hasNormalDepthMap: { value: atlas.normalDepth ? 1 : 0 },
       alphaTest: { value: settings.impostors.alphaTest },
+      treeDitherSeed: { value: settings.seed },
     },
     vertexShader: TREE_IMPOSTOR_VERTEX_SHADER,
     fragmentShader: TREE_IMPOSTOR_FRAGMENT_SHADER,
@@ -143,6 +146,7 @@ export function createTreeImpostorBlendMaterial(
       normalDepthMap: { value: atlas.normalDepth ?? null },
       hasNormalDepthMap: { value: atlas.normalDepth ? 1 : 0 },
       alphaTest: { value: settings.impostors.alphaTest },
+      treeDitherSeed: { value: settings.seed },
     },
     vertexShader: TREE_IMPOSTOR_BLEND_VERTEX_SHADER,
     fragmentShader: TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER,
@@ -156,6 +160,7 @@ export function updateTreeImpostorMaterialSettings(material: THREE.Material, set
   let changed = false;
   if (material instanceof THREE.ShaderMaterial && "alphaTest" in material.uniforms) {
     material.uniforms.alphaTest.value = settings.impostors.alphaTest;
+    if ("treeDitherSeed" in material.uniforms) material.uniforms.treeDitherSeed.value = settings.seed;
   } else {
     changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "alphaTest", settings.impostors.alphaTest, "tree-impostor-alpha-test") || changed;
   }
@@ -196,10 +201,6 @@ function blendCoverageNormalizedTreeImpostorNodeAlbedo(
 }
 
 function createTreeUnlitImpostorNodeMaterial(name: string): TreeNodeMaterial {
-  // Unlit like every other tree material: colorNode already carries the manual
-  // sun/sky relight. A lit (physical) material would shade that color a second
-  // time with scene lights and the captured normal, collapsing sun-averse card
-  // texels to black and washing distant mips toward grey.
   return trackCreatedMaterial(new MeshBasicNodeMaterial(), name) as TreeNodeMaterial;
 }
 
@@ -249,11 +250,17 @@ function decodeTreeImpostorPackedNormalNode(sample: TslNode): TslNode {
   return sample.xyz.mul(2).sub(1);
 }
 
-function treeImpostorNodeDitherMask(): TslNode {
+function treeImpostorNodeDitherMask(seedValue: number): TslNode {
   const lodFade: TslNode = attribute("treeLodFade", "float");
   const role: TslNode = attribute("treeLodDitherRole", "float");
+  const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+  const seed = float(seedValue);
+  const salt = float(TREE_IMPOSTOR_DITHER_SALT);
   const ign: TslNode = fract(
-    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
+    sin(dot(
+      worldXZ.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))),
+      vec2(41.3, 289.1),
+    )).mul(43758.5453),
   );
   const primary: TslNode = ign.lessThan(lodFade);
   const secondary: TslNode = ign.greaterThanEqual(float(1).sub(lodFade));
@@ -280,12 +287,20 @@ function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode, billboa
 export const TREE_IMPOSTOR_VERTEX_SHADER = `
 #define TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT 0.65
 attribute vec4 treeImpostorUvRect;
+attribute vec2 treeWorldXZ;
 attribute float treeLodFade;
 attribute float treeLodDitherRole;
+uniform float treeDitherSeed;
 varying vec2 vTreeImpostorUv;
 varying vec3 vTreeImpostorBillboardNormal;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
+varying float vTreeImpostorLodNoise;
+
+float treeImpostorStableDither(vec2 worldXZ) {
+  vec2 seeded = worldXZ + vec2(treeDitherSeed * 0.017 + 1601.0, treeDitherSeed * 0.031 - 1601.0);
+  return fract(sin(dot(seeded, vec2(127.1, 311.7))) * 43758.5453123);
+}
 
 vec3 treeImpostorBillboardNormal(vec3 origin) {
   vec3 toCamera = cameraPosition - origin;
@@ -317,6 +332,7 @@ void main() {
   vTreeImpostorUv = treeImpostorUvRect.xy + uv * atlasScale;
   vTreeImpostorLodFade = treeLodFade;
   vTreeImpostorLodDitherRole = treeLodDitherRole;
+  vTreeImpostorLodNoise = treeImpostorStableDither(treeWorldXZ);
   vec3 worldPosition = treeImpostorBillboardWorldPosition(position);
   gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
 }
@@ -332,10 +348,7 @@ varying vec2 vTreeImpostorUv;
 varying vec3 vTreeImpostorBillboardNormal;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
-
-float treeImpostorDither(vec2 fragCoord) {
-  return fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715))));
-}
+varying float vTreeImpostorLodNoise;
 
 bool treeImpostorDitherKeep(float ign, float fade, float role) {
   if (role < 0.5) return ign < fade;
@@ -365,7 +378,7 @@ vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal) {
 void main() {
   vec4 color = texture2D(map, vTreeImpostorUv);
   if (color.a < alphaTest) discard;
-  if (!treeImpostorDitherKeep(treeImpostorDither(gl_FragCoord.xy), vTreeImpostorLodFade, vTreeImpostorLodDitherRole)) discard;
+  if (!treeImpostorDitherKeep(vTreeImpostorLodNoise, vTreeImpostorLodFade, vTreeImpostorLodDitherRole)) discard;
   vec3 albedo = treeImpostorDecodeAlbedo(color);
   if (hasNormalDepthMap > 0.5) {
     vec4 normalDepth = texture2D(normalDepthMap, vTreeImpostorUv);
@@ -382,8 +395,10 @@ attribute vec4 treeImpostorUvRect1;
 attribute vec4 treeImpostorUvRect2;
 attribute vec4 treeImpostorUvRect3;
 attribute vec4 treeImpostorBlendWeights;
+attribute vec2 treeWorldXZ;
 attribute float treeLodFade;
 attribute float treeLodDitherRole;
+uniform float treeDitherSeed;
 varying vec2 vTreeImpostorUv0;
 varying vec2 vTreeImpostorUv1;
 varying vec2 vTreeImpostorUv2;
@@ -392,6 +407,12 @@ varying vec3 vTreeImpostorBillboardNormal;
 varying vec4 vTreeImpostorBlendWeights;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
+varying float vTreeImpostorLodNoise;
+
+float treeImpostorStableDither(vec2 worldXZ) {
+  vec2 seeded = worldXZ + vec2(treeDitherSeed * 0.017 + 1601.0, treeDitherSeed * 0.031 - 1601.0);
+  return fract(sin(dot(seeded, vec2(127.1, 311.7))) * 43758.5453123);
+}
 
 vec2 treeImpostorAtlasUv(vec4 rect) {
   return rect.xy + uv * (rect.zw - rect.xy);
@@ -430,6 +451,7 @@ void main() {
   vTreeImpostorBlendWeights = treeImpostorBlendWeights;
   vTreeImpostorLodFade = treeLodFade;
   vTreeImpostorLodDitherRole = treeLodDitherRole;
+  vTreeImpostorLodNoise = treeImpostorStableDither(treeWorldXZ);
   vec3 worldPosition = treeImpostorBillboardWorldPosition(position);
   gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
 }
@@ -449,10 +471,7 @@ varying vec3 vTreeImpostorBillboardNormal;
 varying vec4 vTreeImpostorBlendWeights;
 varying float vTreeImpostorLodFade;
 varying float vTreeImpostorLodDitherRole;
-
-float treeImpostorDither(vec2 fragCoord) {
-  return fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715))));
-}
+varying float vTreeImpostorLodNoise;
 
 bool treeImpostorDitherKeep(float ign, float fade, float role) {
   if (role < 0.5) return ign < fade;
@@ -500,7 +519,7 @@ void main() {
   vec4 weightedCoverage = coverages * vTreeImpostorBlendWeights;
   float coverage = dot(coverages, vTreeImpostorBlendWeights);
   if (coverage < alphaTest) discard;
-  if (!treeImpostorDitherKeep(treeImpostorDither(gl_FragCoord.xy), vTreeImpostorLodFade, vTreeImpostorLodDitherRole)) discard;
+  if (!treeImpostorDitherKeep(vTreeImpostorLodNoise, vTreeImpostorLodFade, vTreeImpostorLodDitherRole)) discard;
   vec3 albedo = (
     treeImpostorDecodeAlbedo(c0) * weightedCoverage.x +
     treeImpostorDecodeAlbedo(c1) * weightedCoverage.y +
