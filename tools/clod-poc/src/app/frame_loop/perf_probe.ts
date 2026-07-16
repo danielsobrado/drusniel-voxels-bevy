@@ -1,5 +1,5 @@
 import type { FramePerfMetric, FramePerfPhaseTiming, FramePerfSample, FramePerfSummary, FramePerfSnapshot, FramePerfHooks, FramePerfProbe } from "./perf_probe_types.js";
-import { FRAME_PERF_ALL_METRICS, FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS } from "./perf_probe_constants.js";
+import { FRAME_PERF_ALL_METRICS, FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_FAR_SUMMARY_BUCKETS, FRAME_PERF_PROP_BUCKETS } from "./perf_probe_constants.js";
 import { intParam, statsFor, rankBuckets, avgCounter, minPositiveCounter, avgGpuPasses, countTreeGpuStatuses, countCustomPropGpuStatuses } from "./perf_probe_helpers.js";
 
 export type { FramePerfMetric, FramePerfBroadBucket, FramePerfPropBucket, FramePerfPhaseTiming, FramePerfSample, FramePerfMetricStats, FramePerfBucketRank, FramePerfSummary, FramePerfSnapshot, FramePerfHooks, FramePerfProbe } from "./perf_probe_types.js";
@@ -44,6 +44,7 @@ const MIRRORED_METRICS: readonly FramePerfMetric[] = [
   "terrainPhaseMs",
   "bubbleMs",
   "farSummaryMs",
+  ...FRAME_PERF_FAR_SUMMARY_BUCKETS,
   "longViewDiagnosticsMs",
   "vegetationTotalMs",
   "grassMs",

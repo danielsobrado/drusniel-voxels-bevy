@@ -171,6 +171,7 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_waiting_on_tiles"] = stats.waitingOnTiles;
   target["live_clod_stream_build_budget"] = stats.buildBudget;
   target["live_clod_stream_inflight_batches"] = stats.inflightBatches;
+  target["gpu_mesher_lane_busy_root"] = stats.inflightBatches;
   target["live_clod_stream_max_inflight_batches"] = stats.maxInflightBatches;
   target["live_clod_stream_apply_queue_pages"] = stats.applyQueuePages;
   target["live_clod_stream_active_root_pages"] = stats.activeRootPages;
@@ -184,6 +185,7 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_refinement_inflight_pages"] = stats.refinementInflightPages;
   target["live_clod_stream_parent_coverage_violations"] = stats.parentCoverageViolations;
   target["live_clod_stream_ready_pages"] = stats.readyPages;
+  target["live_clod_stream_ready_frontier_m"] = stats.readyFrontierM;
   target["live_clod_stream_apply_pages_this_frame"] = stats.applyPagesThisFrame;
   target["live_clod_stream_apply_pages_total"] = streamApplyPagesTotal;
   target["live_clod_stream_apply_ms"] = stats.applyMs;

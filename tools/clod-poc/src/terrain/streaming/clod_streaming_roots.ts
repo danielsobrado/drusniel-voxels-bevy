@@ -26,6 +26,7 @@ export interface StreamingClodRootStats {
   refinementInflightPages: number;
   parentCoverageViolations: number;
   readyPages: number;
+  readyFrontierM: number;
   scheduledPagesThisFrame: number;
   applyPagesThisFrame: number;
   applyMs: number;
@@ -397,6 +398,8 @@ function writeStreamingProbeCounters(stats: StreamingClodRootStats): void {
   counters["live_clod_stream_refinement_inflight_pages"] = stats.refinementInflightPages;
   counters["live_clod_stream_parent_coverage_violations"] = stats.parentCoverageViolations;
   counters["live_clod_stream_ready_pages"] = stats.readyPages;
+  counters["live_clod_stream_ready_frontier_m"] = stats.readyFrontierM;
+  counters["gpu_mesher_lane_busy_root"] = stats.inflightBatches;
   counters["live_clod_stream_probe_active"] = stats.probeActive;
   counters["live_clod_stream_probe_requested_pages_total"] = stats.probeRequestedPagesTotal;
   counters["live_clod_stream_probe_apply_pages_total"] = stats.probeApplyPagesTotal;
@@ -564,6 +567,29 @@ export function streamingClodRequiredPageCoords(center: THREE.Vector3, radiusM: 
   }
 
   return sortStreamingClodPageCoordsForLoad([...coordsById.values()], center);
+}
+
+/** Returns the conservative radius whose required level-zero pages are ready. */
+export function streamingReadyFrontierM(
+  center: Pick<THREE.Vector3, "x" | "z">,
+  radiusM: number,
+  pageSizeM: number,
+  required: readonly PageCoord[],
+  refinedReadyIds: ReadonlySet<string>,
+): number {
+  const radius = Math.max(0, Number.isFinite(radiusM) ? radiusM : 0);
+  const pageSize = Math.max(1, Number.isFinite(pageSizeM) ? pageSizeM : 1);
+  const halfDiagonal = pageSize * Math.SQRT2 * 0.5;
+  let frontier = radius;
+  for (const coord of required) {
+    if (coordLevel(coord) !== 0) continue;
+    if (refinedReadyIds.has(streamingClodPageKey(coord.px, coord.pz, 0))) continue;
+    frontier = Math.min(
+      frontier,
+      Math.max(0, Math.hypot(center.x - coord.centerX, center.z - coord.centerZ) - halfDiagonal),
+    );
+  }
+  return frontier;
 }
 
 export function pageInsideFiniteStartupWorld(px: number, pz: number, worldPagesX: number, worldPagesZ: number, level = 0): boolean {
@@ -1222,6 +1248,11 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       }
       const inflightPageLevels = [...inFlight.values()].flatMap((batch) => [...batch.coordsById.values()].map((coord) => coordLevel(coord)));
       const coverage = countStreamCoverage(requiredIds);
+      const refinedReadyIds = new Set(
+        [...cached.entries()]
+          .filter(([id, entry]) => parseStreamingClodPageKey(id).level === 0 && entry.activeEligible && !staleRootIds.has(id))
+          .map(([id]) => id),
+      );
       const transition = transitionSnapshot();
       latest = {
         requiredPages: requiredIds.size,
@@ -1247,6 +1278,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
         refinementInflightPages: coverage.refinementInflightPages,
         parentCoverageViolations: coverage.parentCoverageViolations,
         readyPages: activeRootTransition ? transitionRenderableRootIds(activeRootTransition).size : activeRootIds.size,
+        readyFrontierM: streamingReadyFrontierM(center, radiusM, pageSize, required, refinedReadyIds),
         scheduledPagesThisFrame,
         applyPagesThisFrame: applied.applied,
         applyMs: applied.applyMs,
@@ -1352,6 +1384,7 @@ function emptyStats(
     refinementInflightPages: 0,
     parentCoverageViolations: 0,
     readyPages: 0,
+    readyFrontierM: 0,
     scheduledPagesThisFrame: 0,
     applyPagesThisFrame: 0,
     applyMs: 0,

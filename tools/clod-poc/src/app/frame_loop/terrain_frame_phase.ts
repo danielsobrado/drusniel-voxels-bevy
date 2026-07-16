@@ -168,6 +168,7 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_max_inflight_chunks"] = stats.gpuMaxInflightChunks;
   counters["live_bubble_pending_chunks"] = stats.pendingChunks;
   counters["live_bubble_inflight_chunks"] = stats.inflightChunks;
+  counters["gpu_mesher_lane_busy_bubble"] = stats.inflightChunks;
   counters["live_bubble_ready_visual_pages"] = stats.readyVisualPages;
   counters["live_bubble_avg_chunk_ms"] = stats.avgChunkMs;
   counters["live_bubble_slowest_page_ms"] = stats.slowestPageMs;
