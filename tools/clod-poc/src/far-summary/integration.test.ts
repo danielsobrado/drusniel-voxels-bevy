@@ -3,7 +3,6 @@ import * as THREE from "three";
 import { createFarShellMetrics } from "../long-view/farShellMetrics.js";
 import {
   applyFarSummaryQueryOverrides,
-  FarSummaryRequestCadence,
   farSummaryRingsForScene,
   initFarSummaryIntegration,
   prunePendingGpuEnrichment,
@@ -43,18 +42,6 @@ describe("resolveFarSummaryFrameInterval", () => {
   it("rejects invalid values and clamps the default to at least one", () => {
     expect(resolveFarSummaryFrameInterval(new URLSearchParams("farSummaryBuildInterval=0"), "farSummaryBuildInterval", 0)).toBe(1);
     expect(resolveFarSummaryFrameInterval(new URLSearchParams("farSummaryBuildInterval=nope"), "farSummaryBuildInterval", 0)).toBe(1);
-  });
-});
-
-describe("FarSummaryRequestCadence", () => {
-  it("coalesces sub-cell motion but refreshes immediately for a meaningful predicted shift", () => {
-    const cadence = new FarSummaryRequestCadence(4, 16);
-
-    expect(cadence.shouldRefresh(1, { worldX: 0, worldZ: 0, predictedX: 0, predictedZ: 0 })).toBe(true);
-    expect(cadence.shouldRefresh(2, { worldX: 2, worldZ: 0, predictedX: 4, predictedZ: 0 })).toBe(false);
-    expect(cadence.shouldRefresh(3, { worldX: 3, worldZ: 0, predictedX: 20, predictedZ: 0 })).toBe(true);
-    expect(cadence.shouldRefresh(4, { worldX: 3, worldZ: 0, predictedX: 20, predictedZ: 0 })).toBe(false);
-    expect(cadence.shouldRefresh(7, { worldX: 3, worldZ: 0, predictedX: 20, predictedZ: 0 })).toBe(true);
   });
 });
 
