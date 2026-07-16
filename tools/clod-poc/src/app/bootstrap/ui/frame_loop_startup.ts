@@ -39,6 +39,7 @@ import type { ClodPageNode } from "../../../types.js";
 import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
 import { runTerrainStreamingWork } from "../../../stream/terrain_streaming_control.js";
+import type { StreamCursor } from "../../../stream/stream_cursor.js";
 import {
   heightfieldTilesReadyForPage,
   updateHeightfieldTileClientRuntime,
@@ -138,25 +139,6 @@ function streamWorkPending(stats: StreamingClodRootStats): boolean {
     || stats.safetyInflightPages > 0
     || stats.parentCoverageViolations > 0
     || stats.transitionActiveGroups > 0;
-}
-
-function streamingWorldCenter(
-  streamingScene: boolean,
-  interactionMode: string,
-  player: { spawned: boolean; position: { x: number; z: number } },
-  camera: { position: { x: number; z: number } },
-  controls: { target: { x: number; z: number } },
-): THREE.Vector3 {
-  // Must match canonicalWorldCenter in terrain_frame_phase so streamed CLOD pages stay
-  // concentric with the near bubble / vegetation / far shell: player in play mode, the spawned
-  // player (camera before spawn) in streaming scenes, orbit target otherwise.
-  if (interactionMode === "playing") return new THREE.Vector3(player.position.x, 0, player.position.z);
-  if (streamingScene) {
-    const src = player.spawned ? player.position : camera.position;
-    return new THREE.Vector3(src.x, 0, src.z);
-  }
-  const src = controls.target;
-  return new THREE.Vector3(src.x, 0, src.z);
 }
 
 function mirrorStreamingClodRootCounters(
@@ -503,9 +485,9 @@ export function runFrameLoopStartup(
   let lastStreamCenterX = Number.NaN;
   let lastStreamCenterZ = Number.NaN;
   const streamingIdleUpdateDistanceM = Math.max(cfg.page.chunk_size, cfg.page.chunks_per_page * cfg.page.chunk_size * STREAMING_ROOT_IDLE_UPDATE_PAGE_FACTOR);
-  const updateSelectionWithStreaming = () => {
+  const updateSelectionWithStreaming = (cursor: StreamCursor) => {
     beginStreamViewPreparationFrame();
-    const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
+    const center = new THREE.Vector3(cursor.center.x, 0, cursor.center.z);
     const previousStats = streamingClodRootController.stats();
     const streamStats = runStreamingSelectionUpdate(
       state.terrainStreamingEnabled,
@@ -513,7 +495,10 @@ export function runFrameLoopStartup(
       () => updateHeightfieldTileClientRuntime(input.clodWorker, {
         x: center.x,
         z: center.z,
-        frameIndex: selectionController.stats().frameId,
+        frameIndex: cursor.frameId,
+        deltaSeconds: cursor.deltaSeconds,
+        velocityX: cursor.velocityMps.x,
+        velocityZ: cursor.velocityMps.z,
       }),
       () => {
         const dx = center.x - lastStreamCenterX;
@@ -554,7 +539,7 @@ export function runFrameLoopStartup(
     waterWeather: { waterController, deepOceanSurface, deepOceanMaterial, waterField, deepOceanConfig, deepOceanMeshPresent, oceanSampler, weatherController, updateWeatherStats, weatherStatsController: session.weatherStatsController },
     stats: { getGrassStats: () => grassStats.current, setGrassStats: (stats: GrassStats | null) => { grassStats.current = stats; }, getTreeStats: () => treeStats.current, setTreeStats: (stats: TreeStats | null) => { treeStats.current = stats; }, getStoneStats: () => stoneStats.current, setStoneStats: (stats: StoneStats | null) => { stoneStats.current = stats; }, getUnderstoryStats: () => understoryStats.current, setUnderstoryStats: (stats: UnderstoryStats | null) => { understoryStats.current = stats; }, getForestLightingStats: () => forestLightingStats.current, setForestLightingStats: (stats: ForestLightingStats | null) => { forestLightingStats.current = stats; }, formatTreeGpuSummary, formatUnderstoryGpuSummary, getPageGeometryCacheStats: () => input.terrainView.pageGeometryCache.stats(), getRenderNodeCacheStats: () => input.terrainView.renderNodeCache.stats(), statsPresenter, updateInfo, averageFpsRef: session.averageFpsRef, statsSyncThrottleConfig: clodRuntime.stats },
     diagnostics: { maxTerrainLevel: diagnosticsTerrainMaxLevel, farShellBuilt: () => farShellController.isBuilt(), farShellCanopyEnabled: () => farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null, getFarShellMetrics: () => longView.farShellMetrics, infiniteFarShellActive: () => longView.infiniteFarShell !== undefined, isLongView: longView.isLongView, phase0TargetVisibleM: longView.phase0TargetVisibleM, phase0Config: longView.phase0Config, queryScene: longView.queryScene, phase0VelocityX: longView.phase0VelocityX, phase0VelocityZ: longView.phase0VelocityZ, phase0Streaming: diagnosticsPhase0Streaming, longViewDiagnosticsCfg: { page: { chunk_size: cfg.page.chunk_size, chunks_per_page: cfg.page.chunks_per_page } }, getFarShellRadiusFactor: () => state.farShellRadiusFactor, getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert, getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled, getFarClipmapOwnershipSnapshot: () => farClipmapController?.ownershipSnapshot() },
-    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera, worldCenter) => { input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera, worldCenter); if (farClipmapController) { const stats = timeFarSummarySubphase("farSumClipmapMs", () => farClipmapController.update(worldCenter, camera.position)); if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats); } if (streamingScene) timeFarSummarySubphase("farSumShellMoveMs", () => farShellController.moveTo(worldCenter.x, worldCenter.z)); timeFarSummarySubphase("farSumSunLightMs", () => { sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now()); syncSunLightCounters(); }); timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay()); } } : undefined,
+    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime ? { onFarSummaryUpdate: (camera, cursor) => { const worldCenter = new THREE.Vector3(cursor.center.x, 0, cursor.center.z); input.onFarSummaryUpdate?.(camera, cursor); if (farClipmapController) { const stats = timeFarSummarySubphase("farSumClipmapMs", () => farClipmapController.update(worldCenter, camera.position)); if (longView.hooks?.stats) publishFarClipmapStatsToCounters(longView.hooks.stats.counters, stats); } if (streamingScene) timeFarSummarySubphase("farSumShellMoveMs", () => farShellController.moveTo(worldCenter.x, worldCenter.z)); timeFarSummarySubphase("farSumSunLightMs", () => { sunLightRuntime?.update(camera, currentLighting().sunDirection, cursor.frameId, performance.now()); syncSunLightCounters(); }); timeFarSummarySubphase("farSumStatsDomMs", () => session.naadfStatsController?.updateDisplay()); } } : undefined,
     floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,
     construction: constructionController ? { update: () => { constructionController.update(); session.constructionBuildActive = constructionController.stats().active; }, isActive: () => constructionController.stats().active } : undefined,
     combat: combatController ? { update: (timeMs) => combatController.update(timeMs) } : undefined,

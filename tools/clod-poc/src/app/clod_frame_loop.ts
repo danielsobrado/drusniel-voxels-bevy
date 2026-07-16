@@ -18,6 +18,8 @@ import { createP0DirtyAtlasExercise } from "./frame_loop/p0_dirty_atlas_exercise
 import { materialChurnDiagnostics } from "../rendering/material_churn/material_churn_diagnostics.js";
 import { aggregateGpuVegetationEarlyRejectCounters } from "../vegetation/gpu_vegetation_early_reject_counters.js";
 import { runTerrainStreamingWork } from "../stream/terrain_streaming_control.js";
+import { publishStreamCursorCounters, StreamCursorTracker } from "../stream/stream_cursor.js";
+import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
@@ -163,6 +165,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   let lastStatsModeKey = "";
   let lastStatsDecision: StatsSyncThrottleDecision = { shouldRun: false, reason: "skipped" };
   let terrainStreamingFrozenFrames = 0;
+  const streamCursorTracker = new StreamCursorTracker();
 
   const diagnosticsPageSizeM = diagnostics.longViewDiagnosticsCfg.page.chunks_per_page * diagnostics.longViewDiagnosticsCfg.page.chunk_size;
   const diagnosticsChunksPerPage = diagnostics.longViewDiagnosticsCfg.page.chunks_per_page;
@@ -256,6 +259,16 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
       player.controls.update();
     });
+    const streamCursor = streamCursorTracker.update({
+      frameId: selectionStats.frameId,
+      deltaSeconds: playerDelta,
+      interactionMode: player.interaction.mode,
+      player: player.player,
+      camera: render.camera,
+      orbitTarget: player.controls.target,
+      cameraRelativeWorld: runtimeWorldUsesCameraRelativeCoordinates(),
+    });
+    publishStreamCursorCounters(render.getHooks()?.stats?.counters, streamCursor);
     timed(collectFrameTiming, phaseTiming, "constructionMs", () => {
       construction?.update();
     });
@@ -272,7 +285,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     if (collectFrameTiming) {
       const selectionOuterStart = performance.now();
       const updateStart = selectionOuterStart;
-      terrain.updateSelection();
+      terrain.updateSelection(streamCursor);
       const updateMs = performance.now() - updateStart;
       const statsStart = performance.now();
       selectionStats = terrain.selectionController.stats();
@@ -283,11 +296,12 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       addExtraTiming(phaseTiming, "selectionOuter.statsCallMs", statsMs);
       addExtraTiming(phaseTiming, "selectionOuter.wrapperGapMs", Math.max(0, outerMs - updateMs - statsMs));
     } else {
-      terrain.updateSelection();
+      terrain.updateSelection(streamCursor);
       selectionStats = terrain.selectionController.stats();
     }
 
     const terrainPhaseResult = timed(collectFrameTiming, phaseTiming, "terrainPhaseMs", () => runTerrainFramePhase({
+      cursor: streamCursor,
       state: player.state,
       pageTransitionMode: terrain.pageTransitionMode,
       crossfadeStep: terrain.crossfadeStep,
@@ -305,7 +319,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
       runTerrainStreamingWork(terrainStreamingEnabled, () => {
-        farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera, terrainPhaseResult.worldCenter);
+        farSummary?.onFarSummaryUpdate?.(render.camera, streamCursor);
       });
       floatingOrigin?.controller.rebaseIfNeeded({ camera: render.camera, controls: player.controls, player: player.player, terrainColliders: floatingOrigin.terrainColliders, frameIndex: selectionStats.frameId });
     });

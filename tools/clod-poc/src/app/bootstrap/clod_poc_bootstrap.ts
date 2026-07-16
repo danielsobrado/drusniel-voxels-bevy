@@ -515,7 +515,10 @@ export async function bootstrapClodPoc() {
           let shellRefreshCommitRev = 0;
           let framesSinceShellRefresh = 0;
           const SHELL_REFRESH_INTERVAL_FRAMES = 120;
-          return (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, worldCenter: THREE.Vector3) => {
+          return (camera: THREE.PerspectiveCamera, cursor: import("../../stream/stream_cursor.js").StreamCursor) => {
+            const frameIndex = cursor.frameId;
+            const deltaSeconds = cursor.deltaSeconds;
+            const worldCenter = cursor.center;
             const originStats = floatingOrigin.stats();
             if (postRenderer.longViewHooks?.stats) {
               postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
@@ -525,7 +528,7 @@ export async function bootstrapClodPoc() {
               postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
             }
             infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
-            if (farSummaryIntegration) timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, deltaSeconds, camera, worldCenter));
+            if (farSummaryIntegration) timeFarSummarySubphase("farSumTilesMs", () => farSummaryIntegration!.update(frameIndex, camera, cursor));
             if (naadfIntegration) timeFarSummarySubphase("farSumNaadfMs", () => naadfIntegration.update(frameIndex, deltaSeconds, camera));
             // In far-clipmap replace mode the shell mesh is hidden and out of the scene —
             // the clipmap owns the far band — so the shell's sliced CPU height rebuild

@@ -18,7 +18,8 @@ import {
   type FarSummaryUnifiedEnrichmentState,
   type FarTerrainSampler,
 } from "./summary-tile-builder.js";
-import { updateStreamCenter, type StreamCenter } from "./stream-center.js";
+import type { StreamCenter } from "./stream-center.js";
+import type { StreamCursor } from "../stream/stream_cursor.js";
 import { computeRequiredFarSummaryTiles, type FarSummaryRingRequest } from "./clipmap-rings.js";
 import { FarSummaryDebugOverlay } from "./debug-overlay.js";
 import { createFarSummaryStats } from "./stats.js";
@@ -63,7 +64,7 @@ export interface FarSummaryIntegration {
   readonly debugOverlay: FarSummaryDebugOverlay;
   readonly stats: FarSummaryStats;
 
-  update: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, streamCenter?: { x: number; z: number }) => void;
+  update: (frameIndex: number, camera: THREE.PerspectiveCamera, cursor: StreamCursor) => void;
   getHeightProvider: () => FarHeightProvider;
   getGpuAtlasView: () => FarSummaryGpuAtlasView | undefined;
   getStreamCenter: () => StreamCenter;
@@ -259,7 +260,7 @@ export function initFarSummaryIntegration(
   if (gpuRenderAtlas) setActiveFarSummaryGpuAtlasView(gpuRenderAtlas.view);
 
   let frameIndex = 0;
-  let previousCenter: StreamCenter | null = null;
+  let hasPreviousCenter = false;
   let currentCenter: StreamCenter = {
     worldX: 0, worldZ: 0,
     predictedX: 0, predictedZ: 0,
@@ -268,19 +269,19 @@ export function initFarSummaryIntegration(
   let forceSlowBuilds = false;
   let buildDelayMs = 0;
 
-  const update = (_frameIndexArg: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, streamCenter?: { x: number; z: number }) => {
+  const update = (_frameIndexArg: number, _camera: THREE.PerspectiveCamera, cursor: StreamCursor) => {
     frameIndex++;
-
-    // Prefer the canonical world center (player / orbit target) so far tiles stay concentric
-    // with the near bubble and streamed CLOD pages; the camera eye drifts away in orbit mode.
-    currentCenter = updateStreamCenter(
-      streamCenter ?? camera.position,
-      previousCenter,
-      deltaSeconds,
-      config.stream.preloadSeconds,
-    );
-    const gpuDirtyReason = previousCenter ? "camera_ring_shift" : "startup";
-    previousCenter = currentCenter;
+    const predicted = cursor.predicted(config.stream.preloadSeconds);
+    currentCenter = {
+      worldX: cursor.center.x,
+      worldZ: cursor.center.z,
+      predictedX: predicted.x,
+      predictedZ: predicted.z,
+      velocityX: cursor.velocityMps.x,
+      velocityZ: cursor.velocityMps.z,
+    };
+    const gpuDirtyReason = hasPreviousCenter ? "camera_ring_shift" : "startup";
+    hasPreviousCenter = true;
     sampler.setSampleCenter(currentCenter.worldX, currentCenter.worldZ);
     gpuRenderAtlas?.update(currentCenter, frameIndex);
 

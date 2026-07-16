@@ -43,6 +43,14 @@ const BASE_BUBBLE_STATS: NearFieldBubbleStats = {
 
 function makeInput(stats: NearFieldBubbleStats, frameId: number): TerrainFramePhaseInput {
   return {
+    cursor: {
+      frameId,
+      center: { x: 0, z: 0 },
+      velocityMps: { x: 0, z: 0 },
+      deltaSeconds: 1 / 60,
+      source: "orbit_target",
+      predicted: () => ({ x: 0, z: 0 }),
+    },
     state: { terrainStreamingEnabled: true, bubble: true, bubbleRadius: 96 } as TerrainFramePhaseInput["state"],
     pageTransitionMode: "instant",
     crossfadeStep: 1,

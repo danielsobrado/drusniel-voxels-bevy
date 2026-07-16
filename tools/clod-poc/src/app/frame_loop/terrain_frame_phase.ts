@@ -13,17 +13,9 @@ import type { ClodPageNode } from "../../types.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../../world/runtime_world_policy.js";
 import { runTerrainStreamingWork } from "../../stream/terrain_streaming_control.js";
+import { STREAM_CURSOR_SOURCE_CODE, type StreamCursor } from "../../stream/stream_cursor.js";
 
 const RING_CLAMP_MARGIN = 2;
-
-const CANONICAL_CENTER_SOURCE_CODE = {
-  playing_player: 1,
-  orbit_spawned_player: 2,
-  orbit_camera: 3,
-  orbit_target: 4,
-} as const;
-
-type CanonicalCenterSource = keyof typeof CANONICAL_CENTER_SOURCE_CODE;
 
 let liveBubbleBuiltTotal = 0;
 let liveBubbleEvictionsTotal = 0;
@@ -89,12 +81,8 @@ interface MovementProbeWindow {
   __drusnielPerf?: { reset(): void };
 }
 
-interface CanonicalCenter {
-  center: THREE.Vector3;
-  source: CanonicalCenterSource;
-}
-
 export interface TerrainFramePhaseInput {
+  cursor: StreamCursor;
   state: ClodFrameLoopUiState;
   pageTransitionMode: string;
   crossfadeStep: number;
@@ -221,12 +209,12 @@ function mirrorLiveBubbleStats(stats: NearFieldBubbleStats): void {
   counters["live_bubble_probe_cpu_work_unit_max_ms"] = liveBubbleProbeCpuWorkUnitMaxMs;
 }
 
-function mirrorCanonicalWorldCenter(input: TerrainFramePhaseInput, canonical: CanonicalCenter): void {
+function mirrorCanonicalWorldCenter(input: TerrainFramePhaseInput): void {
   const counters = hooksCounters();
   if (!counters) return;
-  counters["canonical_world_center_x"] = canonical.center.x;
-  counters["canonical_world_center_z"] = canonical.center.z;
-  counters["canonical_world_center_source"] = CANONICAL_CENTER_SOURCE_CODE[canonical.source];
+  counters["canonical_world_center_x"] = input.cursor.center.x;
+  counters["canonical_world_center_z"] = input.cursor.center.z;
+  counters["canonical_world_center_source"] = STREAM_CURSOR_SOURCE_CODE[input.cursor.source];
   counters["canonical_world_player_spawned"] = input.player.spawned ? 1 : 0;
   counters["canonical_world_player_x"] = input.player.position.x;
   counters["canonical_world_player_z"] = input.player.position.z;
@@ -251,24 +239,6 @@ function mirrorVegetationRingStats(cameraCenter: THREE.Vector3, grassCenter: THR
     vegetationGrassCenter: grassCenter,
     vegetationTreesCenter: ringCenter,
   }));
-}
-
-function canonicalWorldCenter(input: TerrainFramePhaseInput): CanonicalCenter {
-  // One canonical center for every streaming system (near bubble, streamed CLOD roots, rings,
-  // vegetation, far shell). Play mode -> player. Infinite-islands orbit mode -> the spawned
-  // player (stays at the start instead of dragging pages with the orbiting eye), falling back
-  // to the camera before spawn; acceptance gates assert centers track the camera XZ here.
-  // Other scenes -> the orbit target.
-  if (input.interaction.mode === "playing") {
-    return { center: input.player.position, source: "playing_player" };
-  }
-  if (runtimeWorldUsesCameraRelativeCoordinates()) {
-    if (input.player.spawned) {
-      return { center: input.player.position, source: "orbit_spawned_player" };
-    }
-    return { center: input.camera?.position ?? input.controls.object.position, source: "orbit_camera" };
-  }
-  return { center: input.controls.target, source: "orbit_target" };
 }
 
 export function vegetationRingCenter(grassCenter: THREE.Vector3, worldCells: number, unbounded: boolean): THREE.Vector3 {
@@ -328,9 +298,8 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   }
 
   const ringUnbounded = runtimeWorldUsesCameraRelativeCoordinates();
-  const canonicalCenter = canonicalWorldCenter(input);
-  mirrorCanonicalWorldCenter(input, canonicalCenter);
-  const bubbleCenter = canonicalCenter.center;
+  mirrorCanonicalWorldCenter(input);
+  const bubbleCenter = new THREE.Vector3(input.cursor.center.x, 0, input.cursor.center.z);
   const updatedBubbleStats = runTerrainStreamingWork(input.state.terrainStreamingEnabled, () => (
     input.nearFieldBubbleController.update({
       enabled: input.state.bubble,

@@ -39,6 +39,7 @@ import type { ClodRenderNodeCacheStats } from "../../terrain/rendering/clod_rend
 import type { ClodApplyStatsSnapshot } from "../../terrain/rendering/clod_apply_stats.js";
 import type { DynamicResolutionController } from "../../rendering/dynamic_resolution.js";
 import type { StatsSyncThrottleConfig } from "./stats_sync_throttle.js";
+import type { StreamCursor } from "../../stream/stream_cursor.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -86,7 +87,7 @@ export interface FrameLoopPlayerDeps {
 
 export interface FrameLoopTerrainDeps {
   selectionController: ClodSelectionController;
-  updateSelection: () => void;
+  updateSelection: (cursor: StreamCursor) => void;
   pageTransitionMode: string;
   crossfadeStep: number;
   nearFieldBubbleController: NearFieldBubbleController;
@@ -174,10 +175,7 @@ export interface FrameLoopDiagnosticsDeps {
 }
 
 export interface FrameLoopFarSummaryDeps {
-  /** Called each frame after terrain phase but before vegetation phase. `worldCenter` is the
-   *  canonical frame center (player/orbit target) — far clipmap rings + far shell anchor to it so
-   *  they stay aligned with the near bubble instead of drifting to the camera eye. */
-  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera, worldCenter: THREE.Vector3) => void;
+  onFarSummaryUpdate?: (camera: THREE.PerspectiveCamera, cursor: StreamCursor) => void;
 }
 
 export interface FrameLoopFloatingOriginDeps {

@@ -11,6 +11,18 @@ import {
 import { DEFAULT_FAR_SUMMARY_CONFIG } from "./config.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryRingRequest } from "./clipmap-rings.js";
+import type { StreamCursor } from "../stream/stream_cursor.js";
+
+function stationaryCursor(frameId: number): StreamCursor {
+  return {
+    frameId,
+    center: { x: 0, z: 0 },
+    velocityMps: { x: 0, z: 0 },
+    deltaSeconds: 1 / 60,
+    source: "orbit_target",
+    predicted: () => ({ x: 0, z: 0 }),
+  };
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -134,14 +146,14 @@ describe("far summary fallback publication", () => {
     });
     const camera = new THREE.PerspectiveCamera();
 
-    integration.update(1, 1 / 60, camera);
+    integration.update(1, camera, stationaryCursor(1));
     expect(metrics.farSummaryProceduralFallbackSamples).toBe(0);
 
     integration.sampler.sampleHeight(99999, 99999, 0);
-    integration.update(2, 1 / 60, camera);
+    integration.update(2, camera, stationaryCursor(2));
     expect(metrics.farSummaryProceduralFallbackSamples).toBe(1);
 
-    integration.update(3, 1 / 60, camera);
+    integration.update(3, camera, stationaryCursor(3));
     expect(metrics.farSummaryProceduralFallbackSamples).toBe(0);
     expect(metrics.farSummaryFallbackSamples).toBe(0);
 
@@ -191,7 +203,7 @@ describe("far summary fallback publication", () => {
     let observedSplitReadiness = false;
 
     for (let frame = 1; frame <= 80 && !observedSplitReadiness; frame++) {
-      integration.update(frame, 1 / 60, camera);
+      integration.update(frame, camera, stationaryCursor(frame));
       observedSplitReadiness = (metrics.farSummaryTerrainWaterReady ?? 0) > 0
         && (metrics.farSummaryCanopyPending ?? 0) > 0
         && (metrics.farSummaryFullyEnriched ?? 0) < (metrics.farSummaryTerrainWaterReady ?? 0);

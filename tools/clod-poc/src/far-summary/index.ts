@@ -25,9 +25,6 @@ export {
   tileCenter,
 } from "./tile-key.js";
 
-export {
-  updateStreamCenter,
-} from "./stream-center.js";
 export type { StreamCenter } from "./stream-center.js";
 
 export {
