@@ -1,0 +1,1 @@
+export const TREE_LOD_CROSSFADE_MAX_BAND_M = 10;
