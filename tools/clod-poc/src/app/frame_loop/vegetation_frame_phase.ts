@@ -168,7 +168,10 @@ function updateWater(input: VegetationFramePhaseInput): void {
     mirrorInfiniteHydrologyDiagnostics(input);
   }
   if (!input.state.waterEnabled) return;
-  input.waterController.update(Math.min(input.playerDelta, 0.1), input.camera.position);
+  // Keep the water clipmap on the same streamed authority center as terrain and vegetation.
+  // Orbit cameras may sit outside the finite startup world, which previously pulled rivers
+  // into the empty foreground while the terrain stayed centered on the orbit target.
+  input.waterController.update(Math.min(input.playerDelta, 0.1), input.ringCenter);
   input.waterController.logDevInitOnce(input.worldCells);
 }
 
