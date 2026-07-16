@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { getDigEditRevision, surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
+import { createAppCellReadinessFeeds, teleportTargetReady } from "../../../player/cell_readiness.js";
 import { createFirstPersonWeapon, createSwordAttackController } from "../../../combat/index.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -104,6 +105,7 @@ export function runPlayerStartup(
   };
   requestAnimationFrame(updatePlayerInteraction);
 
+  const spawnReadinessFeeds = createAppCellReadinessFeeds({ terrainColliders });
   const playerModeController = createPlayerModeController({
     renderer,
     camera,
@@ -125,6 +127,7 @@ export function runPlayerStartup(
     // safety coverage + colliders so the player never drops through un-meshed ground at startup.
     spawnGateEnabled: window.__drusnielWorldMode?.mode === "infinite_islands"
       || searchParams.get("scene") === "cave-test",
+    movementReadyAt: (x, z) => teleportTargetReady(spawnReadinessFeeds, x, z),
   });
 
   const automationHooks = input.longView.hooks;

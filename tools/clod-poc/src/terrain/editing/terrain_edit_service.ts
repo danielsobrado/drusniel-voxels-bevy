@@ -28,6 +28,8 @@ import {
   type TerrainEditDirtyQueue,
   type TerrainEditDirtyReason,
 } from "./terrain_edit_dirty_queue.js";
+import { gameplayDiagnostics } from "../../player/gameplay_diagnostics.js";
+import { DEFAULT_EDIT_COMMAND_EXPIRY_MS } from "../../player/edit_commands.js";
 
 const DIG_REBUILD_DEBOUNCE_MS = 40;
 const CONSTRUCTION_CONFORM_DEBOUNCE_MS = 20;
@@ -70,6 +72,8 @@ export interface TerrainEditServiceDeps {
   editAuthority?: PlayerEditAuthorityConfig;
   getAuthorityOrigin?: () => THREE.Vector3 | null;
   getAuthorityCounters?: () => Record<string, number> | null;
+  /** Cell readiness for edits (voxel authority resident, collider current); denies with feedback when false. */
+  editReadyAt?: (x: number, z: number) => boolean;
   dirtyQueue?: TerrainEditDirtyQueue;
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
@@ -102,7 +106,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   let lastDigAt = -Infinity;
   let digInFlight = false;
   let editOperationTail: Promise<void> = Promise.resolve();
-  const queuedDigRays: THREE.Ray[] = [];
+  const queuedDigRays: Array<{ ray: THREE.Ray; enqueuedAtMs: number }> = [];
   let scheduledDigRay: THREE.Ray | null = null;
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
@@ -337,6 +341,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   };
 
   const terrainCommitAllowed = (point: THREE.Vector3): boolean => {
+    // Deny-by-default readiness (playable-world-contract P1): a target whose authority
+    // is not ready gets UI feedback, never a queued retry.
+    if (deps.editReadyAt && !deps.editReadyAt(point.x, point.z)) {
+      gameplayDiagnostics.add("edits_denied_not_ready");
+      deps.setLastDigSummary("terrain edit rejected: target not ready (streaming)");
+      deps.updateInfo();
+      return false;
+    }
     if (!deps.editAuthority) return true;
     const decision = canCommitTerrainEdit(deps.editAuthority, authorityOrigin(), point);
     publishPlayerEditAuthorityDecision(authorityCounters(), decision);
@@ -395,8 +407,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   const runDigExclusive = async (ray: THREE.Ray): Promise<void> => {
     if (digInFlight) {
       const previous = queuedDigRays[queuedDigRays.length - 1];
-      if (!previous || previous.origin.distanceTo(ray.origin) > 0.25 || previous.direction.distanceTo(ray.direction) > 0.01) {
-        queuedDigRays.push(ray.clone());
+      if (!previous || previous.ray.origin.distanceTo(ray.origin) > 0.25 || previous.ray.direction.distanceTo(ray.direction) > 0.01) {
+        queuedDigRays.push({ ray: ray.clone(), enqueuedAtMs: performance.now() });
         if (queuedDigRays.length > MAX_PENDING_DIG_SAMPLES) queuedDigRays.shift();
       }
       return;
@@ -406,8 +418,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       await enqueueEditOperation("terrain brush", () => performDig(ray));
     } finally {
       digInFlight = false;
-      const next = queuedDigRays.shift() ?? null;
-      if (next) void runDigExclusive(next);
+      // No silent replay of aged strikes (P1.3): brush-drag samples queued while a dig
+      // was in flight expire instead of firing seconds later against moved terrain.
+      let next = queuedDigRays.shift() ?? null;
+      while (next && performance.now() - next.enqueuedAtMs > DEFAULT_EDIT_COMMAND_EXPIRY_MS) {
+        gameplayDiagnostics.add("edit_commands_expired");
+        next = queuedDigRays.shift() ?? null;
+      }
+      if (next) void runDigExclusive(next.ray);
     }
   };
 

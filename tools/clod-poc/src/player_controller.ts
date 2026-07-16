@@ -2,6 +2,16 @@ import * as THREE from "three";
 import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain/terrain_collider.js";
 import type { PropColliderSet } from "./props/prop_collider.js";
 import { emitAudio } from "./audio/index.js";
+import { gameplayDiagnostics } from "./player/gameplay_diagnostics.js";
+
+/**
+ * Movement readiness for a world column (playable-world-contract P2.3):
+ * - "ready": an exact or stale-safe collider serves here.
+ * - "certified": no collider, but the column is certified single-surface (height fallback allowed).
+ * - "blocked": no collider and not certified (cave/edited/unknown) — the readiness frontier.
+ */
+export type MovementReadiness = "ready" | "certified" | "blocked";
+export type MovementReadinessProbe = (x: number, z: number) => MovementReadiness;
 
 export type PlayerInteractionMode = "orbit" | "choosingSpawn" | "playing";
 
@@ -203,9 +213,20 @@ export class PlayerController {
   }
 
   private propColliders: PropColliderSet | null = null;
+  private movementReadiness: MovementReadinessProbe | null = null;
 
   attachPropColliders(set: PropColliderSet | null): void {
     this.propColliders = set;
+  }
+
+  /**
+   * Frontier barrier: with a probe attached, horizontal movement into a "blocked" column
+   * is stopped at the readiness frontier instead of walking onto an invented floor or
+   * falling through unloaded ground. Engagements are counted and gated near-zero on
+   * standing routes — this is a safety net, not a floor plan.
+   */
+  attachMovementReadiness(probe: MovementReadinessProbe | null): void {
+    this.movementReadiness = probe;
   }
 
   spawn(point: THREE.Vector3): void {
@@ -280,6 +301,24 @@ export class PlayerController {
       this.velocity.y -= this.config.gravity * step;
     }
 
+    if (this.movementReadiness) {
+      const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+      if (horizontalSpeed > 1e-4) {
+        const lookaheadM = this.config.capsuleRadius + horizontalSpeed * step;
+        const aheadX = this.position.x + (this.velocity.x / horizontalSpeed) * lookaheadM;
+        const aheadZ = this.position.z + (this.velocity.z / horizontalSpeed) * lookaheadM;
+        if (
+          this.movementReadiness(aheadX, aheadZ) === "blocked"
+          && this.movementReadiness(this.position.x, this.position.z) !== "blocked"
+        ) {
+          // Stop at the readiness frontier; never invent a floor beyond it.
+          this.velocity.x = 0;
+          this.velocity.z = 0;
+          gameplayDiagnostics.add("frontier_barrier_engagements");
+        }
+      }
+    }
+
     const previousX = this.position.x;
     const previousZ = this.position.z;
     this.position.addScaledVector(this.velocity, step);
@@ -308,6 +347,7 @@ export class PlayerController {
       this.position.copy(this.lastSafePosition);
       this.velocity.set(0, 0, 0);
       this.grounded = false;
+      gameplayDiagnostics.add("player_recovery_backstop_depth");
     }
   }
 }

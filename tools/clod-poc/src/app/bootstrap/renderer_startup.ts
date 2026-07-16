@@ -10,6 +10,7 @@ import { installRealtimeSunShadows } from "../../rendering/realtime_sun_shadows.
 import { createRenderResolutionRuntime, type RenderResolutionRuntime } from "../../rendering/render_resolution_runtime.js";
 import { failLoud } from "../../core/diagnostics.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "../../terrain/terrain_collider.js";
+import { appColumnCertified, createAppCellReadinessFeeds, movementReadinessAt } from "../../player/cell_readiness.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
@@ -288,10 +289,17 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
 const terrainColliders = new TerrainColliderSet(colliderPages, {
     enabled: usesUnboundedTerrain(searchParams.get("scene")),
     surfaceHeight,
-  });
+    // Never invent a floor in 3D voxel columns (caves, edits): the fallback only fires
+    // in columns the voxel authority certifies single-surface.
+    certifyColumn: appColumnCertified,
+  }, { autoProcessRebuilds: true });
   // Build every page's BVH now so the first spell cast / spawn raycast doesn't hitch on a lazy MeshBVH build.
   terrainColliders.prewarmAll();
   const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
+  // Frontier barrier: stop at the readiness frontier of uncovered, uncertified columns
+  // instead of walking onto an invented floor or falling through unloaded ground.
+  const movementReadinessFeeds = createAppCellReadinessFeeds({ terrainColliders });
+  player.attachMovementReadiness((x, z) => movementReadinessAt(movementReadinessFeeds, x, z));
   const interaction = new PlayerInteractionState();
   const terrainRaycast = createTerrainRaycastService({
     terrainColliders,

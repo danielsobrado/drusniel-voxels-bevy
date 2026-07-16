@@ -16,7 +16,7 @@ import {
 import { GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { compareChunkSurfaces } from "../../gpu/gpu_mesh_parity.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
-import { getDigEditsSnapshot, meshChunk } from "../../terrain/terrain.js";
+import { getDigEditRevision, getDigEditsSnapshot, meshChunk } from "../../terrain/terrain.js";
 import type { ClodPagesConfig } from "../../config.js";
 import { triangleCount, type ClodPageNode } from "../../types.js";
 import type { ClodHooks } from "../../core/hooks.js";
@@ -602,7 +602,9 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   const applyNodeCollider = (node: ClodPageNode): number => {
     if (node.level !== 0) return 0;
     const tc = performance.now();
-    terrainColliders.updatePage(node.id, node.mesh);
+    // Async revision-validated replacement (P2): the old collider serves (stale-safe)
+    // until the off-frame rebuild installs; no MeshBVH build on this frame path.
+    terrainColliders.schedulePageUpdate(node.id, node.mesh, getDigEditRevision());
     return performance.now() - tc;
   };
 

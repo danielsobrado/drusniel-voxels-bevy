@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import { createSpawnWaitIndicator } from "./spawn_wait_indicator.js";
+import { gameplayDiagnostics } from "./gameplay_diagnostics.js";
 import {
   PlayerController,
   PlayerInteractionState,
@@ -28,6 +29,8 @@ export interface PlayerModeControllerDeps {
   onStartPlayingFacing: (yaw: number, pitch: number) => void;
   /** Defer the query spawn until streamed-root safety pages + colliders are ready (streaming worlds). */
   spawnGateEnabled?: boolean;
+  /** Cell readiness at the spawn/teleport target: a collision-ready movement envelope exists. */
+  movementReadyAt?: (x: number, z: number) => boolean;
 }
 
 export interface PlayerModeController {
@@ -101,19 +104,21 @@ export interface QuerySpawnGateState {
   collidersLoaded: number;
   framesWaited: number;
   maxFrames: number;
+  /** Readiness of the target cell itself (collision envelope); absent = not evaluated. */
+  targetCellReady?: boolean;
 }
 
 /**
  * Decide whether the query spawn may be applied this frame. Pure so it is unit-testable.
  * For streaming worlds the player must not drop onto un-meshed ground: wait until the streamed
- * root safety pages report full coverage and at least one collider page has loaded, but never
- * past the frame cap.
+ * root safety pages report full coverage, at least one collider page has loaded, and the
+ * target cell reports a collision-ready movement envelope — but never past the frame cap.
  */
 export function shouldApplyQuerySpawnNow(gate: QuerySpawnGateState): boolean {
   if (!gate.enabled) return true;
   if (gate.framesWaited >= gate.maxFrames) return true;
   const safetyReady = gate.safetyRequired > 0 && gate.safetyReady >= gate.safetyRequired;
-  return safetyReady && gate.collidersLoaded > 0;
+  return safetyReady && gate.collidersLoaded > 0 && gate.targetCellReady !== false;
 }
 
 function resolveColliderSpawnPoint(
@@ -263,8 +268,10 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     const yawVal = qyaw !== null ? Number(qyaw) : 0;
     if (!Number.isFinite(xVal) || !Number.isFinite(zVal)) return;
 
+    const gateStartedAt = performance.now();
     if (deps.spawnGateEnabled !== true) {
       performQuerySpawn(xVal, zVal, yawVal);
+      gameplayDiagnostics.set("time_to_gameplay_ready_ms", performance.now() - gateStartedAt);
       return;
     }
 
@@ -291,10 +298,12 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
         collidersLoaded,
         framesWaited,
         maxFrames: SPAWN_GATE_MAX_FRAMES,
+        targetCellReady: deps.movementReadyAt ? deps.movementReadyAt(xVal, zVal) : undefined,
       });
       if (ready) {
         waitIndicator.done();
         performQuerySpawn(xVal, zVal, yawVal);
+        gameplayDiagnostics.set("time_to_gameplay_ready_ms", performance.now() - gateStartedAt);
         return;
       }
       framesWaited++;
