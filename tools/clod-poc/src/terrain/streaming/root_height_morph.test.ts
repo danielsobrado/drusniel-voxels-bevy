@@ -5,6 +5,7 @@ import {
   applyRootHeightMorph,
   resetRootHeightMorph,
   ROOT_HEIGHT_MORPH_ATTRIBUTE,
+  ROOT_HEIGHT_MORPH_ENABLED,
 } from "./root_height_morph.js";
 
 function meshAtHeight(height: number): PageMesh {
@@ -41,45 +42,41 @@ function node(id: string, height: number, mode: "fadeIn" | "fadeOut"): ClodPageN
   };
 }
 
-function view(n: ClodPageNode) {
+function view(n: ClodPageNode, morphValues: readonly number[] = [0, 0, 0]) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(n.mesh.positions, 3));
+  geometry.setAttribute(
+    ROOT_HEIGHT_MORPH_ATTRIBUTE,
+    new THREE.BufferAttribute(new Float32Array(morphValues), 1),
+  );
   geometry.setIndex(new THREE.BufferAttribute(n.mesh.indices, 1));
   return { node: n, mesh: new THREE.Mesh(geometry, new THREE.MeshBasicMaterial()) };
 }
 
 describe("root height morph", () => {
-  it("builds a Y-only rootMorphDeltaY attribute from the opposite root set", () => {
-    const incoming = view(node("incoming", 20, "fadeIn"));
+  it("is disabled for streamed terrain", () => {
+    expect(ROOT_HEIGHT_MORPH_ENABLED).toBe(false);
+  });
+
+  it("never builds morph deltas and clears any stale values", () => {
+    const incoming = view(node("incoming", 20, "fadeIn"), [-10, -10, -10]);
     const outgoing = view(node("outgoing", 10, "fadeOut"));
 
     const stats = applyRootHeightMorph(incoming, [outgoing]);
     const morph = incoming.mesh.geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute;
 
-    expect(stats.builtRoots).toBe(1);
-    expect(stats.builtVertices).toBe(3);
-    expect(Array.from(morph.array as Float32Array)).toEqual([-10, -10, -10]);
-    expect(incoming.node.rootTransition?.parentHeightMorphReady).toBe(true);
+    expect(stats).toEqual({ builtRoots: 0, builtVertices: 0, buildMs: 0 });
+    expect(Array.from(morph.array as Float32Array)).toEqual([0, 0, 0]);
+    expect(incoming.node.rootTransition?.parentHeightMorphReady).toBe(false);
   });
 
-  it("reuses an existing root morph attribute when the signature is unchanged", () => {
+  it("keeps reset idempotent", () => {
     const incoming = view(node("incoming", 20, "fadeIn"));
-    const outgoing = view(node("outgoing", 10, "fadeOut"));
-
-    applyRootHeightMorph(incoming, [outgoing]);
-    const stats = applyRootHeightMorph(incoming, [outgoing]);
-
-    expect(stats.builtRoots).toBe(0);
-  });
-
-  it("resets morph deltas without touching material state", () => {
-    const incoming = view(node("incoming", 20, "fadeIn"));
-    const outgoing = view(node("outgoing", 10, "fadeOut"));
-    applyRootHeightMorph(incoming, [outgoing]);
 
     resetRootHeightMorph(incoming);
-    const morph = incoming.mesh.geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute;
+    resetRootHeightMorph(incoming);
 
+    const morph = incoming.mesh.geometry.getAttribute(ROOT_HEIGHT_MORPH_ATTRIBUTE) as THREE.BufferAttribute;
     expect(Array.from(morph.array as Float32Array)).toEqual([0, 0, 0]);
   });
 });
