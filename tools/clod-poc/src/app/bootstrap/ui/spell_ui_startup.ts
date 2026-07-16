@@ -59,8 +59,8 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
   });
   ctx.session.spellVfxController = controller;
 
-  const deferredController = createDeferredSpellController(controller);
   const pipelineWarmup = scheduleSpellPipelineWarmup({ renderer, scene, camera });
+  const deferredController = createDeferredSpellController(controller, pipelineWarmup.ready);
   const menu = createSpellMenu({ config, controller: deferredController.controller });
   const menuEl = document.getElementById(config.menu.rootId);
 
