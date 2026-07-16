@@ -167,6 +167,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       earthActiveReset = 0;
       lightningActiveReset = 0;
       fireballActiveReset = 0;
+      missFlashReset = 0;
       if (dragOffset) onDragEnd();
       title.removeEventListener("pointerdown", onDragStart);
       root.removeEventListener("pointerdown", stopUiPropagation);
