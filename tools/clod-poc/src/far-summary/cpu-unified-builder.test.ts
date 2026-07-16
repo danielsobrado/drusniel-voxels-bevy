@@ -17,6 +17,33 @@ import {
 import type { FarSummaryTile } from "./types.js";
 
 describe("CPU unified far-summary builder", () => {
+  it("cancels only an active build that intersects invalidated surface bounds", () => {
+    const ring = { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 32 };
+    const config = { ...DEFAULT_FAR_SUMMARY_CONFIG, rings: [ring] };
+    const request: FarSummaryRingRequest = {
+      ring: 0,
+      key: { ring: 0, x: 0, z: 0, cellSizeM: ring.cellM },
+      priority: 0,
+      distanceToCamera: 0,
+      distanceToPredictedCenter: 0,
+    };
+    const cache = { getTile: () => ({ state: "requested" }) } as unknown as FarSummaryCache;
+    const builder = new FarSummaryCpuBaseBuilder({
+      config,
+      cache,
+      terrainSampler: { sampleHeight: () => 0 },
+      isEnrichmentPending: () => false,
+      onBuilt: () => {},
+    });
+    builder.buildSome([request], 1, 0, 1, Number.NEGATIVE_INFINITY);
+
+    expect(builder.buildingCount()).toBe(1);
+    expect(builder.invalidate({ minX: 2_000, minZ: 2_000, maxX: 2_100, maxZ: 2_100 })).toBe(false);
+    expect(builder.buildingCount()).toBe(1);
+    expect(builder.invalidate({ minX: 0, minZ: 0, maxX: 10, maxZ: 10 })).toBe(true);
+    expect(builder.buildingCount()).toBe(0);
+  });
+
   it("builds terrain-only base tiles and defers water/canopy through the shared lifecycle", () => {
     const ring = { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 2 };
     const config = {

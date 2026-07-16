@@ -131,8 +131,14 @@ describe("vegetationRingCenter", () => {
 
 describe("terrain frame live-bubble probe counters", () => {
   it("freezes and resumes the bubble without clearing its last rendered stats", () => {
-    installCounters();
-    const input = makeInput({ ...BASE_BUBBLE_STATS, readyPages: 5, chunkGroupCount: 5 }, 1);
+    const counters = installCounters();
+    const input = makeInput({
+      ...BASE_BUBBLE_STATS,
+      readyPages: 5,
+      chunkGroupCount: 5,
+      chunkGroupsBuiltThisFrame: 2,
+      evictions: 3,
+    }, 1);
     const update = input.nearFieldBubbleController.update as ReturnType<typeof vi.fn>;
 
     const running = runTerrainFramePhase(input);
@@ -145,6 +151,8 @@ describe("terrain frame live-bubble probe counters", () => {
     expect(frozen.bubbleStats).toBe(running.bubbleStats);
     expect(resumed.bubbleStats.readyPages).toBe(5);
     expect(update).toHaveBeenCalledTimes(2);
+    expect(counters["live_bubble_built_total"]).toBe(4);
+    expect(counters["live_bubble_evictions_total"]).toBe(6);
   });
 
   it("adds collider removals by delta and keeps total evictions cumulative", () => {

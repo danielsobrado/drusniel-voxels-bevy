@@ -15,7 +15,7 @@ describe("infinite-islands movement route profiles", () => {
     expect(profile.name).toBe("long-route");
     expect(pathDistanceM).toBeGreaterThanOrEqual(3_000);
     expect(profile.minHorizontalDistanceM).toBeGreaterThanOrEqual(3_000);
-    expect(profile.minFrameSamples).toBe(1_024);
+    expect(profile.minFrameSamples).toBe(1_320);
     expect(profile.maxLiveBubbleEvictions).toBeGreaterThan(0);
     expect(profile.maxStreamEvictions).toBeGreaterThan(0);
   });

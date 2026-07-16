@@ -166,6 +166,19 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
 }
 
 describe("frame perf probe", () => {
+  it("retains the full 1,320-frame long-route window", () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __drusnielClod: { stats: { counters: {} } } },
+    });
+    const probe = createFramePerfProbeFromQuery(new URLSearchParams({ perfProbe: "1" }));
+
+    for (let frameId = 1; frameId <= 1_320; frameId++) probe?.record(sample({ frameId }));
+
+    expect(window.__drusnielPerf?.recentSamples).toHaveLength(1_320);
+    expect(window.__drusnielPerf?.recentSamples[0]?.frameId).toBe(1);
+  });
+
   it("mirrors every far-summary subphase for headless diagnostics", () => {
     const counters: Record<string, number> = {};
     Object.defineProperty(globalThis, "window", {

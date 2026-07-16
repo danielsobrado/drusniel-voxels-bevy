@@ -5,6 +5,7 @@ import {
   applyFarSummaryQueryOverrides,
   farSummaryRingsForScene,
   initFarSummaryIntegration,
+  invalidatePendingFarSummaryEnrichment,
   prunePendingGpuEnrichment,
   resolveFarSummaryFrameInterval,
 } from "./integration.js";
@@ -96,6 +97,29 @@ describe("prunePendingGpuEnrichment", () => {
 
     expect(prunePendingGpuEnrichment([request(9)], pending)).toBe(1);
     expect([...pending.keys()]).toEqual(["0:9:2:32"]);
+  });
+});
+
+describe("surface-scoped far-summary invalidation", () => {
+  it("drops only pending enrichment whose tile intersects the committed bounds", () => {
+    const enrichment = (x: number) => ({
+      tile: { originX: x, originZ: 0, cellSizeM: 32, tileCells: 32 },
+    });
+    const pending = new Map([
+      ["near", enrichment(0)],
+      ["far", enrichment(4_096)],
+    ]);
+    const discarded: string[] = [];
+
+    const removed = invalidatePendingFarSummaryEnrichment(
+      pending,
+      { minX: 10, minZ: 10, maxX: 20, maxZ: 20 },
+      (_value, key) => discarded.push(key),
+    );
+
+    expect(removed).toBe(1);
+    expect([...pending.keys()]).toEqual(["far"]);
+    expect(discarded).toEqual(["near"]);
   });
 });
 

@@ -37,4 +37,27 @@ describe("surface cache revisions", () => {
     expect(markStale).toHaveBeenCalledWith({ minX: 0, minZ: -5, maxX: 50, maxZ: 15 });
     disconnect();
   });
+
+  it("marks everything stale when a subscriber is older than retained history", async () => {
+    for (let index = 0; index < 4_097; index++) emitSurfaceCommit(bounds(index * 20));
+    const markStale = vi.fn();
+
+    const disconnect = connectSurfaceCommitBridge({ markStale }, { sinceRevision: 0 });
+    await Promise.resolve();
+
+    expect(markStale).toHaveBeenCalledTimes(1);
+    expect(markStale).toHaveBeenCalledWith(null);
+    disconnect();
+  });
+
+  it("isolates throwing listeners from the commit path and remaining listeners", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const observed: number[] = [];
+    subscribeSurfaceCommits(() => { throw new Error("listener failed"); });
+    subscribeSurfaceCommits((commit) => observed.push(commit.globalRevision));
+
+    expect(() => emitSurfaceCommit(bounds(0))).not.toThrow();
+    expect(observed).toEqual([1]);
+    expect(error).toHaveBeenCalledOnce();
+  });
 });

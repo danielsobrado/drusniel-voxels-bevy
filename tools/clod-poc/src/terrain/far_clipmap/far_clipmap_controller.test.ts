@@ -66,6 +66,33 @@ describe("FarClipmapController shader displacement", () => {
     controller.dispose();
   });
 
+  it("limits refined seam ownership to the innermost clipmap ring", () => {
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(
+      scene,
+      config({ innerRadiusM: 64, outerRadiusM: 512, ringCount: 2, gridResolution: 17 }),
+      readyFlatSource(),
+      { webGpuCompatibleMaterial: true },
+    );
+    controller.setRefinedClodReadiness({
+      innerRadiusM: 16,
+      outerRadiusM: 64,
+      pageSizeM: 16,
+      readyPageKeys: ["L0:2,0"],
+    });
+
+    controller.update(new THREE.Vector3(0, 0, 0));
+
+    const rings = scene.children
+      .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.name.includes("far-clipmap-ring"))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const innerOwnership = (rings[0]?.material as THREE.Material | undefined)?.userData.farClipmapOwnershipData as Float32Array;
+    const outerOwnership = (rings[1]?.material as THREE.Material | undefined)?.userData.farClipmapOwnershipData as Float32Array;
+    expect(innerOwnership[8 * 17 + 6]).toBe(1);
+    expect([...outerOwnership]).not.toContain(1);
+    controller.dispose();
+  });
+
   it("updates reusable WebGPU grids from the source texture without CPU terrain geometry rebuilds", () => {
     const scene = new THREE.Scene();
     const controller = createFarClipmapController(scene, config(), readyFlatSource(), {
