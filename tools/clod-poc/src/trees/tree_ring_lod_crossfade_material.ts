@@ -7,7 +7,6 @@ import {
   fract,
   instanceIndex,
   max,
-  screenCoordinate,
   sin,
   storage,
   uniform,
@@ -47,6 +46,7 @@ interface CrossfadeUniforms {
 }
 
 const LOD_ORDER: readonly TreeLod[] = ["near", "mid", "far", "impostor"];
+const TREE_RING_LOD_DITHER_SALT = 1601;
 
 export function decorateTreeRingLodCrossfade(
   handle: TreeMaterialHandle,
@@ -106,6 +106,13 @@ export function treeRingCrossfadeKeeps(noise: number, state: TreeRingCrossfadeSt
   return state.role === "secondary" ? value >= 1 - state.fade : value < state.fade;
 }
 
+export function treeRingStableDitherNoise(cellX: number, cellZ: number, seed: number): number {
+  const salt = TREE_RING_LOD_DITHER_SALT;
+  const x = cellX + seed + salt;
+  const z = cellZ + seed * 0.37 + salt * 1.17;
+  return fractNumber(Math.sin(x * 41.3 + z * 289.1) * 43758.5453);
+}
+
 function createTreeRingCrossfadeKeepNode(
   buffers: TreeRingInstanceBuffers,
   lod: TreeLod,
@@ -120,9 +127,7 @@ function createTreeRingCrossfadeKeepNode(
   );
   const worldXZ: TslNode = worldCell.add(jitter).mul(TREE_RING_CELL_SIZE_M);
   const distance: TslNode = vec2(cameraPosition.x, cameraPosition.z).sub(worldXZ).length();
-  const noise: TslNode = fract(
-    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
-  );
+  const noise: TslNode = treeRingHash(worldCell, uniforms.seed, TREE_RING_LOD_DITHER_SALT);
   const thresholds: readonly [TslNode, TslNode, TslNode] = [uniforms.near, uniforms.mid, uniforms.far];
   const index = LOD_ORDER.indexOf(lod);
   const previousThreshold = index > 0 ? thresholds[index - 1] : null;
@@ -200,4 +205,8 @@ function treeRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode 
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+}
+
+function fractNumber(value: number): number {
+  return value - Math.floor(value);
 }
