@@ -25,7 +25,7 @@ interface IdleWindow extends Window {
 }
 
 export interface SpellPipelineWarmupDeps {
-  renderer: AsyncCompileRenderer;
+  renderer: unknown;
   scene: THREE.Scene;
   camera: THREE.Camera;
 }
@@ -43,7 +43,8 @@ function yieldToBrowser(): Promise<void> {
 }
 
 export async function warmSpellPipelines(deps: SpellPipelineWarmupDeps): Promise<void> {
-  const compileAsync = deps.renderer.compileAsync;
+  const renderer = deps.renderer as AsyncCompileRenderer;
+  const compileAsync = renderer.compileAsync;
   if (typeof compileAsync !== "function") return;
 
   const spellObjects = deps.scene.children.filter(isSpellObject);
@@ -52,7 +53,7 @@ export async function warmSpellPipelines(deps: SpellPipelineWarmupDeps): Promise
     object.visible = true;
     let compilePromise: Promise<unknown>;
     try {
-      compilePromise = compileAsync.call(deps.renderer, object, deps.camera, deps.scene);
+      compilePromise = compileAsync.call(renderer, object, deps.camera, deps.scene);
     } catch {
       object.visible = wasVisible;
       continue;
