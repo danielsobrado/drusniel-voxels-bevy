@@ -1,5 +1,6 @@
 import { BUILD_POINTER_OPTIONS, MENU_ID } from "./construction_controller_support.js";
 import { renderConstructionMenuHtml } from "./construction_menu_render.js";
+import { CONSTRUCTION_MATERIAL_OPTIONS } from "./materials.js";
 import type { ConstructionMaterial, ConstructionPieceDef } from "./types.js";
 
 export interface ConstructionControllerUiCallbacks {
@@ -28,7 +29,7 @@ export interface ConstructionControllerUiState {
   indexedSnapPoints: number;
   currentValid: boolean;
   currentReason: string | null;
-  materialOptions: readonly { id: ConstructionMaterial; label: string }[];
+  materialOptions: typeof CONSTRUCTION_MATERIAL_OPTIONS;
   selectedMaterial: ConstructionMaterial;
   lastMessage: string;
 }
