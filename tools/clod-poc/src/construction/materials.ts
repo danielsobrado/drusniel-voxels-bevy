@@ -6,8 +6,11 @@ import { trackedMeshStandardMaterial } from "../rendering/material_churn/tracked
 const DEFAULT_TEXTURE_REPEAT_U = 1.5;
 const DEFAULT_TEXTURE_REPEAT_V = 1.0;
 const DEFAULT_TEXTURE_ANISOTROPY = 8;
-const DEFAULT_NORMAL_SCALE = 0.75;
-const DEFAULT_AO_INTENSITY = 0.85;
+const DEFAULT_NORMAL_SCALE = 0.5;
+const MAX_NORMAL_SCALE = 0.55;
+const DEFAULT_AO_INTENSITY = 0.4;
+const DEFAULT_ALBEDO_GAIN = 1.12;
+const DEFAULT_ENV_MAP_INTENSITY = 1.2;
 
 interface PbrTextureSet {
   albedo?: THREE.Texture;
@@ -51,6 +54,7 @@ function loadPbrTexture(url: string, name: string, asset: ConstructionMaterialAs
     (error) => console.warn(`[construction] failed to load PBR texture ${name}`, error),
   );
   texture.name = name;
+  configurePbrTexture(texture, asset, colorSpace);
   return texture;
 }
 
@@ -76,18 +80,30 @@ function pbrTextures(asset: ConstructionMaterialAsset): PbrTextureSet {
   return textures;
 }
 
+function resolveNormalScale(asset: ConstructionMaterialAsset): number {
+  return Math.min(asset.normalScale ?? DEFAULT_NORMAL_SCALE, MAX_NORMAL_SCALE);
+}
+
+function albedoTint(hasTexture: boolean, fallbackColor: number): THREE.Color | number {
+  return hasTexture
+    ? new THREE.Color(DEFAULT_ALBEDO_GAIN, DEFAULT_ALBEDO_GAIN, DEFAULT_ALBEDO_GAIN)
+    : fallbackColor;
+}
+
 export function createConstructionMaterial(material: ConstructionMaterial): THREE.MeshStandardMaterial {
   const asset = CONSTRUCTION_MATERIAL_ASSETS[material] ?? CONSTRUCTION_MATERIAL_ASSETS.wood;
   const textures = pbrTextures(asset);
+  const normalScale = resolveNormalScale(asset);
   return trackedMeshStandardMaterial({
     name: `construction-${asset.id}`,
-    color: textures.albedo ? 0xffffff : asset.color,
+    color: albedoTint(textures.albedo !== undefined, asset.color),
     roughness: asset.roughness,
     metalness: asset.metalness,
+    envMapIntensity: DEFAULT_ENV_MAP_INTENSITY,
     ...(textures.albedo ? { map: textures.albedo } : {}),
     ...(textures.normal ? {
       normalMap: textures.normal,
-      normalScale: new THREE.Vector2(asset.normalScale ?? DEFAULT_NORMAL_SCALE, asset.normalScale ?? DEFAULT_NORMAL_SCALE),
+      normalScale: new THREE.Vector2(normalScale, normalScale),
     } : {}),
     ...(textures.roughness ? { roughnessMap: textures.roughness } : {}),
     ...(textures.ao ? {
