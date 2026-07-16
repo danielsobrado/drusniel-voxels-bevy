@@ -26,11 +26,14 @@ export function selectTreeGpuRingGeometry(input: TreeGpuRingGeometryInput): Tree
   }
 
   const atlas = input.impostorAtlases[input.species];
-  if (!input.settings.impostors.enabled || !atlas?.ready) {
-    if (input.settings.impostors.enabled && input.settings.impostors.fallbackToPlaceholder) {
-      return { geometry: input.geometries[input.species].impostor, bakedImpostor: false };
-    }
+  if (!input.settings.impostors.enabled) {
     return { geometry: EMPTY_GPU_RING_IMPOSTOR_GEOMETRY, bakedImpostor: false };
+  }
+  if (!atlas?.ready) {
+    const fallback = input.settings.impostors.fallbackToPlaceholder
+      ? input.geometries[input.species].impostor
+      : input.geometries[input.species].far;
+    return { geometry: fallback, bakedImpostor: false };
   }
 
   input.bakedImpostorGeometries[input.species] ??= createTreeGpuRingBakedImpostorGeometry(
