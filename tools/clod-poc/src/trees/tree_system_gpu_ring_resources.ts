@@ -27,6 +27,7 @@ import {
   createTreeGpuRingMesh,
   createTreeGpuRingShadowMesh,
   isRenderableTreeGpuRingGeometry,
+  TREE_GPU_RING_INSTANCE_VEC4S,
   type TreeGpuRingMesh,
 } from "./tree_system_gpu_ring_draw.js";
 import { addTreeGpuRingPrepassTwin } from "./tree_system_gpu_ring_prepass.js";
@@ -112,6 +113,54 @@ export function createTreeSystemGpuRingDrawResources(
     materialHandles,
     outputBuffers: buffers.outputBuffers,
   };
+}
+
+export function refreshTreeSystemGpuRingImpostorResources(
+  input: TreeGpuRingDrawResourcesInput,
+  resources: TreeGpuRingDrawResources,
+): boolean {
+  const capacity = Math.max(1, Math.floor(resources.cell.count / TREE_GPU_RING_INSTANCE_VEC4S));
+  const ringBuffers: TreeRingInstanceBuffers = { cell: resources.cell, capacity };
+  let swapped = false;
+
+  for (const species of TREE_SPECIES) {
+    const atlas = input.impostorAtlases[species];
+    if (!input.settings.impostors.enabled || !atlas?.ready) continue;
+
+    const meshName = `trees-ring-gpu-${species}-impostor`;
+    const mesh = resources.meshes.find((candidate) => candidate.name === meshName);
+    if (!mesh) continue;
+
+    const source = input.geometryForGpuRing(species, "impostor");
+    if (!isRenderableTreeGpuRingGeometry(source)) continue;
+
+    const materialKey = `${species}:impostor`;
+    const nextHandle = createTreeGpuRingMaterialHandle(input, ringBuffers, species, "impostor");
+    const group = treeGpuRingGroupIndex(species, "impostor");
+    const nextGeometry = createTreeGpuRingInstancedGeometry(
+      source,
+      mesh.geometry.instanceCount,
+      resources.indirect,
+      group * 5 * Uint32Array.BYTES_PER_ELEMENT,
+      input.worldCells,
+    );
+    const previousGeometry = mesh.geometry;
+    const previousHandle = resources.materialHandles[materialKey];
+
+    mesh.geometry = nextGeometry;
+    mesh.material = input.settings.render.debugColorByLod
+      ? nextHandle.debugMaterials.impostor
+      : nextHandle.regularMaterial;
+    resources.materialHandles[materialKey] = nextHandle;
+    updateTreeGpuRingIndirectIndexCount(resources.indirect, group, source);
+    replaceTreeGpuRingPrepassTwin(input, mesh, nextHandle);
+
+    previousGeometry.dispose();
+    previousHandle?.dispose();
+    swapped = true;
+  }
+
+  return swapped;
 }
 
 function createTreeGpuRingMaterialHandle(
@@ -220,16 +269,52 @@ function createGpuRingShadowTierDraw(
   input: TreeGpuRingDrawResourcesInput,
   species: TreeSpeciesId,
   lod: TreeLod,
-  cascade: number,
+  cascadeIndex: number,
   count: number,
   indirect: StorageBufferAttribute,
   indirectOffset: number,
   materialHandle: TreeMaterialHandle,
 ): TreeGpuRingMesh | null {
-  const source = lod === "far" || lod === "impostor"
-    ? input.crownProxyGeometry
-    : input.geometryForGpuRing(species, lod);
+  const source = input.geometryForGpuRing(species, lod);
   if (!isRenderableTreeGpuRingGeometry(source)) return null;
   const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
-  return createTreeGpuRingShadowMesh(geometry, materialHandle, species, lod, cascade);
+  return createTreeGpuRingShadowMesh(geometry, materialHandle, species, lod, cascadeIndex);
+}
+
+function updateTreeGpuRingIndirectIndexCount(
+  indirect: StorageBufferAttribute,
+  group: number,
+  source: THREE.BufferGeometry,
+): void {
+  const array = indirect.array as Uint32Array;
+  const offset = group * 5;
+  array[offset] = source.getIndex()?.count ?? source.getAttribute("position")?.count ?? 0;
+  indirect.needsUpdate = true;
+}
+
+function replaceTreeGpuRingPrepassTwin(
+  input: TreeGpuRingDrawResourcesInput,
+  mesh: TreeGpuRingMesh,
+  materialHandle: TreeMaterialHandle,
+): void {
+  const twinName = `${mesh.name}-depth-prepass`;
+  const index = input.ringPrepassTwins.findIndex((twin) => twin.name === twinName);
+  if (index >= 0) {
+    const [previous] = input.ringPrepassTwins.splice(index, 1);
+    input.root.remove(previous);
+    if (Array.isArray(previous.material)) {
+      for (const material of previous.material) material.dispose();
+    } else {
+      previous.material.dispose();
+    }
+  }
+  addTreeGpuRingPrepassTwin({
+    root: input.root,
+    twins: input.ringPrepassTwins,
+    lod: "impostor",
+    mesh,
+    materialHandle,
+    useTreePrepass: input.useTreePrepass,
+    maxLod: input.treePrepassMaxLod,
+  });
 }
