@@ -47,7 +47,7 @@ export function treeCanUseBakedImpostor(
 }
 
 export function treeUnbakedImpostorFallbackLod(settings: TreeSettings): TreeLod {
-  return settings.impostors.enabled ? "impostor" : "far";
+  return settings.impostors.enabled && settings.impostors.fallbackToPlaceholder ? "impostor" : "far";
 }
 
 export function selectTreeSystemGeometry(input: TreeSystemGeometryInput): THREE.BufferGeometry {
