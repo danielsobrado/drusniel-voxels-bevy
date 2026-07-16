@@ -90,12 +90,14 @@ describe("vegetation frame phase", () => {
     expect(counters["infinite_hydrology_camera_outside_startup"]).toBe(1);
   });
 
-  it("updates water when water is enabled", () => {
+  it("updates water around the streamed vegetation center", () => {
     const input = makeInput(true);
+    input.camera.position.set(1500, 40, -300);
 
     runVegetationFramePhase(input);
 
     expect(input.waterController.update).toHaveBeenCalledOnce();
+    expect(input.waterController.update).toHaveBeenCalledWith(1 / 60, input.ringCenter);
     expect(input.waterController.logDevInitOnce).toHaveBeenCalledOnce();
   });
 
