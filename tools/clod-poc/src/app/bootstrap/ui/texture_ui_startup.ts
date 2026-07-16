@@ -1,6 +1,7 @@
 import { createClodPocTerrainMaterialGui } from "../../../ui/gui/gui_root.js";
 import { createTerraformMenu } from "../../../ui/terraform_menu.js";
 import { createTerrainTextureModal } from "../../../terrain/material/terrain_texture_modal.js";
+import { installPlayerEditModeHotkey } from "../../../player/player_edit_mode_hotkey.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { GuiStartupResult } from "./gui_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
@@ -22,7 +23,16 @@ export async function runTextureUiStartup(
     state,
     bindings,
     textureLoadOptions,
-    dom: { buildProgress, buildProgressBar, buildProgressPhase, buildProgressPercent },
+    interaction,
+    renderer,
+    dom: {
+      buildProgress,
+      buildProgressBar,
+      buildProgressPhase,
+      buildProgressPercent,
+      orbitModeButton,
+      playerModeButton,
+    },
   } = input;
   const {
     textureController,
@@ -87,6 +97,16 @@ export async function runTextureUiStartup(
   });
   session.terraformEditCheckbox = terraformMenuUi.editCheckbox;
   session.terraformEditActive = terraformMenuUi.editCheckbox.checked;
+
+  const playerEditModeHotkey = installPlayerEditModeHotkey({
+    interaction,
+    rendererElement: renderer.domElement,
+    playerModeButton,
+    orbitModeButton,
+    editCheckbox: terraformMenuUi.editCheckbox,
+  });
+  window.addEventListener("beforeunload", () => playerEditModeHotkey.dispose(), { once: true });
+
   bindings.refreshTerraformSwatches = terraformMenuUi.refreshSwatches;
   bindings.syncTerraformMenu = terraformMenuUi.syncMenu;
   applyTerrainTextures();
