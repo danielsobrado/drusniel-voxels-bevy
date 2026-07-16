@@ -7,11 +7,25 @@ import {
   type HydrologyGrid,
 } from "./hydrologyGrid.js";
 
+export const FLOW_ACCUMULATION_REFERENCE_PARTICLES = 3_000_000;
+
 function hash01(n: number): number {
   let x = n | 0;
   x = Math.imul(x ^ (x >>> 16), 2246822519);
   x = Math.imul(x ^ (x >>> 13), 3266489917);
   return ((x ^ (x >>> 16)) >>> 0) / 4294967295;
+}
+
+export function flowAccumulationThreshold(
+  particles: number,
+  cellCount: number,
+  thresholdAdd: number,
+  referenceParticles = FLOW_ACCUMULATION_REFERENCE_PARTICLES,
+): number {
+  const safeParticles = Math.max(0, particles);
+  const safeCellCount = Math.max(1, cellCount);
+  const safeReferenceParticles = Math.max(1, referenceParticles);
+  return safeParticles / safeCellCount + thresholdAdd * (safeParticles / safeReferenceParticles);
 }
 
 export function computeFlowAccumulation(
@@ -56,8 +70,8 @@ export function computeFlowAccumulation(
     }
   }
 
-  const riverThreshold = particles / count + riversConfig.riverThresholdAdd;
-  const visibleThreshold = particles / count + riversConfig.visibleWaterThresholdAdd;
+  const riverThreshold = flowAccumulationThreshold(particles, count, riversConfig.riverThresholdAdd);
+  const visibleThreshold = flowAccumulationThreshold(particles, count, riversConfig.visibleWaterThresholdAdd);
   for (let i = 0; i < count; i++) {
     const acc = accumulation[i];
     const t = Math.max(1e-5, Math.min(60, acc / riverThreshold));
