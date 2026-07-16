@@ -1,7 +1,11 @@
 import type { TreeLod, TreeSpeciesId } from "./tree_config.js";
 import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
 import { resolveTreeSystemLod } from "./tree_system_lod_resolution.js";
-import { createTreeSystemGpuRingDrawResources } from "./tree_system_gpu_ring_resources.js";
+import {
+  createTreeSystemGpuRingDrawResources,
+  refreshTreeSystemGpuRingImpostorResources,
+  type TreeGpuRingDrawResourcesInput,
+} from "./tree_system_gpu_ring_resources.js";
 import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
@@ -47,21 +51,13 @@ export function treeGpuRingInput(self: TreeSystem) {
 }
 
 export function treeCreateGpuRingResources(self: TreeSystem, maxInstancesPerGroup: number) {
-  return createTreeSystemGpuRingDrawResources({
-    backend: self.gpuBackend!,
-    root: self.root,
-    ringPrepassTwins: self.gpuRing.prepassTwins,
-    settings: self.settings,
-    worldCells: self.worldCells,
-    currentLighting: self.currentLighting,
-    hydrologyWater: self.hydrologyWater,
-    impostorAtlases: self.assets.impostorAtlases,
-    foliageAtlas: self.assets.foliageAtlas,
-    crownProxyGeometry: self.assets.crownProxyGeometry,
-    useTreePrepass: self.useTreePrepass,
-    treePrepassMaxLod: self.treePrepassMaxLod,
-    geometryForGpuRing: (species, lod) => self.assets.geometryForGpuRing(species, lod),
-  }, maxInstancesPerGroup);
+  return createTreeSystemGpuRingDrawResources(treeGpuRingDrawResourcesInput(self), maxInstancesPerGroup);
+}
+
+export function treeRefreshGpuRingImpostors(self: TreeSystem): boolean {
+  const draw = self.gpuRing.draw;
+  if (!draw) return false;
+  return refreshTreeSystemGpuRingImpostorResources(treeGpuRingDrawResourcesInput(self), draw);
 }
 
 export function treeClearGpuRing(self: TreeSystem): void {
@@ -80,4 +76,23 @@ export function treeUpdateStats(self: TreeSystem): void {
     impostorReason: self.assets.impostorReason,
     earlyTerrainRejectionStats: self.earlyTerrainRejectionStats,
   });
+}
+
+function treeGpuRingDrawResourcesInput(self: TreeSystem): TreeGpuRingDrawResourcesInput {
+  if (!self.gpuBackend) throw new Error("Cannot create WebGPU tree draw resources without a backend");
+  return {
+    backend: self.gpuBackend,
+    root: self.root,
+    ringPrepassTwins: self.gpuRing.prepassTwins,
+    settings: self.settings,
+    worldCells: self.worldCells,
+    currentLighting: self.currentLighting,
+    hydrologyWater: self.hydrologyWater,
+    impostorAtlases: self.assets.impostorAtlases,
+    foliageAtlas: self.assets.foliageAtlas,
+    crownProxyGeometry: self.assets.crownProxyGeometry,
+    useTreePrepass: self.useTreePrepass,
+    treePrepassMaxLod: self.treePrepassMaxLod,
+    geometryForGpuRing: (species, lod) => self.assets.geometryForGpuRing(species, lod),
+  };
 }
