@@ -16,6 +16,7 @@ import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlu
 import { createEmptyTreeSystemStats } from "../../trees/tree_system_stats.js";
 import { estimateTreeImpostorAtlasMemoryMiB } from "../../trees/tree_impostor_memory.js";
 import { mountTreeImpostorLabFromWindow } from "../../trees/tree_impostor_lab.js";
+import { TREE_LOD_CROSSFADE_MAX_BAND_M } from "../../trees/tree_lod_constants.js";
 
 export interface TreeStartupInput {
   scene: THREE.Scene;
@@ -76,7 +77,9 @@ function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
     lod: {
       ...config.lod,
       crossfadeEnabled: config.lod.crossfadeEnabled && ditherEnabled,
-      crossfadeBandM: ditherEnabled ? config.lod.crossfadeBandM : 0,
+      crossfadeBandM: ditherEnabled
+        ? Math.min(config.lod.crossfadeBandM, TREE_LOD_CROSSFADE_MAX_BAND_M)
+        : 0,
       ditherEnabled,
     },
     foliage: {
