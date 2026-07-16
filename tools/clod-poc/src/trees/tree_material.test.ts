@@ -33,15 +33,19 @@ describe("tree material shader injections", () => {
     expect(shader).toContain("vTreeSpeciesIndex = treeWind.z");
     expect(shader).toContain("varying float vTreeLodDitherRole");
     expect(shader).toContain("vTreeLodDitherRole = treeLodDitherRole");
+    expect(shader).toContain("vTreeLodNoise = treeWindHash(treeLodSeeded)");
     expect(shader).toContain("treeShapePhase");
     expect(shader).toContain("treeHeightMask");
     expect(shader).toContain("transformed.xz += normalize(transformed.xz + vec2(0.001)) * treeShape * 0.34");
     expect(shader).toContain("treeSway");
   });
 
-  it("adds complementary primary and secondary LOD dither masks", () => {
+  it("adds stable complementary primary and secondary LOD masks", () => {
     const shader = injectTreeLodFadeFragmentShader(fragmentShader);
     expect(shader).toContain("varying float vTreeLodDitherRole");
+    expect(shader).toContain("varying float vTreeLodNoise");
+    expect(shader).toContain("float treeLodIgn = vTreeLodNoise");
+    expect(shader).not.toContain("gl_FragCoord");
     expect(shader).toContain("if (vTreeLodDitherRole < 0.5)");
     expect(shader).toContain("if (treeLodIgn >= vTreeLodFade) discard");
     expect(shader).toContain("if (treeLodIgn < 1.0 - vTreeLodFade) discard");
