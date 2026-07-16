@@ -142,6 +142,10 @@ export function createClodGui(
   gui.add(state, "farShellEnabled").name("far shell").onChange((on: boolean) => {
     deps.farShellController.setEnabled(on);
   });
+  gui.add(state, "bubble").name("streaming").listen().onChange(() => {
+    deps.updateSelection();
+    deps.updateInfo();
+  });
   gui.add(state, "profileEnabled").name("profiling");
   createRenderResolutionGui(gui, deps);
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(deps.updateSelection);
