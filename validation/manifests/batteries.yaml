@@ -1,0 +1,73 @@
+qa_batteries:
+  schema_version: 1
+  lanes:
+    - id: lane-a-clod-static
+      target: clod-poc
+      authoritative: false
+      commands: [clod-manifest-validate, clod-typecheck, clod-unified-tests]
+    - id: lane-a-bevy-static
+      target: bevy
+      authoritative: false
+      commands: [bevy-manifest-validate, bevy-unified-tests]
+    - id: lane-b-clod-smoke
+      target: clod-poc
+      authoritative: true
+      commands: [clod-capture-smoke]
+    - id: lane-b-clod-full
+      target: clod-poc
+      authoritative: true
+      commands: [clod-capture-full]
+    - id: lane-b-bevy-smoke
+      target: bevy
+      authoritative: true
+      commands: [bevy-capture-smoke, bevy-stage-smoke]
+    - id: lane-b-bevy-full
+      target: bevy
+      authoritative: true
+      commands: [bevy-capture-full, bevy-stage-full]
+    - id: lane-c-clod-specialized
+      target: clod-poc
+      authoritative: false
+      commands: [clod-infinite-acceptance, clod-water-verify, clod-tree-parity]
+    - id: lane-c-bevy-specialized
+      target: bevy
+      authoritative: false
+      commands: [bevy-bench-guard]
+
+  batteries:
+    - id: clod-smoke
+      description: Static validation plus the canonical CLOD smoke capture.
+      targets: [clod-poc]
+      lanes: [lane-a-clod-static, lane-b-clod-smoke]
+      scenes: [clod_poc_main_view]
+      tags: []
+    - id: clod-full
+      description: Full CLOD visual, performance, water, tree, and streaming acceptance battery.
+      targets: [clod-poc]
+      lanes: [lane-a-clod-static, lane-b-clod-full, lane-c-clod-specialized]
+      scenes: [clod_poc_main_view, long_view_4km, infinite_islands_move_static, infinite_islands_move_moving, infinite_islands_move_steady]
+      tags: []
+    - id: bevy-smoke
+      description: Static validation plus the native Bevy ridge checkpoint capture.
+      targets: [bevy]
+      lanes: [lane-a-bevy-static, lane-b-bevy-smoke]
+      scenes: [bevy-ridge-noon]
+      tags: []
+    - id: bevy-full
+      description: Native Bevy visual checkpoints and regression guard.
+      targets: [bevy]
+      lanes: [lane-a-bevy-static, lane-b-bevy-full, lane-c-bevy-specialized]
+      scenes: [bevy-ridge-noon, bevy-water-shore, bevy-forest-noon, bevy-fog-god-rays, bevy-shadow-ray-flag, bevy-photo-cinematic]
+      tags: []
+    - id: combined-smoke
+      description: Lane A and Lane B smoke coverage for CLOD-POC and Bevy.
+      targets: [clod-poc, bevy]
+      lanes: [lane-a-clod-static, lane-a-bevy-static, lane-b-clod-smoke, lane-b-bevy-smoke]
+      scenes: [clod_poc_main_view, bevy-ridge-noon]
+      tags: []
+    - id: combined-full
+      description: Complete Lane A, Lane B, and Lane C battery for both runtimes.
+      targets: [clod-poc, bevy]
+      lanes: [lane-a-clod-static, lane-a-bevy-static, lane-b-clod-full, lane-b-bevy-full, lane-c-clod-specialized, lane-c-bevy-specialized]
+      scenes: [clod_poc_main_view, long_view_4km, infinite_islands_move_static, infinite_islands_move_moving, infinite_islands_move_steady, bevy-ridge-noon, bevy-water-shore, bevy-forest-noon, bevy-fog-god-rays, bevy-shadow-ray-flag, bevy-photo-cinematic]
+      tags: []

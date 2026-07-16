@@ -1,0 +1,34 @@
+name: Unified QA Lane A
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clod-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/clod-poc/package-lock.json
+      - run: npm ci --prefix tools/clod-poc
+      - run: npm --prefix tools/clod-poc exec -- tsx tools/qa-orchestrator.ts --mode validate
+      - run: npm --prefix tools/clod-poc run typecheck
+      - run: npm --prefix tools/clod-poc run test -- src/qa/unified
+
+  bevy-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test diagnostics::qa::unified
+      - run: cargo run --bin qa_orchestrator -- --mode validate
