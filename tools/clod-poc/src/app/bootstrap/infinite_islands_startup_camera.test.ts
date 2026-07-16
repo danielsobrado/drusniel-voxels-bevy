@@ -11,16 +11,16 @@ describe("infinite-islands startup camera", () => {
     expect(pose.target[2]).toBeLessThan(pose.eye[2]);
   });
 
-  it("preserves the legacy default pose for finite scenes", () => {
+  it("starts finite scenes close enough to expose several terrain levels", () => {
     const worldCells = 1024;
     const pose = defaultStartupCameraPose(null, worldCells);
 
     expect(pose.eye).toEqual([
       worldCells * 0.5,
-      worldCells * 0.7,
-      worldCells * 1.6,
+      worldCells * 0.45,
+      worldCells * 1.32,
     ]);
-    expect(pose.target).toEqual([worldCells * 0.5, 24, worldCells * 0.5]);
+    expect(pose.target).toEqual([worldCells * 0.5, 30, worldCells * 0.5]);
   });
 
   it("frames the deterministic cave entrance from outside", () => {
