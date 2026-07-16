@@ -1,21 +1,58 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VisualManifestFile {
     pub visual_regression: VisualManifest,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PerformanceManifestFile {
     pub performance_regression: PerformanceManifest,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyMapFile {
+    pub legacy_id_map: Vec<LegacyMapEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyMapEntry {
+    pub legacy: String,
+    pub canonical: String,
+    pub kind: LegacyIdKind,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyIdKind {
+    Scene,
+    Probe,
+    Timing,
+    Counter,
+    Informational,
+}
+
+impl fmt::Display for LegacyIdKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Scene => "scene",
+            Self::Probe => "probe",
+            Self::Timing => "timing",
+            Self::Counter => "counter",
+            Self::Informational => "informational",
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VisualManifest {
     pub schema_version: u32,
@@ -25,7 +62,7 @@ pub struct VisualManifest {
     pub scenes: Vec<Scene>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PerformanceManifest {
     pub schema_version: u32,
@@ -34,14 +71,29 @@ pub struct PerformanceManifest {
     pub scenes: Vec<Scene>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Target {
     ClodPoc,
     Bevy,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+impl Target {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ClodPoc => "clod-poc",
+            Self::Bevy => "bevy",
+        }
+    }
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Lane {
     Static,
@@ -49,7 +101,23 @@ pub enum Lane {
     Full,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl Lane {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Gpu => "gpu",
+            Self::Full => "full",
+        }
+    }
+}
+
+impl fmt::Display for Lane {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scene {
     pub id: String,
@@ -74,7 +142,22 @@ pub struct Scene {
     pub specialized_commands: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl Scene {
+    pub fn reproduction_command(&self) -> String {
+        match self.target {
+            Target::Bevy => format!(
+                "cargo run --bin qa -- --scene {} --run-bench",
+                self.id
+            ),
+            Target::ClodPoc => format!(
+                "npm --prefix tools/clod-poc run visual:regression -- --scene {}",
+                self.id
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Launch {
     pub world_seed: i64,
@@ -90,7 +173,7 @@ pub struct Launch {
     pub flags: BTreeMap<String, serde_yaml::Value>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Camera {
     pub position: [f64; 3],
@@ -99,7 +182,7 @@ pub struct Camera {
     pub fov_y_deg: f64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lighting {
     pub time_of_day_hours: f64,
@@ -107,7 +190,7 @@ pub struct Lighting {
     pub sun_azimuth_deg: f64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Weather {
     pub wind_time_s: f64,
@@ -116,7 +199,7 @@ pub struct Weather {
     pub precipitation: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settle {
     pub ready_timeout_ms: u64,
@@ -125,7 +208,7 @@ pub struct Settle {
     pub freeze_after_settle: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capture {
     pub checkpoint: String,
@@ -134,7 +217,7 @@ pub struct Capture {
     pub include_debug_overlays: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Baseline {
     pub image: PathBuf,
@@ -144,7 +227,7 @@ pub struct Baseline {
     pub sha256: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageGates {
     pub required: bool,
@@ -158,7 +241,7 @@ pub struct ImageGates {
     pub chroma_mean_delta_max: f64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegionProbe {
     pub id: String,
@@ -166,21 +249,30 @@ pub struct RegionProbe {
     pub gates: BTreeMap<String, NumericRange>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NumericRange {
     pub min: Option<f64>,
     pub max: Option<f64>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Enforcement {
     Required,
     Advisory,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl Enforcement {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Advisory => "advisory",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TimingGate {
     pub id: String,
@@ -190,7 +282,7 @@ pub struct TimingGate {
     pub required: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CounterOperator {
     Equals,
@@ -199,7 +291,18 @@ pub enum CounterOperator {
     Between,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl CounterOperator {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Equals => "equals",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::Between => "between",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CounterGate {
     pub id: String,
@@ -210,7 +313,7 @@ pub struct CounterGate {
     pub required: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct InformationalMetric {
     pub id: String,

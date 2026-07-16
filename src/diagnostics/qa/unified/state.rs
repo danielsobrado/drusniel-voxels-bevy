@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReadinessSnapshot {
     pub runtime_ready: bool,
     pub runtime_error: Option<String>,
@@ -30,7 +32,7 @@ impl ReadinessSnapshot {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FreezeState {
     pub camera: bool,
     pub wind: bool,
@@ -69,6 +71,18 @@ impl FreezeState {
     pub fn unfreeze(&mut self) {
         *self = Self::default();
     }
+
+    pub fn is_fully_frozen(&self) -> bool {
+        self.camera
+            && self.wind
+            && self.clouds
+            && self.particles
+            && self.water
+            && self.sun
+            && self.random_epochs
+            && self.history_updates
+            && self.streaming_commits
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +108,6 @@ mod tests {
             ..Default::default()
         };
         state.freeze_after_readiness(&readiness).unwrap();
-        assert!(state.camera && state.streaming_commits && state.history_updates);
+        assert!(state.is_fully_frozen());
     }
 }

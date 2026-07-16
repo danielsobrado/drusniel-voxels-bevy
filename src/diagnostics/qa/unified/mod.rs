@@ -1,3 +1,14 @@
+pub mod capture;
+pub mod edge_metrics;
+pub mod environment;
+pub mod gates;
+pub mod image_linear;
+pub mod image_metrics;
 pub mod manifest;
+pub mod region_probes;
+pub mod report;
+pub mod runner;
 pub mod schema;
+pub mod sha256;
 pub mod state;
+pub mod summary;
