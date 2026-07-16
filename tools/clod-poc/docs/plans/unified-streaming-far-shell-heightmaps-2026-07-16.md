@@ -2,6 +2,16 @@
 
 Created 2026-07-16. Status: PLANNED (no code landed from this doc yet).
 
+Revised same day after an external review. Accepted: C2 reframed as *surface-cache*
+revisions with a single global commit revision (per-tile max-revision recording had a real
+staleness-miss bug); C4 changed from a radial frontier actuator to per-cell readiness
+ownership; C3 changed from one ms budget to a multi-resource capacity model; the
+misleading master "streaming" toggle added as G11 + Phase 1; local-fix-first promoted to
+its own phase; persistence/memory phases made strictly evidence-gated. Amended against the
+review: master-off means **freeze**, not hide (hiding the far band 5 km from the startup
+window would show void), and the scalar frontier counter stays as a diagnostic/gate input
+(only its use as a control input was dropped).
+
 Related documents:
 
 - `continent-plan-overview-2026-07-12.md` and `continent-fixes-and-next-steps-2026-07-14.md`
@@ -22,14 +32,19 @@ budget, and invalidation. The target state:
 
 1. **One stream cursor** — a single per-frame center + velocity + predicted-center contract
    consumed by every streaming system.
-2. **One height authority with revisions** — heightfield tiles (where authoritative), edits,
-   and stamps produce region revisions; every derived cache (far summary tiles, far shell,
-   clipmap, vegetation masks) can tell when it baked stale data and re-bake by bounds.
-3. **One streaming budget** — a frame-level governor that arbitrates worker dispatch, GPU
-   mesher lanes, and main-thread apply/slice work across systems instead of N independent
-   2 ms budgets stacking on the same frame.
-4. **One seam** — the near↔far handoff follows the *actual* CLOD ready frontier instead of a
-   fixed radius, so a lagging streamer widens the far band rather than leaving pops or holes.
+2. **One surface truth with revisions** — the canonical world function (generator +
+   hydrology carve + feature stamps + voxel edits/overlay) stays the authority;
+   heightfield tiles are its revisioned *cache*, and every derived cache (far summary
+   tiles, far shell, clipmap, vegetation masks) can tell when it baked stale data and
+   re-bake by bounds.
+3. **One capacity model** — a small multi-resource governor (main-thread ms, worker batch
+   slots, GPU mesher lanes, upload bytes) arbitrates streaming work across systems instead
+   of N independent 2 ms budgets stacking on the same frame.
+4. **One seam** — the near↔far handoff follows *per-cell CLOD readiness* instead of a
+   fixed radius, so a lagging streamer is covered by the far owner cell-by-cell rather
+   than leaving pops or holes.
+5. **One switch** — a master streaming control that freezes and resumes the whole stack
+   coherently (today the GUI toggle labeled "streaming" only stops the near bubble).
 
 Non-goals: no Rust/Bevy changes (keep new contracts port-shaped per
 `docs/architecture/bevy-world-source-port.md`); no acceptance-gate weakening; no redo of the
@@ -144,10 +159,15 @@ The gaps below are therefore *coordination* gaps, not missing subsystems.
   re-samples *all* shell vertices (sliced at 2 ms/frame). Suspected contributor to the
   4.7 ms `farSummaryMs` p95, but the composite bucket hides it — `farSum*Ms` sub-buckets
   exist and must be read before touching anything (session doc, item #1).
-- **G10 — World-mode split brain.** Continent runs tiles-as-authority; default infinite
-  islands runs pure procedural with tiles off. Two tall paths through the same code, twice
-  the test surface, and features proven on one mode (tile atlas, hydrology carve) silently
-  absent on the other.
+- **G10 — World-mode split brain.** Continent runs tiles-as-required-cache; default
+  infinite islands runs pure procedural with tiles off. Two tall paths through the same
+  code, twice the test surface, and features proven on one mode (tile atlas, hydrology
+  carve) silently absent on the other.
+- **G11 — The master toggle lies.** The top-level GUI control labeled "streaming"
+  (`src/ui/gui/clod_gui.ts:145`) toggles only `state.bubble`. The streamed CLOD roots
+  (`enabled: streamingScene` at creation), the heightfield tile runtime, far summary
+  requests, far shell recentering, and the clipmap all keep streaming regardless — there
+  is no way to freeze the stack as one piece, for users or for A/B measurement.
 
 ## Design — four contracts
 
@@ -176,66 +196,100 @@ interface StreamCursor {
 - Counters: `stream_cursor_x/z`, `stream_cursor_speed_mps`, plus existing
   `world_center_debug` distances now measured against the cursor.
 
-### C2. Height authority revisions (tile → summary bridge)
+### C2. Surface-cache revisions (tile → summary bridge)
 
-- The heightfield tile cache exposes a commit notification with bounds and a monotonically
-  increasing **surface revision** per committed tile (resident-from-fallback transitions,
-  invalidation rebuilds, and store loads all count).
-- Far summary tiles record the max surface revision they sampled. A small bridge (same
-  shape as `registerSaveInvalidationTarget`) subscribes: on tile commit whose bounds
-  intersect a built summary tile with an older revision → `cache.markStale(bounds)`. The
-  existing commit-revision machinery then drives the shell refresh and clipmap re-upload
-  with no new plumbing.
+Terminology first, because it shapes the Bevy port: the **authority** is the canonical
+world function — generator + hydrology carve + feature stamps + voxel edits (and the voxel
+overlay in complex regions). Heightfield tiles are a revisioned **cache** of that function;
+the code's `authoritative` flag only means "pages must wait for this cache", not "this
+cache is the world truth". Nothing in this contract may promote baked tile bytes to truth —
+caves, overhangs, and near-player editability stay voxel-owned.
+
+- One **global, monotonically increasing surface revision**. Every tile commit
+  (fallback→resident transition, invalidation rebuild, store load) emits
+  `SurfaceCommit { globalRevision, bounds }`. Per-tile independent revision counters are
+  NOT sufficient: a summary tile that sampled source tiles at revisions {10, 4} and
+  recorded max 10 would miss source B moving 4→5. The global counter makes "newer than
+  what I baked" well-defined across any set of source tiles.
+- The event path is unconditional: a commit whose bounds intersect a built far-summary
+  tile marks it stale (`cache.markStale(bounds)`) with no revision comparison. The stored
+  per-summary-tile `builtAtGlobalRevision` exists for *catch-up only* — reconciling
+  commits that land while a summary build is in flight (the race the existing
+  `summary-cache-invalidation-race` test covers) and re-syncing after the bridge is
+  toggled off/on. The existing commit-revision machinery then drives the shell refresh
+  and clipmap re-upload with no new plumbing.
 - Add a **parity probe** (debug/acceptance only): sample N random points per second through
   the tile-resident path and the fallback path where both are available; publish
-  `height_authority_parity_max_error_m`. Gate it in continent acceptance (small epsilon —
+  `surface_cache_parity_max_error_m`. Gate it in continent acceptance (small epsilon —
   fallback recomputes the same math, so divergence is a bug, not noise).
 - Edits already flow (stamps bridge); this contract makes *residency transitions* flow the
   same way, closing G5 and giving G10 a single correctness story.
 
-### C3. StreamScheduler (one frame budget)
+### C3. StreamCapacity (multi-resource governor, not one budget)
 
-A governor that hands out the streaming time slice each frame instead of letting fixed
-budgets stack:
+The contended resources are not interchangeable — worker dispatch, GPU mesher lanes,
+main-thread apply/slice time, and GPU upload bytes are separate currencies (the CLOD
+handoff doc already established worker build vs main-thread apply as separate cost
+systems). A single milliseconds budget would produce misleading accounting, so the
+governor allocates per resource:
 
-- Inputs: recent frame-time headroom (target minus p95-smoothed frame ms), per-producer
-  demand (queue depths, oldest-request age), and GPU mesher lane occupancy (root vs bubble
-  — new counter).
-- Producers register with a priority class:
-  1. collision safety (bubble colliders, safety-ring pages),
-  2. near visual (bubble visuals, refinement pages),
-  3. seam band (far summary tiles in the near_far ring, tile batches feeding `canBuildPage`),
-  4. far refresh (shell slice, shadow proxy slice, horizon-ring summary, biome streams).
-- Each producer keeps its own internal mechanics; the scheduler only scales
-  how-much-this-frame (build counts / deadline ms). Minimum quotas prevent starvation
-  (e.g. tile builds can no longer be fully gated off by `heightfieldTileBuildAllowed`
-  during sustained movement — replace the boolean gate with a low-priority quota, G4).
-- Hysteresis on budget changes; oscillation guard proven over a long warmup (this is Task
-  5/6 from the near-field doc, promoted to *cross-system* scope — the within-bubble version
-  was measured structurally absorbed).
-- **Keep-only-if-measured**: the whole phase ships behind a flag and survives only with
-  movement p99 / p95 improvements on the acceptance A/B, per the repo perf rule.
+```ts
+interface StreamingFrameCapacity {
+  mainThreadDeadlineMs: number; // apply queues, shell/proxy slices, CPU summary builds
+  workerBatchSlots: number;     // root page builds, heightfield tile batches
+  gpuMesherSlots: number;       // root-vs-bubble lane split (8 lanes today)
+  uploadBytes: number;          // geometry/atlas uploads this frame
+}
+```
 
-### C4. Seam contract (frontier-adaptive far band)
+- Producers request the resource they actually consume; each subsystem keeps its own
+  queue and internal mechanics. The policy stays a small allocator — not a scheduler
+  class that owns every subsystem.
+- Priority classes (order): collision safety (bubble colliders, safety-ring pages) →
+  near visual (bubble visuals, refinement pages) → seam band (near_far summary tiles,
+  tile batches feeding `canBuildPage`) → far refresh (shell slice, shadow proxy slice,
+  horizon-ring summary, biome streams).
+- Minimum quotas prevent starvation (tile builds can no longer be fully gated off by
+  `heightfieldTileBuildAllowed` during sustained movement — replace the boolean gate with
+  a low-priority quota, G4).
+- Hysteresis on allocation changes; oscillation guard proven over a long warmup (this is
+  Task 5/6 from the near-field doc promoted to *cross-system* scope — the within-bubble
+  version was measured structurally absorbed).
+- **Keep-only-if-measured**: ships behind a flag and survives only with movement p99/p95
+  improvements on the acceptance A/B, per the repo perf rule.
 
-- Root streamer publishes `live_clod_stream_ready_frontier_m`: the largest radius R such
-  that required pages within R are ready (computable from the per-level required/ready
-  sets it already tracks).
-- The far owner's effective inner edge becomes
-  `min(farShellInnerM, max(readyFrontierM, liveRadiusM + margin))` with hysteresis
-  (recede fast, advance slow) — in replace mode via the clipmap's per-cell GPU ownership,
-  in shell mode via the existing `nearBlendMeters` band following the frontier.
+### C4. Seam contract (per-cell readiness ownership, not a radial frontier)
+
+A single scalar frontier radius is the wrong actuator: one missing page to the north
+would pull the far band inward through all 360°, including sectors that are fully ready.
+The backlog numbers also overstate the visual problem — the root streamer keeps
+hierarchical parent/safety coverage while refinements land (`parentCoverageViolations`,
+`pageCoveredByResidentClodHierarchy`), so G6 is mostly *refinement pop*, not holes. The
+seam therefore follows readiness **per cell**, and the annular shell stays put:
+
+- The root streamer publishes a per-cell readiness feed for the refinement band (which
+  cells are covered by a *refined* page rather than only safety coverage) — the residency
+  feeds and coverage oracle already compute this shape.
+- The far clipmap consumes it through its existing per-cell GPU ownership: clipmap cells
+  render wherever refined CLOD is not ready and fade out per cell as pages land. Clipmap
+  (replace-mode) path first — it is the band owner there today.
+- The annular shell keeps its stable configured inner radius initially. Sector- or
+  cell-based shell ownership is added only if shot evidence proves the shell path needs
+  it.
+- `live_clod_stream_ready_frontier_m` (the worst-case scalar) is still published — as a
+  *diagnostic and acceptance-gate input only*, never as a control input.
 - Crossfade stays owned by root transitions for pages and by the far material fade for the
-  band; the contract only moves *where* the band sits.
+  band; the contract only decides *which cells* the far owner covers.
 - Coverage-oracle gates get teeth during movement: `priority_unowned_cells == 0`,
   `clod_far_gap_holes == 0` sampled on the walking route, not just at settle. New gate on
   frontier lag: `farShellInnerM - ready_frontier_m` p95 below a calibrated bound.
 
 ## Phases
 
-Order: measure → cheapest structural fix → correctness bridge → seam → scheduler → soak.
-Every phase: failing test first for logic, typecheck + vitest + build green, no gate
-weakening, evidence recorded here before the checkbox flips.
+Order: measure → control contract → cursor → cache-revision bridge → dominant local fix →
+per-cell seam → capacity governor → soak. Every phase: failing test first for logic,
+typecheck + vitest + build green, no gate weakening, evidence recorded here before the
+checkbox flips.
 
 ### Phase 0 — Measurement and counters (no behavior change)
 
@@ -254,7 +308,31 @@ weakening, evidence recorded here before the checkbox flips.
 - [ ] frontier counter landed
 - [ ] baseline runs captured (walk + long route)
 
-### Phase 1 — StreamCursor (C1)
+### Phase 1 — Runtime control contract (master streaming switch)
+
+Fixes G11. Independent of Phase 0 and may run in parallel with it.
+
+1. Failing test: `terrainStreamingEnabled = false` stops *new* work in all six streams
+   (bubble required-set growth, root planning/dispatch, tile dispatch, far summary
+   requests/builds, shell recenter + slice, clipmap ring updates) while preserving
+   resident caches and currently rendered meshes; re-enabling resumes from the current
+   cursor with no rebuild storm (caches still valid).
+2. Semantics are **freeze**, not hide: renderers keep their last state. Hiding the far
+   band while the player stands kilometres from the startup window would show void — the
+   useful semantics (for users and for measurement) is a coherent pause, which also gives
+   perf work a clean "streaming off" A/B lever.
+3. The GUI toggle currently labeled "streaming" (`clod_gui.ts:145`) becomes the master
+   switch; the bubble-only toggle already exists in the advanced near-field folder
+   ("enable (raw chunks)", `terrain_material_gui.ts:70`) and keeps its narrow meaning.
+4. Presets that set `bubble = false` (`clodPerf` / acceptance paths, the historical
+   sticky-bubble workaround) are re-audited against the new field so acceptance URLs keep
+   their current meaning.
+- [ ] failing freeze/resume test → green
+- [ ] GUI re-labeled; bubble toggle stays demoted to the near-field folder
+- [ ] preset audit recorded here
+- [ ] walk acceptance green with the master switch untouched
+
+### Phase 2 — StreamCursor (C1)
 
 1. Failing test: cursor equals `canonicalWorldCenter` semantics for all interaction modes
    (playing / orbit spawned / orbit pre-spawn / orbit target), velocity uses real
@@ -269,14 +347,17 @@ weakening, evidence recorded here before the checkbox flips.
 - [ ] tile prediction fed real velocity (unit test at 30 fps)
 - [ ] `accept:infinite-islands --reuse` green, world-center gates untouched
 
-### Phase 2 — Height authority revisions (C2)
+### Phase 3 — Surface-cache revisions (C2)
 
 1. Failing test: build a far summary tile over fallback heights, then commit a heightfield
    tile under it → the summary tile transitions to stale/requested and rebuilds with the
-   canonical heights (extend the existing `summary-cache` invalidation tests).
-2. Implement the commit notification + bridge + revision recording. Reuse
-   `markStale(bounds)`; no new lifecycle states.
-3. Parity probe + `height_authority_parity_max_error_m` counter; wire into
+   canonical heights (extend the existing `summary-cache` invalidation tests). Include the
+   multi-source case: a summary tile that sampled source tiles at global revisions
+   {10, 4}, followed by a recommit of the rev-4 source, must go stale — this is exactly
+   what per-tile max-revision recording would miss.
+2. Implement `SurfaceCommit { globalRevision, bounds }` + the bridge + per-summary-tile
+   `builtAtGlobalRevision`. Reuse `markStale(bounds)`; no new lifecycle states.
+3. Parity probe + `surface_cache_parity_max_error_m` counter; wire into
    `accept:continent-tiles` with a real epsilon.
 4. Watch for churn: the bridge must coalesce (per-frame bounds union) so a burst of tile
    commits doesn't mark the whole near ring stale every frame — assert max summary
@@ -286,55 +367,76 @@ weakening, evidence recorded here before the checkbox flips.
 - [ ] churn guard test (bounded rebuilds under commit burst)
 - [ ] walk + continent acceptance green
 
-### Phase 3 — Frontier-adaptive seam (C4)
+### Phase 4 — Fix the dominant `farSummaryMs` sub-driver locally
 
-1. Failing test: with a synthetic root streamer at 40% coverage, the effective far inner
-   edge follows the frontier (with hysteresis) and never leaves an unowned annulus
-   (extend `ownership_coverage_oracle` tests).
-2. Implement frontier publication + far-owner inner-edge follow (clipmap path first —
-   per-cell ownership already exists; shell `nearBlendMeters` path second).
+Phase 0's sub-bucket table decides this phase's content: a local fix beats a governor when
+one subsystem dominates. Candidates by *suspicion* (do not start until the table exists):
+
+1. `farSumShellMs` dominant → G9: replace the full-ring shell resample on recenter with
+   partial-rim updates (only vertices whose sampled world cell changed), or move the shell
+   fully to GPU displacement from the summary atlas (the `heightSamplingMode: "gpu"` path
+   already exists).
+2. `farSumTilesMs` dominant → tile build/enrichment slicing or GPU-builder coverage.
+3. `farSumStatsDomMs` / upload-shaped buckets dominant → cadence and throttle fixes.
+- [ ] driver identified from the Phase 0 table (recorded here)
+- [ ] failing/characterization test for the chosen fix
+- [ ] A/B on the walk route: sub-bucket down, frame p95 not worse, visuals unchanged
+      (shots recorded)
+
+### Phase 5 — Per-cell seam ownership (C4)
+
+1. Failing test: with a synthetic root streamer at 40% *refined* coverage (full safety
+   coverage), far-clipmap cells cover exactly the non-refined cells — no unowned cell, no
+   double-owned cell (extend `ownership_coverage_oracle` tests).
+2. Implement the per-cell readiness feed + clipmap ownership consumption (replace mode
+   first). The annular shell keeps its configured radius; a shell-path follow is a
+   separate decision gated on shot evidence.
 3. Movement-time coverage gates: `priority_unowned_cells == 0`,
    `clod_far_gap_holes == 0`, frontier-lag p95 bound calibrated from Phase 0 baseline.
 4. Visual QA via the shot harness on the walk route poses (near↔far band, no double-render
    shimmer, no hole ring). Include shot + stats paths here.
 - [ ] failing oracle test → green
-- [ ] clipmap-mode frontier follow landed
-- [ ] shell-mode frontier follow landed
+- [ ] per-cell clipmap ownership landed (replace mode)
+- [ ] shell-path decision recorded (only with shot evidence)
 - [ ] movement coverage gates green; shots recorded
-- [ ] A/B: pop-in complaints quantified (transition counters) not worse; frame p95 not worse
+- [ ] A/B: pop-in quantified (transition counters) not worse; frame p95 not worse
 
-### Phase 4 — StreamScheduler (C3) — measured adoption only
+### Phase 6 — StreamCapacity governor (C3) — measured adoption only
 
-1. Prereq: Phase 0 numbers say *what* contends (farSummary sub-driver, lane occupancy).
-   If the data shows a single dominant driver with a local fix (e.g. G9 shell resample →
-   partial-rim updates or GPU displacement), do that local fix **first** and re-measure;
-   the scheduler only earns its complexity if contention is genuinely cross-system.
+1. Prereq: Phases 0 and 4 are done and the re-measured route *still* shows cross-system
+   contention (lane occupancy split, stacked budgets on the p99 frames). If Phase 4's
+   local fix already cleared the movement p99 target, stop here and record that — the
+   governor only earns its complexity if contention is genuinely cross-system.
 2. Failing tests: priority starvation (collision work always proceeds), min-quota
    (tile builds never fully starve during movement — replaces the
-   `heightfieldTileBuildAllowed` boolean, G4), oscillation guard (budgets stable under
-   steady load).
-3. Implement behind `?streamScheduler=1`; A/B on walk + long route; keep only with
+   `heightfieldTileBuildAllowed` boolean, G4), oscillation guard (allocations stable under
+   steady load), and per-resource accounting (a worker-slot consumer cannot exhaust the
+   main-thread deadline).
+3. Implement behind `?streamCapacity=1`; A/B on walk + long route; keep only with
    movement p99/p95 improvement and no steady-state regression. Report per the repo rule
    (frameMs p50/p95, renderMs p95, top bucket, `live_clod_stream_*`, `live_bubble_*`,
    `heightfield_tiles_*`, `farSum*Ms`).
-- [ ] Phase 0 data reviewed; local-fix-first decision recorded here
-- [ ] failing scheduler tests → green
+- [ ] Phase 0 + Phase 4 re-measure reviewed; go/no-go recorded here
+- [ ] failing governor tests → green
 - [ ] A/B evidence (keep or revert decision recorded either way)
 
-### Phase 5 — Continuous-play soak, persistence, unification
+### Phase 7 — Continuous-play soak, persistence, unification
 
 1. **Long-route acceptance** becomes a standing gate: multi-km route, movement p99 bound,
    zero coverage holes, `heightfield_tiles_fallback_samples_this_frame` draining to 0
    after each region, eviction totals bounded (no runaway).
-2. **Far summary persistence** (optional, measure first): IndexedDB store keyed by manifest
-   hash + surface revision, same shape as the tile store. Only if the long-route baseline
-   shows summary rebuild cost matters on revisit.
-3. **Memory budget unification** (G8): one bytes-based pressure signal consulted by the
-   four eviction policies; sized from long-route peaks.
+2. **Far summary persistence** (strictly optional): do NOT build until a revisit
+   measurement on the long route shows meaningful rebuild cost. If built: IndexedDB store
+   keyed by manifest hash + global surface revision, same shape as the tile store.
+3. **Memory pressure signal** (G8): measure approximate resident bytes per cache first;
+   then one bytes-based pressure signal consulted by the four existing eviction policies,
+   sized from long-route peaks. A central cross-cache eviction manager is explicitly out
+   of scope — the shared signal is expected to be enough.
 4. **World-mode decision** (G10): either enable heightfield tiles for infinite-islands by
-   default (single authority path everywhere — preferred if the Phase 2 parity probe and
-   perf A/B hold) or record explicitly why islands stay procedural. Decision + evidence
-   here, config flipped only with the A/B.
+   default (single surface-cache path everywhere — preferred if the Phase 3 parity probe
+   and perf A/B hold, and explicitly NOT a promotion of tiles to world truth per C2) or
+   record why islands stay procedural. Decision + evidence here, config flipped only with
+   the A/B.
 - [ ] long-route gate landed with real thresholds
 - [ ] persistence decision (with numbers) recorded
 - [ ] memory pressure signal landed or explicitly skipped (with numbers)
@@ -350,12 +452,12 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 ```
 
 - Perf: `perf:main` (steady) + `accept:infinite-islands:reuse -- --scene walk --gate perf`
-  (movement) baseline vs change; long route from Phase 0 for Phases 3–5. Report frameMs
+  (movement) baseline vs change; long route from Phase 0 for Phases 4–7. Report frameMs
   p50/p95, renderMs p95, top phase bucket, and the counters named in each phase. Never
   claim a win from FPS alone; flat-or-regressing changes get reverted and the revert
   recorded here (the near-field session doc shows the discipline).
-- Continent path: `accept:continent-tiles` after Phases 2 and 5.
-- Visuals: shot harness poses on the walk route for Phase 3 (record shot + stats JSON
+- Continent path: `accept:continent-tiles` after Phases 3 and 7.
+- Visuals: shot harness poses on the walk route for Phases 4–5 (record shot + stats JSON
   paths here).
 - Update this doc's checkboxes and the per-phase evidence after every commit-sized chunk
   (`md-progress-logging` discipline, same as the continent plan).
@@ -368,12 +470,15 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 - **C2** risks invalidation churn (summary tiles re-baking every frame during tile
   streaming) — the coalescing/churn-guard test is mandatory, and the bridge can be
   feature-flagged off without touching the stamp-edit bridge.
-- **C4** moves the seam during play; hysteresis constants must be calibrated from the
-  Phase 0 baseline, and the coverage oracle gates catch both failure directions
-  (hole vs double-render).
-- **C3** is the highest-complexity, lowest-certainty item — that is why it is Phase 4,
-  gated on Phase 0 evidence, flagged, and explicitly allowed to end in a documented
-  revert.
+- **C4** changes which cells the far owner renders during play; per-cell fades must be
+  verified in shots, and the coverage oracle gates catch both failure directions
+  (hole vs double-render). The shell path is deliberately deferred behind shot evidence.
+- **C3** is the highest-complexity, lowest-certainty item — that is why it is Phase 6,
+  gated on Phase 0 + Phase 4 evidence, flagged, and explicitly allowed to end in a
+  documented revert.
+- **Phase 1** touches presets: `clodPerf` / acceptance paths historically force
+  `bubble = false` (the old sticky-toggle workaround) — the preset audit must keep
+  acceptance URLs meaning what they meant, or the perf baselines silently change.
 - Pre-existing red on `main`: as of 2026-07-16 `npm run typecheck` fails with 4 errors in
   `tools/qa-capture-clod.ts` (stale imports against `src/qa/unified/*` — unrelated to
   streaming; the 2026-07-14 tree-impostor/WebGPU breakage was since fixed per the
