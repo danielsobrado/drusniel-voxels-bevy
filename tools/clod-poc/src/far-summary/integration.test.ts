@@ -95,6 +95,29 @@ describe("far summary fallback publication", () => {
     sampleWaterCoverage: () => 0,
   };
 
+  it("uses the shared stream cursor velocity and prediction", () => {
+    const integration = initFarSummaryIntegration({ terrainSampler: flatSampler });
+    const camera = new THREE.PerspectiveCamera();
+    integration.update(1, camera, {
+      frameId: 1,
+      center: { x: 100, z: 200 },
+      velocityMps: { x: 12, z: -3 },
+      deltaSeconds: 1 / 30,
+      source: "orbit_target",
+      predicted: (aheadSeconds) => ({ x: 100 + 12 * aheadSeconds, z: 200 - 3 * aheadSeconds }),
+    });
+
+    expect(integration.getStreamCenter()).toEqual({
+      worldX: 100,
+      worldZ: 200,
+      predictedX: 148,
+      predictedZ: 188,
+      velocityX: 12,
+      velocityZ: -3,
+    });
+    integration.dispose();
+  });
+
   it("publishes fallback samples for one settled frame instead of accumulating startup misses", () => {
     const metrics = createFarShellMetrics();
     const integration = initFarSummaryIntegration({

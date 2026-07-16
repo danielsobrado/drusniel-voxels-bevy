@@ -36,4 +36,10 @@ describe("runFrameLoopStartup", () => {
 
     expect(source).toContain("new GpuPassTiming(input.app.renderer, gpuTimestampReady, wantGpuTiming && gpuTimestampReady)");
   });
+
+  it("does not keep a second streaming-center implementation", () => {
+    const source = readFileSync(resolve(startupDir, "frame_loop_startup.ts"), "utf8");
+
+    expect(source).not.toContain("function streamingWorldCenter");
+  });
 });
