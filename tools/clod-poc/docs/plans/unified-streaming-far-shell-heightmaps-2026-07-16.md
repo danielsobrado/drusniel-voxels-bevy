@@ -1,6 +1,6 @@
 # Unified Streaming — CLOD pages, far shell, and heightfield tiles as one system
 
-Created 2026-07-16. Status: PLANNED (no code landed from this doc yet).
+Created 2026-07-16. Status: HEADLESS IMPLEMENTATION COMPLETE; MANUAL VISUAL QA PENDING.
 
 Revised same day after an external review. Accepted: C2 reframed as *surface-cache*
 revisions with a single global commit revision (per-tile max-revision recording had a real
@@ -11,6 +11,44 @@ its own phase; persistence/memory phases made strictly evidence-gated. Amended a
 review: master-off means **freeze**, not hide (hiding the far band 5 km from the startup
 window would show void), and the scalar frontier counter stays as a diagnostic/gate input
 (only its use as a control input was dropped).
+
+## Implementation result (2026-07-16)
+
+Phases 0–5 and the Phase 7 standing gate are implemented. Phase 4 ended in a measured
+revert: `farSumTilesMs` was the largest far-summary sub-driver, but the cadence candidate
+increased its p95 from 0.5 ms to 4.2 ms, so it did not ship. Phase 6 also ended in the
+designed no-go state: the root and bubble use independent GPU mesher implementations, the
+final long route stayed inside its tail-latency gate, and the remaining far-summary work is
+small; a cross-system governor did not earn its complexity.
+
+Headless evidence:
+
+- Baseline steady: `perf-runs/unified-streaming-baseline/steady/summary.json` — frame p50
+  2.50 ms, p95 3.10 ms, render p95 2.20 ms.
+- Final steady: `perf-runs/unified-streaming-final/steady/summary.json` — frame p50
+  2.40 ms, p95 3.10 ms, render p95 2.10 ms.
+- Final walk: `acceptance-runs/infinite-islands/2026-07-16T08-39-32/report.json` — pass,
+  movement p99 14.90 ms, no ownership holes.
+- Final 3.06 km route: `acceptance-runs/infinite-islands/2026-07-16T09-04-28/report.json`
+  — pass, movement p99 15.00 ms, max 19.40 ms, frontier-lag p95 384 m, zero priority
+  unowned/CLOD-far-gap/clipmap-hole samples, 360 bubble evictions and 125 root evictions.
+- Continent cache gate: `acceptance-runs/continent-tiles/unified-streaming-final/report.json`
+  — pass, 70/70 resident tiles, queues drained, current-frame fallback 0, 16 parity
+  samples, parity max error 0 m.
+
+Phase 0 walk sub-buckets (p95):
+
+| bucket | p95 |
+| --- | ---: |
+| `farSumTilesMs` | 0.5 ms |
+| `farSumSunLightMs` | 0.2 ms |
+| `farSumClipmapMs` | 0.1 ms |
+| `farSumShadowProxyMs` | 0.1 ms |
+| `farSumShellMs`, `farSumBiomeStreamMs`, `farSumStatsDomMs`, `farSumNaadfMs` | 0 ms |
+
+No screenshots were inspected and no visual conclusion is claimed. The acceptance harness
+created its normal automated image artifacts, but manual seam, shimmer, pop-in, and shell-
+path review is deliberately left to the handover document.
 
 Related documents:
 
@@ -303,10 +341,10 @@ checkbox flips.
 4. Capture the unified baseline: `accept:infinite-islands:reuse -- --scene walk --gate perf`
    plus one **long route** (multi-km, crosses ≥ 2 far-summary ring boundaries and ≥ 1
    IndexedDB-cold region) saved under `perf-runs/unified-streaming-baseline/`.
-- [ ] sub-bucket table recorded here
-- [ ] lane-occupancy counters landed + baseline numbers
-- [ ] frontier counter landed
-- [ ] baseline runs captured (walk + long route)
+- [x] sub-bucket table recorded above (`farSumTilesMs` was largest at 0.5 ms p95)
+- [x] lane-occupancy counters landed; root and bubble proved to use independent meshers
+- [x] frontier counter landed
+- [ ] baseline walk captured; the multi-km route was added and captured as the final standing gate, not as a pre-change baseline
 
 ### Phase 1 — Runtime control contract (master streaming switch)
 
@@ -327,10 +365,10 @@ Fixes G11. Independent of Phase 0 and may run in parallel with it.
 4. Presets that set `bubble = false` (`clodPerf` / acceptance paths, the historical
    sticky-bubble workaround) are re-audited against the new field so acceptance URLs keep
    their current meaning.
-- [ ] failing freeze/resume test → green
-- [ ] GUI re-labeled; bubble toggle stays demoted to the near-field folder
-- [ ] preset audit recorded here
-- [ ] walk acceptance green with the master switch untouched
+- [x] failing freeze/resume test → green
+- [x] GUI re-labeled; bubble toggle stays demoted to the near-field folder
+- [x] preset audit recorded: existing `bubble = false` presets remain bubble-only; master defaults on
+- [x] walk acceptance green with the master switch untouched
 
 ### Phase 2 — StreamCursor (C1)
 
@@ -342,10 +380,10 @@ Fixes G11. Independent of Phase 0 and may run in parallel with it.
    (replace internal `updateStreamCenter`), far shell/shadow/biome updates.
 3. Existing world-center acceptance gates must pass unchanged; add
    `stream_cursor_*` counters to the debug overlay.
-- [ ] failing test → green
-- [ ] `streamingWorldCenter` deleted, one implementation remains
-- [ ] tile prediction fed real velocity (unit test at 30 fps)
-- [ ] `accept:infinite-islands --reuse` green, world-center gates untouched
+- [x] failing test → green
+- [x] `streamingWorldCenter` deleted, one implementation remains
+- [x] tile prediction fed real velocity (unit test at 30 fps)
+- [x] `accept:infinite-islands --reuse` green, world-center gates untouched
 
 ### Phase 3 — Surface-cache revisions (C2)
 
@@ -362,10 +400,10 @@ Fixes G11. Independent of Phase 0 and may run in parallel with it.
 4. Watch for churn: the bridge must coalesce (per-frame bounds union) so a burst of tile
    commits doesn't mark the whole near ring stale every frame — assert max summary
    rebuilds per second in the test.
-- [ ] failing bridge test → green
-- [ ] parity probe gated in continent acceptance
-- [ ] churn guard test (bounded rebuilds under commit burst)
-- [ ] walk + continent acceptance green
+- [x] failing bridge test → green
+- [x] parity probe gated in continent acceptance
+- [x] churn guard test (commit bursts coalesce to one bounds invalidation)
+- [x] walk + continent acceptance green
 
 ### Phase 4 — Fix the dominant `farSummaryMs` sub-driver locally
 
@@ -378,10 +416,11 @@ one subsystem dominates. Candidates by *suspicion* (do not start until the table
    already exists).
 2. `farSumTilesMs` dominant → tile build/enrichment slicing or GPU-builder coverage.
 3. `farSumStatsDomMs` / upload-shaped buckets dominant → cadence and throttle fixes.
-- [ ] driver identified from the Phase 0 table (recorded here)
-- [ ] failing/characterization test for the chosen fix
-- [ ] A/B on the walk route: sub-bucket down, frame p95 not worse, visuals unchanged
-      (shots recorded)
+- [x] driver identified from the Phase 0 table: `farSumTilesMs`, 0.5 ms p95
+- [x] characterization test and cadence candidate completed
+- [x] measured no-go: cadence raised `farSumTilesMs` p95 to 4.2 ms and `farSummaryMs`
+      p95 to 4.4 ms (`2026-07-16T08-04-52`), so code and test were removed; no visual
+      claim was made
 
 ### Phase 5 — Per-cell seam ownership (C4)
 
@@ -395,11 +434,11 @@ one subsystem dominates. Candidates by *suspicion* (do not start until the table
    `clod_far_gap_holes == 0`, frontier-lag p95 bound calibrated from Phase 0 baseline.
 4. Visual QA via the shot harness on the walk route poses (near↔far band, no double-render
    shimmer, no hole ring). Include shot + stats paths here.
-- [ ] failing oracle test → green
-- [ ] per-cell clipmap ownership landed (replace mode)
-- [ ] shell-path decision recorded (only with shot evidence)
-- [ ] movement coverage gates green; shots recorded
-- [ ] A/B: pop-in quantified (transition counters) not worse; frame p95 not worse
+- [x] failing oracle test → green
+- [x] per-cell clipmap ownership landed (replace mode)
+- [ ] shell-path decision deferred until manual shot evidence exists
+- [x] movement coverage gates green
+- [ ] shots and pop-in/shimmer review deferred by request; steady frame p95 was unchanged
 
 ### Phase 6 — StreamCapacity governor (C3) — measured adoption only
 
@@ -416,9 +455,9 @@ one subsystem dominates. Candidates by *suspicion* (do not start until the table
    movement p99/p95 improvement and no steady-state regression. Report per the repo rule
    (frameMs p50/p95, renderMs p95, top bucket, `live_clod_stream_*`, `live_bubble_*`,
    `heightfield_tiles_*`, `farSum*Ms`).
-- [ ] Phase 0 + Phase 4 re-measure reviewed; go/no-go recorded here
-- [ ] failing governor tests → green
-- [ ] A/B evidence (keep or revert decision recorded either way)
+- [x] Phase 0 + Phase 4 re-measure reviewed; no-go recorded above
+- [ ] governor tests not created because the conditional implementation prerequisite failed
+- [x] no-go evidence recorded; no `streamCapacity` flag or scheduler complexity shipped
 
 ### Phase 7 — Continuous-play soak, persistence, unification
 
@@ -437,10 +476,10 @@ one subsystem dominates. Candidates by *suspicion* (do not start until the table
    and perf A/B hold, and explicitly NOT a promotion of tiles to world truth per C2) or
    record why islands stay procedural. Decision + evidence here, config flipped only with
    the A/B.
-- [ ] long-route gate landed with real thresholds
-- [ ] persistence decision (with numbers) recorded
-- [ ] memory pressure signal landed or explicitly skipped (with numbers)
-- [ ] world-mode decision recorded; config change (if any) benchmarked
+- [x] long-route gate landed with real thresholds (`accept:unified-streaming-long-route`)
+- [x] persistence skipped: no revisit-cost measurement was captured, so the strict prerequisite was absent
+- [x] memory pressure signal skipped: the 3.06 km route stayed bounded at 360 bubble and 125 root evictions; no runaway evidence
+- [x] world-mode decision: keep infinite-islands procedural for now; parity is proven, but no tiles-on islands perf A/B exists to justify a default flip
 
 ## Verification protocol (every phase, per CLAUDE.md)
 
