@@ -45,6 +45,8 @@ export interface StoneHydrologyWater {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
+const STONE_AMBIENT_FLOOR = new THREE.Vector3(0.12, 0.11, 0.10);
+const STONE_MIN_AO = 0.35;
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 
 export interface StoneNodeMaterialHandle {
@@ -147,10 +149,15 @@ export function createStoneNodeMaterial(
   const sky = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi = mix(uGround, uSky, sky);
   const direct = uSun.mul(sun);
+  const lightingTerm = max(hemi.add(direct), vec3(
+    STONE_AMBIENT_FLOOR.x,
+    STONE_AMBIENT_FLOOR.y,
+    STONE_AMBIENT_FLOOR.z,
+  ));
 
   const material = new MeshBasicNodeMaterial();
   if (instanceBuffers) material.positionNode = worldPos;
-  material.colorNode = rock.mul(hemi.add(direct)).mul(ao);
+  material.colorNode = rock.mul(lightingTerm).mul(max(ao, float(STONE_MIN_AO)));
   if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
   material.side = THREE.FrontSide;
 
