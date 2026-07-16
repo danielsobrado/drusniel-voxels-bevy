@@ -1,0 +1,258 @@
+performance_regression:
+  schema_version: 1
+  default_target: clod-poc
+  output_root: validation-runs
+  scenes:
+    - id: infinite_islands_move_static
+      target: clod-poc
+      lane: gpu
+      enabled: true
+      tags: [movement, stationary, smoke]
+      launch:
+        world_seed: 1
+        world_mode: infinite-islands
+        scene: infinite-islands-move
+        quality: balanced
+        render_resolution_preset: high
+        viewport: [2560, 1440]
+        device_pixel_ratio: 1
+        camera:
+          position: [2048.0, 96.0, 2048.0]
+          yaw_deg: 151.8
+          pitch_deg: -24.6
+          fov_y_deg: 55.0
+        lighting:
+          time_of_day_hours: 12.0
+          sun_elevation_deg: 55.0
+          sun_azimuth_deg: 145.0
+        weather:
+          wind_time_s: 0.0
+          cloud_time_s: 0.0
+          particle_time_s: 0.0
+          precipitation: none
+        flags:
+          perfProbe: 1
+          webgpuSelection: 1
+      settle:
+        ready_timeout_ms: 360000
+        warmup_frames: 300
+        settle_frames: 60
+        freeze_after_settle: true
+      capture:
+        checkpoint: static
+        image: cp-0
+        include_hud: false
+        include_debug_overlays: false
+      baseline:
+        image: validation/baselines/clod-poc/infinite_islands_move_static/baseline.png
+        stats: validation/baselines/clod-poc/infinite_islands_move_static/baseline.stats.json
+        metrics: validation/baselines/clod-poc/infinite_islands_move_static/baseline.metrics.json
+        mask: null
+        sha256: null
+      image_gates:
+        required: false
+        changed_pixel_threshold: 0.05
+        mean_absolute_error_max: 0.012
+        p95_absolute_error_max: 0.040
+        changed_pixel_fraction_max: 0.025
+        edge_error_mean_max: 0.018
+        luminance_mean_delta_max: 0.025
+        luminance_stddev_delta_max: 0.030
+        chroma_mean_delta_max: 0.025
+      region_probes:
+        - id: static_has_signal
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_mean: { min: 0.02, max: 0.95 }
+        - id: static_not_flat
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_stddev: { min: 0.01 }
+      timing_gates:
+        - id: static_frame_p95
+          metric: frame_ms_p95
+          max: 11.1
+          enforcement: required
+          required: true
+      counter_gates: []
+      informational_metrics: []
+      specialized_commands: []
+
+    - id: infinite_islands_move_moving
+      target: clod-poc
+      lane: gpu
+      enabled: true
+      tags: [movement, streaming]
+      launch:
+        world_seed: 1
+        world_mode: infinite-islands
+        scene: infinite-islands-move
+        quality: balanced
+        render_resolution_preset: high
+        viewport: [2560, 1440]
+        device_pixel_ratio: 1
+        camera:
+          position: [2048.0, 96.0, 2048.0]
+          yaw_deg: 151.8
+          pitch_deg: -24.6
+          fov_y_deg: 55.0
+        lighting:
+          time_of_day_hours: 12.0
+          sun_elevation_deg: 55.0
+          sun_azimuth_deg: 145.0
+        weather:
+          wind_time_s: 0.0
+          cloud_time_s: 0.0
+          particle_time_s: 0.0
+          precipitation: none
+        flags:
+          perfProbe: 1
+          webgpuSelection: 1
+      settle:
+        ready_timeout_ms: 360000
+        warmup_frames: 300
+        settle_frames: 45
+        freeze_after_settle: true
+      capture:
+        checkpoint: moving
+        image: cp-50
+        include_hud: false
+        include_debug_overlays: false
+      baseline:
+        image: validation/baselines/clod-poc/infinite_islands_move_moving/baseline.png
+        stats: validation/baselines/clod-poc/infinite_islands_move_moving/baseline.stats.json
+        metrics: validation/baselines/clod-poc/infinite_islands_move_moving/baseline.metrics.json
+        mask: null
+        sha256: null
+      image_gates:
+        required: false
+        changed_pixel_threshold: 0.05
+        mean_absolute_error_max: 0.012
+        p95_absolute_error_max: 0.040
+        changed_pixel_fraction_max: 0.025
+        edge_error_mean_max: 0.018
+        luminance_mean_delta_max: 0.025
+        luminance_stddev_delta_max: 0.030
+        chroma_mean_delta_max: 0.025
+      region_probes:
+        - id: cp25_has_signal
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_mean: { min: 0.02, max: 0.95 }
+        - id: cp50_has_signal
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_mean: { min: 0.02, max: 0.95 }
+        - id: cp75_has_signal
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_mean: { min: 0.02, max: 0.95 }
+        - id: cp100_has_signal
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_mean: { min: 0.02, max: 0.95 }
+        - id: cp50_not_flat
+          rect_normalized: [0.0, 0.0, 1.0, 1.0]
+          gates:
+            luminance_stddev: { min: 0.01 }
+      timing_gates:
+        - id: water_burst
+          metric: areas.phases_max.waterMs
+          max: 30.0
+          enforcement: required
+          required: true
+        - id: selection_views_burst
+          metric: areas.phases_max.selectionSub.views
+          max: 15.0
+          enforcement: required
+          required: true
+        - id: canopy_burst
+          metric: areas.phases_max.canopyMs
+          max: 15.0
+          enforcement: required
+          required: true
+      counter_gates:
+        - id: streaming_exercised
+          key: areas.streaming.exercised
+          operator: equals
+          value: 1
+          required: true
+        - id: startup_converged
+          key: areas.streaming.startup_converged
+          operator: equals
+          value: 1
+          required: true
+        - id: stream_pages_applied
+          key: areas.streaming.live_clod_stream_apply_pages_total
+          operator: min
+          value: 1
+          required: true
+      informational_metrics: []
+      specialized_commands: []
+
+    - id: infinite_islands_move_steady
+      target: clod-poc
+      lane: gpu
+      enabled: true
+      tags: [movement, steady, release-gate]
+      launch:
+        world_seed: 1
+        world_mode: infinite-islands
+        scene: infinite-islands-move
+        quality: balanced
+        render_resolution_preset: high
+        viewport: [2560, 1440]
+        device_pixel_ratio: 1
+        camera:
+          position: [2048.0, 96.0, 2048.0]
+          yaw_deg: 151.8
+          pitch_deg: -24.6
+          fov_y_deg: 55.0
+        lighting:
+          time_of_day_hours: 12.0
+          sun_elevation_deg: 55.0
+          sun_azimuth_deg: 145.0
+        weather:
+          wind_time_s: 0.0
+          cloud_time_s: 0.0
+          particle_time_s: 0.0
+          precipitation: none
+        flags:
+          perfProbe: 1
+          webgpuSelection: 1
+      settle:
+        ready_timeout_ms: 360000
+        warmup_frames: 300
+        settle_frames: 45
+        freeze_after_settle: true
+      capture:
+        checkpoint: moving-steady
+        image: cp-50
+        include_hud: false
+        include_debug_overlays: false
+      baseline:
+        image: validation/baselines/clod-poc/infinite_islands_move_steady/baseline.png
+        stats: validation/baselines/clod-poc/infinite_islands_move_steady/baseline.stats.json
+        metrics: validation/baselines/clod-poc/infinite_islands_move_steady/baseline.metrics.json
+        mask: null
+        sha256: null
+      image_gates:
+        required: false
+        changed_pixel_threshold: 0.05
+        mean_absolute_error_max: 0.012
+        p95_absolute_error_max: 0.040
+        changed_pixel_fraction_max: 0.025
+        edge_error_mean_max: 0.018
+        luminance_mean_delta_max: 0.025
+        luminance_stddev_delta_max: 0.030
+        chroma_mean_delta_max: 0.025
+      region_probes: []
+      timing_gates:
+        - id: steady_frame_p95
+          metric: frame_ms_p95
+          max: 11.1
+          enforcement: required
+          required: true
+      counter_gates: []
+      informational_metrics: []
+      specialized_commands: []

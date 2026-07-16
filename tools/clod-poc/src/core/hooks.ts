@@ -1,3 +1,4 @@
+import { installBrowserQaHook } from "../qa/unified/browser_hook.js";
 import type { WorldManifest } from "../world/world_manifest.js";
 import type {
   ContinentRiverCrossingRoute,
@@ -60,9 +61,14 @@ export interface ClodHooks {
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
   beginMovementRouteProbe: (() => void) | null;
-  runTerrainEditProbe: ((ray: { origin: [number, number, number]; direction: [number, number, number] }) => Promise<TerrainEditProbeResult>) | null;
+  runTerrainEditProbe: ((ray: {
+    origin: [number, number, number];
+    direction: [number, number, number];
+  }) => Promise<TerrainEditProbeResult>) | null;
   getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
-  findContinentRiverCrossingRoute: ((options?: ContinentRiverRouteSearchOptions) => ContinentRiverCrossingRoute | null) | null;
+  findContinentRiverCrossingRoute: ((
+    options?: ContinentRiverRouteSearchOptions,
+  ) => ContinentRiverCrossingRoute | null) | null;
   setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => void) | null;
   resetAcceptanceScene: (() => void) | null;
   resetAcceptanceSceneForPose: ((pose: CamPose) => void) | null;
@@ -90,7 +96,10 @@ declare global {
   }
 }
 
-function attachWorldManifest(diagnostics: GpuDiagnostics | null, manifest: WorldManifest | undefined): void {
+function attachWorldManifest(
+  diagnostics: GpuDiagnostics | null,
+  manifest: WorldManifest | undefined,
+): void {
   if (!diagnostics || !manifest || diagnostics.worldManifest === manifest) return;
   Object.defineProperty(diagnostics, "worldManifest", {
     value: manifest,
@@ -118,12 +127,16 @@ export function publishWorldManifestForDiagnostics(manifest: WorldManifest): voi
 }
 
 export function initHooks(): ClodHooks {
-  let diagnostics: GpuDiagnostics | null = manifestOnlyDiagnostics(window.__drusnielWorldManifest);
+  let diagnostics: GpuDiagnostics | null = manifestOnlyDiagnostics(
+    window.__drusnielWorldManifest,
+  );
   const hooks: ClodHooks = {
     ready: false,
     error: null,
     stats: null,
-    get diag() { return diagnostics; },
+    get diag() {
+      return diagnostics;
+    },
     set diag(value) {
       diagnostics = value;
       attachWorldManifest(diagnostics, window.__drusnielWorldManifest);
@@ -144,5 +157,6 @@ export function initHooks(): ClodHooks {
     resetAcceptanceSceneForPose: null,
   };
   window.__drusnielClod = hooks;
+  installBrowserQaHook();
   return hooks;
 }

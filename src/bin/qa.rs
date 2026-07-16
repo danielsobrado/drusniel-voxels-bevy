@@ -6,16 +6,41 @@ use clap::{Parser, ValueEnum};
 use voxel_builder::diagnostics::qa::config::QaConfig;
 use voxel_builder::diagnostics::qa::config::load_config;
 use voxel_builder::diagnostics::qa::runner::{QaRunOptions, run_qa};
+use voxel_builder::diagnostics::qa::unified::manifest::load_registry;
+use voxel_builder::diagnostics::qa::unified::schema::Target;
+
+const DEFAULT_VISUAL_MANIFEST: &str = "validation/manifests/visual-regression.yaml";
+const DEFAULT_PERFORMANCE_MANIFEST: &str = "validation/manifests/performance-regression.yaml";
 
 #[derive(Parser, Debug)]
 #[command(
-    about = "Run host-side visual QA checks against a bench summary or spawned bench run",
+    about = "Run host-side visual QA checks against a bench summary or validate unified manifests",
     version
 )]
 struct Args {
-    /// QA YAML config.
+    /// Existing Bevy QA YAML config retained for bench summary evaluation.
     #[arg(long, default_value = "assets/config/qa_visual.yaml")]
     config: PathBuf,
+
+    /// Canonical unified visual manifest.
+    #[arg(long, default_value = DEFAULT_VISUAL_MANIFEST)]
+    manifest_visual: PathBuf,
+
+    /// Canonical unified performance manifest.
+    #[arg(long, default_value = DEFAULT_PERFORMANCE_MANIFEST)]
+    manifest_performance: PathBuf,
+
+    /// Validate canonical manifests without launching a bench.
+    #[arg(long)]
+    manifest_validate_only: bool,
+
+    /// Select canonical scenes containing every supplied tag.
+    #[arg(long)]
+    tag: Vec<String>,
+
+    /// Select canonical scene IDs.
+    #[arg(long)]
+    scene: Vec<String>,
 
     /// Existing bench summary.json to check.
     #[arg(long)]
@@ -65,6 +90,11 @@ fn main() -> ExitCode {
 
 fn run() -> Result<String, String> {
     let args = Args::parse();
+    validate_unified_manifests(&args)?;
+    if args.manifest_validate_only {
+        return Ok("pass".to_string());
+    }
+
     let config = load_config(&args.config).map_err(|error| error.to_string())?;
     let output_dir = args
         .output
@@ -88,8 +118,10 @@ fn run() -> Result<String, String> {
         }
         summary_path
     } else {
-        args.summary
-            .ok_or_else(|| "pass --summary <summary.json> or use --run-bench".to_string())?
+        args.summary.ok_or_else(|| {
+            "pass --summary <summary.json>, use --run-bench, or use --manifest-validate-only"
+                .to_string()
+        })?
     };
 
     let report = run_qa(
@@ -104,6 +136,26 @@ fn run() -> Result<String, String> {
     .map_err(|error| error.to_string())?;
     println!("[QA] overall_status={}", report.overall_status);
     Ok(report.overall_status)
+}
+
+fn validate_unified_manifests(args: &Args) -> Result<(), String> {
+    let registry = load_registry(&args.manifest_visual, &args.manifest_performance)
+        .map_err(|error| error.to_string())?;
+    let selected = registry.select(&args.tag, &args.scene, Some(Target::Bevy));
+    if (!args.tag.is_empty() || !args.scene.is_empty()) && selected.is_empty() {
+        return Err(format!(
+            "no enabled Bevy QA scenes matched tags=[{}] scenes=[{}]",
+            args.tag.join(","),
+            args.scene.join(",")
+        ));
+    }
+    println!(
+        "[QA] unified manifests valid: scenes={} bevy_selected={} baseline_version={}",
+        registry.scenes.len(),
+        selected.len(),
+        registry.baseline_version
+    );
+    Ok(())
 }
 
 fn single_configured_bench_scene(config: &QaConfig) -> Result<PathBuf, String> {

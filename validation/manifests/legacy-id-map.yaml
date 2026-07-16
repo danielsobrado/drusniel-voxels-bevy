@@ -1,0 +1,44 @@
+legacy_id_map:
+  - { legacy: clod_poc_main_view, canonical: clod_poc_main_view, kind: scene }
+  - { legacy: long_view_4km, canonical: long_view_4km, kind: scene }
+  - { legacy: infinite_islands_move_static, canonical: infinite_islands_move_static, kind: scene }
+  - { legacy: infinite_islands_move_moving, canonical: infinite_islands_move_moving, kind: scene }
+  - { legacy: infinite_islands_move_steady, canonical: infinite_islands_move_steady, kind: scene }
+
+  - { legacy: viewport_has_signal, canonical: viewport_has_signal, kind: probe }
+  - { legacy: viewport_not_flat, canonical: viewport_not_flat, kind: probe }
+  - { legacy: horizon_has_signal, canonical: horizon_has_signal, kind: probe }
+  - { legacy: horizon_not_flat, canonical: horizon_not_flat, kind: probe }
+  - { legacy: far_band_has_silhouette, canonical: far_band_has_silhouette, kind: probe }
+  - { legacy: static_has_signal, canonical: static_has_signal, kind: probe }
+  - { legacy: static_not_flat, canonical: static_not_flat, kind: probe }
+  - { legacy: cp25_has_signal, canonical: cp25_has_signal, kind: probe }
+  - { legacy: cp50_has_signal, canonical: cp50_has_signal, kind: probe }
+  - { legacy: cp75_has_signal, canonical: cp75_has_signal, kind: probe }
+  - { legacy: cp100_has_signal, canonical: cp100_has_signal, kind: probe }
+  - { legacy: cp50_not_flat, canonical: cp50_not_flat, kind: probe }
+
+  - { legacy: frame_p95, canonical: frame_p95, kind: timing }
+  - { legacy: static_frame_p95, canonical: static_frame_p95, kind: timing }
+  - { legacy: water_burst, canonical: water_burst, kind: timing }
+  - { legacy: selection_views_burst, canonical: selection_views_burst, kind: timing }
+  - { legacy: canopy_burst, canonical: canopy_burst, kind: timing }
+  - { legacy: steady_frame_p95, canonical: steady_frame_p95, kind: timing }
+
+  - { legacy: draws, canonical: draws, kind: counter }
+  - { legacy: gpu_mesh_parity_unmatched, canonical: gpu_mesh_parity_unmatched, kind: counter }
+  - { legacy: gpu_mesh_parity_delta, canonical: gpu_mesh_parity_delta, kind: counter }
+  - { legacy: texture_load_errors, canonical: texture_load_errors, kind: counter }
+  - { legacy: terrain_triangles_exist, canonical: terrain_triangles_exist, kind: counter }
+  - { legacy: terrain_draw_calls_exist, canonical: terrain_draw_calls_exist, kind: counter }
+  - { legacy: far_shell_tris_exist, canonical: far_shell_tris_exist, kind: counter }
+  - { legacy: gpu_grass_visible, canonical: gpu_grass_visible, kind: counter }
+  - { legacy: gpu_tree_visible, canonical: gpu_tree_visible, kind: counter }
+  - { legacy: gpu_stone_visible, canonical: gpu_stone_visible, kind: counter }
+  - { legacy: horizon_hole_ratio_zero, canonical: horizon_hole_ratio_zero, kind: counter }
+  - { legacy: streaming_exercised, canonical: streaming_exercised, kind: counter }
+  - { legacy: startup_converged, canonical: startup_converged, kind: counter }
+  - { legacy: stream_pages_applied, canonical: stream_pages_applied, kind: counter }
+
+  - { legacy: shadow_proxy_tris_exist, canonical: shadow_proxy_tris_exist, kind: informational }
+  - { legacy: canopy_tris_exist, canonical: canopy_tris_exist, kind: informational }

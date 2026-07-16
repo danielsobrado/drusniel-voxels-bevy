@@ -6,6 +6,7 @@
 /perf-p0-webgpu/
 /perf-p0-*/
 /validation-artifacts/
+/validation-runs/
 /references/
 .history/src/voxel/*
 log.txt

@@ -77,7 +77,6 @@ export interface QaTimingThreshold {
   optional?: boolean;
 }
 
-// Generic numeric assertion on a counter the browser harness writes into a checkpoint's `areas`.
 export interface QaCheckThreshold {
   id: string;
   area: string;
@@ -188,7 +187,12 @@ export interface QaCheckResult {
 }
 
 export interface CliArgs {
-  config: string;
+  visual: string;
+  performance: string;
+  legacyMap: string;
   summary: string;
   output?: string;
+  tags: string[];
+  scenes: string[];
+  actualRoot?: string;
 }

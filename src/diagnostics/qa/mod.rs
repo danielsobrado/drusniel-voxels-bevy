@@ -6,3 +6,4 @@ pub mod report;
 pub mod runner;
 pub mod summary;
 pub mod timing;
+pub mod unified;
