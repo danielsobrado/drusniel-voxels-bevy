@@ -26,6 +26,7 @@ const argValue = (flag: string, fallback: string): string => {
 const OUT_DIR = argValue("--out", join("acceptance-runs", "continent-tiles", new Date().toISOString().replace(/[:.]/g, "-")));
 const CONVERGE_TIMEOUT_MS = Number(argValue("--converge-timeout-ms", "180000"));
 const SETTLE_FRAMES = Number(argValue("--settle", "240"));
+const SURFACE_CACHE_PARITY_EPSILON_M = 0.001;
 const CONTINENT_TILE_RULES = THRESHOLD_RULES.filter((rule) => rule.key.startsWith("heightfield_tile"));
 
 interface TileSnapshot {
@@ -99,6 +100,14 @@ try {
   if (values["heightfield_tile_gpu_atlas_enabled"] !== 1) {
     failures.push("heightfield_tile_gpu_atlas_enabled != 1: streamed tiles were not authoritative on the GPU");
   }
+  const paritySamples = values["surface_cache_parity_samples"];
+  const parityMaxErrorM = values["surface_cache_parity_max_error_m"];
+  if (!Number.isFinite(paritySamples) || paritySamples! <= 0) {
+    failures.push("surface_cache_parity_samples missing or zero");
+  }
+  if (!Number.isFinite(parityMaxErrorM) || parityMaxErrorM! > SURFACE_CACHE_PARITY_EPSILON_M) {
+    failures.push(`surface_cache_parity_max_error_m=${String(parityMaxErrorM)} exceeds ${SURFACE_CACHE_PARITY_EPSILON_M}`);
+  }
 
   const passed = failures.length === 0;
   const report = {
@@ -108,7 +117,7 @@ try {
     convergeSeconds: trail.length,
     rulesEvaluated: CONTINENT_TILE_RULES.length,
     failures,
-    counters: Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("heightfield_tile"))),
+    counters: Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("heightfield_tile") || key.startsWith("surface_cache_parity"))),
     frameMsP95: values["frame_ms_p95"] ?? null,
     trail,
     errors,

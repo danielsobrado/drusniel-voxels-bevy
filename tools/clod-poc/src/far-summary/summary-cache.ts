@@ -22,6 +22,7 @@ interface ActiveBuild {
   req: FarSummaryRingRequest;
   state: FarSummaryTileBuildState;
   startedAtMs: number;
+  builtAtGlobalRevision: number;
 }
 
 interface PendingCommit {
@@ -50,7 +51,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
   private invalidationEpoch = 0;
   private readonly pendingCommits: PendingCommit[] = [];
 
-  constructor(config: FarSummaryConfig) {
+  constructor(config: FarSummaryConfig, private readonly surfaceRevisionAt: () => number = () => 0) {
     this.config = config;
   }
 
@@ -154,6 +155,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
       ...tile,
       state: "ready",
       builtEpoch: this.invalidationEpoch,
+      builtAtGlobalRevision: tile.builtAtGlobalRevision ?? this.surfaceRevisionAt(),
       lastTouchedFrame: Math.max(tile.lastTouchedFrame, existing?.lastTouchedFrame ?? tile.lastTouchedFrame),
       lastTouchedTimeMs: Math.max(tile.lastTouchedTimeMs, existing?.lastTouchedTimeMs ?? tile.lastTouchedTimeMs),
     };
@@ -402,6 +404,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
         nowMs,
       }),
       startedAtMs: performance.now(),
+      builtAtGlobalRevision: this.surfaceRevisionAt(),
     };
     return true;
   }
@@ -417,6 +420,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
     try {
       const builtTile = finishFarSummaryTileBuild(active.state);
       builtTile.builtEpoch = this.invalidationEpoch;
+      builtTile.builtAtGlobalRevision = active.builtAtGlobalRevision;
       this.stats.tilesBuiltThisFrame++;
       if (deferCompletedTile) {
         deferCompletedTile(builtTile);

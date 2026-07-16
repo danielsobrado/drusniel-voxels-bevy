@@ -33,6 +33,9 @@ import {
   updateHeightfieldTileGpuAtlas,
 } from "./heightfield_tile_gpu_atlas.js";
 import { refreshVegetationAuthorityHeightfieldMask } from "../../vegetation/gpu_authority/heightfield_mask.js";
+import { emitSurfaceCommit } from "../../stream/surface_cache_revisions.js";
+import { measureSurfaceCacheParity } from "./surface_cache_parity.js";
+import { tileOriginM, WORLD_TILE_SIZE_M } from "../tile_key.js";
 
 export interface HeightfieldTileRuntimeUpdate {
   x: number;
@@ -141,6 +144,15 @@ export async function createHeightfieldTileRuntime(
     sourceRevision,
     (keys, revision) => input.buildTiles(keys, revision),
     store,
+    (tile) => {
+      const origin = tileOriginM(tile.key);
+      emitSurfaceCommit({
+        minX: origin.x,
+        minZ: origin.z,
+        maxX: origin.x + WORLD_TILE_SIZE_M,
+        maxZ: origin.z + WORLD_TILE_SIZE_M,
+      });
+    },
   );
   const procedural = input.fallbackSampler ?? proceduralHeightfieldSampler(sourceRevision);
   const startup = input.startupHeightfield
@@ -149,6 +161,8 @@ export async function createHeightfieldTileRuntime(
   const sampler = heightfieldTileSampler(cache, procedural, startup);
   setTerrainSurfaceOverride(sampler.sampleHeight);
   const authoritative = gpuAtlasIsAuthoritative(input);
+  const parityEnabled = searchParams.get("acceptance") === "1" || searchParams.get("surfaceCacheParity") === "1";
+  let lastParity = { samples: 0, maxErrorM: 0 };
   refreshVegetationAuthorityHeightfieldMask();
   registerHeightfieldTileGpuSource(cache, authoritative);
 
@@ -157,6 +171,9 @@ export async function createHeightfieldTileRuntime(
     authoritative,
     update(updateInput) {
       cache.update(updateInput);
+      if (parityEnabled && updateInput.frameIndex % 60 === 0) {
+        lastParity = measureSurfaceCacheParity(cache.residentTiles(), procedural, 16, updateInput.frameIndex);
+      }
       refreshVegetationAuthorityHeightfieldMask();
       updateHeightfieldTileGpuAtlas(updateInput.x, updateInput.z);
       const gpuAtlas = heightfieldTileGpuAtlasStats();
@@ -165,6 +182,8 @@ export async function createHeightfieldTileRuntime(
         counters["heightfield_tile_gpu_atlas_enabled"] = gpuAtlas.enabled;
         counters["heightfield_tile_gpu_atlas_uploads"] = gpuAtlas.uploads;
         counters["heightfield_tile_gpu_atlas_resident"] = gpuAtlas.resident;
+        counters["surface_cache_parity_samples"] = lastParity.samples;
+        counters["surface_cache_parity_max_error_m"] = lastParity.maxErrorM;
       }
       publishHeightfieldTileCounters(diagnosticsCounters(), cache.counters());
     },

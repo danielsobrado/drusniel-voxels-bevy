@@ -200,6 +200,8 @@ export const CONTINENT_TILE_COUNTERS = [
   "heightfield_tile_gpu_atlas_enabled",
   "heightfield_tile_gpu_atlas_uploads",
   "heightfield_tile_gpu_atlas_resident",
+  "surface_cache_parity_samples",
+  "surface_cache_parity_max_error_m",
 ] as const;
 
 export type ContinentTileCounter = typeof CONTINENT_TILE_COUNTERS[number];

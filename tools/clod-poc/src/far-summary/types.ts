@@ -52,6 +52,7 @@ export interface FarSummaryTile {
   state: FarSummaryTileState;
   revision: number;
   builtEpoch?: number;
+  builtAtGlobalRevision?: number;
   lastTouchedFrame: number;
   lastTouchedTimeMs: number;
   cellSizeM: number;

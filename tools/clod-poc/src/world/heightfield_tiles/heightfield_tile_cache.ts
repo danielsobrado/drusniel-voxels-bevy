@@ -146,6 +146,7 @@ export class HeightfieldTileCache {
     readonly sourceRevision: number,
     private readonly builder: HeightfieldTileBatchBuilder | null,
     private readonly store: HeightfieldTileStore | null = null,
+    private readonly onInstalled?: (tile: HeightfieldTile) => void,
   ) {}
 
   update(input: HeightfieldTileCacheUpdate): void {
@@ -384,6 +385,7 @@ export class HeightfieldTileCache {
 
   private install(id: string, tile: HeightfieldTile): void {
     this.resident.set(id, { tile, lastTouchFrame: this.currentFrame });
+    this.onInstalled?.(tile);
     if (this.resident.size > this.config.maxResidentTiles) {
       this.evict(this.evictionCenter.x, this.evictionCenter.z);
     }

@@ -45,6 +45,7 @@ import {
   countFarSummaryUnifiedReadiness,
   type FarSummaryUnifiedReadiness,
 } from "./unified-readiness.js";
+import { connectSurfaceCommitBridge, surfaceRevisionAt } from "../stream/surface_cache_revisions.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 
@@ -191,7 +192,7 @@ export function initFarSummaryIntegration(
     1,
   );
 
-  const cache = new FarSummaryCache(config);
+  const cache = new FarSummaryCache(config, surfaceRevisionAt);
   const sampler = new FarSummaryClipmapSampler(cache, config, options.terrainSampler);
   const debugOverlay = new FarSummaryDebugOverlay(config, cache, options.scene);
   const stats = createFarSummaryStats();
@@ -223,6 +224,7 @@ export function initFarSummaryIntegration(
     pendingUnifiedEnrichment.clear();
     originalMarkStale(bounds);
   };
+  const disconnectSurfaceCommitBridge = connectSurfaceCommitBridge(cache, { sinceRevision: 0 });
 
   const gpuRuntime = new FarSummaryGpuRuntime({
     gpuConfig,
@@ -448,6 +450,7 @@ export function initFarSummaryIntegration(
     setForceSlowBuilds: (on) => { forceSlowBuilds = on; },
     setBuildDelayMs: (ms) => { buildDelayMs = ms; },
     dispose: () => {
+      disconnectSurfaceCommitBridge();
       cpuBaseBuilder.reset();
       pendingCpuFallbackKeys.clear();
       pendingUnifiedEnrichment.clear();
