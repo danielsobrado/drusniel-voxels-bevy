@@ -9,7 +9,12 @@ import {
   packedLiveKeySetWithinRadius,
   pageCoveredByResidentClodHierarchy,
 } from "./ownership_residency.js";
-import { farClipmapBandContainsCell, farClipmapCoversCell } from "./far_clipmap_ownership.js";
+import {
+  farClipmapBandContainsCell,
+  farClipmapCoversCell,
+  refinedClodBandContainsCell,
+  refinedClodCoversCell,
+} from "./far_clipmap_ownership.js";
 
 export interface OwnershipCoverageOracleInput {
   snapshot: TerrainOwnershipRuntimeSnapshot;
@@ -194,18 +199,21 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
       const analyticFar = farDistance >= snapshot.farShell.innerRadiusM && farDistance <= snapshot.farShell.outerRadiusM;
       const farClipmapBand = farClipmapBandContainsCell(input.farClipmap, x, z);
       const farClipmapOwned = farClipmapCoversCell(input.farClipmap, x, z);
+      const refinementSeamCell = refinedClodBandContainsCell(input.farClipmap, x, z);
+      const clodRefined = refinedClodCoversCell(input.farClipmap, x, z);
+      const ownershipClod = refinementSeamCell ? clodRefined : clod;
       const far = farClipmapOwned || (!input.farClipmap?.enabled && analyticFar);
 
       if (live && clod) liveClodOverlap++;
-      if (clod && far) clodFarOverlap++;
+      if (ownershipClod && far) clodFarOverlap++;
       if (farClipmapOwned) farClipmapOwnedCells++;
       if (farClipmapBand && !farClipmapOwned) farClipmapUnownedCells++;
       if (clodDistance <= snapshot.ownership.clodRadiusM && !live && !clod) liveClodGap++;
       if (clodDistance > snapshot.ownership.clodRadiusM && farDistance < farInnerRadius && !clod && !far) clodFarGap++;
 
       const liveOwner = live;
-      const clodOwner = clod && !live;
-      const farOwner = far && !clod && !live;
+      const clodOwner = ownershipClod && !live;
+      const farOwner = far && !ownershipClod && !live;
       const ownerCount = (liveOwner ? 1 : 0) + (clodOwner ? 1 : 0) + (farOwner ? 1 : 0);
       if (ownerCount > 1) priorityOwnerOverlap++;
       if (liveOwner && clodOwner) unresolvedLiveClodOverlap++;
@@ -213,19 +221,19 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
       if (liveOwner) ownerLiveCells++;
       if (clodOwner) ownerClodRefinementCells++;
       if (farOwner && farClipmapOwned) ownerFarClipmapCells++;
-      if (farClipmapOwned && (live || clod)) farClipmapPriorityOverlapCells++;
+      if (farClipmapOwned && (live || ownershipClod)) farClipmapPriorityOverlapCells++;
 
       const inCoverageEnvelope =
         clodDistance <= snapshot.ownership.clodRadiusM ||
         (farDistance >= farInnerRadius && farDistance <= farOuterRadius);
       if (inCoverageEnvelope && ownerCount === 0) priorityUnowned++;
-      if (farClipmapBand && !live && !clod && !farClipmapOwned) farClipmapOwnershipHoles++;
+      if (farClipmapBand && !live && !ownershipClod && !farClipmapOwned) farClipmapOwnershipHoles++;
 
       const nearClodOuterBoundary = Math.abs(clodDistance - snapshot.ownership.clodRadiusM) <= coverageCellM;
       const nearFarInnerBoundary = Math.abs(farDistance - farInnerRadius) <= coverageCellM;
       if (nearClodOuterBoundary || nearFarInnerBoundary) {
         horizonSamples++;
-        if ((!clod && !far) || (clod && far)) rawHorizonHoles++;
+        if ((!ownershipClod && !far) || (ownershipClod && far)) rawHorizonHoles++;
         if (inCoverageEnvelope && ownerCount === 0) unresolvedHorizonHoles++;
       }
     }

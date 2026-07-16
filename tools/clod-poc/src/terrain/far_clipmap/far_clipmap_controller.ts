@@ -13,6 +13,7 @@ import {
   farClipmapShaderRenderOrder,
   setFarClipmapMaterialDebugMode,
   updateFarClipmapMaterialFrameUniforms,
+  updateFarClipmapMaterialOwnershipMask,
   updateFarClipmapMaterialSourceTexture,
   type FarClipmapMaterial,
 } from "./far_clipmap_material.js";
@@ -71,15 +72,30 @@ export interface FarClipmapOwnershipSnapshot {
   snapX: number;
   snapZ: number;
   ready: boolean;
+  refinedClod?: {
+    innerRadiusM: number;
+    outerRadiusM: number;
+    pageSizeM: number;
+    readyPageKeys: readonly string[];
+    readyPageKeySet?: ReadonlySet<string>;
+  };
 }
 
 export interface FarClipmapControllerOptions {
   webGpuCompatibleMaterial?: boolean;
 }
 
+export interface RefinedClodReadinessInput {
+  innerRadiusM: number;
+  outerRadiusM: number;
+  pageSizeM: number;
+  readyPageKeys: readonly string[];
+}
+
 export interface FarClipmapController {
   update(cameraPosition: THREE.Vector3, motionPosition?: THREE.Vector3): FarClipmapStats;
   commitPendingUpload(): void;
+  setRefinedClodReadiness(readiness: RefinedClodReadinessInput | null): void;
   setDebugMode(mode: FarClipmapDebugMode): void;
   setVisible(visible: boolean): void;
   dispose(): void;
@@ -102,6 +118,9 @@ interface RingMesh {
   sourceUploadChannel: "source" | "water" | null;
   sourceUploadOffset: number;
   pendingSourceRefresh: (() => void) | null;
+  ownershipRevision: number;
+  ownershipOriginX: number;
+  ownershipOriginZ: number;
 }
 
 interface BuildFrameStats {
@@ -267,6 +286,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
   private geometryCreatesTotal = 0;
   private geometryDisposalsTotal = 0;
   private uploadCooldownFrames = 0;
+  private refinedClod: RefinedClodReadinessInput | null = null;
+  private refinedClodKey = "";
+  private refinedClodRevision = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -341,6 +363,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
         sourceUploadChannel: null,
         sourceUploadOffset: 0,
         pendingSourceRefresh: null,
+        ownershipRevision: -1,
+        ownershipOriginX: Number.NaN,
+        ownershipOriginZ: Number.NaN,
       });
     }
   }
@@ -443,6 +468,26 @@ class FarClipmapControllerImpl implements FarClipmapController {
         heightScale: this.config.heightScale,
         yOffset: this.config.yOffset,
       });
+      if (
+        ring.ownershipRevision !== this.refinedClodRevision
+        || ring.ownershipOriginX !== ringOriginX
+        || ring.ownershipOriginZ !== ringOriginZ
+      ) {
+        const ownershipInput = this.refinedClod ? {
+          gridResolution: this.config.gridResolution,
+          ringOriginX,
+          ringOriginZ,
+          cellSizeM: ring.cellSizeM,
+          centerX: cameraPosition.x,
+          centerZ: cameraPosition.z,
+          ...this.refinedClod,
+        } : null;
+        updateFarClipmapMaterialOwnershipMask(ring.material, ownershipInput);
+        if (ring.standbyMaterial) updateFarClipmapMaterialOwnershipMask(ring.standbyMaterial, ownershipInput);
+        ring.ownershipRevision = this.refinedClodRevision;
+        ring.ownershipOriginX = ringOriginX;
+        ring.ownershipOriginZ = ringOriginZ;
+      }
       if (ring.displacementMode === "shader") {
         ring.mesh.position.set(ringOriginX, 0, ringOriginZ);
       } else {
@@ -498,6 +543,22 @@ class FarClipmapControllerImpl implements FarClipmapController {
     }
   }
 
+  setRefinedClodReadiness(readiness: RefinedClodReadinessInput | null): void {
+    const normalized = readiness ? {
+      innerRadiusM: Math.max(0, readiness.innerRadiusM),
+      outerRadiusM: Math.max(readiness.innerRadiusM, readiness.outerRadiusM),
+      pageSizeM: Math.max(1, readiness.pageSizeM),
+      readyPageKeys: [...new Set(readiness.readyPageKeys)].sort(),
+    } : null;
+    const key = normalized
+      ? `${normalized.innerRadiusM}|${normalized.outerRadiusM}|${normalized.pageSizeM}|${normalized.readyPageKeys.join(";")}`
+      : "";
+    if (key === this.refinedClodKey) return;
+    this.refinedClod = normalized;
+    this.refinedClodKey = key;
+    this.refinedClodRevision++;
+  }
+
   setDebugMode(mode: FarClipmapDebugMode): void {
     for (const ring of this.rings) {
       setFarClipmapMaterialDebugMode(ring.material, mode);
@@ -526,6 +587,10 @@ class FarClipmapControllerImpl implements FarClipmapController {
       snapX: Number.isFinite(this.snapX) ? this.snapX : 0,
       snapZ: Number.isFinite(this.snapZ) ? this.snapZ : 0,
       ready: this.lastStats.pendingTiles === 0,
+      refinedClod: this.refinedClod ? {
+        ...this.refinedClod,
+        readyPageKeys: [...this.refinedClod.readyPageKeys],
+      } : undefined,
     };
   }
 

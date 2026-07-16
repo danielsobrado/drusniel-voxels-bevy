@@ -58,6 +58,7 @@ export type {
   FarClipmapController,
   FarClipmapOwnershipSnapshot,
   FarClipmapStats,
+  RefinedClodReadinessInput,
 } from "./far_clipmap_controller.js";
 
 export { publishFarClipmapStatsToCounters } from "./far_clipmap_counters.js";

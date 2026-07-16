@@ -76,6 +76,7 @@ export interface StreamingClodRootController {
   update(center: THREE.Vector3, radiusM: number): StreamingClodRootStats;
   stats(): StreamingClodRootStats;
   readyPageKeys(): readonly string[];
+  refinedReadyPageKeys(): readonly string[];
   beginMovementProbe(): void;
   invalidateBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void;
 }
@@ -1328,6 +1329,9 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     },
     stats() { return latest; },
     readyPageKeys() { return currentReadyPageKeys(); },
+    refinedReadyPageKeys() {
+      return currentReadyPageKeys().filter((key) => parseStreamingClodPageKey(key).level === 0);
+    },
     invalidateBounds(bounds) {
       invalidationsTotal++;
       for (let level = 0; level <= maxRootLevel; level++) {

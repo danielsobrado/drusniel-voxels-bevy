@@ -28,6 +28,8 @@ const FAR_CLIPMAP_WATER_TEXTURE = "farClipmapWaterTexture";
 const FAR_CLIPMAP_WATER_DATA = "farClipmapWaterData";
 const FAR_CLIPMAP_SOURCE_STORAGE = "farClipmapSourceStorage";
 const FAR_CLIPMAP_WATER_STORAGE = "farClipmapWaterStorage";
+const FAR_CLIPMAP_OWNERSHIP_DATA = "farClipmapOwnershipData";
+const FAR_CLIPMAP_OWNERSHIP_STORAGE = "farClipmapOwnershipStorage";
 const FAR_CLIPMAP_DISPLACEMENT_MODE = "farClipmapDisplacementMode";
 
 export interface FarClipmapMaterialUniforms {
@@ -325,13 +327,16 @@ function createWebGpuFarClipmapMaterial(input: {
   const gridResolution = Math.max(2, Math.floor(input.gridResolution ?? 2));
   const sourceData = new Float32Array(gridResolution * gridResolution * 4);
   const waterData = new Float32Array(gridResolution * gridResolution * 4);
+  const ownershipData = new Float32Array(gridResolution * gridResolution);
   for (let i = 0; i < gridResolution * gridResolution; i++) sourceData[i * 4 + 2] = 1;
   const sourceStorage = new StorageBufferAttribute(sourceData, 4);
   const waterStorage = new StorageBufferAttribute(waterData, 4);
+  const ownershipStorage = new StorageBufferAttribute(ownershipData, 1);
   const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
   const sampleIndex: TslNode = positionGeometry.z.mul(gridResolution).add(positionGeometry.x);
   const sourceSample: TslNode = storage(sourceStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
   const waterSample: TslNode = storage(waterStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
+  const ownershipSample: TslNode = storage(ownershipStorage, "float", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
   const rawHeight: TslNode = sourceSample.x;
   const terrainHeight: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
   const unifiedChannels: TslNode = tslSmoothstep(-0.5, 0.0, waterSample.w);
@@ -394,7 +399,9 @@ function createWebGpuFarClipmapMaterial(input: {
   material.name = "FarClipmapTerrainNodeShader";
   material.positionNode = localPosition;
   material.colorNode = tslMix(terrainColor, tslVec3(0.46, 0.52, 0.50), fog.mul(0.36));
-  material.maskNode = distance.greaterThanEqual(uniforms.uClipInnerRadius).and(distance.lessThanEqual(uniforms.uClipOuterRadius));
+  material.maskNode = distance.lessThanEqual(uniforms.uClipOuterRadius).and(
+    distance.greaterThanEqual(uniforms.uClipInnerRadius).or(ownershipSample.greaterThan(0.5)),
+  );
   material.depthWrite = true;
   material.depthTest = true;
   material.polygonOffset = true;
@@ -410,6 +417,8 @@ function createWebGpuFarClipmapMaterial(input: {
   material.userData[FAR_CLIPMAP_WATER_DATA] = waterData;
   material.userData[FAR_CLIPMAP_SOURCE_STORAGE] = sourceStorage;
   material.userData[FAR_CLIPMAP_WATER_STORAGE] = waterStorage;
+  material.userData[FAR_CLIPMAP_OWNERSHIP_DATA] = ownershipData;
+  material.userData[FAR_CLIPMAP_OWNERSHIP_STORAGE] = ownershipStorage;
   material.userData[FAR_CLIPMAP_DISPLACEMENT_MODE] = "shader" satisfies FarClipmapDisplacementMode;
   return material;
 }
@@ -496,6 +505,60 @@ export function updateFarClipmapMaterialFrameUniforms(material: FarClipmapMateri
     nodeUniforms.uHeightScale.value = input.heightScale;
     nodeUniforms.uYOffset.value = input.yOffset;
   }
+}
+
+function normalizedRefinedPageCoords(keys: readonly string[]): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const key of keys) {
+    const [levelText, coordText] = key.split(":");
+    const [xText, zText] = (coordText ?? "").split(",");
+    const level = Number(levelText?.startsWith("L") ? levelText.slice(1) : levelText);
+    const x = Number(xText);
+    const z = Number(zText);
+    if (level === 0 && Number.isInteger(x) && Number.isInteger(z)) out.add(`${x},${z}`);
+  }
+  return out;
+}
+
+export function updateFarClipmapMaterialOwnershipMask(material: FarClipmapMaterial, input: {
+  gridResolution: number;
+  ringOriginX: number;
+  ringOriginZ: number;
+  cellSizeM: number;
+  centerX: number;
+  centerZ: number;
+  innerRadiusM: number;
+  outerRadiusM: number;
+  pageSizeM: number;
+  readyPageKeys: readonly string[];
+} | null): number {
+  const data = material.userData[FAR_CLIPMAP_OWNERSHIP_DATA] as Float32Array | undefined;
+  const ownershipStorage = material.userData[FAR_CLIPMAP_OWNERSHIP_STORAGE] as StorageBufferAttribute | undefined;
+  if (!data || !ownershipStorage) return 0;
+  data.fill(0);
+  if (!input) {
+    ownershipStorage.needsUpdate = true;
+    return 0;
+  }
+  const resolution = Math.max(2, Math.floor(input.gridResolution));
+  const pageSizeM = Math.max(1, input.pageSizeM);
+  const refinedReady = normalizedRefinedPageCoords(input.readyPageKeys);
+  let fallbackVertices = 0;
+  for (let z = 0; z < resolution; z++) {
+    for (let x = 0; x < resolution; x++) {
+      const worldX = input.ringOriginX + x * input.cellSizeM;
+      const worldZ = input.ringOriginZ + z * input.cellSizeM;
+      const distanceM = Math.hypot(worldX - input.centerX, worldZ - input.centerZ);
+      if (distanceM < input.innerRadiusM || distanceM >= input.outerRadiusM) continue;
+      const px = Math.floor(worldX / pageSizeM);
+      const pz = Math.floor(worldZ / pageSizeM);
+      if (refinedReady.has(`${px},${pz}`)) continue;
+      data[z * resolution + x] = 1;
+      fallbackVertices++;
+    }
+  }
+  ownershipStorage.needsUpdate = true;
+  return fallbackVertices;
 }
 
 export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMaterial, input: {

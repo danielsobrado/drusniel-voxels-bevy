@@ -319,6 +319,7 @@ export function runFrameLoopStartup(
     targetVisibleRadiusM: longView.phase0TargetVisibleM,
   });
   const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu }) : null;
+  const farClipmapUsesRefinedOwnership = searchParams.get("farClipmapMode") === "replace";
   const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
   const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;
   const rootTransitionEnabled = enabledParam(searchParams, "liveClodRootTransition") && input.app.isWebGpu;
@@ -513,6 +514,14 @@ export function runFrameLoopStartup(
         return nextStats;
       },
     );
+    if (farClipmapController && farClipmapUsesRefinedOwnership) {
+      farClipmapController.setRefinedClodReadiness({
+        innerRadiusM: state.bubbleRadius,
+        outerRadiusM: farClipmapConfig.innerRadiusM,
+        pageSizeM: cfg.page.chunks_per_page * cfg.page.chunk_size,
+        readyPageKeys: streamingClodRootController.refinedReadyPageKeys(),
+      });
+    }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
     runTerrainStreamingWork(state.terrainStreamingEnabled, maybeWarmScenePipelines);
     finishStreamViewPreparationFrame();
