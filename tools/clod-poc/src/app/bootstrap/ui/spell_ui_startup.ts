@@ -6,6 +6,8 @@ import {
   createSpellVfxController,
   type SpellVfxMeshConfig,
 } from "../../../spells/spell_vfx_controller.js";
+import { createDeferredSpellController } from "../../../spells/deferred_spell_controller.js";
+import { scheduleSpellPipelineWarmup } from "../../../spells/spell_pipeline_warmup.js";
 import "../../../spells/spell_menu.css";
 
 function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
@@ -26,7 +28,7 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
 
 export function runSpellUiStartup(ctx: UiStartupContext): void {
   const config = defaultSpellConfig;
-  const { scene, camera, terrainRaycast } = ctx.input;
+  const { scene, camera, renderer, terrainRaycast } = ctx.input;
   const targetRay = new THREE.Ray();
   const targetDirection = new THREE.Vector3();
   const targetNormal = new THREE.Vector3(0, 1, 0);
@@ -57,7 +59,9 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
   });
   ctx.session.spellVfxController = controller;
 
-  const menu = createSpellMenu({ config, controller });
+  const deferredController = createDeferredSpellController(controller);
+  const pipelineWarmup = scheduleSpellPipelineWarmup({ renderer, scene, camera });
+  const menu = createSpellMenu({ config, controller: deferredController.controller });
   const menuEl = document.getElementById(config.menu.rootId);
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -109,6 +113,8 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("beforeunload", () => {
     window.removeEventListener("keydown", onKeyDown);
+    pipelineWarmup.dispose();
+    deferredController.dispose();
     menu.dispose();
     controller.dispose();
     ctx.session.spellVfxController = null;
