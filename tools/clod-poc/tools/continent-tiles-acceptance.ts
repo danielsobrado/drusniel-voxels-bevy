@@ -27,6 +27,8 @@ const OUT_DIR = argValue("--out", join("acceptance-runs", "continent-tiles", new
 const CONVERGE_TIMEOUT_MS = Number(argValue("--converge-timeout-ms", "180000"));
 const SETTLE_FRAMES = Number(argValue("--settle", "240"));
 const SURFACE_CACHE_PARITY_EPSILON_M = 0.001;
+const FALLBACK_DRAIN_TIMEOUT_MS = 60_000;
+const FALLBACK_DRAIN_STABLE_POLLS = 2;
 const CONTINENT_TILE_RULES = THRESHOLD_RULES.filter((rule) => rule.key.startsWith("heightfield_tile"));
 
 interface TileSnapshot {
@@ -87,6 +89,24 @@ try {
     await window.__drusnielClod?.settle?.(frames);
   }, SETTLE_FRAMES);
 
+  let fallbackDrainStablePolls = 0;
+  const fallbackDrainDeadline = Date.now() + FALLBACK_DRAIN_TIMEOUT_MS;
+  while (Date.now() < fallbackDrainDeadline && fallbackDrainStablePolls < FALLBACK_DRAIN_STABLE_POLLS) {
+    await page.evaluate(async () => {
+      await window.__drusnielClod?.settle?.(30);
+    });
+    const drain = await page.evaluate(() => {
+      const counters = window.__drusnielClod?.stats?.counters ?? {};
+      return {
+        fallbackSamples: counters["heightfield_tiles_fallback_samples_this_frame"] ?? -1,
+        paritySamples: counters["surface_cache_parity_samples"] ?? 0,
+      };
+    });
+    fallbackDrainStablePolls = drain.fallbackSamples === 0 && drain.paritySamples > 0
+      ? fallbackDrainStablePolls + 1
+      : 0;
+  }
+
   const stats = await page.evaluate(() => ({
     counters: { ...(window.__drusnielClod?.stats?.counters ?? {}) },
     error: window.__drusnielClod?.error ?? null,
@@ -97,6 +117,7 @@ try {
 
   const failures = [...evaluation.failures];
   if (!converged) failures.push("continent heightfield tiles did not converge before the timeout");
+  if (fallbackDrainStablePolls < FALLBACK_DRAIN_STABLE_POLLS) failures.push("continent heightfield fallback samples did not reach a stable drained window");
   if (stats.error) failures.push(`fail-loud boot error: ${String(stats.error)}`);
   if (errors.length > 0) failures.push(`page errors: ${errors.slice(0, 3).join(" | ")}`);
   if (values["heightfield_tiles_enabled"] !== 1) {
@@ -119,6 +140,7 @@ try {
     url,
     passed,
     converged,
+    fallbackDrained: fallbackDrainStablePolls >= FALLBACK_DRAIN_STABLE_POLLS,
     convergeSeconds: trail.length,
     rulesEvaluated: CONTINENT_TILE_RULES.length,
     failures,
