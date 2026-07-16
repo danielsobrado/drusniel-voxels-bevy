@@ -120,6 +120,7 @@ attribute float treeLodDitherRole;
 attribute float treeVariant;
 varying float vTreeLodFade;
 varying float vTreeLodDitherRole;
+varying float vTreeLodNoise;
 uniform float uTreeTime;
 uniform vec2 uTreeWindDirection;
 uniform float uTreeWindStrength;
@@ -148,6 +149,11 @@ vec2 treeInstanceWorldXZ = treeWorldXZ;
 #else
 vec2 treeInstanceWorldXZ = vec2(0.0);
 #endif
+vec2 treeLodSeeded = treeInstanceWorldXZ + vec2(
+  uTreeVariantSeed * 0.017 + 1601.0,
+  uTreeVariantSeed * 0.031 - 1601.0
+);
+vTreeLodNoise = treeWindHash(treeLodSeeded);
 float treeVariantKeep = 1.0 - step(0.5, abs(treeVariant - treeSelectedVariant(treeInstanceWorldXZ)));
 transformed *= treeVariantKeep;
 float treePhase = treeWindHash(treeInstanceWorldXZ);
@@ -217,11 +223,12 @@ export function injectTreeLodFadeFragmentShader(fragmentShader: string): string 
     "#include <common>",
     `#include <common>
 varying float vTreeLodFade;
-varying float vTreeLodDitherRole;`,
+varying float vTreeLodDitherRole;
+varying float vTreeLodNoise;`,
   ).replace(
     "#include <clipping_planes_fragment>",
     `#include <clipping_planes_fragment>
-float treeLodIgn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+float treeLodIgn = vTreeLodNoise;
 if (vTreeLodDitherRole < 0.5) {
   if (treeLodIgn >= vTreeLodFade) discard;
 } else {
@@ -274,16 +281,14 @@ function createTreeWindUniforms(settings: TreeSettings): TreeWindUniforms {
 }
 
 function updateTreeWindUniforms(uniforms: TreeWindUniforms, settings: TreeSettings): void {
-  const wind = settings.wind;
-  uniforms.uTreeWindDirection.value.set(wind.direction[0], wind.direction[1]);
-  if (uniforms.uTreeWindDirection.value.lengthSq() <= 1e-8) uniforms.uTreeWindDirection.value.set(1, 0);
-  else uniforms.uTreeWindDirection.value.normalize();
-
-  const enabled = wind.enabled ? 1 : 0;
-  uniforms.uTreeWindStrength.value = wind.strength * enabled;
-  uniforms.uTreeWindSpeed.value = wind.speed;
-  uniforms.uTreeGustStrength.value = wind.gustStrength * enabled;
-  uniforms.uTreeTrunkSwayStrength.value = wind.trunkSwayStrength * enabled;
-  uniforms.uTreeLeafFlutterStrength.value = wind.leafFlutterStrength * enabled;
+  const direction = new THREE.Vector2(settings.wind.direction[0], settings.wind.direction[1]);
+  if (direction.lengthSq() < 1e-6) direction.set(1, 0);
+  direction.normalize();
+  uniforms.uTreeWindDirection.value.copy(direction);
+  uniforms.uTreeWindStrength.value = settings.wind.enabled ? settings.wind.strength : 0;
+  uniforms.uTreeWindSpeed.value = settings.wind.speed;
+  uniforms.uTreeGustStrength.value = settings.wind.enabled ? settings.wind.gustStrength : 0;
+  uniforms.uTreeTrunkSwayStrength.value = settings.wind.trunkSwayStrength;
+  uniforms.uTreeLeafFlutterStrength.value = settings.wind.leafFlutterStrength;
   uniforms.uTreeVariantSeed.value = settings.seed;
 }
