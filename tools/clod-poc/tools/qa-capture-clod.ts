@@ -1,10 +1,10 @@
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Browser, Page } from "playwright";
+import type { Browser } from "playwright";
 import { launchWebGPU } from "./launch.js";
 import { loadUnifiedRegistry, selectScenes } from "../src/qa/unified/manifest.js";
-import { readLinearImage } from "../src/qa/unified/image_metrics.js";
+import { loadLinearImage } from "../src/qa/unified/image_linear.js";
 import { evaluateRegionProbe } from "../src/qa/unified/region_probes.js";
 import type { UnifiedQaScene } from "../src/qa/unified/schema.js";
 
@@ -78,18 +78,13 @@ async function captureScene(browser: Browser, scene: UnifiedQaScene, outputRoot:
       await hook.settle(warmup);
     }, {
       pose: {
-        position: scene.launch.camera.position,
-        yaw_deg: scene.launch.camera.yaw_deg,
-        pitch_deg: scene.launch.camera.pitch_deg,
-        fov_y_deg: scene.launch.camera.fov_y_deg,
+        p: scene.launch.camera.position,
+        yaw: scene.launch.camera.yaw_deg,
+        pitch: scene.launch.camera.pitch_deg,
+        fov: scene.launch.camera.fov_y_deg,
       },
       state: {
-        wind_time_s: scene.launch.weather.wind_time_s,
-        cloud_time_s: scene.launch.weather.cloud_time_s,
-        particle_time_s: scene.launch.weather.particle_time_s,
-        water_time_s: 0,
-        time_of_day_hours: scene.launch.lighting.time_of_day_hours,
-        random_epoch: 0,
+        freeze: false,
       },
       warmup: scene.settle.warmup_frames,
     });
@@ -104,11 +99,11 @@ async function captureScene(browser: Browser, scene: UnifiedQaScene, outputRoot:
     const stats = await page.evaluate(async () => window.__drusnielQa?.captureStats());
     if (!stats) throw new Error(`scene ${scene.id} did not return stats`);
     writeFileSync(resolve(sceneDir, "actual.stats.json"), `${JSON.stringify(stats, null, 2)}\n`);
-    const image = await readLinearImage(imagePath);
+    const image = await loadLinearImage(imagePath);
     const probes = scene.region_probes.map((probe) => evaluateRegionProbe(image, probe));
     const metrics = { width: image.width, height: image.height, probes };
     writeFileSync(resolve(sceneDir, "actual.metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
-    const stableCounters = Object.fromEntries(Object.entries(stats.engine?.counters ?? {}).filter(([key]) => /(?:signature|hash|seed|triangles|draw_calls|visible|nodes_rendered|pages_applied)$/u.test(key)).sort(([a], [b]) => a.localeCompare(b)));
+    const stableCounters = Object.fromEntries(Object.entries(stats.counters).filter(([key]) => /(?:signature|hash|seed|triangles|draw_calls|visible|nodes_rendered|pages_applied)$/u.test(key)).sort(([a], [b]) => a.localeCompare(b)));
     writeFileSync(resolve(sceneDir, "determinism.json"), `${JSON.stringify({
       scene_id: scene.id,
       target: scene.target,

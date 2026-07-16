@@ -346,7 +346,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     tick(spell, startMs + 16);
   };
 
-  const playStandalone = (play: (durationMs: number) => boolean, durationMs: number): boolean => {
+  const playStandalone = <T>(play: (durationMs: number) => T, durationMs: number): T => {
     return play(durationMs);
   };
 

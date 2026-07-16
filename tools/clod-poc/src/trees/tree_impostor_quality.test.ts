@@ -54,7 +54,7 @@ describe("tree impostor quality defaults", () => {
     expect(estimateTreeImpostorAtlasMemoryMiB(cloneTreeSettings())).toBe(144);
   });
 
-  it("uses placeholder impostor geometry while baked impostor atlases are not ready", () => {
+  it("uses the configured unbaked impostor fallback while baked atlases are not ready", () => {
     const settings = cloneTreeSettings();
     const map = geometries();
 
@@ -68,7 +68,7 @@ describe("tree impostor quality defaults", () => {
         bakedImpostorGeometries: {},
       });
 
-      expect(geometry).toBe(map[TEST_SPECIES][lod]);
+      expect(geometry).toBe(map[TEST_SPECIES][lod === "impostor" ? "far" : lod]);
     }
   });
 

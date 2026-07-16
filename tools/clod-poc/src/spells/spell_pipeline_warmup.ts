@@ -19,7 +19,7 @@ interface AsyncCompileRenderer {
   ) => Promise<unknown>;
 }
 
-interface IdleWindow extends Window {
+interface IdleWindow {
   requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
   cancelIdleCallback?: (id: number) => void;
 }
@@ -66,7 +66,7 @@ export async function warmSpellPipelines(deps: SpellPipelineWarmupDeps): Promise
 }
 
 export function scheduleSpellPipelineWarmup(deps: SpellPipelineWarmupDeps): SpellPipelineWarmup {
-  const idleWindow = window as IdleWindow;
+  const idleWindow = window as unknown as IdleWindow;
   let disposed = false;
   let scheduledId = 0;
   let scheduledWithIdleCallback = false;

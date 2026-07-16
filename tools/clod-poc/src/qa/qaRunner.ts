@@ -3,7 +3,8 @@ import { evaluateScene } from "./qaEvaluation.js";
 import { writeReport } from "./qaReportWriter.js";
 
 export function runQa(config: QaConfig, summary: WebQaSummary, summaryPath: string, outputDir: string): QaReport {
-  const scenes = config.scenes.map((scene) => evaluateScene(config, scene, summary));
+  const matchingScenes = config.scenes.filter((scene) => !scene.bench_scene || sceneMatches(summary.scene, scene.bench_scene));
+  const scenes = (matchingScenes.length > 0 ? matchingScenes : config.scenes).map((scene) => evaluateScene(config, scene, summary));
   const failures = scenes.flatMap((scene) => scene.failures.map((failure) => `${scene.id}: ${failure}`));
   const baselineMissing = scenes.some((scene) => scene.status === "baseline_missing");
   const overall_status: Status = failures.length ? "fail" : baselineMissing ? "baseline_missing" : "pass";
@@ -25,4 +26,14 @@ export function runQa(config: QaConfig, summary: WebQaSummary, summaryPath: stri
   };
   writeReport(report, config, outputDir);
   return report;
+}
+
+function sceneMatches(summaryScene: string, configuredScene: string): boolean {
+  const summary = normalizePath(summaryScene);
+  const configured = normalizePath(configuredScene);
+  return summary === configured || summary === configured.split("/").at(-1);
+}
+
+function normalizePath(path: string): string {
+  return path.replaceAll("\\", "/");
 }
