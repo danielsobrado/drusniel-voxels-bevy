@@ -31,6 +31,7 @@ export interface SpellPipelineWarmupDeps {
 }
 
 export interface SpellPipelineWarmup {
+  readonly ready: Promise<void>;
   dispose(): void;
 }
 
@@ -69,11 +70,16 @@ export function scheduleSpellPipelineWarmup(deps: SpellPipelineWarmupDeps): Spel
   let disposed = false;
   let scheduledId = 0;
   let scheduledWithIdleCallback = false;
+  let resolveReady: () => void = () => undefined;
+  const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
 
   const run = (): void => {
     scheduledId = 0;
-    if (disposed) return;
-    void warmSpellPipelines(deps);
+    if (disposed) {
+      resolveReady();
+      return;
+    }
+    void warmSpellPipelines(deps).finally(resolveReady);
   };
 
   if (typeof idleWindow.requestIdleCallback === "function") {
@@ -84,15 +90,18 @@ export function scheduleSpellPipelineWarmup(deps: SpellPipelineWarmupDeps): Spel
   }
 
   return {
+    ready,
     dispose() {
       disposed = true;
-      if (scheduledId === 0) return;
-      if (scheduledWithIdleCallback && typeof idleWindow.cancelIdleCallback === "function") {
-        idleWindow.cancelIdleCallback(scheduledId);
-      } else {
-        window.clearTimeout(scheduledId);
+      if (scheduledId !== 0) {
+        if (scheduledWithIdleCallback && typeof idleWindow.cancelIdleCallback === "function") {
+          idleWindow.cancelIdleCallback(scheduledId);
+        } else {
+          window.clearTimeout(scheduledId);
+        }
+        scheduledId = 0;
       }
-      scheduledId = 0;
+      resolveReady();
     },
   };
 }
