@@ -129,6 +129,7 @@ export const REQUIRED_COUNTERS = [
   "live_clod_stream_refinement_inflight_pages",
   "live_clod_stream_parent_coverage_violations",
   "live_clod_stream_ready_pages",
+  "live_clod_stream_ready_frontier_m",
   "live_clod_stream_scheduled_pages_this_frame",
   "live_clod_stream_apply_pages_this_frame",
   "live_clod_stream_apply_pages_total",
@@ -296,6 +297,7 @@ const ORACLE_COUNTERS = new Set<AcceptanceCounter>([
   "owner_far_clipmap_cells",
   "owner_clod_refinement_cells",
   "owner_live_cells",
+  "live_clod_stream_ready_frontier_m",
 ]);
 
 export const THRESHOLD_RULES: ThresholdRule[] = [
@@ -352,6 +354,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "owner_far_clipmap_cells", label: "must be > 0", pass: (value) => value > 0 },
   { key: "owner_clod_refinement_cells", label: "must be > 0", pass: (value) => value > 0 },
   { key: "owner_live_cells", label: "must be > 0", pass: (value) => value > 0 },
+  { key: "live_clod_stream_ready_frontier_m", label: "must be within the configured CLOD radius", pass: (value, values) => Number.isFinite(value) && value >= 0 && value <= (values["live_clod_stream_radius_m"] ?? Number.NEGATIVE_INFINITY) },
   { key: "far_summary_tiles_missing", label: "must equal 0 after warmup", pass: (value) => value === 0 },
   { key: "far_summary_procedural_fallback_samples", label: "must equal 0 after warmup", pass: (value) => value === 0 },
   { key: "far_summary_lower_ring_fallback_samples", label: "must equal 0 after warmup", pass: (value) => value === 0 },

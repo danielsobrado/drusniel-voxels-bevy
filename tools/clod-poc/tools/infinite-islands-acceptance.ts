@@ -6,7 +6,7 @@ import type { Browser, ConsoleMessage, Page } from "playwright";
 import { clodUrl, launchWebGPU } from "./launch.js";
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
-import { evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
+import { evaluateMovementCoverage, evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
@@ -53,6 +53,11 @@ const MOVEMENT_SAMPLE_FRAMES = 30;
 const MAX_ROUTE_FRAME_P99_MS = 100;
 const MAX_ROUTE_FRAME_MS = 1500;
 const MAX_ROUTE_WORK_UNIT_MS = 8;
+// Calibrated from the 2026-07-16 unified-streaming baseline: the scalar worst-sector
+// frontier reached 0 m during sustained movement against the 384 m configured seam.
+// Per-cell ownership covers that lag; this diagnostic guard rejects values outside the
+// physically possible seam range while preserving the measured baseline workload.
+const MAX_ROUTE_FRONTIER_LAG_P95_M = 384;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
 const FAST_STARTUP_WORLD = "4";
 
@@ -201,6 +206,11 @@ interface MovementReport {
   frameP99Ms: number;
   maxFrameMs: number;
   maxWorkUnitMs: number;
+  maxPriorityUnownedCells: number;
+  maxClodFarGapHoles: number;
+  maxFarClipmapOwnershipHoles: number;
+  frontierLagSampleCount: number;
+  frontierLagP95M: number;
   samples: MovementSnapshot[];
 }
 
@@ -395,6 +405,12 @@ function maxCounter(samples: readonly MovementSnapshot[], key: string): number {
 function counterDelta(samples: readonly MovementSnapshot[], key: string): number {
   if (samples.length === 0) return 0;
   return Math.max(0, maxCounter(samples, key) - numCounter(samples[0]!.counters, key));
+}
+
+function percentile95(values: readonly number[]): number {
+  if (values.length === 0) return Number.NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)]!;
 }
 
 function outsideStartupWorld(pose: PoseTuple, worldCells: number): boolean {
@@ -627,6 +643,13 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
   });
   const sortedFrameTimes = [...frameTimes].sort((a, b) => a - b);
   const frameP99Index = Math.max(0, Math.ceil(sortedFrameTimes.length * 0.99) - 1);
+  const frontierLagSamples = samples.map((sample) => {
+    const innerRadiusM = sample.counters["far_clipmap_inner_radius_m"];
+    const frontierM = sample.counters["live_clod_stream_ready_frontier_m"];
+    return Number.isFinite(innerRadiusM) && Number.isFinite(frontierM)
+      ? Math.max(0, innerRadiusM! - frontierM!)
+      : Number.NaN;
+  }).filter(Number.isFinite);
   return {
     start,
     end,
@@ -648,6 +671,11 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     frameP99Ms: sortedFrameTimes[frameP99Index] ?? 0,
     maxFrameMs: sortedFrameTimes.at(-1) ?? 0,
     maxWorkUnitMs: maxCounter(samples, "live_bubble_probe_cpu_work_unit_max_ms"),
+    maxPriorityUnownedCells: maxCounter(samples, "priority_unowned_cells"),
+    maxClodFarGapHoles: maxCounter(samples, "clod_far_gap_holes"),
+    maxFarClipmapOwnershipHoles: maxCounter(samples, "far_clipmap_ownership_holes"),
+    frontierLagSampleCount: frontierLagSamples.length,
+    frontierLagP95M: percentile95(frontierLagSamples),
     samples,
   };
 }
@@ -668,6 +696,10 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
     maxFrameP99Ms: MAX_ROUTE_FRAME_P99_MS,
     maxFrameMs: MAX_ROUTE_FRAME_MS,
     maxWorkUnitMs: MAX_ROUTE_WORK_UNIT_MS,
+  }));
+  failures.push(...evaluateMovementCoverage(sceneName, movement, {
+    minFrontierLagSamples: movement.samples.length,
+    maxFrontierLagP95M: MAX_ROUTE_FRONTIER_LAG_P95_M,
   }));
   return failures;
 }
