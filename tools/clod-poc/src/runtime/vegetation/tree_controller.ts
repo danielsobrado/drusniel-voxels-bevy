@@ -133,7 +133,6 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
           state.treeQualityPreset,
           deps.treeConfig.impostors.resolutionPx,
         ),
-        fallbackToPlaceholder: true,
         swapOnBake: state.treeImpostorSwapOnBake,
       },
       wind: {
