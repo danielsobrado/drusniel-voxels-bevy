@@ -51,7 +51,7 @@ try {
     scene: "continent",
     seed: 19,
     freeze: true,
-    extra: { world: "8", startupWorld: "2", acceptance: "1", surfaceCacheParity: "1" },
+    extra: { world: "8", startupWorld: "2", surfaceCacheParity: "1" },
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
 
