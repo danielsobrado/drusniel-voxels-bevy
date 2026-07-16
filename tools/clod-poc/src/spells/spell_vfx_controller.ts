@@ -22,9 +22,21 @@ const SPELL_LIGHT_ENVELOPE = {
 } as const;
 
 const SPELL_VISIBLE_PROGRESS_FLOOR = 0.035;
-const SPELL_SELF_TICK_PAD_MS = 120;
 const FALLBACK_BASE_OPACITY = 0.72;
 const ENABLE_VISIBLE_FALLBACK = false;
+
+const SPELL_PREWARM_NAME_PREFIXES = [
+  "fire-spell",
+  "water-spell",
+  "air-spell",
+  "earth-spell",
+  "lightning-spell",
+  "fireball-spell",
+];
+
+export interface SpellPrecompileRenderer {
+  compile?: (scene: THREE.Scene, camera: THREE.Camera) => void;
+}
 
 export interface SpellVfxMeshConfig {
   worldWidth: number;
@@ -128,10 +140,11 @@ export interface SpellVfxController {
   playFire: (durationMs: number) => void;
   playWater: (durationMs: number) => void;
   playAir: (durationMs: number) => void;
-  playEarth: (durationMs: number) => void;
+  playEarth: (durationMs: number) => boolean;
   playLightning: (durationMs: number) => void;
   playFireball: (durationMs: number) => void;
   update: (nowMs?: number) => void;
+  precompile: (renderer: SpellPrecompileRenderer) => void;
   dispose: () => void;
 }
 
@@ -188,8 +201,6 @@ function createFallbackSpellMaterial(color: SpellColor): THREE.MeshBasicMaterial
 export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfxController {
   const { scene, getCamera } = deps;
   const now = deps.now ?? (() => performance.now());
-  let rafId = 0;
-  let selfTickUntilMs = 0;
   let disposed = false;
 
   const buildSpell = (
@@ -270,8 +281,6 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
   }) : null;
   const spells = [fire, water, air];
 
-  const hasActiveSpells = (): boolean => spells.some((spell) => spell.active) || now() < selfTickUntilMs;
-
   const tick = (spell: SpellState, nowMs: number): void => {
     if (!spell.active) return;
     const frame = computeSpellFrame(spell.startMs, spell.durationMs, nowMs);
@@ -315,15 +324,6 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     fireball?.update(frameNow);
   };
 
-  const requestSelfTick = (): void => {
-    if (disposed || rafId !== 0 || typeof requestAnimationFrame !== "function") return;
-    rafId = requestAnimationFrame(() => {
-      rafId = 0;
-      updateAll(now());
-      if (hasActiveSpells()) requestSelfTick();
-    });
-  };
-
   const start = (spell: SpellState, durationMs: number): void => {
     const startMs = now();
     spell.startMs = startMs;
@@ -342,16 +342,12 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
       spell.fallbackMesh.visible = false;
       spell.fallbackMesh.material.opacity = 0;
     }
+    // Show this frame immediately; the main frame loop keeps ticking afterward.
     tick(spell, startMs + 16);
-    selfTickUntilMs = Math.max(selfTickUntilMs, startMs + spell.durationMs + SPELL_SELF_TICK_PAD_MS);
-    requestSelfTick();
   };
 
-  const playStandalone = (play: (durationMs: number) => void, durationMs: number): void => {
-    const startMs = now();
-    play(durationMs);
-    selfTickUntilMs = Math.max(selfTickUntilMs, startMs + Math.max(1, durationMs) + SPELL_SELF_TICK_PAD_MS);
-    requestSelfTick();
+  const playStandalone = (play: (durationMs: number) => boolean, durationMs: number): boolean => {
+    return play(durationMs);
   };
 
   return {
@@ -366,10 +362,27 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
       if (fireball) playStandalone(fireball.play, durationMs);
     },
     update: (nowMs) => updateAll(typeof nowMs === "number" && nowMs > 1000 ? nowMs : now()),
+    precompile: (renderer) => {
+      const compile = renderer.compile;
+      if (typeof compile !== "function") return;
+      const toggled: THREE.Object3D[] = [];
+      for (const child of scene.children) {
+        if (child.visible) continue;
+        if (SPELL_PREWARM_NAME_PREFIXES.some((prefix) => child.name.startsWith(prefix))) {
+          child.visible = true;
+          toggled.push(child);
+        }
+      }
+      if (toggled.length === 0) return;
+      try {
+        compile.call(renderer, scene, getCamera());
+      } catch {
+        // Precompilation is best-effort; ignore transient compile errors during warmup.
+      }
+      for (const obj of toggled) obj.visible = false;
+    },
     dispose: () => {
       disposed = true;
-      if (rafId !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
-      rafId = 0;
       for (const spell of spells) {
         scene.remove(spell.mesh);
         scene.remove(spell.fallbackMesh);

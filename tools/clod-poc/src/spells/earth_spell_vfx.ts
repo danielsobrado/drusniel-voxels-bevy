@@ -28,7 +28,7 @@ export interface EarthSpellVfxDeps {
 }
 
 export interface EarthSpellVfx {
-  play: (durationMs: number) => void;
+  play: (durationMs: number) => boolean;
   update: (nowMs: number) => void;
   dispose: () => void;
 }
@@ -255,7 +255,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
   return {
     play: (durationMs) => {
       const target = deps.getTarget();
-      if (!target) return;
+      if (!target) return false;
       state.center.copy(target.point);
       state.normal.copy(target.normal ?? new THREE.Vector3(0, 1, 0)).normalize();
       state.startMs = now();
@@ -272,6 +272,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
       light.position.copy(state.center).addScaledVector(state.normal, 1.2);
       light.visible = true;
       shards.visible = shardStates.length > 0;
+      return true;
     },
     update: (nowMs) => {
       if (!state.active) return;

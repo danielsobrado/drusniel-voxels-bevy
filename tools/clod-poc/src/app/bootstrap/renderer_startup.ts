@@ -285,10 +285,12 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       mesh: node.mesh,
       footprint: node.footprint,
     }));
-  const terrainColliders = new TerrainColliderSet(colliderPages, {
+const terrainColliders = new TerrainColliderSet(colliderPages, {
     enabled: usesUnboundedTerrain(searchParams.get("scene")),
     surfaceHeight,
   });
+  // Build every page's BVH now so the first spell cast / spawn raycast doesn't hitch on a lazy MeshBVH build.
+  terrainColliders.prewarmAll();
   const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
   const interaction = new PlayerInteractionState();
   const terrainRaycast = createTerrainRaycastService({

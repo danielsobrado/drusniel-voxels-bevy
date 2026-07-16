@@ -111,9 +111,17 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   function castEarth(): void {
     window.clearTimeout(earthActiveReset);
     earthButton.setAttribute("aria-pressed", "true");
-    controller?.playEarth(config.earth.castDurationMs);
+    const fired = controller?.playEarth(config.earth.castDurationMs);
+    if (!fired) flashSpellMiss(earthButton);
     emitAudio("spell.earth.cast", { volume: config.earth.audio.volume, durationMs: config.earth.castDurationMs });
     earthActiveReset = window.setTimeout(() => earthButton.setAttribute("aria-pressed", "false"), config.earth.castDurationMs);
+  }
+
+  let missFlashReset = 0;
+  function flashSpellMiss(button: HTMLButtonElement): void {
+    window.clearTimeout(missFlashReset);
+    button.classList.add("spell-miss");
+    missFlashReset = window.setTimeout(() => button.classList.remove("spell-miss"), 280);
   }
 
   function castLightning(): void {
@@ -152,6 +160,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       window.clearTimeout(earthActiveReset);
       window.clearTimeout(lightningActiveReset);
       window.clearTimeout(fireballActiveReset);
+      window.clearTimeout(missFlashReset);
       fireActiveReset = 0;
       waterActiveReset = 0;
       airActiveReset = 0;

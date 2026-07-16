@@ -413,13 +413,16 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
     }
   };
 
-  const resolveEndpoints = (): void => {
+  const resolveSource = (): void => {
     const source = deps.getSource();
     state.source.copy(source.point);
     state.sourceDirection.copy(source.direction);
     if (state.sourceDirection.lengthSq() < 1e-8) state.sourceDirection.set(0, 0, -1);
     else state.sourceDirection.normalize();
+  };
 
+  // Resolve the impact target once at cast time so the active frame doesn't raycast terrain every tick.
+  const resolveTargetOnce = (): void => {
     const target = deps.getTarget();
     if (target) {
       state.target.copy(target.point);
@@ -428,7 +431,9 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
       state.target.copy(state.source).addScaledVector(state.sourceDirection, config.maxRange);
       state.targetNormal.copy(WORLD_UP);
     }
+  };
 
+  const clampTargetToSource = (): void => {
     sourceToTarget.copy(state.target).sub(state.source);
     const distance = sourceToTarget.length();
     if (distance > config.maxRange) {
@@ -489,7 +494,8 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
       return;
     }
 
-    resolveEndpoints();
+    resolveSource();
+    clampTargetToSource();
     const refreshFrame = Math.floor(frame.timeSeconds * config.refreshHz);
     const seed = state.castSeed + refreshFrame * 17.17;
     writeLightningArcPoints(mainPoints, state.source, state.target, config.jitter, seed);
@@ -537,6 +543,9 @@ export function createLightningSpellVfx(deps: LightningSpellVfxDeps): LightningS
       state.durationMs = Math.max(1, durationMs);
       state.castSeed = ++castCounter * 113.17;
       state.active = true;
+      resolveSource();
+      resolveTargetOnce();
+      clampTargetToSource();
       setVisible(true);
       updateActiveFrame(state.startMs + 1);
     },

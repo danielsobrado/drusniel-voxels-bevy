@@ -127,6 +127,11 @@ export class TerrainColliderSet {
     return count;
   }
 
+  /** Build every page's BVH up front so the first raycast against a cold page doesn't hitch. */
+  prewarmAll(): void {
+    for (const entry of this.entries.values()) this.ensureEntry(entry);
+  }
+
   pageCount(): number {
     return this.entries.size;
   }
