@@ -11,7 +11,7 @@ export interface TerrainRaycastServiceDeps {
 
 export interface TerrainRaycastService {
   raycastTerrainHeightfield(ray: THREE.Ray): TerrainSurfaceHit | null;
-  raycastEditableTerrain(ray: THREE.Ray): TerrainSurfaceHit | null;
+  raycastEditableTerrain(ray: THREE.Ray, maxDistance?: number): TerrainSurfaceHit | null;
 }
 
 export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): TerrainRaycastService {
@@ -64,9 +64,9 @@ export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): Te
   const raycastTerrainHeightfield = (ray: THREE.Ray): TerrainSurfaceHit | null =>
     raycastTerrainHeightfieldWithin(ray, Math.max(8000, deps.worldCells * 8));
 
-  const raycastEditableTerrain = (ray: THREE.Ray): TerrainSurfaceHit | null => {
+  const raycastEditableTerrain = (ray: THREE.Ray, maxDistanceOverride?: number): TerrainSurfaceHit | null => {
     const playing = deps.getMode?.() === "playing";
-    const maxDistance = playing ? 8 : 4000;
+    const maxDistance = maxDistanceOverride ?? (playing ? 8 : 4000);
     const colliderHit = deps.terrainColliders.raycastSurface(ray, maxDistance);
     if (colliderHit || playing) return colliderHit;
     return raycastTerrainHeightfieldWithin(ray, maxDistance);

@@ -33,11 +33,15 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
   const targetDirection = new THREE.Vector3();
   const targetNormal = new THREE.Vector3(0, 1, 0);
 
+  const targetMaxRange = Math.max(config.lightning.vfx.maxRange, config.earth.vfx.impactRadius * 4);
+  const fireballMaxRange =
+    config.fireball.vfx.launchSpeed * Math.max(0, (config.fireball.castDurationMs - config.fireball.vfx.impactDurationMs) / 1000) + 24;
+
   const getTerrainTarget = () => {
     camera.getWorldDirection(targetDirection).normalize();
     targetRay.origin.copy(camera.position);
     targetRay.direction.copy(targetDirection);
-    const hit = terrainRaycast.raycastEditableTerrain(targetRay);
+    const hit = terrainRaycast.raycastEditableTerrain(targetRay, targetMaxRange);
     return hit ? { point: hit.point, normal: targetNormal } : null;
   };
 
@@ -53,7 +57,7 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     getLightningTarget: getTerrainTarget,
     fireball: config.fireball.vfx,
     raycastFireballTerrain: (ray) => {
-      const hit = terrainRaycast.raycastEditableTerrain(ray);
+      const hit = terrainRaycast.raycastEditableTerrain(ray, fireballMaxRange);
       return hit ? { ...hit, normal: targetNormal } : null;
     },
   });
