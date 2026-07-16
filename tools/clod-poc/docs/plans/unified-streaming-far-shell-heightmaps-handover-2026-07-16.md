@@ -13,10 +13,34 @@ rendered level-zero CLOD readiness per cell.
 No manual visual QA was performed. The remaining work is deliberately limited to the
 visual review listed below; no visual-quality, shimmer, or pop-in claim is made here.
 
+## Post-review hardening
+
+A code review after the initial handover found six real issues. They are fixed and covered
+headlessly:
+
+- The complementary refined-seam mask is now uploaded only to clipmap ring 0. Outer rings
+  retain their annular inner clip, preventing coincident displaced layers in an unrefined
+  seam sector.
+- The performance probe retains all 1,320 long-route frames, and the gate requires all
+  1,320 instead of accepting the most recent 1,024.
+- Surface commits cancel only intersecting CPU base work and enrichment. Unrelated
+  continent summary work is preserved instead of globally clearing the queues.
+- Frozen frames preserve the last resident bubble stats without re-adding cached build and
+  eviction events to cumulative counters.
+- Root occupancy is published as `root_worker_batches_inflight`; the legacy
+  `gpu_mesher_lane_busy_root` now correctly remains zero because root work uses workers,
+  while `gpu_mesher_lane_busy_bubble` remains the actual bubble GPU inflight count.
+- A bridge older than the retained 4,096-commit history now marks all summaries stale, and
+  a failing commit listener is isolated from tile installation and other listeners.
+
+The ready-frontier calculation now consumes the same rendered-ready page set as the
+clipmap mask. Its internal set path and the per-frame clipmap readiness comparison avoid
+sorting an unchanged cut twice.
+
 ## What landed
 
-- Unified diagnostics: far-summary sub-bucket p95s, separate root/bubble GPU occupancy,
-  and `live_clod_stream_ready_frontier_m`.
+- Unified diagnostics: far-summary sub-bucket p95s, separate root worker-batch and bubble
+  GPU occupancy, and `live_clod_stream_ready_frontier_m`.
 - A master `terrain streaming` switch. Off freezes new work across all streaming layers
   without hiding resident meshes or clearing caches; on resumes from the current cursor.
 - `StreamCursor`: one canonical center, real-delta velocity EMA, predicted center, and
@@ -71,12 +95,13 @@ added.
 | Gate | Result |
 | --- | --- |
 | `npm --prefix tools/clod-poc run typecheck` | Pass |
-| `npm --prefix tools/clod-poc test` | Pass: 623 files, 3264 tests; 1 file/3 tests skipped |
+| `npm --prefix tools/clod-poc test` | Pass: 623 files, 3270 tests; 1 file/3 tests skipped |
 | `npm --prefix tools/clod-poc run build` | Pass |
-| QA sample-summary smoke | Executed; reported `baseline_missing` because the sample has no image baseline |
+| QA sample, `clod_poc_main_view` | Pass with expected `NON_AUTHORITATIVE` sample status |
+| Full QA sample registry | Expected fail: the sample omits required checkpoints/counters for the other manifest scenes |
 | Infinite walk | Pass; movement p99 14.90 ms, no ownership holes |
-| Unified 3.06 km route | Pass; p99 15.00 ms, max 19.40 ms, all movement seam counters zero |
-| Continent tiles/parity | Pass; 70/70 resident, queues drained, fallback frame 0, parity 16 samples / 0 m error |
+| Unified 3.06 km route after review fixes | Movement checks pass over 1320/1320 frames: p99 17.40 ms, max 24.90 ms, all movement seam counters zero. Overall gate fails only the separate settled p95 check at 8.20 ms versus the 8.00 ms limit. Two pre-optimization runs measured 8.50 ms and 8.20 ms. |
+| Continent tiles/parity after review fixes | Pass; 70/70 resident, queues drained, fallback frame 0, parity 16 samples / 0 m error |
 
 Performance comparison using the same `current-textured`, world 8, 120-frame warmup,
 300-frame case:
@@ -95,7 +120,12 @@ Primary artifacts:
 - `perf-runs/unified-streaming-final/steady/summary.json`
 - `acceptance-runs/infinite-islands/2026-07-16T08-39-32/report.json`
 - `acceptance-runs/infinite-islands/2026-07-16T09-04-28/report.json`
+- `acceptance-runs/infinite-islands/2026-07-16T11-25-38/report.json`
+- `acceptance-runs/infinite-islands/2026-07-16T11-27-48/report.json`
+- `acceptance-runs/infinite-islands/2026-07-16T11-33-37/report.json`
 - `acceptance-runs/continent-tiles/unified-streaming-final/report.json`
+- `acceptance-runs/continent-tiles/unified-streaming-review-fixes/report.json`
+- `validation-runs/unified-streaming-review-fixes/report.md`
 
 The acceptance harness generated its normal automated screenshots, but they were not
 opened or visually assessed.
@@ -124,7 +154,9 @@ opened or visually assessed.
 3. Observe an active traversal, not only settled poses. In ownership debug mode, watch
    several level-zero roots arrive. Check that each far cell disappears in the same sector,
    without a circular all-directions pull-in, a hole flash, checkerboard crawling, or
-   double-render shimmer. Record a short screen capture if any transient is visible.
+   double-render shimmer. Confirm that the complementary seam sector appears only on the
+   innermost clipmap ring; outer rings must keep their center clipped. Record a short screen
+   capture if any transient is visible.
 
 4. Repeat in final shading at low grazing angles and over water/coast transitions. Look for
    height discontinuity, different normals/material tint across the 200–384 m band, water
