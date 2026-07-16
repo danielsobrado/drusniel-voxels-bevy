@@ -544,6 +544,15 @@ class FarClipmapControllerImpl implements FarClipmapController {
   }
 
   setRefinedClodReadiness(readiness: RefinedClodReadinessInput | null): void {
+    if (!readiness && !this.refinedClod) return;
+    if (readiness && this.refinedClod
+      && Math.max(0, readiness.innerRadiusM) === this.refinedClod.innerRadiusM
+      && Math.max(readiness.innerRadiusM, readiness.outerRadiusM) === this.refinedClod.outerRadiusM
+      && Math.max(1, readiness.pageSizeM) === this.refinedClod.pageSizeM
+      && readiness.readyPageKeys.length === this.refinedClod.readyPageKeys.length
+      && readiness.readyPageKeys.every((key, index) => key === this.refinedClod?.readyPageKeys[index])) {
+      return;
+    }
     const normalized = readiness ? {
       innerRadiusM: Math.max(0, readiness.innerRadiusM),
       outerRadiusM: Math.max(readiness.innerRadiusM, readiness.outerRadiusM),

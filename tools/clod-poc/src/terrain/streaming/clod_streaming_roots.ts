@@ -1186,11 +1186,12 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
     return { activeGroups: 1, activeRoots: fadeIn + fadeOut, fadeIn, fadeOut, drawOverhead: fadeOut, progressMin: progress, progressMax: progress };
   };
 
-  const currentReadyPageKeys = (): string[] => {
+  const currentReadyPageIdSet = (): Set<string> => {
     const ids = new Set(activeRootIds);
     if (activeRootTransition) for (const id of transitionRenderableRootIds(activeRootTransition)) ids.add(id);
-    return [...ids].sort();
+    return ids;
   };
+  const currentReadyPageKeys = (): string[] => [...currentReadyPageIdSet()].sort();
 
   return {
     update(center, radiusM) {
@@ -1251,7 +1252,7 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       const inflightPageLevels = [...inFlight.values()].flatMap((batch) => [...batch.coordsById.values()].map((coord) => coordLevel(coord)));
       const coverage = countStreamCoverage(requiredIds);
       const refinedReadyIds = new Set(
-        currentReadyPageKeys().filter((id) => parseStreamingClodPageKey(id).level === 0),
+        [...currentReadyPageIdSet()].filter((id) => parseStreamingClodPageKey(id).level === 0),
       );
       const transition = transitionSnapshot();
       latest = {
