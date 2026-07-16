@@ -45,7 +45,12 @@ try {
     if (message.type() === "error") errors.push(message.text());
   });
 
-  const url = clodUrl({ scene: "continent", seed: 19, freeze: true, extra: { world: "8", startupWorld: "2" } });
+  const url = clodUrl({
+    scene: "continent",
+    seed: 19,
+    freeze: true,
+    extra: { world: "8", startupWorld: "2", acceptance: "1", surfaceCacheParity: "1" },
+  });
   await page.goto(url, { waitUntil: "domcontentloaded" });
 
   // Boot, including the continent hydrology graph build.
