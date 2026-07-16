@@ -40,6 +40,32 @@ function readyFlatSource(revision = 0): FarClipmapSource {
 }
 
 describe("FarClipmapController shader displacement", () => {
+  it("uploads the non-refined seam complement into the WebGPU ownership mask", () => {
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(
+      scene,
+      config({ innerRadiusM: 64, outerRadiusM: 128, ringCount: 1, gridResolution: 17 }),
+      readyFlatSource(),
+      { webGpuCompatibleMaterial: true },
+    );
+    controller.setRefinedClodReadiness({
+      innerRadiusM: 16,
+      outerRadiusM: 64,
+      pageSizeM: 16,
+      readyPageKeys: ["L0:2,0"],
+    });
+
+    controller.update(new THREE.Vector3(0, 0, 0));
+
+    const mesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+    const material = mesh?.material as THREE.Material | undefined;
+    const ownershipData = material?.userData.farClipmapOwnershipData as Float32Array | undefined;
+    expect(ownershipData?.[8 * 17 + 10]).toBe(0);
+    expect(ownershipData?.[8 * 17 + 6]).toBe(1);
+    expect(controller.ownershipSnapshot().refinedClod?.readyPageKeys).toEqual(["L0:2,0"]);
+    controller.dispose();
+  });
+
   it("updates reusable WebGPU grids from the source texture without CPU terrain geometry rebuilds", () => {
     const scene = new THREE.Scene();
     const controller = createFarClipmapController(scene, config(), readyFlatSource(), {

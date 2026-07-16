@@ -423,6 +423,7 @@ describe("createStreamingClodRootController", () => {
     resolveRequest(requests[0]!, coords);
     await flushAsync();
     controller.update(new THREE.Vector3(288, 0, 32), 30);
+    expect(controller.refinedReadyPageKeys()).toEqual([]);
     const childCoords = (buildPages as ReturnType<typeof vi.fn>).mock.calls[1]![0] as readonly PageCoord[];
 
     expect(childCoords.map((coord) => streamingClodPageKey(coord.px, coord.pz, coord.level))).toEqual([
@@ -440,6 +441,7 @@ describe("createStreamingClodRootController", () => {
     expect(allNodes.map((node) => node.id)).toEqual(["L1:4,0", ...activeKeys]);
     expect(roots.map((node) => node.id)).toEqual(activeKeys);
     expect(controller.readyPageKeys()).toEqual(activeKeys);
+    expect(controller.refinedReadyPageKeys()).toEqual(activeKeys);
   });
 
   it("retains resident parents while required descendants are still missing", async () => {
