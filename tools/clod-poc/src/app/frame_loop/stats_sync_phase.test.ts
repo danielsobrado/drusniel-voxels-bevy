@@ -67,6 +67,7 @@ function baseForestLightingStats(): ForestLightingStats {
 function baseUiState(): ClodFrameLoopUiState {
   return {
     freeze: false,
+    terrainStreamingEnabled: true,
     bubble: false,
     bubbleRadius: 0,
     digEnabled: false,

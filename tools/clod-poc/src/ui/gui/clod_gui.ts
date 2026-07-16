@@ -142,7 +142,7 @@ export function createClodGui(
   gui.add(state, "farShellEnabled").name("far shell").onChange((on: boolean) => {
     deps.farShellController.setEnabled(on);
   });
-  gui.add(state, "bubble").name("streaming").listen().onChange(() => {
+  gui.add(state, "terrainStreamingEnabled").name("terrain streaming").listen().onChange(() => {
     deps.updateSelection();
     deps.updateInfo();
   });

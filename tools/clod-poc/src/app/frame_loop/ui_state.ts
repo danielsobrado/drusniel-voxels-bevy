@@ -3,6 +3,7 @@ import type { TreeTotalDisplay } from "../../trees/tree_info.js";
 
 export interface ClodFrameLoopUiState {
   freeze: boolean;
+  terrainStreamingEnabled: boolean;
   bubble: boolean;
   bubbleRadius: number;
   digEnabled: boolean;

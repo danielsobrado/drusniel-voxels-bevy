@@ -38,6 +38,7 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 import type { ClodPageNode } from "../../../types.js";
 import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
+import { runTerrainStreamingWork } from "../../../stream/terrain_streaming_control.js";
 import {
   heightfieldTilesReadyForPage,
   updateHeightfieldTileClientRuntime,
@@ -76,6 +77,18 @@ export function nonNegativeIntegerParam(params: URLSearchParams, key: string): n
 
 export function usesInteractiveStreamingBudgets(scene: string | null): boolean {
   return scene === INFINITE_ISLANDS_SCENE || scene === "continent";
+}
+
+export function runStreamingSelectionUpdate<T>(
+  enabled: boolean,
+  previous: T,
+  updateTiles: () => void,
+  updateRoots: () => T,
+): T {
+  return runTerrainStreamingWork(enabled, () => {
+    updateTiles();
+    return updateRoots();
+  }) ?? previous;
 }
 
 function acceptanceMin(value: number | undefined, minimum: number, acceptance: boolean): number | undefined {
@@ -493,23 +506,30 @@ export function runFrameLoopStartup(
   const updateSelectionWithStreaming = () => {
     beginStreamViewPreparationFrame();
     const center = streamingWorldCenter(streamingScene, interaction.mode, player, camera, controls);
-    updateHeightfieldTileClientRuntime(input.clodWorker, {
-      x: center.x,
-      z: center.z,
-      frameIndex: selectionController.stats().frameId,
-    });
     const previousStats = streamingClodRootController.stats();
-    const dx = center.x - lastStreamCenterX;
-    const dz = center.z - lastStreamCenterZ;
-    const movedEnough = !Number.isFinite(dx) || !Number.isFinite(dz) || dx * dx + dz * dz >= streamingIdleUpdateDistanceM * streamingIdleUpdateDistanceM;
-    const shouldUpdateStream = !streamingScene || movedEnough || streamWorkPending(previousStats);
-    const streamStats = shouldUpdateStream ? streamingClodRootController.update(center, liveClodRootRadius) : previousStats;
-    if (shouldUpdateStream) {
-      lastStreamCenterX = center.x;
-      lastStreamCenterZ = center.z;
-    }
+    const streamStats = runStreamingSelectionUpdate(
+      state.terrainStreamingEnabled,
+      previousStats,
+      () => updateHeightfieldTileClientRuntime(input.clodWorker, {
+        x: center.x,
+        z: center.z,
+        frameIndex: selectionController.stats().frameId,
+      }),
+      () => {
+        const dx = center.x - lastStreamCenterX;
+        const dz = center.z - lastStreamCenterZ;
+        const movedEnough = !Number.isFinite(dx) || !Number.isFinite(dz) || dx * dx + dz * dz >= streamingIdleUpdateDistanceM * streamingIdleUpdateDistanceM;
+        const shouldUpdateStream = !streamingScene || movedEnough || streamWorkPending(previousStats);
+        const nextStats = shouldUpdateStream ? streamingClodRootController.update(center, liveClodRootRadius) : previousStats;
+        if (shouldUpdateStream) {
+          lastStreamCenterX = center.x;
+          lastStreamCenterZ = center.z;
+        }
+        return nextStats;
+      },
+    );
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
-    maybeWarmScenePipelines();
+    runTerrainStreamingWork(state.terrainStreamingEnabled, maybeWarmScenePipelines);
     finishStreamViewPreparationFrame();
     updateSelection();
   };

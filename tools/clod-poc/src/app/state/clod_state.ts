@@ -25,6 +25,7 @@ export interface ClodSliceState {
   frontSideOnly: boolean;
   recomputedNormals: boolean;
   forceMaxLevel: string;
+  terrainStreamingEnabled: boolean;
   bubble: boolean;
   liveBubblePinned: boolean;
   bubbleRadius: number;
@@ -145,6 +146,7 @@ export function createClodSliceState(input: {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
+    terrainStreamingEnabled: true,
     bubble: false,
     liveBubblePinned: false,
     bubbleRadius: input.cfg.near_field.radius_chunks * input.cfg.page.chunk_size,

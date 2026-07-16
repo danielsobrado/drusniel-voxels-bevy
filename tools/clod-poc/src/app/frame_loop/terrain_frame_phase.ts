@@ -12,6 +12,7 @@ import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { ClodPageNode } from "../../types.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../../world/runtime_world_policy.js";
+import { runTerrainStreamingWork } from "../../stream/terrain_streaming_control.js";
 
 const RING_CLAMP_MARGIN = 2;
 
@@ -33,6 +34,39 @@ let liveBubbleProbeEvictionsTotal = 0;
 let liveBubbleProbeColliderRemovalsTotal = 0;
 let liveBubbleProbeCpuWorkUnitMaxMs = 0;
 let liveBubbleProbeGpuApplyMaxMs = 0;
+const lastBubbleStatsByController = new WeakMap<NearFieldBubbleController, NearFieldBubbleStats>();
+const EMPTY_BUBBLE_STATS: NearFieldBubbleStats = Object.freeze({
+  chunkGroupsBuiltThisFrame: 0,
+  bubbleMs: 0,
+  chunkGroupCount: 0,
+  requiredPages: 0,
+  readyPages: 0,
+  buildingPages: 0,
+  failedPages: 0,
+  evictions: 0,
+  colliderEvictions: 0,
+  streamedColliderPages: 0,
+  validEmptyPages: 0,
+  gpuRetryPages: 0,
+  gpuRetriesTotal: 0,
+  gpuTerminalFailuresTotal: 0,
+  colliderRegistrations: 0,
+  colliderRemovals: 0,
+  gpuDispatchBudget: 0,
+  gpuMaxInflightChunks: 0,
+  pendingChunks: 0,
+  inflightChunks: 0,
+  readyVisualPages: 0,
+  avgChunkMs: 0,
+  slowestPageMs: 0,
+  visualRequiredPages: 0,
+  visualReadyPages: 0,
+  colliderRequiredPages: 0,
+  colliderReadyPages: 0,
+  colliderSkippedPages: 0,
+  cpuWorkUnitMaxMs: 0,
+  gpuApplyMaxMs: 0,
+});
 
 interface TerrainFadeView {
   node: Pick<ClodPageNode, "id" | "mesh" | "rootTransition">;
@@ -297,14 +331,20 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   const canonicalCenter = canonicalWorldCenter(input);
   mirrorCanonicalWorldCenter(input, canonicalCenter);
   const bubbleCenter = canonicalCenter.center;
-  const bubbleStats = input.nearFieldBubbleController.update({
-    enabled: input.state.bubble,
-    bubbleRadius: input.state.bubbleRadius,
-    bubbleCenter,
-    bubbleViews: transitionViews as unknown as Set<NearFieldBubbleView>,
-    getView: (nodeId) => input.views.get(nodeId) as unknown as NearFieldBubbleView | undefined,
-    frameId: selectionStats.frameId,
-  });
+  const updatedBubbleStats = runTerrainStreamingWork(input.state.terrainStreamingEnabled, () => (
+    input.nearFieldBubbleController.update({
+      enabled: input.state.bubble,
+      bubbleRadius: input.state.bubbleRadius,
+      bubbleCenter,
+      bubbleViews: transitionViews as unknown as Set<NearFieldBubbleView>,
+      getView: (nodeId) => input.views.get(nodeId) as unknown as NearFieldBubbleView | undefined,
+      frameId: selectionStats.frameId,
+    })
+  ));
+  if (updatedBubbleStats) lastBubbleStatsByController.set(input.nearFieldBubbleController, updatedBubbleStats);
+  const bubbleStats = updatedBubbleStats
+    ?? lastBubbleStatsByController.get(input.nearFieldBubbleController)
+    ?? EMPTY_BUBBLE_STATS;
   mirrorLiveBubbleStats(bubbleStats);
   if (input.pruneRenderNodeCache) {
     input.pruneRenderNodeCache(cutSnapshot.protectedNodeIds, selectionStats.frameId);
