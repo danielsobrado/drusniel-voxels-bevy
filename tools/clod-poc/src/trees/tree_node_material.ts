@@ -25,7 +25,6 @@ import {
   normalize,
   positionGeometry,
   round,
-  screenCoordinate,
   sin,
   smoothstep,
   texture,
@@ -53,6 +52,7 @@ type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 const TREE_VARIANT_HASH_SALT = 1103;
+const TREE_LOD_DITHER_HASH_SALT = 1601;
 const TREE_DEFAULT_AMBIENT_FLOOR = 0.025;
 const TREE_FOLIAGE_TRANSMISSION = 0.28;
 const TREE_MATERIAL_AERIAL_TINT_SCALE = 0.15;
@@ -253,15 +253,16 @@ export function createTreeNodeMaterialHandle(
       .add(vec3(forestPacked.w.mul(TREE_MATERIAL_SHAFT_HINT).mul(uForestEnabled)));
 
     const aLodFade: TslNode = attribute("treeLodFade", "float");
-    const ign: TslNode = fract(
-      fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
-    );
+    const aLodDitherRole: TslNode = attribute("treeLodDitherRole", "float");
+    const lodNoise: TslNode = treeRingHash(aWorldXZ, uVariantSeed, TREE_LOD_DITHER_HASH_SALT);
+    const primaryLodKeep: TslNode = lodNoise.lessThan(aLodFade);
+    const secondaryLodKeep: TslNode = lodNoise.greaterThanEqual(float(1).sub(aLodFade));
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
-    const lodMask: TslNode = ign.lessThan(aLodFade);
+    const lodMask: TslNode = aLodDitherRole.greaterThan(0.5).select(secondaryLodKeep, primaryLodKeep);
     const cardKeep: TslNode = treeFoliageCardKeep(
       aFoliageCard,
       deformation.foliageRetention,
