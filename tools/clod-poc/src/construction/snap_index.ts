@@ -2,6 +2,13 @@ import type { ConstructionPieceDef, ConstructionSnapConfig, ConstructionSnapResu
 
 const HORIZONTAL_EPSILON = 0.000001;
 const SNAP_COMPATIBILITY_SCORE_WEIGHT = 10;
+const MAX_RAY_CENTER_CELLS = 100_000;
+
+export interface ConstructionSnapQueryStats {
+  visitedCells: number;
+  candidatePoints: number;
+  traversalTruncated: boolean;
+}
 
 function dot(a: readonly [number, number, number], b: readonly [number, number, number]): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -73,13 +80,11 @@ function wallFloorAlignment(
   targetDir: readonly [number, number, number],
 ): number | null {
   if (!isWallFloorPair(sourceGroup, targetGroup)) return null;
-
   if (sourceGroup === "wall-bottom" && targetGroup === "floor-edge") {
     const sourceNormal = normalizeHorizontal(rotateYQuarter(localHorizontalSnapNormal(piece), rotationQuarterTurns));
     const targetNormal = normalizeHorizontal(targetDir);
     return sourceNormal && targetNormal ? Math.abs(dot(sourceNormal, targetNormal)) : 0;
   }
-
   const sourceNormal = normalizeHorizontal(sourceDir);
   const targetNormal = normalizeHorizontal(targetDir);
   return sourceNormal && targetNormal ? Math.abs(dot(sourceNormal, targetNormal)) : 1;
@@ -116,9 +121,7 @@ function snapWorldPosition(
   sourceOffset: readonly [number, number, number],
 ): [number, number, number] {
   const worldPosition = sub(target.worldPos, sourceOffset);
-  if (sourceGroup === "floor-edge" && target.group === "wall-top") {
-    worldPosition[1] += piece.dimensionsM[1];
-  }
+  if (sourceGroup === "floor-edge" && target.group === "wall-top") worldPosition[1] += piece.dimensionsM[1];
   return worldPosition;
 }
 
@@ -128,8 +131,22 @@ function scoreSnap(alignment: number, distanceScore: number, rank: number, confi
     + config.distanceWeight * distanceScore;
 }
 
+function axisTraversal(origin: number, direction: number, cell: number, cellSize: number): { step: number; nextT: number; deltaT: number } {
+  if (Math.abs(direction) <= HORIZONTAL_EPSILON) {
+    return { step: 0, nextT: Number.POSITIVE_INFINITY, deltaT: Number.POSITIVE_INFINITY };
+  }
+  const step = direction > 0 ? 1 : -1;
+  const boundary = (cell + (step > 0 ? 1 : 0)) * cellSize;
+  return {
+    step,
+    nextT: Math.max(0, (boundary - origin) / direction),
+    deltaT: cellSize / Math.abs(direction),
+  };
+}
+
 export class ConstructionSnapIndex {
   private readonly cells = new Map<string, IndexedConstructionSnapPoint[]>();
+  private lastQuery: ConstructionSnapQueryStats = { visitedCells: 0, candidatePoints: 0, traversalTruncated: false };
 
   constructor(private readonly cellSizeM: number) {}
 
@@ -140,10 +157,7 @@ export class ConstructionSnapIndex {
   insert(point: IndexedConstructionSnapPoint): void {
     const key = this.cellKey(point.worldPos);
     const list = this.cells.get(key) ?? [];
-    list.push({
-      ...point,
-      worldDirection: normalize(point.worldDirection),
-    });
+    list.push({ ...point, worldDirection: normalize(point.worldDirection) });
     this.cells.set(key, list);
   }
 
@@ -173,11 +187,12 @@ export class ConstructionSnapIndex {
     const cellRadius = Math.ceil(radiusM / this.safeCellSize());
     const base = this.toCell(center);
     const result: IndexedConstructionSnapPoint[] = [];
+    let visitedCells = 0;
     for (let dz = -cellRadius; dz <= cellRadius; dz += 1) {
       for (let dy = -cellRadius; dy <= cellRadius; dy += 1) {
         for (let dx = -cellRadius; dx <= cellRadius; dx += 1) {
-          const key = `${base[0] + dx},${base[1] + dy},${base[2] + dz}`;
-          const points = this.cells.get(key);
+          visitedCells += 1;
+          const points = this.cells.get(`${base[0] + dx},${base[1] + dy},${base[2] + dz}`);
           if (!points) continue;
           for (const point of points) {
             if (distance(center, point.worldPos) <= radiusM) result.push(point);
@@ -185,6 +200,7 @@ export class ConstructionSnapIndex {
         }
       }
     }
+    this.lastQuery = { visitedCells, candidatePoints: result.length, traversalTruncated: false };
     return result;
   }
 
@@ -216,7 +232,7 @@ export class ConstructionSnapIndex {
     const direction = normalize(rayDirection);
     let best: ConstructionSnapResult | null = null;
     let bestScore = Number.NEGATIVE_INFINITY;
-    for (const target of this.points()) {
+    for (const target of this.queryRayTube(rayOrigin, direction, maxDistanceM, config.radiusM)) {
       const toTarget = sub(target.worldPos, rayOrigin);
       const t = dot(toTarget, direction);
       if (t < 0 || t > maxDistanceM) continue;
@@ -235,6 +251,67 @@ export class ConstructionSnapIndex {
     let total = 0;
     for (const points of this.cells.values()) total += points.length;
     return total;
+  }
+
+  queryStats(): ConstructionSnapQueryStats {
+    return { ...this.lastQuery };
+  }
+
+  private queryRayTube(
+    rayOrigin: readonly [number, number, number],
+    direction: readonly [number, number, number],
+    maxDistanceM: number,
+    radiusM: number,
+  ): IndexedConstructionSnapPoint[] {
+    const cellSize = this.safeCellSize();
+    const radiusCells = Math.max(0, Math.ceil(radiusM / cellSize));
+    const current = this.toCell(rayOrigin);
+    const x = axisTraversal(rayOrigin[0], direction[0], current[0], cellSize);
+    const y = axisTraversal(rayOrigin[1], direction[1], current[1], cellSize);
+    const z = axisTraversal(rayOrigin[2], direction[2], current[2], cellSize);
+    const visited = new Set<string>();
+    const candidates = new Map<string, IndexedConstructionSnapPoint>();
+    let currentT = 0;
+    let centerCells = 0;
+
+    while (currentT <= maxDistanceM && centerCells < MAX_RAY_CENTER_CELLS) {
+      centerCells += 1;
+      for (let dz = -radiusCells; dz <= radiusCells; dz += 1) {
+        for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
+          for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
+            const key = `${current[0] + dx},${current[1] + dy},${current[2] + dz}`;
+            if (!visited.add(key)) continue;
+            const points = this.cells.get(key);
+            if (!points) continue;
+            for (const point of points) candidates.set(`${point.entityId}:${point.snapIndex}`, point);
+          }
+        }
+      }
+
+      if (x.nextT <= y.nextT && x.nextT <= z.nextT) {
+        if (!Number.isFinite(x.nextT)) break;
+        currentT = x.nextT;
+        current[0] += x.step;
+        x.nextT += x.deltaT;
+      } else if (y.nextT <= z.nextT) {
+        if (!Number.isFinite(y.nextT)) break;
+        currentT = y.nextT;
+        current[1] += y.step;
+        y.nextT += y.deltaT;
+      } else {
+        if (!Number.isFinite(z.nextT)) break;
+        currentT = z.nextT;
+        current[2] += z.step;
+        z.nextT += z.deltaT;
+      }
+    }
+
+    this.lastQuery = {
+      visitedCells: visited.size,
+      candidatePoints: candidates.size,
+      traversalTruncated: centerCells >= MAX_RAY_CENTER_CELLS && currentT <= maxDistanceM,
+    };
+    return [...candidates.values()];
   }
 
   private findBestSnapAgainstTarget(
@@ -260,13 +337,7 @@ export class ConstructionSnapIndex {
       const score = scoreSnap(alignment, distanceScore, rank, config);
       if (score <= bestScore) return;
       bestScore = score;
-      best = {
-        target,
-        sourceSnapIndex,
-        worldPosition,
-        rotationQuarterTurns,
-        score,
-      };
+      best = { target, sourceSnapIndex, worldPosition, rotationQuarterTurns, score };
     });
     return best;
   }
@@ -284,16 +355,6 @@ export class ConstructionSnapIndex {
     const cell = this.toCell(pos);
     return `${cell[0]},${cell[1]},${cell[2]}`;
   }
-
-  private *points(): Iterable<IndexedConstructionSnapPoint> {
-    for (const cellPoints of this.cells.values()) {
-      for (const point of cellPoints) yield point;
-    }
-  }
 }
 
-export const constructionSnapMath = {
-  rotateYQuarter,
-  normalize,
-  compatibilityRank,
-};
+export const constructionSnapMath = { rotateYQuarter, normalize, compatibilityRank };

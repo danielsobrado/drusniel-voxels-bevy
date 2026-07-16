@@ -23,6 +23,7 @@
     "perf:p0": "tsx tools/perf-p0.ts",
     "perf:p0:extract": "tsx tools/perf-p0-extract.ts",
     "perf:postfx": "tsx tools/postfx-perf-matrix.ts",
+    "perf:construction": "tsx tools/benchmark-construction-phase0.ts",
     "perf:heightfield-raster": "tsx tools/benchmark-startup-heightfield-raster.ts",
     "perf:gpu-clod-pools": "node tools/run-gpu-clod-pool-benchmark.mjs",
     "perf:gpu-clod-pools:software": "node tools/run-gpu-clod-pool-benchmark.mjs --allow-software",

@@ -52,6 +52,7 @@ construction:
     max_ray_distance_m: 0
     terrain_step_m: 99
     overlap_padding_m: -1
+    overlap_spatial_cell_m: 999
   ghost:
     opacity: 2
 `);
@@ -64,6 +65,7 @@ construction:
     expect(config.placement.maxRayDistanceM).toBe(1);
     expect(config.placement.terrainStepM).toBe(16);
     expect(config.placement.overlapPaddingM).toBe(0);
+    expect(config.placement.overlapSpatialCellM).toBe(64);
     expect(config.ghost.opacity).toBe(0.95);
   });
 });

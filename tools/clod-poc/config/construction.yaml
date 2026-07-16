@@ -10,6 +10,7 @@ construction:
     max_ray_distance_m: 8000
     terrain_step_m: 2
     overlap_padding_m: 0.04
+    overlap_spatial_cell_m: 4.0
     storage_key: drusniel.clod-poc.construction.v1
   ghost:
     opacity: 0.42

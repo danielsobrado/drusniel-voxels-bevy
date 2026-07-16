@@ -1,6 +1,15 @@
 import { load } from "js-yaml";
 import constructionYamlText from "../../config/construction.yaml?raw";
-import { CONSTRUCTION_MATERIALS, SNAP_GROUPS, type ConstructionCategory, type ConstructionConfig, type ConstructionMaterial, type ConstructionPieceDef, type ConstructionSnapPoint, type SnapGroup } from "./types.js";
+import {
+  CONSTRUCTION_MATERIALS,
+  SNAP_GROUPS,
+  type ConstructionCategory,
+  type ConstructionConfig,
+  type ConstructionMaterial,
+  type ConstructionPieceDef,
+  type ConstructionSnapPoint,
+  type SnapGroup,
+} from "./types.js";
 
 const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = ["floor", "wall", "fence", "pillar", "roof", "generic"];
 const MIN_DIMENSION_M = 0.01;
@@ -20,6 +29,7 @@ const DEFAULT_CONFIG: ConstructionConfig = {
     maxRayDistanceM: 8000,
     terrainStepM: 2,
     overlapPaddingM: 0.04,
+    overlapSpatialCellM: 4,
     storageKey: "drusniel.clod-poc.construction.v1",
   },
   ghost: {
@@ -58,26 +68,38 @@ function readNumber(
   key: string,
   fallback: number,
   min: number,
-  max: number
+  max: number,
 ): number {
   const value = Number(record?.[key]);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
 }
 
-function readVec3(record: Record<string, unknown> | undefined, key: string, fallback: readonly [number, number, number]): [number, number, number] {
+function readVec3(
+  record: Record<string, unknown> | undefined,
+  key: string,
+  fallback: readonly [number, number, number],
+): [number, number, number] {
   const value = record?.[key];
   if (!Array.isArray(value) || value.length !== 3) return [...fallback];
   const parsed = value.map(Number);
   return parsed.every(Number.isFinite) ? [parsed[0], parsed[1], parsed[2]] : [...fallback];
 }
 
-function readPositiveVec3(record: Record<string, unknown> | undefined, key: string, fallback: readonly [number, number, number]): [number, number, number] {
+function readPositiveVec3(
+  record: Record<string, unknown> | undefined,
+  key: string,
+  fallback: readonly [number, number, number],
+): [number, number, number] {
   const value = readVec3(record, key, fallback);
   return value.every((entry) => entry >= MIN_DIMENSION_M) ? value : [...fallback];
 }
 
-function readDirectionVec3(record: Record<string, unknown> | undefined, key: string, fallback: readonly [number, number, number]): [number, number, number] {
+function readDirectionVec3(
+  record: Record<string, unknown> | undefined,
+  key: string,
+  fallback: readonly [number, number, number],
+): [number, number, number] {
   const value = readVec3(record, key, fallback);
   const length = Math.hypot(value[0], value[1], value[2]);
   if (length <= ZERO_LENGTH_EPSILON) return [...fallback];
@@ -175,6 +197,13 @@ export function parseConstructionConfig(text: string = constructionYamlText): Co
         maxRayDistanceM: readNumber(placement, "max_ray_distance_m", DEFAULT_CONFIG.placement.maxRayDistanceM, 1, 50000),
         terrainStepM: readNumber(placement, "terrain_step_m", DEFAULT_CONFIG.placement.terrainStepM, 0.25, 16),
         overlapPaddingM: readNumber(placement, "overlap_padding_m", DEFAULT_CONFIG.placement.overlapPaddingM, 0, 1),
+        overlapSpatialCellM: readNumber(
+          placement,
+          "overlap_spatial_cell_m",
+          DEFAULT_CONFIG.placement.overlapSpatialCellM ?? 4,
+          0.5,
+          64,
+        ),
         storageKey: readString(placement, "storage_key", DEFAULT_CONFIG.placement.storageKey),
       },
       ghost: {

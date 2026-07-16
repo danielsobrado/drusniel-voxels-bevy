@@ -53,6 +53,7 @@ export interface ConstructionPlacementConfig {
   maxRayDistanceM: number;
   terrainStepM: number;
   overlapPaddingM: number;
+  overlapSpatialCellM?: number;
   storageKey: string;
   unboundedWorld?: boolean;
 }
