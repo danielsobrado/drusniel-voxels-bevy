@@ -86,19 +86,32 @@ samples, and the cobble bed check treats a fast adjacent river as a scoured bank
 Unit-tested; live counts stay near zero until W3 density tuning because the per-cell
 acceptance roll (~0.3%) dominates.
 
-## Phase W1 — Rivers That Read as Rivers (P0/P1)
+## Phase W1 — Rivers That Read as Rivers (P0/P1) — IMPLEMENTED 2026-07-18
 
 Continent (graph) rivers already carve; streamed/traced rivers do not.
 
-1. Route traced channels through the same carve path the graph source uses (the tile
-   remote already ships `hydrologyCarve` to the tile build worker): terrain pages,
-   colliders, and heightfield tiles must dip under the channel level with the
-   configured depth profile. Water never touches CLOD page sources directly — the carve
-   lives in the terrain field/tile authority exactly like the graph carve does today.
-2. Guarantee continuity: along each channel polyline, bed ≤ level − min_visible_depth.
-   Add a probe metric (`river_continuity_pct` along traced polylines) and gate ≥ 95%.
+1. ~~Route traced channels through the carve path~~ **DONE**:
+   `carveInfiniteHydrologyHeight` / `createTracedHydrologyCarver` in
+   `infinite_hydrology.ts` carve river channels (edge-faded, bed pinned under the
+   bank-clamped level in the wet core) and lake/pond beds (spill level −
+   `lakeBedDepthM`), tracing always against the *base* field (no feedback). Wired into
+   every terrain authority: CLOD worker override + stream roots + worker heightfield
+   tiles (`clod_worker.ts`), main-thread tile fallback sampler
+   (`heightfield_tile_client_runtime.ts`), startup raster (carve baked, carved
+   fallback), and the water side itself (samples report the carved bed as `terrainY`;
+   tile build worker applies the same carve). Config = the existing
+   `rivers.carveDepthM/carvePower/visibleDepthM` knobs; `terrainSource.hydrologyCarve`
+   is now set on unified traced worlds, so caches rebuild. Lake basin resolution is
+   memoized per sampler (was re-descended per sample).
+2. ~~Continuity gate~~ **DONE**: `measureTracedRiverContinuity` +
+   `river_continuity_pct` / `river_continuity_channels` in startup timings (probe
+   depth floor 1.5 m > the 1.25 m level offset so an uncarved bed cannot pass).
+   Live on infinite-islands seed 1 world 8: **100% over 15 channels**, 28/28 wet
+   downstream+upstream walk, cross-channel transect bank 39.3 m → bed 21.3 m.
+   Runner: `npx tsx tools/verify-traced-carve.ts --url "...scene=infinite-islands..."`
+   (artifacts in `qa-runs/traced-carve-verify/`).
 3. Re-check `dressing_river_cobbles_accepted=0` once beds exist (acceptance gates
-   probably reject on depth/slope today).
+   probably reject on depth/slope today) — still open, W3 density tuning.
 
 ## Phase W2 — GPU-Driven Surface (perf + "all GPU")
 

@@ -39,6 +39,18 @@ const CHANNEL_MEMO_MAX = 512;
 
 export interface InfiniteHydrologyOptions {
   drySentinelDepthM?: number;
+  /** Terrain carve the terrain authority applies (same shape as the graph carve config).
+   *  When set, samples report the carved bed as terrainY so wet masks and depths agree
+   *  with the rendered terrain; when null/absent, samples sit on the raw field (legacy). */
+  carve?: InfiniteHydrologyCarveConfig | null;
+}
+
+/** Structurally identical to GraphTerrainCarveConfig; duplicated to keep this module
+ *  free of graph imports (it must stay loadable in every worker). */
+export interface InfiniteHydrologyCarveConfig {
+  readonly depthM: number;
+  readonly power: number;
+  readonly lakeBedDepthM: number;
 }
 
 function hash2u(ix: number, iz: number, salt: number): number {
@@ -131,79 +143,130 @@ function lakeSpillLevel(centerX: number, centerZ: number, radius: number, sample
   return Math.min(centerY + (rimMin - centerY) * 0.5, rimMin - LAKE_RIM_MARGIN_M);
 }
 
-function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): HydrologySample | null {
+interface ResolvedBasin {
+  centerX: number;
+  centerZ: number;
+  radius: number;
+  waterY: number;
+  /** True when the basin spawns as a lake (spawn < 0.15); ponds otherwise. */
+  isLake: boolean;
+  kind: number;
+  id: number;
+}
+
+/**
+ * Per-sampler memo of resolved lake basins. A basin's refined centre, radius, and spill
+ * level are a pure function of (basin coords, sampler) — the descent and rim validation
+ * never depend on the query point — so hoisting them here changes no output, only cost.
+ */
+const basinMemos = new WeakMap<TerrainHeightSampler, Map<string, ResolvedBasin | null>>();
+const BASIN_MEMO_MAX = 512;
+
+function resolveBasin(cx: number, cz: number, sampler: TerrainHeightSampler): ResolvedBasin | null {
+  const spawn = hash2(cx, cz, 11);
+  if (spawn > 0.55) return null;
+  let centerX = basinCenter(cx, hash2(cx, cz, 17));
+  let centerZ = basinCenter(cz, hash2(cx, cz, 23));
+  const radius = mix(LAKE_RADIUS_MIN_M, LAKE_RADIUS_MAX_M, hash2(cx, cz, 31));
+  // Deterministic descent: hashed centres rarely coincide with real depressions on
+  // hilly terrain, so walk the centre toward the local low spot before validating the
+  // basin. Same inputs -> same descent -> same lake for every sample/tile.
+  for (let step = 0; step < 2; step++) {
+    let lowY = sampler.surfaceHeight(centerX, centerZ);
+    let moveX = centerX;
+    let moveZ = centerZ;
+    for (const [ddx, ddz] of LAKE_DESCENT_OFFSETS) {
+      const px = centerX + ddx;
+      const pz = centerZ + ddz;
+      const py = sampler.surfaceHeight(px, pz);
+      if (py < lowY) {
+        lowY = py;
+        moveX = px;
+        moveZ = pz;
+      }
+    }
+    if (moveX === centerX && moveZ === centerZ) break;
+    centerX = moveX;
+    centerZ = moveZ;
+  }
+  const waterY = lakeSpillLevel(centerX, centerZ, radius, sampler);
+  if (waterY === null) return null; // invalid basin: reject the lake rather than forcing it
+  return {
+    centerX,
+    centerZ,
+    radius,
+    waterY,
+    isLake: spawn < 0.15,
+    kind: spawn < 0.15 ? HYDROLOGY_BODY_LAKE : HYDROLOGY_BODY_POND,
+    id: basinBodyId(cx, cz, 41),
+  };
+}
+
+function getBasin(cx: number, cz: number, sampler: TerrainHeightSampler): ResolvedBasin | null {
+  let memo = basinMemos.get(sampler);
+  if (!memo) {
+    memo = new Map();
+    basinMemos.set(sampler, memo);
+  }
+  const key = `${cx},${cz}`;
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  const resolved = resolveBasin(cx, cz, sampler);
+  if (memo.size >= BASIN_MEMO_MAX) {
+    const oldest = memo.keys().next().value as string;
+    memo.delete(oldest);
+  }
+  memo.set(key, resolved);
+  return resolved;
+}
+
+interface BasinHit {
+  basin: ResolvedBasin;
+  distance: number;
+  mask: number;
+}
+
+/** Basins whose disc contains (x, z), across the 3×3 basin neighbourhood.
+ *  Hard containment at the rim radius: no fade band outside it, otherwise terrain
+ *  that falls away past the rim would carry floating water. Shoreline softness comes
+ *  from the depth->0 crossing inside the basin, not from the radial mask. */
+function collectBasinHits(x: number, z: number, sampler: TerrainHeightSampler): BasinHit[] {
   const bx = basinCoord(x);
   const bz = basinCoord(z);
-  let best: { mask: number; waterY: number; lakeMask: number; kind: number; radius: number; distance: number; id: number } | null = null;
+  const hits: BasinHit[] = [];
   for (let oz = -1; oz <= 1; oz++) {
     for (let ox = -1; ox <= 1; ox++) {
-      const cx = bx + ox;
-      const cz = bz + oz;
-      const spawn = hash2(cx, cz, 11);
-      if (spawn > 0.55) continue;
-      let centerX = basinCenter(cx, hash2(cx, cz, 17));
-      let centerZ = basinCenter(cz, hash2(cx, cz, 23));
-      const radius = mix(LAKE_RADIUS_MIN_M, LAKE_RADIUS_MAX_M, hash2(cx, cz, 31));
-      // The refined centre below moves at most 2 descent steps; skip basins whose disc
-      // cannot reach this sample even after that move (keeps per-sample terrain lookups
-      // bounded away from basin centres).
-      const reach = radius + LAKE_DESCENT_STEP_M * 2;
-      if (Math.hypot(x - centerX, z - centerZ) > reach) continue;
-      // Deterministic descent: hashed centres rarely coincide with real depressions on
-      // hilly terrain, so walk the centre toward the local low spot before validating the
-      // basin. Same inputs -> same descent -> same lake for every sample/tile.
-      for (let step = 0; step < 2; step++) {
-        let lowY = sampler.surfaceHeight(centerX, centerZ);
-        let moveX = centerX;
-        let moveZ = centerZ;
-        for (const [ddx, ddz] of LAKE_DESCENT_OFFSETS) {
-          const px = centerX + ddx;
-          const pz = centerZ + ddz;
-          const py = sampler.surfaceHeight(px, pz);
-          if (py < lowY) {
-            lowY = py;
-            moveX = px;
-            moveZ = pz;
-          }
-        }
-        if (moveX === centerX && moveZ === centerZ) break;
-        centerX = moveX;
-        centerZ = moveZ;
-      }
-      const dx = x - centerX;
-      const dz = z - centerZ;
-      const distance = Math.hypot(dx, dz);
-      // Hard containment at the rim radius: no fade band outside it, otherwise terrain
-      // that falls away past the rim would carry floating water. Shoreline softness comes
-      // from the depth->0 crossing inside the basin, not from the radial mask.
-      if (distance > radius) continue;
-      const mask = 1 - smoothstep(radius * 0.82, radius, distance);
-      if (mask <= (best?.mask ?? 0)) continue;
-      const waterY = lakeSpillLevel(centerX, centerZ, radius, sampler);
-      if (waterY === null) continue; // invalid basin: reject the lake rather than forcing it
-      best = {
-        mask,
-        waterY,
-        lakeMask: spawn < 0.15 ? mask : 0,
-        kind: spawn < 0.15 ? HYDROLOGY_BODY_LAKE : HYDROLOGY_BODY_POND,
-        radius,
+      const basin = getBasin(bx + ox, bz + oz, sampler);
+      if (!basin) continue;
+      const distance = Math.hypot(x - basin.centerX, z - basin.centerZ);
+      if (distance > basin.radius) continue;
+      hits.push({
+        basin,
         distance,
-        id: basinBodyId(cx, cz, 41),
-      };
+        mask: 1 - smoothstep(basin.radius * 0.82, basin.radius, distance),
+      });
     }
   }
+  return hits;
+}
+
+function lakeCandidate(terrainY: number, basins: readonly BasinHit[]): HydrologySample | null {
+  let best: BasinHit | null = null;
+  for (const hit of basins) {
+    if (hit.mask <= (best?.mask ?? 0)) continue;
+    best = hit;
+  }
   if (!best) return null;
-  const terrainY = sampler.surfaceHeight(x, z);
-  const wet = best.waterY > terrainY;
+  const wet = best.basin.waterY > terrainY;
   if (!wet) return null; // basin water surface is below local terrain here: dry ground, not floating water.
-  const waterY = best.waterY;
+  const waterY = best.basin.waterY;
   const bodyMask = best.mask;
   return {
     terrainY,
     waterY,
     depth: waterY - terrainY,
     bodyMask,
-    lakeMask: best.lakeMask,
+    lakeMask: best.basin.isLake ? best.mask : 0,
     riverMask: 0,
     flowX: 0,
     flowZ: 0,
@@ -211,9 +274,9 @@ function lakeCandidate(x: number, z: number, sampler: TerrainHeightSampler): Hyd
     riverDepth: 0,
     waterYFar: waterY,
     moisture: Math.max(0.24, bodyMask),
-    bodyKind: best.kind,
-    bodyId: best.id,
-    shoreDistance: Math.max(0, best.radius - best.distance),
+    bodyKind: best.basin.kind,
+    bodyId: best.basin.id,
+    shoreDistance: Math.max(0, best.basin.radius - best.distance),
   };
 }
 
@@ -387,25 +450,149 @@ function channelHitAt(channel: TracedChannel, x: number, z: number): ChannelHit 
   return best;
 }
 
-function riverCandidate(x: number, z: number, sampler: TerrainHeightSampler): HydrologySample | null {
+/** All channel hits at (x, z) across the search neighbourhood. */
+function collectChannelHits(x: number, z: number, sampler: TerrainHeightSampler): ChannelHit[] {
   const bx = basinCoord(x);
   const bz = basinCoord(z);
-  let best: ChannelHit | null = null;
-  let bestDepth = 0;
-  const terrainY = sampler.surfaceHeight(x, z);
+  const hits: ChannelHit[] = [];
   for (let oz = -RIVER_SEARCH_RADIUS_BASINS; oz <= RIVER_SEARCH_RADIUS_BASINS; oz++) {
     for (let ox = -RIVER_SEARCH_RADIUS_BASINS; ox <= RIVER_SEARCH_RADIUS_BASINS; ox++) {
       const channel = getChannel(bx + ox, bz + oz, sampler);
       if (!channel) continue;
       const hit = channelHitAt(channel, x, z);
-      if (!hit) continue;
-      const depth = hit.level - terrainY;
-      // Where independent channels overlap (a natural confluence), the deeper one owns
-      // the sample so the surface has one well-defined height.
-      if (depth > bestDepth) {
-        bestDepth = depth;
-        best = hit;
+      if (hit) hits.push(hit);
+    }
+  }
+  return hits;
+}
+
+// Channel carve profile: full carve depth inside the wet core (the riverMask=1 zone,
+// distance <= 0.7*halfWidth), fading to zero exactly at the channel edge so banks join
+// the untouched field with no cliff. Inside the core the bed is pinned below the
+// (bank-clamped, monotonic) channel level, which is what guarantees a continuous
+// water-holding channel on slopes — the old pothole failure mode.
+const CARVE_EDGE_FADE_END = 0.3;
+
+function carveChannelBed(baseHeight: number, hits: readonly ChannelHit[], config: InfiniteHydrologyCarveConfig): number {
+  let carved = baseHeight;
+  for (const hit of hits) {
+    const w = 1 - hit.distance / Math.max(1e-6, hit.halfWidth);
+    const edge = smoothstep(0, CARVE_EDGE_FADE_END, w);
+    if (edge <= 0) continue;
+    const shape = Math.pow(Math.max(0, w), Math.max(0.1, config.power));
+    const depth = Math.max(0.05, config.depthM) * (0.35 + 0.65 * shape);
+    const target = Math.min(baseHeight, hit.level - depth);
+    carved = Math.min(carved, baseHeight + (target - baseHeight) * edge);
+  }
+  return carved;
+}
+
+function carveLakeBed(baseHeight: number, basins: readonly BasinHit[], config: InfiniteHydrologyCarveConfig): number {
+  let carved = baseHeight;
+  for (const hit of basins) {
+    if (hit.mask <= 0) continue;
+    const target = Math.min(baseHeight, hit.basin.waterY - Math.max(0.05, config.lakeBedDepthM));
+    carved = Math.min(carved, baseHeight + (target - baseHeight) * hit.mask);
+  }
+  return carved;
+}
+
+/**
+ * Terrain carve for the traced/infinite hydrology field — the streamed-world analogue
+ * of the graph sampler's carveHeight. Pure function of (x, z, base sampler, config);
+ * channels/basins are traced against the *base* field only, so applying the carve to
+ * the terrain authority never feeds back into the trace.
+ */
+export function carveInfiniteHydrologyHeight(
+  x: number,
+  z: number,
+  baseHeight: number,
+  sampler: TerrainHeightSampler,
+  config: InfiniteHydrologyCarveConfig,
+): number {
+  const channelCarved = carveChannelBed(baseHeight, collectChannelHits(x, z, sampler), config);
+  const lakeCarved = carveLakeBed(baseHeight, collectBasinHits(x, z, sampler), config);
+  return Math.min(channelCarved, lakeCarved);
+}
+
+/** Carver with the GraphHydrologySampler.carveHeight shape, for the terrain seams
+ *  (worker override, heightfield tiles) that already accept a hydrology carver. */
+export function createTracedHydrologyCarver(
+  sampler: TerrainHeightSampler,
+): { carveHeight(x: number, z: number, baseHeight: number, config: InfiniteHydrologyCarveConfig): number } {
+  return {
+    carveHeight: (x, z, baseHeight, config) => carveInfiniteHydrologyHeight(x, z, baseHeight, sampler, config),
+  };
+}
+
+export interface TracedRiverContinuity {
+  /** Traced channels found inside the probe radius. */
+  channels: number;
+  /** Channel polyline vertices probed. */
+  points: number;
+  /** Vertices whose carved bed sits at least minVisibleDepthM under the channel level. */
+  okPoints: number;
+  /** 100 * okPoints / points; 100 when no channels exist (nothing to violate). */
+  pct: number;
+}
+
+/**
+ * W1 continuity gate: along every traced channel polyline in the probe radius, the
+ * carved bed must sit at least minVisibleDepthM below the channel level — the invariant
+ * that separates a continuous river from a pothole chain. Pure and cheap (channels are
+ * memoized); intended for a one-shot startup probe, not per-frame use.
+ */
+/** Probe depth floor for the continuity gate. Must exceed RIVER_LEVEL_OFFSET_M: an
+ *  uncarved bed already sits ~1.25 m under the level at centerline vertices, so a
+ *  smaller floor would report 100% even with the carve disabled. */
+export const RIVER_CONTINUITY_MIN_PROBE_DEPTH_M = 1.5;
+
+export function measureTracedRiverContinuity(
+  centerX: number,
+  centerZ: number,
+  radiusM: number,
+  sampler: TerrainHeightSampler,
+  carve: InfiniteHydrologyCarveConfig,
+  minVisibleDepthM: number,
+): TracedRiverContinuity {
+  const probeDepthM = Math.max(minVisibleDepthM, RIVER_CONTINUITY_MIN_PROBE_DEPTH_M);
+  const basinRadius = Math.max(1, Math.ceil(radiusM / BASIN_SIZE_M));
+  const bx = basinCoord(centerX);
+  const bz = basinCoord(centerZ);
+  let channels = 0;
+  let points = 0;
+  let okPoints = 0;
+  for (let oz = -basinRadius; oz <= basinRadius; oz++) {
+    for (let ox = -basinRadius; ox <= basinRadius; ox++) {
+      const channel = getChannel(bx + ox, bz + oz, sampler);
+      if (!channel) continue;
+      channels++;
+      for (const point of channel.points) {
+        points++;
+        const bed = carveInfiniteHydrologyHeight(
+          point.x,
+          point.z,
+          sampler.surfaceHeight(point.x, point.z),
+          sampler,
+          carve,
+        );
+        if (bed <= point.level - probeDepthM) okPoints++;
       }
+    }
+  }
+  return { channels, points, okPoints, pct: points > 0 ? (100 * okPoints) / points : 100 };
+}
+
+function riverCandidate(terrainY: number, hits: readonly ChannelHit[]): HydrologySample | null {
+  let best: ChannelHit | null = null;
+  let bestDepth = 0;
+  for (const hit of hits) {
+    const depth = hit.level - terrainY;
+    // Where independent channels overlap (a natural confluence), the deeper one owns
+    // the sample so the surface has one well-defined height.
+    if (depth > bestDepth) {
+      bestDepth = depth;
+      best = hit;
     }
   }
   // Wet only where terrain sits below the (bank-clamped, monotonic) channel level.
@@ -441,10 +628,17 @@ export function sampleInfiniteHydrology(
   options: InfiniteHydrologyOptions = {},
 ): HydrologySample {
   const dryDepthM = Math.max(1, options.drySentinelDepthM ?? DRY_DEPTH_M);
-  const river = riverCandidate(x, z, sampler);
-  const lake = lakeCandidate(x, z, sampler);
+  const carve = options.carve ?? null;
+  const baseY = sampler.surfaceHeight(x, z);
+  const channelHits = collectChannelHits(x, z, sampler);
+  const basinHits = collectBasinHits(x, z, sampler);
+  const terrainY = carve
+    ? Math.min(carveChannelBed(baseY, channelHits, carve), carveLakeBed(baseY, basinHits, carve))
+    : baseY;
+  const river = riverCandidate(terrainY, channelHits);
+  const lake = lakeCandidate(terrainY, basinHits);
   if (river && lake) return river.bodyMask >= lake.bodyMask ? river : lake;
   if (river) return river;
   if (lake) return lake;
-  return drySample(sampler.surfaceHeight(x, z), dryDepthM);
+  return drySample(terrainY, dryDepthM);
 }

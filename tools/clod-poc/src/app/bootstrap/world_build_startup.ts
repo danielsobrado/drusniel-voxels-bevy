@@ -20,6 +20,7 @@ import {
 import { setTerrainFieldCoreConfig } from "../../gpu/terrain_field_core.js";
 import {
   buildStartupHeightfieldRaster,
+  makeStartupHeightfieldSampler,
   planStartupHeightfieldRaster,
   startupHeightfieldDescriptor,
 } from "../../terrain/startup_heightfield_raster.js";
@@ -113,6 +114,8 @@ import { splitWorldBuildNodes } from "./world_build_nodes.js";
 import { CanonicalWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
 import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
+import { createTracedHydrologyCarver, measureTracedRiverContinuity, sampleInfiniteHydrology } from "../../water/infinite_hydrology.js";
+import type { HydrologyWorldSampler } from "../../water/hydrologyTileSource.js";
 import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 
 function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
@@ -474,6 +477,23 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     && waterConfig.source === "hydrology"
     && waterConfig.hydrology.enabled
     && waterConfig.hydrology.infinite.unifiedStartup;
+  // Traced-channel terrain carve (streamed worlds): rivers and lake beds dip under the
+  // channel/spill level everywhere the terrain authority samples — same contract as the
+  // continent graph carve, same config knobs.
+  const tracedCarveConfig = unifiedHydrologyRequested ? {
+    depthM: waterConfig.hydrology.rivers.carveDepthM,
+    power: waterConfig.hydrology.rivers.carvePower,
+    lakeBedDepthM: waterConfig.hydrology.rivers.visibleDepthM,
+  } : null;
+  const tracedCarvedHeight = tracedCarveConfig
+    ? (() => {
+        const carver = createTracedHydrologyCarver({ surfaceHeight: baseSurfaceHeight });
+        return (x: number, z: number) => carver.carveHeight(x, z, baseSurfaceHeight(x, z), tracedCarveConfig);
+      })()
+    : null;
+  const tracedWorldSampler: HydrologyWorldSampler | undefined = tracedCarveConfig
+    ? (x, z, sampler, options) => sampleInfiniteHydrology(x, z, sampler, { ...options, carve: tracedCarveConfig })
+    : undefined;
   let hydrologySystem = measure(startupTimings, "startup.hydrology_ms", () => {
     if (continentHydrologyRequested) return null;
     const baseTerrainSampler = { surfaceHeight: baseSurfaceHeight };
@@ -483,12 +503,17 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     const system = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
       ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain, {
           infiniteWorldSamples: isStreamedWorld,
+          ...(tracedCarveConfig && tracedCarvedHeight && tracedWorldSampler ? {
+            worldSampler: tracedWorldSampler,
+            remoteTileAuthority: { graph: null, carve: tracedCarveConfig },
+            carvedTerrainHeight: tracedCarvedHeight,
+          } : {}),
         })
       : null;
     if (system?.unifiedStartupActive()) {
-      // Water is now a raster/view of the traced authority. Terrain remains the procedural
-      // field on main and worker paths, so there is no startup-grid carve to serialize.
-      setTerrainSurfaceOverride(null);
+      // Water is a raster/view of the traced authority. With the carve enabled the
+      // terrain authority is the carved field; without it the raw procedural field.
+      setTerrainSurfaceOverride(tracedCarvedHeight);
     } else if (system) {
       const hydroCells = system.grid.worldCells;
       setTerrainSurfaceOverride((x, z) =>
@@ -505,6 +530,25 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   });
   const unifiedHydrology = continentHydrologyRequested || hydrologySystem?.unifiedStartupActive() === true;
   startupTimings["startup.hydrology_unified_startup"] = unifiedHydrology ? 1 : 0;
+  if (tracedCarveConfig && hydrologySystem?.unifiedStartupActive()) {
+    // W1 continuity gate: every traced channel vertex near spawn must have a carved bed
+    // below level - minVisibleDepth (continuous rivers, not pothole chains).
+    const continuity = measure(startupTimings, "startup.river_continuity_ms", () =>
+      measureTracedRiverContinuity(
+        worldCells / 2,
+        worldCells / 2,
+        1536,
+        { surfaceHeight: baseSurfaceHeight },
+        tracedCarveConfig,
+        waterConfig.hydrology.rivers.minVisibleDepth,
+      ));
+    startupTimings["river_continuity_pct"] = continuity.pct;
+    startupTimings["river_continuity_channels"] = continuity.channels;
+    console.info(
+      `[water] traced river continuity ${continuity.pct.toFixed(1)}% ` +
+        `(${continuity.okPoints}/${continuity.points} points, ${continuity.channels} channels)`,
+    );
+  }
 
   const heightfieldRasterRequested = unifiedHydrology
     && booleanParam(searchParams, ["heightfieldRaster", "heightfield_raster"], true);
@@ -515,11 +559,16 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   startupTimings["startup.heightfield_raster_samples"] = heightfieldRasterPlan.sampleCount;
   startupTimings["startup.heightfield_raster_bytes"] = heightfieldRasterPlan.byteLength;
   let startupHeightfield = heightfieldRasterRequested && heightfieldRasterPlan.enabled && !continentHydrologyRequested
-    ? measure(startupTimings, "startup.heightfield_raster_ms", () => buildStartupHeightfieldRaster(worldCells))
+    ? measure(startupTimings, "startup.heightfield_raster_ms", () =>
+        buildStartupHeightfieldRaster(worldCells, tracedCarvedHeight ?? undefined))
     : null;
   if (startupHeightfield) {
-    const sampler = startupRasterHeightfieldSampler(startupHeightfield);
-    setTerrainSurfaceOverride(sampler.sampleHeight);
+    // With the traced carve active the raster bakes carved heights, so everything the
+    // raster does not answer (fractional reads, outside the padded domain) must fall
+    // back to the carved field, not the raw one.
+    setTerrainSurfaceOverride(tracedCarvedHeight
+      ? makeStartupHeightfieldSampler(startupHeightfield, tracedCarvedHeight)
+      : startupRasterHeightfieldSampler(startupHeightfield).sampleHeight);
     startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
   }
   startupTimings["startup.heightfield_raster_enabled"] = startupHeightfield ? 1 : 0;
@@ -568,7 +617,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     proceduralTextureHash,
     longViewScene: queryLongViewScene,
     hydrologyGraphHash: null,
-    hydrologyCarve: null,
+    hydrologyCarve: tracedCarveConfig,
     featureStampHash: featureStamps?.hash ?? null,
     featureStampRevision: featureStamps?.revision ?? 0,
     voxelOverlay,
@@ -726,7 +775,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       terrainSource,
       startupHeightfield,
       hydrologyGraphArtifact?.graph ?? null,
-      hydrologyGraphArtifact ? graphCarveConfig : null,
+      hydrologyGraphArtifact ? graphCarveConfig : tracedCarveConfig,
       featureStamps?.stamps,
     ));
   const workerCacheStats = getWorkerCacheBuildStats();

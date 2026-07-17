@@ -142,12 +142,15 @@ export function startupHeightfieldDescriptor(
   };
 }
 
-export function makeStartupHeightfieldSampler(raster: StartupHeightfieldRaster): TerrainSurfaceOverride {
+export function makeStartupHeightfieldSampler(
+  raster: StartupHeightfieldRaster,
+  fallback: (x: number, z: number) => number = baseSurfaceHeight,
+): TerrainSurfaceOverride {
   const { minCell, res, heights } = raster;
   const maxCell = minCell + res - 1;
   return (x, z) => {
-    if (!Number.isInteger(x) || !Number.isInteger(z)) return baseSurfaceHeight(x, z);
-    if (x < minCell || z < minCell || x > maxCell || z > maxCell) return baseSurfaceHeight(x, z);
+    if (!Number.isInteger(x) || !Number.isInteger(z)) return fallback(x, z);
+    if (x < minCell || z < minCell || x > maxCell || z > maxCell) return fallback(x, z);
     return heights[(z - minCell) * res + (x - minCell)]!;
   };
 }

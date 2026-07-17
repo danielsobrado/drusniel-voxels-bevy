@@ -11,6 +11,7 @@
 import { baseSurfaceHeight, setTerrainFieldConfig } from "../terrain/terrain.js";
 import { makeFakeBodyCarvedSampler } from "./fakeBodyCarve.js";
 import { createCarvedGraphHydrologySampler } from "./graph_hydrology.js";
+import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import {
   buildHydrologyTileData,
   type HydrologyTileBuildOptions,
@@ -52,6 +53,10 @@ function handleConfigure(request: HydrologyTileWorkerConfigureRequest): void {
         request.drySentinelDepthM,
       )
     : null;
+  // Traced carve (streamed worlds): carve config without a graph. The traced field
+  // itself applies the carve, so tiles report the carved bed as terrainY — identical
+  // to the synchronous main-thread path, which passes the same carve option.
+  const tracedCarve = !request.hydrologyGraph ? request.hydrologyCarve : null;
   state = {
     configId: request.configId,
     sampler: graphSampler
@@ -59,7 +64,9 @@ function handleConfigure(request: HydrologyTileWorkerConfigureRequest): void {
       : makeFakeBodyCarvedSampler(carveConfig, { surfaceHeight: baseSurfaceHeight }),
     sampleHydrology: graphSampler
       ? (x, z) => graphSampler.sample(x, z)
-      : undefined,
+      : tracedCarve
+        ? (x, z, sampler, options) => sampleInfiniteHydrology(x, z, sampler, { ...options, carve: tracedCarve })
+        : undefined,
     options: {
       tileSizeM: request.tileSizeM,
       tileRes: request.tileRes,

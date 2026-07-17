@@ -60,9 +60,14 @@ export function installWorkerTerrainOverride(
   startupHeightfield: StartupHeightfieldRaster | null | undefined,
   hydrologyTerrain: SerializedHydrologyTerrain | null | undefined,
   options: InstallHydrologyTerrainOptions = {},
+  rasterFallback?: (x: number, z: number) => number,
 ): void {
   if (startupHeightfield) {
-    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(startupHeightfield));
+    setTerrainSurfaceOverride(makeStartupHeightfieldSampler(startupHeightfield, rasterFallback));
+    return;
+  }
+  if (rasterFallback) {
+    setTerrainSurfaceOverride(rasterFallback);
     return;
   }
   installHydrologyTerrain(hydrologyTerrain, options);

@@ -70,6 +70,7 @@ import { buildCarvedHeightfieldTile } from "./world/heightfield_tiles/heightfiel
 import { featureStampFieldFromStamps } from "./world/feature_stamps.js";
 import { buildHeightfieldTileComplexity } from "./world/heightfield_tiles/heightfield_tile_complexity.js";
 import { createGraphHydrologySampler, type GraphHydrologySampler, type GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
+import { createTracedHydrologyCarver } from "./water/infinite_hydrology.js";
 import {
   collectHeightfieldTileTransferables,
   type HeightfieldTileWorkerBuildRequest,
@@ -88,6 +89,7 @@ let hydrologyTerrain: SerializedHydrologyTerrain | null = null;
 let startupHeightfield: StartupHeightfieldRaster | null = null;
 let graphHydrology: GraphHydrologySampler | null = null;
 let graphCarve: GraphTerrainCarveConfig | null = null;
+let tracedCarver: ReturnType<typeof createTracedHydrologyCarver> | null = null;
 let featureStampField: ReturnType<typeof featureStampFieldFromStamps> | null = null;
 let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
@@ -102,6 +104,15 @@ function graphFeatureHeight(x: number, z: number): number {
   if (!graphHydrology || !graphCarve) return baseSurfaceHeight(x, z);
   const carved = graphHydrology.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarve);
   return Math.fround(featureStampField?.sampleHeight(x, z, carved) ?? carved);
+}
+
+// Streamed-world analogue of graphFeatureHeight: traced-channel carve over the base
+// field. Stamps stay out on purpose — the streamed-world override never composed them
+// (they belong to the heightfield tile authority), and the startup raster this function
+// backs must agree with the raster the main thread bakes with the same carve-only rule.
+function tracedFeatureHeight(x: number, z: number): number {
+  if (!tracedCarver || !graphCarve) return baseSurfaceHeight(x, z);
+  return tracedCarver.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarve);
 }
 const pendingByLevel = new Map<number, Set<string>>();
 /** Child page coords resimplified at level L; flushed to enqueue level L+1 once level L drains. */
@@ -302,8 +313,11 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
     ? createGraphHydrologySampler(request.hydrologyGraph, { surfaceHeight: baseSurfaceHeight })
     : null;
   graphCarve = request.hydrologyCarve ?? null;
+  tracedCarver = !request.hydrologyGraph && request.hydrologyCarve
+    ? createTracedHydrologyCarver({ surfaceHeight: baseSurfaceHeight })
+    : null;
   featureStampField = request.featureStamps ? featureStampFieldFromStamps(request.featureStamps) : null;
-  installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain);
+  installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, {}, tracedCarver ? tracedFeatureHeight : undefined);
   if (!startupHeightfield && graphHydrology && graphCarve) {
     setTerrainSurfaceOverride(graphFeatureHeight);
   }
@@ -539,12 +553,17 @@ function buildStreamRootNode(
   if (graphHydrology && graphCarve) {
     setTerrainSurfaceOverride(graphFeatureHeight);
   } else {
-    installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, { boundedToStartupWorld: true });
+    installWorkerTerrainOverride(
+      startupHeightfield,
+      hydrologyTerrain,
+      { boundedToStartupWorld: true },
+      tracedCarver ? tracedFeatureHeight : undefined,
+    );
   }
   try {
     return buildStandaloneClodRootNode(level, px, pz, cfg, world);
   } finally {
-    installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain);
+    installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, {}, tracedCarver ? tracedFeatureHeight : undefined);
   }
 }
 
@@ -614,8 +633,9 @@ function handleBuildHeightfieldTiles(request: HeightfieldTileWorkerBuildRequest)
       sourceRevision: request.sourceRevision,
       complexity: buildHeightfieldTileComplexity(key, getVoxelOverlaySource()),
     };
-    if (graphHydrology && graphCarve) {
-      return buildCarvedHeightfieldTile(key, field, graphHydrology, graphCarve, request.sourceRevision, features);
+    const carver = graphHydrology ?? tracedCarver;
+    if (carver && graphCarve) {
+      return buildCarvedHeightfieldTile(key, field, carver, graphCarve, request.sourceRevision, features);
     }
     return buildHeightfieldTile(key, features ? {
       ...field,

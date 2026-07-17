@@ -5,10 +5,13 @@ import type { FeatureStampField } from "../feature_stamps.js";
 
 export interface HeightfieldTileCarveConfig extends GraphTerrainCarveConfig {}
 
+/** Any hydrology carver (graph sampler or traced-channel carver). */
+export type HeightfieldTileHydrologyCarver = Pick<GraphHydrologySampler, "carveHeight">;
+
 export function buildCarvedHeightfieldTile(
   key: WorldTileKey,
   field: HeightfieldTileField,
-  hydrology: GraphHydrologySampler,
+  hydrology: HeightfieldTileHydrologyCarver,
   carve: HeightfieldTileCarveConfig,
   sourceRevision = field.sourceRevision ?? 0,
   features?: FeatureStampField,

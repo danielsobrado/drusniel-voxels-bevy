@@ -8,6 +8,7 @@ import { WORLD_TILE_SIZE_M } from "../tile_key.js";
 import { getSaveRuntimeFeatureStamps, subscribeSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 import { baseSurfaceHeight } from "../../terrain/terrain.js";
 import { createGraphHydrologySampler } from "../../water/graph_hydrology.js";
+import { createTracedHydrologyCarver } from "../../water/infinite_hydrology.js";
 import { featureStampFieldFromStamps, type FeatureTerrainStamp } from "../feature_stamps.js";
 import type { HeightfieldSampler } from "../heightfield_sampler.js";
 import { beginStreamRootCacheOperation } from "../../cache/clodStreamRootCache.js";
@@ -29,8 +30,12 @@ function canonicalFallbackSampler(
   carve: Parameters<ClodWorkerClient["buildWorld"]>[12],
   stamps: readonly FeatureTerrainStamp[] | undefined,
 ): HeightfieldSampler | undefined {
-  if (!graph || !carve) return undefined;
-  const hydrology = createGraphHydrologySampler(graph, { surfaceHeight: baseSurfaceHeight });
+  if (!carve) return undefined;
+  // Same carver selection as the worker: graph sampler on continents, traced-channel
+  // carver on streamed worlds (carve config without a graph).
+  const hydrology = graph
+    ? createGraphHydrologySampler(graph, { surfaceHeight: baseSurfaceHeight })
+    : createTracedHydrologyCarver({ surfaceHeight: baseSurfaceHeight });
   const initialFeatures = stamps ? featureStampFieldFromStamps(stamps) : null;
   return Object.freeze({
     kind: "heightfield_tiles" as const,

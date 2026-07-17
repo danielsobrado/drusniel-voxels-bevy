@@ -71,6 +71,7 @@ export class HydrologySystem {
   private readonly worldSampler: HydrologyWorldSampler;
   private readonly acceptsRemoteTiles: boolean;
   private readonly remoteTileAuthority: HydrologyTileRemoteAuthority | null;
+  private readonly carvedTerrainHeight: ((x: number, z: number) => number) | null;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
@@ -86,6 +87,7 @@ export class HydrologySystem {
     atlasTilesPerSide: number,
     worldSampler: HydrologyWorldSampler,
     remoteTileAuthority: HydrologyTileRemoteAuthority | null,
+    carvedTerrainHeight: ((x: number, z: number) => number) | null,
   ) {
     this.grid = grid;
     this.stats = stats;
@@ -99,6 +101,7 @@ export class HydrologySystem {
     this.worldSampler = worldSampler;
     this.acceptsRemoteTiles = remoteTileAuthority !== null;
     this.remoteTileAuthority = remoteTileAuthority;
+    this.carvedTerrainHeight = carvedTerrainHeight;
   }
 
   /**
@@ -169,6 +172,9 @@ export class HydrologySystem {
       infiniteWorldSamples?: boolean;
       worldSampler?: HydrologyWorldSampler;
       remoteTileAuthority?: HydrologyTileRemoteAuthority;
+      /** Carved terrain authority for terrainHeight() in unified mode; without it the
+       *  raw sampler is reported (legacy behavior — no carve on streamed worlds). */
+      carvedTerrainHeight?: (x: number, z: number) => number;
     } = {},
   ): HydrologySystem {
     const t0 = nowMs();
@@ -204,6 +210,7 @@ export class HydrologySystem {
       worldSampler,
       options.remoteTileAuthority
         ?? (options.worldSampler === undefined ? { graph: null, carve: null } : null),
+      options.carvedTerrainHeight ?? null,
     );
   }
 
@@ -236,7 +243,9 @@ export class HydrologySystem {
   }
 
   terrainHeight(x: number, z: number): number {
-    if (this.unifiedStartup) return this.sampler.surfaceHeight(x, z);
+    if (this.unifiedStartup) {
+      return this.carvedTerrainHeight ? this.carvedTerrainHeight(x, z) : this.sampler.surfaceHeight(x, z);
+    }
     if (!this.infiniteWorldSamples) return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
     if (!hydrologyCoordInsideStartupWorld(x, z, this.grid.worldCells)) return this.sampler.surfaceHeight(x, z);
     const t = this.gridWeight(x, z);
