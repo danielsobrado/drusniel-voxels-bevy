@@ -9,9 +9,15 @@ import {
 import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { createHydrologyTileRemoteBuilder } from "../../water/hydrology_tile_worker_client.js";
-import { getTerrainFieldConfig } from "../../terrain/terrain.js";
+import { getDigEditRevision, getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
 import { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
+import {
+  EditedWaterAuthoritySource,
+  createCanonicalWaterAuthority,
+  createHydrologyWaterSource,
+  createLegacyWaterFieldSource,
+} from "../../water/water_authority.js";
 import type { WaterDebugPoseHooks, WaterControllerDeps, WaterController } from "./water_controller_types.js";
 import { readShoreSurfSettings, deepOceanClipmapExclusionDistance } from "./water_controller_params.js";
 import { installWaterDebugApi, logWaterDevInit } from "./water_controller_debug.js";
@@ -23,6 +29,11 @@ export { installWaterDebugApi, logWaterDevInit } from "./water_controller_debug.
 export async function createWaterController(deps: WaterControllerDeps): Promise<WaterController> {
   const pageSignaturesBefore = pageMeshSignatures(deps.nodes);
   const field = new WaterField(deps.waterConfig, { surfaceHeight: deps.surfaceHeight }, deps.hydrologySystem, deps.worldCells);
+  const editedWater = new EditedWaterAuthoritySource();
+  const generatedWater = deps.hydrologySystem
+    ? createHydrologyWaterSource(deps.hydrologySystem, getDigEditRevision)
+    : createLegacyWaterFieldSource(field, getDigEditRevision);
+  const authority = createCanonicalWaterAuthority([editedWater, generatedWater]);
   const shoreSurfSettings = readShoreSurfSettings(deps.searchParams, deps.borderCoastOceanConfig);
   const clipmapExclusionDistance = deepOceanClipmapExclusionDistance(deps.searchParams, deps.borderCoastOceanConfig);
   field.setShoreSurfBand(shoreSurfSettings);
@@ -135,6 +146,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const controller: WaterController = {
     field,
     clipmap,
+    authority,
+    editedWater,
     debugState,
     makeVisual,
     setVisible(enabled) {
