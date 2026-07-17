@@ -102,6 +102,26 @@ describe("canonical water authority", () => {
     expect(authority.revision()).toBe(9);
   });
 
+  it("invalidates the composed revision when either source changes", () => {
+    let generatedRevision = 100;
+    const edited = new EditedWaterAuthoritySource();
+    const generated: WaterAuthoritySource = {
+      id: "generated",
+      revision: () => generatedRevision,
+      sample: () => generatedLake,
+    };
+    const authority = createCanonicalWaterAuthority([edited, generated]);
+    const initial = authority.revision();
+
+    edited.upsert({ id: "pond", kind: "pond", minX: 0, maxX: 1, minZ: 0, maxZ: 1, surfaceY: 2 });
+    const afterEdit = authority.revision();
+    generatedRevision += 1;
+    const afterGenerated = authority.revision();
+
+    expect(afterEdit).not.toBe(initial);
+    expect(afterGenerated).not.toBe(afterEdit);
+  });
+
   it("resolves overlapping edits by priority then stable id", () => {
     const edited = new EditedWaterAuthoritySource();
     edited.upsert({ id: "z", kind: "pond", minX: 0, maxX: 10, minZ: 0, maxZ: 10, surfaceY: 4, priority: 1 });
