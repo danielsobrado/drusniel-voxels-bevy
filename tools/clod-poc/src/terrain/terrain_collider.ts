@@ -2,6 +2,12 @@ import * as THREE from "three";
 import { MeshBVH } from "three-mesh-bvh";
 import type { PageMesh } from "../types.js";
 import { GameplayDiagnostics, gameplayDiagnostics } from "../player/gameplay_diagnostics.js";
+import {
+  createTerrainColliderRemoteBuilder,
+  type TerrainColliderBuildInput,
+  type TerrainColliderBuildResult,
+  type TerrainColliderRemoteBuilder,
+} from "./terrain_collider_worker_client.js";
 
 export interface TerrainColliderFootprint {
   minX: number;
@@ -64,18 +70,21 @@ export interface TerrainColliderStatus {
 
 export interface TerrainColliderSetOptions {
   diagnostics?: GameplayDiagnostics;
-  /**
-   * When true, scheduled page rebuilds self-process on macrotask timeouts (off the frame
-   * callback path). Tests leave it false and drive `processPendingRebuilds()` manually.
-   */
+  /** Automatically drains scheduled replacements outside the render/frame callback. */
   autoProcessRebuilds?: boolean;
+  /** Injectable for tests. Undefined creates the browser worker; null forces fallback mode. */
+  remoteBuilder?: TerrainColliderRemoteBuilder | null;
+}
+
+interface ColliderMeshSource {
+  positions: Float32Array;
+  indices: Uint32Array;
 }
 
 interface ColliderEntry {
   id: string;
   footprint: TerrainColliderFootprint;
-  sourceGeometry: THREE.BufferGeometry | null;
-  sourceMesh: PageMesh | null;
+  source: ColliderMeshSource | null;
   geometry: THREE.BufferGeometry | null;
   boundsTree: MeshBVH | null;
   /** Terrain revision the collision geometry was built from (0 = initial/unknown). */
@@ -84,8 +93,10 @@ interface ColliderEntry {
 
 interface ColliderRebuildJob {
   pageId: string;
-  /** Cloned at enqueue time (snapshot semantics, matching `updatePage`), BVH not yet built. */
+  /** Immutable snapshot at enqueue time; later origin shifts translate this snapshot too. */
   replacement: ColliderEntry;
+  /** The live entry this job is allowed to replace. Object identity is the revision token. */
+  expectedEntry: ColliderEntry;
   enqueuedAtMs: number;
 }
 
@@ -105,11 +116,48 @@ function overlapsFootprint(box: THREE.Box3, footprint: TerrainColliderFootprint)
     && box.min.z <= footprint.maxZ;
 }
 
-function geometryFromPageMesh(mesh: PageMesh): THREE.BufferGeometry {
+function copyGeometrySource(geometry: THREE.BufferGeometry): ColliderMeshSource {
+  const position = geometry.getAttribute("position");
+  if (!position) throw new Error("Collider geometry needs a position attribute");
+
+  const positions = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    positions[i * 3] = position.getX(i);
+    positions[i * 3 + 1] = position.getY(i);
+    positions[i * 3 + 2] = position.getZ(i);
+  }
+
+  const sourceIndex = geometry.getIndex();
+  const indices = new Uint32Array(sourceIndex?.count ?? position.count);
+  if (sourceIndex) {
+    for (let i = 0; i < sourceIndex.count; i++) indices[i] = sourceIndex.getX(i);
+  } else {
+    for (let i = 0; i < position.count; i++) indices[i] = i;
+  }
+  return { positions, indices };
+}
+
+function copyPageMeshSource(mesh: PageMesh): ColliderMeshSource {
+  return {
+    positions: new Float32Array(mesh.positions),
+    indices: new Uint32Array(mesh.indices),
+  };
+}
+
+function geometryFromSource(source: ColliderMeshSource): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
-  geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(source.positions), 3));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(source.indices), 1));
   return geometry;
+}
+
+function workerInputFromSource(source: ColliderMeshSource): TerrainColliderBuildInput {
+  const positions = new Float32Array(source.positions);
+  const vertexCount = positions.length / 3;
+  const indices = vertexCount <= 0xffff
+    ? Uint16Array.from(source.indices)
+    : new Uint32Array(source.indices);
+  return { positions, indices };
 }
 
 function rayCanHitFootprint(ray: THREE.Ray, footprint: TerrainColliderFootprint): boolean {
@@ -118,10 +166,10 @@ function rayCanHitFootprint(ray: THREE.Ray, footprint: TerrainColliderFootprint)
   return ray.intersectsBox(tempRayBox);
 }
 
-function translatePageMesh(mesh: PageMesh, dx: number, dz: number): void {
-  for (let i = 0; i < mesh.positions.length; i += 3) {
-    mesh.positions[i] += dx;
-    mesh.positions[i + 2] += dz;
+function translateSource(source: ColliderMeshSource, dx: number, dz: number): void {
+  for (let i = 0; i < source.positions.length; i += 3) {
+    source.positions[i] += dx;
+    source.positions[i + 2] += dz;
   }
 }
 
@@ -130,13 +178,7 @@ function entryFromPage(page: TerrainColliderPage, revision = 0): ColliderEntry {
   return {
     id: page.id,
     footprint: { ...page.footprint },
-    sourceGeometry: page.geometry?.clone() ?? null,
-    sourceMesh: page.mesh
-      ? {
-          ...page.mesh,
-          positions: new Float32Array(page.mesh.positions),
-        }
-      : null,
+    source: page.geometry ? copyGeometrySource(page.geometry) : copyPageMeshSource(page.mesh!),
     geometry: null,
     boundsTree: null,
     revision,
@@ -154,9 +196,13 @@ export class TerrainColliderSet {
   private readonly diagnostics: GameplayDiagnostics;
   private readonly autoProcessRebuilds: boolean;
   private readonly pendingJobs = new Map<string, ColliderRebuildJob>();
+  private remoteBuilder: TerrainColliderRemoteBuilder | null;
+  private activeJob: ColliderRebuildJob | null = null;
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
-  /** True while the rebuild pipeline builds a BVH — those builds are off the frame path. */
+  private asyncDrainActive = false;
   private pipelineBuildActive = false;
+  private translationEpoch = 0;
+  private disposed = false;
 
   constructor(
     pages: readonly TerrainColliderPage[],
@@ -165,6 +211,9 @@ export class TerrainColliderSet {
   ) {
     this.diagnostics = options.diagnostics ?? gameplayDiagnostics;
     this.autoProcessRebuilds = options.autoProcessRebuilds ?? false;
+    this.remoteBuilder = options.remoteBuilder === undefined
+      ? createTerrainColliderRemoteBuilder()
+      : options.remoteBuilder;
     this.entries = new Map(pages.map((page) => [page.id, entryFromPage(page)]));
     for (const entry of this.entries.values()) this.indexEntry(entry);
   }
@@ -175,7 +224,7 @@ export class TerrainColliderSet {
     return count;
   }
 
-  /** Build every page's BVH up front so the first raycast against a cold page doesn't hitch. */
+  /** Build every page synchronously. Tools/tests use this deterministic path. */
   prewarmAll(): void {
     this.pipelineBuildActive = true;
     try {
@@ -185,34 +234,50 @@ export class TerrainColliderSet {
     }
   }
 
+  /** Build every page in the worker before gameplay starts; falls back loudly in counters. */
+  async prewarmAllAsync(): Promise<void> {
+    for (const entry of this.entries.values()) {
+      while (!this.disposed && !entry.boundsTree) {
+        const buildEpoch = this.translationEpoch;
+        const result = await this.requestRemoteBuild(entry);
+        if (this.disposed) return;
+        if (buildEpoch !== this.translationEpoch) continue;
+        if (result) this.applyRemoteBuild(entry, result);
+        else this.buildEntryAsPipelineFallback(entry);
+      }
+    }
+  }
+
   pageCount(): number {
     return this.entries.size;
   }
 
   translateHorizontal(dx: number, dz: number): void {
     if (dx === 0 && dz === 0) return;
+    this.translationEpoch++;
     for (const entry of this.entries.values()) {
       entry.footprint.minX += dx;
       entry.footprint.maxX += dx;
       entry.footprint.minZ += dz;
       entry.footprint.maxZ += dz;
-      entry.sourceGeometry?.translate(dx, 0, dz);
-      if (entry.sourceMesh) translatePageMesh(entry.sourceMesh, dx, dz);
-      entry.geometry?.dispose();
-      entry.geometry = null;
-      entry.boundsTree = null;
+      if (entry.source) translateSource(entry.source, dx, dz);
+      if (entry.geometry && entry.boundsTree) {
+        entry.geometry.translate(dx, 0, dz);
+        entry.boundsTree.refit();
+      }
     }
-    // Pending rebuild snapshots live in the same world frame as the entries they replace.
-    for (const job of this.pendingJobs.values()) {
-      const replacement = job.replacement;
-      replacement.footprint.minX += dx;
-      replacement.footprint.maxX += dx;
-      replacement.footprint.minZ += dz;
-      replacement.footprint.maxZ += dz;
-      replacement.sourceGeometry?.translate(dx, 0, dz);
-      if (replacement.sourceMesh) translatePageMesh(replacement.sourceMesh, dx, dz);
-    }
+    for (const job of this.pendingJobs.values()) this.translateJob(job, dx, dz);
+    if (this.activeJob) this.translateJob(this.activeJob, dx, dz);
     this.rebuildSpatialIndex();
+  }
+
+  private translateJob(job: ColliderRebuildJob, dx: number, dz: number): void {
+    const replacement = job.replacement;
+    replacement.footprint.minX += dx;
+    replacement.footprint.maxX += dx;
+    replacement.footprint.minZ += dz;
+    replacement.footprint.maxZ += dz;
+    if (replacement.source) translateSource(replacement.source, dx, dz);
   }
 
   private indexEntry(entry: ColliderEntry): void {
@@ -280,9 +345,9 @@ export class TerrainColliderSet {
 
   private ensureEntry(entry: ColliderEntry): MeshBVH {
     if (entry.boundsTree) return entry.boundsTree;
+    if (!entry.source) throw new Error(`Collider page ${entry.id} has no source geometry`);
     const startedAt = performance.now();
-    const geometry = entry.sourceGeometry?.clone() ?? (entry.sourceMesh ? geometryFromPageMesh(entry.sourceMesh) : null);
-    if (!geometry) throw new Error(`Collider page ${entry.id} has no source geometry`);
+    const geometry = geometryFromSource(entry.source);
     geometry.computeBoundingBox();
     entry.geometry = geometry;
     entry.boundsTree = new MeshBVH(geometry);
@@ -296,12 +361,48 @@ export class TerrainColliderSet {
     return entry.boundsTree;
   }
 
+  private async requestRemoteBuild(entry: ColliderEntry): Promise<TerrainColliderBuildResult | null> {
+    const builder = this.remoteBuilder;
+    if (!entry.source || !builder?.available()) return null;
+    try {
+      const result = await builder.build(workerInputFromSource(entry.source));
+      this.diagnostics.add("collider_build_count");
+      this.diagnostics.add("collider_build_total_ms", result.buildMs);
+      this.diagnostics.add("collider_worker_build_count");
+      this.diagnostics.add("collider_worker_build_total_ms", result.buildMs);
+      return result;
+    } catch {
+      this.diagnostics.add("collider_worker_failures");
+      if (this.remoteBuilder === builder) {
+        builder.dispose();
+        this.remoteBuilder = null;
+      }
+      return null;
+    }
+  }
+
+  private applyRemoteBuild(entry: ColliderEntry, result: TerrainColliderBuildResult): void {
+    if (!entry.source) throw new Error(`Collider page ${entry.id} has no source geometry`);
+    const geometry = geometryFromSource(entry.source);
+    geometry.computeBoundingBox();
+    entry.geometry = geometry;
+    entry.boundsTree = MeshBVH.deserialize(result.serialized, geometry);
+  }
+
+  private buildEntryAsPipelineFallback(entry: ColliderEntry): void {
+    this.diagnostics.add("collider_worker_fallback_builds");
+    this.pipelineBuildActive = true;
+    try {
+      this.ensureEntry(entry);
+    } finally {
+      this.pipelineBuildActive = false;
+    }
+  }
+
   private disposeEntry(entry: ColliderEntry): void {
     entry.geometry?.dispose();
-    entry.sourceGeometry?.dispose();
     entry.geometry = null;
-    entry.sourceGeometry = null;
-    entry.sourceMesh = null;
+    entry.source = null;
     entry.boundsTree = null;
   }
 
@@ -318,8 +419,6 @@ export class TerrainColliderSet {
     if (grounded || !this.heightFallback?.enabled) return { position, velocity, grounded, fired: false, deniedUncertified: false };
     const terrainY = this.heightFallback.surfaceHeight(position.x, position.z);
     if (!Number.isFinite(terrainY) || position.y > terrainY) return { position, velocity, grounded, fired: false, deniedUncertified: false };
-    // Never invent a floor in a 3D voxel column: a player below the canonical surface may
-    // legitimately be in a cave. Only certified single-surface columns get the snap.
     if (!this.columnCertifiedForFallback(position.x, position.z)) {
       return { position, velocity, grounded, fired: false, deniedUncertified: true };
     }
@@ -368,23 +467,11 @@ export class TerrainColliderSet {
     return nearest;
   }
 
-  /**
-   * Synchronously replace one page's collision geometry and rebuild its BVH on the calling
-   * path. Frame-path callers should use `schedulePageUpdate` instead (P2 async pipeline);
-   * this stays for tools/tests and is visible in `collider_sync_frame_builds` when misused.
-   */
+  /** Synchronous replacement for deterministic tools/tests. Runtime callers must schedule. */
   updatePage(id: string, source: THREE.BufferGeometry | PageMesh, terrainRevision = 0): boolean {
     const entry = this.entries.get(id);
     if (!entry) return false;
-    const pending = this.pendingJobs.get(id);
-    if (pending) {
-      // The sync replacement is newer than the queued job — installing the job later
-      // would resurrect stale geometry.
-      this.discardJob(pending);
-      this.pendingJobs.delete(id);
-      this.diagnostics.add("collider_jobs_cancelled_stale");
-      this.publishQueueGauges();
-    }
+    this.cancelPendingJob(id);
     const wasLoaded = entry.boundsTree !== null;
     const replacement = entryFromPage({
       id,
@@ -398,13 +485,7 @@ export class TerrainColliderSet {
   }
 
   upsertPage(page: TerrainColliderPage): void {
-    const pending = this.pendingJobs.get(page.id);
-    if (pending) {
-      this.discardJob(pending);
-      this.pendingJobs.delete(page.id);
-      this.diagnostics.add("collider_jobs_cancelled_stale");
-      this.publishQueueGauges();
-    }
+    this.cancelPendingJob(page.id);
     const previous = this.entries.get(page.id);
     const replacement = entryFromPage(page);
     if (previous?.boundsTree) this.ensureEntry(replacement);
@@ -420,11 +501,7 @@ export class TerrainColliderSet {
     this.entries.delete(id);
     this.unindexEntry(id);
     this.disposeEntry(entry);
-    if (this.pendingJobs.has(id)) {
-      this.discardJob(this.pendingJobs.get(id)!);
-      this.pendingJobs.delete(id);
-      this.publishQueueGauges();
-    }
+    this.cancelPendingJob(id);
     return true;
   }
 
@@ -446,26 +523,16 @@ export class TerrainColliderSet {
       if (!footprintContainsPoint(entry.footprint, x, z)) continue;
       covered = true;
       revision = Math.max(revision, entry.revision);
-      if (this.pendingJobs.has(entry.id)) replacementPending = true;
+      if (this.hasRebuildFor(entry.id)) replacementPending = true;
     }
     return { covered, revision, replacementPending };
   }
 
-  /**
-   * Asynchronous revision-validated page replacement (playable-world-contract P2.1):
-   * queues the rebuild instead of constructing the `MeshBVH` on the calling (frame) path.
-   * The old collider keeps serving queries until the validated replacement installs
-   * atomically in `processPendingRebuilds`. Returns false when the page is unknown.
-   */
+  /** Queue a revision-validated replacement while the old collider continues serving. */
   schedulePageUpdate(id: string, source: THREE.BufferGeometry | PageMesh, terrainRevision = 0): boolean {
     const entry = this.entries.get(id);
     if (!entry) return false;
-    const superseded = this.pendingJobs.get(id);
-    if (superseded) {
-      this.discardJob(superseded);
-      this.pendingJobs.delete(id);
-      this.diagnostics.add("collider_jobs_cancelled_stale");
-    }
+    this.cancelPendingJob(id);
     const replacement = entryFromPage(
       {
         id,
@@ -474,7 +541,12 @@ export class TerrainColliderSet {
       },
       terrainRevision,
     );
-    this.pendingJobs.set(id, { pageId: id, replacement, enqueuedAtMs: performance.now() });
+    this.pendingJobs.set(id, {
+      pageId: id,
+      replacement,
+      expectedEntry: entry,
+      enqueuedAtMs: performance.now(),
+    });
     this.diagnostics.add("collider_jobs_queued");
     this.publishQueueGauges();
     this.armRebuildTimer();
@@ -482,15 +554,12 @@ export class TerrainColliderSet {
   }
 
   pendingRebuildCount(): number {
-    return this.pendingJobs.size;
+    return this.pendingJobs.size + (this.activeJob ? 1 : 0);
   }
 
-  /**
-   * Build + install queued replacements, oldest first. Called off the frame path — by the
-   * self-arming timeout (`autoProcessRebuilds`) or explicitly by tests/tools. Jobs whose
-   * page vanished or was re-queued mid-build are discarded (`collider_jobs_cancelled_stale`).
-   */
+  /** Deterministic synchronous drain for tests/tools. Runtime auto-drain uses the worker. */
   processPendingRebuilds(maxJobs = 1): number {
+    if (this.activeJob || this.asyncDrainActive) return 0;
     let processed = 0;
     while (processed < maxJobs) {
       const first = this.pendingJobs.entries().next();
@@ -499,37 +568,107 @@ export class TerrainColliderSet {
       this.pendingJobs.delete(id);
       processed++;
       const current = this.entries.get(id);
-      if (!current) {
+      if (!current || current !== job.expectedEntry) {
         this.discardJob(job);
         this.diagnostics.add("collider_jobs_cancelled_stale");
         continue;
       }
-      if (current.boundsTree) {
-        this.pipelineBuildActive = true;
-        try {
-          this.ensureEntry(job.replacement);
-        } finally {
-          this.pipelineBuildActive = false;
-        }
-      }
-      // Revision validation on completion: a job for this page enqueued during the build
-      // supersedes this result (only reachable with an interleaving/async builder).
-      if (this.pendingJobs.has(id)) {
-        this.discardJob(job);
-        this.diagnostics.add("collider_jobs_cancelled_stale");
-        continue;
-      }
-      const applyStartedAt = performance.now();
-      this.entries.set(id, job.replacement);
-      this.disposeEntry(current);
-      const now = performance.now();
-      this.diagnostics.add("collider_jobs_completed");
-      this.diagnostics.set("collider_apply_ms", now - applyStartedAt);
-      this.diagnostics.set("collider_queue_latency_ms", now - job.enqueuedAtMs);
-      this.diagnostics.setMax("collider_queue_latency_max_ms", now - job.enqueuedAtMs);
+      if (current.boundsTree) this.buildEntryAsPipelineFallback(job.replacement);
+      this.installReplacement(job, current);
     }
     this.publishQueueGauges();
     return processed;
+  }
+
+  /** Worker-backed drain. Old colliders serve until a validated result installs atomically. */
+  async processPendingRebuildsAsync(maxJobs = 1): Promise<number> {
+    if (this.asyncDrainActive) return 0;
+    this.asyncDrainActive = true;
+    let processed = 0;
+    try {
+      while (!this.disposed && processed < maxJobs) {
+        const first = this.pendingJobs.entries().next();
+        if (first.done) break;
+        const [id, job] = first.value;
+        this.pendingJobs.delete(id);
+        this.activeJob = job;
+        this.publishQueueGauges();
+        processed++;
+
+        const current = this.entries.get(id);
+        if (!current || current !== job.expectedEntry) {
+          this.discardJob(job);
+          this.diagnostics.add("collider_jobs_cancelled_stale");
+          this.activeJob = null;
+          continue;
+        }
+
+        let result: TerrainColliderBuildResult | null = null;
+        const buildEpoch = this.translationEpoch;
+        if (current.boundsTree) result = await this.requestRemoteBuild(job.replacement);
+        if (this.disposed) break;
+
+        if (this.pendingJobs.has(id) || this.entries.get(id) !== job.expectedEntry) {
+          this.discardJob(job);
+          this.diagnostics.add("collider_jobs_cancelled_stale");
+          this.activeJob = null;
+          continue;
+        }
+
+        if (buildEpoch !== this.translationEpoch) {
+          this.pendingJobs.set(id, job);
+          this.diagnostics.add("collider_jobs_requeued_origin_shift");
+          this.activeJob = null;
+          break;
+        }
+
+        if (current.boundsTree) {
+          const applyStartedAt = performance.now();
+          if (result) {
+            try {
+              this.applyRemoteBuild(job.replacement, result);
+            } catch {
+              this.diagnostics.add("collider_worker_failures");
+              this.buildEntryAsPipelineFallback(job.replacement);
+            }
+          } else {
+            this.buildEntryAsPipelineFallback(job.replacement);
+          }
+          this.diagnostics.set("collider_apply_ms", performance.now() - applyStartedAt);
+        }
+        this.installReplacement(job, current);
+        this.activeJob = null;
+      }
+    } finally {
+      this.activeJob = null;
+      this.asyncDrainActive = false;
+      this.publishQueueGauges();
+    }
+    return processed;
+  }
+
+  private installReplacement(job: ColliderRebuildJob, current: ColliderEntry): void {
+    const applyStartedAt = performance.now();
+    this.entries.set(job.pageId, job.replacement);
+    this.disposeEntry(current);
+    const now = performance.now();
+    this.diagnostics.add("collider_jobs_completed");
+    this.diagnostics.set("collider_apply_ms", Math.max(this.diagnostics.get("collider_apply_ms"), now - applyStartedAt));
+    this.diagnostics.set("collider_queue_latency_ms", now - job.enqueuedAtMs);
+    this.diagnostics.setMax("collider_queue_latency_max_ms", now - job.enqueuedAtMs);
+  }
+
+  private hasRebuildFor(id: string): boolean {
+    return this.pendingJobs.has(id) || this.activeJob?.pageId === id;
+  }
+
+  private cancelPendingJob(id: string): void {
+    const pending = this.pendingJobs.get(id);
+    if (!pending) return;
+    this.pendingJobs.delete(id);
+    this.discardJob(pending);
+    this.diagnostics.add("collider_jobs_cancelled_stale");
+    this.publishQueueGauges();
   }
 
   private discardJob(job: ColliderRebuildJob): void {
@@ -537,15 +676,14 @@ export class TerrainColliderSet {
   }
 
   private publishQueueGauges(): void {
-    this.diagnostics.set("collider_jobs_inflight", this.pendingJobs.size);
+    this.diagnostics.set("collider_jobs_inflight", this.pendingJobs.size + (this.activeJob ? 1 : 0));
   }
 
   private armRebuildTimer(): void {
-    if (!this.autoProcessRebuilds || this.rebuildTimer !== null || this.pendingJobs.size === 0) return;
+    if (!this.autoProcessRebuilds || this.rebuildTimer !== null || this.asyncDrainActive || this.pendingJobs.size === 0) return;
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
-      this.processPendingRebuilds(1);
-      this.armRebuildTimer();
+      void this.processPendingRebuildsAsync(1).finally(() => this.armRebuildTimer());
     }, 0);
   }
 
@@ -571,7 +709,7 @@ export class TerrainColliderSet {
     for (const entry of this.entriesForBox(tempBox)) {
       if (!overlapsFootprint(tempBox, entry.footprint)) continue;
       pagesTested++;
-      if (this.pendingJobs.has(entry.id)) staleTested = true;
+      if (this.hasRebuildFor(entry.id)) staleTested = true;
       this.ensureEntry(entry).shapecast({
         intersectsBounds: (box) => box.intersectsBox(tempBox),
         intersectsTriangle: (triangle) => {
@@ -589,9 +727,7 @@ export class TerrainColliderSet {
           tempSegment.end.addScaledVector(pushDirection, depth);
           tempBox.translate(pushDirection.clone().multiplyScalar(depth));
 
-          if (triangleNormal.y >= maxSlopeCosine && pushDirection.y > 0.01) {
-            grounded = true;
-          }
+          if (triangleNormal.y >= maxSlopeCosine && pushDirection.y > 0.01) grounded = true;
           return false;
         },
       });
@@ -613,7 +749,6 @@ export class TerrainColliderSet {
 
     const fallback = this.applyHeightFallback(resolvedPosition, resolvedVelocity, grounded);
 
-    // Reason-coded accounting (P0.3): only genuine coverage loss should ever gate.
     if (staleTested) this.diagnostics.add("collider_stale_frames");
     if (fallback.fired) this.diagnostics.add("fallback_heightfield_certified");
     if (fallback.deniedUncertified) this.diagnostics.add("fallback_denied_uncertified");
@@ -621,7 +756,6 @@ export class TerrainColliderSet {
       if (pagesTested > 0) {
         this.diagnostics.add("collider_exact_no_ground");
       } else if (this.heightFallback?.enabled && this.columnCertifiedForFallback(resolvedPosition.x, resolvedPosition.z)) {
-        // Airborne over a certified fallback column: the certified floor exists below.
         this.diagnostics.add("collider_exact_no_ground");
       } else {
         this.diagnostics.add("collider_coverage_missing");
@@ -637,15 +771,22 @@ export class TerrainColliderSet {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     if (this.rebuildTimer !== null) {
       clearTimeout(this.rebuildTimer);
       this.rebuildTimer = null;
     }
+    this.remoteBuilder?.dispose();
+    this.remoteBuilder = null;
     for (const job of this.pendingJobs.values()) this.discardJob(job);
     this.pendingJobs.clear();
+    if (this.activeJob) this.discardJob(this.activeJob);
+    this.activeJob = null;
     for (const entry of this.entries.values()) this.disposeEntry(entry);
     this.entries.clear();
     this.spatialCells.clear();
     this.entryCells.clear();
+    this.publishQueueGauges();
   }
 }
