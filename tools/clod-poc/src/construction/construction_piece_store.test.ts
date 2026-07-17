@@ -65,8 +65,8 @@ describe("ConstructionPieceStore", () => {
     const input = placed("piece-1", 4);
 
     expect(store.add(input, false)).toBe(true);
-    input.position[0] = 99;
-    input.parentIds!.push("external-parent");
+    (input.position as [number, number, number])[0] = 99;
+    (input.parentIds as string[]).push("external-parent");
 
     expect(store.pieces[0]!.position[0]).toBe(4);
     expect(store.pieces[0]!.parentIds).toEqual([]);
