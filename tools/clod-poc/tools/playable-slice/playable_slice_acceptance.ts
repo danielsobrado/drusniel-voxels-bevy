@@ -59,6 +59,10 @@ function requestedModes(): PlayableSliceMode[] {
   return ["diagnostic", "continuous"];
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function withTimeout<T>(label: string, operation: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -215,6 +219,50 @@ function attachPageLogging(page: Page, label: string): void {
   page.on("pageerror", (error) => console.error(`[${label}:pageerror] ${error.message}`));
 }
 
+function failedRunReport(
+  mode: PlayableSliceMode,
+  runIndex: number,
+  freshProfile: boolean,
+  startedAt: Date,
+  startedAtMs: number,
+  driver: PlaywrightPlayableSliceDriver | null,
+  error: unknown,
+): PlayableSliceRunReport {
+  return {
+    schemaVersion: 1,
+    mode,
+    runIndex,
+    freshProfile,
+    startedAt: startedAt.toISOString(),
+    wallClockMs: Math.max(0, performance.now() - startedAtMs),
+    actions: driver ? [...driver.actions] : [],
+    steps: [],
+    maxFrameMs: driver?.maxFrameMs ?? 0,
+    maxFrameP95Ms: driver?.maxFrameP95Ms ?? 0,
+    travelledAfterReloadM: 0,
+    passed: false,
+    failures: [errorMessage(error)],
+  };
+}
+
+async function captureRunScreenshot(
+  page: Page,
+  mode: PlayableSliceMode,
+  runIndex: number,
+  freshProfile: boolean,
+): Promise<void> {
+  if (page.isClosed()) return;
+  mkdirSync(SHOTS_DIR, { recursive: true });
+  try {
+    await page.screenshot({
+      path: resolve(SHOTS_DIR, `${mode}-${freshProfile ? "fresh" : "repeat"}-${runIndex}.png`),
+      fullPage: false,
+    });
+  } catch (error) {
+    console.error(`[playable-slice] screenshot failed: ${errorMessage(error)}`);
+  }
+}
+
 async function runOne(
   context: BrowserContext,
   mode: PlayableSliceMode,
@@ -224,6 +272,9 @@ async function runOne(
 ): Promise<PlayableSliceRunReport> {
   const saveId = `playable-slice-${mode}-${freshProfile ? "fresh" : "repeat"}-${runIndex}`;
   const page = await context.newPage();
+  const startedAt = new Date();
+  const startedAtMs = performance.now();
+  let driver: PlaywrightPlayableSliceDriver | null = null;
   attachPageLogging(page, `${mode}-${runIndex}`);
   try {
     await page.goto(clodUrl({ scene: "continent", seed: SEED, extra: baseExtra() }), {
@@ -237,21 +288,18 @@ async function runOne(
     });
     await preparePlayableSlicePage(page);
 
-    const driver = mode === "diagnostic"
+    driver = mode === "diagnostic"
       ? new PlaywrightDiagnosticSliceDriver(page)
       : new PlaywrightPlayableSliceDriver(page);
     await driver.prepareDownwardAim();
-    const report = mode === "diagnostic"
-      ? await runDiagnosticPlayableSlice(driver as PlaywrightDiagnosticSliceDriver, { runIndex, freshProfile })
-      : await runContinuousPlayableSlice(driver, { runIndex, freshProfile });
-
-    mkdirSync(SHOTS_DIR, { recursive: true });
-    await page.screenshot({
-      path: resolve(SHOTS_DIR, `${mode}-${freshProfile ? "fresh" : "repeat"}-${runIndex}.png`),
-      fullPage: false,
-    });
-    return report;
+    const routeRun = mode === "diagnostic"
+      ? runDiagnosticPlayableSlice(driver as PlaywrightDiagnosticSliceDriver, { runIndex, freshProfile, startedAt })
+      : runContinuousPlayableSlice(driver, { runIndex, freshProfile, startedAt });
+    return await withTimeout(`${mode} playable route`, routeRun, RUN_TIMEOUT_MS);
+  } catch (error) {
+    return failedRunReport(mode, runIndex, freshProfile, startedAt, startedAtMs, driver, error);
   } finally {
+    await captureRunScreenshot(page, mode, runIndex, freshProfile);
     await page.close();
   }
 }
@@ -268,11 +316,7 @@ async function runRepeatedProfile(
     for (const mode of modes) {
       for (let runIndex = 0; runIndex < runs; runIndex++) {
         console.log(`[playable-slice] ${mode} repeated run ${runIndex + 1}/${runs}`);
-        reports.push(await withTimeout(
-          `${mode} run ${runIndex + 1}`,
-          runOne(context, mode, runIndex, false, route),
-          RUN_TIMEOUT_MS,
-        ));
+        reports.push(await runOne(context, mode, runIndex, false, route));
       }
     }
     return reports;
@@ -290,11 +334,7 @@ async function runFreshProfile(
   const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT } });
   try {
     console.log("[playable-slice] continuous fresh-profile run");
-    return [await withTimeout(
-      "continuous fresh-profile run",
-      runOne(context, "continuous", 0, true, route),
-      RUN_TIMEOUT_MS,
-    )];
+    return [await runOne(context, "continuous", 0, true, route)];
   } finally {
     await context.close();
   }
