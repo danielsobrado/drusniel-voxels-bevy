@@ -38,6 +38,7 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 import type { ClodPageNode } from "../../../types.js";
 import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
+import { expandClodOwnershipToLevelZero } from "../../../stream/clod_ownership_keys.js";
 import { runTerrainStreamingWork } from "../../../stream/terrain_streaming_control.js";
 import type { StreamCursor } from "../../../stream/stream_cursor.js";
 import {
@@ -532,7 +533,7 @@ export function runFrameLoopStartup(
         innerRadiusM: state.bubbleRadius,
         outerRadiusM: farClipmapConfig.innerRadiusM,
         pageSizeM: cfg.page.chunks_per_page * cfg.page.chunk_size,
-        readyPageKeys: streamingClodRootController.readyPageKeys(),
+        readyPageKeys: expandClodOwnershipToLevelZero(streamingClodRootController.readyPageKeys()),
       });
     }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
