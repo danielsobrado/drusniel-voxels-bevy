@@ -14,6 +14,7 @@ function sceneWithContent(): THREE.Scene {
   const transparent = new THREE.MeshStandardMaterial({ transparent: true });
 
   const solid = new THREE.Mesh(geometry, opaque);
+  solid.name = "construction-floor";
   solid.castShadow = true;
   scene.add(solid);
 
@@ -21,6 +22,7 @@ function sceneWithContent(): THREE.Scene {
   scene.add(instanced);
 
   const hidden = new THREE.Mesh(geometry, opaque);
+  hidden.name = "construction-hidden";
   hidden.visible = false;
   scene.add(hidden);
 
@@ -31,9 +33,10 @@ function sceneWithContent(): THREE.Scene {
 }
 
 describe("scene workload descriptors", () => {
-  it("counts visible instances, shadow casters, transparency, uniques, and lights", () => {
+  it("counts visible instances, construction, shadows, transparency, uniques, and lights", () => {
     const measured = measureSceneWorkloadDescriptors(sceneWithContent());
     expect(measured.visible_instances).toBe(26);
+    expect(measured.construction_pieces_visible).toBe(1);
     expect(measured.shadow_casters).toBe(1);
     expect(measured.transparent_instances).toBe(25);
     expect(measured.unique_meshes).toBe(2);
@@ -53,13 +56,15 @@ describe("scene workload descriptors", () => {
 });
 
 describe("workload descriptor sampling", () => {
-  it("fills every canonical key and reports missing sources as unmeasured", () => {
+  it("fills every canonical key and combines dense scene sources", () => {
     const sample = sampleWorkloadDescriptors({
       scene: sceneWithContent(),
       counters: {
         construction_placed_meshes: 42,
+        construction_colliders_active: 5,
         "props.colliders_active": 17,
         "props.gpu_candidates": 900,
+        rpg_density_placed_props: 400,
       },
       triangles: 123456,
     });
@@ -67,23 +72,30 @@ describe("workload descriptor sampling", () => {
       expect(sample.values[key]).toBeTypeOf("number");
     }
     expect(sample.values.construction_pieces_total).toBe(42);
-    expect(sample.values.colliders).toBe(17);
+    expect(sample.values.construction_pieces_visible).toBe(1);
+    expect(sample.values.interactive_props).toBe(400);
+    expect(sample.values.colliders).toBe(22);
     expect(sample.values.vegetation_candidates).toBe(900);
     expect(sample.values.triangles).toBe(123456);
     expect(sample.values.agents_full).toBe(0);
-    expect(sample.unmeasured).toContain("construction_pieces_visible");
-    expect(sample.unmeasured).toContain("interactive_props");
+    expect(sample.unmeasured).not.toContain("construction_pieces_visible");
+    expect(sample.unmeasured).not.toContain("interactive_props");
     expect(sample.unmeasured).not.toContain("colliders");
     expect(sample.unmeasured).not.toContain("agents_full");
   });
 
-  it("uses the fallback chain in order", () => {
+  it("uses fallback chains in order", () => {
     const sample = sampleWorkloadDescriptors({
       scene: new THREE.Scene(),
-      counters: { "props.candidates": 5 },
+      counters: {
+        "props.candidates": 5,
+        "props.interactive_total": 7,
+        rpg_density_placed_props: 99,
+      },
       triangles: 0,
     });
     expect(sample.values.vegetation_candidates).toBe(5);
+    expect(sample.values.interactive_props).toBe(7);
     expect(sample.unmeasured).not.toContain("vegetation_candidates");
   });
 
@@ -97,6 +109,7 @@ describe("workload descriptor sampling", () => {
     publishWorkloadDescriptors(counters, sample);
     expect(counters["wd_construction_pieces_total"]).toBe(3);
     expect(counters["wd_measured_construction_pieces_total"]).toBe(1);
+    expect(counters["wd_measured_construction_pieces_visible"]).toBe(1);
     expect(counters["wd_measured_interactive_props"]).toBe(0);
     expect(counters["wd_triangles"]).toBe(10);
     expect(counters["wd_unmeasured_count"]).toBe(sample.unmeasured.length);
