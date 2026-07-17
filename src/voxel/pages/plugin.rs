@@ -30,10 +30,7 @@ use super::rebuild_observer::{
     ClodRebuildObserverSettings, ClodRebuildObserverState, clod_rebuild_observer_system,
 };
 use super::render::{ClodPageMeshCommitState, clod_page_mesh_commit_system};
-use super::runtime::{
-    ClodPagesRuntime, PageExportCache, PageSourceMeshingQueue,
-    clod_pages_source_meshing_system, clod_pages_startup_log_system,
-};
+use super::runtime::{ClodPagesRuntime, PageExportCache, clod_pages_startup_log_system};
 use super::runtime_stats_export::{
     ClodRuntimeStatsExportSettings, ClodRuntimeStatsExportState, clod_runtime_stats_export_system,
 };
@@ -43,6 +40,9 @@ use super::selection::{
 };
 use super::simplify_export::{
     ClodSimplifyExportSettings, ClodSimplifyExportState, clod_simplify_export_system,
+};
+use super::source_meshing::{
+    PageSourceMeshingQueue, PageSourceMeshingStats, clod_pages_source_meshing_system,
 };
 use super::summary::{
     TerrainSummaryField, TerrainSummaryRebuildState, terrain_summary_rebuild_system,
@@ -59,6 +59,7 @@ impl Plugin for ClodPagesPlugin {
         app.init_resource::<ClodPagesRuntime>()
             .init_resource::<PageExportCache>()
             .init_resource::<PageSourceMeshingQueue>()
+            .init_resource::<PageSourceMeshingStats>()
             .init_resource::<ClodPageBuildQueue>()
             .init_resource::<ClodPageTree>()
             .init_resource::<ClodPageMeshCommitState>()
