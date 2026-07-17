@@ -18,27 +18,44 @@ export const CONSTRUCTION_MATERIALS = [
   "thatch",
 ] as const;
 
+export const CONSTRUCTION_GEOMETRY_KINDS = ["box", "wedge", "stairs", "cylinder"] as const;
+
 export type SnapGroup = typeof SNAP_GROUPS[number];
 export type ConstructionCategory = "floor" | "wall" | "fence" | "pillar" | "roof" | "generic";
 export type ConstructionMaterial = typeof CONSTRUCTION_MATERIALS[number];
 export type ConstructionSupportState = "grounded" | "connected" | "unsupported";
+export type ConstructionGeometryKind = typeof CONSTRUCTION_GEOMETRY_KINDS[number];
+export type ConstructionVec3 = readonly [number, number, number];
 
 export interface ConstructionSnapPoint {
   id: string;
-  localPos: readonly [number, number, number];
-  direction: readonly [number, number, number];
+  localPos: ConstructionVec3;
+  direction: ConstructionVec3;
+  tangent?: ConstructionVec3;
+  allowedTwistDegrees?: readonly number[];
   group: SnapGroup;
   accepts: readonly SnapGroup[];
+}
+
+export interface ConstructionPlacementBox {
+  center: ConstructionVec3;
+  dimensionsM: ConstructionVec3;
+  rotationYDegrees?: number;
 }
 
 export interface ConstructionPieceDef {
   id: string;
   label: string;
   category: ConstructionCategory;
-  dimensionsM: readonly [number, number, number];
+  dimensionsM: ConstructionVec3;
   canGround: boolean;
   material: ConstructionMaterial;
   snapPoints: readonly ConstructionSnapPoint[];
+  rotationStepDegrees?: number;
+  geometryKind?: ConstructionGeometryKind;
+  geometryYawDegrees?: number;
+  placementBoxes?: readonly ConstructionPlacementBox[];
+  groundNormalMinY?: number;
 }
 
 export interface ConstructionSnapConfig {
@@ -47,6 +64,9 @@ export interface ConstructionSnapConfig {
   minAlignment: number;
   alignmentWeight: number;
   distanceWeight: number;
+  tangentWeight?: number;
+  releaseRadiusMultiplier?: number;
+  maxRayDistanceM?: number;
 }
 
 export interface ConstructionPlacementConfig {
@@ -56,6 +76,7 @@ export interface ConstructionPlacementConfig {
   overlapSpatialCellM?: number;
   storageKey: string;
   unboundedWorld?: boolean;
+  allowHeightfieldFallback?: boolean;
 }
 
 export interface ConstructionGhostConfig {
@@ -84,23 +105,18 @@ export interface ConstructionConfig {
 export interface PlacedConstructionPiece {
   id: string;
   typeId: string;
-  position: readonly [number, number, number];
+  position: ConstructionVec3;
   rotationQuarterTurns: number;
   material?: ConstructionMaterial;
   grounded?: boolean;
   parentIds?: readonly string[];
-  /**
-   * Explicitly marked unsupported by support re-evaluation (terrain dug out from under
-   * the piece or its ancestors). Collapse is deferred: the piece stays visible and
-   * solid, is visually marked, and persists across save/load with this flag.
-   */
   unsupported?: boolean;
 }
 
 export interface ConstructionTerrainConformRequest {
   pieceId: string;
-  position: readonly [number, number, number];
-  dimensionsM: readonly [number, number, number];
+  position: ConstructionVec3;
+  dimensionsM: ConstructionVec3;
   rotationQuarterTurns: number;
   materialSlot: number;
   padMarginM: number;
@@ -109,12 +125,22 @@ export interface ConstructionTerrainConformRequest {
   falloffM: number;
 }
 
+export interface ConstructionSurfaceHit {
+  point: ConstructionVec3;
+  normal: ConstructionVec3;
+  distanceM: number;
+  surfaceType: "terrain" | "construction" | "prop";
+  entityId?: string;
+  pageId?: string;
+}
+
 export interface IndexedConstructionSnapPoint {
   entityId: string;
   pieceTypeId: string;
   snapIndex: number;
-  worldPos: readonly [number, number, number];
-  worldDirection: readonly [number, number, number];
+  worldPos: ConstructionVec3;
+  worldDirection: ConstructionVec3;
+  worldTangent?: ConstructionVec3;
   group: SnapGroup;
   accepts: readonly SnapGroup[];
 }
@@ -122,19 +148,22 @@ export interface IndexedConstructionSnapPoint {
 export interface ConstructionSnapResult {
   target: IndexedConstructionSnapPoint;
   sourceSnapIndex: number;
-  worldPosition: readonly [number, number, number];
+  worldPosition: ConstructionVec3;
   rotationQuarterTurns: number;
   score: number;
+  rayDistanceM?: number;
+  key?: string;
 }
 
 export interface ConstructionCandidate {
   piece: ConstructionPieceDef;
-  position: readonly [number, number, number];
+  position: ConstructionVec3;
   rotationQuarterTurns: number;
   snapped: boolean;
   valid: boolean;
   reason: string | null;
   snap: ConstructionSnapResult | null;
+  terrainHit?: ConstructionSurfaceHit | null;
   supportState?: ConstructionSupportState;
   supportParentIds?: readonly string[];
 }
