@@ -37,6 +37,7 @@ export interface WorkloadDescriptorSample {
 /** Keys measured by scene-graph traversal every sample (dynamic per frame). */
 const SCENE_MEASURED_KEYS = new Set<WorkloadDescriptorKey>([
   "visible_instances",
+  "construction_pieces_visible",
   "shadow_casters",
   "transparent_instances",
   "unique_meshes",
@@ -45,24 +46,23 @@ const SCENE_MEASURED_KEYS = new Set<WorkloadDescriptorKey>([
   "texture_residency_est_mb",
 ]);
 
-/**
- * Fallback chains into the shared stats counter record (first present wins).
- * Keys with an empty chain have no live source yet and are reported unmeasured —
- * D1b scene work owns adding sources for construction visibility, interactive
- * props, and non-prop colliders.
- */
+/** Fallback chains into the shared stats counter record (first present wins). */
 const COUNTER_SOURCES: Record<string, readonly string[]> = {
-  construction_pieces_total: ["construction_placed_meshes"],
-  construction_pieces_visible: [],
-  interactive_props: [],
-  colliders: ["props.colliders_active"],
+  construction_pieces_total: ["construction_placed_meshes", "rpg_density_construction_pieces_total"],
+  interactive_props: ["props.interactive_total", "rpg_density_placed_props"],
   vegetation_candidates: ["props.gpu_candidates", "props.candidates"],
+};
+
+/** Counter groups whose contributions are additive rather than alternatives. */
+const SUM_COUNTER_SOURCES: Record<string, readonly string[]> = {
+  colliders: ["props.colliders_active", "construction_colliders_active", "terrain_colliders_active"],
 };
 
 /** Agent rings are defined as zero until the D5 envelopes exist. */
 const AGENT_KEYS = ["agents_full", "agents_mid", "agents_frozen"] as const;
 
 const MIP_CHAIN_FACTOR = 4 / 3;
+const CONSTRUCTION_MESH_PREFIX = "construction-";
 
 function instanceCount(object: THREE.Object3D): number {
   return object instanceof THREE.InstancedMesh ? object.count : 1;
@@ -83,6 +83,7 @@ function estimateTextureBytes(texture: THREE.Texture): number {
 
 export interface SceneWorkloadDescriptors {
   visible_instances: number;
+  construction_pieces_visible: number;
   shadow_casters: number;
   transparent_instances: number;
   unique_meshes: number;
@@ -94,6 +95,7 @@ export interface SceneWorkloadDescriptors {
 /** Traverses visible scene content; cost scales with scene size, so sample, don't run per frame. */
 export function measureSceneWorkloadDescriptors(root: THREE.Object3D): SceneWorkloadDescriptors {
   let visibleInstances = 0;
+  let constructionPiecesVisible = 0;
   let shadowCasters = 0;
   let transparentInstances = 0;
   let dynamicLights = 0;
@@ -112,6 +114,7 @@ export function measureSceneWorkloadDescriptors(root: THREE.Object3D): SceneWork
     if (!mesh.isMesh && !(object instanceof THREE.Points) && !(object instanceof THREE.LineSegments)) return;
     const count = instanceCount(object);
     visibleInstances += count;
+    if (object.name.startsWith(CONSTRUCTION_MESH_PREFIX)) constructionPiecesVisible += count;
     if (object.castShadow) shadowCasters += count;
     if (mesh.geometry) geometries.add(mesh.geometry.uuid);
     for (const material of collectMaterials(object)) {
@@ -128,6 +131,7 @@ export function measureSceneWorkloadDescriptors(root: THREE.Object3D): SceneWork
 
   return {
     visible_instances: visibleInstances,
+    construction_pieces_visible: constructionPiecesVisible,
     shadow_casters: shadowCasters,
     transparent_instances: transparentInstances,
     unique_meshes: geometries.size,
@@ -142,6 +146,18 @@ export interface WorkloadDescriptorInput {
   readonly counters: Readonly<Record<string, number>>;
   /** Submitted triangles for the sampled frame (EngineStats.triangles). */
   readonly triangles: number;
+}
+
+function sumPresentCounters(counters: Readonly<Record<string, number>>, sources: readonly string[]): number | null {
+  let found = false;
+  let total = 0;
+  for (const source of sources) {
+    const value = counters[source];
+    if (value === undefined) continue;
+    found = true;
+    total += value;
+  }
+  return found ? total : null;
 }
 
 export function sampleWorkloadDescriptors(input: WorkloadDescriptorInput): WorkloadDescriptorSample {
@@ -160,6 +176,13 @@ export function sampleWorkloadDescriptors(input: WorkloadDescriptorInput): Workl
     }
     if ((AGENT_KEYS as readonly string[]).includes(key)) {
       values[key] = input.counters[key] ?? 0;
+      continue;
+    }
+    const summed = SUM_COUNTER_SOURCES[key]
+      ? sumPresentCounters(input.counters, SUM_COUNTER_SOURCES[key]!)
+      : null;
+    if (summed !== null) {
+      values[key] = summed;
       continue;
     }
     const source = COUNTER_SOURCES[key]?.find((name) => input.counters[name] !== undefined);
