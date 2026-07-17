@@ -2,18 +2,19 @@ import { describe, expect, it } from "vitest";
 import { compactStageList, postFxCaseDiagnostics } from "./postfx_case_diagnostics.js";
 
 describe("postfx case diagnostics", () => {
-  it("describes the default post stack", () => {
+  it("describes the configured default post stack", () => {
     const diagnostics = postFxCaseDiagnostics({});
     expect(diagnostics.postEnabled).toBe(true);
-    expect(diagnostics.stages.bloom).toBe(true);
-    expect(diagnostics.stages.taa).toBe(true);
     expect(diagnostics.stages.aerial).toBe(true);
-    expect(diagnostics.stages.contact).toBe(false);
+    expect(diagnostics.stages.autoExposure).toBe(true);
+    expect(diagnostics.stages.bloom).toBe(true);
+    expect(diagnostics.stages.contact).toBe(true);
     expect(diagnostics.stages.froxels).toBe(true);
+    expect(diagnostics.stages.godrays).toBe(true);
+    expect(diagnostics.stages.taa).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
-    expect(diagnostics.stages.clouds).toBe(true);
-    expect(diagnostics.stages.godrays).toBe(true);
+    expect(diagnostics.stages.clouds).toBe(false);
   });
 
   it("marks post disabled when fx is off", () => {
@@ -33,20 +34,26 @@ describe("postfx case diagnostics", () => {
     expect(diagnostics.stages.froxels).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
+    expect(diagnostics.stages.godrays).toBe(false);
   });
 
-  it("applies ablation after opt-in flags", () => {
-    const diagnostics = postFxCaseDiagnostics({ contact: "1", gtao: "1", bounce: "1", froxels: "1", ablate: "contact,ao,color-bounce,volumetric-fog" });
+  it("applies settings query flags before ablation", () => {
+    const diagnostics = postFxCaseDiagnostics({
+      clouds: "1",
+      taa: "1",
+      contact: "0",
+      gtao: "1",
+      ablate: "ao,taa",
+    });
+    expect(diagnostics.stages.clouds).toBe(true);
     expect(diagnostics.stages.contact).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
-    expect(diagnostics.stages.bounce).toBe(false);
-    expect(diagnostics.stages.froxels).toBe(false);
-    expect(diagnostics.stages.bloom).toBe(true);
+    expect(diagnostics.stages.taa).toBe(false);
   });
 
   it("prints a compact active stage list", () => {
-    const diagnostics = postFxCaseDiagnostics({ contact: "1", froxels: "1", ablate: "bloom,taa" });
-    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+clouds+colorScript+contact+froxels+godrays");
+    const diagnostics = postFxCaseDiagnostics({ ablate: "bloom,taa" });
+    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+colorScript+contact+froxels+godrays");
   });
 
   it("tracks the god-rays stage from ?godrays mode values and flags", () => {
