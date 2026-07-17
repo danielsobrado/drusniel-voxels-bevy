@@ -80,12 +80,33 @@ describe("cell readiness contract", () => {
     expect(movementReadinessAt(feeds({}), 0, 0)).toBe("blocked");
   });
 
-  it("teleport target readiness = a collision-ready movement envelope exists", () => {
+  it("teleport target readiness requires a collision-ready movement envelope", () => {
     expect(teleportTargetReady(feeds({}), 0, 0)).toBe(false);
     expect(teleportTargetReady(feeds({ columnCertified: () => true }), 0, 0)).toBe(true);
     expect(teleportTargetReady(feeds({
       colliderStatusAt: () => ({ covered: true, revision: 0, replacementPending: true }),
     }), 0, 0)).toBe(true); // stale-safe collider is a valid landing envelope
+  });
+
+  it("does not declare a page-edge target ready when the capsule footprint crosses missing coverage", () => {
+    const narrowCoverage = feeds({
+      colliderStatusAt: (x, z) => ({
+        covered: Math.abs(x) < 0.4 && Math.abs(z) < 0.4,
+        revision: 0,
+        replacementPending: false,
+      }),
+    });
+
+    expect(cellReadinessAt(narrowCoverage, 0, 0).movementCollisionReady).toBe(true);
+    expect(teleportTargetReady(narrowCoverage, 0, 0)).toBe(false);
+    expect(teleportTargetReady(narrowCoverage, 0, 0, 0.2)).toBe(true);
+  });
+
+  it("requires authoritative target residency even when collision coverage exists", () => {
+    expect(teleportTargetReady(feeds({
+      colliderStatusAt: () => ({ covered: true, revision: 0, replacementPending: false }),
+      editAuthorityResidentAt: () => false,
+    }), 0, 0)).toBe(false);
   });
 
   it("integrates with a real collider set: coverage and pipeline staleness flow through", () => {
