@@ -16,6 +16,10 @@ export interface ConstructionMenuRenderInput {
   currentCandidate?: ConstructionCandidate | null;
   currentValid?: boolean;
   currentReason?: string | null;
+  currentStability?: number | null;
+  currentMaxSupport?: number | null;
+  currentGrounded?: boolean;
+  pendingCollapses?: number;
   lastPlacementMessage?: string;
   lastMessage?: string;
   active?: boolean;
@@ -40,16 +44,31 @@ function resolveSelectedPiece(input: ConstructionMenuRenderInput, selectedIndex:
   return input.selectedPiece ?? input.pieces[selectedIndex] ?? null;
 }
 
+function stabilityLabel(value: number, maxSupport: number, grounded: boolean): string {
+  if (grounded) return "Grounded";
+  const ratio = maxSupport > 0 ? value / maxSupport : 0;
+  if (ratio >= 0.67) return "Strong";
+  if (ratio >= 0.40) return "Moderate";
+  if (ratio >= 0.20) return "Weak";
+  return "Unstable";
+}
+
 function resolveStatus(input: ConstructionMenuRenderInput): string {
-  if (input.currentCandidate) {
-    return input.currentCandidate.valid
-      ? input.currentCandidate.snapped ? "Snapped" : "Free placement"
-      : `Blocked: ${escapeHtml(input.currentCandidate.reason ?? "invalid")}`;
+  const candidate = input.currentCandidate;
+  if (candidate) {
+    if (!candidate.valid) return `Blocked: ${escapeHtml(candidate.reason ?? "invalid")}`;
+    const percent = Math.round((candidate.stabilityMaxSupport > 0
+      ? candidate.stabilityValue / candidate.stabilityMaxSupport
+      : 0) * 100);
+    return `${stabilityLabel(candidate.stabilityValue, candidate.stabilityMaxSupport, candidate.stabilityGrounded)} · ${percent}%`;
   }
   if (typeof input.currentValid === "boolean") {
-    return input.currentValid
-      ? "Free placement"
-      : input.currentReason ? `Blocked: ${escapeHtml(input.currentReason)}` : "Aim at terrain or snap point";
+    if (!input.currentValid) return input.currentReason
+      ? `Blocked: ${escapeHtml(input.currentReason)}`
+      : "Aim at terrain or snap point";
+    const value = input.currentStability ?? 0;
+    const maxSupport = input.currentMaxSupport ?? 1;
+    return stabilityLabel(value, maxSupport, input.currentGrounded === true);
   }
   return "Aim at terrain or snap point";
 }
@@ -74,6 +93,7 @@ export function renderConstructionMenuHtml(input: ConstructionMenuRenderInput): 
     ? input.snapSuppressed ? "Snap HELD OFF" : "Snap ON"
     : "Snap OFF";
   const rotationDegrees = ((input.rotationQuarterTurns ?? 0) % 4 + 4) % 4 * 90;
+  const collapseLabel = (input.pendingCollapses ?? 0) > 0 ? ` · ${input.pendingCollapses} collapse queued` : "";
   return `
       <div data-drag-handle style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;cursor:grab;">
         <strong>Build</strong>
@@ -87,7 +107,7 @@ export function renderConstructionMenuHtml(input: ConstructionMenuRenderInput): 
         <button data-material-step="1" style="${buttonStyle(false)}">▶</button>
       </div>
       <div style="display:flex;justify-content:space-between;gap:8px;">
-        <span>${status}</span>
+        <span>${status}${collapseLabel}</span>
         <span>R rotate · Q/E snap · hold Shift free · middle-click pick</span>
       </div>
       ${lastMessage ? `<div style="margin-top:6px;color:#ffd27a;">${escapeHtml(lastMessage)}</div>` : ""}
