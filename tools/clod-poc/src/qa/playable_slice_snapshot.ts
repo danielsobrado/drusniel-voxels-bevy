@@ -30,6 +30,8 @@ export interface PlayableSliceSnapshot {
   };
   readonly construction: {
     readonly active: boolean;
+    readonly currentValid: boolean;
+    readonly currentReason: string | null;
     readonly placedPieces: number;
     readonly colliders: number;
     readonly unsupportedPieces: number;
@@ -116,6 +118,8 @@ export function createPlayableSliceSnapshot(input: PlayableSliceSnapshotInput): 
     },
     construction: {
       active: construction?.active ?? false,
+      currentValid: construction?.currentValid ?? false,
+      currentReason: construction?.currentReason ?? null,
       placedPieces: construction?.placedPieces ?? 0,
       colliders: construction ? counter(counters, "construction_colliders_active") : 0,
       unsupportedPieces: construction ? counter(counters, "construction_unsupported_pieces") : 0,
