@@ -1,4 +1,5 @@
 import { installBrowserQaHook } from "../qa/unified/browser_hook.js";
+import type { PlayableSliceSnapshot } from "../qa/playable_slice_snapshot.js";
 import type { WorldManifest } from "../world/world_manifest.js";
 import type {
   ContinentRiverCrossingRoute,
@@ -105,6 +106,7 @@ export interface ClodHooks {
     origin: [number, number, number];
     direction: [number, number, number];
   }) => Promise<TerrainEditProbeResult>) | null;
+  getPlayableSliceSnapshot: (() => PlayableSliceSnapshot) | null;
   getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
   compareStreamRootBuilds: ((
     coords: readonly { px: number; pz: number; level?: number }[],
@@ -197,6 +199,7 @@ export function initHooks(): ClodHooks {
     recoverAfterDeviceLoss: null,
     beginMovementRouteProbe: null,
     runTerrainEditProbe: null,
+    getPlayableSliceSnapshot: null,
     getStreamingRootReadyPageKeys: null,
     compareStreamRootBuilds: null,
     getStreamingResidencySnapshot: null,
