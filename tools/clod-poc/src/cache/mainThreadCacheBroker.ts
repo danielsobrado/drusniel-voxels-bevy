@@ -12,6 +12,7 @@ import {
 import { commitCachePut } from "./streaming_cache_write_guard.js";
 import {
   registerTerrainStreamingWorker,
+  terrainStreamingGenerationIsCurrent,
   type TerrainStreamingStateMessage,
 } from "../stream/terrain_streaming_control.js";
 
@@ -49,6 +50,13 @@ async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
 async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
   const respond = (response: CacheRpcResponse) => worker.postMessage(response);
   try {
+    if (request.op === "put"
+      && request.streamingGeneration !== undefined
+      && !terrainStreamingGenerationIsCurrent(request.streamingGeneration)) {
+      respond({ type: "cacheRpc", requestId: request.requestId, ok: true, result: false });
+      return;
+    }
+
     const store = await ensureBrokerStore();
     if (!store) throw new CacheUnavailableError("main-thread cache broker unavailable");
 
