@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
+import { applyEnvironmentQueryOverrides } from "../app/state/environment_query_overrides.js";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
   applyPostProcessQueryOverrides,
   parsePostProcessSettings,
 } from "./postprocess.js";
+
+function debugAppState() {
+  return {
+    postProcessEnabled: true,
+    postProcessDebugMode: "output",
+    postProcessBloomEnabled: true,
+    postProcessFxaaEnabled: true,
+    postProcessTaaEnabled: true,
+    postProcessTaaJitterEnabled: true,
+    postProcessTaaHistoryClampEnabled: true,
+    postProcessContactShadowsEnabled: true,
+    postProcessClarityEnabled: true,
+    postProcessAerialPerspectiveEnabled: true,
+    postProcessCloudsEnabled: true,
+    postProcessGtaoEnabled: true,
+    postProcessFroxelsEnabled: true,
+    postProcessBounceEnabled: true,
+    godRaysMode: "volumetric",
+    hazeIntensity: 0.5,
+    froxelDebugEnabled: false,
+    froxelDebugMode: "off",
+  };
+}
 
 describe("god-rays dust settings", () => {
   it("applies all shared query controls and aliases", () => {
@@ -84,6 +108,37 @@ postprocess:
     )).toMatchObject({
       aerialPerspectiveEnabled: false,
       godRaysMode: "off",
+    });
+  });
+});
+
+describe("froxel debug reachability", () => {
+  it("re-enables the shared output pipeline after fx=0", () => {
+    expect(applyPostProcessQueryOverrides(
+      DEFAULT_POST_PROCESS_SETTINGS,
+      new URLSearchParams({ fx: "0", froxelDebug: "density" }),
+    )).toMatchObject({
+      enabled: true,
+      debugMode: "output",
+      froxelsEnabled: false,
+      froxelDebugEnabled: true,
+      froxelDebugMode: "density",
+    });
+  });
+
+  it("re-enables the app output pipeline after fx=0", () => {
+    const state = debugAppState();
+    applyEnvironmentQueryOverrides(
+      state as never,
+      new URLSearchParams({ fx: "0", froxelDebug: "density" }),
+    );
+
+    expect(state).toMatchObject({
+      postProcessEnabled: true,
+      postProcessDebugMode: "output",
+      postProcessFroxelsEnabled: false,
+      froxelDebugEnabled: true,
+      froxelDebugMode: "density",
     });
   });
 });
