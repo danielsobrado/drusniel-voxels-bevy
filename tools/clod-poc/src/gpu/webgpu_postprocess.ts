@@ -146,11 +146,11 @@ export class WebGpuPostProcessPipeline {
   private readonly clouds: PostFxCloudSettings = DEFAULT_POSTFX_CLOUDS;
   private readonly gtao: PostFxGtaoSettings = DEFAULT_POSTFX_GTAO;
   private readonly stageFlags: PostFxStageFlags;
-  private readonly bounceEnabled: boolean;
-  private readonly cloudsEnabled: boolean;
-  private readonly froxelsEnabled: boolean;
+  private bounceEnabled = false;
+  private cloudsEnabled = false;
+  private froxelsEnabled = false;
   private froxelDebugMode: PostFxFroxelDebugMode;
-  private readonly gtaoEnabled: boolean;
+  private gtaoEnabled = false;
   private readonly halfResEnabled: boolean;
   private readonly godRaysFullRes: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
@@ -211,18 +211,15 @@ export class WebGpuPostProcessPipeline {
     this.camera = camera;
     this.settings = withPostProcessDefaults(settings);
     this.stageFlags = parsePostFxStageFlags(searchParams() ?? "");
+    this.syncStageSettings();
     this.autoExposureMeter = new WebGpuAutoExposureMeter(
       this.renderer,
       DEFAULT_POSTFX_AUTO_EXPOSURE,
       this.stageEnabled("autoExposure") && queryFlag(["autoExposure", "autoexposure"], DEFAULT_POSTFX_AUTO_EXPOSURE.enabled),
       queryFlag(["lockexp", "lockExposure", "lockexposure"], DEFAULT_POSTFX_AUTO_EXPOSURE.lock),
     );
-    this.bounceEnabled = this.stageEnabled("bounce") && queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
-    this.cloudsEnabled = this.stageEnabled("clouds") && queryFlag(["clouds", "cloud", "volumetricClouds", "volumetricclouds"], this.clouds.enabled);
-    this.froxelsEnabled = this.stageEnabled("froxels") && queryFlag(["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], this.atmosphere.froxels.enabled);
     this.froxelDebugMode = parsePostFxFroxelDebugMode(queryValue(["froxelDebug", "froxelsDebug", "volumetricDebug", "volumetricsDebug"]));
     this.applyFroxelDebugSettings(settings);
-    this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
     this.halfResEnabled = queryFlag(["halfres", "halfResScreenSpace", "halfresscreenspace"], true);
     this.godRaysFullRes = queryFlag(["godraysFullres", "godraysfullres", "godRaysFullres"], false);
     if (this.shouldUseFroxelVolume()) {
@@ -239,6 +236,7 @@ export class WebGpuPostProcessPipeline {
   updateSettings(settings: Partial<PostProcessSettings>): void {
     const previousKey = this.graphKey();
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
+    this.syncStageSettings();
     this.applyFroxelDebugSettings(settings);
     this.applyRendererSettings();
     this.updateUniforms();
@@ -326,6 +324,13 @@ export class WebGpuPostProcessPipeline {
 
   private stageEnabled(stage: PostFxStage): boolean {
     return stageAllowed(this.stageFlags, stage);
+  }
+
+  private syncStageSettings(): void {
+    this.bounceEnabled = this.stageEnabled("bounce") && this.settings.bounceEnabled;
+    this.cloudsEnabled = this.stageEnabled("clouds") && this.settings.cloudsEnabled;
+    this.froxelsEnabled = this.stageEnabled("froxels") && this.settings.froxelsEnabled;
+    this.gtaoEnabled = this.stageEnabled("gtao") && this.settings.gtaoEnabled;
   }
 
   private shouldRunClouds(): boolean {
@@ -520,7 +525,7 @@ export class WebGpuPostProcessPipeline {
 
   private createOutputNode(beauty: TslAny, depthTex: TslAny, camera: THREE.Camera): TslAny {
     const shouldRunAerial = this.froxelDebugMode !== "off"
-      || this.froxelsEnabled
+      || this.effectiveFroxelsEnabled()
       || (this.settings.aerialPerspectiveEnabled && this.stageEnabled("aerial"));
     const aerialRgb = shouldRunAerial
       ? this.createAerialNode(beauty.rgb, depthTex)
