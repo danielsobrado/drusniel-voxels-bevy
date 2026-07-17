@@ -45,4 +45,21 @@ describe("findConstructionConnectionIds", () => {
       toleranceM: 0.08,
     })).toEqual(["left-support", "right-support"]);
   });
+
+  it("rejects coincident sockets whose normals face the same direction", () => {
+    const fakeIndex = {
+      queryRadius() {
+        return [{ ...target("wrong", -2), worldDirection: [-1, 0, 0] }];
+      },
+    } as unknown as ConstructionSnapIndex;
+
+    expect(findConstructionConnectionIds({
+      piece: { ...piece, snapPoints: [piece.snapPoints[0]!] },
+      position: [0, 0, 0],
+      rotationQuarterTurns: 0,
+      snapIndex: fakeIndex,
+      existingPieceIds: new Set(["wrong"]),
+      toleranceM: 0.08,
+    })).toEqual([]);
+  });
 });

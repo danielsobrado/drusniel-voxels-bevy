@@ -205,8 +205,9 @@ class ConstructionControllerImpl implements ConstructionController {
     this.nextEntityId = loadResult.nextEntityId;
     this.stabilityRuntime.rebuild();
     this.stabilityRuntime.refreshGrounding((x, y, z) => density(x, y, z) > 0);
-    const loadChanges = this.stabilityRuntime.recomputeDirty();
-    if (loadChanges.length > 0 || loadResult.rewritten) this.savePlacedPieces();
+    this.stabilityRuntime.recomputeDirty();
+    this.pieceStore.refreshStabilityVisuals(this.config.stability);
+    if (this.pieceStore.pieces.length > 0 || loadResult.rewritten) this.savePlacedPieces();
     this.syncUi(true);
     console.info("[construction] CLOD construction Phase 2 ready. Structural stability uses dirty islands and queued collapse.");
   }
@@ -363,6 +364,7 @@ class ConstructionControllerImpl implements ConstructionController {
           snapIndex: this.snapIndex,
           existingPieceIds,
           toleranceM: this.config.stability.connectionToleranceM,
+          minAlignment: this.config.snap.minAlignment,
         })
       : [];
     const grounded = isConstructionPieceGrounded({
