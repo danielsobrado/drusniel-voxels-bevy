@@ -2,14 +2,23 @@ import * as THREE from "three";
 import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain/terrain_collider.js";
 import type { PropColliderSet } from "./props/prop_collider.js";
 import type { ConstructionColliderSet } from "./construction/construction_collider.js";
+import type { WaterAuthority } from "./water/water_authority.js";
 import { emitAudio } from "./audio/index.js";
 import { gameplayDiagnostics } from "./player/gameplay_diagnostics.js";
+import { defaultSwimConfig, type SwimConfig } from "./player/swim_config.js";
+import {
+  DRY_SWIM_CONTACT,
+  applySwimForces,
+  resolveSwimContact,
+  type SwimContactState,
+  type SwimMode,
+} from "./player/swim_locomotion.js";
 
 /**
- * Movement readiness for a world column (playable-world-contract P2.3):
- * - "ready": an exact or stale-safe collider serves here.
- * - "certified": no collider, but the column is certified single-surface (height fallback allowed).
- * - "blocked": no collider and not certified (cave/edited/unknown) — the readiness frontier.
+ * Movement readiness for a world column (playable-world-contract P2/P5):
+ * - "ready": exact/stale-safe collision and canonical water query are ready.
+ * - "certified": no collider, but the column is certified single-surface.
+ * - "blocked": collision or water authority is unknown — the readiness frontier.
  */
 export type MovementReadiness = "ready" | "certified" | "blocked";
 export type MovementReadinessProbe = (x: number, z: number) => MovementReadiness;
@@ -21,12 +30,14 @@ export interface PlayerInputState {
   right: number;
   sprint: boolean;
   jump: boolean;
+  dive?: boolean;
 }
 
 export interface NormalizedPlayerInput {
   direction: THREE.Vector2;
   speed: number;
   jump: boolean;
+  dive: boolean;
 }
 
 export interface HorizontalWorldBounds {
@@ -47,23 +58,12 @@ export interface PlayerConfig extends CapsuleCollisionConfig {
   gravity: number;
   fixedStep: number;
   recoveryDepth: number;
-  /**
-   * Terminal fall speed (units/s). Bounds per-step motion so the positional capsule
-   * resolve always samples inside thin floors — at 120 Hz, 80 u/s moves 0.67 m per step
-   * against a 1.8 m capsule. Without it, long falls tunnel (P0 hitch-matrix finding).
-   */
   maxFallSpeed: number;
-  /** Proven-invalid recovery: below this Y nothing valid exists (under bedrock volume). */
   killPlaneY: number;
-  /** Fixed steps falling in a blocked (no-collider, uncertified) column before recovery. */
   invalidColumnRecoverySteps: number;
-  /** Horizontal accel toward the desired velocity while grounded (units/s²). */
   groundAcceleration: number;
-  /** Reduced horizontal accel while airborne — steerable but not instant. */
   airAcceleration: number;
-  /** Grace window after leaving the ground in which a jump still fires (s). */
   coyoteTime: number;
-  /** A jump pressed this long before landing still fires on touchdown (s). */
   jumpBufferTime: number;
 }
 
@@ -116,6 +116,7 @@ export function normalizeMovementInput(
     direction,
     speed: input.sprint ? config.runSpeed : config.walkSpeed,
     jump: input.jump,
+    dive: input.dive === true,
   };
 }
 
@@ -218,18 +219,32 @@ export class PlayerController {
   private invalidColumnSteps = 0;
   private readonly edgePushback = new THREE.Vector2();
   private readonly physicsSamples: number[] = [];
+  private propColliders: PropColliderSet | null = null;
+  private constructionColliders: ConstructionColliderSet | null = null;
+  private movementReadiness: MovementReadinessProbe | null = null;
+  private waterAuthority: WaterAuthority | null = null;
+  private swimContact: SwimContactState = { ...DRY_SWIM_CONTACT };
 
   constructor(
     private readonly colliders: TerrainColliderSet,
     private readonly bounds: HorizontalWorldBounds,
     readonly config: Readonly<PlayerConfig> = DEFAULT_PLAYER_CONFIG,
+    readonly swimConfig: Readonly<SwimConfig> = defaultSwimConfig,
   ) {
     validatePlayerWorldBoundsFit(bounds, config);
   }
 
-  private propColliders: PropColliderSet | null = null;
-  private constructionColliders: ConstructionColliderSet | null = null;
-  private movementReadiness: MovementReadinessProbe | null = null;
+  get swimMode(): SwimMode {
+    return this.swimContact.mode;
+  }
+
+  get waterSubmersionM(): number {
+    return this.swimContact.submersionM;
+  }
+
+  get waterBodyId(): string {
+    return this.swimContact.bodyId;
+  }
 
   attachPropColliders(set: PropColliderSet | null): void {
     this.propColliders = set;
@@ -239,14 +254,13 @@ export class PlayerController {
     this.constructionColliders = set;
   }
 
-  /**
-   * Frontier barrier: with a probe attached, horizontal movement into a "blocked" column
-   * is stopped at the readiness frontier instead of walking onto an invented floor or
-   * falling through unloaded ground. Engagements are counted and gated near-zero on
-   * standing routes — this is a safety net, not a floor plan.
-   */
   attachMovementReadiness(probe: MovementReadinessProbe | null): void {
     this.movementReadiness = probe;
+  }
+
+  attachWaterAuthority(authority: WaterAuthority | null): void {
+    this.waterAuthority = authority;
+    if (!authority) this.swimContact = { ...DRY_SWIM_CONTACT };
   }
 
   spawn(point: THREE.Vector3): void {
@@ -260,6 +274,7 @@ export class PlayerController {
     this.coyoteTimer = 0;
     this.jumpBufferTimer = 0;
     this.invalidColumnSteps = 0;
+    this.swimContact = { ...DRY_SWIM_CONTACT };
   }
 
   update(deltaSeconds: number, input: PlayerInputState, cameraForward: THREE.Vector3): void {
@@ -277,7 +292,7 @@ export class PlayerController {
     this.accumulator += Math.min(Math.max(deltaSeconds, 0), 0.1);
     let steps = 0;
     while (this.accumulator >= this.config.fixedStep && steps < 12) {
-      this.fixedUpdate(this.config.fixedStep, desiredMotion, normalized.jump);
+      this.fixedUpdate(this.config.fixedStep, desiredMotion, normalized.jump, normalized.dive);
       this.accumulator -= this.config.fixedStep;
       steps++;
     }
@@ -293,11 +308,60 @@ export class PlayerController {
     return sorted[Math.floor((sorted.length - 1) * 0.95)];
   }
 
-  private fixedUpdate(step: number, desiredMotion: THREE.Vector3, jumpHeld: boolean): void {
-    // Accelerate toward the desired velocity: full traction grounded, reduced in the air.
-    const accel = (this.grounded ? this.config.groundAcceleration : this.config.airAcceleration) * step;
-    this.velocity.x += THREE.MathUtils.clamp(desiredMotion.x - this.velocity.x, -accel, accel);
-    this.velocity.z += THREE.MathUtils.clamp(desiredMotion.z - this.velocity.z, -accel, accel);
+  private fixedUpdate(step: number, desiredMotion: THREE.Vector3, jumpHeld: boolean, diveHeld: boolean): void {
+    const waterSample = this.waterAuthority?.sample(this.position.x, this.position.z) ?? null;
+    if (waterSample) {
+      this.swimContact = resolveSwimContact(
+        this.swimContact,
+        waterSample,
+        this.position.y,
+        this.config.capsuleHeight,
+        this.swimConfig,
+      );
+    } else {
+      this.swimContact = { ...DRY_SWIM_CONTACT };
+    }
+    const swimming = this.swimContact.mode === "surface" || this.swimContact.mode === "submerged";
+    const blockedByUnknownWater = this.swimContact.mode === "blocked_unknown";
+
+    if (blockedByUnknownWater) {
+      this.velocity.set(0, 0, 0);
+      gameplayDiagnostics.add("water_query_blocked_steps");
+    } else if (swimming && waterSample) {
+      const result = applySwimForces({
+        velocity: this.velocity,
+        desiredX: desiredMotion.x,
+        desiredZ: desiredMotion.z,
+        ascend: jumpHeld,
+        dive: diveHeld,
+        capsuleBottomY: this.position.y,
+        sample: waterSample,
+        contact: this.swimContact,
+        stepSeconds: step,
+        config: this.swimConfig,
+      });
+      this.velocity.set(result.velocity.x, result.velocity.y, result.velocity.z);
+      this.grounded = false;
+      this.coyoteTimer = 0;
+      this.jumpBufferTimer = 0;
+    } else {
+      const accel = (this.grounded ? this.config.groundAcceleration : this.config.airAcceleration) * step;
+      this.velocity.x += THREE.MathUtils.clamp(desiredMotion.x - this.velocity.x, -accel, accel);
+      this.velocity.z += THREE.MathUtils.clamp(desiredMotion.z - this.velocity.z, -accel, accel);
+
+      this.coyoteTimer = this.grounded ? this.config.coyoteTime : Math.max(0, this.coyoteTimer - step);
+      this.jumpBufferTimer = jumpHeld ? this.config.jumpBufferTime : Math.max(0, this.jumpBufferTimer - step);
+      if (this.jumpBufferTimer > 0 && (this.grounded || this.coyoteTimer > 0)) {
+        this.velocity.y = jumpVelocityForHeight(this.config.jumpHeight, this.config.gravity);
+        this.grounded = false;
+        this.coyoteTimer = 0;
+        this.jumpBufferTimer = 0;
+        emitAudio("player.jump");
+      } else {
+        this.velocity.y -= this.config.gravity * step;
+      }
+      if (this.velocity.y < -this.config.maxFallSpeed) this.velocity.y = -this.config.maxFallSpeed;
+    }
 
     writeWorldEdgePushbackAcceleration(
       this.edgePushback,
@@ -310,27 +374,8 @@ export class PlayerController {
     this.velocity.x += this.edgePushback.x * step;
     this.velocity.z += this.edgePushback.y * step;
 
-    this.coyoteTimer = this.grounded ? this.config.coyoteTime : Math.max(0, this.coyoteTimer - step);
-    this.jumpBufferTimer = jumpHeld ? this.config.jumpBufferTime : Math.max(0, this.jumpBufferTimer - step);
-    if (this.jumpBufferTimer > 0 && (this.grounded || this.coyoteTimer > 0)) {
-      this.velocity.y = jumpVelocityForHeight(this.config.jumpHeight, this.config.gravity);
-      this.grounded = false;
-      this.coyoteTimer = 0;
-      this.jumpBufferTimer = 0;
-      emitAudio("player.jump");
-    } else {
-      this.velocity.y -= this.config.gravity * step;
-    }
-    // Terminal velocity: keeps per-step motion under the capsule extent so thin floors
-    // are always sampled by the positional resolve (P3 tunnelling fix).
-    if (this.velocity.y < -this.config.maxFallSpeed) this.velocity.y = -this.config.maxFallSpeed;
-
     if (this.movementReadiness && (this.velocity.x !== 0 || this.velocity.z !== 0)
       && this.movementReadiness(this.position.x, this.position.z) !== "blocked") {
-      // Axis-separable frontier checks: a velocity-direction-only probe lets a grazing
-      // approach (large tangential speed, millimeters of inward drift per step) slip
-      // across the boundary. Blocking per axis also slides the player along the frontier
-      // instead of pinning them. Never invent a floor beyond the readiness frontier.
       const radius = this.config.capsuleRadius;
       const aheadX = this.position.x + this.velocity.x * step + Math.sign(this.velocity.x) * radius;
       const aheadZ = this.position.z + this.velocity.z * step + Math.sign(this.velocity.z) * radius;
@@ -343,7 +388,6 @@ export class PlayerController {
         this.velocity.z = 0;
         engaged = true;
       }
-      // Diagonal corner entry: each axis alone stays outside, the combination crosses.
       if (!engaged && this.velocity.x !== 0 && this.velocity.z !== 0
         && this.movementReadiness(aheadX, aheadZ) === "blocked") {
         this.velocity.x = 0;
@@ -385,13 +429,9 @@ export class PlayerController {
     }
     this.position.copy(resolved.position);
     this.velocity.copy(resolved.velocity);
-    this.grounded = resolved.grounded;
+    this.grounded = swimming ? false : resolved.grounded;
     this.lastPagesTested = resolved.pagesTested;
 
-    // Positional hard net for the frontier: the velocity gate above cannot see
-    // resolve-time position changes (slope push-out can slide the capsule across the
-    // boundary — e.g. terrain dug into a pit right at the frontier). If this step ended
-    // in a blocked column that the step did not start in, revert the horizontal motion.
     if (this.movementReadiness && !previousBlocked
       && this.movementReadiness(this.position.x, this.position.z) === "blocked") {
       this.position.x = previousX;
@@ -402,25 +442,9 @@ export class PlayerController {
     }
 
     if (this.grounded) this.lastSafePosition.copy(this.position);
-
     this.applyRecoveryContract();
   }
 
-  /**
-   * Recovery contract (playable-world-contract P3.2): recover ONLY on proven-invalid
-   * conditions — never merely because Y is below a surface height, and never for deep
-   * falls through covered/certified columns (a player falling into a deep cave is
-   * legitimately far below their last grounded position; the real floor collider will
-   * catch them).
-   *
-   * Proven invalid: non-finite state; below the kill plane (under the valid editable
-   * volume — the true last resort, catching even mesh holes coverage cannot see);
-   * falling in a blocked column (no collider, uncertified) for a bounded number of
-   * steps, with the crude depth rule kept as the blocked-column backstop.
-   *
-   * Without a movement-readiness probe there is no column knowledge, so the legacy
-   * 32 m sink rule stays as-is for probe-less worlds and unit tests.
-   */
   private applyRecoveryContract(): void {
     if (!Number.isFinite(this.position.x + this.position.y + this.position.z)
       || !Number.isFinite(this.velocity.x + this.velocity.y + this.velocity.z)) {
@@ -438,7 +462,7 @@ export class PlayerController {
       return;
     }
     const blockedColumn = this.movementReadiness(this.position.x, this.position.z) === "blocked";
-    if (blockedColumn && !this.grounded) {
+    if (blockedColumn && !this.grounded && this.swimContact.mode !== "blocked_unknown") {
       this.invalidColumnSteps++;
       if (this.invalidColumnSteps >= this.config.invalidColumnRecoverySteps) {
         this.recoverToLastSafe("player_recovery_missing_collider");
@@ -457,6 +481,7 @@ export class PlayerController {
     this.velocity.set(0, 0, 0);
     this.grounded = false;
     this.invalidColumnSteps = 0;
+    this.swimContact = { ...DRY_SWIM_CONTACT };
     gameplayDiagnostics.add(reason);
   }
 }
