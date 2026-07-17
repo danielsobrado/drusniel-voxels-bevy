@@ -12,6 +12,7 @@ export interface ConstructionMenuRenderInput {
   selectedIndex?: number;
   selectedMaterial: ConstructionMaterial;
   snapEnabled: boolean;
+  snapSuppressed?: boolean;
   currentCandidate?: ConstructionCandidate | null;
   currentValid?: boolean;
   currentReason?: string | null;
@@ -63,17 +64,21 @@ export function renderConstructionMenuHtml(input: ConstructionMenuRenderInput): 
   }).join("");
   const materialButtons = materialOptions.map((option, index) => {
     const active = option.id === input.selectedMaterial;
-    const label = `${escapeHtml(option.label)}`;
+    const label = escapeHtml(option.label);
     const preview = escapeStyleUrl(option.previewUrl);
     return `<button data-material-index="${index}" title="${label}" style="${swatchStyle(active, option.color, preview)}"><span>${label}</span></button>`;
   }).join("");
   const status = resolveStatus(input);
   const lastMessage = input.lastPlacementMessage ?? input.lastMessage ?? "";
+  const snapLabel = input.snapEnabled
+    ? input.snapSuppressed ? "Snap HELD OFF" : "Snap ON"
+    : "Snap OFF";
+  const rotationDegrees = ((input.rotationQuarterTurns ?? 0) % 4 + 4) % 4 * 90;
   return `
       <div data-drag-handle style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;cursor:grab;">
         <strong>Build</strong>
         <span>${selectedPiece ? escapeHtml(selectedPiece.label) : "No pieces"} · ${escapeHtml(constructionMaterialLabel(input.selectedMaterial))}</span>
-        <span>${input.snapEnabled ? "Snap ON" : "Snap OFF"}</span>
+        <span>${snapLabel} · ${rotationDegrees}°</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">${pieceButtons}</div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
@@ -83,7 +88,7 @@ export function renderConstructionMenuHtml(input: ConstructionMenuRenderInput): 
       </div>
       <div style="display:flex;justify-content:space-between;gap:8px;">
         <span>${status}</span>
-        <span>R rotate · X snap · arrows material</span>
+        <span>R rotate · Q/E snap · hold Shift free · middle-click pick</span>
       </div>
       ${lastMessage ? `<div style="margin-top:6px;color:#ffd27a;">${escapeHtml(lastMessage)}</div>` : ""}
     `;

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { ConstructionPieceDef, PlacedConstructionPiece } from "./types.js";
 
 export const GHOST_VALID_COLOR = 0x35d46b;
@@ -54,9 +55,60 @@ export function disposeMesh(mesh: THREE.Mesh): void {
   }
 }
 
-export function createPieceGeometry(piece: ConstructionPieceDef): THREE.BoxGeometry {
-  const geometry = new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]);
+function addUv2(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   const uv = geometry.getAttribute("uv");
   if (uv) geometry.setAttribute("uv2", uv.clone());
   return geometry;
+}
+
+function createWedgeGeometry(dimensions: readonly [number, number, number]): THREE.BufferGeometry {
+  const [width, height, depth] = dimensions;
+  const geometry = new THREE.BoxGeometry(width, height, depth);
+  const position = geometry.getAttribute("position");
+  const halfHeight = height * 0.5;
+  for (let index = 0; index < position.count; index += 1) {
+    if (position.getZ(index) > 0 && position.getY(index) > 0) position.setY(index, -halfHeight);
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createStairsGeometry(dimensions: readonly [number, number, number]): THREE.BufferGeometry {
+  const [width, height, depth] = dimensions;
+  const stepCount = 4;
+  const parts: THREE.BufferGeometry[] = [];
+  for (let step = 0; step < stepCount; step += 1) {
+    const stepHeight = height * ((step + 1) / stepCount);
+    const stepDepth = depth / stepCount;
+    const geometry = new THREE.BoxGeometry(width, stepHeight, stepDepth);
+    geometry.translate(0, -height * 0.5 + stepHeight * 0.5, -depth * 0.5 + stepDepth * (step + 0.5));
+    parts.push(geometry);
+  }
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  if (!merged) throw new Error("Failed to create construction stairs geometry");
+  return merged;
+}
+
+export function createPieceGeometry(piece: ConstructionPieceDef): THREE.BufferGeometry {
+  const [x, y, z] = piece.dimensionsM;
+  let geometry: THREE.BufferGeometry;
+  switch (piece.geometryKind ?? "box") {
+    case "wedge":
+      geometry = createWedgeGeometry(piece.dimensionsM);
+      break;
+    case "stairs":
+      geometry = createStairsGeometry(piece.dimensionsM);
+      break;
+    case "cylinder":
+      geometry = new THREE.CylinderGeometry(Math.min(x, z) * 0.5, Math.min(x, z) * 0.5, y, 12);
+      break;
+    default:
+      geometry = new THREE.BoxGeometry(x, y, z);
+      break;
+  }
+  if (piece.geometryYawDegrees) geometry.rotateY(THREE.MathUtils.degToRad(piece.geometryYawDegrees));
+  geometry.computeBoundingBox();
+  return addUv2(geometry);
 }

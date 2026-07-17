@@ -1,12 +1,15 @@
 import { load } from "js-yaml";
 import constructionYamlText from "../../config/construction.yaml?raw";
 import {
+  CONSTRUCTION_GEOMETRY_KINDS,
   CONSTRUCTION_MATERIALS,
   SNAP_GROUPS,
   type ConstructionCategory,
   type ConstructionConfig,
+  type ConstructionGeometryKind,
   type ConstructionMaterial,
   type ConstructionPieceDef,
+  type ConstructionPlacementBox,
   type ConstructionSnapPoint,
   type SnapGroup,
 } from "./types.js";
@@ -15,6 +18,7 @@ const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = ["floor", "wall
 const MIN_DIMENSION_M = 0.01;
 const ZERO_LENGTH_EPSILON = 0.000001;
 const DEFAULT_SNAP_DIRECTION: readonly [number, number, number] = [0, 1, 0];
+const DEFAULT_ALLOWED_TWISTS = [0, 90, 180, 270] as const;
 
 const DEFAULT_CONFIG: ConstructionConfig = {
   enabled: true,
@@ -24,6 +28,9 @@ const DEFAULT_CONFIG: ConstructionConfig = {
     minAlignment: 0.70,
     alignmentWeight: 0.65,
     distanceWeight: 0.35,
+    tangentWeight: 0.25,
+    releaseRadiusMultiplier: 1.35,
+    maxRayDistanceM: 32,
   },
   placement: {
     maxRayDistanceM: 8000,
@@ -31,10 +38,9 @@ const DEFAULT_CONFIG: ConstructionConfig = {
     overlapPaddingM: 0.04,
     overlapSpatialCellM: 4,
     storageKey: "drusniel.clod-poc.construction.v1",
+    allowHeightfieldFallback: false,
   },
-  ghost: {
-    opacity: 0.42,
-  },
+  ghost: { opacity: 0.42 },
   terrainConform: {
     enabled: false,
     foundationCategories: ["floor"],
@@ -48,9 +54,7 @@ const DEFAULT_CONFIG: ConstructionConfig = {
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function readBool(record: Record<string, unknown> | undefined, key: string, fallback: boolean): boolean {
@@ -95,15 +99,50 @@ function readPositiveVec3(
   return value.every((entry) => entry >= MIN_DIMENSION_M) ? value : [...fallback];
 }
 
+function normalizeVec3(value: readonly [number, number, number], fallback: readonly [number, number, number]): [number, number, number] {
+  const length = Math.hypot(value[0], value[1], value[2]);
+  return length <= ZERO_LENGTH_EPSILON
+    ? [...fallback]
+    : [value[0] / length, value[1] / length, value[2] / length];
+}
+
 function readDirectionVec3(
   record: Record<string, unknown> | undefined,
   key: string,
   fallback: readonly [number, number, number],
 ): [number, number, number] {
-  const value = readVec3(record, key, fallback);
-  const length = Math.hypot(value[0], value[1], value[2]);
-  if (length <= ZERO_LENGTH_EPSILON) return [...fallback];
-  return [value[0] / length, value[1] / length, value[2] / length];
+  return normalizeVec3(readVec3(record, key, fallback), fallback);
+}
+
+function defaultTangent(normal: readonly [number, number, number]): [number, number, number] {
+  const reference: readonly [number, number, number] = Math.abs(normal[1]) > 0.8 ? [1, 0, 0] : [0, 1, 0];
+  return normalizeVec3([
+    reference[1] * normal[2] - reference[2] * normal[1],
+    reference[2] * normal[0] - reference[0] * normal[2],
+    reference[0] * normal[1] - reference[1] * normal[0],
+  ], [1, 0, 0]);
+}
+
+function readTangent(record: Record<string, unknown> | undefined, normal: readonly [number, number, number]): [number, number, number] {
+  const fallback = defaultTangent(normal);
+  const raw = readVec3(record, "tangent", fallback);
+  const dot = raw[0] * normal[0] + raw[1] * normal[1] + raw[2] * normal[2];
+  return normalizeVec3([
+    raw[0] - normal[0] * dot,
+    raw[1] - normal[1] * dot,
+    raw[2] - normal[2] * dot,
+  ], fallback);
+}
+
+function normalizeDegrees(value: number): number {
+  const normalized = ((value % 360) + 360) % 360;
+  return Math.round(normalized / 90) * 90 % 360;
+}
+
+function readAllowedTwists(value: unknown): number[] {
+  if (!Array.isArray(value)) return [...DEFAULT_ALLOWED_TWISTS];
+  const parsed = [...new Set(value.map(Number).filter(Number.isFinite).map(normalizeDegrees))];
+  return parsed.length > 0 ? parsed : [...DEFAULT_ALLOWED_TWISTS];
 }
 
 function asSnapGroup(value: unknown, fallback: SnapGroup): SnapGroup {
@@ -119,10 +158,7 @@ function readSnapGroups(value: unknown): SnapGroup[] {
 
 function asCategory(value: string): ConstructionCategory {
   const normalized = value.trim().toLowerCase();
-  if (CONSTRUCTION_CATEGORIES.includes(normalized as ConstructionCategory)) {
-    return normalized as ConstructionCategory;
-  }
-  return "generic";
+  return CONSTRUCTION_CATEGORIES.includes(normalized as ConstructionCategory) ? normalized as ConstructionCategory : "generic";
 }
 
 function readCategories(value: unknown, fallback: readonly ConstructionCategory[]): ConstructionCategory[] {
@@ -133,23 +169,38 @@ function readCategories(value: unknown, fallback: readonly ConstructionCategory[
 
 function asMaterial(value: string): ConstructionMaterial {
   const normalized = value.trim().toLowerCase();
-  if (CONSTRUCTION_MATERIALS.includes(normalized as ConstructionMaterial)) {
-    return normalized as ConstructionMaterial;
-  }
-  return "wood";
+  return CONSTRUCTION_MATERIALS.includes(normalized as ConstructionMaterial) ? normalized as ConstructionMaterial : "wood";
+}
+
+function asGeometryKind(value: string): ConstructionGeometryKind {
+  const normalized = value.trim().toLowerCase();
+  return CONSTRUCTION_GEOMETRY_KINDS.includes(normalized as ConstructionGeometryKind)
+    ? normalized as ConstructionGeometryKind
+    : "box";
 }
 
 function parseSnapPoint(value: unknown): ConstructionSnapPoint | null {
   const record = asRecord(value);
   if (!record) return null;
-  const id = readString(record, "id", "snap");
-  const group = asSnapGroup(record.group, "generic");
+  const direction = readDirectionVec3(record, "direction", DEFAULT_SNAP_DIRECTION);
   return {
-    id,
+    id: readString(record, "id", "snap"),
     localPos: readVec3(record, "local_pos", [0, 0, 0]),
-    direction: readDirectionVec3(record, "direction", DEFAULT_SNAP_DIRECTION),
-    group,
+    direction,
+    tangent: readTangent(record, direction),
+    allowedTwistDegrees: readAllowedTwists(record.allowed_twist_degrees),
+    group: asSnapGroup(record.group, "generic"),
     accepts: readSnapGroups(record.accepts),
+  };
+}
+
+function parsePlacementBox(value: unknown): ConstructionPlacementBox | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    center: readVec3(record, "center", [0, 0, 0]),
+    dimensionsM: readPositiveVec3(record, "dimensions_m", [1, 1, 1]),
+    rotationYDegrees: readNumber(record, "rotation_y_degrees", 0, -360, 360),
   };
 }
 
@@ -161,6 +212,9 @@ function parsePiece(value: unknown): ConstructionPieceDef | null {
   const snapPoints = Array.isArray(record.snap_points)
     ? record.snap_points.map(parseSnapPoint).filter((point): point is ConstructionSnapPoint => point !== null)
     : [];
+  const placementBoxes = Array.isArray(record.placement_boxes)
+    ? record.placement_boxes.map(parsePlacementBox).filter((box): box is ConstructionPlacementBox => box !== null)
+    : undefined;
   return {
     id,
     label: readString(record, "label", id),
@@ -169,6 +223,11 @@ function parsePiece(value: unknown): ConstructionPieceDef | null {
     canGround: readBool(record, "can_ground", false),
     material: asMaterial(readString(record, "material", "wood")),
     snapPoints,
+    rotationStepDegrees: readNumber(record, "rotation_step_degrees", 90, 1, 180) >= 135 ? 180 : 90,
+    geometryKind: asGeometryKind(readString(record, "geometry_kind", "box")),
+    geometryYawDegrees: readNumber(record, "geometry_yaw_degrees", 0, -360, 360),
+    placementBoxes,
+    groundNormalMinY: readNumber(record, "ground_normal_min_y", 0.45, -1, 1),
   };
 }
 
@@ -192,23 +251,19 @@ export function parseConstructionConfig(text: string = constructionYamlText): Co
         minAlignment: readNumber(snap, "min_alignment", DEFAULT_CONFIG.snap.minAlignment, -1, 1),
         alignmentWeight: readNumber(snap, "alignment_weight", DEFAULT_CONFIG.snap.alignmentWeight, 0, 10),
         distanceWeight: readNumber(snap, "distance_weight", DEFAULT_CONFIG.snap.distanceWeight, 0, 10),
+        tangentWeight: readNumber(snap, "tangent_weight", DEFAULT_CONFIG.snap.tangentWeight ?? 0.25, 0, 10),
+        releaseRadiusMultiplier: readNumber(snap, "release_radius_multiplier", DEFAULT_CONFIG.snap.releaseRadiusMultiplier ?? 1.35, 1, 3),
+        maxRayDistanceM: readNumber(snap, "max_ray_distance_m", DEFAULT_CONFIG.snap.maxRayDistanceM ?? 32, 1, 256),
       },
       placement: {
         maxRayDistanceM: readNumber(placement, "max_ray_distance_m", DEFAULT_CONFIG.placement.maxRayDistanceM, 1, 50000),
         terrainStepM: readNumber(placement, "terrain_step_m", DEFAULT_CONFIG.placement.terrainStepM, 0.25, 16),
         overlapPaddingM: readNumber(placement, "overlap_padding_m", DEFAULT_CONFIG.placement.overlapPaddingM, 0, 1),
-        overlapSpatialCellM: readNumber(
-          placement,
-          "overlap_spatial_cell_m",
-          DEFAULT_CONFIG.placement.overlapSpatialCellM ?? 4,
-          0.5,
-          64,
-        ),
+        overlapSpatialCellM: readNumber(placement, "overlap_spatial_cell_m", DEFAULT_CONFIG.placement.overlapSpatialCellM ?? 4, 0.5, 64),
         storageKey: readString(placement, "storage_key", DEFAULT_CONFIG.placement.storageKey),
+        allowHeightfieldFallback: readBool(placement, "allow_heightfield_fallback", DEFAULT_CONFIG.placement.allowHeightfieldFallback ?? false),
       },
-      ghost: {
-        opacity: readNumber(ghost, "opacity", DEFAULT_CONFIG.ghost.opacity, 0.05, 0.95),
-      },
+      ghost: { opacity: readNumber(ghost, "opacity", DEFAULT_CONFIG.ghost.opacity, 0.05, 0.95) },
       terrainConform: {
         enabled: readBool(terrainConform, "enabled", DEFAULT_CONFIG.terrainConform.enabled),
         foundationCategories: readCategories(terrainConform?.foundation_categories, DEFAULT_CONFIG.terrainConform.foundationCategories),

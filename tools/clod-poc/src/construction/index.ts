@@ -3,8 +3,10 @@ export type { ConstructionController, ConstructionControllerDeps, ConstructionCo
 export { defaultConstructionConfig, parseConstructionConfig } from "./config.js";
 export { ConstructionSnapIndex, constructionSnapMath } from "./snap_index.js";
 export type { ConstructionSnapQueryStats } from "./snap_index.js";
+export { ConstructionSnapSelector } from "./construction_snap_selector.js";
 export { ConstructionOverlapIndex } from "./overlap_index.js";
 export type { ConstructionOverlapQueryStats } from "./overlap_index.js";
+export { constructionPiecesOverlap, constructionObbMath } from "./construction_obb.js";
 export { ConstructionPerformanceTracker } from "./construction_timing.js";
 export type { ConstructionPerformanceSnapshot, ConstructionTimingSummary } from "./construction_timing.js";
 export {
@@ -12,6 +14,7 @@ export {
   createFreePlacementPosition,
   validateConstructionPlacement,
 } from "./placement.js";
+export { raycastConstructionTerrain } from "./targeting.js";
 export { ConstructionColliderSet } from "./construction_collider.js";
 export { reevaluateConstructionSupport } from "./support_reevaluation.js";
 export type {
@@ -27,13 +30,16 @@ export type { ConstructionSupportInput, ConstructionSupportResult } from "./supp
 export type {
   ConstructionCandidate,
   ConstructionConfig,
+  ConstructionGeometryKind,
   ConstructionGhostConfig,
   ConstructionMaterial,
   ConstructionPieceDef,
+  ConstructionPlacementBox,
   ConstructionPlacementConfig,
   ConstructionSnapConfig,
   ConstructionSnapPoint,
   ConstructionSnapResult,
+  ConstructionSurfaceHit,
   ConstructionSupportState,
   ConstructionTerrainConformConfig,
   ConstructionTerrainConformRequest,

@@ -1,7 +1,10 @@
 import * as THREE from "three";
 import { normalizeRotationQuarterTurns } from "./construction_controller_support.js";
-import type { TerrainHitPoint } from "./placement.js";
-import type { ConstructionPieceDef, ConstructionSnapConfig, ConstructionSnapResult } from "./types.js";
+import type {
+  ConstructionPieceDef,
+  ConstructionSnapConfig,
+  ConstructionSnapResult,
+} from "./types.js";
 import type { ConstructionSnapIndex } from "./snap_index.js";
 
 const ROTATION_QUARTER_COUNT = 4;
@@ -11,29 +14,36 @@ const GHOST_INVALID_COLOR = 0xff4f4f;
 
 export interface FindConstructionSnapInput {
   ray: THREE.Ray;
-  terrainHit: TerrainHitPoint;
+  maxDistanceM: number;
   piece: ConstructionPieceDef;
   rotationQuarterTurns: number;
   snapIndex: ConstructionSnapIndex;
   config: ConstructionSnapConfig;
 }
 
+function candidateRotations(piece: ConstructionPieceDef, baseRotation: number): number[] {
+  const stepTurns = Math.max(1, Math.round((piece.rotationStepDegrees ?? 90) / 90));
+  return Array.from({ length: ROTATION_QUARTER_COUNT / stepTurns }, (_, offset) =>
+    normalizeRotationQuarterTurns(baseRotation + offset * stepTurns));
+}
+
+export function findConstructionSnapCandidates(input: FindConstructionSnapInput): ConstructionSnapResult[] {
+  const releaseRadius = input.config.radiusM * Math.max(1, input.config.releaseRadiusMultiplier ?? 1.35);
+  return input.snapIndex.findSnapCandidatesNearRay(
+    [input.ray.origin.x, input.ray.origin.y, input.ray.origin.z],
+    [input.ray.direction.x, input.ray.direction.y, input.ray.direction.z],
+    input.maxDistanceM,
+    input.piece,
+    candidateRotations(input.piece, input.rotationQuarterTurns),
+    input.config,
+    releaseRadius,
+    input.rotationQuarterTurns,
+  );
+}
+
 export function findBestConstructionSnap(input: FindConstructionSnapInput): ConstructionSnapResult | null {
-  let best: ConstructionSnapResult | null = null;
-  for (let offset = 0; offset < ROTATION_QUARTER_COUNT; offset += 1) {
-    const rotation = normalizeRotationQuarterTurns(input.rotationQuarterTurns + offset);
-    const snap = input.snapIndex.findBestSnapNearRay(
-      [input.ray.origin.x, input.ray.origin.y, input.ray.origin.z],
-      [input.ray.direction.x, input.ray.direction.y, input.ray.direction.z],
-      input.terrainHit.distanceM + input.config.radiusM,
-      input.piece,
-      rotation,
-      input.config,
-    );
-    if (!snap || (best && snap.score <= best.score)) continue;
-    best = snap;
-  }
-  return best;
+  return findConstructionSnapCandidates(input)
+    .find((candidate) => (candidate.rayDistanceM ?? 0) <= input.config.radiusM) ?? null;
 }
 
 export function updateConstructionGhost(
@@ -42,7 +52,6 @@ export function updateConstructionGhost(
   input: {
     position: readonly [number, number, number];
     rotationQuarterTurns: number;
-    dimensionsM: readonly [number, number, number];
     valid: boolean;
     snapped: boolean;
   },
@@ -50,6 +59,6 @@ export function updateConstructionGhost(
   ghostMesh.visible = true;
   ghostMesh.position.set(input.position[0], input.position[1], input.position[2]);
   ghostMesh.rotation.set(0, input.rotationQuarterTurns * Math.PI * 0.5, 0);
-  ghostMesh.scale.set(input.dimensionsM[0], input.dimensionsM[1], input.dimensionsM[2]);
+  ghostMesh.scale.set(1, 1, 1);
   ghostMaterial.color.setHex(input.valid ? input.snapped ? GHOST_SNAPPED_COLOR : GHOST_VALID_COLOR : GHOST_INVALID_COLOR);
 }
