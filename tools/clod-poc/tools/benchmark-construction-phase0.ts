@@ -1,14 +1,27 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createConstructionBenchmarkCatalog, createConstructionBenchmarkScenarios } from "../src/construction/construction_benchmark_scenarios.js";
+import { DEFAULT_CONSTRUCTION_SUPPORT_PROFILES } from "../src/construction/config.js";
 import { ConstructionOverlapIndex } from "../src/construction/overlap_index.js";
 import { validateConstructionPlacement } from "../src/construction/placement.js";
 import { ConstructionSnapIndex } from "../src/construction/snap_index.js";
-import type { ConstructionPlacementConfig, ConstructionSnapConfig } from "../src/construction/types.js";
+import type {
+  ConstructionPlacementConfig,
+  ConstructionSnapConfig,
+  ConstructionStabilityConfig,
+} from "../src/construction/types.js";
 
 const ITERATIONS = 100;
 const SNAP_CONFIG: ConstructionSnapConfig = { radiusM: 0.85, spatialCellM: 1, minAlignment: 0.7, alignmentWeight: 0.65, distanceWeight: 0.35 };
 const PLACEMENT_CONFIG: ConstructionPlacementConfig = { maxRayDistanceM: 32, terrainStepM: 1, overlapPaddingM: 0.04, overlapSpatialCellM: 4, storageKey: "benchmark", unboundedWorld: true };
+const STABILITY_CONFIG: ConstructionStabilityConfig = {
+  collapseThreshold: 0.20,
+  epsilon: 0.0001,
+  maxIslandSize: 4096,
+  maxCollapsesPerFrame: 8,
+  connectionToleranceM: 0.08,
+  verticalConnectionMinRatio: 0.55,
+};
 
 interface ScenarioResult {
   scene: string;
@@ -58,16 +71,25 @@ function main(): void {
       const validationStarted = performance.now();
       validateConstructionPlacement({
         piece: candidate,
+        material: candidate.material,
         position: scene.candidatePosition,
         rotationQuarterTurns: 0,
         snapped: false,
         snap: null,
-        terrainHit: { point: [scene.candidatePosition[0], 0, scene.candidatePosition[2]], distanceM: 2 },
+        connectionIds: [],
+        terrainHit: {
+          point: [scene.candidatePosition[0], 0, scene.candidatePosition[2]],
+          normal: [0, 1, 0],
+          distanceM: 2,
+          surfaceType: "terrain",
+        },
         placedPieces: scene.pieces,
         overlapCandidates,
         piecesById: catalog,
         worldCells: Number.MAX_SAFE_INTEGER,
         config: PLACEMENT_CONFIG,
+        stabilityConfig: STABILITY_CONFIG,
+        supportProfiles: DEFAULT_CONSTRUCTION_SUPPORT_PROFILES,
       });
       validationTimes.push(performance.now() - validationStarted);
       const overlapStats = overlapIndex.queryStats();

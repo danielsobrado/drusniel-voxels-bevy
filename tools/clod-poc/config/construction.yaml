@@ -16,6 +16,54 @@ construction:
     overlap_spatial_cell_m: 4.0
     allow_heightfield_fallback: false
     storage_key: drusniel.clod-poc.construction.v1
+  stability:
+    collapse_threshold: 0.20
+    epsilon: 0.0001
+    max_island_size: 4096
+    max_collapses_per_frame: 8
+    connection_tolerance_m: 0.08
+    vertical_connection_min_ratio: 0.55
+  support_profiles:
+    wood:
+      max_support: 1.0
+      vertical_decay: 0.06
+      horizontal_decay: 0.10
+      support_class: wood
+    brick:
+      max_support: 1.0
+      vertical_decay: 0.10
+      horizontal_decay: 0.16
+      support_class: stone
+    concrete:
+      max_support: 1.0
+      vertical_decay: 0.04
+      horizontal_decay: 0.07
+      support_class: ground
+    marble:
+      max_support: 1.0
+      vertical_decay: 0.09
+      horizontal_decay: 0.15
+      support_class: stone
+    tiles:
+      max_support: 1.0
+      vertical_decay: 0.30
+      horizontal_decay: 0.45
+      support_class: stone
+    stone:
+      max_support: 1.0
+      vertical_decay: 0.10
+      horizontal_decay: 0.18
+      support_class: stone
+    metal:
+      max_support: 1.0
+      vertical_decay: 0.03
+      horizontal_decay: 0.05
+      support_class: ground
+    thatch:
+      max_support: 1.0
+      vertical_decay: 1.0
+      horizontal_decay: 1.0
+      support_class: wood
   ghost:
     opacity: 0.42
   terrain_conform:
@@ -124,6 +172,11 @@ construction:
       dimensions_m: [0.4, 2.0, 0.4]
       can_ground: true
       material: wood
+      support_profile:
+        max_support: 1.0
+        vertical_decay: 0.04
+        horizontal_decay: 0.08
+        support_class: wood
       snap_points:
         - id: bottom
           local_pos: [0.0, -1.0, 0.0]
