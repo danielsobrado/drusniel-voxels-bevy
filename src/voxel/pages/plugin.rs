@@ -31,8 +31,8 @@ use super::rebuild_observer::{
 };
 use super::render::{ClodPageMeshCommitState, clod_page_mesh_commit_system};
 use super::runtime::{
-    ClodPagesRuntime, PageExportCache, clod_pages_source_meshing_system,
-    clod_pages_startup_log_system,
+    ClodPagesRuntime, PageExportCache, PageSourceMeshingQueue,
+    clod_pages_source_meshing_system, clod_pages_startup_log_system,
 };
 use super::runtime_stats_export::{
     ClodRuntimeStatsExportSettings, ClodRuntimeStatsExportState, clod_runtime_stats_export_system,
@@ -58,6 +58,7 @@ impl Plugin for ClodPagesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClodPagesRuntime>()
             .init_resource::<PageExportCache>()
+            .init_resource::<PageSourceMeshingQueue>()
             .init_resource::<ClodPageBuildQueue>()
             .init_resource::<ClodPageTree>()
             .init_resource::<ClodPageMeshCommitState>()
@@ -89,7 +90,7 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<ClodWeldExportState>()
             .init_resource::<ClodFadeMaterialSettings>()
             .add_systems(Startup, clod_pages_startup_log_system)
-            // Reads VoxelWorld immutably; the scheduler serializes it after the dirty mesher.
+            // Source meshing borrows VoxelWorld immutably after the live dirty mesher.
             .add_systems(
                 Update,
                 clod_pages_source_meshing_system.after(VoxelTerrainSet::MeshDirty),
