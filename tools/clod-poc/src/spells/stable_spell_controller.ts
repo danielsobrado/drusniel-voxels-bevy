@@ -5,12 +5,19 @@ function isSpellPointLight(object: THREE.Object3D): object is THREE.PointLight {
   return (object as THREE.PointLight).isPointLight === true && object.name.includes("spell");
 }
 
-export function suppressSpellPointLights(scene: THREE.Scene): void {
+function collectSpellPointLights(scene: THREE.Scene): THREE.PointLight[] {
+  const lights: THREE.PointLight[] = [];
   scene.traverse((object) => {
-    if (!isSpellPointLight(object)) return;
-    object.intensity = 0;
-    object.visible = false;
+    if (isSpellPointLight(object)) lights.push(object);
   });
+  return lights;
+}
+
+function suppressSpellPointLights(lights: readonly THREE.PointLight[]): void {
+  for (const light of lights) {
+    light.intensity = 0;
+    light.visible = false;
+  }
 }
 
 /**
@@ -21,7 +28,8 @@ export function createStableSpellController(
   target: SpellVfxController,
   scene: THREE.Scene,
 ): SpellVfxController {
-  const stabilize = (): void => suppressSpellPointLights(scene);
+  const spellLights = collectSpellPointLights(scene);
+  const stabilize = (): void => suppressSpellPointLights(spellLights);
   stabilize();
 
   return {
