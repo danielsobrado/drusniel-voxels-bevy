@@ -71,7 +71,7 @@ export interface PostProcessSettings {
   froxelDebugEnabled?: boolean;
   /** Which froxel buffer the debug overlay visualizes. `off` renders the normal image. */
   froxelDebugMode?: PostFxFroxelDebugMode;
-  /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
+  /** Light-shaft technique added in linear light before temporal resolve and grading. */
   godRaysMode: GodRaysMode;
   /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
   godRaysDensity: number;
@@ -184,6 +184,10 @@ function godRaysMode(value: unknown, fallback: GodRaysMode): GodRaysMode {
     : fallback;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 /**
  * Parses a `?godrays=` query value: mode names select a mode, boolean-ish values map to
  * `off` (false) or the provided on-mode (true). Unknown values return null (no override).
@@ -214,6 +218,14 @@ function numberValue(params: URLSearchParams, key: string): number | null {
   if (raw === null) return null;
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;
+}
+
+function firstNumberValue(params: URLSearchParams, keys: readonly string[]): number | null {
+  for (const key of keys) {
+    const value = numberValue(params, key);
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 export function clampedRenderScale(value: number): number {
@@ -324,7 +336,10 @@ export function applyPostProcessQueryOverrides(
   if (aerial !== null) next.aerialPerspectiveEnabled = aerial;
 
   const fog = flagValue(searchParams, "fog") ?? flagValue(searchParams, "haze");
-  if (fog === false) next.aerialPerspectiveEnabled = false;
+  if (fog === false) {
+    next.aerialPerspectiveEnabled = false;
+    next.godRaysMode = "off";
+  }
 
   const clouds = flagValue(searchParams, "clouds")
     ?? flagValue(searchParams, "cloud")
@@ -368,6 +383,20 @@ export function applyPostProcessQueryOverrides(
     const mode = parseGodRaysModeParam(godRaysRaw, next.godRaysMode === "off" ? "cheap" : next.godRaysMode);
     if (mode !== null) next.godRaysMode = mode;
   }
+
+  const dustStrength = firstNumberValue(searchParams, [
+    "godRaysDust",
+    "godraysdust",
+    "godRaysDustStrength",
+    "godraysduststrength",
+  ]);
+  if (dustStrength !== null) next.godRaysDustStrength = clamp(dustStrength, 0, 1);
+
+  const dustScale = firstNumberValue(searchParams, ["godRaysDustScale", "godraysdustscale"]);
+  if (dustScale !== null) next.godRaysDustScale = clamp(dustScale, 1, 24);
+
+  const dustSpeed = firstNumberValue(searchParams, ["godRaysDustSpeed", "godraysdustspeed"]);
+  if (dustSpeed !== null) next.godRaysDustSpeed = clamp(dustSpeed, 0, 0.5);
 
   const toneMap = searchParams.get("toneMap") ?? searchParams.get("toneMapping");
   next.toneMapping = toneMapping(toneMap, next.toneMapping);
@@ -463,9 +492,21 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
       godRaysWeight: finiteNumber(godRays.weight, fallback.godRaysWeight),
       godRaysExposure: finiteNumber(godRays.exposure, fallback.godRaysExposure),
-      godRaysDustStrength: finiteNumber(godRays.dust_strength, fallback.godRaysDustStrength),
-      godRaysDustScale: finiteNumber(godRays.dust_scale, fallback.godRaysDustScale),
-      godRaysDustSpeed: finiteNumber(godRays.dust_speed, fallback.godRaysDustSpeed),
+      godRaysDustStrength: clamp(
+        finiteNumber(godRays.dust_strength, fallback.godRaysDustStrength),
+        0,
+        1,
+      ),
+      godRaysDustScale: clamp(
+        finiteNumber(godRays.dust_scale, fallback.godRaysDustScale),
+        1,
+        24,
+      ),
+      godRaysDustSpeed: clamp(
+        finiteNumber(godRays.dust_speed, fallback.godRaysDustSpeed),
+        0,
+        0.5,
+      ),
     };
   } catch (error) {
     console.warn("[postprocess] failed to parse postprocess.yaml; using fallback settings", error);

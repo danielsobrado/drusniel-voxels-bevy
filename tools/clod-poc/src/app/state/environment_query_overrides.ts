@@ -225,8 +225,15 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     const mode = parseGodRaysModeParam(godRaysRaw, state.godRaysMode === "off" ? "cheap" : state.godRaysMode);
     if (mode !== null) state.godRaysMode = mode;
   }
-  const godRaysDust = finiteParam(searchParams, "godRaysDust", "godraysdust");
-  if (godRaysDust !== null) state.godRaysDustStrength = Math.max(0, Math.min(1, godRaysDust));
+  apply(searchParams, ["godRaysDust", "godraysdust", "godRaysDustStrength", "godraysduststrength"], (value) => {
+    state.godRaysDustStrength = clamp(value, 0, 1);
+  });
+  apply(searchParams, ["godRaysDustScale", "godraysdustscale"], (value) => {
+    state.godRaysDustScale = clamp(value, 1, 24);
+  });
+  apply(searchParams, ["godRaysDustSpeed", "godraysdustspeed"], (value) => {
+    state.godRaysDustSpeed = clamp(value, 0, 0.5);
+  });
   const froxelDebug = searchParams.get("froxelDebug")
     ?? searchParams.get("froxelsDebug")
     ?? searchParams.get("volumetricDebug")

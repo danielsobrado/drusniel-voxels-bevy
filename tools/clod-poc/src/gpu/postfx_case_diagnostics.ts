@@ -1,3 +1,10 @@
+import {
+  applyPostProcessQueryOverrides,
+  parseAerialPerspectiveSettings,
+  parsePostProcessSettings,
+  type GodRaysMode,
+} from "../environment/postprocess_settings.js";
+import { DEFAULT_POSTFX_AUTO_EXPOSURE } from "./postfx_auto_exposure.js";
 import { parsePostFxStageFlags, stageAllowed, type PostFxStage } from "./postfx_stage_flags.js";
 
 export type PostFxCaseStageState = Record<PostFxStage, boolean>;
@@ -22,19 +29,9 @@ const STAGES: readonly PostFxStage[] = [
   "taa",
 ] as const;
 
-const DEFAULT_STAGE_STATE: PostFxCaseStageState = {
-  aerial: true,
-  autoExposure: true,
-  bloom: true,
-  bounce: false,
-  clouds: true,
-  colorScript: true,
-  contact: false,
-  froxels: false,
-  // The yaml default mode is volumetric, so the stage is active unless ablated or ?godrays=off.
-  godrays: true,
-  gtao: false,
-  taa: true,
+const BASE_POST_PROCESS_SETTINGS = {
+  ...parsePostProcessSettings(),
+  ...parseAerialPerspectiveSettings(),
 };
 
 function toSearchParams(input: URLSearchParams | Record<string, string>): URLSearchParams {
@@ -55,26 +52,51 @@ function queryFlag(params: URLSearchParams, keys: readonly string[], fallback: b
   return fallback;
 }
 
+function baseStageState(
+  godRaysMode: GodRaysMode,
+  settings: ReturnType<typeof applyPostProcessQueryOverrides>,
+  params: URLSearchParams,
+): PostFxCaseStageState {
+  return {
+    aerial: settings.aerialPerspectiveEnabled,
+    autoExposure: queryFlag(
+      params,
+      ["autoExposure", "autoexposure"],
+      DEFAULT_POSTFX_AUTO_EXPOSURE.enabled,
+    ),
+    bloom: settings.bloomEnabled,
+    bounce: settings.bounceEnabled,
+    clouds: settings.cloudsEnabled,
+    colorScript: true,
+    contact: settings.contactShadowsEnabled,
+    froxels: settings.froxelsEnabled,
+    godrays: godRaysMode !== "off",
+    gtao: settings.gtaoEnabled,
+    taa: settings.taaEnabled,
+  };
+}
+
 export function postFxCaseDiagnostics(input: URLSearchParams | Record<string, string>): PostFxCaseDiagnostics {
   const params = toSearchParams(input);
   const flags = parsePostFxStageFlags(params);
-  const postEnabled = queryFlag(params, ["fx", "post", "postprocess"], true);
-  const stages = { ...DEFAULT_STAGE_STATE };
-
-  stages.contact = queryFlag(params, ["contact", "contactShadows", "contactshadows"], stages.contact);
-  stages.gtao = queryFlag(params, ["gtao", "ao", "ambientOcclusion", "ambientocclusion"], stages.gtao);
-  stages.bounce = queryFlag(params, ["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], stages.bounce);
-  stages.froxels = queryFlag(params, ["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], stages.froxels);
-  stages.autoExposure = queryFlag(params, ["autoExposure", "autoexposure"], stages.autoExposure);
-  const godRaysRaw = params.get("godRays") ?? params.get("godrays");
-  if (godRaysRaw !== null) {
-    const value = godRaysRaw.trim().toLowerCase();
-    if (value === "cheap" || value === "heavy" || value === "volumetric") stages.godrays = true;
-    else stages.godrays = queryFlag(params, ["godRays", "godrays"], stages.godrays);
-  }
+  const settings = applyPostProcessQueryOverrides(BASE_POST_PROCESS_SETTINGS, params);
+  const postEnabled = settings.enabled && settings.debugMode !== "off";
+  const godRaysMode = settings.godRaysMode;
+  const stages = baseStageState(godRaysMode, settings, params);
 
   for (const stage of STAGES) {
     stages[stage] = postEnabled && stages[stage] && stageAllowed(flags, stage);
+  }
+
+  // Match WebGpuPostProcessPipeline.effectiveFroxelsEnabled(): volumetric shafts force the
+  // froxel ambience layer unless the froxel or god-rays stage was explicitly ablated.
+  if (
+    postEnabled
+    && godRaysMode === "volumetric"
+    && stages.godrays
+    && stageAllowed(flags, "froxels")
+  ) {
+    stages.froxels = true;
   }
 
   return { postEnabled, postMin: flags.postMin, stages };

@@ -45,6 +45,9 @@ const SKY_DEPTH_THRESHOLD = 0.9999;
 /** Geometry contributes this fraction of its scene colour to the march source ("lit haze"). */
 export const GOD_RAYS_LIT_HAZE = 0.12;
 
+/** Radius in screen UV space over which shaft energy fades away from the sun. */
+const GOD_RAYS_SCREEN_FALLOFF_RADIUS = 1.4;
+
 // Interleaved gradient noise (Jimenez 2014) — one dot + two fracts, no texture.
 const IGN_MAGIC = { x: 0.06711056, y: 0.00583715, scale: 52.9829189 } as const;
 
@@ -111,7 +114,7 @@ export interface DustGodRaysInputs extends ScreenGodRaysInputs {
 /**
  * Builds the additive god-rays contribution (a vec3) to screen-blend onto the graded scene colour.
  *
- * Classic full-res variant kept for the `?godraysFullres=1` A/B path and the original tests.
+ * Classic full-res variant kept for isolated shader comparisons and the original tests.
  */
 export function buildScreenGodRays(inputs: ScreenGodRaysInputs): TslNode {
   const { sceneTex, depthTex, uvNode, sunUv, intensity, density, decay, weight, exposure, samples } =
@@ -197,8 +200,10 @@ export function buildDustGodRays(inputs: DustGodRaysInputs): TslNode {
     const dust = octave1.mul(0.65).add(octave2.mul(0.35));
     const dustFactor = tslMix(float(1), dust.mul(1.6).add(0.2), clamp(dustStrength, 0, 1));
 
-    // Radial screen falloff (same shape as the WebGL fallback) keeps energy near the sun.
-    const screenFalloff = smoothstep(1.4, 0.0, distToSun);
+    // Use ordered smoothstep edges. Reversed edges are undefined in GLSL/WGSL implementations.
+    const screenFalloff = float(1).sub(
+      smoothstep(0.0, GOD_RAYS_SCREEN_FALLOFF_RADIUS, distToSun),
+    );
 
     return max(
       accum.mul(dustFactor).mul(screenFalloff).mul(exposure).mul(intensity),
@@ -235,8 +240,8 @@ export function projectSunToScreen(sunDir: THREE.Vector3, camera: THREE.Camera):
   const forward = -_viewDir.z;
   const visible = forward > 0;
 
-  _sunPoint.copy(camera.position).addScaledVector(sunDir, 1e6);
-  _sunPoint.project(camera);
+  camera.getWorldPosition(_sunPoint);
+  _sunPoint.addScaledVector(sunDir, 1e6).project(camera);
   return { u: _sunPoint.x * 0.5 + 0.5, v: _sunPoint.y * 0.5 + 0.5, visible, forward };
 }
 
@@ -252,6 +257,11 @@ function clamp01(value: number): number {
 function smooth01(value: number): number {
   const t = clamp01(value);
   return t * t * (3 - 2 * t);
+}
+
+/** Pure reference of the shader's radial screen falloff, for unit tests. */
+export function godRaysScreenFalloffReference(distanceToSun: number): number {
+  return 1 - smooth01(distanceToSun / GOD_RAYS_SCREEN_FALLOFF_RADIUS);
 }
 
 /**

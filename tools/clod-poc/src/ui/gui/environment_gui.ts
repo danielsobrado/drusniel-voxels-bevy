@@ -24,13 +24,6 @@ export interface EnvironmentGuiDeps {
   applyTreeQualityPreset?: (preset: Exclude<PostProcessQualityPreset, "custom">) => void;
 }
 
-interface WebGpuPostProcessStageMirror {
-  cloudsEnabled?: boolean;
-  gtaoEnabled?: boolean;
-  froxelsEnabled?: boolean;
-  bounceEnabled?: boolean;
-}
-
 export function createEnvironmentGui(
   gui: GUI,
   state: ClodAppState,
@@ -86,18 +79,8 @@ export function createEnvironmentGui(
     godRaysDustScale: state.godRaysDustScale,
     godRaysDustSpeed: state.godRaysDustSpeed,
   });
-  const syncWebGpuStageMirror = (settings: Partial<PostProcessSettings>) => {
-    const mirror = deps.postProcess as unknown as WebGpuPostProcessStageMirror | null;
-    if (!mirror) return;
-    mirror.cloudsEnabled = settings.cloudsEnabled;
-    mirror.gtaoEnabled = settings.gtaoEnabled;
-    mirror.froxelsEnabled = settings.froxelsEnabled;
-    mirror.bounceEnabled = settings.bounceEnabled;
-  };
   const applyPostProcessSettings = () => {
-    const settings = currentGuiPostProcessSettings();
-    syncWebGpuStageMirror(settings);
-    deps.postProcess?.updateSettings(settings);
+    deps.postProcess?.updateSettings(currentGuiPostProcessSettings());
   };
 
   const audioFolder = gui.addFolder("Audio");
@@ -191,8 +174,10 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessFroxelsEnabled").name("froxels").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBounceEnabled").name("screen bounce").onChange(applyPostProcessSettings),
   ];
+  let refreshGodRaysControllers = (): void => undefined;
   const refreshPostControllers = () => {
     for (const controller of postControllers) controller.updateDisplay();
+    refreshGodRaysControllers();
   };
   const applyPreset = (preset: Exclude<PostProcessQualityPreset, "custom">) => {
     applyPostProcessQualityPreset(state, preset);
@@ -274,6 +259,9 @@ export function createEnvironmentGui(
     godRaysFolder.add(state, "godRaysDustScale", 1, 24, 0.1).name("dust scale").onChange(applyPostProcessSettings),
     godRaysFolder.add(state, "godRaysDustSpeed", 0, 0.5, 0.005).name("dust speed").onChange(applyPostProcessSettings),
   ];
+  refreshGodRaysControllers = () => {
+    for (const controller of godRaysControllers) controller.updateDisplay();
+  };
   const godRaysActions = {
     reset: () => {
       state.godRaysMode = DEFAULT_POST_PROCESS_SETTINGS.godRaysMode;
@@ -285,7 +273,7 @@ export function createEnvironmentGui(
       state.godRaysDustScale = DEFAULT_POST_PROCESS_SETTINGS.godRaysDustScale;
       state.godRaysDustSpeed = DEFAULT_POST_PROCESS_SETTINGS.godRaysDustSpeed;
       applyPostProcessSettings();
-      for (const controller of godRaysControllers) controller.updateDisplay();
+      refreshGodRaysControllers();
     },
   };
   godRaysFolder.add(godRaysActions, "reset").name("reset");
