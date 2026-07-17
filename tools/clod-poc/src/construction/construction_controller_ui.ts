@@ -7,12 +7,15 @@ export interface ConstructionControllerUiCallbacks {
   isActive: () => boolean;
   onToggleActive: () => void;
   onToggleSnap: () => void;
+  onSnapSuppressedChange: (suppressed: boolean) => void;
+  onCycleSnap: (direction: number) => void;
   onRotate: () => void;
   onMaterialStep: (direction: number) => void;
   onMaterialSelect: (index: number) => void;
   onPieceSelect: (index: number) => void;
   onPlace: () => void;
   onDelete: () => void;
+  onPickPiece: () => void;
   onPointerUpdate: (event: PointerEvent) => boolean;
   onPointerLeave: () => void;
   onInputUnavailable: () => void;
@@ -21,6 +24,7 @@ export interface ConstructionControllerUiCallbacks {
 export interface ConstructionControllerUiState {
   active: boolean;
   snapEnabled: boolean;
+  snapSuppressed: boolean;
   pieces: readonly ConstructionPieceDef[];
   selectedIndex: number;
   selectedPieceId: string;
@@ -53,7 +57,7 @@ export function createConstructionControllerUi(
     transform: "translateX(-50%)",
     zIndex: "13",
     display: "none",
-    width: "min(520px, calc(100vw - 16px))",
+    width: "min(560px, calc(100vw - 16px))",
     padding: "10px",
     boxSizing: "border-box",
     color: "#eef3f8",
@@ -69,6 +73,13 @@ export function createConstructionControllerUi(
 
   let lastStateKey = "";
   let dragOffset: { x: number; y: number } | null = null;
+  let shiftSuppressed = false;
+
+  const setShiftSuppressed = (suppressed: boolean) => {
+    if (shiftSuppressed === suppressed) return;
+    shiftSuppressed = suppressed;
+    callbacks.onSnapSuppressedChange(suppressed);
+  };
 
   const onMenuClick = (event: MouseEvent) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -129,6 +140,7 @@ export function createConstructionControllerUi(
       return;
     }
     if (event.button === 0) callbacks.onPlace();
+    else if (event.button === 1) callbacks.onPickPiece();
     else if (event.button === 2) callbacks.onDelete();
   };
   const onContextMenu = (event: MouseEvent) => {
@@ -138,6 +150,10 @@ export function createConstructionControllerUi(
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (isTextInputEvent(event)) return;
+    if (event.code === "ShiftLeft" || event.code === "ShiftRight") {
+      if (callbacks.isActive()) setShiftSuppressed(true);
+      return;
+    }
     if (event.code === "KeyB") {
       event.preventDefault();
       callbacks.onToggleActive();
@@ -147,6 +163,12 @@ export function createConstructionControllerUi(
     if (event.code === "KeyX") {
       event.preventDefault();
       callbacks.onToggleSnap();
+    } else if (event.code === "KeyQ") {
+      event.preventDefault();
+      callbacks.onCycleSnap(-1);
+    } else if (event.code === "KeyE") {
+      event.preventDefault();
+      callbacks.onCycleSnap(1);
     } else if (event.code === "KeyR") {
       event.preventDefault();
       callbacks.onRotate();
@@ -164,6 +186,10 @@ export function createConstructionControllerUi(
       }
     }
   };
+  const onKeyUp = (event: KeyboardEvent) => {
+    if (event.code === "ShiftLeft" || event.code === "ShiftRight") setShiftSuppressed(false);
+  };
+  const onBlur = () => setShiftSuppressed(false);
 
   menu.addEventListener("click", onMenuClick);
   menu.addEventListener("pointerdown", onMenuPointerDown);
@@ -172,6 +198,8 @@ export function createConstructionControllerUi(
   domElement.addEventListener("pointerdown", onPointerDown, BUILD_POINTER_OPTIONS);
   domElement.addEventListener("contextmenu", onContextMenu, BUILD_POINTER_OPTIONS);
   window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
   document.body.appendChild(menu);
 
   return {
@@ -179,6 +207,7 @@ export function createConstructionControllerUi(
       const stateKey = JSON.stringify({
         active: state.active,
         snapEnabled: state.snapEnabled,
+        snapSuppressed: state.snapSuppressed,
         selectedIndex: state.selectedIndex,
         selectedMaterial: state.selectedMaterial,
         rotationQuarterTurns: state.rotationQuarterTurns,
@@ -193,6 +222,7 @@ export function createConstructionControllerUi(
       menu.innerHTML = renderConstructionMenuHtml({
         active: state.active,
         snapEnabled: state.snapEnabled,
+        snapSuppressed: state.snapSuppressed,
         pieces: state.pieces,
         selectedPieceId: state.selectedPieceId,
         rotationQuarterTurns: state.rotationQuarterTurns,
@@ -207,6 +237,7 @@ export function createConstructionControllerUi(
       menu.style.display = state.active ? "block" : "none";
     },
     dispose() {
+      setShiftSuppressed(false);
       dragOffset = null;
       menu.removeEventListener("click", onMenuClick);
       menu.removeEventListener("pointerdown", onMenuPointerDown);
@@ -215,6 +246,8 @@ export function createConstructionControllerUi(
       domElement.removeEventListener("pointerdown", onPointerDown, BUILD_POINTER_OPTIONS);
       domElement.removeEventListener("contextmenu", onContextMenu, BUILD_POINTER_OPTIONS);
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       menu.remove();
     },
   };
