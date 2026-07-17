@@ -111,6 +111,7 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
       const settings = makeSettings();
       const stats = system.getStats();
       const telemetryState = resolveStoneTelemetryState(stats);
+      publishStoneTelemetryValidity(stats, telemetryState);
       ringDebug.update({
         centerX: ringCenter.x,
         centerZ: ringCenter.z,
@@ -141,4 +142,20 @@ function resolveStoneTelemetryState(stats: StoneStats): RingTelemetryState {
   const state = stats.gpuTelemetryState;
   if (state === "fresh" || state === "last-known") return state;
   return "unknown";
+}
+
+function publishStoneTelemetryValidity(stats: StoneStats, state: RingTelemetryState): void {
+  const counters = globalCounters();
+  if (!counters) return;
+  const known = state !== "unknown";
+  counters["gpu_stone_telemetry_known"] = known ? 1 : 0;
+  counters["gpu_stone_telemetry_fresh"] = state === "fresh" ? 1 : 0;
+  counters["gpu_stone_telemetry_visible"] = known ? stats.visible : -1;
+  counters["gpu_stone_telemetry_total"] = known ? stats.total : -1;
+}
+
+function globalCounters(): Record<string, number> | null {
+  return (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters ?? null;
 }
