@@ -81,7 +81,7 @@ function run(next: StoneStats) {
     },
   });
 
-  return { state, current, updateDisplay };
+  return { state, current: current as StoneStats | null, updateDisplay };
 }
 
 describe("stone telemetry presentation", () => {

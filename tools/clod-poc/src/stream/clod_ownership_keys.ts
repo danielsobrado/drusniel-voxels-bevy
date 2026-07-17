@@ -1,16 +1,20 @@
 export function expandClodOwnershipToLevelZero(keys: readonly string[]): string[] {
-  const expanded = new Set<string>();
+  const expanded = new Map<string, { px: number; pz: number }>();
   for (const key of keys) {
     const page = parseClodPageKey(key);
     if (!page) continue;
     const scale = 2 ** page.level;
     for (let z = 0; z < scale; z++) {
       for (let x = 0; x < scale; x++) {
-        expanded.add(`L0:${page.px * scale + x},${page.pz * scale + z}`);
+        const px = page.px * scale + x;
+        const pz = page.pz * scale + z;
+        expanded.set(`L0:${px},${pz}`, { px, pz });
       }
     }
   }
-  return [...expanded].sort();
+  return [...expanded.values()]
+    .sort((a, b) => a.px - b.px || a.pz - b.pz)
+    .map(({ px, pz }) => `L0:${px},${pz}`);
 }
 
 function parseClodPageKey(key: string): { level: number; px: number; pz: number } | null {
