@@ -11,6 +11,8 @@ import { voxelOverlayPointIsResident } from "../terrain/voxel_overlay/voxel_over
 import { voxelEditStore } from "../terrain/voxel_edits/voxel_edit_store.js";
 import { getDigEditRevision } from "../terrain/terrain_edits.js";
 
+const DEFAULT_TELEPORT_ENVELOPE_RADIUS_M = 0.6;
+
 export type CellFallbackKind = "none" | "frontier_barrier" | "heightfield_certified";
 
 export interface CellReadiness {
@@ -76,9 +78,23 @@ export function movementReadinessAt(feeds: CellReadinessFeeds, x: number, z: num
   return readiness.fallbackKind === "heightfield_certified" ? "certified" : "ready";
 }
 
-/** Spawn/teleport gate: a collision-ready movement envelope must exist at the target. */
-export function teleportTargetReady(feeds: CellReadinessFeeds, x: number, z: number): boolean {
-  return cellReadinessAt(feeds, x, z).movementCollisionReady;
+/** Spawn/teleport gate: authoritative target plus a collision-ready capsule footprint. */
+export function teleportTargetReady(
+  feeds: CellReadinessFeeds,
+  x: number,
+  z: number,
+  envelopeRadiusM = DEFAULT_TELEPORT_ENVELOPE_RADIUS_M,
+): boolean {
+  if (!feeds.editAuthorityResidentAt(x, z)) return false;
+  const radius = Math.max(0, envelopeRadiusM);
+  const probes: readonly (readonly [number, number])[] = [
+    [x, z],
+    [x - radius, z],
+    [x + radius, z],
+    [x, z - radius],
+    [x, z + radius],
+  ];
+  return probes.every(([probeX, probeZ]) => cellReadinessAt(feeds, probeX, probeZ).movementCollisionReady);
 }
 
 /**
