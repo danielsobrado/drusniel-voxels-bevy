@@ -6,21 +6,29 @@ function query(value: string): URLSearchParams {
 }
 
 describe("far clipmap replace backend", () => {
-  it("rejects infinite-world replacement when WebGPU ownership masks are unavailable", () => {
+  it("rejects replacement when WebGPU ownership masks are unavailable", () => {
     expect(farClipmapRendererAllowed(
       query("scene=infinite-islands&farClipmapMode=replace"),
       false,
     )).toBe(false);
+    expect(farClipmapRendererAllowed(
+      query("scene=continent&farClipmapMode=replace"),
+      false,
+    )).toBe(false);
   });
 
-  it("allows infinite-world replacement with WebGPU ownership masks", () => {
+  it("allows replacement with WebGPU ownership masks", () => {
     expect(farClipmapRendererAllowed(
       query("scene=infinite-islands&farClipmapMode=replace"),
       true,
     )).toBe(true);
+    expect(farClipmapRendererAllowed(
+      query("scene=continent&farClipmapMode=replace"),
+      true,
+    )).toBe(true);
   });
 
-  it("keeps finite-world clipmaps available on either renderer", () => {
+  it("keeps non-replacement finite-world clipmaps available on either renderer", () => {
     expect(farClipmapRendererAllowed(query("scene=finite"), false)).toBe(true);
   });
 });
