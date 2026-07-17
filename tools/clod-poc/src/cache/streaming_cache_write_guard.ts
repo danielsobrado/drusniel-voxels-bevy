@@ -3,9 +3,8 @@ import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
 import { terrainStreamingGenerationIsCurrent } from "../stream/terrain_streaming_control.js";
 
 export interface CacheWriteStore {
-  get(key: string): Promise<ClodCacheStoredRecord | null>;
   put(key: string, record: ClodCacheStoredRecord): Promise<void>;
-  delete(key: string): Promise<void>;
+  deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean>;
 }
 
 type CachePutRequest = Extract<CacheRpcRequest, { op: "put" }>;
@@ -24,14 +23,11 @@ export async function commitCachePut(
   await store.put(request.key, request.record);
   if (terrainStreamingGenerationIsCurrent(generation)) return true;
 
-  const stored = await store.get(request.key);
-  if (stored && sameRecordVersion(stored, request.record)) {
-    await store.delete(request.key);
-  }
+  await store.deleteIfMatches(request.key, request.record);
   return false;
 }
 
-function sameRecordVersion(
+export function cacheRecordVersionMatches(
   left: ClodCacheStoredRecord,
   right: ClodCacheStoredRecord,
 ): boolean {
