@@ -62,6 +62,13 @@ function neutralGrade(state: ClodAppState): void {
   state.postProcessVignette = 0.0;
 }
 
+function disableWebGpuStages(state: ClodAppState): void {
+  state.postProcessCloudsEnabled = false;
+  state.postProcessGtaoEnabled = false;
+  state.postProcessFroxelsEnabled = false;
+  state.postProcessBounceEnabled = false;
+}
+
 function enableStrictTreeGpuMode(state: ClodAppState): void {
   state.treeGpuEnabled = true;
   state.treeGpuFallbackToCpu = false;
@@ -166,6 +173,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessContactShadowsEnabled = false;
     state.postProcessClarityEnabled = false;
     state.postProcessAerialPerspectiveEnabled = false;
+    disableWebGpuStages(state);
     state.godRaysMode = "off";
     state.hazeIntensity = 0;
   }
@@ -189,6 +197,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessContactShadowsEnabled = false;
     state.postProcessClarityEnabled = false;
     state.postProcessAerialPerspectiveEnabled = false;
+    disableWebGpuStages(state);
     state.godRaysMode = "off";
   }
 
@@ -198,7 +207,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   if (bloom !== null) state.postProcessBloomEnabled = bloom;
   const fxaa = flagParam(searchParams, "fxaa", "aa");
   if (fxaa !== null) state.postProcessFxaaEnabled = fxaa;
-  const taa = flagParam(searchParams, "taa");
+  const taa = flagParam(searchParams, "taa", "traa");
   if (taa !== null) state.postProcessTaaEnabled = taa;
   const taaJitter = flagParam(searchParams, "taaJitter", "taajitter", "jitter");
   if (taaJitter !== null) state.postProcessTaaJitterEnabled = taaJitter;
@@ -210,10 +219,14 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   if (clarity !== null) state.postProcessClarityEnabled = clarity;
   const aerial = flagParam(searchParams, "aerial", "aerialPerspective");
   if (aerial !== null) state.postProcessAerialPerspectiveEnabled = aerial;
-  const clouds = flagParam(searchParams, "clouds");
+  const clouds = flagParam(searchParams, "clouds", "cloud", "volumetricClouds", "volumetricclouds");
   if (clouds !== null) state.postProcessCloudsEnabled = clouds;
-  const froxels = flagParam(searchParams, "froxels", "volumetrics");
+  const gtao = flagParam(searchParams, "gtao", "ao", "ambientOcclusion", "ambientocclusion");
+  if (gtao !== null) state.postProcessGtaoEnabled = gtao;
+  const froxels = flagParam(searchParams, "froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog");
   if (froxels !== null) state.postProcessFroxelsEnabled = froxels;
+  const bounce = flagParam(searchParams, "bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce");
+  if (bounce !== null) state.postProcessBounceEnabled = bounce;
   const fog = flagParam(searchParams, "fog", "haze");
   if (fog === false) {
     state.hazeIntensity = 0;
