@@ -21,6 +21,13 @@ interface HeadedLaunchRecipe {
   readonly cdpUrl?: string;
 }
 
+interface AdapterInfoLike {
+  readonly vendor?: string;
+  readonly architecture?: string;
+  readonly device?: string;
+  readonly description?: string;
+}
+
 export interface HeadedWebGpuProbe {
   readonly vendor: string;
   readonly architecture: string;
@@ -95,8 +102,8 @@ async function probeAdapter(page: Page, recipe: HeadedLaunchRecipe): Promise<Hea
     if (!adapter) throw new Error("requestAdapter() returned null");
     const extended = adapter as GPUAdapter & {
       readonly isFallbackAdapter?: boolean;
-      readonly info?: GPUAdapterInfo;
-      requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
+      readonly info?: AdapterInfoLike;
+      requestAdapterInfo?: () => Promise<AdapterInfoLike>;
     };
     const info = extended.info
       ?? await extended.requestAdapterInfo?.().catch(() => undefined);
