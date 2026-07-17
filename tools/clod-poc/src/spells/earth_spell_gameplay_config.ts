@@ -13,6 +13,7 @@ export interface EarthSpellGameplayConfig {
   material: number;
   maxRangeM: number;
   commandExpiryMs: number;
+  convergenceTimeoutMs: number;
 }
 
 export const DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG: Readonly<EarthSpellGameplayConfig> = Object.freeze({
@@ -26,6 +27,7 @@ export const DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG: Readonly<EarthSpellGameplayCon
   material: 0,
   maxRangeM: 8,
   commandExpiryMs: 3000,
+  convergenceTimeoutMs: 5000,
 });
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -74,6 +76,12 @@ export function parseEarthSpellGameplayConfig(
       material: Math.floor(finite(gameplay?.["material"], fallback.material, 0, 255)),
       maxRangeM: finite(gameplay?.["max_range_m"], fallback.maxRangeM, 1, 80),
       commandExpiryMs: finite(gameplay?.["command_expiry_ms"], fallback.commandExpiryMs, 50, 5000),
+      convergenceTimeoutMs: finite(
+        gameplay?.["convergence_timeout_ms"],
+        fallback.convergenceTimeoutMs,
+        100,
+        30000,
+      ),
     };
   } catch (error) {
     console.warn("[spells] failed to parse earth gameplay config; using defaults", error);
