@@ -3,6 +3,7 @@ import {
   connectSurfaceCommitBridge,
   emitSurfaceCommit,
   resetSurfaceCacheRevisionsForTests,
+  surfaceBoundsChangedSince,
   surfaceRevisionAt,
   subscribeSurfaceCommits,
 } from "./surface_cache_revisions.js";
@@ -22,6 +23,22 @@ describe("surface cache revisions", () => {
 
     expect(observed).toEqual([1, 2, 3]);
     expect(surfaceRevisionAt()).toBe(3);
+  });
+
+  it("detects only intersecting commits newer than the build revision", () => {
+    emitSurfaceCommit(bounds(0));
+    const buildRevision = surfaceRevisionAt();
+    emitSurfaceCommit(bounds(20));
+
+    expect(surfaceBoundsChangedSince(bounds(0), buildRevision)).toBe(false);
+    expect(surfaceBoundsChangedSince(bounds(20), buildRevision)).toBe(true);
+  });
+
+  it("uses half-open bounds so touching tile edges do not invalidate each other", () => {
+    const buildRevision = surfaceRevisionAt();
+    emitSurfaceCommit(bounds(10));
+
+    expect(surfaceBoundsChangedSince(bounds(0), buildRevision)).toBe(false);
   });
 
   it("replays missed commits and coalesces a burst into one bounds invalidation", async () => {
