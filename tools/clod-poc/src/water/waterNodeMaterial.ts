@@ -55,6 +55,7 @@ import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 import { waterLevelColorTsl } from "./water_node_level_color.js";
 import { buildWaterBodyPresetNodes } from "./water_node_body_presets.js";
 import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
+import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -137,14 +138,16 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uCausticsSunGateStart = uniform(causticsCfg.sunGateStart) as TslNode;
   const uCausticsSunGateEnd = uniform(causticsCfg.sunGateEnd) as TslNode;
 
-  // Static-topology mode (Phase 5b): shared vertex-stage texel sampling, matching
-  // waterPerfNodeMaterial so the HQ and perf paths cannot drift.
-  const staticGrid = params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
-  const aTerrainY = (staticGrid ? staticGrid.terrainY : attribute("aTerrainY", "float")) as TslNode;
-  const aBodyMask = (staticGrid ? staticGrid.bodyMask : attribute("aBodyMask", "float")) as TslNode;
-  const aBodyKind = (staticGrid ? staticGrid.bodyKind : attribute("aBodyKind", "float")) as TslNode;
-  const aFlow = (staticGrid ? staticGrid.flow : attribute("aFlow", "vec4")) as TslNode;
-  const aShoreDistance = (staticGrid ? staticGrid.shoreDistance : attribute("aShoreDistance", "float")) as TslNode;
+  // Atlas-driven (Phase W2) or static-topology (Phase 5b) vertex-stage sampling,
+  // matching waterPerfNodeMaterial so the HQ and perf paths cannot drift.
+  const atlasGrid = params.atlasGrid ? buildWaterAtlasGridNodes(params.atlasGrid) : null;
+  const staticGrid = !atlasGrid && params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
+  const grid = atlasGrid ?? staticGrid;
+  const aTerrainY = (grid ? grid.terrainY : attribute("aTerrainY", "float")) as TslNode;
+  const aBodyMask = (grid ? grid.bodyMask : attribute("aBodyMask", "float")) as TslNode;
+  const aBodyKind = (grid ? grid.bodyKind : attribute("aBodyKind", "float")) as TslNode;
+  const aFlow = (grid ? grid.flow : attribute("aFlow", "vec4")) as TslNode;
+  const aShoreDistance = (grid ? grid.shoreDistance : attribute("aShoreDistance", "float")) as TslNode;
   const aLevel = attribute("aLevel", "float") as TslNode;
   const body = buildWaterBodyPresetNodes(aBodyKind, params.visual.bodies);
 
@@ -176,7 +179,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
         )
       )
     );
-    (staticGrid ? or(baseDiscard, staticGrid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
+    (grid ? or(baseDiscard, grid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
 
     // Per-channel Beer–Lambert depth response from the fragment's body preset (Phase
     // 7b), matching waterPerfNodeMaterial and the WebGL fragment so water colour does
@@ -486,7 +489,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   });
 
   const material = new MeshBasicNodeMaterial();
-  if (staticGrid) material.positionNode = staticGrid.positionNode;
+  if (grid) material.positionNode = grid.positionNode;
   material.fragmentNode = fragment();
   material.transparent = true;
   material.depthWrite = false;
@@ -547,6 +550,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
 
   return {
     material,
+    ...(atlasGrid ? { atlasGrid: atlasGrid.handle } : {}),
     ...(staticGrid ? { staticGrid: staticGrid.handle } : {}),
     setTime: (t) => { u.uTime.value = t; uTime.value = t; },
     setDebugMode: (mode) => { u.uDebugMode.value = mode; uDebugMode.value = mode; },

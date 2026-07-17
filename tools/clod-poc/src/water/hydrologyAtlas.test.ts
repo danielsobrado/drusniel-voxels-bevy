@@ -69,6 +69,26 @@ describe("HydrologyStreamingAtlas", () => {
     expect(atlas.currentStats().filledTiles).toBe(4);
   });
 
+  it("fills Layout B (flow + bodyKind) from the same tiles and zeroes it on invalidate", () => {
+    const cache = makeCache();
+    const resident = new Set(["2,2", "3,2", "2,3", "3,3"]);
+    const atlas = makeAtlas();
+    atlas.update(3 * TILE_SIZE_M + 10, 3 * TILE_SIZE_M + 10, makeSource(cache, resident));
+    for (const [ix, iz] of [[0, 0], [5, 9], [TILE_RES, TILE_RES], [atlas.res - 1, atlas.res - 1]] as const) {
+      const wx = atlas.originX + ix * atlas.cellSize;
+      const wz = atlas.originZ + iz * atlas.cellSize;
+      const analytic = sampleInfiniteHydrology(wx, wz, sampler, { drySentinelDepthM: DRY_SENTINEL_M });
+      const base = (iz * atlas.res + ix) * 4;
+      expect(atlas.dataB[base]).toBeCloseTo(analytic.flowX, 3);
+      expect(atlas.dataB[base + 1]).toBeCloseTo(analytic.flowZ, 3);
+      expect(atlas.dataB[base + 2]).toBeCloseTo(analytic.flowStrength, 3);
+      expect(atlas.dataB[base + 3]).toBeCloseTo(analytic.bodyKind, 3);
+    }
+    // Recenter far away with nothing resident: both planes reset.
+    atlas.update(50 * TILE_SIZE_M, 50 * TILE_SIZE_M, makeSource(cache, new Set()));
+    expect(atlas.dataB.every((v) => v === 0)).toBe(true);
+  });
+
   it("marks texels of missing tiles with the invalid shore-distance sentinel", () => {
     const cache = makeCache();
     const resident = new Set(["2,2"]); // only the north-west slot has data

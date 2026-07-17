@@ -27,6 +27,7 @@ import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 import { waterLevelColorTsl } from "./water_node_level_color.js";
 import { buildWaterBodyPresetNodes } from "./water_node_body_presets.js";
 import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
+import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -74,15 +75,19 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   const uRiverShallowBankTintStrength = uniform(riverMaterial.shallowBankTintStrength) as TslNode;
   const uRiverCenterChannelDarkening = uniform(riverMaterial.centerChannelDarkening) as TslNode;
 
-  // Static-topology mode (Phase 5b): per-vertex water data comes from the level's
-  // toroidal texel textures via the shared vertex-stage builder instead of CPU-filled
-  // attributes; the wall discard replaces the legacy index-time quad guard.
-  const staticGrid = params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
-  const aTerrainY = (staticGrid ? staticGrid.terrainY : attribute("aTerrainY", "float")) as TslNode;
-  const aBodyMask = (staticGrid ? staticGrid.bodyMask : attribute("aBodyMask", "float")) as TslNode;
-  const aBodyKind = (staticGrid ? staticGrid.bodyKind : attribute("aBodyKind", "float")) as TslNode;
-  const aFlow = (staticGrid ? staticGrid.flow : attribute("aFlow", "vec4")) as TslNode;
-  const aShoreDistance = (staticGrid ? staticGrid.shoreDistance : attribute("aShoreDistance", "float")) as TslNode;
+  // Atlas-driven mode (Phase W2) wins over static-topology mode (Phase 5b): both use
+  // the static grid geometry, but atlas levels fetch per-vertex water data from the
+  // shared streaming hydrology atlas (zero CPU refills) while static levels read the
+  // level's toroidal texel textures; the wall discard replaces the legacy index-time
+  // quad guard in either mode.
+  const atlasGrid = params.atlasGrid ? buildWaterAtlasGridNodes(params.atlasGrid) : null;
+  const staticGrid = !atlasGrid && params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
+  const grid = atlasGrid ?? staticGrid;
+  const aTerrainY = (grid ? grid.terrainY : attribute("aTerrainY", "float")) as TslNode;
+  const aBodyMask = (grid ? grid.bodyMask : attribute("aBodyMask", "float")) as TslNode;
+  const aBodyKind = (grid ? grid.bodyKind : attribute("aBodyKind", "float")) as TslNode;
+  const aFlow = (grid ? grid.flow : attribute("aFlow", "vec4")) as TslNode;
+  const aShoreDistance = (grid ? grid.shoreDistance : attribute("aShoreDistance", "float")) as TslNode;
   const aLevel = attribute("aLevel", "float") as TslNode;
   const worldPos: TslNode = positionWorld;
   const body = buildWaterBodyPresetNodes(aBodyKind, params.visual.bodies);
@@ -101,7 +106,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
       .and(worldPos.z.lessThan(uInnerRect.w));
     const depth: TslNode = worldPos.y.sub(aTerrainY);
     const baseDiscard: TslNode = or(outsideWorld, or(insideInner, or(depth.lessThanEqual(float(0)), aBodyMask.lessThanEqual(float(0)))));
-    (staticGrid ? or(baseDiscard, staticGrid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
+    (grid ? or(baseDiscard, grid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
 
     // Per-channel Beer–Lambert depth response (Phase 7b): red is absorbed first in
     // clear water, and the extinction spectrum comes from the fragment's body preset.
@@ -192,7 +197,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   });
 
   const material = new MeshBasicNodeMaterial();
-  if (staticGrid) material.positionNode = staticGrid.positionNode;
+  if (grid) material.positionNode = grid.positionNode;
   material.fragmentNode = fragment();
   material.transparent = true;
   material.depthWrite = params.visual.depthWrite;
@@ -242,6 +247,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
 
   return {
     material,
+    ...(atlasGrid ? { atlasGrid: atlasGrid.handle } : {}),
     ...(staticGrid ? { staticGrid: staticGrid.handle } : {}),
     setTime: (t) => { uTime.value = t; },
     setDebugMode: (mode) => { uDebugMode.value = mode; },

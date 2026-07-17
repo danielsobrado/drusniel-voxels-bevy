@@ -9,6 +9,7 @@ import {
 import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { createHydrologyTileRemoteBuilder } from "../../water/hydrology_tile_worker_client.js";
+import { WaterHydrologyAtlasRuntime, waterAtlasTilesPerSide } from "../../water/waterHydrologyAtlasRuntime.js";
 import { getDigEditRevision, getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
 import { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
@@ -48,21 +49,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
   const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
-  const clipmap = new WaterClipmap({
-    scene: deps.scene,
-    config: deps.waterConfig,
-    field,
-    createMaterial: waterMaterialFactory,
-    sunDirection: deps.getSunDirection().clone(),
-    cameraPosition: deps.camera.position as THREE.Vector3,
-    worldBounds: infiniteWorldWater
-      ? { cellsX: 0, cellsZ: 0 }
-      : { cellsX: deps.worldCells, cellsZ: deps.worldCells },
-    staticTopology: deps.waterConfig.staticTopology
-      && deps.searchParams.get("waterStaticClipmap") !== "0",
-  });
-  const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
-  const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
 
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
   const tileRemoteAuthority = deps.hydrologySystem?.tileRemoteAuthority() ?? null;
@@ -93,6 +79,45 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       }
     }
   }
+
+  // Atlas-driven levels (Phase W2, WebGPU + static topology only): a water-owned
+  // streaming-atlas window follows the camera, and the rings it can cover fetch their
+  // vertex data from it in the vertex stage — zero CPU refill samples on those levels.
+  // Gated on the tile build worker being up: the atlas fills exclusively from
+  // worker-built tiles, so without the remote those levels would never get water.
+  const staticTopologyEnabled = deps.waterConfig.staticTopology
+    && deps.searchParams.get("waterStaticClipmap") !== "0";
+  const atlasSource = deps.isWebGpu
+    && staticTopologyEnabled
+    && hydrologyRemote !== null
+    && deps.searchParams.get("waterAtlasClipmap") !== "0"
+    ? deps.hydrologySystem?.tileAtlasSource() ?? null
+    : null;
+  const atlasLevelHalfSpans = deps.waterConfig.cellSizes
+    .filter((cellSize) => cellSize <= (tileBypassCellSize ?? 0))
+    .map((cellSize) => (cellSize * deps.waterConfig.cellsPerLevel) / 2);
+  const waterAtlas = atlasSource && atlasLevelHalfSpans.length > 0
+    ? new WaterHydrologyAtlasRuntime(
+        atlasSource,
+        waterAtlasTilesPerSide(Math.max(...atlasLevelHalfSpans), atlasSource.tileSizeM),
+      )
+    : null;
+  const clipmap = new WaterClipmap({
+    scene: deps.scene,
+    config: deps.waterConfig,
+    field,
+    createMaterial: waterMaterialFactory,
+    sunDirection: deps.getSunDirection().clone(),
+    cameraPosition: deps.camera.position as THREE.Vector3,
+    worldBounds: infiniteWorldWater
+      ? { cellsX: 0, cellsZ: 0 }
+      : { cellsX: deps.worldCells, cellsZ: deps.worldCells },
+    staticTopology: staticTopologyEnabled,
+    atlasRuntime: waterAtlas,
+  });
+  const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
+  const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
+
   const ui = deps.getUiState();
   clipmap.setVisible(ui.waterEnabled);
   residueOverlay.setVisible(ui.waterEnabled);
@@ -181,6 +206,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       if (hydrologyPrefetchRadiusM > 0) {
         deps.hydrologySystem?.prefetchTiles(cameraPosition.x, cameraPosition.z, hydrologyPrefetchRadiusM);
       }
+      waterAtlas?.update(cameraPosition.x, cameraPosition.z);
       clipmap.update(deltaSeconds, cameraPosition);
       residueOverlay.update(deltaSeconds, cameraPosition);
       cascadeParticles.update(deltaSeconds, cameraPosition);
@@ -200,6 +226,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       cascadeParticles.dispose();
       residueOverlay.dispose();
       clipmap.dispose();
+      waterAtlas?.dispose();
     },
   };
 

@@ -113,7 +113,19 @@ Continent (graph) rivers already carve; streamed/traced rivers do not.
 3. Re-check `dressing_river_cobbles_accepted=0` once beds exist (acceptance gates
    probably reject on depth/slope today) — still open, W3 density tuning.
 
-## Phase W2 — GPU-Driven Surface (perf + "all GPU")
+## Phase W2 — GPU-Driven Surface (perf + "all GPU") — IMPLEMENTED 2026-07-18
+
+Status: items 1–2 landed with a water-owned atlas window (7 tiles = 1792 m, sized from
+the ring spans with tile-snap margin) instead of reusing the vegetation window — one
+writer per atlas, no recenter flip-flop, no init-order coupling. Layout B
+(flow x/z, strength, bodyKind) added to `HydrologyStreamingAtlas`; rings L0–L3 fetch
+Layout A+B in the vertex stage (`water_node_atlas_grid.ts`) with validity-weighted
+4-tap bilinear, vertex-stage drop estimation, and the `shapeRiverSurfaceY` river
+shaping reproduced in TSL. A snap on those levels is one origin uniform; startup
+`water_clipmap_field_samples` dropped from ~100k to 33,282 (exactly the two coarse
+rings). L4/L5 keep the CPU texel path for now (item 3 still open). WebGL untouched
+(item 4). Kill switch: `waterAtlasClipmap=0`. Perf budgets (item 5): see
+`perf-runs/water-atlas-after/`.
 
 Keep the CPU hydrology authority for gameplay queries (no readbacks needed because the
 CPU is the producer); move per-frame surface data production to the GPU:

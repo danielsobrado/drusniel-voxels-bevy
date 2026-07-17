@@ -31,8 +31,18 @@ import type { WaterConfig } from "./waterConfig.js";
 import { WATER_DEBUG_MODES, type WaterDebugModeId, type WaterVisualConfig } from "./waterConfig.js";
 import type { WaterField } from "./waterField.js";
 import type { WaterMaterialHandle, WaterMaterialParams } from "./waterMaterial.js";
+import type { WaterAtlasGridHandle, WaterAtlasGridParams } from "./water_material_types.js";
 import { WATER_SHORE_DISTANCE_UNKNOWN } from "./water_field_types.js";
 import { createStaticWaterGridGeometry, WaterLevelTexelStore } from "./waterClipmapTexels.js";
+
+/** Narrow view of the water hydrology atlas runtime the clipmap consumes (implemented
+ *  by WaterHydrologyAtlasRuntime); levels whose half-span fits the guaranteed window
+ *  coverage fetch their vertex data from the atlas instead of CPU-refilled texels. */
+export interface WaterClipmapAtlasRuntime {
+  readonly coveredHalfSpanM: number;
+  materialParamsForLevel(levelCellSize: number): WaterAtlasGridParams;
+  windowOrigin(): { x: number; z: number } | null;
+}
 
 export interface WaterRect {
   minX: number;
@@ -57,6 +67,9 @@ export interface WaterClipmapOptions {
   /** Offer static-topology resources to the material (config water.static_topology).
    *  Materials that ignore them (WebGL) keep the legacy per-snap index rebuild path. */
   staticTopology?: boolean;
+  /** Streaming-atlas runtime for atlas-driven levels (Phase W2); levels it cannot
+   *  cover (or materials that ignore it) keep their static/legacy path. */
+  atlasRuntime?: WaterClipmapAtlasRuntime | null;
 }
 
 const DEGENERATE_INNER: WaterRect = { minX: 1e30, minZ: 1e30, maxX: -1e30, maxZ: -1e30 };
@@ -111,6 +124,9 @@ class WaterLevel {
   private readonly field: WaterField;
   private readonly worldBounds: WaterWorldBounds;
   private readonly stats: WaterClipmapUpdateStats;
+  /** Atlas-driven mode (Phase W2): vertex data comes from the shared streaming atlas;
+   *  refills take zero field samples. Wins over texels/legacy when present. */
+  private readonly atlasHandle: WaterAtlasGridHandle | null;
   /** Static-topology texel storage; null selects the legacy vertex-buffer path. */
   private readonly texels: WaterLevelTexelStore | null;
   private readonly positions: Float32Array | null;
@@ -151,7 +167,8 @@ class WaterLevel {
     this.handle = handle;
     this.worldBounds = worldBounds;
     this.stats = stats;
-    this.texels = handle.staticGrid ? texels : null;
+    this.atlasHandle = handle.atlasGrid ?? null;
+    this.texels = !this.atlasHandle && handle.staticGrid ? texels : null;
 
     const vertsPerEdge = cellsPerLevel + 1;
     this.slotCol = new Float64Array(vertsPerEdge).fill(Number.NaN);
@@ -160,7 +177,7 @@ class WaterLevel {
     this.dirtyRow = new Uint8Array(vertsPerEdge);
 
     let geometry: THREE.BufferGeometry;
-    if (this.texels) {
+    if (this.atlasHandle || this.texels) {
       this.positions = null;
       this.terrainY = null;
       this.bodyMask = null;
@@ -203,7 +220,13 @@ class WaterLevel {
   get object(): THREE.Object3D { return this.mesh; }
   get currentRect(): WaterRect { return this.rect; }
   get materialHandle(): WaterMaterialHandle { return this.handle; }
-  get staticTopology(): boolean { return this.texels !== null; }
+  get staticTopology(): boolean { return this.texels !== null || this.atlasHandle !== null; }
+  get atlasDriven(): boolean { return this.atlasHandle !== null; }
+
+  /** Per-frame atlas window push (atlas-driven levels only; cheap uniform update). */
+  setAtlasWindow(origin: { x: number; z: number } | null): void {
+    this.atlasHandle?.setWindow(origin?.x ?? 0, origin?.z ?? 0, origin !== null);
+  }
 
   originChanged(cameraX: number, cameraZ: number): boolean {
     const nextX = Math.floor(cameraX / this.snap) * this.snap;
@@ -229,7 +252,17 @@ class WaterLevel {
     // cellSize (cellsPerLevel/2 cells) and origin snaps to whole cells, so this is exact.
     const baseCol = Math.round((originX - half) / this.cellSize);
     const baseRow = Math.round((originZ - half) / this.cellSize);
-    this.refill(baseCol, baseRow);
+    if (this.atlasHandle) {
+      // Atlas-driven level: a snap is one origin uniform; the vertex stage fetches
+      // everything else from the shared atlas. Dry regions resolve per vertex/fragment
+      // (underground sentinel + discards), so the mesh stays visible.
+      this.stats.snaps++;
+      this.stats.staticSnaps++;
+      this.atlasHandle.setOrigin(baseCol * this.cellSize, baseRow * this.cellSize);
+      this.mesh.visible = true;
+    } else {
+      this.refill(baseCol, baseRow);
+    }
     this.rect = {
       minX: originX - half,
       minZ: originZ - half,
@@ -450,6 +483,7 @@ export class WaterClipmap {
   private readonly root = new THREE.Group();
   private readonly levels: WaterLevel[];
   private readonly updateCost = createWaterClipmapUpdateStats();
+  private readonly atlasRuntime: WaterClipmapAtlasRuntime | null;
   private readonly field: WaterField;
   private readonly sunDirection: THREE.Vector3;
   private readonly cameraPosition: THREE.Vector3;
@@ -474,8 +508,15 @@ export class WaterClipmap {
     this.root.name = "water-clipmap-root";
     this.scene.add(this.root);
 
+    this.atlasRuntime = opts.atlasRuntime ?? null;
     this.levels = opts.config.cellSizes.map((cellSize, index) => {
-      const texels = opts.staticTopology !== false
+      const halfSpanM = cellSize * opts.config.cellsPerLevel * 0.5;
+      const atlasParams = opts.staticTopology !== false
+        && this.atlasRuntime
+        && halfSpanM <= this.atlasRuntime.coveredHalfSpanM
+        ? this.atlasRuntime.materialParamsForLevel(cellSize)
+        : null;
+      const texels = !atlasParams && opts.staticTopology !== false
         ? new WaterLevelTexelStore(opts.config.cellsPerLevel + 1, cellSize)
         : null;
       const handle = opts.createMaterial({
@@ -485,6 +526,7 @@ export class WaterClipmap {
         cameraPosition: this.cameraPosition,
         worldBounds: opts.worldBounds,
         caustics: opts.config.caustics,
+        ...(atlasParams ? { atlasGrid: atlasParams } : {}),
         ...(texels ? { staticGrid: texels.materialParams() } : {}),
       });
       if (texels && !handle.staticGrid) texels.dispose();
@@ -528,6 +570,7 @@ export class WaterClipmap {
     this.cameraPosition.copy(cameraPosition);
     const cx = cameraPosition.x;
     const cz = cameraPosition.z;
+    const atlasOrigin = this.atlasRuntime ? this.atlasRuntime.windowOrigin() : null;
     let originRefilled = false;
     for (let i = 0; i < this.levels.length; i++) {
       const finer = i > 0 ? this.levels[i - 1].currentRect : DEGENERATE_INNER;
@@ -540,6 +583,7 @@ export class WaterClipmap {
       const handle = level.materialHandle;
       handle.setTime(this.time);
       handle.updateCamera(this.cameraPosition);
+      level.setAtlasWindow(atlasOrigin);
     }
   }
 

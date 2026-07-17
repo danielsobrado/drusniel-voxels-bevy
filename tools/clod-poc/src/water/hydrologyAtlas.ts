@@ -59,6 +59,9 @@ export class HydrologyStreamingAtlas {
   readonly cellSize: number;
   /** Layout A texels, row-major (iz*res + ix)*4. */
   readonly data: Float32Array<ArrayBuffer>;
+  /** Layout B texels, same lattice: R = flowX, G = flowZ, B = flowStrength,
+   *  A = bodyKind. Validity is carried by Layout A's shoreDistance channel. */
+  readonly dataB: Float32Array<ArrayBuffer>;
 
   private originTileX = Number.NaN;
   private originTileZ = Number.NaN;
@@ -72,6 +75,7 @@ export class HydrologyStreamingAtlas {
     this.res = this.tilesPerSide * this.tileRes + 1;
     this.cellSize = this.tileSizeM / this.tileRes;
     this.data = new Float32Array(this.res * this.res * 4);
+    this.dataB = new Float32Array(this.res * this.res * 4);
     this.filled = new Array<boolean>(this.tilesPerSide * this.tilesPerSide).fill(false);
     this.stats = { recenters: 0, filledTiles: 0, totalTiles: this.filled.length, texelUploads: 0 };
     this.invalidateAll();
@@ -132,6 +136,7 @@ export class HydrologyStreamingAtlas {
 
   private invalidateAll(): void {
     this.data.fill(0);
+    this.dataB.fill(0);
     for (let i = 3; i < this.data.length; i += 4) {
       this.data[i] = HYDROLOGY_ATLAS_INVALID_SHORE_DISTANCE;
     }
@@ -154,6 +159,10 @@ export class HydrologyStreamingAtlas {
         this.data[dst + 1] = tile.bodyMask[s];
         this.data[dst + 2] = tile.terrainY[s];
         this.data[dst + 3] = tile.shoreDistance[s];
+        this.dataB[dst] = tile.flowX[s];
+        this.dataB[dst + 1] = tile.flowZ[s];
+        this.dataB[dst + 2] = tile.flowStrength[s];
+        this.dataB[dst + 3] = tile.bodyKind[s];
         dst += 4;
       }
     }
