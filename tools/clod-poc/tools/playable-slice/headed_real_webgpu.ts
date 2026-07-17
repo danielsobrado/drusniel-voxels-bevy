@@ -53,7 +53,9 @@ export function softwareGpuReason(probe: Omit<HeadedWebGpuProbe, "recipe">): str
   if (probe.fallbackAdapter) return "adapter reports isFallbackAdapter=true";
   const identity = [probe.vendor, probe.architecture, probe.device, probe.description]
     .join(" ")
+    .trim()
     .toLowerCase();
+  if (identity.length === 0) return "adapter identity is unavailable; real GPU cannot be certified";
   const marker = [
     "swiftshader",
     "llvmpipe",
