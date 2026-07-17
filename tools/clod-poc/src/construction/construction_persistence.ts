@@ -6,8 +6,11 @@ import {
   normalizeRotationQuarterTurns,
   readStringArray,
 } from "./construction_controller_support.js";
+import { ConstructionOverlapIndex } from "./overlap_index.js";
 import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 import type { ConstructionPieceDef, ConstructionPlacementConfig, PlacedConstructionPiece } from "./types.js";
+
+const DEFAULT_OVERLAP_SPATIAL_CELL_M = 4;
 
 export interface ConstructionPersistenceLoadInput {
   storageKey: string;
@@ -76,6 +79,18 @@ export function saveConstructionPieces(storageKey: string, pieces: readonly Plac
   }
 }
 
+function createRestoreOverlapIndex(input: ConstructionPersistenceLoadInput): ConstructionOverlapIndex | null {
+  if (input.overlapCandidatesFor) return null;
+  const index = new ConstructionOverlapIndex(
+    input.placement.overlapSpatialCellM ?? DEFAULT_OVERLAP_SPATIAL_CELL_M,
+  );
+  for (const placed of input.placedPieces) {
+    const piece = input.piecesById.get(placed.typeId);
+    if (piece) index.addPiece(placed, piece);
+  }
+  return index;
+}
+
 export function loadConstructionPieces(input: ConstructionPersistenceLoadInput): ConstructionPersistenceLoadResult {
   let nextEntityId = 1;
   try {
@@ -118,6 +133,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
     }
 
     const loadedPieceIds = new Set(input.placedPieces.map((piece) => piece.id));
+    const restoreOverlapIndex = createRestoreOverlapIndex(input);
     let madeProgress = true;
     while (pending.length > 0 && madeProgress) {
       madeProgress = false;
@@ -133,7 +149,8 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
           piece,
           placed,
           placedPieces: input.placedPieces,
-          overlapCandidates: input.overlapCandidatesFor?.(placed, piece),
+          overlapCandidates: input.overlapCandidatesFor?.(placed, piece)
+            ?? restoreOverlapIndex?.query(piece, placed.position, placed.rotationQuarterTurns),
           loadedPieceIds,
           piecesById: input.piecesById,
           worldCells: input.worldCells,
@@ -143,6 +160,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
           pending.splice(index, 1);
           if (input.addPiece(placed)) {
             loadedPieceIds.add(placed.id);
+            restoreOverlapIndex?.addPiece(placed, piece);
             madeProgress = true;
           } else {
             console.warn(`[construction] skipped saved piece ${placed.id}: runtime insertion rejected`);
