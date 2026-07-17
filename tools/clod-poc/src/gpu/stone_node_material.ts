@@ -179,7 +179,7 @@ export function createStoneNodeMaterial(
   ));
   const stableLighting = max(
     lightingTerm.mul(max(ao, float(STONE_MIN_AO))),
-    vec3(STONE_MIN_LIGHTING),
+    vec3(STONE_MIN_LIGHTING, STONE_MIN_LIGHTING, STONE_MIN_LIGHTING),
   );
 
   const material = new MeshBasicNodeMaterial();
