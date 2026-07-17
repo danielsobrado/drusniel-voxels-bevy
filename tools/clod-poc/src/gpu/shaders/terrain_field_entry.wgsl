@@ -167,7 +167,10 @@ fn quadPass(@builtin(global_invocation_id) gid : vec3<u32>) {
   let i = mesh.x0 + (r0 / (nz * mesh.yCells));
   let r1 = r0 % (nz * mesh.yCells);
   let k = mesh.z0 + (r1 / mesh.yCells);
-  let j = r1 % mesh.yCells;
+  // Edge scan must track the vertical window: cells [vyBase+1, vyBase+yCells] are the
+  // ones whose four surrounding vertex cells all fit inside [vyBase, vyBase+yCells].
+  // For the default vyBase of -1 this is the historical [0, yCells) range.
+  let j = mesh.vyBase + 1 + (r1 % mesh.yCells);
 
   let dBase = densityField(f32(i), f32(j), f32(k));
   var step = vec3<i32>(0, 0, 0);

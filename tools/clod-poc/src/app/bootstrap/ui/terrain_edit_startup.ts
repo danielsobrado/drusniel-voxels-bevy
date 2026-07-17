@@ -22,9 +22,13 @@ export interface TerrainEditStartupResult {
   scheduleDig: (ray: THREE.Ray) => void;
   scheduleConstructionTerrainConform: (request: ConstructionTerrainConformRequest) => void;
   playerTerraformEditActive: () => boolean;
+  /** Observes every terrain-edit dirty event (construction support re-evaluation). */
+  setTerrainEditDirtyListener: (listener: ((event: TerrainEditDirtyEvent) => void) | null) => void;
 }
 
 class SaveTrackingDirtyQueue extends TerrainEditDirtyQueue {
+  onEnqueue: ((event: TerrainEditDirtyEvent) => void) | null = null;
+
   enqueue(event: TerrainEditDirtyEvent): void {
     super.enqueue(event);
     markSaveRegionsDirtyForBounds({
@@ -33,6 +37,7 @@ class SaveTrackingDirtyQueue extends TerrainEditDirtyQueue {
       maxX: event.worldAabb.maxX,
       maxZ: event.worldAabb.maxZ,
     });
+    this.onEnqueue?.(event);
   }
 }
 
@@ -195,5 +200,6 @@ export function runTerrainEditStartup(
     scheduleDig: (ray) => terrainEditService.scheduleDig(ray),
     scheduleConstructionTerrainConform,
     playerTerraformEditActive,
+    setTerrainEditDirtyListener: (listener) => { dirtyQueue.onEnqueue = listener; },
   };
 }

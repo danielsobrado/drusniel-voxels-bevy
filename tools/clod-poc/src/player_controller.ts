@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain/terrain_collider.js";
 import type { PropColliderSet } from "./props/prop_collider.js";
+import type { ConstructionColliderSet } from "./construction/construction_collider.js";
 import { emitAudio } from "./audio/index.js";
 import { gameplayDiagnostics } from "./player/gameplay_diagnostics.js";
 
@@ -46,6 +47,16 @@ export interface PlayerConfig extends CapsuleCollisionConfig {
   gravity: number;
   fixedStep: number;
   recoveryDepth: number;
+  /**
+   * Terminal fall speed (units/s). Bounds per-step motion so the positional capsule
+   * resolve always samples inside thin floors — at 120 Hz, 80 u/s moves 0.67 m per step
+   * against a 1.8 m capsule. Without it, long falls tunnel (P0 hitch-matrix finding).
+   */
+  maxFallSpeed: number;
+  /** Proven-invalid recovery: below this Y nothing valid exists (under bedrock volume). */
+  killPlaneY: number;
+  /** Fixed steps falling in a blocked (no-collider, uncertified) column before recovery. */
+  invalidColumnRecoverySteps: number;
   /** Horizontal accel toward the desired velocity while grounded (units/s²). */
   groundAcceleration: number;
   /** Reduced horizontal accel while airborne — steerable but not instant. */
@@ -70,6 +81,9 @@ export const DEFAULT_PLAYER_CONFIG: Readonly<PlayerConfig> = Object.freeze({
   gravity: 30,
   fixedStep: 1 / 120,
   recoveryDepth: 32,
+  maxFallSpeed: 80,
+  killPlaneY: -256,
+  invalidColumnRecoverySteps: 60,
   groundAcceleration: 60,
   airAcceleration: 16,
   coyoteTime: 0.12,
@@ -201,6 +215,7 @@ export class PlayerController {
   private accumulator = 0;
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
+  private invalidColumnSteps = 0;
   private readonly edgePushback = new THREE.Vector2();
   private readonly physicsSamples: number[] = [];
 
@@ -213,10 +228,15 @@ export class PlayerController {
   }
 
   private propColliders: PropColliderSet | null = null;
+  private constructionColliders: ConstructionColliderSet | null = null;
   private movementReadiness: MovementReadinessProbe | null = null;
 
   attachPropColliders(set: PropColliderSet | null): void {
     this.propColliders = set;
+  }
+
+  attachConstructionColliders(set: ConstructionColliderSet | null): void {
+    this.constructionColliders = set;
   }
 
   /**
@@ -239,6 +259,7 @@ export class PlayerController {
     this.accumulator = 0;
     this.coyoteTimer = 0;
     this.jumpBufferTimer = 0;
+    this.invalidColumnSteps = 0;
   }
 
   update(deltaSeconds: number, input: PlayerInputState, cameraForward: THREE.Vector3): void {
@@ -300,27 +321,43 @@ export class PlayerController {
     } else {
       this.velocity.y -= this.config.gravity * step;
     }
+    // Terminal velocity: keeps per-step motion under the capsule extent so thin floors
+    // are always sampled by the positional resolve (P3 tunnelling fix).
+    if (this.velocity.y < -this.config.maxFallSpeed) this.velocity.y = -this.config.maxFallSpeed;
 
-    if (this.movementReadiness) {
-      const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-      if (horizontalSpeed > 1e-4) {
-        const lookaheadM = this.config.capsuleRadius + horizontalSpeed * step;
-        const aheadX = this.position.x + (this.velocity.x / horizontalSpeed) * lookaheadM;
-        const aheadZ = this.position.z + (this.velocity.z / horizontalSpeed) * lookaheadM;
-        if (
-          this.movementReadiness(aheadX, aheadZ) === "blocked"
-          && this.movementReadiness(this.position.x, this.position.z) !== "blocked"
-        ) {
-          // Stop at the readiness frontier; never invent a floor beyond it.
-          this.velocity.x = 0;
-          this.velocity.z = 0;
-          gameplayDiagnostics.add("frontier_barrier_engagements");
-        }
+    if (this.movementReadiness && (this.velocity.x !== 0 || this.velocity.z !== 0)
+      && this.movementReadiness(this.position.x, this.position.z) !== "blocked") {
+      // Axis-separable frontier checks: a velocity-direction-only probe lets a grazing
+      // approach (large tangential speed, millimeters of inward drift per step) slip
+      // across the boundary. Blocking per axis also slides the player along the frontier
+      // instead of pinning them. Never invent a floor beyond the readiness frontier.
+      const radius = this.config.capsuleRadius;
+      const aheadX = this.position.x + this.velocity.x * step + Math.sign(this.velocity.x) * radius;
+      const aheadZ = this.position.z + this.velocity.z * step + Math.sign(this.velocity.z) * radius;
+      let engaged = false;
+      if (this.velocity.x !== 0 && this.movementReadiness(aheadX, this.position.z) === "blocked") {
+        this.velocity.x = 0;
+        engaged = true;
       }
+      if (this.velocity.z !== 0 && this.movementReadiness(this.position.x, aheadZ) === "blocked") {
+        this.velocity.z = 0;
+        engaged = true;
+      }
+      // Diagonal corner entry: each axis alone stays outside, the combination crosses.
+      if (!engaged && this.velocity.x !== 0 && this.velocity.z !== 0
+        && this.movementReadiness(aheadX, aheadZ) === "blocked") {
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+        engaged = true;
+      }
+      if (engaged) gameplayDiagnostics.add("frontier_barrier_engagements");
     }
 
     const previousX = this.position.x;
     const previousZ = this.position.z;
+    const previousBlocked = this.movementReadiness
+      ? this.movementReadiness(previousX, previousZ) === "blocked"
+      : false;
     this.position.addScaledVector(this.velocity, step);
     clampPlayerToWorld(this.position, this.bounds, this.config.worldEdgeMargin);
     if (this.position.x !== previousX + this.velocity.x * step) this.velocity.x = 0;
@@ -329,25 +366,97 @@ export class PlayerController {
     const collision = this.colliders.resolveCapsule(this.position, this.velocity, this.config);
     let resolved = collision;
     if (this.propColliders && this.propColliders.activeCount() > 0) {
-      const propHit = this.propColliders.resolveCapsule(collision.position, collision.velocity, this.config);
+      const propHit = this.propColliders.resolveCapsule(resolved.position, resolved.velocity, this.config);
       resolved = {
         position: propHit.position,
         velocity: propHit.velocity,
-        grounded: collision.grounded || propHit.grounded,
-        pagesTested: collision.pagesTested + propHit.pagesTested,
+        grounded: resolved.grounded || propHit.grounded,
+        pagesTested: resolved.pagesTested + propHit.pagesTested,
+      };
+    }
+    if (this.constructionColliders && this.constructionColliders.activeCount() > 0) {
+      const pieceHit = this.constructionColliders.resolveCapsule(resolved.position, resolved.velocity, this.config);
+      resolved = {
+        position: pieceHit.position,
+        velocity: pieceHit.velocity,
+        grounded: resolved.grounded || pieceHit.grounded,
+        pagesTested: resolved.pagesTested + pieceHit.pagesTested,
       };
     }
     this.position.copy(resolved.position);
     this.velocity.copy(resolved.velocity);
     this.grounded = resolved.grounded;
     this.lastPagesTested = resolved.pagesTested;
+
+    // Positional hard net for the frontier: the velocity gate above cannot see
+    // resolve-time position changes (slope push-out can slide the capsule across the
+    // boundary — e.g. terrain dug into a pit right at the frontier). If this step ended
+    // in a blocked column that the step did not start in, revert the horizontal motion.
+    if (this.movementReadiness && !previousBlocked
+      && this.movementReadiness(this.position.x, this.position.z) === "blocked") {
+      this.position.x = previousX;
+      this.position.z = previousZ;
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+      gameplayDiagnostics.add("frontier_barrier_engagements");
+    }
+
     if (this.grounded) this.lastSafePosition.copy(this.position);
 
-    if (this.position.y < this.lastSafePosition.y - this.config.recoveryDepth) {
-      this.position.copy(this.lastSafePosition);
-      this.velocity.set(0, 0, 0);
-      this.grounded = false;
-      gameplayDiagnostics.add("player_recovery_backstop_depth");
+    this.applyRecoveryContract();
+  }
+
+  /**
+   * Recovery contract (playable-world-contract P3.2): recover ONLY on proven-invalid
+   * conditions — never merely because Y is below a surface height, and never for deep
+   * falls through covered/certified columns (a player falling into a deep cave is
+   * legitimately far below their last grounded position; the real floor collider will
+   * catch them).
+   *
+   * Proven invalid: non-finite state; below the kill plane (under the valid editable
+   * volume — the true last resort, catching even mesh holes coverage cannot see);
+   * falling in a blocked column (no collider, uncertified) for a bounded number of
+   * steps, with the crude depth rule kept as the blocked-column backstop.
+   *
+   * Without a movement-readiness probe there is no column knowledge, so the legacy
+   * 32 m sink rule stays as-is for probe-less worlds and unit tests.
+   */
+  private applyRecoveryContract(): void {
+    if (!Number.isFinite(this.position.x + this.position.y + this.position.z)
+      || !Number.isFinite(this.velocity.x + this.velocity.y + this.velocity.z)) {
+      this.recoverToLastSafe("player_recovery_non_finite");
+      return;
     }
+    if (this.position.y < this.config.killPlaneY) {
+      this.recoverToLastSafe("player_recovery_kill_plane");
+      return;
+    }
+    if (!this.movementReadiness) {
+      if (this.position.y < this.lastSafePosition.y - this.config.recoveryDepth) {
+        this.recoverToLastSafe("player_recovery_backstop_depth");
+      }
+      return;
+    }
+    const blockedColumn = this.movementReadiness(this.position.x, this.position.z) === "blocked";
+    if (blockedColumn && !this.grounded) {
+      this.invalidColumnSteps++;
+      if (this.invalidColumnSteps >= this.config.invalidColumnRecoverySteps) {
+        this.recoverToLastSafe("player_recovery_missing_collider");
+        return;
+      }
+      if (this.position.y < this.lastSafePosition.y - this.config.recoveryDepth) {
+        this.recoverToLastSafe("player_recovery_backstop_depth");
+      }
+    } else {
+      this.invalidColumnSteps = 0;
+    }
+  }
+
+  private recoverToLastSafe(reason: "player_recovery_non_finite" | "player_recovery_kill_plane" | "player_recovery_missing_collider" | "player_recovery_backstop_depth"): void {
+    this.position.copy(this.lastSafePosition);
+    this.velocity.set(0, 0, 0);
+    this.grounded = false;
+    this.invalidColumnSteps = 0;
+    gameplayDiagnostics.add(reason);
   }
 }

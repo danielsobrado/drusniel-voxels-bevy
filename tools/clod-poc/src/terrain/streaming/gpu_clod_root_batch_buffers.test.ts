@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEEP_WINDOW_RETRY_VY_BASE,
   RootGpuBatchLimitError,
   chunkSlotsPerRootPage,
+  deepWindowRetryPlans,
   estimateChunkSlotBytes,
   estimateRootRequestReadbackBytes,
   findChunkVerticesOutOfBounds,
+  fullyEmptyLod0PageKeys,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   splitRootGpuBatches,
@@ -134,6 +137,44 @@ describe("streamed root batch planning", () => {
       maxTotalSlotBytes: Number.MAX_SAFE_INTEGER,
       maxReadbackBufferBytes: readbackBytes - 1,
     })).toThrow(RootGpuBatchLimitError);
+  });
+});
+
+describe("deep-window retry for fully submerged pages", () => {
+  function meshWithIndices(count: number): { indices: { length: number } } {
+    return { indices: { length: count } };
+  }
+
+  it("identifies only pages whose every chunk meshed empty", () => {
+    const plans = planRootBatchChunkSlots([
+      { px: -126, pz: 0, level: 0 },
+      { px: 0, pz: 0, level: 0 },
+    ], CFG);
+    const meshes = new Map(plans.map((plan) => [
+      plan.slotIndex,
+      meshWithIndices(plan.rootPx === -126 ? 0 : 3),
+    ]));
+    const empty = fullyEmptyLod0PageKeys(plans, meshes);
+    expect(empty).toEqual(new Set(["-126,0"]));
+  });
+
+  it("does not flag a page with one non-empty chunk", () => {
+    const plans = planRootBatchChunkSlots([{ px: 5, pz: 5, level: 0 }], CFG);
+    const meshes = new Map(plans.map((plan) => [plan.slotIndex, meshWithIndices(plan.localChunkIndex === 0 ? 3 : 0)]));
+    expect(fullyEmptyLod0PageKeys(plans, meshes).size).toBe(0);
+  });
+
+  it("rebases retry plans to fresh slot indices with the lowered window", () => {
+    const plans = planRootBatchChunkSlots([
+      { px: -126, pz: 0, level: 0 },
+      { px: 0, pz: 0, level: 0 },
+    ], CFG);
+    const retry = deepWindowRetryPlans(plans, new Set(["-126,0"]));
+    expect(retry).toHaveLength(CFG.chunks_per_page * CFG.chunks_per_page);
+    expect(retry.map((plan) => plan.slotIndex)).toEqual([0, 1, 2, 3]);
+    expect(retry.every((plan) => plan.vyBase === DEEP_WINDOW_RETRY_VY_BASE)).toBe(true);
+    expect(retry.every((plan) => plan.rootPx === -126)).toBe(true);
+    expect(DEEP_WINDOW_RETRY_VY_BASE).toBe(-64);
   });
 });
 

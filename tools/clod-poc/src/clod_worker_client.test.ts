@@ -225,6 +225,79 @@ describe("ClodWorkerClient parent error lifecycle", () => {
   });
 });
 
+describe("ClodWorkerClient stream root build comparison", () => {
+  let client: ClodWorkerClient;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    client = new ClodWorkerClient();
+    (client as unknown as { streamRootCfg: unknown }).streamRootCfg = {
+      page: { quadtree_levels: 3, chunks_per_page: 4, chunk_size: 16 },
+    };
+    (client as unknown as { streamRootGpuUnavailable: boolean }).streamRootGpuUnavailable = true;
+  });
+
+  afterEach(() => {
+    client.dispose();
+  });
+
+  it("reports GPU-unavailable evidence beside fresh cache-bypassed CPU mesh stats", async () => {
+    const mockWorker = (client as unknown as { worker: MockWorker }).worker;
+    const promise = client.compareStreamRootBuilds([{ px: -126, pz: 0 }]);
+
+    await vi.waitFor(() => {
+      expect(streamRootCalls(mockWorker).length).toBeGreaterThan(0);
+    });
+    const call = streamRootCalls(mockWorker)[0];
+    expect(call.coords).toEqual([{ px: -126, pz: 0, level: undefined }]);
+    expect(call.bypassCacheIds).toEqual(["L0:-126,0"]);
+
+    mockWorker.onmessage!({
+      data: {
+        type: "streamRootsBuilt",
+        requestId: requestId(call),
+        nodes: [serializedNode("L0:-126,0", 0)],
+        buildMs: 5,
+        transferBytes: 0,
+      },
+    } as MessageEvent);
+
+    const comparisons = await promise;
+    expect(comparisons).toHaveLength(1);
+    expect(comparisons[0].id).toBe("L0:-126,0");
+    expect(comparisons[0].gpu.ok).toBe(false);
+    expect(comparisons[0].gpu.error).toContain("unavailable");
+    expect(comparisons[0].cpu.ok).toBe(true);
+    expect(comparisons[0].cpu.triangles).toBe(1);
+    expect(comparisons[0].cpu.vertices).toBe(3);
+    expect(comparisons[0].cpu.minY).toBe(0);
+    expect(comparisons[0].cpu.maxY).toBe(0);
+  });
+
+  it("reports a CPU build failure without rejecting the comparison", async () => {
+    const mockWorker = (client as unknown as { worker: MockWorker }).worker;
+    const promise = client.compareStreamRootBuilds([{ px: 124, pz: 0 }]);
+
+    await vi.waitFor(() => {
+      expect(streamRootCalls(mockWorker).length).toBeGreaterThan(0);
+    });
+    const call = streamRootCalls(mockWorker)[0];
+    mockWorker.onmessage!({
+      data: { type: "error", requestId: requestId(call), message: "worker build failed" },
+    } as MessageEvent);
+
+    const comparisons = await promise;
+    expect(comparisons[0].cpu.ok).toBe(false);
+    expect(comparisons[0].cpu.error).toContain("worker build failed");
+  });
+});
+
+function streamRootCalls(worker: MockWorker): Array<Record<string, unknown>> {
+  return worker.postMessage.mock.calls
+    .map(([msg]: unknown[]) => msg as Record<string, unknown>)
+    .filter((msg) => msg.type === "buildStreamRoots");
+}
+
 function mesh(): PageMesh {
   return {
     positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),

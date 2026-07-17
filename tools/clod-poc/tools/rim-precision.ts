@@ -99,7 +99,7 @@ async function imageDiff(firstPath: string, secondPath: string, diffPath: string
 
 async function waitReady(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(
-    () => window.__drusnielClod?.ready === true || window.__drusnielClod?.error !== null,
+    () => window.__drusnielClod?.ready === true || window.__drusnielClod?.error != null,
     undefined,
     { timeout: timeoutMs, polling: 250 },
   );
@@ -221,7 +221,8 @@ async function main(): Promise<void> {
   const { browser, recipe } = await launchWebGPU();
   const evidence: CaptureEvidence[] = [];
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) console.log(`[page:navigated] ${frame.url()}`);
     });

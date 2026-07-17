@@ -67,7 +67,7 @@ function routePose(progress: number): [number, number] {
 
 async function waitReady(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(
-    () => window.__drusnielClod?.ready === true || window.__drusnielClod?.error !== null,
+    () => window.__drusnielClod?.ready === true || window.__drusnielClod?.error != null,
     undefined,
     { timeout: timeoutMs, polling: 250 },
   );
@@ -218,7 +218,8 @@ async function main(): Promise<void> {
   let recovery: RecoveryEvidence[] = [];
   let runUrl = "";
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
     const start = route.start ?? [-8_000, 96, 0];
     const url = clodUrl({
       scene: "infinite-islands",

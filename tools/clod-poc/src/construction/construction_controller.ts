@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { surfaceHeight } from "../terrain/terrain.js";
+import { density, surfaceHeight } from "../terrain/terrain.js";
 import { defaultConstructionConfig } from "./config.js";
 import { CONSTRUCTION_MATERIAL_OPTIONS, constructionMaterialLabel } from "./materials.js";
 import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow } from "./material_preloader.js";
@@ -25,7 +25,9 @@ import { ConstructionOverlapIndex } from "./overlap_index.js";
 import { ConstructionPerformanceTracker, type ConstructionPerformanceSnapshot } from "./construction_timing.js";
 import { raycastConstructionTerrain } from "./targeting.js";
 import { findBestConstructionSnap, updateConstructionGhost } from "./construction_preview.js";
+import { ConstructionColliderSet } from "./construction_collider.js";
 import { ConstructionPieceStore } from "./construction_piece_store.js";
+import { reevaluateConstructionSupport, type ConstructionSupportAabb } from "./support_reevaluation.js";
 import { loadConstructionPieces, saveConstructionPieces } from "./construction_persistence.js";
 import { createConstructionTerrainConformRequest } from "./construction_terrain_conform.js";
 import { createConstructionControllerUi, type ConstructionControllerUi } from "./construction_controller_ui.js";
@@ -60,6 +62,10 @@ export interface ConstructionController {
   dispose(): void;
   stats(): ConstructionControllerStats;
   setTerrainConformHandler(handler: ((request: ConstructionTerrainConformRequest) => void) | null): void;
+  /** Player-collision colliders for placed pieces, kept atomic with add/remove. */
+  readonly colliderSet: ConstructionColliderSet;
+  /** Re-probes terrain support for pieces intersecting an edited world AABB. */
+  reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void;
 }
 
 export function createConstructionController(deps: ConstructionControllerDeps): ConstructionController {
@@ -67,6 +73,7 @@ export function createConstructionController(deps: ConstructionControllerDeps): 
 }
 
 class ConstructionControllerImpl implements ConstructionController {
+  readonly colliderSet = new ConstructionColliderSet();
   private readonly config: ConstructionConfig;
   private readonly piecesById = new Map<string, ConstructionPieceDef>();
   private readonly root = new THREE.Group();
@@ -89,6 +96,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private currentCandidate: ConstructionCandidate | null = null;
   private nextEntityId = 1;
   private lastPlacementMessage = "";
+  private supportReevaluations = 0;
   private terrainConformHandler: ((request: ConstructionTerrainConformRequest) => void) | null = null;
 
   constructor(private readonly deps: ConstructionControllerDeps) {
@@ -101,7 +109,7 @@ class ConstructionControllerImpl implements ConstructionController {
     );
     this.root.name = "construction-root";
     this.deps.scene.add(this.root);
-    this.pieceStore = new ConstructionPieceStore(this.root, this.piecesById, this.snapIndex, this.overlapIndex);
+    this.pieceStore = new ConstructionPieceStore(this.root, this.piecesById, this.snapIndex, this.overlapIndex, this.colliderSet);
 
     this.ghostMaterial = trackedMeshBasicMaterial({
       color: GHOST_INVALID_COLOR,
@@ -187,6 +195,23 @@ class ConstructionControllerImpl implements ConstructionController {
 
   setTerrainConformHandler(handler: ((request: ConstructionTerrainConformRequest) => void) | null): void {
     this.terrainConformHandler = handler;
+  }
+
+  reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void {
+    if (this.pieceStore.pieces.length === 0) return;
+    const result = reevaluateConstructionSupport({
+      pieces: this.pieceStore.pieces,
+      piecesById: this.piecesById,
+      aabb,
+      // The voxel-aware density field is authoritative immediately; the collider set is
+      // stale until the async rebuild pipeline swaps the dug page.
+      groundSolidAt: (x, y, z) => density(x, y, z) > 0,
+    });
+    this.supportReevaluations += 1;
+    if (!result.changed) return;
+    this.pieceStore.applySupportState(result.groundedLost, result.groundedRestored, result.unsupportedIds);
+    this.savePlacedPieces();
+    this.syncUi(true);
   }
 
   private updateActivePreview(): void {
@@ -279,6 +304,9 @@ class ConstructionControllerImpl implements ConstructionController {
     counters["construction_draw_calls_estimate"] = this.pieceStore.meshes.length;
     counters["construction_terrain_conform_requests"] = snapshot.terrainConformRequests;
     counters["construction_clod_invalidation_requests"] = snapshot.clodInvalidationRequests;
+    counters["construction_colliders_active"] = this.colliderSet.activeCount();
+    counters["construction_unsupported_pieces"] = this.pieceStore.unsupportedCount();
+    counters["construction_support_reevaluations"] = this.supportReevaluations;
   }
 
   private updatePointerFromEvent(event: PointerEvent): boolean {

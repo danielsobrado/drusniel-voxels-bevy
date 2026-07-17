@@ -15,8 +15,11 @@ export type GameplayCounterKey =
   | "fallback_heightfield_certified" // height fallback fired in a certified single-surface column
   | "fallback_denied_uncertified" // fallback would have fired but the column is not certified (cave/edited)
   | "frontier_barrier_engagements" // movement stopped at a readiness frontier
-  // Recovery reasons.
-  | "player_recovery_backstop_depth" // legacy 32 m sink rule (last-resort backstop)
+  // Recovery reasons (P3 proven-invalid contract).
+  | "player_recovery_non_finite" // NaN/Infinity in position or velocity
+  | "player_recovery_kill_plane" // below the valid editable volume — true last resort
+  | "player_recovery_missing_collider" // bounded steps falling in a blocked column
+  | "player_recovery_backstop_depth" // crude 32 m sink rule (probe-less worlds / blocked-column backstop)
   // Edit command outcomes.
   | "edits_denied_not_ready"
   | "edit_commands_expired"

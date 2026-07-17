@@ -4,7 +4,7 @@ import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_ras
 import type { HydrologyGraph } from "./world/hydrology_graph/hydrology_graph.js";
 import type { GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
-import type { ClodPageNode } from "./types.js";
+import type { ClodPageNode, PageMesh } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
 import type { FeatureTerrainStamp } from "./world/feature_stamps.js";
@@ -68,6 +68,7 @@ import type {
   HeightfieldTileWorkerResponse,
 } from "./world/heightfield_tiles/heightfield_tile_worker_protocol.js";
 import { uploadHeightfieldTilesForPage } from "./world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
+import type { StreamRootBuildComparison, StreamRootBuildLegEvidence } from "./core/hooks.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
 
@@ -296,6 +297,68 @@ export class ClodWorkerClient {
       }
       this.assertStreamRootNodesValid(fallback.nodes, "cpu");
       return fallback;
+    }
+  }
+
+  /**
+   * Diagnostic-only: build the same pages through the GPU mesher and the CPU worker
+   * (cache-bypassed) and report both outcomes side by side. Neither leg stores to the
+   * stream-root cache or counts as a route fallback; a GPU-leg failure does increment
+   * the mesher's failed-batch counter, so run this outside acceptance measurement.
+   */
+  async compareStreamRootBuilds(
+    coords: readonly { px: number; pz: number; level?: number }[],
+  ): Promise<StreamRootBuildComparison[]> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
+    this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
+    const mesher = await this.getStreamRootGpuMesher();
+    const comparisons: StreamRootBuildComparison[] = [];
+    for (const coord of coords) {
+      const id = this.streamRootNodeId(coord);
+      comparisons.push({
+        id,
+        gpu: await this.compareStreamRootGpuLeg(mesher, coord, id),
+        cpu: await this.compareStreamRootCpuLeg(coord, id),
+      });
+    }
+    return comparisons;
+  }
+
+  private async compareStreamRootGpuLeg(
+    mesher: GpuClodRootMesher | null,
+    coord: { px: number; pz: number; level?: number },
+    id: string,
+  ): Promise<StreamRootBuildLegEvidence> {
+    const startedAt = performance.now();
+    if (!mesher) return streamRootLegFailure(new Error("WebGPU streamed-root mesher unavailable"), 0);
+    try {
+      if (this.streamRootGpuTileMeshRequested()) {
+        const pageSize = this.streamRootCfg!.page.chunks_per_page * this.streamRootCfg!.page.chunk_size;
+        if (!uploadHeightfieldTilesForPage(coord, pageSize)) {
+          throw new Error(`GPU tile mesher missing resident heightfield tile for ${id}`);
+        }
+      }
+      const built = await mesher.buildPages([{ px: coord.px, pz: coord.pz, level: coord.level }]);
+      const node = built.nodes.find((candidate) => candidate.id === id);
+      if (!node) throw new Error(`GPU build returned no node for ${id}`);
+      return streamRootLegEvidence(node.mesh, performance.now() - startedAt);
+    } catch (error) {
+      return streamRootLegFailure(error, performance.now() - startedAt);
+    }
+  }
+
+  private async compareStreamRootCpuLeg(
+    coord: { px: number; pz: number; level?: number },
+    id: string,
+  ): Promise<StreamRootBuildLegEvidence> {
+    const startedAt = performance.now();
+    try {
+      const built = await this.buildStreamRootsOnWorker([coord], [id]);
+      const node = built.nodes.find((candidate) => candidate.id === id);
+      if (!node) throw new Error(`CPU build returned no node for ${id}`);
+      return streamRootLegEvidence(node.mesh, performance.now() - startedAt);
+    } catch (error) {
+      return streamRootLegFailure(error, performance.now() - startedAt);
     }
   }
 
@@ -762,4 +825,28 @@ export class ClodWorkerClient {
     this.rejectPendingDig(error);
     this.parentsWaiters.splice(0);
   }
+}
+
+function streamRootLegEvidence(mesh: PageMesh, buildMs: number): StreamRootBuildLegEvidence {
+  let minY: number | null = null;
+  let maxY: number | null = null;
+  for (let i = 1; i < mesh.positions.length; i += 3) {
+    const y = mesh.positions[i];
+    if (minY === null || y < minY) minY = y;
+    if (maxY === null || y > maxY) maxY = y;
+  }
+  return {
+    ok: true,
+    error: null,
+    triangles: mesh.indices.length / 3,
+    vertices: mesh.positions.length / 3,
+    minY,
+    maxY,
+    buildMs,
+  };
+}
+
+function streamRootLegFailure(error: unknown, buildMs: number): StreamRootBuildLegEvidence {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return { ok: false, error: message, triangles: 0, vertices: 0, minY: null, maxY: null, buildMs };
 }

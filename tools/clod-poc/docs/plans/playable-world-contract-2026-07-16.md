@@ -1,6 +1,7 @@
 # Playable World Contract — character, readiness, and the vertical slice
 
-Created 2026-07-16. Status: PLANNED (no code landed from this doc yet). Revised same day
+Created 2026-07-16. Status: **P0–P3 IMPLEMENTED 2026-07-17** (see execution log at the
+bottom); P4+ planned. Revised same day
 after an external review that found real behavioral mistakes in the first draft — all of
 its code claims were verified in source and the readiness/collision core is rewritten
 accordingly. Accepted: the heightfield fallback collider is **restricted, never
@@ -202,10 +203,29 @@ Dig strikes and combat/spell casts never silently replay.
    counters first, policy later.
 4. Honest baseline: scripted 10-minute run (walk + dig + jump + teleport, includes one
    cave from the voxel overlay) recording all reason-coded events **before** any fix.
-- [ ] characterization tests landed (semantics table recorded here)
-- [ ] hitch matrix characterized (behaviors recorded, incl. time-dilation)
-- [ ] reason-coded counters + BVH timing landed
-- [ ] honest baseline recorded (events per class per 10 min)
+- [x] characterization tests landed (semantics table recorded here) —
+  `src/player_controller_characterization.test.ts`
+- [x] hitch matrix characterized (behaviors recorded, incl. time-dilation) —
+  `src/player/hitch_matrix.test.ts`
+- [x] reason-coded counters + BVH timing landed — `src/player/gameplay_diagnostics.ts`,
+  published into `stats.counters` every frame from the frame loop
+- [x] honest baseline recorded (events per class per 10 min) —
+  `docs/performance/playable-world-baseline-2026-07-16.md` (+ `.json`), harness
+  `tools/playable_baseline/` runs legacy vs contract configs and gates in `npm test`
+
+**P0 semantics table (characterized, all against current code):**
+
+| semantics | recorded behavior |
+|---|---|
+| fixed step | 120 Hz, ≤ 12 steps/frame, delta clamp 100 ms → a 250 ms hitch simulates 100 ms (time dilation confirmed) |
+| ground accel | 60 u/s², one clamped increment per step (walk speed reached in 16 steps, not instant) |
+| air accel | 16 u/s² (3.75× weaker) |
+| coyote time | 0.12 s: jump fires ≤ 13 airborne steps after ground loss, not at 15 |
+| jump buffer | 0.15 s: press just before touchdown fires on landing |
+| slopes | 55° ground / 65° slide (60° boundary); 0.3 m step climbed by positional push-out |
+| recovery | crude 32 m sink rule; **finding: any drop > 32 m NEVER completes** — falling does not update `lastSafePosition`, so deep falls yo-yo forever (cave shafts, dug pits). P3 recovery contract owns this |
+| thin features | caught at 42 m/s (30 m drop); at injected 600 m/s the capsule passes a zero-thickness floor when the plane lands in the inter-step gap (at 300 m/s the same drop is caught by alignment luck). No terminal velocity exists; unreachable naturally only because the 32 m rule fires first |
+| page-boundary swap | crossing a boundary with a queued unprocessed rebuild: old collider serves, zero coverage loss, stale frames counted |
 
 ### P1 — Revisioned capability readiness
 
@@ -218,9 +238,23 @@ Dig strikes and combat/spell casts never silently replay.
    hold, edit deny path with feedback, counters).
 3. Edit-command object + validation rules (failing tests: expiry, revision mismatch,
    distance, mode change → deny; construction ghost waits and then places correctly).
-- [ ] readiness contract tests → green
-- [ ] spawn/teleport gating + `time_to_gameplay_ready_ms` landed (plan 1 LM5 consumes)
-- [ ] edit-command validation tests → green; no silent replay anywhere
+- [x] readiness contract tests → green — `src/player/cell_readiness.ts` + tests.
+  Staleness derives from the rebuild pipeline (replacement pending for a covering page),
+  not a global revision compare, which would mark every untouched page stale after any
+  edit anywhere; revisions are still reported in the struct. Fields for construction/
+  water land in P4/P5 with their consumers.
+- [x] spawn/teleport gating + `time_to_gameplay_ready_ms` landed —
+  `shouldApplyQuerySpawnNow` gained `targetCellReady`; `player_startup` wires
+  `teleportTargetReady`; counter recorded on both gated and ungated spawns
+- [x] edit-command validation tests → green; no silent replay anywhere —
+  `src/player/edit_commands.ts` + tests (immutable commands; dig/casts deny on revision
+  mismatch; construction ghosts replay only via latest-revision re-validation). The dig
+  service's queued brush-drag rays now expire (`edit_commands_expired`) instead of firing
+  seconds later; dig deny path wired via `editTargetAcceptable` (collider present +
+  authority resident — deliberately NOT revision-strict: transactions are computed
+  against the current voxel authority, so a one-tick-stale hit is a no-op, never
+  corruption; the strict answer stays in `CellReadiness.terrainEditReady`). Construction
+  ghost command wiring happens with P4's construction hardening.
 
 ### P2 — Safe collider streaming
 
@@ -241,11 +275,34 @@ Dig strikes and combat/spell casts never silently replay.
    certification; never fires in voxel-overlay/edited/overhang columns. Failing test:
    airborne player inside a cave is NOT snapped to the surface above (this fails against
    current code — the proof the restriction bites).
-- [ ] async pipeline tests → green (zero sync BVH builds on frame path)
-- [ ] stale policy tests + bounds → green
-- [ ] frontier barrier tests → green; engagement gate calibrated
-- [ ] fallback restriction test (cave case) → green
-- [ ] `perf:construction` + collider micro-timings before/after recorded
+- [x] async pipeline tests → green (zero sync BVH builds on frame path) —
+  `TerrainColliderSet.schedulePageUpdate` / `processPendingRebuilds` +
+  `terrain_collider_pipeline.test.ts`; the dig apply path
+  (`terrain_view_startup.applyNodeCollider`) now schedules instead of building on the
+  frame; app set runs `autoProcessRebuilds` (self-arming macrotask). **Caveat:** builds
+  are off-the-frame-callback but still on the JS main thread — a worker executor is the
+  follow-up if `collider_build_total_ms` per job grows past frame budget (baseline: ~0.1
+  ms/page synthetic; real pages measured via the counters in live runs).
+- [x] stale policy tests + bounds → green — standing on a pending-replacement collider
+  allowed; `collider_stale_frames` + `collider_queue_latency_ms/max` counted (baseline
+  max ≈ 2.4 ms, 1 job/frame drain)
+- [x] frontier barrier tests → green — `src/player/frontier_barrier.test.ts`. Two real
+  holes found and closed during the baseline run: (1) a velocity-direction-only probe
+  lets a **grazing approach** slip across (fixed: axis-separable next-position checks,
+  which also slide along the frontier); (2) resolve-time slope push-out can carry the
+  capsule across — e.g. **terrain dug into a pit exactly at the frontier** (fixed:
+  positional hard net after resolve — if a step ends in a blocked column it did not
+  start in, the horizontal motion reverts). Engagement gate calibration on standing
+  routes belongs to the P7 slices (baseline routes deliberately provoke it).
+- [x] fallback restriction test (cave case) → green —
+  `terrain_collider_certification.test.ts`; the cave case fails against pre-P2 code.
+  `TerrainHeightFallback.certifyColumn` wired to `appColumnCertified` (voxel-overlay
+  residency + any voxel edit in column ⇒ uncertified, fails closed; absent certifier =
+  legacy heightfield-only behavior, app wiring always passes one).
+- [x] `perf:construction` + collider micro-timings before/after recorded —
+  perf:construction 2026-07-17: PASS, snap_ms_p95 ≤ 0.124 (settlement-10k 0.082),
+  validation_ms_p95 ≤ 0.016 — construction paths untouched, no regression. Collider
+  micro-timings live in the baseline evidence doc.
 
 ### P3 — Controller correctness
 
@@ -261,10 +318,32 @@ Dig strikes and combat/spell casts never silently replay.
    thin features at high velocity is the expected finding class).
 4. Zero `collider_coverage_missing` events and zero unexplained recoveries across the
    P0 scripted run, 5 repeated runs.
-- [ ] dig-under-self test (fall semantics) → green
-- [ ] recovery contract tests (incl. cave-traversal zero-recovery) → green
-- [ ] hitch matrix gates calibrated → green
-- [ ] 5-run zero-coverage-loss gate green
+- [x] dig-under-self test (fall semantics) → green —
+  `src/player/dig_under_self.test.ts`: old collider serves through the queued rebuild
+  (stale frames counted), atomic swap removes the ground, the player falls 60 m and is
+  caught by the real floor below with zero recoveries. Bedrock/crust protection is the
+  voxel authority's existing guard (`dig.test.ts` "respects the bedrock guard";
+  `voxelTransactionFromDigEdit` clamps rasterization above `BEDROCK_Y`).
+- [x] recovery contract tests (incl. cave-traversal zero-recovery) → green —
+  `src/player/recovery_contract.test.ts`. Implemented proven-invalid conditions:
+  non-finite state (`player_recovery_non_finite`), kill plane `killPlaneY = -256`
+  (`player_recovery_kill_plane`, the true last resort — catches even mesh holes that 2D
+  coverage cannot see), bounded falling-in-blocked-column steps
+  (`invalidColumnRecoverySteps = 60` ≈ 0.5 s, `player_recovery_missing_collider`), and
+  the crude 32 m depth rule demoted to blocked-column backstop. Probe-less worlds keep
+  the legacy 32 m rule unchanged (unit-test/back-compat). The 60 m cave drop lands with
+  zero recoveries — fails against pre-P3 code (the P0 yo-yo finding).
+- [x] hitch matrix gates calibrated → green — the two P0 KNOWN LIMIT cases are promoted
+  to gates: a 200 m drop over covered ground completes with zero recoveries, and
+  injected 600 m/s is clamped by the new terminal velocity (`maxFallSpeed = 80` u/s →
+  0.67 m per 120 Hz step against a 1.8 m capsule) so thin floors are always sampled.
+  The probe-less legacy yo-yo stays recorded as characterization. Remaining matrix rows
+  (wall, ceiling, ledge, boundary-swap, frame shapes) were already asserting correct
+  behavior and now gate it.
+- [x] 5-run zero-coverage-loss gate green — the baseline harness runs the full scripted
+  10-sim-minute contract route under 5 route seeds inside `npm test`: zero
+  `collider_coverage_missing`, zero recoveries (all reasons), zero sync frame builds,
+  frontier held, zero invented-floor frames, every seed.
 
 ### P4 — Construction hardened under streaming and edits
 
@@ -379,3 +458,64 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 - **Slice flakiness**: seeded content, injected input, calibrated thresholds; the
   deterministic slice exists precisely so the continuous slice's failures are
   attributable.
+
+## Execution log
+
+### 2026-07-17 — P0–P2 implemented, suite green (3370 tests), build green
+
+New modules: `src/player/gameplay_diagnostics.ts` (reason-coded counters, published to
+`stats.counters` each frame), `src/player/cell_readiness.ts` (readiness contract +
+app feeds + `appColumnCertified`), `src/player/edit_commands.ts` (immutable commands +
+validation). `TerrainColliderSet` gained: build timing + sync-frame-build detection,
+reason-coded capsule accounting, `coversPoint`/`colliderStatusAt`, certification-gated
+height fallback, and the async revision-validated rebuild pipeline
+(`schedulePageUpdate`/`processPendingRebuilds`, snapshot-at-enqueue so floating-origin
+translation keeps pending jobs coherent, supersede + discard rules, auto-drain
+macrotask driver in the app). `PlayerController` gained the frontier barrier (velocity
+gate + positional hard net) and reason-coded recovery counting.
+
+Wiring: renderer_startup passes `certifyColumn` + attaches the movement probe;
+terrain_view_startup's dig collider apply is async; terrain_edit_startup denies
+not-ready targets with UI feedback (`edits_denied_not_ready`); queued dig rays expire;
+player_startup gates query spawns on target-cell readiness and records
+`time_to_gameplay_ready_ms`.
+
+Honest baseline (`npm run baseline:playable`, also a permanent `npm test` gate):
+10 sim-minutes per config, legacy vs contract —
+`docs/performance/playable-world-baseline-2026-07-16.md`. Headlines: legacy stood on an
+invented fallback floor 62 frames in the cave + 4033 frames over the never-streamed
+zone and never reached the real cave floor; contract had **zero invented-floor frames,
+reached the cave floor, zero `collider_coverage_missing`, zero recoveries, zero sync
+frame builds** (legacy: 207 sync builds / 12.7 ms), queue latency max 2.4 ms.
+
+Verification: `typecheck` clean; `vitest run` 3370 passed; `vite build` green;
+`perf:construction` PASS (no regression). Not run (needs browser/GPU session):
+`accept:phase5-voxel-overlay`, real-scene collider build timings — the counters are in
+the stats contract for the next live run.
+
+Known deviations/decisions for review: dig deny uses practical readiness (collider
+present + authority resident) rather than revision-strict readiness — rationale under
+the P1 checkboxes; pipeline builds are off-frame-callback but in-thread (worker executor
+is the named follow-up); baseline evidence file is dated 2026-07-16 by machine clock.
+
+### 2026-07-17 — P3 implemented, suite green (3407 tests), build green
+
+Controller correctness on top of P0–P2. `PlayerConfig` gained `maxFallSpeed` (80 u/s
+terminal velocity — bounds per-step motion under the capsule extent, closing the P0
+thin-feature tunnel), `killPlaneY` (−256) and `invalidColumnRecoverySteps` (60). The
+crude 32 m sink rule is replaced by the proven-invalid recovery contract when a
+movement-readiness probe is attached (the app always attaches one): non-finite / kill
+plane / bounded blocked-column fall, each with its own counter; depth rule demoted to
+blocked-column backstop; probe-less worlds keep legacy semantics. Deep falls through
+covered columns now land instead of yo-yoing — dig-under-self means the player falls
+onto the next real surface (`dig_under_self.test.ts`), and cave traversal triggers zero
+recoveries (`recovery_contract.test.ts`). The P0 hitch-matrix KNOWN LIMIT cases are
+promoted to gates; the baseline harness gained a 5-route-seed contract gate (zero
+coverage loss / recoveries / sync builds / frontier breaches per seed) that runs in
+`npm test`. Evidence regenerated. The controller survived the matrix without an
+integrator swap — the P0 risk ("resolution-after-integration may not survive") did not
+materialize; terminal velocity + the recovery contract were sufficient.
+
+Note for P5 (water): `maxFallSpeed` currently applies to all airborne motion; swim
+locomotion replaces the ballistic fall inside water volumes, so the clamp needs no
+water-specific carve-out now, but rerun the matrix submerged per the protocol.

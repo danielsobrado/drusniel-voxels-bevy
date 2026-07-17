@@ -5,7 +5,7 @@
 // collider rebuilds, no barrier); "contract" runs the P1/P2 wiring. The comparison is
 // the evidence that the restriction bites and that only real failures gate.
 import * as THREE from "three";
-import { DEFAULT_PLAYER_CONFIG, PlayerController } from "../../src/player_controller.js";
+import { PlayerController } from "../../src/player_controller.js";
 import {
   TerrainColliderSet,
   type TerrainColliderPage,
@@ -156,7 +156,6 @@ export interface BaselineRunResult {
 
 const FRAME_DT = 1 / 60;
 const BOUNDS = { minX: 0, minZ: 0, maxX: WORLD_SIZE_M, maxZ: WORLD_SIZE_M };
-const FORWARD = new THREE.Vector3(0, 0, -1);
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
@@ -166,7 +165,12 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-export function runPlayableBaseline(label: "legacy" | "contract", simSeconds = 600): BaselineRunResult {
+export function runPlayableBaseline(
+  label: "legacy" | "contract",
+  simSeconds = 600,
+  traceSink?: string[],
+  routeSeed = 0xd275,
+): BaselineRunResult {
   resetGameplayDiagnosticsForTests();
   clearDigEdits();
   setVoxelOverlayResidentBounds("baseline-cave", null);
@@ -195,7 +199,7 @@ export function runPlayableBaseline(label: "legacy" | "contract", simSeconds = 6
 
   controller.spawn(new THREE.Vector3(96, baseSurfaceHeight(96, 96) + 0.5, 96));
 
-  const random = seededRandom(0xd275); // deterministic route
+  const random = seededRandom(routeSeed); // deterministic route
   let heading = 0;
   let digs = 0;
   let teleports = 0;
@@ -281,7 +285,13 @@ export function runPlayableBaseline(label: "legacy" | "contract", simSeconds = 6
     if (label === "contract") colliders.processPendingRebuilds(1); // the off-frame driver tick
 
     const { x, y, z } = controller.position;
-    if (inRect(x, z, CAVE_HOLE) && controller.grounded) {
+    // Inset the hole rect: rim triangles from adjacent kept cells reach up to half a grid
+    // cell + capsule radius inside it, and standing there is legitimate rim ground.
+    const holeInterior = {
+      minX: CAVE_HOLE.minX + PAGE_GRID_STEP_M, minZ: CAVE_HOLE.minZ + PAGE_GRID_STEP_M,
+      maxX: CAVE_HOLE.maxX - PAGE_GRID_STEP_M, maxZ: CAVE_HOLE.maxZ - PAGE_GRID_STEP_M,
+    };
+    if (inRect(x, z, holeInterior) && controller.grounded) {
       const surface = baseSurfaceHeight(x, z);
       if (Math.abs(y - surface) < 1.5) fakeFloorFramesInCave++; // standing on the invented floor
       if (y < surface - CAVE_FLOOR_DEPTH_M + 2) caveFloorReached = true;
@@ -289,6 +299,15 @@ export function runPlayableBaseline(label: "legacy" | "contract", simSeconds = 6
     if (inRect(x, z, UNSTREAMED)) {
       enteredUnstreamed = true;
       if (controller.grounded) fakeFloorFramesUnstreamed++;
+    }
+
+    if (traceSink && frame % 600 === 0) {
+      traceSink.push(
+        `[trace ${label}] t=${t.toFixed(0)}s pos=(${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}) `
+        + `grounded=${controller.grounded} sync=${gameplayDiagnostics.get("collider_sync_frame_builds")} `
+        + `builds=${gameplayDiagnostics.get("collider_build_count")} queued=${gameplayDiagnostics.get("collider_jobs_queued")} `
+        + `barrier=${gameplayDiagnostics.get("frontier_barrier_engagements")} covMiss=${gameplayDiagnostics.get("collider_coverage_missing")}`,
+      );
     }
   }
 

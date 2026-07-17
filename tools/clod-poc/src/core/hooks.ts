@@ -33,6 +33,22 @@ export interface StreamingResidencySnapshot {
   readonly waterHydrologyKeys: readonly string[] | null;
 }
 
+export interface StreamRootBuildLegEvidence {
+  readonly ok: boolean;
+  readonly error: string | null;
+  readonly triangles: number;
+  readonly vertices: number;
+  readonly minY: number | null;
+  readonly maxY: number | null;
+  readonly buildMs: number;
+}
+
+export interface StreamRootBuildComparison {
+  readonly id: string;
+  readonly gpu: StreamRootBuildLegEvidence;
+  readonly cpu: StreamRootBuildLegEvidence;
+}
+
 export interface PrecisionLandmark {
   readonly id: string;
   readonly p: readonly [number, number, number];
@@ -90,6 +106,9 @@ export interface ClodHooks {
     direction: [number, number, number];
   }) => Promise<TerrainEditProbeResult>) | null;
   getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
+  compareStreamRootBuilds: ((
+    coords: readonly { px: number; pz: number; level?: number }[],
+  ) => Promise<readonly StreamRootBuildComparison[]>) | null;
   getStreamingResidencySnapshot: (() => StreamingResidencySnapshot) | null;
   setPrecisionLandmarks: ((landmarks: readonly PrecisionLandmark[]) => void) | null;
   getPrecisionLandmarkScreenPositions: (() => readonly PrecisionLandmarkScreenPosition[]) | null;
@@ -179,6 +198,7 @@ export function initHooks(): ClodHooks {
     beginMovementRouteProbe: null,
     runTerrainEditProbe: null,
     getStreamingRootReadyPageKeys: null,
+    compareStreamRootBuilds: null,
     getStreamingResidencySnapshot: null,
     setPrecisionLandmarks: null,
     getPrecisionLandmarkScreenPositions: null,

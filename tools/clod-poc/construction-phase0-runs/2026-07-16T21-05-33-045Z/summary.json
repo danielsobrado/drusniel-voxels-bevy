@@ -1,0 +1,84 @@
+{
+  "generated_at": "2026-07-16T21:05:33.044Z",
+  "iterations": 100,
+  "passed": true,
+  "gates": {
+    "settlement_piece_count": true,
+    "snap_candidates_local": true,
+    "overlap_candidates_local": true,
+    "snap_cells_bounded": true,
+    "overlap_cells_bounded": true
+  },
+  "results": [
+    {
+      "scene": "small-cabin",
+      "pieces": 10,
+      "snap_ms_p95": 0.12350000000000705,
+      "validation_ms_p95": 0.015699999999981173,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 8,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 5
+    },
+    {
+      "scene": "cantilever-balcony",
+      "pieces": 13,
+      "snap_ms_p95": 0.06120000000001369,
+      "validation_ms_p95": 0.0037000000000091404,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 4,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 2
+    },
+    {
+      "scene": "supported-bridge",
+      "pieces": 28,
+      "snap_ms_p95": 0.05160000000000764,
+      "validation_ms_p95": 0.002600000000001046,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 4,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 2
+    },
+    {
+      "scene": "tall-tower",
+      "pieces": 25,
+      "snap_ms_p95": 0.04480000000000928,
+      "validation_ms_p95": 0.0024000000000228283,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 5,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 3
+    },
+    {
+      "scene": "sloped-roof-corners",
+      "pieces": 65,
+      "snap_ms_p95": 0.033899999999988495,
+      "validation_ms_p95": 0.0011000000000080945,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 0,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 0
+    },
+    {
+      "scene": "uneven-terrain-foundation",
+      "pieces": 144,
+      "snap_ms_p95": 0.08590000000000941,
+      "validation_ms_p95": 0.0033000000000242835,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 17,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 3
+    },
+    {
+      "scene": "settlement-10k",
+      "pieces": 10000,
+      "snap_ms_p95": 0.0817000000000121,
+      "validation_ms_p95": 0.0024999999999977263,
+      "snap_visited_cells_max": 216,
+      "snap_candidates_max": 9,
+      "overlap_visited_cells_max": 2,
+      "overlap_candidates_max": 2
+    }
+  ]
+}

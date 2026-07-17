@@ -23,6 +23,43 @@ export interface GpuRootChunkPlan {
   localChunkIndex: number;
   cx: number;
   cz: number;
+  /** Vertical window base in cells; omitted means the default near-surface window (-1). */
+  vyBase?: number;
+}
+
+/**
+ * Matches the CPU chunk mesher's MIN_Y_CELL. A page whose whole surface lies below the
+ * default [-1, Y_CELLS] window (deep ocean at the continent rims) meshes empty on the
+ * GPU; retrying with the window floor at -64 covers every height the CPU mesher can
+ * produce for such pages.
+ */
+export const DEEP_WINDOW_RETRY_VY_BASE = -64;
+
+/** LOD0 page keys (`px,pz`) whose every chunk in `meshesBySlot` has zero indices. */
+export function fullyEmptyLod0PageKeys(
+  plans: readonly GpuRootChunkPlan[],
+  meshesBySlot: ReadonlyMap<number, { indices: { length: number } }>,
+): Set<string> {
+  const nonEmpty = new Set<string>();
+  const seen = new Set<string>();
+  for (const plan of plans) {
+    const key = `${plan.lod0Px},${plan.lod0Pz}`;
+    seen.add(key);
+    if ((meshesBySlot.get(plan.slotIndex)?.indices.length ?? 0) > 0) nonEmpty.add(key);
+  }
+  const empty = new Set<string>();
+  for (const key of seen) if (!nonEmpty.has(key)) empty.add(key);
+  return empty;
+}
+
+/** Rebased copies of the plans for `pageKeys`, stamped with the lowered vertical window. */
+export function deepWindowRetryPlans(
+  plans: readonly GpuRootChunkPlan[],
+  pageKeys: ReadonlySet<string>,
+): GpuRootChunkPlan[] {
+  return plans
+    .filter((plan) => pageKeys.has(`${plan.lod0Px},${plan.lod0Pz}`))
+    .map((plan, slotIndex) => ({ ...plan, slotIndex, vyBase: DEEP_WINDOW_RETRY_VY_BASE }));
 }
 
 export interface RootGpuBatchLimits {

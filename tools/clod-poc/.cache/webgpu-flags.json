@@ -1,8 +1,5 @@
 {
   "headless": true,
-  "channel": "chrome",
-  "args": [
-    "--enable-unsafe-webgpu",
-    "--ignore-gpu-blocklist"
-  ]
+  "channel": "chromium",
+  "args": []
 }

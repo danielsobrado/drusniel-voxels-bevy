@@ -42,6 +42,7 @@ export function normalizePersistedConstructionPiece(value: unknown): PlacedConst
   if (typeof record.grounded === "boolean") normalized.grounded = record.grounded;
   const parentIds = readStringArray(record.parentIds);
   if (parentIds !== undefined) normalized.parentIds = parentIds;
+  if (record.unsupported === true) normalized.unsupported = true;
   return normalized;
 }
 

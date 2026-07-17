@@ -26,10 +26,10 @@ export interface MeshBufferOffsets {
   counterSlot?: number;
 }
 
-export function computeMeshDims(cx: number, cz: number, S: number): MeshDims {
+export function computeMeshDims(cx: number, cz: number, S: number, vyBase = -1): MeshDims {
   const x0 = cx * S, x1 = (cx + 1) * S;
   const z0 = cz * S, z1 = (cz + 1) * S;
-  const vxBase = x0 - 1, vyBase = -1, vzBase = z0 - 1;
+  const vxBase = x0 - 1, vzBase = z0 - 1;
   const vxCount = S + 1, vyCount = Y_CELLS + 1, vzCount = S + 1;
   const slotCount = vxCount * vyCount * vzCount;
   const edgeCount = S * S * Y_CELLS * 3;

@@ -106,6 +106,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       fallbackPages: sum(stats, "fallbackPages") + this.fallbackPages,
       failedBatches: sum(stats, "failedBatches"),
       workerFallbackPages: sum(stats, "workerFallbackPages") + this.workerFallbackPages,
+      deepWindowRetryPages: sum(stats, "deepWindowRetryPages"),
     };
   }
 

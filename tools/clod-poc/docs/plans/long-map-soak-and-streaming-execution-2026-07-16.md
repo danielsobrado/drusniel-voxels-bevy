@@ -25,6 +25,15 @@ Execution evidence and per-file land/park decisions are recorded in
 `../performance/long-map-execution-evidence-2026-07-16.md`. LM0.2 is closed with a
 profiled fix, controlled-window gate correction, five-run recalibration, and clean-GPU
 confirmation. LM0.3 remains open; the partial visual captures cannot be used as proof.
+LM2 and LM3 calibration captures have now run, but both are blocked by reproducible
+rim-page GPU-mesher failures; the evidence document contains the measured traces and a
+bounded handoff rather than a speculative renderer fix.
+
+**Handoff progress (2026-07-17):** the LM0.3 WebGPU `uDebugMode` ownership-debug defect
+is fixed with unit and browser differential regressions (see the evidence document);
+the remaining LM0.3 steps are the human visual-review items. A
+`compareStreamRootBuilds` diagnostic hook and `npm run probe:rim-gpu-mesher` now
+reproduce the rim-page GPU-versus-CPU mesher comparison directly.
 
 Plan 1 of 5 toward the browser RPG target (procedural ocean-bounded continent with free
 building, terrain deformation, melee + magic, settlements and dungeons; single-player;

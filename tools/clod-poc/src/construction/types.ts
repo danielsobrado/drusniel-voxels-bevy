@@ -89,6 +89,12 @@ export interface PlacedConstructionPiece {
   material?: ConstructionMaterial;
   grounded?: boolean;
   parentIds?: readonly string[];
+  /**
+   * Explicitly marked unsupported by support re-evaluation (terrain dug out from under
+   * the piece or its ancestors). Collapse is deferred: the piece stays visible and
+   * solid, is visually marked, and persists across save/load with this flag.
+   */
+  unsupported?: boolean;
 }
 
 export interface ConstructionTerrainConformRequest {

@@ -12,6 +12,14 @@ export {
   createFreePlacementPosition,
   validateConstructionPlacement,
 } from "./placement.js";
+export { ConstructionColliderSet } from "./construction_collider.js";
+export { reevaluateConstructionSupport } from "./support_reevaluation.js";
+export type {
+  ConstructionGroundSolidProbe,
+  ConstructionSupportAabb,
+  ConstructionSupportReevaluationInput,
+  ConstructionSupportReevaluationResult,
+} from "./support_reevaluation.js";
 export { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 export type { PersistedConstructionPlacementValidationInput } from "./persisted_placement.js";
 export { buildPlacedPieceMap, hasGroundSupport, isPlacedPieceSupported, resolveConstructionPlacementSupport } from "./support_state.js";

@@ -17,6 +17,20 @@ describe("computeMeshDims", () => {
     expect(d.maxVertices).toBe(d.slotCount);
     expect(d.maxIndices).toBe(S * S * Y_CELLS * 3 * 6);
   });
+
+  it("shifts only the vertical window base when vyBase is overridden", () => {
+    const S = 8;
+    const base = computeMeshDims(2, 3, S);
+    const deep = computeMeshDims(2, 3, S, -64);
+    expect(deep.vyBase).toBe(-64);
+    expect([deep.vxBase, deep.vzBase]).toEqual([base.vxBase, base.vzBase]);
+    expect([deep.vxCount, deep.vyCount, deep.vzCount]).toEqual([base.vxCount, base.vyCount, base.vzCount]);
+    expect(deep.slotCount).toBe(base.slotCount);
+    expect(deep.maxVertices).toBe(base.maxVertices);
+    expect(deep.maxIndices).toBe(base.maxIndices);
+    const packed = packMeshParams(deep, { cellsX: 64, cellsZ: 48 });
+    expect(packed[8]).toBe(-64);
+  });
 });
 
 describe("packMeshParams", () => {

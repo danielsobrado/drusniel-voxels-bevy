@@ -1,0 +1,59 @@
+{
+  "legacy": {
+    "label": "legacy",
+    "simSeconds": 600,
+    "wallClockMs": 273.8754,
+    "counters": {
+      "collider_build_count": 307,
+      "collider_build_total_ms": 25.539700000000096,
+      "collider_exact_no_ground": 28106,
+      "fallback_heightfield_certified": 13001,
+      "collider_sync_frame_builds": 207,
+      "collider_sync_frame_build_ms": 12.534299999999917
+    },
+    "digs": 29,
+    "teleports": 5,
+    "jumps": 85,
+    "fakeFloorFramesInCave": 62,
+    "fakeFloorFramesUnstreamed": 4033,
+    "caveFloorReached": false,
+    "enteredUnstreamed": true,
+    "finalPosition": [
+      608.4176634443903,
+      33.99726277232802,
+      607.9937258512751
+    ]
+  },
+  "contract": {
+    "label": "contract",
+    "simSeconds": 600,
+    "wallClockMs": 336.4448,
+    "counters": {
+      "collider_build_count": 317,
+      "collider_build_total_ms": 17.898500000000126,
+      "collider_exact_no_ground": 23774,
+      "collider_jobs_inflight": 0,
+      "fallback_heightfield_certified": 1989,
+      "collider_jobs_queued": 217,
+      "collider_stale_frames": 192,
+      "collider_jobs_completed": 217,
+      "collider_apply_ms": 0.00020000000017716957,
+      "collider_queue_latency_ms": 1.3976000000000113,
+      "collider_queue_latency_max_ms": 1.8017999999999574,
+      "fallback_denied_uncertified": 2204,
+      "frontier_barrier_engagements": 22473
+    },
+    "digs": 29,
+    "teleports": 5,
+    "jumps": 85,
+    "fakeFloorFramesInCave": 0,
+    "fakeFloorFramesUnstreamed": 0,
+    "caveFloorReached": true,
+    "enteredUnstreamed": false,
+    "finalPosition": [
+      575.9999980373645,
+      24.89638922135553,
+      607.5839705595959
+    ]
+  }
+}

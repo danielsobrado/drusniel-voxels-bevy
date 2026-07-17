@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import { MeshBVH } from "three-mesh-bvh";
+import {
+  footprintFromBox,
+  resolveCapsuleAgainstBvhEntries,
+  type CapsuleBvhFootprint,
+} from "../collision/capsule_bvh_resolve.js";
 import type { CapsuleCollisionConfig, CapsuleCollisionResult } from "../terrain/terrain_collider.js";
 import type { CollisionMode, PropAssetMetadata } from "./prop_types.js";
 import type { LoadedPropAsset } from "./prop_asset_loader.js";
@@ -15,32 +20,15 @@ export interface PropColliderInstanceInput {
 
 interface ColliderEntry {
   key: string;
-  footprint: { minX: number; minZ: number; maxX: number; maxZ: number };
+  footprint: CapsuleBvhFootprint;
   geometry: THREE.BufferGeometry;
   boundsTree: MeshBVH;
 }
 
-const tempBox = new THREE.Box3();
-const tempSegment = new THREE.Line3();
-const trianglePoint = new THREE.Vector3();
-const capsulePoint = new THREE.Vector3();
-const pushDirection = new THREE.Vector3();
-const triangleNormal = new THREE.Vector3();
 const _matrix = new THREE.Matrix4();
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
-
-function footprintFromBox(box: THREE.Box3): ColliderEntry["footprint"] {
-  return { minX: box.min.x, minZ: box.min.z, maxX: box.max.x, maxZ: box.max.z };
-}
-
-function overlapsFootprint(box: THREE.Box3, footprint: ColliderEntry["footprint"]): boolean {
-  return box.max.x >= footprint.minX
-    && box.min.x <= footprint.maxX
-    && box.max.z >= footprint.minZ
-    && box.min.z <= footprint.maxZ;
-}
 
 function boxGeometryFromMetadata(metadata: PropAssetMetadata, scale: number): THREE.BufferGeometry {
   const min = metadata.localBounds.min;
@@ -138,60 +126,7 @@ export class PropColliderSet {
     velocity: THREE.Vector3,
     config: CapsuleCollisionConfig,
   ): CapsuleCollisionResult {
-    const radius = config.capsuleRadius;
-    tempSegment.start.set(position.x, position.y + radius, position.z);
-    tempSegment.end.set(position.x, position.y + config.capsuleHeight - radius, position.z);
-    tempBox.makeEmpty();
-    tempBox.expandByPoint(tempSegment.start);
-    tempBox.expandByPoint(tempSegment.end);
-    tempBox.min.addScalar(-radius);
-    tempBox.max.addScalar(radius);
-
-    const maxSlopeCosine = Math.cos(THREE.MathUtils.degToRad(config.maxSlopeDegrees));
-    let grounded = false;
-    let pagesTested = 0;
-
-    for (const entry of this.entries.values()) {
-      if (!overlapsFootprint(tempBox, entry.footprint)) continue;
-      pagesTested++;
-      entry.boundsTree.shapecast({
-        intersectsBounds: (box) => box.intersectsBox(tempBox),
-        intersectsTriangle: (triangle) => {
-          const distance = triangle.closestPointToSegment(tempSegment, trianglePoint, capsulePoint);
-          if (distance >= radius) return false;
-
-          triangle.getNormal(triangleNormal);
-          if (triangleNormal.y < 0) triangleNormal.negate();
-          const depth = radius - distance;
-          pushDirection.subVectors(capsulePoint, trianglePoint);
-          if (pushDirection.lengthSq() < 1e-10) pushDirection.copy(triangleNormal);
-          else pushDirection.normalize();
-
-          tempSegment.start.addScaledVector(pushDirection, depth);
-          tempSegment.end.addScaledVector(pushDirection, depth);
-          tempBox.translate(pushDirection.clone().multiplyScalar(depth));
-
-          if (triangleNormal.y >= maxSlopeCosine && pushDirection.y > 0.01) grounded = true;
-          return false;
-        },
-      });
-    }
-
-    const resolvedPosition = new THREE.Vector3(
-      tempSegment.start.x,
-      tempSegment.start.y - radius,
-      tempSegment.start.z,
-    );
-    const displacement = resolvedPosition.clone().sub(position);
-    const resolvedVelocity = velocity.clone();
-    if (displacement.lengthSq() > 1e-10) {
-      const collisionNormal = displacement.normalize();
-      const intoSurface = resolvedVelocity.dot(collisionNormal);
-      if (intoSurface < 0) resolvedVelocity.addScaledVector(collisionNormal, -intoSurface);
-    }
-    if (grounded && resolvedVelocity.y < 0) resolvedVelocity.y = 0;
-
-    return { position: resolvedPosition, velocity: resolvedVelocity, grounded, pagesTested };
+    return resolveCapsuleAgainstBvhEntries(this.entries.values(), position, velocity, config);
   }
 
   dispose(): void {

@@ -60,6 +60,9 @@ function validatePersistedSupport(
     if (!allowLegacySupportMetadata) return { valid: false, reason: "missing support" };
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
+  // Support re-evaluation marked this piece unsupported after a terrain edit; collapse
+  // is deferred, so the piece round-trips with its support state instead of vanishing.
+  if (placed.unsupported === true) return { valid: true, reason: null };
   if (placed.grounded === true) {
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }

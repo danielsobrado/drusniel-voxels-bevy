@@ -268,6 +268,7 @@ export function runFrameLoopStartup(
   const clodShadowOverlayController = session.clodShadowOverlayController;
 
   if (longView.hooks) {
+    longView.hooks.compareStreamRootBuilds = (coords) => input.clodWorker.compareStreamRootBuilds(coords);
     longView.hooks.setAcceptanceSceneOptions = (options) => {
       if (options.freeze !== undefined) state.freeze = options.freeze;
       if (options.proceduralDebug !== undefined) {
@@ -283,6 +284,13 @@ export function runFrameLoopStartup(
   if (!session.playerInputController) throw new Error("Frame loop startup requires playerInputController");
   if (customProps?.propController) player.attachPropColliders(customProps.propController.colliderSet);
   constructionController?.setTerrainConformHandler((request) => terrainEdit.scheduleConstructionTerrainConform(request));
+  if (constructionController) {
+    player.attachConstructionColliders(constructionController.colliderSet);
+    terrainEdit.setTerrainEditDirtyListener((event) => {
+      if (!event.affectsCollision && !event.affectsHeight) return;
+      constructionController.reevaluateSupportForTerrainEdit(event.worldAabb);
+    });
+  }
 
   const grassProfileEnabled = searchParams.get("grassProfile") === "1";
   const grassPrepassEnabled = searchParams.get("prepass") !== "0";

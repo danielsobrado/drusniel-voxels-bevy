@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial, StorageBufferAttribute } from "three/webgpu";
-import { max, mix, positionGeometry, smoothstep, storage, uniform, vec3 } from "three/tsl";
+import { max, mix, positionGeometry, select, smoothstep, storage, uniform, vec3 } from "three/tsl";
 import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 import { getActiveWebGpuRendererContext } from "../../rendering/webgpu_renderer_context.js";
@@ -12,6 +12,7 @@ type FarClipmapNodeUniform<T> = TslNode & { value: T };
 const tslMix = mix as unknown as (...args: TslNode[]) => TslNode;
 const tslSmoothstep = smoothstep as unknown as (...args: TslNode[]) => TslNode;
 const tslVec3 = vec3 as unknown as (...args: TslNode[]) => TslNode;
+const tslSelect = select as unknown as (...args: TslNode[]) => TslNode;
 
 const FAR_CLIPMAP_DEBUG_MODE_CODES: Record<FarClipmapDebugMode, number> = Object.freeze({
   final: 0,
@@ -395,10 +396,30 @@ function createWebGpuFarClipmapMaterial(input: {
   const terrainColor: TslNode = tslMix(legacyTerrainColor, unifiedWaterColor, waterMask);
   const fog: TslNode = tslSmoothstep(uniforms.uClipOuterRadius.mul(0.55), uniforms.uClipOuterRadius, distance);
 
+  const finalColor: TslNode = tslMix(terrainColor, tslVec3(0.46, 0.52, 0.50), fog.mul(0.36));
+  // Debug-mode codes mirror the WebGL fragment shader: 1=biome, 2=height, 3=ownership.
+  // Ownership colours the per-cell mask directly (amber = far clipmap owns as fallback,
+  // blue = refined pages own) so the sector hand-off is provable from a capture.
+  const heightShade: TslNode = terrainHeight.add(64.0).div(256.0).clamp(0.0, 1.0);
+  const ownershipDebugColor: TslNode = tslSelect(
+    ownershipSample.greaterThan(0.5),
+    tslVec3(1.0, 0.82, 0.18),
+    tslVec3(0.05, 0.35, 0.95),
+  );
+  const debugMode: TslNode = uniforms.uDebugMode;
+
   const material = new MeshBasicNodeMaterial() as FarClipmapMaterial & MeshBasicNodeMaterial;
   material.name = "FarClipmapTerrainNodeShader";
   material.positionNode = localPosition;
-  material.colorNode = tslMix(terrainColor, tslVec3(0.46, 0.52, 0.50), fog.mul(0.36));
+  material.colorNode = tslSelect(
+    debugMode.greaterThan(2.5),
+    ownershipDebugColor,
+    tslSelect(
+      debugMode.greaterThan(1.5),
+      tslVec3(heightShade, heightShade, heightShade),
+      tslSelect(debugMode.greaterThan(0.5), biomeColor, finalColor),
+    ),
+  );
   material.maskNode = distance.lessThanEqual(uniforms.uClipOuterRadius).and(
     distance.greaterThanEqual(uniforms.uClipInnerRadius).or(ownershipSample.greaterThan(0.5)),
   );

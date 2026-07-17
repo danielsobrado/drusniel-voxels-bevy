@@ -49,6 +49,10 @@ export class SavedPropStore {
     return this.props.size > 0;
   }
 
+  count(): number {
+    return this.props.size;
+  }
+
   upsert(prop: SavedPropInstance): SavedPropInstance | null {
     assertSavedPropInstance(prop);
     const previous = this.props.get(prop.id);

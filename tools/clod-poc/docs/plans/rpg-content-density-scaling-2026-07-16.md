@@ -1,6 +1,11 @@
 # RPG Content Density Scaling — proving the world holds at game density
 
-Created 2026-07-16. Status: PLANNED (no code landed from this doc yet). Revised same day
+Created 2026-07-16. Status: IN PROGRESS — D0 and D1a implemented and verified
+2026-07-17 (D0 curves in `perf-runs/prop-edit-bench/`; D1a schema + descriptors landed,
+registry-graduation deliberately still open). D1b next: NOTE it edits the same
+bootstrap files plan 1's in-flight working-tree WIP touches, and the village site
+depends on plan 1's coast-to-coast route (LM0 closure is this plan's stated
+prerequisite) — sequence D1b after that WIP lands. Revised same day
 after an external review. Accepted: D0 expanded into a full incremental-mutation contract
 (the review's code claims were verified against `prop_exclusion.ts`, `save_runtime.ts`,
 and `prop_edit_store.ts` — all accurate); density modeled as cost-bearing benchmark
@@ -174,11 +179,46 @@ plan 1 LM0.2 owns).
 6. **Sibling audit**: other O(all-N)-per-edit patterns on prop/save hot paths
    (`snapshot()` spreads, full-grid rebuilds in `prop_spatial_grid`/`overlap_index`) —
    fix only what the micro-bench shows on the edit path; list-and-defer the rest here.
-- [ ] baseline curve recorded (ms/edit vs N)
-- [ ] contract tests (all edge cases) → green
-- [ ] dirty-tile GPU invalidation test → green
-- [ ] save runtime on incremental APIs; equivalence guard active
-- [ ] post-fix curve flat; vitest green; sibling audit recorded
+- [x] baseline curve recorded (ms/edit vs N) — 2026-07-17, `npm run bench:prop-edits`
+      (`tools/benchmark-prop-edit-path.ts`, 200 edits/N, `perf-runs/prop-edit-bench/baseline-rebuild.json`):
+      mean ms/edit 2.71 @1k, 31.5 @10k, **406.6 @50k** (p95 482.6, max 592.3) — the C1
+      bug quantified: super-linear per-edit cost through the full-rebuild path.
+- [x] contract tests (all edge cases) → green — `src/world/prop_exclusion.test.ts`:
+      active→destroyed, destroyed→restored, address change (clear old + set new),
+      removal of destroyed environmental prop, duplicates (**decision: refcounted**, not
+      prohibited — `deriveEnvironmentalPropId` makes true duplicates a data bug, so the
+      bitset refcounts and a refcount underflow throws), `prop_delta_count` +
+      `prop_exclusion_tiles` parity with `fromSavedProps` after a mixed sequence
+      (verified via `contentEquals`, which treats missing/trailing words as zero).
+- [x] dirty-tile GPU invalidation test → green — one edit dirties exactly one
+      tile/layer (not zero, not all); consume clears; cross-tile address change dirties
+      two; no-op delta dirties none; fresh `fromSavedProps` reports its populated tiles.
+      Note: `PropExclusionGpuBuffers.upload` re-uploads per tile/layer but has **no live
+      caller yet**; when placement computes consume it, they must drive re-upload from
+      `consumeDirtyTileLayers()` (a pruned-empty tile is reported and `gpuWords` returns
+      null → destroy the buffer).
+- [x] save runtime on incremental APIs; equivalence guard active —
+      `upsert/remove/destroy` now use `savedPropStore` previous-value returns +
+      `propExclusions.applyDelta` + `projectPropEditStore.add/update/remove`;
+      `fromSavedProps`/`restore` remain on `initSaveRuntime`/`clearSaveRuntime` only.
+      Guard: dev-build (`import.meta.env.DEV`, so also active under vitest) cross-check
+      every 16th edit of bitsets (`contentEquals`) and edit-store id-set vs active saved
+      props; divergence self-heals to the rebuild and bumps the new
+      `prop_exclusion_guard_mismatches` counter. Demote to test-only after D3 storm green.
+      Known semantic drift (accepted): project-prop `revision` is now the edit-store
+      revision counter instead of the saved-prop revision (add/update assign it); it is
+      only consumed as a change signal in placement scenes.
+- [x] post-fix curve flat; vitest green; sibling audit recorded — post-fix
+      (`perf-runs/prop-edit-bench/incremental-after-d0.json`): mean ms/edit 0.009 @1k,
+      0.006 @10k, **0.017 @50k** (~24,000× at 50k); typecheck + full vitest green
+      (3384 tests, guard active). Sibling audit: (fixed) `publishCounters` computed
+      `save_prop_count` via `snapshot().length` — O(N log N) clone+sort per edit — now
+      `SavedPropStore.count()`; (deferred, render-side) `custom_props_startup.ts`
+      subscriber rebuilds the full placement scene via `toPlacementScene("active")` on
+      every edit event — O(all project props) per edit, owned by the prop system, and
+      `PropEditResult.changedPropIds` now carries single-id deltas it could use;
+      (deferred, periodic not per-edit) flush path `partitionSavedPropsByRegion(snapshot())`
+      per autosave.
 
 ### D1a — Benchmark content-profile schema
 
@@ -190,9 +230,27 @@ plan 1 LM0.2 owns).
    measured cannot be gated.
 3. Explicit decision recorded here later: whether/what graduates into the production
    content registry once the model has proven itself on D1b/D1c.
-- [ ] schema + loader + failing tests → green
-- [ ] descriptor measurement landed (each descriptor readable in stats)
-- [ ] registry-graduation decision deferred and slot recorded
+- [x] schema + loader + failing tests → green — 2026-07-17:
+      `config/benchmark_content_profiles.yaml` (rpg-village, rpg-player-base,
+      wilderness-forest-ring with the plan's initial authoring targets) +
+      `src/qa/benchmark_content_profiles.ts` (strict parse/validate: canonical
+      descriptor set required per profile, unknown descriptor keys rejected for drift
+      protection, duplicate ids rejected; bundled config fails loud). Tests:
+      `src/qa/benchmark_content_profiles.test.ts`.
+- [x] descriptor measurement landed (each descriptor readable in stats) —
+      `src/diagnostics/workload_descriptors.ts`: canonical `WORKLOAD_DESCRIPTOR_KEYS`;
+      scene-traversal measures visible_instances / shadow_casters /
+      transparent_instances / unique_meshes / unique_materials / dynamic_lights /
+      texture_residency_est_mb; triangles from EngineStats; counter fallback chains for
+      construction_pieces_total (`construction_placed_meshes`), colliders
+      (`props.colliders_active`), vegetation_candidates (`props.gpu_candidates` →
+      `props.candidates`); agent rings defined-zero until D5. Published as `wd_<key>` +
+      `wd_measured_<key>` + `wd_unmeasured_count` from the frame loop's 250 ms debug
+      mirror block. **Honest gaps** (reported unmeasured, D1b owns adding sources):
+      `construction_pieces_visible`, `interactive_props`; `colliders` currently counts
+      prop colliders only (construction/terrain colliders not yet in a counter).
+- [ ] registry-graduation decision deferred and slot recorded — deferred as planned;
+      decide after D1b/D1c prove the profile model.
 
 ### D1b — Village and player-base scenes
 

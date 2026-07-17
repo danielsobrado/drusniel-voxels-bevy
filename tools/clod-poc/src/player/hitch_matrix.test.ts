@@ -102,51 +102,58 @@ describe("hitch matrix: thin features and high velocity", () => {
     expect(Math.abs(controller.position.y)).toBeLessThan(0.5);
   });
 
-  it("KNOWN LIMIT: a drop deeper than recoveryDepth (32 m) NEVER completes — the sink rule treats long free fall as invalid state", () => {
-    // Falling does not update lastSafePosition, so 32 m below the spawn/last-grounded
-    // point the recovery teleports the player back up mid-air, forever. A 200 m drop
-    // (or digging a deep shaft under yourself) yo-yos instead of landing. Recorded as a
-    // P0 finding; the P3 recovery contract (proven-invalid conditions only) removes it.
+  it("P3 GATE: a 200 m drop over covered ground completes — zero recoveries, caught by the floor", () => {
+    // P0 recorded the yo-yo: falling never updated lastSafePosition, so the 32 m sink
+    // rule teleported the player back mid-air forever. The P3 recovery contract only
+    // recovers on proven-invalid conditions; with a readiness probe attached (as the app
+    // wires), deep falls through covered columns land on the real floor.
+    const colliders = new TerrainColliderSet([page("g", groundPlane(2000), -1000, -1000, 1000, 1000)]);
+    const controller = new PlayerController(colliders, BOUNDS);
+    controller.attachMovementReadiness(() => "ready");
+    controller.spawn(new THREE.Vector3(0, 200, 0));
+    let landed = false;
+    for (let i = 0; i < 2400 && !landed; i++) {
+      controller.update(STEP, IDLE, FORWARD);
+      landed = controller.grounded;
+    }
+    expect(landed).toBe(true);
+    expect(Math.abs(controller.position.y)).toBeLessThan(0.5);
+    expect(gameplayDiagnostics.get("player_recovery_backstop_depth")).toBe(0);
+    expect(gameplayDiagnostics.get("player_recovery_missing_collider")).toBe(0);
+  });
+
+  it("legacy (no readiness probe): the crude 32 m sink rule still yo-yos deep falls — kept as the probe-less backstop", () => {
     const colliders = new TerrainColliderSet([page("g", groundPlane(2000), -1000, -1000, 1000, 1000)]);
     const controller = new PlayerController(colliders, BOUNDS);
     controller.spawn(new THREE.Vector3(0, 200, 0));
     let landed = false;
-    let minY = 200;
-    for (let i = 0; i < 2400; i++) {
+    for (let i = 0; i < 2400 && !landed; i++) {
       controller.update(STEP, IDLE, FORWARD);
-      minY = Math.min(minY, controller.position.y);
-      if (controller.grounded) {
-        landed = true;
-        break;
-      }
+      landed = controller.grounded;
     }
     expect(landed).toBe(false);
-    expect(minY).toBeGreaterThan(200 - 34); // snapped back before ever nearing the floor
     expect(gameplayDiagnostics.get("player_recovery_backstop_depth")).toBeGreaterThan(0);
   });
 
-  it("KNOWN LIMIT: at injected 600 m/s fall speed the capsule can pass a zero-thickness floor (no swept resolve, no terminal velocity)", () => {
-    // 600 m/s → 5 m per 120 Hz step, far above the 1.8 m capsule: when the plane falls in
-    // the inter-step gap the positional resolve never sees it. (At 300 m/s the same drop
-    // happens to sample inside the capsule and is caught — thin-feature safety is
-    // alignment luck, not a guarantee.) Unreachable by natural falls today only because
-    // the 32 m sink rule fires first; a terminal-velocity/swept fix owns this case.
+  it("P3 GATE: injected extreme fall speed is clamped to maxFallSpeed — thin floors are always caught", () => {
+    // P0 recorded the tunnel: 600 m/s moved 5 m per 120 Hz step past a 1.8 m capsule
+    // (and 300 m/s survived only by sampling alignment). Terminal velocity bounds the
+    // per-step motion under the capsule extent, so the positional resolve always sees
+    // the floor.
     const colliders = new TerrainColliderSet([page("floor", groundPlane(2000), -1000, -1000, 1000, 1000)]);
     const controller = new PlayerController(colliders, BOUNDS);
+    controller.attachMovementReadiness(() => "ready");
     controller.spawn(new THREE.Vector3(0, 12, 0));
     controller.velocity.y = -600;
-    let minY = 10;
+    let minY = 12;
     let grounded = false;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 120 && !grounded; i++) {
       controller.update(STEP, IDLE, FORWARD);
       minY = Math.min(minY, controller.position.y);
-      if (controller.grounded) {
-        grounded = true;
-        break;
-      }
+      grounded = controller.grounded;
     }
-    expect(grounded).toBe(false);
-    expect(minY).toBeLessThan(-2); // passed through the floor plane at y = 0
+    expect(grounded).toBe(true);
+    expect(minY).toBeGreaterThan(-1); // never passed the floor plane at y = 0
   });
 
   it("jump into a low ceiling (1.9 m clearance over a 1.8 m capsule): pushed out, lands again, no sticking", () => {

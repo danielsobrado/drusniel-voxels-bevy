@@ -1,6 +1,7 @@
 
 import { createLongViewFrameDiagnostics } from "../phase0/long_view_frame_diagnostics.js";
 import { publishGameplayDiagnostics } from "../player/gameplay_diagnostics.js";
+import { publishWorkloadDescriptors, sampleWorkloadDescriptors } from "../diagnostics/workload_descriptors.js";
 import { resolvePrecisionFrameDelta } from "../precision/precision_diagnostics.js";
 import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
 import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
@@ -534,6 +535,11 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["clodGeometryCacheEvictions"] = pageGeometryCacheStats.evictions;
         }
         syncMaterialChurnCounters(counters);
+        publishWorkloadDescriptors(counters, sampleWorkloadDescriptors({
+          scene: render.scene,
+          counters,
+          triangles: hooks.stats.triangles,
+        }));
         const selectionCacheStats = terrain.selectionController.stats().selectionCache;
         counters["selectionCutCache.enabled"] = selectionCacheStats.enabled ? 1 : 0;
         counters["selectionCutCache.hits"] = selectionCacheStats.hits;

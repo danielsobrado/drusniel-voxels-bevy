@@ -100,4 +100,29 @@ describe("playable-world honest baseline (10 simulated minutes per configuration
       expect(run.jumps).toBeGreaterThanOrEqual(80);
     }
   });
+
+  it("P3 gate: 5 route-seed variations — zero coverage loss, zero recoveries, zero sync builds, frontier held", () => {
+    for (const seed of [0xd275, 1, 2, 3, 4]) {
+      const run = runPlayableBaseline("contract", SIM_SECONDS, undefined, seed);
+      const recoveries = (run.counters["player_recovery_non_finite"] ?? 0)
+        + (run.counters["player_recovery_kill_plane"] ?? 0)
+        + (run.counters["player_recovery_missing_collider"] ?? 0)
+        + (run.counters["player_recovery_backstop_depth"] ?? 0);
+      expect({
+        seed,
+        coverageMissing: run.counters["collider_coverage_missing"] ?? 0,
+        recoveries,
+        syncBuilds: run.counters["collider_sync_frame_builds"] ?? 0,
+        enteredUnstreamed: run.enteredUnstreamed,
+        fakeFloors: run.fakeFloorFramesInCave + run.fakeFloorFramesUnstreamed,
+      }).toEqual({
+        seed,
+        coverageMissing: 0,
+        recoveries: 0,
+        syncBuilds: 0,
+        enteredUnstreamed: false,
+        fakeFloors: 0,
+      });
+    }
+  });
 });

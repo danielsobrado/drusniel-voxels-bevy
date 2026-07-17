@@ -262,6 +262,9 @@ class ResidentGpuClodRootMesher implements GpuClodRootMesher {
       fallbackPages: this.fallbackPages,
       failedBatches: this.failedBatches,
       workerFallbackPages: this.workerFallbackPages,
+      // The resident mesher keeps the default vertical window; the deep-window retry
+      // for fully submerged pages currently exists only in the batched mesher.
+      deepWindowRetryPages: 0,
     };
   }
 

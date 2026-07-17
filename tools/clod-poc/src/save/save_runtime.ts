@@ -31,6 +31,7 @@ export interface SaveRuntimeCounters extends SaveFarInvalidationCounters {
   save_voxel_delta_count: number;
   prop_delta_count: number;
   prop_exclusion_tiles: number;
+  prop_exclusion_guard_mismatches: number;
 }
 
 interface SaveRuntimeState {
@@ -51,6 +52,14 @@ interface SaveRuntimeState {
 let state: SaveRuntimeState | null = null;
 let attachedCounters: Partial<SaveRuntimeCounters> | null = null;
 let propExclusions = new SparsePropExclusionBitsets();
+// Dev-only cross-check of the incremental mutation path against a full rebuild
+// (rpg-content-density-scaling D0). Demote to test-only once the D3 storm is green.
+const equivalenceGuard = {
+  enabled: Boolean(import.meta.env?.DEV),
+  everyNEdits: 16,
+  editsSinceCheck: 0,
+  mismatches: 0,
+};
 type FeatureStampListener = (bounds: SavedBounds2D, field: FeatureStampField) => void;
 const featureStampListeners = new Set<FeatureStampListener>();
 
@@ -78,6 +87,7 @@ export function seedSaveRuntimeCounters(counters: Partial<SaveRuntimeCounters>):
   counters.save_voxel_delta_count = counters.save_voxel_delta_count ?? 0;
   counters.prop_delta_count = counters.prop_delta_count ?? 0;
   counters.prop_exclusion_tiles = counters.prop_exclusion_tiles ?? 0;
+  counters.prop_exclusion_guard_mismatches = counters.prop_exclusion_guard_mismatches ?? 0;
   seedSaveFarInvalidationCounters(counters);
 }
 
@@ -92,8 +102,9 @@ function publishCounters(): void {
   state.counters.save_dirty_region_count = state.dirtyRegions.size;
   state.counters.save_dirty_revision = state.revision;
   state.counters.save_metadata_revision = state.metadata.revision;
-  state.counters.save_prop_count = savedPropStore.snapshot().length;
+  state.counters.save_prop_count = savedPropStore.count();
   state.counters.save_voxel_delta_count = state.voxelDeltaCount;
+  state.counters.prop_exclusion_guard_mismatches = equivalenceGuard.mismatches;
   Object.assign(state.counters, propExclusions.counters());
 }
 
@@ -211,11 +222,59 @@ export function updateSaveRuntimeMetadata(metadata: WorldMetadataRecord, dirtyBo
   return markSaveRegionsDirtyForBounds(dirtyBounds);
 }
 
+function syncProjectPropEditStore(previous: SavedPropInstance | null, next: SavedPropInstance | null): void {
+  const id = next?.id ?? previous?.id;
+  if (!id) return;
+  const present = projectPropEditStore.get(id) !== undefined;
+  if (next?.state !== "active") {
+    if (present) projectPropEditStore.remove(id);
+    return;
+  }
+  const input = {
+    prefabId: next.prefabId,
+    position: next.position,
+    rotation: next.rotation,
+    scale: next.scale,
+    anchor: next.anchor,
+    seed: next.seed,
+    variationId: next.variationId,
+    flags: next.flags,
+  };
+  if (present) projectPropEditStore.update(id, input);
+  else projectPropEditStore.add({ id, ...input });
+}
+
+export function configurePropExclusionEquivalenceGuard(config: { enabled?: boolean; everyNEdits?: number }): void {
+  if (config.enabled !== undefined) equivalenceGuard.enabled = config.enabled;
+  if (config.everyNEdits !== undefined) equivalenceGuard.everyNEdits = Math.max(1, config.everyNEdits);
+}
+
+function runEquivalenceGuard(): void {
+  if (!equivalenceGuard.enabled) return;
+  if (++equivalenceGuard.editsSinceCheck < equivalenceGuard.everyNEdits) return;
+  equivalenceGuard.editsSinceCheck = 0;
+  const savedProps = savedPropStore.snapshot();
+  const rebuiltExclusions = SparsePropExclusionBitsets.fromSavedProps(savedProps);
+  if (!propExclusions.contentEquals(rebuiltExclusions)) {
+    equivalenceGuard.mismatches++;
+    console.error("[save-runtime] incremental prop exclusions diverged from full rebuild; adopting rebuild");
+    propExclusions = rebuiltExclusions;
+  }
+  const activeIds = new Set(savedProps.filter((prop) => prop.state === "active").map((prop) => prop.id));
+  const editStoreIds = projectPropEditStore.snapshot().map((prop) => prop.id);
+  if (editStoreIds.length !== activeIds.size || editStoreIds.some((id) => !activeIds.has(id))) {
+    equivalenceGuard.mismatches++;
+    console.error("[save-runtime] incremental project prop edit store diverged from active saved props; restoring");
+    projectPropEditStore.restore(savedPropStore.activeProjectProps());
+  }
+}
+
 export function upsertSaveRuntimeProp(prop: SavedPropInstance): string[] {
   if (!state) return [];
   const previous = savedPropStore.upsert(prop);
-  propExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropStore.snapshot());
-  projectPropEditStore.restore(savedPropStore.activeProjectProps());
+  propExclusions.applyDelta(previous, prop);
+  syncProjectPropEditStore(previous, prop);
+  runEquivalenceGuard();
   const boundsList = previous ? [pointBoundsForProp(previous), pointBoundsForProp(prop)] : [pointBoundsForProp(prop)];
   return markSaveRegionsDirtyForBoundList(boundsList);
 }
@@ -223,8 +282,11 @@ export function upsertSaveRuntimeProp(prop: SavedPropInstance): string[] {
 export function removeSaveRuntimeProp(id: string, dirtyBounds: SavedBounds2D): string[] {
   if (!state) return [];
   const previous = savedPropStore.remove(id);
-  propExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropStore.snapshot());
-  projectPropEditStore.restore(savedPropStore.activeProjectProps());
+  if (previous) {
+    propExclusions.applyDelta(previous, null);
+    syncProjectPropEditStore(previous, null);
+    runEquivalenceGuard();
+  }
   return markSaveRegionsDirtyForBoundList(previous ? [pointBoundsForProp(previous), dirtyBounds] : [dirtyBounds]);
 }
 

@@ -37,10 +37,12 @@ import type { WorldBounds } from "../terrain_surface.js";
 import {
   RootGpuBatchLimitError,
   chunkSlotsPerRootPage,
+  deepWindowRetryPlans,
   estimateChunkSlotBytes,
   estimateRootRequestReadbackBytes,
   estimateRootRequestSlotBytes,
   findChunkVerticesOutOfBounds,
+  fullyEmptyLod0PageKeys,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   rootLevelForRequest,
@@ -103,6 +105,7 @@ export interface GpuClodRootMesherStats {
   fallbackPages: number;
   failedBatches: number;
   workerFallbackPages: number;
+  deepWindowRetryPages: number;
 }
 
 export interface GpuClodRootMesher {
@@ -249,7 +252,7 @@ class PackedRootGpuBufferPool {
   }
 
   private prepareSlot(plan: GpuRootChunkPlan): GpuRootChunkSlot {
-    const dims = computeMeshDims(plan.cx, plan.cz, this.cfg.page.chunk_size);
+    const dims = computeMeshDims(plan.cx, plan.cz, this.cfg.page.chunk_size, plan.vyBase ?? -1);
     const counterSlot = plan.slotIndex;
     const positionBaseF32 = (this.positionStrideBytes / F32) * counterSlot;
     const normalBaseF32 = (this.normalStrideBytes / F32) * counterSlot;
@@ -286,6 +289,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   private fallbackPages = 0;
   private failedBatches = 0;
   private workerFallbackPages = 0;
+  private deepWindowRetryPages = 0;
   private disabledError: Error | null = null;
   private readonly simplifierReady = initSimplifier();
   private readonly batchLimits: RuntimeBatchLimits;
@@ -365,6 +369,7 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       fallbackPages: this.fallbackPages,
       failedBatches: this.failedBatches,
       workerFallbackPages: this.workerFallbackPages,
+      deepWindowRetryPages: this.deepWindowRetryPages,
     };
   }
 
@@ -478,12 +483,56 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
       });
       try {
         const meshes = await this.dispatchAndReadSlots(slots, countReadback);
+        await this.retryFullyEmptyPagesWithDeepWindow(plans, slots, meshes);
         nodes.push(...this.buildRootNodesFromMeshes(subBatch, slots, meshes));
       } finally {
         countReadback.destroy();
       }
     }
     return nodes;
+  }
+
+  /**
+   * A page whose entire surface lies below the default [-1, Y_CELLS] vertical window
+   * (deep ocean beyond the continent coasts) meshes to zero triangles even though the
+   * CPU mesher produces a real seafloor there. Re-dispatch exactly those pages with the
+   * window floor lowered to the CPU mesher's MIN_Y_CELL; a page that is still empty
+   * afterwards fails page validation as before.
+   */
+  private async retryFullyEmptyPagesWithDeepWindow(
+    plans: readonly GpuRootChunkPlan[],
+    slots: readonly GpuRootChunkSlot[],
+    meshes: Map<number, PageMesh>,
+  ): Promise<void> {
+    const emptyPages = fullyEmptyLod0PageKeys(plans, meshes);
+    if (emptyPages.size === 0) return;
+    const retryPlans = deepWindowRetryPlans(plans, emptyPages);
+    this.deepWindowRetryPages += emptyPages.size;
+    this.chunkSlotsDispatched += retryPlans.length;
+    const retrySlots = this.pool.prepare(retryPlans);
+    const retryCountReadback = this.device.createBuffer({
+      label: "gpu clod root deep retry count readback",
+      size: retrySlots.length * 2 * U32,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    try {
+      const retryMeshes = await this.dispatchAndReadSlots(retrySlots, retryCountReadback);
+      const originalSlotByChunk = new Map(
+        slots.map((slot) => [`${slot.lod0Px},${slot.lod0Pz}:${slot.localChunkIndex}`, slot.slotIndex]),
+      );
+      for (const retrySlot of retrySlots) {
+        const originalSlotIndex = originalSlotByChunk.get(
+          `${retrySlot.lod0Px},${retrySlot.lod0Pz}:${retrySlot.localChunkIndex}`,
+        );
+        const mesh = retryMeshes.get(retrySlot.slotIndex);
+        if (originalSlotIndex === undefined || !mesh) {
+          throw new Error(`GPU deep-window retry chunk ${retrySlot.slotIndex} was not read back`);
+        }
+        meshes.set(originalSlotIndex, mesh);
+      }
+    } finally {
+      retryCountReadback.destroy();
+    }
   }
 
   private async dispatchAndReadSlots(
@@ -852,6 +901,7 @@ export function publishGpuClodRootMesherCounters(stats: GpuClodRootMesherStats):
   counters["live_clod_stream_gpu_fallback_pages"] = stats.fallbackPages;
   counters["live_clod_stream_gpu_failed_batches"] = stats.failedBatches;
   counters["live_clod_stream_worker_fallback_pages"] = stats.workerFallbackPages;
+  counters["live_clod_stream_gpu_deep_retry_pages"] = stats.deepWindowRetryPages;
 }
 
 export function disabledGpuStats(workerFallbackPages = 0): GpuClodRootMesherStats {
@@ -872,6 +922,7 @@ export function disabledGpuStats(workerFallbackPages = 0): GpuClodRootMesherStat
     fallbackPages: 0,
     failedBatches: 0,
     workerFallbackPages,
+    deepWindowRetryPages: 0,
   };
 }
 

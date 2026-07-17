@@ -1,0 +1,95 @@
+# Benchmark content profiles (rpg-content-density-scaling D1a).
+# Cost-bearing benchmark workloads, deliberately NOT a production content-registry
+# abstraction. Descriptor values are the plan's initial authoring targets; D1c
+# calibrates them to what the engine sustains at the tier budget, and the measured
+# wd_* counters (see src/diagnostics/workload_descriptors.ts) are the ground truth
+# a gate compares against — a profile edited without re-recording descriptors
+# invalidates its gate.
+profiles:
+  - id: rpg-village
+    scene: rpg-village
+    description: >
+      30-80 distinct buildings on the plan-1 coast-to-coast route site; road/plaza
+      stamps; 200-800 placed unique-ish props; higher unique-mesh/material counts;
+      dynamic lights deferred until the D6 interior-lighting precondition lands.
+    composition:
+      buildings: 40
+      construction_pieces_total: 2500
+      placed_props: 400
+      stamps: [road, plaza]
+      forest_ring: true
+    descriptors:
+      visible_instances: 50000
+      construction_pieces_total: 2500
+      construction_pieces_visible: 1200
+      interactive_props: 500
+      colliders: 900
+      shadow_casters: 3000
+      transparent_instances: 4000
+      unique_meshes: 120
+      unique_materials: 60
+      dynamic_lights: 0
+      texture_residency_est_mb: 512
+      triangles: 6000000
+      vegetation_candidates: 200000
+      agents_full: 0
+      agents_mid: 0
+      agents_frozen: 0
+
+  - id: rpg-player-base
+    scene: rpg-player-base
+    description: >
+      One 200-600-piece editable modular base in a 50 m radius; deep persistence/edit
+      history; snap/support-heavy; few unique materials, many modular pieces.
+    composition:
+      buildings: 1
+      construction_pieces_total: 400
+      placed_props: 100
+      stamps: []
+      forest_ring: true
+    descriptors:
+      visible_instances: 30000
+      construction_pieces_total: 400
+      construction_pieces_visible: 400
+      interactive_props: 150
+      colliders: 500
+      shadow_casters: 1500
+      transparent_instances: 2500
+      unique_meshes: 60
+      unique_materials: 20
+      dynamic_lights: 0
+      texture_residency_est_mb: 384
+      triangles: 4000000
+      vegetation_candidates: 150000
+      agents_full: 0
+      agents_mid: 0
+      agents_frozen: 0
+
+  - id: wilderness-forest-ring
+    scene: infinite-islands
+    description: >
+      Existing vegetation density plus ~50 interactive props/ha; the forest ring both
+      dense scenes share; baseline for the marginal cost of settlement content.
+    composition:
+      buildings: 0
+      construction_pieces_total: 0
+      placed_props: 50
+      stamps: []
+      forest_ring: true
+    descriptors:
+      visible_instances: 120000
+      construction_pieces_total: 0
+      construction_pieces_visible: 0
+      interactive_props: 50
+      colliders: 300
+      shadow_casters: 5000
+      transparent_instances: 8000
+      unique_meshes: 40
+      unique_materials: 25
+      dynamic_lights: 0
+      texture_residency_est_mb: 384
+      triangles: 8000000
+      vegetation_candidates: 500000
+      agents_full: 0
+      agents_mid: 0
+      agents_frozen: 0
