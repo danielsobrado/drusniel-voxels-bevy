@@ -221,9 +221,8 @@ mod tests {
     fn csv_export_writes_header_once() {
         let mut path = env::temp_dir();
         path.push(format!(
-            "drusniel-clod-runtime-stats-{}-{}.csv",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            "drusniel-clod-runtime-stats-{}.csv",
+            std::process::id()
         ));
         let _ = fs::remove_file(&path);
 
