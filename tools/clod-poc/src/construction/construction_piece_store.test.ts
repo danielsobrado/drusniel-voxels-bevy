@@ -74,6 +74,16 @@ describe("ConstructionPieceStore", () => {
     store.dispose();
   });
 
+  it("includes visible construction in shadow and receiver workloads", () => {
+    const { store } = createStore();
+    expect(store.add(placed("piece-1", 0), false)).toBe(true);
+
+    expect(store.meshes[0]!.castShadow).toBe(true);
+    expect(store.meshes[0]!.receiveShadow).toBe(true);
+
+    store.dispose();
+  });
+
   it("removes owned meshes, indexes, and colliders on dispose", () => {
     const { root, snapIndex, overlapIndex, colliderSet, store } = createStore();
     expect(store.add(placed("piece-1", 0), false)).toBe(true);
