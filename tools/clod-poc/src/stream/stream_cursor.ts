@@ -10,6 +10,7 @@ export interface StreamCursor {
   velocityMps: { x: number; z: number };
   deltaSeconds: number;
   source: StreamCursorSource;
+  discontinuity: boolean;
   predicted(aheadSeconds: number): { x: number; z: number };
 }
 
@@ -29,6 +30,8 @@ export interface CanonicalStreamCenter {
 }
 
 const MAX_VELOCITY_MPS = 500;
+const MIN_DISCONTINUITY_DISTANCE_M = 64;
+const DISCONTINUITY_VELOCITY_MULTIPLIER = 2;
 // Matches the former 0.85-per-60-Hz-frame response while remaining stable across frame rates.
 const VELOCITY_EMA_TIME_CONSTANT_SECONDS = -(1 / 60) / Math.log(0.85);
 
@@ -66,12 +69,25 @@ export function canonicalStreamCenter(input: StreamCursorInput): CanonicalStream
 
 export class StreamCursorTracker {
   private previousCenter: { x: number; z: number } | null = null;
+  private previousSource: StreamCursorSource | null = null;
   private velocity = { x: 0, z: 0 };
+  private discontinuities = 0;
 
   update(input: StreamCursorInput): StreamCursor {
     const canonical = canonicalStreamCenter(input);
     const dt = Number.isFinite(input.deltaSeconds) ? Math.max(0, input.deltaSeconds) : 0;
-    if (this.previousCenter && dt > 0.001) {
+    const displacement = this.previousCenter
+      ? Math.hypot(canonical.center.x - this.previousCenter.x, canonical.center.z - this.previousCenter.z)
+      : 0;
+    const maxContinuousDistance = Math.max(
+      MIN_DISCONTINUITY_DISTANCE_M,
+      MAX_VELOCITY_MPS * Math.max(dt, 1 / 60) * DISCONTINUITY_VELOCITY_MULTIPLIER,
+    );
+    const discontinuity = this.previousSource !== null && (
+      this.previousSource !== canonical.source || displacement > maxContinuousDistance
+    );
+
+    if (this.previousCenter && dt > 0.001 && !discontinuity) {
       const rawX = (canonical.center.x - this.previousCenter.x) / dt;
       const rawZ = (canonical.center.z - this.previousCenter.z) / dt;
       const alpha = 1 - Math.exp(-dt / VELOCITY_EMA_TIME_CONSTANT_SECONDS);
@@ -87,7 +103,10 @@ export class StreamCursorTracker {
       this.velocity.x = 0;
       this.velocity.z = 0;
     }
+    if (discontinuity) this.discontinuities++;
+
     this.previousCenter = { ...canonical.center };
+    this.previousSource = canonical.source;
     const center = { ...canonical.center };
     const velocityMps = { ...this.velocity };
     return {
@@ -96,6 +115,7 @@ export class StreamCursorTracker {
       velocityMps,
       deltaSeconds: dt,
       source: canonical.source,
+      discontinuity,
       predicted(aheadSeconds) {
         const ahead = Number.isFinite(aheadSeconds) ? Math.max(0, aheadSeconds) : 0;
         return {
@@ -104,6 +124,10 @@ export class StreamCursorTracker {
         };
       },
     };
+  }
+
+  discontinuityCount(): number {
+    return this.discontinuities;
   }
 }
 
@@ -118,4 +142,5 @@ export function publishStreamCursorCounters(
   counters["stream_cursor_velocity_x_mps"] = cursor.velocityMps.x;
   counters["stream_cursor_velocity_z_mps"] = cursor.velocityMps.z;
   counters["stream_cursor_source"] = STREAM_CURSOR_SOURCE_CODE[cursor.source];
+  counters["stream_cursor_discontinuity"] = cursor.discontinuity ? 1 : 0;
 }
