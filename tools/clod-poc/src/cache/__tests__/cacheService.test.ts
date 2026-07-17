@@ -8,8 +8,10 @@ import {
   type ClodPageNodeArtifact,
 } from "../artifactSerializer.js";
 import { buildClodCacheKey } from "../cacheKey.js";
-import type { ClodCacheKeyParts } from "../cacheTypes.js";
+import type { ClodCacheKeyParts, ClodCacheStoredRecord } from "../cacheTypes.js";
 import { CacheScheduler } from "../cacheScheduler.js";
+import { CacheWriteRejectedError } from "../cacheErrors.js";
+import { cacheRecordVersionMatches } from "../streaming_cache_write_guard.js";
 
 const yaml = `
 cache:
@@ -83,6 +85,21 @@ const artifact: ClodPageNodeArtifact = {
   bounds: { center: [0, 0, 0], radius: 1, minY: 0, maxY: 1 },
 };
 
+class RejectingPersistentStore extends InMemoryPersistentStore {
+  override async put(_key: string, _record: ClodCacheStoredRecord): Promise<void> {
+    throw new CacheWriteRejectedError("stale generation");
+  }
+}
+
+class ConditionalMemoryStore extends InMemoryPersistentStore {
+  async deleteIfMatches(key: string, expected: ClodCacheStoredRecord): Promise<boolean> {
+    const current = await this.get(key);
+    if (!current || !cacheRecordVersionMatches(current, expected)) return false;
+    await this.delete(key);
+    return true;
+  }
+}
+
 describe("cache service", () => {
   it("misses when disabled", async () => {
     const config = parseClodCacheConfig(yaml);
@@ -110,6 +127,54 @@ describe("cache service", () => {
     expect(result.status).toBe("hit");
     expect(result.artifact?.nodeId).toBe("L0:0,0");
     expect(result.bytesRead).toBeGreaterThan(0);
+  });
+
+  it("does not publish a commit-gated write rejected by persistence", async () => {
+    const config = parseClodCacheConfig(yaml);
+    const service = createClodCacheService(config, new RejectingPersistentStore());
+
+    const put = await service.put(keyParts, artifact, encodeClodPageNodeArtifact, {
+      terrainStreamingGeneration: 0,
+      terrainStreamingWriteId: "0:1",
+    });
+    const result = await service.get(keyParts, decodeClodPageNodeArtifact);
+
+    expect(put.bytesWritten).toBe(0);
+    expect(result.status).toBe("miss");
+    expect(result.reason).toBe("not-found");
+  });
+
+  it("removes stale memory without deleting a newer persistent replacement", async () => {
+    const config = parseClodCacheConfig(yaml);
+    const store = new ConditionalMemoryStore();
+    const service = createClodCacheService(config, store);
+    const metadata = {
+      terrainStreamingGeneration: 0,
+      terrainStreamingWriteId: "0:1",
+    };
+
+    await service.put(keyParts, artifact, encodeClodPageNodeArtifact, metadata);
+    const key = buildClodCacheKey(keyParts);
+    const original = (await store.get(key))!;
+    const replacement: ClodCacheStoredRecord = {
+      ...original,
+      header: {
+        ...original.header,
+        createdAtUnixMs: original.header.createdAtUnixMs + 1,
+        metadata: {
+          terrainStreamingGeneration: 2,
+          terrainStreamingWriteId: "2:1",
+        },
+      },
+    };
+    await store.put(key, replacement);
+
+    await expect(service.deleteIfMatches(keyParts, metadata)).resolves.toBe(true);
+    const result = await service.get(keyParts, decodeClodPageNodeArtifact);
+
+    expect(result.status).toBe("hit");
+    expect(result.metadata?.terrainStreamingGeneration).toBe(2);
+    expect(result.metadata?.terrainStreamingWriteId).toBe("2:1");
   });
 
   it("checksum mismatch becomes miss", async () => {
