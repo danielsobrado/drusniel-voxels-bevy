@@ -39,9 +39,14 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
   };
 }
 
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEditStartupResult): void {
   const config = defaultSpellConfig;
-  const { scene, camera, renderer, terrainRaycast, interaction } = ctx.input;
+  const { scene, camera, renderer, terrainRaycast, interaction, terrainColliders, longView } = ctx.input;
+  const { clodApplyQueue } = ctx.input.terrainView;
   const targetRay = new THREE.Ray();
   const targetDirection = new THREE.Vector3();
   const targetNormal = new THREE.Vector3(0, 1, 0);
@@ -70,6 +75,29 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
     const target = earthTargetOverride;
     earthTargetOverride = null;
     return target ?? getTerrainTarget(earthSpellGameplayConfig.maxRangeM);
+  };
+
+  const waitForDerivedConvergence = async (): Promise<void> => {
+    const deadline = performance.now() + earthSpellGameplayConfig.convergenceTimeoutMs;
+    while (!disposed) {
+      const apply = clodApplyQueue.stats();
+      if (
+        apply.clodApplyQueueDepth === 0
+        && apply.clodColliderQueueDepth === 0
+        && terrainColliders.pendingRebuildCount() === 0
+      ) {
+        return;
+      }
+      if (performance.now() >= deadline) {
+        throw new Error(
+          `earth spell convergence timeout: geometry=${apply.clodApplyQueueDepth}`
+            + ` colliderQueue=${apply.clodColliderQueueDepth}`
+            + ` colliderBuild=${terrainColliders.pendingRebuildCount()}`,
+        );
+      }
+      await nextTask();
+    }
+    throw new Error("earth spell convergence cancelled during disposal");
   };
 
   const rawController = createSpellVfxController({
@@ -112,6 +140,16 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
         ready: pipelineWarmup.ready,
         terrainEditService: terrainEdit.terrainEditService,
         isDisposed: () => disposed,
+        waitForDerivedConvergence,
+        onResult: (result) => {
+          const counters = longView.hooks?.stats?.counters;
+          if (!counters) return;
+          const key = result.converged
+            ? "spell_world_runtime_convergence_completed"
+            : "spell_world_runtime_convergence_failed";
+          counters[key] = (counters[key] ?? 0) + 1;
+          if (result.converged) counters["spell_world_runtime_last_converged_revision"] = result.editRevision;
+        },
         playVfx: (committedTarget) => {
           earthTargetOverride = committedTarget;
           return controller.playEarth(durationMs);
