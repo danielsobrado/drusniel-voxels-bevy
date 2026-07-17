@@ -64,6 +64,7 @@ let streamBuiltTotal = 0;
 let streamApplyPagesTotal = 0;
 let streamEvictionsTotal = 0;
 let streamStaleDiscardsTotal = 0;
+let lastAccumulatedStreamStats: StreamingClodRootStats | null = null;
 
 function positiveIntegerParam(params: URLSearchParams, key: string): number | undefined {
   const parsed = Number(params.get(key));
@@ -149,10 +150,13 @@ function mirrorStreamingClodRootCounters(
   const target = counters ?? globalClodCounters();
   if (!target) return;
   const probeStaleDiscardsTotal = probeNoPressureStaleEquivalent(stats);
-  streamBuiltTotal += stats.builtThisFrame;
-  streamApplyPagesTotal += stats.applyPagesThisFrame;
-  streamEvictionsTotal += stats.evictions;
-  streamStaleDiscardsTotal += stats.staleDiscards;
+  if (stats !== lastAccumulatedStreamStats) {
+    lastAccumulatedStreamStats = stats;
+    streamBuiltTotal += stats.builtThisFrame;
+    streamApplyPagesTotal += stats.applyPagesThisFrame;
+    streamEvictionsTotal += stats.evictions;
+    streamStaleDiscardsTotal += stats.staleDiscards;
+  }
   target["live_clod_stream_radius_m"] = radiusM;
   target["live_clod_stream_required_pages"] = stats.requiredPages;
   target["live_clod_stream_cached_pages"] = stats.cachedPages;
@@ -528,7 +532,7 @@ export function runFrameLoopStartup(
         innerRadiusM: state.bubbleRadius,
         outerRadiusM: farClipmapConfig.innerRadiusM,
         pageSizeM: cfg.page.chunks_per_page * cfg.page.chunk_size,
-        readyPageKeys: streamingClodRootController.refinedReadyPageKeys(),
+        readyPageKeys: streamingClodRootController.readyPageKeys(),
       });
     }
     mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
