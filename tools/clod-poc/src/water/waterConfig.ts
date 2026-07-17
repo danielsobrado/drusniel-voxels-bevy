@@ -1,8 +1,9 @@
-// Config contract for the fake water clipmap (config/water.yaml).
+// Rendering configuration for the water clipmap and legacy fake-body fallback.
 //
-// Water is a POC visual layer only. It never feeds the CLOD page source mesh,
-// meshoptimizer simplification, page borders, LOD selection, colliders, or
-// validation. The dependency direction is scene -> water, never pages -> water.
+// Gameplay does not query clipmap geometry or visual shore shaping. Canonical gameplay
+// water authority lives in water_authority.ts and consumes hydrology or explicit edited
+// bodies. The dependency direction remains world authority -> water rendering/gameplay;
+// water visuals never mutate terrain pages, LOD selection, or colliders.
 import { cloneWaterConfig as cloneWaterConfigDeep } from "./water_config_clone.js";
 import { DEFAULT_WATER_CONFIG } from "./water_config_defaults.js";
 import type { WaterConfig } from "./water_config_types.js";
