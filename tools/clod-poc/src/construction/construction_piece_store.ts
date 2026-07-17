@@ -1,18 +1,38 @@
 import * as THREE from "three";
+import { DEFAULT_CONSTRUCTION_SUPPORT_PROFILES } from "./config.js";
 import { constructionMaterialLabel, createConstructionMaterial } from "./materials.js";
 import { createPieceGeometry, disposeMesh } from "./construction_controller_support.js";
+import { constructionStabilityColorHex, constructionSupportProfile } from "./construction_stability.js";
+import { ConstructionSupportGraph } from "./construction_support_graph.js";
 import type { ConstructionColliderSet } from "./construction_collider.js";
 import type { ConstructionOverlapIndex } from "./overlap_index.js";
 import type { ConstructionSnapIndex } from "./snap_index.js";
-import type { ConstructionMaterial, ConstructionPieceDef, PlacedConstructionPiece } from "./types.js";
+import type {
+  ConstructionMaterial,
+  ConstructionPieceDef,
+  ConstructionSupportProfiles,
+  PlacedConstructionPiece,
+} from "./types.js";
 
-/** Multiplied into the albedo so an unsupported piece reads as visibly distressed. */
-const UNSUPPORTED_TINT = new THREE.Color(1.0, 0.45, 0.4);
+export interface ConstructionPieceRemovalResult {
+  removedCount: number;
+  removedIds: readonly string[];
+  disconnectedNeighborIds: readonly string[];
+}
+
+export interface ConstructionPieceStoreOptions {
+  graph?: ConstructionSupportGraph;
+  supportProfiles?: ConstructionSupportProfiles;
+}
 
 export class ConstructionPieceStore {
   readonly pieces: PlacedConstructionPiece[] = [];
   readonly meshes: THREE.Mesh[] = [];
-  private readonly unsupportedOriginalColors = new Map<string, THREE.Color>();
+  readonly graph: ConstructionSupportGraph;
+  private readonly supportProfiles: ConstructionSupportProfiles;
+  private readonly baseColors = new Map<string, THREE.Color>();
+  private stabilityVisualizationActive = false;
+  private collapseThreshold = 0.20;
 
   constructor(
     private readonly root: THREE.Group,
@@ -20,9 +40,12 @@ export class ConstructionPieceStore {
     private readonly snapIndex: ConstructionSnapIndex,
     private readonly overlapIndex: ConstructionOverlapIndex,
     private readonly colliderSet: ConstructionColliderSet | null = null,
-    // Injectable because the default loads PBR textures, which needs a DOM.
     private readonly materialFactory: (material: ConstructionMaterial) => THREE.Material = createConstructionMaterial,
-  ) {}
+    options: ConstructionPieceStoreOptions = {},
+  ) {
+    this.graph = options.graph ?? new ConstructionSupportGraph();
+    this.supportProfiles = options.supportProfiles ?? DEFAULT_CONSTRUCTION_SUPPORT_PROFILES;
+  }
 
   add(placed: PlacedConstructionPiece, logPlacement: boolean): boolean {
     const piece = this.piecesById.get(placed.typeId);
@@ -39,13 +62,18 @@ export class ConstructionPieceStore {
     this.snapIndex.addPiece(piece, placed.id, placed.position, placed.rotationQuarterTurns);
     this.overlapIndex.addPiece(placed, piece);
     this.colliderSet?.add(placed, piece);
-    if (placed.unsupported === true) this.markUnsupportedVisual(placed.id, mesh, true);
+    this.graph.addNode(placed.id);
+    for (const connectionId of placed.connectionIds ?? placed.parentIds ?? []) this.graph.connect(placed.id, connectionId);
+    const meshMaterial = mesh.material as THREE.MeshStandardMaterial;
+    if (meshMaterial?.color) this.baseColors.set(placed.id, meshMaterial.color.clone());
+    this.applyPieceVisual(placed.id);
     if (logPlacement) {
       console.info(`[construction] placed ${piece.label} (${constructionMaterialLabel(material)}) at ${placed.position.map((value) => value.toFixed(2)).join(", ")}`);
     }
     return true;
   }
 
+  /** Legacy helper retained for migration tests. Runtime deletion no longer uses recursive descendants. */
   collectDependentIds(rootId: string): Set<string> {
     const result = new Set<string>([rootId]);
     let changed = true;
@@ -62,11 +90,19 @@ export class ConstructionPieceStore {
     return result;
   }
 
-  removeByIds(ids: ReadonlySet<string>): number {
-    let removed = 0;
+  removeOne(id: string): ConstructionPieceRemovalResult {
+    return this.removeByIds(new Set([id]));
+  }
+
+  removeByIds(ids: ReadonlySet<string>): ConstructionPieceRemovalResult {
+    const removedIds: string[] = [];
+    const disconnectedNeighborIds = new Set<string>();
     for (let index = this.pieces.length - 1; index >= 0; index -= 1) {
       const placed = this.pieces[index]!;
       if (!ids.has(placed.id)) continue;
+      for (const neighbor of this.graph.removeNode(placed.id)) {
+        if (!ids.has(neighbor)) disconnectedNeighborIds.add(neighbor);
+      }
       const mesh = this.meshes[index];
       if (mesh) {
         this.root.remove(mesh);
@@ -75,60 +111,80 @@ export class ConstructionPieceStore {
       this.snapIndex.removeEntity(placed.id);
       this.overlapIndex.removeEntity(placed.id);
       this.colliderSet?.remove(placed.id);
-      this.unsupportedOriginalColors.delete(placed.id);
+      this.baseColors.delete(placed.id);
       this.pieces.splice(index, 1);
       this.meshes.splice(index, 1);
-      removed += 1;
+      removedIds.push(placed.id);
     }
-    return removed;
+    return {
+      removedCount: removedIds.length,
+      removedIds: removedIds.sort(),
+      disconnectedNeighborIds: [...disconnectedNeighborIds].sort(),
+    };
   }
 
-  /**
-   * Applies support flags + visual marking from a re-evaluation pass. Colliders are
-   * deliberately untouched: an unsupported piece stays solid exactly where it is drawn
-   * (collapse deferred means marked-not-passable, never a ghost wall).
-   */
+  setStabilityVisualization(active: boolean, collapseThreshold: number): void {
+    this.stabilityVisualizationActive = active;
+    this.collapseThreshold = collapseThreshold;
+    this.refreshStabilityVisuals();
+  }
+
+  refreshStabilityVisuals(ids?: Iterable<string>): void {
+    const filter = ids ? new Set(ids) : null;
+    for (const placed of this.pieces) {
+      if (!filter || filter.has(placed.id)) this.applyPieceVisual(placed.id);
+    }
+  }
+
   applySupportState(groundedLost: readonly string[], groundedRestored: readonly string[], unsupportedIds: ReadonlySet<string>): void {
     const lost = new Set(groundedLost);
     const restored = new Set(groundedRestored);
-    for (let index = 0; index < this.pieces.length; index += 1) {
-      const placed = this.pieces[index]!;
+    for (const placed of this.pieces) {
       if (lost.has(placed.id)) placed.grounded = false;
       else if (restored.has(placed.id)) placed.grounded = true;
-      const unsupported = unsupportedIds.has(placed.id);
-      if (unsupported) placed.unsupported = true;
+      if (unsupportedIds.has(placed.id)) placed.unsupported = true;
       else delete placed.unsupported;
-      const mesh = this.meshes[index];
-      if (mesh) this.markUnsupportedVisual(placed.id, mesh, unsupported);
     }
+    this.refreshStabilityVisuals();
   }
 
   unsupportedCount(): number {
-    return this.unsupportedOriginalColors.size;
+    return this.pieces.reduce((count, piece) => count + (piece.unsupported === true ? 1 : 0), 0);
   }
 
   isMarkedUnsupported(id: string): boolean {
-    return this.unsupportedOriginalColors.has(id);
-  }
-
-  private markUnsupportedVisual(id: string, mesh: THREE.Mesh, unsupported: boolean): void {
-    const material = mesh.material as THREE.MeshStandardMaterial;
-    if (!material?.color) return;
-    const original = this.unsupportedOriginalColors.get(id);
-    if (unsupported && !original) {
-      this.unsupportedOriginalColors.set(id, material.color.clone());
-      material.color.multiply(UNSUPPORTED_TINT);
-    } else if (!unsupported && original) {
-      material.color.copy(original);
-      this.unsupportedOriginalColors.delete(id);
-    }
+    return this.pieces.find((piece) => piece.id === id)?.unsupported === true;
   }
 
   dispose(): void {
     for (const mesh of this.meshes) disposeMesh(mesh);
     this.meshes.length = 0;
     this.pieces.length = 0;
-    this.unsupportedOriginalColors.clear();
+    this.baseColors.clear();
+    this.graph.clear();
     this.colliderSet?.dispose();
+  }
+
+  private applyPieceVisual(id: string): void {
+    const index = this.pieces.findIndex((piece) => piece.id === id);
+    if (index < 0) return;
+    const placed = this.pieces[index]!;
+    const mesh = this.meshes[index];
+    const definition = this.piecesById.get(placed.typeId);
+    const material = mesh?.material as THREE.MeshStandardMaterial | undefined;
+    const baseColor = this.baseColors.get(id);
+    if (!mesh || !definition || !material?.color || !baseColor) return;
+    if (!this.stabilityVisualizationActive) {
+      material.color.copy(baseColor);
+      return;
+    }
+    const pieceMaterial = placed.material ?? definition.material;
+    const profile = constructionSupportProfile(definition, pieceMaterial, this.supportProfiles);
+    material.color.setHex(constructionStabilityColorHex(
+      placed.stability ?? 0,
+      profile.maxSupport,
+      placed.grounded === true,
+      this.collapseThreshold,
+    ));
   }
 }
