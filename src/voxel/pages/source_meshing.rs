@@ -28,7 +28,7 @@ const COMPLETE_PAGE_REFRESH_INTERVAL_FRAMES: u32 = 8;
 
 #[derive(Resource, Default)]
 pub(crate) struct PageSourceMeshingQueue {
-    center: Option<IVec3>,
+    source_anchor: Option<IVec3>,
     world_chunk_count: usize,
     pending: VecDeque<IVec3>,
     queued: HashSet<IVec3>,
@@ -36,7 +36,7 @@ pub(crate) struct PageSourceMeshingQueue {
 
 impl PageSourceMeshingQueue {
     fn clear(&mut self) {
-        self.center = None;
+        self.source_anchor = None;
         self.world_chunk_count = 0;
         self.pending.clear();
         self.queued.clear();
@@ -46,17 +46,19 @@ impl PageSourceMeshingQueue {
         &mut self,
         world: &VoxelWorld,
         cache: &PageExportCache,
-        cam_chunk: IVec3,
+        source_anchor: IVec3,
+        vertical_reference_y: i32,
         near: i32,
         far: i32,
         chunks_per_page: i32,
     ) {
-        self.center = Some(cam_chunk);
+        self.source_anchor = Some(source_anchor);
         self.world_chunk_count = world.chunk_count();
         self.pending = source_positions_within_radius(
             world.chunk_positions(),
             &cache.exports,
-            cam_chunk,
+            source_anchor,
+            vertical_reference_y,
             near,
             far,
             chunks_per_page,
@@ -101,13 +103,13 @@ struct SourceMeshingSchedule {
 
 fn should_refresh_queue(
     queue: &PageSourceMeshingQueue,
-    cam_chunk: IVec3,
+    source_anchor: IVec3,
     world_chunk_count: usize,
     invalidated: bool,
     schedule: &mut SourceMeshingSchedule,
 ) -> bool {
     if invalidated
-        || queue.center != Some(cam_chunk)
+        || queue.source_anchor != Some(source_anchor)
         || queue.world_chunk_count != world_chunk_count
     {
         schedule.queue_rescan_in_frames = QUEUE_RESCAN_INTERVAL_FRAMES;
@@ -124,6 +126,15 @@ fn should_refresh_queue(
     false
 }
 
+fn source_anchor_chunk(cam_chunk: IVec3, chunks_per_page: i32) -> IVec3 {
+    let half_page = chunks_per_page / 2;
+    IVec3::new(
+        cam_chunk.x.div_euclid(chunks_per_page) * chunks_per_page + half_page,
+        0,
+        cam_chunk.z.div_euclid(chunks_per_page) * chunks_per_page + half_page,
+    )
+}
+
 fn page_coord(position: IVec3, chunks_per_page: i32) -> IVec2 {
     IVec2::new(
         position.x.div_euclid(chunks_per_page),
@@ -133,24 +144,24 @@ fn page_coord(position: IVec3, chunks_per_page: i32) -> IVec2 {
 
 fn page_min_chebyshev_distance(
     page: IVec2,
-    cam_chunk: IVec3,
+    source_anchor: IVec3,
     chunks_per_page: i32,
 ) -> i32 {
     let min_x = page.x * chunks_per_page;
     let min_z = page.y * chunks_per_page;
     let max_x = min_x + chunks_per_page - 1;
     let max_z = min_z + chunks_per_page - 1;
-    let dx = if cam_chunk.x < min_x {
-        min_x - cam_chunk.x
-    } else if cam_chunk.x > max_x {
-        cam_chunk.x - max_x
+    let dx = if source_anchor.x < min_x {
+        min_x - source_anchor.x
+    } else if source_anchor.x > max_x {
+        source_anchor.x - max_x
     } else {
         0
     };
-    let dz = if cam_chunk.z < min_z {
-        min_z - cam_chunk.z
-    } else if cam_chunk.z > max_z {
-        cam_chunk.z - max_z
+    let dz = if source_anchor.z < min_z {
+        min_z - source_anchor.z
+    } else if source_anchor.z > max_z {
+        source_anchor.z - max_z
     } else {
         0
     };
@@ -160,27 +171,28 @@ fn page_min_chebyshev_distance(
 fn source_positions_within_radius(
     positions: impl Iterator<Item = IVec3>,
     exports: &HashMap<IVec3, TerrainMainSurfaceExport>,
-    cam_chunk: IVec3,
+    source_anchor: IVec3,
+    vertical_reference_y: i32,
     near: i32,
     far: i32,
     chunks_per_page: i32,
 ) -> Vec<IVec3> {
     let mut candidates = positions
         .filter(|position| {
-            horizontal_chunk_distance(*position, cam_chunk) <= far
+            horizontal_chunk_distance(*position, source_anchor) <= far
                 && !exports.contains_key(position)
         })
         .collect::<Vec<_>>();
     candidates.sort_by_key(|position| {
         let page = page_coord(*position, chunks_per_page);
-        let page_distance = page_min_chebyshev_distance(page, cam_chunk, chunks_per_page);
+        let page_distance = page_min_chebyshev_distance(page, source_anchor, chunks_per_page);
         let hidden_near_page = page_distance <= near;
         (
             hidden_near_page,
             page_distance,
             page.x,
             page.y,
-            (position.y - cam_chunk.y).abs(),
+            (position.y - vertical_reference_y).abs(),
             position.x,
             position.z,
             position.y,
@@ -243,13 +255,14 @@ pub(crate) fn clod_pages_source_meshing_system(
     let near = runtime.cfg.near_field.radius_chunks;
     let far = runtime.source_radius_chunks;
     let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
-    let retained = cache.retain_in_radius(cam_chunk, far);
+    let source_anchor = source_anchor_chunk(cam_chunk, chunks_per_page);
+    let retained = cache.retain_in_radius(source_anchor, far);
     let invalidated = cache.invalidate_dirty_exports(&world);
     let world_changed = queue.world_chunk_count != world_chunk_count;
 
     if should_refresh_queue(
         &queue,
-        cam_chunk,
+        source_anchor,
         world_chunk_count,
         invalidated || retained,
         &mut schedule,
@@ -257,7 +270,8 @@ pub(crate) fn clod_pages_source_meshing_system(
         queue.refresh(
             &world,
             &cache,
-            cam_chunk,
+            source_anchor,
+            cam_chunk.y,
             near,
             far,
             chunks_per_page,
