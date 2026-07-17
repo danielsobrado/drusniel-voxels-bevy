@@ -9,6 +9,15 @@
 
 [clod]
 min_samples = 1
+
+# Phase 5 must have actually built and selected pages. These minima prevent a zero-work
+# runtime from passing merely because all selection-error counters stayed at zero.
+min_max_source_exports = 1
+min_max_complete_page_columns = 1
+max_source_failures_total = 0
+min_max_indexed_nodes = 1
+min_max_rendered_pages = 1
+
 max_blocked_splits = 0
 max_rows_with_indexed_nodes_and_no_rendered_pages = 0
 max_frozen_frames = 0
