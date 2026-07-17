@@ -55,6 +55,7 @@ const QUERY_SPAWN_FALLBACK_LIFT_M = 16;
 const QUERY_SPAWN_RAYCAST_HEIGHT_M = 512;
 const QUERY_SPAWN_SEARCH_RADII_M = [0, 16, 32, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] as const;
 const QUERY_SPAWN_SEARCH_DIRECTIONS = 24;
+const SPAWN_GATE_STALL_WARNING_FRAMES = 300;
 
 function querySpawnDryEnough(height: number): boolean {
   return Number.isFinite(height) && height >= WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M;
@@ -93,32 +94,28 @@ export function resolveQuerySpawnPoint(
   return { x, y: WATER_LEVEL + QUERY_SPAWN_DRY_CLEARANCE_M, z, adjusted: false };
 }
 
-// ~5s at 60fps: if streaming stalls, spawn anyway rather than hang forever.
-const SPAWN_GATE_MAX_FRAMES = 300;
-
 export interface QuerySpawnGateState {
   /** Only streaming/infinite worlds gate; finite worlds spawn immediately. */
   enabled: boolean;
   safetyReady: number;
   safetyRequired: number;
   collidersLoaded: number;
+  /** Retained for diagnostics; elapsed time must never bypass readiness. */
   framesWaited: number;
+  /** Retained for diagnostics; elapsed time must never bypass readiness. */
   maxFrames: number;
   /** Readiness of the target cell itself (collision envelope); absent = not evaluated. */
   targetCellReady?: boolean;
 }
 
 /**
- * Decide whether the query spawn may be applied this frame. Pure so it is unit-testable.
- * For streaming worlds the player must not drop onto un-meshed ground: wait until the streamed
- * root safety pages report full coverage, at least one collider page has loaded, and the
- * target cell reports a collision-ready movement envelope — but never past the frame cap.
+ * Decide whether the query spawn may be applied this frame. Streaming worlds fail closed:
+ * elapsed frames are observability only and never authorize a spawn onto missing terrain.
  */
 export function shouldApplyQuerySpawnNow(gate: QuerySpawnGateState): boolean {
   if (!gate.enabled) return true;
-  if (gate.framesWaited >= gate.maxFrames) return true;
   const safetyReady = gate.safetyRequired > 0 && gate.safetyReady >= gate.safetyRequired;
-  return safetyReady && gate.collidersLoaded > 0 && gate.targetCellReady !== false;
+  return safetyReady && gate.collidersLoaded > 0 && gate.targetCellReady === true;
 }
 
 function resolveColliderSpawnPoint(
@@ -233,12 +230,16 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     if (deps.interaction.mode === "playing") deps.playerModeStatus.textContent = "Click viewport to capture mouse";
   });
 
-  const performQuerySpawn = (xVal: number, zVal: number, yawVal: number) => {
-    const spawn = resolveQuerySpawnPoint(xVal, zVal, deps.surfaceHeight);
+  const performQuerySpawn = (
+    requestedX: number,
+    requestedZ: number,
+    spawn: QuerySpawnPoint,
+    yawVal: number,
+  ) => {
     const spawnPoint = resolveColliderSpawnPoint(deps.terrainColliders, spawn);
     if (spawn.adjusted) {
       console.info(
-        `[player] query spawn adjusted to dry land: requested=(${xVal.toFixed(1)}, ${zVal.toFixed(1)}) ` +
+        `[player] query spawn adjusted to dry land: requested=(${requestedX.toFixed(1)}, ${requestedZ.toFixed(1)}) ` +
           `resolved=(${spawn.x.toFixed(1)}, ${spawn.z.toFixed(1)}) y=${spawn.y.toFixed(1)}`,
       );
     }
@@ -268,17 +269,17 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     const yawVal = qyaw !== null ? Number(qyaw) : 0;
     if (!Number.isFinite(xVal) || !Number.isFinite(zVal)) return;
 
+    const spawn = resolveQuerySpawnPoint(xVal, zVal, deps.surfaceHeight);
     const gateStartedAt = performance.now();
     if (deps.spawnGateEnabled !== true) {
-      performQuerySpawn(xVal, zVal, yawVal);
+      performQuerySpawn(xVal, zVal, spawn, yawVal);
       gameplayDiagnostics.set("time_to_gameplay_ready_ms", performance.now() - gateStartedAt);
       return;
     }
 
-    // Streaming/infinite worlds: hold in the pre-play (orbit) view until the streamed-root safety
-    // pages report full coverage and at least one collider page has loaded around the spawn, so the
-    // player lands on real ground instead of dropping through un-meshed terrain. Frame-capped so a
-    // stalled stream never hangs the spawn.
+    // Streaming worlds remain in the pre-play view until safety coverage, colliders, and
+    // the resolved dry-land target envelope are ready. A stalled stream is surfaced but
+    // never bypassed by elapsed time.
     let framesWaited = 0;
     const waitIndicator = createSpawnWaitIndicator();
     const poll = () => {
@@ -297,14 +298,18 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
         safetyRequired,
         collidersLoaded,
         framesWaited,
-        maxFrames: SPAWN_GATE_MAX_FRAMES,
-        targetCellReady: deps.movementReadyAt ? deps.movementReadyAt(xVal, zVal) : undefined,
+        maxFrames: SPAWN_GATE_STALL_WARNING_FRAMES,
+        targetCellReady: deps.movementReadyAt ? deps.movementReadyAt(spawn.x, spawn.z) : undefined,
       });
       if (ready) {
         waitIndicator.done();
-        performQuerySpawn(xVal, zVal, yawVal);
+        performQuerySpawn(xVal, zVal, spawn, yawVal);
         gameplayDiagnostics.set("time_to_gameplay_ready_ms", performance.now() - gateStartedAt);
         return;
+      }
+      if (framesWaited === SPAWN_GATE_STALL_WARNING_FRAMES) {
+        deps.playerModeStatus.textContent = "Spawn area is still streaming — waiting for safe terrain";
+        console.warn(`[player] query spawn safety gate stalled at (${spawn.x.toFixed(1)}, ${spawn.z.toFixed(1)}); continuing to wait`);
       }
       framesWaited++;
       requestAnimationFrame(poll);
