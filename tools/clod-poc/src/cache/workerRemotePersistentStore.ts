@@ -1,5 +1,5 @@
 import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes.js";
-import { CacheUnavailableError } from "./cacheErrors.js";
+import { CacheUnavailableError, CacheWriteRejectedError } from "./cacheErrors.js";
 import type { PersistentCacheStore } from "./indexedDbStore.js";
 import type { CacheRpcRequest, CacheRpcResponse } from "./cacheWorkerRpc.js";
 
@@ -36,6 +36,7 @@ type CacheRpcBody =
   | { op: "get"; key: string }
   | { op: "put"; key: string; record: ClodCacheStoredRecord; streamingGeneration?: number }
   | { op: "delete"; key: string }
+  | { op: "deleteIfMatches"; key: string; record: ClodCacheStoredRecord }
   | { op: "clear" }
   | { op: "keys" };
 
@@ -74,12 +75,23 @@ export class WorkerRemotePersistentStore implements PersistentCacheStore {
 
   async put(key: string, record: ClodCacheStoredRecord): Promise<void> {
     const streamingGeneration = recordStreamingGeneration(record);
-    await rpc({
+    const accepted = await rpc<boolean>({
       op: "put",
       key,
       record: normalizeRecord(record),
       ...(streamingGeneration === undefined ? {} : { streamingGeneration }),
     });
+    if (!accepted) {
+      throw new CacheWriteRejectedError(`cache write rejected for ${key}`);
+    }
+  }
+
+  async deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean> {
+    return Boolean(await rpc<boolean>({
+      op: "deleteIfMatches",
+      key,
+      record: normalizeRecord(record),
+    }));
   }
 
   async delete(key: string): Promise<void> {
