@@ -65,8 +65,12 @@ function stepMap(report: Pick<PlayableSliceRunReport, "steps">): Map<PlayableSli
   return new Map(report.steps.map((evidence) => [evidence.step, evidence]));
 }
 
-function delta(finalValue: number, initialValue: number): number {
-  return finalValue - initialValue;
+function maxIncrease(
+  snapshots: readonly PlayableSliceSnapshot[],
+  baseline: number,
+  read: (snapshot: PlayableSliceSnapshot) => number,
+): number {
+  return Math.max(0, ...snapshots.map((snapshot) => read(snapshot) - baseline));
 }
 
 export function publicRouteAuditFailures(
@@ -99,6 +103,7 @@ export function evaluatePlayableSliceRun(
   const checkpoint = steps.get("checkpoint_saved")!.snapshot;
   const reloaded = steps.get("world_reloaded")!.snapshot;
   const continued = steps.get("gameplay_continued")!.snapshot;
+  const snapshots = report.steps.map((evidence) => evidence.snapshot);
 
   if (boundary.page[0] === start.page[0] && boundary.page[1] === start.page[1]) {
     failures.push("player did not cross a terrain page boundary");
@@ -111,6 +116,9 @@ export function evaluatePlayableSliceRun(
   }
   if (placed.construction.colliders < placed.construction.placedPieces) {
     failures.push("placed construction collider count lagged visible pieces");
+  }
+  if (placed.construction.unsupportedPieces !== 0 || placed.construction.pendingCollapses !== 0) {
+    failures.push("placed construction entered an unsupported or collapsing state");
   }
   if (broken.construction.placedPieces >= placed.construction.placedPieces) {
     failures.push("public break/delete input did not remove the placed piece");
@@ -133,8 +141,15 @@ export function evaluatePlayableSliceRun(
   if (checkpoint.persistence.checkpointFailed > spell.persistence.checkpointFailed) {
     failures.push("public checkpoint action failed");
   }
-  if (checkpoint.persistence.checkpointInFlight || checkpoint.persistence.dirtyRegions !== 0) {
+  if (
+    checkpoint.persistence.checkpointInFlight
+    || checkpoint.persistence.dirtyRegions !== 0
+    || checkpoint.persistence.lastError !== 0
+  ) {
     failures.push("checkpoint returned before persistence converged");
+  }
+  if (checkpoint.persistence.voxelDeltaCount < spell.terrain.voxelDeltaCount) {
+    failures.push("checkpoint did not persist all authoritative voxel edits");
   }
   if (!reloaded.persistence.loaded || reloaded.persistence.lastError !== 0) {
     failures.push("saved world did not reload cleanly");
@@ -146,11 +161,12 @@ export function evaluatePlayableSliceRun(
   if (continued.frame <= reloaded.frame) failures.push("render loop did not advance after reload");
 
   const safetyDeltas = {
-    coverage: delta(continued.safety.colliderCoverageMissing, start.safety.colliderCoverageMissing),
-    recoveries: delta(continued.safety.recoveries, start.safety.recoveries),
-    syncBuilds: delta(continued.safety.syncFrameBuilds, start.safety.syncFrameBuilds),
-    barriers: delta(continued.safety.frontierBarrierEngagements, start.safety.frontierBarrierEngagements),
-    expired: delta(continued.safety.editCommandsExpired, start.safety.editCommandsExpired),
+    coverage: maxIncrease(snapshots, start.safety.colliderCoverageMissing, (snapshot) => snapshot.safety.colliderCoverageMissing),
+    recoveries: maxIncrease(snapshots, start.safety.recoveries, (snapshot) => snapshot.safety.recoveries),
+    syncBuilds: maxIncrease(snapshots, start.safety.syncFrameBuilds, (snapshot) => snapshot.safety.syncFrameBuilds),
+    barriers: maxIncrease(snapshots, start.safety.frontierBarrierEngagements, (snapshot) => snapshot.safety.frontierBarrierEngagements),
+    expired: maxIncrease(snapshots, start.safety.editCommandsExpired, (snapshot) => snapshot.safety.editCommandsExpired),
+    deniedNotReady: maxIncrease(snapshots, start.safety.editsDeniedNotReady, (snapshot) => snapshot.safety.editsDeniedNotReady),
   };
   if (safetyDeltas.coverage !== 0) failures.push(`collider coverage was missing ${safetyDeltas.coverage} times`);
   if (safetyDeltas.recoveries !== 0) failures.push(`player recovery fired ${safetyDeltas.recoveries} times`);
@@ -159,6 +175,7 @@ export function evaluatePlayableSliceRun(
     failures.push(`frontier barrier engagements ${safetyDeltas.barriers} exceed ${thresholds.maxFrontierBarrierEngagements}`);
   }
   if (safetyDeltas.expired !== 0) failures.push(`edit commands expired ${safetyDeltas.expired} times`);
+  if (safetyDeltas.deniedNotReady !== 0) failures.push(`edits were denied as not-ready ${safetyDeltas.deniedNotReady} times`);
   if (report.wallClockMs > thresholds.maxWallClockMs) {
     failures.push(`wall clock ${report.wallClockMs.toFixed(0)}ms exceeds ${thresholds.maxWallClockMs}ms`);
   }
