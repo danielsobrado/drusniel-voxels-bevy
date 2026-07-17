@@ -1,0 +1,92 @@
+pieces:
+- id: wood-stairs-2x2
+  label: Stairs 2x2
+  category: stairs
+  dimensions_m: [2.0, 2.0, 2.0]
+  can_ground: false
+  material: wood
+  geometry_kind: stairs
+  placement_boxes:
+  - center: [0, -0.75, -0.75]
+    dimensions_m: [2.0, 0.5, 0.5]
+  - center: [0, -0.5, -0.25]
+    dimensions_m: [2.0, 1.0, 0.5]
+  - center: [0, -0.25, 0.25]
+    dimensions_m: [2.0, 1.5, 0.5]
+  - center: [0, 0.0, 0.75]
+    dimensions_m: [2.0, 2.0, 0.5]
+  snap_points:
+  - id: bottom
+    local_pos: [0, -1, -1]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-top]
+  - id: top
+    local_pos: [0, 1, 1]
+    direction: [0, 0, 1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-top]
+- id: wood-ladder-2m
+  label: Ladder 2m
+  category: stairs
+  dimensions_m: [0.8, 2.0, 0.15]
+  can_ground: false
+  material: wood
+  geometry_parts:
+  - kind: box
+    center: [-0.3, 0, 0]
+    dimensions_m: [0.12, 2.0, 0.12]
+  - kind: box
+    center: [0.3, 0, 0]
+    dimensions_m: [0.12, 2.0, 0.12]
+  - kind: box
+    center: [0, -0.8, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - kind: box
+    center: [0, -0.4, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - kind: box
+    center: [0, 0.0, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - kind: box
+    center: [0, 0.4, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - kind: box
+    center: [0, 0.8, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  placement_boxes:
+  - center: [-0.3, 0, 0]
+    dimensions_m: [0.12, 2.0, 0.12]
+  - center: [0.3, 0, 0]
+    dimensions_m: [0.12, 2.0, 0.12]
+  - center: [0, -0.8, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - center: [0, -0.4, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - center: [0, 0.0, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - center: [0, 0.4, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  - center: [0, 0.8, 0]
+    dimensions_m: [0.6, 0.08, 0.12]
+  snap_points:
+  - id: bottom
+    local_pos: [0, -1, 0]
+    direction: [0, -1, 0]
+    tangent: [1, 0, 0]
+    group: wall-bottom
+    accepts: [floor-edge, wall-top]
+  - id: top
+    local_pos: [0, 1, 0]
+    direction: [0, 1, 0]
+    tangent: [1, 0, 0]
+    group: wall-top
+    accepts: [floor-edge, wall-bottom, wall-top]
+  - id: mount
+    local_pos: [0, 0, 0.075]
+    direction: [0, 0, 1]
+    tangent: [0, 1, 0]
+    group: wall-side
+    accepts: [wall-side]

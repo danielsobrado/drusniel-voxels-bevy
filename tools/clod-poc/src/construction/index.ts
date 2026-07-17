@@ -54,6 +54,7 @@ export type {
   ConstructionCandidate,
   ConstructionConfig,
   ConstructionGeometryKind,
+  ConstructionGeometryPart,
   ConstructionGhostConfig,
   ConstructionMaterial,
   ConstructionPieceDef,

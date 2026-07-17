@@ -1,6 +1,11 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { ConstructionPieceDef, PlacedConstructionPiece } from "./types.js";
+import type {
+  ConstructionGeometryKind,
+  ConstructionGeometryPart,
+  ConstructionPieceDef,
+  PlacedConstructionPiece,
+} from "./types.js";
 
 export const GHOST_VALID_COLOR = 0x35d46b;
 export const GHOST_SNAPPED_COLOR = 0x4ea1ff;
@@ -91,23 +96,42 @@ function createStairsGeometry(dimensions: readonly [number, number, number]): TH
   return merged;
 }
 
-export function createPieceGeometry(piece: ConstructionPieceDef): THREE.BufferGeometry {
-  const [x, y, z] = piece.dimensionsM;
-  let geometry: THREE.BufferGeometry;
-  switch (piece.geometryKind ?? "box") {
+function createPrimitiveGeometry(kind: ConstructionGeometryKind, dimensions: readonly [number, number, number]): THREE.BufferGeometry {
+  const [x, y, z] = dimensions;
+  switch (kind) {
     case "wedge":
-      geometry = createWedgeGeometry(piece.dimensionsM);
-      break;
+      return createWedgeGeometry(dimensions);
     case "stairs":
-      geometry = createStairsGeometry(piece.dimensionsM);
-      break;
+      return createStairsGeometry(dimensions);
     case "cylinder":
-      geometry = new THREE.CylinderGeometry(Math.min(x, z) * 0.5, Math.min(x, z) * 0.5, y, 12);
-      break;
+      return new THREE.CylinderGeometry(Math.min(x, z) * 0.5, Math.min(x, z) * 0.5, y, 12);
     default:
-      geometry = new THREE.BoxGeometry(x, y, z);
-      break;
+      return new THREE.BoxGeometry(x, y, z);
   }
+}
+
+function createGeometryPart(part: ConstructionGeometryPart): THREE.BufferGeometry {
+  const geometry = createPrimitiveGeometry(part.kind, part.dimensionsM);
+  const rotation = part.rotationDegrees ?? [0, 0, 0];
+  if (rotation[0]) geometry.rotateX(THREE.MathUtils.degToRad(rotation[0]));
+  if (rotation[1]) geometry.rotateY(THREE.MathUtils.degToRad(rotation[1]));
+  if (rotation[2]) geometry.rotateZ(THREE.MathUtils.degToRad(rotation[2]));
+  geometry.translate(part.center[0], part.center[1], part.center[2]);
+  return geometry;
+}
+
+function createCompoundGeometry(piece: ConstructionPieceDef): THREE.BufferGeometry | null {
+  if (!piece.geometryParts || piece.geometryParts.length === 0) return null;
+  const parts = piece.geometryParts.map(createGeometryPart);
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  if (!merged) throw new Error(`Failed to create compound construction geometry for ${piece.id}`);
+  return merged;
+}
+
+export function createPieceGeometry(piece: ConstructionPieceDef): THREE.BufferGeometry {
+  const geometry = createCompoundGeometry(piece)
+    ?? createPrimitiveGeometry(piece.geometryKind ?? "box", piece.dimensionsM);
   if (piece.geometryYawDegrees) geometry.rotateY(THREE.MathUtils.degToRad(piece.geometryYawDegrees));
   geometry.computeBoundingBox();
   return addUv2(geometry);

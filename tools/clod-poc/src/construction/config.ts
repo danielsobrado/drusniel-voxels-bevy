@@ -1,5 +1,6 @@
 import { load } from "js-yaml";
 import constructionYamlText from "../../config/construction.yaml?raw";
+import { defaultConstructionPieceCatalogTexts } from "./construction_piece_catalog.js";
 import {
   CONSTRUCTION_GEOMETRY_KINDS,
   CONSTRUCTION_MATERIALS,
@@ -8,6 +9,7 @@ import {
   type ConstructionCategory,
   type ConstructionConfig,
   type ConstructionGeometryKind,
+  type ConstructionGeometryPart,
   type ConstructionMaterial,
   type ConstructionPieceDef,
   type ConstructionPlacementBox,
@@ -18,7 +20,18 @@ import {
   type SnapGroup,
 } from "./types.js";
 
-const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = ["floor", "wall", "fence", "pillar", "roof", "generic"];
+const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = [
+  "floor",
+  "wall",
+  "opening",
+  "fence",
+  "pillar",
+  "beam",
+  "stairs",
+  "roof",
+  "foundation",
+  "generic",
+];
 const MIN_DIMENSION_M = 0.01;
 const ZERO_LENGTH_EPSILON = 0.000001;
 const DEFAULT_SNAP_DIRECTION: readonly [number, number, number] = [0, 1, 0];
@@ -58,7 +71,7 @@ const DEFAULT_CONFIG: ConstructionConfig = {
   ghost: { opacity: 0.42 },
   terrainConform: {
     enabled: false,
-    foundationCategories: ["floor"],
+    foundationCategories: ["floor", "foundation"],
     padMarginM: 0.35,
     fillDepthM: 2.5,
     trimHeightM: 1.2,
@@ -234,6 +247,21 @@ function parsePlacementBox(value: unknown): ConstructionPlacementBox | null {
   };
 }
 
+function parseGeometryPart(value: unknown): ConstructionGeometryPart | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const rotationY = readNumber(record, "rotation_y_degrees", 0, -360, 360);
+  const rotationDegrees = Array.isArray(record.rotation_degrees)
+    ? readVec3(record, "rotation_degrees", [0, rotationY, 0])
+    : [0, rotationY, 0] as const;
+  return {
+    kind: asGeometryKind(readString(record, "kind", "box")),
+    center: readVec3(record, "center", [0, 0, 0]),
+    dimensionsM: readPositiveVec3(record, "dimensions_m", [1, 1, 1]),
+    rotationDegrees,
+  };
+}
+
 function parsePiece(value: unknown): ConstructionPieceDef | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -246,6 +274,9 @@ function parsePiece(value: unknown): ConstructionPieceDef | null {
   const placementBoxes = Array.isArray(record.placement_boxes)
     ? record.placement_boxes.map(parsePlacementBox).filter((box): box is ConstructionPlacementBox => box !== null)
     : undefined;
+  const geometryParts = Array.isArray(record.geometry_parts)
+    ? record.geometry_parts.map(parseGeometryPart).filter((part): part is ConstructionGeometryPart => part !== null)
+    : undefined;
   return {
     id,
     label: readString(record, "label", id),
@@ -257,6 +288,7 @@ function parsePiece(value: unknown): ConstructionPieceDef | null {
     rotationStepDegrees: readNumber(record, "rotation_step_degrees", 90, 1, 180) >= 135 ? 180 : 90,
     geometryKind: asGeometryKind(readString(record, "geometry_kind", "box")),
     geometryYawDegrees: readNumber(record, "geometry_yaw_degrees", 0, -360, 360),
+    geometryParts,
     placementBoxes,
     groundNormalMinY: readNumber(record, "ground_normal_min_y", 0.45, -1, 1),
     supportProfile: record.support_profile
@@ -265,18 +297,32 @@ function parsePiece(value: unknown): ConstructionPieceDef | null {
   };
 }
 
-export function parseConstructionConfig(text: string = constructionYamlText): ConstructionConfig {
+function parsePieceCatalog(text: string): ConstructionPieceDef[] {
+  const parsed = asRecord(load(text));
+  return Array.isArray(parsed?.pieces)
+    ? parsed.pieces.map(parsePiece).filter((piece): piece is ConstructionPieceDef => piece !== null)
+    : [];
+}
+
+export function parseConstructionConfig(
+  text?: string,
+  pieceCatalogTexts?: readonly string[],
+): ConstructionConfig {
   try {
-    const parsed = asRecord(load(text));
+    const usesDefaultSources = text === undefined && pieceCatalogTexts === undefined;
+    const parsed = asRecord(load(text ?? constructionYamlText));
     const root = asRecord(parsed?.construction);
     const snap = asRecord(root?.snap);
     const placement = asRecord(root?.placement);
     const ghost = asRecord(root?.ghost);
     const terrainConform = asRecord(root?.terrain_conform);
     const stability = asRecord(root?.stability);
-    const pieces = Array.isArray(root?.pieces)
+    const inlinePieces = Array.isArray(root?.pieces)
       ? root.pieces.map(parsePiece).filter((piece): piece is ConstructionPieceDef => piece !== null)
       : [];
+    const catalogTexts = pieceCatalogTexts ?? (usesDefaultSources ? defaultConstructionPieceCatalogTexts : []);
+    const catalogPieces = catalogTexts.flatMap(parsePieceCatalog);
+    const pieces = inlinePieces.length > 0 ? inlinePieces : catalogPieces;
 
     return {
       enabled: readBool(root, "enabled", DEFAULT_CONFIG.enabled),
