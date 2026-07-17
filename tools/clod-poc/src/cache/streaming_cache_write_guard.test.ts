@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
-import { commitCachePut, type CacheWriteStore } from "./streaming_cache_write_guard.js";
+import {
+  cacheRecordVersionMatches,
+  commitCachePut,
+  type CacheWriteStore,
+} from "./streaming_cache_write_guard.js";
 import {
   resetTerrainStreamingControlForTests,
   setTerrainStreamingEnabled,
@@ -51,9 +55,8 @@ describe("commitCachePut", () => {
     setTerrainStreamingEnabled(false);
     const put = vi.fn(async () => undefined);
     const store: CacheWriteStore = {
-      get: async () => null,
       put,
-      delete: async () => undefined,
+      deleteIfMatches: async () => false,
     };
 
     await expect(commitCachePut(store, request(record(undefined)))).resolves.toBe(true);
@@ -62,38 +65,44 @@ describe("commitCachePut", () => {
 
   it("removes the exact streamed-root record when its generation changes during the write", async () => {
     let stored: ClodCacheStoredRecord | null = null;
-    const remove = vi.fn(async () => { stored = null; });
+    const remove = vi.fn(async (_key: string, expected: ClodCacheStoredRecord) => {
+      if (!stored || !cacheRecordVersionMatches(stored, expected)) return false;
+      stored = null;
+      return true;
+    });
     const store: CacheWriteStore = {
-      get: async () => stored,
       put: async (_key, value) => {
         stored = value;
         setTerrainStreamingEnabled(false);
         setTerrainStreamingEnabled(true);
       },
-      delete: remove,
+      deleteIfMatches: remove,
     };
 
     await expect(commitCachePut(store, request(record(0), 0))).resolves.toBe(false);
-    expect(remove).toHaveBeenCalledWith("stream-root");
+    expect(remove).toHaveBeenCalledWith("stream-root", expect.any(Object));
     expect(stored).toBeNull();
   });
 
   it("does not delete a newer replacement written under the resumed generation", async () => {
     let stored: ClodCacheStoredRecord | null = null;
     const newer = record(2, 2);
-    const remove = vi.fn(async () => { stored = null; });
+    const remove = vi.fn(async (_key: string, expected: ClodCacheStoredRecord) => {
+      if (!stored || !cacheRecordVersionMatches(stored, expected)) return false;
+      stored = null;
+      return true;
+    });
     const store: CacheWriteStore = {
-      get: async () => stored,
       put: async () => {
         setTerrainStreamingEnabled(false);
         setTerrainStreamingEnabled(true);
         stored = newer;
       },
-      delete: remove,
+      deleteIfMatches: remove,
     };
 
     await expect(commitCachePut(store, request(record(0), 0))).resolves.toBe(false);
-    expect(remove).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledOnce();
     expect(stored).toBe(newer);
   });
 });
