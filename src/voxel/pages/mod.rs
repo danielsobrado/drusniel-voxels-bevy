@@ -43,6 +43,7 @@ pub mod simplify;
 pub mod simplify_export;
 pub mod simplify_stats;
 pub mod source_mesh;
+pub(crate) mod source_meshing;
 pub mod stats;
 pub mod summary;
 pub mod topology_export;
