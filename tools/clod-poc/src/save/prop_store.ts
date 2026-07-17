@@ -30,12 +30,15 @@ export class SavedPropStore {
   }
 
   restore(props: readonly SavedPropInstance[]): void {
-    this.props.clear();
+    const restored = new Map<string, SavedPropInstance>();
     for (const prop of props) {
       assertSavedPropInstance(prop);
-      if (this.props.has(prop.id)) throw new Error(`duplicate saved prop id: ${prop.id}`);
-      this.props.set(prop.id, cloneSavedProp(prop));
+      if (restored.has(prop.id)) throw new Error(`duplicate saved prop id: ${prop.id}`);
+      restored.set(prop.id, cloneSavedProp(prop));
     }
+
+    this.props.clear();
+    for (const [id, prop] of restored) this.props.set(id, prop);
     this.mutationRevision++;
   }
 
