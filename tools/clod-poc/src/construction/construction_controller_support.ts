@@ -38,11 +38,11 @@ export function asFiniteVec3(value: unknown): [number, number, number] | null {
 export function readStringArray(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const parsed = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-  return parsed.length > 0 ? parsed : [];
+  return parsed.length > 0 ? [...new Set(parsed)].sort() : [];
 }
 
 export function hasExplicitSupportMetadata(placed: PlacedConstructionPiece): boolean {
-  return placed.grounded !== undefined || placed.parentIds !== undefined;
+  return placed.grounded !== undefined || placed.connectionIds !== undefined || placed.parentIds !== undefined;
 }
 
 export function disposeMesh(mesh: THREE.Mesh): void {
