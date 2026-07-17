@@ -5,7 +5,10 @@ import {
   executePreparedEarthSpellCast,
   prepareEarthSpellCast,
 } from "./spell_world_convergence.js";
-import type { TerrainSpellEditResult } from "../terrain/editing/terrain_edit_service.js";
+import type {
+  TerrainSpellEditRequest,
+  TerrainSpellEditResult,
+} from "../terrain/editing/terrain_edit_service.js";
 
 const convergedResult: TerrainSpellEditResult = {
   committed: true,
@@ -53,7 +56,10 @@ describe("earth spell world convergence", () => {
       { terrainRevision: 2, actor: "player", mode: "playing", nowMs: 0 },
     )!;
     const order: string[] = [];
-    const commitSpellTerrainEdit = vi.fn(async (_request, onCommit?: () => void) => {
+    const commitSpellTerrainEdit = vi.fn(async (
+      _request: TerrainSpellEditRequest,
+      onCommit?: () => void,
+    ): Promise<TerrainSpellEditResult> => {
       order.push("authority");
       onCommit?.();
       order.push("derived");
@@ -95,7 +101,9 @@ describe("earth spell world convergence", () => {
 
     const result = await executePreparedEarthSpellCast(prepared, {
       ready: Promise.resolve(),
-      terrainEditService: { commitSpellTerrainEdit: vi.fn(async () => denied) },
+      terrainEditService: {
+        commitSpellTerrainEdit: vi.fn(async (): Promise<TerrainSpellEditResult> => denied),
+      },
       playVfx,
     });
 
