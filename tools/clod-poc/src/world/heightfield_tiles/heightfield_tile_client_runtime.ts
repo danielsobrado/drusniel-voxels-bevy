@@ -10,10 +10,12 @@ import { baseSurfaceHeight } from "../../terrain/terrain.js";
 import { createGraphHydrologySampler } from "../../water/graph_hydrology.js";
 import { featureStampFieldFromStamps, type FeatureTerrainStamp } from "../feature_stamps.js";
 import type { HeightfieldSampler } from "../heightfield_sampler.js";
+import { beginStreamRootCacheOperation } from "../../cache/clodStreamRootCache.js";
 
 interface ClientPrototype {
   buildWorld: ClodWorkerClient["buildWorld"];
   buildHeightfieldTiles: ClodWorkerClient["buildHeightfieldTiles"];
+  buildStreamRoots: ClodWorkerClient["buildStreamRoots"];
   dispose: ClodWorkerClient["dispose"];
 }
 
@@ -141,6 +143,7 @@ export function installHeightfieldTileClientRuntime(): void {
 
   const prototype = ClodWorkerClient.prototype as ClientPrototype;
   const originalBuildWorld = prototype.buildWorld;
+  const originalBuildStreamRoots = prototype.buildStreamRoots;
   const originalDispose = prototype.dispose;
 
   prototype.buildWorld = async function (
@@ -167,6 +170,18 @@ export function installHeightfieldTileClientRuntime(): void {
       runtimeSet.add(runtime);
     }
     return result;
+  };
+
+  prototype.buildStreamRoots = async function (
+    this: ClodWorkerClient,
+    ...args: Parameters<ClodWorkerClient["buildStreamRoots"]>
+  ) {
+    const finish = beginStreamRootCacheOperation();
+    try {
+      return await originalBuildStreamRoots.apply(this, args);
+    } finally {
+      finish();
+    }
   };
 
   prototype.dispose = function (this: ClodWorkerClient) {
