@@ -6,7 +6,7 @@ export interface GpuTimestampSnapshot {
   timingsMs: Readonly<Record<string, number>>;
 }
 
-interface ReadbackSlot {
+export interface GpuTimestampReadbackSlot {
   buffer: GPUBuffer;
   busy: boolean;
   destroyAfterMap: boolean;
@@ -29,7 +29,7 @@ export function gpuTimestampRecordingEnabled(
 export class GpuTimestampRecorder {
   private readonly querySet: GPUQuerySet | null;
   private readonly resolveBuffer: GPUBuffer | null;
-  private readonly readbacks: ReadbackSlot[];
+  private readonly readbacks: GpuTimestampReadbackSlot[];
   private readonly queryCount: number;
   private readonly resolveBytes: number;
   private readonly labelIndex = new Map<string, number>();
@@ -38,7 +38,7 @@ export class GpuTimestampRecorder {
   private generation = 0;
 
   constructor(
-    private readonly device: GPUDevice,
+    device: GPUDevice,
     private readonly prefix: string,
     labels: readonly string[],
     private readonly intervalFrames = DEFAULT_INTERVAL_FRAMES,
@@ -84,7 +84,7 @@ export class GpuTimestampRecorder {
     };
   }
 
-  encodeReadback(encoder: GPUCommandEncoder, frame: number): ReadbackSlot | null {
+  encodeReadback(encoder: GPUCommandEncoder, frame: number): GpuTimestampReadbackSlot | null {
     if (!this.querySet || !this.resolveBuffer) return null;
     const interval = Math.max(1, Math.floor(this.intervalFrames));
     if (Math.max(0, Math.floor(frame)) % interval !== 0) return null;
@@ -100,7 +100,7 @@ export class GpuTimestampRecorder {
     return slot;
   }
 
-  submitReadback(slot: ReadbackSlot | null): void {
+  submitReadback(slot: GpuTimestampReadbackSlot | null): void {
     if (!slot) return;
     const generation = this.generation;
     void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
