@@ -32,7 +32,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const editedWater = new EditedWaterAuthoritySource();
   const generatedWater = deps.hydrologySystem
     ? createHydrologyWaterSource(deps.hydrologySystem, getDigEditRevision)
-    : createLegacyWaterFieldSource(field, getDigEditRevision);
+    : createLegacyWaterFieldSource(field, getDigEditRevision, 0.05, deps.waterConfig);
   const authority = createCanonicalWaterAuthority([editedWater, generatedWater]);
   const shoreSurfSettings = readShoreSurfSettings(deps.searchParams, deps.borderCoastOceanConfig);
   const clipmapExclusionDistance = deepOceanClipmapExclusionDistance(deps.searchParams, deps.borderCoastOceanConfig);
@@ -47,10 +47,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
       : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
-  // When hydrology can answer outside the startup world (infinite-islands), the clipmap
-  // and water shaders must not clamp water to [0, worldCells]²: cellsX/Z = 0 is the
-  // designed "unbounded" sentinel (finiteWorldBounds checks `> 0`). Otherwise the camera
-  // spawn region beyond the original world renders no water at all.
   const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
   const clipmap = new WaterClipmap({
     scene: deps.scene,
@@ -68,11 +64,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
 
-  // A hydrology tile built synchronously inside a clipmap refill costs 100–250 ms of
-  // main-thread CPU (a frame spike during traversal). The build worker keeps the tiles
-  // the fine rings will need resident ahead of the camera; the synchronous path stays
-  // as the bit-identical fallback. Prefetch must cover the largest ring that samples
-  // through the tile cache (cellSize <= the cache's coarse bypass threshold).
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
   const tileRemoteAuthority = deps.hydrologySystem?.tileRemoteAuthority() ?? null;
   const hydrologyRemote = tileBypassCellSize !== null && tileRemoteAuthority
@@ -187,8 +178,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       clipmap.updateSunDirection(direction);
     },
     update(deltaSeconds, cameraPosition) {
-      // Adopt worker-built tiles and queue the next ring of prefetches before the
-      // clipmap refill samples, so refills this frame already find tiles resident.
       if (hydrologyPrefetchRadiusM > 0) {
         deps.hydrologySystem?.prefetchTiles(cameraPosition.x, cameraPosition.z, hydrologyPrefetchRadiusM);
       }
