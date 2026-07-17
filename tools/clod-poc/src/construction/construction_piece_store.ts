@@ -9,9 +9,18 @@ import type { ConstructionMaterial, ConstructionPieceDef, PlacedConstructionPiec
 /** Multiplied into the albedo so an unsupported piece reads as visibly distressed. */
 const UNSUPPORTED_TINT = new THREE.Color(1.0, 0.45, 0.4);
 
+function clonePlacedPiece(placed: PlacedConstructionPiece): PlacedConstructionPiece {
+  return {
+    ...placed,
+    position: [placed.position[0], placed.position[1], placed.position[2]],
+    parentIds: placed.parentIds ? [...placed.parentIds] : undefined,
+  };
+}
+
 export class ConstructionPieceStore {
   readonly pieces: PlacedConstructionPiece[] = [];
   readonly meshes: THREE.Mesh[] = [];
+  private readonly pieceIds = new Set<string>();
   private readonly unsupportedOriginalColors = new Map<string, THREE.Color>();
 
   constructor(
@@ -26,22 +35,36 @@ export class ConstructionPieceStore {
 
   add(placed: PlacedConstructionPiece, logPlacement: boolean): boolean {
     const piece = this.piecesById.get(placed.typeId);
-    if (!piece) return false;
-    const material = placed.material ?? piece.material;
+    if (!piece || this.pieceIds.has(placed.id)) return false;
+
+    const stored = clonePlacedPiece(placed);
+    const material = stored.material ?? piece.material;
     const mesh = new THREE.Mesh(createPieceGeometry(piece), this.materialFactory(material));
-    mesh.name = `construction-${placed.typeId}`;
-    mesh.position.set(placed.position[0], placed.position[1], placed.position[2]);
-    mesh.rotation.set(0, placed.rotationQuarterTurns * Math.PI * 0.5, 0);
-    this.root.add(mesh);
+    mesh.name = `construction-${stored.typeId}`;
+    mesh.position.set(stored.position[0], stored.position[1], stored.position[2]);
+    mesh.rotation.set(0, stored.rotationQuarterTurns * Math.PI * 0.5, 0);
     mesh.updateMatrixWorld(true);
-    this.meshes.push(mesh);
-    this.pieces.push(placed);
-    this.snapIndex.addPiece(piece, placed.id, placed.position, placed.rotationQuarterTurns);
-    this.overlapIndex.addPiece(placed, piece);
-    this.colliderSet?.add(placed, piece);
-    if (placed.unsupported === true) this.markUnsupportedVisual(placed.id, mesh, true);
+
+    try {
+      this.snapIndex.addPiece(piece, stored.id, stored.position, stored.rotationQuarterTurns);
+      this.overlapIndex.addPiece(stored, piece);
+      this.colliderSet?.add(stored, piece);
+      this.root.add(mesh);
+      this.meshes.push(mesh);
+      this.pieces.push(stored);
+      this.pieceIds.add(stored.id);
+      if (stored.unsupported === true) this.markUnsupportedVisual(stored.id, mesh, true);
+    } catch (error) {
+      this.colliderSet?.remove(stored.id);
+      this.overlapIndex.removeEntity(stored.id);
+      this.snapIndex.removeEntity(stored.id);
+      this.root.remove(mesh);
+      disposeMesh(mesh);
+      throw error;
+    }
+
     if (logPlacement) {
-      console.info(`[construction] placed ${piece.label} (${constructionMaterialLabel(material)}) at ${placed.position.map((value) => value.toFixed(2)).join(", ")}`);
+      console.info(`[construction] placed ${piece.label} (${constructionMaterialLabel(material)}) at ${stored.position.map((value) => value.toFixed(2)).join(", ")}`);
     }
     return true;
   }
@@ -75,6 +98,7 @@ export class ConstructionPieceStore {
       this.snapIndex.removeEntity(placed.id);
       this.overlapIndex.removeEntity(placed.id);
       this.colliderSet?.remove(placed.id);
+      this.pieceIds.delete(placed.id);
       this.unsupportedOriginalColors.delete(placed.id);
       this.pieces.splice(index, 1);
       this.meshes.splice(index, 1);
@@ -125,9 +149,13 @@ export class ConstructionPieceStore {
   }
 
   dispose(): void {
-    for (const mesh of this.meshes) disposeMesh(mesh);
+    for (const mesh of this.meshes) {
+      this.root.remove(mesh);
+      disposeMesh(mesh);
+    }
     this.meshes.length = 0;
     this.pieces.length = 0;
+    this.pieceIds.clear();
     this.unsupportedOriginalColors.clear();
     this.colliderSet?.dispose();
   }
