@@ -7,6 +7,7 @@ export interface PersistedConstructionPlacementValidationInput {
   placed: PlacedConstructionPiece;
   placedPieces: readonly PlacedConstructionPiece[];
   overlapCandidates?: readonly PlacedConstructionPiece[];
+  loadedPieceIds?: ReadonlySet<string>;
   piecesById: ReadonlyMap<string, ConstructionPieceDef>;
   worldCells: number;
   config: ConstructionPlacementConfig;
@@ -48,6 +49,7 @@ function validatePersistedSupport(
   piece: ConstructionPieceDef,
   placed: PlacedConstructionPiece,
   placedPieces: readonly PlacedConstructionPiece[],
+  loadedPieceIds: ReadonlySet<string> | undefined,
   allowLegacySupportMetadata: boolean,
 ): { valid: boolean; reason: string | null } {
   if (hasLegacySupportMetadata(placed)) {
@@ -57,8 +59,8 @@ function validatePersistedSupport(
   if (placed.grounded === true) return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   const connectionIds = placed.connectionIds ?? placed.parentIds ?? [];
   if (placed.unsupported === true && connectionIds.length === 0) return { valid: true, reason: null };
-  const loadedIds = new Set(placedPieces.map((entry) => entry.id));
-  return connectionIds.some((connectionId) => loadedIds.has(connectionId))
+  const availableIds = loadedPieceIds ?? new Set(placedPieces.map((entry) => entry.id));
+  return connectionIds.some((connectionId) => availableIds.has(connectionId))
     ? { valid: true, reason: null }
     : { valid: false, reason: "unsupported" };
 }
@@ -70,6 +72,7 @@ export function validateStrictPersistedConstructionPlacement(
     input.piece,
     input.placed,
     input.placedPieces,
+    input.loadedPieceIds,
     input.allowLegacySupportMetadata ?? false,
   );
   return support.valid ? validateBoundsAndOverlap(input) : support;
