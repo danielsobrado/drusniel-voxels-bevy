@@ -65,7 +65,8 @@ interface UnderstoryGpuPrefilterStatsSource {
 
 export function createUnderstoryController(deps: UnderstoryControllerDeps): UnderstoryController {
   setUnderstoryDepthPrepassEnabled(initialUnderstoryDepthPrepassEnabled());
-  const ringDebug = getRingDebugOverlay(deps.scene, "understory");
+  const debugEnabled = ringDebugEnabled("understory");
+  const ringDebug = debugEnabled ? getRingDebugOverlay(deps.scene, "understory") : null;
 
   const makeSettings = (): UnderstorySettings => {
     const state = deps.getUiState();
@@ -86,7 +87,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       },
       render: {
         ...deps.understoryConfig.render,
-        debugColorByClass: state.understoryDebugColorByClass || ringDebugEnabled("understory"),
+        debugColorByClass: state.understoryDebugColorByClass || debugEnabled,
       },
     };
   };
@@ -127,7 +128,8 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       deps.dressingSystem?.update(ringCenter);
       const settings = makeSettings();
       const stats = currentStats();
-      ringDebug.update({
+      const state = telemetryState(system);
+      ringDebug?.update({
         centerX: ringCenter.x,
         centerZ: ringCenter.z,
         cellSizeM: settings.placement.spacingM,
@@ -135,8 +137,8 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
         innerRadiusM: 0,
         refreshDistanceM: settings.placement.spacingM,
         candidateGrid: Math.max(1, Math.ceil((settings.distanceM * 2) / settings.placement.spacingM)),
-        acceptedCount: telemetryState(system) === "unknown" ? undefined : stats.gpuVisibleCount,
-        telemetryState: telemetryState(system),
+        acceptedCount: state === "unknown" ? undefined : stats.gpuVisibleCount,
+        telemetryState: state,
         classColoring: settings.render.debugColorByClass,
         lodMode: "class-only",
       });
