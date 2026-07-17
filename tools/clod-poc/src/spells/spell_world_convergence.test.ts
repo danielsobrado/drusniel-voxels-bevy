@@ -1,0 +1,105 @@
+import * as THREE from "three";
+import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG } from "./earth_spell_gameplay_config.js";
+import {
+  executePreparedEarthSpellCast,
+  prepareEarthSpellCast,
+} from "./spell_world_convergence.js";
+import type { TerrainSpellEditResult } from "../terrain/editing/terrain_edit_service.js";
+
+const convergedResult: TerrainSpellEditResult = {
+  committed: true,
+  changed: true,
+  converged: true,
+  reason: null,
+  editRevision: 12,
+};
+
+describe("earth spell world convergence", () => {
+  it("captures an immutable non-replayable spell command", () => {
+    const point = new THREE.Vector3(10, 4, 20);
+    const prepared = prepareEarthSpellCast(
+      { point, normal: new THREE.Vector3(0, 1, 0) },
+      DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG,
+      { terrainRevision: 7, actor: "player", mode: "playing", nowMs: 100 },
+    );
+    expect(prepared).not.toBeNull();
+    point.set(99, 99, 99);
+
+    expect(prepared!.request.command).toMatchObject({
+      operation: "spell_cast",
+      targetPosition: [10, 4, 20],
+      sourceTerrainRevision: 7,
+      mode: "playing",
+      expiresAtMs: 1100,
+    });
+    expect(prepared!.request.edit).toMatchObject({
+      x: 10,
+      y: 4,
+      z: 20,
+      r: 2.4,
+      shape: "sphere",
+      op: "remove",
+    });
+    expect(Object.isFrozen(prepared!.request.command)).toBe(true);
+  });
+
+  it("waits for pipeline readiness and plays VFX only after the authoritative commit", async () => {
+    let resolveReady: () => void = () => undefined;
+    const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
+    const prepared = prepareEarthSpellCast(
+      { point: new THREE.Vector3(2, 3, 4) },
+      DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG,
+      { terrainRevision: 2, actor: "player", mode: "playing", nowMs: 0 },
+    )!;
+    const order: string[] = [];
+    const commitSpellTerrainEdit = vi.fn(async (_request, onCommit?: () => void) => {
+      order.push("authority");
+      onCommit?.();
+      order.push("derived");
+      return convergedResult;
+    });
+    const playVfx = vi.fn(() => {
+      order.push("vfx");
+      return true;
+    });
+
+    const execution = executePreparedEarthSpellCast(prepared, {
+      ready,
+      terrainEditService: { commitSpellTerrainEdit },
+      playVfx,
+    });
+    await Promise.resolve();
+    expect(commitSpellTerrainEdit).not.toHaveBeenCalled();
+
+    resolveReady();
+    const result = await execution;
+    expect(result).toEqual(convergedResult);
+    expect(order).toEqual(["authority", "vfx", "derived"]);
+  });
+
+  it("does not play VFX when command validation denies the terrain edit", async () => {
+    const prepared = prepareEarthSpellCast(
+      { point: new THREE.Vector3(2, 3, 4) },
+      DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG,
+      { terrainRevision: 2, actor: "player", mode: "playing", nowMs: 0 },
+    )!;
+    const denied: TerrainSpellEditResult = {
+      committed: false,
+      changed: false,
+      converged: false,
+      reason: "revision_mismatch",
+      editRevision: 3,
+    };
+    const playVfx = vi.fn(() => true);
+
+    const result = await executePreparedEarthSpellCast(prepared, {
+      ready: Promise.resolve(),
+      terrainEditService: { commitSpellTerrainEdit: vi.fn(async () => denied) },
+      playVfx,
+    });
+
+    expect(result).toEqual(denied);
+    expect(playVfx).not.toHaveBeenCalled();
+  });
+});
