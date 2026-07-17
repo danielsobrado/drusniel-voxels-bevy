@@ -1,4 +1,4 @@
-export type TerrainEditDirtyReason = "dig" | "raise" | "build" | "paint";
+export type TerrainEditDirtyReason = "dig" | "raise" | "build" | "paint" | "spell";
 
 const DEFAULT_MAX_DIRTY_EVENTS = 4096;
 
