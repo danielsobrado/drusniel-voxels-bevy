@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FarSummaryTile } from "./types.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import { DEFAULT_FAR_SUMMARY_CONFIG, type FarSummaryConfig } from "./config.js";
@@ -75,6 +75,15 @@ function successfulResult(): FarSummaryGpuDispatchOrFallbackResult {
       batchIndex: 0,
       records: [record(10), record(11), record(12), record(13)],
     }],
+  };
+}
+
+function fallbackResult(): FarSummaryGpuDispatchOrFallbackResult {
+  return {
+    ok: false,
+    counters: createFarSummaryGpuCounters(),
+    fallbackTiles: 1,
+    fallbackReason: "dispatch_failed",
   };
 }
 
@@ -172,5 +181,30 @@ describe("FarSummaryGpuRuntime revision guards", () => {
 
     expect(committed).toHaveLength(0);
     expect(runtime.stats().lastCommittedTiles).toBe(0);
+  });
+
+  it("does not enqueue CPU fallback after the master stream generation changes", async () => {
+    const pending = deferredDispatch();
+    const onFallbackRequests = vi.fn();
+    let generation = 4;
+    const runtime = new FarSummaryGpuRuntime({
+      gpuConfig: GPU_CONFIG,
+      farSummaryConfig: FAR_CONFIG,
+      terrainSampler: TERRAIN,
+      surfaceRevision: () => 0,
+      surfaceChangedSince: () => false,
+      streamingEnabled: () => true,
+      streamingGeneration: () => generation,
+      onFallbackRequests,
+      dispatch: pending.dispatch,
+    });
+
+    runtime.update(CENTER, 1, "startup", [DIRTY_REQUEST]);
+    await Promise.resolve();
+    generation++;
+    pending.release(fallbackResult());
+    await flushAsync();
+
+    expect(onFallbackRequests).not.toHaveBeenCalled();
   });
 });
