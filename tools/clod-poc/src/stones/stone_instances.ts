@@ -80,7 +80,7 @@ export interface StoneStats {
   drawnNear: number;
   drawnFar: number;
   groups: number;
-  gpuTelemetryState: StoneGpuTelemetryState;
+  gpuTelemetryState?: StoneGpuTelemetryState;
   gpuCandidateCount?: number;
   gpuCandidateCountBeforePrefilter?: number;
   gpuCandidateCountAfterPrefilter?: number;
