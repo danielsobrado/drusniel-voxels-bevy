@@ -7,9 +7,12 @@ import { constructionPiecesOverlap } from "./construction_obb.js";
 import { resolveConstructionPlacementSupport } from "./support_state.js";
 import type {
   ConstructionCandidate,
+  ConstructionMaterial,
   ConstructionPieceDef,
   ConstructionPlacementConfig,
   ConstructionSnapResult,
+  ConstructionStabilityConfig,
+  ConstructionSupportProfiles,
   ConstructionSurfaceHit,
   PlacedConstructionPiece,
 } from "./types.js";
@@ -18,16 +21,20 @@ export type TerrainHitPoint = ConstructionSurfaceHit;
 
 export interface PlacementValidationInput {
   piece: ConstructionPieceDef;
+  material: ConstructionMaterial;
   position: readonly [number, number, number];
   rotationQuarterTurns: number;
   snapped: boolean;
   snap: ConstructionSnapResult | null;
+  connectionIds: readonly string[];
   terrainHit: ConstructionSurfaceHit | null;
   placedPieces: readonly PlacedConstructionPiece[];
   overlapCandidates?: readonly PlacedConstructionPiece[];
   piecesById: ReadonlyMap<string, ConstructionPieceDef>;
   worldCells: number;
   config: ConstructionPlacementConfig;
+  stabilityConfig: ConstructionStabilityConfig;
+  supportProfiles: ConstructionSupportProfiles;
 }
 
 function validateBoundsAndOverlap(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
@@ -60,9 +67,15 @@ function validateBoundsAndOverlap(input: PlacementValidationInput): { valid: boo
 function resolveSupport(input: PlacementValidationInput) {
   return resolveConstructionPlacementSupport({
     snapped: input.snapped,
-    snap: input.snap,
     terrainGrounded: input.piece.canGround && !input.snapped && input.terrainHit !== null,
+    connectionIds: input.connectionIds,
+    position: input.position,
+    piece: input.piece,
+    material: input.material,
     placedPieces: input.placedPieces,
+    piecesById: input.piecesById,
+    supportProfiles: input.supportProfiles,
+    stabilityConfig: input.stabilityConfig,
   });
 }
 
@@ -72,11 +85,7 @@ export function createFreePlacementPosition(
   rotationQuarterTurns = 0,
 ): readonly [number, number, number] {
   const localBounds = constructionBoundsFor(piece, [0, 0, 0], rotationQuarterTurns);
-  return [
-    terrainHit.point[0],
-    terrainHit.point[1] - localBounds.minY,
-    terrainHit.point[2],
-  ];
+  return [terrainHit.point[0], terrainHit.point[1] - localBounds.minY, terrainHit.point[2]];
 }
 
 export function validateConstructionPlacement(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
@@ -96,6 +105,7 @@ export function createConstructionCandidate(input: PlacementValidationInput): Co
   const support = resolveSupport(input);
   return {
     piece: input.piece,
+    material: input.material,
     position: input.position,
     rotationQuarterTurns: input.rotationQuarterTurns,
     snapped: input.snapped,
@@ -104,7 +114,10 @@ export function createConstructionCandidate(input: PlacementValidationInput): Co
     snap: input.snap,
     terrainHit: input.terrainHit,
     supportState: support.grounded ? "grounded" : support.supported ? "connected" : "unsupported",
-    supportParentIds: support.parentIds,
+    connectionIds: support.connectionIds,
+    stabilityValue: support.stabilityValue,
+    stabilityMaxSupport: support.maxSupport,
+    stabilityGrounded: support.grounded,
   };
 }
 
