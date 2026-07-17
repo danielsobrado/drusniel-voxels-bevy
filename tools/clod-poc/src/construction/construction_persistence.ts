@@ -114,7 +114,12 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
         });
         if (validation.valid) {
           pending.splice(index, 1);
-          madeProgress = input.addPiece(placed) || madeProgress;
+          if (input.addPiece(placed)) {
+            madeProgress = true;
+          } else {
+            console.warn(`[construction] skipped saved piece ${placed.id}: runtime insertion rejected`);
+            rewriteStorage = true;
+          }
           continue;
         }
         if (validation.reason !== "unsupported") {
