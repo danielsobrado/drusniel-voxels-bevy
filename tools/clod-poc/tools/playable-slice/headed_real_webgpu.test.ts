@@ -18,11 +18,23 @@ describe("headed real WebGPU certification", () => {
     expect(softwareGpuReason({ ...HARDWARE, fallbackAdapter: true })).toContain("isFallbackAdapter=true");
   });
 
+  it("rejects adapters whose identity cannot be certified", () => {
+    expect(softwareGpuReason({
+      vendor: "",
+      architecture: "",
+      device: "",
+      description: "",
+      fallbackAdapter: false,
+    })).toContain("identity is unavailable");
+  });
+
   it.each([
     ["Google", "", "SwiftShader Device", ""],
     ["Mesa", "llvmpipe", "", ""],
     ["Mesa", "", "lavapipe", ""],
     ["", "", "", "Software Rasterizer"],
+    ["Microsoft", "", "Microsoft Basic Render Driver", ""],
+    ["Microsoft", "", "WARP Adapter", ""],
   ])("rejects named software adapters", (vendor, architecture, device, description) => {
     expect(softwareGpuReason({ vendor, architecture, device, description, fallbackAdapter: false }))
       .toContain("software GPU marker");
