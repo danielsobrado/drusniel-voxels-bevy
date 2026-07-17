@@ -1,6 +1,7 @@
 import { isRpgDensityScene } from "../../scenes/rpg_density_scenes.js";
 
 const CONTINENT_SCENE = "continent";
+const RPG_DENSITY_SCENE_PARAM = "rpgDensityScene";
 
 function setDefault(params: URLSearchParams, key: string, value: string): boolean {
   if (params.has(key)) return false;
@@ -10,10 +11,16 @@ function setDefault(params: URLSearchParams, key: string, value: string): boolea
 
 /** Continent-backed scenes must exercise the same unified path as acceptance. */
 export function applyContinentDefaults(params: URLSearchParams): boolean {
-  const scene = params.get("scene");
-  if (scene !== CONTINENT_SCENE && !isRpgDensityScene(scene)) return false;
+  const requestedScene = params.get("scene");
+  let changed = false;
+  if (isRpgDensityScene(requestedScene)) {
+    params.set(RPG_DENSITY_SCENE_PARAM, requestedScene);
+    params.set("scene", CONTINENT_SCENE);
+    changed = true;
+  }
+  if (params.get("scene") !== CONTINENT_SCENE) return false;
 
-  let changed = setDefault(params, "continentHydrology", "1");
+  changed = setDefault(params, "continentHydrology", "1") || changed;
   changed = setDefault(params, "heightTiles", "1") || changed;
   changed = setDefault(params, "liveClodRootGpuMesher", "1") || changed;
   changed = setDefault(params, "farSummaryLayout", "2") || changed;
