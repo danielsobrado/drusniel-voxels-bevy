@@ -36,10 +36,12 @@ export function selectTreeLod(
   const distances = treeLodDistances(settings);
   const baseLod = lodForDistance(distance, distances);
   const allowCrossfade = options.allowCrossfade ?? true;
+  const crossfadeActive = allowCrossfade
+    && settings.lod.crossfadeEnabled
+    && settings.lod.ditherEnabled
+    && settings.lod.crossfadeBandM > 0;
 
-  if (allowCrossfade && settings.lod.crossfadeEnabled && settings.lod.ditherEnabled) {
-    return selectTreeLodWithCrossfade(distance, baseLod, settings);
-  }
+  if (crossfadeActive) return selectTreeLodWithCrossfade(distance, baseLod, settings);
 
   const lod = previousLod
     ? lodWithHysteresis(distance, baseLod, previousLod, settings.lod.hysteresisM, distances)
