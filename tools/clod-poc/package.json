@@ -75,7 +75,7 @@
     "trees:wire-shadow-proxies": "npm run trees:wire-tree7-shadows && npm run trees:wire-tree8-proxies && npm run trees:repair-generated",
     "trees:wire-shadow-proxies:check": "npm run trees:wire-tree7-shadows:check && npm run trees:wire-tree8-proxies:check && npm run trees:repair-generated:check",
     "trees:wire-parity": "npm run trees:wire-shadow-proxies && npm run trees:wire-tree9-wgsl && npm run trees:wire-tree9-config",
-    "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree8-proxies:check && npm run trees:repair-generated:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
+    "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
     "trees:check-parity-manifest": "tsx tools/verify-tree-parity-evidence.ts --check-manifest",
     "trees:preflight-parity": "npm run trees:wire-parity:check && npm run trees:check-parity-manifest",
     "trees:qa-parity": "npm run trees:preflight-parity && npm run typecheck && npm run test",
@@ -116,7 +116,7 @@
     "water:shot:flow": "npm run water:shot -- --scene river-bend --debug flow --out shots/water/flow-debug",
     "water:shot:clipmap": "npm run water:shot -- --scene clipmap-boundary --debug clipmap-level --out shots/water/clipmap-debug",
     "water:shot:refraction": "npm run water:shot -- --scene lake-shoreline --debug refraction --out shots/water/lake-refraction",
-    "water:shot:reflection": "npm run water:shot -- --scene lake-shoreline --debug reflection --out shots/water/lake-reflection",
+    "water:shot:reflection": "npm run water:shot -- --scene river-bend --debug reflection --out shots/water/river-reflection",
     "water:shot:ssr-hit": "npm run water:shot -- --scene lake-shoreline --debug ssrHit --out shots/water/lake-ssr-hit",
     "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify"
   },
