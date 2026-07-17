@@ -363,16 +363,20 @@ export class PlayerController {
       if (this.velocity.y < -this.config.maxFallSpeed) this.velocity.y = -this.config.maxFallSpeed;
     }
 
-    writeWorldEdgePushbackAcceleration(
-      this.edgePushback,
-      this.position,
-      this.bounds,
-      this.config.worldEdgeMargin,
-      this.config.worldEdgePushbackBand,
-      this.config.worldEdgePushbackAcceleration,
-    );
-    this.velocity.x += this.edgePushback.x * step;
-    this.velocity.z += this.edgePushback.y * step;
+    if (blockedByUnknownWater) {
+      this.edgePushback.set(0, 0);
+    } else {
+      writeWorldEdgePushbackAcceleration(
+        this.edgePushback,
+        this.position,
+        this.bounds,
+        this.config.worldEdgeMargin,
+        this.config.worldEdgePushbackBand,
+        this.config.worldEdgePushbackAcceleration,
+      );
+      this.velocity.x += this.edgePushback.x * step;
+      this.velocity.z += this.edgePushback.y * step;
+    }
 
     if (this.movementReadiness && (this.velocity.x !== 0 || this.velocity.z !== 0)
       && this.movementReadiness(this.position.x, this.position.z) !== "blocked") {
