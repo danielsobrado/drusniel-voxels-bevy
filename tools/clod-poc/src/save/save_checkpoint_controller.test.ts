@@ -7,6 +7,17 @@ class FakeWindow extends EventTarget {
   }
 }
 
+function ctrlSaveEvent(): KeyboardEvent {
+  const event = new Event("keydown", { cancelable: true }) as KeyboardEvent;
+  Object.defineProperties(event, {
+    code: { value: "KeyS" },
+    ctrlKey: { value: true },
+    metaKey: { value: false },
+    altKey: { value: false },
+  });
+  return event;
+}
+
 describe("save checkpoint controller", () => {
   it("coalesces concurrent checkpoint requests and publishes counters", async () => {
     let resolveFlush: () => void = () => undefined;
@@ -40,7 +51,7 @@ describe("save checkpoint controller", () => {
     const target = new FakeWindow();
     const controller = createSaveCheckpointController({ flush });
     const dispose = controller.bindShortcut(target as unknown as Window);
-    const event = new KeyboardEvent("keydown", { code: "KeyS", ctrlKey: true, cancelable: true });
+    const event = ctrlSaveEvent();
 
     target.dispatchKey(event);
     await Promise.resolve();
