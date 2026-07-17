@@ -15,6 +15,7 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 import { createAppCellReadinessFeeds, editTargetAcceptable } from "../../../player/cell_readiness.js";
 import { heightfieldTileResidentKeys } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
 import type { FarSummaryIntegration } from "../../../far-summary/integration.js";
+import { setRenderedClodOwnershipKeySource } from "../../../stream/clod_ownership_keys.js";
 
 export interface TerrainEditStartupResult {
   terrainEditService: ReturnType<typeof createTerrainEditService>;
@@ -71,6 +72,8 @@ export function runTerrainEditStartup(
   const dirtyQueue = new SaveTrackingDirtyQueue();
   const authorityOrigin = () => input.interaction.mode === "playing" ? input.player.position : null;
   const authorityCounters = () => input.longView.hooks?.stats?.counters ?? null;
+  const renderedRootKeys = () => input.result.roots.map((node) => node.id);
+  setRenderedClodOwnershipKeySource(renderedRootKeys);
 
   clodWorker.onParentRebuilt = (batch) => {
     clodApplyQueue.recordWorkerRebuild(batch.parentMs);
@@ -148,8 +151,7 @@ export function runTerrainEditStartup(
   });
 
   if (input.longView.hooks) {
-    input.longView.hooks.getStreamingRootReadyPageKeys = () =>
-      session.streamingClodRootController?.readyPageKeys() ?? [];
+    input.longView.hooks.getStreamingRootReadyPageKeys = renderedRootKeys;
     input.longView.hooks.getStreamingResidencySnapshot = () => {
       // The global may hold the NAADF integration instead, which has no tile cache.
       const farSummary = (window as typeof window & {
