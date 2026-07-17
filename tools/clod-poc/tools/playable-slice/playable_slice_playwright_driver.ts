@@ -163,7 +163,9 @@ export class PlaywrightDiagnosticSliceDriver
   async diagnosticBarrier(label: string): Promise<void> {
     this.record("diagnostic_barrier", label);
     await this.page.evaluate(async () => {
-      await window.__drusnielClod?.settle?.(30);
+      const settle = window.__drusnielClod?.settle;
+      if (!settle) throw new Error("diagnostic settle hook is unavailable");
+      await settle(30);
     });
   }
 }
