@@ -154,8 +154,8 @@ export function evaluatePlayableSliceRun(
   if (!reloaded.persistence.loaded || reloaded.persistence.lastError !== 0) {
     failures.push("saved world did not reload cleanly");
   }
-  if (reloaded.persistence.voxelDeltaCount < dug.terrain.voxelDeltaCount) {
-    failures.push("reloaded save lost terrain edits");
+  if (reloaded.persistence.voxelDeltaCount < checkpoint.persistence.voxelDeltaCount) {
+    failures.push("reloaded save lost checkpointed voxel edits");
   }
   if (report.travelledAfterReloadM < 1) failures.push("gameplay did not continue after reload");
   if (continued.frame <= reloaded.frame) failures.push("render loop did not advance after reload");
