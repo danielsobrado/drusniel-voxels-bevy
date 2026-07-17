@@ -66,4 +66,30 @@ describe("SavedPropStore mutation revision", () => {
     expect(savedPropStore.revision()).toBe(before + 1);
     expect(savedPropStore.hasProps()).toBe(false);
   });
+
+  it("keeps the previous snapshot and revision when a duplicate restore is rejected", () => {
+    savedPropStore.restore([makeProp({ id: "existing", position: [1, 0, 0] })]);
+    const revision = savedPropStore.revision();
+    const before = savedPropStore.snapshot();
+
+    expect(() => savedPropStore.restore([
+      makeProp({ id: "duplicate", position: [2, 0, 0] }),
+      makeProp({ id: "duplicate", position: [3, 0, 0] }),
+    ])).toThrow(/duplicate saved prop id/);
+
+    expect(savedPropStore.snapshot()).toEqual(before);
+    expect(savedPropStore.revision()).toBe(revision);
+  });
+
+  it("owns cloned state after a successful restore", () => {
+    const input = makeProp({ id: "existing", position: [1, 0, 0], tags: ["test"] });
+    savedPropStore.restore([input]);
+
+    input.position[0] = 99;
+    input.tags.push("external");
+
+    const stored = savedPropStore.snapshot()[0]!;
+    expect(stored.position[0]).toBe(1);
+    expect(stored.tags).toEqual(["test"]);
+  });
 });
