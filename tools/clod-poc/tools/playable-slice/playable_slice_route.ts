@@ -175,7 +175,7 @@ async function runRoute(
     "saved world reload",
     (snapshot) => snapshot.persistence.loaded
       && snapshot.persistence.lastError === 0
-      && snapshot.persistence.voxelDeltaCount >= dug.terrain.voxelDeltaCount,
+      && snapshot.persistence.voxelDeltaCount >= checkpoint.persistence.voxelDeltaCount,
     CHECKPOINT_TIMEOUT_MS,
   );
   await evidence(driver, steps, "world_reloaded", reloaded);
