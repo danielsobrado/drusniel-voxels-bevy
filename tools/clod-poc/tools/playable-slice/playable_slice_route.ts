@@ -117,6 +117,9 @@ async function runRoute(
   const placed = await driver.waitUntil(
     "construction placement",
     (snapshot) => snapshot.construction.placedPieces > buildReady.construction.placedPieces
+      && snapshot.construction.colliders >= snapshot.construction.placedPieces
+      && snapshot.construction.unsupportedPieces === 0
+      && snapshot.construction.pendingCollapses === 0
       && !snapshot.construction.transactionInFlight,
     STEP_TIMEOUT_MS,
   );
@@ -127,6 +130,7 @@ async function runRoute(
   const broken = await driver.waitUntil(
     "construction break",
     (snapshot) => snapshot.construction.placedPieces < placed.construction.placedPieces
+      && snapshot.construction.colliders === snapshot.construction.placedPieces
       && !snapshot.construction.transactionInFlight,
     STEP_TIMEOUT_MS,
   );
