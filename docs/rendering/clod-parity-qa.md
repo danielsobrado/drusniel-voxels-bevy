@@ -1,24 +1,33 @@
 # CLOD parity QA
 
-This document describes the Bevy-side QA loop used to compare the Rust CLOD
-runtime with the public `tools/clod-poc` expectations.
+This document describes the Bevy-side QA loop used to compare the Rust CLOD runtime with the public `tools/clod-poc` expectations.
 
-The goal is not to make the TypeScript PoC part of the shipping runtime. The PoC
-is useful because it made several CLOD behaviours explicit:
+The TypeScript PoC is not part of the shipping runtime. It is the reference for:
 
-- active page cut selection;
+- active page-cut selection;
 - 2:1 restricted quadtree selection;
-- relief-sensitive splitting on rugged terrain;
-- freeze/forced selection debug controls;
-- visible runtime counters;
-- page rebuild and publish observability after terrain changes.
+- relief-sensitive splitting;
+- freeze and forced-selection controls;
+- source-build, publish, and visible-cut observability;
+- page rebuild behaviour after terrain changes.
 
-The Rust path should prove those behaviours through deterministic benches, not
-manual screenshots only.
+The Rust path must prove those behaviours through deterministic benches, not screenshots alone.
+
+## Runtime controls
+
+CLOD pages are default-off.
+
+```text
+CLOD_PAGES=1
+CLOD_PAGES_BUDGET=4
+CLOD_PAGES_SOURCE_MESH_BUDGET=4
+```
+
+`CLOD_PAGES_SOURCE_MESH_BUDGET` limits clean LOD0 source meshes generated on the main thread per frame. Page assembly, welding, simplification, and quadtree construction remain asynchronous.
 
 ## One-command local run
 
-Linux/macOS/Git Bash:
+Linux, macOS, or Git Bash:
 
 ```bash
 scripts/run-clod-parity-bench.sh
@@ -58,19 +67,30 @@ cargo run --bin clod_rebuild_guard -- \
 
 ## Acceptance signal
 
-A passing run should show:
+A passing run must show:
 
+- at least one clean LOD0 source export;
+- at least one complete LOD0 page column;
+- zero source-export failures;
+- non-empty indexed and rendered CLOD cuts;
 - zero blocked 2:1 split rows;
-- non-empty rendered CLOD cuts;
-- no accidental frozen selection during bench;
-- at least one published CLOD page-tree rebuild row;
+- no accidental frozen selection;
+- at least one published CLOD page-tree rebuild;
 - published rebuilds with non-zero node and triangle counts;
 - valid source/build/publish ordering.
 
-## Future edit-driver hook
+The selection CSV includes:
 
-This PR deliberately avoids inventing an untyped TOML schema for brush edits.
-When the bench loader gains a first-class edit operation block, add an edit-heavy
-checkpoint to `bench/scenes/terrain/clod-parity-stress.toml` and keep the same
-guards. That will close the final PoC parity loop for edit-driven LOD0 page
-rebuild, ancestor re-simplification, and collider refresh timing.
+```text
+source_exports
+complete_page_columns
+source_pending_chunks
+source_meshed_this_frame
+source_failures_total
+```
+
+The guard intentionally fails legacy or current runs that contain selection samples but never built any pages.
+
+## Edit-driver boundary
+
+Phase 5 provides missing-page fallback and binary live/page ownership. Authoritative edit invalidation, LOD0-first rebuild ordering, ancestor dirtiness, and debounce belong to Phase 6. Keep edit-heavy acceptance on the Phase 6 harness rather than weakening the Phase 5 source-build guard.
