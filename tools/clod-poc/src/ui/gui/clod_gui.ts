@@ -4,6 +4,9 @@ import type { ClodAppState } from "../../app/clod_app_state.js";
 import { emitAudio } from "../../audio/index.js";
 import type { GuiController } from "./gui_controller.js";
 import { isExternalGpuClodGeometry } from "../../rendering/webgpu_external_buffer_geometry.js";
+import {
+  setTerrainStreamingEnabled,
+} from "../../stream/terrain_streaming_control.js";
 import type {
   RenderResolutionCamera,
   RenderResolutionRenderer,
@@ -142,7 +145,8 @@ export function createClodGui(
   gui.add(state, "farShellEnabled").name("far shell").onChange((on: boolean) => {
     deps.farShellController.setEnabled(on);
   });
-  gui.add(state, "terrainStreamingEnabled").name("terrain streaming").listen().onChange(() => {
+  gui.add(state, "terrainStreamingEnabled").name("terrain streaming").listen().onChange((enabled: boolean) => {
+    setTerrainStreamingEnabled(enabled);
     deps.updateSelection();
     deps.updateInfo();
   });
