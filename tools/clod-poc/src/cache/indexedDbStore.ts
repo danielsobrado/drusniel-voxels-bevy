@@ -2,6 +2,7 @@ import type { ClodCachePersistentConfig } from "./cacheConfig.js";
 import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes.js";
 import { CacheUnavailableError } from "./cacheErrors.js";
 import { cacheLogger } from "./cacheLogger.js";
+import { cacheRecordVersionMatches } from "./streaming_cache_write_guard.js";
 import { WorkerRemotePersistentStore } from "./workerRemotePersistentStore.js";
 
 const DB_VERSION = 2;
@@ -259,6 +260,29 @@ export class IndexedDbStore implements PersistentCacheStore {
     });
   }
 
+  private async deleteIfMatchesInternal(
+    key: string,
+    expected: ClodCacheStoredRecord,
+  ): Promise<boolean> {
+    const db = await this.openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.objectStoreName, "readwrite");
+      const store = tx.objectStore(this.objectStoreName);
+      const request = store.get(key);
+      let matched = false;
+      request.onsuccess = () => {
+        const raw = request.result as IdbStoredRecord | undefined;
+        if (!raw || !cacheRecordVersionMatches(fromIdbRecord(raw), expected)) return;
+        matched = true;
+        store.delete(key);
+      };
+      request.onerror = () => reject(request.error ?? new CacheUnavailableError("conditional cache get failed"));
+      tx.oncomplete = () => resolve(matched);
+      tx.onerror = () => reject(tx.error ?? new CacheUnavailableError("conditional cache delete failed"));
+      tx.onabort = () => reject(tx.error ?? new CacheUnavailableError("conditional cache delete aborted"));
+    });
+  }
+
   async get(key: string): Promise<ClodCacheStoredRecord | null> {
     return this.withRecovery(async () => {
       const result = await this.withArtifacts("readonly", (store) => store.get(key));
@@ -271,6 +295,10 @@ export class IndexedDbStore implements PersistentCacheStore {
     await this.withRecovery(async () => {
       await this.withArtifacts("readwrite", (store) => store.put(toIdbRecord(record), key));
     });
+  }
+
+  async deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean> {
+    return this.withRecovery(() => this.deleteIfMatchesInternal(key, record));
   }
 
   async delete(key: string): Promise<void> {

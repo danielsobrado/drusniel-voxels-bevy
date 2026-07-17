@@ -23,7 +23,7 @@ export async function runUiStartup(input: UiStartupInput): Promise<void> {
   const terrainEdit = runTerrainEditStartup(ctx, infoPanel);
   const gui = runGuiStartup(ctx, infoPanel);
   await runTextureUiStartup(ctx, infoPanel, gui, terrainEdit);
-  runSpellUiStartup(ctx);
+  runSpellUiStartup(ctx, terrainEdit);
   runPropEditUiStartup(ctx, gui.gui);
   runProjectArchiveStartup(ctx, infoPanel, terrainEdit);
   applyImportedStateSideEffects(ctx, infoPanel);

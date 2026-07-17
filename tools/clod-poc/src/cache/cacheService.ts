@@ -215,6 +215,10 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     if (this.persistent) await this.persistent.delete(key);
   }
 
+  deleteMemory(keyParts: ClodCacheKeyParts): void {
+    this.memory?.delete(buildClodCacheKey(keyParts));
+  }
+
   async clear(): Promise<void> { this.clearMemory(); await this.clearPersistent(); }
 
   clearMemory(): void { this.memory?.clear(); }

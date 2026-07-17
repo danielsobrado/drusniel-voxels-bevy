@@ -2,7 +2,6 @@ import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes
 import { CacheUnavailableError } from "./cacheErrors.js";
 import type { PersistentCacheStore } from "./indexedDbStore.js";
 import type { CacheRpcRequest, CacheRpcResponse } from "./cacheWorkerRpc.js";
-import { terrainStreamingGeneration } from "../stream/terrain_streaming_control.js";
 
 let nextRequestId = 1;
 const pending = new Map<number, {
@@ -25,17 +24,17 @@ function normalizeRecord(record: ClodCacheStoredRecord): ClodCacheStoredRecord {
   };
 }
 
-function recordStreamingGeneration(record: ClodCacheStoredRecord): number {
+function recordStreamingGeneration(record: ClodCacheStoredRecord): number | undefined {
   const generation = record.header.metadata.terrainStreamingGeneration;
   return typeof generation === "number" && Number.isInteger(generation) && generation >= 0
     ? generation
-    : terrainStreamingGeneration();
+    : undefined;
 }
 
 type CacheRpcBody =
   | { op: "probe" }
   | { op: "get"; key: string }
-  | { op: "put"; key: string; record: ClodCacheStoredRecord; streamingGeneration: number }
+  | { op: "put"; key: string; record: ClodCacheStoredRecord; streamingGeneration?: number }
   | { op: "delete"; key: string }
   | { op: "clear" }
   | { op: "keys" };
@@ -74,11 +73,12 @@ export class WorkerRemotePersistentStore implements PersistentCacheStore {
   }
 
   async put(key: string, record: ClodCacheStoredRecord): Promise<void> {
+    const streamingGeneration = recordStreamingGeneration(record);
     await rpc({
       op: "put",
       key,
       record: normalizeRecord(record),
-      streamingGeneration: recordStreamingGeneration(record),
+      ...(streamingGeneration === undefined ? {} : { streamingGeneration }),
     });
   }
 

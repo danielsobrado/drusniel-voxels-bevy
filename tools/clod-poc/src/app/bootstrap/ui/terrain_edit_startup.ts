@@ -118,6 +118,7 @@ export function runTerrainEditStartup(
     editAuthority,
     getAuthorityOrigin: authorityOrigin,
     getAuthorityCounters: authorityCounters,
+    getInteractionMode: () => input.interaction.mode,
     editReadyAt: (x, z) => editTargetAcceptable(readinessFeeds, x, z),
     dirtyQueue,
     refreshGrassStats: () => bindings.refreshGrassStats(),

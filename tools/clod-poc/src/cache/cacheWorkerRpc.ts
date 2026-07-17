@@ -9,7 +9,7 @@ export type CacheRpcRequest =
       op: "put";
       key: string;
       record: ClodCacheStoredRecord;
-      streamingGeneration: number;
+      streamingGeneration?: number;
     }
   | { type: "cacheRpc"; requestId: number; op: "delete"; key: string }
   | { type: "cacheRpc"; requestId: number; op: "clear" }

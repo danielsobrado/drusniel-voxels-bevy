@@ -59,15 +59,14 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
     await pending;
   });
 
-  it("uses the worker current generation for cache records without an operation stamp", async () => {
+  it("does not stamp unrelated cache records with the current streaming generation", async () => {
     const store = new WorkerRemotePersistentStore();
     setTerrainStreamingEnabled(false);
-    setTerrainStreamingEnabled(true);
 
     const pending = store.put("generic", cacheRecord());
     const request = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "put" }>;
 
-    expect(request.streamingGeneration).toBe(2);
+    expect(request).not.toHaveProperty("streamingGeneration");
     dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: true });
     await pending;
   });
