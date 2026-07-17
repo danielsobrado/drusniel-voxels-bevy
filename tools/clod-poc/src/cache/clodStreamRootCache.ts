@@ -26,6 +26,7 @@ export type StreamRootCacheStats = WorkerCacheBuildStats;
 
 const streamingTokens = new WeakMap<object, TerrainStreamingToken>();
 const activeRequestTokens = new Set<TerrainStreamingToken>();
+let nextStreamRootWriteId = 1;
 
 function workerRealm(): boolean {
   const constructorName = (globalThis as { constructor?: { name?: string } }).constructor?.name ?? "";
@@ -113,9 +114,12 @@ export async function storeStreamRootNode(
     || !streamRootCacheOperationIsCurrent(stats)) return;
   const parsed = parseStreamRootNodeId(node.id);
   const artifact = clodPageNodeToArtifact(node);
+  const generation = streamRootCacheOperationGeneration(stats);
+  const writeId = `${generation}:${nextStreamRootWriteId++}`;
+  const keyParts = streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id);
   if (!streamRootCacheOperationIsCurrent(stats)) return;
   await ctx.service.put(
-    streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id),
+    keyParts,
     artifact,
     encodeClodPageNodeArtifact,
     {
@@ -124,12 +128,33 @@ export async function storeStreamRootNode(
       worldMode: "infinite",
       hydrologyMode: "bounded-to-startup-world",
       backend,
-      terrainStreamingGeneration: streamRootCacheOperationGeneration(stats),
+      terrainStreamingGeneration: generation,
+      terrainStreamingWriteId: writeId,
     },
   );
-  if (!streamRootCacheOperationIsCurrent(stats)) return;
+  if (!streamRootCacheOperationIsCurrent(stats)) {
+    await removeStaleStreamRootCacheEntry(ctx, keyParts, generation, writeId);
+    return;
+  }
   stats.nodesBuilt++;
   stats.coldBuildMs += buildMs;
+}
+
+async function removeStaleStreamRootCacheEntry(
+  ctx: ClodCacheContext,
+  keyParts: ReturnType<typeof streamRootKeyParts>,
+  generation: number,
+  writeId: string,
+): Promise<void> {
+  const current = await ctx.service.get(keyParts, decodeClodPageNodeArtifact);
+  if (current.status !== "hit"
+    || current.metadata?.terrainStreamingGeneration !== generation
+    || current.metadata?.terrainStreamingWriteId !== writeId) return;
+  if (workerRealm()) {
+    ctx.service.deleteMemory(keyParts);
+    return;
+  }
+  await ctx.service.delete(keyParts);
 }
 
 export function publishStreamRootCacheCounters(

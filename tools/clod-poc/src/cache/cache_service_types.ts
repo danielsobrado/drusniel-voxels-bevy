@@ -16,6 +16,7 @@ export interface ClodCacheService {
   ): Promise<ClodCachePutResult>;
 
   delete(keyParts: ClodCacheKeyParts): Promise<void>;
+  deleteMemory(keyParts: ClodCacheKeyParts): void;
   clear(): Promise<void>;
   clearMemory(): void;
   clearPersistent(): Promise<void>;

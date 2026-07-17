@@ -9,6 +9,7 @@ import {
   purgeLegacyCacheDatabases,
   resolveBrokerPersistentConfig,
 } from "./indexedDbStore.js";
+import { commitCachePut } from "./streaming_cache_write_guard.js";
 import {
   registerTerrainStreamingWorker,
   terrainStreamingGenerationIsCurrent,
@@ -49,7 +50,9 @@ async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
 async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
   const respond = (response: CacheRpcResponse) => worker.postMessage(response);
   try {
-    if (request.op === "put" && !terrainStreamingGenerationIsCurrent(request.streamingGeneration)) {
+    if (request.op === "put"
+      && request.streamingGeneration !== undefined
+      && !terrainStreamingGenerationIsCurrent(request.streamingGeneration)) {
       respond({ type: "cacheRpc", requestId: request.requestId, ok: true, result: false });
       return;
     }
@@ -66,8 +69,7 @@ async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Pr
         result = await store.get(request.key);
         break;
       case "put":
-        await store.put(request.key, request.record);
-        result = true;
+        result = await commitCachePut(store, request);
         break;
       case "delete":
         await store.delete(request.key);
