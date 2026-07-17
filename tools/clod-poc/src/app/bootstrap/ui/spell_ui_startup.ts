@@ -8,7 +8,11 @@ import {
 } from "../../../spells/spell_vfx_controller.js";
 import { createDeferredSpellController } from "../../../spells/deferred_spell_controller.js";
 import { scheduleSpellPipelineWarmup } from "../../../spells/spell_pipeline_warmup.js";
+import { createStableSpellController } from "../../../spells/stable_spell_controller.js";
 import "../../../spells/spell_menu.css";
+
+const FIREBALL_COLLISION_PROBE_SECONDS = 0.075;
+const FIREBALL_COLLISION_PROBE_PADDING_M = 1.5;
 
 function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
   return {
@@ -34,8 +38,15 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
   const targetNormal = new THREE.Vector3(0, 1, 0);
 
   const targetMaxRange = Math.max(config.lightning.vfx.maxRange, config.earth.vfx.impactRadius * 4);
-  const fireballMaxRange =
-    config.fireball.vfx.launchSpeed * Math.max(0, (config.fireball.castDurationMs - config.fireball.vfx.impactDurationMs) / 1000) + 24;
+  const probeSeconds = FIREBALL_COLLISION_PROBE_SECONDS;
+  const fireballCollisionRange = Math.max(
+    3,
+    config.fireball.vfx.launchSpeed * probeSeconds
+      + Math.abs(config.fireball.vfx.liftSpeed) * probeSeconds
+      + 0.5 * Math.max(0, config.fireball.vfx.gravity) * probeSeconds * probeSeconds
+      + config.fireball.vfx.projectileRadius * 2
+      + FIREBALL_COLLISION_PROBE_PADDING_M,
+  );
 
   const getTerrainTarget = () => {
     camera.getWorldDirection(targetDirection).normalize();
@@ -45,7 +56,7 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     return hit ? { point: hit.point, normal: targetNormal } : null;
   };
 
-  const controller = createSpellVfxController({
+  const rawController = createSpellVfxController({
     scene,
     getCamera: () => camera,
     fire: meshConfig(config.fire.vfx),
@@ -57,14 +68,15 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     getLightningTarget: getTerrainTarget,
     fireball: config.fireball.vfx,
     raycastFireballTerrain: (ray) => {
-      const hit = terrainRaycast.raycastEditableTerrain(ray, fireballMaxRange);
+      const hit = terrainRaycast.raycastEditableTerrain(ray, fireballCollisionRange);
       return hit ? { ...hit, normal: targetNormal } : null;
     },
   });
+  const controller = createStableSpellController(rawController, scene);
   ctx.session.spellVfxController = controller;
 
   const pipelineWarmup = scheduleSpellPipelineWarmup({ renderer, scene, camera });
-  const deferredController = createDeferredSpellController(controller, pipelineWarmup.ready);
+  const deferredController = createDeferredSpellController(controller);
   const menu = createSpellMenu({ config, controller: deferredController.controller });
   const menuEl = document.getElementById(config.menu.rootId);
 
