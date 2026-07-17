@@ -34,29 +34,49 @@ describe("resolveQuerySpawnPoint", () => {
 });
 
 describe("shouldApplyQuerySpawnNow", () => {
-  const base = { enabled: true, safetyReady: 0, safetyRequired: 0, collidersLoaded: 0, framesWaited: 0, maxFrames: 300 };
+  const base = {
+    enabled: true,
+    safetyReady: 0,
+    safetyRequired: 0,
+    collidersLoaded: 0,
+    framesWaited: 0,
+    maxFrames: 300,
+    targetCellReady: false,
+  };
 
   it("spawns immediately when the gate is disabled (finite worlds)", () => {
     expect(shouldApplyQuerySpawnNow({ ...base, enabled: false })).toBe(true);
   });
 
   it("waits while streamed-root safety coverage is incomplete", () => {
-    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 3, collidersLoaded: 4 })).toBe(false);
+    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 3, collidersLoaded: 4, targetCellReady: true })).toBe(false);
   });
 
   it("waits while safety coverage is unknown (required=0)", () => {
-    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 0, safetyReady: 0, collidersLoaded: 4 })).toBe(false);
+    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 0, safetyReady: 0, collidersLoaded: 4, targetCellReady: true })).toBe(false);
   });
 
   it("waits until at least one collider page has loaded", () => {
-    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 8, collidersLoaded: 0 })).toBe(false);
+    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 8, collidersLoaded: 0, targetCellReady: true })).toBe(false);
   });
 
-  it("spawns once safety coverage and colliders are ready", () => {
-    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 8, collidersLoaded: 2 })).toBe(true);
+  it("waits until the resolved target envelope is explicitly ready", () => {
+    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 8, collidersLoaded: 2 })).toBe(false);
+    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 8, collidersLoaded: 2, targetCellReady: undefined })).toBe(false);
   });
 
-  it("spawns anyway once the frame cap is reached, even if the stream stalled", () => {
-    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 0, collidersLoaded: 0, framesWaited: 300 })).toBe(true);
+  it("spawns once safety coverage, colliders, and the target envelope are ready", () => {
+    expect(shouldApplyQuerySpawnNow({ ...base, safetyRequired: 8, safetyReady: 8, collidersLoaded: 2, targetCellReady: true })).toBe(true);
+  });
+
+  it("remains fail-closed after the warning frame when streaming is stalled", () => {
+    expect(shouldApplyQuerySpawnNow({
+      ...base,
+      safetyRequired: 8,
+      safetyReady: 0,
+      collidersLoaded: 0,
+      framesWaited: 300,
+      targetCellReady: false,
+    })).toBe(false);
   });
 });
