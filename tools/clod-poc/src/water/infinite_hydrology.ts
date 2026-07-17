@@ -159,8 +159,14 @@ interface ResolvedBasin {
  * level are a pure function of (basin coords, sampler) — the descent and rim validation
  * never depend on the query point — so hoisting them here changes no output, only cost.
  */
-const basinMemos = new WeakMap<TerrainHeightSampler, Map<string, ResolvedBasin | null>>();
+const basinMemos = new WeakMap<TerrainHeightSampler, Map<number, ResolvedBasin | null>>();
 const BASIN_MEMO_MAX = 512;
+
+/** Collision-free numeric key for basin coords (avoids per-lookup string allocation on
+ *  the hot terrain-carve path). Valid for |coord| < 2^20 basins (~±800,000 km). */
+function basinKey(cx: number, cz: number): number {
+  return (cx + 0x100000) * 0x200000 + (cz + 0x100000);
+}
 
 function resolveBasin(cx: number, cz: number, sampler: TerrainHeightSampler): ResolvedBasin | null {
   const spawn = hash2(cx, cz, 11);
@@ -208,16 +214,45 @@ function getBasin(cx: number, cz: number, sampler: TerrainHeightSampler): Resolv
     memo = new Map();
     basinMemos.set(sampler, memo);
   }
-  const key = `${cx},${cz}`;
+  const key = basinKey(cx, cz);
   const cached = memo.get(key);
   if (cached !== undefined) return cached;
   const resolved = resolveBasin(cx, cz, sampler);
   if (memo.size >= BASIN_MEMO_MAX) {
-    const oldest = memo.keys().next().value as string;
+    const oldest = memo.keys().next().value as number;
     memo.delete(oldest);
   }
   memo.set(key, resolved);
   return resolved;
+}
+
+/** Per-sampler memo of the 3×3 basin neighbourhood around a centre basin cell, in the
+ *  same oz-outer/ox-inner order the direct loop used (order is part of the tie-break
+ *  contract). One lookup replaces nine on the hot per-sample path. */
+const basinHoodMemos = new WeakMap<TerrainHeightSampler, Map<number, ResolvedBasin[]>>();
+
+function getBasinHood(bx: number, bz: number, sampler: TerrainHeightSampler): ResolvedBasin[] {
+  let memo = basinHoodMemos.get(sampler);
+  if (!memo) {
+    memo = new Map();
+    basinHoodMemos.set(sampler, memo);
+  }
+  const key = basinKey(bx, bz);
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  const hood: ResolvedBasin[] = [];
+  for (let oz = -1; oz <= 1; oz++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const basin = getBasin(bx + ox, bz + oz, sampler);
+      if (basin) hood.push(basin);
+    }
+  }
+  if (memo.size >= BASIN_MEMO_MAX) {
+    const oldest = memo.keys().next().value as number;
+    memo.delete(oldest);
+  }
+  memo.set(key, hood);
+  return hood;
 }
 
 interface BasinHit {
@@ -231,21 +266,16 @@ interface BasinHit {
  *  that falls away past the rim would carry floating water. Shoreline softness comes
  *  from the depth->0 crossing inside the basin, not from the radial mask. */
 function collectBasinHits(x: number, z: number, sampler: TerrainHeightSampler): BasinHit[] {
-  const bx = basinCoord(x);
-  const bz = basinCoord(z);
+  const hood = getBasinHood(basinCoord(x), basinCoord(z), sampler);
   const hits: BasinHit[] = [];
-  for (let oz = -1; oz <= 1; oz++) {
-    for (let ox = -1; ox <= 1; ox++) {
-      const basin = getBasin(bx + ox, bz + oz, sampler);
-      if (!basin) continue;
-      const distance = Math.hypot(x - basin.centerX, z - basin.centerZ);
-      if (distance > basin.radius) continue;
-      hits.push({
-        basin,
-        distance,
-        mask: 1 - smoothstep(basin.radius * 0.82, basin.radius, distance),
-      });
-    }
+  for (const basin of hood) {
+    const distance = Math.hypot(x - basin.centerX, z - basin.centerZ);
+    if (distance > basin.radius) continue;
+    hits.push({
+      basin,
+      distance,
+      mask: 1 - smoothstep(basin.radius * 0.82, basin.radius, distance),
+    });
   }
   return hits;
 }
@@ -304,9 +334,9 @@ interface TracedChannel {
  * different terrain functions never share entries; content is a pure function of
  * (basin coords, sampler), so eviction + rebuild is bit-identical.
  */
-const channelMemos = new WeakMap<TerrainHeightSampler, Map<string, TracedChannel | null>>();
+const channelMemos = new WeakMap<TerrainHeightSampler, Map<number, TracedChannel | null>>();
 
-function channelMemoFor(sampler: TerrainHeightSampler): Map<string, TracedChannel | null> {
+function channelMemoFor(sampler: TerrainHeightSampler): Map<number, TracedChannel | null> {
   let memo = channelMemos.get(sampler);
   if (!memo) {
     memo = new Map();
@@ -395,16 +425,44 @@ function traceChannel(basinX: number, basinZ: number, sampler: TerrainHeightSamp
 
 function getChannel(basinX: number, basinZ: number, sampler: TerrainHeightSampler): TracedChannel | null {
   const memo = channelMemoFor(sampler);
-  const key = `${basinX},${basinZ}`;
+  const key = basinKey(basinX, basinZ);
   const cached = memo.get(key);
   if (cached !== undefined) return cached;
   const traced = traceChannel(basinX, basinZ, sampler);
   if (memo.size >= CHANNEL_MEMO_MAX) {
-    const oldest = memo.keys().next().value as string;
+    const oldest = memo.keys().next().value as number;
     memo.delete(oldest);
   }
   memo.set(key, traced);
   return traced;
+}
+
+/** Per-sampler memo of the channel search neighbourhood (5×5 basins) around a centre
+ *  basin cell, in the same oz-outer/ox-inner order the direct loop used. */
+const channelHoodMemos = new WeakMap<TerrainHeightSampler, Map<number, TracedChannel[]>>();
+
+function getChannelHood(bx: number, bz: number, sampler: TerrainHeightSampler): TracedChannel[] {
+  let memo = channelHoodMemos.get(sampler);
+  if (!memo) {
+    memo = new Map();
+    channelHoodMemos.set(sampler, memo);
+  }
+  const key = basinKey(bx, bz);
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  const hood: TracedChannel[] = [];
+  for (let oz = -RIVER_SEARCH_RADIUS_BASINS; oz <= RIVER_SEARCH_RADIUS_BASINS; oz++) {
+    for (let ox = -RIVER_SEARCH_RADIUS_BASINS; ox <= RIVER_SEARCH_RADIUS_BASINS; ox++) {
+      const channel = getChannel(bx + ox, bz + oz, sampler);
+      if (channel) hood.push(channel);
+    }
+  }
+  if (memo.size >= CHANNEL_MEMO_MAX) {
+    const oldest = memo.keys().next().value as number;
+    memo.delete(oldest);
+  }
+  memo.set(key, hood);
+  return hood;
 }
 
 interface ChannelHit {
@@ -452,16 +510,11 @@ function channelHitAt(channel: TracedChannel, x: number, z: number): ChannelHit 
 
 /** All channel hits at (x, z) across the search neighbourhood. */
 function collectChannelHits(x: number, z: number, sampler: TerrainHeightSampler): ChannelHit[] {
-  const bx = basinCoord(x);
-  const bz = basinCoord(z);
+  const hood = getChannelHood(basinCoord(x), basinCoord(z), sampler);
   const hits: ChannelHit[] = [];
-  for (let oz = -RIVER_SEARCH_RADIUS_BASINS; oz <= RIVER_SEARCH_RADIUS_BASINS; oz++) {
-    for (let ox = -RIVER_SEARCH_RADIUS_BASINS; ox <= RIVER_SEARCH_RADIUS_BASINS; ox++) {
-      const channel = getChannel(bx + ox, bz + oz, sampler);
-      if (!channel) continue;
-      const hit = channelHitAt(channel, x, z);
-      if (hit) hits.push(hit);
-    }
+  for (const channel of hood) {
+    const hit = channelHitAt(channel, x, z);
+    if (hit) hits.push(hit);
   }
   return hits;
 }
