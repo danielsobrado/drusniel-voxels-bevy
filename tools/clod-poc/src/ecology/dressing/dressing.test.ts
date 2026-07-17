@@ -169,6 +169,26 @@ describe("ecological acceptance rules", () => {
       shoreDistanceM: 1,
       flow: [0.2, 0],
     }).accepted).toBe(true);
+    // Dry bank cells carry zero flow; the adjacent river's bankFlow must qualify them.
+    expect(evaluateHydrologyAffinity("river_cobbles", {
+      ...baseSample,
+      shoreDistanceM: 1,
+      flow: [0, 0],
+      bankFlow: [0.2, 0],
+    }).accepted).toBe(true);
+    expect(evaluateHydrologyAffinity("river_cobbles", {
+      ...baseSample,
+      shoreDistanceM: 1,
+      flow: [0, 0],
+    }).accepted).toBe(false);
+    const driftwood = evaluateHydrologyAffinity("large_driftwood", {
+      ...baseSample,
+      shoreDistanceM: 1,
+      flow: [0, 0],
+      bankFlow: [0, 0.4],
+    });
+    expect(driftwood.accepted).toBe(true);
+    expect(driftwood.orientationRad).toBeCloseTo(Math.PI / 2);
     expect(evaluateCaveAffinity("cave_mouth_fern", {
       ...baseSample,
       caveMouthFactor: 0.6,

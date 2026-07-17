@@ -30,6 +30,12 @@ export interface DressingEnvironmentSample extends VegetationSurfaceSample {
   readonly forestEdge: number;
   readonly sunExposure: number;
   readonly caveMouthFactor: number;
+  /**
+   * Strongest water flow found adjacent to a dry near-shore sample. Dry cells carry
+   * zero `flow`, so bank-dwelling classes (river cobbles, driftwood) would otherwise
+   * never see the river they sit beside. Unset/[0,0] away from flowing shores.
+   */
+  readonly bankFlow?: readonly [number, number];
 }
 
 export interface DressingTransform {

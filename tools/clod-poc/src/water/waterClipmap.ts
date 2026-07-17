@@ -575,6 +575,12 @@ export class WaterClipmap {
 
   get debugModeId(): WaterDebugModeId { return this.debugMode; }
   get levelCount(): number { return this.levels.length; }
+  /** Levels whose ring currently holds at least one wet vertex (mesh visible). */
+  get visibleLevelCount(): number {
+    let count = 0;
+    for (const level of this.levels) if (level.object.visible) count++;
+    return count;
+  }
   get updateCostStats(): WaterClipmapUpdateStats { return { ...this.updateCost }; }
   getLevelRect(index: number): WaterRect | null {
     if (index >= 0 && index < this.levels.length) {

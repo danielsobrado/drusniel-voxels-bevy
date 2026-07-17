@@ -784,7 +784,10 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     forestLightingConfig,
     grassConfig,
     waterConfig,
-    borderCoastOceanConfig,
+    // Runtime consumers (water shore surf, clipmap exclusion, deep ocean) must see the
+    // world-mode-resolved coast: a streamed world with the rectangular border coast off
+    // would otherwise grow phantom surf/dry bands inside the startup square.
+    borderCoastOceanConfig: effectiveBorderCoast,
     customPropsConfig,
     propPlacementScenes,
     proceduralTerrain,

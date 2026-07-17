@@ -41,8 +41,17 @@ export interface WaterStartupResult {
   oceanSampler: OceanSampler | null;
 }
 
-export function waterRuntimeWorldCells(searchParams: URLSearchParams, worldCells: number): number {
-  return searchParams.get("scene") === INFINITE_ISLANDS_SCENE
+export function waterRuntimeWorldCells(
+  searchParams: URLSearchParams,
+  worldCells: number,
+  hydrologySystem?: HydrologySystem | null,
+): number {
+  // Streamed worlds (infinite-islands, continent) answer hydrology outside the startup
+  // square; clamping the water runtime to the boot world there produces phantom border
+  // bands and dry walls mid-landmass. Any hydrology that supports infinite samples gets
+  // the unbounded runtime, not just the infinite-islands scene name.
+  return hydrologySystem?.supportsInfiniteWorldSamples() === true
+    || searchParams.get("scene") === INFINITE_ISLANDS_SCENE
     ? INFINITE_WATER_RUNTIME_WORLD_CELLS
     : worldCells;
 }
@@ -52,8 +61,8 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     scene, camera, state, waterConfig, borderCoastOceanConfig, worldCells,
     hydrologySystem, searchParams, currentLighting, lod0Nodes, isWebGpu,
   } = input;
-  const runtimeWorldCells = waterRuntimeWorldCells(searchParams, worldCells);
-  const infiniteIslandsScene = searchParams.get("scene") === INFINITE_ISLANDS_SCENE;
+  const runtimeWorldCells = waterRuntimeWorldCells(searchParams, worldCells, hydrologySystem);
+  const streamedWorldWater = runtimeWorldCells === INFINITE_WATER_RUNTIME_WORLD_CELLS;
 
   const waterController = await createWaterController({
     scene,
@@ -95,7 +104,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
         worldCells,
         deepOceanConfig,
         deepOceanMaterial.material,
-        infiniteIslandsScene ? { mode: "camera-relative", getCenter: () => camera.position } : undefined,
+        streamedWorldWater ? { mode: "camera-relative", getCenter: () => camera.position } : undefined,
       )
     : null;
   if (deepOceanSurface) scene.add(deepOceanSurface.mesh);

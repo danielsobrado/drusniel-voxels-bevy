@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
 import { describeDiagnostics } from "../core/diagnostics.js";
+import { recordWebGpuUncapturedError } from "../diagnostics/webgpu_uncaptured_errors.js";
 import { flushSaveRuntimeOrThrow } from "../save/save_runtime.js";
 import { installTerrainTextureArrayProbe } from "../gpu/terrain_texture_array_probe.js";
 import { requestSharedWebGpuDevice } from "./shared_webgpu_device.js";
@@ -96,6 +97,7 @@ export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {
     setActiveWebGpuRendererContext(renderer, device);
     let reported = 0;
     device.onuncapturederror = (event: GPUUncapturedErrorEvent): void => {
+      recordWebGpuUncapturedError();
       if (reported++ < 8) console.error("[webgpu] uncaptured error:", event.error.message);
     };
     void device.lost.then(async (info: GPUDeviceLostInfo) => {

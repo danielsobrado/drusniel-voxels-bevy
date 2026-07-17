@@ -351,7 +351,9 @@ export class DressingSystem {
     const forestNoise = treePcg2d01(Math.floor(x / 32), Math.floor(z / 32), this.options.worldSeed + 0x4401)[0];
     const forest = smoothstep(0.28, 0.78, forestNoise);
     const edge = 1 - Math.min(1, Math.abs(forestNoise - 0.53) / 0.25);
+    const bankFlow = this.sampleBankFlow(x, z, hydrology);
     return {
+      bankFlow,
       position: [x, height, z],
       normal,
       materialWeights: materials,
@@ -374,6 +376,39 @@ export class DressingSystem {
       sunExposure: 1 - forest * 0.7,
       caveMouthFactor: 0,
     };
+  }
+
+  /**
+   * Strongest adjacent water flow for a dry near-shore sample. Dry hydrology cells
+   * carry zero flow, so bank classes (river cobbles, driftwood) can only see the river
+   * they border through a short neighbourhood probe. Returns undefined away from
+   * shorelines to keep the common case at zero extra hydrology samples.
+   */
+  private sampleBankFlow(
+    x: number,
+    z: number,
+    center: ReturnType<HydrologySystem["sample"]> | undefined,
+  ): readonly [number, number] | undefined {
+    const system = this.options.hydrologySystem;
+    if (!system || !center) return undefined;
+    const nearShore = center.shoreDistance >= 0 && center.shoreDistance <= 6;
+    const dry = center.depth <= 0.12;
+    if (!dry || !nearShore) return undefined;
+    const step = 3;
+    let bestX = 0;
+    let bestZ = 0;
+    let bestSpeed = 0;
+    for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step]] as const) {
+      const neighbor = system.sample(x + dx, z + dz, 4);
+      if (neighbor.depth <= 0) continue;
+      const speed = Math.hypot(neighbor.flowX, neighbor.flowZ);
+      if (speed > bestSpeed) {
+        bestSpeed = speed;
+        bestX = neighbor.flowX;
+        bestZ = neighbor.flowZ;
+      }
+    }
+    return bestSpeed > 0 ? [bestX, bestZ] : undefined;
   }
 
   private surfaceHeightAt(x: number, z: number): number {

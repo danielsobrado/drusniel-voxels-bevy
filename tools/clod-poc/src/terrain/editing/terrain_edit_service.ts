@@ -356,7 +356,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   ): ConstructionTerrainConformPreview => {
     if (deps.editAuthority) {
       const decision = canCommitBuild(deps.editAuthority, authorityOrigin(), request.position);
-      if (!decision.allowed) return invalidConstructionTerrainPreview(request, decision.reason);
+      if (!decision.allowed) {
+        return invalidConstructionTerrainPreview(request, decision.reason ?? "build authority rejected the terrain footprint");
+      }
     }
     const samples: Array<{ x: number; z: number; surfaceY: number }> = [];
     for (const position of constructionTerrainSamplePositions(request)) {

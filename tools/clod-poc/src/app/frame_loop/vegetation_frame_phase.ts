@@ -13,6 +13,7 @@ import type { WeatherController } from "../../runtime/water_weather/weather_cont
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
 import { hydrologyAtlasGpuStats, updateHydrologyAtlasGpu } from "../../gpu/hydrology_atlas_gpu.js";
+import { webGpuUncapturedErrorCount } from "../../diagnostics/webgpu_uncaptured_errors.js";
 import {
   refreshVegetationAuthorityHeightfieldMask,
   vegetationAuthorityHeightfieldMaskStats,
@@ -163,9 +164,28 @@ function updateForestLighting(input: VegetationFramePhaseInput): void {
   if (completed) input.applyForestLightingToPropMaterials();
 }
 
+function mirrorWaterRuntimeCounters(input: VegetationFramePhaseInput): void {
+  const counters = globalCounters();
+  if (!counters) return;
+  counters["webgpu_uncaptured_errors"] = webGpuUncapturedErrorCount();
+  const clipmap = input.waterController.clipmap as typeof input.waterController.clipmap | undefined;
+  if (!clipmap) return;
+  const cost = clipmap.updateCostStats;
+  counters["water_clipmap_enabled"] = input.state.waterEnabled && clipmap.isEnabled ? 1 : 0;
+  counters["water_clipmap_visible_levels"] = clipmap.visibleLevelCount;
+  counters["water_clipmap_level_count"] = clipmap.levelCount;
+  counters["water_clipmap_snaps"] = cost.snaps;
+  counters["water_clipmap_full_refills"] = cost.fullRefills;
+  counters["water_clipmap_partial_refills"] = cost.partialRefills;
+  counters["water_clipmap_field_samples"] = cost.fieldSamples;
+  counters["water_clipmap_static_snaps"] = cost.staticSnaps;
+  counters["water_clipmap_index_rebuilds"] = cost.indexRebuilds;
+}
+
 function updateWater(input: VegetationFramePhaseInput): void {
   if (input.selectionFrameId % HYDROLOGY_DIAGNOSTIC_INTERVAL_FRAMES === 0) {
     mirrorInfiniteHydrologyDiagnostics(input);
+    mirrorWaterRuntimeCounters(input);
   }
   if (!input.state.waterEnabled) return;
   // Keep the water clipmap on the same streamed authority center as terrain and vegetation.
