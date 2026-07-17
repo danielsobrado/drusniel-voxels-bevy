@@ -58,6 +58,10 @@ export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
   return stats;
 }
 
+export function streamRootCacheOperationGeneration(stats: StreamRootCacheStats): number {
+  return streamingTokens.get(stats as object)?.generation ?? captureTerrainStreamingToken().generation;
+}
+
 export function streamRootCacheOperationIsCurrent(stats: StreamRootCacheStats): boolean {
   const statsCurrent = streamingTokens.get(stats as object)?.isCurrent() ?? true;
   if (!statsCurrent) return false;
@@ -120,6 +124,7 @@ export async function storeStreamRootNode(
       worldMode: "infinite",
       hydrologyMode: "bounded-to-startup-world",
       backend,
+      terrainStreamingGeneration: streamRootCacheOperationGeneration(stats),
     },
   );
   if (!streamRootCacheOperationIsCurrent(stats)) return;
