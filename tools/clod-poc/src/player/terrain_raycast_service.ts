@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { TerrainColliderSet, TerrainSurfaceHit } from "../terrain/terrain_collider.js";
+import { setActiveTerrainRaycastService } from "./terrain_raycast_registry.js";
 
 export interface TerrainRaycastServiceDeps {
   terrainColliders: TerrainColliderSet;
@@ -11,6 +12,7 @@ export interface TerrainRaycastServiceDeps {
 
 export interface TerrainRaycastService {
   raycastTerrainHeightfield(ray: THREE.Ray): TerrainSurfaceHit | null;
+  raycastAuthoritativeTerrain(ray: THREE.Ray, maxDistance?: number): TerrainSurfaceHit | null;
   raycastEditableTerrain(ray: THREE.Ray, maxDistance?: number): TerrainSurfaceHit | null;
 }
 
@@ -45,7 +47,7 @@ export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): Te
       if (inWorld && previousSigned >= 0 && signed <= 0) {
         let lo = previousT;
         let hi = t;
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 12; i += 1) {
           const midT = (lo + hi) * 0.5;
           ray.at(midT, hitPoint);
           const midSigned = hitPoint.y - deps.surfaceHeight(hitPoint.x, hitPoint.z);
@@ -64,13 +66,24 @@ export function createTerrainRaycastService(deps: TerrainRaycastServiceDeps): Te
   const raycastTerrainHeightfield = (ray: THREE.Ray): TerrainSurfaceHit | null =>
     raycastTerrainHeightfieldWithin(ray, Math.max(8000, deps.worldCells * 8));
 
+  const raycastAuthoritativeTerrain = (
+    ray: THREE.Ray,
+    maxDistance = Number.POSITIVE_INFINITY,
+  ): TerrainSurfaceHit | null => deps.terrainColliders.raycastSurface(ray, maxDistance);
+
   const raycastEditableTerrain = (ray: THREE.Ray, maxDistanceOverride?: number): TerrainSurfaceHit | null => {
     const playing = deps.getMode?.() === "playing";
     const maxDistance = maxDistanceOverride ?? (playing ? 8 : 4000);
-    const colliderHit = deps.terrainColliders.raycastSurface(ray, maxDistance);
+    const colliderHit = raycastAuthoritativeTerrain(ray, maxDistance);
     if (colliderHit || playing) return colliderHit;
     return raycastTerrainHeightfieldWithin(ray, maxDistance);
   };
 
-  return { raycastTerrainHeightfield, raycastEditableTerrain };
+  const service: TerrainRaycastService = {
+    raycastTerrainHeightfield,
+    raycastAuthoritativeTerrain,
+    raycastEditableTerrain,
+  };
+  setActiveTerrainRaycastService(service);
+  return service;
 }
