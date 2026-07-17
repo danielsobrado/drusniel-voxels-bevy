@@ -23,6 +23,8 @@ export interface ExecuteEarthSpellCastDeps {
   ready: Promise<unknown>;
   terrainEditService: Pick<TerrainEditService, "commitSpellTerrainEdit">;
   playVfx: (target: EarthSpellTarget) => boolean;
+  waitForDerivedConvergence?: () => Promise<void>;
+  onResult?: (result: TerrainSpellEditResult) => void;
   isDisposed?: () => boolean;
 }
 
@@ -71,7 +73,21 @@ export async function executePreparedEarthSpellCast(
 ): Promise<TerrainSpellEditResult | null> {
   await deps.ready;
   if (deps.isDisposed?.()) return null;
-  return deps.terrainEditService.commitSpellTerrainEdit(prepared.request, () => {
+  const serviceResult = await deps.terrainEditService.commitSpellTerrainEdit(prepared.request, () => {
     if (!deps.isDisposed?.()) deps.playVfx(prepared.target);
   });
+  let result = serviceResult;
+  if (serviceResult.committed && serviceResult.changed && serviceResult.converged && deps.waitForDerivedConvergence) {
+    try {
+      await deps.waitForDerivedConvergence();
+    } catch (error) {
+      result = {
+        ...serviceResult,
+        converged: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  deps.onResult?.(result);
+  return result;
 }
