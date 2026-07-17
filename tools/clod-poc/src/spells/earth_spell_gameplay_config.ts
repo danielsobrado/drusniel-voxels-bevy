@@ -11,6 +11,7 @@ export interface EarthSpellGameplayConfig {
   strength: number;
   falloff: number;
   material: number;
+  maxRangeM: number;
   commandExpiryMs: number;
 }
 
@@ -23,7 +24,8 @@ export const DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG: Readonly<EarthSpellGameplayCon
   strength: 0.72,
   falloff: 0.35,
   material: 0,
-  commandExpiryMs: 1000,
+  maxRangeM: 8,
+  commandExpiryMs: 3000,
 });
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -70,6 +72,7 @@ export function parseEarthSpellGameplayConfig(
       strength: finite(gameplay?.["strength"], fallback.strength, 0.01, 1),
       falloff: finite(gameplay?.["falloff"], fallback.falloff, 0, 1),
       material: Math.floor(finite(gameplay?.["material"], fallback.material, 0, 255)),
+      maxRangeM: finite(gameplay?.["max_range_m"], fallback.maxRangeM, 1, 80),
       commandExpiryMs: finite(gameplay?.["command_expiry_ms"], fallback.commandExpiryMs, 50, 5000),
     };
   } catch (error) {
