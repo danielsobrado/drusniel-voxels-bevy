@@ -73,6 +73,7 @@ spells:
       material: 0
       max_range_m: 8.0
       command_expiry_ms: 3000
+      convergence_timeout_ms: 5000
     vfx:
       hand_forward_m: 0.5
       hand_right_m: 0.35
