@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { createTerrainRaycastService } from "./terrain_raycast_service.js";
+import { getActiveTerrainRaycastService } from "./terrain_raycast_registry.js";
 
 describe("terrain edit raycasts", () => {
   it("falls back to the procedural heightfield for orbit editing", () => {
@@ -17,6 +18,21 @@ describe("terrain edit raycasts", () => {
     expect(service.raycastEditableTerrain(ray)?.pageId).toBe("heightfield");
     expect(raycastSurface).toHaveBeenCalledWith(ray, 4000);
     expect(surfaceHeight).toHaveBeenCalled();
+  });
+
+  it("exposes an exact collider-only raycast for construction", () => {
+    const exactHit = { point: new THREE.Vector3(1, 2, 3), distance: 4, pageId: "page-1" };
+    const raycastSurface = vi.fn(() => exactHit);
+    const service = createTerrainRaycastService({
+      terrainColliders: { raycastSurface } as never,
+      surfaceHeight: () => 0,
+      worldCells: 1024,
+    });
+    const ray = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+
+    expect(service.raycastAuthoritativeTerrain(ray, 12)).toBe(exactHit);
+    expect(raycastSurface).toHaveBeenCalledWith(ray, 12);
+    expect(getActiveTerrainRaycastService()).toBe(service);
   });
 
   it("limits player edit picking to collider interaction range", () => {
