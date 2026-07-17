@@ -129,13 +129,17 @@ export class PropEditStore {
   }
 
   restore(props: readonly ProjectPropInstance[]): PropEditResult {
-    this.props.clear();
+    const restored = new Map<string, ProjectPropInstance>();
     let maxRevision = 0;
     for (const prop of props) {
       const normalized = normalizeProp(prop);
+      if (restored.has(normalized.id)) throw new Error(`duplicate prop id: ${normalized.id}`);
       maxRevision = Math.max(maxRevision, normalized.revision ?? 0);
-      this.props.set(normalized.id, normalized);
+      restored.set(normalized.id, normalized);
     }
+
+    this.props.clear();
+    for (const [id, prop] of restored) this.props.set(id, prop);
     this.currentRevision = maxRevision + 1;
     return this.emit([...this.props.keys()]);
   }
