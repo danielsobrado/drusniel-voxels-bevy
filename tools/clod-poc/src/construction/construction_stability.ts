@@ -78,7 +78,7 @@ export function constructionSupportProfile(
   material: ConstructionMaterial,
   profiles: ConstructionSupportProfiles,
 ): ConstructionSupportProfile {
-  return piece.supportProfile ?? profiles[material];
+  return piece.supportProfile && material === piece.material ? piece.supportProfile : profiles[material];
 }
 
 export function constructionConnectionIsVertical(
@@ -201,6 +201,6 @@ export function constructionStabilityColorHex(
   const ratio = maxSupport > 0 ? stability / maxSupport : 0;
   if (ratio >= 0.67) return 0x35d46b;
   if (ratio >= 0.40) return 0xf2d83d;
-  if (ratio >= collapseThreshold) return 0xff8a1f;
+  if (stability >= collapseThreshold) return 0xff8a1f;
   return 0xff3d3d;
 }
