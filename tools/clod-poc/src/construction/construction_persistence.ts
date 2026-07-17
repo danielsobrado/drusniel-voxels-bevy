@@ -40,15 +40,33 @@ export function normalizePersistedConstructionPiece(value: unknown): PlacedConst
     if (material) normalized.material = material;
   }
   if (typeof record.grounded === "boolean") normalized.grounded = record.grounded;
-  const parentIds = readStringArray(record.parentIds);
-  if (parentIds !== undefined) normalized.parentIds = parentIds;
+  const connectionIds = readStringArray(record.connectionIds) ?? readStringArray(record.parentIds);
+  if (connectionIds !== undefined) normalized.connectionIds = connectionIds.filter((id) => id !== normalized.id);
+  const stability = Number(record.stability);
+  if (Number.isFinite(stability) && stability >= 0) normalized.stability = stability;
   if (record.unsupported === true) normalized.unsupported = true;
   return normalized;
 }
 
+function serializablePiece(piece: PlacedConstructionPiece): PlacedConstructionPiece {
+  return {
+    id: piece.id,
+    typeId: piece.typeId,
+    position: [piece.position[0], piece.position[1], piece.position[2]],
+    rotationQuarterTurns: normalizeRotationQuarterTurns(piece.rotationQuarterTurns),
+    ...(piece.material ? { material: piece.material } : {}),
+    ...(piece.grounded !== undefined ? { grounded: piece.grounded } : {}),
+    connectionIds: [...new Set(piece.connectionIds ?? piece.parentIds ?? [])]
+      .filter((id) => id !== piece.id)
+      .sort(),
+    ...(Number.isFinite(piece.stability) ? { stability: Math.max(0, piece.stability!) } : {}),
+    ...(piece.unsupported === true ? { unsupported: true } : {}),
+  };
+}
+
 export function saveConstructionPieces(storageKey: string, pieces: readonly PlacedConstructionPiece[]): void {
   try {
-    localStorage.setItem(storageKey, JSON.stringify(pieces));
+    localStorage.setItem(storageKey, JSON.stringify(pieces.map(serializablePiece)));
   } catch (error) {
     console.warn("[construction] failed to save placed pieces", error);
   }
@@ -66,6 +84,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
     const pending: PlacedConstructionPiece[] = [];
     const seenIds = new Set<string>();
     for (const entry of parsed) {
+      const record = entry && typeof entry === "object" ? entry as Record<string, unknown> : null;
       const placed = normalizePersistedConstructionPiece(entry);
       const piece = placed ? input.piecesById.get(placed.typeId) : null;
       if (!placed || !piece) {
@@ -78,6 +97,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
         continue;
       }
       seenIds.add(placed.id);
+      if (record && record.parentIds !== undefined && record.connectionIds === undefined) rewriteStorage = true;
       if (!hasExplicitSupportMetadata(placed)) {
         if (!piece.canGround) {
           console.warn(`[construction] skipped legacy saved piece ${placed.id}: invalid support`);
@@ -85,7 +105,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
           continue;
         }
         placed.grounded = true;
-        placed.parentIds = [];
+        placed.connectionIds = [];
         rewriteStorage = true;
       }
       const suffix = Number(placed.id.startsWith(ENTITY_ID_PREFIX) ? placed.id.slice(ENTITY_ID_PREFIX.length) : Number.NaN);
@@ -130,7 +150,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
       }
     }
 
-    for (const placed of pending) console.warn(`[construction] skipped invalid saved piece ${placed.id}: unsupported`);
+    for (const placed of pending) console.warn(`[construction] skipped invalid saved piece ${placed.id}: unresolved connection references`);
     if (pending.length > 0) rewriteStorage = true;
     if (rewriteStorage || input.placedPieces.length !== parsed.length) saveConstructionPieces(input.storageKey, input.placedPieces);
     return { nextEntityId, rewritten: rewriteStorage };
