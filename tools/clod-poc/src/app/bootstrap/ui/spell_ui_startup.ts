@@ -41,7 +41,7 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
 
 export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEditStartupResult): void {
   const config = defaultSpellConfig;
-  const { scene, camera, renderer, terrainRaycast, player, interaction } = ctx.input;
+  const { scene, camera, renderer, terrainRaycast, interaction } = ctx.input;
   const targetRay = new THREE.Ray();
   const targetDirection = new THREE.Vector3();
   const targetNormal = new THREE.Vector3(0, 1, 0);
