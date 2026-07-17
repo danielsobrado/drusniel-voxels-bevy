@@ -336,7 +336,10 @@ export function applyPostProcessQueryOverrides(
   if (aerial !== null) next.aerialPerspectiveEnabled = aerial;
 
   const fog = flagValue(searchParams, "fog") ?? flagValue(searchParams, "haze");
-  if (fog === false) next.aerialPerspectiveEnabled = false;
+  if (fog === false) {
+    next.aerialPerspectiveEnabled = false;
+    next.godRaysMode = "off";
+  }
 
   const clouds = flagValue(searchParams, "clouds")
     ?? flagValue(searchParams, "cloud")
