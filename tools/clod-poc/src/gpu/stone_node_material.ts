@@ -49,8 +49,10 @@ export interface StoneNodeMaterialDebugOptions {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
-const STONE_AMBIENT_FLOOR = new THREE.Vector3(0.12, 0.11, 0.10);
-const STONE_MIN_AO = 0.35;
+const STONE_AMBIENT_FLOOR = new THREE.Vector3(0.20, 0.19, 0.18);
+const STONE_MIN_AO = 0.55;
+const STONE_MIN_LIGHTING = 0.30;
+const STONE_MIN_BASE_COLOR = new THREE.Vector3(0.18, 0.18, 0.17);
 const STONE_CLASS_COUNT = 3;
 const STONE_DEBUG_CLASS_BLEND = 0.88;
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
@@ -133,7 +135,7 @@ export function createStoneNodeMaterial(
 
   const hue = hash2(floor(worldPos.xz.mul(0.5)));
   const lightStone = vec3(0.52, 0.5, 0.47);
-  const darkStone = vec3(0.3, 0.29, 0.28);
+  const darkStone = vec3(0.34, 0.33, 0.32);
   let rock: TslNode = mix(darkStone, lightStone, smoothstep(0.0, 1.0, vdata.y));
   rock = mix(rock, rock.mul(vec3(1.05, 0.98, 0.9)), hue.mul(0.5));
 
@@ -147,9 +149,14 @@ export function createStoneNodeMaterial(
   rock = mix(rock, vec3(0.18, 0.15, 0.12), up.oneMinus().mul(0.18));
   if (wetRock) {
     const fleck: TslNode = smoothstep(0.78, 0.98, hash2(floor(worldPos.xz.mul(3.5).add(worldPos.y.mul(0.4))))).mul(wetRock).mul(0.42);
-    rock = mix(rock, rock.mul(vec3(0.42, 0.50, 0.48)), wetRock);
+    rock = mix(rock, rock.mul(vec3(0.62, 0.68, 0.66)), wetRock);
     rock = mix(rock, vec3(0.72, 0.78, 0.74), fleck);
   }
+  rock = max(rock, vec3(
+    STONE_MIN_BASE_COLOR.x,
+    STONE_MIN_BASE_COLOR.y,
+    STONE_MIN_BASE_COLOR.z,
+  ));
   if (debug.classColors && instanceBuffers) {
     const perClass = Math.max(1, Math.floor(instanceBuffers.capacity / STONE_CLASS_COUNT));
     const classIndex: TslNode = floor(float(instanceIndex).div(float(perClass)));
@@ -170,10 +177,14 @@ export function createStoneNodeMaterial(
     STONE_AMBIENT_FLOOR.y,
     STONE_AMBIENT_FLOOR.z,
   ));
+  const stableLighting = max(
+    lightingTerm.mul(max(ao, float(STONE_MIN_AO))),
+    vec3(STONE_MIN_LIGHTING),
+  );
 
   const material = new MeshBasicNodeMaterial();
   if (instanceBuffers) material.positionNode = worldPos;
-  material.colorNode = rock.mul(lightingTerm).mul(max(ao, float(STONE_MIN_AO)));
+  material.colorNode = rock.mul(stableLighting);
   if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
   material.side = THREE.FrontSide;
 
