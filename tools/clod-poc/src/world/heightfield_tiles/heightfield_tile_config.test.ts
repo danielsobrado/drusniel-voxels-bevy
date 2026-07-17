@@ -17,6 +17,7 @@ describe("heightfield tile config", () => {
       evictDistanceMultiplier: 1.5,
       retryCooldownFrames: 120,
       predictionSeconds: 4,
+      backgroundBuildIntervalFrames: 30,
       persistenceEnabled: true,
     });
   });
@@ -49,6 +50,7 @@ describe("heightfield tile config", () => {
       evict_distance_multiplier: 1.5
       retry_cooldown_frames: 120
       prediction_seconds: 4
+      background_build_interval_frames: 30
       persistence_enabled: true
     `)).toThrow(/max_resident_tiles/);
   });
