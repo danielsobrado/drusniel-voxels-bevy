@@ -157,9 +157,9 @@ fn simplifyIndices(@builtin(global_invocation_id) gid : vec3<u32>) {
   let b = vertexRemap[inputIndices[source + 1u]];
   let c = vertexRemap[inputIndices[source + 2u]];
   if (a == 0xffffffffu || b == 0xffffffffu || c == 0xffffffffu || a == b || b == c || a == c) { return; }
-  let target = atomicAdd(&counters.indexCount, 3u);
-  outputIndices[target] = a;
-  outputIndices[target + 1u] = b;
-  outputIndices[target + 2u] = c;
+  let writeBase = atomicAdd(&counters.indexCount, 3u);
+  outputIndices[writeBase] = a;
+  outputIndices[writeBase + 1u] = b;
+  outputIndices[writeBase + 2u] = c;
 }
 `;

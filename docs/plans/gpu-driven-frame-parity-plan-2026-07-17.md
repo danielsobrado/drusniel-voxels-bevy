@@ -22,7 +22,7 @@ representation for the near editable terrain (invariant I5: near bubble stays Su
 | Grass / trees / understory / props / stones | Per-frame ring compute: frustum + terrain-visibility cull in WGSL, compacted instance buffers, GPU-written indirect args, drawn via `geometry.setIndirect` | ✅ fully GPU-driven; CPU never sees counts (counter readback is debug-gated, slot-ring, 90-frame interval) |
 | Tree shadows | Per-cascade GPU shadow caster lists + shadow indirect args | ✅ beyond reference |
 | Hydrology / authority data for placement | Streaming atlas textures, dirty-rect `writeTexture`, sampled inside placement computes ("without readback" by design) | ✅ |
-| Terrain page meshing (streamed roots) | GPU mesher (`liveClodRootGpuMesher=1`, continent default) → GPU-resident vertex/index pool, external-buffer three geometry (`webgpu_external_buffer_geometry.ts`), per-meshlet `drawIndexedIndirect` | ✅ resident; only per-page *count* readback at build |
+| Terrain page meshing (streamed roots) | GPU mesher (`liveClodRootGpuMesher=1`, continent default) → GPU-resident vertex/index pool, external-buffer three geometry (`webgpu_external_buffer_geometry.ts`), per-meshlet `drawIndexedIndirect` | ⚠️ resident *render* path (`liveClodGpuHierarchy=1`) defaults OFF — the continent default GPU-meshes then reads every page back to CPU. Worse, the resident path was broken at WGSL parse (`target` reserved keyword, fixed 2026-07-17); flip the default only after browser validation |
 | Post-processing | Hillaire aerial, volumetric clouds + cloud shadows, froxel volumetrics, GTAO, contact shadows, SS bounce, god rays, auto-exposure, bloom, color script, half-res MRT, dynamic resolution | ✅ matches/exceeds reference (TAA stage exists behind flag; excluded from locked scope) |
 | Shadows | 4-cascade CSM @2048 with caster layers | ✅ (reference adds PCSS — optional polish) |
 
@@ -206,6 +206,30 @@ Gate: worst `renderMs` frame at movement onset on perf:move, N≥3 runs.
   counters (`readbackFrames`, ring `skippedDispatches`) == 0 in the reuse profile.
 - Gate `renderMs` p95 (not just `frameMs`, which stops at render end — known anatomy).
 - Add the meshlet-cull counters (culled/total meshlets) to stats + perf:move summary.
+
+## 3.1 Implementation status (2026-07-17, same day)
+
+Implemented and unit-verified (typecheck, 3573-test suite, vite build all green):
+
+- **P0 complete**: farOwner replace-mode rule moved into `resolveFarOwner` (bootstrap
+  override removed), understory capacity test aligned to the intentional 12×1000 split,
+  localStorage stub added to the rpg composition suite. Suite went 10 failing → 0.
+- **P3 complete**: `webgpuReadback=once` re-arms per node-version change;
+  `webgpuSelection=1` now defaults the readback to `async` so the dispatch has a consumer
+  (`webgpuReadback=off` still measures dispatch cost alone).
+- **P1 code complete**: per-frame meshlet frustum cull
+  (`src/terrain/streaming/gpu_clod_meshlet_cull.ts`), hooked into the terrain frame
+  phase, kill switch `clodMeshletCull=0`, counters `clod_meshlet_cull_*`. Meshlet build
+  bounds now cover the root-morph Y extent. **Browser validation pending** (see the
+  testing handover doc `gpu-driven-p1-testing-handover-2026-07-17.md`).
+- **Found + fixed en route**: the whole resident/weld/simplify mesher WGSL family failed
+  to parse in current Dawn — `let target = atomicAdd(...)` uses the now-reserved keyword
+  `target` (five sites). This silently disabled `liveClodGpuHierarchy=1` and produced
+  `webgpu_uncaptured_errors=2` on boot. Renamed to `writeBase`/`write_base`.
+- **Audit correction**: `liveClodGpuHierarchy` (resident render) defaults OFF, so the
+  continent default was CPU-readback for all pages even with the GPU mesher on. Flipping
+  that default is now the concrete "make it GPU-driven" switch, gated on the handover
+  validation below.
 
 ## 4. Explicit non-goals
 - Adopting LAAS heightfield terrain for the near field (I5).

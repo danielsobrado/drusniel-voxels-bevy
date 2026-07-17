@@ -134,9 +134,9 @@ fn simplify_triangles(@builtin(global_invocation_id) gid : vec3<u32>) {
   let c = vertex_remap[input_indices[source + 2u]];
   if (a == 0xffffffffu || b == 0xffffffffu || c == 0xffffffffu) { return; }
   if (a == b || b == c || a == c) { return; }
-  let target = atomicAdd(&counters.index_count, 3u);
-  output_indices[target] = a;
-  output_indices[target + 1u] = b;
-  output_indices[target + 2u] = c;
+  let write_base = atomicAdd(&counters.index_count, 3u);
+  output_indices[write_base] = a;
+  output_indices[write_base + 1u] = b;
+  output_indices[write_base + 2u] = c;
 }
 `;
