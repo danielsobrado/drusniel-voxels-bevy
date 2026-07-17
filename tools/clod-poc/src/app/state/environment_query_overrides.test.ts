@@ -136,6 +136,41 @@ describe("environment query overrides", () => {
     expect(state.treeGpuMaxVisible).toBe(12000);
   });
 
+  it("lets explicit WebGPU stage flags override preset defaults", () => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({
+      quality: "perf",
+      traa: "1",
+      clouds: "1",
+      gtao: "1",
+      froxels: "1",
+      bounce: "1",
+    }));
+
+    expect(state.postProcessQualityPreset).toBe("perf");
+    expect(state.postProcessTaaEnabled).toBe(true);
+    expect(state.postProcessCloudsEnabled).toBe(true);
+    expect(state.postProcessGtaoEnabled).toBe(true);
+    expect(state.postProcessFroxelsEnabled).toBe(true);
+    expect(state.postProcessBounceEnabled).toBe(true);
+  });
+
+  it("supports the shared WebGPU stage aliases", () => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({
+      quality: "perf",
+      volumetricClouds: "1",
+      ambientOcclusion: "1",
+      volumetricFog: "1",
+      colorBounce: "1",
+    }));
+
+    expect(state.postProcessCloudsEnabled).toBe(true);
+    expect(state.postProcessGtaoEnabled).toBe(true);
+    expect(state.postProcessFroxelsEnabled).toBe(true);
+    expect(state.postProcessBounceEnabled).toBe(true);
+  });
+
   it("lets explicit tree GPU debug URL flags override preset defaults", () => {
     const state = createState();
     const params = new URLSearchParams({
@@ -178,6 +213,19 @@ describe("environment query overrides", () => {
     expect(state.treeLeafFlutterStrength).toBe(0);
     expect(state.grassWindStrength).toBe(0);
     expect(state.grassWindSpeed).toBe(0);
+  });
+
+  it.each([
+    ["fx", "0"],
+    ["postmin", "1"],
+  ])("disables WebGPU stage state for ?%s=%s", (key, value) => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ [key]: value }));
+
+    expect(state.postProcessCloudsEnabled).toBe(false);
+    expect(state.postProcessGtaoEnabled).toBe(false);
+    expect(state.postProcessFroxelsEnabled).toBe(false);
+    expect(state.postProcessBounceEnabled).toBe(false);
   });
 
   it("enables strict tree GPU mode for fail-loud perf captures", () => {
