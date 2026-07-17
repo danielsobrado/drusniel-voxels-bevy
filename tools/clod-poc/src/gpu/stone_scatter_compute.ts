@@ -5,6 +5,7 @@ import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
 import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
+import { GpuTimestampRecorder, type GpuTimestampSnapshot } from "../diagnostics/gpu_timestamp_recorder.js";
 import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 const WORKGROUP_SIZE = 64;
@@ -15,6 +16,9 @@ const COUNTER_BYTES = COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_CLASS = 5;
 const INDIRECT_BYTES = CLASS_COUNT * INDIRECT_ARGS_PER_CLASS * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_INTERVAL_FRAMES = 30;
+const READBACK_SLOTS = 2;
+const TIMING_LABELS = ["clear", "world", "indirect"] as const;
+
 export const STONE_GPU_RING_MAX_SAFE_GRID = 512;
 export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 5;
 
@@ -60,7 +64,14 @@ export interface StoneGpuScatterCounts {
 }
 export interface StoneGpuClassRegion { start: number; end: number; firstInstance: number }
 
+interface CounterReadbackSlot {
+  buffer: GPUBuffer;
+  busy: boolean;
+  destroyAfterMap: boolean;
+}
+
 type PipelineName = "clear_counters" | "scatter_stones" | "build_indirect_args";
+type StoneTelemetryCallback = (counts: StoneGpuScatterCounts) => void;
 
 export function stoneGpuScatterUnsupportedReason(device: GPUDevice): string | null {
   const maxStorageBuffers = device.limits.maxStorageBuffersPerShaderStage;
@@ -80,7 +91,7 @@ export function stoneGpuOutputIndex(classIndex: number, slot: number, maxInstanc
 export class StoneGpuScatterCompute {
   private readonly paramBuffer: GPUBuffer;
   private readonly counterBuffer: GPUBuffer;
-  private readonly counterReadback: GPUBuffer;
+  private readonly counterReadbacks: CounterReadbackSlot[];
   private readonly fieldParams: GPUBuffer;
   private readonly digEdits: GPUBuffer;
   private readonly hydroTexture: GPUTexture;
@@ -89,7 +100,10 @@ export class StoneGpuScatterCompute {
   private readonly paramF32 = new Float32Array(this.paramScratch);
   private readonly paramU32 = new Uint32Array(this.paramScratch);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
+  private readonly timestamps: GpuTimestampRecorder;
   private frame = 0;
+  private generation = 0;
+  private skippedCounterReadbacks = 0;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -100,9 +114,14 @@ export class StoneGpuScatterCompute {
     hydroData: GrassHydrologyData | null,
   ) {
     this.pipelines = pipelines;
+    this.timestamps = new GpuTimestampRecorder(device, "stones", TIMING_LABELS);
     this.paramBuffer = device.createBuffer({ label: "stone scatter params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.counterBuffer = device.createBuffer({ label: "stone scatter counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
-    this.counterReadback = device.createBuffer({ label: "stone scatter counter readback", size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
+      buffer: device.createBuffer({ label: `stone scatter counter readback ${index}`, size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+      busy: false,
+      destroyAfterMap: false,
+    }));
     this.fieldParams = device.createBuffer({ label: "stone scatter field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.digEdits = device.createBuffer({ label: "stone scatter dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
@@ -132,7 +151,12 @@ export class StoneGpuScatterCompute {
     });
   }
 
-  static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], buffers: StoneGpuScatterBuffers, hydroData: GrassHydrologyData | null = null): Promise<StoneGpuScatterCompute> {
+  static async create(
+    device: GPUDevice,
+    edits: readonly ResolvedDigEdit[],
+    buffers: StoneGpuScatterBuffers,
+    hydroData: GrassHydrologyData | null = null,
+  ): Promise<StoneGpuScatterCompute> {
     const module = device.createShaderModule({ label: "stone scatter compute shader", code: composeStoneScatterShader() });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
@@ -152,17 +176,81 @@ export class StoneGpuScatterCompute {
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `stone scatter ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
-    const [clearCounters, scatterStones, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("scatter_stones"), makePipeline("build_indirect_args")]);
-    return new StoneGpuScatterCompute(device, layout, { clear_counters: clearCounters, scatter_stones: scatterStones, build_indirect_args: buildIndirectArgs }, edits, buffers, hydroData);
+    const [clearCounters, scatterStones, buildIndirectArgs] = await Promise.all([
+      makePipeline("clear_counters"),
+      makePipeline("scatter_stones"),
+      makePipeline("build_indirect_args"),
+    ]);
+    return new StoneGpuScatterCompute(
+      device,
+      layout,
+      { clear_counters: clearCounters, scatter_stones: scatterStones, build_indirect_args: buildIndirectArgs },
+      edits,
+      buffers,
+      hydroData,
+    );
   }
 
-  async run(params: StoneGpuScatterParams): Promise<StoneGpuScatterCounts> {
+  run(params: StoneGpuScatterParams, onTelemetry?: StoneTelemetryCallback): boolean {
     const settings = params.settings;
     const maxInstances = Math.max(0, Math.floor(settings.maxInstances));
     const cellSize = Math.max(0.1, settings.cellSizeM);
     const ringRadius = Math.max(cellSize, settings.ringRadiusM);
     const grid = Math.min(STONE_GPU_RING_MAX_SAFE_GRID, Math.max(1, Math.ceil((ringRadius * 2) / cellSize)));
 
+    this.packParams(params, maxInstances, cellSize, ringRadius, grid);
+    this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
+
+    const frame = this.frame++;
+    const requestReadback = shouldRequestGpuReadback({ kind: "stone_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES });
+    const readbackSlot = requestReadback
+      ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null
+      : null;
+    if (requestReadback && !readbackSlot) this.skippedCounterReadbacks++;
+
+    const encoder = this.device.createCommandEncoder({ label: "stone scatter compute encoder" });
+    this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1, "clear");
+    this.dispatchPipeline(encoder, this.pipelines.scatter_stones, Math.ceil((grid * grid) / WORKGROUP_SIZE), "world");
+    this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1, "indirect");
+    if (readbackSlot) {
+      readbackSlot.busy = true;
+      readbackSlot.destroyAfterMap = false;
+      encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
+    }
+    const timingSlot = this.timestamps.encodeReadback(encoder, frame);
+    this.device.queue.submit([encoder.finish()]);
+    this.timestamps.submitReadback(timingSlot);
+    if (readbackSlot) this.readbackCounts(readbackSlot, maxInstances, onTelemetry);
+    publishStoneTimingShape(this.timestamps.snapshot(), this.skippedCounterReadbacks);
+    return true;
+  }
+
+  timingSnapshot(): GpuTimestampSnapshot {
+    return this.timestamps.snapshot();
+  }
+
+  destroy(): void {
+    this.generation++;
+    this.paramBuffer.destroy();
+    this.counterBuffer.destroy();
+    for (const slot of this.counterReadbacks) {
+      if (slot.busy) slot.destroyAfterMap = true;
+      else slot.buffer.destroy();
+    }
+    this.digEdits.destroy();
+    this.fieldParams.destroy();
+    this.hydroTexture.destroy();
+    this.timestamps.destroy();
+  }
+
+  private packParams(
+    params: StoneGpuScatterParams,
+    maxInstances: number,
+    cellSize: number,
+    ringRadius: number,
+    grid: number,
+  ): void {
+    const settings = params.settings;
     this.paramF32.fill(0);
     this.paramU32.fill(0);
     this.paramF32[0] = params.worldCells;
@@ -214,58 +302,38 @@ export class StoneGpuScatterCompute {
     this.paramF32[78] = Math.max(0.001, settings.terrain.heightBlendM);
     const hydroAtlas = hydrologyAtlasGpuParams();
     for (let i = 0; i < 4; i++) this.paramF32[80 + i] = hydroAtlas[i] ?? 0;
-    this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
-
-    const frame = this.frame++;
-    const requestReadback = shouldRequestGpuReadback({ kind: "stone_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES });
-    const encoder = this.device.createCommandEncoder({ label: "stone scatter compute encoder" });
-    this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
-    this.dispatchPipeline(encoder, this.pipelines.scatter_stones, Math.ceil((grid * grid) / WORKGROUP_SIZE));
-    this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
-    if (requestReadback) encoder.copyBufferToBuffer(this.counterBuffer, 0, this.counterReadback, 0, COUNTER_BYTES);
-    this.device.queue.submit([encoder.finish()]);
-
-    if (!requestReadback) return emptyStoneGpuScatterCounts();
-    await this.counterReadback.mapAsync(GPUMapMode.READ);
-    const raw = new Uint32Array(this.counterReadback.getMappedRange(0, COUNTER_BYTES).slice(0));
-    this.counterReadback.unmap();
-    const large = Math.min(raw[COUNTER_CLASS_LARGE] ?? 0, maxInstances);
-    const medium = Math.min(raw[COUNTER_CLASS_MEDIUM] ?? 0, maxInstances);
-    const small = Math.min(raw[COUNTER_CLASS_SMALL] ?? 0, maxInstances);
-    const accepted = Math.min(raw[COUNTER_ACCEPTED_TOTAL] ?? 0, maxInstances);
-    const rejectedTileBudget = raw[COUNTER_REJECT_TILE_BUDGET] ?? 0;
-    const rejectedClassBudget = raw[COUNTER_REJECT_CLASS_BUDGET] ?? 0;
-    return {
-      large,
-      medium,
-      small,
-      totalAccepted: accepted,
-      candidatesTotal: raw[COUNTER_CANDIDATES_TOTAL] ?? 0,
-      rejectedTotal:
-        (raw[COUNTER_REJECT_OUTSIDE_WORLD] ?? 0) +
-        (raw[COUNTER_REJECT_TOO_FAR] ?? 0) +
-        (raw[COUNTER_REJECT_BELOW_WATER] ?? 0) +
-        (raw[COUNTER_REJECT_TOO_STEEP] ?? 0) +
-        (raw[COUNTER_REJECT_DENSITY_MASK] ?? 0) +
-        rejectedTileBudget +
-        rejectedClassBudget,
-      rejectedOutsideWorld: raw[COUNTER_REJECT_OUTSIDE_WORLD] ?? 0,
-      rejectedTooFar: raw[COUNTER_REJECT_TOO_FAR] ?? 0,
-      rejectedBelowWater: raw[COUNTER_REJECT_BELOW_WATER] ?? 0,
-      rejectedTooSteep: raw[COUNTER_REJECT_TOO_STEEP] ?? 0,
-      rejectedDensityMask: raw[COUNTER_REJECT_DENSITY_MASK] ?? 0,
-      rejectedTileBudget,
-      rejectedClassBudget,
-    };
   }
 
-  destroy(): void {
-    this.paramBuffer.destroy();
-    this.counterBuffer.destroy();
-    this.counterReadback.destroy();
-    this.digEdits.destroy();
-    this.fieldParams.destroy();
-    this.hydroTexture.destroy();
+  private readbackCounts(
+    slot: CounterReadbackSlot,
+    maxInstances: number,
+    onTelemetry: StoneTelemetryCallback | undefined,
+  ): void {
+    const generation = this.generation;
+    void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
+      if (generation !== this.generation) {
+        slot.buffer.unmap();
+        slot.busy = false;
+        if (slot.destroyAfterMap) slot.buffer.destroy();
+        return;
+      }
+      const raw = new Uint32Array(slot.buffer.getMappedRange(0, COUNTER_BYTES).slice(0));
+      slot.buffer.unmap();
+      slot.busy = false;
+      onTelemetry?.(resolveCounts(raw, maxInstances));
+      if (slot.destroyAfterMap) {
+        slot.destroyAfterMap = false;
+        slot.buffer.destroy();
+      }
+    }).catch((error) => {
+      slot.busy = false;
+      if (slot.destroyAfterMap) {
+        slot.destroyAfterMap = false;
+        slot.buffer.destroy();
+        return;
+      }
+      console.warn("stone GPU counter readback failed", error);
+    });
   }
 
   private writeClassConfig(offset: number, cls: StoneSettings["classes"]["large"]): void {
@@ -282,8 +350,13 @@ export class StoneGpuScatterCompute {
     this.paramF32[offset + 3] = terrain.small;
   }
 
-  private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
-    const pass = encoder.beginComputePass();
+  private dispatchPipeline(
+    encoder: GPUCommandEncoder,
+    pipeline: GPUComputePipeline,
+    workgroups: number,
+    timingLabel: typeof TIMING_LABELS[number],
+  ): void {
+    const pass = encoder.beginComputePass(this.timestamps.passDescriptor(timingLabel));
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.max(1, workgroups));
@@ -302,22 +375,50 @@ export class StoneGpuScatterCompute {
   }
 }
 
-function emptyStoneGpuScatterCounts(): StoneGpuScatterCounts {
+function resolveCounts(raw: Uint32Array, maxInstances: number): StoneGpuScatterCounts {
+  const large = Math.min(raw[COUNTER_CLASS_LARGE] ?? 0, maxInstances);
+  const medium = Math.min(raw[COUNTER_CLASS_MEDIUM] ?? 0, maxInstances);
+  const small = Math.min(raw[COUNTER_CLASS_SMALL] ?? 0, maxInstances);
+  const accepted = Math.min(raw[COUNTER_ACCEPTED_TOTAL] ?? 0, maxInstances);
+  const rejectedTileBudget = raw[COUNTER_REJECT_TILE_BUDGET] ?? 0;
+  const rejectedClassBudget = raw[COUNTER_REJECT_CLASS_BUDGET] ?? 0;
   return {
-    large: 0,
-    medium: 0,
-    small: 0,
-    totalAccepted: 0,
-    candidatesTotal: 0,
-    rejectedTotal: 0,
-    rejectedOutsideWorld: 0,
-    rejectedTooFar: 0,
-    rejectedBelowWater: 0,
-    rejectedTooSteep: 0,
-    rejectedDensityMask: 0,
-    rejectedTileBudget: 0,
-    rejectedClassBudget: 0,
+    large,
+    medium,
+    small,
+    totalAccepted: accepted,
+    candidatesTotal: raw[COUNTER_CANDIDATES_TOTAL] ?? 0,
+    rejectedTotal:
+      (raw[COUNTER_REJECT_OUTSIDE_WORLD] ?? 0) +
+      (raw[COUNTER_REJECT_TOO_FAR] ?? 0) +
+      (raw[COUNTER_REJECT_BELOW_WATER] ?? 0) +
+      (raw[COUNTER_REJECT_TOO_STEEP] ?? 0) +
+      (raw[COUNTER_REJECT_DENSITY_MASK] ?? 0) +
+      rejectedTileBudget +
+      rejectedClassBudget,
+    rejectedOutsideWorld: raw[COUNTER_REJECT_OUTSIDE_WORLD] ?? 0,
+    rejectedTooFar: raw[COUNTER_REJECT_TOO_FAR] ?? 0,
+    rejectedBelowWater: raw[COUNTER_REJECT_BELOW_WATER] ?? 0,
+    rejectedTooSteep: raw[COUNTER_REJECT_TOO_STEEP] ?? 0,
+    rejectedDensityMask: raw[COUNTER_REJECT_DENSITY_MASK] ?? 0,
+    rejectedTileBudget,
+    rejectedClassBudget,
   };
+}
+
+function publishStoneTimingShape(snapshot: GpuTimestampSnapshot, skippedCounterReadbacks: number): void {
+  const counters = globalCounters();
+  if (!counters) return;
+  counters["stones.gpuTiming.worldViewFused"] = 1;
+  counters["stones.gpuTiming.hasSeparateViewPass"] = 0;
+  counters["stones.gpuTiming.counterReadbacksSkipped"] = skippedCounterReadbacks;
+  counters["stones.gpuTiming.pending"] = snapshot.pending ? 1 : 0;
+}
+
+function globalCounters(): Record<string, number> | null {
+  return (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters ?? null;
 }
 
 function clampFinite(value: number, min: number, max: number, unbounded = false): number {
