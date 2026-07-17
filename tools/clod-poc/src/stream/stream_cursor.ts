@@ -10,7 +10,7 @@ export interface StreamCursor {
   velocityMps: { x: number; z: number };
   deltaSeconds: number;
   source: StreamCursorSource;
-  discontinuity: boolean;
+  discontinuity?: boolean;
   predicted(aheadSeconds: number): { x: number; z: number };
 }
 
