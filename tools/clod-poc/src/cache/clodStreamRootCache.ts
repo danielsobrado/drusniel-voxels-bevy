@@ -28,9 +28,8 @@ const streamingTokens = new WeakMap<object, TerrainStreamingToken>();
 const activeRequestTokens = new Set<TerrainStreamingToken>();
 
 function workerRealm(): boolean {
-  return typeof window === "undefined"
-    && typeof WorkerGlobalScope !== "undefined"
-    && globalThis instanceof WorkerGlobalScope;
+  const constructorName = (globalThis as { constructor?: { name?: string } }).constructor?.name ?? "";
+  return typeof window === "undefined" && constructorName.includes("WorkerGlobalScope");
 }
 
 async function yieldWorkerStreamingState(): Promise<void> {
