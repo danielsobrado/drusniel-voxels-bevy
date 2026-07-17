@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { parseConstructionConfig } from "./config.js";
+import { defaultConstructionConfig, parseConstructionConfig } from "./config.js";
 
 describe("construction config", () => {
+  it("keeps the runtime construction catalogue available", () => {
+    expect(defaultConstructionConfig.pieces.map((piece) => piece.id)).toEqual([
+      "wood-floor-2x2",
+      "wood-wall-2x2",
+      "wood-fence-2x1",
+      "wood-pillar-2m",
+    ]);
+  });
+
   it("normalizes snap frames, proxies, and support overrides", () => {
     const config = parseConstructionConfig(`
 construction:
