@@ -35,6 +35,9 @@ function createState() {
     froxelDebugEnabled: false,
     froxelDebugMode: "off",
     godRaysMode: "off",
+    godRaysDustStrength: 0.55,
+    godRaysDustScale: 6,
+    godRaysDustSpeed: 0.05,
     treeQualityPreset: "custom",
     treeDistance: 620,
     treeMaxInstances: 9000,
@@ -251,5 +254,41 @@ describe("environment query overrides", () => {
 
     expect(state.froxelDebugEnabled).toBe(true);
     expect(state.froxelDebugMode).toBe("density");
+  });
+
+  it("applies all god-rays dust query controls", () => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({
+      godRaysDustStrength: "0.75",
+      godRaysDustScale: "12.5",
+      godRaysDustSpeed: "0.2",
+    }));
+
+    expect(state.godRaysDustStrength).toBe(0.75);
+    expect(state.godRaysDustScale).toBe(12.5);
+    expect(state.godRaysDustSpeed).toBe(0.2);
+  });
+
+  it("clamps dust controls and ignores non-finite aliases", () => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({
+      godraysdust: "2",
+      godraysdustscale: "100",
+      godraysdustspeed: "-1",
+    }));
+
+    expect(state.godRaysDustStrength).toBe(1);
+    expect(state.godRaysDustScale).toBe(24);
+    expect(state.godRaysDustSpeed).toBe(0);
+
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({
+      godRaysDustStrength: "bad",
+      godRaysDustScale: "Infinity",
+      godRaysDustSpeed: "NaN",
+    }));
+
+    expect(state.godRaysDustStrength).toBe(1);
+    expect(state.godRaysDustScale).toBe(24);
+    expect(state.godRaysDustSpeed).toBe(0);
   });
 });
