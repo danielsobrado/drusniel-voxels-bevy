@@ -1,4 +1,4 @@
-import { projectPropEditStore } from "../project/prop_edit_store.js";
+import { PropEditStore, projectPropEditStore } from "../project/prop_edit_store.js";
 import { getVoxelEditSnapshotForBounds, voxelEditCount } from "../terrain/terrain.js";
 import { SAVE_AUTOSAVE_INTERVAL_S, SAVE_MAX_REGION_WRITES_PER_FRAME } from "./save_config.js";
 import type { LoadedSavedWorld } from "./save_service.js";
@@ -10,7 +10,7 @@ import { attachSaveFarInvalidationCounters, markSaveInvalidationBounds, seedSave
 import type { SavedBounds2D } from "./world_metadata/metadata_schema.js";
 import { boundsForRegion, regionKeysForBounds } from "./world_metadata/metadata_store.js";
 import { partitionSavedPropsByRegion } from "./prop_partition.js";
-import { savedPropStore } from "./prop_store.js";
+import { SavedPropStore, savedPropStore } from "./prop_store.js";
 import { SaveDirtyRegionRevisions } from "./save_dirty_region_revisions.js";
 import { SparsePropExclusionBitsets } from "../world/prop_exclusion.js";
 import { deriveEnvironmentalPropId, type PropCandidateAddress } from "../world/prop_identity.js";
@@ -143,9 +143,16 @@ export function attachSaveRuntimeCounters(counters: Partial<SaveRuntimeCounters>
 }
 
 export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial<SaveRuntimeCounters> = {}): void {
-  state?.flushTimer && clearTimeout(state.flushTimer);
+  const restoredProps = loadedWorld.regions.flatMap((region) => region.props);
+  const validatedSavedProps = new SavedPropStore();
+  validatedSavedProps.restore(restoredProps);
+  const savedPropsSnapshot = validatedSavedProps.snapshot();
+  const activeProjectProps = validatedSavedProps.activeProjectProps();
+  const validatedProjectProps = new PropEditStore();
+  validatedProjectProps.restore(activeProjectProps);
+  const nextPropExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropsSnapshot);
   const activeCounters = attachedCounters ?? counters;
-  state = {
+  const nextState: SaveRuntimeState = {
     saveId: loadedWorld.saveId,
     manifest: { ...loadedWorld.manifest, regionKeys: [...loadedWorld.manifest.regionKeys] },
     metadata: structuredClone(loadedWorld.metadata) as WorldMetadataRecord,
@@ -159,9 +166,14 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
     lastFlushError: null,
     counters: activeCounters,
   };
-  savedPropStore.restore(loadedWorld.regions.flatMap((region) => region.props));
-  propExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropStore.snapshot());
-  projectPropEditStore.restore(savedPropStore.activeProjectProps());
+
+  if (state?.flushTimer) clearTimeout(state.flushTimer);
+  state = nextState;
+  savedPropStore.restore(savedPropsSnapshot);
+  propExclusions = nextPropExclusions;
+  projectPropEditStore.restore(activeProjectProps);
+  equivalenceGuard.editsSinceCheck = 0;
+  equivalenceGuard.mismatches = 0;
   publishCounters();
 }
 
@@ -171,6 +183,8 @@ export function clearSaveRuntime(): void {
   savedPropStore.clear();
   propExclusions = new SparsePropExclusionBitsets();
   projectPropEditStore.clear();
+  equivalenceGuard.editsSinceCheck = 0;
+  equivalenceGuard.mismatches = 0;
   publishCounters();
 }
 
