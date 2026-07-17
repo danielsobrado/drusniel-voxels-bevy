@@ -35,8 +35,24 @@ export interface SpellPipelineWarmup {
   dispose(): void;
 }
 
-function isSpellObject(object: THREE.Object3D): boolean {
+function hasSpellName(object: THREE.Object3D): boolean {
   return SPELL_NAME_PREFIXES.some((prefix) => object.name.startsWith(prefix));
+}
+
+function isRenderableSpellObject(object: THREE.Object3D): boolean {
+  if (!hasSpellName(object) || (object as THREE.Light).isLight === true) return false;
+  return (object as THREE.Mesh).isMesh === true
+    || (object as THREE.Line).isLine === true
+    || (object as THREE.Points).isPoints === true
+    || (object as THREE.Sprite).isSprite === true;
+}
+
+function collectSpellRenderables(scene: THREE.Scene): THREE.Object3D[] {
+  const renderables: THREE.Object3D[] = [];
+  scene.traverse((object) => {
+    if (isRenderableSpellObject(object)) renderables.push(object);
+  });
+  return renderables;
 }
 
 function yieldToBrowser(): Promise<void> {
@@ -48,8 +64,7 @@ export async function warmSpellPipelines(deps: SpellPipelineWarmupDeps): Promise
   const compileAsync = renderer.compileAsync;
   if (typeof compileAsync !== "function") return;
 
-  const spellObjects = deps.scene.children.filter(isSpellObject);
-  for (const object of spellObjects) {
+  for (const object of collectSpellRenderables(deps.scene)) {
     const wasVisible = object.visible;
     object.visible = true;
     let compilePromise: Promise<unknown>;
