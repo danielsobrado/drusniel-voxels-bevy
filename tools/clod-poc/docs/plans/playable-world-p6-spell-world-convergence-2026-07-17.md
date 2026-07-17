@@ -24,6 +24,7 @@ input/menu cast
   -> publish one spell terrain dirty event
   -> refresh vegetation masks
   -> flush edited ancestors
+  -> wait for geometry, collider-apply and async collider-build queues
   -> publish convergence counters and result
 ```
 
@@ -55,7 +56,8 @@ The existing warmup exposed a `ready` promise, but spell startup did not pass it
 - strength and falloff;
 - material for add operations;
 - maximum targeting range;
-- command expiry.
+- command expiry;
+- runtime convergence timeout.
 
 No gameplay constants are hidden in the VFX implementation.
 
@@ -69,6 +71,8 @@ No gameplay constants are hidden in the VFX implementation.
 - rejection or failure reason;
 - committed terrain revision.
 
+The runtime coordinator additionally waits until the CLOD geometry queue, CLOD collider queue and terrain collider rebuild pipeline are empty. A bounded timeout returns `converged: false` instead of claiming completion while stale collision is still pending.
+
 Runtime counters:
 
 - `spell_world_casts_accepted`
@@ -78,6 +82,9 @@ Runtime counters:
 - `spell_world_convergence_completed`
 - `spell_world_convergence_failed`
 - `spell_world_last_converged_revision`
+- `spell_world_runtime_convergence_completed`
+- `spell_world_runtime_convergence_failed`
+- `spell_world_runtime_last_converged_revision`
 
 ## Acceptance coverage
 
@@ -86,6 +93,8 @@ Runtime counters:
 - denied authority never starts VFX;
 - stale terrain revisions deny without replay or mutation;
 - a real earth edit reaches voxel storage, worker rebuild, near-field application, CLOD apply queue, streamed-root invalidation, dirty publication, vegetation refresh and ancestor flush;
+- runtime completion waits for geometry and collider queues;
+- queue timeout produces a failed convergence result;
 - dirty publication identifies the source as `spell` and declares collision and vegetation impact.
 
 ## Deliberate boundaries
@@ -108,7 +117,7 @@ npm --prefix tools/clod-poc test -- `
   src/spells/spell_world_convergence.test.ts `
   src/terrain/editing/spell_world_convergence_service.test.ts `
   src/spells/earth_spell_vfx.test.ts `
-  src/spells/spell_vfx_controller_earth.test.ts `
+  src/spells/spell_vfx_controller.test.ts `
   src/player/edit_commands.test.ts
 
 npm --prefix tools/clod-poc run build
