@@ -62,6 +62,16 @@ spells:
     cast_duration_ms: 1700
     audio:
       volume: 0.32
+    gameplay:
+      terrain_edit_enabled: true
+      operation: remove
+      shape: sphere
+      radius_m: 2.4
+      height_m: 2.4
+      strength: 0.72
+      falloff: 0.35
+      material: 0
+      command_expiry_ms: 1000
     vfx:
       hand_forward_m: 0.5
       hand_right_m: 0.35
