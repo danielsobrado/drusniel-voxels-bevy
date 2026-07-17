@@ -150,6 +150,19 @@ export class ConstructionPieceStore {
       this.meshes.splice(index, 1);
       removedIds.push(placed.id);
     }
+
+    if (removedIds.length > 0) {
+      const removed = new Set(removedIds);
+      for (const placed of this.pieces) {
+        if (placed.connectionIds) {
+          placed.connectionIds = placed.connectionIds.filter((connectionId) => !removed.has(connectionId));
+        }
+        if (placed.parentIds) {
+          placed.parentIds = placed.parentIds.filter((parentId) => !removed.has(parentId));
+        }
+      }
+    }
+
     return {
       removedCount: removedIds.length,
       removedIds: removedIds.sort(),

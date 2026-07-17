@@ -47,10 +47,10 @@ const bridge: ConstructionPieceDef = {
 };
 
 describe("construction connection detection", () => {
-  it("records every compatible socket contact", () => {
+  it("records every compatible, opposing socket contact", () => {
     const index = new ConstructionSnapIndex(1);
     index.addPiece(anchor, "left-support", [-1, 0, 0], 0);
-    index.addPiece(anchor, "right-support", [1, 0, 0], 0);
+    index.addPiece(anchor, "right-support", [1, 0, 0], 2);
     const connectionIds = findConstructionConnectionIds({
       snapIndex: index,
       piece: bridge,
@@ -78,5 +78,18 @@ describe("construction connection detection", () => {
       rotationQuarterTurns: 0,
       toleranceM: 0.08,
     })).toEqual(["compound-support"]);
+  });
+
+  it("rejects coincident sockets that face the same direction", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.addPiece(anchor, "wrong-way-support", [-1, 0, 0], 2);
+
+    expect(findConstructionConnectionIds({
+      snapIndex: index,
+      piece: { ...bridge, snapPoints: [bridge.snapPoints[0]!] },
+      position: [0, 0, 0],
+      rotationQuarterTurns: 0,
+      toleranceM: 0.08,
+    })).toEqual([]);
   });
 });
