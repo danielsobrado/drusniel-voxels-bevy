@@ -19,12 +19,15 @@ export const CONSTRUCTION_MATERIALS = [
 ] as const;
 
 export const CONSTRUCTION_GEOMETRY_KINDS = ["box", "wedge", "stairs", "cylinder"] as const;
+export const CONSTRUCTION_SUPPORT_CLASSES = ["wood", "stone", "ground"] as const;
 
 export type SnapGroup = typeof SNAP_GROUPS[number];
 export type ConstructionCategory = "floor" | "wall" | "fence" | "pillar" | "roof" | "generic";
 export type ConstructionMaterial = typeof CONSTRUCTION_MATERIALS[number];
 export type ConstructionSupportState = "grounded" | "connected" | "unsupported";
 export type ConstructionGeometryKind = typeof CONSTRUCTION_GEOMETRY_KINDS[number];
+export type ConstructionSupportClass = typeof CONSTRUCTION_SUPPORT_CLASSES[number];
+export type ConstructionConnectionKind = "vertical" | "horizontal";
 export type ConstructionVec3 = readonly [number, number, number];
 
 export interface ConstructionSnapPoint {
@@ -93,11 +96,30 @@ export interface ConstructionTerrainConformConfig {
   materialSlot: number;
 }
 
+export interface ConstructionSupportProfile {
+  maxSupport: number;
+  verticalDecay: number;
+  horizontalDecay: number;
+  supportClass: ConstructionSupportClass;
+}
+
+export interface ConstructionStabilityConfig {
+  enabled: boolean;
+  collapseThreshold: number;
+  epsilon: number;
+  maxIslandSize: number;
+  maxCollapsesPerFrame: number;
+  collapseDelayMs: number;
+  connectionToleranceM: number;
+  materialProfiles: Readonly<Record<ConstructionMaterial, ConstructionSupportProfile>>;
+}
+
 export interface ConstructionConfig {
   enabled: boolean;
   snap: ConstructionSnapConfig;
   placement: ConstructionPlacementConfig;
   ghost: ConstructionGhostConfig;
+  stability: ConstructionStabilityConfig;
   terrainConform: ConstructionTerrainConformConfig;
   pieces: readonly ConstructionPieceDef[];
 }
@@ -110,6 +132,9 @@ export interface PlacedConstructionPiece {
   material?: ConstructionMaterial;
   grounded?: boolean;
   parentIds?: readonly string[];
+  connectionIds?: readonly string[];
+  stability?: number;
+  collapsePending?: boolean;
   unsupported?: boolean;
 }
 
@@ -155,6 +180,16 @@ export interface ConstructionSnapResult {
   key?: string;
 }
 
+export interface ConstructionStabilityPrediction {
+  supported: boolean;
+  grounded: boolean;
+  value: number;
+  maxSupport: number;
+  ratio: number;
+  connectionIds: readonly string[];
+  reason: string | null;
+}
+
 export interface ConstructionCandidate {
   piece: ConstructionPieceDef;
   position: ConstructionVec3;
@@ -166,4 +201,8 @@ export interface ConstructionCandidate {
   terrainHit?: ConstructionSurfaceHit | null;
   supportState?: ConstructionSupportState;
   supportParentIds?: readonly string[];
+  supportConnectionIds?: readonly string[];
+  stabilityValue?: number;
+  stabilityMax?: number;
+  stabilityRatio?: number;
 }

@@ -6,7 +6,10 @@ import {
   normalizeRotationQuarterTurns,
   readStringArray,
 } from "./construction_controller_support.js";
-import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
+import {
+  validatePersistedConstructionGeometry,
+  validateStrictPersistedConstructionPlacement,
+} from "./persisted_placement.js";
 import type { ConstructionPieceDef, ConstructionPlacementConfig, PlacedConstructionPiece } from "./types.js";
 
 export interface ConstructionPersistenceLoadInput {
@@ -16,6 +19,7 @@ export interface ConstructionPersistenceLoadInput {
   worldCells: number;
   placement: ConstructionPlacementConfig;
   addPiece: (piece: PlacedConstructionPiece) => boolean;
+  deferSupportValidation?: boolean;
 }
 
 export interface ConstructionPersistenceLoadResult {
@@ -42,6 +46,11 @@ export function normalizePersistedConstructionPiece(value: unknown): PlacedConst
   if (typeof record.grounded === "boolean") normalized.grounded = record.grounded;
   const parentIds = readStringArray(record.parentIds);
   if (parentIds !== undefined) normalized.parentIds = parentIds;
+  const connectionIds = readStringArray(record.connectionIds);
+  if (connectionIds !== undefined) normalized.connectionIds = connectionIds;
+  const stability = Number(record.stability);
+  if (Number.isFinite(stability)) normalized.stability = Math.max(0, stability);
+  if (record.collapsePending === true) normalized.collapsePending = true;
   if (record.unsupported === true) normalized.unsupported = true;
   return normalized;
 }
@@ -78,7 +87,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
         continue;
       }
       seenIds.add(placed.id);
-      if (!hasExplicitSupportMetadata(placed)) {
+      if (!input.deferSupportValidation && !hasExplicitSupportMetadata(placed)) {
         if (!piece.canGround) {
           console.warn(`[construction] skipped legacy saved piece ${placed.id}: invalid support`);
           rewriteStorage = true;
@@ -104,14 +113,17 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
           rewriteStorage = true;
           continue;
         }
-        const validation = validateStrictPersistedConstructionPlacement({
+        const validationInput = {
           piece,
           placed,
           placedPieces: input.placedPieces,
           piecesById: input.piecesById,
           worldCells: input.worldCells,
           config: input.placement,
-        });
+        };
+        const validation = input.deferSupportValidation
+          ? validatePersistedConstructionGeometry(validationInput)
+          : validateStrictPersistedConstructionPlacement(validationInput);
         if (validation.valid) {
           pending.splice(index, 1);
           madeProgress = input.addPiece(placed) || madeProgress;

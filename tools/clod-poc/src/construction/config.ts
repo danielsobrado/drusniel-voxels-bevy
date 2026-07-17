@@ -3,6 +3,7 @@ import constructionYamlText from "../../config/construction.yaml?raw";
 import {
   CONSTRUCTION_GEOMETRY_KINDS,
   CONSTRUCTION_MATERIALS,
+  CONSTRUCTION_SUPPORT_CLASSES,
   SNAP_GROUPS,
   type ConstructionCategory,
   type ConstructionConfig,
@@ -11,6 +12,9 @@ import {
   type ConstructionPieceDef,
   type ConstructionPlacementBox,
   type ConstructionSnapPoint,
+  type ConstructionStabilityConfig,
+  type ConstructionSupportClass,
+  type ConstructionSupportProfile,
   type SnapGroup,
 } from "./types.js";
 
@@ -19,6 +23,28 @@ const MIN_DIMENSION_M = 0.01;
 const ZERO_LENGTH_EPSILON = 0.000001;
 const DEFAULT_SNAP_DIRECTION: readonly [number, number, number] = [0, 1, 0];
 const DEFAULT_ALLOWED_TWISTS = [0, 90, 180, 270] as const;
+
+const DEFAULT_MATERIAL_PROFILES: Readonly<Record<ConstructionMaterial, ConstructionSupportProfile>> = {
+  wood: { maxSupport: 1, verticalDecay: 0.06, horizontalDecay: 0.10, supportClass: "wood" },
+  brick: { maxSupport: 1, verticalDecay: 0.10, horizontalDecay: 0.16, supportClass: "stone" },
+  concrete: { maxSupport: 1, verticalDecay: 0.08, horizontalDecay: 0.14, supportClass: "stone" },
+  marble: { maxSupport: 1, verticalDecay: 0.12, horizontalDecay: 0.20, supportClass: "stone" },
+  tiles: { maxSupport: 1, verticalDecay: 0.16, horizontalDecay: 0.24, supportClass: "stone" },
+  stone: { maxSupport: 1, verticalDecay: 0.10, horizontalDecay: 0.18, supportClass: "stone" },
+  metal: { maxSupport: 1, verticalDecay: 0.03, horizontalDecay: 0.05, supportClass: "ground" },
+  thatch: { maxSupport: 1, verticalDecay: 1, horizontalDecay: 1, supportClass: "wood" },
+};
+
+const DEFAULT_STABILITY: ConstructionStabilityConfig = {
+  enabled: true,
+  collapseThreshold: 0.20,
+  epsilon: 0.0001,
+  maxIslandSize: 4096,
+  maxCollapsesPerFrame: 16,
+  collapseDelayMs: 300,
+  connectionToleranceM: 0.08,
+  materialProfiles: DEFAULT_MATERIAL_PROFILES,
+};
 
 const DEFAULT_CONFIG: ConstructionConfig = {
   enabled: true,
@@ -41,6 +67,7 @@ const DEFAULT_CONFIG: ConstructionConfig = {
     allowHeightfieldFallback: false,
   },
   ghost: { opacity: 0.42 },
+  stability: DEFAULT_STABILITY,
   terrainConform: {
     enabled: false,
     foundationCategories: ["floor"],
@@ -77,6 +104,16 @@ function readNumber(
   const value = Number(record?.[key]);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function readInteger(
+  record: Record<string, unknown> | undefined,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return Math.floor(readNumber(record, key, fallback, min, max));
 }
 
 function readVec3(
@@ -172,6 +209,32 @@ function asMaterial(value: string): ConstructionMaterial {
   return CONSTRUCTION_MATERIALS.includes(normalized as ConstructionMaterial) ? normalized as ConstructionMaterial : "wood";
 }
 
+function asSupportClass(value: unknown, fallback: ConstructionSupportClass): ConstructionSupportClass {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLowerCase();
+  return CONSTRUCTION_SUPPORT_CLASSES.includes(normalized as ConstructionSupportClass)
+    ? normalized as ConstructionSupportClass
+    : fallback;
+}
+
+function readSupportProfile(value: unknown, fallback: ConstructionSupportProfile): ConstructionSupportProfile {
+  const record = asRecord(value);
+  return {
+    maxSupport: readNumber(record, "max_support", fallback.maxSupport, 0.01, 10),
+    verticalDecay: readNumber(record, "vertical_decay", fallback.verticalDecay, 0, 10),
+    horizontalDecay: readNumber(record, "horizontal_decay", fallback.horizontalDecay, 0, 10),
+    supportClass: asSupportClass(record?.support_class, fallback.supportClass),
+  };
+}
+
+function readMaterialProfiles(stability: Record<string, unknown> | undefined): Readonly<Record<ConstructionMaterial, ConstructionSupportProfile>> {
+  const profiles = asRecord(stability?.material_profiles);
+  return Object.fromEntries(CONSTRUCTION_MATERIALS.map((material) => [
+    material,
+    readSupportProfile(profiles?.[material], DEFAULT_MATERIAL_PROFILES[material]),
+  ])) as Record<ConstructionMaterial, ConstructionSupportProfile>;
+}
+
 function asGeometryKind(value: string): ConstructionGeometryKind {
   const normalized = value.trim().toLowerCase();
   return CONSTRUCTION_GEOMETRY_KINDS.includes(normalized as ConstructionGeometryKind)
@@ -238,6 +301,7 @@ export function parseConstructionConfig(text: string = constructionYamlText): Co
     const snap = asRecord(root?.snap);
     const placement = asRecord(root?.placement);
     const ghost = asRecord(root?.ghost);
+    const stability = asRecord(root?.stability);
     const terrainConform = asRecord(root?.terrain_conform);
     const pieces = Array.isArray(root?.pieces)
       ? root.pieces.map(parsePiece).filter((piece): piece is ConstructionPieceDef => piece !== null)
@@ -264,6 +328,16 @@ export function parseConstructionConfig(text: string = constructionYamlText): Co
         allowHeightfieldFallback: readBool(placement, "allow_heightfield_fallback", DEFAULT_CONFIG.placement.allowHeightfieldFallback ?? false),
       },
       ghost: { opacity: readNumber(ghost, "opacity", DEFAULT_CONFIG.ghost.opacity, 0.05, 0.95) },
+      stability: {
+        enabled: readBool(stability, "enabled", DEFAULT_STABILITY.enabled),
+        collapseThreshold: readNumber(stability, "collapse_threshold", DEFAULT_STABILITY.collapseThreshold, 0, 1),
+        epsilon: readNumber(stability, "epsilon", DEFAULT_STABILITY.epsilon, 0.000001, 0.1),
+        maxIslandSize: readInteger(stability, "max_island_size", DEFAULT_STABILITY.maxIslandSize, 1, 100000),
+        maxCollapsesPerFrame: readInteger(stability, "max_collapses_per_frame", DEFAULT_STABILITY.maxCollapsesPerFrame, 1, 1000),
+        collapseDelayMs: readNumber(stability, "collapse_delay_ms", DEFAULT_STABILITY.collapseDelayMs, 0, 10000),
+        connectionToleranceM: readNumber(stability, "connection_tolerance_m", DEFAULT_STABILITY.connectionToleranceM, 0.001, 1),
+        materialProfiles: readMaterialProfiles(stability),
+      },
       terrainConform: {
         enabled: readBool(terrainConform, "enabled", DEFAULT_CONFIG.terrainConform.enabled),
         foundationCategories: readCategories(terrainConform?.foundation_categories, DEFAULT_CONFIG.terrainConform.foundationCategories),

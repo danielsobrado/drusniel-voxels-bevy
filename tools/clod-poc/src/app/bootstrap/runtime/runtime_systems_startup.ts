@@ -102,9 +102,11 @@ function withConstructionGuardDispose(
   disposeGuard: () => void,
 ): ConstructionController {
   return {
+    colliderSet: controller.colliderSet,
     update: () => controller.update(),
     stats: () => controller.stats(),
     setTerrainConformHandler: (handler) => controller.setTerrainConformHandler(handler),
+    reevaluateSupportForTerrainEdit: (aabb) => controller.reevaluateSupportForTerrainEdit(aabb),
     dispose: () => {
       disposeGuard();
       controller.dispose();

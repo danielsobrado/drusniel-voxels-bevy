@@ -10,6 +10,7 @@ import type {
   ConstructionPieceDef,
   ConstructionPlacementConfig,
   ConstructionSnapResult,
+  ConstructionStabilityPrediction,
   ConstructionSurfaceHit,
   PlacedConstructionPiece,
 } from "./types.js";
@@ -28,6 +29,7 @@ export interface PlacementValidationInput {
   piecesById: ReadonlyMap<string, ConstructionPieceDef>;
   worldCells: number;
   config: ConstructionPlacementConfig;
+  stabilityPrediction?: ConstructionStabilityPrediction;
 }
 
 function validateBoundsAndOverlap(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
@@ -58,6 +60,14 @@ function validateBoundsAndOverlap(input: PlacementValidationInput): { valid: boo
 }
 
 function resolveSupport(input: PlacementValidationInput) {
+  if (input.stabilityPrediction) {
+    return {
+      supported: input.stabilityPrediction.supported,
+      grounded: input.stabilityPrediction.grounded,
+      parentIds: input.stabilityPrediction.connectionIds,
+      reason: input.stabilityPrediction.reason,
+    };
+  }
   return resolveConstructionPlacementSupport({
     snapped: input.snapped,
     snap: input.snap,
@@ -94,6 +104,7 @@ export function validateConstructionPlacement(input: PlacementValidationInput): 
 export function createConstructionCandidate(input: PlacementValidationInput): ConstructionCandidate {
   const validation = validateConstructionPlacement(input);
   const support = resolveSupport(input);
+  const prediction = input.stabilityPrediction;
   return {
     piece: input.piece,
     position: input.position,
@@ -105,6 +116,10 @@ export function createConstructionCandidate(input: PlacementValidationInput): Co
     terrainHit: input.terrainHit,
     supportState: support.grounded ? "grounded" : support.supported ? "connected" : "unsupported",
     supportParentIds: support.parentIds,
+    supportConnectionIds: prediction?.connectionIds ?? support.parentIds,
+    stabilityValue: prediction?.value,
+    stabilityMax: prediction?.maxSupport,
+    stabilityRatio: prediction?.ratio,
   };
 }
 
