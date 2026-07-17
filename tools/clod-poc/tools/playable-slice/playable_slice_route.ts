@@ -108,7 +108,9 @@ async function runRoute(
   await driver.pointerMoveToCenter();
   const buildReady = await driver.waitUntil(
     "construction preview",
-    (snapshot) => snapshot.construction.active && !snapshot.construction.transactionInFlight,
+    (snapshot) => snapshot.construction.active
+      && snapshot.construction.currentValid
+      && !snapshot.construction.transactionInFlight,
     STEP_TIMEOUT_MS,
   );
   await driver.pointerClick("left");
