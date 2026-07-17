@@ -45,7 +45,7 @@ function bool(value: unknown, fallback: boolean): boolean {
 }
 
 function operation(value: unknown, fallback: BrushOp): BrushOp {
-  return value === "add" || value === "remove" || value === "paint" ? value : fallback;
+  return value === "add" || value === "remove" ? value : fallback;
 }
 
 function shape(value: unknown, fallback: BrushShape): BrushShape {
