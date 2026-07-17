@@ -2,15 +2,15 @@
 //!
 //! The live mesher remains the geometry authority. Source meshes are exported directly from
 //! `MeshData` and are never committed as render or collider entities. Expensive page assembly,
-//! welding, simplification, and quadtree construction remain asynchronous.
+//! welding, simplification, and quadtree construction remain asynchronous. Source generation
+//! includes the near-field area because exclusion is a render-ownership rule; complete page
+//! columns that straddle the bubble still need every chunk export.
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::export::TerrainMainSurfaceExport;
-use super::runtime::{
-    ClodPagesRuntime, PageExportCache, horizontal_chunk_distance,
-};
+use super::runtime::{ClodPagesRuntime, PageExportCache, horizontal_chunk_distance};
 use crate::gameplay::camera::controller::PlayerCamera;
 use crate::rendering::AmbientOcclusionConfig;
 use crate::voxel::chunk::LodLevel;
@@ -47,16 +47,14 @@ impl PageSourceMeshingQueue {
         world: &VoxelWorld,
         cache: &PageExportCache,
         cam_chunk: IVec3,
-        near: i32,
         far: i32,
     ) {
         self.center = Some(cam_chunk);
         self.world_chunk_count = world.chunk_count();
-        self.pending = source_positions_in_band(
+        self.pending = source_positions_within_radius(
             world.chunk_positions(),
             &cache.exports,
             cam_chunk,
-            near,
             far,
         )
         .into();
@@ -124,17 +122,16 @@ fn should_refresh_queue(
     false
 }
 
-fn source_positions_in_band(
+fn source_positions_within_radius(
     positions: impl Iterator<Item = IVec3>,
     exports: &HashMap<IVec3, TerrainMainSurfaceExport>,
     cam_chunk: IVec3,
-    near: i32,
     far: i32,
 ) -> Vec<IVec3> {
     let mut candidates = positions
         .filter(|position| {
-            let distance = horizontal_chunk_distance(*position, cam_chunk);
-            distance > near && distance <= far && !exports.contains_key(position)
+            horizontal_chunk_distance(*position, cam_chunk) <= far
+                && !exports.contains_key(position)
         })
         .collect::<Vec<_>>();
     candidates.sort_by_key(|position| {
@@ -160,7 +157,7 @@ fn all_lod0_neighbors() -> NeighborLods {
     }
 }
 
-/// Builds missing far-field LOD0 exports under a strict main-thread budget.
+/// Builds missing LOD0 exports inside the page-source radius under a strict main-thread budget.
 pub(crate) fn clod_pages_source_meshing_system(
     gen_state: Res<ChunkGenerationState>,
     world: Res<VoxelWorld>,
@@ -200,7 +197,6 @@ pub(crate) fn clod_pages_source_meshing_system(
 
     let cam_chunk = VoxelWorld::world_to_chunk(camera.translation.as_ivec3());
     let world_chunk_count = world.chunk_count();
-    let near = runtime.cfg.near_field.radius_chunks;
     let far = runtime.source_radius_chunks;
     let retained = cache.retain_in_radius(cam_chunk, far);
     let invalidated = cache.invalidate_dirty_exports(&world);
@@ -213,7 +209,7 @@ pub(crate) fn clod_pages_source_meshing_system(
         invalidated || retained,
         &mut schedule,
     ) {
-        queue.refresh(&world, &cache, cam_chunk, near, far);
+        queue.refresh(&world, &cache, cam_chunk, far);
     }
 
     let mut cache_inserted = false;
@@ -298,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn source_queue_contains_only_missing_far_band_chunks() {
+    fn source_queue_includes_near_chunks_and_skips_cached_or_out_of_radius_chunks() {
         let cam = IVec3::ZERO;
         let cached = IVec3::new(3, 0, 0);
         let exports = [(cached, export(cached))].into_iter().collect();
@@ -310,9 +306,16 @@ mod tests {
             IVec3::new(5, 0, 0),
         ];
 
-        let queued = source_positions_in_band(positions.into_iter(), &exports, cam, 1, 4);
+        let queued = source_positions_within_radius(positions.into_iter(), &exports, cam, 4);
 
-        assert_eq!(queued, vec![IVec3::new(2, 0, 0), IVec3::new(4, 0, 0)]);
+        assert_eq!(
+            queued,
+            vec![
+                IVec3::new(1, 0, 0),
+                IVec3::new(2, 0, 0),
+                IVec3::new(4, 0, 0),
+            ]
+        );
     }
 
     #[test]
@@ -324,11 +327,10 @@ mod tests {
             IVec3::new(3, 0, 0),
         ];
 
-        let queued = source_positions_in_band(
+        let queued = source_positions_within_radius(
             positions.into_iter(),
             &HashMap::new(),
             IVec3::ZERO,
-            0,
             8,
         );
 
