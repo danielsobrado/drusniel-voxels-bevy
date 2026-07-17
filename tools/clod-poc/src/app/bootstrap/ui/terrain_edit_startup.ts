@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
+import { setActiveConstructionTerrainConformHandler } from "../../../construction/construction_terrain_registry.js";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
 import { flushSaveRuntimeOnce, markSaveRegionsDirtyForBounds } from "../../../save/save_runtime.js";
 import { getDigEditRevision, voxelEditCount } from "../../../terrain/terrain.js";
@@ -22,7 +23,6 @@ export interface TerrainEditStartupResult {
   scheduleDig: (ray: THREE.Ray) => void;
   scheduleConstructionTerrainConform: (request: ConstructionTerrainConformRequest) => void;
   playerTerraformEditActive: () => boolean;
-  /** Observes every terrain-edit dirty event (construction support re-evaluation). */
   setTerrainEditDirtyListener: (listener: ((event: TerrainEditDirtyEvent) => void) | null) => void;
 }
 
@@ -46,25 +46,9 @@ export function runTerrainEditStartup(
   infoPanel: InfoPanelController,
 ): TerrainEditStartupResult {
   const { input, session } = ctx;
-  const {
-    clodWorker,
-    terrainRaycast,
-    state,
-    bindings,
-    markEditedAncestorsStale,
-  } = input;
-  const {
-    clodApplyQueue,
-    selectionController,
-    updateSelection,
-    applyTerrainTextures,
-  } = input.terrainView;
-  const {
-    grassSystem,
-    treeSystem,
-    understorySystem,
-    fallingTrees,
-  } = input.runtime;
+  const { clodWorker, terrainRaycast, state, bindings, markEditedAncestorsStale } = input;
+  const { clodApplyQueue, selectionController, updateSelection, applyTerrainTextures } = input.terrainView;
+  const { grassSystem, treeSystem, understorySystem, fallingTrees } = input.runtime;
   const { updateInfo } = infoPanel;
   const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, input.searchParams);
   const readinessFeeds = createAppCellReadinessFeeds({ terrainColliders: input.terrainColliders });
@@ -117,11 +101,7 @@ export function runTerrainEditStartup(
     }),
     enqueueApplyNodes: (nodes) => clodApplyQueue.enqueueNodes(nodes),
     applyNearFieldChunks: (patches) => {
-      for (const patch of patches) {
-        // Worker patches are CPU-meshed while the live page may be GPU-meshed.
-        // Rebuild the page with one backend until backend-consistent chunk patching is available.
-        input.terrainView.nearFieldBubbleController.invalidatePage(patch.nodeId);
-      }
+      for (const patch of patches) input.terrainView.nearFieldBubbleController.invalidatePage(patch.nodeId);
     },
     invalidateStreamedRoots: (bounds) => session.streamingClodRootController?.invalidateBounds(bounds),
     recordClodWorkerRebuild: (ms) => clodApplyQueue.recordWorkerRebuild(ms),
@@ -147,11 +127,17 @@ export function runTerrainEditStartup(
     setPendingParentMs: (ms) => { session.pendingParentMs = ms; },
   });
 
+  setActiveConstructionTerrainConformHandler({
+    preview: (request) => terrainEditService.previewConstructionTerrainConform(request),
+    commit: (request) => terrainEditService.commitConstructionTerrainConform(request),
+    undo: (receipt) => terrainEditService.undoConstructionTerrainConform(receipt),
+    forget: (receipt) => terrainEditService.forgetConstructionTerrainConform(receipt),
+  });
+
   if (input.longView.hooks) {
     input.longView.hooks.getStreamingRootReadyPageKeys = () =>
       session.streamingClodRootController?.readyPageKeys() ?? [];
     input.longView.hooks.getStreamingResidencySnapshot = () => {
-      // The global may hold the NAADF integration instead, which has no tile cache.
       const farSummary = (window as typeof window & {
         __drusnielFarSummary?: Partial<FarSummaryIntegration>;
       }).__drusnielFarSummary;
@@ -159,9 +145,7 @@ export function runTerrainEditStartup(
         clodCachedKeys: session.streamingClodRootController?.cachedPageKeys() ?? [],
         farSummaryResidentKeys: farSummary?.cache?.residentTileKeys() ?? [],
         heightfieldResidentKeys: heightfieldTileResidentKeys(),
-        // Plan 2 owns stable vegetation cluster identities; null keeps revisit gates fail-closed.
         vegetationClusterKeys: null,
-        // The current hydrology window publishes counts but no stable resident-key contract.
         waterHydrologyKeys: null,
       };
     };
