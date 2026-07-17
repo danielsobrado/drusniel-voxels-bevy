@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { StreamCursorTracker, canonicalStreamCenter } from "./stream_cursor.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  StreamCursorTracker,
+  canonicalStreamCenter,
+  markStreamCursorDiscontinuity,
+  resetStreamCursorMovementEpochForTests,
+} from "./stream_cursor.js";
 
 const baseInput = {
   frameId: 1,
@@ -10,6 +15,8 @@ const baseInput = {
   orbitTarget: { x: 50, z: 60 },
   cameraRelativeWorld: false,
 };
+
+beforeEach(() => resetStreamCursorMovementEpochForTests());
 
 describe("canonicalStreamCenter", () => {
   it("keeps canonical center semantics for every interaction mode", () => {
@@ -72,6 +79,44 @@ describe("StreamCursorTracker", () => {
     expect(cursor.discontinuity).toBe(true);
     expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
     expect(cursor.predicted(4)).toEqual(cursor.center);
+  });
+
+  it("resets velocity when an explicit movement epoch changes", () => {
+    const tracker = new StreamCursorTracker();
+    tracker.update({ ...baseInput, frameId: 0, movementEpoch: 7, orbitTarget: { x: 0, z: 0 } });
+    tracker.update({ ...baseInput, frameId: 1, movementEpoch: 7, orbitTarget: { x: 1, z: 0 } });
+
+    const cursor = tracker.update({
+      ...baseInput,
+      frameId: 2,
+      movementEpoch: 8,
+      orbitTarget: { x: 2, z: 0 },
+    });
+
+    expect(cursor.discontinuity).toBe(true);
+    expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
+    expect(cursor.predicted(4)).toEqual(cursor.center);
+  });
+
+  it("observes the global discontinuity signal", () => {
+    const tracker = new StreamCursorTracker();
+    tracker.update({ ...baseInput, frameId: 0, orbitTarget: { x: 0, z: 0 } });
+    tracker.update({ ...baseInput, frameId: 1, orbitTarget: { x: 1, z: 0 } });
+    markStreamCursorDiscontinuity();
+
+    const cursor = tracker.update({ ...baseInput, frameId: 2, orbitTarget: { x: 2, z: 0 } });
+
+    expect(cursor.discontinuity).toBe(true);
+    expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
+  });
+
+  it("treats a medium one-frame relocation as a discontinuity", () => {
+    const tracker = new StreamCursorTracker();
+    tracker.update({ ...baseInput, frameId: 0, orbitTarget: { x: 0, z: 0 } });
+    const cursor = tracker.update({ ...baseInput, frameId: 1, orbitTarget: { x: 50, z: 0 } });
+
+    expect(cursor.discontinuity).toBe(true);
+    expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
   });
 
   it("treats a floating-origin-sized coordinate jump as a discontinuity", () => {
