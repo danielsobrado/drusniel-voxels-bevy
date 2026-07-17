@@ -26,6 +26,7 @@ const LEGACY_DATABASE_NAMES = [
 export interface PersistentCacheStore {
   get(key: string): Promise<ClodCacheStoredRecord | null>;
   put(key: string, record: ClodCacheStoredRecord): Promise<void>;
+  deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean>;
   delete(key: string): Promise<void>;
   clear(): Promise<void>;
   keys(): Promise<string[]>;
@@ -95,6 +96,13 @@ export class InMemoryPersistentStore implements PersistentCacheStore {
 
   async put(key: string, record: ClodCacheStoredRecord): Promise<void> {
     this.records.set(key, record);
+  }
+
+  async deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean> {
+    const current = this.records.get(key);
+    if (!current || !cacheRecordVersionMatches(current, record)) return false;
+    this.records.delete(key);
+    return true;
   }
 
   async delete(key: string): Promise<void> {
@@ -180,8 +188,8 @@ export class IndexedDbStore implements PersistentCacheStore {
         if (!isRetryableIdbError(error) || this.recoveryAttempts >= MAX_IDB_RECOVERY_ATTEMPTS) throw error;
         this.recoveryAttempts++;
         cacheLogger.warn(
-          `IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName} ` +
-          `(attempt ${this.recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
+          `IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName} `
+          + `(attempt ${this.recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
         );
         await this.recreateDatabase();
       }
@@ -233,15 +241,54 @@ export class IndexedDbStore implements PersistentCacheStore {
     }
   }
 
-  private async withArtifacts<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  private async withArtifacts<T>(
+    mode: IDBTransactionMode,
+    fn: (store: IDBObjectStore) => IDBRequest<T>,
+  ): Promise<T> {
     const db = await this.openDb();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(this.objectStoreName, mode);
       const store = tx.objectStore(this.objectStoreName);
-      const request = fn(store);
-      request.onsuccess = () => resolve(request.result as T);
-      request.onerror = () => reject(request.error ?? new CacheUnavailableError("artifact store request failed"));
-      tx.onerror = () => reject(tx.error ?? request.error ?? new CacheUnavailableError("artifact transaction failed"));
+      let request: IDBRequest<T>;
+      try {
+        request = fn(store);
+      } catch (error) {
+        try {
+          tx.abort();
+        } catch {
+          // Transaction may already be inactive.
+        }
+        reject(error);
+        return;
+      }
+
+      let requestSucceeded = false;
+      let result!: T;
+      let requestError: DOMException | null = null;
+      request.onsuccess = () => {
+        requestSucceeded = true;
+        result = request.result as T;
+      };
+      request.onerror = () => {
+        requestError = request.error;
+      };
+      tx.oncomplete = () => {
+        if (requestError) {
+          reject(requestError);
+          return;
+        }
+        if (!requestSucceeded) {
+          reject(new CacheUnavailableError("artifact transaction completed without a request result"));
+          return;
+        }
+        resolve(result);
+      };
+      tx.onerror = () => reject(
+        tx.error ?? requestError ?? new CacheUnavailableError("artifact transaction failed"),
+      );
+      tx.onabort = () => reject(
+        tx.error ?? requestError ?? new CacheUnavailableError("artifact transaction aborted"),
+      );
     });
   }
 
@@ -250,14 +297,8 @@ export class IndexedDbStore implements PersistentCacheStore {
   }
 
   private async keysInternal(): Promise<string[]> {
-    const db = await this.openDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(this.objectStoreName, "readonly");
-      const request = tx.objectStore(this.objectStoreName).getAllKeys();
-      request.onsuccess = () => resolve((request.result as IDBValidKey[]).map(String));
-      request.onerror = () => reject(request.error ?? new CacheUnavailableError("keys failed"));
-      tx.onerror = () => reject(tx.error ?? new CacheUnavailableError("keys transaction failed"));
-    });
+    const keys = await this.withArtifacts("readonly", (store) => store.getAllKeys());
+    return (keys as IDBValidKey[]).map(String);
   }
 
   private async deleteIfMatchesInternal(
