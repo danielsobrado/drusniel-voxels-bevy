@@ -67,8 +67,8 @@ construction:
   ghost:
     opacity: 0.42
   terrain_conform:
-    enabled: false
-    foundation_categories: [floor, foundation]
+    enabled: true
+    foundation_categories: [foundation]
     pad_margin_m: 0.35
     fill_depth_m: 2.5
     trim_height_m: 1.2

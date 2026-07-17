@@ -1,7 +1,11 @@
 import { BUILD_POINTER_OPTIONS, MENU_ID } from "./construction_controller_support.js";
 import { renderConstructionMenuHtml } from "./construction_menu_render.js";
 import { CONSTRUCTION_MATERIAL_OPTIONS } from "./materials.js";
-import type { ConstructionMaterial, ConstructionPieceDef } from "./types.js";
+import type {
+  ConstructionMaterial,
+  ConstructionPieceDef,
+  ConstructionTerrainConformPreview,
+} from "./types.js";
 
 export interface ConstructionControllerUiCallbacks {
   isActive: () => boolean;
@@ -16,6 +20,7 @@ export interface ConstructionControllerUiCallbacks {
   onPlace: () => void;
   onDelete: () => void;
   onPickPiece: () => void;
+  onUndo: () => void;
   onPointerUpdate: (event: PointerEvent) => boolean;
   onPointerLeave: () => void;
   onInputUnavailable: () => void;
@@ -36,6 +41,9 @@ export interface ConstructionControllerUiState {
   currentStability: number | null;
   currentMaxSupport: number | null;
   currentGrounded: boolean;
+  currentTerrainPreview: ConstructionTerrainConformPreview | null;
+  placementInFlight: boolean;
+  undoDepth: number;
   pendingCollapses: number;
   materialOptions: typeof CONSTRUCTION_MATERIAL_OPTIONS;
   selectedMaterial: ConstructionMaterial;
@@ -61,7 +69,7 @@ export function createConstructionControllerUi(
     transform: "translateX(-50%)",
     zIndex: "13",
     display: "none",
-    width: "min(560px, calc(100vw - 16px))",
+    width: "min(600px, calc(100vw - 16px))",
     padding: "10px",
     boxSizing: "border-box",
     color: "#eef3f8",
@@ -154,6 +162,11 @@ export function createConstructionControllerUi(
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (isTextInputEvent(event)) return;
+    if ((event.ctrlKey || event.metaKey) && event.code === "KeyZ" && callbacks.isActive()) {
+      event.preventDefault();
+      callbacks.onUndo();
+      return;
+    }
     if (event.code === "ShiftLeft" || event.code === "ShiftRight") {
       if (callbacks.isActive()) setShiftSuppressed(true);
       return;
@@ -220,6 +233,9 @@ export function createConstructionControllerUi(
         currentStability: state.currentStability,
         currentMaxSupport: state.currentMaxSupport,
         currentGrounded: state.currentGrounded,
+        currentTerrainPreview: state.currentTerrainPreview,
+        placementInFlight: state.placementInFlight,
+        undoDepth: state.undoDepth,
         pendingCollapses: state.pendingCollapses,
         placedPieces: state.placedPieces,
         indexedSnapPoints: state.indexedSnapPoints,
@@ -241,6 +257,9 @@ export function createConstructionControllerUi(
         currentStability: state.currentStability,
         currentMaxSupport: state.currentMaxSupport,
         currentGrounded: state.currentGrounded,
+        currentTerrainPreview: state.currentTerrainPreview,
+        placementInFlight: state.placementInFlight,
+        undoDepth: state.undoDepth,
         pendingCollapses: state.pendingCollapses,
         materialOptions: state.materialOptions,
         selectedMaterial: state.selectedMaterial,

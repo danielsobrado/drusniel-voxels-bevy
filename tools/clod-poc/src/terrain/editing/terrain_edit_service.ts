@@ -1,14 +1,28 @@
 import * as THREE from "three";
 import { emitAudio } from "../../audio/index.js";
 import type { ClodWorkerClient } from "../../clod_worker_client.js";
-import type { ConstructionTerrainConformRequest } from "../../construction/types.js";
+import {
+  analyzeConstructionTerrainSamples,
+  constructionTerrainSamplePositions,
+  invalidConstructionTerrainPreview,
+} from "../../construction/construction_terrain_conform.js";
+import type {
+  ConstructionTerrainConformCommitResult,
+  ConstructionTerrainConformPreview,
+  ConstructionTerrainConformReceipt,
+  ConstructionTerrainConformRequest,
+  ConstructionTerrainConformUndoResult,
+} from "../../construction/types.js";
 import {
   applyDigEditTransaction,
+  canUndoVoxelTransaction,
   DIG_INFLUENCE_MARGIN,
   getDigEditRevision,
   hasPaintedTerrainEdits,
   rollbackDigEditTransaction,
+  voxelInverseTransaction,
   voxelTransactionFromDigEdit,
+  voxelTransactionFromTerrainConform,
   type BrushOp,
   type BrushShape,
   type DigEdit,
@@ -32,10 +46,10 @@ import { gameplayDiagnostics } from "../../player/gameplay_diagnostics.js";
 import { DEFAULT_EDIT_COMMAND_EXPIRY_MS } from "../../player/edit_commands.js";
 
 const DIG_REBUILD_DEBOUNCE_MS = 40;
-const CONSTRUCTION_CONFORM_DEBOUNCE_MS = 20;
 const VEGETATION_REBUILD_DEBOUNCE_MS = 160;
 const VEGETATION_REBUILD_RETRY_MS = 1000;
 const MAX_PENDING_DIG_SAMPLES = 32;
+const TERRAIN_PREVIEW_RAY_MARGIN_M = 8;
 
 export interface TerrainBrushParams {
   digRadius: number;
@@ -72,8 +86,8 @@ export interface TerrainEditServiceDeps {
   editAuthority?: PlayerEditAuthorityConfig;
   getAuthorityOrigin?: () => THREE.Vector3 | null;
   getAuthorityCounters?: () => Record<string, number> | null;
-  /** Cell readiness for edits (voxel authority resident, collider current); denies with feedback when false. */
   editReadyAt?: (x: number, z: number) => boolean;
+  protectedAt?: (x: number, z: number) => boolean;
   dirtyQueue?: TerrainEditDirtyQueue;
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
@@ -89,19 +103,20 @@ export interface TerrainEditService {
   scheduleDig(ray: THREE.Ray): void;
   runDigNow(ray: THREE.Ray): Promise<void>;
   scheduleConstructionTerrainConform(request: ConstructionTerrainConformRequest): void;
+  previewConstructionTerrainConform(request: ConstructionTerrainConformRequest): ConstructionTerrainConformPreview;
+  commitConstructionTerrainConform(request: ConstructionTerrainConformRequest): Promise<ConstructionTerrainConformCommitResult>;
+  undoConstructionTerrainConform(receipt: ConstructionTerrainConformReceipt): Promise<ConstructionTerrainConformUndoResult>;
+  forgetConstructionTerrainConform(receipt: ConstructionTerrainConformReceipt): void;
   flushAncestors(): Promise<void>;
   readonly lastDigAt: number;
 }
 
-interface TerrainRebuildHit {
-  point: THREE.Vector3;
-}
-
+interface TerrainRebuildHit { point: THREE.Vector3 }
 type EditCommitStatus = "committed" | "committed_render_stale" | "rejected";
+interface TerrainReceiptEntry { transaction: VoxelEditTransaction }
 
 export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainEditService {
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let conformDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let vegetationFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastDigAt = -Infinity;
   let digInFlight = false;
@@ -111,64 +126,39 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
   const pendingUnderstoryNodeIds = new Set<string>();
+  const terrainReceipts = new Map<string, TerrainReceiptEntry>();
 
   const authorityOrigin = (): THREE.Vector3 | null => deps.getAuthorityOrigin?.() ?? null;
   const authorityCounters = (): Record<string, number> | null => deps.getAuthorityCounters?.() ?? null;
 
-  const clearIds = (pending: Set<string>, ids: readonly string[]): void => {
-    for (const id of ids) pending.delete(id);
-  };
-
-  const hasEnabledPendingVegetation = (veg: TerrainEditVegetationState): boolean => (
-    (veg.grassEnabled && pendingGrassNodeIds.size > 0) ||
-    (veg.treesEnabled && pendingTreeNodeIds.size > 0) ||
-    (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0)
-  );
-
   const flushVegetationRebuilds = () => {
     vegetationFlushTimer = null;
     const veg = deps.getVegetationState();
-
-    if (veg.grassEnabled && pendingGrassNodeIds.size > 0) {
-      const ids = [...pendingGrassNodeIds];
+    const rebuild = (
+      enabled: boolean,
+      pending: Set<string>,
+      system: { rebuildNodePatches(ids: string[]): void; markPatchesDirty?(): void } | null,
+      refresh: () => void,
+      label: string,
+    ) => {
+      if (!enabled || pending.size === 0) return;
+      const ids = [...pending];
       try {
-        const grass = deps.grassSystem;
-        if (grass?.markPatchesDirty) grass.markPatchesDirty();
-        else grass?.rebuildNodePatches(ids);
-        deps.refreshGrassStats();
-        clearIds(pendingGrassNodeIds, ids);
+        if (system?.markPatchesDirty) system.markPatchesDirty();
+        else system?.rebuildNodePatches(ids);
+        refresh();
+        for (const id of ids) pending.delete(id);
       } catch (error) {
-        console.error("grass rebuild after terrain edit failed:", error);
+        console.error(`${label} rebuild after terrain edit failed:`, error);
       }
-    }
-    if (veg.treesEnabled && pendingTreeNodeIds.size > 0) {
-      const ids = [...pendingTreeNodeIds];
-      try {
-        const trees = deps.treeSystem;
-        if (trees?.markPatchesDirty) trees.markPatchesDirty();
-        else trees?.rebuildNodePatches(ids);
-        deps.refreshTreeStats();
-        clearIds(pendingTreeNodeIds, ids);
-      } catch (error) {
-        console.error("tree rebuild after terrain edit failed:", error);
-      }
-    }
-    if (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0) {
-      const ids = [...pendingUnderstoryNodeIds];
-      try {
-        const understory = deps.understorySystem;
-        if (understory?.markPatchesDirty) understory.markPatchesDirty();
-        else understory?.rebuildNodePatches(ids);
-        deps.refreshUnderstoryStats();
-        clearIds(pendingUnderstoryNodeIds, ids);
-      } catch (error) {
-        console.error("understory rebuild after terrain edit failed:", error);
-      }
-    }
-
-    if (vegetationFlushTimer === null && hasEnabledPendingVegetation(deps.getVegetationState())) {
-      vegetationFlushTimer = setTimeout(flushVegetationRebuilds, VEGETATION_REBUILD_RETRY_MS);
-    }
+    };
+    rebuild(veg.grassEnabled, pendingGrassNodeIds, deps.grassSystem, deps.refreshGrassStats, "grass");
+    rebuild(veg.treesEnabled, pendingTreeNodeIds, deps.treeSystem, deps.refreshTreeStats, "tree");
+    rebuild(veg.understoryEnabled, pendingUnderstoryNodeIds, deps.understorySystem, deps.refreshUnderstoryStats, "understory");
+    const stillPending = (veg.grassEnabled && pendingGrassNodeIds.size > 0)
+      || (veg.treesEnabled && pendingTreeNodeIds.size > 0)
+      || (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0);
+    if (stillPending) vegetationFlushTimer = setTimeout(flushVegetationRebuilds, VEGETATION_REBUILD_RETRY_MS);
   };
 
   const queueVegetationRebuild = (changed: readonly ClodPageNode[]) => {
@@ -180,11 +170,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }
     if (vegetationFlushTimer !== null) clearTimeout(vegetationFlushTimer);
     vegetationFlushTimer = setTimeout(flushVegetationRebuilds, VEGETATION_REBUILD_DEBOUNCE_MS);
-  };
-
-  const flushAncestors = async () => {
-    await editOperationTail;
-    await deps.clodWorker.flushParents();
   };
 
   const applyLod0Result = (
@@ -211,20 +196,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     console.error(`${label} rebuild failed:`, error);
   };
 
-  const reportApplyFailure = (label: string, error: unknown): void => {
-    emitAudio("clod.rebuild.error");
-    const message = error instanceof Error ? error.message : String(error);
-    deps.setLastDigSummary(`apply failed: ${message}`);
-    deps.updateInfo();
-    console.error(`${label} apply failed after worker rebuild:`, error);
-  };
-
   const runDerivedUpdate = (label: string, update: () => void): void => {
-    try {
-      update();
-    } catch (error) {
-      console.error(`[terrain-edit] ${label} failed after authoritative commit`, error);
-    }
+    try { update(); }
+    catch (error) { console.error(`[terrain-edit] ${label} failed after authoritative commit`, error); }
   };
 
   const dirtyReasonFor = (edit: DigEdit, label: string): TerrainEditDirtyReason => {
@@ -251,28 +225,19 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }
   };
 
-  const reportNoOp = (summary: string): void => {
-    lastDigAt = performance.now();
-    deps.setLastDigSummary(summary);
-    deps.updateInfo();
-  };
-
   const syncPaintedTerrainState = (previous: boolean): void => {
-    if (hasPaintedTerrainEdits() !== previous) {
-      runDerivedUpdate("terrain texture state sync", deps.applyTerrainTextures);
-    }
+    if (hasPaintedTerrainEdits() !== previous) runDerivedUpdate("terrain texture state sync", deps.applyTerrainTextures);
   };
 
-  const enqueueEditOperation = (label: string, operation: () => Promise<void>): Promise<void> => {
-    const queued = editOperationTail.then(operation);
-    const safe = queued.catch((error) => {
+  const enqueueEditOperation = async <T>(label: string, operation: () => Promise<T>): Promise<T> => {
+    const queued = editOperationTail.then(operation, operation);
+    editOperationTail = queued.then(() => undefined, (error) => {
       const message = error instanceof Error ? error.message : String(error);
       deps.setLastDigSummary(`${label} failed: ${message}`);
       deps.updateInfo();
       console.error(`[terrain-edit] ${label} failed`, error);
     });
-    editOperationTail = safe;
-    return safe;
+    return queued;
   };
 
   const performEditRebuild = async (
@@ -285,8 +250,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     const t0 = performance.now();
     lastDigAt = t0;
     const margin = radius + DIG_INFLUENCE_MARGIN;
-    const workerStartedAt = performance.now();
     let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
+    const workerStartedAt = performance.now();
     try {
       lod0 = await deps.clodWorker.rebuildAfterDig(transaction, {
         minX: hit.point.x - margin,
@@ -298,10 +263,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       reportRebuildFailure(label, error);
       return "rejected";
     }
-
-    const workerMs = performance.now() - workerStartedAt;
     runDerivedUpdate("worker rebuild metrics", () => {
-      deps.recordClodWorkerRebuild(workerMs);
+      deps.recordClodWorkerRebuild(performance.now() - workerStartedAt);
       const counters = authorityCounters();
       if (!counters) return;
       counters["terrain_edit_partial_chunk_count"] = lod0.chunksRemeshed;
@@ -311,38 +274,24 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     });
     runDerivedUpdate("streamed-root invalidation", () => deps.invalidateStreamedRoots?.(transaction.dirtyBounds));
     runDerivedUpdate("dirty edit publication", () => publishDirtyEdit(edit, label));
-
     try {
       applyLod0Result(lod0.changed, lod0.pendingParents, lod0.chunkPatches);
       deps.setPendingParentNodes(0);
       deps.setPendingParentMs(0);
     } catch (error) {
-      reportApplyFailure(label, error);
+      console.error(`${label} apply failed after worker rebuild:`, error);
       setTimeout(() => {
-        try {
-          applyLod0Result(lod0.changed, lod0.pendingParents, lod0.chunkPatches);
-        } catch (retryError) {
-          reportApplyFailure(`${label} retry`, retryError);
-        }
+        try { applyLod0Result(lod0.changed, lod0.pendingParents, lod0.chunkPatches); }
+        catch (retryError) { console.error(`${label} retry apply failed:`, retryError); }
       }, 0);
       return "committed_render_stale";
     }
-
     const totalMs = performance.now() - t0;
-    const batchSuffix = lod0.requestCount > 1 ? ` · batch ${lod0.requestCount}` : "";
-    const summary =
-      `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
-      `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · serialize ${lod0.serializeMs.toFixed(0)}ms${batchSuffix})`;
-    deps.setLastDigSummary(summary);
-    console.log(
-      `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
-    );
+    deps.setLastDigSummary(`${totalMs.toFixed(0)}ms worker LOD0 · ${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks`);
     return "committed";
   };
 
   const terrainCommitAllowed = (point: THREE.Vector3): boolean => {
-    // Deny-by-default readiness (playable-world-contract P1): a target whose authority
-    // is not ready gets UI feedback, never a queued retry.
     if (deps.editReadyAt && !deps.editReadyAt(point.x, point.z)) {
       gameplayDiagnostics.add("edits_denied_not_ready");
       deps.setLastDigSummary("terrain edit rejected: target not ready (streaming)");
@@ -358,50 +307,26 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     return false;
   };
 
-  const buildTerrainConformAllowed = (position: readonly [number, number, number]): boolean => {
-    if (!deps.editAuthority) return true;
-    const decision = canCommitBuild(deps.editAuthority, authorityOrigin(), position);
-    publishPlayerEditAuthorityDecision(authorityCounters(), decision);
-    if (decision.allowed) return true;
-    deps.setLastDigSummary(`construction terrain conform rejected: ${decision.reason}`);
-    deps.updateInfo();
-    return false;
-  };
-
   const performDig = async (ray: THREE.Ray) => {
     const hit = deps.terrainRaycast.raycastEditableTerrain(ray);
-    if (!hit) {
-      deps.setLastDigSummary("no terrain under brush");
-      deps.updateInfo();
-      return;
-    }
+    if (!hit) { deps.setLastDigSummary("no terrain under brush"); deps.updateInfo(); return; }
     if (!terrainCommitAllowed(hit.point)) return;
-    const brushParams = deps.getBrushParams();
-    const radius = brushParams.digRadius;
-    const edit = {
-      x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius,
-      shape: brushParams.brushShape, op: brushParams.brushOp,
-      material: brushParams.brushOp === "add" ? brushParams.brushMaterial : undefined,
-      height: brushParams.brushHeight, strength: brushParams.brushStrength, falloff: brushParams.brushFalloff,
+    const brush = deps.getBrushParams();
+    const edit: DigEdit = {
+      x: hit.point.x, y: hit.point.y, z: hit.point.z, r: brush.digRadius,
+      shape: brush.brushShape, op: brush.brushOp,
+      material: brush.brushOp === "add" ? brush.brushMaterial : undefined,
+      height: brush.brushHeight, strength: brush.brushStrength, falloff: brush.brushFalloff,
     };
     const transaction = voxelTransactionFromDigEdit(edit);
-    if (transaction.deltas.length === 0) {
-      reportNoOp("no terrain changed");
-      return;
-    }
+    if (transaction.deltas.length === 0) { deps.setLastDigSummary("no terrain changed"); deps.updateInfo(); return; }
     const hadPaintedTerrain = hasPaintedTerrainEdits();
     applyDigEditTransaction(transaction, edit);
-
-    emitAudio(brushParams.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
-
-    const status = await performEditRebuild(edit, transaction, hit, radius, `${brushParams.brushOp} ${brushParams.brushShape}`);
-    if (status === "rejected") {
-      rollbackDigEditTransaction(transaction);
-      syncPaintedTerrainState(hadPaintedTerrain);
-      deps.updateInfo();
-      return;
-    }
+    emitAudio(brush.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
+    const status = await performEditRebuild(edit, transaction, hit, brush.digRadius, `${brush.brushOp} ${brush.brushShape}`);
+    if (status === "rejected") rollbackDigEditTransaction(transaction);
     syncPaintedTerrainState(hadPaintedTerrain);
+    deps.updateInfo();
   };
 
   const runDigExclusive = async (ray: THREE.Ray): Promise<void> => {
@@ -414,12 +339,9 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       return;
     }
     digInFlight = true;
-    try {
-      await enqueueEditOperation("terrain brush", () => performDig(ray));
-    } finally {
+    try { await enqueueEditOperation("terrain brush", () => performDig(ray)); }
+    finally {
       digInFlight = false;
-      // No silent replay of aged strikes (P1.3): brush-drag samples queued while a dig
-      // was in flight expire instead of firing seconds later against moved terrain.
       let next = queuedDigRays.shift() ?? null;
       while (next && performance.now() - next.enqueuedAtMs > DEFAULT_EDIT_COMMAND_EXPIRY_MS) {
         gameplayDiagnostics.add("edit_commands_expired");
@@ -429,69 +351,122 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }
   };
 
-  const performConstructionTerrainConform = async (request: ConstructionTerrainConformRequest) => {
-    if (!buildTerrainConformAllowed(request.position)) return;
-    const radius = Math.max(request.dimensionsM[0], request.dimensionsM[2]) * 0.5 + request.padMarginM;
-    const topY = request.position[1] - request.dimensionsM[1] * 0.5;
-    const hit = { point: new THREE.Vector3(request.position[0], topY, request.position[2]) };
-    const fillEdit: DigEdit = {
-      x: request.position[0],
-      y: topY - request.fillDepthM * 0.5,
-      z: request.position[2],
-      r: radius,
-      shape: "cube",
-      op: "add",
-      material: request.materialSlot,
-      height: request.fillDepthM * 0.5,
-      strength: 1,
-      falloff: request.falloffM,
-    };
-    const trimEdit: DigEdit = {
-      x: request.position[0],
-      y: topY + request.trimHeightM * 0.5,
-      z: request.position[2],
-      r: radius,
-      shape: "cube",
-      op: "remove",
-      height: request.trimHeightM * 0.5,
-      strength: 1,
-      falloff: request.falloffM,
-    };
-
-    let changed = false;
-    const hadPaintedTerrain = hasPaintedTerrainEdits();
-    const fillTransaction = voxelTransactionFromDigEdit(fillEdit);
-    if (fillTransaction.deltas.length > 0) {
-      applyDigEditTransaction(fillTransaction, fillEdit);
-      emitAudio("terrain.raise");
-      const fillStatus = await performEditRebuild(fillEdit, fillTransaction, hit, radius, "construction terrain fill");
-      if (fillStatus === "rejected") {
-        rollbackDigEditTransaction(fillTransaction);
-        syncPaintedTerrainState(hadPaintedTerrain);
-        deps.updateInfo();
-        return;
-      }
-      changed = true;
+  const previewConstructionTerrainConform = (
+    request: ConstructionTerrainConformRequest,
+  ): ConstructionTerrainConformPreview => {
+    if (deps.editAuthority) {
+      const decision = canCommitBuild(deps.editAuthority, authorityOrigin(), request.position);
+      if (!decision.allowed) return invalidConstructionTerrainPreview(request, decision.reason);
     }
-
-    if (request.trimHeightM > 0) {
-      const trimTransaction = voxelTransactionFromDigEdit(trimEdit);
-      if (trimTransaction.deltas.length > 0) {
-        applyDigEditTransaction(trimTransaction, trimEdit);
-        const trimStatus = await performEditRebuild(trimEdit, trimTransaction, hit, radius, "construction terrain trim");
-        if (trimStatus === "rejected") {
-          rollbackDigEditTransaction(trimTransaction);
-          syncPaintedTerrainState(hadPaintedTerrain);
-          deps.updateInfo();
-          return;
-        }
-        changed = true;
+    const samples: Array<{ x: number; z: number; surfaceY: number }> = [];
+    for (const position of constructionTerrainSamplePositions(request)) {
+      if (deps.protectedAt?.(position.x, position.z)) {
+        return invalidConstructionTerrainPreview(request, "terrain footprint intersects a protected region");
       }
+      if (deps.editReadyAt && !deps.editReadyAt(position.x, position.z)) {
+        return invalidConstructionTerrainPreview(request, "terrain footprint is not ready for editing");
+      }
+      const originY = request.footprint.targetY + request.trimHeightM + TERRAIN_PREVIEW_RAY_MARGIN_M;
+      const ray = new THREE.Ray(
+        new THREE.Vector3(position.x, originY, position.z),
+        new THREE.Vector3(0, -1, 0),
+      );
+      const hit = deps.terrainRaycast.raycastEditableTerrain(ray);
+      if (!hit) return invalidConstructionTerrainPreview(request, "terrain footprint is not fully authoritative");
+      samples.push({ x: position.x, z: position.z, surfaceY: hit.point.y });
     }
-
-    if (changed) syncPaintedTerrainState(hadPaintedTerrain);
-    else reportNoOp("construction terrain already conformed");
+    return analyzeConstructionTerrainSamples(request, samples);
   };
+
+  const terrainEditForRequest = (request: ConstructionTerrainConformRequest) => ({
+    minX: request.footprint.minX,
+    maxX: request.footprint.maxX,
+    minZ: request.footprint.minZ,
+    maxZ: request.footprint.maxZ,
+    targetY: request.footprint.targetY,
+    fillDepthM: request.fillDepthM,
+    trimHeightM: request.trimHeightM,
+    falloffM: request.falloffM,
+    materialSlot: request.materialSlot,
+  });
+
+  const rebuildMetadataForRequest = (request: ConstructionTerrainConformRequest): { edit: DigEdit; hit: TerrainRebuildHit; radius: number } => {
+    const radius = Math.max(
+      request.footprint.maxX - request.footprint.minX,
+      request.footprint.maxZ - request.footprint.minZ,
+    ) * 0.5;
+    return {
+      radius,
+      hit: { point: new THREE.Vector3(request.position[0], request.footprint.targetY, request.position[2]) },
+      edit: {
+        x: request.position[0], y: request.footprint.targetY, z: request.position[2], r: radius,
+        shape: "cube", op: "add", material: request.materialSlot,
+        height: Math.max(request.fillDepthM, request.trimHeightM), strength: 1, falloff: request.falloffM,
+      },
+    };
+  };
+
+  const commitConstructionTerrainConform = async (
+    request: ConstructionTerrainConformRequest,
+  ): Promise<ConstructionTerrainConformCommitResult> => enqueueEditOperation("construction terrain conform", async () => {
+    const preview = previewConstructionTerrainConform(request);
+    if (!preview.valid) return { committed: false, reason: preview.reason, changed: false, receipt: null };
+    if (!preview.changed) return { committed: true, reason: null, changed: false, receipt: null };
+    const transaction = voxelTransactionFromTerrainConform(terrainEditForRequest(request));
+    if (transaction.deltas.length === 0) return { committed: true, reason: null, changed: false, receipt: null };
+    const hadPaintedTerrain = hasPaintedTerrainEdits();
+    applyDigEditTransaction(transaction);
+    const metadata = rebuildMetadataForRequest(request);
+    const status = await performEditRebuild(metadata.edit, transaction, metadata.hit, metadata.radius, "construction terrain conform");
+    if (status === "rejected") {
+      rollbackDigEditTransaction(transaction);
+      syncPaintedTerrainState(hadPaintedTerrain);
+      return { committed: false, reason: "terrain rebuild rejected", changed: false, receipt: null };
+    }
+    syncPaintedTerrainState(hadPaintedTerrain);
+    emitAudio("terrain.raise");
+    const receipt = { id: `construction-terrain-${transaction.id}` };
+    terrainReceipts.set(receipt.id, { transaction });
+    return { committed: true, reason: null, changed: true, receipt };
+  });
+
+  const undoConstructionTerrainConform = async (
+    receipt: ConstructionTerrainConformReceipt,
+  ): Promise<ConstructionTerrainConformUndoResult> => enqueueEditOperation("construction terrain undo", async () => {
+    const entry = terrainReceipts.get(receipt.id);
+    if (!entry) return { undone: false, reason: "terrain transaction receipt is no longer available" };
+    if (!canUndoVoxelTransaction(entry.transaction)) {
+      return { undone: false, reason: "terrain changed after construction placement" };
+    }
+    let inverse: VoxelEditTransaction;
+    try { inverse = voxelInverseTransaction(entry.transaction); }
+    catch (error) { return { undone: false, reason: error instanceof Error ? error.message : String(error) }; }
+    const hadPaintedTerrain = hasPaintedTerrainEdits();
+    applyDigEditTransaction(inverse);
+    const bounds = inverse.dirtyBounds;
+    const centerX = (bounds.minX + bounds.maxX) * 0.5;
+    const centerZ = (bounds.minZ + bounds.maxZ) * 0.5;
+    const radius = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) * 0.5;
+    const edit: DigEdit = {
+      x: centerX, y: (bounds.minY + bounds.maxY) * 0.5, z: centerZ, r: radius,
+      shape: "cube", op: "remove", height: Math.max(1, (bounds.maxY - bounds.minY) * 0.5), strength: 1, falloff: 0,
+    };
+    const status = await performEditRebuild(
+      edit,
+      inverse,
+      { point: new THREE.Vector3(centerX, edit.y, centerZ) },
+      radius,
+      "construction terrain undo",
+    );
+    if (status === "rejected") {
+      rollbackDigEditTransaction(inverse);
+      syncPaintedTerrainState(hadPaintedTerrain);
+      return { undone: false, reason: "terrain undo rebuild rejected" };
+    }
+    terrainReceipts.delete(receipt.id);
+    syncPaintedTerrainState(hadPaintedTerrain);
+    return { undone: true, reason: null };
+  });
 
   const scheduleDig = (ray: THREE.Ray): void => {
     scheduledDigRay = ray.clone();
@@ -504,21 +479,15 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }, DIG_REBUILD_DEBOUNCE_MS);
   };
 
-  const scheduleConstructionTerrainConform = (request: ConstructionTerrainConformRequest): void => {
-    if (conformDebounceTimer !== null) clearTimeout(conformDebounceTimer);
-    conformDebounceTimer = setTimeout(() => {
-      conformDebounceTimer = null;
-      void enqueueEditOperation("construction terrain conform", () => performConstructionTerrainConform(request));
-    }, CONSTRUCTION_CONFORM_DEBOUNCE_MS);
-  };
-
   return {
     scheduleDig,
     runDigNow: (ray) => runDigExclusive(ray),
-    scheduleConstructionTerrainConform,
-    flushAncestors,
-    get lastDigAt() {
-      return lastDigAt;
-    },
+    scheduleConstructionTerrainConform: (request) => { void commitConstructionTerrainConform(request); },
+    previewConstructionTerrainConform,
+    commitConstructionTerrainConform,
+    undoConstructionTerrainConform,
+    forgetConstructionTerrainConform: (receipt) => { terrainReceipts.delete(receipt.id); },
+    flushAncestors: async () => { await editOperationTail; await deps.clodWorker.flushParents(); },
+    get lastDigAt() { return lastDigAt; },
   };
 }

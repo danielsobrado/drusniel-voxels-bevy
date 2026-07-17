@@ -20,6 +20,8 @@ import type {
   ConstructionConfig,
   ConstructionMaterial,
   ConstructionPieceDef,
+  ConstructionTerrainConformHandler,
+  ConstructionTerrainConformPreview,
   ConstructionTerrainConformRequest,
   PlacedConstructionPiece,
 } from "./types.js";
@@ -49,6 +51,12 @@ import {
   ConstructionStabilityRuntime,
   type ConstructionStabilityRuntimeStats,
 } from "./construction_stability_runtime.js";
+import { getActiveConstructionTerrainConformHandler } from "./construction_terrain_registry.js";
+import {
+  commitConstructionPlacementTransaction,
+  undoConstructionPlacementTransaction,
+  type ConstructionPlacementUndoRecord,
+} from "./construction_placement_transaction.js";
 
 const DEFAULT_OVERLAP_SPATIAL_CELL_M = 4;
 
@@ -77,15 +85,24 @@ export interface ConstructionControllerStats {
   currentValid: boolean;
   currentReason: string | null;
   currentStability: number | null;
+  terrainPreviewValid: boolean | null;
+  terrainFillVolumeM3: number;
+  terrainCutVolumeM3: number;
+  placementInFlight: boolean;
+  undoDepth: number;
   stability: ConstructionStabilityRuntimeStats;
   performance: ConstructionPerformanceSnapshot;
 }
+
+export type LegacyConstructionTerrainConformHandler = (request: ConstructionTerrainConformRequest) => void;
 
 export interface ConstructionController {
   update(): void;
   dispose(): void;
   stats(): ConstructionControllerStats;
-  setTerrainConformHandler(handler: ((request: ConstructionTerrainConformRequest) => void) | null): void;
+  setTerrainConformHandler(
+    handler: ConstructionTerrainConformHandler | LegacyConstructionTerrainConformHandler | null,
+  ): void;
   readonly colliderSet: ConstructionColliderSet;
   reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void;
 }
@@ -112,6 +129,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private readonly ghostMaterial: THREE.MeshBasicMaterial;
   private readonly ghostMesh: THREE.Mesh;
   private readonly ui: ConstructionControllerUi;
+  private readonly undoStack: ConstructionPlacementUndoRecord[] = [];
   private active = false;
   private snapEnabled = true;
   private snapSuppressed = false;
@@ -120,11 +138,14 @@ class ConstructionControllerImpl implements ConstructionController {
   private rotationQuarterTurns = 0;
   private pointerInside = false;
   private currentCandidate: ConstructionCandidate | null = null;
+  private currentTerrainRequest: ConstructionTerrainConformRequest | null = null;
+  private currentTerrainPreview: ConstructionTerrainConformPreview | null = null;
   private nextEntityId = 1;
   private lastPlacementMessage = "";
   private supportReevaluations = 0;
   private ghostPieceId: string | null = null;
-  private terrainConformHandler: ((request: ConstructionTerrainConformRequest) => void) | null = null;
+  private terrainConformHandler: ConstructionTerrainConformHandler | null = null;
+  private placementInFlight = false;
 
   constructor(private readonly deps: ConstructionControllerDeps) {
     this.config = deps.config ?? defaultConstructionConfig;
@@ -194,9 +215,10 @@ class ConstructionControllerImpl implements ConstructionController {
       onMaterialStep: (direction) => this.moveMaterialSelection(direction),
       onMaterialSelect: (index) => this.selectMaterial(index),
       onPieceSelect: (index) => this.selectPiece(index),
-      onPlace: () => this.placeCurrentCandidate(),
+      onPlace: () => { void this.placeCurrentCandidate(); },
       onDelete: () => this.deleteAimedPiece(),
       onPickPiece: () => this.pickAimedPiece(),
+      onUndo: () => { void this.undoLastPlacement(); },
       onPointerUpdate: (event) => this.updatePointerFromEvent(event),
       onPointerLeave: () => { this.pointerInside = false; },
       onInputUnavailable: () => {
@@ -219,14 +241,14 @@ class ConstructionControllerImpl implements ConstructionController {
     this.recomputeStability(this.pieceStore.pieces.map((piece) => piece.id));
     if (loadResult.rewritten) this.savePlacedPieces();
     this.syncUi(true);
-    console.info("[construction] CLOD construction ready. B toggle, left-click place, middle-click pick, right-click delete, X snap, hold Shift free, Q/E cycle, R rotate.");
+    console.info("[construction] CLOD construction ready. B toggle, left-click place, middle-click pick, right-click delete, Ctrl+Z undo, X snap, hold Shift free, Q/E cycle, R rotate.");
   }
 
   update(): void {
     this.processPendingCollapses();
-    if (!this.active || this.config.pieces.length === 0) {
-      this.currentCandidate = null;
-      this.ghostMesh.visible = false;
+    if (this.placementInFlight || !this.active || this.config.pieces.length === 0) {
+      if (!this.active) this.clearCurrentPreview(false);
+      else this.ghostMesh.visible = false;
       this.syncUi();
       this.publishPerformanceCounters();
       return;
@@ -259,13 +281,24 @@ class ConstructionControllerImpl implements ConstructionController {
       currentValid: this.currentCandidate?.valid ?? false,
       currentReason: this.currentCandidate?.reason ?? null,
       currentStability: this.currentCandidate?.stabilityValue ?? null,
+      terrainPreviewValid: this.currentTerrainPreview?.valid ?? null,
+      terrainFillVolumeM3: this.currentTerrainPreview?.fillVolumeM3 ?? 0,
+      terrainCutVolumeM3: this.currentTerrainPreview?.cutVolumeM3 ?? 0,
+      placementInFlight: this.placementInFlight,
+      undoDepth: this.undoStack.length,
       stability: this.stabilityRuntime.stats(),
       performance: this.performance.snapshot(),
     };
   }
 
-  setTerrainConformHandler(handler: ((request: ConstructionTerrainConformRequest) => void) | null): void {
-    this.terrainConformHandler = handler;
+  setTerrainConformHandler(
+    handler: ConstructionTerrainConformHandler | LegacyConstructionTerrainConformHandler | null,
+  ): void {
+    if (handler === null) {
+      this.terrainConformHandler = null;
+      return;
+    }
+    if (typeof handler !== "function") this.terrainConformHandler = handler;
   }
 
   reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void {
@@ -294,10 +327,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const material = this.selectedMaterial();
     this.syncGhostGeometry(piece);
     const ray = this.readAimRay();
-    if (!ray) {
-      this.clearPreviewStats();
-      return;
-    }
+    if (!ray) { this.clearPreviewStats(); return; }
     const terrainHit = this.performance.measure("targeting", () => raycastConstructionTerrain({
       ray,
       worldCells: this.deps.worldCells,
@@ -330,16 +360,9 @@ class ConstructionControllerImpl implements ConstructionController {
       snapActive && snapStats.traversalTruncated,
     );
     const snap = snapActive
-      ? this.snapSelector.select(
-          snapCandidates,
-          this.config.snap.radiusM,
-          this.config.snap.releaseRadiusMultiplier ?? 1.35,
-        )
+      ? this.snapSelector.select(snapCandidates, this.config.snap.radiusM, this.config.snap.releaseRadiusMultiplier ?? 1.35)
       : null;
-    if (!terrainHit && !snap) {
-      this.clearPreviewStats();
-      return;
-    }
+    if (!terrainHit && !snap) { this.clearPreviewStats(); return; }
     const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit!, rotationQuarterTurns);
     const connectionIds = snap
@@ -355,7 +378,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const overlapCandidates = this.overlapIndex.query(piece, position, rotationQuarterTurns);
     const overlapStats = this.overlapIndex.queryStats();
     this.performance.setOverlapQueryStats(overlapStats.visitedCells, overlapStats.candidatePieces);
-    const candidate = this.performance.measure("placementValidation", () => this.applyCommitAuthority(createConstructionCandidate({
+    let candidate = this.performance.measure("placementValidation", () => this.applyCommitAuthority(createConstructionCandidate({
       piece,
       material,
       position,
@@ -373,7 +396,20 @@ class ConstructionControllerImpl implements ConstructionController {
       supportProfiles: this.config.supportProfiles,
     })));
 
+    const terrainRequest = createConstructionTerrainConformRequest(candidate, this.config.terrainConform);
+    const handler = this.resolveTerrainConformHandler();
+    let terrainPreview: ConstructionTerrainConformPreview | null = null;
+    if (terrainRequest) {
+      this.performance.recordTerrainConformRequest();
+      if (!handler) candidate = { ...candidate, valid: false, reason: "terrain conform service unavailable" };
+      else {
+        terrainPreview = handler.preview(terrainRequest);
+        if (!terrainPreview.valid) candidate = { ...candidate, valid: false, reason: terrainPreview.reason };
+      }
+    }
     this.currentCandidate = candidate;
+    this.currentTerrainRequest = terrainRequest;
+    this.currentTerrainPreview = terrainPreview;
     updateConstructionGhost(this.ghostMesh, this.ghostMaterial, {
       position: candidate.position,
       rotationQuarterTurns: candidate.rotationQuarterTurns,
@@ -389,10 +425,15 @@ class ConstructionControllerImpl implements ConstructionController {
   private clearPreviewStats(): void {
     this.performance.setSnapQueryStats(0, 0, false);
     this.performance.setOverlapQueryStats(0, 0);
+    this.clearCurrentPreview(true);
+  }
+
+  private clearCurrentPreview(resetSelector: boolean): void {
     this.currentCandidate = null;
+    this.currentTerrainRequest = null;
+    this.currentTerrainPreview = null;
     this.ghostMesh.visible = false;
-    this.snapSelector.reset();
-    this.syncUi();
+    if (resetSelector) this.snapSelector.reset();
   }
 
   private syncGhostGeometry(piece: ConstructionPieceDef): void {
@@ -423,6 +464,11 @@ class ConstructionControllerImpl implements ConstructionController {
     counters["construction_placed_meshes"] = this.pieceStore.meshes.length;
     counters["construction_draw_calls_estimate"] = this.pieceStore.meshes.length;
     counters["construction_terrain_conform_requests"] = snapshot.terrainConformRequests;
+    counters["construction_terrain_preview_valid"] = this.currentTerrainPreview?.valid === true ? 1 : 0;
+    counters["construction_terrain_fill_volume_m3"] = this.currentTerrainPreview?.fillVolumeM3 ?? 0;
+    counters["construction_terrain_cut_volume_m3"] = this.currentTerrainPreview?.cutVolumeM3 ?? 0;
+    counters["construction_transaction_in_flight"] = this.placementInFlight ? 1 : 0;
+    counters["construction_undo_depth"] = this.undoStack.length;
     counters["construction_clod_invalidation_requests"] = snapshot.clodInvalidationRequests;
     counters["construction_colliders_active"] = this.colliderSet.activeCount();
     counters["construction_unsupported_pieces"] = this.pieceStore.unsupportedCount();
@@ -456,13 +502,11 @@ class ConstructionControllerImpl implements ConstructionController {
     this.pieceStore.setStabilityVisualization(active, this.config.stability.collapseThreshold);
     if (active && document.pointerLockElement === this.deps.rendererDomElement) document.exitPointerLock();
     if (!active) {
-      this.currentCandidate = null;
-      this.ghostMesh.visible = false;
+      this.clearCurrentPreview(true);
       this.lastPlacementMessage = "";
       this.snapSuppressed = false;
-      this.snapSelector.reset();
     } else {
-      this.lastPlacementMessage = "Left-click place · middle-click pick · right-click delete.";
+      this.lastPlacementMessage = "Left-click place · middle-click pick · right-click delete · Ctrl+Z undo.";
       this.preloadSelectedMaterialWindow();
     }
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
@@ -529,45 +573,64 @@ class ConstructionControllerImpl implements ConstructionController {
     return decision.allowed ? candidate : { ...candidate, valid: false, reason: decision.reason };
   }
 
-  private placeCurrentCandidate(): void {
+  private resolveTerrainConformHandler(): ConstructionTerrainConformHandler | null {
+    return this.terrainConformHandler ?? getActiveConstructionTerrainConformHandler();
+  }
+
+  private async placeCurrentCandidate(): Promise<void> {
+    if (this.placementInFlight) return;
     if (!this.currentCandidate) this.update();
     const candidate = this.currentCandidate;
     if (!candidate) {
       this.lastPlacementMessage = "No build target. Aim at authoritative near terrain or a snap point.";
-      console.warn(`[construction] ${this.lastPlacementMessage}`);
       this.syncUi(true);
       return;
     }
     if (!candidate.valid) {
       this.lastPlacementMessage = `Blocked: ${candidate.reason ?? "invalid placement"}`;
-      console.warn(`[construction] ${this.lastPlacementMessage}`);
       this.syncUi(true);
       return;
     }
+
     const placed: PlacedConstructionPiece = {
-      id: `${ENTITY_ID_PREFIX}${this.nextEntityId++}`,
+      id: `${ENTITY_ID_PREFIX}${this.nextEntityId}`,
       typeId: candidate.piece.id,
-      position: [candidate.position[0], candidate.position[1], candidate.position[2]],
+      position: [...candidate.position],
       rotationQuarterTurns: candidate.rotationQuarterTurns,
       material: candidate.material,
       grounded: candidate.stabilityGrounded,
-      connectionIds: candidate.connectionIds,
+      connectionIds: [...candidate.connectionIds],
       stability: candidate.stabilityValue,
     };
-    if (!this.pieceStore.add(placed, true)) {
-      this.lastPlacementMessage = "Placement failed while adding mesh.";
-      console.warn(`[construction] ${this.lastPlacementMessage}`);
-      this.syncUi(true);
-      return;
-    }
-    this.recomputeStability([placed.id, ...placed.connectionIds!]);
-    this.requestTerrainConform(candidate);
-    this.lastPlacementMessage = `Placed ${candidate.piece.label} · ${constructionMaterialLabel(candidate.material)}`;
-    this.currentCandidate = null;
+    const terrainRequest = this.currentTerrainRequest;
+    this.placementInFlight = true;
     this.ghostMesh.visible = false;
-    this.snapSelector.reset();
-    this.savePlacedPieces();
+    this.lastPlacementMessage = terrainRequest ? "Committing terrain and construction…" : "Placing construction…";
     this.syncUi(true);
+    try {
+      const result = await commitConstructionPlacementTransaction({
+        piece: placed,
+        terrainRequest,
+        terrainHandler: this.resolveTerrainConformHandler(),
+        addPiece: (piece) => this.pieceStore.add(piece, true),
+      });
+      if (!result.committed || !result.undoRecord) {
+        this.lastPlacementMessage = `Placement failed: ${result.reason ?? "transaction rejected"}`;
+        return;
+      }
+      this.nextEntityId += 1;
+      this.undoStack.push(result.undoRecord);
+      this.recomputeStability([placed.id, ...(placed.connectionIds ?? [])]);
+      this.savePlacedPieces();
+      this.lastPlacementMessage = `Placed ${candidate.piece.label} · ${constructionMaterialLabel(candidate.material)}`;
+      this.clearCurrentPreview(true);
+    } catch (error) {
+      this.lastPlacementMessage = `Placement failed: ${error instanceof Error ? error.message : String(error)}`;
+      console.error("[construction] placement transaction failed", error);
+    } finally {
+      this.placementInFlight = false;
+      this.syncUi(true);
+    }
   }
 
   private aimedPieceIndex(): number {
@@ -582,11 +645,7 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private pickAimedPiece(): void {
     const index = this.aimedPieceIndex();
-    if (index < 0) {
-      this.lastPlacementMessage = "No construction piece under cursor to pick.";
-      this.syncUi(true);
-      return;
-    }
+    if (index < 0) { this.lastPlacementMessage = "No construction piece under cursor to pick."; this.syncUi(true); return; }
     const placed = this.pieceStore.pieces[index]!;
     const pieceIndex = this.config.pieces.findIndex((piece) => piece.id === placed.typeId);
     if (pieceIndex >= 0) this.selectPiece(pieceIndex);
@@ -596,18 +655,14 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private deleteAimedPiece(): void {
+    if (this.placementInFlight) return;
     const index = this.aimedPieceIndex();
-    if (index < 0) {
-      this.lastPlacementMessage = "No construction piece under cursor.";
-      this.syncUi(true);
-      return;
-    }
+    if (index < 0) { this.lastPlacementMessage = "No construction piece under cursor."; this.syncUi(true); return; }
     const targetId = this.pieceStore.pieces[index]!.id;
+    this.forgetUndoRecord(targetId);
     const removal = this.pieceStore.removeOne(targetId);
     this.recomputeStability(removal.disconnectedNeighborIds);
-    this.currentCandidate = null;
-    this.ghostMesh.visible = false;
-    this.snapSelector.reset();
+    this.clearCurrentPreview(true);
     this.savePlacedPieces();
     this.lastPlacementMessage = removal.removedCount === 1
       ? "Deleted 1 piece. Stability recomputed."
@@ -616,12 +671,53 @@ class ConstructionControllerImpl implements ConstructionController {
     this.syncUi(true);
   }
 
-  private requestTerrainConform(candidate: ConstructionCandidate): void {
-    if (!this.terrainConformHandler) return;
-    const request = createConstructionTerrainConformRequest(candidate, this.config.terrainConform);
-    if (!request) return;
-    this.performance.recordTerrainConformRequest();
-    this.terrainConformHandler(request);
+  private async undoLastPlacement(): Promise<void> {
+    if (this.placementInFlight) return;
+    while (this.undoStack.length > 0) {
+      const latest = this.undoStack[this.undoStack.length - 1]!;
+      if (this.pieceStore.pieces.some((piece) => piece.id === latest.piece.id)) break;
+      if (latest.terrainReceipt) this.resolveTerrainConformHandler()?.forget?.(latest.terrainReceipt);
+      this.undoStack.pop();
+    }
+    const record = this.undoStack.pop();
+    if (!record) { this.lastPlacementMessage = "Nothing to undo."; this.syncUi(true); return; }
+    this.placementInFlight = true;
+    this.lastPlacementMessage = "Undoing construction and terrain…";
+    this.syncUi(true);
+    try {
+      const result = await undoConstructionPlacementTransaction({
+        record,
+        terrainHandler: this.resolveTerrainConformHandler(),
+        removePiece: (id) => this.pieceStore.removeOne(id).removedCount > 0,
+        restorePiece: (piece) => this.pieceStore.add(piece, false),
+      });
+      if (!result.undone) {
+        this.undoStack.push(record);
+        this.lastPlacementMessage = `Undo failed: ${result.reason ?? "transaction rejected"}`;
+      } else {
+        this.recomputeStability(this.pieceStore.pieces.map((piece) => piece.id));
+        this.savePlacedPieces();
+        this.clearCurrentPreview(true);
+        this.lastPlacementMessage = `Undid ${this.piecesById.get(record.piece.typeId)?.label ?? "construction piece"}.`;
+      }
+    } catch (error) {
+      this.undoStack.push(record);
+      this.lastPlacementMessage = `Undo failed: ${error instanceof Error ? error.message : String(error)}`;
+      console.error("[construction] undo transaction failed", error);
+    } finally {
+      this.placementInFlight = false;
+      this.syncUi(true);
+    }
+  }
+
+  private forgetUndoRecord(pieceId: string): void {
+    const handler = this.resolveTerrainConformHandler();
+    for (let index = this.undoStack.length - 1; index >= 0; index -= 1) {
+      const record = this.undoStack[index]!;
+      if (record.piece.id !== pieceId) continue;
+      if (record.terrainReceipt) handler?.forget?.(record.terrainReceipt);
+      this.undoStack.splice(index, 1);
+    }
   }
 
   private recomputeStability(dirtyIds: Iterable<string>): void {
@@ -633,17 +729,13 @@ class ConstructionControllerImpl implements ConstructionController {
   private processPendingCollapses(): void {
     if (this.stabilityRuntime.pendingCollapseCount() === 0) return;
     const result = this.stabilityRuntime.processPendingCollapses(this.pieceStore.pieces, (id) => {
+      this.forgetUndoRecord(id);
       const removal = this.pieceStore.removeOne(id);
-      return {
-        removed: removal.removedCount > 0,
-        disconnectedNeighborIds: removal.disconnectedNeighborIds,
-      };
+      return { removed: removal.removedCount > 0, disconnectedNeighborIds: removal.disconnectedNeighborIds };
     });
     if (result.collapsedIds.length === 0) return;
     this.pieceStore.refreshStabilityVisuals();
-    this.currentCandidate = null;
-    this.ghostMesh.visible = false;
-    this.snapSelector.reset();
+    this.clearCurrentPreview(true);
     this.savePlacedPieces();
     this.lastPlacementMessage = result.collapsedIds.length === 1
       ? "Collapsed 1 unstable piece."
@@ -682,6 +774,9 @@ class ConstructionControllerImpl implements ConstructionController {
       currentStability: this.currentCandidate?.stabilityValue ?? null,
       currentMaxSupport: this.currentCandidate?.stabilityMaxSupport ?? null,
       currentGrounded: this.currentCandidate?.stabilityGrounded ?? false,
+      currentTerrainPreview: this.currentTerrainPreview,
+      placementInFlight: this.placementInFlight,
+      undoDepth: this.undoStack.length,
       pendingCollapses: this.stabilityRuntime.pendingCollapseCount(),
       materialOptions: CONSTRUCTION_MATERIAL_OPTIONS,
       selectedMaterial: this.selectedMaterial(),

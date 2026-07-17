@@ -157,6 +157,23 @@ export interface PlacedConstructionPiece {
   unsupported?: boolean;
 }
 
+export interface ConstructionTerrainFootprint {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  targetY: number;
+}
+
+export interface ConstructionTerrainAabb {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+}
+
 export interface ConstructionTerrainConformRequest {
   pieceId: string;
   position: ConstructionVec3;
@@ -167,6 +184,54 @@ export interface ConstructionTerrainConformRequest {
   fillDepthM: number;
   trimHeightM: number;
   falloffM: number;
+  sampleGrid: number;
+  footprint: ConstructionTerrainFootprint;
+}
+
+export interface ConstructionTerrainConformSample {
+  x: number;
+  z: number;
+  surfaceY: number;
+  deltaY: number;
+}
+
+export interface ConstructionTerrainConformPreview {
+  valid: boolean;
+  reason: string | null;
+  changed: boolean;
+  targetY: number;
+  sampleCount: number;
+  samples: readonly ConstructionTerrainConformSample[];
+  minSurfaceY: number;
+  maxSurfaceY: number;
+  maxFillDepthM: number;
+  maxCutHeightM: number;
+  fillVolumeM3: number;
+  cutVolumeM3: number;
+  worldAabb: ConstructionTerrainAabb;
+}
+
+export interface ConstructionTerrainConformReceipt {
+  id: string;
+}
+
+export interface ConstructionTerrainConformCommitResult {
+  committed: boolean;
+  reason: string | null;
+  changed: boolean;
+  receipt: ConstructionTerrainConformReceipt | null;
+}
+
+export interface ConstructionTerrainConformUndoResult {
+  undone: boolean;
+  reason: string | null;
+}
+
+export interface ConstructionTerrainConformHandler {
+  preview(request: ConstructionTerrainConformRequest): ConstructionTerrainConformPreview;
+  commit(request: ConstructionTerrainConformRequest): Promise<ConstructionTerrainConformCommitResult>;
+  undo(receipt: ConstructionTerrainConformReceipt): Promise<ConstructionTerrainConformUndoResult>;
+  forget?(receipt: ConstructionTerrainConformReceipt): void;
 }
 
 export interface ConstructionSurfaceHit {
