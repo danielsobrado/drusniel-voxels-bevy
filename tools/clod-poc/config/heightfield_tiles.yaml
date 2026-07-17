@@ -6,4 +6,5 @@ max_tiles_per_batch: 2
 evict_distance_multiplier: 1.5
 retry_cooldown_frames: 120
 prediction_seconds: 4
+background_build_interval_frames: 30
 persistence_enabled: true
