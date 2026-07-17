@@ -57,6 +57,7 @@ export class TreeTimingPass {
     const root = scene.getObjectByName(name);
     if (!root) return;
     const previousParent = root.parent;
+    const previousIndex = previousParent?.children.indexOf(root) ?? -1;
     const previousVisible = root.visible;
     const previousTarget = this.renderer.getRenderTarget();
     root.visible = true;
@@ -67,8 +68,12 @@ export class TreeTimingPass {
     } finally {
       this.renderer.setRenderTarget(previousTarget);
       root.visible = previousVisible;
-      if (previousParent) previousParent.add(root);
-      else this.measureScene.remove(root);
+      if (previousParent) {
+        previousParent.add(root);
+        restoreChildIndex(previousParent, root, previousIndex);
+      } else {
+        this.measureScene.remove(root);
+      }
     }
   }
 }
@@ -78,4 +83,12 @@ function timingTarget(name: string, gpuLabel: string, width: number, height: num
   target.texture.name = name;
   tagGpu(target, gpuLabel);
   return target;
+}
+
+function restoreChildIndex(parent: THREE.Object3D, child: THREE.Object3D, index: number): void {
+  if (index < 0 || index >= parent.children.length - 1) return;
+  const current = parent.children.indexOf(child);
+  if (current < 0 || current === index) return;
+  parent.children.splice(current, 1);
+  parent.children.splice(index, 0, child);
 }
