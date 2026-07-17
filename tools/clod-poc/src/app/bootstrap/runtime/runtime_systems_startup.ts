@@ -121,14 +121,54 @@ function withConstructionGuardDispose(
   };
 }
 
+function persistenceSafeDensityComposition(composition: RpgDensityComposition): RpgDensityComposition {
+  const wallGroups = new Map<string, Array<{ id: string; index: number }>>();
+  const wallPattern = /^(.*:wall:\d+:(?:west|east)):(\d+)$/;
+  for (const placed of composition.pieces) {
+    const match = wallPattern.exec(placed.id);
+    if (!match) continue;
+    const group = wallGroups.get(match[1]!) ?? [];
+    group.push({ id: placed.id, index: Number(match[2]) });
+    wallGroups.set(match[1]!, group);
+  }
+  const omittedIds = new Set(
+    composition.pieces
+      .filter((placed) => placed.id.includes(":pillar:"))
+      .map((placed) => placed.id),
+  );
+  for (const group of wallGroups.values()) {
+    group.sort((a, b) => a.index - b.index);
+    if (group.length > 0) omittedIds.add(group[0]!.id);
+    if (group.length > 1) omittedIds.add(group[group.length - 1]!.id);
+  }
+
+  const pieces = composition.pieces.filter((placed) => !omittedIds.has(placed.id));
+  const buildings = composition.buildings.map((building) => ({
+    ...building,
+    pieceCount: pieces.filter((placed) => placed.id.startsWith(`${building.id}:`)).length,
+  }));
+  const maxPiecesPerBuilding = buildings.reduce((max, building) => Math.max(max, building.pieceCount), 0);
+  return {
+    ...composition,
+    pieces,
+    buildings,
+    summary: {
+      ...composition.summary,
+      constructionPiecesTotal: pieces.length,
+      averagePiecesPerBuilding: buildings.length === 0 ? 0 : pieces.length / buildings.length,
+      maxPiecesPerBuilding,
+    },
+  };
+}
+
 function prepareRpgDensityComposition(input: RuntimeSystemsStartupInput): RpgDensityComposition | null {
   const sceneId = input.searchParams.get("rpgDensityScene");
   if (!isRpgDensityScene(sceneId)) return null;
-  const composition = buildRpgDensityComposition({
+  const composition = persistenceSafeDensityComposition(buildRpgDensityComposition({
     sceneId,
     seed: input.worldSeed,
     surfaceHeightAt: surfaceHeight,
-  });
+  }));
   input.propPlacementScenes[sceneId] = composition.propScene;
   input.searchParams.set("customPropScene", sceneId);
   if (!input.searchParams.has("customProps")) input.searchParams.set("customProps", "1");
@@ -423,8 +463,6 @@ export async function runRuntimeSystemsStartup(
       if (seededStorageKey) localStorage.removeItem(seededStorageKey);
     }
   }
-
-  publishRpgDensityCompositionCounters(getHooks()?.stats?.counters, densityComposition ?? undefined as never);
 
   return {
     ...vegetation,
