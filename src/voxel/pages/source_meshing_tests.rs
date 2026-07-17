@@ -14,8 +14,27 @@ fn export(position: IVec3) -> TerrainMainSurfaceExport {
 }
 
 #[test]
+fn source_anchor_changes_only_at_page_boundaries() {
+    assert_eq!(
+        source_anchor_chunk(IVec3::new(0, 5, 0), 4),
+        IVec3::new(2, 0, 2)
+    );
+    assert_eq!(
+        source_anchor_chunk(IVec3::new(3, 9, 3), 4),
+        IVec3::new(2, 0, 2)
+    );
+    assert_eq!(
+        source_anchor_chunk(IVec3::new(4, 9, 4), 4),
+        IVec3::new(6, 0, 6)
+    );
+    assert_eq!(
+        source_anchor_chunk(IVec3::new(-1, 9, -1), 4),
+        IVec3::new(-2, 0, -2)
+    );
+}
+
+#[test]
 fn source_queue_includes_near_chunks_and_skips_cached_or_out_of_radius_chunks() {
-    let cam = IVec3::ZERO;
     let cached = IVec3::new(3, 0, 0);
     let exports = [(cached, export(cached))].into_iter().collect();
     let positions = vec![
@@ -29,7 +48,8 @@ fn source_queue_includes_near_chunks_and_skips_cached_or_out_of_radius_chunks() 
     let queued = source_positions_within_radius(
         positions.into_iter(),
         &exports,
-        cam,
+        IVec3::ZERO,
+        0,
         10,
         4,
         4,
@@ -58,6 +78,7 @@ fn visible_page_sources_are_prioritized_before_hidden_near_pages() {
         positions.into_iter(),
         &HashMap::new(),
         IVec3::ZERO,
+        0,
         6,
         12,
         4,
@@ -88,6 +109,7 @@ fn source_queue_groups_chunks_by_page_before_vertical_order() {
         &HashMap::new(),
         IVec3::ZERO,
         0,
+        0,
         16,
         4,
     );
@@ -106,7 +128,7 @@ fn source_queue_groups_chunks_by_page_before_vertical_order() {
 #[test]
 fn empty_queue_rescans_only_after_cooldown() {
     let mut queue = PageSourceMeshingQueue::default();
-    queue.center = Some(IVec3::ZERO);
+    queue.source_anchor = Some(IVec3::ZERO);
     queue.world_chunk_count = 10;
     let mut schedule = SourceMeshingSchedule {
         queue_rescan_in_frames: 2,
@@ -139,7 +161,7 @@ fn empty_queue_rescans_only_after_cooldown() {
 #[test]
 fn invalidation_bypasses_queue_rescan_cooldown() {
     let mut queue = PageSourceMeshingQueue::default();
-    queue.center = Some(IVec3::ZERO);
+    queue.source_anchor = Some(IVec3::ZERO);
     queue.world_chunk_count = 10;
     let mut schedule = SourceMeshingSchedule {
         queue_rescan_in_frames: 20,
