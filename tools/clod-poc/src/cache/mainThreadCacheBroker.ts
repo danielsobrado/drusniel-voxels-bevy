@@ -9,10 +9,15 @@ import {
   purgeLegacyCacheDatabases,
   resolveBrokerPersistentConfig,
 } from "./indexedDbStore.js";
+import {
+  registerTerrainStreamingWorker,
+  terrainStreamingGenerationIsCurrent,
+  type TerrainStreamingStateMessage,
+} from "../stream/terrain_streaming_control.js";
 
 type CacheWorker = {
   addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
-  postMessage(message: CacheRpcResponse): void;
+  postMessage(message: CacheRpcResponse | TerrainStreamingStateMessage): void;
 };
 
 let brokerStore: IndexedDbStore | null = null;
@@ -44,6 +49,11 @@ async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
 async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
   const respond = (response: CacheRpcResponse) => worker.postMessage(response);
   try {
+    if (request.op === "put" && !terrainStreamingGenerationIsCurrent(request.streamingGeneration)) {
+      respond({ type: "cacheRpc", requestId: request.requestId, ok: true, result: false });
+      return;
+    }
+
     const store = await ensureBrokerStore();
     if (!store) throw new CacheUnavailableError("main-thread cache broker unavailable");
 
@@ -86,6 +96,7 @@ async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Pr
 export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   if (attachedWorkers.has(worker)) return;
   attachedWorkers.add(worker);
+  registerTerrainStreamingWorker(worker);
   worker.addEventListener("message", (event: MessageEvent) => {
     if (!isCacheRpcRequest(event.data)) return;
     void handleCacheRpc(worker, event.data);
