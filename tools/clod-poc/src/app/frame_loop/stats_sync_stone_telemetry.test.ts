@@ -37,7 +37,7 @@ function run(next: StoneStats) {
     stoneTotal: 0,
     stoneClassSummary: "",
     stoneVisible: 0,
-  } as ClodFrameLoopUiState;
+  } as unknown as ClodFrameLoopUiState;
   let current: StoneStats | null = null;
   const updateDisplay = vi.fn();
 
