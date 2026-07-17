@@ -1,9 +1,8 @@
 //! Bench-only guard for the CLOD runtime stats CSV emitted by
 //! `voxel::pages::runtime_stats_export`.
 //!
-//! This is intentionally separate from `bench_guard`: CLOD selection parity is
-//! easier to reason about as a small CSV contract, and it lets the visual bench
-//! guard remain focused on timing regressions.
+//! Selection correctness and source-build health are validated together so an empty page
+//! runtime cannot pass merely because it rendered no expensive work.
 
 use std::collections::HashMap;
 use std::fs;
@@ -15,7 +14,7 @@ use serde::Deserialize;
 
 #[derive(Parser, Debug)]
 #[command(
-    about = "Validate CLOD runtime selection stats exported by VOXEL_CLOD_STATS_CSV=1",
+    about = "Validate CLOD runtime stats exported by VOXEL_CLOD_STATS_CSV=1",
     version
 )]
 struct Args {
@@ -41,17 +40,16 @@ struct GuardConfig {
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(default)]
 struct ClodGuardConfig {
-    /// Minimum number of sampled frames required for the guard to be meaningful.
     min_samples: usize,
-    /// 2:1 enforcement should never be blocked in a healthy page tree.
+    min_max_source_exports: usize,
+    min_max_complete_page_columns: usize,
+    max_source_failures_total: u64,
+    min_max_indexed_nodes: usize,
+    min_max_rendered_pages: usize,
     max_blocked_splits: u32,
-    /// Once nodes are indexed, the active cut should never be empty.
     max_rows_with_indexed_nodes_and_no_rendered_pages: usize,
-    /// Freeze is a manual/debug mode. Benches should not accidentally run frozen.
     max_frozen_frames: usize,
-    /// Optional near-field sanity check. Set to >0 when a bench route should expose LOD0 pages.
     min_max_lod0_visible_pages: usize,
-    /// Crossfade may temporarily make more pages visible than rendered, but runaway gaps are suspicious.
     max_visible_to_rendered_ratio: f32,
 }
 
@@ -59,6 +57,11 @@ impl Default for ClodGuardConfig {
     fn default() -> Self {
         Self {
             min_samples: 1,
+            min_max_source_exports: 1,
+            min_max_complete_page_columns: 1,
+            max_source_failures_total: 0,
+            min_max_indexed_nodes: 1,
+            min_max_rendered_pages: 1,
             max_blocked_splits: 0,
             max_rows_with_indexed_nodes_and_no_rendered_pages: 0,
             max_frozen_frames: 0,
@@ -72,6 +75,11 @@ impl Default for ClodGuardConfig {
 struct ClodStatsRow {
     frame: u64,
     revision: u64,
+    source_exports: usize,
+    complete_page_columns: usize,
+    source_pending_chunks: usize,
+    source_meshed_this_frame: usize,
+    source_failures_total: u64,
     indexed_nodes: usize,
     root_nodes: usize,
     visible_pages: usize,
@@ -87,6 +95,11 @@ struct ClodStatsRow {
 #[derive(Debug, Default, PartialEq)]
 struct ClodStatsSummary {
     samples: usize,
+    max_source_exports: usize,
+    max_complete_page_columns: usize,
+    max_source_pending_chunks: usize,
+    max_source_meshed_this_frame: usize,
+    max_source_failures_total: u64,
     max_indexed_nodes: usize,
     max_root_nodes: usize,
     max_visible_pages: usize,
@@ -112,29 +125,28 @@ fn main() -> ExitCode {
     let args = Args::parse();
     let config = match read_config(&args.config) {
         Ok(config) => config,
-        Err(err) => {
-            eprintln!("failed to read {:?}: {err}", args.config);
+        Err(error) => {
+            eprintln!("failed to read {:?}: {error}", args.config);
             return ExitCode::from(2);
         }
     };
     let csv = match fs::read_to_string(&args.csv) {
         Ok(csv) => csv,
-        Err(err) => {
-            eprintln!("failed to read {:?}: {err}", args.csv);
+        Err(error) => {
+            eprintln!("failed to read {:?}: {error}", args.csv);
             return ExitCode::from(2);
         }
     };
     let rows = match parse_csv(&csv) {
         Ok(rows) => rows,
-        Err(err) => {
-            eprintln!("failed to parse {:?}: {err}", args.csv);
+        Err(error) => {
+            eprintln!("failed to parse {:?}: {error}", args.csv);
             return ExitCode::from(2);
         }
     };
 
     let report = evaluate(&rows, config.clod);
     print_report(&args.csv, &report);
-
     if !report.failures.is_empty() || (args.fail_on_warning && !report.warnings.is_empty()) {
         ExitCode::from(1)
     } else {
@@ -143,8 +155,8 @@ fn main() -> ExitCode {
 }
 
 fn read_config(path: &PathBuf) -> Result<GuardConfig, String> {
-    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
-    toml::from_str(&text).map_err(|err| err.to_string())
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    toml::from_str(&text).map_err(|error| error.to_string())
 }
 
 fn parse_csv(text: &str) -> Result<Vec<ClodStatsRow>, String> {
@@ -152,47 +164,103 @@ fn parse_csv(text: &str) -> Result<Vec<ClodStatsRow>, String> {
     let Some(header_line) = lines.next() else {
         return Ok(Vec::new());
     };
-    let headers: Vec<&str> = header_line.split(',').collect();
-    let header_index: HashMap<&str, usize> = headers
+    let headers = header_line.split(',').collect::<Vec<_>>();
+    let header_index = headers
         .iter()
         .enumerate()
         .map(|(index, header)| (header.trim(), index))
-        .collect();
+        .collect::<HashMap<_, _>>();
 
-    let mut rows = Vec::new();
-    for (line_index, line) in lines.enumerate() {
-        let cols: Vec<&str> = line.split(',').collect();
-        let row_number = line_index + 2;
-        rows.push(ClodStatsRow {
-            frame: parse_field(&cols, &header_index, "frame", row_number)?,
-            revision: parse_field(&cols, &header_index, "revision", row_number)?,
-            indexed_nodes: parse_field(&cols, &header_index, "indexed_nodes", row_number)?,
-            root_nodes: parse_field(&cols, &header_index, "root_nodes", row_number)?,
-            visible_pages: parse_field(&cols, &header_index, "visible_pages", row_number)?,
-            rendered_pages: parse_field(&cols, &header_index, "rendered_pages", row_number)?,
-            split_pages: parse_field(&cols, &header_index, "split_pages", row_number)?,
-            forced_splits: parse_field(&cols, &header_index, "forced_splits", row_number)?,
-            blocked_splits: parse_field(&cols, &header_index, "blocked_splits", row_number)?,
-            near_field_forced_splits: parse_field(
-                &cols,
-                &header_index,
-                "near_field_forced_splits",
-                row_number,
-            )?,
-            frozen: parse_field(&cols, &header_index, "frozen", row_number)?,
-            visible_lods: parse_lod_counts(required_col(
-                &cols,
-                &header_index,
-                "visible_lods",
-                row_number,
-            )?)?,
-        });
-    }
-    Ok(rows)
+    lines
+        .enumerate()
+        .map(|(line_index, line)| {
+            let columns = line.split(',').collect::<Vec<_>>();
+            let row_number = line_index + 2;
+            Ok(ClodStatsRow {
+                frame: parse_field(&columns, &header_index, "frame", row_number)?,
+                revision: parse_field(&columns, &header_index, "revision", row_number)?,
+                source_exports: parse_optional_field(
+                    &columns,
+                    &header_index,
+                    "source_exports",
+                    row_number,
+                )?,
+                complete_page_columns: parse_optional_field(
+                    &columns,
+                    &header_index,
+                    "complete_page_columns",
+                    row_number,
+                )?,
+                source_pending_chunks: parse_optional_field(
+                    &columns,
+                    &header_index,
+                    "source_pending_chunks",
+                    row_number,
+                )?,
+                source_meshed_this_frame: parse_optional_field(
+                    &columns,
+                    &header_index,
+                    "source_meshed_this_frame",
+                    row_number,
+                )?,
+                source_failures_total: parse_optional_field(
+                    &columns,
+                    &header_index,
+                    "source_failures_total",
+                    row_number,
+                )?,
+                indexed_nodes: parse_field(
+                    &columns,
+                    &header_index,
+                    "indexed_nodes",
+                    row_number,
+                )?,
+                root_nodes: parse_field(&columns, &header_index, "root_nodes", row_number)?,
+                visible_pages: parse_field(
+                    &columns,
+                    &header_index,
+                    "visible_pages",
+                    row_number,
+                )?,
+                rendered_pages: parse_field(
+                    &columns,
+                    &header_index,
+                    "rendered_pages",
+                    row_number,
+                )?,
+                split_pages: parse_field(&columns, &header_index, "split_pages", row_number)?,
+                forced_splits: parse_field(
+                    &columns,
+                    &header_index,
+                    "forced_splits",
+                    row_number,
+                )?,
+                blocked_splits: parse_field(
+                    &columns,
+                    &header_index,
+                    "blocked_splits",
+                    row_number,
+                )?,
+                near_field_forced_splits: parse_field(
+                    &columns,
+                    &header_index,
+                    "near_field_forced_splits",
+                    row_number,
+                )?,
+                frozen: parse_field(&columns, &header_index, "frozen", row_number)?,
+                visible_lods: parse_lod_counts(required_column(
+                    &columns,
+                    &header_index,
+                    "visible_lods",
+                    row_number,
+                )?)?,
+            })
+        })
+        .collect()
 }
 
-fn required_col<'a>(
-    cols: &'a [&'a str],
+fn required_column<'a>(
+    columns: &'a [&'a str],
     header_index: &HashMap<&str, usize>,
     name: &str,
     row_number: usize,
@@ -200,20 +268,33 @@ fn required_col<'a>(
     let Some(index) = header_index.get(name).copied() else {
         return Err(format!("missing '{name}' column"));
     };
-    cols.get(index)
+    columns
+        .get(index)
         .copied()
         .ok_or_else(|| format!("row {row_number} missing '{name}' value"))
 }
 
 fn parse_field<T: std::str::FromStr>(
-    cols: &[&str],
+    columns: &[&str],
     header_index: &HashMap<&str, usize>,
     name: &str,
     row_number: usize,
 ) -> Result<T, String> {
-    let raw = required_col(cols, header_index, name, row_number)?.trim();
+    let raw = required_column(columns, header_index, name, row_number)?.trim();
     raw.parse::<T>()
         .map_err(|_| format!("row {row_number} has invalid '{name}' value: {raw:?}"))
+}
+
+fn parse_optional_field<T: std::str::FromStr + Default>(
+    columns: &[&str],
+    header_index: &HashMap<&str, usize>,
+    name: &str,
+    row_number: usize,
+) -> Result<T, String> {
+    if !header_index.contains_key(name) {
+        return Ok(T::default());
+    }
+    parse_field(columns, header_index, name, row_number)
 }
 
 fn parse_lod_counts(raw: &str) -> Result<HashMap<usize, usize>, String> {
@@ -246,8 +327,20 @@ fn summarize(rows: &[ClodStatsRow]) -> ClodStatsSummary {
         samples: rows.len(),
         ..Default::default()
     };
-
     for row in rows {
+        summary.max_source_exports = summary.max_source_exports.max(row.source_exports);
+        summary.max_complete_page_columns = summary
+            .max_complete_page_columns
+            .max(row.complete_page_columns);
+        summary.max_source_pending_chunks = summary
+            .max_source_pending_chunks
+            .max(row.source_pending_chunks);
+        summary.max_source_meshed_this_frame = summary
+            .max_source_meshed_this_frame
+            .max(row.source_meshed_this_frame);
+        summary.max_source_failures_total = summary
+            .max_source_failures_total
+            .max(row.source_failures_total);
         summary.max_indexed_nodes = summary.max_indexed_nodes.max(row.indexed_nodes);
         summary.max_root_nodes = summary.max_root_nodes.max(row.root_nodes);
         summary.max_visible_pages = summary.max_visible_pages.max(row.visible_pages);
@@ -273,7 +366,6 @@ fn summarize(rows: &[ClodStatsRow]) -> ClodStatsSummary {
                 .max(row.visible_pages as f32 / row.rendered_pages as f32);
         }
     }
-
     summary
 }
 
@@ -284,10 +376,41 @@ fn evaluate(rows: &[ClodStatsRow], config: ClodGuardConfig) -> GuardReport {
         ..Default::default()
     };
 
-    if report.summary.samples < config.min_samples {
+    minimum_failure(
+        &mut report.failures,
+        "CLOD stats sample count",
+        report.summary.samples,
+        config.min_samples,
+    );
+    minimum_failure(
+        &mut report.failures,
+        "max source exports",
+        report.summary.max_source_exports,
+        config.min_max_source_exports,
+    );
+    minimum_failure(
+        &mut report.failures,
+        "max complete page columns",
+        report.summary.max_complete_page_columns,
+        config.min_max_complete_page_columns,
+    );
+    minimum_failure(
+        &mut report.failures,
+        "max indexed nodes",
+        report.summary.max_indexed_nodes,
+        config.min_max_indexed_nodes,
+    );
+    minimum_failure(
+        &mut report.failures,
+        "max rendered pages",
+        report.summary.max_rendered_pages,
+        config.min_max_rendered_pages,
+    );
+
+    if report.summary.max_source_failures_total > config.max_source_failures_total {
         report.failures.push(format!(
-            "CLOD stats sample count {} < required {}",
-            report.summary.samples, config.min_samples
+            "source export failures {} > allowed {}",
+            report.summary.max_source_failures_total, config.max_source_failures_total
         ));
     }
     if report.summary.max_blocked_splits > config.max_blocked_splits {
@@ -319,13 +442,13 @@ fn evaluate(rows: &[ClodStatsRow], config: ClodGuardConfig) -> GuardReport {
     }
     if report.summary.max_visible_to_rendered_ratio > config.max_visible_to_rendered_ratio {
         report.warnings.push(format!(
-            "visible/rendered page ratio {:.2} > expected {:.2}; crossfade or stale visibility may be leaking pages",
+            "visible/rendered page ratio {:.2} > expected {:.2}; stale visibility may be leaking pages",
             report.summary.max_visible_to_rendered_ratio, config.max_visible_to_rendered_ratio
         ));
     }
     if report.summary.max_forced_splits == 0 && report.summary.max_near_field_forced_splits == 0 {
         report.warnings.push(
-            "no forced CLOD splits were observed; run a near-field route before claiming clod-poc parity"
+            "no forced CLOD splits were observed; run a near-field route before claiming parity"
                 .to_string(),
         );
     }
@@ -333,22 +456,44 @@ fn evaluate(rows: &[ClodStatsRow], config: ClodGuardConfig) -> GuardReport {
     report
 }
 
+fn minimum_failure(
+    failures: &mut Vec<String>,
+    label: &str,
+    actual: usize,
+    required: usize,
+) {
+    if actual < required {
+        failures.push(format!("{label} {actual} < required {required}"));
+    }
+}
+
 fn print_report(path: &PathBuf, report: &GuardReport) {
     println!("CLOD stats guard: {:?}", path);
     println!("  samples: {}", report.summary.samples);
+    println!("  max source exports: {}", report.summary.max_source_exports);
+    println!(
+        "  max complete page columns: {}",
+        report.summary.max_complete_page_columns
+    );
+    println!(
+        "  max source pending chunks: {}",
+        report.summary.max_source_pending_chunks
+    );
+    println!(
+        "  max source meshed/frame: {}",
+        report.summary.max_source_meshed_this_frame
+    );
+    println!(
+        "  max source failures: {}",
+        report.summary.max_source_failures_total
+    );
     println!("  max indexed nodes: {}", report.summary.max_indexed_nodes);
     println!("  max root nodes: {}", report.summary.max_root_nodes);
     println!("  max visible pages: {}", report.summary.max_visible_pages);
-    println!(
-        "  max rendered pages: {}",
-        report.summary.max_rendered_pages
-    );
+    println!("  max rendered pages: {}", report.summary.max_rendered_pages);
     println!("  max split pages: {}", report.summary.max_split_pages);
     println!("  max forced splits: {}", report.summary.max_forced_splits);
-    println!(
-        "  max blocked splits: {}",
-        report.summary.max_blocked_splits
-    );
+    println!("  max blocked splits: {}", report.summary.max_blocked_splits);
     println!(
         "  max near-field forced splits: {}",
         report.summary.max_near_field_forced_splits
@@ -378,16 +523,23 @@ fn print_report(path: &PathBuf, report: &GuardReport) {
 mod tests {
     use super::*;
 
-    const CSV: &str = "frame,revision,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods\n\
-1,7,10,1,4,4,2,1,0,1,false,L0:4\n\
-2,7,10,1,5,4,2,2,0,2,false,L0:4;L1:1\n";
+    const CSV: &str = "frame,revision,source_exports,complete_page_columns,source_pending_chunks,source_meshed_this_frame,source_failures_total,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods\n\
+1,7,64,4,8,4,0,10,1,4,4,2,1,0,1,false,L0:4\n\
+2,7,80,5,0,4,0,10,1,5,4,2,2,0,2,false,L0:4;L1:1\n";
 
     #[test]
-    fn parses_pr3_csv_format() {
+    fn parses_current_csv_format() {
         let rows = parse_csv(CSV).expect("parse csv");
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].frame, 1);
+        assert_eq!(rows[0].source_exports, 64);
         assert_eq!(rows[1].visible_lods.get(&1), Some(&1));
+    }
+
+    #[test]
+    fn legacy_csv_parses_with_zero_source_evidence() {
+        let legacy = "frame,revision,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods\n1,1,1,1,1,1,0,0,0,0,false,L0:1\n";
+        let rows = parse_csv(legacy).expect("parse legacy csv");
+        assert_eq!(rows[0].source_exports, 0);
     }
 
     #[test]
@@ -395,6 +547,29 @@ mod tests {
         let rows = parse_csv(CSV).expect("parse csv");
         let report = evaluate(&rows, ClodGuardConfig::default());
         assert!(report.failures.is_empty(), "{:?}", report.failures);
+    }
+
+    #[test]
+    fn empty_runtime_evidence_fails() {
+        let legacy = "frame,revision,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods\n1,0,0,0,0,0,0,0,0,0,false,\n";
+        let rows = parse_csv(legacy).expect("parse csv");
+        let report = evaluate(&rows, ClodGuardConfig::default());
+        assert!(report.failures.iter().any(|failure| failure.contains("source exports")));
+        assert!(report.failures.iter().any(|failure| failure.contains("indexed nodes")));
+        assert!(report.failures.iter().any(|failure| failure.contains("rendered pages")));
+    }
+
+    #[test]
+    fn source_failures_fail() {
+        let mut rows = parse_csv(CSV).expect("parse csv");
+        rows[0].source_failures_total = 1;
+        let report = evaluate(&rows, ClodGuardConfig::default());
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("source export failures"))
+        );
     }
 
     #[test]
@@ -413,7 +588,6 @@ mod tests {
     #[test]
     fn missing_active_cut_fails() {
         let mut rows = parse_csv(CSV).expect("parse csv");
-        rows[0].indexed_nodes = 10;
         rows[0].rendered_pages = 0;
         let report = evaluate(&rows, ClodGuardConfig::default());
         assert!(
