@@ -2,6 +2,7 @@ import * as THREE from "three";
 import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
 import { setActiveConstructionTerrainConformHandler } from "../../../construction/construction_terrain_registry.js";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
+import { createPlayableSliceSnapshot } from "../../../qa/playable_slice_snapshot.js";
 import { flushSaveRuntimeOnce, markSaveRegionsDirtyForBounds } from "../../../save/save_runtime.js";
 import { getDigEditRevision, voxelEditCount } from "../../../terrain/terrain.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
@@ -139,6 +140,14 @@ export function runTerrainEditStartup(
   });
 
   if (input.longView.hooks) {
+    input.longView.hooks.getPlayableSliceSnapshot = () => createPlayableSliceSnapshot({
+      player: input.player,
+      constructionController: input.runtime.constructionController,
+      stats: input.longView.hooks?.stats ?? null,
+      terrainRevision: getDigEditRevision(),
+      voxelDeltaCount: voxelEditCount(),
+      pageSizeM: input.cfg.page.chunk_size * input.cfg.page.chunks_per_page,
+    });
     input.longView.hooks.getStreamingRootReadyPageKeys = renderedRootKeys;
     input.longView.hooks.getStreamingResidencySnapshot = () => {
       const farSummary = (window as typeof window & {
