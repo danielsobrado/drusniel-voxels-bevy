@@ -1,6 +1,5 @@
 import { constructionBoundsFor, isFiniteConstructionPosition } from "./construction_bounds.js";
 import { constructionPiecesOverlap } from "./construction_obb.js";
-import { isPlacedPieceSupported } from "./support_state.js";
 import type { ConstructionPieceDef, ConstructionPlacementConfig, PlacedConstructionPiece } from "./types.js";
 
 export interface PersistedConstructionPlacementValidationInput {
@@ -14,9 +13,7 @@ export interface PersistedConstructionPlacementValidationInput {
   allowLegacySupportMetadata?: boolean;
 }
 
-function validateBoundsAndOverlap(
-  input: PersistedConstructionPlacementValidationInput,
-): { valid: boolean; reason: string | null } {
+function validateBoundsAndOverlap(input: PersistedConstructionPlacementValidationInput): { valid: boolean; reason: string | null } {
   const { piece, placed, piecesById, worldCells, config } = input;
   if (!isFiniteConstructionPosition(placed.position)) return { valid: false, reason: "invalid position" };
 
@@ -44,7 +41,7 @@ function validateBoundsAndOverlap(
 }
 
 function hasLegacySupportMetadata(placed: PlacedConstructionPiece): boolean {
-  return placed.grounded === undefined && placed.parentIds === undefined;
+  return placed.grounded === undefined && placed.connectionIds === undefined && placed.parentIds === undefined;
 }
 
 function validatePersistedSupport(
@@ -57,13 +54,13 @@ function validatePersistedSupport(
     if (!allowLegacySupportMetadata) return { valid: false, reason: "missing support" };
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
-  if (placed.unsupported === true) return { valid: true, reason: null };
-  if (placed.grounded === true) {
-    return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
-  }
-  const parentIds = placed.parentIds ?? [];
-  if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) return { valid: true, reason: null };
-  return { valid: false, reason: "unsupported" };
+  if (placed.grounded === true) return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
+  const connectionIds = placed.connectionIds ?? placed.parentIds ?? [];
+  if (placed.unsupported === true && connectionIds.length === 0) return { valid: true, reason: null };
+  const loadedIds = new Set(placedPieces.map((entry) => entry.id));
+  return connectionIds.some((connectionId) => loadedIds.has(connectionId))
+    ? { valid: true, reason: null }
+    : { valid: false, reason: "unsupported" };
 }
 
 export function validateStrictPersistedConstructionPlacement(
