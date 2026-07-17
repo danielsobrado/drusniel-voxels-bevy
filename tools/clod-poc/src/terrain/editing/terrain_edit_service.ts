@@ -43,7 +43,12 @@ import {
   type TerrainEditDirtyReason,
 } from "./terrain_edit_dirty_queue.js";
 import { gameplayDiagnostics } from "../../player/gameplay_diagnostics.js";
-import { DEFAULT_EDIT_COMMAND_EXPIRY_MS } from "../../player/edit_commands.js";
+import {
+  DEFAULT_EDIT_COMMAND_EXPIRY_MS,
+  validateEditCommand,
+  type EditCommandDenialReason,
+  type ModedEditCommand,
+} from "../../player/edit_commands.js";
 
 const DIG_REBUILD_DEBOUNCE_MS = 40;
 const VEGETATION_REBUILD_DEBOUNCE_MS = 160;
@@ -67,6 +72,20 @@ export interface TerrainEditVegetationState {
   understoryEnabled: boolean;
 }
 
+export interface TerrainSpellEditRequest {
+  spellId: string;
+  command: ModedEditCommand;
+  edit: DigEdit;
+}
+
+export interface TerrainSpellEditResult {
+  committed: boolean;
+  changed: boolean;
+  converged: boolean;
+  reason: string | null;
+  editRevision: number;
+}
+
 export interface TerrainEditServiceDeps {
   clodWorker: ClodWorkerClient;
   terrainRaycast: TerrainRaycastService;
@@ -86,6 +105,7 @@ export interface TerrainEditServiceDeps {
   editAuthority?: PlayerEditAuthorityConfig;
   getAuthorityOrigin?: () => THREE.Vector3 | null;
   getAuthorityCounters?: () => Record<string, number> | null;
+  getInteractionMode?: () => string;
   editReadyAt?: (x: number, z: number) => boolean;
   protectedAt?: (x: number, z: number) => boolean;
   dirtyQueue?: TerrainEditDirtyQueue;
@@ -102,6 +122,10 @@ export interface TerrainEditServiceDeps {
 export interface TerrainEditService {
   scheduleDig(ray: THREE.Ray): void;
   runDigNow(ray: THREE.Ray): Promise<void>;
+  commitSpellTerrainEdit(
+    request: TerrainSpellEditRequest,
+    onAuthoritativeCommit?: () => void,
+  ): Promise<TerrainSpellEditResult>;
   scheduleConstructionTerrainConform(request: ConstructionTerrainConformRequest): void;
   previewConstructionTerrainConform(request: ConstructionTerrainConformRequest): ConstructionTerrainConformPreview;
   commitConstructionTerrainConform(request: ConstructionTerrainConformRequest): Promise<ConstructionTerrainConformCommitResult>;
@@ -130,6 +154,11 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   const authorityOrigin = (): THREE.Vector3 | null => deps.getAuthorityOrigin?.() ?? null;
   const authorityCounters = (): Record<string, number> | null => deps.getAuthorityCounters?.() ?? null;
+
+  const addCounter = (key: string, amount = 1): void => {
+    const counters = authorityCounters();
+    if (counters) counters[key] = (counters[key] ?? 0) + amount;
+  };
 
   const flushVegetationRebuilds = () => {
     vegetationFlushTimer = null;
@@ -203,6 +232,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   const dirtyReasonFor = (edit: DigEdit, label: string): TerrainEditDirtyReason => {
     if (label.startsWith("construction")) return "build";
+    if (label.startsWith("spell:")) return "spell";
     return edit.op === "add" ? "raise" : "dig";
   };
 
@@ -351,6 +381,82 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }
   };
 
+  const recordSpellDenial = (reason: EditCommandDenialReason): void => {
+    addCounter("spell_world_casts_denied");
+    addCounter(`spell_world_casts_denied_${reason}`);
+    if (reason === "expired") gameplayDiagnostics.add("edit_commands_expired");
+    else if (reason === "revision_mismatch") gameplayDiagnostics.add("edit_commands_denied_revision");
+    else if (reason === "out_of_range") gameplayDiagnostics.add("edit_commands_denied_distance");
+    else if (reason === "mode_changed") gameplayDiagnostics.add("edit_commands_denied_mode");
+    else if (reason === "target_moved") gameplayDiagnostics.add("edit_commands_denied_target_moved");
+    else gameplayDiagnostics.add("edits_denied_not_ready");
+    deps.setLastDigSummary(`spell terrain edit rejected: ${reason}`);
+    deps.updateInfo();
+  };
+
+  const commitSpellTerrainEdit = async (
+    request: TerrainSpellEditRequest,
+    onAuthoritativeCommit?: () => void,
+  ): Promise<TerrainSpellEditResult> => enqueueEditOperation(`spell:${request.spellId}`, async () => {
+    const point = new THREE.Vector3(...request.command.targetPosition);
+    const actor = authorityOrigin() ?? point;
+    const verdict = validateEditCommand(request.command, {
+      nowMs: performance.now(),
+      currentTerrainRevision: getDigEditRevision(),
+      actorPosition: actor,
+      maxDistanceM: deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER,
+      currentMode: deps.getInteractionMode?.() ?? request.command.mode,
+      targetReady: deps.editReadyAt?.(point.x, point.z) ?? true,
+    });
+    if (!verdict.allowed) {
+      recordSpellDenial(verdict.reason);
+      return { committed: false, changed: false, converged: false, reason: verdict.reason, editRevision: getDigEditRevision() };
+    }
+    if (deps.protectedAt?.(point.x, point.z) || !terrainCommitAllowed(point)) {
+      recordSpellDenial("not_ready");
+      return { committed: false, changed: false, converged: false, reason: "not_ready", editRevision: getDigEditRevision() };
+    }
+
+    const edit: DigEdit = { ...request.edit, x: point.x, y: point.y, z: point.z };
+    const transaction = voxelTransactionFromDigEdit(edit);
+    addCounter("spell_world_casts_accepted");
+    if (transaction.deltas.length === 0) {
+      runDerivedUpdate("spell VFX commit callback", () => onAuthoritativeCommit?.());
+      addCounter("spell_world_convergence_completed");
+      return { committed: true, changed: false, converged: true, reason: null, editRevision: getDigEditRevision() };
+    }
+
+    const hadPaintedTerrain = hasPaintedTerrainEdits();
+    applyDigEditTransaction(transaction, edit);
+    const committedRevision = getDigEditRevision();
+    runDerivedUpdate("spell VFX commit callback", () => onAuthoritativeCommit?.());
+    addCounter("spell_world_edits_committed");
+    const status = await performEditRebuild(edit, transaction, { point }, edit.r, `spell:${request.spellId}`);
+    if (status === "rejected") {
+      rollbackDigEditTransaction(transaction);
+      syncPaintedTerrainState(hadPaintedTerrain);
+      addCounter("spell_world_convergence_failed");
+      return { committed: false, changed: false, converged: false, reason: "terrain_rebuild_rejected", editRevision: getDigEditRevision() };
+    }
+
+    syncPaintedTerrainState(hadPaintedTerrain);
+    try {
+      await deps.clodWorker.flushParents();
+      if (vegetationFlushTimer !== null) clearTimeout(vegetationFlushTimer);
+      flushVegetationRebuilds();
+    } catch (error) {
+      addCounter("spell_world_convergence_failed");
+      const reason = error instanceof Error ? error.message : String(error);
+      return { committed: true, changed: true, converged: false, reason, editRevision: committedRevision };
+    }
+    const counters = authorityCounters();
+    if (counters) counters["spell_world_last_converged_revision"] = committedRevision;
+    addCounter("spell_world_convergence_completed");
+    deps.setLastDigSummary(`${request.spellId} spell terrain converged at revision ${committedRevision}`);
+    deps.updateInfo();
+    return { committed: true, changed: true, converged: true, reason: null, editRevision: committedRevision };
+  });
+
   const previewConstructionTerrainConform = (
     request: ConstructionTerrainConformRequest,
   ): ConstructionTerrainConformPreview => {
@@ -484,6 +590,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   return {
     scheduleDig,
     runDigNow: (ray) => runDigExclusive(ray),
+    commitSpellTerrainEdit,
     scheduleConstructionTerrainConform: (request) => { void commitConstructionTerrainConform(request); },
     previewConstructionTerrainConform,
     commitConstructionTerrainConform,
