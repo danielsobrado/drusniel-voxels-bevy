@@ -16,6 +16,10 @@ export interface ConstructionPersistenceLoadInput {
   worldCells: number;
   placement: ConstructionPlacementConfig;
   addPiece: (piece: PlacedConstructionPiece) => boolean;
+  overlapCandidatesFor?: (
+    placed: PlacedConstructionPiece,
+    piece: ConstructionPieceDef,
+  ) => readonly PlacedConstructionPiece[];
 }
 
 export interface ConstructionPersistenceLoadResult {
@@ -113,6 +117,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
       pending.push(placed);
     }
 
+    const loadedPieceIds = new Set(input.placedPieces.map((piece) => piece.id));
     let madeProgress = true;
     while (pending.length > 0 && madeProgress) {
       madeProgress = false;
@@ -128,6 +133,8 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
           piece,
           placed,
           placedPieces: input.placedPieces,
+          overlapCandidates: input.overlapCandidatesFor?.(placed, piece),
+          loadedPieceIds,
           piecesById: input.piecesById,
           worldCells: input.worldCells,
           config: input.placement,
@@ -135,6 +142,7 @@ export function loadConstructionPieces(input: ConstructionPersistenceLoadInput):
         if (validation.valid) {
           pending.splice(index, 1);
           if (input.addPiece(placed)) {
+            loadedPieceIds.add(placed.id);
             madeProgress = true;
           } else {
             console.warn(`[construction] skipped saved piece ${placed.id}: runtime insertion rejected`);
