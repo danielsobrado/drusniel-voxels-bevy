@@ -39,7 +39,12 @@ import type { ClodPageNode } from "../../../types.js";
 import { primePageAttributesBudgeted } from "../../../terrain/geometry/page_geometry.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../../stream/world_center_debug.js";
 import { expandClodOwnershipToLevelZero } from "../../../stream/clod_ownership_keys.js";
-import { runTerrainStreamingWork } from "../../../stream/terrain_streaming_control.js";
+import {
+  runTerrainStreamingWork,
+  setTerrainStreamingEnabled,
+  terrainStreamingGeneration,
+  terrainStreamingIsEnabled,
+} from "../../../stream/terrain_streaming_control.js";
 import type { StreamCursor } from "../../../stream/stream_cursor.js";
 import {
   heightfieldTilesReadyForPage,
@@ -147,11 +152,12 @@ function mirrorStreamingClodRootCounters(
   counters: Record<string, number> | undefined,
   stats: StreamingClodRootStats,
   radiusM: number,
+  ranThisFrame: boolean,
 ): void {
   const target = counters ?? globalClodCounters();
   if (!target) return;
   const probeStaleDiscardsTotal = probeNoPressureStaleEquivalent(stats);
-  if (stats !== lastAccumulatedStreamStats) {
+  if (ranThisFrame && stats !== lastAccumulatedStreamStats) {
     lastAccumulatedStreamStats = stats;
     streamBuiltTotal += stats.builtThisFrame;
     streamApplyPagesTotal += stats.applyPagesThisFrame;
@@ -161,12 +167,12 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_radius_m"] = radiusM;
   target["live_clod_stream_required_pages"] = stats.requiredPages;
   target["live_clod_stream_cached_pages"] = stats.cachedPages;
-  target["live_clod_stream_built_this_frame"] = stats.builtThisFrame;
+  target["live_clod_stream_built_this_frame"] = ranThisFrame ? stats.builtThisFrame : 0;
   target["live_clod_stream_built_total"] = streamBuiltTotal;
   target["live_clod_stream_failed_pages"] = stats.failedPages;
-  target["live_clod_stream_evictions"] = stats.evictions;
+  target["live_clod_stream_evictions"] = ranThisFrame ? stats.evictions : 0;
   target["live_clod_stream_evictions_total"] = streamEvictionsTotal;
-  target["live_clod_stream_build_ms"] = stats.buildMs;
+  target["live_clod_stream_build_ms"] = ranThisFrame ? stats.buildMs : 0;
   target["live_clod_stream_pending_pages"] = stats.pendingPages;
   target["live_clod_stream_waiting_on_tiles"] = stats.waitingOnTiles;
   target["live_clod_stream_build_budget"] = stats.buildBudget;
@@ -187,15 +193,15 @@ function mirrorStreamingClodRootCounters(
   target["live_clod_stream_parent_coverage_violations"] = stats.parentCoverageViolations;
   target["live_clod_stream_ready_pages"] = stats.readyPages;
   target["live_clod_stream_ready_frontier_m"] = stats.readyFrontierM;
-  target["live_clod_stream_apply_pages_this_frame"] = stats.applyPagesThisFrame;
+  target["live_clod_stream_apply_pages_this_frame"] = ranThisFrame ? stats.applyPagesThisFrame : 0;
   target["live_clod_stream_apply_pages_total"] = streamApplyPagesTotal;
-  target["live_clod_stream_apply_ms"] = stats.applyMs;
-  target["live_clod_stream_stale_discards"] = stats.staleDiscards;
+  target["live_clod_stream_apply_ms"] = ranThisFrame ? stats.applyMs : 0;
+  target["live_clod_stream_stale_discards"] = ranThisFrame ? stats.staleDiscards : 0;
   target["live_clod_stream_stale_discards_total"] = streamStaleDiscardsTotal;
-  target["live_clod_stream_worker_build_ms"] = stats.workerBuildMs;
-  target["live_clod_stream_worker_transfer_bytes"] = stats.workerTransferBytes;
+  target["live_clod_stream_worker_build_ms"] = ranThisFrame ? stats.workerBuildMs : 0;
+  target["live_clod_stream_worker_transfer_bytes"] = ranThisFrame ? stats.workerTransferBytes : 0;
   target["live_clod_stream_inflight_ms"] = stats.inflightMs;
-  target["live_clod_stream_scheduled_budget_cost"] = stats.scheduledBudgetCost;
+  target["live_clod_stream_scheduled_budget_cost"] = ranThisFrame ? stats.scheduledBudgetCost : 0;
   target["live_clod_stream_worker_build_failures"] = stats.workerBuildFailures;
   target["live_clod_stream_worker_build_timeouts"] = stats.workerBuildTimeouts;
   target["live_clod_stream_transition_enabled"] = stats.transitionEnabled;
@@ -250,6 +256,7 @@ export function runFrameLoopStartup(
 ): void {
   const { input, session } = ctx;
   const { searchParams, clodRuntime, cfg, state, renderer, scene, camera, controls, player, interaction, terrainColliders, terrainRaycast, worldCells, maxTerrainLevel, longView, floatingOrigin } = input;
+  setTerrainStreamingEnabled(state.terrainStreamingEnabled);
   const { postProcess, skyEnvironment, currentPostProcessSettings, currentLighting, selectionController, updateSelection, pageTransitionMode, crossfadeStep, nearFieldBubbleController, nodeLabelOverlay, views, farShellController } = input.terrainView;
   const { shadowProxyController, shadowProxyDebugState, getShadowProxyConfig } = input.terrainView;
 
@@ -337,28 +344,9 @@ export function runFrameLoopStartup(
   const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
   const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;
   const rootTransitionEnabled = enabledParam(searchParams, "liveClodRootTransition") && input.app.isWebGpu;
-  // Apply the acceptance-proven streaming budgets whenever the streamed controller is enabled.
-  // The library defaults (1 build / 1 apply per frame, 128 cached pages) starve interactive
-  // infinite-islands runs: pages appear at the horizon faster than one worker round-trip per page.
   const streamBudgetProfile = usesInteractiveStreamingBudgets(longView.queryScene);
-  // Creating one L1 root view (material + geometry) can cost tens of milliseconds. Keep
-  // streamed pages in the controller's ready queue until their attributes and render view
-  // are resident; the previous roots remain visible instead of paying that cost in the
-  // root-switch selection pass.
   const VIEW_PREWARM_BUDGET_MS = 1;
-  // ?viewPrewarmCompile=0 disables the compileAsync half of pre-warming for A/B
-  // attribution. The frozen-build pair fable90-b2-compile-on/off measured OFF as
-  // uniformly worse (moving fps p5 21.9 -> 13.3, p95 45.8 -> 75.5), so ON is the default:
-  // Dawn's async pipeline path compiles driver PSOs off-thread, and pipelines first
-  // *used* later then hit warm caches instead of stalling the submit.
   const viewPrewarmCompileEnabled = searchParams.get("viewPrewarmCompile") !== "0";
-  // One whole-scene compileAsync once the world has largely materialized: the movement-
-  // start camera turn otherwise first-draws never-rendered material families in a single
-  // submit, observed as a 300-800ms native (program) block in the CPU profile. PSOs are
-  // per material variant, so one visible instance of each family warms the whole class.
-  // Opt-in (?sceneCompileWarm=1): its only measurement so far ran while the machine was
-  // under unrelated load and is not attributable, so the default stays off until a clean
-  // A/B supports it.
   const SCENE_PIPELINE_WARM_FRAME = 600;
   const sceneCompileWarmEnabled = searchParams.get("sceneCompileWarm") === "1";
   let sceneCompileWarmFired = false;
@@ -375,13 +363,6 @@ export function runFrameLoopStartup(
     void compile.call(renderer, scene, camera).catch(() => undefined);
   };
   const precompileViewPipelines = (mesh: THREE.Mesh): Promise<unknown> | null => {
-    // WebGPU pipelines, bind groups, and geometry uploads otherwise happen at the mesh's
-    // first *visible* draw — all at once on the root-switch frame (renderMs spikes in the
-    // 100-700ms class). compileAsync builds them ahead of time against the real scene so
-    // cache keys match the later render. The scene traversal inside compileAsync runs
-    // synchronously and skips invisible objects, so the mesh is made visible only for the
-    // duration of the call — the actual render happens later in the frame, after the flag
-    // is already restored.
     if (!viewPrewarmCompileEnabled || !input.app.isWebGpu) return null;
     const compile = (renderer as unknown as {
       compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera, targetScene?: THREE.Scene | null) => Promise<unknown>;
@@ -395,16 +376,7 @@ export function runFrameLoopStartup(
       mesh.visible = wasVisible;
     }
   };
-  // Root switches create many views before any old view is disposed, so the material
-  // recycle pool is empty exactly when the burst hits unless it is topped up ahead of
-  // time; one pre-built material per idle frame keeps switch-time creation to uniform
-  // writes on pooled handles. Sized to a typical switch set.
   const MATERIAL_RESERVE_TARGET = 32;
-  // Warm draw (?viewPrewarmDraw=1): render ONE real triangle of a freshly pre-warmed
-  // page for exactly one frame. Zero-count draws are skipped before the driver compiles
-  // anything, so the earlier zero-range experiment proved nothing about PSO compilation;
-  // a single real triangle forces the driver through the full pipeline + buffer upload
-  // in the real pass. The triangle is actual terrain at its true position — imperceptible.
   const viewWarmDrawEnabled = searchParams.get("viewPrewarmDraw") === "1";
   let warmDrawView: ReturnType<typeof input.terrainView.renderNodeCache.get> | null = null;
   const restoreWarmDraw = (): void => {
@@ -475,7 +447,14 @@ export function runFrameLoopStartup(
       durationFrames: positiveIntegerParam(searchParams, "liveClodRootTransitionFrames") ?? DEFAULT_ROOT_TRANSITION_FRAMES,
       maxExtraRoots: nonNegativeIntegerParam(searchParams, "liveClodRootTransitionMaxExtraRoots") ?? DEFAULT_ROOT_TRANSITION_MAX_EXTRA_ROOTS,
     },
-    buildPages: async (coords) => await input.clodWorker.buildStreamRoots(coords),
+    buildPages: async (coords) => {
+      const generation = terrainStreamingGeneration();
+      const built = await input.clodWorker.buildStreamRoots(coords);
+      if (!terrainStreamingIsEnabled() || generation !== terrainStreamingGeneration()) {
+        return { nodes: [], buildMs: 0, transferBytes: 0 };
+      }
+      return built;
+    },
     canBuildPage: (coord) => heightfieldTilesReadyForPage(
       input.clodWorker,
       coord,
@@ -528,6 +507,7 @@ export function runFrameLoopStartup(
         return nextStats;
       },
     );
+    const streamRanThisFrame = streamStats !== previousStats;
     if (farClipmapController && farClipmapUsesRefinedOwnership) {
       farClipmapController.setRefinedClodReadiness({
         innerRadiusM: state.bubbleRadius,
@@ -536,7 +516,7 @@ export function runFrameLoopStartup(
         readyPageKeys: expandClodOwnershipToLevelZero(streamingClodRootController.readyPageKeys()),
       });
     }
-    mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius);
+    mirrorStreamingClodRootCounters(longView.hooks?.stats?.counters, streamStats, liveClodRootRadius, streamRanThisFrame);
     runTerrainStreamingWork(state.terrainStreamingEnabled, maybeWarmScenePipelines);
     finishStreamViewPreparationFrame();
     updateSelection();
