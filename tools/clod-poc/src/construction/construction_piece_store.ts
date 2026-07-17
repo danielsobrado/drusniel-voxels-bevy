@@ -233,14 +233,18 @@ export class ConstructionPieceStore {
     const material = mesh.material as THREE.MeshStandardMaterial;
     const base = this.baseColors.get(id);
     if (!material?.color || !base) return;
-    if (!this.stabilityVisualizationActive) {
-      material.color.copy(base);
-      return;
-    }
     const def = this.piecesById.get(placed.typeId);
     const profile = def
       ? constructionSupportProfile(def, placed.material ?? def.material, this.supportProfiles)
       : DEFAULT_CONSTRUCTION_SUPPORT_PROFILES.wood;
+    if (placed.unsupported === true) {
+      material.color.setHex(constructionStabilityColorHex(0, profile.maxSupport, false, this.collapseThreshold));
+      return;
+    }
+    if (!this.stabilityVisualizationActive) {
+      material.color.copy(base);
+      return;
+    }
     material.color.setHex(constructionStabilityColorHex(
       placed.stability ?? 0,
       profile.maxSupport,

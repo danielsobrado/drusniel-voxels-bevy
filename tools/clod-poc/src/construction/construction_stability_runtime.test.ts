@@ -63,29 +63,21 @@ describe("construction stability runtime", () => {
     expect(runtime.pendingCollapseCount()).toBe(0);
   });
 
-  it("queues the unsupported island after both bridge supports are removed", () => {
+  it("marks an unsupported island without deleting it", () => {
     const { pieces, graph, runtime } = bridge();
     for (const id of ["left", "right"]) {
       const removal = removePiece(pieces, graph, id);
       runtime.markDirtyMany(removal.disconnectedNeighborIds);
       runtime.recompute(pieces);
     }
-    expect(runtime.pendingCollapseCount()).toBe(3);
-    expect(pieces.every((piece) => piece.unsupported === true)).toBe(true);
-  });
 
-  it("recomputes after every paced collapse", () => {
-    const { pieces, graph, runtime } = bridge();
-    for (const id of ["left", "right"]) {
-      const removal = removePiece(pieces, graph, id);
-      runtime.markDirtyMany(removal.disconnectedNeighborIds);
-      runtime.recompute(pieces);
-    }
-    const step = runtime.processPendingCollapses(pieces, (id) => removePiece(pieces, graph, id));
-    expect(step.collapsedIds).toHaveLength(3);
-    expect(step.recomputes).toBeGreaterThan(0);
-    expect(pieces).toHaveLength(0);
+    expect(pieces).toHaveLength(3);
+    expect(pieces.every((piece) => piece.unsupported === true)).toBe(true);
     expect(runtime.pendingCollapseCount()).toBe(0);
+
+    const step = runtime.processPendingCollapses(pieces, (id) => removePiece(pieces, graph, id));
+    expect(step).toEqual({ collapsedIds: [], recomputes: 0 });
+    expect(pieces).toHaveLength(3);
   });
 
   it("does not touch an unrelated island", () => {
