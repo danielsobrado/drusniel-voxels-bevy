@@ -1,4 +1,13 @@
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
+import {
+  surfaceBoundsChangedSince,
+  surfaceRevisionAt,
+  type SurfaceBounds,
+} from "../stream/surface_cache_revisions.js";
+import {
+  terrainStreamingGeneration,
+  terrainStreamingIsEnabled,
+} from "../stream/terrain_streaming_control.js";
 import type { FarSummaryTile } from "./types.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import type { FarSummaryConfig } from "./config.js";
@@ -37,6 +46,10 @@ export interface FarSummaryGpuRuntimeOptions {
   nowMs?: () => number;
   builderFactory?: () => Promise<FarSummaryGpuBuilder | null>;
   dispatch?: (input: FarSummaryGpuRuntimeDispatchInput) => Promise<FarSummaryGpuDispatchOrFallbackResult>;
+  surfaceRevision?: () => number;
+  surfaceChangedSince?: (bounds: SurfaceBounds, revision: number) => boolean;
+  streamingEnabled?: () => boolean;
+  streamingGeneration?: () => number;
 }
 
 export interface FarSummaryGpuRuntimeDispatchInput {
@@ -155,8 +168,10 @@ export class FarSummaryGpuRuntime {
     }
     this.statsState.scheduledFrames++;
     this.inFlight = true;
+    const buildSurfaceRevision = this.surfaceRevision();
+    const buildStreamingGeneration = this.streamingGeneration();
 
-    void this.dispatchPlan(plan, frameIndex)
+    void this.dispatchPlan(plan, frameIndex, buildSurfaceRevision, buildStreamingGeneration)
       .catch((error) => {
         if (this.disposed) return;
         this.statsState.lastError = error instanceof Error ? error.message : String(error);
@@ -180,7 +195,12 @@ export class FarSummaryGpuRuntime {
     }
   }
 
-  private async dispatchPlan(plan: FarSummaryGpuPlan, frameIndex: number): Promise<void> {
+  private async dispatchPlan(
+    plan: FarSummaryGpuPlan,
+    frameIndex: number,
+    buildSurfaceRevision: number,
+    buildStreamingGeneration: number,
+  ): Promise<void> {
     const nowMs = this.nowMs();
     const dispatch = this.options.dispatch ?? dispatchFarSummaryGpuPlanOrFallback;
     const result = await dispatch({
@@ -199,7 +219,11 @@ export class FarSummaryGpuRuntime {
     if (result.fallbackTiles > 0 && result.fallbackReason !== null) {
       this.options.onFallbackRequests?.(dirtyTilesToRequests(plan.dirtyTiles), result.fallbackReason);
     }
-    const committed = this.commitGpuReadbacks(plan, result, frameIndex, nowMs);
+    const streamingCompletionValid = this.streamingEnabled()
+      && this.streamingGeneration() === buildStreamingGeneration;
+    const committed = streamingCompletionValid
+      ? this.commitGpuReadbacks(plan, result, frameIndex, nowMs, buildSurfaceRevision)
+      : 0;
     this.statsState.lastCommittedTiles = committed;
     this.statsState.totalCommittedTiles += committed;
     if (result.ok && result.counters.deviceReady === 1) {
@@ -227,6 +251,7 @@ export class FarSummaryGpuRuntime {
     result: FarSummaryGpuDispatchOrFallbackResult,
     frameIndex: number,
     nowMs: number,
+    buildSurfaceRevision: number,
   ): number {
     if (!this.options.gpuConfig.commitToCache || !result.ok || !this.options.commitTile) return 0;
     let committed = 0;
@@ -238,7 +263,10 @@ export class FarSummaryGpuRuntime {
         const count = descriptor.tileCells * descriptor.tileCells;
         const records = readback.records.slice(offset, offset + count);
         if (records.length < count) continue;
-        this.options.commitTile(farSummaryGpuCellRecordsToTile({ descriptor, records, frameIndex, nowMs }));
+        const tile = farSummaryGpuCellRecordsToTile({ descriptor, records, frameIndex, nowMs });
+        tile.builtAtGlobalRevision = buildSurfaceRevision;
+        if (this.surfaceChangedSince(tileBounds(tile), buildSurfaceRevision)) continue;
+        this.options.commitTile(tile);
         committed++;
       }
     }
@@ -316,6 +344,32 @@ export class FarSummaryGpuRuntime {
   private nowMs(): number {
     return this.options.nowMs?.() ?? performance.now();
   }
+
+  private surfaceRevision(): number {
+    return this.options.surfaceRevision?.() ?? surfaceRevisionAt();
+  }
+
+  private surfaceChangedSince(bounds: SurfaceBounds, revision: number): boolean {
+    return this.options.surfaceChangedSince?.(bounds, revision) ?? surfaceBoundsChangedSince(bounds, revision);
+  }
+
+  private streamingEnabled(): boolean {
+    return this.options.streamingEnabled?.() ?? terrainStreamingIsEnabled();
+  }
+
+  private streamingGeneration(): number {
+    return this.options.streamingGeneration?.() ?? terrainStreamingGeneration();
+  }
+}
+
+function tileBounds(tile: FarSummaryTile): SurfaceBounds {
+  const sizeM = tile.cellSizeM * tile.tileCells;
+  return {
+    minX: tile.originX,
+    minZ: tile.originZ,
+    maxX: tile.originX + sizeM,
+    maxZ: tile.originZ + sizeM,
+  };
 }
 
 function dirtyTilesToRequests(tiles: readonly FarSummaryGpuDirtyTile[]): FarSummaryRingRequest[] {
