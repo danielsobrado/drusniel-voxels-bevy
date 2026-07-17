@@ -31,6 +31,10 @@ export class MemoryCache {
     return entry.record;
   }
 
+  peek(key: string): ClodCacheStoredRecord | null {
+    return this.entries.get(key)?.record ?? null;
+  }
+
   put(key: string, record: ClodCacheStoredRecord): string[] {
     const storedBytes = record.header.storedBytes;
     const existing = this.entries.get(key);
