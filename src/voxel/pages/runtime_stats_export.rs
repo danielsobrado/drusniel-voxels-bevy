@@ -1,9 +1,7 @@
 //! Machine-readable CLOD runtime stats.
 //!
-//! The web PoC has a QA/debug surface for the active CLOD cut. This module is
-//! the Bevy-side bridge for deterministic benches: it samples the current
-//! runtime selection counters and writes a small CSV that can be attached to a
-//! bench run or consumed by a regression guard.
+//! The CSV combines source-build progress with the active page cut so a bench cannot confuse
+//! an empty CLOD runtime with a successful low-cost run.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -14,7 +12,9 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 
 use super::render::ClodPageMeshTag;
+use super::runtime::PageExportCache;
 use super::selection::{ClodPageSelectionIndex, ClodSelectionRuntimeStats};
+use super::source_meshing::PageSourceMeshingStats;
 
 #[derive(Resource, Clone, Debug)]
 pub(crate) struct ClodRuntimeStatsExportSettings {
@@ -68,6 +68,8 @@ pub(crate) fn clod_runtime_stats_export_system(
     settings: Res<ClodRuntimeStatsExportSettings>,
     mut state: ResMut<ClodRuntimeStatsExportState>,
     selection_stats: Res<ClodSelectionRuntimeStats>,
+    source_stats: Res<PageSourceMeshingStats>,
+    cache: Res<PageExportCache>,
     index: Res<ClodPageSelectionIndex>,
     page_query: Query<(&ClodPageMeshTag, &Visibility)>,
 ) {
@@ -85,6 +87,11 @@ pub(crate) fn clod_runtime_stats_export_system(
     let snapshot = ClodRuntimeStatsSnapshot {
         frame: state.frame,
         revision: index.revision.unwrap_or_default(),
+        source_exports: cache.exports.len(),
+        complete_page_columns: cache.complete_pages.len(),
+        source_pending_chunks: source_stats.pending_chunks,
+        source_meshed_this_frame: source_stats.meshed_this_frame,
+        source_failures_total: source_stats.failures_total,
         indexed_nodes: index.nodes().count(),
         root_nodes: index.root_count(),
         visible_pages,
@@ -97,14 +104,14 @@ pub(crate) fn clod_runtime_stats_export_system(
         visible_lods: visible_lod_counts_field(&visible_counts),
     };
 
-    if let Err(err) = append_snapshot_csv(&settings.csv_path, &snapshot) {
-        let msg = err.to_string();
-        if state.last_error.as_deref() != Some(msg.as_str()) {
+    if let Err(error) = append_snapshot_csv(&settings.csv_path, &snapshot) {
+        let message = error.to_string();
+        if state.last_error.as_deref() != Some(message.as_str()) {
             warn!(
-                "Failed to export CLOD runtime stats to {:?}: {msg}",
+                "Failed to export CLOD runtime stats to {:?}: {message}",
                 settings.csv_path
             );
-            state.last_error = Some(msg);
+            state.last_error = Some(message);
         }
     } else {
         state.last_error = None;
@@ -115,6 +122,11 @@ pub(crate) fn clod_runtime_stats_export_system(
 struct ClodRuntimeStatsSnapshot {
     frame: u64,
     revision: u64,
+    source_exports: usize,
+    complete_page_columns: usize,
+    source_pending_chunks: usize,
+    source_meshed_this_frame: usize,
+    source_failures_total: u64,
     indexed_nodes: usize,
     root_nodes: usize,
     visible_pages: usize,
@@ -164,14 +176,19 @@ fn append_snapshot_csv(path: &PathBuf, snapshot: &ClodRuntimeStatsSnapshot) -> s
     if needs_header {
         writeln!(
             file,
-            "frame,revision,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods"
+            "frame,revision,source_exports,complete_page_columns,source_pending_chunks,source_meshed_this_frame,source_failures_total,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods"
         )?;
     }
     writeln!(
         file,
-        "{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         snapshot.frame,
         snapshot.revision,
+        snapshot.source_exports,
+        snapshot.complete_page_columns,
+        snapshot.source_pending_chunks,
+        snapshot.source_meshed_this_frame,
+        snapshot.source_failures_total,
         snapshot.indexed_nodes,
         snapshot.root_nodes,
         snapshot.visible_pages,
@@ -204,14 +221,20 @@ mod tests {
     fn csv_export_writes_header_once() {
         let mut path = env::temp_dir();
         path.push(format!(
-            "drusniel-clod-runtime-stats-{}.csv",
-            std::process::id()
+            "drusniel-clod-runtime-stats-{}-{}.csv",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
         ));
         let _ = fs::remove_file(&path);
 
         let snapshot = ClodRuntimeStatsSnapshot {
             frame: 1,
             revision: 7,
+            source_exports: 64,
+            complete_page_columns: 4,
+            source_pending_chunks: 8,
+            source_meshed_this_frame: 4,
+            source_failures_total: 0,
             indexed_nodes: 10,
             root_nodes: 1,
             visible_pages: 4,
@@ -229,7 +252,19 @@ mod tests {
         let text = fs::read_to_string(&path).expect("csv text");
         assert_eq!(text.lines().count(), 3);
         assert_eq!(text.matches("frame,revision").count(), 1);
+        assert!(text.contains("source_exports"));
+        assert!(text.contains(",64,4,8,4,0,10,"));
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_state_clears_error_after_success() {
+        let mut state = ClodRuntimeStatsExportState {
+            frame: 0,
+            last_error: Some("old".to_string()),
+        };
+        state.last_error = None;
+        assert_eq!(state.last_error(), None);
     }
 }
