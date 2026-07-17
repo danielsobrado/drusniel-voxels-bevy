@@ -44,13 +44,21 @@ export class SparsePropExclusionBitsets {
    * bits, refcounts, and `prop_delta_count` exactly equivalent to a full rebuild.
    */
   applyDelta(previous: SavedPropInstance | null, next: SavedPropInstance | null): void {
-    if (previous?.environmental) this.deltaCountValue--;
-    if (next?.environmental) this.deltaCountValue++;
+    const nextDeltaCount = this.deltaCountValue
+      - (previous?.environmental ? 1 : 0)
+      + (next?.environmental ? 1 : 0);
+    if (nextDeltaCount < 0) throw new Error("prop exclusion delta count underflow");
+
     const previousAddress = excludingAddress(previous);
     const nextAddress = excludingAddress(next);
-    if (previousAddress && nextAddress && sameAddress(previousAddress, nextAddress)) return;
+    if (previousAddress && nextAddress && sameAddress(previousAddress, nextAddress)) {
+      this.deltaCountValue = nextDeltaCount;
+      return;
+    }
+
     if (previousAddress) this.adjustCandidate(previousAddress, -1);
     if (nextAddress) this.adjustCandidate(nextAddress, +1);
+    this.deltaCountValue = nextDeltaCount;
   }
 
   /**
@@ -67,18 +75,23 @@ export class SparsePropExclusionBitsets {
   private adjustCandidate(address: PropCandidateAddress, delta: number): void {
     const mapKey = key(address.tileKey, address.layer);
     let refCounts = this.refCountsByTileLayer.get(mapKey);
-    if (!refCounts) {
-      refCounts = new Map<number, number>();
-      this.refCountsByTileLayer.set(mapKey, refCounts);
-    }
-    const current = refCounts.get(address.candidateIndex) ?? 0;
+    const current = refCounts?.get(address.candidateIndex) ?? 0;
     const next = current + delta;
     if (next < 0) throw new Error(`prop exclusion refcount underflow at ${mapKey}#${address.candidateIndex}`);
-    if (next === 0) refCounts.delete(address.candidateIndex);
-    else refCounts.set(address.candidateIndex, next);
-    if (current > 0 === next > 0) return;
+
+    if (next > 0) {
+      if (!refCounts) {
+        refCounts = new Map<number, number>();
+        this.refCountsByTileLayer.set(mapKey, refCounts);
+      }
+      refCounts.set(address.candidateIndex, next);
+    } else {
+      refCounts?.delete(address.candidateIndex);
+    }
+
+    if ((current > 0) === (next > 0)) return;
     this.setBit(mapKey, address, next > 0);
-    if (refCounts.size === 0) {
+    if (refCounts?.size === 0) {
       this.refCountsByTileLayer.delete(mapKey);
       this.wordsByTileLayer.delete(mapKey);
     }
