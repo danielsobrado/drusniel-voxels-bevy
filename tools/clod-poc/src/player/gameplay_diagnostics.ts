@@ -32,10 +32,15 @@ export type GameplayCounterKey =
   | "collider_build_total_ms"
   | "collider_sync_frame_builds" // MeshBVH built outside the rebuild pipeline (potential frame stall)
   | "collider_sync_frame_build_ms"
+  | "collider_worker_build_count"
+  | "collider_worker_build_total_ms"
+  | "collider_worker_failures"
+  | "collider_worker_fallback_builds"
   | "collider_jobs_queued"
   | "collider_jobs_inflight"
   | "collider_jobs_completed"
   | "collider_jobs_cancelled_stale"
+  | "collider_jobs_requeued_origin_shift"
   | "collider_apply_ms"
   | "collider_queue_latency_ms" // latest job: enqueue → install
   | "collider_queue_latency_max_ms"
