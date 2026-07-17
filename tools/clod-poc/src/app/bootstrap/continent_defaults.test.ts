@@ -17,6 +17,18 @@ describe("continent defaults", () => {
     });
   });
 
+  it("routes RPG scenes through continent while preserving benchmark identity", () => {
+    for (const scene of ["rpg-village", "rpg-player-base"]) {
+      const params = new URLSearchParams({ scene });
+
+      expect(applyContinentDefaults(params)).toBe(true);
+      expect(params.get("scene")).toBe("continent");
+      expect(params.get("rpgDensityScene")).toBe(scene);
+      expect(params.get("continentHydrology")).toBe("1");
+      expect(params.get("farClipmapMode")).toBe("replace");
+    }
+  });
+
   it("preserves every explicit override", () => {
     const params = new URLSearchParams(
       "scene=continent&continentHydrology=0&heightTiles=0&liveClodRootGpuMesher=0&farSummaryLayout=1&farClipmap=0&farClipmapMode=overlay&farClipmapInnerRadius=512",
