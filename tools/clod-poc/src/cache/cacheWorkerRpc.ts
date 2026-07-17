@@ -3,7 +3,14 @@ import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 export type CacheRpcRequest =
   | { type: "cacheRpc"; requestId: number; op: "probe" }
   | { type: "cacheRpc"; requestId: number; op: "get"; key: string }
-  | { type: "cacheRpc"; requestId: number; op: "put"; key: string; record: ClodCacheStoredRecord }
+  | {
+      type: "cacheRpc";
+      requestId: number;
+      op: "put";
+      key: string;
+      record: ClodCacheStoredRecord;
+      streamingGeneration: number;
+    }
   | { type: "cacheRpc"; requestId: number; op: "delete"; key: string }
   | { type: "cacheRpc"; requestId: number; op: "clear" }
   | { type: "cacheRpc"; requestId: number; op: "keys" };
