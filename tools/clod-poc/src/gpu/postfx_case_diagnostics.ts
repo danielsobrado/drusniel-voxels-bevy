@@ -1,9 +1,10 @@
 import {
-  DEFAULT_POST_PROCESS_SETTINGS,
-  parseGodRaysModeParam,
+  applyPostProcessQueryOverrides,
+  parseAerialPerspectiveSettings,
+  parsePostProcessSettings,
   type GodRaysMode,
 } from "../environment/postprocess_settings.js";
-import { DEFAULT_POSTFX_ATMOSPHERE } from "./postfx_atmosphere.js";
+import { DEFAULT_POSTFX_AUTO_EXPOSURE } from "./postfx_auto_exposure.js";
 import { parsePostFxStageFlags, stageAllowed, type PostFxStage } from "./postfx_stage_flags.js";
 
 export type PostFxCaseStageState = Record<PostFxStage, boolean>;
@@ -28,21 +29,10 @@ const STAGES: readonly PostFxStage[] = [
   "taa",
 ] as const;
 
-function defaultStageState(godRaysMode: GodRaysMode): PostFxCaseStageState {
-  return {
-    aerial: true,
-    autoExposure: true,
-    bloom: true,
-    bounce: false,
-    clouds: true,
-    colorScript: true,
-    contact: false,
-    froxels: DEFAULT_POSTFX_ATMOSPHERE.froxels.enabled,
-    godrays: godRaysMode !== "off",
-    gtao: false,
-    taa: true,
-  };
-}
+const BASE_POST_PROCESS_SETTINGS = {
+  ...parsePostProcessSettings(),
+  ...parseAerialPerspectiveSettings(),
+};
 
 function toSearchParams(input: URLSearchParams | Record<string, string>): URLSearchParams {
   if (input instanceof URLSearchParams) return input;
@@ -62,28 +52,37 @@ function queryFlag(params: URLSearchParams, keys: readonly string[], fallback: b
   return fallback;
 }
 
-function resolveGodRaysMode(params: URLSearchParams): GodRaysMode {
-  const fallback = DEFAULT_POST_PROCESS_SETTINGS.godRaysMode;
-  const raw = params.get("godRays") ?? params.get("godrays");
-  if (raw === null) return fallback;
-  return parseGodRaysModeParam(raw, fallback === "off" ? "cheap" : fallback) ?? fallback;
+function baseStageState(
+  godRaysMode: GodRaysMode,
+  settings: ReturnType<typeof applyPostProcessQueryOverrides>,
+  params: URLSearchParams,
+): PostFxCaseStageState {
+  return {
+    aerial: settings.aerialPerspectiveEnabled,
+    autoExposure: queryFlag(
+      params,
+      ["autoExposure", "autoexposure"],
+      DEFAULT_POSTFX_AUTO_EXPOSURE.enabled,
+    ),
+    bloom: settings.bloomEnabled,
+    bounce: settings.bounceEnabled,
+    clouds: settings.cloudsEnabled,
+    colorScript: true,
+    contact: settings.contactShadowsEnabled,
+    froxels: settings.froxelsEnabled,
+    godrays: godRaysMode !== "off",
+    gtao: settings.gtaoEnabled,
+    taa: settings.taaEnabled,
+  };
 }
 
 export function postFxCaseDiagnostics(input: URLSearchParams | Record<string, string>): PostFxCaseDiagnostics {
   const params = toSearchParams(input);
   const flags = parsePostFxStageFlags(params);
-  const postEnabled = queryFlag(params, ["fx", "post", "postprocess"], true);
-  const godRaysMode = resolveGodRaysMode(params);
-  const stages = defaultStageState(godRaysMode);
-
-  stages.contact = queryFlag(params, ["contact", "contactShadows", "contactshadows"], stages.contact);
-  stages.gtao = queryFlag(params, ["gtao", "ao", "ambientOcclusion", "ambientocclusion"], stages.gtao);
-  stages.bounce = queryFlag(params, ["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], stages.bounce);
-  stages.froxels = queryFlag(
-    params,
-    ["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"],
-    stages.froxels,
-  );
+  const settings = applyPostProcessQueryOverrides(BASE_POST_PROCESS_SETTINGS, params);
+  const postEnabled = settings.enabled && settings.debugMode !== "off";
+  const godRaysMode = settings.godRaysMode;
+  const stages = baseStageState(godRaysMode, settings, params);
 
   for (const stage of STAGES) {
     stages[stage] = postEnabled && stages[stage] && stageAllowed(flags, stage);
