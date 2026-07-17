@@ -22,6 +22,8 @@ function snapshot(overrides: Partial<PlayableSliceSnapshot> = {}): PlayableSlice
     terrain: { revision: 0, voxelDeltaCount: 0 },
     construction: {
       active: false,
+      currentValid: false,
+      currentReason: null,
       placedPieces: 0,
       colliders: 0,
       unsupportedPieces: 0,
@@ -72,6 +74,8 @@ function validReport(): Omit<PlayableSliceRunReport, "passed" | "failures"> {
       terrain: { revision: 1, voxelDeltaCount: 20 },
       construction: {
         active: true,
+        currentValid: true,
+        currentReason: null,
         placedPieces: 1,
         colliders: 1,
         unsupportedPieces: 0,
