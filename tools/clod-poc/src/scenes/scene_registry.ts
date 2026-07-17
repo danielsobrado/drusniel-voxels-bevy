@@ -103,6 +103,18 @@ const BASE_SCENE_REGISTRY: readonly SceneRegistryEntry[] = [
     longView: true,
   },
   {
+    id: "rpg-village",
+    label: "RPG village",
+    phase0ConfigKey: "rpg_village",
+    longView: true,
+  },
+  {
+    id: "rpg-player-base",
+    label: "RPG player base",
+    phase0ConfigKey: "rpg_player_base",
+    longView: true,
+  },
+  {
     id: "cave-test",
     label: "cave test",
     phase0ConfigKey: "cave_test",
