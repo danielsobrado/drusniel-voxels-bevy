@@ -1,10 +1,9 @@
-// Capability + revision readiness (playable-world-contract P1).
+// Capability + revision readiness (playable-world-contract P1/P5).
 //
 // "Ready" is meaningless without *for which action, against which terrain revision*: a
 // collider from revision 40 under revision-43 terrain may be safe to stand on as an
-// explicit stale collider — it is not edit-ready. The contract is data + pure functions
-// over injected residency/revision feeds; capability fields land with their first
-// consumer (movement + terrain edits here; construction/water join in their phases).
+// explicit stale collider — it is not edit-ready. Water readiness is independent and
+// fails closed because unknown water is not dry terrain.
 import type { TerrainColliderStatus, TerrainColliderSet } from "../terrain/terrain_collider.js";
 import type { MovementReadiness } from "../player_controller.js";
 import { voxelOverlayPointIsResident } from "../terrain/voxel_overlay/voxel_overlay.js";
@@ -18,6 +17,8 @@ export type CellFallbackKind = "none" | "frontier_barrier" | "heightfield_certif
 export interface CellReadiness {
   /** Exact or explicitly stale-safe collider (or a certified heightfield column) serves here. */
   movementCollisionReady: boolean;
+  /** Canonical gameplay water authority can answer dry/water here; false means unknown. */
+  waterQueryReady: boolean;
   /** Voxel authority resident and the cell's collider is at the latest revision — edits accepted. */
   terrainEditReady: boolean;
   terrainRevision: number;
@@ -35,6 +36,8 @@ export interface CellReadinessFeeds {
   columnCertified(x: number, z: number): boolean;
   /** Voxel edit authority resident for this cell (edits would be accepted). */
   editAuthorityResidentAt(x: number, z: number): boolean;
+  /** Optional until P5 wiring is present; absent means no water authority is required. */
+  waterQueryReadyAt?(x: number, z: number): boolean;
 }
 
 /**
@@ -63,6 +66,7 @@ export function cellReadinessAt(feeds: CellReadinessFeeds, x: number, z: number)
 
   return {
     movementCollisionReady,
+    waterQueryReady: feeds.waterQueryReadyAt?.(x, z) ?? true,
     terrainEditReady: collider.covered && !stale && feeds.editAuthorityResidentAt(x, z),
     terrainRevision,
     colliderRevision: collider.revision,
@@ -74,11 +78,11 @@ export function cellReadinessAt(feeds: CellReadinessFeeds, x: number, z: number)
 /** Probe shape consumed by the player controller's frontier barrier. */
 export function movementReadinessAt(feeds: CellReadinessFeeds, x: number, z: number): MovementReadiness {
   const readiness = cellReadinessAt(feeds, x, z);
-  if (!readiness.movementCollisionReady) return "blocked";
+  if (!readiness.movementCollisionReady || !readiness.waterQueryReady) return "blocked";
   return readiness.fallbackKind === "heightfield_certified" ? "certified" : "ready";
 }
 
-/** Spawn/teleport gate: authoritative target plus a collision-ready capsule footprint. */
+/** Spawn/teleport gate: authoritative target plus collision- and water-ready capsule footprint. */
 export function teleportTargetReady(
   feeds: CellReadinessFeeds,
   x: number,
@@ -94,7 +98,10 @@ export function teleportTargetReady(
     [x, z - radius],
     [x, z + radius],
   ];
-  return probes.every(([probeX, probeZ]) => cellReadinessAt(feeds, probeX, probeZ).movementCollisionReady);
+  return probes.every(([probeX, probeZ]) => {
+    const readiness = cellReadinessAt(feeds, probeX, probeZ);
+    return readiness.movementCollisionReady && readiness.waterQueryReady;
+  });
 }
 
 /**
@@ -120,7 +127,10 @@ export function appColumnCertified(x: number, z: number): boolean {
   return voxelEditStore.editedYRange(cx, cx + 1, cz, cz + 1) === null;
 }
 
-export function createAppCellReadinessFeeds(deps: { terrainColliders: TerrainColliderSet }): CellReadinessFeeds {
+export function createAppCellReadinessFeeds(deps: {
+  terrainColliders: TerrainColliderSet;
+  waterQueryReadyAt?: (x: number, z: number) => boolean;
+}): CellReadinessFeeds {
   return {
     terrainRevision: () => getDigEditRevision(),
     colliderStatusAt: (x, z) => deps.terrainColliders.colliderStatusAt(x, z),
@@ -128,5 +138,6 @@ export function createAppCellReadinessFeeds(deps: { terrainColliders: TerrainCol
     // The clod-poc voxel edit authority is process-resident everywhere; streamed
     // authorities replace this feed when they land.
     editAuthorityResidentAt: () => true,
+    waterQueryReadyAt: deps.waterQueryReadyAt,
   };
 }

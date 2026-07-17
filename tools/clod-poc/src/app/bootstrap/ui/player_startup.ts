@@ -2,7 +2,11 @@ import * as THREE from "three";
 import { getDigEditRevision, surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
-import { createAppCellReadinessFeeds, teleportTargetReady } from "../../../player/cell_readiness.js";
+import {
+  createAppCellReadinessFeeds,
+  movementReadinessAt,
+  teleportTargetReady,
+} from "../../../player/cell_readiness.js";
 import { createFirstPersonWeapon, createSwordAttackController } from "../../../combat/index.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -38,6 +42,14 @@ export function runPlayerStartup(
   if (!session.digRadiusController) {
     throw new Error("Player startup requires digRadiusController from texture UI startup");
   }
+
+  const waterAuthority = input.runtime.waterController?.authority ?? null;
+  player.attachWaterAuthority(waterAuthority);
+  const playerReadinessFeeds = createAppCellReadinessFeeds({
+    terrainColliders,
+    waterQueryReadyAt: waterAuthority ? (x, z) => waterAuthority.readyAt(x, z) : undefined,
+  });
+  player.attachMovementReadiness((x, z) => movementReadinessAt(playerReadinessFeeds, x, z));
 
   const weapon = createFirstPersonWeapon({ scene, camera });
   const combatController = createSwordAttackController({
@@ -105,7 +117,6 @@ export function runPlayerStartup(
   };
   requestAnimationFrame(updatePlayerInteraction);
 
-  const spawnReadinessFeeds = createAppCellReadinessFeeds({ terrainColliders });
   const playerModeController = createPlayerModeController({
     renderer,
     camera,
@@ -123,11 +134,11 @@ export function runPlayerStartup(
     onBeforeExitMode: () => playerInputController.onBeforeExitMode(),
     resetPlayerInput: () => playerInputController.resetPlayerInput(),
     onStartPlayingFacing: (yaw, pitch) => playerInputController.setPlayerYawPitch(yaw, pitch),
-    // Infinite-island worlds stream terrain around the player; gate the query spawn on streamed-root
-    // safety coverage + colliders so the player never drops through un-meshed ground at startup.
+    // Infinite worlds and cave tests gate spawn against the same collision + water
+    // authority envelope used by runtime movement.
     spawnGateEnabled: window.__drusnielWorldMode?.mode === "infinite_islands"
       || searchParams.get("scene") === "cave-test",
-    movementReadyAt: (x, z) => teleportTargetReady(spawnReadinessFeeds, x, z),
+    movementReadyAt: (x, z) => teleportTargetReady(playerReadinessFeeds, x, z),
   });
 
   const automationHooks = input.longView.hooks;

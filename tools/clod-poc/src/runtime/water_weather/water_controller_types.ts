@@ -8,6 +8,7 @@ import type {
 } from "../../water/index.js";
 import type { WaterField, WaterClipmap } from "../../water/index.js";
 import type { HydrologySystem } from "../../water/hydrologySystem.js";
+import type { EditedWaterAuthoritySource, WaterAuthority } from "../../water/water_authority.js";
 import type { RiverCascadeParticleStats } from "../../water/riverCascadeParticleOverlay.js";
 
 export interface WaterControllerUiState {
@@ -50,6 +51,8 @@ export interface WaterControllerDeps {
 export interface WaterController {
   readonly field: WaterField;
   readonly clipmap: WaterClipmap;
+  readonly authority: WaterAuthority;
+  readonly editedWater: EditedWaterAuthoritySource;
   readonly debugState: WaterDebugState;
   makeVisual(): { depthWrite: boolean } & WaterConfig["visual"];
   setVisible(enabled: boolean): void;

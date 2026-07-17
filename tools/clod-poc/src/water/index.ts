@@ -1,5 +1,6 @@
 export * from "./waterConfig.js";
 export * from "./waterField.js";
+export * from "./water_authority.js";
 export * from "./waterMaterial.js";
 export * from "./waterClipmap.js";
 export * from "./waterClipmapStats.js";

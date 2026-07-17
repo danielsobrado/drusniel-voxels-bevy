@@ -1,4 +1,4 @@
-// Readiness contract tests (playable-world-contract P1.1): answers are per capability
+// Readiness contract tests (playable-world-contract P1/P5): answers are per capability
 // and per revision — a stale collider is stale-safe for movement and NOT edit-ready.
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
@@ -17,18 +17,20 @@ function feeds(overrides: Partial<CellReadinessFeeds>): CellReadinessFeeds {
     colliderStatusAt: () => ({ covered: false, revision: -1, replacementPending: false }),
     columnCertified: () => false,
     editAuthorityResidentAt: () => true,
+    waterQueryReadyAt: () => true,
     ...overrides,
   };
 }
 
 describe("cell readiness contract", () => {
-  it("exact current collider: movement + edit ready, nothing stale", () => {
+  it("exact current collider: movement + water + edit ready, nothing stale", () => {
     const readiness = cellReadinessAt(feeds({
       terrainRevision: () => 3,
       colliderStatusAt: () => ({ covered: true, revision: 3, replacementPending: false }),
     }), 0, 0);
     expect(readiness).toEqual({
       movementCollisionReady: true,
+      waterQueryReady: true,
       terrainEditReady: true,
       terrainRevision: 3,
       colliderRevision: 3,
@@ -53,7 +55,7 @@ describe("cell readiness contract", () => {
     const readiness = cellReadinessAt(feeds({ columnCertified: () => true }), 0, 0);
     expect(readiness.movementCollisionReady).toBe(true);
     expect(readiness.fallbackKind).toBe("heightfield_certified");
-    expect(readiness.terrainEditReady).toBe(false); // no collider = no edit target surface
+    expect(readiness.terrainEditReady).toBe(false);
   });
 
   it("no collider, uncertified (cave/edited/unknown): frontier barrier, nothing ready", () => {
@@ -72,6 +74,18 @@ describe("cell readiness contract", () => {
     expect(readiness.movementCollisionReady).toBe(true);
   });
 
+  it("unknown water blocks movement readiness without pretending collision is missing", () => {
+    const input = feeds({
+      colliderStatusAt: () => ({ covered: true, revision: 0, replacementPending: false }),
+      waterQueryReadyAt: () => false,
+    });
+    const readiness = cellReadinessAt(input, 0, 0);
+    expect(readiness.movementCollisionReady).toBe(true);
+    expect(readiness.waterQueryReady).toBe(false);
+    expect(movementReadinessAt(input, 0, 0)).toBe("blocked");
+    expect(teleportTargetReady(input, 0, 0)).toBe(false);
+  });
+
   it("maps to movement readiness probe values", () => {
     expect(movementReadinessAt(feeds({
       colliderStatusAt: () => ({ covered: true, revision: 0, replacementPending: false }),
@@ -85,7 +99,7 @@ describe("cell readiness contract", () => {
     expect(teleportTargetReady(feeds({ columnCertified: () => true }), 0, 0)).toBe(true);
     expect(teleportTargetReady(feeds({
       colliderStatusAt: () => ({ covered: true, revision: 0, replacementPending: true }),
-    }), 0, 0)).toBe(true); // stale-safe collider is a valid landing envelope
+    }), 0, 0)).toBe(true);
   });
 
   it("does not declare a page-edge target ready when the capsule footprint crosses missing coverage", () => {

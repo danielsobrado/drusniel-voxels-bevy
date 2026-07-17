@@ -1,0 +1,15 @@
+swimming:
+  enabled: true
+  enter_submersion_m: 0.65
+  exit_submersion_m: 0.35
+  surface_submersion_m: 0.85
+  dive_submersion_m: 1.45
+  swim_speed_mps: 5.5
+  acceleration_mps2: 18.0
+  vertical_control_speed_mps: 4.0
+  buoyancy_acceleration_mps2: 20.0
+  max_buoyancy_acceleration_mps2: 30.0
+  horizontal_drag_per_second: 1.5
+  vertical_drag_per_second: 3.5
+  flow_influence: 1.0
+  shore_epsilon_m: 0.05
