@@ -12,6 +12,13 @@ export type CacheRpcRequest =
       streamingGeneration?: number;
     }
   | { type: "cacheRpc"; requestId: number; op: "delete"; key: string }
+  | {
+      type: "cacheRpc";
+      requestId: number;
+      op: "deleteIfMatches";
+      key: string;
+      record: ClodCacheStoredRecord;
+    }
   | { type: "cacheRpc"; requestId: number; op: "clear" }
   | { type: "cacheRpc"; requestId: number; op: "keys" };
 
