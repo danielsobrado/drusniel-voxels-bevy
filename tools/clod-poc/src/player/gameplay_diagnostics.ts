@@ -1,25 +1,23 @@
-// Reason-coded gameplay counters (playable-world-contract P0.3).
+// Reason-coded gameplay counters (playable-world-contract P0-P5).
 //
-// The height fallback, recovery teleport, and collider streaming all fire for a mix of
-// benign and pathological reasons; raw event counts gate nothing meaningful. Every
-// fallback / recovery / barrier / rebuild event records *why*, so acceptance gates can
-// target only real failures (`collider_coverage_missing`, unexplained recoveries) while
-// benign classes (`collider_exact_no_ground` while jumping) stay visible but ungated.
+// Fallback, recovery, streaming, and water-readiness events record why they fired so
+// acceptance gates can distinguish benign safety behavior from authority failures.
 
 /** Reason/event keys with a defined meaning. Gauges (ms, timestamps) share the map. */
 export type GameplayCounterKey =
   // Capsule resolution reasons (one per fixed step where the condition held).
-  | "collider_exact_no_ground" // benign: airborne over covered cells
-  | "collider_coverage_missing" // no collider page covers the capsule column — streaming failure, THIS gates
-  | "collider_stale_frames" // resolved against a collider with a pending replacement (stale-safe policy active)
-  | "fallback_heightfield_certified" // height fallback fired in a certified single-surface column
-  | "fallback_denied_uncertified" // fallback would have fired but the column is not certified (cave/edited)
-  | "frontier_barrier_engagements" // movement stopped at a readiness frontier
+  | "collider_exact_no_ground"
+  | "collider_coverage_missing"
+  | "collider_stale_frames"
+  | "fallback_heightfield_certified"
+  | "fallback_denied_uncertified"
+  | "frontier_barrier_engagements"
+  | "water_query_blocked_steps"
   // Recovery reasons (P3 proven-invalid contract).
-  | "player_recovery_non_finite" // NaN/Infinity in position or velocity
-  | "player_recovery_kill_plane" // below the valid editable volume — true last resort
-  | "player_recovery_missing_collider" // bounded steps falling in a blocked column
-  | "player_recovery_backstop_depth" // crude 32 m sink rule (probe-less worlds / blocked-column backstop)
+  | "player_recovery_non_finite"
+  | "player_recovery_kill_plane"
+  | "player_recovery_missing_collider"
+  | "player_recovery_backstop_depth"
   // Edit command outcomes.
   | "edits_denied_not_ready"
   | "edit_commands_expired"
@@ -30,7 +28,7 @@ export type GameplayCounterKey =
   // Collider build pipeline.
   | "collider_build_count"
   | "collider_build_total_ms"
-  | "collider_sync_frame_builds" // MeshBVH built outside the rebuild pipeline (potential frame stall)
+  | "collider_sync_frame_builds"
   | "collider_sync_frame_build_ms"
   | "collider_worker_build_count"
   | "collider_worker_build_total_ms"
@@ -42,7 +40,7 @@ export type GameplayCounterKey =
   | "collider_jobs_cancelled_stale"
   | "collider_jobs_requeued_origin_shift"
   | "collider_apply_ms"
-  | "collider_queue_latency_ms" // latest job: enqueue → install
+  | "collider_queue_latency_ms"
   | "collider_queue_latency_max_ms"
   // Readiness.
   | "time_to_gameplay_ready_ms";
