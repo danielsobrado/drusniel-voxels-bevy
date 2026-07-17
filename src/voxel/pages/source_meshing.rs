@@ -47,7 +47,9 @@ impl PageSourceMeshingQueue {
         world: &VoxelWorld,
         cache: &PageExportCache,
         cam_chunk: IVec3,
+        near: i32,
         far: i32,
+        chunks_per_page: i32,
     ) {
         self.center = Some(cam_chunk);
         self.world_chunk_count = world.chunk_count();
@@ -55,7 +57,9 @@ impl PageSourceMeshingQueue {
             world.chunk_positions(),
             &cache.exports,
             cam_chunk,
+            near,
             far,
+            chunks_per_page,
         )
         .into();
         self.queued = self.pending.iter().copied().collect();
@@ -84,8 +88,6 @@ impl PageSourceMeshingQueue {
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub(crate) struct PageSourceMeshingStats {
-    pub cached_exports: usize,
-    pub complete_page_columns: usize,
     pub pending_chunks: usize,
     pub meshed_this_frame: usize,
     pub failures_total: u64,
@@ -122,11 +124,46 @@ fn should_refresh_queue(
     false
 }
 
+fn page_coord(position: IVec3, chunks_per_page: i32) -> IVec2 {
+    IVec2::new(
+        position.x.div_euclid(chunks_per_page),
+        position.z.div_euclid(chunks_per_page),
+    )
+}
+
+fn page_min_chebyshev_distance(
+    page: IVec2,
+    cam_chunk: IVec3,
+    chunks_per_page: i32,
+) -> i32 {
+    let min_x = page.x * chunks_per_page;
+    let min_z = page.y * chunks_per_page;
+    let max_x = min_x + chunks_per_page - 1;
+    let max_z = min_z + chunks_per_page - 1;
+    let dx = if cam_chunk.x < min_x {
+        min_x - cam_chunk.x
+    } else if cam_chunk.x > max_x {
+        cam_chunk.x - max_x
+    } else {
+        0
+    };
+    let dz = if cam_chunk.z < min_z {
+        min_z - cam_chunk.z
+    } else if cam_chunk.z > max_z {
+        cam_chunk.z - max_z
+    } else {
+        0
+    };
+    dx.max(dz)
+}
+
 fn source_positions_within_radius(
     positions: impl Iterator<Item = IVec3>,
     exports: &HashMap<IVec3, TerrainMainSurfaceExport>,
     cam_chunk: IVec3,
+    near: i32,
     far: i32,
+    chunks_per_page: i32,
 ) -> Vec<IVec3> {
     let mut candidates = positions
         .filter(|position| {
@@ -135,8 +172,14 @@ fn source_positions_within_radius(
         })
         .collect::<Vec<_>>();
     candidates.sort_by_key(|position| {
+        let page = page_coord(*position, chunks_per_page);
+        let page_distance = page_min_chebyshev_distance(page, cam_chunk, chunks_per_page);
+        let hidden_near_page = page_distance <= near;
         (
-            horizontal_chunk_distance(*position, cam_chunk),
+            hidden_near_page,
+            page_distance,
+            page.x,
+            page.y,
             (position.y - cam_chunk.y).abs(),
             position.x,
             position.z,
@@ -197,7 +240,9 @@ pub(crate) fn clod_pages_source_meshing_system(
 
     let cam_chunk = VoxelWorld::world_to_chunk(camera.translation.as_ivec3());
     let world_chunk_count = world.chunk_count();
+    let near = runtime.cfg.near_field.radius_chunks;
     let far = runtime.source_radius_chunks;
+    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
     let retained = cache.retain_in_radius(cam_chunk, far);
     let invalidated = cache.invalidate_dirty_exports(&world);
     let world_changed = queue.world_chunk_count != world_chunk_count;
@@ -209,7 +254,14 @@ pub(crate) fn clod_pages_source_meshing_system(
         invalidated || retained,
         &mut schedule,
     ) {
-        queue.refresh(&world, &cache, cam_chunk, far);
+        queue.refresh(
+            &world,
+            &cache,
+            cam_chunk,
+            near,
+            far,
+            chunks_per_page,
+        );
     }
 
     let mut cache_inserted = false;
@@ -267,12 +319,10 @@ pub(crate) fn clod_pages_source_meshing_system(
         || (cache_inserted
             && (queue.is_empty() || schedule.complete_page_refresh_in_frames == 0));
     if refresh_complete_pages {
-        cache.refresh_complete_pages(&world, runtime.cfg.page.chunks_per_page as i32);
+        cache.refresh_complete_pages(&world, chunks_per_page);
         schedule.complete_page_refresh_in_frames = COMPLETE_PAGE_REFRESH_INTERVAL_FRAMES;
     }
 
-    stats.cached_exports = cache.exports.len();
-    stats.complete_page_columns = cache.complete_pages.len();
     stats.pending_chunks = queue.pending_len();
 }
 
@@ -306,7 +356,14 @@ mod tests {
             IVec3::new(5, 0, 0),
         ];
 
-        let queued = source_positions_within_radius(positions.into_iter(), &exports, cam, 4);
+        let queued = source_positions_within_radius(
+            positions.into_iter(),
+            &exports,
+            cam,
+            0,
+            4,
+            4,
+        );
 
         assert_eq!(
             queued,
@@ -319,28 +376,59 @@ mod tests {
     }
 
     #[test]
-    fn source_queue_prioritizes_horizontal_then_vertical_distance() {
+    fn visible_page_sources_are_prioritized_before_hidden_near_pages() {
         let positions = vec![
-            IVec3::new(4, 5, 0),
-            IVec3::new(2, 8, 0),
-            IVec3::new(2, 1, 0),
-            IVec3::new(3, 0, 0),
+            IVec3::new(0, 0, 0),
+            IVec3::new(8, 0, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(9, 0, 0),
         ];
 
         let queued = source_positions_within_radius(
             positions.into_iter(),
             &HashMap::new(),
             IVec3::ZERO,
-            8,
+            6,
+            12,
+            4,
         );
 
         assert_eq!(
             queued,
             vec![
-                IVec3::new(2, 1, 0),
-                IVec3::new(2, 8, 0),
-                IVec3::new(3, 0, 0),
-                IVec3::new(4, 5, 0),
+                IVec3::new(8, 0, 0),
+                IVec3::new(9, 0, 0),
+                IVec3::new(0, 0, 0),
+                IVec3::new(1, 0, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn source_queue_groups_chunks_by_page_before_vertical_order() {
+        let positions = vec![
+            IVec3::new(8, 5, 0),
+            IVec3::new(4, 8, 0),
+            IVec3::new(8, 1, 0),
+            IVec3::new(4, 1, 0),
+        ];
+
+        let queued = source_positions_within_radius(
+            positions.into_iter(),
+            &HashMap::new(),
+            IVec3::ZERO,
+            0,
+            16,
+            4,
+        );
+
+        assert_eq!(
+            queued,
+            vec![
+                IVec3::new(4, 1, 0),
+                IVec3::new(4, 8, 0),
+                IVec3::new(8, 1, 0),
+                IVec3::new(8, 5, 0),
             ]
         );
     }
