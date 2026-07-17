@@ -1,0 +1,74 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ClodCacheStoredRecord } from "./cacheTypes.js";
+import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
+import {
+  dispatchCacheRpcResponse,
+  WorkerRemotePersistentStore,
+} from "./workerRemotePersistentStore.js";
+import {
+  resetTerrainStreamingControlForTests,
+  setTerrainStreamingEnabled,
+} from "../stream/terrain_streaming_control.js";
+
+const postMessage = vi.fn();
+
+function cacheRecord(streamingGeneration?: number): ClodCacheStoredRecord {
+  return {
+    header: {
+      schemaVersion: 1,
+      artifactKind: "clod-stream-root-node",
+      key: "stream-root",
+      createdAtUnixMs: 0,
+      builderVersion: "test",
+      generatorVersion: "test",
+      worldSeed: "test",
+      sourceRevision: "0",
+      configHash: "test",
+      sourceHash: "test",
+      uncompressedBytes: 1,
+      storedBytes: 1,
+      compression: "none",
+      checksum: "test",
+      metadata: streamingGeneration === undefined
+        ? {}
+        : { terrainStreamingGeneration: streamingGeneration },
+    },
+    payload: new Uint8Array([1]).buffer,
+  };
+}
+
+beforeEach(() => {
+  postMessage.mockReset();
+  resetTerrainStreamingControlForTests();
+  vi.stubGlobal("self", { postMessage });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("WorkerRemotePersistentStore streaming generation", () => {
+  it("sends the originating stream-root generation instead of the later worker state", async () => {
+    const store = new WorkerRemotePersistentStore();
+    setTerrainStreamingEnabled(false);
+    setTerrainStreamingEnabled(true);
+
+    const pending = store.put("stream-root", cacheRecord(0));
+    const request = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "put" }>;
+
+    expect(request.streamingGeneration).toBe(0);
+    dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: false });
+    await pending;
+  });
+
+  it("uses the worker current generation for cache records without an operation stamp", async () => {
+    const store = new WorkerRemotePersistentStore();
+    setTerrainStreamingEnabled(false);
+    setTerrainStreamingEnabled(true);
+
+    const pending = store.put("generic", cacheRecord());
+    const request = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "put" }>;
+
+    expect(request.streamingGeneration).toBe(2);
+    dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: true });
+    await pending;
+  });
+});
