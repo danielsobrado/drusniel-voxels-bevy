@@ -47,7 +47,7 @@ describe("earth spell world convergence", () => {
     expect(Object.isFrozen(prepared!.request.command)).toBe(true);
   });
 
-  it("waits for pipeline readiness and plays VFX only after the authoritative commit", async () => {
+  it("waits for warmup, commits authority, then waits for runtime queues", async () => {
     let resolveReady: () => void = () => undefined;
     const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
     const prepared = prepareEarthSpellCast(
@@ -69,11 +69,15 @@ describe("earth spell world convergence", () => {
       order.push("vfx");
       return true;
     });
+    const waitForDerivedConvergence = vi.fn(async () => {
+      order.push("runtime-queues");
+    });
 
     const execution = executePreparedEarthSpellCast(prepared, {
       ready,
       terrainEditService: { commitSpellTerrainEdit },
       playVfx,
+      waitForDerivedConvergence,
     });
     await Promise.resolve();
     expect(commitSpellTerrainEdit).not.toHaveBeenCalled();
@@ -81,7 +85,35 @@ describe("earth spell world convergence", () => {
     resolveReady();
     const result = await execution;
     expect(result).toEqual(convergedResult);
-    expect(order).toEqual(["authority", "vfx", "derived"]);
+    expect(order).toEqual(["authority", "vfx", "derived", "runtime-queues"]);
+    expect(waitForDerivedConvergence).toHaveBeenCalledOnce();
+  });
+
+  it("returns a failed convergence result when runtime queues time out", async () => {
+    const prepared = prepareEarthSpellCast(
+      { point: new THREE.Vector3(2, 3, 4) },
+      DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG,
+      { terrainRevision: 2, actor: "player", mode: "playing", nowMs: 0 },
+    )!;
+    const onResult = vi.fn();
+    const result = await executePreparedEarthSpellCast(prepared, {
+      ready: Promise.resolve(),
+      terrainEditService: {
+        commitSpellTerrainEdit: vi.fn(async (): Promise<TerrainSpellEditResult> => convergedResult),
+      },
+      playVfx: vi.fn(() => true),
+      waitForDerivedConvergence: vi.fn(async () => {
+        throw new Error("collider convergence timeout");
+      }),
+      onResult,
+    });
+
+    expect(result).toEqual({
+      ...convergedResult,
+      converged: false,
+      reason: "collider convergence timeout",
+    });
+    expect(onResult).toHaveBeenCalledWith(result);
   });
 
   it("does not play VFX when command validation denies the terrain edit", async () => {
@@ -98,6 +130,7 @@ describe("earth spell world convergence", () => {
       editRevision: 3,
     };
     const playVfx = vi.fn(() => true);
+    const waitForDerivedConvergence = vi.fn();
 
     const result = await executePreparedEarthSpellCast(prepared, {
       ready: Promise.resolve(),
@@ -105,9 +138,11 @@ describe("earth spell world convergence", () => {
         commitSpellTerrainEdit: vi.fn(async (): Promise<TerrainSpellEditResult> => denied),
       },
       playVfx,
+      waitForDerivedConvergence,
     });
 
     expect(result).toEqual(denied);
     expect(playVfx).not.toHaveBeenCalled();
+    expect(waitForDerivedConvergence).not.toHaveBeenCalled();
   });
 });
