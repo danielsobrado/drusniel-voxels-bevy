@@ -39,7 +39,15 @@ export class ConstructionPieceStore {
 
     const stored = clonePlacedPiece(placed);
     const material = stored.material ?? piece.material;
-    const mesh = new THREE.Mesh(createPieceGeometry(piece), this.materialFactory(material));
+    const geometry = createPieceGeometry(piece);
+    let pieceMaterial: THREE.Material;
+    try {
+      pieceMaterial = this.materialFactory(material);
+    } catch (error) {
+      geometry.dispose();
+      throw error;
+    }
+    const mesh = new THREE.Mesh(geometry, pieceMaterial);
     mesh.name = `construction-${stored.typeId}`;
     mesh.position.set(stored.position[0], stored.position[1], stored.position[2]);
     mesh.rotation.set(0, stored.rotationQuarterTurns * Math.PI * 0.5, 0);
@@ -149,7 +157,13 @@ export class ConstructionPieceStore {
   }
 
   dispose(): void {
-    for (const mesh of this.meshes) {
+    for (let index = 0; index < this.meshes.length; index += 1) {
+      const placed = this.pieces[index];
+      if (placed) {
+        this.snapIndex.removeEntity(placed.id);
+        this.overlapIndex.removeEntity(placed.id);
+      }
+      const mesh = this.meshes[index]!;
       this.root.remove(mesh);
       disposeMesh(mesh);
     }
