@@ -69,7 +69,7 @@ export function createTerrainColliderRemoteBuilder(): TerrainColliderRemoteBuild
       ? new Uint16Array(response.indexBuffer)
       : new Uint32Array(response.indexBuffer);
     request.resolve({
-      serialized: { roots: response.roots, index },
+      serialized: { roots: response.roots, index, indirectBuffer: null },
       buildMs: response.buildMs,
     });
   };

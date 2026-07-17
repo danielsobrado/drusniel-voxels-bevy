@@ -44,6 +44,10 @@ export interface StoneHydrologyWater {
 
 export interface StoneNodeMaterialDebugOptions {
   classColors?: boolean;
+  /** Per-group draw capacity when instances are packed (class x variant x lod) group-major. */
+  groupCap?: number;
+  /** Draw-group count per class, class-ordered (large, medium, small). */
+  classGroupCounts?: readonly [number, number, number];
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -158,11 +162,12 @@ export function createStoneNodeMaterial(
     STONE_MIN_BASE_COLOR.z,
   ));
   if (debug.classColors && instanceBuffers) {
-    const perClass = Math.max(1, Math.floor(instanceBuffers.capacity / STONE_CLASS_COUNT));
-    const classIndex: TslNode = floor(float(instanceIndex).div(float(perClass)));
-    const classColor: TslNode = classIndex.lessThan(0.5).select(
+    const groupCap = Math.max(1, Math.floor(debug.groupCap ?? instanceBuffers.capacity / STONE_CLASS_COUNT));
+    const groupCounts = debug.classGroupCounts ?? [1, 1, 1];
+    const group: TslNode = floor(float(instanceIndex).div(float(groupCap)));
+    const classColor: TslNode = group.lessThan(float(groupCounts[0])).select(
       vec3(0.95, 0.30, 0.16),
-      classIndex.lessThan(1.5).select(vec3(0.96, 0.72, 0.18), vec3(0.24, 0.78, 0.92)),
+      group.lessThan(float(groupCounts[0] + groupCounts[1])).select(vec3(0.96, 0.72, 0.18), vec3(0.24, 0.78, 0.92)),
     );
     rock = mix(rock, classColor, STONE_DEBUG_CLASS_BLEND);
   }

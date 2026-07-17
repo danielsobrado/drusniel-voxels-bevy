@@ -4,6 +4,7 @@ import { getTerrainFieldCoreConfig, resolveDigEdits, type ResolvedDigEdit } from
 import { composeUnderstoryRingShader } from "./wgsl_modules.js";
 import type { UnderstorySettings } from "../understory/understory_config.js";
 import {
+  UNDERSTORY_RING_CLASS_COUNT,
   UNDERSTORY_RING_CLASS_STRIDE_F32,
   UNDERSTORY_RING_GROUP_COUNT,
   UNDERSTORY_RING_PARAM_BYTES,
@@ -24,7 +25,7 @@ import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_worl
 import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 import { GpuTimestampRecorder } from "../diagnostics/gpu_timestamp_recorder.js";
 
-const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
+const CLASS_PARAMS_BYTES = UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 const ACTIVE_SLOT_SENTINEL = 0xffffffff;
@@ -69,7 +70,8 @@ export interface UnderstoryGpuRingDispatchParams {
   centerZ: number;
   worldCells: number;
   maxInstancesPerGroup: number;
-  indexCounts: [number, number, number, number, number, number];
+  /** Geometry index counts per (class x tier) draw group. */
+  indexCounts: ArrayLike<number>;
   frustumPlanes: ArrayLike<number>;
   hydroEnabled?: boolean;
   /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled);
@@ -102,7 +104,7 @@ export class UnderstoryGpuRingCompute {
   private readonly hydroTexture: GPUTexture;
   private readonly hydroSampler: GPUSampler;
   private readonly paramScratch = new ArrayBuffer(UNDERSTORY_RING_PARAM_BYTES);
-  private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
+  private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private readonly timestamps: GpuTimestampRecorder;
   private readonly slotPrefilterCache = new VegetationSlotPrefilterCache();

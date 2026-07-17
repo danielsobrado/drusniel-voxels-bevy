@@ -1,8 +1,15 @@
 const UNDERSTORY_WORKGROUP_SIZE: u32 = 64u;
-const UNDERSTORY_GROUP_COUNT: u32 = 6u;
+const UNDERSTORY_CLASS_COUNT: u32 = 6u;
+const UNDERSTORY_TIER_COUNT: u32 = 2u;
+// Draw groups are (class x tier): group = class * 2 + tier (0 = near, 1 = far).
+const UNDERSTORY_GROUP_COUNT: u32 = 12u;
 const UNDERSTORY_INDIRECT_STRIDE_U32: u32 = 5u;
 const UNDERSTORY_CLASS_STRIDE_F32: u32 = 12u;
 const UNDERSTORY_ACTIVE_SLOT_SENTINEL: u32 = 4294967295u;
+// Near tier keeps full geometry inside this fraction of the ring radius.
+const UNDERSTORY_NEAR_TIER_FRACTION: f32 = 0.55;
+// Acceptance fades out over the last metres of the ring so the boundary never pops.
+const UNDERSTORY_RING_EDGE_FADE_M: f32 = 14.0;
 const UNDERSTORY_RIVER_CLEAR_M: f32 = 0.45;
 const UNDERSTORY_FERN_START_M: f32 = 1.2;
 const UNDERSTORY_FERN_END_M: f32 = 8.0;
@@ -12,6 +19,7 @@ struct UnderstoryRingParams {
   center_radius: vec4<f32>, accept_a: vec4<f32>, accept_b: vec4<f32>, ecology_a: vec4<f32>, ecology_b: vec4<f32>,
   ecology_c: vec4<f32>, settings_u: vec4<u32>, settings_extra: vec4<u32>, class_index_counts: vec4<u32>,
   hydro_params: vec4<f32>, planes: array<vec4<f32>, 6>, hydro_atlas: vec4<f32>,
+  group_index_counts: array<vec4<u32>, 3>,
 };
 @group(0) @binding(0) var<uniform> params: UnderstoryRingParams;
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
@@ -257,9 +265,12 @@ fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
   }
   return true;
 }
-fn append_understory_cell(group: u32, wc: vec2<f32>, height: f32, normal_y: f32) {
+fn append_understory_cell(cls: u32, dist: f32, wc: vec2<f32>, height: f32, normal_y: f32) {
   let max_per_group = params.settings_u.x;
   if (max_per_group == 0u) { return; }
+  let near_radius = params.center_radius.z * UNDERSTORY_NEAR_TIER_FRACTION;
+  let tier = select(0u, 1u, dist >= near_radius);
+  let group = cls * UNDERSTORY_TIER_COUNT + tier;
   let slot = atomicAdd(&counters[group], 1u);
   if (slot >= max_per_group) { return; }
   out_cell[group * max_per_group + slot] = vec4<f32>(wc.x, wc.y, height, normal_y);
@@ -292,29 +303,34 @@ fn process_understory_slot(slot: u32) {
   if (ground < 0.0) { return; }
   let river_band = river_understory_band(hydro);
   let ecology = apply_river_understory_ecology(sample_understory_ecology(wpos.x, wpos.y, height, normal.y, ground), river_band);
-  let acceptance = understory_acceptance(ecology);
+  let edge_fade = 1.0 - understory_smoothstep(
+    params.center_radius.z - UNDERSTORY_RING_EDGE_FADE_M,
+    params.center_radius.z,
+    dist,
+  );
+  let acceptance = understory_acceptance(ecology) * edge_fade;
   if (understory_hash(wc, 809u) >= acceptance) { return; }
   let min_tree_influence = params.accept_b.y;
   if (ecology.forest_influence + river_band.z * 0.32 < min_tree_influence) { return; }
   var total_weight: f32 = 0.0;
   var weights: array<f32, 6>;
-  for (var g: u32 = 0u; g < UNDERSTORY_GROUP_COUNT; g++) {
+  for (var g: u32 = 0u; g < UNDERSTORY_CLASS_COUNT; g++) {
     weights[g] = understory_class_weight(g, ecology, height, normal.y, material);
     total_weight += weights[g];
   }
   if (total_weight <= 0.0) { return; }
   let roll = understory_hash(wc, 409u) * total_weight;
-  var selected_group: u32 = 0u;
+  var selected_class: u32 = 0u;
   var cursor: f32 = roll;
-  for (var g: u32 = 0u; g < UNDERSTORY_GROUP_COUNT; g++) {
+  for (var g: u32 = 0u; g < UNDERSTORY_CLASS_COUNT; g++) {
     cursor -= weights[g];
-    if (cursor <= 0.0) { selected_group = g; break; }
+    if (cursor <= 0.0) { selected_class = g; break; }
   }
-  if (understory_hash(wc, 509u) > min(1.0, class_params[selected_group * UNDERSTORY_CLASS_STRIDE_F32 + 1u])) { return; }
-  if (selected_group == 4u || selected_group == 5u) {
+  if (understory_hash(wc, 509u) > min(1.0, class_params[selected_class * UNDERSTORY_CLASS_STRIDE_F32 + 1u])) { return; }
+  if (selected_class == 4u || selected_class == 5u) {
     if (understory_pcg2d(floor(wc / 2.0), params.settings_u.z + 7777u).x > 0.55) { return; }
   }
-  append_understory_cell(selected_group, wc, height, normal.y);
+  append_understory_cell(selected_class, dist, wc, height, normal.y);
 }
 @compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)
 fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -334,15 +350,17 @@ fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
   indirect_args[base + 1u] = min(instance_count, params.settings_u.x);
   indirect_args[base + 2u] = 0u; indirect_args[base + 3u] = 0u; indirect_args[base + 4u] = 0u;
 }
+fn understory_group_index_count(group: u32) -> u32 {
+  let entry = params.group_index_counts[group / 4u];
+  let lane = group % 4u;
+  if (lane == 0u) { return entry.x; }
+  if (lane == 1u) { return entry.y; }
+  if (lane == 2u) { return entry.z; }
+  return entry.w;
+}
 @compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)
 fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
   let group = id.x;
   if (group >= UNDERSTORY_GROUP_COUNT) { return; }
-  var index_count: u32;
-  if (group < 4u) {
-    index_count = params.class_index_counts[group];
-  } else {
-    index_count = params.settings_extra[group - 4u];
-  }
-  write_draw_args(group, index_count, atomicLoad(&counters[group]));
+  write_draw_args(group, understory_group_index_count(group), atomicLoad(&counters[group]));
 }

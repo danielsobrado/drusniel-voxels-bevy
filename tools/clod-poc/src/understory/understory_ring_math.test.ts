@@ -22,9 +22,12 @@ import {
   understoryRingHash,
   understoryRingSlotCount,
   understoryRingTerrainGate,
+  UNDERSTORY_RING_CLASS_COUNT,
   UNDERSTORY_RING_CLASS_STRIDE_F32,
   UNDERSTORY_RING_GROUP_COUNT,
   UNDERSTORY_RING_PARAM_BYTES,
+  UNDERSTORY_RING_TIER_COUNT,
+  understoryRingGroupTier,
   understoryWorldCellFromSlot,
 } from "./understory_ring_math.js";
 
@@ -33,11 +36,15 @@ function settings(overrides: Partial<UnderstorySettings> = {}): UnderstorySettin
 }
 
 describe("understory ring group layout", () => {
-  it("maps every class to a stable group index and back", () => {
-    expect(UNDERSTORY_RING_GROUP_COUNT).toBe(UNDERSTORY_CLASSES.length);
+  it("maps every class x tier to a stable group index and back", () => {
+    expect(UNDERSTORY_RING_GROUP_COUNT).toBe(UNDERSTORY_CLASSES.length * UNDERSTORY_RING_TIER_COUNT);
     UNDERSTORY_CLASSES.forEach((cls, index) => {
-      expect(understoryRingGroupIndex(cls)).toBe(index);
-      expect(understoryRingGroupClass(index)).toBe(cls);
+      for (let tier = 0; tier < UNDERSTORY_RING_TIER_COUNT; tier++) {
+        const group = understoryRingGroupIndex(cls, tier);
+        expect(group).toBe(index * UNDERSTORY_RING_TIER_COUNT + tier);
+        expect(understoryRingGroupClass(group)).toBe(cls);
+        expect(understoryRingGroupTier(group)).toBe(tier);
+      }
     });
   });
 
@@ -66,9 +73,9 @@ describe("understory ring grid sizing", () => {
     expect(understoryRingSlotCount(s)).toBe(grid * grid);
   });
 
-  it("splits maxVisible evenly across class groups", () => {
+  it("splits maxVisible evenly across class x tier groups", () => {
     const s = settings();
-    s.gpu.maxVisible = 12000;
+    s.gpu.maxVisible = 24000;
     expect(understoryRingGroupCapacity(s)).toBe(2000);
   });
 
@@ -138,17 +145,19 @@ describe("understory terrain gate", () => {
 });
 
 describe("understory ring readback resolution", () => {
-  it("clamps counts to capacity and flags overflow", () => {
+  it("clamps counts to capacity, sums tiers per class, and flags overflow", () => {
     const cap = 100;
-    const raw = [10, 100, 150, 0, 50, 99];
+    const raw = [10, 20, 100, 150, 0, 5, 50, 60, 99, 1, 2, 3];
     const resolved = resolveUnderstoryRingReadbackCounts(raw, cap);
-    expect(resolved.groupCounts).toEqual([10, 100, 100, 0, 50, 99]);
+    expect(resolved.groupCounts).toEqual([10, 20, 100, 100, 0, 5, 50, 60, 99, 1, 2, 3]);
     expect(resolved.overflowed).toBe(true);
-    expect(resolved.counts[understoryRingGroupClass(2)]).toBe(100);
+    // Class 1 (fern) sums its near + far tiers, both clamped to cap.
+    expect(resolved.counts[understoryRingGroupClass(2)]).toBe(200);
+    expect(resolved.counts[understoryRingGroupClass(0)]).toBe(30);
   });
 
   it("does not flag overflow when all groups are within capacity", () => {
-    const resolved = resolveUnderstoryRingReadbackCounts([1, 2, 3, 4, 5, 6], 100);
+    const resolved = resolveUnderstoryRingReadbackCounts([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 100);
     expect(resolved.overflowed).toBe(false);
   });
 
@@ -162,12 +171,13 @@ describe("understory ring param packing", () => {
   it("writes globals at the documented lanes", () => {
     const s = settings();
     s.seed = 4242;
+    const indexCounts = [36, 18, 48, 24, 60, 30, 36, 18, 12, 6, 12, 6];
     const buffer = packUnderstoryRingParams(s, {
       centerX: 100,
       centerZ: 200,
       worldCells: 1024,
       maxInstancesPerGroup: 2000,
-      indexCounts: [36, 48, 60, 36, 12, 12],
+      indexCounts,
       frustumPlanes: new Float32Array(24).fill(0).map((_, i) => i % 4 === 3 ? 1_000_000 : 0),
     });
     expect(buffer.byteLength).toBe(UNDERSTORY_RING_PARAM_BYTES);
@@ -183,20 +193,16 @@ describe("understory ring param packing", () => {
     expect(u32[25]).toBe(understoryRingGrid(s));
     expect(u32[26]).toBe(4242);
     expect(u32[27]).toBe(UNDERSTORY_RING_GROUP_COUNT);
-    // lane 7: counts 4 and 5
-    expect(u32[28]).toBe(12);
-    expect(u32[29]).toBe(12);
-    // lane 8: counts 0..3
-    expect(u32[32]).toBe(36);
-    expect(u32[33]).toBe(48);
-    expect(u32[34]).toBe(60);
-    expect(u32[35]).toBe(36);
+    // Per-group index counts live in the tail array (group_index_counts).
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+      expect(u32[68 + group]).toBe(indexCounts[group]);
+    }
   });
 
   it("packs one class param row per class", () => {
     const s = settings();
     const rows = packUnderstoryRingClassParams(s);
-    expect(rows.length).toBe(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
+    expect(rows.length).toBe(UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
     UNDERSTORY_CLASSES.forEach((cls, index) => {
       const base = index * UNDERSTORY_RING_CLASS_STRIDE_F32;
       expect(rows[base + 0]).toBeCloseTo(s.classes[cls].weight);

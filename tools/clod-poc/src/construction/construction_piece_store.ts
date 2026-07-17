@@ -239,8 +239,13 @@ export class ConstructionPieceStore {
     }
     const def = this.piecesById.get(placed.typeId);
     const profile = def
-      ? constructionSupportProfile(def, placed.material, this.supportProfiles)
+      ? constructionSupportProfile(def, placed.material ?? def.material, this.supportProfiles)
       : DEFAULT_CONSTRUCTION_SUPPORT_PROFILES.wood;
-    material.color.setHex(constructionStabilityColorHex(this.graph.support(id), profile.maxSupport, this.collapseThreshold));
+    material.color.setHex(constructionStabilityColorHex(
+      placed.stability ?? 0,
+      profile.maxSupport,
+      placed.grounded === true,
+      this.collapseThreshold,
+    ));
   }
 }

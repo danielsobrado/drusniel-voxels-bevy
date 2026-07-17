@@ -30,6 +30,8 @@ export const DEFAULT_UNDERSTORY_GPU_SETTINGS: UnderstoryGpuSettings = {
   enabled: true,
   fallbackToCpu: true,
   debugForceCpu: false,
+  // Budget is split across (class x near/far tier) draw groups: 12 groups of
+  // 1000, so each class keeps 2000 slots across its near + far tiers.
   maxVisible: 12_000,
   workgroupSize: 64,
   readbackVisibleLists: false,

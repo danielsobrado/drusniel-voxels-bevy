@@ -23,7 +23,7 @@ function build(request: Extract<TerrainColliderWorkerRequest, { type: "build" }>
   const serialized = MeshBVH.serialize(bvh, { cloneBuffers: false });
   const index = serialized.index;
   if (!(index instanceof Uint16Array) && !(index instanceof Uint32Array)) {
-    throw new Error(`Unsupported collider BVH index type: ${index.constructor.name}`);
+    throw new Error("Unsupported collider BVH index type");
   }
 
   const indexBuffer = index.buffer as ArrayBuffer;

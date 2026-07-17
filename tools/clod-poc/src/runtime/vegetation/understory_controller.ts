@@ -140,7 +140,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
         acceptedCount: state === "unknown" ? undefined : stats.gpuVisibleCount,
         telemetryState: state,
         classColoring: settings.render.debugColorByClass,
-        lodMode: "class-only",
+        lodMode: "class-tier",
       });
     },
     updateLighting: (lighting) => system.updateLighting(lighting),

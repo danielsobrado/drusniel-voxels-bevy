@@ -9,16 +9,24 @@ import {
   type UnderstoryTerrainClassWeights,
 } from "./understory_config.js";
 
-export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_CLASSES.length;
-export const UNDERSTORY_RING_PARAM_BYTES = 16 * 17;
+export const UNDERSTORY_RING_CLASS_COUNT = UNDERSTORY_CLASSES.length;
+export const UNDERSTORY_RING_TIER_COUNT = 2;
+/** Draw groups are (class x tier): group = classIndex * 2 + tier (0 = near, 1 = far). */
+export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_TIER_COUNT;
+export const UNDERSTORY_RING_PARAM_BYTES = 16 * 20;
 export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 12;
+/** Near tier keeps full geometry inside this fraction of the ring radius (mirrors WGSL). */
+export const UNDERSTORY_RING_NEAR_TIER_FRACTION = 0.55;
+/** Acceptance fade width at the outer ring edge in metres (mirrors WGSL). */
+export const UNDERSTORY_RING_EDGE_FADE_M = 14.0;
 
 export interface UnderstoryRingDispatchParams {
   centerX: number;
   centerZ: number;
   worldCells: number;
   maxInstancesPerGroup: number;
-  indexCounts: [number, number, number, number, number, number];
+  /** Geometry index counts per (class x tier) draw group. */
+  indexCounts: ArrayLike<number>;
   frustumPlanes: ArrayLike<number>;
   hydroEnabled?: boolean;
   /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled). */
@@ -40,13 +48,19 @@ export function emptyUnderstoryRingCounts(): UnderstoryRingCounts {
   return { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 };
 }
 
-export function understoryRingGroupIndex(cls: UnderstoryClass): number {
-  return UNDERSTORY_CLASSES.indexOf(cls);
+export function understoryRingGroupIndex(cls: UnderstoryClass, tier = 0): number {
+  const safeTier = Math.max(0, Math.min(UNDERSTORY_RING_TIER_COUNT - 1, Math.floor(tier)));
+  return UNDERSTORY_CLASSES.indexOf(cls) * UNDERSTORY_RING_TIER_COUNT + safeTier;
 }
 
 export function understoryRingGroupClass(group: number): UnderstoryClass {
   const index = Math.max(0, Math.min(UNDERSTORY_RING_GROUP_COUNT - 1, Math.floor(group)));
-  return UNDERSTORY_CLASSES[index];
+  return UNDERSTORY_CLASSES[Math.floor(index / UNDERSTORY_RING_TIER_COUNT)];
+}
+
+export function understoryRingGroupTier(group: number): number {
+  const index = Math.max(0, Math.min(UNDERSTORY_RING_GROUP_COUNT - 1, Math.floor(group)));
+  return index % UNDERSTORY_RING_TIER_COUNT;
 }
 
 export function understoryRingCell(settings: UnderstorySettings = DEFAULT_UNDERSTORY_SETTINGS): number {
@@ -217,7 +231,7 @@ export function resolveUnderstoryRingReadbackCounts(
   const groupCounts = rawCounts.map((count) => Math.min(count, cap));
   const counts = emptyUnderstoryRingCounts();
   for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
-    counts[understoryRingGroupClass(group)] = groupCounts[group];
+    counts[understoryRingGroupClass(group)] += groupCounts[group];
   }
   return { counts, groupCounts, overflowed: rawCounts.some((count) => count > cap) };
 }
@@ -229,7 +243,7 @@ function heightPreferenceCode(cls: UnderstoryClass, settings: UnderstorySettings
 
 export function packUnderstoryRingClassParams(
   settings: UnderstorySettings,
-  scratch: Float32Array = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32),
+  scratch: Float32Array = new Float32Array(UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32),
 ): Float32Array {
   scratch.fill(0);
   UNDERSTORY_CLASSES.forEach((cls, index) => {
@@ -289,13 +303,6 @@ export function packUnderstoryRingParams(
   u32[25] = understoryRingGrid(settings) >>> 0;
   u32[26] = settings.seed >>> 0;
   u32[27] = UNDERSTORY_RING_GROUP_COUNT >>> 0;
-  const ic = params.indexCounts;
-  u32[28] = Math.max(0, Math.floor(ic[4])) >>> 0;
-  u32[29] = Math.max(0, Math.floor(ic[5])) >>> 0;
-  u32[32] = Math.max(0, Math.floor(ic[0])) >>> 0;
-  u32[33] = Math.max(0, Math.floor(ic[1])) >>> 0;
-  u32[34] = Math.max(0, Math.floor(ic[2])) >>> 0;
-  u32[35] = Math.max(0, Math.floor(ic[3])) >>> 0;
   f32[36] = params.worldCells;
   f32[37] = params.hydroEnabled ? 1.0 : 0.0;
   f32[38] = 0;
@@ -311,6 +318,10 @@ export function packUnderstoryRingParams(
   }
   const atlas = params.hydroAtlas ?? [0, 0, 0, 0];
   for (let i = 0; i < 4; i++) f32[64 + i] = atlas[i] ?? 0;
+  const ic = params.indexCounts;
+  for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+    u32[68 + group] = Math.max(0, Math.floor(ic[group] ?? 0)) >>> 0;
+  }
   return scratch;
 }
 

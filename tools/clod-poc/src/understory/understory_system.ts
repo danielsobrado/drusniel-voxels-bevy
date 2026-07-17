@@ -30,7 +30,15 @@ import {
   type UnderstoryWebGpuBackendAccess,
   type UnderstoryHydrologyData,
 } from "../gpu/understory_ring_compute.js";
-import { understoryRingGroupCapacity, understoryRingCell } from "./understory_ring_math.js";
+import {
+  understoryRingAcceptParams,
+  understoryRingCell,
+  understoryRingGroupCapacity,
+  understoryRingTerrainGate,
+  UNDERSTORY_RING_GROUP_COUNT,
+} from "./understory_ring_math.js";
+import { sampleUnderstoryEcology } from "./understory_ecology.js";
+import { clamp01 } from "../trees/tree_noise.js";
 import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import { generateUnderstoryRingValidationCounts } from "./understory_ring_validation.js";
@@ -100,6 +108,7 @@ export class UnderstorySystem {
   private gpuRingDraw: UnderstoryGpuRingDrawResources | null = null;
   private ringMeshes: THREE.Mesh[] = [];
   private gpuRingStats: UnderstoryGpuRingStats = emptyGpuRingStats("disabled", null);
+  private gpuLightingProxyCache: { key: string; proxies: UnderstoryLightingProxy[] } | null = null;
   private lastGpuValidationSignature = "";
   private readonly frustumPlaneScratch = new Float32Array(24);
   private readonly hydrologyData: UnderstoryHydrologyData | null;
@@ -142,7 +151,7 @@ export class UnderstorySystem {
       this.updateStats();
       return;
     }
-    if (!wasEnabled) this.refreshForCenter(this.lastCenter);
+    if (!wasEnabled && !this.usesGpuRingDraw()) this.refreshForCenter(this.lastCenter);
   }
 
   private usesGpuRingDraw(): boolean {
@@ -188,8 +197,8 @@ export class UnderstorySystem {
     }
     this.materialHandle.updateSettings(this.settings);
     this.applyMaterials();
-    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
-      handle.updateSettings(this.settings);
+    for (const handle of this.gpuRingDraw?.materialHandles ?? []) {
+      handle?.updateSettings(this.settings);
     }
     if (needsPatchRefresh) this.patchesDirty = true;
     this.setEnabled(this.settings.enabled);
@@ -197,8 +206,8 @@ export class UnderstorySystem {
 
   update(timeSeconds: number, center: THREE.Vector3, camera?: THREE.Camera): void {
     this.materialHandle.setTime(timeSeconds);
-    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
-      handle.setTime(timeSeconds);
+    for (const handle of this.gpuRingDraw?.materialHandles ?? []) {
+      handle?.setTime(timeSeconds);
     }
     this.lastCenter.copy(center);
     if (!this.settings.enabled) {
@@ -277,21 +286,24 @@ export class UnderstorySystem {
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
     this.materialHandle.updateForestLighting(state);
-    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
-      handle.updateForestLighting(state);
+    for (const handle of this.gpuRingDraw?.materialHandles ?? []) {
+      handle?.updateForestLighting(state);
     }
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
     this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
-    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
-      handle.updateLighting?.(lighting);
+    for (const handle of this.gpuRingDraw?.materialHandles ?? []) {
+      handle?.updateLighting?.(lighting);
     }
   }
 
   getLightingProxies(): UnderstoryLightingProxy[] {
     if (!this.settings.enabled) return [];
+    // The GPU ring keeps instances on-GPU, so approximate the lighting
+    // contribution from the same CPU ecology field instead of reading back.
+    if (this.usesGpuRingDraw()) return this.gpuRingLightingProxies();
     const proxies: UnderstoryLightingProxy[] = [];
     for (const patch of this.patches) {
       if (!patch.visible) continue;
@@ -305,6 +317,49 @@ export class UnderstorySystem {
         });
       }
     }
+    return proxies;
+  }
+
+  /** Coarse deterministic ecology sampling used as the lighting stand-in for the
+   *  GPU ring: same terrain gate + ecology density as the compute shader, evaluated
+   *  on a sparse grid and cached until the ring center moves. */
+  private gpuRingLightingProxies(): UnderstoryLightingProxy[] {
+    const center = this.lastCenter;
+    const key = [
+      Math.round(center.x / GPU_LIGHTING_PROXY_REFRESH_M),
+      Math.round(center.z / GPU_LIGHTING_PROXY_REFRESH_M),
+      this.settings.seed,
+      this.settings.distanceM,
+      this.settings.placement.spacingM,
+      this.settings.ecology.enabled ? 1 : 0,
+    ].join("|");
+    if (this.gpuLightingProxyCache?.key === key) return this.gpuLightingProxyCache.proxies;
+    const sampler = this.sampler ?? defaultUnderstoryTerrainSampler;
+    const acceptParams = understoryRingAcceptParams(this.settings);
+    const step = Math.max(1, understoryRingCell(this.settings) * GPU_LIGHTING_PROXY_STEP_CELLS);
+    const radius = this.settings.distanceM;
+    const proxies: UnderstoryLightingProxy[] = [];
+    for (let dz = -radius; dz <= radius; dz += step) {
+      for (let dx = -radius; dx <= radius; dx += step) {
+        if (dx * dx + dz * dz > radius * radius) continue;
+        const wx = center.x + dx;
+        const wz = center.z + dz;
+        const height = sampler.surfaceHeight(wx, wz);
+        const normalY = sampler.surfaceNormal(wx, wz)[1];
+        const ground = understoryRingTerrainGate(height, normalY, acceptParams);
+        if (ground < 0) continue;
+        const ecology = sampleUnderstoryEcology(wx, wz, height, normalY, ground, this.settings);
+        if (ecology.density <= 0.05) continue;
+        proxies.push({
+          x: wx,
+          z: wz,
+          classId: "shrub",
+          scale: 1,
+          densityWeight: clamp01(ecology.density),
+        });
+      }
+    }
+    this.gpuLightingProxyCache = { key, proxies };
     return proxies;
   }
 
@@ -328,6 +383,7 @@ export class UnderstorySystem {
       this.hydrologyWaterTexture,
     );
     for (const mesh of this.gpuRingDraw.meshes) {
+      if (!mesh) continue;
       mesh.visible = false;
       this.root.add(mesh);
       this.ringMeshes.push(mesh);
@@ -472,13 +528,14 @@ export class UnderstorySystem {
     return this.frustumPlaneScratch;
   }
 
-  private gpuRingIndexCounts(): [number, number, number, number, number, number] {
-    const counts = [0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number];
+  private gpuRingIndexCounts(): number[] {
+    const counts = new Array<number>(UNDERSTORY_RING_GROUP_COUNT).fill(0);
     if (!this.gpuRingDraw) return counts;
-    for (let i = 0; i < UNDERSTORY_CLASSES.length && i < this.gpuRingDraw.meshes.length; i++) {
-      const geom = this.gpuRingDraw.meshes[i].geometry;
-      const idx = geom.getIndex();
-      counts[i] = idx ? idx.count : 0;
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT && group < this.gpuRingDraw.meshes.length; group++) {
+      const mesh = this.gpuRingDraw.meshes[group];
+      if (!mesh) continue;
+      const idx = mesh.geometry.getIndex();
+      counts[group] = idx ? idx.count : 0;
     }
     return counts;
   }
@@ -495,6 +552,7 @@ export class UnderstorySystem {
     this.gpuOverflowed = false;
     this.gpuDispatchMs = null;
     this.lastGpuValidationSignature = "";
+    this.gpuLightingProxyCache = null;
     this.gpuRingStats = emptyGpuRingStats(this.gpuDevice ? "idle" : "disabled", null);
   }
 
@@ -741,6 +799,9 @@ export class UnderstorySystem {
     this.stats = stats;
   }
 }
+
+const GPU_LIGHTING_PROXY_REFRESH_M = 8;
+const GPU_LIGHTING_PROXY_STEP_CELLS = 3;
 
 function emptyGpuRingStats(status: UnderstoryGpuRingStats["status"], counts: UnderstoryGpuRingStats["counts"] | null): UnderstoryGpuRingStats {
   return {

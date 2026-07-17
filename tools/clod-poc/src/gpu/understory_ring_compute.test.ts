@@ -63,15 +63,15 @@ describe("understory GPU ring compute helpers", () => {
     const expected = Math.ceil((DEFAULT_UNDERSTORY_SETTINGS.distanceM * 2) / DEFAULT_UNDERSTORY_SETTINGS.placement.spacingM);
     expect(grid).toBe(expected);
     expect(understoryRingSlotCount(DEFAULT_UNDERSTORY_SETTINGS)).toBe(grid * grid);
-    expect(UNDERSTORY_RING_GROUP_COUNT).toBe(UNDERSTORY_CLASSES.length);
-    expect(UNDERSTORY_RING_GROUP_COUNT).toBe(6);
+    expect(UNDERSTORY_RING_GROUP_COUNT).toBe(UNDERSTORY_CLASSES.length * 2);
+    expect(UNDERSTORY_RING_GROUP_COUNT).toBe(12);
   });
 
-  it("splits maxVisible evenly across class groups", () => {
+  it("splits maxVisible evenly across class x tier groups", () => {
     expect(understoryRingGroupCapacity(DEFAULT_UNDERSTORY_SETTINGS)).toBe(2000);
     expect(understoryRingGroupCapacity({
       ...DEFAULT_UNDERSTORY_SETTINGS,
-      gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, maxVisible: 6000 },
+      gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, maxVisible: 12000 },
     })).toBe(1000);
   });
 
@@ -134,30 +134,31 @@ describe("understory ring debug readback gating", () => {
 });
 
 describe("understory ring readback resolution", () => {
-  it("clamps counts to capacity and flags overflow", () => {
+  it("clamps counts to capacity, sums tiers per class, and flags overflow", () => {
     const cap = 100;
-    const raw = new Uint32Array([10, 100, 150, 0, 50, 99]);
+    const raw = new Uint32Array([10, 20, 100, 150, 0, 5, 50, 60, 99, 1, 2, 3]);
     const resolved = resolveUnderstoryRingReadbackCounts(raw, cap);
-    expect(resolved.groupCounts).toEqual([10, 100, 100, 0, 50, 99]);
+    expect(resolved.groupCounts).toEqual([10, 20, 100, 100, 0, 5, 50, 60, 99, 1, 2, 3]);
     expect(resolved.overflowed).toBe(true);
-    expect(resolved.counts[understoryRingGroupClass(2)]).toBe(100);
+    expect(resolved.counts[understoryRingGroupClass(2)]).toBe(200);
   });
 
   it("does not flag overflow when all groups are within capacity", () => {
-    const resolved = resolveUnderstoryRingReadbackCounts([1, 2, 3, 4, 5, 6], 100);
+    const resolved = resolveUnderstoryRingReadbackCounts([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 100);
     expect(resolved.overflowed).toBe(false);
   });
 });
 
 describe("understory ring param packing", () => {
-  it("writes globals at the documented lanes including per-class index counts", () => {
+  it("writes globals at the documented lanes including per-group index counts", () => {
     const s = { ...DEFAULT_UNDERSTORY_SETTINGS, seed: 4242 };
+    const indexCounts = [36, 18, 48, 24, 60, 30, 36, 18, 12, 6, 12, 6];
     const buffer = packUnderstoryRingParams(s, {
       centerX: 100,
       centerZ: 200,
       worldCells: 1024,
       maxInstancesPerGroup: 2000,
-      indexCounts: [36, 48, 60, 36, 12, 12],
+      indexCounts,
       frustumPlanes: new Float32Array(24).fill(0).map((_, i) => i % 4 === 3 ? 1_000_000 : 0),
     });
     const f32 = new Float32Array(buffer);
@@ -172,17 +173,14 @@ describe("understory ring param packing", () => {
     expect(u32[25]).toBe(understoryRingGrid(s));
     expect(u32[26]).toBe(4242);
     expect(u32[27]).toBe(UNDERSTORY_RING_GROUP_COUNT);
-    expect(u32[28]).toBe(12);
-    expect(u32[29]).toBe(12);
-    expect(u32[32]).toBe(36);
-    expect(u32[33]).toBe(48);
-    expect(u32[34]).toBe(60);
-    expect(u32[35]).toBe(36);
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+      expect(u32[68 + group]).toBe(indexCounts[group]);
+    }
   });
 
   it("packs one class param row per class", () => {
     const rows = packUnderstoryRingClassParams(DEFAULT_UNDERSTORY_SETTINGS);
-    expect(rows.length).toBe(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
+    expect(rows.length).toBe(UNDERSTORY_CLASSES.length * UNDERSTORY_RING_CLASS_STRIDE_F32);
     UNDERSTORY_CLASSES.forEach((cls, index) => {
       const base = index * UNDERSTORY_RING_CLASS_STRIDE_F32;
       expect(rows[base + 0]).toBeCloseTo(DEFAULT_UNDERSTORY_SETTINGS.classes[cls].weight);
@@ -238,14 +236,20 @@ describe("understory GPU ring shader source", () => {
     expect(understoryRingShader).not.toContain("treeInfluence");
   });
 
-  it("applies coarser sub-grid gating for dead_log and stump groups", () => {
-    expect(understoryRingShader).toContain("selected_group == 4u || selected_group == 5u");
+  it("applies coarser sub-grid gating for dead_log and stump classes", () => {
+    expect(understoryRingShader).toContain("selected_class == 4u || selected_class == 5u");
     expect(understoryRingShader).toContain("floor(wc / 2.0)");
   });
 
-  it("uses per-class index counts in build_indirect_args", () => {
-    expect(understoryRingShader).toContain("class_index_counts");
-    expect(understoryRingShader).toContain("params.settings_extra[group - 4u]");
+  it("uses per-group index counts in build_indirect_args", () => {
+    expect(understoryRingShader).toContain("group_index_counts");
+    expect(understoryRingShader).toContain("understory_group_index_count(group)");
+  });
+
+  it("splits classes into near/far tiers with an edge fade", () => {
+    expect(understoryRingShader).toContain("UNDERSTORY_NEAR_TIER_FRACTION");
+    expect(understoryRingShader).toContain("UNDERSTORY_RING_EDGE_FADE_M");
+    expect(understoryRingShader).toContain("cls * UNDERSTORY_TIER_COUNT + tier");
   });
 
   it("sets firstInstance to 0 for all groups (explicit class offset replaces indirect firstInstance)", () => {

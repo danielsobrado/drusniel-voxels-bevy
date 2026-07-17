@@ -44,6 +44,17 @@ function createStore() {
 }
 
 describe("ConstructionPieceStore", () => {
+  it("colors grounded pieces from their stored stability state", () => {
+    const { store } = createStore();
+    expect(store.add(placed("piece-1", 0), false)).toBe(true);
+
+    store.setStabilityVisualization(true, 0.2);
+
+    const material = store.meshes[0]!.material as THREE.MeshStandardMaterial;
+    expect(material.color.getHex()).toBe(0x3380ff);
+    store.dispose();
+  });
+
   it("rejects duplicate entity ids without splitting visual and collision state", () => {
     const { root, overlapIndex, colliderSet, store } = createStore();
 

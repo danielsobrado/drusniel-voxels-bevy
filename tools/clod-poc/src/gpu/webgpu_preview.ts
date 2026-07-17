@@ -470,6 +470,7 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
 
   renderer.setAnimationLoop(() => {
     updateGrassVisibility();
+    stones?.update(camera.position, camera);
     if (useDig && hoverPointerValid) {
       const hit = terrainColliders?.raycastSurface(raycaster.ray) ?? null;
       if (hit) {

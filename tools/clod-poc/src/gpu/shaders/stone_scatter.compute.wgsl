@@ -15,9 +15,14 @@ const COUNTER_REJECT_DENSITY_MASK: u32 = 9u;
 const COUNTER_REJECT_TILE_BUDGET: u32 = 10u;
 const COUNTER_REJECT_CLASS_BUDGET: u32 = 11u;
 const STONE_COUNTER_COUNT: u32 = 12u;
+// View-pass per-group counters live after the scatter counters in the same buffer.
+const STONE_VIEW_COUNTER_BASE: u32 = 12u;
+const STONE_MAX_GROUPS: u32 = 32u;
 const TAU: f32 = 6.28318530718;
 const INDIRECT_STRIDE_U32: u32 = 5u;
 const STONE_HYDRO_WATER_CLEARANCE: f32 = 0.22;
+// Packed source meta: source_b.w = variant * STONE_META_VARIANT_SCALE + sink_depth.
+const STONE_META_VARIANT_SCALE: f32 = 32.0;
 
 struct Params {
   world: vec4<f32>,
@@ -41,6 +46,15 @@ struct Params {
   terrain_high: vec4<f32>,
   terrain_height: vec4<f32>,
   hydro_atlas: vec4<f32>,
+  // View pass: x = per-group draw capacity, y = group count, z = source class capacity.
+  view_counts: vec4<u32>,
+  camera: vec4<f32>,
+  frustum: array<vec4<f32>, 6>,
+  // Per class: (max_distance_m, lod_near_m, lod_count, group_base).
+  class_view: array<vec4<f32>, 3>,
+  // Per class variant counts in xyz.
+  class_variants: vec4<f32>,
+  group_index_counts: array<vec4<u32>, 8>,
 };
 
 struct StoneHydrologySample {
@@ -55,6 +69,8 @@ struct StoneHydrologySample {
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(3) var<storage, read_write> instance_a: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> instance_b: array<vec4<f32>>;
+@group(0) @binding(13) var<storage, read_write> source_a: array<vec4<f32>>;
+@group(0) @binding(14) var<storage, read_write> source_b: array<vec4<f32>>;
 
 fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -165,6 +181,22 @@ fn class_base_radius(cls: u32) -> f32 {
     return 0.95;
   }
   return 0.16;
+}
+
+fn class_view_config(cls: u32) -> vec4<f32> {
+  return params.class_view[min(cls, 2u)];
+}
+
+fn class_variant_count(cls: u32) -> u32 {
+  var count: f32;
+  if (cls == CLASS_LARGE) {
+    count = params.class_variants.x;
+  } else if (cls == CLASS_MEDIUM) {
+    count = params.class_variants.y;
+  } else {
+    count = params.class_variants.z;
+  }
+  return max(1u, u32(count));
 }
 
 fn blend_terrain_class_weights(weights: vec4<f32>, grass: vec4<f32>, rock: vec4<f32>, sand: vec4<f32>, snow: vec4<f32>) -> vec4<f32> {
@@ -283,13 +315,20 @@ fn process_cell(slot: u32) {
     return;
   }
 
+  let cls = pick_class(scree, streambed, cliff_above, terrain, pcg2d(wc, seed + 523u).x);
+  // Honor per-class draw distance at scatter time so far ring cells never spend
+  // budget on classes that can only be seen close up (e.g. small stones).
+  if (dist > class_view_config(cls).x) {
+    atomicAdd(&counters[COUNTER_REJECT_TOO_FAR], 1u);
+    return;
+  }
+
   let total_slot = atomicAdd(&counters[COUNTER_ACCEPTED_TOTAL], 1u);
   if (total_slot >= max_instances) {
     atomicAdd(&counters[COUNTER_REJECT_TILE_BUDGET], 1u);
     return;
   }
 
-  let cls = pick_class(scree, streambed, cliff_above, terrain, pcg2d(wc, seed + 523u).x);
   let class_slot = atomicAdd(&counters[cls + 1u], 1u);
   if (class_slot >= max_instances) {
     atomicAdd(&counters[COUNTER_REJECT_CLASS_BUDGET], 1u);
@@ -305,9 +344,13 @@ fn process_cell(slot: u32) {
   let y = h - sink_depth;
   let yaw = pcg2d(wc, seed + 536u).x * TAU;
   let lean = vec2<f32>(normal.z, -normal.x) * params.stream_snow_lean.w * slope_amt;
+  let variant = min(
+    class_variant_count(cls) - 1u,
+    u32(pcg2d(wc, seed + 941u).x * f32(class_variant_count(cls))),
+  );
   let out_index = cls * max_instances + class_slot;
-  instance_a[out_index] = vec4<f32>(wpos.x, y, wpos.y, scale);
-  instance_b[out_index] = vec4<f32>(yaw, lean.x, lean.y, sink_depth);
+  source_a[out_index] = vec4<f32>(wpos.x, y, wpos.y, scale);
+  source_b[out_index] = vec4<f32>(yaw, lean.x, lean.y, f32(variant) * STONE_META_VARIANT_SCALE + sink_depth);
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -316,9 +359,6 @@ fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
   if (i < STONE_COUNTER_COUNT) {
     atomicStore(&counters[i], 0u);
   }
-  if (i < 15u) {
-    indirect_args[i] = 0u;
-  }
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -326,21 +366,91 @@ fn scatter_stones(@builtin(global_invocation_id) id: vec3<u32>) {
   process_cell(id.x);
 }
 
-fn write_draw_args(cls: u32, index_count: u32, instance_count: u32) {
-  let base = cls * INDIRECT_STRIDE_U32;
-  indirect_args[base + 0u] = index_count;
-  indirect_args[base + 1u] = min(instance_count, params.counts_a.x);
-  indirect_args[base + 2u] = 0u;
-  indirect_args[base + 3u] = 0u;
-  indirect_args[base + 4u] = cls * params.counts_a.x;
+fn view_frustum_accept(center: vec3<f32>, radius: f32) -> bool {
+  for (var p = 0u; p < 6u; p = p + 1u) {
+    let plane = params.frustum[p];
+    if (dot(plane.xyz, center) + plane.w < -radius) {
+      return false;
+    }
+  }
+  return true;
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn clear_view_counters(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x < params.view_counts.y) {
+    atomicStore(&counters[STONE_VIEW_COUNTER_BASE + id.x], 0u);
+  }
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn cull_stones(@builtin(global_invocation_id) id: vec3<u32>) {
+  let class_cap = params.view_counts.z;
+  if (class_cap == 0u || id.x >= class_cap * 3u) {
+    return;
+  }
+  let cls = id.x / class_cap;
+  let slot = id.x % class_cap;
+  let produced = min(atomicLoad(&counters[cls + 1u]), class_cap);
+  if (slot >= produced) {
+    return;
+  }
+  let src_a = source_a[id.x];
+  let src_b = source_b[id.x];
+  let pos = vec3<f32>(src_a.x, src_a.y, src_a.z);
+  let cv = class_view_config(cls);
+  let dist = distance(pos.xz, params.camera.xz);
+  if (dist > cv.x) {
+    return;
+  }
+  let radius = max(0.05, src_a.w * class_base_radius(cls));
+  if (!view_frustum_accept(pos + vec3<f32>(0.0, radius, 0.0), radius * 2.0 + 1.0)) {
+    return;
+  }
+  var lod = 0u;
+  if (u32(cv.z) > 1u && dist >= cv.y) {
+    lod = 1u;
+  }
+  let variant = u32(floor(src_b.w / STONE_META_VARIANT_SCALE));
+  let sink_depth = src_b.w - f32(variant) * STONE_META_VARIANT_SCALE;
+  let group = u32(cv.w) + variant * u32(cv.z) + lod;
+  let group_cap = params.view_counts.x;
+  let draw_slot = atomicAdd(&counters[STONE_VIEW_COUNTER_BASE + group], 1u);
+  if (draw_slot >= group_cap) {
+    return;
+  }
+  let draw_index = group * group_cap + draw_slot;
+  instance_a[draw_index] = src_a;
+  instance_b[draw_index] = vec4<f32>(src_b.x, src_b.y, src_b.z, sink_depth);
+}
+
+fn group_index_count(group: u32) -> u32 {
+  let entry = params.group_index_counts[group / 4u];
+  let lane = group % 4u;
+  if (lane == 0u) {
+    return entry.x;
+  }
+  if (lane == 1u) {
+    return entry.y;
+  }
+  if (lane == 2u) {
+    return entry.z;
+  }
+  return entry.w;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x != 0u) {
+  let group = id.x;
+  if (group >= params.view_counts.y) {
     return;
   }
-  write_draw_args(CLASS_LARGE, params.counts_a.w, atomicLoad(&counters[COUNTER_CLASS_LARGE]));
-  write_draw_args(CLASS_MEDIUM, params.counts_b.x, atomicLoad(&counters[COUNTER_CLASS_MEDIUM]));
-  write_draw_args(CLASS_SMALL, params.counts_b.y, atomicLoad(&counters[COUNTER_CLASS_SMALL]));
+  let group_cap = params.view_counts.x;
+  let count = min(atomicLoad(&counters[STONE_VIEW_COUNTER_BASE + group]), group_cap);
+  let base = group * INDIRECT_STRIDE_U32;
+  indirect_args[base + 0u] = group_index_count(group);
+  indirect_args[base + 1u] = count;
+  indirect_args[base + 2u] = 0u;
+  indirect_args[base + 3u] = 0u;
+  indirect_args[base + 4u] = group * group_cap;
 }

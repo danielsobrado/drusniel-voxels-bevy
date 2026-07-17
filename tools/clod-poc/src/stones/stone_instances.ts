@@ -1,5 +1,6 @@
-// GPU-driven stone overlay. Boot scatter writes per-class instance regions and indirect draw
-// arguments; per-frame updates only refresh the toroidal scatter ring when the center moves.
+// GPU-driven stone overlay. Boot scatter writes per-class source regions on movement; a
+// per-frame GPU view pass culls sources (frustum + per-class draw distance), picks the
+// LOD/variant draw group, and compacts indirect draw arguments — no CPU readbacks.
 
 import * as THREE from "three";
 import {
@@ -10,11 +11,12 @@ import { isRenderableIndirectDrawGeometry, renderableIndirectDrawCountForGeometr
 import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import type { ClodPageNode } from "../types.js";
 import {
-  STONE_GPU_CLASS_COUNT,
   StoneGpuScatterCompute,
   stoneGpuScatterUnsupportedReason,
+  stoneGpuSourceClassCap,
   type StoneGpuScatterBuffers,
   type StoneGpuScatterCounts,
+  type StoneGpuViewConfig,
 } from "../gpu/stone_scatter_compute.js";
 import type { GrassHydrologyData } from "../gpu/grass_ring_compute.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
@@ -23,7 +25,7 @@ import {
   type StoneHydrologyWater,
   type StoneNodeMaterialHandle,
 } from "../gpu/stone_node_material.js";
-import { buildRock, type RockPreset } from "./rock_builder.js";
+import { buildRock, ROCK_PRESETS, type RockPreset } from "./rock_builder.js";
 import { hashCombine, hashString, Rng } from "./seed.js";
 import { STONE_CLASSES, type StoneClass, type StoneSettings } from "./stone_config.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
@@ -104,7 +106,18 @@ export interface StoneStats {
 interface StoneDraw {
   classId: StoneClass;
   classIndex: number;
+  group: number;
+  lod: number;
+  variant: number;
   mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>;
+}
+
+interface StoneGroupLayout {
+  groupCount: number;
+  classView: [number, number, number, number][];
+  classVariants: [number, number, number];
+  classGroupCounts: [number, number, number];
+  entries: { classId: StoneClass; classIndex: number; variant: number; lod: number; detail: number; preset: RockPreset; seed: number }[];
 }
 
 type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
@@ -113,13 +126,45 @@ type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
 
 const CLASS_INDEX: Record<StoneClass, number> = { large: 0, medium: 1, small: 2 };
 const CLASS_BY_INDEX: readonly StoneClass[] = ["large", "medium", "small"] as const;
-const DRAW_PRESET: Record<StoneClass, RockPreset> = {
-  large: "talus",
-  medium: "cobble",
-  small: "cobble",
-};
-const DRAW_DETAIL: Record<StoneClass, number> = { large: 2, medium: 1, small: 1 };
 const STONE_RING_MIN_REFRESH_M = 0.5;
+const STONE_MAX_VARIANTS = 4;
+const STONE_MAX_LODS = 2;
+/** LOD switch distance as a fraction of the class's effective draw distance. */
+const STONE_LOD_NEAR_FRACTION = 0.4;
+
+export function stoneGpuGroupLayout(settings: StoneSettings): StoneGroupLayout {
+  const layout: StoneGroupLayout = {
+    groupCount: 0,
+    classView: [],
+    classVariants: [1, 1, 1],
+    classGroupCounts: [0, 0, 0],
+    entries: [],
+  };
+  const ringRadius = Math.max(0.1, settings.ringRadiusM);
+  for (const classId of STONE_CLASSES) {
+    const classIndex = CLASS_INDEX[classId];
+    const config = settings.classes[classId];
+    const lodDetails = config.lodDetails.length > 0 ? config.lodDetails.slice(0, STONE_MAX_LODS) : [1];
+    const variants = Math.max(1, Math.min(STONE_MAX_VARIANTS, Math.floor(config.variants)));
+    const presets = config.presets.length > 0 ? config.presets : ["cobble"];
+    const groupBase = layout.groupCount;
+    const maxDistance = Math.max(1, config.maxDistance);
+    const lodNearM = Math.min(maxDistance, ringRadius) * STONE_LOD_NEAR_FRACTION;
+    layout.classView[classIndex] = [maxDistance, lodNearM, lodDetails.length, groupBase];
+    layout.classVariants[classIndex] = variants;
+    layout.classGroupCounts[classIndex] = variants * lodDetails.length;
+    for (let variant = 0; variant < variants; variant++) {
+      const presetName = presets[variant % presets.length] as RockPreset;
+      const preset = presetName in ROCK_PRESETS ? presetName : "cobble";
+      const seed = hashCombine(settings.seedSalt >>> 0, hashString(`stone-gpu:${classId}:${variant}`));
+      for (let lod = 0; lod < lodDetails.length; lod++) {
+        layout.entries.push({ classId, classIndex, variant, lod, detail: lodDetails[lod], preset, seed });
+        layout.groupCount++;
+      }
+    }
+  }
+  return layout;
+}
 
 export class StoneSystem {
   private readonly scene: THREE.Scene;
@@ -130,6 +175,8 @@ export class StoneSystem {
   private readonly root = new THREE.Group();
   private readonly defaultScatterCenter: THREE.Vector3;
   private readonly lastScatterCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
+  private readonly frustumPlaneScratch = new Float32Array(24);
+  private readonly cameraPositionScratch = new THREE.Vector3();
   private settings: StoneSettings;
   private currentLighting: StoneLighting;
   private visibleClasses = new Set<StoneClass>(STONE_CLASSES);
@@ -140,7 +187,7 @@ export class StoneSystem {
   private scatterCompute: StoneGpuScatterCompute | null = null;
   private generation = 0;
   private drawsReady = false;
-  private indexCounts: [number, number, number] = [0, 0, 0];
+  private groupIndexCounts: number[] = [];
   private stats: StoneStats = emptyStats();
 
   constructor(options: StoneSystemOptions) {
@@ -207,24 +254,31 @@ export class StoneSystem {
 
     const generation = ++this.generation;
     this.drawsReady = false;
-    const capacity = maxInstances * STONE_GPU_CLASS_COUNT;
+    const layout = stoneGpuGroupLayout(this.settings);
+    const sourceClassCap = stoneGpuSourceClassCap(this.settings);
+    const groupCap = Math.min(sourceClassCap, Math.max(1024, Math.ceil(sourceClassCap / 4)));
+    const capacity = layout.groupCount * groupCap;
     const instanceA = this.createStorageInstancedAttribute("instance-a", capacity);
     const instanceB = this.createStorageInstancedAttribute("instance-b", capacity);
-    const indirect = new StorageBufferAttribute(new Uint32Array(STONE_GPU_CLASS_COUNT * 5), 5);
+    const indirect = new StorageBufferAttribute(new Uint32Array(layout.groupCount * 5), 5);
     indirect.name = "stone-gpu-indirect";
     this.gpuBackend.createIndirectStorageAttribute(indirect);
     this.materialHandle = createStoneNodeMaterial(
       this.currentLighting,
       { instanceA, instanceB, capacity },
       this.hydrologyWater,
-      { classColors: this.settings.debug.classColors },
+      {
+        classColors: this.settings.debug.classColors,
+        groupCap,
+        classGroupCounts: layout.classGroupCounts,
+      },
     );
 
-    this.indexCounts = [0, 0, 0];
-    for (const classId of STONE_CLASSES) {
-      const draw = this.createDraw(classId, maxInstances, indirect);
+    this.groupIndexCounts = new Array<number>(layout.groupCount).fill(0);
+    for (let group = 0; group < layout.entries.length; group++) {
+      const draw = this.createDraw(layout.entries[group], group, groupCap, indirect);
       if (!draw) continue;
-      this.indexCounts[draw.classIndex] = this.indexCountFor(draw.mesh.geometry);
+      this.groupIndexCounts[group] = this.indexCountFor(draw.mesh.geometry);
       this.draws.push(draw);
       this.root.add(draw.mesh);
     }
@@ -232,7 +286,7 @@ export class StoneSystem {
     if (this.draws.length === 0) {
       this.materialHandle?.material.dispose();
       this.materialHandle = null;
-      this.indexCounts = [0, 0, 0];
+      this.groupIndexCounts = [];
       this.stats = emptyStats();
       this.onStats?.(this.getStats());
       return;
@@ -243,8 +297,16 @@ export class StoneSystem {
       instanceB: this.gpuBufferForAttribute(instanceB),
       indirectArgs: this.gpuBufferForAttribute(indirect),
     };
+    const viewConfig: StoneGpuViewConfig = {
+      sourceClassCap,
+      groupCap,
+      groupCount: layout.groupCount,
+      classView: layout.classView,
+      classVariants: layout.classVariants,
+      groupIndexCounts: this.groupIndexCounts,
+    };
     const edits = resolveDigEdits(getDigEditsSnapshot());
-    void StoneGpuScatterCompute.create(this.gpuDevice, edits, buffers, this.hydrologyGpuData)
+    void StoneGpuScatterCompute.create(this.gpuDevice, edits, buffers, this.hydrologyGpuData, viewConfig)
       .then((compute) => {
         if (generation !== this.generation) {
           compute.destroy();
@@ -259,12 +321,22 @@ export class StoneSystem {
       });
   }
 
-  /** GPU stones use the same camera-centred ring model as trees and grass. */
-  update(center: THREE.Vector3): void {
+  /** GPU stones use the same camera-centred ring model as trees and grass; the
+   *  per-frame view pass culls the scattered sources against the live camera. */
+  update(center: THREE.Vector3, camera?: THREE.Camera): void {
     if (!this.settings.enabled || !this.scatterCompute || this.draws.length === 0) return;
     const refreshDistance = Math.max(STONE_RING_MIN_REFRESH_M, this.settings.ringRefreshDistanceM);
     if (!this.drawsReady || distance2d(this.lastScatterCenter, center) >= refreshDistance) {
       this.scatterForCenter(center);
+    }
+    if (this.drawsReady) {
+      const cameraPosition = camera?.getWorldPosition(this.cameraPositionScratch) ?? center;
+      this.scatterCompute.view({
+        cameraX: cameraPosition.x,
+        cameraY: cameraPosition.y,
+        cameraZ: cameraPosition.z,
+        frustumPlanes: this.frustumPlanes(camera),
+      });
     }
     this.refreshGpuTiming();
   }
@@ -277,6 +349,30 @@ export class StoneSystem {
   dispose(): void {
     this.clear();
     this.scene.remove(this.root);
+  }
+
+  private frustumPlanes(camera?: THREE.Camera): Float32Array {
+    if (!camera) {
+      this.frustumPlaneScratch.fill(0);
+      for (let i = 0; i < 6; i++) this.frustumPlaneScratch[i * 4 + 3] = 1_000_000;
+      return this.frustumPlaneScratch;
+    }
+    const frustum = new THREE.Frustum();
+    const projScreenMatrix = new THREE.Matrix4();
+    (camera as THREE.Camera & { updateProjectionMatrix?: () => void }).updateProjectionMatrix?.();
+    camera.updateMatrixWorld(true);
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+    projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+    for (let i = 0; i < 6; i++) {
+      const plane = frustum.planes[i];
+      const offset = i * 4;
+      this.frustumPlaneScratch[offset] = plane.normal.x;
+      this.frustumPlaneScratch[offset + 1] = plane.normal.y;
+      this.frustumPlaneScratch[offset + 2] = plane.normal.z;
+      this.frustumPlaneScratch[offset + 3] = plane.constant;
+    }
+    return this.frustumPlaneScratch;
   }
 
   private scatterForCenter(center: THREE.Vector3): void {
@@ -292,7 +388,6 @@ export class StoneSystem {
       centerZ,
       unboundedWorld: unboundedCenter,
       settings: this.settings,
-      indexCounts: this.indexCounts,
     }, (counts) => {
       if (generation !== this.generation || compute !== this.scatterCompute) return;
       this.applyTelemetry(counts);
@@ -334,7 +429,8 @@ export class StoneSystem {
       density_mask: counts.rejectedDensityMask,
       tile_budget: counts.rejectedTileBudget,
       class_budget: counts.rejectedClassBudget,
-      terrain_hidden: counts.rejectedTotal,
+      // GPU scatter has no terrain-occlusion reject; leave 0 so reason sums stay exact.
+      terrain_hidden: 0,
     };
     this.stats.groups = this.draws.length;
   }
@@ -346,31 +442,30 @@ export class StoneSystem {
     this.stats.gpuTimingPending = timing.pending;
     this.stats.gpuClearMs = timing.timingsMs.clear ?? null;
     this.stats.gpuWorldMs = timing.timingsMs.world ?? null;
-    this.stats.gpuViewMs = null;
+    this.stats.gpuViewMs = timing.timingsMs.view ?? null;
     this.stats.gpuIndirectMs = timing.timingsMs.indirect ?? null;
   }
 
   private createDraw(
-    classId: StoneClass,
-    maxInstances: number,
+    entry: StoneGroupLayout["entries"][number],
+    group: number,
+    groupCap: number,
     indirect: StorageBufferAttribute,
   ): StoneDraw | null {
     if (!this.materialHandle) throw new Error("Stone material must exist before creating draws");
-    const classIndex = CLASS_INDEX[classId];
-    const seed = hashCombine(this.settings.seedSalt >>> 0, hashString(`stone-gpu:${classId}`));
-    const built = buildRock(DRAW_PRESET[classId], new Rng(seed), DRAW_DETAIL[classId]);
+    const built = buildRock(entry.preset, new Rng(entry.seed), entry.detail);
     if (!isRenderableIndirectDrawGeometry(built.geometry)) return null;
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.setAttribute("position", built.geometry.getAttribute("position"));
     geometry.setAttribute("normal", built.geometry.getAttribute("normal"));
     geometry.setAttribute("vdata", built.geometry.getAttribute("vdata"));
     geometry.setIndex(built.geometry.getIndex());
-    geometry.instanceCount = maxInstances;
-    this.setIndirect(geometry, indirect, classIndex * 5 * Uint32Array.BYTES_PER_ELEMENT);
+    geometry.instanceCount = groupCap;
+    this.setIndirect(geometry, indirect, group * 5 * Uint32Array.BYTES_PER_ELEMENT);
     const mesh = new THREE.Mesh(geometry, this.materialHandle.material);
-    mesh.name = `stones-gpu-${classId}`;
+    mesh.name = `stones-gpu-${entry.classId}-v${entry.variant}-lod${entry.lod}`;
     mesh.frustumCulled = false;
-    return { classId, classIndex, mesh };
+    return { classId: entry.classId, classIndex: entry.classIndex, group, lod: entry.lod, variant: entry.variant, mesh };
   }
 
   private createStorageInstancedAttribute(name: string, count: number): StorageInstancedBufferAttribute {
@@ -426,7 +521,7 @@ export class StoneSystem {
     this.scatterCompute?.destroy();
     this.scatterCompute = null;
     this.lastScatterCenter.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
-    this.indexCounts = [0, 0, 0];
+    this.groupIndexCounts = [];
     this.drawsReady = false;
     for (const draw of this.draws) {
       this.root.remove(draw.mesh);

@@ -4,10 +4,11 @@ import { composeUnderstoryRingShader } from "./wgsl_modules.js";
 
 describe("understory ring shader safety", () => {
   it("avoids unsigned underflow when selecting indirect index counts", () => {
-    expect(shaderSource).toContain("if (group < 4u)");
-    expect(shaderSource).toContain("index_count = params.class_index_counts[group]");
-    expect(shaderSource).toContain("index_count = params.settings_extra[group - 4u]");
-    expect(shaderSource).not.toContain("select(params.settings_extra[group - 4u]");
+    // Group index counts use lane math (group / 4, group % 4) so no unsigned
+    // subtraction can underflow.
+    expect(shaderSource).toContain("params.group_index_counts[group / 4u]");
+    expect(shaderSource).toContain("let lane = group % 4u;");
+    expect(shaderSource).not.toContain("group - 4u");
   });
 
   it("uses active-slot dispatch in the composed shader", () => {

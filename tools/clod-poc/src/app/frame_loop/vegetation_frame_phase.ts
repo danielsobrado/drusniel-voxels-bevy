@@ -200,7 +200,7 @@ function updateUntimed(input: VegetationFramePhaseInput): VegetationFrameTiming 
   input.treeController.update(input.elapsedSeconds, input.ringCenter, input.camera);
   input.understoryController.update(input.elapsedSeconds, input.ringCenter, input.camera);
   updateForestLighting(input);
-  input.stoneController.update(input.ringCenter);
+  input.stoneController.update(input.ringCenter, input.camera);
   input.propController?.update(input.camera as THREE.PerspectiveCamera, input.ringCenter);
   updateWater(input);
   updateDeepOcean(input);
@@ -223,7 +223,7 @@ export function runVegetationFramePhase(input: VegetationFramePhaseInput): Veget
   const treesMs = measure(() => input.treeController.update(input.elapsedSeconds, input.ringCenter, input.camera));
   const understoryMs = measure(() => input.understoryController.update(input.elapsedSeconds, input.ringCenter, input.camera));
   const forestLightingMs = measure(() => updateForestLighting(input));
-  const stonesMs = measure(() => input.stoneController.update(input.ringCenter));
+  const stonesMs = measure(() => input.stoneController.update(input.ringCenter, input.camera));
   const customPropsMs = measure(() => input.propController?.update(input.camera as THREE.PerspectiveCamera, input.ringCenter));
   const waterMs = measure(() => updateWater(input));
   const deepOceanMs = measure(() => updateDeepOcean(input));

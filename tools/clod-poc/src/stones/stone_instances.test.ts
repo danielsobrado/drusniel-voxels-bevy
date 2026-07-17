@@ -5,7 +5,9 @@ import {
   STONE_GPU_SCATTER_STORAGE_BINDINGS,
   stoneGpuClassRegion,
   stoneGpuOutputIndex,
+  stoneGpuScatterGrid,
   stoneGpuScatterUnsupportedReason,
+  stoneGpuSourceClassCap,
 } from "../gpu/stone_scatter_compute.js";
 import { composeStoneScatterShader } from "../gpu/wgsl_modules.js";
 import terrainCommonSource from "../gpu/shaders/terrain_field_common.wgsl?raw";
@@ -13,7 +15,7 @@ import shaderSource from "../gpu/shaders/stone_scatter.compute.wgsl?raw";
 import { buildWorld } from "../clod/quadtree.js";
 import type { ClodPageNode } from "../types.js";
 import { DEFAULT_STONE_SETTINGS, type StoneSettings } from "./stone_config.js";
-import { StoneSystem, stoneScatterCenterCoord } from "./stone_instances.js";
+import { StoneSystem, stoneGpuGroupLayout, stoneScatterCenterCoord } from "./stone_instances.js";
 import {
   sampleStoneSite,
   selectStoneClass,
@@ -109,8 +111,37 @@ describe("GPU stone instance layout", () => {
     const storageBindings = composeStoneScatterShader().match(/var<storage/g) ?? [];
 
     expect(storageBindings).toHaveLength(STONE_GPU_SCATTER_STORAGE_BINDINGS);
-    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(4))).toContain("5 storage buffers");
-    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(5))).toBeNull();
+    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(6))).toContain("7 storage buffers");
+    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(7))).toBeNull();
+  });
+
+  it("lays out (class x variant x lod) view groups honoring configured LODs and distances", () => {
+    const settings = mixedClassSettings();
+    const layout = stoneGpuGroupLayout(settings);
+    // Defaults: large [3,2] x 4 variants, medium [2,1] x 4, small [1] x 4 = 20 groups.
+    expect(layout.groupCount).toBe(20);
+    expect(layout.classGroupCounts).toEqual([8, 8, 4]);
+    expect(layout.classView[0]?.[0]).toBe(settings.classes.large.maxDistance);
+    expect(layout.classView[1]?.[0]).toBe(settings.classes.medium.maxDistance);
+    expect(layout.classView[2]?.[0]).toBe(settings.classes.small.maxDistance);
+    // Group bases are cumulative and match group = base + variant * lods + lod.
+    expect(layout.classView[0]?.[3]).toBe(0);
+    expect(layout.classView[1]?.[3]).toBe(8);
+    expect(layout.classView[2]?.[3]).toBe(16);
+    // LOD switch stays inside the ring even when maxDistance exceeds it.
+    expect(layout.classView[0]?.[1]).toBeLessThanOrEqual(settings.ringRadiusM);
+    // Entries are group-ordered so the entry index is the draw group.
+    layout.entries.forEach((entry, group) => {
+      const view = layout.classView[entry.classIndex]!;
+      expect(view[3] + entry.variant * view[2] + entry.lod).toBe(group);
+    });
+  });
+
+  it("bounds the source class capacity by the candidate grid", () => {
+    const settings = mixedClassSettings({ maxInstances: 120_000 });
+    const grid = stoneGpuScatterGrid(settings);
+    expect(stoneGpuSourceClassCap(settings)).toBe(Math.min(120_000, grid * grid));
+    expect(stoneGpuSourceClassCap(mixedClassSettings({ maxInstances: 50 }))).toBe(50);
   });
 
   it("does not use WGSL reserved keywords as local identifiers", () => {

@@ -44,7 +44,7 @@ export interface StoneController {
   applySettings(): void;
   rebuild(): void;
   refreshStats(): void;
-  update(ringCenter: THREE.Vector3): void;
+  update(ringCenter: THREE.Vector3, camera?: THREE.Camera): void;
   updateLighting(lighting: StoneLighting): void;
   setEnabled(enabled: boolean): void;
   setVisibleClasses(classes: StoneClass[]): void;
@@ -107,8 +107,8 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
       refreshStats();
     },
     refreshStats,
-    update(ringCenter) {
-      system.update(ringCenter);
+    update(ringCenter, camera) {
+      system.update(ringCenter, camera);
       const settings = makeSettings();
       const stats = system.getStats();
       const telemetryState = resolveStoneTelemetryState(stats);
@@ -124,7 +124,7 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
         acceptedCount: telemetryState === "unknown" ? undefined : stats.total,
         telemetryState,
         classColoring: settings.debug.classColors,
-        lodMode: "class-only",
+        lodMode: "class-lod",
       });
     },
     updateLighting(lighting) {

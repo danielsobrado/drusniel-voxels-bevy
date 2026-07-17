@@ -13,6 +13,9 @@ export { GeometryBuilder, maxAttributeValue } from "./understory_geometry_builde
 
 export type UnderstoryGeometryMap = Record<UnderstoryClass, THREE.BufferGeometry>;
 
+/** Far-tier draws use decimated silhouettes of the same plants. */
+export type UnderstoryGeometryDetail = "full" | "low";
+
 const GROUND_LITTER_DARK = new THREE.Color(0x3b3324);
 const GROUND_LITTER_LIGHT = new THREE.Color(0x786646);
 
@@ -29,9 +32,12 @@ function makeRng(seed: number): Rng {
   };
 }
 
-export function createUnderstoryGeometryMap(settings: UnderstorySettings): UnderstoryGeometryMap {
+export function createUnderstoryGeometryMap(
+  settings: UnderstorySettings,
+  detail: UnderstoryGeometryDetail = "full",
+): UnderstoryGeometryMap {
   const map = {} as UnderstoryGeometryMap;
-  for (const cls of UNDERSTORY_CLASSES) map[cls] = createUnderstoryGeometry(cls, settings);
+  for (const cls of UNDERSTORY_CLASSES) map[cls] = createUnderstoryGeometry(cls, settings, detail);
   return map;
 }
 
@@ -39,16 +45,21 @@ export function disposeUnderstoryGeometryMap(map: UnderstoryGeometryMap): void {
   for (const geometry of Object.values(map)) geometry.dispose();
 }
 
-export function createUnderstoryGeometry(cls: UnderstoryClass, settings: UnderstorySettings): THREE.BufferGeometry {
+export function createUnderstoryGeometry(
+  cls: UnderstoryClass,
+  settings: UnderstorySettings,
+  detail: UnderstoryGeometryDetail = "full",
+): THREE.BufferGeometry {
   const builder = new GeometryBuilder();
   const rng = makeRng(classSeed(settings.seed, cls));
-  if (cls === "shrub") appendShrub(builder, settings.classes.shrub.windWeight, rng);
-  else if (cls === "fern") appendFern(builder, settings.classes.fern.windWeight, rng);
-  else if (cls === "sapling") appendSapling(builder, settings.classes.sapling.windWeight, rng);
-  else if (cls === "flower") appendFlower(builder, settings.classes.flower.windWeight, rng);
-  else if (cls === "dead_log") appendDeadLog(builder);
-  else appendStump(builder);
-  appendGroundLitter(builder, rng, groundLitterCount(cls));
+  const low = detail === "low";
+  if (cls === "shrub") appendShrub(builder, settings.classes.shrub.windWeight, rng, low);
+  else if (cls === "fern") appendFern(builder, settings.classes.fern.windWeight, rng, low);
+  else if (cls === "sapling") appendSapling(builder, settings.classes.sapling.windWeight, rng, low);
+  else if (cls === "flower") appendFlower(builder, settings.classes.flower.windWeight, rng, low);
+  else if (cls === "dead_log") appendDeadLog(builder, low);
+  else appendStump(builder, low);
+  appendGroundLitter(builder, rng, low ? 0 : groundLitterCount(cls));
   const geometry = builder.build();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
@@ -69,8 +80,10 @@ export function understoryGeometrySummary(geometry: THREE.BufferGeometry): {
   };
 }
 
-function appendShrub(builder: GeometryBuilder, wind: number, rng: Rng): void {
-  const stems = 3 + rng.int(2);
+function appendShrub(builder: GeometryBuilder, wind: number, rng: Rng, low = false): void {
+  const stems = low ? 2 : 3 + rng.int(2);
+  const clusters = low ? 1 : 3;
+  const segments = low ? 3 : 5;
   for (let si = 0; si < stems; si++) {
     const azimuth = (si / stems) * Math.PI * 2 + rng.float();
     const lean = 0.12 + rng.float() * 0.2;
@@ -78,18 +91,18 @@ function appendShrub(builder: GeometryBuilder, wind: number, rng: Rng): void {
     const start = new THREE.Vector3(Math.cos(azimuth) * 0.04, 0, Math.sin(azimuth) * 0.04);
     const dir = new THREE.Vector3(Math.cos(azimuth) * lean, 1, Math.sin(azimuth) * lean).normalize();
     const end = start.clone().addScaledVector(dir, len);
-    builder.addCylinder(start, end, 0.022, 0.009, 5, BARK, wind * 0.3);
+    builder.addCylinder(start, end, 0.022, 0.009, segments, BARK, wind * 0.3);
     const outward = new THREE.Vector3(Math.cos(azimuth), 0.5, Math.sin(azimuth)).normalize();
-    for (let c = 0; c < 3; c++) {
+    for (let c = 0; c < clusters; c++) {
       const t = 0.55 + c * 0.15 + rng.float() * 0.05;
       const pos = start.clone().lerp(end, t);
-      builder.addLeafCluster(pos, outward, 0.85 + rng.float() * 0.3, 2, SHRUB_LEAF, GREEN_DARK, GREEN_LIGHT, wind, rng);
+      builder.addLeafCluster(pos, outward, 0.85 + rng.float() * 0.3, low ? 1 : 2, SHRUB_LEAF, GREEN_DARK, GREEN_LIGHT, wind, rng);
     }
   }
 }
 
-function appendFern(builder: GeometryBuilder, wind: number, rng: Rng): void {
-  const fronds = 6 + rng.int(2);
+function appendFern(builder: GeometryBuilder, wind: number, rng: Rng, low = false): void {
+  const fronds = low ? 3 : 6 + rng.int(2);
   const q = new THREE.Quaternion();
   const qt = new THREE.Quaternion();
   const m = new THREE.Matrix4();
@@ -108,11 +121,11 @@ function appendFern(builder: GeometryBuilder, wind: number, rng: Rng): void {
   }
 }
 
-function appendSapling(builder: GeometryBuilder, wind: number, rng: Rng): void {
+function appendSapling(builder: GeometryBuilder, wind: number, rng: Rng, low = false): void {
   const trunkH = 0.95 + rng.float() * 0.2;
   const top = new THREE.Vector3(0, trunkH, 0);
-  builder.addCylinder(new THREE.Vector3(0, 0, 0), top, 0.05, 0.022, 6, BARK, wind * 0.3);
-  const branches = 3 + rng.int(2);
+  builder.addCylinder(new THREE.Vector3(0, 0, 0), top, 0.05, 0.022, low ? 4 : 6, BARK, wind * 0.3);
+  const branches = low ? 2 : 3 + rng.int(2);
   const tips: { pos: THREE.Vector3; dir: THREE.Vector3 }[] = [];
   for (let i = 0; i < branches; i++) {
     const az = (i / branches) * Math.PI * 2 + rng.float();
@@ -121,16 +134,18 @@ function appendSapling(builder: GeometryBuilder, wind: number, rng: Rng): void {
     const branchLen = 0.18 + rng.float() * 0.12;
     const dir = new THREE.Vector3(Math.cos(az) * 0.8, 0.6, Math.sin(az) * 0.8).normalize();
     const branchEnd = branchStart.clone().addScaledVector(dir, branchLen);
-    builder.addCylinder(branchStart, branchEnd, 0.018, 0.008, 4, BARK, wind * 0.5);
+    builder.addCylinder(branchStart, branchEnd, 0.018, 0.008, low ? 3 : 4, BARK, wind * 0.5);
     tips.push({ pos: branchEnd, dir });
   }
-  builder.addLeafCluster(top, AXIS_Y, 1.0, 3, SAPLING_LEAF, GREEN_DARK, GREEN_LIGHT, wind, rng);
-  for (const tip of tips) {
-    builder.addLeafCluster(tip.pos, tip.dir, 0.9 + rng.float() * 0.2, 3, SAPLING_LEAF, GREEN_DARK, GREEN_LIGHT, wind, rng);
+  builder.addLeafCluster(top, AXIS_Y, 1.0, low ? 2 : 3, SAPLING_LEAF, GREEN_DARK, GREEN_LIGHT, wind, rng);
+  if (!low) {
+    for (const tip of tips) {
+      builder.addLeafCluster(tip.pos, tip.dir, 0.9 + rng.float() * 0.2, 3, SAPLING_LEAF, GREEN_DARK, GREEN_LIGHT, wind, rng);
+    }
   }
 }
 
-function appendFlower(builder: GeometryBuilder, wind: number, rng: Rng): void {
+function appendFlower(builder: GeometryBuilder, wind: number, rng: Rng, low = false): void {
   const H = 0.28 + rng.float() * 0.2;
   const sway = (rng.float() - 0.5) * 0.25;
   const top = new THREE.Vector3(sway * H, H, sway * H * 0.6);
@@ -150,7 +165,7 @@ function appendFlower(builder: GeometryBuilder, wind: number, rng: Rng): void {
     builder.addQuad(b0, b1, c1, c0);
   }
   const leafColor = GREEN_DARK.clone().lerp(GREEN_LIGHT, 0.2);
-  const leaves = 2 + rng.int(2);
+  const leaves = low ? 1 : 2 + rng.int(2);
   for (let i = 0; i < leaves; i++) {
     const az = rng.float() * Math.PI * 2;
     const ll = 0.07 + rng.float() * 0.06;
@@ -169,7 +184,7 @@ function appendFlower(builder: GeometryBuilder, wind: number, rng: Rng): void {
   const cz = top.z;
   const s = 0.05 + rng.float() * 0.02;
   const up = new THREE.Vector3(0, 1, 0.2).normalize();
-  const petals = 8 + rng.int(4);
+  const petals = low ? 5 : 8 + rng.int(4);
   for (let i = 0; i < petals; i++) {
     const az = (i / petals) * Math.PI * 2;
     const dx = Math.cos(az);
@@ -183,7 +198,7 @@ function appendFlower(builder: GeometryBuilder, wind: number, rng: Rng): void {
     builder.addQuad(a0, a1, b1, b0);
   }
   const center = builder.addVertex(new THREE.Vector3(cx, cy + s * 0.08, cz), AXIS_Y, FLOWER_CENTER, wind * 0.6, [0.5, 0.5]);
-  const ringN = 6;
+  const ringN = low ? 4 : 6;
   const ring: number[] = [];
   for (let i = 0; i <= ringN; i++) {
     const az = (i / ringN) * Math.PI * 2;
@@ -192,14 +207,17 @@ function appendFlower(builder: GeometryBuilder, wind: number, rng: Rng): void {
   for (let i = 0; i < ringN; i++) builder.addTriangle(center, ring[i + 1], ring[i]);
 }
 
-function appendDeadLog(builder: GeometryBuilder): void {
-  builder.addCylinder(new THREE.Vector3(-0.72, 0.18, 0), new THREE.Vector3(0.72, 0.18, 0), 0.18, 0.16, 8, DEAD_WOOD, 0);
-  builder.addCylinder(new THREE.Vector3(-0.64, 0.32, 0.04), new THREE.Vector3(-0.32, 0.44, 0.12), 0.04, 0.02, 5, BARK_DARK, 0);
+function appendDeadLog(builder: GeometryBuilder, low = false): void {
+  builder.addCylinder(new THREE.Vector3(-0.72, 0.18, 0), new THREE.Vector3(0.72, 0.18, 0), 0.18, 0.16, low ? 5 : 8, DEAD_WOOD, 0);
+  if (!low) {
+    builder.addCylinder(new THREE.Vector3(-0.64, 0.32, 0.04), new THREE.Vector3(-0.32, 0.44, 0.12), 0.04, 0.02, 5, BARK_DARK, 0);
+  }
 }
 
-function appendStump(builder: GeometryBuilder): void {
-  builder.addCylinder(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.42, 0), 0.18, 0.15, 9, BARK, 0);
-  builder.addDisk(new THREE.Vector3(0, 0.43, 0), 0.15, 9, DEAD_WOOD);
+function appendStump(builder: GeometryBuilder, low = false): void {
+  const segments = low ? 6 : 9;
+  builder.addCylinder(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.42, 0), 0.18, 0.15, segments, BARK, 0);
+  builder.addDisk(new THREE.Vector3(0, 0.43, 0), 0.15, segments, DEAD_WOOD);
 }
 
 function groundLitterCount(cls: UnderstoryClass): number {

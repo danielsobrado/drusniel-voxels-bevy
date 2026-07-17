@@ -39,6 +39,20 @@ describe("understory geometry and material", () => {
     }
   });
 
+  it("builds lighter far-tier geometry than the full near tier", () => {
+    const settings = cloneUnderstorySettings();
+    for (const cls of UNDERSTORY_CLASSES) {
+      const full = createUnderstoryGeometry(cls, settings, "full");
+      const low = createUnderstoryGeometry(cls, settings, "low");
+      const fullSummary = understoryGeometrySummary(full);
+      const lowSummary = understoryGeometrySummary(low);
+      expect(lowSummary.indexCount).toBeGreaterThan(0);
+      expect(lowSummary.vertexCount).toBeLessThan(fullSummary.vertexCount);
+      full.dispose();
+      low.dispose();
+    }
+  });
+
   it("uses cutout-safe material settings and injects wind shader code", () => {
     const settings = cloneUnderstorySettings();
     const handle = createUnderstoryMaterialHandle(settings);
@@ -157,6 +171,35 @@ describe("understory GPU status", () => {
     system.update(0, new THREE.Vector3(16, 0, 16));
     const stats = system.getStats();
     expect(stats.gpuStatus).toBe("fallback-cpu");
+  });
+});
+
+describe("understory GPU ring lighting proxies", () => {
+  it("returns coarse deterministic ecology proxies without a readback", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    settings.gpu.enabled = true;
+    settings.gpu.fallbackToCpu = false;
+    const gpuDevice = { limits: { maxStorageBuffersPerShaderStage: 8 } } as unknown as GPUDevice;
+    const system = new UnderstorySystem({
+      scene,
+      nodes: [],
+      worldCells: 512,
+      settings,
+      sampler: flatSampler(),
+      gpuDevice,
+      supportsGpu: true,
+    });
+    systems.push(system);
+    const first = system.getLightingProxies();
+    expect(first.length).toBeGreaterThan(0);
+    for (const proxy of first) {
+      expect(proxy.densityWeight).toBeGreaterThan(0);
+      expect(proxy.densityWeight).toBeLessThanOrEqual(1);
+      expect(Math.hypot(proxy.x - 256, proxy.z - 256)).toBeLessThanOrEqual(settings.distanceM + 0.001);
+    }
+    // Cached until the ring center moves.
+    expect(system.getLightingProxies()).toBe(first);
   });
 });
 

@@ -1,9 +1,14 @@
 import { UNDERSTORY_CLASSES, type UnderstorySettings } from "./understory_config.js";
 import {
+  UNDERSTORY_RING_EDGE_FADE_M,
+  UNDERSTORY_RING_GROUP_COUNT,
+  UNDERSTORY_RING_NEAR_TIER_FRACTION,
+  UNDERSTORY_RING_TIER_COUNT,
   understoryRingAcceptance,
   understoryRingAcceptParams,
   understoryRingCell,
   understoryRingGrid,
+  understoryRingGroupClass,
   understoryRingHash,
   understoryRingSlotCount,
   understoryRingTerrainGate,
@@ -37,7 +42,7 @@ export function generateUnderstoryRingValidationCounts(
   options: UnderstoryRingValidationOptions,
 ): UnderstoryRingValidationCounts {
   const counts: UnderstoryRingCounts = { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 };
-  const rawGroupCounts = new Array<number>(UNDERSTORY_CLASSES.length).fill(0);
+  const rawGroupCounts = new Array<number>(UNDERSTORY_RING_GROUP_COUNT).fill(0);
   if (!options.settings.enabled) {
     return { counts, groupCounts: rawGroupCounts, overflowed: false, candidateCount: 0, acceptedCandidates: 0 };
   }
@@ -88,7 +93,10 @@ export function generateUnderstoryRingValidationCounts(
     if (ground < 0) continue;
 
     const ecology = sampleUnderstoryEcology(wx, wz, height, normalY, ground, settings);
-    const acceptance = understoryRingAcceptance(ecology);
+    const edgeFade = 1 - smoothstep01(
+      (dist - (settings.distanceM - UNDERSTORY_RING_EDGE_FADE_M)) / UNDERSTORY_RING_EDGE_FADE_M,
+    );
+    const acceptance = understoryRingAcceptance(ecology) * edgeFade;
     if (understoryRingHash(wc[0], wc[1], settings.seed, 809) >= acceptance) continue;
     if (ecology.forestInfluence < settings.placement.minTreeInfluence) continue;
 
@@ -123,12 +131,14 @@ export function generateUnderstoryRingValidationCounts(
     }
 
     acceptedCandidates++;
-    rawGroupCounts[selectedGroup]++;
+    const nearRadius = settings.distanceM * UNDERSTORY_RING_NEAR_TIER_FRACTION;
+    const tier = dist >= nearRadius ? 1 : 0;
+    rawGroupCounts[selectedGroup * UNDERSTORY_RING_TIER_COUNT + tier]++;
   }
 
   const groupCounts = rawGroupCounts.map((count) => Math.min(count, maxInstancesPerGroup));
-  for (let group = 0; group < UNDERSTORY_CLASSES.length; group++) {
-    counts[UNDERSTORY_CLASSES[group]] = groupCounts[group];
+  for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+    counts[understoryRingGroupClass(group)] += groupCounts[group];
   }
 
   return {
@@ -138,4 +148,9 @@ export function generateUnderstoryRingValidationCounts(
     candidateCount,
     acceptedCandidates,
   };
+}
+
+function smoothstep01(t: number): number {
+  const clamped = Math.min(1, Math.max(0, t));
+  return clamped * clamped * (3 - 2 * clamped);
 }
