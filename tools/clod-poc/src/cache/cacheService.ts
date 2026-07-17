@@ -1,16 +1,30 @@
 import type { ClodCacheConfig } from "./cacheConfig.js";
 import { isCacheEffective as cacheEffective } from "./cacheConfig.js";
 import { buildClodCacheKey } from "./cacheKey.js";
-import type { ClodCacheGetResult, ClodCacheKeyParts, ClodCachePutResult, ClodCacheStoredRecord, CacheMissReason } from "./cacheTypes.js";
+import type {
+  CacheMissReason,
+  ClodCacheGetResult,
+  ClodCacheKeyParts,
+  ClodCachePutResult,
+  ClodCacheStoredRecord,
+} from "./cacheTypes.js";
 import { MemoryCache } from "./memoryCache.js";
 import { ClodCacheManifest } from "./cacheManifest.js";
 import { CacheMetricsTracker, type ClodCacheMetrics } from "./cacheMetrics.js";
 import { CacheScheduler } from "./cacheScheduler.js";
 import { compressPayload, decompressPayload, resolveCompressionMode } from "./compression.js";
 import { sha256Hex } from "./checksum.js";
-import { CacheChecksumError, CacheUnavailableError } from "./cacheErrors.js";
+import {
+  CacheChecksumError,
+  CacheUnavailableError,
+  CacheWriteRejectedError,
+} from "./cacheErrors.js";
 import { cacheLogger } from "./cacheLogger.js";
-import { createPersistentStore, type PersistentCacheStore, type CachePersistenceRole } from "./indexedDbStore.js";
+import {
+  createPersistentStore,
+  type CachePersistenceRole,
+  type PersistentCacheStore,
+} from "./indexedDbStore.js";
 import type { ClodCacheService } from "./cache_service_types.js";
 import {
   isArtifactValidationError,
@@ -19,8 +33,33 @@ import {
   touchCacheManifest,
   validateCacheHeader,
 } from "./cache_service_helpers.js";
+import { cacheRecordVersionMatches } from "./streaming_cache_write_guard.js";
 
 export type { ClodCacheService } from "./cache_service_types.js";
+
+type ConditionalPersistentCacheStore = PersistentCacheStore & {
+  deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean>;
+};
+
+function supportsConditionalDelete(
+  store: PersistentCacheStore,
+): store is ConditionalPersistentCacheStore {
+  return typeof (store as Partial<ConditionalPersistentCacheStore>).deleteIfMatches === "function";
+}
+
+function metadataMatches(
+  actual: Readonly<Record<string, string | number | boolean>>,
+  expected: Readonly<Record<string, string | number | boolean>>,
+): boolean {
+  return Object.entries(expected).every(([key, value]) => actual[key] === value);
+}
+
+function writeRequiresCommitAcceptance(
+  metadata: Readonly<Record<string, string | number | boolean>>,
+): boolean {
+  const generation = metadata.terrainStreamingGeneration;
+  return typeof generation === "number" && Number.isInteger(generation) && generation >= 0;
+}
 
 export class ClodCacheServiceImpl implements ClodCacheService {
   private readonly config: ClodCacheConfig;
@@ -52,6 +91,37 @@ export class ClodCacheServiceImpl implements ClodCacheService {
       cacheLogger.error(`persistent store failed ${this.persistentErrorCount} times, disabling persistence`);
       this.persistent = null;
       this.metrics.recordError("persistence-disabled");
+    }
+  }
+
+  private storeInMemory(key: string, record: ClodCacheStoredRecord): void {
+    if (!this.memory) return;
+    const evicted = this.memory.put(key, record);
+    if (evicted.length > 0) this.onEvicted(evicted);
+  }
+
+  private async recordPersistentWrite(
+    persistent: PersistentCacheStore,
+    key: string,
+    record: ClodCacheStoredRecord,
+    now: number,
+  ): Promise<void> {
+    this.manifest.upsert({
+      key,
+      artifactKind: record.header.artifactKind,
+      createdAtUnixMs: now,
+      lastAccessedUnixMs: now,
+      hitCount: 0,
+      storedBytes: record.header.storedBytes,
+    });
+    const evictedKeys = this.manifest.evictOldest(
+      this.config.persistent.max_items,
+      this.config.persistent.max_bytes,
+    );
+    for (const evictKey of evictedKeys) {
+      await persistent.delete(evictKey);
+      this.manifest.delete(evictKey);
+      this.onEvicted([evictKey]);
     }
   }
 
@@ -92,10 +162,12 @@ export class ClodCacheServiceImpl implements ClodCacheService {
       const record = await this.persistent.get(key);
       if (!record) continue;
       this.manifest.upsert({
-        key, artifactKind: record.header.artifactKind,
+        key,
+        artifactKind: record.header.artifactKind,
         createdAtUnixMs: record.header.createdAtUnixMs,
         lastAccessedUnixMs: record.header.createdAtUnixMs,
-        hitCount: 0, storedBytes: record.header.storedBytes,
+        hitCount: 0,
+        storedBytes: record.header.storedBytes,
       });
     }
     if (keys.length > maxScan) cacheLogger.debug(`manifest hydrate scanned ${maxScan}/${keys.length} keys`);
@@ -106,13 +178,19 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     decode: (payload: ArrayBuffer) => TArtifact,
   ): Promise<ClodCacheGetResult<TArtifact>> {
     const key = buildClodCacheKey(keyParts);
-    if (!cacheEffective(this.config)) { this.metrics.recordMiss("disabled"); return miss<TArtifact>(key, "disabled"); }
+    if (!cacheEffective(this.config)) {
+      this.metrics.recordMiss("disabled");
+      return miss<TArtifact>(key, "disabled");
+    }
 
     return this.scheduler.scheduleRead(async () => {
       const t0 = performance.now();
       try {
         const record = await loadCachedRecord(key, this.memory, this.persistent);
-        if (!record) { this.metrics.recordMiss("not-found"); return miss<TArtifact>(key, "not-found", performance.now() - t0); }
+        if (!record) {
+          this.metrics.recordMiss("not-found");
+          return miss<TArtifact>(key, "not-found", performance.now() - t0);
+        }
 
         const validationReason = validateCacheHeader(record.header, keyParts, this.config);
         if (validationReason) {
@@ -132,11 +210,24 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         const artifact = decode(uncompressed);
         const decodeMs = performance.now() - t0;
         this.metrics.recordHit(record.header.storedBytes, decodeMs);
-        if (this.config.debug.log_cache_hits) cacheLogger.debug(`hit ${key} (${record.header.storedBytes} B, ${decodeMs.toFixed(2)} ms)`);
+        if (this.config.debug.log_cache_hits) {
+          cacheLogger.debug(`hit ${key} (${record.header.storedBytes} B, ${decodeMs.toFixed(2)} ms)`);
+        }
         touchCacheManifest(this.manifest, key, record.header.artifactKind, record.header.storedBytes);
-        return { status: "hit", artifact, key, bytesRead: record.header.storedBytes, decodeMs, metadata: record.header.metadata };
+        return {
+          status: "hit",
+          artifact,
+          key,
+          bytesRead: record.header.storedBytes,
+          decodeMs,
+          metadata: record.header.metadata,
+        };
       } catch (error) {
-        const reason: CacheMissReason = error instanceof CacheChecksumError ? "checksum-mismatch" : error instanceof CacheUnavailableError ? "backend-error" : "decode-error";
+        const reason: CacheMissReason = error instanceof CacheChecksumError
+          ? "checksum-mismatch"
+          : error instanceof CacheUnavailableError
+            ? "backend-error"
+            : "decode-error";
         const name = error instanceof Error ? error.name : "";
         const message = error instanceof Error ? error.message : String(error);
         cacheLogger.warn(`get failed for ${key} [${name}] ${message}`);
@@ -157,7 +248,9 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     metadata: Record<string, string | number | boolean>,
   ): Promise<ClodCachePutResult> {
     const key = buildClodCacheKey(keyParts);
-    if (!cacheEffective(this.config)) return { key, bytesWritten: 0, encodeMs: 0, compression: "none" };
+    if (!cacheEffective(this.config)) {
+      return { key, bytesWritten: 0, encodeMs: 0, compression: "none" };
+    }
 
     return this.scheduler.scheduleWrite(async () => {
       const t0 = performance.now();
@@ -168,42 +261,64 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         const compressed = await compressPayload(uncompressed, compressionMode);
         const now = Date.now();
         const header = {
-          schemaVersion: this.config.schema_version, artifactKind: keyParts.artifactKind, key,
-          createdAtUnixMs: now, builderVersion: keyParts.builderVersion,
-          generatorVersion: keyParts.generatorVersion, worldSeed: keyParts.worldSeed,
-          sourceRevision: keyParts.sourceRevision, configHash: keyParts.configHash,
-          sourceHash: keyParts.sourceHash, uncompressedBytes: uncompressed.byteLength,
-          storedBytes: compressed.bytes.byteLength, compression: compressed.mode, checksum, metadata,
+          schemaVersion: this.config.schema_version,
+          artifactKind: keyParts.artifactKind,
+          key,
+          createdAtUnixMs: now,
+          builderVersion: keyParts.builderVersion,
+          generatorVersion: keyParts.generatorVersion,
+          worldSeed: keyParts.worldSeed,
+          sourceRevision: keyParts.sourceRevision,
+          configHash: keyParts.configHash,
+          sourceHash: keyParts.sourceHash,
+          uncompressedBytes: uncompressed.byteLength,
+          storedBytes: compressed.bytes.byteLength,
+          compression: compressed.mode,
+          checksum,
+          metadata,
         };
         const record: ClodCacheStoredRecord = { header, payload: compressed.bytes };
-        if (this.memory) {
-          const evicted = this.memory.put(key, record);
-          if (evicted.length > 0) this.onEvicted(evicted);
+        const persistent = this.persistent;
+        const commitGated = writeRequiresCommitAcceptance(metadata);
+
+        if (persistent && commitGated) {
+          await persistent.put(key, record);
+          this.storeInMemory(key, record);
+        } else {
+          this.storeInMemory(key, record);
+          if (persistent) await persistent.put(key, record);
         }
-        if (this.persistent) {
-          await this.persistent.put(key, record);
-          this.manifest.upsert({
-            key, artifactKind: keyParts.artifactKind,
-            createdAtUnixMs: now, lastAccessedUnixMs: now, hitCount: 0, storedBytes: record.header.storedBytes,
-          });
-          const evictedKeys = this.manifest.evictOldest(this.config.persistent.max_items, this.config.persistent.max_bytes);
-          for (const evictKey of evictedKeys) {
-            await this.persistent.delete(evictKey);
-            this.manifest.delete(evictKey);
-            this.onEvicted([evictKey]);
-          }
-        }
+
+        if (persistent) await this.recordPersistentWrite(persistent, key, record, now);
         const encodeMs = performance.now() - t0;
         this.metrics.recordWrite(record.header.storedBytes, encodeMs);
-        return { key, bytesWritten: record.header.storedBytes, encodeMs, compression: compressed.mode };
+        return {
+          key,
+          bytesWritten: record.header.storedBytes,
+          encodeMs,
+          compression: compressed.mode,
+        };
       } catch (error) {
+        if (error instanceof CacheWriteRejectedError) {
+          return {
+            key,
+            bytesWritten: 0,
+            encodeMs: performance.now() - t0,
+            compression: "none",
+          };
+        }
         const name = error instanceof Error ? error.name : "";
         const message = error instanceof Error ? error.message : String(error);
         cacheLogger.error(`put failed for ${key} [${name}] ${message}`);
         this.metrics.recordError(`[${name}] ${message}`);
         if (error instanceof CacheUnavailableError || error instanceof DOMException) this.notePersistentError();
         if (this.config.strict) throw error;
-        return { key, bytesWritten: 0, encodeMs: performance.now() - t0, compression: "none" };
+        return {
+          key,
+          bytesWritten: 0,
+          encodeMs: performance.now() - t0,
+          compression: "none",
+        };
       }
     });
   }
@@ -215,17 +330,50 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     if (this.persistent) await this.persistent.delete(key);
   }
 
-  deleteMemory(keyParts: ClodCacheKeyParts): void {
-    this.memory?.delete(buildClodCacheKey(keyParts));
+  async deleteIfMatches(
+    keyParts: ClodCacheKeyParts,
+    expectedMetadata: Readonly<Record<string, string | number | boolean>>,
+  ): Promise<boolean> {
+    const key = buildClodCacheKey(keyParts);
+    const persistent = this.persistent;
+    let expectedRecord = this.memory?.peek(key) ?? null;
+    if (!expectedRecord && persistent) expectedRecord = await persistent.get(key);
+    if (!expectedRecord || !metadataMatches(expectedRecord.header.metadata, expectedMetadata)) return false;
+
+    let persistentDeleted = false;
+    if (persistent) {
+      if (!supportsConditionalDelete(persistent)) {
+        throw new CacheUnavailableError("persistent cache does not support conditional delete");
+      }
+      persistentDeleted = await persistent.deleteIfMatches(key, expectedRecord);
+    }
+
+    const currentMemory = this.memory?.peek(key) ?? null;
+    let memoryDeleted = false;
+    if (currentMemory && cacheRecordVersionMatches(currentMemory, expectedRecord)) {
+      this.memory?.delete(key);
+      memoryDeleted = true;
+    }
+
+    if ((persistentDeleted || memoryDeleted) && !this.memory?.peek(key)) {
+      this.manifest.delete(key);
+    }
+    return persistentDeleted || memoryDeleted;
   }
 
-  async clear(): Promise<void> { this.clearMemory(); await this.clearPersistent(); }
+  async clear(): Promise<void> {
+    this.clearMemory();
+    await this.clearPersistent();
+  }
 
   clearMemory(): void { this.memory?.clear(); }
 
   async clearPersistent(): Promise<void> {
     this.manifest.clear();
-    if (this.persistent) { await this.persistent.clear(); await this.persistent.putManifestEntries([]); }
+    if (this.persistent) {
+      await this.persistent.clear();
+      await this.persistent.putManifestEntries([]);
+    }
   }
 
   async flush(): Promise<void> { await this.scheduler.flush(); }
