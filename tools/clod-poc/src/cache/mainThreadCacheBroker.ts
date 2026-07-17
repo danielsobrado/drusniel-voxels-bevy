@@ -75,6 +75,9 @@ async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Pr
         await store.delete(request.key);
         result = true;
         break;
+      case "deleteIfMatches":
+        result = await store.deleteIfMatches(request.key, request.record);
+        break;
       case "clear":
         await store.clear();
         brokerStore = null;
