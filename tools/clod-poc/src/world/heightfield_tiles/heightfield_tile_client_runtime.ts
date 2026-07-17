@@ -17,6 +17,7 @@ interface ClientPrototype {
   dispose: ClodWorkerClient["dispose"];
 }
 
+const NON_AUTHORITATIVE_BACKGROUND_BUILD_INTERVAL_FRAMES = 30;
 const activeRuntimes = new WeakMap<ClodWorkerClient, HeightfieldTileRuntime>();
 const runtimeSet = new Set<HeightfieldTileRuntime>();
 let installed = false;
@@ -87,6 +88,11 @@ export function heightfieldTileBuildAllowed(
     && (counters["live_clod_stream_safety_inflight_pages"] ?? 0) === 0;
 }
 
+export function heightfieldTileBackgroundBuildDue(frameIndex: number): boolean {
+  return Number.isFinite(frameIndex)
+    && Math.max(0, Math.floor(frameIndex)) % NON_AUTHORITATIVE_BACKGROUND_BUILD_INTERVAL_FRAMES === 0;
+}
+
 export function updateHeightfieldTileClientRuntime(
   client: ClodWorkerClient,
   input: HeightfieldTileRuntimeUpdate,
@@ -105,7 +111,14 @@ export function updateHeightfieldTileClientRuntime(
   runtime.update({ ...input, buildAllowed: false });
   queueMicrotask(() => {
     if (activeRuntimes.get(client) !== runtime) return;
-    runtime.cache.setBuildAllowed(heightfieldTileBuildAllowed(window.__drusnielClod?.stats?.counters));
+    const normalBuildAllowed = heightfieldTileBuildAllowed(window.__drusnielClod?.stats?.counters);
+    const backgroundQuota = !normalBuildAllowed && heightfieldTileBackgroundBuildDue(input.frameIndex);
+    runtime.cache.setBuildAllowed(normalBuildAllowed || backgroundQuota);
+    if (backgroundQuota) {
+      queueMicrotask(() => {
+        if (activeRuntimes.get(client) === runtime) runtime.cache.setBuildAllowed(false);
+      });
+    }
   });
 }
 
