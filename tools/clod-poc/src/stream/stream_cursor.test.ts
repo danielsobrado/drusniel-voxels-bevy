@@ -56,4 +56,31 @@ describe("StreamCursorTracker", () => {
     expect(at30.velocityMps.x).toBeCloseTo(at60.velocityMps.x, 1);
     expect(at30.predicted(4).x).toBeCloseTo(at60.predicted(4).x, 0);
   });
+
+  it("resets velocity when the canonical source changes", () => {
+    const tracker = new StreamCursorTracker();
+    tracker.update({ ...baseInput, frameId: 0, orbitTarget: { x: 0, z: 0 } });
+    tracker.update({ ...baseInput, frameId: 1, orbitTarget: { x: 1, z: 0 } });
+
+    const cursor = tracker.update({
+      ...baseInput,
+      frameId: 2,
+      interactionMode: "playing",
+      player: { spawned: true, position: { x: 100, z: 100 } },
+    });
+
+    expect(cursor.discontinuity).toBe(true);
+    expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
+    expect(cursor.predicted(4)).toEqual(cursor.center);
+  });
+
+  it("treats a floating-origin-sized coordinate jump as a discontinuity", () => {
+    const tracker = new StreamCursorTracker();
+    tracker.update({ ...baseInput, frameId: 0, orbitTarget: { x: 4100, z: 0 } });
+    const cursor = tracker.update({ ...baseInput, frameId: 1, orbitTarget: { x: 4, z: 0 } });
+
+    expect(cursor.discontinuity).toBe(true);
+    expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
+    expect(tracker.discontinuityCount()).toBe(1);
+  });
 });
