@@ -76,4 +76,14 @@ postprocess:
       godRaysDustSpeed: 0,
     });
   });
+
+  it("turns god rays off with the shared fog-disable flag", () => {
+    expect(applyPostProcessQueryOverrides(
+      DEFAULT_POST_PROCESS_SETTINGS,
+      new URLSearchParams({ fog: "0" }),
+    )).toMatchObject({
+      aerialPerspectiveEnabled: false,
+      godRaysMode: "off",
+    });
+  });
 });
