@@ -3,7 +3,7 @@ import type { TreeLod } from "./tree_config.js";
 export type TreeDepthPrepassMaxLod = "none" | Exclude<TreeLod, "impostor">;
 
 export const TREE_DEPTH_PREPASS_MAX_LODS = ["none", "near", "mid", "far"] as const satisfies readonly TreeDepthPrepassMaxLod[];
-export const DEFAULT_TREE_DEPTH_PREPASS_MAX_LOD: TreeDepthPrepassMaxLod = "far";
+export const DEFAULT_TREE_DEPTH_PREPASS_MAX_LOD: TreeDepthPrepassMaxLod = "none";
 
 const TREE_LOD_RANK: Record<TreeDepthPrepassMaxLod, number> = {
   none: 0,
