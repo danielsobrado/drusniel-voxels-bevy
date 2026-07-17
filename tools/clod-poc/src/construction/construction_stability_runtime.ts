@@ -44,7 +44,6 @@ export interface ConstructionCollapseStepResult {
 
 export class ConstructionStabilityRuntime {
   private readonly dirtyIds = new Set<string>();
-  private readonly pendingCollapseIds = new Set<string>();
   private readonly runtimeStats: ConstructionStabilityRuntimeStats = {
     recomputeMs: 0,
     recomputeCount: 0,
@@ -124,17 +123,12 @@ export class ConstructionStabilityRuntime {
       for (const [id, node] of nodes) {
         const placed = placedById.get(id)!;
         const value = solved.values.get(id) ?? 0;
-        const collapsing = shouldCollapseConstruction(value, node.grounded, this.config);
+        const unsupported = shouldCollapseConstruction(value, node.grounded, this.config);
         if (Math.abs((placed.stability ?? 0) - value) > this.config.epsilon
-          || (placed.unsupported === true) !== collapsing) changedIds.add(id);
+          || (placed.unsupported === true) !== unsupported) changedIds.add(id);
         placed.stability = value;
-        if (collapsing) {
-          placed.unsupported = true;
-          this.pendingCollapseIds.add(id);
-        } else {
-          delete placed.unsupported;
-          this.pendingCollapseIds.delete(id);
-        }
+        if (unsupported) placed.unsupported = true;
+        else delete placed.unsupported;
       }
     }
 
@@ -145,48 +139,24 @@ export class ConstructionStabilityRuntime {
     this.runtimeStats.largestIslandLast = largestIsland;
     this.runtimeStats.relaxationsLast = relaxations;
     this.runtimeStats.capHitsTotal += capHits;
-    this.runtimeStats.pendingCollapses = this.pendingCollapseIds.size;
+    this.runtimeStats.pendingCollapses = 0;
     return { changedIds: [...changedIds].sort(), islands, largestIsland, relaxations, capHits, elapsedMs };
   }
 
   processPendingCollapses(
-    pieces: PlacedConstructionPiece[],
-    removePiece: (id: string) => ConstructionStabilityRemovalResult,
+    _pieces: PlacedConstructionPiece[],
+    _removePiece: (id: string) => ConstructionStabilityRemovalResult,
   ): ConstructionCollapseStepResult {
-    const collapsedIds: string[] = [];
-    let recomputes = 0;
-    for (let index = 0; index < this.config.maxCollapsesPerFrame; index += 1) {
-      if (this.dirtyIds.size > 0) {
-        this.recompute(pieces);
-        recomputes += 1;
-      }
-      const nextId = [...this.pendingCollapseIds].sort()[0];
-      if (!nextId) break;
-      const placed = pieces.find((piece) => piece.id === nextId);
-      if (!placed || !shouldCollapseConstruction(placed.stability ?? 0, placed.grounded === true, this.config)) {
-        this.pendingCollapseIds.delete(nextId);
-        continue;
-      }
-      const removal = removePiece(nextId);
-      this.pendingCollapseIds.delete(nextId);
-      if (!removal.removed) continue;
-      collapsedIds.push(nextId);
-      this.markDirtyMany(removal.disconnectedNeighborIds);
-      if (this.dirtyIds.size > 0) {
-        this.recompute(pieces);
-        recomputes += 1;
-      }
-    }
-    this.runtimeStats.collapsedTotal += collapsedIds.length;
-    this.runtimeStats.pendingCollapses = this.pendingCollapseIds.size;
-    return { collapsedIds, recomputes };
+    // TODO: Reintroduce paced collapse only with the structural-collapse plan's visible
+    // motion, physics, damage, and persistence contract. Unsupported pieces remain present.
+    return { collapsedIds: [], recomputes: 0 };
   }
 
   pendingCollapseCount(): number {
-    return this.pendingCollapseIds.size;
+    return 0;
   }
 
   stats(): ConstructionStabilityRuntimeStats {
-    return { ...this.runtimeStats, pendingCollapses: this.pendingCollapseIds.size };
+    return { ...this.runtimeStats, pendingCollapses: 0 };
   }
 }
