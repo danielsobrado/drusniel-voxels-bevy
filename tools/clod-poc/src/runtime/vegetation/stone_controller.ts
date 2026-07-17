@@ -51,7 +51,8 @@ export interface StoneController {
 }
 
 export function createStoneController(deps: StoneControllerDeps): StoneController {
-  const ringDebug = getRingDebugOverlay(deps.scene, "stones");
+  const debugEnabled = ringDebugEnabled("stones");
+  const ringDebug = debugEnabled ? getRingDebugOverlay(deps.scene, "stones") : null;
   const makeSettings = (): StoneSettings => {
     const state = deps.getUiState();
     return {
@@ -62,7 +63,7 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
       seedSalt: state.stoneSeed,
       debug: {
         ...deps.stoneConfig.debug,
-        classColors: deps.stoneConfig.debug.classColors || ringDebugEnabled("stones"),
+        classColors: deps.stoneConfig.debug.classColors || debugEnabled,
       },
     };
   };
@@ -112,7 +113,7 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
       const stats = system.getStats();
       const telemetryState = resolveStoneTelemetryState(stats);
       publishStoneTelemetryValidity(stats, telemetryState);
-      ringDebug.update({
+      ringDebug?.update({
         centerX: ringCenter.x,
         centerZ: ringCenter.z,
         cellSizeM: settings.cellSizeM,
