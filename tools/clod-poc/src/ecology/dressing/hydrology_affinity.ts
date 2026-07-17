@@ -34,7 +34,9 @@ export function evaluateHydrologyAffinity(
 ): HydrologyAffinityResult {
   const shore = sample.shoreDistanceM;
   if (classId === "river_cobbles") {
-    const compatibleBed = sample.sediment >= 0.2 || sample.deposition <= 0.75;
+    // Dry bank cells carry zero flowStrength, so their deposition is always 1; a fast
+    // adjacent river still means a scoured, cobble-compatible bank.
+    const compatibleBed = sample.sediment >= 0.2 || sample.deposition <= 0.75 || nearbyFlowSpeed(sample) >= 0.25;
     return { accepted: shore >= -2 && shore <= 4 && nearbyFlowSpeed(sample) >= 0.15 && compatibleBed, orientationRad: null };
   }
   if (classId === "wet_stone_cluster") {

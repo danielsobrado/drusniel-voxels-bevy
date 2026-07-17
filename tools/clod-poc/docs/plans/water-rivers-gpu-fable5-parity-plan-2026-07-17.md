@@ -60,20 +60,31 @@ seed 1. Artifacts under `qa-runs/water-live-probe/` and `perf-runs/water-ab-{on,
   (12 m × 128 = 1536 m). Rings L4/L5 are far/ocean scale and already have
   far-summary/deep-ocean representations.
 
-## Phase W0 — Unbreak and Guard (P0)
+## Phase W0 — Unbreak and Guard (P0) — IMPLEMENTED 2026-07-17
 
-1. Land or fix the stone-view WIP so WGSL `Params` and `PARAM_BYTES` agree (656 B), and
-   restart the dev server so the Vite module graph is consistent. Acceptance: zero
-   `[webgpu] uncaptured error` lines over a full infinite-islands acceptance run.
-2. Add `webgpu_uncaptured_errors` to `__drusnielClod.stats.counters` and fail-loud in
-   gated scenes when it grows — silent pipeline loss must never again masquerade as
-   "water missing".
-3. Pass `effectiveBorderCoast` (not the raw config) into water startup; drive
-   `waterRuntimeWorldCells` off `worldMode` (streamed worlds ⇒ unbounded sentinel), not
-   the scene-name string. Kills the continent phantom ocean band and dry frame.
-4. Implement WATER-702: expose clipmap update stats (snaps, refills, fieldSamples),
-   per-level wet vertex counts and visible level count as stats counters.
-   Verify: `water:stats` + a new probe assertion in the acceptance battery.
+1. ~~Land or fix the stone-view WIP~~ **DONE** (landed upstream via PR merges the same
+   day; fresh pages verified with zero stone-scatter errors and zero uncaptured
+   errors).
+2. ~~Add `webgpu_uncaptured_errors`~~ **DONE**: `diagnostics/webgpu_uncaptured_errors.ts`
+   counts device uncaptured errors; mirrored into `__drusnielClod.stats.counters` from
+   the vegetation frame phase. Fail-loud gate wiring into acceptance remains open.
+3. ~~effectiveBorderCoast + streamed worldCells~~ **DONE**: `WorldBuildResult` now
+   exports the world-mode-resolved coast config, and `waterRuntimeWorldCells` returns
+   the unbounded sentinel whenever `hydrologySystem.supportsInfiniteWorldSamples()`.
+   Live-verified on continent: `worldCells 1e9`, `shoreSurf.enabled false`,
+   `clipmapExclusionBand.enabled false`; the deep-ocean surface is camera-relative on
+   all streamed worlds.
+4. ~~WATER-702 counters~~ **DONE**: `water_clipmap_{enabled,visible_levels,level_count,
+   snaps,full_refills,partial_refills,field_samples,static_snaps,index_rebuilds}` are
+   live (continent verified: 6/6 visible levels, ~100k startup field samples).
+   Acceptance-battery assertions remain open.
+
+Bonus fix (W1 adjacent): river cobbles / driftwood bank acceptance was structurally
+impossible (dry cells carry zero flow; `deposition` is always 1 on dry banks). The
+dressing environment now probes a 4 m neighbourhood for `bankFlow` on dry near-shore
+samples, and the cobble bed check treats a fast adjacent river as a scoured bank.
+Unit-tested; live counts stay near zero until W3 density tuning because the per-cell
+acceptance roll (~0.3%) dominates.
 
 ## Phase W1 — Rivers That Read as Rivers (P0/P1)
 

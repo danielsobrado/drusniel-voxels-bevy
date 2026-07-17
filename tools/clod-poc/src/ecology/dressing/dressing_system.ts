@@ -394,7 +394,9 @@ export class DressingSystem {
     const nearShore = center.shoreDistance >= 0 && center.shoreDistance <= 6;
     const dry = center.depth <= 0.12;
     if (!dry || !nearShore) return undefined;
-    const step = 3;
+    // Matches the hydrology tile texel pitch so a bank candidate one texel from the
+    // channel still lands a wet probe.
+    const step = 4;
     let bestX = 0;
     let bestZ = 0;
     let bestSpeed = 0;
