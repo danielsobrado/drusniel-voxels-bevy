@@ -115,7 +115,7 @@ async function seedEmptySave(page: Page, saveId: string): Promise<void> {
         saveId: id,
         worldId: `playable-slice:${seed}`,
         seed,
-        proceduralProfile: "infinite-islands-v1",
+        proceduralProfile: "continent-v1",
         regionSizeM: 512,
         chunkSizeM: 16,
         regionKeys: [],
