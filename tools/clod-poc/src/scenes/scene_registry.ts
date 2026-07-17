@@ -24,6 +24,8 @@ export interface SceneOption {
   readonly value: string;
 }
 
+const RPG_DENSITY_SCENE_PARAM = "rpgDensityScene";
+
 const NAADF_PHASE0_CONFIG_KEYS: Record<string, string> = {
   "infinite-naadf-flat": "infinite_stream_straight",
   "infinite-naadf-hills": "infinite_stream_straight",
@@ -191,7 +193,7 @@ export const SCENE_REGISTRY: readonly SceneRegistryEntry[] = [
 const SCENES_BY_ID = new Map(SCENE_REGISTRY.map((scene) => [scene.id, scene]));
 
 export function sceneFromSearchParams(searchParams: URLSearchParams): string | null {
-  return searchParams.get("scene");
+  return searchParams.get(RPG_DENSITY_SCENE_PARAM) ?? searchParams.get("scene");
 }
 
 export function sceneRegistryEntry(scene: string | null): SceneRegistryEntry | undefined {
