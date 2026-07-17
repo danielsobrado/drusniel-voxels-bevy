@@ -1,6 +1,13 @@
 import type { ConstructionController } from "../construction/construction_controller.js";
-import type { EngineStats } from "../core/hooks.js";
 import type { PlayerController } from "../player_controller.js";
+
+export interface PlayableSliceStats {
+  readonly fps: number;
+  readonly frameMs: number;
+  readonly frameMsP95: number;
+  readonly frame: number;
+  readonly counters: Record<string, number>;
+}
 
 export interface PlayableSliceSnapshot {
   readonly capturedAtMs: number;
@@ -61,7 +68,7 @@ export interface PlayableSliceSnapshot {
 export interface PlayableSliceSnapshotInput {
   readonly player: PlayerController;
   readonly constructionController: ConstructionController | null;
-  readonly stats: EngineStats | null;
+  readonly stats: PlayableSliceStats | null;
   readonly terrainRevision: number;
   readonly voxelDeltaCount: number;
   readonly pageSizeM: number;
