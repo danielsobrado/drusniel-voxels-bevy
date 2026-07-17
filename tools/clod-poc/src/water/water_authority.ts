@@ -8,6 +8,7 @@ import {
   sampleHydrologyGrid,
 } from "./hydrologyGrid.js";
 import type { HydrologySystem } from "./hydrologySystem.js";
+import type { WaterConfig } from "./waterConfig.js";
 import type { WaterField } from "./waterField.js";
 
 export type WaterSampleState = "dry" | "water" | "unknown";
@@ -87,6 +88,61 @@ function hydrologyBodyKind(kind: number): WaterBodyKind {
 
 function contains(body: EditedWaterBody, x: number, z: number): boolean {
   return x >= body.minX && x <= body.maxX && z >= body.minZ && z <= body.maxZ;
+}
+
+function pointSegmentDistance(
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const t = lengthSq > 1e-8
+    ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / lengthSq))
+    : 0;
+  return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+}
+
+function legacyBodyId(config: WaterConfig | undefined, kind: WaterBodyKind, x: number, z: number): string {
+  if (!config) return `legacy:${kind}`;
+  if (kind === "lake") {
+    let selected = -1;
+    let selectedMetric = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < config.fakeBodies.lakes.length; index += 1) {
+      const lake = config.fakeBodies.lakes[index]!;
+      const dx = (x - lake.center[0]) / Math.max(0.001, lake.radius[0]);
+      const dz = (z - lake.center[1]) / Math.max(0.001, lake.radius[1]);
+      const metric = dx * dx + dz * dz;
+      if (metric <= 1 && metric < selectedMetric) {
+        selected = index;
+        selectedMetric = metric;
+      }
+    }
+    return selected >= 0 ? `legacy:lake:${selected}` : "legacy:lake";
+  }
+  if (kind === "river") {
+    let selected = -1;
+    let selectedDistance = Number.POSITIVE_INFINITY;
+    for (let riverIndex = 0; riverIndex < config.fakeBodies.rivers.length; riverIndex += 1) {
+      const river = config.fakeBodies.rivers[riverIndex]!;
+      const maxDistance = Math.max(0.05, river.width * 0.5);
+      for (let pointIndex = 0; pointIndex < river.points.length - 1; pointIndex += 1) {
+        const a = river.points[pointIndex]!;
+        const b = river.points[pointIndex + 1]!;
+        const distance = pointSegmentDistance(x, z, a[0], a[1], b[0], b[1]);
+        if (distance <= maxDistance && distance < selectedDistance) {
+          selected = riverIndex;
+          selectedDistance = distance;
+        }
+      }
+    }
+    return selected >= 0 ? `legacy:river:${selected}` : "legacy:river";
+  }
+  return `legacy:${kind}`;
 }
 
 function hydrologySampleReady(hydrology: HydrologySystem, x: number, z: number): boolean {
@@ -206,6 +262,7 @@ export function createLegacyWaterFieldSource(
   field: WaterField,
   getRevision: () => number = () => 0,
   shoreEpsilonM = 0.05,
+  config?: WaterConfig,
 ): WaterAuthoritySource {
   return {
     id: "legacy-water-field",
@@ -221,7 +278,7 @@ export function createLegacyWaterFieldSource(
         state: "water",
         surfaceY: sample.waterY,
         bottomY: sample.terrainY,
-        bodyId: `legacy:${kind}:${Math.floor(x / 16)}:${Math.floor(z / 16)}`,
+        bodyId: legacyBodyId(config, kind, x, z),
         bodyKind: kind,
         flow: [sample.flow.x * sample.flow.speed, sample.flow.z * sample.flow.speed],
         sourceRevision: revision,
