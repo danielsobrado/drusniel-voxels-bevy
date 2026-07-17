@@ -20,6 +20,7 @@ spells:
       material: 7
       max_range_m: 9
       command_expiry_ms: 450
+      convergence_timeout_ms: 2500
 `);
     expect(config).toEqual({
       enabled: true,
@@ -32,6 +33,7 @@ spells:
       material: 7,
       maxRangeM: 9,
       commandExpiryMs: 450,
+      convergenceTimeoutMs: 2500,
     });
   });
 
@@ -46,6 +48,7 @@ spells:
       strength: 5
       max_range_m: 500
       command_expiry_ms: 1
+      convergence_timeout_ms: 999999
 `);
     expect(config.operation).toBe(DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG.operation);
     expect(config.shape).toBe(DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG.shape);
@@ -53,5 +56,6 @@ spells:
     expect(config.strength).toBe(1);
     expect(config.maxRangeM).toBe(80);
     expect(config.commandExpiryMs).toBe(50);
+    expect(config.convergenceTimeoutMs).toBe(30000);
   });
 });
