@@ -1,22 +1,20 @@
 import {
   constructionBoundsFor,
-  constructionBoundsOverlap,
   isFiniteConstructionPosition,
   rotatedConstructionDimensions,
 } from "./construction_bounds.js";
+import { constructionPiecesOverlap } from "./construction_obb.js";
 import { resolveConstructionPlacementSupport } from "./support_state.js";
 import type {
   ConstructionCandidate,
   ConstructionPieceDef,
   ConstructionPlacementConfig,
   ConstructionSnapResult,
+  ConstructionSurfaceHit,
   PlacedConstructionPiece,
 } from "./types.js";
 
-export interface TerrainHitPoint {
-  point: readonly [number, number, number];
-  distanceM: number;
-}
+export type TerrainHitPoint = ConstructionSurfaceHit;
 
 export interface PlacementValidationInput {
   piece: ConstructionPieceDef;
@@ -24,7 +22,7 @@ export interface PlacementValidationInput {
   rotationQuarterTurns: number;
   snapped: boolean;
   snap: ConstructionSnapResult | null;
-  terrainHit: TerrainHitPoint | null;
+  terrainHit: ConstructionSurfaceHit | null;
   placedPieces: readonly PlacedConstructionPiece[];
   overlapCandidates?: readonly PlacedConstructionPiece[];
   piecesById: ReadonlyMap<string, ConstructionPieceDef>;
@@ -44,18 +42,17 @@ function validateBoundsAndOverlap(input: PlacementValidationInput): { valid: boo
     }
   }
 
-  const bounds = constructionBoundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
-  const candidates = input.overlapCandidates ?? input.placedPieces;
-  for (const placed of candidates) {
+  for (const placed of input.overlapCandidates ?? input.placedPieces) {
     const otherPiece = piecesById.get(placed.typeId);
     if (!otherPiece) continue;
-    const otherBounds = constructionBoundsFor(
+    if (constructionPiecesOverlap({
+      piece,
+      position,
+      rotationQuarterTurns,
       otherPiece,
-      placed.position,
-      placed.rotationQuarterTurns,
-      config.overlapPaddingM,
-    );
-    if (constructionBoundsOverlap(bounds, otherBounds)) return { valid: false, reason: "overlap" };
+      other: placed,
+      insetM: config.overlapPaddingM,
+    })) return { valid: false, reason: "overlap" };
   }
   return { valid: true, reason: null };
 }
@@ -71,11 +68,13 @@ function resolveSupport(input: PlacementValidationInput) {
 
 export function createFreePlacementPosition(
   piece: ConstructionPieceDef,
-  terrainHit: TerrainHitPoint,
+  terrainHit: ConstructionSurfaceHit,
+  rotationQuarterTurns = 0,
 ): readonly [number, number, number] {
+  const localBounds = constructionBoundsFor(piece, [0, 0, 0], rotationQuarterTurns);
   return [
     terrainHit.point[0],
-    terrainHit.point[1] + piece.dimensionsM[1] * 0.5,
+    terrainHit.point[1] - localBounds.minY,
     terrainHit.point[2],
   ];
 }
@@ -83,6 +82,9 @@ export function createFreePlacementPosition(
 export function validateConstructionPlacement(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
   if (!input.snapped && !input.piece.canGround) return { valid: false, reason: "snap required" };
   if (input.piece.canGround && !input.snapped && !input.terrainHit) return { valid: false, reason: "no terrain" };
+  if (!input.snapped && input.terrainHit && input.terrainHit.normal[1] < (input.piece.groundNormalMinY ?? 0.45)) {
+    return { valid: false, reason: "surface too steep" };
+  }
 
   const support = resolveSupport(input);
   if (!support.supported) return { valid: false, reason: support.reason ?? "unsupported" };
@@ -100,11 +102,10 @@ export function createConstructionCandidate(input: PlacementValidationInput): Co
     valid: validation.valid,
     reason: validation.reason,
     snap: input.snap,
+    terrainHit: input.terrainHit,
     supportState: support.grounded ? "grounded" : support.supported ? "connected" : "unsupported",
     supportParentIds: support.parentIds,
   };
 }
 
-export const constructionPlacementMath = {
-  rotatedDimensions: rotatedConstructionDimensions,
-};
+export const constructionPlacementMath = { rotatedDimensions: rotatedConstructionDimensions };
