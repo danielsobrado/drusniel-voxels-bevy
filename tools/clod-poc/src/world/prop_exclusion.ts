@@ -52,6 +52,11 @@ export class SparsePropExclusionBitsets {
     const previousAddress = excludingAddress(previous);
     const nextAddress = excludingAddress(next);
     if (previousAddress && nextAddress && sameAddress(previousAddress, nextAddress)) {
+      const mapKey = key(previousAddress.tileKey, previousAddress.layer);
+      const current = this.refCountsByTileLayer.get(mapKey)?.get(previousAddress.candidateIndex) ?? 0;
+      if (current <= 0) {
+        throw new Error(`prop exclusion refcount underflow at ${mapKey}#${previousAddress.candidateIndex}`);
+      }
       this.deltaCountValue = nextDeltaCount;
       return;
     }
