@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
+  godRaysScreenFalloffReference,
   interleavedGradientNoiseReference,
   projectSunToScreen,
   sunScreenFade,
@@ -58,6 +59,19 @@ describe("projectSunToScreen", () => {
     expect(info.u).toBeLessThan(0.5);
   });
 
+  it("uses the camera world position when the camera is parented", () => {
+    const parent = new THREE.Group();
+    parent.position.set(10_000_000, 2_000_000, -3_000_000);
+    const camera = frontCamera();
+    parent.add(camera);
+    parent.updateMatrixWorld(true);
+
+    const info = projectSunToScreen(new THREE.Vector3(0, 0, -1), camera);
+    expect(info.visible).toBe(true);
+    expect(info.u).toBeCloseTo(0.5, 4);
+    expect(info.v).toBeCloseTo(0.5, 4);
+  });
+
   it("reports the forward cosine so callers can fade near the camera plane", () => {
     const camera = frontCamera();
     expect(projectSunToScreen(new THREE.Vector3(0, 0, -1), camera).forward).toBeCloseTo(1, 5);
@@ -82,6 +96,23 @@ describe("interleavedGradientNoiseReference", () => {
     const center = interleavedGradientNoiseReference(10, 10);
     expect(Math.abs(interleavedGradientNoiseReference(11, 10) - center)).toBeGreaterThan(0.05);
     expect(Math.abs(interleavedGradientNoiseReference(10, 11) - center)).toBeGreaterThan(0.05);
+  });
+});
+
+describe("godRaysScreenFalloffReference", () => {
+  it("fades monotonically from the sun to zero", () => {
+    const center = godRaysScreenFalloffReference(0);
+    const near = godRaysScreenFalloffReference(0.35);
+    const mid = godRaysScreenFalloffReference(0.7);
+    const edge = godRaysScreenFalloffReference(1.4);
+    const outside = godRaysScreenFalloffReference(2);
+
+    expect(center).toBe(1);
+    expect(center).toBeGreaterThan(near);
+    expect(near).toBeGreaterThan(mid);
+    expect(mid).toBeGreaterThan(edge);
+    expect(edge).toBe(0);
+    expect(outside).toBe(0);
   });
 });
 
