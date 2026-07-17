@@ -48,7 +48,6 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
   let earthTargetOverride: EarthSpellTarget | null = null;
   let disposed = false;
 
-  const targetMaxRange = Math.max(config.lightning.vfx.maxRange, config.earth.vfx.impactRadius * 4);
   const probeSeconds = FIREBALL_COLLISION_PROBE_SECONDS;
   const fireballCollisionRange = Math.max(
     3,
@@ -59,18 +58,18 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
       + FIREBALL_COLLISION_PROBE_PADDING_M,
   );
 
-  const getTerrainTarget = (): EarthSpellTarget | null => {
+  const getTerrainTarget = (maxRange: number): EarthSpellTarget | null => {
     camera.getWorldDirection(targetDirection).normalize();
     targetRay.origin.copy(camera.position);
     targetRay.direction.copy(targetDirection);
-    const hit = terrainRaycast.raycastEditableTerrain(targetRay, targetMaxRange);
+    const hit = terrainRaycast.raycastEditableTerrain(targetRay, maxRange);
     return hit ? { point: hit.point.clone(), normal: targetNormal.clone() } : null;
   };
 
   const getEarthVfxTarget = (): EarthSpellTarget | null => {
     const target = earthTargetOverride;
     earthTargetOverride = null;
-    return target ?? getTerrainTarget();
+    return target ?? getTerrainTarget(earthSpellGameplayConfig.maxRangeM);
   };
 
   const rawController = createSpellVfxController({
@@ -82,7 +81,7 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
     earth: config.earth.vfx,
     getEarthTarget: getEarthVfxTarget,
     lightning: config.lightning.vfx,
-    getLightningTarget: getTerrainTarget,
+    getLightningTarget: () => getTerrainTarget(config.lightning.vfx.maxRange),
     fireball: config.fireball.vfx,
     raycastFireballTerrain: (ray) => {
       const hit = terrainRaycast.raycastEditableTerrain(ray, fireballCollisionRange);
@@ -97,7 +96,7 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
   const menuController: SpellVfxController = {
     ...deferredController.controller,
     playEarth: (durationMs) => {
-      const target = getTerrainTarget();
+      const target = getTerrainTarget(earthSpellGameplayConfig.maxRangeM);
       if (!target) return false;
       const prepared = prepareEarthSpellCast(target, earthSpellGameplayConfig, {
         terrainRevision: getDigEditRevision(),
