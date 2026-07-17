@@ -1,6 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_POST_PROCESS_SETTINGS } from "../environment/postprocess.js";
-import { postProcessOutputGraphDirty } from "./webgpu_postprocess.js";
+import {
+  DEFAULT_POST_PROCESS_SETTINGS,
+  type PostProcessSettings,
+} from "../environment/postprocess.js";
+import { parsePostFxStageFlags, type PostFxStageFlags } from "./postfx_stage_flags.js";
+import {
+  WebGpuPostProcessPipeline,
+  postProcessOutputGraphDirty,
+} from "./webgpu_postprocess.js";
+
+interface StageInspectablePipeline {
+  settings: Required<PostProcessSettings>;
+  stageFlags: PostFxStageFlags;
+  bounceEnabled: boolean;
+  cloudsEnabled: boolean;
+  froxelsEnabled: boolean;
+  gtaoEnabled: boolean;
+  syncStageSettings(): void;
+  effectiveFroxelsEnabled(): boolean;
+}
+
+function stageInspectablePipeline(
+  settings: Partial<PostProcessSettings>,
+  search = "",
+): StageInspectablePipeline {
+  const pipeline = Object.create(WebGpuPostProcessPipeline.prototype) as StageInspectablePipeline;
+  pipeline.settings = { ...DEFAULT_POST_PROCESS_SETTINGS, ...settings };
+  pipeline.stageFlags = parsePostFxStageFlags(search);
+  pipeline.bounceEnabled = false;
+  pipeline.cloudsEnabled = false;
+  pipeline.froxelsEnabled = false;
+  pipeline.gtaoEnabled = false;
+  return pipeline;
+}
 
 describe("postProcessOutputGraphDirty", () => {
   it("stays false when the frame loop re-applies the same full settings object", () => {
@@ -65,5 +97,67 @@ describe("postProcessOutputGraphDirty", () => {
       godRaysDustScale: current.godRaysDustScale + 0.1,
       godRaysDustSpeed: current.godRaysDustSpeed + 0.01,
     })).toBe(false);
+  });
+});
+
+describe("WebGpuPostProcessPipeline stage resolution", () => {
+  it("reads stage activation from live settings and respects ablation", () => {
+    const pipeline = stageInspectablePipeline({
+      bounceEnabled: true,
+      cloudsEnabled: true,
+      froxelsEnabled: true,
+      gtaoEnabled: true,
+    });
+    pipeline.syncStageSettings();
+    expect(pipeline).toMatchObject({
+      bounceEnabled: true,
+      cloudsEnabled: true,
+      froxelsEnabled: true,
+      gtaoEnabled: true,
+    });
+
+    const ablated = stageInspectablePipeline({
+      bounceEnabled: true,
+      cloudsEnabled: true,
+      froxelsEnabled: true,
+      gtaoEnabled: true,
+    }, "?ablate=clouds,froxels");
+    ablated.syncStageSettings();
+    expect(ablated).toMatchObject({
+      bounceEnabled: true,
+      cloudsEnabled: false,
+      froxelsEnabled: false,
+      gtaoEnabled: true,
+    });
+  });
+
+  it("forces froxel ambience only for an allowed volumetric god-rays stage", () => {
+    const volumetric = stageInspectablePipeline({
+      froxelsEnabled: false,
+      godRaysMode: "volumetric",
+    });
+    volumetric.syncStageSettings();
+    expect(volumetric.effectiveFroxelsEnabled()).toBe(true);
+
+    const heavy = stageInspectablePipeline({
+      froxelsEnabled: false,
+      godRaysMode: "heavy",
+    });
+    heavy.syncStageSettings();
+    expect(heavy.effectiveFroxelsEnabled()).toBe(false);
+
+    const ablatedFroxels = stageInspectablePipeline({
+      froxelsEnabled: false,
+      godRaysMode: "volumetric",
+    }, "?ablate=froxels");
+    ablatedFroxels.syncStageSettings();
+    expect(ablatedFroxels.effectiveFroxelsEnabled()).toBe(false);
+
+    const ablatedGodRays = stageInspectablePipeline({
+      froxelsEnabled: false,
+      godRaysMode: "volumetric",
+    }, "?ablate=godrays");
+    ablatedGodRays.syncStageSettings();
+    expect(ablatedGodRays.effectiveFroxelsEnabled()).toBe(false);
   });
 });
