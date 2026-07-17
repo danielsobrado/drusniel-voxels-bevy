@@ -22,6 +22,7 @@ export interface StreamCursorInput {
   camera: { position: { x: number; z: number } };
   orbitTarget: { x: number; z: number };
   cameraRelativeWorld: boolean;
+  movementEpoch?: number;
 }
 
 export interface CanonicalStreamCenter {
@@ -30,10 +31,12 @@ export interface CanonicalStreamCenter {
 }
 
 const MAX_VELOCITY_MPS = 500;
-const MIN_DISCONTINUITY_DISTANCE_M = 64;
+const MIN_DISCONTINUITY_DISTANCE_M = 24;
 const DISCONTINUITY_VELOCITY_MULTIPLIER = 2;
 // Matches the former 0.85-per-60-Hz-frame response while remaining stable across frame rates.
 const VELOCITY_EMA_TIME_CONSTANT_SECONDS = -(1 / 60) / Math.log(0.85);
+
+let globalMovementEpoch = 0;
 
 export const STREAM_CURSOR_SOURCE_CODE: Record<StreamCursorSource, number> = {
   playing_player: 1,
@@ -41,6 +44,18 @@ export const STREAM_CURSOR_SOURCE_CODE: Record<StreamCursorSource, number> = {
   orbit_camera: 3,
   orbit_target: 4,
 };
+
+export function markStreamCursorDiscontinuity(): number {
+  return ++globalMovementEpoch;
+}
+
+export function streamCursorMovementEpoch(): number {
+  return globalMovementEpoch;
+}
+
+export function resetStreamCursorMovementEpochForTests(): void {
+  globalMovementEpoch = 0;
+}
 
 export function canonicalStreamCenter(input: StreamCursorInput): CanonicalStreamCenter {
   if (input.interactionMode === "playing") {
@@ -70,12 +85,16 @@ export function canonicalStreamCenter(input: StreamCursorInput): CanonicalStream
 export class StreamCursorTracker {
   private previousCenter: { x: number; z: number } | null = null;
   private previousSource: StreamCursorSource | null = null;
+  private previousMovementEpoch: number | null = null;
   private velocity = { x: 0, z: 0 };
   private discontinuities = 0;
 
   update(input: StreamCursorInput): StreamCursor {
     const canonical = canonicalStreamCenter(input);
     const dt = Number.isFinite(input.deltaSeconds) ? Math.max(0, input.deltaSeconds) : 0;
+    const movementEpoch = Number.isFinite(input.movementEpoch)
+      ? Math.max(0, Math.floor(input.movementEpoch!))
+      : globalMovementEpoch;
     const displacement = this.previousCenter
       ? Math.hypot(canonical.center.x - this.previousCenter.x, canonical.center.z - this.previousCenter.z)
       : 0;
@@ -84,7 +103,9 @@ export class StreamCursorTracker {
       MAX_VELOCITY_MPS * Math.max(dt, 1 / 60) * DISCONTINUITY_VELOCITY_MULTIPLIER,
     );
     const discontinuity = this.previousSource !== null && (
-      this.previousSource !== canonical.source || displacement > maxContinuousDistance
+      this.previousSource !== canonical.source
+      || this.previousMovementEpoch !== movementEpoch
+      || displacement > maxContinuousDistance
     );
 
     if (this.previousCenter && dt > 0.001 && !discontinuity) {
@@ -107,6 +128,7 @@ export class StreamCursorTracker {
 
     this.previousCenter = { ...canonical.center };
     this.previousSource = canonical.source;
+    this.previousMovementEpoch = movementEpoch;
     const center = { ...canonical.center };
     const velocityMps = { ...this.velocity };
     return {
