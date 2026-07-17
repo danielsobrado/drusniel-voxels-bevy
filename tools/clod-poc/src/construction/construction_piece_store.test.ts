@@ -74,15 +74,18 @@ describe("ConstructionPieceStore", () => {
     store.dispose();
   });
 
-  it("removes owned meshes and colliders on dispose", () => {
-    const { root, colliderSet, store } = createStore();
+  it("removes owned meshes, indexes, and colliders on dispose", () => {
+    const { root, snapIndex, overlapIndex, colliderSet, store } = createStore();
     expect(store.add(placed("piece-1", 0), false)).toBe(true);
+    expect(overlapIndex.size()).toBe(1);
 
     store.dispose();
 
     expect(root.children).toHaveLength(0);
     expect(store.pieces).toHaveLength(0);
     expect(store.meshes).toHaveLength(0);
+    expect(snapIndex.size()).toBe(0);
+    expect(overlapIndex.size()).toBe(0);
     expect(colliderSet.activeCount()).toBe(0);
   });
 });
