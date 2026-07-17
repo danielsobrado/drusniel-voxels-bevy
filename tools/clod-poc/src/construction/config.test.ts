@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import { defaultConstructionConfig, parseConstructionConfig } from "./config.js";
 
 describe("construction config", () => {
-  it("keeps the runtime construction catalogue available", () => {
-    expect(defaultConstructionConfig.pieces.map((piece) => piece.id)).toEqual([
+  it("keeps required runtime pieces in the split catalogue", () => {
+    const ids = defaultConstructionConfig.pieces.map((piece) => piece.id);
+    expect(ids).toEqual(expect.arrayContaining([
       "wood-floor-2x2",
       "wood-wall-2x2",
       "wood-fence-2x1",
       "wood-pillar-2m",
-    ]);
+    ]));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThan(4);
   });
 
   it("normalizes snap frames, proxies, and support overrides", () => {
