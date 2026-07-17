@@ -13,8 +13,6 @@ export interface TerrainStreamingToken {
   isCurrent(): boolean;
 }
 
-let stateChannel: BroadcastChannel | null = null;
-
 function workerRealm(): boolean {
   return typeof window === "undefined"
     && typeof WorkerGlobalScope !== "undefined"
@@ -23,12 +21,6 @@ function workerRealm(): boolean {
 
 function currentState(): TerrainStreamingState {
   return { enabled: streamingEnabled, generation: streamingGeneration };
-}
-
-function channel(): BroadcastChannel | null {
-  if (typeof BroadcastChannel === "undefined") return null;
-  if (!stateChannel) stateChannel = new BroadcastChannel(STREAMING_CHANNEL_NAME);
-  return stateChannel;
 }
 
 function applyRemoteState(value: unknown): void {
@@ -41,16 +33,23 @@ function applyRemoteState(value: unknown): void {
   streamingGeneration = state.generation!;
 }
 
-if (workerRealm()) {
-  const workerChannel = channel();
-  if (workerChannel) workerChannel.onmessage = (event) => applyRemoteState(event.data);
+function broadcastState(): void {
+  if (typeof BroadcastChannel === "undefined") return;
+  const sender = new BroadcastChannel(STREAMING_CHANNEL_NAME);
+  sender.postMessage(currentState());
+  sender.close();
+}
+
+if (workerRealm() && typeof BroadcastChannel !== "undefined") {
+  const workerChannel = new BroadcastChannel(STREAMING_CHANNEL_NAME);
+  workerChannel.onmessage = (event) => applyRemoteState(event.data);
 }
 
 export function setTerrainStreamingEnabled(enabled: boolean): void {
   if (streamingEnabled === enabled) return;
   streamingEnabled = enabled;
   streamingGeneration++;
-  if (typeof window !== "undefined") channel()?.postMessage(currentState());
+  if (typeof window !== "undefined") broadcastState();
 }
 
 export function terrainStreamingIsEnabled(): boolean {
