@@ -1,18 +1,26 @@
 import type { ConstructionMaterial, PlacedConstructionPiece } from "../construction/types.js";
 import type { PropInstance, PropPlacementScene } from "../props/prop_types.js";
+import {
+  RPG_PLAYER_BASE_CENTER,
+  RPG_PLAYER_BASE_SCENE,
+  RPG_VILLAGE_CENTER,
+  RPG_VILLAGE_SCENE,
+  isRpgDensityScene,
+  rpgDensitySceneCenter,
+  type RpgDensitySceneCenter,
+  type RpgDensitySceneId,
+} from "../scenes/rpg_density_scenes.js";
 
-export const RPG_VILLAGE_SCENE = "rpg-village";
-export const RPG_PLAYER_BASE_SCENE = "rpg-player-base";
-
-export type RpgDensitySceneId = typeof RPG_VILLAGE_SCENE | typeof RPG_PLAYER_BASE_SCENE;
-
-export interface RpgDensityCenter {
-  readonly x: number;
-  readonly z: number;
-}
-
-export const RPG_VILLAGE_CENTER: RpgDensityCenter = Object.freeze({ x: 1600, z: 500 });
-export const RPG_PLAYER_BASE_CENTER: RpgDensityCenter = Object.freeze({ x: 1900, z: 650 });
+export {
+  RPG_PLAYER_BASE_CENTER,
+  RPG_PLAYER_BASE_SCENE,
+  RPG_VILLAGE_CENTER,
+  RPG_VILLAGE_SCENE,
+  isRpgDensityScene,
+  rpgDensitySceneCenter,
+};
+export type { RpgDensitySceneId };
+export type RpgDensityCenter = RpgDensitySceneCenter;
 
 export interface RpgDensityBuildingSummary {
   readonly id: string;
@@ -52,7 +60,9 @@ const FENCE_ID = "wood-fence-2x1";
 const PILLAR_ID = "wood-pillar-2m";
 const CELL_SIZE_M = 2;
 const FLOOR_HALF_HEIGHT_M = 0.1;
-const STORY_HEIGHT_M = 2;
+const STORY_HEIGHT_M = 2.2;
+const WALL_HALF_DEPTH_M = 0.1;
+const PILLAR_HALF_WIDTH_M = 0.2;
 const VILLAGE_BUILDING_COUNT = 40;
 const VILLAGE_PROP_COUNT = 400;
 const PLAYER_BASE_PROP_COUNT = 100;
@@ -138,6 +148,10 @@ function buildModularBuilding(input: BuildingInput): PlacedConstructionPiece[] {
   const pieces: PlacedConstructionPiece[] = [];
   const firstX = input.centerX - ((input.widthCells - 1) * CELL_SIZE_M) / 2;
   const firstZ = input.centerZ - ((input.depthCells - 1) * CELL_SIZE_M) / 2;
+  const northZ = firstZ - CELL_SIZE_M / 2 - WALL_HALF_DEPTH_M;
+  const southZ = firstZ + (input.depthCells - 1) * CELL_SIZE_M + CELL_SIZE_M / 2 + WALL_HALF_DEPTH_M;
+  const westX = firstX - CELL_SIZE_M / 2 - WALL_HALF_DEPTH_M;
+  const eastX = firstX + (input.widthCells - 1) * CELL_SIZE_M + CELL_SIZE_M / 2 + WALL_HALF_DEPTH_M;
 
   for (let level = 0; level <= input.stories; level++) {
     const y = input.terrainY + FLOOR_HALF_HEIGHT_M + level * STORY_HEIGHT_M;
@@ -165,20 +179,19 @@ function buildModularBuilding(input: BuildingInput): PlacedConstructionPiece[] {
   for (let story = 0; story < input.stories; story++) {
     const y = input.terrainY + 1.2 + story * STORY_HEIGHT_M;
     for (let x = 0; x < input.widthCells; x++) {
-      const supportId = floorPieceId(input.id, story, x, 0);
       pieces.push(piece(
         wallPieceId(input.id, story, "north", x),
         WALL_ID,
-        [firstX + x * CELL_SIZE_M, y, firstZ - 1],
+        [firstX + x * CELL_SIZE_M, y, northZ],
         0,
         input.wallMaterial,
         false,
-        [supportId],
+        [floorPieceId(input.id, story, x, 0)],
       ));
       pieces.push(piece(
         wallPieceId(input.id, story, "south", x),
         WALL_ID,
-        [firstX + x * CELL_SIZE_M, y, firstZ + (input.depthCells - 1) * CELL_SIZE_M + 1],
+        [firstX + x * CELL_SIZE_M, y, southZ],
         0,
         input.wallMaterial,
         false,
@@ -189,7 +202,7 @@ function buildModularBuilding(input: BuildingInput): PlacedConstructionPiece[] {
       pieces.push(piece(
         wallPieceId(input.id, story, "west", z),
         WALL_ID,
-        [firstX - 1, y, firstZ + z * CELL_SIZE_M],
+        [westX, y, firstZ + z * CELL_SIZE_M],
         1,
         input.wallMaterial,
         false,
@@ -198,7 +211,7 @@ function buildModularBuilding(input: BuildingInput): PlacedConstructionPiece[] {
       pieces.push(piece(
         wallPieceId(input.id, story, "east", z),
         WALL_ID,
-        [firstX + (input.widthCells - 1) * CELL_SIZE_M + 1, y, firstZ + z * CELL_SIZE_M],
+        [eastX, y, firstZ + z * CELL_SIZE_M],
         1,
         input.wallMaterial,
         false,
@@ -207,10 +220,10 @@ function buildModularBuilding(input: BuildingInput): PlacedConstructionPiece[] {
     }
 
     const corners = [
-      [firstX - 1, firstZ - 1],
-      [firstX + (input.widthCells - 1) * CELL_SIZE_M + 1, firstZ - 1],
-      [firstX - 1, firstZ + (input.depthCells - 1) * CELL_SIZE_M + 1],
-      [firstX + (input.widthCells - 1) * CELL_SIZE_M + 1, firstZ + (input.depthCells - 1) * CELL_SIZE_M + 1],
+      [westX - PILLAR_HALF_WIDTH_M, northZ - PILLAR_HALF_WIDTH_M],
+      [eastX + PILLAR_HALF_WIDTH_M, northZ - PILLAR_HALF_WIDTH_M],
+      [westX - PILLAR_HALF_WIDTH_M, southZ + PILLAR_HALF_WIDTH_M],
+      [eastX + PILLAR_HALF_WIDTH_M, southZ + PILLAR_HALF_WIDTH_M],
     ] as const;
     for (let index = 0; index < corners.length; index++) {
       const [x, z] = corners[index]!;
@@ -368,14 +381,6 @@ function buildSummary(
     maxPiecesPerBuilding,
     placedProps,
   };
-}
-
-export function isRpgDensityScene(scene: string | null): scene is RpgDensitySceneId {
-  return scene === RPG_VILLAGE_SCENE || scene === RPG_PLAYER_BASE_SCENE;
-}
-
-export function rpgDensitySceneCenter(scene: RpgDensitySceneId): RpgDensityCenter {
-  return scene === RPG_VILLAGE_SCENE ? RPG_VILLAGE_CENTER : RPG_PLAYER_BASE_CENTER;
 }
 
 export function buildRpgDensityComposition(input: BuildRpgDensityCompositionInput): RpgDensityComposition {
