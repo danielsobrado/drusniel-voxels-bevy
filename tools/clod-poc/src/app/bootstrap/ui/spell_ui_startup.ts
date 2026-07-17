@@ -116,6 +116,8 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
           earthTargetOverride = committedTarget;
           return controller.playEarth(durationMs);
         },
+      }).catch((error: unknown) => {
+        console.error("[spells] earth spell world convergence failed", error);
       });
       return true;
     },
