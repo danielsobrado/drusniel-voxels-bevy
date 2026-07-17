@@ -43,10 +43,11 @@ const CASES: readonly PostFxPerfCase[] = [
   { name: "postfx-contact", params: { contact: "1" } },
   { name: "postfx-gtao", params: { gtao: "1" } },
   { name: "postfx-bounce", params: { bounce: "1" } },
-  { name: "postfx-froxels", params: { froxels: "1" } },
-  { name: "postfx-godrays-cheap", params: { godrays: "cheap" } },
-  { name: "postfx-godrays-heavy", params: { godrays: "heavy" } },
-  { name: "postfx-godrays-volumetric", params: { godrays: "volumetric" } },
+  { name: "postfx-froxels", params: { godrays: "off", froxels: "1" } },
+  { name: "postfx-godrays-off", params: { godrays: "off", froxels: "0" } },
+  { name: "postfx-godrays-cheap", params: { godrays: "cheap", froxels: "0" } },
+  { name: "postfx-godrays-heavy", params: { godrays: "heavy", froxels: "0" } },
+  { name: "postfx-godrays-volumetric", params: { godrays: "volumetric", froxels: "0" } },
   { name: "postfx-all-on", params: { contact: "1", gtao: "1", bounce: "1", froxels: "1" } },
 ];
 
@@ -167,7 +168,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
   }
   lines.push("");
   lines.push(...perPassMarkdown(results));
-  lines.push("Run with a deterministic camera/seed and compare deltas between `postfx-off`, `postfx-postmin`, ablated cases, and opt-in heavy stages.");
+  lines.push("Use `postfx-godrays-off` as the matched baseline for cheap/heavy shaft deltas; `postfx-godrays-volumetric` intentionally adds the froxel ambience layer.");
   lines.push("");
   return `${lines.join("\n")}\n`;
 }
