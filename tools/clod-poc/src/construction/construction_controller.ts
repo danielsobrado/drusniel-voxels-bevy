@@ -5,7 +5,12 @@ import { CONSTRUCTION_MATERIAL_OPTIONS, constructionMaterialLabel } from "./mate
 import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow } from "./material_preloader.js";
 import { createConstructionCandidate, createFreePlacementPosition } from "./placement.js";
 import { ConstructionSnapIndex } from "./snap_index.js";
-import { ENTITY_ID_PREFIX, GHOST_INVALID_COLOR, normalizeRotationQuarterTurns } from "./construction_controller_support.js";
+import {
+  ENTITY_ID_PREFIX,
+  GHOST_INVALID_COLOR,
+  createPieceGeometry,
+  normalizeRotationQuarterTurns,
+} from "./construction_controller_support.js";
 import type {
   ConstructionCandidate,
   ConstructionConfig,
@@ -24,7 +29,10 @@ import {
 import { ConstructionOverlapIndex } from "./overlap_index.js";
 import { ConstructionPerformanceTracker, type ConstructionPerformanceSnapshot } from "./construction_timing.js";
 import { raycastConstructionTerrain } from "./targeting.js";
-import { findBestConstructionSnap, updateConstructionGhost } from "./construction_preview.js";
+import { findConstructionSnapCandidates, updateConstructionGhost } from "./construction_preview.js";
+import { ConstructionSnapSelector } from "./construction_snap_selector.js";
+import type { AuthoritativeConstructionTerrainHit } from "./targeting.js";
+import { getActiveTerrainRaycastService } from "../player/terrain_raycast_registry.js";
 import { ConstructionColliderSet } from "./construction_collider.js";
 import { ConstructionPieceStore } from "./construction_piece_store.js";
 import { reevaluateConstructionSupport, type ConstructionSupportAabb } from "./support_reevaluation.js";
@@ -43,6 +51,7 @@ export interface ConstructionControllerDeps {
   editAuthority?: PlayerEditAuthorityConfig;
   getAuthorityOrigin?: () => PlayerEditAuthorityPoint | null;
   getAuthorityCounters?: () => Record<string, number> | null;
+  raycastAuthoritativeTerrain?: (ray: THREE.Ray, maxDistance?: number) => AuthoritativeConstructionTerrainHit | null;
 }
 
 export interface ConstructionControllerStats {
@@ -62,9 +71,7 @@ export interface ConstructionController {
   dispose(): void;
   stats(): ConstructionControllerStats;
   setTerrainConformHandler(handler: ((request: ConstructionTerrainConformRequest) => void) | null): void;
-  /** Player-collision colliders for placed pieces, kept atomic with add/remove. */
   readonly colliderSet: ConstructionColliderSet;
-  /** Re-probes terrain support for pieces intersecting an edited world AABB. */
   reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void;
 }
 
@@ -81,6 +88,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private readonly overlapIndex: ConstructionOverlapIndex;
   private readonly pieceStore: ConstructionPieceStore;
   private readonly performance = new ConstructionPerformanceTracker();
+  private readonly snapSelector = new ConstructionSnapSelector();
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerNdc = new THREE.Vector2(0, 0);
   private readonly centerNdc = new THREE.Vector2(0, 0);
@@ -89,6 +97,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private readonly ui: ConstructionControllerUi;
   private active = false;
   private snapEnabled = true;
+  private snapSuppressed = false;
   private selectedIndex = 0;
   private selectedMaterialIndex = 0;
   private rotationQuarterTurns = 0;
@@ -97,6 +106,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private nextEntityId = 1;
   private lastPlacementMessage = "";
   private supportReevaluations = 0;
+  private ghostPieceId: string | null = null;
   private terrainConformHandler: ((request: ConstructionTerrainConformRequest) => void) | null = null;
 
   constructor(private readonly deps: ConstructionControllerDeps) {
@@ -117,7 +127,11 @@ class ConstructionControllerImpl implements ConstructionController {
       opacity: this.config.ghost.opacity,
       depthWrite: false,
     }, "construction-ghost-base");
-    this.ghostMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.ghostMaterial);
+    const initialGeometry = this.config.pieces[0]
+      ? createPieceGeometry(this.config.pieces[0])
+      : new THREE.BoxGeometry(1, 1, 1);
+    this.ghostMesh = new THREE.Mesh(initialGeometry, this.ghostMaterial);
+    this.ghostPieceId = this.config.pieces[0]?.id ?? null;
     this.ghostMesh.name = "construction-ghost";
     this.ghostMesh.visible = false;
     this.root.add(this.ghostMesh);
@@ -127,11 +141,23 @@ class ConstructionControllerImpl implements ConstructionController {
       onToggleActive: () => this.setActive(!this.active),
       onToggleSnap: () => {
         this.snapEnabled = !this.snapEnabled;
+        this.snapSelector.reset();
         console.info(`[construction] snap ${this.snapEnabled ? "on" : "off"}`);
         this.syncUi(true);
       },
+      onSnapSuppressedChange: (suppressed) => {
+        this.snapSuppressed = suppressed;
+        if (suppressed) this.snapSelector.reset();
+        this.syncUi(true);
+      },
+      onCycleSnap: (direction) => {
+        this.snapSelector.cycle(direction);
+        this.syncUi(true);
+      },
       onRotate: () => {
-        this.rotationQuarterTurns = normalizeRotationQuarterTurns(this.rotationQuarterTurns + 1);
+        const stepTurns = Math.max(1, Math.round((this.selectedPiece().rotationStepDegrees ?? 90) / 90));
+        this.rotationQuarterTurns = normalizeRotationQuarterTurns(this.rotationQuarterTurns + stepTurns);
+        this.snapSelector.reset();
         this.syncUi(true);
       },
       onMaterialStep: (direction) => this.moveMaterialSelection(direction),
@@ -139,6 +165,7 @@ class ConstructionControllerImpl implements ConstructionController {
       onPieceSelect: (index) => this.selectPiece(index),
       onPlace: () => this.placeCurrentCandidate(),
       onDelete: () => this.deleteAimedPiece(),
+      onPickPiece: () => this.pickAimedPiece(),
       onPointerUpdate: (event) => this.updatePointerFromEvent(event),
       onPointerLeave: () => { this.pointerInside = false; },
       onInputUnavailable: () => {
@@ -152,11 +179,11 @@ class ConstructionControllerImpl implements ConstructionController {
       placedPieces: this.pieceStore.pieces,
       worldCells: this.deps.worldCells,
       placement: this.config.placement,
-      addPiece: (piece) => this.pieceStore.add(piece, false),
+      addPiece: (piece: PlacedConstructionPiece) => this.pieceStore.add(piece, false),
     });
     this.nextEntityId = loadResult.nextEntityId;
     this.syncUi(true);
-    console.info("[construction] CLOD construction ready. B toggle, left-click place, right-click delete, X snap, R rotate, 1-9 select.");
+    console.info("[construction] CLOD construction ready. B toggle, left-click place, middle-click pick, right-click delete, X snap, hold Shift free, Q/E cycle, R rotate.");
   }
 
   update(): void {
@@ -172,6 +199,7 @@ class ConstructionControllerImpl implements ConstructionController {
 
   dispose(): void {
     this.ui.dispose();
+    this.snapSelector.reset();
     this.pieceStore.dispose();
     this.ghostMesh.geometry.dispose();
     this.ghostMaterial.dispose();
@@ -182,7 +210,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const selected = this.config.pieces[this.selectedIndex] ?? null;
     return {
       active: this.active,
-      snapEnabled: this.snapEnabled,
+      snapEnabled: this.snapEnabled && !this.snapSuppressed,
       selectedPieceId: selected?.id ?? null,
       placedPieces: this.pieceStore.pieces.length,
       indexedSnapPoints: this.snapIndex.size(),
@@ -203,9 +231,7 @@ class ConstructionControllerImpl implements ConstructionController {
       pieces: this.pieceStore.pieces,
       piecesById: this.piecesById,
       aabb,
-      // The voxel-aware density field is authoritative immediately; the collider set is
-      // stale until the async rebuild pipeline swaps the dug page.
-      groundSolidAt: (x, y, z) => density(x, y, z) > 0,
+      groundSolidAt: (x: number, y: number, z: number) => density(x, y, z) > 0,
     });
     this.supportReevaluations += 1;
     if (!result.changed) return;
@@ -216,48 +242,56 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private updateActivePreview(): void {
     const piece = this.selectedPiece();
+    this.syncGhostGeometry(piece);
     const ray = this.readAimRay();
     if (!ray) {
-      this.performance.setSnapQueryStats(0, 0, false);
-      this.performance.setOverlapQueryStats(0, 0);
-      this.currentCandidate = null;
-      this.ghostMesh.visible = false;
-      this.syncUi();
+      this.clearPreviewStats();
       return;
     }
     const terrainHit = this.performance.measure("targeting", () => raycastConstructionTerrain({
       ray,
       worldCells: this.deps.worldCells,
       placement: this.config.placement,
+      raycastAuthoritativeTerrain: this.deps.raycastAuthoritativeTerrain
+        ?? getActiveTerrainRaycastService()?.raycastAuthoritativeTerrain,
       surfaceHeightAt: surfaceHeight,
+      densityAt: density,
     }));
-    if (!terrainHit) {
-      this.performance.setSnapQueryStats(0, 0, false);
-      this.performance.setOverlapQueryStats(0, 0);
-      this.currentCandidate = null;
-      this.ghostMesh.visible = false;
-      this.syncUi();
-      return;
-    }
 
-    const snap = this.performance.measure("snapQuery", () => this.snapEnabled
-      ? findBestConstructionSnap({
+    const snapActive = this.snapEnabled && !this.snapSuppressed;
+    const releaseRadius = this.config.snap.radiusM * Math.max(1, this.config.snap.releaseRadiusMultiplier ?? 1.35);
+    const snapRayDistanceM = terrainHit
+      ? Math.min(this.config.placement.maxRayDistanceM, terrainHit.distanceM + releaseRadius)
+      : Math.min(this.config.placement.maxRayDistanceM, this.config.snap.maxRayDistanceM ?? 32);
+    const snapCandidates = this.performance.measure("snapQuery", () => snapActive
+      ? findConstructionSnapCandidates({
           ray,
-          terrainHit,
+          maxDistanceM: snapRayDistanceM,
           piece,
           rotationQuarterTurns: this.rotationQuarterTurns,
           snapIndex: this.snapIndex,
           config: this.config.snap,
         })
-      : null);
+      : []);
     const snapStats = this.snapIndex.queryStats();
     this.performance.setSnapQueryStats(
-      this.snapEnabled ? snapStats.visitedCells : 0,
-      this.snapEnabled ? snapStats.candidatePoints : 0,
-      this.snapEnabled && snapStats.traversalTruncated,
+      snapActive ? snapStats.visitedCells : 0,
+      snapActive ? snapStats.candidatePoints : 0,
+      snapActive && snapStats.traversalTruncated,
     );
+    const snap = snapActive
+      ? this.snapSelector.select(
+          snapCandidates,
+          this.config.snap.radiusM,
+          this.config.snap.releaseRadiusMultiplier ?? 1.35,
+        )
+      : null;
+    if (!terrainHit && !snap) {
+      this.clearPreviewStats();
+      return;
+    }
     const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
-    const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit);
+    const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit!, this.rotationQuarterTurns);
     const overlapCandidates = this.overlapIndex.query(piece, position, rotationQuarterTurns);
     const overlapStats = this.overlapIndex.queryStats();
     this.performance.setOverlapQueryStats(overlapStats.visitedCells, overlapStats.candidatePieces);
@@ -279,11 +313,27 @@ class ConstructionControllerImpl implements ConstructionController {
     updateConstructionGhost(this.ghostMesh, this.ghostMaterial, {
       position: candidate.position,
       rotationQuarterTurns: candidate.rotationQuarterTurns,
-      dimensionsM: candidate.piece.dimensionsM,
       valid: candidate.valid,
       snapped: candidate.snapped,
     });
     this.syncUi();
+  }
+
+  private clearPreviewStats(): void {
+    this.performance.setSnapQueryStats(0, 0, false);
+    this.performance.setOverlapQueryStats(0, 0);
+    this.currentCandidate = null;
+    this.ghostMesh.visible = false;
+    this.snapSelector.reset();
+    this.syncUi();
+  }
+
+  private syncGhostGeometry(piece: ConstructionPieceDef): void {
+    if (this.ghostPieceId === piece.id) return;
+    const previous = this.ghostMesh.geometry;
+    this.ghostMesh.geometry = createPieceGeometry(piece);
+    previous.dispose();
+    this.ghostPieceId = piece.id;
   }
 
   private publishPerformanceCounters(): void {
@@ -298,6 +348,8 @@ class ConstructionControllerImpl implements ConstructionController {
     counters["construction_snap_visited_cells"] = snapshot.snapVisitedCells;
     counters["construction_snap_candidates"] = snapshot.snapCandidatePoints;
     counters["construction_snap_traversal_truncated"] = snapshot.snapTraversalTruncated ? 1 : 0;
+    counters["construction_snap_suppressed"] = this.snapSuppressed ? 1 : 0;
+    counters["construction_snap_sticky"] = this.snapSelector.selectedKey() ? 1 : 0;
     counters["construction_overlap_visited_cells"] = snapshot.overlapVisitedCells;
     counters["construction_overlap_candidates"] = snapshot.overlapCandidatePieces;
     counters["construction_placed_meshes"] = this.pieceStore.meshes.length;
@@ -327,8 +379,10 @@ class ConstructionControllerImpl implements ConstructionController {
       this.currentCandidate = null;
       this.ghostMesh.visible = false;
       this.lastPlacementMessage = "";
+      this.snapSuppressed = false;
+      this.snapSelector.reset();
     } else {
-      this.lastPlacementMessage = "Left-click to place. Right-click deletes aimed construction.";
+      this.lastPlacementMessage = "Left-click place · middle-click pick · right-click delete.";
       this.preloadSelectedMaterialWindow();
     }
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
@@ -371,6 +425,9 @@ class ConstructionControllerImpl implements ConstructionController {
   private selectPiece(index: number): void {
     if (index < 0 || index >= this.config.pieces.length) return;
     this.selectedIndex = index;
+    this.rotationQuarterTurns = 0;
+    this.snapSelector.reset();
+    this.syncGhostGeometry(this.selectedPiece());
     this.syncUi(true);
   }
 
@@ -396,7 +453,7 @@ class ConstructionControllerImpl implements ConstructionController {
     if (!this.currentCandidate) this.update();
     const candidate = this.currentCandidate;
     if (!candidate) {
-      this.lastPlacementMessage = "No build target. Aim at terrain or a snap point.";
+      this.lastPlacementMessage = "No build target. Aim at authoritative near terrain or a snap point.";
       console.warn(`[construction] ${this.lastPlacementMessage}`);
       this.syncUi(true);
       return;
@@ -427,30 +484,40 @@ class ConstructionControllerImpl implements ConstructionController {
     this.lastPlacementMessage = `Placed ${candidate.piece.label} · ${constructionMaterialLabel(material)}`;
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
+    this.snapSelector.reset();
     this.savePlacedPieces();
     this.syncUi(true);
   }
 
-  private deleteAimedPiece(): void {
+  private aimedPieceIndex(): number {
     const ray = this.readAimRay();
-    if (!ray) {
-      this.lastPlacementMessage = "No delete target. Aim at an existing construction piece.";
-      this.syncUi(true);
-      return;
-    }
+    if (!ray) return -1;
     this.deps.camera.updateMatrixWorld(true);
     this.root.updateMatrixWorld(true);
     this.raycaster.ray.copy(ray);
     const hit = this.raycaster.intersectObjects(this.pieceStore.meshes, false)[0];
-    if (!hit) {
-      this.lastPlacementMessage = "No construction piece under cursor.";
+    return hit ? this.pieceStore.meshes.indexOf(hit.object as THREE.Mesh) : -1;
+  }
+
+  private pickAimedPiece(): void {
+    const index = this.aimedPieceIndex();
+    if (index < 0) {
+      this.lastPlacementMessage = "No construction piece under cursor to pick.";
       this.syncUi(true);
       return;
     }
-    const index = this.pieceStore.meshes.indexOf(hit.object as THREE.Mesh);
+    const placed = this.pieceStore.pieces[index]!;
+    const pieceIndex = this.config.pieces.findIndex((piece) => piece.id === placed.typeId);
+    if (pieceIndex >= 0) this.selectPiece(pieceIndex);
+    if (placed.material) this.selectedMaterialIndex = this.materialIndexFor(placed.material);
+    this.lastPlacementMessage = `Picked ${this.selectedPiece().label}.`;
+    this.syncUi(true);
+  }
+
+  private deleteAimedPiece(): void {
+    const index = this.aimedPieceIndex();
     if (index < 0) {
-      this.lastPlacementMessage = "Delete target was not tracked.";
-      console.warn(`[construction] ${this.lastPlacementMessage}`);
+      this.lastPlacementMessage = "No construction piece under cursor.";
       this.syncUi(true);
       return;
     }
@@ -458,6 +525,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const removedCount = this.pieceStore.removeByIds(removedIds);
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
+    this.snapSelector.reset();
     this.savePlacedPieces();
     this.lastPlacementMessage = removedCount === 1 ? "Deleted 1 piece." : `Deleted ${removedCount} connected pieces.`;
     console.info(`[construction] ${this.lastPlacementMessage}`);
@@ -481,6 +549,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.ui.render({
       active: this.active,
       snapEnabled: this.snapEnabled,
+      snapSuppressed: this.snapSuppressed,
       pieces: this.config.pieces,
       selectedIndex: this.selectedIndex,
       selectedPieceId: selected.id,
