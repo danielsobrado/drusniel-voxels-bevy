@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import { parseConstructionConfig } from "./config.js";
 
 describe("construction config", () => {
-  it("normalizes snap frames and rejects invalid piece dimensions", () => {
+  it("normalizes snap frames, proxies, and support overrides", () => {
     const config = parseConstructionConfig(`
 construction:
+  support_profiles:
+    wood:
+      max_support: 2
+      vertical_decay: 0.08
+      horizontal_decay: 0.14
+      support_class: wood
   pieces:
     - id: bad-piece
       label: Bad Piece
@@ -27,6 +33,11 @@ construction:
       can_ground: false
       material: wood
       geometry_kind: wedge
+      support_profile:
+        max_support: 1.5
+        vertical_decay: 0.02
+        horizontal_decay: 0.04
+        support_class: ground
       placement_boxes:
         - center: [0, 0, 0]
           dimensions_m: [2, 1, 0.2]
@@ -50,9 +61,16 @@ construction:
     expect(config.pieces[1]?.snapPoints[0]?.tangent).toEqual([0, 1, 0]);
     expect(config.pieces[1]?.geometryKind).toBe("wedge");
     expect(config.pieces[1]?.placementBoxes?.[0]?.rotationYDegrees).toBe(45);
+    expect(config.supportProfiles.wood.maxSupport).toBe(2);
+    expect(config.pieces[1]?.supportProfile).toEqual({
+      maxSupport: 1.5,
+      verticalDecay: 0.02,
+      horizontalDecay: 0.04,
+      supportClass: "ground",
+    });
   });
 
-  it("clamps numeric config values to safe ranges", () => {
+  it("clamps numeric stability values to safe ranges", () => {
     const config = parseConstructionConfig(`
 construction:
   snap:
@@ -69,6 +87,13 @@ construction:
     terrain_step_m: 99
     overlap_padding_m: -1
     overlap_spatial_cell_m: 999
+  stability:
+    collapse_threshold: 2
+    epsilon: 0
+    max_island_size: 2
+    max_collapses_per_frame: 0
+    connection_tolerance_m: 0
+    vertical_connection_min_ratio: 2
   ghost:
     opacity: 2
 `);
@@ -85,6 +110,12 @@ construction:
     expect(config.placement.terrainStepM).toBe(16);
     expect(config.placement.overlapPaddingM).toBe(0);
     expect(config.placement.overlapSpatialCellM).toBe(64);
+    expect(config.stability.collapseThreshold).toBe(1);
+    expect(config.stability.epsilon).toBe(0.000001);
+    expect(config.stability.maxIslandSize).toBe(16);
+    expect(config.stability.maxCollapsesPerFrame).toBe(1);
+    expect(config.stability.connectionToleranceM).toBe(0.005);
+    expect(config.stability.verticalConnectionMinRatio).toBe(1);
     expect(config.ghost.opacity).toBe(0.95);
   });
 });
