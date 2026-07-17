@@ -105,7 +105,7 @@ describe("construction Phase 3 starter kit", () => {
     expect(ridgeSnap.target.entityId).toBe("roof");
   });
 
-  it("builds bridge and tower support chains from snap results", () => {
+  it("builds a bridge deck and a three-storey tower from snap results", () => {
     const index = new ConstructionSnapIndex(defaultConstructionConfig.snap.spatialCellM);
     const foundation = piece("concrete-foundation-2x2");
     const pillar = piece("wood-pillar-2m");
@@ -125,15 +125,44 @@ describe("construction Phase 3 starter kit", () => {
     ];
     const beamSnap = snapTo(index, beam, beamCursor);
     expect(beamSnap.target.entityId).toBe("pillar");
+    index.addPiece(beam, "bridge-beam", beamSnap.worldPosition, beamSnap.rotationQuarterTurns);
+    const beamDeck = beam.snapPoints.find((entry) => entry.id === "deck")!;
+    const deckOffset = constructionSnapMath.rotateYQuarter(beamDeck.localPos, beamSnap.rotationQuarterTurns);
+    const deckCursor: readonly [number, number, number] = [
+      beamSnap.worldPosition[0] + deckOffset[0],
+      beamSnap.worldPosition[1] + deckOffset[1],
+      beamSnap.worldPosition[2] + deckOffset[2],
+    ];
+    const bridgeFloor = snapTo(index, floor, deckCursor);
+    expect(bridgeFloor.target.entityId).toBe("bridge-beam");
 
     index.clear();
-    index.addPiece(floor, "tower-floor", [0, 0, 0], 0);
-    const firstWall = snapTo(index, wall, [1, 0.1, 0]);
-    index.addPiece(wall, "tower-wall-1", firstWall.worldPosition, firstWall.rotationQuarterTurns);
-    const secondWall = snapTo(index, wall, [firstWall.worldPosition[0], firstWall.worldPosition[1] + 1, firstWall.worldPosition[2]]);
-    expect(secondWall.target.entityId).toBe("tower-wall-1");
-    index.addPiece(wall, "tower-wall-2", secondWall.worldPosition, secondWall.rotationQuarterTurns);
-    const upperFloor = snapTo(index, floor, [secondWall.worldPosition[0], secondWall.worldPosition[1] + 1, secondWall.worldPosition[2]]);
-    expect(upperFloor.target.entityId).toBe("tower-wall-2");
+    let floorPosition: readonly [number, number, number] = [0, 0, 0];
+    let floorRotation = 0;
+    index.addPiece(floor, "tower-floor-0", floorPosition, floorRotation);
+    for (let storey = 1; storey <= 3; storey += 1) {
+      const edge = floor.snapPoints.find((entry) => entry.id === "edge-east")!;
+      const edgeOffset = constructionSnapMath.rotateYQuarter(edge.localPos, floorRotation);
+      const wallCursor: readonly [number, number, number] = [
+        floorPosition[0] + edgeOffset[0],
+        floorPosition[1] + edgeOffset[1],
+        floorPosition[2] + edgeOffset[2],
+      ];
+      const wallSnap = snapTo(index, wall, wallCursor);
+      const wallId = `tower-wall-${storey}`;
+      index.addPiece(wall, wallId, wallSnap.worldPosition, wallSnap.rotationQuarterTurns);
+      const wallTop = wall.snapPoints.find((entry) => entry.id === "top")!;
+      const wallTopOffset = constructionSnapMath.rotateYQuarter(wallTop.localPos, wallSnap.rotationQuarterTurns);
+      const floorCursor: readonly [number, number, number] = [
+        wallSnap.worldPosition[0] + wallTopOffset[0],
+        wallSnap.worldPosition[1] + wallTopOffset[1],
+        wallSnap.worldPosition[2] + wallTopOffset[2],
+      ];
+      const upperFloor = snapTo(index, floor, floorCursor);
+      expect(upperFloor.worldPosition[1]).toBeGreaterThan(floorPosition[1]);
+      floorPosition = upperFloor.worldPosition;
+      floorRotation = upperFloor.rotationQuarterTurns;
+      index.addPiece(floor, `tower-floor-${storey}`, floorPosition, floorRotation);
+    }
   });
 });

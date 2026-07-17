@@ -37,7 +37,7 @@ Door frames, window walls, ladders, gates, diagonal beams, roof ridges, and roof
 - Wall bottoms connect to floor edges and wall tops.
 - Wall tops expose wall stacking, floor, roof, and generic structural contacts.
 - Pillar tops accept beams and roof supports.
-- Beams expose separate chain and downward support sockets.
+- Beams expose separate chain, downward support, and upward deck sockets.
 - Roof eaves connect to wall tops; roof ridges and roof corners connect through `roof-edge` frames.
 - Fence and gate ends share generic outdoor sockets.
 
@@ -48,8 +48,8 @@ All placement still uses the Phase 1 snap solver and the Phase 2 bidirectional s
 Phase 3 passes when deterministic tests can build these chains entirely from returned snap transforms:
 
 1. Cabin: floor → wall/opening → roof panel → ridge.
-2. Bridge: foundation → pillar → 4 m beam → floor span.
-3. Tower: floor → stacked walls → upper floor, repeatable to three storeys.
+2. Bridge: foundation → pillar → 4 m beam → snapped floor deck.
+3. Tower: floor → wall → upper floor, repeated through three storeys.
 
 No test may patch the returned world position or rotation after snapping.
 
