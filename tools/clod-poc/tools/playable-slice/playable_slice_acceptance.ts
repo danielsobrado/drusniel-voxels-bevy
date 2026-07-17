@@ -75,7 +75,10 @@ async function withTimeout<T>(label: string, operation: Promise<T>, timeoutMs: n
 
 async function waitForDiagnosticReady(page: Page): Promise<void> {
   await page.waitForFunction(
-    () => window.__drusnielClod?.ready === true || window.__drusnielClod?.error !== null,
+    () => {
+      const hooks = window.__drusnielClod;
+      return Boolean(hooks && (hooks.ready || hooks.error !== null));
+    },
     undefined,
     { timeout: READY_TIMEOUT_MS, polling: 100 },
   );
