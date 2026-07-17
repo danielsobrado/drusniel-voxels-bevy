@@ -104,8 +104,8 @@ phase0:
       world: 16
       camera:
         mode: fixed
-        x_ratio: 0.390625
-        z_ratio: 0.1220703125
+        x_ratio: 1.5625
+        z_ratio: 0.48828125
         y_offset_m: 180
         look_distance_m: 800
       require_visible_m: 4096
@@ -114,8 +114,8 @@ phase0:
       world: 16
       camera:
         mode: fixed
-        x_ratio: 0.4638671875
-        z_ratio: 0.15869140625
+        x_ratio: 1.85546875
+        z_ratio: 0.634765625
         y_offset_m: 150
         look_distance_m: 600
       require_visible_m: 4096
