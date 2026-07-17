@@ -116,16 +116,25 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
   }
 
   async pointerMoveToCenter(): Promise<void> {
-    const viewport = this.page.viewportSize();
-    if (!viewport) throw new Error("playable slice requires a fixed viewport");
-    await this.page.mouse.move(viewport.width * 0.5, viewport.height * 0.5);
-    this.record("pointer", "move:center");
+    const pointerLocked = await this.page.evaluate(() => document.pointerLockElement !== null);
+    if (!pointerLocked) {
+      const viewport = this.page.viewportSize();
+      if (!viewport) throw new Error("playable slice requires a fixed viewport");
+      await this.page.mouse.move(viewport.width * 0.5, viewport.height * 0.5);
+    }
+    this.record("pointer", pointerLocked ? "retain locked center aim" : "move:center");
   }
 
   async pointerClick(button: "left" | "right"): Promise<void> {
-    const viewport = this.page.viewportSize();
-    if (!viewport) throw new Error("playable slice requires a fixed viewport");
-    await this.page.mouse.click(viewport.width * 0.5, viewport.height * 0.5, { button });
+    const pointerLocked = await this.page.evaluate(() => document.pointerLockElement !== null);
+    if (pointerLocked) {
+      await this.page.mouse.down({ button });
+      await this.page.mouse.up({ button });
+    } else {
+      const viewport = this.page.viewportSize();
+      if (!viewport) throw new Error("playable slice requires a fixed viewport");
+      await this.page.mouse.click(viewport.width * 0.5, viewport.height * 0.5, { button });
+    }
     this.record("pointer", `click:${button}`);
   }
 
