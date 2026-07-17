@@ -113,9 +113,11 @@ export async function storeStreamRootNode(
     || !streamRootCacheOperationIsCurrent(stats)) return;
   const parsed = parseStreamRootNodeId(node.id);
   const artifact = clodPageNodeToArtifact(node);
+  const generation = streamRootCacheOperationGeneration(stats);
+  const keyParts = streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id);
   if (!streamRootCacheOperationIsCurrent(stats)) return;
   await ctx.service.put(
-    streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id),
+    keyParts,
     artifact,
     encodeClodPageNodeArtifact,
     {
@@ -124,12 +126,26 @@ export async function storeStreamRootNode(
       worldMode: "infinite",
       hydrologyMode: "bounded-to-startup-world",
       backend,
-      terrainStreamingGeneration: streamRootCacheOperationGeneration(stats),
+      terrainStreamingGeneration: generation,
     },
   );
-  if (!streamRootCacheOperationIsCurrent(stats)) return;
+  if (!streamRootCacheOperationIsCurrent(stats)) {
+    await removeStaleStreamRootCacheEntry(ctx, keyParts, generation);
+    return;
+  }
   stats.nodesBuilt++;
   stats.coldBuildMs += buildMs;
+}
+
+async function removeStaleStreamRootCacheEntry(
+  ctx: ClodCacheContext,
+  keyParts: ReturnType<typeof streamRootKeyParts>,
+  generation: number,
+): Promise<void> {
+  const current = await ctx.service.get(keyParts, decodeClodPageNodeArtifact);
+  if (current.status !== "hit"
+    || current.metadata?.terrainStreamingGeneration !== generation) return;
+  await ctx.service.delete(keyParts);
 }
 
 export function publishStreamRootCacheCounters(
