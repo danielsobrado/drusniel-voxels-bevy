@@ -7,17 +7,19 @@ import type {
 import type { PlayableSliceActionRecord } from "./playable_slice_contract.js";
 
 const READY_TIMEOUT_MS = 180_000;
+const POINTER_LOCK_TIMEOUT_MS = 10_000;
 const POLL_MS = 100;
-const AIM_PITCH = -0.45;
+const AIM_PITCH = -0.9;
+const AIM_POINTER_DELTA_PX = 600;
 
 async function waitForAppReady(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const hooks = window.__drusnielClod;
-    return hooks?.error !== null && hooks?.error !== undefined
-      ? true
-      : hooks?.ready === true
-        && typeof hooks.getPlayableSliceSnapshot === "function"
-        && document.body.dataset.playerMode === "playing";
+    if (!hooks) return false;
+    if (hooks.error !== null) return true;
+    return hooks.ready === true
+      && typeof hooks.getPlayableSliceSnapshot === "function"
+      && document.body.dataset.playerMode === "playing";
   }, undefined, { timeout: READY_TIMEOUT_MS, polling: 100 });
   const error = await page.evaluate(() => window.__drusnielClod?.error ?? null);
   if (error) throw new Error(error);
@@ -52,21 +54,37 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     const centerY = box.y + box.height * 0.5;
     await this.page.mouse.click(centerX, centerY, { button: "left" });
     this.record("pointer", "capture look pointer");
+    await this.page.waitForFunction(
+      () => document.pointerLockElement !== null,
+      undefined,
+      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
+    );
+
     await this.page.mouse.move(centerX, centerY);
-    await this.page.mouse.move(centerX, centerY + Math.min(320, box.height * 0.35), { steps: 8 });
-    this.record("pointer", "aim down at terrain");
+    await this.page.mouse.move(centerX, centerY + AIM_POINTER_DELTA_PX, { steps: 12 });
+    this.record("pointer", "aim steeply down at terrain");
     await this.page.waitForFunction(
       (pitch) => (window.__drusnielClod?.getPose?.().pitch ?? 0) <= pitch,
       AIM_PITCH,
-      { timeout: 10_000, polling: 50 },
+      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
     );
 
     await this.page.keyboard.down("Tab");
     this.record("keyboard", "hold Tab for UI access");
+    await this.page.waitForFunction(
+      () => document.pointerLockElement === null,
+      undefined,
+      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
+    );
     await edit.check();
     this.record("pointer", "enable terrain editing");
     await this.page.keyboard.up("Tab");
     this.record("keyboard", "release Tab and resume look");
+    await this.page.waitForFunction(
+      () => document.pointerLockElement !== null,
+      undefined,
+      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
+    );
   }
 
   async snapshot(): Promise<PlayableSliceSnapshot> {
