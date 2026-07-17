@@ -6,6 +6,11 @@ import { StoneSystem, type StoneLighting, type StoneStats } from "../../stones/s
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
 import type { GrassHydrologyData } from "../../gpu/grass_ring_compute.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
+import {
+  getRingDebugOverlay,
+  ringDebugEnabled,
+  type RingTelemetryState,
+} from "../../diagnostics/ring_debug_overlay.js";
 
 export interface StoneControllerUiState {
   stonesEnabled: boolean;
@@ -46,6 +51,7 @@ export interface StoneController {
 }
 
 export function createStoneController(deps: StoneControllerDeps): StoneController {
+  const ringDebug = getRingDebugOverlay(deps.scene, "stones");
   const makeSettings = (): StoneSettings => {
     const state = deps.getUiState();
     return {
@@ -54,6 +60,10 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
       density: state.stoneDensity,
       maxInstances: state.stoneMaxInstances,
       seedSalt: state.stoneSeed,
+      debug: {
+        ...deps.stoneConfig.debug,
+        classColors: deps.stoneConfig.debug.classColors || ringDebugEnabled("stones"),
+      },
     };
   };
   const visibleClasses = (): StoneClass[] => {
@@ -98,6 +108,22 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
     refreshStats,
     update(ringCenter) {
       system.update(ringCenter);
+      const settings = makeSettings();
+      const stats = system.getStats();
+      const telemetryState = resolveStoneTelemetryState(stats);
+      ringDebug.update({
+        centerX: ringCenter.x,
+        centerZ: ringCenter.z,
+        cellSizeM: settings.cellSizeM,
+        outerRadiusM: settings.ringRadiusM,
+        innerRadiusM: 0,
+        refreshDistanceM: settings.ringRefreshDistanceM,
+        candidateGrid: Math.max(1, Math.ceil((settings.ringRadiusM * 2) / settings.cellSizeM)),
+        acceptedCount: telemetryState === "unknown" ? undefined : stats.total,
+        telemetryState,
+        classColoring: settings.debug.classColors,
+        lodMode: "class-only",
+      });
     },
     updateLighting(lighting) {
       system.updateLighting(lighting);
@@ -109,4 +135,10 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
       system.setVisibleClasses(classes);
     },
   };
+}
+
+function resolveStoneTelemetryState(stats: StoneStats): RingTelemetryState {
+  const state = stats.gpuTelemetryState;
+  if (state === "fresh" || state === "last-known") return state;
+  return "unknown";
 }
