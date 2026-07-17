@@ -2,7 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright";
 import type { ContinentRiverCrossingRoute } from "../../src/water/continent_river_route.js";
-import { clodUrl, launchWebGPU } from "../launch.js";
+import { clodUrl } from "../launch.js";
+import {
+  launchHeadedRealWebGPU,
+  type HeadedWebGpuProbe,
+} from "./headed_real_webgpu.js";
 import {
   PlaywrightDiagnosticSliceDriver,
   PlaywrightPlayableSliceDriver,
@@ -38,6 +42,7 @@ interface PlayableSliceAcceptanceReport {
   scene: "continent";
   seed: number;
   configuredRuns: number;
+  gpu: HeadedWebGpuProbe;
   route: DiscoveryResult;
   runs: PlayableSliceRunReport[];
   passed: boolean;
@@ -343,7 +348,7 @@ async function runFreshProfile(
 async function main(): Promise<void> {
   const runs = requestedRuns();
   const modes = requestedModes();
-  const { browser } = await launchWebGPU();
+  const { browser, probe } = await launchHeadedRealWebGPU();
   try {
     const discoveryContext = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT } });
     let route: DiscoveryResult;
@@ -363,6 +368,7 @@ async function main(): Promise<void> {
       scene: "continent",
       seed: SEED,
       configuredRuns: runs,
+      gpu: probe,
       route,
       runs: allRuns,
       passed: allRuns.length > 0 && allRuns.every((run) => run.passed),
