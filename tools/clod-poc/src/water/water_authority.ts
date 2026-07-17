@@ -5,6 +5,7 @@ import {
   HYDROLOGY_BODY_OCEAN,
   HYDROLOGY_BODY_POND,
   HYDROLOGY_BODY_RIVER,
+  sampleHydrologyGrid,
 } from "./hydrologyGrid.js";
 import type { HydrologySystem } from "./hydrologySystem.js";
 import type { WaterField } from "./waterField.js";
@@ -87,6 +88,15 @@ function contains(body: EditedWaterBody, x: number, z: number): boolean {
   return x >= body.minX && x <= body.maxX && z >= body.minZ && z <= body.maxZ;
 }
 
+function hydrologySampleReady(hydrology: HydrologySystem, x: number, z: number): boolean {
+  if (x >= 0 && z >= 0 && x <= hydrology.grid.worldCells && z <= hydrology.grid.worldCells) return true;
+  const atlas = hydrology.tileAtlasSource();
+  if (!atlas) return true;
+  const tileX = Math.floor(x / atlas.tileSizeM);
+  const tileZ = Math.floor(z / atlas.tileSizeM);
+  return atlas.peek(tileX, tileZ) !== null;
+}
+
 export class EditedWaterAuthoritySource implements WaterAuthoritySource {
   readonly id = "edited-water";
   private readonly bodies = new Map<string, EditedWaterBody>();
@@ -138,7 +148,7 @@ export class EditedWaterAuthoritySource implements WaterAuthoritySource {
     return {
       state: "water",
       surfaceY: selected.surfaceY,
-      ...(Number.isFinite(selected.bottomY) ? { bottomY: selected.bottomY } : {}),
+      ...(selected.bottomY !== undefined && Number.isFinite(selected.bottomY) ? { bottomY: selected.bottomY } : {}),
       bodyId: `edited:${selected.id}`,
       bodyKind: selected.kind,
       flow: selected.flow ?? STILL_FLOW,
@@ -157,8 +167,11 @@ export function createHydrologyWaterSource(
     revision: getRevision,
     sample(x, z) {
       const revision = getRevision();
-      if (!hydrology.waterQueryReadyAt(x, z)) return unknownSample(revision);
-      const sample = hydrology.sample(x, z);
+      if (!hydrologySampleReady(hydrology, x, z)) return unknownSample(revision);
+      const insideStartup = x >= 0 && z >= 0 && x <= hydrology.grid.worldCells && z <= hydrology.grid.worldCells;
+      const sample = insideStartup
+        ? sampleHydrologyGrid(hydrology.grid, x, z)
+        : hydrology.sample(x, z);
       const wet = sample.bodyKind !== HYDROLOGY_BODY_DRY
         && sample.bodyId !== 0
         && sample.bodyMask > 0.5
