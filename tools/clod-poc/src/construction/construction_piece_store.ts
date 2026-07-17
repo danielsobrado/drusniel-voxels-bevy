@@ -73,6 +73,8 @@ export class ConstructionPieceStore {
     }
     const mesh = new THREE.Mesh(geometry, pieceMaterial);
     mesh.name = `construction-${stored.typeId}`;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     mesh.position.set(stored.position[0], stored.position[1], stored.position[2]);
     mesh.rotation.set(0, stored.rotationQuarterTurns * Math.PI * 0.5, 0);
     mesh.updateMatrixWorld(true);
@@ -219,7 +221,6 @@ export class ConstructionPieceStore {
     this.pieces.length = 0;
     this.pieceIds.clear();
     this.baseColors.clear();
-    this.graph.clear();
     this.colliderSet?.dispose();
   }
 
@@ -228,21 +229,18 @@ export class ConstructionPieceStore {
     if (index < 0) return;
     const placed = this.pieces[index]!;
     const mesh = this.meshes[index];
-    const definition = this.piecesById.get(placed.typeId);
-    const material = mesh?.material as THREE.MeshStandardMaterial | undefined;
-    const baseColor = this.baseColors.get(id);
-    if (!mesh || !definition || !material?.color || !baseColor) return;
+    if (!mesh) return;
+    const material = mesh.material as THREE.MeshStandardMaterial;
+    const base = this.baseColors.get(id);
+    if (!material?.color || !base) return;
     if (!this.stabilityVisualizationActive) {
-      material.color.copy(baseColor);
+      material.color.copy(base);
       return;
     }
-    const pieceMaterial = placed.material ?? definition.material;
-    const profile = constructionSupportProfile(definition, pieceMaterial, this.supportProfiles);
-    material.color.setHex(constructionStabilityColorHex(
-      placed.stability ?? 0,
-      profile.maxSupport,
-      placed.grounded === true,
-      this.collapseThreshold,
-    ));
+    const def = this.piecesById.get(placed.typeId);
+    const profile = def
+      ? constructionSupportProfile(def, placed.material, this.supportProfiles)
+      : DEFAULT_CONSTRUCTION_SUPPORT_PROFILES.wood;
+    material.color.setHex(constructionStabilityColorHex(this.graph.support(id), profile.maxSupport, this.collapseThreshold));
   }
 }
