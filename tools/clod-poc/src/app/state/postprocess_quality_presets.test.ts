@@ -23,6 +23,7 @@ function createState(): PostProcessQualityPresetState {
     postProcessGtaoEnabled: true,
     postProcessFroxelsEnabled: true,
     postProcessBounceEnabled: true,
+    godRaysMode: "off",
   };
 }
 
@@ -58,6 +59,7 @@ describe("postprocess quality presets", () => {
       postProcessClarityEnabled: true,
       postProcessAerialPerspectiveEnabled: true,
       postProcessCloudsEnabled: true,
+      godRaysMode: "volumetric",
     }],
     ["balanced", {
       postProcessRenderScale: 0.85,
@@ -68,6 +70,7 @@ describe("postprocess quality presets", () => {
       postProcessClarityEnabled: true,
       postProcessAerialPerspectiveEnabled: true,
       postProcessCloudsEnabled: true,
+      godRaysMode: "heavy",
     }],
     ["perf", {
       postProcessRenderScale: 0.75,
@@ -78,6 +81,7 @@ describe("postprocess quality presets", () => {
       postProcessClarityEnabled: true,
       postProcessAerialPerspectiveEnabled: true,
       postProcessCloudsEnabled: false,
+      godRaysMode: "cheap",
     }],
     ["potato", {
       postProcessRenderScale: 0.5,
@@ -88,6 +92,7 @@ describe("postprocess quality presets", () => {
       postProcessClarityEnabled: false,
       postProcessAerialPerspectiveEnabled: false,
       postProcessCloudsEnabled: false,
+      godRaysMode: "off",
     }],
   ])("applies %s", (preset, expected) => {
     const state = createState();

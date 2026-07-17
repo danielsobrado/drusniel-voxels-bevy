@@ -5,6 +5,7 @@ import {
   mrt,
   output,
   pass,
+  screenUV,
   uniform,
   vec4,
 } from "three/tsl";
@@ -16,9 +17,12 @@ import {
 import { tagGpu } from "../core/gpu_profiler.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import {
+  godRaysHalfResSamples,
   toneMappingModeToThree,
+  type GodRaysMode,
   type PostProcessSettings,
 } from "../environment/postprocess.js";
+import { buildDustGodRays, projectSunToScreen, sunScreenFade } from "./god_rays_screen.js";
 import {
   DEFAULT_POSTFX_ATMOSPHERE,
   parsePostFxFroxelDebugMode,
@@ -104,6 +108,7 @@ const NEUTRAL_GRADE: PostFxGradeParams = {
 type NumericUniform = { value: number };
 type MatrixUniform = { value: THREE.Matrix4 };
 type VectorUniform = { value: THREE.Vector3 };
+type Vector2Uniform = { value: THREE.Vector2 };
 
 export { postProcessOutputGraphDirty } from "./webgpu_postprocess_config.js";
 
@@ -147,6 +152,7 @@ export class WebGpuPostProcessPipeline {
   private froxelDebugMode: PostFxFroxelDebugMode;
   private readonly gtaoEnabled: boolean;
   private readonly halfResEnabled: boolean;
+  private readonly godRaysFullRes: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
   private readonly uSaturation = uniform(1.0) as unknown as NumericUniform;
@@ -182,6 +188,16 @@ export class WebGpuPostProcessPipeline {
   private readonly uView = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
   private readonly uPrevView = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
   private readonly uPrevProjection = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
+  private readonly uSunScreenUv = uniform(new THREE.Vector2(0.5, 0.5)) as unknown as Vector2Uniform;
+  private readonly uGodRaysIntensity = uniform(0.0) as unknown as NumericUniform;
+  private readonly uGodRaysDensity = uniform(0.96) as unknown as NumericUniform;
+  private readonly uGodRaysDecay = uniform(0.92) as unknown as NumericUniform;
+  private readonly uGodRaysWeight = uniform(0.35) as unknown as NumericUniform;
+  private readonly uGodRaysExposure = uniform(0.6) as unknown as NumericUniform;
+  private readonly uGodRaysDustStrength = uniform(0.55) as unknown as NumericUniform;
+  private readonly uGodRaysDustScale = uniform(6.0) as unknown as NumericUniform;
+  private readonly uGodRaysDustSpeed = uniform(0.05) as unknown as NumericUniform;
+  private readonly uGodRaysTint = uniform(new THREE.Vector3(1.0, 1.0, 1.0)) as unknown as VectorUniform;
 
   constructor(
     private readonly renderer: WebGPURenderer,
@@ -208,6 +224,7 @@ export class WebGpuPostProcessPipeline {
     this.applyFroxelDebugSettings(settings);
     this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
     this.halfResEnabled = queryFlag(["halfres", "halfResScreenSpace", "halfresscreenspace"], true);
+    this.godRaysFullRes = queryFlag(["godraysFullres", "godraysfullres", "godRaysFullres"], false);
     if (this.shouldUseFroxelVolume()) {
       this.froxelVolume = new PostFxFroxelVolume(this.atmosphere, { terrain: this.ensureFroxelTerrainInput() });
     }
@@ -257,6 +274,7 @@ export class WebGpuPostProcessPipeline {
 
     this.updateColorScriptUniforms();
     this.syncCameraUniforms(camera);
+    this.updateGodRaysUniforms(camera);
     this.updateFroxelVolume(camera);
     const pipeline = this.ensurePipeline(scene, camera);
     try {
@@ -292,10 +310,11 @@ export class WebGpuPostProcessPipeline {
       this.stageKey(),
       this.bounceEnabled ? "bounce" : "no-bounce",
       this.shouldRunClouds() ? "clouds" : "no-clouds",
-      this.froxelsEnabled ? "froxels" : "no-froxels",
+      this.effectiveFroxelsEnabled() ? "froxels" : "no-froxels",
       `froxel-debug-${this.froxelDebugMode}`,
       this.gtaoEnabled ? "gtao" : "no-gtao",
       this.halfResEnabled ? "halfres" : "fullres",
+      `godrays-${this.godRaysMode()}${this.godRaysFullRes ? "-fullres" : ""}`,
     ].join("|");
   }
 
@@ -313,8 +332,26 @@ export class WebGpuPostProcessPipeline {
     return this.cloudsEnabled && this.settings.cloudsEnabled && this.stageEnabled("clouds");
   }
 
+  private godRaysMode(): GodRaysMode {
+    return this.stageEnabled("godrays") ? this.settings.godRaysMode : "off";
+  }
+
+  private godRaysSamples(): number {
+    return godRaysHalfResSamples(this.godRaysMode());
+  }
+
+  private godRaysEnabled(): boolean {
+    return this.godRaysSamples() > 0;
+  }
+
+  /** `volumetric` god rays force the froxel fog layer on as the ambience under the shafts. */
+  private effectiveFroxelsEnabled(): boolean {
+    return this.froxelsEnabled
+      || (this.stageEnabled("froxels") && this.godRaysMode() === "volumetric");
+  }
+
   private shouldUseFroxelVolume(): boolean {
-    return this.froxelsEnabled || this.froxelDebugMode !== "off";
+    return this.effectiveFroxelsEnabled() || this.froxelDebugMode !== "off";
   }
 
   private updateFroxelVolume(camera: THREE.Camera): void {
@@ -323,7 +360,7 @@ export class WebGpuPostProcessPipeline {
       this.froxelVolume = new PostFxFroxelVolume(this.atmosphere, { terrain: this.ensureFroxelTerrainInput() });
       this.disposePipeline();
     }
-    this.froxelVolume.update(this.renderer, camera, this.uSunDirection.value);
+    this.froxelVolume.update(this.renderer, camera, this.uSunDirection.value, this.resolveLighting());
   }
 
   private ensureFroxelTerrainInput(): PostFxFroxelVolumeTerrainInput | null {
@@ -396,7 +433,35 @@ export class WebGpuPostProcessPipeline {
     this.uGtaoDepthTolerance.value = this.gtao.depthToleranceMeters;
     this.uGtaoMinUvRadius.value = this.gtao.minUvRadius;
     this.uGtaoMaxUvRadius.value = this.gtao.maxUvRadius;
+    this.uGodRaysDensity.value = this.settings.godRaysDensity;
+    this.uGodRaysDecay.value = this.settings.godRaysDecay;
+    this.uGodRaysWeight.value = this.settings.godRaysWeight;
+    this.uGodRaysExposure.value = this.settings.godRaysExposure;
+    this.uGodRaysDustStrength.value = this.settings.godRaysDustStrength;
+    this.uGodRaysDustScale.value = this.settings.godRaysDustScale;
+    this.uGodRaysDustSpeed.value = this.settings.godRaysDustSpeed;
     this.updateColorScriptUniforms();
+  }
+
+  /**
+   * Per-frame god-rays state: the sun's screen UV, the soft sun-behind/off-screen fade folded
+   * into the intensity gain, and the transmittance tint from the live sun colour (warm at low
+   * sun by construction — the shafts share the scene's atmosphere).
+   */
+  private updateGodRaysUniforms(camera: THREE.Camera): void {
+    if (!this.godRaysEnabled()) {
+      this.uGodRaysIntensity.value = 0;
+      return;
+    }
+    const info = projectSunToScreen(this.uSunDirection.value, camera);
+    this.uSunScreenUv.value.set(info.u, info.v);
+    this.uGodRaysIntensity.value = sunScreenFade(info);
+    const lighting = this.resolveLighting();
+    if (lighting) {
+      const sun = lighting.sunColor;
+      const peak = Math.max(sun.r, sun.g, sun.b, 1e-4);
+      this.uGodRaysTint.value.set(sun.r / peak, sun.g / peak, sun.b / peak);
+    }
   }
 
   private updateColorScriptUniforms(): void {
@@ -461,7 +526,8 @@ export class WebGpuPostProcessPipeline {
       ? this.createAerialNode(beauty.rgb, depthTex)
       : beauty.rgb;
     if (this.froxelDebugMode !== "off") return aerialRgb;
-    const wantsHalfRes = this.gtaoEnabled || this.bounceEnabled || this.shouldRunClouds();
+    const wantsHalfResGodRays = this.godRaysEnabled() && !this.godRaysFullRes;
+    const wantsHalfRes = this.gtaoEnabled || this.bounceEnabled || this.shouldRunClouds() || wantsHalfResGodRays;
     const halfRes = this.halfResEnabled && wantsHalfRes
       ? this.buildHalfResPass(beauty, depthTex)
       : null;
@@ -478,9 +544,19 @@ export class WebGpuPostProcessPipeline {
             : this.createGtaoNode(cloudRgb, depthTex),
         )
       : cloudRgb;
+    // Shafts are added in linear before TRAA so the temporal resolve smooths both the IGN
+    // start jitter and the dust noise for free when TAA is enabled.
+    const shaftRgb = this.godRaysEnabled()
+      ? aoRgb.add(
+          (halfRes?.godRaysTex
+            ? halfRes.godRaysTex.rgb
+            : this.createGodRaysLayerNode(beauty, depthTex)
+          ).mul(this.uGodRaysTint as unknown as TslAny),
+        )
+      : aoRgb;
     const temporalColor = this.settings.taaEnabled && this.stageEnabled("taa")
-      ? this.createTraaNode(aoRgb, depthTex, camera)
-      : vec4(aoRgb, DEFAULT_ALPHA);
+      ? this.createTraaNode(shaftRgb, depthTex, camera)
+      : vec4(shaftRgb, DEFAULT_ALPHA);
     const temporalRgb = (temporalColor as TslAny).rgb;
     const bloomRgb = this.settings.bloomEnabled && this.stageEnabled("bloom")
       ? temporalRgb.add((bloom(
@@ -505,12 +581,19 @@ export class WebGpuPostProcessPipeline {
     return this.createGradeNode(beauty.rgb, bounceRgb);
   }
 
-  private buildHalfResPass(beauty: TslAny, depthTex: TslAny): { aoTex: TslAny | null; bounceTex: TslAny | null; cloudTex: TslAny | null } {
+  private buildHalfResPass(beauty: TslAny, depthTex: TslAny): { aoTex: TslAny | null; bounceTex: TslAny | null; cloudTex: TslAny | null; godRaysTex: TslAny | null } {
     const entries: HalfResEntry[] = [];
+    const wantsGodRays = this.godRaysEnabled() && !this.godRaysFullRes;
     if (this.shouldRunClouds()) {
       entries.push({
         name: "clouds",
         node: this.createCloudLayerNode(depthTex),
+      });
+    }
+    if (wantsGodRays) {
+      entries.push({
+        name: "godrays",
+        node: this.createGodRaysLayerNode(beauty, depthTex),
       });
     }
     if (this.gtaoEnabled) {
@@ -547,13 +630,36 @@ export class WebGpuPostProcessPipeline {
         }),
       });
     }
-    if (entries.length === 0) return { aoTex: null, bounceTex: null, cloudTex: null };
+    if (entries.length === 0) return { aoTex: null, bounceTex: null, cloudTex: null, godRaysTex: null };
     this.halfResPass = new HalfResMrtNode(entries);
     return {
       aoTex: this.gtaoEnabled ? (this.halfResPass.getTextureNode("ao") as unknown as TslAny) : null,
       bounceTex: this.bounceEnabled ? (this.halfResPass.getTextureNode("bounce") as unknown as TslAny) : null,
       cloudTex: this.shouldRunClouds() ? (this.halfResPass.getTextureNode("clouds") as unknown as TslAny) : null,
+      godRaysTex: wantsGodRays ? (this.halfResPass.getTextureNode("godrays") as unknown as TslAny) : null,
     };
+  }
+
+  /**
+   * The dust god-rays accumulation layer (pre-tint). Rendered at half res inside the shared MRT
+   * pass by default; the same builder also serves the `?godraysFullres=1` A/B path at full res.
+   */
+  private createGodRaysLayerNode(beauty: TslAny, depthTex: TslAny): TslAny {
+    return buildDustGodRays({
+      sceneTex: beauty,
+      depthTex,
+      uvNode: screenUV,
+      sunUv: this.uSunScreenUv as unknown as TslAny,
+      intensity: this.uGodRaysIntensity as unknown as TslAny,
+      density: this.uGodRaysDensity as unknown as TslAny,
+      decay: this.uGodRaysDecay as unknown as TslAny,
+      weight: this.uGodRaysWeight as unknown as TslAny,
+      exposure: this.uGodRaysExposure as unknown as TslAny,
+      samples: this.godRaysSamples(),
+      dustStrength: this.uGodRaysDustStrength as unknown as TslAny,
+      dustScale: this.uGodRaysDustScale as unknown as TslAny,
+      dustSpeed: this.uGodRaysDustSpeed as unknown as TslAny,
+    });
   }
 
   private createGtaoUpsampleNode(aoTex: TslAny, beautyRgb: TslAny, depthTex: TslAny): TslAny {
@@ -585,7 +691,7 @@ export class WebGpuPostProcessPipeline {
         },
         froxels: {
           ...this.atmosphere.froxels,
-          enabled: this.froxelsEnabled || this.froxelDebugMode !== "off",
+          enabled: this.effectiveFroxelsEnabled() || this.froxelDebugMode !== "off",
         },
       },
       froxelDebugMode: this.froxelDebugMode,

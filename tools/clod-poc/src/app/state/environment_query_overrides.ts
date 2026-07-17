@@ -1,4 +1,4 @@
-import type { PostProcessToneMapping } from "../../environment/postprocess.js";
+import { parseGodRaysModeParam, type PostProcessToneMapping } from "../../environment/postprocess.js";
 import { parsePostFxFroxelDebugMode } from "../../gpu/postfx_atmosphere.js";
 import type { ClodAppState } from "./index.js";
 import {
@@ -220,8 +220,13 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessAerialPerspectiveEnabled = false;
     state.godRaysMode = "off";
   }
-  const godRays = flagParam(searchParams, "godRays", "godrays");
-  if (godRays === false) state.godRaysMode = "off";
+  const godRaysRaw = searchParams.get("godRays") ?? searchParams.get("godrays");
+  if (godRaysRaw !== null) {
+    const mode = parseGodRaysModeParam(godRaysRaw, state.godRaysMode === "off" ? "cheap" : state.godRaysMode);
+    if (mode !== null) state.godRaysMode = mode;
+  }
+  const godRaysDust = finiteParam(searchParams, "godRaysDust", "godraysdust");
+  if (godRaysDust !== null) state.godRaysDustStrength = Math.max(0, Math.min(1, godRaysDust));
   const froxelDebug = searchParams.get("froxelDebug")
     ?? searchParams.get("froxelsDebug")
     ?? searchParams.get("volumetricDebug")

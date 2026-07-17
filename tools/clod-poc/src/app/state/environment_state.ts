@@ -70,6 +70,9 @@ export interface EnvironmentSliceState {
   godRaysDecay: number;
   godRaysWeight: number;
   godRaysExposure: number;
+  godRaysDustStrength: number;
+  godRaysDustScale: number;
+  godRaysDustSpeed: number;
   audioEnabled: boolean;
   audioVolume: number;
 }
@@ -148,6 +151,9 @@ export function createEnvironmentSliceState(input: {
     godRaysDecay: DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay,
     godRaysWeight: DEFAULT_POST_PROCESS_SETTINGS.godRaysWeight,
     godRaysExposure: DEFAULT_POST_PROCESS_SETTINGS.godRaysExposure,
+    godRaysDustStrength: DEFAULT_POST_PROCESS_SETTINGS.godRaysDustStrength,
+    godRaysDustScale: DEFAULT_POST_PROCESS_SETTINGS.godRaysDustScale,
+    godRaysDustSpeed: DEFAULT_POST_PROCESS_SETTINGS.godRaysDustSpeed,
     audioEnabled: input.audioEnabled,
     audioVolume: input.audioVolume,
   };

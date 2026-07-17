@@ -13,6 +13,7 @@ export const POSTFX_GRAPH_STAGES: readonly PostFxStage[] = [
   "colorScript",
   "contact",
   "froxels",
+  "godrays",
   "gtao",
   "taa",
 ] as const;
@@ -40,6 +41,7 @@ export function webGpuPostProcessGraphKey(settings: Required<PostProcessSettings
     settings.gtaoEnabled ? "gtao" : "no-gtao",
     settings.froxelsEnabled ? "froxels" : "no-froxels",
     settings.bounceEnabled ? "bounce" : "no-bounce",
+    `godrays-${settings.godRaysMode}`,
   ].join("|");
 }
 

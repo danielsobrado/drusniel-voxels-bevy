@@ -22,6 +22,13 @@ entirely.
 Fixed in `src/ui/gui/environment_gui.ts` to `["off", "cheap", "heavy", "volumetric"]`. No other
 change was needed — the render path already handled all four.
 
+**Correction (2026-07-17):** "the render path already handled all four" held only for
+`?renderer=webgl` (the frozen `PostProcessPipeline`). The default WebGPU pipeline ignored
+`godRaysMode` entirely until the dedicated dust god-rays stage landed — see
+`lighting-god-rays-improvement-plan-2026-07-16.md`. On WebGPU, `volumetric` now means the
+screen-space dust shafts at the heavy tap budget plus the froxel fog layer forced on; the old
+`GodraysNode` wrapper (`god_rays_volumetric.ts`) was deleted.
+
 ---
 
 ## 2. Froxel debug overlay: the render path already existed, the controls did not

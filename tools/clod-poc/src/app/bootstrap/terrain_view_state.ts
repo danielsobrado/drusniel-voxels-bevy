@@ -90,6 +90,9 @@ export function createTerrainViewStateReaders(state: ClodAppState): TerrainViewS
       godRaysDecay: state.godRaysDecay,
       godRaysWeight: state.godRaysWeight,
       godRaysExposure: state.godRaysExposure,
+      godRaysDustStrength: state.godRaysDustStrength,
+      godRaysDustScale: state.godRaysDustScale,
+      godRaysDustSpeed: state.godRaysDustSpeed,
     }),
   };
 }

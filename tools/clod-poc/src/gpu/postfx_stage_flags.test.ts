@@ -9,6 +9,15 @@ describe("postfx stage flags", () => {
     expect(stageAllowed(flags, "taa")).toBe(true);
     expect(stageAllowed(flags, "gtao")).toBe(true);
     expect(stageAllowed(flags, "froxels")).toBe(true);
+    expect(stageAllowed(flags, "godrays")).toBe(true);
+  });
+
+  it("ablates the god-rays stage by name and aliases", () => {
+    for (const token of ["godrays", "god-rays", "shafts", "light-shafts"]) {
+      const flags = parsePostFxStageFlags(`?ablate=${token}`);
+      expect(stageAllowed(flags, "godrays")).toBe(false);
+      expect(stageAllowed(flags, "bloom")).toBe(true);
+    }
   });
 
   it("ablates comma-separated stage names and aliases", () => {

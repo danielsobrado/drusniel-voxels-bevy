@@ -82,6 +82,9 @@ export function createEnvironmentGui(
     godRaysDecay: state.godRaysDecay,
     godRaysWeight: state.godRaysWeight,
     godRaysExposure: state.godRaysExposure,
+    godRaysDustStrength: state.godRaysDustStrength,
+    godRaysDustScale: state.godRaysDustScale,
+    godRaysDustSpeed: state.godRaysDustSpeed,
   });
   const syncWebGpuStageMirror = (settings: Partial<PostProcessSettings>) => {
     const mirror = deps.postProcess as unknown as WebGpuPostProcessStageMirror | null;
@@ -267,6 +270,9 @@ export function createEnvironmentGui(
     godRaysFolder.add(state, "godRaysDecay", 0, 1, 0.01).name("decay").onChange(applyPostProcessSettings),
     godRaysFolder.add(state, "godRaysWeight", 0, 1, 0.01).name("weight").onChange(applyPostProcessSettings),
     godRaysFolder.add(state, "godRaysExposure", 0, 1, 0.01).name("exposure").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDustStrength", 0, 1, 0.01).name("dust strength").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDustScale", 1, 24, 0.1).name("dust scale").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDustSpeed", 0, 0.5, 0.005).name("dust speed").onChange(applyPostProcessSettings),
   ];
   const godRaysActions = {
     reset: () => {
@@ -275,6 +281,9 @@ export function createEnvironmentGui(
       state.godRaysDecay = DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay;
       state.godRaysWeight = DEFAULT_POST_PROCESS_SETTINGS.godRaysWeight;
       state.godRaysExposure = DEFAULT_POST_PROCESS_SETTINGS.godRaysExposure;
+      state.godRaysDustStrength = DEFAULT_POST_PROCESS_SETTINGS.godRaysDustStrength;
+      state.godRaysDustScale = DEFAULT_POST_PROCESS_SETTINGS.godRaysDustScale;
+      state.godRaysDustSpeed = DEFAULT_POST_PROCESS_SETTINGS.godRaysDustSpeed;
       applyPostProcessSettings();
       for (const controller of godRaysControllers) controller.updateDisplay();
     },

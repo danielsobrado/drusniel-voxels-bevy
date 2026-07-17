@@ -8,10 +8,12 @@ import postProcessYaml from "./config/postprocess.yaml?raw";
  * - `off`: no light shafts.
  * - `cheap`: screen-space radial-blur shafts at a low raymarch budget. Cheapest, default-friendly.
  * - `heavy`: same screen-space technique with a higher raymarch budget for smoother shafts.
- * - `volumetric`: physically-based volumetric shafts that raymarch a real shadow map. Requires the
- *   volumetric controller to stand up a shadow-casting directional light, so it is the most costly.
+ * - `volumetric`: on WebGPU, `heavy` shafts plus the froxel fog layer forced on as the ambience
+ *   underneath. The frozen WebGL fallback aliases this to `heavy`.
  */
 export type GodRaysMode = "off" | "cheap" | "heavy" | "volumetric";
+
+export const GOD_RAYS_MODES: readonly GodRaysMode[] = ["off", "cheap", "heavy", "volumetric"] as const;
 export type PostProcessDebugMode = "output" | "copy" | "off";
 export type PostProcessToneMapping = "aces" | "agx" | "linear" | "none";
 export type PostProcessColor = [number, number, number];
@@ -79,6 +81,12 @@ export interface PostProcessSettings {
   godRaysWeight: number;
   /** Output gain applied to the accumulated shafts. */
   godRaysExposure: number;
+  /** Blend of the animated beam-space dust striation over clean shafts. 0 = classic shafts. */
+  godRaysDustStrength: number;
+  /** Spatial frequency of the dust striation noise in beam space. */
+  godRaysDustScale: number;
+  /** Drift speed of the dust striation noise. */
+  godRaysDustSpeed: number;
 }
 
 const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
@@ -129,6 +137,9 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   godRaysDecay: 0.92,
   godRaysWeight: 0.35,
   godRaysExposure: 0.6,
+  godRaysDustStrength: 0.55,
+  godRaysDustScale: 6.0,
+  godRaysDustSpeed: 0.05,
 };
 
 type AerialPerspectiveSettings = Pick<
@@ -171,6 +182,18 @@ function godRaysMode(value: unknown, fallback: GodRaysMode): GodRaysMode {
   return value === "off" || value === "cheap" || value === "heavy" || value === "volumetric"
     ? value
     : fallback;
+}
+
+/**
+ * Parses a `?godrays=` query value: mode names select a mode, boolean-ish values map to
+ * `off` (false) or the provided on-mode (true). Unknown values return null (no override).
+ */
+export function parseGodRaysModeParam(raw: string, onMode: GodRaysMode = "cheap"): GodRaysMode | null {
+  const value = raw.trim().toLowerCase();
+  if ((GOD_RAYS_MODES as readonly string[]).includes(value)) return value as GodRaysMode;
+  if (value === "0" || value === "false" || value === "no") return "off";
+  if (value === "1" || value === "true" || value === "on" || value === "yes") return onMode;
+  return null;
 }
 
 export function withPostProcessDefaults(settings: Partial<PostProcessSettings>): Required<PostProcessSettings> {
@@ -340,8 +363,11 @@ export function applyPostProcessQueryOverrides(
     ?? flagValue(searchParams, "colorbounce");
   if (bounce !== null) next.bounceEnabled = bounce;
 
-  const godRays = flagValue(searchParams, "godRays") ?? flagValue(searchParams, "godrays");
-  if (godRays === false) next.godRaysMode = "off";
+  const godRaysRaw = searchParams.get("godRays") ?? searchParams.get("godrays");
+  if (godRaysRaw !== null) {
+    const mode = parseGodRaysModeParam(godRaysRaw, next.godRaysMode === "off" ? "cheap" : next.godRaysMode);
+    if (mode !== null) next.godRaysMode = mode;
+  }
 
   const toneMap = searchParams.get("toneMap") ?? searchParams.get("toneMapping");
   next.toneMapping = toneMapping(toneMap, next.toneMapping);
@@ -437,6 +463,9 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
       godRaysWeight: finiteNumber(godRays.weight, fallback.godRaysWeight),
       godRaysExposure: finiteNumber(godRays.exposure, fallback.godRaysExposure),
+      godRaysDustStrength: finiteNumber(godRays.dust_strength, fallback.godRaysDustStrength),
+      godRaysDustScale: finiteNumber(godRays.dust_scale, fallback.godRaysDustScale),
+      godRaysDustSpeed: finiteNumber(godRays.dust_speed, fallback.godRaysDustSpeed),
     };
   } catch (error) {
     console.warn("[postprocess] failed to parse postprocess.yaml; using fallback settings", error);
@@ -452,7 +481,24 @@ export const DEFAULT_POST_PROCESS_SETTINGS: Required<PostProcessSettings> = appl
   browserSearchParams(),
 );
 
+/** Full-res tap counts for the frozen WebGL fallback pipeline only. */
 export const GOD_RAYS_SCREEN_SAMPLES: Record<"cheap" | "heavy", number> = {
   cheap: 24,
   heavy: 60,
 };
+
+/**
+ * Half-res tap counts for the WebGPU dust god-rays stage. The interleaved-gradient-noise start
+ * jitter (plus TAA when enabled) makes these low counts band-free.
+ */
+export const GOD_RAYS_HALF_RES_SAMPLES: Record<"cheap" | "heavy", number> = {
+  cheap: 16,
+  heavy: 28,
+};
+
+/** Compile-time raymarch tap count for a mode in the WebGPU dust stage (0 disables the stage). */
+export function godRaysHalfResSamples(mode: GodRaysMode): number {
+  if (mode === "cheap") return GOD_RAYS_HALF_RES_SAMPLES.cheap;
+  if (mode === "heavy" || mode === "volumetric") return GOD_RAYS_HALF_RES_SAMPLES.heavy;
+  return 0;
+}

@@ -45,6 +45,14 @@ describe("postfx case diagnostics", () => {
 
   it("prints a compact active stage list", () => {
     const diagnostics = postFxCaseDiagnostics({ contact: "1", froxels: "1", ablate: "bloom,taa" });
-    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+clouds+colorScript+contact+froxels");
+    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+clouds+colorScript+contact+froxels+godrays");
+  });
+
+  it("tracks the god-rays stage from ?godrays mode values and flags", () => {
+    expect(postFxCaseDiagnostics({}).stages.godrays).toBe(true);
+    expect(postFxCaseDiagnostics({ godrays: "cheap" }).stages.godrays).toBe(true);
+    expect(postFxCaseDiagnostics({ godrays: "off" }).stages.godrays).toBe(false);
+    expect(postFxCaseDiagnostics({ godrays: "0" }).stages.godrays).toBe(false);
+    expect(postFxCaseDiagnostics({ ablate: "godrays" }).stages.godrays).toBe(false);
   });
 });

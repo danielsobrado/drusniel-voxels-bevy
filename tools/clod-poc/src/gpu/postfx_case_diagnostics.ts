@@ -17,6 +17,7 @@ const STAGES: readonly PostFxStage[] = [
   "colorScript",
   "contact",
   "froxels",
+  "godrays",
   "gtao",
   "taa",
 ] as const;
@@ -30,6 +31,8 @@ const DEFAULT_STAGE_STATE: PostFxCaseStageState = {
   colorScript: true,
   contact: false,
   froxels: false,
+  // The yaml default mode is volumetric, so the stage is active unless ablated or ?godrays=off.
+  godrays: true,
   gtao: false,
   taa: true,
 };
@@ -63,6 +66,12 @@ export function postFxCaseDiagnostics(input: URLSearchParams | Record<string, st
   stages.bounce = queryFlag(params, ["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], stages.bounce);
   stages.froxels = queryFlag(params, ["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], stages.froxels);
   stages.autoExposure = queryFlag(params, ["autoExposure", "autoexposure"], stages.autoExposure);
+  const godRaysRaw = params.get("godRays") ?? params.get("godrays");
+  if (godRaysRaw !== null) {
+    const value = godRaysRaw.trim().toLowerCase();
+    if (value === "cheap" || value === "heavy" || value === "volumetric") stages.godrays = true;
+    else stages.godrays = queryFlag(params, ["godRays", "godrays"], stages.godrays);
+  }
 
   for (const stage of STAGES) {
     stages[stage] = postEnabled && stages[stage] && stageAllowed(flags, stage);

@@ -25,6 +25,7 @@ import {
 import {
   DEFAULT_ENVIRONMENT_COLORS,
   DEFAULT_ENVIRONMENT_SETTINGS,
+  type EnvironmentLighting,
 } from "../environment/environment.js";
 import { deriveEnvironmentLighting } from "../environment/lighting_model.js";
 import type { PostFxAtmosphereSettings, PostFxFroxelSettings } from "./postfx_atmosphere.js";
@@ -297,7 +298,12 @@ export class PostFxFroxelVolume {
     };
   }
 
-  update(renderer: WebGPURenderer, camera: Camera, sunDirection: Vector3): void {
+  update(
+    renderer: WebGPURenderer,
+    camera: Camera,
+    sunDirection: Vector3,
+    liveLighting: EnvironmentLighting | null = null,
+  ): void {
     camera.updateMatrixWorld();
     const cameraWithInverse = camera as Camera & { projectionMatrixInverse?: Matrix4 };
     this.uProjectionInverse.value.copy(
@@ -306,7 +312,9 @@ export class PostFxFroxelVolume {
     this.uCameraWorld.value.copy(camera.matrixWorld);
     this.uCameraPosition.value.setFromMatrixPosition(camera.matrixWorld);
     this.uSunDirection.value.copy(sunDirection).normalize();
-    const lighting = deriveEnvironmentLighting(
+    // Prefer the live scene lighting so fog light follows GUI/environment state; the default
+    // derivation remains a fallback for callers without an environment (tests, previews).
+    const lighting = liveLighting ?? deriveEnvironmentLighting(
       this.uSunDirection.value,
       DEFAULT_ENVIRONMENT_SETTINGS,
       DEFAULT_ENVIRONMENT_COLORS,

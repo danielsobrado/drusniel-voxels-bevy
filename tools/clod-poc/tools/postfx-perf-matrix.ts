@@ -44,6 +44,9 @@ const CASES: readonly PostFxPerfCase[] = [
   { name: "postfx-gtao", params: { gtao: "1" } },
   { name: "postfx-bounce", params: { bounce: "1" } },
   { name: "postfx-froxels", params: { froxels: "1" } },
+  { name: "postfx-godrays-cheap", params: { godrays: "cheap" } },
+  { name: "postfx-godrays-heavy", params: { godrays: "heavy" } },
+  { name: "postfx-godrays-volumetric", params: { godrays: "volumetric" } },
   { name: "postfx-all-on", params: { contact: "1", gtao: "1", bounce: "1", froxels: "1" } },
 ];
 

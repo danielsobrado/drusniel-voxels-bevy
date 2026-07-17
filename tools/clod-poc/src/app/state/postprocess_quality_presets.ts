@@ -1,3 +1,5 @@
+import type { GodRaysMode } from "../../environment/postprocess.js";
+
 export const POST_PROCESS_QUALITY_PRESET_VALUES = [
   "custom",
   "ultra",
@@ -26,6 +28,7 @@ export interface PostProcessQualityPresetState {
   postProcessGtaoEnabled: boolean;
   postProcessFroxelsEnabled: boolean;
   postProcessBounceEnabled: boolean;
+  godRaysMode: GodRaysMode;
 }
 
 interface PostProcessQualityPresetConfig {
@@ -42,6 +45,7 @@ interface PostProcessQualityPresetConfig {
   gtaoEnabled: boolean;
   froxelsEnabled: boolean;
   bounceEnabled: boolean;
+  godRaysMode: GodRaysMode;
 }
 
 const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, PostProcessQualityPresetConfig> = {
@@ -59,6 +63,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     gtaoEnabled: true,
     froxelsEnabled: true,
     bounceEnabled: true,
+    godRaysMode: "volumetric",
   },
   balanced: {
     renderScale: 0.85,
@@ -74,6 +79,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     gtaoEnabled: true,
     froxelsEnabled: true,
     bounceEnabled: true,
+    godRaysMode: "heavy",
   },
   perf: {
     renderScale: 0.75,
@@ -89,6 +95,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     gtaoEnabled: false,
     froxelsEnabled: false,
     bounceEnabled: false,
+    godRaysMode: "cheap",
   },
   potato: {
     renderScale: 0.5,
@@ -104,6 +111,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     gtaoEnabled: false,
     froxelsEnabled: false,
     bounceEnabled: false,
+    godRaysMode: "off",
   },
 };
 
@@ -133,4 +141,5 @@ export function applyPostProcessQualityPreset(
   state.postProcessGtaoEnabled = config.gtaoEnabled;
   state.postProcessFroxelsEnabled = config.froxelsEnabled;
   state.postProcessBounceEnabled = config.bounceEnabled;
+  state.godRaysMode = config.godRaysMode;
 }

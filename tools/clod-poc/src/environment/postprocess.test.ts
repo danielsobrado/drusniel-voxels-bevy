@@ -58,6 +58,9 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       godRaysDecay: 0.92,
       godRaysWeight: 0.35,
       godRaysExposure: 0.6,
+      godRaysDustStrength: 0.55,
+      godRaysDustScale: 6.0,
+      godRaysDustSpeed: 0.05,
     });
   });
 
@@ -245,6 +248,28 @@ aerial_perspective:
   it("keeps the froxel debug overlay after fx=0 strips the froxel stage", () => {
     expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams("fx=0&froxelDebug=density")))
       .toMatchObject({ froxelsEnabled: false, froxelDebugEnabled: true, froxelDebugMode: "density" });
+  });
+
+  it.each<[string, string]>([
+    ["cheap", "cheap"],
+    ["heavy", "heavy"],
+    ["volumetric", "volumetric"],
+    ["off", "off"],
+    ["0", "off"],
+  ])("lets ?godrays=%s select the god-rays mode", (value, expected) => {
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams(`godrays=${value}`)))
+      .toMatchObject({ godRaysMode: expected });
+  });
+
+  it("ignores unknown ?godrays values", () => {
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams("godrays=banana")))
+      .toMatchObject({ godRaysMode: DEFAULT_POST_PROCESS_SETTINGS.godRaysMode });
+  });
+
+  it("parses the dust striation parameters from yaml with fallbacks", () => {
+    expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysDustStrength).toBeCloseTo(0.55, 5);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysDustScale).toBeCloseTo(6.0, 5);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysDustSpeed).toBeCloseTo(0.05, 5);
   });
 
   it("uses depth-aware volumetrics as the default forest shaft path", () => {
