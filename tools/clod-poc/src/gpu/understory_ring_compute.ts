@@ -57,12 +57,12 @@ export interface UnderstoryGpuRingStats {
   submitMs: number | null;
   readbackMs: number | null;
   skippedDispatches: number;
-  gpuTimingSupported: boolean;
-  gpuTimingPending: boolean;
-  gpuClearMs: number | null;
-  gpuWorldViewMs: number | null;
-  gpuIndirectMs: number | null;
-  hasSeparateViewPass: boolean;
+  gpuTimingSupported?: boolean;
+  gpuTimingPending?: boolean;
+  gpuClearMs?: number | null;
+  gpuWorldViewMs?: number | null;
+  gpuIndirectMs?: number | null;
+  hasSeparateViewPass?: boolean;
 }
 export interface UnderstoryGpuRingDispatchParams {
   centerX: number;
