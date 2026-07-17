@@ -42,11 +42,17 @@ export interface StoneHydrologyWater {
   res: number;
 }
 
+export interface StoneNodeMaterialDebugOptions {
+  classColors?: boolean;
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
 const STONE_AMBIENT_FLOOR = new THREE.Vector3(0.12, 0.11, 0.10);
 const STONE_MIN_AO = 0.35;
+const STONE_CLASS_COUNT = 3;
+const STONE_DEBUG_CLASS_BLEND = 0.88;
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 
 export interface StoneNodeMaterialHandle {
@@ -68,6 +74,7 @@ export function createStoneNodeMaterial(
   lighting: StoneLighting,
   instanceBuffers?: StoneStorageInstanceBuffers,
   hydrology?: StoneHydrologyWater,
+  debug: StoneNodeMaterialDebugOptions = {},
 ): StoneNodeMaterialHandle {
   const riverMaterial = readRiverMaterialSettings();
   const uLight = uniform(lighting.light.clone().normalize());
@@ -142,6 +149,15 @@ export function createStoneNodeMaterial(
     const fleck: TslNode = smoothstep(0.78, 0.98, hash2(floor(worldPos.xz.mul(3.5).add(worldPos.y.mul(0.4))))).mul(wetRock).mul(0.42);
     rock = mix(rock, rock.mul(vec3(0.42, 0.50, 0.48)), wetRock);
     rock = mix(rock, vec3(0.72, 0.78, 0.74), fleck);
+  }
+  if (debug.classColors && instanceBuffers) {
+    const perClass = Math.max(1, Math.floor(instanceBuffers.capacity / STONE_CLASS_COUNT));
+    const classIndex: TslNode = floor(float(instanceIndex).div(float(perClass)));
+    const classColor: TslNode = classIndex.lessThan(0.5).select(
+      vec3(0.95, 0.30, 0.16),
+      classIndex.lessThan(1.5).select(vec3(0.96, 0.72, 0.18), vec3(0.24, 0.78, 0.92)),
+    );
+    rock = mix(rock, classColor, STONE_DEBUG_CLASS_BLEND);
   }
 
   const ao = clamp(vdata.w, 0.0, 1.0);
