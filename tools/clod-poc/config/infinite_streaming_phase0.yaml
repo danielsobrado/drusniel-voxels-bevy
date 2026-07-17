@@ -101,21 +101,21 @@ phase0:
       require_visible_m: 8192
 
     rpg_village:
-      world: 16
+      world: 32
       camera:
         mode: fixed
-        x_ratio: 1.5625
-        z_ratio: 0.48828125
+        x_ratio: 0.78125
+        z_ratio: 0.244140625
         y_offset_m: 180
         look_distance_m: 800
       require_visible_m: 4096
 
     rpg_player_base:
-      world: 16
+      world: 32
       camera:
         mode: fixed
-        x_ratio: 1.85546875
-        z_ratio: 0.634765625
+        x_ratio: 0.927734375
+        z_ratio: 0.3173828125
         y_offset_m: 150
         look_distance_m: 600
       require_visible_m: 4096
