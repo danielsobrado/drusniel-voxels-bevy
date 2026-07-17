@@ -18,25 +18,6 @@ export const POSTFX_GRAPH_STAGES: readonly PostFxStage[] = [
   "taa",
 ] as const;
 
-export interface WebGpuPostProcessStageSelection {
-  bounce: boolean;
-  clouds: boolean;
-  froxels: boolean;
-  gtao: boolean;
-}
-
-export function resolveWebGpuPostProcessStages(
-  settings: Required<PostProcessSettings>,
-  isAllowed: (stage: PostFxStage) => boolean,
-): WebGpuPostProcessStageSelection {
-  return {
-    bounce: settings.bounceEnabled && isAllowed("bounce"),
-    clouds: settings.cloudsEnabled && isAllowed("clouds"),
-    froxels: settings.froxelsEnabled && isAllowed("froxels"),
-    gtao: settings.gtaoEnabled && isAllowed("gtao"),
-  };
-}
-
 export function withPostProcessDefaults(settings: Partial<PostProcessSettings>): Required<PostProcessSettings> {
   return { ...DEFAULT_POST_PROCESS_SETTINGS, ...settings };
 }
