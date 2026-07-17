@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { defaultConstructionConfig } from "../construction/config.js";
 import { loadConstructionPieces } from "../construction/construction_persistence.js";
 import type { PlacedConstructionPiece } from "../construction/types.js";
@@ -10,6 +10,27 @@ import {
 
 const HEIGHT = (x: number, z: number): number => 20 + x * 0.0001 + z * 0.0002;
 const STORAGE_KEY = "rpg-density-composition-test";
+
+// Vitest runs in the Node environment, which has no localStorage; stub it like
+// construction_persistence.test.ts does so strictRestore can round-trip pieces.
+let restoreLocalStorage: (() => void) | null = null;
+
+beforeAll(() => {
+  const values = new Map<string, string>();
+  const original = (globalThis as { localStorage?: unknown }).localStorage;
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, String(value)); },
+    removeItem: (key: string) => { values.delete(key); },
+    clear: () => { values.clear(); },
+  };
+  restoreLocalStorage = () => {
+    if (original === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else (globalThis as { localStorage?: unknown }).localStorage = original;
+  };
+});
+
+afterAll(() => restoreLocalStorage?.());
 
 afterEach(() => localStorage.removeItem(STORAGE_KEY));
 

@@ -74,6 +74,13 @@ export function acquireGpuClodResidentPage(
   };
 }
 
+/** Visit every live (non-retired) resident page, e.g. for the per-frame meshlet cull. */
+export function eachGpuClodResidentPage(visit: (page: GpuClodResidentPage) => void): void {
+  for (const entry of entries.values()) {
+    if (!entry.retired && !entry.destroyed) visit(entry.page);
+  }
+}
+
 export function peekGpuClodResidentPage(
   nodeId: string,
   revision?: number,

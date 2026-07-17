@@ -6,6 +6,11 @@ describe("parseReadbackMode", () => {
     expect(parseReadbackMode(new URLSearchParams())).toBe("off");
   });
 
+  it("defaults to async when GPU selection is enabled so the dispatch has a consumer", () => {
+    expect(parseReadbackMode(new URLSearchParams("webgpuSelection=1"))).toBe("async");
+    expect(parseReadbackMode(new URLSearchParams("webgpuSelection=1&webgpuReadback=off"))).toBe("off");
+  });
+
   it("returns explicit modes", () => {
     expect(parseReadbackMode(new URLSearchParams("webgpuReadback=off"))).toBe("off");
     expect(parseReadbackMode(new URLSearchParams("webgpuReadback=once"))).toBe("once");

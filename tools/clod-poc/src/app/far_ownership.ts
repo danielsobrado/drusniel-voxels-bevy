@@ -30,13 +30,16 @@ export interface FarOwnerInput {
 
 /**
  * The primary far-band owner (used for the HUD label and the legacy-shell disable decision).
- * Long-view scenes always hand the far band to the InfiniteFarShell regardless of the finite/infinite
- * terrain flag, because the bootstrap disables the legacy shell for every long-view-capable scene.
+ * Long-view scenes hand the far band to the InfiniteFarShell regardless of the finite/infinite
+ * terrain flag, because the bootstrap disables the legacy shell for every long-view-capable scene —
+ * unless the far clipmap is requested and allowed to render, in which case the bootstrap keeps the
+ * shell out of the scene entirely and the clipmap is the sole far owner.
  */
 export function resolveFarOwner(input: FarOwnerInput): FarOwner {
-  if (input.longViewCapable) return "infinite_far_shell";
+  const clipmapActive = input.farClipmapRequested && input.farClipmapRendererAllowed;
+  if (input.longViewCapable) return clipmapActive ? "far_clipmap" : "infinite_far_shell";
   if (!input.isInfinite) return "legacy_far_shell";
-  if (input.farClipmapRequested && input.farClipmapRendererAllowed) return "far_clipmap";
+  if (clipmapActive) return "far_clipmap";
   return "none";
 }
 

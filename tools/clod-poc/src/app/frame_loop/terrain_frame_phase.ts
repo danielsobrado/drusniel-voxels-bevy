@@ -8,6 +8,10 @@ import type {
 } from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import { resetRootHeightMorph } from "../../terrain/streaming/root_height_morph.js";
+import {
+  mirrorGpuClodMeshletCullCounters,
+  updateGpuClodMeshletCull,
+} from "../../terrain/streaming/gpu_clod_meshlet_cull.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { ClodPageNode } from "../../types.js";
 import { computeWorldCenterDebugStats, publishWorldCenterStatsToCounters } from "../../stream/world_center_debug.js";
@@ -320,6 +324,12 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
   if (input.pruneRenderNodeCache) {
     input.pruneRenderNodeCache(cutSnapshot.protectedNodeIds, selectionStats.frameId);
   }
+
+  // GPU-side meshlet frustum cull for resident terrain pages: submit before three.js
+  // renders so this frame's indirect args are already compacted on the queue.
+  updateGpuClodMeshletCull(input.camera);
+  const cullCounters = hooksCounters();
+  if (cullCounters) mirrorGpuClodMeshletCullCounters(cullCounters);
 
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;

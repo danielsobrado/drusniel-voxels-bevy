@@ -451,17 +451,23 @@ fn buildMeshlets(@builtin(global_invocation_id) gid : vec3<u32>) {
   let firstTriangle = meshletId * params.trianglesPerMeshlet;
   let firstIndex = firstTriangle * 3u;
   let indexCount = min(params.trianglesPerMeshlet * 3u, params.indexCount - firstIndex);
+  // Bounds cover both the base position and the fully root-morphed position
+  // (y + positionMorph.w at uRootMorphInfluence = 1) so the per-frame frustum
+  // cull stays conservative for every morph influence in [0, 1].
   var minPosition = vec3<f32>(3.402823e38);
   var maxPosition = vec3<f32>(-3.402823e38);
   for (var localIndex = 0u; localIndex < indexCount; localIndex++) {
-    let position = vertices[indices[firstIndex + localIndex]].positionMorph.xyz;
-    minPosition = min(minPosition, position);
-    maxPosition = max(maxPosition, position);
+    let packed = vertices[indices[firstIndex + localIndex]].positionMorph;
+    let morphed = vec3<f32>(packed.x, packed.y + packed.w, packed.z);
+    minPosition = min(minPosition, min(packed.xyz, morphed));
+    maxPosition = max(maxPosition, max(packed.xyz, morphed));
   }
   let center = (minPosition + maxPosition) * 0.5;
   var radius = 0.0;
   for (var localIndex = 0u; localIndex < indexCount; localIndex++) {
-    radius = max(radius, distance(vertices[indices[firstIndex + localIndex]].positionMorph.xyz, center));
+    let packed = vertices[indices[firstIndex + localIndex]].positionMorph;
+    let morphed = vec3<f32>(packed.x, packed.y + packed.w, packed.z);
+    radius = max(radius, max(distance(packed.xyz, center), distance(morphed, center)));
   }
   let header = meshletId * 8u;
   headers[header] = firstIndex;

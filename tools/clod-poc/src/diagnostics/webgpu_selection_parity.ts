@@ -113,7 +113,9 @@ export function resolveClodErrorGpuMap(options: {
     case "off":
       return null;
     case "once":
-      if (!readbackState.readbackOnceConsumed) {
+      // Consume the first map, and again after every node-version change: the dispatch
+      // side re-requests a readback per version, so an edited tree gets one fresh map too.
+      if (!readbackState.readbackOnceConsumed || readbackState.lastReadbackOnceVersion !== candidate.version) {
         readbackState.readbackOnceConsumed = true;
         readbackState.lastReadbackOnceVersion = candidate.version;
         return candidate;

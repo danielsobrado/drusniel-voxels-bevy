@@ -68,11 +68,13 @@ describe("understory GPU ring compute helpers", () => {
   });
 
   it("splits maxVisible evenly across class x tier groups", () => {
-    expect(understoryRingGroupCapacity(DEFAULT_UNDERSTORY_SETTINGS)).toBe(2000);
+    // 12 class x tier groups over the default 12 000 budget: 1000 per group,
+    // 2000 per class across its near + far tiers (see understory_config_defaults).
+    expect(understoryRingGroupCapacity(DEFAULT_UNDERSTORY_SETTINGS)).toBe(1000);
     expect(understoryRingGroupCapacity({
       ...DEFAULT_UNDERSTORY_SETTINGS,
-      gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, maxVisible: 12000 },
-    })).toBe(1000);
+      gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, maxVisible: 24000 },
+    })).toBe(2000);
   });
 
   it("covers every slot with at least one workgroup", () => {

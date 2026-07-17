@@ -250,7 +250,7 @@ export async function bootstrapClodPoc() {
   };
   assertLegacyFarShellExclusive(farRendererActivity);
   window.__drusnielFarOwnership = buildFarOwnershipSummary({
-    farOwner: farClipmapReplaceActive && isLongViewCapableScene(queryScene) ? "far_clipmap" : world.worldMode.farOwner,
+    farOwner: world.worldMode.farOwner,
     streamingScene: streamingOwnership.streamingScene,
     activity: farRendererActivity,
     clodRadiusM: streamingOwnership.clodRadiusM,
