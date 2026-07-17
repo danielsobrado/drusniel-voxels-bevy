@@ -1,6 +1,15 @@
+let renderedRootKeySource: (() => readonly string[]) | null = null;
+
+export function setRenderedClodOwnershipKeySource(
+  source: (() => readonly string[]) | null,
+): void {
+  renderedRootKeySource = source;
+}
+
 export function expandClodOwnershipToLevelZero(keys: readonly string[]): string[] {
-  const expanded = new Map<string, { px: number; pz: number }>();
-  for (const key of keys) {
+  const expanded = new Set<string>();
+  const sourceKeys = renderedRootKeySource?.() ?? keys;
+  for (const key of sourceKeys) {
     const page = parseClodPageKey(key);
     if (!page) continue;
     const scale = 2 ** page.level;
@@ -8,13 +17,11 @@ export function expandClodOwnershipToLevelZero(keys: readonly string[]): string[
       for (let x = 0; x < scale; x++) {
         const px = page.px * scale + x;
         const pz = page.pz * scale + z;
-        expanded.set(`L0:${px},${pz}`, { px, pz });
+        expanded.add(`L0:${px},${pz}`);
       }
     }
   }
-  return [...expanded.values()]
-    .sort((a, b) => a.px - b.px || a.pz - b.pz)
-    .map(({ px, pz }) => `L0:${px},${pz}`);
+  return [...expanded].sort();
 }
 
 function parseClodPageKey(key: string): { level: number; px: number; pz: number } | null {

@@ -33,9 +33,10 @@ import {
   updateHeightfieldTileGpuAtlas,
 } from "./heightfield_tile_gpu_atlas.js";
 import { refreshVegetationAuthorityHeightfieldMask } from "../../vegetation/gpu_authority/heightfield_mask.js";
-import { emitSurfaceCommit } from "../../stream/surface_cache_revisions.js";
+import { emitSurfaceCommit, type SurfaceBounds } from "../../stream/surface_cache_revisions.js";
 import { measureSurfaceCacheParity } from "./surface_cache_parity.js";
-import { tileOriginM, WORLD_TILE_SIZE_M } from "../tile_key.js";
+import { tileKeyString, tileOriginM, WORLD_TILE_SIZE_M } from "../tile_key.js";
+import type { HeightfieldTile } from "./heightfield_tile.js";
 
 export interface HeightfieldTileRuntimeUpdate {
   x: number;
@@ -98,6 +99,29 @@ function legacySurfaceOverrideActive(input: CreateHeightfieldTileRuntimeInput): 
     || input.terrainSource.waterConfig.fakeBodies.carveTerrain;
 }
 
+function tileBounds(tile: HeightfieldTile): SurfaceBounds {
+  const origin = tileOriginM(tile.key);
+  return {
+    minX: origin.x,
+    minZ: origin.z,
+    maxX: origin.x + WORLD_TILE_SIZE_M,
+    maxZ: origin.z + WORLD_TILE_SIZE_M,
+  };
+}
+
+function residentTileMap(cache: HeightfieldTileCache): Map<string, HeightfieldTile> {
+  return new Map(cache.residentTiles().map((tile) => [tileKeyString(tile.key), tile]));
+}
+
+function emitRemovedTileCommits(
+  before: ReadonlyMap<string, HeightfieldTile>,
+  after: ReadonlyMap<string, HeightfieldTile>,
+): void {
+  for (const [id, tile] of before) {
+    if (!after.has(id)) emitSurfaceCommit(tileBounds(tile));
+  }
+}
+
 export function gpuAtlasIsAuthoritative(input: CreateHeightfieldTileRuntimeInput): boolean {
   if (input.terrainSource.worldMode === "infinite_islands") return true;
   return input.terrainSource.worldMode === "continent"
@@ -144,15 +168,7 @@ export async function createHeightfieldTileRuntime(
     sourceRevision,
     (keys, revision) => input.buildTiles(keys, revision),
     store,
-    (tile) => {
-      const origin = tileOriginM(tile.key);
-      emitSurfaceCommit({
-        minX: origin.x,
-        minZ: origin.z,
-        maxX: origin.x + WORLD_TILE_SIZE_M,
-        maxZ: origin.z + WORLD_TILE_SIZE_M,
-      });
-    },
+    (tile) => emitSurfaceCommit(tileBounds(tile)),
   );
   const procedural = input.fallbackSampler ?? proceduralHeightfieldSampler(sourceRevision);
   const startup = input.startupHeightfield
@@ -170,7 +186,9 @@ export async function createHeightfieldTileRuntime(
     cache,
     authoritative,
     update(updateInput) {
+      const before = residentTileMap(cache);
       cache.update(updateInput);
+      emitRemovedTileCommits(before, residentTileMap(cache));
       if (parityEnabled && updateInput.frameIndex % 60 === 0) {
         lastParity = measureSurfaceCacheParity(cache.residentTiles(), procedural, 16, updateInput.frameIndex);
       }
@@ -191,10 +209,13 @@ export async function createHeightfieldTileRuntime(
     invalidateBounds(bounds) {
       const count = cache.invalidateBounds(bounds);
       invalidateHeightfieldTileGpuAtlasBounds(cache, bounds);
+      emitSurfaceCommit(bounds);
       return count;
     },
     dispose() {
+      const before = residentTileMap(cache);
       cache.clear();
+      emitRemovedTileCommits(before, new Map());
       unregisterHeightfieldTileGpuSource(cache);
       store?.close();
       setTerrainSurfaceOverride(startup?.sampleHeight ?? procedural.sampleHeight);

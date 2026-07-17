@@ -1,6 +1,11 @@
 let streamingEnabled = true;
 let streamingGeneration = 0;
 
+export interface TerrainStreamingToken {
+  readonly generation: number;
+  isCurrent(): boolean;
+}
+
 export function setTerrainStreamingEnabled(enabled: boolean): void {
   if (streamingEnabled === enabled) return;
   streamingEnabled = enabled;
@@ -13,6 +18,14 @@ export function terrainStreamingIsEnabled(): boolean {
 
 export function terrainStreamingGeneration(): number {
   return streamingGeneration;
+}
+
+export function captureTerrainStreamingToken(): TerrainStreamingToken {
+  const generation = streamingGeneration;
+  return Object.freeze({
+    generation,
+    isCurrent: () => streamingEnabled && streamingGeneration === generation,
+  });
 }
 
 export function runTerrainStreamingWork<T>(

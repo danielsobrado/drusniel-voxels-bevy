@@ -14,14 +14,27 @@ import {
   clodPageNodeToArtifact,
 } from "./clodPageNodeArtifact.js";
 import { gpuClodHierarchyConfigFromWindow } from "../terrain/streaming/gpu_clod_hierarchy_config.js";
+import {
+  captureTerrainStreamingToken,
+  type TerrainStreamingToken,
+} from "../stream/terrain_streaming_control.js";
 
 const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v5-gpu-resident-isolation";
 
 export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
 
+const streamingTokens = new WeakMap<object, TerrainStreamingToken>();
+const activeRequestTokens = new Set<TerrainStreamingToken>();
+
+export function beginStreamRootCacheOperation(): () => void {
+  const token = captureTerrainStreamingToken();
+  activeRequestTokens.add(token);
+  return () => activeRequestTokens.delete(token);
+}
+
 export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
-  return {
+  const stats: StreamRootCacheStats = {
     nodesFromCache: 0,
     nodesBuilt: 0,
     cacheHits: 0,
@@ -31,6 +44,15 @@ export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
     netSavedMs: 0,
     coldBuildMs: 0,
   };
+  streamingTokens.set(stats, captureTerrainStreamingToken());
+  return stats;
+}
+
+export function streamRootCacheOperationIsCurrent(stats: StreamRootCacheStats): boolean {
+  const statsCurrent = streamingTokens.get(stats as object)?.isCurrent() ?? true;
+  if (!statsCurrent) return false;
+  for (const token of activeRequestTokens) if (!token.isCurrent()) return false;
+  return true;
 }
 
 export async function tryLoadStreamRootNode(
@@ -41,12 +63,13 @@ export async function tryLoadStreamRootNode(
   pz: number,
   stats: StreamRootCacheStats,
 ): Promise<ClodPageNode | null> {
-  if (!ctx?.effective || residentHierarchyEnabled()) return null;
+  if (!ctx?.effective || residentHierarchyEnabled() || !streamRootCacheOperationIsCurrent(stats)) return null;
   const nodeId = streamRootNodeId(level, px, pz);
   const result = await ctx.service.get(
     streamRootKeyParts(ctx, backend, level, px, pz, nodeId),
     decodeClodPageNodeArtifact,
   );
+  if (!streamRootCacheOperationIsCurrent(stats)) return null;
 
   if (result.status !== "hit" || !result.artifact) {
     stats.cacheMisses++;
@@ -69,13 +92,16 @@ export async function storeStreamRootNode(
   buildMs: number,
   stats: StreamRootCacheStats,
 ): Promise<void> {
-  if (!ctx?.effective || residentHierarchyEnabled() || node.mesh.indices.length === 0) return;
+  if (!ctx?.effective
+    || residentHierarchyEnabled()
+    || node.mesh.indices.length === 0
+    || !streamRootCacheOperationIsCurrent(stats)) return;
   const parsed = parseStreamRootNodeId(node.id);
-  stats.nodesBuilt++;
-  stats.coldBuildMs += buildMs;
+  const artifact = clodPageNodeToArtifact(node);
+  if (!streamRootCacheOperationIsCurrent(stats)) return;
   await ctx.service.put(
     streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id),
-    clodPageNodeToArtifact(node),
+    artifact,
     encodeClodPageNodeArtifact,
     {
       buildMs,
@@ -85,12 +111,16 @@ export async function storeStreamRootNode(
       backend,
     },
   );
+  if (!streamRootCacheOperationIsCurrent(stats)) return;
+  stats.nodesBuilt++;
+  stats.coldBuildMs += buildMs;
 }
 
 export function publishStreamRootCacheCounters(
   stats: StreamRootCacheStats,
   backend: StreamRootCacheBackend,
 ): void {
+  if (!streamRootCacheOperationIsCurrent(stats)) return;
   const counters = (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
   }).window?.__drusnielClod?.stats?.counters;
