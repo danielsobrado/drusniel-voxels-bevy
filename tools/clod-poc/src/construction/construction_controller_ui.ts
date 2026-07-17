@@ -33,6 +33,10 @@ export interface ConstructionControllerUiState {
   indexedSnapPoints: number;
   currentValid: boolean;
   currentReason: string | null;
+  currentStability: number | null;
+  currentMaxSupport: number | null;
+  currentGrounded: boolean;
+  pendingCollapses: number;
   materialOptions: typeof CONSTRUCTION_MATERIAL_OPTIONS;
   selectedMaterial: ConstructionMaterial;
   lastMessage: string;
@@ -213,6 +217,10 @@ export function createConstructionControllerUi(
         rotationQuarterTurns: state.rotationQuarterTurns,
         currentValid: state.currentValid,
         currentReason: state.currentReason,
+        currentStability: state.currentStability,
+        currentMaxSupport: state.currentMaxSupport,
+        currentGrounded: state.currentGrounded,
+        pendingCollapses: state.pendingCollapses,
         placedPieces: state.placedPieces,
         indexedSnapPoints: state.indexedSnapPoints,
         lastMessage: state.lastMessage,
@@ -230,6 +238,10 @@ export function createConstructionControllerUi(
         indexedSnapPoints: state.indexedSnapPoints,
         currentValid: state.currentValid,
         currentReason: state.currentReason,
+        currentStability: state.currentStability,
+        currentMaxSupport: state.currentMaxSupport,
+        currentGrounded: state.currentGrounded,
+        pendingCollapses: state.pendingCollapses,
         materialOptions: state.materialOptions,
         selectedMaterial: state.selectedMaterial,
         lastMessage: state.lastMessage,

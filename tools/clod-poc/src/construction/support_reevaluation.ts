@@ -1,10 +1,7 @@
 import { constructionBoundsFor, rotatedConstructionDimensions } from "./construction_bounds.js";
-import { buildPlacedPieceMap, hasGroundSupport } from "./support_state.js";
 import type { ConstructionPieceDef, PlacedConstructionPiece } from "./types.js";
 
-/** Depth below the piece base sampled for terrain support (dug holes are metres deep). */
 const GROUND_PROBE_DEPTH_M = 0.5;
-/** Corner probes are inset so a piece flush with a hole edge still counts its rim. */
 const GROUND_PROBE_CORNER_INSET_M = 0.25;
 
 export interface ConstructionSupportAabb {
@@ -14,11 +11,6 @@ export interface ConstructionSupportAabb {
   maxZ: number;
 }
 
-/**
- * Answers "is there solid ground at this point?" against the authoritative voxel-aware
- * density field — NOT a collider raycast, which is stale while the async rebuild
- * pipeline is still replacing the dug page.
- */
 export type ConstructionGroundSolidProbe = (x: number, y: number, z: number) => boolean;
 
 export interface ConstructionSupportReevaluationInput {
@@ -30,19 +22,12 @@ export interface ConstructionSupportReevaluationInput {
 
 export interface ConstructionSupportReevaluationResult {
   changed: boolean;
-  /** Pieces whose terrain grounding flipped true→false in this pass. */
   groundedLost: readonly string[];
-  /** Pieces whose terrain grounding was restored (terrain raised back). */
   groundedRestored: readonly string[];
-  /** The complete set of unsupported pieces after chain re-evaluation. */
-  unsupportedIds: ReadonlySet<string>;
+  dirtyIds: readonly string[];
 }
 
-function boundsIntersectAabb(
-  piece: ConstructionPieceDef,
-  placed: PlacedConstructionPiece,
-  aabb: ConstructionSupportAabb,
-): boolean {
+function boundsIntersectAabb(piece: ConstructionPieceDef, placed: PlacedConstructionPiece, aabb: ConstructionSupportAabb): boolean {
   const bounds = constructionBoundsFor(piece, placed.position, placed.rotationQuarterTurns);
   return bounds.minX <= aabb.maxX && bounds.maxX >= aabb.minX
     && bounds.minZ <= aabb.maxZ && bounds.maxZ >= aabb.minZ;
@@ -65,57 +50,34 @@ function probeTerrainSupport(
     || groundSolidAt(cx + hx, probeY, cz + hz);
 }
 
-/** A ground-lost piece: explicitly unsupported, terrain-groundable, with no parents. */
 function isGroundRegainCandidate(piece: ConstructionPieceDef, placed: PlacedConstructionPiece): boolean {
-  return placed.unsupported === true
-    && piece.canGround
+  return piece.canGround
     && placed.grounded !== true
-    && (placed.parentIds ?? []).length === 0;
+    && (placed.connectionIds ?? placed.parentIds ?? []).length === 0;
 }
 
 /**
- * Re-evaluates construction support after a terrain edit. Grounded pieces whose
- * footprint intersects the edited AABB are re-probed against the authoritative density
- * field; support then propagates through the parent chain, so digging under a
- * foundation marks the whole dependent structure unsupported (collapse stays deferred —
- * callers keep colliders aligned with the visible pieces). Raising terrain back under a
- * ground-lost piece restores it.
+ * Re-probes only terrain grounding. Structural propagation belongs to the dirty-island
+ * runtime, which receives dirtyIds and recomputes the affected connected component.
  */
-export function reevaluateConstructionSupport(
-  input: ConstructionSupportReevaluationInput,
-): ConstructionSupportReevaluationResult {
+export function reevaluateConstructionSupport(input: ConstructionSupportReevaluationInput): ConstructionSupportReevaluationResult {
   const groundedLost: string[] = [];
   const groundedRestored: string[] = [];
 
   for (const placed of input.pieces) {
     const piece = input.piecesById.get(placed.typeId);
-    if (!piece) continue;
+    if (!piece || !boundsIntersectAabb(piece, placed, input.aabb)) continue;
     const claimsGround = placed.grounded === true;
-    const regainCandidate = isGroundRegainCandidate(piece, placed);
-    if (!claimsGround && !regainCandidate) continue;
-    if (!boundsIntersectAabb(piece, placed, input.aabb)) continue;
+    if (!claimsGround && !isGroundRegainCandidate(piece, placed)) continue;
     const solid = probeTerrainSupport(piece, placed, input.groundSolidAt);
     if (claimsGround && !solid) groundedLost.push(placed.id);
-    else if (regainCandidate && solid) groundedRestored.push(placed.id);
+    else if (!claimsGround && solid) groundedRestored.push(placed.id);
   }
 
-  const lost = new Set(groundedLost);
-  const restored = new Set(groundedRestored);
-  const evaluated = input.pieces.map((placed) => {
-    if (lost.has(placed.id)) return { ...placed, grounded: false };
-    if (restored.has(placed.id)) return { ...placed, grounded: true };
-    return placed;
-  });
-  const byId = buildPlacedPieceMap(evaluated);
-
-  const unsupportedIds = new Set<string>();
-  for (const placed of evaluated) {
-    if (!hasGroundSupport(placed, byId)) unsupportedIds.add(placed.id);
-  }
-
-  const changed = groundedLost.length > 0
-    || groundedRestored.length > 0
-    || input.pieces.some((placed) => (placed.unsupported === true) !== unsupportedIds.has(placed.id));
-
-  return { changed, groundedLost, groundedRestored, unsupportedIds };
+  return {
+    changed: groundedLost.length > 0 || groundedRestored.length > 0,
+    groundedLost,
+    groundedRestored,
+    dirtyIds: [...new Set([...groundedLost, ...groundedRestored])].sort(),
+  };
 }
