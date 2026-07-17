@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  captureTerrainStreamingToken,
   resetTerrainStreamingControlForTests,
   runTerrainStreamingWork,
   terrainStreamingGeneration,
@@ -34,5 +35,17 @@ describe("runTerrainStreamingWork", () => {
     runTerrainStreamingWork(true, () => undefined);
     expect(terrainStreamingIsEnabled()).toBe(true);
     expect(terrainStreamingGeneration()).toBe(2);
+  });
+
+  it("invalidates completion tokens across disable and resume", () => {
+    const token = captureTerrainStreamingToken();
+    expect(token.isCurrent()).toBe(true);
+
+    runTerrainStreamingWork(false, () => undefined);
+    expect(token.isCurrent()).toBe(false);
+
+    runTerrainStreamingWork(true, () => undefined);
+    expect(token.isCurrent()).toBe(false);
+    expect(captureTerrainStreamingToken().isCurrent()).toBe(true);
   });
 });
