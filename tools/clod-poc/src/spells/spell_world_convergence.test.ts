@@ -34,7 +34,7 @@ describe("earth spell world convergence", () => {
       targetPosition: [10, 4, 20],
       sourceTerrainRevision: 7,
       mode: "playing",
-      expiresAtMs: 1100,
+      expiresAtMs: 3100,
     });
     expect(prepared!.request.edit).toMatchObject({
       x: 10,
