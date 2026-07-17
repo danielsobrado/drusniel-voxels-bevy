@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { defaultConstructionConfig } from "../construction/config.js";
+import { loadConstructionPieces } from "../construction/construction_persistence.js";
+import type { PlacedConstructionPiece } from "../construction/types.js";
 import {
   buildRpgDensityComposition,
   RPG_PLAYER_BASE_SCENE,
@@ -6,6 +9,29 @@ import {
 } from "./rpg_density_scene_composition.js";
 
 const HEIGHT = (x: number, z: number): number => 20 + x * 0.0001 + z * 0.0002;
+const STORAGE_KEY = "rpg-density-composition-test";
+
+afterEach(() => localStorage.removeItem(STORAGE_KEY));
+
+function strictRestore(pieces: readonly PlacedConstructionPiece[]): {
+  readonly loaded: readonly PlacedConstructionPiece[];
+  readonly rewritten: boolean;
+} {
+  const loaded: PlacedConstructionPiece[] = [];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(pieces));
+  const result = loadConstructionPieces({
+    storageKey: STORAGE_KEY,
+    piecesById: new Map(defaultConstructionConfig.pieces.map((piece) => [piece.id, piece])),
+    placedPieces: loaded,
+    worldCells: Number.MAX_SAFE_INTEGER / 4,
+    placement: { ...defaultConstructionConfig.placement, unboundedWorld: true },
+    addPiece: (piece) => {
+      loaded.push(piece);
+      return true;
+    },
+  });
+  return { loaded, rewritten: result.rewritten };
+}
 
 describe("RPG density scene composition", () => {
   it("is byte-stable for the same scene and seed", () => {
@@ -55,6 +81,17 @@ describe("RPG density scene composition", () => {
         for (const connectionId of placed.connectionIds ?? []) expect(ids.has(connectionId)).toBe(true);
         expect(placed.position.every(Number.isFinite)).toBe(true);
       }
+    }
+  });
+
+  it("loads both scenes through strict persistence without dropping pieces", () => {
+    for (const sceneId of [RPG_VILLAGE_SCENE, RPG_PLAYER_BASE_SCENE] as const) {
+      const composition = buildRpgDensityComposition({ sceneId, seed: 23, surfaceHeightAt: HEIGHT });
+      const restored = strictRestore(composition.pieces);
+
+      expect(restored.rewritten).toBe(false);
+      expect(restored.loaded).toHaveLength(composition.pieces.length);
+      expect(new Set(restored.loaded.map((piece) => piece.id)).size).toBe(composition.pieces.length);
     }
   });
 
