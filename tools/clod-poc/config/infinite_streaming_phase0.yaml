@@ -278,3 +278,31 @@ metrics:
     - live_clod_stream_max_cached_pages
     - live_clod_stream_safety_cache_capacity_ok
     - far_shell_recenter_count
+    - far_shell_last_recenter_frame
+    - stale_fallback_count
+    - far_shell_inner_m
+    - far_shell_outer_m
+    - far_shell_vertices
+    - far_shell_rebuilds
+    - far_shell_rebuild_restarts
+    - far_shell_last_rebuild_ms
+    - far_summary_tiles_required
+    - far_summary_tiles_ready
+    - far_summary_tiles_missing
+    - far_summary_tiles_stale
+    - far_summary_tiles_built_this_frame
+    - far_summary_cache_size
+    - far_summary_procedural_fallback_samples
+    - far_summary_lower_ring_fallback_samples
+    - far_summary_conservative_fallback_samples
+    - far_summary_stale_restores
+    - far_summary_builds_discarded
+    - far_summary_probe_fallbacks
+    - far_summary_probe_height_error_max_m
+
+acceptance:
+  allow_current_4km_failure: true
+  visible_target_required_for_future_phases: true
+  max_horizon_hole_ratio: 0.0
+  max_streamer_simulated_missing_chunks: 0
+  max_streamer_simulated_missing_pages: 0
