@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PlayerController } from "../player_controller.js";
 import type { TerrainColliderSet } from "../terrain/terrain_collider.js";
+import { markStreamCursorDiscontinuity } from "../stream/stream_cursor.js";
 
 export interface FloatingOriginConfig {
   enabled: boolean;
@@ -87,6 +88,7 @@ export class FloatingOriginController {
     this.statsState.lastRebaseFrame = target.frameIndex;
     this.statsState.lastDeltaX = dx;
     this.statsState.lastDeltaZ = dz;
+    markStreamCursorDiscontinuity();
     this.syncWorldCamera(target.camera);
     return true;
   }
