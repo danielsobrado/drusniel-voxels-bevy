@@ -14,6 +14,7 @@ import {
   StoneGpuScatterCompute,
   stoneGpuScatterUnsupportedReason,
   type StoneGpuScatterBuffers,
+  type StoneGpuScatterCounts,
 } from "../gpu/stone_scatter_compute.js";
 import type { GrassHydrologyData } from "../gpu/grass_ring_compute.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
@@ -53,7 +54,7 @@ export interface StoneSystemOptions {
   hydrologyWaterTexture?: THREE.Texture | null;
   /** Baked hydrology grid for GPU scatter carved-bed sampling. */
   hydrologyGpuData?: GrassHydrologyData | null;
-  /** Called when async scatter finishes and `getStats()` counts become valid. */
+  /** Called when scatter submission or asynchronous telemetry changes the public stats. */
   onStats?: (stats: StoneStats) => void;
 }
 
@@ -68,6 +69,8 @@ export interface StoneEarlyTerrainReasonCounts {
   terrain_hidden?: number;
 }
 
+export type StoneGpuTelemetryState = "unknown" | "last-known" | "fresh";
+
 export interface StoneStats {
   total: number;
   large: number;
@@ -77,6 +80,7 @@ export interface StoneStats {
   drawnNear: number;
   drawnFar: number;
   groups: number;
+  gpuTelemetryState: StoneGpuTelemetryState;
   gpuCandidateCount?: number;
   gpuCandidateCountBeforePrefilter?: number;
   gpuCandidateCountAfterPrefilter?: number;
@@ -88,6 +92,12 @@ export interface StoneStats {
   gpuPrefilterSourceFarSummary?: number;
   gpuPrefilterSourceTerrainSampler?: number;
   gpuPrefilterSourceFallback?: number;
+  gpuTimingSupported?: boolean;
+  gpuTimingPending?: boolean;
+  gpuClearMs?: number | null;
+  gpuWorldMs?: number | null;
+  gpuViewMs?: number | null;
+  gpuIndirectMs?: number | null;
   earlyTerrainReasonCounts?: StoneEarlyTerrainReasonCounts;
 }
 
@@ -128,7 +138,6 @@ export class StoneSystem {
   private readonly hydrologyWater: StoneHydrologyWater | undefined;
   private readonly hydrologyGpuData: GrassHydrologyData | null;
   private scatterCompute: StoneGpuScatterCompute | null = null;
-  private scatterRunning = false;
   private generation = 0;
   private drawsReady = false;
   private indexCounts: [number, number, number] = [0, 0, 0];
@@ -147,7 +156,7 @@ export class StoneSystem {
       }
       : undefined;
     this.hydrologyGpuData = options.hydrologyGpuData ?? null;
-    this.settings = { ...options.settings };
+    this.settings = { ...options.settings, debug: { ...options.settings.debug } };
     this.currentLighting = cloneLighting(options.lighting);
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
@@ -167,6 +176,7 @@ export class StoneSystem {
 
   updateSettings(settings: Partial<StoneSettings>): void {
     Object.assign(this.settings, settings);
+    if (settings.debug) this.settings.debug = { ...settings.debug };
     if (this.settings.enabled) this.rebuild();
     else this.clear();
     this.root.visible = this.settings.enabled;
@@ -203,7 +213,12 @@ export class StoneSystem {
     const indirect = new StorageBufferAttribute(new Uint32Array(STONE_GPU_CLASS_COUNT * 5), 5);
     indirect.name = "stone-gpu-indirect";
     this.gpuBackend.createIndirectStorageAttribute(indirect);
-    this.materialHandle = createStoneNodeMaterial(this.currentLighting, { instanceA, instanceB, capacity }, this.hydrologyWater);
+    this.materialHandle = createStoneNodeMaterial(
+      this.currentLighting,
+      { instanceA, instanceB, capacity },
+      this.hydrologyWater,
+      { classColors: this.settings.debug.classColors },
+    );
 
     this.indexCounts = [0, 0, 0];
     for (const classId of STONE_CLASSES) {
@@ -251,9 +266,11 @@ export class StoneSystem {
     if (!this.drawsReady || distance2d(this.lastScatterCenter, center) >= refreshDistance) {
       this.scatterForCenter(center);
     }
+    this.refreshGpuTiming();
   }
 
   getStats(): StoneStats {
+    this.refreshGpuTiming();
     return { ...this.stats, earlyTerrainReasonCounts: { ...(this.stats.earlyTerrainReasonCounts ?? {}) } };
   }
 
@@ -264,57 +281,73 @@ export class StoneSystem {
 
   private scatterForCenter(center: THREE.Vector3): void {
     const compute = this.scatterCompute;
-    if (!compute || this.scatterRunning) return;
+    if (!compute) return;
     const generation = this.generation;
     const unboundedCenter = runtimeWorldUsesCameraRelativeCoordinates();
     const centerX = stoneScatterCenterCoord(center.x, 0, this.worldCells, unboundedCenter);
     const centerZ = stoneScatterCenterCoord(center.z, 0, this.worldCells, unboundedCenter);
-    this.scatterRunning = true;
-    void compute.run({
+    const submitted = compute.run({
       worldCells: this.worldCells,
       centerX,
       centerZ,
       unboundedWorld: unboundedCenter,
       settings: this.settings,
       indexCounts: this.indexCounts,
-    }).then((counts) => {
+    }, (counts) => {
       if (generation !== this.generation || compute !== this.scatterCompute) return;
-      this.drawsReady = true;
-      this.stats.large = counts.large;
-      this.stats.medium = counts.medium;
-      this.stats.small = counts.small;
-      this.stats.total = counts.large + counts.medium + counts.small;
-      this.stats.gpuCandidateCount = counts.candidatesTotal;
-      this.stats.gpuCandidateCountBeforePrefilter = counts.candidatesTotal;
-      this.stats.gpuCandidateCountAfterPrefilter = counts.totalAccepted;
-      this.stats.gpuPrefilterTestedClusters = counts.candidatesTotal;
-      this.stats.gpuPrefilterRejectedClusters = counts.rejectedTotal;
-      this.stats.gpuPrefilterAcceptedClusters = counts.totalAccepted;
-      this.stats.gpuPrefilterUnknownKeptClusters = 0;
-      this.stats.gpuPrefilterFarSummaryConsulted = 0;
-      this.stats.gpuPrefilterSourceFarSummary = 0;
-      this.stats.gpuPrefilterSourceTerrainSampler = counts.candidatesTotal;
-      this.stats.gpuPrefilterSourceFallback = 0;
-      this.stats.earlyTerrainReasonCounts = {
-        outside_world: counts.rejectedOutsideWorld,
-        too_far: counts.rejectedTooFar,
-        below_water: counts.rejectedBelowWater,
-        too_steep: counts.rejectedTooSteep,
-        density_mask: counts.rejectedDensityMask,
-        tile_budget: counts.rejectedTileBudget,
-        class_budget: counts.rejectedClassBudget,
-        terrain_hidden: counts.rejectedTotal,
-      };
-      this.stats.groups = this.draws.length;
-      this.lastScatterCenter.set(centerX, 0, centerZ);
+      this.applyTelemetry(counts);
+      this.stats.gpuTelemetryState = "fresh";
       this.applyClassVisibility();
       this.onStats?.(this.getStats());
-    }).catch((error) => {
-      if (generation !== this.generation) return;
-      console.warn("stone GPU ring scatter failed", error);
-    }).finally(() => {
-      if (generation === this.generation) this.scatterRunning = false;
     });
+    if (!submitted) return;
+
+    this.drawsReady = true;
+    if (this.stats.gpuTelemetryState !== "unknown") this.stats.gpuTelemetryState = "last-known";
+    this.lastScatterCenter.set(centerX, 0, centerZ);
+    this.refreshGpuTiming();
+    this.applyClassVisibility();
+    this.onStats?.(this.getStats());
+  }
+
+  private applyTelemetry(counts: StoneGpuScatterCounts): void {
+    this.stats.large = counts.large;
+    this.stats.medium = counts.medium;
+    this.stats.small = counts.small;
+    this.stats.total = counts.large + counts.medium + counts.small;
+    this.stats.gpuCandidateCount = counts.candidatesTotal;
+    this.stats.gpuCandidateCountBeforePrefilter = counts.candidatesTotal;
+    this.stats.gpuCandidateCountAfterPrefilter = counts.totalAccepted;
+    this.stats.gpuPrefilterTestedClusters = counts.candidatesTotal;
+    this.stats.gpuPrefilterRejectedClusters = counts.rejectedTotal;
+    this.stats.gpuPrefilterAcceptedClusters = counts.totalAccepted;
+    this.stats.gpuPrefilterUnknownKeptClusters = 0;
+    this.stats.gpuPrefilterFarSummaryConsulted = 0;
+    this.stats.gpuPrefilterSourceFarSummary = 0;
+    this.stats.gpuPrefilterSourceTerrainSampler = counts.candidatesTotal;
+    this.stats.gpuPrefilterSourceFallback = 0;
+    this.stats.earlyTerrainReasonCounts = {
+      outside_world: counts.rejectedOutsideWorld,
+      too_far: counts.rejectedTooFar,
+      below_water: counts.rejectedBelowWater,
+      too_steep: counts.rejectedTooSteep,
+      density_mask: counts.rejectedDensityMask,
+      tile_budget: counts.rejectedTileBudget,
+      class_budget: counts.rejectedClassBudget,
+      terrain_hidden: counts.rejectedTotal,
+    };
+    this.stats.groups = this.draws.length;
+  }
+
+  private refreshGpuTiming(): void {
+    const timing = this.scatterCompute?.timingSnapshot();
+    if (!timing) return;
+    this.stats.gpuTimingSupported = timing.supported;
+    this.stats.gpuTimingPending = timing.pending;
+    this.stats.gpuClearMs = timing.timingsMs.clear ?? null;
+    this.stats.gpuWorldMs = timing.timingsMs.world ?? null;
+    this.stats.gpuViewMs = null;
+    this.stats.gpuIndirectMs = timing.timingsMs.indirect ?? null;
   }
 
   private createDraw(
@@ -392,7 +425,6 @@ export class StoneSystem {
     this.generation++;
     this.scatterCompute?.destroy();
     this.scatterCompute = null;
-    this.scatterRunning = false;
     this.lastScatterCenter.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
     this.indexCounts = [0, 0, 0];
     this.drawsReady = false;
@@ -409,13 +441,28 @@ export class StoneSystem {
 }
 
 function emptyStats(): StoneStats {
-  return { total: 0, large: 0, medium: 0, small: 0, visible: 0, drawnNear: 0, drawnFar: 0, groups: 0 };
+  return {
+    total: 0,
+    large: 0,
+    medium: 0,
+    small: 0,
+    visible: 0,
+    drawnNear: 0,
+    drawnFar: 0,
+    groups: 0,
+    gpuTelemetryState: "unknown",
+    gpuTimingSupported: false,
+    gpuTimingPending: false,
+    gpuClearMs: null,
+    gpuWorldMs: null,
+    gpuViewMs: null,
+    gpuIndirectMs: null,
+  };
 }
 
 function distance2d(a: THREE.Vector3, b: THREE.Vector3): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
-
 
 export function stoneScatterCenterCoord(value: number, min: number, max: number, unbounded: boolean): number {
   if (!Number.isFinite(value)) return min;
