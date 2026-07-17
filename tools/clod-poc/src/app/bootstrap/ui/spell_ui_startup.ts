@@ -4,11 +4,20 @@ import { createSpellMenu } from "../../../spells/spell_menu.js";
 import { defaultSpellConfig, type FireSpellVfxConfig } from "../../../spells/spell_config.js";
 import {
   createSpellVfxController,
+  type SpellVfxController,
   type SpellVfxMeshConfig,
 } from "../../../spells/spell_vfx_controller.js";
 import { createDeferredSpellController } from "../../../spells/deferred_spell_controller.js";
 import { scheduleSpellPipelineWarmup } from "../../../spells/spell_pipeline_warmup.js";
 import { createStableSpellController } from "../../../spells/stable_spell_controller.js";
+import { earthSpellGameplayConfig } from "../../../spells/earth_spell_gameplay_config.js";
+import {
+  executePreparedEarthSpellCast,
+  prepareEarthSpellCast,
+} from "../../../spells/spell_world_convergence.js";
+import { getDigEditRevision } from "../../../terrain/terrain.js";
+import type { EarthSpellTarget } from "../../../spells/earth_spell_vfx.js";
+import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import "../../../spells/spell_menu.css";
 
 const FIREBALL_COLLISION_PROBE_SECONDS = 0.075;
@@ -30,12 +39,14 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
   };
 }
 
-export function runSpellUiStartup(ctx: UiStartupContext): void {
+export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEditStartupResult): void {
   const config = defaultSpellConfig;
-  const { scene, camera, renderer, terrainRaycast } = ctx.input;
+  const { scene, camera, renderer, terrainRaycast, player, interaction } = ctx.input;
   const targetRay = new THREE.Ray();
   const targetDirection = new THREE.Vector3();
   const targetNormal = new THREE.Vector3(0, 1, 0);
+  let earthTargetOverride: EarthSpellTarget | null = null;
+  let disposed = false;
 
   const targetMaxRange = Math.max(config.lightning.vfx.maxRange, config.earth.vfx.impactRadius * 4);
   const probeSeconds = FIREBALL_COLLISION_PROBE_SECONDS;
@@ -48,12 +59,18 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
       + FIREBALL_COLLISION_PROBE_PADDING_M,
   );
 
-  const getTerrainTarget = () => {
+  const getTerrainTarget = (): EarthSpellTarget | null => {
     camera.getWorldDirection(targetDirection).normalize();
     targetRay.origin.copy(camera.position);
     targetRay.direction.copy(targetDirection);
     const hit = terrainRaycast.raycastEditableTerrain(targetRay, targetMaxRange);
-    return hit ? { point: hit.point, normal: targetNormal } : null;
+    return hit ? { point: hit.point.clone(), normal: targetNormal.clone() } : null;
+  };
+
+  const getEarthVfxTarget = (): EarthSpellTarget | null => {
+    const target = earthTargetOverride;
+    earthTargetOverride = null;
+    return target ?? getTerrainTarget();
   };
 
   const rawController = createSpellVfxController({
@@ -63,7 +80,7 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     water: meshConfig(config.water.vfx),
     air: meshConfig(config.air.vfx),
     earth: config.earth.vfx,
-    getEarthTarget: getTerrainTarget,
+    getEarthTarget: getEarthVfxTarget,
     lightning: config.lightning.vfx,
     getLightningTarget: getTerrainTarget,
     fireball: config.fireball.vfx,
@@ -76,8 +93,35 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
   ctx.session.spellVfxController = controller;
 
   const pipelineWarmup = scheduleSpellPipelineWarmup({ renderer, scene, camera });
-  const deferredController = createDeferredSpellController(controller);
-  const menu = createSpellMenu({ config, controller: deferredController.controller });
+  const deferredController = createDeferredSpellController(controller, pipelineWarmup.ready);
+  const menuController: SpellVfxController = {
+    ...deferredController.controller,
+    playEarth: (durationMs) => {
+      const target = getTerrainTarget();
+      if (!target) return false;
+      const prepared = prepareEarthSpellCast(target, earthSpellGameplayConfig, {
+        terrainRevision: getDigEditRevision(),
+        actor: "player",
+        mode: interaction.mode,
+        nowMs: performance.now(),
+      });
+      if (!prepared) {
+        deferredController.controller.playEarth(durationMs);
+        return true;
+      }
+      void executePreparedEarthSpellCast(prepared, {
+        ready: pipelineWarmup.ready,
+        terrainEditService: terrainEdit.terrainEditService,
+        isDisposed: () => disposed,
+        playVfx: (committedTarget) => {
+          earthTargetOverride = committedTarget;
+          return controller.playEarth(durationMs);
+        },
+      });
+      return true;
+    },
+  };
+  const menu = createSpellMenu({ config, controller: menuController });
   const menuEl = document.getElementById(config.menu.rootId);
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -128,6 +172,7 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("beforeunload", () => {
+    disposed = true;
     window.removeEventListener("keydown", onKeyDown);
     pipelineWarmup.dispose();
     deferredController.dispose();
