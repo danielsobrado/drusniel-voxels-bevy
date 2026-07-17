@@ -45,7 +45,7 @@ export interface PlayerInputController {
 }
 
 export function createPlayerInputController(deps: PlayerInputControllerDeps): PlayerInputController {
-  const playerInput: PlayerInputState = { forward: 0, right: 0, sprint: false, jump: false };
+  const playerInput: PlayerInputState = { forward: 0, right: 0, sprint: false, jump: false, dive: false };
   const playerRaycaster = new THREE.Raycaster();
   const playerPointer = new THREE.Vector2();
   const playerForward = new THREE.Vector3();
@@ -68,6 +68,7 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
     playerInput.right = 0;
     playerInput.sprint = false;
     playerInput.jump = false;
+    playerInput.dive = false;
     digHeld = false;
   };
 
@@ -167,7 +168,7 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
       return;
     }
     if (deps.interaction.mode !== "playing") return;
-    if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight", "Space"].includes(event.code)) {
+    if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight", "Space", "ControlLeft", "ControlRight"].includes(event.code)) {
       event.preventDefault();
     }
     if (event.code === "KeyW") playerInput.forward = 1;
@@ -176,6 +177,7 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
     if (event.code === "KeyD") playerInput.right = 1;
     if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = true;
     if (event.code === "Space") playerInput.jump = true;
+    if (event.code === "ControlLeft" || event.code === "ControlRight") playerInput.dive = true;
     if (event.code === "KeyG") {
       deps.cycleBrushShape();
       return;
@@ -197,6 +199,7 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
     if (event.code === "KeyD" && playerInput.right > 0) playerInput.right = 0;
     if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = false;
     if (event.code === "Space") playerInput.jump = false;
+    if (event.code === "ControlLeft" || event.code === "ControlRight") playerInput.dive = false;
   });
   window.addEventListener("blur", () => {
     resetPlayerInput();
