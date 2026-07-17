@@ -1,3 +1,5 @@
+import { isRpgDensityScene } from "../../scenes/rpg_density_scenes.js";
+
 const CONTINENT_SCENE = "continent";
 
 function setDefault(params: URLSearchParams, key: string, value: string): boolean {
@@ -6,9 +8,10 @@ function setDefault(params: URLSearchParams, key: string, value: string): boolea
   return true;
 }
 
-/** The ordinary continent URL must exercise the same unified path as acceptance. */
+/** Continent-backed scenes must exercise the same unified path as acceptance. */
 export function applyContinentDefaults(params: URLSearchParams): boolean {
-  if (params.get("scene") !== CONTINENT_SCENE) return false;
+  const scene = params.get("scene");
+  if (scene !== CONTINENT_SCENE && !isRpgDensityScene(scene)) return false;
 
   let changed = setDefault(params, "continentHydrology", "1");
   changed = setDefault(params, "heightTiles", "1") || changed;
