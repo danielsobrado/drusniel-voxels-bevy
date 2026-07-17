@@ -19,13 +19,33 @@ export const CONSTRUCTION_MATERIALS = [
 ] as const;
 
 export const CONSTRUCTION_GEOMETRY_KINDS = ["box", "wedge", "stairs", "cylinder"] as const;
+export const CONSTRUCTION_SUPPORT_CLASSES = ["wood", "stone", "ground"] as const;
 
 export type SnapGroup = typeof SNAP_GROUPS[number];
 export type ConstructionCategory = "floor" | "wall" | "fence" | "pillar" | "roof" | "generic";
 export type ConstructionMaterial = typeof CONSTRUCTION_MATERIALS[number];
 export type ConstructionSupportState = "grounded" | "connected" | "unsupported";
 export type ConstructionGeometryKind = typeof CONSTRUCTION_GEOMETRY_KINDS[number];
+export type ConstructionSupportClass = typeof CONSTRUCTION_SUPPORT_CLASSES[number];
 export type ConstructionVec3 = readonly [number, number, number];
+
+export interface ConstructionSupportProfile {
+  maxSupport: number;
+  verticalDecay: number;
+  horizontalDecay: number;
+  supportClass: ConstructionSupportClass;
+}
+
+export type ConstructionSupportProfiles = Readonly<Record<ConstructionMaterial, ConstructionSupportProfile>>;
+
+export interface ConstructionStabilityConfig {
+  collapseThreshold: number;
+  epsilon: number;
+  maxIslandSize: number;
+  maxCollapsesPerFrame: number;
+  connectionToleranceM: number;
+  verticalConnectionMinRatio: number;
+}
 
 export interface ConstructionSnapPoint {
   id: string;
@@ -56,6 +76,7 @@ export interface ConstructionPieceDef {
   geometryYawDegrees?: number;
   placementBoxes?: readonly ConstructionPlacementBox[];
   groundNormalMinY?: number;
+  supportProfile?: ConstructionSupportProfile;
 }
 
 export interface ConstructionSnapConfig {
@@ -99,6 +120,8 @@ export interface ConstructionConfig {
   placement: ConstructionPlacementConfig;
   ghost: ConstructionGhostConfig;
   terrainConform: ConstructionTerrainConformConfig;
+  stability: ConstructionStabilityConfig;
+  supportProfiles: ConstructionSupportProfiles;
   pieces: readonly ConstructionPieceDef[];
 }
 
@@ -109,7 +132,10 @@ export interface PlacedConstructionPiece {
   rotationQuarterTurns: number;
   material?: ConstructionMaterial;
   grounded?: boolean;
+  connectionIds?: readonly string[];
+  /** Legacy v1 directed support metadata. Read during migration only. */
   parentIds?: readonly string[];
+  stability?: number;
   unsupported?: boolean;
 }
 
@@ -157,6 +183,7 @@ export interface ConstructionSnapResult {
 
 export interface ConstructionCandidate {
   piece: ConstructionPieceDef;
+  material: ConstructionMaterial;
   position: ConstructionVec3;
   rotationQuarterTurns: number;
   snapped: boolean;
@@ -164,6 +191,9 @@ export interface ConstructionCandidate {
   reason: string | null;
   snap: ConstructionSnapResult | null;
   terrainHit?: ConstructionSurfaceHit | null;
-  supportState?: ConstructionSupportState;
-  supportParentIds?: readonly string[];
+  supportState: ConstructionSupportState;
+  connectionIds: readonly string[];
+  stabilityValue: number;
+  stabilityMaxSupport: number;
+  stabilityGrounded: boolean;
 }
