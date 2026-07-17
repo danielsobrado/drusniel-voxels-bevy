@@ -212,6 +212,18 @@ fn all_lod0_neighbors() -> NeighborLods {
     }
 }
 
+fn reset_source_state(
+    cache: &mut PageExportCache,
+    queue: &mut PageSourceMeshingQueue,
+    stats: &mut PageSourceMeshingStats,
+    schedule: &mut SourceMeshingSchedule,
+) {
+    cache.clear_all();
+    queue.clear();
+    *stats = PageSourceMeshingStats::default();
+    *schedule = SourceMeshingSchedule::default();
+}
+
 /// Builds missing LOD0 exports inside the page-source radius under a strict main-thread budget.
 pub(crate) fn clod_pages_source_meshing_system(
     gen_state: Res<ChunkGenerationState>,
@@ -227,22 +239,15 @@ pub(crate) fn clod_pages_source_meshing_system(
     mut schedule: Local<SourceMeshingSchedule>,
 ) {
     stats.meshed_this_frame = 0;
-    if !runtime.enabled {
-        cache.clear_all();
-        queue.clear();
-        *stats = PageSourceMeshingStats::default();
-        return;
-    }
-    if !gen_state.is_complete {
+    if !runtime.enabled || !gen_state.is_complete {
+        reset_source_state(&mut cache, &mut queue, &mut stats, &mut schedule);
         return;
     }
     let Ok(camera) = camera_query.single() else {
         return;
     };
     if !matches!(mesh_settings.mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel) {
-        cache.clear_all();
-        queue.clear();
-        *stats = PageSourceMeshingStats::default();
+        reset_source_state(&mut cache, &mut queue, &mut stats, &mut schedule);
         return;
     }
 
