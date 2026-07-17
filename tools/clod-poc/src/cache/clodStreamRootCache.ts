@@ -25,6 +25,13 @@ export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
 
 const streamingTokens = new WeakMap<object, TerrainStreamingToken>();
+const activeRequestTokens = new Set<TerrainStreamingToken>();
+
+export function beginStreamRootCacheOperation(): () => void {
+  const token = captureTerrainStreamingToken();
+  activeRequestTokens.add(token);
+  return () => activeRequestTokens.delete(token);
+}
 
 export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
   const stats: StreamRootCacheStats = {
@@ -42,7 +49,10 @@ export function createEmptyStreamRootCacheStats(): StreamRootCacheStats {
 }
 
 export function streamRootCacheOperationIsCurrent(stats: StreamRootCacheStats): boolean {
-  return streamingTokens.get(stats as object)?.isCurrent() ?? true;
+  const statsCurrent = streamingTokens.get(stats as object)?.isCurrent() ?? true;
+  if (!statsCurrent) return false;
+  for (const token of activeRequestTokens) if (!token.isCurrent()) return false;
+  return true;
 }
 
 export async function tryLoadStreamRootNode(
