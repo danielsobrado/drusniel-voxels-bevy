@@ -71,7 +71,8 @@ spells:
       strength: 0.72
       falloff: 0.35
       material: 0
-      command_expiry_ms: 1000
+      max_range_m: 8.0
+      command_expiry_ms: 3000
     vfx:
       hand_forward_m: 0.5
       hand_right_m: 0.35
