@@ -83,9 +83,11 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
   const stoneStats = input.getStoneStats();
   if (nextStoneStats && shouldUpdateStoneStats(nextStoneStats, stoneStats)) {
     input.setStoneStats(nextStoneStats);
-    input.state.stoneTotal = nextStoneStats.total;
-    input.state.stoneClassSummary = `${nextStoneStats.large}/${nextStoneStats.medium}/${nextStoneStats.small}`;
-    input.state.stoneVisible = nextStoneStats.visible;
+    const telemetry = nextStoneStats.gpuTelemetryState ?? "unknown";
+    const known = telemetry !== "unknown";
+    input.state.stoneTotal = known ? nextStoneStats.total : -1;
+    input.state.stoneClassSummary = formatStoneSummary(nextStoneStats, telemetry);
+    input.state.stoneVisible = known ? nextStoneStats.visible : -1;
     presenter.stoneTotalController?.updateDisplay();
     presenter.stoneClassSummaryController?.updateDisplay();
     presenter.stoneVisibleController?.updateDisplay();
@@ -190,12 +192,35 @@ function shouldUpdateStoneStats(next: StoneStats, previous: StoneStats | null): 
   return !previous ||
     next.total !== previous.total ||
     next.visible !== previous.visible ||
+    next.gpuTelemetryState !== previous.gpuTelemetryState ||
+    next.gpuTimingSupported !== previous.gpuTimingSupported ||
+    next.gpuTimingPending !== previous.gpuTimingPending ||
+    next.gpuClearMs !== previous.gpuClearMs ||
+    next.gpuWorldMs !== previous.gpuWorldMs ||
+    next.gpuViewMs !== previous.gpuViewMs ||
+    next.gpuIndirectMs !== previous.gpuIndirectMs ||
     next.gpuCandidateCount !== previous.gpuCandidateCount ||
     next.gpuCandidateCountBeforePrefilter !== previous.gpuCandidateCountBeforePrefilter ||
     next.gpuCandidateCountAfterPrefilter !== previous.gpuCandidateCountAfterPrefilter ||
     next.gpuPrefilterRejectedClusters !== previous.gpuPrefilterRejectedClusters ||
     next.gpuPrefilterAcceptedClusters !== previous.gpuPrefilterAcceptedClusters ||
     next.gpuPrefilterTestedClusters !== previous.gpuPrefilterTestedClusters;
+}
+
+function formatStoneSummary(stats: StoneStats, telemetry: string): string {
+  if (telemetry === "unknown") return "counts unknown (gameplay readbacks off)";
+  const timing = formatStoneTiming(stats);
+  return `${stats.large}/${stats.medium}/${stats.small} telemetry=${telemetry}${timing}`;
+}
+
+function formatStoneTiming(stats: StoneStats): string {
+  if (!stats.gpuTimingSupported) return "";
+  const parts = [
+    stats.gpuWorldMs !== null && stats.gpuWorldMs !== undefined ? `world=${stats.gpuWorldMs.toFixed(3)}ms` : null,
+    stats.gpuViewMs !== null && stats.gpuViewMs !== undefined ? `view=${stats.gpuViewMs.toFixed(3)}ms` : "view=fused",
+    stats.gpuIndirectMs !== null && stats.gpuIndirectMs !== undefined ? `indirect=${stats.gpuIndirectMs.toFixed(3)}ms` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 function formatGrassCandidateSummary(stats: GrassStats): string {
