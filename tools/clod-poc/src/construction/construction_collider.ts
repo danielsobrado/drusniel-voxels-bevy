@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { MeshBVH } from "three-mesh-bvh";
 import {
   footprintFromBox,
@@ -6,6 +7,7 @@ import {
   type CapsuleBvhFootprint,
 } from "../collision/capsule_bvh_resolve.js";
 import type { CapsuleCollisionConfig, CapsuleCollisionResult } from "../terrain/terrain_collider.js";
+import { constructionPlacementBoxes } from "./construction_proxy.js";
 import type { ConstructionPieceDef, PlacedConstructionPiece } from "./types.js";
 
 interface ConstructionColliderEntry {
@@ -20,15 +22,19 @@ const _quaternion = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
 const _unitScale = new THREE.Vector3(1, 1, 1);
 
-/**
- * Player-collision colliders for placed construction pieces, keyed by piece id and kept
- * in lockstep with the visible mesh: add/remove happen in the same synchronous call as
- * the piece store mutation, so the collider always matches the visible geometry — an
- * unsupported (collapse-deferred) piece stays solid where it is drawn, and a removed
- * piece never leaves a ghost wall. Each collider is a 12-triangle box, so the BVH build
- * cost per placement is microseconds — it does not go through the async terrain
- * collider pipeline.
- */
+function createProxyGeometry(piece: ConstructionPieceDef): THREE.BufferGeometry {
+  const parts = constructionPlacementBoxes(piece).map((proxy) => {
+    const geometry = new THREE.BoxGeometry(proxy.dimensionsM[0], proxy.dimensionsM[1], proxy.dimensionsM[2]);
+    geometry.rotateY(THREE.MathUtils.degToRad(proxy.rotationYDegrees ?? 0));
+    geometry.translate(proxy.center[0], proxy.center[1], proxy.center[2]);
+    return geometry;
+  });
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  if (!merged) throw new Error(`Failed to create placement proxy geometry for ${piece.id}`);
+  return merged;
+}
+
 export class ConstructionColliderSet {
   private readonly entries = new Map<string, ConstructionColliderEntry>();
 
@@ -42,7 +48,7 @@ export class ConstructionColliderSet {
 
   add(placed: PlacedConstructionPiece, piece: ConstructionPieceDef): void {
     this.remove(placed.id);
-    const geometry = new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]);
+    const geometry = createProxyGeometry(piece);
     _position.set(placed.position[0], placed.position[1], placed.position[2]);
     _quaternion.setFromAxisAngle(_up, placed.rotationQuarterTurns * Math.PI * 0.5);
     _matrix.compose(_position, _quaternion, _unitScale);
