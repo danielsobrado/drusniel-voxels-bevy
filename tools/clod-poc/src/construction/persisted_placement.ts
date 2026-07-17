@@ -1,8 +1,5 @@
-import {
-  constructionBoundsFor,
-  constructionBoundsOverlap,
-  isFiniteConstructionPosition,
-} from "./construction_bounds.js";
+import { constructionBoundsFor, isFiniteConstructionPosition } from "./construction_bounds.js";
+import { constructionPiecesOverlap } from "./construction_obb.js";
 import { isPlacedPieceSupported } from "./support_state.js";
 import type { ConstructionPieceDef, ConstructionPlacementConfig, PlacedConstructionPiece } from "./types.js";
 
@@ -31,17 +28,17 @@ function validateBoundsAndOverlap(
     }
   }
 
-  const bounds = constructionBoundsFor(piece, placed.position, placed.rotationQuarterTurns, config.overlapPaddingM);
   for (const other of input.overlapCandidates ?? input.placedPieces) {
     const otherPiece = piecesById.get(other.typeId);
     if (!otherPiece) continue;
-    const otherBounds = constructionBoundsFor(
+    if (constructionPiecesOverlap({
+      piece,
+      position: placed.position,
+      rotationQuarterTurns: placed.rotationQuarterTurns,
       otherPiece,
-      other.position,
-      other.rotationQuarterTurns,
-      config.overlapPaddingM,
-    );
-    if (constructionBoundsOverlap(bounds, otherBounds)) return { valid: false, reason: "overlap" };
+      other,
+      insetM: config.overlapPaddingM,
+    })) return { valid: false, reason: "overlap" };
   }
   return { valid: true, reason: null };
 }
@@ -60,16 +57,12 @@ function validatePersistedSupport(
     if (!allowLegacySupportMetadata) return { valid: false, reason: "missing support" };
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
-  // Support re-evaluation marked this piece unsupported after a terrain edit; collapse
-  // is deferred, so the piece round-trips with its support state instead of vanishing.
   if (placed.unsupported === true) return { valid: true, reason: null };
   if (placed.grounded === true) {
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
   const parentIds = placed.parentIds ?? [];
-  if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) {
-    return { valid: true, reason: null };
-  }
+  if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) return { valid: true, reason: null };
   return { valid: false, reason: "unsupported" };
 }
 
