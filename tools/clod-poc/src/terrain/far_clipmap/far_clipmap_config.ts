@@ -1,5 +1,3 @@
-import { parseRendererBackend } from "../../rendering/renderer_backend.js";
-
 export type FarClipmapDebugMode = "final" | "biome" | "height" | "ownership";
 
 export interface FarClipmapConfig {
@@ -110,7 +108,7 @@ function debugMode(value: unknown, fallback: FarClipmapDebugMode): FarClipmapDeb
 
 export function farClipmapRendererAllowed(
   params: URLSearchParams,
-  webGpuAvailable = parseRendererBackend(params) === "webgpu",
+  webGpuAvailable = params.get("renderer") !== "webgl",
 ): boolean {
   const sceneName = params.get("scene") ?? "";
   if (!sceneName.startsWith("infinite-")) return true;
