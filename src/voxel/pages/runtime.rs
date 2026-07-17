@@ -1,28 +1,27 @@
-//! Phase 5 Step 3a — LOD0 live-mesh export cache maintenance.
+//! Phase 5 Step 3a — bounded LOD0 page-source meshing and export-cache maintenance.
 //!
-//! Default-OFF (`ClodPagesRuntime.enabled`, D4) for explicit A/B rollout.
-//! Enable with `CLOD_PAGES=1` env var.
-//! Reuses the exact live LOD0 mesher output, so the near/far bubble edge matches the live
-//! chunks by construction (I3.1). This module maintains the export cache consumed by the
-//! async page assembly, decimation, and entity commit pipeline.
-//!
-//! NOTE: terrain is chunked in Y too, so a page footprint spans several Y chunks; this
-//! caches per-chunk exports (all Y), and Step 3b groups them into P×P×Y page sources.
-//!
-//! TODO(CLOD_PHASE3_GATE): This runtime path is default-off and experimental.
-//! Do not expand Phase 5 behavior until tools/clod-poc Phase 3 acceptance
-//! passes with mixed-LOD A1, strict A2, real A5 measured timings, and honest
-//! visual-sweep reporting.
+//! Default-OFF (`ClodPagesRuntime.enabled`) for explicit A/B rollout. Enable with
+//! `CLOD_PAGES=1`. Source meshing runs on the main thread under a strict per-frame budget,
+//! using the exact live terrain mesher with LOD0 neighbors. Weld/simplify/quadtree work stays
+//! on the async compute pool.
 
 use bevy::prelude::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use super::config::ClodPagesConfig;
 use super::export::TerrainMainSurfaceExport;
 use crate::gameplay::camera::controller::PlayerCamera;
-use crate::voxel::chunk::MeshDirtyReason;
+use crate::rendering::AmbientOcclusionConfig;
+use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
+use crate::voxel::mc_transvoxel::McTransvoxelSettings;
+use crate::voxel::meshing::{
+    MeshForensicsOptions, MeshMode, MeshRequest, MeshSettings, generate_chunk_mesh_for_request,
+};
 use crate::voxel::runtime::ChunkGenerationState;
+use crate::voxel::skirt::NeighborLods;
 use crate::voxel::world::VoxelWorld;
+
+const DEFAULT_SOURCE_MESH_BUDGET_PER_FRAME: usize = 4;
 
 fn clod_pages_enabled() -> bool {
     matches!(
@@ -31,13 +30,23 @@ fn clod_pages_enabled() -> bool {
     )
 }
 
+fn env_usize(key: &str, fallback: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
+}
+
 #[derive(Resource)]
 pub struct ClodPagesRuntime {
     pub cfg: ClodPagesConfig,
     /// Master toggle — default OFF. Set `CLOD_PAGES=1` to enable.
     pub enabled: bool,
-    /// LOD0 pages assembled per frame by the build queue.
+    /// LOD0 page sources assembled per frame by the async build queue.
     pub source_budget_per_frame: usize,
+    /// Far-field chunks meshed for clean LOD0 export per frame.
+    pub source_mesh_budget_per_frame: usize,
     /// Chebyshev radius (chunks) out to which page sources are pre-meshed.
     pub source_radius_chunks: i32,
 }
@@ -48,22 +57,22 @@ impl Default for ClodPagesRuntime {
         let p = cfg.page.chunks_per_page as i32;
         let levels = cfg.page.quadtree_levels as i32;
         let enabled = clod_pages_enabled();
-        // reach one top-level page footprint beyond the near-field bubble
+        // Reach one top-level page footprint beyond the near-field bubble.
         let source_radius_chunks = cfg.near_field.radius_chunks + p * (1 << (levels - 1).max(0));
-        let source_budget_per_frame = std::env::var("CLOD_PAGES_BUDGET")
-            .ok()
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(4);
         Self {
             cfg,
             enabled,
-            source_budget_per_frame,
+            source_budget_per_frame: env_usize("CLOD_PAGES_BUDGET", 4),
+            source_mesh_budget_per_frame: env_usize(
+                "CLOD_PAGES_SOURCE_MESH_BUDGET",
+                DEFAULT_SOURCE_MESH_BUDGET_PER_FRAME,
+            ),
             source_radius_chunks,
         }
     }
 }
 
-/// LOD0 main-surface exports keyed by chunk position, the input to the Step 3b page builder.
+/// LOD0 main-surface exports keyed by chunk position, the input to the page builder.
 #[derive(Resource, Default)]
 pub struct PageExportCache {
     pub exports: HashMap<IVec3, TerrainMainSurfaceExport>,
@@ -138,13 +147,6 @@ impl PageExportCache {
             return;
         }
 
-        // NOTE: a page column is only "complete" when every chunk in it has an export.
-        // Uniform air/solid chunks never export, so most columns stay incomplete and few
-        // pages build. That keeps the far field on the live LOD0 fallback (see
-        // `clod_page_chunk_ownership_system`), which is correct and fast. Do NOT loosen
-        // this to build partial pages until the page-source weld is watertight — partial
-        // columns weld with interior open borders and the builder fails every frame
-        // (`InternalBorderNotWelded`), spiking frame time and flickering the far field.
         let mut columns: BTreeMap<(i32, i32), Vec<IVec3>> = BTreeMap::new();
         for pos in world.chunk_positions() {
             columns
@@ -164,6 +166,64 @@ impl PageExportCache {
     }
 }
 
+#[derive(Resource, Default)]
+pub(crate) struct PageSourceMeshingQueue {
+    center: Option<IVec3>,
+    world_chunk_count: usize,
+    pending: VecDeque<IVec3>,
+    queued: HashSet<IVec3>,
+}
+
+impl PageSourceMeshingQueue {
+    fn clear(&mut self) {
+        self.center = None;
+        self.world_chunk_count = 0;
+        self.pending.clear();
+        self.queued.clear();
+    }
+
+    fn refresh(
+        &mut self,
+        world: &VoxelWorld,
+        cache: &PageExportCache,
+        cam_chunk: IVec3,
+        near: i32,
+        far: i32,
+    ) {
+        let world_chunk_count = world.chunk_count();
+        let rebuild = self.center != Some(cam_chunk)
+            || self.world_chunk_count != world_chunk_count
+            || self.pending.is_empty();
+        if !rebuild {
+            return;
+        }
+
+        self.center = Some(cam_chunk);
+        self.world_chunk_count = world_chunk_count;
+        self.pending = source_positions_in_band(
+            world.chunk_positions(),
+            &cache.exports,
+            cam_chunk,
+            near,
+            far,
+        )
+        .into();
+        self.queued = self.pending.iter().copied().collect();
+    }
+
+    fn pop(&mut self) -> Option<IVec3> {
+        let position = self.pending.pop_front()?;
+        self.queued.remove(&position);
+        Some(position)
+    }
+
+    fn requeue(&mut self, position: IVec3) {
+        if self.queued.insert(position) {
+            self.pending.push_back(position);
+        }
+    }
+}
+
 fn cheby(a: IVec3, b: IVec3) -> i32 {
     (a.x - b.x).abs().max((a.z - b.z).abs())
 }
@@ -175,6 +235,42 @@ fn page_coord(chunk_pos: IVec3, chunks_per_page: i32) -> (i32, i32) {
     )
 }
 
+fn source_positions_in_band(
+    positions: impl Iterator<Item = IVec3>,
+    exports: &HashMap<IVec3, TerrainMainSurfaceExport>,
+    cam_chunk: IVec3,
+    near: i32,
+    far: i32,
+) -> Vec<IVec3> {
+    let mut candidates = positions
+        .filter(|position| {
+            let distance = cheby(*position, cam_chunk);
+            distance > near && distance <= far && !exports.contains_key(position)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|position| {
+        (
+            cheby(*position, cam_chunk),
+            (position.y - cam_chunk.y).abs(),
+            position.x,
+            position.z,
+            position.y,
+        )
+    });
+    candidates
+}
+
+fn all_lod0_neighbors() -> NeighborLods {
+    NeighborLods {
+        neg_x: Some(LodLevel::Lod0),
+        pos_x: Some(LodLevel::Lod0),
+        neg_y: Some(LodLevel::Lod0),
+        pos_y: Some(LodLevel::Lod0),
+        neg_z: Some(LodLevel::Lod0),
+        pos_z: Some(LodLevel::Lod0),
+    }
+}
+
 /// Logs the initial page state once for bench output.
 pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
     if !runtime.enabled {
@@ -182,29 +278,167 @@ pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
         return;
     }
     info!(
-        "CLOD PAGES: enabled; radius {} chunks, page-source budget {}/frame.",
-        runtime.source_radius_chunks, runtime.source_budget_per_frame
+        "CLOD PAGES: enabled; radius {} chunks, source-mesh budget {}/frame, page-source budget {}/frame.",
+        runtime.source_radius_chunks,
+        runtime.source_mesh_budget_per_frame,
+        runtime.source_budget_per_frame,
     );
 }
 
-/// Maintains the page-source export cache filled by the live dirty mesher.
+/// Builds missing far-field LOD0 exports under a strict main-thread budget, then refreshes
+/// complete page columns. It never commits source meshes as live chunk entities.
 pub fn clod_pages_source_meshing_system(
     gen_state: Res<ChunkGenerationState>,
     world: Res<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     runtime: Res<ClodPagesRuntime>,
+    mesh_settings: Res<MeshSettings>,
+    ao_config: Res<AmbientOcclusionConfig>,
+    mc_settings: Option<Res<McTransvoxelSettings>>,
     mut cache: ResMut<PageExportCache>,
+    mut queue: ResMut<PageSourceMeshingQueue>,
 ) {
-    if !runtime.enabled || !gen_state.is_complete {
+    if !runtime.enabled {
         cache.clear_all();
+        queue.clear();
         return;
     }
-    let Ok(cam) = camera_query.single() else {
+    if !gen_state.is_complete {
+        return;
+    }
+    let Ok(camera) = camera_query.single() else {
         return;
     };
-    let cam_chunk = VoxelWorld::world_to_chunk(cam.translation.as_ivec3());
+    if !matches!(mesh_settings.mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel) {
+        cache.clear_all();
+        queue.clear();
+        return;
+    }
+
+    let cam_chunk = VoxelWorld::world_to_chunk(camera.translation.as_ivec3());
+    let near = runtime.cfg.near_field.radius_chunks;
     let far = runtime.source_radius_chunks;
     cache.retain_in_radius(cam_chunk, far);
     cache.invalidate_dirty_exports(&world);
+    queue.refresh(&world, &cache, cam_chunk, near, far);
+
+    for _ in 0..runtime.source_mesh_budget_per_frame.max(1) {
+        let Some(chunk_pos) = queue.pop() else {
+            break;
+        };
+        if cache.exports.contains_key(&chunk_pos) {
+            continue;
+        }
+        let Some(chunk) = world.get_chunk(chunk_pos) else {
+            continue;
+        };
+        if chunk.is_dirty() {
+            queue.requeue(chunk_pos);
+            continue;
+        }
+
+        let mesh_result = generate_chunk_mesh_for_request(MeshRequest {
+            chunk,
+            world: &world,
+            mode: mesh_settings.mode,
+            logical_lod: LodLevel::Lod0,
+            mesh_lod: LodLevel::Lod0,
+            neighbor_lods: all_lod0_neighbors(),
+            ao_config: &ao_config.baked,
+            water_exposure_mode: mesh_settings.water_air_exposure_mode,
+            forensics: MeshForensicsOptions::default(),
+            mc_settings: mc_settings.as_deref(),
+            timing_enabled: false,
+        });
+
+        match super::extract_main_surface_for_clod(
+            &mesh_result.solid,
+            chunk_pos,
+            LodLevel::Lod0,
+            0,
+        ) {
+            Ok(export) => cache.insert_from_live_lod0(export),
+            Err(error) => {
+                cache.remove_export(chunk_pos);
+                warn!("CLOD source export failed for {:?}: {}", chunk_pos, error);
+            }
+        }
+    }
+
     cache.refresh_complete_pages(&world, runtime.cfg.page.chunks_per_page as i32);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn export(position: IVec3) -> TerrainMainSurfaceExport {
+        TerrainMainSurfaceExport {
+            local_positions: Vec::new(),
+            normals: Vec::new(),
+            material_weights: Vec::new(),
+            paint_slots: Vec::new(),
+            indices: Vec::new(),
+            chunk_pos: position,
+            lod: LodLevel::Lod0,
+            revision: 1,
+        }
+    }
+
+    #[test]
+    fn source_queue_contains_only_missing_far_band_chunks() {
+        let cam = IVec3::ZERO;
+        let cached = IVec3::new(3, 0, 0);
+        let exports = [(cached, export(cached))].into_iter().collect();
+        let positions = vec![
+            IVec3::new(1, 0, 0),
+            IVec3::new(2, 0, 0),
+            cached,
+            IVec3::new(4, 0, 0),
+            IVec3::new(5, 0, 0),
+        ];
+
+        let queued = source_positions_in_band(positions.into_iter(), &exports, cam, 1, 4);
+
+        assert_eq!(queued, vec![IVec3::new(2, 0, 0), IVec3::new(4, 0, 0)]);
+    }
+
+    #[test]
+    fn source_queue_prioritizes_horizontal_distance_then_vertical_distance() {
+        let positions = vec![
+            IVec3::new(4, 5, 0),
+            IVec3::new(2, 8, 0),
+            IVec3::new(2, 1, 0),
+            IVec3::new(3, 0, 0),
+        ];
+
+        let queued = source_positions_in_band(
+            positions.into_iter(),
+            &HashMap::new(),
+            IVec3::ZERO,
+            0,
+            8,
+        );
+
+        assert_eq!(
+            queued,
+            vec![
+                IVec3::new(2, 1, 0),
+                IVec3::new(2, 8, 0),
+                IVec3::new(3, 0, 0),
+                IVec3::new(4, 5, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn source_meshing_uses_all_lod0_neighbors() {
+        let neighbors = all_lod0_neighbors();
+        assert_eq!(neighbors.neg_x, Some(LodLevel::Lod0));
+        assert_eq!(neighbors.pos_x, Some(LodLevel::Lod0));
+        assert_eq!(neighbors.neg_y, Some(LodLevel::Lod0));
+        assert_eq!(neighbors.pos_y, Some(LodLevel::Lod0));
+        assert_eq!(neighbors.neg_z, Some(LodLevel::Lod0));
+        assert_eq!(neighbors.pos_z, Some(LodLevel::Lod0));
+    }
 }
