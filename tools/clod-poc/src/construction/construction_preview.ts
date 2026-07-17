@@ -1,15 +1,16 @@
 import * as THREE from "three";
 import { normalizeRotationQuarterTurns } from "./construction_controller_support.js";
+import { constructionStabilityColorHex } from "./construction_stability_visual.js";
 import type {
   ConstructionPieceDef,
   ConstructionSnapConfig,
   ConstructionSnapResult,
+  ConstructionStabilityConfig,
 } from "./types.js";
 import type { ConstructionSnapIndex } from "./snap_index.js";
 
 const ROTATION_QUARTER_COUNT = 4;
 const GHOST_VALID_COLOR = 0x35d46b;
-const GHOST_SNAPPED_COLOR = 0x4ea1ff;
 const GHOST_INVALID_COLOR = 0xff4f4f;
 
 export interface FindConstructionSnapInput {
@@ -53,12 +54,22 @@ export function updateConstructionGhost(
     position: readonly [number, number, number];
     rotationQuarterTurns: number;
     valid: boolean;
-    snapped: boolean;
+    stability?: {
+      grounded: boolean;
+      value: number;
+      maxSupport: number;
+      config: ConstructionStabilityConfig;
+    };
   },
 ): void {
   ghostMesh.visible = true;
   ghostMesh.position.set(input.position[0], input.position[1], input.position[2]);
   ghostMesh.rotation.set(0, input.rotationQuarterTurns * Math.PI * 0.5, 0);
   ghostMesh.scale.set(1, 1, 1);
-  ghostMaterial.color.setHex(input.valid ? input.snapped ? GHOST_SNAPPED_COLOR : GHOST_VALID_COLOR : GHOST_INVALID_COLOR);
+  const color = !input.valid
+    ? GHOST_INVALID_COLOR
+    : input.stability
+      ? constructionStabilityColorHex(input.stability)
+      : GHOST_VALID_COLOR;
+  ghostMaterial.color.setHex(color);
 }

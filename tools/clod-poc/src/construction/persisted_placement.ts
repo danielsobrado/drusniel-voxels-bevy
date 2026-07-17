@@ -14,7 +14,7 @@ export interface PersistedConstructionPlacementValidationInput {
   allowLegacySupportMetadata?: boolean;
 }
 
-function validateBoundsAndOverlap(
+export function validatePersistedConstructionGeometry(
   input: PersistedConstructionPlacementValidationInput,
 ): { valid: boolean; reason: string | null } {
   const { piece, placed, piecesById, worldCells, config } = input;
@@ -44,7 +44,7 @@ function validateBoundsAndOverlap(
 }
 
 function hasLegacySupportMetadata(placed: PlacedConstructionPiece): boolean {
-  return placed.grounded === undefined && placed.parentIds === undefined;
+  return placed.grounded === undefined && placed.parentIds === undefined && placed.connectionIds === undefined;
 }
 
 function validatePersistedSupport(
@@ -57,11 +57,11 @@ function validatePersistedSupport(
     if (!allowLegacySupportMetadata) return { valid: false, reason: "missing support" };
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
-  if (placed.unsupported === true) return { valid: true, reason: null };
+  if (placed.unsupported === true || placed.collapsePending === true) return { valid: true, reason: null };
   if (placed.grounded === true) {
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
-  const parentIds = placed.parentIds ?? [];
+  const parentIds = placed.connectionIds ?? placed.parentIds ?? [];
   if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) return { valid: true, reason: null };
   return { valid: false, reason: "unsupported" };
 }
@@ -75,5 +75,5 @@ export function validateStrictPersistedConstructionPlacement(
     input.placedPieces,
     input.allowLegacySupportMetadata ?? false,
   );
-  return support.valid ? validateBoundsAndOverlap(input) : support;
+  return support.valid ? validatePersistedConstructionGeometry(input) : support;
 }

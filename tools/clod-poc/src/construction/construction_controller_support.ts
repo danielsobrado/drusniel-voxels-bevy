@@ -42,7 +42,10 @@ export function readStringArray(value: unknown): readonly string[] | undefined {
 }
 
 export function hasExplicitSupportMetadata(placed: PlacedConstructionPiece): boolean {
-  return placed.grounded !== undefined || placed.parentIds !== undefined;
+  return placed.grounded !== undefined
+    || placed.parentIds !== undefined
+    || placed.connectionIds !== undefined
+    || placed.stability !== undefined;
 }
 
 export function disposeMesh(mesh: THREE.Mesh): void {

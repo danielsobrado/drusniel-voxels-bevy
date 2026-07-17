@@ -1,16 +1,40 @@
 import * as THREE from "three";
 import { density, surfaceHeight } from "../terrain/terrain.js";
+import { getActiveTerrainRaycastService } from "../player/terrain_raycast_registry.js";
+import {
+  canCommitBuild,
+  publishPlayerEditAuthorityDecision,
+  type PlayerEditAuthorityConfig,
+  type PlayerEditAuthorityPoint,
+} from "../player/player_edit_authority.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 import { defaultConstructionConfig } from "./config.js";
-import { CONSTRUCTION_MATERIAL_OPTIONS, constructionMaterialLabel } from "./materials.js";
-import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow } from "./material_preloader.js";
-import { createConstructionCandidate, createFreePlacementPosition } from "./placement.js";
-import { ConstructionSnapIndex } from "./snap_index.js";
+import { ConstructionColliderSet } from "./construction_collider.js";
+import { findConstructionConnectionIds } from "./construction_connections.js";
 import {
   ENTITY_ID_PREFIX,
   GHOST_INVALID_COLOR,
   createPieceGeometry,
   normalizeRotationQuarterTurns,
 } from "./construction_controller_support.js";
+import { createConstructionControllerUi, type ConstructionControllerUi } from "./construction_controller_ui.js";
+import {
+  isConstructionPieceGrounded,
+  type ConstructionGroundingAabb,
+} from "./construction_grounding.js";
+import { CONSTRUCTION_MATERIAL_OPTIONS, constructionMaterialLabel } from "./materials.js";
+import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow } from "./material_preloader.js";
+import { ConstructionOverlapIndex } from "./overlap_index.js";
+import { loadConstructionPieces, saveConstructionPieces } from "./construction_persistence.js";
+import { ConstructionPieceStore } from "./construction_piece_store.js";
+import { createConstructionCandidate, createFreePlacementPosition } from "./placement.js";
+import { findConstructionSnapCandidates, updateConstructionGhost } from "./construction_preview.js";
+import { ConstructionSnapIndex } from "./snap_index.js";
+import { ConstructionSnapSelector } from "./construction_snap_selector.js";
+import { ConstructionStabilityRuntime, type ConstructionStabilityRuntimeStats } from "./construction_stability_runtime.js";
+import { createConstructionTerrainConformRequest } from "./construction_terrain_conform.js";
+import { ConstructionPerformanceTracker, type ConstructionPerformanceSnapshot } from "./construction_timing.js";
+import { raycastConstructionTerrain, type AuthoritativeConstructionTerrainHit } from "./targeting.js";
 import type {
   ConstructionCandidate,
   ConstructionConfig,
@@ -19,28 +43,10 @@ import type {
   ConstructionTerrainConformRequest,
   PlacedConstructionPiece,
 } from "./types.js";
-import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
-import {
-  canCommitBuild,
-  publishPlayerEditAuthorityDecision,
-  type PlayerEditAuthorityConfig,
-  type PlayerEditAuthorityPoint,
-} from "../player/player_edit_authority.js";
-import { ConstructionOverlapIndex } from "./overlap_index.js";
-import { ConstructionPerformanceTracker, type ConstructionPerformanceSnapshot } from "./construction_timing.js";
-import { raycastConstructionTerrain } from "./targeting.js";
-import { findConstructionSnapCandidates, updateConstructionGhost } from "./construction_preview.js";
-import { ConstructionSnapSelector } from "./construction_snap_selector.js";
-import type { AuthoritativeConstructionTerrainHit } from "./targeting.js";
-import { getActiveTerrainRaycastService } from "../player/terrain_raycast_registry.js";
-import { ConstructionColliderSet } from "./construction_collider.js";
-import { ConstructionPieceStore } from "./construction_piece_store.js";
-import { reevaluateConstructionSupport, type ConstructionSupportAabb } from "./support_reevaluation.js";
-import { loadConstructionPieces, saveConstructionPieces } from "./construction_persistence.js";
-import { createConstructionTerrainConformRequest } from "./construction_terrain_conform.js";
-import { createConstructionControllerUi, type ConstructionControllerUi } from "./construction_controller_ui.js";
 
 const DEFAULT_OVERLAP_SPATIAL_CELL_M = 4;
+
+export type ConstructionSupportAabb = ConstructionGroundingAabb;
 
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
@@ -64,6 +70,7 @@ export interface ConstructionControllerStats {
   currentValid: boolean;
   currentReason: string | null;
   performance: ConstructionPerformanceSnapshot;
+  stability: ConstructionStabilityRuntimeStats;
 }
 
 export interface ConstructionController {
@@ -87,6 +94,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private readonly snapIndex: ConstructionSnapIndex;
   private readonly overlapIndex: ConstructionOverlapIndex;
   private readonly pieceStore: ConstructionPieceStore;
+  private readonly stabilityRuntime: ConstructionStabilityRuntime;
   private readonly performance = new ConstructionPerformanceTracker();
   private readonly snapSelector = new ConstructionSnapSelector();
   private readonly raycaster = new THREE.Raycaster();
@@ -119,7 +127,18 @@ class ConstructionControllerImpl implements ConstructionController {
     );
     this.root.name = "construction-root";
     this.deps.scene.add(this.root);
-    this.pieceStore = new ConstructionPieceStore(this.root, this.piecesById, this.snapIndex, this.overlapIndex, this.colliderSet);
+    this.pieceStore = new ConstructionPieceStore(
+      this.root,
+      this.piecesById,
+      this.snapIndex,
+      this.overlapIndex,
+      this.colliderSet,
+    );
+    this.stabilityRuntime = new ConstructionStabilityRuntime(
+      this.config.stability,
+      this.piecesById,
+      this.pieceStore.pieces,
+    );
 
     this.ghostMaterial = trackedMeshBasicMaterial({
       color: GHOST_INVALID_COLOR,
@@ -173,6 +192,7 @@ class ConstructionControllerImpl implements ConstructionController {
         this.syncUi(true);
       },
     });
+
     const loadResult = loadConstructionPieces({
       storageKey: this.config.placement.storageKey,
       piecesById: this.piecesById,
@@ -180,17 +200,25 @@ class ConstructionControllerImpl implements ConstructionController {
       worldCells: this.deps.worldCells,
       placement: this.config.placement,
       addPiece: (piece: PlacedConstructionPiece) => this.pieceStore.add(piece, false),
+      deferSupportValidation: true,
     });
     this.nextEntityId = loadResult.nextEntityId;
+    this.stabilityRuntime.rebuild();
+    this.stabilityRuntime.refreshGrounding((x, y, z) => density(x, y, z) > 0);
+    this.stabilityRuntime.recomputeDirty();
+    this.pieceStore.refreshStabilityVisuals(this.config.stability);
+    if (this.pieceStore.pieces.length > 0 || loadResult.rewritten) this.savePlacedPieces();
     this.syncUi(true);
-    console.info("[construction] CLOD construction ready. B toggle, left-click place, middle-click pick, right-click delete, X snap, hold Shift free, Q/E cycle, R rotate.");
+    console.info("[construction] CLOD construction Phase 2 ready. Structural stability uses dirty islands and queued collapse.");
   }
 
   update(): void {
+    this.updateStabilityRuntime();
     if (!this.active || this.config.pieces.length === 0) {
       this.currentCandidate = null;
       this.ghostMesh.visible = false;
       this.syncUi();
+      this.publishPerformanceCounters();
       return;
     }
     this.performance.measure("previewTotal", () => this.updateActivePreview());
@@ -218,6 +246,7 @@ class ConstructionControllerImpl implements ConstructionController {
       currentValid: this.currentCandidate?.valid ?? false,
       currentReason: this.currentCandidate?.reason ?? null,
       performance: this.performance.snapshot(),
+      stability: this.stabilityRuntime.stats(),
     };
   }
 
@@ -227,17 +256,46 @@ class ConstructionControllerImpl implements ConstructionController {
 
   reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void {
     if (this.pieceStore.pieces.length === 0) return;
-    const result = reevaluateConstructionSupport({
-      pieces: this.pieceStore.pieces,
-      piecesById: this.piecesById,
+    const changed = this.stabilityRuntime.refreshGrounding(
+      (x, y, z) => density(x, y, z) > 0,
       aabb,
-      groundSolidAt: (x: number, y: number, z: number) => density(x, y, z) > 0,
-    });
+    );
     this.supportReevaluations += 1;
-    if (!result.changed) return;
-    this.pieceStore.applySupportState(result.groundedLost, result.groundedRestored, result.unsupportedIds);
-    this.savePlacedPieces();
+    if (changed.length === 0) return;
+    this.recomputeStabilityAndPersist();
     this.syncUi(true);
+  }
+
+  private updateStabilityRuntime(): void {
+    const changedIds = this.stabilityRuntime.recomputeDirty();
+    if (changedIds.length > 0) {
+      this.pieceStore.refreshStabilityVisuals(this.config.stability, new Set(changedIds));
+      this.savePlacedPieces();
+    }
+
+    const ready = this.stabilityRuntime.takeReadyCollapseIds();
+    let collapsed = 0;
+    for (const id of ready) {
+      if (!this.stabilityRuntime.isStillUnstable(id)) {
+        this.stabilityRuntime.cancelCollapse(id);
+        continue;
+      }
+      this.stabilityRuntime.removePiece(id);
+      collapsed += this.pieceStore.removeByIds(new Set([id]));
+    }
+    if (collapsed > 0) {
+      this.stabilityRuntime.recordCollapsed(collapsed);
+      this.savePlacedPieces();
+      this.lastPlacementMessage = `Collapsed ${collapsed} unstable piece${collapsed === 1 ? "" : "s"}.`;
+      console.info(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+    }
+  }
+
+  private recomputeStabilityAndPersist(): void {
+    const changedIds = this.stabilityRuntime.recomputeDirty();
+    this.pieceStore.refreshStabilityVisuals(this.config.stability);
+    if (changedIds.length > 0) this.savePlacedPieces();
   }
 
   private updateActivePreview(): void {
@@ -290,11 +348,39 @@ class ConstructionControllerImpl implements ConstructionController {
       this.clearPreviewStats();
       return;
     }
+
     const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit!, this.rotationQuarterTurns);
     const overlapCandidates = this.overlapIndex.query(piece, position, rotationQuarterTurns);
     const overlapStats = this.overlapIndex.queryStats();
     this.performance.setOverlapQueryStats(overlapStats.visitedCells, overlapStats.candidatePieces);
+
+    const existingPieceIds = new Set(this.pieceStore.pieces.map((placed) => placed.id));
+    const connectionIds = snap
+      ? findConstructionConnectionIds({
+          piece,
+          position,
+          rotationQuarterTurns,
+          snapIndex: this.snapIndex,
+          existingPieceIds,
+          toleranceM: this.config.stability.connectionToleranceM,
+          minAlignment: this.config.snap.minAlignment,
+        })
+      : [];
+    const grounded = isConstructionPieceGrounded({
+      piece,
+      position,
+      rotationQuarterTurns,
+      groundSolidAt: (x, y, z) => density(x, y, z) > 0,
+    });
+    const prediction = this.stabilityRuntime.predict({
+      piece,
+      material: this.selectedMaterial(),
+      position,
+      grounded,
+      connectionIds,
+    });
+
     const candidate = this.performance.measure("placementValidation", () => this.applyCommitAuthority(createConstructionCandidate({
       piece,
       position,
@@ -307,6 +393,7 @@ class ConstructionControllerImpl implements ConstructionController {
       piecesById: this.piecesById,
       worldCells: this.deps.worldCells,
       config: this.config.placement,
+      stabilityPrediction: prediction,
     })));
 
     this.currentCandidate = candidate;
@@ -314,7 +401,12 @@ class ConstructionControllerImpl implements ConstructionController {
       position: candidate.position,
       rotationQuarterTurns: candidate.rotationQuarterTurns,
       valid: candidate.valid,
-      snapped: candidate.snapped,
+      stability: {
+        grounded: prediction.grounded,
+        value: prediction.value,
+        maxSupport: prediction.maxSupport,
+        config: this.config.stability,
+      },
     });
     this.syncUi();
   }
@@ -340,6 +432,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const counters = this.deps.getAuthorityCounters?.();
     if (!counters) return;
     const snapshot = this.performance.snapshot();
+    const stability = this.stabilityRuntime.stats();
     counters["construction_preview_total_ms"] = snapshot.previewTotal.lastMs;
     counters["construction_preview_total_ms_p95"] = snapshot.previewTotal.p95Ms;
     counters["construction_targeting_ms"] = snapshot.targeting.lastMs;
@@ -359,6 +452,14 @@ class ConstructionControllerImpl implements ConstructionController {
     counters["construction_colliders_active"] = this.colliderSet.activeCount();
     counters["construction_unsupported_pieces"] = this.pieceStore.unsupportedCount();
     counters["construction_support_reevaluations"] = this.supportReevaluations;
+    counters["construction_stability_dirty_starts"] = stability.dirtyStarts;
+    counters["construction_stability_islands"] = stability.islands;
+    counters["construction_stability_largest_island"] = stability.largestIsland;
+    counters["construction_stability_relaxations"] = stability.relaxations;
+    counters["construction_stability_cap_hits"] = stability.capHits;
+    counters["construction_stability_pending_collapses"] = stability.pendingCollapses;
+    counters["construction_stability_collapsed_total"] = stability.collapsedTotal;
+    counters["construction_stability_solve_ms"] = stability.solveMs;
   }
 
   private updatePointerFromEvent(event: PointerEvent): boolean {
@@ -382,9 +483,10 @@ class ConstructionControllerImpl implements ConstructionController {
       this.snapSuppressed = false;
       this.snapSelector.reset();
     } else {
-      this.lastPlacementMessage = "Left-click place · middle-click pick · right-click delete.";
+      this.lastPlacementMessage = "Left-click place · middle-click pick · right-click remove.";
       this.preloadSelectedMaterialWindow();
     }
+    this.pieceStore.setStabilityVisualization(active, this.config.stability);
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
     this.syncUi(true);
   }
@@ -465,6 +567,7 @@ class ConstructionControllerImpl implements ConstructionController {
       return;
     }
     const material = this.selectedMaterial();
+    const connections = candidate.supportConnectionIds ?? candidate.supportParentIds ?? [];
     const placed: PlacedConstructionPiece = {
       id: `${ENTITY_ID_PREFIX}${this.nextEntityId++}`,
       typeId: candidate.piece.id,
@@ -472,7 +575,11 @@ class ConstructionControllerImpl implements ConstructionController {
       rotationQuarterTurns: candidate.rotationQuarterTurns,
       material,
       grounded: candidate.supportState === "grounded",
-      parentIds: candidate.supportParentIds ?? [],
+      parentIds: connections,
+      connectionIds: connections,
+      stability: candidate.stabilityValue ?? 0,
+      unsupported: false,
+      collapsePending: false,
     };
     if (!this.pieceStore.add(placed, true)) {
       this.lastPlacementMessage = "Placement failed while adding mesh.";
@@ -480,8 +587,10 @@ class ConstructionControllerImpl implements ConstructionController {
       this.syncUi(true);
       return;
     }
+    this.stabilityRuntime.addPiece(placed);
+    this.recomputeStabilityAndPersist();
     this.requestTerrainConform(candidate);
-    this.lastPlacementMessage = `Placed ${candidate.piece.label} · ${constructionMaterialLabel(material)}`;
+    this.lastPlacementMessage = `Placed ${candidate.piece.label} · ${constructionMaterialLabel(material)} · ${Math.round((candidate.stabilityRatio ?? 0) * 100)}% support`;
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
     this.snapSelector.reset();
@@ -521,13 +630,17 @@ class ConstructionControllerImpl implements ConstructionController {
       this.syncUi(true);
       return;
     }
-    const removedIds = this.pieceStore.collectDependentIds(this.pieceStore.pieces[index]!.id);
-    const removedCount = this.pieceStore.removeByIds(removedIds);
+    const id = this.pieceStore.pieces[index]!.id;
+    this.stabilityRuntime.removePiece(id);
+    const removedCount = this.pieceStore.removeByIds(new Set([id]));
+    this.recomputeStabilityAndPersist();
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
     this.snapSelector.reset();
     this.savePlacedPieces();
-    this.lastPlacementMessage = removedCount === 1 ? "Deleted 1 piece." : `Deleted ${removedCount} connected pieces.`;
+    this.lastPlacementMessage = removedCount === 1
+      ? "Removed 1 piece. Unsupported islands will collapse after re-evaluation."
+      : "Construction removal failed.";
     console.info(`[construction] ${this.lastPlacementMessage}`);
     this.syncUi(true);
   }
