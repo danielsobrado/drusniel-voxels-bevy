@@ -11,6 +11,11 @@ import {
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
 import type { DressingSystem } from "../../ecology/dressing/dressing_system.js";
+import {
+  getRingDebugOverlay,
+  ringDebugEnabled,
+  type RingTelemetryState,
+} from "../../diagnostics/ring_debug_overlay.js";
 
 export interface UnderstoryControllerUiState {
   understoryEnabled: boolean;
@@ -54,11 +59,13 @@ interface UnderstoryGpuPrefilterStatsSource {
     prefilterRejectedClusters?: number;
     prefilterAcceptedClusters?: number;
     prefilterUnknownKeptClusters?: number;
+    readbackMs?: number | null;
   };
 }
 
 export function createUnderstoryController(deps: UnderstoryControllerDeps): UnderstoryController {
   setUnderstoryDepthPrepassEnabled(initialUnderstoryDepthPrepassEnabled());
+  const ringDebug = getRingDebugOverlay(deps.scene, "understory");
 
   const makeSettings = (): UnderstorySettings => {
     const state = deps.getUiState();
@@ -79,7 +86,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       },
       render: {
         ...deps.understoryConfig.render,
-        debugColorByClass: state.understoryDebugColorByClass,
+        debugColorByClass: state.understoryDebugColorByClass || ringDebugEnabled("understory"),
       },
     };
   };
@@ -100,7 +107,8 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
   });
   assertPageMeshSignaturesUnchanged(signaturesBefore, pageMeshSignatures(deps.nodes));
 
-  const sync = () => deps.syncStatsToState(withGpuPrefilterStats(system, system.getStats()));
+  const currentStats = () => withGpuPrefilterStats(system, system.getStats());
+  const sync = () => deps.syncStatsToState(currentStats());
   const rebuildWithCurrentSettings = () => {
     system.updateSettings(makeSettings());
     system.rebuild();
@@ -117,6 +125,21 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     update: (elapsedSeconds, ringCenter, camera) => {
       system.update(elapsedSeconds, ringCenter, camera);
       deps.dressingSystem?.update(ringCenter);
+      const settings = makeSettings();
+      const stats = currentStats();
+      ringDebug.update({
+        centerX: ringCenter.x,
+        centerZ: ringCenter.z,
+        cellSizeM: settings.placement.spacingM,
+        outerRadiusM: settings.distanceM,
+        innerRadiusM: 0,
+        refreshDistanceM: settings.placement.spacingM,
+        candidateGrid: Math.max(1, Math.ceil((settings.distanceM * 2) / settings.placement.spacingM)),
+        acceptedCount: telemetryState(system) === "unknown" ? undefined : stats.gpuVisibleCount,
+        telemetryState: telemetryState(system),
+        classColoring: settings.render.debugColorByClass,
+        lodMode: "class-only",
+      });
     },
     updateLighting: (lighting) => system.updateLighting(lighting),
     setEnabled: (enabled) => {
@@ -148,6 +171,11 @@ function withGpuPrefilterStats(system: UnderstorySystem, stats: UnderstoryStats)
     gpuPrefilterAcceptedClusters: gpuRingStats.prefilterAcceptedClusters ?? stats.gpuPrefilterAcceptedClusters ?? 0,
     gpuPrefilterUnknownKeptClusters: gpuRingStats.prefilterUnknownKeptClusters ?? stats.gpuPrefilterUnknownKeptClusters ?? 0,
   };
+}
+
+function telemetryState(system: UnderstorySystem): RingTelemetryState {
+  const source = system as unknown as UnderstoryGpuPrefilterStatsSource;
+  return source.gpuRingStats?.readbackMs == null ? "unknown" : "last-known";
 }
 
 function initialUnderstoryDepthPrepassEnabled(): boolean {
