@@ -20,6 +20,11 @@ describe("postProcessOutputGraphDirty", () => {
     expect(postProcessOutputGraphDirty(current, { taaEnabled: !current.taaEnabled })).toBe(true);
     expect(postProcessOutputGraphDirty(current, { aerialPerspectiveEnabled: !current.aerialPerspectiveEnabled })).toBe(true);
     expect(postProcessOutputGraphDirty(current, { contactShadowsEnabled: !current.contactShadowsEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { cloudsEnabled: !current.cloudsEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { gtaoEnabled: !current.gtaoEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { froxelsEnabled: !current.froxelsEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { bounceEnabled: !current.bounceEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { godRaysMode: current.godRaysMode === "off" ? "cheap" : "off" })).toBe(true);
   });
 
   it("rebuilds when bloom node constants change", () => {
@@ -46,6 +51,19 @@ describe("postProcessOutputGraphDirty", () => {
       contactShadowsStrength: current.contactShadowsStrength + 0.05,
       contactShadowsRadiusPx: current.contactShadowsRadiusPx + 0.25,
       contactShadowsDepthBias: current.contactShadowsDepthBias + 0.001,
+    })).toBe(false);
+  });
+
+  it("does not rebuild when only god-rays uniforms change", () => {
+    const current = { ...DEFAULT_POST_PROCESS_SETTINGS };
+    expect(postProcessOutputGraphDirty(current, {
+      godRaysDensity: current.godRaysDensity + 0.01,
+      godRaysDecay: current.godRaysDecay - 0.01,
+      godRaysWeight: current.godRaysWeight + 0.01,
+      godRaysExposure: current.godRaysExposure + 0.01,
+      godRaysDustStrength: current.godRaysDustStrength + 0.01,
+      godRaysDustScale: current.godRaysDustScale + 0.1,
+      godRaysDustSpeed: current.godRaysDustSpeed + 0.01,
     })).toBe(false);
   });
 });
