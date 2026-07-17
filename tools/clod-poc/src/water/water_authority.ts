@@ -53,6 +53,7 @@ export interface EditedWaterBody {
 const DEFAULT_BODY_KIND: WaterBodyKind = "pond";
 const DRY_BODY_ID = "";
 const STILL_FLOW = [0, 0] as const;
+const REVISION_MIX_MULTIPLIER = 1_000_003;
 
 function drySample(sourceRevision: number): WaterSample {
   return {
@@ -95,6 +96,15 @@ function hydrologySampleReady(hydrology: HydrologySystem, x: number, z: number):
   const tileX = Math.floor(x / atlas.tileSizeM);
   const tileZ = Math.floor(z / atlas.tileSizeM);
   return atlas.peek(tileX, tileZ) !== null;
+}
+
+function compositeRevision(sources: readonly WaterAuthoritySource[]): number {
+  if (sources.length === 0) return 0;
+  let revision = sources[0]!.revision() >>> 0;
+  for (let index = 1; index < sources.length; index += 1) {
+    revision = (Math.imul(revision, REVISION_MIX_MULTIPLIER) ^ (sources[index]!.revision() >>> 0)) >>> 0;
+  }
+  return revision;
 }
 
 export class EditedWaterAuthoritySource implements WaterAuthoritySource {
@@ -230,13 +240,13 @@ export function createCanonicalWaterAuthority(
         const sample = source.sample(x, z);
         if (sample) return sample;
       }
-      return drySample(this.revision());
+      return drySample(compositeRevision(ordered));
     },
     readyAt(x, z) {
       return this.sample(x, z).state !== "unknown";
     },
     revision() {
-      return ordered.reduce((revision, source) => Math.max(revision, source.revision()), 0);
+      return compositeRevision(ordered);
     },
   };
 }
