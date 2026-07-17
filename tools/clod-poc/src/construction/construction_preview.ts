@@ -21,9 +21,10 @@ export interface FindConstructionSnapInput {
   config: ConstructionSnapConfig;
 }
 
-function candidateRotations(baseRotation: number): number[] {
-  return Array.from({ length: ROTATION_QUARTER_COUNT }, (_, offset) =>
-    normalizeRotationQuarterTurns(baseRotation + offset));
+function candidateRotations(piece: ConstructionPieceDef, baseRotation: number): number[] {
+  const stepTurns = Math.max(1, Math.round((piece.rotationStepDegrees ?? 90) / 90));
+  return Array.from({ length: ROTATION_QUARTER_COUNT / stepTurns }, (_, offset) =>
+    normalizeRotationQuarterTurns(baseRotation + offset * stepTurns));
 }
 
 export function findConstructionSnapCandidates(input: FindConstructionSnapInput): ConstructionSnapResult[] {
@@ -33,7 +34,7 @@ export function findConstructionSnapCandidates(input: FindConstructionSnapInput)
     [input.ray.direction.x, input.ray.direction.y, input.ray.direction.z],
     input.maxDistanceM,
     input.piece,
-    candidateRotations(input.rotationQuarterTurns),
+    candidateRotations(input.piece, input.rotationQuarterTurns),
     input.config,
     releaseRadius,
     input.rotationQuarterTurns,
