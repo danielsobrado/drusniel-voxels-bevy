@@ -27,6 +27,17 @@ export type StreamRootCacheStats = WorkerCacheBuildStats;
 const streamingTokens = new WeakMap<object, TerrainStreamingToken>();
 const activeRequestTokens = new Set<TerrainStreamingToken>();
 
+function workerRealm(): boolean {
+  return typeof window === "undefined"
+    && typeof WorkerGlobalScope !== "undefined"
+    && globalThis instanceof WorkerGlobalScope;
+}
+
+async function yieldWorkerStreamingState(): Promise<void> {
+  if (!workerRealm()) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 export function beginStreamRootCacheOperation(): () => void {
   const token = captureTerrainStreamingToken();
   activeRequestTokens.add(token);
@@ -92,6 +103,7 @@ export async function storeStreamRootNode(
   buildMs: number,
   stats: StreamRootCacheStats,
 ): Promise<void> {
+  await yieldWorkerStreamingState();
   if (!ctx?.effective
     || residentHierarchyEnabled()
     || node.mesh.indices.length === 0
