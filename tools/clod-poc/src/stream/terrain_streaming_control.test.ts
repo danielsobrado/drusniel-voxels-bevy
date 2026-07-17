@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  applyTerrainStreamingState,
   captureTerrainStreamingToken,
+  registerTerrainStreamingWorker,
   resetTerrainStreamingControlForTests,
   runTerrainStreamingWork,
   terrainStreamingGeneration,
+  terrainStreamingGenerationIsCurrent,
   terrainStreamingIsEnabled,
 } from "./terrain_streaming_control.js";
 
@@ -47,5 +50,54 @@ describe("runTerrainStreamingWork", () => {
     runTerrainStreamingWork(true, () => undefined);
     expect(token.isCurrent()).toBe(false);
     expect(captureTerrainStreamingToken().isCurrent()).toBe(true);
+  });
+
+  it("sends the current state before worker requests and streams later transitions", () => {
+    const postMessage = vi.fn();
+    const unregister = registerTerrainStreamingWorker({ postMessage });
+
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: "terrainStreamingState",
+      enabled: true,
+      generation: 0,
+    });
+
+    runTerrainStreamingWork(false, () => undefined);
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: "terrainStreamingState",
+      enabled: false,
+      generation: 1,
+    });
+
+    unregister();
+    runTerrainStreamingWork(true, () => undefined);
+    expect(postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects stale or contradictory remote states without reviving old tokens", () => {
+    const token = captureTerrainStreamingToken();
+
+    expect(applyTerrainStreamingState({ enabled: false, generation: 0 })).toBe(false);
+    expect(terrainStreamingIsEnabled()).toBe(true);
+    expect(token.isCurrent()).toBe(true);
+
+    expect(applyTerrainStreamingState({ enabled: false, generation: 2 })).toBe(true);
+    expect(terrainStreamingIsEnabled()).toBe(false);
+    expect(terrainStreamingGeneration()).toBe(2);
+    expect(token.isCurrent()).toBe(false);
+
+    expect(applyTerrainStreamingState({ enabled: true, generation: 1 })).toBe(false);
+    expect(applyTerrainStreamingState({ enabled: true, generation: 2 })).toBe(false);
+    expect(terrainStreamingIsEnabled()).toBe(false);
+  });
+
+  it("accepts cache writes only for the enabled current generation", () => {
+    expect(terrainStreamingGenerationIsCurrent(0)).toBe(true);
+    runTerrainStreamingWork(false, () => undefined);
+    expect(terrainStreamingGenerationIsCurrent(0)).toBe(false);
+    expect(terrainStreamingGenerationIsCurrent(1)).toBe(false);
+    runTerrainStreamingWork(true, () => undefined);
+    expect(terrainStreamingGenerationIsCurrent(1)).toBe(false);
+    expect(terrainStreamingGenerationIsCurrent(2)).toBe(true);
   });
 });
