@@ -4,6 +4,7 @@ import {
   setTerrainStreamingEnabled,
 } from "../stream/terrain_streaming_control.js";
 import {
+  beginStreamRootCacheOperation,
   createEmptyStreamRootCacheStats,
   streamRootCacheOperationIsCurrent,
 } from "./clodStreamRootCache.js";
@@ -19,6 +20,17 @@ describe("stream-root cache streaming token", () => {
     setTerrainStreamingEnabled(true);
 
     expect(streamRootCacheOperationIsCurrent(stats)).toBe(false);
+    expect(streamRootCacheOperationIsCurrent(createEmptyStreamRootCacheStats())).toBe(true);
+  });
+
+  it("conservatively blocks cache writes while a stale root request is still active", () => {
+    const finish = beginStreamRootCacheOperation();
+    setTerrainStreamingEnabled(false);
+    setTerrainStreamingEnabled(true);
+
+    expect(streamRootCacheOperationIsCurrent(createEmptyStreamRootCacheStats())).toBe(false);
+
+    finish();
     expect(streamRootCacheOperationIsCurrent(createEmptyStreamRootCacheStats())).toBe(true);
   });
 });

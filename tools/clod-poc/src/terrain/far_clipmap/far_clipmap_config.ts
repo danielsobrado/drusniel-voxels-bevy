@@ -110,9 +110,9 @@ export function farClipmapRendererAllowed(
   params: URLSearchParams,
   webGpuAvailable = params.get("renderer") !== "webgl",
 ): boolean {
+  if (params.get("farClipmapMode") === "replace") return webGpuAvailable;
   const sceneName = params.get("scene") ?? "";
-  if (!sceneName.startsWith("infinite-")) return true;
-  return params.get("farClipmapMode") === "replace" && webGpuAvailable;
+  return !sceneName.startsWith("infinite-");
 }
 
 export function resolveFarClipmapConfig(

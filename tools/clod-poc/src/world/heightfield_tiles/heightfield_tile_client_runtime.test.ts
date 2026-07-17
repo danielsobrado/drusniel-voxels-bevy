@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 const clientMocks = vi.hoisted(() => ({
   buildWorld: vi.fn(async () => ({})),
   buildHeightfieldTiles: vi.fn(),
+  buildStreamRoots: vi.fn(async () => ({ nodes: [], buildMs: 0, transferBytes: 0 })),
   dispose: vi.fn(),
 }));
 const runtimeMocks = vi.hoisted(() => ({
@@ -17,6 +18,10 @@ vi.mock("../../clod_worker_client.js", () => ({
 
     buildHeightfieldTiles(...args: unknown[]) {
       return (clientMocks.buildHeightfieldTiles as (...input: unknown[]) => unknown)(...args);
+    }
+
+    buildStreamRoots(...args: unknown[]) {
+      return (clientMocks.buildStreamRoots as (...input: unknown[]) => Promise<unknown>)(...args);
     }
 
     dispose(): void {
@@ -89,6 +94,17 @@ describe("heightfieldTilesReadyForPage", () => {
       64,
     )).toBe(true);
     expect(requestedTileIds).toEqual([`${expectedTileCoord},${expectedTileCoord}`]);
+  });
+});
+
+describe("stream-root cache request scope", () => {
+  it("keeps the wrapped worker result unchanged", async () => {
+    await expect(client.buildStreamRoots([{ px: 1, pz: 2 }])).resolves.toEqual({
+      nodes: [],
+      buildMs: 0,
+      transferBytes: 0,
+    });
+    expect(clientMocks.buildStreamRoots).toHaveBeenCalledWith([{ px: 1, pz: 2 }]);
   });
 });
 
