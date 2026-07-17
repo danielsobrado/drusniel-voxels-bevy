@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { PropEditStore } from "./prop_edit_store.js";
 import { surfaceHeight } from "../terrain/terrain.js";
+import type { ProjectPropInstance } from "./project_props.js";
 
 function makeStore(): PropEditStore {
   let n = 0;
   return new PropEditStore({ idFactory: () => `generated-${++n}` });
+}
+
+function restoredProp(id: string, revision: number): ProjectPropInstance {
+  return {
+    id,
+    prefabId: "asset-b",
+    position: [10, 20, 30],
+    rotation: [0, 0, 0, 1],
+    scale: [1, 1, 1],
+    anchor: "terrain",
+    seed: 9,
+    variationId: 2,
+    flags: 1,
+    revision,
+  };
 }
 
 describe("PropEditStore", () => {
@@ -43,18 +59,7 @@ describe("PropEditStore", () => {
     const revisions: number[] = [];
     edits.subscribe((result) => revisions.push(result.revision));
 
-    edits.restore([{
-      id: "prop-a",
-      prefabId: "asset-b",
-      position: [10, 20, 30],
-      rotation: [0, 0, 0, 1],
-      scale: [1, 1, 1],
-      anchor: "terrain",
-      seed: 9,
-      variationId: 2,
-      flags: 1,
-      revision: 5,
-    }]);
+    edits.restore([restoredProp("prop-a", 5)]);
 
     const snapshot = edits.snapshot();
     snapshot[0]!.position[0] = 999;
@@ -80,5 +85,23 @@ describe("PropEditStore", () => {
     expect(() => edits.add({ prefabId: "", position: [0, 0, 0] })).toThrow(/prefabId/i);
     expect(() => edits.add({ prefabId: "asset-a", position: [0, Number.NaN, 0] })).toThrow(/position/i);
     expect(() => edits.add({ prefabId: "asset-a", position: [0, 0, 0], scale: [1, 0, 1] })).toThrow(/scale/i);
+  });
+
+  it("keeps existing state, revision, and listeners untouched when restore is rejected", () => {
+    const edits = makeStore();
+    edits.restore([restoredProp("existing", 3)]);
+    const before = edits.snapshot();
+    const revision = edits.revision();
+    const events: number[] = [];
+    edits.subscribe((result) => events.push(result.revision));
+
+    expect(() => edits.restore([
+      restoredProp("duplicate", 4),
+      restoredProp("duplicate", 5),
+    ])).toThrow(/duplicate prop id/i);
+
+    expect(edits.snapshot()).toEqual(before);
+    expect(edits.revision()).toBe(revision);
+    expect(events).toEqual([]);
   });
 });
