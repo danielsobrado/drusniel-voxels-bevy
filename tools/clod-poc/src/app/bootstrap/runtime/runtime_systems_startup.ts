@@ -55,6 +55,7 @@ import {
   publishRpgDensityCompositionCounters,
   type RpgDensityComposition,
 } from "../../../qa/rpg_density_scene_composition.js";
+import { createAgentEnvelopeRuntime, type AgentEnvelopeRuntime } from "../../../agents/agent_envelope_runtime.js";
 import { isRpgDensityScene } from "../../../scenes/rpg_density_scenes.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
@@ -102,6 +103,7 @@ export interface RuntimeSystemsStartupResult extends VegetationStartupResult, Wa
   drainVegetationDirtyQueue: () => void;
   customProps: CustomPropsStartupResult | null;
   constructionController: ConstructionController | null;
+  agentEnvelopeRuntime: AgentEnvelopeRuntime | null;
 }
 
 function withConstructionGuardDispose(
@@ -406,7 +408,9 @@ export async function runRuntimeSystemsStartup(
             defaultConstructionConfig.placement.maxRayDistanceM,
             editAuthority.allowFarPreview ? editAuthority.buildPreviewRadiusM : editAuthority.buildCommitRadiusM,
           );
-      const constructionUnboundedWorld = unboundedWorld;
+      // RPG density compositions sit on the coast-to-coast route outside the small
+      // startup world box; keep placement unbounded so seeded pieces are not rejected.
+      const constructionUnboundedWorld = unboundedWorld || densityComposition !== null;
       const constructionConfig = {
         ...defaultConstructionConfig,
         placement: {
@@ -464,6 +468,10 @@ export async function runRuntimeSystemsStartup(
     }
   }
 
+  const agentEnvelopeRuntime = searchParams.get("agentEnvelope") === "1"
+    ? createAgentEnvelopeRuntime(scene, searchParams)
+    : null;
+
   return {
     ...vegetation,
     ...waterWeather,
@@ -472,5 +480,6 @@ export async function runRuntimeSystemsStartup(
     drainVegetationDirtyQueue,
     customProps,
     constructionController,
+    agentEnvelopeRuntime,
   };
 }

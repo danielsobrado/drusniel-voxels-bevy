@@ -19,6 +19,7 @@ export interface FramePerfPhaseTiming {
   brushMs: number;
   combatMs: number;
   spellsMs: number;
+  agentEnvelopeMs: number;
   terrainPhaseMs: number;
   shadowProxyMs: number;
   clodShadowMs: number;

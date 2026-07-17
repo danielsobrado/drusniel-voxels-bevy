@@ -265,7 +265,7 @@ export function runFrameLoopStartup(
     const proxyConfig = getShadowProxyConfig();
     return shadowProxyStatsToCounters({ proxyEnabled: shadowProxyDebugState.shadowProxyEnabled, sunShadowsEnabled: shadowProxyDebugState.sunShadowsEnabled, stats: shadowProxyController.runtime.stats, lightShadowMapSize: shadowProxyDebugState.lightShadowMapSize, lightShadowCameraExtentM: proxyConfig.lightShadowCameraExtentM });
   };
-  const { drainVegetationDirtyQueue, treeController, grassController, understoryController, forestLightingController, applyForestLightingToPropMaterials, stoneController, waterController, deepOceanMaterial, deepOceanSurface, waterField, deepOceanConfig, oceanSampler, weatherController, updateWeatherStats, grassSystem, treeSystem, understorySystem, forestLightingSystem, stoneSystem, makeGrassSettings, formatTreeGpuSummary, formatUnderstoryGpuSummary, grassStats, treeStats, stoneStats, understoryStats, forestLightingStats, customProps, constructionController } = input.runtime;
+  const { drainVegetationDirtyQueue, treeController, grassController, understoryController, forestLightingController, applyForestLightingToPropMaterials, stoneController, waterController, deepOceanMaterial, deepOceanSurface, waterField, deepOceanConfig, oceanSampler, weatherController, updateWeatherStats, grassSystem, treeSystem, understorySystem, forestLightingSystem, stoneSystem, makeGrassSettings, formatTreeGpuSummary, formatUnderstoryGpuSummary, grassStats, treeStats, stoneStats, understoryStats, forestLightingStats, customProps, constructionController, agentEnvelopeRuntime } = input.runtime;
   const deepOceanMeshPresent = deepOceanSurface !== null;
   const { updateInfo } = infoPanel;
   const { playerTerraformEditActive } = terrainEdit;
@@ -547,6 +547,12 @@ export function runFrameLoopStartup(
     construction: constructionController ? { update: () => { constructionController.update(); session.constructionBuildActive = constructionController.stats().active; }, isActive: () => constructionController.stats().active } : undefined,
     combat: combatController ? { update: (timeMs) => combatController.update(timeMs) } : undefined,
     spells: spellVfxController ? { update: (timeMs) => spellVfxController.update(timeMs) } : undefined,
+    agentEnvelope: agentEnvelopeRuntime ? {
+      update: (deltaSeconds) => {
+        const counters = longView.hooks?.stats?.counters;
+        if (counters) agentEnvelopeRuntime.update(deltaSeconds, counters);
+      },
+    } : undefined,
     clodShadow: clodShadowOverlayController ? { update: () => clodShadowOverlayController.update(), statsController: session.clodShadowStatsController, isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off" } : undefined,
     canopy: input.terrainView.canopyShellSystem ? { update: (cameraX, cameraZ) => { input.terrainView.canopyShellSystem!.update(cameraX, cameraZ); publishWorldCenterStatsToCounters(longView.hooks?.stats?.counters, computeWorldCenterDebugStats({ camera: { x: cameraX, z: cameraZ }, canopyCenter: { x: cameraX, z: cameraZ } })); } } : undefined,
   });

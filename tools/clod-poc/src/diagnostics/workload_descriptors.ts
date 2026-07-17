@@ -58,7 +58,7 @@ const SUM_COUNTER_SOURCES: Record<string, readonly string[]> = {
   colliders: ["props.colliders_active", "construction_colliders_active", "terrain_colliders_active"],
 };
 
-/** Agent rings are defined as zero until the D5 envelopes exist. */
+/** Agent rings read `agents_full/mid/frozen` counters when D5 envelopes are active. */
 const AGENT_KEYS = ["agents_full", "agents_mid", "agents_frozen"] as const;
 
 const MIP_CHAIN_FACTOR = 4 / 3;

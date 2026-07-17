@@ -28,6 +28,33 @@ export const PERF_MAIN_CASES: readonly PerfMainCase[] = [
   { name: "terrain-material-cache-debug", params: { scene: "infinite-naadf-far", terrainMaterialCache: "1", terrainMaterialCacheDebug: "far_color" } },
   { name: "selection-cpu", params: { webgpuSelection: "0" } },
   { name: "clod-perf-mode", params: { clodPerf: "1" } },
+  {
+    name: "rpg-village",
+    params: {
+      scene: "rpg-village",
+      seed: "1337",
+      world: "32",
+      startupWorld: "2",
+      freeze: "0",
+    },
+  },
+  {
+    name: "rpg-player-base",
+    params: {
+      scene: "rpg-player-base",
+      seed: "1337",
+      world: "32",
+      startupWorld: "2",
+      freeze: "0",
+    },
+  },
+  // D4 marginal-cost toggles on the village settled pose.
+  { name: "rpg-village-trees-off", params: { scene: "rpg-village", seed: "1337", world: "32", startupWorld: "2", freeze: "0", trees: "0", understory: "0" } },
+  { name: "rpg-village-grass-off", params: { scene: "rpg-village", seed: "1337", world: "32", startupWorld: "2", freeze: "0", grass: "0" } },
+  { name: "rpg-village-props-off", params: { scene: "rpg-village", seed: "1337", world: "32", startupWorld: "2", freeze: "0", customProps: "0" } },
+  { name: "rpg-village-construction-off", params: { scene: "rpg-village", seed: "1337", world: "32", startupWorld: "2", freeze: "0", construction: "0" } },
+  { name: "rpg-village-water-off", params: { scene: "rpg-village", seed: "1337", world: "32", startupWorld: "2", freeze: "0", water: "0" } },
+  { name: "rpg-village-vegetation-off", params: { scene: "rpg-village", seed: "1337", world: "32", startupWorld: "2", freeze: "0", grass: "0", trees: "0", stones: "0", understory: "0" } },
 ];
 
 export function selectPerfMainCases(

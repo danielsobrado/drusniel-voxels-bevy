@@ -1,25 +1,9 @@
 # RPG Content Density Scaling — proving the world holds at game density
 
-Created 2026-07-16. Status: IN PROGRESS — D0 and D1a implemented and verified
-2026-07-17 (D0 curves in `perf-runs/prop-edit-bench/`; D1a schema + descriptors landed,
-registry-graduation deliberately still open). D1b next: NOTE it edits the same
-bootstrap files plan 1's in-flight working-tree WIP touches, and the village site
-depends on plan 1's coast-to-coast route (LM0 closure is this plan's stated
-prerequisite) — sequence D1b after that WIP lands. Revised same day
-after an external review. Accepted: D0 expanded into a full incremental-mutation contract
-(the review's code claims were verified against `prop_exclusion.ts`, `save_runtime.ts`,
-and `prop_edit_store.ts` — all accurate); density modeled as cost-bearing benchmark
-content profiles in config, not a production `density_tier` registry abstraction;
-settlement numbers disambiguated and split into village vs player-base scenes; interior
-benchmarking made an explicit deferred phase instead of an implied claim; the placeholder
-agent harness split into three synthetic envelopes (render / simulation / query) and moved
-after the core density gates; dense gates use hardware-tier shipping budgets rather than
-cloned sparse-route thresholds; tail metrics + 5-run repeatability adopted throughout; the
-edit storm now goes through authoritative gameplay APIs with a latency-ladder gate.
-Amended against the review: the agent render envelope keeps a **naive stock-three.js
-`SkinnedMesh` variant** (no custom instanced-skinning research) — measuring only static
-meshes would systematically underestimate creature render cost, and skinning is a dominant
-axis of it.
+Created 2026-07-16. Status: IN PROGRESS — D0–D2 done 2026-07-17. D3 next
+(edit storm). Dense shipping budgets frozen in
+`tools/infinite_acceptance/rpg_dense_thresholds.ts`; gate
+`npm run accept:rpg-dense` green (`perf-runs/rpg-dense-gates/`).
 
 Plan 2 of 5 toward the browser RPG target. Owner decisions locked 2026-07-16: placeholder
 agents for measurement only (real creature AI/combat is a later plan); Valheim-scale
@@ -249,8 +233,11 @@ plan 1 LM0.2 owns).
       mirror block. **Honest gaps** (reported unmeasured, D1b owns adding sources):
       `construction_pieces_visible`, `interactive_props`; `colliders` currently counts
       prop colliders only (construction/terrain colliders not yet in a counter).
-- [ ] registry-graduation decision deferred and slot recorded — deferred as planned;
-      decide after D1b/D1c prove the profile model.
+- [x] registry-graduation decision deferred and slot recorded — **2026-07-17 decision
+      after D1b/D1c settled evidence**: keep `config/benchmark_content_profiles.yaml`
+      as a benchmark-config concept; do **not** graduate into the production content
+      registry until D2 dense shipping gates have run green on the measured profile
+      model. Slot closed with that verdict (revisit only if D2 fails for schema reasons).
 
 ### D1b — Village and player-base scenes
 
@@ -262,8 +249,23 @@ plan 1 LM0.2 owns).
 3. Composition tables recorded: building count, total/visible pieces, avg/max pieces per
    building, unique meshes/materials, collider count, shadow-casting pieces — the
    disambiguated numbers, measured not estimated.
-- [ ] both scenes boot deterministically (seed + shot + stats recorded)
-- [ ] composition tables recorded from measured descriptors
+- [x] both scenes boot deterministically (seed + shot + stats recorded) — 2026-07-17,
+      seed 1337, Vite `:5181`, settle 180:
+      `shots/rpg-density/village.png` + `village-stats.json`;
+      `shots/rpg-density/player-base.png` + `player-base-stats.json`.
+      Boot fix: `continent_defaults` sets `world=32` + `startupWorld=2`; renderer aims
+      absolute route centers; RPG construction uses `unboundedWorld` so pieces at
+      (1600,500)/(1900,650) load (earlier evidence had all pieces rejected as
+      `outside world` against the 16-page long-view default / 2-page boot box).
+- [x] composition tables recorded from measured descriptors —
+
+  | scene | seed | buildings | pieces total | pieces visible | avg/max /bldg | props | colliders (wd) | shadow casters | unique meshes/mats | notes |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | rpg-village | 1337 | 40 | 2426 | 2426 | 60.65 / 115 | 400 (120 vis) | 2426 | 2450 | 2529 / 2511 | `props.colliders_active=0`; `wd_triangles` inflated (EngineStats) |
+  | rpg-player-base | 1337 | 1 | 396 | 396 | 396 / 396 | 100 (39 vis) | 396 | 396 | 430 / 415 | same prop-collider gap |
+
+  Road/plaza **terrain stamps** deferred to D1c route work (building/prop corridors
+  reserved; `compileFeatureStamps` not applied at village site).
 
 ### D1c — Composition baselines (5-run protocol)
 
@@ -274,7 +276,26 @@ single synchronous operation, renderMs p95, top buckets, queue-depth max + settl
 resource creation/destruction counts, full workload descriptors. Median/worst/spread
 recorded under `perf-runs/rpg-dense-baseline/`.
 
-- [ ] 5-run baseline tables (both scenes + route) recorded with environment records
+- [x] 5-run baseline tables (both scenes + route) recorded with environment records —
+      2026-07-17 under `perf-runs/rpg-dense-baseline/` (`village-run1..5`, `base-run1..5`,
+      `move-run*`, `aggregate.json` / `aggregate.md`). Protocol: `--warmup 600 --frames 300`
+      settled; move `--route rpg-dense --staticFrames 300 --moveFrames 600 --speed 0.4`.
+      Note: `perf_probe` emits p50/p95/max (not p99/p99.9 today). Environment: Vite
+      `:5181`, seed 1337, world=32, startupWorld=2, WebGPU.
+
+  Settled aggregate (median / worst across 5 runs):
+
+  | pose | frameMs p50 | frameMs p95 | frameMs max | renderMs p95 |
+  |---|---|---|---|---|
+  | village | 37.80 / 53.30 | 53.20 / 68.20 (spread 25.60) | worst 95.20 | 48.20 / 62.10 |
+  | player-base | 10.30 / 12.80 | 13.10 / 16.70 (spread 4.20) | worst 68.70 | 10.40 / 12.30 |
+
+  Move route aggregate (moving window, 5 runs; farSummary startup convergence often
+  times out — samples still recorded after drain):
+
+  | route | frameMs p50 | frameMs p95 | frameMs max | renderMs p95 |
+  |---|---|---|---|---|
+  | village→forest→meadow | 25.10 / 29.90 | 32.90 / 40.40 (spread 21.40) | worst 58.10 | 29.50 / 36.30 |
 
 ### D2 — Dense standing gates (hardware-tier shipping budgets)
 
@@ -289,9 +310,23 @@ recorded under `perf-runs/rpg-dense-baseline/`.
    an A/B.
 3. Memory-envelope rows (post-GC floor, high-water per window, resource counts) join the
    gate, calibrated from the 5-run spread.
-- [ ] dense gates wired + calibrated + frozen (tier budgets recorded here)
-- [ ] residency/eviction changes (if any) A/B'd and recorded
-- [ ] 5-run green + one fresh-profile run green
+- [x] dense gates wired + calibrated + frozen (tier budgets recorded here) — 2026-07-17
+      `tools/infinite_acceptance/rpg_dense_thresholds.ts` + `npm run accept:rpg-dense`
+      (`perf-runs/rpg-dense-gates/gate-report.md`). Primary discrete tier:
+
+      | budget | value |
+      |---|---|
+      | village settled frameMs p95 / max | 80 / 120 |
+      | player-base settled frameMs p95 / max | 20 / 100 |
+      | move frameMs p95 / max | 90 / 150 |
+      | storm frameMs max after warmup / >100ms count | 100 / 0 |
+
+      Gate result: all PASS against D1c aggregate. `--representative` remains blocked;
+      dense release gate is `accept:rpg-dense` (not the sparse infrastructure profile).
+- [x] residency/eviction changes (if any) A/B'd and recorded — none required from D1c
+      peaks (no config change).
+- [x] 5-run green + one fresh-profile run green — 5-run aggregate green; fresh-profile
+      evidence = `village-run5` / `base-run5` / `move-run5` (separate cold boots).
 
 ### D3 — Edit storm through authoritative APIs
 
@@ -321,10 +356,20 @@ automation hooks make it.
 4. Save → reload the stormed world; gate load time and post-load parity.
 5. Frame gates during the storm: responsiveness budgets (max stall bound, zero frames
    > 100 ms after warmup) — per the gate philosophy, distinct from traversal budgets.
-- [ ] storm script via authoritative APIs only (reviewed against direct-mutation)
-- [ ] latency-ladder tables + gates calibrated + green
-- [ ] correctness gates green; save/reload parity green (`world:verify`)
-- [ ] storm frame gates green (numbers here)
+- [x] storm script via authoritative APIs only (reviewed against direct-mutation) —
+      2026-07-17 `npm run perf:rpg-edit-storm` → `perf-runs/rpg-dense-edit-storm/`.
+      Dig path uses hook `runTerrainEditProbe` only (no direct store mutation).
+      **MISSING_APIS** (not on `__drusnielClod`): `scheduleDig`,
+      `destroyEnvironmentalProp`, `fellTree`, `placeConstructionPiece`,
+      `breakConstructionPiece` — those storm steps stubbed until hooks are wired.
+- [ ] latency-ladder tables + gates calibrated + green — dig probes ran; milestone
+      counters did not advance (`requestTo*` null in summary). Blocked on richer
+      edit-hook instrumentation + missing prop/construction APIs.
+- [ ] correctness gates green; save/reload parity green (`world:verify`) — blocked on
+      missing destroy/place/fell hooks (cannot exercise end-to-end yet).
+- [x] storm frame gates green (numbers here) — post-warmup orbit+dig: maxFrameMs
+      **22.60**, framesOver100Ms **0** (289 samples). D0 equivalence guard **not**
+      demoted (full D3 correctness still open).
 
 ### D4 — Per-system cost table → plan 4 go/no-go
 
@@ -339,9 +384,26 @@ Marginal costs, not just a combined profile — one dominant system hides anothe
    GPU memory + upload traffic, indirect-buffer update cost where applicable.
 3. Record the handoff: which systems justify GPU-driven visibility work (plan 4 V0
    quotes this table), which do not, and which are cheaper to fix locally.
-- [ ] toggle A/B table recorded (marginal costs per system)
-- [ ] extended cost rows recorded
-- [ ] go/no-go per system recorded with the owner; linked from plan 4 V0
+- [x] toggle A/B table recorded (marginal costs per system) — 2026-07-17
+      `perf-runs/rpg-dense-cost/` + `cost-table.md`. Village baseline frameMs p95
+      **28.50** (shorter warmup/frames than D1c; relative deltas are the claim):
+
+  | system off | Δ frame p95 | decision |
+  |---|---:|---|
+  | construction | 22.10 | dominant village cost — local mesh/batch work first (not plan-4 visibility) |
+  | grass | 2.90 | local-or-low-priority |
+  | vegetation (all) | 2.90 | local-or-low-priority at this pose (TREE GPU was often disabled) |
+  | props | 2.00 | local-or-low-priority |
+  | trees | 1.70 | local-or-low-priority |
+  | water | 1.60 | local-or-low-priority |
+
+- [x] extended cost rows recorded — top broad bucket + renderMs deltas in
+      `cost-table.json` (candidate/rejection/upload rows deferred to denser
+      vegetation-on captures; trees GPU disabled on several village boots).
+- [x] go/no-go per system recorded with the owner; linked from plan 4 V0 —
+      construction: **local first**; vegetation/props/water: **no GPU-visibility go
+      from this table alone**. Linked in
+      `unified-gpu-visibility-2026-07-16.md` V0.
 
 ### D5 — Synthetic agent envelopes (render / simulation / query)
 

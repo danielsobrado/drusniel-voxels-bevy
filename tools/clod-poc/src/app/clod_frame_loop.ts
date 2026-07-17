@@ -124,7 +124,7 @@ function recordStatsSyncThrottleCounters(
 }
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, floatingOrigin, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, floatingOrigin, shadowProxy, clodShadow, canopy, construction, combat, spells, agentEnvelope } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -295,6 +295,9 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
     timed(collectFrameTiming, phaseTiming, "spellsMs", () => {
       spells?.update(playerDelta);
+    });
+    timed(collectFrameTiming, phaseTiming, "agentEnvelopeMs", () => {
+      agentEnvelope?.update(playerDelta);
     });
     timed(collectFrameTiming, phaseTiming, "clodApplyMs", () => {
       runTerrainStreamingWork(terrainStreamingEnabled, () => terrain.drainClodApplyQueue?.());

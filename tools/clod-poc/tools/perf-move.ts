@@ -49,6 +49,15 @@ const ROUTE_SEGMENTS = [
   { label: "north", dux: 0, duz: -1, fraction: 0.15 },
 ] as const;
 
+/** Village center → forest ring → meadow; used by D1c dense baselines. */
+const RPG_DENSE_ROUTE_SEGMENTS = [
+  { label: "village-to-forest", dux: 0.6, duz: 0.8, fraction: 0.4 },
+  { label: "forest-arc", dux: 1, duz: 0, fraction: 0.35 },
+  { label: "forest-to-meadow", dux: 0.4, duz: -0.9, fraction: 0.25 },
+] as const;
+
+const RPG_VILLAGE_SPAWN = { x: 1600, z: 500, yaw: 2.65 } as const;
+
 const PHASE_KEYS = [
   "frameMs",
   "selectionMs",
@@ -265,8 +274,10 @@ function summarizeWindow(samples: readonly Record<string, unknown>[]): WindowSum
 }
 
 function buildParams(args: Args): Record<string, string> {
-  const world = str(args["world"]) ?? "16";
-  const seed = str(args["seed"]) ?? "1";
+  const routeProfile = str(args["route"]) ?? "default";
+  const rpgDense = routeProfile === "rpg-dense";
+  const world = str(args["world"]) ?? (rpgDense ? "32" : "16");
+  const seed = str(args["seed"]) ?? (rpgDense ? "1337" : "1");
   const moveFrames = num(args["moveFrames"], 900);
   const staticFrames = num(args["staticFrames"], 300);
   const profile = str(args["profile"]) ?? "acceptance";
@@ -287,14 +298,15 @@ function buildParams(args: Args): Record<string, string> {
   params["perfSampleFrames"] = String(Math.max(moveFrames, staticFrames) * 4);
   delete params["perfProbeConvergenceGate"];
 
-  params["scene"] = str(args["scene"]) ?? "infinite-islands";
+  params["scene"] = str(args["scene"]) ?? (rpgDense ? "rpg-village" : "infinite-islands");
   params["world"] = world;
   params["seed"] = seed;
+  if (rpgDense) params["startupWorld"] = str(args["startupWorld"]) ?? "2";
   params["webgpuSelection"] = "1";
   params["farShell"] = "1";
-  params["x"] = str(args["x"]) ?? String(SPAWN_X);
-  params["z"] = str(args["z"]) ?? String(SPAWN_Z);
-  params["yaw"] = str(args["yaw"]) ?? String(SPAWN_YAW);
+  params["x"] = str(args["x"]) ?? String(rpgDense ? RPG_VILLAGE_SPAWN.x : SPAWN_X);
+  params["z"] = str(args["z"]) ?? String(rpgDense ? RPG_VILLAGE_SPAWN.z : SPAWN_Z);
+  params["yaw"] = str(args["yaw"]) ?? String(rpgDense ? RPG_VILLAGE_SPAWN.yaw : SPAWN_YAW);
   const renderScale = str(args["renderScale"]);
   if (renderScale) {
     params["renderScale"] = renderScale;
@@ -309,6 +321,7 @@ function buildParams(args: Args): Record<string, string> {
 
   const runnerArgs = new Set([
     "baseUrl", "out", "profile", "world", "seed", "scene", "x", "z", "yaw",
+    "route", "startupWorld",
     "staticFrames", "moveFrames", "speed", "shots", "cpuprofile", "trace", "onsetFrames", "turnRate",
     "readyTimeout", "convergenceTimeout", "moveTimeout", "checkpointConvergenceTimeout",
     "renderScale", "viewPrewarmCompile", "sceneCompileWarm", "viewPrewarmDraw",
@@ -492,8 +505,9 @@ async function setPose(page: Page, pose: CamPose): Promise<void> {
 
 interface RouteSegmentSpec { label: string; dux: number; duz: number; lengthM: number }
 
-function routeSegments(totalDistanceM: number): RouteSegmentSpec[] {
-  return ROUTE_SEGMENTS.map((segment) => ({
+function routeSegments(totalDistanceM: number, routeProfile = "default"): RouteSegmentSpec[] {
+  const template = routeProfile === "rpg-dense" ? RPG_DENSE_ROUTE_SEGMENTS : ROUTE_SEGMENTS;
+  return template.map((segment) => ({
     label: segment.label,
     dux: segment.dux,
     duz: segment.duz,
@@ -714,7 +728,7 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
 
   const params = buildParams(args);
-  const segments = routeSegments(moveFrames * speed);
+  const segments = routeSegments(moveFrames * speed, str(args["route"]) ?? "default");
   const url = buildUrl(baseUrl, params);
   console.log(`[perf-move] url: ${url}`);
   console.log(`[perf-move] static ${staticFrames}f, moving ${moveFrames}f @ ${speed} m/frame (${(moveFrames * speed).toFixed(0)}m route)`);

@@ -210,6 +210,10 @@ export interface FrameLoopSpellsDeps {
   update: (timeMs: number) => void;
 }
 
+export interface FrameLoopAgentEnvelopeDeps {
+  update: (deltaSeconds: number) => void;
+}
+
 export interface ClodFrameLoopDeps {
   render: FrameLoopRenderDeps;
   player: FrameLoopPlayerDeps;
@@ -226,4 +230,5 @@ export interface ClodFrameLoopDeps {
   construction?: FrameLoopConstructionDeps;
   combat?: FrameLoopCombatDeps;
   spells?: FrameLoopSpellsDeps;
+  agentEnvelope?: FrameLoopAgentEnvelopeDeps;
 }

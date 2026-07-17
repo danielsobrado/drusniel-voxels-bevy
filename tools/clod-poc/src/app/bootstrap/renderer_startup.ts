@@ -38,16 +38,32 @@ import {
   parseBorderOceanCamString,
   parseBorderOceanSceneConfig,
 } from "../../debug/border_ocean_scene.js";
+import {
+  isRpgDensityScene,
+  rpgDensitySceneCenter,
+  type RpgDensitySceneId,
+} from "../../scenes/rpg_density_scenes.js";
 
 export type AppRenderer = Awaited<ReturnType<typeof createWebGpuAppRenderer>> | ReturnType<typeof createWebGlAppRenderer>;
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
+const CONTINENT_SCENE = "continent";
 const CAVE_TEST_SCENE = "cave-test";
 const INFINITE_PLAYER_WORLD_RADIUS_M = 1_000_000_000;
 
 function usesUnboundedTerrain(scene: string | null): boolean {
-  return scene === INFINITE_ISLANDS_SCENE || scene === CAVE_TEST_SCENE;
+  return scene === INFINITE_ISLANDS_SCENE || scene === CAVE_TEST_SCENE || scene === CONTINENT_SCENE;
 }
+
+/** RPG density route sites are absolute metres; phase0 ratios assume the full authored domain. */
+function rpgDensityCameraTarget(searchParams: URLSearchParams): { x: number; z: number } | null {
+  const sceneId = searchParams.get("rpgDensityScene");
+  if (!isRpgDensityScene(sceneId)) return null;
+  return rpgDensitySceneCenter(sceneId as RpgDensitySceneId);
+}
+
+/** Authored RPG domain (32 pages · 64 m); used when startup world is a smaller bootstrap box. */
+const RPG_DENSITY_DOMAIN_CELLS = 32 * 64;
 
 export interface RendererStartupInput {
   searchParams: URLSearchParams;
@@ -82,6 +98,9 @@ export interface RendererStartupResult {
 }
 
 export function playerWorldBoundsForScene(searchParams: URLSearchParams, worldCells: number): HorizontalWorldBounds {
+  if (isRpgDensityScene(searchParams.get("rpgDensityScene"))) {
+    return { minX: 0, minZ: 0, maxX: RPG_DENSITY_DOMAIN_CELLS, maxZ: RPG_DENSITY_DOMAIN_CELLS };
+  }
   if (!usesUnboundedTerrain(searchParams.get("scene"))) {
     return { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells };
   }
@@ -253,14 +272,18 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       controls.update();
     } else if (activePhase0Scene) {
       const cam = activePhase0Scene.camera;
-      const xRatio = cam.x_ratio ?? cam.start_x_ratio ?? 0.5;
-      const zRatio = cam.z_ratio ?? cam.start_z_ratio ?? 0.5;
       const yOffset = cam.y_offset_m ?? worldCells * 0.45;
       const lookDist = cam.look_distance_m ?? worldCells;
-      const cx = worldCells * xRatio;
-      const cz = worldCells * zRatio;
+      const rpgTarget = rpgDensityCameraTarget(searchParams);
+      const cx = rpgTarget
+        ? rpgTarget.x
+        : worldCells * (cam.x_ratio ?? cam.start_x_ratio ?? 0.5);
+      const cz = rpgTarget
+        ? rpgTarget.z
+        : worldCells * (cam.z_ratio ?? cam.start_z_ratio ?? 0.5);
+      const orbitBack = rpgTarget ? Math.min(lookDist, 240) : worldCells * 0.15;
       controls.target.set(cx, 64, cz + lookDist * 0.1);
-      camera.position.set(cx - worldCells * 0.15, yOffset, cz + lookDist * 0.15);
+      camera.position.set(cx - orbitBack, yOffset, cz + lookDist * 0.15);
       camera.lookAt(controls.target);
       controls.update();
     } else {

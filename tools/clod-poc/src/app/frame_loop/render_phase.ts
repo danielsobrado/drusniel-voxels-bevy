@@ -279,6 +279,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const selectionCacheStats = selectionStats.selectionCache;
     const selectionCacheReason = selectionCacheStats.lastReason;
     const selectionCacheReasonNumeric = selectionCacheReasonCode(selectionCacheReason);
+    const engineCounters = input.getHooks()?.stats?.counters ?? {};
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       selectionCutChanged: selectionStats.cutChanged ? 1 : 0,
@@ -298,6 +299,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       brushMs: input.phaseTiming.brushMs,
       combatMs: input.phaseTiming.combatMs,
       spellsMs: input.phaseTiming.spellsMs,
+      agentEnvelopeMs: input.phaseTiming.agentEnvelopeMs,
       terrainPhaseMs: input.phaseTiming.terrainPhaseMs,
       shadowProxyMs: input.phaseTiming.shadowProxyMs,
       clodShadowMs: input.phaseTiming.clodShadowMs,
@@ -429,6 +431,17 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       dynamicResolutionActive: dynamicResolutionStats?.active ? 1 : 0,
       dynamicResolutionRenderScale: dynamicResolutionStats?.renderScale ?? 0,
       dynamicResolutionAdjustments: dynamicResolutionStats?.adjustments ?? 0,
+      agentsTotal: engineCounters["agents_total"] ?? 0,
+      agentDraws: engineCounters["agent_draws"] ?? 0,
+      agentAnimMs: engineCounters["agent_anim_ms"] ?? 0,
+      agentsFull: engineCounters["agents_full"] ?? 0,
+      agentsMid: engineCounters["agents_mid"] ?? 0,
+      agentsFrozen: engineCounters["agents_frozen"] ?? 0,
+      agentSimMs: engineCounters["agent_sim_ms"] ?? 0,
+      agentTerrainQueryMs: engineCounters["agent_terrain_query_ms"] ?? 0,
+      wdAgentsFull: engineCounters["wd_agents_full"] ?? 0,
+      wdAgentsMid: engineCounters["wd_agents_mid"] ?? 0,
+      wdAgentsFrozen: engineCounters["wd_agents_frozen"] ?? 0,
       gpuPasses: input.gpuPasses ? { ...input.gpuPasses } : undefined,
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {

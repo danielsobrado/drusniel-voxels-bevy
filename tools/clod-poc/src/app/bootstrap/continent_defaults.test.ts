@@ -24,9 +24,18 @@ describe("continent defaults", () => {
       expect(applyContinentDefaults(params)).toBe(true);
       expect(params.get("scene")).toBe("continent");
       expect(params.get("rpgDensityScene")).toBe(scene);
+      expect(params.get("world")).toBe("32");
+      expect(params.get("startupWorld")).toBe("2");
       expect(params.get("continentHydrology")).toBe("1");
       expect(params.get("farClipmapMode")).toBe("replace");
     }
+  });
+
+  it("defaults world=32 and startupWorld=2 when rpgDensityScene is already set on continent", () => {
+    const params = new URLSearchParams("scene=continent&rpgDensityScene=rpg-village");
+    expect(applyContinentDefaults(params)).toBe(true);
+    expect(params.get("world")).toBe("32");
+    expect(params.get("startupWorld")).toBe("2");
   });
 
   it("preserves every explicit override", () => {

@@ -173,7 +173,10 @@ The two stages stay separate passes; fusing them re-couples their cadences.
    V1 justified as the documented next step; props/shadows pending dense-scene numbers;
    terrain deferred. If nothing beyond vegetation justifies adoption, this plan ends at
    V2 and says so.
-- [ ] rebased attribution table recorded (or linked from plan 2 D4) per system
+- [x] rebased attribution table recorded (or linked from plan 2 D4) per system —
+      2026-07-17 link: `perf-runs/rpg-dense-cost/cost-table.md` from plan 2 D4.
+      Dominant village settled cost is **construction** (~22 ms frame p95 when
+      toggled off); vegetation/props/water marginals <3 ms at this pose.
 - [ ] prefilter audit → parity-case list recorded here
 - [ ] per-system go/no-go recorded
 
