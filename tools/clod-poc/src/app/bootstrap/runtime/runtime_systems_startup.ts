@@ -8,6 +8,7 @@ import { parseTreeConfig } from "../../../trees/index.js";
 import type { TreeTerrainOcclusionSampler } from "../../../trees/tree_terrain_occlusion.js";
 import { parseUnderstoryConfig } from "../../../understory/index.js";
 import type { BorderCoastOceanConfig } from "../../../terrain/border_coast_config.js";
+import { surfaceHeight } from "../../../terrain/terrain.js";
 import type { WaterConfig } from "../../../water/waterConfig.js";
 import {
   buildRiverTerrainWetnessMask,
@@ -49,6 +50,12 @@ import { propPlacementSceneToProjectProps } from "../../../project/project_props
 import { projectPropEditStore } from "../../../project/prop_edit_store.js";
 import { hasLoadedSavePropAuthority } from "../../../save/save_runtime.js";
 import { shouldRestoreDefaultCustomProps } from "./custom_props_authority.js";
+import {
+  buildRpgDensityComposition,
+  publishRpgDensityCompositionCounters,
+  type RpgDensityComposition,
+} from "../../../qa/rpg_density_scene_composition.js";
+import { isRpgDensityScene } from "../../../scenes/rpg_density_scenes.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
 
@@ -114,6 +121,26 @@ function withConstructionGuardDispose(
   };
 }
 
+function prepareRpgDensityComposition(input: RuntimeSystemsStartupInput): RpgDensityComposition | null {
+  const sceneId = input.searchParams.get("rpgDensityScene");
+  if (!isRpgDensityScene(sceneId)) return null;
+  const composition = buildRpgDensityComposition({
+    sceneId,
+    seed: input.worldSeed,
+    surfaceHeightAt: surfaceHeight,
+  });
+  input.propPlacementScenes[sceneId] = composition.propScene;
+  input.searchParams.set("customPropScene", sceneId);
+  if (!input.searchParams.has("customProps")) input.searchParams.set("customProps", "1");
+  if (!input.searchParams.has("construction")) input.searchParams.set("construction", "1");
+  publishRpgDensityCompositionCounters(input.getHooks()?.stats?.counters, composition);
+  return composition;
+}
+
+function benchmarkConstructionStorageKey(composition: RpgDensityComposition): string {
+  return `drusniel.clod-poc.benchmark.${composition.sceneId}.${composition.seed}.v1`;
+}
+
 export async function runRuntimeSystemsStartup(
   input: RuntimeSystemsStartupInput,
 ): Promise<RuntimeSystemsStartupResult> {
@@ -152,6 +179,7 @@ export async function runRuntimeSystemsStartup(
     statControllers,
     getHooks,
   } = input;
+  const densityComposition = prepareRpgDensityComposition(input);
 
   const vegetation = runVegetationStartup({
     app,
@@ -283,12 +311,17 @@ export async function runRuntimeSystemsStartup(
   const hasImportedProps = importedProps.length > 0;
   const customPropsEnabled = searchParams.get("customProps") === "0"
     ? false
-    : hasImportedProps || searchParams.get("propEditor") === "1" || resolveCustomPropsEnabled(searchParams, customPropsConfig);
+    : densityComposition !== null
+      || hasImportedProps
+      || searchParams.get("propEditor") === "1"
+      || resolveCustomPropsEnabled(searchParams, customPropsConfig);
   let customProps: CustomPropsStartupResult | null = null;
   if (customPropsEnabled) {
     try {
       if (hasImportedProps) {
         projectPropEditStore.restore(importedProps);
+      } else if (densityComposition && !hasLoadedSavePropAuthority()) {
+        projectPropEditStore.restore(propPlacementSceneToProjectProps(densityComposition.propScene));
       } else if (shouldRestoreDefaultCustomProps({
         hasImportedProps,
         hasProjectProps: projectPropEditStore.hasProps(),
@@ -322,8 +355,9 @@ export async function runRuntimeSystemsStartup(
     ? true
     : constructionParam === "0"
       ? false
-      : defaultConstructionConfig.enabled;
+      : densityComposition !== null || defaultConstructionConfig.enabled;
   if (constructionEnabled) {
+    const seededStorageKey = densityComposition ? benchmarkConstructionStorageKey(densityComposition) : null;
     try {
       const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, searchParams);
       const maxRayDistanceM = editAuthority.allowFarCommit
@@ -332,12 +366,13 @@ export async function runRuntimeSystemsStartup(
             defaultConstructionConfig.placement.maxRayDistanceM,
             editAuthority.allowFarPreview ? editAuthority.buildPreviewRadiusM : editAuthority.buildCommitRadiusM,
           );
-      const constructionUnboundedWorld = searchParams.get("scene")?.startsWith("infinite-") ?? false;
+      const constructionUnboundedWorld = unboundedWorld;
       const constructionConfig = {
         ...defaultConstructionConfig,
         placement: {
           ...defaultConstructionConfig.placement,
           maxRayDistanceM,
+          storageKey: seededStorageKey ?? defaultConstructionConfig.placement.storageKey,
           unboundedWorld: constructionUnboundedWorld,
         },
       };
@@ -363,6 +398,9 @@ export async function runRuntimeSystemsStartup(
         getCounters: getBuildAuthorityCounters,
         onRejected: (reason) => console.info(`[construction] placement rejected: ${reason}`),
       });
+      if (seededStorageKey && densityComposition) {
+        localStorage.setItem(seededStorageKey, JSON.stringify(densityComposition.pieces));
+      }
       try {
         constructionController = withConstructionGuardDispose(createConstructionController({
           scene,
@@ -377,11 +415,16 @@ export async function runRuntimeSystemsStartup(
       } catch (error) {
         disposeGuard();
         throw error;
+      } finally {
+        if (seededStorageKey) localStorage.removeItem(seededStorageKey);
       }
     } catch (error) {
       console.error("[construction] failed to initialize", error);
+      if (seededStorageKey) localStorage.removeItem(seededStorageKey);
     }
   }
+
+  publishRpgDensityCompositionCounters(getHooks()?.stats?.counters, densityComposition ?? undefined as never);
 
   return {
     ...vegetation,
