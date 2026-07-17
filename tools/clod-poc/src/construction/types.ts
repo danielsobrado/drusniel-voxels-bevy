@@ -22,7 +22,17 @@ export const CONSTRUCTION_GEOMETRY_KINDS = ["box", "wedge", "stairs", "cylinder"
 export const CONSTRUCTION_SUPPORT_CLASSES = ["wood", "stone", "ground"] as const;
 
 export type SnapGroup = typeof SNAP_GROUPS[number];
-export type ConstructionCategory = "floor" | "wall" | "fence" | "pillar" | "roof" | "generic";
+export type ConstructionCategory =
+  | "floor"
+  | "wall"
+  | "opening"
+  | "fence"
+  | "pillar"
+  | "beam"
+  | "stairs"
+  | "roof"
+  | "foundation"
+  | "generic";
 export type ConstructionMaterial = typeof CONSTRUCTION_MATERIALS[number];
 export type ConstructionSupportState = "grounded" | "connected" | "unsupported";
 export type ConstructionGeometryKind = typeof CONSTRUCTION_GEOMETRY_KINDS[number];
@@ -63,6 +73,13 @@ export interface ConstructionPlacementBox {
   rotationYDegrees?: number;
 }
 
+export interface ConstructionGeometryPart {
+  kind: ConstructionGeometryKind;
+  center: ConstructionVec3;
+  dimensionsM: ConstructionVec3;
+  rotationDegrees?: ConstructionVec3;
+}
+
 export interface ConstructionPieceDef {
   id: string;
   label: string;
@@ -74,6 +91,7 @@ export interface ConstructionPieceDef {
   rotationStepDegrees?: number;
   geometryKind?: ConstructionGeometryKind;
   geometryYawDegrees?: number;
+  geometryParts?: readonly ConstructionGeometryPart[];
   placementBoxes?: readonly ConstructionPlacementBox[];
   groundNormalMinY?: number;
   supportProfile?: ConstructionSupportProfile;

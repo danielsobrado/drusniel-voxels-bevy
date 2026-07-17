@@ -1,0 +1,221 @@
+pieces:
+- id: wood-roof-26
+  label: "Roof 26\xB0"
+  category: roof
+  dimensions_m: [2.0, 0.975, 2.0]
+  can_ground: false
+  material: wood
+  geometry_kind: wedge
+  placement_boxes:
+  - center: [0, 0.365625, -0.75]
+    dimensions_m: [2.0, 0.24375, 0.5]
+  - center: [0, 0.12187500000000001, -0.25]
+    dimensions_m: [2.0, 0.24375, 0.5]
+  - center: [0, -0.12187500000000001, 0.25]
+    dimensions_m: [2.0, 0.24375, 0.5]
+  - center: [0, -0.36562500000000003, 0.75]
+    dimensions_m: [2.0, 0.24375, 0.5]
+  snap_points:
+  - id: eave
+    local_pos: [0, -0.4875, 1]
+    direction: [0, -1, 0]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [wall-top, roof-edge]
+  - id: ridge
+    local_pos: [0, 0.4875, -1]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: side-left
+    local_pos: [-1, 0, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 1, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: side-right
+    local_pos: [1, 0, 0]
+    direction: [1, 0, 0]
+    tangent: [0, 1, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+- id: wood-roof-45
+  label: "Roof 45\xB0"
+  category: roof
+  dimensions_m: [2.0, 2.0, 2.0]
+  can_ground: false
+  material: wood
+  geometry_kind: wedge
+  placement_boxes:
+  - center: [0, 0.75, -0.75]
+    dimensions_m: [2.0, 0.5, 0.5]
+  - center: [0, 0.25, -0.25]
+    dimensions_m: [2.0, 0.5, 0.5]
+  - center: [0, -0.25, 0.25]
+    dimensions_m: [2.0, 0.5, 0.5]
+  - center: [0, -0.75, 0.75]
+    dimensions_m: [2.0, 0.5, 0.5]
+  snap_points:
+  - id: eave
+    local_pos: [0, -1.0, 1]
+    direction: [0, -1, 0]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [wall-top, roof-edge]
+  - id: ridge
+    local_pos: [0, 1.0, -1]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: side-left
+    local_pos: [-1, 0, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 1, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: side-right
+    local_pos: [1, 0, 0]
+    direction: [1, 0, 0]
+    tangent: [0, 1, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+- id: wood-roof-ridge-2m
+  label: Roof Ridge 2m
+  category: roof
+  dimensions_m: [2.0, 0.4, 0.6]
+  can_ground: false
+  material: wood
+  geometry_parts:
+  - kind: wedge
+    center: [0, 0, 0]
+    dimensions_m: [2.0, 0.4, 0.6]
+  - kind: wedge
+    center: [0, 0, 0]
+    dimensions_m: [2.0, 0.4, 0.6]
+    rotation_y_degrees: 180
+  placement_boxes:
+  - center: [0, 0, 0]
+    dimensions_m: [2.0, 0.4, 0.6]
+  snap_points:
+  - id: slope-north
+    local_pos: [0, 0, -0.3]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: slope-south
+    local_pos: [0, 0, 0.3]
+    direction: [0, 0, 1]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: end-west
+    local_pos: [-1, 0, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 1, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: end-east
+    local_pos: [1, 0, 0]
+    direction: [1, 0, 0]
+    tangent: [0, 1, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+- id: wood-roof-corner-outside-45
+  label: "Roof Outside Corner 45\xB0"
+  category: roof
+  dimensions_m: [2, 2, 2]
+  can_ground: false
+  material: wood
+  geometry_parts:
+  - kind: wedge
+    center: [0, 0, 0]
+    dimensions_m: [2, 2, 2]
+  - kind: wedge
+    center: [0, 0, 0]
+    dimensions_m: [2, 2, 2]
+    rotation_y_degrees: 90
+  placement_boxes:
+  - center: [-0.5, 0.75, -0.75]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [-0.5, 0.25, -0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [-0.5, -0.25, 0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [-0.5, -0.75, 0.75]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [0, 0.75, -1.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: 90
+  - center: [0, 0.25, -0.75]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: 90
+  - center: [0, -0.25, -0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: 90
+  - center: [0, -0.75, 0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: 90
+  snap_points: &id001
+  - id: eave-z
+    local_pos: [0, -1, 1]
+    direction: [0, -1, 0]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [wall-top, roof-edge]
+  - id: eave-x
+    local_pos: [1, -1, 0]
+    direction: [0, -1, 0]
+    tangent: [0, 0, 1]
+    group: roof-edge
+    accepts: [wall-top, roof-edge]
+  - id: ridge-z
+    local_pos: [0, 1, -1]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: roof-edge
+    accepts: [roof-edge]
+  - id: ridge-x
+    local_pos: [-1, 1, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 0, 1]
+    group: roof-edge
+    accepts: [roof-edge]
+- id: wood-roof-corner-inside-45
+  label: "Roof Inside Corner 45\xB0"
+  category: roof
+  dimensions_m: [2, 2, 2]
+  can_ground: false
+  material: wood
+  geometry_parts:
+  - kind: wedge
+    center: [0, 0, 0]
+    dimensions_m: [2, 2, 2]
+  - kind: wedge
+    center: [0, 0, 0]
+    dimensions_m: [2, 2, 2]
+    rotation_y_degrees: -90
+  placement_boxes:
+  - center: [0.5, 0.75, -0.75]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [0.5, 0.25, -0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [0.5, -0.25, 0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [0.5, -0.75, 0.75]
+    dimensions_m: [1.0, 0.5, 0.5]
+  - center: [0, 0.75, -0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: -90
+  - center: [0, 0.25, 0.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: -90
+  - center: [0, -0.25, 0.75]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: -90
+  - center: [0, -0.75, 1.25]
+    dimensions_m: [1.0, 0.5, 0.5]
+    rotation_y_degrees: -90
+  snap_points: *id001

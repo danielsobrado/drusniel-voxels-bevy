@@ -1,0 +1,97 @@
+pieces:
+- id: wood-floor-2x2
+  label: Floor 2x2
+  category: floor
+  dimensions_m: [2.0, 0.2, 2.0]
+  can_ground: true
+  material: wood
+  ground_normal_min_y: 0.45
+  snap_points:
+  - id: edge-north
+    local_pos: [0, 0.1, -1.0]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-south
+    local_pos: [0, 0.1, 1.0]
+    direction: [0, 0, 1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-west
+    local_pos: [-1.0, 0.1, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 0, 1]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-east
+    local_pos: [1.0, 0.1, 0]
+    direction: [1, 0, 0]
+    tangent: [0, 0, 1]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+- id: wood-floor-1x1
+  label: Floor 1x1
+  category: floor
+  dimensions_m: [1.0, 0.2, 1.0]
+  can_ground: true
+  material: wood
+  ground_normal_min_y: 0.45
+  snap_points:
+  - id: edge-north
+    local_pos: [0, 0.1, -0.5]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-south
+    local_pos: [0, 0.1, 0.5]
+    direction: [0, 0, 1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-west
+    local_pos: [-0.5, 0.1, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 0, 1]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-east
+    local_pos: [0.5, 0.1, 0]
+    direction: [1, 0, 0]
+    tangent: [0, 0, 1]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+- id: wood-floor-half
+  label: Floor Half 2x1
+  category: floor
+  dimensions_m: [2.0, 0.2, 1.0]
+  can_ground: true
+  material: wood
+  ground_normal_min_y: 0.45
+  snap_points:
+  - id: edge-north
+    local_pos: [0, 0.1, -0.5]
+    direction: [0, 0, -1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-south
+    local_pos: [0, 0.1, 0.5]
+    direction: [0, 0, 1]
+    tangent: [1, 0, 0]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-west
+    local_pos: [-1.0, 0.1, 0]
+    direction: [-1, 0, 0]
+    tangent: [0, 0, 1]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
+  - id: edge-east
+    local_pos: [1.0, 0.1, 0]
+    direction: [1, 0, 0]
+    tangent: [0, 0, 1]
+    group: floor-edge
+    accepts: [floor-edge, wall-bottom, wall-top, generic]
