@@ -16,7 +16,10 @@ export interface ClodCacheService {
   ): Promise<ClodCachePutResult>;
 
   delete(keyParts: ClodCacheKeyParts): Promise<void>;
-  deleteMemory(keyParts: ClodCacheKeyParts): void;
+  deleteIfMatches(
+    keyParts: ClodCacheKeyParts,
+    expectedMetadata: Readonly<Record<string, string | number | boolean>>,
+  ): Promise<boolean>;
   clear(): Promise<void>;
   clearMemory(): void;
   clearPersistent(): Promise<void>;
