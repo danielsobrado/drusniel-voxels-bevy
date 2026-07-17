@@ -36,5 +36,7 @@ export function cacheRecordVersionMatches(
     && left.header.checksum === right.header.checksum
     && left.header.sourceHash === right.header.sourceHash
     && left.header.metadata.terrainStreamingGeneration
-      === right.header.metadata.terrainStreamingGeneration;
+      === right.header.metadata.terrainStreamingGeneration
+    && left.header.metadata.terrainStreamingWriteId
+      === right.header.metadata.terrainStreamingWriteId;
 }
