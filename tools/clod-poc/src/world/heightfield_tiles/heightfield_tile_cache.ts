@@ -1,4 +1,8 @@
 import {
+  terrainStreamingGeneration,
+  terrainStreamingIsEnabled,
+} from "../../stream/terrain_streaming_control.js";
+import {
   HEIGHTFIELD_TILE_BYTE_LENGTH,
   HEIGHTFIELD_TILE_RES,
   type HeightfieldTile,
@@ -295,7 +299,10 @@ export class HeightfieldTileCache {
   }
 
   private dispatch(): void {
-    if (!this.buildAllowed || !this.builder || this.inflightBatches >= this.config.maxInflightBatches) return;
+    if (!terrainStreamingIsEnabled()
+      || !this.buildAllowed
+      || !this.builder
+      || this.inflightBatches >= this.config.maxInflightBatches) return;
     const candidates = [...this.required.values()].filter((entry) => {
       if (this.resident.has(entry.id) || this.inflightIds.has(entry.id)) return false;
       const failure = this.failures.get(entry.id);
@@ -305,9 +312,10 @@ export class HeightfieldTileCache {
 
     const batch = candidates.slice(0, this.config.maxTilesPerBatch);
     const epoch = this.epoch;
+    const streamingGeneration = terrainStreamingGeneration();
     for (const entry of batch) this.inflightIds.add(entry.id);
     this.inflightBatches++;
-    void this.loadOrBuild(batch, epoch).finally(() => {
+    void this.loadOrBuild(batch, epoch, streamingGeneration).finally(() => {
       if (epoch === this.epoch) {
         for (const entry of batch) this.inflightIds.delete(entry.id);
       }
@@ -316,7 +324,11 @@ export class HeightfieldTileCache {
     });
   }
 
-  private async loadOrBuild(batch: readonly PlannedTile[], epoch: number): Promise<void> {
+  private async loadOrBuild(
+    batch: readonly PlannedTile[],
+    epoch: number,
+    streamingGeneration: number,
+  ): Promise<void> {
     const loaded = new Map<string, HeightfieldTile>();
     const misses: PlannedTile[] = [];
 
@@ -328,7 +340,7 @@ export class HeightfieldTileCache {
         }
         try {
           const tile = await this.store.load(entry.key, this.sourceRevision);
-          if (epoch !== this.epoch) return;
+          if (!this.completionIsCurrent(epoch, streamingGeneration)) return;
           if (tile) {
             assertTile(tile, entry.key, this.sourceRevision);
             loaded.set(entry.id, tile);
@@ -338,7 +350,7 @@ export class HeightfieldTileCache {
             misses.push(entry);
           }
         } catch {
-          if (epoch !== this.epoch) return;
+          if (!this.completionIsCurrent(epoch, streamingGeneration)) return;
           this.storeErrors++;
           misses.push(entry);
         }
@@ -347,13 +359,13 @@ export class HeightfieldTileCache {
       misses.push(...batch);
     }
 
-    if (epoch !== this.epoch) return;
+    if (!this.completionIsCurrent(epoch, streamingGeneration)) return;
     for (const [id, tile] of loaded) this.install(id, tile);
     if (misses.length === 0) return;
 
     try {
       const built = await this.builder!(misses.map((entry) => entry.key), this.sourceRevision);
-      if (epoch !== this.epoch) return;
+      if (!this.completionIsCurrent(epoch, streamingGeneration)) return;
       if (built.tiles.length !== misses.length) {
         throw new Error(`heightfield tile builder returned ${built.tiles.length} tiles for ${misses.length} requests`);
       }
@@ -370,12 +382,12 @@ export class HeightfieldTileCache {
         this.failures.delete(entry.id);
         if (this.store) {
           void this.store.save(tile).catch(() => {
-            if (epoch === this.epoch) this.storeErrors++;
+            if (this.completionIsCurrent(epoch, streamingGeneration)) this.storeErrors++;
           });
         }
       }
     } catch {
-      if (epoch !== this.epoch) return;
+      if (!this.completionIsCurrent(epoch, streamingGeneration)) return;
       this.failuresTotal += misses.length;
       for (const entry of misses) {
         const previous = this.failures.get(entry.id);
@@ -385,6 +397,12 @@ export class HeightfieldTileCache {
         });
       }
     }
+  }
+
+  private completionIsCurrent(epoch: number, streamingGeneration: number): boolean {
+    return epoch === this.epoch
+      && terrainStreamingIsEnabled()
+      && streamingGeneration === terrainStreamingGeneration();
   }
 
   private install(id: string, tile: HeightfieldTile): void {
