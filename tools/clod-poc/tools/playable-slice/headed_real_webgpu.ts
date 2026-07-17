@@ -54,8 +54,15 @@ export function softwareGpuReason(probe: Omit<HeadedWebGpuProbe, "recipe">): str
   const identity = [probe.vendor, probe.architecture, probe.device, probe.description]
     .join(" ")
     .toLowerCase();
-  const marker = ["swiftshader", "llvmpipe", "lavapipe", "software rasterizer", "software adapter"]
-    .find((candidate) => identity.includes(candidate));
+  const marker = [
+    "swiftshader",
+    "llvmpipe",
+    "lavapipe",
+    "software rasterizer",
+    "software adapter",
+    "microsoft basic render",
+    "warp adapter",
+  ].find((candidate) => identity.includes(candidate));
   return marker ? `software GPU marker detected: ${marker}` : null;
 }
 
