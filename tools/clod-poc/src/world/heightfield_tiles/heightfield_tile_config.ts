@@ -9,6 +9,7 @@ export interface HeightfieldTileConfig {
   evictDistanceMultiplier: number;
   retryCooldownFrames: number;
   predictionSeconds: number;
+  backgroundBuildIntervalFrames?: number;
   persistenceEnabled: boolean;
 }
 
@@ -50,6 +51,7 @@ export function parseHeightfieldTileConfig(text: string): HeightfieldTileConfig 
     evictDistanceMultiplier: numberValue(raw, "evict_distance_multiplier", 1),
     retryCooldownFrames: integerValue(raw, "retry_cooldown_frames", 0),
     predictionSeconds: numberValue(raw, "prediction_seconds", 0),
+    backgroundBuildIntervalFrames: integerValue(raw, "background_build_interval_frames", 1),
     persistenceEnabled: booleanValue(raw, "persistence_enabled"),
   });
 }
