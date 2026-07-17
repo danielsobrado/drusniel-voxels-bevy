@@ -216,11 +216,11 @@ export class FarSummaryGpuRuntime {
     this.statsState.lastFallbackTiles = result.fallbackTiles;
     this.statsState.lastFallbackReason = result.fallbackReason;
     this.statsState.lastError = result.error?.message ?? null;
-    if (result.fallbackTiles > 0 && result.fallbackReason !== null) {
-      this.options.onFallbackRequests?.(dirtyTilesToRequests(plan.dirtyTiles), result.fallbackReason);
-    }
     const streamingCompletionValid = this.streamingEnabled()
       && this.streamingGeneration() === buildStreamingGeneration;
+    if (streamingCompletionValid && result.fallbackTiles > 0 && result.fallbackReason !== null) {
+      this.options.onFallbackRequests?.(dirtyTilesToRequests(plan.dirtyTiles), result.fallbackReason);
+    }
     const committed = streamingCompletionValid
       ? this.commitGpuReadbacks(plan, result, frameIndex, nowMs, buildSurfaceRevision)
       : 0;
