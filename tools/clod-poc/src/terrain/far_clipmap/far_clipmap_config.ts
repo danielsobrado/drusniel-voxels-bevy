@@ -1,3 +1,5 @@
+import { getActiveWebGpuRendererContext } from "../../rendering/webgpu_renderer_context.js";
+
 export type FarClipmapDebugMode = "final" | "biome" | "height" | "ownership";
 
 export interface FarClipmapConfig {
@@ -106,9 +108,13 @@ function debugMode(value: unknown, fallback: FarClipmapDebugMode): FarClipmapDeb
   return typeof value === "string" && DEBUG_MODES.has(value) ? value as FarClipmapDebugMode : fallback;
 }
 
-export function farClipmapRendererAllowed(params: URLSearchParams): boolean {
+export function farClipmapRendererAllowed(
+  params: URLSearchParams,
+  webGpuAvailable = getActiveWebGpuRendererContext() !== null,
+): boolean {
   const sceneName = params.get("scene") ?? "";
-  return params.get("farClipmapMode") === "replace" || !sceneName.startsWith("infinite-");
+  if (!sceneName.startsWith("infinite-")) return true;
+  return params.get("farClipmapMode") === "replace" && webGpuAvailable;
 }
 
 export function resolveFarClipmapConfig(
