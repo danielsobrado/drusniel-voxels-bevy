@@ -1,8 +1,11 @@
+import { captureTerrainStreamingToken, type TerrainStreamingToken } from "../../stream/terrain_streaming_control.js";
+
 export type StreamRootDirtySnapshot = ReadonlyMap<string, number>;
 
 export class StreamRootEditState {
   private readonly dirtyVersions = new Map<string, number>();
   private readonly cpuAuthoritativeIds = new Set<string>();
+  private readonly snapshotTokens = new WeakMap<object, TerrainStreamingToken>();
 
   markDirty(id: string): void {
     this.dirtyVersions.set(id, (this.dirtyVersions.get(id) ?? 0) + 1);
@@ -23,10 +26,12 @@ export class StreamRootEditState {
       const revision = this.dirtyVersions.get(id);
       if (revision !== undefined) snapshot.set(id, revision);
     }
+    this.snapshotTokens.set(snapshot, captureTerrainStreamingToken());
     return snapshot;
   }
 
   acknowledge(snapshot: StreamRootDirtySnapshot): void {
+    if (!this.snapshotTokens.get(snapshot as object)?.isCurrent()) return;
     for (const [id, revision] of snapshot) {
       if (this.dirtyVersions.get(id) === revision) this.dirtyVersions.delete(id);
     }
