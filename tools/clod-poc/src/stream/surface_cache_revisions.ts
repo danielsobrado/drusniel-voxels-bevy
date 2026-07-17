@@ -41,12 +41,26 @@ function unionBounds(a: SurfaceBounds | null, b: SurfaceBounds): SurfaceBounds {
   };
 }
 
+function boundsIntersect(a: SurfaceBounds, b: SurfaceBounds): boolean {
+  return a.minX < b.maxX && a.maxX > b.minX
+    && a.minZ < b.maxZ && a.maxZ > b.minZ;
+}
+
 export function surfaceRevisionAt(): number {
   return globalRevision;
 }
 
 export function surfaceCommitsSince(revision: number): readonly SurfaceCommit[] {
   return history.filter((commit) => commit.globalRevision > revision);
+}
+
+export function surfaceBoundsChangedSince(bounds: SurfaceBounds, revision: number): boolean {
+  const normalizedRevision = Math.max(0, Math.floor(Number.isFinite(revision) ? revision : 0));
+  if (normalizedRevision >= globalRevision) return false;
+  const oldestRetainedRevision = history[0]?.globalRevision ?? globalRevision + 1;
+  if (normalizedRevision < oldestRetainedRevision - 1) return true;
+  const target = normalizedBounds(bounds);
+  return history.some((commit) => commit.globalRevision > normalizedRevision && boundsIntersect(target, commit.bounds));
 }
 
 export function emitSurfaceCommit(bounds: SurfaceBounds): SurfaceCommit {
