@@ -9,10 +9,11 @@ describe("postfx case diagnostics", () => {
     expect(diagnostics.stages.taa).toBe(true);
     expect(diagnostics.stages.aerial).toBe(true);
     expect(diagnostics.stages.contact).toBe(false);
-    expect(diagnostics.stages.froxels).toBe(false);
+    expect(diagnostics.stages.froxels).toBe(true);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
     expect(diagnostics.stages.clouds).toBe(true);
+    expect(diagnostics.stages.godrays).toBe(true);
   });
 
   it("marks post disabled when fx is off", () => {
@@ -54,5 +55,12 @@ describe("postfx case diagnostics", () => {
     expect(postFxCaseDiagnostics({ godrays: "off" }).stages.godrays).toBe(false);
     expect(postFxCaseDiagnostics({ godrays: "0" }).stages.godrays).toBe(false);
     expect(postFxCaseDiagnostics({ ablate: "godrays" }).stages.godrays).toBe(false);
+  });
+
+  it("mirrors volumetric mode forcing the froxel ambience layer", () => {
+    expect(postFxCaseDiagnostics({ godrays: "volumetric", froxels: "0" }).stages.froxels).toBe(true);
+    expect(postFxCaseDiagnostics({ godrays: "heavy", froxels: "0" }).stages.froxels).toBe(false);
+    expect(postFxCaseDiagnostics({ godrays: "volumetric", froxels: "0", ablate: "froxels" }).stages.froxels).toBe(false);
+    expect(postFxCaseDiagnostics({ godrays: "volumetric", froxels: "0", ablate: "godrays" }).stages.froxels).toBe(false);
   });
 });
