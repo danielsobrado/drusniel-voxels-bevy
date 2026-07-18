@@ -15,6 +15,10 @@ export interface ProjectImportDom {
   info: HTMLElement;
 }
 
+function setBooleanParam(searchParams: URLSearchParams, key: string, value: boolean): void {
+  searchParams.set(key, value ? "1" : "0");
+}
+
 function applyStagedWorldIdentity(
   searchParams: URLSearchParams,
   stagedImport: VoxelProjectArchiveContents,
@@ -29,9 +33,17 @@ function applyStagedWorldIdentity(
       `Project generator ${manifest.world.generatorVersion} is incompatible with ${TERRAIN_SOURCE_VERSION}`,
     );
   }
+  const { terrainField } = manifest.world;
+  const { islandShape } = terrainField;
   searchParams.set("scene", manifest.world.scene);
-  searchParams.set("seed", String(manifest.world.terrainField.seed));
-  searchParams.set("seaLevel", String(manifest.world.terrainField.seaLevel));
+  searchParams.set("seed", String(terrainField.seed));
+  searchParams.set("seaLevel", String(terrainField.seaLevel));
+  setBooleanParam(searchParams, "islands", islandShape.enabled);
+  setBooleanParam(searchParams, "oceanRim", islandShape.oceanRim);
+  searchParams.set("worldRadius", String(islandShape.worldRadiusM));
+  searchParams.set("islandSpacing", String(islandShape.spacingM));
+  searchParams.set("islandRadius", String(islandShape.radiusM));
+  searchParams.set("islandBlend", String(islandShape.blendM));
 }
 
 export async function loadStagedProjectImport(
