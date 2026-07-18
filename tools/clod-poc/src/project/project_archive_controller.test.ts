@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   stageImport: vi.fn(),
   validateConfig: vi.fn((value: unknown) => value),
   validateSessionState: vi.fn((value: unknown) => value),
+  validateWaterState: vi.fn((value: unknown) => value),
+  validateWeatherState: vi.fn((value: unknown) => value),
   validateTextures: vi.fn(),
   getVoxelEditSnapshot: vi.fn(),
   mapSessionState: vi.fn(),
@@ -25,6 +27,10 @@ vi.mock("../project/voxel_project_archive.js", () => ({
   stageVoxelProjectImport: mocks.stageImport,
 }));
 vi.mock("./project_archive_config.js", () => ({ validateProjectArchiveConfig: mocks.validateConfig }));
+vi.mock("./project_archive_environment_state.js", () => ({
+  validateProjectWaterArchiveState: mocks.validateWaterState,
+  validateProjectWeatherArchiveState: mocks.validateWeatherState,
+}));
 vi.mock("./project_archive_session_state.js", () => ({ validateProjectSessionState: mocks.validateSessionState }));
 vi.mock("../terrain/terrain.js", () => ({ getVoxelEditSnapshot: mocks.getVoxelEditSnapshot }));
 vi.mock("./project_state_mapper.js", () => ({
@@ -135,6 +141,8 @@ describe("project archive import handoff", () => {
       worldSize: 16,
       config: {},
       state: {},
+      water: {},
+      weather: {},
       world: {
         scene: "continent",
         generatorVersion: "test-generator",
@@ -153,6 +161,8 @@ describe("project archive import handoff", () => {
     vi.clearAllMocks();
     mocks.validateConfig.mockImplementation((value: unknown) => value);
     mocks.validateSessionState.mockImplementation((value: unknown) => value);
+    mocks.validateWaterState.mockImplementation((value: unknown) => value);
+    mocks.validateWeatherState.mockImplementation((value: unknown) => value);
     vi.stubGlobal("window", { alert: vi.fn() });
     vi.stubGlobal("location", { search: "?save=save-a&seed=9&hud=1" });
     mocks.parseArchive.mockResolvedValue(contents);
@@ -174,8 +184,10 @@ describe("project archive import handoff", () => {
     await vi.waitFor(() => expect(mocks.stageImport).toHaveBeenCalledOnce());
     expect(mocks.validateConfig).toHaveBeenCalledOnce();
     expect(mocks.validateSessionState).toHaveBeenCalledOnce();
+    expect(mocks.validateWaterState).toHaveBeenCalledOnce();
+    expect(mocks.validateWeatherState).toHaveBeenCalledOnce();
     expect(beforeImportNavigation).toHaveBeenCalledOnce();
-    expect(mocks.validateSessionState.mock.invocationCallOrder[0])
+    expect(mocks.validateWeatherState.mock.invocationCallOrder[0])
       .toBeLessThan(beforeImportNavigation.mock.invocationCallOrder[0]!);
     expect(beforeImportNavigation.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.stageImport.mock.invocationCallOrder[0]!);
