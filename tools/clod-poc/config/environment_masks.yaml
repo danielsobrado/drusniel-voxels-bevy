@@ -15,6 +15,23 @@ river_mist:
   strength: 1.0
   min_flow_strength: 0.01
   max_shore_distance_m: 14.0
+  particles:
+    spawn_radius_m: 54.0
+    spacing_m: 5.5
+    sample_hint_m: 16.0
+    emit_interval_s: 0.12
+    max_particles: 240
+    max_emitters_per_tick: 18
+    scan_cells_per_frame: 28
+    point_size_m: 3.4
+    opacity: 0.32
+    spawn_probability: 0.72
+    rise_speed_mps: 0.16
+    drift_speed_mps: 0.13
+    min_lifetime_s: 2.8
+    max_lifetime_s: 5.5
+    surface_offset_m: 0.22
+    color_rgb: [0.82, 0.91, 0.94]
 
 rapid_splash:
   enabled: true
