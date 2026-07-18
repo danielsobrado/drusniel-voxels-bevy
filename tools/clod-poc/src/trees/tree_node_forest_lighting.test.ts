@@ -44,7 +44,7 @@ describe("CPU WebGPU tree forest-lighting wrapper", () => {
       "tree impostor node material does not expose a color node",
     );
 
-    regularMaterial.dispose();
+    handle.dispose();
   });
 });
 
