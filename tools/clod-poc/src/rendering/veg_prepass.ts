@@ -152,6 +152,7 @@ export function refreshInstancedDepthPrepassTwin(
 
   if (!previous) {
     const next = instancedDepthPrepassTwin(mesh, nodes);
+    next.visible = mesh.visible;
     mesh.parent?.add(next);
     mesh.userData.depthTwin = next;
     return next;
@@ -173,7 +174,7 @@ export function refreshInstancedDepthPrepassTwin(
 
   const parent = previous.parent ?? mesh.parent;
   const next = instancedDepthPrepassTwin(mesh, nodes);
-  next.visible = previous.visible;
+  next.visible = mesh.visible;
   parent?.remove(previous);
   parent?.add(next);
   previousMaterial.dispose();
