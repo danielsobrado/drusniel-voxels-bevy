@@ -1,6 +1,16 @@
 import * as THREE from "three";
 import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import {
+  TREE_CROWN_PROXY_RINGS,
+  TREE_CROWN_PROXY_SEGMENTS,
+} from "./tree_crown_proxy_contract.js";
 import type { TreeInstanceMorphology } from "./morphology/types.js";
+
+export {
+  TREE_CROWN_PROXY_INDEX_COUNT,
+  TREE_CROWN_PROXY_RINGS,
+  TREE_CROWN_PROXY_SEGMENTS,
+} from "./tree_crown_proxy_contract.js";
 
 export interface TreeCrownProxyDimensions {
   radiusX: number;
@@ -9,10 +19,6 @@ export interface TreeCrownProxyDimensions {
   centerY: number;
   density: number;
 }
-
-export const TREE_CROWN_PROXY_SEGMENTS = 10;
-export const TREE_CROWN_PROXY_RINGS = 6;
-export const TREE_CROWN_PROXY_INDEX_COUNT = TREE_CROWN_PROXY_SEGMENTS * (TREE_CROWN_PROXY_RINGS - 1) * 6;
 
 export function treeCrownProxyDimensions(settings: TreeSettings, species: TreeSpeciesId): TreeCrownProxyDimensions {
   const config = settings.species[species];
