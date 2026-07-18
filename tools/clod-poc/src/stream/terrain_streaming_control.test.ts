@@ -74,6 +74,17 @@ describe("runTerrainStreamingWork", () => {
     expect(postMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("does not retain a worker whose initial state send fails", () => {
+    const postMessage = vi.fn(() => {
+      throw new Error("worker terminated");
+    });
+
+    expect(() => registerTerrainStreamingWorker({ postMessage })).toThrow("worker terminated");
+    runTerrainStreamingWork(false, () => undefined);
+
+    expect(postMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects stale or contradictory remote states without reviving old tokens", () => {
     const token = captureTerrainStreamingToken();
 
