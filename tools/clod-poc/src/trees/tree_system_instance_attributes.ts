@@ -17,6 +17,7 @@ import type { TreeIdentity } from "./morphology/types.js";
 
 export const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
 export const TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME = "treeImpostorLocalPositionScale";
+export const TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME = "treeImpostorYawSinCos";
 export const TREE_LOD_DITHER_PRIMARY = 0;
 export const TREE_LOD_DITHER_SECONDARY = 1;
 export type TreeLodDitherRole = typeof TREE_LOD_DITHER_PRIMARY | typeof TREE_LOD_DITHER_SECONDARY;
@@ -82,6 +83,24 @@ export function writeTreeImpostorLocalPositionScaleIfChanged(
     return false;
   }
   attribute.setXYZW(index, localX, localY, localZ, scale);
+  return true;
+}
+
+export function writeTreeImpostorYawSinCosIfChanged(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  rotationY: number,
+): boolean {
+  const attribute = treeImpostorYawSinCosAttribute(mesh);
+  const cosine = Math.cos(rotationY);
+  const sine = Math.sin(rotationY);
+  if (
+    Math.abs(attribute.getX(index) - cosine) <= TREE_INSTANCE_ATTRIBUTE_EPSILON &&
+    Math.abs(attribute.getY(index) - sine) <= TREE_INSTANCE_ATTRIBUTE_EPSILON
+  ) {
+    return false;
+  }
+  attribute.setXY(index, cosine, sine);
   return true;
 }
 
@@ -181,6 +200,10 @@ export function treeIdentityBitsAttribute(mesh: THREE.InstancedMesh): THREE.Inst
 
 export function treeImpostorLocalPositionScaleAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
   return mesh.geometry.getAttribute(TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME) as unknown as THREE.BufferAttribute;
+}
+
+export function treeImpostorYawSinCosAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+  return mesh.geometry.getAttribute(TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute;
 }
 
 export function treeLodFadeAttribute(mesh: THREE.InstancedMesh): THREE.BufferAttribute {
