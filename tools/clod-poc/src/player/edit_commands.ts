@@ -50,6 +50,8 @@ export interface EditCommandContext {
    * Absent for non-replayable operations — they use strict revision equality instead.
    */
   targetStillValid?: (command: EditCommand) => boolean;
+  /** Terrain revision used to calculate targetStillValid. Required for cross-revision retry. */
+  targetValidatedAtTerrainRevision?: number;
   /** Target cell readiness (edit authority resident); false denies with "not_ready". */
   targetReady?: boolean;
 }
@@ -102,8 +104,11 @@ export function validateEditCommand(command: ModedEditCommand, context: EditComm
     if (!editCommandMayRetryAcrossRevisions(command.operation)) {
       return { allowed: false, reason: "revision_mismatch" };
     }
-    // Replayable command under moved terrain: authority re-validation against the
-    // latest revision is mandatory, not optional.
+    // A boolean oracle is insufficient unless it was calculated from the revision being
+    // committed. Otherwise a stale ghost can validate itself against stale preview state.
+    if (context.targetValidatedAtTerrainRevision !== context.currentTerrainRevision) {
+      return { allowed: false, reason: "target_moved" };
+    }
     if (!context.targetStillValid || !context.targetStillValid(command)) {
       return { allowed: false, reason: "target_moved" };
     }
