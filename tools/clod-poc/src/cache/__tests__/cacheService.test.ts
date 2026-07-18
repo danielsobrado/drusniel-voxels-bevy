@@ -10,7 +10,7 @@ import {
 import { buildClodCacheKey } from "../cacheKey.js";
 import type { ClodCacheKeyParts, ClodCacheStoredRecord } from "../cacheTypes.js";
 import { CacheScheduler } from "../cacheScheduler.js";
-import { CacheWriteRejectedError } from "../cacheErrors.js";
+import { CacheUnavailableError, CacheWriteRejectedError } from "../cacheErrors.js";
 import { cacheRecordVersionMatches } from "../streaming_cache_write_guard.js";
 
 const yaml = `
@@ -33,6 +33,7 @@ cache:
     max_bytes: 1048576
     compression: "none"
     checksum: "sha256"
+    rpc_timeout_ms: 30000
   invalidation:
     include_config_hash: true
     include_generator_version: true
@@ -69,6 +70,12 @@ const keyParts: ClodCacheKeyParts = {
   nodeId: "L0:0,0",
 };
 
+const secondKeyParts: ClodCacheKeyParts = {
+  ...keyParts,
+  pageX: 1,
+  nodeId: "L0:1,0",
+};
+
 const artifact: ClodPageNodeArtifact = {
   nodeId: "L0:0,0",
   level: 0,
@@ -97,6 +104,15 @@ class ConditionalMemoryStore extends InMemoryPersistentStore {
     if (!current || !cacheRecordVersionMatches(current, expected)) return false;
     await this.delete(key);
     return true;
+  }
+}
+
+class FailingEvictionStore extends InMemoryPersistentStore {
+  failDeletes = false;
+
+  override async delete(key: string): Promise<void> {
+    if (this.failDeletes) throw new CacheUnavailableError(`delete failed for ${key}`);
+    await super.delete(key);
   }
 }
 
@@ -175,6 +191,23 @@ describe("cache service", () => {
     expect(result.status).toBe("hit");
     expect(result.metadata?.terrainStreamingGeneration).toBe(2);
     expect(result.metadata?.terrainStreamingWriteId).toBe("2:1");
+    expect(service.getMetrics().persistentEntries).toBe(1);
+  });
+
+  it("keeps a committed write successful when eviction housekeeping fails", async () => {
+    const config = parseClodCacheConfig(yaml);
+    config.persistent.max_items = 1;
+    const store = new FailingEvictionStore();
+    const service = createClodCacheService(config, store);
+
+    await service.put(keyParts, artifact, encodeClodPageNodeArtifact, {});
+    store.failDeletes = true;
+    const committed = await service.put(secondKeyParts, artifact, encodeClodPageNodeArtifact, {});
+    const result = await service.get(secondKeyParts, decodeClodPageNodeArtifact);
+
+    expect(committed.bytesWritten).toBeGreaterThan(0);
+    expect(result.status).toBe("hit");
+    expect(service.getMetrics().persistentEntries).toBe(2);
   });
 
   it("checksum mismatch becomes miss", async () => {
