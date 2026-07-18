@@ -191,6 +191,58 @@ describe("voxel project archive", () => {
     expect(() => validateVoxelProjectManifest(terrainOnly)).toThrow(/voxelTerrainEdits/i);
   });
 
+  it("rejects malformed voxel deltas instead of silently dropping them", () => {
+    const invalid = structuredClone(manifest()) as unknown as Record<string, unknown>;
+    invalid.voxelTerrainEdits = {
+      revision: 7,
+      deltas: [
+        { x: 4, y: 5, z: 6, density: -0.25, revision: 7 },
+        { x: "broken", y: 5, z: 6, density: 0.75, revision: 7 },
+      ],
+    };
+    expect(() => validateVoxelProjectManifest(invalid)).toThrow(/deltas\[1\].*coordinates/i);
+  });
+
+  it("rejects ambiguous or invalid voxel authority", () => {
+    const duplicate = manifest();
+    duplicate.voxelTerrainEdits = {
+      revision: 7,
+      deltas: [
+        { x: 4, y: 5, z: 6, density: -0.25, revision: 7 },
+        { x: 4, y: 5, z: 6, density: 0.75, revision: 7 },
+      ],
+    };
+    expect(() => validateVoxelProjectManifest(duplicate)).toThrow(/duplicates voxel/i);
+
+    const invalidMaterial = manifest();
+    invalidMaterial.voxelTerrainEdits = {
+      revision: 7,
+      deltas: [{ x: 4, y: 5, z: 6, density: -0.25, materialSlot: 999, revision: 7 }],
+    };
+    expect(() => validateVoxelProjectManifest(invalidMaterial)).toThrow(/materialSlot is invalid/i);
+
+    const futureRevision = manifest();
+    futureRevision.voxelTerrainEdits = {
+      revision: 7,
+      deltas: [{ x: 4, y: 5, z: 6, density: -0.25, revision: 8 }],
+    };
+    expect(() => validateVoxelProjectManifest(futureRevision)).toThrow(/snapshot revision/i);
+  });
+
+  it("rejects invalid or duplicate project props", () => {
+    const invalidScale = manifest();
+    invalidScale.props = [{ ...invalidScale.props[0]!, scale: [1, 0, 1] }];
+    expect(() => validateVoxelProjectManifest(invalidScale)).toThrow(/scale must be positive/i);
+
+    const invalidAnchor = manifest() as unknown as { props: Array<Record<string, unknown>> };
+    invalidAnchor.props[0]!.anchor = "invalid";
+    expect(() => validateVoxelProjectManifest(invalidAnchor)).toThrow(/anchor is invalid/i);
+
+    const duplicate = manifest();
+    duplicate.props = [duplicate.props[0]!, { ...duplicate.props[0]! }];
+    expect(() => validateVoxelProjectManifest(duplicate)).toThrow(/id is duplicated/i);
+  });
+
   it("rejects malformed archives and missing custom texture bytes", async () => {
     await expect(parseVoxelProjectArchive(new Uint8Array([1, 2, 3]))).rejects.toThrow();
     const missingTexture = zipSync({ "project.json": strToU8(JSON.stringify(manifest())) });
