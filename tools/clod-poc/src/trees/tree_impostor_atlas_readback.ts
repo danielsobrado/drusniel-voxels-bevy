@@ -6,7 +6,7 @@ import {
   viewTreeImpostorPixels,
 } from "./tree_impostor_atlas_pixels.js";
 
-const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
+const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 8;
 
 export interface TreeImpostorReadbackRenderer {
   readRenderTargetPixelsAsync?(
@@ -42,8 +42,8 @@ export function createTreeImpostorRenderTarget(
 export function configureTreeImpostorAtlasTexture(texture: THREE.Texture): void {
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = false;
-  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = Math.max(texture.anisotropy, TREE_IMPOSTOR_ATLAS_ANISOTROPY);
 }
