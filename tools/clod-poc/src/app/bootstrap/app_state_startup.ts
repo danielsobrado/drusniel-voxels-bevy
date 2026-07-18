@@ -91,6 +91,6 @@ export function runAppStateStartup(input: AppStateStartupInput): AppStateStartup
     waterConfig: configs.waterConfig,
     digHoldIntervalMs: clodRuntime.digging.holdIntervalMs,
   });
-  applyEnvironmentQueryOverrides(state, searchParams);
+  if (!stagedImport) applyEnvironmentQueryOverrides(state, searchParams);
   return { state, textureLoadOptions };
 }
