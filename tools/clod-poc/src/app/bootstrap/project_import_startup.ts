@@ -1,6 +1,8 @@
 import { emitAudio } from "../../audio/index.js";
+import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import {
   consumeStagedVoxelProjectImport,
+  isCurrentVoxelProjectManifest,
   type VoxelProjectArchiveContents,
 } from "../../project/voxel_project_archive.js";
 import { loadSavedWorldStartup } from "./save_world_startup.js";
@@ -11,6 +13,25 @@ export interface ProjectImportDom {
   buildProgressPercent: HTMLElement;
   buildProgressBar: HTMLProgressElement;
   info: HTMLElement;
+}
+
+function applyStagedWorldIdentity(
+  searchParams: URLSearchParams,
+  stagedImport: VoxelProjectArchiveContents,
+): void {
+  const { manifest } = stagedImport;
+  if (!isCurrentVoxelProjectManifest(manifest)) {
+    console.warn("[project import] legacy schema v3 has no pinned world identity; using current URL world settings");
+    return;
+  }
+  if (manifest.world.generatorVersion !== TERRAIN_SOURCE_VERSION) {
+    throw new Error(
+      `Project generator ${manifest.world.generatorVersion} is incompatible with ${TERRAIN_SOURCE_VERSION}`,
+    );
+  }
+  searchParams.set("scene", manifest.world.scene);
+  searchParams.set("seed", String(manifest.world.terrainField.seed));
+  searchParams.set("seaLevel", String(manifest.world.terrainField.seaLevel));
 }
 
 export async function loadStagedProjectImport(
@@ -29,7 +50,8 @@ export async function loadStagedProjectImport(
   dom.buildProgressBar.value = 0;
   try {
     const stagedImport = await consumeStagedVoxelProjectImport(importToken);
-    if (!stagedImport) throw new Error("The staged project was not found or was already used");
+    if (!stagedImport) throw new Error("The staged project was not found, expired, or was already used");
+    applyStagedWorldIdentity(searchParams, stagedImport);
     emitAudio("project.import.success");
     return stagedImport;
   } catch (error) {
