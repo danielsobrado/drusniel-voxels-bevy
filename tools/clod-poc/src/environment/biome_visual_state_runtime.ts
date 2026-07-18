@@ -34,37 +34,44 @@ export function createBiomeVisualStateRuntime(
   let cachedWetness = Number.NaN;
   let cachedState: BiomeVisualState | null = null;
 
-  const readValues = () => {
+  const readSeasonT = () => normalizeCycle(options.getSeasonT());
+  const readSunElevationDeg = () => finiteOrZero(options.getSunElevationDeg());
+  const readWetness = () => {
     const weather = options.getWeather();
-    return {
-      seasonT: normalizeCycle(options.getSeasonT()),
-      sunElevationDeg: finiteOrZero(options.getSunElevationDeg()),
-      wetness: deriveBiomeVisualWetness(
-        weather.mode,
-        weather.intensity,
-        options.settings.defaultWetness,
-      ),
-    };
+    return deriveBiomeVisualWetness(
+      weather.mode,
+      weather.intensity,
+      options.settings.defaultWetness,
+    );
   };
 
   return {
     currentInput() {
-      return Object.freeze(readValues());
+      return Object.freeze({
+        seasonT: readSeasonT(),
+        sunElevationDeg: readSunElevationDeg(),
+        wetness: readWetness(),
+      });
     },
     current() {
-      const values = readValues();
+      const seasonT = readSeasonT();
+      const sunElevationDeg = readSunElevationDeg();
+      const wetness = readWetness();
       if (cachedState
-        && cachedSeasonT === values.seasonT
-        && cachedSunElevationDeg === values.sunElevationDeg
-        && cachedWetness === values.wetness) {
+        && cachedSeasonT === seasonT
+        && cachedSunElevationDeg === sunElevationDeg
+        && cachedWetness === wetness) {
         return cachedState;
       }
 
-      const input = Object.freeze(values);
-      cachedSeasonT = input.seasonT;
-      cachedSunElevationDeg = input.sunElevationDeg;
-      cachedWetness = input.wetness ?? options.settings.defaultWetness;
-      cachedState = evaluateBiomeVisualState(options.settings, input);
+      cachedSeasonT = seasonT;
+      cachedSunElevationDeg = sunElevationDeg;
+      cachedWetness = wetness;
+      cachedState = evaluateBiomeVisualState(options.settings, {
+        seasonT,
+        sunElevationDeg,
+        wetness,
+      });
       return cachedState;
     },
   };
