@@ -26,6 +26,13 @@ import { getVoxelEditSnapshot } from "../terrain/terrain.js";
 import { mapProjectSessionState, mapProjectWaterArchiveState, mapProjectWeatherArchiveState, type ProjectStateSource } from "./project_state_mapper.js";
 import { validateProjectArchiveTextures } from "./project_texture_validator.js";
 
+const PROJECT_IMPORT_EARLY_ROUTE_KEYS = [
+  "builder",
+  "webgpuSpike",
+  "webgpu",
+  "grassFirstInstanceSmoke",
+] as const;
+
 export interface ProjectArchiveControllerDeps {
   importButton: HTMLButtonElement;
   exportButton: HTMLButtonElement;
@@ -60,6 +67,10 @@ function applyWorldIdentityToQuery(next: URLSearchParams, manifest: VoxelProject
   next.set("scene", manifest.world.scene);
   next.set("seed", String(manifest.world.terrainField.seed));
   next.set("seaLevel", String(manifest.world.terrainField.seaLevel));
+}
+
+function clearImportBlockingRoutes(next: URLSearchParams): void {
+  for (const key of PROJECT_IMPORT_EARLY_ROUTE_KEYS) next.delete(key);
 }
 
 export function createProjectArchiveController(deps: ProjectArchiveControllerDeps): ProjectArchiveController {
@@ -140,6 +151,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         emitAudio("project.import.success");
         const next = new URLSearchParams(fallbackSearch);
         next.delete("save");
+        clearImportBlockingRoutes(next);
         applyWorldIdentityToQuery(next, contents.manifest);
         next.set("world", String(contents.manifest.worldSize));
         next.set("import", token);
