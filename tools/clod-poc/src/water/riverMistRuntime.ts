@@ -40,8 +40,9 @@ export function riverMistSignal(
   settings: RiverMistRuntimeSettings,
 ): number {
   if (!settings.enabled || !biome?.enabled) return 0;
+  if (!validWaterSample(sample)) return 0;
   if (sample.bodyKind !== HYDROLOGY_BODY_RIVER || sample.depth <= 0.03 || sample.bodyMask <= 0.08) return 0;
-  if (!Number.isFinite(sample.shoreDistance) || sample.shoreDistance < 0) return 0;
+  if (sample.shoreDistance < 0) return 0;
 
   const mask = settings.mask;
   const flow = smoothRamp(mask.minFlowStrength, mask.minFlowStrength * 3 + 0.001, sample.flow.speed);
@@ -51,6 +52,14 @@ export function riverMistSignal(
     * clamp01(biome.morningMist)
     * flow
     * shore;
+}
+
+function validWaterSample(sample: WaterFieldResult): boolean {
+  return Number.isFinite(sample.waterY)
+    && Number.isFinite(sample.depth)
+    && Number.isFinite(sample.bodyMask)
+    && Number.isFinite(sample.shoreDistance)
+    && Number.isFinite(sample.flow.speed);
 }
 
 function queryFlag(
