@@ -1,5 +1,7 @@
 import { emitAudio } from "../../audio/index.js";
 import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
+import { validateProjectArchiveConfig } from "../../project/project_archive_config.js";
+import { validateProjectSessionState } from "../../project/project_archive_session_state.js";
 import {
   consumeStagedVoxelProjectImport,
   isCurrentVoxelProjectManifest,
@@ -65,6 +67,8 @@ export async function loadStagedProjectImport(
   try {
     const stagedImport = await consumeStagedVoxelProjectImport(importToken);
     if (!stagedImport) throw new Error("The staged project was not found, expired, or was already used");
+    stagedImport.manifest.config = validateProjectArchiveConfig(stagedImport.manifest.config);
+    stagedImport.manifest.state = validateProjectSessionState(stagedImport.manifest.state);
     applyStagedWorldIdentity(searchParams, stagedImport);
     emitAudio("project.import.success");
     return stagedImport;
