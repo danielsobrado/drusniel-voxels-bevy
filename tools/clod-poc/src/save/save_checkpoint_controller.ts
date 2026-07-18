@@ -49,10 +49,33 @@ export function createSaveCheckpointController(
       return null;
     }
   };
+  const setCounter = (key: keyof SaveCheckpointCounters, value: number): void => {
+    const target = counters();
+    if (!target) return;
+    try {
+      target[key] = value;
+    } catch (error) {
+      console.error(`[save-checkpoint] counter write failed: ${key}`, error);
+    }
+  };
   const increment = (key: keyof SaveCheckpointCounters): void => {
     const target = counters();
     if (!target) return;
-    target[key] = (target[key] ?? 0) + 1;
+    try {
+      target[key] = (target[key] ?? 0) + 1;
+    } catch (error) {
+      console.error(`[save-checkpoint] counter increment failed: ${key}`, error);
+    }
+  };
+  const readClock = (phase: string): number | null => {
+    try {
+      const value = nowMs();
+      if (Number.isFinite(value)) return value;
+      console.error(`[save-checkpoint] clock returned a non-finite value during ${phase}`);
+    } catch (error) {
+      console.error(`[save-checkpoint] clock failed during ${phase}`, error);
+    }
+    return null;
   };
   const publishStatus = (status: string): void => {
     try {
@@ -78,16 +101,13 @@ export function createSaveCheckpointController(
       resolveCheckpoint = resolve;
       rejectCheckpoint = reject;
     });
-    // Establish the guard before invoking status, counters, clock, or flush callbacks.
     inFlight = current;
 
     const runCheckpoint = async (): Promise<void> => {
-      let startedAt: number | null = null;
+      const startedAt = readClock("start");
       try {
-        startedAt = nowMs();
         increment("save_checkpoint_requests");
-        const target = counters();
-        if (target) target.save_checkpoint_in_flight = 1;
+        setCounter("save_checkpoint_in_flight", 1);
         publishStatus("saving checkpoint");
 
         await flushToConvergence();
@@ -100,16 +120,10 @@ export function createSaveCheckpointController(
       } finally {
         // Keep the guard active through cleanup so re-entrant instrumentation coalesces.
         try {
-          const latest = counters();
-          if (latest) {
-            latest.save_checkpoint_in_flight = 0;
-            if (startedAt !== null) {
-              try {
-                latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
-              } catch (error) {
-                console.error("[save-checkpoint] clock failed during cleanup", error);
-              }
-            }
+          setCounter("save_checkpoint_in_flight", 0);
+          const finishedAt = readClock("cleanup");
+          if (startedAt !== null && finishedAt !== null) {
+            setCounter("save_checkpoint_last_ms", Math.max(0, finishedAt - startedAt));
           }
         } finally {
           if (inFlight === current) inFlight = null;
