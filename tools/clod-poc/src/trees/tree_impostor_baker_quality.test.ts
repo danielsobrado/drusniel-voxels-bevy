@@ -18,6 +18,7 @@ import { parseTreeImpostorBakeConfig } from "./tree_impostor_bake_config.js";
 import { TreeImpostorFrameBudget } from "./tree_impostor_bake_scheduler.js";
 import { estimateTreeImpostorAtlasMemoryMiB } from "./tree_impostor_memory.js";
 
+
 describe("tree impostor baker quality", () => {
   it("selects every structural variant instead of the merged selector geometry", () => {
     const merged = new THREE.BufferGeometry();
@@ -43,26 +44,22 @@ describe("tree impostor baker quality", () => {
     }
   });
 
-  it("allocates mature-only pages by default and keeps full age layers opt-in", () => {
+  it("uses one mature page per structural variant in production", () => {
     const settings = cloneTreeSettings();
+    expect(settings.impostors.bakeAgeLayers).toBe(false);
     expect(treeImpostorAgeBucketsForSettings(settings)).toEqual([0.60]);
-    settings.impostors.bakeAgeLayers = true;
-    expect(treeImpostorAgeBucketsForSettings(settings)).toEqual([0.20, 0.60, 0.92]);
   });
 
-  it("reports mipmapped memory for the active page policy", () => {
+  it("reports mipmapped memory for the supported production page policy", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
     settings.impostors.resolutionPx = 192;
     settings.impostors.octahedralGridSize = 8;
     settings.impostors.bakeAgeLayers = false;
     expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(576, 5);
-
-    settings.impostors.bakeAgeLayers = true;
-    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(1728, 5);
   });
 
-  it("bakes distinct monotonic young, mature, and old silhouettes", () => {
+  it("keeps age deformation available for a future runtime page selector", () => {
     const source = new THREE.BufferGeometry();
     source.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 10, 0], 3));
     source.setAttribute("normal", new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0], 3));
