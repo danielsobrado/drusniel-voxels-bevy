@@ -1,6 +1,5 @@
-import cacheConfigText from "../../config/clod_cache.yaml?raw";
 import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes.js";
-import { parseClodCacheConfig } from "./cacheConfig.js";
+import { DEFAULT_CACHE_RPC_TIMEOUT_MS } from "./cacheConstants.js";
 import { CacheUnavailableError, CacheWriteRejectedError } from "./cacheErrors.js";
 import type { PersistentCacheStore } from "./indexedDbStore.js";
 import type { CacheRpcRequest, CacheRpcResponse } from "./cacheWorkerRpc.js";
@@ -11,7 +10,6 @@ interface PendingCacheRpc {
   timeout: ReturnType<typeof setTimeout>;
 }
 
-const DEFAULT_CACHE_RPC_TIMEOUT_MS = parseClodCacheConfig(cacheConfigText).persistent.rpc_timeout_ms;
 let nextRequestId = 1;
 const pending = new Map<number, PendingCacheRpc>();
 
