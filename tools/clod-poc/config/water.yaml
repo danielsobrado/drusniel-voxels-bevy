@@ -184,6 +184,13 @@ water:
       edge_fade_end: 0.82
       sky_fallback_strength: 0.78
       terrain_fallback_strength: 0.12
+      # Disabled pending headed W4 A/B evidence. Uses each ring's existing material:
+      # fine rings keep full SSR, mid rings use fewer steps, far rings use sky fallback.
+      clipmap_tiers:
+        enabled: false
+        full_quality_max_cell_size_m: 4.0
+        mid_quality_max_cell_size_m: 16.0
+        mid_max_steps: 6
     depth_write: false
 
   debug:

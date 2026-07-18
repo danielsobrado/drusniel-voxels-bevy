@@ -146,6 +146,17 @@ export interface WaterRefractionConfig {
   maxThickness: number;
 }
 
+export interface WaterReflectionClipmapTiersConfig {
+  /** Kill switch. Disabled tiers preserve the configured reflection object. */
+  enabled: boolean;
+  /** Largest grid-cell size that retains the configured full SSR step count. */
+  fullQualityMaxCellSizeM: number;
+  /** Largest grid-cell size that receives reduced-step SSR. Coarser levels use fallback only. */
+  midQualityMaxCellSizeM: number;
+  /** Maximum SSR steps used by mid-distance clipmap levels. */
+  midMaxSteps: number;
+}
+
 export interface WaterReflectionConfig {
   mode: "fake" | "ssr";
   ssrEnabled: boolean;
@@ -155,6 +166,7 @@ export interface WaterReflectionConfig {
   edgeFadeEnd: number;
   skyFallbackStrength: number;
   terrainFallbackStrength: number;
+  clipmapTiers: WaterReflectionClipmapTiersConfig;
 }
 
 export interface WaterConfig {

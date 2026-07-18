@@ -35,6 +35,16 @@ function normalizeRecord(record: ClodCacheStoredRecord): ClodCacheStoredRecord {
   };
 }
 
+function compensationRecord(record: ClodCacheStoredRecord): ClodCacheStoredRecord {
+  return {
+    header: {
+      ...record.header,
+      metadata: { ...record.header.metadata },
+    },
+    payload: new ArrayBuffer(0),
+  };
+}
+
 function recordStreamingGeneration(record: ClodCacheStoredRecord): number | undefined {
   const generation = record.header.metadata.terrainStreamingGeneration;
   return typeof generation === "number" && Number.isInteger(generation) && generation >= 0
@@ -75,7 +85,7 @@ function rpc<T>(body: CacheRpcBody, timeoutMs: number): Promise<T> {
       if (body.op === "put") {
         timedOutPuts.set(requestId, {
           key: body.key,
-          record: body.record,
+          record: compensationRecord(body.record),
           timeoutMs,
         });
       }

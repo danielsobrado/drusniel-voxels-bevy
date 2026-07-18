@@ -45,6 +45,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 function isVec3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every(isFiniteNumber);
 }
@@ -53,8 +57,14 @@ function isVec4(value: unknown): value is [number, number, number, number] {
   return Array.isArray(value) && value.length === 4 && value.every(isFiniteNumber);
 }
 
-function optionalFiniteNumber(value: unknown): number | undefined {
-  return isFiniteNumber(value) ? value : undefined;
+function assertNonEmptyString(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);
+}
+
+function optionalSafeInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!isSafeInteger(value)) throw new Error(`${label} must be a safe integer`);
+  return value;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -106,40 +116,74 @@ function assertTextureSlot(value: unknown, index: number): asserts value is Proj
 }
 
 function validateVoxelEditSnapshot(value: unknown): VoxelEditSnapshot {
-  if (!isRecord(value) || typeof value.revision !== "number" || !Array.isArray(value.deltas)) {
+  if (!isRecord(value) || !isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.deltas)) {
     throw new Error("project.json voxelTerrainEdits is invalid");
   }
-  return {
-    revision: value.revision,
-    deltas: value.deltas.filter(isRecord).map((delta) => ({
-      x: Number(delta.x),
-      y: Number(delta.y),
-      z: Number(delta.z),
-      density: Number(delta.density),
-      materialSlot: delta.materialSlot === undefined ? undefined : Number(delta.materialSlot),
-      revision: Number(delta.revision),
-    })).filter((delta) => Number.isSafeInteger(delta.x) && Number.isSafeInteger(delta.y) && Number.isSafeInteger(delta.z) && Number.isFinite(delta.density) && Number.isSafeInteger(delta.revision)),
-  };
+
+  const snapshotRevision = value.revision;
+  const coordinates = new Set<string>();
+  const deltas = value.deltas.map((raw, index) => {
+    const label = `project.json voxelTerrainEdits.deltas[${index}]`;
+    if (!isRecord(raw)) throw new Error(`${label} must be an object`);
+    if (!isSafeInteger(raw.x) || !isSafeInteger(raw.y) || !isSafeInteger(raw.z)) {
+      throw new Error(`${label} coordinates must be safe integers`);
+    }
+    if (!isFiniteNumber(raw.density)) throw new Error(`${label}.density must be finite`);
+    if (!isSafeInteger(raw.revision) || raw.revision < 0 || raw.revision > snapshotRevision) {
+      throw new Error(`${label}.revision must be a non-negative safe integer within the snapshot revision`);
+    }
+    let materialSlot: number | undefined;
+    if (raw.materialSlot !== undefined) {
+      if (!isSafeInteger(raw.materialSlot) || raw.materialSlot < 0 || raw.materialSlot >= MAX_TERRAIN_TEXTURES) {
+        throw new Error(`${label}.materialSlot is invalid`);
+      }
+      materialSlot = raw.materialSlot;
+    }
+    const coordinateKey = `${raw.x},${raw.y},${raw.z}`;
+    if (coordinates.has(coordinateKey)) throw new Error(`${label} duplicates voxel ${coordinateKey}`);
+    coordinates.add(coordinateKey);
+    return {
+      x: raw.x,
+      y: raw.y,
+      z: raw.z,
+      density: raw.density,
+      ...(materialSlot === undefined ? {} : { materialSlot }),
+      revision: raw.revision,
+    };
+  });
+
+  return { revision: snapshotRevision, deltas };
 }
 
 function validateProps(value: unknown): ProjectPropInstance[] {
   if (!Array.isArray(value)) throw new Error("project.json props must be an array");
+  const ids = new Set<string>();
   return value.map((raw, index) => {
-    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.prefabId !== "string" || !isVec3(raw.position) || !isVec4(raw.rotation) || !isVec3(raw.scale)) {
-      throw new Error(`project.json props[${index}] is invalid`);
+    const label = `project.json props[${index}]`;
+    if (!isRecord(raw) || !isVec3(raw.position) || !isVec4(raw.rotation) || !isVec3(raw.scale)) {
+      throw new Error(`${label} is invalid`);
     }
+    assertNonEmptyString(raw.id, `${label}.id`);
+    assertNonEmptyString(raw.prefabId, `${label}.prefabId`);
+    if (ids.has(raw.id)) throw new Error(`${label}.id is duplicated`);
+    ids.add(raw.id);
+    if (raw.scale.some((scale) => scale <= 0)) throw new Error(`${label}.scale must be positive`);
+    if (raw.anchor !== undefined && raw.anchor !== "world" && raw.anchor !== "terrain" && raw.anchor !== "voxel") {
+      throw new Error(`${label}.anchor is invalid`);
+    }
+
     const prop: ProjectPropInstance = {
       id: raw.id,
       prefabId: raw.prefabId,
       position: [...raw.position],
       rotation: [...raw.rotation],
       scale: [...raw.scale],
-      anchor: raw.anchor === "terrain" || raw.anchor === "voxel" ? raw.anchor : "world",
+      anchor: raw.anchor ?? "world",
     };
-    const seed = optionalFiniteNumber(raw.seed);
-    const variationId = optionalFiniteNumber(raw.variationId);
-    const flags = optionalFiniteNumber(raw.flags);
-    const revision = optionalFiniteNumber(raw.revision);
+    const seed = optionalSafeInteger(raw.seed, `${label}.seed`);
+    const variationId = optionalSafeInteger(raw.variationId, `${label}.variationId`);
+    const flags = optionalSafeInteger(raw.flags, `${label}.flags`);
+    const revision = optionalSafeInteger(raw.revision, `${label}.revision`);
     if (seed !== undefined) prop.seed = seed;
     if (variationId !== undefined) prop.variationId = variationId;
     if (flags !== undefined) prop.flags = flags;

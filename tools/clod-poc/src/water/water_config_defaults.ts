@@ -88,6 +88,12 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     edgeFadeEnd: 0.82,
     skyFallbackStrength: 0.78,
     terrainFallbackStrength: 0.12,
+    clipmapTiers: {
+      enabled: false,
+      fullQualityMaxCellSizeM: 4.0,
+      midQualityMaxCellSizeM: 16.0,
+      midMaxSteps: 6,
+    },
   },
   depthWrite: false,
 };

@@ -63,7 +63,10 @@ export function cloneWaterConfig(config: WaterConfig): WaterConfig {
         riverColor: [...config.visual.rockFlour.riverColor],
       },
       refraction: { ...config.visual.refraction },
-      reflection: { ...config.visual.reflection },
+      reflection: {
+        ...config.visual.reflection,
+        clipmapTiers: { ...config.visual.reflection.clipmapTiers },
+      },
     },
     debug: { ...config.debug },
   };

@@ -32,6 +32,7 @@ export interface ProjectArchiveControllerDeps {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   flushAncestors: () => Promise<void>;
+  beforeImportNavigation?: () => Promise<void>;
   setBuildStatus: (status: string) => void;
   updateOverlay: () => void;
   setLastArchiveSummary: (summary: string) => void;
@@ -104,10 +105,15 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         setProjectBusy(true, "validating project archive", 0.2);
         const contents = await parseVoxelProjectArchive(new Uint8Array(await file.arrayBuffer()));
         await validateProjectArchiveTextures(contents);
-        setProjectBusy(true, "staging project for rebuild", 0.65);
+        if (deps.beforeImportNavigation) {
+          setProjectBusy(true, "saving current world", 0.5);
+          await deps.beforeImportNavigation();
+        }
+        setProjectBusy(true, "staging project for rebuild", 0.7);
         const token = await stageVoxelProjectImport(contents);
         emitAudio("project.import.success");
         const next = new URLSearchParams(location.search);
+        next.delete("save");
         next.set("world", String(contents.manifest.worldSize));
         next.set("import", token);
         location.search = `?${next.toString()}`;

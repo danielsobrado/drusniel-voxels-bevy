@@ -44,6 +44,7 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
   const rockFlour = recordFrom(visual.rock_flour ?? visual.rockFlour);
   const refraction = recordFrom(visual.refraction);
   const reflection = recordFrom(visual.reflection);
+  const reflectionClipmapTiers = recordFrom(reflection.clipmap_tiers ?? reflection.clipmapTiers);
   // Body presets default from the *parsed* base scalars, so overriding only
   // shallow_color/deep_color/depth_scale keeps unconfigured kinds consistent with them.
   const parsedBase = {
@@ -143,6 +144,23 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       edgeFadeEnd: readNumber(reflection.edge_fade_end ?? reflection.edgeFadeEnd, defaults.reflection.edgeFadeEnd),
       skyFallbackStrength: readNumber(reflection.sky_fallback_strength ?? reflection.skyFallbackStrength, defaults.reflection.skyFallbackStrength),
       terrainFallbackStrength: readNumber(reflection.terrain_fallback_strength ?? reflection.terrainFallbackStrength, defaults.reflection.terrainFallbackStrength),
+      clipmapTiers: {
+        enabled: readBoolean(reflectionClipmapTiers.enabled, defaults.reflection.clipmapTiers.enabled),
+        fullQualityMaxCellSizeM: readNumber(
+          reflectionClipmapTiers.full_quality_max_cell_size_m
+            ?? reflectionClipmapTiers.fullQualityMaxCellSizeM,
+          defaults.reflection.clipmapTiers.fullQualityMaxCellSizeM,
+        ),
+        midQualityMaxCellSizeM: readNumber(
+          reflectionClipmapTiers.mid_quality_max_cell_size_m
+            ?? reflectionClipmapTiers.midQualityMaxCellSizeM,
+          defaults.reflection.clipmapTiers.midQualityMaxCellSizeM,
+        ),
+        midMaxSteps: readNumber(
+          reflectionClipmapTiers.mid_max_steps ?? reflectionClipmapTiers.midMaxSteps,
+          defaults.reflection.clipmapTiers.midMaxSteps,
+        ),
+      },
     },
     depthWrite: readBoolean(visual.depth_write ?? visual.depthWrite, defaults.depthWrite),
   };

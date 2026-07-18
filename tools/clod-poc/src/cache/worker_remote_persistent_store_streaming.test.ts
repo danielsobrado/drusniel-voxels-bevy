@@ -16,7 +16,7 @@ import {
 
 const postMessage = vi.fn();
 
-function cacheRecord(streamingGeneration?: number): ClodCacheStoredRecord {
+function cacheRecord(streamingGeneration?: number, payloadBytes = 1): ClodCacheStoredRecord {
   return {
     header: {
       schemaVersion: 1,
@@ -29,15 +29,15 @@ function cacheRecord(streamingGeneration?: number): ClodCacheStoredRecord {
       sourceRevision: "0",
       configHash: "test",
       sourceHash: "test",
-      uncompressedBytes: 1,
-      storedBytes: 1,
+      uncompressedBytes: payloadBytes,
+      storedBytes: payloadBytes,
       compression: "none",
       checksum: "test",
       metadata: streamingGeneration === undefined
         ? {}
         : { terrainStreamingGeneration: streamingGeneration },
     },
-    payload: new Uint8Array([1]).buffer,
+    payload: new Uint8Array(payloadBytes).buffer,
   };
 }
 
@@ -106,14 +106,15 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
     expect(pendingCacheRpcCount()).toBe(0);
   });
 
-  it("compensates a late successful put after the client timed out", async () => {
+  it("compensates a late successful put without retaining its payload", async () => {
     vi.useFakeTimers();
     const store = new WorkerRemotePersistentStore(25);
-    const record = cacheRecord(0);
+    const record = cacheRecord(0, 4 * 1024 * 1024);
 
     const pending = store.put("stream-root", record);
     const putRequest = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "put" }>;
     const rejection = expect(pending).rejects.toBeInstanceOf(CacheUnavailableError);
+    expect(putRequest.record.payload.byteLength).toBe(record.payload.byteLength);
 
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
@@ -132,6 +133,8 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
     const compensate = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "deleteIfMatches" }>;
     expect(compensate.op).toBe("deleteIfMatches");
     expect(compensate.key).toBe("stream-root");
+    expect(compensate.record.payload.byteLength).toBe(0);
+    expect(compensate.record.header).toEqual(record.header);
     dispatchCacheRpcResponse({
       type: "cacheRpc",
       requestId: compensate.requestId,
