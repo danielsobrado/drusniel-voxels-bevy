@@ -19,6 +19,7 @@ describe("tree patch resource ownership", () => {
     expect(materialDispose).not.toHaveBeenCalled();
     expect(first.geometryDisposals.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
     expect(first.depthMaterialDisposals.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+    expect(first.depthTwinDisposals.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
 
     disposeTreeMeshGrid(second.grid);
     expect(materialDispose).not.toHaveBeenCalled();
@@ -39,6 +40,7 @@ describe("tree patch resource ownership", () => {
 
     expect(group.parent).toBeNull();
     expect(materialDispose).not.toHaveBeenCalled();
+    expect(resources.depthTwinDisposals.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
     sharedMaterial.dispose();
   });
 });
@@ -47,10 +49,12 @@ function createMeshGrid(material: THREE.Material): {
   grid: TreeSystemMeshGrid;
   geometryDisposals: MockInstance[];
   depthMaterialDisposals: MockInstance[];
+  depthTwinDisposals: MockInstance[];
 } {
   const grid = {} as TreeSystemMeshGrid;
   const geometryDisposals: MockInstance[] = [];
   const depthMaterialDisposals: MockInstance[] = [];
+  const depthTwinDisposals: MockInstance[] = [];
 
   for (const species of TREE_SPECIES) {
     grid[species] = {} as Record<TreeLod, THREE.InstancedMesh>;
@@ -61,12 +65,16 @@ function createMeshGrid(material: THREE.Material): {
       const mesh = new THREE.InstancedMesh(geometry, material, 1);
       const depthMaterial = new THREE.MeshBasicMaterial();
       const depthDispose = vi.spyOn(depthMaterial, "dispose");
-      mesh.userData.depthTwin = new THREE.InstancedMesh(geometry, depthMaterial, 1);
+      const depthTwin = new THREE.InstancedMesh(geometry, depthMaterial, 1);
+      const depthTwinDispose = vi.spyOn(depthTwin, "dispose");
+      depthTwin.instanceMatrix = mesh.instanceMatrix;
+      mesh.userData.depthTwin = depthTwin;
       grid[species][lod] = mesh;
       geometryDisposals.push(geometryDispose);
       depthMaterialDisposals.push(depthDispose);
+      depthTwinDisposals.push(depthTwinDispose);
     }
   }
 
-  return { grid, geometryDisposals, depthMaterialDisposals };
+  return { grid, geometryDisposals, depthMaterialDisposals, depthTwinDisposals };
 }
