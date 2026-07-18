@@ -26,7 +26,7 @@ function pixel(pixels: Uint8Array, width: number, x: number, y: number): number[
 }
 
 describe("tree impostor atlas pixels", () => {
-  it("dilates RGB and normal-depth within each tile without changing coverage", () => {
+  it("dilates normal-depth while preserving premultiplied albedo and coverage", () => {
     const width = 4;
     const height = 2;
     const tileSize = 2;
@@ -40,13 +40,14 @@ describe("tree impostor atlas pixels", () => {
 
     dilateTreeImpostorAtlasTiles({ albedo, normalDepth, width, height, tileSize });
 
-    expect(pixel(albedo, width, 1, 1)).toEqual([120, 80, 40, 0]);
+    expect(pixel(albedo, width, 0, 0)).toEqual([120, 80, 40, 255]);
+    expect(pixel(albedo, width, 1, 1)).toEqual([0, 0, 0, 0]);
     expect(pixel(normalDepth, width, 1, 1)).toEqual([128, 255, 128, 96]);
-    expect(pixel(albedo, width, 2, 0)).toEqual([20, 60, 100, 0]);
+    expect(pixel(albedo, width, 2, 0)).toEqual([0, 0, 0, 0]);
     expect(pixel(normalDepth, width, 2, 0)).toEqual([255, 128, 128, 180]);
   });
 
-  it("never bleeds colours across tile boundaries", () => {
+  it("never bleeds normal-depth data across tile boundaries", () => {
     const width = 4;
     const height = 2;
     const tileSize = 2;
@@ -60,8 +61,10 @@ describe("tree impostor atlas pixels", () => {
 
     dilateTreeImpostorAtlasTiles({ albedo, normalDepth, width, height, tileSize });
 
-    expect(pixel(albedo, width, 0, 1)).toEqual([240, 10, 10, 0]);
-    expect(pixel(albedo, width, 3, 1)).toEqual([10, 10, 240, 0]);
+    expect(pixel(albedo, width, 0, 1)).toEqual([0, 0, 0, 0]);
+    expect(pixel(albedo, width, 3, 1)).toEqual([0, 0, 0, 0]);
+    expect(pixel(normalDepth, width, 0, 1)).toEqual([10, 20, 30, 40]);
+    expect(pixel(normalDepth, width, 3, 1)).toEqual([50, 60, 70, 80]);
   });
 
   it("produces identical cleanup when stepped one operation at a time", () => {
