@@ -27,9 +27,28 @@ export interface RiverCobbleMaskSettings extends EnvironmentalBandSettings {
   minNormalY: number;
 }
 
+export interface RiverMistParticleSettings {
+  spawnRadiusM: number;
+  spacingM: number;
+  emitIntervalS: number;
+  maxParticles: number;
+  maxEmittersPerTick: number;
+  scanCellsPerFrame: number;
+  pointSizeM: number;
+  opacity: number;
+  spawnProbability: number;
+  riseSpeedMps: number;
+  driftSpeedMps: number;
+  minLifetimeS: number;
+  maxLifetimeS: number;
+  surfaceOffsetM: number;
+  colorRgb: [number, number, number];
+}
+
 export interface RiverMistMaskSettings extends EnvironmentalBandSettings {
   minFlowStrength: number;
   maxShoreDistanceM: number;
+  particles: RiverMistParticleSettings;
 }
 
 export interface RapidSplashMaskSettings extends EnvironmentalBandSettings {
