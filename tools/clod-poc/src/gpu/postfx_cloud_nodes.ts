@@ -15,6 +15,7 @@ import {
   vec4,
 } from "three/tsl";
 import type { PostFxCloudSettings } from "./postfx_clouds.js";
+import { inverseSmoothstep } from "./postfx_mask_math.js";
 import type { TslAny } from "./webgpu_postprocess_nodes.js";
 
 export interface VolumetricCloudLayerInput {
@@ -61,7 +62,7 @@ function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostF
   );
   const horizonFade = Math.max(0.001, settings.horizonFade);
   const layerMask = smoothstep(0, horizonFade, height01)
-    .mul(smoothstep(1, 1 - horizonFade, height01));
+    .mul(inverseSmoothstep(1 - horizonFade, 1, height01));
   const weather = cloudNoise(worldPosition, windOffset);
   const coverage = smoothstep(settings.coverage, 1, weather).mul(1.35);
   const core = cloudNoise(worldPosition.mul(1.91).add(vec3(47.3, 13.1, 91.7)), windOffset.mul(1.35));
