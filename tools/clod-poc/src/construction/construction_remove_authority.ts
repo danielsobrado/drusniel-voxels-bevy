@@ -50,18 +50,47 @@ function denied(
   return { allowed: false, reason };
 }
 
+function targetIsFinite(target: ConstructionRemoveTarget): boolean {
+  return target.id.trim().length > 0 && target.position.every(Number.isFinite);
+}
+
+function commandMatchesTarget(command: ModedEditCommand, target: ConstructionRemoveTarget): boolean {
+  return command.operation === "construction_remove"
+    && command.targetPosition[0] === target.position[0]
+    && command.targetPosition[1] === target.position[1]
+    && command.targetPosition[2] === target.position[2];
+}
+
 export function createConstructionRemoveAuthorizer(
   deps: ConstructionRemoveAuthorityDeps,
 ): ConstructionRemoveAuthorizer {
   return (target, existingCommand = null) => {
     try {
+      if (!targetIsFinite(target)) return denied(deps, target, "not_ready");
+      if (existingCommand && !commandMatchesTarget(existingCommand, target)) {
+        return denied(deps, target, "target_moved");
+      }
+
       const nowMs = (deps.nowMs ?? (() => performance.now()))();
       const terrainRevision = deps.getTerrainRevision();
+      const maxDistanceM = deps.getMaxDistanceM();
       const mode = deps.getCurrentMode();
       const actorPosition = deps.getActorPosition() ?? {
         x: target.position[0],
         z: target.position[2],
       };
+      if (
+        !Number.isFinite(nowMs)
+        || !Number.isSafeInteger(terrainRevision)
+        || !Number.isFinite(maxDistanceM)
+        || maxDistanceM < 0
+        || !Number.isFinite(actorPosition.x)
+        || !Number.isFinite(actorPosition.z)
+        || mode.length === 0
+      ) {
+        return denied(deps, target, "not_ready");
+      }
+
       const command = existingCommand ?? createEditCommand({
         operation: "construction_remove",
         targetPosition: target.position,
@@ -75,7 +104,7 @@ export function createConstructionRemoveAuthorizer(
         nowMs,
         currentTerrainRevision: terrainRevision,
         actorPosition,
-        maxDistanceM: deps.getMaxDistanceM(),
+        maxDistanceM,
         currentMode: mode,
         targetReady: deps.targetReadyAt?.(target.position[0], target.position[2]) ?? true,
       });
