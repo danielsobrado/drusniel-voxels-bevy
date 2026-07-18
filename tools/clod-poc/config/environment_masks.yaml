@@ -1,0 +1,57 @@
+enabled: true
+
+river_cobble:
+  enabled: true
+  strength: 1.0
+  min_depth_m: 0.06
+  max_depth_m: 1.4
+  min_flow_strength: 0.015
+  max_flow_strength: 1.8
+  max_shore_distance_m: 10.0
+  min_normal_y: 0.58
+
+river_mist:
+  enabled: true
+  strength: 1.0
+  min_flow_strength: 0.01
+  max_shore_distance_m: 14.0
+
+rapid_splash:
+  enabled: true
+  strength: 1.0
+  flow_start: 0.35
+  flow_end: 1.2
+  bed_drop_start: 0.35
+  bed_drop_end: 1.8
+
+sunbeam_mote:
+  enabled: true
+  strength: 1.0
+  visibility_start: 0.45
+  visibility_end: 0.9
+
+calm_pool:
+  enabled: true
+  strength: 1.0
+  min_depth_m: 0.45
+  max_flow_strength: 0.08
+
+frost:
+  enabled: true
+  strength: 1.0
+  visibility_start: 0.2
+  visibility_end: 0.85
+  wetness_suppression: 0.7
+
+dew:
+  enabled: true
+  strength: 1.0
+  wetness_start: 0.25
+  wetness_end: 0.85
+
+shore_debris:
+  enabled: true
+  strength: 1.0
+  shore_start_m: 0.2
+  shore_end_m: 4.5
+  max_flow_strength: 0.55
