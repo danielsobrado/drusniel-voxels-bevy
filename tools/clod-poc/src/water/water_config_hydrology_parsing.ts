@@ -6,11 +6,16 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
   const fill = (record.fill ?? {}) as Record<string, unknown>;
   const accumulation = (record.accumulation ?? {}) as Record<string, unknown>;
   const rivers = (record.rivers ?? {}) as Record<string, unknown>;
+  const gravelBars = (record.gravel_bars ?? record.gravelBars ?? {}) as Record<string, unknown>;
   const waterSurface = (record.water_surface ?? record.waterSurface ?? {}) as Record<string, unknown>;
   const moisture = (record.moisture ?? {}) as Record<string, unknown>;
   const talus = (record.talus ?? {}) as Record<string, unknown>;
   const infinite = (record.infinite ?? {}) as Record<string, unknown>;
   const debug = (record.debug ?? {}) as Record<string, unknown>;
+  const gravelPatternStart = readFraction(gravelBars.pattern_start ?? gravelBars.patternStart, fallback.gravelBars.patternStart);
+  const gravelMinShore = readNonNegative(gravelBars.min_shore_distance_m ?? gravelBars.minShoreDistanceM, fallback.gravelBars.minShoreDistanceM);
+  const gravelMinDepth = readNonNegative(gravelBars.min_depth_m ?? gravelBars.minDepthM, fallback.gravelBars.minDepthM);
+  const gravelMinFlow = readNonNegative(gravelBars.min_flow_strength ?? gravelBars.minFlowStrength, fallback.gravelBars.minFlowStrength);
 
   return {
     enabled: readBoolean(record.enabled, fallback.enabled),
@@ -46,6 +51,22 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
       fallbackTributaries: readBoolean(rivers.fallback_tributaries ?? rivers.fallbackTributaries, fallback.rivers.fallbackTributaries),
       flowSpeedMultiplier: readNumber(rivers.flow_speed_multiplier ?? rivers.flowSpeedMultiplier, fallback.rivers.flowSpeedMultiplier),
       lakeSurfaceDropM: readNumber(rivers.lake_surface_drop_m ?? rivers.lakeSurfaceDropM, fallback.rivers.lakeSurfaceDropM),
+    },
+    gravelBars: {
+      enabled: readBoolean(gravelBars.enabled, fallback.gravelBars.enabled),
+      strength: readFraction(gravelBars.strength, fallback.gravelBars.strength),
+      seedSalt: Math.floor(readNumber(gravelBars.seed_salt ?? gravelBars.seedSalt, fallback.gravelBars.seedSalt)),
+      longitudinalPeriodM: readAtLeast(gravelBars.longitudinal_period_m ?? gravelBars.longitudinalPeriodM, fallback.gravelBars.longitudinalPeriodM, 8),
+      crossPeriodM: readAtLeast(gravelBars.cross_period_m ?? gravelBars.crossPeriodM, fallback.gravelBars.crossPeriodM, 2),
+      patternStart: gravelPatternStart,
+      patternEnd: Math.max(gravelPatternStart, readFraction(gravelBars.pattern_end ?? gravelBars.patternEnd, fallback.gravelBars.patternEnd)),
+      breakupStrength: readFraction(gravelBars.breakup_strength ?? gravelBars.breakupStrength, fallback.gravelBars.breakupStrength),
+      minShoreDistanceM: gravelMinShore,
+      maxShoreDistanceM: Math.max(gravelMinShore, readNonNegative(gravelBars.max_shore_distance_m ?? gravelBars.maxShoreDistanceM, fallback.gravelBars.maxShoreDistanceM)),
+      minDepthM: gravelMinDepth,
+      maxDepthM: Math.max(gravelMinDepth, readNonNegative(gravelBars.max_depth_m ?? gravelBars.maxDepthM, fallback.gravelBars.maxDepthM)),
+      minFlowStrength: gravelMinFlow,
+      maxFlowStrength: Math.max(gravelMinFlow, readNonNegative(gravelBars.max_flow_strength ?? gravelBars.maxFlowStrength, fallback.gravelBars.maxFlowStrength)),
     },
     waterSurface: {
       farReduceFactor: readNumber(waterSurface.far_reduce_factor ?? waterSurface.farReduceFactor, fallback.waterSurface.farReduceFactor),
@@ -88,4 +109,16 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
       dumpDir: typeof debug.dump_dir === "string" ? debug.dump_dir : typeof debug.dumpDir === "string" ? debug.dumpDir : fallback.debug.dumpDir,
     },
   };
+}
+
+function readAtLeast(value: unknown, fallback: number, minimum: number): number {
+  return Math.max(minimum, readNumber(value, fallback));
+}
+
+function readNonNegative(value: unknown, fallback: number): number {
+  return Math.max(0, readNumber(value, fallback));
+}
+
+function readFraction(value: unknown, fallback: number): number {
+  return Math.min(1, Math.max(0, readNumber(value, fallback)));
 }
