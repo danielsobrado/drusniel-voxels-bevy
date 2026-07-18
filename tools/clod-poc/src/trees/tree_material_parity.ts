@@ -33,6 +33,7 @@ import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import { TREE_FOLIAGE_ATLAS_COLUMNS, TREE_FOLIAGE_ATLAS_ROWS } from "./tree_alpha_mask.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import { decorateTreeNodeForestLighting } from "./tree_node_forest_lighting.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
 import {
   TREE_RING_CELL_SIZE_M,
@@ -114,7 +115,9 @@ export function decorateTreeMaterialHandle(
     forest?.dispose();
     originalDispose();
   };
-  return handle;
+  return !options.ring && regular.colorNode
+    ? decorateTreeNodeForestLighting(handle)
+    : handle;
 }
 
 function createTreeVisibilityNodes(atlas: TreeFoliageAtlas): {
