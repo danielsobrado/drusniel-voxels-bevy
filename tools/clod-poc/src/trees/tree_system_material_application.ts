@@ -111,8 +111,9 @@ function refreshTreeSystemDepthTwin(
   species: TreeSpeciesId,
   lod: (typeof TREE_LODS)[number],
 ): void {
-  if (!mesh.userData.depthTwin) return;
+  if (!mesh.userData.depthTwin && mesh.userData.depthPrepassRequested !== true) return;
   const bakedImpostor = lod === "impostor" &&
+    !input.settings.render.debugColorByLod &&
     isTreeImpostorCardGeometry(mesh.geometry) &&
     input.settings.impostors.enabled &&
     input.impostorAtlases[species]?.ready === true;
