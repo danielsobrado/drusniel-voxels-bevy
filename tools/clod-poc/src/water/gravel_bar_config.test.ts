@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { cloneHydrologyConfig } from "./hydrologyConfig.js";
 import { parseWaterConfig } from "./waterConfig.js";
-import { readGravelBarSettings } from "./gravel_bar_runtime.js";
+import { readGravelBarSettings, setGravelBarSettings } from "./gravel_bar_runtime.js";
 
 const MINIMAL_WATER = `
 water:
@@ -21,6 +22,10 @@ water:
       min_flow_strength: 3
       max_flow_strength: 1
 `;
+
+afterEach(() => {
+  setGravelBarSettings(cloneHydrologyConfig().gravelBars);
+});
 
 describe("gravel bar hydrology config", () => {
   it("parses and clamps inverted or unsafe ranges", () => {
