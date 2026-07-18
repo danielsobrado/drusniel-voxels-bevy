@@ -94,6 +94,13 @@ export function applyWaterQueryOverrides(config: WaterConfig, searchParams: URLS
   const glacialMurkiness = flagParam(searchParams, ["waterGlacialMurkiness", "glacialWater", "waterGlacial"]);
   if (glacialMurkiness !== null) next.visual.glacialMurkiness.enabled = glacialMurkiness;
 
+  const reflectionTiers = flagParam(searchParams, [
+    "waterReflectionTiers",
+    "waterMidReflection",
+    "waterReflectionFallback",
+  ]);
+  if (reflectionTiers !== null) next.visual.reflection.clipmapTiers.enabled = reflectionTiers;
+
   const hydroUnified = flagParam(searchParams, ["hydroUnified", "hydroUnifiedStartup"]);
   if (hydroUnified !== null) next.hydrology.infinite.unifiedStartup = hydroUnified;
 
