@@ -74,7 +74,7 @@ export function createSaveCheckpointController(
     // Establish the guard before invoking status, counters, clock, or flush callbacks.
     inFlight = current;
 
-    void (async () => {
+    const runCheckpoint = async (): Promise<void> => {
       const startedAt = nowMs();
       try {
         increment("save_checkpoint_requests");
@@ -85,11 +85,10 @@ export function createSaveCheckpointController(
         await flushToConvergence();
         increment("save_checkpoint_completed");
         publishStatus("checkpoint saved");
-        resolveCheckpoint();
       } catch (error) {
         increment("save_checkpoint_failed");
         publishStatus(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-        rejectCheckpoint(error);
+        throw error;
       } finally {
         const latest = counters();
         if (latest) {
@@ -98,8 +97,9 @@ export function createSaveCheckpointController(
         }
         if (inFlight === current) inFlight = null;
       }
-    })();
+    };
 
+    void runCheckpoint().then(resolveCheckpoint, rejectCheckpoint);
     return current;
   };
 
