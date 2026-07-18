@@ -32,6 +32,7 @@ function applyStagedWorldIdentity(
   stagedImport: VoxelProjectArchiveContents,
 ): void {
   const { manifest } = stagedImport;
+  setBooleanParam(searchParams, "customProps", manifest.props.length > 0);
   if (!isCurrentVoxelProjectManifest(manifest)) {
     console.warn("[project import] legacy schema v3 has no pinned world identity; using current URL world settings");
     return;
@@ -49,6 +50,7 @@ function applyStagedWorldIdentity(
   searchParams.set("seaLevel", String(terrainField.seaLevel));
   setBooleanParam(searchParams, "islands", islandShape.enabled);
   setBooleanParam(searchParams, "oceanRim", islandShape.oceanRim);
+  setBooleanParam(searchParams, "customProps", manifest.props.length > 0);
   searchParams.set("worldRadius", String(islandShape.worldRadiusM));
   searchParams.set("islandSpacing", String(islandShape.spacingM));
   searchParams.set("islandRadius", String(islandShape.radiusM));
