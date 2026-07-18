@@ -11,6 +11,7 @@ import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { resolveWaterQualityTier } from "../../water/water_quality_overrides.js";
 import { createHydrologyTileRemoteBuilder } from "../../water/hydrology_tile_worker_client.js";
 import { WaterHydrologyAtlasRuntime, waterAtlasTilesPerSide } from "../../water/waterHydrologyAtlasRuntime.js";
+import { resolveWaterReflectionPolicy } from "../../water/waterReflectionPolicy.js";
 import { getDigEditRevision, getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
 import { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
@@ -45,11 +46,33 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   });
   const waterQuality = resolveWaterQualityTier(deps.searchParams);
   const useHighQualityWebGpuWater = deps.isWebGpu && waterQuality === "high";
+  const requestedReflection = useHighQualityWebGpuWater
+    ? { ...deps.waterConfig.visual.reflection, mode: "ssr" as const, ssrEnabled: true }
+    : deps.waterConfig.visual.reflection;
+  const reflectionPolicy = resolveWaterReflectionPolicy(
+    requestedReflection,
+    deps.isWebGpu ? "webgpu" : "webgl",
+  );
+  const clipmapVisual = useHighQualityWebGpuWater
+    ? {
+        ...deps.waterConfig.visual,
+        reflection: {
+          ...requestedReflection,
+          ssrEnabled: reflectionPolicy.ssrActive,
+        },
+      }
+    : deps.waterConfig.visual;
   const waterMaterialFactory = deps.isWebGpu
     ? useHighQualityWebGpuWater
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
       : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
+  const clipmapWaterConfig = useHighQualityWebGpuWater
+    ? {
+        ...deps.waterConfig,
+        visual: clipmapVisual,
+      }
+    : deps.waterConfig;
   const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
 
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
@@ -95,13 +118,22 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     && deps.searchParams.get("waterAtlasClipmap") !== "0"
     ? deps.hydrologySystem?.tileAtlasSource() ?? null
     : null;
-  const atlasLevelHalfSpans = deps.waterConfig.cellSizes
-    .filter((cellSize) => cellSize <= (tileBypassCellSize ?? 0))
+  const atlasLevelCellSizes = deps.waterConfig.cellSizes
+    .filter((cellSize) => cellSize <= (tileBypassCellSize ?? 0));
+  const atlasLevelHalfSpans = atlasLevelCellSizes
     .map((cellSize) => (cellSize * deps.waterConfig.cellsPerLevel) / 2);
+  const atlasMaxSnapOffsetM = atlasLevelCellSizes.reduce(
+    (maxOffset, cellSize) => Math.max(maxOffset, cellSize * deps.waterConfig.snapCells),
+    0,
+  );
   const waterAtlas = atlasSource && atlasLevelHalfSpans.length > 0
     ? new WaterHydrologyAtlasRuntime(
         atlasSource,
-        waterAtlasTilesPerSide(Math.max(...atlasLevelHalfSpans), atlasSource.tileSizeM),
+        waterAtlasTilesPerSide(
+          Math.max(...atlasLevelHalfSpans),
+          atlasSource.tileSizeM,
+          atlasMaxSnapOffsetM,
+        ),
       )
     : null;
   const clipmap = new WaterClipmap({
@@ -131,7 +163,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const devLogged = { value: false };
   const debugState: WaterDebugState = {
     ...defaultWaterDebugState({
-      ...deps.waterConfig.visual,
+      ...clipmapWaterConfig.visual,
       depthWrite: ui.waterDepthWrite,
     }),
     enabled: ui.waterEnabled,
@@ -147,7 +179,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   };
 
   const makeVisual = () => ({
-    ...deps.waterConfig.visual,
+    ...clipmapWaterConfig.visual,
     depthWrite: deps.getUiState().waterDepthWrite,
   });
 

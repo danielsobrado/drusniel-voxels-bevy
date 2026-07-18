@@ -22,16 +22,25 @@ export function resolveWaterReflectionPolicy(
     Math.min(1, reflection.skyFallbackStrength + reflection.terrainFallbackStrength),
   );
 
-  // TODO(WATER-302): Switch WebGPU to active SSR once screen-space hit/miss resources
-  // are wired. The current shader path uses procedural sky/terrain fallback only.
+  if (ssrRequested && backend === "webgpu") {
+    return {
+      requestedMode: reflection.mode,
+      activeMode: "ssr",
+      ssrRequested: true,
+      ssrActive: true,
+      fallbackStrength,
+      reason: "webgpu: screen-space reflection with sky/terrain miss fallback",
+    };
+  }
+
   if (ssrRequested) {
     return {
       requestedMode: reflection.mode,
       activeMode: "sky_terrain_fallback",
-      ssrRequested,
+      ssrRequested: true,
       ssrActive: false,
       fallbackStrength,
-      reason: `${backend}: ssr requested but not runtime-wired; using safe sky/terrain fallback`,
+      reason: `${backend}: ssr requires WebGPU; using safe sky/terrain fallback`,
     };
   }
 
