@@ -14,9 +14,11 @@ function tile(): HydrologyTile {
   const shoreDistance = floats();
   shoreDistance.fill(2);
   return {
-    key: "0,0",
     tileX: 0,
     tileZ: 0,
+    originX: 0,
+    originZ: 0,
+    cellSize: 4,
     res,
     terrainY: floats(),
     waterY: floats(),
