@@ -22,6 +22,9 @@ export class CacheBrokerOperationQueue {
 
   private track(operation: Promise<unknown>): void {
     this.active.add(operation);
-    void operation.finally(() => this.active.delete(operation));
+    void operation.then(
+      () => this.active.delete(operation),
+      () => this.active.delete(operation),
+    );
   }
 }
