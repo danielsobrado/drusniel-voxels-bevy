@@ -37,6 +37,7 @@ function record(generation: number | undefined, createdAtUnixMs = 1): ClodCacheS
 function request(
   cacheRecord: ClodCacheStoredRecord,
   streamingGeneration?: number,
+  deadlineUnixMs = 100,
 ): Extract<CacheRpcRequest, { op: "put" }> {
   return {
     type: "cacheRpc",
@@ -44,6 +45,7 @@ function request(
     op: "put",
     key: "stream-root",
     record: cacheRecord,
+    deadlineUnixMs,
     ...(streamingGeneration === undefined ? {} : { streamingGeneration }),
   };
 }
@@ -59,7 +61,7 @@ describe("commitCachePut", () => {
       deleteIfMatches: async () => false,
     };
 
-    await expect(commitCachePut(store, request(record(undefined)))).resolves.toBe(true);
+    await expect(commitCachePut(store, request(record(undefined)), () => 0)).resolves.toBe(true);
     expect(put).toHaveBeenCalledOnce();
   });
 
@@ -79,7 +81,7 @@ describe("commitCachePut", () => {
       deleteIfMatches: remove,
     };
 
-    await expect(commitCachePut(store, request(record(0), 0))).resolves.toBe(false);
+    await expect(commitCachePut(store, request(record(0), 0), () => 0)).resolves.toBe(false);
     expect(remove).toHaveBeenCalledWith("stream-root", expect.any(Object));
     expect(stored).toBeNull();
   });
@@ -101,8 +103,40 @@ describe("commitCachePut", () => {
       deleteIfMatches: remove,
     };
 
-    await expect(commitCachePut(store, request(record(0), 0))).resolves.toBe(false);
+    await expect(commitCachePut(store, request(record(0), 0), () => 0)).resolves.toBe(false);
     expect(remove).toHaveBeenCalledOnce();
     expect(stored).toBe(newer);
+  });
+
+  it("rejects a write whose broker deadline elapsed before execution", async () => {
+    const put = vi.fn(async () => undefined);
+    const store: CacheWriteStore = {
+      put,
+      deleteIfMatches: async () => false,
+    };
+
+    await expect(commitCachePut(store, request(record(undefined), undefined, 10), () => 11)).resolves.toBe(false);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("rolls back an exact write whose deadline expires during commit", async () => {
+    let now = 0;
+    let stored: ClodCacheStoredRecord | null = null;
+    const remove = vi.fn(async (_key: string, expected: ClodCacheStoredRecord) => {
+      if (!stored || !cacheRecordVersionMatches(stored, expected)) return false;
+      stored = null;
+      return true;
+    });
+    const store: CacheWriteStore = {
+      put: async (_key, value) => {
+        stored = value;
+        now = 11;
+      },
+      deleteIfMatches: remove,
+    };
+
+    await expect(commitCachePut(store, request(record(undefined), undefined, 10), () => now)).resolves.toBe(false);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(stored).toBeNull();
   });
 });
