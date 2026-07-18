@@ -330,7 +330,7 @@ async function main(): Promise<void> {
     page.on("console", (message) => {
       if (message.type() === "error" || message.type() === "warning") console.log(`[page:${message.type()}] ${message.text()}`);
     });
-    page.on("pageerror", (error) => console.log(`[page:error] ${error.message}`));
+    page.on("pageerror", (error) => console.log(`[page:error] ${error.stack ?? error.message}`));
     for (const floatingOrigin of [false, true]) {
       for (const pose of POSE_MATRIX) {
         console.log(`[rim-precision] ${pose.name} floatingOrigin=${floatingOrigin ? 1 : 0}`);

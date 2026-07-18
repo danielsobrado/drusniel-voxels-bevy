@@ -4,6 +4,7 @@ import {
   gameplayDiagnostics,
   resetGameplayDiagnosticsForTests,
 } from "../../player/gameplay_diagnostics.js";
+import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
 import type { TerrainBrushParams, TerrainEditService, TerrainSpellEditResult } from "./terrain_edit_service.js";
 import { createCommandGuardedTerrainEditService } from "./terrain_edit_command_service.js";
 
@@ -24,7 +25,7 @@ function brush(overrides: Partial<TerrainBrushParams> = {}): TerrainBrushParams 
 }
 
 function baseService() {
-  const runDigNow = vi.fn(async () => undefined);
+  const runDigNow = vi.fn(async () => {});
   const commitSpellTerrainEdit = vi.fn(async (): Promise<TerrainSpellEditResult> => ({
     committed: true,
     changed: false,
@@ -41,7 +42,7 @@ function baseService() {
     commitConstructionTerrainConform: vi.fn(async () => ({ committed: true, reason: null, changed: false, receipt: null })),
     undoConstructionTerrainConform: vi.fn(async () => ({ undone: true, reason: null })),
     forgetConstructionTerrainConform: vi.fn(),
-    flushAncestors: vi.fn(async () => undefined),
+    flushAncestors: vi.fn(async () => {}),
     get lastDigAt() { return 123; },
   } as unknown as TerrainEditService;
   return { service, runDigNow, commitSpellTerrainEdit };
@@ -56,7 +57,11 @@ function createHarness(overrides: {
   allowFarCommit?: boolean;
 } = {}) {
   const base = baseService();
-  const terrainRaycast = { raycastEditableTerrain: vi.fn(overrides.raycast ?? (() => hit)) } as never;
+  const terrainRaycast = {
+    raycastEditableTerrain: vi.fn(overrides.raycast ?? (() => hit)),
+  } as unknown as TerrainRaycastService & {
+    raycastEditableTerrain: ReturnType<typeof vi.fn>;
+  };
   const service = createCommandGuardedTerrainEditService(base.service, {
     terrainRaycast,
     getBrushParams: overrides.currentBrush ?? (() => brush()),

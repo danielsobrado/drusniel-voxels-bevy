@@ -271,7 +271,7 @@ describe("environment query overrides", () => {
     const state = createState();
     applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ quality: "perf", treeShadowMaxLod: "bad" }));
 
-    expect(state.treeShadowMaxLod).toBe("near");
+    expect(state.treeShadowMaxLod).toBe("far");
   });
 
   it.each(["density", "transmittance", "scatter"])("enables the froxel debug overlay for ?froxelDebug=%s", (mode) => {

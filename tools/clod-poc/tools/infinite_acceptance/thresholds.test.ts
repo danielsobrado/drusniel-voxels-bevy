@@ -145,7 +145,7 @@ describe("infinite islands thresholds", () => {
 
   it("checks live bubble and streamed CLOD safety failures", () => {
     expect(evaluateThresholds(validCounters({ live_bubble_streamed_collider_pages: 0 })).failures).toContain(
-      "live_bubble_streamed_collider_pages=0 failed: must be > 0",
+      "live_bubble_streamed_collider_pages=0 failed: active plus certified/skipped pages must cover collider demand",
     );
     expect(evaluateThresholds(validCounters({ live_clod_stream_ready_pages: 0, live_clod_stream_active_root_pages: 0 })).failures).toContain(
       "live_clod_stream_ready_pages=0 failed: must be > 0 when worker stream roots are required and enabled",
@@ -213,8 +213,8 @@ describe("infinite islands thresholds", () => {
     expect(evaluateThresholds(validCounters({ far_clipmap_build_ms: 6.1 })).failures).toContain(
       "far_clipmap_build_ms=6.1 failed: must be finite, >= 0 and <= 6",
     );
-    expect(evaluateThresholds(validCounters({ far_clipmap_fallback_samples_total: 1 })).failures).toContain(
-      "far_clipmap_fallback_samples_total=1 failed: must equal 0",
+    expect(evaluateThresholds(validCounters({ far_clipmap_fallback_samples_this_frame: 1 })).failures).toContain(
+      "far_clipmap_fallback_samples_this_frame=1 failed: must equal 0",
     );
     expect(evaluateThresholds(validCounters({ far_clipmap_exception_samples_total: 1 })).failures).toContain(
       "far_clipmap_exception_samples_total=1 failed: must equal 0",

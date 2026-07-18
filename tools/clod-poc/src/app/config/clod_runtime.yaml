@@ -23,12 +23,12 @@ page_geometry_cache:
 
 render_node_cache:
   enabled: true
-  max_inactive_nodes: 512
+  max_inactive_nodes: 256
   prune_interval_frames: 30
   prefetch_parent: true
   prefetch_children: false
   max_prefetch_creates_per_frame: 4
-  warn_at_inactive_nodes: 480
+  warn_at_inactive_nodes: 224
   evict_geometry_with_render_node: true
 
 clod_apply:

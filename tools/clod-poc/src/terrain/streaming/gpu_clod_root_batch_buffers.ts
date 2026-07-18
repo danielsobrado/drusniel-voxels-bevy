@@ -34,6 +34,8 @@ export interface GpuRootChunkPlan {
  * produce for such pages.
  */
 export const DEEP_WINDOW_RETRY_VY_BASE = -64;
+const DEFAULT_WINDOW_FLOOR_SURFACE_Y = 0;
+const DEEP_WINDOW_SAFE_MAX_Y = 63;
 
 /** LOD0 page keys (`px,pz`) whose every chunk in `meshesBySlot` has zero indices. */
 export function fullyEmptyLod0PageKeys(
@@ -50,6 +52,66 @@ export function fullyEmptyLod0PageKeys(
   const empty = new Set<string>();
   for (const key of seen) if (!nonEmpty.has(key)) empty.add(key);
   return empty;
+}
+
+/**
+ * LOD0 pages with real geometry intersecting the lower edge of the default GPU window.
+ * Rebuild only pages whose observed top stays inside the lowered window, so the retry cannot
+ * trade a clipped seafloor for a clipped hilltop.
+ */
+export function partiallyFloorClippedLod0PageKeys(
+  plans: readonly GpuRootChunkPlan[],
+  meshesBySlot: ReadonlyMap<number, { positions: ArrayLike<number>; indices: ArrayLike<number> }>,
+  chunkSize: number,
+): Set<string> {
+  const ranges = new Map<string, { minY: number; maxY: number }>();
+  const floorContourPages = new Set<string>();
+  for (const plan of plans) {
+    const mesh = meshesBySlot.get(plan.slotIndex);
+    const positions = mesh?.positions;
+    if (!mesh || !positions || positions.length < 3) continue;
+    const key = `${plan.lod0Px},${plan.lod0Pz}`;
+    const range = ranges.get(key) ?? { minY: Number.POSITIVE_INFINITY, maxY: Number.NEGATIVE_INFINITY };
+    for (let index = 1; index < positions.length; index += 3) {
+      const y = Number(positions[index]);
+      if (!Number.isFinite(y)) continue;
+      range.minY = Math.min(range.minY, y);
+      range.maxY = Math.max(range.maxY, y);
+    }
+    ranges.set(key, range);
+    const edgeCounts = new Map<string, number>();
+    for (let index = 0; index + 2 < mesh.indices.length; index += 3) {
+      const triangle = [Number(mesh.indices[index]), Number(mesh.indices[index + 1]), Number(mesh.indices[index + 2])];
+      for (const [a, b] of [[triangle[0], triangle[1]], [triangle[1], triangle[2]], [triangle[2], triangle[0]]]) {
+        const edge = a! < b! ? `${a}:${b}` : `${b}:${a}`;
+        edgeCounts.set(edge, (edgeCounts.get(edge) ?? 0) + 1);
+      }
+    }
+    const boundaryVertices = new Set<number>();
+    for (const [edge, count] of edgeCounts) {
+      if (count !== 1) continue;
+      for (const vertex of edge.split(":").map(Number)) boundaryVertices.add(vertex);
+    }
+    const x0 = plan.cx * chunkSize;
+    const x1 = x0 + chunkSize;
+    const z0 = plan.cz * chunkSize;
+    const z1 = z0 + chunkSize;
+    for (const vertex of boundaryVertices) {
+      const x = Number(positions[vertex * 3]);
+      const y = Number(positions[vertex * 3 + 1]);
+      const z = Number(positions[vertex * 3 + 2]);
+      const perimeterDistance = Math.min(Math.abs(x - x0), Math.abs(x - x1), Math.abs(z - z0), Math.abs(z - z1));
+      if (y <= DEFAULT_WINDOW_FLOOR_SURFACE_Y && perimeterDistance > 1) {
+        floorContourPages.add(key);
+        break;
+      }
+    }
+  }
+  const clipped = new Set<string>();
+  for (const [key, range] of ranges) {
+    if (floorContourPages.has(key) && range.maxY <= DEEP_WINDOW_SAFE_MAX_Y) clipped.add(key);
+  }
+  return clipped;
 }
 
 /** Rebased copies of the plans for `pageKeys`, stamped with the lowered vertical window. */

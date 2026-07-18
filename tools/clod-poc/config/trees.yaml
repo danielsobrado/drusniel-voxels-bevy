@@ -37,7 +37,7 @@ trees:
   lod:
     near_fraction: 0.062
     mid_fraction: 0.24
-    far_fraction: 0.4666666667
+    far_fraction: 0.4666666666666667
     impostor_fraction: 1.0
     hysteresis_m: 8
     crossfade_enabled: true

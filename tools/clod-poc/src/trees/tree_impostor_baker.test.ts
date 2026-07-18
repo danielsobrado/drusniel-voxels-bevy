@@ -38,12 +38,12 @@ describe("tree impostor baker", () => {
       expect(atlas?.texture).toBe(atlas?.albedo);
       expect(atlas?.gridSize).toBe(settings.impostors.octahedralGridSize);
       expect(atlas?.frames).toHaveLength(settings.impostors.octahedralGridSize ** 2);
-      expect(atlas?.ageBuckets).toEqual([0.20, 0.60, 0.92]);
-      expect(atlas?.layerCount).toBe(3);
+      expect(atlas?.ageBuckets).toEqual([0.60]);
+      expect(atlas?.layerCount).toBe(1);
       expect(atlas?.radius).toBeGreaterThan(0);
       atlas?.dispose();
     }
-    expect(renderer.renderCalls).toBe(TREE_SPECIES.length * settings.impostors.octahedralGridSize ** 2 * 3 * 2);
+    expect(renderer.renderCalls).toBe(TREE_SPECIES.length * settings.impostors.octahedralGridSize ** 2 * 1 * 2);
   });
 
   it("uses a WebGPU-compatible normal-depth material when requested", async () => {

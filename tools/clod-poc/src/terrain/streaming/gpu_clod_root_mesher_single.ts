@@ -43,6 +43,7 @@ import {
   estimateRootRequestSlotBytes,
   findChunkVerticesOutOfBounds,
   fullyEmptyLod0PageKeys,
+  partiallyFloorClippedLod0PageKeys,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   rootLevelForRequest,
@@ -493,21 +494,20 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   }
 
   /**
-   * A page whose entire surface lies below the default [-1, Y_CELLS] vertical window
-   * (deep ocean beyond the continent coasts) meshes to zero triangles even though the
-   * CPU mesher produces a real seafloor there. Re-dispatch exactly those pages with the
-   * window floor lowered to the CPU mesher's MIN_Y_CELL; a page that is still empty
-   * afterwards fails page validation as before.
+   * A page whose surface lies below or crosses the default [-1, Y_CELLS] vertical window
+   * can be empty or retain an artificial open contour at the floor. Re-dispatch those pages
+   * with the CPU mesher's lower window when their observed top also fits that window.
    */
   private async retryFullyEmptyPagesWithDeepWindow(
     plans: readonly GpuRootChunkPlan[],
     slots: readonly GpuRootChunkSlot[],
     meshes: Map<number, PageMesh>,
   ): Promise<void> {
-    const emptyPages = fullyEmptyLod0PageKeys(plans, meshes);
-    if (emptyPages.size === 0) return;
-    const retryPlans = deepWindowRetryPlans(plans, emptyPages);
-    this.deepWindowRetryPages += emptyPages.size;
+    const retryPages = fullyEmptyLod0PageKeys(plans, meshes);
+    for (const key of partiallyFloorClippedLod0PageKeys(plans, meshes, this.cfg.page.chunk_size)) retryPages.add(key);
+    if (retryPages.size === 0) return;
+    const retryPlans = deepWindowRetryPlans(plans, retryPages);
+    this.deepWindowRetryPages += retryPages.size;
     this.chunkSlotsDispatched += retryPlans.length;
     const retrySlots = this.pool.prepare(retryPlans);
     const retryCountReadback = this.device.createBuffer({

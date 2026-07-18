@@ -12,14 +12,19 @@ import { clodUrl, launchWebGPU } from "./launch.js";
 interface PageCoord {
   px: number;
   pz: number;
+  level?: number;
 }
 
 function parsePages(raw: string | undefined): PageCoord[] {
   const text = raw ?? "-126,0;124,0;140,4;146,4";
   return text.split(";").map((entry) => {
-    const [px, pz] = entry.split(",").map((value) => Number(value.trim()));
-    if (!Number.isInteger(px) || !Number.isInteger(pz)) throw new Error(`invalid page coord: ${entry}`);
-    return { px, pz };
+    const [levelText, coordinates] = entry.includes(":") ? entry.split(":", 2) : [undefined, entry];
+    const [px, pz] = coordinates!.split(",").map((value) => Number(value.trim()));
+    const level = levelText === undefined ? undefined : Number(levelText);
+    if (!Number.isInteger(px) || !Number.isInteger(pz) || (level !== undefined && !Number.isInteger(level))) {
+      throw new Error(`invalid page coord: ${entry}`);
+    }
+    return level === undefined ? { px, pz } : { px, pz, level };
   });
 }
 

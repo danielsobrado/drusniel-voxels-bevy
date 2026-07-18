@@ -38,4 +38,20 @@ describe("WebGPU required limits", () => {
       maxVertexAttributes: 16,
     });
   });
+
+  it("requests enough storage binding capacity for a continent erosion checkpoint", () => {
+    const diagnostics: GpuDiagnostics = {
+      ok: true,
+      features: [],
+      limits: {
+        maxStorageBufferBindingSize: 2_147_483_644,
+        maxBufferSize: 2_147_483_644,
+      },
+    };
+
+    expect(buildRequiredLimits(diagnostics)).toMatchObject({
+      maxStorageBufferBindingSize: 256 * 1024 * 1024,
+      maxBufferSize: 256 * 1024 * 1024,
+    });
+  });
 });

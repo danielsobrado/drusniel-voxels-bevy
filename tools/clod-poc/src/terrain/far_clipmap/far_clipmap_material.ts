@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial, StorageBufferAttribute } from "three/webgpu";
-import { max, mix, positionGeometry, select, smoothstep, storage, uniform, vec3 } from "three/tsl";
+import { max, mix, positionGeometry, select, smoothstep, storage, uniform, varying, vec3 } from "three/tsl";
 import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 import { getActiveWebGpuRendererContext } from "../../rendering/webgpu_renderer_context.js";
@@ -335,9 +335,9 @@ function createWebGpuFarClipmapMaterial(input: {
   const ownershipStorage = new StorageBufferAttribute(ownershipData, 1);
   const uniforms = createFarClipmapNodeUniforms({ ...input, gridResolution });
   const sampleIndex: TslNode = positionGeometry.z.mul(gridResolution).add(positionGeometry.x);
-  const sourceSample: TslNode = storage(sourceStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
-  const waterSample: TslNode = storage(waterStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
-  const ownershipSample: TslNode = storage(ownershipStorage, "float", gridResolution * gridResolution).toReadOnly().element(sampleIndex);
+  const sourceSample: TslNode = varying(storage(sourceStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex));
+  const waterSample: TslNode = varying(storage(waterStorage, "vec4", gridResolution * gridResolution).toReadOnly().element(sampleIndex));
+  const ownershipSample: TslNode = varying(storage(ownershipStorage, "float", gridResolution * gridResolution).toReadOnly().element(sampleIndex));
   const rawHeight: TslNode = sourceSample.x;
   const terrainHeight: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
   const unifiedChannels: TslNode = tslSmoothstep(-0.5, 0.0, waterSample.w);

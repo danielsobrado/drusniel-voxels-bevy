@@ -57,14 +57,14 @@ async function load(page: Page, url: string): Promise<void> {
   );
 }
 
-async function waitCoverage(page: Page, label: string, timeoutMs = 360_000): Promise<Record<string, number>> {
+async function waitCoverage(page: Page, label: string, timeoutMs = 360_000, requireGpuClean = true): Promise<Record<string, number>> {
   const startedAt = performance.now();
   let stable = 0;
   let counters: Record<string, number> = {};
   while (performance.now() - startedAt < timeoutMs) {
     counters = await page.evaluate(() => ({ ...(window.__drusnielClod?.stats?.counters ?? {}) }));
     const clean = REQUIRED_ZERO.every((key) => Number(counters[key]) === 0)
-      && Number(counters["live_clod_stream_gpu_failed_batches"] ?? 0) === 0;
+      && (!requireGpuClean || Number(counters["live_clod_stream_gpu_failed_batches"] ?? 0) === 0);
     stable = clean ? stable + 1 : 0;
     if (stable >= 3) return counters;
     await page.evaluate(() => window.__drusnielClod?.settle?.(30));
@@ -125,6 +125,21 @@ async function main(): Promise<void> {
   const failures: string[] = [];
   const artifacts: Array<{ image: string; stats: string; counters: Record<string, number> }> = [];
   try {
+    if (process.argv.includes("--probe-coast")) {
+      await load(page, visualUrl("final"));
+      const pose: Pose = { p: [-7_600, 42, 0], yaw: -Math.PI / 2, pitch: -0.12, fov: 55 };
+      await setPose(page, pose, 180);
+      await waitCoverage(page, "grazing coast probe", 360_000, false);
+      const shot = await capture(page, outDir, "grazing-coast-probe", pose, 1);
+      writeFileSync(join(outDir, "coast-probe.json"), `${JSON.stringify({
+        createdAt: new Date().toISOString(),
+        shot,
+        consoleErrors,
+        consoleWarnings,
+      }, null, 2)}\n`);
+      console.log(`[unified-streaming-visual-qa] coast probe: ${join(outDir, "coast-probe.json")}`);
+      return;
+    }
     await load(page, visualUrl("ownership"));
     await waitCoverage(page, "ownership traversal start");
     const ownershipFrames = [];

@@ -29,6 +29,16 @@ function colorNodeReaches(material: FarClipmapMaterial, target: unknown): boolea
   return found;
 }
 
+function colorNodeHasType(material: FarClipmapMaterial, typeName: string): boolean {
+  const colorNode = (material as { colorNode?: TraversableNode }).colorNode;
+  if (!colorNode) return false;
+  let found = false;
+  colorNode.traverse((node) => {
+    if ((node as { constructor?: { name?: string } }).constructor?.name === typeName) found = true;
+  });
+  return found;
+}
+
 describe("far clipmap WebGPU material debug modes", () => {
   it("colorNode consumes the uDebugMode uniform so debug modes render differently", () => {
     const material = createWebGpuMaterial();
@@ -42,6 +52,11 @@ describe("far clipmap WebGPU material debug modes", () => {
     const ownershipStorage = material.userData.farClipmapOwnershipStorage as THREE.BufferAttribute;
     expect(ownershipStorage).toBeDefined();
     expect(colorNodeReaches(material, ownershipStorage)).toBe(true);
+  });
+
+  it("interpolates per-vertex storage samples instead of indexing storage per fragment", () => {
+    const material = createWebGpuMaterial();
+    expect(colorNodeHasType(material, "VaryingNode")).toBe(true);
   });
 
   it("setFarClipmapMaterialDebugMode updates the node uniform value", () => {

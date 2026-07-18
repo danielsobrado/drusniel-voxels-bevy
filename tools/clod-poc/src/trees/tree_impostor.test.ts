@@ -90,7 +90,7 @@ trees:
     expect(parsed.impostors.sourceLod).toBe(DEFAULT_TREE_SETTINGS.impostors.sourceLod);
     expect(parsed.impostors.resolutionPx).toBe(32);
     expect(parsed.impostors.octahedralGridSize).toBe(8);
-    expect(parsed.impostors.atlasPaddingPx).toBe(8);
+    expect(parsed.impostors.atlasPaddingPx).toBe(16);
     expect(parsed.impostors.alphaTest).toBe(1);
     expect(parsed.impostors.frameUpdateDistanceM).toBe(32);
     expect(parsed.impostors.maxBakesPerFrame).toBe(8);

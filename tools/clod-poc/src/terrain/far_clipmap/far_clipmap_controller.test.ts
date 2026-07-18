@@ -240,6 +240,32 @@ describe("FarClipmapController shader displacement", () => {
     controller.dispose();
   });
 
+  it("retains committed shader rings while a snapped replacement uploads", () => {
+    const scene = new THREE.Scene();
+    const controller = createFarClipmapController(
+      scene,
+      config({ ringCount: 1, sourceRefreshMaxPerFrame: 1 }),
+      readyFlatSource(1),
+      { webGpuCompatibleMaterial: true },
+    );
+
+    const initial = new THREE.Vector3(63, 0, 0);
+    expect(controller.update(initial).readyTiles).toBe(1);
+    const activeMesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.visible);
+    expect(activeMesh?.position.x).toBe(-512);
+
+    const crossedSnap = controller.update(new THREE.Vector3(65, 0, 0));
+
+    expect(crossedSnap.snapUpdatesThisFrame).toBe(1);
+    expect(crossedSnap.readyTiles).toBe(1);
+    expect(crossedSnap.pendingTiles).toBe(0);
+    expect(activeMesh?.visible).toBe(true);
+    expect(activeMesh?.position.x).toBe(-512);
+    expect(controller.ownershipSnapshot().ready).toBe(true);
+
+    controller.dispose();
+  });
+
   it("does not poll an unchanged authoritative revision source", () => {
     const source: FarClipmapSource = {
       isReady: () => true,

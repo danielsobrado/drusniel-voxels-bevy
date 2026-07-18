@@ -19,6 +19,8 @@ const INTERESTING_LIMITS: readonly (keyof GPUSupportedLimits & string)[] = [
 
 export function buildRequiredLimits(diagnostics: GpuDiagnostics): Record<string, number> {
   const desired: Record<string, number> = {
+    maxStorageBufferBindingSize: 256 * 1024 * 1024,
+    maxBufferSize: 256 * 1024 * 1024,
     maxStorageBuffersPerShaderStage: 12,
     maxStorageTexturesPerShaderStage: 4,
     maxVertexBuffers: 16,

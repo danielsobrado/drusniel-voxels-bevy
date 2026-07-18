@@ -891,6 +891,15 @@ async function beginMovementRouteProbe(page: Page): Promise<void> {
   });
 }
 
+async function collectRouteGarbageBaseline(page: Page): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send("HeapProfiler.collectGarbage");
+  } finally {
+    await session.detach();
+  }
+}
+
 async function readMovementSnapshot(page: Page, label: string, routeDistanceM: number): Promise<MovementSnapshot> {
   return await page.evaluate(({ sampleLabel, distanceM }) => {
     const hooks = (window as typeof window & { __drusnielClod?: { getPose?: (() => { p: [number, number, number] }) | null; stats?: { counters?: Record<string, number> } | null } }).__drusnielClod;
@@ -1008,6 +1017,7 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
   const samples: MovementSnapshot[] = [];
   const frameSamples: MovementFrameSample[] = [];
   const frameCursor = { lastFrameId: -1 };
+  await collectRouteGarbageBaseline(page);
   await beginMovementRouteProbe(page);
   await startLongTaskObserver(page);
   frameCursor.lastFrameId = await page.evaluate(() => Number((window as typeof window & {

@@ -54,7 +54,6 @@ function loadPbrTexture(url: string, name: string, asset: ConstructionMaterialAs
     (error) => console.warn(`[construction] failed to load PBR texture ${name}`, error),
   );
   texture.name = name;
-  configurePbrTexture(texture, asset, colorSpace);
   return texture;
 }
 

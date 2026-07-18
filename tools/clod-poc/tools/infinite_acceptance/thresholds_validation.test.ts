@@ -130,8 +130,30 @@ describe("infinite islands threshold validation", () => {
   it("fails when far clipmap source or build diagnostics are bad", () => {
     expect(evaluateThresholds(validCounters({ far_clipmap_source_ready: 0 })).passed).toBe(false);
     expect(evaluateThresholds(validCounters({ far_clipmap_build_ms: 6.1 })).passed).toBe(false);
-    expect(evaluateThresholds(validCounters({ far_clipmap_fallback_samples_total: 1 })).passed).toBe(false);
+    expect(evaluateThresholds(validCounters({ far_clipmap_fallback_samples_this_frame: 1 })).passed).toBe(false);
     expect(evaluateThresholds(validCounters({ far_clipmap_exception_samples_total: 1 })).passed).toBe(false);
+  });
+
+  it("allows historical fallback and absent colliders after a camera-driven route settles", () => {
+    expect(evaluateThresholds(validCounters({
+      far_clipmap_fallback_samples_total: 7_893,
+      far_clipmap_fallback_samples_this_frame: 0,
+      live_bubble_collider_required_pages: 0,
+      live_bubble_streamed_collider_pages: 0,
+      live_bubble_collider_registrations: 0,
+      live_bubble_probe_evictions_total: 12,
+      live_bubble_probe_collider_removals_total: 0,
+    })).passed).toBe(true);
+  });
+
+  it("accepts certified collider skips after a camera route evicts visual-only pages", () => {
+    expect(evaluateThresholds(validCounters({
+      live_bubble_collider_required_pages: 22,
+      live_bubble_collider_skipped_pages: 23,
+      live_bubble_streamed_collider_pages: 0,
+      live_bubble_probe_evictions_total: 587,
+      live_bubble_probe_collider_removals_total: 0,
+    })).passed).toBe(true);
   });
 
   it("fails when required streamed roots never become ready residents", () => {

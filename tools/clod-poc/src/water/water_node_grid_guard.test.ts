@@ -3,13 +3,15 @@ import atlasGridSource from "./water_node_atlas_grid.ts?raw";
 import staticGridSource from "./water_node_static_grid.ts?raw";
 
 describe("water node grid ramp guard", () => {
-  it.each([
-    ["atlas", atlasGridSource],
-    ["static", staticGridSource],
-  ])("dithers steep near-ring ramps on the %s path", (_name, source) => {
-    expect(source).toContain("const rampKeep: TslNode");
-    expect(source).toContain("const dither: TslNode");
-    expect(source).toContain("return dither.greaterThan(keep);");
-    expect(source).not.toContain("return slope.greaterThan(limit)");
+  it("dithers steep near-ring ramps in the shared static helper", () => {
+    expect(staticGridSource).toContain("const rampKeep: TslNode");
+    expect(staticGridSource).toContain("const dither: TslNode");
+    expect(staticGridSource).toContain("return dither.greaterThan(keep);");
+    expect(staticGridSource).not.toContain("return slope.greaterThan(limit)");
+  });
+
+  it("reuses the shared ramp discard helper on the atlas path", () => {
+    expect(atlasGridSource).toContain("buildWaterRampDiscard");
+    expect(atlasGridSource).not.toContain("return slope.greaterThan(limit)");
   });
 });

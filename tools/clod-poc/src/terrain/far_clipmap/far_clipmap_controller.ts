@@ -112,6 +112,8 @@ interface RingMesh {
   cellSizeM: number;
   readySnapX: number;
   readySnapZ: number;
+  pendingSnapX: number;
+  pendingSnapZ: number;
   displacementMode: "shader" | "cpu-baked";
   sourceRevision: number;
   lastSourceRefreshFrame: number;
@@ -357,6 +359,8 @@ class FarClipmapControllerImpl implements FarClipmapController {
         cellSizeM,
         readySnapX: Number.NaN,
         readySnapZ: Number.NaN,
+        pendingSnapX: Number.NaN,
+        pendingSnapZ: Number.NaN,
         displacementMode: farClipmapMaterialDisplacementMode(material),
         sourceRevision: Number.NaN,
         lastSourceRefreshFrame: -1,
@@ -403,18 +407,22 @@ class FarClipmapControllerImpl implements FarClipmapController {
     const triangleCount = ringTriangleCount(this.config);
     for (const [ringIndex, ring] of this.rings.entries()) {
       const stale = ring.readySnapX !== snap.snapX || ring.readySnapZ !== snap.snapZ;
-      const displaySnapX = Number.isFinite(ring.readySnapX) && !stale ? ring.readySnapX : snap.snapX;
-      const displaySnapZ = Number.isFinite(ring.readySnapZ) && !stale ? ring.readySnapZ : snap.snapZ;
-      const ringOriginX = displaySnapX - ring.outerRadiusM;
-      const ringOriginZ = displaySnapZ - ring.outerRadiusM;
+      let displaySnapX = Number.isFinite(ring.readySnapX) ? ring.readySnapX : snap.snapX;
+      let displaySnapZ = Number.isFinite(ring.readySnapZ) ? ring.readySnapZ : snap.snapZ;
+      let ringOriginX = displaySnapX - ring.outerRadiusM;
+      let ringOriginZ = displaySnapZ - ring.outerRadiusM;
 
       if (!sourceUploadPending && stale && this.canRefreshRing(ring, sourceReady, frameStats)) {
         const startedAt = performance.now();
-        ring.readySnapX = snap.snapX;
-        ring.readySnapZ = snap.snapZ;
         frameStats.snapUpdates++;
 
         if (ring.displacementMode === "cpu-baked") {
+          ring.readySnapX = snap.snapX;
+          ring.readySnapZ = snap.snapZ;
+          displaySnapX = snap.snapX;
+          displaySnapZ = snap.snapZ;
+          ringOriginX = displaySnapX - ring.outerRadiusM;
+          ringOriginZ = displaySnapZ - ring.outerRadiusM;
           const oldGeo = ring.mesh.geometry;
           const buildStats = { vertices: 0, triangles: 0, fallbackSamples: 0, exceptionSamples: 0 };
           const newGeo = createFarClipmapTerrainGeometry({
@@ -440,13 +448,25 @@ class FarClipmapControllerImpl implements FarClipmapController {
           this.totalFallbackSamples += buildStats.fallbackSamples;
           this.totalExceptionSamples += buildStats.exceptionSamples;
         } else {
+          const deferUpload = Number.isFinite(ring.sourceRevision) && ring.standbyMaterial !== null;
+          if (deferUpload) {
+            ring.pendingSnapX = snap.snapX;
+            ring.pendingSnapZ = snap.snapZ;
+          } else {
+            ring.readySnapX = snap.snapX;
+            ring.readySnapZ = snap.snapZ;
+            displaySnapX = snap.snapX;
+            displaySnapZ = snap.snapZ;
+            ringOriginX = displaySnapX - ring.outerRadiusM;
+            ringOriginZ = displaySnapZ - ring.outerRadiusM;
+          }
           this.refreshShaderSourceTexture(
             ring,
-            ringOriginX,
-            ringOriginZ,
+            snap.snapX - ring.outerRadiusM,
+            snap.snapZ - ring.outerRadiusM,
             cameraPosition,
             frameStats,
-            Number.isFinite(ring.sourceRevision),
+            deferUpload,
           );
         }
 
@@ -493,10 +513,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
       } else {
         ring.mesh.position.set(0, 0, 0);
       }
-      const ringReady = ring.sourceUploadChannel === null
-        && ring.pendingSourceRefresh === null
-        && ring.readySnapX === snap.snapX
-        && ring.readySnapZ === snap.snapZ;
+      const ringReady = Number.isFinite(ring.readySnapX) && Number.isFinite(ring.readySnapZ);
       ring.mesh.visible = this.visible && this.config.enabled && ringReady;
       if (ringReady) ready++;
     }
@@ -537,6 +554,12 @@ class FarClipmapControllerImpl implements FarClipmapController {
         ring.standbyMesh = previousMesh;
         ring.material = ring.standbyMaterial;
         ring.standbyMaterial = previous;
+        if (Number.isFinite(ring.pendingSnapX) && Number.isFinite(ring.pendingSnapZ)) {
+          ring.readySnapX = ring.pendingSnapX;
+          ring.readySnapZ = ring.pendingSnapZ;
+          ring.pendingSnapX = Number.NaN;
+          ring.pendingSnapZ = Number.NaN;
+        }
         this.uploadCooldownFrames = 8;
       }
       return;
@@ -578,9 +601,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
   setVisible(visible: boolean): void {
     this.visible = visible;
     for (const ring of this.rings) {
-      const ringReady = ring.sourceUploadChannel === null
-        && ring.pendingSourceRefresh === null
-        && Number.isFinite(ring.readySnapX)
+      const ringReady = Number.isFinite(ring.readySnapX)
         && Number.isFinite(ring.readySnapZ);
       ring.mesh.visible = visible && this.config.enabled && ringReady;
     }

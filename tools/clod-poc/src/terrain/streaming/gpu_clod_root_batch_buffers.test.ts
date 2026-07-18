@@ -8,6 +8,7 @@ import {
   estimateRootRequestReadbackBytes,
   findChunkVerticesOutOfBounds,
   fullyEmptyLod0PageKeys,
+  partiallyFloorClippedLod0PageKeys,
   planGeometryReadbackLayout,
   planRootBatchChunkSlots,
   splitRootGpuBatches,
@@ -162,6 +163,32 @@ describe("deep-window retry for fully submerged pages", () => {
     const plans = planRootBatchChunkSlots([{ px: 5, pz: 5, level: 0 }], CFG);
     const meshes = new Map(plans.map((plan) => [plan.slotIndex, meshWithIndices(plan.localChunkIndex === 0 ? 3 : 0)]));
     expect(fullyEmptyLod0PageKeys(plans, meshes).size).toBe(0);
+  });
+
+  it("flags a partially meshed coastal page that touches the default vertical floor", () => {
+    const plans = planRootBatchChunkSlots([{ px: -61, pz: -1, level: 0 }], CFG);
+    const meshes = new Map(plans.map((plan) => [plan.slotIndex, {
+      indices: new Uint32Array([0, 1, 2]),
+      positions: plan.localChunkIndex === 0
+        ? new Float32Array([-972, -0.03, -12, -971, 0.1, -12, -972, 0.1, -11])
+        : new Float32Array([plan.cx * 8, 4, plan.cz * 8, plan.cx * 8 + 1, 4, plan.cz * 8, plan.cx * 8, 4, plan.cz * 8 + 1]),
+    }]));
+
+    expect(partiallyFloorClippedLod0PageKeys(plans, meshes, CFG.chunk_size)).toEqual(new Set(["-61,-1"]));
+  });
+
+  it("does not retry ordinary low terrain whose open edge stays on a chunk perimeter", () => {
+    const plans = planRootBatchChunkSlots([{ px: 0, pz: 0, level: 0 }], CFG);
+    const meshes = new Map(plans.map((plan) => {
+      const x0 = plan.cx * CFG.chunk_size;
+      const z0 = plan.cz * CFG.chunk_size;
+      return [plan.slotIndex, {
+        indices: new Uint32Array([0, 1, 2]),
+        positions: new Float32Array([x0 + 0.2, -0.03, z0 + 2, x0 + 0.2, 0.1, z0 + 3, x0 + 0.2, 0.1, z0 + 4]),
+      }];
+    }));
+
+    expect(partiallyFloorClippedLod0PageKeys(plans, meshes, CFG.chunk_size).size).toBe(0);
   });
 
   it("rebases retry plans to fresh slot indices with the lowered window", () => {

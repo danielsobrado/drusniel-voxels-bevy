@@ -168,6 +168,26 @@ Relevant counters:
 - `floatingOriginOffsetX`
 - `floatingOriginOffsetZ`
 
+### Continent precision decision addendum — 2026-07-18
+
+Keep floating origin disabled for the current 16-page continent profile. The native-Windows
+18-case rim matrix at
+`shots/long-map-precision/rim-matrix-accepted-2026-07-18/report.json` compared fp32 world space
+with the gated floating-origin path across center, four cardinal rims, and four diagonal rims at
+near-ground/high-altitude construction, vegetation, and water poses.
+
+All cases reported zero repeated-frozen-frame pixel change, zero measured landmark drift, zero
+terrain/prop relative drift, zero shadow-edge movement, and zero uncaptured WebGPU errors. Poses
+where the registered landmarks were outside the view report them as unavailable rather than as
+drift. All seven `precisionDiag` freeze counters were asserted for every capture.
+
+The fp32 path had a 24.0 ms worst frame-time p95 and 20.86 ms nine-pose average p95, compared with
+44.2 ms worst and 25.47 ms average for floating origin. Worst fixed-step specular residual was
+0.0125% of pixels for fp32 and 0.0920% for floating origin. Floating-origin rim cases each recorded
+one expected 1024-metre-snapped rebase (offset magnitude 7168 metres per active axis), but provided
+no precision improvement. Revisit the decision only if the supported coordinate envelope grows
+materially beyond this matrix or a new signal shows fp32 instability.
+
 ## Diagnosing coordinate disagreement
 
 Use deterministic poses and inspect counters rather than inferring alignment from a screenshot.

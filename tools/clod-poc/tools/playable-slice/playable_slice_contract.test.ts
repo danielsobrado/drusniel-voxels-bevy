@@ -254,7 +254,14 @@ describe("playable slice acceptance contract", () => {
   it("rejects non-finite report and snapshot evidence", () => {
     const report = validReport();
     const steps = report.steps.map((item) => item.step === "water_entered"
-      ? { ...item, snapshot: { ...item.snapshot, pose: [Number.NaN, 10, 0], swim: { ...item.snapshot.swim, submersionM: Number.POSITIVE_INFINITY } } }
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            pose: [Number.NaN, 10, 0] as const,
+            swim: { ...item.snapshot.swim, submersionM: Number.POSITIVE_INFINITY },
+          },
+        }
       : item);
     const failures = evaluatePlayableSliceRun({
       ...report,

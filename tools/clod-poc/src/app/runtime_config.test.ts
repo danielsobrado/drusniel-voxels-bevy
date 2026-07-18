@@ -18,7 +18,8 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.nearField.chunkGroupBuildBudget).toBe(1);
     expect(config.nearField.maxCachedChunkGroups).toBe(64);
     expect(config.nearField.evictDistanceMultiplier).toBe(2.5);
-    expect(config.renderNodeCache.maxInactiveNodes).toBe(512);
+    expect(config.renderNodeCache.maxInactiveNodes).toBe(256);
+    expect(config.renderNodeCache.warnAtInactiveNodes).toBe(224);
     expect(config.renderNodeCache.pruneIntervalFrames).toBe(30);
     expect(config.renderNodeCache.maxPrefetchCreatesPerFrame).toBe(4);
     expect(config.renderNodeCache.evictGeometryWithRenderNode).toBe(true);

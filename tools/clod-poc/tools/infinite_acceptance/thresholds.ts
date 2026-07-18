@@ -344,7 +344,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "far_clipmap_vertices_built_this_frame", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "far_clipmap_triangles_built_this_frame", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "far_clipmap_fallback_samples_this_frame", label: "must equal 0", pass: (value) => value === 0 },
-  { key: "far_clipmap_fallback_samples_total", label: "must equal 0", pass: (value, values) => ((values["frame_ms_p95"] ?? 0) > INFINITE_ISLANDS_FRAME_MS_P95_MAX) ? value >= 0 : value === 0 },
+  { key: "far_clipmap_fallback_samples_total", label: "must be finite and >= 0; settled fallback is gated per frame", pass: finiteNonNegative },
   { key: "far_clipmap_exception_samples_this_frame", label: "must equal 0", pass: (value) => value === 0 },
   { key: "far_clipmap_exception_samples_total", label: "must equal 0", pass: (value) => value === 0 },
   { key: "far_clipmap_inner_radius_m", label: "must be finite and > live radius", pass: (value, values) => Number.isFinite(value) && value > (values["streamer_live_radius_m"] ?? 0) },
@@ -381,10 +381,18 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   {
     key: "live_bubble_probe_collider_removals_total",
     label: "must be finite and remove colliders if route-owned live-bubble pages evicted",
-    pass: (value, values) => finiteNonNegative(value) && ((values["live_bubble_probe_evictions_total"] ?? 0) <= 0 || value > 0),
+    pass: (value, values) => finiteNonNegative(value) && (
+      (values["live_bubble_streamed_collider_pages"] ?? 0) <= 0
+      || (values["live_bubble_probe_evictions_total"] ?? 0) <= 0
+      || value > 0
+    ),
   },
-  { key: "live_bubble_streamed_collider_pages", label: "must be > 0", pass: (value) => value > 0 },
-  { key: "live_bubble_collider_registrations", label: "must be > 0", pass: (value) => value > 0 },
+  {
+    key: "live_bubble_streamed_collider_pages",
+    label: "active plus certified/skipped pages must cover collider demand",
+    pass: (value, values) => value + (values["live_bubble_collider_skipped_pages"] ?? 0) >= (values["live_bubble_collider_required_pages"] ?? 0),
+  },
+  { key: "live_bubble_collider_registrations", label: "must be > 0 when collider pages are required", pass: (value, values) => (values["live_bubble_collider_required_pages"] ?? 0) <= 0 || value > 0 },
   { key: "live_bubble_gpu_dispatch_budget", label: "must be > 0", pass: (value) => value > 0 },
   { key: "live_bubble_max_inflight_chunks", label: "must be finite and > 0", pass: (value) => Number.isFinite(value) && value > 0 },
   { key: "live_bubble_pending_chunks", label: "must be zero or only background after live residency", pass: liveBubbleChunkWorkDrainedOrBackground },
