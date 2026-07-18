@@ -261,6 +261,49 @@ describe("pageInsideFiniteStartupWorld", () => {
 });
 
 describe("createStreamingClodRootController", () => {
+  it("exposes live stream budget setters that restore production values", () => {
+    const { controller } = makeController({
+      buildBudgetPagesPerFrame: 16,
+      applyBudgetPagesPerFrame: 4,
+      maxInflightBatches: 1,
+      maxCachedPages: 512,
+    });
+    expect(controller.streamBudgets()).toEqual({
+      buildBudgetPagesPerFrame: 16,
+      applyBudgetPagesPerFrame: 4,
+      maxInflightBatches: 1,
+      maxCachedPages: 512,
+    });
+    const previous = controller.setStreamBudgets({
+      buildBudgetPagesPerFrame: 64,
+      applyBudgetPagesPerFrame: 16,
+      maxInflightBatches: 4,
+      maxCachedPages: 1024,
+    });
+    expect(previous).toEqual({
+      buildBudgetPagesPerFrame: 16,
+      applyBudgetPagesPerFrame: 4,
+      maxInflightBatches: 1,
+      maxCachedPages: 512,
+    });
+    expect(controller.streamBudgets()).toEqual({
+      buildBudgetPagesPerFrame: 64,
+      applyBudgetPagesPerFrame: 16,
+      maxInflightBatches: 4,
+      maxCachedPages: 1024,
+    });
+    expect(controller.stats().buildBudget).toBe(64);
+    expect(controller.stats().maxInflightBatches).toBe(4);
+    expect(controller.stats().maxCachedPages).toBe(1024);
+    controller.setStreamBudgets(previous);
+    expect(controller.streamBudgets()).toEqual({
+      buildBudgetPagesPerFrame: 16,
+      applyBudgetPagesPerFrame: 4,
+      maxInflightBatches: 1,
+      maxCachedPages: 512,
+    });
+  });
+
   it("retires finite startup roots once streamed roots cover the safety ring", async () => {
     const startupRoot = { ...makeNode(0, 0, 2), id: "startup-root" };
     const { controller, roots, buildPages, requests } = makeController({

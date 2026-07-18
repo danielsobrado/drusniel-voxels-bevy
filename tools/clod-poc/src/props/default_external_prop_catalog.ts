@@ -117,11 +117,24 @@ export async function loadDefaultExternalPropCatalog(settings: CustomPropsSettin
   const catalogUrl = new URL(CATALOG_URL, window.location.href).toString();
   try {
     const response = await fetch(catalogUrl, { cache: "force-cache" });
-    if (!response.ok) return settings;
-    const catalog = await response.json() as CatalogFile;
+    if (!response.ok) {
+      console.warn(`[props] Quaternius construction catalog HTTP ${response.status} at ${catalogUrl}`);
+      return settings;
+    }
+    const contentType = response.headers.get("content-type") ?? "";
+    const body = await response.text();
+    const trimmed = body.trimStart();
+    if (contentType.includes("text/html") || trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+      console.warn(`[props] Quaternius construction catalog missing or SPA-fallback HTML at ${catalogUrl}`);
+      return settings;
+    }
+    const catalog = JSON.parse(body) as CatalogFile;
     const packId = safeId("pack", text(catalog.packId), CATALOG_URL);
     const props = Array.isArray(catalog.props) ? catalog.props.map((entry) => toProp(catalogUrl, packId, entry as CatalogEntry)).filter((entry): entry is PropAssetDef => entry !== null) : [];
-    if (props.length === 0) return settings;
+    if (props.length === 0) {
+      console.info(`[props] Quaternius construction catalog loaded with 0 authored prop(s) from ${catalogUrl}`);
+      return settings;
+    }
     const byId = new Map(settings.props.map((prop) => [prop.id, prop]));
     for (const prop of props) byId.set(prop.id, prop);
     console.info(`[props] loaded ${props.length} Quaternius construction prop(s)`);

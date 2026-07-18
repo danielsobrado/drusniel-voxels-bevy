@@ -72,16 +72,15 @@ export class PropAssetRegistry {
     this.assertActive();
     const manifestReport = validateCustomPropsManifest(this.settings);
     const loaded: LoadedPropAsset[] = [];
-    try {
-      for (const def of this.settings.props) {
+    for (const def of this.settings.props) {
+      try {
         const asset = await this.loadAsset(def);
         loaded.push(asset);
+      } catch (error) {
+        console.warn(`[props] skipped prop asset "${def.id}"`, error);
       }
-      return { loaded, manifestReport };
-    } catch (error) {
-      this.dispose();
-      throw error;
     }
+    return { loaded, manifestReport };
   }
 
   async loadAsset(def: PropAssetDef): Promise<LoadedPropAsset> {

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "packId": "quaternius-construction",
+  "generatedAt": "2026-07-18T15:23:48.378Z",
+  "props": [],
+  "notes": "Construction-ready authored entries only. Raw RPG-item GLBs exceed small_decor material budgets and must not be auto-listed."
+}

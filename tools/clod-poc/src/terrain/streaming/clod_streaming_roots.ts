@@ -72,6 +72,20 @@ export interface StreamingClodRootStats {
   transitionMsP95: number;
 }
 
+export interface StreamingClodRootBudgetOptions {
+  buildBudgetPagesPerFrame?: number;
+  applyBudgetPagesPerFrame?: number;
+  maxInflightBatches?: number;
+  maxCachedPages?: number;
+}
+
+export interface StreamingClodRootBudgets {
+  buildBudgetPagesPerFrame: number;
+  applyBudgetPagesPerFrame: number;
+  maxInflightBatches: number;
+  maxCachedPages: number;
+}
+
 export interface StreamingClodRootController {
   update(center: THREE.Vector3, radiusM: number): StreamingClodRootStats;
   stats(): StreamingClodRootStats;
@@ -80,6 +94,8 @@ export interface StreamingClodRootController {
   refinedReadyPageKeys(): readonly string[];
   beginMovementProbe(): void;
   invalidateBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void;
+  streamBudgets(): StreamingClodRootBudgets;
+  setStreamBudgets(options: StreamingClodRootBudgetOptions): StreamingClodRootBudgets;
 }
 
 export interface PageCoord {
@@ -606,10 +622,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
   const pageSize = deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size;
   const worldPagesX = Math.max(1, Math.ceil(deps.worldCells / pageSize));
   const worldPagesZ = Math.max(1, Math.ceil(deps.worldCells / pageSize));
-  const buildBudget = resolveBudget(deps.buildBudgetPagesPerFrame, DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME);
-  const applyBudget = resolveBudget(deps.applyBudgetPagesPerFrame, DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME);
-  const maxInflightBatches = Math.max(1, resolveBudget(deps.maxInflightBatches, DEFAULT_MAX_INFLIGHT_BATCHES));
-  const maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
+  let buildBudget = resolveBudget(deps.buildBudgetPagesPerFrame, DEFAULT_BUILD_BUDGET_PAGES_PER_FRAME);
+  let applyBudget = resolveBudget(deps.applyBudgetPagesPerFrame, DEFAULT_APPLY_BUDGET_PAGES_PER_FRAME);
+  let maxInflightBatches = Math.max(1, resolveBudget(deps.maxInflightBatches, DEFAULT_MAX_INFLIGHT_BATCHES));
+  let maxCachedPages = Math.max(1, Math.floor(deps.maxCachedPages ?? DEFAULT_MAX_CACHED_PAGES));
   const evictDistanceMultiplier = Math.max(1, deps.evictDistanceMultiplier ?? DEFAULT_EVICT_DISTANCE_MULTIPLIER);
   const maxRootLevel = resolveStreamingClodMaxRootLevel(deps.cfg, deps.maxRootLevel);
   const startupRoots = [...deps.roots];
@@ -1357,6 +1373,36 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       }
     },
     beginMovementProbe,
+    streamBudgets() {
+      return {
+        buildBudgetPagesPerFrame: buildBudget,
+        applyBudgetPagesPerFrame: applyBudget,
+        maxInflightBatches,
+        maxCachedPages,
+      };
+    },
+    setStreamBudgets(options) {
+      const previous = {
+        buildBudgetPagesPerFrame: buildBudget,
+        applyBudgetPagesPerFrame: applyBudget,
+        maxInflightBatches,
+        maxCachedPages,
+      };
+      if (options.buildBudgetPagesPerFrame !== undefined) {
+        buildBudget = resolveBudget(options.buildBudgetPagesPerFrame, buildBudget);
+      }
+      if (options.applyBudgetPagesPerFrame !== undefined) {
+        applyBudget = resolveBudget(options.applyBudgetPagesPerFrame, applyBudget);
+      }
+      if (options.maxInflightBatches !== undefined) {
+        maxInflightBatches = Math.max(1, resolveBudget(options.maxInflightBatches, maxInflightBatches));
+      }
+      if (options.maxCachedPages !== undefined) {
+        maxCachedPages = Math.max(1, Math.floor(options.maxCachedPages));
+      }
+      latest = { ...latest, buildBudget, maxInflightBatches, maxCachedPages };
+      return previous;
+    },
   };
 }
 

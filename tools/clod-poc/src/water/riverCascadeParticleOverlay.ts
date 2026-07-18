@@ -50,7 +50,7 @@ const MAX_MIST_PARTICLES = 180;
 const MAX_SPLASH_PARTICLES = 150;
 const MAX_FOAM_PARTICLES = 220;
 const WATER_SURFACE_OFFSET_M = 0.08;
-const EMIT_CELLS_PER_FRAME = 32;
+const EMIT_CELLS_PER_FRAME = 16;
 
 interface EmitterScan {
   baseX: number;

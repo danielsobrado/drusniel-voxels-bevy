@@ -53,7 +53,7 @@ function fakeHandle(
   regularMaterial: THREE.Material = nodeMaterial(),
 ): TreeMaterialHandle {
   const debug = new THREE.MeshBasicMaterial();
-  const debugMaterials = Object.fromEntries(LODS.map((lod) => [lod, debug])) as Record<TreeLod, THREE.Material>;
+  const debugMaterials = Object.fromEntries(LODS.map((lod) => [lod, debug])) as unknown as Record<TreeLod, THREE.Material>;
   return {
     regularMaterial,
     debugMaterials,
