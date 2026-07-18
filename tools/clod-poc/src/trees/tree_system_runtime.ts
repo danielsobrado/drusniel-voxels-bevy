@@ -41,7 +41,10 @@ import {
   treeClearGpuRing,
   treeUpdateStats,
 } from "./tree_system_runtime_privates.js";
-import { treeImpostorBakeHandoffAction } from "./tree_impostor_bake_handoff.js";
+import {
+  executeTreeImpostorBakeHandoff,
+  treeImpostorBakeHandoffAction,
+} from "./tree_impostor_bake_handoff.js";
 
 export class TreeSystem {
   readonly scene: THREE.Scene;
@@ -268,30 +271,33 @@ export class TreeSystem {
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
     const result = await this.assets.bakeImpostors(renderer);
-    switch (treeImpostorBakeHandoffAction(this.settings, result.supported)) {
-      case "swap-live":
-        // TreeSystemAssets already drains submitted GPU work before publishing
-        // the replacement atlas. Do not yield again while live consumers still
-        // reference the retired generation.
-        this.refreshGpuRingImpostors();
-        // Geometry first: applyMaterials only assigns the billboard impostor
-        // material to meshes that already carry the baked flat-card geometry.
-        this.assets.replaceImpostorMeshGeometries(this.patches, this.meshBoundsState);
-        this.assets.applyMaterials(this.patches);
-        this.updatePatchLods(this.lastCenter, this.lastCenter);
-        break;
-      case "rebuild-gpu":
-        this.clearGpuRing();
-        this.updateStats();
-        break;
-      case "rebuild-cpu":
-        this.clearPatches();
-        this.patchesDirty = true;
-        this.updateStats();
-        break;
-      case "none":
-        break;
-    }
+    executeTreeImpostorBakeHandoff(
+      treeImpostorBakeHandoffAction(this.settings, result.supported),
+      {
+        swapLive: () => {
+          this.refreshGpuRingImpostors();
+          // Geometry first: applyMaterials only assigns the billboard impostor
+          // material to meshes that already carry the baked flat-card geometry.
+          this.assets.replaceImpostorMeshGeometries(this.patches, this.meshBoundsState);
+          this.assets.applyMaterials(this.patches);
+          this.updatePatchLods(this.lastCenter, this.lastCenter);
+        },
+        rebuildGpu: () => {
+          this.clearGpuRing();
+          this.updateStats();
+        },
+        rebuildCpu: () => {
+          this.clearPatches();
+          this.patchesDirty = true;
+          this.updateStats();
+        },
+        resetGpuConsumers: () => this.clearGpuRing(),
+        resetCpuConsumers: () => {
+          this.clearPatches();
+          this.patchesDirty = true;
+        },
+      },
+    );
     return { supported: result.supported, reason: result.reason };
   }
 
