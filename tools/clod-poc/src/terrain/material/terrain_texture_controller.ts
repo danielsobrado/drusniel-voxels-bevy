@@ -148,10 +148,11 @@ function importedSlotState(
   return slot;
 }
 
-function disposeSlotResources(slot: TerrainTextureSlot): void {
+function disposeSlotResources(slot: TerrainTextureSlot, includeNormal = true): void {
   slot.texture?.dispose();
-  slot.normalTexture?.dispose();
   if (slot.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.previewUrl);
+  if (!includeNormal) return;
+  slot.normalTexture?.dispose();
   if (slot.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.normalPreviewUrl);
 }
 
@@ -242,15 +243,10 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     customExtension: string,
   ) => {
     const old = slots[index];
-    disposeSlotResources(old);
+    disposeSlotResources(old, false);
     slots[index] = {
       ...old,
       texture,
-      normalTexture: null,
-      normalPreviewUrl: null,
-      normalBytes: null,
-      normalMimeType: null,
-      normalExtension: null,
       name,
       previewUrl,
       selectedId: "custom",
