@@ -106,7 +106,8 @@ function extension(path: string | null | undefined): string | null {
 
 function importedSlotState(
   manifest: TerrainTextureImportManifest,
-  resource: ImportedTerrainTextureResource | undefined,
+  resource?: ImportedTerrainTextureResource,
+  requireResource = false,
 ): TerrainTextureSlot {
   const slot: TerrainTextureSlot = {
     ...emptyTextureSlotState(),
@@ -123,7 +124,10 @@ function importedSlotState(
     if (resource) throw new Error(`Imported empty texture slot ${manifest.index} unexpectedly has a resource`);
     return slot;
   }
-  if (!resource) throw new Error(`Imported texture slot ${manifest.index} has no loaded resource`);
+  if (!resource) {
+    if (requireResource) throw new Error(`Imported texture slot ${manifest.index} has no loaded resource`);
+    return slot;
+  }
 
   slot.texture = resource.texture;
   slot.previewUrl = resource.previewUrl;
@@ -162,7 +166,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   for (let i = 0; i < slots.length; i++) {
     const imported = importedSlots?.[i];
     if (imported) {
-      slots[i] = importedSlotState(imported, undefined);
+      slots[i] = importedSlotState(imported);
       continue;
     }
 
@@ -327,8 +331,9 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   };
 
   const clearAllTextures = () => {
+    const count = slots.length;
     for (const slot of slots) disposeSlotResources(slot);
-    slots.splice(0, slots.length, ...slots.map(() => emptyTextureSlotState()));
+    slots.splice(0, count, ...Array.from({ length: count }, () => emptyTextureSlotState()));
     markTextureContentChanged();
   };
 
@@ -401,7 +406,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     try {
       const resourcesByIndex = new Map(resources.map((resource) => [resource.slot.index, resource]));
       const nextSlots = stagedImport.manifest.textures.map((manifest) => (
-        importedSlotState(manifest, resourcesByIndex.get(manifest.index))
+        importedSlotState(manifest, resourcesByIndex.get(manifest.index), true)
       ));
       if (resourcesByIndex.size !== resources.length || resources.length !== nextSlots.filter((slot) => slot.texture !== null).length) {
         throw new Error("Imported texture resources do not match the manifest");
