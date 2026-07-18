@@ -5,8 +5,8 @@ import {
   TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
 } from "./tree_impostor_blend_geometry.js";
 import {
+  TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME,
   treeImpostorLocalPositionScaleAttribute,
-  treeImpostorYawSinCosAttribute,
   treeIdentityBitsAttribute,
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
@@ -66,7 +66,8 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
   }
   if (input.impostorUvChanged) {
     treeImpostorUvRectAttribute(input.mesh).needsUpdate = true;
-    treeImpostorYawSinCosAttribute(input.mesh).needsUpdate = true;
+    const yaw = input.mesh.geometry.getAttribute(TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute | undefined;
+    if (yaw) yaw.needsUpdate = true;
     for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
       const attribute = input.mesh.geometry.getAttribute(name) as THREE.InstancedBufferAttribute | undefined;
       if (attribute) attribute.needsUpdate = true;
