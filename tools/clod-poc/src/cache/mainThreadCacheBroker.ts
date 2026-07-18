@@ -4,6 +4,7 @@ import { CacheUnavailableError } from "./cacheErrors.js";
 import { cacheLogger } from "./cacheLogger.js";
 import type { CacheRpcRequest, CacheRpcResponse } from "./cacheWorkerRpc.js";
 import { isCacheRpcRequest } from "./cacheWorkerRpc.js";
+import { CacheBrokerOperationQueue } from "./cacheBrokerOperationQueue.js";
 import {
   IndexedDbStore,
   purgeLegacyCacheDatabases,
@@ -24,6 +25,7 @@ type CacheWorker = {
 let brokerStore: IndexedDbStore | null = null;
 let brokerInit: Promise<IndexedDbStore | null> | null = null;
 const attachedWorkers = new WeakSet<CacheWorker>();
+const brokerOperations = new CacheBrokerOperationQueue();
 
 async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
   if (brokerStore) return brokerStore;
@@ -104,13 +106,15 @@ export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   registerTerrainStreamingWorker(worker);
   worker.addEventListener("message", (event: MessageEvent) => {
     if (!isCacheRpcRequest(event.data)) return;
-    void handleCacheRpc(worker, event.data);
+    void brokerOperations.enqueue(() => handleCacheRpc(worker, event.data));
   });
 }
 
-export async function clearMainThreadCacheBroker(): Promise<void> {
-  const store = await ensureBrokerStore();
-  if (store) await store.clear();
-  brokerStore = null;
-  brokerInit = null;
+export function clearMainThreadCacheBroker(): Promise<void> {
+  return brokerOperations.enqueue(async () => {
+    const store = await ensureBrokerStore();
+    if (store) await store.clear();
+    brokerStore = null;
+    brokerInit = null;
+  });
 }
