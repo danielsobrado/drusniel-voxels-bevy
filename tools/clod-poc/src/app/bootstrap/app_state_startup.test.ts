@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createClodAppState: vi.fn(() => ({ marker: "state" })),
+  createClodAppState: vi.fn((_params: Record<string, unknown>) => ({ marker: "state" })),
   applyEnvironmentQueryOverrides: vi.fn(),
 }));
 
@@ -55,7 +55,7 @@ describe("app state startup archive precedence", () => {
     runAppStateStartup(input({ manifest: {} }));
 
     const params = mocks.createClodAppState.mock.calls[0]![0];
-    expect(params.searchParams.toString()).toBe("");
+    expect((params.searchParams as URLSearchParams).toString()).toBe("");
     expect(params.isWebGpu).toBe(false);
     expect(params.queryPerfMode).toBe(false);
     expect(params.queryGrassPerfScene).toBe(false);
