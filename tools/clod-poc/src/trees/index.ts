@@ -20,6 +20,7 @@ export * from "./tree_impostor_bake_progress.js";
 export * from "./tree_impostor_bake_scheduler.js";
 export * from "./tree_impostor_blend_geometry.js";
 export * from "./tree_impostor_debug.js";
+export * from "./tree_impostor_live_material.js";
 export * from "./tree_impostor_material.js";
 export * from "./tree_impostor_material_selector.js";
 export * from "./tree_impostor_octahedral.js";

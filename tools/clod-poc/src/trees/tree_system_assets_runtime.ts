@@ -21,6 +21,7 @@ import {
   selectTreeSystemGeometry,
   selectTreeSystemMaterial,
   updateTreeSystemImpostorMaterial,
+  updateTreeSystemImpostorMaterialsLighting,
 } from "./tree_system_impostor_resources.js";
 import {
   applyTreeSystemMaterials,
@@ -89,6 +90,7 @@ export class TreeSystemAssets {
   updateLighting(lighting: EnvironmentLighting): void {
     this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
+    updateTreeSystemImpostorMaterialsLighting(this.impostorMaterials, lighting);
   }
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
@@ -359,6 +361,7 @@ export class TreeSystemAssets {
         settings: this.settings,
         atlas,
         webgpu: this.webgpu,
+        lighting: this.currentLighting,
         viewBlend: true,
         viewBlendGeometryReady: true,
         impostorMaterials: this.impostorMaterials,
