@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import { DEFAULT_ISLAND_SHAPE_CONFIG } from "../../world_source/island_shape.js";
 
@@ -49,6 +49,12 @@ function currentContents(generatorVersion = TERRAIN_SOURCE_VERSION) {
             blendM: 280,
           },
         },
+        generatorQuery: {
+          water: "1",
+          quality: "perf",
+          hydroUnified: "1",
+          continentHydrology: "0",
+        },
       },
     },
     customTextures: new Map(),
@@ -61,10 +67,16 @@ beforeEach(() => {
   vi.stubGlobal("history", { replaceState: vi.fn() });
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("project import startup", () => {
   it("restores the complete query-visible world identity", async () => {
     mocks.consume.mockResolvedValue(currentContents());
-    const params = new URLSearchParams("import=token&seed=1&scene=default&hud=1");
+    const params = new URLSearchParams(
+      "import=token&seed=1&scene=default&hud=1&waterEnabled=0&waterHq=0",
+    );
 
     const result = await loadStagedProjectImport(params, dom());
 
@@ -79,6 +91,12 @@ describe("project import startup", () => {
     expect(params.get("islandSpacing")).toBe("1700");
     expect(params.get("islandRadius")).toBe("620");
     expect(params.get("islandBlend")).toBe("280");
+    expect(params.get("water")).toBe("1");
+    expect(params.get("quality")).toBe("perf");
+    expect(params.get("hydroUnified")).toBe("1");
+    expect(params.get("continentHydrology")).toBe("0");
+    expect(params.get("waterEnabled")).toBeNull();
+    expect(params.get("waterHq")).toBeNull();
     expect(params.get("hud")).toBe("1");
     expect(mocks.emitAudio).toHaveBeenCalledWith("project.import.success");
   });
