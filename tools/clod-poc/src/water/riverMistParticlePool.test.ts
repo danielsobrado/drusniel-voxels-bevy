@@ -1,26 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { RiverMistParticlePool } from "./riverMistParticlePool.js";
 
-function particle(x: number, lifeS = 2) {
-  return {
-    x,
-    y: 1,
-    z: 2,
-    vx: 1,
-    vy: 0.5,
-    vz: -1,
-    lifeS,
-    strength: 1,
-  };
+function spawn(pool: RiverMistParticlePool, x: number, lifeS = 2): void {
+  pool.spawn(x, 1, 2, 1, 0.5, -1, lifeS, 1);
 }
 
 describe("RiverMistParticlePool", () => {
   it("uses a fixed capacity and overwrites without growing", () => {
     const pool = new RiverMistParticlePool(2.9);
     expect(pool.capacity).toBe(2);
-    pool.spawn(particle(1));
-    pool.spawn(particle(2));
-    pool.spawn(particle(3));
+    spawn(pool, 1);
+    spawn(pool, 2);
+    spawn(pool, 3);
     expect(pool.count).toBe(2);
 
     pool.advance(0.5);
@@ -33,8 +24,8 @@ describe("RiverMistParticlePool", () => {
 
   it("compacts expired particles and rejects invalid spawns", () => {
     const pool = new RiverMistParticlePool(4);
-    pool.spawn(particle(1, 0.25));
-    pool.spawn({ ...particle(2), x: Number.NaN });
+    spawn(pool, 1, 0.25);
+    pool.spawn(Number.NaN, 1, 2, 1, 0.5, -1, 2, 1);
     expect(pool.count).toBe(1);
     pool.advance(0.3);
     expect(pool.count).toBe(0);
