@@ -59,8 +59,20 @@ export function interleavedGradientNoiseReference(pixelX: number, pixelY: number
   return outer - Math.floor(outer);
 }
 
+/** Pure reference of the shader's screen-UV coverage mask, for unit tests. */
+export function godRaysScreenUvCoverageReference(u: number, v: number): number {
+  return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? 1 : 0;
+}
+
 function interleavedGradientNoise(pixel: TslNode): TslNode {
   return fract(float(IGN_MAGIC.scale).mul(fract(dot(pixel, vec2(IGN_MAGIC.x, IGN_MAGIC.y)))));
+}
+
+function screenUvCoverage(coord: TslNode): TslNode {
+  return step(0, coord.x)
+    .mul(step(coord.x, 1))
+    .mul(step(0, coord.y))
+    .mul(step(coord.y, 1));
 }
 
 function hashNoise2(p: TslNode): TslNode {
@@ -123,8 +135,9 @@ export function buildScreenGodRays(inputs: ScreenGodRaysInputs): TslNode {
   // Sky pixels (no geometry) keep the cleared far depth of 1.0; geometry writes a smaller value.
   const skyThreshold = float(SKY_DEPTH_THRESHOLD);
   const occlusionAt = (coord: TslNode): TslNode => {
+    const coverage = screenUvCoverage(coord);
     const sky = step(skyThreshold, depthTex.sample(coord).r);
-    return sceneTex.sample(coord).rgb.mul(sky);
+    return sceneTex.sample(coord).rgb.mul(sky).mul(coverage);
   };
 
   const coord = uvNode.toVar();
@@ -169,8 +182,11 @@ export function buildDustGodRays(inputs: DustGodRaysInputs): TslNode {
     const skyThreshold = float(SKY_DEPTH_THRESHOLD);
     // Sky keeps full radiance; geometry keeps a lit-haze fraction so beams survive silhouettes.
     const sourceAt = (coord: TslNode): TslNode => {
+      const coverage = screenUvCoverage(coord);
       const sky = step(skyThreshold, depthTex.sample(coord).r);
-      return sceneTex.sample(coord).rgb.mul(tslMix(float(GOD_RAYS_LIT_HAZE), float(1), sky));
+      return sceneTex.sample(coord).rgb
+        .mul(tslMix(float(GOD_RAYS_LIT_HAZE), float(1), sky))
+        .mul(coverage);
     };
 
     const delta = uvNode.sub(sunUv).mul(density.mul(1 / samples)).toConst();
