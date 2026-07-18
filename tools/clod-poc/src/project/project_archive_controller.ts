@@ -14,6 +14,10 @@ import {
   type VoxelProjectManifest,
 } from "../project/voxel_project_archive.js";
 import { validateProjectArchiveConfig } from "./project_archive_config.js";
+import {
+  validateProjectWaterArchiveState,
+  validateProjectWeatherArchiveState,
+} from "./project_archive_environment_state.js";
 import { assertProjectArchiveInputSize } from "./project_archive_limits.js";
 import { validateProjectSessionState } from "./project_archive_session_state.js";
 import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
@@ -121,6 +125,8 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         const contents = await parseVoxelProjectArchive(new Uint8Array(await file.arrayBuffer()));
         contents.manifest.config = validateProjectArchiveConfig(contents.manifest.config);
         contents.manifest.state = validateProjectSessionState(contents.manifest.state);
+        contents.manifest.water = validateProjectWaterArchiveState(contents.manifest.water);
+        contents.manifest.weather = validateProjectWeatherArchiveState(contents.manifest.weather);
         await validateProjectArchiveTextures(contents);
         if (deps.beforeImportNavigation) {
           setProjectBusy(true, "saving current world", 0.5);
@@ -155,8 +161,8 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
           world: structuredClone(deps.getWorldIdentity()) as ProjectWorldIdentity,
           config: validateProjectArchiveConfig(deps.getConfig()),
           state: validateProjectSessionState(mapProjectSessionState(deps.getState())),
-          water: mapProjectWaterArchiveState(deps.getState()),
-          weather: mapProjectWeatherArchiveState(deps.getState()),
+          water: validateProjectWaterArchiveState(mapProjectWaterArchiveState(deps.getState())),
+          weather: validateProjectWeatherArchiveState(mapProjectWeatherArchiveState(deps.getState())),
           voxelTerrainEdits: getVoxelEditSnapshot(),
           props: deps.getProps(),
           textures: deps.textureController.projectTextureMetadata(),
