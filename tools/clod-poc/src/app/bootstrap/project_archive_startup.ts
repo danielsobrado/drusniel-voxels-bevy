@@ -1,3 +1,4 @@
+import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
 import { projectPropEditStore } from "../../project/prop_edit_store.js";
 import { createSaveCheckpointController } from "../../save/save_checkpoint_controller.js";
@@ -6,6 +7,7 @@ import {
   hasActiveSaveRuntime,
   isSaveRuntimeConverged,
 } from "../../save/save_runtime.js";
+import { getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import type { InfoPanelController } from "./info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./ui/terrain_edit_startup.js";
@@ -66,6 +68,11 @@ export function runProjectArchiveStartup(
     getState: () => state,
     getWorldSize: () => WORLD,
     getConfig: () => cfg,
+    getWorldIdentity: () => ({
+      scene: input.searchParams.get("scene") ?? "default",
+      generatorVersion: TERRAIN_SOURCE_VERSION,
+      terrainField: structuredClone(getTerrainFieldConfig()),
+    }),
     getNodesByLevel: () => result.nodesByLevel,
     getProps: () => projectPropEditStore.snapshot(),
     textureController,
