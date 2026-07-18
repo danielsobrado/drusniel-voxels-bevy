@@ -15,9 +15,8 @@ export interface RiverMistRuntimeSettings {
   readonly mask: RiverMistMaskSettings;
 }
 
-export function readRiverMistRuntimeSettings(
-  searchParams: URLSearchParams,
-): RiverMistRuntimeSettings {
+/** Resolved capability and budget settings. Live activation is owned by the lil-gui state. */
+export function readRiverMistRuntimeSettings(): RiverMistRuntimeSettings {
   const settings = readEnvironmentalMaskSettings();
   const mask = settings.riverMist;
   const particles = mask.particles;
@@ -28,10 +27,16 @@ export function readRiverMistRuntimeSettings(
       && mask.maxShoreDistanceM > 0
       && particles.maxParticles > 0
       && particles.maxEmittersPerTick > 0
-      && particles.spawnProbability > 0
-      && queryFlag(searchParams, RIVER_MIST_QUERY_KEYS, false),
+      && particles.spawnProbability > 0,
     mask,
   };
+}
+
+/** Backward-compatible URL links seed the initial lil-gui checkbox only. */
+export function riverMistInitialEnabled(
+  searchParams: URLSearchParams = currentSearchParams(),
+): boolean {
+  return queryFlag(searchParams, RIVER_MIST_QUERY_KEYS, false);
 }
 
 export function riverMistSignal(
@@ -60,6 +65,12 @@ function validWaterSample(sample: WaterFieldResult): boolean {
     && Number.isFinite(sample.bodyMask)
     && Number.isFinite(sample.shoreDistance)
     && Number.isFinite(sample.flow.speed);
+}
+
+function currentSearchParams(): URLSearchParams {
+  return typeof window === "undefined"
+    ? new URLSearchParams()
+    : new URLSearchParams(window.location.search);
 }
 
 function queryFlag(
