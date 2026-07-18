@@ -1,5 +1,6 @@
 export type StreamCursorSource =
   | "playing_player"
+  | "playing_teleport_prime"
   | "orbit_spawned_player"
   | "orbit_camera"
   | "orbit_target";
@@ -30,6 +31,16 @@ export interface CanonicalStreamCenter {
   source: StreamCursorSource;
 }
 
+export interface StreamCursorPrimeTarget {
+  readonly x: number;
+  readonly z: number;
+}
+
+interface InstalledStreamCursorPrimeTarget {
+  readonly token: symbol;
+  readonly target: Readonly<StreamCursorPrimeTarget>;
+}
+
 const MAX_VELOCITY_MPS = 500;
 const MIN_DISCONTINUITY_DISTANCE_M = 24;
 const DISCONTINUITY_VELOCITY_MULTIPLIER = 2;
@@ -37,12 +48,14 @@ const DISCONTINUITY_VELOCITY_MULTIPLIER = 2;
 const VELOCITY_EMA_TIME_CONSTANT_SECONDS = -(1 / 60) / Math.log(0.85);
 
 let globalMovementEpoch = 0;
+const installedPrimeTargets: InstalledStreamCursorPrimeTarget[] = [];
 
 export const STREAM_CURSOR_SOURCE_CODE: Record<StreamCursorSource, number> = {
   playing_player: 1,
   orbit_spawned_player: 2,
   orbit_camera: 3,
   orbit_target: 4,
+  playing_teleport_prime: 5,
 };
 
 export function markStreamCursorDiscontinuity(): number {
@@ -53,12 +66,50 @@ export function streamCursorMovementEpoch(): number {
   return globalMovementEpoch;
 }
 
+function activePrimeTarget(): Readonly<StreamCursorPrimeTarget> | null {
+  return installedPrimeTargets[installedPrimeTargets.length - 1]?.target ?? null;
+}
+
+/**
+ * Temporarily redirects streaming work without moving gameplay authority. Installations are
+ * tokenized so overlapping teleport probes can dispose out of order without clearing a newer one.
+ */
+export function installStreamCursorPrimeTarget(target: StreamCursorPrimeTarget): () => void {
+  if (!Number.isFinite(target.x) || !Number.isFinite(target.z)) {
+    throw new RangeError(`Stream cursor prime target must be finite, received (${target.x}, ${target.z})`);
+  }
+  const entry: InstalledStreamCursorPrimeTarget = {
+    token: Symbol("stream-cursor-prime-target"),
+    target: Object.freeze({ x: target.x, z: target.z }),
+  };
+  installedPrimeTargets.push(entry);
+  markStreamCursorDiscontinuity();
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const wasActive = installedPrimeTargets[installedPrimeTargets.length - 1]?.token === entry.token;
+    const index = installedPrimeTargets.findIndex((candidate) => candidate.token === entry.token);
+    if (index >= 0) installedPrimeTargets.splice(index, 1);
+    if (wasActive) markStreamCursorDiscontinuity();
+  };
+}
+
 export function resetStreamCursorMovementEpochForTests(): void {
   globalMovementEpoch = 0;
+  installedPrimeTargets.length = 0;
 }
 
 export function canonicalStreamCenter(input: StreamCursorInput): CanonicalStreamCenter {
   if (input.interactionMode === "playing") {
+    const primeTarget = activePrimeTarget();
+    if (primeTarget) {
+      return {
+        center: { x: primeTarget.x, z: primeTarget.z },
+        source: "playing_teleport_prime",
+      };
+    }
     return {
       center: { x: input.player.position.x, z: input.player.position.z },
       source: "playing_player",

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { getDigEditRevision, surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
-import { runReadinessGatedTeleport } from "../../../player/teleport_recovery.js";
+import { runStreamPrimedGameplayTeleport } from "../../../player/gameplay_teleport_stream_prime.js";
 import { gameplayDiagnostics } from "../../../player/gameplay_diagnostics.js";
 import {
   createAppCellReadinessFeeds,
@@ -95,10 +95,11 @@ export function runPlayerStartup(
   controls.update = () => (interaction.mode === "orbit" ? updateOrbitControls() : false);
 
   let lastPlayerFrameAt = performance.now();
+  let activeGameplayTeleportProbes = 0;
   const updatePlayerInteraction = (now: number): void => {
     const deltaSeconds = Math.min(Math.max((now - lastPlayerFrameAt) / 1000, 0), MAX_PLAYER_FRAME_DELTA_SECONDS);
     lastPlayerFrameAt = now;
-    if (interaction.mode === "playing") {
+    if (interaction.mode === "playing" && activeGameplayTeleportProbes === 0) {
       playerInputController.updateFrame(deltaSeconds);
       playerInputController.updateHoldToDig();
     }
@@ -197,16 +198,24 @@ export function runPlayerStartup(
           yaw: target.yaw ?? current.yaw,
         });
       };
-      return runReadinessGatedTeleport({
+      return runStreamPrimedGameplayTeleport({
         target,
         timeoutMs: Math.max(1_000, target.timeoutMs ?? 180_000),
-        // Streaming worlds need a pose nudge to load the destination; arrival commits only when ready.
-        primeStream: applyPose,
         commit: applyPose,
         readyAt: (x, z) => teleportTargetReady(playerReadinessFeeds, x, z),
         waitFrame: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
         now: () => performance.now(),
         recordReadyMs: (milliseconds) => gameplayDiagnostics.set("time_to_gameplay_ready_ms", milliseconds),
+        suspendGameplay: () => {
+          activeGameplayTeleportProbes += 1;
+          playerInputController.resetPlayerInput();
+          let resumed = false;
+          return () => {
+            if (resumed) return;
+            resumed = true;
+            activeGameplayTeleportProbes = Math.max(0, activeGameplayTeleportProbes - 1);
+          };
+        },
       });
     };
   }

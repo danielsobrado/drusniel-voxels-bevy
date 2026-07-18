@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   StreamCursorTracker,
   canonicalStreamCenter,
+  installStreamCursorPrimeTarget,
   markStreamCursorDiscontinuity,
   resetStreamCursorMovementEpochForTests,
 } from "./stream_cursor.js";
@@ -37,6 +38,44 @@ describe("canonicalStreamCenter", () => {
       center: { x: 50, z: 60 },
       source: "orbit_target",
     });
+  });
+
+  it("primes playing-mode streaming without mutating the player position", () => {
+    const playerPosition = { x: 10, z: 20 };
+    const input = {
+      ...baseInput,
+      interactionMode: "playing" as const,
+      player: { spawned: true, position: playerPosition },
+    };
+    const release = installStreamCursorPrimeTarget({ x: 2_048, z: -1_024 });
+
+    expect(canonicalStreamCenter(input)).toEqual({
+      center: { x: 2_048, z: -1_024 },
+      source: "playing_teleport_prime",
+    });
+    expect(playerPosition).toEqual({ x: 10, z: 20 });
+
+    release();
+    expect(canonicalStreamCenter(input)).toEqual({
+      center: { x: 10, z: 20 },
+      source: "playing_player",
+    });
+  });
+
+  it("keeps the newest overlapping prime active when an older lease disposes", () => {
+    const input = { ...baseInput, interactionMode: "playing" as const };
+    const releaseFirst = installStreamCursorPrimeTarget({ x: 100, z: 200 });
+    const releaseSecond = installStreamCursorPrimeTarget({ x: 300, z: 400 });
+
+    releaseFirst();
+    expect(canonicalStreamCenter(input).center).toEqual({ x: 300, z: 400 });
+
+    releaseSecond();
+    expect(canonicalStreamCenter(input).center).toEqual({ x: 10, z: 20 });
+  });
+
+  it("rejects non-finite stream-prime targets", () => {
+    expect(() => installStreamCursorPrimeTarget({ x: Number.NaN, z: 0 })).toThrow(/must be finite/);
   });
 });
 
@@ -108,6 +147,22 @@ describe("StreamCursorTracker", () => {
 
     expect(cursor.discontinuity).toBe(true);
     expect(cursor.velocityMps).toEqual({ x: 0, z: 0 });
+  });
+
+  it("treats prime installation and release as discontinuities", () => {
+    const tracker = new StreamCursorTracker();
+    const playingInput = { ...baseInput, interactionMode: "playing" as const };
+    tracker.update({ ...playingInput, frameId: 0 });
+
+    const release = installStreamCursorPrimeTarget({ x: 1_000, z: 1_000 });
+    const primed = tracker.update({ ...playingInput, frameId: 1 });
+    expect(primed.discontinuity).toBe(true);
+    expect(primed.velocityMps).toEqual({ x: 0, z: 0 });
+
+    release();
+    const restored = tracker.update({ ...playingInput, frameId: 2 });
+    expect(restored.discontinuity).toBe(true);
+    expect(restored.center).toEqual({ x: 10, z: 20 });
   });
 
   it("treats a medium one-frame relocation as a discontinuity", () => {

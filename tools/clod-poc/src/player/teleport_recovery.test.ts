@@ -71,4 +71,32 @@ describe("readiness-gated teleport recovery", () => {
     })).rejects.toThrow("teleport readiness timed out");
     expect(commit).not.toHaveBeenCalled();
   });
+
+  it("rejects non-finite targets before querying readiness", async () => {
+    const readyAt = vi.fn(() => true);
+    await expect(runReadinessGatedTeleport({
+      target: { x: Number.NaN, z: 0 },
+      timeoutMs: 30,
+      commit: vi.fn(),
+      readyAt,
+      waitFrame: async () => undefined,
+      now: () => 0,
+      recordReadyMs: vi.fn(),
+    })).rejects.toThrow(/target must be finite/);
+    expect(readyAt).not.toHaveBeenCalled();
+  });
+
+  it("fails instead of polling forever when the readiness clock is invalid", async () => {
+    const readyAt = vi.fn(() => false);
+    await expect(runReadinessGatedTeleport({
+      target: { x: 1, z: 2 },
+      timeoutMs: 30,
+      commit: vi.fn(),
+      readyAt,
+      waitFrame: async () => undefined,
+      now: () => Number.NaN,
+      recordReadyMs: vi.fn(),
+    })).rejects.toThrow(/clock returned/);
+    expect(readyAt).not.toHaveBeenCalled();
+  });
 });
