@@ -53,6 +53,10 @@ export function cloneWaterConfig(config: WaterConfig): WaterConfig {
       fresnel: { ...config.visual.fresnel },
       color: { ...config.visual.color },
       bodies: cloneWaterBodyPresets(config.visual.bodies),
+      glacialMurkiness: {
+        ...config.visual.glacialMurkiness,
+        absorptionMultiplier: [...config.visual.glacialMurkiness.absorptionMultiplier],
+      },
       refraction: { ...config.visual.refraction },
       reflection: { ...config.visual.reflection },
     },
