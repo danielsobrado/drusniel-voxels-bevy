@@ -9,6 +9,7 @@ import {
 import { trackCreatedMaterial } from "./material_churn/tracked_material_factory.js";
 
 const WGSL_ATTRIBUTE_PREFIX = String.fromCharCode(64);
+const DEPTH_PREPASS_REQUESTED_KEY = "depthPrepassRequested";
 
 export function installPositionInvariance(renderer: WebGPURenderer): void {
   const backend = renderer.backend as unknown as {
@@ -127,6 +128,7 @@ export function instancedDepthPrepassTwin(mesh: InstancedMesh, nodes: PrepassNod
   twin.castShadow = false;
   twin.receiveShadow = false;
   twin.renderOrder = -100;
+  mesh.userData[DEPTH_PREPASS_REQUESTED_KEY] = true;
 
   return twin;
 }
@@ -136,13 +138,23 @@ export function refreshInstancedDepthPrepassTwin(
   nodes: PrepassNodes | undefined,
 ): InstancedMesh | undefined {
   const previous = mesh.userData.depthTwin as InstancedMesh | undefined;
-  if (!previous) return undefined;
+  const requested = previous !== undefined || mesh.userData[DEPTH_PREPASS_REQUESTED_KEY] === true;
+  if (!requested) return undefined;
 
   if (!nodes) {
-    previous.parent?.remove(previous);
-    singleMeshMaterial(previous).dispose();
-    delete mesh.userData.depthTwin;
+    if (previous) {
+      previous.parent?.remove(previous);
+      singleMeshMaterial(previous).dispose();
+      delete mesh.userData.depthTwin;
+    }
     return undefined;
+  }
+
+  if (!previous) {
+    const next = instancedDepthPrepassTwin(mesh, nodes);
+    mesh.parent?.add(next);
+    mesh.userData.depthTwin = next;
+    return next;
   }
 
   const previousMaterial = singleMeshMaterial(previous);
