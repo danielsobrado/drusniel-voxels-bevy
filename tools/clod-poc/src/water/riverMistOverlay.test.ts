@@ -25,7 +25,7 @@ function runtimeSettings() {
 }
 
 describe("RiverMistOverlay", () => {
-  it("uses a coarse sample hint and respects particle and scan budgets", () => {
+  it("uses the coarse bypass hint and respects particle and scan budgets", () => {
     const sampleForCellSize = vi.fn((_x: number, _z: number, _cellSize: number) => ({
       waterY: 4,
       terrainY: 3.5,
@@ -41,6 +41,7 @@ describe("RiverMistOverlay", () => {
       { sampleForCellSize } as unknown as WaterField,
       {
         settings: runtimeSettings(),
+        minimumSampleHintM: 20,
         readBiomeState: () => ({ enabled: true, morningMist: 1 } as BiomeVisualState),
       },
     );
@@ -51,7 +52,7 @@ describe("RiverMistOverlay", () => {
     expect(stats.particles).toBeLessThanOrEqual(8);
     expect(stats.lastEmitters).toBeLessThanOrEqual(8);
     expect(sampleForCellSize).toHaveBeenCalled();
-    expect(sampleForCellSize.mock.calls.every((call) => call[2] === 16)).toBe(true);
+    expect(sampleForCellSize.mock.calls.every((call) => call[2] === 20)).toBe(true);
 
     const callsAfterScan = sampleForCellSize.mock.calls.length;
     overlay.update(0.05, new THREE.Vector3(0, 0, 0));
