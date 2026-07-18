@@ -70,4 +70,24 @@ describe("postfx case diagnostics", () => {
     expect(postFxCaseDiagnostics({ godrays: "volumetric", froxels: "0", ablate: "froxels" }).stages.froxels).toBe(false);
     expect(postFxCaseDiagnostics({ godrays: "volumetric", froxels: "0", ablate: "godrays" }).stages.froxels).toBe(false);
   });
+
+  it("reports only the work used by an explicit froxel debug capture", () => {
+    const diagnostics = postFxCaseDiagnostics({ fx: "0", froxelDebug: "density" });
+
+    expect(diagnostics.postEnabled).toBe(true);
+    expect(compactStageList(diagnostics)).toBe("autoExposure+froxels");
+    expect(diagnostics.stages.froxels).toBe(true);
+    expect(diagnostics.stages.colorScript).toBe(false);
+    expect(diagnostics.stages.godrays).toBe(false);
+  });
+
+  it("keeps froxel debug visible even when the normal froxel stage is ablated", () => {
+    const diagnostics = postFxCaseDiagnostics({
+      postmin: "1",
+      froxelDebug: "scatter",
+      ablate: "froxels,autoexposure",
+    });
+
+    expect(compactStageList(diagnostics)).toBe("froxels");
+  });
 });

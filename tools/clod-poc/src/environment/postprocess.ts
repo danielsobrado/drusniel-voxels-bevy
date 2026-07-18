@@ -281,7 +281,7 @@ const OUTPUT_FRAG = /* glsl */ `
       shafts += source * decay * clamp(uGodRaysWeight, 0.0, 2.0);
       decay *= clamp(uGodRaysDecay, 0.1, 0.99);
     }
-    float screenFalloff = smoothstep(1.4, 0.0, length(vUv - uSunScreen));
+    float screenFalloff = 1.0 - smoothstep(0.0, 1.4, length(vUv - uSunScreen));
     float intensity = shafts * uGodRaysExposure * screenFalloff / sampleCount;
     return uAerialPerspectiveColor * max(intensity, 0.0);
   }
