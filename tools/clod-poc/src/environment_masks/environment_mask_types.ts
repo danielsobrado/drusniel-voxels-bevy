@@ -30,6 +30,7 @@ export interface RiverCobbleMaskSettings extends EnvironmentalBandSettings {
 export interface RiverMistParticleSettings {
   spawnRadiusM: number;
   spacingM: number;
+  sampleHintM: number;
   emitIntervalS: number;
   maxParticles: number;
   maxEmittersPerTick: number;
