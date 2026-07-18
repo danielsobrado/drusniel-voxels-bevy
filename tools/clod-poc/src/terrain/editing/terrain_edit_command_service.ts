@@ -17,6 +17,7 @@ import type {
 } from "./terrain_edit_service.js";
 
 const DIG_COMMAND_DEBOUNCE_MS = 40;
+const MAX_SCHEDULED_DIGS_IN_PIPELINE = 2;
 const TARGET_POSITION_EPSILON_M = 0.25;
 
 interface TerrainDigIntent {
@@ -45,7 +46,7 @@ function cloneBrush(brush: TerrainBrushParams): Readonly<TerrainBrushParams> {
 function brushIsValid(brush: TerrainBrushParams): boolean {
   return Number.isFinite(brush.digRadius)
     && brush.digRadius > 0
-    && Number.isFinite(brush.brushMaterial)
+    && (brush.brushOp !== "add" || Number.isFinite(brush.brushMaterial))
     && Number.isFinite(brush.brushHeight)
     && Number.isFinite(brush.brushStrength)
     && Number.isFinite(brush.brushFalloff);
@@ -83,6 +84,7 @@ export function createCommandGuardedTerrainEditService(
 ): TerrainEditService {
   let operationTail: Promise<void> = Promise.resolve();
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let scheduledDigsInPipeline = 0;
 
   const nowMs = (): number => (deps.nowMs ?? (() => performance.now()))();
   const interactionMode = (): string => deps.getInteractionMode?.() ?? "playing";
@@ -209,12 +211,17 @@ export function createCommandGuardedTerrainEditService(
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
-    if (digDebounceTimer !== null) return;
+    if (digDebounceTimer !== null || scheduledDigsInPipeline >= MAX_SCHEDULED_DIGS_IN_PIPELINE) return;
     const intent = captureIntent(ray);
     if (!intent) return;
     digDebounceTimer = setTimeout(() => {
       digDebounceTimer = null;
-      void enqueueOperation("terrain brush", () => executeIntent(intent));
+      if (scheduledDigsInPipeline >= MAX_SCHEDULED_DIGS_IN_PIPELINE) return;
+      scheduledDigsInPipeline += 1;
+      void enqueueOperation("terrain brush", () => executeIntent(intent)).then(
+        () => { scheduledDigsInPipeline -= 1; },
+        () => { scheduledDigsInPipeline -= 1; },
+      );
     }, DIG_COMMAND_DEBOUNCE_MS);
   };
 
