@@ -5,15 +5,33 @@ import type { ClodPageNode } from "../types.js";
 import type { ProjectPropInstance } from "../project/project_props.js";
 import {
   createVoxelProjectArchive,
+  isCurrentVoxelProjectManifest,
   parseVoxelProjectArchive,
   stageVoxelProjectImport,
   VOXEL_PROJECT_SCHEMA_VERSION,
+  type CurrentVoxelProjectManifest,
+  type ProjectWorldIdentity,
   type VoxelProjectManifest,
 } from "../project/voxel_project_archive.js";
+import { validateProjectArchiveConfig } from "./project_archive_config.js";
+import {
+  validateProjectWaterArchiveState,
+  validateProjectWeatherArchiveState,
+} from "./project_archive_environment_state.js";
+import { armProjectImportRecovery } from "./project_import_recovery.js";
+import { assertProjectArchiveInputSize } from "./project_archive_limits.js";
+import { validateProjectSessionState } from "./project_archive_session_state.js";
 import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
 import { getVoxelEditSnapshot } from "../terrain/terrain.js";
 import { mapProjectSessionState, mapProjectWaterArchiveState, mapProjectWeatherArchiveState, type ProjectStateSource } from "./project_state_mapper.js";
 import { validateProjectArchiveTextures } from "./project_texture_validator.js";
+
+const PROJECT_IMPORT_EARLY_ROUTE_KEYS = [
+  "builder",
+  "webgpuSpike",
+  "webgpu",
+  "grassFirstInstanceSmoke",
+] as const;
 
 export interface ProjectArchiveControllerDeps {
   importButton: HTMLButtonElement;
@@ -26,6 +44,7 @@ export interface ProjectArchiveControllerDeps {
   getState: () => ProjectStateSource;
   getWorldSize: () => number;
   getConfig: () => VoxelProjectManifest["config"];
+  getWorldIdentity: () => ProjectWorldIdentity;
   getNodesByLevel: () => Map<number, ClodPageNode[]>;
   getProps: () => ProjectPropInstance[];
   textureController: TerrainTextureController;
@@ -41,6 +60,17 @@ export interface ProjectArchiveControllerDeps {
 
 export interface ProjectArchiveController {
   bindImportExportButtons: () => void;
+}
+
+function applyWorldIdentityToQuery(next: URLSearchParams, manifest: VoxelProjectManifest): void {
+  if (!isCurrentVoxelProjectManifest(manifest)) return;
+  next.set("scene", manifest.world.scene);
+  next.set("seed", String(manifest.world.terrainField.seed));
+  next.set("seaLevel", String(manifest.world.terrainField.seaLevel));
+}
+
+function clearImportBlockingRoutes(next: URLSearchParams): void {
+  for (const key of PROJECT_IMPORT_EARLY_ROUTE_KEYS) next.delete(key);
 }
 
 export function createProjectArchiveController(deps: ProjectArchiveControllerDeps): ProjectArchiveController {
@@ -102,18 +132,27 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
       deps.projectImportInput.value = "";
       if (!file) return;
       try {
+        assertProjectArchiveInputSize(file.size);
         setProjectBusy(true, "validating project archive", 0.2);
         const contents = await parseVoxelProjectArchive(new Uint8Array(await file.arrayBuffer()));
+        contents.manifest.config = validateProjectArchiveConfig(contents.manifest.config);
+        contents.manifest.state = validateProjectSessionState(contents.manifest.state);
+        contents.manifest.water = validateProjectWaterArchiveState(contents.manifest.water);
+        contents.manifest.weather = validateProjectWeatherArchiveState(contents.manifest.weather);
         await validateProjectArchiveTextures(contents);
         if (deps.beforeImportNavigation) {
           setProjectBusy(true, "saving current world", 0.5);
           await deps.beforeImportNavigation();
         }
         setProjectBusy(true, "staging project for rebuild", 0.7);
+        const fallbackSearch = location.search;
         const token = await stageVoxelProjectImport(contents);
+        armProjectImportRecovery(token, fallbackSearch);
         emitAudio("project.import.success");
-        const next = new URLSearchParams(location.search);
+        const next = new URLSearchParams(fallbackSearch);
         next.delete("save");
+        clearImportBlockingRoutes(next);
+        applyWorldIdentityToQuery(next, contents.manifest);
         next.set("world", String(contents.manifest.worldSize));
         next.set("import", token);
         location.search = `?${next.toString()}`;
@@ -129,15 +168,16 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
       try {
         setProjectBusy(true, "packing voxel project archive", 0.8);
         const worldSize = deps.getWorldSize();
-        const manifest: VoxelProjectManifest = {
+        const manifest: CurrentVoxelProjectManifest = {
           schemaVersion: VOXEL_PROJECT_SCHEMA_VERSION,
           kind: "drusniel-clod-project",
           exportedAt: new Date().toISOString(),
           worldSize,
-          config: structuredClone(deps.getConfig()),
-          state: mapProjectSessionState(deps.getState()),
-          water: mapProjectWaterArchiveState(deps.getState()),
-          weather: mapProjectWeatherArchiveState(deps.getState()),
+          world: structuredClone(deps.getWorldIdentity()) as ProjectWorldIdentity,
+          config: validateProjectArchiveConfig(deps.getConfig()),
+          state: validateProjectSessionState(mapProjectSessionState(deps.getState())),
+          water: validateProjectWaterArchiveState(mapProjectWaterArchiveState(deps.getState())),
+          weather: validateProjectWeatherArchiveState(mapProjectWeatherArchiveState(deps.getState())),
           voxelTerrainEdits: getVoxelEditSnapshot(),
           props: deps.getProps(),
           textures: deps.textureController.projectTextureMetadata(),
@@ -148,7 +188,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         };
         const archive = await createVoxelProjectArchive(manifest, collectCustomTextures());
         const stamp = manifest.exportedAt.replace(/[:.]/g, "-");
-        downloadArchive(archive, `drusniel-clod-world-${worldSize}-${stamp}.zip`);
+        downloadArchive(archive, `drusniel-clod-world-${worldSize}-seed-${manifest.world.terrainField.seed}-${stamp}.zip`);
         const elapsed = performance.now() - startedAt;
         const summary = `export: ${(archive.byteLength / 1048576).toFixed(1)} MiB voxel archive in ${(elapsed / 1000).toFixed(2)}s`;
         deps.setLastArchiveSummary(summary);

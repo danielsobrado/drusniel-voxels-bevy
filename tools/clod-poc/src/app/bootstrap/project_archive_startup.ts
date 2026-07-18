@@ -1,4 +1,7 @@
+import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
+import { resolveProjectArchiveWorldPages } from "../../project/project_archive_world_size.js";
+import { captureProjectGeneratorQuery } from "../../project/project_world_identity.js";
 import { projectPropEditStore } from "../../project/prop_edit_store.js";
 import { createSaveCheckpointController } from "../../save/save_checkpoint_controller.js";
 import {
@@ -6,12 +9,20 @@ import {
   hasActiveSaveRuntime,
   isSaveRuntimeConverged,
 } from "../../save/save_runtime.js";
+import { getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import type { InfoPanelController } from "./info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./ui/terrain_edit_startup.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
 
 const CHECKPOINT_MAX_REGION_WRITES = Number.MAX_SAFE_INTEGER;
+
+function diagnosticConfiguredWorldPages(): number | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as typeof window & {
+    __drusnielWorldMode?: { configuredWorldPages?: number };
+  }).__drusnielWorldMode?.configuredWorldPages;
+}
 
 export function runProjectArchiveStartup(
   ctx: UiStartupContext,
@@ -29,7 +40,6 @@ export function runProjectArchiveStartup(
       buildProgressPhase,
       buildProgressPercent,
     },
-    WORLD,
     cfg,
     state,
     buildStatusRef,
@@ -64,8 +74,18 @@ export function runProjectArchiveStartup(
     buildProgressPercent,
     buildProgressBar,
     getState: () => state,
-    getWorldSize: () => WORLD,
+    getWorldSize: () => resolveProjectArchiveWorldPages(
+      input.WORLD,
+      input.configuredWorldPages,
+      diagnosticConfiguredWorldPages(),
+    ),
     getConfig: () => cfg,
+    getWorldIdentity: () => ({
+      scene: input.searchParams.get("scene") ?? "default",
+      generatorVersion: TERRAIN_SOURCE_VERSION,
+      terrainField: structuredClone(getTerrainFieldConfig()),
+      generatorQuery: captureProjectGeneratorQuery(input.searchParams),
+    }),
     getNodesByLevel: () => result.nodesByLevel,
     getProps: () => projectPropEditStore.snapshot(),
     textureController,

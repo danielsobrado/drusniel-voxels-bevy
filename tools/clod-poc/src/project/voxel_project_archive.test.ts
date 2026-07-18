@@ -1,13 +1,16 @@
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
+import { TERRAIN_SOURCE_VERSION } from "../cache/terrainSource.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
+import { DEFAULT_ISLAND_SHAPE_CONFIG } from "../world_source/island_shape.js";
 import {
   createVoxelProjectArchive,
+  LEGACY_VOXEL_PROJECT_SCHEMA_VERSION,
   parseVoxelProjectArchive,
   validateVoxelProjectManifest,
   VOXEL_PROJECT_SCHEMA_VERSION,
+  type CurrentVoxelProjectManifest,
   type ProjectSessionState,
-  type VoxelProjectManifest,
 } from "./voxel_project_archive.js";
 
 const cfg: ClodPagesConfig = {
@@ -117,12 +120,26 @@ const state: ProjectSessionState = {
   grassSeed: 1337,
 };
 
-function manifest(): VoxelProjectManifest {
+function manifest(): CurrentVoxelProjectManifest {
   return {
     schemaVersion: VOXEL_PROJECT_SCHEMA_VERSION,
     kind: "drusniel-clod-project",
     exportedAt: "2026-06-13T10:00:00.000Z",
     worldSize: 4,
+    world: {
+      scene: "infinite-islands",
+      generatorVersion: TERRAIN_SOURCE_VERSION,
+      terrainField: {
+        seed: 73,
+        seaLevel: 18,
+        islandShape: { ...DEFAULT_ISLAND_SHAPE_CONFIG, enabled: true, oceanRim: true, seed: 73 },
+      },
+      generatorQuery: {
+        water: "1",
+        quality: "balanced",
+        hydroUnified: "1",
+      },
+    },
     config: cfg,
     state,
     water: {
@@ -168,7 +185,7 @@ function manifest(): VoxelProjectManifest {
 }
 
 describe("voxel project archive", () => {
-  it("round-trips voxel terrain edits, props, and custom texture bytes without terrain.glb", async () => {
+  it("round-trips world identity, voxel terrain edits, props, and texture bytes", async () => {
     const source = manifest();
     const texture = new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4]);
     const archive = await createVoxelProjectArchive(source, new Map([["textures/slot-0.png", texture]]));
@@ -181,8 +198,19 @@ describe("voxel project archive", () => {
     expect(parsed.customTextures.get("textures/slot-0.png")).toEqual(texture);
   });
 
-  it("requires schema v3 and voxelTerrainEdits", () => {
+  it("accepts legacy schema v3 without inventing world identity", () => {
+    const { world: _world, ...legacy } = manifest();
+    const parsed = validateVoxelProjectManifest({
+      ...legacy,
+      schemaVersion: LEGACY_VOXEL_PROJECT_SCHEMA_VERSION,
+    });
+    expect(parsed.schemaVersion).toBe(3);
+    expect("world" in parsed).toBe(false);
+  });
+
+  it("requires supported schemas, v4 identity, and voxelTerrainEdits", () => {
     expect(() => validateVoxelProjectManifest({ ...manifest(), schemaVersion: 2 })).toThrow(/schema version/i);
+    expect(() => validateVoxelProjectManifest({ ...manifest(), world: undefined })).toThrow(/world identity/i);
     const terrainOnly = {
       ...manifest(),
       voxelTerrainEdits: undefined,
@@ -243,9 +271,31 @@ describe("voxel project archive", () => {
     expect(() => validateVoxelProjectManifest(duplicate)).toThrow(/id is duplicated/i);
   });
 
-  it("rejects malformed archives and missing custom texture bytes", async () => {
+  it("rejects invalid generator query identity", () => {
+    const invalid = manifest() as unknown as { world: { generatorQuery: Record<string, string> } };
+    invalid.world.generatorQuery = { arbitrary: "1" };
+    expect(() => validateVoxelProjectManifest(invalid)).toThrow(/unsupported key/i);
+  });
+
+  it("rejects unsafe or duplicate texture paths", () => {
+    const unsafe = manifest();
+    unsafe.textures[0] = { ...unsafe.textures[0]!, customPath: "../outside.png" };
+    expect(() => validateVoxelProjectManifest(unsafe)).toThrow(/unsafe path/i);
+
+    const duplicate = manifest();
+    duplicate.textures[1] = { ...duplicate.textures[1]!, normalPath: "textures/slot-0.png" };
+    expect(() => validateVoxelProjectManifest(duplicate)).toThrow(/duplicates an archive path/i);
+  });
+
+  it("rejects malformed archives, missing textures, and unreferenced files", async () => {
     await expect(parseVoxelProjectArchive(new Uint8Array([1, 2, 3]))).rejects.toThrow();
     const missingTexture = zipSync({ "project.json": strToU8(JSON.stringify(manifest())) });
-    await expect(parseVoxelProjectArchive(missingTexture)).rejects.toThrow(/slot-0\.png/i);
+    await expect(parseVoxelProjectArchive(missingTexture)).rejects.toThrow(/payload|referenced|slot-0\.png/i);
+    const extraFile = zipSync({
+      "project.json": strToU8(JSON.stringify(manifest())),
+      "textures/slot-0.png": new Uint8Array([1]),
+      "ignored.bin": new Uint8Array([2]),
+    });
+    await expect(parseVoxelProjectArchive(extraFile)).rejects.toThrow(/not referenced/i);
   });
 });

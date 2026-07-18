@@ -58,7 +58,7 @@ describe("cascade particle signal", () => {
     overlay.update(1, new THREE.Vector3());
 
     expect(sampleField.mock.calls.length).toBeGreaterThan(0);
-    expect(sampleField.mock.calls.length).toBeLessThanOrEqual(32);
+    expect(sampleField.mock.calls.length).toBeLessThanOrEqual(16);
     overlay.dispose();
   });
 });

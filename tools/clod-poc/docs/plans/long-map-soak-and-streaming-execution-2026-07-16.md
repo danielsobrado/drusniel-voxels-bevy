@@ -1,44 +1,58 @@
 # Long-Map Soak and Streaming Execution — proving continuous play at continent scale
 
-Created 2026-07-16. Status: IN PROGRESS, revised same day after an external review and a repo
-re-read. The first draft was written hours before the unified-streaming implementation
-landed and was stale on arrival; this revision is rebased against the implementation
-handover. Accepted from the review: LM0 rebased to the real current state; the mirror
-checklist replaced by a versioned dependency record; visual closure made a prerequisite of
-the long soak; two route profiles (infrastructure vs representative density); percentile
-gates extended with worst-frame and threshold-bucket metrics; the frozen-diff precision
-test hardened into a deterministic diagnostic mode with targeted signals; diagonal-rim
-poses added; "green two consecutive days" replaced by a 5-run repeatability protocol plus
-environment records; heap-slope replaced by envelope + resource-lifecycle metrics; revisit
-legs must prove eviction; the teleport drill now depends on plan 3's readiness contract
-instead of a second interim definition; device-loss scope labeled as the fail-loud
-baseline with recovery as a recorded future contract.
+Created 2026-07-16. Status: **IN PROGRESS** (progress refreshed 2026-07-18).
 
-**Execution note (2026-07-16):** work on this plan is already in flight in the working
-tree (uncommitted): `tools/continent-soak.ts` (wander soak + teleport + background/
-foreground drills), a `coast-to-coast` movement-route profile, `allowBoundedWorld` on the
-floating-origin gate, `src/rendering/webgpu_device_loss.ts`, and ~220 new lines in the
-acceptance runner. LM0.4 reconciles that work with this revision — do not clobber it, and
-do not let it entrench contracts this plan supersedes (see LM5 readiness note).
-
-Execution evidence and per-file land/park decisions are recorded in
-`../performance/long-map-execution-evidence-2026-07-16.md`. LM0.2 is closed with a
-profiled fix, controlled-window gate correction, five-run recalibration, and clean-GPU
-confirmation. LM0.3 remains open; the partial visual captures cannot be used as proof.
-LM2 and LM3 calibration captures have now run, but both are blocked by reproducible
-rim-page GPU-mesher failures; the evidence document contains the measured traces and a
-bounded handoff rather than a speculative renderer fix.
-
-**Handoff progress (2026-07-17):** the LM0.3 WebGPU `uDebugMode` ownership-debug defect
-is fixed with unit and browser differential regressions (see the evidence document);
-the remaining LM0.3 steps are the human visual-review items. A
-`compareStreamRootBuilds` diagnostic hook and `npm run probe:rim-gpu-mesher` now
-reproduce the rim-page GPU-versus-CPU mesher comparison directly.
+Revised same day after an external review and a repo re-read. The first draft was written
+hours before the unified-streaming implementation landed and was stale on arrival; this
+revision is rebased against the implementation handover. Accepted from the review: LM0
+rebased to the real current state; the mirror checklist replaced by a versioned
+dependency record; visual closure made a prerequisite of the long soak; two route
+profiles (infrastructure vs representative density); percentile gates extended with
+worst-frame and threshold-bucket metrics; the frozen-diff precision test hardened into a
+deterministic diagnostic mode with targeted signals; diagonal-rim poses added; "green two
+consecutive days" replaced by a 5-run repeatability protocol plus environment records;
+heap-slope replaced by envelope + resource-lifecycle metrics; revisit legs must prove
+eviction; the teleport drill now depends on plan 3's readiness contract instead of a
+second interim definition; device-loss scope labeled as the fail-loud baseline with
+recovery as a recorded future contract.
 
 Plan 1 of 5 toward the browser RPG target (procedural ocean-bounded continent with free
 building, terrain deformation, melee + magic, settlements and dungeons; single-player;
 desktop Chromium WebGPU). Owner decisions locked 2026-07-16: Valheim-scale continent
 (~10 km radius); agents/sailing/collapse out of scope here (plans 2 and 3).
+
+## Progress snapshot (2026-07-18)
+
+**Where we are:** substrate proof is closed. LM0 (including visual QA), LM1, LM2 (fp32
+keep), and **LM3 infrastructure** coast-to-coast are green. Representative dense content
+is wired into the route runner; short-route calibration numbers exist but thresholds are
+**not frozen** yet. LM4 revisit economics and LM5 soak/recovery are still open (scaffolding
+exists; standing evidence does not).
+
+| Phase | Status | Evidence / notes |
+| --- | --- | --- |
+| LM0.1–0.2, LM0.4 | **CLOSED** | Settled p95 → 11.0 ms gate; soak/route/FO/device-loss reconciled in evidence doc |
+| LM0.3 visual QA | **CLOSED** | `shots/manual/unified-streaming-visual-qa-accepted-2026-07-18/` (`passed: true`, 18 artifacts). Shell-path: keep **replace-mode far clipmap** (`farClipmap=1&farClipmapMode=replace`); legacy annular retained as comparison only (`legacy-annular-shell.png`) |
+| LM1 | **CLOSED** | Plan 3 P1 readiness unblocks LM5 teleport |
+| LM2 | **CLOSED** | Keep floating origin **disabled**. Rim matrix `shots/long-map-precision/rim-matrix-accepted-2026-07-18/`; decision addendum in `docs/coordinate-system-2026-07-12.md` (fp32 better p95/specular than FO at 16-page continent) |
+| LM3 infrastructure | **CLOSED** | Frozen thresholds `config/long_map_route_thresholds.json` (p50≤9, p95≤22, p99≤50, max≤100, over16.7≤725, …). Repeatability PASS `repeatability-runs/long-map-infrastructure-final-2026-07-18/` (6 runs on `6aaffba7`: median/worst p95 **19.5 / 20.0**, max **61.8 / 70.2**, over100 **0 / 0**) |
+| LM3 representative | **PARTIAL** | `--representative` → `scene=rpg-village` + agents; dense stream budgets in `movement_route_profile.ts`. Short (≈4.8 km) cal-v2 on `cf1ebf32`: 4/5 clean (p95 med/worst **17.4 / 18.1**, max med/worst **68.4 / 79.2**, over100 0); run 5 failed waterMs 0.6 vs 0.5. **Representative thresholds not frozen.** Full dense coast-to-coast 5+1 not run |
+| LM4 | **OPEN** | `accept:continent-revisit` scaffolding; no standing eviction / cost-table evidence |
+| LM5 | **OPEN** | Plan 3 readiness available; soak/teleport/bg-fg/device-loss evidence not closed |
+
+**Next (dependency order):**
+
+1. Finish calibrate-harness speedups already in the working tree (`--calibrate` skips forced
+   water; pre-route stream-budget boost restored before route; `--repeat N`; Quaternius
+   catalog 404 fix) — then freeze **representative short-route** thresholds from a clean
+   5-run spread.
+2. LM3 full representative coast-to-coast under the 5+1 protocol (release gate).
+3. LM4 A→B→A revisit with eviction assertions → parent Phase 7 go/no-go.
+4. LM5 soak + teleport (plan 3 contract) + background/foreground + device-loss fail-loud.
+
+Execution evidence and per-file land/park decisions:
+`../performance/long-map-execution-evidence-2026-07-16.md` (may lag this snapshot; prefer
+the table above and linked artifact paths for 2026-07-18 claims).
 
 ## Relationship to the unified streaming plan
 
@@ -72,7 +86,10 @@ remain in the parent plan); content density itself (plan 2); gameplay readiness 
 (plan 3 defines them; LM5 consumes them); gate weakening; Bevy port work (contracts stay
 port-shaped per `docs/architecture/bevy-world-source-port.md`).
 
-## Current state (rebased 2026-07-16, from the implementation handover)
+## Current state (historical rebase 2026-07-16, from the implementation handover)
+
+> Superseded for status by **Progress snapshot (2026-07-18)** above. Kept as the
+> substrate context the phases were written against.
 
 - **Green trio on the handover commit**: typecheck pass, tests pass (623 files / 3,270
   tests, 1 file / 3 tests skipped), build pass.
@@ -132,7 +149,9 @@ port-shaped per `docs/architecture/bevy-world-source-port.md`).
    piece. Nothing merges without its failing-test-first coverage.
 - [x] green trio + environment record on HEAD (recorded in the execution evidence)
 - [x] settled p95 disposition (analysis + fix/recalibration recorded)
-- [ ] handover visual QA steps 1–7 done, artifacts linked, shell-path decision recorded
+- [x] handover visual QA steps 1–7 done, artifacts linked, shell-path decision recorded
+      (`shots/manual/unified-streaming-visual-qa-accepted-2026-07-18/`; keep replace-mode
+      far clipmap; legacy annular comparison artifact retained)
 - [x] in-flight work reconciled (per-file land/park decisions in the execution evidence)
 
 ### LM1 — Dependency record (no mirror checkboxes)
@@ -184,11 +203,16 @@ criterion.
    spell VFX, agents (plan 2). Registry-driven test, not a hope-based checklist.
 6. Record the decision either way as an addendum to `coordinate-system-2026-07-12.md`
    with all artifact paths. "fp32 is adequate at 10 km" is a valid, recorded outcome.
-- [ ] freeze-semantics audit + diagnostic mode gaps closed (list here)
-- [ ] pose matrix captured (center/cardinal/diagonal × camera/sun/surface variants)
-- [ ] signal tables recorded (landmark drift px, shadow-edge, specular-crawl, pixel diff)
-- [ ] floating-origin A/B recorded (artifacts + rebase perf)
-- [ ] decision recorded; if enabled: registry tests → green, acceptance suites green
+- [x] freeze-semantics audit + diagnostic mode gaps closed (`precisionDiag=1` asserted on
+      every rim-matrix capture; seven freeze counters recorded in the accepted report)
+- [x] pose matrix captured (center/cardinal/diagonal × camera/sun/surface variants)
+      (`shots/long-map-precision/rim-matrix-accepted-2026-07-18/`, 18 cases)
+- [x] signal tables recorded (landmark drift px, shadow-edge, specular-crawl, pixel diff)
+      — all zero drift / zero uncaptured WebGPU errors in the accepted matrix
+- [x] floating-origin A/B recorded (artifacts + rebase perf) — FO worse p95 and specular
+      residual; each FO rim case one expected 1024 m rebase
+- [x] decision recorded; floating origin stays **disabled** (fp32 adequate at this
+      envelope) — addendum in `docs/coordinate-system-2026-07-12.md`
 
 ### LM3 — Coast-to-coast standing routes (two profiles + a short per-change route)
 
@@ -231,15 +255,23 @@ representative profile : + dense forest, settlement, dungeon entrance, construct
 4. **Repeatability protocol** (replaces "green two consecutive days"): 5 repeated runs on
    the same recorded environment — median/worst/spread reported, zero gate failures —
    plus one fresh-profile run. Nightly runs continue as drift monitoring, not as proof.
-- [ ] short per-change route landed + gates calibrated (5-run spread recorded)
-- [ ] full route landed (infrastructure profile) + gates green under the protocol
-- [ ] representative-profile rerun recorded when plan 2 D1/D2 land (release gate from
-      then on) — **handoff 2026-07-18 from plan 2 D5**: representative dense profile is
-      `scene=rpg-village` (+ optional `agentEnvelope=1&agentCount=40&agentSkin=1`),
-      gated by `npm run accept:rpg-dense` budgets in
-      `tools/infinite_acceptance/rpg_dense_thresholds.ts`. Coast-to-coast
-      `--representative` still blocked until LM3 wires this profile into the route runner.
-- [ ] environment records attached to every gate table in this section
+- [x] short per-change route landed + gates calibrated (5-run spread recorded) —
+      **infrastructure** short + full thresholds frozen in
+      `config/long_map_route_thresholds.json`. **Representative** short cal-v2
+      (`acceptance-runs/long-map-short-representative-cal-v2-{1..5}-2026-07-18/`, SHA
+      `cf1ebf32`): clean 4/5 — p95 med/worst 17.4/18.1, max 68.4/79.2, over100 0;
+      run 5 waterMs flake (0.6 vs 0.5). Representative thresholds **not frozen** yet.
+- [x] full route landed (infrastructure profile) + gates green under the protocol —
+      `repeatability-runs/long-map-infrastructure-final-2026-07-18/` PASS (6 runs on
+      `6aaffba7`; median/worst p95 19.5/20.0, max 61.8/70.2, over100 0/0)
+- [ ] representative-profile full coast-to-coast 5+1 recorded (release gate) —
+      **wiring done 2026-07-18**: `--representative` → `scene=rpg-village` + agents via
+      `movement_route_profile.ts` (plan 2 D5 handoff). Short-route calibrate evidence
+      above; freeze short thresholds, then run full dense 5+1. Dense budgets already
+      differ (frontier lag 768 m, region drain 600, stream acceptance floors).
+- [x] environment records attached to infrastructure gate tables (repeatability report
+      embeds commit/browser/GPU/driver/display/power/viewport). Representative freeze
+      must attach the same template.
 
 ### LM4 — Revisit and persistence economics (feeds parent Phase 7 decisions)
 
@@ -294,7 +326,7 @@ here.
    flaky).
 - [ ] soak sampling + gates green under the 5-run protocol (numbers here)
 - [ ] teleport gates green at 3 distances using plan 3's contract
-      (plan 3 P1 unblocked on `99cbdd94`; wire LM5 drills to `teleportTargetReady` /
+      (plan 3 P0–P7 complete; wire LM5 drills to `teleportTargetReady` /
       `time_to_gameplay_ready_ms` and reconcile any interim `streamingReadinessBlockers`)
 - [ ] background/foreground drill green
 - [ ] device-loss baseline tests green; no-corruption-on-reload verified; future
@@ -333,5 +365,6 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
   countermeasures away for runtime convenience.
 - **Soak flakiness**: fixed seeds, recorded environments, calibrate-then-freeze; a gate
   that flakes twice gets re-derived from a fresh 5-run spread, not deleted.
-- **In-flight-work collision**: LM0.4 owns reconciliation; until it completes, no other
-  session should edit the soak/route/floating-origin/device-loss files.
+- **In-flight-work collision**: LM0.4 reconciliation is closed. Do not silently bump
+  frozen infrastructure thresholds; representative freeze and LM4/LM5 evidence still
+  need recorded environments and calibrate-then-freeze discipline.

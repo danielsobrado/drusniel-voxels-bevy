@@ -425,6 +425,16 @@ const BASE_ACTIVE_SCENES = PROFILE === "fast"
 const ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES, CLI_ARGS);
 const ACTIVE_GATES = filterActiveGates(GATE_MODES, CLI_ARGS);
 const SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;
+const REPEAT_COUNT = Math.max(1, Math.floor(Number(cliValues(CLI_ARGS, "--repeat").at(-1) ?? "1")) || 1);
+/** Higher stream budgets only for pre-route convergence; restored before the route. */
+const PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS = {
+  buildBudgetPagesPerFrame: 64,
+  applyBudgetPagesPerFrame: 16,
+  maxInflightBatches: 4,
+  // Representative radius 768 needs >512 resident pages to close frontier lag.
+  maxCachedPages: 1024,
+} as const;
+const BUDGET_RESTORE_SETTLE_FRAMES = 30;
 
 function sceneSupportsGate(scene: SceneSpec, gate: GateMode): boolean {
   return !scene.gates || scene.gates.includes(gate.name);
@@ -815,82 +825,158 @@ async function settle(page: Page, frames: number): Promise<void> {
 }
 
 async function waitForConvergence(page: Page, sceneName: string): Promise<void> {
+  const boostPreRoute = !sceneName.includes(":post-route");
+  let previousBudgets: {
+    buildBudgetPagesPerFrame: number;
+    applyBudgetPagesPerFrame: number;
+    maxInflightBatches: number;
+    maxCachedPages: number;
+  } | null = null;
+  if (boostPreRoute) {
+    const restored = await page.evaluate((budgets) => {
+      const hooks = (window as typeof window & {
+        __drusnielClod?: {
+          setAcceptanceSceneOptions?: ((options: {
+            streamBudgets?: {
+              buildBudgetPagesPerFrame?: number;
+              applyBudgetPagesPerFrame?: number;
+              maxInflightBatches?: number;
+              maxCachedPages?: number;
+            };
+          }) => {
+            buildBudgetPagesPerFrame: number;
+            applyBudgetPagesPerFrame: number;
+            maxInflightBatches: number;
+            maxCachedPages: number;
+          } | void) | null;
+        };
+      }).__drusnielClod;
+      const previous = hooks?.setAcceptanceSceneOptions?.({ streamBudgets: budgets });
+      if (!previous
+        || typeof previous.buildBudgetPagesPerFrame !== "number"
+        || typeof previous.applyBudgetPagesPerFrame !== "number"
+        || typeof previous.maxInflightBatches !== "number"
+        || typeof previous.maxCachedPages !== "number") {
+        return null;
+      }
+      return {
+        buildBudgetPagesPerFrame: previous.buildBudgetPagesPerFrame,
+        applyBudgetPagesPerFrame: previous.applyBudgetPagesPerFrame,
+        maxInflightBatches: previous.maxInflightBatches,
+        maxCachedPages: previous.maxCachedPages,
+      };
+    }, { ...PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS });
+    previousBudgets = restored;
+    if (previousBudgets) {
+      console.log(
+        `[infinite-accept] ${sceneName}: pre-route stream budgets ` +
+        `${previousBudgets.buildBudgetPagesPerFrame}/${previousBudgets.applyBudgetPagesPerFrame}/${previousBudgets.maxInflightBatches}/cache${previousBudgets.maxCachedPages}` +
+        ` -> ${PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS.buildBudgetPagesPerFrame}/${PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS.applyBudgetPagesPerFrame}/${PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS.maxInflightBatches}/cache${PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS.maxCachedPages}`,
+      );
+    }
+  }
   const startedAt = Date.now();
   const deadline = startedAt + CONVERGENCE_TIMEOUT_MS;
   let stablePolls = 0;
   let lastSnapshot = "";
-  while (Date.now() < deadline) {
-    const c = await page.evaluate(() => {
-      const counters = (window as typeof window & { __drusnielClod?: { stats?: { counters?: Record<string, number> } | null } }).__drusnielClod?.stats?.counters ?? {};
-      return {
-        tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
-        tilesBuilding: counters["far_summary_tiles_building"] ?? -1,
-        farShellRebuildPending: counters["far_shell_rebuild_pending"] ?? 0,
-        textureWindowPending: counters["terrain_texture_window_pending"] ?? 0,
-        bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
-        bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
-        bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
-        bubbleFailed: counters["live_bubble_failed_pages"] ?? -1,
-        bubbleRetryPages: counters["live_bubble_gpu_retry_pages"] ?? 0,
-        bubblePendingChunks: counters["live_bubble_pending_chunks"] ?? 0,
-        bubbleInflightChunks: counters["live_bubble_inflight_chunks"] ?? 0,
-        bubbleColliderPages: counters["live_bubble_streamed_collider_pages"] ?? -1,
-        bubbleColliderRegistrations: counters["live_bubble_collider_registrations"] ?? -1,
-        streamRequired: counters["live_clod_stream_required_pages"] ?? 0,
-        streamBudget: counters["live_clod_stream_build_budget"] ?? 0,
-        streamPending: counters["live_clod_stream_pending_pages"] ?? 0,
-        streamInflight: counters["live_clod_stream_inflight_batches"] ?? 0,
-        streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
-        streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
-        streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
-        streamMaxCached: counters["live_clod_stream_max_cached_pages"] ?? 0,
-        streamSafetyCacheCapacityOk: counters["live_clod_stream_safety_cache_capacity_ok"] ?? 1,
-        streamSafetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
-        streamSafetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
-        streamSafetyPending: counters["live_clod_stream_safety_pending_pages"] ?? 0,
-        streamSafetyInflight: counters["live_clod_stream_safety_inflight_pages"] ?? 0,
-        streamRefinementPending: counters["live_clod_stream_refinement_pending_pages"] ?? 0,
-        streamRefinementInflight: counters["live_clod_stream_refinement_inflight_pages"] ?? 0,
-        streamParentCoverageViolations: counters["live_clod_stream_parent_coverage_violations"] ?? 0,
-        streamActiveRootPages: counters["live_clod_stream_active_root_pages"] ?? 0,
-        streamReadyFrame: counters["stream_ready_frame"] ?? -1,
-        streamReadyFrontierM: counters["live_clod_stream_ready_frontier_m"] ?? 0,
-        farClipmapInnerRadiusM: counters["far_clipmap_inner_radius_m"] ?? 0,
-        heightfieldEnabled: counters["heightfield_tiles_enabled"] ?? 0,
-        heightfieldPending: counters["heightfield_tiles_pending"] ?? 0,
-        heightfieldInflight: counters["heightfield_tiles_inflight"] ?? 0,
-        heightfieldFallbackSamples: counters["heightfield_tiles_fallback_samples_this_frame"] ?? 0,
-        proxyBuilding: counters["shadow_proxy_building"] ?? -1,
-        sceneCompileRequired: counters["scene_compile_warm_required"] ?? 0,
-        sceneCompilePending: counters["scene_compile_warm_pending"] ?? 0,
-        sceneCompileReady: counters["scene_compile_warm_ready"] ?? 1,
-      };
-    }) as ConvergenceSnapshot;
-    const { quiet } = evaluateConvergence(c);
-    if (c.streamRequired > 0 && c.streamBudget === 0) {
-      const blockers = convergenceTimeoutBlockers(c);
-      const message = `${sceneName}: streamed CLOD required but build budget is zero`;
-      if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
-      throw new Error(message);
+  try {
+    while (Date.now() < deadline) {
+      const c = await page.evaluate(() => {
+        const counters = (window as typeof window & { __drusnielClod?: { stats?: { counters?: Record<string, number> } | null } }).__drusnielClod?.stats?.counters ?? {};
+        return {
+          tilesMissing: counters["far_summary_tiles_missing"] ?? -1,
+          tilesBuilding: counters["far_summary_tiles_building"] ?? -1,
+          farShellRebuildPending: counters["far_shell_rebuild_pending"] ?? 0,
+          textureWindowPending: counters["terrain_texture_window_pending"] ?? 0,
+          bubbleBuilding: counters["live_bubble_building_pages"] ?? -1,
+          bubbleReady: counters["live_bubble_ready_pages"] ?? -1,
+          bubbleRequired: counters["live_bubble_required_pages"] ?? -1,
+          bubbleFailed: counters["live_bubble_failed_pages"] ?? -1,
+          bubbleRetryPages: counters["live_bubble_gpu_retry_pages"] ?? 0,
+          bubblePendingChunks: counters["live_bubble_pending_chunks"] ?? 0,
+          bubbleInflightChunks: counters["live_bubble_inflight_chunks"] ?? 0,
+          bubbleColliderPages: counters["live_bubble_streamed_collider_pages"] ?? -1,
+          bubbleColliderRegistrations: counters["live_bubble_collider_registrations"] ?? -1,
+          streamRequired: counters["live_clod_stream_required_pages"] ?? 0,
+          streamBudget: counters["live_clod_stream_build_budget"] ?? 0,
+          streamPending: counters["live_clod_stream_pending_pages"] ?? 0,
+          streamInflight: counters["live_clod_stream_inflight_batches"] ?? 0,
+          streamReady: counters["live_clod_stream_ready_pages"] ?? 0,
+          streamCached: counters["live_clod_stream_cached_pages"] ?? 0,
+          streamFailed: counters["live_clod_stream_failed_pages"] ?? 0,
+          streamMaxCached: counters["live_clod_stream_max_cached_pages"] ?? 0,
+          streamSafetyCacheCapacityOk: counters["live_clod_stream_safety_cache_capacity_ok"] ?? 1,
+          streamSafetyRequired: counters["live_clod_stream_safety_required_pages"] ?? 0,
+          streamSafetyReady: counters["live_clod_stream_safety_ready_pages"] ?? 0,
+          streamSafetyPending: counters["live_clod_stream_safety_pending_pages"] ?? 0,
+          streamSafetyInflight: counters["live_clod_stream_safety_inflight_pages"] ?? 0,
+          streamRefinementPending: counters["live_clod_stream_refinement_pending_pages"] ?? 0,
+          streamRefinementInflight: counters["live_clod_stream_refinement_inflight_pages"] ?? 0,
+          streamParentCoverageViolations: counters["live_clod_stream_parent_coverage_violations"] ?? 0,
+          streamActiveRootPages: counters["live_clod_stream_active_root_pages"] ?? 0,
+          streamReadyFrame: counters["stream_ready_frame"] ?? -1,
+          streamReadyFrontierM: counters["live_clod_stream_ready_frontier_m"] ?? 0,
+          farClipmapInnerRadiusM: counters["far_clipmap_inner_radius_m"] ?? 0,
+          heightfieldEnabled: counters["heightfield_tiles_enabled"] ?? 0,
+          heightfieldPending: counters["heightfield_tiles_pending"] ?? 0,
+          heightfieldInflight: counters["heightfield_tiles_inflight"] ?? 0,
+          heightfieldFallbackSamples: counters["heightfield_tiles_fallback_samples_this_frame"] ?? 0,
+          proxyBuilding: counters["shadow_proxy_building"] ?? -1,
+          sceneCompileRequired: counters["scene_compile_warm_required"] ?? 0,
+          sceneCompilePending: counters["scene_compile_warm_pending"] ?? 0,
+          sceneCompileReady: counters["scene_compile_warm_ready"] ?? 1,
+        };
+      }) as ConvergenceSnapshot;
+      const { quiet } = evaluateConvergence(c);
+      if (c.streamRequired > 0 && c.streamBudget === 0) {
+        const blockers = convergenceTimeoutBlockers(c);
+        const message = `${sceneName}: streamed CLOD required but build budget is zero`;
+        if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
+        throw new Error(message);
+      }
+      if (c.streamRequired > 0 && c.streamSafetyCacheCapacityOk === 0) {
+        const blockers = convergenceTimeoutBlockers(c);
+        const message = `${sceneName}: CLOD safety set cannot fit cache`;
+        if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
+        throw new Error(message);
+      }
+      stablePolls = quiet ? stablePolls + 1 : 0;
+      if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
+        console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+        return;
+      }
+      lastSnapshot = JSON.stringify(c);
+      await page.waitForTimeout(CONVERGENCE_POLL_MS);
     }
-    if (c.streamRequired > 0 && c.streamSafetyCacheCapacityOk === 0) {
-      const blockers = convergenceTimeoutBlockers(c);
-      const message = `${sceneName}: CLOD safety set cannot fit cache`;
-      if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
-      throw new Error(message);
+    const last = JSON.parse(lastSnapshot || "{}") as ConvergenceSnapshot;
+    console.log(`[infinite-accept] ${sceneName}: convergence wait timed out after ${(CONVERGENCE_TIMEOUT_MS / 1000).toFixed(0)}s; last ${lastSnapshot}`);
+    const blockers = convergenceTimeoutBlockers(last);
+    if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
+    throw new Error(`${sceneName}: convergence wait timed out after ${(CONVERGENCE_TIMEOUT_MS / 1000).toFixed(0)}s`);
+  } finally {
+    if (previousBudgets) {
+      await page.evaluate((budgets) => {
+        const hooks = (window as typeof window & {
+          __drusnielClod?: {
+            setAcceptanceSceneOptions?: ((options: {
+              streamBudgets?: {
+                buildBudgetPagesPerFrame?: number;
+                applyBudgetPagesPerFrame?: number;
+                maxInflightBatches?: number;
+                maxCachedPages?: number;
+              };
+            }) => unknown) | null;
+          };
+        }).__drusnielClod;
+        hooks?.setAcceptanceSceneOptions?.({ streamBudgets: budgets });
+      }, previousBudgets);
+      console.log(
+        `[infinite-accept] ${sceneName}: restored stream budgets ` +
+        `${previousBudgets.buildBudgetPagesPerFrame}/${previousBudgets.applyBudgetPagesPerFrame}/${previousBudgets.maxInflightBatches}/cache${previousBudgets.maxCachedPages}`,
+      );
+      await settle(page, BUDGET_RESTORE_SETTLE_FRAMES);
     }
-    stablePolls = quiet ? stablePolls + 1 : 0;
-    if (stablePolls >= CONVERGENCE_STABLE_POLLS) {
-      console.log(`[infinite-accept] ${sceneName}: converged after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
-      return;
-    }
-    lastSnapshot = JSON.stringify(c);
-    await page.waitForTimeout(CONVERGENCE_POLL_MS);
   }
-  const last = JSON.parse(lastSnapshot || "{}") as ConvergenceSnapshot;
-  console.log(`[infinite-accept] ${sceneName}: convergence wait timed out after ${(CONVERGENCE_TIMEOUT_MS / 1000).toFixed(0)}s; last ${lastSnapshot}`);
-  const blockers = convergenceTimeoutBlockers(last);
-  if (blockers.length > 0) console.log(`[infinite-accept] ${sceneName}: timeout blockers:\n${blockers.join("\n")}`);
 }
 
 async function beginMovementRouteProbe(page: Page): Promise<void> {
@@ -1511,48 +1597,48 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
   }
 }
 
-async function main(): Promise<void> {
-  const timestamp = timestampForFolder();
-  const requestedOutDir = cliValues(CLI_ARGS, "--out").at(-1);
-  const outDir = requestedOutDir ? resolve(requestedOutDir) : resolve(RUN_ROOT, timestamp);
-  mkdirSync(outDir, { recursive: true });
-  console.log(`[infinite-accept] run ${rel(outDir)}`);
-  console.log(`[infinite-accept] base ${process.env["CLOD_POC_BASE_URL"]}`);
-  console.log(`[infinite-accept] profile ${PROFILE} route=${MOVEMENT_ROUTE_PROFILE.name} content=${MOVEMENT_ROUTE_PROFILE.contentProfile} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES}`);
-  const { browser, recipe } = await launchWebGPU();
-  const browserVersion = browser.version();
+async function runAcceptanceScenes(browser: Browser, outDir: string): Promise<SceneResult[]> {
   const sceneResults: SceneResult[] = [];
-  try {
-    if (PROFILE === "reuse") {
-      const page = await createAcceptancePage(browser);
-      let firstSceneOnPage = true;
-      try {
-        for (const gate of ACTIVE_GATES) {
-          for (const scene of ACTIVE_SCENES) {
-            if (!sceneSupportsGate(scene, gate)) continue;
-            sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: true, firstSceneOnPage }));
-            firstSceneOnPage = false;
-          }
-        }
-      } finally {
-        await page.close().catch(() => undefined);
-      }
-    } else {
+  if (PROFILE === "reuse") {
+    const page = await createAcceptancePage(browser);
+    let firstSceneOnPage = true;
+    try {
       for (const gate of ACTIVE_GATES) {
         for (const scene of ACTIVE_SCENES) {
           if (!sceneSupportsGate(scene, gate)) continue;
-          const page = await createAcceptancePage(browser);
-          try {
-            sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: false, firstSceneOnPage: true }));
-          } finally {
-            await page.close().catch(() => undefined);
-          }
+          sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: true, firstSceneOnPage }));
+          firstSceneOnPage = false;
+        }
+      }
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  } else {
+    for (const gate of ACTIVE_GATES) {
+      for (const scene of ACTIVE_SCENES) {
+        if (!sceneSupportsGate(scene, gate)) continue;
+        const page = await createAcceptancePage(browser);
+        try {
+          sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: false, firstSceneOnPage: true }));
+        } finally {
+          await page.close().catch(() => undefined);
         }
       }
     }
-  } finally {
-    await browser.close().catch(() => undefined);
   }
+  return sceneResults;
+}
+
+function writeAcceptanceReport(input: {
+  outDir: string;
+  timestamp: string;
+  browserVersion: string;
+  recipe: unknown;
+  sceneResults: SceneResult[];
+  runIndex?: number;
+  repeatCount?: number;
+}): { reportJsonPath: string; reportMdPath: string; passed: boolean; runtimePassed: boolean; failures: string[] } {
+  const { outDir, timestamp, browserVersion, recipe, sceneResults } = input;
   const runtimeFailures = sceneResults.flatMap((scene) => scene.failures.map((failure) => `${scene.name}: ${failure}`));
   const runtimePassed = aggregatePassed(sceneResults, runtimeFailures);
   const failures = ROUTE_CALIBRATION
@@ -1567,6 +1653,8 @@ async function main(): Promise<void> {
     timestamp,
     commit_sha: gitSha(),
     browser_launch_recipe: recipe,
+    repeat_index: input.runIndex ?? 1,
+    repeat_count: input.repeatCount ?? 1,
     environment: {
       ...hostEnvironmentRecord(),
       browser_version: browserVersion,
@@ -1622,9 +1710,95 @@ async function main(): Promise<void> {
   };
   writeJson(reportJsonPath, report);
   writeFileSync(reportMdPath, renderMarkdownReport({ passed, scenes: sceneResults, failures, reportJsonPath: rel(reportJsonPath) }));
-  console.log(`[infinite-accept] report ${rel(reportJsonPath)}`);
-  if (!runtimePassed) {
-    console.error(`[infinite-accept] FAILED with ${failures.length} failure(s)`);
+  return { reportJsonPath, reportMdPath, passed, runtimePassed, failures };
+}
+
+function movementTailSummary(sceneResults: SceneResult[]): Record<string, number | null> | null {
+  const movement = sceneResults.find((scene) => scene.movement)?.movement;
+  if (!movement) return null;
+  return {
+    frameP50Ms: movement.frameP50Ms ?? null,
+    frameP95Ms: movement.frameP95Ms ?? null,
+    frameP99Ms: movement.frameP99Ms ?? null,
+    maxFrameMs: movement.maxFrameMs ?? null,
+    framesOver16_7Ms: movement.framesOver16_7Ms ?? null,
+    framesOver33_3Ms: movement.framesOver33_3Ms ?? null,
+  };
+}
+
+async function main(): Promise<void> {
+  const timestamp = timestampForFolder();
+  const requestedOutDir = cliValues(CLI_ARGS, "--out").at(-1);
+  const outDir = requestedOutDir ? resolve(requestedOutDir) : resolve(RUN_ROOT, timestamp);
+  mkdirSync(outDir, { recursive: true });
+  console.log(`[infinite-accept] run ${rel(outDir)}`);
+  console.log(`[infinite-accept] base ${process.env["CLOD_POC_BASE_URL"]}`);
+  console.log(`[infinite-accept] profile ${PROFILE} route=${MOVEMENT_ROUTE_PROFILE.name} content=${MOVEMENT_ROUTE_PROFILE.contentProfile} gates=${ACTIVE_GATES.map((gate) => gate.name).join(",")} scenes=${ACTIVE_SCENES.map((scene) => scene.name).join(",")} sampleFrames=${SAMPLE_FRAMES} repeat=${REPEAT_COUNT}`);
+  const { browser, recipe } = await launchWebGPU();
+  const browserVersion = browser.version();
+  const repeatSummaries: Array<{
+    run: number;
+    outDir: string;
+    runtimePassed: boolean;
+    wallMs: number;
+    movement: Record<string, number | null> | null;
+    failures: string[];
+  }> = [];
+  let anyRuntimeFailed = false;
+  try {
+    for (let run = 1; run <= REPEAT_COUNT; run++) {
+      const runOutDir = REPEAT_COUNT > 1 ? resolve(outDir, `run-${run}`) : outDir;
+      mkdirSync(runOutDir, { recursive: true });
+      if (REPEAT_COUNT > 1) console.log(`[infinite-accept] repeat ${run}/${REPEAT_COUNT} -> ${rel(runOutDir)}`);
+      const runStartedAt = Date.now();
+      // Fresh context+page per repeat (Playwright newPage creates a new context).
+      const sceneResults = await runAcceptanceScenes(browser, runOutDir);
+      const wallMs = Date.now() - runStartedAt;
+      const written = writeAcceptanceReport({
+        outDir: runOutDir,
+        timestamp,
+        browserVersion,
+        recipe,
+        sceneResults,
+        runIndex: run,
+        repeatCount: REPEAT_COUNT,
+      });
+      console.log(`[infinite-accept] report ${rel(written.reportJsonPath)} wall=${(wallMs / 1000).toFixed(1)}s`);
+      if (!written.runtimePassed) anyRuntimeFailed = true;
+      repeatSummaries.push({
+        run,
+        outDir: rel(runOutDir),
+        runtimePassed: written.runtimePassed,
+        wallMs,
+        movement: movementTailSummary(sceneResults),
+        failures: written.failures,
+      });
+    }
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+
+  if (REPEAT_COUNT > 1) {
+    const run1 = repeatSummaries[0]?.movement;
+    const later = repeatSummaries.slice(1).map((entry) => entry.movement).filter(Boolean) as Array<Record<string, number | null>>;
+    const run1P95 = typeof run1?.frameP95Ms === "number" ? run1.frameP95Ms : null;
+    const laterP95 = later.map((entry) => entry.frameP95Ms).filter((value): value is number => typeof value === "number");
+    const laterP95Mean = laterP95.length > 0 ? laterP95.reduce((sum, value) => sum + value, 0) / laterP95.length : null;
+    const run1Skew = run1P95 !== null && laterP95Mean !== null && run1P95 > laterP95Mean * 1.15;
+    const repeatSummary = {
+      repeat_count: REPEAT_COUNT,
+      run1_dawn_skew_suspected: run1Skew,
+      note: run1Skew
+        ? "Run 1 frameP95 is >15% above later-run mean; keep fresh-browser-per-repeat as fallback if skew persists."
+        : "Run 1 vs later-run frame tails look consistent under fresh context+page per repeat.",
+      runs: repeatSummaries,
+    };
+    writeJson(resolve(outDir, "repeat-summary.json"), repeatSummary);
+    console.log(`[infinite-accept] repeat-summary ${rel(resolve(outDir, "repeat-summary.json"))} run1Skew=${run1Skew}`);
+  }
+
+  if (anyRuntimeFailed) {
+    console.error(`[infinite-accept] FAILED with runtime failure(s)`);
     process.exit(1);
   }
   if (ROUTE_CALIBRATION) {

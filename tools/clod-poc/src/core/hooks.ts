@@ -13,9 +13,18 @@ export interface CamPose {
   fov?: number;
 }
 
+export interface AcceptanceStreamBudgets {
+  buildBudgetPagesPerFrame: number;
+  applyBudgetPagesPerFrame: number;
+  maxInflightBatches: number;
+  maxCachedPages: number;
+}
+
 export interface AcceptanceSceneOptions {
   freeze?: boolean;
   proceduralDebug?: string | null;
+  /** Live stream budgets for pre-route convergence boost; restores via a second call. */
+  streamBudgets?: Partial<AcceptanceStreamBudgets>;
 }
 
 export interface TerrainEditProbeResult {
@@ -221,7 +230,7 @@ export interface ClodHooks {
   findContinentRiverCrossingRoute: ((
     options?: ContinentRiverRouteSearchOptions,
   ) => ContinentRiverCrossingRoute | null) | null;
-  setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => void) | null;
+  setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => AcceptanceStreamBudgets | void) | null;
   resetAcceptanceScene: (() => void) | null;
   resetAcceptanceSceneForPose: ((pose: CamPose) => void) | null;
 }

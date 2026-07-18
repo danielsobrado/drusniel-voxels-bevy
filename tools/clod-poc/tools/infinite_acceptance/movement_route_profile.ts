@@ -89,6 +89,9 @@ export function resolveMovementRouteProfile(
         startupWorld: "2",
         liveBubble: "1",
         liveBubbleRadius: "200",
+        liveClodRootBudget: "16",
+        liveClodRootApplyBudget: "4",
+        liveClodRootMaxCached: "512",
         liveClodRootRadius: "768",
         farClipmapInnerRadius: "768",
         sceneCompileWarm: "1",
@@ -96,7 +99,11 @@ export function resolveMovementRouteProfile(
         agentCount: "40",
         agentSkin: "1",
       }
-    : {};
+    : {
+        liveClodRootBudget: "16",
+        liveClodRootApplyBudget: "4",
+        liveClodRootMaxCached: "512",
+      };
   const maxRegionDrainFrames = contentProfile === "representative" ? 600 : 240;
   const maxFrontierLagP95M = contentProfile === "representative" ? 768 : 384;
   if (name === "coast-to-coast" || name === "coast-to-coast-revisit") {

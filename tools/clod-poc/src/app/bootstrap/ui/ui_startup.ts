@@ -1,3 +1,4 @@
+import { completeProjectImportRecovery } from "../../../project/project_import_recovery.js";
 import { createUiStartupContext, type UiStartupInput } from "../ui_startup_context.js";
 import { createInfoPanelController } from "../info_panel_startup.js";
 import { runTerrainEditStartup } from "./terrain_edit_startup.js";
@@ -29,4 +30,5 @@ export async function runUiStartup(input: UiStartupInput): Promise<void> {
   applyImportedStateSideEffects(ctx, infoPanel);
   runFrameLoopStartup(ctx, infoPanel, terrainEdit);
   bindBootstrapDisposal(ctx);
+  if (input.stagedImport) completeProjectImportRecovery();
 }

@@ -79,7 +79,7 @@ function fakeHandle(updateForestLighting: (state: ForestLightingMaterialState | 
   regular.colorNode = vec3(1, 1, 1);
   const debug = new MeshBasicNodeMaterial();
   debug.colorNode = vec3(1, 0, 0);
-  const debugMaterials = Object.fromEntries(LODS.map((lod) => [lod, debug])) as Record<TreeLod, THREE.Material>;
+  const debugMaterials = Object.fromEntries(LODS.map((lod) => [lod, debug])) as unknown as Record<TreeLod, THREE.Material>;
   return {
     regularMaterial: regular,
     debugMaterials,

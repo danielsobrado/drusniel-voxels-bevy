@@ -279,6 +279,7 @@ export function runFrameLoopStartup(
   const combatController = session.combatController;
   const spellVfxController = session.spellVfxController;
   const clodShadowOverlayController = session.clodShadowOverlayController;
+  let streamingClodRootControllerRef: ReturnType<typeof createStreamingClodRootController> | null = null;
 
   if (longView.hooks) {
     longView.hooks.compareStreamRootBuilds = (coords) => input.clodWorker.compareStreamRootBuilds(coords);
@@ -290,6 +291,9 @@ export function runFrameLoopStartup(
           state.proceduralDebugMode = nextMode as ProceduralDebugMode;
           input.terrainView.applyTerrainTextures();
         }
+      }
+      if (options.streamBudgets && streamingClodRootControllerRef) {
+        return streamingClodRootControllerRef.setStreamBudgets(options.streamBudgets);
       }
     };
     if (constructionController) {
@@ -504,6 +508,7 @@ export function runFrameLoopStartup(
     },
     onRootsChanged: () => selectionController.invalidate(),
   });
+  streamingClodRootControllerRef = streamingClodRootController;
   session.streamingClodRootController = streamingClodRootController;
   subscribeSaveRuntimeFeatureStamps((bounds) => {
     streamingClodRootController.invalidateBounds(bounds);

@@ -215,7 +215,7 @@ function stripGateArgs(args) {
   return out;
 }
 
-function normalizeAcceptanceArgs(args) {
+export function normalizeAcceptanceArgs(args) {
   const scenes = requestedScenes(args);
   const fastUnsupportedScenes = hasFlag(args, "--fast") ? scenes.filter((scene) => !FAST_SCENES.has(scene)) : [];
   if (fastUnsupportedScenes.length > 0) {
@@ -235,7 +235,10 @@ function normalizeAcceptanceArgs(args) {
     return args;
   }
 
+  // Calibration captures route frame tails only; skip forced water (~60s/run).
+  // Real (non-calibrate) continent acceptance still includes water.
   const shouldIncludeRouteWater = !hasFlag(args, "--fast")
+    && !hasFlag(args, "--calibrate")
     && hasRouteFlag(args)
     && scenes.includes("walk")
     && !scenes.includes("water")
