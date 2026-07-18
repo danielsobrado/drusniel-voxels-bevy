@@ -37,6 +37,8 @@ import type {
   TreeWebGpuBackendAccess,
 } from "./tree_system_types.js";
 
+export const TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP = 1;
+
 export interface TreeGpuRingDrawResourcesInput {
   backend: TreeWebGpuBackendAccess;
   root: THREE.Object3D;
@@ -53,20 +55,34 @@ export interface TreeGpuRingDrawResourcesInput {
   geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry;
 }
 
+export function treeGpuRingAllocatedShadowCapacityPerGroup(
+  settings: TreeSettings,
+  maxInstancesPerGroup: number,
+): number {
+  const count = Math.max(1, Math.floor(maxInstancesPerGroup));
+  return TREE_LODS.some((lod) => treeLodCastsShadow(settings, lod))
+    ? count
+    : TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP;
+}
+
 export function createTreeSystemGpuRingDrawResources(
   input: TreeGpuRingDrawResourcesInput,
   maxInstancesPerGroup: number,
 ): TreeGpuRingDrawResources {
-  const count = Math.max(1, maxInstancesPerGroup);
+  const count = Math.max(1, Math.floor(maxInstancesPerGroup));
+  const shadowCapacity = treeGpuRingAllocatedShadowCapacityPerGroup(input.settings, count);
   const buffers = createTreeGpuRingDrawBuffers(input.backend, count, TREE_GPU_RING_GROUP_COUNT, {
-    maxShadowCastersPerGroup: count,
+    maxShadowCastersPerGroup: shadowCapacity,
     shadowCascadeCount: TREE_RING_SHADOW_CASCADE_COUNT,
   });
   if (!buffers.shadowCell || !buffers.shadowIndirect) {
     throw new Error("tree GPU ring requires shadow draw buffers");
   }
   const ringBuffers: TreeRingInstanceBuffers = { cell: buffers.cell, capacity: count * TREE_GPU_RING_GROUP_COUNT };
-  const shadowRingBuffers: TreeRingInstanceBuffers = { cell: buffers.shadowCell, capacity: count * TREE_GPU_RING_SHADOW_GROUP_COUNT };
+  const shadowRingBuffers: TreeRingInstanceBuffers = {
+    cell: buffers.shadowCell,
+    capacity: shadowCapacity * TREE_GPU_RING_SHADOW_GROUP_COUNT,
+  };
   const materialHandles = {} as Record<string, TreeMaterialHandle>;
   const meshes: TreeGpuRingMesh[] = [];
   for (const species of TREE_SPECIES) {
