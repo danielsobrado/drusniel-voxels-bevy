@@ -16,6 +16,7 @@ import {
   terrainStreamingGenerationIsCurrent,
   type TerrainStreamingStateMessage,
 } from "../stream/terrain_streaming_control.js";
+import { installClodWorkerProtocolGuard } from "../clod_worker_protocol_guard.js";
 
 type CacheWorker = {
   addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
@@ -125,6 +126,7 @@ export function attachMainThreadCacheBroker(worker: CacheWorker): void {
       if (!isCacheRpcRequest(request)) return;
       void scheduleCacheRpc(worker, request);
     });
+    installClodWorkerProtocolGuard(worker);
     attachedWorkers.add(worker);
   } catch (error) {
     unregisterStreamingWorker();
