@@ -196,6 +196,13 @@ export function getSaveRuntimeWorldId(): string | null {
   return state?.manifest.worldId ?? null;
 }
 
+export function isSaveRuntimeConverged(): boolean {
+  return state !== null
+    && state.dirtyRegions.size === 0
+    && state.flushPromise === null
+    && state.lastFlushError === null;
+}
+
 export function hasLoadedSavePropAuthority(): boolean {
   return state !== null && savedPropStore.hasProps();
 }

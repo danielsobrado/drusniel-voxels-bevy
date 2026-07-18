@@ -35,6 +35,7 @@ describe("headed real WebGPU certification", () => {
     ["", "", "", "Software Rasterizer"],
     ["Microsoft", "", "Microsoft Basic Render Driver", ""],
     ["Microsoft", "", "WARP Adapter", ""],
+    ["Microsoft", "", "WARP", "D3D12"],
   ])("rejects named software adapters", (vendor, architecture, device, description) => {
     expect(softwareGpuReason({ vendor, architecture, device, description, fallbackAdapter: false }))
       .toContain("software GPU marker");

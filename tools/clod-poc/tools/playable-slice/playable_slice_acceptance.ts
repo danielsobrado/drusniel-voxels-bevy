@@ -28,6 +28,8 @@ const WIDTH = 1280;
 const HEIGHT = 720;
 const READY_TIMEOUT_MS = 180_000;
 const RUN_TIMEOUT_MS = 240_000;
+const SAVE_DB_NAME = "drusniel-clod-saves";
+const CONSTRUCTION_STORAGE_KEY = "drusniel.clod-poc.construction.v1";
 const OUT = resolve("acceptance-runs/playable-slice/report.json");
 const SHOTS_DIR = resolve("acceptance-runs/playable-slice/shots");
 
@@ -95,10 +97,19 @@ async function waitForDiagnosticReady(page: Page): Promise<void> {
   if (error) throw new Error(error);
 }
 
-async function seedEmptySave(page: Page, saveId: string): Promise<void> {
-  await page.evaluate(async ({ id, seed }) => {
+async function resetRunStorageAndSeedSave(page: Page, saveId: string): Promise<void> {
+  await page.evaluate(async ({ constructionStorageKey, dbName, id, seed }) => {
+    localStorage.removeItem(constructionStorageKey);
+    sessionStorage.clear();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(dbName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error(`save database ${dbName} deletion was blocked`));
+    });
+
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("drusniel-clod-saves", 1);
+      const request = indexedDB.open(dbName, 1);
       request.onupgradeneeded = () => {
         for (const name of ["manifests", "regions", "metadata"]) {
           if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name);
@@ -107,37 +118,45 @@ async function seedEmptySave(page: Page, saveId: string): Promise<void> {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(["manifests", "metadata"], "readwrite");
-      const now = new Date().toISOString();
-      tx.objectStore("manifests").put({
-        schemaVersion: 1,
-        saveId: id,
-        worldId: `playable-slice:${seed}`,
-        seed,
-        proceduralProfile: "continent-v1",
-        regionSizeM: 512,
-        chunkSizeM: 16,
-        regionKeys: [],
-        createdAt: now,
-        updatedAt: now,
-      }, id);
-      tx.objectStore("metadata").put({
-        schemaVersion: 1,
-        cities: [],
-        districts: [],
-        roads: [],
-        caveEntrances: [],
-        caveSystems: [],
-        criticalPaths: [],
-        revision: 0,
-      }, id);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-    db.close();
-  }, { id: saveId, seed: SEED });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(["manifests", "metadata"], "readwrite");
+        const now = new Date().toISOString();
+        tx.objectStore("manifests").put({
+          schemaVersion: 1,
+          saveId: id,
+          worldId: `playable-slice:${seed}`,
+          seed,
+          proceduralProfile: "continent-v1",
+          regionSizeM: 512,
+          chunkSizeM: 16,
+          regionKeys: [],
+          createdAt: now,
+          updatedAt: now,
+        }, id);
+        tx.objectStore("metadata").put({
+          schemaVersion: 1,
+          cities: [],
+          districts: [],
+          roads: [],
+          caveEntrances: [],
+          caveSystems: [],
+          criticalPaths: [],
+          revision: 0,
+        }, id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    } finally {
+      db.close();
+    }
+  }, {
+    constructionStorageKey: CONSTRUCTION_STORAGE_KEY,
+    dbName: SAVE_DB_NAME,
+    id: saveId,
+    seed: SEED,
+  });
 }
 
 function baseExtra(saveId?: string): Record<string, string> {
@@ -241,7 +260,7 @@ function failedRunReport(
     startedAt: startedAt.toISOString(),
     wallClockMs: Math.max(0, performance.now() - startedAtMs),
     actions: driver ? [...driver.actions] : [],
-    steps: [],
+    steps: driver ? [...driver.evidence] : [],
     maxFrameMs: driver?.maxFrameMs ?? 0,
     maxFrameP95Ms: driver?.maxFrameP95Ms ?? 0,
     travelledAfterReloadM: 0,
@@ -286,7 +305,7 @@ async function runOne(
       waitUntil: "domcontentloaded",
       timeout: READY_TIMEOUT_MS,
     });
-    await seedEmptySave(page, saveId);
+    await resetRunStorageAndSeedSave(page, saveId);
     await page.goto(gameplayUrl(saveId, route.plan), {
       waitUntil: "domcontentloaded",
       timeout: READY_TIMEOUT_MS,

@@ -4,13 +4,51 @@ import type {
   DiagnosticPlayableSliceDriver,
   PublicPlayableSliceDriver,
 } from "./playable_slice_route.js";
-import type { PlayableSliceActionRecord } from "./playable_slice_contract.js";
+import type {
+  PlayableSliceActionRecord,
+  PlayableSliceStepEvidence,
+} from "./playable_slice_contract.js";
 
 const READY_TIMEOUT_MS = 180_000;
 const POINTER_LOCK_TIMEOUT_MS = 10_000;
 const POLL_MS = 100;
 const AIM_PITCH = -0.9;
 const AIM_POINTER_DELTA_PX = 600;
+
+interface PlayableSliceFrameProbe {
+  maxFrameMs: number;
+  lastFrameAtMs: number;
+}
+
+function installFrameProbeInPage(): void {
+  const target = window as typeof window & {
+    __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
+  };
+  if (target.__drusnielPlayableSliceFrameProbe) return;
+  const state: PlayableSliceFrameProbe = { maxFrameMs: 0, lastFrameAtMs: 0 };
+  target.__drusnielPlayableSliceFrameProbe = state;
+  const tick = (now: number): void => {
+    if (state.lastFrameAtMs > 0) state.maxFrameMs = Math.max(state.maxFrameMs, now - state.lastFrameAtMs);
+    state.lastFrameAtMs = now;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+async function ensureFrameProbe(page: Page): Promise<void> {
+  await page.evaluate(installFrameProbeInPage);
+}
+
+async function resetFrameProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
+    }).__drusnielPlayableSliceFrameProbe;
+    if (!probe) throw new Error("playable slice frame probe is unavailable");
+    probe.maxFrameMs = 0;
+    probe.lastFrameAtMs = performance.now();
+  });
+}
 
 async function waitForAppReady(page: Page): Promise<void> {
   await page.waitForFunction(() => {
@@ -27,6 +65,7 @@ async function waitForAppReady(page: Page): Promise<void> {
 
 export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver {
   readonly actions: PlayableSliceActionRecord[] = [];
+  readonly evidence: PlayableSliceStepEvidence[] = [];
   maxFrameMs = 0;
   maxFrameP95Ms = 0;
   protected readonly page: Page;
@@ -54,11 +93,7 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     const centerY = box.y + box.height * 0.5;
     await this.page.mouse.click(centerX, centerY, { button: "left" });
     this.record("pointer", "capture look pointer");
-    await this.page.waitForFunction(
-      () => document.pointerLockElement !== null,
-      undefined,
-      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
-    );
+    await this.waitForPointerLock(true);
 
     await this.page.mouse.move(centerX, centerY);
     await this.page.mouse.move(centerX, centerY + AIM_POINTER_DELTA_PX, { steps: 12 });
@@ -71,31 +106,34 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
 
     await this.page.keyboard.down("Tab");
     this.record("keyboard", "hold Tab for UI access");
-    await this.page.waitForFunction(
-      () => document.pointerLockElement === null,
-      undefined,
-      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
-    );
+    await this.waitForPointerLock(false);
     await edit.check();
     this.record("pointer", "enable terrain editing");
     await this.page.keyboard.up("Tab");
     this.record("keyboard", "release Tab and resume look");
-    await this.page.waitForFunction(
-      () => document.pointerLockElement !== null,
-      undefined,
-      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
-    );
+    await this.waitForPointerLock(true);
+    await resetFrameProbe(this.page);
   }
 
   async snapshot(): Promise<PlayableSliceSnapshot> {
-    const snapshot = await this.page.evaluate(() => {
+    const result = await this.page.evaluate(() => {
       const read = window.__drusnielClod?.getPlayableSliceSnapshot;
       if (!read) throw new Error("playable slice snapshot hook is unavailable");
-      return read();
+      const frameProbe = (window as typeof window & {
+        __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
+      }).__drusnielPlayableSliceFrameProbe;
+      return {
+        snapshot: read(),
+        frameMaxMs: frameProbe?.maxFrameMs ?? 0,
+      };
     });
-    this.maxFrameMs = Math.max(this.maxFrameMs, snapshot.frameMs);
-    this.maxFrameP95Ms = Math.max(this.maxFrameP95Ms, snapshot.frameMsP95);
-    return snapshot;
+    this.maxFrameMs = Math.max(this.maxFrameMs, result.frameMaxMs, result.snapshot.frameMs);
+    this.maxFrameP95Ms = Math.max(this.maxFrameP95Ms, result.snapshot.frameMsP95);
+    return result.snapshot;
+  }
+
+  recordEvidence(item: PlayableSliceStepEvidence): void {
+    this.evidence.push(item);
   }
 
   async keyDown(key: string): Promise<void> {
@@ -110,8 +148,11 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
 
   async press(key: string, modifiers: readonly string[] = []): Promise<void> {
     for (const modifier of modifiers) await this.page.keyboard.down(modifier);
-    await this.page.keyboard.press(key);
-    for (const modifier of [...modifiers].reverse()) await this.page.keyboard.up(modifier);
+    try {
+      await this.page.keyboard.press(key);
+    } finally {
+      for (const modifier of [...modifiers].reverse()) await this.page.keyboard.up(modifier);
+    }
     this.record("keyboard", `${modifiers.length > 0 ? `${modifiers.join("+")}+` : ""}${key}`);
   }
 
@@ -138,10 +179,19 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     this.record("pointer", `click:${button}`);
   }
 
+  async waitForPointerLock(locked: boolean): Promise<void> {
+    await this.page.waitForFunction(
+      (expected) => (document.pointerLockElement !== null) === expected,
+      locked,
+      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
+    );
+  }
+
   async reload(): Promise<void> {
     this.record("navigation", "reload saved world");
     await this.page.reload({ waitUntil: "domcontentloaded", timeout: READY_TIMEOUT_MS });
     await waitForAppReady(this.page);
+    await ensureFrameProbe(this.page);
   }
 
   async waitUntil(
@@ -180,5 +230,7 @@ export class PlaywrightDiagnosticSliceDriver
 }
 
 export async function preparePlayableSlicePage(page: Page): Promise<void> {
+  await page.addInitScript(installFrameProbeInPage);
   await waitForAppReady(page);
+  await ensureFrameProbe(page);
 }

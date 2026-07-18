@@ -55,8 +55,12 @@ describe("playable slice snapshot", () => {
           collider_coverage_missing: 0,
           frontier_barrier_engagements: 1,
           collider_sync_frame_builds: 0,
+          collider_worker_failures: 2,
+          collider_worker_fallback_builds: 1,
           player_recovery_kill_plane: 1,
           player_recovery_non_finite: 2,
+          edit_commands_denied_revision: 1,
+          edit_commands_denied_distance: 2,
         },
       },
     });
@@ -92,7 +96,9 @@ describe("playable slice snapshot", () => {
         colliderCoverageMissing: 0,
         frontierBarrierEngagements: 1,
         syncFrameBuilds: 0,
+        colliderWorkerFaults: 2,
         recoveries: 3,
+        editCommandDenials: 3,
       },
     });
   });
@@ -113,5 +119,7 @@ describe("playable slice snapshot", () => {
     expect(snapshot.persistence.loaded).toBe(false);
     expect(snapshot.spell.accepted).toBe(0);
     expect(snapshot.safety.recoveries).toBe(0);
+    expect(snapshot.safety.colliderWorkerFaults).toBe(0);
+    expect(snapshot.safety.editCommandDenials).toBe(0);
   });
 });

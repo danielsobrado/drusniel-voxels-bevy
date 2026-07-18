@@ -53,9 +53,11 @@ function snapshot(overrides: Partial<PlayableSliceSnapshot> = {}): PlayableSlice
       colliderCoverageMissing: 0,
       frontierBarrierEngagements: 0,
       syncFrameBuilds: 0,
+      colliderWorkerFaults: 0,
       recoveries: 0,
       editsDeniedNotReady: 0,
       editCommandsExpired: 0,
+      editCommandDenials: 0,
     },
     ...overrides,
   };
@@ -186,6 +188,91 @@ describe("playable slice acceptance contract", () => {
     expect(publicRouteAuditFailures("continuous", [
       { channel: "diagnostic_barrier", action: "settle", atMs: 1 },
     ])).toEqual(["continuous route used diagnostic barrier: settle"]);
+  });
+
+  it("rejects missing, duplicated, or reordered step evidence", () => {
+    const report = validReport();
+    const steps = [...report.steps];
+    [steps[2], steps[3]] = [steps[3]!, steps[2]!];
+    const failures = evaluatePlayableSliceRun({ ...report, steps });
+
+    expect(failures.some((failure) => failure.includes("step 3 expected terrain_dug"))).toBe(true);
+    expect(failures.some((failure) => failure.includes("step 4 expected construction_placed"))).toBe(true);
+  });
+
+  it("rejects an earth cast that converges without committing terrain", () => {
+    const report = validReport();
+    const water = report.steps.find((item) => item.step === "water_entered")!.snapshot;
+    const steps = report.steps.map((item) => item.step === "earth_cast_converged"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            terrain: { ...water.terrain },
+            spell: {
+              ...item.snapshot.spell,
+              committed: water.spell.committed,
+              convergenceCompleted: water.spell.convergenceCompleted,
+            },
+          },
+        }
+      : item);
+    const failures = evaluatePlayableSliceRun({ ...report, steps });
+
+    expect(failures).toContain("terrain-affecting spell did not commit an authoritative edit");
+    expect(failures).toContain("terrain-affecting spell did not complete terrain convergence");
+    expect(failures).toContain("terrain-affecting spell did not change authoritative terrain state");
+  });
+
+  it("rejects a denied earth cast even if a terminal counter changes", () => {
+    const report = validReport();
+    const steps = report.steps.map((item) => item.step === "earth_cast_converged"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            spell: { ...item.snapshot.spell, denied: 1 },
+          },
+        }
+      : item);
+
+    expect(evaluatePlayableSliceRun({ ...report, steps })).toContain("public earth spell input was denied");
+  });
+
+  it("rejects extra stale construction colliders", () => {
+    const report = validReport();
+    const steps = report.steps.map((item) => item.step === "construction_placed"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            construction: { ...item.snapshot.construction, colliders: 2 },
+          },
+        }
+      : item);
+
+    expect(evaluatePlayableSliceRun({ ...report, steps })).toContain("placed construction visual/collider counts diverged");
+  });
+
+  it("gates collider worker faults and all edit-command denials", () => {
+    const report = validReport();
+    const steps = report.steps.map((item) => item.step === "construction_broken"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            safety: {
+              ...item.snapshot.safety,
+              colliderWorkerFaults: 1,
+              editCommandDenials: 2,
+            },
+          },
+        }
+      : item);
+    const failures = evaluatePlayableSliceRun({ ...report, steps });
+
+    expect(failures).toContain("collider worker faults increased by 1");
+    expect(failures).toContain("edit command denials increased by 2");
   });
 
   it("reports subsystem and responsiveness regressions", () => {
