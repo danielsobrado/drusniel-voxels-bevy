@@ -91,7 +91,12 @@ installWorkerStateListener();
 export function registerTerrainStreamingWorker(worker: TerrainStreamingWorker): () => void {
   const reference = createWorkerReference(worker);
   workerReferences.add(reference);
-  worker.postMessage(currentStateMessage());
+  try {
+    worker.postMessage(currentStateMessage());
+  } catch (error) {
+    workerReferences.delete(reference);
+    throw error;
+  }
   return () => workerReferences.delete(reference);
 }
 
