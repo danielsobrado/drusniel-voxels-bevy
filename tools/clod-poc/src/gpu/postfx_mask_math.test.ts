@@ -9,7 +9,7 @@ describe("inverseSmoothstepReference", () => {
     );
 
     expect(samples[0]).toBe(1);
-    expect(samples.at(-1)).toBe(0);
+    expect(samples[samples.length - 1]).toBe(0);
     for (let index = 1; index < samples.length; index++) {
       expect(samples[index]).toBeLessThanOrEqual(samples[index - 1]);
     }
@@ -18,6 +18,13 @@ describe("inverseSmoothstepReference", () => {
   it("clamps outside the transition range", () => {
     expect(inverseSmoothstepReference(10, 20, 5)).toBe(1);
     expect(inverseSmoothstepReference(10, 20, 25)).toBe(0);
+  });
+
+  it("orders crossed and equal thresholds before evaluation", () => {
+    expect(inverseSmoothstepReference(20, 10, 10)).toBe(1);
+    expect(inverseSmoothstepReference(20, 10, 20)).toBe(0);
+    expect(inverseSmoothstepReference(5, 5, 4)).toBe(1);
+    expect(inverseSmoothstepReference(5, 5, 6)).toBe(0);
   });
 
   it("keeps the WebGL shaft falloff on ordered edges", () => {
