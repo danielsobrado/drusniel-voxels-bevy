@@ -1,22 +1,22 @@
-import type { ClodPagesConfig } from "../config.js";
-import { isGrassShaderMode } from "../grass/grass_config.js";
 import type { IslandShapeConfig } from "../world_source/island_shape.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { MAX_TERRAIN_TEXTURES } from "../terrain/terrain_textures.js";
-import { WATER_DEBUG_MODES } from "../water/waterConfig.js";
 import { decodeProjectArchive, encodeProjectArchive } from "./project_archive_codec.js";
+import { validateProjectArchiveConfig } from "./project_archive_config.js";
+import {
+  validateProjectWaterArchiveState,
+  validateProjectWeatherArchiveState,
+} from "./project_archive_environment_state.js";
 import {
   assertProjectArchivePath,
   PROJECT_ARCHIVE_LIMITS,
 } from "./project_archive_limits.js";
+import { validateProjectSessionState } from "./project_archive_session_state.js";
 import { validateProjectGeneratorQuery } from "./project_world_identity.js";
 import type { ProjectPropInstance } from "./project_props.js";
 import type {
   CurrentVoxelProjectManifest,
-  ProjectSessionState,
   ProjectTextureSlot,
-  ProjectWaterArchiveState,
-  ProjectWeatherArchiveState,
   ProjectWorldIdentity,
   VoxelProjectManifest,
   VoxelProjectArchiveContents,
@@ -107,31 +107,29 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
+function consumeStoreValue<T>(store: IDBObjectStore, key: IDBValidKey): Promise<T | undefined> {
+  return new Promise((resolve, reject) => {
+    const getRequest = store.get(key);
+    getRequest.onerror = () => reject(getRequest.error ?? new Error("staged project lookup failed"));
+    getRequest.onsuccess = () => {
+      const value = getRequest.result as T | undefined;
+      if (value === undefined) {
+        resolve(undefined);
+        return;
+      }
+      const deleteRequest = store.delete(key);
+      deleteRequest.onerror = () => reject(deleteRequest.error ?? new Error("staged project deletion failed"));
+      deleteRequest.onsuccess = () => resolve(value);
+    };
+  });
+}
+
 async function openImportDb(): Promise<IDBDatabase> {
   const request = indexedDB.open(IMPORT_DB, 1);
   request.onupgradeneeded = () => {
     if (!request.result.objectStoreNames.contains(IMPORT_STORE)) request.result.createObjectStore(IMPORT_STORE);
   };
   return requestResult(request);
-}
-
-function assertConfig(value: unknown): asserts value is ClodPagesConfig {
-  if (!isRecord(value) || !isRecord(value.page) || !isRecord(value.simplify) || !isRecord(value.selection) || !isRecord(value.near_field)) {
-    throw new Error("project.json has an invalid CLOD config snapshot");
-  }
-}
-
-function assertSessionState(value: unknown): asserts value is ProjectSessionState {
-  if (!isRecord(value)) throw new Error("project.json is missing session state");
-  if (!isGrassShaderMode(value.grassShaderMode)) throw new Error("project.json has an invalid grassShaderMode");
-  if (!["remove", "add"].includes(String(value.brushOp))) throw new Error("project.json has an invalid brushOp");
-  if (!["sphere", "cube", "cylinder"].includes(String(value.brushShape))) throw new Error("project.json has an invalid brushShape");
-  const numericKeys = ["thresholdPx", "digRadius", "brushMaterial", "brushHeight", "brushStrength", "brushFalloff", "grassMaxBlades"] as const;
-  for (const key of numericKeys) {
-    if (!isFiniteNumber(value[key]) || Math.abs(value[key]) > 1_000_000) throw new Error(`project.json state.${key} must be finite`);
-  }
-  const brushMaterial = value.brushMaterial as number;
-  if (brushMaterial < 0 || brushMaterial >= MAX_TERRAIN_TEXTURES) throw new Error("project.json has unsafe brush material");
 }
 
 function validateTextureSlots(value: unknown): ProjectTextureSlot[] {
@@ -147,20 +145,41 @@ function validateTextureSlots(value: unknown): ProjectTextureSlot[] {
     if (typeof raw.name !== "string" || raw.name.length > 256 || typeof raw.selectedId !== "string" || raw.selectedId.length > 256) {
       throw new Error(`${label} contains invalid names`);
     }
-    finiteInRange(raw.scale, `${label}.scale`, 0.000001, 1000);
+    const scale = finiteInRange(raw.scale, `${label}.scale`, 0.000001, 1000);
     const heightMin = finiteInRange(raw.heightMin, `${label}.heightMin`, -1_000_000, 1_000_000);
     const heightMax = finiteInRange(raw.heightMax, `${label}.heightMax`, -1_000_000, 1_000_000);
     if (heightMax < heightMin) throw new Error(`${label} has an inverted height range`);
 
+    let customPath: string | undefined;
+    let normalPath: string | undefined;
     for (const [pathKey, pathValue] of [["customPath", raw.customPath], ["normalPath", raw.normalPath]] as const) {
       if (pathValue === undefined) continue;
       if (typeof pathValue !== "string") throw new Error(`${label}.${pathKey} is invalid`);
       assertProjectArchivePath(pathValue);
       if (pathValue === PROJECT_FILE || archivePaths.has(pathValue)) throw new Error(`${label}.${pathKey} duplicates an archive path`);
       archivePaths.add(pathValue);
+      if (pathKey === "customPath") customPath = pathValue;
+      else normalPath = pathValue;
     }
-    if (raw.source === "custom" && typeof raw.customPath !== "string") throw new Error(`${label}.customPath is required`);
-    return { ...(raw as unknown as ProjectTextureSlot) };
+    if (raw.source === "custom" && customPath === undefined) throw new Error(`${label}.customPath is required`);
+    if (raw.source !== "custom" && customPath !== undefined) throw new Error(`${label}.customPath requires custom source ownership`);
+    if (raw.mimeType !== undefined && typeof raw.mimeType !== "string") throw new Error(`${label}.mimeType is invalid`);
+    if (raw.normalMimeType !== undefined && typeof raw.normalMimeType !== "string") throw new Error(`${label}.normalMimeType is invalid`);
+
+    const slot: ProjectTextureSlot = {
+      index,
+      source: raw.source as ProjectTextureSlot["source"],
+      name: raw.name,
+      selectedId: raw.selectedId,
+      scale,
+      heightMin,
+      heightMax,
+    };
+    if (customPath !== undefined) slot.customPath = customPath;
+    if (normalPath !== undefined) slot.normalPath = normalPath;
+    if (typeof raw.mimeType === "string") slot.mimeType = raw.mimeType;
+    if (typeof raw.normalMimeType === "string") slot.normalMimeType = raw.normalMimeType;
+    return slot;
   });
 }
 
@@ -283,17 +302,6 @@ function validateWorldIdentity(value: unknown): ProjectWorldIdentity {
   };
 }
 
-function assertWaterArchiveState(value: unknown): asserts value is ProjectWaterArchiveState {
-  if (!isRecord(value)) throw new Error("project.json is missing water state");
-  if (typeof value.waterEnabled !== "boolean") throw new Error("project.json water.waterEnabled must be a boolean");
-  if (!Object.prototype.hasOwnProperty.call(WATER_DEBUG_MODES, String(value.waterDebugMode))) throw new Error("project.json water.waterDebugMode is invalid");
-}
-
-function assertWeatherArchiveState(value: unknown): asserts value is ProjectWeatherArchiveState {
-  if (!isRecord(value)) throw new Error("project.json is missing weather state");
-  if (!["off", "rain", "snow", "sandstorm"].includes(String(value.weatherMode))) throw new Error("project.json weather.weatherMode is invalid");
-}
-
 export function isCurrentVoxelProjectManifest(manifest: VoxelProjectManifest): manifest is CurrentVoxelProjectManifest {
   return manifest.schemaVersion === 4;
 }
@@ -304,24 +312,19 @@ export function validateVoxelProjectManifest(value: unknown): VoxelProjectManife
   }
   if (!isFiniteNumber(value.worldSize) || ![2, 4, 8, 16, 32].includes(value.worldSize)) throw new Error("project.json has an unsupported world size");
   if (typeof value.exportedAt !== "string" || Number.isNaN(Date.parse(value.exportedAt))) throw new Error("project.json has an invalid export timestamp");
-  assertConfig(value.config);
-  assertSessionState(value.state);
-  assertWaterArchiveState(value.water);
-  assertWeatherArchiveState(value.weather);
-  const textures = validateTextureSlots(value.textures);
   if (!isRecord(value.camera) || !isVec3(value.camera.position) || !isVec3(value.camera.target)) throw new Error("project.json has invalid orbit camera data");
 
   const common = {
     kind: "drusniel-clod-project" as const,
     exportedAt: value.exportedAt,
     worldSize: value.worldSize,
-    config: structuredClone(value.config) as ClodPagesConfig,
-    state: structuredClone(value.state) as ProjectSessionState,
-    water: structuredClone(value.water) as ProjectWaterArchiveState,
-    weather: structuredClone(value.weather) as ProjectWeatherArchiveState,
+    config: validateProjectArchiveConfig(value.config),
+    state: validateProjectSessionState(value.state),
+    water: validateProjectWaterArchiveState(value.water),
+    weather: validateProjectWeatherArchiveState(value.weather),
     voxelTerrainEdits: validateVoxelEditSnapshot(value.voxelTerrainEdits),
     props: validateProps(value.props),
-    textures,
+    textures: validateTextureSlots(value.textures),
     camera: { position: [...value.camera.position] as [number, number, number], target: [...value.camera.target] as [number, number, number] },
   };
   if (value.schemaVersion === 4) return { ...common, schemaVersion: 4, world: validateWorldIdentity(value.world) };
@@ -448,8 +451,7 @@ export async function consumeStagedVoxelProjectImport(
   try {
     const transaction = db.transaction(IMPORT_STORE, "readwrite");
     const store = transaction.objectStore(IMPORT_STORE);
-    const staged = await requestResult(store.get(token)) as StagedVoxelProjectImport | undefined;
-    if (staged) store.delete(token);
+    const staged = await consumeStoreValue<StagedVoxelProjectImport>(store, token);
     await transactionDone(transaction);
     if (!staged || stagedImportExpired(staged, nowMs)) return null;
     return validateArchiveContents({
