@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   createArchive: vi.fn(),
   parseArchive: vi.fn(),
   stageImport: vi.fn(),
+  validateConfig: vi.fn((value: unknown) => value),
+  validateSessionState: vi.fn((value: unknown) => value),
   validateTextures: vi.fn(),
   getVoxelEditSnapshot: vi.fn(),
   mapSessionState: vi.fn(),
@@ -22,6 +24,8 @@ vi.mock("../project/voxel_project_archive.js", () => ({
   parseVoxelProjectArchive: mocks.parseArchive,
   stageVoxelProjectImport: mocks.stageImport,
 }));
+vi.mock("./project_archive_config.js", () => ({ validateProjectArchiveConfig: mocks.validateConfig }));
+vi.mock("./project_archive_session_state.js", () => ({ validateProjectSessionState: mocks.validateSessionState }));
 vi.mock("../terrain/terrain.js", () => ({ getVoxelEditSnapshot: mocks.getVoxelEditSnapshot }));
 vi.mock("./project_state_mapper.js", () => ({
   mapProjectSessionState: mocks.mapSessionState,
@@ -129,6 +133,8 @@ describe("project archive import handoff", () => {
     manifest: {
       schemaVersion: 4,
       worldSize: 16,
+      config: {},
+      state: {},
       world: {
         scene: "continent",
         generatorVersion: "test-generator",
@@ -145,6 +151,8 @@ describe("project archive import handoff", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.validateConfig.mockImplementation((value: unknown) => value);
+    mocks.validateSessionState.mockImplementation((value: unknown) => value);
     vi.stubGlobal("window", { alert: vi.fn() });
     vi.stubGlobal("location", { search: "?save=save-a&seed=9&hud=1" });
     mocks.parseArchive.mockResolvedValue(contents);
@@ -156,7 +164,7 @@ describe("project archive import handoff", () => {
     vi.unstubAllGlobals();
   });
 
-  it("checkpoints before staging and replaces stale world ownership", async () => {
+  it("validates, checkpoints, stages, and replaces stale world ownership in order", async () => {
     const beforeImportNavigation = vi.fn(async () => {});
     const harness = createHarness(beforeImportNavigation);
     harness.projectImportInput.files = fileList(projectFile());
@@ -164,7 +172,11 @@ describe("project archive import handoff", () => {
     harness.projectImportInput.dispatchEvent(new Event("change"));
 
     await vi.waitFor(() => expect(mocks.stageImport).toHaveBeenCalledOnce());
+    expect(mocks.validateConfig).toHaveBeenCalledOnce();
+    expect(mocks.validateSessionState).toHaveBeenCalledOnce();
     expect(beforeImportNavigation).toHaveBeenCalledOnce();
+    expect(mocks.validateSessionState.mock.invocationCallOrder[0])
+      .toBeLessThan(beforeImportNavigation.mock.invocationCallOrder[0]!);
     expect(beforeImportNavigation.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.stageImport.mock.invocationCallOrder[0]!);
     expect(location.search).toBe("?seed=73&hud=1&scene=continent&seaLevel=21&world=16&import=import-token");
