@@ -5,6 +5,7 @@ import {
   validateProjectWaterArchiveState,
   validateProjectWeatherArchiveState,
 } from "../../project/project_archive_environment_state.js";
+import { confirmProjectImportRecoveryToken } from "../../project/project_import_recovery.js";
 import { validateProjectSessionState } from "../../project/project_archive_session_state.js";
 import {
   consumeStagedVoxelProjectImport,
@@ -64,6 +65,7 @@ export async function loadStagedProjectImport(
     return null;
   }
 
+  confirmProjectImportRecoveryToken(importToken);
   dom.buildProgress.hidden = false;
   dom.buildProgressPhase.textContent = "loading imported project";
   dom.buildProgressPercent.textContent = "0%";
@@ -81,7 +83,7 @@ export async function loadStagedProjectImport(
   } catch (error) {
     emitAudio("project.import.error");
     dom.info.textContent = `Project import failed: ${error instanceof Error ? error.message : String(error)}`;
-    return null;
+    throw error;
   } finally {
     searchParams.delete("import");
     const query = searchParams.toString();
