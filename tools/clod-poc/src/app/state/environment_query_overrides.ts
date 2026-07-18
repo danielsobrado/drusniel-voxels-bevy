@@ -256,6 +256,10 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     const mode = parsePostFxFroxelDebugMode(froxelDebug);
     state.froxelDebugMode = mode;
     state.froxelDebugEnabled = mode !== "off";
+    if (mode !== "off") {
+      state.postProcessEnabled = true;
+      state.postProcessDebugMode = "output";
+    }
   }
   const toneMap = toneMappingParam(searchParams);
   if (toneMap !== null) state.postProcessToneMapping = toneMap;

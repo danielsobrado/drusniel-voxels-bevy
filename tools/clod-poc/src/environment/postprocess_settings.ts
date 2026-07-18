@@ -369,6 +369,10 @@ export function applyPostProcessQueryOverrides(
     const mode = parsePostFxFroxelDebugMode(froxelDebug);
     next.froxelDebugMode = mode;
     next.froxelDebugEnabled = mode !== "off";
+    if (mode !== "off") {
+      next.enabled = true;
+      next.debugMode = "output";
+    }
   }
 
   const bounce = flagValue(searchParams, "bounce")
