@@ -3,6 +3,7 @@ import { IDBFactory } from "fake-indexeddb";
 import type { ClodCacheStoredRecord } from "../cacheTypes.js";
 import {
   createPersistentStore,
+  deleteDatabase,
   IndexedDbStore,
   resolveBrokerPersistentConfig,
   resolvePersistentConfig,
@@ -67,7 +68,24 @@ describe("IndexedDbStore conditional delete", () => {
     await expect(store.deleteIfMatches("stream-root", original)).resolves.toBe(true);
     await expect(store.get("stream-root")).resolves.toBeNull();
   });
+
+  it("rejects a blocked database deletion instead of hanging the broker", async () => {
+    const db = await openDatabase("blocked-delete-test");
+
+    await expect(deleteDatabase("blocked-delete-test")).rejects.toThrow(/blocked/);
+
+    db.close();
+    await expect(deleteDatabase("blocked-delete-test")).resolves.toBeUndefined();
+  });
 });
+
+function openDatabase(name: string): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error(`failed to open ${name}`));
+  });
+}
 
 function cacheRecord(version: number): ClodCacheStoredRecord {
   return {
