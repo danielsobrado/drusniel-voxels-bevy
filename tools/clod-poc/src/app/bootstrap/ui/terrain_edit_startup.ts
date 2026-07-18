@@ -25,7 +25,6 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 import { createAppCellReadinessFeeds, editTargetAcceptable } from "../../../player/cell_readiness.js";
 import { heightfieldTileResidentKeys } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
 import type { FarSummaryIntegration } from "../../../far-summary/integration.js";
-import { setRenderedClodOwnershipKeySource } from "../../../stream/clod_ownership_keys.js";
 import { lookupEnvironmentalPropHit } from "../../../world/prop_interaction_lookup.js";
 import { treeInstanceToFallingInstance } from "../../../trees/tree_system_patch_removal.js";
 import type { TreeSpeciesId } from "../../../trees/tree_config_types.js";
@@ -81,8 +80,6 @@ export function runTerrainEditStartup(
     brushFalloff: state.brushFalloff,
   });
   const setLastDigSummary = (summary: string) => { session.lastDigSummary = summary; };
-  const renderedRootKeys = () => input.result.roots.map((node) => node.id);
-  setRenderedClodOwnershipKeySource(renderedRootKeys);
 
   clodWorker.onParentRebuilt = (batch) => {
     clodApplyQueue.recordWorkerRebuild(batch.parentMs);
@@ -175,7 +172,8 @@ export function runTerrainEditStartup(
       voxelDeltaCount: voxelEditCount(),
       pageSizeM: input.cfg.page.chunk_size * input.cfg.page.chunks_per_page,
     });
-    input.longView.hooks.getStreamingRootReadyPageKeys = renderedRootKeys;
+    input.longView.hooks.getStreamingRootReadyPageKeys = () =>
+      session.streamingClodRootController?.readyPageKeys() ?? [];
     input.longView.hooks.getStreamingResidencySnapshot = () => {
       const farSummary = (window as typeof window & {
         __drusnielFarSummary?: Partial<FarSummaryIntegration>;

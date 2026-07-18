@@ -49,7 +49,7 @@ describe("runStreamPrimedGameplayTeleport", () => {
       },
     });
 
-    expect(result.readinessPolls).toBe(2);
+    expect(result.readinessPolls).toBe(3);
     expect(commit).toHaveBeenCalledOnce();
     expect(player).toEqual(target);
     expect(suspended).toBe(0);

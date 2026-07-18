@@ -181,7 +181,10 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const postProcess = flagParam(searchParams, "postprocess", "postProcess");
   if (postProcess !== null) {
     state.postProcessEnabled = postProcess;
-    if (!postProcess) state.postProcessDebugMode = "off";
+    if (!postProcess) {
+      state.postProcessDebugMode = "off";
+      disableWebGpuStages(state);
+    }
   }
 
   const postMin = flagParam(searchParams, "postmin", "postMin");

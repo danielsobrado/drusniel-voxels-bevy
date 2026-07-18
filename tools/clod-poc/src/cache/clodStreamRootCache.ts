@@ -76,9 +76,10 @@ export function streamRootCacheOperationGeneration(stats: StreamRootCacheStats):
 }
 
 export function streamRootCacheOperationIsCurrent(stats: StreamRootCacheStats): boolean {
-  const statsCurrent = streamingTokens.get(stats as object)?.isCurrent() ?? true;
-  if (!statsCurrent) return false;
-  for (const token of activeRequestTokens) if (!token.isCurrent()) return false;
+  const token = streamingTokens.get(stats as object);
+  if (!token) return false;
+  if (!token.isCurrent()) return false;
+  for (const active of activeRequestTokens) if (!active.isCurrent()) return false;
   return true;
 }
 

@@ -352,9 +352,28 @@ export class ClodCacheServiceImpl implements ClodCacheService {
   ): Promise<boolean> {
     const key = buildClodCacheKey(keyParts);
     const persistent = this.persistent;
-    let expectedRecord = this.memory?.peek(key) ?? null;
-    if (!expectedRecord && persistent) expectedRecord = await persistent.get(key);
-    if (!expectedRecord || !metadataMatches(expectedRecord.header.metadata, expectedMetadata)) return false;
+    // Prefer persistent when present so a newer memory entry cannot blind cleanup of an older IDB write.
+    let expectedRecord: ClodCacheStoredRecord | null = null;
+    if (persistent) {
+      try {
+        const persistentRecord = await persistent.get(key);
+        if (persistentRecord && metadataMatches(persistentRecord.header.metadata, expectedMetadata)) {
+          expectedRecord = persistentRecord;
+        }
+      } catch (error) {
+        const name = error instanceof Error ? error.name : "";
+        const message = error instanceof Error ? error.message : String(error);
+        cacheLogger.warn(`cache deleteIfMatches persistent peek failed for ${key} [${name}] ${message}`);
+        this.metrics.recordError(`[${name}] ${message}`);
+      }
+    }
+    if (!expectedRecord) {
+      const memoryRecord = this.memory?.peek(key) ?? null;
+      if (memoryRecord && metadataMatches(memoryRecord.header.metadata, expectedMetadata)) {
+        expectedRecord = memoryRecord;
+      }
+    }
+    if (!expectedRecord) return false;
 
     const persistentDeleted = persistent
       ? await persistent.deleteIfMatches(key, expectedRecord)

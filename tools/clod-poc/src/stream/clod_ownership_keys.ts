@@ -1,15 +1,6 @@
-let renderedRootKeySource: (() => readonly string[]) | null = null;
-
-export function setRenderedClodOwnershipKeySource(
-  source: (() => readonly string[]) | null,
-): void {
-  renderedRootKeySource = source;
-}
-
 export function expandClodOwnershipToLevelZero(keys: readonly string[]): string[] {
   const expanded = new Set<string>();
-  const sourceKeys = renderedRootKeySource?.() ?? keys;
-  for (const key of sourceKeys) {
+  for (const key of keys) {
     const page = parseClodPageKey(key);
     if (!page) continue;
     const scale = 2 ** page.level;

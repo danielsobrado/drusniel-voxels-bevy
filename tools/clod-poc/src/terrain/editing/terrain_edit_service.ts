@@ -407,14 +407,31 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     onAuthoritativeCommit?: () => void,
   ): Promise<TerrainSpellEditResult> => enqueueEditOperation(`spell:${request.spellId}`, async () => {
     const point = new THREE.Vector3(...request.command.targetPosition);
-    const actor = authorityOrigin() ?? point;
+    const actor = authorityOrigin();
+    if (!actor) {
+      recordSpellDenial("not_ready");
+      return { committed: false, changed: false, converged: false, reason: "not_ready", editRevision: getDigEditRevision() };
+    }
+    if (!deps.getInteractionMode) {
+      recordSpellDenial("mode_changed");
+      return { committed: false, changed: false, converged: false, reason: "mode_changed", editRevision: getDigEditRevision() };
+    }
+    if (!deps.editReadyAt) {
+      recordSpellDenial("not_ready");
+      return { committed: false, changed: false, converged: false, reason: "not_ready", editRevision: getDigEditRevision() };
+    }
+    const maxDistanceM = deps.editAuthority?.terrainEditRadiusM;
+    if (maxDistanceM === undefined) {
+      recordSpellDenial("out_of_range");
+      return { committed: false, changed: false, converged: false, reason: "out_of_range", editRevision: getDigEditRevision() };
+    }
     const verdict = validateEditCommand(request.command, {
       nowMs: performance.now(),
       currentTerrainRevision: getDigEditRevision(),
       actorPosition: actor,
-      maxDistanceM: deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER,
-      currentMode: deps.getInteractionMode?.() ?? request.command.mode,
-      targetReady: deps.editReadyAt?.(point.x, point.z) ?? true,
+      maxDistanceM,
+      currentMode: deps.getInteractionMode(),
+      targetReady: deps.editReadyAt(point.x, point.z),
     });
     if (!verdict.allowed) {
       recordSpellDenial(verdict.reason);
@@ -427,18 +444,21 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
     const edit: DigEdit = { ...request.edit, x: point.x, y: point.y, z: point.z };
     const transaction = voxelTransactionFromDigEdit(edit);
-    addCounter("spell_world_casts_accepted");
     if (transaction.deltas.length === 0) {
-      runDerivedUpdate("spell VFX commit callback", () => onAuthoritativeCommit?.());
-      addCounter("spell_world_convergence_completed");
-      return { committed: true, changed: false, converged: true, reason: null, editRevision: getDigEditRevision() };
+      deps.setLastDigSummary(`${request.spellId} spell: no terrain changed`);
+      deps.updateInfo();
+      return {
+        committed: false,
+        changed: false,
+        converged: false,
+        reason: "no_change",
+        editRevision: getDigEditRevision(),
+      };
     }
 
     const hadPaintedTerrain = hasPaintedTerrainEdits();
     applyDigEditTransaction(transaction, edit);
     const committedRevision = getDigEditRevision();
-    runDerivedUpdate("spell VFX commit callback", () => onAuthoritativeCommit?.());
-    addCounter("spell_world_edits_committed");
     const status = await performEditRebuild(edit, transaction, { point }, edit.r, `spell:${request.spellId}`);
     if (status === "rejected") {
       rollbackDigEditTransaction(transaction);
@@ -447,7 +467,25 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       return { committed: false, changed: false, converged: false, reason: "terrain_rebuild_rejected", editRevision: getDigEditRevision() };
     }
 
+    // Count acceptance and fire VFX only after a non-rejected rebuild.
+    addCounter("spell_world_casts_accepted");
+    runDerivedUpdate("spell VFX commit callback", () => onAuthoritativeCommit?.());
+    addCounter("spell_world_edits_committed");
     syncPaintedTerrainState(hadPaintedTerrain);
+
+    if (status === "committed_render_stale") {
+      addCounter("spell_world_convergence_failed");
+      deps.setLastDigSummary(`${request.spellId} spell terrain committed with stale render at revision ${committedRevision}`);
+      deps.updateInfo();
+      return {
+        committed: true,
+        changed: true,
+        converged: false,
+        reason: "committed_render_stale",
+        editRevision: committedRevision,
+      };
+    }
+
     try {
       await deps.clodWorker.flushParents();
       if (vegetationFlushTimer !== null) clearTimeout(vegetationFlushTimer);

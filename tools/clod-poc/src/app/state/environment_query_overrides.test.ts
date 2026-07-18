@@ -218,8 +218,13 @@ describe("environment query overrides", () => {
   it.each([
     ["fx", "0"],
     ["postmin", "1"],
+    ["postprocess", "0"],
   ])("disables WebGPU stage state for ?%s=%s", (key, value) => {
     const state = createState();
+    state.postProcessCloudsEnabled = true;
+    state.postProcessGtaoEnabled = true;
+    state.postProcessFroxelsEnabled = true;
+    state.postProcessBounceEnabled = true;
     applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ [key]: value }));
 
     expect(state.postProcessCloudsEnabled).toBe(false);

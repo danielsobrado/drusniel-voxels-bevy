@@ -4,7 +4,7 @@ import {
   HYDROLOGY_BODY_LAKE,
   HYDROLOGY_BODY_RIVER,
 } from "./hydrologyGrid.js";
-import { findContinentRiverCrossingRoute } from "./continent_river_route.js";
+import { findContinentRiverCrossingRoute, findContinentRiverCrossingRouteFromSample } from "./continent_river_route.js";
 
 function horizontalRiverSample(_x: number, z: number) {
   return {
@@ -144,7 +144,7 @@ describe("findContinentRiverCrossingRoute", () => {
     { bodyId: 3, depth: 2, flowX: 1, flowZ: 0, terrainY: 10, waterY: Number.NaN },
     { bodyId: 3, depth: 2, flowX: 1, flowZ: 0, terrainY: 10, waterY: 10 },
   ])("rejects malformed canonical river samples: %o", (invalid) => {
-    expect(findContinentRiverCrossingRoute((_x, z) => ({
+    expect(findContinentRiverCrossingRouteFromSample((_x, z) => ({
       bodyKind: Math.abs(z) <= 4 ? HYDROLOGY_BODY_RIVER : HYDROLOGY_BODY_DRY,
       bodyId: invalid.bodyId,
       depth: Math.abs(z) <= 4 ? invalid.depth : 0,

@@ -148,7 +148,8 @@ function legacyBodyId(config: WaterConfig | undefined, kind: WaterBodyKind, x: n
 function hydrologySampleReady(hydrology: HydrologySystem, x: number, z: number): boolean {
   if (x >= 0 && z >= 0 && x <= hydrology.grid.worldCells && z <= hydrology.grid.worldCells) return true;
   const atlas = hydrology.tileAtlasSource();
-  if (!atlas) return true;
+  // Outside the startup grid, missing atlas means residency is unknown — fail closed.
+  if (!atlas) return false;
   const tileX = Math.floor(x / atlas.tileSizeM);
   const tileZ = Math.floor(z / atlas.tileSizeM);
   return atlas.peek(tileX, tileZ) !== null;

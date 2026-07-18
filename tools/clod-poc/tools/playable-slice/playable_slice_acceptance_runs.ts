@@ -38,13 +38,24 @@ export interface PlayableSliceProfileRunResult {
   readonly failures: string[];
 }
 
-async function withTimeout<T>(label: string, operation: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(
+  label: string,
+  operation: Promise<T>,
+  timeoutMs: number,
+  onTimeout?: () => void | Promise<void>,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
       operation,
       new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+        timer = setTimeout(() => {
+          void Promise.resolve(onTimeout?.())
+            .catch(() => undefined)
+            .finally(() => {
+              reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+            });
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -156,7 +167,12 @@ async function runOne(
           expectedWaterBodyId: waterBodyId,
           startedAt,
         });
-    const report = await withTimeout(`${mode} playable route`, operation, PLAYABLE_SLICE_RUN_TIMEOUT_MS);
+    const report = await withTimeout(
+      `${mode} playable route`,
+      operation,
+      PLAYABLE_SLICE_RUN_TIMEOUT_MS,
+      () => closePlayableSlicePageBestEffort(page, `${mode} run ${runIndex} timeout`),
+    );
     await driver.collectFrameMetrics();
     return revalidateFinalFrameMetrics(report, driver);
   } catch (error) {

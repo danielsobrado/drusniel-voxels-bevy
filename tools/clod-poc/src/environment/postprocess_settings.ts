@@ -279,7 +279,13 @@ export function applyPostProcessQueryOverrides(
   const postProcess = flagValue(searchParams, "postprocess") ?? flagValue(searchParams, "postProcess");
   if (postProcess !== null) {
     next.enabled = postProcess;
-    if (!postProcess) next.debugMode = "off";
+    if (!postProcess) {
+      next.debugMode = "off";
+      next.cloudsEnabled = false;
+      next.gtaoEnabled = false;
+      next.froxelsEnabled = false;
+      next.bounceEnabled = false;
+    }
   }
 
   const postMin = flagValue(searchParams, "postmin") ?? flagValue(searchParams, "postMin");

@@ -1,10 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  expandClodOwnershipToLevelZero,
-  setRenderedClodOwnershipKeySource,
-} from "./clod_ownership_keys.js";
-
-afterEach(() => setRenderedClodOwnershipKeySource(null));
+import { describe, expect, it } from "vitest";
+import { expandClodOwnershipToLevelZero } from "./clod_ownership_keys.js";
 
 describe("expandClodOwnershipToLevelZero", () => {
   it("preserves level-zero pages", () => {
@@ -33,16 +28,8 @@ describe("expandClodOwnershipToLevelZero", () => {
     ]);
   });
 
-  it("uses the exact currently rendered roots when a source is registered", () => {
-    setRenderedClodOwnershipKeySource(() => ["L1:2,3", "L0:-1,4"]);
-
-    expect(expandClodOwnershipToLevelZero(["L0:99,99"])).toEqual([
-      "L0:-1,4",
-      "L0:4,6",
-      "L0:4,7",
-      "L0:5,6",
-      "L0:5,7",
-    ]);
+  it("honors the keys argument rather than any ambient rendered-root source", () => {
+    expect(expandClodOwnershipToLevelZero(["L0:99,99"])).toEqual(["L0:99,99"]);
   });
 
   it("returns one stable lexical order for negative and multi-digit keys", () => {
