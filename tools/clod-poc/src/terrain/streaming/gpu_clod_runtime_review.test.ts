@@ -45,8 +45,19 @@ describe("reviewed GPU CLOD runtime contracts", () => {
   it("verifies cluster identity before simplifying hash matches", () => {
     expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("fn clusterCell");
     expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("fn sameCluster");
-    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("representativeLocked");
-    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("publishWaitLimit");
-    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).not.toContain("while (valuePlusOne == 0u)");
+    // Locked owners are re-derived from the immutable input buffer, not a
+    // cross-invocation output read.
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("isLocked(owner.positionMorph.xyz)");
+  });
+
+  it("keeps the simplify hash race-free: input-id slots, no cross-invocation waits", () => {
+    // Slots claim the owner's INPUT vertex id; comparisons read inputVertices only.
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("array<atomic<u32>>");
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("0u, vertexId + 1u");
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("fn assignSimplifyOutputs");
+    // The old output-id design spin-waited on another invocation's publish; the
+    // race-free design has no wait loops at all.
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).not.toContain("publishWait");
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).not.toContain("valuePlusOne");
   });
 });

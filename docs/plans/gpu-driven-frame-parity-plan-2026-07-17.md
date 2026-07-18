@@ -231,6 +231,43 @@ Implemented and unit-verified (typecheck, 3573-test suite, vite build all green)
   that default is now the concrete "make it GPU-driven" switch, gated on the handover
   validation below.
 
+### Round 2 (same day, after external validation FAILed on residency)
+
+The first validation run found the layer of rot *under* the WGSL keyword fix: the weld
+hash exhausted probes on 167/167 pages (everything fell back to CPU, so the cull had
+nothing to cull). Root cause: the weld/simplify hash slots published **output** vertex
+ids, and other invocations compared against `outputVertices` written non-atomically by
+other workgroups — WGSL guarantees no cross-workgroup visibility for non-atomic storage
+writes, so on current Dawn every comparison read garbage, every duplicate claimed a new
+slot, and clusters overran `maxProbe`.
+
+**Fix (implemented + browser-verified)**: hash slots now claim the owner's **input**
+vertex id (single `atomic<u32>` per slot); all comparisons read the immutable input
+buffer; a new `assignWeldOutputs` / `assignSimplifyOutputs` pass compacts canonical
+vertices (dispatch-to-dispatch ordering makes its plain writes safe); the spin-wait is
+gone entirely. Applied to `GPU_CLOD_WELD_RUNTIME_WGSL`, both
+`GPU_CLOD_SIMPLIFY_RUNTIME_WGSL` copies, and the pipeline (binding 8 + two pipelines).
+
+Evidence (`shots/p1-meshlet-cull/weldfix-on-stats.json`, continent
+`liveClodGpuHierarchy=1`): `live_clod_gpu_resident_pages=32`,
+`live_clod_gpu_meshlets_resident=17183`, `live_clod_gpu_resident_render_views_total=15`,
+`clod_meshlet_cull_pages=32`, `clod_meshlet_cull_meshlets=17183`,
+`webgpu_uncaptured_errors=0`. Suite 3628 green, typecheck green.
+
+**Still open, pre-existing (next fix before flipping the default):**
+`InternalBorderNotWelded` on some L1 parent pages (34 build attempts fell back to the
+CPU worker, gracefully). Candidate mechanisms: (a) quantization straddle — `positionsMatch`
+accepts an epsilon that `round(position/epsilon)` bucketing can split across adjacent
+cells, so coincident child-seam vertices never meet in the hash; (b) seam-vertex
+attribute conflicts (normalDotMin 0.999) leaving intended duplicates that read as open
+edges. Diagnose by logging the failing vertex's quantized cell + attribute deltas for
+both copies at `validateReadback`. Also pre-existing and NOT from this work: the
+infinite-islands far-clipmap unowned-cell failures (older acceptance runs on earlier
+SHAs had zero ownership failures; every boolean consumer of the farOwner change
+evaluates identically) and the missing `config/long_map_route_thresholds.json`
+(continent routes need a five-run calibration; run acceptance with `--calibrate` until
+a maintainer freezes thresholds).
+
 ## 4. Explicit non-goals
 - Adopting LAAS heightfield terrain for the near field (I5).
 - TAA, collapse, sailing (locked out of scope 2026-07-16).

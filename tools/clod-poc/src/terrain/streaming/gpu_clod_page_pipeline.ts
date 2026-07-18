@@ -97,8 +97,10 @@ export class GpuClodPagePipeline {
     private readonly packVerticesPipeline: GPUComputePipeline,
     private readonly packIndicesPipeline: GPUComputePipeline,
     private readonly weldVerticesPipeline: GPUComputePipeline,
+    private readonly weldAssignOutputsPipeline: GPUComputePipeline,
     private readonly weldIndicesPipeline: GPUComputePipeline,
     private readonly simplifyVerticesPipeline: GPUComputePipeline,
+    private readonly simplifyAssignOutputsPipeline: GPUComputePipeline,
     private readonly simplifyIndicesPipeline: GPUComputePipeline,
     private readonly indexOffsetPipeline: GPUComputePipeline,
     private readonly meshletPipeline: GPUComputePipeline,
@@ -150,6 +152,7 @@ export class GpuClodPagePipeline {
         storageBuffer(5),
         storageBuffer(6),
         storageBuffer(7),
+        storageBuffer(8),
       ],
     });
     const packPipelineLayout = device.createPipelineLayout({
@@ -175,8 +178,10 @@ export class GpuClodPagePipeline {
       packVerticesPipeline,
       packIndicesPipeline,
       weldVerticesPipeline,
+      weldAssignOutputsPipeline,
       weldIndicesPipeline,
       simplifyVerticesPipeline,
+      simplifyAssignOutputsPipeline,
       simplifyIndicesPipeline,
       indexOffsetPipeline,
       meshletPipeline,
@@ -185,8 +190,10 @@ export class GpuClodPagePipeline {
       pipeline("gpu clod pack vertices", packModule, "packVertices", packPipelineLayout),
       pipeline("gpu clod pack indices", packModule, "packIndices", packPipelineLayout),
       pipeline("gpu clod weld vertices", weldModule, "weldVertices", reductionPipelineLayout),
+      pipeline("gpu clod weld assign outputs", weldModule, "assignWeldOutputs", reductionPipelineLayout),
       pipeline("gpu clod weld indices", weldModule, "weldIndices", reductionPipelineLayout),
       pipeline("gpu clod simplify vertices", simplifyModule, "simplifyVertices", reductionPipelineLayout),
+      pipeline("gpu clod simplify assign outputs", simplifyModule, "assignSimplifyOutputs", reductionPipelineLayout),
       pipeline("gpu clod simplify indices", simplifyModule, "simplifyIndices", reductionPipelineLayout),
       pipeline("gpu clod offset indices", indexModule, "offsetIndices"),
       pipeline("gpu clod build meshlets", meshletModule, "buildMeshlets"),
@@ -198,8 +205,10 @@ export class GpuClodPagePipeline {
       packVerticesPipeline,
       packIndicesPipeline,
       weldVerticesPipeline,
+      weldAssignOutputsPipeline,
       weldIndicesPipeline,
       simplifyVerticesPipeline,
+      simplifyAssignOutputsPipeline,
       simplifyIndicesPipeline,
       indexOffsetPipeline,
       meshletPipeline,
@@ -502,13 +511,15 @@ export class GpuClodPagePipeline {
     const hashCapacity = nextPowerOfTwo(Math.max(4, input.vertexCount * 2));
     let hashBuffer: GPUBuffer | null = null;
     let remapBuffer: GPUBuffer | null = null;
+    let outputIdBuffer: GPUBuffer | null = null;
     let outputVertices: GPUBuffer | null = null;
     let outputIndices: GPUBuffer | null = null;
     let counters: GPUBuffer | null = null;
     let params: GPUBuffer | null = null;
     try {
-      hashBuffer = this.buffer("gpu clod weld hash", hashCapacity * 2 * U32, STORAGE_USAGE);
+      hashBuffer = this.buffer("gpu clod weld hash", hashCapacity * U32, STORAGE_USAGE);
       remapBuffer = this.buffer("gpu clod weld remap", input.vertexCount * U32, STORAGE_USAGE);
+      outputIdBuffer = this.buffer("gpu clod weld output ids", input.vertexCount * U32, STORAGE_USAGE);
       outputVertices = this.buffer(
         "gpu clod welded vertices",
         input.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES,
@@ -529,6 +540,7 @@ export class GpuClodPagePipeline {
           { binding: 5, resource: { buffer: outputVertices } },
           { binding: 6, resource: { buffer: outputIndices } },
           { binding: 7, resource: { buffer: counters } },
+          { binding: 8, resource: { buffer: outputIdBuffer } },
         ],
       });
       const result = await this.runReduction(
@@ -538,6 +550,7 @@ export class GpuClodPagePipeline {
         4 * U32,
         [
           { pipeline: this.weldVerticesPipeline, bindGroup, workItems: input.vertexCount },
+          { pipeline: this.weldAssignOutputsPipeline, bindGroup, workItems: input.vertexCount },
           { pipeline: this.weldIndicesPipeline, bindGroup, workItems: Math.ceil(input.indexCount / 3) },
         ],
       );
@@ -559,6 +572,7 @@ export class GpuClodPagePipeline {
       params?.destroy();
       hashBuffer?.destroy();
       remapBuffer?.destroy();
+      outputIdBuffer?.destroy();
       counters?.destroy();
       outputVertices?.destroy();
       outputIndices?.destroy();
@@ -574,13 +588,15 @@ export class GpuClodPagePipeline {
     const hashCapacity = nextPowerOfTwo(Math.max(4, input.vertexCount * 2));
     let hashBuffer: GPUBuffer | null = null;
     let remapBuffer: GPUBuffer | null = null;
+    let outputIdBuffer: GPUBuffer | null = null;
     let outputVertices: GPUBuffer | null = null;
     let outputIndices: GPUBuffer | null = null;
     let counters: GPUBuffer | null = null;
     let params: GPUBuffer | null = null;
     try {
-      hashBuffer = this.buffer("gpu clod simplify hash", hashCapacity * 2 * U32, STORAGE_USAGE);
+      hashBuffer = this.buffer("gpu clod simplify hash", hashCapacity * U32, STORAGE_USAGE);
       remapBuffer = this.buffer("gpu clod simplify remap", input.vertexCount * U32, STORAGE_USAGE);
+      outputIdBuffer = this.buffer("gpu clod simplify output ids", input.vertexCount * U32, STORAGE_USAGE);
       outputVertices = this.buffer(
         "gpu clod simplified vertices",
         input.vertexCount * GPU_CLOD_VERTEX_STRIDE_BYTES,
@@ -601,6 +617,7 @@ export class GpuClodPagePipeline {
           { binding: 5, resource: { buffer: outputVertices } },
           { binding: 6, resource: { buffer: outputIndices } },
           { binding: 7, resource: { buffer: counters } },
+          { binding: 8, resource: { buffer: outputIdBuffer } },
         ],
       });
       const result = await this.runReduction(
@@ -610,6 +627,7 @@ export class GpuClodPagePipeline {
         6 * U32,
         [
           { pipeline: this.simplifyVerticesPipeline, bindGroup, workItems: input.vertexCount },
+          { pipeline: this.simplifyAssignOutputsPipeline, bindGroup, workItems: input.vertexCount },
           { pipeline: this.simplifyIndicesPipeline, bindGroup, workItems: Math.ceil(input.indexCount / 3) },
         ],
       );
@@ -631,6 +649,7 @@ export class GpuClodPagePipeline {
       params?.destroy();
       hashBuffer?.destroy();
       remapBuffer?.destroy();
+      outputIdBuffer?.destroy();
       counters?.destroy();
       outputVertices?.destroy();
       outputIndices?.destroy();

@@ -9,6 +9,11 @@ struct PackedVertex {
 };
 `;
 
+// Simplify hash slots store the OWNER'S INPUT VERTEX ID (+1), never an output id: all
+// cross-invocation comparisons read the immutable input buffer (WGSL guarantees no
+// visibility for non-atomic storage writes across workgroups in one dispatch — the old
+// output-id design read garbage representatives on current Dawn and exhausted probes).
+// Cluster representatives are compacted afterwards by the assignSimplifyOutputs pass.
 export const GPU_CLOD_SIMPLIFY_RUNTIME_WGSL = /* wgsl */ `
 ${PACKED_VERTEX}
 
@@ -28,11 +33,6 @@ struct SimplifyParams {
   _pad0 : vec4<u32>,
 };
 
-struct HashSlot {
-  key : atomic<u32>,
-  valuePlusOne : atomic<u32>,
-};
-
 struct SimplifyCounters {
   vertexCount : atomic<u32>,
   indexCount : atomic<u32>,
@@ -45,11 +45,12 @@ struct SimplifyCounters {
 @group(0) @binding(0) var<uniform> params : SimplifyParams;
 @group(0) @binding(1) var<storage, read> inputVertices : array<PackedVertex>;
 @group(0) @binding(2) var<storage, read> inputIndices : array<u32>;
-@group(0) @binding(3) var<storage, read_write> hashSlots : array<HashSlot>;
+@group(0) @binding(3) var<storage, read_write> hashSlots : array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> vertexRemap : array<u32>;
 @group(0) @binding(5) var<storage, read_write> outputVertices : array<PackedVertex>;
 @group(0) @binding(6) var<storage, read_write> outputIndices : array<u32>;
 @group(0) @binding(7) var<storage, read_write> counters : SimplifyCounters;
+@group(0) @binding(8) var<storage, read_write> outputIdPlusOne : array<u32>;
 
 fn hashMix(value : u32) -> u32 {
   var x = value;
@@ -110,38 +111,23 @@ fn simplifyVertices(@builtin(global_invocation_id) gid : vec3<u32>) {
   let start = key & params.hashMask;
   for (var probe = 0u; probe < params.maxProbe; probe++) {
     let slotIndex = (start + probe) & params.hashMask;
-    let claim = atomicCompareExchangeWeak(&hashSlots[slotIndex].key, 0u, key);
+    let claim = atomicCompareExchangeWeak(&hashSlots[slotIndex], 0u, vertexId + 1u);
     if (claim.exchanged) {
-      let outputId = atomicAdd(&counters.vertexCount, 1u);
-      outputVertices[outputId] = candidate;
-      atomicStore(&hashSlots[slotIndex].valuePlusOne, outputId + 1u);
-      vertexRemap[vertexId] = outputId;
+      vertexRemap[vertexId] = vertexId;
       return;
     }
-    if (claim.old_value != key) { continue; }
-    var valuePlusOne = atomicLoad(&hashSlots[slotIndex].valuePlusOne);
-    let publishWaitLimit = max(1024u, params.maxProbe * 64u);
-    for (var publishWait = 0u; publishWait < publishWaitLimit && valuePlusOne == 0u; publishWait++) {
-      valuePlusOne = atomicLoad(&hashSlots[slotIndex].valuePlusOne);
-    }
-    if (valuePlusOne == 0u) {
-      atomicAdd(&counters.probeFailures, 1u);
-      vertexRemap[vertexId] = 0xffffffffu;
-      return;
-    }
-    let outputId = valuePlusOne - 1u;
-    let representative = outputVertices[outputId];
-    let representativeLocked = isLocked(representative.positionMorph.xyz);
-    if (locked || representativeLocked || !sameCluster(candidate.positionMorph.xyz, representative.positionMorph.xyz)) {
-      continue;
-    }
-    if (!attributesMatch(candidate, representative)) {
+    if (locked) { continue; }
+    let ownerId = claim.old_value - 1u;
+    let owner = inputVertices[ownerId];
+    if (isLocked(owner.positionMorph.xyz)) { continue; }
+    if (!sameCluster(candidate.positionMorph.xyz, owner.positionMorph.xyz)) { continue; }
+    if (!attributesMatch(candidate, owner)) {
       atomicAdd(&counters.attributeConflicts, 1u);
       continue;
     }
-    let error = distance(candidate.positionMorph.xyz, representative.positionMorph.xyz);
+    let error = distance(candidate.positionMorph.xyz, owner.positionMorph.xyz);
     atomicMax(&counters.maxErrorBits, bitcast<u32>(max(0.0, error)));
-    vertexRemap[vertexId] = outputId;
+    vertexRemap[vertexId] = ownerId;
     return;
   }
   atomicAdd(&counters.probeFailures, 1u);
@@ -149,14 +135,28 @@ fn simplifyVertices(@builtin(global_invocation_id) gid : vec3<u32>) {
 }
 
 @compute @workgroup_size(${GPU_CLOD_PAGE_WORKGROUP_SIZE})
+fn assignSimplifyOutputs(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let vertexId = gid.x;
+  if (vertexId >= params.vertexCount) { return; }
+  if (vertexRemap[vertexId] != vertexId) { return; }
+  let outputId = atomicAdd(&counters.vertexCount, 1u);
+  outputVertices[outputId] = inputVertices[vertexId];
+  outputIdPlusOne[vertexId] = outputId + 1u;
+}
+
+@compute @workgroup_size(${GPU_CLOD_PAGE_WORKGROUP_SIZE})
 fn simplifyIndices(@builtin(global_invocation_id) gid : vec3<u32>) {
   let triangleId = gid.x;
   let source = triangleId * 3u;
   if (source + 2u >= params.indexCount) { return; }
-  let a = vertexRemap[inputIndices[source]];
-  let b = vertexRemap[inputIndices[source + 1u]];
-  let c = vertexRemap[inputIndices[source + 2u]];
-  if (a == 0xffffffffu || b == 0xffffffffu || c == 0xffffffffu || a == b || b == c || a == c) { return; }
+  let canonicalA = vertexRemap[inputIndices[source]];
+  let canonicalB = vertexRemap[inputIndices[source + 1u]];
+  let canonicalC = vertexRemap[inputIndices[source + 2u]];
+  if (canonicalA == 0xffffffffu || canonicalB == 0xffffffffu || canonicalC == 0xffffffffu) { return; }
+  let a = outputIdPlusOne[canonicalA] - 1u;
+  let b = outputIdPlusOne[canonicalB] - 1u;
+  let c = outputIdPlusOne[canonicalC] - 1u;
+  if (a == b || b == c || a == c) { return; }
   let writeBase = atomicAdd(&counters.indexCount, 3u);
   outputIndices[writeBase] = a;
   outputIndices[writeBase + 1u] = b;

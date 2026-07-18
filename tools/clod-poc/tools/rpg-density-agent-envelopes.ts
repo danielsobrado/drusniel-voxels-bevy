@@ -119,33 +119,70 @@ async function runCase(browser: Browser, baseUrl: string, sweepCase: AgentSweepC
     console.log(`[rpg-agent-envelopes] ${sweepCase.name}: ${url}`);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120_000 });
     const start = Date.now();
+    let lastLog = 0;
     while (Date.now() - start < READY_TIMEOUT_MS) {
-      const ready = await page.evaluate(() => window.__drusnielPerf?.ready === true);
-      const fatal = await page.evaluate(() => window.__drusnielClod?.error ?? null);
-      if (fatal) throw new Error(fatal);
-      if (ready) break;
+      const state = await page.evaluate(`(function(){
+        var clod = window.__drusnielClod;
+        var perf = window.__drusnielPerf;
+        return {
+          clodReady: !!(clod && clod.ready),
+          clodError: clod ? clod.error : null,
+          perfReady: !!(perf && perf.ready),
+          sampleCount: perf && perf.snapshot ? (perf.snapshot().sampleCount || 0) : 0,
+          progress: clod ? clod.progressMsg : null
+        };
+      })()`) as {
+        clodReady: boolean;
+        clodError: string | null;
+        perfReady: boolean;
+        sampleCount: number;
+        progress: string | null;
+      };
+      if (state.clodError) throw new Error(state.clodError);
+      if (state.perfReady) break;
+      if (Date.now() - lastLog >= 5000) {
+        lastLog = Date.now();
+        console.log(
+          `[rpg-agent-envelopes] ${sweepCase.name}: waiting (clod=${state.clodReady}, samples=${state.sampleCount}, ${state.progress ?? "no progress"})`,
+        );
+      }
       await delay(250);
     }
-    const snapshot = await page.evaluate(() => window.__drusnielPerf?.snapshot() ?? null);
-    if (!snapshot?.ready) throw new Error(`Perf probe not ready for ${sweepCase.name}`);
+    const snapshot = await page.evaluate(`(function(){
+      var perf = window.__drusnielPerf;
+      var clod = window.__drusnielClod;
+      var snap = perf && perf.snapshot ? perf.snapshot() : null;
+      var live = (clod && clod.stats && clod.stats.counters) ? clod.stats.counters : {};
+      return { snap: snap, live: live };
+    })()`) as {
+      snap: {
+        ready: boolean;
+        metrics: { frameMs: { p50: number; p95: number }; renderMs: { p95: number } };
+        counters: Record<string, number>;
+      } | null;
+      live: Record<string, number>;
+    };
+    if (!snapshot.snap?.ready) throw new Error(`Perf probe not ready for ${sweepCase.name}`);
+    const c = snapshot.snap.counters;
+    const live = snapshot.live;
     return {
       name: sweepCase.name,
       url,
-      frameMsP50: snapshot.metrics.frameMs.p50,
-      frameMsP95: snapshot.metrics.frameMs.p95,
-      renderMsP95: snapshot.metrics.renderMs.p95,
+      frameMsP50: snapshot.snap.metrics.frameMs.p50,
+      frameMsP95: snapshot.snap.metrics.frameMs.p95,
+      renderMsP95: snapshot.snap.metrics.renderMs.p95,
       counters: {
-        agents_total: snapshot.counters.agentsTotalAvg ?? 0,
-        agent_draws: snapshot.counters.agentDrawsAvg ?? 0,
-        agent_anim_ms: snapshot.counters.agentAnimMsAvg ?? 0,
-        agents_full: snapshot.counters.agentsFullAvg ?? 0,
-        agents_mid: snapshot.counters.agentsMidAvg ?? 0,
-        agents_frozen: snapshot.counters.agentsFrozenAvg ?? 0,
-        agent_sim_ms: snapshot.counters.agentSimMsAvg ?? 0,
-        agent_terrain_query_ms: snapshot.counters.agentTerrainQueryMsAvg ?? 0,
-        wd_agents_full: snapshot.counters.wdAgentsFullAvg ?? 0,
-        wd_agents_mid: snapshot.counters.wdAgentsMidAvg ?? 0,
-        wd_agents_frozen: snapshot.counters.wdAgentsFrozenAvg ?? 0,
+        agents_total: c.agentsTotalAvg ?? live.agents_total ?? 0,
+        agent_draws: c.agentDrawsAvg ?? live.agent_draws ?? 0,
+        agent_anim_ms: c.agentAnimMsAvg ?? live.agent_anim_ms ?? 0,
+        agents_full: c.agentsFullAvg ?? live.agents_full ?? 0,
+        agents_mid: c.agentsMidAvg ?? live.agents_mid ?? 0,
+        agents_frozen: c.agentsFrozenAvg ?? live.agents_frozen ?? 0,
+        agent_sim_ms: c.agentSimMsAvg ?? live.agent_sim_ms ?? 0,
+        agent_terrain_query_ms: c.agentTerrainQueryMsAvg ?? live.agent_terrain_query_ms ?? 0,
+        wd_agents_full: c.wdAgentsFullAvg ?? live.wd_agents_full ?? 0,
+        wd_agents_mid: c.wdAgentsMidAvg ?? live.wd_agents_mid ?? 0,
+        wd_agents_frozen: c.wdAgentsFrozenAvg ?? live.wd_agents_frozen ?? 0,
       },
       errors,
     };

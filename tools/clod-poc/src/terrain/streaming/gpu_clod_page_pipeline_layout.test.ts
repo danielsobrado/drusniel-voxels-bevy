@@ -61,8 +61,10 @@ describe("GPU CLOD page pipeline layouts", () => {
       expect(packLayout).not.toBe("auto");
       expect(layoutFor("gpu clod pack indices")).toBe(packLayout);
       expect(reductionLayout).not.toBe("auto");
+      expect(layoutFor("gpu clod weld assign outputs")).toBe(reductionLayout);
       expect(layoutFor("gpu clod weld indices")).toBe(reductionLayout);
       expect(layoutFor("gpu clod simplify vertices")).toBe(reductionLayout);
+      expect(layoutFor("gpu clod simplify assign outputs")).toBe(reductionLayout);
       expect(layoutFor("gpu clod simplify indices")).toBe(reductionLayout);
       expect(layoutFor("gpu clod offset indices")).toBe("auto");
       expect(layoutFor("gpu clod build meshlets")).toBe("auto");

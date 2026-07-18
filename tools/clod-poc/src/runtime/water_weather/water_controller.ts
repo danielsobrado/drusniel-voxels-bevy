@@ -42,12 +42,23 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     enabled: clipmapExclusionDistance > 0,
     distance: clipmapExclusionDistance,
   });
-  const useHighQualityWebGpuWater = deps.searchParams.get("waterHq") === "1" || deps.searchParams.get("waterQuality") === "high";
+  // Water quality tier (W3): the HQ TSL material (screen-space reflection/refraction,
+  // caustics, advected ripples) is the WebGPU default — perf:move A/B measured it at
+  // ~0.1 ms render p95 over the perf material (perf-runs/water-hq-ab/). waterQuality=low
+  // (or the legacy waterHq=0) selects the perf material as the low tier.
+  const waterQuality = deps.searchParams.get("waterQuality") === "low" || deps.searchParams.get("waterHq") === "0"
+    ? "low"
+    : "high";
+  const useHighQualityWebGpuWater = deps.isWebGpu && waterQuality === "high";
   const waterMaterialFactory = deps.isWebGpu
     ? useHighQualityWebGpuWater
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
       : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
+  // Analytic caustics ride the high tier unless the config explicitly tuned them on.
+  const clipmapWaterConfig = useHighQualityWebGpuWater && !deps.waterConfig.caustics.enabled
+    ? { ...deps.waterConfig, caustics: { ...deps.waterConfig.caustics, enabled: true } }
+    : deps.waterConfig;
   const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
 
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
@@ -104,7 +115,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     : null;
   const clipmap = new WaterClipmap({
     scene: deps.scene,
-    config: deps.waterConfig,
+    config: clipmapWaterConfig,
     field,
     createMaterial: waterMaterialFactory,
     sunDirection: deps.getSunDirection().clone(),

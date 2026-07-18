@@ -199,11 +199,19 @@ describe("GPU CLOD compute contracts", () => {
     expect(GPU_CLOD_SIMPLIFY_WGSL).toContain("fn is_locked");
   });
 
-  it("bounds cross-workgroup hash publication waits", () => {
+  it("keeps hash reductions race-free: input-id slots, no cross-workgroup waits", () => {
     for (const source of [GPU_CLOD_WELD_RUNTIME_WGSL, GPU_CLOD_SIMPLIFY_RUNTIME_WGSL]) {
-      expect(source).toContain("publishWaitLimit");
-      expect(source).not.toContain("while (valuePlusOne == 0u)");
+      // Slots claim the owner's INPUT vertex id so comparisons read the immutable
+      // input buffer; output compaction runs as its own pass. WGSL guarantees no
+      // cross-workgroup visibility for non-atomic writes, so the shader must not
+      // wait on or read another invocation's output.
+      expect(source).toContain("array<atomic<u32>>");
+      expect(source).toContain("0u, vertexId + 1u");
+      expect(source).not.toContain("publishWait");
+      expect(source).not.toContain("valuePlusOne");
     }
+    expect(GPU_CLOD_WELD_RUNTIME_WGSL).toContain("fn assignWeldOutputs");
+    expect(GPU_CLOD_SIMPLIFY_RUNTIME_WGSL).toContain("fn assignSimplifyOutputs");
   });
 });
 

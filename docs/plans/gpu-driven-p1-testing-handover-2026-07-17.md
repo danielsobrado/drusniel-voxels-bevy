@@ -1,5 +1,20 @@
 # Testing Handover — GPU-Driven P0/P1/P3 Validation (2026-07-17)
 
+> **Round 2 update (post first FAIL report):** the residency blocker (weld hash-probe
+> exhaustion, 167/167 CPU fallback) is fixed — slots now claim input vertex ids and all
+> comparisons read the immutable input buffer (see plan doc §3.1 Round 2). A smoke run
+> already shows 32 resident pages / 17,183 meshlets culled / 0 uncaptured errors
+> (`shots/p1-meshlet-cull/weldfix-on-stats.json`). Re-run Steps 2–4 and 7 as written.
+> Known remaining failures you should EXPECT and not chase as new:
+> - `InternalBorderNotWelded` on some L1 pages → graceful CPU fallback
+>   (`live_clod_gpu_hierarchy_failures_total` > 0 is acceptable; resident pages > 0 is
+>   the pass signal).
+> - Infinite-islands far-clipmap unowned-cell gate failures: pre-existing on this tree
+>   (older runs on earlier SHAs had zero), not from these changes — report counts only.
+> - `accept:continent-short` needs `config/long_map_route_thresholds.json`, which was
+>   never committed: run it with `--calibrate` (explicitly non-proof) and report the
+>   captured baseline instead of PASS/FAIL.
+
 This is a self-contained prompt for a testing/verification agent working in this repo.
 Report results back in the format at the bottom. Do not change product code except where
 a step explicitly allows a fix; if something fails, capture the evidence and report.

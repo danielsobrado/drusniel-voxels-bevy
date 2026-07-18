@@ -172,7 +172,10 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const reflectionScale: TslNode = float(0.70).mul(body.reflectionDamping);
     const lit: TslNode = mix(waterBase, skyReflection, clamp(fresnel.mul(reflectionScale), 0.0, 0.82)).add(spec).add(scatter);
     const finalColor: TslNode = mix(mix(lit, uFoam, foam), waterLevelColorTsl(aLevel), uClipmapTint.mul(0.18));
-    const alpha: TslNode = clamp(uAlpha.add(fresnel.mul(0.18)), 0.0, 1.0);
+    // Soft waterline (W3): dissolve alpha over the first ~35 cm of depth so shorelines
+    // fade out on the terrain instead of ending on a hard texel-staircase edge.
+    const shoreFade: TslNode = smoothstep(float(0.02), float(0.35), depth);
+    const alpha: TslNode = clamp(uAlpha.add(fresnel.mul(0.18)), 0.0, 1.0).mul(shoreFade);
 
     const outColor: TslNode = uDebugMode.equal(0).select(
       finalColor,

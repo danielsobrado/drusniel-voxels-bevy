@@ -447,7 +447,10 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       waterLevelColorTsl(aLevel),
       uClipmapTint.mul(0.18),
     );
-    const alpha: TslNode = clamp(uAlpha.add(fres.mul(0.18)), 0.0, 1.0);
+    // Soft waterline (W3): dissolve alpha over the first ~35 cm of depth so shorelines
+    // fade out on the terrain instead of ending on a hard texel-staircase edge.
+    const shoreFade: TslNode = smoothstep(float(0.02), float(0.35), depth);
+    const alpha: TslNode = clamp(uAlpha.add(fres.mul(0.18)), 0.0, 1.0).mul(shoreFade);
 
     const depthCol: TslNode = vec3(depthNorm);
     const foamCol: TslNode = vec3(foam);
