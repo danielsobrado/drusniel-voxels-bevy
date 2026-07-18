@@ -86,10 +86,8 @@ export async function runPostRendererStartup(input: PostRendererStartupInput) {
     settings: biomeVisualStateSettings,
     getSeasonT: () => seasonT,
     getSunElevationDeg: () => appState.state.sunElevationDeg,
-    getWeather: () => ({
-      mode: appState.state.weatherMode,
-      intensity: appState.state.weatherIntensity,
-    }),
+    getWeatherMode: () => appState.state.weatherMode,
+    getWeatherIntensity: () => appState.state.weatherIntensity,
   });
   installBiomeVisualStateDebugProperty(window, biomeVisualStateRuntime);
 
