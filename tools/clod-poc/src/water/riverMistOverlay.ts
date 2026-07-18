@@ -20,6 +20,7 @@ export interface RiverMistOverlayStats {
 export interface RiverMistOverlayOptions {
   readonly settings: RiverMistRuntimeSettings;
   readonly readBiomeState?: () => BiomeVisualState | null;
+  readonly minimumSampleHintM?: number;
 }
 
 export class RiverMistOverlay {
@@ -76,7 +77,11 @@ export class RiverMistOverlay {
     this.readBiomeState = options.readBiomeState ?? readActiveBiomeVisualState;
     this.halfGrid = Math.ceil(particles.spawnRadiusM / particles.spacingM);
     this.gridSide = this.halfGrid * 2 + 1;
-    this.sampleHintM = Math.max(particles.spacingM, particles.sampleHintM);
+    this.sampleHintM = Math.max(
+      particles.spacingM,
+      particles.sampleHintM,
+      finiteNonNegative(options.minimumSampleHintM),
+    );
     this.emitTimeS = particles.emitIntervalS;
     this.scene.add(this.points);
     this.applyVisibility();
@@ -244,4 +249,8 @@ function hashSigned(x: number, z: number, seed: number): number {
 
 function lerp(start: number, end: number, amount: number): number {
   return start + (end - start) * amount;
+}
+
+function finiteNonNegative(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, value!) : 0;
 }
