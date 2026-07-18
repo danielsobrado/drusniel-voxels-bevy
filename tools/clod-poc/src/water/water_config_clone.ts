@@ -57,6 +57,11 @@ export function cloneWaterConfig(config: WaterConfig): WaterConfig {
         ...config.visual.glacialMurkiness,
         absorptionMultiplier: [...config.visual.glacialMurkiness.absorptionMultiplier],
       },
+      rockFlour: {
+        ...config.visual.rockFlour,
+        lakeColor: [...config.visual.rockFlour.lakeColor],
+        riverColor: [...config.visual.rockFlour.riverColor],
+      },
       refraction: { ...config.visual.refraction },
       reflection: { ...config.visual.reflection },
     },
