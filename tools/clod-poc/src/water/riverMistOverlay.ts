@@ -209,16 +209,16 @@ export class RiverMistOverlay {
     const heightT = hash01(cellX, cellZ, this.scanGeneration * 13 + 8);
     const drift = particles.driftSpeedMps * (0.7 + Math.min(1, sample.flow.speed) * 0.45);
 
-    this.pool.spawn({
-      x: x + sideX * side * particles.spacingM * 0.28,
-      y: sample.waterY + particles.surfaceOffsetM + heightT * particles.surfaceOffsetM * 0.5,
-      z: z + sideZ * side * particles.spacingM * 0.28,
-      vx: directionX * drift * forward + sideX * side * drift * 0.45,
-      vy: particles.riseSpeedMps * (0.75 + heightT * 0.5),
-      vz: directionZ * drift * forward + sideZ * side * drift * 0.45,
-      lifeS: lerp(particles.minLifetimeS, particles.maxLifetimeS, lifeT),
-      strength: signal * (0.7 + heightT * 0.3),
-    });
+    this.pool.spawn(
+      x + sideX * side * particles.spacingM * 0.28,
+      sample.waterY + particles.surfaceOffsetM + heightT * particles.surfaceOffsetM * 0.5,
+      z + sideZ * side * particles.spacingM * 0.28,
+      directionX * drift * forward + sideX * side * drift * 0.45,
+      particles.riseSpeedMps * (0.75 + heightT * 0.5),
+      directionZ * drift * forward + sideZ * side * drift * 0.45,
+      lerp(particles.minLifetimeS, particles.maxLifetimeS, lifeT),
+      signal * (0.7 + heightT * 0.3),
+    );
   }
 
   private writeParticles(): void {
