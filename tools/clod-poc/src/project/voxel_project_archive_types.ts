@@ -3,6 +3,7 @@ import type { GrassShaderMode } from "../grass/grass_config.js";
 import type { BrushOp, BrushShape, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import type { WeatherMode } from "../app/clod_constants.js";
 import type { WaterDebugMode } from "../water/waterConfig.js";
+import type { ProjectGeneratorQuery } from "./project_world_identity.js";
 import type { ProjectPropInstance } from "./project_props.js";
 
 export const LEGACY_VOXEL_PROJECT_SCHEMA_VERSION = 3 as const;
@@ -15,6 +16,7 @@ export interface ProjectWorldIdentity {
   readonly scene: string;
   readonly generatorVersion: string;
   readonly terrainField: TerrainFieldConfig;
+  readonly generatorQuery: ProjectGeneratorQuery;
 }
 
 export interface ProjectSessionState {
