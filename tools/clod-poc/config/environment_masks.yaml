@@ -18,6 +18,7 @@ river_mist:
   particles:
     spawn_radius_m: 54.0
     spacing_m: 5.5
+    sample_hint_m: 16.0
     emit_interval_s: 0.12
     max_particles: 240
     max_emitters_per_tick: 18
