@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSaveCheckpointController, type SaveCheckpointCounters } from "./save_checkpoint_controller.js";
 
 type KeyListener = EventListenerOrEventListenerObject;
@@ -52,6 +52,10 @@ function ctrlSaveEvent(repeat = false): KeyboardEvent {
   } as unknown as KeyboardEvent;
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("save checkpoint controller", () => {
   it("coalesces concurrent checkpoint requests and publishes counters", async () => {
     let resolveFlush: () => void = () => undefined;
@@ -78,6 +82,68 @@ describe("save checkpoint controller", () => {
     expect(counters.save_checkpoint_failed ?? 0).toBe(0);
     expect(counters.save_checkpoint_in_flight).toBe(0);
     expect(counters.save_checkpoint_last_ms).toBe(45);
+  });
+
+  it("establishes the in-flight guard before callbacks can re-enter", async () => {
+    let controller!: ReturnType<typeof createSaveCheckpointController>;
+    let nestedFromStatus: Promise<void> | null = null;
+    let nestedFromFlush: Promise<void> | null = null;
+    let statusReentered = false;
+    let flushReentered = false;
+    const counters: SaveCheckpointCounters = {};
+    const flush = vi.fn(() => {
+      if (!flushReentered) {
+        flushReentered = true;
+        nestedFromFlush = controller.requestCheckpoint();
+      }
+      return Promise.resolve();
+    });
+    controller = createSaveCheckpointController({
+      flush,
+      getCounters: () => counters,
+      onStatus: (status) => {
+        if (status !== "saving checkpoint" || statusReentered) return;
+        statusReentered = true;
+        nestedFromStatus = controller.requestCheckpoint();
+      },
+    });
+
+    const first = controller.requestCheckpoint();
+    expect(nestedFromStatus).not.toBeNull();
+    expect(nestedFromFlush).not.toBeNull();
+    await Promise.all([first, nestedFromStatus!, nestedFromFlush!]);
+
+    expect(flush).toHaveBeenCalledOnce();
+    expect(counters.save_checkpoint_requests).toBe(1);
+    expect(counters.save_checkpoint_completed).toBe(1);
+  });
+
+  it("keeps saving when checkpoint clock instrumentation throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const flush = vi.fn(async () => undefined);
+    const controller = createSaveCheckpointController({
+      flush,
+      nowMs: () => { throw new Error("clock unavailable"); },
+    });
+
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    expect(flush).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps saving when checkpoint counter writes throw", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const flush = vi.fn(async () => undefined);
+    const counters = Object.freeze({}) as SaveCheckpointCounters;
+    const controller = createSaveCheckpointController({
+      flush,
+      getCounters: () => counters,
+      nowMs: () => 10,
+    });
+
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    expect(flush).toHaveBeenCalledTimes(2);
   });
 
   it("repeats flush passes until the checkpoint is clean", async () => {
@@ -143,6 +209,7 @@ describe("save checkpoint controller", () => {
   });
 
   it("does not let a status callback break a successful checkpoint", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     const status = vi.fn(() => { throw new Error("ui unavailable"); });
     const controller = createSaveCheckpointController({
       flush: async () => undefined,

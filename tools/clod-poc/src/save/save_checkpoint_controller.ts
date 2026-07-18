@@ -41,11 +41,41 @@ export function createSaveCheckpointController(
   const maxFlushPasses = normalizedPassCount(deps.maxFlushPasses);
   let inFlight: Promise<void> | null = null;
 
-  const counters = (): SaveCheckpointCounters | null => deps.getCounters?.() ?? null;
-  const increment = (key: keyof SaveCheckpointCounters): void => {
+  const counters = (): SaveCheckpointCounters | null => {
+    try {
+      return deps.getCounters?.() ?? null;
+    } catch (error) {
+      console.error("[save-checkpoint] counter provider failed", error);
+      return null;
+    }
+  };
+  const writeCounter = (
+    key: keyof SaveCheckpointCounters,
+    resolve: (current: number) => number,
+  ): void => {
     const target = counters();
     if (!target) return;
-    target[key] = (target[key] ?? 0) + 1;
+    try {
+      target[key] = resolve(target[key] ?? 0);
+    } catch (error) {
+      console.error(`[save-checkpoint] counter write failed: ${key}`, error);
+    }
+  };
+  const setCounter = (key: keyof SaveCheckpointCounters, value: number): void => {
+    writeCounter(key, () => value);
+  };
+  const increment = (key: keyof SaveCheckpointCounters): void => {
+    writeCounter(key, (current) => current + 1);
+  };
+  const readClock = (phase: string): number | null => {
+    try {
+      const value = nowMs();
+      if (Number.isFinite(value)) return value;
+      console.error(`[save-checkpoint] clock returned a non-finite value during ${phase}`);
+    } catch (error) {
+      console.error(`[save-checkpoint] clock failed during ${phase}`, error);
+    }
+    return null;
   };
   const publishStatus = (status: string): void => {
     try {
@@ -56,42 +86,53 @@ export function createSaveCheckpointController(
   };
   const flushToConvergence = async (): Promise<void> => {
     for (let pass = 1; pass <= maxFlushPasses; pass += 1) {
-      // Call flush immediately so concurrent requestCheckpoint() coalescing can observe
-      // an in-flight flush before the next microtask. Do not defer through Promise.then.
       await deps.flush();
       if (deps.isConverged?.() ?? true) return;
     }
     throw new Error(`checkpoint did not converge after ${maxFlushPasses} flush passes`);
   };
 
-  const requestCheckpoint = async (): Promise<void> => {
+  const requestCheckpoint = (): Promise<void> => {
     if (inFlight) return inFlight;
-    const startedAt = nowMs();
-    increment("save_checkpoint_requests");
-    const target = counters();
-    if (target) target.save_checkpoint_in_flight = 1;
-    publishStatus("saving checkpoint");
 
-    inFlight = flushToConvergence()
-      .then(() => {
+    let resolveCheckpoint!: () => void;
+    let rejectCheckpoint!: (reason: unknown) => void;
+    const current = new Promise<void>((resolve, reject) => {
+      resolveCheckpoint = resolve;
+      rejectCheckpoint = reject;
+    });
+    inFlight = current;
+
+    const runCheckpoint = async (): Promise<void> => {
+      const startedAt = readClock("start");
+      try {
+        increment("save_checkpoint_requests");
+        setCounter("save_checkpoint_in_flight", 1);
+        publishStatus("saving checkpoint");
+
+        await flushToConvergence();
         increment("save_checkpoint_completed");
         publishStatus("checkpoint saved");
-      })
-      .catch((error) => {
+      } catch (error) {
         increment("save_checkpoint_failed");
         publishStatus(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
-      })
-      .finally(() => {
-        const latest = counters();
-        if (latest) {
-          latest.save_checkpoint_in_flight = 0;
-          latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
+      } finally {
+        // Keep the guard active through cleanup so re-entrant instrumentation coalesces.
+        try {
+          setCounter("save_checkpoint_in_flight", 0);
+          const finishedAt = readClock("cleanup");
+          if (startedAt !== null && finishedAt !== null) {
+            setCounter("save_checkpoint_last_ms", Math.max(0, finishedAt - startedAt));
+          }
+        } finally {
+          if (inFlight === current) inFlight = null;
         }
-        inFlight = null;
-      });
+      }
+    };
 
-    return inFlight;
+    void runCheckpoint().then(resolveCheckpoint, rejectCheckpoint);
+    return current;
   };
 
   const bindShortcut = (target: Window = window): (() => void) => {
