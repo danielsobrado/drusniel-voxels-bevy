@@ -207,7 +207,9 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
       if (live && clod) liveClodOverlap++;
       if (ownershipClod && far) clodFarOverlap++;
       if (farClipmapOwned) farClipmapOwnedCells++;
-      if (farClipmapBand && !farClipmapOwned) farClipmapUnownedCells++;
+      // Seam cells handed to ready refined-CLOD pages have an owner; only count
+      // band cells the clipmap dropped without a refined page taking over.
+      if (farClipmapBand && !farClipmapOwned && !(refinementSeamCell && clodRefined)) farClipmapUnownedCells++;
       if (clodDistance <= snapshot.ownership.clodRadiusM && !live && !clod) liveClodGap++;
       if (clodDistance > snapshot.ownership.clodRadiusM && farDistance < farInnerRadius && !clod && !far) clodFarGap++;
 

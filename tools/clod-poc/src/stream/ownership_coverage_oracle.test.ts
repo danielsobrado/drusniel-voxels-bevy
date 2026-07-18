@@ -289,6 +289,10 @@ describe("ownership coverage oracle", () => {
     expect(counters.priority_owner_overlap_cells).toBe(0);
     expect(counters.clod_far_gap_holes).toBe(0);
     expect(counters.far_clipmap_ownership_holes).toBe(0);
+    // Seam cells owned by ready refined-CLOD pages are owned, not unowned:
+    // the acceptance gate holds far_clipmap_unowned_cells at zero while the
+    // refinement band is healthy.
+    expect(counters.far_clipmap_unowned_cells).toBe(0);
   });
 
   it("priority ownership is gap-free even though square tiles raw-overlap the circular rings", () => {

@@ -143,7 +143,10 @@ const SCENES: SceneSpec[] = [
   {
     name: "water",
     freeze: false,
-    extra: { water: "1", waterQuality: "high" },
+    // waterDebug=1: the river/lake spot finder needs window.waterProbe, which
+    // only installs in dev mode or with an explicit debug flag — acceptance
+    // must also pass against production (vite preview) builds.
+    extra: { water: "1", waterQuality: "high", waterDebug: "1" },
     validation: "water",
     waterAcceptance: true,
     gates: ["perf"],
@@ -1265,6 +1268,19 @@ function failedImageSanity(message = "screenshot was not captured"): ImageSanity
 }
 
 async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: string, options: RunSceneOptions): Promise<SceneResult> {
+  // Water acceptance must boot with water=1: scene presets (clodPerf=1 turns
+  // water off) apply at page boot only, so a reused page that booted without
+  // water never prefetches hydrology tiles and the river-spot scan comes up
+  // empty. Give the water scene its own page instead of the reused one.
+  const isolatedPage = options.reusePage && !options.firstSceneOnPage && scene.waterAcceptance === true;
+  if (isolatedPage) {
+    // The reused page's context was created implicitly by browser.newPage() and
+    // cannot spawn more pages; open a fresh context from the browser instead.
+    const owner = page.context().browser();
+    if (!owner) throw new Error("water acceptance isolated page requires a browser handle");
+    page = await createAcceptancePage(owner);
+    options = { ...options, reusePage: false, firstSceneOnPage: true };
+  }
   const consoleWarnings: string[] = [];
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -1479,6 +1495,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
   } finally {
     page.off("console", onConsole);
     page.off("pageerror", onPageError);
+    if (isolatedPage) await page.close().catch(() => undefined);
   }
 }
 
