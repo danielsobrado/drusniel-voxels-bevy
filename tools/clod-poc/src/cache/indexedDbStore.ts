@@ -137,7 +137,6 @@ export class IndexedDbStore implements PersistentCacheStore {
   private readonly config: ClodCachePersistentConfig;
   private db: IDBDatabase | null = null;
   private dbPromise: Promise<IDBDatabase> | null = null;
-  private recoveryAttempts = 0;
 
   get dbName(): string {
     return this.config.database_name;
@@ -183,15 +182,16 @@ export class IndexedDbStore implements PersistentCacheStore {
   }
 
   private async withRecovery<T>(op: () => Promise<T>): Promise<T> {
+    let recoveryAttempts = 0;
     for (;;) {
       try {
         return await op();
       } catch (error) {
-        if (!isRetryableIdbError(error) || this.recoveryAttempts >= MAX_IDB_RECOVERY_ATTEMPTS) throw error;
-        this.recoveryAttempts++;
+        if (!isRetryableIdbError(error) || recoveryAttempts >= MAX_IDB_RECOVERY_ATTEMPTS) throw error;
+        recoveryAttempts++;
         cacheLogger.warn(
           `IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName} `
-          + `(attempt ${this.recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
+          + `(attempt ${recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
         );
         await this.recreateDatabase();
       }
