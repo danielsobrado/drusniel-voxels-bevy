@@ -94,6 +94,7 @@ function treeGpuRingDrawResourcesInput(self: TreeSystem): TreeGpuRingDrawResourc
     settings: self.settings,
     worldCells: self.worldCells,
     currentLighting: self.currentLighting,
+    currentForestLighting: self.currentForestLighting,
     hydrologyWater: self.hydrologyWater,
     impostorAtlases: self.assets.impostorAtlases,
     foliageAtlas: self.assets.foliageAtlas,
