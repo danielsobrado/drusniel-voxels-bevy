@@ -1,3 +1,4 @@
+import { authorizeConstructionRemoval } from "./construction_remove_authority.js";
 import type {
   ConstructionTerrainConformHandler,
   ConstructionTerrainConformReceipt,
@@ -93,6 +94,10 @@ export interface UndoConstructionPlacementResult {
 export async function undoConstructionPlacementTransaction(
   input: UndoConstructionPlacementInput,
 ): Promise<UndoConstructionPlacementResult> {
+  const authority = authorizeConstructionRemoval(input.record.piece);
+  if (!authority.allowed) {
+    return { undone: false, reason: `edit command denied: ${authority.reason}` };
+  }
   if (!input.removePiece(input.record.piece.id)) {
     return { undone: false, reason: "piece is no longer present" };
   }

@@ -1,14 +1,24 @@
 import * as THREE from "three";
+import {
+  authorizeConstructionRemoval,
+  createConstructionRemoveAuthorizer,
+  installConstructionRemoveAuthorizer,
+  type ConstructionRemoveTarget,
+} from "./construction_remove_authority.js";
 import { surfaceHeight } from "../terrain/terrain.js";
+import { getDigEditRevision } from "../terrain/terrain_edits.js";
 import {
   canCommitBuild,
   publishPlayerEditAuthorityDecision,
   type PlayerEditAuthorityConfig,
   type PlayerEditAuthorityPoint,
 } from "../player/player_edit_authority.js";
+import type { EditCommandDenialReason } from "../player/edit_commands.js";
 import type { ConstructionPlacementConfig } from "./types.js";
 
 const RAYCAST_REFINE_STEPS = 12;
+const CONSTRUCTION_ROOT_NAME = "construction-root";
+const CONSTRUCTION_GHOST_NAME = "construction-ghost";
 
 export interface ConstructionCommitGuardDeps {
   domElement: HTMLElement;
@@ -19,6 +29,10 @@ export interface ConstructionCommitGuardDeps {
   editAuthority: PlayerEditAuthorityConfig;
   getAuthorityOrigin: () => PlayerEditAuthorityPoint | null;
   getCounters: () => Record<string, number> | null;
+  getInteractionMode?: () => string;
+  getTerrainRevision?: () => number;
+  constructionReadyAt?: (x: number, z: number) => boolean;
+  recordEditDenial?: (reason: EditCommandDenialReason) => void;
   onRejected?: (reason: string) => void;
 }
 
@@ -77,8 +91,60 @@ function raycastTerrain(
   return null;
 }
 
+function constructionRoot(camera: THREE.Camera): THREE.Object3D | null {
+  let root: THREE.Object3D = camera;
+  while (root.parent) root = root.parent;
+  return root.getObjectByName(CONSTRUCTION_ROOT_NAME) ?? null;
+}
+
+function raycastConstructionTarget(ray: THREE.Ray, camera: THREE.Camera): ConstructionRemoveTarget | null {
+  const root = constructionRoot(camera);
+  if (!root) return null;
+  root.updateMatrixWorld(true);
+  const meshes = root.children.filter((child): child is THREE.Mesh => (
+    child instanceof THREE.Mesh && child.name !== CONSTRUCTION_GHOST_NAME
+  ));
+  if (meshes.length === 0) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.ray.copy(ray);
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (!hit) return null;
+  const position = hit.object.getWorldPosition(new THREE.Vector3());
+  return {
+    id: hit.object.uuid,
+    position: [position.x, position.y, position.z],
+  };
+}
+
+function rejectPointerEvent(event: PointerEvent): void {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
 export function installConstructionCommitGuard(deps: ConstructionCommitGuardDeps): () => void {
+  const disposeRemoveAuthorizer = installConstructionRemoveAuthorizer(createConstructionRemoveAuthorizer({
+    getActorPosition: deps.getAuthorityOrigin,
+    getCurrentMode: deps.getInteractionMode ?? (() => "playing"),
+    getTerrainRevision: deps.getTerrainRevision ?? getDigEditRevision,
+    getMaxDistanceM: () => deps.editAuthority.allowFarCommit
+      ? Number.MAX_SAFE_INTEGER
+      : deps.editAuthority.buildCommitRadiusM,
+    targetReadyAt: deps.constructionReadyAt,
+    onDenied: (reason) => deps.recordEditDenial?.(reason),
+  }));
+
   const onPointerDown = (event: PointerEvent): void => {
+    if (event.button === 2) {
+      const ray = pointerRay(event, deps.domElement, deps.camera);
+      const target = ray ? raycastConstructionTarget(ray, deps.camera) : null;
+      if (!target) return;
+      const verdict = authorizeConstructionRemoval(target);
+      if (verdict.allowed) return;
+      rejectPointerEvent(event);
+      deps.onRejected?.(`construction removal denied: ${verdict.reason}`);
+      return;
+    }
+
     if (event.button !== 0) return;
     const origin = deps.getAuthorityOrigin();
     if (!origin || deps.editAuthority.allowFarCommit) return;
@@ -89,10 +155,12 @@ export function installConstructionCommitGuard(deps: ConstructionCommitGuardDeps
     const decision = canCommitBuild(deps.editAuthority, origin, hit);
     publishPlayerEditAuthorityDecision(deps.getCounters(), decision);
     if (decision.allowed) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    rejectPointerEvent(event);
     deps.onRejected?.(decision.reason ?? "build target is outside commit range");
   };
   deps.domElement.addEventListener("pointerdown", onPointerDown, { capture: true });
-  return () => deps.domElement.removeEventListener("pointerdown", onPointerDown, { capture: true });
+  return () => {
+    deps.domElement.removeEventListener("pointerdown", onPointerDown, { capture: true });
+    disposeRemoveAuthorizer();
+  };
 }
