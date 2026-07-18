@@ -116,7 +116,8 @@ export function createStoneNodeMaterial(
       };
       const hydro: TslNode = sampleHydrologyBilinearTsl(instA.x, instA.z, hydroSample);
       const heightAboveWater: TslNode = instA.y.sub(hydro.x);
-      groundY = sampleCarvedBedBilinearTsl(instA.x, instA.z, hydroSample).sub(sinkDepth);
+      const sampledGround: TslNode = sampleCarvedBedBilinearTsl(instA.x, instA.z, hydroSample).sub(sinkDepth);
+      groundY = underwater.select(instA.y, sampledGround);
       const dryVisibility: TslNode = hydro.y.lessThan(0.5).or(heightAboveWater.greaterThan(0.03));
       aboveWater = underwater.or(dryVisibility);
       const shoreWet: TslNode = hydro.y
