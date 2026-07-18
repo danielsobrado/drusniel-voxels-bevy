@@ -6,6 +6,7 @@ import type { TreeGeometryMap } from "./tree_geometry.js";
 import { configureTreeImpostorAtlasTexture } from "./tree_impostor_baker.js";
 import {
   TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
+  readTreeImpostorAtlasPixels,
   validateTreeImpostorRenderTargetSize,
 } from "./tree_impostor_atlas_readback.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
@@ -56,7 +57,7 @@ describe("tree impostor quality defaults", () => {
     expect(texture.anisotropy).toBeGreaterThanOrEqual(8);
   });
 
-  it("rejects atlas dimensions outside the portable texture contract", () => {
+  it("rejects atlas dimensions outside the supported texture contract", () => {
     expect(() => validateTreeImpostorRenderTargetSize(
       TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
       TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
@@ -65,8 +66,18 @@ describe("tree impostor quality defaults", () => {
       TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION + 1,
       1024,
     )).toThrow(/exceeds the portable/);
+    expect(() => validateTreeImpostorRenderTargetSize(1024, 5120)).toThrow(/unsupported age-layer pages/);
     expect(() => validateTreeImpostorRenderTargetSize(1024, 12288)).toThrow(/disable age-layer baking/);
     expect(() => validateTreeImpostorRenderTargetSize(0, 1024)).toThrow(/positive integers/);
+  });
+
+  it("fails rather than publishing an unclean atlas when readback is unavailable", async () => {
+    await expect(readTreeImpostorAtlasPixels(
+      {},
+      {} as THREE.WebGLRenderTarget,
+      64,
+      64,
+    )).rejects.toThrow(/requires asynchronous render-target readback/);
   });
 
   it("keeps the balanced four-page mipmapped fallback within 256 MiB", () => {
