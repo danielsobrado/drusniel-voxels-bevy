@@ -6,6 +6,7 @@ import {
   type WaterRiverDebugStats,
 } from "../../water/index.js";
 import type { WaterController } from "../../runtime/water_weather/water_controller.js";
+import { addWaterEffectsGui } from "./water_effects_gui.js";
 
 export interface WaterGuiDeps {
   waterController: WaterController;
@@ -153,6 +154,13 @@ function addWaterRefractionFolder(
   folder.add(actions, "showFinal").name("debug final");
 }
 
+function syncWaterEffectVisual(target: WaterVisual, next: WaterVisual): void {
+  target.bodies = next.bodies;
+  target.glacialMurkiness = next.glacialMurkiness;
+  target.rockFlour = next.rockFlour;
+  target.reflection.clipmapTiers = next.reflection.clipmapTiers;
+}
+
 export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
   const visual = deps.makeWaterVisual();
 
@@ -194,6 +202,10 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     getCascadeParticleStats: () => deps.waterController.getCascadeParticleStats(),
   });
 
+  addWaterEffectsGui(gui, {
+    waterController: deps.waterController,
+    onVisualChanged: () => syncWaterEffectVisual(visual, deps.makeWaterVisual()),
+  });
   addDeepWaterLookFolder(gui, visual, rebuildVisual);
   addWaterRefractionFolder(gui, visual, rebuildVisual, setDebugMode);
 }

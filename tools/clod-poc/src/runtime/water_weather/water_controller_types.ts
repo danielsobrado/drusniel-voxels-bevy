@@ -5,6 +5,8 @@ import type {
   WaterConfig,
   WaterDebugState,
   WATER_DEBUG_MODES,
+  WaterEffectKey,
+  WaterEffectsState,
 } from "../../water/index.js";
 import type { WaterField, WaterClipmap } from "../../water/index.js";
 import type { HydrologySystem } from "../../water/hydrologySystem.js";
@@ -66,6 +68,8 @@ export interface WaterController {
   readonly debugState: WaterDebugState;
   readonly runtimeFeatures: WaterRuntimeFeatures;
   makeVisual(): { depthWrite: boolean } & WaterConfig["visual"];
+  getEffectsState(): Readonly<WaterEffectsState>;
+  setEffectEnabled(effect: WaterEffectKey, enabled: boolean): void;
   setVisible(enabled: boolean): void;
   setDebugMode(mode: keyof typeof WATER_DEBUG_MODES): void;
   setClipmapTint(enabled: boolean): void;

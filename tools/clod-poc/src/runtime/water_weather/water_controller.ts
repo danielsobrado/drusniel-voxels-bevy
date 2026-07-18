@@ -4,6 +4,7 @@ import {
   WATER_DEBUG_MODES,
   WaterClipmap,
   WaterField,
+  createWaterEffectsRuntime,
   resolveGlacialWaterVisual,
   resolveRockFlourWaterVisual,
   resolveWaterRockFlourEnabled,
@@ -86,10 +87,12 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     tierVisual.rockFlour.enabled,
     deps.searchParams,
   );
+  const effectsRuntime = createWaterEffectsRuntime(tierVisual, rockFlourEnabled);
   const resolveBiomeTintedVisual = () => {
     const biomeVisualState = readActiveBiomeVisualState();
-    const glacialVisual = resolveGlacialWaterVisual(tierVisual, biomeVisualState);
-    return resolveRockFlourWaterVisual(glacialVisual, biomeVisualState, rockFlourEnabled);
+    const effectVisual = effectsRuntime.apply(tierVisual);
+    const glacialVisual = resolveGlacialWaterVisual(effectVisual, biomeVisualState);
+    return resolveRockFlourWaterVisual(glacialVisual, biomeVisualState, effectVisual.rockFlour.enabled);
   };
   const clipmapVisual = resolveBiomeTintedVisual();
   const waterMaterialFactory = deps.isWebGpu
@@ -99,10 +102,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     : createWaterShaderMaterial;
   const clipmapWaterConfig = clipmapVisual === deps.waterConfig.visual
     ? deps.waterConfig
-    : {
-        ...deps.waterConfig,
-        visual: clipmapVisual,
-      };
+    : { ...deps.waterConfig, visual: clipmapVisual };
   const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
 
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
@@ -275,24 +275,21 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     authority,
     editedWater,
     debugState,
-    get runtimeFeatures() {
-      return liveRuntimeFeatures();
-    },
+    get runtimeFeatures() { return liveRuntimeFeatures(); },
     makeVisual,
+    getEffectsState() { return effectsRuntime.current(); },
+    setEffectEnabled(effect, enabled) {
+      if (!effectsRuntime.setEnabled(effect, enabled)) return;
+      clipmap.updateVisual(makeVisual());
+    },
     setVisible(enabled) {
       clipmap.setVisible(enabled);
       residueOverlay.setVisible(enabled);
       cascadeParticles.setVisible(enabled);
     },
-    setDebugMode(mode) {
-      clipmap.setDebugMode(WATER_DEBUG_MODES[mode]);
-    },
-    setClipmapTint(enabled) {
-      clipmap.setClipmapTint(enabled);
-    },
-    setWireframe(enabled) {
-      clipmap.setWireframe(enabled);
-    },
+    setDebugMode(mode) { clipmap.setDebugMode(WATER_DEBUG_MODES[mode]); },
+    setClipmapTint(enabled) { clipmap.setClipmapTint(enabled); },
+    setWireframe(enabled) { clipmap.setWireframe(enabled); },
     setShoreSurfEnabled(enabled) {
       debugState.shoreSurfEnabled = enabled;
       applyShoreSurfDebugState();
@@ -309,12 +306,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       debugState.shoreSurfMaxDepth = Math.max(0.01, depth);
       applyShoreSurfDebugState();
     },
-    updateVisual(visual) {
-      clipmap.updateVisual(visual);
-    },
-    updateSunDirection(direction) {
-      clipmap.updateSunDirection(direction);
-    },
+    updateVisual(visual) { clipmap.updateVisual(effectsRuntime.apply(visual)); },
+    updateSunDirection(direction) { clipmap.updateSunDirection(direction); },
     update(deltaSeconds, cameraPosition) {
       if (hydrologyPrefetchRadiusM > 0) {
         deps.hydrologySystem?.prefetchTiles(cameraPosition.x, cameraPosition.z, hydrologyPrefetchRadiusM);
@@ -324,15 +317,11 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       residueOverlay.update(deltaSeconds, cameraPosition);
       cascadeParticles.update(deltaSeconds, cameraPosition);
     },
-    getCascadeParticleStats() {
-      return cascadeParticles.getStats();
-    },
+    getCascadeParticleStats() { return cascadeParticles.getStats(); },
     installDebugApi(hooks: WaterDebugPoseHooks) {
       installWaterDebugApi(deps, field, clipmap, cascadeParticles, debugState, applyShoreSurfDebugState, hooks);
     },
-    logDevInitOnce() {
-      logWaterDevInit(clipmap, deps, field, cascadeParticles, devLogged);
-    },
+    logDevInitOnce() { logWaterDevInit(clipmap, deps, field, cascadeParticles, devLogged); },
     dispose() {
       deps.hydrologySystem?.attachTileRemote(null);
       hydrologyRemote?.dispose();
