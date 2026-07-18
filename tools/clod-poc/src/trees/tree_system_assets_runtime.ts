@@ -21,6 +21,8 @@ import {
   selectTreeSystemGeometry,
   selectTreeSystemMaterial,
   updateTreeSystemImpostorMaterial,
+  updateTreeSystemImpostorMaterialsForestLighting,
+  updateTreeSystemImpostorMaterialsLighting,
 } from "./tree_system_impostor_resources.js";
 import {
   applyTreeSystemMaterials,
@@ -29,6 +31,10 @@ import {
 import type { TreePatch, TreeImpostorStatus } from "./tree_system_types.js";
 import type { TreeMeshBoundsState } from "./tree_system_mesh_bounds.js";
 import { waitForTreeRendererSubmittedWork } from "./tree_renderer_gpu_sync.js";
+import {
+  treeImpostorBakeCanCommit,
+  treeImpostorBakeContentKey,
+} from "./tree_impostor_lifecycle.js";
 
 export interface TreeSystemAssetsOptions {
   settings: TreeSettings;
@@ -59,7 +65,8 @@ export class TreeSystemAssets {
   private currentLighting: EnvironmentLighting | undefined;
   private currentForestLighting: ForestLightingMaterialState | null = null;
   private impostorBakeController: AbortController | null = null;
-  private impostorBakeSettingsKey: string | null = null;
+  private impostorBakeContentKey: string | null = null;
+  private impostorAtlasContentKey: string | null = null;
 
   constructor(options: TreeSystemAssetsOptions) {
     this.settings = options.settings;
@@ -74,29 +81,35 @@ export class TreeSystemAssets {
     this.impostorStatus = this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
       ? "pending"
       : "disabled";
-    if (options.impostorAtlases) this.setImpostorAtlases(options.impostorAtlases);
-    else publishTreeImpostorDebugStatus(this.impostorAtlases);
+    if (options.impostorAtlases) {
+      this.setImpostorAtlases(options.impostorAtlases, this.currentImpostorBakeContentKey());
+    } else {
+      publishTreeImpostorDebugStatus(this.impostorAtlases);
+    }
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
     this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
+    updateTreeSystemImpostorMaterialsLighting(this.impostorMaterials, lighting);
   }
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
     this.currentForestLighting = state;
     this.materialHandle.updateForestLighting?.(state);
+    updateTreeSystemImpostorMaterialsForestLighting(this.impostorMaterials, state);
   }
 
   cancelImpostorBake(reason = "tree impostor baking cancelled"): void {
     this.impostorBakeController?.abort(reason);
     this.impostorBakeController = null;
-    this.impostorBakeSettingsKey = null;
+    this.impostorBakeContentKey = null;
   }
 
   rebuildGeometries(): void {
     this.cancelImpostorBake("tree geometry rebuilt");
     this.geometryKey = treeGeometryKey(this.settings);
+    this.invalidateImpostorAtlases("tree geometry rebuilt");
     disposeTreeGeometryMap(this.geometries);
     this.geometries = createTreeGeometryMap(this.settings);
     this.materialHandle.dispose();
@@ -106,18 +119,19 @@ export class TreeSystemAssets {
     this.foliageAtlasReason = null;
     this.materialHandle = this.createMaterialHandle();
     this.publishFoliageAtlasStatus();
-    this.disposeBakedImpostorGeometries();
   }
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
     this.cancelImpostorBake("superseded by a newer tree impostor bake");
     const controller = new AbortController();
-    const bakeSettingsKey = this.currentImpostorBakeSettingsKey();
+    const bakeContentKey = this.currentImpostorBakeContentKey();
     this.impostorBakeController = controller;
-    this.impostorBakeSettingsKey = bakeSettingsKey;
+    this.impostorBakeContentKey = bakeContentKey;
     try {
       await this.captureFoliageAtlas(renderer, controller.signal);
-      if (controller.signal.aborted) return this.cancelledBakeResult(controller.signal.reason);
+      if (!this.canCommitImpostorBake(controller, bakeContentKey)) {
+        return this.cancelledBakeResult(controller.signal.reason);
+      }
       if (!this.settings.impostors.enabled || !this.settings.impostors.bakeOnStart) {
         this.impostorStatus = "disabled";
         this.impostorReason = "tree impostor baking disabled";
@@ -134,14 +148,17 @@ export class TreeSystemAssets {
         webgpu: this.webgpu,
         signal: controller.signal,
       });
-      const stale = bakeSettingsKey !== this.currentImpostorBakeSettingsKey();
-      if (controller.signal.aborted || this.impostorBakeController !== controller || stale) {
-        for (const atlas of Object.values(result.atlases)) atlas?.dispose();
+      if (!this.canCommitImpostorBake(controller, bakeContentKey)) {
+        this.disposeAtlasSet(result.atlases);
         return this.cancelledBakeResult(controller.signal.reason);
       }
       if (result.supported) {
         await waitForTreeRendererSubmittedWork(renderer);
-        this.setImpostorAtlases(result.atlases);
+        if (!this.canCommitImpostorBake(controller, bakeContentKey)) {
+          this.disposeAtlasSet(result.atlases);
+          return this.cancelledBakeResult(controller.signal.reason);
+        }
+        this.setImpostorAtlases(result.atlases, bakeContentKey);
         this.impostorStatus = "baked";
         this.impostorReason = null;
       } else {
@@ -152,18 +169,26 @@ export class TreeSystemAssets {
     } finally {
       if (this.impostorBakeController === controller) {
         this.impostorBakeController = null;
-        this.impostorBakeSettingsKey = null;
+        this.impostorBakeContentKey = null;
       }
     }
   }
 
-  setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
-    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+  setImpostorAtlases(
+    atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+    contentKey = this.currentImpostorBakeContentKey(),
+  ): void {
+    this.disposeAtlasSet(this.impostorAtlases);
     this.impostorAtlases = { ...atlases };
+    this.impostorAtlasContentKey = contentKey;
     publishTreeImpostorDebugStatus(this.impostorAtlases);
     this.disposeImpostorMaterials();
     this.disposeBakedImpostorGeometries();
     this.updateImpostorMaterials();
+    if (Object.values(this.impostorAtlases).some((atlas) => atlas?.ready)) {
+      this.impostorStatus = "baked";
+      this.impostorReason = null;
+    }
   }
 
   materialFor(species: TreeSpeciesId, lod: TreeLod): THREE.Material {
@@ -188,8 +213,9 @@ export class TreeSystemAssets {
   }
 
   refreshMaterials(patches: readonly TreePatch[]): void {
-    if (this.impostorBakeController && this.impostorBakeSettingsKey !== this.currentImpostorBakeSettingsKey()) {
-      this.cancelImpostorBake("tree impostor settings changed");
+    const currentContentKey = this.currentImpostorBakeContentKey();
+    if (this.impostorBakeController && this.impostorBakeContentKey !== currentContentKey) {
+      this.cancelImpostorBake("tree impostor source settings changed");
     }
     this.materialHandle.updateSettings(this.settings);
     this.updateImpostorMaterials();
@@ -239,7 +265,9 @@ export class TreeSystemAssets {
     this.crownProxyGeometry.dispose();
     this.disposeBakedImpostorGeometries();
     this.disposeImpostorMaterials();
-    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    this.disposeAtlasSet(this.impostorAtlases);
+    this.impostorAtlases = {};
+    this.impostorAtlasContentKey = null;
     publishTreeImpostorDebugStatus({});
     this.materialHandle.dispose();
     this.foliageAtlas.dispose();
@@ -271,9 +299,11 @@ export class TreeSystemAssets {
 
   private cancelledBakeResult(reason: unknown): { supported: false; reason: string } {
     const message = String(reason ?? "tree impostor baking cancelled");
+    const hasAppliedAtlas = this.impostorAtlasContentKey !== null
+      && Object.values(this.impostorAtlases).some((atlas) => atlas?.ready);
     this.impostorStatus = !this.settings.impostors.enabled
       ? "disabled"
-      : Object.values(this.impostorAtlases).some((atlas) => atlas?.ready)
+      : hasAppliedAtlas
         ? "baked"
         : "pending";
     this.impostorReason = message;
@@ -297,12 +327,31 @@ export class TreeSystemAssets {
     return handle;
   }
 
-  private currentImpostorBakeSettingsKey(): string {
-    return JSON.stringify({
-      geometry: treeGeometryKey(this.settings),
-      impostors: this.settings.impostors,
-      foliage: this.settings.foliage,
+  private currentImpostorBakeContentKey(): string {
+    return treeImpostorBakeContentKey(this.settings, this.geometryKey);
+  }
+
+  private canCommitImpostorBake(controller: AbortController, expectedContentKey: string): boolean {
+    return treeImpostorBakeCanCommit({
+      signal: controller.signal,
+      activeController: this.impostorBakeController,
+      controller,
+      expectedContentKey,
+      currentContentKey: this.currentImpostorBakeContentKey(),
     });
+  }
+
+  private invalidateImpostorAtlases(reason: string): void {
+    this.disposeImpostorMaterials();
+    this.disposeBakedImpostorGeometries();
+    this.disposeAtlasSet(this.impostorAtlases);
+    this.impostorAtlases = {};
+    this.impostorAtlasContentKey = null;
+    publishTreeImpostorDebugStatus(this.impostorAtlases);
+    this.impostorStatus = this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
+      ? "pending"
+      : "disabled";
+    this.impostorReason = reason;
   }
 
   private updateImpostorMaterials(): void {
@@ -314,11 +363,17 @@ export class TreeSystemAssets {
         settings: this.settings,
         atlas,
         webgpu: this.webgpu,
+        lighting: this.currentLighting,
+        forestLighting: this.currentForestLighting,
         viewBlend: true,
         viewBlendGeometryReady: true,
         impostorMaterials: this.impostorMaterials,
       });
     }
+  }
+
+  private disposeAtlasSet(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
+    for (const atlas of Object.values(atlases)) atlas?.dispose();
   }
 
   private disposeBakedImpostorGeometries(): void {

@@ -177,6 +177,26 @@ fn tree_pcg2d_u32(cell: vec2<i32>, salt: u32) -> vec2<u32> {
   return next;
 }
 
+export function withTreeCrownProxyShadowIndexCount(source: string, indexCount: number): string {
+  const safeIndexCount = Math.max(0, Math.floor(indexCount));
+  const helper = `fn shadow_index_count_for_group(group: u32) -> u32 {
+  let visible_group = group % TREE_GROUP_COUNT;
+  let lod = visible_group % TREE_LOD_COUNT;
+  if (lod >= TREE_LOD_FAR) { return ${safeIndexCount}u; }
+  return index_count_for_group(visible_group);
+}`;
+  let next = source.replace("fn in_frustum(center: vec3<f32>, slack: f32) -> bool {", `${helper}\n\nfn in_frustum(center: vec3<f32>, slack: f32) -> bool {`);
+  next = next.replace(
+    "shadow_indirect_args[base + 0u] = index_count_for_group(group % TREE_GROUP_COUNT);",
+    "shadow_indirect_args[base + 0u] = shadow_index_count_for_group(group);",
+  );
+  if (!next.includes(`if (lod >= TREE_LOD_FAR) { return ${safeIndexCount}u; }`)
+    || !next.includes("shadow_index_count_for_group(group)")) {
+    throw new Error("tree ring WGSL crown-proxy shadow index transform failed");
+  }
+  return next;
+}
+
 export function withTreeShadowLodGate(source: string): string {
   return source.replace(
     "if (lod_active == 0u || params.settings_u.w == 0u) { return; }",

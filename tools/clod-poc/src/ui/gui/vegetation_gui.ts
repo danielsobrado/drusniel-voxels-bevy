@@ -18,6 +18,9 @@ import { understoryDepthPrepassFromQuery } from "../../understory/understory_dep
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { GuiController } from "./gui_controller.js";
 
+export const TREE_DISTANCE_GUI_MAX_M = 1600;
+export const TREE_GPU_VISIBLE_GUI_MAX = 160_000;
+
 export interface VegetationGuiDeps {
   grassController: GrassController;
   stoneController: StoneController;
@@ -321,7 +324,7 @@ export function createVegetationGui(
   });
   treeFolder.add(state, "treeDepthPrepassMaxLod", [...TREE_DEPTH_PREPASS_MAX_LODS]).name("depth prepass max LOD").onChange(updateTreeDepthPrepass);
   treeSettingControllers.push(
-    treeFolder.add(state, "treeDistance", 0, 800, 5).name("active ring m").onFinishChange(treeActions.rebuild),
+    treeFolder.add(state, "treeDistance", 0, TREE_DISTANCE_GUI_MAX_M, 5).name("active ring m").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeDensity", 0, 2, 0.05).name("density").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeSpacing", 0.5, 24, 0.25).name("spacing m").onFinishChange(treeActions.rebuild),
@@ -338,7 +341,7 @@ export function createVegetationGui(
     treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuReadbackVisibleLists").name("GPU readback lists").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuValidateAgainstCpu").name("validate GPU vs CPU").onChange(updateTreeGpuSettings),
-    treeFolder.add(state, "treeGpuMaxVisible", 0, 50000, 1000).name("GPU max visible").onFinishChange(updateTreeGpuSettings),
+    treeFolder.add(state, "treeGpuMaxVisible", 0, TREE_GPU_VISIBLE_GUI_MAX, 1000).name("GPU max visible").onFinishChange(updateTreeGpuSettings),
   );
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);

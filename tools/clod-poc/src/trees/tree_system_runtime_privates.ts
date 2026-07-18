@@ -10,6 +10,7 @@ import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
 import { treeLodWithinDepthPrepass } from "./tree_depth_prepass_runtime.js";
+import { selectTreeCpuPrepassNodes } from "./tree_system_prepass_policy.js";
 
 export function treeCpuPatchInput(self: TreeSystem) {
   return {
@@ -30,9 +31,15 @@ export function treeCpuPatchInput(self: TreeSystem) {
       impostorAtlases: self.assets.impostorAtlases,
     }),
     prepassNodesFor: self.useCpuTreePrepass
-      ? (_species: TreeSpeciesId, lod: TreeLod) => treeLodWithinDepthPrepass(self.treePrepassMaxLod, lod)
-        ? self.assets.materialHandle.prepassNodesFor?.(lod)
-        : undefined
+      ? (species: TreeSpeciesId, lod: TreeLod) => {
+          if (!treeLodWithinDepthPrepass(self.treePrepassMaxLod, lod)) return undefined;
+          return selectTreeCpuPrepassNodes({
+            lod,
+            bakedImpostor: self.settings.impostors.enabled && self.assets.impostorAtlases[species]?.ready === true,
+            impostorMaterial: self.assets.impostorMaterials[species],
+            baseNodes: self.assets.materialHandle.prepassNodesFor?.(lod),
+          });
+        }
       : undefined,
   };
 }

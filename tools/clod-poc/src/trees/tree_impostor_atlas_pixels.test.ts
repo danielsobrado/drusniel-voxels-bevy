@@ -26,7 +26,7 @@ function pixel(pixels: Uint8Array, width: number, x: number, y: number): number[
 }
 
 describe("tree impostor atlas pixels", () => {
-  it("dilates RGB and normal-depth within each tile without changing coverage", () => {
+  it("dilates normal-depth while preserving premultiplied albedo and coverage", () => {
     const width = 4;
     const height = 2;
     const tileSize = 2;
@@ -40,13 +40,14 @@ describe("tree impostor atlas pixels", () => {
 
     dilateTreeImpostorAtlasTiles({ albedo, normalDepth, width, height, tileSize });
 
-    expect(pixel(albedo, width, 1, 1)).toEqual([120, 80, 40, 0]);
+    expect(pixel(albedo, width, 0, 0)).toEqual([120, 80, 40, 255]);
+    expect(pixel(albedo, width, 1, 1)).toEqual([0, 0, 0, 0]);
     expect(pixel(normalDepth, width, 1, 1)).toEqual([128, 255, 128, 96]);
-    expect(pixel(albedo, width, 2, 0)).toEqual([20, 60, 100, 0]);
+    expect(pixel(albedo, width, 2, 0)).toEqual([0, 0, 0, 0]);
     expect(pixel(normalDepth, width, 2, 0)).toEqual([255, 128, 128, 180]);
   });
 
-  it("never bleeds colours across tile boundaries", () => {
+  it("never bleeds normal-depth data across tile boundaries", () => {
     const width = 4;
     const height = 2;
     const tileSize = 2;
@@ -60,8 +61,10 @@ describe("tree impostor atlas pixels", () => {
 
     dilateTreeImpostorAtlasTiles({ albedo, normalDepth, width, height, tileSize });
 
-    expect(pixel(albedo, width, 0, 1)).toEqual([240, 10, 10, 0]);
-    expect(pixel(albedo, width, 3, 1)).toEqual([10, 10, 240, 0]);
+    expect(pixel(albedo, width, 0, 1)).toEqual([0, 0, 0, 0]);
+    expect(pixel(albedo, width, 3, 1)).toEqual([0, 0, 0, 0]);
+    expect(pixel(normalDepth, width, 0, 1)).toEqual([10, 20, 30, 40]);
+    expect(pixel(normalDepth, width, 3, 1)).toEqual([50, 60, 70, 80]);
   });
 
   it("produces identical cleanup when stepped one operation at a time", () => {
@@ -101,6 +104,27 @@ describe("tree impostor atlas pixels", () => {
     expect(steppedAlbedo).toEqual(synchronousAlbedo);
     expect(steppedNormalDepth).toEqual(synchronousNormalDepth);
     expect(job.completed()).toBe(job.total());
+  });
+
+  it("batches dilation work while keeping row copies narrowly bounded", () => {
+    const tileSize = 8;
+    const albedo = new Uint8Array(tileSize * tileSize * 4);
+    const normalDepth = new Uint8Array(tileSize * tileSize * 4);
+    setPixel(albedo, tileSize, 4, 4, [180, 100, 40, 255]);
+    setPixel(normalDepth, tileSize, 4, 4, [128, 255, 128, 90]);
+
+    const dilation = createTreeImpostorAtlasDilationJob({
+      albedo,
+      normalDepth,
+      width: tileSize,
+      height: tileSize,
+      tileSize,
+    });
+    expect(dilation.step(4096)).toBe(true);
+
+    const rowFlip = createTreeImpostorRowFlipJob(new Uint8Array(128 * 4), 1, 128);
+    expect(rowFlip.step(4096)).toBe(false);
+    expect(rowFlip.completed()).toBe(16);
   });
 
   it("flips rows incrementally and validates readback lengths", () => {

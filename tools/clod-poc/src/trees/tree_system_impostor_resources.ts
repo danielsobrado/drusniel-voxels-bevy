@@ -1,7 +1,11 @@
 import * as THREE from "three";
+import type { EnvironmentLighting } from "../environment/environment.js";
+import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import { createTreeBakedImpostorGeometry, type TreeGeometryMap } from "./tree_geometry.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { updateTreeImpostorMaterialForestLighting } from "./tree_impostor_forest_lighting.js";
+import { updateLiveTreeImpostorMaterialLighting } from "./tree_impostor_live_material.js";
 import {
   createSelectedTreeImpostorMaterial,
   treeImpostorMaterialMatchesSelection,
@@ -33,6 +37,8 @@ export interface TreeSystemImpostorMaterialUpdateInput {
   settings: TreeSettings;
   atlas: TreeImpostorAtlas;
   webgpu: boolean;
+  lighting?: EnvironmentLighting;
+  forestLighting?: ForestLightingMaterialState | null;
   viewBlend?: boolean;
   viewBlendGeometryReady?: boolean;
   impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>>;
@@ -78,11 +84,39 @@ export function updateTreeSystemImpostorMaterial(input: TreeSystemImpostorMateri
   const current = input.impostorMaterials[input.species];
   if (!treeImpostorMaterialMatchesSelection(current, selection)) {
     current?.dispose();
-    input.impostorMaterials[input.species] = createSelectedTreeImpostorMaterial(input.settings, input.atlas, selection);
+    input.impostorMaterials[input.species] = createSelectedTreeImpostorMaterial(
+      input.settings,
+      input.atlas,
+      selection,
+      input.lighting,
+      input.forestLighting ?? null,
+    );
   }
   const material = input.impostorMaterials[input.species]!;
   updateTreeImpostorMaterialSettings(material, input.settings);
+  if (input.lighting) updateLiveTreeImpostorMaterialLighting(material, input.lighting);
+  if (input.forestLighting !== undefined) {
+    updateTreeImpostorMaterialForestLighting(material, input.forestLighting);
+  }
   return material;
+}
+
+export function updateTreeSystemImpostorMaterialsLighting(
+  materials: Partial<Record<TreeSpeciesId, THREE.Material>>,
+  lighting: EnvironmentLighting,
+): void {
+  for (const material of Object.values(materials)) {
+    if (material) updateLiveTreeImpostorMaterialLighting(material, lighting);
+  }
+}
+
+export function updateTreeSystemImpostorMaterialsForestLighting(
+  materials: Partial<Record<TreeSpeciesId, THREE.Material>>,
+  state: ForestLightingMaterialState | null,
+): void {
+  for (const material of Object.values(materials)) {
+    if (material) updateTreeImpostorMaterialForestLighting(material, state);
+  }
 }
 
 export function disposeTreeSystemBakedImpostorGeometries(

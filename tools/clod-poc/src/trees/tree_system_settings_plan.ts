@@ -29,7 +29,9 @@ export function planTreeSystemSettingsUpdate(
   const renderChanged = patch.render !== undefined;
   const farMaterialChanged = patch.render?.farCheapMaterial !== undefined &&
     patch.render.farCheapMaterial !== current.render.farCheapMaterial;
-  const clearGpuRing = patch.gpu !== undefined || farMaterialChanged || renderChanged;
+  const shadowPolicyChanged = patch.lod?.shadowsMaxLod !== undefined &&
+    patch.lod.shadowsMaxLod !== current.lod.shadowsMaxLod;
+  const clearGpuRing = patch.gpu !== undefined || farMaterialChanged || renderChanged || shadowPolicyChanged;
   const nextGpuStatus = !patch.gpu
     ? null
     : !patch.gpu.enabled

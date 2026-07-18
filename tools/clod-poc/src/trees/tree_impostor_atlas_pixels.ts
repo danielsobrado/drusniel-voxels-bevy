@@ -1,7 +1,8 @@
 const BYTES_PER_PIXEL = 4;
 const COVERAGE_THRESHOLD = 8;
 const DEFAULT_DILATION_OPERATIONS = 1024;
-const MAX_RESUMABLE_OPERATIONS = 16;
+const MAX_ROW_FLIP_OPERATIONS = 16;
+const MAX_DILATION_OPERATIONS = 4096;
 
 export interface TreeImpostorAtlasPixels {
   albedo: Uint8Array;
@@ -58,7 +59,7 @@ export function createTreeImpostorRowFlipJob(
   let currentRow = 0;
   return {
     step(maxOperations = 1): boolean {
-      const limit = Math.min(MAX_RESUMABLE_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
+      const limit = Math.min(MAX_ROW_FLIP_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
       let operations = 0;
       while (currentRow < totalRows && operations < limit) {
         const page = Math.floor(currentRow / pairsPerPage);
@@ -156,9 +157,6 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
     const x = index % tileSize;
     const y = Math.floor(index / tileSize);
     let count = 0;
-    let albedoR = 0;
-    let albedoG = 0;
-    let albedoB = 0;
     let normalR = 0;
     let normalG = 0;
     let normalB = 0;
@@ -172,9 +170,6 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
         if (nx < 0 || ny < 0 || nx >= tileSize || ny >= tileSize) continue;
         if (!current.filled[localIndex(nx, ny)]) continue;
         const offset = atlasOffset(current.originX, current.originY, nx, ny);
-        albedoR += albedo[offset] as number;
-        albedoG += albedo[offset + 1] as number;
-        albedoB += albedo[offset + 2] as number;
         normalR += normalDepth[offset] as number;
         normalG += normalDepth[offset + 1] as number;
         normalB += normalDepth[offset + 2] as number;
@@ -185,9 +180,8 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
     if (count === 0) return;
 
     const target = atlasOffset(current.originX, current.originY, x, y);
-    albedo[target] = Math.round(albedoR / count);
-    albedo[target + 1] = Math.round(albedoG / count);
-    albedo[target + 2] = Math.round(albedoB / count);
+    // The albedo channel is decoded as premultiplied by coverage. Zero-alpha
+    // texels must therefore retain zero RGB so generated mipmaps remain valid.
     normalDepth[target] = Math.round(normalR / count);
     normalDepth[target + 1] = Math.round(normalG / count);
     normalDepth[target + 2] = Math.round(normalB / count);
@@ -207,7 +201,7 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
 
   return {
     step(maxOperations = DEFAULT_DILATION_OPERATIONS): boolean {
-      const limit = Math.min(MAX_RESUMABLE_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
+      const limit = Math.min(MAX_DILATION_OPERATIONS, Math.max(1, Math.floor(maxOperations)));
       let operations = 0;
       while (tileIndex < totalTiles && operations < limit) {
         state ??= createState();

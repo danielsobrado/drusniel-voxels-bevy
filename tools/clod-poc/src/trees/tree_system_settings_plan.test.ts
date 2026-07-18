@@ -44,6 +44,30 @@ describe("tree system settings update planner", () => {
     expect(plan.needsPatchRefresh).toBe(true);
   });
 
+  it("rebuilds the GPU ring when shadow ownership changes", () => {
+    const settings = cloneTreeSettings();
+    settings.lod.shadowsMaxLod = "none";
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {
+      lod: { ...settings.lod, shadowsMaxLod: "impostor" },
+    }, key);
+
+    expect(plan.needsGeometry).toBe(false);
+    expect(plan.needsPatchRefresh).toBe(true);
+    expect(plan.clearGpuRing).toBe(true);
+  });
+
+  it("does not rebuild the GPU ring when the shadow policy is unchanged", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {
+      lod: { ...settings.lod, shadowsMaxLod: settings.lod.shadowsMaxLod },
+    }, key);
+
+    expect(plan.needsPatchRefresh).toBe(true);
+    expect(plan.clearGpuRing).toBe(false);
+  });
+
   it("plans GPU ring clear and disabled status", () => {
     const settings = cloneTreeSettings();
     const key = treeGeometryKey(settings);

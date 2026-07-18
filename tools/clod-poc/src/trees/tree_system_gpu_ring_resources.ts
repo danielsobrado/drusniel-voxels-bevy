@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import type { StorageBufferAttribute } from "three/webgpu";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { renderableIndirectDrawCountForGeometry } from "../gpu/indirect_draw_geometry.js";
 import {
   TREE_GPU_RING_GROUP_COUNT,
   TREE_GPU_RING_SHADOW_GROUP_COUNT,
   treeGpuRingGroupIndex,
 } from "../gpu/tree_ring_compute.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import { TREE_CROWN_PROXY_INDEX_COUNT } from "./tree_crown_proxy_math.js";
 import type { TreeDepthPrepassMaxLod } from "./tree_depth_prepass_runtime.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { createTreeRingNodeMaterialHandle, type TreeHydrologyWater, type TreeRingInstanceBuffers } from "./tree_node_material.js";
@@ -37,6 +39,8 @@ import type {
   TreeWebGpuBackendAccess,
 } from "./tree_system_types.js";
 
+export const TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP = 1;
+
 export interface TreeGpuRingDrawResourcesInput {
   backend: TreeWebGpuBackendAccess;
   root: THREE.Object3D;
@@ -53,20 +57,39 @@ export interface TreeGpuRingDrawResourcesInput {
   geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry;
 }
 
+export function treeGpuRingAllocatedShadowCapacityPerGroup(
+  settings: TreeSettings,
+  maxInstancesPerGroup: number,
+): number {
+  const count = Math.max(1, Math.floor(maxInstancesPerGroup));
+  return TREE_LODS.some((lod) => treeLodCastsShadow(settings, lod))
+    ? count
+    : TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP;
+}
+
+export function treeGpuRingUsesCrownProxyShadowGeometry(lod: TreeLod): boolean {
+  return lod === "far" || lod === "impostor";
+}
+
 export function createTreeSystemGpuRingDrawResources(
   input: TreeGpuRingDrawResourcesInput,
   maxInstancesPerGroup: number,
 ): TreeGpuRingDrawResources {
-  const count = Math.max(1, maxInstancesPerGroup);
+  validateTreeGpuRingCrownProxyGeometry(input);
+  const count = Math.max(1, Math.floor(maxInstancesPerGroup));
+  const shadowCapacity = treeGpuRingAllocatedShadowCapacityPerGroup(input.settings, count);
   const buffers = createTreeGpuRingDrawBuffers(input.backend, count, TREE_GPU_RING_GROUP_COUNT, {
-    maxShadowCastersPerGroup: count,
+    maxShadowCastersPerGroup: shadowCapacity,
     shadowCascadeCount: TREE_RING_SHADOW_CASCADE_COUNT,
   });
   if (!buffers.shadowCell || !buffers.shadowIndirect) {
     throw new Error("tree GPU ring requires shadow draw buffers");
   }
   const ringBuffers: TreeRingInstanceBuffers = { cell: buffers.cell, capacity: count * TREE_GPU_RING_GROUP_COUNT };
-  const shadowRingBuffers: TreeRingInstanceBuffers = { cell: buffers.shadowCell, capacity: count * TREE_GPU_RING_SHADOW_GROUP_COUNT };
+  const shadowRingBuffers: TreeRingInstanceBuffers = {
+    cell: buffers.shadowCell,
+    capacity: shadowCapacity * TREE_GPU_RING_SHADOW_GROUP_COUNT,
+  };
   const materialHandles = {} as Record<string, TreeMaterialHandle>;
   const meshes: TreeGpuRingMesh[] = [];
   for (const species of TREE_SPECIES) {
@@ -239,7 +262,7 @@ function createGpuRingTierDraw(
   return mesh;
 }
 
-function createGpuRingShadowMaterialHandle(
+function createTreeGpuRingShadowMaterialHandle(
   input: TreeGpuRingDrawResourcesInput,
   species: TreeSpeciesId,
   lod: TreeLod,
@@ -275,10 +298,24 @@ function createGpuRingShadowTierDraw(
   indirectOffset: number,
   materialHandle: TreeMaterialHandle,
 ): TreeGpuRingMesh | null {
-  const source = input.geometryForGpuRing(species, lod);
+  const source = treeGpuRingUsesCrownProxyShadowGeometry(lod)
+    ? input.crownProxyGeometry
+    : input.geometryForGpuRing(species, lod);
   if (!isRenderableTreeGpuRingGeometry(source)) return null;
   const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
   return createTreeGpuRingShadowMesh(geometry, materialHandle, species, lod, cascadeIndex);
+}
+
+function validateTreeGpuRingCrownProxyGeometry(input: TreeGpuRingDrawResourcesInput): void {
+  const usesCrownProxy = TREE_LODS.some((lod) =>
+    treeLodCastsShadow(input.settings, lod) && treeGpuRingUsesCrownProxyShadowGeometry(lod));
+  if (!usesCrownProxy) return;
+  const indexCount = renderableIndirectDrawCountForGeometry(input.crownProxyGeometry);
+  if (indexCount !== TREE_CROWN_PROXY_INDEX_COUNT) {
+    throw new Error(
+      `tree crown proxy geometry has ${indexCount} draw indices; expected ${TREE_CROWN_PROXY_INDEX_COUNT}`,
+    );
+  }
 }
 
 function updateTreeGpuRingIndirectIndexCount(

@@ -9,6 +9,7 @@ import {
 import { trackCreatedMaterial } from "./material_churn/tracked_material_factory.js";
 
 const WGSL_ATTRIBUTE_PREFIX = String.fromCharCode(64);
+const DEPTH_PREPASS_REQUESTED_KEY = "depthPrepassRequested";
 
 export function installPositionInvariance(renderer: WebGPURenderer): void {
   const backend = renderer.backend as unknown as {
@@ -120,15 +121,65 @@ export function instancedDepthPrepassTwin(mesh: InstancedMesh, nodes: PrepassNod
   const material = createPrepassNodeMaterial(nodes, `veg-instanced-depth-prepass:${mesh.name || "instanced"}`);
 
   const twin = new InstancedMesh(mesh.geometry, material, mesh.instanceMatrix.count);
-  twin.instanceMatrix = mesh.instanceMatrix; // share per-instance transforms
+  twin.instanceMatrix = mesh.instanceMatrix;
   twin.count = mesh.count;
   twin.name = `${mesh.name}-depth-prepass`;
   twin.frustumCulled = false;
   twin.castShadow = false;
   twin.receiveShadow = false;
   twin.renderOrder = -100;
+  mesh.userData[DEPTH_PREPASS_REQUESTED_KEY] = true;
 
   return twin;
+}
+
+export function refreshInstancedDepthPrepassTwin(
+  mesh: InstancedMesh,
+  nodes: PrepassNodes | undefined,
+): InstancedMesh | undefined {
+  const previous = mesh.userData.depthTwin as InstancedMesh | undefined;
+  const requested = previous !== undefined || mesh.userData[DEPTH_PREPASS_REQUESTED_KEY] === true;
+  if (!requested) return undefined;
+
+  if (!nodes) {
+    if (previous) {
+      previous.parent?.remove(previous);
+      singleMeshMaterial(previous).dispose();
+      delete mesh.userData.depthTwin;
+    }
+    return undefined;
+  }
+
+  if (!previous) {
+    const next = instancedDepthPrepassTwin(mesh, nodes);
+    next.visible = mesh.visible;
+    mesh.parent?.add(next);
+    mesh.userData.depthTwin = next;
+    return next;
+  }
+
+  const previousMaterial = singleMeshMaterial(previous);
+  const previousNodes = previousMaterial as unknown as NodeMaterialShape;
+  if (
+    previousNodes.positionNode === nodes.positionNode &&
+    (previousNodes.maskNode ?? undefined) === nodes.maskNode &&
+    previousMaterial.side === nodes.side
+  ) {
+    previous.geometry = mesh.geometry;
+    previous.instanceMatrix = mesh.instanceMatrix;
+    previous.count = mesh.count;
+    previous.visible = mesh.visible;
+    return previous;
+  }
+
+  const parent = previous.parent ?? mesh.parent;
+  const next = instancedDepthPrepassTwin(mesh, nodes);
+  next.visible = mesh.visible;
+  parent?.remove(previous);
+  parent?.add(next);
+  previousMaterial.dispose();
+  mesh.userData.depthTwin = next;
+  return next;
 }
 
 function createPrepassNodeMaterial(nodes: PrepassNodes, reason: string): NodeMaterial {

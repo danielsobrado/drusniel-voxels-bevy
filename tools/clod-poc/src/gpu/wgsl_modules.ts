@@ -15,6 +15,7 @@ import vegetationAuthorityPcg from "../vegetation/gpu_authority/pcg2d.wgsl?raw";
 import vegetationAuthorityHash from "../vegetation/gpu_authority/shaders/hash.wgsl?raw";
 import vegetationTerrainSampling from "../vegetation/gpu_authority/terrain_sampling.wgsl?raw";
 import { TREE_SPECIES } from "../trees/tree_config.js";
+import { TREE_CROWN_PROXY_INDEX_COUNT } from "../trees/tree_crown_proxy_contract.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
@@ -25,6 +26,7 @@ import { withConservativeGrassFrustum, withGrassActiveSlotList } from "./grass_r
 import { withUnderstoryAuthorityExclusion } from "./understory_ring_wgsl_transforms.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
+  withTreeCrownProxyShadowIndexCount,
   withTreeFinalPlacementHeight,
   withTreePcgHash,
   withTreeSharedPcgModule,
@@ -58,7 +60,10 @@ export function composeStoneScatterShader(): string {
 
 export function composeTreeRingShader(workgroupSize = 64): string {
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreeSharedPcgModule(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))))));
+  const baseTreeEntry = withTreeCrownProxyShadowIndexCount(
+    withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreeSharedPcgModule(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))))))),
+    TREE_CROWN_PROXY_INDEX_COUNT,
+  );
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
   const treeEntry = replaceConstU32(
     applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),

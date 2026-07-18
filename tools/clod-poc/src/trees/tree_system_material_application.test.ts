@@ -8,6 +8,7 @@ import {
 } from "./tree_system_material_application.js";
 import {
   cloneTreeSettings,
+  createTreeBakedImpostorGeometry,
   createTreeGeometryMap,
   disposeTreeGeometryMap,
   octFrames,
@@ -20,6 +21,11 @@ import {
   type TreeSystemMeshGrid,
   type TreeImpostorAtlas,
 } from "./index.js";
+
+interface NodeMaterialShape {
+  positionNode?: unknown;
+  maskNode?: unknown;
+}
 
 describe("tree system material application helpers", () => {
   it("applies regular materials and shadow policy to every mesh", () => {
@@ -68,6 +74,63 @@ describe("tree system material application helpers", () => {
     });
 
     expect(patch.meshes.oak.impostor.material).toBe(debug);
+  });
+
+  it("refreshes an existing impostor depth twin after the baked card swap", () => {
+    const settings = cloneTreeSettings();
+    settings.impostors.enabled = true;
+    const regular = new THREE.MeshBasicMaterial();
+    const debug = new THREE.MeshBasicMaterial();
+    const basePosition = { kind: "base-position" };
+    const baseMask = { kind: "base-mask" };
+    const handle = materialHandle(regular, debug);
+    handle.prepassNodesFor = () => ({ positionNode: basePosition, maskNode: baseMask, side: THREE.DoubleSide });
+
+    const impostor = new THREE.MeshBasicMaterial() as THREE.MeshBasicMaterial & NodeMaterialShape;
+    const impostorPosition = { kind: "impostor-position" };
+    const impostorMask = { kind: "impostor-mask" };
+    impostor.positionNode = impostorPosition;
+    impostor.maskNode = impostorMask;
+    impostor.side = THREE.DoubleSide;
+
+    const patch = { meshes: meshGrid() };
+    const mesh = patch.meshes.oak.impostor;
+    const oldDepthMaterial = new THREE.MeshBasicMaterial() as THREE.MeshBasicMaterial & NodeMaterialShape;
+    oldDepthMaterial.positionNode = basePosition;
+    oldDepthMaterial.maskNode = baseMask;
+    const oldDepthTwin = new THREE.InstancedMesh(mesh.geometry, oldDepthMaterial, mesh.instanceMatrix.count);
+    mesh.userData.depthTwin = oldDepthTwin;
+    const oldDispose = vi.spyOn(oldDepthMaterial, "dispose");
+
+    const source = createTreeBakedImpostorGeometry("oak", settings, { radius: 1, centerY: 1 });
+    replaceTreeSystemImpostorGeometry(mesh, source);
+    applyTreeSystemMaterials({
+      patches: [patch],
+      settings,
+      materialHandle: handle,
+      impostorAtlases: { oak: fakeAtlas("oak") },
+      impostorMaterials: { oak: impostor },
+    });
+
+    const refreshed = mesh.userData.depthTwin as THREE.InstancedMesh;
+    const refreshedMaterial = refreshed.material as THREE.Material & NodeMaterialShape;
+    expect(refreshed).not.toBe(oldDepthTwin);
+    expect(refreshed.geometry).toBe(mesh.geometry);
+    expect(refreshed.instanceMatrix).toBe(mesh.instanceMatrix);
+    expect(refreshedMaterial.positionNode).toBe(impostorPosition);
+    expect(refreshedMaterial.maskNode).toBe(impostorMask);
+    expect(oldDispose).toHaveBeenCalledTimes(1);
+
+    applyTreeSystemMaterials({
+      patches: [patch],
+      settings,
+      materialHandle: handle,
+      impostorAtlases: { oak: fakeAtlas("oak") },
+      impostorMaterials: { oak: impostor },
+    });
+    expect(mesh.userData.depthTwin).toBe(refreshed);
+
+    source.dispose();
   });
 
   it("creates impostor geometry for a fixed capacity", () => {
