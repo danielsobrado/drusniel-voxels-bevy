@@ -212,6 +212,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     authority,
     editedWater,
     debugState,
+    highQualityMaterialActive: useHighQualityWebGpuWater,
     makeVisual,
     setVisible(enabled) {
       clipmap.setVisible(enabled);
