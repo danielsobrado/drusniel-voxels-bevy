@@ -5,6 +5,7 @@ import {
   CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M,
   findContinentRiverCrossingRoute,
   findContinentRiverCrossingRouteFromEnvironmentQuery,
+  findContinentRiverCrossingRouteFromSample,
   type ContinentRiverRouteSearchOptions,
 } from "./continent_river_route.js";
 
@@ -41,7 +42,7 @@ function sampleRiverStrip(x: number): HydrologySample {
 describe("continent river route EnvironmentQuery adapter", () => {
   it("matches direct hydrology sampling and preserves the coarse route hint", () => {
     let directSamples = 0;
-    const direct = findContinentRiverCrossingRoute((x) => {
+    const direct = findContinentRiverCrossingRouteFromSample((x) => {
       directSamples += 1;
       const sample = sampleRiverStrip(x);
       return {
@@ -69,7 +70,24 @@ describe("continent river route EnvironmentQuery adapter", () => {
     });
     const adapted = findContinentRiverCrossingRouteFromEnvironmentQuery(query, OPTIONS);
 
+    let migratedSamples = 0;
+    const migrated = findContinentRiverCrossingRoute((x) => {
+      migratedSamples += 1;
+      const sample = sampleRiverStrip(x);
+      return {
+        bodyKind: sample.bodyKind,
+        bodyId: sample.bodyId,
+        depth: sample.depth,
+        flowX: sample.flowX,
+        flowZ: sample.flowZ,
+        terrainY: sample.terrainY,
+        waterY: sample.waterY,
+      };
+    }, OPTIONS);
+
     expect(adapted).toEqual(direct);
+    expect(migrated).toEqual(direct);
+    expect(migratedSamples).toBe(directSamples);
     expect(adaptedSamples).toBe(directSamples);
     expect(hints.length).toBeGreaterThan(0);
     expect(hints.every((hint) => hint === CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M)).toBe(true);
