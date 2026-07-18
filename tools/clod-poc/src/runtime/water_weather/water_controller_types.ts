@@ -54,6 +54,7 @@ export interface WaterController {
   readonly authority: WaterAuthority;
   readonly editedWater: EditedWaterAuthoritySource;
   readonly debugState: WaterDebugState;
+  readonly highQualityMaterialActive: boolean;
   makeVisual(): { depthWrite: boolean } & WaterConfig["visual"];
   setVisible(enabled: boolean): void;
   setDebugMode(mode: keyof typeof WATER_DEBUG_MODES): void;
