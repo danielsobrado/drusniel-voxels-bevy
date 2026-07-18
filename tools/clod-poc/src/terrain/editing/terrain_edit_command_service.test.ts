@@ -117,7 +117,7 @@ describe("terrain edit command service", () => {
 
   it("bounds held-input backlog to the active strike and one successor", async () => {
     let resolveFirst!: () => void;
-    const first = new Promise<void>((resolve) => { resolveFirst = resolve; });
+    const first = new Promise<void>((resolve) => { resolveFirst = () => resolve(); });
     const harness = createHarness();
     harness.runDigNow.mockImplementationOnce(() => first);
 
