@@ -14,8 +14,9 @@ describe("tree depth prepass runtime helpers", () => {
     expect(parseTreeDepthPrepassMaxLod("near")).toBe("near");
     expect(parseTreeDepthPrepassMaxLod("mid")).toBe("mid");
     expect(parseTreeDepthPrepassMaxLod("far")).toBe("far");
-    expect(parseTreeDepthPrepassMaxLod("bad")).toBe("none");
-    expect(parseTreeDepthPrepassMaxLod(null)).toBe("none");
+    expect(parseTreeDepthPrepassMaxLod("impostor")).toBe("impostor");
+    expect(parseTreeDepthPrepassMaxLod("bad")).toBe("impostor");
+    expect(parseTreeDepthPrepassMaxLod(null)).toBe("impostor");
   });
 
   it("limits prepass by max LOD", () => {
@@ -27,6 +28,7 @@ describe("tree depth prepass runtime helpers", () => {
     expect(treeLodWithinDepthPrepass("mid", "far")).toBe(false);
     expect(treeLodWithinDepthPrepass("far", "far")).toBe(true);
     expect(treeLodWithinDepthPrepass("far", "impostor")).toBe(false);
+    expect(treeLodWithinDepthPrepass("impostor", "impostor")).toBe(true);
   });
 });
 
@@ -36,7 +38,8 @@ describe("tree system GPU ring prepass helpers", () => {
     expect(treeSystemUsesGpuRingPrepass(true, "far", "mid")).toBe(true);
     expect(treeSystemUsesGpuRingPrepass(true, "far", "far")).toBe(true);
     expect(treeSystemUsesGpuRingPrepass(true, "far", "impostor")).toBe(false);
-    expect(treeSystemUsesGpuRingPrepass(false, "far", "near")).toBe(false);
+    expect(treeSystemUsesGpuRingPrepass(true, "impostor", "impostor")).toBe(true);
+    expect(treeSystemUsesGpuRingPrepass(false, "impostor", "impostor")).toBe(false);
     expect(treeSystemUsesGpuRingPrepass(true, "near", "mid")).toBe(false);
     expect(treeSystemUsesGpuRingPrepass(true, "none", "near")).toBe(false);
   });
@@ -52,7 +55,7 @@ describe("tree system GPU ring prepass helpers", () => {
       mesh,
       materialHandle: handleWithNodes(true),
       useTreePrepass: false,
-      maxLod: "far",
+      maxLod: "impostor",
     });
 
     expect(twin).toBeNull();
@@ -79,10 +82,11 @@ describe("tree system GPU ring prepass helpers", () => {
     expect(root.children).toHaveLength(0);
   });
 
-  it("does not create a twin for impostor LOD", () => {
+  it("creates a twin for impostors when the max LOD includes them", () => {
     const root = new THREE.Group();
     const twins: THREE.Mesh[] = [];
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+    mesh.name = "trees-ring-gpu-oak-impostor";
     const twin = addTreeGpuRingPrepassTwin({
       root,
       twins,
@@ -90,12 +94,12 @@ describe("tree system GPU ring prepass helpers", () => {
       mesh,
       materialHandle: handleWithNodes(true),
       useTreePrepass: true,
-      maxLod: "far",
+      maxLod: "impostor",
     });
 
-    expect(twin).toBeNull();
-    expect(twins).toHaveLength(0);
-    expect(root.children).toHaveLength(0);
+    expect(twin?.name).toBe("trees-ring-gpu-oak-impostor-depth-prepass");
+    expect(twins).toEqual([twin]);
+    expect(root.children).toEqual([twin]);
   });
 
   it("does not create a twin when the material has no prepass nodes", () => {
@@ -109,7 +113,7 @@ describe("tree system GPU ring prepass helpers", () => {
       mesh,
       materialHandle: handleWithNodes(false),
       useTreePrepass: true,
-      maxLod: "far",
+      maxLod: "impostor",
     });
 
     expect(twin).toBeNull();
@@ -130,7 +134,7 @@ describe("tree system GPU ring prepass helpers", () => {
       mesh,
       materialHandle: handleWithNodes(true),
       useTreePrepass: true,
-      maxLod: "far",
+      maxLod: "impostor",
     });
 
     expect(twin).toBeDefined();
