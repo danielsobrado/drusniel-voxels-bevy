@@ -116,7 +116,9 @@ export function createCommandGuardedTerrainEditService(
         || !Number.isFinite(capturedAt)
         || !Number.isSafeInteger(revision)
         || mode.length === 0
-        || !hit.point.toArray().every(Number.isFinite)
+        || !Number.isFinite(hit.point.x)
+        || !Number.isFinite(hit.point.y)
+        || !Number.isFinite(hit.point.z)
       ) {
         reportDenial("not_ready");
         return null;
