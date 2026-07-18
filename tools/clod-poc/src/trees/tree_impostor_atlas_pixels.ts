@@ -156,9 +156,6 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
     const x = index % tileSize;
     const y = Math.floor(index / tileSize);
     let count = 0;
-    let albedoR = 0;
-    let albedoG = 0;
-    let albedoB = 0;
     let normalR = 0;
     let normalG = 0;
     let normalB = 0;
@@ -172,9 +169,6 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
         if (nx < 0 || ny < 0 || nx >= tileSize || ny >= tileSize) continue;
         if (!current.filled[localIndex(nx, ny)]) continue;
         const offset = atlasOffset(current.originX, current.originY, nx, ny);
-        albedoR += albedo[offset] as number;
-        albedoG += albedo[offset + 1] as number;
-        albedoB += albedo[offset + 2] as number;
         normalR += normalDepth[offset] as number;
         normalG += normalDepth[offset + 1] as number;
         normalB += normalDepth[offset + 2] as number;
@@ -185,9 +179,8 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
     if (count === 0) return;
 
     const target = atlasOffset(current.originX, current.originY, x, y);
-    albedo[target] = Math.round(albedoR / count);
-    albedo[target + 1] = Math.round(albedoG / count);
-    albedo[target + 2] = Math.round(albedoB / count);
+    // The albedo channel is decoded as premultiplied by coverage. Zero-alpha
+    // texels must therefore retain zero RGB so generated mipmaps remain valid.
     normalDepth[target] = Math.round(normalR / count);
     normalDepth[target + 1] = Math.round(normalG / count);
     normalDepth[target + 2] = Math.round(normalB / count);
