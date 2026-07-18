@@ -52,6 +52,23 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     depthScale: 5.0,
     turbidity: 0.10,
   }),
+  glacialMurkiness: {
+    enabled: false,
+    lakeStrength: 1.0,
+    riverStrength: 0.75,
+    absorptionMultiplier: [1.55, 1.30, 1.15],
+    turbidityAdd: 0.28,
+    reflectionDampingMin: 0.68,
+  },
+  rockFlour: {
+    enabled: false,
+    lakeStrength: 1.0,
+    riverStrength: 0.82,
+    lakeColor: [0.07, 0.38, 0.36],
+    riverColor: [0.08, 0.43, 0.39],
+    shallowBlend: 0.62,
+    deepBlend: 0.28,
+  },
   refraction: {
     enabled: false,
     strength: DEFAULT_WATER_REFRACTION_STRENGTH,

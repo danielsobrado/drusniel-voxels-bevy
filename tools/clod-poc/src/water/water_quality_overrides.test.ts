@@ -46,6 +46,26 @@ describe("water quality overrides", () => {
     expect(config.caustics.enabled).toBe(true);
   });
 
+  it("keeps glacial murkiness disabled unless explicitly requested", () => {
+    const untouched = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams());
+    expect(untouched.visual.glacialMurkiness.enabled).toBe(false);
+
+    const enabled = applyWaterQueryOverrides(
+      DEFAULT_WATER_CONFIG,
+      new URLSearchParams({ waterGlacialMurkiness: "1" }),
+    );
+    expect(enabled.visual.glacialMurkiness.enabled).toBe(true);
+
+    const disabled = applyWaterQueryOverrides(
+      { ...DEFAULT_WATER_CONFIG, visual: { ...DEFAULT_WATER_CONFIG.visual, glacialMurkiness: {
+        ...DEFAULT_WATER_CONFIG.visual.glacialMurkiness,
+        enabled: true,
+      } } },
+      new URLSearchParams({ glacialWater: "0" }),
+    );
+    expect(disabled.visual.glacialMurkiness.enabled).toBe(false);
+  });
+
   it("overrides unified startup hydrology via hydroUnified flag", () => {
     const off = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams({ hydroUnified: "0" }));
     expect(off.hydrology.infinite.unifiedStartup).toBe(false);

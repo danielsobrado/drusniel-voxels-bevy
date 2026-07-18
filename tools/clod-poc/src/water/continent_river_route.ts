@@ -1,3 +1,5 @@
+import type { EnvironmentQuery } from "../environment_query/types.js";
+import { createContinentRiverRouteEnvironmentQuery } from "./continent_river_route_query_adapter.js";
 import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 
 const DEFAULT_CENTER_M = 2048;
@@ -12,6 +14,7 @@ const MAX_SEARCH_SPACING_M = MAX_CROSSING_HALF_SPAN_M;
 const MAX_SHORE_PROBE_SPACING_M = 16;
 const MAX_SHORE_PROBES = 4096;
 const SHORE_REFINEMENT_STEPS = 8;
+export const CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M = 64;
 
 export interface ContinentRiverRouteSample {
   bodyKind: number;
@@ -114,7 +117,7 @@ function findWaterEntry(
   return null;
 }
 
-export function findContinentRiverCrossingRoute(
+export function findContinentRiverCrossingRouteFromSample(
   sample: (x: number, z: number) => ContinentRiverRouteSample,
   options: ContinentRiverRouteSearchOptions = {},
 ): ContinentRiverCrossingRoute | null {
@@ -185,4 +188,33 @@ export function findContinentRiverCrossingRoute(
     }
   }
   return null;
+}
+
+export function findContinentRiverCrossingRoute(
+  sample: (x: number, z: number) => ContinentRiverRouteSample,
+  options: ContinentRiverRouteSearchOptions = {},
+): ContinentRiverCrossingRoute | null {
+  return findContinentRiverCrossingRouteFromEnvironmentQuery(
+    createContinentRiverRouteEnvironmentQuery(sample),
+    options,
+  );
+}
+
+export function findContinentRiverCrossingRouteFromEnvironmentQuery(
+  query: EnvironmentQuery,
+  options: ContinentRiverRouteSearchOptions = {},
+): ContinentRiverCrossingRoute | null {
+  return findContinentRiverCrossingRouteFromSample((x, z) => {
+    const water = query.water(x, z, CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M);
+    const river = query.river(x, z, CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M);
+    return {
+      bodyKind: water.bodyKind,
+      bodyId: water.bodyId ?? 0,
+      depth: water.depth,
+      flowX: river.flowX,
+      flowZ: river.flowZ,
+      terrainY: water.carvedBedY,
+      waterY: water.waterY,
+    };
+  }, options);
 }

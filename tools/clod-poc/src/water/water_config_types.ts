@@ -40,6 +40,38 @@ export interface RiverBodyConfig {
 
 import type { WaterBodyVisualPresets } from "./water_body_presets.js";
 
+export interface WaterGlacialMurkinessConfig {
+  /** Kill switch. Disabled configurations preserve the original body preset objects. */
+  enabled: boolean;
+  /** Fraction of the shared glacial-murkiness state applied to lakes. */
+  lakeStrength: number;
+  /** Fraction of the shared glacial-murkiness state applied to rivers. */
+  riverStrength: number;
+  /** Full-strength RGB Beer-Lambert multiplier. */
+  absorptionMultiplier: [number, number, number];
+  /** Full-strength turbidity added to the base body preset. */
+  turbidityAdd: number;
+  /** Lower bound approached by reflection damping at full strength. */
+  reflectionDampingMin: number;
+}
+
+export interface WaterRockFlourConfig {
+  /** Kill switch for the colour component of glacial suspended sediment. */
+  enabled: boolean;
+  /** Fraction of the shared glacial-murkiness state applied to lakes. */
+  lakeStrength: number;
+  /** Fraction of the shared glacial-murkiness state applied to rivers. */
+  riverStrength: number;
+  /** Suspended-sediment target colour for lakes. */
+  lakeColor: [number, number, number];
+  /** Suspended-sediment target colour for rivers. */
+  riverColor: [number, number, number];
+  /** Maximum blend into the shallow body colour. */
+  shallowBlend: number;
+  /** Maximum blend into the deep body colour. */
+  deepBlend: number;
+}
+
 export interface WaterVisualConfig {
   shallowColor: [number, number, number];
   deepColor: [number, number, number];
@@ -63,6 +95,10 @@ export interface WaterVisualConfig {
   color: WaterColorVisualConfig;
   /** Per-body-kind colour/absorption/turbidity/reflection presets (Phase 7b). */
   bodies: WaterBodyVisualPresets;
+  /** Optional biome-state multiplier over existing lake/river optical presets. */
+  glacialMurkiness: WaterGlacialMurkinessConfig;
+  /** Optional rock-flour colour response using the existing turbidity scatter path. */
+  rockFlour: WaterRockFlourConfig;
   refraction: WaterRefractionConfig;
   reflection: WaterReflectionConfig;
   depthWrite: boolean;
