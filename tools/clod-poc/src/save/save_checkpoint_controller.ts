@@ -56,42 +56,51 @@ export function createSaveCheckpointController(
   };
   const flushToConvergence = async (): Promise<void> => {
     for (let pass = 1; pass <= maxFlushPasses; pass += 1) {
-      // Call flush immediately so concurrent requestCheckpoint() coalescing can observe
-      // an in-flight flush before the next microtask. Do not defer through Promise.then.
       await deps.flush();
       if (deps.isConverged?.() ?? true) return;
     }
     throw new Error(`checkpoint did not converge after ${maxFlushPasses} flush passes`);
   };
 
-  const requestCheckpoint = async (): Promise<void> => {
+  const requestCheckpoint = (): Promise<void> => {
     if (inFlight) return inFlight;
-    const startedAt = nowMs();
-    increment("save_checkpoint_requests");
-    const target = counters();
-    if (target) target.save_checkpoint_in_flight = 1;
-    publishStatus("saving checkpoint");
 
-    inFlight = flushToConvergence()
-      .then(() => {
+    let resolveCheckpoint!: () => void;
+    let rejectCheckpoint!: (reason: unknown) => void;
+    const current = new Promise<void>((resolve, reject) => {
+      resolveCheckpoint = resolve;
+      rejectCheckpoint = reject;
+    });
+    // Establish the guard before invoking status, counters, clock, or flush callbacks.
+    inFlight = current;
+
+    void (async () => {
+      const startedAt = nowMs();
+      try {
+        increment("save_checkpoint_requests");
+        const target = counters();
+        if (target) target.save_checkpoint_in_flight = 1;
+        publishStatus("saving checkpoint");
+
+        await flushToConvergence();
         increment("save_checkpoint_completed");
         publishStatus("checkpoint saved");
-      })
-      .catch((error) => {
+        resolveCheckpoint();
+      } catch (error) {
         increment("save_checkpoint_failed");
         publishStatus(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-        throw error;
-      })
-      .finally(() => {
+        rejectCheckpoint(error);
+      } finally {
         const latest = counters();
         if (latest) {
           latest.save_checkpoint_in_flight = 0;
           latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
         }
-        inFlight = null;
-      });
+        if (inFlight === current) inFlight = null;
+      }
+    })();
 
-    return inFlight;
+    return current;
   };
 
   const bindShortcut = (target: Window = window): (() => void) => {
