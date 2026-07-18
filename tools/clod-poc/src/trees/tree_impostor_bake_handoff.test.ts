@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { cloneTreeSettings } from "./tree_config.js";
-import { treeImpostorBakeHandoffAction } from "./tree_impostor_bake_handoff.js";
+import {
+  executeTreeImpostorBakeHandoff,
+  treeImpostorBakeHandoffAction,
+  type TreeImpostorBakeHandoffOperations,
+} from "./tree_impostor_bake_handoff.js";
 
 describe("tree impostor bake handoff", () => {
   it("does nothing for an unsupported bake", () => {
@@ -29,4 +33,43 @@ describe("tree impostor bake handoff", () => {
     settings.gpu.debugForceCpu = true;
     expect(treeImpostorBakeHandoffAction(settings, true)).toBe("rebuild-cpu");
   });
+
+  it("resets both consumer paths when a live swap fails", () => {
+    const operations = operationsForTest();
+    operations.swapLive.mockImplementation(() => {
+      throw new Error("replacement failed");
+    });
+
+    expect(() => executeTreeImpostorBakeHandoff("swap-live", operations)).toThrow("replacement failed");
+    expect(operations.resetGpuConsumers).toHaveBeenCalledTimes(1);
+    expect(operations.resetCpuConsumers).toHaveBeenCalledTimes(1);
+    expect(operations.rebuildGpu).not.toHaveBeenCalled();
+    expect(operations.rebuildCpu).not.toHaveBeenCalled();
+  });
+
+  it("does not reset consumers after a successful live swap", () => {
+    const operations = operationsForTest();
+
+    executeTreeImpostorBakeHandoff("swap-live", operations);
+
+    expect(operations.swapLive).toHaveBeenCalledTimes(1);
+    expect(operations.resetGpuConsumers).not.toHaveBeenCalled();
+    expect(operations.resetCpuConsumers).not.toHaveBeenCalled();
+  });
 });
+
+function operationsForTest(): TreeImpostorBakeHandoffOperations & {
+  swapLive: ReturnType<typeof vi.fn>;
+  rebuildGpu: ReturnType<typeof vi.fn>;
+  rebuildCpu: ReturnType<typeof vi.fn>;
+  resetGpuConsumers: ReturnType<typeof vi.fn>;
+  resetCpuConsumers: ReturnType<typeof vi.fn>;
+} {
+  return {
+    swapLive: vi.fn(),
+    rebuildGpu: vi.fn(),
+    rebuildCpu: vi.fn(),
+    resetGpuConsumers: vi.fn(),
+    resetCpuConsumers: vi.fn(),
+  };
+}
