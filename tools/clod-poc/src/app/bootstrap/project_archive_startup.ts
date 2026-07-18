@@ -1,5 +1,6 @@
 import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
+import { resolveProjectArchiveWorldPages } from "../../project/project_archive_world_size.js";
 import { captureProjectGeneratorQuery } from "../../project/project_world_identity.js";
 import { projectPropEditStore } from "../../project/prop_edit_store.js";
 import { createSaveCheckpointController } from "../../save/save_checkpoint_controller.js";
@@ -16,14 +17,11 @@ import type { UiStartupContext } from "./ui_startup_context.js";
 
 const CHECKPOINT_MAX_REGION_WRITES = Number.MAX_SAFE_INTEGER;
 
-function configuredWorldPages(input: UiStartupContext["input"]): number {
-  const diagnostics = typeof window === "undefined"
-    ? undefined
-    : (window as typeof window & {
-        __drusnielWorldMode?: { configuredWorldPages?: number };
-      }).__drusnielWorldMode;
-  const candidate = input.configuredWorldPages ?? diagnostics?.configuredWorldPages;
-  return Number.isFinite(candidate) && candidate! > 0 ? candidate! : input.WORLD;
+function diagnosticConfiguredWorldPages(): number | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as typeof window & {
+    __drusnielWorldMode?: { configuredWorldPages?: number };
+  }).__drusnielWorldMode?.configuredWorldPages;
 }
 
 export function runProjectArchiveStartup(
@@ -76,7 +74,11 @@ export function runProjectArchiveStartup(
     buildProgressPercent,
     buildProgressBar,
     getState: () => state,
-    getWorldSize: () => configuredWorldPages(input),
+    getWorldSize: () => resolveProjectArchiveWorldPages(
+      input.WORLD,
+      input.configuredWorldPages,
+      diagnosticConfiguredWorldPages(),
+    ),
     getConfig: () => cfg,
     getWorldIdentity: () => ({
       scene: input.searchParams.get("scene") ?? "default",
