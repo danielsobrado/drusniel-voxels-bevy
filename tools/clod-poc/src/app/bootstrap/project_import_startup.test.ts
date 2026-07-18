@@ -49,6 +49,7 @@ function currentContents(generatorVersion = TERRAIN_SOURCE_VERSION) {
       state: {},
       water: {},
       weather: {},
+      props: [{ id: "prop-1" }],
       world: {
         scene: "infinite-islands",
         generatorVersion,
@@ -94,10 +95,10 @@ afterEach(() => {
 });
 
 describe("project import startup", () => {
-  it("validates the staged payload and restores the complete world identity", async () => {
+  it("validates the staged payload and restores complete world and prop authority", async () => {
     mocks.consume.mockResolvedValue(currentContents());
     const params = new URLSearchParams(
-      "import=token&seed=1&scene=default&hud=1&waterEnabled=0&waterHq=0",
+      "import=token&seed=1&scene=default&hud=1&waterEnabled=0&waterHq=0&customProps=0",
     );
 
     const result = await loadStagedProjectImport(params, dom());
@@ -122,6 +123,7 @@ describe("project import startup", () => {
     expect(params.get("quality")).toBe("perf");
     expect(params.get("hydroUnified")).toBe("1");
     expect(params.get("continentHydrology")).toBe("0");
+    expect(params.get("customProps")).toBe("1");
     expect(params.get("waterEnabled")).toBeNull();
     expect(params.get("waterHq")).toBeNull();
     expect(params.get("hud")).toBe("1");
@@ -141,19 +143,20 @@ describe("project import startup", () => {
     expect(mocks.emitAudio).toHaveBeenCalledWith("project.import.error");
   });
 
-  it("keeps explicit URL identity for a legacy v3 archive", async () => {
+  it("keeps explicit URL identity but pins empty props for a legacy v3 archive", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.consume.mockResolvedValue({
-      manifest: { schemaVersion: 3, config: {}, state: {}, water: {}, weather: {} },
+      manifest: { schemaVersion: 3, config: {}, state: {}, water: {}, weather: {}, props: [] },
       customTextures: new Map(),
     });
-    const params = new URLSearchParams("import=token&seed=9&scene=continent");
+    const params = new URLSearchParams("import=token&seed=9&scene=continent&customProps=1");
 
     const result = await loadStagedProjectImport(params, dom());
 
     expect(result).not.toBeNull();
     expect(params.get("seed")).toBe("9");
     expect(params.get("scene")).toBe("continent");
+    expect(params.get("customProps")).toBe("0");
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
   });
