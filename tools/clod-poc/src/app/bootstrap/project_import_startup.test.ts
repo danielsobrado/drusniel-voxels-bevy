@@ -6,9 +6,13 @@ const mocks = vi.hoisted(() => ({
   consume: vi.fn(),
   loadSavedWorldStartup: vi.fn(),
   emitAudio: vi.fn(),
+  validateConfig: vi.fn((value: unknown) => value),
+  validateSessionState: vi.fn((value: unknown) => value),
 }));
 
 vi.mock("../../audio/index.js", () => ({ emitAudio: mocks.emitAudio }));
+vi.mock("../../project/project_archive_config.js", () => ({ validateProjectArchiveConfig: mocks.validateConfig }));
+vi.mock("../../project/project_archive_session_state.js", () => ({ validateProjectSessionState: mocks.validateSessionState }));
 vi.mock("../../project/voxel_project_archive.js", () => ({
   consumeStagedVoxelProjectImport: mocks.consume,
   isCurrentVoxelProjectManifest: (manifest: { schemaVersion?: number }) => manifest.schemaVersion === 4,
@@ -31,6 +35,8 @@ function currentContents(generatorVersion = TERRAIN_SOURCE_VERSION) {
   return {
     manifest: {
       schemaVersion: 4,
+      config: {},
+      state: {},
       world: {
         scene: "infinite-islands",
         generatorVersion,
@@ -63,6 +69,8 @@ function currentContents(generatorVersion = TERRAIN_SOURCE_VERSION) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.validateConfig.mockImplementation((value: unknown) => value);
+  mocks.validateSessionState.mockImplementation((value: unknown) => value);
   vi.stubGlobal("location", { pathname: "/", hash: "" });
   vi.stubGlobal("history", { replaceState: vi.fn() });
 });
@@ -72,7 +80,7 @@ afterEach(() => {
 });
 
 describe("project import startup", () => {
-  it("restores the complete query-visible world identity", async () => {
+  it("validates the staged payload and restores the complete world identity", async () => {
     mocks.consume.mockResolvedValue(currentContents());
     const params = new URLSearchParams(
       "import=token&seed=1&scene=default&hud=1&waterEnabled=0&waterHq=0",
@@ -81,6 +89,8 @@ describe("project import startup", () => {
     const result = await loadStagedProjectImport(params, dom());
 
     expect(result).not.toBeNull();
+    expect(mocks.validateConfig).toHaveBeenCalledOnce();
+    expect(mocks.validateSessionState).toHaveBeenCalledOnce();
     expect(params.get("import")).toBeNull();
     expect(params.get("scene")).toBe("infinite-islands");
     expect(params.get("seed")).toBe("73");
@@ -117,7 +127,10 @@ describe("project import startup", () => {
 
   it("keeps explicit URL identity for a legacy v3 archive", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.consume.mockResolvedValue({ manifest: { schemaVersion: 3 }, customTextures: new Map() });
+    mocks.consume.mockResolvedValue({
+      manifest: { schemaVersion: 3, config: {}, state: {} },
+      customTextures: new Map(),
+    });
     const params = new URLSearchParams("import=token&seed=9&scene=continent");
 
     const result = await loadStagedProjectImport(params, dom());
