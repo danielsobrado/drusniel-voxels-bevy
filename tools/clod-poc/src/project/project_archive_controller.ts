@@ -13,7 +13,9 @@ import {
   type ProjectWorldIdentity,
   type VoxelProjectManifest,
 } from "../project/voxel_project_archive.js";
+import { validateProjectArchiveConfig } from "./project_archive_config.js";
 import { assertProjectArchiveInputSize } from "./project_archive_limits.js";
+import { validateProjectSessionState } from "./project_archive_session_state.js";
 import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
 import { getVoxelEditSnapshot } from "../terrain/terrain.js";
 import { mapProjectSessionState, mapProjectWaterArchiveState, mapProjectWeatherArchiveState, type ProjectStateSource } from "./project_state_mapper.js";
@@ -117,6 +119,8 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         assertProjectArchiveInputSize(file.size);
         setProjectBusy(true, "validating project archive", 0.2);
         const contents = await parseVoxelProjectArchive(new Uint8Array(await file.arrayBuffer()));
+        contents.manifest.config = validateProjectArchiveConfig(contents.manifest.config);
+        contents.manifest.state = validateProjectSessionState(contents.manifest.state);
         await validateProjectArchiveTextures(contents);
         if (deps.beforeImportNavigation) {
           setProjectBusy(true, "saving current world", 0.5);
@@ -149,8 +153,8 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
           exportedAt: new Date().toISOString(),
           worldSize,
           world: structuredClone(deps.getWorldIdentity()) as ProjectWorldIdentity,
-          config: structuredClone(deps.getConfig()),
-          state: mapProjectSessionState(deps.getState()),
+          config: validateProjectArchiveConfig(deps.getConfig()),
+          state: validateProjectSessionState(mapProjectSessionState(deps.getState())),
           water: mapProjectWaterArchiveState(deps.getState()),
           weather: mapProjectWeatherArchiveState(deps.getState()),
           voxelTerrainEdits: getVoxelEditSnapshot(),
