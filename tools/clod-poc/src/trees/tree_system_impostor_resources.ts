@@ -76,6 +76,15 @@ export function selectTreeSystemMaterial(input: TreeSystemMaterialInput): THREE.
   return input.materialHandle.regularMaterial;
 }
 
+export function replaceTreeImpostorMaterialAfterCreate(
+  current: THREE.Material | undefined,
+  createNext: () => THREE.Material,
+): THREE.Material {
+  const next = createNext();
+  current?.dispose();
+  return next;
+}
+
 export function updateTreeSystemImpostorMaterial(input: TreeSystemImpostorMaterialUpdateInput): THREE.Material {
   const selection: TreeImpostorMaterialSelection = {
     webgpu: input.webgpu,
@@ -83,14 +92,14 @@ export function updateTreeSystemImpostorMaterial(input: TreeSystemImpostorMateri
   };
   const current = input.impostorMaterials[input.species];
   if (!treeImpostorMaterialMatchesSelection(current, selection)) {
-    current?.dispose();
-    input.impostorMaterials[input.species] = createSelectedTreeImpostorMaterial(
-      input.settings,
-      input.atlas,
-      selection,
-      input.lighting,
-      input.forestLighting ?? null,
-    );
+    input.impostorMaterials[input.species] = replaceTreeImpostorMaterialAfterCreate(current, () =>
+      createSelectedTreeImpostorMaterial(
+        input.settings,
+        input.atlas,
+        selection,
+        input.lighting,
+        input.forestLighting ?? null,
+      ));
   }
   const material = input.impostorMaterials[input.species]!;
   updateTreeImpostorMaterialSettings(material, input.settings);
