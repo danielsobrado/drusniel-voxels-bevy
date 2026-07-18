@@ -1,3 +1,7 @@
+import {
+  validateProjectWaterArchiveState,
+  validateProjectWeatherArchiveState,
+} from "../../project/project_archive_environment_state.js";
 import { validateProjectSessionState } from "../../project/project_archive_session_state.js";
 import type { VoxelProjectManifest } from "../../project/voxel_project_archive.js";
 import type { AppStateSlices } from "./types.js";
@@ -16,6 +20,6 @@ export function applyValidatedArchiveState(slices: AppStateSlices, manifest: Vox
   applyBrushArchiveState(slices.brush, state);
   applyEnvironmentArchiveState(slices.environment, state);
   applyVegetationArchiveState(slices.vegetation, state);
-  applyWaterArchiveState(slices.water, manifest.water);
-  applyWeatherArchiveState(slices.weather, manifest.weather);
+  applyWaterArchiveState(slices.water, validateProjectWaterArchiveState(manifest.water));
+  applyWeatherArchiveState(slices.weather, validateProjectWeatherArchiveState(manifest.weather));
 }
