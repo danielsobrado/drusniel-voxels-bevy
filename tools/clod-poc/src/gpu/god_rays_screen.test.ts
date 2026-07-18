@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   godRaysScreenFalloffReference,
+  godRaysScreenUvCoverageReference,
   interleavedGradientNoiseReference,
   projectSunToScreen,
   sunScreenFade,
@@ -96,6 +97,21 @@ describe("interleavedGradientNoiseReference", () => {
     const center = interleavedGradientNoiseReference(10, 10);
     expect(Math.abs(interleavedGradientNoiseReference(11, 10) - center)).toBeGreaterThan(0.05);
     expect(Math.abs(interleavedGradientNoiseReference(10, 11) - center)).toBeGreaterThan(0.05);
+  });
+});
+
+describe("godRaysScreenUvCoverageReference", () => {
+  it("keeps samples on the viewport including exact edges", () => {
+    expect(godRaysScreenUvCoverageReference(0, 0)).toBe(1);
+    expect(godRaysScreenUvCoverageReference(0.5, 0.5)).toBe(1);
+    expect(godRaysScreenUvCoverageReference(1, 1)).toBe(1);
+  });
+
+  it("rejects samples beyond any viewport edge", () => {
+    expect(godRaysScreenUvCoverageReference(-0.001, 0.5)).toBe(0);
+    expect(godRaysScreenUvCoverageReference(1.001, 0.5)).toBe(0);
+    expect(godRaysScreenUvCoverageReference(0.5, -0.001)).toBe(0);
+    expect(godRaysScreenUvCoverageReference(0.5, 1.001)).toBe(0);
   });
 });
 
