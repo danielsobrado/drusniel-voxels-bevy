@@ -17,17 +17,18 @@ export function packHydrologyData(hydrology: {
   return { res, worldCells, data: packHydrologyWaterSurfaceTexels(hydrology.grid) };
 }
 
-/** Stone-only Layout B upload: flow XY, flow strength, and body kind with a sub-half-unit
- * gravel phase. Existing round-to-kind decoders remain bit-compatible. */
+/** Stone-only Layout B upload: flow XY pre-scaled by strength, flow strength, and body
+ * kind with a sub-half-unit gravel phase. Round-to-kind decoders remain compatible. */
 export function packHydrologyFieldData(hydrology: {
   grid: HydrologyGrid;
 }): UnderstoryHydrologyData {
   const { grid } = hydrology;
   const data = new Float32Array(grid.res * grid.res * 4);
   for (let index = 0; index < grid.res * grid.res; index += 1) {
-    data[index * 4] = grid.flowDirX[index];
-    data[index * 4 + 1] = grid.flowDirZ[index];
-    data[index * 4 + 2] = grid.flowStrength[index];
+    const flowStrength = Math.max(0, grid.flowStrength[index]);
+    data[index * 4] = grid.flowDirX[index] * flowStrength;
+    data[index * 4 + 1] = grid.flowDirZ[index] * flowStrength;
+    data[index * 4 + 2] = flowStrength;
     const bodyPhase = gravelBarBodyPhase(grid.bodyId[index]);
     data[index * 4 + 3] = (grid.bodyKind[index] + bodyPhase * BODY_PHASE_LANE_SCALE)
       / BODY_KIND_NORMALIZATION;
