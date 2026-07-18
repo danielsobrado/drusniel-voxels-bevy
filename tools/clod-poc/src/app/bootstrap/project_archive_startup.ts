@@ -41,6 +41,20 @@ export function runProjectArchiveStartup(
   const { updateInfo, currentOverlaySnapshot } = infoPanel;
   const { flushAncestors } = terrainEdit;
 
+  const checkpointController = createSaveCheckpointController({
+    flush: async () => {
+      if (!hasActiveSaveRuntime()) throw new Error("no active saved world to checkpoint");
+      await flushAncestors();
+      await flushSaveRuntimeOrThrow(CHECKPOINT_MAX_REGION_WRITES);
+    },
+    isConverged: isSaveRuntimeConverged,
+    getCounters: () => input.longView.hooks?.stats?.counters ?? null,
+    onStatus: (status) => {
+      session.lastArchiveSummary = status;
+      updateInfo();
+    },
+  });
+
   const projectArchiveController = createProjectArchiveController({
     importButton,
     exportButton,
@@ -58,6 +72,10 @@ export function runProjectArchiveStartup(
     camera,
     controls,
     flushAncestors,
+    beforeImportNavigation: async () => {
+      if (!hasActiveSaveRuntime() || isSaveRuntimeConverged()) return;
+      await checkpointController.requestCheckpoint();
+    },
     setBuildStatus: (status) => { buildStatusRef.value = status; },
     updateOverlay: () => updateClodOverlay(currentOverlaySnapshot()),
     setLastArchiveSummary: (summary) => { session.lastArchiveSummary = summary; },
@@ -65,19 +83,6 @@ export function runProjectArchiveStartup(
   });
   projectArchiveController.bindImportExportButtons();
 
-  const checkpointController = createSaveCheckpointController({
-    flush: async () => {
-      if (!hasActiveSaveRuntime()) throw new Error("no active saved world to checkpoint");
-      await flushAncestors();
-      await flushSaveRuntimeOrThrow(CHECKPOINT_MAX_REGION_WRITES);
-    },
-    isConverged: isSaveRuntimeConverged,
-    getCounters: () => input.longView.hooks?.stats?.counters ?? null,
-    onStatus: (status) => {
-      session.lastArchiveSummary = status;
-      updateInfo();
-    },
-  });
   const disposeCheckpointShortcut = checkpointController.bindShortcut();
   window.addEventListener("beforeunload", disposeCheckpointShortcut, { once: true });
 }
