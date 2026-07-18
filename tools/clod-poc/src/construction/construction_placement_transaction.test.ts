@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  authorizeConstructionRemoval,
+  installConstructionRemoveAuthorizer,
+} from "./construction_remove_authority.js";
 import {
   commitConstructionPlacementTransaction,
   undoConstructionPlacementTransaction,
@@ -16,6 +20,13 @@ const piece: PlacedConstructionPiece = {
   rotationQuarterTurns: 0,
 };
 const request = { pieceId: "foundation" } as ConstructionTerrainConformRequest;
+
+let disposeAuthorizer: (() => void) | null = null;
+
+afterEach(() => {
+  disposeAuthorizer?.();
+  disposeAuthorizer = null;
+});
 
 function handler(overrides: Partial<ConstructionTerrainConformHandler> = {}): ConstructionTerrainConformHandler {
   return {
@@ -60,5 +71,32 @@ describe("construction placement transaction", () => {
     });
     expect(result.undone).toBe(false);
     expect(restorePiece).toHaveBeenCalledWith(piece);
+  });
+
+  it("preserves the piece and terrain receipt when removal authority denies undo", async () => {
+    const removePiece = vi.fn(() => true);
+    const terrain = handler();
+    disposeAuthorizer = installConstructionRemoveAuthorizer(() => ({
+      allowed: false,
+      reason: "out_of_range",
+    }));
+
+    expect(authorizeConstructionRemoval(piece)).toEqual({
+      allowed: false,
+      reason: "out_of_range",
+    });
+    const result = await undoConstructionPlacementTransaction({
+      record: { piece, terrainReceipt: { id: "receipt" } },
+      terrainHandler: terrain,
+      removePiece,
+      restorePiece: vi.fn(() => true),
+    });
+
+    expect(result).toEqual({
+      undone: false,
+      reason: "edit command denied: out_of_range",
+    });
+    expect(removePiece).not.toHaveBeenCalled();
+    expect(terrain.undo).not.toHaveBeenCalled();
   });
 });
