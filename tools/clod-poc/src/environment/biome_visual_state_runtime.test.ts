@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { BiomeVisualStateSettings } from "./biome_visual_state_config.js";
 import {
   BIOME_VISUAL_STATE_DEBUG_PROPERTY,
+  bindActiveBiomeVisualStateRuntime,
   createBiomeVisualStateRuntime,
   deriveBiomeVisualWetness,
   installBiomeVisualStateDebugProperty,
+  readActiveBiomeVisualState,
   resolveBiomeVisualSeasonT,
 } from "./biome_visual_state_runtime.js";
 
@@ -40,6 +42,8 @@ const SETTINGS: BiomeVisualStateSettings = Object.freeze({
   }),
   defaultWetness: 0.1,
 });
+
+afterEach(() => bindActiveBiomeVisualStateRuntime(null));
 
 describe("biome visual state runtime", () => {
   it("reads live sun and weather owners while caching unchanged snapshots", () => {
@@ -98,5 +102,21 @@ describe("biome visual state runtime", () => {
     expect(descriptor?.get).toBeTypeOf("function");
     expect(descriptor?.set).toBeUndefined();
     expect(Reflect.get(target, BIOME_VISUAL_STATE_DEBUG_PROPERTY)).toBe(runtime.current());
+  });
+
+  it("provides the active runtime to internal consumers and supports teardown", () => {
+    const runtime = createBiomeVisualStateRuntime({
+      settings: SETTINGS,
+      getSeasonT: () => 0.5,
+      getSunElevationDeg: () => 5,
+      getWeatherMode: () => "off",
+      getWeatherIntensity: () => 0,
+    });
+
+    bindActiveBiomeVisualStateRuntime(runtime);
+    expect(readActiveBiomeVisualState()).toBe(runtime.current());
+
+    bindActiveBiomeVisualStateRuntime(null);
+    expect(readActiveBiomeVisualState()).toBeNull();
   });
 });
