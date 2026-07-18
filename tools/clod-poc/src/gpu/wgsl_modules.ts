@@ -23,6 +23,7 @@ import { composeShader } from "./wgsl_compose.js";
 import { replaceConstU32 } from "./wgsl_workgroup_size.js";
 import { withConservativeGrassFrustum, withGrassActiveSlotList } from "./grass_ring_wgsl_transforms.js";
 import { withUnderstoryAuthorityExclusion } from "./understory_ring_wgsl_transforms.js";
+import { withUnderwaterRiverCobbles } from "./stone_river_cobble_wgsl_transform.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeFinalPlacementHeight,
@@ -53,7 +54,8 @@ export function composeGrassRingShader(): string {
 }
 
 export function composeStoneScatterShader(): string {
-  return composeShader("stone scatter shader", [stoneBindings, terrainCommon, vegetationTerrainSampling, placementHeight, withRiverEcologyConstants(stoneScatterEntry)]);
+  const stoneEntry = withUnderwaterRiverCobbles(withRiverEcologyConstants(stoneScatterEntry));
+  return composeShader("stone scatter shader", [stoneBindings, terrainCommon, vegetationTerrainSampling, placementHeight, stoneEntry]);
 }
 
 export function composeTreeRingShader(workgroupSize = 64): string {
