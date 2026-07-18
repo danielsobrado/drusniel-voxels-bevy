@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { StorageInstancedBufferAttribute } from "three/webgpu";
 import {
+  cloneForestLightingSettings,
   cloneTreeSettings,
   createTreeRingImpostorNodeMaterialHandle,
   octFrames,
   TREE_LODS,
+  type ForestLightingMaterialState,
   type TreeImpostorAtlas,
   type TreeRingInstanceBuffers,
 } from "./index.js";
@@ -60,8 +62,21 @@ describe("GPU ring baked impostor node material", () => {
     expect(handle.regularMaterial).toBe(material);
   });
 
+  it("updates and tears down forest lighting without replacing materials", () => {
+    const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
+    const material = handle.regularMaterial;
+    const live = forestState("combined");
+
+    handle.updateForestLighting?.(live.state);
+    handle.updateForestLighting?.(null);
+    live.state.textureHandle.dispose();
+
+    expect(handle.regularMaterial).toBe(material);
+    handle.dispose();
+  });
+
   it("keeps the per-instance four-frame atlas blend contract", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+    const source = materialSource();
 
     expect(source).toContain("treeRingImpostorFourFrameSample");
     expect(source).toContain("treeRingOctEncode(viewDirection)");
@@ -75,7 +90,7 @@ describe("GPU ring baked impostor node material", () => {
   });
 
   it("samples the shared deterministic structural variant page", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+    const source = materialSource();
 
     expect(source).toContain("record.rotationNormalY.z");
     expect(source).toContain("treeMorphologyRecordNodes(buffers)");
@@ -86,7 +101,7 @@ describe("GPU ring baked impostor node material", () => {
   });
 
   it("blends captured normals with the cylindrical billboard facing normal", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+    const source = materialSource();
 
     expect(source).toContain("treeRingCylindricalBillboardNormal");
     expect(source).toContain("billboardNormal");
@@ -96,7 +111,7 @@ describe("GPU ring baked impostor node material", () => {
   });
 
   it("uses the shared ambient floor and preserves HDR highlights", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+    const source = materialSource();
 
     expect(source).toContain("uAmbientFloor");
     expect(source).toContain("TREE_RING_IMPOSTOR_HDR_MAX");
@@ -105,18 +120,35 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).not.toContain("clamp(lit, 0.0, 1.0)");
   });
 
-  it("applies the same forest lighting channels as mesh trees", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+  it("applies the same packed and auxiliary forest channels as mesh trees", () => {
+    const source = materialSource();
 
     expect(source).toContain("forestPacked.x.mul(uForestAoStrength)");
     expect(source).toContain("forestPacked.y.mul(uForestShadowStrength)");
     expect(source).toContain("forestPacked.z.mul(uForestFogStrength)");
     expect(source).toContain("forestPacked.w.mul(TREE_RING_IMPOSTOR_SHAFT_HINT)");
     expect(source).toContain("state.textureHandle.texture");
+    expect(source).toContain("state.textureHandle.auxTexture");
+    expect(source).toContain("vec3(aux.x)");
+    expect(source).toContain("max(packed.z, aux.y)");
+    expect(source).toContain("forestLightingDebugModeValue");
+  });
+
+  it("rebinds neutral forest textures and resets mutable state on teardown", () => {
+    const source = materialSource();
+
+    expect(source).toContain("mapNode.value = neutralForestPackedTexture");
+    expect(source).toContain("mapNode.value = neutralForestAuxTexture");
+    expect(source).toContain("uForestEnabled.value = 0");
+    expect(source).toContain("uForestWorldSize.value = 1");
+    expect(source).toContain("uForestAoStrength.value = 1");
+    expect(source).toContain("uForestShadowStrength.value = 1");
+    expect(source).toContain("uForestFogStrength.value = 0");
+    expect(source).toContain("uForestDebugMode.value = 0");
   });
 
   it("uses unlit WebGPU node materials so the manual relight is not lit twice", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+    const source = materialSource();
 
     expect(source).not.toContain("MeshPhysicalNodeMaterial");
     expect(source).toContain("createTreeRingUnlitImpostorNodeMaterial");
@@ -125,7 +157,7 @@ describe("GPU ring baked impostor node material", () => {
   });
 
   it("coverage-normalizes albedo and four-frame normal blends", () => {
-    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+    const source = materialSource();
 
     expect(source).toContain("TREE_RING_IMPOSTOR_MIN_COVERAGE");
     expect(source).toContain("sample.xyz.div(max(sample.w, float(TREE_RING_IMPOSTOR_MIN_COVERAGE)))");
@@ -133,21 +165,50 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("decodeTreeRingImpostorPackedNormal(s00.normal).mul(s00.coverage).mul(w00)");
   });
 
-  it("disposes every owned material", () => {
+  it("disposes every owned material and both neutral forest textures", () => {
+    const textureDispose = vi.spyOn(THREE.DataTexture.prototype, "dispose");
     const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
     const materials = [handle.regularMaterial, ...Object.values(handle.debugMaterials)];
-    const spies = materials.map((material) => vi.spyOn(material, "dispose"));
+    const materialSpies = materials.map((material) => vi.spyOn(material, "dispose"));
 
     handle.dispose();
 
-    for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1);
+    for (const spy of materialSpies) expect(spy).toHaveBeenCalledTimes(1);
+    expect(textureDispose).toHaveBeenCalledTimes(2);
+    textureDispose.mockRestore();
   });
 });
+
+function materialSource(): string {
+  return readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+}
 
 function buffers(): TreeRingInstanceBuffers {
   return {
     cell: new StorageInstancedBufferAttribute(4, 4),
     capacity: 4,
+  };
+}
+
+function forestState(debugMode: "combined"): { state: ForestLightingMaterialState } {
+  const texture = new THREE.DataTexture(new Uint8Array([1, 2, 3, 4]), 1, 1);
+  const auxTexture = new THREE.DataTexture(new Uint8Array([5, 6, 7, 8]), 1, 1);
+  const settings = cloneForestLightingSettings();
+  settings.materialIntegration.debugMode = debugMode;
+  return {
+    state: {
+      worldCells: 2048,
+      settings,
+      textureHandle: {
+        texture,
+        auxTexture,
+        update() {},
+        dispose() {
+          texture.dispose();
+          auxTexture.dispose();
+        },
+      },
+    },
   };
 }
 
