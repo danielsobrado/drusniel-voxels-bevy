@@ -39,6 +39,32 @@ interface PendingBuild {
   reject: (error: Error) => void;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isSafeRequestId(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function validWorkerResponse(value: unknown): value is CanopyWorkerResponse {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  if (value.type === "error") {
+    return (value.requestId === null || isSafeRequestId(value.requestId))
+      && typeof value.message === "string";
+  }
+  return value.type === "built"
+    && isSafeRequestId(value.requestId)
+    && isSafeRequestId(value.configId)
+    && Array.isArray(value.tiles)
+    && typeof value.buildMs === "number"
+    && Number.isFinite(value.buildMs);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createCanopyRemoteTileBuilder(): CanopyRemoteTileBuilder | null {
   let worker: Worker;
   try {
@@ -48,19 +74,34 @@ export function createCanopyRemoteTileBuilder(): CanopyRemoteTileBuilder | null 
   }
 
   let failed = false;
+  let terminated = false;
   let configId = 0;
   let nextRequestId = 1;
   const pending = new Map<number, PendingBuild>();
 
-  const failAll = (message: string): void => {
-    failed = true;
-    const error = new Error(message);
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
+  const terminateOnce = (): void => {
+    if (terminated) return;
+    terminated = true;
+    worker.terminate();
   };
 
-  worker.onmessage = (event: MessageEvent<CanopyWorkerResponse>) => {
+  const failAll = (message: string): void => {
+    if (!failed) {
+      failed = true;
+      const error = new Error(message);
+      for (const request of pending.values()) request.reject(error);
+      pending.clear();
+    }
+    terminateOnce();
+  };
+
+  worker.onmessage = (event: MessageEvent<unknown>) => {
+    if (failed) return;
     const response = event.data;
+    if (!validWorkerResponse(response)) {
+      failAll("canopy build worker returned an invalid protocol message");
+      return;
+    }
     if (response.type === "error") {
       failAll(`canopy build worker error: ${response.message}`);
       return;
@@ -74,14 +115,28 @@ export function createCanopyRemoteTileBuilder(): CanopyRemoteTileBuilder | null 
       request.resolve([]);
       return;
     }
-    request.resolve(response.tiles.map(unpackCanopyTile));
+    try {
+      request.resolve(response.tiles.map(unpackCanopyTile));
+    } catch (error) {
+      request.reject(new Error(`canopy build worker returned invalid tile data: ${errorMessage(error)}`));
+      failAll(`canopy build worker returned invalid tile data: ${errorMessage(error)}`);
+    }
   };
   worker.onerror = (event) => {
     failAll(`canopy build worker crashed: ${event.message ?? "unknown error"}`);
   };
+  worker.onmessageerror = () => {
+    failAll("canopy build worker response could not be deserialized");
+  };
 
-  const post = (message: CanopyWorkerRequest, transfer?: Transferable[]): void => {
-    worker.postMessage(message, transfer ?? []);
+  const post = (message: CanopyWorkerRequest, transfer?: Transferable[]): boolean => {
+    try {
+      worker.postMessage(message, transfer ?? []);
+      return true;
+    } catch (error) {
+      failAll(`canopy build worker postMessage failed: ${errorMessage(error)}`);
+      return false;
+    }
   };
 
   return {
@@ -117,7 +172,6 @@ export function createCanopyRemoteTileBuilder(): CanopyRemoteTileBuilder | null 
     },
     dispose() {
       failAll("canopy build worker disposed");
-      worker.terminate();
     },
   };
 }
