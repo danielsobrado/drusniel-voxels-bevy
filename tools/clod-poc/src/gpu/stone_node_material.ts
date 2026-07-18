@@ -30,6 +30,7 @@ import {
   vec3,
 } from "three/tsl";
 import type { StoneLighting } from "../stones/stone_instances.js";
+import { STONE_META_UNDERWATER_FLAG } from "../stones/stone_instance_meta.js";
 import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
 import { readRiverMaterialSettings } from "../water/riverMaterialRuntime.js";
 
@@ -98,15 +99,15 @@ export function createStoneNodeMaterial(
     const instBStore: TslNode = storage(instanceBuffers.instanceB, "vec4", instanceBuffers.capacity).toReadOnly();
     const instA: TslNode = instAStore.element(instanceIndex);
     const instB: TslNode = instBStore.element(instanceIndex);
+    const underwater: TslNode = instB.w.greaterThanEqual(float(STONE_META_UNDERWATER_FLAG));
+    const underwaterOffset: TslNode = underwater.select(float(STONE_META_UNDERWATER_FLAG), float(0));
+    const sinkDepth: TslNode = instB.w.sub(underwaterOffset);
     const c: TslNode = cos(instB.x);
     const s: TslNode = sin(instB.x);
     const local: TslNode = positionGeometry.mul(instA.w);
     const rx: TslNode = c.mul(local.x).add(s.mul(local.z));
     const rz: TslNode = s.mul(local.x).negate().add(c.mul(local.z));
-    // Snap the stone's ground to the carved-bed height (hydrology B channel) so it
-    // sits on the carved terrain instead of floating on the un-carved base height.
     let groundY: TslNode = instA.y;
-    const sinkDepth: TslNode = instB.w;
     if (hydrology?.texture) {
       const hydroSample = {
         texture: hydrology.texture,
@@ -116,10 +117,13 @@ export function createStoneNodeMaterial(
       const hydro: TslNode = sampleHydrologyBilinearTsl(instA.x, instA.z, hydroSample);
       const heightAboveWater: TslNode = instA.y.sub(hydro.x);
       groundY = sampleCarvedBedBilinearTsl(instA.x, instA.z, hydroSample).sub(sinkDepth);
-      aboveWater = hydro.y.lessThan(0.5).or(heightAboveWater.greaterThan(0.03));
-      wetRock = hydro.y
+      const dryVisibility: TslNode = hydro.y.lessThan(0.5).or(heightAboveWater.greaterThan(0.03));
+      aboveWater = underwater.or(dryVisibility);
+      const shoreWet: TslNode = hydro.y
         .mul(float(1).sub(smoothstep(0.10, 2.15, heightAboveWater)))
         .mul(uWetRockDarkening);
+      const submergedWet: TslNode = underwater.select(uWetRockDarkening, float(0));
+      wetRock = max(shoreWet, submergedWet);
     }
     worldPos = vec3(
       rx.add(instB.y.mul(local.y)).add(instA.x),
