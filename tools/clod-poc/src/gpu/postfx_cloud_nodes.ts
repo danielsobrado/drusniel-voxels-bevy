@@ -6,7 +6,6 @@ import {
   exp,
   float,
   getViewPosition,
-  mix,
   screenUV,
   smoothstep,
   time,
@@ -39,8 +38,6 @@ const CLOUD_MIN_STEP_METERS = 8.0;
 const CLOUD_SUN_OCCLUSION_STEPS = 3;
 const CLOUD_SUN_OCCLUSION_STEP_METERS = 160;
 const CLOUD_POWDER_SCALE = 18;
-
-const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
 
 function hashNoise2(uv: TslAny): TslAny {
   return dot(uv, vec2(12.9898, 78.233)).sin().mul(43758.5453).fract();
@@ -136,10 +133,23 @@ export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput)
   })();
 }
 
+export function compositePremultipliedCloudReference(
+  sourceRgb: readonly [number, number, number],
+  cloudRgb: readonly [number, number, number],
+  alpha: number,
+): [number, number, number] {
+  const opacity = Math.max(0, Math.min(1, alpha));
+  return [
+    sourceRgb[0] * (1 - opacity) + cloudRgb[0],
+    sourceRgb[1] * (1 - opacity) + cloudRgb[1],
+    sourceRgb[2] * (1 - opacity) + cloudRgb[2],
+  ];
+}
+
 export function createVolumetricCloudCompositeNode(input: VolumetricCloudCompositeInput): TslAny {
   return Fn((): TslAny => {
     const cloud = input.cloudTex;
     const alpha = clamp(cloud.a, 0, 1);
-    return tslMix(input.sourceRgb, cloud.rgb, alpha);
+    return input.sourceRgb.mul(float(1).sub(alpha)).add(cloud.rgb);
   })();
 }
