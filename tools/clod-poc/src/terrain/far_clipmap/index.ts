@@ -53,7 +53,10 @@ export type {
   FarClipmapSourceTextureStats,
 } from "./far_clipmap_material.js";
 
-export { createFarClipmapController } from "./far_clipmap_controller.js";
+export {
+  createCurrentSnapFarClipmapController as createFarClipmapController,
+  applyCurrentSnapReadiness,
+} from "./far_clipmap_current_snap_controller.js";
 export type {
   FarClipmapController,
   FarClipmapOwnershipSnapshot,
