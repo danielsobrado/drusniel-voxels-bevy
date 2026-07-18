@@ -11,6 +11,7 @@ river_mist:
   particles:
     spawn_radius_m: 999
     spacing_m: 0.1
+    sample_hint_m: 999
     max_particles: 99999
     max_emitters_per_tick: 999
     scan_cells_per_frame: 9999
@@ -21,6 +22,7 @@ river_mist:
 
     expect(settings.riverMist.particles.spawnRadiusM).toBe(256);
     expect(settings.riverMist.particles.spacingM).toBe(1);
+    expect(settings.riverMist.particles.sampleHintM).toBe(256);
     expect(settings.riverMist.particles.maxParticles).toBe(2_048);
     expect(settings.riverMist.particles.maxEmittersPerTick).toBe(128);
     expect(settings.riverMist.particles.scanCellsPerFrame).toBe(512);
