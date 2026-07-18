@@ -176,6 +176,7 @@ function mirrorWaterRuntimeCounters(input: VegetationFramePhaseInput): void {
   counters["water_caustics_active"] = runtimeFeatures.caustics ? 1 : 0;
   counters["water_atlas_driven_level_count"] = runtimeFeatures.atlasDrivenLevelCount;
   counters["water_clipmap_outer_half_span_m"] = runtimeFeatures.clipmapOuterHalfSpanM;
+  counters["water_clipmap_guaranteed_half_span_m"] = runtimeFeatures.clipmapGuaranteedHalfSpanM;
   counters["water_clipmap_enabled"] = input.state.waterEnabled && clipmap.isEnabled ? 1 : 0;
   counters["water_clipmap_visible_levels"] = clipmap.visibleLevelCount;
   counters["water_clipmap_level_count"] = clipmap.levelCount;
