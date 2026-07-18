@@ -1,7 +1,7 @@
 trees:
   enabled: true
   seed: 7331
-  distance_m: 420
+  distance_m: 900
   refresh_distance_m: 20
   max_new_patches_per_frame: 1
   max_instances: 6000
@@ -37,13 +37,13 @@ trees:
   lod:
     near_fraction: 0.062
     mid_fraction: 0.24
-    far_fraction: 0.62
+    far_fraction: 0.4666666667
     impostor_fraction: 1.0
     hysteresis_m: 8
     crossfade_enabled: true
-    crossfade_band_m: 20
+    crossfade_band_m: 28
     dither_enabled: true
-    shadows_max_lod: none
+    shadows_max_lod: impostor
     budgets:
       near_max_vertices: 180000
       mid_max_vertices: 60000
@@ -56,10 +56,11 @@ trees:
     fallback_to_placeholder: false
     swap_on_bake: true
     source_lod: mid
-    resolution_px: 64
+    bake_age_layers: false
+    resolution_px: 128
     octahedral_grid_size: 8
-    atlas_padding_px: 2
-    alpha_test: 0.38
+    atlas_padding_px: 4
+    alpha_test: 0.32
     frame_update_distance_m: 3.0
     axial_billboard: true
     preserve_vertical: true
@@ -67,6 +68,9 @@ trees:
     debug_show_frames: false
     debug_freeze_frame: -1
     future_normal_depth: true
+
+  foliage:
+    mask_resolution_px: 192
 
   render:
     far_cheap_material: true
