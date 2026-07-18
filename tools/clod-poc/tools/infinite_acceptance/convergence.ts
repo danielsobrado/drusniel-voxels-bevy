@@ -29,7 +29,17 @@ export interface ConvergenceSnapshot {
   streamRefinementInflight: number;
   streamParentCoverageViolations: number;
   streamActiveRootPages: number;
+  streamReadyFrame: number;
+  streamReadyFrontierM: number;
+  farClipmapInnerRadiusM: number;
+  heightfieldEnabled: number;
+  heightfieldPending: number;
+  heightfieldInflight: number;
+  heightfieldFallbackSamples: number;
   proxyBuilding: number;
+  sceneCompileRequired: number;
+  sceneCompilePending: number;
+  sceneCompileReady: number;
 }
 
 export interface AcceptanceSceneCacheEvidence {
@@ -121,7 +131,7 @@ export function evaluateConvergence(snapshot: ConvergenceSnapshot): {
   bubbleQuiet: boolean;
   streamQuiet: boolean;
 } {
-  const farSummaryQuiet = snapshot.tilesMissing === 0 && snapshot.tilesBuilding === 0;
+  const farSummaryQuiet = snapshot.tilesMissing === 0 && snapshot.tilesBuilding <= 0;
   const shellQuiet = snapshot.farShellRebuildPending === 0;
   const textureQuiet = snapshot.textureWindowPending === 0;
   const bubbleQuiet = snapshot.bubbleRequired === 0 || (
@@ -139,9 +149,19 @@ export function evaluateConvergence(snapshot: ConvergenceSnapshot): {
     && snapshot.streamSafetyInflight === 0
     && snapshot.streamParentCoverageViolations === 0
     && snapshot.streamActiveRootPages > 0
+    && snapshot.streamReadyFrame >= 0
+    && snapshot.farClipmapInnerRadiusM - snapshot.streamReadyFrontierM <= 384
+  );
+  const heightfieldQuiet = snapshot.heightfieldEnabled !== 1 || (
+    snapshot.heightfieldPending === 0
+    && snapshot.heightfieldInflight === 0
+    && snapshot.heightfieldFallbackSamples === 0
+  );
+  const sceneCompileQuiet = snapshot.sceneCompileRequired === 0 || (
+    snapshot.sceneCompilePending === 0 && snapshot.sceneCompileReady === 1
   );
   return {
-    quiet: farSummaryQuiet && shellQuiet && textureQuiet && bubbleQuiet && streamQuiet && snapshot.proxyBuilding !== 1,
+    quiet: farSummaryQuiet && shellQuiet && textureQuiet && bubbleQuiet && streamQuiet && heightfieldQuiet && sceneCompileQuiet && snapshot.proxyBuilding !== 1,
     farSummaryQuiet,
     bubbleQuiet,
     streamQuiet,
@@ -177,12 +197,26 @@ export function convergenceTimeoutBlockers(snapshot: ConvergenceSnapshot): strin
         `safetyPending=${snapshot.streamSafetyPending} safetyInflight=${snapshot.streamSafetyInflight} ` +
         `refinementPending=${snapshot.streamRefinementPending} refinementInflight=${snapshot.streamRefinementInflight} ` +
         `parentCoverageViolations=${snapshot.streamParentCoverageViolations} activeRoots=${snapshot.streamActiveRootPages} ` +
+        `readyFrame=${snapshot.streamReadyFrame} readyFrontier=${snapshot.streamReadyFrontierM} farInner=${snapshot.farClipmapInnerRadiusM} ` +
         `cached=${snapshot.streamCached} failed=${snapshot.streamFailed}`,
+    });
+  }
+  if (snapshot.heightfieldEnabled === 1 && (
+    snapshot.heightfieldPending !== 0
+    || snapshot.heightfieldInflight !== 0
+    || snapshot.heightfieldFallbackSamples !== 0
+  )) {
+    blockers.push({
+      rank: snapshot.heightfieldPending + snapshot.heightfieldInflight + snapshot.heightfieldFallbackSamples,
+      text: `heightfield: pending=${snapshot.heightfieldPending} inflight=${snapshot.heightfieldInflight} fallbackSamples=${snapshot.heightfieldFallbackSamples}`,
     });
   }
   if (snapshot.farShellRebuildPending !== 0) blockers.push({ rank: 1, text: `farShell: rebuildPending=${snapshot.farShellRebuildPending}` });
   if (snapshot.textureWindowPending !== 0) blockers.push({ rank: 1, text: `textureWindow: pending=${snapshot.textureWindowPending}` });
   if (snapshot.proxyBuilding === 1) blockers.push({ rank: 1, text: "shadowProxy: building=1" });
+  if (snapshot.sceneCompileRequired === 1 && (snapshot.sceneCompilePending !== 0 || snapshot.sceneCompileReady !== 1)) {
+    blockers.push({ rank: 1, text: `sceneCompile: pending=${snapshot.sceneCompilePending} ready=${snapshot.sceneCompileReady}` });
+  }
   return blockers
     .sort((a, b) => b.rank - a.rank || a.text.localeCompare(b.text))
     .map((entry, index) => `${index + 1}. ${entry.text}`);

@@ -62,9 +62,6 @@ function rpgDensityCameraTarget(searchParams: URLSearchParams): { x: number; z: 
   return rpgDensitySceneCenter(sceneId as RpgDensitySceneId);
 }
 
-/** Authored RPG domain (32 pages · 64 m); used when startup world is a smaller bootstrap box. */
-const RPG_DENSITY_DOMAIN_CELLS = 32 * 64;
-
 export interface RendererStartupInput {
   searchParams: URLSearchParams;
   clodRuntime?: ClodRuntimeConfig;
@@ -98,9 +95,6 @@ export interface RendererStartupResult {
 }
 
 export function playerWorldBoundsForScene(searchParams: URLSearchParams, worldCells: number): HorizontalWorldBounds {
-  if (isRpgDensityScene(searchParams.get("rpgDensityScene"))) {
-    return { minX: 0, minZ: 0, maxX: RPG_DENSITY_DOMAIN_CELLS, maxZ: RPG_DENSITY_DOMAIN_CELLS };
-  }
   if (!usesUnboundedTerrain(searchParams.get("scene"))) {
     return { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells };
   }

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import * as THREE from "three";
+import { describe, expect, it, vi } from "vitest";
 import type { WaterFieldResult } from "./waterField.js";
-import { cascadeParticleSignal } from "./riverCascadeParticleOverlay.js";
+import { RiverCascadeParticleOverlay, cascadeParticleSignal } from "./riverCascadeParticleOverlay.js";
 import { DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS } from "./riverCascadeParticlesRuntime.js";
 
 function sample(partial: Partial<WaterFieldResult>): WaterFieldResult {
@@ -45,5 +46,19 @@ describe("cascade particle signal", () => {
     );
 
     expect(signal).toEqual({ cascade: 0, rapid: 0, foam: 0 });
+  });
+
+  it("budgets emitter field probes across frames", () => {
+    const sampleField = vi.fn(() => sample({ depth: 0, bodyMask: 0 }));
+    const overlay = new RiverCascadeParticleOverlay(
+      new THREE.Scene(),
+      { sample: sampleField } as never,
+    );
+
+    overlay.update(1, new THREE.Vector3());
+
+    expect(sampleField.mock.calls.length).toBeGreaterThan(0);
+    expect(sampleField.mock.calls.length).toBeLessThanOrEqual(32);
+    overlay.dispose();
   });
 });

@@ -41,4 +41,23 @@ describe("river bank residue build job", () => {
     expect(result!.wet.drawCount).toBeGreaterThan(0);
     expect(result!.wet.positions.every(Number.isFinite)).toBe(true);
   });
+
+  it("keeps the default scan slice within eight cells per frame", () => {
+    const job = createRiverBankResidueBuildJob(
+      makeField(),
+      DEFAULT_RIVER_MATERIAL_SETTINGS,
+      0,
+      0,
+    );
+    let result = null;
+    let steps = 0;
+
+    while (!result && steps < 1_000) {
+      result = job.step();
+      steps += 1;
+    }
+
+    expect(result).not.toBeNull();
+    expect(steps).toBeGreaterThanOrEqual(Math.ceil((25 * 25) / 8));
+  });
 });

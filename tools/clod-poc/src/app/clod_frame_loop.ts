@@ -22,7 +22,7 @@ import { materialChurnDiagnostics } from "../rendering/material_churn/material_c
 import { aggregateGpuVegetationEarlyRejectCounters } from "../vegetation/gpu_vegetation_early_reject_counters.js";
 import { runTerrainStreamingWork, setTerrainStreamingEnabled as setGlobalTerrainStreamingEnabled } from "../stream/terrain_streaming_control.js";
 import { publishStreamCursorCounters, StreamCursorTracker } from "../stream/stream_cursor.js";
-import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
+import { runtimeWorldUsesCameraRelativeCoordinates, usesStreamingRuntimeWorld } from "../world/runtime_world_policy.js";
 import { installPrecisionLandmarkHooks } from "../precision/precision_landmarks.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
@@ -200,7 +200,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       targetVisibleM: diagnostics.phase0TargetVisibleM,
       targetFutureVisibleM: diagnostics.phase0Config.phase0.target_future_visible_m,
       pageSizeM: diagnosticsPageSizeM,
-      streamingScene: diagnostics.queryScene?.startsWith("infinite-") ?? false,
+      streamingScene: usesStreamingRuntimeWorld(diagnostics.queryScene),
     }),
     {
       live: {

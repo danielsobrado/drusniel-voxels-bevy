@@ -28,6 +28,8 @@ describe("runFrameLoopStartup", () => {
   it("uses convergence-safe streaming budgets for playable unbounded scenes", () => {
     expect(usesInteractiveStreamingBudgets("continent")).toBe(true);
     expect(usesInteractiveStreamingBudgets("infinite-islands")).toBe(true);
+    expect(usesInteractiveStreamingBudgets("rpg-village")).toBe(true);
+    expect(usesInteractiveStreamingBudgets("rpg-player-base")).toBe(true);
     expect(usesInteractiveStreamingBudgets("sanity")).toBe(false);
   });
 

@@ -4,6 +4,7 @@ import { parsePhase0Config } from "../../phase0/phase0_config.js";
 import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
 import { FAR_SHELL_DEFAULTS } from "../clod_constants.js";
 import { assignArchiveFields } from "./archive_fields.js";
+import { isRpgDensityScene } from "../../scenes/rpg_density_scenes.js";
 
 export interface ClodSliceState {
   clodPerfMode: boolean;
@@ -87,9 +88,15 @@ function finiteNonNegative(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
 }
 
-function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undefined {
-  const params = currentSearchParams();
-  const sceneDefault = params.get("scene") === INFINITE_ISLANDS_SCENE;
+export function usesLiveBubbleByDefault(scene: string | null): boolean {
+  return scene === INFINITE_ISLANDS_SCENE || isRpgDensityScene(scene);
+}
+
+export function liveBubbleDefaultForParams(
+  cfg: ClodPagesConfig,
+  params: URLSearchParams,
+): LiveBubbleDefault | undefined {
+  const sceneDefault = usesLiveBubbleByDefault(params.get("scene"));
   const enabledOverride = booleanParam(params, "liveBubble");
   const radiusOverride = positiveParam(params, "liveBubbleRadius");
   if (!sceneDefault && enabledOverride === null && radiusOverride === null) return undefined;
@@ -102,8 +109,12 @@ function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undef
   return {
     enabled,
     radiusM: Math.min(radiusOverride ?? defaultRadius, maxRadius),
-    pinned: sceneDefault && enabled,
+    pinned: enabled && (sceneDefault || enabledOverride === true),
   };
+}
+
+function queryLiveBubbleDefault(cfg: ClodPagesConfig): LiveBubbleDefault | undefined {
+  return liveBubbleDefaultForParams(cfg, currentSearchParams());
 }
 
 export function applyLiveBubbleDefault(

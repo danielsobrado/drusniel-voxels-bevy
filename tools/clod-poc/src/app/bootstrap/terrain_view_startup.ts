@@ -7,7 +7,6 @@ import {
   applyShadowProxySceneOverrides,
   createShadowProxyController,
   createShadowProxyDebugState,
-  isStreamingLongViewScene,
   parseLongViewSunShadowsConfig,
   resolveShadowProxyRebuildSnapMeters,
   type ShadowProxyController,
@@ -84,6 +83,12 @@ import {
   createTerrainViewSkyEnvironment,
   createTerrainViewStateReaders,
 } from "./terrain_view_state.js";
+import { isStreamingLongViewScene } from "./bootstrap_long_view.js";
+
+export function gpuMesherEnabledForScene(queryScene: string | null, params: URLSearchParams): boolean {
+  return params.get("gpuMesh") === "1"
+    || (isStreamingLongViewScene(queryScene) && params.get("gpuMesh") !== "0");
+}
 
 export interface TerrainViewStartupInput {
   app: AppRenderer;
@@ -420,10 +425,9 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   nodeLabelOverlay.setVisible(state.showNodeLabels);
 
   const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
-  // infinite-islands streams live-bubble pages continuously; CPU chunk meshing
-  // cannot keep up, so the async GPU mesher defaults on (gpuMesh=0 disables).
-  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1"
-    || (queryScene === "infinite-islands" && searchParams.get("gpuMesh") !== "0");
+  // Streaming scenes build live-bubble pages continuously; CPU chunk meshing cannot
+  // keep up, so the async GPU mesher defaults on (gpuMesh=0 disables).
+  const gpuMeshEnabled = gpuMesherEnabledForScene(queryScene, searchParams);
   const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
   let gpuMesher: GpuChunkMesher | null = null;
   if (gpuMeshEnabled) {

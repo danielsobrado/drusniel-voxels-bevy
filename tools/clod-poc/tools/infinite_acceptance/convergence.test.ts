@@ -37,12 +37,42 @@ function snapshot(overrides: Partial<ConvergenceSnapshot> = {}): ConvergenceSnap
     streamRefinementInflight: 0,
     streamParentCoverageViolations: 0,
     streamActiveRootPages: 1,
+    streamReadyFrame: 1,
+    streamReadyFrontierM: 384,
+    farClipmapInnerRadiusM: 384,
+    heightfieldEnabled: 1,
+    heightfieldPending: 0,
+    heightfieldInflight: 0,
+    heightfieldFallbackSamples: 0,
     proxyBuilding: 0,
+    sceneCompileRequired: 0,
+    sceneCompilePending: 0,
+    sceneCompileReady: 1,
     ...overrides,
   };
 }
 
 describe("infinite acceptance convergence helpers", () => {
+  it("accepts a settled far summary when the scene omits the optional building counter", () => {
+    const result = evaluateConvergence(snapshot({ tilesMissing: 0, tilesBuilding: -1 }));
+
+    expect(result.farSummaryQuiet).toBe(true);
+    expect(result.quiet).toBe(true);
+  });
+
+  it("waits for an explicitly requested scene pipeline prewarm", () => {
+    expect(evaluateConvergence(snapshot({
+      sceneCompileRequired: 1,
+      sceneCompilePending: 1,
+      sceneCompileReady: 0,
+    })).quiet).toBe(false);
+    expect(evaluateConvergence(snapshot({
+      sceneCompileRequired: 1,
+      sceneCompilePending: 0,
+      sceneCompileReady: 1,
+    })).quiet).toBe(true);
+  });
+
   it("does not treat cached streamed roots as quiet while pending work remains", () => {
     expect(evaluateConvergence(snapshot({
       streamCached: 17,
@@ -135,6 +165,24 @@ describe("infinite acceptance convergence helpers", () => {
     }));
 
     expect(result.streamQuiet).toBe(false);
+  });
+
+  it("waits for the proven streaming frontier and readiness epoch", () => {
+    expect(evaluateConvergence(snapshot({ streamReadyFrame: -1 })).quiet).toBe(false);
+    expect(evaluateConvergence(snapshot({
+      farClipmapInnerRadiusM: 768,
+      streamReadyFrontierM: 383,
+    })).quiet).toBe(false);
+    expect(evaluateConvergence(snapshot({
+      farClipmapInnerRadiusM: 768,
+      streamReadyFrontierM: 384,
+    })).quiet).toBe(true);
+  });
+
+  it("waits for heightfield work and fallback sampling to drain", () => {
+    expect(evaluateConvergence(snapshot({ heightfieldPending: 1 })).quiet).toBe(false);
+    expect(evaluateConvergence(snapshot({ heightfieldInflight: 1 })).quiet).toBe(false);
+    expect(evaluateConvergence(snapshot({ heightfieldFallbackSamples: 1 })).quiet).toBe(false);
   });
 
   it("prints live-bubble pending/building data in timeout blockers", () => {

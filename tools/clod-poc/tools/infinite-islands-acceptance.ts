@@ -8,7 +8,7 @@ import { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS } from "../src/app/fr
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
 import { evaluateMovementCoverage, evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
-import { resolveMovementRouteProfile, type MovementContentProfile, type MovementRouteName, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
+import { requiresDedicatedMovementPage, resolveMovementRouteProfile, sceneForMovementCase, type MovementContentProfile, type MovementRouteName, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
@@ -43,10 +43,12 @@ import {
   PERF_RULES,
   REQUIRED_COUNTERS,
   THRESHOLD_RULES,
+  withFrameMsP95Max,
   type RequiredCounter,
   type ThresholdEvaluation,
   type ThresholdRule,
 } from "./infinite_acceptance/thresholds.js";
+import { RPG_DENSE_PRIMARY_TIER } from "./infinite_acceptance/rpg_dense_thresholds.js";
 
 process.env["CLOD_POC_BASE_URL"] ??= "http://127.0.0.1:5173/";
 
@@ -67,11 +69,6 @@ const MOVEMENT_SAMPLE_FRAMES = 30;
 const MAX_ROUTE_FRAME_P99_MS = 100;
 const MAX_ROUTE_FRAME_MS = 1500;
 const MAX_ROUTE_WORK_UNIT_MS = 8;
-// Calibrated from the 2026-07-16 unified-streaming baseline: the scalar worst-sector
-// frontier reached 0 m during sustained movement against the 384 m configured seam.
-// Per-cell ownership covers that lag; this diagnostic guard rejects values outside the
-// physically possible seam range while preserving the measured baseline workload.
-const MAX_ROUTE_FRONTIER_LAG_P95_M = 384;
 const RUN_ROOT = resolve("acceptance-runs/infinite-islands");
 const FAST_STARTUP_WORLD = "4";
 
@@ -856,7 +853,17 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         streamRefinementInflight: counters["live_clod_stream_refinement_inflight_pages"] ?? 0,
         streamParentCoverageViolations: counters["live_clod_stream_parent_coverage_violations"] ?? 0,
         streamActiveRootPages: counters["live_clod_stream_active_root_pages"] ?? 0,
+        streamReadyFrame: counters["stream_ready_frame"] ?? -1,
+        streamReadyFrontierM: counters["live_clod_stream_ready_frontier_m"] ?? 0,
+        farClipmapInnerRadiusM: counters["far_clipmap_inner_radius_m"] ?? 0,
+        heightfieldEnabled: counters["heightfield_tiles_enabled"] ?? 0,
+        heightfieldPending: counters["heightfield_tiles_pending"] ?? 0,
+        heightfieldInflight: counters["heightfield_tiles_inflight"] ?? 0,
+        heightfieldFallbackSamples: counters["heightfield_tiles_fallback_samples_this_frame"] ?? 0,
         proxyBuilding: counters["shadow_proxy_building"] ?? -1,
+        sceneCompileRequired: counters["scene_compile_warm_required"] ?? 0,
+        sceneCompilePending: counters["scene_compile_warm_pending"] ?? 0,
+        sceneCompileReady: counters["scene_compile_warm_ready"] ?? 1,
       };
     }) as ConvergenceSnapshot;
     const { quiet } = evaluateConvergence(c);
@@ -968,7 +975,7 @@ async function waitForRegionDrain(
   frameCursor: { lastFrameId: number },
   phase: "outbound" | "revisit",
 ): Promise<void> {
-  for (let waitedFrames = 0; waitedFrames < 240; waitedFrames += MOVEMENT_SAMPLE_FRAMES) {
+  for (let waitedFrames = 0; waitedFrames < MOVEMENT_ROUTE_PROFILE.maxRegionDrainFrames; waitedFrames += MOVEMENT_SAMPLE_FRAMES) {
     const drained = await page.evaluate(() => {
       const counters = window.__drusnielClod?.stats?.counters ?? {};
       return (counters["heightfield_tiles_fallback_samples_this_frame"] ?? 0) === 0
@@ -1175,7 +1182,7 @@ function evaluateMovementRoute(sceneName: string, movement: MovementReport | nul
   }));
   failures.push(...evaluateMovementCoverage(sceneName, movement, {
     minFrontierLagSamples: movement.samples.length,
-    maxFrontierLagP95M: MAX_ROUTE_FRONTIER_LAG_P95_M,
+    maxFrontierLagP95M: MOVEMENT_ROUTE_PROFILE.maxFrontierLagP95M,
   }));
   return failures;
 }
@@ -1268,16 +1275,17 @@ function failedImageSanity(message = "screenshot was not captured"): ImageSanity
 }
 
 async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: string, options: RunSceneOptions): Promise<SceneResult> {
-  // Water acceptance must boot with water=1: scene presets (clodPerf=1 turns
-  // water off) apply at page boot only, so a reused page that booted without
-  // water never prefetches hydrology tiles and the river-spot scan comes up
-  // empty. Give the water scene its own page instead of the reused one.
-  const isolatedPage = options.reusePage && !options.firstSceneOnPage && scene.waterAcceptance === true;
+  // Scene presets apply at page boot. Water must boot with water=1, and the
+  // representative route must boot its RPG composition instead of reusing the
+  // infrastructure world.
+  const needsDedicatedPage = scene.waterAcceptance === true
+    || requiresDedicatedMovementPage(MOVEMENT_ROUTE_PROFILE, scene.movementRoute === true);
+  const isolatedPage = options.reusePage && !options.firstSceneOnPage && needsDedicatedPage;
   if (isolatedPage) {
     // The reused page's context was created implicitly by browser.newPage() and
     // cannot spawn more pages; open a fresh context from the browser instead.
     const owner = page.context().browser();
-    if (!owner) throw new Error("water acceptance isolated page requires a browser handle");
+    if (!owner) throw new Error("isolated acceptance page requires a browser handle");
     page = await createAcceptancePage(owner);
     options = { ...options, reusePage: false, firstSceneOnPage: true };
   }
@@ -1334,13 +1342,14 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
   const routeStartExtra: Record<string, string> = routeStart
     ? { x: String(routeStart[0]), z: String(routeStart[2]), yaw: "1.5708" }
     : {};
-  const extra: Record<string, string> = { acceptance: "1", acceptanceReuse: PROFILE, acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]), ownershipOracle: gate.ownershipOracle, world: "16", clodPerf: "1", webgpuSelection: "1", ...UNIFIED_STREAMING_ACCEPTANCE_PARAMS, ...profileAcceptanceParams(PROFILE), ...(scene.extra ?? {}), ...routeStartExtra };
+  const movementSceneParams = scene.movementRoute ? MOVEMENT_ROUTE_PROFILE.sceneParams : {};
+  const extra: Record<string, string> = { acceptance: "1", acceptanceReuse: PROFILE, acceptanceReuseMode: String(REUSE_MODE_CODES[PROFILE]), ownershipOracle: gate.ownershipOracle, world: "16", clodPerf: "1", webgpuSelection: "1", ...UNIFIED_STREAMING_ACCEPTANCE_PARAMS, ...profileAcceptanceParams(PROFILE), ...(scene.extra ?? {}), ...movementSceneParams, ...routeStartExtra };
   if (PROFILE === "fast") {
     extra["startupWorld"] = FAST_STARTUP_WORLD;
     extra["infiniteStartupWorld"] = FAST_STARTUP_WORLD;
   }
   if (scene.proceduralDebug) extra["proceduralDebug"] = scene.proceduralDebug;
-  const url = clodUrl({ scene: MOVEMENT_ROUTE_PROFILE.scene, seed: 1, hud: true, freeze: scene.freeze, cam: scene.cam, extra });
+  const url = clodUrl({ scene: sceneForMovementCase(MOVEMENT_ROUTE_PROFILE, scene.movementRoute === true), seed: 1, hud: true, freeze: scene.freeze, cam: scene.cam, extra });
 
   console.log(`[infinite-accept] ${gate.name}/${scene.name}: ${url}`);
   try {
@@ -1422,9 +1431,12 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     await writeBootstrapDiff(screenshotPath, comparisonPath);
     const imageSanity = await inspectPngSanity(screenshotPath, { width: WIDTH, height: HEIGHT });
     const acceptanceCounters = withSampledPerfCounters(extractAcceptanceCounters(stats), phase0);
+    const activeRules = MOVEMENT_CONTENT_PROFILE === "representative" && scene.movementRoute && gate.name === "perf"
+      ? withFrameMsP95Max(gate.rules, RPG_DENSE_PRIMARY_TIER.villageSettledFrameMsP95Max)
+      : gate.rules;
     const thresholds: ThresholdEvaluation = scene.validation
       ? evaluateThresholds(acceptanceCounters, [], [])
-      : evaluateThresholds(acceptanceCounters, gate.requiredCounters, gate.rules);
+      : evaluateThresholds(acceptanceCounters, gate.requiredCounters, activeRules);
     const movementFailures = evaluateMovementRoute(scene.name, movement);
     const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats, finalStartupTimings);
     const failures = [...pageErrors.map((error) => `page error: ${error}`), ...thresholds.failures, ...movementFailures, ...sceneSpecificFailures, ...imageSanity.failures.map((failure) => `image sanity: ${failure}`)];

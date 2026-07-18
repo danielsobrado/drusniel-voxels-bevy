@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveMovementRouteProfile } from "./movement_route_profile.js";
+import { requiresDedicatedMovementPage, resolveMovementRouteProfile, sceneForMovementCase } from "./movement_route_profile.js";
 
 describe("infinite-islands movement route profiles", () => {
   it("keeps the default walk route compact", () => {
@@ -39,6 +39,24 @@ describe("infinite-islands movement route profiles", () => {
 
     expect(profile.contentProfile).toBe("representative");
     expect(profile.scene).toBe("rpg-village");
+    expect(profile.sceneParams).toEqual({
+      world: "32",
+      startupWorld: "2",
+      liveBubble: "1",
+      liveBubbleRadius: "200",
+      liveClodRootRadius: "768",
+      farClipmapInnerRadius: "768",
+      sceneCompileWarm: "1",
+      agentEnvelope: "1",
+      agentCount: "40",
+      agentSkin: "1",
+    });
+    expect(sceneForMovementCase(profile, true)).toBe("rpg-village");
+    expect(sceneForMovementCase(profile, false)).toBe("infinite-islands");
+    expect(requiresDedicatedMovementPage(profile, true)).toBe(true);
+    expect(requiresDedicatedMovementPage(profile, false)).toBe(false);
+    expect(profile.maxRegionDrainFrames).toBe(600);
+    expect(profile.maxFrontierLagP95M).toBe(768);
   });
 
   it("defines a short per-change infrastructure route through cold boundaries", () => {
@@ -51,6 +69,8 @@ describe("infinite-islands movement route profiles", () => {
     expect(frames).toBeGreaterThanOrEqual(4_000);
     expect(distance).toBeGreaterThanOrEqual(4_000);
     expect(profile.segments.some((segment) => segment.landmark === "river")).toBe(true);
+    expect(profile.maxRegionDrainFrames).toBe(240);
+    expect(profile.maxFrontierLagP95M).toBe(384);
   });
 
   it("adds an eviction-forcing A-to-B-to-A revisit without changing the final pose", () => {

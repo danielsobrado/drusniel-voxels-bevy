@@ -7,6 +7,7 @@ import {
   PERF_REQUIRED_COUNTERS,
   PERF_RULES,
   REQUIRED_COUNTERS,
+  withFrameMsP95Max,
 } from "./thresholds.js";
 
 function validCounters(overrides: Record<string, number> = {}): Record<string, number> {
@@ -92,6 +93,15 @@ function validCounters(overrides: Record<string, number> = {}): Record<string, n
 }
 
 describe("infinite islands thresholds", () => {
+  it("can apply a dense-scene frame p95 budget without changing coverage rules", () => {
+    const denseRules = withFrameMsP95Max(PERF_RULES, 80);
+
+    expect(evaluateThresholds(validCounters({ frame_ms_p95: 79 }), PERF_REQUIRED_COUNTERS, denseRules).passed).toBe(true);
+    expect(evaluateThresholds(validCounters({ frame_ms_p95: 81 }), PERF_REQUIRED_COUNTERS, denseRules).failures).toContain(
+      "frame_ms_p95=81 failed: must be finite, >= 0 and <= 80",
+    );
+    expect(withFrameMsP95Max(COVERAGE_RULES, 80)).toEqual(COVERAGE_RULES);
+  });
   it("passes a valid zero-hole sample", () => {
     expect(evaluateThresholds(validCounters()).passed).toBe(true);
   });

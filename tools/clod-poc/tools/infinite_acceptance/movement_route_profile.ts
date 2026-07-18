@@ -14,12 +14,29 @@ export interface MovementRouteProfile {
   name: MovementRouteName;
   contentProfile: MovementContentProfile;
   scene: "infinite-islands" | "rpg-village";
+  sceneParams: Readonly<Record<string, string>>;
   segments: readonly MovementSegment[];
   start?: readonly [number, number, number];
   minHorizontalDistanceM: number;
   minFrameSamples: number;
+  maxFrontierLagP95M: number;
+  maxRegionDrainFrames: number;
   maxLiveBubbleEvictions: number;
   maxStreamEvictions: number;
+}
+
+export function sceneForMovementCase(
+  profile: MovementRouteProfile,
+  movementRoute: boolean,
+): MovementRouteProfile["scene"] {
+  return movementRoute ? profile.scene : "infinite-islands";
+}
+
+export function requiresDedicatedMovementPage(
+  profile: MovementRouteProfile,
+  movementRoute: boolean,
+): boolean {
+  return movementRoute && profile.contentProfile === "representative";
 }
 
 const WALK_ROUTE: readonly MovementSegment[] = Object.freeze([
@@ -66,16 +83,35 @@ export function resolveMovementRouteProfile(
 ): MovementRouteProfile {
   const name = typeof route === "boolean" ? (route ? "long-route" : "walk") : route;
   const scene = contentProfile === "representative" ? "rpg-village" : "infinite-islands";
+  const sceneParams: Readonly<Record<string, string>> = contentProfile === "representative"
+    ? {
+        world: "32",
+        startupWorld: "2",
+        liveBubble: "1",
+        liveBubbleRadius: "200",
+        liveClodRootRadius: "768",
+        farClipmapInnerRadius: "768",
+        sceneCompileWarm: "1",
+        agentEnvelope: "1",
+        agentCount: "40",
+        agentSkin: "1",
+      }
+    : {};
+  const maxRegionDrainFrames = contentProfile === "representative" ? 600 : 240;
+  const maxFrontierLagP95M = contentProfile === "representative" ? 768 : 384;
   if (name === "coast-to-coast" || name === "coast-to-coast-revisit") {
     const segments = name === "coast-to-coast" ? COAST_TO_COAST_ROUTE : REVISIT_ROUTE;
     return {
       name,
       contentProfile,
       scene,
+      sceneParams,
       segments,
       start: [-8_000, 96, 0],
       minHorizontalDistanceM: 16_000,
       minFrameSamples: routeFrames(segments),
+      maxFrontierLagP95M,
+      maxRegionDrainFrames,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     };
@@ -85,10 +121,13 @@ export function resolveMovementRouteProfile(
       name,
       contentProfile,
       scene,
+      sceneParams,
       segments: CONTINENT_SHORT_ROUTE,
       start: [-8_000, 96, 0],
       minHorizontalDistanceM: 4_800,
       minFrameSamples: routeFrames(CONTINENT_SHORT_ROUTE),
+      maxFrontierLagP95M,
+      maxRegionDrainFrames,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     };
@@ -98,9 +137,12 @@ export function resolveMovementRouteProfile(
       name: "long-route",
       contentProfile,
       scene,
+      sceneParams,
       segments: LONG_ROUTE,
       minHorizontalDistanceM: 3_000,
       minFrameSamples: LONG_ROUTE_FRAMES,
+      maxFrontierLagP95M,
+      maxRegionDrainFrames,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     }
@@ -108,9 +150,12 @@ export function resolveMovementRouteProfile(
       name: "walk",
       contentProfile,
       scene,
+      sceneParams,
       segments: WALK_ROUTE,
       minHorizontalDistanceM: 48,
       minFrameSamples: 460,
+      maxFrontierLagP95M,
+      maxRegionDrainFrames,
       maxLiveBubbleEvictions: 4_096,
       maxStreamEvictions: 4_096,
     };

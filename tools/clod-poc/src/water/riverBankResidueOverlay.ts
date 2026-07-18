@@ -23,7 +23,7 @@ const UPDATE_INTERVAL_S = 0.28;
 const MIN_CAMERA_MOVE_M = 2.5;
 const NORMAL_SAMPLE_STEP_M = 1.2;
 const DECAL_SURFACE_OFFSET_M = 0.055;
-const SCAN_CELLS_PER_FRAME = 32;
+const SCAN_CELLS_PER_FRAME = 8;
 const DECALS_PER_FRAME = 64;
 
 interface ResidueGeometry {

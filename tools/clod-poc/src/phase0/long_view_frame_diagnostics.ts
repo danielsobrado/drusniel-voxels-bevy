@@ -21,6 +21,7 @@ import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } fr
 import type { OwnershipResidencyFeeds } from "../stream/ownership_residency.js";
 import { countSnapshotResidencyMissing, createSnapshotOwnershipResidencyFeeds, pageCoveredByResidentClodHierarchy } from "../stream/ownership_residency.js";
 import { parsePageKey } from "../stream/page_plan.js";
+import { usesStreamingRuntimeWorld } from "../world/runtime_world_policy.js";
 
 const PHASE0_P95_WINDOW = 120;
 const PERF_DIAGNOSTICS_CAMERA_EPSILON_M = 1;
@@ -138,7 +139,7 @@ function farClipmapFromCounters(counters: Readonly<Record<string, number>>, came
 
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
   const phase0FrameMsBuffer: number[] = [];
-  const streamingScene = deps.queryScene?.startsWith("infinite-") ?? false;
+  const streamingScene = usesStreamingRuntimeWorld(deps.queryScene);
   let farShellRecenterCount = 0;
   let farShellLastRecenterFrame = -1;
   let lastFarShellSnapX = Number.NaN;

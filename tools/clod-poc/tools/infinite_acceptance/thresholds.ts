@@ -515,6 +515,17 @@ export const PERF_REQUIRED_COUNTERS = REQUIRED_COUNTERS.filter((key) => !ORACLE_
 export const COVERAGE_RULES = THRESHOLD_RULES.filter((rule) => !FRAME_TIME_COUNTERS.has(rule.key));
 export const PERF_RULES = THRESHOLD_RULES.filter((rule) => !ORACLE_COUNTERS.has(rule.key));
 
+export function withFrameMsP95Max(rules: readonly ThresholdRule[], maxMs: number): ThresholdRule[] {
+  if (!Number.isFinite(maxMs) || maxMs < 0) throw new Error("frame p95 maximum must be finite and non-negative");
+  return rules.map((rule) => rule.key === "frame_ms_p95"
+    ? {
+        key: rule.key,
+        label: `must be finite, >= 0 and <= ${maxMs}`,
+        pass: (value) => Number.isFinite(value) && value >= 0 && value <= maxMs,
+      }
+    : rule);
+}
+
 export interface ThresholdEvaluation {
   values: Record<string, number>;
   missing: string[];

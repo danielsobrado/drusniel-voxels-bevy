@@ -38,6 +38,7 @@ import {
   applyLongViewScenePreset,
   farSummaryCanopyEnabled,
   isLongViewCapableScene,
+  isStreamingLongViewScene,
 } from "./bootstrap_long_view.js";
 import {
   materialChurnConfigForQuery,
@@ -239,7 +240,7 @@ export async function bootstrapClodPoc() {
     targetVisibleM: queries.phase0TargetVisibleM,
     targetFutureVisibleM: queries.phase0Config.phase0.target_future_visible_m,
     pageSizeM: world.cfg.page.chunks_per_page * world.cfg.page.chunk_size,
-    streamingScene: queryScene?.startsWith("infinite-") ?? false,
+    streamingScene: isStreamingLongViewScene(queryScene),
   });
 
   // farClipmapMode=replace hands the whole far band to the GPU clipmap, which then becomes the

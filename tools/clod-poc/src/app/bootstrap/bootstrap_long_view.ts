@@ -1,6 +1,7 @@
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import { createDefaultLongViewConfig } from "../../long-view/index.js";
 import { isNaadfScene, type NaadfIntegration } from "../../naadf/integration.js";
+import { usesStreamingRuntimeWorld } from "../../world/runtime_world_policy.js";
 
 export type LongViewConfig = ReturnType<typeof createDefaultLongViewConfig>;
 
@@ -8,11 +9,12 @@ export function farSummaryCanopyEnabled(params: URLSearchParams): boolean {
   return params.get("farSummaryCanopy") !== "0";
 }
 
+export function isStreamingLongViewScene(queryScene: string | null): boolean {
+  return usesStreamingRuntimeWorld(queryScene);
+}
+
 export function isLongViewCapableScene(queryScene: string | null): boolean {
-  return queryScene === "infinite-stream-far-summary"
-    || queryScene === "infinite-stream-slow-builds"
-    || queryScene === "infinite-islands"
-    || queryScene === "continent"
+  return isStreamingLongViewScene(queryScene)
     || queryScene === "infinite-stream-straight"
     || queryScene === "infinite-stream-fast-turn"
     || queryScene === "long-view-4km"

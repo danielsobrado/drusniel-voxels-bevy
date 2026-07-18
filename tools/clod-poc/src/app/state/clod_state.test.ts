@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClodPagesConfig } from "../../config.js";
-import { createClodSliceState } from "./clod_state.js";
+import { createClodSliceState, liveBubbleDefaultForParams, usesLiveBubbleByDefault } from "./clod_state.js";
 
 const cfg: ClodPagesConfig = {
   page: {
@@ -76,6 +76,17 @@ function createState(liveBubbleDefault?: { enabled: boolean; radiusM: number; pi
 }
 
 describe("createClodSliceState", () => {
+  it.each(["infinite-islands", "rpg-village", "rpg-player-base"])("pins the live bubble for %s", (scene) => {
+    expect(usesLiveBubbleByDefault(scene)).toBe(true);
+  });
+
+  it("pins an explicit live-bubble query override after scene canonicalization", () => {
+    expect(liveBubbleDefaultForParams(cfg, new URLSearchParams("scene=continent&liveBubble=1"))).toMatchObject({
+      enabled: true,
+      pinned: true,
+    });
+  });
+
   it("enables the master terrain streaming switch by default", () => {
     expect(createState().terrainStreamingEnabled).toBe(true);
   });

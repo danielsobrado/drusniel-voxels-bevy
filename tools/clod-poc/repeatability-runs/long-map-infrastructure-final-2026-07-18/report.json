@@ -1,0 +1,167 @@
+{
+  "createdAt": "2026-07-18T12:30:29.804Z",
+  "runs": [
+    {
+      "id": "F:\\Development\\workspace\\GitHub\\drus\\drusniel-voxels-bevy\\tools\\clod-poc\\acceptance-runs\\long-map-full-final-head-6aaffba7-run-1-2026-07-18\\report.json",
+      "passed": true,
+      "freshProfile": false,
+      "environmentKey": "{\"commit\":\"6aaffba7f9c5aeaff9520cd188f5a247f3baa996\",\"browser\":\"149.0.7827.55\",\"gpu\":{\"Name\":\"NVIDIA GeForce RTX 4080\",\"DriverVersion\":\"32.0.15.7242\"},\"display\":{\"width\":3440,\"height\":1440},\"power\":\"Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)\",\"viewport\":{\"width\":1920,\"height\":1080,\"device_scale_factor\":1}}",
+      "metrics": {
+        "frameP50Ms": 8,
+        "frameP95Ms": 19.200000002980232,
+        "frameP99Ms": 30.900000005960464,
+        "frameP999Ms": 43.30000001192093,
+        "maxFrameMs": 55.5,
+        "framesOver16_7Ms": 592,
+        "framesOver33_3Ms": 62,
+        "framesOver100Ms": 0,
+        "longTaskCount": 11,
+        "longestLongTaskMs": 126
+      }
+    },
+    {
+      "id": "F:\\Development\\workspace\\GitHub\\drus\\drusniel-voxels-bevy\\tools\\clod-poc\\acceptance-runs\\long-map-full-final-head-6aaffba7-run-2-2026-07-18\\report.json",
+      "passed": true,
+      "freshProfile": false,
+      "environmentKey": "{\"commit\":\"6aaffba7f9c5aeaff9520cd188f5a247f3baa996\",\"browser\":\"149.0.7827.55\",\"gpu\":{\"Name\":\"NVIDIA GeForce RTX 4080\",\"DriverVersion\":\"32.0.15.7242\"},\"display\":{\"width\":3440,\"height\":1440},\"power\":\"Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)\",\"viewport\":{\"width\":1920,\"height\":1080,\"device_scale_factor\":1}}",
+      "metrics": {
+        "frameP50Ms": 8.099999994039536,
+        "frameP95Ms": 19.5,
+        "frameP99Ms": 31.400000005960464,
+        "frameP999Ms": 41.29999999701977,
+        "maxFrameMs": 62.70000000298023,
+        "framesOver16_7Ms": 608,
+        "framesOver33_3Ms": 69,
+        "framesOver100Ms": 0,
+        "longTaskCount": 14,
+        "longestLongTaskMs": 144
+      }
+    },
+    {
+      "id": "F:\\Development\\workspace\\GitHub\\drus\\drusniel-voxels-bevy\\tools\\clod-poc\\acceptance-runs\\long-map-full-final-head-6aaffba7-run-3-2026-07-18\\report.json",
+      "passed": true,
+      "freshProfile": false,
+      "environmentKey": "{\"commit\":\"6aaffba7f9c5aeaff9520cd188f5a247f3baa996\",\"browser\":\"149.0.7827.55\",\"gpu\":{\"Name\":\"NVIDIA GeForce RTX 4080\",\"DriverVersion\":\"32.0.15.7242\"},\"display\":{\"width\":3440,\"height\":1440},\"power\":\"Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)\",\"viewport\":{\"width\":1920,\"height\":1080,\"device_scale_factor\":1}}",
+      "metrics": {
+        "frameP50Ms": 8.599999994039536,
+        "frameP95Ms": 20,
+        "frameP99Ms": 31.30000001192093,
+        "frameP999Ms": 44.20000000298023,
+        "maxFrameMs": 61.099999994039536,
+        "framesOver16_7Ms": 651,
+        "framesOver33_3Ms": 72,
+        "framesOver100Ms": 0,
+        "longTaskCount": 20,
+        "longestLongTaskMs": 163
+      }
+    },
+    {
+      "id": "F:\\Development\\workspace\\GitHub\\drus\\drusniel-voxels-bevy\\tools\\clod-poc\\acceptance-runs\\long-map-full-final-head-6aaffba7-run-4-2026-07-18\\report.json",
+      "passed": true,
+      "freshProfile": false,
+      "environmentKey": "{\"commit\":\"6aaffba7f9c5aeaff9520cd188f5a247f3baa996\",\"browser\":\"149.0.7827.55\",\"gpu\":{\"Name\":\"NVIDIA GeForce RTX 4080\",\"DriverVersion\":\"32.0.15.7242\"},\"display\":{\"width\":3440,\"height\":1440},\"power\":\"Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)\",\"viewport\":{\"width\":1920,\"height\":1080,\"device_scale_factor\":1}}",
+      "metrics": {
+        "frameP50Ms": 8.099999994039536,
+        "frameP95Ms": 19.700000002980232,
+        "frameP99Ms": 30.900000005960464,
+        "frameP999Ms": 40.599999994039536,
+        "maxFrameMs": 61.79999999701977,
+        "framesOver16_7Ms": 603,
+        "framesOver33_3Ms": 64,
+        "framesOver100Ms": 0,
+        "longTaskCount": 17,
+        "longestLongTaskMs": 138
+      }
+    },
+    {
+      "id": "F:\\Development\\workspace\\GitHub\\drus\\drusniel-voxels-bevy\\tools\\clod-poc\\acceptance-runs\\long-map-full-final-head-6aaffba7-run-5-2026-07-18\\report.json",
+      "passed": true,
+      "freshProfile": false,
+      "environmentKey": "{\"commit\":\"6aaffba7f9c5aeaff9520cd188f5a247f3baa996\",\"browser\":\"149.0.7827.55\",\"gpu\":{\"Name\":\"NVIDIA GeForce RTX 4080\",\"DriverVersion\":\"32.0.15.7242\"},\"display\":{\"width\":3440,\"height\":1440},\"power\":\"Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)\",\"viewport\":{\"width\":1920,\"height\":1080,\"device_scale_factor\":1}}",
+      "metrics": {
+        "frameP50Ms": 8,
+        "frameP95Ms": 19.5,
+        "frameP99Ms": 31,
+        "frameP999Ms": 43.900000005960464,
+        "maxFrameMs": 70.20000000298023,
+        "framesOver16_7Ms": 595,
+        "framesOver33_3Ms": 72,
+        "framesOver100Ms": 0,
+        "longTaskCount": 17,
+        "longestLongTaskMs": 128
+      }
+    },
+    {
+      "id": "F:\\Development\\workspace\\GitHub\\drus\\drusniel-voxels-bevy\\tools\\clod-poc\\acceptance-runs\\long-map-full-final-head-6aaffba7-fresh-2026-07-18\\report.json",
+      "passed": true,
+      "freshProfile": true,
+      "environmentKey": "{\"commit\":\"6aaffba7f9c5aeaff9520cd188f5a247f3baa996\",\"browser\":\"149.0.7827.55\",\"gpu\":{\"Name\":\"NVIDIA GeForce RTX 4080\",\"DriverVersion\":\"32.0.15.7242\"},\"display\":{\"width\":3440,\"height\":1440},\"power\":\"Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)\",\"viewport\":{\"width\":1920,\"height\":1080,\"device_scale_factor\":1}}",
+      "metrics": {
+        "frameP50Ms": 6.0999999940395355,
+        "frameP95Ms": 12.200000002980232,
+        "frameP99Ms": 17,
+        "frameP999Ms": 23.799999997019768,
+        "maxFrameMs": 39.79999999701977,
+        "framesOver16_7Ms": 96,
+        "framesOver33_3Ms": 1,
+        "framesOver100Ms": 0,
+        "longTaskCount": 8,
+        "longestLongTaskMs": 116
+      }
+    }
+  ],
+  "passed": true,
+  "failures": [],
+  "metrics": {
+    "frameP50Ms": {
+      "median": 8.099999994039536,
+      "worst": 8.599999994039536,
+      "spread": 0.5999999940395355
+    },
+    "frameP95Ms": {
+      "median": 19.5,
+      "worst": 20,
+      "spread": 0.7999999970197678
+    },
+    "frameP99Ms": {
+      "median": 31,
+      "worst": 31.400000005960464,
+      "spread": 0.5
+    },
+    "frameP999Ms": {
+      "median": 43.30000001192093,
+      "worst": 44.20000000298023,
+      "spread": 3.6000000089406967
+    },
+    "maxFrameMs": {
+      "median": 61.79999999701977,
+      "worst": 70.20000000298023,
+      "spread": 14.700000002980232
+    },
+    "framesOver16_7Ms": {
+      "median": 603,
+      "worst": 651,
+      "spread": 59
+    },
+    "framesOver33_3Ms": {
+      "median": 69,
+      "worst": 72,
+      "spread": 10
+    },
+    "framesOver100Ms": {
+      "median": 0,
+      "worst": 0,
+      "spread": 0
+    },
+    "longTaskCount": {
+      "median": 17,
+      "worst": 20,
+      "spread": 9
+    },
+    "longestLongTaskMs": {
+      "median": 138,
+      "worst": 163,
+      "spread": 37
+    }
+  }
+}

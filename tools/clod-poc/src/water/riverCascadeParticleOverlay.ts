@@ -50,6 +50,15 @@ const MAX_MIST_PARTICLES = 180;
 const MAX_SPLASH_PARTICLES = 150;
 const MAX_FOAM_PARTICLES = 220;
 const WATER_SURFACE_OFFSET_M = 0.08;
+const EMIT_CELLS_PER_FRAME = 32;
+
+interface EmitterScan {
+  baseX: number;
+  baseZ: number;
+  centerX: number;
+  centerZ: number;
+  cursor: number;
+}
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -173,6 +182,7 @@ export class RiverCascadeParticleOverlay {
   private lastRapidEmitters = 0;
   private lastMaxCascade = 0;
   private lastMaxRapid = 0;
+  private emitterScan: EmitterScan | null = null;
 
   constructor(private readonly scene: THREE.Scene, private readonly field: WaterField) {
     this.group.name = "river-cascade-particle-overlay";
@@ -204,10 +214,11 @@ export class RiverCascadeParticleOverlay {
     advanceLayer(this.splash, deltaSeconds);
     this.advanceFoam(deltaSeconds);
     this.emitTime += deltaSeconds;
-    if (this.emitTime >= EMIT_INTERVAL_S) {
+    if (this.emitTime >= EMIT_INTERVAL_S && this.emitterScan === null) {
       this.emitTime = 0;
-      this.emit(cameraPosition);
+      this.beginEmit(cameraPosition);
     }
+    this.stepEmit();
     writeLayer(this.mist, this.mistColor, 1.9);
     writeLayer(this.splash, this.splashColor, 1.15);
     writeLayer(this.foam, this.foamColor, 1.5);
@@ -221,36 +232,51 @@ export class RiverCascadeParticleOverlay {
     }
   }
 
-  private emit(cameraPosition: THREE.Vector3): void {
+  private beginEmit(cameraPosition: THREE.Vector3): void {
     this.lastEmitters = 0;
     this.lastCascadeEmitters = 0;
     this.lastRapidEmitters = 0;
     this.lastMaxCascade = 0;
     this.lastMaxRapid = 0;
+    this.emitterScan = {
+      baseX: Math.round(cameraPosition.x / EMIT_SPACING_M),
+      baseZ: Math.round(cameraPosition.z / EMIT_SPACING_M),
+      centerX: cameraPosition.x,
+      centerZ: cameraPosition.z,
+      cursor: 0,
+    };
+  }
+
+  private stepEmit(): void {
+    const scan = this.emitterScan;
+    if (!scan) return;
     const radius = this.settings.spawnRadiusM;
     const half = Math.floor(EMIT_GRID / 2);
-    const baseX = Math.round(cameraPosition.x / EMIT_SPACING_M);
-    const baseZ = Math.round(cameraPosition.z / EMIT_SPACING_M);
-    for (let gz = -half; gz <= half; gz += 1) {
-      for (let gx = -half; gx <= half; gx += 1) {
-        if (this.lastEmitters >= this.settings.maxEmittersPerTick) return;
-        const cellX = baseX + gx;
-        const cellZ = baseZ + gz;
-        const x = (cellX + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
-        const z = (cellZ + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
-        if (Math.hypot(x - cameraPosition.x, z - cameraPosition.z) > radius) continue;
-        const sample = this.field.sample(x, z);
-        const signal = cascadeParticleSignal(sample, this.settings);
-        this.lastMaxCascade = Math.max(this.lastMaxCascade, signal.cascade);
-        this.lastMaxRapid = Math.max(this.lastMaxRapid, signal.rapid);
-        if (signal.foam <= 0.08) continue;
-        const chance = Math.min(0.92, signal.foam * 0.74 + hash2(cellX, cellZ, 19) * 0.10);
-        if (Math.random() > chance) continue;
-        this.lastEmitters += 1;
-        if (signal.cascade > 0.12) this.lastCascadeEmitters += 1;
-        if (signal.rapid > 0.12) this.lastRapidEmitters += 1;
-        this.spawnAt(x, z, sample, signal);
-      }
+    const totalCells = EMIT_GRID * EMIT_GRID;
+    const end = Math.min(totalCells, scan.cursor + EMIT_CELLS_PER_FRAME);
+    while (scan.cursor < end && this.lastEmitters < this.settings.maxEmittersPerTick) {
+      const cursor = scan.cursor++;
+      const gx = cursor % EMIT_GRID - half;
+      const gz = Math.floor(cursor / EMIT_GRID) - half;
+      const cellX = scan.baseX + gx;
+      const cellZ = scan.baseZ + gz;
+      const x = (cellX + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
+      const z = (cellZ + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
+      if (Math.hypot(x - scan.centerX, z - scan.centerZ) > radius) continue;
+      const sample = this.field.sample(x, z);
+      const signal = cascadeParticleSignal(sample, this.settings);
+      this.lastMaxCascade = Math.max(this.lastMaxCascade, signal.cascade);
+      this.lastMaxRapid = Math.max(this.lastMaxRapid, signal.rapid);
+      if (signal.foam <= 0.08) continue;
+      const chance = Math.min(0.92, signal.foam * 0.74 + hash2(cellX, cellZ, 19) * 0.10);
+      if (Math.random() > chance) continue;
+      this.lastEmitters += 1;
+      if (signal.cascade > 0.12) this.lastCascadeEmitters += 1;
+      if (signal.rapid > 0.12) this.lastRapidEmitters += 1;
+      this.spawnAt(x, z, sample, signal);
+    }
+    if (scan.cursor >= totalCells || this.lastEmitters >= this.settings.maxEmittersPerTick) {
+      this.emitterScan = null;
     }
   }
 

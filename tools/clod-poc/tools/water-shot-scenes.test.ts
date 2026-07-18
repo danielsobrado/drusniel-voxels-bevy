@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   GLACIAL_WATER_SHOT_SCENES,
   STANDARD_WATER_SHOT_SCENES,
@@ -69,10 +69,14 @@ describe("water shot scenes", () => {
       flowDrop: 0.2,
       score: 4,
     };
-    const evaluate = vi.fn(async () => candidate);
+    const expressions: string[] = [];
+    const evaluate = async <T>(expression: string): Promise<T> => {
+      expressions.push(expression);
+      return candidate as T;
+    };
 
     await expect(findWaterShotPose({ evaluate }, "shallow-glacial-river", 64)).resolves.toEqual(candidate);
-    const expression = evaluate.mock.calls[0]?.[0] ?? "";
+    const expression = expressions[0] ?? "";
     expect(expression).toContain('"viewMode":"downstream"');
     expect(expression).toContain("const worldCells = 64");
   });

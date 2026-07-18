@@ -51,6 +51,7 @@ import {
   updateHeightfieldTileClientRuntime,
 } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
 import { subscribeSaveRuntimeFeatureStamps } from "../../../save/save_runtime.js";
+import { isRpgDensityScene } from "../../../scenes/rpg_density_scenes.js";
 
 export type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 
@@ -84,7 +85,7 @@ export function nonNegativeIntegerParam(params: URLSearchParams, key: string): n
 }
 
 export function usesInteractiveStreamingBudgets(scene: string | null): boolean {
-  return scene === INFINITE_ISLANDS_SCENE || scene === "continent";
+  return scene === INFINITE_ISLANDS_SCENE || scene === "continent" || isRpgDensityScene(scene);
 }
 
 export function runStreamingSelectionUpdate<T>(
@@ -271,7 +272,7 @@ export function runFrameLoopStartup(
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
   const streamingScene = (longView.queryScene?.startsWith("infinite-") ?? false)
-    || longView.queryScene === "continent"
+    || usesInteractiveStreamingBudgets(longView.queryScene)
     || longView.queryScene === CAVE_TEST_SCENE;
   const acceptanceStreamProfile = searchParams.get("acceptance") === "1" && longView.queryScene === INFINITE_ISLANDS_SCENE;
   const diagnosticsTerrainMaxLevel = acceptanceStreamProfile ? Math.min(maxTerrainLevel, ACCEPTANCE_STREAM_MAX_LEVEL) : maxTerrainLevel;
@@ -366,6 +367,12 @@ export function runFrameLoopStartup(
   const viewPrewarmCompileEnabled = searchParams.get("viewPrewarmCompile") !== "0";
   const SCENE_PIPELINE_WARM_FRAME = 600;
   const sceneCompileWarmEnabled = searchParams.get("sceneCompileWarm") === "1";
+  const sceneCompileCounters = longView.hooks?.stats?.counters;
+  if (sceneCompileCounters) {
+    sceneCompileCounters["scene_compile_warm_required"] = sceneCompileWarmEnabled ? 1 : 0;
+    sceneCompileCounters["scene_compile_warm_pending"] = 0;
+    sceneCompileCounters["scene_compile_warm_ready"] = sceneCompileWarmEnabled ? 0 : 1;
+  }
   let sceneCompileWarmFired = false;
   let sceneCompileWarmFrame = 0;
   const maybeWarmScenePipelines = (): void => {
@@ -376,8 +383,21 @@ export function runFrameLoopStartup(
     const compile = (renderer as unknown as {
       compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera) => Promise<unknown>;
     }).compileAsync;
-    if (typeof compile !== "function") return;
-    void compile.call(renderer, scene, camera).catch(() => undefined);
+    const finish = (): void => {
+      if (!sceneCompileCounters) return;
+      sceneCompileCounters["scene_compile_warm_pending"] = 0;
+      sceneCompileCounters["scene_compile_warm_ready"] = 1;
+    };
+    if (typeof compile !== "function") {
+      finish();
+      return;
+    }
+    if (sceneCompileCounters) sceneCompileCounters["scene_compile_warm_pending"] = 1;
+    try {
+      void compile.call(renderer, scene, camera).then(finish, finish);
+    } catch {
+      finish();
+    }
   };
   const precompileViewPipelines = (mesh: THREE.Mesh): Promise<unknown> | null => {
     if (!viewPrewarmCompileEnabled || !input.app.isWebGpu) return null;
