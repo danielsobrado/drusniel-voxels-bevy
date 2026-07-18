@@ -7,6 +7,7 @@ import {
   RiverMistOverlay,
   createWaterEffectsRuntime,
   readRiverMistRuntimeSettings,
+  riverMistInitialEnabled,
   resolveGlacialWaterVisual,
   resolveRockFlourWaterVisual,
   resolveWaterRockFlourEnabled,
@@ -140,11 +141,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     }
   }
 
-  // Atlas-driven levels (Phase W2, WebGPU + static topology only): a water-owned
-  // streaming-atlas window follows the camera, and the rings it can cover fetch their
-  // vertex data from it in the vertex stage — zero CPU refill samples on those levels.
-  // Gated on the tile build worker being up: the atlas fills exclusively from
-  // worker-built tiles, so without the remote those levels would never get water.
   const staticTopologyEnabled = deps.waterConfig.staticTopology
     && deps.searchParams.get("waterStaticClipmap") !== "0";
   const atlasSource = deps.isWebGpu
@@ -173,10 +169,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         ),
       )
     : null;
-  // The far clipmap already owns unified water beyond its inner radius. When the
-  // WebGPU atlas is active, keep only its near rings and avoid CPU refills for the
-  // overlapping coarse L4/L5 rings. WebGL and the atlas kill switch retain all rings.
-  // Built from clipmapWaterConfig so the tier-resolved visual (active SSR) survives.
   const clipmapConfig = waterAtlas
     ? { ...clipmapWaterConfig, cellSizes: atlasLevelCellSizes }
     : clipmapWaterConfig;
@@ -216,13 +208,15 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
-  const riverMistSettings = readRiverMistRuntimeSettings(deps.searchParams);
-  const riverMist = riverMistSettings.enabled
-    ? new RiverMistOverlay(deps.scene, field, {
-        settings: riverMistSettings,
-        minimumSampleHintM: tileBypassCellSize ?? 0,
-      })
-    : null;
+  const riverMistSettings = readRiverMistRuntimeSettings();
+  const initialRiverMistEnabled = riverMistSettings.enabled
+    && riverMistInitialEnabled(deps.searchParams);
+  let riverMist: RiverMistOverlay | null = null;
+
+  const createRiverMist = () => new RiverMistOverlay(deps.scene, field, {
+    settings: riverMistSettings,
+    minimumSampleHintM: tileBypassCellSize ?? 0,
+  });
 
   const liveRuntimeFeatures = (): WaterRuntimeFeatures => {
     const waterEnabled = deps.getUiState().waterEnabled && clipmap.isEnabled;
@@ -243,7 +237,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   clipmap.setVisible(ui.waterEnabled);
   residueOverlay.setVisible(ui.waterEnabled);
   cascadeParticles.setVisible(ui.waterEnabled);
-  riverMist?.setVisible(ui.waterEnabled);
   clipmap.setClipmapTint(ui.waterClipmapTint);
   clipmap.setWireframe(ui.waterWireframe);
   assertPageMeshSignaturesUnchanged(pageSignaturesBefore, pageMeshSignatures(deps.nodes));
@@ -264,10 +257,23 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     shoreSurfFullDistance: shoreSurfSettings.fullSurfDistance,
     shoreSurfMaxDepth: shoreSurfSettings.maxShallowDepth,
     riverSource: deps.waterConfig.source,
+    riverMistEnabled: initialRiverMistEnabled,
   };
 
+  const setRiverMistEnabled = (enabled: boolean): void => {
+    const effective = enabled && riverMistSettings.enabled;
+    debugState.riverMistEnabled = effective;
+    if (!effective) {
+      riverMist?.dispose();
+      riverMist = null;
+      return;
+    }
+    riverMist ??= createRiverMist();
+    riverMist.setVisible(deps.getUiState().waterEnabled);
+  };
+  setRiverMistEnabled(initialRiverMistEnabled);
+
   const makeVisual = () => ({
-    // Re-resolve from the tier base so glacial/rock-flour track live biome state.
     ...resolveBiomeTintedVisual(),
     depthWrite: deps.getUiState().waterDepthWrite,
   });
@@ -320,6 +326,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       debugState.shoreSurfMaxDepth = Math.max(0.01, depth);
       applyShoreSurfDebugState();
     },
+    setRiverMistEnabled,
     updateVisual(visual) { clipmap.updateVisual(effectsRuntime.apply(visual)); },
     updateSunDirection(direction) { clipmap.updateSunDirection(direction); },
     update(deltaSeconds, cameraPosition) {
@@ -341,6 +348,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       deps.hydrologySystem?.attachTileRemote(null);
       hydrologyRemote?.dispose();
       riverMist?.dispose();
+      riverMist = null;
       cascadeParticles.dispose();
       residueOverlay.dispose();
       clipmap.dispose();
