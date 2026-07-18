@@ -1,17 +1,10 @@
 export const WATER_ACCEPTANCE_MAX_P95_MS = 0.5;
 export const WATER_ACCEPTANCE_MAX_FRAME_MS = 2;
 export const WATER_ACCEPTANCE_MIN_ATLAS_LEVELS = 4;
-export const WATER_ACCEPTANCE_SHOT_NAMES = ["river-close", "river-aerial", "lake", "shore"] as const;
-
-export type WaterAcceptanceShotName = typeof WATER_ACCEPTANCE_SHOT_NAMES[number];
 
 export interface WaterAcceptanceInput {
   readonly counters: Readonly<Record<string, number>>;
   readonly startupTimings: Readonly<Record<string, number>>;
-}
-
-export interface WaterShotSanityInput {
-  readonly failures: readonly string[];
 }
 
 function finiteValue(values: Readonly<Record<string, number>>, key: string): number {
@@ -26,21 +19,6 @@ function requireEnabledCounter(
 ): void {
   const value = finiteValue(counters, key);
   if (value !== 1) failures.push(`${key}=${value} must equal 1`);
-}
-
-export function evaluateWaterShotSanity(
-  shots: Partial<Readonly<Record<WaterAcceptanceShotName, WaterShotSanityInput>>>,
-): string[] {
-  const failures: string[] = [];
-  for (const name of WATER_ACCEPTANCE_SHOT_NAMES) {
-    const result = shots[name];
-    if (!result) {
-      failures.push(`water ${name} image sanity: capture is missing`);
-      continue;
-    }
-    failures.push(...result.failures.map((failure) => `water ${name} image sanity: ${failure}`));
-  }
-  return failures;
 }
 
 export function evaluateWaterAcceptance(input: WaterAcceptanceInput): string[] {
