@@ -295,9 +295,11 @@ export class TreeSystemAssets {
 
   private cancelledBakeResult(reason: unknown): { supported: false; reason: string } {
     const message = String(reason ?? "tree impostor baking cancelled");
+    const hasAppliedAtlas = this.impostorAtlasContentKey !== null
+      && Object.values(this.impostorAtlases).some((atlas) => atlas?.ready);
     this.impostorStatus = !this.settings.impostors.enabled
       ? "disabled"
-      : Object.values(this.impostorAtlases).some((atlas) => atlas?.ready)
+      : hasAppliedAtlas
         ? "baked"
         : "pending";
     this.impostorReason = message;
