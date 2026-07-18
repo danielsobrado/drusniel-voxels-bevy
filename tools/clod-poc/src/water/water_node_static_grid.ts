@@ -12,7 +12,9 @@ import * as THREE from "three";
 import {
   dFdx,
   dFdy,
+  dot,
   float,
+  fract,
   int,
   ivec2,
   max,
@@ -20,6 +22,7 @@ import {
   mod,
   positionLocal,
   positionWorld,
+  sin,
   smoothstep,
   textureLoad,
   uniform,
@@ -42,13 +45,11 @@ export interface WaterStaticGridNodes {
   flow: TslNode;
   shoreDistance: TslNode;
   /**
-   * Fragment-side replacement for the legacy index-time height-discontinuity guard
-   * (waterQuadRenderable): the CPU used to skip quads whose wet corners spanned more
-   * than 0.45 m (1.25 m when flowing); with a static index buffer those quads now
-   * rasterize as near-vertical walls, so fragments steeper than the same per-cell
-   * threshold are discarded instead. The depth gate keeps genuine shoreline ramps
-   * (wet corner next to a dry sentinel corner) intact — their visible fragments sit
-   * within half a metre of the waterline, where walls have real depth.
+   * Fragment-side replacement for the legacy index-time height-discontinuity guard.
+   * Near levels use a stable world-space dither over a slope band instead of a hard
+   * discard, so sentinel dives dissolve rather than printing torn shoreline triangles.
+   * Far/min-reduced levels retain their shore dip and skip this guard, matching the
+   * reference renderer's near-only ramp suppression.
    */
   wallDiscard(depth: TslNode, flowSpeed: TslNode): TslNode;
   handle: WaterStaticGridHandle;
@@ -75,15 +76,23 @@ export function buildWaterStaticGridNodes(grid: WaterStaticGridParams): WaterSta
   const positionNode: TslNode = vec3(worldX, texelA.x, worldZ);
 
   const wallDiscard = (depth: TslNode, flowSpeed: TslNode): TslNode => {
+    if (grid.cellSize >= 12) return float(0).greaterThan(float(1));
+
     const dx: TslNode = dFdx(positionWorld);
     const dy: TslNode = dFdy(positionWorld);
     const slopeX: TslNode = dx.y.div(max(dx.xz.length(), float(1e-5)));
     const slopeY: TslNode = dy.y.div(max(dy.xz.length(), float(1e-5)));
     const slope: TslNode = vec2(slopeX, slopeY).length();
-    // Same thresholds as waterQuadRenderable, converted from per-quad ΔY to slope.
     const limit: TslNode = mix(float(0.45), float(1.25), smoothstep(float(0.015), float(0.025), flowSpeed))
       .div(float(grid.cellSize));
-    return slope.greaterThan(limit).and(depth.greaterThan(float(0.5)));
+
+    const rampKeep: TslNode = float(1).sub(smoothstep(limit.mul(0.75), limit.mul(1.35), slope));
+    const depthGate: TslNode = smoothstep(float(0.05), float(0.5), depth);
+    const keep: TslNode = mix(float(1), rampKeep, depthGate);
+    const dither: TslNode = fract(
+      sin(dot(positionWorld.xz, vec2(12.9898, 78.233))).mul(43758.5453),
+    );
+    return dither.greaterThan(keep);
   };
 
   return {
