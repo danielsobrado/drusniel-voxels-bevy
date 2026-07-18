@@ -8,10 +8,16 @@ const mocks = vi.hoisted(() => ({
   emitAudio: vi.fn(),
   validateConfig: vi.fn((value: unknown) => value),
   validateSessionState: vi.fn((value: unknown) => value),
+  validateWaterState: vi.fn((value: unknown) => value),
+  validateWeatherState: vi.fn((value: unknown) => value),
 }));
 
 vi.mock("../../audio/index.js", () => ({ emitAudio: mocks.emitAudio }));
 vi.mock("../../project/project_archive_config.js", () => ({ validateProjectArchiveConfig: mocks.validateConfig }));
+vi.mock("../../project/project_archive_environment_state.js", () => ({
+  validateProjectWaterArchiveState: mocks.validateWaterState,
+  validateProjectWeatherArchiveState: mocks.validateWeatherState,
+}));
 vi.mock("../../project/project_archive_session_state.js", () => ({ validateProjectSessionState: mocks.validateSessionState }));
 vi.mock("../../project/voxel_project_archive.js", () => ({
   consumeStagedVoxelProjectImport: mocks.consume,
@@ -37,6 +43,8 @@ function currentContents(generatorVersion = TERRAIN_SOURCE_VERSION) {
       schemaVersion: 4,
       config: {},
       state: {},
+      water: {},
+      weather: {},
       world: {
         scene: "infinite-islands",
         generatorVersion,
@@ -71,6 +79,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.validateConfig.mockImplementation((value: unknown) => value);
   mocks.validateSessionState.mockImplementation((value: unknown) => value);
+  mocks.validateWaterState.mockImplementation((value: unknown) => value);
+  mocks.validateWeatherState.mockImplementation((value: unknown) => value);
   vi.stubGlobal("location", { pathname: "/", hash: "" });
   vi.stubGlobal("history", { replaceState: vi.fn() });
 });
@@ -91,6 +101,8 @@ describe("project import startup", () => {
     expect(result).not.toBeNull();
     expect(mocks.validateConfig).toHaveBeenCalledOnce();
     expect(mocks.validateSessionState).toHaveBeenCalledOnce();
+    expect(mocks.validateWaterState).toHaveBeenCalledOnce();
+    expect(mocks.validateWeatherState).toHaveBeenCalledOnce();
     expect(params.get("import")).toBeNull();
     expect(params.get("scene")).toBe("infinite-islands");
     expect(params.get("seed")).toBe("73");
@@ -128,7 +140,7 @@ describe("project import startup", () => {
   it("keeps explicit URL identity for a legacy v3 archive", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.consume.mockResolvedValue({
-      manifest: { schemaVersion: 3, config: {}, state: {} },
+      manifest: { schemaVersion: 3, config: {}, state: {}, water: {}, weather: {} },
       customTextures: new Map(),
     });
     const params = new URLSearchParams("import=token&seed=9&scene=continent");
