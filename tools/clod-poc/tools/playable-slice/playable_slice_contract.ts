@@ -50,6 +50,7 @@ export interface PlayableSliceRunReport {
   readonly mode: PlayableSliceMode;
   readonly runIndex: number;
   readonly freshProfile: boolean;
+  readonly expectedWaterBodyId: string;
   readonly startedAt: string;
   readonly wallClockMs: number;
   readonly actions: readonly PlayableSliceActionRecord[];
@@ -94,6 +95,12 @@ function increaseAcrossCounterResets(
   return increase;
 }
 
+function isDry(snapshot: PlayableSliceSnapshot): boolean {
+  return snapshot.swim.mode === "dry"
+    && snapshot.swim.submersionM <= 0
+    && snapshot.swim.bodyId.length === 0;
+}
+
 export function publicRouteAuditFailures(
   mode: PlayableSliceMode,
   actions: readonly PlayableSliceActionRecord[],
@@ -129,6 +136,19 @@ export function evaluatePlayableSliceRun(
   const continued = steps.get("gameplay_continued")!.snapshot;
   const snapshots = report.steps.map((evidence) => evidence.snapshot);
 
+  if (!start.persistence.loaded || start.persistence.lastError !== 0) {
+    failures.push("saved world was not loaded cleanly at route start");
+  }
+  if (!start.grounded) failures.push("player was not grounded at route start");
+  if (!isDry(start)) failures.push("route did not start on dry authoritative terrain");
+  for (const [step, snapshot] of [
+    ["boundary_crossed", boundary],
+    ["terrain_dug", dug],
+    ["construction_placed", placed],
+    ["construction_broken", broken],
+  ] as const) {
+    if (!isDry(snapshot)) failures.push(`route entered water before the canonical water step: ${step}`);
+  }
   if (boundary.page[0] === start.page[0] && boundary.page[1] === start.page[1]) {
     failures.push("player did not cross a terrain page boundary");
   }
@@ -155,6 +175,11 @@ export function evaluatePlayableSliceRun(
   }
   if (water.swim.bodyId.length === 0 || water.swim.submersionM <= 0) {
     failures.push("swim state did not identify an immersed authoritative water body");
+  }
+  if (!report.expectedWaterBodyId.trim()) {
+    failures.push("expected canonical river body id is missing");
+  } else if (water.swim.bodyId !== report.expectedWaterBodyId) {
+    failures.push(`player entered ${water.swim.bodyId || "unknown water"}, expected ${report.expectedWaterBodyId}`);
   }
   if (spell.spell.accepted <= water.spell.accepted) {
     failures.push("public earth spell input was not accepted");

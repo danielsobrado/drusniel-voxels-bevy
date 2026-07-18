@@ -92,12 +92,12 @@ function validReport(): Omit<PlayableSliceRunReport, "passed" | "failures"> {
     water_entered: snapshot({
       page: [1, 0], frame: 6,
       terrain: { revision: 1, voxelDeltaCount: 20 },
-      swim: { mode: "surface", submersionM: 1, bodyId: "river:7" },
+      swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:7" },
     }),
     earth_cast_converged: snapshot({
       page: [1, 0], frame: 7,
       terrain: { revision: 2, voxelDeltaCount: 40 },
-      swim: { mode: "surface", submersionM: 1, bodyId: "river:7" },
+      swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:7" },
       spell: {
         accepted: 1,
         denied: 0,
@@ -165,6 +165,7 @@ function validReport(): Omit<PlayableSliceRunReport, "passed" | "failures"> {
     mode: "continuous",
     runIndex: 0,
     freshProfile: false,
+    expectedWaterBodyId: "hydrology:7",
     startedAt: new Date(0).toISOString(),
     wallClockMs: 20_000,
     actions: [
@@ -198,6 +199,58 @@ describe("playable slice acceptance contract", () => {
 
     expect(failures.some((failure) => failure.includes("step 3 expected terrain_dug"))).toBe(true);
     expect(failures.some((failure) => failure.includes("step 4 expected construction_placed"))).toBe(true);
+  });
+
+  it("rejects an unloaded, airborne, or wet route start", () => {
+    const report = validReport();
+    const steps = report.steps.map((item) => item.step === "spawn_ready"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            grounded: false,
+            swim: { mode: "surface", submersionM: 0.25, bodyId: "hydrology:7" },
+            persistence: { ...item.snapshot.persistence, loaded: false },
+          },
+        }
+      : item);
+    const failures = evaluatePlayableSliceRun({ ...report, steps });
+
+    expect(failures).toContain("saved world was not loaded cleanly at route start");
+    expect(failures).toContain("player was not grounded at route start");
+    expect(failures).toContain("route did not start on dry authoritative terrain");
+  });
+
+  it("rejects entering water before dig and construction finish", () => {
+    const report = validReport();
+    const steps = report.steps.map((item) => item.step === "terrain_dug"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            swim: { mode: "surface", submersionM: 0.5, bodyId: "hydrology:7" },
+          },
+        }
+      : item);
+
+    expect(evaluatePlayableSliceRun({ ...report, steps }))
+      .toContain("route entered water before the canonical water step: terrain_dug");
+  });
+
+  it("rejects a different authoritative water body", () => {
+    const report = validReport();
+    const steps = report.steps.map((item) => item.step === "water_entered"
+      ? {
+          ...item,
+          snapshot: {
+            ...item.snapshot,
+            swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:99" },
+          },
+        }
+      : item);
+
+    expect(evaluatePlayableSliceRun({ ...report, steps }))
+      .toContain("player entered hydrology:99, expected hydrology:7");
   });
 
   it("rejects an earth cast that converges without committing terrain", () => {

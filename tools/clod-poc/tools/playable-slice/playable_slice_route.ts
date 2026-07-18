@@ -43,6 +43,7 @@ export interface PlayableSliceRunOptions {
   readonly mode: PlayableSliceMode;
   readonly runIndex: number;
   readonly freshProfile: boolean;
+  readonly expectedWaterBodyId: string;
   readonly startedAt?: Date;
 }
 
@@ -71,6 +72,27 @@ async function barrier(
   if (mode === "diagnostic") {
     await (driver as DiagnosticPlayableSliceDriver).diagnosticBarrier(label);
   }
+}
+
+async function restorePlayerAfterConstruction(driver: PublicPlayableSliceDriver): Promise<void> {
+  let cleanupError: unknown = null;
+  try {
+    const current = await driver.snapshot();
+    if (current.construction.active) await driver.press("b");
+  } catch (error) {
+    cleanupError = error;
+  }
+  try {
+    await driver.keyUp("Tab");
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
+    await driver.waitForPointerLock(true);
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (cleanupError) throw cleanupError;
 }
 
 async function runRoute(
@@ -110,6 +132,7 @@ async function runRoute(
   await evidence(driver, steps, "terrain_dug", dug);
 
   await driver.keyDown("Tab");
+  let constructionFailure: unknown = null;
   try {
     await driver.waitForPointerLock(false);
     await driver.press("b");
@@ -144,9 +167,15 @@ async function runRoute(
     );
     await evidence(driver, steps, "construction_broken", broken);
     await driver.press("b");
+  } catch (error) {
+    constructionFailure = error;
+    throw error;
   } finally {
-    await driver.keyUp("Tab");
-    await driver.waitForPointerLock(true);
+    try {
+      await restorePlayerAfterConstruction(driver);
+    } catch (error) {
+      if (!constructionFailure) throw error;
+    }
   }
 
   await driver.keyDown("Shift");
@@ -214,6 +243,7 @@ async function runRoute(
     mode: options.mode,
     runIndex: options.runIndex,
     freshProfile: options.freshProfile,
+    expectedWaterBodyId: options.expectedWaterBodyId,
     startedAt: startedAt.toISOString(),
     wallClockMs: Math.max(0, driver.nowMs() - startedAtMs),
     actions: [...driver.actions],

@@ -26,7 +26,7 @@ function snapshot(step: PlayableSliceStep): PlayableSliceSnapshot {
     pageSizeM: 64,
     page: pageCrossed ? [1, 0] : [0, 0],
     swim: index >= PLAYABLE_SLICE_STEPS.indexOf("water_entered")
-      ? { mode: "surface", submersionM: 1, bodyId: "river:1" }
+      ? { mode: "surface", submersionM: 1, bodyId: "hydrology:1" }
       : { mode: "dry", submersionM: 0, bodyId: "" },
     terrain: terrainChanged
       ? { revision: spellChanged ? 2 : 1, voxelDeltaCount: spellChanged ? 40 : 20 }
@@ -96,6 +96,7 @@ function baseReport(
     mode: "continuous",
     runIndex: 0,
     freshProfile: false,
+    expectedWaterBodyId: "hydrology:1",
     startedAt: new Date(0).toISOString(),
     wallClockMs: 10_000,
     actions: [

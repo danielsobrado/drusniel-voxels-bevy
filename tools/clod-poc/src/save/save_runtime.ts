@@ -359,11 +359,20 @@ async function performSaveRuntimeFlush(
   let db: IDBDatabase | null = null;
   let acknowledgedRegionKeys: string[] = [];
   try {
-    db = await openSaveDb();
     activeState.voxelDeltaCount = voxelEditCount();
     const propsByRegion = partitionSavedPropsByRegion(savedPropStore.snapshot());
     const dirtyRegionKeys = activeState.dirtyRegions.keys();
     const dirtySnapshot = activeState.dirtyRegions.capture(dirtyRegionKeys);
+    const voxelSnapshotsByRegion = new Map<string, ReturnType<typeof getVoxelEditSnapshotForBounds>>();
+    for (const regionKey of dirtyRegionKeys) {
+      const bounds = boundsForRegion(regionKey);
+      voxelSnapshotsByRegion.set(
+        regionKey,
+        getVoxelEditSnapshotForBounds(bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ),
+      );
+    }
+
+    db = await openSaveDb();
     const result = await flushDirtyRegionBatch({
       db,
       saveId: activeState.saveId,
@@ -372,8 +381,9 @@ async function performSaveRuntimeFlush(
       dirtyRegionKeys,
       propsByRegion,
       snapshotForRegion: (regionKey) => {
-        const bounds = boundsForRegion(regionKey);
-        return getVoxelEditSnapshotForBounds(bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ);
+        const snapshot = voxelSnapshotsByRegion.get(regionKey);
+        if (!snapshot) throw new Error(`missing captured voxel snapshot for ${regionKey}`);
+        return snapshot;
       },
       maxRegionWrites,
     });
@@ -388,24 +398,26 @@ async function performSaveRuntimeFlush(
       );
       activeState.completedRegionKeys.clear();
     }
-    activeState.counters.save_last_flush_written_regions = result.written.length;
-    activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegions.size;
-    activeState.counters.save_last_flush_ms = nowMs() - startedAt;
-    activeState.counters.save_last_error = 0;
+    if (state === activeState) {
+      activeState.counters.save_last_flush_written_regions = result.written.length;
+      activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegions.size;
+      activeState.counters.save_last_flush_ms = nowMs() - startedAt;
+      activeState.counters.save_last_error = 0;
+    }
     activeState.lastFlushError = null;
   } catch (error) {
     if (acknowledgedRegionKeys.length > 0 && activeState.dirtyRegions.size === 0) {
       activeState.revision++;
       activeState.dirtyRegions.mark(acknowledgedRegionKeys, activeState.revision);
     }
-    activeState.counters.save_last_error = 1;
+    if (state === activeState) activeState.counters.save_last_error = 1;
     activeState.lastFlushError = error;
     console.error("[save-runtime] autosave flush failed", error);
     if (throwOnError) throw error;
   } finally {
     db?.close();
     publishCounters();
-    if (activeState.dirtyRegions.size > 0) scheduleFlush();
+    if (state === activeState && activeState.dirtyRegions.size > 0) scheduleFlush();
   }
 }
 
