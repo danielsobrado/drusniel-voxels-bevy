@@ -3,6 +3,7 @@ import * as THREE from "three";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import { cloneTreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { TreeSystemAssets } from "./tree_system_assets_runtime.js";
 import {
   updateTreeSystemImpostorMaterial,
   updateTreeSystemImpostorMaterialsLighting,
@@ -25,6 +26,28 @@ describe("tree system impostor lighting lifecycle", () => {
 
     expect(material.uniforms.uTreeImpostorSunColor.value).toEqual(current.sunColor);
     expect(materials).toEqual({ oak: material });
+  });
+
+  it("wires asset lighting updates into preloaded impostor materials", () => {
+    const initial = lighting(0.2);
+    const assets = new TreeSystemAssets({
+      settings: cloneTreeSettings(),
+      webgpu: false,
+      lighting: initial,
+      impostorAtlases: { oak: fakeAtlas() },
+    });
+    try {
+      const material = assets.impostorMaterials.oak as THREE.ShaderMaterial;
+      const next = lighting(0.9);
+
+      expect(material.uniforms.uTreeImpostorSunColor.value).toEqual(initial.sunColor);
+      assets.updateLighting(next);
+      expect(assets.impostorMaterials.oak).toBe(material);
+      expect(material.uniforms.uTreeImpostorSunColor.value).toEqual(next.sunColor);
+      expect(material.uniforms.uTreeImpostorAmbientFloor.value).toBe(next.ambientFloor);
+    } finally {
+      assets.dispose();
+    }
   });
 
   it("updates every cached species material in place", () => {
