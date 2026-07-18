@@ -15,7 +15,6 @@ import {
   forestLightingDebugModeValue,
   updateForestLightingUniforms,
   type ForestLightingMaterialState,
-  type ForestLightingUniforms,
 } from "../forest_lighting/index.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -47,7 +46,7 @@ const AERIAL_TINT_SCALE = 0.15;
 const AERIAL_TINT_MAX = 0.04;
 const SHAFT_HINT_SCALE = 0.01;
 const FOREST_DARKEN_MAX = 0.72;
-const FOREST_FOG_COLOR = new THREE.Vector3(0.4, 0.4431372549, 0.4274509804);
+const FOREST_FOG_RGB = [0.4, 0.4431372549, 0.4274509804] as const;
 
 export function decorateTreeImpostorForestLighting(
   material: THREE.Material,
@@ -85,20 +84,24 @@ function createNodeForestLightingHandle(material: NodeMaterialShape): ImpostorFo
   const packedTexture = createNeutralForestTexture("tree-impostor-forest-neutral-packed");
   const auxTexture = createNeutralForestTexture("tree-impostor-forest-neutral-aux");
   const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+  const enabled = uniform(0);
+  const worldSize = uniform(1);
+  const aoStrength = uniform(1);
+  const shadowStrength = uniform(1);
+  const fogStrength = uniform(0);
+  const debugMode = uniform(0);
+  const forestUv: TslNode = clamp(worldXZ.div(worldSize), vec2(0), vec2(1));
   const nodeState: NodeForestLightingState = {
-    packedNode: texture(packedTexture, vec2(0)),
-    auxNode: texture(auxTexture, vec2(0)),
-    enabled: uniform(0),
-    worldSize: uniform(1),
-    aoStrength: uniform(1),
-    shadowStrength: uniform(1),
-    fogStrength: uniform(0),
-    debugMode: uniform(0),
+    packedNode: texture(packedTexture, forestUv),
+    auxNode: texture(auxTexture, forestUv),
+    enabled,
+    worldSize,
+    aoStrength,
+    shadowStrength,
+    fogStrength,
+    debugMode,
   };
 
-  const forestUv: TslNode = clamp(worldXZ.div(nodeState.worldSize), vec2(0), vec2(1));
-  nodeState.packedNode.uvNode = forestUv;
-  nodeState.auxNode.uvNode = forestUv;
   const packed: TslNode = nodeState.packedNode;
   const aux: TslNode = nodeState.auxNode;
   const darken: TslNode = clamp(
@@ -113,7 +116,7 @@ function createNodeForestLightingHandle(material: NodeMaterialShape): ImpostorFo
   );
   const shaded: TslNode = mix(
     baseColor.mul(float(1).sub(darken)),
-    vec3(FOREST_FOG_COLOR),
+    vec3(...FOREST_FOG_RGB),
     fog,
   ).add(vec3(packed.w.mul(SHAFT_HINT_SCALE).mul(nodeState.enabled)));
   const debugColor = forestDebugColorNode(nodeState.debugMode, packed, aux);
