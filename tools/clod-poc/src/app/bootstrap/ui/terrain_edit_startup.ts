@@ -12,6 +12,7 @@ import {
   markSaveRegionsDirtyForBounds,
 } from "../../../save/save_runtime.js";
 import { getDigEditRevision, voxelEditCount } from "../../../terrain/terrain.js";
+import { createCommandGuardedTerrainEditService } from "../../../terrain/editing/terrain_edit_command_service.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
 import { TerrainEditDirtyQueue, type TerrainEditDirtyEvent } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
 import {
@@ -68,6 +69,18 @@ export function runTerrainEditStartup(
   const dirtyQueue = new SaveTrackingDirtyQueue();
   const authorityOrigin = () => input.interaction.mode === "playing" ? input.player.position : null;
   const authorityCounters = () => input.longView.hooks?.stats?.counters ?? null;
+  const getInteractionMode = () => input.interaction.mode;
+  const editReadyAt = (x: number, z: number) => editTargetAcceptable(readinessFeeds, x, z);
+  const getBrushParams = () => ({
+    digRadius: state.digRadius,
+    brushShape: state.brushShape,
+    brushOp: state.brushOp,
+    brushMaterial: state.brushMaterial,
+    brushHeight: state.brushHeight,
+    brushStrength: state.brushStrength,
+    brushFalloff: state.brushFalloff,
+  });
+  const setLastDigSummary = (summary: string) => { session.lastDigSummary = summary; };
   const renderedRootKeys = () => input.result.roots.map((node) => node.id);
   setRenderedClodOwnershipKeySource(renderedRootKeys);
 
@@ -97,18 +110,10 @@ export function runTerrainEditStartup(
     return session.terraformEditCheckbox?.checked ?? session.terraformEditActive;
   };
 
-  const terrainEditService = createTerrainEditService({
+  const baseTerrainEditService = createTerrainEditService({
     clodWorker,
     terrainRaycast,
-    getBrushParams: () => ({
-      digRadius: state.digRadius,
-      brushShape: state.brushShape,
-      brushOp: state.brushOp,
-      brushMaterial: state.brushMaterial,
-      brushHeight: state.brushHeight,
-      brushStrength: state.brushStrength,
-      brushFalloff: state.brushFalloff,
-    }),
+    getBrushParams,
     getVegetationState: () => ({
       grassEnabled: state.grassEnabled,
       treesEnabled: state.treesEnabled,
@@ -130,17 +135,28 @@ export function runTerrainEditStartup(
     editAuthority,
     getAuthorityOrigin: authorityOrigin,
     getAuthorityCounters: authorityCounters,
-    getInteractionMode: () => input.interaction.mode,
-    editReadyAt: (x, z) => editTargetAcceptable(readinessFeeds, x, z),
+    getInteractionMode,
+    editReadyAt,
     dirtyQueue,
     refreshGrassStats: () => bindings.refreshGrassStats(),
     refreshTreeStats: () => bindings.refreshTreeStats(),
     refreshUnderstoryStats: () => bindings.refreshUnderstoryStats(),
     updateInfo,
-    setLastDigSummary: (summary) => { session.lastDigSummary = summary; },
+    setLastDigSummary,
     setPendingParentCount: (count) => { session.pendingParentCount = count; },
     setPendingParentNodes: (nodes) => { session.pendingParentNodes = nodes; },
     setPendingParentMs: (ms) => { session.pendingParentMs = ms; },
+  });
+  const terrainEditService = createCommandGuardedTerrainEditService(baseTerrainEditService, {
+    terrainRaycast,
+    getBrushParams,
+    editAuthority,
+    getAuthorityOrigin: authorityOrigin,
+    getInteractionMode,
+    getTerrainRevision: getDigEditRevision,
+    editReadyAt,
+    setLastDigSummary,
+    updateInfo,
   });
 
   setActiveConstructionTerrainConformHandler({
