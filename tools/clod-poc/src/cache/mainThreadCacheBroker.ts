@@ -105,8 +105,9 @@ export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   attachedWorkers.add(worker);
   registerTerrainStreamingWorker(worker);
   worker.addEventListener("message", (event: MessageEvent) => {
-    if (!isCacheRpcRequest(event.data)) return;
-    void brokerOperations.enqueue(() => handleCacheRpc(worker, event.data));
+    const request = event.data;
+    if (!isCacheRpcRequest(request)) return;
+    void brokerOperations.enqueue(() => handleCacheRpc(worker, request));
   });
 }
 
