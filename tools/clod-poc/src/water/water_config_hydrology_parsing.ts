@@ -55,7 +55,7 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
     gravelBars: {
       enabled: readBoolean(gravelBars.enabled, fallback.gravelBars.enabled),
       strength: readFraction(gravelBars.strength, fallback.gravelBars.strength),
-      seedSalt: Math.floor(readNumber(gravelBars.seed_salt ?? gravelBars.seedSalt, fallback.gravelBars.seedSalt)),
+      seedSalt: Math.max(0, Math.floor(readNumber(gravelBars.seed_salt ?? gravelBars.seedSalt, fallback.gravelBars.seedSalt))),
       longitudinalPeriodM: readAtLeast(gravelBars.longitudinal_period_m ?? gravelBars.longitudinalPeriodM, fallback.gravelBars.longitudinalPeriodM, 8),
       crossPeriodM: readAtLeast(gravelBars.cross_period_m ?? gravelBars.crossPeriodM, fallback.gravelBars.crossPeriodM, 2),
       patternStart: gravelPatternStart,
