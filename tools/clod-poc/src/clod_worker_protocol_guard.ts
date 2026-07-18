@@ -23,6 +23,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function hasFiniteNumbers(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.every((key) => isFiniteNumber(value[key]));
+}
+
 function isRequestIdArray(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isRequestId);
 }
@@ -37,25 +41,37 @@ export function isClodWorkerProtocolMessage(value: unknown): boolean {
     case "buildComplete":
       return isRequestId(value.requestId) && isRecord(value.result);
     case "lod0Rebuilt":
-      return isRequestIdArray(value.requestIds) && Array.isArray(value.changed);
+      return isRequestIdArray(value.requestIds)
+        && Array.isArray(value.changed)
+        && Array.isArray(value.dirtyCoords)
+        && hasFiniteNumbers(value, [
+          "editCount",
+          "lod0Pages",
+          "lod0Ms",
+          "serializeMs",
+          "serializedBytes",
+          "chunksRemeshed",
+          "chunksTotal",
+          "pendingParents",
+        ]);
     case "parentRebuilt":
-      return isNullableRequestId(value.requestId) && Array.isArray(value.changed);
+      return isNullableRequestId(value.requestId)
+        && Array.isArray(value.changed)
+        && hasFiniteNumbers(value, ["parentNodes", "parentMs", "pendingParents"]);
     case "parentsComplete":
       return isNullableRequestId(value.requestId)
-        && isFiniteNumber(value.parentNodes)
-        && isFiniteNumber(value.parentMs);
+        && hasFiniteNumbers(value, ["parentNodes", "parentMs"]);
     case "flushed":
     case "cacheCleared":
       return isRequestId(value.requestId);
     case "streamRootsBuilt":
       return isRequestId(value.requestId)
         && Array.isArray(value.nodes)
-        && isFiniteNumber(value.buildMs)
-        && isFiniteNumber(value.transferBytes);
+        && hasFiniteNumbers(value, ["buildMs", "transferBytes"]);
     case "heightfieldTilesBuilt":
       return isRequestId(value.requestId)
         && Array.isArray(value.tiles)
-        && isFiniteNumber(value.buildMs);
+        && hasFiniteNumbers(value, ["buildMs", "transferBytes"]);
     case "error":
       return isNullableRequestId(value.requestId) && typeof value.message === "string";
     default:
