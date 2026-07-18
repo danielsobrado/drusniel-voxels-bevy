@@ -15,7 +15,7 @@ import vegetationAuthorityPcg from "../vegetation/gpu_authority/pcg2d.wgsl?raw";
 import vegetationAuthorityHash from "../vegetation/gpu_authority/shaders/hash.wgsl?raw";
 import vegetationTerrainSampling from "../vegetation/gpu_authority/terrain_sampling.wgsl?raw";
 import { TREE_SPECIES } from "../trees/tree_config.js";
-import { TREE_CROWN_PROXY_INDEX_COUNT } from "../trees/tree_crown_proxy_math.js";
+import { TREE_CROWN_PROXY_INDEX_COUNT } from "../trees/tree_crown_proxy_contract.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
