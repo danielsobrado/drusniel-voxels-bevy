@@ -80,6 +80,40 @@ describe("save checkpoint controller", () => {
     expect(counters.save_checkpoint_last_ms).toBe(45);
   });
 
+  it("establishes the in-flight guard before callbacks can re-enter", async () => {
+    let controller!: ReturnType<typeof createSaveCheckpointController>;
+    let nestedFromStatus: Promise<void> | null = null;
+    let nestedFromFlush: Promise<void> | null = null;
+    let statusReentered = false;
+    let flushReentered = false;
+    const counters: SaveCheckpointCounters = {};
+    const flush = vi.fn(() => {
+      if (!flushReentered) {
+        flushReentered = true;
+        nestedFromFlush = controller.requestCheckpoint();
+      }
+      return Promise.resolve();
+    });
+    controller = createSaveCheckpointController({
+      flush,
+      getCounters: () => counters,
+      onStatus: (status) => {
+        if (status !== "saving checkpoint" || statusReentered) return;
+        statusReentered = true;
+        nestedFromStatus = controller.requestCheckpoint();
+      },
+    });
+
+    const first = controller.requestCheckpoint();
+    expect(nestedFromStatus).not.toBeNull();
+    expect(nestedFromFlush).not.toBeNull();
+    await Promise.all([first, nestedFromStatus!, nestedFromFlush!]);
+
+    expect(flush).toHaveBeenCalledOnce();
+    expect(counters.save_checkpoint_requests).toBe(1);
+    expect(counters.save_checkpoint_completed).toBe(1);
+  });
+
   it("repeats flush passes until the checkpoint is clean", async () => {
     let remainingDirtyPasses = 2;
     const flush = vi.fn(async () => { remainingDirtyPasses -= 1; });
