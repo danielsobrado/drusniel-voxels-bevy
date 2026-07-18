@@ -18,6 +18,7 @@ const base = {
   max_bytes: 1_000_000,
   compression: "none" as const,
   checksum: "sha256" as const,
+  rpc_timeout_ms: 30_000,
 };
 
 describe("persistent config roles", () => {
