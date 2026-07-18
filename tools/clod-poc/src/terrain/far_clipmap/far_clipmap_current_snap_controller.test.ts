@@ -1,10 +1,8 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { resolveFarClipmapConfig } from "./far_clipmap_config.js";
-import {
-  applyCurrentSnapReadiness,
-  createCurrentSnapFarClipmapController,
-} from "./far_clipmap_current_snap_controller.js";
+import { createFarClipmapController } from "./index.js";
+import { applyCurrentSnapReadiness } from "./far_clipmap_current_snap_controller.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 
 function config(ringCount = 1) {
@@ -59,7 +57,7 @@ describe("current snap far clipmap readiness", () => {
 
   it("keeps the old ring visible but pending until the replacement commits", () => {
     const scene = new THREE.Scene();
-    const controller = createCurrentSnapFarClipmapController(
+    const controller = createFarClipmapController(
       scene,
       config(),
       readyFlatSource(),
@@ -98,7 +96,7 @@ describe("current snap far clipmap readiness", () => {
       ...readyFlatSource(),
       revision: () => revision,
     };
-    const controller = createCurrentSnapFarClipmapController(
+    const controller = createFarClipmapController(
       new THREE.Scene(),
       resolveFarClipmapConfig({
         ...config(),
