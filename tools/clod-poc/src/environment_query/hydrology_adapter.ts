@@ -100,7 +100,6 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
     const cached = this.sampleHydrology(x, z, hint);
     const valid = isFiniteHydrologySample(cached.sample);
     const result = hydrologyWaterResult(
-      // Fail closed: never surface partial finite fields from a non-finite sample.
       valid ? cached.sample : null,
       createHydrologyMeta(cached.revision, valid, hint),
     );
@@ -116,6 +115,8 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
     const result = hydrologyRiverResult(
       valid ? cached.sample : null,
       createHydrologyMeta(cached.revision, valid, hint),
+      x,
+      z,
     );
     this.recordScalar("river", result.meta, startedAt);
     return result;
@@ -178,7 +179,7 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
         writeBatchWater(output, index, sampleValid ? sample : null, sampleMeta);
       }
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.river)) {
-        writeBatchRiver(output, index, sampleValid ? sample : null, sampleMeta);
+        writeBatchRiver(output, index, sampleValid ? sample : null, sampleMeta, x, z);
       }
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.visibility)) {
         output.sunVisibility[index] = 1;
