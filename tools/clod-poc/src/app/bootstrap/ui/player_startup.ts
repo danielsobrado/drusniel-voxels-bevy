@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { getDigEditRevision, surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
+import { runReadinessGatedTeleport } from "../../../player/teleport_recovery.js";
+import { gameplayDiagnostics } from "../../../player/gameplay_diagnostics.js";
 import {
   createAppCellReadinessFeeds,
   movementReadinessAt,
@@ -182,6 +184,30 @@ export function runPlayerStartup(
         pitch: camera.rotation.x,
         fov: camera.fov,
       };
+    };
+    automationHooks.teleportGameplayTarget = async (target) => {
+      const applyPose = ({ x, z }: { x: number; z: number }): void => {
+        const current = automationHooks.getPose?.();
+        if (!current || !automationHooks.setPose) {
+          throw new Error("gameplay teleport requires pose automation hooks");
+        }
+        automationHooks.setPose({
+          ...current,
+          p: [x, current.p[1], z],
+          yaw: target.yaw ?? current.yaw,
+        });
+      };
+      return runReadinessGatedTeleport({
+        target,
+        timeoutMs: Math.max(1_000, target.timeoutMs ?? 180_000),
+        // Streaming worlds need a pose nudge to load the destination; arrival commits only when ready.
+        primeStream: applyPose,
+        commit: applyPose,
+        readyAt: (x, z) => teleportTargetReady(playerReadinessFeeds, x, z),
+        waitFrame: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+        now: () => performance.now(),
+        recordReadyMs: (milliseconds) => gameplayDiagnostics.set("time_to_gameplay_ready_ms", milliseconds),
+      });
     };
   }
 

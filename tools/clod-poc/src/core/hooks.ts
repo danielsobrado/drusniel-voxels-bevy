@@ -36,6 +36,8 @@ export interface DestroyEnvironmentalPropInput {
   readonly prefabId?: string;
   readonly layer?: "tree" | "stone" | "grass";
   readonly candidateSpacingM?: number;
+  /** When false, skips immediate durable flush (caller must flushSaveRuntime). Default true. */
+  readonly flush?: boolean;
 }
 
 export interface DestroyEnvironmentalPropResult {
@@ -49,6 +51,8 @@ export interface FellTreeInput {
   readonly position: readonly [number, number, number];
   readonly candidateSpacingM?: number;
   readonly maxDistanceM?: number;
+  /** When false, skips immediate durable flush (caller must flushSaveRuntime). Default true. */
+  readonly flush?: boolean;
 }
 
 export interface FellTreeResult {
@@ -145,6 +149,18 @@ export interface PrecisionLandmarkScreenPosition {
   readonly visible: boolean;
 }
 
+export interface GameplayTeleportTarget {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw?: number;
+  readonly timeoutMs?: number;
+}
+
+export interface GameplayTeleportEvidence {
+  readonly timeToGameplayReadyMs: number;
+  readonly readinessPolls: number;
+}
+
 export interface EngineStats {
   fps: number;
   frameMs: number;
@@ -199,6 +215,7 @@ export interface ClodHooks {
   getStreamingResidencySnapshot: (() => StreamingResidencySnapshot) | null;
   setPrecisionLandmarks: ((landmarks: readonly PrecisionLandmark[]) => void) | null;
   getPrecisionLandmarkScreenPositions: (() => readonly PrecisionLandmarkScreenPosition[]) | null;
+  teleportGameplayTarget: ((target: GameplayTeleportTarget) => Promise<GameplayTeleportEvidence>) | null;
   findContinentRiverCrossingRoute: ((
     options?: ContinentRiverRouteSearchOptions,
   ) => ContinentRiverCrossingRoute | null) | null;
@@ -298,6 +315,7 @@ export function initHooks(): ClodHooks {
     getStreamingResidencySnapshot: null,
     setPrecisionLandmarks: null,
     getPrecisionLandmarkScreenPositions: null,
+    teleportGameplayTarget: null,
     findContinentRiverCrossingRoute: null,
     setAcceptanceSceneOptions: null,
     resetAcceptanceScene: null,

@@ -796,7 +796,8 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private currentInteractionMode(): string {
-    return this.deps.getInteractionMode?.() ?? "construction";
+    // Match dig/spell: stamp and re-check the live player interaction mode.
+    return this.deps.getInteractionMode?.() ?? "playing";
   }
 
   private validatePlaceCommand(

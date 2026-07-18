@@ -1,29 +1,29 @@
 # Playable World Contract — character, readiness, and the vertical slice
 
-Created 2026-07-16. Status: **P0–P7 COMPLETE 2026-07-18** (see execution log at the
-bottom). Landed on `main` as `99cbdd94` ("Close playable-world contract P4-P7…") and
-pushed to `origin/main`. P0–P3 landed 2026-07-17; P4–P7 closed 2026-07-18 (construction
-edit-command + `constructionReady` wiring, water/swim already on main, spell↔world verify
-green, `accept:playable-slice` harness green under `playable-slice:verify`). Revised
-2026-07-16 after an external review that found real behavioral mistakes in the first draft
-— all of its code claims were verified in source and the readiness/collision core is
-rewritten accordingly. Accepted: the heightfield fallback collider is **restricted, never
-generalized** (a height-per-column fallback seals caves and invents floors in a voxel
-world); the below-canonical-surface sentinel is **dropped** (a player in a cave is
-legitimately below the surface) in favor of a proven-invalid recovery contract with
-reason-coded counters; dig-under-self now expects the player to **fall**, not "follow
-terrain"; the single tri-state is replaced by **capability + revision readiness**; queued
-edit retries are replaced by deny-by-default plus strictly validated immutable commands;
-collider replacement becomes an **asynchronous revision-validated pipeline** (the current
-swap builds `MeshBVH` synchronously on the calling path); fallback counters are
-reason-coded so only missing-coverage frames count against streaming gates; hitch/
-tunnelling test cases added beyond fixed rates; the water phase defines a canonical
-water authority before locomotion, scoped to swim locomotion with immersion forces;
-spell/world integration moved **before** the final slice gate (the first draft gated a
-slice step on work scheduled in a later phase); unsupported construction pieces keep
-colliders aligned with their visible geometry; persistence round-trips compare semantic
-state, not bytes; and the slice splits into a deterministic diagnostic gate plus a
-continuous-play gate.
+Created 2026-07-16. Status: **P0–P6 COMPLETE; P7 harness green / headed evidence owed
+(2026-07-18)**. Landed on `main` as `99cbdd94` (+ review fixes follow-up). P0–P3 landed
+2026-07-17; P4–P6 closed with unit/verify suites green; P7 acceptance **runner and unit
+contracts** are green under `playable-slice:verify`, but the headed 5+5+1 WebGPU
+`accept:playable-slice` report has **not** been captured yet — do not treat P7 as
+release-closed until that report is attached. Revised 2026-07-16 after an external review
+that found real behavioral mistakes in the first draft — all of its code claims were
+verified in source and the readiness/collision core is rewritten accordingly. Accepted:
+the heightfield fallback collider is **restricted, never generalized** (a
+height-per-column fallback seals caves and invents floors in a voxel world); the
+below-canonical-surface sentinel is **dropped** (a player in a cave is legitimately
+below the surface) in favor of a proven-invalid recovery contract with reason-coded
+counters; dig-under-self now expects the player to **fall**, not "follow terrain"; the
+single tri-state is replaced by **capability + revision readiness**; queued edit retries
+are replaced by deny-by-default plus strictly validated immutable commands; collider
+replacement becomes an **asynchronous revision-validated pipeline** (the current swap
+builds `MeshBVH` synchronously on the calling path); fallback counters are reason-coded
+so only missing-coverage frames count against streaming gates; hitch/tunnelling test
+cases added beyond fixed rates; the water phase defines a canonical water authority
+before locomotion, scoped to swim locomotion with immersion forces; spell/world
+integration moved **before** the final slice gate (the first draft gated a slice step on
+work scheduled in a later phase); unsupported construction pieces keep colliders aligned
+with their visible geometry; persistence round-trips compare semantic state, not bytes;
+and the slice splits into a deterministic diagnostic gate plus a continuous-play gate.
 
 Plan 3 of 5 toward the browser RPG target. Owner decisions locked 2026-07-16: harden the
 existing construction system (structural collapse is a later plan); swim + buoyancy
@@ -368,7 +368,7 @@ Dig strikes and combat/spell casts never silently replay.
   `constructionReady` + edit-command `not_ready`)
 - [x] semantic round-trip test → green (`world:verify`) —
   dig-under → save → reload semantic equality in the P4 test; `canonicalConstructionPieces`
-  exported; `npm run world:verify` asserts semantic match (tsx-safe pure check; full
+  exported; `npm run world:verify` asserts dig-under + semantic match (tsx-safe; full
   store/collider round-trip stays in vitest)
 - [x] perf non-regression recorded — construction hardening / timing vitest green
   2026-07-18. `perf:construction` remains blocked under raw `tsx` by construction.yaml /
@@ -441,13 +441,13 @@ Two gates, same content, different discipline:
    during the slice; bounded wall-clock; 5 repeated runs + one fresh-profile run. Wire as
    `accept:playable-slice` (sparse scene now; plan 2's dense scene when it lands — both
    recorded).
-- [x] deterministic slice green end-to-end (5 runs) —
-  runner + contract: `tools/playable-slice/`; `npm run accept:playable-slice:diagnostic`
-  (full 5-run headed WebGPU evidence is the release gate; unit contract suite green via
-  `playable-slice:verify`)
-- [x] continuous slice green end-to-end (5 runs), public-routes-only verified —
-  `npm run accept:playable-slice:continuous` (+ fresh-profile in full
-  `accept:playable-slice`); continuous rejects `diagnostic_barrier` actions
+- [x] acceptance runner + unit contracts green (`playable-slice:verify` 2026-07-18) —
+  route planner, diagnostic/continuous contracts, checkpoint controller, snapshot,
+  headed_real_webgpu adapter identity checks
+- [ ] deterministic slice headed 5-run evidence attached
+      (`npm run accept:playable-slice:diagnostic` → `acceptance-runs/playable-slice/`)
+- [ ] continuous slice headed 5-run + fresh-profile evidence attached
+      (`npm run accept:playable-slice` or `:continuous`)
 - [x] wired into acceptance; dense-scene switch recorded when available —
   `accept:playable-slice` / `:diagnostic` / `:continuous` in package.json. Sparse
   continent is the release gate; dense RPG scene switch deferred until a deterministic
@@ -549,42 +549,41 @@ Note for P5 (water): `maxFallSpeed` currently applies to all airborne motion; sw
 locomotion replaces the ballistic fall inside water volumes, so the clamp needs no
 water-specific carve-out now, but rerun the matrix submerged per the protocol.
 
-### 2026-07-18 — P4–P7 closed; contract COMPLETE
+### 2026-07-18 — P4–P6 closed; P7 harness green / headed evidence owed
 
 Closed remaining P4 gaps on top of the already-landed P4–P7 sub-plans:
 
 - **`CellReadiness.constructionReady`** + `constructionTargetReady` — fails closed while a
-  covering collider page is mid-rebuild.
+  covering collider page is mid-rebuild (same predicate as `terrainEditReady` today;
+  named for place consumers).
 - Construction place path creates/validates immutable `construction_place` edit commands
   (ghost command revalidated on click; revision-retry allowed with `targetStillValid`).
-- Runtime wiring passes `terrainColliders` into construction startup for readiness.
+- Runtime wiring passes `terrainColliders` + live `interaction.mode` into construction.
 - Dig-under → save → reload semantic test added; `canonicalConstructionPieces` exported;
-  `world:verify` asserts semantic match (tsx-safe).
+  `world:verify` asserts dig-under + semantic match (tsx-safe; full store/collider
+  round-trip remains in vitest).
 - Fixed `save_checkpoint_controller` coalescing regression (`Promise.then` deferred flush).
 
 **Landed commit:** `99cbdd94` on `main`
 (`Close playable-world contract P4-P7: construction readiness, edit commands, and gates.`)
-— pushed to `origin/main` 2026-07-18.
+— pushed to `origin/main` 2026-07-18. Review fixes (P7 honesty, interaction mode,
+hold-until-ready teleport, dig-under world:verify) follow in a subsequent commit.
 
-Verification 2026-07-18 (on the commit above):
+Verification 2026-07-18 (unit/verify — **not** headed slice):
 
 ```text
 typecheck                         green
 playable-slice:verify             green (41 tests + build)
 spells:verify                     green (48 tests + build)
-world:verify                      green (incl. constructionSemanticMatch)
+world:verify                      green (incl. constructionDigUnderApplied)
 P4/P5/P6 focused vitest           green
+accept:playable-slice (headed)    NOT RUN — P7 release evidence still owed
 ```
 
-Headed release evidence remains `npm run accept:playable-slice` (5 diagnostic + 5
-continuous + 1 fresh profile) against a live WebGPU server — harness and unit contracts
-are green; run that command for the full headed report under
-`acceptance-runs/playable-slice/`.
-
 Plan 1 LM5 teleport drill is unblocked by this contract (`time_to_gameplay_ready_ms` +
-`teleportTargetReady`); any in-tree teleport-recovery / long-map soak WIP is owned by
-plan 1, not this document.
+`teleportTargetReady`); `runReadinessGatedTeleport` commits arrival only after ready
+(optional `primeStream` for streaming).
 
 Deferred (unchanged, recorded): structural collapse; automatic voxel→water extraction;
 `perf:construction` under raw `tsx` (yaml/jpg loader); dense-scene P7 switch until a
-deterministic river approach exists.
+deterministic river approach exists; **headed P7 5+5+1 report**.

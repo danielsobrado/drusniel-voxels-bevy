@@ -5,7 +5,8 @@ import { deriveEnvironmentalPropId, enumerateTreeCandidatesForTile } from "../sr
 import { SparsePropExclusionBitsets } from "../src/world/prop_exclusion.js";
 import type { SavedPropInstance, WorldMetadataRecord } from "../src/save/save_schema.js";
 import { canonicalConstructionPieces } from "../src/construction/construction_semantic.js";
-import type { PlacedConstructionPiece } from "../src/construction/types.js";
+import { reevaluateConstructionSupport } from "../src/construction/support_reevaluation.js";
+import type { ConstructionPieceDef, PlacedConstructionPiece } from "../src/construction/types.js";
 
 function arg(name: string, fallback: number): number {
   const index = process.argv.indexOf(name);
@@ -29,17 +30,28 @@ function rng(seed: number): () => number {
 }
 
 /**
- * Pure semantic construction check (tsx-safe: no yaml/jpg imports). Full dig-under +
- * localStorage + collider round-trip is gated by playable_world_p4_construction.test.ts.
+ * Dig-under → unsupported semantic state, then reorder-tolerant canonicalize.
+ * Full mesh/collider store round-trip stays in playable_world_p4_construction.test.ts
+ * (tsx cannot load construction.yaml / PBR assets).
  */
 function verifyConstructionSemanticRoundTrip(): {
   pieces: number;
   unsupported: number;
   semanticMatch: boolean;
+  digUnderApplied: boolean;
 } {
+  const FLOOR: ConstructionPieceDef = {
+    id: "floor",
+    label: "Floor",
+    category: "floor",
+    dimensionsM: [1, 0.2, 1],
+    canGround: true,
+    material: "wood",
+    snapPoints: [],
+  };
+  const piecesById = new Map([[FLOOR.id, FLOOR]]);
   const source: PlacedConstructionPiece[] = [];
   for (let index = 0; index < 30; index += 1) {
-    const unsupported = index < 8;
     const connectionIds = index === 0
       ? []
       : index === 29
@@ -47,25 +59,44 @@ function verifyConstructionSemanticRoundTrip(): {
         : [`piece-${index + 1}`, `piece-${index - 1}`];
     source.push({
       id: `piece-${index}`,
-      typeId: "floor",
+      typeId: FLOOR.id,
       position: [10 + (index % 6) * 2, 0.1, 10 + Math.floor(index / 6) * 2],
       rotationQuarterTurns: 0,
       material: index % 2 === 0 ? "wood" : "stone",
-      grounded: !unsupported,
+      grounded: true,
       connectionIds,
-      stability: unsupported ? 0 : 1,
-      ...(unsupported ? { unsupported: true } : {}),
+      stability: 1,
     });
   }
-  // Simulate a save/reload that reorders the array.
+
+  const support = reevaluateConstructionSupport({
+    pieces: source,
+    piecesById,
+    aabb: { minX: 0, maxX: 40, minZ: 0, maxZ: 40 },
+    groundSolidAt: () => false,
+  });
+  assert.ok(support.groundedLost.length > 0, "dig-under must clear grounded support");
+  for (const piece of source) {
+    if (support.groundedLost.includes(piece.id)) {
+      piece.grounded = false;
+      piece.unsupported = true;
+      piece.stability = 0;
+    }
+  }
+
   const reloaded = [...source].reverse().map((piece) => ({ ...piece }));
   const expected = canonicalConstructionPieces(source);
   const actual = canonicalConstructionPieces(reloaded);
   assert.deepEqual(actual, expected, "construction semantic round-trip drifted");
   const unsupported = actual.filter((piece) => piece.unsupported).length;
-  assert.equal(unsupported, 8);
+  assert.ok(unsupported > 0, "dig-under must leave unsupported pieces");
   assert.equal(actual[1]!.connectionIds.join(","), "piece-0,piece-2");
-  return { pieces: actual.length, unsupported, semanticMatch: true };
+  return {
+    pieces: actual.length,
+    unsupported,
+    semanticMatch: true,
+    digUnderApplied: true,
+  };
 }
 
 const samples = arg("--tiles", 16);
@@ -118,4 +149,5 @@ console.log(JSON.stringify({
   constructionPieces: construction.pieces,
   constructionUnsupported: construction.unsupported,
   constructionSemanticMatch: construction.semanticMatch,
+  constructionDigUnderApplied: construction.digUnderApplied,
 }, null, 2));

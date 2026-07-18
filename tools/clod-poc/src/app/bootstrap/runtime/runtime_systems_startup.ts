@@ -103,6 +103,8 @@ export interface RuntimeSystemsStartupInput {
   getHooks: () => ClodHooks | null;
   shadowProxyController?: import("../../../shadows/shadowProxyController.js").ShadowProxyController | null;
   terrainColliders?: TerrainColliderSet;
+  /** Real player interaction mode (`orbit` | `choosingSpawn` | `playing`). */
+  getInteractionMode?: () => string;
 }
 
 export interface RuntimeSystemsStartupResult extends VegetationStartupResult, WaterWeatherStartupResult,
@@ -233,6 +235,7 @@ export async function runRuntimeSystemsStartup(
     getHooks,
     terrainColliders,
   } = input;
+  const getInteractionMode = input.getInteractionMode ?? (() => "playing");
   const densityComposition = prepareRpgDensityComposition(input);
 
   const vegetation = runVegetationStartup({
@@ -490,7 +493,7 @@ export async function runRuntimeSystemsStartup(
             ? (x, z) => cellReadinessAt(readinessFeeds, x, z).constructionReady
             : undefined,
           getTerrainRevision: () => getDigEditRevision(),
-          getInteractionMode: () => "construction",
+          getInteractionMode,
           recordEditDenial: recordConstructionEditDenial,
         }), disposeGuard);
       } catch (error) {

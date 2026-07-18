@@ -22,9 +22,10 @@ export interface CellReadiness {
   /** Voxel authority resident and the cell's collider is at the latest revision — edits accepted. */
   terrainEditReady: boolean;
   /**
-   * Construction place/remove is accepted here: covering collider is current (not mid-rebuild)
-   * and edit authority is resident. Snap/overlap indexes are process-resident today; this field
-   * still fails closed on pending page replacement so dig-under rebuilds cannot race a commit.
+   * Construction place/remove is accepted here. Today this matches `terrainEditReady`
+   * (covering collider current + edit authority resident). Named separately so place
+   * consumers fail closed on mid-rebuild without coupling to dig semantics; may diverge
+   * later if snap/overlap indexes become residency-gated.
    */
   constructionReady: boolean;
   terrainRevision: number;
