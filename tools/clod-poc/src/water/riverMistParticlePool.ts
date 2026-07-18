@@ -10,6 +10,7 @@ export interface RiverMistParticleSpawn {
 }
 
 export class RiverMistParticlePool {
+  readonly capacity: number;
   private readonly x: Float32Array;
   private readonly y: Float32Array;
   private readonly z: Float32Array;
@@ -22,17 +23,17 @@ export class RiverMistParticlePool {
   private countValue = 0;
   private overwriteCursor = 0;
 
-  constructor(readonly capacity: number) {
-    const size = Math.max(0, Math.floor(capacity));
-    this.x = new Float32Array(size);
-    this.y = new Float32Array(size);
-    this.z = new Float32Array(size);
-    this.vx = new Float32Array(size);
-    this.vy = new Float32Array(size);
-    this.vz = new Float32Array(size);
-    this.age = new Float32Array(size);
-    this.life = new Float32Array(size);
-    this.strength = new Float32Array(size);
+  constructor(capacity: number) {
+    this.capacity = Math.max(0, Math.floor(Number.isFinite(capacity) ? capacity : 0));
+    this.x = new Float32Array(this.capacity);
+    this.y = new Float32Array(this.capacity);
+    this.z = new Float32Array(this.capacity);
+    this.vx = new Float32Array(this.capacity);
+    this.vy = new Float32Array(this.capacity);
+    this.vz = new Float32Array(this.capacity);
+    this.age = new Float32Array(this.capacity);
+    this.life = new Float32Array(this.capacity);
+    this.strength = new Float32Array(this.capacity);
   }
 
   get count(): number {
