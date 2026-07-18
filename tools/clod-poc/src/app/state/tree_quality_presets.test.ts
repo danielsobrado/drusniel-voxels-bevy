@@ -89,7 +89,7 @@ describe("tree quality presets", () => {
   });
 
   it("binds impostor tile size to the canonical quality token", () => {
-    expect(treeImpostorTileResolutionForQualityPreset("ultra", 17)).toBe(160);
+    expect(treeImpostorTileResolutionForQualityPreset("ultra", 17)).toBe(192);
     expect(treeImpostorTileResolutionForQualityPreset("balanced", 17)).toBe(128);
     expect(treeImpostorTileResolutionForQualityPreset("perf", 17)).toBe(64);
     expect(treeImpostorTileResolutionForQualityPreset("potato", 17)).toBe(48);
