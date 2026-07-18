@@ -1,6 +1,6 @@
 import {
-  cloneEnvironmentalMaskSettings,
   parseEnvironmentalMaskConfig,
+  cloneEnvironmentalMaskSettings,
 } from "./environment_mask_config.js";
 import type { EnvironmentalMaskSettings } from "./environment_mask_types.js";
 
@@ -14,7 +14,7 @@ export function configureEnvironmentalMaskSettings(
 ): EnvironmentalMaskSettings {
   const next = parseEnvironmentalMaskConfig(configText, warn);
   setEnvironmentalMaskSettings(next);
-  return readEnvironmentalMaskSettings();
+  return settings;
 }
 
 export function setEnvironmentalMaskSettings(next: EnvironmentalMaskSettings): void {
@@ -22,5 +22,5 @@ export function setEnvironmentalMaskSettings(next: EnvironmentalMaskSettings): v
 }
 
 export function readEnvironmentalMaskSettings(): EnvironmentalMaskSettings {
-  return cloneEnvironmentalMaskSettings(settings);
+  return settings;
 }
