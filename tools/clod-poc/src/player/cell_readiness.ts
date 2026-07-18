@@ -11,6 +11,20 @@ import { voxelEditStore } from "../terrain/voxel_edits/voxel_edit_store.js";
 import { getDigEditRevision } from "../terrain/terrain_edits.js";
 
 const DEFAULT_TELEPORT_ENVELOPE_RADIUS_M = 0.6;
+/** Current construction catalog reaches at most 2 m horizontally from its placement origin. */
+export const DEFAULT_CONSTRUCTION_ENVELOPE_RADIUS_M = 2;
+
+const ENVELOPE_OFFSETS: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+  [-1, 0],
+  [1, 0],
+  [-1, 1],
+  [0, 1],
+  [1, 1],
+];
 
 export type CellFallbackKind = "none" | "frontier_barrier" | "heightfield_certified";
 
@@ -21,12 +35,7 @@ export interface CellReadiness {
   waterQueryReady: boolean;
   /** Voxel authority resident and the cell's collider is at the latest revision — edits accepted. */
   terrainEditReady: boolean;
-  /**
-   * Construction place/remove is accepted here. Today this matches `terrainEditReady`
-   * (covering collider current + edit authority resident). Named separately so place
-   * consumers fail closed on mid-rebuild without coupling to dig semantics; may diverge
-   * later if snap/overlap indexes become residency-gated.
-   */
+  /** Construction catalog envelope is covered by current colliders and edit authority is resident. */
   constructionReady: boolean;
   terrainRevision: number;
   /** Highest revision among covering collider pages; -1 when no page covers the cell. */
@@ -45,6 +54,8 @@ export interface CellReadinessFeeds {
   editAuthorityResidentAt(x: number, z: number): boolean;
   /** Optional until P5 wiring is present; absent means no water authority is required. */
   waterQueryReadyAt?(x: number, z: number): boolean;
+  /** Optional action-specific construction gate; absent preserves the point-ready contract. */
+  constructionReadyAt?(x: number, z: number): boolean;
 }
 
 /**
@@ -72,11 +83,12 @@ export function cellReadinessAt(feeds: CellReadinessFeeds, x: number, z: number)
   }
 
   const authorityResident = feeds.editAuthorityResidentAt(x, z);
-  const constructionReady = collider.covered && !stale && authorityResident;
+  const terrainEditReady = collider.covered && !stale && authorityResident;
+  const constructionReady = feeds.constructionReadyAt?.(x, z) ?? terrainEditReady;
   return {
     movementCollisionReady,
     waterQueryReady: feeds.waterQueryReadyAt?.(x, z) ?? true,
-    terrainEditReady: constructionReady,
+    terrainEditReady,
     constructionReady,
     terrainRevision,
     colliderRevision: collider.revision,
@@ -85,7 +97,7 @@ export function cellReadinessAt(feeds: CellReadinessFeeds, x: number, z: number)
   };
 }
 
-/** Construction place gate: covering collider must be current (not mid-rebuild). */
+/** Construction place gate: the configured construction envelope must be current. */
 export function constructionTargetReady(feeds: CellReadinessFeeds, x: number, z: number): boolean {
   return cellReadinessAt(feeds, x, z).constructionReady;
 }
@@ -145,7 +157,18 @@ export function appColumnCertified(x: number, z: number): boolean {
 export function createAppCellReadinessFeeds(deps: {
   terrainColliders: TerrainColliderSet;
   waterQueryReadyAt?: (x: number, z: number) => boolean;
+  constructionEnvelopeRadiusM?: number;
 }): CellReadinessFeeds {
+  const envelopeRadiusM = Number.isFinite(deps.constructionEnvelopeRadiusM)
+    ? Math.max(0, deps.constructionEnvelopeRadiusM!)
+    : DEFAULT_CONSTRUCTION_ENVELOPE_RADIUS_M;
+  const constructionReadyAt = (x: number, z: number): boolean => ENVELOPE_OFFSETS.every(([dx, dz]) => {
+    const probeX = x + dx * envelopeRadiusM;
+    const probeZ = z + dz * envelopeRadiusM;
+    const collider = deps.terrainColliders.colliderStatusAt(probeX, probeZ);
+    return collider.covered && !collider.replacementPending;
+  });
+
   return {
     terrainRevision: () => getDigEditRevision(),
     colliderStatusAt: (x, z) => deps.terrainColliders.colliderStatusAt(x, z),
@@ -154,5 +177,6 @@ export function createAppCellReadinessFeeds(deps: {
     // authorities replace this feed when they land.
     editAuthorityResidentAt: () => true,
     waterQueryReadyAt: deps.waterQueryReadyAt,
+    constructionReadyAt,
   };
 }

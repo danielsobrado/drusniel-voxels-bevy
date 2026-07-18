@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   cellReadinessAt,
   constructionTargetReady,
+  createAppCellReadinessFeeds,
   movementReadinessAt,
   teleportTargetReady,
   type CellReadinessFeeds,
@@ -21,6 +22,13 @@ function feeds(overrides: Partial<CellReadinessFeeds>): CellReadinessFeeds {
     waterQueryReadyAt: () => true,
     ...overrides,
   };
+}
+
+function plane(sizeX: number, sizeZ: number, centerX: number, centerZ: number): THREE.BufferGeometry {
+  const geometry = new THREE.PlaneGeometry(sizeX, sizeZ, 1, 1);
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(centerX, 0, centerZ);
+  return geometry;
 }
 
 describe("cell readiness contract", () => {
@@ -155,6 +163,36 @@ describe("cell readiness contract", () => {
     expect(cellReadinessAt(realFeeds, 0, 0).terrainEditReady).toBe(true);
     expect(constructionTargetReady(realFeeds, 0, 0)).toBe(true);
     expect(cellReadinessAt(realFeeds, 0, 0).colliderRevision).toBe(1);
+    colliders.dispose();
+  });
+
+  it("denies construction when its catalog envelope crosses a rebuilding adjacent page", () => {
+    const colliders = new TerrainColliderSet([
+      {
+        id: "left",
+        geometry: plane(20, 20, -10, 0),
+        footprint: { minX: -20, minZ: -10, maxX: 0, maxZ: 10 },
+      },
+      {
+        id: "right",
+        geometry: plane(20, 20, 10, 0),
+        footprint: { minX: 0, minZ: -10, maxX: 20, maxZ: 10 },
+      },
+    ]);
+    colliders.prewarmAll();
+    colliders.schedulePageUpdate("right", plane(20, 20, 10, 0), 1);
+    const realFeeds = createAppCellReadinessFeeds({
+      terrainColliders: colliders,
+      constructionEnvelopeRadiusM: 1.5,
+    });
+
+    const target = cellReadinessAt(realFeeds, -0.25, 0);
+    expect(target.staleColliderSafe).toBe(false);
+    expect(target.terrainEditReady).toBe(true);
+    expect(target.constructionReady).toBe(false);
+
+    colliders.processPendingRebuilds();
+    expect(cellReadinessAt(realFeeds, -0.25, 0).constructionReady).toBe(true);
     colliders.dispose();
   });
 });
