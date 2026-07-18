@@ -46,23 +46,38 @@ const AERIAL_TINT_SCALE = 0.15;
 const AERIAL_TINT_MAX = 0.04;
 const SHAFT_HINT_SCALE = 0.01;
 const FOREST_DARKEN_MAX = 0.72;
-const FOREST_FOG_RGB = [0.4, 0.4431372549, 0.4274509804] as const;
+const FOREST_FOG_R = 0.4;
+const FOREST_FOG_G = 0.4431372549;
+const FOREST_FOG_B = 0.4274509804;
+const FOREST_HANDLES = new WeakMap<THREE.Material, ImpostorForestLightingHandle>();
 
 export function decorateTreeImpostorForestLighting(
   material: THREE.Material,
   webgpu: boolean,
   state: ForestLightingMaterialState | null = null,
 ): THREE.Material {
-  if (material.userData[TREE_IMPOSTOR_FOREST_LIGHTING_KEY]) {
-    updateTreeImpostorMaterialForestLighting(material, state);
+  const existing = FOREST_HANDLES.get(material);
+  if (existing) {
+    existing.update(state);
     return material;
   }
 
-  const handle = webgpu
+  const resourceHandle = webgpu
     ? createNodeForestLightingHandle(material as NodeMaterialShape)
     : createShaderForestLightingHandle(material as THREE.ShaderMaterial);
-  material.userData[TREE_IMPOSTOR_FOREST_LIGHTING_KEY] = handle;
-  material.addEventListener("dispose", handle.dispose);
+  const disposeListener = (): void => {
+    resourceHandle.dispose();
+    FOREST_HANDLES.delete(material);
+    delete material.userData[TREE_IMPOSTOR_FOREST_LIGHTING_KEY];
+    material.removeEventListener("dispose", disposeListener);
+  };
+  const handle: ImpostorForestLightingHandle = {
+    update: resourceHandle.update,
+    dispose: disposeListener,
+  };
+  FOREST_HANDLES.set(material, handle);
+  material.userData[TREE_IMPOSTOR_FOREST_LIGHTING_KEY] = true;
+  material.addEventListener("dispose", disposeListener);
   handle.update(state);
   return material;
 }
@@ -71,7 +86,7 @@ export function updateTreeImpostorMaterialForestLighting(
   material: THREE.Material,
   state: ForestLightingMaterialState | null,
 ): boolean {
-  const handle = material.userData[TREE_IMPOSTOR_FOREST_LIGHTING_KEY] as ImpostorForestLightingHandle | undefined;
+  const handle = FOREST_HANDLES.get(material);
   if (!handle) return false;
   handle.update(state);
   return true;
@@ -83,70 +98,76 @@ function createNodeForestLightingHandle(material: NodeMaterialShape): ImpostorFo
 
   const packedTexture = createNeutralForestTexture("tree-impostor-forest-neutral-packed");
   const auxTexture = createNeutralForestTexture("tree-impostor-forest-neutral-aux");
-  const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
-  const enabled = uniform(0);
-  const worldSize = uniform(1);
-  const aoStrength = uniform(1);
-  const shadowStrength = uniform(1);
-  const fogStrength = uniform(0);
-  const debugMode = uniform(0);
-  const forestUv: TslNode = clamp(worldXZ.div(worldSize), vec2(0), vec2(1));
-  const nodeState: NodeForestLightingState = {
-    packedNode: texture(packedTexture, forestUv),
-    auxNode: texture(auxTexture, forestUv),
-    enabled,
-    worldSize,
-    aoStrength,
-    shadowStrength,
-    fogStrength,
-    debugMode,
-  };
+  try {
+    const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+    const enabled = uniform(0);
+    const worldSize = uniform(1);
+    const aoStrength = uniform(1);
+    const shadowStrength = uniform(1);
+    const fogStrength = uniform(0);
+    const debugMode = uniform(0);
+    const forestUv: TslNode = clamp(worldXZ.div(worldSize), vec2(0), vec2(1));
+    const nodeState: NodeForestLightingState = {
+      packedNode: texture(packedTexture, forestUv),
+      auxNode: texture(auxTexture, forestUv),
+      enabled,
+      worldSize,
+      aoStrength,
+      shadowStrength,
+      fogStrength,
+      debugMode,
+    };
 
-  const packed: TslNode = nodeState.packedNode;
-  const aux: TslNode = nodeState.auxNode;
-  const darken: TslNode = clamp(
-    packed.x.mul(nodeState.aoStrength).add(packed.y.mul(nodeState.shadowStrength)),
-    0,
-    FOREST_DARKEN_MAX,
-  ).mul(nodeState.enabled);
-  const fog: TslNode = clamp(
-    packed.z.mul(nodeState.fogStrength).mul(nodeState.enabled),
-    0,
-    AERIAL_TINT_MAX,
-  );
-  const shaded: TslNode = mix(
-    baseColor.mul(float(1).sub(darken)),
-    vec3(...FOREST_FOG_RGB),
-    fog,
-  ).add(vec3(packed.w.mul(SHAFT_HINT_SCALE).mul(nodeState.enabled)));
-  const debugColor = forestDebugColorNode(nodeState.debugMode, packed, aux);
-  const debugActive: TslNode = nodeState.enabled.greaterThan(0.5).and(nodeState.debugMode.greaterThan(0.5));
-  material.colorNode = debugActive.select(debugColor, shaded);
+    const packed: TslNode = nodeState.packedNode;
+    const aux: TslNode = nodeState.auxNode;
+    const darken: TslNode = clamp(
+      packed.x.mul(nodeState.aoStrength).add(packed.y.mul(nodeState.shadowStrength)),
+      0,
+      FOREST_DARKEN_MAX,
+    ).mul(nodeState.enabled);
+    const fog: TslNode = clamp(
+      packed.z.mul(nodeState.fogStrength).mul(nodeState.enabled),
+      0,
+      AERIAL_TINT_MAX,
+    );
+    const shaded: TslNode = mix(
+      baseColor.mul(float(1).sub(darken)),
+      vec3(FOREST_FOG_R, FOREST_FOG_G, FOREST_FOG_B),
+      fog,
+    ).add(vec3(packed.w.mul(SHAFT_HINT_SCALE).mul(nodeState.enabled)));
+    const debugColor = forestDebugColorNode(nodeState.debugMode, packed, aux);
+    const debugActive: TslNode = nodeState.enabled.greaterThan(0.5).and(nodeState.debugMode.greaterThan(0.5));
+    material.colorNode = debugActive.select(debugColor, shaded);
 
-  let disposed = false;
-  return {
-    update(state) {
-      if (!state) {
-        nodeState.enabled.value = 0;
-        return;
-      }
-      const settings = state.settings;
-      nodeState.enabled.value = settings.enabled && settings.materialIntegration.treeEnabled ? 1 : 0;
-      nodeState.worldSize.value = Math.max(1, state.worldCells);
-      nodeState.aoStrength.value = settings.ambientOcclusion.strength;
-      nodeState.shadowStrength.value = settings.shadowProxy.strength;
-      nodeState.fogStrength.value = settings.atmosphere.aerialTintStrength * AERIAL_TINT_SCALE;
-      nodeState.debugMode.value = forestLightingDebugModeValue(settings.materialIntegration.debugMode);
-      nodeState.packedNode.value = state.textureHandle.texture;
-      nodeState.auxNode.value = state.textureHandle.auxTexture;
-    },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      packedTexture.dispose();
-      auxTexture.dispose();
-    },
-  };
+    let disposed = false;
+    return {
+      update(state) {
+        if (!state) {
+          nodeState.enabled.value = 0;
+          return;
+        }
+        const settings = state.settings;
+        nodeState.enabled.value = settings.enabled && settings.materialIntegration.treeEnabled ? 1 : 0;
+        nodeState.worldSize.value = Math.max(1, state.worldCells);
+        nodeState.aoStrength.value = settings.ambientOcclusion.strength;
+        nodeState.shadowStrength.value = settings.shadowProxy.strength;
+        nodeState.fogStrength.value = settings.atmosphere.aerialTintStrength * AERIAL_TINT_SCALE;
+        nodeState.debugMode.value = forestLightingDebugModeValue(settings.materialIntegration.debugMode);
+        nodeState.packedNode.value = state.textureHandle.texture;
+        nodeState.auxNode.value = state.textureHandle.auxTexture;
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        packedTexture.dispose();
+        auxTexture.dispose();
+      },
+    };
+  } catch (error) {
+    packedTexture.dispose();
+    auxTexture.dispose();
+    throw error;
+  }
 }
 
 function forestDebugColorNode(debugMode: TslNode, packed: TslNode, aux: TslNode): TslNode {
@@ -169,26 +190,32 @@ function forestDebugColorNode(debugMode: TslNode, packed: TslNode, aux: TslNode)
 function createShaderForestLightingHandle(material: THREE.ShaderMaterial): ImpostorForestLightingHandle {
   const packedTexture = createNeutralForestTexture("tree-impostor-forest-neutral-packed");
   const auxTexture = createNeutralForestTexture("tree-impostor-forest-neutral-aux");
-  const uniforms = createForestLightingUniforms();
-  uniforms.uForestLightingMap.value = packedTexture;
-  uniforms.uForestLightingAuxMap.value = auxTexture;
-  Object.assign(material.uniforms, uniforms);
-  material.vertexShader = injectImpostorForestVertexShader(material.vertexShader);
-  material.fragmentShader = injectImpostorForestFragmentShader(material.fragmentShader);
-  material.needsUpdate = true;
+  try {
+    const uniforms = createForestLightingUniforms();
+    uniforms.uForestLightingMap.value = packedTexture;
+    uniforms.uForestLightingAuxMap.value = auxTexture;
+    Object.assign(material.uniforms, uniforms);
+    material.vertexShader = injectImpostorForestVertexShader(material.vertexShader);
+    material.fragmentShader = injectImpostorForestFragmentShader(material.fragmentShader);
+    material.needsUpdate = true;
 
-  let disposed = false;
-  return {
-    update(state) {
-      updateForestLightingUniforms(uniforms, state, "tree");
-    },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      packedTexture.dispose();
-      auxTexture.dispose();
-    },
-  };
+    let disposed = false;
+    return {
+      update(state) {
+        updateForestLightingUniforms(uniforms, state, "tree");
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        packedTexture.dispose();
+        auxTexture.dispose();
+      },
+    };
+  } catch (error) {
+    packedTexture.dispose();
+    auxTexture.dispose();
+    throw error;
+  }
 }
 
 function injectImpostorForestVertexShader(source: string): string {
