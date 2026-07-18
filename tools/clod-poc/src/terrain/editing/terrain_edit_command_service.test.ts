@@ -115,6 +115,26 @@ describe("terrain edit command service", () => {
     expect(harness.runDigNow).toHaveBeenCalledOnce();
   });
 
+  it("bounds held-input backlog to the active strike and one successor", async () => {
+    let resolveFirst!: () => void;
+    const first = new Promise<void>((resolve) => { resolveFirst = resolve; });
+    const harness = createHarness();
+    harness.runDigNow.mockImplementationOnce(() => first);
+
+    harness.service.scheduleDig(ray);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(harness.runDigNow).toHaveBeenCalledOnce();
+
+    harness.service.scheduleDig(ray);
+    await vi.advanceTimersByTimeAsync(40);
+    harness.service.scheduleDig(ray);
+    expect(harness.terrainRaycast.raycastEditableTerrain).toHaveBeenCalledTimes(3);
+
+    resolveFirst();
+    await harness.service.flushAncestors();
+    expect(harness.runDigNow).toHaveBeenCalledTimes(2);
+  });
+
   it("denies debounced intents after mode or terrain revision changes", async () => {
     let mode = "playing";
     let revision = 7;
