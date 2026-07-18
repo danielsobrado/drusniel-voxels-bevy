@@ -19,6 +19,7 @@ cache:
     max_bytes: 2147483648
     compression: "gzip"
     checksum: "sha256"
+    rpc_timeout_ms: 30000
 
   invalidation:
     include_config_hash: true
