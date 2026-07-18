@@ -18,8 +18,8 @@ export const PROJECT_ARCHIVE_LIMITS: ProjectArchiveLimits = Object.freeze({
 
 export interface ProjectArchiveEntryInfo {
   readonly name: string;
-  readonly size: number;
-  readonly originalSize: number;
+  readonly size?: number;
+  readonly originalSize?: number;
 }
 
 export interface ProjectArchiveExtractionGuard {
@@ -63,17 +63,18 @@ export function createProjectArchiveExtractionGuard(
   const filter = (entry: ProjectArchiveEntryInfo): boolean => {
     assertProjectArchivePath(entry.name, limits);
     if (expectedSizes.has(entry.name)) throw new Error(`project archive contains duplicate path ${entry.name}`);
-    if (!Number.isSafeInteger(entry.size) || entry.size < 0 || !Number.isSafeInteger(entry.originalSize) || entry.originalSize < 0) {
-      throw new Error(`project archive contains invalid size metadata for ${entry.name}`);
+    if (!Number.isSafeInteger(entry.size) || entry.size! < 0 || !Number.isSafeInteger(entry.originalSize) || entry.originalSize! < 0) {
+      throw new Error(`project archive contains invalid or missing size metadata for ${entry.name}`);
     }
     if (expectedSizes.size + 1 > limits.maxEntries) throw new Error("project archive contains too many entries");
+    const originalSize = entry.originalSize!;
     const entryLimit = entry.name === "project.json" ? limits.maxProjectJsonBytes : limits.maxEntryUncompressedBytes;
-    if (entry.originalSize > entryLimit) throw new Error(`project archive entry ${entry.name} exceeds its uncompressed size limit`);
-    totalUncompressedBytes += entry.originalSize;
+    if (originalSize > entryLimit) throw new Error(`project archive entry ${entry.name} exceeds its uncompressed size limit`);
+    totalUncompressedBytes += originalSize;
     if (!Number.isSafeInteger(totalUncompressedBytes) || totalUncompressedBytes > limits.maxTotalUncompressedBytes) {
       throw new Error("project archive exceeds the total uncompressed size limit");
     }
-    expectedSizes.set(entry.name, entry.originalSize);
+    expectedSizes.set(entry.name, originalSize);
     return true;
   };
 
