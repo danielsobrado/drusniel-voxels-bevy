@@ -13,7 +13,7 @@ describe("water reflection policy", () => {
     expect(policy.fallbackStrength).toBeGreaterThan(0);
   });
 
-  it("does not claim SSR active before screen-space resources are wired", () => {
+  it("activates wired SSR on WebGPU and keeps the miss fallback", () => {
     const config = cloneWaterConfig();
     config.visual.reflection.mode = "ssr";
     config.visual.reflection.ssrEnabled = true;
@@ -21,9 +21,23 @@ describe("water reflection policy", () => {
     const policy = resolveWaterReflectionPolicy(config.visual.reflection, "webgpu");
 
     expect(policy.ssrRequested).toBe(true);
+    expect(policy.ssrActive).toBe(true);
+    expect(policy.activeMode).toBe("ssr");
+    expect(policy.reason).toContain("screen-space reflection");
+    expect(policy.fallbackStrength).toBeGreaterThan(0);
+  });
+
+  it("falls back safely when SSR is requested on WebGL", () => {
+    const config = cloneWaterConfig();
+    config.visual.reflection.mode = "ssr";
+    config.visual.reflection.ssrEnabled = true;
+
+    const policy = resolveWaterReflectionPolicy(config.visual.reflection, "webgl");
+
+    expect(policy.ssrRequested).toBe(true);
     expect(policy.ssrActive).toBe(false);
     expect(policy.activeMode).toBe("sky_terrain_fallback");
-    expect(policy.reason).toContain("not runtime-wired");
+    expect(policy.reason).toContain("requires WebGPU");
   });
 
   it("clamps combined fallback strength to the valid debug range", () => {
