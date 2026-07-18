@@ -106,6 +106,27 @@ describe("tree impostor atlas pixels", () => {
     expect(job.completed()).toBe(job.total());
   });
 
+  it("batches dilation work while keeping row copies narrowly bounded", () => {
+    const tileSize = 8;
+    const albedo = new Uint8Array(tileSize * tileSize * 4);
+    const normalDepth = new Uint8Array(tileSize * tileSize * 4);
+    setPixel(albedo, tileSize, 4, 4, [180, 100, 40, 255]);
+    setPixel(normalDepth, tileSize, 4, 4, [128, 255, 128, 90]);
+
+    const dilation = createTreeImpostorAtlasDilationJob({
+      albedo,
+      normalDepth,
+      width: tileSize,
+      height: tileSize,
+      tileSize,
+    });
+    expect(dilation.step(4096)).toBe(true);
+
+    const rowFlip = createTreeImpostorRowFlipJob(new Uint8Array(128 * 4), 1, 128);
+    expect(rowFlip.step(4096)).toBe(false);
+    expect(rowFlip.completed()).toBe(16);
+  });
+
   it("flips rows incrementally and validates readback lengths", () => {
     const source = new Uint8Array([
       1, 2, 3, 4,
