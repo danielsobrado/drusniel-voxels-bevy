@@ -8,6 +8,15 @@ export interface TeleportRecoveryEvidence {
   readonly readinessPolls: number;
 }
 
+function validateTeleportInput(target: TeleportRecoveryTarget, timeoutMs: number): void {
+  if (!Number.isFinite(target.x) || !Number.isFinite(target.z)) {
+    throw new RangeError(`teleport target must be finite, received (${target.x}, ${target.z})`);
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(`teleport timeout must be a positive finite number, received ${timeoutMs}`);
+  }
+}
+
 /**
  * Hold-until-ready teleport (playable-world P1 / plan 1 LM5).
  *
@@ -27,12 +36,18 @@ export async function runReadinessGatedTeleport(input: {
   readonly now: () => number;
   readonly recordReadyMs: (milliseconds: number) => void;
 }): Promise<TeleportRecoveryEvidence> {
-  const startedAt = input.now();
+  validateTeleportInput(input.target, input.timeoutMs);
+  const readNow = (): number => {
+    const value = input.now();
+    if (!Number.isFinite(value)) throw new Error(`teleport readiness clock returned ${value}`);
+    return value;
+  };
+  const startedAt = readNow();
   let readinessPolls = 0;
 
   const finish = (polls: number): TeleportRecoveryEvidence => {
     input.commit(input.target);
-    const timeToGameplayReadyMs = Math.max(0, input.now() - startedAt);
+    const timeToGameplayReadyMs = Math.max(0, readNow() - startedAt);
     input.recordReadyMs(timeToGameplayReadyMs);
     return { timeToGameplayReadyMs, readinessPolls: polls };
   };
@@ -45,7 +60,7 @@ export async function runReadinessGatedTeleport(input: {
   input.primeStream?.(input.target);
 
   for (;;) {
-    if (input.now() - startedAt > input.timeoutMs) {
+    if (readNow() - startedAt > input.timeoutMs) {
       throw new Error(
         `teleport readiness timed out after ${input.timeoutMs}ms at (${input.target.x}, ${input.target.z})`,
       );
