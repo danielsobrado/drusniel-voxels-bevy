@@ -77,6 +77,8 @@ function projectFile(): File {
   } as unknown as File;
 }
 
+const ORIGINAL_SEARCH = "?save=save-a&seed=9&hud=1&acceptance=1&builder=1&webgpuSpike=1&webgpu=1&grassFirstInstanceSmoke=1";
+
 function createHarness(beforeImportNavigation: () => Promise<void>) {
   const importButton = new FakeButton();
   const exportButton = new FakeButton();
@@ -166,7 +168,7 @@ describe("project archive import handoff", () => {
     mocks.validateWaterState.mockImplementation((value: unknown) => value);
     mocks.validateWeatherState.mockImplementation((value: unknown) => value);
     vi.stubGlobal("window", { alert: vi.fn() });
-    vi.stubGlobal("location", { search: "?save=save-a&seed=9&hud=1" });
+    vi.stubGlobal("location", { search: ORIGINAL_SEARCH });
     mocks.parseArchive.mockResolvedValue(contents);
     mocks.validateTextures.mockResolvedValue(undefined);
     mocks.stageImport.mockResolvedValue("import-token");
@@ -176,7 +178,7 @@ describe("project archive import handoff", () => {
     vi.unstubAllGlobals();
   });
 
-  it("validates, checkpoints, arms rollback, and navigates in order", async () => {
+  it("validates, checkpoints, arms exact rollback, and removes only route blockers", async () => {
     const beforeImportNavigation = vi.fn(async () => {});
     const harness = createHarness(beforeImportNavigation);
     harness.projectImportInput.files = fileList(projectFile());
@@ -195,11 +197,8 @@ describe("project archive import handoff", () => {
       .toBeLessThan(mocks.stageImport.mock.invocationCallOrder[0]!);
     expect(mocks.stageImport.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.armRecovery.mock.invocationCallOrder[0]!);
-    expect(mocks.armRecovery).toHaveBeenCalledWith(
-      "import-token",
-      "?save=save-a&seed=9&hud=1",
-    );
-    expect(location.search).toBe("?seed=73&hud=1&scene=continent&seaLevel=21&world=16&import=import-token");
+    expect(mocks.armRecovery).toHaveBeenCalledWith("import-token", ORIGINAL_SEARCH);
+    expect(location.search).toBe("?seed=73&hud=1&acceptance=1&scene=continent&seaLevel=21&world=16&import=import-token");
     expect(mocks.emitAudio).toHaveBeenCalledWith("project.import.success");
   });
 
@@ -215,7 +214,7 @@ describe("project archive import handoff", () => {
     await vi.waitFor(() => expect(window.alert).toHaveBeenCalledOnce());
     expect(mocks.stageImport).not.toHaveBeenCalled();
     expect(mocks.armRecovery).not.toHaveBeenCalled();
-    expect(location.search).toBe("?save=save-a&seed=9&hud=1");
+    expect(location.search).toBe(ORIGINAL_SEARCH);
     expect(harness.importButton.disabled).toBe(false);
     expect(harness.exportButton.disabled).toBe(false);
     expect(harness.setLastArchiveSummary).toHaveBeenCalledWith("Project import failed: checkpoint failed");
