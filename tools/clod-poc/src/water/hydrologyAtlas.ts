@@ -12,6 +12,7 @@
 // The atlas texel lattice is the tile vertex lattice: texel (ix, iz) sits at world
 // (originX + ix*cellSize, originZ + iz*cellSize) with cellSize = tileSizeM / tileRes and
 // origin snapped to a tile corner, so filling a slot is a row-wise copy, never a resample.
+import { gravelBarBodyPhase } from "./gravel_bar_field.js";
 import type { HydrologyTile } from "./hydrologyTileSource.js";
 
 /** Narrow tile-cache view the atlas consumes (implemented by HydrologySystem). */
@@ -41,6 +42,7 @@ export interface HydrologyStreamingAtlasOptions {
   tileSizeM: number;
   tileRes: number;
   tilesPerSide: number;
+  includeBodyPhase?: boolean;
 }
 
 export interface HydrologyStreamingAtlasStats {
@@ -62,6 +64,8 @@ export class HydrologyStreamingAtlas {
   /** Layout B texels, same lattice: R = flowX, G = flowZ, B = flowStrength,
    *  A = bodyKind. Validity is carried by Layout A's shoreDistance channel. */
   readonly dataB: Float32Array<ArrayBuffer>;
+  /** Optional stone-only R32 phase plane derived from bodyId. */
+  readonly bodyPhase: Float32Array<ArrayBuffer> | null;
 
   private originTileX = Number.NaN;
   private originTileZ = Number.NaN;
@@ -76,6 +80,7 @@ export class HydrologyStreamingAtlas {
     this.cellSize = this.tileSizeM / this.tileRes;
     this.data = new Float32Array(this.res * this.res * 4);
     this.dataB = new Float32Array(this.res * this.res * 4);
+    this.bodyPhase = options.includeBodyPhase ? new Float32Array(this.res * this.res) : null;
     this.filled = new Array<boolean>(this.tilesPerSide * this.tilesPerSide).fill(false);
     this.stats = { recenters: 0, filledTiles: 0, totalTiles: this.filled.length, texelUploads: 0 };
     this.invalidateAll();
@@ -128,15 +133,14 @@ export class HydrologyStreamingAtlas {
         if (!recentred) dirty.push(rect);
       }
     }
-    if (recentred) {
-      return [{ x: 0, z: 0, width: this.res, height: this.res }];
-    }
+    if (recentred) return [{ x: 0, z: 0, width: this.res, height: this.res }];
     return dirty;
   }
 
   private invalidateAll(): void {
     this.data.fill(0);
     this.dataB.fill(0);
+    this.bodyPhase?.fill(0);
     for (let i = 3; i < this.data.length; i += 4) {
       this.data[i] = HYDROLOGY_ATLAS_INVALID_SHORE_DISTANCE;
     }
@@ -153,6 +157,7 @@ export class HydrologyStreamingAtlas {
     for (let iz = 0; iz < height; iz++) {
       const src = iz * verts;
       let dst = ((baseZ + iz) * this.res + baseX) * 4;
+      let phaseDst = (baseZ + iz) * this.res + baseX;
       for (let ix = 0; ix < width; ix++) {
         const s = src + ix;
         this.data[dst] = tile.waterY[s];
@@ -163,7 +168,9 @@ export class HydrologyStreamingAtlas {
         this.dataB[dst + 1] = tile.flowZ[s];
         this.dataB[dst + 2] = tile.flowStrength[s];
         this.dataB[dst + 3] = tile.bodyKind[s];
+        if (this.bodyPhase) this.bodyPhase[phaseDst] = gravelBarBodyPhase(tile.bodyId[s]);
         dst += 4;
+        phaseDst += 1;
       }
     }
     this.stats.texelUploads += width * height;
