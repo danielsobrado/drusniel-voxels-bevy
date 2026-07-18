@@ -1,3 +1,5 @@
+import { readEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
+
 const RIVER_COBBLE_QUERY_KEYS = [
   "riverCobbles",
   "underwaterCobbles",
@@ -5,6 +7,8 @@ const RIVER_COBBLE_QUERY_KEYS = [
 ] as const;
 
 export function riverCobbleGpuEnabled(search = currentSearch()): boolean {
+  const settings = readEnvironmentalMaskSettings();
+  if (!settings.enabled || !settings.riverCobble.enabled) return false;
   const params = new URLSearchParams(search);
   for (const key of RIVER_COBBLE_QUERY_KEYS) {
     if (!params.has(key)) continue;
