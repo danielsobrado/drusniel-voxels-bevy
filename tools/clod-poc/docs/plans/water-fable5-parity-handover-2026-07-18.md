@@ -35,9 +35,12 @@ Master plan (all phase statuses inline): `water-rivers-gpu-fable5-parity-plan-20
 
 ## Remaining (in priority order)
 
-1. Confirm the W2 budget gate with `perf-runs/water-nofar-after/` (waterMs p95 ≤ 0.3,
-   max ≤ 2 ms; frame p95 delta water on/off ≤ 1 ms). If the run is missing, re-run:
-   `npx tsx tools/perf-move.ts --baseUrl http://127.0.0.1:PORT/ --moveFrames 420 --water 1 --stones 0 --shots 0 --out perf-runs/water-nofar-after`
+1. ~~Confirm the W2 budget gate~~ **DONE**: `perf-runs/water-nofar-after/` (HQ default
+   tier) — moving waterMs p50 0.2 / p95 0.4 / **max 1.6 ms** (was 9.8): the max ≤ 2 ms
+   gate is met by the L4/L5 removal. Caveat: that run also carries the new HQ default,
+   so its render p95 (4.2 vs 2.8 ms) conflates SSR cost with the ring change; a
+   `--waterQuality low` leg on the same tree was started as
+   `perf-runs/water-nofar-low/` to separate them — read it if present.
 2. W4 acceptance integration: water gate in the infinite-islands (and continent walk)
    acceptances — aerial channel/close river/lake/shore shots + assertions
    (`webgpu_uncaptured_errors == 0`, `river_continuity_pct >= 95`, visible levels > 0,
