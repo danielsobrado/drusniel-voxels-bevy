@@ -5,6 +5,11 @@
 //   2. an in-page downstream walk from a strong river spot (wet fraction),
 //   3. carved-bed evidence at the spot (terrain below water level in the core),
 //   4. `webgpu_uncaptured_errors` and water clipmap counters,
+//   5. a render-vs-authority gate: far-summary tiles (the data the far shell actually
+//      displaces from) must keep the authority's wet river points wet. The analytic
+//      gates (1)-(3) share their math with the carve and pass by construction; this is
+//      the check that fails when the rendered far field diverges from the authority
+//      (the "lakes instead of rivers" regression).
 // and captures aerial + close screenshots at the river spot.
 //
 // Usage:
@@ -78,6 +83,21 @@ async function main(): Promise<void> {
     })()`);
     if (!spot) throw new Error("no strong river spot found in the startup area");
     console.log(`river spot: (${spot.x}, ${spot.z}) depth=${spot.depth.toFixed(2)} mask=${spot.bodyMask.toFixed(2)}`);
+
+    // Authority-wet river points across the scan area; the render gate later asserts the
+    // far-summary tiles keep these wet wherever they have coverage.
+    const wetPoints = await page.evaluate<Array<[number, number]>>(`(() => {
+      const probe = window.waterProbe;
+      const points = [];
+      for (let z = 256; z < 4096 && points.length < 400; z += 24) {
+        for (let x = 256; x < 4096 && points.length < 400; x += 24) {
+          const s = probe(x, z);
+          if (s.bodyMask >= 0.9 && s.depth >= 1.0 && Math.hypot(s.flowX, s.flowZ) >= 0.5) points.push([x, z]);
+        }
+      }
+      return points;
+    })()`);
+    console.log(`authority-wet river points: ${wetPoints.length}`);
 
     const walkFrom = (dir: 1 | -1) => page.evaluate<{ steps: number; wet: number; minDepth: number; maxDepth: number }>(`(() => {
       const probe = window.waterProbe;
@@ -158,6 +178,68 @@ async function main(): Promise<void> {
     await page.screenshot(join(out, "river-close.png"));
     const aerialY = (await terrainAt(spot.x, spot.z)) + 460;
     await teleport(spot.x, spot.z, aerialY, yaw, -1.55);
+
+    // Render-vs-authority gate. Far-summary rings recenter on the aerial camera; poll
+    // while budgeted tile builds fill them, then compare tile heights with the authority
+    // at every wet river point the tiles cover.
+    interface RenderCheck {
+      points: number;
+      covered: number;
+      wet: number;
+      coveragePct: number;
+      wetPct: number;
+      divergenceP50: number | null;
+      divergenceP95: number | null;
+      divergenceMax: number | null;
+    }
+    const evaluateRenderCheck = () => page.evaluate<RenderCheck | null>(`(() => {
+      const probe = window.waterProbe;
+      const provider = window.__drusnielFarSummary?.getHeightProvider?.();
+      if (!probe || !provider || !provider.sampleSummaryInto) return null;
+      const points = ${JSON.stringify(wetPoints)};
+      const out = { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0 };
+      let covered = 0;
+      let wet = 0;
+      const divergences = [];
+      for (const [x, z] of points) {
+        const distance = Math.hypot(x - ${spot.x}, z - ${spot.z});
+        if (!provider.sampleSummaryInto(x, z, distance, out)) continue;
+        covered++;
+        const s = probe(x, z);
+        divergences.push(Math.abs(out.height - s.terrain));
+        if (out.height <= s.water - 0.25) wet++;
+      }
+      divergences.sort((a, b) => a - b);
+      const percentile = (p) => divergences.length
+        ? divergences[Math.min(divergences.length - 1, Math.floor(divergences.length * p))]
+        : null;
+      return {
+        points: points.length,
+        covered,
+        wet,
+        coveragePct: points.length ? (100 * covered) / points.length : 0,
+        wetPct: covered ? (100 * wet) / covered : 0,
+        divergenceP50: percentile(0.5),
+        divergenceP95: percentile(0.95),
+        divergenceMax: divergences.length ? divergences[divergences.length - 1] : null,
+      };
+    })()`);
+    let renderCheck = await evaluateRenderCheck();
+    for (let round = 0; round < 10 && renderCheck !== null && renderCheck.covered < 100; round++) {
+      await settleFrames(page, 60);
+      renderCheck = await evaluateRenderCheck();
+    }
+    if (renderCheck === null) {
+      console.error("render gate: far-summary height provider unavailable (no __drusnielFarSummary hook)");
+    } else {
+      console.log(
+        `render gate: ${renderCheck.wet}/${renderCheck.covered} far-covered river points wet `
+        + `(${renderCheck.wetPct.toFixed(1)}%; coverage ${renderCheck.coveragePct.toFixed(1)}% of ${renderCheck.points}), `
+        + `terrain divergence p50 ${renderCheck.divergenceP50?.toFixed(2)} p95 ${renderCheck.divergenceP95?.toFixed(2)} `
+        + `max ${renderCheck.divergenceMax?.toFixed(2)} m`,
+      );
+    }
+
     await page.screenshot(join(out, "river-aerial.png"));
 
     const report = {
@@ -166,6 +248,7 @@ async function main(): Promise<void> {
       continuityPct,
       continuityChannels,
       walk: { ...walk, wetPct },
+      renderCheck,
       counters: {
         webgpu_uncaptured_errors: uncaptured,
         water_clipmap_visible_levels: visibleLevels,
@@ -180,6 +263,12 @@ async function main(): Promise<void> {
     if (!(continuityPct >= 95)) failures.push(`river_continuity_pct ${continuityPct} < 95`);
     if (!(wetPct >= 95)) failures.push(`downstream wet ${wetPct.toFixed(1)}% < 95%`);
     if (uncaptured !== 0) failures.push(`webgpu_uncaptured_errors ${uncaptured} != 0`);
+    if (renderCheck === null) {
+      failures.push("render gate unavailable: no far-summary height provider hook");
+    } else {
+      if (!(renderCheck.covered >= 25)) failures.push(`render gate coverage ${renderCheck.covered} points < 25`);
+      if (!(renderCheck.wetPct >= 85)) failures.push(`render-side wet ${renderCheck.wetPct.toFixed(1)}% < 85%`);
+    }
     if (failures.length > 0) {
       console.error(`FAIL: ${failures.join("; ")}`);
       process.exitCode = 1;

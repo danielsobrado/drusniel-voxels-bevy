@@ -98,9 +98,11 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
     const startedAt = this.nowMs();
     const hint = resolveEnvironmentSampleHint(hintM);
     const cached = this.sampleHydrology(x, z, hint);
+    const valid = isFiniteHydrologySample(cached.sample);
     const result = hydrologyWaterResult(
-      cached.sample,
-      createHydrologyMeta(cached.revision, isFiniteHydrologySample(cached.sample), hint),
+      // Fail closed: never surface partial finite fields from a non-finite sample.
+      valid ? cached.sample : null,
+      createHydrologyMeta(cached.revision, valid, hint),
     );
     this.recordScalar("water", result.meta, startedAt);
     return result;
@@ -110,9 +112,10 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
     const startedAt = this.nowMs();
     const hint = resolveEnvironmentSampleHint(hintM);
     const cached = this.sampleHydrology(x, z, hint);
+    const valid = isFiniteHydrologySample(cached.sample);
     const result = hydrologyRiverResult(
-      cached.sample,
-      createHydrologyMeta(cached.revision, isFiniteHydrologySample(cached.sample), hint),
+      valid ? cached.sample : null,
+      createHydrologyMeta(cached.revision, valid, hint),
     );
     this.recordScalar("river", result.meta, startedAt);
     return result;
@@ -172,10 +175,10 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
         writeEnvironmentMeta(output.meta.material, index, fallbackMeta);
       }
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.water)) {
-        writeBatchWater(output, index, sample, sampleMeta);
+        writeBatchWater(output, index, sampleValid ? sample : null, sampleMeta);
       }
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.river)) {
-        writeBatchRiver(output, index, sample, sampleMeta);
+        writeBatchRiver(output, index, sampleValid ? sample : null, sampleMeta);
       }
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.visibility)) {
         output.sunVisibility[index] = 1;

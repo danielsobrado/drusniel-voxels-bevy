@@ -178,3 +178,5 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 Understand first if you are under Windows or WSL and use the command accordingly and the paths
 
 Do not mention the name of the refernece in the code comments like Fable 5 for example.
+
+"Do not consider backward compatibility.Ignore legacy code/libraries"

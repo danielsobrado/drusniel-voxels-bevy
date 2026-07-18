@@ -35,9 +35,21 @@ export function createFallbackMeta(cellSizeM: number): EnvironmentQueryMeta {
 }
 
 export function hydrologyWaterResult(
-  sample: HydrologySample,
+  sample: HydrologySample | null,
   meta: EnvironmentQueryMeta,
 ): WaterQueryResult {
+  if (!sample) {
+    return {
+      waterY: 0,
+      carvedBedY: 0,
+      depth: 0,
+      wetMask: 0,
+      shoreDistanceM: 0,
+      bodyKind: 0,
+      bodyId: null,
+      meta,
+    };
+  }
   return {
     waterY: finiteOrZero(sample.waterY),
     carvedBedY: finiteOrZero(sample.terrainY),
@@ -53,9 +65,22 @@ export function hydrologyWaterResult(
 }
 
 export function hydrologyRiverResult(
-  sample: HydrologySample,
+  sample: HydrologySample | null,
   meta: EnvironmentQueryMeta,
 ): RiverQueryResult {
+  if (!sample) {
+    return {
+      flowX: 0,
+      flowZ: 0,
+      flowStrength: 0,
+      bedDrop: 0,
+      rapidMask: 0,
+      channelCenterWeight: 0,
+      bankContactWeight: 0,
+      gravelBarMask: 0,
+      meta,
+    };
+  }
   return {
     flowX: finiteOrZero(sample.flowX),
     flowZ: finiteOrZero(sample.flowZ),

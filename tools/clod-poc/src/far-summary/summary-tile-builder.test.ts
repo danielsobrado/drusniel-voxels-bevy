@@ -64,6 +64,31 @@ describe("summary tile builder", () => {
     expect(tile.samples[0].heightMax).toBe(64);
   });
 
+  it("bakes the traced-carve imprint into CPU-built heights via the height grid", () => {
+    const ringConfig = { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 4 };
+    const cellM = ringConfig.cellM;
+    const tile = buildFarSummaryTile({
+      key: { ring: 0, x: 0, z: 0, cellSizeM: cellM },
+      ringConfig,
+      terrainSampler: {
+        sampleHeight: () => 50,
+        carveHeightImprint: (x, _z, height, cellSizeM) => {
+          expect(cellSizeM).toBe(cellM);
+          return x < cellM ? height - 4 : height;
+        },
+      },
+      frameIndex: 0,
+      nowMs: 0,
+    });
+
+    for (let sz = 0; sz < 4; sz++) {
+      for (let sx = 0; sx < 4; sx++) {
+        const sample = tile.samples[sz * 4 + sx]!;
+        expect(sample.heightAvg).toBe((sx + 0.5) * cellM < cellM ? 46 : 50);
+      }
+    }
+  });
+
   it("normals are unit vectors", () => {
     const tile = buildFarSummaryTile({
       key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },

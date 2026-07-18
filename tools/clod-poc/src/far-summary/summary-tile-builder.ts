@@ -5,6 +5,10 @@ import { sampleCaveEntranceCoverage } from "../terrain/voxel_overlay/voxel_overl
 
 export interface FarTerrainSampler {
   sampleHeight(x: number, z: number): number;
+  /** Far-LOD hydrology carve for a cell of the given size (traced worlds): returns the
+   *  carved height for the cell centre, inflating channels narrower than the cell so the
+   *  carve survives summary resolution. Absent on worlds without a traced carve. */
+  carveHeightImprint?(x: number, z: number, height: number, cellSizeM: number): number;
   sampleMaterial?(x: number, z: number): number;
   sampleCanopyCoverage?(x: number, z: number): number;
   sampleStructureCoverage?(x: number, z: number, cellSizeM: number): number;
@@ -161,13 +165,19 @@ export function createFarSummaryTileBuild(input: FarSummaryBuildInput): FarSumma
   const originX = tileOrigin(key.x, ringConfig.cellM, ringConfig.tileCells);
   const originZ = tileOrigin(key.z, ringConfig.cellM, ringConfig.tileCells);
   const sampleCount = ringConfig.tileCells * ringConfig.tileCells;
+  // Every CPU-built cell reads heights through this grid, so wrapping the sampler here
+  // bakes the traced-carve imprint into heights, min/max, and normals consistently.
+  const carveImprint = terrainSampler.carveHeightImprint;
+  const sampleHeight = carveImprint
+    ? (x: number, z: number) => carveImprint(x, z, terrainSampler.sampleHeight(x, z), ringConfig.cellM)
+    : terrainSampler.sampleHeight;
   return {
     input,
     originX,
     originZ,
     sampleCount,
     samples: new Array(sampleCount),
-    heightGrid: createHeightGrid(originX, originZ, ringConfig.cellM, ringConfig.tileCells, terrainSampler.sampleHeight),
+    heightGrid: createHeightGrid(originX, originZ, ringConfig.cellM, ringConfig.tileCells, sampleHeight),
     cursor: 0,
     globalMin: Number.POSITIVE_INFINITY,
     globalMax: Number.NEGATIVE_INFINITY,

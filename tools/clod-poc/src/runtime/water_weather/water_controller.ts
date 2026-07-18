@@ -82,13 +82,16 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         },
       }
     : deps.waterConfig.visual;
-  const biomeVisualState = readActiveBiomeVisualState();
-  const glacialVisual = resolveGlacialWaterVisual(tierVisual, biomeVisualState);
-  const clipmapVisual = resolveRockFlourWaterVisual(
-    glacialVisual,
-    biomeVisualState,
-    resolveWaterRockFlourEnabled(glacialVisual.rockFlour.enabled, deps.searchParams),
+  const rockFlourEnabled = resolveWaterRockFlourEnabled(
+    tierVisual.rockFlour.enabled,
+    deps.searchParams,
   );
+  const resolveBiomeTintedVisual = () => {
+    const biomeVisualState = readActiveBiomeVisualState();
+    const glacialVisual = resolveGlacialWaterVisual(tierVisual, biomeVisualState);
+    return resolveRockFlourWaterVisual(glacialVisual, biomeVisualState, rockFlourEnabled);
+  };
+  const clipmapVisual = resolveBiomeTintedVisual();
   const waterMaterialFactory = deps.isWebGpu
     ? useHighQualityWebGpuWater
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
@@ -251,7 +254,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   };
 
   const makeVisual = () => ({
-    ...clipmapWaterConfig.visual,
+    // Re-resolve from the tier base so glacial/rock-flour track live biome state.
+    ...resolveBiomeTintedVisual(),
     depthWrite: deps.getUiState().waterDepthWrite,
   });
 

@@ -21,19 +21,24 @@ const HASH_UINT_SCALE = 1 / 0xffffffff;
 // coordinates and the terrain sampler, so every tile/sample reconstructs the identical
 // polyline — seam-free by construction.
 const RIVER_SPAWN_THRESHOLD = 0.85;
-const RIVER_TRACE_STEPS = 48;
+const RIVER_TRACE_STEPS = 72;
 const RIVER_TRACE_STEP_M = 24;
 const RIVER_GRAD_STEP_M = 12;
 const RIVER_MIN_TRACE_POINTS = 6;
 /** Stop tracing when the local slope falls below this (m per m): reached a flat/basin. */
 const RIVER_FLAT_SLOPE_STOP = 0.005;
 const RIVER_TRACE_INERTIA = 0.55;
+/** Absolute downstream distance over which the channel widens MIN -> MAX. Widths are a
+ *  function of distance from the seed, not trace fraction, so short traces stay narrow
+ *  (an accumulation proxy) and confluences of long channels read as real rivers. */
+const RIVER_WIDTH_RAMP_M = 1152;
 /**
  * Channel search radius in basins. Must satisfy: max seed-to-sample distance a channel
- * can bridge (trace length + half-width ≈ 1.2 km) < (radius - 0.5+) * BASIN_SIZE_M, so a
- * sample near a channel tail still finds the seed basin (radius 2 -> 1536 m guaranteed).
+ * can bridge (trace length + half-width = 72*24 + 28 ≈ 1.76 km) < (radius - 0.5+) *
+ * BASIN_SIZE_M, so a sample near a channel tail still finds the seed basin
+ * (radius 3 -> 1920 m guaranteed).
  */
-const RIVER_SEARCH_RADIUS_BASINS = 2;
+const RIVER_SEARCH_RADIUS_BASINS = 3;
 /** Bounded memo of traced channels; rebuilt entries are bit-identical (pure function). */
 const CHANNEL_MEMO_MAX = 512;
 
@@ -345,10 +350,21 @@ function channelMemoFor(sampler: TerrainHeightSampler): Map<number, TracedChanne
   return memo;
 }
 
+/** True when a trace point sits under the spill level of a containing basin — the
+ *  channel has drained into standing water. Pure terrain/basin lookup, no channel
+ *  recursion: basins never depend on channels. */
+function channelReachedBasin(x: number, z: number, terrainY: number, sampler: TerrainHeightSampler): boolean {
+  for (const hit of collectBasinHits(x, z, sampler)) {
+    if (hit.basin.waterY > terrainY) return true;
+  }
+  return false;
+}
+
 /**
  * Trace one drainage channel for a basin: start at a hashed seed, follow the terrain
- * gradient downhill with inertia, stop on flat ground or step budget. Returns null when
- * the basin does not spawn a channel or the trace is too short to be a river.
+ * gradient downhill with inertia, stop when it drains into a basin, on flat ground, or
+ * at the step budget. Returns null when the basin does not spawn a channel or the trace
+ * is too short to be a river.
  */
 function traceChannel(basinX: number, basinZ: number, sampler: TerrainHeightSampler): TracedChannel | null {
   if (hash2(basinX, basinZ, 101) > RIVER_SPAWN_THRESHOLD) return null;
@@ -368,6 +384,10 @@ function traceChannel(basinX: number, basinZ: number, sampler: TerrainHeightSamp
     xs.push(px);
     zs.push(pz);
     heights.push(y);
+    // Terminate into standing water: once the trace point sits under a basin's spill
+    // level the channel has reached a lake/pond, so the polyline ends inside it and the
+    // carve connects the channel bed through the shore instead of stopping short of it.
+    if (i > 0 && channelReachedBasin(px, pz, y, sampler)) break;
     if (slope < RIVER_FLAT_SLOPE_STOP) break; // reached a flat / basin floor
     const stepX = -gx / slope;
     const stepZ = -gz / slope;
@@ -390,8 +410,8 @@ function traceChannel(basinX: number, basinZ: number, sampler: TerrainHeightSamp
   let level = heights[0] + RIVER_LEVEL_OFFSET_M;
   let maxHalfWidth = 0;
   for (let i = 0; i < count; i++) {
-    // Width grows downstream as an accumulation proxy.
-    const halfWidth = mix(RIVER_WIDTH_MIN_M, RIVER_WIDTH_MAX_M, i / Math.max(1, count - 1));
+    // Width grows with absolute downstream distance as an accumulation proxy.
+    const halfWidth = mix(RIVER_WIDTH_MIN_M, RIVER_WIDTH_MAX_M, Math.min(1, (i * RIVER_TRACE_STEP_M) / RIVER_WIDTH_RAMP_M));
     // Non-increasing downstream profile: water never flows uphill along the channel.
     level = Math.min(level, heights[i] + RIVER_LEVEL_OFFSET_M);
     // Bank containment on cross-slopes: the surface may not sit above the channel's low
@@ -475,9 +495,15 @@ interface ChannelHit {
   id: number;
 }
 
-/** Nearest in-channel hit across a channel's segments, or null when outside its width. */
-function channelHitAt(channel: TracedChannel, x: number, z: number): ChannelHit | null {
-  if (x < channel.minX || x > channel.maxX || z < channel.minZ || z > channel.maxZ) return null;
+/** Nearest in-channel hit across a channel's segments, or null when outside its width.
+ *  `halfWidthFloorM` inflates the effective half-width for coarse-LOD consumers (the
+ *  far-summary imprint) so a channel narrower than a summary cell still registers;
+ *  water sampling always passes 0 and sees the exact traced widths. */
+function channelHitAt(channel: TracedChannel, x: number, z: number, halfWidthFloorM = 0): ChannelHit | null {
+  if (
+    x < channel.minX - halfWidthFloorM || x > channel.maxX + halfWidthFloorM
+    || z < channel.minZ - halfWidthFloorM || z > channel.maxZ + halfWidthFloorM
+  ) return null;
   const pts = channel.points;
   let best: ChannelHit | null = null;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -491,7 +517,7 @@ function channelHitAt(channel: TracedChannel, x: number, z: number): ChannelHit 
     const cx = a.x + abX * t;
     const cz = a.z + abZ * t;
     const distance = Math.hypot(x - cx, z - cz);
-    const halfWidth = mix(a.halfWidth, b.halfWidth, t);
+    const halfWidth = Math.max(mix(a.halfWidth, b.halfWidth, t), halfWidthFloorM);
     if (distance > halfWidth) continue;
     if (best && distance >= best.distance) continue;
     const abLen = Math.sqrt(abLen2);
@@ -509,11 +535,11 @@ function channelHitAt(channel: TracedChannel, x: number, z: number): ChannelHit 
 }
 
 /** All channel hits at (x, z) across the search neighbourhood. */
-function collectChannelHits(x: number, z: number, sampler: TerrainHeightSampler): ChannelHit[] {
+function collectChannelHits(x: number, z: number, sampler: TerrainHeightSampler, halfWidthFloorM = 0): ChannelHit[] {
   const hood = getChannelHood(basinCoord(x), basinCoord(z), sampler);
   const hits: ChannelHit[] = [];
   for (const channel of hood) {
-    const hit = channelHitAt(channel, x, z);
+    const hit = channelHitAt(channel, x, z, halfWidthFloorM);
     if (hit) hits.push(hit);
   }
   return hits;
@@ -555,6 +581,11 @@ function carveLakeBed(baseHeight: number, basins: readonly BasinHit[], config: I
  * of the graph sampler's carveHeight. Pure function of (x, z, base sampler, config);
  * channels/basins are traced against the *base* field only, so applying the carve to
  * the terrain authority never feeds back into the trace.
+ *
+ * `halfWidthFloorM` (optional) inflates the channel carve footprint for coarse-LOD
+ * consumers whose cell size exceeds the traced width — without it a 10–28 m channel
+ * point-sampled at far-summary resolution degenerates back into a pothole chain.
+ * Terrain authorities must pass 0 (the default) so near geometry keeps exact widths.
  */
 export function carveInfiniteHydrologyHeight(
   x: number,
@@ -562,8 +593,9 @@ export function carveInfiniteHydrologyHeight(
   baseHeight: number,
   sampler: TerrainHeightSampler,
   config: InfiniteHydrologyCarveConfig,
+  halfWidthFloorM = 0,
 ): number {
-  const channelCarved = carveChannelBed(baseHeight, collectChannelHits(x, z, sampler), config);
+  const channelCarved = carveChannelBed(baseHeight, collectChannelHits(x, z, sampler, halfWidthFloorM), config);
   const lakeCarved = carveLakeBed(baseHeight, collectBasinHits(x, z, sampler), config);
   return Math.min(channelCarved, lakeCarved);
 }

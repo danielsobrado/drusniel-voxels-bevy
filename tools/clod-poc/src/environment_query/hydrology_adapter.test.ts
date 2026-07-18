@@ -96,6 +96,44 @@ describe("HydrologyEnvironmentQuery", () => {
     expect(water.meta.valid).toBe(true);
   });
 
+  it("fails closed on non-finite hydrology samples instead of leaking partial values", () => {
+    const query = new HydrologyEnvironmentQuery({
+      hydrology: {
+        sample: () => riverSample({ waterY: Number.NaN, flowX: 0.9, bodyId: 42 }),
+      },
+      nowMs: () => 0,
+    });
+
+    const water = query.water(1, 2, 8);
+    const river = query.river(1, 2, 8);
+    expect(water.meta.valid).toBe(false);
+    expect(water.waterY).toBe(0);
+    expect(water.depth).toBe(0);
+    expect(water.bodyId).toBe(null);
+    expect(river.meta.valid).toBe(false);
+    expect(river.flowX).toBe(0);
+    expect(river.channelCenterWeight).toBe(0);
+
+    const output = createEnvironmentBatchOutput(1);
+    sampleEnvironmentBatch(
+      query,
+      { positionsXZ: new Float32Array([1, 2]), count: 1 },
+      output,
+      {
+        fieldMask: ENVIRONMENT_QUERY_FIELD.surface
+          | ENVIRONMENT_QUERY_FIELD.water
+          | ENVIRONMENT_QUERY_FIELD.river,
+        sampleHintM: 8,
+      },
+    );
+    expect(output.meta.water.valid[0]).toBe(0);
+    expect(output.waterY[0]).toBe(0);
+    expect(output.waterDepth[0]).toBe(0);
+    expect(output.bodyId[0]).toBe(-1);
+    expect(output.flowXZ[0]).toBe(0);
+    expect(Number.isNaN(output.surfaceHeight[0])).toBe(true);
+  });
+
   it("samples hydrology once per batch position for all hydrology-backed fields", () => {
     const hints: number[] = [];
     const query = new HydrologyEnvironmentQuery({

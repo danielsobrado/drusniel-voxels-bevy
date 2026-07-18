@@ -45,6 +45,7 @@ import {
   countFarSummaryUnifiedReadiness,
   type FarSummaryUnifiedReadiness,
 } from "./unified-readiness.js";
+import { imprintTracedCarveOnFarSummaryTile } from "./traced-carve-imprint.js";
 import { connectSurfaceCommitBridge, surfaceRevisionAt } from "../stream/surface_cache_revisions.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
@@ -263,6 +264,10 @@ export function initFarSummaryIntegration(
     terrainFieldConfig: options.terrainFieldConfig,
     sharedDevice: options.sharedDevice,
     commitTile: (tile) => {
+      // GPU builds evaluate the base WGSL field, which has no traced carve; imprint the
+      // fresh tile once before it enters the cache/enrichment (CPU builds bake the carve
+      // through the height grid instead and never pass through here).
+      imprintTracedCarveOnFarSummaryTile(tile, options.terrainSampler);
       if (!unifiedLayout) {
         cache.commitExternalTile(tile);
         return;

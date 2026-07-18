@@ -43,3 +43,5 @@ investigations easy to find and harder to drift.
 - Do not commit generated runtime/debug logs.
 - Keep binary artifacts and debug dumps out of docs unless they are intentionally
   attached as references under an archive or run-output path.
+
+"Do not consider backward compatibility.Ignore legacy code/libraries"

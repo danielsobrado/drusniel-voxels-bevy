@@ -191,6 +191,28 @@ describe("traced-channel terrain carve", () => {
     for (const s of lakes) expect(s.depth).toBeGreaterThanOrEqual(carve.lakeBedDepthM - 0.01);
   });
 
+  it("inflates the carve footprint with the half-width floor for coarse-LOD consumers", () => {
+    const rivers = findCarvedSamples(12, (s) => s.riverMask >= 0.999 && s.depth > 1);
+    expect(rivers.length).toBeGreaterThan(0);
+    let widened = 0;
+    for (const { x, z, s } of rivers) {
+      // 40 m perpendicular to the flow is outside every natural half-width (max 28 m)
+      // but inside a 60 m floor, so only the floored carve may bite there.
+      const px = -s.flowZ;
+      const pz = s.flowX;
+      for (const side of [1, -1]) {
+        const sx = x + px * 40 * side;
+        const sz = z + pz * 40 * side;
+        const base = hilly.surfaceHeight(sx, sz);
+        const exact = carveInfiniteHydrologyHeight(sx, sz, base, hilly, carve);
+        const floored = carveInfiniteHydrologyHeight(sx, sz, base, hilly, carve, 60);
+        expect(floored).toBeLessThanOrEqual(exact + 1e-9); // the floor only widens, never shrinks
+        if (floored < base - 0.05 && exact > base - 1e-9) widened++;
+      }
+    }
+    expect(widened).toBeGreaterThan(0);
+  });
+
   it("is pure across memo evictions with the carve enabled", () => {
     const probe = () => {
       const out: number[] = [];

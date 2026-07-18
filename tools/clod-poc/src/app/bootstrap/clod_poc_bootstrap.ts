@@ -301,6 +301,10 @@ export async function bootstrapClodPoc() {
         sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
         sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
       };
+      // Traced worlds: bake the hydrology carve into far-summary heights (CPU builds via
+      // the height grid, GPU-committed tiles via the commit imprint) so far terrain shows
+      // the same channels the near authority carves.
+      if (world.farCarveImprint) farSummaryTerrainSampler.carveHeightImprint = world.farCarveImprint;
       if (searchParams.get("farSummaryLayout") === "2") {
         const hydrologySystem = world.hydrologySystem;
         const graphHydrologyEnabled = searchParams.get("continentHydrology") !== "0"
@@ -349,7 +353,12 @@ export async function bootstrapClodPoc() {
     if (naadfHeightSamplingMode === "gpu" && !useParity) throw new Error("NAADF GPU height mode requires the WebGPU parity far terrain material");
     if (naadfHeightSamplingMode === "gpu" && !farSummaryGpuAtlas) throw new Error("NAADF GPU height mode requires a far-summary GPU atlas");
 
-    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu" ? "gpu" : naadfHeightSamplingMode;
+    // Traced-carve worlds must displace far-shell vertices from the (imprinted) CPU
+    // summary tiles: the GPU render atlas evaluates the base WGSL field, which cannot
+    // run the traced polyline carve, so GPU displacement would show uncarved channels.
+    const effectiveHeightSamplingMode = world.farCarveImprint
+      ? "cpu"
+      : naadfHeightSamplingMode === "gpu" ? "gpu" : naadfHeightSamplingMode;
     if (farShellCpuHeightsEnabled && !heightProvider && effectiveHeightSamplingMode !== "gpu") {
       throw new Error("long-view scene requires NAADF or far-summary height provider");
     }

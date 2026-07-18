@@ -146,6 +146,10 @@ export function createFarSummaryBaseSampler(source: FarTerrainSampler): FarTerra
   const sampler: FarTerrainSampler = {
     sampleHeight: (x, z) => source.sampleHeight(x, z),
   };
+  if (source.carveHeightImprint) {
+    sampler.carveHeightImprint = (x, z, height, cellSizeM) =>
+      source.carveHeightImprint!(x, z, height, cellSizeM);
+  }
   if (source.sampleMaterial) {
     sampler.sampleMaterial = (x, z) => source.sampleMaterial!(x, z);
   }

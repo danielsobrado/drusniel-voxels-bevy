@@ -114,7 +114,7 @@ import { splitWorldBuildNodes } from "./world_build_nodes.js";
 import { CanonicalWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
 import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
-import { createTracedHydrologyCarver, measureTracedRiverContinuity, sampleInfiniteHydrology } from "../../water/infinite_hydrology.js";
+import { carveInfiniteHydrologyHeight, createTracedHydrologyCarver, measureTracedRiverContinuity, sampleInfiniteHydrology } from "../../water/infinite_hydrology.js";
 import type { HydrologyWorldSampler } from "../../water/hydrologyTileSource.js";
 import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 
@@ -285,6 +285,9 @@ export interface WorldBuildResult {
   worldSource: WorldSource;
   result: Awaited<ReturnType<ClodWorkerClient["buildWorld"]>>;
   hydrologySystem: HydrologySystem | null;
+  /** Far-LOD hydrology carve for traced worlds (channel width floored at the consumer's
+   *  cell size); null when the world has no traced carve. */
+  farCarveImprint: ((x: number, z: number, height: number, cellSizeM: number) => number) | null;
   polishLine: string;
   buildStatus: { value: string };
 }
@@ -489,6 +492,17 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     ? (() => {
         const carver = createTracedHydrologyCarver({ surfaceHeight: baseSurfaceHeight });
         return (x: number, z: number) => carver.carveHeight(x, z, baseSurfaceHeight(x, z), tracedCarveConfig);
+      })()
+    : null;
+  // Far-summary carve imprint: same traced polylines, but with the channel half-width
+  // floored at the consumer's cell size so a 10-28 m channel survives far-LOD sampling
+  // instead of aliasing back into the pothole chain. One shared sampler object keeps the
+  // channel/basin memos (WeakMap-keyed per sampler) warm across every imprint call.
+  const farCarveImprint = tracedCarveConfig
+    ? (() => {
+        const imprintSampler = { surfaceHeight: baseSurfaceHeight };
+        return (x: number, z: number, height: number, cellSizeM: number) =>
+          carveInfiniteHydrologyHeight(x, z, height, imprintSampler, tracedCarveConfig, Math.max(0, cellSizeM));
       })()
     : null;
   const tracedWorldSampler: HydrologyWorldSampler | undefined = tracedCarveConfig
@@ -856,6 +870,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     worldSource,
     result,
     hydrologySystem,
+    farCarveImprint,
     polishLine,
     buildStatus,
   };

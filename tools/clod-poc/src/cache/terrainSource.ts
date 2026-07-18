@@ -26,7 +26,9 @@ const textEncoder = new TextEncoder();
 // v7: continent hydrology graph carving makes canonical f32 heightfield tiles authoritative;
 // the graph artifact and carve profile now participate in terrain identity.
 // v8: sparse voxel-region references and authored stamp hashes change composed terrain geometry.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v9-feature-stamps";
+// v10: traced-channel semantics changed (longer traces, basin termination, distance-based
+// widths), moving every traced river/lake carve; pages cached under v9 traces are stale.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v10-traced-river-network";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);

@@ -1,0 +1,26 @@
+{
+  "url": "http://127.0.0.1:5186/?scene=infinite-islands&seed=1&world=8",
+  "spot": {
+    "x": 1840,
+    "z": 1048,
+    "depth": 7.490306854248047,
+    "bodyMask": 1,
+    "flowX": 0.17761812741763117,
+    "flowZ": -0.9840994872535268
+  },
+  "continuityPct": 100,
+  "continuityChannels": 15,
+  "walk": {
+    "steps": 28,
+    "wet": 28,
+    "minDepth": 3.185556438633224,
+    "maxDepth": 7.354843083869149,
+    "wetPct": 100
+  },
+  "counters": {
+    "webgpu_uncaptured_errors": 0,
+    "water_clipmap_visible_levels": 4,
+    "water_clipmap_level_count": 4,
+    "water_clipmap_field_samples": 0
+  }
+}
