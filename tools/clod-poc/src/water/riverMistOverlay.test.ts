@@ -50,8 +50,7 @@ describe("RiverMistOverlay", () => {
     expect(stats.particles).toBeLessThanOrEqual(8);
     expect(stats.lastEmitters).toBeLessThanOrEqual(8);
     expect(sampleForCellSize).toHaveBeenCalled();
-    expect(sampleForCellSize.mock.calls.every(([, , hint]) => hint === undefined)).toBe(false);
-    expect(sampleForCellSize.mock.calls.every(([, hint]) => hint === 2)).toBe(true);
+    expect(sampleForCellSize.mock.calls.every((call) => call[2] === 2)).toBe(true);
 
     overlay.setVisible(false);
     expect(overlay.getStats().enabled).toBe(false);
