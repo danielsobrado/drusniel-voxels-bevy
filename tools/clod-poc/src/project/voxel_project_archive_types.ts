@@ -1,14 +1,23 @@
 import type { ClodPagesConfig } from "../config.js";
 import type { GrassShaderMode } from "../grass/grass_config.js";
-import type { BrushOp, BrushShape, VoxelEditSnapshot } from "../terrain/terrain.js";
+import type { BrushOp, BrushShape, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import type { WeatherMode } from "../app/clod_constants.js";
 import type { WaterDebugMode } from "../water/waterConfig.js";
+import type { ProjectGeneratorQuery } from "./project_world_identity.js";
 import type { ProjectPropInstance } from "./project_props.js";
 
-export const VOXEL_PROJECT_SCHEMA_VERSION = 3 as const;
+export const LEGACY_VOXEL_PROJECT_SCHEMA_VERSION = 3 as const;
+export const VOXEL_PROJECT_SCHEMA_VERSION = 4 as const;
 
 export type TextureBlendMode = "hard bands" | "blend bands";
 export type PostProcessDebugMode = "output" | "copy" | "off";
+
+export interface ProjectWorldIdentity {
+  readonly scene: string;
+  readonly generatorVersion: string;
+  readonly terrainField: TerrainFieldConfig;
+  readonly generatorQuery: ProjectGeneratorQuery;
+}
 
 export interface ProjectSessionState {
   thresholdPx: number;
@@ -123,8 +132,7 @@ export interface ProjectWeatherArchiveState {
   weatherWindZ: number;
 }
 
-export interface VoxelProjectManifest {
-  schemaVersion: typeof VOXEL_PROJECT_SCHEMA_VERSION;
+interface VoxelProjectManifestBase {
   kind: "drusniel-clod-project";
   exportedAt: string;
   worldSize: number;
@@ -140,6 +148,18 @@ export interface VoxelProjectManifest {
     target: [number, number, number];
   };
 }
+
+export interface VoxelProjectManifestV3 extends VoxelProjectManifestBase {
+  schemaVersion: typeof LEGACY_VOXEL_PROJECT_SCHEMA_VERSION;
+}
+
+export interface VoxelProjectManifestV4 extends VoxelProjectManifestBase {
+  schemaVersion: typeof VOXEL_PROJECT_SCHEMA_VERSION;
+  world: ProjectWorldIdentity;
+}
+
+export type VoxelProjectManifest = VoxelProjectManifestV3 | VoxelProjectManifestV4;
+export type CurrentVoxelProjectManifest = VoxelProjectManifestV4;
 
 export interface VoxelProjectArchiveContents {
   manifest: VoxelProjectManifest;

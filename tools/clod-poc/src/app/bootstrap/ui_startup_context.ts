@@ -33,6 +33,7 @@ export interface UiStartupInput {
   clodRuntime: ClodRuntimeConfig;
   cfg: ClodPagesConfig;
   WORLD: number;
+  configuredWorldPages?: number;
   polishLine: string;
   buildStatusRef: { value: string };
   stagedImport: VoxelProjectArchiveContents | null;
@@ -91,7 +92,6 @@ export interface UiStartupInput {
 }
 
 export interface UiSessionState {
-  // Extra bootstrap modules attach optional controllers after their startup phases.
   [key: string]: any;
   averageFpsRef: { value: number };
   lastDigSummary: string;

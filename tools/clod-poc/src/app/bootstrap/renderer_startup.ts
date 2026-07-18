@@ -144,6 +144,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       "- Use ?renderer=webgl to open the app without WebGPU.",
     ];
     failLoud("Renderer startup failed", details);
+    if (stagedImport) throw error;
     return null;
   }
 
@@ -303,7 +304,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       mesh: node.mesh,
       footprint: node.footprint,
     }));
-const terrainColliders = new TerrainColliderSet(colliderPages, {
+  const terrainColliders = new TerrainColliderSet(colliderPages, {
     enabled: usesUnboundedTerrain(searchParams.get("scene")),
     surfaceHeight,
     // Never invent a floor in 3D voxel columns (caves, edits): the fallback only fires
