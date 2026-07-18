@@ -48,12 +48,22 @@ export interface WaterControllerDeps {
   borderCoastOceanConfig?: BorderCoastOceanConfig;
 }
 
+export interface WaterRuntimeFeatures {
+  readonly highQualityMaterial: boolean;
+  readonly ssr: boolean;
+  readonly refraction: boolean;
+  readonly caustics: boolean;
+  readonly atlasDrivenLevelCount: number;
+  readonly clipmapOuterHalfSpanM: number;
+}
+
 export interface WaterController {
   readonly field: WaterField;
   readonly clipmap: WaterClipmap;
   readonly authority: WaterAuthority;
   readonly editedWater: EditedWaterAuthoritySource;
   readonly debugState: WaterDebugState;
+  readonly runtimeFeatures: WaterRuntimeFeatures;
   makeVisual(): { depthWrite: boolean } & WaterConfig["visual"];
   setVisible(enabled: boolean): void;
   setDebugMode(mode: keyof typeof WATER_DEBUG_MODES): void;
