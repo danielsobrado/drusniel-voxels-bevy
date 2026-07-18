@@ -14,6 +14,7 @@ function runtimeSettings() {
     ...mask.particles,
     spawnRadiusM: 4,
     spacingM: 2,
+    sampleHintM: 16,
     emitIntervalS: 0.1,
     maxParticles: 8,
     maxEmittersPerTick: 8,
@@ -50,10 +51,11 @@ describe("RiverMistOverlay", () => {
     expect(stats.particles).toBeLessThanOrEqual(8);
     expect(stats.lastEmitters).toBeLessThanOrEqual(8);
     expect(sampleForCellSize).toHaveBeenCalled();
-    expect(sampleForCellSize.mock.calls.every((call) => call[2] === 2)).toBe(true);
+    expect(sampleForCellSize.mock.calls.every((call) => call[2] === 16)).toBe(true);
 
     overlay.setVisible(false);
     expect(overlay.getStats().enabled).toBe(false);
+    expect(overlay.getStats().particles).toBe(0);
     overlay.dispose();
     expect(scene.getObjectByName("river-mist-overlay")).toBeUndefined();
   });
