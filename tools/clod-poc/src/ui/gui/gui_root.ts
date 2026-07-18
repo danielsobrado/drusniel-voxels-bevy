@@ -4,6 +4,7 @@ import { createClodGui, type ClodGuiDeps } from "./clod_gui.js";
 import { createEnvironmentGui, type EnvironmentGuiDeps } from "./environment_gui.js";
 import { createWeatherGui, type WeatherGuiDeps } from "./weather_gui.js";
 import { createVegetationGui, type VegetationGuiDeps, type VegetationGuiStatControllers } from "./vegetation_gui.js";
+import { createStoneEffectsGui } from "./stone_effects_gui.js";
 import { createShadowProxyGui } from "./shadow_proxy_gui.js";
 import { createClodShadowGui, type ClodShadowGuiDeps } from "./clod_shadow_gui.js";
 import { createWaterGui, type WaterGuiDeps } from "./water_gui.js";
@@ -57,6 +58,10 @@ export function createClodPocGui(
   createEnvironmentGui(gui, state, deps.environment);
   const { weatherStatsController } = createWeatherGui(gui, state, deps.weather);
   const vegetation = createVegetationGui(gui, state, deps.vegetation);
+  createStoneEffectsGui(gui, state, {
+    stoneController: deps.vegetation.stoneController,
+    updateInfo: deps.vegetation.updateInfo,
+  });
   createWaterGui(gui, deps.water);
   const shadowProxyStatsController = deps.shadowProxy
     ? createShadowProxyGui(gui, deps.shadowProxy).statsController
