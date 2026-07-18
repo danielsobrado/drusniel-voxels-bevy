@@ -32,7 +32,7 @@ function cacheRecord(): ClodCacheStoredRecord {
 beforeEach(() => resetTerrainStreamingControlForTests());
 
 describe("main-thread cache broker streaming gate", () => {
-  it("initializes the worker state and drops stale persistent writes after resume", () => {
+  it("initializes the worker state and drops stale persistent writes after resume", async () => {
     const listeners: Array<(event: MessageEvent) => void> = [];
     const postMessage = vi.fn();
     const worker = {
@@ -62,9 +62,12 @@ describe("main-thread cache broker streaming gate", () => {
         op: "put",
         key: "stream-root",
         record: cacheRecord(),
+        deadlineUnixMs: Date.now() + 1_000,
         streamingGeneration: 0,
       },
     } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(postMessage).toHaveBeenLastCalledWith({
       type: "cacheRpc",
