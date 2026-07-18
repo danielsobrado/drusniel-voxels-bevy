@@ -26,7 +26,16 @@ export type ConstructionRemoveAuthorizer = (
   command?: ModedEditCommand | null,
 ) => EditCommandVerdict;
 
-let activeAuthorizer: ConstructionRemoveAuthorizer | null = null;
+interface InstalledAuthorizer {
+  readonly token: symbol;
+  readonly authorizer: ConstructionRemoveAuthorizer;
+}
+
+const installedAuthorizers: InstalledAuthorizer[] = [];
+
+function activeAuthorizer(): ConstructionRemoveAuthorizer | null {
+  return installedAuthorizers[installedAuthorizers.length - 1]?.authorizer ?? null;
+}
 
 function denied(
   deps: ConstructionRemoveAuthorityDeps,
@@ -81,10 +90,14 @@ export function createConstructionRemoveAuthorizer(
 export function installConstructionRemoveAuthorizer(
   authorizer: ConstructionRemoveAuthorizer,
 ): () => void {
-  const previous = activeAuthorizer;
-  activeAuthorizer = authorizer;
+  const entry: InstalledAuthorizer = {
+    token: Symbol("construction-remove-authorizer"),
+    authorizer,
+  };
+  installedAuthorizers.push(entry);
   return () => {
-    if (activeAuthorizer === authorizer) activeAuthorizer = previous;
+    const index = installedAuthorizers.findIndex((candidate) => candidate.token === entry.token);
+    if (index >= 0) installedAuthorizers.splice(index, 1);
   };
 }
 
@@ -92,5 +105,5 @@ export function authorizeConstructionRemoval(
   target: ConstructionRemoveTarget,
   command?: ModedEditCommand | null,
 ): EditCommandVerdict {
-  return activeAuthorizer?.(target, command) ?? { allowed: true };
+  return activeAuthorizer()?.(target, command) ?? { allowed: true };
 }
