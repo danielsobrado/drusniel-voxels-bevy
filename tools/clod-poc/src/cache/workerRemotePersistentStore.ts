@@ -40,7 +40,13 @@ function recordStreamingGeneration(record: ClodCacheStoredRecord): number | unde
 type CacheRpcBody =
   | { op: "probe" }
   | { op: "get"; key: string }
-  | { op: "put"; key: string; record: ClodCacheStoredRecord; streamingGeneration?: number }
+  | {
+      op: "put";
+      key: string;
+      record: ClodCacheStoredRecord;
+      deadlineUnixMs: number;
+      streamingGeneration?: number;
+    }
   | { op: "delete"; key: string }
   | { op: "deleteIfMatches"; key: string; record: ClodCacheStoredRecord }
   | { op: "clear" }
@@ -113,6 +119,7 @@ export class WorkerRemotePersistentStore implements PersistentCacheStore {
       op: "put",
       key,
       record: normalizeRecord(record),
+      deadlineUnixMs: Date.now() + this.timeoutMs,
       ...(streamingGeneration === undefined ? {} : { streamingGeneration }),
     }, this.timeoutMs);
     if (!accepted) {
