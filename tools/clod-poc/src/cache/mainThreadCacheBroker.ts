@@ -4,6 +4,7 @@ import { CacheUnavailableError } from "./cacheErrors.js";
 import { cacheLogger } from "./cacheLogger.js";
 import type { CacheRpcRequest, CacheRpcResponse } from "./cacheWorkerRpc.js";
 import { isCacheRpcRequest } from "./cacheWorkerRpc.js";
+import { CacheBrokerOperationQueue } from "./cacheBrokerOperationQueue.js";
 import {
   IndexedDbStore,
   purgeLegacyCacheDatabases,
@@ -24,6 +25,7 @@ type CacheWorker = {
 let brokerStore: IndexedDbStore | null = null;
 let brokerInit: Promise<IndexedDbStore | null> | null = null;
 const attachedWorkers = new WeakSet<CacheWorker>();
+const brokerOperations = new CacheBrokerOperationQueue();
 
 async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
   if (brokerStore) return brokerStore;
@@ -47,8 +49,17 @@ async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
   return brokerInit;
 }
 
+function respondToCacheWorker(worker: CacheWorker, response: CacheRpcResponse): void {
+  try {
+    worker.postMessage(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    cacheLogger.debug(`cache broker response dropped: ${message}`);
+  }
+}
+
 async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
-  const respond = (response: CacheRpcResponse) => worker.postMessage(response);
+  const respond = (response: CacheRpcResponse) => respondToCacheWorker(worker, response);
   try {
     if (request.op === "put"
       && request.streamingGeneration !== undefined
@@ -97,20 +108,35 @@ async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Pr
   }
 }
 
+function scheduleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
+  const operation = () => handleCacheRpc(worker, request);
+  return request.op === "clear"
+    ? brokerOperations.barrier(operation)
+    : brokerOperations.run(operation);
+}
+
 /** Routes worker cache RPC to main-thread IndexedDB (workers skip local IDB). */
 export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   if (attachedWorkers.has(worker)) return;
-  attachedWorkers.add(worker);
-  registerTerrainStreamingWorker(worker);
-  worker.addEventListener("message", (event: MessageEvent) => {
-    if (!isCacheRpcRequest(event.data)) return;
-    void handleCacheRpc(worker, event.data);
-  });
+  const unregisterStreamingWorker = registerTerrainStreamingWorker(worker);
+  try {
+    worker.addEventListener("message", (event: MessageEvent) => {
+      const request = event.data;
+      if (!isCacheRpcRequest(request)) return;
+      void scheduleCacheRpc(worker, request);
+    });
+    attachedWorkers.add(worker);
+  } catch (error) {
+    unregisterStreamingWorker();
+    throw error;
+  }
 }
 
-export async function clearMainThreadCacheBroker(): Promise<void> {
-  const store = await ensureBrokerStore();
-  if (store) await store.clear();
-  brokerStore = null;
-  brokerInit = null;
+export function clearMainThreadCacheBroker(): Promise<void> {
+  return brokerOperations.barrier(async () => {
+    const store = await ensureBrokerStore();
+    if (store) await store.clear();
+    brokerStore = null;
+    brokerInit = null;
+  });
 }

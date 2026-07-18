@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
-import { CacheWriteRejectedError } from "./cacheErrors.js";
+import { CacheUnavailableError, CacheWriteRejectedError } from "./cacheErrors.js";
 import {
   dispatchCacheRpcResponse,
+  pendingCacheRpcCount,
   WorkerRemotePersistentStore,
 } from "./workerRemotePersistentStore.js";
 import {
@@ -44,7 +45,10 @@ beforeEach(() => {
   vi.stubGlobal("self", { postMessage });
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("WorkerRemotePersistentStore streaming generation", () => {
   it("reports a stale streamed-root write rejection to the cache service", async () => {
@@ -83,5 +87,28 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
     expect(request.record.header.metadata.terrainStreamingGeneration).toBe(0);
     dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: true });
     await expect(pending).resolves.toBe(true);
+  });
+
+  it("times out an unanswered RPC and removes its pending entry", async () => {
+    vi.useFakeTimers();
+    const store = new WorkerRemotePersistentStore(25);
+
+    const result = store.get("missing");
+    const rejection = expect(result).rejects.toBeInstanceOf(CacheUnavailableError);
+    expect(pendingCacheRpcCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(pendingCacheRpcCount()).toBe(0);
+  });
+
+  it("removes the pending entry when postMessage throws", async () => {
+    postMessage.mockImplementationOnce(() => {
+      throw new Error("worker stopped");
+    });
+    const store = new WorkerRemotePersistentStore(25);
+
+    await expect(store.get("missing")).rejects.toThrow("worker stopped");
+    expect(pendingCacheRpcCount()).toBe(0);
   });
 });

@@ -40,18 +40,19 @@ export class ClodCacheManifest {
     existing.hitCount++;
   }
 
-  evictOldest(maxItems: number, maxBytes: number): string[] {
-    const evicted: string[] = [];
-    while (this.entries.size > maxItems || this.totalStoredBytes > maxBytes) {
-      let oldest: ClodCacheManifestEntry | null = null;
-      for (const entry of this.entries.values()) {
-        if (!oldest || entry.lastAccessedUnixMs < oldest.lastAccessedUnixMs) oldest = entry;
-      }
-      if (!oldest) break;
-      this.entries.delete(oldest.key);
-      evicted.push(oldest.key);
-      if (this.entries.size === 0) break;
+  evictionCandidates(maxItems: number, maxBytes: number): ClodCacheManifestEntry[] {
+    const ordered = [...this.entries.values()].sort(
+      (left, right) => left.lastAccessedUnixMs - right.lastAccessedUnixMs,
+    );
+    const selected: ClodCacheManifestEntry[] = [];
+    let remainingItems = ordered.length;
+    let remainingBytes = this.totalStoredBytes;
+    for (const entry of ordered) {
+      if (remainingItems <= maxItems && remainingBytes <= maxBytes) break;
+      selected.push(entry);
+      remainingItems--;
+      remainingBytes -= entry.storedBytes;
     }
-    return evicted;
+    return selected;
   }
 }

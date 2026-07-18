@@ -71,7 +71,9 @@ export function deleteDatabase(name: string): Promise<void> {
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error ?? new CacheUnavailableError(`deleteDatabase failed: ${name}`));
     request.onblocked = () => {
-      cacheLogger.warn(`IndexedDB delete blocked for ${name}; waiting for open connections to close`);
+      const error = new CacheUnavailableError(`IndexedDB delete blocked for ${name}`);
+      cacheLogger.warn(error.message);
+      reject(error);
     };
   });
 }
@@ -135,7 +137,6 @@ export class IndexedDbStore implements PersistentCacheStore {
   private readonly config: ClodCachePersistentConfig;
   private db: IDBDatabase | null = null;
   private dbPromise: Promise<IDBDatabase> | null = null;
-  private recoveryAttempts = 0;
 
   get dbName(): string {
     return this.config.database_name;
@@ -181,15 +182,16 @@ export class IndexedDbStore implements PersistentCacheStore {
   }
 
   private async withRecovery<T>(op: () => Promise<T>): Promise<T> {
+    let recoveryAttempts = 0;
     for (;;) {
       try {
         return await op();
       } catch (error) {
-        if (!isRetryableIdbError(error) || this.recoveryAttempts >= MAX_IDB_RECOVERY_ATTEMPTS) throw error;
-        this.recoveryAttempts++;
+        if (!isRetryableIdbError(error) || recoveryAttempts >= MAX_IDB_RECOVERY_ATTEMPTS) throw error;
+        recoveryAttempts++;
         cacheLogger.warn(
           `IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName} `
-          + `(attempt ${this.recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
+          + `(attempt ${recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
         );
         await this.recreateDatabase();
       }
@@ -416,7 +418,7 @@ export function createPersistentStore(
   const resolved = resolvePersistentConfig(config, role);
   if (role === "worker" && config.enabled && config.backend === "indexeddb") {
     if (typeof document === "undefined") {
-      return new WorkerRemotePersistentStore();
+      return new WorkerRemotePersistentStore(config.rpc_timeout_ms);
     }
   }
   if (!resolved.enabled) return null;

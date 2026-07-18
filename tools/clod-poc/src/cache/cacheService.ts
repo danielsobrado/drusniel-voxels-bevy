@@ -5,6 +5,7 @@ import type {
   CacheMissReason,
   ClodCacheGetResult,
   ClodCacheKeyParts,
+  ClodCacheManifestEntry,
   ClodCachePutResult,
   ClodCacheStoredRecord,
 } from "./cacheTypes.js";
@@ -34,18 +35,9 @@ import {
   validateCacheHeader,
 } from "./cache_service_helpers.js";
 import { cacheRecordVersionMatches } from "./streaming_cache_write_guard.js";
+import { nextCacheWriteId } from "./cacheWriteIdentity.js";
 
 export type { ClodCacheService } from "./cache_service_types.js";
-
-type ConditionalPersistentCacheStore = PersistentCacheStore & {
-  deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean>;
-};
-
-function supportsConditionalDelete(
-  store: PersistentCacheStore,
-): store is ConditionalPersistentCacheStore {
-  return typeof (store as Partial<ConditionalPersistentCacheStore>).deleteIfMatches === "function";
-}
 
 function metadataMatches(
   actual: Readonly<Record<string, string | number | boolean>>,
@@ -59,6 +51,21 @@ function writeRequiresCommitAcceptance(
 ): boolean {
   const generation = metadata.terrainStreamingGeneration;
   return typeof generation === "number" && Number.isInteger(generation) && generation >= 0;
+}
+
+function manifestEntryFromRecord(
+  key: string,
+  record: ClodCacheStoredRecord,
+  lastAccessedUnixMs = record.header.createdAtUnixMs,
+): ClodCacheManifestEntry {
+  return {
+    key,
+    artifactKind: record.header.artifactKind,
+    createdAtUnixMs: record.header.createdAtUnixMs,
+    lastAccessedUnixMs,
+    hitCount: 0,
+    storedBytes: record.header.storedBytes,
+  };
 }
 
 export class ClodCacheServiceImpl implements ClodCacheService {
@@ -106,22 +113,24 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     record: ClodCacheStoredRecord,
     now: number,
   ): Promise<void> {
-    this.manifest.upsert({
-      key,
-      artifactKind: record.header.artifactKind,
-      createdAtUnixMs: now,
-      lastAccessedUnixMs: now,
-      hitCount: 0,
-      storedBytes: record.header.storedBytes,
-    });
-    const evictedKeys = this.manifest.evictOldest(
+    this.manifest.upsert(manifestEntryFromRecord(key, record, now));
+    const candidates = this.manifest.evictionCandidates(
       this.config.persistent.max_items,
       this.config.persistent.max_bytes,
     );
-    for (const evictKey of evictedKeys) {
-      await persistent.delete(evictKey);
-      this.manifest.delete(evictKey);
-      this.onEvicted([evictKey]);
+    for (const candidate of candidates) {
+      try {
+        await persistent.delete(candidate.key);
+        this.manifest.delete(candidate.key);
+        this.onEvicted([candidate.key]);
+      } catch (error) {
+        const name = error instanceof Error ? error.name : "";
+        const message = error instanceof Error ? error.message : String(error);
+        cacheLogger.warn(`cache eviction failed for ${candidate.key} [${name}] ${message}`);
+        this.metrics.recordError(`[${name}] ${message}`);
+        if (error instanceof CacheUnavailableError || error instanceof DOMException) this.notePersistentError();
+        break;
+      }
     }
   }
 
@@ -161,14 +170,7 @@ export class ClodCacheServiceImpl implements ClodCacheService {
       const key = keys[i]!;
       const record = await this.persistent.get(key);
       if (!record) continue;
-      this.manifest.upsert({
-        key,
-        artifactKind: record.header.artifactKind,
-        createdAtUnixMs: record.header.createdAtUnixMs,
-        lastAccessedUnixMs: record.header.createdAtUnixMs,
-        hitCount: 0,
-        storedBytes: record.header.storedBytes,
-      });
+      this.manifest.upsert(manifestEntryFromRecord(key, record));
     }
     if (keys.length > maxScan) cacheLogger.debug(`manifest hydrate scanned ${maxScan}/${keys.length} keys`);
   }
@@ -260,6 +262,10 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         const compressionMode = resolveCompressionMode(this.config.persistent.compression);
         const compressed = await compressPayload(uncompressed, compressionMode);
         const now = Date.now();
+        const recordMetadata = {
+          ...metadata,
+          cacheWriteId: nextCacheWriteId(),
+        };
         const header = {
           schemaVersion: this.config.schema_version,
           artifactKind: keyParts.artifactKind,
@@ -275,11 +281,11 @@ export class ClodCacheServiceImpl implements ClodCacheService {
           storedBytes: compressed.bytes.byteLength,
           compression: compressed.mode,
           checksum,
-          metadata,
+          metadata: recordMetadata,
         };
         const record: ClodCacheStoredRecord = { header, payload: compressed.bytes };
         const persistent = this.persistent;
-        const commitGated = writeRequiresCommitAcceptance(metadata);
+        const commitGated = writeRequiresCommitAcceptance(recordMetadata);
 
         if (persistent && commitGated) {
           await persistent.put(key, record);
@@ -340,13 +346,9 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     if (!expectedRecord && persistent) expectedRecord = await persistent.get(key);
     if (!expectedRecord || !metadataMatches(expectedRecord.header.metadata, expectedMetadata)) return false;
 
-    let persistentDeleted = false;
-    if (persistent) {
-      if (!supportsConditionalDelete(persistent)) {
-        throw new CacheUnavailableError("persistent cache does not support conditional delete");
-      }
-      persistentDeleted = await persistent.deleteIfMatches(key, expectedRecord);
-    }
+    const persistentDeleted = persistent
+      ? await persistent.deleteIfMatches(key, expectedRecord)
+      : false;
 
     const currentMemory = this.memory?.peek(key) ?? null;
     let memoryDeleted = false;
@@ -355,7 +357,20 @@ export class ClodCacheServiceImpl implements ClodCacheService {
       memoryDeleted = true;
     }
 
-    if ((persistentDeleted || memoryDeleted) && !this.memory?.peek(key)) {
+    let remainingPersistent: ClodCacheStoredRecord | null = null;
+    if (persistent && !persistentDeleted) {
+      try {
+        remainingPersistent = await persistent.get(key);
+      } catch (error) {
+        const name = error instanceof Error ? error.name : "";
+        const message = error instanceof Error ? error.message : String(error);
+        cacheLogger.warn(`cache manifest reconciliation failed for ${key} [${name}] ${message}`);
+        this.metrics.recordError(`[${name}] ${message}`);
+      }
+    }
+    if (remainingPersistent) {
+      this.manifest.upsert(manifestEntryFromRecord(key, remainingPersistent));
+    } else if (!this.memory?.peek(key) && (persistentDeleted || !persistent)) {
       this.manifest.delete(key);
     }
     return persistentDeleted || memoryDeleted;

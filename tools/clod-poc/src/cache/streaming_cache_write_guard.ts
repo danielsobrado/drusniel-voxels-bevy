@@ -9,19 +9,21 @@ export interface CacheWriteStore {
 
 type CachePutRequest = Extract<CacheRpcRequest, { op: "put" }>;
 
+function requestCanCommit(request: CachePutRequest, nowUnixMs: number): boolean {
+  if (!Number.isFinite(request.deadlineUnixMs) || nowUnixMs > request.deadlineUnixMs) return false;
+  const generation = request.streamingGeneration;
+  return generation === undefined || terrainStreamingGenerationIsCurrent(generation);
+}
+
 export async function commitCachePut(
   store: CacheWriteStore,
   request: CachePutRequest,
+  nowUnixMs: () => number = Date.now,
 ): Promise<boolean> {
-  const generation = request.streamingGeneration;
-  if (generation === undefined) {
-    await store.put(request.key, request.record);
-    return true;
-  }
-  if (!terrainStreamingGenerationIsCurrent(generation)) return false;
+  if (!requestCanCommit(request, nowUnixMs())) return false;
 
   await store.put(request.key, request.record);
-  if (terrainStreamingGenerationIsCurrent(generation)) return true;
+  if (requestCanCommit(request, nowUnixMs())) return true;
 
   await store.deleteIfMatches(request.key, request.record);
   return false;
@@ -35,6 +37,7 @@ export function cacheRecordVersionMatches(
     && left.header.createdAtUnixMs === right.header.createdAtUnixMs
     && left.header.checksum === right.header.checksum
     && left.header.sourceHash === right.header.sourceHash
+    && left.header.metadata.cacheWriteId === right.header.metadata.cacheWriteId
     && left.header.metadata.terrainStreamingGeneration
       === right.header.metadata.terrainStreamingGeneration
     && left.header.metadata.terrainStreamingWriteId
