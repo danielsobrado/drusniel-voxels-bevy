@@ -4,6 +4,8 @@ import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 import type { PostProcessQualityPreset } from "../../app/state/postprocess_quality_presets.js";
 import {
+  treeImpostorBakeAgeLayersForQualityPreset,
+  treeImpostorStartFractionForQualityPreset,
   treeImpostorTileResolutionForQualityPreset,
   treeLodBudgetsForQualityPreset,
   type TreeShadowMaxLod,
@@ -105,11 +107,12 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
     const state = deps.getUiState();
     const treeSpacing = clampAtLeast(state.treeSpacing, 0.5);
     const treeDensity = clampAtLeast(state.treeDensity, 0);
+    const treeDistance = clampAtLeast(state.treeDistance, 0);
     const lodBudgets = treeLodBudgetsForQualityPreset(state.treeQualityPreset, deps.treeConfig.lod.budgets);
     return {
       ...deps.treeConfig,
       enabled: state.treesEnabled,
-      distanceM: clampAtLeast(state.treeDistance, 0),
+      distanceM: treeDistance,
       maxInstances: Math.floor(clampAtLeast(state.treeMaxInstances, 0)),
       placement: {
         ...deps.treeConfig.placement,
@@ -117,6 +120,11 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       },
       lod: {
         ...deps.treeConfig.lod,
+        farFraction: treeImpostorStartFractionForQualityPreset(
+          state.treeQualityPreset,
+          treeDistance,
+          deps.treeConfig.lod.farFraction,
+        ),
         shadowsMaxLod: state.treeShadowMaxLod,
         budgets: lodBudgets,
       },
@@ -129,6 +137,10 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       },
       impostors: {
         ...deps.treeConfig.impostors,
+        bakeAgeLayers: treeImpostorBakeAgeLayersForQualityPreset(
+          state.treeQualityPreset,
+          deps.treeConfig.impostors.bakeAgeLayers,
+        ),
         resolutionPx: treeImpostorTileResolutionForQualityPreset(
           state.treeQualityPreset,
           deps.treeConfig.impostors.resolutionPx,

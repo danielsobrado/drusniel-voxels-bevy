@@ -44,7 +44,8 @@ export interface TreeFoliageAtlasBakeResult {
 }
 
 const CAPTURE_MIN_CELL_SIZE = 128;
-const DILATION_PASSES = 6;
+const DILATION_DISTANCE_PX = 8;
+const FOLIAGE_ATLAS_ANISOTROPY = 8;
 const TILE_HALF_EXTENT = 0.46;
 const MIN_LEAFY_ALPHA_COVERAGE = 0.005;
 const MAX_LEAFY_ALPHA_COVERAGE = 0.82;
@@ -116,7 +117,7 @@ export async function bakeTreeFoliageAtlas(
     const validationError = validateCapturedFoliageAtlasAlpha(pixels, width, height, cellSize);
     if (validationError) return { atlas: null, supported: false, reason: validationError };
 
-    dilateTransparentRgb(pixels, width, height, DILATION_PASSES);
+    dilateFoliageAtlasCells(pixels, width, cellSize, DILATION_DISTANCE_PX);
     const atlas = createCapturedAtlas(pixels, width, height, cellSize);
     return { atlas, supported: true, reason: null };
   } catch (error) {
@@ -143,7 +144,7 @@ export function replaceTreeFoliageAtlasData(
   target.texture.minFilter = THREE.LinearMipmapLinearFilter;
   target.texture.magFilter = THREE.LinearFilter;
   target.texture.generateMipmaps = true;
-  target.texture.anisotropy = Math.max(target.texture.anisotropy, 4);
+  target.texture.anisotropy = Math.max(target.texture.anisotropy, FOLIAGE_ATLAS_ANISOTROPY);
   target.texture.needsUpdate = true;
   target.columns = captured.columns;
   target.rows = captured.rows;
@@ -182,13 +183,13 @@ function buildCaptureTile(
   const centerY = speciesIndex + 0.5;
 
   if (foliage.kind === "needleSpray") {
-    const sprayCount = species.id === "spruce" ? 9 : 7;
+    const sprayCount = species.id === "spruce" ? 12 : 10;
     const scaleToTile = 0.72 / Math.max(0.08, foliage.scale[1]);
     const leaf = {
       ...foliage.leaf,
       len: foliage.leaf.len * scaleToTile * 1.08,
       width: foliage.leaf.width * scaleToTile,
-      needleCount: Math.max(18, Math.round(foliage.leaf.needleCount * 0.62)),
+      needleCount: Math.max(24, Math.round(foliage.leaf.needleCount * 0.9)),
     };
     for (let index = 0; index < sprayCount; index++) {
       const t = sprayCount <= 1 ? 0 : index / (sprayCount - 1);
@@ -210,7 +211,7 @@ function buildCaptureTile(
     return;
   }
 
-  const leafCount = 15 + variant * 2 + rng.int(4);
+  const leafCount = 22 + variant * 3 + rng.int(5);
   const scaleToTile = 0.86 / Math.max(0.1, foliage.leaf.len * 2.1);
   for (let index = 0; index < leafCount; index++) {
     const t = leafCount <= 1 ? 0 : index / (leafCount - 1);
@@ -271,7 +272,7 @@ function createCapturedAtlas(
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
-  texture.anisotropy = 4;
+  texture.anisotropy = FOLIAGE_ATLAS_ANISOTROPY;
   texture.needsUpdate = true;
   return {
     texture,
@@ -346,44 +347,69 @@ export function flipRows(pixels: Uint8Array, width: number, height: number): voi
   }
 }
 
-function dilateTransparentRgb(pixels: Uint8Array, width: number, height: number, passes: number): void {
-  const alpha = new Uint8Array(width * height);
-  for (let pixel = 0; pixel < width * height; pixel++) alpha[pixel] = pixels[pixel * 4 + 3] as number;
+function dilateFoliageAtlasCells(
+  pixels: Uint8Array,
+  width: number,
+  cellSize: number,
+  maxDistance: number,
+): void {
+  for (let row = 0; row < TREE_FOLIAGE_ATLAS_ROWS; row++) {
+    for (let column = 0; column < TREE_FOLIAGE_ATLAS_COLUMNS; column++) {
+      dilateCellRgb(pixels, width, cellSize, column, row, maxDistance);
+    }
+  }
+}
 
-  for (let pass = 0; pass < passes; pass++) {
-    const source = pixels.slice();
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const pixel = y * width + x;
-        if ((alpha[pixel] as number) > 0) continue;
-        const offset = pixel * 4;
-        let red = 0;
-        let green = 0;
-        let blue = 0;
-        let samples = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            const sx = x + dx;
-            const sy = y + dy;
-            if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
-            const sampleOffset = (sy * width + sx) * 4;
-            if ((source[sampleOffset + 3] as number) === 0
-              && (source[sampleOffset] as number) === 0
-              && (source[sampleOffset + 1] as number) === 0
-              && (source[sampleOffset + 2] as number) === 0) continue;
-            red += source[sampleOffset] as number;
-            green += source[sampleOffset + 1] as number;
-            blue += source[sampleOffset + 2] as number;
-            samples++;
-          }
-        }
-        if (samples > 0) {
-          pixels[offset] = Math.round(red / samples);
-          pixels[offset + 1] = Math.round(green / samples);
-          pixels[offset + 2] = Math.round(blue / samples);
-          pixels[offset + 3] = 0;
-        }
+function dilateCellRgb(
+  pixels: Uint8Array,
+  width: number,
+  cellSize: number,
+  column: number,
+  row: number,
+  maxDistance: number,
+): void {
+  const pixelCount = cellSize * cellSize;
+  const distance = new Int16Array(pixelCount);
+  distance.fill(-1);
+  const queue = new Int32Array(pixelCount);
+  let head = 0;
+  let tail = 0;
+  const originX = column * cellSize;
+  const originY = row * cellSize;
+
+  for (let y = 0; y < cellSize; y++) {
+    for (let x = 0; x < cellSize; x++) {
+      const local = y * cellSize + x;
+      const offset = ((originY + y) * width + originX + x) * 4;
+      if ((pixels[offset + 3] as number) === 0) continue;
+      distance[local] = 0;
+      queue[tail++] = local;
+    }
+  }
+
+  while (head < tail) {
+    const local = queue[head++] as number;
+    const currentDistance = distance[local] as number;
+    if (currentDistance >= maxDistance) continue;
+    const x = local % cellSize;
+    const y = Math.floor(local / cellSize);
+    const sourceOffset = ((originY + y) * width + originX + x) * 4;
+
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nextX = x + dx;
+        const nextY = y + dy;
+        if (nextX < 0 || nextY < 0 || nextX >= cellSize || nextY >= cellSize) continue;
+        const nextLocal = nextY * cellSize + nextX;
+        if ((distance[nextLocal] as number) >= 0) continue;
+        const nextOffset = ((originY + nextY) * width + originX + nextX) * 4;
+        pixels[nextOffset] = pixels[sourceOffset] as number;
+        pixels[nextOffset + 1] = pixels[sourceOffset + 1] as number;
+        pixels[nextOffset + 2] = pixels[sourceOffset + 2] as number;
+        pixels[nextOffset + 3] = 0;
+        distance[nextLocal] = currentDistance + 1;
+        queue[tail++] = nextLocal;
       }
     }
   }

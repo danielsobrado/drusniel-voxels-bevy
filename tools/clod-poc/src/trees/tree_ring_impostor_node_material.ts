@@ -25,6 +25,8 @@ import {
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import { TREE_LODS } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
@@ -56,6 +58,9 @@ const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_RING_IMPOSTOR_MIN_COVERAGE = 0.0001;
 const TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR = 0.025;
 const TREE_RING_IMPOSTOR_HDR_MAX = 4.0;
+const TREE_RING_IMPOSTOR_AERIAL_TINT_SCALE = 0.15;
+const TREE_RING_IMPOSTOR_AERIAL_TINT_MAX = 0.04;
+const TREE_RING_IMPOSTOR_SHAFT_HINT = 0.01;
 
 function fallbackLighting(): EnvironmentLighting {
   return {
@@ -79,7 +84,23 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uAmbientFloor = uniform(lighting.ambientFloor ?? TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR);
+  const neutralForestTexture = new THREE.DataTexture(
+    new Uint8Array([0, 0, 0, 0]),
+    1,
+    1,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  neutralForestTexture.needsUpdate = true;
+  const uForestEnabled = uniform(0);
+  const uForestWorldSize = uniform(1);
+  const uForestAoStrength = uniform(1);
+  const uForestShadowStrength = uniform(1);
+  const uForestFogStrength = uniform(0);
+  const uForestFogColor = uniform(new THREE.Vector3(0.40, 0.45, 0.43));
+  const forestMapNodes: TslNode[] = [];
   const materials: TreeRingNodeMaterial[] = [];
+  const prepassNodes = new Map<TreeRingNodeMaterial, PrepassNodes>();
 
   const buildMaterial = (debugColor?: THREE.Color): TreeRingNodeMaterial => {
     const record = treeMorphologyRecordNodes(buffers);
@@ -129,11 +150,13 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const sampledAlbedo: TslNode = debugColor
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
       : impostor.albedo;
-    const albedo: TslNode = debugColor ? sampledAlbedo : mix(sampledAlbedo.mul(vec3(1.05, 0.78, 0.52)), sampledAlbedo, health);
+    const albedo: TslNode = debugColor
+      ? sampledAlbedo
+      : mix(sampledAlbedo.mul(vec3(1.05, 0.78, 0.52)), sampledAlbedo, health);
     const normalNode: TslNode = atlas.normalDepth && !debugColor
       ? treeRingImpostorSurfaceNormal(impostor.normal, billboardNormal, c, s)
       : billboardNormal;
-    const lit: TslNode = atlas.normalDepth && !debugColor
+    const litBase: TslNode = atlas.normalDepth && !debugColor
       ? relightTreeRingImpostor(
           albedo,
           impostor.normal,
@@ -148,13 +171,33 @@ export function createTreeRingImpostorNodeMaterialHandle(
         )
       : albedo;
 
+    const forestUv: TslNode = clamp(aWorldXZ.div(uForestWorldSize), vec2(0), vec2(1));
+    const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
+    forestMapNodes.push(forestPacked);
+    const forestDarken: TslNode = clamp(
+      forestPacked.x.mul(uForestAoStrength).add(forestPacked.y.mul(uForestShadowStrength)),
+      0,
+      0.72,
+    ).mul(uForestEnabled);
+    const forestFog: TslNode = clamp(
+      forestPacked.z.mul(uForestFogStrength).mul(uForestEnabled),
+      0,
+      TREE_RING_IMPOSTOR_AERIAL_TINT_MAX,
+    );
+    const lit: TslNode = debugColor
+      ? litBase
+      : mix(litBase.mul(float(1).sub(forestDarken)), uForestFogColor, forestFog)
+        .add(vec3(forestPacked.w.mul(TREE_RING_IMPOSTOR_SHAFT_HINT).mul(uForestEnabled)));
+
     const retention: TslNode = clamp(record.morphology2.y.mul(mix(0.72, 1, health)), 0, 1);
     const retentionCell: TslNode = uint(floor(uv().x.mul(8))).add(uint(floor(uv().y.mul(8))).mul(8));
     const retentionNoise: TslNode = treeMorphologyHash01Node(
       floatBitsToUint(record.identityBits.zw),
       uint(0x1109).bitXor(retentionCell),
     );
-    const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest)).and(retentionNoise.lessThan(retention));
+    const alphaMask: TslNode = impostor.coverage
+      .greaterThan(float(settings.impostors.alphaTest))
+      .and(retentionNoise.lessThan(retention));
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const mask: TslNode = aboveWater ? alphaMask.and(aboveWater) : alphaMask;
 
@@ -169,6 +212,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
+    prepassNodes.set(material, { positionNode, maskNode: mask, side: material.side });
     return material;
   };
 
@@ -182,6 +226,9 @@ export function createTreeRingImpostorNodeMaterialHandle(
     setTime() {},
     setFadeCenter() {
       // GPU ring LOD fading is attached by the shared crossfade decorator.
+    },
+    prepassNodesFor() {
+      return prepassNodes.get(regularMaterial);
     },
     updateSettings(_next: TreeSettings) {
       for (const material of materials) {
@@ -198,8 +245,21 @@ export function createTreeRingImpostorNodeMaterialHandle(
       uGround.value.copy(v3(next.groundLight));
       uAmbientFloor.value = next.ambientFloor ?? TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR;
     },
-    updateForestLighting() {},
+    updateForestLighting(state: ForestLightingMaterialState | null) {
+      if (!state) {
+        uForestEnabled.value = 0;
+        return;
+      }
+      const next = state.settings;
+      uForestEnabled.value = next.enabled && next.materialIntegration.treeEnabled ? 1 : 0;
+      uForestWorldSize.value = Math.max(1, state.worldCells);
+      uForestAoStrength.value = next.ambientOcclusion.strength;
+      uForestShadowStrength.value = next.shadowProxy.strength;
+      uForestFogStrength.value = next.atmosphere.aerialTintStrength * TREE_RING_IMPOSTOR_AERIAL_TINT_SCALE;
+      for (const mapNode of forestMapNodes) mapNode.value = state.textureHandle.texture;
+    },
     dispose() {
+      neutralForestTexture.dispose();
       for (const material of materials) material.dispose();
     },
   };
@@ -257,7 +317,10 @@ function treeRingImpostorFourFrameSample(
   const s10 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y0, variantIndex);
   const s01 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y1, variantIndex);
   const s11 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y1, variantIndex);
-  const coverage: TslNode = s00.coverage.mul(w00).add(s10.coverage.mul(w10)).add(s01.coverage.mul(w01)).add(s11.coverage.mul(w11));
+  const coverage: TslNode = s00.coverage.mul(w00)
+    .add(s10.coverage.mul(w10))
+    .add(s01.coverage.mul(w01))
+    .add(s11.coverage.mul(w11));
   const safeCoverage: TslNode = max(coverage, float(TREE_RING_IMPOSTOR_MIN_COVERAGE));
   return {
     albedo: s00.albedo.mul(s00.coverage).mul(w00)
@@ -330,8 +393,14 @@ function treeRingImpostorAtlasSample(
 ): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
   const atlasUv = treeRingImpostorAtlasUv(atlas, baseUv, frameX, frameY, variantIndex);
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
-  const encoded: TslNode = clamp(sample.xyz.div(max(sample.w, float(TREE_RING_IMPOSTOR_MIN_COVERAGE))), 0.0, 1.0);
-  const normalSample: TslNode = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv).xyz : vec3(0.5, 1.0, 0.5);
+  const encoded: TslNode = clamp(
+    sample.xyz.div(max(sample.w, float(TREE_RING_IMPOSTOR_MIN_COVERAGE))),
+    0.0,
+    1.0,
+  );
+  const normalSample: TslNode = atlas.normalDepth
+    ? texture(atlas.normalDepth, atlasUv).xyz
+    : vec3(0.5, 1.0, 0.5);
   return {
     albedo: encoded.mul(encoded),
     coverage: sample.w,

@@ -31,8 +31,10 @@ describe("tree impostor quality defaults", () => {
     const settings = cloneTreeSettings();
 
     expect(settings.impostors.sourceLod).toBe("mid");
-    expect(settings.impostors.resolutionPx).toBe(64);
-    expect(settings.impostors.alphaTest).toBe(0.38);
+    expect(settings.impostors.bakeAgeLayers).toBe(false);
+    expect(settings.impostors.resolutionPx).toBe(128);
+    expect(settings.impostors.atlasPaddingPx).toBe(4);
+    expect(settings.impostors.alphaTest).toBe(0.32);
     expect(settings.impostors.fallbackToPlaceholder).toBe(false);
     expect(settings.impostors.swapOnBake).toBe(true);
   });
@@ -44,14 +46,14 @@ describe("tree impostor quality defaults", () => {
 
     expect(texture.wrapS).toBe(THREE.ClampToEdgeWrapping);
     expect(texture.wrapT).toBe(THREE.ClampToEdgeWrapping);
-    expect(texture.generateMipmaps).toBe(false);
-    expect(texture.minFilter).toBe(THREE.LinearFilter);
+    expect(texture.generateMipmaps).toBe(true);
+    expect(texture.minFilter).toBe(THREE.LinearMipmapLinearFilter);
     expect(texture.magFilter).toBe(THREE.LinearFilter);
-    expect(texture.anisotropy).toBeGreaterThanOrEqual(4);
+    expect(texture.anisotropy).toBeGreaterThanOrEqual(8);
   });
 
-  it("keeps the balanced 12-layer two-channel fallback within 144 MiB", () => {
-    expect(estimateTreeImpostorAtlasMemoryMiB(cloneTreeSettings())).toBe(144);
+  it("keeps the balanced four-page mipmapped fallback within 256 MiB", () => {
+    expect(estimateTreeImpostorAtlasMemoryMiB(cloneTreeSettings())).toBe(256);
   });
 
   it("uses the configured unbaked impostor fallback while baked atlases are not ready", () => {

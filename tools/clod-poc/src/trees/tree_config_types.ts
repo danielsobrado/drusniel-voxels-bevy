@@ -108,6 +108,8 @@ export interface TreeImpostorSettings {
   fallbackToPlaceholder: boolean;
   swapOnBake: boolean;
   sourceLod: Exclude<TreeLod, "impostor">;
+  /** Full young/mature/old atlas pages. Disable to spend memory on sharper mature pages. */
+  bakeAgeLayers: boolean;
   resolutionPx: number;
   octahedralGridSize: number;
   atlasPaddingPx: number;

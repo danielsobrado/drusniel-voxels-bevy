@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyTreeQualityPreset,
   isTreeShadowMaxLod,
+  treeImpostorBakeAgeLayersForQualityPreset,
+  treeImpostorStartFractionForQualityPreset,
   treeImpostorTileResolutionForQualityPreset,
   treeLodBudgetsForQualityPreset,
   type TreeQualityPresetState,
@@ -52,11 +54,11 @@ describe("tree quality presets", () => {
     applyTreeQualityPreset(state, "perf");
     expect(state).toEqual({
       treeQualityPreset: "perf",
-      treeDistance: 300,
-      treeMaxInstances: 3500,
+      treeDistance: 500,
+      treeMaxInstances: 5000,
       treeDensity: 0.55,
       treeSpacing: 9,
-      treeShadowMaxLod: "near",
+      treeShadowMaxLod: "far",
       treeWindEnabled: false,
       treeWindStrength: 0,
       treeGustStrength: 0,
@@ -68,7 +70,7 @@ describe("tree quality presets", () => {
       treeGpuShowCounts: false,
       treeGpuReadbackVisibleLists: false,
       treeGpuValidateAgainstCpu: false,
-      treeGpuMaxVisible: 16_000,
+      treeGpuMaxVisible: 40_000,
     });
   });
 
@@ -87,10 +89,24 @@ describe("tree quality presets", () => {
   });
 
   it("binds impostor tile size to the canonical quality token", () => {
-    expect(treeImpostorTileResolutionForQualityPreset("ultra", 17)).toBe(96);
-    expect(treeImpostorTileResolutionForQualityPreset("balanced", 17)).toBe(64);
-    expect(treeImpostorTileResolutionForQualityPreset("perf", 17)).toBe(48);
-    expect(treeImpostorTileResolutionForQualityPreset("potato", 17)).toBe(32);
+    expect(treeImpostorTileResolutionForQualityPreset("ultra", 17)).toBe(192);
+    expect(treeImpostorTileResolutionForQualityPreset("balanced", 17)).toBe(128);
+    expect(treeImpostorTileResolutionForQualityPreset("perf", 17)).toBe(64);
+    expect(treeImpostorTileResolutionForQualityPreset("potato", 17)).toBe(48);
     expect(treeImpostorTileResolutionForQualityPreset("custom", 17)).toBe(17);
+  });
+
+  it("keeps high-quality far geometry to the intended billboard seam", () => {
+    expect(treeImpostorStartFractionForQualityPreset("ultra", 1200, 0.1)).toBeCloseTo(460 / 1200);
+    expect(treeImpostorStartFractionForQualityPreset("balanced", 900, 0.1)).toBeCloseTo(420 / 900);
+    expect(treeImpostorStartFractionForQualityPreset("perf", 500, 0.1)).toBeCloseTo(300 / 500);
+    expect(treeImpostorStartFractionForQualityPreset("potato", 240, 0.1)).toBeCloseTo(140 / 240);
+    expect(treeImpostorStartFractionForQualityPreset("custom", 900, 0.37)).toBe(0.37);
+  });
+
+  it("spends preset memory on sharper mature pages", () => {
+    expect(treeImpostorBakeAgeLayersForQualityPreset("ultra", true)).toBe(false);
+    expect(treeImpostorBakeAgeLayersForQualityPreset("balanced", true)).toBe(false);
+    expect(treeImpostorBakeAgeLayersForQualityPreset("custom", true)).toBe(true);
   });
 });
