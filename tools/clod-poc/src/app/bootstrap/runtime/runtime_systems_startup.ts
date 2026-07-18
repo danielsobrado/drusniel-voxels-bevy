@@ -44,6 +44,7 @@ import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
 import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
 import { installConstructionCommitGuard } from "../../../construction/construction_commit_guard.js";
+import { authorizeConstructionRemoval } from "../../../construction/construction_remove_authority.js";
 import { resolvePlayerEditAuthorityConfig } from "../../../player/player_edit_authority.js";
 import {
   cellReadinessAt,
@@ -117,6 +118,30 @@ export interface RuntimeSystemsStartupResult extends VegetationStartupResult, Wa
   agentEnvelopeRuntime: AgentEnvelopeRuntime | null;
 }
 
+function resolveBreakTarget(
+  controller: ConstructionController,
+  input: Parameters<ConstructionController["breakPiece"]>[0],
+): ReturnType<ConstructionController["listPlacedPieces"]>[number] | null {
+  const pieces = controller.listPlacedPieces(Number.MAX_SAFE_INTEGER);
+  if (input.pieceId) return pieces.find((piece) => piece.id === input.pieceId) ?? null;
+  if (!input.position) return null;
+  const maxDistanceM = Math.max(0.5, input.maxDistanceM ?? 4);
+  const maxDistance2 = maxDistanceM * maxDistanceM;
+  let best = null as ReturnType<ConstructionController["listPlacedPieces"]>[number] | null;
+  let bestDistance2 = maxDistance2;
+  for (const piece of pieces) {
+    const dx = piece.position[0] - input.position[0];
+    const dy = piece.position[1] - input.position[1];
+    const dz = piece.position[2] - input.position[2];
+    const distance2 = dx * dx + dy * dy + dz * dz;
+    if (distance2 <= bestDistance2) {
+      best = piece;
+      bestDistance2 = distance2;
+    }
+  }
+  return best;
+}
+
 function withConstructionGuardDispose(
   controller: ConstructionController,
   disposeGuard: () => void,
@@ -128,7 +153,19 @@ function withConstructionGuardDispose(
     setTerrainConformHandler: (handler) => controller.setTerrainConformHandler(handler),
     reevaluateSupportForTerrainEdit: (aabb) => controller.reevaluateSupportForTerrainEdit(aabb),
     placePieceAt: (input) => controller.placePieceAt(input),
-    breakPiece: (input) => controller.breakPiece(input),
+    breakPiece: (input) => {
+      const target = resolveBreakTarget(controller, input);
+      if (!target) return controller.breakPiece(input);
+      const verdict = authorizeConstructionRemoval(target);
+      if (!verdict.allowed) {
+        return {
+          ok: false,
+          pieceId: target.id,
+          reason: `edit command denied: ${verdict.reason}`,
+        };
+      }
+      return controller.breakPiece({ ...input, pieceId: target.id });
+    },
     listPlacedPieces: (limit) => controller.listPlacedPieces(limit),
     dispose: () => {
       disposeGuard();
@@ -450,6 +487,9 @@ export async function runRuntimeSystemsStartup(
       const readinessFeeds = terrainColliders
         ? createAppCellReadinessFeeds({ terrainColliders })
         : null;
+      const constructionReadyAt = readinessFeeds
+        ? (x: number, z: number) => cellReadinessAt(readinessFeeds, x, z).constructionReady
+        : undefined;
       const recordConstructionEditDenial = (reason: EditCommandDenialReason): void => {
         const counters = getBuildAuthorityCounters();
         if (!counters) return;
@@ -475,7 +515,11 @@ export async function runRuntimeSystemsStartup(
         editAuthority,
         getAuthorityOrigin: getBuildAuthorityOrigin,
         getCounters: getBuildAuthorityCounters,
-        onRejected: (reason) => console.info(`[construction] placement rejected: ${reason}`),
+        getInteractionMode,
+        getTerrainRevision: getDigEditRevision,
+        constructionReadyAt,
+        recordEditDenial: recordConstructionEditDenial,
+        onRejected: (reason) => console.info(`[construction] edit rejected: ${reason}`),
       });
       if (seededStorageKey && densityComposition) {
         localStorage.setItem(seededStorageKey, JSON.stringify(densityComposition.pieces));
@@ -490,9 +534,7 @@ export async function runRuntimeSystemsStartup(
           editAuthority,
           getAuthorityOrigin: getBuildAuthorityOrigin,
           getAuthorityCounters: getBuildAuthorityCounters,
-          constructionReadyAt: readinessFeeds
-            ? (x, z) => cellReadinessAt(readinessFeeds, x, z).constructionReady
-            : undefined,
+          constructionReadyAt,
           getTerrainRevision: () => getDigEditRevision(),
           getInteractionMode,
           recordEditDenial: recordConstructionEditDenial,
