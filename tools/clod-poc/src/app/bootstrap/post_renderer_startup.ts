@@ -1,3 +1,4 @@
+import biomeVisualStateConfigText from "../../../config/biome_visual_state.yaml?raw";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import {
   createClodErrorComputeAccess,
@@ -12,6 +13,12 @@ import type { VoxelProjectArchiveContents } from "../../project/voxel_project_ar
 import type { ClodPagesConfig } from "../../config.js";
 import type { RendererStartupResult } from "./renderer_startup.js";
 import type { WorldBuildResult } from "./world_build_startup.js";
+import { parseBiomeVisualStateConfig } from "../../environment/biome_visual_state_config.js";
+import {
+  createBiomeVisualStateRuntime,
+  installBiomeVisualStateDebugProperty,
+  resolveBiomeVisualSeasonT,
+} from "../../environment/biome_visual_state_runtime.js";
 
 export interface PostRendererStartupInput {
   info: HTMLElement;
@@ -72,12 +79,27 @@ export async function runPostRendererStartup(input: PostRendererStartupInput) {
     queries,
     configs: world,
   });
+  const biomeVisualStateSettings = parseBiomeVisualStateConfig(biomeVisualStateConfigText);
+  const fallbackSeasonT = biomeVisualStateSettings.seasonKeyframes[0]?.at ?? 0;
+  const seasonT = resolveBiomeVisualSeasonT(searchParams, fallbackSeasonT);
+  const biomeVisualStateRuntime = createBiomeVisualStateRuntime({
+    settings: biomeVisualStateSettings,
+    getSeasonT: () => seasonT,
+    getSunElevationDeg: () => appState.state.sunElevationDeg,
+    getWeather: () => ({
+      mode: appState.state.weatherMode,
+      intensity: appState.state.weatherIntensity,
+    }),
+  });
+  installBiomeVisualStateDebugProperty(window, biomeVisualStateRuntime);
+
   const uiRefs = createBootstrapUiRefs(stagedImport);
   return {
     isLongView,
     terrainEdit,
     longViewHooks,
     longViewSettleWaiters,
+    biomeVisualStateRuntime,
     ...clodErrorAccess,
     ...appState,
     uiRefs,
