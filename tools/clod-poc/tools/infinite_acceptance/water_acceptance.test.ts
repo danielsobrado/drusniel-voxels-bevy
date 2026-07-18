@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   WATER_ACCEPTANCE_MAX_FRAME_MS,
   WATER_ACCEPTANCE_MAX_P95_MS,
+  WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
   evaluateWaterAcceptance,
 } from "./water_acceptance.js";
 
@@ -10,10 +11,11 @@ function passingInput() {
     startupTimings: { river_continuity_pct: 100 },
     counters: {
       webgpu_uncaptured_errors: 0,
+      water_high_quality_material_active: 1,
       water_clipmap_enabled: 1,
-      water_clipmap_visible_levels: 4,
-      water_clipmap_level_count: 4,
-      water_clipmap_snaps: 8,
+      water_clipmap_visible_levels: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
+      water_clipmap_level_count: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
+      water_clipmap_snaps: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS * 2,
       water_clipmap_field_samples: 0,
       "framePerf.p95.waterMs": WATER_ACCEPTANCE_MAX_P95_MS,
       "framePerf.max.waterMs": WATER_ACCEPTANCE_MAX_FRAME_MS,
@@ -22,7 +24,7 @@ function passingInput() {
 }
 
 describe("water acceptance", () => {
-  it("accepts complete atlas-driven water evidence at the timing limits", () => {
+  it("accepts complete high-quality atlas-driven water evidence at the timing limits", () => {
     expect(evaluateWaterAcceptance(passingInput())).toEqual([]);
   });
 
@@ -30,6 +32,7 @@ describe("water acceptance", () => {
     const input = passingInput();
     input.startupTimings.river_continuity_pct = 94;
     input.counters.webgpu_uncaptured_errors = 1;
+    input.counters.water_high_quality_material_active = 0;
     input.counters.water_clipmap_enabled = 0;
     input.counters.water_clipmap_level_count = 0;
     input.counters.water_clipmap_visible_levels = 0;
@@ -41,6 +44,7 @@ describe("water acceptance", () => {
     expect(evaluateWaterAcceptance(input)).toEqual(expect.arrayContaining([
       expect.stringContaining("river_continuity_pct"),
       expect.stringContaining("webgpu_uncaptured_errors"),
+      expect.stringContaining("water_high_quality_material_active"),
       expect.stringContaining("water_clipmap_enabled"),
       expect.stringContaining("water_clipmap_level_count"),
       expect.stringContaining("water_clipmap_visible_levels"),
@@ -51,14 +55,25 @@ describe("water acceptance", () => {
     ]));
   });
 
+  it("rejects a reduced atlas ring count even when every remaining ring is visible", () => {
+    const input = passingInput();
+    input.counters.water_clipmap_level_count = WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 1;
+    input.counters.water_clipmap_visible_levels = WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 1;
+    input.counters.water_clipmap_snaps = WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 1;
+
+    expect(evaluateWaterAcceptance(input)).toEqual([
+      `water_clipmap_level_count=${WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 1} must be an integer >= ${WATER_ACCEPTANCE_MIN_ATLAS_LEVELS}`,
+    ]);
+  });
+
   it("rejects partial ring visibility and uninitialized clipmap levels", () => {
     const input = passingInput();
-    input.counters.water_clipmap_visible_levels = 3;
-    input.counters.water_clipmap_snaps = 2;
+    input.counters.water_clipmap_visible_levels = WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 1;
+    input.counters.water_clipmap_snaps = WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 2;
 
     expect(evaluateWaterAcceptance(input)).toEqual(expect.arrayContaining([
-      expect.stringContaining("must equal water_clipmap_level_count=4"),
-      expect.stringContaining("water_clipmap_snaps=2"),
+      expect.stringContaining(`must equal water_clipmap_level_count=${WATER_ACCEPTANCE_MIN_ATLAS_LEVELS}`),
+      expect.stringContaining(`water_clipmap_snaps=${WATER_ACCEPTANCE_MIN_ATLAS_LEVELS - 2}`),
     ]));
   });
 
