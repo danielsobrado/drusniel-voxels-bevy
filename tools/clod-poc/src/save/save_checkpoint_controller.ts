@@ -98,18 +98,21 @@ export function createSaveCheckpointController(
         publishStatus(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
       } finally {
-        // Release the coalescing guard before best-effort instrumentation cleanup.
-        if (inFlight === current) inFlight = null;
-        const latest = counters();
-        if (latest) {
-          latest.save_checkpoint_in_flight = 0;
-          if (startedAt !== null) {
-            try {
-              latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
-            } catch (error) {
-              console.error("[save-checkpoint] clock failed during cleanup", error);
+        // Keep the guard active through cleanup so re-entrant instrumentation coalesces.
+        try {
+          const latest = counters();
+          if (latest) {
+            latest.save_checkpoint_in_flight = 0;
+            if (startedAt !== null) {
+              try {
+                latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
+              } catch (error) {
+                console.error("[save-checkpoint] clock failed during cleanup", error);
+              }
             }
           }
+        } finally {
+          if (inFlight === current) inFlight = null;
         }
       }
     };
