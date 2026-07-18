@@ -11,10 +11,8 @@ let settings = cloneEnvironmentalMaskSettings();
 export function configureEnvironmentalMaskSettings(
   configText: string | null | undefined,
   warn: WarnHandler | null = console.warn,
-): EnvironmentalMaskSettings {
-  const next = parseEnvironmentalMaskConfig(configText, warn);
-  setEnvironmentalMaskSettings(next);
-  return settings;
+): void {
+  setEnvironmentalMaskSettings(parseEnvironmentalMaskConfig(configText, warn));
 }
 
 export function setEnvironmentalMaskSettings(next: EnvironmentalMaskSettings): void {
