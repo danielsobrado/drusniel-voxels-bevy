@@ -27,7 +27,10 @@ export interface ProjectArchiveExtractionGuard {
   readonly verify: (files: Readonly<Record<string, Uint8Array>>) => void;
 }
 
-function assertSafePath(path: string, limits: ProjectArchiveLimits): void {
+export function assertProjectArchivePath(
+  path: string,
+  limits: ProjectArchiveLimits = PROJECT_ARCHIVE_LIMITS,
+): void {
   if (path.length < 1 || path.length > limits.maxPathLength) throw new Error("project archive contains an invalid path length");
   if (path.includes("\0") || path.includes("\\") || path.startsWith("/") || /^[A-Za-z]:/.test(path)) {
     throw new Error(`project archive contains an unsafe path: ${path}`);
@@ -58,7 +61,7 @@ export function createProjectArchiveExtractionGuard(
   let totalUncompressedBytes = 0;
 
   const filter = (entry: ProjectArchiveEntryInfo): boolean => {
-    assertSafePath(entry.name, limits);
+    assertProjectArchivePath(entry.name, limits);
     if (expectedSizes.has(entry.name)) throw new Error(`project archive contains duplicate path ${entry.name}`);
     if (!Number.isSafeInteger(entry.size) || entry.size < 0 || !Number.isSafeInteger(entry.originalSize) || entry.originalSize < 0) {
       throw new Error(`project archive contains invalid size metadata for ${entry.name}`);
