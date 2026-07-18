@@ -1,18 +1,15 @@
 import * as THREE from "three";
 import {
   attribute,
-  cameraPosition,
   clamp,
   dot,
   float,
   frontFacing,
   max,
   mix,
-  normalize,
   texture,
   uniform,
   uv,
-  vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { TreeSettings } from "./tree_config.js";
@@ -170,7 +167,8 @@ function configureShaderLighting(
         `  vec3 packedNormal = vec3(0.5, 0.5, 1.0);\n  if (hasNormalDepthMap > 0.5) packedNormal = texture2D(normalDepthMap, vTreeImpostorUv).rgb;\n  vec3 albedo = treeImpostorRelight(treeImpostorDecodeAlbedo(color), packedNormal, vTreeImpostorBillboardNormal, hasNormalDepthMap);\n  gl_FragColor = vec4(albedo, color.a);`,
       );
   if (!material.fragmentShader.includes("uTreeImpostorSunDirection")
-    || !material.fragmentShader.includes("hasNormalDepthMap);")) {
+    || !material.fragmentShader.includes("hasNormalDepthMap);")
+    || material.fragmentShader.includes("normalize(vec3(0.4, 0.85, 0.3))")) {
     throw new Error("tree impostor live-lighting shader transform failed");
   }
   material.needsUpdate = true;
