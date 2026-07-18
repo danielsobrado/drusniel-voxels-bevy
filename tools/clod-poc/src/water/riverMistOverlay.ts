@@ -8,6 +8,8 @@ import {
   type RiverMistRuntimeSettings,
 } from "./riverMistRuntime.js";
 
+const MIST_SPRITE_SIZE = 32;
+
 export interface RiverMistOverlayStats {
   readonly enabled: boolean;
   readonly particles: number;
@@ -25,6 +27,7 @@ export interface RiverMistOverlayOptions {
 
 export class RiverMistOverlay {
   private readonly geometry = new THREE.BufferGeometry();
+  private readonly texture = createMistSpriteTexture();
   private readonly material: THREE.PointsMaterial;
   private readonly points: THREE.Points;
   private readonly positions: Float32Array;
@@ -61,6 +64,8 @@ export class RiverMistOverlay {
     this.geometry.setDrawRange(0, 0);
     this.material = new THREE.PointsMaterial({
       size: particles.pointSizeM,
+      map: this.texture,
+      alphaTest: 0.01,
       transparent: true,
       opacity: particles.opacity,
       vertexColors: true,
@@ -132,6 +137,7 @@ export class RiverMistOverlay {
     this.scene.remove(this.points);
     this.geometry.dispose();
     this.material.dispose();
+    this.texture.dispose();
     this.pool.clear();
   }
 
@@ -238,6 +244,35 @@ export class RiverMistOverlay {
   }
 }
 
+function createMistSpriteTexture(): THREE.DataTexture {
+  const data = new Uint8Array(MIST_SPRITE_SIZE * MIST_SPRITE_SIZE * 4);
+  for (let y = 0; y < MIST_SPRITE_SIZE; y += 1) {
+    for (let x = 0; x < MIST_SPRITE_SIZE; x += 1) {
+      const nx = ((x + 0.5) / MIST_SPRITE_SIZE) * 2 - 1;
+      const ny = ((y + 0.5) / MIST_SPRITE_SIZE) * 2 - 1;
+      const radial = Math.max(0, 1 - Math.hypot(nx, ny));
+      const alpha = radial * radial * (3 - 2 * radial);
+      const offset = (y * MIST_SPRITE_SIZE + x) * 4;
+      data[offset] = 255;
+      data[offset + 1] = 255;
+      data[offset + 2] = 255;
+      data[offset + 3] = Math.round(alpha * 255);
+    }
+  }
+  const texture = new THREE.DataTexture(
+    data,
+    MIST_SPRITE_SIZE,
+    MIST_SPRITE_SIZE,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function hash01(x: number, z: number, seed: number): number {
   const value = Math.sin(x * 41.3 + z * 289.1 + seed * 17.17) * 43758.5453;
   return value - Math.floor(value);
@@ -252,5 +287,5 @@ function lerp(start: number, end: number, amount: number): number {
 }
 
 function finiteNonNegative(value: number | undefined): number {
-  return Number.isFinite(value) ? Math.max(0, value!) : 0;
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
