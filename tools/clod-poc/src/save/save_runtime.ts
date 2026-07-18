@@ -151,6 +151,9 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
   const validatedProjectProps = new PropEditStore();
   validatedProjectProps.restore(activeProjectProps);
   const nextPropExclusions = SparsePropExclusionBitsets.fromSavedProps(savedPropsSnapshot);
+  if (state && state.dirtyRegions.size > 0 && state.flushPromise === null) {
+    throw new Error("cannot replace a dirty save runtime without an in-flight flush");
+  }
   const activeCounters = attachedCounters ?? counters;
   const nextState: SaveRuntimeState = {
     saveId: loadedWorld.saveId,
@@ -168,6 +171,7 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
   };
 
   if (state?.flushTimer) clearTimeout(state.flushTimer);
+  if (state) state.counters = {};
   state = nextState;
   savedPropStore.restore(savedPropsSnapshot);
   propExclusions = nextPropExclusions;
@@ -359,26 +363,70 @@ async function performSaveRuntimeFlush(
   let db: IDBDatabase | null = null;
   let acknowledgedRegionKeys: string[] = [];
   try {
-    db = await openSaveDb();
     activeState.voxelDeltaCount = voxelEditCount();
+    const capturedManifest: SaveWorldManifest = {
+      ...activeState.manifest,
+      regionKeys: [...activeState.manifest.regionKeys],
+    };
+    const capturedMetadata = structuredClone(activeState.metadata) as WorldMetadataRecord;
     const propsByRegion = partitionSavedPropsByRegion(savedPropStore.snapshot());
     const dirtyRegionKeys = activeState.dirtyRegions.keys();
     const dirtySnapshot = activeState.dirtyRegions.capture(dirtyRegionKeys);
-    const result = await flushDirtyRegionBatch({
-      db,
-      saveId: activeState.saveId,
-      manifest: activeState.manifest,
-      metadata: activeState.metadata,
-      dirtyRegionKeys,
-      propsByRegion,
-      snapshotForRegion: (regionKey) => {
-        const bounds = boundsForRegion(regionKey);
-        return getVoxelEditSnapshotForBounds(bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ);
-      },
-      maxRegionWrites,
-    });
-    acknowledgedRegionKeys = activeState.dirtyRegions.acknowledge(result.written, dirtySnapshot);
-    for (const key of acknowledgedRegionKeys) activeState.completedRegionKeys.add(key);
+    const voxelSnapshotsByRegion = new Map<string, ReturnType<typeof getVoxelEditSnapshotForBounds>>();
+    for (const regionKey of dirtyRegionKeys) {
+      const bounds = boundsForRegion(regionKey);
+      voxelSnapshotsByRegion.set(
+        regionKey,
+        getVoxelEditSnapshotForBounds(bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ),
+      );
+    }
+
+    db = await openSaveDb();
+    let pendingRegionKeys = dirtyRegionKeys;
+    const capturedWrittenRegionKeys: string[] = [];
+    let lastWrittenCount = 0;
+    while (pendingRegionKeys.length > 0) {
+      const result = await flushDirtyRegionBatch({
+        db,
+        saveId: activeState.saveId,
+        manifest: capturedManifest,
+        metadata: capturedMetadata,
+        dirtyRegionKeys: pendingRegionKeys,
+        propsByRegion,
+        snapshotForRegion: (regionKey) => {
+          const snapshot = voxelSnapshotsByRegion.get(regionKey);
+          if (!snapshot) throw new Error(`missing captured voxel snapshot for ${regionKey}`);
+          return snapshot;
+        },
+        maxRegionWrites,
+      });
+      if (result.written.length === 0 && result.pending.length > 0) {
+        throw new Error("save runtime flush made no progress");
+      }
+      lastWrittenCount = result.written.length;
+      capturedWrittenRegionKeys.push(...result.written);
+
+      if (state === activeState) {
+        acknowledgedRegionKeys = activeState.dirtyRegions.acknowledge(result.written, dirtySnapshot);
+        for (const key of acknowledgedRegionKeys) activeState.completedRegionKeys.add(key);
+        pendingRegionKeys = result.pending;
+        break;
+      }
+      pendingRegionKeys = result.pending;
+    }
+
+    if (state !== activeState) {
+      await finalizeSaveManifestAndMetadata(
+        db,
+        capturedManifest,
+        capturedMetadata,
+        [...capturedManifest.regionKeys, ...activeState.completedRegionKeys, ...capturedWrittenRegionKeys],
+      );
+      activeState.completedRegionKeys.clear();
+      activeState.lastFlushError = null;
+      return;
+    }
+
     if (activeState.dirtyRegions.size === 0) {
       activeState.manifest = await finalizeSaveManifestAndMetadata(
         db,
@@ -388,7 +436,7 @@ async function performSaveRuntimeFlush(
       );
       activeState.completedRegionKeys.clear();
     }
-    activeState.counters.save_last_flush_written_regions = result.written.length;
+    activeState.counters.save_last_flush_written_regions = lastWrittenCount;
     activeState.counters.save_last_flush_pending_regions = activeState.dirtyRegions.size;
     activeState.counters.save_last_flush_ms = nowMs() - startedAt;
     activeState.counters.save_last_error = 0;
@@ -398,14 +446,14 @@ async function performSaveRuntimeFlush(
       activeState.revision++;
       activeState.dirtyRegions.mark(acknowledgedRegionKeys, activeState.revision);
     }
-    activeState.counters.save_last_error = 1;
+    if (state === activeState) activeState.counters.save_last_error = 1;
     activeState.lastFlushError = error;
     console.error("[save-runtime] autosave flush failed", error);
     if (throwOnError) throw error;
   } finally {
     db?.close();
     publishCounters();
-    if (activeState.dirtyRegions.size > 0) scheduleFlush();
+    if (state === activeState && activeState.dirtyRegions.size > 0) scheduleFlush();
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright";
 import type { ContinentRiverCrossingRoute } from "../../src/water/continent_river_route.js";
@@ -68,6 +68,10 @@ function requestedModes(): PlayableSliceMode[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function expectedWaterBodyId(route: DiscoveryResult): string {
+  return `hydrology:${route.route.riverBodyId}`;
 }
 
 async function withTimeout<T>(label: string, operation: Promise<T>, timeoutMs: number): Promise<T> {
@@ -247,6 +251,7 @@ function failedRunReport(
   mode: PlayableSliceMode,
   runIndex: number,
   freshProfile: boolean,
+  waterBodyId: string,
   startedAt: Date,
   startedAtMs: number,
   driver: PlaywrightPlayableSliceDriver | null,
@@ -257,6 +262,7 @@ function failedRunReport(
     mode,
     runIndex,
     freshProfile,
+    expectedWaterBodyId: waterBodyId,
     startedAt: startedAt.toISOString(),
     wallClockMs: Math.max(0, performance.now() - startedAtMs),
     actions: driver ? [...driver.actions] : [],
@@ -295,6 +301,7 @@ async function runOne(
   route: DiscoveryResult,
 ): Promise<PlayableSliceRunReport> {
   const saveId = `playable-slice-${mode}-${freshProfile ? "fresh" : "repeat"}-${runIndex}`;
+  const waterBodyId = expectedWaterBodyId(route);
   const page = await context.newPage();
   const startedAt = new Date();
   const startedAtMs = performance.now();
@@ -317,11 +324,21 @@ async function runOne(
       : new PlaywrightPlayableSliceDriver(page);
     await driver.prepareDownwardAim();
     const routeRun = mode === "diagnostic"
-      ? runDiagnosticPlayableSlice(driver as PlaywrightDiagnosticSliceDriver, { runIndex, freshProfile, startedAt })
-      : runContinuousPlayableSlice(driver, { runIndex, freshProfile, startedAt });
+      ? runDiagnosticPlayableSlice(driver as PlaywrightDiagnosticSliceDriver, {
+          runIndex,
+          freshProfile,
+          expectedWaterBodyId: waterBodyId,
+          startedAt,
+        })
+      : runContinuousPlayableSlice(driver, {
+          runIndex,
+          freshProfile,
+          expectedWaterBodyId: waterBodyId,
+          startedAt,
+        });
     return await withTimeout(`${mode} playable route`, routeRun, RUN_TIMEOUT_MS);
   } catch (error) {
-    return failedRunReport(mode, runIndex, freshProfile, startedAt, startedAtMs, driver, error);
+    return failedRunReport(mode, runIndex, freshProfile, waterBodyId, startedAt, startedAtMs, driver, error);
   } finally {
     await captureRunScreenshot(page, mode, runIndex, freshProfile);
     await page.close();
@@ -365,6 +382,8 @@ async function runFreshProfile(
 }
 
 async function main(): Promise<void> {
+  rmSync(OUT, { force: true });
+  rmSync(SHOTS_DIR, { recursive: true, force: true });
   const runs = requestedRuns();
   const modes = requestedModes();
   const { browser, probe } = await launchHeadedRealWebGPU();
@@ -395,7 +414,9 @@ async function main(): Promise<void> {
     mkdirSync(dirname(OUT), { recursive: true });
     writeFileSync(OUT, `${JSON.stringify(report, null, 2)}\n`);
     if (!report.passed) {
-      const failures = allRuns.flatMap((run) => run.failures.map((failure) => `${run.mode}[${run.runIndex}]: ${failure}`));
+      const failures = allRuns.flatMap((run) => run.failures.map(
+        (failure) => `${run.mode}[${run.freshProfile ? "fresh" : "repeat"}:${run.runIndex}]: ${failure}`,
+      ));
       throw new Error(`playable slice failed:\n${failures.join("\n")}`);
     }
     console.log(`[playable-slice] PASS ${OUT}`);
