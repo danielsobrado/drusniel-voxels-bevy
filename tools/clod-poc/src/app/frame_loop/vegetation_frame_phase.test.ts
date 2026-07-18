@@ -54,6 +54,7 @@ function makeInput(waterEnabled: boolean, selectionFrameId = 1): VegetationFrame
         caustics: true,
         atlasDrivenLevelCount: 4,
         clipmapOuterHalfSpanM: 768,
+        clipmapGuaranteedHalfSpanM: 744,
       },
       clipmap: {
         isEnabled: waterEnabled,
@@ -163,6 +164,7 @@ describe("vegetation frame phase", () => {
     expect(counters["water_caustics_active"]).toBe(1);
     expect(counters["water_atlas_driven_level_count"]).toBe(4);
     expect(counters["water_clipmap_outer_half_span_m"]).toBe(768);
+    expect(counters["water_clipmap_guaranteed_half_span_m"]).toBe(744);
     expect(counters["water_clipmap_enabled"]).toBe(1);
     expect(counters["water_clipmap_visible_levels"]).toBe(4);
     expect(counters["water_clipmap_level_count"]).toBe(4);
