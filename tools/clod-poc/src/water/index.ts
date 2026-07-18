@@ -9,6 +9,7 @@ export * from "./waterOwnership.js";
 export * from "./waterReflectionPolicy.js";
 export * from "./waterCausticsPolicy.js";
 export * from "./water_glacial_murkiness.js";
+export * from "./water_rock_flour.js";
 export * from "./hydrologyConfig.js";
 export * from "./hydrologyGrid.js";
 export * from "./depressionFill.js";
