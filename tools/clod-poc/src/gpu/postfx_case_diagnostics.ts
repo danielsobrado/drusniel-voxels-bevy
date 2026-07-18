@@ -88,14 +88,19 @@ export function postFxCaseDiagnostics(input: URLSearchParams | Record<string, st
     stages[stage] = postEnabled && stages[stage] && stageAllowed(flags, stage);
   }
 
-  // Match WebGpuPostProcessPipeline.effectiveFroxelsEnabled(): volumetric shafts force the
-  // froxel ambience layer unless the froxel or god-rays stage was explicitly ablated.
   if (
     postEnabled
     && godRaysMode === "volumetric"
     && stages.godrays
     && stageAllowed(flags, "froxels")
   ) {
+    stages.froxels = true;
+  }
+
+  if (postEnabled && settings.froxelDebugEnabled && settings.froxelDebugMode !== "off") {
+    const autoExposure = stages.autoExposure;
+    for (const stage of STAGES) stages[stage] = false;
+    stages.autoExposure = autoExposure;
     stages.froxels = true;
   }
 
