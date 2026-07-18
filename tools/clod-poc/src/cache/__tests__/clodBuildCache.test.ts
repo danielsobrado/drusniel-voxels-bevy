@@ -26,6 +26,7 @@ cache:
     max_bytes: 67108864
     compression: "none"
     checksum: "sha256"
+    rpc_timeout_ms: 30000
   invalidation:
     include_config_hash: true
     include_generator_version: true
