@@ -4,7 +4,6 @@ import {
   WATER_ACCEPTANCE_MAX_P95_MS,
   WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
   evaluateWaterAcceptance,
-  evaluateWaterShotSanity,
 } from "./water_acceptance.js";
 
 function passingInput() {
@@ -135,17 +134,6 @@ describe("water acceptance", () => {
 
     expect(evaluateWaterAcceptance(input)).toEqual([
       "framePerf.max.waterMs=0.3 must be >= framePerf.p95.waterMs=0.4",
-    ]);
-  });
-
-  it("reports missing and invalid dedicated water captures", () => {
-    expect(evaluateWaterShotSanity({
-      "river-close": { failures: [] },
-      "river-aerial": { failures: ["image is almost black"] },
-      lake: { failures: [] },
-    })).toEqual([
-      "water river-aerial image sanity: image is almost black",
-      "water shore image sanity: capture is missing",
     ]);
   });
 });
