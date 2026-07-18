@@ -5,6 +5,7 @@ import {
   createTreeImpostorAgeGeometry,
   octFrames,
   selectTreeImpostorBakeGeometry,
+  treeImpostorAgeBucketsForSettings,
   treeImpostorFramesForVariant,
   TREE_IMPOSTOR_MAX_ATLAS_VARIANTS,
   TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER,
@@ -42,13 +43,23 @@ describe("tree impostor baker quality", () => {
     }
   });
 
-  it("accounts for all twelve variant/age layers in the production memory estimate", () => {
+  it("allocates mature-only pages by default and keeps full age layers opt-in", () => {
+    const settings = cloneTreeSettings();
+    expect(treeImpostorAgeBucketsForSettings(settings)).toEqual([0.60]);
+    settings.impostors.bakeAgeLayers = true;
+    expect(treeImpostorAgeBucketsForSettings(settings)).toEqual([0.20, 0.60, 0.92]);
+  });
+
+  it("reports mipmapped memory for the active page policy", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
     settings.impostors.resolutionPx = 192;
     settings.impostors.octahedralGridSize = 8;
+    settings.impostors.bakeAgeLayers = false;
+    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(576, 5);
 
-    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(1296, 5);
+    settings.impostors.bakeAgeLayers = true;
+    expect(estimateTreeImpostorAtlasMemoryMiB(settings)).toBeCloseTo(1728, 5);
   });
 
   it("bakes distinct monotonic young, mature, and old silhouettes", () => {
@@ -133,6 +144,8 @@ describe("tree impostor baker quality", () => {
       atlasWidthPx: 32,
       atlasHeightPx: 128,
       variantCount: TREE_STRUCTURAL_VARIANTS,
+      layerCount: TREE_STRUCTURAL_VARIANTS,
+      ageBuckets: [0.6],
       frames: pages[0],
       variantFrames: { 0: pages[0], 1: pages[1], 2: pages[2], 3: pages[3] },
       ready: true,
