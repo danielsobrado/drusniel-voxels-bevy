@@ -35,6 +35,7 @@ import {
   validateCacheHeader,
 } from "./cache_service_helpers.js";
 import { cacheRecordVersionMatches } from "./streaming_cache_write_guard.js";
+import { nextCacheWriteId } from "./cacheWriteIdentity.js";
 
 export type { ClodCacheService } from "./cache_service_types.js";
 
@@ -261,6 +262,10 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         const compressionMode = resolveCompressionMode(this.config.persistent.compression);
         const compressed = await compressPayload(uncompressed, compressionMode);
         const now = Date.now();
+        const recordMetadata = {
+          ...metadata,
+          cacheWriteId: nextCacheWriteId(),
+        };
         const header = {
           schemaVersion: this.config.schema_version,
           artifactKind: keyParts.artifactKind,
@@ -276,11 +281,11 @@ export class ClodCacheServiceImpl implements ClodCacheService {
           storedBytes: compressed.bytes.byteLength,
           compression: compressed.mode,
           checksum,
-          metadata,
+          metadata: recordMetadata,
         };
         const record: ClodCacheStoredRecord = { header, payload: compressed.bytes };
         const persistent = this.persistent;
-        const commitGated = writeRequiresCommitAcceptance(metadata);
+        const commitGated = writeRequiresCommitAcceptance(recordMetadata);
 
         if (persistent && commitGated) {
           await persistent.put(key, record);
