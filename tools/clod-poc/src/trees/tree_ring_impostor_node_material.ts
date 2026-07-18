@@ -25,7 +25,10 @@ import {
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
-import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import {
+  forestLightingDebugModeValue,
+  type ForestLightingMaterialState,
+} from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import { TREE_LODS } from "./tree_config.js";
@@ -61,6 +64,8 @@ const TREE_RING_IMPOSTOR_HDR_MAX = 4.0;
 const TREE_RING_IMPOSTOR_AERIAL_TINT_SCALE = 0.15;
 const TREE_RING_IMPOSTOR_AERIAL_TINT_MAX = 0.04;
 const TREE_RING_IMPOSTOR_SHAFT_HINT = 0.01;
+const TREE_RING_IMPOSTOR_FOREST_DARKEN_MAX = 0.72;
+const TREE_RING_IMPOSTOR_FOREST_FOG = new THREE.Vector3(0.40, 0.45, 0.43);
 
 function fallbackLighting(): EnvironmentLighting {
   return {
@@ -84,21 +89,17 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uAmbientFloor = uniform(lighting.ambientFloor ?? TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR);
-  const neutralForestTexture = new THREE.DataTexture(
-    new Uint8Array([0, 0, 0, 0]),
-    1,
-    1,
-    THREE.RGBAFormat,
-    THREE.UnsignedByteType,
-  );
-  neutralForestTexture.needsUpdate = true;
+  const neutralForestPackedTexture = createNeutralForestTexture("tree-ring-impostor-forest-neutral-packed");
+  const neutralForestAuxTexture = createNeutralForestTexture("tree-ring-impostor-forest-neutral-aux");
   const uForestEnabled = uniform(0);
   const uForestWorldSize = uniform(1);
   const uForestAoStrength = uniform(1);
   const uForestShadowStrength = uniform(1);
   const uForestFogStrength = uniform(0);
-  const uForestFogColor = uniform(new THREE.Vector3(0.40, 0.45, 0.43));
-  const forestMapNodes: TslNode[] = [];
+  const uForestFogColor = uniform(TREE_RING_IMPOSTOR_FOREST_FOG.clone());
+  const uForestDebugMode = uniform(0);
+  const forestPackedNodes: TslNode[] = [];
+  const forestAuxNodes: TslNode[] = [];
   const materials: TreeRingNodeMaterial[] = [];
   const prepassNodes = new Map<TreeRingNodeMaterial, PrepassNodes>();
 
@@ -172,22 +173,27 @@ export function createTreeRingImpostorNodeMaterialHandle(
       : albedo;
 
     const forestUv: TslNode = clamp(aWorldXZ.div(uForestWorldSize), vec2(0), vec2(1));
-    const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
-    forestMapNodes.push(forestPacked);
+    const forestPacked: TslNode = texture(neutralForestPackedTexture, forestUv);
+    const forestAux: TslNode = texture(neutralForestAuxTexture, forestUv);
+    forestPackedNodes.push(forestPacked);
+    forestAuxNodes.push(forestAux);
     const forestDarken: TslNode = clamp(
       forestPacked.x.mul(uForestAoStrength).add(forestPacked.y.mul(uForestShadowStrength)),
       0,
-      0.72,
+      TREE_RING_IMPOSTOR_FOREST_DARKEN_MAX,
     ).mul(uForestEnabled);
     const forestFog: TslNode = clamp(
       forestPacked.z.mul(uForestFogStrength).mul(uForestEnabled),
       0,
       TREE_RING_IMPOSTOR_AERIAL_TINT_MAX,
     );
+    const forestLit: TslNode = mix(litBase.mul(float(1).sub(forestDarken)), uForestFogColor, forestFog)
+      .add(vec3(forestPacked.w.mul(TREE_RING_IMPOSTOR_SHAFT_HINT).mul(uForestEnabled)));
+    const forestDebugColor: TslNode = treeRingForestDebugColor(uForestDebugMode, forestPacked, forestAux);
+    const forestDebugActive: TslNode = uForestEnabled.greaterThan(0.5).and(uForestDebugMode.greaterThan(0.5));
     const lit: TslNode = debugColor
       ? litBase
-      : mix(litBase.mul(float(1).sub(forestDarken)), uForestFogColor, forestFog)
-        .add(vec3(forestPacked.w.mul(TREE_RING_IMPOSTOR_SHAFT_HINT).mul(uForestEnabled)));
+      : forestDebugActive.select(forestDebugColor, forestLit);
 
     const retention: TslNode = clamp(record.morphology2.y.mul(mix(0.72, 1, health)), 0, 1);
     const retentionCell: TslNode = uint(floor(uv().x.mul(8))).add(uint(floor(uv().y.mul(8))).mul(8));
@@ -220,6 +226,18 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const debugMaterials = {} as Record<TreeLod, THREE.Material>;
   for (const lod of TREE_LODS) debugMaterials[lod] = buildMaterial(LOD_COLORS[lod]);
 
+  const resetForestLighting = (): void => {
+    uForestEnabled.value = 0;
+    uForestWorldSize.value = 1;
+    uForestAoStrength.value = 1;
+    uForestShadowStrength.value = 1;
+    uForestFogStrength.value = 0;
+    uForestFogColor.value.copy(TREE_RING_IMPOSTOR_FOREST_FOG);
+    uForestDebugMode.value = 0;
+    for (const mapNode of forestPackedNodes) mapNode.value = neutralForestPackedTexture;
+    for (const mapNode of forestAuxNodes) mapNode.value = neutralForestAuxTexture;
+  };
+
   return {
     regularMaterial,
     debugMaterials,
@@ -247,7 +265,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
     },
     updateForestLighting(state: ForestLightingMaterialState | null) {
       if (!state) {
-        uForestEnabled.value = 0;
+        resetForestLighting();
         return;
       }
       const next = state.settings;
@@ -256,10 +274,13 @@ export function createTreeRingImpostorNodeMaterialHandle(
       uForestAoStrength.value = next.ambientOcclusion.strength;
       uForestShadowStrength.value = next.shadowProxy.strength;
       uForestFogStrength.value = next.atmosphere.aerialTintStrength * TREE_RING_IMPOSTOR_AERIAL_TINT_SCALE;
-      for (const mapNode of forestMapNodes) mapNode.value = state.textureHandle.texture;
+      uForestDebugMode.value = forestLightingDebugModeValue(next.materialIntegration.debugMode);
+      for (const mapNode of forestPackedNodes) mapNode.value = state.textureHandle.texture;
+      for (const mapNode of forestAuxNodes) mapNode.value = state.textureHandle.auxTexture;
     },
     dispose() {
-      neutralForestTexture.dispose();
+      neutralForestPackedTexture.dispose();
+      neutralForestAuxTexture.dispose();
       for (const material of materials) material.dispose();
     },
   };
@@ -267,6 +288,36 @@ export function createTreeRingImpostorNodeMaterialHandle(
 
 function createTreeRingUnlitImpostorNodeMaterial(): TreeRingNodeMaterial {
   return new MeshBasicNodeMaterial() as TreeRingNodeMaterial;
+}
+
+function createNeutralForestTexture(name: string): THREE.DataTexture {
+  const result = new THREE.DataTexture(
+    new Uint8Array([0, 0, 0, 0]),
+    1,
+    1,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  result.name = name;
+  result.needsUpdate = true;
+  return result;
+}
+
+function treeRingForestDebugColor(debugMode: TslNode, packed: TslNode, aux: TslNode): TslNode {
+  const combined: TslNode = vec3(packed.x, packed.y, max(packed.z, aux.y));
+  return debugMode.lessThan(1.5).select(
+    vec3(aux.x),
+    debugMode.lessThan(2.5).select(
+      vec3(packed.x),
+      debugMode.lessThan(3.5).select(
+        vec3(packed.y),
+        debugMode.lessThan(4.5).select(
+          vec3(packed.z),
+          debugMode.lessThan(5.5).select(vec3(packed.w), combined),
+        ),
+      ),
+    ),
+  );
 }
 
 function treeRingCylindricalBillboardNormal(worldXZ: TslNode): TslNode {
