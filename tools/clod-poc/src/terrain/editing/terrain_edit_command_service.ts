@@ -30,8 +30,8 @@ export interface TerrainEditCommandServiceDeps {
   readonly getBrushParams: () => TerrainBrushParams;
   readonly editAuthority?: PlayerEditAuthorityConfig;
   readonly getAuthorityOrigin?: () => THREE.Vector3 | null;
-  readonly getAuthorityCounters?: () => Record<string, number> | null;
   readonly getInteractionMode?: () => string;
+  readonly getTerrainRevision?: () => number;
   readonly editReadyAt?: (x: number, z: number) => boolean;
   readonly setLastDigSummary: (summary: string) => void;
   readonly updateInfo: () => void;
@@ -78,6 +78,7 @@ export function createCommandGuardedTerrainEditService(
 
   const nowMs = (): number => (deps.nowMs ?? (() => performance.now()))();
   const interactionMode = (): string => deps.getInteractionMode?.() ?? "playing";
+  const terrainRevision = (): number => deps.getTerrainRevision?.() ?? getDigEditRevision();
 
   const reportNoTarget = (): void => {
     deps.setLastDigSummary("no terrain under brush");
@@ -106,7 +107,7 @@ export function createCommandGuardedTerrainEditService(
         operation: brush.brushOp === "add" ? "terrain_fill" : "terrain_dig",
         targetPosition: [hit.point.x, hit.point.y, hit.point.z],
         targetNormal: [0, 1, 0],
-        sourceTerrainRevision: getDigEditRevision(),
+        sourceTerrainRevision: terrainRevision(),
         actor: "player",
         mode: interactionMode(),
         nowMs: capturedAt,
@@ -117,11 +118,20 @@ export function createCommandGuardedTerrainEditService(
   const validateIntent = (intent: TerrainDigIntent): EditCommandDenialReason | null => {
     const point = new THREE.Vector3(...intent.command.targetPosition);
     const actor = deps.getAuthorityOrigin?.() ?? point;
+    const maxDistanceM = deps.editAuthority?.allowFarCommit
+      ? Number.MAX_SAFE_INTEGER
+      : deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER;
+    if (
+      !Number.isFinite(actor.x)
+      || !Number.isFinite(actor.z)
+      || !Number.isFinite(maxDistanceM)
+      || maxDistanceM < 0
+    ) return "not_ready";
     const verdict = validateEditCommand(intent.command, {
       nowMs: nowMs(),
-      currentTerrainRevision: getDigEditRevision(),
+      currentTerrainRevision: terrainRevision(),
       actorPosition: actor,
-      maxDistanceM: deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER,
+      maxDistanceM,
       currentMode: interactionMode(),
       targetReady: deps.editReadyAt?.(point.x, point.z) ?? true,
     });
