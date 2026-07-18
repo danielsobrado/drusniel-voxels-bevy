@@ -1,6 +1,10 @@
 import { emitAudio } from "../../audio/index.js";
 import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import { validateProjectArchiveConfig } from "../../project/project_archive_config.js";
+import {
+  validateProjectWaterArchiveState,
+  validateProjectWeatherArchiveState,
+} from "../../project/project_archive_environment_state.js";
 import { validateProjectSessionState } from "../../project/project_archive_session_state.js";
 import {
   consumeStagedVoxelProjectImport,
@@ -69,6 +73,8 @@ export async function loadStagedProjectImport(
     if (!stagedImport) throw new Error("The staged project was not found, expired, or was already used");
     stagedImport.manifest.config = validateProjectArchiveConfig(stagedImport.manifest.config);
     stagedImport.manifest.state = validateProjectSessionState(stagedImport.manifest.state);
+    stagedImport.manifest.water = validateProjectWaterArchiveState(stagedImport.manifest.water);
+    stagedImport.manifest.weather = validateProjectWeatherArchiveState(stagedImport.manifest.weather);
     applyStagedWorldIdentity(searchParams, stagedImport);
     emitAudio("project.import.success");
     return stagedImport;
