@@ -91,7 +91,8 @@ export function writeTreeImpostorYawSinCosIfChanged(
   index: number,
   rotationY: number,
 ): boolean {
-  const attribute = treeImpostorYawSinCosAttribute(mesh);
+  const attribute = mesh.geometry.getAttribute(TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute | undefined;
+  if (!attribute) return false;
   const cosine = Math.cos(rotationY);
   const sine = Math.sin(rotationY);
   if (
@@ -240,13 +241,9 @@ function writeTreeImpostorBlendIfChanged(
         sample.uvMax[1],
       ) || changed;
     }
-    changed = writeBlendWeightIfChanged(weights, inputIndex(index), sampleIndex, sample.weight) || changed;
+    changed = writeBlendWeightIfChanged(weights, index, sampleIndex, sample.weight) || changed;
   }
   return changed;
-}
-
-function inputIndex(index: number): number {
-  return index;
 }
 
 function writeBlendWeightIfChanged(
