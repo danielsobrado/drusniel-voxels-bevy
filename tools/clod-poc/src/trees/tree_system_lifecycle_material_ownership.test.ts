@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type MockInstance } from "vitest";
 import * as THREE from "three";
-import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
+import { TREE_LODS, TREE_SPECIES, type TreeLod } from "./tree_config.js";
 import {
   disposeTreeMeshGrid,
   removeTreePatchResources,
@@ -45,12 +45,12 @@ describe("tree patch resource ownership", () => {
 
 function createMeshGrid(material: THREE.Material): {
   grid: TreeSystemMeshGrid;
-  geometryDisposals: Array<ReturnType<typeof vi.spyOn>>;
-  depthMaterialDisposals: Array<ReturnType<typeof vi.spyOn>>;
+  geometryDisposals: MockInstance[];
+  depthMaterialDisposals: MockInstance[];
 } {
   const grid = {} as TreeSystemMeshGrid;
-  const geometryDisposals: Array<ReturnType<typeof vi.spyOn>> = [];
-  const depthMaterialDisposals: Array<ReturnType<typeof vi.spyOn>> = [];
+  const geometryDisposals: MockInstance[] = [];
+  const depthMaterialDisposals: MockInstance[] = [];
 
   for (const species of TREE_SPECIES) {
     grid[species] = {} as Record<TreeLod, THREE.InstancedMesh>;
@@ -62,7 +62,7 @@ function createMeshGrid(material: THREE.Material): {
       const depthMaterial = new THREE.MeshBasicMaterial();
       const depthDispose = vi.spyOn(depthMaterial, "dispose");
       mesh.userData.depthTwin = new THREE.InstancedMesh(geometry, depthMaterial, 1);
-      grid[species as TreeSpeciesId][lod] = mesh;
+      grid[species][lod] = mesh;
       geometryDisposals.push(geometryDispose);
       depthMaterialDisposals.push(depthDispose);
     }
