@@ -201,6 +201,47 @@ describe("understory GPU ring lighting proxies", () => {
     // Cached until the ring center moves.
     expect(system.getLightingProxies()).toBe(first);
   });
+
+  it("spreads the budgeted proxy scan across calls and matches the full scan", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    settings.gpu.enabled = true;
+    settings.gpu.fallbackToCpu = false;
+    const gpuDevice = { limits: { maxStorageBuffersPerShaderStage: 8 } } as unknown as GPUDevice;
+    const makeSystem = () => {
+      const system = new UnderstorySystem({
+        scene,
+        nodes: [],
+        worldCells: 512,
+        settings,
+        sampler: flatSampler(),
+        gpuDevice,
+        supportsGpu: true,
+      });
+      systems.push(system);
+      return system;
+    };
+
+    const budgeted = makeSystem();
+    // An already-expired deadline forces minimum progress per call, so the
+    // first calls must report a stale (empty) set without blocking.
+    const first = budgeted.getLightingProxiesBudgeted(0);
+    expect(first.ready).toBe(false);
+    expect(first.proxies).toEqual([]);
+    let result = first;
+    let steps = 0;
+    while (!result.ready && steps < 5000) {
+      result = budgeted.getLightingProxiesBudgeted(0);
+      steps++;
+    }
+    expect(result.ready).toBe(true);
+    expect(steps).toBeGreaterThan(1);
+    expect(result.proxies.length).toBeGreaterThan(0);
+    expect(result.proxies).toEqual(makeSystem().getLightingProxies());
+
+    // Completed scans are cached: the next call is a synchronous hit.
+    expect(budgeted.getLightingProxiesBudgeted(0)).toEqual({ proxies: result.proxies, ready: true });
+  });
 });
 
 function systemSettings() {

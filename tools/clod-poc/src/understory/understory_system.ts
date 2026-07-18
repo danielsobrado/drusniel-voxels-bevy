@@ -109,6 +109,7 @@ export class UnderstorySystem {
   private ringMeshes: THREE.Mesh[] = [];
   private gpuRingStats: UnderstoryGpuRingStats = emptyGpuRingStats("disabled", null);
   private gpuLightingProxyCache: { key: string; proxies: UnderstoryLightingProxy[] } | null = null;
+  private gpuLightingProxyBuild: UnderstoryGpuLightingProxyBuild | null = null;
   private lastGpuValidationSignature = "";
   private readonly frustumPlaneScratch = new Float32Array(24);
   private readonly hydrologyData: UnderstoryHydrologyData | null;
@@ -320,12 +321,42 @@ export class UnderstorySystem {
     return proxies;
   }
 
+  /** Deadline-bounded variant of {@link getLightingProxies} for the per-frame
+   *  forest-lighting budget: the GPU-ring ecology scan is spread across frames
+   *  and the previous proxy set is returned (ready=false) until it completes. */
+  getLightingProxiesBudgeted(deadlineMs: number): { proxies: readonly UnderstoryLightingProxy[]; ready: boolean } {
+    if (!this.settings.enabled) return { proxies: [], ready: true };
+    if (!this.usesGpuRingDraw()) return { proxies: this.getLightingProxies(), ready: true };
+    const key = this.gpuLightingProxyKey();
+    if (this.gpuLightingProxyCache?.key === key) return { proxies: this.gpuLightingProxyCache.proxies, ready: true };
+    // An in-progress build is never restarted on key drift: it completes, then
+    // the next call starts the fresh key, so continuous movement still converges.
+    if (!this.gpuLightingProxyBuild) this.gpuLightingProxyBuild = this.createGpuLightingProxyBuild(key);
+    const build = this.gpuLightingProxyBuild;
+    if (!this.stepGpuLightingProxyBuild(build, deadlineMs)) {
+      return { proxies: this.gpuLightingProxyCache?.proxies ?? [], ready: false };
+    }
+    this.gpuLightingProxyBuild = null;
+    this.gpuLightingProxyCache = { key: build.key, proxies: build.proxies };
+    return { proxies: build.proxies, ready: build.key === key };
+  }
+
   /** Coarse deterministic ecology sampling used as the lighting stand-in for the
    *  GPU ring: same terrain gate + ecology density as the compute shader, evaluated
    *  on a sparse grid and cached until the ring center moves. */
   private gpuRingLightingProxies(): UnderstoryLightingProxy[] {
+    const key = this.gpuLightingProxyKey();
+    if (this.gpuLightingProxyCache?.key === key) return this.gpuLightingProxyCache.proxies;
+    const build = this.createGpuLightingProxyBuild(key);
+    this.stepGpuLightingProxyBuild(build, Number.POSITIVE_INFINITY);
+    this.gpuLightingProxyBuild = null;
+    this.gpuLightingProxyCache = { key, proxies: build.proxies };
+    return build.proxies;
+  }
+
+  private gpuLightingProxyKey(): string {
     const center = this.lastCenter;
-    const key = [
+    return [
       Math.round(center.x / GPU_LIGHTING_PROXY_REFRESH_M),
       Math.round(center.z / GPU_LIGHTING_PROXY_REFRESH_M),
       this.settings.seed,
@@ -333,34 +364,61 @@ export class UnderstorySystem {
       this.settings.placement.spacingM,
       this.settings.ecology.enabled ? 1 : 0,
     ].join("|");
-    if (this.gpuLightingProxyCache?.key === key) return this.gpuLightingProxyCache.proxies;
+  }
+
+  private createGpuLightingProxyBuild(key: string): UnderstoryGpuLightingProxyBuild {
+    const radius = this.settings.distanceM;
+    return {
+      key,
+      centerX: this.lastCenter.x,
+      centerZ: this.lastCenter.z,
+      step: Math.max(1, understoryRingCell(this.settings) * GPU_LIGHTING_PROXY_STEP_CELLS),
+      radius,
+      dx: -radius,
+      dz: -radius,
+      proxies: [],
+    };
+  }
+
+  /** Advance the sparse ecology grid scan until `deadlineMs`; at least one grid
+   *  point of progress is made per call. Returns true when the scan completed. */
+  private stepGpuLightingProxyBuild(build: UnderstoryGpuLightingProxyBuild, deadlineMs: number): boolean {
     const sampler = this.sampler ?? defaultUnderstoryTerrainSampler;
     const acceptParams = understoryRingAcceptParams(this.settings);
-    const step = Math.max(1, understoryRingCell(this.settings) * GPU_LIGHTING_PROXY_STEP_CELLS);
-    const radius = this.settings.distanceM;
-    const proxies: UnderstoryLightingProxy[] = [];
-    for (let dz = -radius; dz <= radius; dz += step) {
-      for (let dx = -radius; dx <= radius; dx += step) {
-        if (dx * dx + dz * dz > radius * radius) continue;
-        const wx = center.x + dx;
-        const wz = center.z + dz;
+    const radiusSq = build.radius * build.radius;
+    let sinceCheck = 0;
+    while (build.dz <= build.radius) {
+      while (build.dx <= build.radius) {
+        const dx = build.dx;
+        const dz = build.dz;
+        build.dx += build.step;
+        if (dx * dx + dz * dz > radiusSq) continue;
+        const wx = build.centerX + dx;
+        const wz = build.centerZ + dz;
         const height = sampler.surfaceHeight(wx, wz);
         const normalY = sampler.surfaceNormal(wx, wz)[1];
         const ground = understoryRingTerrainGate(height, normalY, acceptParams);
-        if (ground < 0) continue;
-        const ecology = sampleUnderstoryEcology(wx, wz, height, normalY, ground, this.settings);
-        if (ecology.density <= 0.05) continue;
-        proxies.push({
-          x: wx,
-          z: wz,
-          classId: "shrub",
-          scale: 1,
-          densityWeight: clamp01(ecology.density),
-        });
+        if (ground >= 0) {
+          const ecology = sampleUnderstoryEcology(wx, wz, height, normalY, ground, this.settings);
+          if (ecology.density > 0.05) {
+            build.proxies.push({
+              x: wx,
+              z: wz,
+              classId: "shrub",
+              scale: 1,
+              densityWeight: clamp01(ecology.density),
+            });
+          }
+        }
+        if (++sinceCheck >= GPU_LIGHTING_PROXY_POINT_CHECK_INTERVAL) {
+          sinceCheck = 0;
+          if (performance.now() >= deadlineMs) return false;
+        }
       }
+      build.dx = -build.radius;
+      build.dz += build.step;
     }
-    this.gpuLightingProxyCache = { key, proxies };
-    return proxies;
+    return true;
   }
 
   private ensureGpuRingCompute(): void {
@@ -553,6 +611,7 @@ export class UnderstorySystem {
     this.gpuDispatchMs = null;
     this.lastGpuValidationSignature = "";
     this.gpuLightingProxyCache = null;
+    this.gpuLightingProxyBuild = null;
     this.gpuRingStats = emptyGpuRingStats(this.gpuDevice ? "idle" : "disabled", null);
   }
 
@@ -802,6 +861,22 @@ export class UnderstorySystem {
 
 const GPU_LIGHTING_PROXY_REFRESH_M = 8;
 const GPU_LIGHTING_PROXY_STEP_CELLS = 3;
+/** Grid points sampled between deadline checks; also the minimum progress per step. */
+const GPU_LIGHTING_PROXY_POINT_CHECK_INTERVAL = 16;
+
+/** Resumable state for the sparse ecology scan behind the GPU-ring lighting
+ *  proxies: walking the ring samples the streamed terrain hundreds of times,
+ *  which is too slow for one frame at the forest-lighting budget. */
+interface UnderstoryGpuLightingProxyBuild {
+  key: string;
+  centerX: number;
+  centerZ: number;
+  step: number;
+  radius: number;
+  dx: number;
+  dz: number;
+  proxies: UnderstoryLightingProxy[];
+}
 
 function emptyGpuRingStats(status: UnderstoryGpuRingStats["status"], counts: UnderstoryGpuRingStats["counts"] | null): UnderstoryGpuRingStats {
   return {

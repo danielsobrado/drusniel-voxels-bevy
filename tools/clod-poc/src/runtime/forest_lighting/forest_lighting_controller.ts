@@ -119,9 +119,11 @@ export function createForestLightingController(deps: ForestLightingControllerDep
       if (!system.shouldUpdate(center, sunDirection)) return false;
       const trees = deps.getTreeSystem().getLightingProxiesBudgeted(deadlineMs);
       if (!trees.ready) return false;
+      const understory = deps.getUnderstorySystem().getLightingProxiesBudgeted(deadlineMs);
+      if (!understory.ready) return false;
       system.beginBuild(center, {
         treeProxies: trees.proxies,
-        understoryProxies: deps.getUnderstorySystem().getLightingProxies(),
+        understoryProxies: understory.proxies,
         sunDirection,
       });
     }

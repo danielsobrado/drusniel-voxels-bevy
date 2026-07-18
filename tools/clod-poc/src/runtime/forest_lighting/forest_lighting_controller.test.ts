@@ -14,7 +14,7 @@ function uiState(): ForestLightingControllerUiState {
   };
 }
 
-function makeController(readyAfterCalls: number) {
+function makeController(readyAfterCalls: number, understoryReadyAfterCalls = 0) {
   const proxies = [{ x: 8, z: 8, height: 10, scale: 1, crownRadius: 4, species: "oak" }];
   let calls = 0;
   const treeSystem = {
@@ -26,9 +26,15 @@ function makeController(readyAfterCalls: number) {
         : { proxies: [], ready: false };
     }),
   };
+  let understoryCalls = 0;
   const understorySystem = {
     updateForestLighting: vi.fn(),
-    getLightingProxies: vi.fn(() => []),
+    getLightingProxiesBudgeted: vi.fn(() => {
+      understoryCalls++;
+      return understoryCalls > understoryReadyAfterCalls
+        ? { proxies: [{ x: 6, z: 6, classId: "shrub", scale: 1, densityWeight: 0.5 }], ready: true }
+        : { proxies: [], ready: false };
+    }),
   };
   const config = cloneForestLightingSettings();
   config.field.resolution = 8;
@@ -52,14 +58,30 @@ describe("forest lighting controller budgeted update", () => {
 
     expect(controller.updateBudgeted(center, sun)).toBe(false);
     expect(controller.updateBudgeted(center, sun)).toBe(false);
-    expect(understorySystem.getLightingProxies).not.toHaveBeenCalled();
+    expect(understorySystem.getLightingProxiesBudgeted).not.toHaveBeenCalled();
 
     expect(controller.updateBudgeted(center, sun)).toBe(true);
-    expect(understorySystem.getLightingProxies).toHaveBeenCalledTimes(1);
+    expect(understorySystem.getLightingProxiesBudgeted).toHaveBeenCalledTimes(1);
     expect(controller.system.getStats().treeProxies).toBe(1);
+    expect(controller.system.getStats().understoryProxies).toBe(1);
 
     expect(controller.updateBudgeted(center, sun)).toBe(false);
     expect(treeSystem.getLightingProxiesBudgeted).toHaveBeenCalledTimes(3);
+    controller.dispose();
+  });
+
+  it("waits for budgeted understory proxies before starting the rebuild", () => {
+    const { controller, understorySystem } = makeController(0, 2);
+    const center = new THREE.Vector3(16, 0, 16);
+    const sun = new THREE.Vector3(0.4, -0.8, 0.2).normalize();
+
+    expect(controller.updateBudgeted(center, sun)).toBe(false);
+    expect(controller.updateBudgeted(center, sun)).toBe(false);
+    expect(controller.system.hasBuildInProgress()).toBe(false);
+
+    expect(controller.updateBudgeted(center, sun)).toBe(true);
+    expect(understorySystem.getLightingProxiesBudgeted).toHaveBeenCalledTimes(3);
+    expect(controller.system.getStats().understoryProxies).toBe(1);
     controller.dispose();
   });
 
