@@ -38,7 +38,7 @@ export interface PlayableSliceProfileRunResult {
   readonly failures: string[];
 }
 
-async function withTimeout<T>(
+export async function withTimeout<T>(
   label: string,
   operation: Promise<T>,
   timeoutMs: number,
@@ -50,11 +50,10 @@ async function withTimeout<T>(
       operation,
       new Promise<T>((_resolve, reject) => {
         timer = setTimeout(() => {
-          void Promise.resolve(onTimeout?.())
-            .catch(() => undefined)
-            .finally(() => {
-              reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-            });
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+          void Promise.resolve()
+            .then(() => onTimeout?.())
+            .catch(() => undefined);
         }, timeoutMs);
       }),
     ]);
