@@ -9,6 +9,7 @@ import {
   movementReadinessAt,
   teleportTargetReady,
 } from "../../../player/cell_readiness.js";
+import { installStreamCursorPrimeTarget } from "../../../stream/stream_cursor.js";
 import { createFirstPersonWeapon, createSwordAttackController } from "../../../combat/index.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -197,17 +198,31 @@ export function runPlayerStartup(
           yaw: target.yaw ?? current.yaw,
         });
       };
-      return runReadinessGatedTeleport({
-        target,
-        timeoutMs: Math.max(1_000, target.timeoutMs ?? 180_000),
-        // Streaming worlds need a pose nudge to load the destination; arrival commits only when ready.
-        primeStream: applyPose,
-        commit: applyPose,
-        readyAt: (x, z) => teleportTargetReady(playerReadinessFeeds, x, z),
-        waitFrame: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-        now: () => performance.now(),
-        recordReadyMs: (milliseconds) => gameplayDiagnostics.set("time_to_gameplay_ready_ms", milliseconds),
-      });
+      let releasePrime: (() => void) | null = null;
+      const clearPrime = (): void => {
+        releasePrime?.();
+        releasePrime = null;
+      };
+      try {
+        return await runReadinessGatedTeleport({
+          target,
+          timeoutMs: Math.max(1_000, target.timeoutMs ?? 180_000),
+          primeStream: ({ x, z }) => {
+            clearPrime();
+            releasePrime = installStreamCursorPrimeTarget({ x, z });
+          },
+          commit: (readyTarget) => {
+            clearPrime();
+            applyPose(readyTarget);
+          },
+          readyAt: (x, z) => teleportTargetReady(playerReadinessFeeds, x, z),
+          waitFrame: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+          now: () => performance.now(),
+          recordReadyMs: (milliseconds) => gameplayDiagnostics.set("time_to_gameplay_ready_ms", milliseconds),
+        });
+      } finally {
+        clearPrime();
+      }
     };
   }
 
