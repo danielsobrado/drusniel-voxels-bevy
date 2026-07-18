@@ -49,8 +49,17 @@ async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
   return brokerInit;
 }
 
+function respondToCacheWorker(worker: CacheWorker, response: CacheRpcResponse): void {
+  try {
+    worker.postMessage(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    cacheLogger.debug(`cache broker response dropped: ${message}`);
+  }
+}
+
 async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
-  const respond = (response: CacheRpcResponse) => worker.postMessage(response);
+  const respond = (response: CacheRpcResponse) => respondToCacheWorker(worker, response);
   try {
     if (request.op === "put"
       && request.streamingGeneration !== undefined
