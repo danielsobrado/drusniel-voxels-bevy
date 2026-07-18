@@ -6,6 +6,8 @@ import type {
   WaterQueryResult,
 } from "./types.js";
 import type { HydrologySample } from "../water/hydrologyGrid.js";
+import { evaluateGravelBarMask } from "../water/gravel_bar_field.js";
+import { readGravelBarSettings } from "../water/gravel_bar_runtime.js";
 
 export const HYDROLOGY_QUERY_SOURCE = "hydrology-cpu" as const;
 export const ENVIRONMENT_FALLBACK_SOURCE = "fallback" as const;
@@ -17,21 +19,11 @@ export function createHydrologyMeta(
   valid: boolean,
   cellSizeM: number,
 ): EnvironmentQueryMeta {
-  return {
-    source: HYDROLOGY_QUERY_SOURCE,
-    revision,
-    valid,
-    cellSizeM,
-  };
+  return { source: HYDROLOGY_QUERY_SOURCE, revision, valid, cellSizeM };
 }
 
 export function createFallbackMeta(cellSizeM: number): EnvironmentQueryMeta {
-  return {
-    source: ENVIRONMENT_FALLBACK_SOURCE,
-    revision: 0,
-    valid: false,
-    cellSizeM,
-  };
+  return { source: ENVIRONMENT_FALLBACK_SOURCE, revision: 0, valid: false, cellSizeM };
 }
 
 export function hydrologyWaterResult(
@@ -57,9 +49,7 @@ export function hydrologyWaterResult(
     wetMask: finiteOrZero(sample.bodyMask),
     shoreDistanceM: finiteOrZero(sample.shoreDistance),
     bodyKind: nonNegativeIntegerOrZero(sample.bodyKind),
-    bodyId: sample.bodyId > 0 && Number.isFinite(sample.bodyId)
-      ? Math.floor(sample.bodyId)
-      : null,
+    bodyId: sample.bodyId > 0 && Number.isFinite(sample.bodyId) ? Math.floor(sample.bodyId) : null,
     meta,
   };
 }
@@ -67,20 +57,10 @@ export function hydrologyWaterResult(
 export function hydrologyRiverResult(
   sample: HydrologySample | null,
   meta: EnvironmentQueryMeta,
+  x = 0,
+  z = 0,
 ): RiverQueryResult {
-  if (!sample) {
-    return {
-      flowX: 0,
-      flowZ: 0,
-      flowStrength: 0,
-      bedDrop: 0,
-      rapidMask: 0,
-      channelCenterWeight: 0,
-      bankContactWeight: 0,
-      gravelBarMask: 0,
-      meta,
-    };
-  }
+  if (!sample) return emptyRiverResult(meta);
   return {
     flowX: finiteOrZero(sample.flowX),
     flowZ: finiteOrZero(sample.flowZ),
@@ -89,7 +69,7 @@ export function hydrologyRiverResult(
     rapidMask: 0,
     channelCenterWeight: finiteOrZero(sample.riverMask),
     bankContactWeight: 0,
-    gravelBarMask: 0,
+    gravelBarMask: gravelBarMaskAt(x, z, sample),
     meta,
   };
 }
@@ -117,6 +97,8 @@ export function writeBatchRiver(
   index: number,
   sample: HydrologySample | null,
   meta: EnvironmentQueryMeta,
+  x = 0,
+  z = 0,
 ): void {
   const flowIndex = index * 2;
   output.flowXZ[flowIndex] = sample ? finiteOrZero(sample.flowX) : 0;
@@ -126,7 +108,7 @@ export function writeBatchRiver(
   output.rapidMask[index] = 0;
   output.channelCenterWeight[index] = sample ? finiteOrZero(sample.riverMask) : 0;
   output.bankContactWeight[index] = 0;
-  output.gravelBarMask[index] = 0;
+  output.gravelBarMask[index] = sample ? gravelBarMaskAt(x, z, sample) : 0;
   writeEnvironmentMeta(output.meta.river, index, meta);
 }
 
@@ -157,6 +139,24 @@ export function isFiniteHydrologySample(sample: HydrologySample): boolean {
 
 export function hasEnvironmentField(fieldMask: number, field: number): boolean {
   return (fieldMask & field) !== 0;
+}
+
+function emptyRiverResult(meta: EnvironmentQueryMeta): RiverQueryResult {
+  return {
+    flowX: 0,
+    flowZ: 0,
+    flowStrength: 0,
+    bedDrop: 0,
+    rapidMask: 0,
+    channelCenterWeight: 0,
+    bankContactWeight: 0,
+    gravelBarMask: 0,
+    meta,
+  };
+}
+
+function gravelBarMaskAt(x: number, z: number, sample: HydrologySample): number {
+  return evaluateGravelBarMask(x, z, sample, readGravelBarSettings());
 }
 
 function finiteOrZero(value: number): number {
