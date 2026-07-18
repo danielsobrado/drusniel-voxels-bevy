@@ -15,6 +15,7 @@ import type { RendererStartupResult } from "./renderer_startup.js";
 import type { WorldBuildResult } from "./world_build_startup.js";
 import { parseBiomeVisualStateConfig } from "../../environment/biome_visual_state_config.js";
 import {
+  bindActiveBiomeVisualStateRuntime,
   createBiomeVisualStateRuntime,
   installBiomeVisualStateDebugProperty,
   resolveBiomeVisualSeasonT,
@@ -89,6 +90,7 @@ export async function runPostRendererStartup(input: PostRendererStartupInput) {
     getWeatherMode: () => appState.state.weatherMode,
     getWeatherIntensity: () => appState.state.weatherIntensity,
   });
+  bindActiveBiomeVisualStateRuntime(biomeVisualStateRuntime);
   installBiomeVisualStateDebugProperty(window, biomeVisualStateRuntime);
 
   const uiRefs = createBootstrapUiRefs(stagedImport);
