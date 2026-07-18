@@ -73,6 +73,7 @@ export class ConstructionPieceStore {
     }
     const mesh = new THREE.Mesh(geometry, pieceMaterial);
     mesh.name = `construction-${stored.typeId}`;
+    mesh.userData.pieceId = stored.id;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.position.set(stored.position[0], stored.position[1], stored.position[2]);

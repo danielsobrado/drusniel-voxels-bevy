@@ -75,12 +75,10 @@ export function createConstructionRemoveAuthorizer(
       const terrainRevision = deps.getTerrainRevision();
       const maxDistanceM = deps.getMaxDistanceM();
       const mode = deps.getCurrentMode();
-      const actorPosition = deps.getActorPosition() ?? {
-        x: target.position[0],
-        z: target.position[2],
-      };
+      const actorPosition = deps.getActorPosition();
       if (
-        !Number.isFinite(nowMs)
+        !actorPosition
+        || !Number.isFinite(nowMs)
         || !Number.isSafeInteger(terrainRevision)
         || !Number.isFinite(maxDistanceM)
         || maxDistanceM < 0
@@ -134,5 +132,7 @@ export function authorizeConstructionRemoval(
   target: ConstructionRemoveTarget,
   command?: ModedEditCommand | null,
 ): EditCommandVerdict {
-  return activeAuthorizer()?.(target, command) ?? { allowed: true };
+  const authorizer = activeAuthorizer();
+  if (!authorizer) return { allowed: false, reason: "not_ready" };
+  return authorizer(target, command);
 }

@@ -109,9 +109,11 @@ function raycastConstructionTarget(ray: THREE.Ray, camera: THREE.Camera): Constr
   raycaster.ray.copy(ray);
   const hit = raycaster.intersectObjects(meshes, false)[0];
   if (!hit) return null;
+  const pieceId = hit.object.userData.pieceId;
+  if (typeof pieceId !== "string" || pieceId.trim().length === 0) return null;
   const position = hit.object.getWorldPosition(new THREE.Vector3());
   return {
-    id: hit.object.uuid,
+    id: pieceId,
     position: [position.x, position.y, position.z],
   };
 }

@@ -22,7 +22,7 @@ function totalAcrossCounterResets(
 }
 
 export function playableSliceCertificationIntegrityFailures(
-  report: PlayableSliceRunReport,
+  report: Pick<PlayableSliceRunReport, "startedAt" | "expectedWaterBodyId" | "actions" | "steps">,
 ): string[] {
   const failures: string[] = [];
   const parsedStartedAt = Date.parse(report.startedAt);

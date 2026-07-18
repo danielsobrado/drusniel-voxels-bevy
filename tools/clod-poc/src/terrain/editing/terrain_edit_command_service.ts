@@ -26,6 +26,13 @@ interface TerrainDigIntent {
   readonly command: ModedEditCommand;
 }
 
+interface PendingScheduledDig {
+  readonly ray: THREE.Ray;
+  readonly brush: Readonly<TerrainBrushParams>;
+  readonly mode: string;
+  readonly targetPosition: readonly [number, number, number];
+}
+
 export interface TerrainEditCommandServiceDeps {
   readonly terrainRaycast: TerrainRaycastService;
   readonly getBrushParams: () => TerrainBrushParams;
@@ -85,6 +92,7 @@ export function createCommandGuardedTerrainEditService(
   let operationTail: Promise<void> = Promise.resolve();
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let scheduledDigsInPipeline = 0;
+  let pendingScheduledDig: PendingScheduledDig | null = null;
 
   const nowMs = (): number => (deps.nowMs ?? (() => performance.now()))();
   const interactionMode = (): string => deps.getInteractionMode?.() ?? "playing";
@@ -101,7 +109,7 @@ export function createCommandGuardedTerrainEditService(
     deps.updateInfo();
   };
 
-  const captureIntent = (ray: THREE.Ray): TerrainDigIntent | null => {
+  const captureImmediateIntent = (ray: THREE.Ray): TerrainDigIntent | null => {
     try {
       const frozenRay = ray.clone();
       const hit = deps.terrainRaycast.raycastEditableTerrain(frozenRay);
@@ -145,11 +153,42 @@ export function createCommandGuardedTerrainEditService(
     }
   };
 
+  const materializeScheduledIntent = (pending: PendingScheduledDig): TerrainDigIntent | null => {
+    try {
+      const capturedAt = nowMs();
+      const revision = terrainRevision();
+      if (!Number.isFinite(capturedAt) || !Number.isSafeInteger(revision)) {
+        reportDenial("not_ready");
+        return null;
+      }
+      return {
+        ray: pending.ray.clone(),
+        brush: pending.brush,
+        command: createEditCommand({
+          operation: pending.brush.brushOp === "add" ? "terrain_fill" : "terrain_dig",
+          targetPosition: pending.targetPosition,
+          targetNormal: [0, 1, 0],
+          sourceTerrainRevision: revision,
+          actor: "player",
+          mode: pending.mode,
+          nowMs: capturedAt,
+        }),
+      };
+    } catch (error) {
+      console.error("[terrain-edit-command] scheduled intent materialize failed closed", error);
+      reportDenial("not_ready");
+      return null;
+    }
+  };
+
   const validateIntent = (intent: TerrainDigIntent): EditCommandDenialReason | null => {
     try {
       const point = new THREE.Vector3(...intent.command.targetPosition);
-      const actor = deps.getAuthorityOrigin?.() ?? point;
-      const maxDistanceM = deps.editAuthority?.allowFarCommit
+      const origin = deps.getAuthorityOrigin?.() ?? null;
+      const allowFarCommit = deps.editAuthority?.allowFarCommit ?? false;
+      if (!origin && !allowFarCommit) return "not_ready";
+      const actor = origin ?? point;
+      const maxDistanceM = allowFarCommit
         ? Number.MAX_SAFE_INTEGER
         : deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER;
       const currentNowMs = nowMs();
@@ -174,7 +213,7 @@ export function createCommandGuardedTerrainEditService(
       });
       if (!verdict.allowed) return verdict.reason;
       const brush = deps.getBrushParams();
-      if (!brushIsValid(brush) || !brushesEqual(intent.brush, brush)) return "target_moved";
+      if (!brushIsValid(brush) || !brushesEqual(intent.brush, brush)) return "not_ready";
       const currentHit = deps.terrainRaycast.raycastEditableTerrain(intent.ray);
       if (!currentHit || !targetMatches(intent.command, currentHit.point)) return "target_moved";
       return null;
@@ -190,7 +229,10 @@ export function createCommandGuardedTerrainEditService(
       reportDenial(denial);
       return;
     }
-    await base.runDigNow(intent.ray);
+    await base.runDigNow(intent.ray, {
+      brush: intent.brush,
+      targetPoint: new THREE.Vector3(...intent.command.targetPosition),
+    });
   };
 
   const enqueueOperation = <T>(label: string, operation: () => Promise<T>): Promise<T> => {
@@ -205,24 +247,64 @@ export function createCommandGuardedTerrainEditService(
   };
 
   const runDigNow = async (ray: THREE.Ray): Promise<void> => {
-    const intent = captureIntent(ray);
+    const intent = captureImmediateIntent(ray);
     if (!intent) return;
     await enqueueOperation("terrain brush", () => executeIntent(intent));
   };
 
+  const fireScheduledDig = (): void => {
+    digDebounceTimer = null;
+    if (scheduledDigsInPipeline >= MAX_SCHEDULED_DIGS_IN_PIPELINE) return;
+    const pending = pendingScheduledDig;
+    pendingScheduledDig = null;
+    if (!pending) return;
+    scheduledDigsInPipeline += 1;
+    // Materialize revision when the queued operation runs so own prior digs do not
+    // trip revision_mismatch. Brush/mode/target stay frozen from the latest schedule.
+    void enqueueOperation("terrain brush", async () => {
+      const intent = materializeScheduledIntent(pending);
+      if (!intent) return;
+      await executeIntent(intent);
+    }).then(
+      () => { scheduledDigsInPipeline -= 1; },
+      () => { scheduledDigsInPipeline -= 1; },
+    );
+  };
+
   const scheduleDig = (ray: THREE.Ray): void => {
-    if (digDebounceTimer !== null || scheduledDigsInPipeline >= MAX_SCHEDULED_DIGS_IN_PIPELINE) return;
-    const intent = captureIntent(ray);
-    if (!intent) return;
-    digDebounceTimer = setTimeout(() => {
-      digDebounceTimer = null;
-      if (scheduledDigsInPipeline >= MAX_SCHEDULED_DIGS_IN_PIPELINE) return;
-      scheduledDigsInPipeline += 1;
-      void enqueueOperation("terrain brush", () => executeIntent(intent)).then(
-        () => { scheduledDigsInPipeline -= 1; },
-        () => { scheduledDigsInPipeline -= 1; },
-      );
-    }, DIG_COMMAND_DEBOUNCE_MS);
+    if (scheduledDigsInPipeline >= MAX_SCHEDULED_DIGS_IN_PIPELINE && digDebounceTimer === null) return;
+    try {
+      const frozenRay = ray.clone();
+      const hit = deps.terrainRaycast.raycastEditableTerrain(frozenRay);
+      if (!hit) {
+        reportNoTarget();
+        return;
+      }
+      const brush = deps.getBrushParams();
+      const mode = interactionMode();
+      if (
+        !brushIsValid(brush)
+        || mode.length === 0
+        || !Number.isFinite(hit.point.x)
+        || !Number.isFinite(hit.point.y)
+        || !Number.isFinite(hit.point.z)
+      ) {
+        reportDenial("not_ready");
+        return;
+      }
+      pendingScheduledDig = {
+        ray: frozenRay,
+        brush: cloneBrush(brush),
+        mode,
+        targetPosition: [hit.point.x, hit.point.y, hit.point.z],
+      };
+    } catch (error) {
+      console.error("[terrain-edit-command] schedule capture failed closed", error);
+      reportDenial("not_ready");
+      return;
+    }
+    if (digDebounceTimer !== null) return;
+    digDebounceTimer = setTimeout(fireScheduledDig, DIG_COMMAND_DEBOUNCE_MS);
   };
 
   const commitSpellTerrainEdit = (

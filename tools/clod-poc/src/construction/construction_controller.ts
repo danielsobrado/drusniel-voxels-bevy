@@ -48,6 +48,7 @@ import type { AuthoritativeConstructionTerrainHit } from "./targeting.js";
 import { getActiveTerrainRaycastService } from "../player/terrain_raycast_registry.js";
 import { ConstructionColliderSet } from "./construction_collider.js";
 import { ConstructionPieceStore } from "./construction_piece_store.js";
+import { authorizeConstructionRemoval } from "./construction_remove_authority.js";
 import { reevaluateConstructionSupport, type ConstructionSupportAabb } from "./support_reevaluation.js";
 import { loadConstructionPieces, saveConstructionPieces } from "./construction_persistence.js";
 import { createConstructionTerrainConformRequest } from "./construction_terrain_conform.js";
@@ -931,17 +932,23 @@ class ConstructionControllerImpl implements ConstructionController {
     if (this.placementInFlight) return;
     const index = this.aimedPieceIndex();
     if (index < 0) { this.lastPlacementMessage = "No construction piece under cursor."; this.syncUi(true); return; }
-    const targetId = this.pieceStore.pieces[index]!.id;
-    this.forgetUndoRecord(targetId);
-    const removal = this.pieceStore.removeOne(targetId);
-    this.recomputeStability(removal.disconnectedNeighborIds);
-    this.clearCurrentPreview(true);
-    this.savePlacedPieces();
-    this.lastPlacementMessage = removal.removedCount === 1
-      ? "Deleted 1 piece. Stability recomputed."
-      : "Delete target was not tracked.";
-    console.info(`[construction] ${this.lastPlacementMessage}`);
-    this.syncUi(true);
+    const target = this.pieceStore.pieces[index]!;
+    const verdict = authorizeConstructionRemoval({
+      id: target.id,
+      position: [target.position[0], target.position[1], target.position[2]],
+    });
+    if (!verdict.allowed) {
+      this.lastPlacementMessage = `construction removal denied: ${verdict.reason}`;
+      console.info(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+      return;
+    }
+    const result = this.breakPiece({ pieceId: target.id });
+    if (!result.ok) {
+      this.lastPlacementMessage = result.reason ?? "Delete target was not tracked.";
+      console.info(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+    }
   }
 
   private async undoLastPlacement(): Promise<void> {

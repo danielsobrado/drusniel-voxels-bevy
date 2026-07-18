@@ -134,10 +134,28 @@ describe("construction remove authority", () => {
       disposeFirst();
       expect(authorizeConstructionRemoval(target)).toEqual({ allowed: true });
       disposeSecond();
-      expect(authorizeConstructionRemoval(target)).toEqual({ allowed: true });
+      expect(authorizeConstructionRemoval(target)).toEqual({
+        allowed: false,
+        reason: "not_ready",
+      });
     } finally {
       disposeFirst();
       disposeSecond();
     }
+  });
+
+  it("fails closed when no authorizer is installed", () => {
+    expect(authorizeConstructionRemoval(target)).toEqual({
+      allowed: false,
+      reason: "not_ready",
+    });
+  });
+
+  it("fails closed when the actor origin is unavailable", () => {
+    install({ getActorPosition: () => null });
+    expect(authorizeConstructionRemoval(target)).toEqual({
+      allowed: false,
+      reason: "not_ready",
+    });
   });
 });

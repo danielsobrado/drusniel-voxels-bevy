@@ -362,7 +362,7 @@ function treeRingImpostorAgeSample(
       old.select(clamp(age.sub(0.60).div(0.32), 0, 1), float(0)),
     ),
   );
-  const variantBase: TslNode = variantIndex.mul(3);
+  const variantBase: TslNode = variantIndex.mul(ageLayerCount);
   const lower = treeRingImpostorFourFrameSample(atlas, baseUv, viewDirection, variantBase.add(lowerBucket));
   const upper = treeRingImpostorFourFrameSample(atlas, baseUv, viewDirection, variantBase.add(upperBucket));
   return {

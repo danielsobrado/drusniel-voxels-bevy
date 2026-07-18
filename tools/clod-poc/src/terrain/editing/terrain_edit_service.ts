@@ -119,9 +119,14 @@ export interface TerrainEditServiceDeps {
   setPendingParentMs: (ms: number) => void;
 }
 
+export interface TerrainDigExecution {
+  readonly brush?: Readonly<TerrainBrushParams>;
+  readonly targetPoint?: THREE.Vector3;
+}
+
 export interface TerrainEditService {
   scheduleDig(ray: THREE.Ray): void;
-  runDigNow(ray: THREE.Ray): Promise<void>;
+  runDigNow(ray: THREE.Ray, execution?: TerrainDigExecution): Promise<void>;
   commitSpellTerrainEdit(
     request: TerrainSpellEditRequest,
     onAuthoritativeCommit?: () => void,
@@ -145,7 +150,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   let lastDigAt = -Infinity;
   let digInFlight = false;
   let editOperationTail: Promise<void> = Promise.resolve();
-  const queuedDigRays: Array<{ ray: THREE.Ray; enqueuedAtMs: number }> = [];
+  const queuedDigRays: Array<{ ray: THREE.Ray; enqueuedAtMs: number; execution?: TerrainDigExecution }> = [];
   let scheduledDigRay: THREE.Ray | null = null;
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
@@ -337,11 +342,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     return false;
   };
 
-  const performDig = async (ray: THREE.Ray) => {
-    const hit = deps.terrainRaycast.raycastEditableTerrain(ray);
+  const performDig = async (ray: THREE.Ray, execution?: TerrainDigExecution) => {
+    const hitPoint = execution?.targetPoint?.clone() ?? null;
+    const hit = hitPoint
+      ? { point: hitPoint, distance: 0, pageId: "command-target" }
+      : deps.terrainRaycast.raycastEditableTerrain(ray);
     if (!hit) { deps.setLastDigSummary("no terrain under brush"); deps.updateInfo(); return; }
     if (!terrainCommitAllowed(hit.point)) return;
-    const brush = deps.getBrushParams();
+    const brush = execution?.brush ? { ...execution.brush } : deps.getBrushParams();
     const edit: DigEdit = {
       x: hit.point.x, y: hit.point.y, z: hit.point.z, r: brush.digRadius,
       shape: brush.brushShape, op: brush.brushOp,
@@ -359,17 +367,17 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     deps.updateInfo();
   };
 
-  const runDigExclusive = async (ray: THREE.Ray): Promise<void> => {
+  const runDigExclusive = async (ray: THREE.Ray, execution?: TerrainDigExecution): Promise<void> => {
     if (digInFlight) {
       const previous = queuedDigRays[queuedDigRays.length - 1];
       if (!previous || previous.ray.origin.distanceTo(ray.origin) > 0.25 || previous.ray.direction.distanceTo(ray.direction) > 0.01) {
-        queuedDigRays.push({ ray: ray.clone(), enqueuedAtMs: performance.now() });
+        queuedDigRays.push({ ray: ray.clone(), enqueuedAtMs: performance.now(), execution });
         if (queuedDigRays.length > MAX_PENDING_DIG_SAMPLES) queuedDigRays.shift();
       }
       return;
     }
     digInFlight = true;
-    try { await enqueueEditOperation("terrain brush", () => performDig(ray)); }
+    try { await enqueueEditOperation("terrain brush", () => performDig(ray, execution)); }
     finally {
       digInFlight = false;
       let next = queuedDigRays.shift() ?? null;
@@ -377,7 +385,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         gameplayDiagnostics.add("edit_commands_expired");
         next = queuedDigRays.shift() ?? null;
       }
-      if (next) void runDigExclusive(next.ray);
+      if (next) void runDigExclusive(next.ray, next.execution);
     }
   };
 
@@ -589,7 +597,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
   return {
     scheduleDig,
-    runDigNow: (ray) => runDigExclusive(ray),
+    runDigNow: (ray, execution) => runDigExclusive(ray, execution),
     commitSpellTerrainEdit,
     scheduleConstructionTerrainConform: (request) => { void commitConstructionTerrainConform(request); },
     previewConstructionTerrainConform,

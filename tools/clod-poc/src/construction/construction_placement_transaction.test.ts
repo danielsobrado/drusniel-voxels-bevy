@@ -61,6 +61,7 @@ describe("construction placement transaction", () => {
   });
 
   it("restores the piece when terrain undo fails", async () => {
+    disposeAuthorizer = installConstructionRemoveAuthorizer(() => ({ allowed: true }));
     const terrain = handler({ undo: vi.fn(async () => ({ undone: false, reason: "terrain changed" })) });
     const restorePiece = vi.fn(() => true);
     const result = await undoConstructionPlacementTransaction({

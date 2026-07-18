@@ -16,6 +16,7 @@ import {
   waterAtlasTilesPerSide,
 } from "../../water/waterHydrologyAtlasRuntime.js";
 import { resolveWaterReflectionPolicy } from "../../water/waterReflectionPolicy.js";
+import { getWaterScreenResources } from "../../water/waterScreenResources.js";
 import { getDigEditRevision, getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
 import { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
@@ -166,7 +167,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   );
   const clipmapOuterHalfSpanM = maxClipmapCellSize * clipmapConfig.cellsPerLevel * 0.5;
   const clipmapMaxSnapOffsetM = maxClipmapCellSize * clipmapConfig.snapCells;
-  const runtimeFeatures: WaterRuntimeFeatures = {
+  const featureIntent = {
     highQualityMaterial: useHighQualityWebGpuWater,
     ssr: useHighQualityWebGpuWater
       && reflectionPolicy.ssrActive
@@ -196,6 +197,21 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
+
+  const liveRuntimeFeatures = (): WaterRuntimeFeatures => {
+    const waterEnabled = deps.getUiState().waterEnabled && clipmap.isEnabled;
+    const screenOk = getWaterScreenResources().available;
+    const levelsReady = clipmap.levelCount > 0;
+    return {
+      highQualityMaterial: waterEnabled && levelsReady && featureIntent.highQualityMaterial,
+      ssr: waterEnabled && levelsReady && screenOk && featureIntent.ssr,
+      refraction: waterEnabled && levelsReady && screenOk && featureIntent.refraction,
+      caustics: waterEnabled && levelsReady && featureIntent.caustics,
+      atlasDrivenLevelCount: waterEnabled ? featureIntent.atlasDrivenLevelCount : 0,
+      clipmapOuterHalfSpanM: featureIntent.clipmapOuterHalfSpanM,
+      clipmapGuaranteedHalfSpanM: featureIntent.clipmapGuaranteedHalfSpanM,
+    };
+  };
 
   const ui = deps.getUiState();
   clipmap.setVisible(ui.waterEnabled);
@@ -244,7 +260,9 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     authority,
     editedWater,
     debugState,
-    runtimeFeatures,
+    get runtimeFeatures() {
+      return liveRuntimeFeatures();
+    },
     makeVisual,
     setVisible(enabled) {
       clipmap.setVisible(enabled);

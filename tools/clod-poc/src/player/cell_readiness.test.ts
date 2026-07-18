@@ -134,6 +134,16 @@ describe("cell readiness contract", () => {
     }), 0, 0)).toBe(false);
   });
 
+  it("denies construction when edit authority is absent even if the envelope is covered", () => {
+    const readiness = cellReadinessAt(feeds({
+      colliderStatusAt: () => ({ covered: true, revision: 0, replacementPending: false }),
+      editAuthorityResidentAt: () => false,
+      constructionReadyAt: () => true,
+    }), 0, 0);
+    expect(readiness.constructionReady).toBe(false);
+    expect(readiness.terrainEditReady).toBe(false);
+  });
+
   it("integrates with a real collider set: coverage and pipeline staleness flow through", () => {
     const diagnostics = new GameplayDiagnostics();
     const geometry = new THREE.PlaneGeometry(20, 20, 1, 1);

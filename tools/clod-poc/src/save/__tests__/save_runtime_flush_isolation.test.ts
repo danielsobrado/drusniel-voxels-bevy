@@ -144,7 +144,19 @@ describe("save runtime flush isolation", () => {
 
   afterEach(() => {
     attachSaveRuntimeCounters(null);
-    clearSaveRuntime();
+    clearSaveRuntime({ force: true });
+  });
+
+  it("rejects clear during a flush", async () => {
+    initSaveRuntime(loaded("old-save", [prop("old-prop")]));
+    markSaveRegionsDirtyForBounds({ minX: 0, minZ: 0, maxX: 1, maxZ: 1 });
+    const flush = flushSaveRuntimeOnce(1);
+
+    expect(() => clearSaveRuntime())
+      .toThrow("cannot clear a save runtime while a flush is in flight");
+
+    resolveDb({ close: closeDb } as unknown as IDBDatabase);
+    await flush;
   });
 
   it("rejects replacement during a flush and writes only the captured outgoing data", async () => {

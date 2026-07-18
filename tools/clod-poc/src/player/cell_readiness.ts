@@ -84,7 +84,8 @@ export function cellReadinessAt(feeds: CellReadinessFeeds, x: number, z: number)
 
   const authorityResident = feeds.editAuthorityResidentAt(x, z);
   const terrainEditReady = collider.covered && !stale && authorityResident;
-  const constructionReady = feeds.constructionReadyAt?.(x, z) ?? terrainEditReady;
+  const envelopeReady = feeds.constructionReadyAt?.(x, z) ?? (collider.covered && !stale);
+  const constructionReady = authorityResident && envelopeReady;
   return {
     movementCollisionReady,
     waterQueryReady: feeds.waterQueryReadyAt?.(x, z) ?? true,
@@ -158,24 +159,28 @@ export function createAppCellReadinessFeeds(deps: {
   terrainColliders: TerrainColliderSet;
   waterQueryReadyAt?: (x: number, z: number) => boolean;
   constructionEnvelopeRadiusM?: number;
+  editAuthorityResidentAt?: (x: number, z: number) => boolean;
 }): CellReadinessFeeds {
   const envelopeRadiusM = Number.isFinite(deps.constructionEnvelopeRadiusM)
     ? Math.max(0, deps.constructionEnvelopeRadiusM!)
     : DEFAULT_CONSTRUCTION_ENVELOPE_RADIUS_M;
+  // The clod-poc voxel edit authority is process-resident everywhere; streamed
+  // authorities replace this feed when they land.
+  const editAuthorityResidentAt = deps.editAuthorityResidentAt ?? ((_x: number, _z: number) => true);
   const constructionReadyAt = (x: number, z: number): boolean => ENVELOPE_OFFSETS.every(([dx, dz]) => {
     const probeX = x + dx * envelopeRadiusM;
     const probeZ = z + dz * envelopeRadiusM;
     const collider = deps.terrainColliders.colliderStatusAt(probeX, probeZ);
-    return collider.covered && !collider.replacementPending;
+    return collider.covered
+      && !collider.replacementPending
+      && editAuthorityResidentAt(probeX, probeZ);
   });
 
   return {
     terrainRevision: () => getDigEditRevision(),
     colliderStatusAt: (x, z) => deps.terrainColliders.colliderStatusAt(x, z),
     columnCertified: appColumnCertified,
-    // The clod-poc voxel edit authority is process-resident everywhere; streamed
-    // authorities replace this feed when they land.
-    editAuthorityResidentAt: () => true,
+    editAuthorityResidentAt,
     waterQueryReadyAt: deps.waterQueryReadyAt,
     constructionReadyAt,
   };

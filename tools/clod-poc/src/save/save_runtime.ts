@@ -216,7 +216,10 @@ export function initSaveRuntime(loadedWorld: LoadedSavedWorld, counters: Partial
   publishCounters();
 }
 
-export function clearSaveRuntime(): void {
+export function clearSaveRuntime(options: { force?: boolean } = {}): void {
+  if (!options.force && state?.flushPromise !== null && state?.flushPromise !== undefined) {
+    throw new Error("cannot clear a save runtime while a flush is in flight");
+  }
   if (state?.flushTimer) clearTimeout(state.flushTimer);
   state = null;
   savedPropStore.clear();

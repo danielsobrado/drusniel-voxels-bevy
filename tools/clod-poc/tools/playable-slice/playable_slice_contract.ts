@@ -1,4 +1,5 @@
 import type { PlayableSliceSnapshot } from "../../src/qa/playable_slice_snapshot.js";
+import { playableSliceCertificationIntegrityFailures } from "./playable_slice_certification_integrity.js";
 
 export type PlayableSliceMode = "diagnostic" | "continuous";
 export type PlayableSlicePublicChannel = "keyboard" | "pointer" | "navigation";
@@ -255,6 +256,7 @@ export function evaluatePlayableSliceRun(
   const integrityFailures = reportIntegrityFailures(report);
   failures.push(...integrityFailures);
   if (integrityFailures.length > 0) return failures;
+  failures.push(...playableSliceCertificationIntegrityFailures(report));
   failures.push(...publicRouteSequenceFailures(report));
 
   const start = steps.get("spawn_ready")!.snapshot;

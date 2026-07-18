@@ -25,7 +25,7 @@ function brush(overrides: Partial<TerrainBrushParams> = {}): TerrainBrushParams 
 }
 
 function baseService() {
-  const runDigNow = vi.fn(async () => {});
+  const runDigNow = vi.fn(async (_ray?: THREE.Ray, _execution?: unknown) => {});
   const commitSpellTerrainEdit = vi.fn(async (): Promise<TerrainSpellEditResult> => ({
     committed: true,
     changed: false,
@@ -107,17 +107,21 @@ describe("terrain edit command service", () => {
     expect(harness.service.lastDigAt).toBe(123);
   });
 
-  it("captures only one intent while the debounce timer is active", async () => {
+  it("keeps the latest aim while the debounce timer is active", async () => {
     const harness = createHarness();
 
     harness.service.scheduleDig(ray);
     harness.service.scheduleDig(ray);
     harness.service.scheduleDig(ray);
-    expect(harness.terrainRaycast.raycastEditableTerrain).toHaveBeenCalledOnce();
+    expect(harness.terrainRaycast.raycastEditableTerrain).toHaveBeenCalledTimes(3);
 
     await vi.advanceTimersByTimeAsync(40);
     await harness.service.flushAncestors();
     expect(harness.runDigNow).toHaveBeenCalledOnce();
+    expect(harness.runDigNow.mock.calls[0]?.[1]).toMatchObject({
+      brush: expect.objectContaining({ digRadius: 1, brushOp: "remove" }),
+      targetPoint: expect.objectContaining({ x: 0, y: 5, z: 0 }),
+    });
   });
 
   it("bounds held-input backlog to the active strike and one successor", async () => {
@@ -133,17 +137,15 @@ describe("terrain edit command service", () => {
     harness.service.scheduleDig(ray);
     await vi.advanceTimersByTimeAsync(40);
     harness.service.scheduleDig(ray);
-    expect(harness.terrainRaycast.raycastEditableTerrain).toHaveBeenCalledTimes(3);
 
     resolveFirst();
     await harness.service.flushAncestors();
     expect(harness.runDigNow).toHaveBeenCalledTimes(2);
   });
 
-  it("denies debounced intents after mode or terrain revision changes", async () => {
+  it("denies debounced intents after mode changes", async () => {
     let mode = "playing";
-    let revision = 7;
-    const harness = createHarness({ mode: () => mode, revision: () => revision });
+    const harness = createHarness({ mode: () => mode });
 
     harness.service.scheduleDig(ray);
     mode = "orbit";
@@ -151,14 +153,6 @@ describe("terrain edit command service", () => {
     await harness.service.flushAncestors();
     expect(harness.runDigNow).not.toHaveBeenCalled();
     expect(gameplayDiagnostics.get("edit_commands_denied_mode")).toBe(1);
-
-    mode = "playing";
-    harness.service.scheduleDig(ray);
-    revision = 8;
-    await vi.advanceTimersByTimeAsync(40);
-    await harness.service.flushAncestors();
-    expect(harness.runDigNow).not.toHaveBeenCalled();
-    expect(gameplayDiagnostics.get("edit_commands_denied_revision")).toBe(1);
   });
 
   it("never replays a click with changed brush settings or a moved target", async () => {
@@ -174,6 +168,7 @@ describe("terrain edit command service", () => {
     await vi.advanceTimersByTimeAsync(40);
     await harness.service.flushAncestors();
     expect(harness.runDigNow).not.toHaveBeenCalled();
+    expect(gameplayDiagnostics.get("edits_denied_not_ready")).toBe(1);
 
     currentBrush = brush();
     harness.service.scheduleDig(ray);
@@ -181,7 +176,39 @@ describe("terrain edit command service", () => {
     await vi.advanceTimersByTimeAsync(40);
     await harness.service.flushAncestors();
     expect(harness.runDigNow).not.toHaveBeenCalled();
-    expect(gameplayDiagnostics.get("edit_commands_denied_target_moved")).toBe(2);
+    expect(gameplayDiagnostics.get("edit_commands_denied_target_moved")).toBe(1);
+  });
+
+  it("applies the frozen brush captured at intent time", async () => {
+    const harness = createHarness({
+      currentBrush: () => brush({ digRadius: 2, brushOp: "remove" }),
+    });
+
+    await harness.service.runDigNow(ray);
+
+    expect(harness.runDigNow).toHaveBeenCalledOnce();
+    const execution = harness.runDigNow.mock.calls[0]?.[1] as { brush?: { digRadius: number; brushOp: string } } | undefined;
+    expect(execution?.brush).toMatchObject({
+      digRadius: 2,
+      brushOp: "remove",
+    });
+  });
+
+  it("allows a pipelined successor after the prior dig bumps terrain revision", async () => {
+    let revision = 7;
+    const harness = createHarness({ revision: () => revision });
+    harness.runDigNow.mockImplementation(async () => {
+      revision += 1;
+    });
+
+    harness.service.scheduleDig(ray);
+    await vi.advanceTimersByTimeAsync(40);
+    harness.service.scheduleDig(ray);
+    await vi.advanceTimersByTimeAsync(40);
+    await harness.service.flushAncestors();
+
+    expect(harness.runDigNow).toHaveBeenCalledTimes(2);
+    expect(revision).toBe(9);
   });
 
   it("does not cancel remove when only the unused material selection changes", async () => {

@@ -1,6 +1,7 @@
 import {
   DEFAULT_ENVIRONMENT_SAMPLE_HINT_M,
   ENVIRONMENT_QUERY_ALL_FIELDS,
+  ENVIRONMENT_QUERY_FIELD,
   ENVIRONMENT_QUERY_FIELD_NAMES,
   ENVIRONMENT_QUERY_SOURCE_NAMES,
   MAX_ENVIRONMENT_SAMPLE_HINT_M,
@@ -140,14 +141,73 @@ export function sampleEnvironmentBatch(
   options: EnvironmentBatchOptions = {},
 ): void {
   const count = validateEnvironmentBatchInput(input, output.capacity);
+  const fieldMask = options.fieldMask ?? ENVIRONMENT_QUERY_ALL_FIELDS;
+  if (!Number.isInteger(fieldMask) || fieldMask < 0 || (fieldMask & ~ENVIRONMENT_QUERY_ALL_FIELDS) !== 0) {
+    throw new RangeError(
+      `Environment batch fieldMask must be a non-negative bitset within 0x${ENVIRONMENT_QUERY_ALL_FIELDS.toString(16)}, received ${fieldMask}`,
+    );
+  }
   const resolved: ResolvedEnvironmentBatchOptions = {
-    fieldMask: options.fieldMask ?? ENVIRONMENT_QUERY_ALL_FIELDS,
+    fieldMask,
     sampleHintM: resolveEnvironmentSampleHint(options.sampleHintM, options.fallbackSampleHintM),
   };
+
+  clearUnmaskedEnvironmentFields(output, count, fieldMask);
 
   output.count = 0;
   sampler.sampleBatch(input, output, resolved);
   output.count = count;
+}
+
+function clearUnmaskedEnvironmentFields(
+  output: EnvironmentBatchOutput,
+  count: number,
+  fieldMask: number,
+): void {
+  const clearMeta = (field: EnvironmentQueryField): void => {
+    const meta = output.meta[field];
+    meta.source.fill(0, 0, count);
+    meta.revision.fill(0, 0, count);
+    meta.valid.fill(0, 0, count);
+    meta.cellSizeM.fill(0, 0, count);
+  };
+
+  if ((fieldMask & ENVIRONMENT_QUERY_FIELD.surface) === 0) {
+    output.surfaceHeight.fill(0, 0, count);
+    clearMeta("surface");
+  }
+  if ((fieldMask & ENVIRONMENT_QUERY_FIELD.normal) === 0) {
+    output.normalXYZ.fill(0, 0, count * 3);
+    clearMeta("normal");
+  }
+  if ((fieldMask & ENVIRONMENT_QUERY_FIELD.material) === 0) {
+    output.materialWeights.fill(0, 0, count * 4);
+    clearMeta("material");
+  }
+  if ((fieldMask & ENVIRONMENT_QUERY_FIELD.water) === 0) {
+    output.waterY.fill(0, 0, count);
+    output.carvedBedY.fill(0, 0, count);
+    output.waterDepth.fill(0, 0, count);
+    output.wetMask.fill(0, 0, count);
+    output.shoreDistanceM.fill(0, 0, count);
+    output.bodyKind.fill(0, 0, count);
+    output.bodyId.fill(-1, 0, count);
+    clearMeta("water");
+  }
+  if ((fieldMask & ENVIRONMENT_QUERY_FIELD.river) === 0) {
+    output.flowXZ.fill(0, 0, count * 2);
+    output.flowStrength.fill(0, 0, count);
+    output.bedDrop.fill(0, 0, count);
+    output.rapidMask.fill(0, 0, count);
+    output.channelCenterWeight.fill(0, 0, count);
+    output.bankContactWeight.fill(0, 0, count);
+    output.gravelBarMask.fill(0, 0, count);
+    clearMeta("river");
+  }
+  if ((fieldMask & ENVIRONMENT_QUERY_FIELD.visibility) === 0) {
+    output.sunVisibility.fill(0, 0, count);
+    clearMeta("visibility");
+  }
 }
 
 function validateEnvironmentBatchInput(input: EnvironmentBatchInput, capacity: number): number {

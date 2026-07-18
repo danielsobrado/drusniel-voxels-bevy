@@ -70,6 +70,7 @@ function sceneFixture(): { scene: THREE.Scene; camera: THREE.PerspectiveCamera }
   root.name = "construction-root";
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
   mesh.name = "construction-floor";
+  mesh.userData.pieceId = "piece-test";
   root.add(mesh);
   scene.add(root);
   scene.updateMatrixWorld(true);
