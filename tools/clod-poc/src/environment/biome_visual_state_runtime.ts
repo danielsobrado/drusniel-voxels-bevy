@@ -29,12 +29,14 @@ export interface BiomeVisualStateRuntime {
 export function createBiomeVisualStateRuntime(
   options: BiomeVisualStateRuntimeOptions,
 ): BiomeVisualStateRuntime {
-  let cachedInput: BiomeVisualStateInput | null = null;
+  let cachedSeasonT = Number.NaN;
+  let cachedSunElevationDeg = Number.NaN;
+  let cachedWetness = Number.NaN;
   let cachedState: BiomeVisualState | null = null;
 
-  const currentInput = (): BiomeVisualStateInput => {
+  const readValues = () => {
     const weather = options.getWeather();
-    return Object.freeze({
+    return {
       seasonT: normalizeCycle(options.getSeasonT()),
       sunElevationDeg: finiteOrZero(options.getSunElevationDeg()),
       wetness: deriveBiomeVisualWetness(
@@ -42,22 +44,26 @@ export function createBiomeVisualStateRuntime(
         weather.intensity,
         options.settings.defaultWetness,
       ),
-    });
+    };
   };
 
   return {
-    currentInput,
+    currentInput() {
+      return Object.freeze(readValues());
+    },
     current() {
-      const input = currentInput();
-      if (cachedInput
-        && cachedState
-        && cachedInput.seasonT === input.seasonT
-        && cachedInput.sunElevationDeg === input.sunElevationDeg
-        && cachedInput.wetness === input.wetness) {
+      const values = readValues();
+      if (cachedState
+        && cachedSeasonT === values.seasonT
+        && cachedSunElevationDeg === values.sunElevationDeg
+        && cachedWetness === values.wetness) {
         return cachedState;
       }
 
-      cachedInput = input;
+      const input = Object.freeze(values);
+      cachedSeasonT = input.seasonT;
+      cachedSunElevationDeg = input.sunElevationDeg;
+      cachedWetness = input.wetness ?? options.settings.defaultWetness;
       cachedState = evaluateBiomeVisualState(options.settings, input);
       return cachedState;
     },
