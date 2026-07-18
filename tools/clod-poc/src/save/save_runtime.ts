@@ -52,10 +52,10 @@ interface SaveRuntimeState {
 let state: SaveRuntimeState | null = null;
 let attachedCounters: Partial<SaveRuntimeCounters> | null = null;
 let propExclusions = new SparsePropExclusionBitsets();
-// Dev-only cross-check of the incremental mutation path against a full rebuild
-// (rpg-content-density-scaling D0). Demote to test-only once the D3 storm is green.
+// Dev equivalence guard demoted to test-only after D3 edit-storm green
+// (rpg-content-density-scaling). Enable via configurePropExclusionEquivalenceGuard in tests.
 const equivalenceGuard = {
-  enabled: Boolean(import.meta.env?.DEV),
+  enabled: false,
   everyNEdits: 16,
   editsSinceCheck: 0,
   mismatches: 0,

@@ -45,6 +45,7 @@ import {
 } from "../../rendering/material_churn/material_churn_diagnostics.js";
 import { findContinentRiverCrossingRoute } from "../../water/continent_river_route.js";
 import { applyContinentDefaults } from "./continent_defaults.js";
+import { getRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
 
 const MAX_TERRAIN_TEXTURE_WINDOW_CACHE = 8;
 
@@ -121,6 +122,8 @@ export async function bootstrapClodPoc() {
     renderer,
   });
   if (postRenderer.longViewHooks) {
+    const rendererDevice = getRendererGpuDevice(renderer.app);
+    postRenderer.longViewHooks.destroyRendererDevice = rendererDevice ? () => rendererDevice.destroy() : null;
     postRenderer.longViewHooks.findContinentRiverCrossingRoute = world.hydrologySystem
       ? (options) => findContinentRiverCrossingRoute(
           (x, z) => world.hydrologySystem!.sample(x, z, 64),

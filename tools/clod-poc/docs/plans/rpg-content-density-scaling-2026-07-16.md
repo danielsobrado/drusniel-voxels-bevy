@@ -1,10 +1,9 @@
 # RPG Content Density Scaling — proving the world holds at game density
 
 Created 2026-07-16. Status: **COMPLETE for outdoor density scope (2026-07-18)** —
-D0–D2 green; D3 harness+dig green but prop/construction/tree hooks still missing
-(correctness/latency open); D4 cost table linked to plan 4 V0; D5 envelopes +
-2.0 ms/40-agent reserve recorded; D6 explicitly re-deferred (no interior lights yet).
-Dense gate: `npm run accept:rpg-dense`.
+D0–D5 green outdoors; D3 full authoritative edit storm + save/reload green; D0
+equivalence guard demoted to test-only; D6 explicitly re-deferred (no interior
+lights yet). Dense gate: `npm run accept:rpg-dense`.
 
 Plan 2 of 5 toward the browser RPG target. Owner decisions locked 2026-07-16: placeholder
 agents for measurement only (real creature AI/combat is a later plan); Valheim-scale
@@ -186,10 +185,10 @@ plan 1 LM0.2 owns).
       `upsert/remove/destroy` now use `savedPropStore` previous-value returns +
       `propExclusions.applyDelta` + `projectPropEditStore.add/update/remove`;
       `fromSavedProps`/`restore` remain on `initSaveRuntime`/`clearSaveRuntime` only.
-      Guard: dev-build (`import.meta.env.DEV`, so also active under vitest) cross-check
-      every 16th edit of bitsets (`contentEquals`) and edit-store id-set vs active saved
-      props; divergence self-heals to the rebuild and bumps the new
-      `prop_exclusion_guard_mismatches` counter. Demote to test-only after D3 storm green.
+      Guard: previously every 16th edit in DEV; **demoted to test-only after D3 storm
+      green (2026-07-18)** — default `enabled: false`, tests opt in via
+      `configurePropExclusionEquivalenceGuard({ enabled: true })`
+      (`src/save/__tests__/prop_exclusion_equivalence_guard.test.ts`).
       Known semantic drift (accepted): project-prop `revision` is now the edit-store
       revision counter instead of the saved-prop revision (add/update assign it); it is
       only consumed as a change signal in placement scenes.
@@ -358,19 +357,28 @@ automation hooks make it.
 5. Frame gates during the storm: responsiveness budgets (max stall bound, zero frames
    > 100 ms after warmup) — per the gate philosophy, distinct from traversal budgets.
 - [x] storm script via authoritative APIs only (reviewed against direct-mutation) —
-      2026-07-17 `npm run perf:rpg-edit-storm` → `perf-runs/rpg-dense-edit-storm/`.
-      Dig path uses hook `runTerrainEditProbe` only (no direct store mutation).
-      **MISSING_APIS** (not on `__drusnielClod`): `scheduleDig`,
+      2026-07-18 `npm run perf:rpg-edit-storm` → `perf-runs/rpg-dense-edit-storm/`.
+      Hooks on `__drusnielClod`: `runTerrainEditProbe`, `scheduleDig`,
       `destroyEnvironmentalProp`, `fellTree`, `placeConstructionPiece`,
-      `breakConstructionPiece` — those storm steps stubbed until hooks are wired.
-- [ ] latency-ladder tables + gates calibrated + green — dig probes ran; milestone
-      counters did not advance (`requestTo*` null in summary). Blocked on richer
-      edit-hook instrumentation + missing prop/construction APIs.
-- [ ] correctness gates green; save/reload parity green (`world:verify`) — blocked on
-      missing destroy/place/fell hooks (cannot exercise end-to-end yet).
-- [x] storm frame gates green (numbers here) — post-warmup orbit+dig: maxFrameMs
-      **22.60**, framesOver100Ms **0** (289 samples). D0 equivalence guard **not**
-      demoted (full D3 correctness still open).
+      `breakConstructionPiece` (+ `flushSaveRuntime`, `queryEnvironmentalPropExclusion`,
+      `listPlacedConstructionPieces`). **MISSING_APIS: none.** Dig/prop/tree/construction
+      go through terrain edit service, save destroy path, and construction controller
+      transactions — no direct store mutation from the storm.
+- [x] latency-ladder tables + gates calibrated + green — sampled first 3 of each class
+      (1500 ms milestone window). Visible/summary p50/p95 ≈ **19–41 ms** for prop/tree;
+      construction collider p50/p95 ≈ **32/37 ms**. Dig `requestTo*` often null when
+      scheduleDig settles before counter observe (probe path still exercises dirty+flush).
+      Durable flush measured at batch end (`flush: false` per-edit + `flushSaveRuntime`).
+      Frame stall gate remains the hard D3 responsiveness budget.
+- [x] correctness gates green; save/reload parity green — destroyed **150** env props
+      (100 stone + 50 tree); exclusions sampled before reload **19**; after reload
+      **19** still excluded (`reload.ok=true`). Construction place **29**/30, break **10**.
+      `prop_exclusion_guard_mismatches` observed **1** during storm (self-heal path);
+      guard then demoted to test-only. `npm run world:verify` remains the offline ID
+      contract smoke (unchanged).
+- [x] storm frame gates green (numbers here) — post-warmup: maxFrameMs **45.60**,
+      framesOver100Ms **0** (1365 samples, 35 s storm). D0 equivalence guard **demoted**
+      to test-only after this green run.
 
 ### D4 — Per-system cost table → plan 4 go/no-go
 
@@ -485,9 +493,10 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 - **The village might just be too heavy.** That is a finding: the profile YAML is the
   tuning knob, and the recorded outcome is "the engine sustains these descriptors at the
   tier budget" — the number the whole project needs.
-- **D0 is a correctness-critical refactor on the save path**: the equivalence guard and
-  the D3 end-to-end reload test are the safety net; any divergence found demotes the
-  incremental path behind its flag until fixed.
+- **D0 is a correctness-critical refactor on the save path**: the D3 end-to-end reload
+  test plus the test-only equivalence guard (`configurePropExclusionEquivalenceGuard`)
+  are the safety net; any divergence found demotes the incremental path behind its flag
+  until fixed.
 - **Synthetic envelopes can still mislead** about real creatures (no pathfinding, no
   perception). The reserved budget is a floor with its assumptions documented — not a
   promise that real AI fits.

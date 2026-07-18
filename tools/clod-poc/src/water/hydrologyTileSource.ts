@@ -193,6 +193,10 @@ export class HydrologyTileCache {
     return this.tiles.size;
   }
 
+  residentTileKeys(): string[] {
+    return [...this.tiles.keys()].sort();
+  }
+
   get tileSize(): number {
     return this.tileSizeM;
   }

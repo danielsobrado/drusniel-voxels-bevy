@@ -18,6 +18,7 @@ export interface SoakThresholds {
   maxResourceGrowth: number;
   maxLateFrameP95Ratio: number;
   maxBackgroundRecoveryMs: number;
+  maxTeleportRecoveryMs: number;
 }
 
 export interface SoakEvaluation {
@@ -65,7 +66,7 @@ export function evaluateSoak(samples: readonly SoakMinuteSample[], thresholds: S
   if (steady.length === 0) {
     failures.push(`no steady-state samples at or after warmupMinutes=${thresholds.warmupMinutes}; run is too short to evaluate`);
   } else if (postGcEnvelope === null) {
-    failures.push("post-GC heap floor evidence unavailable; expose window.gc (Chromium --js-flags=--expose-gc) so floor growth is measurable");
+    failures.push("post-GC heap floor evidence unavailable; the Chromium HeapProfiler collection did not expose a measurable floor");
   }
   if (heapHighWaterGrowth > thresholds.maxHeapHighWaterGrowthBytes) {
     failures.push(`JS heap high-water growth ${heapHighWaterGrowth.toFixed(0)} B > ${thresholds.maxHeapHighWaterGrowthBytes} B`);

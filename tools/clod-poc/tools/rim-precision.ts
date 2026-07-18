@@ -4,11 +4,27 @@ import { join, resolve } from "node:path";
 import sharp from "sharp";
 import type { Page } from "playwright";
 import { clodUrl, launchWebGPU } from "./launch.js";
+import { gitSha, hostEnvironmentRecord } from "./infinite_acceptance/host_environment.js";
+import { landmarkDriftSignals, type LandmarkDriftSignals, type ScreenLandmark } from "./infinite_acceptance/precision_geometry_signals.js";
+import { luminanceEdgeDrift, temporalSecondDifference, type EdgeDriftSignal, type RawRgbImage, type TemporalSecondDifferenceSignal } from "./infinite_acceptance/precision_image_signals.js";
 import { percentile } from "./infinite_acceptance/route_metrics.js";
 import { precisionDiagnosticUrlOverrides } from "../src/precision/precision_diagnostics.js";
 
 type Args = Record<string, string | boolean>;
-type PoseName = "center" | "west-rim" | "east-rim";
+type PoseName = "center" | "west-rim" | "east-rim" | "north-rim" | "south-rim"
+  | "north-west-diagonal" | "north-east-diagonal" | "south-west-diagonal" | "south-east-diagonal";
+
+interface PoseCase {
+  readonly name: PoseName;
+  readonly worldX: number;
+  readonly worldZ: number;
+  readonly cameraY: number;
+  readonly yaw: number;
+  readonly pitch: number;
+  readonly cameraVariant: "near-ground" | "high-altitude";
+  readonly surfaceVariant: "construction" | "dense-vegetation" | "water-specular";
+  readonly scene: "infinite-islands" | "rpg-village";
+}
 
 interface PixelDiff {
   changedPixels: number;
@@ -29,13 +45,33 @@ interface CaptureEvidence {
   floatingOrigin: boolean;
   pose: PoseName;
   worldX: number;
+  worldZ: number;
+  cameraVariant: PoseCase["cameraVariant"];
+  surfaceVariant: PoseCase["surfaceVariant"];
+  scene: PoseCase["scene"];
+  url: string;
   firstImage: string;
   secondImage: string;
   diffImage: string;
   diff: PixelDiff;
+  landmarkSignals: LandmarkDriftSignals;
+  shadowEdgeSignal: EdgeDriftSignal;
+  specularCrawlSignal: TemporalSecondDifferenceSignal;
   perf: PerfEvidence;
   counters: Record<string, number>;
 }
+
+const POSE_MATRIX: readonly PoseCase[] = Object.freeze([
+  { name: "center", worldX: 0, worldZ: 0, cameraY: 96, yaw: 0, pitch: -0.35, cameraVariant: "near-ground", surfaceVariant: "construction", scene: "rpg-village" },
+  { name: "west-rim", worldX: -8_000, worldZ: 0, cameraY: 96, yaw: -Math.PI / 2, pitch: -0.35, cameraVariant: "near-ground", surfaceVariant: "dense-vegetation", scene: "infinite-islands" },
+  { name: "east-rim", worldX: 8_000, worldZ: 0, cameraY: 420, yaw: Math.PI / 2, pitch: -0.65, cameraVariant: "high-altitude", surfaceVariant: "water-specular", scene: "infinite-islands" },
+  { name: "north-rim", worldX: 0, worldZ: -8_000, cameraY: 96, yaw: 0, pitch: -0.35, cameraVariant: "near-ground", surfaceVariant: "water-specular", scene: "infinite-islands" },
+  { name: "south-rim", worldX: 0, worldZ: 8_000, cameraY: 420, yaw: Math.PI, pitch: -0.65, cameraVariant: "high-altitude", surfaceVariant: "dense-vegetation", scene: "infinite-islands" },
+  { name: "north-west-diagonal", worldX: -7_500, worldZ: -7_500, cameraY: 96, yaw: -Math.PI / 4, pitch: -0.35, cameraVariant: "near-ground", surfaceVariant: "water-specular", scene: "infinite-islands" },
+  { name: "north-east-diagonal", worldX: 7_500, worldZ: -7_500, cameraY: 420, yaw: Math.PI / 4, pitch: -0.65, cameraVariant: "high-altitude", surfaceVariant: "dense-vegetation", scene: "infinite-islands" },
+  { name: "south-west-diagonal", worldX: -7_500, worldZ: 7_500, cameraY: 420, yaw: -3 * Math.PI / 4, pitch: -0.65, cameraVariant: "high-altitude", surfaceVariant: "water-specular", scene: "infinite-islands" },
+  { name: "south-east-diagonal", worldX: 7_500, worldZ: 7_500, cameraY: 96, yaw: 3 * Math.PI / 4, pitch: -0.35, cameraVariant: "near-ground", surfaceVariant: "dense-vegetation", scene: "infinite-islands" },
+]);
 
 interface DeferredCopy {
   source: string;
@@ -97,6 +133,29 @@ async function imageDiff(firstPath: string, secondPath: string, diffPath: string
   };
 }
 
+async function rawRgb(path: string): Promise<RawRgbImage> {
+  const raw = await sharp(path).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { data: raw.data, width: raw.info.width, height: raw.info.height, channels: raw.info.channels };
+}
+
+function cameraForward(pose: PoseCase): readonly [number, number, number] {
+  const cosPitch = Math.cos(pose.pitch);
+  return [-Math.sin(pose.yaw) * cosPitch, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cosPitch];
+}
+
+function diagnosticLandmarks(pose: PoseCase): readonly { id: string; p: readonly [number, number, number]; color: string; radiusM: number }[] {
+  const forward = cameraForward(pose);
+  const base: readonly [number, number, number] = [
+    pose.worldX + forward[0] * 120,
+    pose.cameraY + forward[1] * 120,
+    pose.worldZ + forward[2] * 120,
+  ];
+  return [
+    { id: "terrain", p: base, color: "#ff00ff", radiusM: 3 },
+    { id: "prop", p: [base[0] + 6, base[1] + 4, base[2] - 5], color: "#00ffff", radiusM: 2 },
+  ];
+}
+
 async function waitReady(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(
     () => window.__drusnielClod?.ready === true || window.__drusnielClod?.error != null,
@@ -145,27 +204,28 @@ async function captureCase(
   outDir: string,
   tempDir: string,
   deferredCopies: DeferredCopy[],
-  pose: PoseName,
-  worldX: number,
+  pose: PoseCase,
   floatingOrigin: boolean,
   timeoutMs: number,
 ): Promise<CaptureEvidence> {
   const mode = floatingOrigin ? "floating-origin" : "fp32-world";
-  const stem = `${pose}-${mode}`;
+  const stem = `${pose.name}-${mode}`;
   const firstImage = join(tempDir, `${stem}-a.png`);
   const secondImage = join(tempDir, `${stem}-b.png`);
   const diffImage = join(tempDir, `${stem}-diff.png`);
   const finalFirstImage = join(outDir, `${stem}-a.png`);
   const finalSecondImage = join(outDir, `${stem}-b.png`);
   const finalDiffImage = join(outDir, `${stem}-diff.png`);
+  const dollyMiddleImage = join(tempDir, `${stem}-dolly-middle.png`);
+  const dollyLastImage = join(tempDir, `${stem}-dolly-last.png`);
+  const finalDollyMiddleImage = join(outDir, `${stem}-dolly-middle.png`);
+  const finalDollyLastImage = join(outDir, `${stem}-dolly-last.png`);
   const url = clodUrl({
-    scene: "infinite-islands",
+    scene: pose.scene,
     seed: 1,
     freeze: true,
+    cam: `${pose.worldX},${pose.cameraY},${pose.worldZ},${pose.yaw},${pose.pitch},55`,
     extra: {
-      x: String(worldX),
-      z: "0",
-      yaw: "1.5708",
       world: "16",
       startupWorld: "4",
       clodPerf: "1",
@@ -184,28 +244,69 @@ async function captureCase(
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await waitReady(page, timeoutMs);
   await page.evaluate(() => window.__drusnielClod?.settle?.(600));
-  const perf = await sampleRimPerf(page, worldX);
+  const perf = await sampleRimPerf(page, pose.worldX);
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await waitReady(page, timeoutMs);
   await page.evaluate(() => window.__drusnielClod?.settle?.(600));
+  await page.evaluate((landmarks) => {
+    const setLandmarks = window.__drusnielClod?.setPrecisionLandmarks;
+    if (!setLandmarks) throw new Error("precision matrix requires setPrecisionLandmarks");
+    setLandmarks(landmarks);
+    return window.__drusnielClod?.settle?.(2);
+  }, diagnosticLandmarks(pose));
+  const firstLandmarks = await page.evaluate(() => window.__drusnielClod?.getPrecisionLandmarkScreenPositions?.() ?? []) as ScreenLandmark[];
   await page.screenshot({ path: firstImage });
   await page.evaluate(() => window.__drusnielClod?.settle?.(8));
+  const secondLandmarks = await page.evaluate(() => window.__drusnielClod?.getPrecisionLandmarkScreenPositions?.() ?? []) as ScreenLandmark[];
   await page.screenshot({ path: secondImage });
   const diff = await imageDiff(firstImage, secondImage, diffImage);
+  const forward = cameraForward(pose);
+  await page.evaluate(async ({ dx, dz }) => {
+    const hooks = window.__drusnielClod;
+    const current = hooks?.getPose?.();
+    if (!current || !hooks?.setPose || !hooks.settle) throw new Error("precision dolly requires pose hooks");
+    hooks.setPose({ ...current, p: [current.p[0] + dx, current.p[1], current.p[2] + dz] });
+    await hooks.settle(1);
+  }, { dx: forward[0] * 0.25, dz: forward[2] * 0.25 });
+  await page.screenshot({ path: dollyMiddleImage });
+  await page.evaluate(async ({ dx, dz }) => {
+    const hooks = window.__drusnielClod;
+    const current = hooks?.getPose?.();
+    if (!current || !hooks?.setPose || !hooks.settle) throw new Error("precision dolly requires pose hooks");
+    hooks.setPose({ ...current, p: [current.p[0] + dx, current.p[1], current.p[2] + dz] });
+    await hooks.settle(1);
+  }, { dx: forward[0] * 0.25, dz: forward[2] * 0.25 });
+  await page.screenshot({ path: dollyLastImage });
+  const [firstRaw, secondRaw, dollyMiddleRaw, dollyLastRaw] = await Promise.all([
+    rawRgb(firstImage), rawRgb(secondImage), rawRgb(dollyMiddleImage), rawRgb(dollyLastImage),
+  ]);
+  const landmarkSignals = landmarkDriftSignals(firstLandmarks, secondLandmarks, "terrain", "prop");
+  const shadowEdgeSignal = luminanceEdgeDrift(firstRaw, secondRaw);
+  const specularCrawlSignal = temporalSecondDifference(firstRaw, dollyMiddleRaw, dollyLastRaw);
   const counters = await page.evaluate(() => ({ ...(window.__drusnielClod?.stats?.counters ?? {}) })).catch((): Record<string, number> => ({}));
   deferredCopies.push(
     { source: firstImage, destination: finalFirstImage },
     { source: secondImage, destination: finalSecondImage },
     { source: diffImage, destination: finalDiffImage },
+    { source: dollyMiddleImage, destination: finalDollyMiddleImage },
+    { source: dollyLastImage, destination: finalDollyLastImage },
   );
   return {
     floatingOrigin,
-    pose,
-    worldX,
+    pose: pose.name,
+    worldX: pose.worldX,
+    worldZ: pose.worldZ,
+    cameraVariant: pose.cameraVariant,
+    surfaceVariant: pose.surfaceVariant,
+    scene: pose.scene,
+    url,
     firstImage: finalFirstImage.replace(/\\/g, "/"),
     secondImage: finalSecondImage.replace(/\\/g, "/"),
     diffImage: finalDiffImage.replace(/\\/g, "/"),
     diff,
+    landmarkSignals,
+    shadowEdgeSignal,
+    specularCrawlSignal,
     perf,
     counters,
   };
@@ -231,9 +332,9 @@ async function main(): Promise<void> {
     });
     page.on("pageerror", (error) => console.log(`[page:error] ${error.message}`));
     for (const floatingOrigin of [false, true]) {
-      for (const [pose, worldX] of [["center", 0], ["west-rim", -8_000], ["east-rim", 8_000]] as const) {
-        console.log(`[rim-precision] ${pose} floatingOrigin=${floatingOrigin ? 1 : 0}`);
-        evidence.push(await captureCase(page, outDir, tempDir, deferredCopies, pose, worldX, floatingOrigin, timeoutMs));
+      for (const pose of POSE_MATRIX) {
+        console.log(`[rim-precision] ${pose.name} floatingOrigin=${floatingOrigin ? 1 : 0}`);
+        evidence.push(await captureCase(page, outDir, tempDir, deferredCopies, pose, floatingOrigin, timeoutMs));
       }
     }
   } finally {
@@ -243,8 +344,12 @@ async function main(): Promise<void> {
   rmSync(tempDir, { recursive: true, force: true });
   const report = {
     createdAt: new Date().toISOString(),
+    commitSha: gitSha(),
     baseUrl: process.env["CLOD_POC_BASE_URL"] ?? "http://localhost:5173/",
     browserRecipe: recipe,
+    browserVersion: browser.version(),
+    environment: hostEnvironmentRecord(),
+    poseMatrix: POSE_MATRIX,
     evidence,
   };
   const reportPath = join(outDir, "report.json");

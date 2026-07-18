@@ -34,6 +34,13 @@ describe("infinite-islands movement route profiles", () => {
     expect(profile.segments.some((segment) => segment.landmark === "village-site")).toBe(true);
   });
 
+  it("labels the handed-off RPG village route as representative content", () => {
+    const profile = resolveMovementRouteProfile("coast-to-coast", "representative");
+
+    expect(profile.contentProfile).toBe("representative");
+    expect(profile.scene).toBe("rpg-village");
+  });
+
   it("defines a short per-change infrastructure route through cold boundaries", () => {
     const profile = resolveMovementRouteProfile("continent-short");
     const frames = profile.segments.reduce((sum, segment) => sum + segment.frames, 0);

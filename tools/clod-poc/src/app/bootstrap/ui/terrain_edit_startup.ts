@@ -28,6 +28,7 @@ import { setRenderedClodOwnershipKeySource } from "../../../stream/clod_ownershi
 import { lookupEnvironmentalPropHit } from "../../../world/prop_interaction_lookup.js";
 import { treeInstanceToFallingInstance } from "../../../trees/tree_system_patch_removal.js";
 import type { TreeSpeciesId } from "../../../trees/tree_config_types.js";
+import { treeResidencyClusterKeys } from "../../../trees/tree_residency_keys.js";
 
 export interface TerrainEditStartupResult {
   terrainEditService: ReturnType<typeof createTerrainEditService>;
@@ -167,8 +168,13 @@ export function runTerrainEditStartup(
         clodCachedKeys: session.streamingClodRootController?.cachedPageKeys() ?? [],
         farSummaryResidentKeys: farSummary?.cache?.residentTileKeys() ?? [],
         heightfieldResidentKeys: heightfieldTileResidentKeys(),
-        vegetationClusterKeys: null,
-        waterHydrologyKeys: null,
+        vegetationClusterKeys: treeSystem.settings.enabled ? treeResidencyClusterKeys({
+          cpuPatchKeys: treeSystem.patches.map((patch) => patch.nodeId),
+          centerX: treeSystem.lastCenter.x,
+          centerZ: treeSystem.lastCenter.z,
+          radiusM: treeSystem.settings.distanceM,
+        }) : [],
+        waterHydrologyKeys: input.runtime.hydrologySystem?.residentTileKeys() ?? null,
       };
     };
     input.longView.hooks.runTerrainEditProbe = async (ray) => {
@@ -222,7 +228,7 @@ export function runTerrainEditStartup(
       const prefabId = destroyInput.prefabId
         ?? (layer === "tree" ? "environment/tree" : layer === "grass" ? "environment/grass" : "environment/stone");
       const dirtyRegions = destroyEnvironmentalPropCandidate(hit.address, hit.worldPosition, prefabId);
-      await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
+      if (destroyInput.flush !== false) await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
       return { ok: true, propId: hit.propId, dirtyRegions, reason: null };
     };
     input.longView.hooks.fellTree = async (fellInput) => {
@@ -275,7 +281,7 @@ export function runTerrainEditStartup(
         falling = true;
         treeSystem.markPatchesDirty();
       }
-      await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
+      if (fellInput.flush !== false) await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
       return { ok: true, propId: hit.propId, falling, dirtyRegions, reason: null };
     };
   }

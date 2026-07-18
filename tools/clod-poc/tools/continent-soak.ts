@@ -21,6 +21,30 @@ interface RecoveryEvidence {
   counters: Record<string, number>;
 }
 
+interface TeleportEvidence {
+  name: "2km" | "8km" | "rim-to-rim";
+  distanceM: number;
+  from: readonly [number, number];
+  to: readonly [number, number];
+  timeToGameplayReadyMs: number;
+  readinessPolls: number;
+  passed: boolean;
+  blockers: string[];
+  counters: Record<string, number>;
+}
+
+interface DeviceLossEvidence {
+  requested: boolean;
+  error: string | null;
+  editRevision: number | null;
+  voxelDeltaCountBefore: number | null;
+  voxelDeltaCountAfter: number | null;
+  persistenceErrorAfter: number | null;
+  controlledReloadInstalled: boolean;
+  passed: boolean;
+  failures: string[];
+}
+
 const route = resolveMovementRouteProfile("coast-to-coast");
 
 function parseArgs(argv: readonly string[]): Args {
@@ -85,17 +109,16 @@ async function setPoseAndSettle(page: Page, x: number, z: number, frames: number
   }, { nextX: x, nextZ: z, settleFrames: frames });
 }
 
-async function readMinuteSample(page: Page, minute: number): Promise<SoakMinuteSample> {
-  return await page.evaluate((sampleMinute) => {
+async function readMinuteSample(page: Page, minute: number, collectGarbage: () => Promise<void>): Promise<SoakMinuteSample> {
+  const usedJsHeapBytes = await page.evaluate(() => Number(
+    (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize,
+  ));
+  await collectGarbage();
+  return await page.evaluate(({ sampleMinute, heapBeforeGc }) => {
     const hooks = window.__drusnielClod;
     const counters = { ...(hooks?.stats?.counters ?? {}) };
     const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
-    const usedJsHeapBytes = Number(memory?.usedJSHeapSize);
-    const exposedGc = (globalThis as typeof globalThis & { gc?: () => void }).gc;
-    if (typeof exposedGc === "function") exposedGc();
-    const postGcHeapFloorBytes = typeof exposedGc === "function"
-      ? Number((performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize)
-      : Number.NaN;
+    const postGcHeapFloorBytes = Number(memory?.usedJSHeapSize);
     const recent = (window as typeof window & {
       __drusnielPerf?: { recentSamples?: Array<{ frameMs?: number }> };
     }).__drusnielPerf?.recentSamples ?? [];
@@ -115,7 +138,7 @@ async function readMinuteSample(page: Page, minute: number): Promise<SoakMinuteS
       .reduce((sum, [, value]) => sum + Math.max(0, value), 0);
     return {
       minute: sampleMinute,
-      usedJsHeapBytes: Number.isFinite(usedJsHeapBytes) ? usedJsHeapBytes : null,
+      usedJsHeapBytes: Number.isFinite(heapBeforeGc) ? heapBeforeGc : null,
       postGcHeapFloorBytes: Number.isFinite(postGcHeapFloorBytes) ? postGcHeapFloorBytes : null,
       estimatedVramBytes,
       frameMsP95: frameMs[p95Index] ?? hooks?.stats?.frameMsP95 ?? 0,
@@ -130,11 +153,11 @@ async function readMinuteSample(page: Page, minute: number): Promise<SoakMinuteS
       ].every((key) => (counters[key] ?? 0) === 0),
       counters: resourceCounters,
     };
-  }, minute);
+  }, { sampleMinute: minute, heapBeforeGc: usedJsHeapBytes });
 }
 
-async function runWander(page: Page, minutes: number): Promise<SoakMinuteSample[]> {
-  const samples: SoakMinuteSample[] = [await readMinuteSample(page, 0)];
+async function runWander(page: Page, minutes: number, collectGarbage: () => Promise<void>): Promise<SoakMinuteSample[]> {
+  const samples: SoakMinuteSample[] = [await readMinuteSample(page, 0, collectGarbage)];
   for (let minute = 1; minute <= minutes; minute++) {
     for (let second = 0; second < 60; second++) {
       const elapsedMinutes = minute - 1 + second / 60;
@@ -143,7 +166,7 @@ async function runWander(page: Page, minutes: number): Promise<SoakMinuteSample[
       const [x, z] = routePose(progress);
       await setPoseAndSettle(page, x, z, 60);
     }
-    const sample = await readMinuteSample(page, minute);
+    const sample = await readMinuteSample(page, minute, collectGarbage);
     samples.push(sample);
     console.log(`[continent-soak] minute=${minute} heap=${sample.usedJsHeapBytes ?? "n/a"} vramEstimate=${sample.estimatedVramBytes} frameP95=${sample.frameMsP95.toFixed(2)}ms`);
   }
@@ -190,12 +213,126 @@ async function backgroundForeground(page: Page, timeoutMs: number, seconds: numb
   return await waitForQueueDrain(page, timeoutMs);
 }
 
+function teleportCoverageBlockers(counters: Readonly<Record<string, number>>): string[] {
+  const requiredZero = [
+    "priority_unowned_cells",
+    "clod_far_gap_holes",
+    "far_clipmap_ownership_holes",
+    "far_clipmap_fallback_samples_this_frame",
+    "heightfield_tiles_fallback_samples_this_frame",
+  ] as const;
+  return requiredZero.flatMap((key) => {
+    const value = counters[key];
+    if (!Number.isFinite(value)) return [`${key}=missing`];
+    return value === 0 ? [] : [`${key}=${value}`];
+  });
+}
+
+async function gameplayTeleport(
+  page: Page,
+  name: TeleportEvidence["name"],
+  from: readonly [number, number],
+  to: readonly [number, number],
+  timeoutMs: number,
+): Promise<TeleportEvidence> {
+  const readiness = await page.evaluate(async ({ x, z, timeout }) => {
+    const teleport = window.__drusnielClod?.teleportGameplayTarget;
+    if (!teleport) throw new Error("continent teleport drill requires the P1 teleportGameplayTarget hook");
+    return await teleport({ x, z, timeoutMs: timeout });
+  }, { x: to[0], z: to[1], timeout: timeoutMs });
+  await page.evaluate(() => window.__drusnielClod?.settle?.(30));
+  const drain = await waitForQueueDrain(page, timeoutMs);
+  const blockers = [...drain.blockers, ...teleportCoverageBlockers(drain.counters)];
+  return {
+    name,
+    distanceM: Math.hypot(to[0] - from[0], to[1] - from[1]),
+    from,
+    to,
+    timeToGameplayReadyMs: readiness.timeToGameplayReadyMs,
+    readinessPolls: readiness.readinessPolls,
+    passed: blockers.length === 0,
+    blockers,
+    counters: drain.counters,
+  };
+}
+
+async function runTeleportDrills(page: Page, timeoutMs: number): Promise<TeleportEvidence[]> {
+  const results: TeleportEvidence[] = [];
+  results.push(await gameplayTeleport(page, "2km", [0, 0], [2_000, 0], timeoutMs));
+  results.push(await gameplayTeleport(page, "8km", [2_000, 0], [-6_000, 0], timeoutMs));
+  await gameplayTeleport(page, "2km", [-6_000, 0], [-8_000, 0], timeoutMs);
+  results.push(await gameplayTeleport(page, "rim-to-rim", [-8_000, 0], [8_000, 0], timeoutMs));
+  return results;
+}
+
+async function runDeviceLossBaseline(page: Page, timeoutMs: number): Promise<DeviceLossEvidence> {
+  const before = await page.evaluate(async () => {
+    const hooks = window.__drusnielClod;
+    const pose = hooks?.getPose?.();
+    if (!pose || !hooks?.runTerrainEditProbe || !hooks.flushSaveRuntime || !hooks.getPlayableSliceSnapshot) {
+      throw new Error("device-loss baseline requires pose, terrain-edit, save-flush, and playable-snapshot hooks");
+    }
+    const edit = await hooks.runTerrainEditProbe({
+      origin: [pose.p[0], pose.p[1] + 128, pose.p[2]],
+      direction: [0, -1, 0],
+    });
+    await hooks.flushSaveRuntime();
+    return { edit, snapshot: hooks.getPlayableSliceSnapshot() };
+  });
+  await page.evaluate(() => {
+    const destroy = window.__drusnielClod?.destroyRendererDevice;
+    if (!destroy) throw new Error("device-loss baseline requires destroyRendererDevice");
+    destroy();
+  });
+  await page.waitForFunction(
+    () => window.__drusnielClod?.error?.includes("WebGPU device lost") === true
+      && typeof window.__drusnielClod?.recoverAfterDeviceLoss === "function",
+    undefined,
+    { timeout: timeoutMs, polling: 100 },
+  );
+  const error = await page.evaluate(() => window.__drusnielClod?.error ?? null);
+  const navigation = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await page.evaluate(() => { void window.__drusnielClod?.recoverAfterDeviceLoss?.(); }).catch(() => undefined);
+  await navigation;
+  await waitReady(page, timeoutMs);
+  await page.evaluate(() => window.__drusnielClod?.settle?.(120));
+  const after = await page.evaluate(() => window.__drusnielClod?.getPlayableSliceSnapshot?.() ?? null);
+  const failures: string[] = [];
+  if (!after) failures.push("playable snapshot unavailable after controlled reload");
+  if (after && after.terrain.voxelDeltaCount < before.snapshot.terrain.voxelDeltaCount) {
+    failures.push(`voxel deltas regressed across reload: ${after.terrain.voxelDeltaCount} < ${before.snapshot.terrain.voxelDeltaCount}`);
+  }
+  if (after && after.persistence.lastError !== 0) failures.push(`save_last_error=${after.persistence.lastError} after reload`);
+  return {
+    requested: true,
+    error,
+    editRevision: before.edit.editRevision,
+    voxelDeltaCountBefore: before.snapshot.terrain.voxelDeltaCount,
+    voxelDeltaCountAfter: after?.terrain.voxelDeltaCount ?? null,
+    persistenceErrorAfter: after?.persistence.lastError ?? null,
+    controlledReloadInstalled: error?.includes("WebGPU device lost") === true,
+    passed: failures.length === 0,
+    failures,
+  };
+}
+
 function recoveryFailures(recovery: readonly RecoveryEvidence[], thresholds: SoakThresholds | null): string[] {
   if (!thresholds) return [];
   return recovery.flatMap((entry) => {
     if (!entry.passed) return [`${entry.name} did not recover: ${entry.blockers.join(", ")}`];
     if (entry.recoveryMs > thresholds.maxBackgroundRecoveryMs) return [`${entry.name} recovery ${entry.recoveryMs.toFixed(0)}ms > ${thresholds.maxBackgroundRecoveryMs}ms`];
     return [];
+  });
+}
+
+function teleportFailures(teleports: readonly TeleportEvidence[], thresholds: SoakThresholds | null): string[] {
+  if (!thresholds) return [];
+  return teleports.flatMap((entry) => {
+    const failures = entry.blockers.map((blocker) => `${entry.name} teleport: ${blocker}`);
+    if (entry.timeToGameplayReadyMs > thresholds.maxTeleportRecoveryMs) {
+      failures.push(`${entry.name} teleport readiness ${entry.timeToGameplayReadyMs.toFixed(0)}ms > ${thresholds.maxTeleportRecoveryMs}ms`);
+    }
+    return failures;
   });
 }
 
@@ -207,6 +344,7 @@ async function main(): Promise<void> {
   const outDir = resolve(stringArg(args, "out") ?? join("soak-runs", new Date().toISOString().replace(/[:.]/g, "-")));
   const thresholdsPath = resolve(stringArg(args, "thresholds") ?? join("config", "long_map_soak_thresholds.json"));
   const calibrate = args["calibrate"] === true;
+  const deviceLossRequested = args["device-loss"] === true;
   const thresholds = existsSync(thresholdsPath)
     ? JSON.parse(readFileSync(thresholdsPath, "utf8")) as SoakThresholds
     : null;
@@ -216,11 +354,21 @@ async function main(): Promise<void> {
   const browserVersion = browser.version();
   let samples: SoakMinuteSample[] = [];
   let recovery: RecoveryEvidence[] = [];
+  let teleports: TeleportEvidence[] = [];
+  let deviceLoss: DeviceLossEvidence = {
+    requested: false, error: null, editRevision: null, voxelDeltaCountBefore: null,
+    voxelDeltaCountAfter: null, persistenceErrorAfter: null,
+    controlledReloadInstalled: false, passed: true, failures: [],
+  };
   let runUrl = "";
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
     const page = await context.newPage();
-    const start = route.start ?? [-8_000, 96, 0];
+    const cdp = await context.newCDPSession(page);
+    const collectGarbage = async () => { await cdp.send("HeapProfiler.collectGarbage"); };
+    // Start on the known-ready center. Rim readiness belongs to the teleport drill,
+    // not to startup, so a failed rim recovery is attributed to the measured leg.
+    const start: readonly [number, number, number] = [0, 96, 0];
     const url = clodUrl({
       scene: "infinite-islands",
       seed: 1,
@@ -234,19 +382,31 @@ async function main(): Promise<void> {
     runUrl = url;
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await waitReady(page, 360_000);
+    await page.waitForFunction(
+      () => Object.hasOwn(window.__drusnielClod?.stats?.counters ?? {}, "time_to_gameplay_ready_ms"),
+      undefined,
+      { timeout: timeoutMs, polling: 250 },
+    );
     await page.evaluate(() => window.__drusnielClod?.settle?.(600));
     await page.evaluate(() => window.__drusnielClod?.beginMovementRouteProbe?.());
-    samples = await runWander(page, minutes);
+    samples = await runWander(page, minutes, collectGarbage);
     recovery = [
       await backgroundForeground(page, timeoutMs, backgroundSeconds),
     ];
+    teleports = await runTeleportDrills(page, timeoutMs);
+    if (deviceLossRequested) deviceLoss = await runDeviceLossBaseline(page, timeoutMs);
   } finally {
     await browser.close();
   }
   // The --minutes 0 recovery drill exercises background/foreground recovery only;
   // soak envelopes need a wander window and would fail closed on an empty one.
   const evaluation: SoakEvaluation | null = thresholds && minutes > 0 ? evaluateSoak(samples, thresholds) : null;
-  const failures = [...(evaluation?.failures ?? []), ...recoveryFailures(recovery, thresholds)];
+  const failures = [
+    ...(evaluation?.failures ?? []),
+    ...recoveryFailures(recovery, thresholds),
+    ...teleportFailures(teleports, thresholds),
+    ...deviceLoss.failures.map((failure) => `device loss: ${failure}`),
+  ];
   const report = {
     createdAt: new Date().toISOString(),
     minutes,
@@ -266,14 +426,10 @@ async function main(): Promise<void> {
     evaluation,
     recovery,
     teleport: {
-      status: "blocked",
-      dependency: "playable-world plan P1 time_to_gameplay_ready_ms contract",
-      note: "No interim readiness predicate is used by this tool.",
+      contract: "playable-world P1 teleportTargetReady + time_to_gameplay_ready_ms",
+      evidence: teleports,
     },
-    deviceLoss: {
-      contract: "fail-loud",
-      manualProcedure: "Open DevTools, obtain the active GPUDevice, call device.destroy(), and verify window.__drusnielClod.error plus the fatal overlay report WebGPU device loss.",
-    },
+    deviceLoss,
     passed: thresholds !== null && failures.length === 0,
     failures,
   };

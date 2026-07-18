@@ -52,6 +52,7 @@
     "accept:continent-coast-to-coast": "node tools/run-infinite-islands-acceptance.mjs --scene walk --gate perf --coast-to-coast --reuse",
     "accept:continent-revisit": "node tools/run-infinite-islands-acceptance.mjs --scene walk --gate perf --revisit --reuse",
     "precision:rim": "tsx tools/rim-precision.ts",
+    "visual:unified-streaming-manual": "tsx tools/unified-streaming-visual-qa.ts",
     "soak:continent": "tsx tools/continent-soak.ts",
     "drill:continent-recovery": "tsx tools/continent-soak.ts --minutes 0",
     "report:continent-repeatability": "tsx tools/long-map-repeatability.ts",

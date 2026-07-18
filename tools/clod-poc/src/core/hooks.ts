@@ -197,6 +197,7 @@ export interface ClodHooks {
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
   recoverAfterDeviceLoss: (() => Promise<void>) | null;
+  destroyRendererDevice: (() => void) | null;
   beginMovementRouteProbe: (() => void) | null;
   runTerrainEditProbe: ((ray: EditRayInput) => Promise<TerrainEditProbeResult>) | null;
   scheduleDig: ((ray: EditRayInput) => void) | null;
@@ -216,6 +217,7 @@ export interface ClodHooks {
   setPrecisionLandmarks: ((landmarks: readonly PrecisionLandmark[]) => void) | null;
   getPrecisionLandmarkScreenPositions: (() => readonly PrecisionLandmarkScreenPosition[]) | null;
   teleportGameplayTarget: ((target: GameplayTeleportTarget) => Promise<GameplayTeleportEvidence>) | null;
+  setTerrainStreamingEnabled: ((enabled: boolean) => void) | null;
   findContinentRiverCrossingRoute: ((
     options?: ContinentRiverRouteSearchOptions,
   ) => ContinentRiverCrossingRoute | null) | null;
@@ -299,6 +301,7 @@ export function initHooks(): ClodHooks {
     settle: null,
     flyCamEnabled: null,
     recoverAfterDeviceLoss: null,
+    destroyRendererDevice: null,
     beginMovementRouteProbe: null,
     runTerrainEditProbe: null,
     scheduleDig: null,
@@ -316,6 +319,7 @@ export function initHooks(): ClodHooks {
     setPrecisionLandmarks: null,
     getPrecisionLandmarkScreenPositions: null,
     teleportGameplayTarget: null,
+    setTerrainStreamingEnabled: null,
     findContinentRiverCrossingRoute: null,
     setAcceptanceSceneOptions: null,
     resetAcceptanceScene: null,

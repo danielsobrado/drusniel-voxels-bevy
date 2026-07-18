@@ -13,16 +13,18 @@ function snapshot(overrides: Partial<ResidencySnapshot> = {}): ResidencySnapshot
 }
 
 describe("revisit eviction evidence", () => {
-  it("passes only when named route-A targets are absent before the return leg", () => {
+  it("requires transient targets to be evicted while allowing persisted heightfield residency", () => {
     const evidence = evaluateRevisitEviction(snapshot(), snapshot({
       clodCachedKeys: ["L0:40,0"],
       farSummaryResidentKeys: ["r0_x8_z0_cs32", "r1_x-2_z0_cs128"],
-      heightfieldResidentKeys: ["T:31,0"],
+      heightfieldResidentKeys: ["T:-32,0", "T:31,0"],
       vegetationClusterKeys: ["tree:250,0"],
     }));
 
     expect(evidence.passed).toBe(true);
     expect(evidence.farSummary.targetKeys).toEqual(["r0_x-8_z0_cs32"]);
+    expect(evidence.heightfield.remainingKeys).toEqual(["T:-32,0"]);
+    expect(evidence.heightfield.passed).toBe(true);
     expect(evidence.waterHydrology.available).toBe(false);
   });
 

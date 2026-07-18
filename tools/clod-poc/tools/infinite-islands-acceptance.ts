@@ -8,7 +8,7 @@ import { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS } from "../src/app/fr
 import { inspectPngSanity, type ImageSanityResult } from "./infinite_acceptance/image_sanity.js";
 import { aggregatePassed, renderMarkdownReport, type SceneReportInput } from "./infinite_acceptance/report.js";
 import { evaluateMovementCoverage, evaluateMovementPerformance } from "./infinite_acceptance/movement_performance.js";
-import { resolveMovementRouteProfile, type MovementRouteName, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
+import { resolveMovementRouteProfile, type MovementContentProfile, type MovementRouteName, type MovementSegment } from "./infinite_acceptance/movement_route_profile.js";
 import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
@@ -101,10 +101,10 @@ function requestedMovementRoute(argv: readonly string[]): MovementRouteName {
   return "walk";
 }
 
-const MOVEMENT_ROUTE_PROFILE = resolveMovementRouteProfile(requestedMovementRoute(process.argv));
-if (process.argv.includes("--representative")) {
-  throw new Error("The representative content profile is blocked by playable-world plan D1/D2; the infrastructure profile must not be reported as the release gate.");
-}
+const MOVEMENT_CONTENT_PROFILE: MovementContentProfile = process.argv.includes("--representative")
+  ? "representative"
+  : "infrastructure";
+const MOVEMENT_ROUTE_PROFILE = resolveMovementRouteProfile(requestedMovementRoute(process.argv), MOVEMENT_CONTENT_PROFILE);
 const WALK_ROUTE = MOVEMENT_ROUTE_PROFILE.segments;
 
 const SCENES: SceneSpec[] = [
@@ -271,6 +271,8 @@ interface RevisitEconomics {
   outboundFrameP99Ms: number;
   revisitFrameP99Ms: number;
   frameP99DeltaMs: number;
+  outboundFrameMs: ReturnType<typeof summarizeFrameTimes>;
+  revisitFrameMs: ReturnType<typeof summarizeFrameTimes>;
 }
 
 interface MovementReport {
@@ -1048,6 +1050,8 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
   const revisitFrames = frameSamples.filter((sample) => sample.phase === "revisit");
   const outboundP99 = percentile(outboundFrames.map((sample) => sample.frameMs), 0.99);
   const revisitP99 = percentile(revisitFrames.map((sample) => sample.frameMs), 0.99);
+  const outboundFrameMs = summarizeFrameTimes(outboundFrames.map((sample) => sample.frameMs));
+  const revisitFrameMs = summarizeFrameTimes(revisitFrames.map((sample) => sample.frameMs));
   const longTasks = await readLongTasks(page);
   const revisitEviction = routeAResidency && beforeReturnResidency
     ? evaluateRevisitEviction(routeAResidency, beforeReturnResidency)
@@ -1063,6 +1067,8 @@ async function runMovementRoute(page: Page): Promise<MovementReport> {
     outboundFrameP99Ms: outboundP99,
     revisitFrameP99Ms: revisitP99,
     frameP99DeltaMs: revisitP99 - outboundP99,
+    outboundFrameMs,
+    revisitFrameMs,
   } : null;
   return {
     start,
@@ -1308,7 +1314,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
     extra["infiniteStartupWorld"] = FAST_STARTUP_WORLD;
   }
   if (scene.proceduralDebug) extra["proceduralDebug"] = scene.proceduralDebug;
-  const url = clodUrl({ scene: "infinite-islands", seed: 1, hud: true, freeze: scene.freeze, cam: scene.cam, extra });
+  const url = clodUrl({ scene: MOVEMENT_ROUTE_PROFILE.scene, seed: 1, hud: true, freeze: scene.freeze, cam: scene.cam, extra });
 
   console.log(`[infinite-accept] ${gate.name}/${scene.name}: ${url}`);
   try {

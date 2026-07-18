@@ -13,6 +13,7 @@ export type MovementContentProfile = "infrastructure" | "representative";
 export interface MovementRouteProfile {
   name: MovementRouteName;
   contentProfile: MovementContentProfile;
+  scene: "infinite-islands" | "rpg-village";
   segments: readonly MovementSegment[];
   start?: readonly [number, number, number];
   minHorizontalDistanceM: number;
@@ -59,13 +60,18 @@ function routeFrames(segments: readonly MovementSegment[]): number {
   return segments.reduce((sum, segment) => sum + segment.frames, 0);
 }
 
-export function resolveMovementRouteProfile(route: boolean | MovementRouteName): MovementRouteProfile {
+export function resolveMovementRouteProfile(
+  route: boolean | MovementRouteName,
+  contentProfile: MovementContentProfile = "infrastructure",
+): MovementRouteProfile {
   const name = typeof route === "boolean" ? (route ? "long-route" : "walk") : route;
+  const scene = contentProfile === "representative" ? "rpg-village" : "infinite-islands";
   if (name === "coast-to-coast" || name === "coast-to-coast-revisit") {
     const segments = name === "coast-to-coast" ? COAST_TO_COAST_ROUTE : REVISIT_ROUTE;
     return {
       name,
-      contentProfile: "infrastructure",
+      contentProfile,
+      scene,
       segments,
       start: [-8_000, 96, 0],
       minHorizontalDistanceM: 16_000,
@@ -77,7 +83,8 @@ export function resolveMovementRouteProfile(route: boolean | MovementRouteName):
   if (name === "continent-short") {
     return {
       name,
-      contentProfile: "infrastructure",
+      contentProfile,
+      scene,
       segments: CONTINENT_SHORT_ROUTE,
       start: [-8_000, 96, 0],
       minHorizontalDistanceM: 4_800,
@@ -89,7 +96,8 @@ export function resolveMovementRouteProfile(route: boolean | MovementRouteName):
   return name === "long-route"
     ? {
       name: "long-route",
-      contentProfile: "infrastructure",
+      contentProfile,
+      scene,
       segments: LONG_ROUTE,
       minHorizontalDistanceM: 3_000,
       minFrameSamples: LONG_ROUTE_FRAMES,
@@ -98,7 +106,8 @@ export function resolveMovementRouteProfile(route: boolean | MovementRouteName):
     }
     : {
       name: "walk",
-      contentProfile: "infrastructure",
+      contentProfile,
+      scene,
       segments: WALK_ROUTE,
       minHorizontalDistanceM: 48,
       minFrameSamples: 460,

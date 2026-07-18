@@ -9,6 +9,7 @@ const thresholds: SoakThresholds = {
   maxResourceGrowth: 1,
   maxLateFrameP95Ratio: 1.1,
   maxBackgroundRecoveryMs: 5_000,
+  maxTeleportRecoveryMs: 180_000,
 };
 
 function sample(

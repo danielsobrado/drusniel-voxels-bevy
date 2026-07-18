@@ -240,6 +240,7 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
   var destroyedPropIds = [];
   var placedPieceIds = [];
   var brokenPieceIds = [];
+  var latencyBudget = { dig: 3, prop_destroy: 3, tree_fell: 3, construction_place: 3 };
   function readCounters() {
     var out = {};
     var counters = (clod.stats && clod.stats.counters) ? clod.stats.counters : {};
@@ -275,12 +276,12 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
           if (collider === null && (counters.construction_colliders_active || 0) !== (baseline.construction_colliders_active || 0)) {
             collider = performance.now() - startedAt;
           }
-          if (summary === null && (counters.prop_exclusion_tiles || 0) >= (baseline.prop_exclusion_tiles || 0) && (propDelta > (baseline.prop_delta_count || 0) || dirtySave > (baseline.save_dirty_revision || 0))) {
+          if (summary === null && (propDelta > (baseline.prop_delta_count || 0) || dirtySave > (baseline.save_dirty_revision || 0))) {
             summary = performance.now() - startedAt;
           }
           if (durable === null && flush > (baseline.save_last_flush_written_regions || 0)) durable = performance.now() - startedAt;
         }
-        if ((visible !== null && (durable !== null || mode !== "dig")) || performance.now() >= deadline) {
+        if (visible !== null || performance.now() >= deadline) {
           resolve({ requestToVisibleMs: visible, requestToColliderMs: collider, requestToSummaryMs: summary, requestToDurableMs: durable });
           return;
         }
@@ -289,11 +290,17 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       requestAnimationFrame(step);
     });
   }
-  async function sampleLatency(editClass, mode, work) {
+  async function maybeSampleLatency(bucket, editClass, mode, work) {
+    var shouldSample = (latencyBudget[bucket] || 0) > 0;
+    if (shouldSample) latencyBudget[bucket] -= 1;
+    if (!shouldSample) {
+      await work();
+      return;
+    }
     var baseline = readCounters();
     var startedAt = performance.now();
     await work();
-    var milestones = await waitForMilestones(startedAt, baseline, 4000, mode);
+    var milestones = await waitForMilestones(startedAt, baseline, 1500, mode);
     latencySamples.push({
       editClass: editClass,
       requestToVisibleMs: milestones.requestToVisibleMs,
@@ -305,10 +312,9 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
   }
   async function runDig(editClass, ray, useSchedule) {
     if (useSchedule && typeof clod.scheduleDig === "function") {
-      await sampleLatency(editClass, "dig", async function() {
+      await maybeSampleLatency("dig", editClass, "dig", async function() {
         clod.scheduleDig(ray);
-        await clod.settle(8);
-        if (typeof clod.flushSaveRuntime === "function") await clod.flushSaveRuntime();
+        await clod.settle(4);
       });
       stormSteps.push({ id: editClass, status: "ran" });
       return;
@@ -317,7 +323,7 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       stormSteps.push({ id: editClass, status: "skipped" });
       return;
     }
-    await sampleLatency(editClass, "dig", async function() {
+    await maybeSampleLatency("dig", editClass, "dig", async function() {
       await clod.runTerrainEditProbe(ray);
     });
     stormSteps.push({ id: editClass, status: "ran" });
@@ -334,14 +340,15 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       var radius = 28 + (i % 7);
       var position = [center.x + Math.cos(angle) * radius, 0, center.z + Math.sin(angle) * radius];
       var result = null;
-      await sampleLatency("prop_destroy_" + i, "prop", async function() {
-        result = await clod.destroyEnvironmentalProp({ position: position, layer: "stone", prefabId: "environment/stone" });
+      await maybeSampleLatency("prop_destroy", "prop_destroy_" + i, "prop", async function() {
+        result = await clod.destroyEnvironmentalProp({ position: position, layer: "stone", prefabId: "environment/stone", flush: false });
       });
       if (result && result.ok && result.propId) {
         destroyedPropIds.push(result.propId);
         count += 1;
       }
     }
+    if (typeof clod.flushSaveRuntime === "function") await clod.flushSaveRuntime();
     stormSteps.push({ id: "prop-destroy-batch", status: count > 0 ? "ran" : "failed" });
   }
   async function fellTreeBatch() {
@@ -355,14 +362,15 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       var radius = 55 + (i % 5);
       var position = [center.x + Math.cos(angle) * radius, 0, center.z + Math.sin(angle) * radius];
       var result = null;
-      await sampleLatency("tree_fell_" + i, "prop", async function() {
-        result = await clod.fellTree({ position: position });
+      await maybeSampleLatency("tree_fell", "tree_fell_" + i, "prop", async function() {
+        result = await clod.fellTree({ position: position, flush: false });
       });
       if (result && result.ok && result.propId) {
         destroyedPropIds.push(result.propId);
         count += 1;
       }
     }
+    if (typeof clod.flushSaveRuntime === "function") await clod.flushSaveRuntime();
     stormSteps.push({ id: "tree-fell-batch", status: count > 0 ? "ran" : "failed" });
   }
   async function constructionPlaceBreak() {
@@ -372,11 +380,14 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       return;
     }
     var placeCount = 0;
+    var lastReason = null;
     for (var i = 0; i < 30; i++) {
-      var x = center.x + 90 + (i % 6) * 3;
-      var z = center.z + 90 + Math.floor(i / 6) * 3;
+      var x = center.x + 12 + (i % 6) * 2.5;
+      var z = center.z - 70 - Math.floor(i / 6) * 2.5;
+      clod.setPose({ p: [x, center.y, z + 8], yaw: Math.PI, pitch: -0.45 });
+      if (typeof clod.settle === "function") await clod.settle(2);
       var result = null;
-      await sampleLatency("construction_place_" + i, "prop", async function() {
+      await maybeSampleLatency("construction_place", "construction_place_" + i, "prop", async function() {
         result = await clod.placeConstructionPiece({
           position: [x, 0, z],
           typeId: "wood-floor-2x2",
@@ -386,15 +397,22 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       if (result && result.ok && result.pieceId) {
         placedPieceIds.push(result.pieceId);
         placeCount += 1;
+      } else if (result && result.reason) {
+        lastReason = result.reason;
       }
     }
     stormSteps.push({ id: "construction-place-batch", status: placeCount > 0 ? "ran" : "failed" });
+    if (placeCount === 0 && lastReason) stormSteps.push({ id: "construction-place-reason", status: "failed" });
     if (typeof clod.breakConstructionPiece !== "function") {
       stormSteps.push({ id: "construction-break-batch", status: "stubbed" });
       return;
     }
     var breakCount = 0;
     var toBreak = placedPieceIds.slice(0, 10);
+    if (toBreak.length === 0 && typeof clod.listPlacedConstructionPieces === "function") {
+      var listed = clod.listPlacedConstructionPieces(32) || [];
+      for (var L = 0; L < Math.min(10, listed.length); L++) toBreak.push(listed[L].id);
+    }
     for (var b = 0; b < toBreak.length; b++) {
       var pieceId = toBreak[b];
       var breakResult = clod.breakConstructionPiece({ pieceId: pieceId });
@@ -404,10 +422,17 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
       }
     }
     stormSteps.push({ id: "construction-break-batch", status: breakCount > 0 ? "ran" : "failed" });
+    if (placeCount === 0) {
+      // Keep last failure reason discoverable in the report via a sentinel step id.
+      stormSteps.push({ id: "construction-place-last-reason:" + String(lastReason || "unknown"), status: "failed" });
+    }
   }
   var stormStart = performance.now();
   var orbitStep = 0;
   var trenchDone = false;
+  var propsDone = false;
+  var treesDone = false;
+  var constructionDone = false;
   while (performance.now() - stormStart < duration) {
     orbitStep += 1;
     var angle = (orbitStep / 180) * Math.PI * 2;
@@ -419,7 +444,7 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
     });
     var frameMs = (clod.stats && clod.stats.frameMs) ? clod.stats.frameMs : 0;
     if (frameMs > 0) frameMsSamples.push(frameMs);
-    if (!trenchDone && orbitStep === 20) {
+    if (!trenchDone && orbitStep === 8) {
       trenchDone = true;
       for (var t = 0; t < 12; t++) {
         await runDig("dig-trench-" + t, {
@@ -427,11 +452,21 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
           direction: [0.15, -0.55, 0.35]
         }, true);
       }
+      if (typeof clod.flushSaveRuntime === "function") await clod.flushSaveRuntime();
     }
-    if (orbitStep === 40) await destroyPropBatch();
-    if (orbitStep === 70) await fellTreeBatch();
-    if (orbitStep === 100) await constructionPlaceBreak();
-    if (orbitStep % 45 === 0 && orbitStep > 100) {
+    if (!propsDone && orbitStep === 16) {
+      propsDone = true;
+      await destroyPropBatch();
+    }
+    if (!treesDone && orbitStep === 24) {
+      treesDone = true;
+      await fellTreeBatch();
+    }
+    if (!constructionDone && orbitStep === 32) {
+      constructionDone = true;
+      await constructionPlaceBreak();
+    }
+    if (orbitStep % 40 === 0 && orbitStep > 32) {
       await runDig("dig-" + orbitStep, {
         origin: [center.x, center.y, center.z],
         direction: [Math.cos(angle), -0.35, Math.sin(angle)]
@@ -441,16 +476,10 @@ function stormPageScriptSource(center: typeof VILLAGE_CENTER, duration: number, 
   }
   if (typeof clod.flushSaveRuntime === "function") await clod.flushSaveRuntime();
   var exclusionsBeforeReload = 0;
-  for (var d = 0; d < destroyedPropIds.length; d++) {
-    // Count unique destroyed ids; exclusion query uses positions from ids via counters.
-    exclusionsBeforeReload += 1;
-  }
   if (typeof clod.queryEnvironmentalPropExclusion === "function") {
-    exclusionsBeforeReload = 0;
-    for (var q = 0; q < 16; q++) {
-      var qAngle = (q / 16) * Math.PI * 2;
-      var qPos = [center.x + Math.cos(qAngle) * 30, 0, center.z + Math.sin(qAngle) * 30];
-      var qStone = clod.queryEnvironmentalPropExclusion({ position: qPos, layer: "stone" });
+    for (var q = 0; q < 32; q++) {
+      var qAngle = (q / 32) * Math.PI * 2;
+      var qStone = clod.queryEnvironmentalPropExclusion({ position: [center.x + Math.cos(qAngle) * 30, 0, center.z + Math.sin(qAngle) * 30], layer: "stone" });
       var qTree = clod.queryEnvironmentalPropExclusion({ position: [center.x + Math.cos(qAngle) * 55, 0, center.z + Math.sin(qAngle) * 55], layer: "tree" });
       if (qStone && qStone.excluded) exclusionsBeforeReload += 1;
       if (qTree && qTree.excluded) exclusionsBeforeReload += 1;

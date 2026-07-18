@@ -275,6 +275,10 @@ export class HydrologySystem {
     return this.tileCache ? this.tileCache.stats : null;
   }
 
+  residentTileKeys(): string[] | null {
+    return this.tileCache?.residentTileKeys() ?? null;
+  }
+
   /** Metres per consumer cell above which sampleInfinite bypasses the tile cache;
    *  null when this system has no tile cache (finite worlds, cache disabled). */
   tileCoarseBypassCellSize(): number | null {

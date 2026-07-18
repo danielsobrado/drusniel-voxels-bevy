@@ -20,7 +20,7 @@ import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePe
 import { createP0DirtyAtlasExercise } from "./frame_loop/p0_dirty_atlas_exercise.js";
 import { materialChurnDiagnostics } from "../rendering/material_churn/material_churn_diagnostics.js";
 import { aggregateGpuVegetationEarlyRejectCounters } from "../vegetation/gpu_vegetation_early_reject_counters.js";
-import { runTerrainStreamingWork } from "../stream/terrain_streaming_control.js";
+import { runTerrainStreamingWork, setTerrainStreamingEnabled as setGlobalTerrainStreamingEnabled } from "../stream/terrain_streaming_control.js";
 import { publishStreamCursorCounters, StreamCursorTracker } from "../stream/stream_cursor.js";
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 import { installPrecisionLandmarkHooks } from "../precision/precision_landmarks.js";
@@ -135,8 +135,15 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   let materialChurnFrame = 0;
   const debugQuery = new URLSearchParams(window.location.search);
   const precisionDiagnostics = debugQuery.get("precisionDiag") === "1";
+  const automationHooks = render.getHooks();
+  if (automationHooks) {
+    automationHooks.setTerrainStreamingEnabled = (enabled) => {
+      player.state.terrainStreamingEnabled = enabled;
+      setGlobalTerrainStreamingEnabled(enabled);
+    };
+  }
   if (precisionDiagnostics) {
-    const hooks = render.getHooks();
+    const hooks = automationHooks;
     if (hooks) installPrecisionLandmarkHooks({
       hooks,
       scene: render.scene,

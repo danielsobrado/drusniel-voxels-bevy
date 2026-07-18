@@ -109,6 +109,7 @@ export interface RuntimeSystemsStartupInput {
 
 export interface RuntimeSystemsStartupResult extends VegetationStartupResult, WaterWeatherStartupResult,
   ForestLightingStartupResult {
+  hydrologySystem: HydrologySystem | null;
   updateLighting: () => void;
   drainVegetationDirtyQueue: () => void;
   customProps: CustomPropsStartupResult | null;
@@ -516,6 +517,7 @@ export async function runRuntimeSystemsStartup(
     ...vegetation,
     ...waterWeather,
     ...forestLighting,
+    hydrologySystem,
     updateLighting,
     drainVegetationDirtyQueue,
     customProps,
