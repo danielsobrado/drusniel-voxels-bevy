@@ -46,9 +46,13 @@ export async function runReadinessGatedTeleport(input: {
   let readinessPolls = 0;
 
   const finish = (polls: number): TeleportRecoveryEvidence => {
-    input.commit(input.target);
     const timeToGameplayReadyMs = Math.max(0, readNow() - startedAt);
-    input.recordReadyMs(timeToGameplayReadyMs);
+    input.commit(input.target);
+    try {
+      input.recordReadyMs(timeToGameplayReadyMs);
+    } catch (error) {
+      console.error("[teleport] readiness metric callback failed", error);
+    }
     return { timeToGameplayReadyMs, readinessPolls: polls };
   };
 
