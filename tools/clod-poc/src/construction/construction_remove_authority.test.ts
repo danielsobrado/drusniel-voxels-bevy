@@ -65,11 +65,8 @@ describe("construction remove authority", () => {
     });
   });
 
-  it("denies a queued removal after mode or terrain revision changes", () => {
-    install({
-      getCurrentMode: () => "orbit",
-      getTerrainRevision: () => 8,
-    });
+  it("denies a queued removal after the interaction mode changes", () => {
+    install({ getCurrentMode: () => "orbit" });
     const command = createEditCommand({
       operation: "construction_remove",
       targetPosition: target.position,
@@ -86,11 +83,47 @@ describe("construction remove authority", () => {
     });
   });
 
+  it("denies a queued removal after the terrain revision changes", () => {
+    install({ getTerrainRevision: () => 8 });
+    const command = createEditCommand({
+      operation: "construction_remove",
+      targetPosition: target.position,
+      targetNormal: [0, 1, 0],
+      sourceTerrainRevision: 7,
+      actor: "player",
+      mode: "playing",
+      nowMs: 50,
+    });
+
+    expect(authorizeConstructionRemoval(target, command)).toEqual({
+      allowed: false,
+      reason: "revision_mismatch",
+    });
+  });
+
   it("fails closed when an authority dependency throws", () => {
     install({ getTerrainRevision: () => { throw new Error("revision unavailable"); } });
     expect(authorizeConstructionRemoval(target)).toEqual({
       allowed: false,
       reason: "not_ready",
     });
+  });
+
+  it("does not resurrect a disposed authorizer when runtimes dispose out of order", () => {
+    const disposeFirst = installConstructionRemoveAuthorizer(() => ({
+      allowed: false,
+      reason: "out_of_range",
+    }));
+    const disposeSecond = installConstructionRemoveAuthorizer(() => ({ allowed: true }));
+    try {
+      expect(authorizeConstructionRemoval(target)).toEqual({ allowed: true });
+      disposeFirst();
+      expect(authorizeConstructionRemoval(target)).toEqual({ allowed: true });
+      disposeSecond();
+      expect(authorizeConstructionRemoval(target)).toEqual({ allowed: true });
+    } finally {
+      disposeFirst();
+      disposeSecond();
+    }
   });
 });
