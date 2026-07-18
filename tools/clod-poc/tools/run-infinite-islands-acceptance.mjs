@@ -12,7 +12,8 @@ const PHASE_SCENES = new Set([
   "phase6-canopy",
 ]);
 const FAST_SCENES = new Set(["walk", "final-near"]);
-const DEFAULT_PERF_SCENES = ["walk", "biome-near", "biome-horizon", "final-near", "final-horizon"];
+const ROUTE_FLAGS = new Set(["--short-route", "--coast-to-coast", "--revisit", "--long-route"]);
+const DEFAULT_PERF_SCENES = ["walk", "water", "biome-near", "biome-horizon", "final-near", "final-horizon"];
 
 process.env.CLOD_POC_BASE_URL ??= DEFAULT_BASE_URL;
 
@@ -166,6 +167,10 @@ function hasFlag(args, flag) {
   return args.includes(flag);
 }
 
+function hasRouteFlag(args) {
+  return args.some((arg) => ROUTE_FLAGS.has(arg));
+}
+
 function lastCliValue(args, key) {
   return cliValues(args, key).at(-1)?.trim() ?? null;
 }
@@ -229,6 +234,13 @@ function normalizeAcceptanceArgs(args) {
     }
     return args;
   }
+
+  const shouldIncludeRouteWater = !hasFlag(args, "--fast")
+    && hasRouteFlag(args)
+    && scenes.includes("walk")
+    && !scenes.includes("water")
+    && (gate === "perf" || gate === "all");
+  if (shouldIncludeRouteWater) return appendSceneFilter(args, ["water"]);
 
   if (!hasSceneFilter(args) && (gate === "perf" || gate === "all" || !hasGateFilter(args))) {
     return appendSceneFilter(args, DEFAULT_PERF_SCENES);

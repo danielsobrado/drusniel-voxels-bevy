@@ -13,6 +13,7 @@ function passingInput() {
       water_clipmap_enabled: 1,
       water_clipmap_visible_levels: 4,
       water_clipmap_level_count: 4,
+      water_clipmap_snaps: 8,
       water_clipmap_field_samples: 0,
       "framePerf.p95.waterMs": WATER_ACCEPTANCE_MAX_P95_MS,
       "framePerf.max.waterMs": WATER_ACCEPTANCE_MAX_FRAME_MS,
@@ -21,7 +22,7 @@ function passingInput() {
 }
 
 describe("water acceptance", () => {
-  it("accepts the atlas-driven water budget and continuity evidence", () => {
+  it("accepts complete atlas-driven water evidence at the timing limits", () => {
     expect(evaluateWaterAcceptance(passingInput())).toEqual([]);
   });
 
@@ -29,7 +30,10 @@ describe("water acceptance", () => {
     const input = passingInput();
     input.startupTimings.river_continuity_pct = 94;
     input.counters.webgpu_uncaptured_errors = 1;
+    input.counters.water_clipmap_enabled = 0;
+    input.counters.water_clipmap_level_count = 0;
     input.counters.water_clipmap_visible_levels = 0;
+    input.counters.water_clipmap_snaps = 0;
     input.counters.water_clipmap_field_samples = 1;
     input.counters["framePerf.p95.waterMs"] = WATER_ACCEPTANCE_MAX_P95_MS + 0.1;
     input.counters["framePerf.max.waterMs"] = WATER_ACCEPTANCE_MAX_FRAME_MS + 0.1;
@@ -37,10 +41,34 @@ describe("water acceptance", () => {
     expect(evaluateWaterAcceptance(input)).toEqual(expect.arrayContaining([
       expect.stringContaining("river_continuity_pct"),
       expect.stringContaining("webgpu_uncaptured_errors"),
+      expect.stringContaining("water_clipmap_enabled"),
+      expect.stringContaining("water_clipmap_level_count"),
       expect.stringContaining("water_clipmap_visible_levels"),
+      expect.stringContaining("water_clipmap_snaps"),
       expect.stringContaining("water_clipmap_field_samples"),
       expect.stringContaining("framePerf.p95.waterMs"),
       expect.stringContaining("framePerf.max.waterMs"),
     ]));
+  });
+
+  it("rejects partial ring visibility and uninitialized clipmap levels", () => {
+    const input = passingInput();
+    input.counters.water_clipmap_visible_levels = 3;
+    input.counters.water_clipmap_snaps = 2;
+
+    expect(evaluateWaterAcceptance(input)).toEqual(expect.arrayContaining([
+      expect.stringContaining("must equal water_clipmap_level_count=4"),
+      expect.stringContaining("water_clipmap_snaps=2"),
+    ]));
+  });
+
+  it("rejects inconsistent timing envelopes", () => {
+    const input = passingInput();
+    input.counters["framePerf.p95.waterMs"] = 0.4;
+    input.counters["framePerf.max.waterMs"] = 0.3;
+
+    expect(evaluateWaterAcceptance(input)).toEqual([
+      "framePerf.max.waterMs=0.3 must be >= framePerf.p95.waterMs=0.4",
+    ]);
   });
 });
