@@ -134,6 +134,11 @@ function manifest(): CurrentVoxelProjectManifest {
         seaLevel: 18,
         islandShape: { ...DEFAULT_ISLAND_SHAPE_CONFIG, enabled: true, oceanRim: true, seed: 73 },
       },
+      generatorQuery: {
+        water: "1",
+        quality: "balanced",
+        hydroUnified: "1",
+      },
     },
     config: cfg,
     state,
@@ -264,6 +269,12 @@ describe("voxel project archive", () => {
     const duplicate = manifest();
     duplicate.props = [duplicate.props[0]!, { ...duplicate.props[0]! }];
     expect(() => validateVoxelProjectManifest(duplicate)).toThrow(/id is duplicated/i);
+  });
+
+  it("rejects invalid generator query identity", () => {
+    const invalid = manifest() as unknown as { world: { generatorQuery: Record<string, string> } };
+    invalid.world.generatorQuery = { arbitrary: "1" };
+    expect(() => validateVoxelProjectManifest(invalid)).toThrow(/unsupported key/i);
   });
 
   it("rejects unsafe or duplicate texture paths", () => {
