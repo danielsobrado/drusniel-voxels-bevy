@@ -55,6 +55,7 @@ export interface WaterRuntimeFeatures {
   readonly caustics: boolean;
   readonly atlasDrivenLevelCount: number;
   readonly clipmapOuterHalfSpanM: number;
+  readonly clipmapGuaranteedHalfSpanM: number;
 }
 
 export interface WaterController {
