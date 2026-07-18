@@ -15,8 +15,8 @@ describe("tree depth prepass runtime helpers", () => {
     expect(parseTreeDepthPrepassMaxLod("mid")).toBe("mid");
     expect(parseTreeDepthPrepassMaxLod("far")).toBe("far");
     expect(parseTreeDepthPrepassMaxLod("impostor")).toBe("impostor");
-    expect(parseTreeDepthPrepassMaxLod("bad")).toBe("impostor");
-    expect(parseTreeDepthPrepassMaxLod(null)).toBe("impostor");
+    expect(parseTreeDepthPrepassMaxLod("bad")).toBe("none");
+    expect(parseTreeDepthPrepassMaxLod(null)).toBe("none");
   });
 
   it("limits prepass by max LOD", () => {
