@@ -35,6 +35,41 @@ interface PendingBuild {
   reject: (error: Error) => void;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isBuiltTile(value: unknown): value is SunLightWorkerBuiltTile {
+  if (!isRecord(value) || typeof value.key !== "string" || value.key.length === 0) return false;
+  if (!isNonNegativeSafeInteger(value.resolution) || value.resolution <= 0) return false;
+  if (!(value.values instanceof Uint8Array)) return false;
+  return value.values.length === value.resolution * value.resolution;
+}
+
+function isWorkerResponse(value: unknown): value is SunLightWorkerResponse {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  if (value.type === "error") {
+    return (value.requestId === null || isNonNegativeSafeInteger(value.requestId))
+      && typeof value.message === "string";
+  }
+  return value.type === "built"
+    && isNonNegativeSafeInteger(value.requestId)
+    && isNonNegativeSafeInteger(value.configId)
+    && Array.isArray(value.tiles)
+    && value.tiles.every(isBuiltTile)
+    && typeof value.buildMs === "number"
+    && Number.isFinite(value.buildMs)
+    && value.buildMs >= 0;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createSunLightRemoteTileBuilder(): SunLightRemoteTileBuilder | null {
   let worker: Worker;
   try {
@@ -44,19 +79,34 @@ export function createSunLightRemoteTileBuilder(): SunLightRemoteTileBuilder | n
   }
 
   let failed = false;
+  let terminated = false;
   let configId = 0;
   let nextRequestId = 1;
   const pending = new Map<number, PendingBuild>();
 
-  const failAll = (message: string): void => {
-    failed = true;
-    const error = new Error(message);
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
+  const terminateOnce = (): void => {
+    if (terminated) return;
+    terminated = true;
+    worker.terminate();
   };
 
-  worker.onmessage = (event: MessageEvent<SunLightWorkerResponse>) => {
+  const failAll = (message: string): void => {
+    if (!failed) {
+      failed = true;
+      const error = new Error(message);
+      for (const request of pending.values()) request.reject(error);
+      pending.clear();
+    }
+    terminateOnce();
+  };
+
+  worker.onmessage = (event: MessageEvent<unknown>) => {
+    if (failed) return;
     const response = event.data;
+    if (!isWorkerResponse(response)) {
+      failAll("sun-light build worker returned an invalid protocol message");
+      return;
+    }
     if (response.type === "error") {
       failAll(`sun-light build worker error: ${response.message}`);
       return;
@@ -75,16 +125,25 @@ export function createSunLightRemoteTileBuilder(): SunLightRemoteTileBuilder | n
   worker.onerror = (event) => {
     failAll(`sun-light build worker crashed: ${event.message ?? "unknown error"}`);
   };
+  worker.onmessageerror = () => {
+    failAll("sun-light build worker response could not be deserialized");
+  };
 
-  const post = (message: SunLightWorkerRequest, transfer?: Transferable[]): void => {
-    worker.postMessage(message, transfer ?? []);
+  const post = (message: SunLightWorkerRequest, transfer?: Transferable[]): boolean => {
+    try {
+      worker.postMessage(message, transfer ?? []);
+      return true;
+    } catch (error) {
+      failAll(`sun-light build worker postMessage failed: ${errorMessage(error)}`);
+      return false;
+    }
   };
 
   return {
     available: () => !failed,
     configure(input) {
       if (failed) return;
-      configId++;
+      const nextConfigId = configId + 1;
       const summary = input.summary
         ? {
           res: input.summary.res,
@@ -92,13 +151,15 @@ export function createSunLightRemoteTileBuilder(): SunLightRemoteTileBuilder | n
           heightMax: input.summary.heightMax.slice(),
         }
         : null;
-      post({
+      if (post({
         type: "configure",
-        configId,
+        configId: nextConfigId,
         terrainFieldConfig: input.terrainFieldConfig,
         summary,
         options: input.options,
-      }, summary ? [summary.heightMax.buffer] : []);
+      }, summary ? [summary.heightMax.buffer] : [])) {
+        configId = nextConfigId;
+      }
     },
     build(tiles) {
       if (failed) return Promise.reject(new Error("sun-light build worker unavailable"));
@@ -110,7 +171,6 @@ export function createSunLightRemoteTileBuilder(): SunLightRemoteTileBuilder | n
     },
     dispose() {
       failAll("sun-light build worker disposed");
-      worker.terminate();
     },
   };
 }
