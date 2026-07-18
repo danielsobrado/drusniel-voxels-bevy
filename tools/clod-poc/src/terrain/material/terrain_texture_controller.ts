@@ -7,6 +7,7 @@ import {
 import {
   disposeImportedTerrainTextureResources,
   loadImportedTerrainTextureResources,
+  type ImportedTerrainTextureResource,
 } from "./terrain_texture_import_transaction.js";
 import {
   configureNormalTexture,
@@ -99,6 +100,57 @@ export interface TerrainTextureController {
   projectTextureMetadata(): ProjectTextureSlot[];
 }
 
+function extension(path: string | null | undefined): string | null {
+  return path?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? null;
+}
+
+function importedSlotState(
+  manifest: TerrainTextureImportManifest,
+  resource: ImportedTerrainTextureResource | undefined,
+): TerrainTextureSlot {
+  const slot: TerrainTextureSlot = {
+    ...emptyTextureSlotState(),
+    name: manifest.name,
+    selectedId: manifest.selectedId,
+    scale: manifest.scale,
+    heightMin: manifest.heightMin,
+    heightMax: manifest.heightMax,
+    customMimeType: manifest.mimeType ?? null,
+    customExtension: extension(manifest.customPath),
+  };
+
+  if (manifest.source === "empty") {
+    if (resource) throw new Error(`Imported empty texture slot ${manifest.index} unexpectedly has a resource`);
+    return slot;
+  }
+  if (!resource) throw new Error(`Imported texture slot ${manifest.index} has no loaded resource`);
+
+  slot.texture = resource.texture;
+  slot.previewUrl = resource.previewUrl;
+  slot.normalTexture = resource.normalTexture;
+  slot.normalPreviewUrl = resource.normalPreviewUrl;
+  if (manifest.source === "custom") {
+    if (!resource.customBytes || !resource.customMimeType || !resource.customExtension) {
+      throw new Error(`Imported custom texture slot ${manifest.index} is incomplete`);
+    }
+    slot.selectedId = "custom";
+    slot.customBytes = resource.customBytes.slice();
+    slot.customMimeType = resource.customMimeType;
+    slot.customExtension = resource.customExtension;
+    slot.normalBytes = resource.normalBytes?.slice() ?? null;
+    slot.normalMimeType = resource.normalMimeType;
+    slot.normalExtension = resource.normalExtension;
+  }
+  return slot;
+}
+
+function disposeSlotResources(slot: TerrainTextureSlot): void {
+  slot.texture?.dispose();
+  slot.normalTexture?.dispose();
+  if (slot.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.previewUrl);
+  if (slot.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.normalPreviewUrl);
+}
+
 export function createTerrainTextureController(deps: TerrainTextureControllerDeps): TerrainTextureController {
   const { textureArraySize, textureMipmapsEnabled, maxAnisotropy, textureLoadOptions } = deps;
   const importedSlots = deps.stagedImport?.manifest.textures;
@@ -110,13 +162,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   for (let i = 0; i < slots.length; i++) {
     const imported = importedSlots?.[i];
     if (imported) {
-      slots[i].name = imported.name;
-      slots[i].selectedId = imported.selectedId;
-      slots[i].scale = imported.scale;
-      slots[i].heightMin = imported.heightMin;
-      slots[i].heightMax = imported.heightMax;
-      slots[i].customMimeType = imported.mimeType ?? null;
-      slots[i].customExtension = imported.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? null;
+      slots[i] = importedSlotState(imported, undefined);
       continue;
     }
 
@@ -192,11 +238,15 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     customExtension: string,
   ) => {
     const old = slots[index];
-    old.texture?.dispose();
-    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
+    disposeSlotResources(old);
     slots[index] = {
       ...old,
       texture,
+      normalTexture: null,
+      normalPreviewUrl: null,
+      normalBytes: null,
+      normalMimeType: null,
+      normalExtension: null,
       name,
       previewUrl,
       selectedId: "custom",
@@ -215,10 +265,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     selectedId: string,
   ) => {
     const old = slots[index];
-    old.texture?.dispose();
-    old.normalTexture?.dispose();
-    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
+    disposeSlotResources(old);
     slots[index] = {
       ...old,
       texture,
@@ -249,7 +296,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     markTextureContentChanged();
   };
 
-  const setSlotNormal = (index: number, texture: THREE.Texture, previewUrl: string, bytes: Uint8Array, mimeType: string, extension: string) => {
+  const setSlotNormal = (index: number, texture: THREE.Texture, previewUrl: string, bytes: Uint8Array, mimeType: string, normalExtension: string) => {
     const slot = slots[index];
     slot.normalTexture?.dispose();
     if (slot.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.normalPreviewUrl);
@@ -257,7 +304,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     slot.normalPreviewUrl = previewUrl;
     slot.normalBytes = bytes.slice();
     slot.normalMimeType = mimeType;
-    slot.normalExtension = extension;
+    slot.normalExtension = normalExtension;
     markTextureContentChanged();
   };
 
@@ -274,16 +321,15 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   };
 
   const clearTextureSlot = (index: number) => {
-    const slot = slots[index];
-    slot.texture?.dispose();
-    if (slot.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.previewUrl);
-    clearSlotNormal(index);
+    disposeSlotResources(slots[index]);
     slots[index] = emptyTextureSlotState();
     markTextureContentChanged();
   };
 
   const clearAllTextures = () => {
-    for (let i = 0; i < slots.length; i++) clearTextureSlot(i);
+    for (const slot of slots) disposeSlotResources(slot);
+    slots.splice(0, slots.length, ...slots.map(() => emptyTextureSlotState()));
+    markTextureContentChanged();
   };
 
   const addEmptySlot = () => {
@@ -293,7 +339,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
 
   const removeSlot = (index: number) => {
     if (slots.length <= 1) return;
-    clearTextureSlot(index);
+    disposeSlotResources(slots[index]);
     slots.splice(index, 1);
     markTextureContentChanged();
   };
@@ -352,43 +398,19 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       progress,
     });
 
-    let committed = 0;
     try {
-      for (const resource of resources) {
-        const { slot } = resource;
-        if (slot.source === "custom") {
-          if (!resource.customBytes || !resource.customMimeType || !resource.customExtension) {
-            throw new Error(`Imported custom texture slot ${slot.index} is incomplete`);
-          }
-          setTextureSlot(
-            slot.index,
-            resource.texture,
-            slot.name,
-            resource.previewUrl,
-            resource.customBytes,
-            resource.customMimeType,
-            resource.customExtension,
-          );
-          if (resource.normalTexture && resource.normalPreviewUrl && resource.normalBytes && resource.normalMimeType && resource.normalExtension) {
-            setSlotNormal(
-              slot.index,
-              resource.normalTexture,
-              resource.normalPreviewUrl,
-              resource.normalBytes,
-              resource.normalMimeType,
-              resource.normalExtension,
-            );
-          }
-        } else {
-          setBuiltinTextureSlot(slot.index, resource.texture, slot.name, resource.previewUrl, slot.selectedId);
-          if (resource.normalTexture && resource.normalPreviewUrl) {
-            setBuiltinSlotNormal(slot.index, resource.normalTexture, resource.normalPreviewUrl);
-          }
-        }
-        committed++;
+      const resourcesByIndex = new Map(resources.map((resource) => [resource.slot.index, resource]));
+      const nextSlots = stagedImport.manifest.textures.map((manifest) => (
+        importedSlotState(manifest, resourcesByIndex.get(manifest.index))
+      ));
+      if (resourcesByIndex.size !== resources.length || resources.length !== nextSlots.filter((slot) => slot.texture !== null).length) {
+        throw new Error("Imported texture resources do not match the manifest");
       }
+      for (const slot of slots) disposeSlotResources(slot);
+      slots.splice(0, slots.length, ...nextSlots);
+      markTextureContentChanged();
     } catch (error) {
-      disposeImportedTerrainTextureResources(resources.slice(committed));
+      disposeImportedTerrainTextureResources(resources);
       throw error;
     }
   };
