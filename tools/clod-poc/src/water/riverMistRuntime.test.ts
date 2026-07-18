@@ -39,9 +39,14 @@ describe("river mist runtime", () => {
     expect(readRiverMistRuntimeSettings(new URLSearchParams()).enabled).toBe(false);
   });
 
-  it("fails closed when the shared mask configuration disables river mist", () => {
+  it("fails closed for disabled or ineffective shared settings", () => {
     const settings = cloneEnvironmentalMaskSettings();
     settings.riverMist.enabled = false;
+    setEnvironmentalMaskSettings(settings);
+    expect(readRiverMistRuntimeSettings(new URLSearchParams("riverMist=1")).enabled).toBe(false);
+
+    settings.riverMist.enabled = true;
+    settings.riverMist.particles.maxParticles = 0;
     setEnvironmentalMaskSettings(settings);
     expect(readRiverMistRuntimeSettings(new URLSearchParams("riverMist=1")).enabled).toBe(false);
   });
