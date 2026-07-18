@@ -55,6 +55,23 @@ export interface WaterGlacialMurkinessConfig {
   reflectionDampingMin: number;
 }
 
+export interface WaterRockFlourConfig {
+  /** Kill switch for the colour component of glacial suspended sediment. */
+  enabled: boolean;
+  /** Fraction of the shared glacial-murkiness state applied to lakes. */
+  lakeStrength: number;
+  /** Fraction of the shared glacial-murkiness state applied to rivers. */
+  riverStrength: number;
+  /** Suspended-sediment target colour for lakes. */
+  lakeColor: [number, number, number];
+  /** Suspended-sediment target colour for rivers. */
+  riverColor: [number, number, number];
+  /** Maximum blend into the shallow body colour. */
+  shallowBlend: number;
+  /** Maximum blend into the deep body colour. */
+  deepBlend: number;
+}
+
 export interface WaterVisualConfig {
   shallowColor: [number, number, number];
   deepColor: [number, number, number];
@@ -80,6 +97,8 @@ export interface WaterVisualConfig {
   bodies: WaterBodyVisualPresets;
   /** Optional biome-state multiplier over existing lake/river optical presets. */
   glacialMurkiness: WaterGlacialMurkinessConfig;
+  /** Optional rock-flour colour response using the existing turbidity scatter path. */
+  rockFlour: WaterRockFlourConfig;
   refraction: WaterRefractionConfig;
   reflection: WaterReflectionConfig;
   depthWrite: boolean;
