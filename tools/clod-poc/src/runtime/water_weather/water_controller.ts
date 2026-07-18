@@ -4,8 +4,10 @@ import {
   WATER_DEBUG_MODES,
   WaterClipmap,
   WaterField,
+  resolveGlacialWaterVisual,
   type WaterDebugState,
 } from "../../water/index.js";
+import { readActiveBiomeVisualState } from "../../environment/biome_visual_state_runtime.js";
 import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { resolveWaterQualityTier } from "../../water/water_quality_overrides.js";
@@ -57,7 +59,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     requestedReflection,
     deps.isWebGpu ? "webgpu" : "webgl",
   );
-  const clipmapVisual = useHighQualityWebGpuWater
+  const tierVisual = useHighQualityWebGpuWater
     ? {
         ...deps.waterConfig.visual,
         reflection: {
@@ -66,17 +68,18 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         },
       }
     : deps.waterConfig.visual;
+  const clipmapVisual = resolveGlacialWaterVisual(tierVisual, readActiveBiomeVisualState());
   const waterMaterialFactory = deps.isWebGpu
     ? useHighQualityWebGpuWater
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
       : (await import("../../water/waterPerfNodeMaterial.js")).createWaterPerfNodeMaterial
     : createWaterShaderMaterial;
-  const clipmapWaterConfig = useHighQualityWebGpuWater
-    ? {
+  const clipmapWaterConfig = clipmapVisual === deps.waterConfig.visual
+    ? deps.waterConfig
+    : {
         ...deps.waterConfig,
         visual: clipmapVisual,
-      }
-    : deps.waterConfig;
+      };
   const infiniteWorldWater = deps.hydrologySystem?.supportsInfiniteWorldSamples() === true;
 
   const tileBypassCellSize = deps.hydrologySystem?.tileCoarseBypassCellSize() ?? null;
