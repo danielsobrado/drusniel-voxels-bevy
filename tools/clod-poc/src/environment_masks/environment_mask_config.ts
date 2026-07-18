@@ -19,6 +19,7 @@ type RecordValue = Record<string, unknown>;
 const RIVER_MIST_PARTICLE_LIMITS = Object.freeze({
   spawnRadiusM: 256,
   spacingM: 32,
+  sampleHintM: 256,
   emitIntervalS: 5,
   maxParticles: 2_048,
   maxEmittersPerTick: 128,
@@ -49,6 +50,7 @@ export const DEFAULT_ENVIRONMENTAL_MASK_SETTINGS: EnvironmentalMaskSettings = Ob
     particles: Object.freeze({
       spawnRadiusM: 54,
       spacingM: 5.5,
+      sampleHintM: 16,
       emitIntervalS: 0.12,
       maxParticles: 240,
       maxEmittersPerTick: 18,
@@ -193,6 +195,7 @@ function parseRiverMistParticles(
   return {
     spawnRadiusM: readBounded(raw.spawn_radius_m ?? raw.spawnRadiusM, defaults.spawnRadiusM, 1, RIVER_MIST_PARTICLE_LIMITS.spawnRadiusM),
     spacingM: readBounded(raw.spacing_m ?? raw.spacingM, defaults.spacingM, 1, RIVER_MIST_PARTICLE_LIMITS.spacingM),
+    sampleHintM: readBounded(raw.sample_hint_m ?? raw.sampleHintM, defaults.sampleHintM, 1, RIVER_MIST_PARTICLE_LIMITS.sampleHintM),
     emitIntervalS: readBounded(raw.emit_interval_s ?? raw.emitIntervalS, defaults.emitIntervalS, 0.03, RIVER_MIST_PARTICLE_LIMITS.emitIntervalS),
     maxParticles: readInteger(raw.max_particles ?? raw.maxParticles, defaults.maxParticles, 0, RIVER_MIST_PARTICLE_LIMITS.maxParticles),
     maxEmittersPerTick: readInteger(raw.max_emitters_per_tick ?? raw.maxEmittersPerTick, defaults.maxEmittersPerTick, 0, RIVER_MIST_PARTICLE_LIMITS.maxEmittersPerTick),
@@ -314,7 +317,7 @@ function readFraction(value: unknown, fallback: number): number {
 }
 
 function readColor(value: unknown, fallback: [number, number, number]): [number, number, number] {
-  if (!Array.isArray(value) || value.length !== 3) return [...fallback];
+  if (!Array.isArray(value) || value.length !== 3) return [fallback[0], fallback[1], fallback[2]];
   return [
     readFraction(value[0], fallback[0]),
     readFraction(value[1], fallback[1]),
