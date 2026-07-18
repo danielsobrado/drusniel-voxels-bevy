@@ -410,7 +410,10 @@ const PROFILE = parseProfile(CLI_ARGS);
 const CONTINENT_ROUTE = MOVEMENT_ROUTE_PROFILE.name === "continent-short"
   || MOVEMENT_ROUTE_PROFILE.name.startsWith("coast-to-coast");
 const ROUTE_CALIBRATION = CONTINENT_ROUTE && CLI_ARGS.includes("--calibrate");
-const ROUTE_THRESHOLDS_PATH = resolve(cliValues(CLI_ARGS, "--thresholds").at(-1) ?? "config/long_map_route_thresholds.json");
+const DEFAULT_ROUTE_THRESHOLDS_PATH = MOVEMENT_CONTENT_PROFILE === "representative"
+  ? "config/long_map_representative_route_thresholds.json"
+  : "config/long_map_route_thresholds.json";
+const ROUTE_THRESHOLDS_PATH = resolve(cliValues(CLI_ARGS, "--thresholds").at(-1) ?? DEFAULT_ROUTE_THRESHOLDS_PATH);
 const ROUTE_TAIL_THRESHOLDS: ContinentRouteTailThresholds | null = CONTINENT_ROUTE && !ROUTE_CALIBRATION && existsSync(ROUTE_THRESHOLDS_PATH)
   ? JSON.parse(readFileSync(ROUTE_THRESHOLDS_PATH, "utf8")) as ContinentRouteTailThresholds
   : null;
@@ -1797,12 +1800,16 @@ async function main(): Promise<void> {
     console.log(`[infinite-accept] repeat-summary ${rel(resolve(outDir, "repeat-summary.json"))} run1Skew=${run1Skew}`);
   }
 
-  if (anyRuntimeFailed) {
+  if (anyRuntimeFailed && !ROUTE_CALIBRATION) {
     console.error(`[infinite-accept] FAILED with runtime failure(s)`);
     process.exit(1);
   }
   if (ROUTE_CALIBRATION) {
     console.log("[infinite-accept] calibration captured; this report is deliberately not proof");
+    if (anyRuntimeFailed) {
+      console.warn("[infinite-accept] calibration runs included runtime failures; inspect repeat-summary before freezing thresholds");
+      process.exit(1);
+    }
     return;
   }
   console.log("[infinite-accept] ok");

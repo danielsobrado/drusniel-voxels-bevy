@@ -36,19 +36,15 @@ exists; standing evidence does not).
 | LM1 | **CLOSED** | Plan 3 P1 readiness unblocks LM5 teleport |
 | LM2 | **CLOSED** | Keep floating origin **disabled**. Rim matrix `shots/long-map-precision/rim-matrix-accepted-2026-07-18/`; decision addendum in `docs/coordinate-system-2026-07-12.md` (fp32 better p95/specular than FO at 16-page continent) |
 | LM3 infrastructure | **CLOSED** | Frozen thresholds `config/long_map_route_thresholds.json` (p50≤9, p95≤22, p99≤50, max≤100, over16.7≤725, …). Repeatability PASS `repeatability-runs/long-map-infrastructure-final-2026-07-18/` (6 runs on `6aaffba7`: median/worst p95 **19.5 / 20.0**, max **61.8 / 70.2**, over100 **0 / 0**) |
-| LM3 representative | **PARTIAL** | `--representative` → `scene=rpg-village` + agents; dense stream budgets in `movement_route_profile.ts`. Short (≈4.8 km) cal-v2 on `cf1ebf32`: 4/5 clean (p95 med/worst **17.4 / 18.1**, max med/worst **68.4 / 79.2**, over100 0); run 5 failed waterMs 0.6 vs 0.5. **Representative thresholds not frozen.** Full dense coast-to-coast 5+1 not run |
+| LM3 representative | **SHORT FROZEN** | Harness speedups landed (calibrate skips water; pre-route budgets 64/16/4/cache1024 restored to 16/4/1/cache512 before route; `--repeat N`; Quaternius catalog JSON served, SPA HTML rejected). Short cal-v3 `acceptance-runs/long-map-short-representative-cal-v3-2026-07-18/` (`--repeat 5`, scenes=`walk` only): wall mean **408 s/run** (total **2041 s**); pre-route converge **90–135 s**; restore verified every run; `run1Skew=false`. Spread → frozen `config/long_map_representative_route_thresholds.json` (p50≤14, p95≤28, p99≤40, max≤140, over16.7≤1900, …). Note: 2/5 runs had a single >100 ms frame (hard gate still fails those). **Full dense coast-to-coast 5+1 not run** |
 | LM4 | **OPEN** | `accept:continent-revisit` scaffolding; no standing eviction / cost-table evidence |
 | LM5 | **OPEN** | Plan 3 readiness available; soak/teleport/bg-fg/device-loss evidence not closed |
 
 **Next (dependency order):**
 
-1. Finish calibrate-harness speedups already in the working tree (`--calibrate` skips forced
-   water; pre-route stream-budget boost restored before route; `--repeat N`; Quaternius
-   catalog 404 fix) — then freeze **representative short-route** thresholds from a clean
-   5-run spread.
-2. LM3 full representative coast-to-coast under the 5+1 protocol (release gate).
-3. LM4 A→B→A revisit with eviction assertions → parent Phase 7 go/no-go.
-4. LM5 soak + teleport (plan 3 contract) + background/foreground + device-loss fail-loud.
+1. LM3 full representative coast-to-coast under the 5+1 protocol (release gate) using frozen representative thresholds.
+2. LM4 A→B→A revisit with eviction assertions → parent Phase 7 go/no-go.
+3. LM5 soak + teleport (plan 3 contract) + background/foreground + device-loss fail-loud.
 
 Execution evidence and per-file land/park decisions:
 `../performance/long-map-execution-evidence-2026-07-16.md` (may lag this snapshot; prefer
@@ -257,21 +253,22 @@ representative profile : + dense forest, settlement, dungeon entrance, construct
    plus one fresh-profile run. Nightly runs continue as drift monitoring, not as proof.
 - [x] short per-change route landed + gates calibrated (5-run spread recorded) —
       **infrastructure** short + full thresholds frozen in
-      `config/long_map_route_thresholds.json`. **Representative** short cal-v2
-      (`acceptance-runs/long-map-short-representative-cal-v2-{1..5}-2026-07-18/`, SHA
-      `cf1ebf32`): clean 4/5 — p95 med/worst 17.4/18.1, max 68.4/79.2, over100 0;
-      run 5 waterMs flake (0.6 vs 0.5). Representative thresholds **not frozen** yet.
+      `config/long_map_route_thresholds.json`. **Representative** short cal-v3
+      (`acceptance-runs/long-map-short-representative-cal-v3-2026-07-18/`, `--repeat 5`,
+      water skipped, budget boost/restore verified): p50 med/worst 8.3/11.9, p95 18.4/24.1,
+      p99 24.3/32.7, max 81.9/127.7, over16 600/1676, over100 0/1. Thresholds frozen in
+      `config/long_map_representative_route_thresholds.json`.
 - [x] full route landed (infrastructure profile) + gates green under the protocol —
       `repeatability-runs/long-map-infrastructure-final-2026-07-18/` PASS (6 runs on
       `6aaffba7`; median/worst p95 19.5/20.0, max 61.8/70.2, over100 0/0)
 - [ ] representative-profile full coast-to-coast 5+1 recorded (release gate) —
       **wiring done 2026-07-18**: `--representative` → `scene=rpg-village` + agents via
-      `movement_route_profile.ts` (plan 2 D5 handoff). Short-route calibrate evidence
-      above; freeze short thresholds, then run full dense 5+1. Dense budgets already
-      differ (frontier lag 768 m, region drain 600, stream acceptance floors).
+      `movement_route_profile.ts` (plan 2 D5 handoff). Short-route thresholds frozen above;
+      next is full dense 5+1. Dense budgets already differ (frontier lag 768 m, region
+      drain 600, stream acceptance floors).
 - [x] environment records attached to infrastructure gate tables (repeatability report
-      embeds commit/browser/GPU/driver/display/power/viewport). Representative freeze
-      must attach the same template.
+      embeds commit/browser/GPU/driver/display/power/viewport). Representative cal-v3
+      reports embed the same template.
 
 ### LM4 — Revisit and persistence economics (feeds parent Phase 7 decisions)
 
