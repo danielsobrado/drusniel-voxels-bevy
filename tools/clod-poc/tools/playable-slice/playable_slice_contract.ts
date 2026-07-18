@@ -65,12 +65,33 @@ function stepMap(report: Pick<PlayableSliceRunReport, "steps">): Map<PlayableSli
   return new Map(report.steps.map((evidence) => [evidence.step, evidence]));
 }
 
-function maxIncrease(
+function stepSequenceFailures(steps: readonly PlayableSliceStepEvidence[]): string[] {
+  const failures: string[] = [];
+  if (steps.length !== PLAYABLE_SLICE_STEPS.length) {
+    failures.push(`expected ${PLAYABLE_SLICE_STEPS.length} step records, received ${steps.length}`);
+  }
+  const count = Math.min(steps.length, PLAYABLE_SLICE_STEPS.length);
+  for (let index = 0; index < count; index += 1) {
+    const expected = PLAYABLE_SLICE_STEPS[index];
+    const actual = steps[index]?.step;
+    if (actual !== expected) failures.push(`step ${index + 1} expected ${expected}, received ${actual ?? "missing"}`);
+  }
+  return failures;
+}
+
+function increaseAcrossCounterResets(
   snapshots: readonly PlayableSliceSnapshot[],
-  baseline: number,
   read: (snapshot: PlayableSliceSnapshot) => number,
 ): number {
-  return Math.max(0, ...snapshots.map((snapshot) => read(snapshot) - baseline));
+  if (snapshots.length === 0) return 0;
+  let previous = read(snapshots[0]!);
+  let increase = 0;
+  for (let index = 1; index < snapshots.length; index += 1) {
+    const current = read(snapshots[index]!);
+    increase += current >= previous ? current - previous : current;
+    previous = current;
+  }
+  return increase;
 }
 
 export function publicRouteAuditFailures(
@@ -86,7 +107,10 @@ export function evaluatePlayableSliceRun(
   report: Omit<PlayableSliceRunReport, "passed" | "failures">,
   thresholds: Readonly<PlayableSliceThresholds> = DEFAULT_PLAYABLE_SLICE_THRESHOLDS,
 ): string[] {
-  const failures = publicRouteAuditFailures(report.mode, report.actions);
+  const failures = [
+    ...publicRouteAuditFailures(report.mode, report.actions),
+    ...stepSequenceFailures(report.steps),
+  ];
   const steps = stepMap(report);
   for (const step of PLAYABLE_SLICE_STEPS) {
     if (!steps.has(step)) failures.push(`missing step evidence: ${step}`);
@@ -114,8 +138,8 @@ export function evaluatePlayableSliceRun(
   if (placed.construction.placedPieces <= dug.construction.placedPieces) {
     failures.push("public construction input did not place a piece");
   }
-  if (placed.construction.colliders < placed.construction.placedPieces) {
-    failures.push("placed construction collider count lagged visible pieces");
+  if (placed.construction.colliders !== placed.construction.placedPieces) {
+    failures.push("placed construction visual/collider counts diverged");
   }
   if (placed.construction.unsupportedPieces !== 0 || placed.construction.pendingCollapses !== 0) {
     failures.push("placed construction entered an unsupported or collapsing state");
@@ -129,11 +153,35 @@ export function evaluatePlayableSliceRun(
   if (water.swim.mode !== "surface" && water.swim.mode !== "submerged") {
     failures.push(`player did not enter authoritative water: ${water.swim.mode}`);
   }
+  if (water.swim.bodyId.length === 0 || water.swim.submersionM <= 0) {
+    failures.push("swim state did not identify an immersed authoritative water body");
+  }
+  if (spell.spell.accepted <= water.spell.accepted) {
+    failures.push("public earth spell input was not accepted");
+  }
+  if (spell.spell.denied > water.spell.denied) {
+    failures.push("public earth spell input was denied");
+  }
+  if (spell.spell.committed <= water.spell.committed) {
+    failures.push("terrain-affecting spell did not commit an authoritative edit");
+  }
+  if (spell.spell.convergenceCompleted <= water.spell.convergenceCompleted) {
+    failures.push("terrain-affecting spell did not complete terrain convergence");
+  }
+  if (spell.spell.convergenceFailed > water.spell.convergenceFailed) {
+    failures.push("terrain-affecting spell reported terrain convergence failure");
+  }
   if (spell.spell.runtimeConvergenceCompleted <= water.spell.runtimeConvergenceCompleted) {
     failures.push("terrain-affecting spell did not reach runtime convergence");
   }
   if (spell.spell.runtimeConvergenceFailed > water.spell.runtimeConvergenceFailed) {
     failures.push("terrain-affecting spell reported runtime convergence failure");
+  }
+  if (
+    spell.terrain.revision <= water.terrain.revision
+    || spell.terrain.voxelDeltaCount <= water.terrain.voxelDeltaCount
+  ) {
+    failures.push("terrain-affecting spell did not change authoritative terrain state");
   }
   if (checkpoint.persistence.checkpointCompleted <= spell.persistence.checkpointCompleted) {
     failures.push("public checkpoint action did not complete");
@@ -161,21 +209,25 @@ export function evaluatePlayableSliceRun(
   if (continued.frame <= reloaded.frame) failures.push("render loop did not advance after reload");
 
   const safetyDeltas = {
-    coverage: maxIncrease(snapshots, start.safety.colliderCoverageMissing, (snapshot) => snapshot.safety.colliderCoverageMissing),
-    recoveries: maxIncrease(snapshots, start.safety.recoveries, (snapshot) => snapshot.safety.recoveries),
-    syncBuilds: maxIncrease(snapshots, start.safety.syncFrameBuilds, (snapshot) => snapshot.safety.syncFrameBuilds),
-    barriers: maxIncrease(snapshots, start.safety.frontierBarrierEngagements, (snapshot) => snapshot.safety.frontierBarrierEngagements),
-    expired: maxIncrease(snapshots, start.safety.editCommandsExpired, (snapshot) => snapshot.safety.editCommandsExpired),
-    deniedNotReady: maxIncrease(snapshots, start.safety.editsDeniedNotReady, (snapshot) => snapshot.safety.editsDeniedNotReady),
+    coverage: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.colliderCoverageMissing),
+    recoveries: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.recoveries),
+    syncBuilds: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.syncFrameBuilds),
+    workerFaults: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.colliderWorkerFaults),
+    barriers: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.frontierBarrierEngagements),
+    expired: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.editCommandsExpired),
+    deniedNotReady: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.editsDeniedNotReady),
+    commandDenials: increaseAcrossCounterResets(snapshots, (snapshot) => snapshot.safety.editCommandDenials),
   };
   if (safetyDeltas.coverage !== 0) failures.push(`collider coverage was missing ${safetyDeltas.coverage} times`);
   if (safetyDeltas.recoveries !== 0) failures.push(`player recovery fired ${safetyDeltas.recoveries} times`);
   if (safetyDeltas.syncBuilds !== 0) failures.push(`synchronous frame collider builds increased by ${safetyDeltas.syncBuilds}`);
+  if (safetyDeltas.workerFaults !== 0) failures.push(`collider worker faults increased by ${safetyDeltas.workerFaults}`);
   if (safetyDeltas.barriers > thresholds.maxFrontierBarrierEngagements) {
     failures.push(`frontier barrier engagements ${safetyDeltas.barriers} exceed ${thresholds.maxFrontierBarrierEngagements}`);
   }
   if (safetyDeltas.expired !== 0) failures.push(`edit commands expired ${safetyDeltas.expired} times`);
   if (safetyDeltas.deniedNotReady !== 0) failures.push(`edits were denied as not-ready ${safetyDeltas.deniedNotReady} times`);
+  if (safetyDeltas.commandDenials !== 0) failures.push(`edit command denials increased by ${safetyDeltas.commandDenials}`);
   if (report.wallClockMs > thresholds.maxWallClockMs) {
     failures.push(`wall clock ${report.wallClockMs.toFixed(0)}ms exceeds ${thresholds.maxWallClockMs}ms`);
   }

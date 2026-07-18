@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { PlayableSliceSnapshot } from "../../src/qa/playable_slice_snapshot.js";
-import type { PlayableSliceActionRecord } from "./playable_slice_contract.js";
+import type {
+  PlayableSliceActionRecord,
+  PlayableSliceStepEvidence,
+} from "./playable_slice_contract.js";
 import {
   runContinuousPlayableSlice,
   runDiagnosticPlayableSlice,
@@ -53,9 +56,11 @@ function snapshot(overrides: Partial<PlayableSliceSnapshot> = {}): PlayableSlice
       colliderCoverageMissing: 0,
       frontierBarrierEngagements: 0,
       syncFrameBuilds: 0,
+      colliderWorkerFaults: 0,
       recoveries: 0,
       editsDeniedNotReady: 0,
       editCommandsExpired: 0,
+      editCommandDenials: 0,
     },
     ...overrides,
   };
@@ -127,21 +132,33 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
 
 class FakeDriver implements DiagnosticPlayableSliceDriver {
   readonly actions: PlayableSliceActionRecord[] = [];
+  readonly evidence: PlayableSliceStepEvidence[] = [];
   readonly maxFrameMs = 80;
   readonly maxFrameP95Ms = 30;
   private readonly snapshots = routeSnapshots();
   private elapsed = 0;
   private current = snapshot();
+  private pointerLocked = true;
 
   nowMs(): number { return this.elapsed += 10; }
   async snapshot(): Promise<PlayableSliceSnapshot> { return this.current; }
-  async keyDown(key: string): Promise<void> { this.record("keyboard", `down:${key}`); }
-  async keyUp(key: string): Promise<void> { this.record("keyboard", `up:${key}`); }
+  recordEvidence(item: PlayableSliceStepEvidence): void { this.evidence.push(item); }
+  async keyDown(key: string): Promise<void> {
+    if (key === "Tab") this.pointerLocked = false;
+    this.record("keyboard", `down:${key}`);
+  }
+  async keyUp(key: string): Promise<void> {
+    if (key === "Tab") this.pointerLocked = true;
+    this.record("keyboard", `up:${key}`);
+  }
   async press(key: string, modifiers: readonly string[] = []): Promise<void> {
     this.record("keyboard", `${modifiers.join("+")}${modifiers.length > 0 ? "+" : ""}${key}`);
   }
   async pointerMoveToCenter(): Promise<void> { this.record("pointer", "move:center"); }
   async pointerClick(button: "left" | "right"): Promise<void> { this.record("pointer", `click:${button}`); }
+  async waitForPointerLock(locked: boolean): Promise<void> {
+    if (this.pointerLocked !== locked) throw new Error(`pointer lock expected ${locked}`);
+  }
   async reload(): Promise<void> { this.record("navigation", "reload"); }
   async diagnosticBarrier(label: string): Promise<void> { this.record("diagnostic_barrier", label); }
   async waitUntil(
@@ -159,14 +176,35 @@ class FakeDriver implements DiagnosticPlayableSliceDriver {
   }
 }
 
+function actionIndex(actions: readonly PlayableSliceActionRecord[], action: string): number {
+  return actions.findIndex((item) => item.action === action);
+}
+
 describe("playable slice route", () => {
-  it("runs the continuous sequence without diagnostic barriers", async () => {
+  it("runs the continuous sequence through public inputs without diagnostic barriers", async () => {
     const driver = new FakeDriver();
     const report = await runContinuousPlayableSlice(driver, { runIndex: 0, freshProfile: false });
 
     expect(report.passed).toBe(true);
     expect(report.steps.map((step) => step.step)).toHaveLength(10);
     expect(report.actions.some((action) => action.channel === "diagnostic_barrier")).toBe(false);
+    expect(driver.evidence).toEqual(report.steps);
+  });
+
+  it("holds Tab while construction releases pointer lock and resumes play afterwards", async () => {
+    const driver = new FakeDriver();
+    const report = await runContinuousPlayableSlice(driver, { runIndex: 0, freshProfile: false });
+
+    const tabDown = actionIndex(report.actions, "down:Tab");
+    const buildOn = actionIndex(report.actions, "b");
+    const deleteClick = actionIndex(report.actions, "click:right");
+    const tabUp = actionIndex(report.actions, "up:Tab");
+    const waterSprint = report.actions.findIndex((action, index) => index > tabUp && action.action === "down:Shift");
+    expect(tabDown).toBeGreaterThanOrEqual(0);
+    expect(buildOn).toBeGreaterThan(tabDown);
+    expect(deleteClick).toBeGreaterThan(buildOn);
+    expect(tabUp).toBeGreaterThan(deleteClick);
+    expect(waterSprint).toBeGreaterThan(tabUp);
   });
 
   it("uses explicit barriers only in diagnostic mode", async () => {

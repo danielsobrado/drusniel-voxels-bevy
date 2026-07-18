@@ -2,6 +2,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { clodBaseUrl } from "../launch.js";
 
 const SERVER_PROBE_TIMEOUT_MS = 2500;
+const BROWSER_PROBE_TIMEOUT_MS = 15_000;
 const DEVICE_STABILITY_PROBE_MS = 500;
 
 const WEBGPU_ARGS = [
@@ -56,6 +57,24 @@ function recipeLabel(recipe: HeadedLaunchRecipe): string {
   return `headed channel=${recipe.channel ?? "default"} args=[${recipe.args.join(" ") || "none"}]`;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function withTimeout<T>(label: string, operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function softwareGpuReason(probe: Omit<HeadedWebGpuProbe, "recipe">): string | null {
   if (probe.fallbackAdapter) return "adapter reports isFallbackAdapter=true";
   const identity = [probe.vendor, probe.architecture, probe.device, probe.description]
@@ -69,10 +88,14 @@ export function softwareGpuReason(probe: Omit<HeadedWebGpuProbe, "recipe">): str
     "lavapipe",
     "software rasterizer",
     "software adapter",
+    "software renderer",
     "microsoft basic render",
     "warp adapter",
+    "d3d12 warp",
   ].find((candidate) => identity.includes(candidate));
-  return marker ? `software GPU marker detected: ${marker}` : null;
+  if (marker) return `software GPU marker detected: ${marker}`;
+  if (/\bwarp\b/.test(identity)) return "software GPU marker detected: warp";
+  return null;
 }
 
 async function assertBaseUrlReachable(baseUrl: string): Promise<void> {
@@ -82,9 +105,8 @@ async function assertBaseUrlReachable(baseUrl: string): Promise<void> {
     const response = await fetch(baseUrl, { signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `CLOD-POC dev server is not reachable at ${baseUrl} (${reason}). `
+      `CLOD-POC dev server is not reachable at ${baseUrl} (${errorMessage(error)}). `
         + "Start it with `npm run dev` from tools/clod-poc, or set CLOD_POC_BASE_URL.",
     );
   } finally {
@@ -109,23 +131,50 @@ async function probeAdapter(page: Page, recipe: HeadedLaunchRecipe): Promise<Hea
       ?? await extended.requestAdapterInfo?.().catch(() => undefined);
     const device = await adapter.requestDevice();
     try {
-      const lost = device.lost.then((result) => {
-        throw new Error(`WebGPU device lost during probe: ${result.message || result.reason}`);
-      });
+      const lost = device.lost.then((result) => ({
+        lost: true as const,
+        reason: result.message || String(result.reason),
+      }));
       device.pushErrorScope("validation");
       const buffer = device.createBuffer({
         size: 256,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+      const module = device.createShaderModule({
+        code: `
+          @group(0) @binding(0) var<storage, read_write> values: array<u32>;
+          @compute @workgroup_size(1)
+          fn main() {
+            values[0] = values[0] + 1u;
+          }
+        `,
+      });
+      const pipeline = device.createComputePipeline({
+        layout: "auto",
+        compute: { module, entryPoint: "main" },
+      });
+      const bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer } }],
       });
       device.queue.writeBuffer(buffer, 0, new Uint32Array([1, 2, 3, 4]));
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(1);
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+      await device.queue.onSubmittedWorkDone();
       buffer.destroy();
-      device.queue.submit([]);
+
       const validation = await device.popErrorScope();
       if (validation) throw new Error(validation.message);
-      await Promise.race([
+      const stability = await Promise.race([
         lost,
-        new Promise<void>((resolve) => setTimeout(resolve, stabilityMs)),
+        new Promise<{ lost: false }>((resolve) => setTimeout(() => resolve({ lost: false }), stabilityMs)),
       ]);
+      if (stability.lost) throw new Error(`WebGPU device lost during probe: ${stability.reason}`);
     } finally {
       device.destroy();
     }
@@ -149,8 +198,8 @@ async function probeBrowser(browser: Browser, recipe: HeadedLaunchRecipe, baseUr
   try {
     const url = new URL(baseUrl);
     url.searchParams.set("webgpuProbe", "1");
-    await page.goto(url.toString(), { waitUntil: "domcontentloaded" });
-    return await probeAdapter(page, recipe);
+    await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: BROWSER_PROBE_TIMEOUT_MS });
+    return await withTimeout("WebGPU adapter probe", probeAdapter(page, recipe), BROWSER_PROBE_TIMEOUT_MS);
   } finally {
     await page.close().catch(() => undefined);
   }
@@ -190,7 +239,7 @@ export async function launchHeadedRealWebGPU(): Promise<HeadedWebGpuLaunch> {
       console.log(`[playable-slice:launch] real WebGPU OK ${launched.probe.recipe}`);
       return launched;
     } catch (error) {
-      failures.push(`${recipeLabel(recipe)}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${recipeLabel(recipe)}: ${errorMessage(error)}`);
     }
   }
   throw new Error(

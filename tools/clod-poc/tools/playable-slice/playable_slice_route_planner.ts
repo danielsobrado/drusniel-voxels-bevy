@@ -1,7 +1,7 @@
 import type { ContinentRiverCrossingRoute } from "../../src/water/continent_river_route.js";
 
 const DEFAULT_BOUNDARY_LEAD_M = 8;
-const DEFAULT_MIN_POST_BOUNDARY_LAND_M = 8;
+const DEFAULT_MIN_POST_BOUNDARY_DRY_M = 8;
 const MIN_DIRECTION_LENGTH = 0.001;
 
 export interface PlayableSliceRoutePlan {
@@ -10,6 +10,7 @@ export interface PlayableSliceRoutePlan {
   readonly direction: readonly [number, number];
   readonly boundary: readonly [number, number];
   readonly boundaryDistanceM: number;
+  readonly waterEntry: readonly [number, number];
   readonly riverCenter: readonly [number, number];
   readonly riverEnd: readonly [number, number];
   readonly pageSizeM: number;
@@ -62,21 +63,33 @@ export function planPlayableSliceRoute(
   if (!Number.isFinite(pageSizeM) || pageSizeM <= 0) throw new Error("pageSizeM must be positive");
   const dx = route.center[0] - route.start[0];
   const dz = route.center[1] - route.start[1];
-  const lengthM = Math.hypot(dx, dz);
-  if (lengthM < MIN_DIRECTION_LENGTH) throw new Error("river route start and center must differ");
-  const direction: [number, number] = [dx / lengthM, dz / lengthM];
+  const centerDistanceM = Math.hypot(dx, dz);
+  if (centerDistanceM < MIN_DIRECTION_LENGTH) throw new Error("river route start and center must differ");
+  const direction: [number, number] = [dx / centerDistanceM, dz / centerDistanceM];
+  const waterDx = route.waterEntry[0] - route.start[0];
+  const waterDz = route.waterEntry[1] - route.start[1];
+  const waterEntryDistanceM = waterDx * direction[0] + waterDz * direction[1];
+  const waterEntryLateralM = Math.abs(waterDx * direction[1] - waterDz * direction[0]);
+  if (
+    waterEntryDistanceM <= 0
+    || waterEntryDistanceM > centerDistanceM
+    || waterEntryLateralM > 1
+  ) {
+    throw new Error("river route water entry must lie on the dry-bank approach");
+  }
+
   const candidates = [
-    ...candidatesForAxis(route.start, direction, lengthM, pageSizeM, 0),
-    ...candidatesForAxis(route.start, direction, lengthM, pageSizeM, 1),
+    ...candidatesForAxis(route.start, direction, waterEntryDistanceM, pageSizeM, 0),
+    ...candidatesForAxis(route.start, direction, waterEntryDistanceM, pageSizeM, 1),
   ]
     .filter((candidate) => candidate.distanceM >= boundaryLeadM)
-    .filter((candidate) => lengthM - candidate.distanceM >= DEFAULT_MIN_POST_BOUNDARY_LAND_M)
+    .filter((candidate) => waterEntryDistanceM - candidate.distanceM >= DEFAULT_MIN_POST_BOUNDARY_DRY_M)
     .sort((a, b) => a.distanceM - b.distanceM);
   const selected = candidates[0];
   if (!selected) {
     throw new Error(
       `river approach does not cross a page boundary with ${boundaryLeadM}m lead and `
-        + `${DEFAULT_MIN_POST_BOUNDARY_LAND_M}m dry margin`,
+        + `${DEFAULT_MIN_POST_BOUNDARY_DRY_M}m before the shoreline`,
     );
   }
   const spawn: [number, number] = [
@@ -90,6 +103,7 @@ export function planPlayableSliceRoute(
     direction,
     boundary: selected.point,
     boundaryDistanceM: boundaryLeadM,
+    waterEntry: [...route.waterEntry],
     riverCenter: [...route.center],
     riverEnd: [...route.end],
     pageSizeM,

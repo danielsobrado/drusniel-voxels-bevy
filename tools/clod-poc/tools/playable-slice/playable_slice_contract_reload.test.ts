@@ -74,24 +74,23 @@ function snapshot(step: PlayableSliceStep): PlayableSliceSnapshot {
       colliderCoverageMissing: 0,
       frontierBarrierEngagements: 0,
       syncFrameBuilds: 0,
+      colliderWorkerFaults: 0,
       recoveries: 0,
       editsDeniedNotReady: 0,
       editCommandsExpired: 0,
+      editCommandDenials: 0,
     },
   };
 }
 
-function reportWithPreReloadRecovery(): Omit<PlayableSliceRunReport, "passed" | "failures"> {
-  const steps = PLAYABLE_SLICE_STEPS.map((step) => {
-    const base = snapshot(step);
-    return {
-      step,
-      atMs: PLAYABLE_SLICE_STEPS.indexOf(step),
-      snapshot: step === "water_entered"
-        ? { ...base, safety: { ...base.safety, recoveries: 1 } }
-        : base,
-    };
-  });
+function baseReport(
+  mutate: (step: PlayableSliceStep, value: PlayableSliceSnapshot) => PlayableSliceSnapshot,
+): Omit<PlayableSliceRunReport, "passed" | "failures"> {
+  const steps = PLAYABLE_SLICE_STEPS.map((step) => ({
+    step,
+    atMs: PLAYABLE_SLICE_STEPS.indexOf(step),
+    snapshot: mutate(step, snapshot(step)),
+  }));
   return {
     schemaVersion: 1,
     mode: "continuous",
@@ -113,7 +112,41 @@ function reportWithPreReloadRecovery(): Omit<PlayableSliceRunReport, "passed" | 
 
 describe("playable slice safety across reload", () => {
   it("does not let a reload reset hide an earlier recovery", () => {
-    const failures = evaluatePlayableSliceRun(reportWithPreReloadRecovery());
-    expect(failures).toContain("player recovery fired 1 times");
+    const report = baseReport((step, value) => step === "water_entered"
+      ? { ...value, safety: { ...value.safety, recoveries: 1 } }
+      : value);
+
+    expect(evaluatePlayableSliceRun(report)).toContain("player recovery fired 1 times");
+  });
+
+  it("counts a new post-reload event after a nonzero pre-reload baseline resets", () => {
+    const report = baseReport((step, value) => {
+      const reloaded = PLAYABLE_SLICE_STEPS.indexOf(step) >= PLAYABLE_SLICE_STEPS.indexOf("world_reloaded");
+      const postReloadRecovery = step === "gameplay_continued" ? 1 : 0;
+      return {
+        ...value,
+        safety: {
+          ...value.safety,
+          recoveries: reloaded ? postReloadRecovery : 5,
+        },
+      };
+    });
+
+    expect(evaluatePlayableSliceRun(report)).toContain("player recovery fired 1 times");
+  });
+
+  it("does not treat a clean reset as a new safety event", () => {
+    const report = baseReport((step, value) => {
+      const reloaded = PLAYABLE_SLICE_STEPS.indexOf(step) >= PLAYABLE_SLICE_STEPS.indexOf("world_reloaded");
+      return {
+        ...value,
+        safety: {
+          ...value.safety,
+          frontierBarrierEngagements: reloaded ? 0 : 1,
+        },
+      };
+    });
+
+    expect(evaluatePlayableSliceRun(report).some((failure) => failure.includes("frontier barrier engagements"))).toBe(false);
   });
 });

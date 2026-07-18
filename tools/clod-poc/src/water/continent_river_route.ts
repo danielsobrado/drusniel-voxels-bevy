@@ -1,5 +1,8 @@
 import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 
+const DEFAULT_SHORE_PROBE_SPACING_M = 2;
+const SHORE_REFINEMENT_STEPS = 8;
+
 export interface ContinentRiverRouteSample {
   bodyKind: number;
   bodyId: number;
@@ -16,10 +19,12 @@ export interface ContinentRiverRouteSearchOptions {
   searchRadiusM?: number;
   searchSpacingM?: number;
   crossingHalfSpanM?: number;
+  shoreProbeSpacingM?: number;
 }
 
 export interface ContinentRiverCrossingRoute {
   start: [number, number];
+  waterEntry: [number, number];
   center: [number, number];
   end: [number, number];
   flow: [number, number];
@@ -27,6 +32,54 @@ export interface ContinentRiverCrossingRoute {
   centerTerrainY: number;
   centerWaterY: number;
   centerDepthM: number;
+}
+
+function isRouteRiver(sample: ContinentRiverRouteSample, bodyId: number): boolean {
+  return sample.bodyKind === HYDROLOGY_BODY_RIVER && sample.bodyId === bodyId && sample.depth > 0;
+}
+
+function findWaterEntry(
+  sample: (x: number, z: number) => ContinentRiverRouteSample,
+  start: readonly [number, number],
+  center: readonly [number, number],
+  bodyId: number,
+  spacingM: number,
+): [number, number] | null {
+  const dx = center[0] - start[0];
+  const dz = center[1] - start[1];
+  const lengthM = Math.hypot(dx, dz);
+  if (!(lengthM > 0)) return null;
+  const directionX = dx / lengthM;
+  const directionZ = dz / lengthM;
+  const probeSteps = Math.ceil(lengthM / spacingM);
+  let dryPoint: [number, number] = [start[0], start[1]];
+
+  for (let probe = 1; probe <= probeSteps; probe += 1) {
+    const distanceM = Math.min(probe * spacingM, lengthM);
+    const point: [number, number] = [
+      start[0] + directionX * distanceM,
+      start[1] + directionZ * distanceM,
+    ];
+    const result = sample(point[0], point[1]);
+    if (isRouteRiver(result, bodyId)) {
+      let low = dryPoint;
+      let high = point;
+      for (let step = 0; step < SHORE_REFINEMENT_STEPS; step += 1) {
+        const midpoint: [number, number] = [
+          (low[0] + high[0]) * 0.5,
+          (low[1] + high[1]) * 0.5,
+        ];
+        const midpointSample = sample(midpoint[0], midpoint[1]);
+        if (isRouteRiver(midpointSample, bodyId)) high = midpoint;
+        else if (midpointSample.bodyKind === HYDROLOGY_BODY_DRY) low = midpoint;
+        else return null;
+      }
+      return high;
+    }
+    if (result.bodyKind !== HYDROLOGY_BODY_DRY) return null;
+    dryPoint = point;
+  }
+  return null;
 }
 
 export function findContinentRiverCrossingRoute(
@@ -38,6 +91,7 @@ export function findContinentRiverCrossingRoute(
   const searchRadiusM = Math.max(0, options.searchRadiusM ?? 1024);
   const searchSpacingM = Math.max(1, options.searchSpacingM ?? 16);
   const crossingHalfSpanM = Math.max(searchSpacingM, options.crossingHalfSpanM ?? 64);
+  const shoreProbeSpacingM = Math.max(0.25, options.shoreProbeSpacingM ?? DEFAULT_SHORE_PROBE_SPACING_M);
   const minX = centerX - searchRadiusM;
   const minZ = centerZ - searchRadiusM;
   const cells = Math.floor(searchRadiusM * 2 / searchSpacingM);
@@ -62,8 +116,11 @@ export function findContinentRiverCrossingRoute(
       ];
       if (sample(start[0], start[1]).bodyKind !== HYDROLOGY_BODY_DRY) continue;
       if (sample(end[0], end[1]).bodyKind !== HYDROLOGY_BODY_DRY) continue;
+      const waterEntry = findWaterEntry(sample, start, [x, z], river.bodyId, shoreProbeSpacingM);
+      if (!waterEntry) continue;
       return {
         start,
+        waterEntry,
         center: [x, z],
         end,
         flow: [river.flowX / flowLength, river.flowZ / flowLength],

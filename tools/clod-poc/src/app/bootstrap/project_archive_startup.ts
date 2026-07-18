@@ -1,11 +1,17 @@
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
 import { projectPropEditStore } from "../../project/prop_edit_store.js";
 import { createSaveCheckpointController } from "../../save/save_checkpoint_controller.js";
-import { flushSaveRuntimeOrThrow } from "../../save/save_runtime.js";
+import {
+  flushSaveRuntimeOrThrow,
+  hasActiveSaveRuntime,
+  isSaveRuntimeConverged,
+} from "../../save/save_runtime.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import type { InfoPanelController } from "./info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./ui/terrain_edit_startup.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
+
+const CHECKPOINT_MAX_REGION_WRITES = Number.MAX_SAFE_INTEGER;
 
 export function runProjectArchiveStartup(
   ctx: UiStartupContext,
@@ -61,9 +67,11 @@ export function runProjectArchiveStartup(
 
   const checkpointController = createSaveCheckpointController({
     flush: async () => {
+      if (!hasActiveSaveRuntime()) throw new Error("no active saved world to checkpoint");
       await flushAncestors();
-      await flushSaveRuntimeOrThrow(Number.MAX_SAFE_INTEGER);
+      await flushSaveRuntimeOrThrow(CHECKPOINT_MAX_REGION_WRITES);
     },
+    isConverged: isSaveRuntimeConverged,
     getCounters: () => input.longView.hooks?.stats?.counters ?? null,
     onStatus: (status) => {
       session.lastArchiveSummary = status;

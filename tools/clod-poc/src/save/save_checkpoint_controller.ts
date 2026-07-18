@@ -1,3 +1,6 @@
+const DEFAULT_MAX_FLUSH_PASSES = 8;
+const SHORTCUT_CAPTURE = true;
+
 export interface SaveCheckpointCounters {
   save_checkpoint_requests?: number;
   save_checkpoint_completed?: number;
@@ -8,6 +11,8 @@ export interface SaveCheckpointCounters {
 
 export interface SaveCheckpointControllerDeps {
   flush: () => Promise<void>;
+  isConverged?: () => boolean;
+  maxFlushPasses?: number;
   getCounters?: () => SaveCheckpointCounters | null;
   nowMs?: () => number;
   onStatus?: (status: string) => void;
@@ -24,10 +29,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
+function normalizedPassCount(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_MAX_FLUSH_PASSES;
+  return Math.max(1, Math.floor(value!));
+}
+
 export function createSaveCheckpointController(
   deps: SaveCheckpointControllerDeps,
 ): SaveCheckpointController {
   const nowMs = deps.nowMs ?? (() => performance.now());
+  const maxFlushPasses = normalizedPassCount(deps.maxFlushPasses);
   let inFlight: Promise<void> | null = null;
 
   const counters = (): SaveCheckpointCounters | null => deps.getCounters?.() ?? null;
@@ -36,6 +47,20 @@ export function createSaveCheckpointController(
     if (!target) return;
     target[key] = (target[key] ?? 0) + 1;
   };
+  const publishStatus = (status: string): void => {
+    try {
+      deps.onStatus?.(status);
+    } catch (error) {
+      console.error("[save-checkpoint] status callback failed", error);
+    }
+  };
+  const flushToConvergence = async (): Promise<void> => {
+    for (let pass = 1; pass <= maxFlushPasses; pass += 1) {
+      await Promise.resolve().then(() => deps.flush());
+      if (deps.isConverged?.() ?? true) return;
+    }
+    throw new Error(`checkpoint did not converge after ${maxFlushPasses} flush passes`);
+  };
 
   const requestCheckpoint = async (): Promise<void> => {
     if (inFlight) return inFlight;
@@ -43,16 +68,16 @@ export function createSaveCheckpointController(
     increment("save_checkpoint_requests");
     const target = counters();
     if (target) target.save_checkpoint_in_flight = 1;
-    deps.onStatus?.("saving checkpoint");
+    publishStatus("saving checkpoint");
 
-    inFlight = deps.flush()
+    inFlight = flushToConvergence()
       .then(() => {
         increment("save_checkpoint_completed");
-        deps.onStatus?.("checkpoint saved");
+        publishStatus("checkpoint saved");
       })
       .catch((error) => {
         increment("save_checkpoint_failed");
-        deps.onStatus?.(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+        publishStatus(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
       })
       .finally(() => {
@@ -72,12 +97,14 @@ export function createSaveCheckpointController(
       if (isEditableTarget(event.target)) return;
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.code !== "KeyS") return;
       event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.repeat) return;
       void requestCheckpoint().catch((error) => {
         console.error("[save-checkpoint] checkpoint failed", error);
       });
     };
-    target.addEventListener("keydown", onKeyDown);
-    return () => target.removeEventListener("keydown", onKeyDown);
+    target.addEventListener("keydown", onKeyDown, SHORTCUT_CAPTURE);
+    return () => target.removeEventListener("keydown", onKeyDown, SHORTCUT_CAPTURE);
   };
 
   return { requestCheckpoint, bindShortcut };

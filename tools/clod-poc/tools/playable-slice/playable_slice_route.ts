@@ -15,15 +15,18 @@ const CHECKPOINT_TIMEOUT_MS = 60_000;
 
 export interface PublicPlayableSliceDriver {
   readonly actions: readonly PlayableSliceActionRecord[];
+  readonly evidence: readonly PlayableSliceStepEvidence[];
   readonly maxFrameMs: number;
   readonly maxFrameP95Ms: number;
   nowMs(): number;
   snapshot(): Promise<PlayableSliceSnapshot>;
+  recordEvidence(evidence: PlayableSliceStepEvidence): void;
   keyDown(key: string): Promise<void>;
   keyUp(key: string): Promise<void>;
   press(key: string, modifiers?: readonly string[]): Promise<void>;
   pointerMoveToCenter(): Promise<void>;
   pointerClick(button: "left" | "right"): Promise<void>;
+  waitForPointerLock(locked: boolean): Promise<void>;
   reload(): Promise<void>;
   waitUntil(
     label: string,
@@ -54,7 +57,9 @@ async function evidence(
   snapshot?: PlayableSliceSnapshot,
 ): Promise<PlayableSliceSnapshot> {
   const captured = snapshot ?? await driver.snapshot();
-  steps.push({ step, snapshot: captured, atMs: driver.nowMs() });
+  const item = { step, snapshot: captured, atMs: driver.nowMs() } satisfies PlayableSliceStepEvidence;
+  steps.push(item);
+  driver.recordEvidence(item);
   return captured;
 }
 
@@ -104,39 +109,47 @@ async function runRoute(
   );
   await evidence(driver, steps, "terrain_dug", dug);
 
-  await driver.press("b");
-  await driver.pointerMoveToCenter();
-  const buildReady = await driver.waitUntil(
-    "construction preview",
-    (snapshot) => snapshot.construction.active
-      && snapshot.construction.currentValid
-      && !snapshot.construction.transactionInFlight,
-    STEP_TIMEOUT_MS,
-  );
-  await driver.pointerClick("left");
-  const placed = await driver.waitUntil(
-    "construction placement",
-    (snapshot) => snapshot.construction.placedPieces > buildReady.construction.placedPieces
-      && snapshot.construction.colliders >= snapshot.construction.placedPieces
-      && snapshot.construction.unsupportedPieces === 0
-      && snapshot.construction.pendingCollapses === 0
-      && !snapshot.construction.transactionInFlight,
-    STEP_TIMEOUT_MS,
-  );
-  await evidence(driver, steps, "construction_placed", placed);
-  await barrier(driver, options.mode, "construction placement convergence");
+  await driver.keyDown("Tab");
+  try {
+    await driver.waitForPointerLock(false);
+    await driver.press("b");
+    await driver.pointerMoveToCenter();
+    const buildReady = await driver.waitUntil(
+      "construction preview",
+      (snapshot) => snapshot.construction.active
+        && snapshot.construction.currentValid
+        && !snapshot.construction.transactionInFlight,
+      STEP_TIMEOUT_MS,
+    );
+    await driver.pointerClick("left");
+    const placed = await driver.waitUntil(
+      "construction placement",
+      (snapshot) => snapshot.construction.placedPieces > buildReady.construction.placedPieces
+        && snapshot.construction.colliders >= snapshot.construction.placedPieces
+        && snapshot.construction.unsupportedPieces === 0
+        && snapshot.construction.pendingCollapses === 0
+        && !snapshot.construction.transactionInFlight,
+      STEP_TIMEOUT_MS,
+    );
+    await evidence(driver, steps, "construction_placed", placed);
+    await barrier(driver, options.mode, "construction placement convergence");
 
-  await driver.pointerClick("right");
-  const broken = await driver.waitUntil(
-    "construction break",
-    (snapshot) => snapshot.construction.placedPieces < placed.construction.placedPieces
-      && snapshot.construction.colliders === snapshot.construction.placedPieces
-      && !snapshot.construction.transactionInFlight,
-    STEP_TIMEOUT_MS,
-  );
-  await evidence(driver, steps, "construction_broken", broken);
-  await driver.press("b");
+    await driver.pointerClick("right");
+    const broken = await driver.waitUntil(
+      "construction break",
+      (snapshot) => snapshot.construction.placedPieces < placed.construction.placedPieces
+        && snapshot.construction.colliders === snapshot.construction.placedPieces
+        && !snapshot.construction.transactionInFlight,
+      STEP_TIMEOUT_MS,
+    );
+    await evidence(driver, steps, "construction_broken", broken);
+    await driver.press("b");
+  } finally {
+    await driver.keyUp("Tab");
+    await driver.waitForPointerLock(true);
+  }
 
+  await driver.keyDown("Shift");
   await driver.keyDown("w");
   let water: PlayableSliceSnapshot;
   try {
@@ -147,6 +160,7 @@ async function runRoute(
     );
   } finally {
     await driver.keyUp("w");
+    await driver.keyUp("Shift");
   }
   await evidence(driver, steps, "water_entered", water);
   await barrier(driver, options.mode, "water authority convergence");
@@ -154,7 +168,8 @@ async function runRoute(
   await driver.press("4");
   const spell = await driver.waitUntil(
     "earth spell runtime convergence",
-    (snapshot) => snapshot.spell.runtimeConvergenceCompleted > water.spell.runtimeConvergenceCompleted
+    (snapshot) => snapshot.spell.denied > water.spell.denied
+      || snapshot.spell.runtimeConvergenceCompleted > water.spell.runtimeConvergenceCompleted
       || snapshot.spell.runtimeConvergenceFailed > water.spell.runtimeConvergenceFailed,
     SPELL_TIMEOUT_MS,
   );
