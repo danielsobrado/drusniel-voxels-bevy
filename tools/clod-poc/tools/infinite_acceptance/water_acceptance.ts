@@ -18,6 +18,7 @@ export function evaluateWaterAcceptance(input: WaterAcceptanceInput): string[] {
   const clipmapEnabled = finiteValue(input.counters, "water_clipmap_enabled");
   const visibleLevels = finiteValue(input.counters, "water_clipmap_visible_levels");
   const levelCount = finiteValue(input.counters, "water_clipmap_level_count");
+  const snaps = finiteValue(input.counters, "water_clipmap_snaps");
   const fieldSamples = finiteValue(input.counters, "water_clipmap_field_samples");
   const waterP95Ms = finiteValue(input.counters, "framePerf.p95.waterMs");
   const waterMaxMs = finiteValue(input.counters, "framePerf.max.waterMs");
@@ -25,14 +26,24 @@ export function evaluateWaterAcceptance(input: WaterAcceptanceInput): string[] {
   if (!(continuityPct >= 95)) failures.push(`river_continuity_pct=${continuityPct} must be >= 95`);
   if (uncapturedErrors !== 0) failures.push(`webgpu_uncaptured_errors=${uncapturedErrors} must equal 0`);
   if (clipmapEnabled !== 1) failures.push(`water_clipmap_enabled=${clipmapEnabled} must equal 1`);
-  if (!(visibleLevels > 0)) failures.push(`water_clipmap_visible_levels=${visibleLevels} must be > 0`);
-  if (!(levelCount > 0)) failures.push(`water_clipmap_level_count=${levelCount} must be > 0`);
+  if (!Number.isInteger(levelCount) || levelCount <= 0) {
+    failures.push(`water_clipmap_level_count=${levelCount} must be a positive integer`);
+  }
+  if (!Number.isInteger(visibleLevels) || visibleLevels !== levelCount) {
+    failures.push(`water_clipmap_visible_levels=${visibleLevels} must equal water_clipmap_level_count=${levelCount}`);
+  }
+  if (!(snaps >= levelCount)) {
+    failures.push(`water_clipmap_snaps=${snaps} must be >= water_clipmap_level_count=${levelCount}`);
+  }
   if (fieldSamples !== 0) failures.push(`water_clipmap_field_samples=${fieldSamples} must equal 0 on the atlas path`);
   if (!(waterP95Ms <= WATER_ACCEPTANCE_MAX_P95_MS)) {
     failures.push(`framePerf.p95.waterMs=${waterP95Ms} must be <= ${WATER_ACCEPTANCE_MAX_P95_MS}`);
   }
   if (!(waterMaxMs <= WATER_ACCEPTANCE_MAX_FRAME_MS)) {
     failures.push(`framePerf.max.waterMs=${waterMaxMs} must be <= ${WATER_ACCEPTANCE_MAX_FRAME_MS}`);
+  }
+  if (Number.isFinite(waterP95Ms) && Number.isFinite(waterMaxMs) && waterMaxMs < waterP95Ms) {
+    failures.push(`framePerf.max.waterMs=${waterMaxMs} must be >= framePerf.p95.waterMs=${waterP95Ms}`);
   }
   return failures;
 }
