@@ -20,6 +20,7 @@ export interface WaterDebugState {
   riverCarveDepth: number;
   riverFlowSpeed: number;
   riverFoamStrength: number;
+  riverMistEnabled: boolean;
 }
 
 export interface WaterRiverDebugStats {
@@ -49,6 +50,7 @@ export interface WaterDebugBindings {
   onShoreSurfStartDistance: (distance: number) => void;
   onShoreSurfFullDistance: (distance: number) => void;
   onShoreSurfMaxDepth: (depth: number) => void;
+  onRiverMistEnabled: (enabled: boolean) => void;
   onRebuildVisual: () => void;
   getRiverStats?: () => WaterRiverDebugStats;
   getCascadeParticleStats?: () => RiverCascadeParticleStats;
