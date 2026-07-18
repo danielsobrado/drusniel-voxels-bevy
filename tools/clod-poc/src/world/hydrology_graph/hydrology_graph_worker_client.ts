@@ -38,6 +38,7 @@ interface PendingBuild {
 }
 
 export interface HydrologyGraphWorkerClient {
+  available(): boolean;
   build(input: Omit<HydrologyGraphWorkerBuildRequest, "type" | "requestId" | "erodedMacroField" | "erosionArtifactRef">, onProgress?: (buildPct: number) => void): Promise<HydrologyGraphArtifact>;
   dispose(): void;
 }
@@ -50,16 +51,40 @@ export function createHydrologyGraphWorkerClient(): HydrologyGraphWorkerClient |
     return null;
   }
   let nextRequestId = 1;
-  let disposed = false;
+  let terminalError: Error | null = null;
+  let workerTerminated = false;
   const pending = new Map<number, PendingBuild>();
 
+  const terminateWorker = (): void => {
+    if (workerTerminated) return;
+    workerTerminated = true;
+    worker.terminate();
+  };
+
+  const failTerminally = (error: Error): void => {
+    if (!terminalError) {
+      terminalError = error;
+      for (const request of pending.values()) {
+        request.controller.abort(error);
+        request.reject(error);
+      }
+      pending.clear();
+    }
+    terminateWorker();
+  };
+
   worker.onmessage = (event: MessageEvent<HydrologyGraphWorkerResponse>) => {
+    if (terminalError) return;
     const response = event.data;
     const request = pending.get(response.requestId);
     if (!request) return;
     if (response.type === "hydrologyGraphProgress") {
       const percent = 70 + response.buildPct * 0.3;
-      request.onProgress?.(percent);
+      try {
+        request.onProgress?.(percent);
+      } catch (error) {
+        console.error("[hydrology] graph progress callback failed", error);
+      }
       publishStartupPhase("Building watersheds", percent);
       return;
     }
@@ -68,31 +93,34 @@ export function createHydrologyGraphWorkerClient(): HydrologyGraphWorkerClient |
       request.reject(new Error(response.message));
       return;
     }
-    const erosion = response.artifact.graph.macro.erosion;
-    if (erosion) {
-      setActiveErodedMacroField(toErodedMacroField(erosion), response.artifact.graph.worldId);
-      setLatestErosionArtifactRef(erosion.artifactRef, response.artifact.graph.worldId);
-    } else {
-      clearActiveErodedMacroField();
-      setLatestErosionArtifactRef(null);
+    try {
+      const erosion = response.artifact.graph.macro.erosion;
+      if (erosion) {
+        setActiveErodedMacroField(toErodedMacroField(erosion), response.artifact.graph.worldId);
+        setLatestErosionArtifactRef(erosion.artifactRef, response.artifact.graph.worldId);
+      } else {
+        clearActiveErodedMacroField();
+        setLatestErosionArtifactRef(null);
+      }
+      publishStartupPhase("Carving rivers and lakes", 100);
+      request.resolve(response.artifact);
+      queueMicrotask(() => publishStartupPhase("Preparing world tiles", 100));
+    } catch (error) {
+      request.reject(error instanceof Error ? error : new Error(String(error)));
     }
-    publishStartupPhase("Carving rivers and lakes", 100);
-    request.resolve(response.artifact);
-    queueMicrotask(() => publishStartupPhase("Preparing world tiles", 100));
   };
 
   worker.onerror = (event) => {
-    const error = new Error(`hydrology graph worker crashed: ${event.message ?? "unknown error"}`);
-    for (const request of pending.values()) {
-      request.controller.abort(error);
-      request.reject(error);
-    }
-    pending.clear();
+    failTerminally(new Error(`hydrology graph worker crashed: ${event.message ?? "unknown error"}`));
+  };
+  worker.onmessageerror = () => {
+    failTerminally(new Error("hydrology graph worker produced an unreadable message"));
   };
 
   return {
+    available: () => terminalError === null,
     build(input, onProgress) {
-      if (disposed) return Promise.reject(new Error("hydrology graph worker disposed"));
+      if (terminalError) return Promise.reject(terminalError);
       const requestId = nextRequestId++;
       const controller = new AbortController();
       return new Promise((resolve, reject) => {
@@ -125,10 +153,14 @@ export function createHydrologyGraphWorkerClient(): HydrologyGraphWorkerClient |
             signal: controller.signal,
           }, (progress) => {
             const percent = progress.percent * 0.7;
-            onProgress?.(percent);
+            try {
+              onProgress?.(percent);
+            } catch (error) {
+              console.error("[hydrology] erosion progress callback failed", error);
+            }
             publishStartupPhase(progress.phase === "sampling" ? "Generating base terrain" : "Eroding terrain", percent);
           });
-          if (disposed || !pending.has(requestId)) return;
+          if (terminalError || !pending.has(requestId)) return;
           publishStartupPhase("Building watersheds", 70);
           const erodedMacroField = cloneSerializedErodedMacroField(artifact.field);
           worker.postMessage({
@@ -148,15 +180,7 @@ export function createHydrologyGraphWorkerClient(): HydrologyGraphWorkerClient |
       });
     },
     dispose() {
-      if (disposed) return;
-      disposed = true;
-      const error = new Error("hydrology graph worker disposed");
-      for (const request of pending.values()) {
-        request.controller.abort(error);
-        request.reject(error);
-      }
-      pending.clear();
-      worker.terminate();
+      failTerminally(new Error("hydrology graph worker disposed"));
     },
   };
 }
