@@ -96,10 +96,11 @@ export function runPlayerStartup(
   controls.update = () => (interaction.mode === "orbit" ? updateOrbitControls() : false);
 
   let lastPlayerFrameAt = performance.now();
+  let activeGameplayTeleportProbes = 0;
   const updatePlayerInteraction = (now: number): void => {
     const deltaSeconds = Math.min(Math.max((now - lastPlayerFrameAt) / 1000, 0), MAX_PLAYER_FRAME_DELTA_SECONDS);
     lastPlayerFrameAt = now;
-    if (interaction.mode === "playing") {
+    if (interaction.mode === "playing" && activeGameplayTeleportProbes === 0) {
       playerInputController.updateFrame(deltaSeconds);
       playerInputController.updateHoldToDig();
     }
@@ -203,6 +204,8 @@ export function runPlayerStartup(
         releasePrime?.();
         releasePrime = null;
       };
+      activeGameplayTeleportProbes += 1;
+      playerInputController.resetPlayerInput();
       try {
         return await runReadinessGatedTeleport({
           target,
@@ -222,6 +225,7 @@ export function runPlayerStartup(
         });
       } finally {
         clearPrime();
+        activeGameplayTeleportProbes = Math.max(0, activeGameplayTeleportProbes - 1);
       }
     };
   }
