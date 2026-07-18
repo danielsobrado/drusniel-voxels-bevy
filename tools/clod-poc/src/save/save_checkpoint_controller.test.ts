@@ -114,21 +114,30 @@ describe("save checkpoint controller", () => {
     expect(counters.save_checkpoint_completed).toBe(1);
   });
 
-  it("recovers after the checkpoint clock throws", async () => {
-    let clockCalls = 0;
+  it("keeps saving when checkpoint clock instrumentation throws", async () => {
     const flush = vi.fn(async () => undefined);
     const controller = createSaveCheckpointController({
       flush,
-      nowMs: () => {
-        clockCalls += 1;
-        if (clockCalls === 1) throw new Error("clock unavailable");
-        return 10;
-      },
+      nowMs: () => { throw new Error("clock unavailable"); },
     });
 
-    await expect(controller.requestCheckpoint()).rejects.toThrow("clock unavailable");
     await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
-    expect(flush).toHaveBeenCalledOnce();
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    expect(flush).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps saving when checkpoint counter writes throw", async () => {
+    const flush = vi.fn(async () => undefined);
+    const counters = Object.freeze({}) as SaveCheckpointCounters;
+    const controller = createSaveCheckpointController({
+      flush,
+      getCounters: () => counters,
+      nowMs: () => 10,
+    });
+
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    expect(flush).toHaveBeenCalledTimes(2);
   });
 
   it("repeats flush passes until the checkpoint is clean", async () => {
