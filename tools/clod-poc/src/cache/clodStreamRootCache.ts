@@ -20,6 +20,7 @@ import {
 } from "../stream/terrain_streaming_control.js";
 
 const STREAM_ROOT_SOURCE_SUFFIX = "stream-root-v5-gpu-resident-isolation";
+const STREAM_ROOT_WRITE_SESSION_ID = createStreamRootWriteSessionId();
 
 export type StreamRootCacheBackend = "cpu" | "gpu";
 export type StreamRootCacheStats = WorkerCacheBuildStats;
@@ -27,6 +28,17 @@ export type StreamRootCacheStats = WorkerCacheBuildStats;
 const streamingTokens = new WeakMap<object, TerrainStreamingToken>();
 const activeRequestTokens = new Set<TerrainStreamingToken>();
 let nextStreamRootWriteId = 1;
+
+function createStreamRootWriteSessionId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const values = new Uint32Array(4);
+    cryptoApi.getRandomValues(values);
+    return Array.from(values, (value) => value.toString(36)).join("-");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 function workerRealm(): boolean {
   const constructorName = (globalThis as { constructor?: { name?: string } }).constructor?.name ?? "";
@@ -115,10 +127,10 @@ export async function storeStreamRootNode(
   const parsed = parseStreamRootNodeId(node.id);
   const artifact = clodPageNodeToArtifact(node);
   const generation = streamRootCacheOperationGeneration(stats);
-  const writeId = `${generation}:${nextStreamRootWriteId++}`;
+  const writeId = `${STREAM_ROOT_WRITE_SESSION_ID}:${generation}:${nextStreamRootWriteId++}`;
   const keyParts = streamRootKeyParts(ctx, backend, parsed.level, parsed.pageX, parsed.pageZ, node.id);
   if (!streamRootCacheOperationIsCurrent(stats)) return;
-  await ctx.service.put(
+  const putResult = await ctx.service.put(
     keyParts,
     artifact,
     encodeClodPageNodeArtifact,
@@ -132,6 +144,7 @@ export async function storeStreamRootNode(
       terrainStreamingWriteId: writeId,
     },
   );
+  if (putResult.bytesWritten === 0) return;
   if (!streamRootCacheOperationIsCurrent(stats)) {
     await removeStaleStreamRootCacheEntry(ctx, keyParts, generation, writeId);
     return;
@@ -146,15 +159,10 @@ async function removeStaleStreamRootCacheEntry(
   generation: number,
   writeId: string,
 ): Promise<void> {
-  const current = await ctx.service.get(keyParts, decodeClodPageNodeArtifact);
-  if (current.status !== "hit"
-    || current.metadata?.terrainStreamingGeneration !== generation
-    || current.metadata?.terrainStreamingWriteId !== writeId) return;
-  if (workerRealm()) {
-    ctx.service.deleteMemory(keyParts);
-    return;
-  }
-  await ctx.service.delete(keyParts);
+  await ctx.service.deleteIfMatches(keyParts, {
+    terrainStreamingGeneration: generation,
+    terrainStreamingWriteId: writeId,
+  });
 }
 
 export function publishStreamRootCacheCounters(

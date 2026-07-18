@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
+import { CacheWriteRejectedError } from "./cacheErrors.js";
 import {
   dispatchCacheRpcResponse,
   WorkerRemotePersistentStore,
@@ -46,7 +47,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("WorkerRemotePersistentStore streaming generation", () => {
-  it("sends the originating stream-root generation instead of the later worker state", async () => {
+  it("reports a stale streamed-root write rejection to the cache service", async () => {
     const store = new WorkerRemotePersistentStore();
     setTerrainStreamingEnabled(false);
     setTerrainStreamingEnabled(true);
@@ -56,7 +57,7 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
 
     expect(request.streamingGeneration).toBe(0);
     dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: false });
-    await pending;
+    await expect(pending).rejects.toBeInstanceOf(CacheWriteRejectedError);
   });
 
   it("does not stamp unrelated cache records with the current streaming generation", async () => {
@@ -69,5 +70,18 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
     expect(request).not.toHaveProperty("streamingGeneration");
     dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: true });
     await pending;
+  });
+
+  it("forwards conditional deletes to the main-thread broker", async () => {
+    const store = new WorkerRemotePersistentStore();
+    const record = cacheRecord(0);
+
+    const pending = store.deleteIfMatches("stream-root", record);
+    const request = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "deleteIfMatches" }>;
+
+    expect(request.key).toBe("stream-root");
+    expect(request.record.header.metadata.terrainStreamingGeneration).toBe(0);
+    dispatchCacheRpcResponse({ type: "cacheRpc", requestId: request.requestId, ok: true, result: true });
+    await expect(pending).resolves.toBe(true);
   });
 });

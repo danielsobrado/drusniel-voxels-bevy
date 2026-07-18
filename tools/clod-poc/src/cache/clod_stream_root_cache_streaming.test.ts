@@ -42,9 +42,8 @@ describe("stream-root cache streaming token", () => {
     expect(streamRootCacheOperationIsCurrent(createEmptyStreamRootCacheStats())).toBe(true);
   });
 
-  it("removes a local cache entry committed across a pause generation change", async () => {
-    let metadata: Record<string, string | number | boolean> = {};
-    const deleteEntry = vi.fn(async () => undefined);
+  it("conditionally removes a cache entry committed across a pause generation change", async () => {
+    const deleteEntry = vi.fn(async () => true);
     const context = {
       effective: true,
       config: {
@@ -57,19 +56,12 @@ describe("stream-root cache streaming token", () => {
       terrainSourceHash: "test-source",
       configHash: "test-config",
       service: {
-        put: vi.fn(async (_keyParts, _artifact, _encode, nextMetadata) => {
-          metadata = nextMetadata as Record<string, string | number | boolean>;
+        put: vi.fn(async () => {
           setTerrainStreamingEnabled(false);
           setTerrainStreamingEnabled(true);
+          return { key: "stream-root", bytesWritten: 1, encodeMs: 0, compression: "none" };
         }),
-        get: vi.fn(async () => ({
-          status: "hit",
-          key: "stream-root",
-          bytesRead: 1,
-          decodeMs: 0,
-          metadata,
-        })),
-        delete: deleteEntry,
+        deleteIfMatches: deleteEntry,
       },
     } as unknown as ClodCacheContext;
     const stats = createEmptyStreamRootCacheStats();
@@ -77,7 +69,43 @@ describe("stream-root cache streaming token", () => {
     await storeStreamRootNode(context, "gpu", testNode(), 2, stats);
 
     expect(deleteEntry).toHaveBeenCalledOnce();
+    expect(deleteEntry).toHaveBeenCalledWith(expect.any(Object), {
+      terrainStreamingGeneration: 0,
+      terrainStreamingWriteId: expect.any(String),
+    });
     expect(stats.nodesBuilt).toBe(0);
+  });
+
+  it("does not count a broker-rejected write as a built cache node", async () => {
+    const deleteEntry = vi.fn(async () => true);
+    const context = {
+      effective: true,
+      config: {
+        namespace: "test",
+        schema_version: 1,
+        builder_version: "test",
+      },
+      worldSeed: "test",
+      generatorVersion: "test",
+      terrainSourceHash: "test-source",
+      configHash: "test-config",
+      service: {
+        put: vi.fn(async () => ({
+          key: "stream-root",
+          bytesWritten: 0,
+          encodeMs: 0,
+          compression: "none",
+        })),
+        deleteIfMatches: deleteEntry,
+      },
+    } as unknown as ClodCacheContext;
+    const stats = createEmptyStreamRootCacheStats();
+
+    await storeStreamRootNode(context, "cpu", testNode(), 3, stats);
+
+    expect(deleteEntry).not.toHaveBeenCalled();
+    expect(stats.nodesBuilt).toBe(0);
+    expect(stats.coldBuildMs).toBe(0);
   });
 });
 

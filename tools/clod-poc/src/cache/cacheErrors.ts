@@ -5,6 +5,13 @@ export class CacheUnavailableError extends Error {
   }
 }
 
+export class CacheWriteRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CacheWriteRejectedError";
+  }
+}
+
 export class CacheCorruptError extends Error {
   constructor(message: string) {
     super(message);
