@@ -1,4 +1,5 @@
 import type { EnvironmentQuery } from "../environment_query/types.js";
+import { createContinentRiverRouteEnvironmentQuery } from "./continent_river_route_query_adapter.js";
 import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 
 const DEFAULT_SHORE_PROBE_SPACING_M = 2;
@@ -84,7 +85,7 @@ function findWaterEntry(
   return null;
 }
 
-export function findContinentRiverCrossingRoute(
+export function findContinentRiverCrossingRouteFromSample(
   sample: (x: number, z: number) => ContinentRiverRouteSample,
   options: ContinentRiverRouteSearchOptions = {},
 ): ContinentRiverCrossingRoute | null {
@@ -136,11 +137,21 @@ export function findContinentRiverCrossingRoute(
   return null;
 }
 
+export function findContinentRiverCrossingRoute(
+  sample: (x: number, z: number) => ContinentRiverRouteSample,
+  options: ContinentRiverRouteSearchOptions = {},
+): ContinentRiverCrossingRoute | null {
+  return findContinentRiverCrossingRouteFromEnvironmentQuery(
+    createContinentRiverRouteEnvironmentQuery(sample),
+    options,
+  );
+}
+
 export function findContinentRiverCrossingRouteFromEnvironmentQuery(
   query: EnvironmentQuery,
   options: ContinentRiverRouteSearchOptions = {},
 ): ContinentRiverCrossingRoute | null {
-  return findContinentRiverCrossingRoute((x, z) => {
+  return findContinentRiverCrossingRouteFromSample((x, z) => {
     const water = query.water(x, z, CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M);
     const river = query.river(x, z, CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M);
     return {
