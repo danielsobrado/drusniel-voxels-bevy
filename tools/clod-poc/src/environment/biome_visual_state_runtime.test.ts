@@ -44,7 +44,7 @@ const SETTINGS: BiomeVisualStateSettings = Object.freeze({
 describe("biome visual state runtime", () => {
   it("reads live sun and weather owners while caching unchanged snapshots", () => {
     let sunElevationDeg = 5;
-    let weatherMode = "off" as const | "rain";
+    let weatherMode: "off" | "rain" = "off";
     let weatherIntensity = 0;
     const runtime = createBiomeVisualStateRuntime({
       settings: SETTINGS,
