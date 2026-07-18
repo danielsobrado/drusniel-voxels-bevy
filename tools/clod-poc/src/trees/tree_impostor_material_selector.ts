@@ -21,9 +21,14 @@ export function createSelectedTreeImpostorMaterial(
   forestLighting: ForestLightingMaterialState | null = null,
 ): THREE.Material {
   const material = createLiveTreeImpostorMaterial(settings, atlas, selection, lighting);
-  decorateTreeImpostorForestLighting(material, selection.webgpu, forestLighting);
-  material.userData[TREE_IMPOSTOR_MATERIAL_SELECTION_KEY] = { ...selection };
-  return material;
+  try {
+    decorateTreeImpostorForestLighting(material, selection.webgpu, forestLighting);
+    material.userData[TREE_IMPOSTOR_MATERIAL_SELECTION_KEY] = { ...selection };
+    return material;
+  } catch (error) {
+    material.dispose();
+    throw error;
+  }
 }
 
 export function treeImpostorMaterialMatchesSelection(
