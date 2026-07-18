@@ -7,6 +7,7 @@ import {
 } from "./tree_impostor_atlas_pixels.js";
 
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 8;
+export const TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION = 8192;
 
 export interface TreeImpostorReadbackRenderer {
   readRenderTargetPixelsAsync?(
@@ -18,11 +19,31 @@ export interface TreeImpostorReadbackRenderer {
   ): Promise<ArrayBufferView>;
 }
 
+export function validateTreeImpostorRenderTargetSize(
+  width: number,
+  height: number,
+  maxDimension = TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
+): void {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new Error(`tree impostor atlas dimensions must be positive integers; received ${width}x${height}`);
+  }
+  if (!Number.isInteger(maxDimension) || maxDimension <= 0) {
+    throw new Error(`tree impostor max texture dimension must be a positive integer; received ${maxDimension}`);
+  }
+  if (width > maxDimension || height > maxDimension) {
+    throw new Error(
+      `tree impostor atlas ${width}x${height} exceeds the portable ${maxDimension}px texture limit; ` +
+      "reduce resolution or disable age-layer baking",
+    );
+  }
+}
+
 export function createTreeImpostorRenderTarget(
   width: number,
   height: number,
   name: string,
 ): THREE.WebGLRenderTarget {
+  validateTreeImpostorRenderTargetSize(width, height);
   const renderTarget = new THREE.WebGLRenderTarget(width, height, {
     depthBuffer: true,
     stencilBuffer: false,
@@ -66,6 +87,7 @@ export function createTreeImpostorDataTexture(
   height: number,
   name: string,
 ): THREE.DataTexture {
+  validateTreeImpostorRenderTargetSize(width, height);
   const texture = new THREE.DataTexture(
     pixels,
     width,
