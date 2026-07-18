@@ -49,23 +49,23 @@ export function createSaveCheckpointController(
       return null;
     }
   };
-  const setCounter = (key: keyof SaveCheckpointCounters, value: number): void => {
+  const writeCounter = (
+    key: keyof SaveCheckpointCounters,
+    resolve: (current: number) => number,
+  ): void => {
     const target = counters();
     if (!target) return;
     try {
-      target[key] = value;
+      target[key] = resolve(target[key] ?? 0);
     } catch (error) {
       console.error(`[save-checkpoint] counter write failed: ${key}`, error);
     }
   };
+  const setCounter = (key: keyof SaveCheckpointCounters, value: number): void => {
+    writeCounter(key, () => value);
+  };
   const increment = (key: keyof SaveCheckpointCounters): void => {
-    const target = counters();
-    if (!target) return;
-    try {
-      target[key] = (target[key] ?? 0) + 1;
-    } catch (error) {
-      console.error(`[save-checkpoint] counter increment failed: ${key}`, error);
-    }
+    writeCounter(key, (current) => current + 1);
   };
   const readClock = (phase: string): number | null => {
     try {
