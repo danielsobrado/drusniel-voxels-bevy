@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
+import { TREE_GPU_RING_SHADOW_GROUP_COUNT } from "../gpu/tree_ring_compute.js";
 import { cloneTreeSettings, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import { octFrames } from "./tree_impostor_octahedral.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import { TREE_GPU_RING_INSTANCE_VEC4S } from "./tree_system_gpu_ring_draw.js";
 import type { TreeWebGpuBackendAccess } from "./tree_system_types.js";
-import { createTreeSystemGpuRingDrawResources } from "./tree_system_gpu_ring_resources.js";
+import {
+  createTreeSystemGpuRingDrawResources,
+  TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP,
+  treeGpuRingAllocatedShadowCapacityPerGroup,
+} from "./tree_system_gpu_ring_resources.js";
 
 const materialFactoryMocks = vi.hoisted(() => ({
   regular: vi.fn(),
@@ -60,13 +66,31 @@ describe("tree system GPU ring resources", () => {
     const resources = createResources({}, new THREE.BufferGeometry());
     expect(resources.meshes).toHaveLength(0);
   });
+
+  it("keeps only sentinel shadow storage when tree shadows are disabled", () => {
+    const resources = createResources({});
+
+    expect(TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP).toBe(1);
+    expect(resources.shadowCell.count).toBe(
+      TREE_GPU_RING_SHADOW_GROUP_COUNT * TREE_GPU_RING_INSTANCE_VEC4S,
+    );
+  });
+
+  it("restores the requested per-group capacity when any tree LOD casts shadows", () => {
+    const settings = settingsForTest();
+    settings.lod.shadowsMaxLod = "far";
+
+    expect(treeGpuRingAllocatedShadowCapacityPerGroup(settings, 27)).toBe(27);
+    settings.lod.shadowsMaxLod = "none";
+    expect(treeGpuRingAllocatedShadowCapacityPerGroup(settings, 27)).toBe(1);
+  });
 });
 
 function createResources(
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
   sourceGeometry: THREE.BufferGeometry = new THREE.BoxGeometry(1, 1, 1),
+  settings: TreeSettings = settingsForTest(),
 ) {
-  const settings = settingsForTest();
   return createTreeSystemGpuRingDrawResources({
     backend: fakeBackend(),
     root: new THREE.Group(),
