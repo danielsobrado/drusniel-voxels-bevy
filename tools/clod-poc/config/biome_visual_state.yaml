@@ -1,0 +1,50 @@
+biome_visual_state:
+  enabled: true
+
+  # Cyclic year positions in [0, 1). Consumers read the resolved state and do not
+  # implement independent seasonal curves.
+  season_keyframes:
+    - at: 0.00
+      green: 0.20
+      autumn: 0.00
+      bloom: 0.00
+      snowline_m: 900
+      glacial_murkiness: 0.72
+      pollen_amount: 0.00
+      frost_amount: 0.95
+
+    - at: 0.25
+      green: 0.82
+      autumn: 0.00
+      bloom: 1.00
+      snowline_m: 1500
+      glacial_murkiness: 0.64
+      pollen_amount: 0.72
+      frost_amount: 0.18
+
+    - at: 0.50
+      green: 1.00
+      autumn: 0.00
+      bloom: 0.32
+      snowline_m: 2300
+      glacial_murkiness: 0.55
+      pollen_amount: 0.28
+      frost_amount: 0.00
+
+    - at: 0.75
+      green: 0.46
+      autumn: 1.00
+      bloom: 0.00
+      snowline_m: 1350
+      glacial_murkiness: 0.66
+      pollen_amount: 0.04
+      frost_amount: 0.42
+
+  morning_mist:
+    start_sun_elevation_deg: -4
+    peak_sun_elevation_deg: 5
+    end_sun_elevation_deg: 18
+    strength: 0.65
+
+  wetness:
+    default: 0.00
