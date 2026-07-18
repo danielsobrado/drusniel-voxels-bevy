@@ -18,6 +18,7 @@ import {
   validateProjectWaterArchiveState,
   validateProjectWeatherArchiveState,
 } from "./project_archive_environment_state.js";
+import { armProjectImportRecovery } from "./project_import_recovery.js";
 import { assertProjectArchiveInputSize } from "./project_archive_limits.js";
 import { validateProjectSessionState } from "./project_archive_session_state.js";
 import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
@@ -133,9 +134,11 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
           await deps.beforeImportNavigation();
         }
         setProjectBusy(true, "staging project for rebuild", 0.7);
+        const fallbackSearch = location.search;
         const token = await stageVoxelProjectImport(contents);
+        armProjectImportRecovery(token, fallbackSearch);
         emitAudio("project.import.success");
-        const next = new URLSearchParams(location.search);
+        const next = new URLSearchParams(fallbackSearch);
         next.delete("save");
         applyWorldIdentityToQuery(next, contents.manifest);
         next.set("world", String(contents.manifest.worldSize));
