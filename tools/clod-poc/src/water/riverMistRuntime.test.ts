@@ -56,6 +56,7 @@ describe("river mist runtime", () => {
     expect(riverMistSignal(riverSample(), biome, settings)).toBeGreaterThan(0);
     expect(riverMistSignal(riverSample({ bodyKind: HYDROLOGY_BODY_LAKE }), biome, settings)).toBe(0);
     expect(riverMistSignal(riverSample({ shoreDistance: -1 }), biome, settings)).toBe(0);
+    expect(riverMistSignal(riverSample({ depth: Number.NaN }), biome, settings)).toBe(0);
     expect(riverMistSignal(riverSample({ flow: { x: 1, z: 0, speed: 0, progress: 0, drop: 0 } }), biome, settings)).toBe(0);
     expect(riverMistSignal(riverSample(), { enabled: true, morningMist: 0 }, settings)).toBe(0);
   });
