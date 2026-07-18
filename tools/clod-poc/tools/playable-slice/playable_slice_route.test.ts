@@ -10,6 +10,12 @@ import {
   type DiagnosticPlayableSliceDriver,
 } from "./playable_slice_route.js";
 
+const RUN_OPTIONS = {
+  runIndex: 0,
+  freshProfile: false,
+  expectedWaterBodyId: "hydrology:7",
+} as const;
+
 function snapshot(overrides: Partial<PlayableSliceSnapshot> = {}): PlayableSliceSnapshot {
   return {
     capturedAtMs: 0,
@@ -80,10 +86,7 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
   return new Map([
     ["terrain page boundary", snapshot({ page: [1, 0], pose: [65, 10, 20], frame: 2 })],
     ["terrain edit commit", dug],
-    ["construction preview", snapshot({
-      ...dug,
-      construction: { ...dug.construction, active: true, currentValid: true },
-    })],
+    ["construction preview", snapshot({ ...dug, construction: { ...dug.construction, active: true, currentValid: true } })],
     ["construction placement", snapshot({
       ...dug,
       frame: 4,
@@ -93,13 +96,13 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
     ["authoritative water entry", snapshot({
       ...dug,
       frame: 6,
-      swim: { mode: "surface", submersionM: 1, bodyId: "river:7" },
+      swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:7" },
     })],
     ["earth spell runtime convergence", snapshot({
       ...dug,
       frame: 7,
       terrain: { revision: 2, voxelDeltaCount: 40 },
-      swim: { mode: "surface", submersionM: 1, bodyId: "river:7" },
+      swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:7" },
       spell: spellState,
     })],
     ["save checkpoint", snapshot({
@@ -107,12 +110,7 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
       frame: 8,
       terrain: { revision: 2, voxelDeltaCount: 40 },
       spell: spellState,
-      persistence: {
-        ...dug.persistence,
-        voxelDeltaCount: 40,
-        checkpointRequests: 1,
-        checkpointCompleted: 1,
-      },
+      persistence: { ...dug.persistence, voxelDeltaCount: 40, checkpointRequests: 1, checkpointCompleted: 1 },
     })],
     ["saved world reload", snapshot({
       ...dug,
@@ -130,6 +128,13 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
   ]);
 }
 
+interface FakeDriverFailures {
+  readonly waitLabel?: string;
+  readonly restorePointerLock?: boolean;
+  readonly keyDown?: string;
+  readonly keyUp?: string;
+}
+
 class FakeDriver implements DiagnosticPlayableSliceDriver {
   readonly actions: PlayableSliceActionRecord[] = [];
   readonly evidence: PlayableSliceStepEvidence[] = [];
@@ -140,26 +145,34 @@ class FakeDriver implements DiagnosticPlayableSliceDriver {
   private current = snapshot();
   private pointerLocked = true;
 
+  constructor(private readonly failures: FakeDriverFailures = {}) {}
+
   nowMs(): number { return this.elapsed += 10; }
   async snapshot(): Promise<PlayableSliceSnapshot> { return this.current; }
   recordEvidence(item: PlayableSliceStepEvidence): void { this.evidence.push(item); }
   async keyDown(key: string): Promise<void> {
+    if (key === this.failures.keyDown) throw new Error(`down ${key} failed`);
     if (key === "Tab") this.pointerLocked = false;
     this.record("keyboard", `down:${key}`);
   }
   async keyUp(key: string): Promise<void> {
+    if (key === this.failures.keyUp) throw new Error(`up ${key} failed`);
     if (key === "Tab") this.pointerLocked = true;
     this.record("keyboard", `up:${key}`);
   }
   async press(key: string, modifiers: readonly string[] = []): Promise<void> {
+    if (key === "b" && this.current.construction.active) {
+      this.current = snapshot({ ...this.current, construction: { ...this.current.construction, active: false } });
+    }
     this.record("keyboard", `${modifiers.join("+")}${modifiers.length > 0 ? "+" : ""}${key}`);
   }
   async pointerMoveToCenter(): Promise<void> { this.record("pointer", "move:center"); }
   async pointerClick(button: "left" | "right"): Promise<void> { this.record("pointer", `click:${button}`); }
   async waitForPointerLock(locked: boolean): Promise<void> {
+    if (locked && this.failures.restorePointerLock) throw new Error("cleanup pointer lock failed");
     if (this.pointerLocked !== locked) throw new Error(`pointer lock expected ${locked}`);
   }
-  async reload(): Promise<void> { this.record("navigation", "reload"); }
+  async reload(): Promise<void> { this.record("navigation", "reload saved world"); }
   async diagnosticBarrier(label: string): Promise<void> { this.record("diagnostic_barrier", label); }
   async waitUntil(
     label: string,
@@ -168,6 +181,7 @@ class FakeDriver implements DiagnosticPlayableSliceDriver {
     const next = this.snapshots.get(label);
     if (!next || !predicate(next)) throw new Error(`invalid fake evidence for ${label}`);
     this.current = next;
+    if (label === this.failures.waitLabel) throw new Error(`${label} failed`);
     return next;
   }
 
@@ -183,9 +197,10 @@ function actionIndex(actions: readonly PlayableSliceActionRecord[], action: stri
 describe("playable slice route", () => {
   it("runs the continuous sequence through public inputs without diagnostic barriers", async () => {
     const driver = new FakeDriver();
-    const report = await runContinuousPlayableSlice(driver, { runIndex: 0, freshProfile: false });
+    const report = await runContinuousPlayableSlice(driver, RUN_OPTIONS);
 
     expect(report.passed).toBe(true);
+    expect(report.expectedWaterBodyId).toBe("hydrology:7");
     expect(report.steps.map((step) => step.step)).toHaveLength(10);
     expect(report.actions.some((action) => action.channel === "diagnostic_barrier")).toBe(false);
     expect(driver.evidence).toEqual(report.steps);
@@ -193,7 +208,7 @@ describe("playable slice route", () => {
 
   it("holds Tab while construction releases pointer lock and resumes play afterwards", async () => {
     const driver = new FakeDriver();
-    const report = await runContinuousPlayableSlice(driver, { runIndex: 0, freshProfile: false });
+    const report = await runContinuousPlayableSlice(driver, RUN_OPTIONS);
 
     const tabDown = actionIndex(report.actions, "down:Tab");
     const buildOn = actionIndex(report.actions, "b");
@@ -207,9 +222,30 @@ describe("playable slice route", () => {
     expect(waterSprint).toBeGreaterThan(tabUp);
   });
 
+  it("preserves the construction failure when cleanup also fails", async () => {
+    const driver = new FakeDriver({ waitLabel: "construction preview", restorePointerLock: true });
+
+    await expect(runContinuousPlayableSlice(driver, RUN_OPTIONS)).rejects.toThrow("construction preview failed");
+    expect(driver.actions.some((action) => action.action === "up:Tab")).toBe(true);
+  });
+
+  it("releases an already-held movement key when the next key-down fails", async () => {
+    const driver = new FakeDriver({ keyDown: "w" });
+
+    await expect(runContinuousPlayableSlice(driver, RUN_OPTIONS)).rejects.toThrow("down w failed");
+    expect(driver.actions.some((action) => action.action === "up:Shift")).toBe(true);
+  });
+
+  it("preserves a route timeout when movement cleanup also fails", async () => {
+    const driver = new FakeDriver({ waitLabel: "terrain page boundary", keyUp: "w" });
+
+    await expect(runContinuousPlayableSlice(driver, RUN_OPTIONS)).rejects.toThrow("terrain page boundary failed");
+    expect(driver.actions.some((action) => action.action === "up:Shift")).toBe(true);
+  });
+
   it("uses explicit barriers only in diagnostic mode", async () => {
     const driver = new FakeDriver();
-    const report = await runDiagnosticPlayableSlice(driver, { runIndex: 0, freshProfile: false });
+    const report = await runDiagnosticPlayableSlice(driver, RUN_OPTIONS);
 
     expect(report.passed).toBe(true);
     expect(report.actions.filter((action) => action.channel === "diagnostic_barrier").length).toBeGreaterThan(0);

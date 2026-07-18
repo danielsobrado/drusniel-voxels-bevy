@@ -50,6 +50,7 @@ export interface PlayableSliceRunReport {
   readonly mode: PlayableSliceMode;
   readonly runIndex: number;
   readonly freshProfile: boolean;
+  readonly expectedWaterBodyId: string;
   readonly startedAt: string;
   readonly wallClockMs: number;
   readonly actions: readonly PlayableSliceActionRecord[];
@@ -94,6 +95,100 @@ function increaseAcrossCounterResets(
   return increase;
 }
 
+function isDry(snapshot: PlayableSliceSnapshot): boolean {
+  return snapshot.swim.mode === "dry"
+    && snapshot.swim.submersionM <= 0
+    && snapshot.swim.bodyId.length === 0;
+}
+
+function numericFailure(
+  failures: string[],
+  label: string,
+  value: number,
+  options: { integer?: boolean; nonNegative?: boolean; positive?: boolean } = {},
+): void {
+  if (!Number.isFinite(value)) {
+    failures.push(`${label} must be finite`);
+    return;
+  }
+  if (options.integer && !Number.isInteger(value)) failures.push(`${label} must be an integer`);
+  if (options.positive && value <= 0) failures.push(`${label} must be positive`);
+  else if (options.nonNegative && value < 0) failures.push(`${label} must be non-negative`);
+}
+
+function snapshotIntegrityFailures(step: PlayableSliceStep, snapshot: PlayableSliceSnapshot): string[] {
+  const failures: string[] = [];
+  const label = `${step} snapshot`;
+  numericFailure(failures, `${label} capturedAtMs`, snapshot.capturedAtMs, { nonNegative: true });
+  numericFailure(failures, `${label} frame`, snapshot.frame, { integer: true, nonNegative: true });
+  numericFailure(failures, `${label} fps`, snapshot.fps, { nonNegative: true });
+  numericFailure(failures, `${label} frameMs`, snapshot.frameMs, { nonNegative: true });
+  numericFailure(failures, `${label} frameMsP95`, snapshot.frameMsP95, { nonNegative: true });
+  snapshot.pose.forEach((value, index) => numericFailure(failures, `${label} pose[${index}]`, value));
+  numericFailure(failures, `${label} pageSizeM`, snapshot.pageSizeM, { positive: true });
+  snapshot.page.forEach((value, index) => numericFailure(failures, `${label} page[${index}]`, value, { integer: true }));
+  numericFailure(failures, `${label} swim.submersionM`, snapshot.swim.submersionM, { nonNegative: true });
+
+  const integerCounters: readonly [string, number][] = [
+    ["terrain.revision", snapshot.terrain.revision],
+    ["terrain.voxelDeltaCount", snapshot.terrain.voxelDeltaCount],
+    ["construction.placedPieces", snapshot.construction.placedPieces],
+    ["construction.colliders", snapshot.construction.colliders],
+    ["construction.unsupportedPieces", snapshot.construction.unsupportedPieces],
+    ["construction.pendingCollapses", snapshot.construction.pendingCollapses],
+    ["persistence.dirtyRegions", snapshot.persistence.dirtyRegions],
+    ["persistence.lastError", snapshot.persistence.lastError],
+    ["persistence.voxelDeltaCount", snapshot.persistence.voxelDeltaCount],
+    ["persistence.checkpointRequests", snapshot.persistence.checkpointRequests],
+    ["persistence.checkpointCompleted", snapshot.persistence.checkpointCompleted],
+    ["persistence.checkpointFailed", snapshot.persistence.checkpointFailed],
+    ["spell.accepted", snapshot.spell.accepted],
+    ["spell.denied", snapshot.spell.denied],
+    ["spell.committed", snapshot.spell.committed],
+    ["spell.convergenceCompleted", snapshot.spell.convergenceCompleted],
+    ["spell.convergenceFailed", snapshot.spell.convergenceFailed],
+    ["spell.runtimeConvergenceCompleted", snapshot.spell.runtimeConvergenceCompleted],
+    ["spell.runtimeConvergenceFailed", snapshot.spell.runtimeConvergenceFailed],
+    ["safety.colliderCoverageMissing", snapshot.safety.colliderCoverageMissing],
+    ["safety.frontierBarrierEngagements", snapshot.safety.frontierBarrierEngagements],
+    ["safety.syncFrameBuilds", snapshot.safety.syncFrameBuilds],
+    ["safety.colliderWorkerFaults", snapshot.safety.colliderWorkerFaults],
+    ["safety.recoveries", snapshot.safety.recoveries],
+    ["safety.editsDeniedNotReady", snapshot.safety.editsDeniedNotReady],
+    ["safety.editCommandsExpired", snapshot.safety.editCommandsExpired],
+    ["safety.editCommandDenials", snapshot.safety.editCommandDenials],
+  ];
+  for (const [name, value] of integerCounters) {
+    numericFailure(failures, `${label} ${name}`, value, { integer: true, nonNegative: true });
+  }
+  return failures;
+}
+
+function reportIntegrityFailures(report: Omit<PlayableSliceRunReport, "passed" | "failures">): string[] {
+  const failures: string[] = [];
+  numericFailure(failures, "runIndex", report.runIndex, { integer: true, nonNegative: true });
+  numericFailure(failures, "wallClockMs", report.wallClockMs, { nonNegative: true });
+  numericFailure(failures, "maxFrameMs", report.maxFrameMs, { nonNegative: true });
+  numericFailure(failures, "maxFrameP95Ms", report.maxFrameP95Ms, { nonNegative: true });
+  numericFailure(failures, "travelledAfterReloadM", report.travelledAfterReloadM, { nonNegative: true });
+  if (Number.isNaN(Date.parse(report.startedAt))) failures.push("startedAt must be a valid ISO-8601 timestamp");
+
+  let previousStepAtMs = Number.NEGATIVE_INFINITY;
+  for (const evidence of report.steps) {
+    numericFailure(failures, `${evidence.step} evidence atMs`, evidence.atMs, { nonNegative: true });
+    if (Number.isFinite(evidence.atMs) && evidence.atMs < previousStepAtMs) {
+      failures.push(`${evidence.step} evidence timestamp is earlier than the previous step`);
+    }
+    previousStepAtMs = evidence.atMs;
+    failures.push(...snapshotIntegrityFailures(evidence.step, evidence.snapshot));
+  }
+  for (const action of report.actions) {
+    numericFailure(failures, `action ${action.action || "<empty>"} atMs`, action.atMs, { nonNegative: true });
+    if (!action.action.trim()) failures.push("public action name must not be empty");
+  }
+  return failures;
+}
+
 export function publicRouteAuditFailures(
   mode: PlayableSliceMode,
   actions: readonly PlayableSliceActionRecord[],
@@ -101,6 +196,46 @@ export function publicRouteAuditFailures(
   if (mode !== "continuous") return [];
   const forbidden = actions.filter((action) => action.channel === "diagnostic_barrier");
   return forbidden.map((action) => `continuous route used diagnostic barrier: ${action.action}`);
+}
+
+interface RequiredPublicAction {
+  readonly after: PlayableSliceStep;
+  readonly before: PlayableSliceStep;
+  readonly channel: PlayableSlicePublicChannel;
+  readonly action: string;
+  readonly label: string;
+}
+
+const REQUIRED_PUBLIC_ACTIONS: readonly RequiredPublicAction[] = [
+  { after: "spawn_ready", before: "boundary_crossed", channel: "keyboard", action: "down:Shift", label: "boundary sprint" },
+  { after: "spawn_ready", before: "boundary_crossed", channel: "keyboard", action: "down:w", label: "boundary movement" },
+  { after: "boundary_crossed", before: "terrain_dug", channel: "pointer", action: "click:left", label: "terrain dig" },
+  { after: "terrain_dug", before: "construction_placed", channel: "keyboard", action: "down:Tab", label: "construction UI access" },
+  { after: "terrain_dug", before: "construction_placed", channel: "keyboard", action: "b", label: "construction mode" },
+  { after: "terrain_dug", before: "construction_placed", channel: "pointer", action: "click:left", label: "construction placement" },
+  { after: "construction_placed", before: "construction_broken", channel: "pointer", action: "click:right", label: "construction break" },
+  { after: "construction_broken", before: "water_entered", channel: "keyboard", action: "up:Tab", label: "construction exit" },
+  { after: "construction_broken", before: "water_entered", channel: "keyboard", action: "down:w", label: "water approach" },
+  { after: "water_entered", before: "earth_cast_converged", channel: "keyboard", action: "4", label: "earth spell" },
+  { after: "earth_cast_converged", before: "checkpoint_saved", channel: "keyboard", action: "Control+s", label: "checkpoint" },
+  { after: "checkpoint_saved", before: "world_reloaded", channel: "navigation", action: "reload saved world", label: "saved-world reload" },
+  { after: "world_reloaded", before: "gameplay_continued", channel: "keyboard", action: "down:w", label: "post-reload movement" },
+];
+
+function publicRouteSequenceFailures(report: Omit<PlayableSliceRunReport, "passed" | "failures">): string[] {
+  const failures: string[] = [];
+  const steps = stepMap(report);
+  for (const requirement of REQUIRED_PUBLIC_ACTIONS) {
+    const after = steps.get(requirement.after)?.atMs;
+    const before = steps.get(requirement.before)?.atMs;
+    if (after === undefined || before === undefined) continue;
+    const found = report.actions.some((action) => action.channel === requirement.channel
+      && action.action === requirement.action
+      && action.atMs >= after
+      && action.atMs <= before);
+    if (!found) failures.push(`missing public ${requirement.label} action: ${requirement.channel}:${requirement.action}`);
+  }
+  return failures;
 }
 
 export function evaluatePlayableSliceRun(
@@ -117,6 +252,11 @@ export function evaluatePlayableSliceRun(
   }
   if (failures.some((failure) => failure.startsWith("missing step evidence"))) return failures;
 
+  const integrityFailures = reportIntegrityFailures(report);
+  failures.push(...integrityFailures);
+  if (integrityFailures.length > 0) return failures;
+  failures.push(...publicRouteSequenceFailures(report));
+
   const start = steps.get("spawn_ready")!.snapshot;
   const boundary = steps.get("boundary_crossed")!.snapshot;
   const dug = steps.get("terrain_dug")!.snapshot;
@@ -129,6 +269,19 @@ export function evaluatePlayableSliceRun(
   const continued = steps.get("gameplay_continued")!.snapshot;
   const snapshots = report.steps.map((evidence) => evidence.snapshot);
 
+  if (!start.persistence.loaded || start.persistence.lastError !== 0) {
+    failures.push("saved world was not loaded cleanly at route start");
+  }
+  if (!start.grounded) failures.push("player was not grounded at route start");
+  if (!isDry(start)) failures.push("route did not start on dry authoritative terrain");
+  for (const [step, snapshot] of [
+    ["boundary_crossed", boundary],
+    ["terrain_dug", dug],
+    ["construction_placed", placed],
+    ["construction_broken", broken],
+  ] as const) {
+    if (!isDry(snapshot)) failures.push(`route entered water before the canonical water step: ${step}`);
+  }
   if (boundary.page[0] === start.page[0] && boundary.page[1] === start.page[1]) {
     failures.push("player did not cross a terrain page boundary");
   }
@@ -156,15 +309,14 @@ export function evaluatePlayableSliceRun(
   if (water.swim.bodyId.length === 0 || water.swim.submersionM <= 0) {
     failures.push("swim state did not identify an immersed authoritative water body");
   }
-  if (spell.spell.accepted <= water.spell.accepted) {
-    failures.push("public earth spell input was not accepted");
+  if (!report.expectedWaterBodyId.trim()) {
+    failures.push("expected canonical river body id is missing");
+  } else if (water.swim.bodyId !== report.expectedWaterBodyId) {
+    failures.push(`player entered ${water.swim.bodyId || "unknown water"}, expected ${report.expectedWaterBodyId}`);
   }
-  if (spell.spell.denied > water.spell.denied) {
-    failures.push("public earth spell input was denied");
-  }
-  if (spell.spell.committed <= water.spell.committed) {
-    failures.push("terrain-affecting spell did not commit an authoritative edit");
-  }
+  if (spell.spell.accepted <= water.spell.accepted) failures.push("public earth spell input was not accepted");
+  if (spell.spell.denied > water.spell.denied) failures.push("public earth spell input was denied");
+  if (spell.spell.committed <= water.spell.committed) failures.push("terrain-affecting spell did not commit an authoritative edit");
   if (spell.spell.convergenceCompleted <= water.spell.convergenceCompleted) {
     failures.push("terrain-affecting spell did not complete terrain convergence");
   }
@@ -177,33 +329,37 @@ export function evaluatePlayableSliceRun(
   if (spell.spell.runtimeConvergenceFailed > water.spell.runtimeConvergenceFailed) {
     failures.push("terrain-affecting spell reported runtime convergence failure");
   }
-  if (
-    spell.terrain.revision <= water.terrain.revision
-    || spell.terrain.voxelDeltaCount <= water.terrain.voxelDeltaCount
-  ) {
+  if (spell.terrain.revision <= water.terrain.revision || spell.terrain.voxelDeltaCount <= water.terrain.voxelDeltaCount) {
     failures.push("terrain-affecting spell did not change authoritative terrain state");
   }
   if (checkpoint.persistence.checkpointCompleted <= spell.persistence.checkpointCompleted) {
     failures.push("public checkpoint action did not complete");
   }
-  if (checkpoint.persistence.checkpointFailed > spell.persistence.checkpointFailed) {
-    failures.push("public checkpoint action failed");
-  }
-  if (
-    checkpoint.persistence.checkpointInFlight
-    || checkpoint.persistence.dirtyRegions !== 0
-    || checkpoint.persistence.lastError !== 0
-  ) {
+  if (checkpoint.persistence.checkpointFailed > spell.persistence.checkpointFailed) failures.push("public checkpoint action failed");
+  if (checkpoint.persistence.checkpointInFlight || checkpoint.persistence.dirtyRegions !== 0 || checkpoint.persistence.lastError !== 0) {
     failures.push("checkpoint returned before persistence converged");
   }
   if (checkpoint.persistence.voxelDeltaCount < spell.terrain.voxelDeltaCount) {
     failures.push("checkpoint did not persist all authoritative voxel edits");
   }
-  if (!reloaded.persistence.loaded || reloaded.persistence.lastError !== 0) {
-    failures.push("saved world did not reload cleanly");
-  }
+  if (!reloaded.persistence.loaded || reloaded.persistence.lastError !== 0) failures.push("saved world did not reload cleanly");
   if (reloaded.persistence.voxelDeltaCount < checkpoint.persistence.voxelDeltaCount) {
     failures.push("reloaded save lost checkpointed voxel edits");
+  }
+  if (reloaded.terrain.voxelDeltaCount < checkpoint.persistence.voxelDeltaCount
+    || reloaded.terrain.voxelDeltaCount < spell.terrain.voxelDeltaCount) {
+    failures.push("reloaded terrain authority did not restore checkpointed voxel edits");
+  }
+  if (reloaded.construction.placedPieces !== broken.construction.placedPieces
+    || reloaded.construction.colliders !== broken.construction.colliders) {
+    failures.push("reloaded construction state does not match the post-break world");
+  }
+  if (continued.terrain.voxelDeltaCount < reloaded.terrain.voxelDeltaCount) {
+    failures.push("continued gameplay lost reloaded terrain authority");
+  }
+  if (continued.construction.placedPieces !== reloaded.construction.placedPieces
+    || continued.construction.colliders !== reloaded.construction.colliders) {
+    failures.push("continued gameplay changed reloaded construction state");
   }
   if (report.travelledAfterReloadM < 1) failures.push("gameplay did not continue after reload");
   if (continued.frame <= reloaded.frame) failures.push("render loop did not advance after reload");

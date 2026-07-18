@@ -3,6 +3,7 @@ import type { PlayableSliceSnapshot } from "../../src/qa/playable_slice_snapshot
 import {
   PLAYABLE_SLICE_STEPS,
   evaluatePlayableSliceRun,
+  type PlayableSliceActionRecord,
   type PlayableSliceRunReport,
   type PlayableSliceStep,
 } from "./playable_slice_contract.js";
@@ -26,7 +27,7 @@ function snapshot(step: PlayableSliceStep): PlayableSliceSnapshot {
     pageSizeM: 64,
     page: pageCrossed ? [1, 0] : [0, 0],
     swim: index >= PLAYABLE_SLICE_STEPS.indexOf("water_entered")
-      ? { mode: "surface", submersionM: 1, bodyId: "river:1" }
+      ? { mode: "surface", submersionM: 1, bodyId: "hydrology:1" }
       : { mode: "dry", submersionM: 0, bodyId: "" },
     terrain: terrainChanged
       ? { revision: spellChanged ? 2 : 1, voxelDeltaCount: spellChanged ? 40 : 20 }
@@ -83,12 +84,30 @@ function snapshot(step: PlayableSliceStep): PlayableSliceSnapshot {
   };
 }
 
+function publicActions(): PlayableSliceActionRecord[] {
+  return [
+    { channel: "keyboard", action: "down:Shift", atMs: 50 },
+    { channel: "keyboard", action: "down:w", atMs: 50 },
+    { channel: "pointer", action: "click:left", atMs: 150 },
+    { channel: "keyboard", action: "down:Tab", atMs: 250 },
+    { channel: "keyboard", action: "b", atMs: 250 },
+    { channel: "pointer", action: "click:left", atMs: 250 },
+    { channel: "pointer", action: "click:right", atMs: 350 },
+    { channel: "keyboard", action: "up:Tab", atMs: 450 },
+    { channel: "keyboard", action: "down:w", atMs: 450 },
+    { channel: "keyboard", action: "4", atMs: 550 },
+    { channel: "keyboard", action: "Control+s", atMs: 650 },
+    { channel: "navigation", action: "reload saved world", atMs: 750 },
+    { channel: "keyboard", action: "down:w", atMs: 850 },
+  ];
+}
+
 function baseReport(
   mutate: (step: PlayableSliceStep, value: PlayableSliceSnapshot) => PlayableSliceSnapshot,
 ): Omit<PlayableSliceRunReport, "passed" | "failures"> {
-  const steps = PLAYABLE_SLICE_STEPS.map((step) => ({
+  const steps = PLAYABLE_SLICE_STEPS.map((step, index) => ({
     step,
-    atMs: PLAYABLE_SLICE_STEPS.indexOf(step),
+    atMs: index * 100,
     snapshot: mutate(step, snapshot(step)),
   }));
   return {
@@ -96,13 +115,10 @@ function baseReport(
     mode: "continuous",
     runIndex: 0,
     freshProfile: false,
+    expectedWaterBodyId: "hydrology:1",
     startedAt: new Date(0).toISOString(),
     wallClockMs: 10_000,
-    actions: [
-      { channel: "keyboard", action: "move", atMs: 1 },
-      { channel: "pointer", action: "edit", atMs: 2 },
-      { channel: "navigation", action: "reload", atMs: 3 },
-    ],
+    actions: publicActions(),
     steps,
     maxFrameMs: 50,
     maxFrameP95Ms: 25,
@@ -125,10 +141,7 @@ describe("playable slice safety across reload", () => {
       const postReloadRecovery = step === "gameplay_continued" ? 1 : 0;
       return {
         ...value,
-        safety: {
-          ...value.safety,
-          recoveries: reloaded ? postReloadRecovery : 5,
-        },
+        safety: { ...value.safety, recoveries: reloaded ? postReloadRecovery : 5 },
       };
     });
 
@@ -140,10 +153,7 @@ describe("playable slice safety across reload", () => {
       const reloaded = PLAYABLE_SLICE_STEPS.indexOf(step) >= PLAYABLE_SLICE_STEPS.indexOf("world_reloaded");
       return {
         ...value,
-        safety: {
-          ...value.safety,
-          frontierBarrierEngagements: reloaded ? 0 : 1,
-        },
+        safety: { ...value.safety, frontierBarrierEngagements: reloaded ? 0 : 1 },
       };
     });
 
