@@ -329,3 +329,41 @@ function validateTreeGpuRingCrownProxyGeometry(input: TreeGpuRingDrawResourcesIn
     );
   }
 }
+
+function updateTreeGpuRingIndirectIndexCount(
+  indirect: StorageBufferAttribute,
+  group: number,
+  source: THREE.BufferGeometry,
+): void {
+  const array = indirect.array as Uint32Array;
+  const offset = group * 5;
+  array[offset] = source.getIndex()?.count ?? source.getAttribute("position")?.count ?? 0;
+  indirect.needsUpdate = true;
+}
+
+function replaceTreeGpuRingPrepassTwin(
+  input: TreeGpuRingDrawResourcesInput,
+  mesh: TreeGpuRingMesh,
+  materialHandle: TreeMaterialHandle,
+): void {
+  const twinName = `${mesh.name}-depth-prepass`;
+  const index = input.ringPrepassTwins.findIndex((twin) => twin.name === twinName);
+  if (index >= 0) {
+    const [previous] = input.ringPrepassTwins.splice(index, 1);
+    input.root.remove(previous);
+    if (Array.isArray(previous.material)) {
+      for (const material of previous.material) material.dispose();
+    } else {
+      previous.material.dispose();
+    }
+  }
+  addTreeGpuRingPrepassTwin({
+    root: input.root,
+    twins: input.ringPrepassTwins,
+    lod: "impostor",
+    mesh,
+    materialHandle,
+    useTreePrepass: input.useTreePrepass,
+    maxLod: input.treePrepassMaxLod,
+  });
+}
