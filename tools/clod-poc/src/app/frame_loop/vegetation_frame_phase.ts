@@ -168,6 +168,7 @@ function mirrorWaterRuntimeCounters(input: VegetationFramePhaseInput): void {
   const counters = globalCounters();
   if (!counters) return;
   counters["webgpu_uncaptured_errors"] = webGpuUncapturedErrorCount();
+  counters["water_high_quality_material_active"] = input.waterController.highQualityMaterialActive ? 1 : 0;
   const clipmap = input.waterController.clipmap as typeof input.waterController.clipmap | undefined;
   if (!clipmap) return;
   const cost = clipmap.updateCostStats;
