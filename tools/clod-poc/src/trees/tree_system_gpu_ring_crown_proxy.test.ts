@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
-import { cloneTreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import { cloneTreeSettings } from "./tree_config.js";
 import {
   createTreeCrownProxyGeometry,
   TREE_CROWN_PROXY_INDEX_COUNT,
@@ -168,5 +168,3 @@ function fakeFoliageAtlas(): TreeFoliageAtlas {
     },
   };
 }
-
-void (null as TreeSpeciesId | null);
