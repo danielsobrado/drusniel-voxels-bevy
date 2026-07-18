@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSaveCheckpointController, type SaveCheckpointCounters } from "./save_checkpoint_controller.js";
 
 type KeyListener = EventListenerOrEventListenerObject;
@@ -51,6 +51,10 @@ function ctrlSaveEvent(repeat = false): KeyboardEvent {
     stopImmediatePropagation: () => { propagationStopped = true; },
   } as unknown as KeyboardEvent;
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("save checkpoint controller", () => {
   it("coalesces concurrent checkpoint requests and publishes counters", async () => {
@@ -115,6 +119,7 @@ describe("save checkpoint controller", () => {
   });
 
   it("keeps saving when checkpoint clock instrumentation throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     const flush = vi.fn(async () => undefined);
     const controller = createSaveCheckpointController({
       flush,
@@ -127,6 +132,7 @@ describe("save checkpoint controller", () => {
   });
 
   it("keeps saving when checkpoint counter writes throw", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     const flush = vi.fn(async () => undefined);
     const counters = Object.freeze({}) as SaveCheckpointCounters;
     const controller = createSaveCheckpointController({
@@ -203,6 +209,7 @@ describe("save checkpoint controller", () => {
   });
 
   it("does not let a status callback break a successful checkpoint", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     const status = vi.fn(() => { throw new Error("ui unavailable"); });
     const controller = createSaveCheckpointController({
       flush: async () => undefined,
