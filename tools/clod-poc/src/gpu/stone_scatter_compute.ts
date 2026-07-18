@@ -3,10 +3,16 @@ import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
-import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
+import {
+  hydrologyAtlasGpuFieldsTexture,
+  hydrologyAtlasGpuParams,
+  hydrologyAtlasGpuTexture,
+} from "./hydrology_atlas_gpu.js";
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 import { GpuTimestampRecorder, type GpuTimestampSnapshot } from "../diagnostics/gpu_timestamp_recorder.js";
 import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
+import { riverCobbleGpuEnabled } from "../stones/river_cobble_runtime.js";
+import { readStoneHydrologyFieldsData } from "../stones/stone_hydrology_fields_runtime.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
@@ -138,6 +144,7 @@ export class StoneGpuScatterCompute {
   private readonly fieldParams: GPUBuffer;
   private readonly digEdits: GPUBuffer;
   private readonly hydroTexture: GPUTexture;
+  private readonly hydroFieldsTexture: GPUTexture;
   private readonly sourceA: GPUBuffer;
   private readonly sourceB: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
@@ -160,6 +167,7 @@ export class StoneGpuScatterCompute {
     edits: readonly ResolvedDigEdit[],
     private readonly buffers: StoneGpuScatterBuffers,
     hydroData: GrassHydrologyData | null,
+    hydroFieldsData: GrassHydrologyData | null,
     viewConfig: StoneGpuViewConfig,
   ) {
     this.pipelines = pipelines;
@@ -180,7 +188,8 @@ export class StoneGpuScatterCompute {
     device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
     const packedFieldParams = packFieldParams(edits.length);
     device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
-    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    this.hydroTexture = this.createHydrologyTexture("stone scatter hydrology layout a", hydroData);
+    this.hydroFieldsTexture = this.createHydrologyTexture("stone scatter hydrology layout b", hydroFieldsData);
     const hydroSampler = device.createSampler({ label: "stone scatter hydro sampler", magFilter: "nearest", minFilter: "nearest" });
     const canonicalHeight = heightfieldTileGpuAtlasBindings(device);
     this.bindGroup = device.createBindGroup({
@@ -202,6 +211,8 @@ export class StoneGpuScatterCompute {
         { binding: 12, resource: { buffer: canonicalHeight.params } },
         { binding: 13, resource: { buffer: this.sourceA } },
         { binding: 14, resource: { buffer: this.sourceB } },
+        { binding: 15, resource: this.hydroFieldsTexture.createView() },
+        { binding: 16, resource: hydrologyAtlasGpuFieldsTexture(device).createView() },
       ],
     });
     this.packStaticViewConfig();
@@ -216,6 +227,11 @@ export class StoneGpuScatterCompute {
   ): Promise<StoneGpuScatterCompute> {
     const module = device.createShaderModule({ label: "stone scatter compute shader", code: composeStoneScatterShader() });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
+    const texture = (binding: number, sampleType: GPUTextureSampleType = "unfilterable-float"): GPUBindGroupLayoutEntry => ({
+      binding,
+      visibility: GPUShaderStage.COMPUTE,
+      texture: { sampleType },
+    });
     const layout = device.createBindGroupLayout({
       label: "stone scatter compute layout",
       entries: [
@@ -223,13 +239,14 @@ export class StoneGpuScatterCompute {
         storage(1), storage(2), storage(3), storage(4),
         { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        texture(7),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
-        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-        { binding: 10, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-        { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+        texture(9),
+        texture(10),
+        texture(11, "sint"),
         { binding: 12, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         storage(13), storage(14),
+        texture(15), texture(16),
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -254,6 +271,7 @@ export class StoneGpuScatterCompute {
       edits,
       buffers,
       hydroData,
+      readStoneHydrologyFieldsData(),
       viewConfig,
     );
   }
@@ -324,6 +342,7 @@ export class StoneGpuScatterCompute {
     this.digEdits.destroy();
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
+    this.hydroFieldsTexture.destroy();
     this.sourceA.destroy();
     this.sourceB.destroy();
     this.timestamps.destroy();
@@ -367,7 +386,7 @@ export class StoneGpuScatterCompute {
     this.paramU32[36] = maxInstances;
     this.paramU32[37] = grid;
     this.paramU32[38] = settings.seedSalt >>> 0;
-    this.paramU32[39] = 0;
+    this.paramU32[39] = riverCobbleGpuEnabled() ? 1 : 0;
     this.paramU32[40] = 0;
     this.paramU32[41] = 0;
     this.paramU32[42] = params.unboundedWorld ? 1 : 0;
@@ -485,15 +504,30 @@ export class StoneGpuScatterCompute {
     pass.end();
   }
 
-  private createHydrologyTexture(hydroData: GrassHydrologyData | null): GPUTexture {
+  private createHydrologyTexture(label: string, hydroData: GrassHydrologyData | null): GPUTexture {
     if (hydroData && hydroData.data.length > 0) {
-      const texture = this.device.createTexture({ label: "stone scatter hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      const texture = this.device.createTexture({
+        label,
+        size: { width: hydroData.res, height: hydroData.res },
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
       const bytes = new Uint8Array(hydroData.data.byteLength);
       bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
-      this.device.queue.writeTexture({ texture }, bytes, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
+      this.device.queue.writeTexture(
+        { texture },
+        bytes,
+        { bytesPerRow: hydroData.res * 16 },
+        { width: hydroData.res, height: hydroData.res },
+      );
       return texture;
     }
-    return this.device.createTexture({ label: "stone scatter fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
+    return this.device.createTexture({
+      label: `${label} fallback`,
+      size: { width: 1, height: 1 },
+      format: "rgba32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
   }
 }
 

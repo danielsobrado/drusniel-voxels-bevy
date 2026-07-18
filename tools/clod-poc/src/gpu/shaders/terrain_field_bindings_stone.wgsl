@@ -8,3 +8,5 @@
 @group(0) @binding(10) var canonical_height_atlas: texture_2d<f32>;
 @group(0) @binding(11) var canonical_height_residency: texture_2d<i32>;
 @group(0) @binding(12) var<uniform> canonical_height_atlas_params: vec4<f32>;
+@group(0) @binding(15) var hydro_fields_texture: texture_2d<f32>;
+@group(0) @binding(16) var hydro_fields_atlas_texture: texture_2d<f32>;

@@ -107,12 +107,14 @@ describe("WGSL module composition", () => {
     for (const [source, textureBinding, samplerBinding] of [
       [treeRingComputeSource, 9, 10],
       [grassRingComputeSource, 9, 10],
-      [stoneScatterComputeSource, 7, 8],
       [understoryRingComputeSource, 5, 6],
     ] as const) {
       expect(source).toContain(`{ binding: ${textureBinding}, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } }`);
       expect(source).toContain(`{ binding: ${samplerBinding}, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } }`);
     }
+    expect(stoneScatterComputeSource).toContain('sampleType: GPUTextureSampleType = "unfilterable-float"');
+    expect(stoneScatterComputeSource).toContain("texture(7),");
+    expect(stoneScatterComputeSource).toContain('{ binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } }');
   });
 
   it("routes every active vegetation category through the resident canonical height atlas", () => {
