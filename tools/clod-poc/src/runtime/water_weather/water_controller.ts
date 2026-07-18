@@ -164,15 +164,22 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     (maxCellSize, cellSize) => Math.max(maxCellSize, cellSize),
     0,
   );
+  const clipmapOuterHalfSpanM = maxClipmapCellSize * clipmapConfig.cellsPerLevel * 0.5;
+  const clipmapMaxSnapOffsetM = maxClipmapCellSize * clipmapConfig.snapCells;
   const runtimeFeatures: WaterRuntimeFeatures = {
     highQualityMaterial: useHighQualityWebGpuWater,
-    ssr: useHighQualityWebGpuWater && reflectionPolicy.ssrActive,
+    ssr: useHighQualityWebGpuWater
+      && reflectionPolicy.ssrActive
+      && clipmapWaterConfig.visual.reflection.maxSteps > 0,
     refraction: useHighQualityWebGpuWater
       && clipmapWaterConfig.visual.refraction.enabled
       && clipmapWaterConfig.visual.refraction.strength > 0,
-    caustics: useHighQualityWebGpuWater && clipmapWaterConfig.caustics.enabled,
+    caustics: useHighQualityWebGpuWater
+      && clipmapWaterConfig.caustics.enabled
+      && clipmapWaterConfig.caustics.gain > 0,
     atlasDrivenLevelCount: waterAtlas ? atlasLevelCellSizes.length : 0,
-    clipmapOuterHalfSpanM: maxClipmapCellSize * clipmapConfig.cellsPerLevel * 0.5,
+    clipmapOuterHalfSpanM,
+    clipmapGuaranteedHalfSpanM: Math.max(0, clipmapOuterHalfSpanM - clipmapMaxSnapOffsetM),
   };
   const clipmap = new WaterClipmap({
     scene: deps.scene,
