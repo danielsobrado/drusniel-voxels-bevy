@@ -11,7 +11,11 @@ import {
   setTerrainStreamingEnabled,
 } from "../stream/terrain_streaming_control.js";
 
-function record(generation: number | undefined, createdAtUnixMs = 1): ClodCacheStoredRecord {
+function record(
+  generation: number | undefined,
+  createdAtUnixMs = 1,
+  cacheWriteId?: string,
+): ClodCacheStoredRecord {
   return {
     header: {
       schemaVersion: 1,
@@ -28,7 +32,10 @@ function record(generation: number | undefined, createdAtUnixMs = 1): ClodCacheS
       storedBytes: 1,
       compression: "none",
       checksum: `checksum-${createdAtUnixMs}`,
-      metadata: generation === undefined ? {} : { terrainStreamingGeneration: generation },
+      metadata: {
+        ...(generation === undefined ? {} : { terrainStreamingGeneration: generation }),
+        ...(cacheWriteId === undefined ? {} : { cacheWriteId }),
+      },
     },
     payload: new Uint8Array([createdAtUnixMs]).buffer,
   };
@@ -138,5 +145,12 @@ describe("commitCachePut", () => {
     await expect(commitCachePut(store, request(record(undefined), undefined, 10), () => now)).resolves.toBe(false);
     expect(remove).toHaveBeenCalledOnce();
     expect(stored).toBeNull();
+  });
+
+  it("does not match same-millisecond replacements with different write ids", () => {
+    const first = record(undefined, 1, "session:1");
+    const replacement = record(undefined, 1, "session:2");
+
+    expect(cacheRecordVersionMatches(first, replacement)).toBe(false);
   });
 });
