@@ -4,11 +4,13 @@ import * as THREE from "three";
 import { StorageInstancedBufferAttribute } from "three/webgpu";
 import {
   cloneForestLightingSettings,
+  type ForestLightingMaterialState,
+} from "../forest_lighting/index.js";
+import {
   cloneTreeSettings,
   createTreeRingImpostorNodeMaterialHandle,
   octFrames,
   TREE_LODS,
-  type ForestLightingMaterialState,
   type TreeImpostorAtlas,
   type TreeRingInstanceBuffers,
 } from "./index.js";
@@ -65,7 +67,7 @@ describe("GPU ring baked impostor node material", () => {
   it("updates and tears down forest lighting without replacing materials", () => {
     const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
     const material = handle.regularMaterial;
-    const live = forestState("combined");
+    const live = forestState();
 
     handle.updateForestLighting?.(live.state);
     handle.updateForestLighting?.(null);
@@ -190,11 +192,11 @@ function buffers(): TreeRingInstanceBuffers {
   };
 }
 
-function forestState(debugMode: "combined"): { state: ForestLightingMaterialState } {
+function forestState(): { state: ForestLightingMaterialState } {
   const texture = new THREE.DataTexture(new Uint8Array([1, 2, 3, 4]), 1, 1);
   const auxTexture = new THREE.DataTexture(new Uint8Array([5, 6, 7, 8]), 1, 1);
   const settings = cloneForestLightingSettings();
-  settings.materialIntegration.debugMode = debugMode;
+  settings.materialIntegration.debugMode = "combined";
   return {
     state: {
       worldCells: 2048,
