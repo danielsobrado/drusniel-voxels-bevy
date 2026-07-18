@@ -16,6 +16,16 @@ import type { UiStartupContext } from "./ui_startup_context.js";
 
 const CHECKPOINT_MAX_REGION_WRITES = Number.MAX_SAFE_INTEGER;
 
+function configuredWorldPages(input: UiStartupContext["input"]): number {
+  const diagnostics = typeof window === "undefined"
+    ? undefined
+    : (window as typeof window & {
+        __drusnielWorldMode?: { configuredWorldPages?: number };
+      }).__drusnielWorldMode;
+  const candidate = input.configuredWorldPages ?? diagnostics?.configuredWorldPages;
+  return Number.isFinite(candidate) && candidate! > 0 ? candidate! : input.WORLD;
+}
+
 export function runProjectArchiveStartup(
   ctx: UiStartupContext,
   infoPanel: InfoPanelController,
@@ -32,7 +42,6 @@ export function runProjectArchiveStartup(
       buildProgressPhase,
       buildProgressPercent,
     },
-    WORLD,
     cfg,
     state,
     buildStatusRef,
@@ -67,7 +76,7 @@ export function runProjectArchiveStartup(
     buildProgressPercent,
     buildProgressBar,
     getState: () => state,
-    getWorldSize: () => WORLD,
+    getWorldSize: () => configuredWorldPages(input),
     getConfig: () => cfg,
     getWorldIdentity: () => ({
       scene: input.searchParams.get("scene") ?? "default",
