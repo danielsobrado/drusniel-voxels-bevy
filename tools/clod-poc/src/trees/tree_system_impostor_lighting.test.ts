@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import type { EnvironmentLighting } from "../environment/environment.js";
-import { cloneTreeSettings } from "./tree_config.js";
+import { cloneTreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import {
   updateTreeSystemImpostorMaterial,
@@ -10,7 +10,7 @@ import {
 
 describe("tree system impostor lighting lifecycle", () => {
   it("creates a cached material with the current lighting", () => {
-    const materials = {};
+    const materials: Partial<Record<TreeSpeciesId, THREE.Material>> = {};
     const current = lighting(0.25);
     const material = updateTreeSystemImpostorMaterial({
       species: "oak",
@@ -29,7 +29,7 @@ describe("tree system impostor lighting lifecycle", () => {
 
   it("updates every cached species material in place", () => {
     const settings = cloneTreeSettings();
-    const materials = {};
+    const materials: Partial<Record<TreeSpeciesId, THREE.Material>> = {};
     const oak = updateTreeSystemImpostorMaterial({
       species: "oak",
       settings,
