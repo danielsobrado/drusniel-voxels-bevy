@@ -32,6 +32,7 @@ export class RiverMistOverlay {
   private readonly readBiomeState: () => BiomeVisualState | null;
   private readonly halfGrid: number;
   private readonly gridSide: number;
+  private readonly sampleHintM: number;
   private emitTimeS: number;
   private visible = true;
   private scanActive = false;
@@ -73,6 +74,7 @@ export class RiverMistOverlay {
     this.readBiomeState = options.readBiomeState ?? readActiveBiomeVisualState;
     this.halfGrid = Math.ceil(particles.spawnRadiusM / particles.spacingM);
     this.gridSide = this.halfGrid * 2 + 1;
+    this.sampleHintM = Math.max(particles.spacingM, particles.sampleHintM);
     this.emitTimeS = particles.emitIntervalS;
     this.scene.add(this.points);
     this.applyVisibility();
@@ -80,6 +82,11 @@ export class RiverMistOverlay {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+    if (!visible) {
+      this.scanActive = false;
+      this.pool.clear();
+      this.geometry.setDrawRange(0, 0);
+    }
     this.applyVisibility();
   }
 
@@ -96,10 +103,11 @@ export class RiverMistOverlay {
 
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void {
     if (!this.points.visible) return;
-    this.pool.advance(deltaSeconds);
+    const safeDeltaSeconds = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+    this.pool.advance(safeDeltaSeconds);
     const biome = this.readBiomeState();
     const particles = this.options.settings.mask.particles;
-    this.emitTimeS += Math.max(0, deltaSeconds);
+    this.emitTimeS += safeDeltaSeconds;
     if (!this.scanActive
       && this.emitTimeS >= particles.emitIntervalS
       && biome?.enabled
@@ -152,7 +160,7 @@ export class RiverMistOverlay {
       const z = (cellZ + 0.5 + jitterZ) * particles.spacingM;
       if (Math.hypot(x - this.scanCenterX, z - this.scanCenterZ) > particles.spawnRadiusM) continue;
 
-      const sample = this.field.sampleForCellSize(x, z, particles.spacingM);
+      const sample = this.field.sampleForCellSize(x, z, this.sampleHintM);
       this.lastSampledCells += 1;
       const signal = riverMistSignal(sample, biome, this.options.settings);
       this.lastMaxSignal = Math.max(this.lastMaxSignal, signal);
