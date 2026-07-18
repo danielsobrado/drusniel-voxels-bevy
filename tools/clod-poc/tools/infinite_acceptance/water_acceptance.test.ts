@@ -19,7 +19,7 @@ function passingInput() {
       water_clipmap_visible_levels: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
       water_clipmap_level_count: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
       water_atlas_driven_level_count: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS,
-      water_clipmap_outer_half_span_m: 768,
+      water_clipmap_guaranteed_half_span_m: 744,
       far_clipmap_inner_radius_m: 384,
       water_clipmap_snaps: WATER_ACCEPTANCE_MIN_ATLAS_LEVELS * 2,
       water_clipmap_field_samples: 0,
@@ -46,7 +46,7 @@ describe("water acceptance", () => {
     input.counters.water_clipmap_level_count = 0;
     input.counters.water_atlas_driven_level_count = 0;
     input.counters.water_clipmap_visible_levels = 0;
-    input.counters.water_clipmap_outer_half_span_m = 0;
+    input.counters.water_clipmap_guaranteed_half_span_m = 0;
     input.counters.far_clipmap_inner_radius_m = 0;
     input.counters.water_clipmap_snaps = 0;
     input.counters.water_clipmap_field_samples = 1;
@@ -64,7 +64,7 @@ describe("water acceptance", () => {
       expect.stringContaining("water_clipmap_level_count"),
       expect.stringContaining("water_atlas_driven_level_count"),
       expect.stringContaining("water_clipmap_visible_levels"),
-      expect.stringContaining("water_clipmap_outer_half_span_m"),
+      expect.stringContaining("water_clipmap_guaranteed_half_span_m"),
       expect.stringContaining("far_clipmap_inner_radius_m"),
       expect.stringContaining("water_clipmap_snaps"),
       expect.stringContaining("water_clipmap_field_samples"),
@@ -105,12 +105,12 @@ describe("water acceptance", () => {
     ]));
   });
 
-  it("rejects a gap between near water and the far clipmap", () => {
+  it("rejects a snap-adjusted gap between near water and the far clipmap", () => {
     const input = passingInput();
-    input.counters.water_clipmap_outer_half_span_m = 256;
+    input.counters.water_clipmap_guaranteed_half_span_m = 383;
 
     expect(evaluateWaterAcceptance(input)).toEqual([
-      "water_clipmap_outer_half_span_m=256 must cover far_clipmap_inner_radius_m=384",
+      "water_clipmap_guaranteed_half_span_m=383 must cover far_clipmap_inner_radius_m=384",
     ]);
   });
 
