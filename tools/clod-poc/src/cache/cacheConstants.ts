@@ -1,0 +1,1 @@
+export const DEFAULT_CACHE_RPC_TIMEOUT_MS = 30_000;
