@@ -47,6 +47,28 @@ function makeInput(waterEnabled: boolean, selectionFrameId = 1): VegetationFrame
     propController: { update: propUpdate } as unknown as VegetationFramePhaseInput["propController"],
     waterController: {
       field: { sample: sampleWater },
+      runtimeFeatures: {
+        highQualityMaterial: true,
+        ssr: true,
+        refraction: true,
+        caustics: true,
+        atlasDrivenLevelCount: 4,
+        clipmapOuterHalfSpanM: 768,
+        clipmapGuaranteedHalfSpanM: 744,
+      },
+      clipmap: {
+        isEnabled: waterEnabled,
+        visibleLevelCount: 4,
+        levelCount: 4,
+        updateCostStats: {
+          snaps: 8,
+          fullRefills: 0,
+          partialRefills: 0,
+          fieldSamples: 0,
+          staticSnaps: 8,
+          indexRebuilds: 0,
+        },
+      },
       update,
       logDevInitOnce: vi.fn(),
     } as unknown as VegetationFramePhaseInput["waterController"],
@@ -88,6 +110,7 @@ describe("vegetation frame phase", () => {
     expect(counters["infinite_hydrology_outside_sample_valid"]).toBe(1);
     expect(counters["infinite_hydrology_nonrepeat_ok"]).toBe(1);
     expect(counters["infinite_hydrology_camera_outside_startup"]).toBe(1);
+    expect(counters["water_clipmap_enabled"]).toBe(0);
   });
 
   it("updates water around the streamed vegetation center", () => {
@@ -129,7 +152,27 @@ describe("vegetation frame phase", () => {
     expect(counters["infinite_hydrology_camera_outside_startup"]).toBe(1);
   });
 
-  it("skips the hydrology diagnostics mirror off its frame cadence", () => {
+  it("mirrors resolved water features and clipmap evidence every frame", () => {
+    const counters = installCounters();
+    const input = makeInput(true, 31);
+
+    runVegetationFramePhase(input);
+
+    expect(counters["water_high_quality_material_active"]).toBe(1);
+    expect(counters["water_ssr_active"]).toBe(1);
+    expect(counters["water_refraction_active"]).toBe(1);
+    expect(counters["water_caustics_active"]).toBe(1);
+    expect(counters["water_atlas_driven_level_count"]).toBe(4);
+    expect(counters["water_clipmap_outer_half_span_m"]).toBe(768);
+    expect(counters["water_clipmap_guaranteed_half_span_m"]).toBe(744);
+    expect(counters["water_clipmap_enabled"]).toBe(1);
+    expect(counters["water_clipmap_visible_levels"]).toBe(4);
+    expect(counters["water_clipmap_level_count"]).toBe(4);
+    expect(counters["water_clipmap_snaps"]).toBe(8);
+    expect(counters["water_clipmap_field_samples"]).toBe(0);
+  });
+
+  it("keeps expensive hydrology diagnostics on their coarse cadence", () => {
     const counters = installCounters();
     const input = makeInput(true, 31);
     input.camera.position.set(1500, 40, -300);
@@ -137,6 +180,7 @@ describe("vegetation frame phase", () => {
     runVegetationFramePhase(input);
 
     expect(counters["infinite_hydrology_outside_sample_valid"]).toBeUndefined();
+    expect(counters["water_clipmap_level_count"]).toBe(4);
     expect(input.waterController.update).toHaveBeenCalledOnce();
   });
 

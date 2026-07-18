@@ -25,11 +25,22 @@ import {
   createHydrologyWaterSource,
   createLegacyWaterFieldSource,
 } from "../../water/water_authority.js";
-import type { WaterDebugPoseHooks, WaterControllerDeps, WaterController } from "./water_controller_types.js";
+import type {
+  WaterDebugPoseHooks,
+  WaterControllerDeps,
+  WaterController,
+  WaterRuntimeFeatures,
+} from "./water_controller_types.js";
 import { readShoreSurfSettings, deepOceanClipmapExclusionDistance } from "./water_controller_params.js";
 import { installWaterDebugApi, logWaterDevInit } from "./water_controller_debug.js";
 
-export type { WaterControllerUiState, WaterDebugPoseHooks, WaterControllerDeps, WaterController } from "./water_controller_types.js";
+export type {
+  WaterControllerUiState,
+  WaterDebugPoseHooks,
+  WaterControllerDeps,
+  WaterController,
+  WaterRuntimeFeatures,
+} from "./water_controller_types.js";
 export { readShoreSurfSettings, deepOceanClipmapExclusionDistance } from "./water_controller_params.js";
 export { installWaterDebugApi, logWaterDevInit } from "./water_controller_debug.js";
 
@@ -149,6 +160,27 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const clipmapConfig = waterAtlas
     ? { ...clipmapWaterConfig, cellSizes: atlasLevelCellSizes }
     : clipmapWaterConfig;
+  const maxClipmapCellSize = clipmapConfig.cellSizes.reduce(
+    (maxCellSize, cellSize) => Math.max(maxCellSize, cellSize),
+    0,
+  );
+  const clipmapOuterHalfSpanM = maxClipmapCellSize * clipmapConfig.cellsPerLevel * 0.5;
+  const clipmapMaxSnapOffsetM = maxClipmapCellSize * clipmapConfig.snapCells;
+  const runtimeFeatures: WaterRuntimeFeatures = {
+    highQualityMaterial: useHighQualityWebGpuWater,
+    ssr: useHighQualityWebGpuWater
+      && reflectionPolicy.ssrActive
+      && clipmapWaterConfig.visual.reflection.maxSteps > 0,
+    refraction: useHighQualityWebGpuWater
+      && clipmapWaterConfig.visual.refraction.enabled
+      && clipmapWaterConfig.visual.refraction.strength > 0,
+    caustics: useHighQualityWebGpuWater
+      && clipmapWaterConfig.caustics.enabled
+      && clipmapWaterConfig.caustics.gain > 0,
+    atlasDrivenLevelCount: waterAtlas ? atlasLevelCellSizes.length : 0,
+    clipmapOuterHalfSpanM,
+    clipmapGuaranteedHalfSpanM: Math.max(0, clipmapOuterHalfSpanM - clipmapMaxSnapOffsetM),
+  };
   const clipmap = new WaterClipmap({
     scene: deps.scene,
     config: clipmapConfig,
@@ -212,6 +244,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     authority,
     editedWater,
     debugState,
+    runtimeFeatures,
     makeVisual,
     setVisible(enabled) {
       clipmap.setVisible(enabled);

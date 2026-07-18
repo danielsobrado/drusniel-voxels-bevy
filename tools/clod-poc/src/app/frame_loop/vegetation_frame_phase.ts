@@ -167,10 +167,16 @@ function updateForestLighting(input: VegetationFramePhaseInput): void {
 function mirrorWaterRuntimeCounters(input: VegetationFramePhaseInput): void {
   const counters = globalCounters();
   if (!counters) return;
-  counters["webgpu_uncaptured_errors"] = webGpuUncapturedErrorCount();
-  const clipmap = input.waterController.clipmap as typeof input.waterController.clipmap | undefined;
-  if (!clipmap) return;
+  const { runtimeFeatures, clipmap } = input.waterController;
   const cost = clipmap.updateCostStats;
+  counters["webgpu_uncaptured_errors"] = webGpuUncapturedErrorCount();
+  counters["water_high_quality_material_active"] = runtimeFeatures.highQualityMaterial ? 1 : 0;
+  counters["water_ssr_active"] = runtimeFeatures.ssr ? 1 : 0;
+  counters["water_refraction_active"] = runtimeFeatures.refraction ? 1 : 0;
+  counters["water_caustics_active"] = runtimeFeatures.caustics ? 1 : 0;
+  counters["water_atlas_driven_level_count"] = runtimeFeatures.atlasDrivenLevelCount;
+  counters["water_clipmap_outer_half_span_m"] = runtimeFeatures.clipmapOuterHalfSpanM;
+  counters["water_clipmap_guaranteed_half_span_m"] = runtimeFeatures.clipmapGuaranteedHalfSpanM;
   counters["water_clipmap_enabled"] = input.state.waterEnabled && clipmap.isEnabled ? 1 : 0;
   counters["water_clipmap_visible_levels"] = clipmap.visibleLevelCount;
   counters["water_clipmap_level_count"] = clipmap.levelCount;
@@ -183,9 +189,9 @@ function mirrorWaterRuntimeCounters(input: VegetationFramePhaseInput): void {
 }
 
 function updateWater(input: VegetationFramePhaseInput): void {
+  mirrorWaterRuntimeCounters(input);
   if (input.selectionFrameId % HYDROLOGY_DIAGNOSTIC_INTERVAL_FRAMES === 0) {
     mirrorInfiniteHydrologyDiagnostics(input);
-    mirrorWaterRuntimeCounters(input);
   }
   if (!input.state.waterEnabled) return;
   // Keep the water clipmap on the same streamed authority center as terrain and vegetation.
