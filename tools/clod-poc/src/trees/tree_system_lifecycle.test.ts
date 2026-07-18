@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type MockInstance } from "vitest";
 import * as THREE from "three";
 import {
   disposeMaterial,
@@ -36,16 +36,17 @@ describe("tree system lifecycle helpers", () => {
     expect(second.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("disposes every mesh in a tree mesh grid", () => {
+  it("disposes patch-owned mesh resources but preserves shared materials", () => {
     const grid = meshGrid();
     const disposals = spyGridDisposals(grid);
 
     disposeTreeMeshGrid(grid);
 
-    for (const dispose of disposals) expect(dispose).toHaveBeenCalledTimes(1);
+    for (const dispose of disposals.geometryAndMesh) expect(dispose).toHaveBeenCalledTimes(1);
+    for (const dispose of disposals.materials) expect(dispose).not.toHaveBeenCalled();
   });
 
-  it("removes a patch group and disposes its grid", () => {
+  it("removes a patch group without disposing shared materials", () => {
     const root = new THREE.Group();
     const group = new THREE.Group();
     root.add(group);
@@ -55,7 +56,8 @@ describe("tree system lifecycle helpers", () => {
     removeTreePatchResources(root, { group, meshes: grid });
 
     expect(root.children).not.toContain(group);
-    for (const dispose of disposals) expect(dispose).toHaveBeenCalledTimes(1);
+    for (const dispose of disposals.geometryAndMesh) expect(dispose).toHaveBeenCalledTimes(1);
+    for (const dispose of disposals.materials) expect(dispose).not.toHaveBeenCalled();
   });
 
   it("removes and disposes loose render objects", () => {
@@ -103,14 +105,18 @@ function meshGrid(): TreeSystemMeshGrid {
   return grid;
 }
 
-function spyGridDisposals(grid: TreeSystemMeshGrid): Array<ReturnType<typeof vi.spyOn>> {
-  const spies: Array<ReturnType<typeof vi.spyOn>> = [];
+function spyGridDisposals(grid: TreeSystemMeshGrid): {
+  geometryAndMesh: MockInstance[];
+  materials: MockInstance[];
+} {
+  const geometryAndMesh: MockInstance[] = [];
+  const materials: MockInstance[] = [];
   for (const species of TREE_SPECIES as readonly TreeSpeciesId[]) {
     for (const lod of TREE_LODS) {
-      spies.push(vi.spyOn(grid[species][lod].geometry, "dispose"));
-      spies.push(vi.spyOn(grid[species][lod].material as THREE.Material, "dispose"));
-      spies.push(vi.spyOn(grid[species][lod], "dispose"));
+      geometryAndMesh.push(vi.spyOn(grid[species][lod].geometry, "dispose"));
+      geometryAndMesh.push(vi.spyOn(grid[species][lod], "dispose"));
+      materials.push(vi.spyOn(grid[species][lod].material as THREE.Material, "dispose"));
     }
   }
-  return spies;
+  return { geometryAndMesh, materials };
 }
