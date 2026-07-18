@@ -1,6 +1,7 @@
 import { load } from "js-yaml";
 import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
 import { DEFAULT_HYDROLOGY_CONFIG } from "./hydrologyConfig.js";
+import { setGravelBarSettings } from "./gravel_bar_runtime.js";
 import { cloneWaterConfig } from "./water_config_clone.js";
 import { DEFAULT_WATER_CONFIG, DEFAULT_WATER_VISUAL } from "./water_config_defaults.js";
 import { readWaterDebugConfig } from "./water_config_debug_parsing.js";
@@ -49,7 +50,10 @@ export function parseWaterConfig(
   warn: ((message: string) => void) | null = console.warn,
 ): WaterConfig {
   const fallback = applyRuntimeRiverOverrides(cloneWaterConfig(DEFAULT_WATER_CONFIG), WATER_RUNTIME_OVERRIDE_OPTIONS);
-  if (!text || text.trim() === "") return fallback;
+  if (!text || text.trim() === "") {
+    setGravelBarSettings(fallback.hydrology.gravelBars);
+    return fallback;
+  }
 
   let config: WaterConfig;
   try {
@@ -59,10 +63,13 @@ export function parseWaterConfig(
       `failed to parse config/water.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`,
       warn ?? undefined,
     );
+    setGravelBarSettings(fallback.hydrology.gravelBars);
     return fallback;
   }
 
-  return validateWaterConfig(config, DEFAULT_WATER_CONFIG.debug.mode, warn ?? null);
+  const validated = validateWaterConfig(config, DEFAULT_WATER_CONFIG.debug.mode, warn ?? null);
+  setGravelBarSettings(validated.hydrology.gravelBars);
+  return validated;
 }
 
 /** Resolves normalized fake bodies to absolute coordinate space. */
