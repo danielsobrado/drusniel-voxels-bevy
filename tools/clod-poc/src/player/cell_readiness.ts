@@ -11,8 +11,8 @@ import { voxelEditStore } from "../terrain/voxel_edits/voxel_edit_store.js";
 import { getDigEditRevision } from "../terrain/terrain_edits.js";
 
 const DEFAULT_TELEPORT_ENVELOPE_RADIUS_M = 0.6;
-/** Current construction catalog reaches at most 1.5 m horizontally from its placement origin. */
-export const DEFAULT_CONSTRUCTION_ENVELOPE_RADIUS_M = 1.5;
+/** Current construction catalog reaches at most 2 m horizontally from its placement origin. */
+export const DEFAULT_CONSTRUCTION_ENVELOPE_RADIUS_M = 2;
 
 const ENVELOPE_OFFSETS: readonly (readonly [number, number])[] = [
   [0, 0],
