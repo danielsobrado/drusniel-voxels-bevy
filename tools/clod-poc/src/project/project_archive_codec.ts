@@ -1,4 +1,4 @@
-import type { Zippable } from "fflate";
+import type { AsyncZippable, Zippable } from "fflate";
 import {
   assertProjectArchiveInputSize,
   createProjectArchiveExtractionGuard,
@@ -7,7 +7,7 @@ import {
 export async function encodeProjectArchive(files: Zippable): Promise<Uint8Array> {
   const { zip } = await import("fflate");
   const archive = await new Promise<Uint8Array>((resolve, reject) => {
-    zip(files, (error, data) => {
+    zip(files as AsyncZippable, (error, data) => {
       if (error) reject(error);
       else resolve(data);
     });
