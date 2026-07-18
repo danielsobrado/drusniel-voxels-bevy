@@ -10,6 +10,7 @@ import {
   createProjectArchiveExtractionGuard,
   PROJECT_ARCHIVE_LIMITS,
 } from "./project_archive_limits.js";
+import { validateProjectGeneratorQuery } from "./project_world_identity.js";
 import type { ProjectPropInstance } from "./project_props.js";
 import type {
   CurrentVoxelProjectManifest,
@@ -275,7 +276,12 @@ function validateWorldIdentity(value: unknown): ProjectWorldIdentity {
     seaLevel: finiteInRange(value.terrainField.seaLevel, "project.json world sea level", -100_000, 100_000),
     islandShape: validateIslandShape(value.terrainField.islandShape),
   };
-  return { scene: value.scene, generatorVersion: value.generatorVersion, terrainField };
+  return {
+    scene: value.scene,
+    generatorVersion: value.generatorVersion,
+    terrainField,
+    generatorQuery: validateProjectGeneratorQuery(value.generatorQuery),
+  };
 }
 
 function assertWaterArchiveState(value: unknown): asserts value is ProjectWaterArchiveState {
