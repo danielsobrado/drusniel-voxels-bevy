@@ -40,6 +40,21 @@ export interface RiverBodyConfig {
 
 import type { WaterBodyVisualPresets } from "./water_body_presets.js";
 
+export interface WaterGlacialMurkinessConfig {
+  /** Kill switch. Disabled configurations preserve the original body preset objects. */
+  enabled: boolean;
+  /** Fraction of the shared glacial-murkiness state applied to lakes. */
+  lakeStrength: number;
+  /** Fraction of the shared glacial-murkiness state applied to rivers. */
+  riverStrength: number;
+  /** Full-strength RGB Beer-Lambert multiplier. */
+  absorptionMultiplier: [number, number, number];
+  /** Full-strength turbidity added to the base body preset. */
+  turbidityAdd: number;
+  /** Lower bound approached by reflection damping at full strength. */
+  reflectionDampingMin: number;
+}
+
 export interface WaterVisualConfig {
   shallowColor: [number, number, number];
   deepColor: [number, number, number];
@@ -63,6 +78,8 @@ export interface WaterVisualConfig {
   color: WaterColorVisualConfig;
   /** Per-body-kind colour/absorption/turbidity/reflection presets (Phase 7b). */
   bodies: WaterBodyVisualPresets;
+  /** Optional biome-state multiplier over existing lake/river optical presets. */
+  glacialMurkiness: WaterGlacialMurkinessConfig;
   refraction: WaterRefractionConfig;
   reflection: WaterReflectionConfig;
   depthWrite: boolean;
