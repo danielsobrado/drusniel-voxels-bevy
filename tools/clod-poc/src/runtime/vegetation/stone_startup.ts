@@ -7,8 +7,7 @@ import { createStoneController } from "./stone_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { stoneUiState } from "../../app/clod_app_state.js";
 import type { VegetationGpuBackend } from "./vegetation_gpu_backend.js";
-import { parseEnvironmentalMaskConfig } from "../../environment_masks/environment_mask_config.js";
-import { setEnvironmentalMaskSettings } from "../../environment_masks/environment_mask_runtime.js";
+import { configureEnvironmentalMaskSettings } from "../../environment_masks/environment_mask_runtime.js";
 import { packHydrologyData, packHydrologyFieldData } from "../../systems/hydrology_packing.js";
 import { setStoneHydrologyFieldsData } from "../../stones/stone_hydrology_fields_runtime.js";
 import type { VegetationStatControllerRefs } from "./vegetation_types.js";
@@ -55,7 +54,7 @@ export function runStoneStartup(input: StoneStartupInput): StoneStartupResult {
   const stoneStats = { current: null as StoneStats | null };
   const onStoneScatterComplete = { current: null as (() => void) | null };
 
-  setEnvironmentalMaskSettings(parseEnvironmentalMaskConfig(environmentMaskConfigText));
+  configureEnvironmentalMaskSettings(environmentMaskConfigText);
   const stoneHydrologyData = hydrologySystem ? packHydrologyData(hydrologySystem) : null;
   setStoneHydrologyFieldsData(hydrologySystem ? packHydrologyFieldData(hydrologySystem) : null);
 
