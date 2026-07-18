@@ -4,10 +4,9 @@ import type { IslandShapeConfig } from "../world_source/island_shape.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { MAX_TERRAIN_TEXTURES } from "../terrain/terrain_textures.js";
 import { WATER_DEBUG_MODES } from "../water/waterConfig.js";
+import { decodeProjectArchive, encodeProjectArchive } from "./project_archive_codec.js";
 import {
-  assertProjectArchiveInputSize,
   assertProjectArchivePath,
-  createProjectArchiveExtractionGuard,
   PROJECT_ARCHIVE_LIMITS,
 } from "./project_archive_limits.js";
 import { validateProjectGeneratorQuery } from "./project_world_identity.js";
@@ -357,7 +356,7 @@ export async function createVoxelProjectArchive(
   manifest: CurrentVoxelProjectManifest,
   customTextures: ReadonlyMap<string, Uint8Array>,
 ): Promise<Uint8Array> {
-  const { strToU8, zipSync } = await import("fflate");
+  const { strToU8 } = await import("fflate");
   const normalized = validateArchiveContents({ manifest, customTextures: new Map(customTextures) });
   if (!isCurrentVoxelProjectManifest(normalized.manifest)) throw new Error("new project archives must use the current schema");
   const projectBytes = strToU8(JSON.stringify(normalized.manifest, null, 2));
@@ -367,17 +366,12 @@ export async function createVoxelProjectArchive(
   };
   for (const [path, bytes] of normalized.customTextures) files[path] = [bytes, { level: 0 }];
   if (Object.keys(files).length > PROJECT_ARCHIVE_LIMITS.maxEntries) throw new Error("project archive contains too many entries");
-  const archive = zipSync(files);
-  assertProjectArchiveInputSize(archive.byteLength);
-  return archive;
+  return encodeProjectArchive(files);
 }
 
 export async function parseVoxelProjectArchive(bytes: Uint8Array): Promise<VoxelProjectArchiveContents> {
-  assertProjectArchiveInputSize(bytes.byteLength);
-  const { strFromU8, unzipSync } = await import("fflate");
-  const extraction = createProjectArchiveExtractionGuard();
-  const files = unzipSync(bytes, { filter: (entry) => extraction.filter(entry) });
-  extraction.verify(files);
+  const { strFromU8 } = await import("fflate");
+  const files = await decodeProjectArchive(bytes);
 
   let rawManifest: unknown;
   try {
@@ -436,8 +430,8 @@ export async function stageVoxelProjectImport(
   try {
     const transaction = db.transaction(IMPORT_STORE, "readwrite");
     const store = transaction.objectStore(IMPORT_STORE);
-    await pruneExpiredStagedImports(store, nowMs);
     store.put(staged, token);
+    await pruneExpiredStagedImports(store, nowMs);
     await transactionDone(transaction);
   } finally {
     db.close();
