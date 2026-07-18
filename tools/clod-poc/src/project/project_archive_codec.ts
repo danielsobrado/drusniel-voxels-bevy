@@ -22,9 +22,21 @@ export async function decodeProjectArchive(
   assertProjectArchiveInputSize(bytes.byteLength);
   const { unzip } = await import("fflate");
   const extraction = createProjectArchiveExtractionGuard();
+  let filterError: unknown = null;
   const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-    unzip(bytes, { filter: (entry) => extraction.filter(entry) }, (error, data) => {
-      if (error) reject(error);
+    unzip(bytes, {
+      filter: (entry) => {
+        if (filterError) return false;
+        try {
+          return extraction.filter(entry);
+        } catch (error) {
+          filterError = error;
+          return false;
+        }
+      },
+    }, (error, data) => {
+      if (filterError) reject(filterError);
+      else if (error) reject(error);
       else resolve(data);
     });
   });
