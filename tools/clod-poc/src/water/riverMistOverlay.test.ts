@@ -25,7 +25,7 @@ function runtimeSettings() {
 
 describe("RiverMistOverlay", () => {
   it("uses a coarse sample hint and respects the fixed particle budget", () => {
-    const sampleForCellSize = vi.fn(() => ({
+    const sampleForCellSize = vi.fn((_x: number, _z: number, _cellSize: number) => ({
       waterY: 4,
       terrainY: 3.5,
       depth: 0.5,
