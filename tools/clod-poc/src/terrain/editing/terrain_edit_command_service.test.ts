@@ -191,4 +191,17 @@ describe("terrain edit command service", () => {
     expect(harness.runDigNow).not.toHaveBeenCalled();
     expect(gameplayDiagnostics.get("edit_commands_denied_revision")).toBe(1);
   });
+
+  it("fails closed when capture or live authority dependencies are invalid", async () => {
+    const captureFailure = createHarness({ currentBrush: () => { throw new Error("brush unavailable"); } });
+    await captureFailure.service.runDigNow(ray);
+    expect(captureFailure.runDigNow).not.toHaveBeenCalled();
+    expect(gameplayDiagnostics.get("edits_denied_not_ready")).toBe(1);
+
+    resetGameplayDiagnosticsForTests();
+    const authorityFailure = createHarness({ actor: () => new THREE.Vector3(Number.NaN, 0, 0) });
+    await authorityFailure.service.runDigNow(ray);
+    expect(authorityFailure.runDigNow).not.toHaveBeenCalled();
+    expect(gameplayDiagnostics.get("edits_denied_not_ready")).toBe(1);
+  });
 });
