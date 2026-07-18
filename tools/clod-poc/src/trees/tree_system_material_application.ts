@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { refreshInstancedDepthPrepassTwin } from "../rendering/veg_prepass.js";
 import { TREE_LODS, TREE_SPECIES, type TreeSpeciesId } from "./tree_config.js";
 import { isTreeImpostorCardGeometry, type TreeGeometryMap } from "./tree_geometry.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
@@ -9,6 +10,7 @@ import {
 } from "./tree_system_impostor_resources.js";
 import { attachPackedTreeInstanceAttributes } from "./tree_system_instance_attribute_layout.js";
 import type { TreeSystemMeshGrid } from "./tree_system_lifecycle.js";
+import { selectTreeCpuPrepassNodes } from "./tree_system_prepass_policy.js";
 import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
 import type { TreeSettings } from "./tree_config.js";
 
@@ -55,6 +57,7 @@ export function applyTreeSystemMaterials(input: ApplyTreeSystemMaterialsInput): 
           ? input.materialHandle.regularMaterial
           : material;
         mesh.castShadow = treeLodCastsShadow(input.settings, lod);
+        refreshTreeSystemDepthTwin(input, mesh, species, lod);
       }
     }
   }
@@ -100,4 +103,24 @@ export function createTreeSystemImpostorGeometryForCapacity(
   const geometry = source.clone();
   attachPackedTreeInstanceAttributes(geometry, safeCapacity, true);
   return geometry;
+}
+
+function refreshTreeSystemDepthTwin(
+  input: ApplyTreeSystemMaterialsInput,
+  mesh: THREE.InstancedMesh,
+  species: TreeSpeciesId,
+  lod: (typeof TREE_LODS)[number],
+): void {
+  if (!mesh.userData.depthTwin) return;
+  const bakedImpostor = lod === "impostor" &&
+    isTreeImpostorCardGeometry(mesh.geometry) &&
+    input.settings.impostors.enabled &&
+    input.impostorAtlases[species]?.ready === true;
+  const nodes = selectTreeCpuPrepassNodes({
+    lod,
+    bakedImpostor,
+    impostorMaterial: bakedImpostor ? input.impostorMaterials[species] : undefined,
+    baseNodes: input.materialHandle.prepassNodesFor?.(lod),
+  });
+  refreshInstancedDepthPrepassTwin(mesh, nodes);
 }
