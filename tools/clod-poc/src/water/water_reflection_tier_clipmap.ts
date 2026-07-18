@@ -11,15 +11,24 @@ import { resolveWaterReflectionTierVisual } from "./water_reflection_tiers.js";
 
 export type WaterMaterialFactory = (params: WaterMaterialParams) => WaterMaterialHandle;
 
-export function waterMaterialLevelCellSize(params: WaterMaterialParams): number | null {
-  return params.atlasGrid?.levelCellSize ?? params.staticGrid?.cellSize ?? null;
+export function waterMaterialLevelCellSize(
+  params: WaterMaterialParams,
+  configuredCellSizeM: number | null = null,
+): number | null {
+  return params.atlasGrid?.levelCellSize
+    ?? params.staticGrid?.cellSize
+    ?? configuredCellSizeM;
 }
 
 export function createTieredWaterMaterialFactory(
   createMaterial: WaterMaterialFactory,
+  configuredCellSizesM: readonly number[] = [],
 ): WaterMaterialFactory {
+  let levelIndex = 0;
   return (params) => {
-    const levelCellSizeM = waterMaterialLevelCellSize(params);
+    const configuredCellSizeM = configuredCellSizesM[levelIndex] ?? null;
+    levelIndex += 1;
+    const levelCellSizeM = waterMaterialLevelCellSize(params, configuredCellSizeM);
     const resolveVisual = (visual: WaterVisualConfig) => (
       resolveWaterReflectionTierVisual(visual, levelCellSizeM)
     );
@@ -39,7 +48,10 @@ export class TieredWaterClipmap {
   constructor(options: WaterClipmapOptions) {
     this.base = new BaseWaterClipmap({
       ...options,
-      createMaterial: createTieredWaterMaterialFactory(options.createMaterial),
+      createMaterial: createTieredWaterMaterialFactory(
+        options.createMaterial,
+        options.config.cellSizes,
+      ),
     });
   }
 
