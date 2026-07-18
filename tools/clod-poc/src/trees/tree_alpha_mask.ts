@@ -33,8 +33,8 @@ interface LeafletSample {
 }
 
 const EMPTY_LEAFLET: LeafletSample = { alpha: 0, shade: 0.5, coolWarm: 0 };
-const DILATION_PASSES = 6;
-const FOLIAGE_ATLAS_ANISOTROPY = 4;
+const DILATION_PASSES = 8;
+const FOLIAGE_ATLAS_ANISOTROPY = 8;
 
 export function createTreeFoliageAtlas(settings: TreeSettings): TreeFoliageAtlas {
   const cellSize = Math.max(32, Math.floor(settings.foliage.maskResolutionPx));
@@ -148,10 +148,11 @@ function writeClusterCell(
 function buildLeaflets(species: TreeSpeciesId, seed: number, variant: number): Leaflet[] {
   const params = VEG_TREE_SPECIES[species];
   const conifer = params.kind === "conifer";
+  const sourceNeedleCount = params.foliage?.leaf.needleCount ?? 24;
   const baseCount = conifer
-    ? Math.max(18, Math.round((params.foliage?.leaf.needleCount ?? 24) * 0.55))
-    : 15;
-  const count = Math.min(conifer ? 42 : 22, baseCount + variant * (conifer ? 2 : 1));
+    ? Math.max(32, Math.round(sourceNeedleCount * 0.9))
+    : 24;
+  const count = Math.min(conifer ? 64 : 34, baseCount + variant * (conifer ? 4 : 2));
   const leaflets: Leaflet[] = [];
 
   for (let index = 0; index < count; index++) {
@@ -171,12 +172,12 @@ function buildLeaflets(species: TreeSpeciesId, seed: number, variant: number): L
         cos: Math.cos(angle),
         sin: Math.sin(angle),
         length: 0.48 + h3 * 0.42,
-        width: 0.022 + h4 * 0.035,
+        width: 0.018 + h4 * 0.03,
         value: 0.68 + h4 * 0.32,
         coolWarm: (h2 - 0.5) * 2,
       });
     } else {
-      const radial = Math.sqrt(h0) * 0.65;
+      const radial = Math.sqrt(h0) * 0.68;
       const around = h1 * Math.PI * 2;
       const direction = around + (h2 - 0.5) * 1.35;
       leaflets.push({
@@ -184,8 +185,8 @@ function buildLeaflets(species: TreeSpeciesId, seed: number, variant: number): L
         cy: Math.sin(around) * radial * 0.78,
         cos: Math.cos(direction),
         sin: Math.sin(direction),
-        length: 0.4 + h3 * 0.34,
-        width: 0.14 + h4 * 0.13,
+        length: 0.34 + h3 * 0.3,
+        width: 0.11 + h4 * 0.11,
         value: 0.64 + h4 * 0.36,
         coolWarm: (h2 - 0.5) * 2,
       });
