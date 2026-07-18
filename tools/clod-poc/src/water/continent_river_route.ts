@@ -1,6 +1,16 @@
 import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 
+const DEFAULT_CENTER_M = 2048;
+const DEFAULT_SEARCH_RADIUS_M = 1024;
+const DEFAULT_SEARCH_SPACING_M = 16;
+const DEFAULT_CROSSING_HALF_SPAN_M = 64;
 const DEFAULT_SHORE_PROBE_SPACING_M = 2;
+const MAX_SEARCH_RADIUS_M = 8192;
+const MAX_SEARCH_CELLS_PER_AXIS = 256;
+const MAX_CROSSING_HALF_SPAN_M = 4096;
+const MAX_SEARCH_SPACING_M = MAX_CROSSING_HALF_SPAN_M;
+const MAX_SHORE_PROBE_SPACING_M = 16;
+const MAX_SHORE_PROBES = 4096;
 const SHORE_REFINEMENT_STEPS = 8;
 
 export interface ContinentRiverRouteSample {
@@ -34,8 +44,29 @@ export interface ContinentRiverCrossingRoute {
   centerDepthM: number;
 }
 
+function finiteOption(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) ? value : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function isCanonicalRiverSample(sample: ContinentRiverRouteSample): boolean {
+  return sample.bodyKind === HYDROLOGY_BODY_RIVER
+    && Number.isSafeInteger(sample.bodyId)
+    && sample.bodyId > 0
+    && Number.isFinite(sample.depth)
+    && sample.depth > 0
+    && Number.isFinite(sample.flowX)
+    && Number.isFinite(sample.flowZ)
+    && Number.isFinite(sample.terrainY)
+    && Number.isFinite(sample.waterY)
+    && sample.waterY > sample.terrainY;
+}
+
 function isRouteRiver(sample: ContinentRiverRouteSample, bodyId: number): boolean {
-  return sample.bodyKind === HYDROLOGY_BODY_RIVER && sample.bodyId === bodyId && sample.depth > 0;
+  return isCanonicalRiverSample(sample) && sample.bodyId === bodyId;
 }
 
 function findWaterEntry(
@@ -43,7 +74,7 @@ function findWaterEntry(
   start: readonly [number, number],
   center: readonly [number, number],
   bodyId: number,
-  spacingM: number,
+  requestedSpacingM: number,
 ): [number, number] | null {
   const dx = center[0] - start[0];
   const dz = center[1] - start[1];
@@ -51,6 +82,7 @@ function findWaterEntry(
   if (!(lengthM > 0)) return null;
   const directionX = dx / lengthM;
   const directionZ = dz / lengthM;
+  const spacingM = Math.max(requestedSpacingM, lengthM / MAX_SHORE_PROBES);
   const probeSteps = Math.ceil(lengthM / spacingM);
   let dryPoint: [number, number] = [start[0], start[1]];
 
@@ -86,12 +118,33 @@ export function findContinentRiverCrossingRoute(
   sample: (x: number, z: number) => ContinentRiverRouteSample,
   options: ContinentRiverRouteSearchOptions = {},
 ): ContinentRiverCrossingRoute | null {
-  const centerX = options.centerX ?? 2048;
-  const centerZ = options.centerZ ?? 2048;
-  const searchRadiusM = Math.max(0, options.searchRadiusM ?? 1024);
-  const searchSpacingM = Math.max(1, options.searchSpacingM ?? 16);
-  const crossingHalfSpanM = Math.max(searchSpacingM, options.crossingHalfSpanM ?? 64);
-  const shoreProbeSpacingM = Math.max(0.25, options.shoreProbeSpacingM ?? DEFAULT_SHORE_PROBE_SPACING_M);
+  const centerX = finiteOption(options.centerX, DEFAULT_CENTER_M);
+  const centerZ = finiteOption(options.centerZ, DEFAULT_CENTER_M);
+  const searchRadiusM = clamp(
+    finiteOption(options.searchRadiusM, DEFAULT_SEARCH_RADIUS_M),
+    0,
+    MAX_SEARCH_RADIUS_M,
+  );
+  const requestedSearchSpacingM = clamp(
+    finiteOption(options.searchSpacingM, DEFAULT_SEARCH_SPACING_M),
+    1,
+    MAX_SEARCH_SPACING_M,
+  );
+  const searchSpacingM = clamp(
+    Math.max(requestedSearchSpacingM, searchRadiusM * 2 / MAX_SEARCH_CELLS_PER_AXIS),
+    1,
+    MAX_SEARCH_SPACING_M,
+  );
+  const crossingHalfSpanM = clamp(
+    finiteOption(options.crossingHalfSpanM, DEFAULT_CROSSING_HALF_SPAN_M),
+    searchSpacingM,
+    MAX_CROSSING_HALF_SPAN_M,
+  );
+  const shoreProbeSpacingM = clamp(
+    finiteOption(options.shoreProbeSpacingM, DEFAULT_SHORE_PROBE_SPACING_M),
+    0.25,
+    MAX_SHORE_PROBE_SPACING_M,
+  );
   const minX = centerX - searchRadiusM;
   const minZ = centerZ - searchRadiusM;
   const cells = Math.floor(searchRadiusM * 2 / searchSpacingM);
@@ -101,9 +154,9 @@ export function findContinentRiverCrossingRoute(
     for (let ix = 0; ix <= cells; ix++) {
       const x = minX + ix * searchSpacingM;
       const river = sample(x, z);
-      if (river.bodyKind !== HYDROLOGY_BODY_RIVER || !(river.depth > 0)) continue;
+      if (!isCanonicalRiverSample(river)) continue;
       const flowLength = Math.hypot(river.flowX, river.flowZ);
-      if (!(flowLength > 1e-6)) continue;
+      if (!Number.isFinite(flowLength) || !(flowLength > 1e-6)) continue;
       const perpendicularX = -river.flowZ / flowLength;
       const perpendicularZ = river.flowX / flowLength;
       const start: [number, number] = [

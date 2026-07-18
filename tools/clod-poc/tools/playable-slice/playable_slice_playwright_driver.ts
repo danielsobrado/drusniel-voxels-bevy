@@ -8,6 +8,7 @@ import type {
   PlayableSliceActionRecord,
   PlayableSliceStepEvidence,
 } from "./playable_slice_contract.js";
+import { frameP95Ms } from "./playable_slice_frame_metrics.js";
 
 const READY_TIMEOUT_MS = 180_000;
 const POINTER_LOCK_TIMEOUT_MS = 10_000;
@@ -18,6 +19,12 @@ const AIM_POINTER_DELTA_PX = 600;
 interface PlayableSliceFrameProbe {
   maxFrameMs: number;
   lastFrameAtMs: number;
+  samplesMs: number[];
+}
+
+interface DrainedFrameProbe {
+  maxFrameMs: number;
+  samplesMs: number[];
 }
 
 function installFrameProbeInPage(): void {
@@ -25,14 +32,30 @@ function installFrameProbeInPage(): void {
     __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
   };
   if (target.__drusnielPlayableSliceFrameProbe) return;
-  const state: PlayableSliceFrameProbe = { maxFrameMs: 0, lastFrameAtMs: 0 };
+  const state: PlayableSliceFrameProbe = { maxFrameMs: 0, lastFrameAtMs: 0, samplesMs: [] };
   target.__drusnielPlayableSliceFrameProbe = state;
   const tick = (now: number): void => {
-    if (state.lastFrameAtMs > 0) state.maxFrameMs = Math.max(state.maxFrameMs, now - state.lastFrameAtMs);
+    if (state.lastFrameAtMs > 0) {
+      const frameMs = now - state.lastFrameAtMs;
+      if (Number.isFinite(frameMs) && frameMs >= 0) {
+        state.maxFrameMs = Math.max(state.maxFrameMs, frameMs);
+        state.samplesMs.push(frameMs);
+      }
+    }
     state.lastFrameAtMs = now;
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+}
+
+function drainFrameProbeInPage(): DrainedFrameProbe {
+  const probe = (window as typeof window & {
+    __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
+  }).__drusnielPlayableSliceFrameProbe;
+  if (!probe) throw new Error("playable slice frame probe is unavailable");
+  const result = { maxFrameMs: probe.maxFrameMs, samplesMs: probe.samplesMs.splice(0) };
+  probe.maxFrameMs = 0;
+  return result;
 }
 
 async function ensureFrameProbe(page: Page): Promise<void> {
@@ -46,6 +69,7 @@ async function resetFrameProbe(page: Page): Promise<void> {
     }).__drusnielPlayableSliceFrameProbe;
     if (!probe) throw new Error("playable slice frame probe is unavailable");
     probe.maxFrameMs = 0;
+    probe.samplesMs.length = 0;
     probe.lastFrameAtMs = performance.now();
   });
 }
@@ -70,6 +94,7 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
   maxFrameP95Ms = 0;
   protected readonly page: Page;
   private readonly startedAtMs: number;
+  private readonly frameSamplesMs: number[] = [];
 
   constructor(page: Page) {
     this.page = page;
@@ -113,23 +138,27 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     this.record("keyboard", "release Tab and resume look");
     await this.waitForPointerLock(true);
     await resetFrameProbe(this.page);
+    this.frameSamplesMs.length = 0;
+    this.maxFrameMs = 0;
+    this.maxFrameP95Ms = 0;
+  }
+
+  async collectFrameMetrics(): Promise<void> {
+    const drained = await this.page.evaluate(drainFrameProbeInPage);
+    this.maxFrameMs = Math.max(this.maxFrameMs, drained.maxFrameMs);
+    this.frameSamplesMs.push(...drained.samplesMs);
+    this.maxFrameP95Ms = frameP95Ms(this.frameSamplesMs);
   }
 
   async snapshot(): Promise<PlayableSliceSnapshot> {
     const result = await this.page.evaluate(() => {
       const read = window.__drusnielClod?.getPlayableSliceSnapshot;
       if (!read) throw new Error("playable slice snapshot hook is unavailable");
-      const frameProbe = (window as typeof window & {
-        __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
-      }).__drusnielPlayableSliceFrameProbe;
-      return {
-        snapshot: read(),
-        frameMaxMs: frameProbe?.maxFrameMs ?? 0,
-      };
+      return read();
     });
-    this.maxFrameMs = Math.max(this.maxFrameMs, result.frameMaxMs, result.snapshot.frameMs);
-    this.maxFrameP95Ms = Math.max(this.maxFrameP95Ms, result.snapshot.frameMsP95);
-    return result.snapshot;
+    await this.collectFrameMetrics();
+    this.maxFrameMs = Math.max(this.maxFrameMs, result.frameMs);
+    return result;
   }
 
   recordEvidence(item: PlayableSliceStepEvidence): void {
@@ -188,6 +217,7 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
   }
 
   async reload(): Promise<void> {
+    await this.collectFrameMetrics();
     this.record("navigation", "reload saved world");
     await this.page.reload({ waitUntil: "domcontentloaded", timeout: READY_TIMEOUT_MS });
     await waitForAppReady(this.page);

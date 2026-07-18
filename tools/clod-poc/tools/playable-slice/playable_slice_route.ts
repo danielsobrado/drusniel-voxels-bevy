@@ -43,6 +43,7 @@ export interface PlayableSliceRunOptions {
   readonly mode: PlayableSliceMode;
   readonly runIndex: number;
   readonly freshProfile: boolean;
+  readonly expectedWaterBodyId: string;
   readonly startedAt?: Date;
 }
 
@@ -68,9 +69,57 @@ async function barrier(
   mode: PlayableSliceMode,
   label: string,
 ): Promise<void> {
-  if (mode === "diagnostic") {
-    await (driver as DiagnosticPlayableSliceDriver).diagnosticBarrier(label);
+  if (mode === "diagnostic") await (driver as DiagnosticPlayableSliceDriver).diagnosticBarrier(label);
+}
+
+async function withHeldKeys<T>(
+  driver: PublicPlayableSliceDriver,
+  keys: readonly string[],
+  operation: () => Promise<T>,
+): Promise<T> {
+  const held: string[] = [];
+  let primaryError: unknown = null;
+  try {
+    for (const key of keys) {
+      await driver.keyDown(key);
+      held.push(key);
+    }
+    return await operation();
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    let cleanupError: unknown = null;
+    for (const key of [...held].reverse()) {
+      try {
+        await driver.keyUp(key);
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+    if (!primaryError && cleanupError) throw cleanupError;
   }
+}
+
+async function restorePlayerAfterConstruction(driver: PublicPlayableSliceDriver): Promise<void> {
+  let cleanupError: unknown = null;
+  try {
+    const current = await driver.snapshot();
+    if (current.construction.active) await driver.press("b");
+  } catch (error) {
+    cleanupError = error;
+  }
+  try {
+    await driver.keyUp("Tab");
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
+    await driver.waitForPointerLock(true);
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (cleanupError) throw cleanupError;
 }
 
 async function runRoute(
@@ -84,19 +133,11 @@ async function runRoute(
   await barrier(driver, options.mode, "spawn readiness");
   const start = await evidence(driver, steps, "spawn_ready");
 
-  await driver.keyDown("Shift");
-  await driver.keyDown("w");
-  let boundary: PlayableSliceSnapshot;
-  try {
-    boundary = await driver.waitUntil(
-      "terrain page boundary",
-      (snapshot) => snapshot.page[0] !== start.page[0] || snapshot.page[1] !== start.page[1],
-      STEP_TIMEOUT_MS,
-    );
-  } finally {
-    await driver.keyUp("w");
-    await driver.keyUp("Shift");
-  }
+  const boundary = await withHeldKeys(driver, ["Shift", "w"], () => driver.waitUntil(
+    "terrain page boundary",
+    (snapshot) => snapshot.page[0] !== start.page[0] || snapshot.page[1] !== start.page[1],
+    STEP_TIMEOUT_MS,
+  ));
   await evidence(driver, steps, "boundary_crossed", boundary);
   await barrier(driver, options.mode, "boundary readiness");
 
@@ -109,8 +150,9 @@ async function runRoute(
   );
   await evidence(driver, steps, "terrain_dug", dug);
 
-  await driver.keyDown("Tab");
+  let constructionFailure: unknown = null;
   try {
+    await driver.keyDown("Tab");
     await driver.waitForPointerLock(false);
     await driver.press("b");
     await driver.pointerMoveToCenter();
@@ -144,24 +186,22 @@ async function runRoute(
     );
     await evidence(driver, steps, "construction_broken", broken);
     await driver.press("b");
+  } catch (error) {
+    constructionFailure = error;
+    throw error;
   } finally {
-    await driver.keyUp("Tab");
-    await driver.waitForPointerLock(true);
+    try {
+      await restorePlayerAfterConstruction(driver);
+    } catch (error) {
+      if (!constructionFailure) throw error;
+    }
   }
 
-  await driver.keyDown("Shift");
-  await driver.keyDown("w");
-  let water: PlayableSliceSnapshot;
-  try {
-    water = await driver.waitUntil(
-      "authoritative water entry",
-      (snapshot) => snapshot.swim.mode === "surface" || snapshot.swim.mode === "submerged",
-      STEP_TIMEOUT_MS,
-    );
-  } finally {
-    await driver.keyUp("w");
-    await driver.keyUp("Shift");
-  }
+  const water = await withHeldKeys(driver, ["Shift", "w"], () => driver.waitUntil(
+    "authoritative water entry",
+    (snapshot) => snapshot.swim.mode === "surface" || snapshot.swim.mode === "submerged",
+    STEP_TIMEOUT_MS,
+  ));
   await evidence(driver, steps, "water_entered", water);
   await barrier(driver, options.mode, "water authority convergence");
 
@@ -190,23 +230,18 @@ async function runRoute(
     "saved world reload",
     (snapshot) => snapshot.persistence.loaded
       && snapshot.persistence.lastError === 0
-      && snapshot.persistence.voxelDeltaCount >= checkpoint.persistence.voxelDeltaCount,
+      && snapshot.persistence.voxelDeltaCount >= checkpoint.persistence.voxelDeltaCount
+      && snapshot.terrain.voxelDeltaCount >= checkpoint.persistence.voxelDeltaCount,
     CHECKPOINT_TIMEOUT_MS,
   );
   await evidence(driver, steps, "world_reloaded", reloaded);
   await barrier(driver, options.mode, "post-reload readiness");
 
-  await driver.keyDown("w");
-  let continued: PlayableSliceSnapshot;
-  try {
-    continued = await driver.waitUntil(
-      "continued gameplay",
-      (snapshot) => distanceXZ(snapshot.pose, reloaded.pose) >= 1,
-      STEP_TIMEOUT_MS,
-    );
-  } finally {
-    await driver.keyUp("w");
-  }
+  const continued = await withHeldKeys(driver, ["w"], () => driver.waitUntil(
+    "continued gameplay",
+    (snapshot) => distanceXZ(snapshot.pose, reloaded.pose) >= 1,
+    STEP_TIMEOUT_MS,
+  ));
   await evidence(driver, steps, "gameplay_continued", continued);
 
   return {
@@ -214,6 +249,7 @@ async function runRoute(
     mode: options.mode,
     runIndex: options.runIndex,
     freshProfile: options.freshProfile,
+    expectedWaterBodyId: options.expectedWaterBodyId,
     startedAt: startedAt.toISOString(),
     wallClockMs: Math.max(0, driver.nowMs() - startedAtMs),
     actions: [...driver.actions],
