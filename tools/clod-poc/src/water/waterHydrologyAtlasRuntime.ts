@@ -8,9 +8,10 @@
 // vegetation GPU startup; both windows share the same worker-built tile cache, so the
 // added cost is a few memcpy blits, not extra tile builds.
 //
-// The window is sized from the ring spans it must cover: with tile snapping, a window
-// of N tiles guarantees coverage of ±((N>>1) * tileSizeM) around the center, so N is
-// the smallest odd count with (N>>1)*tileSizeM >= the largest atlas-level half-span.
+// The window is sized from the ring spans it must cover. The required radius includes
+// the largest clipmap snap offset because a level's snapped center can lag the camera by
+// almost one snap interval; omitting that margin leaves a narrow out-of-atlas fringe on
+// the coarsest atlas-driven ring.
 import * as THREE from "three";
 import { HydrologyStreamingAtlas, type HydrologyTileAtlasSource } from "./hydrologyAtlas.js";
 import type { WaterAtlasGridParams } from "./water_material_types.js";
@@ -22,8 +23,14 @@ export interface WaterHydrologyAtlasStats {
   textureUploads: number;
 }
 
-export function waterAtlasTilesPerSide(maxLevelHalfSpanM: number, tileSizeM: number): number {
-  return 2 * Math.ceil(maxLevelHalfSpanM / Math.max(16, tileSizeM)) + 1;
+export function waterAtlasTilesPerSide(
+  maxLevelHalfSpanM: number,
+  tileSizeM: number,
+  maxSnapOffsetM = 0,
+): number {
+  const safeTileSizeM = Math.max(16, tileSizeM);
+  const requiredHalfSpanM = Math.max(0, maxLevelHalfSpanM) + Math.max(0, maxSnapOffsetM);
+  return 2 * Math.ceil(requiredHalfSpanM / safeTileSizeM) + 1;
 }
 
 export class WaterHydrologyAtlasRuntime {
@@ -64,7 +71,7 @@ export class WaterHydrologyAtlasRuntime {
     return { x: this.atlas.originX, z: this.atlas.originZ };
   }
 
-  /** Largest ring half-span this window can guarantee after tile snapping. */
+  /** Largest camera-centred half-span guaranteed after atlas tile snapping. */
   get coveredHalfSpanM(): number {
     return (this.atlas.tilesPerSide >> 1) * this.atlas.tileSizeM;
   }
