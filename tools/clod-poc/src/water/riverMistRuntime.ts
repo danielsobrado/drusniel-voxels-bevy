@@ -19,11 +19,18 @@ export function readRiverMistRuntimeSettings(
   searchParams: URLSearchParams,
 ): RiverMistRuntimeSettings {
   const settings = readEnvironmentalMaskSettings();
+  const mask = settings.riverMist;
+  const particles = mask.particles;
   return {
     enabled: settings.enabled
-      && settings.riverMist.enabled
+      && mask.enabled
+      && mask.strength > 0
+      && mask.maxShoreDistanceM > 0
+      && particles.maxParticles > 0
+      && particles.maxEmittersPerTick > 0
+      && particles.spawnProbability > 0
       && queryFlag(searchParams, RIVER_MIST_QUERY_KEYS, false),
-    mask: settings.riverMist,
+    mask,
   };
 }
 
