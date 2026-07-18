@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { waterAtlasTilesPerSide } from "./waterHydrologyAtlasRuntime.js";
+import { waterAtlasLevelCellSizes, waterAtlasTilesPerSide } from "./waterHydrologyAtlasRuntime.js";
 
 describe("water hydrology atlas sizing", () => {
+  it("keeps only atlas-driven near rings for the WebGPU water clipmap", () => {
+    expect(waterAtlasLevelCellSizes([1.5, 3, 6, 12, 24, 48], 12)).toEqual([1.5, 3, 6, 12]);
+  });
+
   it("keeps the original odd window when no clipmap snap margin is required", () => {
     expect(waterAtlasTilesPerSide(768, 256)).toBe(7);
   });

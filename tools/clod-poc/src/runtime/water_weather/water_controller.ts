@@ -10,7 +10,11 @@ import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { resolveWaterQualityTier } from "../../water/water_quality_overrides.js";
 import { createHydrologyTileRemoteBuilder } from "../../water/hydrology_tile_worker_client.js";
-import { WaterHydrologyAtlasRuntime, waterAtlasTilesPerSide } from "../../water/waterHydrologyAtlasRuntime.js";
+import {
+  WaterHydrologyAtlasRuntime,
+  waterAtlasLevelCellSizes,
+  waterAtlasTilesPerSide,
+} from "../../water/waterHydrologyAtlasRuntime.js";
 import { resolveWaterReflectionPolicy } from "../../water/waterReflectionPolicy.js";
 import { getDigEditRevision, getTerrainFieldConfig } from "../../terrain/terrain.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
@@ -118,8 +122,10 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     && deps.searchParams.get("waterAtlasClipmap") !== "0"
     ? deps.hydrologySystem?.tileAtlasSource() ?? null
     : null;
-  const atlasLevelCellSizes = deps.waterConfig.cellSizes
-    .filter((cellSize) => cellSize <= (tileBypassCellSize ?? 0));
+  const atlasLevelCellSizes = waterAtlasLevelCellSizes(
+    deps.waterConfig.cellSizes,
+    tileBypassCellSize ?? 0,
+  );
   const atlasLevelHalfSpans = atlasLevelCellSizes
     .map((cellSize) => (cellSize * deps.waterConfig.cellsPerLevel) / 2);
   const atlasMaxSnapOffsetM = atlasLevelCellSizes.reduce(
@@ -136,9 +142,16 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         ),
       )
     : null;
+  // The far clipmap already owns unified water beyond its inner radius. When the
+  // WebGPU atlas is active, keep only its near rings and avoid CPU refills for the
+  // overlapping coarse L4/L5 rings. WebGL and the atlas kill switch retain all rings.
+  // Built from clipmapWaterConfig so the tier-resolved visual (active SSR) survives.
+  const clipmapConfig = waterAtlas
+    ? { ...clipmapWaterConfig, cellSizes: atlasLevelCellSizes }
+    : clipmapWaterConfig;
   const clipmap = new WaterClipmap({
     scene: deps.scene,
-    config: deps.waterConfig,
+    config: clipmapConfig,
     field,
     createMaterial: waterMaterialFactory,
     sunDirection: deps.getSunDirection().clone(),

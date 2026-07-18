@@ -22,7 +22,9 @@ import {
   cos,
   dFdx,
   dFdy,
+  dot,
   float,
+  fract,
   int,
   ivec2,
   max,
@@ -201,15 +203,23 @@ export function buildWaterAtlasGridNodes(grid: WaterAtlasGridParams): WaterAtlas
   );
 
   const wallDiscard = (depth: TslNode, flowSpeed: TslNode): TslNode => {
+    if (grid.levelCellSize >= 12) return float(0).greaterThan(float(1));
+
     const dx: TslNode = dFdx(positionWorld);
     const dy: TslNode = dFdy(positionWorld);
     const slopeX: TslNode = dx.y.div(max(dx.xz.length(), float(1e-5)));
     const slopeY: TslNode = dy.y.div(max(dy.xz.length(), float(1e-5)));
     const slope: TslNode = vec2(slopeX, slopeY).length();
-    // Same thresholds as waterQuadRenderable, converted from per-quad ΔY to slope.
     const limit: TslNode = mix(float(0.45), float(1.25), smoothstep(float(0.015), float(0.025), flowSpeed))
       .div(float(grid.levelCellSize));
-    return slope.greaterThan(limit).and(depth.greaterThan(float(0.5)));
+
+    const rampKeep: TslNode = float(1).sub(smoothstep(limit.mul(0.75), limit.mul(1.35), slope));
+    const depthGate: TslNode = smoothstep(float(0.05), float(0.5), depth);
+    const keep: TslNode = mix(float(1), rampKeep, depthGate);
+    const dither: TslNode = fract(
+      sin(dot(positionWorld.xz, vec2(12.9898, 78.233))).mul(43758.5453),
+    );
+    return dither.greaterThan(keep);
   };
 
   const dryGate = (node: TslNode): TslNode => select(hasData, node, float(0));

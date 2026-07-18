@@ -23,6 +23,13 @@ export interface WaterHydrologyAtlasStats {
   textureUploads: number;
 }
 
+export function waterAtlasLevelCellSizes(
+  configuredCellSizes: readonly number[],
+  maxAtlasCellSize: number,
+): number[] {
+  return configuredCellSizes.filter((cellSize) => cellSize > 0 && cellSize <= maxAtlasCellSize);
+}
+
 export function waterAtlasTilesPerSide(
   maxLevelHalfSpanM: number,
   tileSizeM: number,
