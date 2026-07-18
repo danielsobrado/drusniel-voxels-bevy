@@ -218,7 +218,10 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
   const riverMistSettings = readRiverMistRuntimeSettings(deps.searchParams);
   const riverMist = riverMistSettings.enabled
-    ? new RiverMistOverlay(deps.scene, field, { settings: riverMistSettings })
+    ? new RiverMistOverlay(deps.scene, field, {
+        settings: riverMistSettings,
+        minimumSampleHintM: tileBypassCellSize ?? 0,
+      })
     : null;
 
   const liveRuntimeFeatures = (): WaterRuntimeFeatures => {
