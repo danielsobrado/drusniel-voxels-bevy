@@ -114,6 +114,23 @@ describe("save checkpoint controller", () => {
     expect(counters.save_checkpoint_completed).toBe(1);
   });
 
+  it("recovers after the checkpoint clock throws", async () => {
+    let clockCalls = 0;
+    const flush = vi.fn(async () => undefined);
+    const controller = createSaveCheckpointController({
+      flush,
+      nowMs: () => {
+        clockCalls += 1;
+        if (clockCalls === 1) throw new Error("clock unavailable");
+        return 10;
+      },
+    });
+
+    await expect(controller.requestCheckpoint()).rejects.toThrow("clock unavailable");
+    await expect(controller.requestCheckpoint()).resolves.toBeUndefined();
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
   it("repeats flush passes until the checkpoint is clean", async () => {
     let remainingDirtyPasses = 2;
     const flush = vi.fn(async () => { remainingDirtyPasses -= 1; });
