@@ -41,7 +41,14 @@ export function createSaveCheckpointController(
   const maxFlushPasses = normalizedPassCount(deps.maxFlushPasses);
   let inFlight: Promise<void> | null = null;
 
-  const counters = (): SaveCheckpointCounters | null => deps.getCounters?.() ?? null;
+  const counters = (): SaveCheckpointCounters | null => {
+    try {
+      return deps.getCounters?.() ?? null;
+    } catch (error) {
+      console.error("[save-checkpoint] counter provider failed", error);
+      return null;
+    }
+  };
   const increment = (key: keyof SaveCheckpointCounters): void => {
     const target = counters();
     if (!target) return;
@@ -75,8 +82,9 @@ export function createSaveCheckpointController(
     inFlight = current;
 
     const runCheckpoint = async (): Promise<void> => {
-      const startedAt = nowMs();
+      let startedAt: number | null = null;
       try {
+        startedAt = nowMs();
         increment("save_checkpoint_requests");
         const target = counters();
         if (target) target.save_checkpoint_in_flight = 1;
@@ -90,12 +98,19 @@ export function createSaveCheckpointController(
         publishStatus(`checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
       } finally {
+        // Release the coalescing guard before best-effort instrumentation cleanup.
+        if (inFlight === current) inFlight = null;
         const latest = counters();
         if (latest) {
           latest.save_checkpoint_in_flight = 0;
-          latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
+          if (startedAt !== null) {
+            try {
+              latest.save_checkpoint_last_ms = Math.max(0, nowMs() - startedAt);
+            } catch (error) {
+              console.error("[save-checkpoint] clock failed during cleanup", error);
+            }
+          }
         }
-        if (inFlight === current) inFlight = null;
       }
     };
 
