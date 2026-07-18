@@ -1,12 +1,13 @@
 # Playable World Contract — character, readiness, and the vertical slice
 
 Created 2026-07-16. Status: **P0–P7 COMPLETE 2026-07-18** (see execution log at the
-bottom). P0–P3 landed 2026-07-17; P4–P7 closed 2026-07-18 (construction edit-command +
-`constructionReady` wiring, water/swim already on main, spell↔world verify green,
-`accept:playable-slice` harness green under `playable-slice:verify`). Revised 2026-07-16
-after an external review that found real behavioral mistakes in the first draft — all of
-its code claims were verified in source and the readiness/collision core is rewritten
-accordingly. Accepted: the heightfield fallback collider is **restricted, never
+bottom). Landed on `main` as `99cbdd94` ("Close playable-world contract P4-P7…") and
+pushed to `origin/main`. P0–P3 landed 2026-07-17; P4–P7 closed 2026-07-18 (construction
+edit-command + `constructionReady` wiring, water/swim already on main, spell↔world verify
+green, `accept:playable-slice` harness green under `playable-slice:verify`). Revised
+2026-07-16 after an external review that found real behavioral mistakes in the first draft
+— all of its code claims were verified in source and the readiness/collision core is
+rewritten accordingly. Accepted: the heightfield fallback collider is **restricted, never
 generalized** (a height-per-column fallback seals caves and invents floors in a voxel
 world); the below-canonical-surface sentinel is **dropped** (a player in a cave is
 legitimately below the surface) in favor of a proven-invalid recovery contract with
@@ -561,7 +562,11 @@ Closed remaining P4 gaps on top of the already-landed P4–P7 sub-plans:
   `world:verify` asserts semantic match (tsx-safe).
 - Fixed `save_checkpoint_controller` coalescing regression (`Promise.then` deferred flush).
 
-Verification 2026-07-18:
+**Landed commit:** `99cbdd94` on `main`
+(`Close playable-world contract P4-P7: construction readiness, edit commands, and gates.`)
+— pushed to `origin/main` 2026-07-18.
+
+Verification 2026-07-18 (on the commit above):
 
 ```text
 typecheck                         green
@@ -576,6 +581,10 @@ continuous + 1 fresh profile) against a live WebGPU server — harness and unit 
 are green; run that command for the full headed report under
 `acceptance-runs/playable-slice/`.
 
+Plan 1 LM5 teleport drill is unblocked by this contract (`time_to_gameplay_ready_ms` +
+`teleportTargetReady`); any in-tree teleport-recovery / long-map soak WIP is owned by
+plan 1, not this document.
+
 Deferred (unchanged, recorded): structural collapse; automatic voxel→water extraction;
-`perf:construction` under raw tsx (yaml/jpg loader); dense-scene P7 switch until a
+`perf:construction` under raw `tsx` (yaml/jpg loader); dense-scene P7 switch until a
 deterministic river approach exists.

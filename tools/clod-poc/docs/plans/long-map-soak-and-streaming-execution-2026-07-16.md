@@ -147,6 +147,8 @@ LM3 requires : accept:unified-streaming-long-route green incl. settled gate (LM0
                holes, farSum* sub-buckets, occupancy split
 LM4 requires : LM3 route + residency counters per cache (bubble/root/summary/tile)
 LM5 requires : plan 3 P1 readiness contract (time_to_gameplay_ready_ms) — hard dependency
+               **SATISFIED 2026-07-18**: plan 3 P0–P7 complete on `main` `99cbdd94`
+               (`playable-world-contract-2026-07-16.md`)
 ```
 
 - [x] dependency versions pinned (commit/counter names recorded in the execution evidence)
@@ -292,7 +294,8 @@ here.
    flaky).
 - [ ] soak sampling + gates green under the 5-run protocol (numbers here)
 - [ ] teleport gates green at 3 distances using plan 3's contract
-      (blocked by plan 3 P1; `streamingReadinessBlockers` reconciliation recorded)
+      (plan 3 P1 unblocked on `99cbdd94`; wire LM5 drills to `teleportTargetReady` /
+      `time_to_gameplay_ready_ms` and reconcile any interim `streamingReadinessBlockers`)
 - [ ] background/foreground drill green
 - [ ] device-loss baseline tests green; no-corruption-on-reload verified; future
       recovery contract recorded
