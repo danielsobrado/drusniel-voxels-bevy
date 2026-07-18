@@ -6,6 +6,7 @@ import {
 } from "./tree_impostor_blend_geometry.js";
 import {
   treeImpostorLocalPositionScaleAttribute,
+  treeImpostorYawSinCosAttribute,
   treeIdentityBitsAttribute,
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
@@ -43,8 +44,6 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
   const countChanged = input.mesh.count !== input.nextCount;
   input.mesh.count = input.nextCount;
 
-  // TP-3: mirror count/visibility onto the depth-prepass twin (shares the
-  // instanceMatrix, so its needsUpdate is already handled below via the mesh).
   const depthTwin = input.mesh.userData.depthTwin as THREE.InstancedMesh | undefined;
   if (depthTwin) {
     depthTwin.count = input.nextCount;
@@ -67,6 +66,7 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
   }
   if (input.impostorUvChanged) {
     treeImpostorUvRectAttribute(input.mesh).needsUpdate = true;
+    treeImpostorYawSinCosAttribute(input.mesh).needsUpdate = true;
     for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
       const attribute = input.mesh.geometry.getAttribute(name) as THREE.InstancedBufferAttribute | undefined;
       if (attribute) attribute.needsUpdate = true;
