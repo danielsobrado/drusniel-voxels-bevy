@@ -25,6 +25,7 @@ import { replaceConstU32 } from "./wgsl_workgroup_size.js";
 import { withConservativeGrassFrustum, withGrassActiveSlotList } from "./grass_ring_wgsl_transforms.js";
 import { withUnderstoryAuthorityExclusion } from "./understory_ring_wgsl_transforms.js";
 import { withUnderwaterRiverCobbles } from "./stone_river_cobble_wgsl_transform.js";
+import { withGravelBarStones } from "./stone_bar_field_transform.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeCrownProxyShadowIndexCount,
@@ -56,7 +57,8 @@ export function composeGrassRingShader(): string {
 }
 
 export function composeStoneScatterShader(): string {
-  const stoneEntry = withUnderwaterRiverCobbles(withRiverEcologyConstants(stoneScatterEntry));
+  const riverEntry = withUnderwaterRiverCobbles(withRiverEcologyConstants(stoneScatterEntry));
+  const stoneEntry = withGravelBarStones(riverEntry);
   return composeShader("stone scatter shader", [stoneBindings, terrainCommon, vegetationTerrainSampling, placementHeight, stoneEntry]);
 }
 
@@ -74,8 +76,6 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     ),
   );
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
-  // Crown-proxy rewrite must run after species index-count replacement; that replace
-  // slices through anything between index_count_for_group and in_frustum.
   const crownProxyTreeEntry = withTreeCrownProxyShadowIndexCount(
     expandedTreeEntry,
     TREE_CROWN_PROXY_INDEX_COUNT,
@@ -94,5 +94,5 @@ export function composeUnderstoryRingShader(workgroupSize = 64): string {
     "UNDERSTORY_WORKGROUP_SIZE",
     workgroupSize,
   );
-  return composeShader("understory ring shader", [understoryBindings, terrainCommon, vegetationTerrainSampling, placementHeight, entry]);
+  return composeShader("understory ring shader", [vegetationAuthorityPcg, vegetationAuthorityHash, understoryBindings, terrainCommon, vegetationTerrainSampling, placementHeight, entry]);
 }
