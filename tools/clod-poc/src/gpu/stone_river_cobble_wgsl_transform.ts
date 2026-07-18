@@ -1,11 +1,11 @@
-import { DEFAULT_ENVIRONMENTAL_MASK_SETTINGS } from "../environment_masks/environment_mask_config.js";
+import { readEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import {
   STONE_META_UNDERWATER_FLAG,
   STONE_META_VARIANT_SCALE,
 } from "../stones/stone_instance_meta.js";
 
 export function withUnderwaterRiverCobbles(source: string): string {
-  const config = DEFAULT_ENVIRONMENTAL_MASK_SETTINGS.riverCobble;
+  const config = readEnvironmentalMaskSettings().riverCobble;
   let next = source;
 
   next = replaceRequired(next,
