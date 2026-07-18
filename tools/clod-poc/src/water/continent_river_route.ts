@@ -1,7 +1,9 @@
+import type { EnvironmentQuery } from "../environment_query/types.js";
 import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 
 const DEFAULT_SHORE_PROBE_SPACING_M = 2;
 const SHORE_REFINEMENT_STEPS = 8;
+export const CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M = 64;
 
 export interface ContinentRiverRouteSample {
   bodyKind: number;
@@ -132,4 +134,23 @@ export function findContinentRiverCrossingRoute(
     }
   }
   return null;
+}
+
+export function findContinentRiverCrossingRouteFromEnvironmentQuery(
+  query: EnvironmentQuery,
+  options: ContinentRiverRouteSearchOptions = {},
+): ContinentRiverCrossingRoute | null {
+  return findContinentRiverCrossingRoute((x, z) => {
+    const water = query.water(x, z, CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M);
+    const river = query.river(x, z, CONTINENT_RIVER_ROUTE_SAMPLE_HINT_M);
+    return {
+      bodyKind: water.bodyKind,
+      bodyId: water.bodyId ?? 0,
+      depth: water.depth,
+      flowX: river.flowX,
+      flowZ: river.flowZ,
+      terrainY: water.carvedBedY,
+      waterY: water.waterY,
+    };
+  }, options);
 }
