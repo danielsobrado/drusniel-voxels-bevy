@@ -52,32 +52,34 @@ export function runAppStateStartup(input: AppStateStartupInput): AppStateStartup
     queryTerrainMaterialSource,
     textureMipmapsEnabled,
   } = queries;
+  const importedState = stagedImport !== null;
+  const stateSearchParams = importedState ? new URLSearchParams() : searchParams;
   const {
     queryWeatherMode,
     weatherDefaults,
     queryWeatherIntensity,
     queryWeatherWindX,
     queryWeatherWindZ,
-  } = parseWeatherQueryContext(searchParams);
+  } = parseWeatherQueryContext(stateSearchParams);
   const textureLoadOptions: TerrainTextureLoadOptions = { textureMipmapsEnabled, maxAnisotropy };
   const state = createClodAppState({
     cfg,
     clodRuntime,
-    searchParams,
+    searchParams: stateSearchParams,
     stagedImport,
-    isWebGpu,
-    queryPerfMode,
+    isWebGpu: importedState ? false : isWebGpu,
+    queryPerfMode: importedState ? false : queryPerfMode,
     queryWebGpuSelection,
     queryMaterialTiers,
-    queryGrassPerfScene,
-    queryTreePerfScene,
-    queryForestFloorScene,
-    queryTreeGpuRing,
+    queryGrassPerfScene: importedState ? false : queryGrassPerfScene,
+    queryTreePerfScene: importedState ? false : queryTreePerfScene,
+    queryForestFloorScene: importedState ? false : queryForestFloorScene,
+    queryTreeGpuRing: importedState ? false : queryTreeGpuRing,
     queryFarShell,
     isLongView: queryLongViewScene,
     queryGrassRingGrid,
     queryGrassRingCell,
-    queryTerrainMaterialSource,
+    queryTerrainMaterialSource: importedState ? null : queryTerrainMaterialSource,
     queryWeatherMode,
     queryWeatherIntensity,
     queryWeatherWindX,
@@ -91,6 +93,6 @@ export function runAppStateStartup(input: AppStateStartupInput): AppStateStartup
     waterConfig: configs.waterConfig,
     digHoldIntervalMs: clodRuntime.digging.holdIntervalMs,
   });
-  if (!stagedImport) applyEnvironmentQueryOverrides(state, searchParams);
+  if (!importedState) applyEnvironmentQueryOverrides(state, searchParams);
   return { state, textureLoadOptions };
 }
