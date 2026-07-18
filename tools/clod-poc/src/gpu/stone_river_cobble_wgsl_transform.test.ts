@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { cloneEnvironmentalMaskSettings } from "../environment_masks/environment_mask_config.js";
+import { setEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import stoneSource from "./shaders/stone_scatter.compute.wgsl?raw";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import { withUnderwaterRiverCobbles } from "./stone_river_cobble_wgsl_transform.js";
 
+const baseSource = withRiverEcologyConstants(stoneSource);
+
+afterEach(() => setEnvironmentalMaskSettings(cloneEnvironmentalMaskSettings()));
+
 describe("underwater river cobble WGSL transform", () => {
-  const shader = withUnderwaterRiverCobbles(withRiverEcologyConstants(stoneSource));
+  const shader = withUnderwaterRiverCobbles(baseSource);
 
   it("requires canonical river body kind and Layout B flow", () => {
     expect(shader).toContain("const HYDROLOGY_BODY_RIVER: u32 = 3u;");
@@ -30,6 +36,17 @@ describe("underwater river cobble WGSL transform", () => {
     expect(shader).toContain("const STONE_META_UNDERWATER_FLAG: f32 = 16.0;");
     expect(shader).toContain("let underwater = meta_lane >= STONE_META_UNDERWATER_FLAG;");
     expect(shader).toContain("sink_depth + underwater_meta");
+  });
+
+  it("embeds the validated runtime mask thresholds", () => {
+    const settings = cloneEnvironmentalMaskSettings();
+    settings.riverCobble.minDepthM = 0.25;
+    settings.riverCobble.maxDepthM = 2.5;
+    setEnvironmentalMaskSettings(settings);
+
+    const configured = withUnderwaterRiverCobbles(baseSource);
+    expect(configured).toContain("const RIVER_COBBLE_MIN_DEPTH_M: f32 = 0.25;");
+    expect(configured).toContain("const RIVER_COBBLE_MAX_DEPTH_M: f32 = 2.5;");
   });
 
   it("fails closed when the source contract changes", () => {
