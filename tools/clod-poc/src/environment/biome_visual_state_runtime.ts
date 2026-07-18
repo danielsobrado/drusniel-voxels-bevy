@@ -9,6 +9,8 @@ import type { BiomeVisualStateSettings } from "./biome_visual_state_config.js";
 export const BIOME_VISUAL_SEASON_QUERY_KEYS = ["biomeSeasonT", "biomeSeason"] as const;
 export const BIOME_VISUAL_STATE_DEBUG_PROPERTY = "__drusnielBiomeVisualState";
 
+let activeBiomeVisualStateRuntime: BiomeVisualStateRuntime | null = null;
+
 export interface BiomeVisualStateRuntimeOptions {
   readonly settings: BiomeVisualStateSettings;
   readonly getSeasonT: () => number;
@@ -68,6 +70,14 @@ export function createBiomeVisualStateRuntime(
       return cachedState;
     },
   };
+}
+
+export function bindActiveBiomeVisualStateRuntime(runtime: BiomeVisualStateRuntime | null): void {
+  activeBiomeVisualStateRuntime = runtime;
+}
+
+export function readActiveBiomeVisualState(): BiomeVisualState | null {
+  return activeBiomeVisualStateRuntime?.current() ?? null;
 }
 
 export function resolveBiomeVisualSeasonT(
