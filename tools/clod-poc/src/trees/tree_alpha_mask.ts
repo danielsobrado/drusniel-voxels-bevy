@@ -33,7 +33,7 @@ interface LeafletSample {
 }
 
 const EMPTY_LEAFLET: LeafletSample = { alpha: 0, shade: 0.5, coolWarm: 0 };
-const DILATION_PASSES = 8;
+const DILATION_DISTANCE_PX = 8;
 const FOLIAGE_ATLAS_ANISOTROPY = 8;
 
 export function createTreeFoliageAtlas(settings: TreeSettings): TreeFoliageAtlas {
@@ -47,9 +47,9 @@ export function createTreeFoliageAtlas(settings: TreeSettings): TreeFoliageAtlas
     if (!VEG_TREE_SPECIES[species].foliage) continue;
     for (let variant = 0; variant < TREE_FOLIAGE_ATLAS_VARIANTS; variant++) {
       writeClusterCell(data, width, cellSize, speciesIndex, variant, species, settings.seed);
+      dilateClusterCellRgb(data, width, cellSize, speciesIndex, variant, DILATION_DISTANCE_PX);
     }
   }
-  dilateTransparentRgb(data, width, height, DILATION_PASSES);
 
   const texture = new THREE.DataTexture(
     data,
@@ -121,26 +121,92 @@ function writeClusterCell(
   seed: number,
 ): void {
   const leaflets = buildLeaflets(species, seed, variant);
-  const cellX = variant;
-  const cellY = speciesIndex;
+  const cellOriginX = variant * cellSize;
+  const cellOriginY = speciesIndex * cellSize;
 
-  for (let py = 0; py < cellSize; py++) {
-    for (let px = 0; px < cellSize; px++) {
-      const x = (px + 0.5) / cellSize * 2 - 1;
+  for (const leaf of leaflets) {
+    const endX = leaf.cx + leaf.cos * leaf.length;
+    const endY = leaf.cy + leaf.sin * leaf.length;
+    const padding = leaf.width * 1.25;
+    const minPx = normalizedToPixel(Math.min(leaf.cx, endX) - padding, cellSize, false);
+    const maxPx = normalizedToPixel(Math.max(leaf.cx, endX) + padding, cellSize, true);
+    const minPy = normalizedToPixel(Math.min(leaf.cy, endY) - padding, cellSize, false);
+    const maxPy = normalizedToPixel(Math.max(leaf.cy, endY) + padding, cellSize, true);
+
+    for (let py = minPy; py <= maxPy; py++) {
       const y = (py + 0.5) / cellSize * 2 - 1;
-      let best = EMPTY_LEAFLET;
-      for (const leaf of leaflets) {
+      for (let px = minPx; px <= maxPx; px++) {
+        const x = (px + 0.5) / cellSize * 2 - 1;
         const sample = evalLeaflet(leaf, x, y, species);
-        if (sample.alpha > best.alpha) best = sample;
+        if (sample.alpha <= 0) continue;
+        const offset = ((cellOriginY + py) * textureWidth + cellOriginX + px) * 4;
+        if (sample.alpha <= (data[offset + 3] as number) / 255) continue;
+        const cool = Math.max(0, -sample.coolWarm);
+        const warm = Math.max(0, sample.coolWarm);
+        data[offset] = Math.round(255 * clamp01(sample.shade * (1 + warm * 0.1 - cool * 0.08)));
+        data[offset + 1] = Math.round(255 * clamp01(sample.shade));
+        data[offset + 2] = Math.round(255 * clamp01(sample.shade * (1 + cool * 0.1 - warm * 0.1)));
+        data[offset + 3] = Math.round(255 * clamp01(sample.alpha));
       }
+    }
+  }
+}
 
-      const offset = ((cellY * cellSize + py) * textureWidth + cellX * cellSize + px) * 4;
-      const cool = Math.max(0, -best.coolWarm);
-      const warm = Math.max(0, best.coolWarm);
-      data[offset] = Math.round(255 * clamp01(best.shade * (1 + warm * 0.1 - cool * 0.08)));
-      data[offset + 1] = Math.round(255 * clamp01(best.shade));
-      data[offset + 2] = Math.round(255 * clamp01(best.shade * (1 + cool * 0.1 - warm * 0.1)));
-      data[offset + 3] = Math.round(255 * clamp01(best.alpha));
+function normalizedToPixel(value: number, cellSize: number, upper: boolean): number {
+  const pixel = (clamp01(value * 0.5 + 0.5) * cellSize) - (upper ? 0 : 1);
+  return Math.max(0, Math.min(cellSize - 1, upper ? Math.ceil(pixel) : Math.floor(pixel)));
+}
+
+function dilateClusterCellRgb(
+  data: Uint8Array,
+  textureWidth: number,
+  cellSize: number,
+  speciesIndex: number,
+  variant: number,
+  maxDistance: number,
+): void {
+  const cellPixels = cellSize * cellSize;
+  const distance = new Int16Array(cellPixels);
+  distance.fill(-1);
+  const queue = new Int32Array(cellPixels);
+  let head = 0;
+  let tail = 0;
+  const originX = variant * cellSize;
+  const originY = speciesIndex * cellSize;
+
+  for (let y = 0; y < cellSize; y++) {
+    for (let x = 0; x < cellSize; x++) {
+      const local = y * cellSize + x;
+      const offset = ((originY + y) * textureWidth + originX + x) * 4;
+      if ((data[offset + 3] as number) === 0) continue;
+      distance[local] = 0;
+      queue[tail++] = local;
+    }
+  }
+
+  while (head < tail) {
+    const local = queue[head++] as number;
+    const currentDistance = distance[local] as number;
+    if (currentDistance >= maxDistance) continue;
+    const x = local % cellSize;
+    const y = Math.floor(local / cellSize);
+    const sourceOffset = ((originY + y) * textureWidth + originX + x) * 4;
+
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nextX = x + dx;
+        const nextY = y + dy;
+        if (nextX < 0 || nextY < 0 || nextX >= cellSize || nextY >= cellSize) continue;
+        const nextLocal = nextY * cellSize + nextX;
+        if ((distance[nextLocal] as number) >= 0) continue;
+        const nextOffset = ((originY + nextY) * textureWidth + originX + nextX) * 4;
+        data[nextOffset] = data[sourceOffset] as number;
+        data[nextOffset + 1] = data[sourceOffset + 1] as number;
+        data[nextOffset + 2] = data[sourceOffset + 2] as number;
+        distance[nextLocal] = currentDistance + 1;
+        queue[tail++] = nextLocal;
+      }
     }
   }
 }
@@ -229,46 +295,4 @@ function leafProfile(s: number, shapePower: number): number {
   const body = Math.pow(Math.sin(Math.PI * Math.min(1, s * 0.91 + 0.045)), Math.max(0.5, shapePower));
   const tip = Math.pow(1 - s, 0.28);
   return base * body * tip;
-}
-
-function dilateTransparentRgb(data: Uint8Array, width: number, height: number, passes: number): void {
-  const originalAlpha = new Uint8Array(width * height);
-  for (let pixel = 0; pixel < width * height; pixel++) originalAlpha[pixel] = data[pixel * 4 + 3] as number;
-
-  for (let pass = 0; pass < passes; pass++) {
-    const source = data.slice();
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const pixel = y * width + x;
-        const offset = pixel * 4;
-        if ((originalAlpha[pixel] as number) > 0) continue;
-        let red = 0;
-        let green = 0;
-        let blue = 0;
-        let count = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            const sampleX = x + dx;
-            const sampleY = y + dy;
-            if (sampleX < 0 || sampleY < 0 || sampleX >= width || sampleY >= height) continue;
-            const sampleOffset = (sampleY * width + sampleX) * 4;
-            if ((source[sampleOffset] as number) === 0
-              && (source[sampleOffset + 1] as number) === 0
-              && (source[sampleOffset + 2] as number) === 0) continue;
-            red += source[sampleOffset] as number;
-            green += source[sampleOffset + 1] as number;
-            blue += source[sampleOffset + 2] as number;
-            count++;
-          }
-        }
-        if (count > 0) {
-          data[offset] = Math.round(red / count);
-          data[offset + 1] = Math.round(green / count);
-          data[offset + 2] = Math.round(blue / count);
-          data[offset + 3] = 0;
-        }
-      }
-    }
-  }
 }
