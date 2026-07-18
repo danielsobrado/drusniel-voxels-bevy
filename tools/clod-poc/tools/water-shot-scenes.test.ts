@@ -15,6 +15,7 @@ describe("water shot scenes", () => {
       expect(parseWaterShotScene(scene)).toBe(scene);
     }
     expect(() => parseWaterShotScene("unknown")).toThrow(/unknown --scene/);
+    expect(() => parseWaterShotScene("toString")).toThrow(/unknown --scene/);
   });
 
   it("accepts all runtime water debug modes and the clipmap alias", () => {
