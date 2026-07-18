@@ -5,6 +5,8 @@ import {
   WaterClipmap,
   WaterField,
   resolveGlacialWaterVisual,
+  resolveRockFlourWaterVisual,
+  resolveWaterRockFlourEnabled,
   type WaterDebugState,
 } from "../../water/index.js";
 import { readActiveBiomeVisualState } from "../../environment/biome_visual_state_runtime.js";
@@ -68,7 +70,13 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         },
       }
     : deps.waterConfig.visual;
-  const clipmapVisual = resolveGlacialWaterVisual(tierVisual, readActiveBiomeVisualState());
+  const biomeVisualState = readActiveBiomeVisualState();
+  const glacialVisual = resolveGlacialWaterVisual(tierVisual, biomeVisualState);
+  const clipmapVisual = resolveRockFlourWaterVisual(
+    glacialVisual,
+    biomeVisualState,
+    resolveWaterRockFlourEnabled(glacialVisual.rockFlour.enabled, deps.searchParams),
+  );
   const waterMaterialFactory = deps.isWebGpu
     ? useHighQualityWebGpuWater
       ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
