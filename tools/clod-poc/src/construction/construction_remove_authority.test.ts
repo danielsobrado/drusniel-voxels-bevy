@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createEditCommand } from "../player/edit_commands.js";
+import { createEditCommand, type EditCommandOperation } from "../player/edit_commands.js";
 import {
   authorizeConstructionRemoval,
   createConstructionRemoveAuthorizer,
@@ -37,6 +37,21 @@ function install(overrides: Partial<ConstructionRemoveAuthorityDeps> = {}): void
   );
 }
 
+function command(
+  operation: EditCommandOperation = "construction_remove",
+  position: readonly [number, number, number] = target.position,
+) {
+  return createEditCommand({
+    operation,
+    targetPosition: position,
+    targetNormal: [0, 1, 0],
+    sourceTerrainRevision: 7,
+    actor: "player",
+    mode: "playing",
+    nowMs: 50,
+  });
+}
+
 describe("construction remove authority", () => {
   it("allows a current, ready, in-range removal", () => {
     install();
@@ -67,17 +82,7 @@ describe("construction remove authority", () => {
 
   it("denies a queued removal after the interaction mode changes", () => {
     install({ getCurrentMode: () => "orbit" });
-    const command = createEditCommand({
-      operation: "construction_remove",
-      targetPosition: target.position,
-      targetNormal: [0, 1, 0],
-      sourceTerrainRevision: 7,
-      actor: "player",
-      mode: "playing",
-      nowMs: 50,
-    });
-
-    expect(authorizeConstructionRemoval(target, command)).toEqual({
+    expect(authorizeConstructionRemoval(target, command())).toEqual({
       allowed: false,
       reason: "mode_changed",
     });
@@ -85,23 +90,32 @@ describe("construction remove authority", () => {
 
   it("denies a queued removal after the terrain revision changes", () => {
     install({ getTerrainRevision: () => 8 });
-    const command = createEditCommand({
-      operation: "construction_remove",
-      targetPosition: target.position,
-      targetNormal: [0, 1, 0],
-      sourceTerrainRevision: 7,
-      actor: "player",
-      mode: "playing",
-      nowMs: 50,
-    });
-
-    expect(authorizeConstructionRemoval(target, command)).toEqual({
+    expect(authorizeConstructionRemoval(target, command())).toEqual({
       allowed: false,
       reason: "revision_mismatch",
     });
   });
 
-  it("fails closed when an authority dependency throws", () => {
+  it("rejects a queued command for another operation or target", () => {
+    install();
+    expect(authorizeConstructionRemoval(target, command("terrain_dig"))).toEqual({
+      allowed: false,
+      reason: "target_moved",
+    });
+    expect(authorizeConstructionRemoval(target, command("construction_remove", [11, 2, -5]))).toEqual({
+      allowed: false,
+      reason: "target_moved",
+    });
+  });
+
+  it("fails closed for malformed targets and authority dependencies", () => {
+    install();
+    expect(authorizeConstructionRemoval({ id: "", position: [Number.NaN, 0, 0] })).toEqual({
+      allowed: false,
+      reason: "not_ready",
+    });
+    disposeAuthorizer?.();
+    disposeAuthorizer = null;
     install({ getTerrainRevision: () => { throw new Error("revision unavailable"); } });
     expect(authorizeConstructionRemoval(target)).toEqual({
       allowed: false,
