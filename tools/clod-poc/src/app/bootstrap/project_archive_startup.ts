@@ -1,5 +1,6 @@
 import { TERRAIN_SOURCE_VERSION } from "../../cache/terrainSource.js";
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
+import { captureProjectGeneratorQuery } from "../../project/project_world_identity.js";
 import { projectPropEditStore } from "../../project/prop_edit_store.js";
 import { createSaveCheckpointController } from "../../save/save_checkpoint_controller.js";
 import {
@@ -72,6 +73,7 @@ export function runProjectArchiveStartup(
       scene: input.searchParams.get("scene") ?? "default",
       generatorVersion: TERRAIN_SOURCE_VERSION,
       terrainField: structuredClone(getTerrainFieldConfig()),
+      generatorQuery: captureProjectGeneratorQuery(input.searchParams),
     }),
     getNodesByLevel: () => result.nodesByLevel,
     getProps: () => projectPropEditStore.snapshot(),
