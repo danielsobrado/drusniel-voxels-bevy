@@ -99,6 +99,13 @@ async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Pr
   }
 }
 
+function scheduleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promise<void> {
+  const operation = () => handleCacheRpc(worker, request);
+  return request.op === "clear"
+    ? brokerOperations.barrier(operation)
+    : brokerOperations.run(operation);
+}
+
 /** Routes worker cache RPC to main-thread IndexedDB (workers skip local IDB). */
 export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   if (attachedWorkers.has(worker)) return;
@@ -107,12 +114,12 @@ export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   worker.addEventListener("message", (event: MessageEvent) => {
     const request = event.data;
     if (!isCacheRpcRequest(request)) return;
-    void brokerOperations.enqueue(() => handleCacheRpc(worker, request));
+    void scheduleCacheRpc(worker, request);
   });
 }
 
 export function clearMainThreadCacheBroker(): Promise<void> {
-  return brokerOperations.enqueue(async () => {
+  return brokerOperations.barrier(async () => {
     const store = await ensureBrokerStore();
     if (store) await store.clear();
     brokerStore = null;
