@@ -31,11 +31,13 @@ describe("CacheBrokerOperationQueue", () => {
 
   it("keeps operations after a barrier behind that barrier", async () => {
     const queue = new CacheBrokerOperationQueue();
+    const barrierStarted = deferred();
     const releaseBarrier = deferred();
     const order: string[] = [];
 
     const clear = queue.barrier(async () => {
       order.push("clear-start");
+      barrierStarted.resolve();
       await releaseBarrier.promise;
       order.push("clear-end");
     });
@@ -43,7 +45,7 @@ describe("CacheBrokerOperationQueue", () => {
       order.push("read");
     });
 
-    await Promise.resolve();
+    await barrierStarted.promise;
     expect(order).toEqual(["clear-start"]);
     releaseBarrier.resolve();
     await Promise.all([clear, read]);
