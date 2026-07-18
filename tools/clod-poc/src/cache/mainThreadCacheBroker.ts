@@ -118,13 +118,18 @@ function scheduleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Promis
 /** Routes worker cache RPC to main-thread IndexedDB (workers skip local IDB). */
 export function attachMainThreadCacheBroker(worker: CacheWorker): void {
   if (attachedWorkers.has(worker)) return;
-  attachedWorkers.add(worker);
-  registerTerrainStreamingWorker(worker);
-  worker.addEventListener("message", (event: MessageEvent) => {
-    const request = event.data;
-    if (!isCacheRpcRequest(request)) return;
-    void scheduleCacheRpc(worker, request);
-  });
+  const unregisterStreamingWorker = registerTerrainStreamingWorker(worker);
+  try {
+    worker.addEventListener("message", (event: MessageEvent) => {
+      const request = event.data;
+      if (!isCacheRpcRequest(request)) return;
+      void scheduleCacheRpc(worker, request);
+    });
+    attachedWorkers.add(worker);
+  } catch (error) {
+    unregisterStreamingWorker();
+    throw error;
+  }
 }
 
 export function clearMainThreadCacheBroker(): Promise<void> {
