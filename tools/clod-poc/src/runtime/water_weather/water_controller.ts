@@ -216,9 +216,10 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
   const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
-  const riverMist = new RiverMistOverlay(deps.scene, field, {
-    settings: readRiverMistRuntimeSettings(deps.searchParams),
-  });
+  const riverMistSettings = readRiverMistRuntimeSettings(deps.searchParams);
+  const riverMist = riverMistSettings.enabled
+    ? new RiverMistOverlay(deps.scene, field, { settings: riverMistSettings })
+    : null;
 
   const liveRuntimeFeatures = (): WaterRuntimeFeatures => {
     const waterEnabled = deps.getUiState().waterEnabled && clipmap.isEnabled;
@@ -239,7 +240,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
   clipmap.setVisible(ui.waterEnabled);
   residueOverlay.setVisible(ui.waterEnabled);
   cascadeParticles.setVisible(ui.waterEnabled);
-  riverMist.setVisible(ui.waterEnabled);
+  riverMist?.setVisible(ui.waterEnabled);
   clipmap.setClipmapTint(ui.waterClipmapTint);
   clipmap.setWireframe(ui.waterWireframe);
   assertPageMeshSignaturesUnchanged(pageSignaturesBefore, pageMeshSignatures(deps.nodes));
@@ -295,7 +296,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       clipmap.setVisible(enabled);
       residueOverlay.setVisible(enabled);
       cascadeParticles.setVisible(enabled);
-      riverMist.setVisible(enabled);
+      riverMist?.setVisible(enabled);
     },
     setDebugMode(mode) { clipmap.setDebugMode(WATER_DEBUG_MODES[mode]); },
     setClipmapTint(enabled) { clipmap.setClipmapTint(enabled); },
@@ -326,7 +327,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       clipmap.update(deltaSeconds, cameraPosition);
       residueOverlay.update(deltaSeconds, cameraPosition);
       cascadeParticles.update(deltaSeconds, cameraPosition);
-      riverMist.update(deltaSeconds, cameraPosition);
+      riverMist?.update(deltaSeconds, cameraPosition);
     },
     getCascadeParticleStats() { return cascadeParticles.getStats(); },
     installDebugApi(hooks: WaterDebugPoseHooks) {
@@ -336,7 +337,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     dispose() {
       deps.hydrologySystem?.attachTileRemote(null);
       hydrologyRemote?.dispose();
-      riverMist.dispose();
+      riverMist?.dispose();
       cascadeParticles.dispose();
       residueOverlay.dispose();
       clipmap.dispose();
