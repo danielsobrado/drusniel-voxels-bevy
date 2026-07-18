@@ -9,16 +9,12 @@ import type { BiomeVisualStateSettings } from "./biome_visual_state_config.js";
 export const BIOME_VISUAL_SEASON_QUERY_KEYS = ["biomeSeasonT", "biomeSeason"] as const;
 export const BIOME_VISUAL_STATE_DEBUG_PROPERTY = "__drusnielBiomeVisualState";
 
-export interface BiomeVisualWeatherInput {
-  readonly mode: WeatherMode;
-  readonly intensity: number;
-}
-
 export interface BiomeVisualStateRuntimeOptions {
   readonly settings: BiomeVisualStateSettings;
   readonly getSeasonT: () => number;
   readonly getSunElevationDeg: () => number;
-  readonly getWeather: () => BiomeVisualWeatherInput;
+  readonly getWeatherMode: () => WeatherMode;
+  readonly getWeatherIntensity: () => number;
 }
 
 export interface BiomeVisualStateRuntime {
@@ -36,14 +32,11 @@ export function createBiomeVisualStateRuntime(
 
   const readSeasonT = () => normalizeCycle(options.getSeasonT());
   const readSunElevationDeg = () => finiteOrZero(options.getSunElevationDeg());
-  const readWetness = () => {
-    const weather = options.getWeather();
-    return deriveBiomeVisualWetness(
-      weather.mode,
-      weather.intensity,
-      options.settings.defaultWetness,
-    );
-  };
+  const readWetness = () => deriveBiomeVisualWetness(
+    options.getWeatherMode(),
+    options.getWeatherIntensity(),
+    options.settings.defaultWetness,
+  );
 
   return {
     currentInput() {
