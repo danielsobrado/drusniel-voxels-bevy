@@ -12,6 +12,7 @@ export interface TreeCrownProxyDimensions {
 
 export const TREE_CROWN_PROXY_SEGMENTS = 10;
 export const TREE_CROWN_PROXY_RINGS = 6;
+export const TREE_CROWN_PROXY_INDEX_COUNT = TREE_CROWN_PROXY_SEGMENTS * (TREE_CROWN_PROXY_RINGS - 1) * 6;
 
 export function treeCrownProxyDimensions(settings: TreeSettings, species: TreeSpeciesId): TreeCrownProxyDimensions {
   const config = settings.species[species];
