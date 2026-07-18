@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   createArchive: vi.fn(),
   parseArchive: vi.fn(),
   stageImport: vi.fn(),
+  armRecovery: vi.fn(),
   validateConfig: vi.fn((value: unknown) => value),
   validateSessionState: vi.fn((value: unknown) => value),
   validateWaterState: vi.fn((value: unknown) => value),
@@ -31,6 +32,7 @@ vi.mock("./project_archive_environment_state.js", () => ({
   validateProjectWaterArchiveState: mocks.validateWaterState,
   validateProjectWeatherArchiveState: mocks.validateWeatherState,
 }));
+vi.mock("./project_import_recovery.js", () => ({ armProjectImportRecovery: mocks.armRecovery }));
 vi.mock("./project_archive_session_state.js", () => ({ validateProjectSessionState: mocks.validateSessionState }));
 vi.mock("../terrain/terrain.js", () => ({ getVoxelEditSnapshot: mocks.getVoxelEditSnapshot }));
 vi.mock("./project_state_mapper.js", () => ({
@@ -174,14 +176,14 @@ describe("project archive import handoff", () => {
     vi.unstubAllGlobals();
   });
 
-  it("validates, checkpoints, stages, and replaces stale world ownership in order", async () => {
+  it("validates, checkpoints, arms rollback, and navigates in order", async () => {
     const beforeImportNavigation = vi.fn(async () => {});
     const harness = createHarness(beforeImportNavigation);
     harness.projectImportInput.files = fileList(projectFile());
 
     harness.projectImportInput.dispatchEvent(new Event("change"));
 
-    await vi.waitFor(() => expect(mocks.stageImport).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(mocks.armRecovery).toHaveBeenCalledOnce());
     expect(mocks.validateConfig).toHaveBeenCalledOnce();
     expect(mocks.validateSessionState).toHaveBeenCalledOnce();
     expect(mocks.validateWaterState).toHaveBeenCalledOnce();
@@ -191,11 +193,17 @@ describe("project archive import handoff", () => {
       .toBeLessThan(beforeImportNavigation.mock.invocationCallOrder[0]!);
     expect(beforeImportNavigation.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.stageImport.mock.invocationCallOrder[0]!);
+    expect(mocks.stageImport.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.armRecovery.mock.invocationCallOrder[0]!);
+    expect(mocks.armRecovery).toHaveBeenCalledWith(
+      "import-token",
+      "?save=save-a&seed=9&hud=1",
+    );
     expect(location.search).toBe("?seed=73&hud=1&scene=continent&seaLevel=21&world=16&import=import-token");
     expect(mocks.emitAudio).toHaveBeenCalledWith("project.import.success");
   });
 
-  it("does not stage or navigate when the checkpoint fails", async () => {
+  it("does not stage, arm rollback, or navigate when the checkpoint fails", async () => {
     const beforeImportNavigation = vi.fn(async () => {
       throw new Error("checkpoint failed");
     });
@@ -206,6 +214,7 @@ describe("project archive import handoff", () => {
 
     await vi.waitFor(() => expect(window.alert).toHaveBeenCalledOnce());
     expect(mocks.stageImport).not.toHaveBeenCalled();
+    expect(mocks.armRecovery).not.toHaveBeenCalled();
     expect(location.search).toBe("?save=save-a&seed=9&hud=1");
     expect(harness.importButton.disabled).toBe(false);
     expect(harness.exportButton.disabled).toBe(false);
