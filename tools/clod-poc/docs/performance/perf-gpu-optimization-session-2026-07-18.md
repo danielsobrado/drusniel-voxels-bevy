@@ -81,6 +81,29 @@ clipmap levels, and `webgpu_uncaptured_errors=0` (`qa-runs/traced-carve-verify/`
 Verified: focused `perf/water` acceptance run green (`acceptance-runs/water-fix-check`) —
 river and lake sub-scenes converge and sample.
 
+## Feature verification (frozen production build, world=16, ground pose at 2048,2048)
+
+Playwright probe with `gpuReadbacks=acceptance` after `__drusnielClod.setPose` to ground
+level (recenters vegetation rings):
+
+- Trees: `gpu_tree_visible` 4119, dispatch 0.1 ms; canopy GPU impostors enabled,
+  734 instances.
+- Grass: `gpu_grass_visible` 5702.
+- Stones: `gpu_stone_visible` 667 of 17,956 clusters (reject pipeline active:
+  12,811 density-mask, 4,470 too-far), telemetry known+fresh.
+- Understory: GPU ring fused world+view pass running (`worldViewFused=1`, `pending=0`);
+  this mode publishes no visible-count counter.
+- Water: 100% river continuity over 15 channels, HQ material + SSR + refraction +
+  caustics active, 4 clipmap levels, hydrology atlas 36/36 tiles filled.
+- Far summary: GPU authoritative, 216/216 tiles ready, 0 CPU fallbacks, 0 parity failures.
+- `webgpu_uncaptured_errors` 0 in every probe and acceptance run this session; the
+  shared device requests 256 MiB storage/buffer limits (adapter-clamped) in
+  `buildRequiredLimits`, so the old erosion checkpoint-buffer warning no longer applies.
+- Resident GPU hierarchy (`liveClodGpuHierarchy=1`): counters publish and no GPU errors,
+  but zero pages adopt without the full flag set from the P1 handover
+  (`docs/plans/gpu-driven-p1-testing-handover-2026-07-17.md`); still opt-in, unvalidated
+  here beyond error-freedom.
+
 ## Acceptance walk-gate flakiness (long-map-full-proof-1..5, earlier 2026-07-18)
 
 Five proof runs by a previous session: 2 PASS, 1 real perf FAIL (356 ms max frame, 401 ms
