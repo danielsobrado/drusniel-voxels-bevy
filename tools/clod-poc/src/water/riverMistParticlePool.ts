@@ -1,14 +1,3 @@
-export interface RiverMistParticleSpawn {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly vx: number;
-  readonly vy: number;
-  readonly vz: number;
-  readonly lifeS: number;
-  readonly strength: number;
-}
-
 export class RiverMistParticlePool {
   readonly capacity: number;
   private readonly x: Float32Array;
@@ -45,20 +34,29 @@ export class RiverMistParticlePool {
     this.overwriteCursor = 0;
   }
 
-  spawn(particle: RiverMistParticleSpawn): void {
-    if (this.capacity <= 0 || !validSpawn(particle)) return;
+  spawn(
+    x: number,
+    y: number,
+    z: number,
+    vx: number,
+    vy: number,
+    vz: number,
+    lifeS: number,
+    strength: number,
+  ): void {
+    if (this.capacity <= 0 || !validSpawn(x, y, z, vx, vy, vz, lifeS, strength)) return;
     const index = this.countValue < this.capacity
       ? this.countValue++
       : this.nextOverwriteIndex();
-    this.x[index] = particle.x;
-    this.y[index] = particle.y;
-    this.z[index] = particle.z;
-    this.vx[index] = particle.vx;
-    this.vy[index] = particle.vy;
-    this.vz[index] = particle.vz;
+    this.x[index] = x;
+    this.y[index] = y;
+    this.z[index] = z;
+    this.vx[index] = vx;
+    this.vy[index] = vy;
+    this.vz[index] = vz;
     this.age[index] = 0;
-    this.life[index] = particle.lifeS;
-    this.strength[index] = particle.strength;
+    this.life[index] = lifeS;
+    this.strength[index] = strength;
   }
 
   advance(deltaSeconds: number): void {
@@ -120,17 +118,26 @@ export class RiverMistParticlePool {
   }
 }
 
-function validSpawn(particle: RiverMistParticleSpawn): boolean {
-  return Number.isFinite(particle.x)
-    && Number.isFinite(particle.y)
-    && Number.isFinite(particle.z)
-    && Number.isFinite(particle.vx)
-    && Number.isFinite(particle.vy)
-    && Number.isFinite(particle.vz)
-    && Number.isFinite(particle.lifeS)
-    && particle.lifeS > 0
-    && Number.isFinite(particle.strength)
-    && particle.strength > 0;
+function validSpawn(
+  x: number,
+  y: number,
+  z: number,
+  vx: number,
+  vy: number,
+  vz: number,
+  lifeS: number,
+  strength: number,
+): boolean {
+  return Number.isFinite(x)
+    && Number.isFinite(y)
+    && Number.isFinite(z)
+    && Number.isFinite(vx)
+    && Number.isFinite(vy)
+    && Number.isFinite(vz)
+    && Number.isFinite(lifeS)
+    && lifeS > 0
+    && Number.isFinite(strength)
+    && strength > 0;
 }
 
 function smooth01(value: number): number {
