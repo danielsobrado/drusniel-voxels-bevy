@@ -46,6 +46,17 @@ interface NodeLightingUniforms {
   ambientFloor: TslNode;
 }
 
+interface NodeImpostorSample {
+  albedo: TslNode;
+  localNormal: TslNode | null;
+}
+
+interface NodeBlendSample {
+  albedo: TslNode;
+  coverage: TslNode;
+  localNormal: TslNode | null;
+}
+
 const LIVE_LIGHTING_KEY = "treeImpostorLiveLighting";
 const DEFAULT_AMBIENT_FLOOR = 0.25;
 const LEAF_TRANSMISSION = 0.22;
@@ -105,45 +116,79 @@ function configureNodeLighting(
   lighting: EnvironmentLighting,
 ): void {
   const material = rawMaterial as NodeMaterialShape;
-  const albedo = viewBlend ? blendedNodeAlbedo(atlas) : singleNodeAlbedo(atlas);
-  const surfaceNormal = nodeSurfaceNormal(atlas, viewBlend);
+  const sample = viewBlend ? blendedNodeSample(atlas) : singleNodeSample(atlas);
+  const surfaceNormal = nodeSurfaceNormal(sample.localNormal);
   const uniforms = nodeLightingUniforms(lighting);
   const n: TslNode = frontFacing.select(surfaceNormal, surfaceNormal.negate());
   const sun: TslNode = clamp(max(dot(n, uniforms.light), 0), 0, SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0, 1);
   const hemi: TslNode = mix(uniforms.ground, uniforms.sky, sky);
   const back: TslNode = max(dot(n.negate(), uniforms.light), 0);
-  const transmission: TslNode = albedo.mul(uniforms.sun).mul(back).mul(LEAF_TRANSMISSION);
+  const transmission: TslNode = sample.albedo.mul(uniforms.sun).mul(back).mul(LEAF_TRANSMISSION);
   material.normalNode = surfaceNormal;
   material.colorNode = clamp(
-    albedo.mul(hemi.add(uniforms.sun.mul(sun)).add(uniforms.ambientFloor)).add(transmission),
+    sample.albedo.mul(hemi.add(uniforms.sun.mul(sun)).add(uniforms.ambientFloor)).add(transmission),
     0,
     1,
   );
   material.userData[LIVE_LIGHTING_KEY] = uniforms;
 }
 
-function singleNodeAlbedo(atlas: TreeImpostorAtlas): TslNode {
+function singleNodeSample(atlas: TreeImpostorAtlas): NodeImpostorSample {
   const rect: TslNode = attribute("treeImpostorUvRect", "vec4");
   const atlasUv: TslNode = rect.xy.add(uv().mul(rect.zw.sub(rect.xy)));
-  return decodeNodeAlbedo(texture(atlas.albedo ?? atlas.texture, atlasUv));
+  const albedo: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
+  return {
+    albedo: decodeNodeAlbedo(albedo),
+    localNormal: atlas.normalDepth
+      ? normalize(texture(atlas.normalDepth, atlasUv).xyz.mul(2).sub(1))
+      : null,
+  };
 }
 
-function blendedNodeAlbedo(atlas: TreeImpostorAtlas): TslNode {
+function blendedNodeSample(atlas: TreeImpostorAtlas): NodeImpostorSample {
   const weights: TslNode = attribute("treeImpostorBlendWeights", "vec4");
-  const samples = nodeBlendSamples(atlas);
+  const samples = [0, 1, 2, 3].map((index): NodeBlendSample => {
+    const rect: TslNode = attribute(`treeImpostorUvRect${index}`, "vec4");
+    const atlasUv: TslNode = rect.xy.add(uv().mul(rect.zw.sub(rect.xy)));
+    const albedo: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
+    return {
+      albedo: decodeNodeAlbedo(albedo),
+      coverage: albedo.w,
+      localNormal: atlas.normalDepth
+        ? normalize(texture(atlas.normalDepth, atlasUv).xyz.mul(2).sub(1))
+        : null,
+    };
+  });
   const coverage = blendedCoverage(samples, weights);
-  return samples[0].albedo.mul(samples[0].coverage).mul(weights.x)
+  const safeCoverage = max(coverage, float(MIN_COVERAGE));
+  const albedo = samples[0].albedo.mul(samples[0].coverage).mul(weights.x)
     .add(samples[1].albedo.mul(samples[1].coverage).mul(weights.y))
     .add(samples[2].albedo.mul(samples[2].coverage).mul(weights.z))
     .add(samples[3].albedo.mul(samples[3].coverage).mul(weights.w))
-    .div(max(coverage, float(MIN_COVERAGE)));
+    .div(safeCoverage);
+  const localNormal = samples.every((sample) => sample.localNormal !== null)
+    ? normalize(
+        samples[0].localNormal.mul(samples[0].coverage).mul(weights.x)
+          .add(samples[1].localNormal.mul(samples[1].coverage).mul(weights.y))
+          .add(samples[2].localNormal.mul(samples[2].coverage).mul(weights.z))
+          .add(samples[3].localNormal.mul(samples[3].coverage).mul(weights.w))
+          .div(safeCoverage),
+      )
+    : null;
+  return { albedo, localNormal };
 }
 
-function nodeSurfaceNormal(atlas: TreeImpostorAtlas, viewBlend: boolean): TslNode {
+function blendedCoverage(samples: readonly NodeBlendSample[], weights: TslNode): TslNode {
+  return samples[0].coverage.mul(weights.x)
+    .add(samples[1].coverage.mul(weights.y))
+    .add(samples[2].coverage.mul(weights.z))
+    .add(samples[3].coverage.mul(weights.w));
+}
+
+function nodeSurfaceNormal(localNormal: TslNode | null): TslNode {
   const billboard = nodeBillboardNormal();
-  if (!atlas.normalDepth) return billboard;
-  const localNormal = viewBlend ? blendedNodeLocalNormal(atlas) : singleNodeLocalNormal(atlas);
+  if (!localNormal) return billboard;
   const yaw: TslNode = attribute(TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME, "vec2");
   const rotated = normalize(vec3(
     localNormal.x.mul(yaw.x).add(localNormal.z.mul(yaw.y)),
@@ -151,47 +196,6 @@ function nodeSurfaceNormal(atlas: TreeImpostorAtlas, viewBlend: boolean): TslNod
     localNormal.z.mul(yaw.x).sub(localNormal.x.mul(yaw.y)),
   ));
   return normalize((mix as any)(billboard, rotated, float(NORMAL_DETAIL_WEIGHT)));
-}
-
-function singleNodeLocalNormal(atlas: TreeImpostorAtlas): TslNode {
-  const rect: TslNode = attribute("treeImpostorUvRect", "vec4");
-  const atlasUv: TslNode = rect.xy.add(uv().mul(rect.zw.sub(rect.xy)));
-  return normalize(texture(atlas.normalDepth!, atlasUv).xyz.mul(2).sub(1));
-}
-
-function blendedNodeLocalNormal(atlas: TreeImpostorAtlas): TslNode {
-  const weights: TslNode = attribute("treeImpostorBlendWeights", "vec4");
-  const samples = nodeBlendSamples(atlas);
-  const coverage = blendedCoverage(samples, weights);
-  return normalize(
-    samples[0].normal.mul(samples[0].coverage).mul(weights.x)
-      .add(samples[1].normal.mul(samples[1].coverage).mul(weights.y))
-      .add(samples[2].normal.mul(samples[2].coverage).mul(weights.z))
-      .add(samples[3].normal.mul(samples[3].coverage).mul(weights.w))
-      .div(max(coverage, float(MIN_COVERAGE))),
-  );
-}
-
-function nodeBlendSamples(atlas: TreeImpostorAtlas): Array<{ albedo: TslNode; coverage: TslNode; normal: TslNode }> {
-  return [0, 1, 2, 3].map((index) => {
-    const rect: TslNode = attribute(`treeImpostorUvRect${index}`, "vec4");
-    const atlasUv: TslNode = rect.xy.add(uv().mul(rect.zw.sub(rect.xy)));
-    const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
-    const normal: TslNode = atlas.normalDepth
-      ? normalize(texture(atlas.normalDepth, atlasUv).xyz.mul(2).sub(1))
-      : vec3(0, 1, 0);
-    return { albedo: decodeNodeAlbedo(sample), coverage: sample.w, normal };
-  });
-}
-
-function blendedCoverage(
-  samples: Array<{ coverage: TslNode }>,
-  weights: TslNode,
-): TslNode {
-  return samples[0].coverage.mul(weights.x)
-    .add(samples[1].coverage.mul(weights.y))
-    .add(samples[2].coverage.mul(weights.z))
-    .add(samples[3].coverage.mul(weights.w));
 }
 
 function nodeBillboardNormal(): TslNode {
