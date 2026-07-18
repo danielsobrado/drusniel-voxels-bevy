@@ -10,4 +10,3 @@
 @group(0) @binding(12) var<uniform> canonical_height_atlas_params: vec4<f32>;
 @group(0) @binding(15) var hydro_fields_texture: texture_2d<f32>;
 @group(0) @binding(16) var hydro_fields_atlas_texture: texture_2d<f32>;
-@group(0) @binding(17) var hydro_body_phase_atlas_texture: texture_2d<f32>;
