@@ -10,7 +10,9 @@ import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { TerrainFieldConfig } from "../terrain/terrain.js";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import {
+  CANOPY_CELL_FLOATS,
   unpackCanopyTile,
+  type CanopyWorkerBuiltTile,
   type CanopyWorkerRequest,
   type CanopyWorkerResponse,
   type CanopyWorkerTileCoord,
@@ -43,22 +45,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isSafeRequestId(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0;
+function isSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function validBuiltTile(value: unknown): value is CanopyWorkerBuiltTile {
+  if (!isRecord(value) || !isRecord(value.key)) return false;
+  if (!isSafeInteger(value.key.tileX)
+    || !isSafeInteger(value.key.tileZ)
+    || !isNonNegativeSafeInteger(value.key.ring)) return false;
+  if (!isFiniteNumber(value.originX)
+    || !isFiniteNumber(value.originZ)
+    || !isFiniteNumber(value.cellSizeM)
+    || value.cellSizeM <= 0) return false;
+  if (!isNonNegativeSafeInteger(value.revision)
+    || !isNonNegativeSafeInteger(value.resolution)
+    || value.resolution <= 0) return false;
+  if (!(value.cells instanceof Float64Array)) return false;
+  return value.cells.length === value.resolution * value.resolution * CANOPY_CELL_FLOATS;
 }
 
 function validWorkerResponse(value: unknown): value is CanopyWorkerResponse {
   if (!isRecord(value) || typeof value.type !== "string") return false;
   if (value.type === "error") {
-    return (value.requestId === null || isSafeRequestId(value.requestId))
+    return (value.requestId === null || isNonNegativeSafeInteger(value.requestId))
       && typeof value.message === "string";
   }
   return value.type === "built"
-    && isSafeRequestId(value.requestId)
-    && isSafeRequestId(value.configId)
+    && isNonNegativeSafeInteger(value.requestId)
+    && isNonNegativeSafeInteger(value.configId)
     && Array.isArray(value.tiles)
-    && typeof value.buildMs === "number"
-    && Number.isFinite(value.buildMs);
+    && value.tiles.every(validBuiltTile)
+    && isFiniteNumber(value.buildMs)
+    && value.buildMs >= 0;
 }
 
 function errorMessage(error: unknown): string {
