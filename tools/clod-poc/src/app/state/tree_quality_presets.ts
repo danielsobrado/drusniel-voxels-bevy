@@ -30,6 +30,9 @@ export type TreeLodBudgets = TreeSettings["lod"]["budgets"];
 
 interface TreeQualityPresetConfig {
   distanceM: number;
+  impostorStartM: number;
+  impostorResolutionPx: number;
+  bakeAgeLayers: boolean;
   maxInstances: number;
   density: number;
   spacingM: number;
@@ -51,11 +54,14 @@ interface TreeQualityPresetConfig {
 
 const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, TreeQualityPresetConfig> = {
   ultra: {
-    distanceM: 620,
-    maxInstances: 9000,
+    distanceM: 1200,
+    impostorStartM: 460,
+    impostorResolutionPx: 160,
+    bakeAgeLayers: false,
+    maxInstances: 12_000,
     density: 1.2,
     spacingM: 5.5,
-    shadowMaxLod: "far",
+    shadowMaxLod: "impostor",
     windEnabled: true,
     windStrength: 0.18,
     gustStrength: 0.12,
@@ -67,7 +73,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
     gpuValidateAgainstCpu: false,
-    gpuMaxVisible: 50_000,
+    gpuMaxVisible: 128_000,
     budgets: {
       nearMaxVertices: 260_000,
       midMaxVertices: 90_000,
@@ -76,11 +82,14 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     },
   },
   balanced: {
-    distanceM: 420,
-    maxInstances: 6000,
+    distanceM: 900,
+    impostorStartM: 420,
+    impostorResolutionPx: 128,
+    bakeAgeLayers: false,
+    maxInstances: 9000,
     density: 0.85,
     spacingM: 7.0,
-    shadowMaxLod: "mid",
+    shadowMaxLod: "impostor",
     windEnabled: true,
     windStrength: 0.12,
     gustStrength: 0.08,
@@ -92,7 +101,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
     gpuValidateAgainstCpu: false,
-    gpuMaxVisible: 30_000,
+    gpuMaxVisible: 96_000,
     budgets: {
       nearMaxVertices: 140_000,
       midMaxVertices: 45_000,
@@ -101,11 +110,14 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     },
   },
   perf: {
-    distanceM: 300,
-    maxInstances: 3500,
+    distanceM: 500,
+    impostorStartM: 300,
+    impostorResolutionPx: 64,
+    bakeAgeLayers: false,
+    maxInstances: 5000,
     density: 0.55,
     spacingM: 9.0,
-    shadowMaxLod: "near",
+    shadowMaxLod: "far",
     windEnabled: false,
     windStrength: 0,
     gustStrength: 0,
@@ -117,7 +129,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
     gpuValidateAgainstCpu: false,
-    gpuMaxVisible: 16_000,
+    gpuMaxVisible: 40_000,
     budgets: {
       nearMaxVertices: 75_000,
       midMaxVertices: 24_000,
@@ -126,8 +138,11 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     },
   },
   potato: {
-    distanceM: 180,
-    maxInstances: 1500,
+    distanceM: 240,
+    impostorStartM: 140,
+    impostorResolutionPx: 48,
+    bakeAgeLayers: false,
+    maxInstances: 2000,
     density: 0.3,
     spacingM: 12.0,
     shadowMaxLod: "none",
@@ -142,7 +157,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
     gpuValidateAgainstCpu: false,
-    gpuMaxVisible: 8_000,
+    gpuMaxVisible: 16_000,
     budgets: {
       nearMaxVertices: 32_000,
       midMaxVertices: 12_000,
@@ -169,7 +184,25 @@ export function treeImpostorTileResolutionForQualityPreset(
   fallback: number,
 ): number {
   if (preset === "custom") return fallback;
-  return { ultra: 96, balanced: 64, perf: 48, potato: 32 }[preset];
+  return TREE_QUALITY_PRESETS[preset].impostorResolutionPx;
+}
+
+export function treeImpostorBakeAgeLayersForQualityPreset(
+  preset: PostProcessQualityPreset,
+  fallback: boolean,
+): boolean {
+  if (preset === "custom") return fallback;
+  return TREE_QUALITY_PRESETS[preset].bakeAgeLayers;
+}
+
+export function treeImpostorStartFractionForQualityPreset(
+  preset: PostProcessQualityPreset,
+  distanceM: number,
+  fallback: number,
+): number {
+  if (preset === "custom") return fallback;
+  const safeDistance = Math.max(1, distanceM);
+  return Math.max(0, Math.min(1, TREE_QUALITY_PRESETS[preset].impostorStartM / safeDistance));
 }
 
 export function applyTreeQualityPreset(state: TreeQualityPresetState, preset: PostProcessQualityPreset): void {
