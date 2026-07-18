@@ -11,6 +11,8 @@ import {
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 import { GpuTimestampRecorder, type GpuTimestampSnapshot } from "../diagnostics/gpu_timestamp_recorder.js";
 import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
+import { riverCobbleGpuEnabled } from "../stones/river_cobble_runtime.js";
+import { readStoneHydrologyFieldsData } from "../stones/stone_hydrology_fields_runtime.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
@@ -67,7 +69,6 @@ export interface StoneGpuScatterParams {
   centerX: number;
   centerZ: number;
   unboundedWorld?: boolean;
-  riverCobblesEnabled?: boolean;
   settings: StoneSettings;
 }
 
@@ -221,8 +222,7 @@ export class StoneGpuScatterCompute {
     device: GPUDevice,
     edits: readonly ResolvedDigEdit[],
     buffers: StoneGpuScatterBuffers,
-    hydroData: GrassHydrologyData | null,
-    hydroFieldsData: GrassHydrologyData | null,
+    hydroData: GrassHydrologyData | null = null,
     viewConfig: StoneGpuViewConfig,
   ): Promise<StoneGpuScatterCompute> {
     const module = device.createShaderModule({ label: "stone scatter compute shader", code: composeStoneScatterShader() });
@@ -271,7 +271,7 @@ export class StoneGpuScatterCompute {
       edits,
       buffers,
       hydroData,
-      hydroFieldsData,
+      readStoneHydrologyFieldsData(),
       viewConfig,
     );
   }
@@ -386,7 +386,7 @@ export class StoneGpuScatterCompute {
     this.paramU32[36] = maxInstances;
     this.paramU32[37] = grid;
     this.paramU32[38] = settings.seedSalt >>> 0;
-    this.paramU32[39] = params.riverCobblesEnabled ? 1 : 0;
+    this.paramU32[39] = riverCobbleGpuEnabled() ? 1 : 0;
     this.paramU32[40] = 0;
     this.paramU32[41] = 0;
     this.paramU32[42] = params.unboundedWorld ? 1 : 0;
