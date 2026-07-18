@@ -26,6 +26,7 @@ import { withConservativeGrassFrustum, withGrassActiveSlotList } from "./grass_r
 import { withUnderstoryAuthorityExclusion } from "./understory_ring_wgsl_transforms.js";
 import { withUnderwaterRiverCobbles } from "./stone_river_cobble_wgsl_transform.js";
 import { withGravelBarStones } from "./stone_bar_field_transform.js";
+import { withGravelBarFieldSampling } from "./stone_bar_field_gate_transform.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeCrownProxyShadowIndexCount,
@@ -58,7 +59,8 @@ export function composeGrassRingShader(): string {
 
 export function composeStoneScatterShader(): string {
   const riverEntry = withUnderwaterRiverCobbles(withRiverEcologyConstants(stoneScatterEntry));
-  const stoneEntry = withGravelBarStones(riverEntry);
+  const gravelEntry = withGravelBarStones(riverEntry);
+  const stoneEntry = withGravelBarFieldSampling(gravelEntry);
   return composeShader("stone scatter shader", [stoneBindings, terrainCommon, vegetationTerrainSampling, placementHeight, stoneEntry]);
 }
 
