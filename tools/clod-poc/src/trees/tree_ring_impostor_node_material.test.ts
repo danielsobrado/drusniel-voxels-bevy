@@ -12,7 +12,7 @@ import {
 } from "./index.js";
 
 describe("GPU ring baked impostor node material", () => {
-  it("creates a material handle with regular and debug materials", () => {
+  it("creates a material handle with regular, debug, and prepass materials", () => {
     const handle = createTreeRingImpostorNodeMaterialHandle(
       cloneTreeSettings(),
       buffers(),
@@ -24,6 +24,7 @@ describe("GPU ring baked impostor node material", () => {
     expect(handle.setFadeCenter).toBeDefined();
     expect(handle.updateLighting).toBeDefined();
     expect(handle.updateForestLighting).toBeDefined();
+    expect(handle.prepassNodesFor?.("impostor")).toBeDefined();
   });
 
   it("keeps render flags stable after settings updates", () => {
@@ -102,6 +103,16 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("hemi.add(direct).add(uAmbientFloor)");
     expect(source).not.toContain("albedo.mul(0.25)");
     expect(source).not.toContain("clamp(lit, 0.0, 1.0)");
+  });
+
+  it("applies the same forest lighting channels as mesh trees", () => {
+    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("forestPacked.x.mul(uForestAoStrength)");
+    expect(source).toContain("forestPacked.y.mul(uForestShadowStrength)");
+    expect(source).toContain("forestPacked.z.mul(uForestFogStrength)");
+    expect(source).toContain("forestPacked.w.mul(TREE_RING_IMPOSTOR_SHAFT_HINT)");
+    expect(source).toContain("state.textureHandle.texture");
   });
 
   it("uses unlit WebGPU node materials so the manual relight is not lit twice", () => {
