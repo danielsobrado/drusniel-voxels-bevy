@@ -17,6 +17,7 @@ interface HydrologyAtlasGpuState {
   source: HydrologyTileAtlasSource;
   waterTexture: GPUTexture;
   fieldsTexture: GPUTexture;
+  bodyPhaseTexture: GPUTexture;
   prefetchRadiusM: number;
   uploads: number;
   uploadedTexels: number;
@@ -26,6 +27,7 @@ interface HydrologyAtlasGpuFallback {
   device: GPUDevice;
   waterTexture: GPUTexture;
   fieldsTexture: GPUTexture;
+  bodyPhaseTexture: GPUTexture;
 }
 
 let state: HydrologyAtlasGpuState | null = null;
@@ -38,6 +40,7 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
     tileSizeM: source.tileSizeM,
     tileRes: source.tileRes,
     tilesPerSide: source.atlasTilesPerSide,
+    includeBodyPhase: true,
   });
   const textureDescriptor: GPUTextureDescriptor = {
     size: { width: atlas.res, height: atlas.res },
@@ -50,8 +53,12 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
     source,
     waterTexture: device.createTexture({ ...textureDescriptor, label: "hydrology streaming atlas layout a" }),
     fieldsTexture: device.createTexture({ ...textureDescriptor, label: "hydrology streaming atlas layout b" }),
-    // Half the window edge covers every tile the tile-snapped window can need before
-    // the next recenter.
+    bodyPhaseTexture: device.createTexture({
+      label: "hydrology streaming atlas gravel phase",
+      size: { width: atlas.res, height: atlas.res },
+      format: "r32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    }),
     prefetchRadiusM: (source.atlasTilesPerSide / 2) * source.tileSizeM,
     uploads: 0,
     uploadedTexels: 0,
@@ -61,6 +68,7 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
 export function resetHydrologyAtlasGpu(): void {
   state?.waterTexture.destroy();
   state?.fieldsTexture.destroy();
+  state?.bodyPhaseTexture.destroy();
   state = null;
 }
 
@@ -74,36 +82,54 @@ export function hydrologyAtlasGpuFieldsTexture(device: GPUDevice): GPUTexture {
   return atlasTexturesFor(device).fieldsTexture;
 }
 
+/** Stone-only R32 atlas texture containing a stable phase derived from bodyId. */
+export function hydrologyAtlasGpuBodyPhaseTexture(device: GPUDevice): GPUTexture {
+  return atlasTexturesFor(device).bodyPhaseTexture;
+}
+
 /** Per-dispatch uniform payload: (originX, originZ, cellSize, enabled). */
 export function hydrologyAtlasGpuParams(): [number, number, number, number] {
   if (!state || !state.atlas.initialized) return [0, 0, 0, 0];
   return [state.atlas.originX, state.atlas.originZ, state.atlas.cellSize, 1];
 }
 
-/** Recenter/refill the CPU atlas and upload changed Layout A and Layout B rectangles. */
+/** Recenter/refill the CPU atlas and upload changed atlas rectangles. */
 export function updateHydrologyAtlasGpu(centerX: number, centerZ: number): void {
   if (!state) return;
   state.source.prefetch(centerX, centerZ, state.prefetchRadiusM);
   const dirty = state.atlas.update(centerX, centerZ, state.source);
-  const bytesPerRow = state.atlas.res * 16;
+  const rgbaBytesPerRow = state.atlas.res * 16;
+  const phaseBytesPerRow = state.atlas.res * 4;
+  const bodyPhase = state.atlas.bodyPhase;
   for (const rect of dirty) {
-    const dataLayout = {
+    const rgbaLayout = {
       offset: (rect.z * state.atlas.res + rect.x) * 16,
-      bytesPerRow,
+      bytesPerRow: rgbaBytesPerRow,
     };
     const size = { width: rect.width, height: rect.height };
     state.device.queue.writeTexture(
       { texture: state.waterTexture, origin: { x: rect.x, y: rect.z } },
       state.atlas.data,
-      dataLayout,
+      rgbaLayout,
       size,
     );
     state.device.queue.writeTexture(
       { texture: state.fieldsTexture, origin: { x: rect.x, y: rect.z } },
       state.atlas.dataB,
-      dataLayout,
+      rgbaLayout,
       size,
     );
+    if (bodyPhase) {
+      state.device.queue.writeTexture(
+        { texture: state.bodyPhaseTexture, origin: { x: rect.x, y: rect.z } },
+        bodyPhase,
+        {
+          offset: (rect.z * state.atlas.res + rect.x) * 4,
+          bytesPerRow: phaseBytesPerRow,
+        },
+        size,
+      );
+    }
     state.uploads++;
     state.uploadedTexels += rect.width * rect.height;
   }
@@ -125,20 +151,29 @@ export function hydrologyAtlasGpuStats(): HydrologyAtlasGpuStats | null {
   };
 }
 
-function atlasTexturesFor(device: GPUDevice): Pick<HydrologyAtlasGpuState, "waterTexture" | "fieldsTexture"> {
+function atlasTexturesFor(
+  device: GPUDevice,
+): Pick<HydrologyAtlasGpuState, "waterTexture" | "fieldsTexture" | "bodyPhaseTexture"> {
   if (state && state.device === device) return state;
   if (!fallback || fallback.device !== device) {
     fallback?.waterTexture.destroy();
     fallback?.fieldsTexture.destroy();
-    const descriptor: GPUTextureDescriptor = {
+    fallback?.bodyPhaseTexture.destroy();
+    const rgbaDescriptor: GPUTextureDescriptor = {
       size: { width: 1, height: 1 },
       format: "rgba32float",
       usage: GPUTextureUsage.TEXTURE_BINDING,
     };
     fallback = {
       device,
-      waterTexture: device.createTexture({ ...descriptor, label: "hydrology atlas layout a fallback" }),
-      fieldsTexture: device.createTexture({ ...descriptor, label: "hydrology atlas layout b fallback" }),
+      waterTexture: device.createTexture({ ...rgbaDescriptor, label: "hydrology atlas layout a fallback" }),
+      fieldsTexture: device.createTexture({ ...rgbaDescriptor, label: "hydrology atlas layout b fallback" }),
+      bodyPhaseTexture: device.createTexture({
+        label: "hydrology atlas gravel phase fallback",
+        size: { width: 1, height: 1 },
+        format: "r32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+      }),
     };
   }
   return fallback;
