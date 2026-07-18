@@ -5,6 +5,10 @@ import {
   INITIAL_TERRAIN_TEXTURE_COUNT,
 } from "../../terrain/terrain_textures.js";
 import {
+  disposeImportedTerrainTextureResources,
+  loadImportedTerrainTextureResources,
+} from "./terrain_texture_import_transaction.js";
+import {
   configureNormalTexture,
   loadTerrainTextureUrl,
   type TerrainTextureLoadOptions,
@@ -97,19 +101,14 @@ export interface TerrainTextureController {
 
 export function createTerrainTextureController(deps: TerrainTextureControllerDeps): TerrainTextureController {
   const { textureArraySize, textureMipmapsEnabled, maxAnisotropy, textureLoadOptions } = deps;
-  const slots: TerrainTextureSlot[] = Array.from({ length: INITIAL_TERRAIN_TEXTURE_COUNT }, () => ({
+  const importedSlots = deps.stagedImport?.manifest.textures;
+  const slotCount = importedSlots?.length ?? INITIAL_TERRAIN_TEXTURE_COUNT;
+  const slots: TerrainTextureSlot[] = Array.from({ length: slotCount }, () => ({
     ...emptyTextureSlotState(),
   }));
 
   for (let i = 0; i < slots.length; i++) {
-    const preset = DEFAULT_TERRAIN_TEXTURE_PRESETS[i];
-    const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === preset.id);
-    slots[i].selectedId = preset.id;
-    slots[i].scale = preset.scale;
-    slots[i].heightMin = preset.heightMin;
-    slots[i].heightMax = preset.heightMax;
-    slots[i].name = builtin?.label ?? preset.id;
-    const imported = deps.stagedImport?.manifest.textures[i];
+    const imported = importedSlots?.[i];
     if (imported) {
       slots[i].name = imported.name;
       slots[i].selectedId = imported.selectedId;
@@ -118,16 +117,39 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       slots[i].heightMax = imported.heightMax;
       slots[i].customMimeType = imported.mimeType ?? null;
       slots[i].customExtension = imported.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? null;
+      continue;
     }
+
+    const preset = DEFAULT_TERRAIN_TEXTURE_PRESETS[i];
+    if (!preset) continue;
+    const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === preset.id);
+    slots[i].selectedId = preset.id;
+    slots[i].scale = preset.scale;
+    slots[i].heightMin = preset.heightMin;
+    slots[i].heightMax = preset.heightMax;
+    slots[i].name = builtin?.label ?? preset.id;
   }
 
   let albedoArrayTex: THREE.DataArrayTexture | null = null;
   let normalArrayTex: THREE.DataArrayTexture | null = null;
   let textureArraySignature = "";
+  let textureContentRevision = 0;
   const arrayBuildCanvas = document.createElement("canvas");
   arrayBuildCanvas.width = textureArraySize;
   arrayBuildCanvas.height = textureArraySize;
   const arrayBuildCtx = arrayBuildCanvas.getContext("2d", { willReadFrequently: true })!;
+
+  const markTextureContentChanged = () => {
+    textureContentRevision++;
+  };
+
+  const disposeTextureArrays = () => {
+    albedoArrayTex?.dispose();
+    normalArrayTex?.dispose();
+    albedoArrayTex = null;
+    normalArrayTex = null;
+    textureArraySignature = "";
+  };
 
   const buildDataArray = (
     images: readonly (TexImageSource | null)[],
@@ -182,6 +204,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       customMimeType,
       customExtension,
     };
+    markTextureContentChanged();
   };
 
   const setBuiltinTextureSlot = (
@@ -211,6 +234,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       normalMimeType: null,
       normalExtension: null,
     };
+    markTextureContentChanged();
   };
 
   const setBuiltinSlotNormal = (index: number, texture: THREE.Texture, previewUrl: string) => {
@@ -222,6 +246,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     slot.normalBytes = null;
     slot.normalMimeType = null;
     slot.normalExtension = null;
+    markTextureContentChanged();
   };
 
   const setSlotNormal = (index: number, texture: THREE.Texture, previewUrl: string, bytes: Uint8Array, mimeType: string, extension: string) => {
@@ -233,6 +258,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     slot.normalBytes = bytes.slice();
     slot.normalMimeType = mimeType;
     slot.normalExtension = extension;
+    markTextureContentChanged();
   };
 
   const clearSlotNormal = (index: number) => {
@@ -244,6 +270,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     slot.normalBytes = null;
     slot.normalMimeType = null;
     slot.normalExtension = null;
+    markTextureContentChanged();
   };
 
   const clearTextureSlot = (index: number) => {
@@ -252,22 +279,31 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     if (slot.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.previewUrl);
     clearSlotNormal(index);
     slots[index] = emptyTextureSlotState();
+    markTextureContentChanged();
   };
 
   const clearAllTextures = () => {
     for (let i = 0; i < slots.length; i++) clearTextureSlot(i);
   };
 
-  const addEmptySlot = () => slots.push(emptyTextureSlotState());
+  const addEmptySlot = () => {
+    slots.push(emptyTextureSlotState());
+    markTextureContentChanged();
+  };
+
   const removeSlot = (index: number) => {
     if (slots.length <= 1) return;
     clearTextureSlot(index);
     slots.splice(index, 1);
+    markTextureContentChanged();
   };
 
   const ensureTextureArrays = (materialSource: string) => {
-    if (materialSource !== "external_pbr") return;
-    const signature = slots.map((slot) => `${slot.previewUrl ?? ""}:${slot.normalPreviewUrl ?? ""}:${slot.scale}:${slot.heightMin}:${slot.heightMax}`).join("|");
+    if (materialSource !== "external_pbr") {
+      disposeTextureArrays();
+      return;
+    }
+    const signature = `${textureContentRevision}:${slots.length}`;
     if (signature === textureArraySignature) return;
     albedoArrayTex?.dispose();
     normalArrayTex?.dispose();
@@ -307,32 +343,53 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   };
 
   const restoreStagedImport = async (progress: TerrainTextureLoadProgress) => {
-    const manifest = deps.stagedImport?.manifest;
-    if (!manifest) return;
-    const builtin = manifest.textures.filter((slot) => slot.source === "builtin");
-    await loadBuiltinTextureSlots(builtin, progress, "loading built-in");
+    const stagedImport = deps.stagedImport;
+    if (!stagedImport) return;
+    const resources = await loadImportedTerrainTextureResources({
+      manifest: stagedImport.manifest.textures,
+      customTextures: stagedImport.customTextures,
+      options: textureLoadOptions,
+      progress,
+    });
 
-    const custom = manifest.textures.filter((slot) => slot.source === "custom" && slot.customPath);
-    for (let i = 0; i < custom.length; i++) {
-      const slot = custom[i];
-      const bytes = deps.stagedImport?.customTextures.get(slot.customPath!);
-      if (!bytes) throw new Error(`Imported project is missing ${slot.customPath}`);
-      const blob = new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: slot.mimeType ?? "application/octet-stream" });
-      const previewUrl = URL.createObjectURL(blob);
-      const texture = await loadTerrainTextureUrl(previewUrl, textureLoadOptions);
-      if (texture) setTextureSlot(slot.index, texture, slot.name, previewUrl, bytes, slot.mimeType ?? "application/octet-stream", slot.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin");
-      if (slot.normalPath) {
-        const normalBytes = deps.stagedImport?.customTextures.get(slot.normalPath);
-        if (!normalBytes) throw new Error(`Imported project is missing ${slot.normalPath}`);
-        const normalBlob = new Blob([new Uint8Array(normalBytes).buffer as ArrayBuffer], { type: slot.normalMimeType ?? "application/octet-stream" });
-        const normalPreviewUrl = URL.createObjectURL(normalBlob);
-        const normalTexture = await loadTerrainTextureUrl(normalPreviewUrl, textureLoadOptions);
-        if (normalTexture) {
-          configureNormalTexture(normalTexture, textureLoadOptions);
-          setSlotNormal(slot.index, normalTexture, normalPreviewUrl, normalBytes, slot.normalMimeType ?? "application/octet-stream", slot.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin");
+    let committed = 0;
+    try {
+      for (const resource of resources) {
+        const { slot } = resource;
+        if (slot.source === "custom") {
+          if (!resource.customBytes || !resource.customMimeType || !resource.customExtension) {
+            throw new Error(`Imported custom texture slot ${slot.index} is incomplete`);
+          }
+          setTextureSlot(
+            slot.index,
+            resource.texture,
+            slot.name,
+            resource.previewUrl,
+            resource.customBytes,
+            resource.customMimeType,
+            resource.customExtension,
+          );
+          if (resource.normalTexture && resource.normalPreviewUrl && resource.normalBytes && resource.normalMimeType && resource.normalExtension) {
+            setSlotNormal(
+              slot.index,
+              resource.normalTexture,
+              resource.normalPreviewUrl,
+              resource.normalBytes,
+              resource.normalMimeType,
+              resource.normalExtension,
+            );
+          }
+        } else {
+          setBuiltinTextureSlot(slot.index, resource.texture, slot.name, resource.previewUrl, slot.selectedId);
+          if (resource.normalTexture && resource.normalPreviewUrl) {
+            setBuiltinSlotNormal(slot.index, resource.normalTexture, resource.normalPreviewUrl);
+          }
         }
+        committed++;
       }
-      progress.setPhase(`loading custom texture ${i + 1}/${custom.length}`, (i + 1) / Math.max(1, custom.length));
+    } catch (error) {
+      disposeImportedTerrainTextureResources(resources.slice(committed));
+      throw error;
     }
   };
 
@@ -346,7 +403,11 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
 
   const projectTextureMetadata = (): ProjectTextureSlot[] => slots.map((slot, index) => ({
     index,
-    source: slot.selectedId === "empty" ? "empty" : slot.selectedId === "custom" ? "custom" : "builtin",
+    source: slot.selectedId === "" || slot.selectedId === "empty"
+      ? "empty"
+      : slot.selectedId === "custom"
+        ? "custom"
+        : "builtin",
     name: slot.name,
     selectedId: slot.selectedId,
     scale: slot.scale,
