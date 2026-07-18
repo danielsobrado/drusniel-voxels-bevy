@@ -56,7 +56,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
   ultra: {
     distanceM: 1200,
     impostorStartM: 460,
-    impostorResolutionPx: 160,
+    impostorResolutionPx: 192,
     bakeAgeLayers: false,
     maxInstances: 12_000,
     density: 1.2,
