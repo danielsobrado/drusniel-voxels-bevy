@@ -71,7 +71,9 @@ export function deleteDatabase(name: string): Promise<void> {
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error ?? new CacheUnavailableError(`deleteDatabase failed: ${name}`));
     request.onblocked = () => {
-      cacheLogger.warn(`IndexedDB delete blocked for ${name}; waiting for open connections to close`);
+      const error = new CacheUnavailableError(`IndexedDB delete blocked for ${name}`);
+      cacheLogger.warn(error.message);
+      reject(error);
     };
   });
 }
@@ -416,7 +418,7 @@ export function createPersistentStore(
   const resolved = resolvePersistentConfig(config, role);
   if (role === "worker" && config.enabled && config.backend === "indexeddb") {
     if (typeof document === "undefined") {
-      return new WorkerRemotePersistentStore();
+      return new WorkerRemotePersistentStore(config.rpc_timeout_ms);
     }
   }
   if (!resolved.enabled) return null;
