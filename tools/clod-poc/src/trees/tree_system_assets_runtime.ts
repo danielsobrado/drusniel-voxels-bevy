@@ -213,9 +213,6 @@ export class TreeSystemAssets {
     if (this.impostorBakeController && this.impostorBakeContentKey !== currentContentKey) {
       this.cancelImpostorBake("tree impostor source settings changed");
     }
-    if (this.impostorAtlasContentKey && this.impostorAtlasContentKey !== currentContentKey) {
-      this.invalidateImpostorAtlases("tree impostor source settings changed");
-    }
     this.materialHandle.updateSettings(this.settings);
     this.updateImpostorMaterials();
     this.applyMaterials(patches);
