@@ -15,6 +15,7 @@ import { getDigEditRevision, voxelEditCount } from "../../../terrain/terrain.js"
 import { createCommandGuardedTerrainEditService } from "../../../terrain/editing/terrain_edit_command_service.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
 import { TerrainEditDirtyQueue, type TerrainEditDirtyEvent } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
+import { createTerrainEditUnderstoryAdapter } from "../../../terrain/editing/terrain_edit_understory_adapter.js";
 import {
   canCommitBuild,
   publishPlayerEditAuthorityDecision,
@@ -127,7 +128,7 @@ export function runTerrainEditStartup(
     applyTerrainTextures,
     grassSystem,
     treeSystem,
-    understorySystem,
+    understorySystem: createTerrainEditUnderstoryAdapter(understorySystem),
     fallingTrees,
     editAuthority,
     getAuthorityOrigin: authorityOrigin,
