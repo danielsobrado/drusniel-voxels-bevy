@@ -150,7 +150,7 @@ export const WATER_SHOT_DEBUG_MODES: readonly WaterShotDebugMode[] = Object.free
 ]);
 
 export function parseWaterShotScene(value: string): WaterShotScene {
-  if (value in WATER_SHOT_SCENE_POLICIES) return value as WaterShotScene;
+  if (Object.hasOwn(WATER_SHOT_SCENE_POLICIES, value)) return value as WaterShotScene;
   throw new Error(`unknown --scene ${value}; expected single, all, glacial, or a registered water scene`);
 }
 
