@@ -33,6 +33,11 @@ interface PendingBuild {
   reject: (error: Error) => void;
 }
 
+function asError(error: unknown, prefix: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(`${prefix}: ${message}`);
+}
+
 export function createHydrologyTileRemoteBuilder(): HydrologyTileRemoteBuilder | null {
   let worker: Worker;
   try {
@@ -41,22 +46,42 @@ export function createHydrologyTileRemoteBuilder(): HydrologyTileRemoteBuilder |
     return null;
   }
 
-  let failed = false;
+  let terminalError: Error | null = null;
+  let workerTerminated = false;
   let configId = 0;
   let nextRequestId = 1;
   const pending = new Map<number, PendingBuild>();
 
-  const failAll = (message: string): void => {
-    failed = true;
-    const error = new Error(message);
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
+  const terminateWorker = (): void => {
+    if (workerTerminated) return;
+    workerTerminated = true;
+    worker.terminate();
+  };
+
+  const failTerminally = (error: Error): Error => {
+    if (!terminalError) {
+      terminalError = error;
+      for (const request of pending.values()) request.reject(error);
+      pending.clear();
+    }
+    terminateWorker();
+    return terminalError;
+  };
+
+  const post = (message: HydrologyTileWorkerRequest): void => {
+    if (terminalError) throw terminalError;
+    try {
+      worker.postMessage(message);
+    } catch (error) {
+      throw failTerminally(asError(error, "hydrology tile build worker post failed"));
+    }
   };
 
   worker.onmessage = (event: MessageEvent<HydrologyTileWorkerResponse>) => {
+    if (terminalError) return;
     const response = event.data;
     if (response.type === "error") {
-      failAll(`hydrology tile build worker error: ${response.message}`);
+      failTerminally(new Error(`hydrology tile build worker error: ${response.message}`));
       return;
     }
     const request = pending.get(response.requestId);
@@ -71,21 +96,20 @@ export function createHydrologyTileRemoteBuilder(): HydrologyTileRemoteBuilder |
     request.resolve(response.tiles);
   };
   worker.onerror = (event) => {
-    failAll(`hydrology tile build worker crashed: ${event.message ?? "unknown error"}`);
+    failTerminally(new Error(`hydrology tile build worker crashed: ${event.message ?? "unknown error"}`));
   };
-
-  const post = (message: HydrologyTileWorkerRequest): void => {
-    worker.postMessage(message);
+  worker.onmessageerror = () => {
+    failTerminally(new Error("hydrology tile build worker produced an unreadable message"));
   };
 
   return {
-    available: () => !failed,
+    available: () => terminalError === null,
     configure(input) {
-      if (failed) return;
-      configId++;
+      if (terminalError) return;
+      const nextConfigId = configId + 1;
       post({
         type: "configure",
-        configId,
+        configId: nextConfigId,
         terrainFieldConfig: input.terrainFieldConfig,
         fakeBodies: input.fakeBodies,
         tileSizeM: input.tileSizeM,
@@ -94,18 +118,22 @@ export function createHydrologyTileRemoteBuilder(): HydrologyTileRemoteBuilder |
         hydrologyGraph: input.hydrologyGraph,
         hydrologyCarve: input.hydrologyCarve,
       });
+      configId = nextConfigId;
     },
     build(tiles) {
-      if (failed) return Promise.reject(new Error("hydrology tile build worker unavailable"));
+      if (terminalError) return Promise.reject(terminalError);
       const requestId = nextRequestId++;
       return new Promise<HydrologyTile[]>((resolve, reject) => {
         pending.set(requestId, { resolve, reject });
-        post({ type: "build", requestId, configId, tiles });
+        try {
+          post({ type: "build", requestId, configId, tiles });
+        } catch (error) {
+          if (pending.delete(requestId)) reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
     dispose() {
-      failAll("hydrology tile build worker disposed");
-      worker.terminate();
+      failTerminally(new Error("hydrology tile build worker disposed"));
     },
   };
 }
