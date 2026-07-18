@@ -29,7 +29,7 @@ export function evaluateWaterAcceptance(input: WaterAcceptanceInput): string[] {
   const visibleLevels = finiteValue(input.counters, "water_clipmap_visible_levels");
   const levelCount = finiteValue(input.counters, "water_clipmap_level_count");
   const atlasDrivenLevelCount = finiteValue(input.counters, "water_atlas_driven_level_count");
-  const clipmapOuterHalfSpanM = finiteValue(input.counters, "water_clipmap_outer_half_span_m");
+  const clipmapGuaranteedHalfSpanM = finiteValue(input.counters, "water_clipmap_guaranteed_half_span_m");
   const farClipmapInnerRadiusM = finiteValue(input.counters, "far_clipmap_inner_radius_m");
   const snaps = finiteValue(input.counters, "water_clipmap_snaps");
   const fieldSamples = finiteValue(input.counters, "water_clipmap_field_samples");
@@ -58,11 +58,11 @@ export function evaluateWaterAcceptance(input: WaterAcceptanceInput): string[] {
   if (!(farClipmapInnerRadiusM > 0)) {
     failures.push(`far_clipmap_inner_radius_m=${farClipmapInnerRadiusM} must be > 0`);
   }
-  if (!(clipmapOuterHalfSpanM > 0)) {
-    failures.push(`water_clipmap_outer_half_span_m=${clipmapOuterHalfSpanM} must be > 0`);
-  } else if (farClipmapInnerRadiusM > 0 && clipmapOuterHalfSpanM < farClipmapInnerRadiusM) {
+  if (!(clipmapGuaranteedHalfSpanM > 0)) {
+    failures.push(`water_clipmap_guaranteed_half_span_m=${clipmapGuaranteedHalfSpanM} must be > 0`);
+  } else if (farClipmapInnerRadiusM > 0 && clipmapGuaranteedHalfSpanM < farClipmapInnerRadiusM) {
     failures.push(
-      `water_clipmap_outer_half_span_m=${clipmapOuterHalfSpanM} must cover far_clipmap_inner_radius_m=${farClipmapInnerRadiusM}`,
+      `water_clipmap_guaranteed_half_span_m=${clipmapGuaranteedHalfSpanM} must cover far_clipmap_inner_radius_m=${farClipmapInnerRadiusM}`,
     );
   }
   if (fieldSamples !== 0) failures.push(`water_clipmap_field_samples=${fieldSamples} must equal 0 on the atlas path`);
