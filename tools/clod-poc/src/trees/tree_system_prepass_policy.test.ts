@@ -33,8 +33,8 @@ describe("tree CPU prepass policy", () => {
     };
     const positionNode = { kind: "billboard-position" };
     const maskNode = { kind: "billboard-mask" };
-    material.positionNode = positionNode;
-    material.maskNode = maskNode;
+    material.positionNode = positionNode as never;
+    material.maskNode = maskNode as never;
     material.side = THREE.DoubleSide;
 
     expect(selectTreeCpuPrepassNodes({

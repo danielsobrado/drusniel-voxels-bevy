@@ -62,13 +62,26 @@ export function composeStoneScatterShader(): string {
 
 export function composeTreeRingShader(workgroupSize = 64): string {
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreeCrownProxyShadowIndexCount(
-    withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreeSharedPcgModule(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))))))),
-    TREE_CROWN_PROXY_INDEX_COUNT,
+  const baseTreeEntry = withTreeTerrainVisibilityCull(
+    withTreeShadowLodGate(
+      withTreeSharedPcgModule(
+        withTreePcgHash(
+          withTreeFinalPlacementHeight(
+            withRiverEcologyConstants(treeRingEntry),
+          ),
+        ),
+      ),
+    ),
   );
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
+  // Crown-proxy rewrite must run after species index-count replacement; that replace
+  // slices through anything between index_count_for_group and in_frustum.
+  const crownProxyTreeEntry = withTreeCrownProxyShadowIndexCount(
+    expandedTreeEntry,
+    TREE_CROWN_PROXY_INDEX_COUNT,
+  );
   const treeEntry = replaceConstU32(
-    applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout),
+    applyTreeRingWgslLayoutConstants(crownProxyTreeEntry, treeLayout),
     "TREE_WORKGROUP_SIZE",
     workgroupSize,
   );

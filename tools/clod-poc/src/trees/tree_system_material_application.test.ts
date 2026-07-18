@@ -81,23 +81,23 @@ describe("tree system material application helpers", () => {
     settings.impostors.enabled = true;
     const regular = new THREE.MeshBasicMaterial();
     const debug = new THREE.MeshBasicMaterial();
-    const basePosition = { kind: "base-position" };
-    const baseMask = { kind: "base-mask" };
+    const basePosition = { kind: "base-position" } as unknown;
+    const baseMask = { kind: "base-mask" } as unknown;
     const handle = materialHandle(regular, debug);
     handle.prepassNodesFor = () => ({ positionNode: basePosition, maskNode: baseMask, side: THREE.DoubleSide });
 
     const impostor = new THREE.MeshBasicMaterial() as THREE.MeshBasicMaterial & NodeMaterialShape;
-    const impostorPosition = { kind: "impostor-position" };
-    const impostorMask = { kind: "impostor-mask" };
-    impostor.positionNode = impostorPosition;
-    impostor.maskNode = impostorMask;
+    const impostorPosition = { kind: "impostor-position" } as unknown;
+    const impostorMask = { kind: "impostor-mask" } as unknown;
+    impostor.positionNode = impostorPosition as never;
+    impostor.maskNode = impostorMask as never;
     impostor.side = THREE.DoubleSide;
 
     const patch = { meshes: meshGrid() };
     const mesh = patch.meshes.oak.impostor;
     const oldDepthMaterial = new THREE.MeshBasicMaterial() as THREE.MeshBasicMaterial & NodeMaterialShape;
-    oldDepthMaterial.positionNode = basePosition;
-    oldDepthMaterial.maskNode = baseMask;
+    oldDepthMaterial.positionNode = basePosition as never;
+    oldDepthMaterial.maskNode = baseMask as never;
     const oldDepthTwin = new THREE.InstancedMesh(mesh.geometry, oldDepthMaterial, mesh.instanceMatrix.count);
     mesh.userData.depthTwin = oldDepthTwin;
     const oldDispose = vi.spyOn(oldDepthMaterial, "dispose");

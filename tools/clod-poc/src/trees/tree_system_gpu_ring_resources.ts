@@ -110,7 +110,7 @@ export function createTreeSystemGpuRingDrawResources(
       if (treeLodCastsShadow(input.settings, lod)) {
         for (let cascade = 0; cascade < TREE_RING_SHADOW_CASCADE_COUNT; cascade++) {
           const shadowMaterialKey = "shadow:" + cascade + ":" + materialKey;
-          materialHandles[shadowMaterialKey] = createGpuRingShadowMaterialHandle(input, species, lod, shadowRingBuffers);
+          materialHandles[shadowMaterialKey] = createTreeGpuRingShadowMaterialHandle(input, species, lod, shadowRingBuffers);
           const shadowGroup = treeRingShadowCasterGroupIndex(species, lod, cascade);
           const shadowMesh = createGpuRingShadowTierDraw(
             input,
