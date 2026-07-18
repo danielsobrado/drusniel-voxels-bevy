@@ -42,6 +42,15 @@ function cloneBrush(brush: TerrainBrushParams): Readonly<TerrainBrushParams> {
   return Object.freeze({ ...brush });
 }
 
+function brushIsValid(brush: TerrainBrushParams): boolean {
+  return Number.isFinite(brush.digRadius)
+    && brush.digRadius > 0
+    && Number.isFinite(brush.brushMaterial)
+    && Number.isFinite(brush.brushHeight)
+    && Number.isFinite(brush.brushStrength)
+    && Number.isFinite(brush.brushFalloff);
+}
+
 function brushesEqual(left: Readonly<TerrainBrushParams>, right: TerrainBrushParams): boolean {
   return left.digRadius === right.digRadius
     && left.brushShape === right.brushShape
@@ -91,54 +100,84 @@ export function createCommandGuardedTerrainEditService(
   };
 
   const captureIntent = (ray: THREE.Ray): TerrainDigIntent | null => {
-    const frozenRay = ray.clone();
-    const hit = deps.terrainRaycast.raycastEditableTerrain(frozenRay);
-    if (!hit) {
-      reportNoTarget();
+    try {
+      const frozenRay = ray.clone();
+      const hit = deps.terrainRaycast.raycastEditableTerrain(frozenRay);
+      if (!hit) {
+        reportNoTarget();
+        return null;
+      }
+      const brush = deps.getBrushParams();
+      const capturedAt = nowMs();
+      const revision = terrainRevision();
+      const mode = interactionMode();
+      if (
+        !brushIsValid(brush)
+        || !Number.isFinite(capturedAt)
+        || !Number.isSafeInteger(revision)
+        || mode.length === 0
+        || !hit.point.toArray().every(Number.isFinite)
+      ) {
+        reportDenial("not_ready");
+        return null;
+      }
+      return {
+        ray: frozenRay,
+        brush: cloneBrush(brush),
+        command: createEditCommand({
+          operation: brush.brushOp === "add" ? "terrain_fill" : "terrain_dig",
+          targetPosition: [hit.point.x, hit.point.y, hit.point.z],
+          targetNormal: [0, 1, 0],
+          sourceTerrainRevision: revision,
+          actor: "player",
+          mode,
+          nowMs: capturedAt,
+        }),
+      };
+    } catch (error) {
+      console.error("[terrain-edit-command] intent capture failed closed", error);
+      reportDenial("not_ready");
       return null;
     }
-    const brush = cloneBrush(deps.getBrushParams());
-    const capturedAt = nowMs();
-    return {
-      ray: frozenRay,
-      brush,
-      command: createEditCommand({
-        operation: brush.brushOp === "add" ? "terrain_fill" : "terrain_dig",
-        targetPosition: [hit.point.x, hit.point.y, hit.point.z],
-        targetNormal: [0, 1, 0],
-        sourceTerrainRevision: terrainRevision(),
-        actor: "player",
-        mode: interactionMode(),
-        nowMs: capturedAt,
-      }),
-    };
   };
 
   const validateIntent = (intent: TerrainDigIntent): EditCommandDenialReason | null => {
-    const point = new THREE.Vector3(...intent.command.targetPosition);
-    const actor = deps.getAuthorityOrigin?.() ?? point;
-    const maxDistanceM = deps.editAuthority?.allowFarCommit
-      ? Number.MAX_SAFE_INTEGER
-      : deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER;
-    if (
-      !Number.isFinite(actor.x)
-      || !Number.isFinite(actor.z)
-      || !Number.isFinite(maxDistanceM)
-      || maxDistanceM < 0
-    ) return "not_ready";
-    const verdict = validateEditCommand(intent.command, {
-      nowMs: nowMs(),
-      currentTerrainRevision: terrainRevision(),
-      actorPosition: actor,
-      maxDistanceM,
-      currentMode: interactionMode(),
-      targetReady: deps.editReadyAt?.(point.x, point.z) ?? true,
-    });
-    if (!verdict.allowed) return verdict.reason;
-    if (!brushesEqual(intent.brush, deps.getBrushParams())) return "target_moved";
-    const currentHit = deps.terrainRaycast.raycastEditableTerrain(intent.ray);
-    if (!currentHit || !targetMatches(intent.command, currentHit.point)) return "target_moved";
-    return null;
+    try {
+      const point = new THREE.Vector3(...intent.command.targetPosition);
+      const actor = deps.getAuthorityOrigin?.() ?? point;
+      const maxDistanceM = deps.editAuthority?.allowFarCommit
+        ? Number.MAX_SAFE_INTEGER
+        : deps.editAuthority?.terrainEditRadiusM ?? Number.MAX_SAFE_INTEGER;
+      const currentNowMs = nowMs();
+      const currentRevision = terrainRevision();
+      const currentMode = interactionMode();
+      if (
+        !Number.isFinite(actor.x)
+        || !Number.isFinite(actor.z)
+        || !Number.isFinite(maxDistanceM)
+        || maxDistanceM < 0
+        || !Number.isFinite(currentNowMs)
+        || !Number.isSafeInteger(currentRevision)
+        || currentMode.length === 0
+      ) return "not_ready";
+      const verdict = validateEditCommand(intent.command, {
+        nowMs: currentNowMs,
+        currentTerrainRevision: currentRevision,
+        actorPosition: actor,
+        maxDistanceM,
+        currentMode,
+        targetReady: deps.editReadyAt?.(point.x, point.z) ?? true,
+      });
+      if (!verdict.allowed) return verdict.reason;
+      const brush = deps.getBrushParams();
+      if (!brushIsValid(brush) || !brushesEqual(intent.brush, brush)) return "target_moved";
+      const currentHit = deps.terrainRaycast.raycastEditableTerrain(intent.ray);
+      if (!currentHit || !targetMatches(intent.command, currentHit.point)) return "target_moved";
+      return null;
+    } catch (error) {
+      console.error("[terrain-edit-command] intent validation failed closed", error);
+      return "not_ready";
+    }
   };
 
   const executeIntent = async (intent: TerrainDigIntent): Promise<void> => {
