@@ -91,6 +91,9 @@ export function applyWaterQueryOverrides(config: WaterConfig, searchParams: URLS
   const waterCaustics = flagParam(searchParams, ["waterCaustics", "caustics"]);
   next.caustics.enabled = waterCaustics ?? waterQuality === "high";
 
+  const glacialMurkiness = flagParam(searchParams, ["waterGlacialMurkiness", "glacialWater", "waterGlacial"]);
+  if (glacialMurkiness !== null) next.visual.glacialMurkiness.enabled = glacialMurkiness;
+
   const hydroUnified = flagParam(searchParams, ["hydroUnified", "hydroUnifiedStartup"]);
   if (hydroUnified !== null) next.hydrology.infinite.unifiedStartup = hydroUnified;
 
