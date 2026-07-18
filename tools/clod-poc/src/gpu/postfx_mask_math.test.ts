@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { POSTPROCESS_SHADER_TEST_HOOKS } from "../environment/postprocess.js";
 import { inverseSmoothstepReference } from "./postfx_mask_math.js";
 
 describe("inverseSmoothstepReference", () => {
@@ -17,5 +18,12 @@ describe("inverseSmoothstepReference", () => {
   it("clamps outside the transition range", () => {
     expect(inverseSmoothstepReference(10, 20, 5)).toBe(1);
     expect(inverseSmoothstepReference(10, 20, 25)).toBe(0);
+  });
+
+  it("keeps the WebGL shaft falloff on ordered edges", () => {
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment)
+      .toContain("1.0 - smoothstep(0.0, 1.4, length(vUv - uSunScreen))");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment)
+      .not.toContain("smoothstep(1.4, 0.0");
   });
 });
