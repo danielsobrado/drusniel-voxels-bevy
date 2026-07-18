@@ -146,12 +146,13 @@ export function writeTreeMorphologyIfChanged(mesh: THREE.InstancedMesh, index: n
 }
 
 export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput): boolean {
+  const yawChanged = writeTreeImpostorYawSinCosIfChanged(input.mesh, input.index, input.instance.rotationY);
   const attribute = treeImpostorUvRectAttribute(input.mesh);
   const atlas = input.impostorAtlases[input.instance.species];
   if (!atlas?.ready || atlas.frames.length === 0) {
     const singleChanged = writeUvRectIfChanged(attribute, input.index, 0, 0, 1, 1);
     const blendChanged = writeTreeImpostorBlendIfChanged(input.mesh, input.index, fallbackTreeImpostorRuntimeSamples());
-    return singleChanged || blendChanged;
+    return yawChanged || singleChanged || blendChanged;
   }
 
   const frames = treeImpostorFramesForVariant(atlas, input.instance.variant);
@@ -167,7 +168,7 @@ export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput
     ? frozenTreeImpostorRuntimeSamples(frame)
     : treeImpostorRuntimeBlend(atlas, viewDirection, input.instance.variant).samples;
   const blendChanged = writeTreeImpostorBlendIfChanged(input.mesh, input.index, blendSamples);
-  return singleChanged || blendChanged;
+  return yawChanged || singleChanged || blendChanged;
 }
 
 export function writeUvRectIfChanged(
@@ -239,9 +240,13 @@ function writeTreeImpostorBlendIfChanged(
         sample.uvMax[1],
       ) || changed;
     }
-    changed = writeBlendWeightIfChanged(weights, index, sampleIndex, sample.weight) || changed;
+    changed = writeBlendWeightIfChanged(weights, inputIndex(index), sampleIndex, sample.weight) || changed;
   }
   return changed;
+}
+
+function inputIndex(index: number): number {
+  return index;
 }
 
 function writeBlendWeightIfChanged(
