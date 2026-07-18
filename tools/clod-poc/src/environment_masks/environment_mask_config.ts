@@ -8,12 +8,26 @@ import type {
   RapidSplashMaskSettings,
   RiverCobbleMaskSettings,
   RiverMistMaskSettings,
+  RiverMistParticleSettings,
   ShoreDebrisMaskSettings,
   SunbeamMoteMaskSettings,
 } from "./environment_mask_types.js";
 
 type WarnHandler = (message: string) => void;
 type RecordValue = Record<string, unknown>;
+
+const RIVER_MIST_PARTICLE_LIMITS = Object.freeze({
+  spawnRadiusM: 256,
+  spacingM: 32,
+  emitIntervalS: 5,
+  maxParticles: 2_048,
+  maxEmittersPerTick: 128,
+  scanCellsPerFrame: 512,
+  pointSizeM: 20,
+  speedMps: 5,
+  lifetimeS: 30,
+  surfaceOffsetM: 5,
+});
 
 export const DEFAULT_ENVIRONMENTAL_MASK_SETTINGS: EnvironmentalMaskSettings = Object.freeze({
   enabled: true,
@@ -32,6 +46,23 @@ export const DEFAULT_ENVIRONMENTAL_MASK_SETTINGS: EnvironmentalMaskSettings = Ob
     strength: 1,
     minFlowStrength: 0.01,
     maxShoreDistanceM: 14,
+    particles: Object.freeze({
+      spawnRadiusM: 54,
+      spacingM: 5.5,
+      emitIntervalS: 0.12,
+      maxParticles: 240,
+      maxEmittersPerTick: 18,
+      scanCellsPerFrame: 28,
+      pointSizeM: 3.4,
+      opacity: 0.32,
+      spawnProbability: 0.72,
+      riseSpeedMps: 0.16,
+      driftSpeedMps: 0.13,
+      minLifetimeS: 2.8,
+      maxLifetimeS: 5.5,
+      surfaceOffsetM: 0.22,
+      colorRgb: [0.82, 0.91, 0.94] as [number, number, number],
+    }),
   }),
   rapidSplash: Object.freeze({
     enabled: true,
@@ -81,7 +112,13 @@ export function cloneEnvironmentalMaskSettings(
   return {
     enabled: settings.enabled,
     riverCobble: { ...settings.riverCobble },
-    riverMist: { ...settings.riverMist },
+    riverMist: {
+      ...settings.riverMist,
+      particles: {
+        ...settings.riverMist.particles,
+        colorRgb: [...settings.riverMist.particles.colorRgb] as [number, number, number],
+      },
+    },
     rapidSplash: { ...settings.rapidSplash },
     sunbeamMote: { ...settings.sunbeamMote },
     calmPool: { ...settings.calmPool },
@@ -139,6 +176,41 @@ function parseRiverMist(raw: RecordValue, defaults: RiverMistMaskSettings): Rive
     ...parseBand(raw, defaults),
     minFlowStrength: readNonNegative(raw.min_flow_strength ?? raw.minFlowStrength, defaults.minFlowStrength),
     maxShoreDistanceM: readNonNegative(raw.max_shore_distance_m ?? raw.maxShoreDistanceM, defaults.maxShoreDistanceM),
+    particles: parseRiverMistParticles(record(raw.particles), defaults.particles),
+  };
+}
+
+function parseRiverMistParticles(
+  raw: RecordValue,
+  defaults: RiverMistParticleSettings,
+): RiverMistParticleSettings {
+  const minLifetimeS = readBounded(
+    raw.min_lifetime_s ?? raw.minLifetimeS,
+    defaults.minLifetimeS,
+    0.1,
+    RIVER_MIST_PARTICLE_LIMITS.lifetimeS,
+  );
+  return {
+    spawnRadiusM: readBounded(raw.spawn_radius_m ?? raw.spawnRadiusM, defaults.spawnRadiusM, 1, RIVER_MIST_PARTICLE_LIMITS.spawnRadiusM),
+    spacingM: readBounded(raw.spacing_m ?? raw.spacingM, defaults.spacingM, 1, RIVER_MIST_PARTICLE_LIMITS.spacingM),
+    emitIntervalS: readBounded(raw.emit_interval_s ?? raw.emitIntervalS, defaults.emitIntervalS, 0.03, RIVER_MIST_PARTICLE_LIMITS.emitIntervalS),
+    maxParticles: readInteger(raw.max_particles ?? raw.maxParticles, defaults.maxParticles, 0, RIVER_MIST_PARTICLE_LIMITS.maxParticles),
+    maxEmittersPerTick: readInteger(raw.max_emitters_per_tick ?? raw.maxEmittersPerTick, defaults.maxEmittersPerTick, 0, RIVER_MIST_PARTICLE_LIMITS.maxEmittersPerTick),
+    scanCellsPerFrame: readInteger(raw.scan_cells_per_frame ?? raw.scanCellsPerFrame, defaults.scanCellsPerFrame, 1, RIVER_MIST_PARTICLE_LIMITS.scanCellsPerFrame),
+    pointSizeM: readBounded(raw.point_size_m ?? raw.pointSizeM, defaults.pointSizeM, 0.1, RIVER_MIST_PARTICLE_LIMITS.pointSizeM),
+    opacity: readFraction(raw.opacity, defaults.opacity),
+    spawnProbability: readFraction(raw.spawn_probability ?? raw.spawnProbability, defaults.spawnProbability),
+    riseSpeedMps: readBounded(raw.rise_speed_mps ?? raw.riseSpeedMps, defaults.riseSpeedMps, 0, RIVER_MIST_PARTICLE_LIMITS.speedMps),
+    driftSpeedMps: readBounded(raw.drift_speed_mps ?? raw.driftSpeedMps, defaults.driftSpeedMps, 0, RIVER_MIST_PARTICLE_LIMITS.speedMps),
+    minLifetimeS,
+    maxLifetimeS: Math.max(minLifetimeS, readBounded(
+      raw.max_lifetime_s ?? raw.maxLifetimeS,
+      defaults.maxLifetimeS,
+      0.1,
+      RIVER_MIST_PARTICLE_LIMITS.lifetimeS,
+    )),
+    surfaceOffsetM: readBounded(raw.surface_offset_m ?? raw.surfaceOffsetM, defaults.surfaceOffsetM, 0, RIVER_MIST_PARTICLE_LIMITS.surfaceOffsetM),
+    colorRgb: readColor(raw.color_rgb ?? raw.colorRgb, defaults.colorRgb),
   };
 }
 
@@ -225,12 +297,29 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function readInteger(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.floor(readBounded(value, fallback, min, max));
+}
+
+function readBounded(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, readFinite(value, fallback)));
+}
+
 function readNonNegative(value: unknown, fallback: number): number {
   return Math.max(0, readFinite(value, fallback));
 }
 
 function readFraction(value: unknown, fallback: number): number {
   return Math.min(1, Math.max(0, readFinite(value, fallback)));
+}
+
+function readColor(value: unknown, fallback: [number, number, number]): [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) return [...fallback];
+  return [
+    readFraction(value[0], fallback[0]),
+    readFraction(value[1], fallback[1]),
+    readFraction(value[2], fallback[2]),
+  ];
 }
 
 function readFinite(value: unknown, fallback: number): number {
