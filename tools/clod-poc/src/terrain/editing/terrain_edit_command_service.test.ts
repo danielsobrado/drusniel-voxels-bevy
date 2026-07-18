@@ -32,7 +32,6 @@ function baseService() {
     reason: null,
     editRevision: 1,
   }));
-  const flushAncestors = vi.fn(async () => undefined);
   const service = {
     scheduleDig: vi.fn(),
     runDigNow,
@@ -42,7 +41,7 @@ function baseService() {
     commitConstructionTerrainConform: vi.fn(async () => ({ committed: true, reason: null, changed: false, receipt: null })),
     undoConstructionTerrainConform: vi.fn(async () => ({ undone: true, reason: null })),
     forgetConstructionTerrainConform: vi.fn(),
-    flushAncestors,
+    flushAncestors: vi.fn(async () => undefined),
     get lastDigAt() { return 123; },
   } as unknown as TerrainEditService;
   return { service, runDigNow, commitSpellTerrainEdit };
@@ -103,6 +102,19 @@ describe("terrain edit command service", () => {
     expect(harness.service.lastDigAt).toBe(123);
   });
 
+  it("captures only one intent while the debounce timer is active", async () => {
+    const harness = createHarness();
+
+    harness.service.scheduleDig(ray);
+    harness.service.scheduleDig(ray);
+    harness.service.scheduleDig(ray);
+    expect(harness.terrainRaycast.raycastEditableTerrain).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(40);
+    await harness.service.flushAncestors();
+    expect(harness.runDigNow).toHaveBeenCalledOnce();
+  });
+
   it("denies debounced intents after mode or terrain revision changes", async () => {
     let mode = "playing";
     let revision = 7;
@@ -145,6 +157,18 @@ describe("terrain edit command service", () => {
     await harness.service.flushAncestors();
     expect(harness.runDigNow).not.toHaveBeenCalled();
     expect(gameplayDiagnostics.get("edit_commands_denied_target_moved")).toBe(2);
+  });
+
+  it("does not cancel remove when only the unused material selection changes", async () => {
+    let currentBrush = brush({ brushMaterial: 0 });
+    const harness = createHarness({ currentBrush: () => currentBrush });
+
+    harness.service.scheduleDig(ray);
+    currentBrush = brush({ brushMaterial: 4 });
+    await vi.advanceTimersByTimeAsync(40);
+    await harness.service.flushAncestors();
+
+    expect(harness.runDigNow).toHaveBeenCalledOnce();
   });
 
   it("serializes digs behind prior world edits and validates after they complete", async () => {
