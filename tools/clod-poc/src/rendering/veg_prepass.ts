@@ -145,6 +145,7 @@ export function refreshInstancedDepthPrepassTwin(
     if (previous) {
       previous.parent?.remove(previous);
       singleMeshMaterial(previous).dispose();
+      previous.dispose();
       delete mesh.userData.depthTwin;
     }
     return undefined;
@@ -178,6 +179,7 @@ export function refreshInstancedDepthPrepassTwin(
   parent?.remove(previous);
   parent?.add(next);
   previousMaterial.dispose();
+  previous.dispose();
   mesh.userData.depthTwin = next;
   return next;
 }
