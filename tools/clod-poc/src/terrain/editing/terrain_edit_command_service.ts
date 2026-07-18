@@ -46,7 +46,7 @@ function brushesEqual(left: Readonly<TerrainBrushParams>, right: TerrainBrushPar
   return left.digRadius === right.digRadius
     && left.brushShape === right.brushShape
     && left.brushOp === right.brushOp
-    && left.brushMaterial === right.brushMaterial
+    && (left.brushOp !== "add" || left.brushMaterial === right.brushMaterial)
     && left.brushHeight === right.brushHeight
     && left.brushStrength === right.brushStrength
     && left.brushFalloff === right.brushFalloff;
@@ -73,7 +73,6 @@ export function createCommandGuardedTerrainEditService(
   deps: TerrainEditCommandServiceDeps,
 ): TerrainEditService {
   let operationTail: Promise<void> = Promise.resolve();
-  let scheduledIntent: TerrainDigIntent | null = null;
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const nowMs = (): number => (deps.nowMs ?? (() => performance.now()))();
@@ -169,13 +168,12 @@ export function createCommandGuardedTerrainEditService(
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
-    scheduledIntent = captureIntent(ray);
-    if (!scheduledIntent || digDebounceTimer !== null) return;
+    if (digDebounceTimer !== null) return;
+    const intent = captureIntent(ray);
+    if (!intent) return;
     digDebounceTimer = setTimeout(() => {
       digDebounceTimer = null;
-      const intent = scheduledIntent;
-      scheduledIntent = null;
-      if (intent) void enqueueOperation("terrain brush", () => executeIntent(intent));
+      void enqueueOperation("terrain brush", () => executeIntent(intent));
     }, DIG_COMMAND_DEBOUNCE_MS);
   };
 
