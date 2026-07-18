@@ -35,6 +35,41 @@ import type { WaterStaticGridHandle, WaterStaticGridParams } from "./water_mater
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
+const WATER_RAMP_GUARD_FAR_CELL_SIZE = 12;
+
+export function waterRampGuardEnabled(cellSize: number): boolean {
+  return cellSize < WATER_RAMP_GUARD_FAR_CELL_SIZE;
+}
+
+/**
+ * Near-level shoreline ramp suppression shared by static-texel and atlas grids.
+ * A stable world-space dither dissolves sentinel dives instead of tearing entire
+ * triangles. Far/min-reduced rings keep their deliberate shoreline dip untouched.
+ */
+export function buildWaterRampDiscard(
+  depth: TslNode,
+  flowSpeed: TslNode,
+  cellSize: number,
+): TslNode {
+  if (!waterRampGuardEnabled(cellSize)) return float(0).greaterThan(float(1));
+
+  const dx: TslNode = dFdx(positionWorld);
+  const dy: TslNode = dFdy(positionWorld);
+  const slopeX: TslNode = dx.y.div(max(dx.xz.length(), float(1e-5)));
+  const slopeY: TslNode = dy.y.div(max(dy.xz.length(), float(1e-5)));
+  const slope: TslNode = vec2(slopeX, slopeY).length();
+  const limit: TslNode = mix(float(0.45), float(1.25), smoothstep(float(0.015), float(0.025), flowSpeed))
+    .div(float(cellSize));
+
+  const rampKeep: TslNode = float(1).sub(smoothstep(limit.mul(0.75), limit.mul(1.35), slope));
+  const depthGate: TslNode = smoothstep(float(0.05), float(0.5), depth);
+  const keep: TslNode = mix(float(1), rampKeep, depthGate);
+  const dither: TslNode = fract(
+    sin(dot(positionWorld.xz, vec2(12.9898, 78.233))).mul(43758.5453),
+  );
+  return dither.greaterThan(keep);
+}
+
 export interface WaterStaticGridNodes {
   /** Vertex-stage world position (mesh sits at identity, so local == world). */
   positionNode: TslNode;
@@ -44,13 +79,7 @@ export interface WaterStaticGridNodes {
   bodyKind: TslNode;
   flow: TslNode;
   shoreDistance: TslNode;
-  /**
-   * Fragment-side replacement for the legacy index-time height-discontinuity guard.
-   * Near levels use a stable world-space dither over a slope band instead of a hard
-   * discard, so sentinel dives dissolve rather than printing torn shoreline triangles.
-   * Far/min-reduced levels retain their shore dip and skip this guard, matching the
-   * reference renderer's near-only ramp suppression.
-   */
+  /** Fragment-side replacement for the legacy index-time height-discontinuity guard. */
   wallDiscard(depth: TslNode, flowSpeed: TslNode): TslNode;
   handle: WaterStaticGridHandle;
 }
@@ -75,25 +104,8 @@ export function buildWaterStaticGridNodes(grid: WaterStaticGridParams): WaterSta
   const worldZ: TslNode = uOriginMin.y.add(gridJ.mul(float(grid.cellSize)));
   const positionNode: TslNode = vec3(worldX, texelA.x, worldZ);
 
-  const wallDiscard = (depth: TslNode, flowSpeed: TslNode): TslNode => {
-    if (grid.cellSize >= 12) return float(0).greaterThan(float(1));
-
-    const dx: TslNode = dFdx(positionWorld);
-    const dy: TslNode = dFdy(positionWorld);
-    const slopeX: TslNode = dx.y.div(max(dx.xz.length(), float(1e-5)));
-    const slopeY: TslNode = dy.y.div(max(dy.xz.length(), float(1e-5)));
-    const slope: TslNode = vec2(slopeX, slopeY).length();
-    const limit: TslNode = mix(float(0.45), float(1.25), smoothstep(float(0.015), float(0.025), flowSpeed))
-      .div(float(grid.cellSize));
-
-    const rampKeep: TslNode = float(1).sub(smoothstep(limit.mul(0.75), limit.mul(1.35), slope));
-    const depthGate: TslNode = smoothstep(float(0.05), float(0.5), depth);
-    const keep: TslNode = mix(float(1), rampKeep, depthGate);
-    const dither: TslNode = fract(
-      sin(dot(positionWorld.xz, vec2(12.9898, 78.233))).mul(43758.5453),
-    );
-    return dither.greaterThan(keep);
-  };
+  const wallDiscard = (depth: TslNode, flowSpeed: TslNode): TslNode =>
+    buildWaterRampDiscard(depth, flowSpeed, grid.cellSize);
 
   return {
     positionNode,
