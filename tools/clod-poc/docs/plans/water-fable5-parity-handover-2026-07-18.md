@@ -44,10 +44,13 @@ Master plan (all phase statuses inline): `water-rivers-gpu-fable5-parity-plan-20
    only paired same-session legs, and take the HQ tier cost from the controlled A/B
    (+0.3 ms moving render p95). waterMs itself is stable and is the metric this gate
    reads.
-2. W4 acceptance integration: water gate in the infinite-islands (and continent walk)
-   acceptances — aerial channel/close river/lake/shore shots + assertions
-   (`webgpu_uncaptured_errors == 0`, `river_continuity_pct >= 95`, visible levels > 0,
-   waterMs budget). `verify-traced-carve.ts` is the standing runner to fold in.
+2. ~~W4 acceptance integration~~ **DONE**: the infinite-islands acceptance battery has
+   a perf-gated `water` case with deterministic close-river/aerial-river/lake/shore
+   captures and assertions for continuity, uncaptured GPU errors, visible atlas rings,
+   zero CPU field samples, and water p95/max budgets. Live pass:
+   `acceptance-runs/infinite-islands/water-w4-live-final/` (`waterMs` p95 0.3 / max
+   0.7 ms, continuity 100%, 4/4 levels, zero errors). Wet-margin mask contents remain
+   unit-tested but are not yet exported as a live acceptance counter.
 3. W1.3 leftover: `dressing_river_cobbles_accepted` still ~0 (density roll, W3 tuning).
 4. Visual polish candidates: aerial dither speckle at shorelines (tune the near-water
    ramp), traced channels are single polylines (no confluence networks like fable5's

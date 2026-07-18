@@ -13,6 +13,7 @@ import { buildInfiniteQaSummary } from "./infinite_acceptance/qa_summary.js";
 import { settlePage } from "./infinite_acceptance/page_settle.js";
 import { resetAcceptanceSampleWindow } from "./infinite_acceptance/sample_window.js";
 import { withSampledPerfCounters } from "./infinite_acceptance/sampled_perf_counters.js";
+import { evaluateWaterAcceptance } from "./infinite_acceptance/water_acceptance.js";
 import { percentile, summarizeFrameTimes, summarizeNumericEnvelope, type NumericEnvelope } from "./infinite_acceptance/route_metrics.js";
 import {
   evaluateRevisitEviction,
@@ -140,6 +141,14 @@ const SCENES: SceneSpec[] = [
     movementRoute: true,
   },
   {
+    name: "water",
+    freeze: false,
+    extra: { water: "1", waterQuality: "high" },
+    validation: "water",
+    waterAcceptance: true,
+    gates: ["perf"],
+  },
+  {
     name: "biome-near",
     freeze: true,
     proceduralDebug: "biome",
@@ -182,7 +191,8 @@ type JsonRecord = Record<string, unknown>;
 type SceneExtra = Record<string, string>;
 type PoseTuple = [number, number, number];
 type CamPose = { p: PoseTuple; yaw: number; pitch: number; fov?: number };
-type SceneValidation = "stone-gpu" | "phase6-canopy" | "far-summary-gpu-authoritative";
+type SceneValidation = "stone-gpu" | "phase6-canopy" | "far-summary-gpu-authoritative" | "water";
+type WaterShotName = "river-close" | "river-aerial" | "lake" | "shore";
 
 const REUSE_MODE_CODES: Record<AcceptanceProfile, number> = {
   full: 1,
@@ -199,6 +209,26 @@ interface SceneSpec {
   summary?: boolean;
   movementRoute?: boolean;
   validation?: SceneValidation;
+  waterAcceptance?: boolean;
+  gates?: readonly GateMode["name"][];
+}
+
+interface WaterSpot {
+  x: number;
+  z: number;
+  terrain: number;
+  water: number;
+  depth: number;
+  flowX: number;
+  flowZ: number;
+  bankX: number;
+  bankZ: number;
+}
+
+interface WaterAcceptanceEvidence {
+  shots: Record<WaterShotName, string>;
+  river: WaterSpot;
+  lake: WaterSpot;
 }
 
 interface GateMode {
@@ -306,6 +336,7 @@ interface SceneResult extends SceneReportInput {
   consoleWarnings: string[];
   consoleErrors: string[];
   pageErrors: string[];
+  waterAcceptance: WaterAcceptanceEvidence | null;
 }
 
 interface RunSceneOptions {
@@ -393,6 +424,14 @@ const ACTIVE_SCENES = filterActiveScenes(BASE_ACTIVE_SCENES, CLI_ARGS);
 const ACTIVE_GATES = filterActiveGates(GATE_MODES, CLI_ARGS);
 const SAMPLE_FRAMES = PROFILE === "fast" ? FAST_SAMPLE_FRAMES : DEFAULT_SAMPLE_FRAMES;
 
+function sceneSupportsGate(scene: SceneSpec, gate: GateMode): boolean {
+  return !scene.gates || scene.gates.includes(gate.name);
+}
+
+if (!ACTIVE_GATES.some((gate) => ACTIVE_SCENES.some((scene) => sceneSupportsGate(scene, gate)))) {
+  throw new Error("The requested scene/gate combination has no acceptance cases");
+}
+
 function elapsedSeconds(startedAt: number): string {
   return `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 }
@@ -432,6 +471,137 @@ function numericCounter(stats: JsonRecord, key: string): number {
   const counters = stats["counters"] as Record<string, unknown> | undefined;
   const value = counters?.[key] ?? stats[key];
   return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
+}
+
+function numericCounters(stats: JsonRecord): Record<string, number> {
+  const counters = (stats["counters"] as Record<string, unknown> | undefined) ?? {};
+  return Object.fromEntries(
+    Object.entries(counters).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])),
+  );
+}
+
+async function findWaterAcceptanceSpots(page: Page): Promise<{ river: WaterSpot; lake: WaterSpot }> {
+  const spots = await page.evaluate<{ river: WaterSpot | null; lake: WaterSpot | null }>(`(() => {
+    const probe = window.waterProbe;
+    if (!probe) return { river: null, lake: null };
+    const dirs = Array.from({ length: 24 }, (_, i) => {
+      const angle = i / 24 * Math.PI * 2;
+      return [Math.cos(angle), Math.sin(angle)];
+    });
+    const nearestBank = (x, z, maxRadius) => {
+      for (let radius = 6; radius <= maxRadius; radius += 3) {
+        for (const [dx, dz] of dirs) {
+          const sample = probe(x + dx * radius, z + dz * radius);
+          if (sample.depth <= 0.02 || sample.bodyMask <= 0.02) return { x: dx, z: dz };
+        }
+      }
+      return null;
+    };
+    let river = null;
+    let lake = null;
+    let riverScore = -Infinity;
+    let lakeScore = -Infinity;
+    for (let z = 256; z <= 4096; z += 12) {
+      for (let x = 256; x <= 4096; x += 12) {
+        const sample = probe(x, z);
+        if (sample.depth < 0.12 || sample.bodyMask < 0.05) continue;
+        const flowLength = Math.hypot(sample.flowX, sample.flowZ);
+        const isRiver = sample.bodyMask >= 0.3 && sample.flowSpeed >= 0.35;
+        const isLake = sample.flowSpeed <= 0.001 && sample.depth <= 5;
+        if (!isRiver && !isLake) continue;
+        const bank = nearestBank(x, z, isLake ? 192 : 36);
+        if (!bank) continue;
+        const candidate = {
+          x,
+          z,
+          terrain: sample.terrain,
+          water: sample.water,
+          depth: sample.depth,
+          flowX: flowLength > 1e-4 ? sample.flowX / flowLength : 0,
+          flowZ: flowLength > 1e-4 ? sample.flowZ / flowLength : 0,
+          bankX: bank.x,
+          bankZ: bank.z,
+        };
+        if (isRiver) {
+          const score = sample.depth + Math.min(sample.flowSpeed, 3) * 0.5 + sample.bodyMask;
+          if (score > riverScore) { river = candidate; riverScore = score; }
+        } else if (isLake) {
+          const score = sample.bodyMask + Math.min(sample.depth, 0.6);
+          if (score > lakeScore) { lake = candidate; lakeScore = score; }
+        }
+      }
+    }
+    return { river, lake };
+  })()`);
+  if (!spots.river) throw new Error("water acceptance could not find a strong traced river spot");
+  if (!spots.lake) throw new Error("water acceptance could not find a lake shoreline spot");
+  return { river: spots.river, lake: spots.lake };
+}
+
+async function terrainAt(page: Page, x: number, z: number): Promise<number> {
+  return page.evaluate<number>(`window.waterProbe(${x}, ${z}).terrain`);
+}
+
+async function moveWaterCamera(page: Page, pose: CamPose, label: string, waitForStreaming: boolean): Promise<void> {
+  await page.evaluate((nextPose) => {
+    window.__drusnielClod?.setPose?.(nextPose);
+  }, pose);
+  await settle(page, 60);
+  if (waitForStreaming) await waitForConvergence(page, label);
+  await settle(page, 30);
+}
+
+async function captureWaterAcceptance(page: Page, outDir: string, sceneRunName: string): Promise<WaterAcceptanceEvidence> {
+  const { river, lake } = await findWaterAcceptanceSpots(page);
+  const shots = {} as Record<WaterShotName, string>;
+  const capture = async (name: WaterShotName) => {
+    const path = resolve(outDir, `${sceneRunName}-${name}.png`);
+    await page.screenshot({ path });
+    shots[name] = rel(path);
+  };
+
+  const riverCloseX = river.x - river.flowX * 70;
+  const riverCloseZ = river.z - river.flowZ * 70;
+  await moveWaterCamera(page, {
+    p: [riverCloseX, (await terrainAt(page, riverCloseX, riverCloseZ)) + 20, riverCloseZ],
+    yaw: Math.atan2(-river.flowX, -river.flowZ),
+    pitch: -0.3,
+    fov: 55,
+  }, `${sceneRunName}:river`, true);
+  await capture("river-close");
+
+  await moveWaterCamera(page, {
+    p: [river.x, river.terrain + 460, river.z],
+    yaw: Math.atan2(-river.flowX, -river.flowZ),
+    pitch: -1.55,
+    fov: 55,
+  }, `${sceneRunName}:river-aerial`, false);
+  await capture("river-aerial");
+
+  const lakeCameraX = lake.x + lake.bankX * 28;
+  const lakeCameraZ = lake.z + lake.bankZ * 28;
+  const lakeYaw = Math.atan2(lake.bankX, lake.bankZ);
+  await moveWaterCamera(page, {
+    p: [lakeCameraX, (await terrainAt(page, lakeCameraX, lakeCameraZ)) + 16, lakeCameraZ],
+    yaw: lakeYaw,
+    pitch: -0.28,
+    fov: 55,
+  }, `${sceneRunName}:lake`, true);
+  await capture("lake");
+
+  const shoreCameraX = lake.x + lake.bankX * 10;
+  const shoreCameraZ = lake.z + lake.bankZ * 10;
+  await moveWaterCamera(page, {
+    p: [shoreCameraX, (await terrainAt(page, shoreCameraX, shoreCameraZ)) + 7, shoreCameraZ],
+    yaw: lakeYaw,
+    pitch: -0.18,
+    fov: 55,
+  }, `${sceneRunName}:shore`, false);
+  await capture("shore");
+  // Keep camera/atlas recenter work out of the sampled proof window.
+  await settle(page, 120);
+
+  return { shots, river, lake };
 }
 
 async function createAcceptancePage(browser: Browser): Promise<Page> {
@@ -1056,10 +1226,17 @@ function evaluateFarSummaryGpuAuthoritativeCounters(stats: JsonRecord): string[]
   return failures;
 }
 
-function evaluateSceneSpecificCounters(scene: SceneSpec, stats: JsonRecord): string[] {
+function evaluateSceneSpecificCounters(
+  scene: SceneSpec,
+  stats: JsonRecord,
+  startupTimings: Readonly<Record<string, number>>,
+): string[] {
   if (scene.validation === "stone-gpu") return evaluateStoneGpuCounters(stats);
   if (scene.validation === "phase6-canopy") return evaluatePhase6CanopyCounters(stats);
   if (scene.validation === "far-summary-gpu-authoritative") return evaluateFarSummaryGpuAuthoritativeCounters(stats);
+  if (scene.validation === "water") {
+    return evaluateWaterAcceptance({ counters: numericCounters(stats), startupTimings });
+  }
   return [];
 }
 
@@ -1091,6 +1268,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
   const movementPath = scene.movementRoute ? resolve(outDir, `${sceneRunName}-movement.json`) : null;
   const comparisonPath = resolve(outDir, `compare/${sceneRunName}-self-diff.png`);
   let movement: MovementReport | null = null;
+  let waterAcceptance: WaterAcceptanceEvidence | null = null;
 
   const onConsole = (msg: ConsoleMessage) => {
     const type = msg.type();
@@ -1186,6 +1364,13 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
       await Promise.race([waitForConvergence(page, `${sceneRunName}:post-route`), pageErrorGate]);
       await failOnPageError(page, scene.name, pageErrors, failedPath);
     }
+    if (scene.waterAcceptance) {
+      waterAcceptance = await Promise.race([
+        captureWaterAcceptance(page, outDir, sceneRunName),
+        pageErrorGate,
+      ]);
+      await failOnPageError(page, scene.name, pageErrors, failedPath);
+    }
     await Promise.race([settle(page, WARMUP_FRAMES), pageErrorGate]);
     await resetAcceptanceSampleWindow(page);
     const sampleStartedAt = Date.now();
@@ -1209,7 +1394,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
       ? evaluateThresholds(acceptanceCounters, [], [])
       : evaluateThresholds(acceptanceCounters, gate.requiredCounters, gate.rules);
     const movementFailures = evaluateMovementRoute(scene.name, movement);
-    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats);
+    const sceneSpecificFailures = evaluateSceneSpecificCounters(scene, stats, finalStartupTimings);
     const failures = [...pageErrors.map((error) => `page error: ${error}`), ...thresholds.failures, ...movementFailures, ...sceneSpecificFailures, ...imageSanity.failures.map((failure) => `image sanity: ${failure}`)];
     return {
       name: `${gate.name}/${scene.name}`,
@@ -1231,6 +1416,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
       consoleWarnings,
       consoleErrors,
       pageErrors,
+      waterAcceptance,
       failures,
       passed: failures.length === 0,
     };
@@ -1270,6 +1456,7 @@ async function runScene(page: Page, scene: SceneSpec, gate: GateMode, outDir: st
       consoleWarnings,
       consoleErrors,
       pageErrors,
+      waterAcceptance,
       failures,
       passed: false,
     };
@@ -1297,6 +1484,7 @@ async function main(): Promise<void> {
       try {
         for (const gate of ACTIVE_GATES) {
           for (const scene of ACTIVE_SCENES) {
+            if (!sceneSupportsGate(scene, gate)) continue;
             sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: true, firstSceneOnPage }));
             firstSceneOnPage = false;
           }
@@ -1307,6 +1495,7 @@ async function main(): Promise<void> {
     } else {
       for (const gate of ACTIVE_GATES) {
         for (const scene of ACTIVE_SCENES) {
+          if (!sceneSupportsGate(scene, gate)) continue;
           const page = await createAcceptancePage(browser);
           try {
             sceneResults.push(await runScene(page, scene, gate, outDir, { reusePage: false, firstSceneOnPage: true }));
@@ -1374,7 +1563,15 @@ async function main(): Promise<void> {
       startup_world_pages: scene.startupWorldPages,
       cache: scene.cache,
       acceptance_cache_key: scene.acceptanceCacheKey,
-      artifacts: { screenshot: scene.screenshot, stats_json: scene.statsPath, phase0_report_json: scene.phase0Path, qa_summary_json: scene.summaryPath, visual_comparison: scene.comparisonPath },
+      water_acceptance: scene.waterAcceptance,
+      artifacts: {
+        screenshot: scene.screenshot,
+        stats_json: scene.statsPath,
+        phase0_report_json: scene.phase0Path,
+        qa_summary_json: scene.summaryPath,
+        visual_comparison: scene.comparisonPath,
+        water_shots: scene.waterAcceptance?.shots ?? null,
+      },
     })),
     artifacts: { run_dir: rel(outDir), report_json: rel(reportJsonPath), report_md: rel(reportMdPath) },
   };

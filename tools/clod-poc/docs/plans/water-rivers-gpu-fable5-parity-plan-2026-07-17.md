@@ -160,9 +160,9 @@ analytic caustics ride the high tier (`applyWaterQueryOverrides`). (4) was alrea
 wired (`setRiverTerrainWetnessMask`, WebGPU). (5) DONE differently — depth-based
 shore alpha fade (~0.35 m) in both TSL materials plus a dithered near-water ramp
 transition instead of hard wall tears. (6) DONE — HQ ripples/foam advect along the
-flow field; cascade particles remain the whitewater accent. (7) partially — the
-standing runner is `tools/verify-traced-carve.ts` (continuity, walk, transect,
-counters, shots); battery scenes remain open with W4.
+flow field; cascade particles remain the whitewater accent. (7) DONE — the standing
+runner is `tools/verify-traced-carve.ts` (continuity, walk, transect, counters, shots),
+and W4 adds the four-view water case to the normal acceptance battery.
 
 Target set from the demo: SSR with terrain-aware fallback, analytic caustics, obstacle
 and shore foam, wet margins, flow-aligned animation.
@@ -179,14 +179,27 @@ and shore foam, wet margins, flow-aligned animation.
    visibly move downstream; cascade particle overlay stays as the whitewater accent.
 7. Every step lands with a `water:shot` battery scene + stats JSON (existing harness).
 
-## Phase W4 — Acceptance Integration
+## Phase W4 — Acceptance Integration — IMPLEMENTED 2026-07-18
 
-1. Add a water gate to the infinite-islands and continent walk acceptances: aerial
-   channel shot, close river shot, lake shot, shore shot; counters asserted:
-   `webgpu_uncaptured_errors == 0`, `river_continuity_pct ≥ 95`, water clipmap visible
-   levels > 0 near wet terrain, `waterMs` budget, wet-margin mask built.
-2. Keep `perf:move` water A/B as the standing perf evidence (documented commands in
-   CLAUDE.md pattern).
+1. **DONE**: the infinite-islands acceptance battery now has a dedicated `water` case
+   on its perf gate. It finds traced-river and still-lake locations from the live water
+   authority, converges the streamed world at both locations, and captures close river,
+   aerial river, lake, and shore images. The case runs in the normal full/reuse battery
+   (including the continent-route invocations) and can be isolated with
+   `--reuse --scene water --gate perf`.
+2. **DONE**: `tools/infinite_acceptance/water_acceptance.ts` asserts
+   `webgpu_uncaptured_errors == 0`, `river_continuity_pct >= 95`, clipmap enabled with
+   visible levels, atlas-path CPU field samples equal zero, `waterMs` p95 <= 0.5 ms,
+   and `waterMs` max <= 2 ms. The capture path warms camera/atlas recenter work before
+   resetting the proof window so teleports do not pollute the budget.
+3. Live proof: `acceptance-runs/infinite-islands/water-w4-live-final/` passed with
+   continuity 100%, 4/4 visible levels, zero uncaptured errors, zero CPU field samples,
+   `waterMs` p95 0.3 / max 0.7 ms, frame p50/p95 4.4/5.0 ms, and render p95 2.1 ms.
+   The top broad buckets were render and selection-update (both p95 2.1 ms); the top
+   prop bucket was `propsRestMs` (p95 0.6 ms).
+4. `perf:move` water A/B remains the standing tier-cost evidence. The acceptance case
+   covers the runtime budget/counter regression gate; wet-margin mask contents still
+   have unit coverage but are not yet exported as a live acceptance counter.
 
 ## Non-Goals
 
