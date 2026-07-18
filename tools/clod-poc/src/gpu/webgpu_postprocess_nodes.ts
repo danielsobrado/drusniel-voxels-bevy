@@ -19,6 +19,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
+import { inverseSmoothstep } from "./postfx_mask_math.js";
 
 export type TslAny = any;
 
@@ -104,20 +105,24 @@ export function createGtaoPostProcessNode(input: GtaoNodeInput): TslAny {
         const sampleSky = sampleDepth.lessThanEqual(1e-7).or(sampleDepth.greaterThanEqual(0.9999999));
         const sampleView = getViewPosition(uvSample, sampleDepth, input.projectionInverse) as TslAny;
         const sampleCloser = sampleView.z.sub(viewPosition.z).greaterThan(input.depthBias);
-        const sameSurface = smoothstep(input.depthTolerance, input.depthBias, sampleView.sub(viewPosition).length());
+        const sameSurface = inverseSmoothstep(
+          input.depthBias,
+          input.depthTolerance,
+          sampleView.sub(viewPosition).length(),
+        );
         const support = inFrame.and(sampleSky.not()).and(sampleCloser).select(float(1), float(0));
         occlusionSum.addAssign(sameSurface.mul(support));
         weightSum.addAssign(inFrame.and(sampleSky.not()).select(float(1), float(0)));
       }
       const rawAo = float(1).sub(occlusionSum.div(weightSum.max(1e-3)).mul(input.strength));
-      const farFade = smoothstep(input.fadeEnd, input.maxDistance, distance);
+      const distanceWeight = inverseSmoothstep(input.maxDistance, input.fadeEnd, distance);
       const directReduction = smoothstep(
         GTAO_DIRECT_LIGHT_LUMA_START,
         GTAO_DIRECT_LIGHT_LUMA_END,
         luminance(input.sourceRgb),
       ).mul(GTAO_DIRECT_LIGHT_REDUCTION);
       const litAo = tslMix(rawAo, float(1), directReduction);
-      result.assign(tslMix(float(1), litAo, farFade));
+      result.assign(tslMix(float(1), litAo, distanceWeight));
     });
     return clamp(result, 0, 1);
   })();
@@ -167,7 +172,11 @@ export function createGtaoHalfResLayerNode(input: GtaoHalfResLayerInput): TslAny
         const sampleSky = sampleDepth.lessThanEqual(1e-7).or(sampleDepth.greaterThanEqual(0.9999999));
         const sampleView = getViewPosition(uvSample, sampleDepth, input.projectionInverse) as TslAny;
         const sampleCloser = sampleView.z.sub(viewPosition.z).greaterThan(input.depthBias);
-        const sameSurface = smoothstep(input.depthTolerance, input.depthBias, sampleView.sub(viewPosition).length());
+        const sameSurface = inverseSmoothstep(
+          input.depthBias,
+          input.depthTolerance,
+          sampleView.sub(viewPosition).length(),
+        );
         const support = inFrame.and(sampleSky.not()).and(sampleCloser).select(float(1), float(0));
         occlusionSum.addAssign(sameSurface.mul(support));
         weightSum.addAssign(inFrame.and(sampleSky.not()).select(float(1), float(0)));
@@ -271,8 +280,11 @@ export function createBounceHalfResLayerNode(input: BounceHalfResLayerInput): Ts
         const depthSample = texture(input.depthTex.value, uvSample).x;
         const sampleSky = depthSample.lessThanEqual(1e-7).or(depthSample.greaterThanEqual(0.9999999));
         const sampleView = getViewPosition(uvSample, depthSample, input.projectionInverse) as TslAny;
-        const support = smoothstep(input.depthTolerance, 0.05, sampleView.sub(viewPosition).length())
-          .mul(inFrame.and(sampleSky.not()).select(float(1), float(0)));
+        const support = inverseSmoothstep(
+          0.05,
+          input.depthTolerance,
+          sampleView.sub(viewPosition).length(),
+        ).mul(inFrame.and(sampleSky.not()).select(float(1), float(0)));
         sum.addAssign(texture(input.beauty.value, uvSample).rgb.mul(support));
         weightSum.addAssign(support);
       }
@@ -343,7 +355,11 @@ export function createContactShadowPostProcessNode(input: ContactShadowNodeInput
         });
       }
       const occlusion = hitF.lessThan(1.5).select(float(1).sub(hitF.mul(0.5)), float(0));
-      const fade = smoothstep(CONTACT_SHADOW_MAX_DISTANCE_M, CONTACT_SHADOW_FULL_DISTANCE_M, distance);
+      const fade = inverseSmoothstep(
+        CONTACT_SHADOW_FULL_DISTANCE_M,
+        CONTACT_SHADOW_MAX_DISTANCE_M,
+        distance,
+      );
       result.assign(float(1).sub(occlusion.mul(input.strength).mul(fade)));
     });
     return result;
@@ -387,14 +403,17 @@ export function createBouncePostProcessNode(input: BounceNodeInput): TslAny {
         const depthSample = texture(input.depthTex.value, uvSample).x;
         const sampleSky = depthSample.lessThanEqual(1e-7).or(depthSample.greaterThanEqual(0.9999999));
         const sampleView = getViewPosition(uvSample, depthSample, input.projectionInverse) as TslAny;
-        const support = smoothstep(input.depthTolerance, 0.05, sampleView.sub(viewPosition).length())
-          .mul(inFrame.and(sampleSky.not()).select(float(1), float(0)));
+        const support = inverseSmoothstep(
+          0.05,
+          input.depthTolerance,
+          sampleView.sub(viewPosition).length(),
+        ).mul(inFrame.and(sampleSky.not()).select(float(1), float(0)));
         sum.addAssign(texture(input.beauty.value, uvSample).rgb.mul(support));
         weightSum.addAssign(support);
       }
       const receiverLum = luminance(input.sourceRgb).add(0.25);
       const receiverTint = input.sourceRgb.div(receiverLum);
-      const fade = smoothstep(input.maxDistance, input.maxDistance.mul(0.5), distance);
+      const fade = inverseSmoothstep(input.maxDistance.mul(0.5), input.maxDistance, distance);
       const bounce = sum.div(weightSum.max(1e-3)).mul(receiverTint).mul(input.strength).mul(fade);
       result.assign(input.sourceRgb.add(bounce));
     });
@@ -422,7 +441,7 @@ export function createGradePostProcessNode(input: GradeNodeInput): TslAny {
   return Fn((): TslAny => {
     const balanced = input.postRgb.mul(input.exposure).mul(input.autoExposure).mul(input.whiteBalance);
     const luma = dot(balanced, vec3(...LUMA_WEIGHTS));
-    const shadowMask = smoothstep(0.45, 0.08, luma).mul(input.shadowAmount);
+    const shadowMask = inverseSmoothstep(0.08, 0.45, luma).mul(input.shadowAmount);
     const shadowed = tslMix(balanced, balanced.mul(input.shadowTint), shadowMask);
     const highlightMask = smoothstep(0.35, 0.95, luma).mul(input.highlightAmount);
     const tinted = tslMix(shadowed, shadowed.mul(input.highlightTint), highlightMask);
