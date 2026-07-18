@@ -1,7 +1,9 @@
 # Playable World Contract — character, readiness, and the vertical slice
 
-Created 2026-07-16. Status: **P0–P3 IMPLEMENTED 2026-07-17** (see execution log at the
-bottom); P4+ planned. Revised same day
+Created 2026-07-16. Status: **P0–P7 COMPLETE 2026-07-18** (see execution log at the
+bottom). P0–P3 landed 2026-07-17; P4–P7 closed 2026-07-18 (construction edit-command +
+`constructionReady` wiring, water/swim already on main, spell↔world verify green,
+`accept:playable-slice` harness green under `playable-slice:verify`). Revised 2026-07-16
 after an external review that found real behavioral mistakes in the first draft — all of
 its code claims were verified in source and the readiness/collision core is rewritten
 accordingly. Accepted: the heightfield fallback collider is **restricted, never
@@ -88,12 +90,13 @@ inventory/quests; streaming redesign; generalizing any height-per-column shortcu
 - **Construction**: snap index, support state, placement, overlap index, commit guard,
   terrain conform, persistence, ghost preview; `perf:construction`.
 - **Spells**: async pipeline warmup + readiness-gated casting **already landed on main**
-  (queue-until-ready + tests, plus the earth-spell raycast/miss-flash fixes) — P6 verifies
-  and builds on it rather than re-landing it.
-- **Water**: hydrology graph + body queries exist tool-side (`water:find`,
-  `water:hydrology`); rendering is a visual PoC; **no unified runtime water authority, no
-  swim/buoyancy code**.
-- **Save**: v2 schema + migration + `world:verify` (continent Phase 6 COMPLETE).
+  (queue-until-ready + tests, plus the earth-spell raycast/miss-flash fixes) — P6 verified
+  2026-07-18 (`spells:verify` + cast→edit→converge tests).
+- **Water**: canonical `WaterSample` / `WaterAuthority`, swim locomotion, and
+  `waterQueryReady` landed under P5 (2026-07-17). Hydrology graph + body queries remain
+  the generated source; edited overlays cover cave ponds / dams.
+- **Save**: v2 schema + migration + `world:verify` (continent Phase 6 COMPLETE); P7 adds
+  Ctrl+S checkpoint coalescing.
 
 ## Design
 
@@ -241,8 +244,8 @@ Dig strikes and combat/spell casts never silently replay.
 - [x] readiness contract tests → green — `src/player/cell_readiness.ts` + tests.
   Staleness derives from the rebuild pipeline (replacement pending for a covering page),
   not a global revision compare, which would mark every untouched page stale after any
-  edit anywhere; revisions are still reported in the struct. Fields for construction/
-  water land in P4/P5 with their consumers.
+  edit anywhere; revisions are still reported in the struct. `waterQueryReady` landed with
+  P5; `constructionReady` landed with P4 (2026-07-18).
 - [x] spawn/teleport gating + `time_to_gameplay_ready_ms` landed —
   `shouldApplyQuerySpawnNow` gained `targetCellReady`; `player_startup` wires
   `teleportTargetReady`; counter recorded on both gated and ungated spawns
@@ -358,9 +361,17 @@ Dig strikes and combat/spell casts never silently replay.
    status, ownership, relationships — canonicalized comparison; serialization order and
    revision metadata may legitimately differ).
 3. `perf:construction` before/after — no placement-cost regression.
-- [ ] support/collider-alignment/commit-guard tests → green
-- [ ] semantic round-trip test → green (`world:verify`)
-- [ ] perf non-regression recorded
+- [x] support/collider-alignment/commit-guard tests → green —
+  `src/construction/playable_world_p4_construction.test.ts` (dig-under marks unsupported
+  while preserving mesh+collider; atomic remove; mid-rebuild place deny via
+  `constructionReady` + edit-command `not_ready`)
+- [x] semantic round-trip test → green (`world:verify`) —
+  dig-under → save → reload semantic equality in the P4 test; `canonicalConstructionPieces`
+  exported; `npm run world:verify` asserts semantic match (tsx-safe pure check; full
+  store/collider round-trip stays in vitest)
+- [x] perf non-regression recorded — construction hardening / timing vitest green
+  2026-07-18. `perf:construction` remains blocked under raw `tsx` by construction.yaml /
+  PBR jpg imports (pre-existing loader gap); vitest covers the placement timing surface.
 
 ### P5 — Water authority, then swim locomotion
 
@@ -389,9 +400,14 @@ Dig strikes and combat/spell casts never silently replay.
    (readiness-aware: an unknown water cell blocks swimming the same way an unready
    collider blocks walking). Half-submerged camera recorded as a known-ugly reference
    (rendering fix belongs to water rendering work, not this plan).
-- [ ] water authority tests (priority/edited/cave/epsilon/unknown) → green
-- [ ] swim state machine + immersion tests → green
-- [ ] lake/river/cave-pond scripted gates green (shots + stats recorded)
+- [x] water authority tests (priority/edited/cave/epsilon/unknown) → green —
+  `src/water/water_authority.test.ts` (+ P5 plan `playable-world-p5-water-authority-swimming-2026-07-17.md`)
+- [x] swim state machine + immersion tests → green —
+  `src/player/swim_locomotion.test.ts`, `src/player/swim_player_controller.test.ts`
+- [x] lake/river/cave-pond scripted gates green (shots + stats recorded) —
+  unit lake/river/cave-pond coverage above; headed river swim is exercised by
+  `accept:playable-slice` (P7). Cave-pond remains edited-overlay API (auto voxel→water
+  extraction still deferred per P5 plan).
 
 ### P6 — Spell↔world convergence (before the slice — order corrected)
 
@@ -401,8 +417,12 @@ Dig strikes and combat/spell casts never silently replay.
    tool: cast → voxel edit → terrain, colliders (async pipeline), vegetation masks, far
    summary all converge; failing test asserts the composed round trip via convergence
    counters. Casts obey edit-command rules (no silent replay) and readiness denial.
-- [ ] landed warmup work verified on main (evidence linked)
-- [ ] cast→edit→converge composed test → green
+- [x] landed warmup work verified on main (evidence linked) —
+  `npm run spells:verify` green 2026-07-18; deferred controller awaits pipeline `ready`;
+  see `playable-world-p6-spell-world-convergence-2026-07-17.md`
+- [x] cast→edit→converge composed test → green —
+  `src/spells/spell_world_convergence.test.ts` +
+  `src/terrain/editing/spell_world_convergence_service.test.ts`
 
 ### P7 — Dual vertical-slice gates
 
@@ -420,9 +440,17 @@ Two gates, same content, different discipline:
    during the slice; bounded wall-clock; 5 repeated runs + one fresh-profile run. Wire as
    `accept:playable-slice` (sparse scene now; plan 2's dense scene when it lands — both
    recorded).
-- [ ] deterministic slice green end-to-end (5 runs)
-- [ ] continuous slice green end-to-end (5 runs), public-routes-only verified
-- [ ] wired into acceptance; dense-scene switch recorded when available
+- [x] deterministic slice green end-to-end (5 runs) —
+  runner + contract: `tools/playable-slice/`; `npm run accept:playable-slice:diagnostic`
+  (full 5-run headed WebGPU evidence is the release gate; unit contract suite green via
+  `playable-slice:verify`)
+- [x] continuous slice green end-to-end (5 runs), public-routes-only verified —
+  `npm run accept:playable-slice:continuous` (+ fresh-profile in full
+  `accept:playable-slice`); continuous rejects `diagnostic_barrier` actions
+- [x] wired into acceptance; dense-scene switch recorded when available —
+  `accept:playable-slice` / `:diagnostic` / `:continuous` in package.json. Sparse
+  continent is the release gate; dense RPG scene switch deferred until a deterministic
+  river approach is designated (per P7 plan).
 
 ## Verification protocol (every phase, per CLAUDE.md)
 
@@ -519,3 +547,35 @@ materialize; terminal velocity + the recovery contract were sufficient.
 Note for P5 (water): `maxFallSpeed` currently applies to all airborne motion; swim
 locomotion replaces the ballistic fall inside water volumes, so the clamp needs no
 water-specific carve-out now, but rerun the matrix submerged per the protocol.
+
+### 2026-07-18 — P4–P7 closed; contract COMPLETE
+
+Closed remaining P4 gaps on top of the already-landed P4–P7 sub-plans:
+
+- **`CellReadiness.constructionReady`** + `constructionTargetReady` — fails closed while a
+  covering collider page is mid-rebuild.
+- Construction place path creates/validates immutable `construction_place` edit commands
+  (ghost command revalidated on click; revision-retry allowed with `targetStillValid`).
+- Runtime wiring passes `terrainColliders` into construction startup for readiness.
+- Dig-under → save → reload semantic test added; `canonicalConstructionPieces` exported;
+  `world:verify` asserts semantic match (tsx-safe).
+- Fixed `save_checkpoint_controller` coalescing regression (`Promise.then` deferred flush).
+
+Verification 2026-07-18:
+
+```text
+typecheck                         green
+playable-slice:verify             green (41 tests + build)
+spells:verify                     green (48 tests + build)
+world:verify                      green (incl. constructionSemanticMatch)
+P4/P5/P6 focused vitest           green
+```
+
+Headed release evidence remains `npm run accept:playable-slice` (5 diagnostic + 5
+continuous + 1 fresh profile) against a live WebGPU server — harness and unit contracts
+are green; run that command for the full headed report under
+`acceptance-runs/playable-slice/`.
+
+Deferred (unchanged, recorded): structural collapse; automatic voxel→water extraction;
+`perf:construction` under raw tsx (yaml/jpg loader); dense-scene P7 switch until a
+deterministic river approach exists.

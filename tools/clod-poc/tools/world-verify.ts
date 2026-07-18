@@ -4,6 +4,8 @@ import { compileFeatureStamps } from "../src/world/feature_stamps.js";
 import { deriveEnvironmentalPropId, enumerateTreeCandidatesForTile } from "../src/world/prop_identity.js";
 import { SparsePropExclusionBitsets } from "../src/world/prop_exclusion.js";
 import type { SavedPropInstance, WorldMetadataRecord } from "../src/save/save_schema.js";
+import { canonicalConstructionPieces } from "../src/construction/construction_semantic.js";
+import type { PlacedConstructionPiece } from "../src/construction/types.js";
 
 function arg(name: string, fallback: number): number {
   const index = process.argv.indexOf(name);
@@ -24,6 +26,46 @@ function rng(seed: number): () => number {
     state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
     return state >>> 0;
   };
+}
+
+/**
+ * Pure semantic construction check (tsx-safe: no yaml/jpg imports). Full dig-under +
+ * localStorage + collider round-trip is gated by playable_world_p4_construction.test.ts.
+ */
+function verifyConstructionSemanticRoundTrip(): {
+  pieces: number;
+  unsupported: number;
+  semanticMatch: boolean;
+} {
+  const source: PlacedConstructionPiece[] = [];
+  for (let index = 0; index < 30; index += 1) {
+    const unsupported = index < 8;
+    const connectionIds = index === 0
+      ? []
+      : index === 29
+        ? [`piece-${index - 1}`]
+        : [`piece-${index + 1}`, `piece-${index - 1}`];
+    source.push({
+      id: `piece-${index}`,
+      typeId: "floor",
+      position: [10 + (index % 6) * 2, 0.1, 10 + Math.floor(index / 6) * 2],
+      rotationQuarterTurns: 0,
+      material: index % 2 === 0 ? "wood" : "stone",
+      grounded: !unsupported,
+      connectionIds,
+      stability: unsupported ? 0 : 1,
+      ...(unsupported ? { unsupported: true } : {}),
+    });
+  }
+  // Simulate a save/reload that reorders the array.
+  const reloaded = [...source].reverse().map((piece) => ({ ...piece }));
+  const expected = canonicalConstructionPieces(source);
+  const actual = canonicalConstructionPieces(reloaded);
+  assert.deepEqual(actual, expected, "construction semantic round-trip drifted");
+  const unsupported = actual.filter((piece) => piece.unsupported).length;
+  assert.equal(unsupported, 8);
+  assert.equal(actual[1]!.connectionIds.join(","), "piece-0,piece-2");
+  return { pieces: actual.length, unsupported, semanticMatch: true };
 }
 
 const samples = arg("--tiles", 16);
@@ -62,6 +104,7 @@ const exclusions = SparsePropExclusionBitsets.fromSavedProps([delta]);
 assert.equal(exclusions.isExcluded(delta.environmental!), true, "prop delta was not applied");
 assert.equal(stamps.sampleHeight(0, 0, 80), 10, "road stamp missing");
 assert.equal(stamps.excludesScatter(0, 0), true, "road scatter exclusion missing");
+const construction = verifyConstructionSemanticRoundTrip();
 
 console.log(JSON.stringify({
   ok: true,
@@ -72,4 +115,7 @@ console.log(JSON.stringify({
   prop_delta_count: exclusions.counters().prop_delta_count,
   prop_exclusion_tiles: exclusions.counters().prop_exclusion_tiles,
   featureStampHash: stamps.hash,
+  constructionPieces: construction.pieces,
+  constructionUnsupported: construction.unsupported,
+  constructionSemanticMatch: construction.semanticMatch,
 }, null, 2));

@@ -32,6 +32,13 @@ import {
   type PlayerEditAuthorityConfig,
   type PlayerEditAuthorityPoint,
 } from "../player/player_edit_authority.js";
+import {
+  createEditCommand,
+  validateEditCommand,
+  type EditCommandDenialReason,
+  type ModedEditCommand,
+} from "../player/edit_commands.js";
+import { getDigEditRevision } from "../terrain/terrain_edits.js";
 import { ConstructionOverlapIndex } from "./overlap_index.js";
 import { ConstructionPerformanceTracker, type ConstructionPerformanceSnapshot } from "./construction_timing.js";
 import { raycastConstructionTerrain } from "./targeting.js";
@@ -70,6 +77,11 @@ export interface ConstructionControllerDeps {
   getAuthorityOrigin?: () => PlayerEditAuthorityPoint | null;
   getAuthorityCounters?: () => Record<string, number> | null;
   raycastAuthoritativeTerrain?: (ray: THREE.Ray, maxDistance?: number) => AuthoritativeConstructionTerrainHit | null;
+  /** Fail closed when a covering collider page is mid-rebuild at the place target. */
+  constructionReadyAt?: (x: number, z: number) => boolean;
+  getTerrainRevision?: () => number;
+  getInteractionMode?: () => string;
+  recordEditDenial?: (reason: EditCommandDenialReason) => void;
 }
 
 export interface ConstructionControllerStats {
@@ -182,6 +194,8 @@ class ConstructionControllerImpl implements ConstructionController {
   private ghostPieceId: string | null = null;
   private terrainConformHandler: ConstructionTerrainConformHandler | null = null;
   private placementInFlight = false;
+  /** Immutable ghost place command; revalidated on click against the latest revision. */
+  private pendingPlaceCommand: ModedEditCommand | null = null;
 
   constructor(private readonly deps: ConstructionControllerDeps) {
     this.config = deps.config ?? defaultConstructionConfig;
@@ -428,6 +442,10 @@ class ConstructionControllerImpl implements ConstructionController {
     if (!candidate.valid) {
       return { ok: false, pieceId: null, reason: candidate.reason ?? "invalid placement" };
     }
+    const commandVerdict = this.validatePlaceCommand(candidate, null);
+    if (!commandVerdict.allowed) {
+      return { ok: false, pieceId: null, reason: commandVerdict.reason };
+    }
     const terrainRequest = createConstructionTerrainConformRequest(candidate, this.config.terrainConform);
     const handler = this.resolveTerrainConformHandler();
     if (terrainRequest) {
@@ -587,6 +605,17 @@ class ConstructionControllerImpl implements ConstructionController {
     this.currentCandidate = candidate;
     this.currentTerrainRequest = terrainRequest;
     this.currentTerrainPreview = terrainPreview;
+    this.pendingPlaceCommand = candidate.valid
+      ? createEditCommand({
+          operation: "construction_place",
+          targetPosition: candidate.position,
+          targetNormal: candidate.terrainHit?.normal ?? [0, 1, 0],
+          sourceTerrainRevision: this.currentTerrainRevision(),
+          actor: "player",
+          mode: this.currentInteractionMode(),
+          nowMs: performance.now(),
+        })
+      : null;
     updateConstructionGhost(this.ghostMesh, this.ghostMaterial, {
       position: candidate.position,
       rotationQuarterTurns: candidate.rotationQuarterTurns,
@@ -609,6 +638,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.currentCandidate = null;
     this.currentTerrainRequest = null;
     this.currentTerrainPreview = null;
+    this.pendingPlaceCommand = null;
     this.ghostMesh.visible = false;
     if (resetSelector) this.snapSelector.reset();
   }
@@ -744,10 +774,69 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private applyCommitAuthority(candidate: ConstructionCandidate): ConstructionCandidate {
     const editAuthority = this.deps.editAuthority;
-    if (!editAuthority) return candidate;
-    const decision = canCommitBuild(editAuthority, this.deps.getAuthorityOrigin?.() ?? null, candidate.position);
-    publishPlayerEditAuthorityDecision(this.deps.getAuthorityCounters?.() ?? null, decision);
-    return decision.allowed ? candidate : { ...candidate, valid: false, reason: decision.reason };
+    let next = candidate;
+    if (editAuthority) {
+      const decision = canCommitBuild(editAuthority, this.deps.getAuthorityOrigin?.() ?? null, candidate.position);
+      publishPlayerEditAuthorityDecision(this.deps.getAuthorityCounters?.() ?? null, decision);
+      if (!decision.allowed) {
+        next = { ...next, valid: false, reason: decision.reason };
+      }
+    }
+    if (next.valid && this.deps.constructionReadyAt) {
+      const ready = this.deps.constructionReadyAt(next.position[0], next.position[2]);
+      if (!ready) {
+        next = { ...next, valid: false, reason: "construction not ready (terrain collider rebuilding)" };
+      }
+    }
+    return next;
+  }
+
+  private currentTerrainRevision(): number {
+    return this.deps.getTerrainRevision?.() ?? getDigEditRevision();
+  }
+
+  private currentInteractionMode(): string {
+    return this.deps.getInteractionMode?.() ?? "construction";
+  }
+
+  private validatePlaceCommand(
+    candidate: ConstructionCandidate,
+    command: ModedEditCommand | null,
+  ): { allowed: true; command: ModedEditCommand } | { allowed: false; reason: string } {
+    const nowMs = performance.now();
+    const active = command ?? createEditCommand({
+      operation: "construction_place",
+      targetPosition: candidate.position,
+      targetNormal: candidate.terrainHit?.normal ?? [0, 1, 0],
+      sourceTerrainRevision: this.currentTerrainRevision(),
+      actor: "player",
+      mode: this.currentInteractionMode(),
+      nowMs,
+    });
+    const origin = this.deps.getAuthorityOrigin?.() ?? {
+      x: candidate.position[0],
+      z: candidate.position[2],
+    };
+    const maxDistanceM = this.deps.editAuthority?.buildCommitRadiusM ?? Number.MAX_SAFE_INTEGER;
+    const verdict = validateEditCommand(active, {
+      nowMs,
+      currentTerrainRevision: this.currentTerrainRevision(),
+      actorPosition: origin,
+      maxDistanceM,
+      currentMode: this.currentInteractionMode(),
+      targetReady: this.deps.constructionReadyAt?.(candidate.position[0], candidate.position[2]) ?? true,
+      targetStillValid: (cmd) => {
+        const dx = Math.abs(cmd.targetPosition[0] - candidate.position[0]);
+        const dy = Math.abs(cmd.targetPosition[1] - candidate.position[1]);
+        const dz = Math.abs(cmd.targetPosition[2] - candidate.position[2]);
+        return candidate.valid && dx <= 0.25 && dy <= 0.5 && dz <= 0.25;
+      },
+    });
+    if (!verdict.allowed) {
+      this.deps.recordEditDenial?.(verdict.reason);
+      return { allowed: false, reason: `edit command denied: ${verdict.reason}` };
+    }
+    return { allowed: true, command: active };
   }
 
   private resolveTerrainConformHandler(): ConstructionTerrainConformHandler | null {
@@ -765,6 +854,12 @@ class ConstructionControllerImpl implements ConstructionController {
     }
     if (!candidate.valid) {
       this.lastPlacementMessage = `Blocked: ${candidate.reason ?? "invalid placement"}`;
+      this.syncUi(true);
+      return;
+    }
+    const commandVerdict = this.validatePlaceCommand(candidate, this.pendingPlaceCommand);
+    if (!commandVerdict.allowed) {
+      this.lastPlacementMessage = `Blocked: ${commandVerdict.reason}`;
       this.syncUi(true);
       return;
     }

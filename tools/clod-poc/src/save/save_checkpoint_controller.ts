@@ -56,7 +56,9 @@ export function createSaveCheckpointController(
   };
   const flushToConvergence = async (): Promise<void> => {
     for (let pass = 1; pass <= maxFlushPasses; pass += 1) {
-      await Promise.resolve().then(() => deps.flush());
+      // Call flush immediately so concurrent requestCheckpoint() coalescing can observe
+      // an in-flight flush before the next microtask. Do not defer through Promise.then.
+      await deps.flush();
       if (deps.isConverged?.() ?? true) return;
     }
     throw new Error(`checkpoint did not converge after ${maxFlushPasses} flush passes`);

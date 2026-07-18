@@ -45,6 +45,13 @@ import type { CustomPropsSettings, PropPlacementScene } from "../../../props/pro
 import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
 import { installConstructionCommitGuard } from "../../../construction/construction_commit_guard.js";
 import { resolvePlayerEditAuthorityConfig } from "../../../player/player_edit_authority.js";
+import {
+  cellReadinessAt,
+  createAppCellReadinessFeeds,
+} from "../../../player/cell_readiness.js";
+import type { EditCommandDenialReason } from "../../../player/edit_commands.js";
+import { getDigEditRevision } from "../../../terrain/terrain_edits.js";
+import type { TerrainColliderSet } from "../../../terrain/terrain_collider.js";
 import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
 import { propPlacementSceneToProjectProps } from "../../../project/project_props.js";
 import { projectPropEditStore } from "../../../project/prop_edit_store.js";
@@ -95,6 +102,7 @@ export interface RuntimeSystemsStartupInput {
   statControllers: VegetationStatControllerRefs;
   getHooks: () => ClodHooks | null;
   shadowProxyController?: import("../../../shadows/shadowProxyController.js").ShadowProxyController | null;
+  terrainColliders?: TerrainColliderSet;
 }
 
 export interface RuntimeSystemsStartupResult extends VegetationStartupResult, WaterWeatherStartupResult,
@@ -223,6 +231,7 @@ export async function runRuntimeSystemsStartup(
     vegetationDirtyQueue,
     statControllers,
     getHooks,
+    terrainColliders,
   } = input;
   const densityComposition = prepareRpgDensityComposition(input);
 
@@ -434,6 +443,25 @@ export async function runRuntimeSystemsStartup(
       }
       const getBuildAuthorityOrigin = () => ({ x: camera.position.x, z: camera.position.z });
       const getBuildAuthorityCounters = () => getHooks()?.stats?.counters ?? null;
+      const readinessFeeds = terrainColliders
+        ? createAppCellReadinessFeeds({ terrainColliders })
+        : null;
+      const recordConstructionEditDenial = (reason: EditCommandDenialReason): void => {
+        const counters = getBuildAuthorityCounters();
+        if (!counters) return;
+        const key = reason === "not_ready"
+          ? "edits_denied_not_ready"
+          : reason === "expired"
+            ? "edit_commands_expired"
+            : reason === "revision_mismatch"
+              ? "edit_commands_denied_revision"
+              : reason === "out_of_range"
+                ? "edit_commands_denied_distance"
+                : reason === "mode_changed"
+                  ? "edit_commands_denied_mode"
+                  : "edit_commands_denied_target_moved";
+        counters[key] = (counters[key] ?? 0) + 1;
+      };
       const disposeGuard = installConstructionCommitGuard({
         domElement: app.renderer.domElement,
         camera,
@@ -458,6 +486,12 @@ export async function runRuntimeSystemsStartup(
           editAuthority,
           getAuthorityOrigin: getBuildAuthorityOrigin,
           getAuthorityCounters: getBuildAuthorityCounters,
+          constructionReadyAt: readinessFeeds
+            ? (x, z) => cellReadinessAt(readinessFeeds, x, z).constructionReady
+            : undefined,
+          getTerrainRevision: () => getDigEditRevision(),
+          getInteractionMode: () => "construction",
+          recordEditDenial: recordConstructionEditDenial,
         }), disposeGuard);
       } catch (error) {
         disposeGuard();

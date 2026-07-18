@@ -455,6 +455,7 @@ export async function bootstrapClodPoc() {
     statControllers: postRenderer.uiRefs.statControllers,
     getHooks: () => postRenderer.longViewHooks,
     shadowProxyController: terrainView.shadowProxyController,
+    terrainColliders: renderer.terrainColliders,
   });
 
   await runUiStartup({

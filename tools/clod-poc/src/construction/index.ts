@@ -29,6 +29,11 @@ export type { ConstructionStabilityNode, ConstructionStabilitySolveResult, Predi
 export { findConstructionConnectionIds } from "./construction_connections.js";
 export { reevaluateConstructionSupport } from "./support_reevaluation.js";
 export type { ConstructionGroundSolidProbe, ConstructionSupportAabb, ConstructionSupportReevaluationInput, ConstructionSupportReevaluationResult } from "./support_reevaluation.js";
+export {
+  canonicalConstructionPieces,
+  constructionSemanticEqual,
+} from "./construction_semantic.js";
+export type { CanonicalConstructionPiece } from "./construction_semantic.js";
 export { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 export type { PersistedConstructionPlacementValidationInput } from "./persisted_placement.js";
 export { buildPlacedPieceMap, hasGroundSupport, isPlacedPieceSupported, resolveConstructionPlacementSupport } from "./support_state.js";

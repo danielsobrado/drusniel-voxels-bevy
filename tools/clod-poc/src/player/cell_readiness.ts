@@ -21,6 +21,12 @@ export interface CellReadiness {
   waterQueryReady: boolean;
   /** Voxel authority resident and the cell's collider is at the latest revision — edits accepted. */
   terrainEditReady: boolean;
+  /**
+   * Construction place/remove is accepted here: covering collider is current (not mid-rebuild)
+   * and edit authority is resident. Snap/overlap indexes are process-resident today; this field
+   * still fails closed on pending page replacement so dig-under rebuilds cannot race a commit.
+   */
+  constructionReady: boolean;
   terrainRevision: number;
   /** Highest revision among covering collider pages; -1 when no page covers the cell. */
   colliderRevision: number;
@@ -64,15 +70,23 @@ export function cellReadinessAt(feeds: CellReadinessFeeds, x: number, z: number)
     fallbackKind = "frontier_barrier";
   }
 
+  const authorityResident = feeds.editAuthorityResidentAt(x, z);
+  const constructionReady = collider.covered && !stale && authorityResident;
   return {
     movementCollisionReady,
     waterQueryReady: feeds.waterQueryReadyAt?.(x, z) ?? true,
-    terrainEditReady: collider.covered && !stale && feeds.editAuthorityResidentAt(x, z),
+    terrainEditReady: constructionReady,
+    constructionReady,
     terrainRevision,
     colliderRevision: collider.revision,
     staleColliderSafe: stale,
     fallbackKind,
   };
+}
+
+/** Construction place gate: covering collider must be current (not mid-rebuild). */
+export function constructionTargetReady(feeds: CellReadinessFeeds, x: number, z: number): boolean {
+  return cellReadinessAt(feeds, x, z).constructionReady;
 }
 
 /** Probe shape consumed by the player controller's frontier barrier. */

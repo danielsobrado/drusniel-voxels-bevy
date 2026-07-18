@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   cellReadinessAt,
+  constructionTargetReady,
   movementReadinessAt,
   teleportTargetReady,
   type CellReadinessFeeds,
@@ -32,6 +33,7 @@ describe("cell readiness contract", () => {
       movementCollisionReady: true,
       waterQueryReady: true,
       terrainEditReady: true,
+      constructionReady: true,
       terrainRevision: 3,
       colliderRevision: 3,
       staleColliderSafe: false,
@@ -47,6 +49,7 @@ describe("cell readiness contract", () => {
     expect(readiness.movementCollisionReady).toBe(true);
     expect(readiness.staleColliderSafe).toBe(true);
     expect(readiness.terrainEditReady).toBe(false);
+    expect(readiness.constructionReady).toBe(false);
     expect(readiness.colliderRevision).toBe(3);
     expect(readiness.terrainRevision).toBe(5);
   });
@@ -139,6 +142,7 @@ describe("cell readiness contract", () => {
     });
 
     expect(cellReadinessAt(realFeeds, 0, 0).terrainEditReady).toBe(true);
+    expect(cellReadinessAt(realFeeds, 0, 0).constructionReady).toBe(true);
     expect(cellReadinessAt(realFeeds, 500, 500).movementCollisionReady).toBe(false);
 
     const replacement = new THREE.PlaneGeometry(20, 20, 1, 1);
@@ -146,8 +150,10 @@ describe("cell readiness contract", () => {
     colliders.schedulePageUpdate("page", replacement, 1);
     expect(cellReadinessAt(realFeeds, 0, 0).staleColliderSafe).toBe(true);
     expect(cellReadinessAt(realFeeds, 0, 0).terrainEditReady).toBe(false);
+    expect(constructionTargetReady(realFeeds, 0, 0)).toBe(false);
     colliders.processPendingRebuilds();
     expect(cellReadinessAt(realFeeds, 0, 0).terrainEditReady).toBe(true);
+    expect(constructionTargetReady(realFeeds, 0, 0)).toBe(true);
     expect(cellReadinessAt(realFeeds, 0, 0).colliderRevision).toBe(1);
     colliders.dispose();
   });
