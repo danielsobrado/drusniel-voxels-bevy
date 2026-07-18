@@ -54,7 +54,7 @@ interface NodeImpostorSample {
 interface NodeBlendSample {
   albedo: TslNode;
   coverage: TslNode;
-  localNormal: TslNode | null;
+  localNormal: TslNode;
 }
 
 const LIVE_LIGHTING_KEY = "treeImpostorLiveLighting";
@@ -157,7 +157,7 @@ function blendedNodeSample(atlas: TreeImpostorAtlas): NodeImpostorSample {
       coverage: albedo.w,
       localNormal: atlas.normalDepth
         ? normalize(texture(atlas.normalDepth, atlasUv).xyz.mul(2).sub(1))
-        : null,
+        : vec3(0, 1, 0),
     };
   });
   const coverage = blendedCoverage(samples, weights);
@@ -167,7 +167,7 @@ function blendedNodeSample(atlas: TreeImpostorAtlas): NodeImpostorSample {
     .add(samples[2].albedo.mul(samples[2].coverage).mul(weights.z))
     .add(samples[3].albedo.mul(samples[3].coverage).mul(weights.w))
     .div(safeCoverage);
-  const localNormal = samples.every((sample) => sample.localNormal !== null)
+  const localNormal = atlas.normalDepth
     ? normalize(
         samples[0].localNormal.mul(samples[0].coverage).mul(weights.x)
           .add(samples[1].localNormal.mul(samples[1].coverage).mul(weights.y))
