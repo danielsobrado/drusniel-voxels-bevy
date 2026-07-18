@@ -9,6 +9,7 @@ export type CacheRpcRequest =
       op: "put";
       key: string;
       record: ClodCacheStoredRecord;
+      deadlineUnixMs: number;
       streamingGeneration?: number;
     }
   | { type: "cacheRpc"; requestId: number; op: "delete"; key: string }
