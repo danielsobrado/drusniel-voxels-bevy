@@ -82,11 +82,7 @@ export class RiverMistOverlay {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
-    if (!visible) {
-      this.scanActive = false;
-      this.pool.clear();
-      this.geometry.setDrawRange(0, 0);
-    }
+    if (!visible) this.clearParticles();
     this.applyVisibility();
   }
 
@@ -106,16 +102,18 @@ export class RiverMistOverlay {
     const safeDeltaSeconds = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
     this.pool.advance(safeDeltaSeconds);
     const biome = this.readBiomeState();
+    if (!biome?.enabled || biome.morningMist <= 0.001) {
+      this.clearParticles();
+      return;
+    }
+
     const particles = this.options.settings.mask.particles;
     this.emitTimeS += safeDeltaSeconds;
-    if (!this.scanActive
-      && this.emitTimeS >= particles.emitIntervalS
-      && biome?.enabled
-      && biome.morningMist > 0.001) {
+    if (!this.scanActive && this.emitTimeS >= particles.emitIntervalS) {
       this.emitTimeS = 0;
       this.beginScan(cameraPosition);
     }
-    if (this.scanActive && biome) this.stepScan(biome);
+    if (this.scanActive) this.stepScan(biome);
     this.writeParticles();
   }
 
@@ -128,6 +126,12 @@ export class RiverMistOverlay {
 
   private applyVisibility(): void {
     this.points.visible = this.visible && this.options.settings.enabled;
+  }
+
+  private clearParticles(): void {
+    this.scanActive = false;
+    this.pool.clear();
+    this.geometry.setDrawRange(0, 0);
   }
 
   private beginScan(cameraPosition: THREE.Vector3): void {
