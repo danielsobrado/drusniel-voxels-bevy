@@ -1,5 +1,8 @@
 import { gravelBarSeedPhase } from "../water/gravel_bar_field.js";
-import { readGravelBarSettings } from "../water/gravel_bar_runtime.js";
+import {
+  gravelBarStonesEnabled,
+  readGravelBarSettings,
+} from "../water/gravel_bar_runtime.js";
 
 export function withGravelBarStones(source: string): string {
   const config = readGravelBarSettings();
@@ -44,8 +47,10 @@ const STREAM_FIELDS_RETURN = `    let fields = textureLoad(hydro_fields_atlas_te
     return StoneHydrologyFieldsSample(max(0.0, fields.z), u32(round(max(0.0, fields.w))), 1.0);`;
 
 const STREAM_FIELDS_RETURN_WITH_PHASE = `    let fields = textureLoad(hydro_fields_atlas_texture, vec2<i32>(ix, iz), 0);
-    let phase = textureLoad(hydro_body_phase_atlas_texture, vec2<i32>(ix, iz), 0).x;
-    return StoneHydrologyFieldsSample(fields.x, fields.y, max(0.0, fields.z), u32(round(max(0.0, fields.w))), clamp(phase, 0.0, 1.0), 1.0);`;
+    let encoded_kind = max(0.0, fields.w);
+    let body_kind = u32(round(encoded_kind));
+    let body_phase = clamp(fract(encoded_kind) * 4.0, 0.0, 1.0);
+    return StoneHydrologyFieldsSample(fields.x, fields.y, max(0.0, fields.z), body_kind, body_phase, 1.0);`;
 
 const STATIC_FIELDS_RETURN = `  let fields = textureSampleLevel(hydro_fields_texture, hydro_sampler, uv, 0.0);
   let body_kind = u32(round(clamp(fields.w, 0.0, 1.0) * 255.0));
@@ -84,7 +89,7 @@ const GRAVEL_MASK_WGSL = `fn gravel_bar_unit_sin(value: f32) -> f32 {
 }
 
 fn gravel_bar_mask(wx: f32, wz: f32, hydro: StoneHydrologySample, fields: StoneHydrologyFieldsSample) -> f32 {
-  if (params.counts_b.x == 0u || hydro.enabled < 0.5 || fields.enabled < 0.5 || fields.body_kind != HYDROLOGY_BODY_RIVER) {
+  if (!GRAVEL_BAR_ENABLED || hydro.enabled < 0.5 || fields.enabled < 0.5 || fields.body_kind != HYDROLOGY_BODY_RIVER) {
     return 0.0;
   }
   let flow = vec2<f32>(fields.flow_x, fields.flow_z);
@@ -111,6 +116,7 @@ fn gravel_bar_mask(wx: f32, wz: f32, hydro: StoneHydrologySample, fields: StoneH
 
 function gravelConstants(config: ReturnType<typeof readGravelBarSettings>): string {
   return [
+    `const GRAVEL_BAR_ENABLED: bool = ${gravelBarStonesEnabled() ? "true" : "false"};`,
     constant("GRAVEL_BAR_STRENGTH", config.strength),
     constant("GRAVEL_BAR_SEED_PHASE", gravelBarSeedPhase(config.seedSalt)),
     constant("GRAVEL_BAR_LONGITUDINAL_PERIOD_M", config.longitudinalPeriodM),
