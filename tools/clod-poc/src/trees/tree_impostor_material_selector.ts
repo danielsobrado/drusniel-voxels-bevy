@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { decorateTreeImpostorForestLighting } from "./tree_impostor_forest_lighting.js";
 import { createLiveTreeImpostorMaterial } from "./tree_impostor_live_material.js";
 
 export const TREE_IMPOSTOR_MATERIAL_SELECTION_KEY = "treeImpostorMaterialSelection";
@@ -16,8 +18,10 @@ export function createSelectedTreeImpostorMaterial(
   atlas: TreeImpostorAtlas,
   selection: TreeImpostorMaterialSelection,
   lighting?: EnvironmentLighting,
+  forestLighting: ForestLightingMaterialState | null = null,
 ): THREE.Material {
   const material = createLiveTreeImpostorMaterial(settings, atlas, selection, lighting);
+  decorateTreeImpostorForestLighting(material, selection.webgpu, forestLighting);
   material.userData[TREE_IMPOSTOR_MATERIAL_SELECTION_KEY] = { ...selection };
   return material;
 }
