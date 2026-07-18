@@ -2,7 +2,19 @@ export * from "./waterConfig.js";
 export * from "./waterField.js";
 export * from "./water_authority.js";
 export * from "./waterMaterial.js";
-export * from "./waterClipmap.js";
+export {
+  WATER_CLIPMAP_DEBUG_MODES,
+  createWaterClipmapUpdateStats,
+  finiteWaterWorldBounds,
+  waterQuadRenderable,
+  type WaterClipmapAtlasRuntime,
+  type WaterClipmapOptions,
+  type WaterClipmapUpdateStats,
+  type WaterRect,
+  type WaterWorldBounds,
+} from "./waterClipmap.js";
+export { TieredWaterClipmap as WaterClipmap } from "./water_reflection_tier_clipmap.js";
+export * from "./water_reflection_tiers.js";
 export * from "./waterClipmapStats.js";
 export * from "./waterDebug.js";
 export * from "./waterOwnership.js";
