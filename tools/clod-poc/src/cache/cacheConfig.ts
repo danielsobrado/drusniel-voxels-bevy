@@ -17,6 +17,7 @@ export interface ClodCachePersistentConfig {
   max_bytes: number;
   compression: CacheCompressionMode;
   checksum: CacheChecksumMode;
+  rpc_timeout_ms: number;
 }
 
 export interface ClodCacheInvalidationConfig {
@@ -132,6 +133,7 @@ export function parseClodCacheConfig(text: string): ClodCacheConfig {
       max_bytes: intAt(persistent, "max_bytes", "cache.persistent", 1),
       compression: compressionAt(persistent, "compression", "cache.persistent"),
       checksum: "sha256",
+      rpc_timeout_ms: intAt(persistent, "rpc_timeout_ms", "cache.persistent", 1),
     },
     invalidation: {
       include_config_hash: boolAt(invalidation, "include_config_hash", "cache.invalidation"),
