@@ -1,0 +1,1 @@
+export const STONE_BAR_FIELD_TRANSFORM_VERSION = 1;
