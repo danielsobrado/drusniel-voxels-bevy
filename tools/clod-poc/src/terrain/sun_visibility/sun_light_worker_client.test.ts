@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSunLightRemoteTileBuilder } from "./sun_light_worker_client.js";
+import type { SunLightWorkerTileRequest } from "./sun_light_worker_protocol.js";
 
 class FakeWorker {
   static latest: FakeWorker | null = null;
@@ -15,13 +16,13 @@ class FakeWorker {
   }
 }
 
-const tiles = [{
+const tiles: SunLightWorkerTileRequest[] = [{
   key: "0|0,0|sun",
   tileX: 0,
   tileZ: 0,
   lod: 0,
-  sunVec: [0, 1, 0] as [number, number, number],
-  sunBin: { azimuth: 0, elevation: 0 },
+  sunVec: [0, 1, 0],
+  sunBin: { azimuthIndex: 0, elevationIndex: 0 },
   terrainRevision: 0,
   frameIndex: 1,
 }];
