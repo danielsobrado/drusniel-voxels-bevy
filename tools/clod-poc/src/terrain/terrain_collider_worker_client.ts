@@ -2,6 +2,7 @@
 
 import type { SerializedBVH } from "three-mesh-bvh";
 import type {
+  TerrainColliderWorkerBuiltResponse,
   TerrainColliderWorkerRequest,
   TerrainColliderWorkerResponse,
 } from "./terrain_collider_worker_protocol.js";
@@ -28,6 +29,37 @@ interface PendingBuild {
   reject: (error: Error) => void;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isBuiltResponse(value: unknown): value is TerrainColliderWorkerBuiltResponse {
+  if (!isRecord(value) || value.type !== "built") return false;
+  if (!isNonNegativeSafeInteger(value.requestId)) return false;
+  if (!Array.isArray(value.roots) || value.roots.length === 0) return false;
+  if (!value.roots.every((root) => root instanceof ArrayBuffer && root.byteLength > 0)) return false;
+  if (!(value.indexBuffer instanceof ArrayBuffer)) return false;
+  if (value.indexKind !== "uint16" && value.indexKind !== "uint32") return false;
+  const bytesPerIndex = value.indexKind === "uint16" ? Uint16Array.BYTES_PER_ELEMENT : Uint32Array.BYTES_PER_ELEMENT;
+  if (value.indexBuffer.byteLength === 0 || value.indexBuffer.byteLength % bytesPerIndex !== 0) return false;
+  return typeof value.buildMs === "number" && Number.isFinite(value.buildMs) && value.buildMs >= 0;
+}
+
+function isErrorResponse(value: unknown): value is Extract<TerrainColliderWorkerResponse, { type: "error" }> {
+  return isRecord(value)
+    && value.type === "error"
+    && (value.requestId === null || isNonNegativeSafeInteger(value.requestId))
+    && typeof value.message === "string";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createTerrainColliderRemoteBuilder(): TerrainColliderRemoteBuilder | null {
   let worker: Worker;
   try {
@@ -37,20 +69,30 @@ export function createTerrainColliderRemoteBuilder(): TerrainColliderRemoteBuild
   }
 
   let failed = false;
+  let terminated = false;
   let nextRequestId = 1;
   const pending = new Map<number, PendingBuild>();
 
-  const failAll = (message: string): void => {
-    if (failed) return;
-    failed = true;
-    const error = new Error(message);
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
+  const terminateOnce = (): void => {
+    if (terminated) return;
+    terminated = true;
+    worker.terminate();
   };
 
-  worker.onmessage = (event: MessageEvent<TerrainColliderWorkerResponse>) => {
+  const failAll = (message: string): void => {
+    if (!failed) {
+      failed = true;
+      const error = new Error(message);
+      for (const request of pending.values()) request.reject(error);
+      pending.clear();
+    }
+    terminateOnce();
+  };
+
+  worker.onmessage = (event: MessageEvent<unknown>) => {
+    if (failed) return;
     const response = event.data;
-    if (response.type === "error") {
+    if (isErrorResponse(response)) {
       if (response.requestId === null) {
         failAll(`terrain collider worker error: ${response.message}`);
         return;
@@ -59,6 +101,10 @@ export function createTerrainColliderRemoteBuilder(): TerrainColliderRemoteBuild
       if (!request) return;
       pending.delete(response.requestId);
       request.reject(new Error(`terrain collider worker error: ${response.message}`));
+      return;
+    }
+    if (!isBuiltResponse(response)) {
+      failAll("terrain collider worker returned an invalid protocol message");
       return;
     }
 
@@ -77,6 +123,9 @@ export function createTerrainColliderRemoteBuilder(): TerrainColliderRemoteBuild
   worker.onerror = (event) => {
     failAll(`terrain collider worker crashed: ${event.message || "unknown error"}`);
   };
+  worker.onmessageerror = () => {
+    failAll("terrain collider worker response could not be deserialized");
+  };
 
   return {
     available: () => !failed,
@@ -94,14 +143,12 @@ export function createTerrainColliderRemoteBuilder(): TerrainColliderRemoteBuild
         try {
           worker.postMessage(request, [input.positions.buffer, input.indices.buffer]);
         } catch (error) {
-          pending.delete(requestId);
-          reject(error instanceof Error ? error : new Error(String(error)));
+          failAll(`terrain collider worker postMessage failed: ${errorMessage(error)}`);
         }
       });
     },
     dispose() {
       failAll("terrain collider worker disposed");
-      worker.terminate();
     },
   };
 }
