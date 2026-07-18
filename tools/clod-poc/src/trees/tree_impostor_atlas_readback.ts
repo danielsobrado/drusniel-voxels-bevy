@@ -8,6 +8,7 @@ import {
 
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 8;
 export const TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION = 8192;
+export const TREE_IMPOSTOR_MAX_STRUCTURAL_PAGE_ROWS = 4;
 
 export interface TreeImpostorReadbackRenderer {
   readRenderTargetPixelsAsync?(
@@ -34,6 +35,12 @@ export function validateTreeImpostorRenderTargetSize(
     throw new Error(
       `tree impostor atlas ${width}x${height} exceeds the portable ${maxDimension}px texture limit; ` +
       "reduce resolution or disable age-layer baking",
+    );
+  }
+  if (height > width * TREE_IMPOSTOR_MAX_STRUCTURAL_PAGE_ROWS) {
+    throw new Error(
+      `tree impostor atlas ${width}x${height} contains unsupported age-layer pages; ` +
+      "the runtime currently selects structural pages only, so disable age-layer baking",
     );
   }
 }
@@ -74,9 +81,8 @@ export async function readTreeImpostorAtlasPixels(
   target: THREE.WebGLRenderTarget,
   width: number,
   height: number,
-): Promise<Uint8Array | null> {
-  const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
-  if (!readPixels) return null;
+): Promise<Uint8Array> {
+  const readPixels = requireTreeImpostorReadback(renderer);
   const raw = await readPixels(target, 0, 0, width, height);
   return viewTreeImpostorPixels(raw, width * height * 4);
 }
@@ -110,9 +116,8 @@ export async function readCleanedTreeImpostorAtlasTextures(
   height: number,
   tileSize: number,
   webgpu: boolean,
-): Promise<{ albedo: THREE.DataTexture; normalDepth: THREE.DataTexture } | null> {
-  const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
-  if (!readPixels) return null;
+): Promise<{ albedo: THREE.DataTexture; normalDepth: THREE.DataTexture }> {
+  const readPixels = requireTreeImpostorReadback(renderer);
   const expectedLength = width * height * 4;
   const rawAlbedo = await readPixels(albedoTarget, 0, 0, width, height);
   const rawNormalDepth = await readPixels(normalDepthTarget, 0, 0, width, height);
@@ -127,4 +132,16 @@ export async function readCleanedTreeImpostorAtlasTextures(
     albedo: createTreeImpostorDataTexture(albedo, width, height, albedoTarget.texture.name),
     normalDepth: createTreeImpostorDataTexture(normalDepth, width, height, normalDepthTarget.texture.name),
   };
+}
+
+function requireTreeImpostorReadback(
+  renderer: TreeImpostorReadbackRenderer,
+): NonNullable<TreeImpostorReadbackRenderer["readRenderTargetPixelsAsync"]> {
+  const readPixels = renderer.readRenderTargetPixelsAsync?.bind(renderer);
+  if (!readPixels) {
+    throw new Error(
+      "tree impostor baking requires asynchronous render-target readback for row flipping, cleanup, and mip generation",
+    );
+  }
+  return readPixels;
 }
