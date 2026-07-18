@@ -67,10 +67,10 @@ describe("water reflection clipmap tiers", () => {
   it("preserves exact visual identity while disabled or unavailable", () => {
     const disabled = activeVisual();
     disabled.reflection.clipmapTiers.enabled = false;
-
     expect(resolveWaterReflectionTierVisual(disabled, 32)).toBe(disabled);
-    expect(resolveWaterReflectionTierVisual(activeVisual(), null)).toBeInstanceOf(Object);
+
     const active = activeVisual();
+    expect(resolveWaterReflectionTierVisual(active, null)).toBe(active);
     expect(resolveWaterReflectionTierVisual(active, Number.NaN)).toBe(active);
     expect(resolveWaterReflectionTierVisual(active, 0)).toBe(active);
   });
@@ -114,12 +114,14 @@ describe("water reflection clipmap tiers", () => {
     const initialVisual = activeVisual();
     const updateVisual = vi.fn();
     const handle = materialHandle(updateVisual);
-    const createMaterial = vi.fn(() => handle);
+    const createMaterial = vi.fn((params: WaterMaterialParams) => {
+      expect(params.visual.reflection.maxSteps).toBe(6);
+      return handle;
+    });
     const tieredFactory = createTieredWaterMaterialFactory(createMaterial);
 
     const returned = tieredFactory(materialParams(initialVisual, 8));
-    const firstVisual = createMaterial.mock.calls[0]?.[0].visual;
-    expect(firstVisual?.reflection.maxSteps).toBe(6);
+    expect(createMaterial).toHaveBeenCalledOnce();
     expect(waterMaterialLevelCellSize(materialParams(initialVisual, 8))).toBe(8);
 
     returned.updateVisual(initialVisual);
