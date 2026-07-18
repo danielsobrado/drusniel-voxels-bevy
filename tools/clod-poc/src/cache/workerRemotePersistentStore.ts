@@ -1,4 +1,6 @@
+import cacheConfigText from "../../config/clod_cache.yaml?raw";
 import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes.js";
+import { parseClodCacheConfig } from "./cacheConfig.js";
 import { CacheUnavailableError, CacheWriteRejectedError } from "./cacheErrors.js";
 import type { PersistentCacheStore } from "./indexedDbStore.js";
 import type { CacheRpcRequest, CacheRpcResponse } from "./cacheWorkerRpc.js";
@@ -9,6 +11,7 @@ interface PendingCacheRpc {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+const DEFAULT_CACHE_RPC_TIMEOUT_MS = parseClodCacheConfig(cacheConfigText).persistent.rpc_timeout_ms;
 let nextRequestId = 1;
 const pending = new Map<number, PendingCacheRpc>();
 
@@ -84,7 +87,7 @@ export function pendingCacheRpcCount(): number {
 }
 
 export class WorkerRemotePersistentStore implements PersistentCacheStore {
-  constructor(private readonly timeoutMs: number) {
+  constructor(private readonly timeoutMs = DEFAULT_CACHE_RPC_TIMEOUT_MS) {
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
       throw new CacheUnavailableError("cache RPC timeout must be a positive integer");
     }
