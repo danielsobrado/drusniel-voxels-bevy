@@ -62,6 +62,7 @@ export class TreeSystem {
   patchesDirty = true;
   readonly gpuRing = createTreeGpuRingRuntimeState(null);
   currentLighting: EnvironmentLighting | undefined;
+  currentForestLighting: ForestLightingMaterialState | null = null;
   readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   readonly lastCenter: THREE.Vector3;
   useTreePrepass: boolean;
@@ -112,6 +113,7 @@ export class TreeSystem {
   }
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
+    this.currentForestLighting = state;
     this.assets.updateForestLighting(state);
     for (const handle of treeGpuRingMaterialHandles(this.gpuRing)) handle.updateForestLighting?.(state);
   }

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { StorageBufferAttribute } from "three/webgpu";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import { renderableIndirectDrawCountForGeometry } from "../gpu/indirect_draw_geometry.js";
 import {
   TREE_GPU_RING_GROUP_COUNT,
@@ -48,6 +49,7 @@ export interface TreeGpuRingDrawResourcesInput {
   settings: TreeSettings;
   worldCells: number;
   currentLighting: EnvironmentLighting | undefined;
+  currentForestLighting: ForestLightingMaterialState | null;
   hydrologyWater: TreeHydrologyWater | undefined;
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
   foliageAtlas: TreeFoliageAtlas;
@@ -201,7 +203,8 @@ function createTreeGpuRingMaterialHandle(
       input.currentLighting ?? undefined,
       input.hydrologyWater,
     );
-    return decorateTreeRingLodCrossfade(impostor, input.settings, buffers, lod);
+    const decorated = decorateTreeRingLodCrossfade(impostor, input.settings, buffers, lod);
+    return applyCurrentTreeGpuRingForestLighting(decorated, input.currentForestLighting);
   }
 
   const base = input.settings.render.farCheapMaterial && treeRingUsesFarMaterial(lod)
@@ -227,7 +230,16 @@ function createTreeGpuRingMaterialHandle(
       forestLighting: true,
     },
   });
-  return decorateTreeRingLodCrossfade(parity, input.settings, buffers, lod);
+  const decorated = decorateTreeRingLodCrossfade(parity, input.settings, buffers, lod);
+  return applyCurrentTreeGpuRingForestLighting(decorated, input.currentForestLighting);
+}
+
+function applyCurrentTreeGpuRingForestLighting(
+  handle: TreeMaterialHandle,
+  state: ForestLightingMaterialState | null,
+): TreeMaterialHandle {
+  handle.updateForestLighting?.(state);
+  return handle;
 }
 
 function createGpuRingTierDraw(

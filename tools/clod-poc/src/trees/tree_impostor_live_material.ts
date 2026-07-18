@@ -1,15 +1,18 @@
 import * as THREE from "three";
 import {
   attribute,
+  cameraPosition,
   clamp,
   dot,
   float,
   frontFacing,
   max,
   mix,
+  normalize,
   texture,
   uniform,
   uv,
+  vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { TreeSettings } from "./tree_config.js";
@@ -20,6 +23,7 @@ import {
   createTreeImpostorMaterial,
   createTreeImpostorNodeMaterial,
 } from "./tree_impostor_material.js";
+import { TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME } from "./tree_system_instance_attributes.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -42,9 +46,21 @@ interface NodeLightingUniforms {
   ambientFloor: TslNode;
 }
 
+interface NodeImpostorSample {
+  albedo: TslNode;
+  localNormal: TslNode | null;
+}
+
+interface NodeBlendSample {
+  albedo: TslNode;
+  coverage: TslNode;
+  localNormal: TslNode;
+}
+
 const LIVE_LIGHTING_KEY = "treeImpostorLiveLighting";
 const DEFAULT_AMBIENT_FLOOR = 0.25;
 const LEAF_TRANSMISSION = 0.22;
+const NORMAL_DETAIL_WEIGHT = 0.65;
 const SUN_MAX = 0.85;
 const MIN_COVERAGE = 0.0001;
 
@@ -100,48 +116,98 @@ function configureNodeLighting(
   lighting: EnvironmentLighting,
 ): void {
   const material = rawMaterial as NodeMaterialShape;
-  const normal = material.normalNode;
-  if (!normal) throw new Error("tree impostor node material does not expose a surface normal");
-
-  const albedo = viewBlend ? blendedNodeAlbedo(atlas) : singleNodeAlbedo(atlas);
+  const sample = viewBlend ? blendedNodeSample(atlas) : singleNodeSample(atlas);
+  const surfaceNormal = nodeSurfaceNormal(sample.localNormal);
   const uniforms = nodeLightingUniforms(lighting);
-  const n: TslNode = frontFacing.select(normal, normal.negate());
+  const n: TslNode = frontFacing.select(surfaceNormal, surfaceNormal.negate());
   const sun: TslNode = clamp(max(dot(n, uniforms.light), 0), 0, SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0, 1);
   const hemi: TslNode = mix(uniforms.ground, uniforms.sky, sky);
   const back: TslNode = max(dot(n.negate(), uniforms.light), 0);
-  const transmission: TslNode = albedo.mul(uniforms.sun).mul(back).mul(LEAF_TRANSMISSION);
+  const transmission: TslNode = sample.albedo.mul(uniforms.sun).mul(back).mul(LEAF_TRANSMISSION);
+  material.normalNode = surfaceNormal;
   material.colorNode = clamp(
-    albedo.mul(hemi.add(uniforms.sun.mul(sun)).add(uniforms.ambientFloor)).add(transmission),
+    sample.albedo.mul(hemi.add(uniforms.sun.mul(sun)).add(uniforms.ambientFloor)).add(transmission),
     0,
     1,
   );
   material.userData[LIVE_LIGHTING_KEY] = uniforms;
 }
 
-function singleNodeAlbedo(atlas: TreeImpostorAtlas): TslNode {
+function singleNodeSample(atlas: TreeImpostorAtlas): NodeImpostorSample {
   const rect: TslNode = attribute("treeImpostorUvRect", "vec4");
   const atlasUv: TslNode = rect.xy.add(uv().mul(rect.zw.sub(rect.xy)));
-  return decodeNodeAlbedo(texture(atlas.albedo ?? atlas.texture, atlasUv));
+  const albedo: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
+  return {
+    albedo: decodeNodeAlbedo(albedo),
+    localNormal: atlas.normalDepth
+      ? normalize(texture(atlas.normalDepth, atlasUv).xyz.mul(2).sub(1))
+      : null,
+  };
 }
 
-function blendedNodeAlbedo(atlas: TreeImpostorAtlas): TslNode {
+function blendedNodeSample(atlas: TreeImpostorAtlas): NodeImpostorSample {
   const weights: TslNode = attribute("treeImpostorBlendWeights", "vec4");
-  const samples = [0, 1, 2, 3].map((index) => {
+  const samples = [0, 1, 2, 3].map((index): NodeBlendSample => {
     const rect: TslNode = attribute(`treeImpostorUvRect${index}`, "vec4");
     const atlasUv: TslNode = rect.xy.add(uv().mul(rect.zw.sub(rect.xy)));
-    const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
-    return { albedo: decodeNodeAlbedo(sample), coverage: sample.w };
+    const albedo: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
+    return {
+      albedo: decodeNodeAlbedo(albedo),
+      coverage: albedo.w,
+      localNormal: atlas.normalDepth
+        ? normalize(texture(atlas.normalDepth, atlasUv).xyz.mul(2).sub(1))
+        : vec3(0, 1, 0),
+    };
   });
-  const coverage = samples[0].coverage.mul(weights.x)
-    .add(samples[1].coverage.mul(weights.y))
-    .add(samples[2].coverage.mul(weights.z))
-    .add(samples[3].coverage.mul(weights.w));
-  return samples[0].albedo.mul(samples[0].coverage).mul(weights.x)
+  const coverage = blendedCoverage(samples, weights);
+  const safeCoverage = max(coverage, float(MIN_COVERAGE));
+  const albedo = samples[0].albedo.mul(samples[0].coverage).mul(weights.x)
     .add(samples[1].albedo.mul(samples[1].coverage).mul(weights.y))
     .add(samples[2].albedo.mul(samples[2].coverage).mul(weights.z))
     .add(samples[3].albedo.mul(samples[3].coverage).mul(weights.w))
-    .div(max(coverage, float(MIN_COVERAGE)));
+    .div(safeCoverage);
+  const localNormal = atlas.normalDepth
+    ? normalize(
+        samples[0].localNormal.mul(samples[0].coverage).mul(weights.x)
+          .add(samples[1].localNormal.mul(samples[1].coverage).mul(weights.y))
+          .add(samples[2].localNormal.mul(samples[2].coverage).mul(weights.z))
+          .add(samples[3].localNormal.mul(samples[3].coverage).mul(weights.w))
+          .div(safeCoverage),
+      )
+    : null;
+  return { albedo, localNormal };
+}
+
+function blendedCoverage(samples: readonly NodeBlendSample[], weights: TslNode): TslNode {
+  return samples[0].coverage.mul(weights.x)
+    .add(samples[1].coverage.mul(weights.y))
+    .add(samples[2].coverage.mul(weights.z))
+    .add(samples[3].coverage.mul(weights.w));
+}
+
+function nodeSurfaceNormal(localNormal: TslNode | null): TslNode {
+  const billboard = nodeBillboardNormal();
+  if (!localNormal) return billboard;
+  const yaw: TslNode = attribute(TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME, "vec2");
+  const rotated = normalize(vec3(
+    localNormal.x.mul(yaw.x).add(localNormal.z.mul(yaw.y)),
+    localNormal.y,
+    localNormal.z.mul(yaw.x).sub(localNormal.x.mul(yaw.y)),
+  ));
+  return normalize((mix as any)(billboard, rotated, float(NORMAL_DETAIL_WEIGHT)));
+}
+
+function nodeBillboardNormal(): TslNode {
+  const worldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+  const toCamera: TslNode = vec3(
+    cameraPosition.x.sub(worldXZ.x),
+    float(0),
+    cameraPosition.z.sub(worldXZ.y),
+  );
+  return dot(toCamera, toCamera)
+    .greaterThan(float(0.000001))
+    .select(normalize(toCamera), vec3(0, 0, 1));
 }
 
 function decodeNodeAlbedo(sample: TslNode): TslNode {
@@ -155,34 +221,49 @@ function configureShaderLighting(
   lighting: EnvironmentLighting,
 ): void {
   Object.assign(material.uniforms, shaderLightingUniforms(lighting));
+  material.vertexShader = addShaderYawBasis(material.vertexShader);
   material.fragmentShader = addShaderLightingUniforms(material.fragmentShader)
     .replace(/vec3 treeImpostorRelight\([\s\S]*?\n\}/, dynamicRelightFunction());
   material.fragmentShader = viewBlend
     ? material.fragmentShader.replace(
         /  if \(hasNormalDepthMap > 0\.5\) \{[\s\S]*?  \}\n  gl_FragColor = vec4\(albedo, coverage\);/,
-        `  vec3 packedNormal = vec3(0.5, 0.5, 1.0);\n  if (hasNormalDepthMap > 0.5) {\n    vec3 n0 = texture2D(normalDepthMap, vTreeImpostorUv0).rgb;\n    vec3 n1 = texture2D(normalDepthMap, vTreeImpostorUv1).rgb;\n    vec3 n2 = texture2D(normalDepthMap, vTreeImpostorUv2).rgb;\n    vec3 n3 = texture2D(normalDepthMap, vTreeImpostorUv3).rgb;\n    packedNormal = treeImpostorBlendPackedNormal(n0, n1, n2, n3, coverages, vTreeImpostorBlendWeights, coverage);\n  }\n  albedo = treeImpostorRelight(albedo, packedNormal, vTreeImpostorBillboardNormal, hasNormalDepthMap);\n  gl_FragColor = vec4(albedo, coverage);`,
+        `  vec3 packedNormal = vec3(0.5, 0.5, 1.0);\n  if (hasNormalDepthMap > 0.5) {\n    vec3 n0 = texture2D(normalDepthMap, vTreeImpostorUv0).rgb;\n    vec3 n1 = texture2D(normalDepthMap, vTreeImpostorUv1).rgb;\n    vec3 n2 = texture2D(normalDepthMap, vTreeImpostorUv2).rgb;\n    vec3 n3 = texture2D(normalDepthMap, vTreeImpostorUv3).rgb;\n    packedNormal = treeImpostorBlendPackedNormal(n0, n1, n2, n3, coverages, vTreeImpostorBlendWeights, coverage);\n  }\n  albedo = treeImpostorRelight(albedo, packedNormal, vTreeImpostorBillboardNormal, vTreeImpostorYawSinCos, hasNormalDepthMap);\n  gl_FragColor = vec4(albedo, coverage);`,
       )
     : material.fragmentShader.replace(
         /  vec3 albedo = treeImpostorDecodeAlbedo\(color\);\n  if \(hasNormalDepthMap > 0\.5\) \{[\s\S]*?  \}\n  gl_FragColor = vec4\(albedo, color\.a\);/,
-        `  vec3 packedNormal = vec3(0.5, 0.5, 1.0);\n  if (hasNormalDepthMap > 0.5) packedNormal = texture2D(normalDepthMap, vTreeImpostorUv).rgb;\n  vec3 albedo = treeImpostorRelight(treeImpostorDecodeAlbedo(color), packedNormal, vTreeImpostorBillboardNormal, hasNormalDepthMap);\n  gl_FragColor = vec4(albedo, color.a);`,
+        `  vec3 packedNormal = vec3(0.5, 0.5, 1.0);\n  if (hasNormalDepthMap > 0.5) packedNormal = texture2D(normalDepthMap, vTreeImpostorUv).rgb;\n  vec3 albedo = treeImpostorRelight(treeImpostorDecodeAlbedo(color), packedNormal, vTreeImpostorBillboardNormal, vTreeImpostorYawSinCos, hasNormalDepthMap);\n  gl_FragColor = vec4(albedo, color.a);`,
       );
-  if (!material.fragmentShader.includes("uTreeImpostorSunDirection")
-    || !material.fragmentShader.includes("hasNormalDepthMap);")
+  if (!material.vertexShader.includes("vTreeImpostorYawSinCos = treeImpostorYawSinCos")
+    || !material.fragmentShader.includes("uTreeImpostorSunDirection")
+    || !material.fragmentShader.includes("vTreeImpostorYawSinCos, hasNormalDepthMap)")
     || material.fragmentShader.includes("normalize(vec3(0.4, 0.85, 0.3))")) {
     throw new Error("tree impostor live-lighting shader transform failed");
   }
   material.needsUpdate = true;
 }
 
+function addShaderYawBasis(source: string): string {
+  const transformed = source
+    .replace(
+      "attribute vec2 treeWorldXZ;",
+      `attribute vec2 treeWorldXZ;\nattribute vec2 ${TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME};\nvarying vec2 vTreeImpostorYawSinCos;`,
+    )
+    .replace("void main() {", `void main() {\n  vTreeImpostorYawSinCos = ${TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME};`);
+  if (!transformed.includes("vTreeImpostorYawSinCos = treeImpostorYawSinCos")) {
+    throw new Error("tree impostor yaw-basis vertex transform failed");
+  }
+  return transformed;
+}
+
 function addShaderLightingUniforms(source: string): string {
   return source.replace(
     "uniform float alphaTest;",
-    `uniform float alphaTest;\nuniform vec3 uTreeImpostorSunDirection;\nuniform vec3 uTreeImpostorSunColor;\nuniform vec3 uTreeImpostorSkyColor;\nuniform vec3 uTreeImpostorGroundColor;\nuniform float uTreeImpostorAmbientFloor;`,
+    `uniform float alphaTest;\nvarying vec2 vTreeImpostorYawSinCos;\nuniform vec3 uTreeImpostorSunDirection;\nuniform vec3 uTreeImpostorSunColor;\nuniform vec3 uTreeImpostorSkyColor;\nuniform vec3 uTreeImpostorGroundColor;\nuniform float uTreeImpostorAmbientFloor;`,
   );
 }
 
 function dynamicRelightFunction(): string {
-  return `vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal, float hasNormalMap) {\n  vec3 capturedNormal = normalize(packedNormal * 2.0 - 1.0);\n  vec3 detailedNormal = normalize(mix(normalize(billboardNormal), capturedNormal, TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT));\n  vec3 n0 = normalize(mix(normalize(billboardNormal), detailedNormal, step(0.5, hasNormalMap)));\n  vec3 n = gl_FrontFacing ? n0 : -n0;\n  vec3 sunDir = normalize(uTreeImpostorSunDirection);\n  float sun = clamp(max(dot(n, sunDir), 0.0), 0.0, 0.85);\n  float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);\n  float back = max(dot(-n, sunDir), 0.0);\n  vec3 hemi = mix(uTreeImpostorGroundColor, uTreeImpostorSkyColor, sky);\n  vec3 transmission = albedo * uTreeImpostorSunColor * back * 0.22;\n  return clamp(albedo * (hemi + uTreeImpostorSunColor * sun + vec3(uTreeImpostorAmbientFloor)) + transmission, 0.0, 1.0);\n}`;
+  return `vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal, vec3 billboardNormal, vec2 yawSinCos, float hasNormalMap) {\n  vec3 localNormal = normalize(packedNormal * 2.0 - 1.0);\n  vec3 capturedNormal = normalize(vec3(\n    localNormal.x * yawSinCos.x + localNormal.z * yawSinCos.y,\n    localNormal.y,\n    localNormal.z * yawSinCos.x - localNormal.x * yawSinCos.y\n  ));\n  vec3 detailedNormal = normalize(mix(normalize(billboardNormal), capturedNormal, TREE_IMPOSTOR_NORMAL_DETAIL_WEIGHT));\n  vec3 n0 = normalize(mix(normalize(billboardNormal), detailedNormal, step(0.5, hasNormalMap)));\n  vec3 n = gl_FrontFacing ? n0 : -n0;\n  vec3 sunDir = normalize(uTreeImpostorSunDirection);\n  float sun = clamp(max(dot(n, sunDir), 0.0), 0.0, 0.85);\n  float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);\n  float back = max(dot(-n, sunDir), 0.0);\n  vec3 hemi = mix(uTreeImpostorGroundColor, uTreeImpostorSkyColor, sky);\n  vec3 transmission = albedo * uTreeImpostorSunColor * back * 0.22;\n  return clamp(albedo * (hemi + uTreeImpostorSunColor * sun + vec3(uTreeImpostorAmbientFloor)) + transmission, 0.0, 1.0);\n}`;
 }
 
 function nodeLightingUniforms(lighting: EnvironmentLighting): NodeLightingUniforms {

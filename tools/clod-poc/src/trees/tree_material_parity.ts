@@ -24,12 +24,16 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
-import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import {
+  forestLightingDebugModeValue,
+  type ForestLightingMaterialState,
+} from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import { TREE_FOLIAGE_ATLAS_COLUMNS, TREE_FOLIAGE_ATLAS_ROWS } from "./tree_alpha_mask.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import { decorateTreeNodeForestLighting } from "./tree_node_forest_lighting.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
 import {
   TREE_RING_CELL_SIZE_M,
@@ -60,6 +64,10 @@ const CARD_EDGE_NEAR_M = 35;
 const CARD_EDGE_FAR_M = 70;
 const CAMERA_FADE_START_M = 0.85;
 const CAMERA_FADE_END_M = 2.6;
+const RING_FOREST_DARKEN_MAX = 0.72;
+const RING_FOREST_FOG_MAX = 0.35;
+const RING_FOREST_SHAFT_HINT = 0.05;
+const RING_FOREST_FOG_COLOR = new THREE.Vector3(0.72, 0.78, 0.81);
 
 export function decorateTreeMaterialHandle(
   handle: TreeMaterialHandle,
@@ -107,7 +115,9 @@ export function decorateTreeMaterialHandle(
     forest?.dispose();
     originalDispose();
   };
-  return handle;
+  return !options.ring && regular.colorNode
+    ? decorateTreeNodeForestLighting(handle)
+    : handle;
 }
 
 function createTreeVisibilityNodes(atlas: TreeFoliageAtlas): {
@@ -165,16 +175,15 @@ function createRingForestLighting(
   update(state: ForestLightingMaterialState | null): void;
   dispose(): void;
 } {
-  const neutralData = new Uint8Array([0, 0, 0, 0]);
-  const neutralTexture = new THREE.DataTexture(neutralData, 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
-  neutralTexture.needsUpdate = true;
-
+  const neutralPackedTexture = createNeutralForestTexture("tree-ring-forest-neutral-packed");
+  const neutralAuxTexture = createNeutralForestTexture("tree-ring-forest-neutral-aux");
   const enabled = uniform(0);
   const worldSize = uniform(1);
   const aoStrength = uniform(1);
   const shadowStrength = uniform(1);
-  const fogStrength = uniform(1);
-  const fogColor = uniform(new THREE.Vector3(0.72, 0.78, 0.81));
+  const fogStrength = uniform(0);
+  const fogColor = uniform(RING_FOREST_FOG_COLOR.clone());
+  const debugMode = uniform(0);
   const seed = uniform(settings.seed);
   const cellSize = uniform(TREE_RING_CELL_SIZE_M);
 
@@ -187,26 +196,42 @@ function createRingForestLighting(
   );
   const worldXZ: TslNode = worldCell.add(jitter).mul(cellSize);
   const forestUv: TslNode = clamp(worldXZ.div(worldSize), vec2(0), vec2(1));
-  const packed: TslNode = texture(neutralTexture, forestUv);
+  const packed: TslNode = texture(neutralPackedTexture, forestUv);
+  const aux: TslNode = texture(neutralAuxTexture, forestUv);
 
   if (material.colorNode) {
     const darken: TslNode = clamp(
       packed.x.mul(aoStrength).add(packed.y.mul(shadowStrength)),
       0,
-      0.72,
+      RING_FOREST_DARKEN_MAX,
     ).mul(enabled);
-    const fog: TslNode = clamp(packed.z.mul(fogStrength).mul(enabled), 0, 0.35);
-    material.colorNode = mix(
+    const fog: TslNode = clamp(packed.z.mul(fogStrength).mul(enabled), 0, RING_FOREST_FOG_MAX);
+    const lit: TslNode = mix(
       material.colorNode.mul(float(1).sub(darken)),
       fogColor,
       fog,
-    ).add(vec3(packed.w.mul(0.05).mul(enabled)));
+    ).add(vec3(packed.w.mul(RING_FOREST_SHAFT_HINT).mul(enabled)));
+    const debugColor = ringForestDebugColor(debugMode, packed, aux);
+    const debugActive = enabled.greaterThan(0.5).and(debugMode.greaterThan(0.5));
+    material.colorNode = debugActive.select(debugColor, lit);
   }
+
+  const reset = (): void => {
+    enabled.value = 0;
+    worldSize.value = 1;
+    aoStrength.value = 1;
+    shadowStrength.value = 1;
+    fogStrength.value = 0;
+    fogColor.value.copy(RING_FOREST_FOG_COLOR);
+    debugMode.value = 0;
+    packed.value = neutralPackedTexture;
+    aux.value = neutralAuxTexture;
+  };
 
   return {
     update(state: ForestLightingMaterialState | null): void {
       if (!state) {
-        enabled.value = 0;
+        reset();
         return;
       }
       const config = state.settings;
@@ -215,12 +240,45 @@ function createRingForestLighting(
       aoStrength.value = config.ambientOcclusion.strength;
       shadowStrength.value = config.shadowProxy.strength;
       fogStrength.value = config.atmosphere.forestFogStrength + config.atmosphere.aerialTintStrength;
+      debugMode.value = forestLightingDebugModeValue(config.materialIntegration.debugMode);
       packed.value = state.textureHandle.texture;
+      aux.value = state.textureHandle.auxTexture;
     },
     dispose(): void {
-      neutralTexture.dispose();
+      neutralPackedTexture.dispose();
+      neutralAuxTexture.dispose();
     },
   };
+}
+
+function createNeutralForestTexture(name: string): THREE.DataTexture {
+  const result = new THREE.DataTexture(
+    new Uint8Array([0, 0, 0, 0]),
+    1,
+    1,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  result.name = name;
+  result.needsUpdate = true;
+  return result;
+}
+
+function ringForestDebugColor(debugMode: TslNode, packed: TslNode, aux: TslNode): TslNode {
+  const combined: TslNode = vec3(packed.x, packed.y, max(packed.z, aux.y));
+  return debugMode.lessThan(1.5).select(
+    vec3(aux.x),
+    debugMode.lessThan(2.5).select(
+      vec3(packed.x),
+      debugMode.lessThan(3.5).select(
+        vec3(packed.y),
+        debugMode.lessThan(4.5).select(
+          vec3(packed.z),
+          debugMode.lessThan(5.5).select(vec3(packed.w), combined),
+        ),
+      ),
+    ),
+  );
 }
 
 function ringHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode {

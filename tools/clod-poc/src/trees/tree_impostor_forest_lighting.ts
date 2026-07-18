@@ -143,7 +143,7 @@ function createNodeForestLightingHandle(material: NodeMaterialShape): ImpostorFo
     return {
       update(state) {
         if (!state) {
-          nodeState.enabled.value = 0;
+          resetNodeForestLightingState(nodeState, packedTexture, auxTexture);
           return;
         }
         const settings = state.settings;
@@ -170,6 +170,21 @@ function createNodeForestLightingHandle(material: NodeMaterialShape): ImpostorFo
   }
 }
 
+function resetNodeForestLightingState(
+  state: NodeForestLightingState,
+  packedTexture: THREE.Texture,
+  auxTexture: THREE.Texture,
+): void {
+  state.enabled.value = 0;
+  state.worldSize.value = 1;
+  state.aoStrength.value = 1;
+  state.shadowStrength.value = 1;
+  state.fogStrength.value = 0;
+  state.debugMode.value = 0;
+  state.packedNode.value = packedTexture;
+  state.auxNode.value = auxTexture;
+}
+
 function forestDebugColorNode(debugMode: TslNode, packed: TslNode, aux: TslNode): TslNode {
   const combined: TslNode = vec3(packed.x, packed.y, max(packed.z, aux.y));
   return debugMode.lessThan(1.5).select(
@@ -192,8 +207,7 @@ function createShaderForestLightingHandle(material: THREE.ShaderMaterial): Impos
   const auxTexture = createNeutralForestTexture("tree-impostor-forest-neutral-aux");
   try {
     const uniforms = createForestLightingUniforms();
-    uniforms.uForestLightingMap.value = packedTexture;
-    uniforms.uForestLightingAuxMap.value = auxTexture;
+    resetShaderForestLightingState(uniforms, packedTexture, auxTexture);
     Object.assign(material.uniforms, uniforms);
     material.vertexShader = injectImpostorForestVertexShader(material.vertexShader);
     material.fragmentShader = injectImpostorForestFragmentShader(material.fragmentShader);
@@ -202,6 +216,10 @@ function createShaderForestLightingHandle(material: THREE.ShaderMaterial): Impos
     let disposed = false;
     return {
       update(state) {
+        if (!state) {
+          resetShaderForestLightingState(uniforms, packedTexture, auxTexture);
+          return;
+        }
         updateForestLightingUniforms(uniforms, state, "tree");
       },
       dispose() {
@@ -216,6 +234,21 @@ function createShaderForestLightingHandle(material: THREE.ShaderMaterial): Impos
     auxTexture.dispose();
     throw error;
   }
+}
+
+function resetShaderForestLightingState(
+  uniforms: ReturnType<typeof createForestLightingUniforms>,
+  packedTexture: THREE.Texture,
+  auxTexture: THREE.Texture,
+): void {
+  uniforms.uForestLightingMap.value = packedTexture;
+  uniforms.uForestLightingAuxMap.value = auxTexture;
+  uniforms.uForestLightingEnabled.value = 0;
+  uniforms.uForestLightingWorldSize.value = 1;
+  uniforms.uForestAoStrength.value = 1;
+  uniforms.uForestShadowStrength.value = 1;
+  uniforms.uForestFogStrength.value = 0;
+  uniforms.uForestDebugMode.value = 0;
 }
 
 function injectImpostorForestVertexShader(source: string): string {

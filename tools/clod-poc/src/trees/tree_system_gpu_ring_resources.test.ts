@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
+import {
+  cloneForestLightingSettings,
+  type ForestLightingMaterialState,
+} from "../forest_lighting/index.js";
 import { TREE_GPU_RING_SHADOW_GROUP_COUNT } from "../gpu/tree_ring_compute.js";
-import { cloneTreeSettings, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import {
+  cloneTreeSettings,
+  TREE_LODS,
+  TREE_SPECIES,
+  type TreeSettings,
+  type TreeSpeciesId,
+} from "./tree_config.js";
 import { octFrames } from "./tree_impostor_octahedral.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
@@ -10,14 +20,17 @@ import { TREE_GPU_RING_INSTANCE_VEC4S } from "./tree_system_gpu_ring_draw.js";
 import type { TreeWebGpuBackendAccess } from "./tree_system_types.js";
 import {
   createTreeSystemGpuRingDrawResources,
+  refreshTreeSystemGpuRingImpostorResources,
   TREE_GPU_RING_DISABLED_SHADOW_CAPACITY_PER_GROUP,
   treeGpuRingAllocatedShadowCapacityPerGroup,
+  type TreeGpuRingDrawResourcesInput,
 } from "./tree_system_gpu_ring_resources.js";
 
 const materialFactoryMocks = vi.hoisted(() => ({
   regular: vi.fn(),
   impostor: vi.fn(),
   far: vi.fn(),
+  forestUpdates: [] as Array<{ name: string; state: unknown }>,
 }));
 
 vi.mock("./tree_node_material.js", () => ({
@@ -42,6 +55,7 @@ describe("tree system GPU ring resources", () => {
     materialFactoryMocks.regular.mockReset();
     materialFactoryMocks.impostor.mockReset();
     materialFactoryMocks.far.mockReset();
+    materialFactoryMocks.forestUpdates.length = 0;
     materialFactoryMocks.regular.mockImplementation((_settings: unknown, _buffers: unknown, lod: string) => fakeHandle(`regular:${lod}`));
     materialFactoryMocks.impostor.mockImplementation((_settings: unknown, _buffers: unknown, atlas: TreeImpostorAtlas) =>
       fakeHandle(`impostor:${atlas.species}`),
@@ -60,6 +74,33 @@ describe("tree system GPU ring resources", () => {
     expect(ready.materialHandles["oak:impostor"].regularMaterial.name).toBe("impostor:oak");
     expect(materialFactoryMocks.impostor).toHaveBeenCalledTimes(1);
     expect(materialFactoryMocks.impostor.mock.calls[0]?.[2]).toBe(readyAtlas);
+  });
+
+  it("applies active forest lighting to every visible handle during resource creation", () => {
+    const state = forestState();
+
+    createResources({ oak: atlas("oak", true) }, undefined, undefined, state);
+
+    const applied = materialFactoryMocks.forestUpdates.filter((update) => update.state === state);
+    expect(applied).toHaveLength(TREE_SPECIES.length * TREE_LODS.length);
+    expect(applied.some((update) => update.name === "impostor:oak")).toBe(true);
+    expect(applied.some((update) => update.name === "regular:near")).toBe(true);
+    expect(applied.some((update) => update.name === "far:far")).toBe(true);
+  });
+
+  it("applies active forest lighting before publishing a refreshed impostor handle", () => {
+    const sourceGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const settings = settingsForTest();
+    const state = forestState();
+    const pendingInput = resourcesInput({ oak: atlas("oak", false) }, sourceGeometry, settings, state);
+    const resources = createTreeSystemGpuRingDrawResources(pendingInput, 2);
+    materialFactoryMocks.forestUpdates.length = 0;
+
+    const readyInput = resourcesInput({ oak: atlas("oak", true) }, sourceGeometry, settings, state);
+    expect(refreshTreeSystemGpuRingImpostorResources(readyInput, resources)).toBe(true);
+
+    expect(materialFactoryMocks.forestUpdates).toContainEqual({ name: "impostor:oak", state });
+    expect(resources.materialHandles["oak:impostor"].regularMaterial.name).toBe("impostor:oak");
   });
 
   it("does not create renderable GPU ring meshes for empty source geometry", () => {
@@ -90,14 +131,28 @@ function createResources(
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
   sourceGeometry: THREE.BufferGeometry = new THREE.BoxGeometry(1, 1, 1),
   settings: TreeSettings = settingsForTest(),
+  currentForestLighting: ForestLightingMaterialState | null = null,
 ) {
-  return createTreeSystemGpuRingDrawResources({
+  return createTreeSystemGpuRingDrawResources(
+    resourcesInput(impostorAtlases, sourceGeometry, settings, currentForestLighting),
+    2,
+  );
+}
+
+function resourcesInput(
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+  sourceGeometry: THREE.BufferGeometry,
+  settings: TreeSettings,
+  currentForestLighting: ForestLightingMaterialState | null,
+): TreeGpuRingDrawResourcesInput {
+  return {
     backend: fakeBackend(),
     root: new THREE.Group(),
     ringPrepassTwins: [],
     settings,
     worldCells: 64,
     currentLighting: undefined,
+    currentForestLighting,
     hydrologyWater: undefined,
     impostorAtlases,
     foliageAtlas: fakeFoliageAtlas(),
@@ -105,7 +160,7 @@ function createResources(
     useTreePrepass: false,
     treePrepassMaxLod: "far",
     geometryForGpuRing: () => sourceGeometry,
-  }, 2);
+  };
 }
 
 function settingsForTest(): TreeSettings {
@@ -140,9 +195,30 @@ function fakeHandle(name: string): TreeMaterialHandle {
     },
     setTime() {},
     updateSettings() {},
+    updateForestLighting(state) {
+      materialFactoryMocks.forestUpdates.push({ name, state });
+    },
     dispose() {
       regularMaterial.dispose();
       debugMaterial.dispose();
+    },
+  };
+}
+
+function forestState(): ForestLightingMaterialState {
+  const texture = new THREE.DataTexture(new Uint8Array([1, 2, 3, 4]), 1, 1);
+  const auxTexture = new THREE.DataTexture(new Uint8Array([5, 6, 7, 8]), 1, 1);
+  return {
+    worldCells: 64,
+    settings: cloneForestLightingSettings(),
+    textureHandle: {
+      texture,
+      auxTexture,
+      update() {},
+      dispose() {
+        texture.dispose();
+        auxTexture.dispose();
+      },
     },
   };
 }

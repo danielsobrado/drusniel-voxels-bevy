@@ -3,7 +3,10 @@ import {
   TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
   TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
 } from "./tree_impostor_blend_geometry.js";
-import { TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME } from "./tree_system_instance_attributes.js";
+import {
+  TREE_IMPOSTOR_LOCAL_POSITION_SCALE_ATTRIBUTE_NAME,
+  TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME,
+} from "./tree_system_instance_attributes.js";
 
 const TREE_INSTANCE_BASE_STRIDE = 16;
 const TREE_INSTANCE_IMPOSTOR_STRIDE = 44;
@@ -36,6 +39,10 @@ export function attachPackedTreeInstanceAttributes(
     geometry.setAttribute(TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES[index], attribute(buffer, 4, 24 + index * 4));
   }
   geometry.setAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME, attribute(buffer, 4, 40));
+
+  const yaw = new Float32Array(safeCapacity * 2);
+  for (let index = 0; index < safeCapacity; index++) yaw[index * 2] = 1;
+  geometry.setAttribute(TREE_IMPOSTOR_YAW_SIN_COS_ATTRIBUTE_NAME, new THREE.InstancedBufferAttribute(yaw, 2));
 }
 
 function attribute(
