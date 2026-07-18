@@ -5,6 +5,7 @@ import {
   isCurrentVoxelProjectManifest,
   type VoxelProjectArchiveContents,
 } from "../../project/voxel_project_archive.js";
+import { applyProjectGeneratorQuery } from "../../project/project_world_identity.js";
 import { loadSavedWorldStartup } from "./save_world_startup.js";
 
 export interface ProjectImportDom {
@@ -35,6 +36,7 @@ function applyStagedWorldIdentity(
   }
   const { terrainField } = manifest.world;
   const { islandShape } = terrainField;
+  applyProjectGeneratorQuery(searchParams, manifest.world.generatorQuery);
   searchParams.set("scene", manifest.world.scene);
   searchParams.set("seed", String(terrainField.seed));
   searchParams.set("seaLevel", String(terrainField.seaLevel));
