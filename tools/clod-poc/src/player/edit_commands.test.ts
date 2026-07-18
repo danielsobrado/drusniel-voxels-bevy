@@ -61,18 +61,29 @@ describe("edit commands", () => {
     expect(editCommandMayRetryAcrossRevisions("spell_cast")).toBe(false);
   });
 
-  it("construction ghosts may retry across revisions ONLY via latest-revision re-validation", () => {
+  it("construction ghosts retry only with proof from the latest terrain revision", () => {
     const ghost = command({ operation: "construction_place" });
     expect(editCommandMayRetryAcrossRevisions("construction_place")).toBe(true);
-    // No validation oracle wired → deny (fails closed).
     expect(validateEditCommand(ghost, context({ currentTerrainRevision: 9 })))
       .toEqual({ allowed: false, reason: "target_moved" });
-    // Oracle confirms the same world feature is still targeted → place.
+    // A stale preview oracle cannot certify itself without a matching validation revision.
     expect(validateEditCommand(ghost, context({ currentTerrainRevision: 9, targetStillValid: () => true })))
-      .toEqual({ allowed: true });
-    // Oracle says the terrain moved under the ghost → deny with feedback.
-    expect(validateEditCommand(ghost, context({ currentTerrainRevision: 9, targetStillValid: () => false })))
       .toEqual({ allowed: false, reason: "target_moved" });
+    expect(validateEditCommand(ghost, context({
+      currentTerrainRevision: 9,
+      targetValidatedAtTerrainRevision: 8,
+      targetStillValid: () => true,
+    }))).toEqual({ allowed: false, reason: "target_moved" });
+    expect(validateEditCommand(ghost, context({
+      currentTerrainRevision: 9,
+      targetValidatedAtTerrainRevision: 9,
+      targetStillValid: () => true,
+    }))).toEqual({ allowed: true });
+    expect(validateEditCommand(ghost, context({
+      currentTerrainRevision: 9,
+      targetValidatedAtTerrainRevision: 9,
+      targetStillValid: () => false,
+    }))).toEqual({ allowed: false, reason: "target_moved" });
   });
 
   it("interaction distance is re-checked at execution time", () => {
