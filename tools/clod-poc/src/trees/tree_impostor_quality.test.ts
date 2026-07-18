@@ -4,6 +4,10 @@ import { cloneTreeSettings } from "./tree_config_defaults.js";
 import { TREE_LODS, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
 import { configureTreeImpostorAtlasTexture } from "./tree_impostor_baker.js";
+import {
+  TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
+  validateTreeImpostorRenderTargetSize,
+} from "./tree_impostor_atlas_readback.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
 import { selectTreeSystemGeometry } from "./tree_system_impostor_resources.js";
 import { estimateTreeImpostorAtlasMemoryMiB } from "./tree_impostor_memory.js";
@@ -50,6 +54,19 @@ describe("tree impostor quality defaults", () => {
     expect(texture.minFilter).toBe(THREE.LinearMipmapLinearFilter);
     expect(texture.magFilter).toBe(THREE.LinearFilter);
     expect(texture.anisotropy).toBeGreaterThanOrEqual(8);
+  });
+
+  it("rejects atlas dimensions outside the portable texture contract", () => {
+    expect(() => validateTreeImpostorRenderTargetSize(
+      TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
+      TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION,
+    )).not.toThrow();
+    expect(() => validateTreeImpostorRenderTargetSize(
+      TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION + 1,
+      1024,
+    )).toThrow(/exceeds the portable/);
+    expect(() => validateTreeImpostorRenderTargetSize(1024, 12288)).toThrow(/disable age-layer baking/);
+    expect(() => validateTreeImpostorRenderTargetSize(0, 1024)).toThrow(/positive integers/);
   });
 
   it("keeps the balanced four-page mipmapped fallback within 256 MiB", () => {
