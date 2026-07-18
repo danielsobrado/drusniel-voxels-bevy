@@ -109,9 +109,13 @@ class ConditionalMemoryStore extends InMemoryPersistentStore {
 
 class FailingEvictionStore extends InMemoryPersistentStore {
   failDeletes = false;
+  failOnceKeys = new Set<string>();
 
   override async delete(key: string): Promise<void> {
-    if (this.failDeletes) throw new CacheUnavailableError(`delete failed for ${key}`);
+    if (this.failDeletes || this.failOnceKeys.has(key)) {
+      this.failOnceKeys.delete(key);
+      throw new CacheUnavailableError(`delete failed for ${key}`);
+    }
     await super.delete(key);
   }
 }
@@ -207,6 +211,28 @@ describe("cache service", () => {
 
     expect(committed.bytesWritten).toBeGreaterThan(0);
     expect(result.status).toBe("hit");
+    expect(service.getMetrics().persistentEntries).toBe(2);
+  });
+
+  it("continues eviction after a single-key delete failure", async () => {
+    const config = parseClodCacheConfig(yaml);
+    config.persistent.max_items = 2;
+    const store = new FailingEvictionStore();
+    const service = createClodCacheService(config, store);
+    const thirdKeyParts = { ...keyParts, pageX: 2, nodeId: "L0:2,0" };
+    const firstKey = buildClodCacheKey(keyParts);
+    const secondKey = buildClodCacheKey(secondKeyParts);
+    const thirdKey = buildClodCacheKey(thirdKeyParts);
+
+    await service.put(keyParts, artifact, encodeClodPageNodeArtifact, {});
+    await service.put(secondKeyParts, artifact, encodeClodPageNodeArtifact, {});
+    // LRU-oldest (first) fails once; eviction must skip it and remove the next candidate.
+    store.failOnceKeys.add(firstKey);
+    await service.put(thirdKeyParts, artifact, encodeClodPageNodeArtifact, {});
+
+    expect(await store.get(firstKey)).not.toBeNull();
+    expect(await store.get(secondKey)).toBeNull();
+    expect(await store.get(thirdKey)).not.toBeNull();
     expect(service.getMetrics().persistentEntries).toBe(2);
   });
 

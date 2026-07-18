@@ -208,8 +208,8 @@ async function runRoute(
   await driver.press("4");
   const spell = await driver.waitUntil(
     "earth spell runtime convergence",
-    (snapshot) => snapshot.spell.denied > water.spell.denied
-      || snapshot.spell.runtimeConvergenceCompleted > water.spell.runtimeConvergenceCompleted
+    // Denial alone is not convergence — keep waiting until runtime settles or times out.
+    (snapshot) => snapshot.spell.runtimeConvergenceCompleted > water.spell.runtimeConvergenceCompleted
       || snapshot.spell.runtimeConvergenceFailed > water.spell.runtimeConvergenceFailed,
     SPELL_TIMEOUT_MS,
   );

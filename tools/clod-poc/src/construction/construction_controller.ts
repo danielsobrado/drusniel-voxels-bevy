@@ -820,13 +820,16 @@ class ConstructionControllerImpl implements ConstructionController {
       z: candidate.position[2],
     };
     const maxDistanceM = this.deps.editAuthority?.buildCommitRadiusM ?? Number.MAX_SAFE_INTEGER;
+    const currentTerrainRevision = this.currentTerrainRevision();
     const verdict = validateEditCommand(active, {
       nowMs,
-      currentTerrainRevision: this.currentTerrainRevision(),
+      currentTerrainRevision,
       actorPosition: origin,
       maxDistanceM,
       currentMode: this.currentInteractionMode(),
       targetReady: this.deps.constructionReadyAt?.(candidate.position[0], candidate.position[2]) ?? true,
+      // Candidate was computed against the live revision at commit/preview time.
+      targetValidatedAtTerrainRevision: currentTerrainRevision,
       targetStillValid: (cmd) => {
         const dx = Math.abs(cmd.targetPosition[0] - candidate.position[0]);
         const dy = Math.abs(cmd.targetPosition[1] - candidate.position[1]);
@@ -847,7 +850,13 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private async placeCurrentCandidate(): Promise<void> {
     if (this.placementInFlight) return;
-    if (!this.currentCandidate) this.update();
+    // Preserve the immutable ghost command across commit-time re-preview so cross-revision
+    // retry validates the original intent against a freshly computed candidate.
+    const pendingCommand = this.pendingPlaceCommand;
+    if (this.active && this.config.pieces.length > 0) {
+      this.performance.measure("previewTotal", () => this.updateActivePreview());
+      this.pendingPlaceCommand = pendingCommand;
+    }
     const candidate = this.currentCandidate;
     if (!candidate) {
       this.lastPlacementMessage = "No build target. Aim at authoritative near terrain or a snap point.";
@@ -859,7 +868,7 @@ class ConstructionControllerImpl implements ConstructionController {
       this.syncUi(true);
       return;
     }
-    const commandVerdict = this.validatePlaceCommand(candidate, this.pendingPlaceCommand);
+    const commandVerdict = this.validatePlaceCommand(candidate, pendingCommand);
     if (!commandVerdict.allowed) {
       this.lastPlacementMessage = `Blocked: ${commandVerdict.reason}`;
       this.syncUi(true);

@@ -34,15 +34,15 @@ function installFrameProbeInPage(): void {
   if (target.__drusnielPlayableSliceFrameProbe) return;
   const state: PlayableSliceFrameProbe = { maxFrameMs: 0, lastFrameAtMs: 0, samplesMs: [] };
   target.__drusnielPlayableSliceFrameProbe = state;
-  const tick = (now: number): void => {
-    if (state.lastFrameAtMs > 0) {
-      const frameMs = now - state.lastFrameAtMs;
-      if (Number.isFinite(frameMs) && frameMs >= 0) {
-        state.maxFrameMs = Math.max(state.maxFrameMs, frameMs);
-        state.samplesMs.push(frameMs);
-      }
+  const tick = (): void => {
+    // Prefer the app's measured frame time over rAF interval (rAF ≠ GPU/render frame).
+    const stats = window.__drusnielClod?.stats;
+    const frameMs = typeof stats?.frameMs === "number" ? stats.frameMs : null;
+    if (frameMs !== null && Number.isFinite(frameMs) && frameMs >= 0) {
+      state.maxFrameMs = Math.max(state.maxFrameMs, frameMs);
+      state.samplesMs.push(frameMs);
+      state.lastFrameAtMs = performance.now();
     }
-    state.lastFrameAtMs = now;
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);

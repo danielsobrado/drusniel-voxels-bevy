@@ -96,7 +96,7 @@ describe("playable slice snapshot", () => {
         colliderCoverageMissing: 0,
         frontierBarrierEngagements: 1,
         syncFrameBuilds: 0,
-        colliderWorkerFaults: 2,
+        colliderWorkerFaults: 3,
         recoveries: 3,
         editCommandDenials: 3,
       },

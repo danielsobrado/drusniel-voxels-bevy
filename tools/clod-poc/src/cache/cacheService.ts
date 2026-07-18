@@ -114,11 +114,21 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     now: number,
   ): Promise<void> {
     this.manifest.upsert(manifestEntryFromRecord(key, record, now));
-    const candidates = this.manifest.evictionCandidates(
-      this.config.persistent.max_items,
-      this.config.persistent.max_bytes,
-    );
-    for (const candidate of candidates) {
+    const skipped = new Set<string>();
+    for (;;) {
+      const overItems = this.manifest.size > this.config.persistent.max_items;
+      const overBytes = this.manifest.totalStoredBytes > this.config.persistent.max_bytes;
+      if (!overItems && !overBytes) break;
+
+      const candidate = this.manifest.evictionCandidates(
+        this.config.persistent.max_items,
+        this.config.persistent.max_bytes,
+      ).find((entry) => !skipped.has(entry.key))
+        ?? this.manifest.listEntries()
+          .filter((entry) => !skipped.has(entry.key))
+          .sort((left, right) => left.lastAccessedUnixMs - right.lastAccessedUnixMs)[0];
+      if (!candidate) break;
+
       try {
         await persistent.delete(candidate.key);
         this.manifest.delete(candidate.key);
@@ -129,7 +139,7 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         cacheLogger.warn(`cache eviction failed for ${candidate.key} [${name}] ${message}`);
         this.metrics.recordError(`[${name}] ${message}`);
         if (error instanceof CacheUnavailableError || error instanceof DOMException) this.notePersistentError();
-        break;
+        skipped.add(candidate.key);
       }
     }
   }

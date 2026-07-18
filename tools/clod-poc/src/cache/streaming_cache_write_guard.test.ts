@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
+import { CacheUnavailableError } from "./cacheErrors.js";
 import {
   cacheRecordVersionMatches,
   commitCachePut,
@@ -108,11 +109,53 @@ describe("commitCachePut", () => {
         stored = newer;
       },
       deleteIfMatches: remove,
+      get: async () => stored,
+      delete: async () => {
+        stored = null;
+      },
     };
 
     await expect(commitCachePut(store, request(record(0), 0), () => 0)).resolves.toBe(false);
     expect(remove).toHaveBeenCalledOnce();
     expect(stored).toBe(newer);
+  });
+
+  it("force-deletes an orphan when conditional delete misses our write", async () => {
+    let stored: ClodCacheStoredRecord | null = null;
+    const written = record(undefined, 1, "session:1");
+    const store: CacheWriteStore = {
+      put: async (_key, value) => {
+        stored = value;
+      },
+      deleteIfMatches: async () => false,
+      get: async () => stored,
+      delete: async () => {
+        stored = null;
+      },
+    };
+    let now = 0;
+
+    await expect(commitCachePut(store, request(written, undefined, 10), () => {
+      const value = now;
+      now = 11;
+      return value;
+    })).resolves.toBe(false);
+    expect(stored).toBeNull();
+  });
+
+  it("fails loud when an orphan cannot be removed", async () => {
+    const written = record(undefined, 1, "session:1");
+    const store: CacheWriteStore = {
+      put: async () => undefined,
+      deleteIfMatches: async () => false,
+    };
+    let now = 0;
+
+    await expect(commitCachePut(store, request(written, undefined, 10), () => {
+      const value = now;
+      now = 11;
+      return value;
+    })).rejects.toBeInstanceOf(CacheUnavailableError);
   });
 
   it("rejects a write whose broker deadline elapsed before execution", async () => {

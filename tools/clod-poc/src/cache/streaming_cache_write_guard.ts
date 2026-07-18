@@ -1,10 +1,14 @@
 import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
+import { CacheUnavailableError } from "./cacheErrors.js";
 import { terrainStreamingGenerationIsCurrent } from "../stream/terrain_streaming_control.js";
 
 export interface CacheWriteStore {
   put(key: string, record: ClodCacheStoredRecord): Promise<void>;
   deleteIfMatches(key: string, record: ClodCacheStoredRecord): Promise<boolean>;
+  /** Optional: used to force-remove an orphan when conditional delete misses our write. */
+  get?(key: string): Promise<ClodCacheStoredRecord | null>;
+  delete?(key: string): Promise<void>;
 }
 
 type CachePutRequest = Extract<CacheRpcRequest, { op: "put" }>;
@@ -25,8 +29,24 @@ export async function commitCachePut(
   await store.put(request.key, request.record);
   if (requestCanCommit(request, nowUnixMs())) return true;
 
-  await store.deleteIfMatches(request.key, request.record);
-  return false;
+  const removed = await store.deleteIfMatches(request.key, request.record);
+  if (removed) return false;
+
+  // Conditional delete missed: either a newer write won, or our record is still orphaned.
+  if (store.get) {
+    const current = await store.get(request.key);
+    if (!current || !cacheRecordVersionMatches(current, request.record)) {
+      return false;
+    }
+    if (store.delete) {
+      await store.delete(request.key);
+      return false;
+    }
+  }
+
+  throw new CacheUnavailableError(
+    `cache put rollback failed for ${request.key}; orphaned write may remain`,
+  );
 }
 
 export function cacheRecordVersionMatches(

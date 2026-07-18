@@ -3,8 +3,10 @@ import type { ClodCacheStoredRecord } from "./cacheTypes.js";
 import type { CacheRpcRequest } from "./cacheWorkerRpc.js";
 import { CacheUnavailableError, CacheWriteRejectedError } from "./cacheErrors.js";
 import {
+  clearTimedOutCachePutsForTests,
   dispatchCacheRpcResponse,
   pendingCacheRpcCount,
+  timedOutCachePutCount,
   WorkerRemotePersistentStore,
 } from "./workerRemotePersistentStore.js";
 import {
@@ -41,6 +43,7 @@ function cacheRecord(streamingGeneration?: number): ClodCacheStoredRecord {
 
 beforeEach(() => {
   postMessage.mockReset();
+  clearTimedOutCachePutsForTests();
   resetTerrainStreamingControlForTests();
   vi.stubGlobal("self", { postMessage });
 });
@@ -48,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  clearTimedOutCachePutsForTests();
 });
 
 describe("WorkerRemotePersistentStore streaming generation", () => {
@@ -100,6 +104,40 @@ describe("WorkerRemotePersistentStore streaming generation", () => {
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
     expect(pendingCacheRpcCount()).toBe(0);
+  });
+
+  it("compensates a late successful put after the client timed out", async () => {
+    vi.useFakeTimers();
+    const store = new WorkerRemotePersistentStore(25);
+    const record = cacheRecord(0);
+
+    const pending = store.put("stream-root", record);
+    const putRequest = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "put" }>;
+    const rejection = expect(pending).rejects.toBeInstanceOf(CacheUnavailableError);
+
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(pendingCacheRpcCount()).toBe(0);
+    expect(timedOutCachePutCount()).toBe(1);
+
+    postMessage.mockClear();
+    expect(dispatchCacheRpcResponse({
+      type: "cacheRpc",
+      requestId: putRequest.requestId,
+      ok: true,
+      result: true,
+    })).toBe(false);
+    expect(timedOutCachePutCount()).toBe(0);
+
+    const compensate = postMessage.mock.calls[0]![0] as Extract<CacheRpcRequest, { op: "deleteIfMatches" }>;
+    expect(compensate.op).toBe("deleteIfMatches");
+    expect(compensate.key).toBe("stream-root");
+    dispatchCacheRpcResponse({
+      type: "cacheRpc",
+      requestId: compensate.requestId,
+      ok: true,
+      result: true,
+    });
   });
 
   it("removes the pending entry when postMessage throws", async () => {

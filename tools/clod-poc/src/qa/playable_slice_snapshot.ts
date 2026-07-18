@@ -151,10 +151,9 @@ export function createPlayableSliceSnapshot(input: PlayableSliceSnapshotInput): 
       colliderCoverageMissing: counter(counters, "collider_coverage_missing"),
       frontierBarrierEngagements: counter(counters, "frontier_barrier_engagements"),
       syncFrameBuilds: counter(counters, "collider_sync_frame_builds"),
-      colliderWorkerFaults: Math.max(
-        counter(counters, "collider_worker_failures"),
-        counter(counters, "collider_worker_fallback_builds"),
-      ),
+      colliderWorkerFaults:
+        counter(counters, "collider_worker_failures")
+        + counter(counters, "collider_worker_fallback_builds"),
       recoveries: prefixTotal(counters, "player_recovery_"),
       editsDeniedNotReady: counter(counters, "edits_denied_not_ready"),
       editCommandsExpired: counter(counters, "edit_commands_expired"),

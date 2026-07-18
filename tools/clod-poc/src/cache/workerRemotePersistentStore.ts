@@ -10,8 +10,15 @@ interface PendingCacheRpc {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+interface TimedOutPutRpc {
+  key: string;
+  record: ClodCacheStoredRecord;
+  timeoutMs: number;
+}
+
 let nextRequestId = 1;
 const pending = new Map<number, PendingCacheRpc>();
+const timedOutPuts = new Map<number, TimedOutPutRpc>();
 
 function normalizePayload(payload: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   if (payload instanceof ArrayBuffer) return payload;
@@ -50,12 +57,28 @@ type CacheRpcBody =
   | { op: "clear" }
   | { op: "keys" };
 
+function compensateTimedOutPut(timedOut: TimedOutPutRpc): void {
+  // Best-effort: broker may have committed after the client abandoned the pending map.
+  void rpc({
+    op: "deleteIfMatches",
+    key: timedOut.key,
+    record: timedOut.record,
+  }, timedOut.timeoutMs).catch(() => undefined);
+}
+
 function rpc<T>(body: CacheRpcBody, timeoutMs: number): Promise<T> {
   const requestId = nextRequestId++;
   const request = { type: "cacheRpc", requestId, ...body } as CacheRpcRequest;
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       if (!pending.delete(requestId)) return;
+      if (body.op === "put") {
+        timedOutPuts.set(requestId, {
+          key: body.key,
+          record: body.record,
+          timeoutMs,
+        });
+      }
       reject(new CacheUnavailableError(`cache RPC ${body.op} timed out after ${timeoutMs} ms`));
     }, timeoutMs);
     pending.set(requestId, {
@@ -71,6 +94,7 @@ function rpc<T>(body: CacheRpcBody, timeoutMs: number): Promise<T> {
         pending.delete(requestId);
         clearTimeout(requestState.timeout);
       }
+      timedOutPuts.delete(requestId);
       reject(error instanceof Error ? error : new CacheUnavailableError(String(error)));
     }
   });
@@ -78,8 +102,17 @@ function rpc<T>(body: CacheRpcBody, timeoutMs: number): Promise<T> {
 
 export function dispatchCacheRpcResponse(message: CacheRpcResponse): boolean {
   const pendingRequest = pending.get(message.requestId);
-  if (!pendingRequest) return false;
+  if (!pendingRequest) {
+    const timedOut = timedOutPuts.get(message.requestId);
+    if (!timedOut) return false;
+    timedOutPuts.delete(message.requestId);
+    if (message.ok && message.result === true) {
+      compensateTimedOutPut(timedOut);
+    }
+    return false;
+  }
   pending.delete(message.requestId);
+  timedOutPuts.delete(message.requestId);
   clearTimeout(pendingRequest.timeout);
   if (message.ok) pendingRequest.resolve(message.result);
   else pendingRequest.reject(new CacheUnavailableError(message.error));
@@ -88,6 +121,15 @@ export function dispatchCacheRpcResponse(message: CacheRpcResponse): boolean {
 
 export function pendingCacheRpcCount(): number {
   return pending.size;
+}
+
+export function timedOutCachePutCount(): number {
+  return timedOutPuts.size;
+}
+
+/** Test hook: drop timed-out put tracking without firing compensation. */
+export function clearTimedOutCachePutsForTests(): void {
+  timedOutPuts.clear();
 }
 
 export class WorkerRemotePersistentStore implements PersistentCacheStore {
