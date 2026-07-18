@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_ISLAND_SHAPE_CONFIG } from "../world_source/island_shape.js";
 
 const mocks = vi.hoisted(() => ({
   emitAudio: vi.fn(),
@@ -15,8 +16,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../audio/index.js", () => ({ emitAudio: mocks.emitAudio }));
 vi.mock("../project/voxel_project_archive.js", () => ({
-  VOXEL_PROJECT_SCHEMA_VERSION: 3,
+  VOXEL_PROJECT_SCHEMA_VERSION: 4,
   createVoxelProjectArchive: mocks.createArchive,
+  isCurrentVoxelProjectManifest: (manifest: { schemaVersion?: number }) => manifest.schemaVersion === 4,
   parseVoxelProjectArchive: mocks.parseArchive,
   stageVoxelProjectImport: mocks.stageImport,
 }));
@@ -58,6 +60,7 @@ function fileList(file: File): FileList {
 
 function projectFile(): File {
   return {
+    size: 3,
     arrayBuffer: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
   } as unknown as File;
 }
@@ -86,6 +89,15 @@ function createHarness(beforeImportNavigation: () => Promise<void>) {
     getState: () => ({}) as never,
     getWorldSize: () => 8,
     getConfig: () => ({}) as never,
+    getWorldIdentity: () => ({
+      scene: "infinite-islands",
+      generatorVersion: "test-generator",
+      terrainField: {
+        seed: 73,
+        seaLevel: 18,
+        islandShape: { ...DEFAULT_ISLAND_SHAPE_CONFIG, enabled: true, seed: 73 },
+      },
+    }),
     getNodesByLevel: () => new Map(),
     getProps: () => [],
     textureController: {
@@ -113,7 +125,19 @@ function createHarness(beforeImportNavigation: () => Promise<void>) {
 
 describe("project archive import handoff", () => {
   const contents = {
-    manifest: { worldSize: 16 },
+    manifest: {
+      schemaVersion: 4,
+      worldSize: 16,
+      world: {
+        scene: "continent",
+        generatorVersion: "test-generator",
+        terrainField: {
+          seed: 73,
+          seaLevel: 21,
+          islandShape: { ...DEFAULT_ISLAND_SHAPE_CONFIG, seed: 73, seaLevel: 21 },
+        },
+      },
+    },
     customTextures: new Map(),
   };
 
@@ -130,7 +154,7 @@ describe("project archive import handoff", () => {
     vi.unstubAllGlobals();
   });
 
-  it("checkpoints before staging and removes stale save ownership", async () => {
+  it("checkpoints before staging and replaces stale world ownership", async () => {
     const beforeImportNavigation = vi.fn(async () => {});
     const harness = createHarness(beforeImportNavigation);
     harness.projectImportInput.files = fileList(projectFile());
@@ -141,7 +165,7 @@ describe("project archive import handoff", () => {
     expect(beforeImportNavigation).toHaveBeenCalledOnce();
     expect(beforeImportNavigation.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.stageImport.mock.invocationCallOrder[0]!);
-    expect(location.search).toBe("?seed=9&hud=1&world=16&import=import-token");
+    expect(location.search).toBe("?seed=73&hud=1&scene=continent&seaLevel=21&world=16&import=import-token");
     expect(mocks.emitAudio).toHaveBeenCalledWith("project.import.success");
   });
 
