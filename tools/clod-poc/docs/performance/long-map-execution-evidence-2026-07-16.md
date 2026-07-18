@@ -313,3 +313,48 @@ separate and remain open.
 | Rim precision calibration | EXECUTED, non-decisive; artifact and handoff above |
 | Focused acceptance tests after empirical runner fixes | PASS: 15 files / 77 tests |
 | Manual visual steps 1-7 | PARTIAL as described above; no visual-quality claim |
+
+## Representative short-route cal-v3 + harness speedups (2026-07-18)
+
+Owner interrupt: implement safe speedups before freezing representative thresholds.
+
+### Harness changes
+
+1. `--calibrate` no longer force-adds water (`run-infinite-islands-acceptance.mjs`).
+2. Pre-route convergence boosts stream budgets to `64/16/4/cache1024`, then restores
+   `16/4/1/cache512` + settle before the route (`setStreamBudgets` via
+   `setAcceptanceSceneOptions`). Post-route converge is not boosted.
+3. `--repeat N` folds N fresh context+page runs into one process; writes
+   `repeat-summary.json` and flags Dawn run-1 skew (>15% p95).
+4. Quaternius catalog: real JSON at
+   `public/assets/.../construction-props.catalog.json` (authored empty props — raw RPG
+   GLBs exceed `small_decor` material budgets); loader rejects SPA HTML; prop
+   `loadManifest` soft-skips individual asset failures.
+
+### Measured wall times
+
+| | Before (cal-v2 approx) | After (cal-v3) |
+| --- | ---: | ---: |
+| Scenes | walk + water | walk only |
+| Pre-route converge | ~60–100s (infra) / 360s timeout risk at r=768 | **90–135 s** (boost+cache1024) |
+| Mean wall / run | ~420–480 s (incl. water) | **408 s** |
+| 5-run total | ~35–40 min (5 processes) | **2041 s (~34 min, 1 process)** |
+
+Budget restore logged every run: `16/4/1/cache512`. `run1_dawn_skew_suspected: false`.
+
+### Frozen representative thresholds
+
+From cal-v3 worst-of-5 + headroom → `config/long_map_representative_route_thresholds.json`.
+
+| Metric | med / worst | Frozen max |
+| --- | ---: | ---: |
+| p50 | 8.3 / 11.9 | 14 |
+| p95 | 18.4 / 24.1 | 28 |
+| p99 | 24.3 / 32.7 | 40 |
+| p99.9 | 35.6 / 52.9 | 60 |
+| max | 81.9 / 127.7 | 140 |
+| over16.7 | 600 / 1676 | 1900 |
+| over33.3 | 11 / 72 | 100 |
+
+Artifact: `acceptance-runs/long-map-short-representative-cal-v3-2026-07-18/`.
+Next: full representative coast-to-coast 5+1 (LM3 release gate), then LM4/LM5.
