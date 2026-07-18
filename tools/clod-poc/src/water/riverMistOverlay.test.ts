@@ -25,7 +25,7 @@ function runtimeSettings() {
 }
 
 describe("RiverMistOverlay", () => {
-  it("uses a coarse sample hint and respects the fixed particle budget", () => {
+  it("uses a coarse sample hint and respects particle and scan budgets", () => {
     const sampleForCellSize = vi.fn((_x: number, _z: number, _cellSize: number) => ({
       waterY: 4,
       terrainY: 3.5,
@@ -52,6 +52,12 @@ describe("RiverMistOverlay", () => {
     expect(stats.lastEmitters).toBeLessThanOrEqual(8);
     expect(sampleForCellSize).toHaveBeenCalled();
     expect(sampleForCellSize.mock.calls.every((call) => call[2] === 16)).toBe(true);
+
+    const callsAfterScan = sampleForCellSize.mock.calls.length;
+    overlay.update(0.05, new THREE.Vector3(0, 0, 0));
+    expect(sampleForCellSize).toHaveBeenCalledTimes(callsAfterScan);
+    overlay.update(0.06, new THREE.Vector3(0, 0, 0));
+    expect(sampleForCellSize.mock.calls.length).toBeGreaterThan(callsAfterScan);
 
     overlay.setVisible(false);
     expect(overlay.getStats().enabled).toBe(false);
