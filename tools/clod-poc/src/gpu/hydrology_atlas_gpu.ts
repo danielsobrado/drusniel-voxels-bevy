@@ -1,12 +1,10 @@
 // GPU side of the streaming hydrology atlas (Phase 4b).
 //
-// One shared rgba32float texture holds the camera-following Layout A window built by
-// HydrologyStreamingAtlas; every vegetation placement compute (grass/understory/stone/
-// tree rings) binds it next to its static startup-world hydrology texture and samples it
-// for world positions OUTSIDE [0, worldCells] (see placement_height.wgsl). Module-scoped
-// like the other vegetation GPU wiring (e.g. setTreeGpuRingHydrologyData): initialized
-// once in runVegetationStartup before any ring compute is created, updated once per
-// frame from the vegetation frame phase.
+// Shared rgba32float textures hold the camera-following Layout A and Layout B windows
+// built by HydrologyStreamingAtlas. Vegetation placement computes bind them beside the
+// static startup-world hydrology textures and sample them for positions outside the
+// startup world. Module-scoped like the other vegetation GPU wiring: initialized once
+// before ring computes are created and updated once per frame.
 import {
   HydrologyStreamingAtlas,
   type HydrologyStreamingAtlasStats,
@@ -17,14 +15,21 @@ interface HydrologyAtlasGpuState {
   device: GPUDevice;
   atlas: HydrologyStreamingAtlas;
   source: HydrologyTileAtlasSource;
-  texture: GPUTexture;
+  waterTexture: GPUTexture;
+  fieldsTexture: GPUTexture;
   prefetchRadiusM: number;
   uploads: number;
   uploadedTexels: number;
 }
 
+interface HydrologyAtlasGpuFallback {
+  device: GPUDevice;
+  waterTexture: GPUTexture;
+  fieldsTexture: GPUTexture;
+}
+
 let state: HydrologyAtlasGpuState | null = null;
-let fallback: { device: GPUDevice; texture: GPUTexture } | null = null;
+let fallback: HydrologyAtlasGpuFallback | null = null;
 
 export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAtlasSource): void {
   resetHydrologyAtlasGpu();
@@ -34,19 +39,19 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
     tileRes: source.tileRes,
     tilesPerSide: source.atlasTilesPerSide,
   });
-  const texture = device.createTexture({
-    label: "hydrology streaming atlas",
+  const textureDescriptor: GPUTextureDescriptor = {
     size: { width: atlas.res, height: atlas.res },
     format: "rgba32float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
+  };
   state = {
     device,
     atlas,
     source,
-    texture,
-    // Half the window edge: a square prefetch ring of this radius covers every tile the
-    // tile-snapped window can need before the next recenter.
+    waterTexture: device.createTexture({ ...textureDescriptor, label: "hydrology streaming atlas layout a" }),
+    fieldsTexture: device.createTexture({ ...textureDescriptor, label: "hydrology streaming atlas layout b" }),
+    // Half the window edge covers every tile the tile-snapped window can need before
+    // the next recenter.
     prefetchRadiusM: (source.atlasTilesPerSide / 2) * source.tileSizeM,
     uploads: 0,
     uploadedTexels: 0,
@@ -54,26 +59,19 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
 }
 
 export function resetHydrologyAtlasGpu(): void {
-  state?.texture.destroy();
+  state?.waterTexture.destroy();
+  state?.fieldsTexture.destroy();
   state = null;
 }
 
-/** Shared atlas texture for placement compute bind groups; a 1×1 texture (dimension 1
- *  disables the shader path) when no atlas is active or it lives on another device. */
+/** Layout A atlas texture. A 1x1 texture disables the shader path. */
 export function hydrologyAtlasGpuTexture(device: GPUDevice): GPUTexture {
-  if (state && state.device === device) return state.texture;
-  if (!fallback || fallback.device !== device) {
-    fallback = {
-      device,
-      texture: device.createTexture({
-        label: "hydrology streaming atlas fallback",
-        size: { width: 1, height: 1 },
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING,
-      }),
-    };
-  }
-  return fallback.texture;
+  return atlasTexturesFor(device).waterTexture;
+}
+
+/** Layout B atlas texture: flow XY, flow strength, and raw body kind. */
+export function hydrologyAtlasGpuFieldsTexture(device: GPUDevice): GPUTexture {
+  return atlasTexturesFor(device).fieldsTexture;
 }
 
 /** Per-dispatch uniform payload: (originX, originZ, cellSize, enabled). */
@@ -82,19 +80,29 @@ export function hydrologyAtlasGpuParams(): [number, number, number, number] {
   return [state.atlas.originX, state.atlas.originZ, state.atlas.cellSize, 1];
 }
 
-/** Recenter/refill the CPU atlas around the vegetation ring center and upload any texel
- *  rects that changed. Call once per frame before the ring computes dispatch. */
+/** Recenter/refill the CPU atlas and upload changed Layout A and Layout B rectangles. */
 export function updateHydrologyAtlasGpu(centerX: number, centerZ: number): void {
   if (!state) return;
   state.source.prefetch(centerX, centerZ, state.prefetchRadiusM);
   const dirty = state.atlas.update(centerX, centerZ, state.source);
   const bytesPerRow = state.atlas.res * 16;
   for (const rect of dirty) {
+    const dataLayout = {
+      offset: (rect.z * state.atlas.res + rect.x) * 16,
+      bytesPerRow,
+    };
+    const size = { width: rect.width, height: rect.height };
     state.device.queue.writeTexture(
-      { texture: state.texture, origin: { x: rect.x, y: rect.z } },
+      { texture: state.waterTexture, origin: { x: rect.x, y: rect.z } },
       state.atlas.data,
-      { offset: (rect.z * state.atlas.res + rect.x) * 16, bytesPerRow },
-      { width: rect.width, height: rect.height },
+      dataLayout,
+      size,
+    );
+    state.device.queue.writeTexture(
+      { texture: state.fieldsTexture, origin: { x: rect.x, y: rect.z } },
+      state.atlas.dataB,
+      dataLayout,
+      size,
     );
     state.uploads++;
     state.uploadedTexels += rect.width * rect.height;
@@ -115,4 +123,23 @@ export function hydrologyAtlasGpuStats(): HydrologyAtlasGpuStats | null {
     uploadedTexels: state.uploadedTexels,
     res: state.atlas.res,
   };
+}
+
+function atlasTexturesFor(device: GPUDevice): Pick<HydrologyAtlasGpuState, "waterTexture" | "fieldsTexture"> {
+  if (state && state.device === device) return state;
+  if (!fallback || fallback.device !== device) {
+    fallback?.waterTexture.destroy();
+    fallback?.fieldsTexture.destroy();
+    const descriptor: GPUTextureDescriptor = {
+      size: { width: 1, height: 1 },
+      format: "rgba32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    };
+    fallback = {
+      device,
+      waterTexture: device.createTexture({ ...descriptor, label: "hydrology atlas layout a fallback" }),
+      fieldsTexture: device.createTexture({ ...descriptor, label: "hydrology atlas layout b fallback" }),
+    };
+  }
+  return fallback;
 }
