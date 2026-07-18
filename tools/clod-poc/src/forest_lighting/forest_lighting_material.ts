@@ -5,6 +5,7 @@ import type { ForestLightingTextureHandle } from "./forest_lighting_texture.js";
 const MATERIAL_AERIAL_TINT_SCALE = 0.15;
 const MATERIAL_AERIAL_TINT_MAX = 0.04;
 const MATERIAL_SHAFT_HINT_SCALE = 0.01;
+const DEFAULT_FOREST_FOG_COLOR = 0x66716d;
 
 export interface ForestLightingMaterialState {
   textureHandle: ForestLightingTextureHandle;
@@ -68,9 +69,21 @@ export function createForestLightingUniforms(): ForestLightingUniforms {
     uForestAoStrength: { value: 1 },
     uForestShadowStrength: { value: 1 },
     uForestFogStrength: { value: 0 },
-    uForestFogColor: { value: new THREE.Color(0x66716d) },
+    uForestFogColor: { value: new THREE.Color(DEFAULT_FOREST_FOG_COLOR) },
     uForestDebugMode: { value: 0 },
   };
+}
+
+export function resetForestLightingUniforms(uniforms: ForestLightingUniforms): void {
+  uniforms.uForestLightingMap.value = null;
+  uniforms.uForestLightingAuxMap.value = null;
+  uniforms.uForestLightingEnabled.value = 0;
+  uniforms.uForestLightingWorldSize.value = 1;
+  uniforms.uForestAoStrength.value = 1;
+  uniforms.uForestShadowStrength.value = 1;
+  uniforms.uForestFogStrength.value = 0;
+  uniforms.uForestFogColor.value.setHex(DEFAULT_FOREST_FOG_COLOR);
+  uniforms.uForestDebugMode.value = 0;
 }
 
 export function updateForestLightingUniforms(
@@ -79,7 +92,7 @@ export function updateForestLightingUniforms(
   target: "tree" | "understory",
 ): void {
   if (!state) {
-    uniforms.uForestLightingEnabled.value = 0;
+    resetForestLightingUniforms(uniforms);
     return;
   }
   const settings = state.settings;
