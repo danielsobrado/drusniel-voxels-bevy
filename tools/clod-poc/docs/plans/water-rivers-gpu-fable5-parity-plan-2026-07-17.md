@@ -123,9 +123,14 @@ Layout A+B in the vertex stage (`water_node_atlas_grid.ts`) with validity-weight
 4-tap bilinear, vertex-stage drop estimation, and the `shapeRiverSurfaceY` river
 shaping reproduced in TSL. A snap on those levels is one origin uniform; startup
 `water_clipmap_field_samples` dropped from ~100k to 33,282 (exactly the two coarse
-rings). L4/L5 keep the CPU texel path for now (item 3 still open). WebGL untouched
-(item 4). Kill switch: `waterAtlasClipmap=0`. Perf budgets (item 5): see
-`perf-runs/water-atlas-after/`.
+rings). WebGL untouched (item 4). Kill switch: `waterAtlasClipmap=0`. Perf budgets
+(item 5): see `perf-runs/water-atlas-after/`.
+
+Item 3 (2026-07-18, later): with the atlas active the clipmap now keeps only the
+atlas-driven rings — the far clipmap owns unified water coverage/level from 384 m
+outward, so the CPU-refilled L4/L5 rings were overlap and the last ~10 ms `waterMs`
+max spike source. WebGL / kill switch retain all rings. Atlas window sizing includes
+the clipmap snap margin (a snapped ring center lags the camera by up to one snap).
 
 Keep the CPU hydrology authority for gameplay queries (no readbacks needed because the
 CPU is the producer); move per-frame surface data production to the GPU:
@@ -144,7 +149,20 @@ CPU is the producer); move per-frame surface data production to the GPU:
 5. Budgets (perf:move A/B, moving window): `waterMs` p95 ≤ 0.3 ms, max ≤ 2 ms; frame
    p95 delta water-on vs water-off ≤ 1 ms; no fpsP5 regression > 3.
 
-## Phase W3 — Fable5-Level Shading (P1/P2)
+## Phase W3 — Fable5-Level Shading (P1/P2) — LARGELY IMPLEMENTED 2026-07-18
+
+Status: (1) DONE — `waterQuality=low|high` tier (high = WebGPU default; `waterHq=0` /
+`quality=perf` select low). perf:move A/B: high costs +0.3 ms moving render p95 /
++0.6 ms frame p95 (`perf-runs/water-hq-ab/`). (2) DONE — the HQ material's
+screen-space reflection raymarch is active by default with sky/terrain fallback on
+miss (`resolveWaterReflectionPolicy` now reports ssrActive on WebGPU). (3) DONE —
+analytic caustics ride the high tier (`applyWaterQueryOverrides`). (4) was already
+wired (`setRiverTerrainWetnessMask`, WebGPU). (5) DONE differently — depth-based
+shore alpha fade (~0.35 m) in both TSL materials plus a dithered near-water ramp
+transition instead of hard wall tears. (6) DONE — HQ ripples/foam advect along the
+flow field; cascade particles remain the whitewater accent. (7) partially — the
+standing runner is `tools/verify-traced-carve.ts` (continuity, walk, transect,
+counters, shots); battery scenes remain open with W4.
 
 Target set from the demo: SSR with terrain-aware fallback, analytic caustics, obstacle
 and shore foam, wet margins, flow-aligned animation.
