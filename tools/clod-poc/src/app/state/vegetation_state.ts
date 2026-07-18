@@ -45,6 +45,7 @@ export interface VegetationSliceState {
   stoneShowLarge: boolean;
   stoneShowMedium: boolean;
   stoneShowSmall: boolean;
+  stoneRiverCobblesEnabled: boolean;
   stoneTotal: number;
   stoneClassSummary: string;
   stoneVisible: number;
@@ -152,6 +153,7 @@ export function createVegetationSliceState(input: {
     stoneShowLarge: true,
     stoneShowMedium: true,
     stoneShowSmall: true,
+    stoneRiverCobblesEnabled: false,
     stoneTotal: 0,
     stoneClassSummary: "0/0/0",
     stoneVisible: 0,
