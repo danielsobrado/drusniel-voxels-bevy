@@ -40,6 +40,7 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
   const foam = recordFrom(visual.foam);
   const fresnel = recordFrom(visual.fresnel);
   const color = recordFrom(visual.color);
+  const glacialMurkiness = recordFrom(visual.glacial_murkiness ?? visual.glacialMurkiness);
   const refraction = recordFrom(visual.refraction);
   const reflection = recordFrom(visual.reflection);
   // Body presets default from the *parsed* base scalars, so overriding only
@@ -90,6 +91,29 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       turbidity: readNumber(color.turbidity, defaults.color.turbidity),
     },
     bodies: readBodyPresets(visual.bodies, deriveDefaultWaterBodyPresets(parsedBase)),
+    glacialMurkiness: {
+      enabled: readBoolean(glacialMurkiness.enabled, defaults.glacialMurkiness.enabled),
+      lakeStrength: readNumber(
+        glacialMurkiness.lake_strength ?? glacialMurkiness.lakeStrength,
+        defaults.glacialMurkiness.lakeStrength,
+      ),
+      riverStrength: readNumber(
+        glacialMurkiness.river_strength ?? glacialMurkiness.riverStrength,
+        defaults.glacialMurkiness.riverStrength,
+      ),
+      absorptionMultiplier: readColorTuple(
+        glacialMurkiness.absorption_multiplier ?? glacialMurkiness.absorptionMultiplier,
+        defaults.glacialMurkiness.absorptionMultiplier,
+      ),
+      turbidityAdd: readNumber(
+        glacialMurkiness.turbidity_add ?? glacialMurkiness.turbidityAdd,
+        defaults.glacialMurkiness.turbidityAdd,
+      ),
+      reflectionDampingMin: readNumber(
+        glacialMurkiness.reflection_damping_min ?? glacialMurkiness.reflectionDampingMin,
+        defaults.glacialMurkiness.reflectionDampingMin,
+      ),
+    },
     refraction: {
       enabled: readBoolean(refraction.enabled, defaults.refraction.enabled),
       strength: readNumber(refraction.strength, defaults.refraction.strength),
