@@ -37,7 +37,6 @@ import {
 import { treeAtlasVariantIndex } from "./tree_variant_selection.js";
 import { TREE_IMPOSTOR_AGE_BUCKETS } from "./morphology/constants.js";
 import { deformTreeVertexReference } from "./morphology/deformation_reference.js";
-import { impostorLayerIndex } from "./morphology/impostor_layers.js";
 import type { TreeInstanceMorphology } from "./morphology/types.js";
 
 export {
@@ -47,6 +46,7 @@ export {
 };
 
 const TREE_IMPOSTOR_CANONICAL_VARIANT = 0;
+const TREE_IMPOSTOR_MATURE_AGE = TREE_IMPOSTOR_AGE_BUCKETS[1] ?? 0.6;
 const PIXEL_JOB_OPERATIONS_PER_STEP = 256;
 /** One atlas page per live structural variant keeps mesh and impostor silhouettes identical. */
 export const TREE_IMPOSTOR_MAX_ATLAS_VARIANTS = TREE_STRUCTURAL_VARIANTS;
@@ -112,6 +112,7 @@ interface SpeciesBakeContext {
   speciesIndex: number;
   variantCount: number;
   layerCount: number;
+  ageBuckets: readonly number[];
   gridSize: number;
   resolutionPx: number;
   atlasSizePx: number;
@@ -161,6 +162,10 @@ class BakeProgressTracker {
       frameMs: Math.max(this.budget.reportedFrameMs(), this.budget.elapsedMs()),
     }, this.options.onProgress);
   }
+}
+
+export function treeImpostorAgeBucketsForSettings(settings: TreeSettings): readonly number[] {
+  return settings.impostors.bakeAgeLayers ? TREE_IMPOSTOR_AGE_BUCKETS : [TREE_IMPOSTOR_MATURE_AGE];
 }
 
 export async function bakeTreeImpostorAtlases(
@@ -404,11 +409,11 @@ async function captureSpeciesChannel(
       options.settings.impostors.sourceLod,
       variant,
     );
-    for (let ageBucket = 0; ageBucket < TREE_IMPOSTOR_AGE_BUCKETS.length; ageBucket++) {
+    for (let ageBucket = 0; ageBucket < context.ageBuckets.length; ageBucket++) {
       const geometry = createTreeImpostorAgeGeometry(
         sourceGeometry,
         context.species,
-        TREE_IMPOSTOR_AGE_BUCKETS[ageBucket],
+        context.ageBuckets[ageBucket] ?? TREE_IMPOSTOR_MATURE_AGE,
         options.settings,
       );
       try {
@@ -416,7 +421,8 @@ async function captureSpeciesChannel(
         mesh.geometry = geometry;
         mesh.position.copy(bounds.center).multiplyScalar(-1);
         configureBakeCamera(camera, bounds.radius);
-        const yOffsetPx = impostorLayerIndex(variant, ageBucket) * context.atlasSizePx;
+        const layerIndex = variant * context.ageBuckets.length + ageBucket;
+        const yOffsetPx = layerIndex * context.atlasSizePx;
         for (const frame of context.baseFrames) {
           throwIfTreeImpostorBakeAborted(options.signal);
           bakeAtlasTile(
@@ -483,7 +489,8 @@ function createSpeciesContext(
   const paddingPx = settings.impostors.atlasPaddingPx;
   const atlasSizePx = gridSize * resolutionPx;
   const variantCount = treeImpostorVariantCount(geometries, species);
-  const layerCount = variantCount * TREE_IMPOSTOR_AGE_BUCKETS.length;
+  const ageBuckets = treeImpostorAgeBucketsForSettings(settings);
+  const layerCount = variantCount * ageBuckets.length;
   const atlasWidthPx = atlasSizePx;
   const atlasHeightPx = atlasSizePx * layerCount;
   const baseFrames = octFrames(gridSize, resolutionPx, paddingPx);
@@ -492,6 +499,7 @@ function createSpeciesContext(
     speciesIndex,
     variantCount,
     layerCount,
+    ageBuckets,
     gridSize,
     resolutionPx,
     atlasSizePx,
@@ -506,6 +514,7 @@ function createSpeciesContext(
       resolutionPx,
       paddingPx,
       variantCount,
+      ageBuckets.length,
     ),
     variantBounds: computeTreeImpostorVariantBounds(
       geometries,
@@ -537,7 +546,7 @@ function createAtlas(
     atlasHeightPx: context.atlasHeightPx,
     variantCount: context.variantCount,
     layerCount: context.layerCount,
-    ageBuckets: TREE_IMPOSTOR_AGE_BUCKETS,
+    ageBuckets: context.ageBuckets,
     frames: context.variantFrames[TREE_IMPOSTOR_CANONICAL_VARIANT] ?? context.variantFrames[0] ?? context.baseFrames,
     variantFrames: context.variantFrames,
     radius: context.variantBounds.maxRadius,
@@ -557,10 +566,11 @@ function createAtlas(
 
 function estimateTotalBakeWork(options: TreeImpostorBakerOptions): number {
   let total = 0;
+  const ageLayerCount = treeImpostorAgeBucketsForSettings(options.settings).length;
   for (const species of TREE_SPECIES) {
     const gridSize = options.settings.impostors.octahedralGridSize;
     const variantCount = treeImpostorVariantCount(options.geometries, species);
-    const layerCount = variantCount * TREE_IMPOSTOR_AGE_BUCKETS.length;
+    const layerCount = variantCount * ageLayerCount;
     const captureTiles = gridSize * gridSize * layerCount * 2;
     const atlasHeight = gridSize * options.settings.impostors.resolutionPx * layerCount;
     const flipRows = options.webgpu === true ? Math.floor(atlasHeight / 2) * 2 : 0;
@@ -669,10 +679,12 @@ function createTreeImpostorVariantFrames(
   resolutionPx: number,
   paddingPx: number,
   variantCount: number,
+  ageLayerCount: number,
 ): Partial<Record<number, OctahedralFrame[]>> {
   const out: Partial<Record<number, OctahedralFrame[]>> = {};
+  const canonicalAgeLayer = Math.floor(Math.max(0, ageLayerCount - 1) / 2);
   for (let variant = 0; variant < variantCount; variant++) {
-    const yOffsetPx = impostorLayerIndex(variant, 1) * atlasSizePx;
+    const yOffsetPx = (variant * ageLayerCount + canonicalAgeLayer) * atlasSizePx;
     out[variant] = baseFrames.map((frame) => ({
       ...frame,
       uvMin: [
