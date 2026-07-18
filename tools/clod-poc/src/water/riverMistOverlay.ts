@@ -66,6 +66,8 @@ export class RiverMistOverlay {
       depthWrite: false,
       depthTest: true,
       sizeAttenuation: true,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
     });
     this.points = new THREE.Points(this.geometry, this.material);
     this.points.name = "river-mist-overlay";
@@ -108,12 +110,16 @@ export class RiverMistOverlay {
     }
 
     const particles = this.options.settings.mask.particles;
-    this.emitTimeS += safeDeltaSeconds;
-    if (!this.scanActive && this.emitTimeS >= particles.emitIntervalS) {
-      this.emitTimeS = 0;
-      this.beginScan(cameraPosition);
+    if (this.scanActive) {
+      this.stepScan(biome);
+    } else {
+      this.emitTimeS += safeDeltaSeconds;
+      if (this.emitTimeS >= particles.emitIntervalS) {
+        this.emitTimeS = 0;
+        this.beginScan(cameraPosition);
+        this.stepScan(biome);
+      }
     }
-    if (this.scanActive) this.stepScan(biome);
     this.writeParticles();
   }
 
@@ -132,6 +138,9 @@ export class RiverMistOverlay {
     this.scanActive = false;
     this.pool.clear();
     this.geometry.setDrawRange(0, 0);
+    this.lastSampledCells = 0;
+    this.lastEmitters = 0;
+    this.lastMaxSignal = 0;
   }
 
   private beginScan(cameraPosition: THREE.Vector3): void {
