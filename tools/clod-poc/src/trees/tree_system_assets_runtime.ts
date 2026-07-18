@@ -178,17 +178,37 @@ export class TreeSystemAssets {
     atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
     contentKey = this.currentImpostorBakeContentKey(),
   ): void {
-    this.disposeAtlasSet(this.impostorAtlases);
-    this.impostorAtlases = { ...atlases };
-    this.impostorAtlasContentKey = contentKey;
-    publishTreeImpostorDebugStatus(this.impostorAtlases);
-    this.disposeImpostorMaterials();
-    this.disposeBakedImpostorGeometries();
-    this.updateImpostorMaterials();
-    if (Object.values(this.impostorAtlases).some((atlas) => atlas?.ready)) {
-      this.impostorStatus = "baked";
-      this.impostorReason = null;
+    const nextAtlases = { ...atlases };
+    const nextMaterials: Partial<Record<TreeSpeciesId, THREE.Material>> = {};
+    const retainedAtlases = this.atlasIdentitySet(this.impostorAtlases);
+    try {
+      this.updateImpostorMaterialsFor(nextAtlases, nextMaterials);
+    } catch (error) {
+      disposeTreeSystemImpostorMaterials(nextMaterials);
+      this.disposeAtlasSet(nextAtlases, retainedAtlases);
+      throw error;
     }
+
+    const previousAtlases = this.impostorAtlases;
+    const previousMaterials = this.impostorMaterials;
+    const previousGeometries = this.bakedImpostorGeometries;
+    const hasReadyAtlas = Object.values(nextAtlases).some((atlas) => atlas?.ready);
+
+    this.impostorAtlases = nextAtlases;
+    this.impostorMaterials = nextMaterials;
+    this.bakedImpostorGeometries = {};
+    this.impostorAtlasContentKey = hasReadyAtlas ? contentKey : null;
+    this.impostorStatus = hasReadyAtlas
+      ? "baked"
+      : this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
+        ? "pending"
+        : "disabled";
+    this.impostorReason = null;
+    publishTreeImpostorDebugStatus(this.impostorAtlases);
+
+    disposeTreeSystemImpostorMaterials(previousMaterials);
+    disposeTreeSystemBakedImpostorGeometries(previousGeometries);
+    this.disposeAtlasSet(previousAtlases, this.atlasIdentitySet(nextAtlases));
   }
 
   materialFor(species: TreeSpeciesId, lod: TreeLod): THREE.Material {
@@ -355,8 +375,15 @@ export class TreeSystemAssets {
   }
 
   private updateImpostorMaterials(): void {
+    this.updateImpostorMaterialsFor(this.impostorAtlases, this.impostorMaterials);
+  }
+
+  private updateImpostorMaterialsFor(
+    atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+    materials: Partial<Record<TreeSpeciesId, THREE.Material>>,
+  ): void {
     for (const species of TREE_SPECIES) {
-      const atlas = this.impostorAtlases[species];
+      const atlas = atlases[species];
       if (!atlas?.ready) continue;
       updateTreeSystemImpostorMaterial({
         species,
@@ -367,13 +394,29 @@ export class TreeSystemAssets {
         forestLighting: this.currentForestLighting,
         viewBlend: true,
         viewBlendGeometryReady: true,
-        impostorMaterials: this.impostorMaterials,
+        impostorMaterials: materials,
       });
     }
   }
 
-  private disposeAtlasSet(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
-    for (const atlas of Object.values(atlases)) atlas?.dispose();
+  private atlasIdentitySet(
+    atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+  ): Set<TreeImpostorAtlas> {
+    const result = new Set<TreeImpostorAtlas>();
+    for (const atlas of Object.values(atlases)) if (atlas) result.add(atlas);
+    return result;
+  }
+
+  private disposeAtlasSet(
+    atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+    retained: ReadonlySet<TreeImpostorAtlas> = new Set(),
+  ): void {
+    const disposed = new Set<TreeImpostorAtlas>();
+    for (const atlas of Object.values(atlases)) {
+      if (!atlas || retained.has(atlas) || disposed.has(atlas)) continue;
+      disposed.add(atlas);
+      atlas.dispose();
+    }
   }
 
   private disposeBakedImpostorGeometries(): void {
