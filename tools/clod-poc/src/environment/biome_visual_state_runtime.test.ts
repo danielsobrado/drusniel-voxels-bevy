@@ -50,7 +50,8 @@ describe("biome visual state runtime", () => {
       settings: SETTINGS,
       getSeasonT: () => 0.5,
       getSunElevationDeg: () => sunElevationDeg,
-      getWeather: () => ({ mode: weatherMode, intensity: weatherIntensity }),
+      getWeatherMode: () => weatherMode,
+      getWeatherIntensity: () => weatherIntensity,
     });
 
     const first = runtime.current();
@@ -86,7 +87,8 @@ describe("biome visual state runtime", () => {
       settings: SETTINGS,
       getSeasonT: () => 0,
       getSunElevationDeg: () => 5,
-      getWeather: () => ({ mode: "off", intensity: 0 }),
+      getWeatherMode: () => "off",
+      getWeatherIntensity: () => 0,
     });
     const target = {};
 
