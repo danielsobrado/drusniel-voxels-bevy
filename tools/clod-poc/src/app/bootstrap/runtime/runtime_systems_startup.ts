@@ -116,6 +116,9 @@ function withConstructionGuardDispose(
     stats: () => controller.stats(),
     setTerrainConformHandler: (handler) => controller.setTerrainConformHandler(handler),
     reevaluateSupportForTerrainEdit: (aabb) => controller.reevaluateSupportForTerrainEdit(aabb),
+    placePieceAt: (input) => controller.placePieceAt(input),
+    breakPiece: (input) => controller.breakPiece(input),
+    listPlacedPieces: (limit) => controller.listPlacedPieces(limit),
     dispose: () => {
       disposeGuard();
       controller.dispose();

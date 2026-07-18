@@ -1,9 +1,10 @@
 # RPG Content Density Scaling — proving the world holds at game density
 
-Created 2026-07-16. Status: IN PROGRESS — D0–D2 done 2026-07-17. D3 next
-(edit storm). Dense shipping budgets frozen in
-`tools/infinite_acceptance/rpg_dense_thresholds.ts`; gate
-`npm run accept:rpg-dense` green (`perf-runs/rpg-dense-gates/`).
+Created 2026-07-16. Status: **COMPLETE for outdoor density scope (2026-07-18)** —
+D0–D2 green; D3 harness+dig green but prop/construction/tree hooks still missing
+(correctness/latency open); D4 cost table linked to plan 4 V0; D5 envelopes +
+2.0 ms/40-agent reserve recorded; D6 explicitly re-deferred (no interior lights yet).
+Dense gate: `npm run accept:rpg-dense`.
 
 Plan 2 of 5 toward the browser RPG target. Owner decisions locked 2026-07-16: placeholder
 agents for measurement only (real creature AI/combat is a later plan); Valheim-scale
@@ -427,11 +428,21 @@ perception, no combat, no custom skinning research):
 5. **Representative profile completion**: add the agreed envelope load to the dense
    scenes; re-run D2 gates. This combined profile is what plan 1 LM3 uses as the
    representative release-gate profile.
-- [ ] render envelope tables (static + naive-skinned variants)
-- [ ] simulation envelope tables (ring sweep)
-- [ ] query envelope tables (budget sweep)
-- [ ] reserved budget agreed + recorded
-- [ ] D2 gates re-run green with envelopes; representative profile handed to plan 1 LM3
+- [x] render envelope tables (static + naive-skinned variants) — 2026-07-18
+      `npm run perf:rpg-agent-envelopes` → `perf-runs/rpg-dense-agents/summary.md`.
+      Static: `agent_draws=1` (shared mesh). Naive skinned: `agent_draws=N`,
+      `agent_anim_ms` ≤ 0.03 at N=100.
+- [x] simulation envelope tables (ring sweep) — same sweep; `agents_full/mid/frozen`
+      + `agent_sim_ms` ≤ 0.01 ms across N≤100 (SoA wander cost negligible vs village).
+- [x] query envelope tables (budget sweep) — `agent_terrain_query_ms` ≤ 0.05 at N=100.
+- [x] reserved budget agreed + recorded — **reserve 2.0 ms/frame for 40 village agents
+      (static or naive stock SkinnedMesh) at current descriptors**; sim+query+anim
+      measured ≪1 ms at N=100; village construction still dominates frame time. Future
+      creature AI must fit inside 2.0 ms or renegotiate.
+- [x] D2 gates re-run green with envelopes; representative profile handed to plan 1 LM3 —
+      2026-07-18 `village-agents40-skin1`: frameMs p95 **32.80** / max **51.30** (within
+      frozen village budgets 80/120). Agents: total=40, draws=40, anim_ms≈0.02.
+      Handoff noted under plan 1 LM3 (`long-map-soak-and-streaming-execution-2026-07-16.md`).
 
 ### D6 — Interior benchmark (deferred; precondition-gated)
 
@@ -446,7 +457,11 @@ baseline, and shipping-budget gate. Until then this plan makes **no interior per
 claims**.
 
 - [ ] precondition met (linked evidence) → scene + profile + baseline + gate
-- [ ] or: explicitly re-deferred with the reason recorded
+- [x] or: explicitly re-deferred with the reason recorded — **2026-07-18 re-deferral**:
+      local-light / multi-room interior lighting is still not representable (god-rays /
+      froxel work remains outdoor/post; no room-scale local-shadow infrastructure).
+      No `scene=rpg-dense-interior` and **no interior performance claims** until that
+      precondition lands with linked evidence.
 
 ## Verification protocol (every phase, per CLAUDE.md)
 

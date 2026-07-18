@@ -4,6 +4,8 @@ import type { WaterConfig } from "./water_config_types.js";
 const PERF_WATER_CELL_SIZES = [3, 6, 12, 24];
 const BALANCED_WATER_CELL_SIZES = [2, 4, 8, 16, 32];
 
+export type WaterQualityTier = "low" | "high";
+
 function flagParam(searchParams: URLSearchParams, keys: readonly string[]): boolean | null {
   for (const key of keys) {
     const raw = searchParams.get(key);
@@ -39,8 +41,19 @@ function shouldUseBalancedWater(searchParams: URLSearchParams): boolean {
   return qualityParam(searchParams) === "balanced";
 }
 
+export function resolveWaterQualityTier(searchParams: URLSearchParams): WaterQualityTier {
+  const explicit = searchParams.get("waterQuality")?.trim().toLowerCase();
+  if (explicit === "low" || explicit === "high") return explicit;
+
+  const legacyHighQuality = flagParam(searchParams, ["waterHq"]);
+  if (legacyHighQuality !== null) return legacyHighQuality ? "high" : "low";
+
+  return shouldUsePerfWater(searchParams) ? "low" : "high";
+}
+
 export function applyWaterQueryOverrides(config: WaterConfig, searchParams: URLSearchParams): WaterConfig {
   const next = cloneWaterConfig(config);
+  const waterQuality = resolveWaterQualityTier(searchParams);
   const enabled = flagParam(searchParams, ["water", "waterEnabled"]);
   if (enabled !== null) next.enabled = enabled;
 
@@ -76,7 +89,7 @@ export function applyWaterQueryOverrides(config: WaterConfig, searchParams: URLS
   }
 
   const waterCaustics = flagParam(searchParams, ["waterCaustics", "caustics"]);
-  if (waterCaustics !== null) next.caustics.enabled = waterCaustics;
+  next.caustics.enabled = waterCaustics ?? waterQuality === "high";
 
   const hydroUnified = flagParam(searchParams, ["hydroUnified", "hydroUnifiedStartup"]);
   if (hydroUnified !== null) next.hydrology.infinite.unifiedStartup = hydroUnified;

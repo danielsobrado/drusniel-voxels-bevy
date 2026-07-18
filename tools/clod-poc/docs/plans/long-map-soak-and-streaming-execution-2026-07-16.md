@@ -232,7 +232,11 @@ representative profile : + dense forest, settlement, dungeon entrance, construct
 - [ ] short per-change route landed + gates calibrated (5-run spread recorded)
 - [ ] full route landed (infrastructure profile) + gates green under the protocol
 - [ ] representative-profile rerun recorded when plan 2 D1/D2 land (release gate from
-      then on)
+      then on) — **handoff 2026-07-18 from plan 2 D5**: representative dense profile is
+      `scene=rpg-village` (+ optional `agentEnvelope=1&agentCount=40&agentSkin=1`),
+      gated by `npm run accept:rpg-dense` budgets in
+      `tools/infinite_acceptance/rpg_dense_thresholds.ts`. Coast-to-coast
+      `--representative` still blocked until LM3 wires this profile into the route runner.
 - [ ] environment records attached to every gate table in this section
 
 ### LM4 — Revisit and persistence economics (feeds parent Phase 7 decisions)

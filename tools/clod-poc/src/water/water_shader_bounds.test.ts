@@ -31,4 +31,10 @@ describe("water shader world bounds", () => {
     );
     expect(waterPerfNodeMaterialSource).not.toContain("const foamHash:");
   });
+
+  it("fades both WebGPU quality tiers into shallow shore water", () => {
+    const shoreFade = "const shoreFade: TslNode = smoothstep(float(0.02), float(0.35), depth);";
+    expect(waterNodeMaterialSource).toContain(shoreFade);
+    expect(waterPerfNodeMaterialSource).toContain(shoreFade);
+  });
 });

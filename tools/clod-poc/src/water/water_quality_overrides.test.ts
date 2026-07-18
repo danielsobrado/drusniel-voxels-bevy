@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_WATER_CONFIG } from "./water_config_defaults.js";
-import { applyWaterQueryOverrides } from "./water_quality_overrides.js";
+import { applyWaterQueryOverrides, resolveWaterQualityTier } from "./water_quality_overrides.js";
 
 describe("water quality overrides", () => {
+  it("selects the high material by default and preserves low-tier aliases", () => {
+    expect(resolveWaterQualityTier(new URLSearchParams())).toBe("high");
+    expect(resolveWaterQualityTier(new URLSearchParams({ waterQuality: "low" }))).toBe("low");
+    expect(resolveWaterQualityTier(new URLSearchParams({ waterHq: "0" }))).toBe("low");
+    expect(resolveWaterQualityTier(new URLSearchParams({ quality: "perf" }))).toBe("low");
+    expect(resolveWaterQualityTier(new URLSearchParams({ waterPerf: "1" }))).toBe("low");
+    expect(resolveWaterQualityTier(new URLSearchParams({ quality: "perf", waterQuality: "high" }))).toBe("high");
+  });
+
+  it("enables analytic caustics for high water unless explicitly disabled", () => {
+    const high = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams());
+    expect(high.caustics.enabled).toBe(true);
+
+    const disabled = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams({ waterCaustics: "0" }));
+    expect(disabled.caustics.enabled).toBe(false);
+  });
+
   it("applies low-cost water defaults for perf captures", () => {
     const config = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams({ quality: "perf" }));
 

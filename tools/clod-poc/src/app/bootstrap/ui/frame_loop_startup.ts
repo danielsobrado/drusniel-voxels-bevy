@@ -291,6 +291,23 @@ export function runFrameLoopStartup(
         }
       }
     };
+    if (constructionController) {
+      longView.hooks.placeConstructionPiece = async (placeInput) => {
+        const material = placeInput.material as import("../../../construction/types.js").ConstructionMaterial | undefined;
+        const result = await constructionController.placePieceAt({
+          position: placeInput.position,
+          typeId: placeInput.typeId,
+          rotationQuarterTurns: placeInput.rotationQuarterTurns,
+          material,
+        });
+        return { ok: result.ok, pieceId: result.pieceId, reason: result.reason };
+      };
+      longView.hooks.breakConstructionPiece = (breakInput) => {
+        const result = constructionController.breakPiece(breakInput);
+        return { ok: result.ok, pieceId: result.pieceId, reason: result.reason };
+      };
+      longView.hooks.listPlacedConstructionPieces = (limit) => constructionController.listPlacedPieces(limit);
+    }
   }
 
   if (!session.playerInputController) throw new Error("Frame loop startup requires playerInputController");

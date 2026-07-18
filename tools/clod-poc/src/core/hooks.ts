@@ -26,6 +26,86 @@ export interface TerrainEditProbeResult {
   readonly streamRebuilds: number;
 }
 
+export interface EditRayInput {
+  readonly origin: [number, number, number];
+  readonly direction: [number, number, number];
+}
+
+export interface DestroyEnvironmentalPropInput {
+  readonly position: readonly [number, number, number];
+  readonly prefabId?: string;
+  readonly layer?: "tree" | "stone" | "grass";
+  readonly candidateSpacingM?: number;
+}
+
+export interface DestroyEnvironmentalPropResult {
+  readonly ok: boolean;
+  readonly propId: string | null;
+  readonly dirtyRegions: readonly string[];
+  readonly reason: string | null;
+}
+
+export interface FellTreeInput {
+  readonly position: readonly [number, number, number];
+  readonly candidateSpacingM?: number;
+  readonly maxDistanceM?: number;
+}
+
+export interface FellTreeResult {
+  readonly ok: boolean;
+  readonly propId: string | null;
+  readonly falling: boolean;
+  readonly dirtyRegions: readonly string[];
+  readonly reason: string | null;
+}
+
+export interface PlaceConstructionPieceInput {
+  readonly position: readonly [number, number, number];
+  readonly typeId?: string;
+  readonly rotationQuarterTurns?: number;
+  readonly material?: string;
+}
+
+export interface PlaceConstructionPieceResult {
+  readonly ok: boolean;
+  readonly pieceId: string | null;
+  readonly reason: string | null;
+}
+
+export interface BreakConstructionPieceInput {
+  readonly pieceId?: string;
+  readonly position?: readonly [number, number, number];
+  readonly maxDistanceM?: number;
+}
+
+export interface BreakConstructionPieceResult {
+  readonly ok: boolean;
+  readonly pieceId: string | null;
+  readonly reason: string | null;
+}
+
+export interface PlacedConstructionPieceHookInfo {
+  readonly id: string;
+  readonly typeId: string;
+  readonly position: readonly [number, number, number];
+}
+
+export interface EnvironmentalPropExclusionQuery {
+  readonly position: readonly [number, number, number];
+  readonly layer?: "tree" | "stone" | "grass";
+  readonly candidateSpacingM?: number;
+}
+
+export interface EnvironmentalPropExclusionResult {
+  readonly propId: string;
+  readonly excluded: boolean;
+  readonly address: {
+    readonly tileKey: { readonly x: number; readonly z: number };
+    readonly layer: "tree" | "stone" | "grass";
+    readonly candidateIndex: number;
+  };
+}
+
 export interface StreamingResidencySnapshot {
   readonly clodCachedKeys: readonly string[];
   readonly farSummaryResidentKeys: readonly string[];
@@ -102,10 +182,15 @@ export interface ClodHooks {
   flyCamEnabled: ((on: boolean) => void) | null;
   recoverAfterDeviceLoss: (() => Promise<void>) | null;
   beginMovementRouteProbe: (() => void) | null;
-  runTerrainEditProbe: ((ray: {
-    origin: [number, number, number];
-    direction: [number, number, number];
-  }) => Promise<TerrainEditProbeResult>) | null;
+  runTerrainEditProbe: ((ray: EditRayInput) => Promise<TerrainEditProbeResult>) | null;
+  scheduleDig: ((ray: EditRayInput) => void) | null;
+  destroyEnvironmentalProp: ((input: DestroyEnvironmentalPropInput) => Promise<DestroyEnvironmentalPropResult>) | null;
+  fellTree: ((input: FellTreeInput) => Promise<FellTreeResult>) | null;
+  placeConstructionPiece: ((input: PlaceConstructionPieceInput) => Promise<PlaceConstructionPieceResult>) | null;
+  breakConstructionPiece: ((input: BreakConstructionPieceInput) => BreakConstructionPieceResult) | null;
+  listPlacedConstructionPieces: ((limit?: number) => readonly PlacedConstructionPieceHookInfo[]) | null;
+  queryEnvironmentalPropExclusion: ((input: EnvironmentalPropExclusionQuery) => EnvironmentalPropExclusionResult | null) | null;
+  flushSaveRuntime: (() => Promise<void>) | null;
   getPlayableSliceSnapshot: (() => PlayableSliceSnapshot) | null;
   getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
   compareStreamRootBuilds: ((
@@ -199,6 +284,14 @@ export function initHooks(): ClodHooks {
     recoverAfterDeviceLoss: null,
     beginMovementRouteProbe: null,
     runTerrainEditProbe: null,
+    scheduleDig: null,
+    destroyEnvironmentalProp: null,
+    fellTree: null,
+    placeConstructionPiece: null,
+    breakConstructionPiece: null,
+    listPlacedConstructionPieces: null,
+    queryEnvironmentalPropExclusion: null,
+    flushSaveRuntime: null,
     getPlayableSliceSnapshot: null,
     getStreamingRootReadyPageKeys: null,
     compareStreamRootBuilds: null,

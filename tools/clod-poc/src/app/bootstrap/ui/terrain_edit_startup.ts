@@ -3,7 +3,14 @@ import playerEditingConfigText from "../../../../config/player/player_editing.ya
 import { setActiveConstructionTerrainConformHandler } from "../../../construction/construction_terrain_registry.js";
 import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
 import { createPlayableSliceSnapshot } from "../../../qa/playable_slice_snapshot.js";
-import { flushSaveRuntimeOnce, markSaveRegionsDirtyForBounds } from "../../../save/save_runtime.js";
+import {
+  destroyEnvironmentalPropCandidate,
+  flushSaveRuntimeOnce,
+  getSaveRuntimePropExclusions,
+  getSaveRuntimeWorldId,
+  hasActiveSaveRuntime,
+  markSaveRegionsDirtyForBounds,
+} from "../../../save/save_runtime.js";
 import { getDigEditRevision, voxelEditCount } from "../../../terrain/terrain.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
 import { TerrainEditDirtyQueue, type TerrainEditDirtyEvent } from "../../../terrain/editing/terrain_edit_dirty_queue.js";
@@ -18,6 +25,9 @@ import { createAppCellReadinessFeeds, editTargetAcceptable } from "../../../play
 import { heightfieldTileResidentKeys } from "../../../world/heightfield_tiles/heightfield_tile_client_runtime.js";
 import type { FarSummaryIntegration } from "../../../far-summary/integration.js";
 import { setRenderedClodOwnershipKeySource } from "../../../stream/clod_ownership_keys.js";
+import { lookupEnvironmentalPropHit } from "../../../world/prop_interaction_lookup.js";
+import { treeInstanceToFallingInstance } from "../../../trees/tree_system_patch_removal.js";
+import type { TreeSpeciesId } from "../../../trees/tree_config_types.js";
 
 export interface TerrainEditStartupResult {
   terrainEditService: ReturnType<typeof createTerrainEditService>;
@@ -176,6 +186,97 @@ export function runTerrainEditStartup(
         streamInvalidations: counters["live_clod_stream_invalidations_total"] ?? 0,
         streamRebuilds: counters["live_clod_stream_rebuilt_after_invalidation_total"] ?? 0,
       };
+    };
+    input.longView.hooks.scheduleDig = (ray) => {
+      terrainEditService.scheduleDig(new THREE.Ray(
+        new THREE.Vector3(...ray.origin),
+        new THREE.Vector3(...ray.direction).normalize(),
+      ));
+    };
+    input.longView.hooks.flushSaveRuntime = async () => {
+      await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
+    };
+    input.longView.hooks.queryEnvironmentalPropExclusion = (query) => {
+      const worldId = getSaveRuntimeWorldId() ?? window.__drusnielWorldManifest?.worldId;
+      if (!worldId) return null;
+      const layer = query.layer ?? "tree";
+      const spacing = Math.max(0.5, query.candidateSpacingM ?? treeSystem.settings.placement.spacingM);
+      const hit = lookupEnvironmentalPropHit(worldId, layer, query.position, spacing);
+      return {
+        propId: hit.propId,
+        excluded: getSaveRuntimePropExclusions().isExcluded(hit.address),
+        address: hit.address,
+      };
+    };
+    input.longView.hooks.destroyEnvironmentalProp = async (destroyInput) => {
+      if (!hasActiveSaveRuntime()) {
+        return { ok: false, propId: null, dirtyRegions: [], reason: "save runtime inactive (pass ?save=...)" };
+      }
+      const worldId = getSaveRuntimeWorldId() ?? window.__drusnielWorldManifest?.worldId;
+      if (!worldId) {
+        return { ok: false, propId: null, dirtyRegions: [], reason: "world manifest missing" };
+      }
+      const layer = destroyInput.layer ?? "stone";
+      const spacing = Math.max(0.5, destroyInput.candidateSpacingM ?? (layer === "tree" ? treeSystem.settings.placement.spacingM : 8));
+      const hit = lookupEnvironmentalPropHit(worldId, layer, destroyInput.position, spacing);
+      const prefabId = destroyInput.prefabId
+        ?? (layer === "tree" ? "environment/tree" : layer === "grass" ? "environment/grass" : "environment/stone");
+      const dirtyRegions = destroyEnvironmentalPropCandidate(hit.address, hit.worldPosition, prefabId);
+      await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
+      return { ok: true, propId: hit.propId, dirtyRegions, reason: null };
+    };
+    input.longView.hooks.fellTree = async (fellInput) => {
+      if (!hasActiveSaveRuntime()) {
+        return { ok: false, propId: null, falling: false, dirtyRegions: [], reason: "save runtime inactive (pass ?save=...)" };
+      }
+      const worldId = getSaveRuntimeWorldId() ?? window.__drusnielWorldManifest?.worldId;
+      if (!worldId) {
+        return { ok: false, propId: null, falling: false, dirtyRegions: [], reason: "world manifest missing" };
+      }
+      const spacing = Math.max(0.5, fellInput.candidateSpacingM ?? treeSystem.settings.placement.spacingM);
+      const hit = lookupEnvironmentalPropHit(worldId, "tree", fellInput.position, spacing);
+      const dirtyRegions = destroyEnvironmentalPropCandidate(hit.address, hit.worldPosition, "environment/tree");
+      const maxDist = Math.max(spacing, fellInput.maxDistanceM ?? spacing * 1.5);
+      const maxDist2 = maxDist * maxDist;
+      let nearest: { patchIndex: number; instanceIndex: number } | null = null;
+      let bestDist2 = maxDist2;
+      for (let patchIndex = 0; patchIndex < treeSystem.patches.length; patchIndex += 1) {
+        const patch = treeSystem.patches[patchIndex]!;
+        for (let instanceIndex = 0; instanceIndex < patch.instances.length; instanceIndex += 1) {
+          const instance = patch.instances[instanceIndex]!;
+          const dx = instance.position[0] - fellInput.position[0];
+          const dz = instance.position[2] - fellInput.position[2];
+          const dist2 = dx * dx + dz * dz;
+          if (dist2 <= bestDist2) {
+            bestDist2 = dist2;
+            nearest = { patchIndex, instanceIndex };
+          }
+        }
+      }
+      let falling = false;
+      if (nearest) {
+        const patch = treeSystem.patches[nearest.patchIndex]!;
+        const instance = patch.instances[nearest.instanceIndex]!;
+        fallingTrees.push(treeInstanceToFallingInstance(instance));
+        patch.instances.splice(nearest.instanceIndex, 1);
+        treeSystem.markPatchesDirty();
+        falling = true;
+      } else {
+        const species = "oak" as TreeSpeciesId;
+        fallingTrees.push({
+          position: [hit.worldPosition[0], hit.worldPosition[1], hit.worldPosition[2]],
+          velocity: 0,
+          originalY: hit.worldPosition[1],
+          species,
+          scale: 1,
+          rotationY: 0,
+          normalY: 1,
+        });
+        falling = true;
+        treeSystem.markPatchesDirty();
+      }
+      await flushSaveRuntimeOnce(Number.MAX_SAFE_INTEGER);
+      return { ok: true, propId: hit.propId, falling, dirtyRegions, reason: null };
     };
   }
 

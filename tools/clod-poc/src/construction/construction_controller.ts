@@ -94,6 +94,37 @@ export interface ConstructionControllerStats {
   performance: ConstructionPerformanceSnapshot;
 }
 
+export interface ConstructionPlacePieceAtInput {
+  readonly position: readonly [number, number, number];
+  readonly typeId?: string;
+  readonly rotationQuarterTurns?: number;
+  readonly material?: ConstructionMaterial;
+}
+
+export interface ConstructionPlacePieceAtResult {
+  readonly ok: boolean;
+  readonly pieceId: string | null;
+  readonly reason: string | null;
+}
+
+export interface ConstructionBreakPieceInput {
+  readonly pieceId?: string;
+  readonly position?: readonly [number, number, number];
+  readonly maxDistanceM?: number;
+}
+
+export interface ConstructionBreakPieceResult {
+  readonly ok: boolean;
+  readonly pieceId: string | null;
+  readonly reason: string | null;
+}
+
+export interface ConstructionListedPiece {
+  readonly id: string;
+  readonly typeId: string;
+  readonly position: readonly [number, number, number];
+}
+
 export type LegacyConstructionTerrainConformHandler = (request: ConstructionTerrainConformRequest) => void;
 
 export interface ConstructionController {
@@ -105,6 +136,11 @@ export interface ConstructionController {
   ): void;
   readonly colliderSet: ConstructionColliderSet;
   reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void;
+  /** Automation/authoritative place path used by edit-storm hooks (same transaction as player place). */
+  placePieceAt(input: ConstructionPlacePieceAtInput): Promise<ConstructionPlacePieceAtResult>;
+  /** Automation/authoritative break path used by edit-storm hooks (same removal as player delete). */
+  breakPiece(input: ConstructionBreakPieceInput): ConstructionBreakPieceResult;
+  listPlacedPieces(limit?: number): readonly ConstructionListedPiece[];
 }
 
 export function createConstructionController(deps: ConstructionControllerDeps): ConstructionController {
@@ -299,6 +335,147 @@ class ConstructionControllerImpl implements ConstructionController {
       return;
     }
     if (typeof handler !== "function") this.terrainConformHandler = handler;
+  }
+
+  listPlacedPieces(limit = 256): readonly ConstructionListedPiece[] {
+    const max = Math.max(0, Math.floor(limit));
+    const out: ConstructionListedPiece[] = [];
+    for (let i = 0; i < this.pieceStore.pieces.length && out.length < max; i += 1) {
+      const piece = this.pieceStore.pieces[i]!;
+      out.push({
+        id: piece.id,
+        typeId: piece.typeId,
+        position: [...piece.position],
+      });
+    }
+    return out;
+  }
+
+  breakPiece(input: ConstructionBreakPieceInput): ConstructionBreakPieceResult {
+    if (this.placementInFlight) {
+      return { ok: false, pieceId: null, reason: "placement in flight" };
+    }
+    let targetId = input.pieceId ?? null;
+    if (!targetId && input.position) {
+      const maxDist = Math.max(0.5, input.maxDistanceM ?? 4);
+      const maxDist2 = maxDist * maxDist;
+      let bestDist2 = maxDist2;
+      for (const piece of this.pieceStore.pieces) {
+        const dx = piece.position[0] - input.position[0];
+        const dy = piece.position[1] - input.position[1];
+        const dz = piece.position[2] - input.position[2];
+        const dist2 = dx * dx + dy * dy + dz * dz;
+        if (dist2 <= bestDist2) {
+          bestDist2 = dist2;
+          targetId = piece.id;
+        }
+      }
+    }
+    if (!targetId) return { ok: false, pieceId: null, reason: "piece not found" };
+    this.forgetUndoRecord(targetId);
+    const removal = this.pieceStore.removeOne(targetId);
+    if (removal.removedCount !== 1) {
+      return { ok: false, pieceId: targetId, reason: "delete target was not tracked" };
+    }
+    this.recomputeStability(removal.disconnectedNeighborIds);
+    this.clearCurrentPreview(true);
+    this.savePlacedPieces();
+    this.lastPlacementMessage = "Deleted 1 piece. Stability recomputed.";
+    this.syncUi(true);
+    return { ok: true, pieceId: targetId, reason: null };
+  }
+
+  async placePieceAt(input: ConstructionPlacePieceAtInput): Promise<ConstructionPlacePieceAtResult> {
+    if (this.placementInFlight) {
+      return { ok: false, pieceId: null, reason: "placement in flight" };
+    }
+    if (this.config.pieces.length === 0) {
+      return { ok: false, pieceId: null, reason: "no construction pieces configured" };
+    }
+    const typeId = input.typeId
+      ?? this.config.pieces.find((piece) => piece.canGround)?.id
+      ?? this.config.pieces[0]!.id;
+    const piece = this.piecesById.get(typeId);
+    if (!piece) return { ok: false, pieceId: null, reason: `unknown piece type: ${typeId}` };
+    const material = input.material ?? piece.material;
+    const rotationQuarterTurns = normalizeRotationQuarterTurns(input.rotationQuarterTurns ?? 0);
+    const surfaceY = surfaceHeight(input.position[0], input.position[2]);
+    const terrainHit = {
+      point: [input.position[0], surfaceY, input.position[2]] as const,
+      normal: [0, 1, 0] as const,
+      distanceM: 0,
+      surfaceType: "terrain" as const,
+    };
+    const position = createFreePlacementPosition(piece, terrainHit, rotationQuarterTurns);
+    const overlapCandidates = this.overlapIndex.query(piece, position, rotationQuarterTurns);
+    let candidate = this.applyCommitAuthority(createConstructionCandidate({
+      piece,
+      material,
+      position,
+      rotationQuarterTurns,
+      snapped: false,
+      snap: null,
+      connectionIds: [],
+      terrainHit,
+      placedPieces: this.pieceStore.pieces,
+      overlapCandidates,
+      piecesById: this.piecesById,
+      worldCells: this.deps.worldCells,
+      config: this.config.placement,
+      stabilityConfig: this.config.stability,
+      supportProfiles: this.config.supportProfiles,
+    }));
+    if (!candidate.valid) {
+      return { ok: false, pieceId: null, reason: candidate.reason ?? "invalid placement" };
+    }
+    const terrainRequest = createConstructionTerrainConformRequest(candidate, this.config.terrainConform);
+    const handler = this.resolveTerrainConformHandler();
+    if (terrainRequest) {
+      if (!handler) return { ok: false, pieceId: null, reason: "terrain conform service unavailable" };
+      const terrainPreview = handler.preview(terrainRequest);
+      if (!terrainPreview.valid) {
+        return { ok: false, pieceId: null, reason: terrainPreview.reason ?? "terrain conform preview rejected" };
+      }
+    }
+
+    const placed: PlacedConstructionPiece = {
+      id: `${ENTITY_ID_PREFIX}${this.nextEntityId}`,
+      typeId: candidate.piece.id,
+      position: [...candidate.position],
+      rotationQuarterTurns: candidate.rotationQuarterTurns,
+      material: candidate.material,
+      grounded: candidate.stabilityGrounded,
+      connectionIds: [...candidate.connectionIds],
+      stability: candidate.stabilityValue,
+    };
+    this.placementInFlight = true;
+    try {
+      const result = await commitConstructionPlacementTransaction({
+        piece: placed,
+        terrainRequest,
+        terrainHandler: handler,
+        addPiece: (next) => this.pieceStore.add(next, true),
+      });
+      if (!result.committed || !result.undoRecord) {
+        return { ok: false, pieceId: null, reason: result.reason ?? "transaction rejected" };
+      }
+      this.nextEntityId += 1;
+      this.undoStack.push(result.undoRecord);
+      this.recomputeStability([placed.id, ...(placed.connectionIds ?? [])]);
+      this.savePlacedPieces();
+      this.clearCurrentPreview(true);
+      this.lastPlacementMessage = `Placed ${candidate.piece.label} · ${constructionMaterialLabel(candidate.material)}`;
+      return { ok: true, pieceId: placed.id, reason: null };
+    } catch (error) {
+      return {
+        ok: false,
+        pieceId: null,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      this.placementInFlight = false;
+      this.syncUi(true);
+    }
   }
 
   reevaluateSupportForTerrainEdit(aabb: ConstructionSupportAabb): void {

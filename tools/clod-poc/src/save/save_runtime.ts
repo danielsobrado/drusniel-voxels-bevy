@@ -192,6 +192,10 @@ export function hasActiveSaveRuntime(): boolean {
   return state !== null;
 }
 
+export function getSaveRuntimeWorldId(): string | null {
+  return state?.manifest.worldId ?? null;
+}
+
 export function hasLoadedSavePropAuthority(): boolean {
   return state !== null && savedPropStore.hasProps();
 }
