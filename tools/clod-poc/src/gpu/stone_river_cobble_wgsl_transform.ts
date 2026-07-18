@@ -158,7 +158,10 @@ fn ring_edge_fade(dist: f32) -> f32 {`,
   let h = placement_ground_height(wpos.x, wpos.y, world_size);`,
     `  let world_size = params.world.x;
   let hydro = hydrology_at(wpos.x, wpos.y);
-  let hydro_fields = hydrology_fields_at(wpos.x, wpos.y);
+  var hydro_fields = StoneHydrologyFieldsSample(0.0, 0u, 0.0);
+  if (params.counts_a.w != 0u) {
+    hydro_fields = hydrology_fields_at(wpos.x, wpos.y);
+  }
   let h = placement_ground_height(wpos.x, wpos.y, world_size);`,
   );
 
