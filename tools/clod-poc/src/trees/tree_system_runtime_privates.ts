@@ -3,9 +3,9 @@ import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
 import { resolveTreeSystemLod } from "./tree_system_lod_resolution.js";
 import {
   createTreeSystemGpuRingDrawResources,
-  refreshTreeSystemGpuRingImpostorResources,
   type TreeGpuRingDrawResourcesInput,
 } from "./tree_system_gpu_ring_resources.js";
+import { refreshTreeGpuRingImpostorsTransactionally } from "./tree_gpu_ring_impostor_refresh_transaction.js";
 import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
@@ -64,7 +64,7 @@ export function treeCreateGpuRingResources(self: TreeSystem, maxInstancesPerGrou
 export function treeRefreshGpuRingImpostors(self: TreeSystem): boolean {
   const draw = self.gpuRing.draw;
   if (!draw) return false;
-  return refreshTreeSystemGpuRingImpostorResources(treeGpuRingDrawResourcesInput(self), draw);
+  return refreshTreeGpuRingImpostorsTransactionally(treeGpuRingDrawResourcesInput(self), draw);
 }
 
 export function treeClearGpuRing(self: TreeSystem): void {

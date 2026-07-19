@@ -18,10 +18,13 @@ export function disposeTreeMeshGrid(meshes: TreeSystemMeshGrid): void {
   for (const species of TREE_SPECIES) {
     for (const lod of TREE_LODS) {
       const mesh = meshes[species][lod];
-      // The depth material is patch-owned. Geometry and instance data are shared
-      // with the colour mesh and are released by the colour mesh path below.
+      // The depth material and twin mesh state are patch-owned. Geometry and
+      // instance data are shared with the colour mesh and released below.
       const depthTwin = mesh.userData.depthTwin as THREE.InstancedMesh | undefined;
-      if (depthTwin) disposeMaterial(depthTwin.material);
+      if (depthTwin) {
+        disposeMaterial(depthTwin.material);
+        depthTwin.dispose();
+      }
       mesh.geometry.dispose();
       // Colour materials are shared and owned by TreeSystemAssets.
       mesh.dispose();
