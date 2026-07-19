@@ -52,8 +52,7 @@ async function main(): Promise<void> {
   const outRoot = resolveOutputPath(stringArg(args, "out", "shots/water/foam-acceptance"));
   mkdirSync(outRoot, { recursive: true });
 
-  let report: Record<string, unknown> | null = null;
-  await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
+  const report = await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
     const targetUrl = foamAcceptanceUrl(baseUrl, seed, world);
     await navigateToFoamProfile(page, targetUrl);
     const info = await waterDebugInfo(page);
@@ -90,8 +89,8 @@ async function main(): Promise<void> {
       ),
     };
     const acceptance = evaluateFoamVisualAcceptance(metrics);
-    report = {
-      schemaVersion: 1,
+    return {
+      schemaVersion: 1 as const,
       targetUrl,
       seed,
       world,
@@ -101,13 +100,11 @@ async function main(): Promise<void> {
     };
   });
 
-  if (!report) throw new Error("foam visual acceptance did not produce a report");
   const reportPath = join(outRoot, "report.json");
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`foam visual report: ${reportPath}`);
-  const acceptance = report.acceptance as { passed: boolean; failures: readonly string[] };
-  if (!acceptance.passed) {
-    throw new Error(`water foam visual acceptance failed:\n- ${acceptance.failures.join("\n- ")}`);
+  if (!report.acceptance.passed) {
+    throw new Error(`water foam visual acceptance failed:\n- ${report.acceptance.failures.join("\n- ")}`);
   }
   console.log("water foam visual acceptance passed");
 }

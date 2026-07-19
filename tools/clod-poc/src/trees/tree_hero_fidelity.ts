@@ -212,8 +212,8 @@ function createGeometryCacheEntry(
 
 function attributeVersion(attribute: GeometryAttribute | null | undefined): number {
   if (!attribute) return -1;
-  if ("version" in attribute && typeof attribute.version === "number") return attribute.version;
-  return attribute.data.version;
+  if ("data" in attribute) return attribute.data.version;
+  return attribute.version;
 }
 
 function attributeCount(attribute: GeometryAttribute | null | undefined): number {
