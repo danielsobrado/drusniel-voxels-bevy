@@ -10,8 +10,12 @@ postfx_atmosphere:
     # RAYLEIGH_SPECTRAL_RATIO in code. Real-sky magnitude: ~50% light loss
     # in the blue channel at 12 km, a few percent at 1 km.
     rayleigh_extinction: 0.0000135
-    mie_extinction: 0.000021
-    mie_g: 0.76
+    # Mie raised above the clear-sky value to give the 1-6 km band a visible
+    # haze that carries the near->far terrain hand-off; still energy-conserving.
+    mie_extinction: 0.000046
+    # Broader phase than 0.76 so away-sun terrain gains haze light instead of
+    # sitting in the forward lobe's shadow (distance must lighten, not darken).
+    mie_g: 0.62
     max_distance_m: 12000.0
   froxels:
     enabled: true
