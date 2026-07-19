@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
+import { TreeGpuRingCompute } from "../gpu/tree_ring_compute.js";
 import { cloneTreeSettings, type TreeLod } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import {
@@ -42,6 +43,33 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(2);
     expect(console.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("latches an asynchronous compute initialization failure", async () => {
+    const fixture = runtimeFixture(true);
+    fixture.createDrawResources.mockReturnValue({
+      meshes: [],
+      materialHandles: {},
+      outputBuffers: {},
+    } as TreeGpuRingDrawResources);
+    vi.spyOn(TreeGpuRingCompute, "create").mockRejectedValue(new Error("compute init failed"));
+
+    expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(true);
+    const init = fixture.input.state.init;
+    expect(init).not.toBeNull();
+    await init;
+
+    expect(fixture.input.state.status).toBe("fallback-cpu");
+    expect(fixture.input.state.stats.status).toBe("failed");
+    expect(fixture.input.state.stats.reason).toBe("compute init failed");
+    expect(fixture.input.state.failedKey).not.toBe("");
+    expect(fixture.input.state.draw).toBeNull();
+    expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(1);
+
+    expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
+    expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(1);
   });
 
   it("reports an error without CPU fallback and does not retry the same key", () => {
@@ -137,11 +165,11 @@ describe("tree GPU ring runtime failure handling", () => {
 
 function runtimeFixture(fallbackToCpu: boolean): {
   input: TreeGpuRingRuntimeInput;
-  createDrawResources: ReturnType<typeof vi.fn>;
+  createDrawResources: ReturnType<typeof vi.fn<(maxInstancesPerGroup: number) => TreeGpuRingDrawResources>>;
 } {
   const settings = cloneTreeSettings();
   settings.gpu.fallbackToCpu = fallbackToCpu;
-  const createDrawResources = vi.fn<() => TreeGpuRingDrawResources>();
+  const createDrawResources = vi.fn<(maxInstancesPerGroup: number) => TreeGpuRingDrawResources>();
   const lodCounts = { near: 0, mid: 0, far: 0, impostor: 0 } satisfies Record<TreeLod, number>;
   return {
     createDrawResources,
