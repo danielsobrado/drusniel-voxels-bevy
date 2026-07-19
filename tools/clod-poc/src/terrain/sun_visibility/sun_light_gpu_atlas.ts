@@ -17,6 +17,13 @@ export interface SunLightGpuAtlasState {
   version: number;
 }
 
+export interface SunLightGpuAtlasSample {
+  readonly visibility: number;
+  readonly valid: boolean;
+  readonly revision: number;
+  readonly cellSizeM: number;
+}
+
 const state: SunLightGpuAtlasState = {
   texture: createTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT])),
   originX: 0,
@@ -51,6 +58,43 @@ function resizeTexture(width: number, height: number, data: Uint8Array): void {
 
 export function getSunLightGpuAtlas(): SunLightGpuAtlasState {
   return state;
+}
+
+export function sampleSunLightGpuAtlas(x: number, z: number): SunLightGpuAtlasSample {
+  const image = atlasImage();
+  const cellSizeM = image.width > 0 && state.worldSize > 0 ? state.worldSize / image.width : 0;
+  const fallback: SunLightGpuAtlasSample = {
+    visibility: 1,
+    valid: false,
+    revision: state.version,
+    cellSizeM,
+  };
+  if (
+    state.valid <= 0
+    || !Number.isFinite(x)
+    || !Number.isFinite(z)
+    || !(state.worldSize > 0)
+    || image.width <= 0
+    || image.height <= 0
+  ) {
+    return fallback;
+  }
+
+  const u = (x - state.originX) / state.worldSize;
+  const v = (z - state.originZ) / state.worldSize;
+  if (u < 0 || v < 0 || u > 1 || v > 1) return fallback;
+
+  const ix = Math.min(image.width - 1, Math.max(0, Math.floor(u * image.width)));
+  const iz = Math.min(image.height - 1, Math.max(0, Math.floor(v * image.height)));
+  const value = Number(image.data[iz * image.width + ix]);
+  if (!Number.isFinite(value) || value === VISIBILITY_MISSING) return fallback;
+
+  return {
+    visibility: Math.min(1, Math.max(0, value / VISIBILITY_LIT)),
+    valid: true,
+    revision: state.version,
+    cellSizeM,
+  };
 }
 
 export function updateSunLightGpuAtlas(
@@ -98,4 +142,13 @@ export function invalidateSunLightGpuAtlas(): void {
   state.valid = 0;
   state.version += 1;
   resizeTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT]));
+}
+
+function atlasImage(): { readonly data: ArrayLike<number>; readonly width: number; readonly height: number } {
+  const image = state.texture.image as { data?: ArrayLike<number>; width?: number; height?: number };
+  return {
+    data: image.data ?? [],
+    width: Number.isInteger(image.width) ? Math.max(0, image.width as number) : 0,
+    height: Number.isInteger(image.height) ? Math.max(0, image.height as number) : 0,
+  };
 }

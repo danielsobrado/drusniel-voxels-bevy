@@ -192,7 +192,7 @@ function createFallbackSpellMaterial(color: SpellColor): THREE.MeshBasicMaterial
     opacity: 0,
     depthTest: false,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
@@ -212,7 +212,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     handle.material.transparent = true;
     handle.material.depthWrite = false;
     handle.material.depthTest = false;
-    handle.material.side = THREE.DoubleSide;
+    handle.material.side = THREE.FrontSide;
     handle.material.toneMapped = false;
 
     const mesh = new THREE.Mesh(geometry, handle.material);

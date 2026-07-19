@@ -3,6 +3,7 @@
 // the TSL graph; all owning meshes are notified so their .material reference is swapped.
 
 import * as THREE from "three";
+import { positionGeometry } from "three/tsl";
 import {
   createTerrainNodeMaterial,
   DEFAULT_TERRAIN_COLOR_ADJUST,
@@ -13,6 +14,7 @@ import {
   type TerrainNodeMaterialHandle,
   type TerrainNodeTextures,
 } from "../gpu/terrain_node_material.js";
+import { applyGrassContactTerrainTint } from "../grass/grass_contact_patches.js";
 import type {
   TerrainDebugState,
   TerrainMaterialHandle,
@@ -99,6 +101,7 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
 
   function createNode(reason: string): TerrainNodeMaterialHandle {
     const next = createTerrainNodeMaterial({ lighting, adjust, textures });
+    next.material.colorNode = applyGrassContactTerrainTint(next.material.colorNode, positionGeometry.xz);
     next.material.side = side;
     next.material.wireframe = wireframe;
     next.setFade(fade, fadeIn, dither);

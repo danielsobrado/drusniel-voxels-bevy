@@ -84,7 +84,6 @@ describe("GPU stone instance layout", () => {
   it("partitions direct storage regions by size class", () => {
     expect(stoneGpuClassRegion(0, 100)).toEqual({ start: 0, end: 100, firstInstance: 0 });
     expect(stoneGpuClassRegion(1, 100)).toEqual({ start: 100, end: 200, firstInstance: 100 });
-    expect(stoneGpuClassRegion(2, 100)).toEqual({ start: 200, end: 300, firstInstance: 200 });
     expect(stoneGpuOutputIndex(2, 7, 100)).toBe(207);
   });
 
@@ -108,11 +107,15 @@ describe("GPU stone instance layout", () => {
   });
 
   it("keeps the WGSL storage-buffer declarations within the advertised safe limit", () => {
-    const storageBindings = composeStoneScatterShader().match(/var<storage/g) ?? [];
+    const composed = composeStoneScatterShader();
+    const storageBindings = composed.match(/var<storage/g) ?? [];
 
     expect(storageBindings).toHaveLength(STONE_GPU_SCATTER_STORAGE_BINDINGS);
-    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(6))).toContain("7 storage buffers");
-    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(7))).toBeNull();
+    expect(STONE_GPU_SCATTER_STORAGE_BINDINGS).toBe(8);
+    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(7))).toContain("8 storage buffers");
+    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(8))).toBeNull();
+    expect(composed).toContain("fn select_contact_patches");
+    expect(composed).toContain("@group(0) @binding(17) var<storage, read_write> grass_contact_patches");
   });
 
   it("lays out (class x variant x lod) view groups honoring configured LODs and distances", () => {

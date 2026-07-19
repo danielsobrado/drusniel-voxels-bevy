@@ -160,7 +160,7 @@ export function createFireNodeMaterial(): SpellNodeMaterialHandle {
   material.transparent = true;
   material.depthWrite = false;
   material.depthTest = true;
-  material.side = THREE.DoubleSide;
+  material.side = THREE.FrontSide;
   material.blending = THREE.AdditiveBlending;
   material.toneMapped = false;
 

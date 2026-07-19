@@ -25,6 +25,10 @@ import {
   type StoneHydrologyWater,
   type StoneNodeMaterialHandle,
 } from "../gpu/stone_node_material.js";
+import {
+  ensureGrassContactPatchGpuResources,
+  readGrassContactSettings,
+} from "../grass/grass_contact_patches.js";
 import { buildRock, ROCK_PRESETS, type RockPreset } from "./rock_builder.js";
 import { hashCombine, hashString, Rng } from "./seed.js";
 import { STONE_CLASSES, type StoneClass, type StoneSettings } from "./stone_config.js";
@@ -292,10 +296,12 @@ export class StoneSystem {
       return;
     }
 
+    const contactPatches = ensureGrassContactPatchGpuResources(this.gpuBackend);
     const buffers: StoneGpuScatterBuffers = {
       instanceA: this.gpuBufferForAttribute(instanceA),
       instanceB: this.gpuBufferForAttribute(instanceB),
       indirectArgs: this.gpuBufferForAttribute(indirect),
+      contactPatches: contactPatches.buffer,
     };
     const viewConfig: StoneGpuViewConfig = {
       sourceClassCap,
@@ -388,6 +394,7 @@ export class StoneSystem {
       centerZ,
       unboundedWorld: unboundedCenter,
       settings: this.settings,
+      contactSettings: readGrassContactSettings(),
     }, (counts) => {
       if (generation !== this.generation || compute !== this.scatterCompute) return;
       this.applyTelemetry(counts);

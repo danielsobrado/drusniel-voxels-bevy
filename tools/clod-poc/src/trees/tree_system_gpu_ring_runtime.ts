@@ -113,17 +113,16 @@ export interface TreeMaterialHandleLike {
 export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: THREE.Vector3, camera?: THREE.Camera): boolean {
   const gpu = input.settings.gpu;
   if (!input.supportsGpuTrees || !input.gpuDevice || !input.gpuBackend) {
+    const reason = treeGpuCapabilityFailureReason(input);
     clearTreeGpuRing(input);
     input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+    reportTreeGpuFailure(input, reason);
     return false;
   }
   if (input.unsupportedReason) {
     clearTreeGpuRing(input);
     input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
-    if (input.state.loggedError !== input.unsupportedReason) {
-      input.state.loggedError = input.unsupportedReason;
-      console.warn(`[trees-gpu-ring] falling back to CPU: ${input.unsupportedReason}`);
-    }
+    reportTreeGpuFailure(input, input.unsupportedReason);
     return false;
   }
 
@@ -272,14 +271,25 @@ function failTreeGpuRing(input: TreeGpuRingRuntimeInput, key: string, error: unk
   const reason = error instanceof Error ? error.message : String(error);
   clearTreeGpuRing(input);
   input.state.failedKey = key;
-  input.state.loggedError = reason;
   input.state.stats = {
     ...createTreeGpuRingStats("failed"),
     reason,
   };
   input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "error";
+  reportTreeGpuFailure(input, reason);
+}
+
+function reportTreeGpuFailure(input: TreeGpuRingRuntimeInput, reason: string): void {
+  if (input.state.loggedError === reason) return;
+  input.state.loggedError = reason;
   const action = input.settings.gpu.fallbackToCpu ? "falling back to CPU" : "GPU ring disabled";
-  console.warn(`[trees-gpu-ring] ${action}: ${reason}`);
+  console.error(`[trees-gpu-ring] ${action}: ${reason}`);
+}
+
+function treeGpuCapabilityFailureReason(input: TreeGpuRingRuntimeInput): string {
+  if (!input.supportsGpuTrees) return "GPU trees are not supported by the active renderer";
+  if (!input.gpuDevice) return "WebGPU device is unavailable";
+  return "WebGPU backend access is unavailable";
 }
 
 function destroyTreeGpuRingCompute(compute: TreeGpuRingCompute | null): void {

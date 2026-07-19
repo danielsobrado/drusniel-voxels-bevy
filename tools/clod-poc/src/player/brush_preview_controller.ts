@@ -41,8 +41,9 @@ export function createBrushPreviewController(scene: THREE.Scene): BrushPreviewCo
     opacity: PREVIEW_OPACITY,
     depthTest: false,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   }, "brush-preview");
+  material.name = "terrain-edit-brush-preview";
   const mesh = new THREE.Mesh(brushPreviewGeometries.sphere, material);
   const lastRayOrigin = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
   const lastRayDirection = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);

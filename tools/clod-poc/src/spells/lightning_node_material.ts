@@ -62,7 +62,7 @@ export function createLightningArcNodeMaterial(
   material.transparent = true;
   material.depthTest = true;
   material.depthWrite = false;
-  material.side = THREE.DoubleSide;
+  material.side = THREE.FrontSide;
   material.blending = THREE.AdditiveBlending;
   material.toneMapped = false;
 

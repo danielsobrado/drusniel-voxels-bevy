@@ -14,6 +14,7 @@ import type { TreeGpuRingMesh } from "./tree_system_gpu_ring_draw.js";
 
 describe("tree GPU ring runtime failure handling", () => {
   beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
@@ -33,16 +34,16 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(fixture.input.state.stats.reason).toBe("tree draw init failed");
     expect(fixture.input.state.failedKey).not.toBe("");
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
 
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
 
     fixture.input.settings.seed++;
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(2);
-    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledTimes(1);
   });
 
   it("latches an asynchronous compute initialization failure", async () => {
@@ -64,11 +65,25 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(fixture.input.state.failedKey).not.toBe("");
     expect(fixture.input.state.draw).toBeNull();
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
 
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unavailable GPU capability once before using the CPU path", () => {
+    const fixture = runtimeFixture(true);
+    fixture.input.gpuBackend = null;
+
+    expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
+    expect(fixture.input.state.status).toBe("fallback-cpu");
+    expect(console.error).toHaveBeenCalledWith(
+      "[trees-gpu-ring] falling back to CPU: WebGPU backend access is unavailable",
+    );
+
+    expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
+    expect(console.error).toHaveBeenCalledTimes(1);
   });
 
   it("reports an error without CPU fallback and does not retry the same key", () => {
@@ -81,7 +96,7 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(fixture.input.state.status).toBe("error");
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
   });
 
   it("allows an explicit clear to retry the same configuration", () => {

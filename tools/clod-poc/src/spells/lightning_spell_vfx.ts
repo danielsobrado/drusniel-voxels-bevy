@@ -89,7 +89,7 @@ function createArcMaterial(color: SpellColor, opacity: number): THREE.MeshBasicM
     opacity,
     depthTest: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
