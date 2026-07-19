@@ -71,6 +71,6 @@ export function createStreamingRootGpuGui(
   folder.add(model, "resetOverrides").name("reset menu overrides");
 
   if (!isWebGpu) {
-    for (const controller of liveControllers) controller.disable();
+    for (const controller of liveControllers) controller.disable?.();
   }
 }

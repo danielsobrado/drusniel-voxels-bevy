@@ -12,69 +12,69 @@
   "static_temporal_variance": {
     "adjacent": [
       {
-        "meanLuma": 0.003102735046601061,
-        "p95Luma": 0.006443137254901963,
-        "maxLuma": 0.4441270588235294,
-        "meanChroma": 0.003070463094885605,
-        "changedRatio": 0.17973589217822206,
-        "edgeMean": 0.0017360822137885
+        "meanLuma": 0.00009626443114306218,
+        "p95Luma": 0.00028313725490196963,
+        "maxLuma": 0.005305882352941211,
+        "meanChroma": 0.00016575973377093618,
+        "changedRatio": 0.00008810713828014866,
+        "edgeMean": 0.00020763421118416212
       },
       {
-        "meanLuma": 0.002132335018206473,
-        "p95Luma": 0.0047552941176470945,
-        "maxLuma": 0.009247843137254916,
-        "meanChroma": 0.0023849707126198647,
-        "changedRatio": 0.060198534751591266,
-        "edgeMean": 0.0015798833367251142
+        "meanLuma": 0.0000942146036508703,
+        "p95Luma": 0.0002831372549019557,
+        "maxLuma": 0.005305882352941154,
+        "meanChroma": 0.00016234643287024242,
+        "changedRatio": 0.00007475757187406553,
+        "edgeMean": 0.00020437586110543993
       },
       {
-        "meanLuma": 0.001500493207321785,
-        "p95Luma": 0.0036384313725490386,
-        "maxLuma": 0.006443137254901992,
-        "meanChroma": 0.0018730959853702769,
-        "changedRatio": 0.011849075142039386,
-        "edgeMean": 0.0015036266709643259
+        "meanLuma": 0.00008755849937054984,
+        "p95Luma": 0.00028313725490194177,
+        "maxLuma": 0.003921568627451092,
+        "meanChroma": 0.00015177148222699055,
+        "changedRatio": 0.000018689392968516384,
+        "edgeMean": 0.00019384867377615186
       },
       {
-        "meanLuma": 0.0010397239770355215,
-        "p95Luma": 0.003638431372549011,
-        "maxLuma": 0.006443137254901978,
-        "meanChroma": 0.0014263671421823308,
-        "changedRatio": 0.0009504891281131189,
-        "edgeMean": 0.0013447297165432195
-      },
-      {
-        "meanLuma": 0.0007349143952499969,
-        "p95Luma": 0.0028047058823529804,
+        "meanLuma": 0.00008879362219493755,
+        "p95Luma": 0.00028313725490194177,
         "maxLuma": 0.004755294117647038,
-        "meanChroma": 0.0010776398217871954,
-        "changedRatio": 0.0002616515015592294,
-        "edgeMean": 0.0011352153698361213
+        "meanChroma": 0.00015298079588965915,
+        "changedRatio": 0.000029369046093382887,
+        "edgeMean": 0.00019618730804897314
       },
       {
-        "meanLuma": 0.0005919835612907502,
-        "p95Luma": 0.0028047058823529526,
-        "maxLuma": 0.006443137254901949,
-        "meanChroma": 0.0008902171445700481,
-        "changedRatio": 0.0001441753171856978,
-        "edgeMean": 0.0009947718619458608
+        "meanLuma": 0.00008653542210598135,
+        "p95Luma": 0.00028313725490194177,
+        "maxLuma": 0.003921568627451036,
+        "meanChroma": 0.00014952037887223948,
+        "changedRatio": 0.00001334956640608313,
+        "edgeMean": 0.00019234023430026608
       },
       {
-        "meanLuma": 0.00033464752747197185,
-        "p95Luma": 0.0028047058823529388,
-        "maxLuma": 0.004472156862745096,
-        "meanChroma": 0.000526386491201758,
-        "changedRatio": 0.00003470887265581614,
-        "edgeMean": 0.0006560996184526641
+        "meanLuma": 0.00009093586847360192,
+        "p95Luma": 0.00028313725490194177,
+        "maxLuma": 0.004472156862745152,
+        "meanChroma": 0.00015632080505322132,
+        "changedRatio": 0.00005339826562433252,
+        "edgeMean": 0.00019909532476499237
+      },
+      {
+        "meanLuma": 0.00009046655216405391,
+        "p95Luma": 0.00028313725490194177,
+        "maxLuma": 0.004472156862745152,
+        "meanChroma": 0.00015564547404679608,
+        "changedRatio": 0.00003203895937459951,
+        "edgeMean": 0.0001984830735990675
       }
     ],
-    "meanLuma": 0.0013481189618825085,
-    "maxP95Luma": 0.006443137254901963,
-    "maxChangedRatio": 0.17973589217822206,
+    "meanLuma": 0.00009068128558615101,
+    "maxP95Luma": 0.00028313725490196963,
+    "maxChangedRatio": 0.00008810713828014866,
     "multiScaleMean": {
-      "1": 0.0013481189618825085,
-      "2": 0.0013468193144196043,
-      "4": 0.0013458083838973397
+      "1": 0.00009068128558615101,
+      "2": 0.00008976026543847886,
+      "4": 0.00008751198931585078
     }
   },
   "transition_residual": null,
@@ -82,56 +82,73 @@
   "reprojected_colour_residual": [
     {
       "frame": 1,
-      "meanLuma": 0.003102735046601061,
-      "edgeMean": 0.0017360822137885,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00009618123905758832,
+      "edgeMean": 0.0004828996494501288,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     },
     {
       "frame": 2,
-      "meanLuma": 0.002132335018206473,
-      "edgeMean": 0.0015798833367251142,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00009409178602259371,
+      "edgeMean": 0.0004795371743949401,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     },
     {
       "frame": 3,
-      "meanLuma": 0.001500493207321785,
-      "edgeMean": 0.0015036266709643259,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00008747780083680342,
+      "edgeMean": 0.00046910198076407334,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     },
     {
       "frame": 4,
-      "meanLuma": 0.0010397239770355215,
-      "edgeMean": 0.0013447297165432195,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00008868397953159442,
+      "edgeMean": 0.00047125469051637666,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     },
     {
       "frame": 5,
-      "meanLuma": 0.0007349143952499969,
-      "edgeMean": 0.0011352153698361213,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00008644200677826704,
+      "edgeMean": 0.0004674925193202443,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     },
     {
       "frame": 6,
-      "meanLuma": 0.0005919835612907502,
-      "edgeMean": 0.0009947718619458608,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00009084945545712882,
+      "edgeMean": 0.0004740870742357395,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     },
     {
       "frame": 7,
-      "meanLuma": 0.00033464752747197185,
-      "edgeMean": 0.0006560996184526641,
-      "validRatio": 1,
-      "disoccludedRatio": 0
+      "meanLuma": 0.00009043198594128082,
+      "edgeMean": 0.00047368450935703207,
+      "validRatio": 0.9985609167414242,
+      "disoccludedRatio": 0.0014390832585757796
     }
   ],
-  "popEvents": 7,
+  "popEvents": 0,
+  "eventResidual": null,
+  "eventPopEvents": 0,
   "consoleErrors": [],
+  "thresholds": {
+    "meanLuma": 0.0002,
+    "maxP95Luma": 0.001,
+    "maxChangedRatio": 0.001,
+    "popEvents": 0,
+    "counterMax": {
+      "live_clod_gap_holes": 0,
+      "clod_far_gap_holes": 0,
+      "live_clod_overlap_cells": 0,
+      "clod_far_overlap_cells": 0,
+      "priority_owner_overlap_cells": 0,
+      "far_clipmap_ownership_holes": 0
+    }
+  },
+  "gateViolations": [],
   "passed": true
 }
 ```

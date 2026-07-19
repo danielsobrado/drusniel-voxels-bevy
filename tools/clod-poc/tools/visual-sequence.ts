@@ -42,7 +42,14 @@ async function main(): Promise<void> {
     const url = clodUrl({
       scene: config.scene === "main" ? null : config.scene,
       seed: config.seed,
-      cam: [config.start.p[0], config.start.p[1], config.start.p[2], config.start.yaw, config.start.pitch, config.start.fov ?? 55].join(","),
+      cam: [
+        (config.boot ?? config.start).p[0],
+        (config.boot ?? config.start).p[1],
+        (config.boot ?? config.start).p[2],
+        (config.boot ?? config.start).yaw,
+        (config.boot ?? config.start).pitch,
+        (config.boot ?? config.start).fov ?? 55,
+      ].join(","),
       hud: false,
       freeze: true,
       extra: {
@@ -51,6 +58,7 @@ async function main(): Promise<void> {
         froxels: "0",
         treeWind: "0",
         grassWind: "0",
+        taa: "0",
         ...config.query,
       },
     });
@@ -60,7 +68,14 @@ async function main(): Promise<void> {
       () => Boolean(window.__drusnielClod?.ready || window.__drusnielClod?.error),
       undefined,
       { timeout: timeoutMs, polling: 250 },
-    );
+    ).catch(async () => {
+      const state = await page.evaluate(() => ({
+        progress: window.__drusnielClod?.progress ?? null,
+        progressMsg: window.__drusnielClod?.progressMsg ?? "hook missing",
+        error: window.__drusnielClod?.error ?? null,
+      }));
+      throw new Error(`timed out waiting for app readiness: ${JSON.stringify(state)}; console=${consoleErrors.join(" | ")}`);
+    });
     const fatal = await page.evaluate(() => window.__drusnielClod?.error ?? null);
     if (fatal) throw new Error(`app reported fatal error: ${fatal}`);
     await page.waitForFunction(
@@ -75,19 +90,31 @@ async function main(): Promise<void> {
       if (!window.__drusnielQa) throw new Error("QA hook is missing");
       await window.__drusnielQa.beginSequence(clockConfig);
     }, { frames: config.frames, stepSeconds: config.stepSeconds, path: { start: config.start, end: config.end } });
-    if (config.setupAction) await page.evaluate(async (action) => window.__drusnielQa!.runSequenceEvent(action), config.setupAction);
+    await page.evaluate(async (frames) => window.__drusnielQa!.settle(frames), config.warmupFrames ?? 60);
+    await page.evaluate(async () => window.__drusnielQa!.setDiagnosticBuffer("final"));
+    if (config.setupAction) {
+      await page.evaluate(async (action) => window.__drusnielQa!.runSequenceEvent(action), config.setupAction);
+      if (config.boot && !sameConfiguredPose(config.boot, config.start)) {
+        await page.evaluate(async () => window.__drusnielQa!.stepSequence(0, true));
+      }
+      await page.evaluate(async (frames) => window.__drusnielQa!.settle(frames), config.setupSettleFrames ?? 1);
+    }
 
     const environment = await page.evaluate(() => window.__drusnielQa?.environment() ?? {});
+    const movingPath = !sameConfiguredPose(config.start, config.end);
     const records: VisualSequenceFrameRecord[] = [];
     const frameStats: Array<{ counters: Record<string, number>; camera: CameraRecord }> = [];
     for (let index = 0; index < config.frames; index++) {
       if (config.eventFrame === index && config.eventAction) {
         await page.evaluate(async (action) => window.__drusnielQa!.runSequenceEvent(action), config.eventAction);
       }
-      const state = await page.evaluate(async (frameIndex) => window.__drusnielQa!.stepSequence(frameIndex), index);
+      const state = await page.evaluate(
+        async ({ frameIndex, applyPose }) => window.__drusnielQa!.stepSequence(frameIndex, applyPose),
+        { frameIndex: index, applyPose: movingPath },
+      );
       const stem = String(index).padStart(3, "0");
       const colorRelative = `frames/${stem}.png`;
-      const colorDataUrl = await page.evaluate(async () => window.__drusnielQa!.captureDiagnosticBuffer("final"));
+      const colorDataUrl = await page.evaluate(async (frameIndex) => window.__drusnielQa!.captureScreenshot(`final-${frameIndex}`), index);
       writeFileSync(join(outputDir, colorRelative), decodeDataUrl(colorDataUrl));
       const depthRelative = config.captureDepth ? `depth/${stem}.png` : undefined;
       const captured = await page.evaluate(async () => ({
@@ -100,12 +127,12 @@ async function main(): Promise<void> {
       records.push({ index, timeSeconds: state.timeSeconds, pose: state.pose, color: colorRelative, depth: depthRelative, stats: statsRelative });
     }
     if (config.captureDepth) {
-      await page.evaluate(async (clockConfig) => {
-        await window.__drusnielQa!.beginSequence(clockConfig);
-        await window.__drusnielQa!.setDiagnosticBuffer("depth");
-      }, { frames: config.frames, stepSeconds: config.stepSeconds, path: { start: config.start, end: config.end } });
+      await page.evaluate(async () => window.__drusnielQa!.setDiagnosticBuffer("depth"));
       for (let index = 0; index < config.frames; index++) {
-        await page.evaluate(async (frameIndex) => window.__drusnielQa!.stepSequence(frameIndex), index);
+        await page.evaluate(
+          async ({ frameIndex, applyPose }) => window.__drusnielQa!.stepSequence(frameIndex, applyPose),
+          { frameIndex: index, applyPose: movingPath },
+        );
         const dataUrl = await page.evaluate(async (frameIndex) => window.__drusnielQa!.captureScreenshot(`depth-${frameIndex}`), index);
         writeFileSync(join(outputDir, records[index]!.depth!), decodeDataUrl(dataUrl));
       }
@@ -145,6 +172,9 @@ async function main(): Promise<void> {
     const reprojection = config.captureDepth
       ? await calculateReprojection(outputDir, records, colorPlanes, frameStats)
       : [];
+    const eventResidual = config.eventFrame && config.eventFrame > 0 ? temporal.adjacent[config.eventFrame - 1] ?? null : null;
+    const eventPopEvents = config.eventFrame === undefined ? 0 : events.filter((event) => event.frame === config.eventFrame).length;
+    const gateViolations = evaluateThresholds(config.thresholds, temporal, events.length, reprojection, eventResidual, eventPopEvents, frameStats);
     const summary = {
       schemaVersion: 1,
       id: config.id,
@@ -155,8 +185,12 @@ async function main(): Promise<void> {
       moving_residual: config.mode === "moving" ? temporal : null,
       reprojected_colour_residual: reprojection,
       popEvents: events.length,
+      eventResidual,
+      eventPopEvents,
       consoleErrors,
-      passed: consoleErrors.length === 0,
+      thresholds: config.thresholds ?? null,
+      gateViolations,
+      passed: consoleErrors.length === 0 && gateViolations.length === 0,
     };
     writeJson(join(outputDir, "summary.json"), summary);
     writeFileSync(join(outputDir, "report.md"), reportMarkdown(summary, relative(process.cwd(), outputDir)));
@@ -168,6 +202,36 @@ async function main(): Promise<void> {
 }
 
 interface CameraRecord { viewProjection: number[]; viewProjectionInverse: number[]; near: number; far: number }
+
+function evaluateThresholds(
+  thresholds: VisualSequenceManifest["config"]["thresholds"],
+  temporal: ReturnType<typeof temporalMetrics>,
+  popEvents: number,
+  reprojection: readonly { meanLuma: number; validRatio: number }[],
+  eventResidual: { meanLuma: number; p95Luma: number; changedRatio: number } | null,
+  eventPopEvents: number,
+  frameStats: readonly { counters: Record<string, number> }[],
+): string[] {
+  if (!thresholds) return [];
+  const violations: string[] = [];
+  const maximumReprojected = reprojection.length > 0 ? Math.max(...reprojection.map((item) => item.meanLuma)) : 0;
+  const minimumValidRatio = reprojection.length > 0 ? Math.min(...reprojection.map((item) => item.validRatio)) : 1;
+  if (thresholds.meanLuma !== undefined && temporal.meanLuma > thresholds.meanLuma) violations.push(`meanLuma ${temporal.meanLuma} > ${thresholds.meanLuma}`);
+  if (thresholds.maxP95Luma !== undefined && temporal.maxP95Luma > thresholds.maxP95Luma) violations.push(`maxP95Luma ${temporal.maxP95Luma} > ${thresholds.maxP95Luma}`);
+  if (thresholds.maxChangedRatio !== undefined && temporal.maxChangedRatio > thresholds.maxChangedRatio) violations.push(`maxChangedRatio ${temporal.maxChangedRatio} > ${thresholds.maxChangedRatio}`);
+  if (thresholds.popEvents !== undefined && popEvents > thresholds.popEvents) violations.push(`popEvents ${popEvents} > ${thresholds.popEvents}`);
+  if (thresholds.eventMeanLuma !== undefined && (eventResidual?.meanLuma ?? 0) > thresholds.eventMeanLuma) violations.push(`eventMeanLuma ${eventResidual?.meanLuma ?? 0} > ${thresholds.eventMeanLuma}`);
+  if (thresholds.eventP95Luma !== undefined && (eventResidual?.p95Luma ?? 0) > thresholds.eventP95Luma) violations.push(`eventP95Luma ${eventResidual?.p95Luma ?? 0} > ${thresholds.eventP95Luma}`);
+  if (thresholds.eventChangedRatio !== undefined && (eventResidual?.changedRatio ?? 0) > thresholds.eventChangedRatio) violations.push(`eventChangedRatio ${eventResidual?.changedRatio ?? 0} > ${thresholds.eventChangedRatio}`);
+  if (thresholds.eventPopEvents !== undefined && eventPopEvents > thresholds.eventPopEvents) violations.push(`eventPopEvents ${eventPopEvents} > ${thresholds.eventPopEvents}`);
+  if (thresholds.maxReprojectedMeanLuma !== undefined && maximumReprojected > thresholds.maxReprojectedMeanLuma) violations.push(`maxReprojectedMeanLuma ${maximumReprojected} > ${thresholds.maxReprojectedMeanLuma}`);
+  if (thresholds.minReprojectedValidRatio !== undefined && minimumValidRatio < thresholds.minReprojectedValidRatio) violations.push(`minReprojectedValidRatio ${minimumValidRatio} < ${thresholds.minReprojectedValidRatio}`);
+  for (const [counter, maximum] of Object.entries(thresholds.counterMax ?? {})) {
+    const observed = Math.max(...frameStats.map((frame) => frame.counters[counter] ?? 0));
+    if (observed > maximum) violations.push(`counterMax.${counter} ${observed} > ${maximum}`);
+  }
+  return violations;
+}
 
 async function calculateReprojection(
   outputDir: string,
@@ -225,7 +289,11 @@ async function readPlane(path: string): Promise<ImagePlane> {
 async function readDepth(path: string): Promise<Float32Array> {
   const plane = await readPlane(path);
   const result = new Float32Array(plane.width * plane.height);
-  for (let p = 0; p < result.length; p++) result[p] = (plane.data[p * 4] ?? 255) / 255;
+  for (let p = 0; p < result.length; p++) {
+    const high = plane.data[p * 4] ?? 255;
+    const low = plane.data[p * 4 + 1] ?? 255;
+    result[p] = (high + low / 255) / 256;
+  }
   return result;
 }
 
@@ -241,6 +309,13 @@ function reportMarkdown(summary: object, artifactPath: string): string {
 
 function currentCommit(): string {
   try { return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { return "unknown"; }
+}
+
+function sameConfiguredPose(a: VisualSequenceManifest["config"]["start"], b: VisualSequenceManifest["config"]["end"]): boolean {
+  return a.p.every((value, index) => value === b.p[index])
+    && a.yaw === b.yaw
+    && a.pitch === b.pitch
+    && (a.fov ?? 60) === (b.fov ?? 60);
 }
 
 function decodeDataUrl(dataUrl: string): Buffer {

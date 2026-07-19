@@ -278,7 +278,18 @@ describe("tree lighting proxies", () => {
       sampler: flatSampler(),
     });
     treeSystems.push(treeSystem);
-    (treeSystem as unknown as { gpuRing: { status: "ring" } }).gpuRing.status = "ring";
+    const gpuRing = treeSystem as unknown as {
+      gpuRing: {
+        status: string;
+        draw: object | null;
+        compute: object | null;
+        stats: { status: string };
+      };
+    };
+    gpuRing.gpuRing.status = "ring";
+    gpuRing.gpuRing.draw = {};
+    gpuRing.gpuRing.compute = {};
+    gpuRing.gpuRing.stats.status = "ready";
     const proxies = treeSystem.getLightingProxies();
     expect(proxies.length).toBeGreaterThan(0);
 

@@ -5,6 +5,7 @@ import type {
   TreeGpuRingRuntimeInput,
   TreeGpuRingRuntimeState,
 } from "./tree_system_gpu_ring_runtime.js";
+import type { TreeWebGpuBackendAccess } from "./tree_system_types.js";
 
 const compute = vi.hoisted(() => ({
   key: vi.fn((settings: { seed: number }, worldCells: number) => `${worldCells}|${settings.seed}`),
@@ -236,7 +237,7 @@ function fixture(fallbackToCpu: boolean): TreeGpuRingRuntimeInput {
     worldCells: 64,
     sampler: undefined,
     gpuDevice: {} as GPUDevice,
-    gpuBackend: {},
+    gpuBackend: {} as TreeWebGpuBackendAccess,
     supportsGpuTrees: true,
     unsupportedReason: null,
     lodCounts,

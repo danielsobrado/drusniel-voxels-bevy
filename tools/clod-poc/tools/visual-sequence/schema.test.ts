@@ -23,4 +23,8 @@ describe("visual sequence schema", () => {
   it("rejects oversized captures", () => {
     expect(() => validateVisualSequenceConfig({ ...config, frames: 97 })).toThrow(/2\.\.96/);
   });
+
+  it("rejects negative metric thresholds", () => {
+    expect(() => validateVisualSequenceConfig({ ...config, thresholds: { meanLuma: -1 } })).toThrow(/non-negative/);
+  });
 });

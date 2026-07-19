@@ -20,7 +20,8 @@ export type WaterShotDebugMode =
   | "clipmapLevel"
   | "refraction"
   | "reflection"
-  | "ssrHit";
+  | "ssrHit"
+  | "suspendedScatter";
 
 export interface WaterShotCandidatePose extends CameraPoseArgs {
   depth: number;
@@ -147,6 +148,7 @@ export const WATER_SHOT_DEBUG_MODES: readonly WaterShotDebugMode[] = Object.free
   "refraction",
   "reflection",
   "ssrHit",
+  "suspendedScatter",
 ]);
 
 export function parseWaterShotScene(value: string): WaterShotScene {

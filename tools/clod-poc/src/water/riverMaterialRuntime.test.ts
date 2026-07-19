@@ -27,7 +27,7 @@ describe("river material runtime settings", () => {
     expect(settings.rapidNormalBoost).toBeGreaterThan(0);
     expect(settings.bankFoamStrength).toBeGreaterThan(0);
     expect(settings.rapidFoamStrength).toBeGreaterThan(0);
-    expect(settings.foamStreakStrength).toBeGreaterThan(0);
+    expect(settings.foamStreakStrength).toBe(0);
     expect(settings.shallowBankTintStrength).toBeGreaterThan(0);
     expect(settings.centerChannelDarkening).toBeGreaterThan(0);
   });

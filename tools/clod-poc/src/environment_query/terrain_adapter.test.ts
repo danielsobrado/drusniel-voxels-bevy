@@ -194,7 +194,7 @@ function makeBase(): EnvironmentQuery & EnvironmentBatchSampler {
       shoreDistanceM: 3,
       bodyKind: 3,
       bodyId: 1,
-      meta: { ...fallbackMeta, source: "hydrology-cpu", valid: true },
+      meta: { ...fallbackMeta, source: "hydrology-cpu", valid: true } satisfies EnvironmentQueryMeta,
     })),
     river: vi.fn(() => ({
       flowX: 1,
@@ -205,7 +205,7 @@ function makeBase(): EnvironmentQuery & EnvironmentBatchSampler {
       channelCenterWeight: 1,
       bankContactWeight: 0,
       gravelBarMask: 0,
-      meta: { ...fallbackMeta, source: "hydrology-cpu", valid: true },
+      meta: { ...fallbackMeta, source: "hydrology-cpu", valid: true } satisfies EnvironmentQueryMeta,
     })),
     visibility: vi.fn(() => ({ sunVisibility: 1, meta: fallbackMeta })),
     sampleBatch: vi.fn((

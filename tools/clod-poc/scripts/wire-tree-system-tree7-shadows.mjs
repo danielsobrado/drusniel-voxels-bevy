@@ -264,11 +264,14 @@ function tree8AlreadySatisfiesTree7Edit(source, label) {
 }
 
 function modularShadowDrawAlreadySatisfiesTree7(source) {
+  const updatesGpuRing =
+    source.includes("updateTreeGpuRingTrees(")
+    || source.includes("updateTreeGpuRingTreesSafely(");
   if (source.includes("treeCreateGpuRingResources(") &&
-    source.includes("updateTreeGpuRingTrees(") &&
+    updatesGpuRing &&
     source.includes("treeGpuRingInput(")) return true;
   return source.includes("createTreeSystemGpuRingDrawResources(") &&
-    source.includes("updateTreeGpuRingTrees(") &&
+    updatesGpuRing &&
     source.includes("TreeGpuRingRuntimeInput");
 }
 

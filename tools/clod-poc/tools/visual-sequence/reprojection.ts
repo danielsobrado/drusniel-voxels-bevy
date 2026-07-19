@@ -31,20 +31,22 @@ export function reprojectedResidual(input: ReprojectionInput): ReprojectionResul
     const p = y * currentColor.width + x;
     const depth = input.currentDepth[p]!;
     if (!(depth >= 0 && depth <= 1)) continue;
-    const ndc = [((x + 0.5) / currentColor.width) * 2 - 1, 1 - ((y + 0.5) / currentColor.height) * 2, depth * 2 - 1, 1] as const;
+    // The sequence harness is WebGPU-only, whose camera projection uses zero-to-one clip depth.
+    const ndc = [((x + 0.5) / currentColor.width) * 2 - 1, 1 - ((y + 0.5) / currentColor.height) * 2, depth, 1] as const;
     const world = transform(input.currentViewProjectionInverse, ndc);
     const previousClip = transform(input.previousViewProjection, world);
     if (Math.abs(previousClip[3]) < 1e-8) continue;
     const previousNdcX = previousClip[0] / previousClip[3];
     const previousNdcY = previousClip[1] / previousClip[3];
     const previousNdcZ = previousClip[2] / previousClip[3];
-    const px = Math.round((previousNdcX * 0.5 + 0.5) * currentColor.width - 0.5);
-    const py = Math.round((0.5 - previousNdcY * 0.5) * currentColor.height - 0.5);
-    if (px < 0 || py < 0 || px >= currentColor.width || py >= currentColor.height) continue;
-    const previousP = py * currentColor.width + px;
-    const projectedDepth = previousNdcZ * 0.5 + 0.5;
-    if (Math.abs(input.previousDepth[previousP]! - projectedDepth) > tolerance) continue;
-    for (let c = 0; c < channels; c++) reprojected[p * channels + c] = previousColor.data[previousP * channels + c] ?? 0;
+    const px = (previousNdcX * 0.5 + 0.5) * currentColor.width - 0.5;
+    const py = (0.5 - previousNdcY * 0.5) * currentColor.height - 0.5;
+    if (px < 0 || py < 0 || px > currentColor.width - 1 || py > currentColor.height - 1) continue;
+    const projectedDepth = previousNdcZ;
+    if (Math.abs(sampleScalar(input.previousDepth, currentColor.width, currentColor.height, px, py) - projectedDepth) > tolerance) continue;
+    for (let c = 0; c < channels; c++) {
+      reprojected[p * channels + c] = Math.round(sampleChannel(previousColor, px, py, c));
+    }
     mask[p] = 1;
     valid += 1;
   }
@@ -54,6 +56,38 @@ export function reprojectedResidual(input: ReprojectionInput): ReprojectionResul
     disoccludedRatio: 1 - valid / pixels,
     mask,
   };
+}
+
+function sampleScalar(data: Float32Array, width: number, height: number, x: number, y: number): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  return bilerp(data[y0 * width + x0]!, data[y0 * width + x1]!, data[y1 * width + x0]!, data[y1 * width + x1]!, tx, ty);
+}
+
+function sampleChannel(image: ImagePlane, x: number, y: number, channel: number): number {
+  const channels = image.channels ?? 4;
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(image.width - 1, x0 + 1);
+  const y1 = Math.min(image.height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  return bilerp(
+    image.data[(y0 * image.width + x0) * channels + channel] ?? 0,
+    image.data[(y0 * image.width + x1) * channels + channel] ?? 0,
+    image.data[(y1 * image.width + x0) * channels + channel] ?? 0,
+    image.data[(y1 * image.width + x1) * channels + channel] ?? 0,
+    tx,
+    ty,
+  );
+}
+
+function bilerp(a: number, b: number, c: number, d: number, tx: number, ty: number): number {
+  return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
 }
 
 function transform(matrix: readonly number[], vector: readonly [number, number, number, number]): [number, number, number, number] {

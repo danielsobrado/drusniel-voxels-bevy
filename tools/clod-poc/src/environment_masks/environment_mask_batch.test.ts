@@ -103,14 +103,16 @@ describe("environmental mask batch", () => {
         | ENVIRONMENT_QUERY_FIELD.visibility,
       sampleHintM: 32,
     });
-    expect(Array.from(batchOutput.riverCobble)).toEqual(Array.from(scalarOutput.riverCobble));
-    expect(Array.from(batchOutput.riverMist)).toEqual(Array.from(scalarOutput.riverMist));
-    expect(Array.from(batchOutput.rapidSplash)).toEqual(Array.from(scalarOutput.rapidSplash));
-    expect(Array.from(batchOutput.sunbeamMote)).toEqual(Array.from(scalarOutput.sunbeamMote));
-    expect(Array.from(batchOutput.calmPool)).toEqual(Array.from(scalarOutput.calmPool));
-    expect(Array.from(batchOutput.frost)).toEqual(Array.from(scalarOutput.frost));
-    expect(Array.from(batchOutput.dew)).toEqual(Array.from(scalarOutput.dew));
-    expect(Array.from(batchOutput.shoreDebris)).toEqual(Array.from(scalarOutput.shoreDebris));
+    // Batch path reads authority fields from Float32Array storage, so mask values
+    // can differ from the scalar path by ~1 ULP while still preserving parity.
+    expectCloseArrays(batchOutput.riverCobble, scalarOutput.riverCobble);
+    expectCloseArrays(batchOutput.riverMist, scalarOutput.riverMist);
+    expectCloseArrays(batchOutput.rapidSplash, scalarOutput.rapidSplash);
+    expectCloseArrays(batchOutput.sunbeamMote, scalarOutput.sunbeamMote);
+    expectCloseArrays(batchOutput.calmPool, scalarOutput.calmPool);
+    expectCloseArrays(batchOutput.frost, scalarOutput.frost);
+    expectCloseArrays(batchOutput.dew, scalarOutput.dew);
+    expectCloseArrays(batchOutput.shoreDebris, scalarOutput.shoreDebris);
     expect(Array.from(batchOutput.validity)).toEqual(Array.from(scalarOutput.validity));
   });
 
@@ -230,4 +232,11 @@ function makeBatchQuery(): EnvironmentQuery & EnvironmentBatchSampler {
     }
   });
   return query;
+}
+
+function expectCloseArrays(actual: ArrayLike<number>, expected: ArrayLike<number>, precision = 5): void {
+  expect(actual.length).toBe(expected.length);
+  for (let index = 0; index < expected.length; index += 1) {
+    expect(actual[index]).toBeCloseTo(expected[index]!, precision);
+  }
 }

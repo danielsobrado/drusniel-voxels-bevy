@@ -2,12 +2,20 @@
   "schemaVersion": 1,
   "id": "water-shoreline-frozen",
   "mode": "moving",
-  "frames": 16,
-  "stepSeconds": 0.0166666667,
+  "frames": 48,
+  "stepSeconds": 0.05,
   "scene": "continent",
   "seed": 1,
   "start": { "p": [1264, 42, 150], "yaw": 0, "pitch": -0.28, "fov": 55 },
-  "end": { "p": [1264, 40, 112], "yaw": 0, "pitch": -0.24, "fov": 55 },
+  "end": { "p": [1264, 40, 138], "yaw": 0, "pitch": -0.24, "fov": 55 },
   "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384", "water": "1" },
-  "captureDepth": true
+  "captureDepth": true,
+  "thresholds": {
+    "counterMax": {
+      "live_clod_gap_holes": 0,
+      "clod_far_gap_holes": 0,
+      "priority_owner_overlap_cells": 0,
+      "far_clipmap_ownership_holes": 0
+    }
+  }
 }

@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "id": "tree-dolly-cpu",
   "mode": "paired",
-  "frames": 16,
-  "stepSeconds": 0.0166666667,
+  "frames": 48,
+  "stepSeconds": 0.1,
   "scene": "trees-perf",
   "seed": 1,
-  "start": { "p": [732, 116, 512], "yaw": 1.5707963268, "pitch": -0.364, "fov": 55 },
-  "end": { "p": [612, 92, 512], "yaw": 1.5707963268, "pitch": -0.5, "fov": 55 },
-  "query": { "world": "8", "treeGpu": "0", "webgpuSelection": "1" },
+  "start": { "p": [476, 116, 256], "yaw": 1.5707963268, "pitch": -0.364, "fov": 55 },
+  "end": { "p": [356, 92, 256], "yaw": 1.5707963268, "pitch": -0.5, "fov": 55 },
+  "query": { "world": "4", "treeGpu": "0", "webgpuSelection": "1", "treeDistance": "260", "treeDensity": "0.2", "treeMaxInstances": "1000" },
   "captureDepth": true
 }

@@ -44,6 +44,6 @@ describe("deep ocean material", () => {
   it("keeps reference-style sky reflection on the visible clipmap shader", () => {
     expect(CLIPMAP_SHADER_SOURCE).toContain("skyReflection");
     expect(CLIPMAP_SHADER_SOURCE).toContain("envReflection");
-    expect(CLIPMAP_SHADER_SOURCE).toContain("384.0");
+    expect(CLIPMAP_SHADER_SOURCE).toContain("512.0");
   });
 });

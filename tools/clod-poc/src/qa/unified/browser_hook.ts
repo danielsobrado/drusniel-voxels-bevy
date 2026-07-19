@@ -94,12 +94,13 @@ export function installBrowserQaHook(): DrusnielQaHook {
       if (!getCameraMatrices) throw new Error("runtime camera matrices are not ready");
       return getCameraMatrices();
     },
-    stepSequence: async (index) => {
+    stepSequence: async (index, applyPose = true) => {
       if (!sequenceClock) throw new Error("sequence clock is not active");
       const state = sequenceClock.step(index);
       const setPose = runtime().setPose;
       if (!setPose) throw new Error("runtime pose setter is not ready");
-      setPose(state.pose);
+      const currentPose = runtime().getPose?.();
+      if (applyPose && (!currentPose || !samePose(currentPose, state.pose))) setPose(state.pose);
       await settleRuntime(runtime(), 1);
       return state;
     },
@@ -130,6 +131,11 @@ export function installBrowserQaHook(): DrusnielQaHook {
     },
     runSequenceEvent: async (action) => {
       if (action === "streaming-off") runtime().setTerrainStreamingEnabled?.(false);
+      else if (action === "streaming-off-reset") {
+        runtime().setTerrainStreamingEnabled?.(false);
+        const pose = runtime().getPose?.();
+        if (pose) runtime().resetAcceptanceSceneForPose?.(pose);
+      }
       else if (action === "streaming-on") runtime().setTerrainStreamingEnabled?.(true);
       else if (action === "ownership-debug") runtime().setAcceptanceSceneOptions?.({ proceduralDebug: "ownership" });
       else runtime().setAcceptanceSceneOptions?.({ proceduralDebug: "final" });
@@ -143,6 +149,14 @@ export function installBrowserQaHook(): DrusnielQaHook {
 async function settleRuntime(runtime: ClodHooks, frames: number): Promise<void> {
   if (!runtime.settle) throw new Error("runtime settle hook is not ready");
   await runtime.settle(frames);
+}
+
+function samePose(a: { p: [number, number, number]; yaw: number; pitch: number; fov?: number }, b: { p: [number, number, number]; yaw: number; pitch: number; fov?: number }): boolean {
+  const epsilon = 1e-6;
+  return a.p.every((value, index) => Math.abs(value - b.p[index]!) <= epsilon)
+    && Math.abs(a.yaw - b.yaw) <= epsilon
+    && Math.abs(a.pitch - b.pitch) <= epsilon
+    && Math.abs((a.fov ?? 60) - (b.fov ?? 60)) <= epsilon;
 }
 
 function nextFrame(): Promise<void> {

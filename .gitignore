@@ -105,3 +105,5 @@ tools/clod-poc/pr/*
 tools/clod-poc/shots/phase-1/*.png
 tools/clod-poc/shots/phase-0/*.png
 tools/clod-poc/.cache/webgpu-flags.json
+tools/clod-poc/sequence-runs/
+tools/clod-poc/sequence-runs/

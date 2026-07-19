@@ -32,11 +32,11 @@ export interface DrusnielQaHook {
   runCheckpoint(name: string): Promise<void>;
   lastCheckpoint(): string | null;
   beginSequence(config: SequenceClockConfig): Promise<void>;
-  stepSequence(index: number): Promise<SequenceClockState>;
+  stepSequence(index: number, applyPose?: boolean): Promise<SequenceClockState>;
   endSequence(): Promise<void>;
   captureDiagnosticBuffer(kind: "final" | "depth"): Promise<string>;
   setDiagnosticBuffer(kind: "final" | "depth"): Promise<void>;
-  runSequenceEvent(action: "streaming-off" | "streaming-on" | "ownership-debug" | "final-debug"): Promise<void>;
+  runSequenceEvent(action: "streaming-off" | "streaming-off-reset" | "streaming-on" | "ownership-debug" | "final-debug"): Promise<void>;
 }
 
 declare global {

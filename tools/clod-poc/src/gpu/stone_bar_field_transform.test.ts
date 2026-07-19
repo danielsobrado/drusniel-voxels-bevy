@@ -17,7 +17,9 @@ describe("stone gravel bar WGSL", () => {
     const shader = composeStoneScatterShader();
     expect(shader).toContain("const GRAVEL_BAR_ENABLED: bool = false;");
     expect(shader).toContain("fn gravel_bar_mask(");
-    expect(shader).not.toContain("@binding(17)");
+    // Contact patches own binding 17; gravel-bar mode must not add its own storage bindings.
+    expect(shader).toContain("@binding(17) var<storage, read_write> grass_contact_patches");
+    expect(shader).not.toContain("gravel_bar_texture");
   });
 
   it("enables aliases, samples fields independently, and preserves body kind", () => {

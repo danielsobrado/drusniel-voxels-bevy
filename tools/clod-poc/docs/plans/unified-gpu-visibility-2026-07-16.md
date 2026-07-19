@@ -1,6 +1,6 @@
 # GPU Visibility Primitives — shared contracts, per-system policies, evidence-gated adoption
 
-Created 2026-07-16. Status: PLANNED (no code landed from this doc yet). Revised same day
+Created 2026-07-16. Status: COMPLETE AT V0 (2026-07-19 no-go; V1/V2 not entered). Revised same day
 after an external review; the file name keeps its original slug for link stability, but
 the target is renamed from "one unified classify→compact→indirect architecture" to **GPU
 visibility primitives with per-system policies** — trees, grass, understory, stones,
@@ -177,10 +177,15 @@ The two stages stay separate passes; fusing them re-couples their cadences.
       2026-07-17 link: `perf-runs/rpg-dense-cost/cost-table.md` from plan 2 D4.
       Dominant village settled cost is **construction** (~22 ms frame p95 when
       toggled off); vegetation/props/water marginals <3 ms at this pose.
-- [ ] prefilter audit → parity-case list recorded here
-- [ ] per-system go/no-go recorded
+- [x] prefilter audit → parity-case list recorded in
+      `unified-gpu-visibility-v0-disposition-2026-07-19.md`
+- [x] per-system go/no-go recorded in the same disposition: no new classifier is
+      justified by current attribution, so V1 is not entered
 
 ### V1A — GPU classification mask (one vegetation kind first)
+
+**NOT ENTERED (2026-07-19): V0 no-go.** The unchecked implementation tasks below are
+conditional design, not remaining work under the recorded disposition.
 
 1. Failing tests: GPU decision mask matches the CPU reference per parity case on
    synthetic inputs (validation-mode readback).
@@ -238,6 +243,9 @@ scalability" without a crossover table is not evidence. Reverts are recorded wit
 numbers, per repo rule.
 
 ### V2 — Extract primitives (rule of three, inside vegetation)
+
+**NOT ENTERED (2026-07-19):** no V1 adopter was funded, so the three-adopter
+precondition is unmet.
 
 Only after trees + grass + understory all run the GPU path: extract **what proved
 common** into `src/gpu/visibility/` — bounds encoding, frustum helpers, conservative

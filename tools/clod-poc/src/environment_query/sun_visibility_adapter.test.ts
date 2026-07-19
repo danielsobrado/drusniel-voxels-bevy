@@ -149,7 +149,10 @@ function makeBase(): EnvironmentQuery & EnvironmentBatchSampler {
       gravelBarMask: 0,
       meta: validMeta,
     })),
-    visibility: vi.fn(() => ({ sunVisibility: 1, meta: { ...validMeta, source: "fallback", valid: false } })),
+    visibility: vi.fn(() => ({
+      sunVisibility: 1,
+      meta: { ...validMeta, source: "fallback", valid: false } satisfies EnvironmentQueryMeta,
+    })),
     sampleBatch: vi.fn((
       input: EnvironmentBatchInput,
       output: EnvironmentBatchOutput,

@@ -71,10 +71,12 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
     const hit = terrainRaycast.raycastEditableTerrain(targetRay, maxRange);
     return hit ? { point: hit.point.clone(), normal: targetNormal.clone() } : null;
   };
-  longView.hooks.probeEarthSpellTarget = () => {
-    const target = getTerrainTarget(earthSpellGameplayConfig.maxRangeM);
-    return target ? [target.point.x, target.point.y, target.point.z] : null;
-  };
+  if (longView.hooks) {
+    longView.hooks.probeEarthSpellTarget = () => {
+      const target = getTerrainTarget(earthSpellGameplayConfig.maxRangeM);
+      return target ? [target.point.x, target.point.y, target.point.z] : null;
+    };
+  }
 
   const getEarthVfxTarget = (): EarthSpellTarget | null => {
     const target = earthTargetOverride;
@@ -227,6 +229,6 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
     menu.dispose();
     controller.dispose();
     ctx.session.spellVfxController = null;
-    longView.hooks.probeEarthSpellTarget = null;
+    if (longView.hooks) longView.hooks.probeEarthSpellTarget = null;
   }, { once: true });
 }

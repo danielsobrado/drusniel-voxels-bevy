@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "static-continent-rim",
   "mode": "static",
-  "createdAt": "2026-07-19T07:15:16.485Z",
-  "commit": "0df7aed12157b48a5724faeb96f7f0c9b94477a1",
-  "url": "http://127.0.0.1:5180/?scene=continent&seed=1&cam=1264%2C50%2C272%2C0%2C-0.35%2C55&freeze=1&precisionDiag=1&clouds=0&froxels=0&treeWind=0&grassWind=0&world=4&acceptance=1&farClipmap=1&farClipmapMode=replace&liveBubble=1&liveBubbleRadius=200&liveBubbleColliderRadius=160&liveClodRootRadius=384",
+  "createdAt": "2026-07-19T08:25:21.844Z",
+  "commit": "c97c448962dc25c81896ae7dd563e9d14006a997",
+  "url": "http://127.0.0.1:5180/?scene=continent&seed=1&cam=1264%2C50%2C272%2C0%2C-0.35%2C55&freeze=1&precisionDiag=1&clouds=0&froxels=0&treeWind=0&grassWind=0&taa=0&world=4&acceptance=1&farClipmap=1&farClipmapMode=replace&liveBubble=1&liveBubbleRadius=200&liveBubbleColliderRadius=160&liveClodRootRadius=384",
   "environment": {
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
     "platform": "Win32",
@@ -64,6 +64,7 @@
     "id": "static-continent-rim",
     "mode": "static",
     "frames": 8,
+    "warmupFrames": 60,
     "stepSeconds": 0.0166666667,
     "scene": "continent",
     "seed": 1,
@@ -97,7 +98,21 @@
       "liveBubbleColliderRadius": "160",
       "liveClodRootRadius": "384"
     },
-    "captureDepth": true
+    "captureDepth": true,
+    "thresholds": {
+      "meanLuma": 0.0002,
+      "maxP95Luma": 0.001,
+      "maxChangedRatio": 0.001,
+      "popEvents": 0,
+      "counterMax": {
+        "live_clod_gap_holes": 0,
+        "clod_far_gap_holes": 0,
+        "live_clod_overlap_cells": 0,
+        "clod_far_overlap_cells": 0,
+        "priority_owner_overlap_cells": 0,
+        "far_clipmap_ownership_holes": 0
+      }
+    }
   },
   "frames": [
     {

@@ -522,9 +522,12 @@ export class WebGpuPostProcessPipeline {
     const depthTex = scenePass.getTextureNode("depth") as TslAny;
     const pipeline = new RenderPipeline(this.renderer);
     if (this.qaDiagnosticBuffer === "depth") {
-      const depth = depthTex.r;
+      const depth = depthTex.r.min(65535 / 65536);
+      const scaled = depth.mul(256);
+      const high = scaled.floor().div(255);
+      const low = scaled.fract();
       this.autoExposureMeter.clearKernel();
-      pipeline.outputNode = vec4(depth, depth, depth, 1);
+      pipeline.outputNode = vec4(high, low, 0, 1);
     } else if (this.settings.debugMode === "copy") {
       this.autoExposureMeter.clearKernel();
       pipeline.outputNode = beauty;
