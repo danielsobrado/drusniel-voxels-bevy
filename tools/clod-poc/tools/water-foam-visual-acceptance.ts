@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
+import type { WaterFoamRuntimeDiagnostics } from "../src/water/water_foam_diagnostics.js";
 import {
   numberArg,
   parseCliArgs,
@@ -21,6 +22,7 @@ import {
   parseWaterFoamAcceptanceQuality,
 } from "./water-foam-acceptance-profile.js";
 import { extractWaterFoamAcceptancePoses } from "./water-foam-pose-parity.js";
+import { evaluateWaterFoamRuntimeContract } from "./water-foam-runtime-contract.js";
 import {
   deriveWaterPixelMask,
   measureFoamImage,
@@ -67,7 +69,8 @@ async function main(): Promise<void> {
   const outRoot = resolveOutputPath(stringArg(args, "out", defaultOut));
   mkdirSync(outRoot, { recursive: true });
 
-  const report = await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
+  let report: Record<string, unknown> | null = null;
+  await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
     const targetUrl = buildWaterFoamAcceptanceUrl(baseUrl, seed, world, quality);
     await navigateToFoamProfile(page, targetUrl);
     const info = await waterDebugInfo(page);
@@ -95,39 +98,44 @@ async function main(): Promise<void> {
       rapid: measureFoamImage(rapidImages.foamA, rapidMask),
       smoothRiver: measureFoamImage(smoothImages.foamA, smoothMask),
       lakeShore: measureFoamImage(lakeImages.foamA, lakeMask),
-      rapidTemporal: measureFoamTemporal(
-        rapidImages.foamA,
-        rapidImages.foamB,
-        rapidMask,
-      ),
-      rapidLighting: measureFoamLighting(
-        rapidImages.final,
-        rapidImages.foamB,
-        rapidMask,
-      ),
+      rapidTemporal: measureFoamTemporal(rapidImages.foamA, rapidImages.foamB, rapidMask),
+      rapidLighting: measureFoamLighting(rapidImages.final, rapidImages.foamB, rapidMask),
     };
-    const acceptance = evaluateFoamVisualAcceptance(metrics);
-    return {
-      schemaVersion: 2 as const,
+    const visualAcceptance = evaluateFoamVisualAcceptance(metrics);
+    const runtimeDiagnostics = await page.evaluate<WaterFoamRuntimeDiagnostics>(
+      "window.waterDebugInfo().foam",
+    );
+    const runtimeAcceptance = evaluateWaterFoamRuntimeContract(quality, runtimeDiagnostics);
+    const acceptance = {
+      passed: visualAcceptance.passed && runtimeAcceptance.passed,
+      failures: [...visualAcceptance.failures, ...runtimeAcceptance.failures],
+      visual: visualAcceptance,
+      runtime: runtimeAcceptance,
+    };
+    report = {
+      schemaVersion: 3,
       targetUrl,
       seed,
       world,
       quality,
       profileQuery: profile.query,
       poseSource: poseReportPath
-        ? { kind: "canonical-report" as const, path: poseReportPath }
-        : { kind: "discovered" as const },
+        ? { kind: "canonical-report", path: poseReportPath }
+        : { kind: "discovered" },
+      runtimeDiagnostics,
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
       acceptance,
     };
   });
 
+  if (!report) throw new Error("foam visual acceptance did not produce a report");
   const reportPath = join(outRoot, "report.json");
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`foam visual report: ${reportPath}`);
-  if (!report.acceptance.passed) {
-    throw new Error(`water foam visual acceptance failed for ${quality}:\n- ${report.acceptance.failures.join("\n- ")}`);
+  const acceptance = report.acceptance as { passed: boolean; failures: readonly string[] };
+  if (!acceptance.passed) {
+    throw new Error(`water foam visual acceptance failed for ${quality}:\n- ${acceptance.failures.join("\n- ")}`);
   }
   console.log(`water foam visual acceptance passed for ${quality}`);
 }
