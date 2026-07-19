@@ -1,9 +1,15 @@
 import * as THREE from "three";
-import type { WaterField, WaterFieldResult } from "./waterField.js";
+import type { EnvironmentQuery } from "../environment_query/types.js";
+import type { WaterField } from "./waterField.js";
 import {
   readRiverCascadeParticleSettings,
   type RiverCascadeParticleSettings,
 } from "./riverCascadeParticlesRuntime.js";
+import {
+  RiverDressingSampleReader,
+  type RiverDressingSample,
+  type RiverDressingSamplingStats,
+} from "./riverDressingSampleReader.js";
 
 interface Particle {
   x: number;
@@ -27,20 +33,25 @@ interface ParticleLayer {
 }
 
 interface CascadeParticleSignal {
-  cascade: number;
-  rapid: number;
-  foam: number;
+  readonly cascade: number;
+  readonly rapid: number;
+  readonly foam: number;
 }
 
 export interface RiverCascadeParticleStats {
-  mist: number;
-  splash: number;
-  foam: number;
-  lastEmitters: number;
-  lastCascadeEmitters: number;
-  lastRapidEmitters: number;
-  lastMaxCascade: number;
-  lastMaxRapid: number;
+  readonly mist: number;
+  readonly splash: number;
+  readonly foam: number;
+  readonly lastEmitters: number;
+  readonly lastCascadeEmitters: number;
+  readonly lastRapidEmitters: number;
+  readonly lastMaxCascade: number;
+  readonly lastMaxRapid: number;
+}
+
+export interface RiverCascadeParticleOverlayOptions {
+  readonly minimumSampleHintM?: number;
+  readonly readEnvironmentQuery?: () => EnvironmentQuery | null;
 }
 
 const EMIT_INTERVAL_S = 0.085;
@@ -53,118 +64,36 @@ const WATER_SURFACE_OFFSET_M = 0.08;
 const EMIT_CELLS_PER_FRAME = 16;
 
 interface EmitterScan {
-  baseX: number;
-  baseZ: number;
-  centerX: number;
-  centerZ: number;
+  readonly baseX: number;
+  readonly baseZ: number;
+  readonly centerX: number;
+  readonly centerZ: number;
   cursor: number;
 }
 
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
-}
-
-function smooth01(value: number): number {
-  const t = clamp01(value);
-  return t * t * (3 - 2 * t);
-}
-
-function hash2(x: number, z: number, seed: number): number {
-  const v = Math.sin(x * 41.3 + z * 289.1 + seed * 17.17) * 43758.5453;
-  return v - Math.floor(v);
-}
-
-function randomSigned(scale: number): number {
-  return (Math.random() * 2 - 1) * scale;
-}
-
-function makeLayer(name: string, max: number, size: number, opacity: number, gravity: number): ParticleLayer {
-  const positions = new Float32Array(max * 3);
-  const colors = new Float32Array(max * 3);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geometry.setDrawRange(0, 0);
-  const material = new THREE.PointsMaterial({
-    size,
-    transparent: true,
-    opacity,
-    vertexColors: true,
-    depthWrite: false,
-    depthTest: true,
-    sizeAttenuation: true,
-  });
-  const points = new THREE.Points(geometry, material);
-  points.name = name;
-  points.frustumCulled = false;
-  return { points, positions, colors, particles: [], max, gravity };
-}
-
 export function cascadeParticleSignal(
-  sample: WaterFieldResult,
+  sample: RiverDressingSample,
   settings: RiverCascadeParticleSettings,
 ): CascadeParticleSignal {
-  if (!settings.enabled || sample.depth <= 0.03 || sample.bodyMask <= 0.08) {
+  if (!settings.enabled || sample.depth <= 0.03 || sample.wetMask <= 0.08) {
     return { cascade: 0, rapid: 0, foam: 0 };
   }
-  const body = smooth01(sample.bodyMask);
+  const body = smooth01(sample.wetMask);
   const shallowBoost = 1 - smooth01((sample.depth - 4.0) / 8.0);
   const depth = Math.max(0.25, shallowBoost);
-  const cascade = smooth01((sample.flow.drop - settings.dropStart) / Math.max(0.05, settings.dropEnd - settings.dropStart))
-    * body
-    * depth;
-  const rapid = smooth01((sample.flow.speed - settings.rapidSpeedStart) / Math.max(0.05, settings.rapidSpeedEnd - settings.rapidSpeedStart))
-    * body
-    * depth
-    * (1 - cascade * 0.35);
+  const cascade = smooth01(
+    (sample.bedDrop - settings.dropStart)
+    / Math.max(0.05, settings.dropEnd - settings.dropStart),
+  ) * body * depth;
+  const rapid = smooth01(
+    (sample.flowStrength - settings.rapidSpeedStart)
+    / Math.max(0.05, settings.rapidSpeedEnd - settings.rapidSpeedStart),
+  ) * body * depth * (1 - cascade * 0.35);
   return {
     cascade: clamp01(cascade),
     rapid: clamp01(rapid),
     foam: clamp01(Math.max(rapid * 0.78, cascade)),
   };
-}
-
-function pushParticle(layer: ParticleLayer, particle: Particle): void {
-  if (layer.particles.length >= layer.max) layer.particles.shift();
-  layer.particles.push(particle);
-}
-
-function writeLayer(layer: ParticleLayer, color: THREE.Color, fadePower: number): void {
-  const count = layer.particles.length;
-  for (let i = 0; i < count; i += 1) {
-    const p = layer.particles[i]!;
-    const fade = Math.pow(1 - clamp01(p.age / Math.max(0.001, p.life)), fadePower) * p.strength;
-    const vi = i * 3;
-    layer.positions[vi + 0] = p.x;
-    layer.positions[vi + 1] = p.y;
-    layer.positions[vi + 2] = p.z;
-    layer.colors[vi + 0] = color.r * fade;
-    layer.colors[vi + 1] = color.g * fade;
-    layer.colors[vi + 2] = color.b * fade;
-  }
-  layer.points.geometry.setDrawRange(0, count);
-  const position = layer.points.geometry.getAttribute("position") as THREE.BufferAttribute;
-  const colorAttr = layer.points.geometry.getAttribute("color") as THREE.BufferAttribute;
-  position.needsUpdate = true;
-  colorAttr.needsUpdate = true;
-}
-
-function advanceLayer(layer: ParticleLayer, deltaSeconds: number): void {
-  let write = 0;
-  for (let read = 0; read < layer.particles.length; read += 1) {
-    const p = layer.particles[read]!;
-    p.age += deltaSeconds;
-    if (p.age >= p.life) continue;
-    p.vy += layer.gravity * deltaSeconds;
-    p.x += p.vx * deltaSeconds;
-    p.y += p.vy * deltaSeconds;
-    p.z += p.vz * deltaSeconds;
-    p.vx *= 0.986;
-    p.vz *= 0.986;
-    layer.particles[write] = p;
-    write += 1;
-  }
-  layer.particles.length = write;
 }
 
 export class RiverCascadeParticleOverlay {
@@ -176,6 +105,7 @@ export class RiverCascadeParticleOverlay {
   private readonly splashColor = new THREE.Color(0xf4fbff);
   private readonly foamColor = new THREE.Color(0xe4eee9);
   private readonly settings = readRiverCascadeParticleSettings();
+  private readonly sampleReader: RiverDressingSampleReader;
   private emitTime = EMIT_INTERVAL_S;
   private lastEmitters = 0;
   private lastCascadeEmitters = 0;
@@ -184,7 +114,12 @@ export class RiverCascadeParticleOverlay {
   private lastMaxRapid = 0;
   private emitterScan: EmitterScan | null = null;
 
-  constructor(private readonly scene: THREE.Scene, private readonly field: WaterField) {
+  constructor(
+    private readonly scene: THREE.Scene,
+    field: WaterField,
+    options: RiverCascadeParticleOverlayOptions = {},
+  ) {
+    this.sampleReader = new RiverDressingSampleReader(field, readerOptions(options));
     this.group.name = "river-cascade-particle-overlay";
     this.group.add(this.foam.points, this.mist.points, this.splash.points);
     this.scene.add(this.group);
@@ -206,6 +141,10 @@ export class RiverCascadeParticleOverlay {
       lastMaxCascade: this.lastMaxCascade,
       lastMaxRapid: this.lastMaxRapid,
     };
+  }
+
+  getSamplingStats(): RiverDressingSamplingStats {
+    return this.sampleReader.getStats();
   }
 
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void {
@@ -256,14 +195,15 @@ export class RiverCascadeParticleOverlay {
     const end = Math.min(totalCells, scan.cursor + EMIT_CELLS_PER_FRAME);
     while (scan.cursor < end && this.lastEmitters < this.settings.maxEmittersPerTick) {
       const cursor = scan.cursor++;
-      const gx = cursor % EMIT_GRID - half;
-      const gz = Math.floor(cursor / EMIT_GRID) - half;
-      const cellX = scan.baseX + gx;
-      const cellZ = scan.baseZ + gz;
+      const gridX = cursor % EMIT_GRID - half;
+      const gridZ = Math.floor(cursor / EMIT_GRID) - half;
+      const cellX = scan.baseX + gridX;
+      const cellZ = scan.baseZ + gridZ;
       const x = (cellX + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
       const z = (cellZ + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
       if (Math.hypot(x - scan.centerX, z - scan.centerZ) > radius) continue;
-      const sample = this.field.sample(x, z);
+      const sample = this.sampleReader.sampleRiver(x, z);
+      if (!sample) continue;
       const signal = cascadeParticleSignal(sample, this.settings);
       this.lastMaxCascade = Math.max(this.lastMaxCascade, signal.cascade);
       this.lastMaxRapid = Math.max(this.lastMaxRapid, signal.rapid);
@@ -280,14 +220,19 @@ export class RiverCascadeParticleOverlay {
     }
   }
 
-  private spawnAt(x: number, z: number, sample: WaterFieldResult, signal: CascadeParticleSignal): void {
-    const flowX = Math.abs(sample.flow.x) > 0.001 ? sample.flow.x : randomSigned(1);
-    const flowZ = Math.abs(sample.flow.z) > 0.001 ? sample.flow.z : randomSigned(1);
-    const flowLen = Math.max(0.001, Math.hypot(flowX, flowZ));
-    const dirX = flowX / flowLen;
-    const dirZ = flowZ / flowLen;
-    const sideX = -dirZ;
-    const sideZ = dirX;
+  private spawnAt(
+    x: number,
+    z: number,
+    sample: RiverDressingSample,
+    signal: CascadeParticleSignal,
+  ): void {
+    const flowX = Math.abs(sample.flowX) > 0.001 ? sample.flowX : randomSigned(1);
+    const flowZ = Math.abs(sample.flowZ) > 0.001 ? sample.flowZ : randomSigned(1);
+    const flowLength = Math.max(0.001, Math.hypot(flowX, flowZ));
+    const directionX = flowX / flowLength;
+    const directionZ = flowZ / flowLength;
+    const sideX = -directionZ;
+    const sideZ = directionX;
     const y = sample.waterY + WATER_SURFACE_OFFSET_M;
 
     if (this.settings.foamDriftStrength > 0) {
@@ -296,9 +241,9 @@ export class RiverCascadeParticleOverlay {
         x: x + randomSigned(0.45),
         y: y + 0.04,
         z: z + randomSigned(0.45),
-        vx: dirX * (0.46 + sample.flow.speed * 0.38) + sideX * randomSigned(0.18),
+        vx: directionX * (0.46 + sample.flowStrength * 0.38) + sideX * randomSigned(0.18),
         vy: 0,
-        vz: dirZ * (0.46 + sample.flow.speed * 0.38) + sideZ * randomSigned(0.18),
+        vz: directionZ * (0.46 + sample.flowStrength * 0.38) + sideZ * randomSigned(0.18),
         age: 0,
         life: 1.25 + Math.random() * 1.8,
         strength,
@@ -311,9 +256,9 @@ export class RiverCascadeParticleOverlay {
         x: x + sideX * randomSigned(0.95),
         y: y + 0.34 + Math.random() * 0.52,
         z: z + sideZ * randomSigned(0.95),
-        vx: dirX * (0.14 + sample.flow.speed * 0.12) + randomSigned(0.18),
+        vx: directionX * (0.14 + sample.flowStrength * 0.12) + randomSigned(0.18),
         vy: 0.22 + Math.random() * 0.44,
-        vz: dirZ * (0.14 + sample.flow.speed * 0.12) + randomSigned(0.18),
+        vz: directionZ * (0.14 + sample.flowStrength * 0.12) + randomSigned(0.18),
         age: 0,
         life: 1.85 + Math.random() * 1.85,
         strength,
@@ -326,9 +271,9 @@ export class RiverCascadeParticleOverlay {
         x: x + sideX * randomSigned(0.55),
         y: y + 0.14,
         z: z + sideZ * randomSigned(0.55),
-        vx: dirX * (0.78 + sample.flow.speed * 0.50) + sideX * randomSigned(0.72),
+        vx: directionX * (0.78 + sample.flowStrength * 0.50) + sideX * randomSigned(0.72),
         vy: 1.2 + Math.random() * 1.7 + signal.cascade * 0.78,
-        vz: dirZ * (0.78 + sample.flow.speed * 0.50) + sideZ * randomSigned(0.72),
+        vz: directionZ * (0.78 + sample.flowStrength * 0.50) + sideZ * randomSigned(0.72),
         age: 0,
         life: 0.42 + Math.random() * 0.58,
         strength,
@@ -339,19 +284,125 @@ export class RiverCascadeParticleOverlay {
   private advanceFoam(deltaSeconds: number): void {
     let write = 0;
     for (let read = 0; read < this.foam.particles.length; read += 1) {
-      const p = this.foam.particles[read]!;
-      p.age += deltaSeconds;
-      if (p.age >= p.life) continue;
-      p.x += p.vx * deltaSeconds;
-      p.z += p.vz * deltaSeconds;
-      p.vx *= 0.992;
-      p.vz *= 0.992;
-      const sample = this.field.sample(p.x, p.z);
-      if (sample.depth <= 0.02 || sample.bodyMask <= 0.04) continue;
-      p.y = sample.waterY + 0.045;
-      this.foam.particles[write] = p;
+      const particle = this.foam.particles[read]!;
+      particle.age += deltaSeconds;
+      if (particle.age >= particle.life) continue;
+      particle.x += particle.vx * deltaSeconds;
+      particle.z += particle.vz * deltaSeconds;
+      particle.vx *= 0.992;
+      particle.vz *= 0.992;
+      const water = this.sampleReader.sampleWater(particle.x, particle.z);
+      if (!water || water.depth <= 0.02 || water.wetMask <= 0.04) continue;
+      particle.y = water.waterY + 0.045;
+      this.foam.particles[write] = particle;
       write += 1;
     }
     this.foam.particles.length = write;
   }
+}
+
+function readerOptions(options: RiverCascadeParticleOverlayOptions): {
+  sampleHintM?: number;
+  readEnvironmentQuery?: () => EnvironmentQuery | null;
+} {
+  return {
+    ...(options.minimumSampleHintM !== undefined
+      ? { sampleHintM: options.minimumSampleHintM }
+      : {}),
+    ...(options.readEnvironmentQuery
+      ? { readEnvironmentQuery: options.readEnvironmentQuery }
+      : {}),
+  };
+}
+
+function makeLayer(
+  name: string,
+  max: number,
+  size: number,
+  opacity: number,
+  gravity: number,
+): ParticleLayer {
+  const positions = new Float32Array(max * 3);
+  const colors = new Float32Array(max * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geometry.setDrawRange(0, 0);
+  const material = new THREE.PointsMaterial({
+    size,
+    transparent: true,
+    opacity,
+    vertexColors: true,
+    depthWrite: false,
+    depthTest: true,
+    sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.name = name;
+  points.frustumCulled = false;
+  return { points, positions, colors, particles: [], max, gravity };
+}
+
+function pushParticle(layer: ParticleLayer, particle: Particle): void {
+  if (layer.particles.length >= layer.max) layer.particles.shift();
+  layer.particles.push(particle);
+}
+
+function writeLayer(layer: ParticleLayer, color: THREE.Color, fadePower: number): void {
+  const count = layer.particles.length;
+  for (let index = 0; index < count; index += 1) {
+    const particle = layer.particles[index]!;
+    const fade = Math.pow(
+      1 - clamp01(particle.age / Math.max(0.001, particle.life)),
+      fadePower,
+    ) * particle.strength;
+    const vertex = index * 3;
+    layer.positions[vertex] = particle.x;
+    layer.positions[vertex + 1] = particle.y;
+    layer.positions[vertex + 2] = particle.z;
+    layer.colors[vertex] = color.r * fade;
+    layer.colors[vertex + 1] = color.g * fade;
+    layer.colors[vertex + 2] = color.b * fade;
+  }
+  layer.points.geometry.setDrawRange(0, count);
+  const position = layer.points.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const colorAttribute = layer.points.geometry.getAttribute("color") as THREE.BufferAttribute;
+  position.needsUpdate = true;
+  colorAttribute.needsUpdate = true;
+}
+
+function advanceLayer(layer: ParticleLayer, deltaSeconds: number): void {
+  let write = 0;
+  for (let read = 0; read < layer.particles.length; read += 1) {
+    const particle = layer.particles[read]!;
+    particle.age += deltaSeconds;
+    if (particle.age >= particle.life) continue;
+    particle.vy += layer.gravity * deltaSeconds;
+    particle.x += particle.vx * deltaSeconds;
+    particle.y += particle.vy * deltaSeconds;
+    particle.z += particle.vz * deltaSeconds;
+    particle.vx *= 0.986;
+    particle.vz *= 0.986;
+    layer.particles[write] = particle;
+    write += 1;
+  }
+  layer.particles.length = write;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function smooth01(value: number): number {
+  const t = clamp01(value);
+  return t * t * (3 - 2 * t);
+}
+
+function hash2(x: number, z: number, seed: number): number {
+  const value = Math.sin(x * 41.3 + z * 289.1 + seed * 17.17) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function randomSigned(scale: number): number {
+  return (Math.random() * 2 - 1) * scale;
 }
