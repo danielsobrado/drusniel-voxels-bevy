@@ -26,6 +26,16 @@ describe("GPU CPU fallback logging", () => {
     );
   });
 
+  it("deduplicates variable messages with a stable handoff key", () => {
+    reportGpuCpuFallback("clod-stream-gpu", "handed 4 pages to CPU", "worker-handoff");
+    reportGpuCpuFallback("clod-stream-gpu", "handed 8 pages to CPU", "worker-handoff");
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(
+      "[clod-stream-gpu] GPU path failed; falling back to CPU: handed 4 pages to CPU",
+    );
+  });
+
   it("keeps the original error for stack diagnostics", () => {
     const error = new Error("compute initialization failed");
     reportGpuCpuFallback("props-gpu-ring", error);
