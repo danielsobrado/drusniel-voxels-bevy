@@ -37,20 +37,17 @@ export function assertWaterFoamAcceptancePosesMatch(
 }
 
 function cameraPose(input: Record<string, unknown>, label: string): CameraPoseArgs {
-  const base: CameraPoseArgs = {
+  const y = optionalFinite(input.y, `${label} pose y`);
+  const yaw = optionalFinite(input.yaw, `${label} pose yaw`);
+  const distance = optionalFinite(input.distance, `${label} pose distance`);
+  const pitch = optionalFinite(input.pitch, `${label} pose pitch`);
+  return {
     x: finite(input.x, `${label} pose x`),
     z: finite(input.z, `${label} pose z`),
-  };
-  return {
-    ...base,
-    ...(optionalFinite(input.y, `${label} pose y`) === undefined ? {} : { y: optionalFinite(input.y, `${label} pose y`) }),
-    ...(optionalFinite(input.yaw, `${label} pose yaw`) === undefined ? {} : { yaw: optionalFinite(input.yaw, `${label} pose yaw`) }),
-    ...(optionalFinite(input.distance, `${label} pose distance`) === undefined
-      ? {}
-      : { distance: optionalFinite(input.distance, `${label} pose distance`) }),
-    ...(optionalFinite(input.pitch, `${label} pose pitch`) === undefined
-      ? {}
-      : { pitch: optionalFinite(input.pitch, `${label} pose pitch`) }),
+    ...(y === undefined ? {} : { y }),
+    ...(yaw === undefined ? {} : { yaw }),
+    ...(distance === undefined ? {} : { distance }),
+    ...(pitch === undefined ? {} : { pitch }),
   };
 }
 
