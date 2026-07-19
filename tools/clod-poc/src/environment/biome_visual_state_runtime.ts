@@ -164,7 +164,9 @@ export function installBiomeVisualStateDebugProperty(
 function sanitizeBiomeVisualStateOverride(
   override: BiomeVisualStateOverride,
 ): Readonly<BiomeVisualStateOverride> {
-  const next: BiomeVisualStateOverride = {};
+  const next: {
+    -readonly [K in keyof BiomeVisualStateOverride]?: BiomeVisualStateOverride[K];
+  } = {};
   if (typeof override.enabled === "boolean") next.enabled = override.enabled;
   if (override.seasonT !== undefined) next.seasonT = normalizeCycle(override.seasonT);
   if (override.green !== undefined) next.green = clampFraction(override.green);

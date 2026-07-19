@@ -69,8 +69,7 @@ async function main(): Promise<void> {
   const outRoot = resolveOutputPath(stringArg(args, "out", defaultOut));
   mkdirSync(outRoot, { recursive: true });
 
-  let report: Record<string, unknown> | null = null;
-  await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
+  const report = await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
     const targetUrl = buildWaterFoamAcceptanceUrl(baseUrl, seed, world, quality);
     await navigateToFoamProfile(page, targetUrl);
     const info = await waterDebugInfo(page);
@@ -112,16 +111,16 @@ async function main(): Promise<void> {
       visual: visualAcceptance,
       runtime: runtimeAcceptance,
     };
-    report = {
-      schemaVersion: 3,
+    return {
+      schemaVersion: 3 as const,
       targetUrl,
       seed,
       world,
       quality,
       profileQuery: profile.query,
       poseSource: poseReportPath
-        ? { kind: "canonical-report", path: poseReportPath }
-        : { kind: "discovered" },
+        ? { kind: "canonical-report" as const, path: poseReportPath }
+        : { kind: "discovered" as const },
       runtimeDiagnostics,
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
@@ -129,13 +128,11 @@ async function main(): Promise<void> {
     };
   });
 
-  if (!report) throw new Error("foam visual acceptance did not produce a report");
   const reportPath = join(outRoot, "report.json");
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`foam visual report: ${reportPath}`);
-  const acceptance = report.acceptance as { passed: boolean; failures: readonly string[] };
-  if (!acceptance.passed) {
-    throw new Error(`water foam visual acceptance failed for ${quality}:\n- ${acceptance.failures.join("\n- ")}`);
+  if (!report.acceptance.passed) {
+    throw new Error(`water foam visual acceptance failed for ${quality}:\n- ${report.acceptance.failures.join("\n- ")}`);
   }
   console.log(`water foam visual acceptance passed for ${quality}`);
 }
