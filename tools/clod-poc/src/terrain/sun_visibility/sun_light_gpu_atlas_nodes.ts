@@ -10,6 +10,11 @@ import {
   uniform,
   vec2,
 } from "three/tsl";
+import {
+  getSunLightGpuAtlas,
+  subscribeSunLightGpuAtlas,
+  type SunLightGpuAtlasState,
+} from "./sun_light_gpu_atlas.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -18,15 +23,6 @@ const ATLAS_EDGE_EPSILON = 0.0001;
 const MISSING_VISIBILITY_CENTER = 0.5;
 const MISSING_VISIBILITY_TOLERANCE_START = 0.08;
 const MISSING_VISIBILITY_TOLERANCE_END = 0.20;
-
-export interface SunLightGpuAtlasNodeSource {
-  readonly texture: THREE.Texture;
-  readonly originX: number;
-  readonly originZ: number;
-  readonly worldSize: number;
-  readonly valid: number;
-  readonly version: number;
-}
 
 export interface SunLightGpuAtlasNodes {
   readonly visibility: TslNode;
@@ -39,16 +35,12 @@ interface SharedUniformState {
   readonly originZ: TslNode;
   readonly worldSize: TslNode;
   readonly valid: TslNode;
-  version: number;
 }
 
 let shared: SharedUniformState | null = null;
 
-export function buildSunLightGpuAtlasNodes(
-  worldXZ: TslNode,
-  source: SunLightGpuAtlasNodeSource,
-): SunLightGpuAtlasNodes {
-  const refs = getOrCreateSharedState(source);
+export function buildSunLightGpuAtlasNodes(worldXZ: TslNode): SunLightGpuAtlasNodes {
+  const refs = getOrCreateSharedState();
   const worldUv = vec2(
     worldXZ.x.sub(refs.originX).div(refs.worldSize.max(ATLAS_EDGE_EPSILON)),
     worldXZ.y.sub(refs.originZ).div(refs.worldSize.max(ATLAS_EDGE_EPSILON)),
@@ -73,7 +65,7 @@ export function buildSunLightGpuAtlasNodes(
   return { visibility, atlasInside };
 }
 
-export function syncSunLightGpuAtlasNodes(source: SunLightGpuAtlasNodeSource): void {
+function syncSharedState(source: SunLightGpuAtlasState): void {
   if (!shared) return;
   if (shared.texture !== source.texture) {
     throw new Error("sun-light GPU atlas texture identity changed");
@@ -82,20 +74,19 @@ export function syncSunLightGpuAtlasNodes(source: SunLightGpuAtlasNodeSource): v
   shared.originZ.value = source.originZ;
   shared.worldSize.value = Math.max(ATLAS_EDGE_EPSILON, source.worldSize);
   shared.valid.value = source.valid;
-  shared.version = source.version;
 }
 
-function getOrCreateSharedState(source: SunLightGpuAtlasNodeSource): SharedUniformState {
+function getOrCreateSharedState(): SharedUniformState {
   if (!shared) {
+    const source = getSunLightGpuAtlas();
     shared = {
       texture: source.texture,
       originX: uniform(source.originX) as TslNode,
       originZ: uniform(source.originZ) as TslNode,
       worldSize: uniform(Math.max(ATLAS_EDGE_EPSILON, source.worldSize)) as TslNode,
       valid: uniform(source.valid) as TslNode,
-      version: source.version,
     };
+    subscribeSunLightGpuAtlas(syncSharedState);
   }
-  syncSunLightGpuAtlasNodes(source);
   return shared;
 }
