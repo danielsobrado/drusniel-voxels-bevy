@@ -1,4 +1,5 @@
 import type { BuildProgress, BuildResult } from "./clod/quadtree.js";
+import { interpolateMeshHeightAt } from "./clod/mesh_height_probe.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
 import type { HydrologyGraph } from "./world/hydrology_graph/hydrology_graph.js";
@@ -572,6 +573,40 @@ export class ClodWorkerClient {
     this.streamRootGpuMesher?.dispose();
     this.streamRootGpuMesher = null;
     this.streamRootGpuCreatePromise = null;
+  }
+
+  /**
+   * Diagnostic: rendered-mesh heights at world points, from the stream roots covering
+   * them (cache-honoring, so a stale cache is part of what this measures). Builds each
+   * covering root at `level` (default: the coarsest root level) through the normal
+   * build route and interpolates the top surface per point; null where the root mesh
+   * has no triangle over the point. Used by the traced-carve verify gate to prove the
+   * carved channel survives root-LOD simplification.
+   */
+  async probeStreamRootHeights(
+    points: readonly { x: number; z: number }[],
+    level?: number,
+  ): Promise<(number | null)[]> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
+    if (!this.streamRootCfg) throw new Error("stream root CLOD config unavailable");
+    const rootLevel = this.streamRootLevel(level ?? this.streamRootCfg.page.quadtree_levels - 1);
+    const spanM = this.streamRootCfg.page.chunks_per_page * this.streamRootCfg.page.chunk_size * 2 ** rootLevel;
+    const coordByKey = new Map<string, { px: number; pz: number; level: number }>();
+    const keys = points.map((point) => {
+      const px = Math.floor(point.x / spanM);
+      const pz = Math.floor(point.z / spanM);
+      const key = `${px},${pz}`;
+      if (!coordByKey.has(key)) coordByKey.set(key, { px, pz, level: rootLevel });
+      return key;
+    });
+    const coords = [...coordByKey.values()];
+    const built = await this.buildStreamRoots(coords);
+    const nodeByKey = new Map<string, ClodPageNode>();
+    coords.forEach((coord, index) => nodeByKey.set(`${coord.px},${coord.pz}`, built.nodes[index]));
+    return points.map((point, index) => {
+      const node = nodeByKey.get(keys[index]);
+      return node ? interpolateMeshHeightAt(node.mesh, point.x, point.z) : null;
+    });
   }
 
   private streamRootLevel(level: number | undefined): number {

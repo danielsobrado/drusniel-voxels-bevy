@@ -545,6 +545,44 @@ function collectChannelHits(x: number, z: number, sampler: TerrainHeightSampler,
   return hits;
 }
 
+/** Corridor margin the CLOD parent simplifier locks around traced channels: wide enough
+ *  to keep the trench walls and immediate bank crest so the ribbon has a silhouette. */
+export const CHANNEL_CORRIDOR_LOCK_MARGIN_M = 4;
+
+/**
+ * True when (x, z) lies within a traced channel's corridor: distance to the polyline is
+ * at most halfWidth + marginM. Pure and memoized like the carve (channel hoods/AABBs are
+ * shared per sampler); never evaluates the carve. Used by the CLOD parent simplifier to
+ * lock corridor vertices so channels survive coarse LODs the same way page borders do.
+ */
+export function isNearTracedChannel(
+  x: number,
+  z: number,
+  sampler: TerrainHeightSampler,
+  marginM = 0,
+): boolean {
+  const hood = getChannelHood(basinCoord(x), basinCoord(z), sampler);
+  for (const channel of hood) {
+    if (
+      x < channel.minX - marginM || x > channel.maxX + marginM
+      || z < channel.minZ - marginM || z > channel.maxZ + marginM
+    ) continue;
+    const pts = channel.points;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const abX = b.x - a.x;
+      const abZ = b.z - a.z;
+      const abLen2 = abX * abX + abZ * abZ;
+      if (abLen2 <= 0) continue;
+      const t = clamp01(((x - a.x) * abX + (z - a.z) * abZ) / abLen2);
+      const distance = Math.hypot(x - (a.x + abX * t), z - (a.z + abZ * t));
+      if (distance <= mix(a.halfWidth, b.halfWidth, t) + marginM) return true;
+    }
+  }
+  return false;
+}
+
 // Channel carve profile: full carve depth inside the wet core (the riverMask=1 zone,
 // distance <= 0.7*halfWidth), fading to zero exactly at the channel edge so banks join
 // the untouched field with no cliff. Inside the core the bed is pinned below the

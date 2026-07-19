@@ -240,6 +240,45 @@ async function main(): Promise<void> {
       );
     }
 
+    // Root-mesh gate: build the coarse stream roots covering the channel near the spot
+    // through the normal (cache-honoring) route and check the carved trench survives
+    // root-LOD simplification. The far-summary gate above cannot see root meshes — this
+    // band previously had no gate at all, which is how uncarved roots shipped unnoticed.
+    interface RootMeshCheck {
+      points: number;
+      covered: number;
+      wet: number;
+      wetPct: number;
+    }
+    const rootPoints = wetPoints
+      .filter(([x, z]) => Math.hypot(x - spot.x, z - spot.z) <= 600)
+      .slice(0, 120);
+    const rootMeshCheck = await page.evaluate<RootMeshCheck | null>(`(async () => {
+      const probeHeights = window.__drusnielClod?.probeStreamRootHeights;
+      const probe = window.waterProbe;
+      if (!probeHeights || !probe) return null;
+      const points = ${JSON.stringify(rootPoints)};
+      const heights = await probeHeights(points.map(([x, z]) => ({ x, z })));
+      let covered = 0;
+      let wet = 0;
+      for (let i = 0; i < points.length; i++) {
+        const height = heights[i];
+        if (typeof height !== "number" || !Number.isFinite(height)) continue;
+        covered++;
+        const s = probe(points[i][0], points[i][1]);
+        if (height <= s.water - 0.25) wet++;
+      }
+      return { points: points.length, covered, wet, wetPct: covered ? (100 * wet) / covered : 0 };
+    })()`);
+    if (rootMeshCheck === null) {
+      console.error("root-mesh gate: probeStreamRootHeights hook unavailable");
+    } else {
+      console.log(
+        `root-mesh gate: ${rootMeshCheck.wet}/${rootMeshCheck.covered} root-covered river points wet `
+        + `(${rootMeshCheck.wetPct.toFixed(1)}% of ${rootMeshCheck.points} near-spot points)`,
+      );
+    }
+
     await page.screenshot(join(out, "river-aerial.png"));
 
     const report = {
@@ -249,6 +288,7 @@ async function main(): Promise<void> {
       continuityChannels,
       walk: { ...walk, wetPct },
       renderCheck,
+      rootMeshCheck,
       counters: {
         webgpu_uncaptured_errors: uncaptured,
         water_clipmap_visible_levels: visibleLevels,
@@ -268,6 +308,12 @@ async function main(): Promise<void> {
     } else {
       if (!(renderCheck.covered >= 25)) failures.push(`render gate coverage ${renderCheck.covered} points < 25`);
       if (!(renderCheck.wetPct >= 85)) failures.push(`render-side wet ${renderCheck.wetPct.toFixed(1)}% < 85%`);
+    }
+    if (rootMeshCheck === null) {
+      failures.push("root-mesh gate unavailable: no probeStreamRootHeights hook");
+    } else {
+      if (!(rootMeshCheck.covered >= 20)) failures.push(`root-mesh gate coverage ${rootMeshCheck.covered} points < 20`);
+      if (!(rootMeshCheck.wetPct >= 80)) failures.push(`root-mesh wet ${rootMeshCheck.wetPct.toFixed(1)}% < 80%`);
     }
     if (failures.length > 0) {
       console.error(`FAIL: ${failures.join("; ")}`);

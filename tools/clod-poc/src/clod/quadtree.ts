@@ -14,7 +14,7 @@ import { buildLod0PageSource, dirtyPageChunkIndices, rebuildPageChunks } from ".
 import type { WorldBounds } from "../terrain/terrain.js";
 import { concatPageSourceMeshes as concat } from "./pageSource.js";
 import { weldVertices } from "./weld.js";
-import { buildOuterBorderLocks, countLocks } from "../lock.js";
+import { buildOuterBorderLocks, buildParentSimplifyLocks, countLocks } from "../lock.js";
 import { simplifyPage, type SimplifyOutput } from "./simplify.js";
 import {
   assertNoInternalBorders,
@@ -206,7 +206,7 @@ function buildParentOutput(
   });
   validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
   const footprint = footprintFor(level, nx, nz, cfg);
-  const locks = buildOuterBorderLocks(welded);
+  const locks = buildParentSimplifyLocks(welded);
   const sim = simplifyParentPage(welded, locks, footprint, cfg, `L${level}:${nx},${nz}`);
   const simplified = sim.mesh !== welded;
   let polish = emptyDiagonalPolishStats();

@@ -73,6 +73,7 @@ export function initHooks(): ClodHooks {
     probeEarthSpellTarget: null,
     getStreamingRootReadyPageKeys: null,
     compareStreamRootBuilds: null,
+    probeStreamRootHeights: null,
     getStreamingResidencySnapshot: null,
     setPrecisionLandmarks: null,
     getPrecisionLandmarkScreenPositions: null,

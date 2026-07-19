@@ -3,7 +3,7 @@ import { countLocks } from "../lock.js";
 import { simplifyPage } from "./simplify.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
 import { assertNoInternalBorders, stripDegenerateTriangles } from "./validate.js";
-import { buildOuterBorderLocks } from "../lock.js";
+import { buildParentSimplifyLocks } from "../lock.js";
 import { boundsOf } from "./heightfield_leaf_source.js";
 import { validatePageBorderChains } from "./page_border_lock.js";
 import { computeParentErrorWorld } from "./page_error_metric.js";
@@ -40,7 +40,7 @@ export function deriveParentPage(
   recomputeNormals(sourceMesh);
   assertNoInternalBorders(sourceMesh, footprint);
 
-  const locks = buildOuterBorderLocks(sourceMesh);
+  const locks = buildParentSimplifyLocks(sourceMesh);
   const simplified = simplifyPage(sourceMesh, locks, simplifyConfig(config));
   stripDegenerateTriangles(simplified.mesh);
   recomputeNormals(simplified.mesh);

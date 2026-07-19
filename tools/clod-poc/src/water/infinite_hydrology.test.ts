@@ -3,6 +3,7 @@ import { HYDROLOGY_BODY_DRY, HYDROLOGY_BODY_LAKE, HYDROLOGY_BODY_POND } from "./
 import {
   carveInfiniteHydrologyHeight,
   createTracedHydrologyCarver,
+  isNearTracedChannel,
   measureTracedRiverContinuity,
   sampleInfiniteHydrology,
   type InfiniteHydrologyCarveConfig,
@@ -228,6 +229,31 @@ describe("traced-channel terrain carve", () => {
       sampleInfiniteHydrology(-200_000 + i * 768, 90_000 + i * 768, hilly, options);
     }
     expect(probe()).toEqual(before);
+  });
+
+  it("marks river samples as inside the channel corridor", () => {
+    const rivers = findCarvedSamples(10, (s) => s.riverMask >= 0.999);
+    expect(rivers.length).toBeGreaterThan(0);
+    for (const { x, z } of rivers) {
+      expect(isNearTracedChannel(x, z, hilly)).toBe(true);
+    }
+  });
+
+  it("grows the corridor monotonically with the margin and stays pure across evictions", () => {
+    const probes: Array<[number, number]> = [];
+    for (let i = 0; i < 120; i++) probes.push([200 + i * 61.5, 5800 - i * 43.25]);
+    const at = (margin: number) => probes.map(([x, z]) => isNearTracedChannel(x, z, hilly, margin));
+    const tight = at(0);
+    const wide = at(12);
+    for (let i = 0; i < probes.length; i++) {
+      if (tight[i]) expect(wide[i]).toBe(true); // margin only widens the corridor
+    }
+    // Flood the bounded memos with distant basins to force evictions; pure retrace.
+    for (let i = 0; i < 600; i++) {
+      sampleInfiniteHydrology(300_000 + i * 768, -120_000 - i * 768, hilly, options);
+    }
+    expect(at(0)).toEqual(tight);
+    expect(at(12)).toEqual(wide);
   });
 
   it("reports full continuity with the carve and degraded continuity without it", () => {

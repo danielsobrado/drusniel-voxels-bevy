@@ -114,8 +114,16 @@ import { splitWorldBuildNodes } from "./world_build_nodes.js";
 import { CanonicalWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
 import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
-import { carveInfiniteHydrologyHeight, createTracedHydrologyCarver, measureTracedRiverContinuity, sampleInfiniteHydrology } from "../../water/infinite_hydrology.js";
+import {
+  CHANNEL_CORRIDOR_LOCK_MARGIN_M,
+  carveInfiniteHydrologyHeight,
+  createTracedHydrologyCarver,
+  isNearTracedChannel,
+  measureTracedRiverContinuity,
+  sampleInfiniteHydrology,
+} from "../../water/infinite_hydrology.js";
 import { setStreamingRootGpuMesherRuntimeControls } from "../../terrain/streaming/streamed_root_gpu_config.js";
+import { setSimplifyCorridorLockQuery } from "../../lock.js";
 import type { HydrologyWorldSampler } from "../../water/hydrologyTileSource.js";
 import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 
@@ -498,14 +506,18 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   // Far-summary carve imprint: same traced polylines, but with the channel half-width
   // floored at the consumer's cell size so a 10-28 m channel survives far-LOD sampling
   // instead of aliasing back into the pothole chain. One shared sampler object keeps the
-  // channel/basin memos (WeakMap-keyed per sampler) warm across every imprint call.
+  // channel/basin memos (WeakMap-keyed per sampler) warm across imprint and lock calls.
+  const tracedMainSampler = { surfaceHeight: baseSurfaceHeight };
   const farCarveImprint = tracedCarveConfig
-    ? (() => {
-        const imprintSampler = { surfaceHeight: baseSurfaceHeight };
-        return (x: number, z: number, height: number, cellSizeM: number) =>
-          carveInfiniteHydrologyHeight(x, z, height, imprintSampler, tracedCarveConfig, Math.max(0, cellSizeM));
-      })()
+    ? (x: number, z: number, height: number, cellSizeM: number) =>
+        carveInfiniteHydrologyHeight(x, z, height, tracedMainSampler, tracedCarveConfig, Math.max(0, cellSizeM))
     : null;
+  // Main-thread analogue of the worker's corridor-lock install: parent simplification
+  // that runs on this thread (the GPU root mesher's weld+simplify) locks river-corridor
+  // vertices so channels survive coarse LODs.
+  setSimplifyCorridorLockQuery(tracedCarveConfig
+    ? (x, z) => isNearTracedChannel(x, z, tracedMainSampler, CHANNEL_CORRIDOR_LOCK_MARGIN_M)
+    : null);
   // GPU-meshed roots evaluate the terrain field in WGSL, where the traced polyline carve
   // cannot run: root-level terrain reverts to uncarved pothole chains at mid distance
   // while near CPU pages and the imprinted far summary both carry the carve. Default the

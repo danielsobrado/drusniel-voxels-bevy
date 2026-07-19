@@ -283,6 +283,7 @@ export function runFrameLoopStartup(
 
   if (longView.hooks) {
     longView.hooks.compareStreamRootBuilds = (coords) => input.clodWorker.compareStreamRootBuilds(coords);
+    longView.hooks.probeStreamRootHeights = (points, level) => input.clodWorker.probeStreamRootHeights(points, level);
     longView.hooks.setAcceptanceSceneOptions = (options) => {
       if (options.freeze !== undefined) state.freeze = options.freeze;
       if (options.proceduralDebug !== undefined) {

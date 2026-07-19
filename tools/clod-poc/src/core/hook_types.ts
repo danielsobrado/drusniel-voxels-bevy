@@ -228,6 +228,12 @@ export interface ClodHooks {
   compareStreamRootBuilds: ((
     coords: readonly { px: number; pz: number; level?: number }[],
   ) => Promise<readonly StreamRootBuildComparison[]>) | null;
+  /** Rendered-mesh heights from the stream roots covering the points (null where the
+   *  root has no triangle over a point); level defaults to the coarsest root level. */
+  probeStreamRootHeights: ((
+    points: readonly { x: number; z: number }[],
+    level?: number,
+  ) => Promise<readonly (number | null)[]>) | null;
   getStreamingResidencySnapshot: (() => StreamingResidencySnapshot) | null;
   setPrecisionLandmarks: ((landmarks: readonly PrecisionLandmark[]) => void) | null;
   getPrecisionLandmarkScreenPositions: (() => readonly PrecisionLandmarkScreenPosition[]) | null;

@@ -70,7 +70,12 @@ import { buildCarvedHeightfieldTile } from "./world/heightfield_tiles/heightfiel
 import { featureStampFieldFromStamps } from "./world/feature_stamps.js";
 import { buildHeightfieldTileComplexity } from "./world/heightfield_tiles/heightfield_tile_complexity.js";
 import { createGraphHydrologySampler, type GraphHydrologySampler, type GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
-import { createTracedHydrologyCarver } from "./water/infinite_hydrology.js";
+import {
+  CHANNEL_CORRIDOR_LOCK_MARGIN_M,
+  createTracedHydrologyCarver,
+  isNearTracedChannel,
+} from "./water/infinite_hydrology.js";
+import { setSimplifyCorridorLockQuery } from "./lock.js";
 import {
   collectHeightfieldTileTransferables,
   type HeightfieldTileWorkerBuildRequest,
@@ -313,9 +318,17 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
     ? createGraphHydrologySampler(request.hydrologyGraph, { surfaceHeight: baseSurfaceHeight })
     : null;
   graphCarve = request.hydrologyCarve ?? null;
+  // One shared sampler object keeps the traced channel/basin memos (WeakMap-keyed per
+  // sampler) warm across the carver and the corridor-lock query.
+  const tracedSampler = { surfaceHeight: baseSurfaceHeight };
   tracedCarver = !request.hydrologyGraph && request.hydrologyCarve
-    ? createTracedHydrologyCarver({ surfaceHeight: baseSurfaceHeight })
+    ? createTracedHydrologyCarver(tracedSampler)
     : null;
+  // Traced worlds lock river-corridor vertices during parent simplification so the
+  // carved channel survives coarse LODs the same way page borders do.
+  setSimplifyCorridorLockQuery(tracedCarver
+    ? (x, z) => isNearTracedChannel(x, z, tracedSampler, CHANNEL_CORRIDOR_LOCK_MARGIN_M)
+    : null);
   featureStampField = request.featureStamps ? featureStampFieldFromStamps(request.featureStamps) : null;
   installWorkerTerrainOverride(startupHeightfield, hydrologyTerrain, {}, tracedCarver ? tracedFeatureHeight : undefined);
   if (!startupHeightfield && graphHydrology && graphCarve) {

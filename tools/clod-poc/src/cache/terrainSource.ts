@@ -28,7 +28,9 @@ const textEncoder = new TextEncoder();
 // v8: sparse voxel-region references and authored stamp hashes change composed terrain geometry.
 // v10: traced-channel semantics changed (longer traces, basin termination, distance-based
 // widths), moving every traced river/lake carve; pages cached under v9 traces are stale.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v10-traced-river-network";
+// v11: traced worlds lock river-corridor vertices during parent simplification, changing
+// every parent/root mesh along channels; v10-cached parents lack the preserved trench.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v11-corridor-locks";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);

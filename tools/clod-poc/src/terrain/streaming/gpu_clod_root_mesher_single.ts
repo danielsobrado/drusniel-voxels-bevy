@@ -31,7 +31,7 @@ import {
 } from "../../gpu/gpu_mesh_buffers.js";
 import { composeTerrainFieldShader } from "../../gpu/wgsl_modules.js";
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
-import { buildOuterBorderLocks } from "../../lock.js";
+import { buildParentSimplifyLocks } from "../../lock.js";
 import { ClodBuildError, type ClodPageNode, type PageMesh } from "../../types.js";
 import type { WorldBounds } from "../terrain_surface.js";
 import {
@@ -1056,7 +1056,7 @@ function buildParentNode(level: number, nx: number, nz: number, children: readon
   });
   const footprint = footprintFor(level, nx, nz, cfg);
   validateWeldedIntermediate(welded, `L${level}:${nx},${nz} gpu welded`, cfg.validation.zero_area_epsilon);
-  const locks = buildOuterBorderLocks(welded);
+  const locks = buildParentSimplifyLocks(welded);
   const label = `L${level}:${nx},${nz}`;
   const selected = selectParentSimplificationCandidate(
     simplifyPage(clonePageMesh(welded), locks, cfg),
