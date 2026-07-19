@@ -3,7 +3,7 @@
 > Updated: 2026-07-19  
 > Target: `tools/clod-poc` on `main`  
 > Execution plan: `docs/plans/clod-poc-glacial-valley-effects-performance-execution-plan-2026-07-18.md`  
-> Status: **IN PROGRESS — production EnvironmentQuery is installed; consumer migration and cumulative acceptance remain**
+> Status: **IN PROGRESS — production EnvironmentQuery is installed; gravel-bed hydrology integration and cumulative acceptance remain**
 
 ## Purpose
 
@@ -58,6 +58,7 @@ The estimate separates code presence from proof. Several merged slices have focu
 | #196 | Physical glacial-water scatter and configurable glitter | `acceptance_pending` |
 | #197 | Status refresh after shared foundations | `implemented` |
 | #199 | Production EnvironmentQuery composition root | `implemented`, consumer migration pending |
+| #230 | Bounded gravel-bed decision contract and YAML parsing | `implemented`, production authority pending |
 
 ## Open pull requests
 
@@ -85,6 +86,36 @@ Required before merge:
 - confirm sun-atlas updates change visibility revision without rebuilding hydrology;
 - confirm a coarse hint is reported unchanged and causes no fine hydrology tile spike.
 
+### PR #243 — Gravel-bed hydrology authority
+
+Status: `open_pr`
+
+Scope:
+
+- apply the bounded gravel-bed decision to finite hydrology after final body and shoreline identity;
+- wrap traced, analytic, graph, synchronous-tile, and remote-worker hydrology with the same authority;
+- preserve exact base sampler and tile behavior while disabled;
+- keep water Y and water-body identity unchanged;
+- enforce minimum wet depth, channel continuity reserve, and conservative bank clearance;
+- publish candidate, accepted, depth, continuity, bank, and maximum-elevation counters;
+- add gravel field and bed policy to terrain-source cache identity;
+- expose read-only startup authority state in lil-gui beside the live gravel-stone switch;
+- keep the YAML default disabled and provide no gravel-bed URL override.
+
+Required before merge:
+
+- typecheck, focused tests, and production build;
+- feature-off hydrology and tile parity with current `main`;
+- direct, synchronous-tile, and remote-worker sample agreement;
+- deterministic counter totals;
+- proof that only river cells change and all safety reserves remain valid;
+- no disabled-path tile or frame-spike regression.
+
+Scope boundary:
+
+- streamed CLOD page geometry, colliders, save/reload terrain semantics, and headed braided-river acceptance remain a separate follow-up;
+- the YAML default must remain disabled until those authorities and gates agree.
+
 ## Workstream status
 
 | Workstream | Status | Current state | Remaining completion requirement |
@@ -92,7 +123,7 @@ Required before merge:
 | GV-CLOD-00 Baseline/status | `partial` | Consolidated plan and live status owner are on `main`. | Pin the Glacial Valley source revision and record canonical before/after poses and baseline metrics. |
 | GV-CLOD-01 EnvironmentQuery | `partial` | Hydrology, live terrain, and live sun-atlas decorators are composed in one production runtime on `main`. PR #201 adds live owner/validity/revision probes. | Route ambience masks, river dressing, and CPU stone fallback through the shared query; add runtime distribution counters and acceptance evidence. |
 | GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted cache/worker, GPU atlas, terrain, fog, god-ray consumers, and CPU EnvironmentQuery sampling exist. | Profile the builder, add remaining consumers, integrate large-prop overlay, and add GPU production only if measurements justify it. |
-| GV-CLOD-03 Gravel bars/cobbles | `acceptance_pending` | Visual bar mask, GPU packing, gravel-bar stones, and underwater cobbles exist. | Integrate safe bed elevation, produce a real braided reach, add rejection counters, and prove continuity/non-floating/performance gates. |
+| GV-CLOD-03 Gravel bars/cobbles | `open_pr` | Visual bar mask, GPU packing, gravel-bar stones, underwater cobbles, and the bounded decision contract exist. PR #243 integrates the bed decision into hydrology and tile workers with the default disabled. | Validate and merge #243, route the same authority into CLOD geometry/colliders/save semantics, produce a real braided reach, and prove continuity/non-floating/performance gates. |
 | GV-CLOD-04 Glacial water | `acceptance_pending` | Murkiness, body optics, physical suspended scattering, configurable glitter, reflection step tiers, GUI, and capture tooling are on `main`. | Validate clear/glacial A/B and budgets, implement the far-summary middle reflection approximation, and attach measured evidence. |
 | GV-CLOD-05 Prop occlusion overlay | `pending` | No shared large-prop height/occupancy overlay is on `main`. | Add dirty-region, stale-safe overlay and integrate it with sun visibility, water reflection, and mist clipping. |
 | GV-CLOD-06 Environmental masks | `partial` | Eight deterministic mask formulas, batched evaluation, and a production composed query are on `main`. | Route normal gameplay mask consumers through the shared query; add mask debug overlays, cursor probes, distribution counters, and performance proof. |
@@ -129,13 +160,14 @@ Exit gate:
 
 ## P1 — Safe gravel-bed integration and braided reach
 
-- [ ] Extend the deterministic bar result with bounded `elevationOffsetM`.
-- [ ] Apply the offset inside the carved-bed stage, not as render-only displacement.
-- [ ] Clamp against minimum wet depth, water Y, local banks, and continuity reserve.
-- [ ] Preserve the traced channel as authority; never replace it with a sine centerline.
-- [ ] Keep lakes unchanged unless a separate delta/sandbar mode is explicitly enabled.
+- [x] Extend the deterministic bar result with bounded `elevationOffsetM` in PR #230.
+- [ ] Apply the offset inside the canonical hydrology carved-bed authority — implemented in PR #243, validation and merge pending.
+- [ ] Clamp against minimum wet depth, water Y, local banks, and continuity reserve — implemented in PR #243, validation and merge pending.
+- [ ] Preserve the traced channel as authority; never replace it with a sine centerline — implemented in PR #243, validation and merge pending.
+- [ ] Keep lakes unchanged unless a separate delta/sandbar mode is explicitly enabled — implemented in PR #243, validation and merge pending.
 - [ ] Publish one bar mask to terrain material, vegetation suppression, cobbles, and water breakup.
-- [ ] Add counters for candidates, accepted bars, rejected continuity, rejected depth, and rejected bank safety.
+- [ ] Add counters for candidates, accepted bars, rejected continuity, rejected depth, and rejected bank safety — implemented in PR #243, validation and merge pending.
+- [ ] Route accepted elevation into streamed CLOD page geometry, colliders, and save/reload terrain semantics.
 - [ ] Add cobble candidates, accepted, visible, underwater, shore, rapid, and rejection-reason counters.
 - [ ] Add deterministic close and aerial braided-reach captures.
 - [ ] Gate acceptance on non-zero underwater cobbles after convergence.
@@ -257,19 +289,20 @@ Exit gate:
 ## Ordered remaining PR sequence
 
 1. PR #201 — EnvironmentQuery owner/validity probe — open, validation required.
-2. `feat(clod-poc): route ambience masks through production EnvironmentQuery`.
-3. `feat(clod-poc): route river dressing and CPU stone fallback through production EnvironmentQuery`.
-4. `feat(clod-poc): carve safe gravel bars and braided reaches`.
-5. `test(clod-poc): accept braided rivers and underwater cobbles`.
-6. `feat(clod-poc): add far-summary water reflection tier`.
-7. `feat(clod-poc): add large-prop occlusion overlay`.
-8. `feat(clod-poc): add rapid splash droplets`.
-9. `feat(clod-poc): add calm-water rise rings`.
-10. `feat(clod-poc): add dew and frost material accents`.
-11. `feat(clod-poc): add GPU ground-debris ring`.
-12. `feat(clod-poc): complete biome visual-state routing`.
-13. `test(clod-poc): add Glacial Valley cumulative acceptance`.
-14. `docs(clod-poc): close Glacial Valley execution plan`.
+2. PR #243 — gravel-bed hydrology authority — open, validation required.
+3. `feat(clod-poc): route gravel-bed authority into CLOD geometry and colliders`.
+4. `test(clod-poc): accept braided rivers and underwater cobbles`.
+5. `feat(clod-poc): route ambience masks through production EnvironmentQuery`.
+6. `feat(clod-poc): route river dressing and CPU stone fallback through production EnvironmentQuery`.
+7. `feat(clod-poc): add far-summary water reflection tier`.
+8. `feat(clod-poc): add large-prop occlusion overlay`.
+9. `feat(clod-poc): add rapid splash droplets`.
+10. `feat(clod-poc): add calm-water rise rings`.
+11. `feat(clod-poc): add dew and frost material accents`.
+12. `feat(clod-poc): add GPU ground-debris ring`.
+13. `feat(clod-poc): complete biome visual-state routing`.
+14. `test(clod-poc): add Glacial Valley cumulative acceptance`.
+15. `docs(clod-poc): close Glacial Valley execution plan`.
 
 Split a PR further whenever it crosses multiple authorities or cannot be safely reviewed and reverted as one unit.
 
