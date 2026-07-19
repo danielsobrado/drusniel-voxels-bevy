@@ -7,6 +7,7 @@ import {
   WATER_FOAM_MAX_COVERAGE,
   WATER_FOAM_PATTERN_END,
   WATER_FOAM_PATTERN_START,
+  WATER_FOAM_RIVER_SHORE_ATTENUATION,
   WATER_FOAM_SHORE_DISTANCE_WEIGHT,
 } from "./water_foam_model.js";
 import { getWaterFoamNoiseTexture } from "./water_foam_texture.js";
@@ -77,6 +78,11 @@ export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes 
     depthContact,
     distanceContact.mul(WATER_FOAM_SHORE_DISTANCE_WEIGHT),
   );
+  const shoreBodyWeight = mix(
+    float(1),
+    float(WATER_FOAM_RIVER_SHORE_ATTENUATION),
+    input.riverWeight,
+  );
   const rapidEligibility = input.rapidSpeed.mul(input.rapidDrop).mul(input.riverWeight);
   const rapid = rapidEligibility.mul(input.rapidStrength);
   const bank = bankContact
@@ -85,6 +91,7 @@ export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes 
     .mul(float(WATER_FOAM_BANK_DROP_BASE).add(input.rapidDrop.mul(WATER_FOAM_BANK_DROP_GAIN)));
   const source = bankContact
     .mul(input.shoreStrength)
+    .mul(shoreBodyWeight)
     .add(rapid.add(bank).mul(input.riverStrength));
   const coverage = clamp(
     source.mul(pattern).mul(wetFade),
