@@ -52,7 +52,11 @@ describe("FarClipmapController shader displacement", () => {
       innerRadiusM: 16,
       outerRadiusM: 64,
       pageSizeM: 16,
-      readyPageKeys: ["L0:2,0"],
+      readyPageKeys: [
+        "L0:1,-1", "L0:2,-1", "L0:3,-1",
+        "L0:1,0", "L0:2,0", "L0:3,0",
+        "L0:1,1", "L0:2,1", "L0:3,1",
+      ],
     });
 
     controller.update(new THREE.Vector3(0, 0, 0));
@@ -61,8 +65,11 @@ describe("FarClipmapController shader displacement", () => {
     const material = mesh?.material as THREE.Material | undefined;
     const ownershipData = material?.userData.farClipmapOwnershipData as Float32Array | undefined;
     expect(ownershipData?.[8 * 17 + 10]).toBe(0);
+    // A one-cell overlap inside the refined page prevents interpolated ownership from
+    // clipping half a coarse triangle at the transition.
+    expect(ownershipData?.[8 * 17 + 9]).toBe(1);
     expect(ownershipData?.[8 * 17 + 6]).toBe(1);
-    expect(controller.ownershipSnapshot().refinedClod?.readyPageKeys).toEqual(["L0:2,0"]);
+    expect(controller.ownershipSnapshot().refinedClod?.readyPageKeys).toHaveLength(9);
     controller.dispose();
   });
 
@@ -138,8 +145,8 @@ describe("FarClipmapController shader displacement", () => {
       sampleSummaryInto: (_x, _z, _distanceM, out) => {
         out.height = 12;
         out.normalX = 0;
-        out.normalY = 1;
-        out.normalZ = 0;
+        out.normalY = 0.8;
+        out.normalZ = 0.6;
         out.material = 1;
         out.waterLevel = 34;
         out.bodyKind = 2;
@@ -163,6 +170,7 @@ describe("FarClipmapController shader displacement", () => {
     expect(stats.fallbackSamplesThisFrame).toBe(0);
     const centerOffset = (8 * 17 + 8) * 4;
     expect(sourceData?.[centerOffset + 3]).toBe(1);
+    expect(sourceData?.[centerOffset + 2]).toBeCloseTo(0.6, 6);
     expect(waterData?.slice(centerOffset, centerOffset + 4)).toEqual(new Float32Array([34, 2, 80, 0.75]));
 
     controller.dispose();

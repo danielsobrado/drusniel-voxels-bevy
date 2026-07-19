@@ -330,7 +330,6 @@ function createWebGpuFarClipmapMaterial(input: {
   const sourceData = new Float32Array(gridResolution * gridResolution * 4);
   const waterData = new Float32Array(gridResolution * gridResolution * 4);
   const ownershipData = new Float32Array(gridResolution * gridResolution);
-  for (let i = 0; i < gridResolution * gridResolution; i++) sourceData[i * 4 + 2] = 1;
   const sourceStorage = new StorageBufferAttribute(sourceData, 4);
   const waterStorage = new StorageBufferAttribute(waterData, 4);
   const ownershipStorage = new StorageBufferAttribute(ownershipData, 1);
@@ -354,12 +353,17 @@ function createWebGpuFarClipmapMaterial(input: {
     positionGeometry.z.mul(uniforms.uCellSize),
   );
   const materialId: TslNode = sourceSample.w;
-  const meadowColor: TslNode = tslVec3(...GRASS_SHARED_BASE_LINEAR);
-  const forestColor: TslNode = tslVec3(0.08, 0.22, 0.07);
-  const swampColor: TslNode = tslVec3(0.16, 0.25, 0.10);
-  const mountainColor: TslNode = tslVec3(0.36, 0.35, 0.31);
-  const plainsColor: TslNode = tslVec3(0.30, 0.34, 0.15);
-  const coastColor: TslNode = tslVec3(0.48, 0.42, 0.27);
+  const normalX: TslNode = sourceSample.y;
+  const normalZ: TslNode = sourceSample.z;
+  const normalY: TslNode = max(0.0, normalX.mul(normalX).add(normalZ.mul(normalZ)).oneMinus()).sqrt();
+  const sourceNormal: TslNode = tslVec3(normalX, normalY, normalZ).normalize();
+  const shadingNormal: TslNode = tslMix(sourceNormal, tslVec3(0.0, 1.0, 0.0), waterMask).normalize();
+  const meadowColor: TslNode = tslVec3(0.30, 0.26, 0.18);
+  const forestColor: TslNode = tslVec3(0.18, 0.22, 0.12);
+  const swampColor: TslNode = tslVec3(0.18, 0.23, 0.13);
+  const mountainColor: TslNode = tslVec3(0.42, 0.40, 0.37);
+  const plainsColor: TslNode = tslVec3(0.36, 0.32, 0.16);
+  const coastColor: TslNode = tslVec3(0.58, 0.52, 0.38);
   const biomeColor: TslNode = tslMix(
     tslMix(
       tslMix(
@@ -377,11 +381,19 @@ function createWebGpuFarClipmapMaterial(input: {
     coastColor,
     tslSmoothstep(4.15, 4.85, materialId),
   );
-  const slopeRock: TslNode = tslSmoothstep(0.18, 0.62, sourceSample.z.oneMinus());
-  const elevationRock: TslNode = tslSmoothstep(uniforms.uSeaLevel.add(80), uniforms.uSeaLevel.add(220), terrainHeight).mul(0.62);
-  const macroLight: TslNode = max(0.62, sourceSample.z.mul(0.38).add(0.62));
-  const landColor: TslNode = tslMix(biomeColor, mountainColor, max(slopeRock, elevationRock)).mul(macroLight);
-  const waterColor: TslNode = tslVec3(0.07, 0.19, 0.26);
+  const slopeRock: TslNode = tslSmoothstep(0.10, 0.46, normalY.oneMinus());
+  const elevationRock: TslNode = tslSmoothstep(uniforms.uSeaLevel.add(24), uniforms.uSeaLevel.add(120), terrainHeight).mul(0.82);
+  const snowMask: TslNode = tslSmoothstep(
+    uniforms.uSeaLevel.add(150),
+    uniforms.uSeaLevel.add(270),
+    terrainHeight,
+  ).mul(tslSmoothstep(0.58, 0.9, normalY));
+  const sunDirection: TslNode = tslVec3(0.38, 0.82, 0.34).normalize();
+  const directLight: TslNode = max(0.0, shadingNormal.dot(sunDirection));
+  const terrainLight: TslNode = max(0.5, normalY.mul(0.24).add(directLight.mul(0.55)).add(0.24));
+  const rockyLandColor: TslNode = tslMix(biomeColor, mountainColor, max(slopeRock, elevationRock));
+  const landColor: TslNode = tslMix(rockyLandColor, tslVec3(0.72, 0.74, 0.72), snowMask).mul(terrainLight);
+  const waterColor: TslNode = tslVec3(0.09, 0.19, 0.22);
   const legacyTerrainColor: TslNode = tslMix(
     waterColor,
     landColor,
@@ -391,13 +403,27 @@ function createWebGpuFarClipmapMaterial(input: {
   const bodyTint: TslNode = tslSmoothstep(1.0, 3.0, waterSample.y).mul(0.12);
   const unifiedWaterColor: TslNode = tslMix(
     waterColor,
-    tslVec3(0.12, 0.30, 0.34),
+    tslVec3(0.13, 0.25, 0.26),
     max(shoreTint.mul(0.45), bodyTint),
   );
   const terrainColor: TslNode = tslMix(legacyTerrainColor, unifiedWaterColor, waterMask);
-  const fog: TslNode = tslSmoothstep(uniforms.uClipOuterRadius.mul(0.55), uniforms.uClipOuterRadius, distance);
+  const distanceFog: TslNode = tslSmoothstep(
+    uniforms.uClipInnerRadius,
+    uniforms.uClipOuterRadius.mul(0.72),
+    distance,
+  );
+  const lowlandFog: TslNode = tslSmoothstep(
+    uniforms.uClipInnerRadius,
+    uniforms.uClipOuterRadius.mul(0.6),
+    distance,
+  ).mul(tslSmoothstep(
+    uniforms.uSeaLevel.add(120),
+    uniforms.uSeaLevel.add(24),
+    terrainHeight,
+  ));
+  const fog: TslNode = max(distanceFog.mul(0.78), lowlandFog.mul(0.36));
 
-  const finalColor: TslNode = tslMix(terrainColor, tslVec3(0.46, 0.52, 0.50), fog.mul(0.36));
+  const finalColor: TslNode = tslMix(terrainColor, tslVec3(0.55, 0.60, 0.60), fog);
   // Debug-mode codes mirror the WebGL fragment shader: 1=biome, 2=height, 3=ownership.
   // Ownership colours the per-cell mask directly (amber = far clipmap owns as fallback,
   // blue = refined pages own) so the sector hand-off is provable from a capture.
@@ -417,7 +443,7 @@ function createWebGpuFarClipmapMaterial(input: {
     ownershipDebugColor,
     tslSelect(
       debugMode.greaterThan(1.5),
-      tslVec3(heightShade, heightShade, heightShade),
+      tslVec3(waterMask, waterMask, waterMask),
       tslSelect(debugMode.greaterThan(0.5), biomeColor, finalColor),
     ),
   );
@@ -565,16 +591,31 @@ export function updateFarClipmapMaterialOwnershipMask(material: FarClipmapMateri
   const resolution = Math.max(2, Math.floor(input.gridResolution));
   const pageSizeM = Math.max(1, input.pageSizeM);
   const refinedReady = normalizedRefinedPageCoords(input.readyPageKeys);
+  const fallbackOwnsPoint = (worldX: number, worldZ: number): boolean => {
+    const distanceM = Math.hypot(worldX - input.centerX, worldZ - input.centerZ);
+    if (distanceM < input.innerRadiusM || distanceM >= input.outerRadiusM) return false;
+    const px = Math.floor(worldX / pageSizeM);
+    const pz = Math.floor(worldZ / pageSizeM);
+    return !refinedReady.has(`${px},${pz}`);
+  };
   let fallbackVertices = 0;
   for (let z = 0; z < resolution; z++) {
     for (let x = 0; x < resolution; x++) {
       const worldX = input.ringOriginX + x * input.cellSizeM;
       const worldZ = input.ringOriginZ + z * input.cellSizeM;
-      const distanceM = Math.hypot(worldX - input.centerX, worldZ - input.centerZ);
-      if (distanceM < input.innerRadiusM || distanceM >= input.outerRadiusM) continue;
-      const px = Math.floor(worldX / pageSizeM);
-      const pz = Math.floor(worldZ / pageSizeM);
-      if (refinedReady.has(`${px},${pz}`)) continue;
+      let fallbackOwned = false;
+      // Ownership is interpolated across the coarse clipmap triangle. Dilate the missing-page
+      // complement by one grid cell so the interpolation transition lands under ready CLOD
+      // geometry instead of cutting a triangular hole at the exact page boundary.
+      for (let oz = -1; oz <= 1 && !fallbackOwned; oz++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          if (fallbackOwnsPoint(worldX + ox * input.cellSizeM, worldZ + oz * input.cellSizeM)) {
+            fallbackOwned = true;
+            break;
+          }
+        }
+      }
+      if (!fallbackOwned) continue;
       data[z * resolution + x] = 1;
       fallbackVertices++;
     }
@@ -626,7 +667,7 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
       if (outsideInnerRadius || outsideOuterRadius) {
         data[offset] = 0;
         data[offset + 1] = 0;
-        data[offset + 2] = 1;
+        data[offset + 2] = 0;
         data[offset + 3] = 0;
         waterData[offset] = 0;
         waterData[offset + 1] = 0;
@@ -643,7 +684,7 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
           : estimateNormal(input.source, worldX, worldZ, input.cellSizeM);
         data[offset] = finiteOr(height, 0);
         data[offset + 1] = finiteOr(normal.x, 0);
-        data[offset + 2] = finiteOr(normal.y, 1);
+        data[offset + 2] = finiteOr(normal.z, 0);
         data[offset + 3] = finiteOr(hasSummary ? summary.material : input.source.sampleMaterial(worldX, worldZ), 0);
         waterData[offset] = finiteOr(hasSummary ? summary.waterLevel : height, height);
         waterData[offset + 1] = finiteOr(hasSummary ? summary.bodyKind : 0, 0);
@@ -655,7 +696,7 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
         exceptionSamples++;
         data[offset] = 0;
         data[offset + 1] = 0;
-        data[offset + 2] = 1;
+        data[offset + 2] = 0;
         data[offset + 3] = 0;
         waterData[offset] = 0;
         waterData[offset + 1] = 0;

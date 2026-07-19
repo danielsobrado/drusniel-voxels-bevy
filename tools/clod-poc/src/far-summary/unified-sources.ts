@@ -34,6 +34,24 @@ export function sampleFarSummaryHydrology(
   };
 }
 
+/**
+ * Canonical hydrology owns inland water, but its dry result does not describe the
+ * world ocean. Preserve any hydrology body and fill only dry terrain below sea level.
+ */
+export function applyFarSummaryOceanFallback(
+  sample: FarSummaryWaterSample,
+  terrainHeight: number,
+  seaLevel: number,
+): FarSummaryWaterSample {
+  if (sample.coverage > 0 || terrainHeight >= seaLevel) return sample;
+  return {
+    ...sample,
+    coverage: 1,
+    waterLevel: seaLevel,
+    bodyKind: 1,
+  };
+}
+
 export interface FarSummaryCanopySourceInput {
   getConfig: () => CanopyShellConfig;
   sampleHeight: (x: number, z: number) => number;

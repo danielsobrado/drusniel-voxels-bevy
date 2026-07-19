@@ -1,5 +1,5 @@
 import { cloneWaterConfig } from "./water_config_clone.js";
-import type { WaterConfig } from "./water_config_types.js";
+import type { WaterConfig, WaterDebugModeId } from "./water_config_types.js";
 
 const PERF_WATER_CELL_SIZES = [3, 6, 12, 24];
 const BALANCED_WATER_CELL_SIZES = [2, 4, 8, 16, 32];
@@ -81,6 +81,14 @@ export function applyWaterQueryOverrides(config: WaterConfig, searchParams: URLS
 
   const waterCells = finiteNumberParam(searchParams, ["waterCells", "waterCellsPerLevel"]);
   if (waterCells !== null) next.cellsPerLevel = Math.max(16, Math.min(128, Math.floor(waterCells)));
+
+  const rippleAmp = finiteNumberParam(searchParams, ["waterRippleAmp"]);
+  if (rippleAmp !== null) next.visual.rippleAmp = Math.max(0, Math.min(4, rippleAmp));
+
+  const debugMode = finiteNumberParam(searchParams, ["waterMaterialDebug"]);
+  if (debugMode !== null) {
+    next.debug.mode = Math.max(0, Math.min(15, Math.floor(debugMode))) as WaterDebugModeId;
+  }
 
   const refraction = flagParam(searchParams, ["waterRefraction", "refraction"]);
   if (refraction !== null) {

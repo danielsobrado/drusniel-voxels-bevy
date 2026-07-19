@@ -256,7 +256,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     );
     const suspended = buildWaterSuspendedScatter(depth, ndotv, sunDir, body);
 
-    const reflectDir: TslNode = normalize(reflect(viewDir.negate(), normal));
+    const reflectDir: TslNode = normalize(reflect(viewDir.negate(), fresnelNormal));
     const reflY: TslNode = reflectDir.y;
     const reflYClamped: TslNode = max(reflY, float(0.0));
     const sunDot: TslNode = max(dot(reflectDir, sunDir), float(0.0));

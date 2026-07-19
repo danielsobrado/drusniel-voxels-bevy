@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CANOPY_SHELL_CONFIG } from "../canopy/canopy_defaults.js";
 import { cloneHydrologyConfig } from "../water/hydrologyConfig.js";
 import { HydrologySystem } from "../water/hydrologySystem.js";
-import { createFarSummaryCanopySource, sampleFarSummaryHydrology } from "./unified-sources.js";
+import {
+  applyFarSummaryOceanFallback,
+  createFarSummaryCanopySource,
+  sampleFarSummaryHydrology,
+} from "./unified-sources.js";
 
 describe("far-summary layout-v2 sources", () => {
   it("maps canonical hydrology channels without re-deriving them", () => {
@@ -30,6 +34,28 @@ describe("far-summary layout-v2 sources", () => {
       flowZ: -0.2,
     });
     expect(hints).toEqual([32]);
+  });
+
+  it("fills dry below-sea samples with the ocean authority", () => {
+    const dry = {
+      coverage: 0,
+      waterLevel: -2,
+      bodyKind: 0,
+      shoreDistance: 64,
+      flowX: 0,
+      flowZ: 0,
+    };
+
+    expect(applyFarSummaryOceanFallback(dry, -12, 0)).toEqual({
+      ...dry,
+      coverage: 1,
+      waterLevel: 0,
+      bodyKind: 1,
+    });
+    expect(applyFarSummaryOceanFallback(dry, 12, 0)).toBe(dry);
+
+    const river = { ...dry, coverage: 0.7, waterLevel: 3, bodyKind: 3 };
+    expect(applyFarSummaryOceanFallback(river, -12, 0)).toBe(river);
   });
 
   it("uses deterministic near-tree distribution without resampling hydrology", () => {

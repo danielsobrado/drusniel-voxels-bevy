@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
+import cloudNodeSource from "./postfx_cloud_nodes.ts?raw";
 import { compositePremultipliedCloudReference } from "./postfx_cloud_nodes.js";
 
 describe("volumetric cloud compositing", () => {
+  it("uses smooth 3D stochastic noise instead of periodic sine planes or extruded cells", () => {
+    expect(cloudNodeSource).toContain("function valueNoise3");
+    expect(cloudNodeSource).not.toContain("worldPosition.y.mul(0.0031)");
+  });
+
   it("adds premultiplied cloud radiance without multiplying alpha twice", () => {
     const result = compositePremultipliedCloudReference(
       [0.2, 0.4, 0.6],

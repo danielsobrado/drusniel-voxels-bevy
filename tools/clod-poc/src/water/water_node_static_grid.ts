@@ -12,9 +12,7 @@ import * as THREE from "three";
 import {
   dFdx,
   dFdy,
-  dot,
   float,
-  fract,
   int,
   ivec2,
   max,
@@ -22,7 +20,6 @@ import {
   mod,
   positionLocal,
   positionWorld,
-  sin,
   smoothstep,
   textureLoad,
   uniform,
@@ -43,8 +40,8 @@ export function waterRampGuardEnabled(cellSize: number): boolean {
 
 /**
  * Near-level shoreline ramp suppression shared by static-texel and atlas grids.
- * A stable world-space dither dissolves sentinel dives instead of tearing entire
- * triangles. Far/min-reduced rings keep their deliberate shoreline dip untouched.
+ * The steepest sentinel ramps are rejected as complete fragments. Far/min-reduced
+ * rings keep their deliberate shoreline dip untouched.
  */
 export function buildWaterRampDiscard(
   depth: TslNode,
@@ -64,10 +61,7 @@ export function buildWaterRampDiscard(
   const rampKeep: TslNode = float(1).sub(smoothstep(limit.mul(0.75), limit.mul(1.35), slope));
   const depthGate: TslNode = smoothstep(float(0.05), float(0.5), depth);
   const keep: TslNode = mix(float(1), rampKeep, depthGate);
-  const dither: TslNode = fract(
-    sin(dot(positionWorld.xz, vec2(12.9898, 78.233))).mul(43758.5453),
-  );
-  return dither.greaterThan(keep);
+  return keep.lessThan(float(0.5));
 }
 
 export interface WaterStaticGridNodes {

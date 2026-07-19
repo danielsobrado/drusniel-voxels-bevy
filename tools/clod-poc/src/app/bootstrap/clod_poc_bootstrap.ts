@@ -14,7 +14,11 @@ import { runTerrainViewStartup } from "./terrain_view_startup.js";
 import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
-import { createFarSummaryCanopySource, sampleFarSummaryHydrology } from "../../far-summary/unified-sources.js";
+import {
+  applyFarSummaryOceanFallback,
+  createFarSummaryCanopySource,
+  sampleFarSummaryHydrology,
+} from "../../far-summary/unified-sources.js";
 import type { FarTerrainSampler } from "../../far-summary/summary-tile-builder.js";
 import { timeFarSummarySubphase } from "../frame_loop/far_summary_subphase_timing.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
@@ -312,7 +316,11 @@ export async function bootstrapClodPoc() {
         const graphHydrologyEnabled = searchParams.get("continentHydrology") !== "0"
           && searchParams.get("continent_hydrology") !== "0";
         const sampleWater = hydrologySystem && graphHydrologyEnabled
-          ? (x: number, z: number, cellSizeM = 1) => sampleFarSummaryHydrology(hydrologySystem, x, z, cellSizeM)
+          ? (x: number, z: number, cellSizeM = 1) => applyFarSummaryOceanFallback(
+            sampleFarSummaryHydrology(hydrologySystem, x, z, cellSizeM),
+            farSummaryTerrainSampler.sampleHeight(x, z),
+            seaLevel,
+          )
           : undefined;
         farSummaryTerrainSampler.sampleWaterSummary = sampleWater;
         if (farSummaryCanopyEnabled(searchParams)) {

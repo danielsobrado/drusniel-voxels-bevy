@@ -46,6 +46,28 @@ describe("water quality overrides", () => {
     expect(config.caustics.enabled).toBe(true);
   });
 
+  it("supports a bounded ripple-amplitude diagnostic override", () => {
+    const flat = applyWaterQueryOverrides(
+      DEFAULT_WATER_CONFIG,
+      new URLSearchParams({ waterRippleAmp: "0" }),
+    );
+    const bounded = applyWaterQueryOverrides(
+      DEFAULT_WATER_CONFIG,
+      new URLSearchParams({ waterRippleAmp: "99" }),
+    );
+
+    expect(flat.visual.rippleAmp).toBe(0);
+    expect(bounded.visual.rippleAmp).toBe(4);
+  });
+
+  it("supports a bounded numeric water debug-mode override", () => {
+    const debug = applyWaterQueryOverrides(
+      DEFAULT_WATER_CONFIG,
+      new URLSearchParams({ waterMaterialDebug: "12" }),
+    );
+    expect(debug.debug.mode).toBe(12);
+  });
+
   it("keeps glacial murkiness disabled unless explicitly requested", () => {
     const untouched = applyWaterQueryOverrides(DEFAULT_WATER_CONFIG, new URLSearchParams());
     expect(untouched.visual.glacialMurkiness.enabled).toBe(false);

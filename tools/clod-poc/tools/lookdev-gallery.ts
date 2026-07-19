@@ -9,6 +9,7 @@
 //
 // Usage:
 //   npx tsx tools/lookdev-gallery.ts --url "http://127.0.0.1:5199/" --out qa-runs/lookdev-2026-07-19
+//   npx tsx tools/lookdev-gallery.ts --toneMap agx --poses ridge --params "clouds=0&froxels=0"
 //
 // Output: <out>/<variant>-<pose>.png + gallery.md index.
 
@@ -46,12 +47,20 @@ async function main(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
   const origin = typeof args.url === "string" ? args.url : "http://127.0.0.1:5180/";
   const out = resolveOutputPath(stringArg(args, "out", `qa-runs/lookdev-${new Date().toISOString().slice(0, 10)}`));
+  const queryOverrides = new URLSearchParams(stringArg(args, "params", ""));
+  const requestedToneMaps = stringArg(args, "toneMap", TONEMAP_VARIANTS.join(","))
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is typeof TONEMAP_VARIANTS[number] => TONEMAP_VARIANTS.includes(value as typeof TONEMAP_VARIANTS[number]));
+  if (requestedToneMaps.length === 0) throw new Error(`--toneMap must include one of: ${TONEMAP_VARIANTS.join(", ")}`);
+  const requestedPoses = new Set(stringArg(args, "poses", "").split(",").map((value) => value.trim()).filter(Boolean));
   mkdirSync(out, { recursive: true });
   const captured: Array<{ variant: string; pose: string; file: string }> = [];
 
-  for (const variant of TONEMAP_VARIANTS) {
+  for (const variant of requestedToneMaps) {
     const url = new URL(origin);
     for (const [key, value] of Object.entries(LOOKDEV_PARAMS)) url.searchParams.set(key, value);
+    for (const [key, value] of queryOverrides) url.searchParams.set(key, value);
     url.searchParams.set("toneMap", variant);
     console.log(`[lookdev] boot ${variant}: ${url}`);
 
@@ -69,7 +78,7 @@ async function main(): Promise<void> {
       })`);
       await settleFrames(page, 30);
 
-      const poses = await page.evaluate<Pose[]>(`(() => {
+      const discoveredPoses = await page.evaluate<Pose[]>(`(() => {
         const probe = window.waterProbe;
         const terrain = (x, z) => probe(x, z).terrain;
         const poses = [];
@@ -143,6 +152,10 @@ async function main(): Promise<void> {
 
         return poses;
       })()`);
+      const poses = requestedPoses.size > 0
+        ? discoveredPoses.filter((pose) => requestedPoses.has(pose.name))
+        : discoveredPoses;
+      if (poses.length === 0) throw new Error(`--poses matched none of: ${discoveredPoses.map((pose) => pose.name).join(", ")}`);
       console.log(`[lookdev] ${variant}: ${poses.length} poses (${poses.map((pose) => pose.name).join(", ")})`);
 
       for (const pose of poses) {
@@ -167,12 +180,12 @@ async function main(): Promise<void> {
   const lines = [
     "# Lookdev gallery",
     "",
-    `Profile: ${Object.entries(LOOKDEV_PARAMS).map(([key, value]) => `${key}=${value}`).join(" ")}`,
+    `Profile: ${[...Object.entries(LOOKDEV_PARAMS), ...queryOverrides.entries()].map(([key, value]) => `${key}=${value}`).join(" ")}`,
     "",
-    "| pose | " + TONEMAP_VARIANTS.map((variant) => `toneMap=${variant}`).join(" | ") + " |",
-    "| --- | " + TONEMAP_VARIANTS.map(() => "---").join(" | ") + " |",
+    "| pose | " + requestedToneMaps.map((variant) => `toneMap=${variant}`).join(" | ") + " |",
+    "| --- | " + requestedToneMaps.map(() => "---").join(" | ") + " |",
     ...poseNames.map((pose) =>
-      `| ${pose} | ` + TONEMAP_VARIANTS.map((variant) => `![${variant}-${pose}](${variant}-${pose}.png)`).join(" | ") + " |",
+      `| ${pose} | ` + requestedToneMaps.map((variant) => `![${variant}-${pose}](${variant}-${pose}.png)`).join(" | ") + " |",
     ),
     "",
   ];

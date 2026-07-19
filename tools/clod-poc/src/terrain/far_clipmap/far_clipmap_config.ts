@@ -32,7 +32,7 @@ export const DEFAULT_FAR_CLIPMAP_CONFIG: FarClipmapConfig = Object.freeze({
   outerRadiusM: 4096,
   ringCount: 5,
   baseCellSizeM: 8,
-  gridResolution: 129,
+  gridResolution: 257,
   snapSizeM: 128,
   heightScale: 1,
   yOffset: 0,

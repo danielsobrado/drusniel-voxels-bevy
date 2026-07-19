@@ -5,7 +5,10 @@ import {
   dot,
   exp,
   float,
+  floor,
+  fract,
   getViewPosition,
+  mix,
   screenUV,
   smoothstep,
   time,
@@ -31,7 +34,7 @@ export interface VolumetricCloudCompositeInput {
   cloudTex: TslAny;
 }
 
-const CLOUD_NOISE_WEIGHTS = [0.52, 0.31, 0.17] as const;
+const CLOUD_NOISE_SCALE = [0.00135, 0.002, 0.00135] as const;
 const CLOUD_BLUE_NOISE_SCALE = [132.37, 77.17] as const;
 const CLOUD_WIND_DIR = [0.821, 0.571] as const;
 const CLOUD_MIN_STEP_METERS = 8.0;
@@ -43,12 +46,34 @@ function hashNoise2(uv: TslAny): TslAny {
   return dot(uv, vec2(12.9898, 78.233)).sin().mul(43758.5453).fract();
 }
 
+const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
+
+function hashNoise3(p: TslAny): TslAny {
+  const q = fract(p.mul(vec3(0.1031, 0.103, 0.0973))) as TslAny;
+  const mixed = q.add(dot(q, q.yzx.add(33.33))) as TslAny;
+  return fract(mixed.x.add(mixed.y).mul(mixed.z));
+}
+
+function valueNoise3(p: TslAny): TslAny {
+  const cell = floor(p) as TslAny;
+  const offset = fract(p) as TslAny;
+  const blend = offset.mul(offset).mul(float(3).sub(offset.mul(2))) as TslAny;
+  const a = hashNoise3(cell);
+  const b = hashNoise3(cell.add(vec3(1, 0, 0)));
+  const c = hashNoise3(cell.add(vec3(0, 1, 0)));
+  const d = hashNoise3(cell.add(vec3(1, 1, 0)));
+  const e = hashNoise3(cell.add(vec3(0, 0, 1)));
+  const f = hashNoise3(cell.add(vec3(1, 0, 1)));
+  const g = hashNoise3(cell.add(vec3(0, 1, 1)));
+  const h = hashNoise3(cell.add(vec3(1, 1, 1)));
+  const low = tslMix(tslMix(a, b, blend.x), tslMix(c, d, blend.x), blend.y);
+  const high = tslMix(tslMix(e, f, blend.x), tslMix(g, h, blend.x), blend.y);
+  return tslMix(low, high, blend.z);
+}
+
 function cloudNoise(worldPosition: TslAny, windOffset: TslAny): TslAny {
-  const p = worldPosition.xz.sub(windOffset);
-  const n0 = p.x.mul(0.0021).add(p.y.mul(0.0017)).add(worldPosition.y.mul(0.0031)).sin().mul(0.5).add(0.5);
-  const n1 = p.x.mul(-0.0043).add(p.y.mul(0.0037)).add(worldPosition.y.mul(0.0053)).sin().mul(0.5).add(0.5);
-  const n2 = p.x.mul(0.0089).add(p.y.mul(-0.0062)).add(worldPosition.y.mul(0.0091)).sin().mul(0.5).add(0.5);
-  return n0.mul(CLOUD_NOISE_WEIGHTS[0]).add(n1.mul(CLOUD_NOISE_WEIGHTS[1])).add(n2.mul(CLOUD_NOISE_WEIGHTS[2]));
+  const advectedPosition = worldPosition.sub(vec3(windOffset.x, 0, windOffset.y));
+  return valueNoise3(advectedPosition.mul(vec3(...CLOUD_NOISE_SCALE)));
 }
 
 function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostFxCloudSettings): TslAny {
@@ -60,10 +85,20 @@ function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostF
   const horizonFade = Math.max(0.001, settings.horizonFade);
   const layerMask = smoothstep(0, horizonFade, height01)
     .mul(inverseSmoothstep(1 - horizonFade, 1, height01));
-  const weather = cloudNoise(worldPosition, windOffset);
+  const base = cloudNoise(worldPosition, windOffset);
+  const detailPosition = vec3(
+    worldPosition.x.mul(1.73).add(worldPosition.z.mul(0.91)),
+    worldPosition.y.mul(1.91),
+    worldPosition.x.mul(-0.91).add(worldPosition.z.mul(1.73)),
+  ).add(vec3(47.3, 13.1, 91.7));
+  const detailWind = vec2(
+    windOffset.x.mul(1.73).add(windOffset.y.mul(0.91)),
+    windOffset.x.mul(-0.91).add(windOffset.y.mul(1.73)),
+  );
+  const detail = cloudNoise(detailPosition, detailWind);
+  const weather = base.mul(0.72).add(detail.mul(0.28));
   const coverage = smoothstep(settings.coverage, 1, weather).mul(1.35);
-  const core = cloudNoise(worldPosition.mul(1.91).add(vec3(47.3, 13.1, 91.7)), windOffset.mul(1.35));
-  const erosion = float(1).sub(core.mul(0.28));
+  const erosion = float(1).sub(detail.mul(0.22));
   return clamp(coverage.mul(layerMask).mul(erosion).mul(settings.density), 0, 1);
 }
 
