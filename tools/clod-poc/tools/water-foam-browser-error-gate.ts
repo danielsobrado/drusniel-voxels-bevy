@@ -1,6 +1,7 @@
 import type { CdpPage } from "./water-harness.js";
 
 const MAX_BROWSER_ERRORS = 32;
+const WATER_FOAM_BROWSER_WARNING_PATTERN = /webgl(?:program|shader|context)?|shader|program\s+(?:link|compile)|(?:compile|link)\s+(?:error|failed)/i;
 
 export interface WaterFoamBrowserError {
   readonly source: "console" | "error" | "rejection" | "webgl-context";
@@ -35,6 +36,10 @@ export function evaluateWaterFoamBrowserErrorGate(
   return { passed: failures.length === 0, failures };
 }
 
+export function isWaterFoamBrowserWarning(message: string): boolean {
+  return WATER_FOAM_BROWSER_WARNING_PATTERN.test(message);
+}
+
 function normalizeBrowserError(value: unknown): WaterFoamBrowserError[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const record = value as Record<string, unknown>;
@@ -51,8 +56,11 @@ function normalizeBrowserError(value: unknown): WaterFoamBrowserError[] {
 }
 
 function browserCaptureSource(): string {
+  const warningPatternSource = JSON.stringify(WATER_FOAM_BROWSER_WARNING_PATTERN.source);
+  const warningPatternFlags = JSON.stringify(WATER_FOAM_BROWSER_WARNING_PATTERN.flags);
   return `(() => {
     const MAX_ERRORS = ${MAX_BROWSER_ERRORS};
+    const warningPattern = new RegExp(${warningPatternSource}, ${warningPatternFlags});
     const errors = [];
     const seen = new Set();
     const text = (value) => {
@@ -81,7 +89,7 @@ function browserCaptureSource(): string {
     const originalWarn = console.warn.bind(console);
     console.warn = (...values) => {
       const message = values.map(text).join(" ");
-      if (/webgl|shader|program|compile|link/i.test(message)) record("console", values);
+      if (warningPattern.test(message)) record("console", values);
       originalWarn(...values);
     };
     addEventListener("error", (event) => {
