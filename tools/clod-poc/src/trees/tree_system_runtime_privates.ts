@@ -7,7 +7,8 @@ import {
 } from "./tree_system_gpu_ring_resources.js";
 import { refreshTreeGpuRingImpostorsTransactionally } from "./tree_gpu_ring_impostor_refresh_transaction.js";
 import { treeGpuRingRequiresClear } from "./tree_gpu_ring_clear_policy.js";
-import { treeGpuRingReportsRuntimeStats } from "./tree_gpu_ring_stats_authority.js";
+import { treeReportsGpuRingStats } from "./tree_system_gpu_status.js";
+import { treeSystemUsesGpuRingDraw } from "./tree_system_gpu_policy.js";
 import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
@@ -79,7 +80,13 @@ export function treeUpdateStats(self: TreeSystem): void {
     patches: self.patches,
     geometries: self.assets.geometries,
     lodCounts: self.lodCounts,
-    reportsGpuRingStats: treeGpuRingReportsRuntimeStats(self.gpuRing),
+    reportsGpuRingStats: treeReportsGpuRingStats(
+      treeSystemUsesGpuRingDraw(self.settings),
+      self.gpuRing.status,
+      !!self.gpuRing.draw,
+      !!self.gpuRing.compute,
+      self.gpuRing.stats.status,
+    ),
     gpuRing: self.gpuRing,
     debugShowGpuCounts: self.settings.gpu.debugShowGpuCounts,
     impostorStatus: self.assets.impostorStatus,
