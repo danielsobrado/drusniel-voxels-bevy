@@ -12,9 +12,11 @@ import {
   farClipmapMaterialDisplacementMode,
   farClipmapShaderRenderOrder,
   setFarClipmapMaterialDebugMode,
+  setFarClipmapMaterialLighting,
   updateFarClipmapMaterialFrameUniforms,
   updateFarClipmapMaterialOwnershipMask,
   updateFarClipmapMaterialSourceTexture,
+  type FarClipmapLighting,
   type FarClipmapMaterial,
 } from "./far_clipmap_material.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
@@ -83,6 +85,9 @@ export interface FarClipmapOwnershipSnapshot {
 
 export interface FarClipmapControllerOptions {
   webGpuCompatibleMaterial?: boolean;
+  /** Live environment lighting; applied to ring materials each update so the far
+   *  clipmap is lit by the same rig as the near CLOD terrain. */
+  getLighting?: () => FarClipmapLighting;
 }
 
 export interface RefinedClodReadinessInput {
@@ -291,6 +296,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
   private refinedClod: RefinedClodReadinessInput | null = null;
   private refinedClodKey = "";
   private refinedClodRevision = 0;
+  private readonly getLighting?: () => FarClipmapLighting;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -298,6 +304,7 @@ class FarClipmapControllerImpl implements FarClipmapController {
     private readonly source: FarClipmapSource,
     options: FarClipmapControllerOptions,
   ) {
+    this.getLighting = options.getLighting;
     this.lastStats = makeStats(config, false, 0, emptyFrameStats(), false, this.totals(), emptySnapshot());
     for (let ring = 0; ring < config.ringCount; ring++) {
       const range = farClipmapRingRange(config, ring);
@@ -488,6 +495,11 @@ class FarClipmapControllerImpl implements FarClipmapController {
         heightScale: this.config.heightScale,
         yOffset: this.config.yOffset,
       });
+      if (this.getLighting) {
+        const lighting = this.getLighting();
+        setFarClipmapMaterialLighting(ring.material, lighting);
+        if (ring.standbyMaterial) setFarClipmapMaterialLighting(ring.standbyMaterial, lighting);
+      }
       if (
         ring.ownershipRevision !== this.refinedClodRevision
         || ring.ownershipOriginX !== ringOriginX
@@ -699,6 +711,10 @@ class FarClipmapControllerImpl implements FarClipmapController {
       cameraZ: cameraPosition.z,
       clipInnerRadiusM: ring.innerRadiusM,
       clipOuterRadiusM: ring.outerRadiusM,
+      seaLevelM: this.config.seaLevelM,
+      // The innermost ring renders inside its inner radius wherever refined pages are
+      // missing (ownership fallback); those cells need real heights, not the zero fill.
+      includeInnerRadius: this.refinedClod !== null && ring === this.rings[0],
       deferUpload,
     });
     ring.sourceUploadChannel = deferUpload ? "source" : null;

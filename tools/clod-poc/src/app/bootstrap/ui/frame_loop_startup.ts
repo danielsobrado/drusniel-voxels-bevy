@@ -362,7 +362,7 @@ export function runFrameLoopStartup(
     clodCoverageRadiusM: liveClodRootRadius,
     targetVisibleRadiusM: longView.phase0TargetVisibleM,
   });
-  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu }) : null;
+  const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu, getLighting: currentLighting }) : null;
   const farClipmapUsesRefinedOwnership = searchParams.get("farClipmapMode") === "replace";
   const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
   const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;

@@ -14,6 +14,7 @@ import {
   isAuthoredBiomeMaterialId,
   sampleAuthoredBiomeMaterial,
 } from "./authoredBiomeMaterials.js";
+import { recordTerrainLayerAverageAlbedos } from "./terrain_layer_average_albedo.js";
 
 declare global {
   interface Window {
@@ -211,6 +212,7 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
     }
   }
 
+  recordTerrainLayerAverageAlbedos(order, albedo, layerSize);
   const albedoArray = makeArrayTexture(albedo, layerSize, layers, THREE.SRGBColorSpace);
   const normalArray = makeArrayTexture(normal, layerSize, layers, THREE.NoColorSpace);
   if (typeof window !== "undefined") window.__drusnielTerrainAlbedoArray = albedoArray;

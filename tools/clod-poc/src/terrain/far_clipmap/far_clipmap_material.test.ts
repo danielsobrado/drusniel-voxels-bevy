@@ -5,8 +5,11 @@ import {
   createFarClipmapMaterial,
   setFarClipmapMaterialDebugMode,
   smoothFarClipmapLandHeights,
+  updateFarClipmapMaterialFrameUniforms,
+  updateFarClipmapMaterialSourceTexture,
   type FarClipmapMaterial,
 } from "./far_clipmap_material.js";
+import { recordTerrainLayerAverageAlbedos } from "../../textures/terrain_layer_average_albedo.js";
 
 type TraversableNode = { traverse(callback: (node: unknown) => void): void };
 
@@ -92,5 +95,68 @@ describe("far clipmap water routing", () => {
   it("requires positive water depth before water can replace the land material", () => {
     expect(farClipmapMaterialSource).toContain("const waterDepthMask: TslNode");
     expect(farClipmapMaterialSource).toContain(".mul(waterDepthMask)");
+  });
+
+  it("colors water cells instead of leaving them land-colored", () => {
+    expect(farClipmapMaterialSource).toContain("tslMix(landColor, waterBodyColor, waterMask)");
+  });
+});
+
+describe("far clipmap ocean fallback", () => {
+  function fillWater(heightM: number, seaLevelM?: number): Float32Array {
+    const material = createWebGpuMaterial();
+    updateFarClipmapMaterialSourceTexture(material, {
+      source: { sampleHeight: () => heightM, sampleMaterial: () => 0, sampleBiome: () => 0, sampleWater: () => 0 },
+      gridResolution: 4,
+      ringOriginX: 0,
+      ringOriginZ: 0,
+      cellSizeM: 8,
+      cameraX: 0,
+      cameraZ: 0,
+      seaLevelM,
+    });
+    return material.userData.farClipmapWaterData as Float32Array;
+  }
+
+  it("synthesizes open ocean for below-sea cells without summary tiles", () => {
+    const water = fillWater(0, 18);
+    expect(water[0]).toBe(18);
+    expect(water[3]).toBe(1);
+  });
+
+  it("keeps dry fallback cells and unset sea level water-free", () => {
+    expect(fillWater(30, 18)[3]).toBe(-1);
+    expect(fillWater(0, undefined)[3]).toBe(-1);
+  });
+});
+
+// Mutates the module-level average-albedo registry; keep this describe last.
+describe("far clipmap near-palette matching", () => {
+  it("colorNode consumes palette uniforms derived from near-terrain layer averages", () => {
+    const material = createWebGpuMaterial();
+    const palette = material.userData.farClipmapPaletteUniforms as { uRock: unknown; uSnow: unknown };
+    expect(palette?.uRock).toBeDefined();
+    expect(colorNodeReaches(material, palette.uRock)).toBe(true);
+    expect(colorNodeReaches(material, palette.uSnow)).toBe(true);
+  });
+
+  it("re-resolves palette uniforms after a texture re-bake", () => {
+    const material = createWebGpuMaterial();
+    const palette = material.userData.farClipmapPaletteUniforms as { uRock: { value: { x: number } } };
+    const before = palette.uRock.value.x;
+    recordTerrainLayerAverageAlbedos(["rock"], new Uint8Array(2 * 2 * 4).fill(255), 2);
+    updateFarClipmapMaterialFrameUniforms(material, {
+      cameraX: 0,
+      cameraZ: 0,
+      clipInnerRadiusM: 100,
+      clipOuterRadiusM: 1000,
+      ringOriginX: 0,
+      ringOriginZ: 0,
+      cellSizeM: 8,
+      heightScale: 1,
+      yOffset: 0,
+    });
+    expect(palette.uRock.value.x).toBeCloseTo(1, 5);
+    expect(palette.uRock.value.x).not.toBe(before);
   });
 });
