@@ -13,13 +13,16 @@ export const WATER_FOAM_RENDERER_PARITY_LIMITS = Object.freeze({
   rapidActiveRatioMax: 1.65,
   rapidMeanCoverageRatioMin: 0.25,
   rapidMeanCoverageRatioMax: 1.75,
+  rapidComponentDensityDeltaMax: 20.0,
   rapidLargestComponentDeltaMax: 0.28,
   rapidStripeDeltaMax: 0.22,
   rapidIsolatedDeltaMax: 0.20,
   smoothRiverActiveExcessMax: 0.04,
   smoothRiverCoverageExcessMax: 0.025,
+  lakeShoreActiveDeltaMax: 0.08,
   lakeShoreCoverageDeltaMax: 0.05,
   lightingMeanDeltaMax: 0.20,
+  lightingP95DeltaMax: 0.20,
   lightingVariationRatioMin: 0.20,
   lightingVariationRatioMax: 3.00,
   temporalDeltaRatioMin: 0.20,
@@ -38,6 +41,10 @@ export function evaluateWaterFoamRendererParity(
     lakeShoreWaterPixelRatio: ratio(webGl.lakeShore.waterPixelCount, webGpu.lakeShore.waterPixelCount),
     rapidActiveRatio: ratio(webGl.rapid.activeFraction, webGpu.rapid.activeFraction),
     rapidMeanCoverageRatio: ratio(webGl.rapid.meanCoverage, webGpu.rapid.meanCoverage),
+    rapidComponentDensityDelta: delta(
+      webGl.rapid.componentDensityPerK,
+      webGpu.rapid.componentDensityPerK,
+    ),
     rapidLargestComponentDelta: delta(
       webGl.rapid.largestComponentFraction,
       webGpu.rapid.largestComponentFraction,
@@ -49,10 +56,18 @@ export function evaluateWaterFoamRendererParity(
     ),
     smoothRiverActiveExcess: webGl.smoothRiver.activeFraction - webGpu.smoothRiver.activeFraction,
     smoothRiverCoverageExcess: webGl.smoothRiver.meanCoverage - webGpu.smoothRiver.meanCoverage,
+    lakeShoreActiveDelta: delta(
+      webGl.lakeShore.activeFraction,
+      webGpu.lakeShore.activeFraction,
+    ),
     lakeShoreCoverageDelta: delta(webGl.lakeShore.meanCoverage, webGpu.lakeShore.meanCoverage),
     lightingMeanDelta: delta(
       webGl.rapidLighting.meanLuminance,
       webGpu.rapidLighting.meanLuminance,
+    ),
+    lightingP95Delta: delta(
+      webGl.rapidLighting.p95Luminance,
+      webGpu.rapidLighting.p95Luminance,
     ),
     lightingVariationRatio: ratio(
       webGl.rapidLighting.standardDeviation,
@@ -89,6 +104,12 @@ export function evaluateWaterFoamRendererParity(
   );
   requireMax(
     failures,
+    "rapid component-density delta",
+    measurements.rapidComponentDensityDelta,
+    limits.rapidComponentDensityDeltaMax,
+  );
+  requireMax(
+    failures,
     "rapid largest-component delta",
     measurements.rapidLargestComponentDelta,
     limits.rapidLargestComponentDeltaMax,
@@ -109,6 +130,12 @@ export function evaluateWaterFoamRendererParity(
   );
   requireMax(
     failures,
+    "lake-shore active delta",
+    measurements.lakeShoreActiveDelta,
+    limits.lakeShoreActiveDeltaMax,
+  );
+  requireMax(
+    failures,
     "lake-shore coverage delta",
     measurements.lakeShoreCoverageDelta,
     limits.lakeShoreCoverageDeltaMax,
@@ -118,6 +145,12 @@ export function evaluateWaterFoamRendererParity(
     "lit-foam mean luminance delta",
     measurements.lightingMeanDelta,
     limits.lightingMeanDeltaMax,
+  );
+  requireMax(
+    failures,
+    "lit-foam p95 luminance delta",
+    measurements.lightingP95Delta,
+    limits.lightingP95DeltaMax,
   );
   requireRange(
     failures,
