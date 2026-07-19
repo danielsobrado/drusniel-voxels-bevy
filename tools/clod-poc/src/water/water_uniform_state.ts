@@ -6,6 +6,7 @@ import {
   waterBodyPresetsByKind,
   type WaterBodyVisualPresets,
 } from "./water_body_presets.js";
+import { resolveWaterFoamDistanceFade } from "./water_foam_distance.js";
 import type { WaterMaterialParams } from "./water_material_types.js";
 import type { WaterRefractionConfig, WaterReflectionConfig } from "./waterConfig.js";
 
@@ -29,6 +30,8 @@ export interface WaterUniforms {
   uShoreFoamEnd: { value: number };
   uShoreDistFoamStart: { value: number };
   uShoreDistFoamEnd: { value: number };
+  uFoamDetailFadeStartM: { value: number };
+  uFoamDetailFadeEndM: { value: number };
   uBodyShallow: { value: THREE.Vector3[] };
   uBodyDeep: { value: THREE.Vector3[] };
   uBodyAbsorption: { value: THREE.Vector3[] };
@@ -96,6 +99,7 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
   const visual = params.visual;
   const caustics = params.caustics ?? DEFAULT_CAUSTICS_CONFIG;
   const bodyArrays = createBodyUniformArrays();
+  const foamDistance = resolveWaterFoamDistanceFade(visual.foam);
   syncWaterBodyUniformArrays(bodyArrays, visual.bodies);
 
   const uniforms: WaterUniforms = {
@@ -119,6 +123,8 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uShoreFoamEnd: { value: visual.shoreFoamEnd },
     uShoreDistFoamStart: { value: visual.foam.shoreDistanceStart },
     uShoreDistFoamEnd: { value: visual.foam.shoreDistanceEnd },
+    uFoamDetailFadeStartM: { value: foamDistance.startM },
+    uFoamDetailFadeEndM: { value: foamDistance.endM },
     uFoamNoiseScale: { value: visual.foam.noiseScale },
     uFoamShoreStrength: { value: visual.foam.shoreStrength },
     uFoamRiverStrength: { value: visual.foam.riverStrength },
