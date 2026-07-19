@@ -7,6 +7,7 @@ export const WATER_FOAM_SHORE_DISTANCE_WEIGHT = 0.35;
 export const WATER_FOAM_RIVER_SHORE_ATTENUATION = 0.28;
 export const WATER_FOAM_BANK_DROP_BASE = 0.08;
 export const WATER_FOAM_BANK_DROP_GAIN = 0.72;
+export const WATER_FOAM_SHADE_COVERAGE_FLOOR = 0.55;
 
 export interface WaterFoamModelInput {
   readonly shoreContact: number;
@@ -15,6 +16,7 @@ export interface WaterFoamModelInput {
   readonly riverWeight: number;
   readonly pattern: number;
   readonly wetFade: number;
+  readonly sunVisibility: number;
   readonly shoreStrength: number;
   readonly riverStrength: number;
   readonly bankStrength: number;
@@ -26,6 +28,7 @@ export interface WaterFoamModelResult {
   readonly shoreSource: number;
   readonly rapidSource: number;
   readonly bankSource: number;
+  readonly shadeCoverage: number;
 }
 
 export function rapidFoamEligibility(
@@ -42,6 +45,9 @@ export function evaluateWaterFoam(input: WaterFoamModelInput): WaterFoamModelRes
   const rapidDrop = clamp01(input.rapidDrop);
   const pattern = clamp01(input.pattern);
   const wetFade = clamp01(input.wetFade);
+  const sunVisibility = clamp01(input.sunVisibility);
+  const shadeCoverage = WATER_FOAM_SHADE_COVERAGE_FLOOR
+    + (1 - WATER_FOAM_SHADE_COVERAGE_FLOOR) * sunVisibility;
   const shoreBodyWeight = 1 + (WATER_FOAM_RIVER_SHORE_ATTENUATION - 1) * riverWeight;
 
   const shoreSource = shoreContact * Math.max(0, input.shoreStrength) * shoreBodyWeight;
@@ -54,10 +60,14 @@ export function evaluateWaterFoam(input: WaterFoamModelInput): WaterFoamModelRes
   const source = shoreSource + (rapidSource + bankSource) * Math.max(0, input.riverStrength);
 
   return {
-    coverage: Math.min(WATER_FOAM_MAX_COVERAGE, Math.max(0, source * pattern * wetFade)),
+    coverage: Math.min(
+      WATER_FOAM_MAX_COVERAGE,
+      Math.max(0, source * pattern * wetFade * shadeCoverage),
+    ),
     shoreSource,
     rapidSource,
     bankSource,
+    shadeCoverage,
   };
 }
 
