@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   WATER_FOAM_MAX_COVERAGE,
+  WATER_FOAM_RIVER_SHORE_ATTENUATION,
   evaluateWaterFoam,
   rapidFoamEligibility,
 } from "./water_foam_model.js";
@@ -53,6 +54,25 @@ describe("water foam parity model", () => {
     const half = evaluateWaterFoam({ ...fixture, pattern: 0.5 });
 
     expect(half.coverage).toBeCloseTo(full.coverage * 0.5);
+  });
+
+  it("attenuates continuous river-shore foam while retaining lake shoreline foam", () => {
+    const lake = evaluateWaterFoam({
+      ...BASE,
+      riverWeight: 0,
+      shoreContact: 1,
+      shoreStrength: 0.2,
+    });
+    const river = evaluateWaterFoam({
+      ...BASE,
+      riverWeight: 1,
+      shoreContact: 1,
+      shoreStrength: 0.2,
+      riverStrength: 0,
+      bankStrength: 0,
+    });
+
+    expect(river.shoreSource).toBeCloseTo(lake.shoreSource * WATER_FOAM_RIVER_SHORE_ATTENUATION);
   });
 
   it("caps bright whitewater coverage at the parity limit", () => {
