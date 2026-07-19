@@ -58,6 +58,7 @@ function resolveBodyPreset(
   const reflectionMinimum = Math.min(base.reflectionDamping, clampFraction(config.reflectionDampingMin));
 
   return {
+    ...base,
     shallowColor: [...base.shallowColor],
     deepColor: [...base.deepColor],
     absorption: [
@@ -67,6 +68,7 @@ function resolveBodyPreset(
     ],
     turbidity: clampFraction(base.turbidity + turbidityAdd * blend),
     reflectionDamping: lerp(base.reflectionDamping, reflectionMinimum, blend),
+    scatterColor: [...base.scatterColor],
   };
 }
 
