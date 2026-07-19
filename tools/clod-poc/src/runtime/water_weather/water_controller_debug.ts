@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { WATER_DEBUG_MODES, type WaterDebugState, type ShoreSurfBandSettings } from "../../water/index.js";
 import type { WaterField } from "../../water/index.js";
 import type { WaterClipmap } from "../../water/index.js";
+import { getWaterFoamRuntimeDiagnostics } from "../../water/water_foam_diagnostics.js";
 import type { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
 import type { WaterDebugPoseHooks, WaterControllerDeps } from "./water_controller_types.js";
 
@@ -94,6 +95,7 @@ export function installWaterDebugApi(
       shoreSurf: field.getShoreSurfBand(),
       clipmapExclusionBand: field.getClipmapExclusionBand(),
       debugModes: { ...WATER_DEBUG_MODES },
+      foam: getWaterFoamRuntimeDiagnostics(deps.searchParams),
       residueOverlay: true,
       cascadeParticles: cascadeParticles.getStats(),
       clipmap: {
