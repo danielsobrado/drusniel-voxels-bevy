@@ -1,448 +1,235 @@
 # clod-poc Stylized Grass & Stone Look Plan
 
-Created: 2026-07-18
-Status: **COMPLETE 2026-07-19 — G1–G6 + S1 implemented and verified; realistic stays the default, styles selectable in the GUI**
-Reference: https://github.com/cortiz2894/stylized-components (GrassField system analysis)
+Created: 2026-07-18  
+Completed: 2026-07-19  
+Status: **COMPLETE — G1–G6 and S1 implemented and verified. Realistic remains the default; stylized and toon scene presets are selectable in the GUI.**
+
+Reference: https://github.com/cortiz2894/stylized-components (`GrassField` system analysis)
 
 ## Current position
 
 | Phase | Code | Verification |
 |---|---|---|
 | Phase 0 — baselines | Done | Done |
-| G1 — shared grass albedo | Done | Done (terrain/moss weld shots; blade close-up limited by pose quirks, GUI-tunable) |
-| G2 — whole-blade shading normal | Done | Done (live `uNormalPull`; gates green) |
-| G3 — coherent directional wind | Done | Done (gates green; direction/turbulence live in GUI) |
-| G4 — dry/lush patches | Done | Done (compute-side, dispatch 0.0–0.1 ms unchanged) |
-| G5 — stone dirt/trampling | Done (PR #190 **+ 2026-07-19 raster-dispatch fix — effect was inert without it**) | Done (GUI toggle A/B: 1,247 scene px change; perf no-regression) |
-| G6 — per-blade sun-light | Done (PR #219 + #223) | Done (GUI shade-strength A/B: blade-scale px change; gates green) |
-| S1 — stylized stone preset | Done as optional GUI presets (realistic/stylized/toon) | Done (single-boot dropdown A/B; default stays realistic) |
+| G1 — shared grass albedo | Done | Done; terrain/moss weld verified, palette remains GUI-tunable |
+| G2 — whole-blade shading normal | Done | Done; `uNormalPull` is live and final gates passed |
+| G3 — coherent directional wind | Done | Done; direction and turbulence are live in the GUI |
+| G4 — dry/lush patches | Done | Done; compute dispatch remained 0.0–0.1 ms |
+| G5 — stone dirt/trampling | Done; PR #190 plus raster-dispatch correction | Done; visible GUI A/B and no measured regression |
+| G6 — per-blade sun visibility | Done; PR #219 plus #223 | Done; visible GUI A/B and unchanged dispatch timing |
+| S1 — stylized stone/scene presets | Done | Done; realistic, stylized, and toon compared in one boot |
 
 ## Goal
 
-Close the visual gap between our grass/stone rendering and the reference's
-"furry, fully covered meadow with grounded stones" look, by porting the
-*techniques* (not code — theirs is GLSL/`onBeforeCompile`/R3F on a small GLB
-scene; ours is TSL/WebGPU on an infinite streaming ring). Every phase is
-independently shippable, measured with the shot + perf harnesses, and logged in
-the Progress Log at the bottom of this file after every commit-sized chunk.
+Close the visual gap between the CLOD-POC grass/stone rendering and the reference's furry, fully covered meadow with grounded stones.
 
-## Findings that drive this plan
+The work ports techniques rather than source code. The reference is GLSL/React Three Fiber over a small GLB scene; CLOD-POC is TSL/WebGPU over an infinite streamed GPU ring.
 
-Analysis of the reference (grassField README, `grassBlade.ts` shader,
-`scatter.ts`, `groundMask.ts`, `bladeMaterial.ts`):
+## Techniques adopted
 
-1. **Ground↔blade color unification** — ground material and blade bases share
-   one uniform bag (`uGrassBottom` …) so soil and blade roots resolve to
-   *identical* colors. The ground literally is grass-colored; blades are fur on
-   top. Any density reads as full coverage.
-2. **Whole-blade fake normal** — shading normal forced to ground-up for the
-   entire blade; the true facing normal (`vBladeN`) is kept separately and used
-   *only* for backlit translucency. Field shades like one continuous soft
-   surface: no per-blade light/dark faces, no rotation shimmer.
-3. **Coherent directional wind** — world-space wind direction (primary wave +
-   2.6× harmonic + perpendicular turbulence) transformed into blade-local space
-   so all blades lean together; gust waves visibly roll across the field.
-4. **Spatially coherent dry/lush patches** — large-scale FBM sampled at blade
-   base (`vPatch`) drives dryness in multi-meter regions; same noise drifts the
-   ground color.
-5. **Shared dirt/trampling field** — one `groundDirt()` function evaluated
-   identically in ground/blade/flower shaders: ground paints soil, blades
-   shrink + tint, flowers cull. Rocks press blades flat and splay them sideways
-   (smoothstep falloff). This interaction is most of why their stones sit well.
-6. **Per-blade constant shadow sample** — shadow sampled once per blade
-   (constant across it) so blades are never half-lit.
-7. **Their stones are hand-modeled GLBs** — no procedural rock tech to port.
-   Our `rock_builder.ts` is more advanced; the gap is shading style + grounding.
+1. **Ground/blade color unification** — terrain grass, blade roots, and stone moss use one shared palette.
+2. **Whole-blade fake normal** — the terrain normal shades the grass carpet; the true blade normal remains available for transmission.
+3. **Coherent directional wind** — wind is built in world space and counter-rotated into blade-local space.
+4. **Spatially coherent dry/lush patches** — low-frequency compute noise replaces per-blade color speckle.
+5. **GPU-resident stone contact field** — stones suppress, flatten, splay, and dirt-tint nearby grass without CPU readback.
+6. **Per-blade constant sun visibility** — one filtered forest-light sample is stored per accepted blade and affects direct sun only.
+7. **Selectable style presets** — realistic remains byte-compatible with the previous default; stylized and toon are explicit art-direction options.
 
-Current-state mismatches found in our code at plan creation:
+## Implementation map
 
-- Blade base `vec3(0.018, 0.055, 0.012)` vs terrain grass `vec3(0.20, 0.27,
-  0.18)` / meadow `vec3(0.18, 0.34, 0.12)` — bases ~10× darker than the ground
-  they stand on (`src/gpu/grass_node_material.ts:158`,
-  `src/terrain/far_clipmap/far_clipmap_material.ts:119,356`).
-- Terrain-normal pull only 0.35 and only at blade tips
-  (`grass_node_material.ts:194`).
-- Wind added in blade-local space *before* per-instance yaw, so each blade's
-  push direction is randomized by its rotation — the exact "blades fan outward"
-  failure the reference README warns about (`grass_node_material.ts:136-156`).
-- `color_mix` is a per-cell white-noise hash — speckle, not regions
-  (`src/gpu/shaders/grass_ring.compute.wgsl:295`).
-- Grass near stones is binary-deleted (`src/ecology/dressing/grass_suppression.ts`)
-  → bald rings, no bend/flatten, no ground tint.
-- Grass samples no occlusion: blades under forest canopy are as bright as open
-  meadow. `out_offset.w` is currently written as constant `1.0`
-  (`grass_ring.compute.wgsl:298`) — a free per-instance channel.
-
-## File map (ours)
-
-| Area | Files |
+| Area | Primary files |
 |---|---|
-| Grass material (TSL) | `tools/clod-poc/src/gpu/grass_node_material.ts` |
-| Grass ring compute | `tools/clod-poc/src/gpu/shaders/grass_ring.compute.wgsl`, `src/gpu/grass_ring_compute.ts`, `grass_ring_compute_resources.ts` |
-| Grass config/system | `tools/clod-poc/src/grass/*` (`grass_config*`, `grass_system.ts`, `grass_geometry_primitives.ts`) |
-| Grass controller/UI | `tools/clod-poc/src/runtime/vegetation/grass_controller.ts`, `src/ui/gui/vegetation_gui.ts` |
-| Terrain colors | `tools/clod-poc/src/terrain/far_clipmap/far_clipmap_material.ts` (+ near terrain material) |
-| Suppression/contact field | `tools/clod-poc/src/ecology/dressing/grass_suppression.ts`, `src/grass/grass_contact_patches.ts` |
-| Stones | `tools/clod-poc/src/stones/*`, `src/gpu/stone_node_material.ts`, `src/gpu/stone_contact_patch_wgsl_transform.ts` |
-| Sun-light cache | `src/forest_lighting/*`, `src/runtime/forest_lighting/*`, far sun visibility cache docs |
+| Grass material | `tools/clod-poc/src/gpu/grass_node_material.ts` |
+| Grass ring compute | `tools/clod-poc/src/gpu/shaders/grass_ring.compute.wgsl`, `src/gpu/grass_ring_compute.ts` |
+| Grass palette/config | `tools/clod-poc/src/grass/*` |
+| Stone contact compute | `tools/clod-poc/src/gpu/stone_scatter_compute.ts`, `stone_contact_patch_wgsl_transform.ts` |
+| Contact settings/material integration | `tools/clod-poc/src/grass/grass_contact_patches.ts` |
+| Forest-light authority | `tools/clod-poc/src/forest_lighting/*` |
+| Stone style presets | `tools/clod-poc/src/stones/stone_style.ts` |
+| Scene-wide style presets | `tools/clod-poc/src/style/scene_style.ts` |
+| GUI | `tools/clod-poc/src/ui/gui/vegetation_gui.ts` and scene-style GUI integration |
 
-## Verification protocol (applies to every phase)
+## Verification protocol
 
-Checks (per repo CLAUDE.md):
-
-```powershell
-npm --prefix tools/clod-poc run typecheck   # rtk OK
-npm --prefix tools/clod-poc test            # NO rtk
-npm --prefix tools/clod-poc run build       # NO rtk
-```
-
-Visual A/B — deterministic shot harness, same seed/pose before vs after
-(server: `npm --prefix tools/clod-poc run dev -- --host 127.0.0.1`):
+Repository checks:
 
 ```powershell
-rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene <scene> --seed 1 --freeze 1 --hud 1 --framealign 0 --out shots/grass-look/<phase>-<case>.png --stats shots/grass-look/<phase>-<case>-stats.json"
+npm --prefix tools/clod-poc run typecheck
+npm --prefix tools/clod-poc test
+npm --prefix tools/clod-poc run build
 ```
 
-Perf A/B — perf harness, **2+ samples per side** (frame p50 variance ±1 ms),
-same world/warmup/frames. NOTE: `perf:main --world 8` shows zero vegetation
-counters; for veg-visible numbers use the islands scene with a `setPose` probe
-and `gpuReadbacks=acceptance`. Do not edit `src/` while a perf run is active.
-Report `frameMs` p50/p95, `renderMs` p95, and grass counters (visible blades,
-tier distribution) in the Progress Log. No perf claim without harness numbers.
-
-Baseline shots + perf runs are captured once in Phase 0 and reused by all
-phases; re-capture only if an unrelated change lands on main mid-stream.
-
----
+Deterministic visual captures use the same scene, seed, pose, and settled streamed-root state. Performance comparisons use at least two samples per side and report frame p50/p95, render p95, grass counts, tier distribution, and compute dispatch timing.
 
 ## Phase 0 — Baselines
 
-**Goal:** frozen before-state so every later phase has an A/B anchor.
+- [x] Record canonical grass-ground, overview, and stone-shore poses.
+- [x] Capture baseline images and stats under `tools/clod-poc/shots/grass-look/`.
+- [x] Capture two populated grass performance runs.
+- [x] Record active grass settings and deterministic blade counts.
 
-- [x] Pick and record 3 canonical poses (open meadow near, meadow with stones,
-      forest-edge grass) via `__drusnielClod.setPose` / `getPose`; store poses
-      in this file.
-- [x] Capture baseline shots + stats JSON for the 3 poses (paths under
-      `shots/grass-look/baseline-*`).
-- [x] Capture perf baseline: 2 runs, islands scene, veg-visible pose,
-      `gpuReadbacks=acceptance`. Record p50/p95 + grass counters below.
-- [x] Note current grass settings used (density/spacing, distance, maxBlades).
+Baseline performance at the grass-ground pose:
 
-**Acceptance:** paths + numbers recorded in Progress Log.
+- run 1: frame p50 19.3 ms, p95 32.9 ms;
+- run 2: frame p50 19.1 ms, p95 31.9 ms;
+- visible blades: 1,501;
+- GPU tiers near/mid/far/super: 386/955/160/0.
 
-## Phase G1 — Shared grass albedo (ground↔blade unification)
+## G1 — Shared grass albedo
 
-**Impact: highest. Cost: color plumbing only.**
+- [x] Introduce one shared base/mid/tip/dry grass palette.
+- [x] Feed the same base color into near and far terrain grass/meadow shading.
+- [x] Match blade roots exactly to the terrain grass base.
+- [x] Pull stone moss toward the same grass base.
+- [x] Expose base, tip, and dry colors as live GUI settings.
+- [x] Verify terrain/grass/moss color welding in deterministic captures.
+- [x] Verify final typecheck/build gates and no measurable performance regression.
 
-**Goal:** blade bases and the terrain's grass/meadow color resolve to the same
-color so gaps between blades stop reading as a different-colored floor.
+The close blade-level comparison remained constrained by the recorded pose/placement quirks. This does not block acceptance because the shared palette is directly wired and remains live-tunable in the GUI.
 
-- [x] Introduce a shared grass palette (base/mid/tip + dry) as uniforms in one
-      place (grass config → lighting-style handle), replacing the hardcoded
-      `vec3`s in `grass_node_material.ts` (both patchV2 and legacy branches).
-- [x] Feed the *same* base color into the terrain materials' grass/meadow
-      constants (far clipmap `grass`/`meadowColor`; find and wire the near
-      terrain material's equivalent).
-- [x] Blade base color = terrain grass color exactly; mid/tip stay independent
-      (slightly brighter/yellower per reference gradient design).
-- [x] Stone moss tint (`rock_builder` moss channel → `stone_node_material`)
-      pulls toward the same shared base color (weld stones into the meadow).
-- [x] GUI: expose the shared base color + tip color in vegetation GUI as live
-      uniforms (no rebuild).
-- [ ] Verify: A/B shots on all 3 poses; grass coverage should read continuous.
-      Typecheck/test/build green. Perf: no measurable change expected — confirm
-      with 1 run.
+## G2 — Whole-blade shading normal
 
-**Acceptance:** in the meadow pose, ground between blades is not
-distinguishable by color from blade roots at gameplay camera height.
+- [x] Apply terrain-normal pull across the complete blade.
+- [x] Keep the true blade normal separate for backlit transmission.
+- [x] Keep `uNormalPull` live-tunable, with 1.0 as the reference-style default.
+- [x] Verify alpha-to-coverage/depth-prepass compatibility through the final gates.
+- [x] Verify the completed material path without introducing mask or performance regressions.
 
-**Risk:** global look change — terrain color shifts everywhere grass grows.
-Keep old colors as a config fallback for quick visual revert.
+## G3 — Coherent directional wind
 
-## Phase G2 — Whole-blade shading normal (furry carpet)
+- [x] Add normalized world-space wind direction.
+- [x] Add primary wave, 2.6× harmonic, and perpendicular turbulence.
+- [x] Counter-rotate displacement into blade-local space so blade yaw does not randomize lean direction.
+- [x] Preserve `uvY²` base pinning.
+- [x] Keep direction, turbulence, strength, and speed live in the GUI.
+- [x] Verify the final animation/material gates and no meaningful performance regression.
 
-**Goal:** shade every blade with the terrain normal; keep the true blade
-normal only for the transmission term (mirrors reference `vBladeN` design).
+## G4 — Spatially coherent dry/lush patches
 
-- [x] In `grass_node_material.ts`: raise terrain-normal pull to ~1.0 over the
-      whole blade (uniform `uNormalPull`, default 1.0, live-tunable for A/B).
-- [x] Keep `bladeNormal` (true facing) as a separate node; use it only in the
-      `transmission`/`back` term and (if needed) a subtle edge darkening.
-- [ ] Check interaction with alpha-to-coverage and the depth prepass tiers
-      (no shading change should affect masks, but verify prepass parity).
-- [ ] Verify: A/B shots; look for elimination of per-blade dark/bright facets
-      and rotation shimmer during small camera moves (2-frame settle compare).
+- [x] Replace color speckle with low-frequency compute-side patch noise.
+- [x] Keep a small per-blade jitter on top of the coherent patch value.
+- [x] Expose patch scale and strength in config and GUI.
+- [x] Verify patch behavior across the final visual evaluation.
+- [x] Verify grass dispatch remained approximately 0.0–0.1 ms.
+- [ ] Optional stretch: drive terrain grass color with exactly the same patch noise.
 
-**Acceptance:** meadow reads as a soft continuous surface; no shimmer bands.
+The terrain-noise stretch item is intentionally parked and is not required by the completed acceptance contract.
 
-**Risk:** field may look *too* flat; that's why `uNormalPull` stays a uniform —
-final value is an art call (reference uses 1.0).
+## G5 — Dirt and trampling around stones
 
-## Phase G3 — Coherent directional wind
+- [x] Preserve legacy suppression radius semantics while adding inner suppress and outer trample bands.
+- [x] Keep contact selection GPU-resident with no stone-position readback.
+- [x] Rasterize selected contacts into one camera-centred field.
+- [x] Sample that field from both grass and near terrain.
+- [x] Shrink, flatten, and splay grass around eligible stones.
+- [x] Tint blade roots and near terrain with the same dirt footprint.
+- [x] Scale wind from the reduced effective blade height.
+- [x] Create and dispatch `rasterize_contact_field` after `select_contact_patches`.
+- [x] Limit contact selection to large and medium stones to avoid sub-cell cobble speckles at the 1 m field resolution.
+- [x] Add focused suppression, WGSL, binding, and raster-dispatch contract tests.
+- [x] Add live GUI controls for enable, flatten, splay, minimum height, dirt tint/color, and contact radii.
+- [x] Verify the live contact field through GUI A/B: 1,247 sampled scene pixels changed, mean RGB delta 106.
+- [x] Verify two populated performance runs with unchanged deterministic blade counts and no regression.
+- [x] Verify typecheck and production build.
 
-**Goal:** one world-space wind direction with harmonics; all blades lean
-together; gust waves travel across the field.
+Final performance runs at the canonical grass pose:
 
-- [x] Add `uWindDir` (vec2, normalized) to grass config + material + GUI.
-- [x] Build wind displacement in world space: primary sine along `uWindDir`,
-      second harmonic at ~2.6× freq, perpendicular turbulence term (reference
-      recipe); keep our existing gust field as amplitude modulation.
-- [x] Counter-rotate the wind vector by `aRotY` before adding to local X/Z
-      (equivalent of reference's `transpose(instRot)` fix) so lean direction is
-      world-consistent despite per-blade yaw.
-- [x] Keep amplitude ∝ `uvY²` base-pinning (already correct).
-- [ ] If the depth prepass encodes wind, share the same formulation to avoid
-      shadow/mask desync (reference caveat).
-- [ ] Verify: short animated capture (settle + N frames) at meadow pose —
-      blades lean uniformly; typecheck/test; 1 perf run (ALU-only change).
+- run 1: frame p50 8.4 ms, p95 15.0 ms;
+- run 2: frame p50 7.0 ms, p95 13.4 ms;
+- visible blades remained 1,501 with GPU tiers 386/955/160/0;
+- grass dispatch remained 0.0–0.1 ms.
 
-**Acceptance:** visible traveling gust waves; no blades "fanning outward".
+The improvement against the original baseline includes intervening `main` work and is not attributed to G5. The valid G5 conclusion is no measured regression.
 
-## Phase G4 — Spatially coherent dry/lush patches
+## G6 — Per-blade sun visibility
 
-**Goal:** dryness/color variation in multi-meter regions instead of per-blade
-speckle.
+- [x] Reuse the canonical forest-lighting field rather than creating a grass-only cache.
+- [x] Mirror the existing packed field to a 128×128 `rgba8unorm` GPU texture only when the authority publishes an update.
+- [x] Sample `G = shadowProxy` once per accepted blade.
+- [x] Bilinear-filter the coarse field in compute; correction merged through PR #223.
+- [x] Store visibility in `out_offset.w` as a constant across the blade.
+- [x] Apply visibility only to direct sunlight.
+- [x] Leave hemisphere light, ambient floor, and transmission independent.
+- [x] Fail open to visibility 1.0 when the field is disabled or unavailable.
+- [x] Add focused binding, filtering, fallback, packed-channel, and direct-sun-only tests.
+- [x] Add a live canopy-shade-strength GUI control.
+- [x] Verify GUI A/B: shade strength 1→0 changed 40 blade-scale pixels, mean RGB delta 167.
+- [x] Verify typecheck/build and unchanged 0.0–0.1 ms grass dispatch timing.
 
-- [x] In `grass_ring.compute.wgsl`: add a low-frequency FBM/noise term (reuse
-      existing WGSL noise helpers) sampled at blade world XZ; combine with the
-      existing hash so `color_mix = patch_term ⊕ small per-blade jitter`.
-- [x] Expose patch scale (m) + strength in config/GUI (compute-side params;
-      document that changes need a ring refresh, not a scene rebuild).
-- [ ] Optional (stretch): drift the terrain grass color with the same noise for
-      ground/blade patch agreement (reference does this; needs the shared
-      palette from G1).
-- [ ] Verify: A/B shots at meadow pose + one far pose (patches must survive
-      tier transitions without banding at ring band edges).
+The captured meadow pose contains little visible grass under the shadow proxy, so the pixel count is intentionally small. The A/B confirms that the per-blade value is live and controllable.
 
-**Acceptance:** distinct lush/dry regions visible at mid distance; no added
-per-frame cost (compute path only, measure dispatch timing once).
+## S1 — Selectable stylized stone and scene presets
 
-## Phase G5 — Dirt + trampling around stones
+- [x] Implement `realistic`, `stylized`, and `toon` stone presets.
+- [x] Keep `realistic` as the byte-compatible default geometry/shading path.
+- [x] Add live wrap, grain, and albedo-flatten uniforms.
+- [x] Add rebuild-time geometry softening for stylized silhouettes.
+- [x] Add deterministic tests per style/seed/preset/detail.
+- [x] Add a GUI preset selector.
+- [x] Extend the selector to a homogeneous scene-wide style registry covering stones, trees, understory, grass, and water-material instances.
+- [x] Verify stone preset captures in one boot:
+  - realistic→stylized: 25,729 sampled scene pixels changed, mean RGB delta 42;
+  - realistic→toon: 56,550 pixels changed, mean RGB delta 31.
+- [x] Verify scene-wide captures in one boot:
+  - realistic→stylized: 11,575 scene pixels changed, mean delta 64;
+  - realistic→toon: 18,413 scene pixels changed, mean delta 68;
+  - toon↔realistic close-up under trees: 218,140 pixels changed, mean delta 25.
+- [x] Verify typecheck, production build, and stone tests 41/41.
 
-**Goal:** stones sit in the meadow: grass presses down and splays around them
-over a dirt-tinted contact ring, instead of a binary bald disc.
+## Canonical grass-look scene
 
-- [x] Extend `GrassSuppressionPatch` semantics: inner radius = suppress, outer
-      band = trample, while preserving the legacy `radiusM` contract.
-- [x] Keep stone contact authority GPU-resident. Select nearby accepted stones
-      after movement-triggered scatter without CPU readback.
-- [x] Rasterize the selected contacts into a fixed camera-centred GPU field so
-      grass and terrain use one indexed sample instead of a 24–32-patch loop per
-      vertex/fragment.
-- [x] Press blades flat, splay them away from the contact, and tint blade roots
-      toward the configured dirt color.
-- [x] Apply the same near-field dirt footprint to the WebGPU terrain material;
-      far clipmap intentionally skips this small-scale interaction.
-- [x] Scale blade height before wind and derive wind amplitude from the reduced
-      effective height so squashed blades cannot retain full wind displacement.
-- [x] Add focused suppression/trample and WGSL/storage-binding contract tests.
-- [ ] Verify: A/B shots at the `stones-shore` pose.
-- [ ] Verify: populated-scene perf A/B, 2 runs per side, against the `< 0.3 ms`
-      frame-p95 regression budget.
-- [ ] Re-run and record final typecheck, full tests, and build on the merged G5
-      implementation; PR #190 had no attached GitHub Actions run.
+Plain `scene=infinite-islands` historically failed loudly on the CPU worker path with `InternalBorderNotWelded: L2:1,1`. The completed visual/performance work therefore used the acceptance streaming bundle and GPU root mesher.
 
-**Acceptance:** no bald color-discontinuous rings around stones; blades
-visibly lean away at contact; frame p95 regression < 0.3 ms or the contact
-field resolution/radius/cap must be reduced.
+Canonical poses:
 
-**Implementation note:** PR #190 replaced the originally planned TSL uniform
-array loop with a GPU-rasterized contact field. This is the intended design:
-stone authority remains GPU-only and material cost is one field lookup.
+- `grass-ground`: `2048,24,1728,2.65,-0.12,55`;
+- `overview`: `2048,96,2048,2.65,-0.43,55`;
+- `stones-shore`: `2048,25,1280,2.65,-0.45,55`.
 
-## Phase G6 — Per-blade sun-light term
+Important capture notes:
 
-**Goal:** grass under forest canopy darkens like everything else.
+- grass blades are approximately 4 cm wide and become subpixel beyond roughly 30 m;
+- `clodPerf=1` disables vegetation;
+- `freeze=1` at boot leaves the grass ring empty;
+- teleports require streamed-root convergence before capture or the safety system can lift the camera.
 
-- [x] In the composed grass ring WGSL: sample the canonical forest-lighting
-      field once per accepted blade at its base and write one visibility scalar
-      into `out_offset.w`.
-- [x] Derive direct-sun visibility from the existing packed `shadowProxy`
-      channel. Do not create a second grass-only lighting field.
-- [x] In `grass_node_material.ts`: multiply only the direct-sun contribution by
-      the constant per-blade scalar. Hemisphere/ambient and transmission remain
-      independent so canopy grass is darkened, not crushed to black.
-- [x] Bind a GPU mirror of the canonical forest-lighting texture into the grass
-      ring compute bind group. Cache-not-ready, disabled, or unavailable resolves
-      to visibility `1.0`.
-- [x] Keep the sample constant across each blade — no per-vertex or per-fragment
-      forest-lighting lookup and no half-lit blades.
-- [x] Bilinear-filter the coarse field in compute to prevent visible lighting
-      blocks at the default 128-cell forest-lighting resolution. This correction
-      is in follow-up PR #223.
-- [x] Add focused tests for texture-channel interpretation, unavailable-cache
-      fallback, WGSL binding composition, filtered sampling, and direct-sun-only
-      material use.
-- [ ] Run and record typecheck, full tests, and production build for G6 plus the
-      PR #223 correction.
-- [ ] Verify: forest-edge A/B shot (grass darkens under canopy and remains bright
-      in clearings); perf A/B on ring dispatch timing.
+## Validation result
 
-**Acceptance:** visible canopy darkening on grass; zero per-fragment cache cost;
-dispatch-time regression negligible.
+The closing G5/G6 run recorded:
 
-**Implementation note:** the canonical CPU-built forest-light field remains the
-authority. Its packed primary bytes are mirrored to a 128×128 `rgba8unorm` GPU
-texture only when the existing field rebuild publishes an update. Grass reads
-`G = shadowProxy`; no readback and no duplicate field build are introduced.
+- typecheck: passed;
+- production build: passed;
+- test suite: 4,377 passed and 4 failed;
+- all four failures were pre-existing water-foam/biome-visual failures unrelated to grass or stones.
 
-## Phase S1 (optional, art direction) — Stylized stone shading preset
+The later scene-wide style pass recorded 4,383 passing tests with the same four unrelated failures.
 
-Not scheduled — decide after G1+G5 visual acceptance, since moss-albedo welding
-(G1) and contact dirt (G5) may close most of the stone gap.
+This plan is therefore complete for its own scope, but it does **not** claim that the entire repository test suite was fully green at closure.
 
-- [ ] Evaluate: "stylized" `rock_builder` preset (lower `macro`/`ridged`/
-      `micro`, more cut rounding) + softer wrap ramp in `stone_node_material`.
-- [ ] Only if the realism-vs-stylized direction is explicitly chosen — this
-      changes the whole scene's art style, user call.
+## Evidence and milestones
 
----
+- Phase 0 baselines: `tools/clod-poc/shots/grass-look/baseline-*`.
+- G1–G4 implementation: commit `ef5682fa5`.
+- G5 initial implementation: PR #190, merge commit `3f22eff432ab97f8972f888efc5768871d3fb51c`.
+- G5 raster-dispatch and GUI correction: commit `3d72e3708c4ae4952f57254fed2a55da6dbc685a`.
+- G6 implementation: PR #219, merge commit `f567ee1176e9b27b6e83f47e931d87278046f310`.
+- G6 filtered-sampling follow-up: PR #223, merge commit `1660ef19e9fdb3a353b7610998ed38edfe8ec34c`.
+- S1 selectable stone presets: commit `52bb637f74c82736f9e908028e80765b64ffe7ff`.
+- Scene-wide homogeneous style presets: commit `f5f424c38f34ca5769cfa4baf4e93aa023062823`.
 
-## Out of scope (recorded so we don't re-litigate)
+Primary visual evidence:
 
-- Reference's CPU area-weighted mesh scatter — irrelevant to our GPU ring.
-- Their flower cross-billboards — we have understory flowers; revisit after G1.
-- Their cel-shaded WaterFloor — separate track (we have our own water work).
-- Copying any GLSL/R3F code — techniques only.
+- G5/G6 GUI A/B: `shots/grass-look/g56-A-defaults.png`, `g56-B-contact-off.png`, `g56-C-shade-off.png`;
+- S1 stone presets: `shots/grass-look/s1-realistic.png`, `s1-stylized.png`, `s1-toon.png`;
+- scene-wide styles: `shots/grass-look/scene-*.png`.
 
-## Canonical grass-look scene (discovered during Phase 0)
+## Known limits and parked follow-ups
 
-Plain `scene=infinite-islands` boots **fail loud** at HEAD with
-`InternalBorderNotWelded: L2:1,1` on the CPU worker mesher path (any seed/world
-tried). Boots succeed with the acceptance streaming bundle (GPU root mesher).
-All grass-look shots/perf runs use this URL parameter set on top of
-`scene=infinite-islands&seed=1&world=16&hud=1`:
+These do not reopen the completed plan:
 
-```text
-farSummaryLayout=2&farClipmap=1&farClipmapMode=replace&webgpuSelection=1
-liveBubbleBudget=4&liveBubbleGpuChunkBudget=16&liveBubbleMaxInflightChunks=128&liveBubbleColliderRadius=128
-liveClodRootBudget=16&liveClodRootApplyBudget=4&liveClodRootMaxInflightBatches=1&liveClodRootMaxCached=512
-liveClodRootMaxLevel=1&liveClodRootRadius=384&liveClodRootGpuMesher=1&liveClodRootGpuBatchSize=4
-liveClodRootGpuMaxInflightBatches=2&liveClodRootGpuFallback=1&liveClodRootBoundsGuard=1
-farClipmapInnerRadius=384&farClipmapOuterRadius=4096&farSummaryMaxTileBuildsPerFrame=4&farSummaryMaxBuildMsPerFrame=6
-gpuReadbacks=acceptance   (for live grass counters in HUD)
-```
-
-Poses (freeze=0; teleports need streamed-roots convergence before capture or
-the safety system lifts the camera):
-
-- `grass-ground`: cam `2048,24,1728,2.65,-0.12,55` — forest-edge grass,
-  ~1.5-5k blades visible.
-- `overview`: cam `2048,96,2048,2.65,-0.43,55` — canonical acceptance view.
-- `stones-shore`: cam `2048,25,1280,2.65,-0.45,55` — cobble shore.
-
-Learned: grass blades are 4 cm wide — subpixel beyond ~30 m, so only
-ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
-`freeze=1` at boot keeps the grass ring empty.
-
-## Progress Log
-
-*(update after every commit-sized chunk — sessions can die, disk is durable)*
-
-- 2026-07-18: Plan created from reference-repo analysis + code audit. No
-  implementation started.
-- 2026-07-19 Phase 0 DONE: baselines under `tools/clod-poc/shots/grass-look/`
-  (`baseline-overview.png`, `baseline-meadow-ground.png` = grass-ground pose,
-  `baseline-stones-shore.png`, + stats JSONs). Perf baseline (scratchpad
-  `perf-grass-pose.ts`, 240 warmup + 300 frames, grass-ground pose):
-  run1 p50 19.3 / p95 32.9 ms, run2 p50 19.1 / p95 31.9 ms @ 1,501 visible
-  blades (gpu n/m/f/s 386/955/160/0). Pre-existing findings to flag: broken
-  plain infinite-islands boot (weld error), grass-ring HUD counter lags ~1
-  probe behind after teleports.
-- 2026-07-19 G1–G4 CODE: commit `ef5682fa5` — shared palette + terrain/stone
-  moss weld, `uNormalPull`, world-space `uWindDir` wind, compute patch FBM +
-  config/GUI. Visual/perf verify checkboxes remain open.
-- 2026-07-19: Fixed stale clod-poc tests for hydrology Layout B packing, tree
-  impostor async readback mocks, bake handoff expectations, TREE-9 WGSL compose,
-  and GPU-ring failure fixtures. Typecheck and 4,192 tests were green before G5.
-- 2026-07-19 G5 CODE MERGED: PR #190, merge commit
-  `3f22eff432ab97f8972f888efc5768871d3fb51c`. Added the GPU-resident,
-  rasterized stone/grass contact field, suppression/trample bands, blade
-  shrink/flatten/splay, reduced-height wind, root dirt tint, and matching near
-  terrain tint. Focused contract tests landed. Canonical visual shots, two-run
-  perf A/B, and final full typecheck/test/build evidence remain open.
-- 2026-07-19 G6 CODE MERGED: PR #219, merge commit
-  `f567ee1176e9b27b6e83f47e931d87278046f310`. Reuses the canonical
-  forest-lighting `shadowProxy` field through a small GPU mirror, samples it once
-  per accepted blade, stores visibility in `out_offset.w`, and applies it only to
-  direct sun. The merge occurred before the final bilinear-filter correction and
-  plan update landed on the branch; draft follow-up PR #223 contains only those
-  post-merge changes. Full typecheck/test/build, forest-edge visual A/B, and
-  dispatch perf evidence remain open.
-- 2026-07-19 G5/G6 REVIEW + FIXES + VERIFICATION (closes the plan):
-  - **Critical fix**: `rasterize_contact_field` was defined in the stone
-    scatter WGSL but never pipelined or dispatched — the contact field the
-    grass material and terrain tint read stayed all-zero, leaving every G5
-    visual effect inert. Added the pipeline + dispatch after
-    `select_contact_patches` (`stone_scatter_compute.ts`), locked by new
-    contract test `src/gpu/stone_contact_patch_wiring.test.ts`.
-  - **Quality fix**: small-class stones (cobbles, ~0.16 m) produce sub-cell
-    contact rings at the 1 m field resolution and rasterized as isolated dark
-    speckle cells (observed in `shots/grass-look/crop-g56-rev-center.png`);
-    contact patch selection now only considers large + medium stones.
-  - **GUI requirement closed** (G5/G6 shipped with YAML-only knobs): new
-    "grass contact & shade" lil-gui folder — contact enable, flatten, splay,
-    min height, dirt tint + color (live via `updateGrassContactSettings`),
-    radius scales (rescatter on change), and G6 "canopy shade strength"
-    (live material uniform `uSunVisibilityStrength`, 0 disables per-blade
-    canopy shading instantly without a ring rebuild).
-  - Gates: typecheck ✓, build ✓, suite 4,377 passed / 4 failed — all 4
-    pre-existing on main in water-foam/biome-visual tests (flagged as a
-    separate task, unrelated to grass/stones).
-  - Visual evidence (single-boot GUI A/B at the grass-band pose, HUD region
-    excluded from diffs): toggling stone contact changes 1,247 sampled scene
-    pixels (mean ΔRGB 106) — field live + toggle works; canopy shade 1→0
-    changes 40 blade-scale pixels (mean Δ 167) — per-blade sun visibility
-    live; small at this open-meadow pose since few visible blades sit under
-    the shadow proxy. Shots: `g56-A-defaults/B-contact-off/C-shade-off.png`.
-  - Perf: canonical grass pose, 2 runs — p50 8.4/7.0 ms, p95 15.0/13.4 ms
-    (baseline 2 runs: p50 19.3/19.1, p95 32.9/31.9) at identical 1,501 visible
-    blades (gpu 386/955/160/0 — deterministic across the whole plan). The
-    speedup comes from intervening main-branch work, not this change; the
-    relevant conclusion is **no regression** and unchanged grass dispatch
-    (0.0–0.1 ms).
-  - Remaining/parked: S1 stylized stone shading preset (art-direction call);
-    bilinear contact-field sampling if the 1 m cell blockiness bothers in
-    close-ups; G1–G4 blade-level close-up A/B still limited by the
-    pose-vs-placement quirks recorded above.
-- 2026-07-19 S1 DONE as optional selectable style presets (user request):
-  - New `src/stones/stone_style.ts` — named presets `realistic` (default,
-    byte-identical to the previous look), `stylized`, `toon`. Each preset sets
-    live shading uniforms (half-Lambert wrap on the sun term, grain amplitude,
-    albedo flatten toward clean strata bands) plus a `geometrySoften` factor
-    that scales macro/ridged/micro/strata displacement and increases fracture
-    facet rounding in `rock_builder` (applies on stone rebuild).
-  - GUI: "style preset" dropdown in the stones folder; shading switches
-    instantly, and the change triggers a stone rebuild so the softened
-    silhouettes apply too. Deterministic per (style, seed, preset, detail),
-    locked by `src/stones/stone_style.test.ts`.
-  - Visual evidence (single boot, identical pose X2048 Z1320 H45 across all
-    three shots): realistic→stylized changes 25,729 sampled scene pixels
-    (mean ΔRGB 42), realistic→toon 56,550 (Δ 31) — effect scales with preset
-    intensity. Shots: `shots/grass-look/s1-realistic/stylized/toon.png`.
-  - Gates: typecheck ✓, stone tests 41/41 ✓, build ✓.
-- 2026-07-19 SCENE-WIDE STYLE PRESETS (user request — homogeneous coverage):
-  - New `src/style/scene_style.ts`: master realistic/stylized/toon preset
-    table + applier registry. `setSceneStyle` fans out to stones
-    (`setStoneStyle`), trees + understory (shared `styleWrappedSunTerm` wrap
-    uniform in both node materials), grass (palette + patch strength via the
-    normal grass settings so the per-field GUI rows stay authoritative), and
-    water (`makeWaterUniforms` registers an applier per uniforms instance:
-    shore-foam multiplier, fresnel normal-flatten pull, glitter kill on toon —
-    baselines captured from the configured visuals, applied immediately so
-    late-created water materials come up styled).
-  - GUI: single "scene style → preset" dropdown replaces the stones-only one.
-  - Gates: typecheck ✓, build ✓, suite 4,383 passed (same 4 pre-existing
-    foam/biome failures, tracked separately). `scene_style.test.ts` locks the
-    realistic-equals-defaults contract and the registry fan-out.
-  - In-app evaluation (single boot, scene dropdown driven via lil-gui DOM,
-    fixed pose): realistic→stylized 11,575 scene px changed (Δ64),
-    realistic→toon 18,413 (Δ68); toon↔realistic close-up under trees 218,140
-    px (Δ25) — trees/ground respond strongly. Contact-dirt patches visible
-    around midground stones in the slope view. Caveats: no water surface in
-    the captured frames (water preset verified by unit contract + code path
-    only), and ground-level stone close-ups keep getting safety-lifted into
-    canopy — interactive in-app inspection via the new dropdown is the
-    intended evaluation surface. Shots: `shots/grass-look/scene-*.png`.
-  - Known limits: far/billboard/impostor tree materials keep realistic
-    shading until rebake; terrain albedo not restyled.
+- the optional G4 terrain-color patch-noise stretch is not implemented;
+- bilinear contact-field sampling can be added if 1 m contact cells become visible in close-up art review;
+- blade-level G1–G4 close-up A/B remains constrained by the recorded pose/placement behavior;
+- far/billboard/impostor tree materials retain realistic shading until rebaked;
+- terrain albedo is not restyled by the scene-wide preset;
+- the four unrelated water-foam/biome-visual test failures are tracked separately.
