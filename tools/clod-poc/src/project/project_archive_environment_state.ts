@@ -1,3 +1,4 @@
+import { WEATHER_MODE_OPTIONS } from "../app/clod_constants.js";
 import { WATER_DEBUG_MODES } from "../water/waterConfig.js";
 import type {
   ProjectWaterArchiveState,
@@ -49,7 +50,7 @@ export function validateProjectWaterArchiveState(value: unknown): ProjectWaterAr
 export function validateProjectWeatherArchiveState(value: unknown): ProjectWeatherArchiveState {
   const raw = record(value, "weather");
   const weatherMode = raw.weatherMode;
-  if (typeof weatherMode !== "string" || !["off", "rain", "snow", "sandstorm"].includes(weatherMode)) {
+  if (typeof weatherMode !== "string" || !WEATHER_MODE_OPTIONS.includes(weatherMode as ProjectWeatherArchiveState["weatherMode"])) {
     throw new Error("project.json weather.weatherMode is invalid");
   }
   return {
