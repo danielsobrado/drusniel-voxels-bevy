@@ -30,12 +30,13 @@ describe("water foam renderer matrix wiring", () => {
     expect(LEG_SOURCE).toContain("assertWaterFoamAcceptancePosesMatch(canonical, poses)");
   });
 
-  it("rejects stale reports and validates actual runtime identity", () => {
+  it("rejects stale reports, malformed roots, and runtime identity drift", () => {
     const remove = LEG_SOURCE.indexOf("rmSync(reportPath, { force: true })");
     const spawn = LEG_SOURCE.indexOf("spawnSync(process.execPath");
 
     expect(remove).toBeGreaterThan(0);
     expect(spawn).toBeGreaterThan(remove);
+    expect(LEG_SOURCE).toContain("foam acceptance report root must be an object");
     expect(LEG_SOURCE).toContain("report.renderer?.requested !== options.renderer");
     expect(LEG_SOURCE).toContain("report.renderer?.actual !== options.renderer");
     expect(LEG_SOURCE).toContain("report.quality !== options.quality");
@@ -56,11 +57,13 @@ describe("water foam renderer matrix wiring", () => {
     expect(MATRIX_SOURCE).toContain("Object.values(rendererParity).every((result) => result.passed)");
   });
 
-  it("writes the combined report before failing the process", () => {
+  it("clears and rewrites the combined report before failing", () => {
+    const remove = MATRIX_SOURCE.indexOf("rmSync(reportPath, { force: true })");
     const write = MATRIX_SOURCE.indexOf("writeFileSync(reportPath");
     const failure = MATRIX_SOURCE.indexOf("if (!passed) {");
 
-    expect(write).toBeGreaterThan(0);
+    expect(remove).toBeGreaterThan(0);
+    expect(write).toBeGreaterThan(remove);
     expect(failure).toBeGreaterThan(write);
     expect(MATRIX_SOURCE).toContain('join(outRoot, "renderer-matrix-report.json")');
   });
