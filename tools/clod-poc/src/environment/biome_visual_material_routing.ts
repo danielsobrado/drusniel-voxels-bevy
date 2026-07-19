@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {
+  clamp,
   float,
   max,
   mix,
@@ -19,6 +20,7 @@ import { readActiveBiomeVisualState } from "./biome_visual_state_runtime.js";
 type TslNode = any;
 type BiomeMaterialDomain = "terrain" | "grass" | "tree" | "understory";
 
+const nodeClamp = clamp as (...args: TslNode[]) => TslNode;
 const nodeMix = mix as (...args: TslNode[]) => TslNode;
 const nodeFloat = float as (...args: TslNode[]) => TslNode;
 const nodeMax = max as (...args: TslNode[]) => TslNode;
@@ -199,19 +201,34 @@ export function resolveGrassSeasonalColor(
   return multiplyColor(next, mixColor([1, 1, 1], [1.05, 1.09, 1.06], state.dew * 0.16));
 }
 
+export function injectBiomeVisualCustomFoliageShader(
+  fragmentShader: string,
+  includeFlowers: boolean,
+): string | null {
+  if (!fragmentShader.includes("gl_FragColor")) return null;
+  const tinted = fragmentShader.replace(
+    /(\bgl_FragColor\s*=\s*[^;]+;)/g,
+    "$1\n  gl_FragColor.rgb = biomeVisualFoliageColor(gl_FragColor.rgb);",
+  );
+  if (tinted === fragmentShader) return null;
+  return prependShaderPreamble(
+    tinted,
+    `${classicUniformDeclarations()}\n${classicFoliageFunction(includeFlowers)}`,
+  );
+}
+
 function createMaterialBinding(
   material: THREE.Material,
   domain: BiomeMaterialDomain,
 ): BiomeMaterialBinding | null {
   const nodeBinding = createNodeMaterialBinding(material, domain);
   if (nodeBinding) return nodeBinding;
-  if (domain === "terrain" && material instanceof THREE.ShaderMaterial) {
-    return createClassicTerrainBinding(material);
+  if (material instanceof THREE.ShaderMaterial) {
+    if (domain === "terrain") return createClassicTerrainBinding(material);
+    if (domain === "grass") return createClassicGrassBinding(material);
+    return createCustomShaderFoliageBinding(material, domain);
   }
-  if (domain === "grass" && material instanceof THREE.ShaderMaterial) {
-    return createClassicGrassBinding(material);
-  }
-  return createClassicFoliageBinding(material, domain);
+  return createBuiltInFoliageBinding(material, domain);
 }
 
 function createNodeMaterialBinding(
@@ -238,7 +255,7 @@ function terrainNodeColor(baseColor: TslNode, uniforms: BiomeNodeUniforms): TslN
   color = nodeMix(color, color.mul(nodeVec3(1.08, 0.78, 0.48)), uniforms.autumn.mul(0.28).mul(uniforms.enabled));
   color = nodeMix(color, color.mul(nodeVec3(0.82, 0.88, 0.86)), uniforms.dew.mul(0.12).mul(uniforms.enabled));
   color = nodeMix(color, nodeVec3(0.82, 0.9, 1), uniforms.frost.mul(0.18).mul(uniforms.enabled));
-  const upness = nodeSmoothstep(0.35, 0.72, normalWorld.y);
+  const upness = nodeSmoothstep(0.35, 0.72, nodeClamp(normalWorld.y, 0, 1));
   const snow = nodeSmoothstep(
     uniforms.snowlineM.sub(TERRAIN_SNOW_FADE_M),
     uniforms.snowlineM.add(TERRAIN_SNOW_FADE_M),
@@ -314,7 +331,24 @@ function createClassicGrassBinding(material: THREE.ShaderMaterial): BiomeMateria
   return { update: (state) => updateClassicUniforms(uniforms, state) };
 }
 
-function createClassicFoliageBinding(
+function createCustomShaderFoliageBinding(
+  material: THREE.ShaderMaterial,
+  domain: BiomeMaterialDomain,
+): BiomeMaterialBinding | null {
+  if (domain !== "tree" && domain !== "understory") return null;
+  const fragmentShader = injectBiomeVisualCustomFoliageShader(
+    material.fragmentShader,
+    domain === "understory",
+  );
+  if (!fragmentShader) return null;
+  const uniforms = createClassicUniforms();
+  Object.assign(material.uniforms, uniforms);
+  material.fragmentShader = fragmentShader;
+  material.needsUpdate = true;
+  return { update: (state) => updateClassicUniforms(uniforms, state) };
+}
+
+function createBuiltInFoliageBinding(
   material: THREE.Material,
   domain: BiomeMaterialDomain,
 ): BiomeMaterialBinding | null {
@@ -329,20 +363,42 @@ function createClassicFoliageBinding(
       .replace("void main() {", `${classicFoliageFunction(domain === "understory")}\nvoid main() {`);
     const anchor = shader.fragmentShader.includes("#include <opaque_fragment>")
       ? "#include <opaque_fragment>"
-      : "#include <output_fragment>";
+      : shader.fragmentShader.includes("#include <output_fragment>")
+        ? "#include <output_fragment>"
+        : null;
+    if (!anchor) return;
     shader.fragmentShader = shader.fragmentShader.replace(
       anchor,
       `diffuseColor.rgb = biomeVisualFoliageColor(diffuseColor.rgb);\n${anchor}`,
     );
   };
-  material.customProgramCacheKey = () => `${previousCacheKey()}|biome-visual-${domain}-v1`;
+  material.customProgramCacheKey = () => `${previousCacheKey()}|biome-visual-${domain}-v2`;
   material.needsUpdate = true;
   return { update: (state) => updateClassicUniforms(uniforms, state) };
 }
 
 function injectClassicDeclarations(shader: string): string {
-  const anchor = shader.includes("precision highp float;") ? "precision highp float;" : "#include <common>";
-  return shader.replace(anchor, `${anchor}\n${classicUniformDeclarations()}`);
+  if (shader.includes("precision highp float;")) {
+    return shader.replace(
+      "precision highp float;",
+      `precision highp float;\n${classicUniformDeclarations()}`,
+    );
+  }
+  if (shader.includes("#include <common>")) {
+    return shader.replace(
+      "#include <common>",
+      `#include <common>\n${classicUniformDeclarations()}`,
+    );
+  }
+  return prependShaderPreamble(shader, classicUniformDeclarations());
+}
+
+function prependShaderPreamble(shader: string, preamble: string): string {
+  if (!shader.startsWith("#version")) return `${preamble}\n${shader}`;
+  const lineEnd = shader.indexOf("\n");
+  return lineEnd < 0
+    ? `${shader}\n${preamble}`
+    : `${shader.slice(0, lineEnd + 1)}${preamble}\n${shader.slice(lineEnd + 1)}`;
 }
 
 function classicUniformDeclarations(): string {
