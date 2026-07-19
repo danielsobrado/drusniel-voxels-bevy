@@ -167,27 +167,20 @@ function sanitizeBiomeVisualStateOverride(
   const next: BiomeVisualStateOverride = {};
   if (typeof override.enabled === "boolean") next.enabled = override.enabled;
   if (override.seasonT !== undefined) next.seasonT = normalizeCycle(override.seasonT);
-  assignFraction(next, "green", override.green);
-  assignFraction(next, "autumn", override.autumn);
-  assignFraction(next, "bloom", override.bloom);
-  assignFraction(next, "glacialMurkiness", override.glacialMurkiness);
-  assignFraction(next, "morningMist", override.morningMist);
-  assignFraction(next, "pollenAmount", override.pollenAmount);
-  assignFraction(next, "frostAmount", override.frostAmount);
-  assignFraction(next, "wetness", override.wetness);
+  if (override.green !== undefined) next.green = clampFraction(override.green);
+  if (override.autumn !== undefined) next.autumn = clampFraction(override.autumn);
+  if (override.bloom !== undefined) next.bloom = clampFraction(override.bloom);
+  if (override.glacialMurkiness !== undefined) {
+    next.glacialMurkiness = clampFraction(override.glacialMurkiness);
+  }
+  if (override.morningMist !== undefined) next.morningMist = clampFraction(override.morningMist);
+  if (override.pollenAmount !== undefined) next.pollenAmount = clampFraction(override.pollenAmount);
+  if (override.frostAmount !== undefined) next.frostAmount = clampFraction(override.frostAmount);
+  if (override.wetness !== undefined) next.wetness = clampFraction(override.wetness);
   if (override.snowlineM !== undefined && Number.isFinite(override.snowlineM)) {
     next.snowlineM = Math.max(0, override.snowlineM);
   }
   return Object.freeze(next);
-}
-
-function assignFraction<K extends keyof BiomeVisualStateOverride>(
-  target: BiomeVisualStateOverride,
-  key: K,
-  value: BiomeVisualStateOverride[K] | undefined,
-): void {
-  if (typeof value !== "number") return;
-  target[key] = clampFraction(value) as BiomeVisualStateOverride[K];
 }
 
 function invalidateOverrideCache(): void {
