@@ -2,6 +2,7 @@ import type { ClodAppState } from "../../app/clod_app_state.js";
 import GUI from "lil-gui";
 import { createClodGui, type ClodGuiDeps } from "./clod_gui.js";
 import { createEnvironmentGui, type EnvironmentGuiDeps } from "./environment_gui.js";
+import { createEnvironmentQueryGui, type EnvironmentQueryGuiDeps } from "./environment_query_gui.js";
 import { createWeatherGui, type WeatherGuiDeps } from "./weather_gui.js";
 import { createVegetationGui, type VegetationGuiDeps, type VegetationGuiStatControllers } from "./vegetation_gui.js";
 import { createShadowProxyGui } from "./shadow_proxy_gui.js";
@@ -15,6 +16,7 @@ import type { GuiController } from "./gui_controller.js";
 export interface ClodPocGuiDeps {
   clod: ClodGuiDeps;
   environment: EnvironmentGuiDeps;
+  environmentQuery?: EnvironmentQueryGuiDeps;
   weather: WeatherGuiDeps;
   vegetation: VegetationGuiDeps;
   water: WaterGuiDeps;
@@ -55,6 +57,7 @@ export function createClodPocGui(
     ? createClodShadowGui(gui, state, deps.clodShadow).statsController
     : null;
   createEnvironmentGui(gui, state, deps.environment);
+  if (deps.environmentQuery) createEnvironmentQueryGui(gui, deps.environmentQuery);
   const { weatherStatsController } = createWeatherGui(gui, state, deps.weather);
   const vegetation = createVegetationGui(gui, state, deps.vegetation);
   createWaterGui(gui, deps.water);

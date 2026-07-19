@@ -3,7 +3,7 @@
 > Updated: 2026-07-19  
 > Target: `tools/clod-poc` on `main`  
 > Execution plan: `docs/plans/clod-poc-glacial-valley-effects-performance-execution-plan-2026-07-18.md`  
-> Status: **IN PROGRESS — shared query foundations landed; water optics and production integration pending**
+> Status: **IN PROGRESS — production EnvironmentQuery is installed; consumer migration and cumulative acceptance remain**
 
 ## Purpose
 
@@ -52,53 +52,50 @@ The estimate separates code presence from proof. Several merged slices have focu
 | #186 | Sunbeam motes with live controls | `acceptance_pending` |
 | #187 | Live Glacial Valley completion status | `implemented` |
 | #188 | Batched environmental-mask queries | `implemented`, runtime/perf proof pending |
-| #189 | Live sun-visibility EnvironmentQuery adapter | `implemented`, production composition pending |
-| #192 | Live terrain EnvironmentQuery adapter | `implemented`, production composition pending |
+| #189 | Live sun-visibility EnvironmentQuery adapter | `implemented` |
+| #192 | Live terrain EnvironmentQuery adapter | `implemented` |
+| #194 | GPU streaming controls and explicit CPU-fallback errors | `implemented` |
+| #196 | Physical glacial-water scatter and configurable glitter | `acceptance_pending` |
+| #197 | Status refresh after shared foundations | `implemented` |
+| #199 | Production EnvironmentQuery composition root | `implemented`, consumer migration pending |
 
 ## Open pull requests
 
-### PR #196 — Physical glacial water scatter and glitter
+### PR #201 — EnvironmentQuery ownership probe
 
 Status: `open_pr`
 
 Scope:
 
-- per-body suspended-scatter colour, extinction, strength, and ambient response;
-- path-thickness scattering using `1 - exp(-opticalThickness * extinction)`;
-- YAML-owned tight and broad glitter lobes with low-sun gain;
-- shared TSL optics helper for WebGPU high and performance tiers;
-- equivalent WebGL fallback implementation;
-- `suspendedScatter` debug mode;
-- deterministic scatter capture;
-- focused config, clone, body-preset, rock-flour, glitter, and acceptance tests.
+- click-driven lil-gui probe using the active production query from PR #199;
+- world-coordinate and current-camera sampling;
+- one normalized sample hint passed unchanged to every field;
+- source, validity, revision, and effective cell-size readouts;
+- compact terrain, material, water, river, gravel-bar, and sun-visibility values;
+- no URL-only switch, reload, private composition, polling, readback, or frame-loop work;
+- focused pure-probe and GUI interaction tests.
 
 Required before merge:
 
 - typecheck;
-- focused tests;
+- focused probe and GUI tests;
 - production build;
-- WebGPU high and performance material compile;
-- WebGL fallback smoke;
-- clear-water feature-off visual parity;
-- shallow glacial river, deep lake, and low-sun captures;
-- `suspendedScatter` debug capture;
-- zero uncaptured GPU errors;
-- suspended-scatter render delta `<= 0.20 ms p95`;
-- existing W4 water budget remains green.
-
-Do not mark Workstream 4 complete when #196 merges. The far-summary-assisted middle reflection tier and cumulative acceptance still remain.
+- headed smoke confirming the folder samples the active runtime after startup;
+- confirm edited terrain changes the reported terrain revision;
+- confirm sun-atlas updates change visibility revision without rebuilding hydrology;
+- confirm a coarse hint is reported unchanged and causes no fine hydrology tile spike.
 
 ## Workstream status
 
 | Workstream | Status | Current state | Remaining completion requirement |
 |---|---|---|---|
 | GV-CLOD-00 Baseline/status | `partial` | Consolidated plan and live status owner are on `main`. | Pin the Glacial Valley source revision and record canonical before/after poses and baseline metrics. |
-| GV-CLOD-01 EnvironmentQuery | `partial` | Hydrology, live terrain, and live sun-atlas adapters exist. Scalar/batch contracts, diagnostics, hint propagation, and batched mask consumption exist. | Add and install one production composition root; route river dressing and CPU stone fallback; expose source/validity/revision debug. |
-| GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted cache/worker, GPU atlas, terrain, fog, and god-ray consumers exist. CPU EnvironmentQuery sampling now exists. | Profile the builder, add remaining consumers, integrate large-prop overlay, and add GPU production only if measurements justify it. |
+| GV-CLOD-01 EnvironmentQuery | `partial` | Hydrology, live terrain, and live sun-atlas decorators are composed in one production runtime on `main`. PR #201 adds live owner/validity/revision probes. | Route ambience masks, river dressing, and CPU stone fallback through the shared query; add runtime distribution counters and acceptance evidence. |
+| GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted cache/worker, GPU atlas, terrain, fog, god-ray consumers, and CPU EnvironmentQuery sampling exist. | Profile the builder, add remaining consumers, integrate large-prop overlay, and add GPU production only if measurements justify it. |
 | GV-CLOD-03 Gravel bars/cobbles | `acceptance_pending` | Visual bar mask, GPU packing, gravel-bar stones, and underwater cobbles exist. | Integrate safe bed elevation, produce a real braided reach, add rejection counters, and prove continuity/non-floating/performance gates. |
-| GV-CLOD-04 Glacial water | `open_pr` | Murkiness, body optics, reflection step tiers, GUI, and capture tooling are on `main`; PR #196 adds physical scattering and config-driven glitter. | Validate #196, implement the far-summary middle reflection approximation, and attach measured clear/glacial A/B evidence. |
+| GV-CLOD-04 Glacial water | `acceptance_pending` | Murkiness, body optics, physical suspended scattering, configurable glitter, reflection step tiers, GUI, and capture tooling are on `main`. | Validate clear/glacial A/B and budgets, implement the far-summary middle reflection approximation, and attach measured evidence. |
 | GV-CLOD-05 Prop occlusion overlay | `pending` | No shared large-prop height/occupancy overlay is on `main`. | Add dirty-region, stale-safe overlay and integrate it with sun visibility, water reflection, and mist clipping. |
-| GV-CLOD-06 Environmental masks | `partial` | Eight deterministic mask formulas and one-batch query evaluation are on `main`. | Install the composed production query so normal/visibility are valid everywhere; add debug overlays, cursor probes, and runtime distribution counters. |
+| GV-CLOD-06 Environmental masks | `partial` | Eight deterministic mask formulas, batched evaluation, and a production composed query are on `main`. | Route normal gameplay mask consumers through the shared query; add mask debug overlays, cursor probes, distribution counters, and performance proof. |
 | GV-CLOD-07 Ambient effects | `partial` | River mist and sunbeam motes are on `main`. | Add rapid droplets, calm-water rise rings, dew/frost accents, quality policies, and cumulative ambience performance evidence. |
 | GV-CLOD-08 Ground debris | `pending` | No grouped GPU debris ring found. | Implement one toroidal compute/indirect system for pebbles, twigs, bark, litter, and gravel; prove no walking seam. |
 | GV-CLOD-09 Biome visual state | `partial` | Shared season, wetness, glacial murkiness, morning mist, pollen, and frost state exist; water, mist, and motes consume parts of it. | Route terrain, grass, understory, trees, dew/frost, and bloom; add authoring controls and seasonal acceptance. |
@@ -106,24 +103,22 @@ Do not mark Workstream 4 complete when #196 merges. The far-summary-assisted mid
 
 ## P0 — Production EnvironmentQuery composition
 
-This is the next shared architecture PR after PR #196 is validated or while it remains independently reviewable.
-
 - [x] Hydrology authority adapter.
 - [x] Live terrain height/normal/material adapter.
 - [x] Live sun-visibility atlas adapter.
 - [x] Allocation-reusable batch buffers and field masks.
 - [x] Batched environmental-mask consumption.
-- [ ] Create one composed query in the application composition root.
-- [ ] Order ownership as hydrology base -> terrain decorator -> sun-visibility decorator.
-- [ ] Preserve real sample-size hints through every layer.
-- [ ] Expose the composed query through runtime state rather than creating private instances.
+- [x] Create one composed query in the application composition root.
+- [x] Order ownership as hydrology base -> terrain decorator -> sun-visibility decorator.
+- [x] Preserve real sample-size hints through every layer.
+- [x] Expose the composed query through runtime state rather than creating private instances.
 - [ ] Route ambience-mask production through the composed query.
 - [ ] Route river dressing and CPU stone fallback through the composed query.
-- [ ] Add source, validity, revision, and cell-size debug probes.
-- [ ] Add integration tests proving all requested fields come from the correct owners.
-- [ ] Add an edit test proving terrain revision invalidates scalar terrain reuse.
-- [ ] Add a sun-atlas update test proving visibility revision changes without rebuilding hydrology.
-- [ ] Prove far hints do not trigger fine hydrology tile construction.
+- [x] Add source, validity, revision, and cell-size debug probes in PR #201.
+- [x] Add integration tests proving requested fields come from the correct owners.
+- [x] Add an edit test proving terrain revision invalidates scalar terrain reuse.
+- [x] Add a sun-atlas update test proving visibility revision changes without rebuilding hydrology.
+- [ ] Prove far hints do not trigger fine hydrology tile construction in headed/runtime evidence.
 
 Exit gate:
 
@@ -154,8 +149,6 @@ Exit gate:
 - river-detail cost remains inside the plan budget.
 
 ## P2 — Finish water reflection policy
-
-After PR #196:
 
 - [ ] Keep current SSR for near water.
 - [ ] Keep reduced-step SSR for current middle clipmap levels as a fallback policy.
@@ -263,9 +256,9 @@ Exit gate:
 
 ## Ordered remaining PR sequence
 
-1. PR #196 — physical glacial water scatter and glitter — open, validation required.
-2. `feat(clod-poc): install composed environment query`.
-3. `debug(clod-poc): visualize environment query sources and validity`.
+1. PR #201 — EnvironmentQuery owner/validity probe — open, validation required.
+2. `feat(clod-poc): route ambience masks through production EnvironmentQuery`.
+3. `feat(clod-poc): route river dressing and CPU stone fallback through production EnvironmentQuery`.
 4. `feat(clod-poc): carve safe gravel bars and braided reaches`.
 5. `test(clod-poc): accept braided rivers and underwater cobbles`.
 6. `feat(clod-poc): add far-summary water reflection tier`.
@@ -287,7 +280,8 @@ Split a PR further whenever it crosses multiple authorities or cannot be safely 
 - Do not merge draft PRs without their stated validation.
 - Do not label unit-tested plumbing as visually accepted.
 - Do not weaken continuity, error, or performance gates.
-- YAML remains production authority; URL flags are temporary overrides.
+- YAML remains production authority; URL flags are temporary overrides and must not be the only live control path.
+- Actual GPU-to-CPU failovers must emit a deduplicated `console.error`; intentional CPU modes remain quiet.
 - Do not introduce normal-gameplay GPU readbacks.
 - Do not write water, stones, debris, or prop occlusion into CLOD page authority.
 - Do not default-enable a transparent effect in its first rendering commit without headed evidence.
