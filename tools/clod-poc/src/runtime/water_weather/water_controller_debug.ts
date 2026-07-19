@@ -4,6 +4,7 @@ import type { WaterField } from "../../water/index.js";
 import type { WaterClipmap } from "../../water/index.js";
 import { getWaterFoamRuntimeDiagnostics } from "../../water/water_foam_diagnostics.js";
 import type { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
+import { setSunLightGpuAtlasDebugOverride } from "../../terrain/sun_visibility/sun_light_gpu_atlas_nodes.js";
 import type { WaterDebugPoseHooks, WaterControllerDeps } from "./water_controller_types.js";
 
 export function installWaterDebugApi(
@@ -17,6 +18,7 @@ export function installWaterDebugApi(
 ): void {
   const enabled = deps.devMode || deps.searchParams.get("waterDebug") === "1" || deps.searchParams.get("debug") === "1";
   if (!enabled) return;
+  setSunLightGpuAtlasDebugOverride(null);
 
   const sampleForDebug = (x: number, z: number) => {
     const s = field.sample(x, z);
@@ -84,6 +86,12 @@ export function installWaterDebugApi(
       yaw,
     };
   };
+  const setWaterFoamSunVisibilityOverride = (value?: number | null) => {
+    if (value === undefined || value === null) return setSunLightGpuAtlasDebugOverride(null);
+    const visibility = Number(value);
+    if (!Number.isFinite(visibility)) throw new Error("foam sun visibility override must be finite or null");
+    return setSunLightGpuAtlasDebugOverride(visibility);
+  };
   const waterDebugInfo = () => {
     const uiState = deps.getUiState();
     return {
@@ -122,6 +130,7 @@ export function installWaterDebugApi(
     setWaterDebugMode,
     setShoreSurfBand,
     setCameraPose,
+    setWaterFoamSunVisibilityOverride,
     waterDebugInfo,
   });
 }
