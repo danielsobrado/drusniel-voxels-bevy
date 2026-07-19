@@ -18,11 +18,14 @@ const CONFIG: WaterRockFlourConfig = {
   riverColor: [0.3, 0.5, 0.7],
   shallowBlend: 0.8,
   deepBlend: 0.4,
+  scatterExtinction: 0.6,
+  scatterStrength: 0.9,
+  scatterAmbient: 0.7,
 };
 
 const ENABLED_STATE = { enabled: true, glacialMurkiness: 0.5 } as const;
 
-describe("rock flour water colour", () => {
+describe("rock flour water optics", () => {
   it("preserves exact visual identity while disabled", () => {
     const disabled = { ...CONFIG, enabled: false };
 
@@ -41,7 +44,7 @@ describe("rock flour water colour", () => {
     )).toBe(DEFAULT_WATER_VISUAL.bodies);
   });
 
-  it("tints lake and river colours independently while preserving optical coefficients", () => {
+  it("tints lake and river and scales suspended scatter independently", () => {
     const base = DEFAULT_WATER_VISUAL.bodies;
     const resolved = resolveRockFlourWaterBodyPresets(base, CONFIG, ENABLED_STATE);
 
@@ -59,10 +62,32 @@ describe("rock flour water colour", () => {
     expect(resolved.lake.deepColor[0]).toBeCloseTo(0.04, 6);
     expect(resolved.lake.deepColor[1]).toBeCloseTo(0.1, 6);
     expect(resolved.lake.deepColor[2]).toBeCloseTo(0.216, 6);
+    expect(resolved.lake.scatterColor).toEqual([0.1, 0.2, 0.3]);
+    expect(resolved.lake.scatterExtinction).toBeCloseTo(0.3, 6);
+    expect(resolved.lake.scatterStrength).toBeCloseTo(0.45, 6);
+    expect(resolved.lake.scatterAmbient).toBeCloseTo(0.35, 6);
 
     expect(resolved.river.shallowColor[0]).toBeCloseTo(0.06, 6);
     expect(resolved.river.shallowColor[1]).toBeCloseTo(0.356, 6);
     expect(resolved.river.shallowColor[2]).toBeCloseTo(0.58, 6);
+    expect(resolved.river.scatterColor).toEqual([0.075, 0.125, 0.175]);
+    expect(resolved.river.scatterExtinction).toBeCloseTo(0.15, 6);
+    expect(resolved.river.scatterStrength).toBeCloseTo(0.225, 6);
+    expect(resolved.river.scatterAmbient).toBeCloseTo(0.175, 6);
+  });
+
+  it("activates scattering even when colour blend amounts are zero", () => {
+    const base = DEFAULT_WATER_VISUAL.bodies;
+    const resolved = resolveRockFlourWaterBodyPresets(base, {
+      ...CONFIG,
+      shallowBlend: 0,
+      deepBlend: 0,
+    }, { enabled: true, glacialMurkiness: 1 });
+
+    expect(resolved.lake.shallowColor).toEqual(base.lake.shallowColor);
+    expect(resolved.lake.deepColor).toEqual(base.lake.deepColor);
+    expect(resolved.lake.scatterStrength).toBe(0.9);
+    expect(resolved.lake).not.toBe(base.lake);
   });
 
   it("clamps invalid colours, strengths, and blend amounts", () => {
@@ -75,10 +100,16 @@ describe("rock flour water colour", () => {
       riverColor: [1, 1, 1],
       shallowBlend: 3,
       deepBlend: -2,
+      scatterExtinction: -4,
+      scatterStrength: Number.NaN,
+      scatterAmbient: -1,
     }, { enabled: true, glacialMurkiness: 2 });
 
     expect(resolved.lake.shallowColor).toEqual([0, base.lake.shallowColor[1], 1]);
     expect(resolved.lake.deepColor).toEqual(base.lake.deepColor);
+    expect(resolved.lake.scatterExtinction).toBe(0);
+    expect(resolved.lake.scatterStrength).toBe(0);
+    expect(resolved.lake.scatterAmbient).toBe(0);
     expect(resolved.river).toBe(base.river);
   });
 
@@ -101,6 +132,9 @@ describe("rock flour water colour", () => {
       "      river_color: [0.2, 0.5, 0.4]",
       "      shallow_blend: 0.6",
       "      deep_blend: 0.25",
+      "      scatter_extinction: 0.5",
+      "      scatter_strength: 0.8",
+      "      scatter_ambient: 0.65",
     ].join("\n"), () => {});
 
     expect(parsed.visual.rockFlour).toEqual({
@@ -111,6 +145,9 @@ describe("rock flour water colour", () => {
       riverColor: [0.2, 0.5, 0.4],
       shallowBlend: 0.6,
       deepBlend: 0.25,
+      scatterExtinction: 0.5,
+      scatterStrength: 0.8,
+      scatterAmbient: 0.65,
     });
 
     const cloned = cloneWaterConfig(parsed);
