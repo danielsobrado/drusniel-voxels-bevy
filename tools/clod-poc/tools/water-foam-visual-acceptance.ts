@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
 import {
@@ -20,6 +20,7 @@ import {
   getWaterFoamAcceptanceProfile,
   parseWaterFoamAcceptanceQuality,
 } from "./water-foam-acceptance-profile.js";
+import { extractWaterFoamAcceptancePoses } from "./water-foam-pose-parity.js";
 import {
   deriveWaterPixelMask,
   measureFoamImage,
@@ -56,6 +57,12 @@ async function main(): Promise<void> {
   const quality = parseWaterFoamAcceptanceQuality(stringArg(args, "quality", "high"));
   const profile = getWaterFoamAcceptanceProfile(quality);
   const sourceUrl = typeof args.url === "string" ? args.url : undefined;
+  const poseReportPath = typeof args["pose-report"] === "string"
+    ? resolveOutputPath(args["pose-report"])
+    : null;
+  const fixedPoses = poseReportPath
+    ? extractWaterFoamAcceptancePoses(JSON.parse(readFileSync(poseReportPath, "utf8")))
+    : null;
   const defaultOut = join("shots/water/foam-acceptance", profile.outputFolder);
   const outRoot = resolveOutputPath(stringArg(args, "out", defaultOut));
   mkdirSync(outRoot, { recursive: true });
@@ -67,9 +74,12 @@ async function main(): Promise<void> {
     const info = await waterDebugInfo(page);
     assertRequiredDebugModes(info.debugModes);
 
-    const rapidPose = await findWaterShotPose(page, "rapid-bed-step", info.worldCells);
-    const smoothPose = await findSmoothRiverPose(page, info.worldCells);
-    const lakePose = await findWaterShotPose(page, "lake-shoreline", info.worldCells);
+    const rapidPose = fixedPoses?.rapid
+      ?? await findWaterShotPose(page, "rapid-bed-step", info.worldCells);
+    const smoothPose = fixedPoses?.smoothRiver
+      ?? await findSmoothRiverPose(page, info.worldCells);
+    const lakePose = fixedPoses?.lakeShore
+      ?? await findWaterShotPose(page, "lake-shoreline", info.worldCells);
 
     const rapid = await captureScene(page, outRoot, "rapid", rapidPose, true);
     const smoothRiver = await captureScene(page, outRoot, "smooth-river", smoothPose, false);
@@ -99,12 +109,15 @@ async function main(): Promise<void> {
     };
     const acceptance = evaluateFoamVisualAcceptance(metrics);
     report = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       targetUrl,
       seed,
       world,
       quality,
       profileQuery: profile.query,
+      poseSource: poseReportPath
+        ? { kind: "canonical-report", path: poseReportPath }
+        : { kind: "discovered" },
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
       acceptance,
