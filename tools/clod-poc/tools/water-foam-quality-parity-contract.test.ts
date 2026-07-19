@@ -2,21 +2,29 @@ import { describe, expect, it } from "vitest";
 import type { FoamVisualAcceptanceInput } from "./water-foam-visual-contract.js";
 import { evaluateWaterFoamQualityParity } from "./water-foam-quality-parity-contract.js";
 
-function fixture(): FoamVisualAcceptanceInput {
+function fixture(
+  overrides: {
+    readonly rapid?: Partial<FoamVisualAcceptanceInput["rapid"]>;
+    readonly rapidTemporal?: Partial<FoamVisualAcceptanceInput["rapidTemporal"]>;
+    readonly rapidLighting?: Partial<FoamVisualAcceptanceInput["rapidLighting"]>;
+  } = {},
+): FoamVisualAcceptanceInput {
   return {
-    rapid: imageMetrics({ activeFraction: 0.12, meanCoverage: 0.06 }),
+    rapid: imageMetrics({ activeFraction: 0.12, meanCoverage: 0.06, ...overrides.rapid }),
     smoothRiver: imageMetrics({ activeFraction: 0.02, meanCoverage: 0.008 }),
     lakeShore: imageMetrics({ activeFraction: 0.08, meanCoverage: 0.03 }),
     rapidTemporal: {
       comparedPixelCount: 10_000,
       meanAbsoluteDelta: 0.02,
       binaryIou: 0.60,
+      ...overrides.rapidTemporal,
     },
     rapidLighting: {
       sampleCount: 1_000,
       meanLuminance: 0.55,
       p95Luminance: 0.82,
       standardDeviation: 0.08,
+      ...overrides.rapidLighting,
     },
   };
 }
@@ -40,11 +48,10 @@ function imageMetrics(
 describe("water foam quality parity contract", () => {
   it("passes a lower-cost tier that preserves the HQ visual structure", () => {
     const high = fixture();
-    const low = fixture();
-    low.rapid.activeFraction = 0.08;
-    low.rapid.meanCoverage = 0.035;
-    low.rapidLighting.meanLuminance = 0.50;
-    low.rapidLighting.standardDeviation = 0.05;
+    const low = fixture({
+      rapid: { activeFraction: 0.08, meanCoverage: 0.035 },
+      rapidLighting: { meanLuminance: 0.50, standardDeviation: 0.05 },
+    });
 
     const result = evaluateWaterFoamQualityParity(high, low);
 
@@ -54,9 +61,7 @@ describe("water foam quality parity contract", () => {
 
   it("rejects performance foam that nearly disappears", () => {
     const high = fixture();
-    const low = fixture();
-    low.rapid.activeFraction = 0.02;
-    low.rapid.meanCoverage = 0.01;
+    const low = fixture({ rapid: { activeFraction: 0.02, meanCoverage: 0.01 } });
 
     const result = evaluateWaterFoamQualityParity(high, low);
 
@@ -67,9 +72,9 @@ describe("water foam quality parity contract", () => {
 
   it("rejects performance-only ribbons and stripes", () => {
     const high = fixture();
-    const low = fixture();
-    low.rapid.largestComponentFraction = 0.80;
-    low.rapid.stripeAnisotropy = 0.50;
+    const low = fixture({
+      rapid: { largestComponentFraction: 0.80, stripeAnisotropy: 0.50 },
+    });
 
     const result = evaluateWaterFoamQualityParity(high, low);
 
@@ -80,10 +85,10 @@ describe("water foam quality parity contract", () => {
 
   it("rejects flat lighting and unrelated temporal behavior", () => {
     const high = fixture();
-    const low = fixture();
-    low.rapidLighting.standardDeviation = 0.01;
-    low.rapidTemporal.meanAbsoluteDelta = 0.08;
-    low.rapidTemporal.binaryIou = 0.20;
+    const low = fixture({
+      rapidLighting: { standardDeviation: 0.01 },
+      rapidTemporal: { meanAbsoluteDelta: 0.08, binaryIou: 0.20 },
+    });
 
     const result = evaluateWaterFoamQualityParity(high, low);
 
