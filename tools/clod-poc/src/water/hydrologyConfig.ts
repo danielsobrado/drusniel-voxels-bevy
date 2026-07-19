@@ -38,6 +38,23 @@ export interface HydrologyRiversConfig {
   lakeSurfaceDropM: number;
 }
 
+export interface HydrologyGravelBarsConfig {
+  enabled: boolean;
+  strength: number;
+  seedSalt: number;
+  longitudinalPeriodM: number;
+  crossPeriodM: number;
+  patternStart: number;
+  patternEnd: number;
+  breakupStrength: number;
+  minShoreDistanceM: number;
+  maxShoreDistanceM: number;
+  minDepthM: number;
+  maxDepthM: number;
+  minFlowStrength: number;
+  maxFlowStrength: number;
+}
+
 export interface HydrologyWaterSurfaceConfig {
   wetSmoothIterations: number;
   wetToWetCliffSlopeMax: number;
@@ -100,6 +117,7 @@ export interface HydrologyConfig {
   fill: HydrologyFillConfig;
   accumulation: HydrologyAccumulationConfig;
   rivers: HydrologyRiversConfig;
+  gravelBars: HydrologyGravelBarsConfig;
   waterSurface: HydrologyWaterSurfaceConfig;
   moisture: HydrologyMoistureConfig;
   talus: HydrologyTalusConfig;
@@ -141,6 +159,22 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     fallbackTributaries: true,
     flowSpeedMultiplier: 1.0,
     lakeSurfaceDropM: 2.0,
+  },
+  gravelBars: {
+    enabled: true,
+    strength: 1.0,
+    seedSalt: 58193,
+    longitudinalPeriodM: 96,
+    crossPeriodM: 18,
+    patternStart: 0.46,
+    patternEnd: 0.72,
+    breakupStrength: 0.55,
+    minShoreDistanceM: 0.6,
+    maxShoreDistanceM: 9.0,
+    minDepthM: 0.04,
+    maxDepthM: 1.35,
+    minFlowStrength: 0.015,
+    maxFlowStrength: 0.95,
   },
   waterSurface: {
     wetSmoothIterations: 2,
@@ -190,6 +224,7 @@ export function cloneHydrologyConfig(config: HydrologyConfig = DEFAULT_HYDROLOGY
     fill: { ...config.fill },
     accumulation: { ...config.accumulation },
     rivers: { ...config.rivers },
+    gravelBars: { ...config.gravelBars },
     waterSurface: { ...config.waterSurface },
     moisture: { ...config.moisture },
     talus: { ...config.talus },

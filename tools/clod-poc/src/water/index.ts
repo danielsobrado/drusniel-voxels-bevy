@@ -26,6 +26,8 @@ export * from "./water_effects_runtime.js";
 export * from "./water_effects_url.js";
 export * from "./hydrologyConfig.js";
 export * from "./hydrologyGrid.js";
+export * from "./gravel_bar_field.js";
+export * from "./gravel_bar_runtime.js";
 export * from "./depressionFill.js";
 export * from "./flowAccumulation.js";
 export * from "./riverCarve.js";

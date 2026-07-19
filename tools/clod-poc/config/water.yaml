@@ -43,6 +43,23 @@ water:
       fallback_tributaries: true
       flow_speed_multiplier: 1.15
       lake_surface_drop_m: 2.0
+    # Visual-only deterministic bar field. It does not raise terrain or alter river
+    # continuity; consumers use the shared mask for gravel/cobble dressing.
+    gravel_bars:
+      enabled: true
+      strength: 1.0
+      seed_salt: 58193
+      longitudinal_period_m: 96.0
+      cross_period_m: 18.0
+      pattern_start: 0.46
+      pattern_end: 0.72
+      breakup_strength: 0.55
+      min_shore_distance_m: 0.6
+      max_shore_distance_m: 9.0
+      min_depth_m: 0.04
+      max_depth_m: 1.35
+      min_flow_strength: 0.015
+      max_flow_strength: 0.95
     water_surface:
       far_reduce_factor: 8
       far_level_min_cell_size: 12.0

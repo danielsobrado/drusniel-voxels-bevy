@@ -197,6 +197,7 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     onShoreSurfStartDistance: (distance) => deps.waterController.setShoreSurfStartDistance(distance),
     onShoreSurfFullDistance: (distance) => deps.waterController.setShoreSurfFullDistance(distance),
     onShoreSurfMaxDepth: (depth) => deps.waterController.setShoreSurfMaxDepth(depth),
+    onRiverMistEnabled: (enabled) => deps.waterController.setRiverMistEnabled(enabled),
     onRebuildVisual: rebuildVisual,
     getRiverStats: () => riverStats(deps.waterController),
     getCascadeParticleStats: () => deps.waterController.getCascadeParticleStats(),

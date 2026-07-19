@@ -78,6 +78,7 @@ export interface WaterController {
   setShoreSurfStartDistance(distance: number): void;
   setShoreSurfFullDistance(distance: number): void;
   setShoreSurfMaxDepth(depth: number): void;
+  setRiverMistEnabled(enabled: boolean): void;
   updateVisual(visual: ReturnType<WaterController["makeVisual"]>): void;
   updateSunDirection(direction: THREE.Vector3): void;
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void;

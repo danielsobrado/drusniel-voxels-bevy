@@ -8,25 +8,17 @@
 // not yet resident leave their texels at the invalid sentinel (shoreDistance < 0);
 // GPU samples that touch an invalid texel fall back to plain-terrain semantics and
 // self-correct once the worker-built tile arrives.
-//
-// The atlas texel lattice is the tile vertex lattice: texel (ix, iz) sits at world
-// (originX + ix*cellSize, originZ + iz*cellSize) with cellSize = tileSizeM / tileRes and
-// origin snapped to a tile corner, so filling a slot is a row-wise copy, never a resample.
+import { gravelBarBodyPhase } from "./gravel_bar_field.js";
 import type { HydrologyTile } from "./hydrologyTileSource.js";
 
-/** Narrow tile-cache view the atlas consumes (implemented by HydrologySystem). */
 export interface HydrologyTileAtlasSource {
   readonly tileSizeM: number;
   readonly tileRes: number;
-  /** Configured atlas window edge in tiles; 0 disables the streaming atlas. */
   readonly atlasTilesPerSide: number;
-  /** Resident tile lookup; must never build synchronously. */
   peek(tileX: number, tileZ: number): HydrologyTile | null;
-  /** Queue worker builds for tiles the atlas window will need. */
   prefetch(centerX: number, centerZ: number, radiusM: number): void;
 }
 
-/** Texel rectangle (texel units) that changed this update and needs a GPU upload. */
 export interface HydrologyAtlasDirtyRect {
   x: number;
   z: number;
@@ -34,13 +26,15 @@ export interface HydrologyAtlasDirtyRect {
   height: number;
 }
 
-/** Layout A alpha channel below this marks a texel with no tile data yet. */
 export const HYDROLOGY_ATLAS_INVALID_SHORE_DISTANCE = -1;
 
 export interface HydrologyStreamingAtlasOptions {
   tileSizeM: number;
   tileRes: number;
   tilesPerSide: number;
+  /** Vegetation-only option: encodes body phase below the half-unit round threshold.
+   * Water-owned atlases leave this false and preserve raw body-kind values. */
+  encodeBodyPhaseInKindLane?: boolean;
 }
 
 export interface HydrologyStreamingAtlasStats {
@@ -50,19 +44,18 @@ export interface HydrologyStreamingAtlasStats {
   texelUploads: number;
 }
 
+const BODY_PHASE_LANE_SCALE = 0.25;
+
 export class HydrologyStreamingAtlas {
   readonly tileSizeM: number;
   readonly tileRes: number;
   readonly tilesPerSide: number;
-  /** Texels per atlas edge: tilesPerSide*tileRes cells plus the closing vertex row. */
   readonly res: number;
   readonly cellSize: number;
-  /** Layout A texels, row-major (iz*res + ix)*4. */
   readonly data: Float32Array<ArrayBuffer>;
-  /** Layout B texels, same lattice: R = flowX, G = flowZ, B = flowStrength,
-   *  A = bodyKind. Validity is carried by Layout A's shoreDistance channel. */
   readonly dataB: Float32Array<ArrayBuffer>;
 
+  private readonly encodeBodyPhaseInKindLane: boolean;
   private originTileX = Number.NaN;
   private originTileZ = Number.NaN;
   private readonly filled: boolean[];
@@ -76,12 +69,12 @@ export class HydrologyStreamingAtlas {
     this.cellSize = this.tileSizeM / this.tileRes;
     this.data = new Float32Array(this.res * this.res * 4);
     this.dataB = new Float32Array(this.res * this.res * 4);
+    this.encodeBodyPhaseInKindLane = options.encodeBodyPhaseInKindLane === true;
     this.filled = new Array<boolean>(this.tilesPerSide * this.tilesPerSide).fill(false);
     this.stats = { recenters: 0, filledTiles: 0, totalTiles: this.filled.length, texelUploads: 0 };
     this.invalidateAll();
   }
 
-  /** World position of texel (0, 0). */
   get originX(): number {
     return this.originTileX * this.tileSizeM;
   }
@@ -98,12 +91,6 @@ export class HydrologyStreamingAtlas {
     return { ...this.stats, filledTiles: this.filled.filter(Boolean).length };
   }
 
-  /**
-   * Re-anchor the window around (centerX, centerZ) and copy in any resident tiles the
-   * window is still missing. Returns the texel rects that changed (a single full-atlas
-   * rect after a recenter). Cheap when idle: filled slots are skipped, unfilled slots
-   * cost one Map lookup each.
-   */
   update(centerX: number, centerZ: number, source: HydrologyTileAtlasSource): HydrologyAtlasDirtyRect[] {
     const wantedOriginTileX = Math.floor(centerX / this.tileSizeM) - (this.tilesPerSide >> 1);
     const wantedOriginTileZ = Math.floor(centerZ / this.tileSizeM) - (this.tilesPerSide >> 1);
@@ -128,9 +115,7 @@ export class HydrologyStreamingAtlas {
         if (!recentred) dirty.push(rect);
       }
     }
-    if (recentred) {
-      return [{ x: 0, z: 0, width: this.res, height: this.res }];
-    }
+    if (recentred) return [{ x: 0, z: 0, width: this.res, height: this.res }];
     return dirty;
   }
 
@@ -142,8 +127,6 @@ export class HydrologyStreamingAtlas {
     }
   }
 
-  /** Copy one tile's vertex arrays into its slot. Neighbouring slots share edge texels;
-   *  overlapping writes carry identical values because tiles agree on shared edges. */
   private blitTile(tile: HydrologyTile, slotX: number, slotZ: number): HydrologyAtlasDirtyRect {
     const verts = tile.res + 1;
     const baseX = slotX * this.tileRes;
@@ -162,7 +145,9 @@ export class HydrologyStreamingAtlas {
         this.dataB[dst] = tile.flowX[s];
         this.dataB[dst + 1] = tile.flowZ[s];
         this.dataB[dst + 2] = tile.flowStrength[s];
-        this.dataB[dst + 3] = tile.bodyKind[s];
+        this.dataB[dst + 3] = this.encodeBodyPhaseInKindLane
+          ? tile.bodyKind[s] + gravelBarBodyPhase(tile.bodyId[s]) * BODY_PHASE_LANE_SCALE
+          : tile.bodyKind[s];
         dst += 4;
       }
     }

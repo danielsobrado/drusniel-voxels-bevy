@@ -2,6 +2,7 @@ import type GUI from "lil-gui";
 import { type WaterVisualConfig } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
 import { DEFAULT_HYDROLOGY_CONFIG } from "./hydrologyConfig.js";
+import { riverMistInitialEnabled } from "./riverMistRuntime.js";
 import type { WaterDebugState, WaterDebugBindings, WaterDebugController } from "./water_debug_types.js";
 import {
   WATER_MODE_OPTIONS, querySource, queryBool, queryNumber, reloadWithRiverState,
@@ -29,6 +30,7 @@ export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugSta
     riverCarveDepth: queryNumber("riverCarveDepth", riverDefaults.carveDepthM),
     riverFlowSpeed: queryNumber("riverFlowSpeed", riverDefaults.flowSpeedMultiplier),
     riverFoamStrength: queryNumber("riverFoamStrength", visual.foam.riverStrength),
+    riverMistEnabled: riverMistInitialEnabled(),
   };
 }
 
@@ -52,6 +54,7 @@ export function addWaterDebugFolder(gui: GUI, state: WaterDebugState, bindings: 
   rivers.add(state, "riverCarveDepth", 0.5, 18, 0.25).name("carve depth");
   rivers.add(state, "riverFlowSpeed", 0.1, 4, 0.05).name("flow speed");
   rivers.add(state, "riverFoamStrength", 0, 2, 0.01).name("rapids foam");
+  rivers.add(state, "riverMistEnabled").name("river mist").onChange((enabled: boolean) => bindings.onRiverMistEnabled(enabled));
   rivers.add({ apply: () => reloadWithRiverState(state) }, "apply").name("apply + rebuild");
   const riverStats = addRiverStatsFolder(folder, bindings);
   const cascadeStats = addCascadeParticleStatsFolder(folder, bindings);

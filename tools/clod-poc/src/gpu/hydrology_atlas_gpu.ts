@@ -38,6 +38,7 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
     tileSizeM: source.tileSizeM,
     tileRes: source.tileRes,
     tilesPerSide: source.atlasTilesPerSide,
+    encodeBodyPhaseInKindLane: true,
   });
   const textureDescriptor: GPUTextureDescriptor = {
     size: { width: atlas.res, height: atlas.res },
@@ -50,8 +51,6 @@ export function initHydrologyAtlasGpu(device: GPUDevice, source: HydrologyTileAt
     source,
     waterTexture: device.createTexture({ ...textureDescriptor, label: "hydrology streaming atlas layout a" }),
     fieldsTexture: device.createTexture({ ...textureDescriptor, label: "hydrology streaming atlas layout b" }),
-    // Half the window edge covers every tile the tile-snapped window can need before
-    // the next recenter.
     prefetchRadiusM: (source.atlasTilesPerSide / 2) * source.tileSizeM,
     uploads: 0,
     uploadedTexels: 0,
@@ -64,23 +63,20 @@ export function resetHydrologyAtlasGpu(): void {
   state = null;
 }
 
-/** Layout A atlas texture. A 1x1 texture disables the shader path. */
 export function hydrologyAtlasGpuTexture(device: GPUDevice): GPUTexture {
   return atlasTexturesFor(device).waterTexture;
 }
 
-/** Layout B atlas texture: flow XY, flow strength, and raw body kind. */
+/** Vegetation Layout B: flow XY, flow strength, and body kind with a sub-half-unit phase. */
 export function hydrologyAtlasGpuFieldsTexture(device: GPUDevice): GPUTexture {
   return atlasTexturesFor(device).fieldsTexture;
 }
 
-/** Per-dispatch uniform payload: (originX, originZ, cellSize, enabled). */
 export function hydrologyAtlasGpuParams(): [number, number, number, number] {
   if (!state || !state.atlas.initialized) return [0, 0, 0, 0];
   return [state.atlas.originX, state.atlas.originZ, state.atlas.cellSize, 1];
 }
 
-/** Recenter/refill the CPU atlas and upload changed Layout A and Layout B rectangles. */
 export function updateHydrologyAtlasGpu(centerX: number, centerZ: number): void {
   if (!state) return;
   state.source.prefetch(centerX, centerZ, state.prefetchRadiusM);
