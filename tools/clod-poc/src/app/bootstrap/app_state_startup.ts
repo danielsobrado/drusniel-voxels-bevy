@@ -26,6 +26,14 @@ export interface AppStateStartupResult {
   textureLoadOptions: TerrainTextureLoadOptions;
 }
 
+function applyImportedHardwareCompatibility(state: ClodAppState, isWebGpu: boolean): void {
+  if (isWebGpu) {
+    state.normalDivergence = false;
+    return;
+  }
+  if (state.grassShaderMode === "webgpu-ring-v1") state.grassShaderMode = "terrain-patch-v2";
+}
+
 export function runAppStateStartup(input: AppStateStartupInput): AppStateStartupResult {
   const {
     searchParams,
@@ -67,6 +75,8 @@ export function runAppStateStartup(input: AppStateStartupInput): AppStateStartup
     clodRuntime,
     searchParams: stateSearchParams,
     stagedImport,
+    // Suppress the constructor's WebGPU presentation preset while the archive is applied.
+    // Hardware-only compatibility is reconciled explicitly below.
     isWebGpu: importedState ? false : isWebGpu,
     queryPerfMode: importedState ? false : queryPerfMode,
     queryWebGpuSelection,
@@ -93,6 +103,7 @@ export function runAppStateStartup(input: AppStateStartupInput): AppStateStartup
     waterConfig: configs.waterConfig,
     digHoldIntervalMs: clodRuntime.digging.holdIntervalMs,
   });
-  if (!importedState) applyEnvironmentQueryOverrides(state, searchParams);
+  if (importedState) applyImportedHardwareCompatibility(state, isWebGpu);
+  else applyEnvironmentQueryOverrides(state, searchParams);
   return { state, textureLoadOptions };
 }
