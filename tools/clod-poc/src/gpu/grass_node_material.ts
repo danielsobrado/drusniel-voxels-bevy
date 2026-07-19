@@ -30,6 +30,10 @@ import {
 } from "three/tsl";
 import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
 import { DEFAULT_GRASS_SETTINGS } from "../grass.js";
+import {
+  grassContactInteractionNodes,
+  grassContactPatchInfluence,
+} from "../grass/grass_contact_patches.js";
 import type { GrassNodeParams, GrassNodeMaterialHandle } from "./grass_node_material_types.js";
 
 type TslNode = any;
@@ -152,6 +156,12 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const aTier: TslNode = aPacked1.w;
   const uvY: TslNode = uv().y;
   const bend: TslNode = uvY.mul(uvY);
+  const contact = grassContactPatchInfluence(vec2(aOffset.x, aOffset.z));
+  const interaction = grassContactInteractionNodes();
+  const effectiveHeight: TslNode = aHeight.mul(mix(1.0, interaction.minHeightScale, contact.suppress));
+  const flattenedHeight: TslNode = effectiveHeight.mul(
+    float(1).sub(contact.flatten.mul(interaction.flattenStrength).mul(uvY)),
+  );
   const windTime: TslNode = uTime.mul(uWindSpeed);
   // World-space directional wind: the wave phase advances along uWindDir so gusts
   // roll across the field; per-blade phase only jitters, it does not steer.
@@ -163,11 +173,14 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const gustDetail: TslNode = sin(gustTime.mul(0.73).add(aOffset.x.mul(0.19).add(aOffset.z.mul(0.14)))).mul(0.5).add(0.5);
   const gust: TslNode = gustBase.mul(0.6).add(gustDetail.mul(0.4));
   const gustK: TslNode = aTerrainNormal4.w;
-  const windAmp: TslNode = uWindStrength.mul(aHeight).mul(bend).mul(uGustStrength.mul(gust).mul(gustK).add(1.0).sub(uGustStrength));
+  const windAmp: TslNode = uWindStrength.mul(effectiveHeight).mul(bend).mul(uGustStrength.mul(gust).mul(gustK).add(1.0).sub(uGustStrength));
   const windWave: TslNode = sin(wavePhase).add(sin(wavePhase.mul(2.6).add(aPhase)).mul(0.35)).add(0.4);
   const windTurb: TslNode = sin(windTime.mul(1.9).add(aPhase.mul(2.0)).add(acrossWind.mul(0.31))).mul(uWindTurbulence);
-  const windWorldX: TslNode = uWindDir.x.mul(windWave).sub(uWindDir.y.mul(windTurb)).mul(windAmp);
-  const windWorldZ: TslNode = uWindDir.y.mul(windWave).add(uWindDir.x.mul(windTurb)).mul(windAmp);
+  const directionalWindWorldX: TslNode = uWindDir.x.mul(windWave).sub(uWindDir.y.mul(windTurb)).mul(windAmp);
+  const directionalWindWorldZ: TslNode = uWindDir.y.mul(windWave).add(uWindDir.x.mul(windTurb)).mul(windAmp);
+  const splayAmp: TslNode = interaction.splayStrengthM.mul(contact.trample).mul(bend);
+  const windWorldX: TslNode = directionalWindWorldX.add(contact.splay.x.mul(splayAmp));
+  const windWorldZ: TslNode = directionalWindWorldZ.add(contact.splay.y.mul(splayAmp));
   // Counter-rotate into blade-local space so the later per-instance yaw restores
   // the world-space lean direction (all blades lean together).
   const c: TslNode = cos(aRotY);
@@ -187,7 +200,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     const terrainNormal: TslNode = normalize(aTerrainNormal);
     const normalY: TslNode = clamp(terrainNormal.y, 0.0, 1.0);
     localX = pos.x.mul(uBladeWidth).mul(aWidthScale).add(wind.x);
-    localY = pos.y.mul(aHeight);
+    localY = pos.y.mul(flattenedHeight);
     localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
     const mid = mix(uBaseColor, uTipColor, 0.5);
@@ -199,13 +212,20 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     }
   } else {
     localX = pos.x.mul(uBladeWidth).mul(aWidthScale).add(wind.x);
-    localY = pos.y.mul(aHeight);
+    localY = pos.y.mul(flattenedHeight);
     localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
     const mid = mix(uBaseColor, uTipColor, 0.5);
     grassColor = mix(uBaseColor, mid, smoothstep(0.0, 0.62, uvY));
     grassColor = mix(grassColor, uTipColor, smoothstep(0.58, 1.0, uvY));
     grassColor = mix(grassColor, uDryColor, aColorMix.mul(0.48));
+  }
+
+  if (!debugAttributes) {
+    const rootDirt: TslNode = contact.dirt
+      .mul(interaction.dirtTintStrength)
+      .mul(float(1).sub(smoothstep(0.2, 0.78, uvY)));
+    grassColor = mix(grassColor, interaction.dirtColor, rootDirt);
   }
 
   const rotX: TslNode = c.mul(localX).add(s.mul(localZ));

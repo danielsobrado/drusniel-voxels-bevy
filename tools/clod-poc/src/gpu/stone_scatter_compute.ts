@@ -1,6 +1,7 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
+import type { GrassContactSettings } from "../grass/grass_contact_patches.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
 import {
@@ -19,8 +20,8 @@ const CLASS_COUNT = 3;
 const SCATTER_COUNTER_COUNT = 12;
 const MAX_VIEW_GROUPS = 32;
 const COUNTER_TOTAL_COUNT = SCATTER_COUNTER_COUNT + MAX_VIEW_GROUPS;
-// 21 scatter vec4s + view_counts + camera + 6 frustum + 3 class_view + variants + 8 index-count lanes.
-const PARAM_BYTES = 16 * 41;
+// 22 scatter vec4s + view_counts + camera + 6 frustum + 3 class_view + variants + 8 index-count lanes.
+const PARAM_BYTES = 16 * 42;
 const COUNTER_BYTES = SCATTER_COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_GROUP = 5;
 const READBACK_INTERVAL_FRAMES = 30;
@@ -28,7 +29,7 @@ const READBACK_SLOTS = 2;
 const TIMING_LABELS = ["clear", "world", "view", "indirect"] as const;
 
 export const STONE_GPU_RING_MAX_SAFE_GRID = 512;
-export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 7;
+export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 8;
 
 const COUNTER_ACCEPTED_TOTAL = 0;
 const COUNTER_CLASS_LARGE = 1;
@@ -46,7 +47,12 @@ const COUNTER_REJECT_CLASS_BUDGET = 11;
 export type StoneGpuClassIndex = 0 | 1 | 2;
 
 export interface StoneHydrologyData { res: number; worldCells: number; data: Float32Array }
-export interface StoneGpuScatterBuffers { instanceA: GPUBuffer; instanceB: GPUBuffer; indirectArgs: GPUBuffer }
+export interface StoneGpuScatterBuffers {
+  instanceA: GPUBuffer;
+  instanceB: GPUBuffer;
+  indirectArgs: GPUBuffer;
+  contactPatches: GPUBuffer;
+}
 
 /** Static per-rebuild view configuration: group layout, LOD boundaries, draw budgets. */
 export interface StoneGpuViewConfig {
@@ -70,6 +76,7 @@ export interface StoneGpuScatterParams {
   centerZ: number;
   unboundedWorld?: boolean;
   settings: StoneSettings;
+  contactSettings: GrassContactSettings;
 }
 
 export interface StoneGpuViewParams {
@@ -105,6 +112,7 @@ interface CounterReadbackSlot {
 type PipelineName =
   | "clear_counters"
   | "scatter_stones"
+  | "select_contact_patches"
   | "clear_view_counters"
   | "cull_stones"
   | "build_indirect_args";
@@ -213,6 +221,7 @@ export class StoneGpuScatterCompute {
         { binding: 14, resource: { buffer: this.sourceB } },
         { binding: 15, resource: this.hydroFieldsTexture.createView() },
         { binding: 16, resource: hydrologyAtlasGpuFieldsTexture(device).createView() },
+        { binding: 17, resource: { buffer: this.buffers.contactPatches } },
       ],
     });
     this.packStaticViewConfig();
@@ -247,13 +256,15 @@ export class StoneGpuScatterCompute {
         { binding: 12, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         storage(13), storage(14),
         texture(15), texture(16),
+        storage(17),
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `stone scatter ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
-    const [clearCounters, scatterStones, clearViewCounters, cullStones, buildIndirectArgs] = await Promise.all([
+    const [clearCounters, scatterStones, selectContactPatches, clearViewCounters, cullStones, buildIndirectArgs] = await Promise.all([
       makePipeline("clear_counters"),
       makePipeline("scatter_stones"),
+      makePipeline("select_contact_patches"),
       makePipeline("clear_view_counters"),
       makePipeline("cull_stones"),
       makePipeline("build_indirect_args"),
@@ -264,6 +275,7 @@ export class StoneGpuScatterCompute {
       {
         clear_counters: clearCounters,
         scatter_stones: scatterStones,
+        select_contact_patches: selectContactPatches,
         clear_view_counters: clearViewCounters,
         cull_stones: cullStones,
         build_indirect_args: buildIndirectArgs,
@@ -290,7 +302,7 @@ export class StoneGpuScatterCompute {
 
     const encoder = this.device.createCommandEncoder({ label: "stone scatter compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1, "clear");
-    this.dispatchPipeline(encoder, this.pipelines.scatter_stones, Math.ceil((grid * grid) / WORKGROUP_SIZE), "world");
+    this.dispatchWorldPipelines(encoder, Math.ceil((grid * grid) / WORKGROUP_SIZE));
     this.device.queue.submit([encoder.finish()]);
     return true;
   }
@@ -408,40 +420,45 @@ export class StoneGpuScatterCompute {
     this.paramF32[79] = 0;
     const hydroAtlas = hydrologyAtlasGpuParams();
     for (let i = 0; i < 4; i++) this.paramF32[80 + i] = hydroAtlas[i] ?? 0;
+    const contact = params.contactSettings;
+    this.paramF32[84] = Math.max(0, contact.innerRadiusScale);
+    this.paramF32[85] = Math.max(contact.innerRadiusScale, contact.outerRadiusScale);
+    this.paramF32[86] = Math.max(0, contact.maxPatches);
+    this.paramF32[87] = contact.enabled ? 1 : 0;
     // view_counts.z tracks the source stride the cull pass must walk.
-    this.paramU32[86] = this.effectiveMaxInstances;
+    this.paramU32[90] = this.effectiveMaxInstances;
   }
 
   private packViewParams(params: StoneGpuViewParams): void {
-    this.paramU32[86] = this.effectiveMaxInstances;
-    this.paramF32[88] = params.cameraX;
-    this.paramF32[89] = params.cameraY;
-    this.paramF32[90] = params.cameraZ;
-    this.paramF32[91] = 0;
+    this.paramU32[90] = this.effectiveMaxInstances;
+    this.paramF32[92] = params.cameraX;
+    this.paramF32[93] = params.cameraY;
+    this.paramF32[94] = params.cameraZ;
+    this.paramF32[95] = 0;
     const fp = params.frustumPlanes;
-    for (let i = 0; i < 24; i++) this.paramF32[92 + i] = fp[i] ?? 0;
+    for (let i = 0; i < 24; i++) this.paramF32[96 + i] = fp[i] ?? 0;
   }
 
   private packStaticViewConfig(): void {
     const config = this.viewConfig;
-    this.paramU32[84] = Math.max(0, Math.floor(config.groupCap));
-    this.paramU32[85] = Math.max(0, Math.min(MAX_VIEW_GROUPS, Math.floor(config.groupCount)));
-    this.paramU32[86] = 0;
-    this.paramU32[87] = 0;
+    this.paramU32[88] = Math.max(0, Math.floor(config.groupCap));
+    this.paramU32[89] = Math.max(0, Math.min(MAX_VIEW_GROUPS, Math.floor(config.groupCount)));
+    this.paramU32[90] = 0;
+    this.paramU32[91] = 0;
     for (let cls = 0; cls < CLASS_COUNT; cls++) {
       const view = config.classView[cls] ?? [0, 0, 1, 0];
-      const base = 116 + cls * 4;
+      const base = 120 + cls * 4;
       this.paramF32[base] = view[0];
       this.paramF32[base + 1] = view[1];
       this.paramF32[base + 2] = view[2];
       this.paramF32[base + 3] = view[3];
     }
-    this.paramF32[128] = config.classVariants[0];
-    this.paramF32[129] = config.classVariants[1];
-    this.paramF32[130] = config.classVariants[2];
-    this.paramF32[131] = 0;
+    this.paramF32[132] = config.classVariants[0];
+    this.paramF32[133] = config.classVariants[1];
+    this.paramF32[134] = config.classVariants[2];
+    this.paramF32[135] = 0;
     for (let group = 0; group < MAX_VIEW_GROUPS; group++) {
-      this.paramU32[132 + group] = Math.max(0, Math.floor(config.groupIndexCounts[group] ?? 0));
+      this.paramU32[136 + group] = Math.max(0, Math.floor(config.groupIndexCounts[group] ?? 0));
     }
   }
 
@@ -489,6 +506,16 @@ export class StoneGpuScatterCompute {
     this.paramF32[offset + 1] = terrain.large;
     this.paramF32[offset + 2] = terrain.medium;
     this.paramF32[offset + 3] = terrain.small;
+  }
+
+  private dispatchWorldPipelines(encoder: GPUCommandEncoder, scatterWorkgroups: number): void {
+    const pass = encoder.beginComputePass(this.timestamps.passDescriptor("world"));
+    pass.setBindGroup(0, this.bindGroup);
+    pass.setPipeline(this.pipelines.scatter_stones);
+    pass.dispatchWorkgroups(Math.max(1, scatterWorkgroups));
+    pass.setPipeline(this.pipelines.select_contact_patches);
+    pass.dispatchWorkgroups(1);
+    pass.end();
   }
 
   private dispatchPipeline(
