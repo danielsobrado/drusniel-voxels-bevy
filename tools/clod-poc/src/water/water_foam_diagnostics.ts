@@ -1,3 +1,4 @@
+import { webGpuUncapturedErrorCount } from "../diagnostics/webgpu_uncaptured_errors.js";
 import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 import { getWaterFoamDistanceFadeState } from "./water_foam_distance.js";
 import {
@@ -23,6 +24,8 @@ export interface WaterFoamRuntimeDiagnostics {
   readonly shadeCoverageFloor: number;
   readonly rapidEligibility: "speed-times-drop-times-river";
   readonly cpuFieldSamples: number;
+  /** Session-cumulative uncaptured WebGPU errors, including startup and capture work. */
+  readonly webGpuUncapturedErrors: number;
   readonly distanceFade: {
     readonly valid: boolean;
     readonly version: number;
@@ -59,6 +62,7 @@ export function getWaterFoamRuntimeDiagnostics(
     shadeCoverageFloor: WATER_FOAM_SHADE_COVERAGE_FLOOR,
     rapidEligibility: "speed-times-drop-times-river",
     cpuFieldSamples: 0,
+    webGpuUncapturedErrors: webGpuUncapturedErrorCount(),
     distanceFade: {
       valid: distanceFade.valid,
       version: distanceFade.version,
