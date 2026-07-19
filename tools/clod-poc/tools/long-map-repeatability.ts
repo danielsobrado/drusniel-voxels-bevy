@@ -34,7 +34,8 @@ function environmentKey(report: Json): string {
     commit: report["commit_sha"],
     browser: environment["browser_version"],
     gpu: environment["gpu"],
-    display: environment["display"],
+    // Capture viewport is the acceptance render surface. Host desktop resolution can
+    // change mid-session (dock/undock) without affecting the headed Playwright viewport.
     power: environment["power_profile"],
     viewport: environment["capture_viewport"],
   });

@@ -16,6 +16,9 @@ export interface AgentRenderEnvelope {
   dispose(): void;
 }
 
+const AGENT_ROOT_BONE = "agentRoot";
+const AGENT_UPPER_BONE = "agentUpper";
+
 function scatterOffsets(count: number, seed: number, centerX: number, centerZ: number, spreadM: number): Float32Array {
   const rng = mulberry32(seed);
   const offsets = new Float32Array(count * 3);
@@ -43,10 +46,11 @@ function skinnedBoxGeometry(): THREE.BufferGeometry {
   return geometry;
 }
 
-function createSharedWalkClip(skeleton: THREE.Skeleton): THREE.AnimationClip {
+/** Shared clip uses bone *names* so every agent instance can bind the same track. */
+export function createSharedWalkClip(): THREE.AnimationClip {
   const times = [0, 0.5, 1];
   const values = [0, 0.15, 0];
-  const track = new THREE.NumberKeyframeTrack(`${skeleton.bones[1]!.uuid}.position[y]`, times, values);
+  const track = new THREE.NumberKeyframeTrack(`${AGENT_UPPER_BONE}.position[y]`, times, values);
   return new THREE.AnimationClip("agent-walk", 1, [track]);
 }
 
@@ -58,8 +62,10 @@ function createSkinnedAgent(
   sharedClip: THREE.AnimationClip,
 ): { mesh: THREE.SkinnedMesh; mixer: THREE.AnimationMixer } {
   const rootBone = new THREE.Bone();
+  rootBone.name = AGENT_ROOT_BONE;
   rootBone.position.set(0, 0.5, 0);
   const upperBone = new THREE.Bone();
+  upperBone.name = AGENT_UPPER_BONE;
   upperBone.position.set(0, 0.5, 0);
   rootBone.add(upperBone);
   const skeleton = new THREE.Skeleton([rootBone, upperBone]);
@@ -87,13 +93,7 @@ export function createAgentRenderEnvelope(
   if (config.skinned) {
     const geometry = skinnedBoxGeometry();
     const material = new THREE.MeshStandardMaterial({ color: 0x8a6a4a });
-    const templateBone = new THREE.Bone();
-    templateBone.position.set(0, 0.5, 0);
-    const templateUpper = new THREE.Bone();
-    templateUpper.position.set(0, 0.5, 0);
-    templateBone.add(templateUpper);
-    const templateSkeleton = new THREE.Skeleton([templateBone, templateUpper]);
-    const clip = createSharedWalkClip(templateSkeleton);
+    const clip = createSharedWalkClip();
     for (let index = 0; index < config.count; index += 1) {
       const agent = createSkinnedAgent(offsets, index, geometry, material, clip);
       root.add(agent.mesh);

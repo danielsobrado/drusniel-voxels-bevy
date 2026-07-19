@@ -46,7 +46,7 @@ describe("infinite-islands movement route profiles", () => {
       liveBubbleRadius: "200",
       liveClodRootBudget: "16",
       liveClodRootApplyBudget: "4",
-      liveClodRootMaxCached: "512",
+      liveClodRootMaxCached: "1024",
       liveClodRootRadius: "768",
       farClipmapInnerRadius: "768",
       sceneCompileWarm: "1",

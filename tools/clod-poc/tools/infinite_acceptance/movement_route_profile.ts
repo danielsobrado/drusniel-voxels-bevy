@@ -91,7 +91,9 @@ export function resolveMovementRouteProfile(
         liveBubbleRadius: "200",
         liveClodRootBudget: "16",
         liveClodRootApplyBudget: "4",
-        liveClodRootMaxCached: "512",
+        // Dense radius 768 requires >512 resident pages; 512 caused mid-route thrash after
+        // pre-route convergence filled a temporary 1024 ceiling.
+        liveClodRootMaxCached: "1024",
         liveClodRootRadius: "768",
         farClipmapInnerRadius: "768",
         sceneCompileWarm: "1",

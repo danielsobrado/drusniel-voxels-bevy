@@ -156,8 +156,31 @@ async function readMinuteSample(page: Page, minute: number, collectGarbage: () =
   }, { sampleMinute: minute, heapBeforeGc: usedJsHeapBytes });
 }
 
+async function waitQueuesDrained(page: Page, timeoutMs: number): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const drained = await page.evaluate(() => {
+      const counters = window.__drusnielClod?.stats?.counters ?? {};
+      return [
+        "heightfield_tiles_pending",
+        "heightfield_tiles_inflight",
+        "live_bubble_building_pages",
+        "live_clod_stream_safety_pending_pages",
+        "live_clod_stream_safety_inflight_pages",
+        "clodApplyQueueDepth",
+        "clodColliderQueueDepth",
+      ].every((key) => (counters[key] ?? 0) === 0);
+    });
+    if (drained) return true;
+    await page.evaluate(async () => { await window.__drusnielClod?.settle?.(30); });
+  }
+  return false;
+}
+
 async function runWander(page: Page, minutes: number, collectGarbage: () => Promise<void>): Promise<SoakMinuteSample[]> {
-  const samples: SoakMinuteSample[] = [await readMinuteSample(page, 0, collectGarbage)];
+  const samples: SoakMinuteSample[] = [];
+  await waitQueuesDrained(page, 60_000);
+  samples.push(await readMinuteSample(page, 0, collectGarbage));
   for (let minute = 1; minute <= minutes; minute++) {
     for (let second = 0; second < 60; second++) {
       const elapsedMinutes = minute - 1 + second / 60;
@@ -166,9 +189,11 @@ async function runWander(page: Page, minutes: number, collectGarbage: () => Prom
       const [x, z] = routePose(progress);
       await setPoseAndSettle(page, x, z, 60);
     }
+    // Plan gate is "queues return to settled between legs" — sample only after a pause.
+    await waitQueuesDrained(page, 90_000);
     const sample = await readMinuteSample(page, minute, collectGarbage);
     samples.push(sample);
-    console.log(`[continent-soak] minute=${minute} heap=${sample.usedJsHeapBytes ?? "n/a"} vramEstimate=${sample.estimatedVramBytes} frameP95=${sample.frameMsP95.toFixed(2)}ms`);
+    console.log(`[continent-soak] minute=${minute} heap=${sample.usedJsHeapBytes ?? "n/a"} vramEstimate=${sample.estimatedVramBytes} frameP95=${sample.frameMsP95.toFixed(2)}ms queues=${sample.queuesDrained ? "drained" : "busy"}`);
   }
   return samples;
 }
@@ -375,7 +400,8 @@ async function main(): Promise<void> {
       extra: {
         x: String(start[0]), z: String(start[2]), yaw: "1.5708", world: "16", startupWorld: "4",
         clodPerf: "1", perfProbe: "1", perfWarmupFrames: "0", perfSampleFrames: "1320",
-        ownershipOracle: "1", acceptance: "1", liveClodRootBudget: "2", liveClodRootMaxCached: "4",
+        ownershipOracle: "1", acceptance: "1", liveClodRootBudget: "16", liveClodRootApplyBudget: "4",
+        liveClodRootMaxCached: "512", liveClodRootRadius: "384",
         farSummaryLayout: "2", farClipmap: "1", farClipmapMode: "replace",
       },
     });

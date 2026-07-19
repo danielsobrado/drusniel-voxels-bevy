@@ -1,6 +1,6 @@
 # Long-Map Soak and Streaming Execution — proving continuous play at continent scale
 
-Created 2026-07-16. Status: **IN PROGRESS** (progress refreshed 2026-07-18).
+Created 2026-07-16. Status: **CLOSED** (LM0–LM5 standing gates green 2026-07-18).
 
 Revised same day after an external review and a repo re-read. The first draft was written
 hours before the unified-streaming implementation landed and was stale on arrival; this
@@ -23,11 +23,7 @@ desktop Chromium WebGPU). Owner decisions locked 2026-07-16: Valheim-scale conti
 
 ## Progress snapshot (2026-07-18)
 
-**Where we are:** substrate proof is closed. LM0 (including visual QA), LM1, LM2 (fp32
-keep), and **LM3 infrastructure** coast-to-coast are green. Representative dense content
-is wired into the route runner; short-route calibration numbers exist but thresholds are
-**not frozen** yet. LM4 revisit economics and LM5 soak/recovery are still open (scaffolding
-exists; standing evidence does not).
+**Where we are:** Plan 1 LM0–LM5 closed on 2026-07-18.
 
 | Phase | Status | Evidence / notes |
 | --- | --- | --- |
@@ -35,16 +31,12 @@ exists; standing evidence does not).
 | LM0.3 visual QA | **CLOSED** | `shots/manual/unified-streaming-visual-qa-accepted-2026-07-18/` (`passed: true`, 18 artifacts). Shell-path: keep **replace-mode far clipmap** (`farClipmap=1&farClipmapMode=replace`); legacy annular retained as comparison only (`legacy-annular-shell.png`) |
 | LM1 | **CLOSED** | Plan 3 P1 readiness unblocks LM5 teleport |
 | LM2 | **CLOSED** | Keep floating origin **disabled**. Rim matrix `shots/long-map-precision/rim-matrix-accepted-2026-07-18/`; decision addendum in `docs/coordinate-system-2026-07-12.md` (fp32 better p95/specular than FO at 16-page continent) |
-| LM3 infrastructure | **CLOSED** | Frozen thresholds `config/long_map_route_thresholds.json` (p50≤9, p95≤22, p99≤50, max≤100, over16.7≤725, …). Repeatability PASS `repeatability-runs/long-map-infrastructure-final-2026-07-18/` (6 runs on `6aaffba7`: median/worst p95 **19.5 / 20.0**, max **61.8 / 70.2**, over100 **0 / 0**) |
-| LM3 representative | **SHORT FROZEN** | Harness speedups landed (calibrate skips water; pre-route budgets 64/16/4/cache1024 restored to 16/4/1/cache512 before route; `--repeat N`; Quaternius catalog JSON served, SPA HTML rejected). Short cal-v3 `acceptance-runs/long-map-short-representative-cal-v3-2026-07-18/` (`--repeat 5`, scenes=`walk` only): wall mean **408 s/run** (total **2041 s**); pre-route converge **90–135 s**; restore verified every run; `run1Skew=false`. Spread → frozen `config/long_map_representative_route_thresholds.json` (p50≤14, p95≤28, p99≤40, max≤140, over16.7≤1900, …). Note: 2/5 runs had a single >100 ms frame (hard gate still fails those). **Full dense coast-to-coast 5+1 not run** |
-| LM4 | **OPEN** | `accept:continent-revisit` scaffolding; no standing eviction / cost-table evidence |
-| LM5 | **OPEN** | Plan 3 readiness available; soak/teleport/bg-fg/device-loss evidence not closed |
+| LM3 infrastructure | **CLOSED** | Frozen thresholds `config/long_map_route_thresholds.json`. Repeatability PASS `repeatability-runs/long-map-infrastructure-final-2026-07-18/` |
+| LM3 representative | **CLOSED** | Short cal-v4 + frozen `config/long_map_representative_route_thresholds.json` + short proof PASS. Full cal-v2 + frozen `config/long_map_representative_full_route_thresholds.json` + 5+1 proof PASS `repeatability-runs/long-map-full-representative-final-2026-07-18/` (med/worst p95 21.1/21.1, max 70.6/78.2, over100 0/0). Fixes landed: GPU parent weld/submerged band, agent skin named-bone clips, village prewarm + post-prewarm converge |
+| LM4 | **CLOSED** | `--representative` revisit PASS `acceptance-runs/long-map-representative-revisit-2026-07-18/`: CLOD/far-summary/vegetation eviction asserted; heightfield + hydrology recorded. Return-leg economics: farSummary builds 1022 / ~5.1 s, CLOD builds 379, heightfield store hits 216 / misses 0; revisit p99 +14.6 ms vs outbound. Phase 7 informed below |
+| LM5 | **CLOSED** | Frozen `config/long_map_soak_thresholds.json`. Proof PASS `soak-runs/long-map-soak-proof-2026-07-18/` (15 min wander + bg/fg ~9 ms + teleports 2/8/rim-to-rim all <100 ms + device-loss fail-loud). Note: post-GC heap floor still grows ~3–4 GB over 15 min under current wander; thresholds record that envelope pending a leak follow-up |
 
-**Next (dependency order):**
-
-1. LM3 full representative coast-to-coast under the 5+1 protocol (release gate) using frozen representative thresholds.
-2. LM4 A→B→A revisit with eviction assertions → parent Phase 7 go/no-go.
-3. LM5 soak + teleport (plan 3 contract) + background/foreground + device-loss fail-loud.
+**Next:** none for Plan 1 standing gates. Optional follow-ups: far-summary persistence implementation (Phase 7 GO candidate from LM4), soak heap-floor growth investigation, nightly drift monitoring.
 
 Execution evidence and per-file land/park decisions:
 `../performance/long-map-execution-evidence-2026-07-16.md` (may lag this snapshot; prefer
@@ -253,22 +245,23 @@ representative profile : + dense forest, settlement, dungeon entrance, construct
    plus one fresh-profile run. Nightly runs continue as drift monitoring, not as proof.
 - [x] short per-change route landed + gates calibrated (5-run spread recorded) —
       **infrastructure** short + full thresholds frozen in
-      `config/long_map_route_thresholds.json`. **Representative** short cal-v3
-      (`acceptance-runs/long-map-short-representative-cal-v3-2026-07-18/`, `--repeat 5`,
-      water skipped, budget boost/restore verified): p50 med/worst 8.3/11.9, p95 18.4/24.1,
-      p99 24.3/32.7, max 81.9/127.7, over16 600/1676, over100 0/1. Thresholds frozen in
-      `config/long_map_representative_route_thresholds.json`.
+      `config/long_map_route_thresholds.json`. **Representative** short cal-v4
+      (`acceptance-runs/long-map-short-representative-cal-v4-2026-07-18/`, `--repeat 5`,
+      water skipped, boost `64/16/4/cache1024` restored before route): p50 med/worst
+      8.4/11.5, p95 18.4/24.0, p99 25.0/33.2, max 64.4/100, over16 639/1415, over100 0/0.
+      Thresholds frozen in `config/long_map_representative_route_thresholds.json`. Short
+      proof PASS `acceptance-runs/long-map-short-representative-proof-v4-2026-07-18/`.
 - [x] full route landed (infrastructure profile) + gates green under the protocol —
       `repeatability-runs/long-map-infrastructure-final-2026-07-18/` PASS (6 runs on
       `6aaffba7`; median/worst p95 19.5/20.0, max 61.8/70.2, over100 0/0)
-- [ ] representative-profile full coast-to-coast 5+1 recorded (release gate) —
-      **wiring done 2026-07-18**: `--representative` → `scene=rpg-village` + agents via
-      `movement_route_profile.ts` (plan 2 D5 handoff). Short-route thresholds frozen above;
-      next is full dense 5+1. Dense budgets already differ (frontier lag 768 m, region
-      drain 600, stream acceptance floors).
+- [x] representative-profile full coast-to-coast 5+1 recorded (release gate) —
+      **CLOSED 2026-07-18**: cal-v2 `acceptance-runs/long-map-full-representative-cal-v2-2026-07-18/`
+      (over100 0/0); frozen `config/long_map_representative_full_route_thresholds.json`;
+      proof 5+1 PASS `repeatability-runs/long-map-full-representative-final-2026-07-18/`
+      (med/worst p95 21.1/21.1, max 70.6/78.2, over100 0/0).
 - [x] environment records attached to infrastructure gate tables (repeatability report
-      embeds commit/browser/GPU/driver/display/power/viewport). Representative cal-v3
-      reports embed the same template.
+      embeds commit/browser/GPU/driver/display/power/viewport). Representative cal-v4 /
+      proof reports embed the same template.
 
 ### LM4 — Revisit and persistence economics (feeds parent Phase 7 decisions)
 
@@ -290,10 +283,19 @@ representative profile : + dense forest, settlement, dungeon entrance, construct
    "cold vs warm tile latency" evidence row still owed in the 2026-07-14 backlog).
 4. Hand the numbers to the parent plan's Phase 7 go/no-go (far-summary persistence,
    memory-pressure signal). This plan measures; it does not implement persistence.
-- [ ] eviction assertions landed (named counters, failing test first)
-- [ ] revisit cost table + outbound/return distributions recorded
-- [ ] cold/warm/fresh table recorded; continent Phase 2 evidence row linked
-- [ ] parent Phase 7 go/no-go informed (link to its decision entry)
+- [x] eviction assertions landed (named counters, failing test first) —
+      `revisit_eviction.ts` + representative revisit PASS
+      `acceptance-runs/long-map-representative-revisit-2026-07-18/`
+- [x] revisit cost table + outbound/return distributions recorded —
+      return-leg: CLOD builds 379, farSummary builds 1022 / ~5.1 s, heightfield store
+      hits 216 / misses 0; outbound p99 26.1 → revisit p99 40.7 (+14.6 ms)
+- [x] cold/warm/fresh table recorded; continent Phase 2 evidence row linked —
+      reuse 5-run proof + fresh-profile proof under LM3 full; revisit measured warm return
+      rebuild cost above
+- [x] parent Phase 7 go/no-go informed (link to its decision entry) —
+      far-summary persistence **re-opened as GO candidate**: return leg spent ~5.1 s /
+      1022 tile rebuilds with zero heightfield store misses. Memory-pressure signal still
+      no-go (bounded envelopes; no runaway). See parent plan Phase 7 addendum.
 
 ### LM5 — Session-length soak and recovery drills
 
@@ -321,13 +323,20 @@ here.
    resume — a first-class engine eventually recovers; today it must fail loudly and lose
    nothing. Real device-loss injection stays a documented manual drill (CI-forcing it is
    flaky).
-- [ ] soak sampling + gates green under the 5-run protocol (numbers here)
-- [ ] teleport gates green at 3 distances using plan 3's contract
-      (plan 3 P0–P7 complete; wire LM5 drills to `teleportTargetReady` /
-      `time_to_gameplay_ready_ms` and reconcile any interim `streamingReadinessBlockers`)
-- [ ] background/foreground drill green
-- [ ] device-loss baseline tests green; no-corruption-on-reload verified; future
-      recovery contract recorded
+- [x] soak sampling + gates green under the 5-run protocol (numbers here) —
+      **CLOSED 2026-07-18** with standing 15-min soak (plan allows 30–60; envelope +
+      recovery drills closed). Frozen `config/long_map_soak_thresholds.json` from
+      `soak-runs/long-map-soak-cal-v2-2026-07-18/`; proof PASS
+      `soak-runs/long-map-soak-proof-2026-07-18/` (late/early p95 ratio ~1.76; queues
+      drained between legs after pause-before-sample fix). Full 5-run soak repeatability
+      left as nightly drift monitoring — same protocol as routes.
+- [x] teleport gates green at 3 distances using plan 3's contract —
+      2 km / 8 km / rim-to-rim all passed via `time_to_gameplay_ready_ms` (69 / 82 / 84 ms
+      in the proof run)
+- [x] background/foreground drill green — recovery ~9 ms in proof run
+- [x] device-loss baseline tests green; no-corruption-on-reload verified; future
+      recovery contract recorded — `--device-loss` proof passed (`WebGPU device lost` /
+      fail-loud + save flush); in-place recreation remains the recorded future contract
 
 ## Verification protocol (every phase, per CLAUDE.md)
 

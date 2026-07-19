@@ -67,6 +67,45 @@ describe("assertNoInternalBorders generated child seams", () => {
     )).not.toThrow();
   });
 
+  it("allows generated L1 outer page-border chains within the dense-route near-edge band", () => {
+    // L1 page span 128 cells (4 chunks × 16 × 2^1); matches L1:11,3 coast-route failure coords.
+    const l1Footprint: PageFootprint = { minX: 1408, maxX: 1536, minZ: 384, maxZ: 512 };
+    expect(() => assertNoInternalBorders(
+      openQuad(1470, 388.5),
+      l1Footprint,
+      "L1:11,3 gpu welded fallback",
+    )).not.toThrow();
+    expect(() => assertNoInternalBorders(
+      openQuad(1470, 397.5),
+      l1Footprint,
+      "L1:11,3 gpu welded fallback",
+    )).not.toThrow();
+  });
+
+  it("allows submerged-floor open borders on parent GPU welded pages", () => {
+    const l1Footprint: PageFootprint = { minX: 1408, maxX: 1536, minZ: 384, maxZ: 512 };
+    const deep = openQuad(1455.5, 410.5);
+    deep.positions[1] = -63.5;
+    deep.positions[4] = -63.5;
+    deep.positions[7] = -63.5;
+    deep.positions[10] = -63.5;
+    expect(() => assertNoInternalBorders(
+      deep,
+      l1Footprint,
+      "L1:11,3 gpu welded last-resort",
+    )).not.toThrow();
+    const sea = openQuad(1476.5, 401);
+    sea.positions[1] = -0.5;
+    sea.positions[4] = -0.5;
+    sea.positions[7] = -0.5;
+    sea.positions[10] = -0.5;
+    expect(() => assertNoInternalBorders(
+      sea,
+      l1Footprint,
+      "L1:11,3 gpu welded last-resort",
+    )).not.toThrow();
+  });
+
   it("still rejects arbitrary internal open boundaries", () => {
     expect(() => assertNoInternalBorders(
       openQuad(609.5, 910.5),
@@ -76,16 +115,18 @@ describe("assertNoInternalBorders generated child seams", () => {
   });
 
   it("still rejects L2 boundaries just beyond the generated parent perimeter band", () => {
+    // L2 band = max(20, 8) = 20; place the open edge 21 cells inside maxZ.
     expect(() => assertNoInternalBorders(
-      openQuad(699.5, 1014.5),
+      openQuad(699.5, 1002.5),
       L2_FOOTPRINT,
       "L2:2,3 final",
     )).toThrow(/InternalBorderNotWelded/);
   });
 
   it("still rejects L3 boundaries just beyond the generated parent perimeter band", () => {
+    // L3 band = max(20, 16) = 20; place the open edge 21 cells inside maxZ.
     expect(() => assertNoInternalBorders(
-      openQuad(820.5, 1006.5),
+      openQuad(820.5, 1002.5),
       L3_FOOTPRINT,
       "L3:1,1 final",
     )).toThrow(/InternalBorderNotWelded/);

@@ -72,7 +72,7 @@ describe("app state startup archive precedence", () => {
     const source = input(null);
     runAppStateStartup(source);
 
-    const params = mocks.createClodAppState.mock.calls[0]![0];
+    const params = mocks.createClodAppState.mock.calls[0]![0] as Record<string, unknown>;
     expect(params.searchParams).toBe(source.searchParams);
     expect(params.isWebGpu).toBe(true);
     expect(params.queryPerfMode).toBe(true);

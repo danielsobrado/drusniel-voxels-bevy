@@ -1,0 +1,13 @@
+{
+  "maxFrameP50Ms": 12,
+  "maxFrameP95Ms": 24,
+  "maxFrameP99Ms": 30,
+  "maxFrameP999Ms": 55,
+  "maxFrameMs": 100,
+  "maxFramesOver16_7Ms": 2800,
+  "maxFramesOver33_3Ms": 60,
+  "maxLongTaskCount": 60,
+  "maxLongestLongTaskMs": 150,
+  "maxTopPhaseP95Ms": 16,
+  "maxTopPhaseMs": 90
+}

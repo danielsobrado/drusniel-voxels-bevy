@@ -1044,7 +1044,10 @@ export function createStreamingClodRootController(deps: StreamingClodRootControl
       cacheNode(node, true);
       appliedNodes.push(node);
       incrementLevel(appliedPagesByLevel, node.level);
-      if (probe.active && probe.requestedIds.has(node.id)) probe.applyPagesTotal++;
+      // Count every apply while the movement probe is active. Filtering to
+      // probe.requestedIds missed leftover pre-route ready-queue drains and
+      // under-counted dense routes that reuse a larger resident cache.
+      if (probe.active) probe.applyPagesTotal++;
     }
     if (appliedNodes.length > 0) deps.onNodesBuilt?.(appliedNodes);
     return { applied: appliedNodes.length, applyMs: performance.now() - startedAt, staleDiscards };

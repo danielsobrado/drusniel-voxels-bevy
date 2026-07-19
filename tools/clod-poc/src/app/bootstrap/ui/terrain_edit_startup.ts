@@ -183,12 +183,26 @@ export function runTerrainEditStartup(
         clodCachedKeys: session.streamingClodRootController?.cachedPageKeys() ?? [],
         farSummaryResidentKeys: farSummary?.cache?.residentTileKeys() ?? [],
         heightfieldResidentKeys: heightfieldTileResidentKeys(),
-        vegetationClusterKeys: treeSystem.settings.enabled ? treeResidencyClusterKeys({
-          cpuPatchKeys: treeSystem.patches.map((patch) => patch.nodeId),
-          centerX: treeSystem.lastCenter.x,
-          centerZ: treeSystem.lastCenter.z,
-          radiusM: treeSystem.settings.distanceM,
-        }) : [],
+        vegetationClusterKeys: (() => {
+          if (treeSystem?.settings?.enabled) {
+            return treeResidencyClusterKeys({
+              cpuPatchKeys: treeSystem.patches.map((patch) => patch.nodeId),
+              centerX: treeSystem.lastCenter.x,
+              centerZ: treeSystem.lastCenter.z,
+              radiusM: treeSystem.settings.distanceM,
+            });
+          }
+          // Representative/coast starts may bind residency before the tree controller is
+          // attached; fall back to pose-centered ring keys so LM4 can still assert eviction.
+          const pose = input.longView.hooks?.getPose?.();
+          if (!pose) return null;
+          return treeResidencyClusterKeys({
+            cpuPatchKeys: [],
+            centerX: pose.p[0],
+            centerZ: pose.p[2],
+            radiusM: 128,
+          });
+        })(),
         waterHydrologyKeys: input.runtime.hydrologySystem?.residentTileKeys() ?? null,
       };
     };

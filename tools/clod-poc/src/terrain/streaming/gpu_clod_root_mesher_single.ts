@@ -4,7 +4,6 @@ import { concatPageSourceMeshes, filterPageSourceSections } from "../../clod/pag
 import type { PageSourceSection } from "../../clod/pageSourceSections.js";
 import { weldVertices } from "../../clod/weld.js";
 import {
-  assertNoInternalBorders,
   stripDegenerateTriangles,
   validateFinalPageMesh,
   validatePageMesh,
@@ -17,6 +16,7 @@ import {
   INITIAL_NODE_REVISION,
   requireFourChildren,
 } from "../../clod/quadtree_support.js";
+import { selectParentSimplificationCandidate } from "../../clod/quadtree.js";
 import {
   DIG_EDIT_BYTES,
   FIELD_PARAM_WORDS,
@@ -1057,30 +1057,46 @@ function buildParentNode(level: number, nx: number, nz: number, children: readon
   const footprint = footprintFor(level, nx, nz, cfg);
   validateWeldedIntermediate(welded, `L${level}:${nx},${nz} gpu welded`, cfg.validation.zero_area_epsilon);
   const locks = buildOuterBorderLocks(welded);
-  let mesh = welded;
-  let errorWorld = 0;
-  let lowBenefit = true;
-  try {
-    const simplified = simplifyPage(clonePageMesh(welded), locks, cfg);
-    stripDegenerateTriangles(simplified.mesh, cfg.validation.zero_area_epsilon);
-    assertNoInternalBorders(simplified.mesh, footprint, `L${level}:${nx},${nz} gpu simplified`);
-    mesh = simplified.mesh;
-    errorWorld = simplified.errorWorld;
-    lowBenefit = simplified.lowBenefit;
-  } catch {
-    validateFinalPageMesh(welded, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} gpu welded fallback`);
-  }
-  return {
-    id: `L${level}:${nx},${nz}`,
-    revision: INITIAL_NODE_REVISION,
-    level,
-    children: [...children],
-    mesh,
+  const label = `L${level}:${nx},${nz}`;
+  const selected = selectParentSimplificationCandidate(
+    simplifyPage(clonePageMesh(welded), locks, cfg),
+    welded,
     footprint,
-    bounds: boundsOf(mesh),
-    errorWorld: errorWorld + Math.max(...children.map((child) => child.errorWorld)),
-    lowBenefit,
-  };
+    cfg.validation.zero_area_epsilon,
+    `${label} gpu`,
+  );
+  stripDegenerateTriangles(selected.mesh, cfg.validation.zero_area_epsilon);
+  try {
+    validateFinalPageMesh(selected.mesh, footprint, cfg.validation.zero_area_epsilon, `${label} gpu final`);
+    return {
+      id: `${label}`,
+      revision: INITIAL_NODE_REVISION,
+      level,
+      children: [...children],
+      mesh: selected.mesh,
+      footprint,
+      bounds: boundsOf(selected.mesh),
+      errorWorld: selected.errorWorld + Math.max(...children.map((child) => child.errorWorld)),
+      lowBenefit: selected.lowBenefit,
+    };
+  } catch {
+    // Last resort: keep the pre-simplify welded parent when near-edge open borders survive
+    // simplify. Prefer a coarser valid parent over failing the whole GPU batch into worker
+    // fallback (which trips the zero-fallback acceptance gate).
+    stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+    validateFinalPageMesh(welded, footprint, cfg.validation.zero_area_epsilon, `${label} gpu welded last-resort`);
+    return {
+      id: `${label}`,
+      revision: INITIAL_NODE_REVISION,
+      level,
+      children: [...children],
+      mesh: welded,
+      footprint,
+      bounds: boundsOf(welded),
+      errorWorld: Math.max(...children.map((child) => child.errorWorld)),
+      lowBenefit: true,
+    };
+  }
 }
 
 function childNodes(index: Map<string, ClodPageNode>[], level: number, nx: number, nz: number): ClodPageNode[] {

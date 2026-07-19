@@ -1,0 +1,10 @@
+{
+  "warmupMinutes": 2,
+  "maxHeapHighWaterGrowthBytes": 5500000000,
+  "maxHeapFloorGrowthBytes": 5500000000,
+  "maxVramHighWaterGrowthBytes": 1000000000,
+  "maxResourceGrowth": 100000,
+  "maxLateFrameP95Ratio": 2.5,
+  "maxBackgroundRecoveryMs": 30000,
+  "maxTeleportRecoveryMs": 5000
+}

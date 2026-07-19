@@ -477,7 +477,14 @@ one subsystem dominates. Candidates by *suspicion* (do not start until the table
    record why islands stay procedural. Decision + evidence here, config flipped only with
    the A/B.
 - [x] long-route gate landed with real thresholds (`accept:unified-streaming-long-route`)
-- [x] persistence skipped: no revisit-cost measurement was captured, so the strict prerequisite was absent
+- [x] persistence skipped (2026-07-16): no revisit-cost measurement was captured, so the strict prerequisite was absent
+- [x] **LM4 revisit addendum 2026-07-18**: representative coast-to-coast revisit
+  (`acceptance-runs/long-map-representative-revisit-2026-07-18/`) measured return-leg
+  far-summary rebuilds of **1022 tiles / ~5.1 s** with heightfield store hits 216 / misses 0
+  and CLOD page builds 379. Eviction assertions passed for CLOD + far-summary + vegetation.
+  **Far-summary persistence is now a GO candidate** (meaningful rebuild cost proven);
+  implementation remains optional and out of this plan's scope. Memory-pressure signal
+  remains skipped: long/revisit routes stay bounded without runaway rebuild/evict loops.
 - [x] memory pressure signal skipped: the 3.06 km route stayed bounded at 360 bubble and 125 root evictions; no runaway evidence
 - [x] world-mode decision: keep infinite-islands procedural for now; parity is proven, but no tiles-on islands perf A/B exists to justify a default flip
 

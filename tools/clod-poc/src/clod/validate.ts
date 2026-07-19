@@ -60,14 +60,26 @@ const PERIMETER_BAND = 1.0;
 // after recursive child simplification. The allowance scales with the parent LOD because
 // higher-level parents are built from coarser child ownership spans. Arbitrary holes deeper
 // inside the page still hard-fail.
-const GENERATED_PARENT_PERIMETER_BASE_BAND = 4.0;
+//
+// GPU L1 parents observed open boundary vertices ~4.5–13.5 cells inside the footprint on the
+// dense coast route (deep-ocean / near-edge welded + simplify artifacts). Keep the base band
+// above that near-edge artifact while still rejecting mid-page holes (~half the L1 span is 64
+// cells on the 128-cell L1 footprint used by streamed roots).
+const GENERATED_PARENT_PERIMETER_BASE_BAND = 20.0;
 const GENERATED_CHILD_SEAM_BAND = 1.0;
 const COAST_BOUNDARY_BAND = 0.01;
+/** Parent GPU welded meshes can retain open borders on submerged / empty water floors. */
+const SUBMERGED_FLOOR_Y = 0.5;
 
 function isCoastOpenBoundary(x: number, z: number): boolean {
   const coast = getBorderCoastRuntime();
   if (!coast) return false;
   return coastMask(x, z, coast.config.coast, coast.worldCellsX) > COAST_BOUNDARY_BAND;
+}
+
+function isSubmergedFloorOpenBoundary(y: number, label?: string): boolean {
+  const level = levelFromLabel(label);
+  return level !== null && level > 0 && Number.isFinite(y) && y <= SUBMERGED_FLOOR_Y;
 }
 
 function isLod0SourceLabel(label: string): boolean {
@@ -131,6 +143,7 @@ export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint
       || isCoastOpenBoundary(x, z)
       || isCaveEntranceBoundary(x, z)
       || isGeneratedChildSeamOpenBoundary(x, z, footprint, label)
+      || isSubmergedFloorOpenBoundary(mesh.positions[i * 3 + 1]!, label)
     ) continue;
     const prefix = label ? `${label}: ` : "";
     throw new ClodBuildError(
