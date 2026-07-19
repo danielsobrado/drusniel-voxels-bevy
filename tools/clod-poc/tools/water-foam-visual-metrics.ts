@@ -5,6 +5,12 @@ export interface RgbaImage {
   readonly channels: number;
 }
 
+export interface PixelMask {
+  readonly data: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface FoamImageMetrics {
   readonly waterPixelCount: number;
   readonly activePixelCount: number;
@@ -29,12 +35,59 @@ export interface FoamLightingMetrics {
   readonly standardDeviation: number;
 }
 
-const WATER_THRESHOLD = 0.10;
 const ACTIVE_FOAM_THRESHOLD = 0.16;
 const LIGHTING_FOAM_THRESHOLD = 0.12;
+const WATER_DEBUG_DELTA_THRESHOLD = 0.045;
+const WATER_DEBUG_STRONG_DELTA = 0.14;
+const WATER_DEBUG_GRAY_SPREAD_MAX = 0.04;
 
-export function measureFoamImage(foam: RgbaImage, bodyMask: RgbaImage): FoamImageMetrics {
-  assertCompatible(foam, bodyMask);
+export function deriveWaterPixelMask(
+  bodyMask: RgbaImage,
+  depth: RgbaImage,
+  foam: RgbaImage,
+): PixelMask {
+  assertCompatible(bodyMask, depth);
+  assertCompatible(bodyMask, foam);
+  const pixelCount = bodyMask.width * bodyMask.height;
+  const candidate = new Uint8Array(pixelCount);
+  const strength = new Float32Array(pixelCount);
+
+  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+    const spread = channelSpreadAt(bodyMask, pixel);
+    if (spread > WATER_DEBUG_GRAY_SPREAD_MAX || luminanceAt(bodyMask, pixel) <= 0.015) continue;
+    const delta = Math.max(
+      colorDeltaAt(bodyMask, depth, pixel),
+      colorDeltaAt(bodyMask, foam, pixel),
+    );
+    if (delta < WATER_DEBUG_DELTA_THRESHOLD) continue;
+    candidate[pixel] = 1;
+    strength[pixel] = delta;
+  }
+
+  const data = new Uint8Array(pixelCount);
+  for (let y = 0; y < bodyMask.height; y += 1) {
+    for (let x = 0; x < bodyMask.width; x += 1) {
+      const pixel = y * bodyMask.width + x;
+      if (candidate[pixel] === 0) continue;
+      let neighbours = 0;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= bodyMask.width || ny < 0 || ny >= bodyMask.height) continue;
+          neighbours += candidate[ny * bodyMask.width + nx] ?? 0;
+        }
+      }
+      if ((strength[pixel] ?? 0) >= WATER_DEBUG_STRONG_DELTA || neighbours >= 2) data[pixel] = 1;
+    }
+  }
+
+  return { data, width: bodyMask.width, height: bodyMask.height };
+}
+
+export function measureFoamImage(foam: RgbaImage, waterMask: PixelMask): FoamImageMetrics {
+  assertMaskCompatible(foam, waterMask);
   const pixelCount = foam.width * foam.height;
   const active = new Uint8Array(pixelCount);
   let waterPixelCount = 0;
@@ -42,7 +95,7 @@ export function measureFoamImage(foam: RgbaImage, bodyMask: RgbaImage): FoamImag
   let coverageSum = 0;
 
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-    if (luminanceAt(bodyMask, pixel) <= WATER_THRESHOLD) continue;
+    if (waterMask.data[pixel] === 0) continue;
     waterPixelCount += 1;
     const coverage = luminanceAt(foam, pixel);
     coverageSum += coverage;
@@ -80,10 +133,10 @@ export function measureFoamImage(foam: RgbaImage, bodyMask: RgbaImage): FoamImag
 export function measureFoamTemporal(
   first: RgbaImage,
   second: RgbaImage,
-  bodyMask: RgbaImage,
+  waterMask: PixelMask,
 ): FoamTemporalMetrics {
   assertCompatible(first, second);
-  assertCompatible(first, bodyMask);
+  assertMaskCompatible(first, waterMask);
   const pixelCount = first.width * first.height;
   let comparedPixelCount = 0;
   let deltaSum = 0;
@@ -91,7 +144,7 @@ export function measureFoamTemporal(
   let union = 0;
 
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-    if (luminanceAt(bodyMask, pixel) <= WATER_THRESHOLD) continue;
+    if (waterMask.data[pixel] === 0) continue;
     const a = luminanceAt(first, pixel);
     const b = luminanceAt(second, pixel);
     comparedPixelCount += 1;
@@ -112,15 +165,15 @@ export function measureFoamTemporal(
 export function measureFoamLighting(
   finalImage: RgbaImage,
   foam: RgbaImage,
-  bodyMask: RgbaImage,
+  waterMask: PixelMask,
 ): FoamLightingMetrics {
   assertCompatible(finalImage, foam);
-  assertCompatible(finalImage, bodyMask);
+  assertMaskCompatible(finalImage, waterMask);
   const values: number[] = [];
   const pixelCount = finalImage.width * finalImage.height;
 
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-    if (luminanceAt(bodyMask, pixel) <= WATER_THRESHOLD) continue;
+    if (waterMask.data[pixel] === 0) continue;
     if (luminanceAt(foam, pixel) <= LIGHTING_FOAM_THRESHOLD) continue;
     values.push(luminanceAt(finalImage, pixel));
   }
@@ -223,12 +276,36 @@ function assertCompatible(a: RgbaImage, b: RgbaImage): void {
   }
 }
 
+function assertMaskCompatible(image: RgbaImage, mask: PixelMask): void {
+  if (image.width !== mask.width || image.height !== mask.height) {
+    throw new Error(`image and mask dimensions differ: ${image.width}x${image.height} vs ${mask.width}x${mask.height}`);
+  }
+}
+
 function luminanceAt(image: RgbaImage, pixel: number): number {
   const offset = pixel * image.channels;
   const r = image.data[offset] ?? 0;
   const g = image.data[offset + 1] ?? 0;
   const b = image.data[offset + 2] ?? 0;
   return (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255;
+}
+
+function channelSpreadAt(image: RgbaImage, pixel: number): number {
+  const offset = pixel * image.channels;
+  const r = image.data[offset] ?? 0;
+  const g = image.data[offset + 1] ?? 0;
+  const b = image.data[offset + 2] ?? 0;
+  return (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+}
+
+function colorDeltaAt(a: RgbaImage, b: RgbaImage, pixel: number): number {
+  const offsetA = pixel * a.channels;
+  const offsetB = pixel * b.channels;
+  return Math.max(
+    Math.abs((a.data[offsetA] ?? 0) - (b.data[offsetB] ?? 0)),
+    Math.abs((a.data[offsetA + 1] ?? 0) - (b.data[offsetB + 1] ?? 0)),
+    Math.abs((a.data[offsetA + 2] ?? 0) - (b.data[offsetB + 2] ?? 0)),
+  ) / 255;
 }
 
 function percentile(sorted: readonly number[], ratio: number): number {
