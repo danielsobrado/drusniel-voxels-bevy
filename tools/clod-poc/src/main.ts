@@ -1,23 +1,29 @@
 import { bootstrapClodPoc } from "./app/bootstrap/index.js";
 import { installConstructionBuildMenuLayout } from "./construction/build_menu_style.js";
 import { installConstructionGhostEffect } from "./construction/ghost_effect.js";
-import { recoverFailedProjectImport } from "./project/project_import_recovery.js";
+import {
+  recoverAbandonedProjectImport,
+  recoverFailedProjectImport,
+} from "./project/project_import_recovery.js";
 import { installHeightfieldTileClientRuntime } from "./world/heightfield_tiles/heightfield_tile_client_runtime.js";
 
-installConstructionBuildMenuLayout();
-installConstructionGhostEffect();
-installHeightfieldTileClientRuntime();
+const importRequested = new URLSearchParams(location.search).has("import");
+if (!recoverAbandonedProjectImport(importRequested)) {
+  installConstructionBuildMenuLayout();
+  installConstructionGhostEffect();
+  installHeightfieldTileClientRuntime();
 
-bootstrapClodPoc().catch((error) => {
-  if (recoverFailedProjectImport()) return;
+  bootstrapClodPoc().catch((error) => {
+    if (recoverFailedProjectImport()) return;
 
-  const buildProgress = document.getElementById("build-progress");
-  if (buildProgress) buildProgress.hidden = true;
+    const buildProgress = document.getElementById("build-progress");
+    if (buildProgress) buildProgress.hidden = true;
 
-  const info = document.getElementById("info");
-  if (info) {
-    info.textContent = `build failed: ${error instanceof Error ? error.message : String(error)}`;
-  }
+    const info = document.getElementById("info");
+    if (info) {
+      info.textContent = `build failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
 
-  console.error(error);
-});
+    console.error(error);
+  });
+}

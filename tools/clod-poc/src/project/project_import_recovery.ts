@@ -31,6 +31,7 @@ function parseRecord(raw: string | null, nowMs: number): ProjectImportRecoveryRe
     if (typeof value.token !== "string" || value.token.length < 1 || value.token.length > 256) return null;
     if (typeof value.fallbackSearch !== "string") return null;
     if (typeof value.createdAtMs !== "number" || !Number.isFinite(value.createdAtMs)) return null;
+    if (value.createdAtMs > nowMs + 60_000) return null;
     if (nowMs - value.createdAtMs > PROJECT_IMPORT_RECOVERY_MAX_AGE_MS) return null;
     return {
       token: value.token,
@@ -50,7 +51,7 @@ export function armProjectImportRecovery(
   if (token.length < 1 || token.length > 256) throw new Error("project import token is invalid");
   if (!Number.isFinite(nowMs)) throw new Error("project import recovery timestamp is invalid");
   const target = storage();
-  if (!target) return;
+  if (!target) throw new Error("project import recovery storage is unavailable");
   const record: ProjectImportRecoveryRecord = {
     token,
     fallbackSearch: normalizedFallbackSearch(fallbackSearch),
@@ -86,4 +87,8 @@ export function recoverFailedProjectImport(nowMs = Date.now()): boolean {
   if (fallbackUrl === currentUrl) return false;
   location.replace(fallbackUrl);
   return true;
+}
+
+export function recoverAbandonedProjectImport(importRequested: boolean, nowMs = Date.now()): boolean {
+  return importRequested ? false : recoverFailedProjectImport(nowMs);
 }

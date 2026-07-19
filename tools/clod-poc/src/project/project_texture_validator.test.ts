@@ -78,6 +78,14 @@ describe("project archive texture validation", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts decodable image payloads when the browser supplied no MIME type", async () => {
+    const input = contents();
+    input.manifest.textures[0]!.mimeType = "application/octet-stream";
+    input.manifest.textures[0]!.normalMimeType = "application/octet-stream";
+    await expect(validateProjectArchiveTextures(input)).resolves.toBeUndefined();
+    expect(assignedSources).toBe(2);
+  });
+
   it("rejects decoded images above the dimension budget", async () => {
     nextWidth = PROJECT_TEXTURE_MAX_DIMENSION + 1;
     await expect(validateProjectArchiveTextures(contents())).rejects.toThrow(/dimension limit/i);

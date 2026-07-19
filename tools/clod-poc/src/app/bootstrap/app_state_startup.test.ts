@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createClodAppState: vi.fn((_params: Record<string, unknown>) => ({ marker: "state" })),
+  createClodAppState: vi.fn((_params: Record<string, unknown>) => ({
+    marker: "state",
+    normalDivergence: true,
+    grassShaderMode: "webgpu-ring-v1",
+  })),
   applyEnvironmentQueryOverrides: vi.fn(),
 }));
 
@@ -14,13 +18,13 @@ vi.mock("../state/environment_query_overrides.js", () => ({
 
 import { runAppStateStartup } from "./app_state_startup.js";
 
-function input(stagedImport: unknown) {
+function input(stagedImport: unknown, isWebGpu = true) {
   return {
     searchParams: new URLSearchParams("clodPerf=1&grass=0&postProcess=0&treeGpu=1&weather=storm"),
     clodRuntime: { digging: { holdIntervalMs: 180 } },
     cfg: {},
     stagedImport,
-    isWebGpu: true,
+    isWebGpu,
     maxAnisotropy: 8,
     queries: {
       queryPerfMode: true,
@@ -48,11 +52,18 @@ function input(stagedImport: unknown) {
   } as never;
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.createClodAppState.mockImplementation((_params: Record<string, unknown>) => ({
+    marker: "state",
+    normalDivergence: true,
+    grassShaderMode: "webgpu-ring-v1",
+  }));
+});
 
 describe("app state startup archive precedence", () => {
   it("removes state-changing query presets for imported projects", () => {
-    runAppStateStartup(input({ manifest: {} }));
+    const result = runAppStateStartup(input({ manifest: {} }));
 
     const params = mocks.createClodAppState.mock.calls[0]![0];
     expect((params.searchParams as URLSearchParams).toString()).toBe("");
@@ -65,14 +76,21 @@ describe("app state startup archive precedence", () => {
     expect(params.queryTerrainMaterialSource).toBeNull();
     expect(params.queryWebGpuSelection).toBe(true);
     expect(params.queryFarShell).toBe(true);
+    expect(result.state.normalDivergence).toBe(false);
+    expect(result.state.grassShaderMode).toBe("webgpu-ring-v1");
     expect(mocks.applyEnvironmentQueryOverrides).not.toHaveBeenCalled();
+  });
+
+  it("downgrades an imported GPU grass mode when the renderer is WebGL", () => {
+    const result = runAppStateStartup(input({ manifest: {} }, false));
+    expect(result.state.grassShaderMode).toBe("terrain-patch-v2");
   });
 
   it("keeps query overrides for normal non-import startup", () => {
     const source = input(null);
     runAppStateStartup(source);
 
-    const params = mocks.createClodAppState.mock.calls[0]![0] as Record<string, unknown>;
+    const params = mocks.createClodAppState.mock.calls[0]![0];
     expect(params.searchParams).toBe(source.searchParams);
     expect(params.isWebGpu).toBe(true);
     expect(params.queryPerfMode).toBe(true);
