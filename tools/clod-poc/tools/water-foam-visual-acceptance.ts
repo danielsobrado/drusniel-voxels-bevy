@@ -16,6 +16,7 @@ import {
 } from "./water-harness.js";
 import { findWaterShotPose } from "./water-shot-scenes.js";
 import {
+  deriveWaterPixelMask,
   measureFoamImage,
   measureFoamLighting,
   measureFoamTemporal,
@@ -25,6 +26,7 @@ import { evaluateFoamVisualAcceptance } from "./water-foam-visual-contract.js";
 
 interface CaptureFiles {
   readonly bodyMask: string;
+  readonly depth: string;
   readonly foamA: string;
   readonly foamB: string;
   readonly final: string;
@@ -68,20 +70,23 @@ async function main(): Promise<void> {
     const rapidImages = await loadCaptureImages(rapid.files);
     const smoothImages = await loadCaptureImages(smoothRiver.files);
     const lakeImages = await loadCaptureImages(lakeShore.files);
+    const rapidMask = deriveWaterPixelMask(rapidImages.bodyMask, rapidImages.depth, rapidImages.foamA);
+    const smoothMask = deriveWaterPixelMask(smoothImages.bodyMask, smoothImages.depth, smoothImages.foamA);
+    const lakeMask = deriveWaterPixelMask(lakeImages.bodyMask, lakeImages.depth, lakeImages.foamA);
 
     const metrics = {
-      rapid: measureFoamImage(rapidImages.foamA, rapidImages.bodyMask),
-      smoothRiver: measureFoamImage(smoothImages.foamA, smoothImages.bodyMask),
-      lakeShore: measureFoamImage(lakeImages.foamA, lakeImages.bodyMask),
+      rapid: measureFoamImage(rapidImages.foamA, rapidMask),
+      smoothRiver: measureFoamImage(smoothImages.foamA, smoothMask),
+      lakeShore: measureFoamImage(lakeImages.foamA, lakeMask),
       rapidTemporal: measureFoamTemporal(
         rapidImages.foamA,
         rapidImages.foamB,
-        rapidImages.bodyMask,
+        rapidMask,
       ),
       rapidLighting: measureFoamLighting(
         rapidImages.final,
-        rapidImages.foamA,
-        rapidImages.bodyMask,
+        rapidImages.foamB,
+        rapidMask,
       ),
     };
     const acceptance = evaluateFoamVisualAcceptance(metrics);
@@ -121,6 +126,7 @@ async function captureScene<TPose extends CameraPoseArgs>(
 
   const files: CaptureFiles = {
     bodyMask: join(sceneOut, "body-mask.png"),
+    depth: join(sceneOut, "depth.png"),
     foamA: join(sceneOut, "foam-a.png"),
     foamB: join(sceneOut, "foam-b.png"),
     final: join(sceneOut, "final.png"),
@@ -128,6 +134,8 @@ async function captureScene<TPose extends CameraPoseArgs>(
 
   await setWaterDebugMode(page, "bodyMask");
   await page.screenshot(files.bodyMask);
+  await setWaterDebugMode(page, "depth");
+  await page.screenshot(files.depth);
   await setWaterDebugMode(page, "foam");
   await page.screenshot(files.foamA);
   await settleFrames(page, temporalProof ? 30 : 8);
@@ -140,17 +148,19 @@ async function captureScene<TPose extends CameraPoseArgs>(
 
 async function loadCaptureImages(files: CaptureFiles): Promise<{
   readonly bodyMask: RgbaImage;
+  readonly depth: RgbaImage;
   readonly foamA: RgbaImage;
   readonly foamB: RgbaImage;
   readonly final: RgbaImage;
 }> {
-  const [bodyMask, foamA, foamB, finalImage] = await Promise.all([
+  const [bodyMask, depth, foamA, foamB, finalImage] = await Promise.all([
     loadImage(files.bodyMask),
+    loadImage(files.depth),
     loadImage(files.foamA),
     loadImage(files.foamB),
     loadImage(files.final),
   ]);
-  return { bodyMask, foamA, foamB, final: finalImage };
+  return { bodyMask, depth, foamA, foamB, final: finalImage };
 }
 
 async function loadImage(path: string): Promise<RgbaImage> {
@@ -252,7 +262,7 @@ async function navigateToFoamProfile(page: CdpPage, url: string): Promise<void> 
 }
 
 function assertRequiredDebugModes(available: Readonly<Record<string, number>>): void {
-  const required = ["bodyMask", "foam", "final"];
+  const required = ["bodyMask", "depth", "foam", "final"];
   const missing = required.filter((mode) => !(mode in available));
   if (missing.length > 0) throw new Error(`water debug API is missing modes: ${missing.join(", ")}`);
 }
