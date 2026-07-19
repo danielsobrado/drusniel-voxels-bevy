@@ -13,6 +13,8 @@ export interface TreeGpuRingOwnedResources {
   materialHandles: Readonly<Record<string, TreeMaterialHandle>>;
 }
 
+const DISPOSAL_LOG_PREFIX = "[trees-gpu-ring] resource disposal failed";
+
 export function disposeTreeGpuRingOwnedResources(resources: TreeGpuRingOwnedResources): void {
   const geometries = new Set<THREE.BufferGeometry>();
   const handles = new Set<TreeMaterialHandle>();
@@ -23,33 +25,42 @@ export function disposeTreeGpuRingOwnedResources(resources: TreeGpuRingOwnedReso
     resources.root.remove(mesh);
     mesh.parent?.remove(mesh);
     geometries.add(mesh.geometry);
-    disposeObjectState(mesh);
+    disposeTreeGpuRingMeshState(mesh);
   }
 
-  for (const geometry of geometries) geometry.dispose();
+  for (const geometry of geometries) disposeTreeGpuRingGeometry(geometry);
   for (const handle of Object.values(resources.materialHandles)) handles.add(handle);
-  for (const handle of handles) handle.dispose();
+  for (const handle of handles) disposeTreeGpuRingMaterialHandle(handle);
 }
 
 export function disposeTreeGpuRingPrepassTwin(root: THREE.Object3D, twin: THREE.Mesh): void {
   root.remove(twin);
   twin.parent?.remove(twin);
   disposeMaterial(twin.material);
-  disposeObjectState(twin);
+  disposeTreeGpuRingMeshState(twin);
+}
+
+export function disposeTreeGpuRingGeometry(geometry: THREE.BufferGeometry): void {
+  attemptDispose("geometry", () => geometry.dispose());
+}
+
+export function disposeTreeGpuRingMaterialHandle(handle: TreeMaterialHandle): void {
+  attemptDispose("material handle", () => handle.dispose());
 }
 
 export function disposeTreeGpuRingMeshState(mesh: THREE.Object3D): void {
-  disposeObjectState(mesh);
-}
-
-function disposeObjectState(object: THREE.Object3D): void {
-  (object as DisposableObject3D).dispose?.();
+  attemptDispose("mesh state", () => (mesh as DisposableObject3D).dispose?.());
 }
 
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
-  if (Array.isArray(material)) {
-    for (const item of new Set(material)) item.dispose();
-    return;
+  const materials = Array.isArray(material) ? new Set(material) : [material];
+  for (const item of materials) attemptDispose("prepass material", () => item.dispose());
+}
+
+function attemptDispose(label: string, action: () => void): void {
+  try {
+    action();
+  } catch (error) {
+    console.warn(`${DISPOSAL_LOG_PREFIX}: ${label}`, error);
   }
-  material.dispose();
 }
