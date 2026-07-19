@@ -1,7 +1,7 @@
 # clod-poc Stylized Grass & Stone Look Plan
 
 Created: 2026-07-18
-Status: **IN PROGRESS — Phase 0 + G1–G5 code landed; G6 implemented in draft PR #219; G1–G6 visual/perf verification pending**
+Status: **IN PROGRESS — Phase 0 + G1–G6 code landed; G6 filtered-sampling follow-up PR #223 + G1–G6 visual/perf verification pending**
 Reference: https://github.com/cortiz2894/stylized-components (GrassField system analysis)
 
 ## Current position
@@ -14,7 +14,7 @@ Reference: https://github.com/cortiz2894/stylized-components (GrassField system 
 | G3 — coherent directional wind | Done | Depth-prepass parity + animation/perf verification open |
 | G4 — dry/lush patches | Done | A/B shots + dispatch timing open |
 | G5 — stone dirt/trampling | Done, merged by PR #190 | Canonical stone shot + two-run perf A/B open |
-| G6 — per-blade sun-light | Implemented in draft PR #219 | Typecheck/test/build + forest-edge visual/perf open |
+| G6 — per-blade sun-light | Merged by PR #219; filtered sampling correction in draft PR #223 | Typecheck/test/build + forest-edge visual/perf open |
 | S1 — stylized stone preset | Optional | Decision after G5 visual acceptance |
 
 ## Goal
@@ -268,11 +268,13 @@ stone authority remains GPU-only and material cost is one field lookup.
 - [x] Keep the sample constant across each blade — no per-vertex or per-fragment
       forest-lighting lookup and no half-lit blades.
 - [x] Bilinear-filter the coarse field in compute to prevent visible lighting
-      blocks at the default 128-cell forest-lighting resolution.
+      blocks at the default 128-cell forest-lighting resolution. This correction
+      is in follow-up PR #223.
 - [x] Add focused tests for texture-channel interpretation, unavailable-cache
       fallback, WGSL binding composition, filtered sampling, and direct-sun-only
       material use.
-- [ ] Run and record typecheck, full tests, and production build for PR #219.
+- [ ] Run and record typecheck, full tests, and production build for G6 plus the
+      PR #223 correction.
 - [ ] Verify: forest-edge A/B shot (grass darkens under canopy and remains bright
       in clearings); perf A/B on ring dispatch timing.
 
@@ -359,9 +361,11 @@ ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
   shrink/flatten/splay, reduced-height wind, root dirt tint, and matching near
   terrain tint. Focused contract tests landed. Canonical visual shots, two-run
   perf A/B, and final full typecheck/test/build evidence remain open.
-- 2026-07-19 G6 CODE IN DRAFT: PR #219. Reuses the canonical forest-lighting
-  `shadowProxy` field through a small GPU mirror, samples it once per accepted
-  blade with bilinear filtering, stores visibility in `out_offset.w`, and applies
-  it only to direct sun. Focused contract tests are included. Full
-  typecheck/test/build, forest-edge visual A/B, and dispatch perf evidence remain
-  open; the PR stays draft until those gates are recorded.
+- 2026-07-19 G6 CODE MERGED: PR #219, merge commit
+  `f567ee1176e9b27b6e83f47e931d87278046f310`. Reuses the canonical
+  forest-lighting `shadowProxy` field through a small GPU mirror, samples it once
+  per accepted blade, stores visibility in `out_offset.w`, and applies it only to
+  direct sun. The merge occurred before the final bilinear-filter correction and
+  plan update landed on the branch; draft follow-up PR #223 contains only those
+  post-merge changes. Full typecheck/test/build, forest-edge visual A/B, and
+  dispatch perf evidence remain open.
