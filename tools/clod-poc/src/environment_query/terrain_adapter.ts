@@ -69,14 +69,25 @@ export class TerrainEnvironmentQuery implements EnvironmentQuery, EnvironmentBat
     const hint = resolveEnvironmentSampleHint(hintM);
     const sample = this.sampleTerrain(x, z, hint);
     const normal = normalizedNormal(sample);
-    return { ...normal, meta: terrainMeta(sample, hint, normal.valid) };
+    return {
+      x: normal.x,
+      y: normal.y,
+      z: normal.z,
+      meta: terrainMeta(sample, hint, normal.valid),
+    };
   }
 
   materialWeights(x: number, z: number, hintM?: number): MaterialWeightsResult {
     const hint = resolveEnvironmentSampleHint(hintM);
     const sample = this.sampleTerrain(x, z, hint);
     const weights = normalizedWeights(sample);
-    return { ...weights, meta: terrainMeta(sample, hint, weights.valid) };
+    return {
+      grass: weights.grass,
+      rock: weights.rock,
+      sand: weights.sand,
+      snow: weights.snow,
+      meta: terrainMeta(sample, hint, weights.valid),
+    };
   }
 
   water(x: number, z: number, hintM?: number): WaterQueryResult {
