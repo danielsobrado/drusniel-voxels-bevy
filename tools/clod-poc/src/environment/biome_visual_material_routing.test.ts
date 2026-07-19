@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BiomeVisualState } from "./biome_visual_state.js";
 import {
   biomeVisualMaterialStateSignature,
+  injectBiomeVisualCustomFoliageShader,
   resolveBiomeVisualMaterialState,
   resolveGrassSeasonalColor,
 } from "./biome_visual_material_routing.js";
@@ -65,5 +66,30 @@ describe("biome visual material routing", () => {
 
     expect(biomeVisualMaterialStateSignature(first)).toBe(biomeVisualMaterialStateSignature(same));
     expect(biomeVisualMaterialStateSignature(first)).not.toBe(biomeVisualMaterialStateSignature(changed));
+  });
+
+  it("injects uniforms and output tint into custom WebGL foliage shaders", () => {
+    const shader = injectBiomeVisualCustomFoliageShader(
+      "void main() { gl_FragColor = vec4(albedo, coverage); }",
+      false,
+    );
+
+    expect(shader).toContain("uniform float uBiomeVisualGreen;");
+    expect(shader).toContain("vec3 biomeVisualFoliageColor");
+    expect(shader).toContain("gl_FragColor.rgb = biomeVisualFoliageColor(gl_FragColor.rgb);");
+  });
+
+  it("keeps GLSL version directives first", () => {
+    const shader = injectBiomeVisualCustomFoliageShader(
+      "#version 300 es\nout vec4 fragColor;\nvoid main() { gl_FragColor = vec4(1.0); }",
+      true,
+    );
+
+    expect(shader?.startsWith("#version 300 es\n")).toBe(true);
+    expect(shader).toContain("uBiomeVisualBloom");
+  });
+
+  it("does not modify shaders without a fragment output", () => {
+    expect(injectBiomeVisualCustomFoliageShader("void main() {}", false)).toBeNull();
   });
 });
