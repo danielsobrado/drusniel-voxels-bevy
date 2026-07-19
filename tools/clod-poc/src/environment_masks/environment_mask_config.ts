@@ -11,6 +11,7 @@ import type {
   RiverMistParticleSettings,
   ShoreDebrisMaskSettings,
   SunbeamMoteMaskSettings,
+  SunbeamMoteParticleSettings,
 } from "./environment_mask_types.js";
 
 type WarnHandler = (message: string) => void;
@@ -28,6 +29,13 @@ const RIVER_MIST_PARTICLE_LIMITS = Object.freeze({
   speedMps: 5,
   lifetimeS: 30,
   surfaceOffsetM: 5,
+});
+
+const SUNBEAM_MOTE_PARTICLE_LIMITS = Object.freeze({
+  maxParticles: 1_200,
+  spawnRadiusM: 96,
+  updatePeriodFrames: 120,
+  forwardScatterPower: 32,
 });
 
 export const DEFAULT_ENVIRONMENTAL_MASK_SETTINGS: EnvironmentalMaskSettings = Object.freeze({
@@ -79,6 +87,19 @@ export const DEFAULT_ENVIRONMENTAL_MASK_SETTINGS: EnvironmentalMaskSettings = Ob
     strength: 1,
     visibilityStart: 0.45,
     visibilityEnd: 0.9,
+    particles: Object.freeze({
+      maxParticles: 1_200,
+      spawnRadiusM: 42,
+      fadeStartM: 34,
+      fadeEndM: 42,
+      updatePeriodFrames: 8,
+      density: 0.72,
+      opacity: 0.82,
+      forwardScatterPower: 8,
+      mistFloor: 0.18,
+      warmColorRgb: [0.85, 0.75, 0.45] as [number, number, number],
+      coldColorRgb: [0.78, 0.9, 1] as [number, number, number],
+    }),
   }),
   calmPool: Object.freeze({
     enabled: true,
@@ -122,7 +143,14 @@ export function cloneEnvironmentalMaskSettings(
       },
     },
     rapidSplash: { ...settings.rapidSplash },
-    sunbeamMote: { ...settings.sunbeamMote },
+    sunbeamMote: {
+      ...settings.sunbeamMote,
+      particles: {
+        ...settings.sunbeamMote.particles,
+        warmColorRgb: [...settings.sunbeamMote.particles.warmColorRgb] as [number, number, number],
+        coldColorRgb: [...settings.sunbeamMote.particles.coldColorRgb] as [number, number, number],
+      },
+    },
     calmPool: { ...settings.calmPool },
     frost: { ...settings.frost },
     dew: { ...settings.dew },
@@ -235,6 +263,58 @@ function parseSunbeamMote(raw: RecordValue, defaults: SunbeamMoteMaskSettings): 
     ...parseBand(raw, defaults),
     visibilityStart,
     visibilityEnd: Math.max(visibilityStart, readFraction(raw.visibility_end ?? raw.visibilityEnd, defaults.visibilityEnd)),
+    particles: parseSunbeamMoteParticles(record(raw.particles), defaults.particles),
+  };
+}
+
+function parseSunbeamMoteParticles(
+  raw: RecordValue,
+  defaults: SunbeamMoteParticleSettings,
+): SunbeamMoteParticleSettings {
+  const spawnRadiusM = readBounded(
+    raw.spawn_radius_m ?? raw.spawnRadiusM,
+    defaults.spawnRadiusM,
+    4,
+    SUNBEAM_MOTE_PARTICLE_LIMITS.spawnRadiusM,
+  );
+  const fadeStartM = readBounded(
+    raw.fade_start_m ?? raw.fadeStartM,
+    defaults.fadeStartM,
+    0,
+    spawnRadiusM,
+  );
+  return {
+    maxParticles: readInteger(
+      raw.max_particles ?? raw.maxParticles,
+      defaults.maxParticles,
+      0,
+      SUNBEAM_MOTE_PARTICLE_LIMITS.maxParticles,
+    ),
+    spawnRadiusM,
+    fadeStartM,
+    fadeEndM: Math.max(fadeStartM, readBounded(
+      raw.fade_end_m ?? raw.fadeEndM,
+      defaults.fadeEndM,
+      0,
+      spawnRadiusM,
+    )),
+    updatePeriodFrames: readInteger(
+      raw.update_period_frames ?? raw.updatePeriodFrames,
+      defaults.updatePeriodFrames,
+      1,
+      SUNBEAM_MOTE_PARTICLE_LIMITS.updatePeriodFrames,
+    ),
+    density: readFraction(raw.density, defaults.density),
+    opacity: readFraction(raw.opacity, defaults.opacity),
+    forwardScatterPower: readBounded(
+      raw.forward_scatter_power ?? raw.forwardScatterPower,
+      defaults.forwardScatterPower,
+      1,
+      SUNBEAM_MOTE_PARTICLE_LIMITS.forwardScatterPower,
+    ),
+    mistFloor: readFraction(raw.mist_floor ?? raw.mistFloor, defaults.mistFloor),
+    warmColorRgb: readColor(raw.warm_color_rgb ?? raw.warmColorRgb, defaults.warmColorRgb),
+    coldColorRgb: readColor(raw.cold_color_rgb ?? raw.coldColorRgb, defaults.coldColorRgb),
   };
 }
 
