@@ -1,5 +1,6 @@
 import { clamp, float, max, mix, smoothstep, texture, vec2 } from "three/tsl";
 import { buildSunLightGpuAtlasNodes } from "../terrain/sun_visibility/sun_light_gpu_atlas_nodes.js";
+import { buildWaterFoamDistanceFadeNode } from "./water_foam_distance_nodes.js";
 import {
   WATER_FOAM_BANK_DROP_BASE,
   WATER_FOAM_BANK_DROP_GAIN,
@@ -19,7 +20,7 @@ type TslNode = any;
 
 export interface WaterFoamNodeInputs {
   readonly worldXZ: TslNode;
-  readonly cameraXZ: TslNode;
+  readonly cameraXZ?: TslNode;
   readonly advectA: TslNode;
   readonly advectB: TslNode;
   readonly phaseBlend: TslNode;
@@ -34,8 +35,8 @@ export interface WaterFoamNodeInputs {
   readonly shoreFoamEnd: TslNode;
   readonly shoreDistanceStart: TslNode;
   readonly shoreDistanceEnd: TslNode;
-  readonly detailFadeStartM: TslNode;
-  readonly detailFadeEndM: TslNode;
+  readonly detailFadeStartM?: TslNode;
+  readonly detailFadeEndM?: TslNode;
   readonly shoreStrength: TslNode;
   readonly riverStrength: TslNode;
   readonly bankStrength: TslNode;
@@ -106,10 +107,11 @@ export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes 
     float(1),
     sunVisibility,
   );
-  const cameraDistanceM = input.worldXZ.sub(input.cameraXZ).length();
-  const detailFade = float(1).sub(
-    smoothstep(input.detailFadeStartM, input.detailFadeEndM, cameraDistanceM),
-  );
+  const detailFade = buildWaterFoamDistanceFadeNode(input.worldXZ, {
+    cameraXZ: input.cameraXZ,
+    startM: input.detailFadeStartM,
+    endM: input.detailFadeEndM,
+  });
   const coverage = clamp(
     source.mul(pattern).mul(wetFade).mul(shadeCoverage).mul(detailFade),
     0.0,
