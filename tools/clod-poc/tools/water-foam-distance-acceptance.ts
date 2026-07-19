@@ -26,11 +26,14 @@ import {
   readWaterFoamBrowserErrors,
 } from "./water-foam-browser-error-gate.js";
 import {
+  assertWaterFoamAuxiliaryState,
   assertWaterFoamDistanceState,
   assertWaterFoamTimeState,
   resetWaterFoamDistanceControls,
+  setWaterFoamAuxiliaryOverlaysHidden,
   setWaterFoamDistanceOverride,
   setWaterFoamTimeFrozen,
+  type WaterFoamAuxiliaryVisibilityState,
   type WaterFoamDistanceOverrideState,
   type WaterFoamDistanceResetState,
   type WaterFoamTimeFreezeState,
@@ -53,6 +56,7 @@ interface RendererWaterDebugInfo extends WaterDebugInfo {
   readonly foam: WaterFoamRuntimeDiagnostics;
   readonly foamDistanceDebug: WaterFoamDistanceOverrideState;
   readonly foamTimeDebug: WaterFoamTimeFreezeState;
+  readonly foamAuxiliaryDebug: WaterFoamAuxiliaryVisibilityState;
 }
 
 interface CaptureFiles {
@@ -101,6 +105,7 @@ async function main(): Promise<void> {
         mid: join(outRoot, "foam-mid.png"),
         far: join(outRoot, "foam-far.png"),
       };
+      let auxiliary: WaterFoamAuxiliaryVisibilityState | null = null;
       let frozen: WaterFoamTimeFreezeState | null = null;
       let nearOverride: WaterFoamDistanceOverrideState | null = null;
       let midOverride: WaterFoamDistanceOverrideState | null = null;
@@ -108,6 +113,8 @@ async function main(): Promise<void> {
       let reset: WaterFoamDistanceResetState | null = null;
 
       try {
+        auxiliary = await setWaterFoamAuxiliaryOverlaysHidden(page, true);
+        assertWaterFoamAuxiliaryState(auxiliary, true, "capture");
         frozen = await setWaterFoamTimeFrozen(page, true);
         assertWaterFoamTimeState(frozen, true, "freeze");
         await settleFrames(page, 2);
@@ -181,6 +188,7 @@ async function main(): Promise<void> {
         configuredFade: info.foam.distanceFade,
         syntheticDistances: distances,
         controlSequence: {
+          auxiliary,
           frozen,
           near: nearOverride,
           mid: midOverride,
@@ -213,6 +221,9 @@ function assertInitialDebugState(info: RendererWaterDebugInfo): void {
   }
   if (info.foamTimeDebug.frozen) {
     throw new Error("foam time was frozen before acceptance");
+  }
+  if (info.foamAuxiliaryDebug.hidden || info.foamAuxiliaryDebug.matched !== 0) {
+    throw new Error("foam auxiliary overlays were hidden before acceptance");
   }
 }
 
@@ -254,7 +265,8 @@ async function navigateToDistanceProfile(page: CdpPage, url: string): Promise<vo
         && typeof window.setCameraPose === "function"
         && typeof window.waterDebugInfo === "function"
         && typeof window.setWaterFoamDistanceOverrideM === "function"
-        && typeof window.setWaterFoamTimeFrozen === "function"`,
+        && typeof window.setWaterFoamTimeFrozen === "function"
+        && typeof window.setWaterFoamAuxiliaryOverlaysHidden === "function"`,
     ).catch(() => false);
     if (ready) {
       await settleFrames(page, 30);
