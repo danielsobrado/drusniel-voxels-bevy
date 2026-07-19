@@ -56,6 +56,15 @@ export interface HydrologyGravelBarsConfig {
   maxFlowStrength: number;
 }
 
+export interface HydrologyGravelBedConfig {
+  /** Build-time terrain authority. Kept off until headed continuity acceptance passes. */
+  enabled: boolean;
+  maxElevationM: number;
+  minWetDepthM: number;
+  continuityReserveM: number;
+  bankClearanceM: number;
+}
+
 export interface HydrologyWaterSurfaceConfig {
   wetSmoothIterations: number;
   wetToWetCliffSlopeMax: number;
@@ -119,6 +128,7 @@ export interface HydrologyConfig {
   accumulation: HydrologyAccumulationConfig;
   rivers: HydrologyRiversConfig;
   gravelBars: HydrologyGravelBarsConfig;
+  gravelBed: HydrologyGravelBedConfig;
   waterSurface: HydrologyWaterSurfaceConfig;
   moisture: HydrologyMoistureConfig;
   talus: HydrologyTalusConfig;
@@ -178,6 +188,13 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     minFlowStrength: 0.015,
     maxFlowStrength: 0.95,
   },
+  gravelBed: {
+    enabled: false,
+    maxElevationM: 0.7,
+    minWetDepthM: 0.18,
+    continuityReserveM: 0.32,
+    bankClearanceM: 0.12,
+  },
   waterSurface: {
     wetSmoothIterations: 2,
     wetToWetCliffSlopeMax: 0.35,
@@ -227,6 +244,7 @@ export function cloneHydrologyConfig(config: HydrologyConfig = DEFAULT_HYDROLOGY
     accumulation: { ...config.accumulation },
     rivers: { ...config.rivers },
     gravelBars: { ...config.gravelBars },
+    gravelBed: { ...config.gravelBed },
     waterSurface: { ...config.waterSurface },
     moisture: { ...config.moisture },
     talus: { ...config.talus },
