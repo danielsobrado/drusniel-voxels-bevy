@@ -16,6 +16,13 @@ void main() {
 }
 `;
 
+const TREE_FRAGMENT_SHADER = `
+precision highp float;
+void main() {
+    gl_FragColor = vec4(0.08, 0.16, 0.05, 1.0);
+}
+`;
+
 function createGrassMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({ fragmentShader: GRASS_FRAGMENT_SHADER });
 }
@@ -41,7 +48,7 @@ function occurrences(source: string, value: string): number {
 }
 
 describe("biome visual material runtime", () => {
-  it("deduplicates, ignores disposed attachments, and binds streamed materials once", () => {
+  it("deduplicates, handles streamed materials, and routes the far canopy", () => {
     const scene = new THREE.Scene();
     const root = new THREE.Group();
     root.name = "grass";
@@ -53,6 +60,11 @@ describe("biome visual material runtime", () => {
       new THREE.Mesh(new THREE.BufferGeometry(), shared),
     );
 
+    const farCanopyMaterial = new THREE.ShaderMaterial({ fragmentShader: TREE_FRAGMENT_SHADER });
+    const farCanopy = new THREE.Mesh(new THREE.BufferGeometry(), farCanopyMaterial);
+    farCanopy.userData.canopyTextureSetRevision = 1;
+    scene.add(farCanopy);
+
     const grassController = createGrassController();
     installBiomeVisualMaterialRouting({
       scene,
@@ -61,6 +73,7 @@ describe("biome visual material runtime", () => {
     });
 
     expect(occurrences(shared.fragmentShader, "vec3 biomeVisualGrassColor")).toBe(1);
+    expect(occurrences(farCanopyMaterial.fragmentShader, "vec3 biomeVisualFoliageColor")).toBe(1);
 
     const center = new THREE.Vector3();
     const camera = new THREE.Camera();
