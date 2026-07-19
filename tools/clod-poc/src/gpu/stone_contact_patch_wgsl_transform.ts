@@ -168,14 +168,14 @@ fn rasterize_contact_field(@builtin(global_invocation_id) global_id: vec3<u32>) 
   var trample = 0.0;
   var splay_sum = vec2<f32>(0.0);
   for (var patch_index = 0u; patch_index < STONE_CONTACT_PATCH_CAPACITY; patch_index = patch_index + 1u) {
-    let patch = grass_contact_patches[STONE_CONTACT_PATCH_OFFSET + patch_index];
-    if (patch.w <= 0.0) {
+    let contact_patch = grass_contact_patches[STONE_CONTACT_PATCH_OFFSET + patch_index];
+    if (contact_patch.w <= 0.0) {
       continue;
     }
-    let delta = world_xz - patch.xy;
+    let delta = world_xz - contact_patch.xy;
     let distance_m = length(delta);
-    let inner_radius = max(patch.z, 0.001);
-    let outer_radius = max(patch.w, inner_radius + 0.001);
+    let inner_radius = max(contact_patch.z, 0.001);
+    let outer_radius = max(contact_patch.w, inner_radius + 0.001);
     let core = 1.0 - smoothstep(0.0, inner_radius, distance_m);
     let contact = 1.0 - smoothstep(inner_radius, outer_radius, distance_m);
     let influence = max(core, contact);

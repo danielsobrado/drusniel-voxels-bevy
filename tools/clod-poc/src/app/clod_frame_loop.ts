@@ -137,6 +137,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const precisionDiagnostics = debugQuery.get("precisionDiag") === "1";
   const automationHooks = render.getHooks();
   if (automationHooks) {
+    automationHooks.setQaDiagnosticBuffer = (kind) => render.postProcess?.setQaDiagnosticBuffer?.(kind);
     automationHooks.setTerrainStreamingEnabled = (enabled) => {
       player.state.terrainStreamingEnabled = enabled;
       setGlobalTerrainStreamingEnabled(enabled);

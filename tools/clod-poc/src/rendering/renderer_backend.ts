@@ -75,21 +75,6 @@ export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {
   });
   try {
     await renderer.init();
-    const baseFromMaterial = renderer.library.fromMaterial.bind(renderer.library);
-    renderer.library.fromMaterial = (material) => {
-      if (material.type === "MeshBasicMaterial") {
-        console.info("[material-trace]", {
-          id: material.id,
-          name: material.name,
-          side: material.side,
-          transparent: material.transparent,
-          opacity: material.opacity,
-          depthTest: material.depthTest,
-          depthWrite: material.depthWrite,
-        });
-      }
-      return baseFromMaterial(material);
-    };
     configureCanvasFrameLatency(renderer, options.desiredMaximumFrameLatency);
   } catch (error) {
     renderer.dispose();

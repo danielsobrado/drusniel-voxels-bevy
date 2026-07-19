@@ -203,6 +203,7 @@ export interface ClodHooks {
   progressMsg: string;
   setPose: ((pose: CamPose) => void) | null;
   getPose: (() => CamPose) | null;
+  getCameraMatrices: (() => { viewProjection: number[]; viewProjectionInverse: number[]; near: number; far: number }) | null;
   settle: ((frames?: number) => Promise<void>) | null;
   flyCamEnabled: ((on: boolean) => void) | null;
   recoverAfterDeviceLoss: (() => Promise<void>) | null;
@@ -232,6 +233,7 @@ export interface ClodHooks {
     options?: ContinentRiverRouteSearchOptions,
   ) => ContinentRiverCrossingRoute | null) | null;
   setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => AcceptanceStreamBudgets | void) | null;
+  setQaDiagnosticBuffer: ((kind: "final" | "depth") => void) | null;
   resetAcceptanceScene: (() => void) | null;
   resetAcceptanceSceneForPose: ((pose: CamPose) => void) | null;
 }
@@ -308,6 +310,7 @@ export function initHooks(): ClodHooks {
     progressMsg: "boot",
     setPose: null,
     getPose: null,
+    getCameraMatrices: null,
     settle: null,
     flyCamEnabled: null,
     recoverAfterDeviceLoss: null,
@@ -333,6 +336,7 @@ export function initHooks(): ClodHooks {
     setTerrainStreamingEnabled: null,
     findContinentRiverCrossingRoute: null,
     setAcceptanceSceneOptions: null,
+    setQaDiagnosticBuffer: null,
     resetAcceptanceScene: null,
     resetAcceptanceSceneForPose: null,
   };

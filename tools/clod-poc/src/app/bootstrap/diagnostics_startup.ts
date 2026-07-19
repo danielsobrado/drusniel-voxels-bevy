@@ -88,6 +88,16 @@ export function initLongViewDiagnostics(input: {
     pitch: input.camera.rotation.x,
     fov: input.camera.fov,
   });
+  longViewHooks.getCameraMatrices = () => {
+    input.camera.updateMatrixWorld(true);
+    const viewProjection = new THREE.Matrix4().multiplyMatrices(input.camera.projectionMatrix, input.camera.matrixWorldInverse);
+    return {
+      viewProjection: viewProjection.toArray(),
+      viewProjectionInverse: viewProjection.clone().invert().toArray(),
+      near: input.camera.near,
+      far: input.camera.far,
+    };
+  };
 
   return { longViewHooks, longViewSettleWaiters };
 }

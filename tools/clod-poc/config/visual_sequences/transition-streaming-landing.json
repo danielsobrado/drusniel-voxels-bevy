@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "transition-streaming-landing",
+  "mode": "transition",
+  "frames": 12,
+  "stepSeconds": 0.0166666667,
+  "scene": "continent",
+  "seed": 1,
+  "start": { "p": [1264, 50, 272], "yaw": 0, "pitch": -0.35, "fov": 55 },
+  "end": { "p": [1264, 50, 272], "yaw": 0, "pitch": -0.35, "fov": 55 },
+  "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384" },
+  "captureDepth": true,
+  "setupAction": "streaming-off",
+  "eventFrame": 4,
+  "eventName": "terrain-streaming-resume",
+  "eventAction": "streaming-on"
+}

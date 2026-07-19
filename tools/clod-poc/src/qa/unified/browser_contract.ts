@@ -1,4 +1,5 @@
 import type { CamPose, EngineStats } from "../../core/hooks.js";
+import type { SequenceClockConfig, SequenceClockState } from "../sequence/sequence_clock.js";
 
 export interface QaEnvironment {
   userAgent: string;
@@ -20,6 +21,7 @@ export interface DrusnielQaHook {
   error(): string | null;
   environment(): QaEnvironment;
   getPose(): CamPose;
+  getCameraMatrices(): { viewProjection: number[]; viewProjectionInverse: number[]; near: number; far: number };
   setPose(pose: CamPose): Promise<void>;
   setWorldState(state: QaWorldState): Promise<void>;
   settle(frames: number): Promise<void>;
@@ -29,6 +31,12 @@ export interface DrusnielQaHook {
   captureScreenshot(name: string): Promise<string>;
   runCheckpoint(name: string): Promise<void>;
   lastCheckpoint(): string | null;
+  beginSequence(config: SequenceClockConfig): Promise<void>;
+  stepSequence(index: number): Promise<SequenceClockState>;
+  endSequence(): Promise<void>;
+  captureDiagnosticBuffer(kind: "final" | "depth"): Promise<string>;
+  setDiagnosticBuffer(kind: "final" | "depth"): Promise<void>;
+  runSequenceEvent(action: "streaming-off" | "streaming-on" | "ownership-debug" | "final-debug"): Promise<void>;
 }
 
 declare global {

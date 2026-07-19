@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "id": "static-continent-rim",
+  "mode": "static",
+  "createdAt": "2026-07-19T07:15:16.485Z",
+  "commit": "0df7aed12157b48a5724faeb96f7f0c9b94477a1",
+  "url": "http://127.0.0.1:5180/?scene=continent&seed=1&cam=1264%2C50%2C272%2C0%2C-0.35%2C55&freeze=1&precisionDiag=1&clouds=0&froxels=0&treeWind=0&grassWind=0&world=4&acceptance=1&farClipmap=1&farClipmapMode=replace&liveBubble=1&liveBubbleRadius=200&liveBubbleColliderRadius=160&liveClodRootRadius=384",
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
+    "platform": "Win32",
+    "viewport": [
+      960,
+      540
+    ],
+    "devicePixelRatio": 1,
+    "gpu": {
+      "ok": true,
+      "reason": "world manifest initialized",
+      "features": [],
+      "limits": {},
+      "worldManifest": {
+        "worldId": "ephemeral:1",
+        "seed": 1,
+        "generatorVersion": "world-modes-v10-traced-river-network",
+        "terrainSourceHash": "9f193dd7e2accdc8789e04248a602b9f88b8db8f525959f649cec642bee43ac3",
+        "mode": "continent",
+        "sizeM": {
+          "x": 32768,
+          "z": 32768
+        },
+        "seaLevelM": 18,
+        "startupWorld": {
+          "pages": 4,
+          "cells": 256
+        },
+        "artifacts": {
+          "erosion": {
+            "schemaVersion": 2,
+            "id": "erosion:50edfb2190ed53a5",
+            "hash": "50edfb2190ed53a5668b218a777f0b4edd2f2765ff67810cdca7b2e406dc282a",
+            "width": 2049,
+            "height": 2049,
+            "cellSizeM": 16,
+            "originX": -16384,
+            "originZ": -16384,
+            "sourceTerrainHash": "fc30445b1a978ca723169dde8fad6cf0a14b17f611cbf1aa7657e2d396957319",
+            "configHash": "3455f7247f0a1a7dba0a2fa78f5e1b0f0f522a495a5697a1e2721065d9943160"
+          },
+          "hydrologyGraph": {
+            "id": "hydrology-graph:301e4f500fcbe181",
+            "hash": "301e4f500fcbe18111f89cb4be7d0f6a8f6f4b7f4b19daee80caa51226ec86b1"
+          }
+        }
+      }
+    },
+    "launch": {
+      "headless": true,
+      "channel": "chromium",
+      "args": []
+    }
+  },
+  "config": {
+    "schemaVersion": 1,
+    "id": "static-continent-rim",
+    "mode": "static",
+    "frames": 8,
+    "stepSeconds": 0.0166666667,
+    "scene": "continent",
+    "seed": 1,
+    "start": {
+      "p": [
+        1264,
+        50,
+        272
+      ],
+      "yaw": 0,
+      "pitch": -0.35,
+      "fov": 55
+    },
+    "end": {
+      "p": [
+        1264,
+        50,
+        272
+      ],
+      "yaw": 0,
+      "pitch": -0.35,
+      "fov": 55
+    },
+    "query": {
+      "world": "4",
+      "acceptance": "1",
+      "farClipmap": "1",
+      "farClipmapMode": "replace",
+      "liveBubble": "1",
+      "liveBubbleRadius": "200",
+      "liveBubbleColliderRadius": "160",
+      "liveClodRootRadius": "384"
+    },
+    "captureDepth": true
+  },
+  "frames": [
+    {
+      "index": 0,
+      "timeSeconds": 0,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/000.png",
+      "depth": "depth/000.png",
+      "stats": "stats/000.json"
+    },
+    {
+      "index": 1,
+      "timeSeconds": 0.0166666667,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/001.png",
+      "depth": "depth/001.png",
+      "stats": "stats/001.json"
+    },
+    {
+      "index": 2,
+      "timeSeconds": 0.0333333334,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/002.png",
+      "depth": "depth/002.png",
+      "stats": "stats/002.json"
+    },
+    {
+      "index": 3,
+      "timeSeconds": 0.0500000001,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/003.png",
+      "depth": "depth/003.png",
+      "stats": "stats/003.json"
+    },
+    {
+      "index": 4,
+      "timeSeconds": 0.0666666668,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/004.png",
+      "depth": "depth/004.png",
+      "stats": "stats/004.json"
+    },
+    {
+      "index": 5,
+      "timeSeconds": 0.0833333335,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/005.png",
+      "depth": "depth/005.png",
+      "stats": "stats/005.json"
+    },
+    {
+      "index": 6,
+      "timeSeconds": 0.1000000002,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/006.png",
+      "depth": "depth/006.png",
+      "stats": "stats/006.json"
+    },
+    {
+      "index": 7,
+      "timeSeconds": 0.1166666669,
+      "pose": {
+        "p": [
+          1264,
+          50,
+          272
+        ],
+        "yaw": 0,
+        "pitch": -0.35,
+        "fov": 55
+      },
+      "color": "frames/007.png",
+      "depth": "depth/007.png",
+      "stats": "stats/007.json"
+    }
+  ]
+}

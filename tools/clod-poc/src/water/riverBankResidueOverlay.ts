@@ -73,10 +73,12 @@ function makeDecalMesh(name: string, opacity: number): THREE.Mesh {
     vertexColors: true,
     depthWrite: false,
     depthTest: true,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   }, `river-bank-residue:${name}`);
+  material.name = name;
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = name;
+  mesh.visible = false;
   mesh.frustumCulled = false;
   return mesh;
 }
@@ -107,8 +109,8 @@ function writeDecals(
     const ca = Math.cos(s.angle);
     const sa = Math.sin(s.angle);
     const corners = [
-      [-rx, -rz], [rx, -rz], [rx, rz],
-      [-rx, -rz], [rx, rz], [-rx, rz],
+      [-rx, -rz], [rx, rz], [rx, -rz],
+      [-rx, -rz], [-rx, rz], [rx, rz],
     ];
     for (let c = 0; c < 6; c++) {
       const [lx, lz] = corners[c];
@@ -139,6 +141,7 @@ function replaceDecals(mesh: THREE.Mesh, geometry: ResidueGeometry): void {
   mesh.geometry.setAttribute("position", new THREE.BufferAttribute(geometry.positions, 3));
   mesh.geometry.setAttribute("color", new THREE.BufferAttribute(geometry.colors, 3));
   mesh.geometry.setDrawRange(0, geometry.drawCount);
+  mesh.visible = geometry.drawCount > 0;
 }
 
 export function createRiverBankResidueBuildJob(

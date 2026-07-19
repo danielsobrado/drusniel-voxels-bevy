@@ -31,6 +31,7 @@ import {
   uint,
   uniform,
   uv,
+  varying,
   vec2,
   vec3,
 } from "three/tsl";
@@ -259,14 +260,19 @@ export function createTreeNodeMaterialHandle(
     const secondaryLodKeep: TslNode = lodNoise.greaterThanEqual(float(1).sub(aLodFade));
 
     const material = new MeshBasicNodeMaterial();
+    material.name = `tree-cpu-node-${materials.length}`;
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
     const lodMask: TslNode = aLodDitherRole.greaterThan(0.5).select(secondaryLodKeep, primaryLodKeep);
+    const cardInputs: TslNode = varying(
+      vec3(aFoliageCard, deformation.foliageRetention, aBranchPhase),
+      "treeCpuCardInputs",
+    );
     const cardKeep: TslNode = treeFoliageCardKeep(
-      aFoliageCard,
-      deformation.foliageRetention,
-      aBranchPhase,
+      cardInputs.x,
+      cardInputs.y,
+      cardInputs.z,
       float(0),
       aIdentityWords,
     );
@@ -429,13 +435,18 @@ export function createTreeRingNodeMaterialHandle(
     const lit: TslNode = albedo.mul(hemi.add(direct).add(uAmbientFloor)).add(transmission);
 
     const material = new MeshBasicNodeMaterial();
+    material.name = `tree-ring-node-${materials.length}`;
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
+    const cardInputs: TslNode = varying(
+      vec3(aFoliageCard, deformation.foliageRetention, aBranchPhase),
+      "treeRingCardInputs",
+    );
     const cardKeep: TslNode = treeFoliageCardKeep(
-      aFoliageCard,
-      deformation.foliageRetention,
-      aBranchPhase,
+      cardInputs.x,
+      cardInputs.y,
+      cardInputs.z,
       record.rotationNormalY.w,
       floatBitsToUint(record.identityBits.zw),
     );

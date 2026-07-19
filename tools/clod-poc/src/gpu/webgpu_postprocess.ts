@@ -151,6 +151,7 @@ export class WebGpuPostProcessPipeline {
   private froxelsEnabled = false;
   private froxelDebugMode: PostFxFroxelDebugMode;
   private gtaoEnabled = false;
+  private qaDiagnosticBuffer: "final" | "depth" = "final";
   private readonly halfResEnabled: boolean;
   private readonly godRaysFullRes: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
@@ -233,6 +234,12 @@ export class WebGpuPostProcessPipeline {
     // RenderPipeline tracks the renderer size; the method preserves AppPostProcess parity.
   }
 
+  setQaDiagnosticBuffer(kind: "final" | "depth"): void {
+    if (this.qaDiagnosticBuffer === kind) return;
+    this.qaDiagnosticBuffer = kind;
+    this.disposePipeline();
+  }
+
   updateSettings(settings: Partial<PostProcessSettings>): void {
     const previousKey = this.graphKey();
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
@@ -310,6 +317,7 @@ export class WebGpuPostProcessPipeline {
       this.shouldRunClouds() ? "clouds" : "no-clouds",
       this.effectiveFroxelsEnabled() ? "froxels" : "no-froxels",
       `froxel-debug-${this.froxelDebugMode}`,
+      `qa-buffer-${this.qaDiagnosticBuffer}`,
       this.gtaoEnabled ? "gtao" : "no-gtao",
       this.halfResEnabled ? "halfres" : "fullres",
       `godrays-${this.godRaysMode()}${this.godRaysFullRes ? "-fullres" : ""}`,
@@ -513,7 +521,11 @@ export class WebGpuPostProcessPipeline {
     const beauty = scenePass.getTextureNode("output") as TslAny;
     const depthTex = scenePass.getTextureNode("depth") as TslAny;
     const pipeline = new RenderPipeline(this.renderer);
-    if (this.settings.debugMode === "copy") {
+    if (this.qaDiagnosticBuffer === "depth") {
+      const depth = depthTex.r;
+      this.autoExposureMeter.clearKernel();
+      pipeline.outputNode = vec4(depth, depth, depth, 1);
+    } else if (this.settings.debugMode === "copy") {
       this.autoExposureMeter.clearKernel();
       pipeline.outputNode = beauty;
     } else {

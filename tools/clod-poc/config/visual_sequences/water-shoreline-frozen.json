@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "water-shoreline-frozen",
+  "mode": "moving",
+  "frames": 16,
+  "stepSeconds": 0.0166666667,
+  "scene": "continent",
+  "seed": 1,
+  "start": { "p": [1264, 42, 150], "yaw": 0, "pitch": -0.28, "fov": 55 },
+  "end": { "p": [1264, 40, 112], "yaw": 0, "pitch": -0.24, "fov": 55 },
+  "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384", "water": "1" },
+  "captureDepth": true
+}

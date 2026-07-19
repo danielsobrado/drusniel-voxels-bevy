@@ -18,6 +18,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "shoot": "tsx tools/shoot.ts",
+    "sequence:capture": "tsx tools/visual-sequence.ts",
+    "sequence:pair": "tsx tools/visual-sequence.ts",
     "perf:main": "tsx tools/perf-main.ts",
     "perf:move": "tsx tools/perf-move.ts",
     "perf:rpg-edit-storm": "tsx tools/rpg-density-edit-storm.ts",
