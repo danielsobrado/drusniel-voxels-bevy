@@ -59,9 +59,24 @@ export interface RapidSplashMaskSettings extends EnvironmentalBandSettings {
   bedDropEnd: number;
 }
 
+export interface SunbeamMoteParticleSettings {
+  maxParticles: number;
+  spawnRadiusM: number;
+  fadeStartM: number;
+  fadeEndM: number;
+  updatePeriodFrames: number;
+  density: number;
+  opacity: number;
+  forwardScatterPower: number;
+  mistFloor: number;
+  warmColorRgb: [number, number, number];
+  coldColorRgb: [number, number, number];
+}
+
 export interface SunbeamMoteMaskSettings extends EnvironmentalBandSettings {
   visibilityStart: number;
   visibilityEnd: number;
+  particles: SunbeamMoteParticleSettings;
 }
 
 export interface CalmPoolMaskSettings extends EnvironmentalBandSettings {

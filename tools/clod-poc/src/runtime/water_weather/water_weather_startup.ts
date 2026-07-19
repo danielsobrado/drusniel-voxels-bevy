@@ -36,6 +36,7 @@ export async function runWaterWeatherStartup(
     worldCells: input.worldCells,
     waterField: water.waterField,
     state: input.state,
+    currentLighting: input.currentLighting,
   });
 
   return {
