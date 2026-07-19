@@ -5,6 +5,7 @@ import type { TerrainEnvironmentAuthority, TerrainEnvironmentSample } from "./te
 export function createLiveTerrainEnvironmentAuthority(): TerrainEnvironmentAuthority {
   return {
     sample: sampleLiveTerrainEnvironment,
+    revision: getVoxelEditRevision,
   };
 }
 
