@@ -5,7 +5,10 @@ import {
   HYDROLOGY_BODY_POND,
   HYDROLOGY_BODY_RIVER,
 } from "../water/hydrologyGrid.js";
-import type { EnvironmentalMaskSettings } from "./environment_mask_types.js";
+import type {
+  EnvironmentalMaskSettings,
+  RiverMistMaskSettings,
+} from "./environment_mask_types.js";
 
 export interface EnvironmentalMaskMathInput {
   readonly settings: EnvironmentalMaskSettings;
@@ -23,6 +26,19 @@ export interface EnvironmentalMaskMathInput {
   readonly rapidMask: number;
   readonly normalY: number;
   readonly sunVisibility: number;
+}
+
+export interface RiverMistMaskMathInput {
+  readonly settings: RiverMistMaskSettings;
+  readonly biomeEnabled: boolean;
+  readonly morningMist: number;
+  readonly waterValid: boolean;
+  readonly riverValid: boolean;
+  readonly wetMask: number;
+  readonly bodyKind: number;
+  readonly waterDepth: number;
+  readonly shoreDistanceM: number;
+  readonly flowStrength: number;
 }
 
 export interface EnvironmentalMaskValues {
@@ -47,6 +63,44 @@ export function createEnvironmentalMaskValues(): EnvironmentalMaskValues {
     dew: 0,
     shoreDebris: 0,
   };
+}
+
+export function evaluateRiverMistMaskValue(input: RiverMistMaskMathInput): number {
+  const config = input.settings;
+  if (
+    !config.enabled
+    || !input.biomeEnabled
+    || !input.waterValid
+    || !input.riverValid
+    || input.bodyKind !== HYDROLOGY_BODY_RIVER
+    || !Number.isFinite(input.waterDepth)
+    || input.waterDepth <= 0.03
+    || !Number.isFinite(input.wetMask)
+    || input.wetMask <= 0.08
+    || !Number.isFinite(input.shoreDistanceM)
+    || input.shoreDistanceM < 0
+    || !Number.isFinite(input.flowStrength)
+  ) {
+    return 0;
+  }
+
+  const flow = ramp(
+    config.minFlowStrength,
+    config.minFlowStrength * 3 + 0.001,
+    input.flowStrength,
+  );
+  const shore = inverseRamp(
+    config.maxShoreDistanceM * 0.55,
+    config.maxShoreDistanceM,
+    input.shoreDistanceM,
+  );
+  return clamp01(
+    config.strength
+      * clamp01(input.wetMask)
+      * clamp01(input.morningMist)
+      * flow
+      * shore,
+  );
 }
 
 export function evaluateEnvironmentalMaskValues(
@@ -79,15 +133,18 @@ export function evaluateEnvironmentalMaskValues(
       * ramp(config.minNormalY, Math.min(1, config.minNormalY + 0.16), input.normalY);
   }
 
-  if (input.settings.riverMist.enabled && input.waterValid && input.riverValid) {
-    const config = input.settings.riverMist;
-    output.riverMist = config.strength
-      * wet
-      * isRiver
-      * clamp01(input.biome.morningMist)
-      * ramp(config.minFlowStrength, config.minFlowStrength * 3 + 0.001, flow)
-      * inverseRamp(config.maxShoreDistanceM * 0.55, config.maxShoreDistanceM, shore);
-  }
+  output.riverMist = evaluateRiverMistMaskValue({
+    settings: input.settings.riverMist,
+    biomeEnabled: input.biome.enabled,
+    morningMist: input.biome.morningMist,
+    waterValid: input.waterValid,
+    riverValid: input.riverValid,
+    wetMask: input.wetMask,
+    bodyKind: input.bodyKind,
+    waterDepth: input.waterDepth,
+    shoreDistanceM: input.shoreDistanceM,
+    flowStrength: input.flowStrength,
+  });
 
   if (input.settings.rapidSplash.enabled && input.waterValid && input.riverValid) {
     const config = input.settings.rapidSplash;
