@@ -46,7 +46,25 @@ describe("tree system settings update planner", () => {
     expect(plan.clearGpuRing).toBe(true);
   });
 
-  it("detects geometry rebuilds", () => {
+  it("refreshes scatter and GPU materials for non-geometry species changes", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const nextSpecies = {
+      ...settings.species,
+      oak: {
+        ...settings.species.oak,
+        weight: settings.species.oak.weight + 0.25,
+      },
+    };
+    const plan = planTreeSystemSettingsUpdate(settings, { species: nextSpecies }, key);
+
+    expect(plan.nextGeometryKey).toBe(key);
+    expect(plan.needsGeometry).toBe(false);
+    expect(plan.needsPatchRefresh).toBe(true);
+    expect(plan.clearGpuRing).toBe(true);
+  });
+
+  it("detects geometry rebuilds and retires GPU draw resources", () => {
     const settings = cloneTreeSettings();
     const key = treeGeometryKey(settings);
     const nextSpecies = {
@@ -61,6 +79,25 @@ describe("tree system settings update planner", () => {
     expect(plan.nextGeometryKey).not.toBe(key);
     expect(plan.needsGeometry).toBe(true);
     expect(plan.needsPatchRefresh).toBe(true);
+    expect(plan.clearGpuRing).toBe(true);
+  });
+
+  it("rebuilds GPU material handles for wind and impostor changes", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const windPlan = planTreeSystemSettingsUpdate(settings, {
+      wind: { ...settings.wind, strength: settings.wind.strength + 0.1 },
+    }, key);
+    const impostorPlan = planTreeSystemSettingsUpdate(settings, {
+      impostors: { ...settings.impostors, alphaTest: settings.impostors.alphaTest + 0.01 },
+    }, key);
+
+    expect(windPlan.needsGeometry).toBe(false);
+    expect(windPlan.needsPatchRefresh).toBe(false);
+    expect(windPlan.clearGpuRing).toBe(true);
+    expect(impostorPlan.needsGeometry).toBe(false);
+    expect(impostorPlan.needsPatchRefresh).toBe(false);
+    expect(impostorPlan.clearGpuRing).toBe(true);
   });
 
   it("rebuilds the GPU ring when shadow ownership changes", () => {
