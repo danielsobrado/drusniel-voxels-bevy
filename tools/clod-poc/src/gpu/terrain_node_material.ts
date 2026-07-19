@@ -31,6 +31,7 @@ import {
 } from "three/tsl";
 import type { TerrainNodeTextureSlot } from "../textures/terrainTextureArrays.js";
 import type { TerrainDebugState } from "../rendering/terrain_material.js";
+import { getTerrainLayerAverageAlbedo } from "../textures/terrain_layer_average_albedo.js";
 
 /** Array-texture sampling mode: disabled, single-plane, or triplanar projection. */
 export type TerrainArraySamplingMode = "off" | "planar" | "triplanar";
@@ -543,6 +544,18 @@ export function createTerrainNodeMaterial(
       tex = mix(tex, paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights, weights, useTriplanar), paint);
     }
     baseColor = tex.mul(mix(vec3(1), uColor, float(0.35)));
+
+    // Distant vegetation cover: grass blades and understory stop rendering a few
+    // hundred metres out, which strips the lowlands down to bare sand/dirt texture
+    // and makes the far field read as desert against the vegetated near ground.
+    // Tint far flat terrain in the grass elevation band (near layer 22-66 m) toward
+    // the grass layer's average albedo so distant lowlands keep their plant cover.
+    const [coverR, coverG, coverB] = getTerrainLayerAverageAlbedo("grass");
+    const coverDistance = smoothstep(float(450.0), float(900.0), worldPos.xz.sub(cameraPosition.xz).length());
+    const coverBand = smoothstep(float(20.0), float(26.0), worldPos.y)
+      .mul(smoothstep(float(72.0), float(58.0), worldPos.y))
+      .mul(smoothstep(float(0.62), float(0.82), geomN.y));
+    baseColor = mix(baseColor, vec3(coverR, coverG, coverB), coverDistance.mul(coverBand).mul(0.6));
   }
 
   let riverWetness: TslNode = float(0);

@@ -20,10 +20,11 @@ describe("deep ocean material", () => {
   });
 
   it("keeps deep blue water with teal shallow scattering", () => {
-    for (const source of [WATER_CONFIG_SOURCE, CLIPMAP_SHADER_SOURCE]) {
-      expect(source).toContain("0.025");
-      expect(source).toContain("0.10");
-    }
+    expect(WATER_CONFIG_SOURCE).toContain("0.06");
+    expect(WATER_CONFIG_SOURCE).toContain("0.17");
+    expect(WATER_CONFIG_SOURCE).toContain("0.10");
+    expect(CLIPMAP_SHADER_SOURCE).toContain("0.025");
+    expect(CLIPMAP_SHADER_SOURCE).toContain("0.10");
     for (const source of [DEEP_SHADER_SOURCE, DEEP_NODE_SOURCE]) {
       expect(source).toContain("0.45");
     }

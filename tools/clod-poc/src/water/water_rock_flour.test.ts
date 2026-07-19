@@ -59,9 +59,9 @@ describe("rock flour water optics", () => {
     expect(resolved.lake.shallowColor[0]).toBeCloseTo(0.08, 6);
     expect(resolved.lake.shallowColor[1]).toBeCloseTo(0.352, 6);
     expect(resolved.lake.shallowColor[2]).toBeCloseTo(0.57, 6);
-    expect(resolved.lake.deepColor[0]).toBeCloseTo(0.04, 6);
-    expect(resolved.lake.deepColor[1]).toBeCloseTo(0.1, 6);
-    expect(resolved.lake.deepColor[2]).toBeCloseTo(0.216, 6);
+    expect(resolved.lake.deepColor[0]).toBeCloseTo(0.0496, 6);
+    expect(resolved.lake.deepColor[1]).toBeCloseTo(0.128, 6);
+    expect(resolved.lake.deepColor[2]).toBeCloseTo(0.256, 6);
     expect(resolved.lake.scatterColor).toEqual([0.1, 0.2, 0.3]);
     expect(resolved.lake.scatterExtinction).toBeCloseTo(0.3, 6);
     expect(resolved.lake.scatterStrength).toBeCloseTo(0.45, 6);

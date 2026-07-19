@@ -10,7 +10,9 @@ const DEFAULT_WATER_REFRACTION_STRENGTH = 0.0;
 
 export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   shallowColor: [0.00, 0.32, 0.55],
-  deepColor: [0.00, 0.025, 0.12],
+  // Keep a visible blue floor in deep water: near-zero luminance reads as pure
+  // black from steep view angles where fresnel contributes almost no sky.
+  deepColor: [0.012, 0.06, 0.17],
   foamColor: [0.90, 0.95, 0.96],
   alpha: 0.90,
   rippleCycle: 0.07,
@@ -40,7 +42,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     detailFadeEndM: 320.0,
   },
   fresnel: {
-    base: 0.045,
+    base: 0.065,
     power: 4.2,
     normalFlatten: 0.92,
   },
@@ -50,7 +52,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   },
   bodies: deriveDefaultWaterBodyPresets({
     shallowColor: [0.00, 0.32, 0.55],
-    deepColor: [0.00, 0.025, 0.12],
+    deepColor: [0.012, 0.06, 0.17],
     depthScale: 5.0,
     turbidity: 0.10,
   }),
