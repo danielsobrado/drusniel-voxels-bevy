@@ -107,7 +107,7 @@ function main(): void {
     seed,
     world,
     canonicalPoseReport: canonicalReportPath,
-    legs: legs.map(({ metrics: _metrics, poses: _poses, ...leg }) => leg),
+    legs,
     qualityParity: {
       webgpu: webGpuQualityParity,
       webgl: webGlQualityParity,
