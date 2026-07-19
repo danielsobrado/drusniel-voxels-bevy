@@ -1,5 +1,6 @@
 import { clamp, float, max, mix, smoothstep, texture, vec2 } from "three/tsl";
 import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
+import { buildSunLightGpuAtlasNodes } from "../terrain/sun_visibility/sun_light_gpu_atlas_nodes.js";
 import {
   WATER_FOAM_BANK_DROP_BASE,
   WATER_FOAM_BANK_DROP_GAIN,
@@ -13,7 +14,6 @@ import {
   WATER_FOAM_SHORE_DISTANCE_WEIGHT,
 } from "./water_foam_model.js";
 import { getWaterFoamNoiseTexture } from "./water_foam_texture.js";
-import { buildWaterSunVisibilityNodes } from "./water_sun_visibility_nodes.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -97,7 +97,7 @@ export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes 
     .mul(input.shoreStrength)
     .mul(shoreBodyWeight)
     .add(rapid.add(bank).mul(input.riverStrength));
-  const sunVisibility = buildWaterSunVisibilityNodes(
+  const sunVisibility = buildSunLightGpuAtlasNodes(
     input.worldXZ,
     getSunLightGpuAtlas(),
   ).visibility;
