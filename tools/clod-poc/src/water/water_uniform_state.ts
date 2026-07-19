@@ -166,6 +166,9 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uCausticsSpeed: { value: caustics.speed },
   };
 
+  // Scene style: the configured values stay the baseline; the applier restyles
+  // this instance live and is applied once immediately so late-created water
+  // materials come up matching the active preset.
   const styleBaseline = {
     foamShore: visual.foam.shoreStrength,
     normalFlatten: visual.fresnel.normalFlatten,
