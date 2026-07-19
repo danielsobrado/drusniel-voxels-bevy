@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { cloneTreeSettings } from "./tree_config.js";
@@ -44,6 +44,10 @@ describe("tree GPU ring creation rollback", () => {
     factories.impostor.mockReset();
     factories.far.mockReset();
     factories.crown.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("releases the partially built generation when a later material fails", () => {
