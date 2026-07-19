@@ -32,9 +32,11 @@ describe("WebGL foam acceptance wiring", () => {
     expect(RUNNER_SOURCE).toContain("evaluateWaterFoamRuntimeContract");
   });
 
-  it("does not claim that WebGL consumes the TSL sun atlas", () => {
+  it("does not claim WebGL consumes GPU-only sun-visibility authority", () => {
     expect(WEBGL_CONTRACT_SOURCE).not.toContain("sun atlas valid");
     expect(WEBGL_CONTRACT_SOURCE).not.toContain("sunAtlas.valid");
+    expect(WEBGL_CONTRACT_SOURCE).not.toContain("shade coverage floor");
+    expect(WEBGL_CONTRACT_SOURCE).not.toContain("shadeCoverageFloor");
     expect(WEBGL_CONTRACT_SOURCE).toContain("CPU field samples");
     expect(WEBGL_CONTRACT_SOURCE).toContain("rapid eligibility");
   });
