@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import {
-  clamp,
   float,
   max,
   mix,
@@ -19,6 +18,12 @@ import { readActiveBiomeVisualState } from "./biome_visual_state_runtime.js";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 type BiomeMaterialDomain = "terrain" | "grass" | "tree" | "understory";
+
+const nodeMix = mix as (...args: TslNode[]) => TslNode;
+const nodeFloat = float as (...args: TslNode[]) => TslNode;
+const nodeMax = max as (...args: TslNode[]) => TslNode;
+const nodeVec3 = vec3 as (...args: TslNode[]) => TslNode;
+const nodeSmoothstep = smoothstep as (...args: TslNode[]) => TslNode;
 
 const MATERIAL_SCAN_INTERVAL_FRAMES = 30;
 const TERRAIN_SNOW_FADE_M = 120;
@@ -228,26 +233,26 @@ function biomeNodeColor(baseColor: TslNode, domain: BiomeMaterialDomain, uniform
 }
 
 function terrainNodeColor(baseColor: TslNode, uniforms: BiomeNodeUniforms): TslNode {
-  const dry = float(1).sub(uniforms.green);
-  let color = mix(baseColor, baseColor.mul(vec3(0.93, 0.86, 0.68)), dry.mul(0.22).mul(uniforms.enabled));
-  color = mix(color, color.mul(vec3(1.08, 0.78, 0.48)), uniforms.autumn.mul(0.28).mul(uniforms.enabled));
-  color = mix(color, color.mul(vec3(0.82, 0.88, 0.86)), uniforms.dew.mul(0.12).mul(uniforms.enabled));
-  color = mix(color, vec3(0.82, 0.9, 1), uniforms.frost.mul(0.18).mul(uniforms.enabled));
-  const upness = smoothstep(0.35, 0.72, normalWorld.y);
-  const snow = smoothstep(
+  const dry = nodeFloat(1).sub(uniforms.green);
+  let color = nodeMix(baseColor, baseColor.mul(nodeVec3(0.93, 0.86, 0.68)), dry.mul(0.22).mul(uniforms.enabled));
+  color = nodeMix(color, color.mul(nodeVec3(1.08, 0.78, 0.48)), uniforms.autumn.mul(0.28).mul(uniforms.enabled));
+  color = nodeMix(color, color.mul(nodeVec3(0.82, 0.88, 0.86)), uniforms.dew.mul(0.12).mul(uniforms.enabled));
+  color = nodeMix(color, nodeVec3(0.82, 0.9, 1), uniforms.frost.mul(0.18).mul(uniforms.enabled));
+  const upness = nodeSmoothstep(0.35, 0.72, normalWorld.y);
+  const snow = nodeSmoothstep(
     uniforms.snowlineM.sub(TERRAIN_SNOW_FADE_M),
     uniforms.snowlineM.add(TERRAIN_SNOW_FADE_M),
     positionWorld.y,
   ).mul(upness).mul(uniforms.enabled);
-  return mix(color, vec3(0.86, 0.91, 0.96), snow.mul(0.72));
+  return nodeMix(color, nodeVec3(0.86, 0.91, 0.96), snow.mul(0.72));
 }
 
 function grassNodeColor(baseColor: TslNode, uniforms: BiomeNodeUniforms): TslNode {
-  const dry = max(float(1).sub(uniforms.green), uniforms.autumn.mul(0.8));
-  let color = mix(baseColor, baseColor.mul(vec3(0.95, 0.78, 0.36)), dry.mul(0.58).mul(uniforms.enabled));
-  color = mix(color, color.mul(vec3(1.08, 0.76, 0.38)), uniforms.autumn.mul(0.28).mul(uniforms.enabled));
-  color = mix(color, vec3(0.78, 0.9, 1), uniforms.frost.mul(0.48).mul(uniforms.enabled));
-  return color.mul(mix(vec3(1), vec3(1.05, 1.09, 1.06), uniforms.dew.mul(0.16).mul(uniforms.enabled)));
+  const dry = nodeMax(nodeFloat(1).sub(uniforms.green), uniforms.autumn.mul(0.8));
+  let color = nodeMix(baseColor, baseColor.mul(nodeVec3(0.95, 0.78, 0.36)), dry.mul(0.58).mul(uniforms.enabled));
+  color = nodeMix(color, color.mul(nodeVec3(1.08, 0.76, 0.38)), uniforms.autumn.mul(0.28).mul(uniforms.enabled));
+  color = nodeMix(color, nodeVec3(0.78, 0.9, 1), uniforms.frost.mul(0.48).mul(uniforms.enabled));
+  return color.mul(nodeMix(nodeVec3(1), nodeVec3(1.05, 1.09, 1.06), uniforms.dew.mul(0.16).mul(uniforms.enabled)));
 }
 
 function foliageNodeColor(
@@ -255,17 +260,17 @@ function foliageNodeColor(
   uniforms: BiomeNodeUniforms,
   includeFlowers: boolean,
 ): TslNode {
-  const foliage = smoothstep(0.015, 0.16, baseColor.g.sub(max(baseColor.r, baseColor.b)));
-  const dry = max(float(1).sub(uniforms.green), uniforms.autumn.mul(0.7));
-  let foliageColor = mix(baseColor, baseColor.mul(vec3(0.94, 0.8, 0.46)), dry.mul(0.5));
-  foliageColor = mix(foliageColor, foliageColor.mul(vec3(1.08, 0.72, 0.38)), uniforms.autumn.mul(0.34));
-  foliageColor = mix(foliageColor, vec3(0.8, 0.91, 1), uniforms.frost.mul(0.42));
-  foliageColor = foliageColor.mul(mix(vec3(1), vec3(1.04, 1.08, 1.06), uniforms.dew.mul(0.14)));
-  let color = mix(baseColor, foliageColor, foliage.mul(uniforms.enabled));
+  const foliage = nodeSmoothstep(0.015, 0.16, baseColor.g.sub(nodeMax(baseColor.r, baseColor.b)));
+  const dry = nodeMax(nodeFloat(1).sub(uniforms.green), uniforms.autumn.mul(0.7));
+  let foliageColor = nodeMix(baseColor, baseColor.mul(nodeVec3(0.94, 0.8, 0.46)), dry.mul(0.5));
+  foliageColor = nodeMix(foliageColor, foliageColor.mul(nodeVec3(1.08, 0.72, 0.38)), uniforms.autumn.mul(0.34));
+  foliageColor = nodeMix(foliageColor, nodeVec3(0.8, 0.91, 1), uniforms.frost.mul(0.42));
+  foliageColor = foliageColor.mul(nodeMix(nodeVec3(1), nodeVec3(1.04, 1.08, 1.06), uniforms.dew.mul(0.14)));
+  let color = nodeMix(baseColor, foliageColor, foliage.mul(uniforms.enabled));
   if (includeFlowers) {
-    const flower = smoothstep(0.03, 0.22, baseColor.r.sub(baseColor.g));
-    const flowerGain = mix(float(0.32), float(1), uniforms.bloom);
-    color = mix(color, color.mul(flowerGain), flower.mul(uniforms.enabled));
+    const flower = nodeSmoothstep(0.03, 0.22, baseColor.r.sub(baseColor.g));
+    const flowerGain = nodeMix(nodeFloat(0.32), nodeFloat(1), uniforms.bloom);
+    color = nodeMix(color, color.mul(flowerGain), flower.mul(uniforms.enabled));
   }
   return color;
 }

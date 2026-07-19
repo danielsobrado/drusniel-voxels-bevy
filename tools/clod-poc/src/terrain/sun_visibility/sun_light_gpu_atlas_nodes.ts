@@ -60,8 +60,8 @@ export function buildSunLightGpuAtlasNodes(worldXZ: TslNode): SunLightGpuAtlasNo
     MISSING_VISIBILITY_TOLERANCE_END,
     abs(sampled.sub(MISSING_VISIBILITY_CENTER)),
   );
-  const resolvedSample = mix(float(1), sampled, knownSample);
-  const visibility = mix(float(1), resolvedSample, atlasInside);
+  const resolvedSample = (mix as (...args: TslNode[]) => TslNode)(float(1), sampled, knownSample);
+  const visibility = (mix as (...args: TslNode[]) => TslNode)(float(1), resolvedSample, atlasInside);
   return { visibility, atlasInside };
 }
 
