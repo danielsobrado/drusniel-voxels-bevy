@@ -380,16 +380,17 @@ export function initFarSummaryIntegration(
       }
       if (performance.now() >= enrichmentDeadlineMs) break;
     }
-    if (performance.now() < enrichmentDeadlineMs) {
-      for (const [key, enrichment] of pendingUnifiedEnrichment) {
-        if (enrichment.nextSample < enrichment.tile.samples.length) continue;
-        const complete = stepFarSummaryUnifiedEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs);
-        if (complete) {
-          cache.commitExternalTile(enrichment.tile);
-          pendingUnifiedEnrichment.delete(key);
-        }
-        if (performance.now() >= enrichmentDeadlineMs) break;
+    // Always give canopy at least one turn after water, even if water exhausted the
+    // frame budget. Otherwise tiles can sit water-ready / canopy-pending with zero
+    // canopy progress for a full frame (flaky under scheduler noise).
+    for (const [key, enrichment] of pendingUnifiedEnrichment) {
+      if (enrichment.nextSample < enrichment.tile.samples.length) continue;
+      const complete = stepFarSummaryUnifiedEnrichment(enrichment, options.terrainSampler, enrichmentDeadlineMs);
+      if (complete) {
+        cache.commitExternalTile(enrichment.tile);
+        pendingUnifiedEnrichment.delete(key);
       }
+      if (performance.now() >= enrichmentDeadlineMs) break;
     }
 
     cache.evictColdTiles(frameIndex, nowMs);

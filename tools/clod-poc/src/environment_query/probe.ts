@@ -1,4 +1,5 @@
 import { resolveEnvironmentSampleHint } from "./batch.js";
+import { MIN_ENVIRONMENT_SAMPLE_HINT_M } from "./constants.js";
 import type {
   EnvironmentQuery,
   EnvironmentQueryMeta,
@@ -28,7 +29,9 @@ export function sampleEnvironmentQueryProbe(
   z: number,
   hintM: number,
 ): EnvironmentQueryProbe {
-  const hint = resolveEnvironmentSampleHint(hintM);
+  // Probe diagnostics want the finest legal hint when the caller passes 0 / invalid,
+  // not the batch-path default cell size.
+  const hint = resolveEnvironmentSampleHint(hintM, MIN_ENVIRONMENT_SAMPLE_HINT_M);
   return {
     x,
     z,

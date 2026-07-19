@@ -5,7 +5,9 @@ const DEEP_SHADER_SOURCE = readFileSync(new URL("./deep_ocean_material_v2.ts", i
 const DEEP_NODE_SOURCE = readFileSync(new URL("./deep_ocean_node_material.ts", import.meta.url), "utf8");
 const DEEP_VISUAL_SOURCE = readFileSync(new URL("./deep_ocean_visual.ts", import.meta.url), "utf8");
 const WATER_CONFIG_SOURCE = readFileSync(new URL("./water_config_defaults.ts", import.meta.url), "utf8");
-const CLIPMAP_SHADER_SOURCE = readFileSync(new URL("./water_material_uniforms.ts", import.meta.url), "utf8");
+// Clipmap fragment lives here after the WebGL water material module split; the
+// water_material_uniforms.ts path is now a re-export barrel only.
+const CLIPMAP_SHADER_SOURCE = readFileSync(new URL("./water_glsl_fragment.ts", import.meta.url), "utf8");
 
 describe("deep ocean material", () => {
   it("keeps reference-style sky reflection and sun glints in deep-ocean render paths", () => {
