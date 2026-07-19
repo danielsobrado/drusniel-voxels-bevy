@@ -20,6 +20,11 @@ export interface WaterFoamDistanceResetState {
   readonly auxiliary: WaterFoamAuxiliaryVisibilityState;
 }
 
+export interface WaterFoamDistanceCaptureResult<T> {
+  readonly value: T;
+  readonly reset: WaterFoamDistanceResetState;
+}
+
 export async function setWaterFoamDistanceOverride(
   page: CdpPage,
   distanceM: number | null,
@@ -57,6 +62,23 @@ export async function setWaterFoamAuxiliaryOverlaysHidden(
     throw new Error("foam auxiliary visibility returned an invalid state");
   }
   return state;
+}
+
+export async function runWaterFoamDistanceCapture<T>(
+  page: CdpPage,
+  capture: () => Promise<T>,
+): Promise<WaterFoamDistanceCaptureResult<T>> {
+  const captureOutcome = await captureResult(capture);
+  const cleanupOutcome = await captureResult(() => resetWaterFoamDistanceControls(page));
+
+  if (!captureOutcome.ok && !cleanupOutcome.ok) {
+    throw new Error(
+      `foam distance capture failed: ${message(captureOutcome.error)}; cleanup failed: ${message(cleanupOutcome.error)}`,
+    );
+  }
+  if (!captureOutcome.ok) throw captureOutcome.error;
+  if (!cleanupOutcome.ok) throw cleanupOutcome.error;
+  return { value: captureOutcome.value, reset: cleanupOutcome.value };
 }
 
 export async function resetWaterFoamDistanceControls(
@@ -146,6 +168,16 @@ export function assertWaterFoamAuxiliaryState(
   }
   if (!expectedHidden && state.matched !== 0) {
     throw new Error(`${label} foam auxiliary reset retained ${state.matched} snapshots`);
+  }
+}
+
+async function captureResult<T>(
+  operation: () => Promise<T>,
+): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (error) {
+    return { ok: false, error };
   }
 }
 
