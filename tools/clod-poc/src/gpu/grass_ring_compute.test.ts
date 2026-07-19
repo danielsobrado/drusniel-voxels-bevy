@@ -45,6 +45,16 @@ describe("grass ring compute capabilities", () => {
     expect(storageBindings).toHaveLength(GRASS_GPU_RING_STORAGE_BINDINGS);
   });
 
+  it("composes one canonical forest-light sample into each accepted blade", () => {
+    const composed = composeGrassRingShader();
+
+    expect(composed).toContain("sun_visibility: vec4<f32>");
+    expect(composed).toContain("@group(0) @binding(16) var forest_lighting_texture");
+    expect(composed).toContain("fn grass_sun_visibility");
+    expect(composed).toContain("textureLoad(forest_lighting_texture, coord, 0).g");
+    expect(composed).toContain("grass_sun_visibility(wpos)");
+  });
+
   it("binds shared grass ring instance attributes without writable buffer aliasing", () => {
     const offset = { label: "offset" } as unknown as GPUBuffer;
     const packed0 = { label: "packed0" } as unknown as GPUBuffer;
@@ -105,7 +115,7 @@ grass:
     expect(grassGpuRingStableKey(changed, 256)).not.toBe(grassGpuRingStableKey(base, 256));
   });
 
-  it("packs YAML LOD, width, and material inputs so GPU density mirrors the CPU helper", () => {
+  it("packs YAML LOD, width, material, and forest-light inputs", () => {
     const settings = {
       ...DEFAULT_GRASS_SETTINGS,
       distance: 180,
@@ -143,6 +153,7 @@ grass:
       materialDensity: [1.12, 0.18, 0.58, 0.02],
       heightDensity: [14, 34, 8, 1.04, 1, 0.58],
       frustumPlanes: [1, 2, 3, 4],
+      sunVisibility: [4096, 128, 1, 0],
     }, { near: 11, mid: 13, far: 17, super: 19 }, settings.ring);
     const f32 = new Float32Array(scratch);
     const u32 = new Uint32Array(scratch);
@@ -158,6 +169,9 @@ grass:
     expect(f32[36]).toBeCloseTo(14);
     expect(f32[39]).toBeCloseTo(1.04);
     expect(f32[44]).toBe(1);
+    expect(f32[72]).toBe(4096);
+    expect(f32[73]).toBe(128);
+    expect(f32[74]).toBe(1);
     expect(u32[20]).toBe(1234);
 
     const densityFromPacked = (distance: number) => {
@@ -172,6 +186,26 @@ grass:
     for (const distance of [1, 60, 120, 180, 220]) {
       expect(densityFromPacked(distance)).toBeCloseTo(computeGrassDensityScale(distance, settings), 6);
     }
+  });
+
+  it("fails open when no forest-light texture metadata is supplied", () => {
+    const scratch = packGrassGpuRingParams({
+      centerX: 0,
+      centerZ: 0,
+      worldCells: 256,
+      bands: { near: 10, mid: 20, far: 30, radius: 40 },
+      density: grassGpuRingDensityParams(DEFAULT_GRASS_SETTINGS),
+      bladeHeight: DEFAULT_GRASS_SETTINGS.bladeHeight,
+      bladeHeightVariation: DEFAULT_GRASS_SETTINGS.bladeHeightVariation,
+      slopeMinY: DEFAULT_GRASS_SETTINGS.slopeMinY,
+      minHeight: DEFAULT_GRASS_SETTINGS.minHeight,
+      maxHeight: DEFAULT_GRASS_SETTINGS.maxHeight,
+      maxInstancesPerTier: 1,
+      seed: 1,
+      jitter: 0,
+    }, { near: 1, mid: 1, far: 1, super: 1 });
+
+    expect(new Float32Array(scratch)[74]).toBe(0);
   });
 
   it("keeps tier compact regions aligned with indirect firstInstance", () => {

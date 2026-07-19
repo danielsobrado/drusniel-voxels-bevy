@@ -53,3 +53,19 @@ export function createGrassHydrologyTexture(device: GPUDevice, hydroData: GrassH
     usage: GPUTextureUsage.TEXTURE_BINDING,
   });
 }
+
+export function createGrassSunVisibilityFallbackTexture(device: GPUDevice): GPUTexture {
+  const texture = device.createTexture({
+    label: "grass ring fail-open sun visibility",
+    size: { width: 1, height: 1 },
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture },
+    new Uint8Array([0, 0, 0, 0]),
+    {},
+    { width: 1, height: 1 },
+  );
+  return texture;
+}
