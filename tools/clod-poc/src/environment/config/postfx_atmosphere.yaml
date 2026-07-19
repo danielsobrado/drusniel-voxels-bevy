@@ -1,13 +1,16 @@
 postfx_atmosphere:
   hillaire:
     enabled: true
-    strength: 0.30
-    rayleigh_color: [0.48, 0.66, 1.0]
-    mie_color: [1.0, 0.86, 0.68]
+    strength: 1.0
+    rayleigh_color: [0.62, 0.72, 0.86]
+    mie_color: [1.0, 0.92, 0.80]
     rayleigh_scale_height_m: 8200.0
     mie_scale_height_m: 1200.0
-    rayleigh_extinction: 0.00135
-    mie_extinction: 0.0026
+    # Per-meter sea-level extinction, green channel; RGB spread comes from
+    # RAYLEIGH_SPECTRAL_RATIO in code. Real-sky magnitude: ~50% light loss
+    # in the blue channel at 12 km, a few percent at 1 km.
+    rayleigh_extinction: 0.0000135
+    mie_extinction: 0.000021
     mie_g: 0.76
     max_distance_m: 12000.0
   froxels:

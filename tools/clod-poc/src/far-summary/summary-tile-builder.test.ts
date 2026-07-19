@@ -200,19 +200,23 @@ describe("summary tile builder", () => {
   });
 
   it("fills layout-v2 hydrology and deterministic canopy channels", () => {
+    let waterTerrainHeight: number | undefined;
     const tile = buildFarSummaryTile({
       key: { ring: 0, x: 0, z: 0, cellSizeM: 32 },
       ringConfig: { ...DEFAULT_FAR_SUMMARY_CONFIG.rings[0], tileCells: 1 },
       terrainSampler: {
         sampleHeight: () => 40,
-        sampleWaterSummary: (_x, _z, cellSizeM) => ({
-          coverage: 0.8,
-          waterLevel: 43,
-          bodyKind: 2,
-          shoreDistance: cellSizeM * 0.25,
-          flowX: 0.5,
-          flowZ: -0.25,
-        }),
+        sampleWaterSummary: (_x, _z, cellSizeM, terrainHeight) => {
+          waterTerrainHeight = terrainHeight;
+          return {
+            coverage: 0.8,
+            waterLevel: 43,
+            bodyKind: 2,
+            shoreDistance: cellSizeM * 0.25,
+            flowX: 0.5,
+            flowZ: -0.25,
+          };
+        },
         sampleCanopySummary: (originX, originZ, cellSizeM) => ({
           coverage: 0.6,
           canopyHeightAvg: 55,
@@ -241,6 +245,7 @@ describe("summary tile builder", () => {
       caveEntranceCoverage: 0,
       occluderHeight: 0,
     });
+    expect(waterTerrainHeight).toBe(40);
   });
 
   it("coarsens GPU canopy enrichment without diluting the native summary cell size", () => {

@@ -8,6 +8,13 @@ describe("volumetric cloud compositing", () => {
     expect(cloudNodeSource).not.toContain("worldPosition.y.mul(0.0031)");
   });
 
+  it("builds cloud shape from rotated multi-octave fBm with stable march jitter", () => {
+    expect(cloudNodeSource).toContain("function fbm3");
+    expect(cloudNodeSource).toContain("rotateOctaveDomain");
+    expect(cloudNodeSource).toContain("rotateErosionDomain");
+    expect(cloudNodeSource).not.toContain("time.mul(0.037)");
+  });
+
   it("adds premultiplied cloud radiance without multiplying alpha twice", () => {
     const result = compositePremultipliedCloudReference(
       [0.2, 0.4, 0.6],

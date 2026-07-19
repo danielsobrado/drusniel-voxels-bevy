@@ -316,9 +316,9 @@ export async function bootstrapClodPoc() {
         const graphHydrologyEnabled = searchParams.get("continentHydrology") !== "0"
           && searchParams.get("continent_hydrology") !== "0";
         const sampleWater = hydrologySystem && graphHydrologyEnabled
-          ? (x: number, z: number, cellSizeM = 1) => applyFarSummaryOceanFallback(
+          ? (x: number, z: number, cellSizeM = 1, terrainHeight?: number) => applyFarSummaryOceanFallback(
             sampleFarSummaryHydrology(hydrologySystem, x, z, cellSizeM),
-            farSummaryTerrainSampler.sampleHeight(x, z),
+            Number.isFinite(terrainHeight) ? terrainHeight! : farSummaryTerrainSampler.sampleHeight(x, z),
             seaLevel,
           )
           : undefined;

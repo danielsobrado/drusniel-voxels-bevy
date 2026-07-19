@@ -15,7 +15,7 @@ export interface FarTerrainSampler {
   sampleWaterCoverage?(x: number, z: number): number;
   sampleWaterCoverageForHeight?(x: number, z: number, height: number): number;
   /** Canonical hydrology graph sample when the world has one. */
-  sampleWaterSummary?(x: number, z: number, cellSizeM: number): FarSummaryWaterSample;
+  sampleWaterSummary?(x: number, z: number, cellSizeM: number, terrainHeight?: number): FarSummaryWaterSample;
   /** Same deterministic forest distribution used by near canopy. */
   sampleCanopySummary?(cellOriginX: number, cellOriginZ: number, cellSizeM: number): FarSummaryCanopySample;
 }
@@ -358,7 +358,7 @@ export function stepFarSummaryUnifiedWaterEnrichment(
     const tile = state.tile;
     const wx = tile.originX + (sx + 0.5) * tile.cellSizeM;
     const wz = tile.originZ + (sz + 0.5) * tile.cellSizeM;
-    const water = terrainSampler.sampleWaterSummary?.(wx, wz, tile.cellSizeM);
+    const water = terrainSampler.sampleWaterSummary?.(wx, wz, tile.cellSizeM, sample.heightAvg);
     sample.waterCoverage = clamp01(water?.coverage
       ?? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, sample.heightAvg)
       ?? sample.waterCoverage);
@@ -462,7 +462,7 @@ function sampleCell(build: FarSummaryTileBuildState, idx: number): FarSummarySam
   );
   const canopy = canopySummary?.coverage ?? terrainSampler.sampleCanopyCoverage?.(wx, wz) ?? 0;
   const waterHeight = Number.isFinite(hMax) ? hMax : sampleH;
-  const waterSummary = heightValid ? terrainSampler.sampleWaterSummary?.(wx, wz, cellM) : undefined;
+  const waterSummary = heightValid ? terrainSampler.sampleWaterSummary?.(wx, wz, cellM, sampleH) : undefined;
   const water = waterSummary?.coverage ?? (heightValid
     ? terrainSampler.sampleWaterCoverageForHeight?.(wx, wz, waterHeight) ?? terrainSampler.sampleWaterCoverage?.(wx, wz) ?? 0
     : 0);

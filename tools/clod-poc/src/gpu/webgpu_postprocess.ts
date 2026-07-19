@@ -58,7 +58,6 @@ import {
 } from "./postfx_gtao.js";
 import { createPostFxCloudShadowTexture, type PostFxCloudShadowTexture } from "./postfx_cloud_shadow.js";
 import { PostFxFroxelVolume, type PostFxFroxelVolumeTerrainInput } from "./postfx_froxel_volume.js";
-import { PostFxHillaireLuts } from "./postfx_hillaire_luts.js";
 import {
   parsePostFxStageFlags,
   stageAllowed,
@@ -137,7 +136,6 @@ export class WebGpuPostProcessPipeline {
   private halfResPass: HalfResMrtNode | null = null;
   private froxelTerrainInput: PostFxFroxelVolumeTerrainInput | null = null;
   private froxelCloudShadow: PostFxCloudShadowTexture | null = null;
-  private hillaireLuts: PostFxHillaireLuts | null = null;
   private readonly autoExposureMeter: WebGpuAutoExposureMeter;
   private readonly projectionInverse = new THREE.Matrix4();
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
@@ -304,8 +302,6 @@ export class WebGpuPostProcessPipeline {
     this.froxelVolume = null;
     this.disposeFroxelTerrainInput();
     this.disposeFroxelCloudShadow();
-    this.hillaireLuts?.dispose();
-    this.hillaireLuts = null;
   }
 
   private graphKey(): string {
@@ -716,7 +712,6 @@ export class WebGpuPostProcessPipeline {
       },
       froxelDebugMode: this.froxelDebugMode,
       froxelVolume: this.froxelVolume?.nodeInput() ?? null,
-      hillaireLuts: hillaireEnabled ? this.ensureHillaireLuts().nodeInput() : null,
     });
   }
 
@@ -733,11 +728,6 @@ export class WebGpuPostProcessPipeline {
 
   private createCloudCompositeNode(sourceRgb: TslAny, cloudTex: TslAny): TslAny {
     return createVolumetricCloudCompositeNode({ sourceRgb, cloudTex });
-  }
-
-  private ensureHillaireLuts(): PostFxHillaireLuts {
-    if (!this.hillaireLuts) this.hillaireLuts = new PostFxHillaireLuts(this.atmosphere.hillaire);
-    return this.hillaireLuts;
   }
 
   private createTraaNode(sourceRgb: TslAny, depthTex: TslAny, camera: THREE.Camera): TslAny {

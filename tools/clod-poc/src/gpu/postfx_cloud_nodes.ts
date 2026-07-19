@@ -34,7 +34,15 @@ export interface VolumetricCloudCompositeInput {
   cloudTex: TslAny;
 }
 
-const CLOUD_NOISE_SCALE = [0.00135, 0.002, 0.00135] as const;
+const CLOUD_BASE_NOISE_SCALE = 0.00052;
+const CLOUD_VERTICAL_SCALE_MULT = 1.6;
+const CLOUD_LACUNARITY = 2.17;
+const CLOUD_EROSION_SCALE_MULT = 5.9;
+const CLOUD_EROSION_STRENGTH = 0.38;
+const CLOUD_COVERAGE_SOFTNESS = 0.30;
+const CLOUD_WARP_NOISE_SCALE = 0.00013;
+const CLOUD_WARP_METERS = 520;
+const CLOUD_WARP_DIR = [0.62, 0.31, 0.72] as const;
 const CLOUD_BLUE_NOISE_SCALE = [132.37, 77.17] as const;
 const CLOUD_WIND_DIR = [0.821, 0.571] as const;
 const CLOUD_MIN_STEP_METERS = 8.0;
@@ -71,35 +79,89 @@ function valueNoise3(p: TslAny): TslAny {
   return tslMix(low, high, blend.z);
 }
 
-function cloudNoise(worldPosition: TslAny, windOffset: TslAny): TslAny {
-  const advectedPosition = worldPosition.sub(vec3(windOffset.x, 0, windOffset.y));
-  return valueNoise3(advectedPosition.mul(vec3(...CLOUD_NOISE_SCALE)));
+// Skewed rotations between octaves so no two octaves share aligned lattice axes;
+// aligned axes are what exposed the value-noise cells as an egg-crate ceiling.
+function rotateOctaveDomain(p: TslAny): TslAny {
+  return vec3(
+    p.x.mul(0.80).add(p.z.mul(0.60)).add(19.19),
+    p.y.sub(p.x.mul(0.23)).add(7.71),
+    p.z.mul(0.80).sub(p.x.mul(0.60)).add(5.31),
+  );
 }
 
-function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostFxCloudSettings): TslAny {
+function rotateErosionDomain(p: TslAny): TslAny {
+  return vec3(
+    p.x.mul(0.36).sub(p.y.mul(0.48)).add(p.z.mul(0.80)).add(31.7),
+    p.x.mul(0.80).add(p.y.mul(0.60)).add(11.3),
+    p.x.mul(0.48).sub(p.y.mul(0.64)).sub(p.z.mul(0.60)).add(3.9),
+  );
+}
+
+function fbm3(p: TslAny): TslAny {
+  const o1 = valueNoise3(p);
+  const p2 = rotateOctaveDomain(p.mul(CLOUD_LACUNARITY));
+  const o2 = valueNoise3(p2);
+  const p3 = rotateOctaveDomain(p2.mul(CLOUD_LACUNARITY));
+  const o3 = valueNoise3(p3);
+  return o1.mul(0.5333).add(o2.mul(0.2667)).add(o3.mul(0.1333));
+}
+
+function fbm2(p: TslAny): TslAny {
+  const o1 = valueNoise3(p);
+  const o2 = valueNoise3(rotateOctaveDomain(p.mul(CLOUD_LACUNARITY)));
+  return o1.mul(0.6667).add(o2.mul(0.3333));
+}
+
+function cloudLayerMask(worldPosition: TslAny, settings: PostFxCloudSettings): TslAny {
   const height01 = clamp(
     worldPosition.y.sub(settings.bottomMeters).div(settings.topMeters - settings.bottomMeters),
     0,
     1,
   );
   const horizonFade = Math.max(0.001, settings.horizonFade);
-  const layerMask = smoothstep(0, horizonFade, height01)
+  return smoothstep(0, horizonFade, height01)
     .mul(inverseSmoothstep(1 - horizonFade, 1, height01));
-  const base = cloudNoise(worldPosition, windOffset);
-  const detailPosition = vec3(
-    worldPosition.x.mul(1.73).add(worldPosition.z.mul(0.91)),
-    worldPosition.y.mul(1.91),
-    worldPosition.x.mul(-0.91).add(worldPosition.z.mul(1.73)),
-  ).add(vec3(47.3, 13.1, 91.7));
-  const detailWind = vec2(
-    windOffset.x.mul(1.73).add(windOffset.y.mul(0.91)),
-    windOffset.x.mul(-0.91).add(windOffset.y.mul(1.73)),
-  );
-  const detail = cloudNoise(detailPosition, detailWind);
-  const weather = base.mul(0.72).add(detail.mul(0.28));
-  const coverage = smoothstep(settings.coverage, 1, weather).mul(1.35);
-  const erosion = float(1).sub(detail.mul(0.22));
-  return clamp(coverage.mul(layerMask).mul(erosion).mul(settings.density), 0, 1);
+}
+
+function cloudBaseDomain(worldPosition: TslAny, windOffset: TslAny): TslAny {
+  const advected = worldPosition.sub(vec3(windOffset.x, 0, windOffset.y));
+  return advected.mul(vec3(
+    CLOUD_BASE_NOISE_SCALE,
+    CLOUD_BASE_NOISE_SCALE * CLOUD_VERTICAL_SCALE_MULT,
+    CLOUD_BASE_NOISE_SCALE,
+  ));
+}
+
+function cloudCoverageSignal(shape: TslAny, settings: PostFxCloudSettings): TslAny {
+  return smoothstep(settings.coverage, Math.min(1, settings.coverage + CLOUD_COVERAGE_SOFTNESS), shape);
+}
+
+function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostFxCloudSettings): TslAny {
+  const layerMask = cloudLayerMask(worldPosition, settings);
+  const advected = worldPosition.sub(vec3(windOffset.x, 0, windOffset.y));
+  const warpNoise = valueNoise3(advected.mul(CLOUD_WARP_NOISE_SCALE).add(vec3(101.3, 57.7, 23.1)));
+  const warped = advected
+    .add(vec3(...CLOUD_WARP_DIR).mul(warpNoise.sub(0.5).mul(CLOUD_WARP_METERS)))
+    .mul(vec3(
+      CLOUD_BASE_NOISE_SCALE,
+      CLOUD_BASE_NOISE_SCALE * CLOUD_VERTICAL_SCALE_MULT,
+      CLOUD_BASE_NOISE_SCALE,
+    ));
+  const cover = cloudCoverageSignal(fbm3(warped), settings).mul(layerMask);
+  const density = float(0).toVar();
+  If(cover.greaterThan(0.002), () => {
+    const erosion = fbm2(rotateErosionDomain(warped.mul(CLOUD_EROSION_SCALE_MULT)));
+    const eroded = cover.sub(erosion.mul(CLOUD_EROSION_STRENGTH).mul(float(1).sub(cover))).max(0);
+    density.assign(clamp(eroded.mul(settings.density), 0, 1));
+  });
+  return density;
+}
+
+// Two-octave, no-warp, no-erosion density for the sun occlusion march.
+function cloudDensityCheap(worldPosition: TslAny, windOffset: TslAny, settings: PostFxCloudSettings): TslAny {
+  const layerMask = cloudLayerMask(worldPosition, settings);
+  const shape = fbm2(cloudBaseDomain(worldPosition, windOffset));
+  return clamp(cloudCoverageSignal(shape, settings).mul(layerMask).mul(settings.density), 0, 1);
 }
 
 export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput): TslAny {
@@ -125,7 +187,9 @@ export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput)
     const tEnter = insideLayer.select(float(0), tEnterRaw.max(0));
     const tExit = tExitRaw.min(maxDistance).min(settings.maxDistanceMeters);
     const valid = tExit.greaterThan(tEnter).and(dirW.y.abs().greaterThan(1e-4));
-    const jitter = hashNoise2(screenUV.mul(vec2(CLOUD_BLUE_NOISE_SCALE[0], CLOUD_BLUE_NOISE_SCALE[1])).add(vec2(time.mul(0.037), time.mul(0.019))));
+    // Static per-pixel jitter: a time-varying pattern here crawls visibly because
+    // the cloud pass has no dedicated temporal reprojection.
+    const jitter = hashNoise2(screenUV.mul(vec2(CLOUD_BLUE_NOISE_SCALE[0], CLOUD_BLUE_NOISE_SCALE[1])));
     const segmentLength = tExit.sub(tEnter).div(steps).max(CLOUD_MIN_STEP_METERS);
     const transmittance = float(1).toVar();
     const radiance = vec3(0).toVar();
@@ -133,14 +197,14 @@ export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput)
     If(valid, () => {
       for (let step = 0; step < steps; step++) {
         const distance = tEnter.add(float(step).add(jitter).mul(segmentLength));
-        If(distance.lessThan(tExit), () => {
+        If(distance.lessThan(tExit).and(transmittance.greaterThan(0.02)), () => {
           const samplePosition = camPos.add(dirW.mul(distance));
           const density = cloudDensity(samplePosition, windOffset, settings);
           If(density.greaterThan(0.002), () => {
             const lightTau = float(0).toVar();
             for (let lightStep = 1; lightStep <= CLOUD_SUN_OCCLUSION_STEPS; lightStep++) {
               const lightPosition = samplePosition.add(sunDir.mul(lightStep * CLOUD_SUN_OCCLUSION_STEP_METERS));
-              lightTau.addAssign(cloudDensity(lightPosition, windOffset, settings).mul(CLOUD_SUN_OCCLUSION_STEP_METERS));
+              lightTau.addAssign(cloudDensityCheap(lightPosition, windOffset, settings).mul(CLOUD_SUN_OCCLUSION_STEP_METERS));
             }
             const sunVisibility = exp(lightTau.mul(-settings.absorption));
             const phaseForward = dirW.dot(sunDir).max(0).pow(2.2).mul(0.75).add(0.25);

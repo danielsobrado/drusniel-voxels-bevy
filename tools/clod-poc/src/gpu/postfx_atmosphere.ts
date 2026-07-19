@@ -39,16 +39,20 @@ export interface PostFxAtmosphereSettings {
   froxels: PostFxFroxelSettings;
 }
 
+// Rayleigh extinction per RGB channel relative to green (~545nm); derived from
+// sea-level coefficients (5.8, 13.5, 33.1)e-6 per meter.
+export const RAYLEIGH_SPECTRAL_RATIO: PostFxColor = [0.43, 1.0, 2.45];
+
 const FALLBACK_ATMOSPHERE: PostFxAtmosphereSettings = {
   hillaire: {
     enabled: true,
-    strength: 0.30,
-    rayleighColor: [0.48, 0.66, 1.0],
-    mieColor: [1.0, 0.86, 0.68],
+    strength: 1.0,
+    rayleighColor: [0.62, 0.72, 0.86],
+    mieColor: [1.0, 0.92, 0.80],
     rayleighScaleHeightMeters: 8200,
     mieScaleHeightMeters: 1200,
-    rayleighExtinction: 0.00135,
-    mieExtinction: 0.0026,
+    rayleighExtinction: 0.0000135,
+    mieExtinction: 0.000021,
     mieG: 0.76,
     maxDistanceMeters: 12000,
   },
@@ -151,6 +155,40 @@ export function henyeyGreenstein(cosTheta: number, g: number): number {
   const gg = clampedG * clampedG;
   const denom = Math.pow(Math.max(0.0001, 1 + gg - 2 * clampedG * clamp(cosTheta, -1, 1)), 1.5);
   return (1 - gg) / (4 * Math.PI * denom);
+}
+
+export interface AerialPerspectiveReferenceResult {
+  transmittance: PostFxColor;
+  color: PostFxColor;
+}
+
+// CPU mirror of the hillaire block in postfx_atmosphere_nodes.ts.
+export function aerialPerspectiveReference(
+  sceneColor: PostFxColor,
+  distanceMeters: number,
+  cameraHeightMeters: number,
+  cosTheta: number,
+  settings: PostFxHillaireSettings,
+): AerialPerspectiveReferenceResult {
+  const d = clamp(distanceMeters, 0, settings.maxDistanceMeters);
+  const rayleighDensity = Math.exp(-Math.max(0, cameraHeightMeters) / Math.max(0.0001, settings.rayleighScaleHeightMeters));
+  const mieDensity = Math.exp(-Math.max(0, cameraHeightMeters) / Math.max(0.0001, settings.mieScaleHeightMeters));
+  const tauMie = mieDensity * settings.mieExtinction * d;
+  const rayleighPhase = 0.75 * (1 + cosTheta * cosTheta);
+  const miePhase = Math.min(4, 4 * Math.PI * henyeyGreenstein(cosTheta, settings.mieG));
+  const transmittance: PostFxColor = [0, 0, 0];
+  const color: PostFxColor = [0, 0, 0];
+  for (let c = 0; c < 3; c++) {
+    const tauRayleigh = rayleighDensity * settings.rayleighExtinction * RAYLEIGH_SPECTRAL_RATIO[c] * d;
+    const tau = tauRayleigh + tauMie;
+    const t = Math.exp(-tau);
+    const rayleighWeight = tauRayleigh / Math.max(1e-5, tau);
+    const inscatter = settings.rayleighColor[c] * rayleighPhase * rayleighWeight
+      + settings.mieColor[c] * miePhase * (1 - rayleighWeight);
+    transmittance[c] = t;
+    color[c] = sceneColor[c] * t + inscatter * (1 - t) * settings.strength;
+  }
+  return { transmittance, color };
 }
 
 export function parsePostFxFroxelDebugMode(value: unknown): PostFxFroxelDebugMode {

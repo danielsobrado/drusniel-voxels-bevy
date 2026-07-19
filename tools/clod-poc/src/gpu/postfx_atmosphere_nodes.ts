@@ -7,22 +7,22 @@ import {
   float,
   getViewPosition,
   log2,
-  mix,
   screenUV,
   smoothstep,
   time,
-  texture,
   vec2,
   vec3,
   vec4,
   texture3D,
 } from "three/tsl";
-import type { PostFxAtmosphereSettings, PostFxFroxelDebugMode } from "./postfx_atmosphere.js";
+import {
+  RAYLEIGH_SPECTRAL_RATIO,
+  type PostFxAtmosphereSettings,
+  type PostFxFroxelDebugMode,
+} from "./postfx_atmosphere.js";
 import type { PostFxFroxelVolumeNodeInput } from "./postfx_froxel_volume.js";
-import type { PostFxHillaireLutNodeInput } from "./postfx_hillaire_luts.js";
 
 type TslAny = any;
-const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
 
 export interface HillaireFroxelAerialNodeInput {
   sourceRgb: TslAny;
@@ -34,7 +34,6 @@ export interface HillaireFroxelAerialNodeInput {
   settings: PostFxAtmosphereSettings;
   froxelDebugMode?: PostFxFroxelDebugMode;
   froxelVolume?: PostFxFroxelVolumeNodeInput | null;
-  hillaireLuts?: PostFxHillaireLutNodeInput | null;
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
@@ -59,7 +58,6 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
   const froxelSteps = froxels.steps;
   const froxelDebugMode = input.froxelDebugMode ?? "off";
   const volume = input.froxelVolume;
-  const hillaireLuts = input.hillaireLuts;
 
   return Fn((): TslAny => {
     const depth = input.depthTex.x;
@@ -140,34 +138,28 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
     }
 
     if (hillaireEnabled) {
-      const clampedDistance = isSky.select(float(maxAerialDistance), distance.min(maxAerialDistance));
+      const clampedDistance = distance.min(maxAerialDistance);
       const cameraHeight = input.cameraPosition.y.max(0);
       const rayleighDensity = densityAtHeight(cameraHeight, hillaire.rayleighScaleHeightMeters);
       const mieDensity = densityAtHeight(cameraHeight, hillaire.mieScaleHeightMeters);
-      const opticalRayleigh = rayleighDensity.mul(hillaire.rayleighExtinction).mul(clampedDistance);
-      const opticalMie = mieDensity.mul(hillaire.mieExtinction).mul(clampedDistance);
-      const transmittance = exp(opticalRayleigh.add(opticalMie).mul(-1));
+      // Per-meter extinction; rayleighExtinction is the green-channel coefficient
+      // spread over RGB by the spectral ratio so red survives farther than blue.
+      const tauRayleigh = vec3(...RAYLEIGH_SPECTRAL_RATIO)
+        .mul(rayleighDensity.mul(hillaire.rayleighExtinction).mul(clampedDistance));
+      const tauMie = mieDensity.mul(hillaire.mieExtinction).mul(clampedDistance);
+      const tauTotal = tauRayleigh.add(tauMie);
+      const transmittance = exp(tauTotal.negate());
       const cosTheta = dirW.dot(sunDir);
-      const rayleighPhase = cosTheta.mul(cosTheta).add(1).mul(3 / (16 * Math.PI));
-      const miePhase = phaseHenyeyGreenstein(cosTheta, hillaire.mieG);
-      let transmittanceRgb: TslAny = vec3(transmittance);
-      let lutInscatter: TslAny = vec3(0);
-      if (hillaireLuts) {
-        const heightUv = clamp(cameraHeight.div(40000), 0, 1);
-        const sunUv = clamp(sunDir.y.mul(0.5).add(0.5), 0, 1);
-        const viewUv = clamp(dirW.y.mul(0.5).add(0.5), 0, 1);
-        transmittanceRgb = transmittanceRgb.mul((texture(hillaireLuts.transmittanceTexture, vec2(sunUv, heightUv)) as TslAny).rgb);
-        lutInscatter = (texture(hillaireLuts.skyViewTexture, vec2(screenUV.x, viewUv)) as TslAny).rgb
-          .add((texture(hillaireLuts.multiScatterTexture, vec2(sunUv, heightUv)) as TslAny).rgb);
-      }
-      const inscatter = vec3(...hillaire.rayleighColor)
-        .mul(rayleighPhase)
-        .mul(opticalRayleigh)
-        .add(vec3(...hillaire.mieColor).mul(miePhase).mul(opticalMie).mul(6));
-      const hazed = color.mul(transmittanceRgb)
-        .add(inscatter.add(lutInscatter).mul(float(1).sub(transmittance)).mul(hillaire.strength));
-      const distanceFade = smoothstep(0, maxAerialDistance, clampedDistance);
-      color.assign(tslMix(color, hazed, clamp(distanceFade, 0, 1).mul(isSky.select(float(0), float(1)))));
+      // 4pi-normalized phases (mean 1 over the sphere) keep in-scatter energy-conserving:
+      // removed light is replaced by (1 - T) * inscatterColor, never darkened twice.
+      const rayleighPhase = cosTheta.mul(cosTheta).add(1).mul(0.75);
+      const miePhase = phaseHenyeyGreenstein(cosTheta, hillaire.mieG).mul(4 * Math.PI).min(4);
+      const rayleighWeight = tauRayleigh.div(tauTotal.max(1e-5));
+      const inscatter = vec3(...hillaire.rayleighColor).mul(rayleighPhase).mul(rayleighWeight)
+        .add(vec3(...hillaire.mieColor).mul(miePhase).mul(float(1).sub(rayleighWeight)));
+      const hazed = color.mul(transmittance)
+        .add(inscatter.mul(float(1).sub(transmittance)).mul(hillaire.strength));
+      color.assign(isSky.select(color, hazed));
     }
 
     return color;

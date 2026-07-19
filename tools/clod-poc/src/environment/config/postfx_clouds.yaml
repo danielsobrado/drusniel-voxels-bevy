@@ -3,8 +3,9 @@ postfx_clouds:
   bottom_m: 850.0
   top_m: 1450.0
   max_distance_m: 14000.0
-  steps: 24
-  coverage: 0.69
+  steps: 32
+  # Coverage is a soft threshold on 3-octave fBm (mean ~0.5): lower = more sky covered.
+  coverage: 0.56
   density: 0.62
   wind_speed_mps: 18.0
   absorption: 0.035
