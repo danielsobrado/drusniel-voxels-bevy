@@ -1,6 +1,7 @@
 import type GUI from "lil-gui";
 import {
   gravelBarStonesEnabled,
+  readGravelBedSettings,
   resetGravelBarRuntimeOverrides,
   setGravelBarStonesEnabled,
 } from "../../water/gravel_bar_runtime.js";
@@ -10,14 +11,21 @@ export interface GravelBarGuiDeps {
   readonly rebuildStones: () => void;
 }
 
+interface EnvironmentGuiController extends GuiController {
+  disable(): unknown;
+}
+
 interface GravelBarGuiModel {
   stonesEnabled: boolean;
+  bedAuthority: string;
   resetStonesOverride: () => void;
 }
 
 export function addGravelBarGui(folder: GUI, deps: GravelBarGuiDeps): void {
+  const bed = readGravelBedSettings();
   const model: GravelBarGuiModel = {
     stonesEnabled: gravelBarStonesEnabled(),
+    bedAuthority: bed.enabled ? "enabled at startup" : "disabled in water.yaml",
     resetStonesOverride: () => undefined,
   };
   const liveControllers: GuiController[] = [];
@@ -28,6 +36,9 @@ export function addGravelBarGui(folder: GUI, deps: GravelBarGuiDeps): void {
       setGravelBarStonesEnabled(enabled);
       deps.rebuildStones();
     }));
+  (folder.add(model, "bedAuthority") as EnvironmentGuiController)
+    .name("gravel bed authority")
+    .disable();
 
   model.resetStonesOverride = () => {
     resetGravelBarRuntimeOverrides();

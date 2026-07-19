@@ -1,6 +1,14 @@
 import type { BorderCoastOceanConfig } from "../terrain/border_coast_config.js";
 import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
 import type { WaterConfig } from "../water/waterConfig.js";
+import type {
+  HydrologyGravelBarsConfig,
+  HydrologyGravelBedConfig,
+} from "../water/hydrologyConfig.js";
+import {
+  readGravelBarSettings,
+  readGravelBedSettings,
+} from "../water/gravel_bar_runtime.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
 import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
@@ -30,7 +38,9 @@ const textEncoder = new TextEncoder();
 // widths), moving every traced river/lake carve; pages cached under v9 traces are stale.
 // v11: traced worlds lock river-corridor vertices during parent simplification, changing
 // every parent/root mesh along channels; v10-cached parents lack the preserved trench.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v11-corridor-locks";
+// v12: gravel-bar bed elevation and its deterministic visual field participate in terrain
+// identity before the authority is allowed to affect startup or streamed terrain.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v12-gravel-bed-authority";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -111,7 +121,12 @@ export interface TerrainSourceInputs {
   borderCoastOceanConfig: BorderCoastOceanConfig;
   waterConfig: Pick<WaterConfig, "enabled" | "source"> & {
     fakeBodies: { carveTerrain: boolean };
-    hydrology: { enabled: boolean; unifiedStartup: boolean };
+    hydrology: {
+      enabled: boolean;
+      unifiedStartup: boolean;
+      gravelBars?: HydrologyGravelBarsConfig;
+      gravelBed?: HydrologyGravelBedConfig;
+    };
   };
   proceduralTextureEnabled: boolean;
   proceduralTextureHash: string | null;
@@ -154,6 +169,8 @@ export function normalizeTerrainSourceInputs(
       hydrology: {
         enabled: input.waterConfig?.hydrology?.enabled ?? false,
         unifiedStartup: input.waterConfig?.hydrology?.unifiedStartup ?? false,
+        gravelBars: { ...(input.waterConfig?.hydrology?.gravelBars ?? readGravelBarSettings()) },
+        gravelBed: { ...(input.waterConfig?.hydrology?.gravelBed ?? readGravelBedSettings()) },
       },
     },
     proceduralTextureEnabled: input.proceduralTextureEnabled ?? false,
@@ -220,6 +237,8 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
       carveTerrain: source.waterConfig.fakeBodies.carveTerrain,
       hydrologyEnabled: source.waterConfig.hydrology.enabled,
       unifiedStartup: source.waterConfig.hydrology.unifiedStartup,
+      gravelBars: source.waterConfig.hydrology.gravelBars,
+      gravelBed: source.waterConfig.hydrology.gravelBed,
     },
     proceduralTextureEnabled: source.proceduralTextureEnabled,
     proceduralTextureHash: source.proceduralTextureHash,

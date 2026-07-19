@@ -1,6 +1,7 @@
 import {
   DEFAULT_HYDROLOGY_CONFIG,
   type HydrologyGravelBarsConfig,
+  type HydrologyGravelBedConfig,
 } from "./hydrologyConfig.js";
 
 const GRAVEL_BAR_QUERY_KEYS = [
@@ -10,6 +11,7 @@ const GRAVEL_BAR_QUERY_KEYS = [
 ] as const;
 
 let settings = cloneGravelBarSettings(DEFAULT_HYDROLOGY_CONFIG.gravelBars);
+let bedSettings = cloneGravelBedSettings(DEFAULT_HYDROLOGY_CONFIG.gravelBed);
 let stonesEnabledOverride: boolean | null = null;
 
 export function setGravelBarSettings(next: HydrologyGravelBarsConfig): void {
@@ -18,6 +20,14 @@ export function setGravelBarSettings(next: HydrologyGravelBarsConfig): void {
 
 export function readGravelBarSettings(): HydrologyGravelBarsConfig {
   return settings;
+}
+
+export function setGravelBedSettings(next: HydrologyGravelBedConfig): void {
+  bedSettings = cloneGravelBedSettings(next);
+}
+
+export function readGravelBedSettings(): HydrologyGravelBedConfig {
+  return bedSettings;
 }
 
 export function setGravelBarStonesEnabled(enabled: boolean): void {
@@ -34,6 +44,10 @@ export function gravelBarStonesEnabled(search = currentSearch()): boolean {
 }
 
 function cloneGravelBarSettings(config: HydrologyGravelBarsConfig): HydrologyGravelBarsConfig {
+  return { ...config };
+}
+
+function cloneGravelBedSettings(config: HydrologyGravelBedConfig): HydrologyGravelBedConfig {
   return { ...config };
 }
 

@@ -59,6 +59,14 @@ water:
       max_depth_m: 1.35
       min_flow_strength: 0.015
       max_flow_strength: 0.95
+    # Build-time terrain authority. It remains disabled until CLOD/collider parity and
+    # headed continuity/non-floating acceptance are complete.
+    gravel_bar_bed:
+      enabled: false
+      max_elevation_m: 0.7
+      min_wet_depth_m: 0.18
+      continuity_reserve_m: 0.32
+      bank_clearance_m: 0.12
     water_surface:
       far_reduce_factor: 8
       far_level_min_cell_size: 12.0

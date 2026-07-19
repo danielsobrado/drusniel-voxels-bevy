@@ -8,6 +8,14 @@
 import type { TerrainFieldConfigInput } from "../terrain/terrain_surface.js";
 import type { HydrologyGraph } from "../world/hydrology_graph/hydrology_graph.js";
 import type { GraphTerrainCarveConfig } from "./graph_hydrology.js";
+import {
+  readGravelBarSettings,
+  readGravelBedSettings,
+} from "./gravel_bar_runtime.js";
+import type {
+  HydrologyGravelBarsConfig,
+  HydrologyGravelBedConfig,
+} from "./hydrologyConfig.js";
 import type { WaterConfig } from "./waterConfig.js";
 import type { HydrologyTile, HydrologyTileRemoteSource } from "./hydrologyTileSource.js";
 import type {
@@ -24,6 +32,8 @@ export interface HydrologyTileRemoteBuilder extends HydrologyTileRemoteSource {
     drySentinelDepthM: number;
     hydrologyGraph: HydrologyGraph | null;
     hydrologyCarve: GraphTerrainCarveConfig | null;
+    gravelBars?: HydrologyGravelBarsConfig;
+    gravelBed?: HydrologyGravelBedConfig;
   }): void;
   dispose(): void;
 }
@@ -117,6 +127,8 @@ export function createHydrologyTileRemoteBuilder(): HydrologyTileRemoteBuilder |
         drySentinelDepthM: input.drySentinelDepthM,
         hydrologyGraph: input.hydrologyGraph,
         hydrologyCarve: input.hydrologyCarve,
+        gravelBars: { ...(input.gravelBars ?? readGravelBarSettings()) },
+        gravelBed: { ...(input.gravelBed ?? readGravelBedSettings()) },
       });
       configId = nextConfigId;
     },

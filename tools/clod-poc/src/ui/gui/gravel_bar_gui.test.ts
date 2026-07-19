@@ -4,12 +4,14 @@ import {
   gravelBarStonesEnabled,
   resetGravelBarRuntimeOverrides,
   setGravelBarSettings,
+  setGravelBedSettings,
 } from "../../water/gravel_bar_runtime.js";
 import { addGravelBarGui } from "./gravel_bar_gui.js";
 
 interface AddCall {
   prop: string;
   target: Record<string, unknown>;
+  disabled: boolean;
   onChange?: (value: unknown) => void;
   updateDisplay: ReturnType<typeof vi.fn>;
 }
@@ -20,6 +22,7 @@ function fakeFolder(calls: AddCall[]): any {
       const call: AddCall = {
         prop,
         target,
+        disabled: false,
         updateDisplay: vi.fn(),
       };
       calls.push(call);
@@ -27,6 +30,10 @@ function fakeFolder(calls: AddCall[]): any {
         name: () => controller,
         onChange: (handler: (value: unknown) => void) => {
           call.onChange = handler;
+          return controller;
+        },
+        disable: () => {
+          call.disabled = true;
           return controller;
         },
         updateDisplay: call.updateDisplay,
@@ -43,10 +50,14 @@ beforeEach(() => {
     enabled: true,
     stonesEnabled: false,
   });
+  setGravelBedSettings({
+    ...DEFAULT_HYDROLOGY_CONFIG.gravelBed,
+    enabled: false,
+  });
 });
 
 describe("addGravelBarGui", () => {
-  it("adds a live stone toggle", () => {
+  it("adds a live stone toggle and read-only bed authority status", () => {
     const calls: AddCall[] = [];
     const rebuildStones = vi.fn();
 
@@ -54,8 +65,12 @@ describe("addGravelBarGui", () => {
 
     expect(calls.map((call) => call.prop)).toEqual([
       "stonesEnabled",
+      "bedAuthority",
       "resetStonesOverride",
     ]);
+    expect(calls.find((call) => call.prop === "bedAuthority")?.disabled).toBe(true);
+    expect(calls.find((call) => call.prop === "bedAuthority")?.target.bedAuthority)
+      .toBe("disabled in water.yaml");
 
     calls.find((call) => call.prop === "stonesEnabled")?.onChange?.(true);
     expect(gravelBarStonesEnabled("")).toBe(true);
