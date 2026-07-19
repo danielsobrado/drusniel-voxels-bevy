@@ -4,6 +4,7 @@ import { createSceneGui } from "../../../ui/gui/scene_gui.js";
 import { createSunLightGui } from "../../../ui/gui/sun_light_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
+import { installBiomeVisualMaterialRouting } from "../../../environment/biome_visual_material_routing.js";
 import { applyTreeQualityPreset } from "../../state/tree_quality_presets.js";
 import type { PostProcessQualityPreset } from "../../state/postprocess_quality_presets.js";
 import type GUI from "lil-gui";
@@ -76,6 +77,12 @@ export function runGuiStartup(
   } = input.runtime;
   const { applyColorAdjustmentsToTerrain } = input.terrainView;
   const { updateInfo, applyClodPerfMode } = infoPanel;
+
+  installBiomeVisualMaterialRouting({
+    scene: input.scene,
+    materialController,
+    grassController,
+  });
 
   const farSummaryIntegration = (window as unknown as Record<string, unknown>).__drusnielFarSummary;
 
