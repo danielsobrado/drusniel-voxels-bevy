@@ -9,7 +9,25 @@ import type { BiomeVisualStateSettings } from "./biome_visual_state_config.js";
 export const BIOME_VISUAL_SEASON_QUERY_KEYS = ["biomeSeasonT", "biomeSeason"] as const;
 export const BIOME_VISUAL_STATE_DEBUG_PROPERTY = "__drusnielBiomeVisualState";
 
+export type BiomeVisualStateOverride = Partial<Pick<BiomeVisualState,
+  | "enabled"
+  | "seasonT"
+  | "green"
+  | "autumn"
+  | "bloom"
+  | "snowlineM"
+  | "glacialMurkiness"
+  | "morningMist"
+  | "pollenAmount"
+  | "frostAmount"
+  | "wetness"
+>>;
+
 let activeBiomeVisualStateRuntime: BiomeVisualStateRuntime | null = null;
+let activeBiomeVisualStateOverride: Readonly<BiomeVisualStateOverride> | null = null;
+let cachedOverrideBase: BiomeVisualState | null = null;
+let cachedOverrideValue: Readonly<BiomeVisualStateOverride> | null = null;
+let cachedOverrideState: BiomeVisualState | null = null;
 
 export interface BiomeVisualStateRuntimeOptions {
   readonly settings: BiomeVisualStateSettings;
@@ -74,10 +92,39 @@ export function createBiomeVisualStateRuntime(
 
 export function bindActiveBiomeVisualStateRuntime(runtime: BiomeVisualStateRuntime | null): void {
   activeBiomeVisualStateRuntime = runtime;
+  invalidateOverrideCache();
 }
 
 export function readActiveBiomeVisualState(): BiomeVisualState | null {
-  return activeBiomeVisualStateRuntime?.current() ?? null;
+  const base = activeBiomeVisualStateRuntime?.current() ?? null;
+  return base ? applyBiomeVisualStateOverride(base, activeBiomeVisualStateOverride) : null;
+}
+
+export function setBiomeVisualStateOverride(override: BiomeVisualStateOverride | null): void {
+  activeBiomeVisualStateOverride = override ? sanitizeBiomeVisualStateOverride(override) : null;
+  invalidateOverrideCache();
+}
+
+export function clearBiomeVisualStateOverride(): void {
+  setBiomeVisualStateOverride(null);
+}
+
+export function readBiomeVisualStateOverride(): Readonly<BiomeVisualStateOverride> | null {
+  return activeBiomeVisualStateOverride;
+}
+
+export function applyBiomeVisualStateOverride(
+  base: BiomeVisualState,
+  override: Readonly<BiomeVisualStateOverride> | null,
+): BiomeVisualState {
+  if (!override) return base;
+  if (cachedOverrideBase === base && cachedOverrideValue === override && cachedOverrideState) {
+    return cachedOverrideState;
+  }
+  cachedOverrideBase = base;
+  cachedOverrideValue = override;
+  cachedOverrideState = Object.freeze({ ...base, ...override });
+  return cachedOverrideState;
 }
 
 export function resolveBiomeVisualSeasonT(
@@ -110,8 +157,43 @@ export function installBiomeVisualStateDebugProperty(
   Object.defineProperty(target, BIOME_VISUAL_STATE_DEBUG_PROPERTY, {
     configurable: true,
     enumerable: false,
-    get: () => runtime.current(),
+    get: () => applyBiomeVisualStateOverride(runtime.current(), activeBiomeVisualStateOverride),
   });
+}
+
+function sanitizeBiomeVisualStateOverride(
+  override: BiomeVisualStateOverride,
+): Readonly<BiomeVisualStateOverride> {
+  const next: BiomeVisualStateOverride = {};
+  if (typeof override.enabled === "boolean") next.enabled = override.enabled;
+  if (override.seasonT !== undefined) next.seasonT = normalizeCycle(override.seasonT);
+  assignFraction(next, "green", override.green);
+  assignFraction(next, "autumn", override.autumn);
+  assignFraction(next, "bloom", override.bloom);
+  assignFraction(next, "glacialMurkiness", override.glacialMurkiness);
+  assignFraction(next, "morningMist", override.morningMist);
+  assignFraction(next, "pollenAmount", override.pollenAmount);
+  assignFraction(next, "frostAmount", override.frostAmount);
+  assignFraction(next, "wetness", override.wetness);
+  if (override.snowlineM !== undefined && Number.isFinite(override.snowlineM)) {
+    next.snowlineM = Math.max(0, override.snowlineM);
+  }
+  return Object.freeze(next);
+}
+
+function assignFraction<K extends keyof BiomeVisualStateOverride>(
+  target: BiomeVisualStateOverride,
+  key: K,
+  value: BiomeVisualStateOverride[K] | undefined,
+): void {
+  if (typeof value !== "number") return;
+  target[key] = clampFraction(value) as BiomeVisualStateOverride[K];
+}
+
+function invalidateOverrideCache(): void {
+  cachedOverrideBase = null;
+  cachedOverrideValue = null;
+  cachedOverrideState = null;
 }
 
 function normalizeCycle(value: number): number {
