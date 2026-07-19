@@ -5,6 +5,7 @@ import {
   HydrologyEnvironmentQuery,
   type HydrologyEnvironmentAuthority,
 } from "./hydrology_adapter.js";
+import { resolveHydrologyRiverMetrics } from "./hydrology_river_metrics.js";
 import {
   SunVisibilityEnvironmentQuery,
   type SunVisibilityEnvironmentAuthority,
@@ -37,6 +38,13 @@ export function createEnvironmentQueryRuntime(hydrologySystem: HydrologySystem):
   return createEnvironmentQueryRuntimeFromAuthorities({
     hydrology: {
       sample: (x, z, hintM) => hydrologySystem.sample(x, z, hintM),
+      riverMetrics: (x, z, hintM, sample) => resolveHydrologyRiverMetrics(
+        hydrologySystem,
+        sample,
+        x,
+        z,
+        hintM,
+      ),
       revision: getDigEditRevision,
     },
     terrain: createLiveTerrainEnvironmentAuthority(),
