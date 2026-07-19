@@ -24,6 +24,8 @@ export interface SunLightGpuAtlasSample {
   readonly cellSizeM: number;
 }
 
+export type SunLightGpuAtlasListener = (state: SunLightGpuAtlasState) => void;
+
 const state: SunLightGpuAtlasState = {
   texture: createTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT])),
   originX: 0,
@@ -32,6 +34,7 @@ const state: SunLightGpuAtlasState = {
   valid: 0,
   version: 0,
 };
+const listeners = new Set<SunLightGpuAtlasListener>();
 
 function createTexture(width: number, height: number, data: Uint8Array): THREE.DataTexture {
   const texture = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.UnsignedByteType);
@@ -58,6 +61,12 @@ function resizeTexture(width: number, height: number, data: Uint8Array): void {
 
 export function getSunLightGpuAtlas(): SunLightGpuAtlasState {
   return state;
+}
+
+export function subscribeSunLightGpuAtlas(listener: SunLightGpuAtlasListener): () => void {
+  listeners.add(listener);
+  listener(state);
+  return () => listeners.delete(listener);
 }
 
 export function sampleSunLightGpuAtlas(x: number, z: number): SunLightGpuAtlasSample {
@@ -133,15 +142,19 @@ export function updateSunLightGpuAtlas(
   state.valid = options.active && tileCount > 0 ? 1 : 0;
   state.version += 1;
   resizeTexture(width, height, data);
+  notifyListeners();
 }
 
 export function invalidateSunLightGpuAtlas(): void {
-  // Called every frame while the feature is disabled; re-invalidating would
-  // reallocate the texture and bump the version consumers re-upload on.
   if (state.valid === 0 && state.texture.image.width === DEFAULT_ATLAS_SIZE && state.texture.image.height === DEFAULT_ATLAS_SIZE) return;
   state.valid = 0;
   state.version += 1;
   resizeTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT]));
+  notifyListeners();
+}
+
+function notifyListeners(): void {
+  for (const listener of listeners) listener(state);
 }
 
 function atlasImage(): { readonly data: ArrayLike<number>; readonly width: number; readonly height: number } {
