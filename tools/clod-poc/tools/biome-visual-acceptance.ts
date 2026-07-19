@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
+import { ensureBrowserExecutable } from "./browser-executable.js";
 import {
   evaluateBiomeVisualAcceptance,
   type BiomeVisualRuntimeState,
@@ -41,6 +42,7 @@ interface SeasonCapture {
 const CAPTURE_VARIANTS: readonly CaptureVariant[] = ["terrain", "grass", "trees", "understory"];
 
 async function main(): Promise<void> {
+  ensureBrowserExecutable();
   const args = parseCliArgs(process.argv.slice(2));
   const world = Math.max(1, Math.floor(numberArg(args, "world", 16)));
   const seed = stringArg(args, "seed", "1");
