@@ -1,3 +1,13 @@
+import {
+  WATER_FOAM_BASE_WEIGHT,
+  WATER_FOAM_DETAIL_WEIGHT,
+  WATER_FOAM_MAX_COVERAGE,
+  WATER_FOAM_PATTERN_END,
+  WATER_FOAM_PATTERN_START,
+  WATER_FOAM_RIVER_SHORE_ATTENUATION,
+  WATER_FOAM_SHORE_DISTANCE_WEIGHT,
+} from "./water_foam_model.js";
+
 function levelColorGlsl(): string {
   return [
     "  vec3 waterLevelColor(float level) {",
@@ -209,17 +219,21 @@ export const WATER_FRAG = /* glsl */ `
     float varNorm = sqrt(blend * blend + (1.0 - blend) * (1.0 - blend));
     float foamBlend = (mix(foamA1, foamB1, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
     float foamDetail = (mix(foamA2, foamB2, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
-    float breakup = smoothstep(0.35, 0.82, foamBlend * 0.62 + foamDetail * 0.38);
-    float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
-    float bankContact = max(
-      1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth),
-      1.0 - smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, vShoreDistance)
+    float breakup = smoothstep(
+      ${WATER_FOAM_PATTERN_START},
+      ${WATER_FOAM_PATTERN_END},
+      foamBlend * ${WATER_FOAM_BASE_WEIGHT} + foamDetail * ${WATER_FOAM_DETAIL_WEIGHT}
     );
-    float shore = bankContact * wetFade * breakup * uFoamShoreStrength;
+    float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
+    float depthContact = 1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth);
+    float distanceContact = 1.0 - smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, vShoreDistance);
+    float bankContact = max(depthContact, distanceContact * ${WATER_FOAM_SHORE_DISTANCE_WEIGHT});
+    float shoreBodyWeight = mix(1.0, ${WATER_FOAM_RIVER_SHORE_ATTENUATION}, riverWeight);
+    float shoreSource = bankContact * uFoamShoreStrength * shoreBodyWeight;
     float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
-    float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, vFlow.w);
-    float riverFoam = riverFast * riverDrop * uFoamRiverStrength * wetFade * (0.25 + 0.75 * breakup);
-    float foam = clamp(shore + riverFoam, 0.0, 1.0);
+    float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, abs(vFlow.w));
+    float rapidSource = riverFast * riverDrop * riverWeight * uFoamRiverStrength;
+    float foam = clamp((shoreSource + rapidSource) * breakup * wetFade, 0.0, ${WATER_FOAM_MAX_COVERAGE});
 
     float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.30;
     float crestScatter = smoothstep(0.45, 0.95, foamBlend) * 0.24;
@@ -232,8 +246,15 @@ export const WATER_FRAG = /* glsl */ `
     );
     vec3 sunSpec = vec3(1.0, 0.92, 0.76) * glitter;
     vec3 litWater = mix(waterColor + sss + sunSpec, envReflection, clamp(fres * 0.72 * bodyExtra.y, 0.0, 0.82));
+    float waterLuminance = dot(litWater, vec3(0.2126, 0.7152, 0.0722));
+    float foamLighting = clamp(
+      waterLuminance * 0.55 + max(dot(normal, sunDir), 0.0) * 0.35 + 0.22,
+      0.18,
+      0.95
+    );
+    vec3 litFoam = uFoamColor * foamLighting;
 
-    vec3 finalColor = mix(litWater, uFoamColor, foam);
+    vec3 finalColor = mix(litWater, litFoam, foam);
     finalColor = mix(finalColor, waterLevelColor(vLevel), uClipmapTint * 0.18);
     float alpha = clamp(uAlpha + fres * 0.18, 0.0, 1.0);
 
@@ -243,7 +264,7 @@ export const WATER_FRAG = /* glsl */ `
     else if (uDebugMode == 3) outCol = vec3(fres);
     else if (uDebugMode == 4) outCol = vec3(vBodyMask);
     else if (uDebugMode == 5) outCol = waterLevelColor(vLevel);
-    else if (uDebugMode == 6) outCol = vec3(riverDir * 0.5 + 0.5, clamp(vFlow.z / max(uFoamSpeedEnd, 0.001), 0.0, 1.0));
+    else if (uDebugMode == 6) outCol = vec3(riverDir * 0.5 + 0.5, clamp(rapidSource, 0.0, 1.0));
     else if (uDebugMode == 12) outCol = waterColor;
     else if (uDebugMode == 13) outCol = envReflection;
     else if (uDebugMode == 14) outCol = vec3(specDot);
