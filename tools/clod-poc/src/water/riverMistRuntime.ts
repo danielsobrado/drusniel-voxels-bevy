@@ -1,8 +1,8 @@
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
+import { evaluateRiverMistMaskValue } from "../environment_masks/environment_mask_math.js";
 import { readEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import type { RiverMistMaskSettings } from "../environment_masks/environment_mask_types.js";
 import type { RiverQueryResult, WaterQueryResult } from "../environment_query/types.js";
-import { HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 import type { WaterFieldResult } from "./waterField.js";
 
 export const RIVER_MIST_QUERY_KEYS = [
@@ -87,19 +87,19 @@ export function riverMistSignal(
   biome: Pick<BiomeVisualState, "enabled" | "morningMist"> | null,
   settings: RiverMistRuntimeSettings,
 ): number {
-  if (!settings.enabled || !biome?.enabled) return 0;
-  if (!validRiverMistSample(sample)) return 0;
-  if (sample.bodyKind !== HYDROLOGY_BODY_RIVER || sample.depth <= 0.03 || sample.wetMask <= 0.08) return 0;
-  if (sample.shoreDistanceM < 0) return 0;
-
-  const mask = settings.mask;
-  const flow = smoothRamp(mask.minFlowStrength, mask.minFlowStrength * 3 + 0.001, sample.flowStrength);
-  const shore = 1 - smoothRamp(mask.maxShoreDistanceM * 0.55, mask.maxShoreDistanceM, sample.shoreDistanceM);
-  return clamp01(mask.strength)
-    * clamp01(sample.wetMask)
-    * clamp01(biome.morningMist)
-    * flow
-    * shore;
+  if (!settings.enabled || !validRiverMistSample(sample)) return 0;
+  return evaluateRiverMistMaskValue({
+    settings: settings.mask,
+    biomeEnabled: biome?.enabled === true,
+    morningMist: biome?.morningMist ?? 0,
+    waterValid: true,
+    riverValid: true,
+    wetMask: sample.wetMask,
+    bodyKind: sample.bodyKind,
+    waterDepth: sample.depth,
+    shoreDistanceM: sample.shoreDistanceM,
+    flowStrength: sample.flowStrength,
+  });
 }
 
 function validRiverMistSample(sample: RiverMistSample): boolean {
@@ -132,16 +132,4 @@ function queryFlag(
     if (["0", "false", "off", "no"].includes(normalized)) return false;
   }
   return fallback;
-}
-
-function smoothRamp(start: number, end: number, value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  if (!(end > start)) return value >= end ? 1 : 0;
-  const t = clamp01((value - start) / (end - start));
-  return t * t * (3 - 2 * t);
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(1, Math.max(0, value));
 }
