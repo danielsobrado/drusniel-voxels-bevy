@@ -26,7 +26,17 @@ describe("sun visibility environment query", () => {
     };
     const query = new SunVisibilityEnvironmentQuery({ base, visibility: authority });
 
-    expect(query.water(1, 2, 32)).toBe(base.water(1, 2, 32));
+    expect(query.water(1, 2, 32)).toEqual({
+      waterY: 2,
+      carvedBedY: 1.5,
+      depth: 0.5,
+      wetMask: 1,
+      shoreDistanceM: 3,
+      bodyKind: 3,
+      bodyId: 1,
+      meta: validMeta,
+    });
+    expect(base.water).toHaveBeenCalledWith(1, 2, 32);
     expect(query.visibility(4, 5, 32)).toEqual({
       sunVisibility: 0.25,
       meta: {
