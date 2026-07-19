@@ -93,6 +93,5 @@ function browserCaptureSource(): string {
     addEventListener("webglcontextlost", () => {
       record("webgl-context", ["WebGL context lost"]);
     }, true);
-  })();`,
-  } as unknown as string;
+  })();`;
 }
