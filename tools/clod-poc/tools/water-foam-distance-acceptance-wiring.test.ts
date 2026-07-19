@@ -9,6 +9,10 @@ const CONTROLS_SOURCE = readFileSync(
   new URL("./water-foam-distance-browser-controls.ts", import.meta.url),
   "utf8",
 );
+const EVIDENCE_SOURCE = readFileSync(
+  new URL("./water-foam-distance-evidence.ts", import.meta.url),
+  "utf8",
+);
 const DEBUG_SOURCE = readFileSync(
   new URL("../src/runtime/water_weather/water_controller_debug.ts", import.meta.url),
   "utf8",
@@ -23,6 +27,16 @@ const AUXILIARY_SOURCE = readFileSync(
 );
 
 describe("water foam distance acceptance wiring", () => {
+  it("removes stale report and screenshots before browser startup", () => {
+    const clear = RUNNER_SOURCE.indexOf("clearWaterFoamDistanceEvidence(evidence)");
+    const harness = RUNNER_SOURCE.indexOf("withWaterHarness(");
+
+    expect(clear).toBeGreaterThan(0);
+    expect(harness).toBeGreaterThan(clear);
+    expect(EVIDENCE_SOURCE).toContain("rmSync(evidence.reportPath, { force: true })");
+    expect(EVIDENCE_SOURCE).toContain("Object.values(evidence.files)");
+  });
+
   it("uses one rapid pose and one camera placement", () => {
     expect(RUNNER_SOURCE.match(/findWaterShotPose\(/g)).toHaveLength(1);
     expect(RUNNER_SOURCE.match(/setCameraPose\(page, rapidPose\)/g)).toHaveLength(1);
@@ -46,14 +60,16 @@ describe("water foam distance acceptance wiring", () => {
     expect(RUNNER_SOURCE.match(/deriveWaterPixelMask\(/g)).toHaveLength(1);
   });
 
-  it("resets distance, time, and overlay visibility in a finally block", () => {
-    expect(RUNNER_SOURCE).toContain("finally {");
-    expect(RUNNER_SOURCE).toContain("resetWaterFoamDistanceControls(page)");
+  it("always resets controls and preserves capture plus cleanup failures", () => {
+    expect(RUNNER_SOURCE).toContain("runWaterFoamDistanceCapture(page");
+    expect(CONTROLS_SOURCE).toContain("resetWaterFoamDistanceControls(page)");
     expect(CONTROLS_SOURCE).toContain("distance = await setWaterFoamDistanceOverride(page, null)");
     expect(CONTROLS_SOURCE).toContain("time = await setWaterFoamTimeFrozen(page, false)");
     expect(CONTROLS_SOURCE).toContain(
       "auxiliary = await setWaterFoamAuxiliaryOverlaysHidden(page, false)",
     );
+    expect(CONTROLS_SOURCE).toContain("foam distance capture failed:");
+    expect(CONTROLS_SOURCE).toContain("cleanup failed:");
   });
 
   it("keeps camera and atlas updates live while freezing only clipmap delta", () => {
