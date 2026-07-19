@@ -151,7 +151,10 @@ describe("tree GPU ring safe update", () => {
   it("retries immediately when GPU availability returns", () => {
     const input = fixture(true);
     input.gpuDevice = null;
-    runtime.update.mockReturnValue(true);
+    runtime.update.mockImplementation((runtimeInput: TreeGpuRingRuntimeInput) => {
+      setLiveRing(runtimeInput);
+      return true;
+    });
 
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
     expect(runtime.update).not.toHaveBeenCalled();
@@ -188,9 +191,31 @@ describe("tree GPU ring safe update", () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
-  it("returns a successful update without building a duplicate ring key", () => {
+  it("keeps CPU authority while the GPU generation is still initializing", () => {
     const input = fixture(true);
-    runtime.update.mockReturnValue(true);
+    runtime.update.mockImplementation((runtimeInput: TreeGpuRingRuntimeInput) => {
+      runtimeInput.state.draw = {} as NonNullable<TreeGpuRingRuntimeState["draw"]>;
+      runtimeInput.state.init = Promise.resolve();
+      runtimeInput.state.stats = stats("initializing");
+      runtimeInput.state.status = "ring";
+      return true;
+    });
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(runtime.update).toHaveBeenCalledTimes(1);
+    expect(input.state.draw).not.toBeNull();
+    expect(input.state.compute).toBeNull();
+    expect(input.state.stats.status).toBe("initializing");
+    expect(compute.key).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("returns a live successful update without building a duplicate ring key", () => {
+    const input = fixture(true);
+    runtime.update.mockImplementation((runtimeInput: TreeGpuRingRuntimeInput) => {
+      setLiveRing(runtimeInput);
+      return true;
+    });
 
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(true);
     expect(runtime.clear).not.toHaveBeenCalled();
@@ -243,6 +268,14 @@ function state(): TreeGpuRingRuntimeState {
     clusterVisibilityProviderRevision: 0,
     clusterVisibilitySampler: undefined,
   };
+}
+
+function setLiveRing(input: TreeGpuRingRuntimeInput): void {
+  input.state.compute = {} as NonNullable<TreeGpuRingRuntimeState["compute"]>;
+  input.state.draw = {} as NonNullable<TreeGpuRingRuntimeState["draw"]>;
+  input.state.init = null;
+  input.state.stats = stats("ready");
+  input.state.status = "ring";
 }
 
 function stats(
