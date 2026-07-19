@@ -1,7 +1,7 @@
 # clod-poc Stylized Grass & Stone Look Plan
 
 Created: 2026-07-18
-Status: **IN PROGRESS — Phase 0 + G1–G5 code landed; G6 + G1–G5 visual/perf verification pending**
+Status: **IN PROGRESS — Phase 0 + G1–G5 code landed; G6 implemented in draft PR #219; G1–G6 visual/perf verification pending**
 Reference: https://github.com/cortiz2894/stylized-components (GrassField system analysis)
 
 ## Current position
@@ -14,7 +14,7 @@ Reference: https://github.com/cortiz2894/stylized-components (GrassField system 
 | G3 — coherent directional wind | Done | Depth-prepass parity + animation/perf verification open |
 | G4 — dry/lush patches | Done | A/B shots + dispatch timing open |
 | G5 — stone dirt/trampling | Done, merged by PR #190 | Canonical stone shot + two-run perf A/B open |
-| G6 — per-blade sun-light | Not started | Not started |
+| G6 — per-blade sun-light | Implemented in draft PR #219 | Typecheck/test/build + forest-edge visual/perf open |
 | S1 — stylized stone preset | Optional | Decision after G5 visual acceptance |
 
 ## Goal
@@ -254,32 +254,35 @@ stone authority remains GPU-only and material cost is one field lookup.
 
 **Goal:** grass under forest canopy darkens like everything else.
 
-- [ ] In `grass_ring.compute.wgsl`: sample the canonical forest-lighting field
-      once per accepted blade at its base and write one visibility scalar into
-      `out_offset.w`.
-- [ ] Derive direct-sun visibility from the existing packed forest-lighting
-      channels (`shadowProxy` and, only if needed after visual review,
-      `ambientOcclusion`). Do not create a second grass-only cache.
-- [ ] In `grass_node_material.ts`: multiply only the direct-sun contribution by
+- [x] In the composed grass ring WGSL: sample the canonical forest-lighting
+      field once per accepted blade at its base and write one visibility scalar
+      into `out_offset.w`.
+- [x] Derive direct-sun visibility from the existing packed `shadowProxy`
+      channel. Do not create a second grass-only lighting field.
+- [x] In `grass_node_material.ts`: multiply only the direct-sun contribution by
       the constant per-blade scalar. Hemisphere/ambient and transmission remain
       independent so canopy grass is darkened, not crushed to black.
-- [ ] Bind the canonical forest-lighting texture into the grass ring compute
-      bind group. Cache-not-ready, disabled, or unavailable must resolve to
-      visibility `1.0`.
-- [ ] Keep the sample constant across each blade — never sample per vertex or
-      fragment and never create half-lit blades.
-- [ ] Add focused tests for texture-channel interpretation, unavailable-cache
-      fallback, WGSL binding composition, and direct-sun-only material use.
+- [x] Bind a GPU mirror of the canonical forest-lighting texture into the grass
+      ring compute bind group. Cache-not-ready, disabled, or unavailable resolves
+      to visibility `1.0`.
+- [x] Keep the sample constant across each blade — no per-vertex or per-fragment
+      forest-lighting lookup and no half-lit blades.
+- [x] Bilinear-filter the coarse field in compute to prevent visible lighting
+      blocks at the default 128-cell forest-lighting resolution.
+- [x] Add focused tests for texture-channel interpretation, unavailable-cache
+      fallback, WGSL binding composition, filtered sampling, and direct-sun-only
+      material use.
+- [ ] Run and record typecheck, full tests, and production build for PR #219.
 - [ ] Verify: forest-edge A/B shot (grass darkens under canopy and remains bright
       in clearings); perf A/B on ring dispatch timing.
 
 **Acceptance:** visible canopy darkening on grass; zero per-fragment cache cost;
 dispatch-time regression negligible.
 
-**Dependency resolution:** the canonical cache already exists as
-`ForestLightingTextureHandle.texture`; its packed `G` channel is
-`shadowProxy`, with field resolution/world extent available from the forest
-lighting system. G6 must reuse that authority.
+**Implementation note:** the canonical CPU-built forest-light field remains the
+authority. Its packed primary bytes are mirrored to a 128×128 `rgba8unorm` GPU
+texture only when the existing field rebuild publishes an update. Grass reads
+`G = shadowProxy`; no readback and no duplicate field build are introduced.
 
 ## Phase S1 (optional, art direction) — Stylized stone shading preset
 
@@ -356,5 +359,9 @@ ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
   shrink/flatten/splay, reduced-height wind, root dirt tint, and matching near
   terrain tint. Focused contract tests landed. Canonical visual shots, two-run
   perf A/B, and final full typecheck/test/build evidence remain open.
-- 2026-07-19 NEXT: implement G6 in a separate PR by reusing the canonical forest
-  lighting texture and writing one direct-sun visibility scalar per blade.
+- 2026-07-19 G6 CODE IN DRAFT: PR #219. Reuses the canonical forest-lighting
+  `shadowProxy` field through a small GPU mirror, samples it once per accepted
+  blade with bilinear filtering, stores visibility in `out_offset.w`, and applies
+  it only to direct sun. Focused contract tests are included. Full
+  typecheck/test/build, forest-edge visual A/B, and dispatch perf evidence remain
+  open; the PR stays draft until those gates are recorded.
