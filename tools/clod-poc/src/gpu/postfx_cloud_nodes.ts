@@ -34,12 +34,21 @@ export interface VolumetricCloudCompositeInput {
   cloudTex: TslAny;
 }
 
-const CLOUD_NOISE_SCALE = [0.00135, 0.002, 0.00135] as const;
+interface CloudNoiseField {
+  shape: TslAny;
+  erosion: TslAny;
+}
+
+const CLOUD_SHAPE_SCALE = [0.00052, 0.00068, 0.00052] as const;
 const CLOUD_BLUE_NOISE_SCALE = [132.37, 77.17] as const;
 const CLOUD_WIND_DIR = [0.821, 0.571] as const;
+const CLOUD_OCTAVE_1_FREQUENCY = 2.03;
+const CLOUD_OCTAVE_2_FREQUENCY = 4.17;
+const CLOUD_DOMAIN_WARP_FREQUENCY = 0.37;
+const CLOUD_DOMAIN_WARP_STRENGTH = 0.72;
 const CLOUD_MIN_STEP_METERS = 8.0;
-const CLOUD_SUN_OCCLUSION_STEPS = 3;
-const CLOUD_SUN_OCCLUSION_STEP_METERS = 160;
+const CLOUD_SUN_OCCLUSION_STEPS = 2;
+const CLOUD_SUN_OCCLUSION_STEP_METERS = 220;
 const CLOUD_POWDER_SCALE = 18;
 
 function hashNoise2(uv: TslAny): TslAny {
@@ -71,9 +80,37 @@ function valueNoise3(p: TslAny): TslAny {
   return tslMix(low, high, blend.z);
 }
 
-function cloudNoise(worldPosition: TslAny, windOffset: TslAny): TslAny {
+function rotateCloudDomain(p: TslAny): TslAny {
+  return vec3(
+    p.x.mul(0.80).add(p.z.mul(0.60)),
+    p.y.mul(0.93).add(p.x.mul(0.19)).sub(p.z.mul(0.12)),
+    p.z.mul(0.78).sub(p.x.mul(0.57)).add(p.y.mul(0.16)),
+  );
+}
+
+function cloudNoiseField(worldPosition: TslAny, windOffset: TslAny): CloudNoiseField {
   const advectedPosition = worldPosition.sub(vec3(windOffset.x, 0, windOffset.y));
-  return valueNoise3(advectedPosition.mul(vec3(...CLOUD_NOISE_SCALE)));
+  const basePosition = advectedPosition.mul(vec3(...CLOUD_SHAPE_SCALE));
+  const warp = valueNoise3(
+    basePosition.mul(CLOUD_DOMAIN_WARP_FREQUENCY).add(vec3(31.7, 17.1, 9.2)),
+  ).sub(0.5);
+  const warpedPosition = basePosition.add(vec3(
+    warp.mul(CLOUD_DOMAIN_WARP_STRENGTH),
+    warp.mul(-0.41),
+    warp.mul(0.57),
+  ));
+  const octave0 = valueNoise3(warpedPosition);
+  const octave1 = valueNoise3(
+    rotateCloudDomain(warpedPosition.mul(CLOUD_OCTAVE_1_FREQUENCY)).add(vec3(13.7, 47.3, 91.7)),
+  );
+  const octave2 = valueNoise3(
+    rotateCloudDomain(rotateCloudDomain(warpedPosition.mul(CLOUD_OCTAVE_2_FREQUENCY)))
+      .add(vec3(71.1, 19.3, 37.9)),
+  );
+  return {
+    shape: octave0.mul(0.57).add(octave1.mul(0.29)).add(octave2.mul(0.14)),
+    erosion: octave2,
+  };
 }
 
 function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostFxCloudSettings): TslAny {
@@ -85,21 +122,16 @@ function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostF
   const horizonFade = Math.max(0.001, settings.horizonFade);
   const layerMask = smoothstep(0, horizonFade, height01)
     .mul(inverseSmoothstep(1 - horizonFade, 1, height01));
-  const base = cloudNoise(worldPosition, windOffset);
-  const detailPosition = vec3(
-    worldPosition.x.mul(1.73).add(worldPosition.z.mul(0.91)),
-    worldPosition.y.mul(1.91),
-    worldPosition.x.mul(-0.91).add(worldPosition.z.mul(1.73)),
-  ).add(vec3(47.3, 13.1, 91.7));
-  const detailWind = vec2(
-    windOffset.x.mul(1.73).add(windOffset.y.mul(0.91)),
-    windOffset.x.mul(-0.91).add(windOffset.y.mul(1.73)),
+  const field = cloudNoiseField(worldPosition, windOffset);
+  const weather = field.shape.mul(0.90).add(field.erosion.mul(0.10));
+  const coverage = smoothstep(
+    Math.max(0, settings.coverage - 0.10),
+    Math.min(1, settings.coverage + 0.12),
+    weather,
   );
-  const detail = cloudNoise(detailPosition, detailWind);
-  const weather = base.mul(0.72).add(detail.mul(0.28));
-  const coverage = smoothstep(settings.coverage, 1, weather).mul(1.35);
-  const erosion = float(1).sub(detail.mul(0.22));
-  return clamp(coverage.mul(layerMask).mul(erosion).mul(settings.density), 0, 1);
+  const erosion = smoothstep(0.12, 0.88, field.erosion.add(coverage.mul(0.18)));
+  const shapedDensity = coverage.mul(erosion.mul(0.45).add(0.55));
+  return clamp(shapedDensity.mul(layerMask).mul(settings.density), 0, 1);
 }
 
 export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput): TslAny {
@@ -125,7 +157,9 @@ export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput)
     const tEnter = insideLayer.select(float(0), tEnterRaw.max(0));
     const tExit = tExitRaw.min(maxDistance).min(settings.maxDistanceMeters);
     const valid = tExit.greaterThan(tEnter).and(dirW.y.abs().greaterThan(1e-4));
-    const jitter = hashNoise2(screenUV.mul(vec2(CLOUD_BLUE_NOISE_SCALE[0], CLOUD_BLUE_NOISE_SCALE[1])).add(vec2(time.mul(0.037), time.mul(0.019))));
+    const jitter = hashNoise2(
+      screenUV.mul(vec2(CLOUD_BLUE_NOISE_SCALE[0], CLOUD_BLUE_NOISE_SCALE[1])).add(vec2(19.19, 73.73)),
+    );
     const segmentLength = tExit.sub(tEnter).div(steps).max(CLOUD_MIN_STEP_METERS);
     const transmittance = float(1).toVar();
     const radiance = vec3(0).toVar();
