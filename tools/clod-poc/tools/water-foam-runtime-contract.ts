@@ -31,6 +31,7 @@ export function evaluateWaterFoamRuntimeContract(
   requireEqual(failures, "shade coverage floor", diagnostics.shadeCoverageFloor, WATER_FOAM_SHADE_COVERAGE_FLOOR);
   requireEqual(failures, "rapid eligibility", diagnostics.rapidEligibility, "speed-times-drop-times-river");
   requireEqual(failures, "CPU field samples", diagnostics.cpuFieldSamples, 0);
+  requireEqual(failures, "WebGPU uncaptured errors", diagnostics.webGpuUncapturedErrors, 0);
   requireEqual(failures, "distance fade authority", diagnostics.distanceFade.authority, "camera-distance-shared");
   requireEqual(failures, "distance fade valid", diagnostics.distanceFade.valid ? 1 : 0, 1);
   requireMin(failures, "distance fade version", diagnostics.distanceFade.version, 1);
